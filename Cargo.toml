@@ -1,0 +1,5 @@
+[workspace]
+
+members = ["crates/fzn-huub", "crates/huub"]
+
+resolver = "2"

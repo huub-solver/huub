@@ -1,0 +1,9 @@
+[package]
+name = "huub"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jip J. Dekker <jip@dekker.one>"]
+license = "MIT"
+
+
+[dependencies]
