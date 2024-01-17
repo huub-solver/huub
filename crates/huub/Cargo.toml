@@ -7,3 +7,6 @@ license = "MIT"
 
 
 [dependencies]
+pindakaas = { git = "https://github.com/Dekker1/pindakaas.git", features = [
+	"ipasir-up",
+] }
