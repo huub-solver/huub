@@ -1,0 +1,9 @@
+[package]
+name = "fzn-huub"
+version = "0.0.1"
+edition = "2021"
+authors = ["Jip J. Dekker <jip@dekker.one>"]
+license = "MIT"
+
+[dependencies]
+huub = { path = "../huub" }
