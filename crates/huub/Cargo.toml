@@ -10,3 +10,4 @@ flatzinc-serde = "0.1"
 pindakaas = { git = "https://github.com/Dekker1/pindakaas.git", features = [
 	"ipasir-up",
 ] }
+tracing = "0.1.40"
