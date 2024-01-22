@@ -1,7 +1,7 @@
 use std::{fs::File, io::BufReader, path::PathBuf, time::Duration};
 
 use clap::Parser;
-use flatzinc_serde::FlatZinc;
+use flatzinc_serde::{Domain, FlatZinc, Type};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use tracing::Level;
 use tracing_subscriber::fmt::{time::uptime, SubscriberBuilder};
@@ -42,7 +42,31 @@ fn main() -> Result<()> {
 			args.path.display()
 		))?;
 
-	println!("{:?}", fzn);
+	for (name, var) in fzn.variables {
+		match var.ty {
+			Type::Bool => println!("{} = {};", name, false),
+			Type::Int => println!(
+				"{} = {}",
+				name,
+				if let Some(Domain::Int(dom)) = var.domain {
+					*dom.lower_bound().unwrap()
+				} else {
+					0
+				}
+			),
+			Type::Float => println!(
+				"{} = {}",
+				name,
+				if let Some(Domain::Float(dom)) = var.domain {
+					*dom.lower_bound().unwrap()
+				} else {
+					0.0
+				}
+			),
+			Type::IntSet => println!("{} = {{}}", name),
+		}
+	}
+	println!("----------");
 	Ok(())
 }
 
