@@ -1,52 +1,35 @@
-use pindakaas::{
-	solver::{cadical::Cadical, Solver},
-	ClauseDatabase, Valuation, Var,
+mod model;
+mod solver;
+
+pub use model::{
+	BoolExpr, BoolVar, Constraint, Literal, Model, SimplifiedBool, SimplifiedVariable, VariableMap,
 };
-
-#[derive(Default)]
-pub struct Huub {
-	sat: Cadical,
-}
-
-pub struct BoolVar(Var);
-
-impl Huub {
-	pub fn new_bool_var(&mut self) -> BoolVar {
-		BoolVar(self.sat.new_var())
-	}
-
-	pub fn solve(&mut self, on_sol: impl FnMut(&dyn Valuation)) {
-		self.sat.solve(on_sol);
-	}
-}
-
-impl ClauseDatabase for Huub {
-	fn new_var(&mut self) -> Var {
-		self.sat.new_var()
-	}
-
-	fn add_clause<I: IntoIterator<Item = pindakaas::Lit>>(&mut self, cl: I) -> pindakaas::Result {
-		self.sat.add_clause(cl)
-	}
-}
+pub use solver::{Solver, Valuation, Value, Variable};
 
 #[cfg(test)]
 mod tests {
-	use pindakaas::Lit;
 
 	use super::*;
 
 	#[test]
 	fn it_works() {
-		let mut slv = Huub::default();
-		let a: Lit = slv.new_var().into();
-		let b: Lit = slv.new_var().into();
+		let mut prb = Model::default();
+		let a = prb.new_bool_var();
+		let b = prb.new_bool_var();
 
-		slv.add_clause([!a, !b]).unwrap();
-		slv.add_clause([a, b]).unwrap();
+		prb += Constraint::Clause(vec![(!a).into(), (!b).into()]);
+		prb += Constraint::Clause(vec![a.into(), b.into()]);
+
+		let (mut slv, map) = prb.to_solver();
+		let SimplifiedVariable::Bool(SimplifiedBool::Lit(a)) = map.get(&Variable::Bool(a)) else {
+			unreachable!()
+		};
+		let SimplifiedVariable::Bool(SimplifiedBool::Lit(b)) = map.get(&Variable::Bool(b)) else {
+			unreachable!()
+		};
 
 		slv.solve(|value| {
-			assert_ne!(value(a), value(b));
+			assert_ne!(value(a.var().into()), value(b.var().into()));
 		})
 	}
 }
