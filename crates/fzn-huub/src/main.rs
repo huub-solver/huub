@@ -44,7 +44,7 @@ fn main() -> Result<()> {
 
 	for (name, var) in fzn.variables {
 		match var.ty {
-			Type::Bool => println!("{} = {};", name, false),
+			Type::Bool => println!("{} = false;", name),
 			Type::Int => println!(
 				"{} = {}",
 				name,
@@ -54,16 +54,8 @@ fn main() -> Result<()> {
 					0
 				}
 			),
-			Type::Float => println!(
-				"{} = {}",
-				name,
-				if let Some(Domain::Float(dom)) = var.domain {
-					*dom.lower_bound().unwrap()
-				} else {
-					0.0
-				}
-			),
-			Type::IntSet => println!("{} = {{}}", name),
+			Type::Float => unimplemented!("Floating point decision variables are not supported"),
+			Type::IntSet => unimplemented!("Integet set variables are not supported"),
 		}
 	}
 	println!("----------");
@@ -97,6 +89,10 @@ struct Args {
 	verbose: u8,
 }
 
+/// Parse time duration for the time limit flag
+///
+/// This function can uses [`humantime::parse_duration`], but assumes a single
+/// millisecond measurement if no unit is provided.
 fn parse_time_limit(s: &str) -> Result<Duration, humantime::DurationError> {
 	if let Ok(ms) = s.parse() {
 		Ok(Duration::from_millis(ms))
