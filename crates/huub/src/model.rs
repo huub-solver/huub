@@ -1,3 +1,4 @@
+mod flatzinc;
 mod reformulate;
 
 use std::{
@@ -67,7 +68,7 @@ impl Constraint {
 			Constraint::Clause(v) => {
 				let lits: Result<Vec<Literal>, Satisfied> = v
 					.iter()
-					.filter_map(|x| match x.to_bool_arg(ReifContext::Pos, slv, map) {
+					.filter_map(|x| match x.to_arg(ReifContext::Pos, slv, map) {
 						SimplifiedBool::Lit(l) => Some(Ok(l)),
 						SimplifiedBool::Val(true) => Some(Err(Satisfied)),
 						SimplifiedBool::Val(false) => None,
@@ -84,18 +85,30 @@ impl Constraint {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BoolExpr {
+	Not(Box<BoolExpr>),
 	Lit(Literal),
+	Val(bool),
 }
 
 impl BoolExpr {
-	fn to_bool_arg(
+	fn to_arg(&self, ctx: ReifContext, slv: &mut Solver, map: &mut VariableMap) -> SimplifiedBool {
+		match self {
+			BoolExpr::Not(b) => b.to_negated_arg(ctx, slv, map),
+			BoolExpr::Lit(l) => SimplifiedBool::Lit(*l),
+			BoolExpr::Val(v) => SimplifiedBool::Val(*v),
+		}
+	}
+
+	fn to_negated_arg(
 		&self,
-		_ctx: ReifContext,
-		_slv: &mut Solver,
-		_map: &mut VariableMap,
+		ctx: ReifContext,
+		slv: &mut Solver,
+		map: &mut VariableMap,
 	) -> SimplifiedBool {
 		match self {
-			BoolExpr::Lit(l) => SimplifiedBool::Lit(*l),
+			BoolExpr::Not(v) => v.to_arg(ctx, slv, map),
+			BoolExpr::Lit(v) => SimplifiedBool::Lit(!v),
+			BoolExpr::Val(v) => SimplifiedBool::Val(!v),
 		}
 	}
 }

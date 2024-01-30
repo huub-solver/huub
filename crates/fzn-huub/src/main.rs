@@ -1,7 +1,8 @@
 use std::{fs::File, io::BufReader, path::PathBuf, time::Duration};
 
 use clap::Parser;
-use flatzinc_serde::{Domain, FlatZinc, Type};
+use flatzinc_serde::{FlatZinc, Literal};
+use huub::{SimplifiedBool, SimplifiedVariable, Solver, Valuation, Value, Variable};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use tracing::Level;
 use tracing_subscriber::fmt::{time::uptime, SubscriberBuilder};
@@ -42,23 +43,62 @@ fn main() -> Result<()> {
 			args.path.display()
 		))?;
 
-	for (name, var) in fzn.variables {
-		match var.ty {
-			Type::Bool => println!("{} = false;", name),
-			Type::Int => println!(
-				"{} = {}",
-				name,
-				if let Some(Domain::Int(dom)) = var.domain {
-					*dom.lower_bound().unwrap()
-				} else {
-					0
-				}
-			),
-			Type::Float => unimplemented!("Floating point decision variables are not supported"),
-			Type::IntSet => unimplemented!("Integet set variables are not supported"),
+	let (mut slv, var_map) = Solver::from_fzn(&fzn)
+		.into_diagnostic()
+		.wrap_err("Error while processing FlatZinc".to_string())?;
+
+	let print_var = |value: &dyn Valuation, var: &SimplifiedVariable| match var {
+		SimplifiedVariable::Bool(SimplifiedBool::Lit(l)) => {
+			format!(
+				"{}",
+				value(Variable::Bool(l.var()))
+					.map(|b| {
+						let Value::Bool(b) = b;
+						if l.is_negated() {
+							!b
+						} else {
+							b
+						}
+					})
+					.unwrap()
+			)
 		}
-	}
-	println!("----------");
+		SimplifiedVariable::Bool(SimplifiedBool::Val(b)) => format!("{b}"),
+	};
+	let print_lit = |value: &dyn Valuation, lit: &Literal| match lit {
+		Literal::Int(i) => format!("{i}"),
+		Literal::Float(f) => format!("{f}"),
+		Literal::Identifier(ident) => print_var(value, &var_map[ident]),
+		Literal::Bool(b) => format!("{b}"),
+		Literal::IntSet(is) => is
+			.into_iter()
+			.map(|r| format!("{}..{}", r.start(), r.end()))
+			.collect::<Vec<_>>()
+			.join(" union "),
+		Literal::FloatSet(fs) => fs
+			.into_iter()
+			.map(|r| format!("{}..{}", r.start(), r.end()))
+			.collect::<Vec<_>>()
+			.join(" union "),
+		Literal::String(s) => s.clone(),
+	};
+	slv.solve(|value| {
+		for ident in &fzn.output {
+			if let Some(arr) = fzn.arrays.get(ident) {
+				println!(
+					"{ident} = [{}]",
+					arr.contents
+						.iter()
+						.map(|lit| print_lit(value, lit))
+						.collect::<Vec<_>>()
+						.join(",")
+				)
+			} else {
+				println!("{ident} = {}", print_var(value, &var_map[ident]))
+			}
+		}
+		println!("----------");
+	});
 	Ok(())
 }
 
