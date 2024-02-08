@@ -43,7 +43,7 @@ fn main() -> Result<()> {
 			args.path.display()
 		))?;
 
-	let (mut slv, var_map) = Solver::from_fzn(&fzn)
+	let (mut slv, var_map): (Solver, _) = Solver::from_fzn(&fzn)
 		.into_diagnostic()
 		.wrap_err("Error while processing FlatZinc".to_string())?;
 

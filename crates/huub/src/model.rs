@@ -7,10 +7,13 @@ use std::{
 	ops::{AddAssign, Not},
 };
 
-use pindakaas::{solver::PropagatingSolver, ClauseDatabase, Cnf, Lit as RawLit, Var as RawVar};
+use pindakaas::{ClauseDatabase, Cnf, Lit as RawLit, Var as RawVar};
 pub use reformulate::{ReifContext, SimplifiedBool, SimplifiedVariable, VariableMap};
 
-use crate::{solver::PropagationLayer, Solver};
+use crate::{
+	solver::{PropagationLayer, SatSolver},
+	Solver,
+};
 
 #[derive(Debug, Default)]
 pub struct Model {
@@ -23,12 +26,12 @@ impl Model {
 		BoolVar(self.cnf.new_var())
 	}
 
-	pub fn to_solver(&self) -> (Solver, VariableMap) {
+	pub fn to_solver<S: SatSolver + From<Cnf>>(&self) -> (Solver<S>, VariableMap) {
 		let mut map = VariableMap::default();
 
 		// TODO: run SAT simplification
 
-		let mut slv = Solver {
+		let mut slv: Solver<S> = Solver {
 			engine: self.cnf.clone().into(),
 		};
 		let prop_layer = PropagationLayer::default();
@@ -65,7 +68,7 @@ pub enum Constraint {
 }
 
 impl Constraint {
-	fn to_solver(&self, slv: &mut Solver, map: &mut VariableMap) {
+	fn to_solver<S: SatSolver>(&self, slv: &mut Solver<S>, map: &mut VariableMap) {
 		struct Satisfied;
 		match self {
 			Constraint::Clause(v) => {
@@ -94,7 +97,12 @@ pub enum BoolExpr {
 }
 
 impl BoolExpr {
-	fn to_arg(&self, ctx: ReifContext, slv: &mut Solver, map: &mut VariableMap) -> SimplifiedBool {
+	fn to_arg<S: SatSolver>(
+		&self,
+		ctx: ReifContext,
+		slv: &mut Solver<S>,
+		map: &mut VariableMap,
+	) -> SimplifiedBool {
 		match self {
 			BoolExpr::Not(b) => b.to_negated_arg(ctx, slv, map),
 			BoolExpr::Lit(l) => SimplifiedBool::Lit(*l),
@@ -102,10 +110,10 @@ impl BoolExpr {
 		}
 	}
 
-	fn to_negated_arg(
+	fn to_negated_arg<S: SatSolver>(
 		&self,
 		ctx: ReifContext,
-		slv: &mut Solver,
+		slv: &mut Solver<S>,
 		map: &mut VariableMap,
 	) -> SimplifiedBool {
 		match self {

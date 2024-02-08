@@ -20,7 +20,7 @@ mod tests {
 		prb += Constraint::Clause(vec![(!a).into(), (!b).into()]);
 		prb += Constraint::Clause(vec![a.into(), b.into()]);
 
-		let (mut slv, map) = prb.to_solver();
+		let (mut slv, map): (Solver, _) = prb.to_solver();
 		let SimplifiedVariable::Bool(SimplifiedBool::Lit(a)) = map.get(&Variable::Bool(a)) else {
 			unreachable!()
 		};
