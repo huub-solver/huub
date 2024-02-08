@@ -83,7 +83,7 @@ impl Model {
 		// Ensure all variables in the output are in the model
 		for ident in fzn.output.iter() {
 			let mut ensure_exists = |ident: &String, var| {
-				if map.contains_key(ident) {
+				if !map.contains_key(ident) {
 					map.insert(ident.clone(), new_var(&mut prb, var));
 				}
 			};
