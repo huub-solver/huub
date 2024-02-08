@@ -1,7 +1,7 @@
 mod propagation_layer;
 
 use pindakaas::solver::{
-	cadical::Cadical, LearnCallback, PropagatingSolver, SolveAssuming, Solver as _, TermCallback,
+	cadical::Cadical, LearnCallback, PropagatingSolver, SolveAssuming, TermCallback,
 };
 
 pub use self::propagation_layer::PropagationLayer;
@@ -11,7 +11,7 @@ pub struct Solver<Sat = Cadical> {
 	pub(crate) engine: Sat,
 }
 
-impl Solver {
+impl<S: SatSolver> Solver<S> {
 	pub(crate) fn propagation_layer(&self) -> &PropagationLayer {
 		self.engine.propagator().unwrap()
 	}
@@ -50,5 +50,5 @@ pub enum Value {
 
 pub trait Valuation: Fn(Variable) -> Option<Value> {}
 impl<F: Fn(Variable) -> Option<Value>> Valuation for F {}
-trait SatSolver: PropagatingSolver + TermCallback + LearnCallback + SolveAssuming {}
+pub trait SatSolver: PropagatingSolver + TermCallback + LearnCallback + SolveAssuming {}
 impl<X: PropagatingSolver + TermCallback + LearnCallback + SolveAssuming> SatSolver for X {}

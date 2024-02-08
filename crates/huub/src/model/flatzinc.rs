@@ -1,9 +1,12 @@
 use std::collections::BTreeMap;
 
 use flatzinc_serde::{Argument, FlatZinc, Literal, Type, Variable};
+use pindakaas::Cnf;
 use thiserror::Error;
 
-use crate::{BoolExpr, Constraint, Model, SimplifiedVariable, Solver, Variable as MVar};
+use crate::{
+	solver::SatSolver, BoolExpr, Constraint, Model, SimplifiedVariable, Solver, Variable as MVar,
+};
 
 impl Model {
 	pub fn from_fzn(fzn: &FlatZinc) -> Result<(Self, BTreeMap<String, MVar>), FlatZincError> {
@@ -105,7 +108,7 @@ impl Model {
 	}
 }
 
-impl Solver {
+impl<S: SatSolver + From<Cnf>> Solver<S> {
 	pub fn from_fzn(
 		fzn: &FlatZinc,
 	) -> Result<(Self, BTreeMap<String, SimplifiedVariable>), FlatZincError> {
