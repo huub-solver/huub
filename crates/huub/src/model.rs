@@ -7,10 +7,10 @@ use std::{
 	ops::{AddAssign, Not},
 };
 
-use pindakaas::{ClauseDatabase, Cnf, Lit as RawLit, Var as RawVar};
+use pindakaas::{solver::PropagatingSolver, ClauseDatabase, Cnf, Lit as RawLit, Var as RawVar};
 pub use reformulate::{ReifContext, SimplifiedBool, SimplifiedVariable, VariableMap};
 
-use crate::Solver;
+use crate::{solver::PropagationLayer, Solver};
 
 #[derive(Debug, Default)]
 pub struct Model {
@@ -31,11 +31,14 @@ impl Model {
 		let mut slv = Solver {
 			engine: self.cnf.clone().into(),
 		};
+		let prop_layer = PropagationLayer::default();
 
 		for c in self.constraints.iter() {
 			c.to_solver(&mut slv, &mut map)
 		}
 
+		slv.engine
+			.set_external_propagator(Some(Box::new(prop_layer)));
 		(slv, map)
 	}
 }
