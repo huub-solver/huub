@@ -2,7 +2,7 @@ use std::{fs::File, io::BufReader, path::PathBuf, time::Duration};
 
 use clap::Parser;
 use flatzinc_serde::{FlatZinc, Literal};
-use huub::{SimplifiedBool, SimplifiedVariable, Solver, Valuation, Value, Variable};
+use huub::{SimplifiedBool, SimplifiedInt, SimplifiedVariable, Solver, Valuation, Value};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use tracing::Level;
 use tracing_subscriber::fmt::{time::uptime, SubscriberBuilder};
@@ -51,19 +51,27 @@ fn main() -> Result<()> {
 		SimplifiedVariable::Bool(SimplifiedBool::Lit(l)) => {
 			format!(
 				"{}",
-				value(Variable::Bool(l.var()))
+				value(l.into())
 					.map(|b| {
-						let Value::Bool(b) = b;
-						if l.is_negated() {
-							!b
-						} else {
-							b
-						}
+						let Value::Bool(b) = b else { unreachable!() };
+						b
 					})
 					.unwrap()
 			)
 		}
 		SimplifiedVariable::Bool(SimplifiedBool::Val(b)) => format!("{b}"),
+		SimplifiedVariable::Int(SimplifiedInt::Var(i)) => {
+			format!(
+				"{}",
+				value(i.into())
+					.map(|v| {
+						let Value::Int(v) = v else { unreachable!() };
+						v
+					})
+					.unwrap()
+			)
+		}
+		SimplifiedVariable::Int(SimplifiedInt::Val(i)) => format!("{i}"),
 	};
 	let print_lit = |value: &dyn Valuation, lit: &Literal| match lit {
 		Literal::Int(i) => format!("{i}"),

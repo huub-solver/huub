@@ -1,10 +1,12 @@
-mod model;
-mod solver;
+pub(crate) mod model;
+pub(crate) mod propagator;
+pub(crate) mod solver;
 
 pub use model::{
-	BoolExpr, BoolVar, Constraint, Literal, Model, SimplifiedBool, SimplifiedVariable, VariableMap,
+	BoolExpr, BoolVar, Constraint, Literal, Model, SimplifiedBool, SimplifiedInt,
+	SimplifiedVariable, Variable, VariableMap,
 };
-pub use solver::{Solver, Valuation, Value, Variable};
+pub use solver::{Solver, Valuation, Value};
 
 #[cfg(test)]
 mod tests {
@@ -29,7 +31,7 @@ mod tests {
 		};
 
 		slv.solve(|value| {
-			assert_ne!(value(a.var().into()), value(b.var().into()));
+			assert_ne!(value(a.into()), value(b.into()));
 		})
 	}
 }

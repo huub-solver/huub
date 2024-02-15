@@ -1,17 +1,22 @@
+mod bool;
 mod flatzinc;
+mod int;
 mod reformulate;
 
-use std::{
-	fmt::{self, Display},
-	num::NonZeroI32,
-	ops::{AddAssign, Not},
+use std::ops::AddAssign;
+
+use flatzinc_serde::RangeList;
+use pindakaas::{ClauseDatabase, Cnf, Var as RawVar};
+
+pub use self::{
+	bool::{BoolExpr, BoolVar, Literal},
+	int::{IntExpr, IntVar},
+	reformulate::{ReifContext, SimplifiedBool, SimplifiedInt, SimplifiedVariable, VariableMap},
 };
-
-use pindakaas::{ClauseDatabase, Cnf, Lit as RawLit, Var as RawVar};
-pub use reformulate::{ReifContext, SimplifiedBool, SimplifiedVariable, VariableMap};
-
 use crate::{
-	solver::{PropagationLayer, SatSolver},
+	model::int::IntVarDef,
+	propagator::all_different::AllDifferentValue,
+	solver::{engine::int_var::IntVar as SlvIntVar, BoolView},
 	Solver,
 };
 
@@ -19,6 +24,7 @@ use crate::{
 pub struct Model {
 	pub(crate) cnf: Cnf,
 	constraints: Vec<Constraint>,
+	int_vars: Vec<IntVarDef>,
 }
 
 impl Model {
@@ -26,22 +32,37 @@ impl Model {
 		BoolVar(self.cnf.new_var())
 	}
 
-	pub fn to_solver<S: SatSolver + From<Cnf>>(&self) -> (Solver<S>, VariableMap) {
+	pub fn new_int_var(&mut self, domain: RangeList<i64>) -> IntVar {
+		let iv = IntVar(self.int_vars.len() as u32);
+		self.int_vars.push(IntVarDef { domain });
+		iv
+	}
+
+	// TODO: Make generic on Solver again (need var range trait)
+	pub fn to_solver(&self) -> (Solver, VariableMap) {
 		let mut map = VariableMap::default();
 
 		// TODO: run SAT simplification
+		let mut slv = self.cnf.clone().into();
 
-		let mut slv: Solver<S> = Solver {
-			engine: self.cnf.clone().into(),
-		};
-		let prop_layer = PropagationLayer::default();
+		// TODO: Find Views
+		// TODO: Analyse/Choose Integer encodings
 
+		// Create integer data structures within the solver
+		for i in 0..self.int_vars.len() {
+			let var = &self.int_vars[i];
+			let view = SlvIntVar::new_in(&mut slv, var.domain.clone());
+			map.insert(
+				Variable::Int(IntVar(i as u32)),
+				SimplifiedVariable::Int(SimplifiedInt::Var(view)),
+			);
+		}
+
+		// Create constraint data structures within the solve
 		for c in self.constraints.iter() {
 			c.to_solver(&mut slv, &mut map)
 		}
 
-		slv.engine
-			.set_external_propagator(Some(Box::new(prop_layer)));
 		(slv, map)
 	}
 }
@@ -62,17 +83,18 @@ impl ClauseDatabase for Model {
 	}
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum Constraint {
 	Clause(Vec<BoolExpr>),
+	AllDifferent(Vec<IntExpr>),
 }
 
 impl Constraint {
-	fn to_solver<S: SatSolver>(&self, slv: &mut Solver<S>, map: &mut VariableMap) {
+	fn to_solver(&self, slv: &mut Solver, map: &mut VariableMap) {
 		struct Satisfied;
 		match self {
 			Constraint::Clause(v) => {
-				let lits: Result<Vec<Literal>, Satisfied> = v
+				let lits: Result<Vec<BoolView>, Satisfied> = v
 					.iter()
 					.filter_map(|x| match x.to_arg(ReifContext::Pos, slv, map) {
 						SimplifiedBool::Lit(l) => Some(Ok(l)),
@@ -81,137 +103,38 @@ impl Constraint {
 					})
 					.collect();
 				if let Ok(lits) = lits {
-					// TOOD: early unsat detection?
-					let _ = slv.engine.add_clause(lits.into_iter().map(|l| l.0));
+					// TODO: early unsat detection?
+					let _ = slv.core.add_clause(lits.into_iter().map(|l| l.0));
 				}
+			}
+			Constraint::AllDifferent(v) => {
+				let (vars, vals): (Vec<_>, _) = v
+					.iter()
+					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
+					.partition(|x| matches!(x, SimplifiedInt::Var(_)));
+				if !vals.is_empty() {
+					todo!()
+				}
+				slv.add_propagator(Box::new(AllDifferentValue::new(vars.into_iter().map(
+					|v| {
+						let SimplifiedInt::Var(v) = v else {
+							unreachable!()
+						};
+						v
+					},
+				))))
 			}
 		}
 	}
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum BoolExpr {
-	Not(Box<BoolExpr>),
-	Lit(Literal),
-	Val(bool),
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Variable {
+	Bool(BoolVar),
+	Int(IntVar),
 }
-
-impl BoolExpr {
-	fn to_arg<S: SatSolver>(
-		&self,
-		ctx: ReifContext,
-		slv: &mut Solver<S>,
-		map: &mut VariableMap,
-	) -> SimplifiedBool {
-		match self {
-			BoolExpr::Not(b) => b.to_negated_arg(ctx, slv, map),
-			BoolExpr::Lit(l) => SimplifiedBool::Lit(*l),
-			BoolExpr::Val(v) => SimplifiedBool::Val(*v),
-		}
-	}
-
-	fn to_negated_arg<S: SatSolver>(
-		&self,
-		ctx: ReifContext,
-		slv: &mut Solver<S>,
-		map: &mut VariableMap,
-	) -> SimplifiedBool {
-		match self {
-			BoolExpr::Not(v) => v.to_arg(ctx, slv, map),
-			BoolExpr::Lit(v) => SimplifiedBool::Lit(!v),
-			BoolExpr::Val(v) => SimplifiedBool::Val(!v),
-		}
-	}
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BoolVar(pub(crate) RawVar);
-
-impl Not for BoolVar {
-	type Output = Literal;
-	fn not(self) -> Self::Output {
-		!Literal::from(self)
-	}
-}
-impl Not for &BoolVar {
-	type Output = Literal;
-	fn not(self) -> Self::Output {
-		!*self
-	}
-}
-
-impl Display for BoolVar {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		self.0.fmt(f)
-	}
-}
-
-impl From<BoolVar> for NonZeroI32 {
-	fn from(val: BoolVar) -> Self {
-		val.0.into()
-	}
-}
-impl From<BoolVar> for i32 {
-	fn from(val: BoolVar) -> Self {
-		val.0.into()
-	}
-}
-impl From<BoolVar> for BoolExpr {
+impl From<BoolVar> for Variable {
 	fn from(value: BoolVar) -> Self {
-		BoolExpr::Lit(value.into())
-	}
-}
-
-/// Literal is type that can be use to represent Boolean decision variables and
-/// their negations
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Literal(pub(crate) RawLit);
-
-impl Literal {
-	pub fn var(&self) -> BoolVar {
-		BoolVar(self.0.var())
-	}
-	pub fn is_negated(&self) -> bool {
-		self.0.is_negated()
-	}
-}
-
-impl Not for Literal {
-	type Output = Literal;
-	fn not(self) -> Self::Output {
-		Literal(!self.0)
-	}
-}
-impl Not for &Literal {
-	type Output = Literal;
-	fn not(self) -> Self::Output {
-		!(*self)
-	}
-}
-
-impl From<BoolVar> for Literal {
-	fn from(value: BoolVar) -> Self {
-		Literal(value.0.into())
-	}
-}
-impl From<Literal> for NonZeroI32 {
-	fn from(val: Literal) -> Self {
-		val.0.into()
-	}
-}
-impl From<Literal> for i32 {
-	fn from(val: Literal) -> Self {
-		val.0.into()
-	}
-}
-impl From<Literal> for BoolExpr {
-	fn from(value: Literal) -> Self {
-		BoolExpr::Lit(value)
-	}
-}
-
-impl Display for Literal {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		self.0.fmt(f)
+		Self::Bool(value)
 	}
 }
