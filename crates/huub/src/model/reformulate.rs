@@ -1,37 +1,52 @@
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
-use crate::{Literal, Variable};
+use crate::{
+	model::Variable,
+	solver::{BoolView, IntView},
+};
 
 /// A reformulation mapping helper that automatically maps variables to
 /// themselves unless otherwise specified
-#[derive(Default, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct VariableMap {
 	// Note the "to" of the mapping will likely need to be appended
-	map: BTreeMap<Variable, Variable>,
+	map: HashMap<Variable, SimplifiedVariable>,
 }
 
 impl VariableMap {
 	pub fn get(&self, index: &Variable) -> SimplifiedVariable {
-		self.map
-			.get(index)
-			.map(|v| match v {
-				Variable::Bool(x) => SimplifiedVariable::Bool(SimplifiedBool::Lit((*x).into())),
-			})
-			.unwrap_or_else(|| match index {
-				Variable::Bool(x) => SimplifiedVariable::Bool(SimplifiedBool::Lit((*x).into())),
-			})
+		self.map.get(index).copied().unwrap_or_else(|| match index {
+			Variable::Bool(x) => {
+				SimplifiedVariable::Bool(SimplifiedBool::Lit(BoolView(x.0.into())))
+			}
+			Variable::Int(_) => unreachable!(),
+		})
+	}
+
+	pub fn insert(&mut self, index: Variable, elem: SimplifiedVariable) {
+		self.map.insert(index, elem);
 	}
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SimplifiedVariable {
+	Bool(SimplifiedBool),
+	Int(SimplifiedInt),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SimplifiedBool {
-	Lit(Literal),
+	Lit(BoolView),
 	Val(bool),
 }
 
-pub enum SimplifiedVariable {
-	Bool(SimplifiedBool),
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SimplifiedInt {
+	Var(IntView),
+	Val(i64),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReifContext {
 	Pos,
 	#[allow(dead_code)]

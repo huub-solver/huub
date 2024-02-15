@@ -1,54 +1,83 @@
-mod propagation_layer;
+pub(crate) mod engine;
+pub(crate) mod value;
+pub(crate) mod view;
 
-use pindakaas::solver::{
-	cadical::Cadical, LearnCallback, PropagatingSolver, SolveAssuming, TermCallback,
+use pindakaas::{
+	solver::{cadical::Cadical, LearnCallback, PropagatingSolver, SolveAssuming, TermCallback},
+	Cnf,
 };
 
-pub use self::propagation_layer::PropagationLayer;
-use crate::{BoolVar, Literal};
+pub use crate::solver::{
+	value::{Valuation, Value},
+	view::{BoolView, IntView, SolverView},
+};
+use crate::{
+	propagator::{init_action::InitializationActions, Propagator},
+	solver::{
+		engine::{Engine, PropRef},
+		view::IntViewInner,
+	},
+};
 
-pub struct Solver<Sat = Cadical> {
-	pub(crate) engine: Sat,
+pub struct Solver<Sat: SatSolver = Cadical> {
+	pub(crate) core: Sat,
 }
 
-impl<S: SatSolver> Solver<S> {
-	pub(crate) fn propagation_layer(&self) -> &PropagationLayer {
-		self.engine.propagator().unwrap()
+impl<Sat: SatSolver> Solver<Sat> {
+	pub(crate) fn engine(&self) -> &Engine {
+		self.core.propagator().unwrap()
 	}
 
-	pub(crate) fn propagation_layer_mut(&mut self) -> &mut PropagationLayer {
-		self.engine.propagator_mut().unwrap()
+	pub(crate) fn engine_mut(&mut self) -> &mut Engine {
+		self.core.propagator_mut().unwrap()
 	}
 
 	pub fn solve(&mut self, mut on_sol: impl FnMut(&dyn Valuation)) {
-		self.engine.solve(|sat_value| {
+		// TODO: This is bad, but we cannot access propagator in the value function.
+		// If we could, then we could (hopefully) just access the current domain
+		let int_vars = self.engine().int_vars.clone();
+
+		self.core.solve(|sat_value| {
 			let wrapper: &dyn Valuation = &|x| match x {
-				Variable::Bool(x) => {
-					let lit: Literal = x.into();
-					sat_value(lit.0).map(Value::Bool)
-				}
+				SolverView::Bool(lit) => sat_value(lit.0).map(Value::Bool),
+				SolverView::Int(var) => match var.0 {
+					IntViewInner::VarRef(iv) => {
+						for (i, l) in int_vars[iv].one_hot.clone().enumerate() {
+							if sat_value(l.into()) == Some(true) {
+								// TODO: Does not account for holes
+								return Some(Value::Int(
+									int_vars[iv].orig_domain.lower_bound().unwrap() + i as i64,
+								));
+							}
+						}
+						unreachable!()
+					}
+				},
 			};
 			on_sol(wrapper);
 		});
 	}
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Variable {
-	Bool(BoolVar),
-}
-impl From<BoolVar> for Variable {
-	fn from(value: BoolVar) -> Self {
-		Self::Bool(value)
+impl<Sat: SatSolver + From<Cnf>> From<Cnf> for Solver<Sat> {
+	fn from(value: Cnf) -> Self {
+		let mut core: Sat = value.into();
+		core.set_external_propagator(Some(Box::new(Engine::default())));
+		Self { core }
 	}
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub enum Value {
-	Bool(bool),
+impl Solver {
+	pub(crate) fn add_propagator(&mut self, mut prop: Box<dyn Propagator>) {
+		let prop_ref = PropRef::from(self.engine().propagators.len());
+		let mut actions = InitializationActions {
+			prop_ref,
+			slv: self,
+		};
+		prop.initialize(&mut actions);
+		self.engine_mut().propagators.push(prop);
+	}
 }
 
-pub trait Valuation: Fn(Variable) -> Option<Value> {}
-impl<F: Fn(Variable) -> Option<Value>> Valuation for F {}
 pub trait SatSolver: PropagatingSolver + TermCallback + LearnCallback + SolveAssuming {}
 impl<X: PropagatingSolver + TermCallback + LearnCallback + SolveAssuming> SatSolver for X {}
