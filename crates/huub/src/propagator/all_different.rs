@@ -49,3 +49,45 @@ impl Propagator for AllDifferentValue {
 		}
 	}
 }
+
+mod tests {
+    #[test]
+	fn test_all_different_value_sat() {
+		use super::*; 
+		use flatzinc_serde::RangeList;
+		use crate::solver::engine::int_var::IntVar; 
+		use pindakaas::Cnf;
+
+		let mut slv = Cnf::default().into(); 
+		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4])); 
+		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4])); 
+		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4])); 
+
+		slv.add_propagator(Box::new(AllDifferentValue::new(vec![a, b, c])));
+		slv.solve(|val| {
+			assert_ne!(val(a.into()), val(b.into()));
+			assert_ne!(val(b.into()), val(c.into()));
+			assert_ne!(val(a.into()), val(c.into()));
+		})
+	}
+
+	#[test]
+	fn test_all_different_value_unsat() {
+		use super::*; 
+		use flatzinc_serde::RangeList;
+		use crate::solver::engine::int_var::IntVar; 
+		use pindakaas::Cnf;
+
+		let mut slv = Cnf::default().into(); 
+		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2])); 
+		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2])); 
+		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2])); 
+
+		slv.add_propagator(Box::new(AllDifferentValue::new(vec![a, b, c])));
+		slv.solve(|val| {
+			assert_ne!(val(a.into()), val(b.into()));
+			assert_ne!(val(b.into()), val(c.into()));
+			assert_ne!(val(a.into()), val(c.into()));
+		})
+	}
+}
