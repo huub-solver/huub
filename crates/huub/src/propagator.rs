@@ -1,4 +1,5 @@
 pub(crate) mod all_different;
+pub(crate) mod conflict;
 pub(crate) mod init_action;
 pub(crate) mod int_event;
 pub(crate) mod propagation_action;
@@ -9,7 +10,10 @@ use std::fmt::Debug;
 use pindakaas::Lit;
 
 use crate::{
-	propagator::{init_action::InitializationActions, propagation_action::PropagationActions},
+	propagator::{
+		conflict::Conflict, init_action::InitializationActions,
+		propagation_action::PropagationActions,
+	},
 	solver::engine::queue::PriorityLevel,
 };
 
@@ -27,15 +31,25 @@ pub trait Propagator: Debug {
 	///
 	/// The [`data`] argument will contain the data that the propagater has set
 	/// when subscribing to an event.
-	fn notify(&mut self, data: u32) -> Option<PriorityLevel> {
+	fn notify_event(&mut self, data: u32) -> Option<PriorityLevel> {
 		let _ = data;
 		Some(PriorityLevel::Medium)
 	}
 
+	/// This method is called when the solver backtracks to a previous decision
+	/// level.
+	///
+	/// Generally this method would be used to reset any values that depend on the
+	/// previously made decisions.
+	fn notify_backtrack(&mut self, new_level: usize) {
+		let _ = new_level;
+	}
+
 	/// The propagate method is called during the search process to allow the
 	/// propagator to enforce
-	fn propagate(&mut self, actions: &mut PropagationActions<'_>) {
+	fn propagate(&mut self, actions: &mut PropagationActions<'_>) -> Result<(), Conflict> {
 		let _ = actions;
+		Ok(())
 	}
 
 	/// Explain a lazy reason that was emitted.
@@ -47,8 +61,6 @@ pub trait Propagator: Debug {
 	fn explain(&mut self, data: u64) -> Vec<Lit> {
 		let _ = data;
 		// Method will only be called if `propagate` used a lazy reason.
-		unreachable!();
-		#[allow(unreachable_code)]
-		Vec::new()
+		panic!("propagator did not provide an explain implementation")
 	}
 }

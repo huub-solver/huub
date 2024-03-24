@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use index_vec::IndexVec;
-use pindakaas::{solver::SolvingActions, Lit as RawLit, Var as RawVar};
+use pindakaas::{solver::SolvingActions, Lit as RawLit};
 
 use crate::{
-	propagator::reason::Reason,
+	propagator::{conflict::Conflict, reason::Reason},
 	solver::{
 		engine::{
 			int_var::{BoolVarMap, IntVar, IntVarRef},
@@ -21,7 +21,7 @@ pub struct PropagationActions<'a> {
 	#[allow(dead_code)] // TODO
 	pub(crate) sat: &'a mut dyn SolvingActions,
 	pub(crate) int_vars: &'a mut IndexVec<IntVarRef, IntVar>,
-	pub(crate) reason_map: &'a mut HashMap<RawVar, Reason>,
+	pub(crate) reason_map: &'a mut HashMap<RawLit, Reason>,
 }
 
 impl PropagationActions<'_> {
@@ -44,15 +44,17 @@ impl PropagationActions<'_> {
 		}
 	}
 
-	pub fn int_neq_val(&mut self, var: IntView, val: i64, r: Reason) {
+	pub fn int_neq_val(&mut self, var: IntView, val: i64, r: Reason) -> Result<(), Conflict> {
 		match var.0 {
 			IntViewInner::VarRef(iv) => {
 				let lit = self.int_vars[iv].get_bool_var(BoolVarMap::Eq(val));
-				self.reason_map.insert(lit.var(), r);
+				self.reason_map.insert(!lit, r);
 				self.lit_queue.push(!lit);
 				// TODO: Should this trigger notify?
+				// TODO: Check conflict
 			}
-		}
+		};
+		Ok(())
 	}
 
 	#[allow(dead_code)] // TODO
