@@ -7,7 +7,7 @@ use flatzinc_serde::RangeList;
 use index_vec::IndexVec;
 use pindakaas::{
 	solver::{Propagator as IpasirPropagator, SolvingActions},
-	Var as RawVar,
+	Lit as RawLit, Var as RawVar,
 };
 
 use crate::{
@@ -33,7 +33,7 @@ pub struct Engine {
 	/// Queue of propagators awaiting action
 	prop_queue: PriorityQueue<PropRef>,
 
-	pub(crate) reason_map: HashMap<RawVar, Reason>,
+	pub(crate) reason_map: HashMap<RawLit, Reason>,
 
 	/// Storage for the propagators used by the
 	pub(crate) propagators: IndexVec<PropRef, Box<dyn Propagator>>,
@@ -43,6 +43,9 @@ pub struct Engine {
 	// TODO: Inefficient, optimise!
 	int_domain_trail: Vec<(IntVarRef, RangeList<i64>)>,
 	trail_level: Vec<usize>,
+
+	external_queue: Vec<Vec<RawLit>>,
+	persistent: Vec<(RawVar, bool)>,
 }
 
 impl IpasirPropagator for Engine {
@@ -52,10 +55,10 @@ impl IpasirPropagator for Engine {
 
 	fn notify_assignment(&mut self, var: RawVar, val: bool, persistent: bool) {
 		if persistent {
-			todo!()
+			self.persistent.push((var, val))
 		}
 		for (prop, data) in self.bool_subscribers.get(&var).into_iter().flatten() {
-			if let Some(l) = self.propagators[*prop].notify(*data) {
+			if let Some(l) = self.propagators[*prop].notify_event(*data) {
 				self.prop_queue.insert(l, *prop);
 			}
 		}
@@ -101,7 +104,7 @@ impl IpasirPropagator for Engine {
 
 			for (prop, level, data) in self.int_subscribers.get(iv).into_iter().flatten() {
 				if level.is_activated_by(&event) {
-					if let Some(l) = self.propagators[*prop].notify(*data) {
+					if let Some(l) = self.propagators[*prop].notify_event(*data) {
 						self.prop_queue.insert(l, *prop)
 					}
 				}
@@ -124,6 +127,15 @@ impl IpasirPropagator for Engine {
 		for (var, dom) in self.int_domain_trail.drain(dom_trail_size..).rev() {
 			self.int_vars[var].domain = dom;
 		}
+		self.external_queue.clear();
+		for p in &mut self.propagators {
+			p.notify_backtrack(new_level);
+		}
+		// Re-apply persistent changes
+		for (var, val) in self.persistent.clone() {
+			self.notify_assignment(var, val, false);
+		}
+		self.persistent.clear()
 	}
 
 	fn decide(&mut self) -> Option<pindakaas::Lit> {
@@ -140,8 +152,7 @@ impl IpasirPropagator for Engine {
 		};
 		while let Some(p) = self.prop_queue.pop() {
 			let prop = self.propagators[p].as_mut();
-			prop.propagate(&mut context);
-			if !context.lit_queue.is_empty() {
+			if prop.propagate(&mut context).is_err() {
 				break;
 			}
 		}
@@ -149,20 +160,66 @@ impl IpasirPropagator for Engine {
 	}
 
 	fn add_reason_clause(&mut self, propagated_lit: pindakaas::Lit) -> Vec<pindakaas::Lit> {
-		match &self.reason_map[&propagated_lit.var()] {
+		match &self.reason_map[&propagated_lit] {
 			Reason::Lazy(_, _) => todo!(),
 			Reason::Eager(v) => once(propagated_lit).chain(v.iter().map(|l| !l)).collect(),
 			Reason::Simple(l) => vec![propagated_lit, !l],
 		}
 	}
 
-	fn check_model(&mut self, value: &dyn pindakaas::Valuation) -> bool {
-		let _ = value;
-		true
+	fn check_model(&mut self, sat_value: &dyn pindakaas::Valuation) -> bool {
+		let value = &|iv: &IntVar| {
+			for (i, l) in iv.one_hot.clone().enumerate() {
+				if sat_value(l.into()) == Some(true) {
+					// TODO: Does not account for holes
+					return iv.orig_domain.lower_bound().unwrap() + i as i64;
+				}
+			}
+			unreachable!()
+		};
+
+		for (r, iv) in self.int_vars.iter_mut().enumerate() {
+			let lb = iv.domain.lower_bound().unwrap();
+			let ub = iv.domain.upper_bound().unwrap();
+			if lb != ub {
+				let r = IntVarRef::new(r);
+				let val = value(iv);
+				let old_dom = mem::replace(&mut iv.domain, RangeList::from(val..=val));
+				self.int_domain_trail.push((r, old_dom));
+
+				for (prop, level, data) in self.int_subscribers.get(&r).into_iter().flatten() {
+					if level.is_activated_by(&IntEvent::Fixed) {
+						if let Some(l) = self.propagators[*prop].notify_event(*data) {
+							self.prop_queue.insert(l, *prop)
+						}
+					}
+				}
+			}
+		}
+		struct NoOp {}
+		impl SolvingActions for NoOp {
+			fn new_var(&mut self) -> RawVar {
+				todo!()
+			}
+
+			fn add_observed_var(&mut self, _var: RawVar) {
+				todo!()
+			}
+
+			fn is_decision(&mut self, _lit: pindakaas::Lit) -> bool {
+				todo!()
+			}
+		}
+		let lits = self.propagate(&mut NoOp {});
+		for lit in lits {
+			let clause = self.add_reason_clause(lit);
+			self.external_queue.push(clause);
+		}
+		self.external_queue.is_empty()
 	}
 
 	fn add_external_clause(&mut self) -> Option<Vec<pindakaas::Lit>> {
-		None
+		self.external_queue.pop()
 	}
 
 	fn as_any(&self) -> &dyn Any {
