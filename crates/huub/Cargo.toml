@@ -8,8 +8,8 @@ license = "MIT"
 [dependencies]
 flatzinc-serde = "0.1"
 index_vec = "0.1.3"
-pindakaas = { git = "https://github.com/Dekker1/pindakaas.git", features = [
-	"ipasir-up",
+pindakaas = { git = "https://github.com/pindakaashq/pindakaas.git", features = [
+  "ipasir-up",
 ] }
 thiserror = "1.0.56"
 tracing = "0.1.40"

@@ -47,7 +47,7 @@ impl Propagator for AllDifferentValue {
 			let lit = actions.int_get_bool_lit(var, BoolVarMap::Eq(val));
 			for (j, &v) in self.vars.iter().enumerate() {
 				let j_val = actions.int_get_val(v);
-				if (j as u32) != i && j_val.is_none() || j_val.unwrap() == val {
+				if (j as u32) != i && (j_val.is_none() || j_val.unwrap() == val) {
 					actions.int_neq_val(v, val, Reason::Simple(lit))?
 				}
 			}
@@ -59,7 +59,7 @@ impl Propagator for AllDifferentValue {
 #[cfg(test)]
 mod tests {
 	use flatzinc_serde::RangeList;
-	use pindakaas::Cnf;
+	use pindakaas::{solver::SolveResult, Cnf};
 
 	use super::*;
 	use crate::solver::engine::int_var::IntVar;
@@ -72,11 +72,14 @@ mod tests {
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]));
 
 		slv.add_propagator(Box::new(AllDifferentValue::new(vec![a, b, c])));
-		slv.solve(|val| {
-			assert_ne!(val(a.into()), val(b.into()));
-			assert_ne!(val(b.into()), val(c.into()));
-			assert_ne!(val(a.into()), val(c.into()));
-		})
+		assert_eq!(
+			slv.solve(|val| {
+				assert_ne!(val(a.into()), val(b.into()));
+				assert_ne!(val(b.into()), val(c.into()));
+				assert_ne!(val(a.into()), val(c.into()));
+			}),
+			SolveResult::Sat
+		)
 	}
 
 	#[test]
@@ -87,10 +90,6 @@ mod tests {
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]));
 
 		slv.add_propagator(Box::new(AllDifferentValue::new(vec![a, b, c])));
-		slv.solve(|val| {
-			assert_ne!(val(a.into()), val(b.into()));
-			assert_ne!(val(b.into()), val(c.into()));
-			assert_ne!(val(a.into()), val(c.into()));
-		})
+		assert_eq!(slv.solve(|_| { assert!(false) }), SolveResult::Unsat)
 	}
 }
