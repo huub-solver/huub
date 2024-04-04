@@ -173,7 +173,12 @@ impl IpasirPropagator for Engine {
 
 	fn add_reason_clause(&mut self, propagated_lit: pindakaas::Lit) -> Vec<pindakaas::Lit> {
 		let reason = match &self.reason_map[&propagated_lit] {
-			Reason::Lazy(_, _) => todo!(),
+			Reason::Lazy(prop, data) => {
+				let reason = self.propagators[*prop].explain(*data);
+				once(propagated_lit)
+					.chain(reason.iter().map(|l| !l))
+					.collect()
+			}
 			Reason::Eager(v) => once(propagated_lit).chain(v.iter().map(|l| !l)).collect(),
 			Reason::Simple(l) => vec![propagated_lit, !l],
 		};
