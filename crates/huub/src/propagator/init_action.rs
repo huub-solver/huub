@@ -1,21 +1,21 @@
-use pindakaas::solver::{cadical::Cadical, PropagatingSolver};
+use pindakaas::solver::PropagatingSolver;
 
 use crate::{
 	propagator::int_event::IntEvent,
-	solver::{engine::PropRef, BoolView, IntView},
+	solver::{engine::PropRef, BoolView, IntView, SatSolver},
 	Solver,
 };
 
-pub struct InitializationActions<'a> {
+pub struct InitializationActions<'a, Sat: SatSolver> {
 	pub(crate) prop_ref: PropRef,
-	pub(crate) slv: &'a mut Solver,
+	pub(crate) slv: &'a mut Solver<Sat>,
 }
 
-impl InitializationActions<'_> {
+impl<Sat: SatSolver> InitializationActions<'_, Sat> {
 	#[allow(dead_code)] // TODO
 	pub fn subscribe_bool(&mut self, var: BoolView, data: u32) {
 		let var = var.0.var();
-		<Cadical as PropagatingSolver>::add_observed_var(&mut self.slv.core, var);
+		<Sat as PropagatingSolver>::add_observed_var(&mut self.slv.core, var);
 		self.slv
 			.engine_mut()
 			.bool_subscribers

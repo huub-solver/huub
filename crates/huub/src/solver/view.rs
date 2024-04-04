@@ -2,7 +2,7 @@ use std::num::NonZeroI32;
 
 use pindakaas::Lit as RawLit;
 
-use crate::{solver::engine::int_var::IntVarRef, Solver};
+use crate::{solver::engine::int_var::IntVarRef, solver::SatSolver, Solver};
 
 pub enum SolverView {
 	Bool(BoolView),
@@ -44,15 +44,17 @@ impl BoolView {
 pub struct IntView(pub(crate) IntViewInner);
 
 impl IntView {
-	pub fn add_to_lit_reverse_map<M: Extend<(NonZeroI32, String)>>(
+	pub fn add_to_lit_reverse_map<Sat: SatSolver, M: Extend<(NonZeroI32, String)>>(
 		&self,
-		slv: &Solver,
+		slv: &Solver<Sat>,
 		map: &mut M,
 		name: &str,
 	) {
 		match self.0 {
 			IntViewInner::VarRef(v) => {
 				let var = &slv.engine().int_vars[v];
+				// eprintln!("one_hot: {:?}", var.one_hot);
+				// eprintln!("dom: {:?}", var.orig_domain);
 				for (lit, val) in var
 					.one_hot
 					.clone()

@@ -2,12 +2,12 @@ use std::ops::RangeBounds;
 
 use flatzinc_serde::RangeList;
 use pindakaas::{
-	solver::{cadical::Cadical, PropagatingSolver, VarRange},
+	solver::{PropagatingSolver, VarRange},
 	BitwiseEncoder, CardinalityOne, Encoder, Lit as RawLit, Var as RawVar,
 };
 
 use crate::{
-	solver::{view::IntViewInner, IntView},
+	solver::{view::IntViewInner, IntView, SatSolver},
 	Solver,
 };
 
@@ -24,12 +24,15 @@ pub(crate) struct IntVar {
 }
 
 impl IntVar {
-	pub(crate) fn new_in(slv: &mut Solver, domain: RangeList<i64>) -> IntView {
+	pub(crate) fn new_in<Sat: SatSolver>(slv: &mut Solver<Sat>, domain: RangeList<i64>) -> IntView {
 		let dom_size = (&domain)
 			.into_iter()
 			.map(|x| (*x.end() - *x.start() + 1) as usize)
 			.sum();
-		let vars = slv.core.new_var_range(dom_size);
+		let vars = slv
+			.core
+			.next_var_range(dom_size)
+			.expect("Boolean variable pool exhausted");
 		BitwiseEncoder::default()
 			.encode(
 				&mut slv.core,
@@ -45,7 +48,7 @@ impl IntVar {
 			one_hot: vars.clone(),
 		});
 		for l in vars {
-			<Cadical as PropagatingSolver>::add_observed_var(&mut slv.core, l);
+			<Sat as PropagatingSolver>::add_observed_var(&mut slv.core, l);
 			slv.engine_mut().bool_to_int.insert(l, iv);
 		}
 		IntView(IntViewInner::VarRef(iv))

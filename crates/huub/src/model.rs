@@ -16,7 +16,7 @@ pub use self::{
 use crate::{
 	model::int::IntVarDef,
 	propagator::all_different::AllDifferentValue,
-	solver::{engine::int_var::IntVar as SlvIntVar, BoolView},
+	solver::{engine::int_var::IntVar as SlvIntVar, BoolView, SatSolver},
 	Solver,
 };
 
@@ -39,7 +39,7 @@ impl Model {
 	}
 
 	// TODO: Make generic on Solver again (need var range trait)
-	pub fn to_solver(&self) -> (Solver, VariableMap) {
+	pub fn to_solver<Sat: SatSolver>(&self) -> (Solver<Sat>, VariableMap) {
 		let mut map = VariableMap::default();
 
 		// TODO: run SAT simplification
@@ -90,7 +90,7 @@ pub enum Constraint {
 }
 
 impl Constraint {
-	fn to_solver(&self, slv: &mut Solver, map: &mut VariableMap) {
+	fn to_solver<Sat: SatSolver>(&self, slv: &mut Solver<Sat>, map: &mut VariableMap) {
 		struct Satisfied;
 		match self {
 			Constraint::Clause(v) => {
@@ -115,14 +115,12 @@ impl Constraint {
 				if !vals.is_empty() {
 					todo!()
 				}
-				slv.add_propagator(Box::new(AllDifferentValue::new(vars.into_iter().map(
-					|v| {
-						let SimplifiedInt::Var(v) = v else {
-							unreachable!()
-						};
-						v
-					},
-				))))
+				slv.add_propagator(AllDifferentValue::new(vars.into_iter().map(|v| {
+					let SimplifiedInt::Var(v) = v else {
+						unreachable!()
+					};
+					v
+				})))
 			}
 		}
 	}

@@ -4,8 +4,8 @@ pub(crate) mod view;
 
 use pindakaas::{
 	solver::{
-		cadical::Cadical, LearnCallback, PropagatingSolver, SolveAssuming, SolveResult,
-		TermCallback,
+		cadical::Cadical, LearnCallback, NextVarRange, PropagatingSolver, SolveAssuming,
+		SolveResult, TermCallback,
 	},
 	Cnf, Lit as RawLit,
 };
@@ -16,7 +16,7 @@ pub use crate::solver::{
 	view::{BoolView, IntView, SolverView},
 };
 use crate::{
-	propagator::{init_action::InitializationActions, Propagator},
+	propagator::{init_action::InitializationActions, Initialize, Propagator},
 	solver::{
 		engine::{Engine, PropRef},
 		view::IntViewInner,
@@ -76,17 +76,24 @@ fn learn_clause_cb(clause: &mut dyn Iterator<Item = RawLit>) {
 	debug!(clause = ?clause.map(|x| i32::from(x)).collect::<Vec<i32>>(), "learn clause");
 }
 
-impl Solver {
-	pub(crate) fn add_propagator(&mut self, mut prop: Box<dyn Propagator>) {
+impl<Sat: SatSolver> Solver<Sat> {
+	pub(crate) fn add_propagator(&mut self, mut prop: impl Propagator + Initialize + 'static) {
 		let prop_ref = PropRef::from(self.engine().propagators.len());
 		let mut actions = InitializationActions {
 			prop_ref,
 			slv: self,
 		};
 		prop.initialize(&mut actions);
-		self.engine_mut().propagators.push(prop);
+		self.engine_mut().propagators.push(Box::new(prop));
 	}
 }
 
-pub trait SatSolver: PropagatingSolver + TermCallback + LearnCallback + SolveAssuming {}
-impl<X: PropagatingSolver + TermCallback + LearnCallback + SolveAssuming> SatSolver for X {}
+pub trait SatSolver:
+	PropagatingSolver + TermCallback + LearnCallback + SolveAssuming + NextVarRange + From<Cnf>
+{
+}
+impl<
+		X: PropagatingSolver + TermCallback + LearnCallback + SolveAssuming + NextVarRange + From<Cnf>,
+	> SatSolver for X
+{
+}

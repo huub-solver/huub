@@ -14,17 +14,10 @@ use crate::{
 		conflict::Conflict, init_action::InitializationActions,
 		propagation_action::PropagationActions,
 	},
-	solver::engine::queue::PriorityLevel,
+	solver::{engine::queue::PriorityLevel, SatSolver},
 };
 
 pub trait Propagator: Debug {
-	/// The method called when registering a propagator with the solver. This
-	/// method is generally used to register variable event subscriptions with the
-	/// solver.
-	fn initialize(&mut self, actions: &mut InitializationActions<'_>) {
-		let _ = actions;
-	}
-
 	/// The method called by the solver to notify the propagator of a variable
 	/// event to which it has subscribed. The propagator can choose a priority
 	/// level if it wants to be placed in the propagation queue.
@@ -62,5 +55,14 @@ pub trait Propagator: Debug {
 		let _ = data;
 		// Method will only be called if `propagate` used a lazy reason.
 		panic!("propagator did not provide an explain implementation")
+	}
+}
+
+pub trait Initialize {
+	/// The method called when registering a propagator with the solver. This
+	/// method is generally used to register variable event subscriptions with the
+	/// solver.
+	fn initialize<Sat: SatSolver>(&mut self, actions: &mut InitializationActions<'_, Sat>) {
+		let _ = actions;
 	}
 }
