@@ -113,7 +113,7 @@ impl<'a, V: Visit> LitNames<'a, V> {
 						v.push(format!("Lit({})", i));
 					}
 				}
-				self.inner.record_str(field, &format!("{}", v.join(" ∨ ")));
+				self.inner.record_str(field, &v.join(" ∨ "));
 				return true;
 			}
 		}

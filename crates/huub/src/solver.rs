@@ -66,14 +66,14 @@ impl<Sat: SatSolver> Solver<Sat> {
 impl<Sat: SatSolver + From<Cnf>> From<Cnf> for Solver<Sat> {
 	fn from(value: Cnf) -> Self {
 		let mut core: Sat = value.into();
-		core.set_external_propagator(Some(Box::new(Engine::default())));
+		core.set_external_propagator(Some(Box::<Engine>::default()));
 		core.set_learn_callback(Some(learn_clause_cb));
 		Self { core }
 	}
 }
 
 fn learn_clause_cb(clause: &mut dyn Iterator<Item = RawLit>) {
-	debug!(clause = ?clause.map(|x| i32::from(x)).collect::<Vec<i32>>(), "learn clause");
+	debug!(clause = ?clause.map(i32::from).collect::<Vec<i32>>(), "learn clause");
 }
 
 impl<Sat: SatSolver> Solver<Sat> {

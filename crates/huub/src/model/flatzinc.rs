@@ -45,7 +45,7 @@ impl Model {
 					if let [args] = c.args.as_slice() {
 						let args = arg_array(fzn, args)?;
 						let args: Result<Vec<_>, _> = args
-							.into_iter()
+							.iter()
 							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
 							.collect();
 						prb += Constraint::AllDifferent(args?);

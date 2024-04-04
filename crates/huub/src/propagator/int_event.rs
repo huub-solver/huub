@@ -10,17 +10,17 @@ pub enum IntEvent {
 impl IntEvent {
 	pub fn is_activated_by(&self, other: &IntEvent) -> bool {
 		use IntEvent::*;
-		match (self, other) {
-			(_, Fixed) => true,
-			(LowerBound, LowerBound) => true,
-			(LowerBound, Bounds) => true,
-			(UpperBound, UpperBound) => true,
-			(UpperBound, Bounds) => true,
-			(Bounds, LowerBound) => true,
-			(Bounds, UpperBound) => true,
-			(Bounds, Bounds) => true,
-			(Domain, _) => true,
-			_ => false,
-		}
+		matches!(
+			(self, other),
+			(_, Fixed)
+				| (LowerBound, LowerBound)
+				| (LowerBound, Bounds)
+				| (UpperBound, UpperBound)
+				| (UpperBound, Bounds)
+				| (Bounds, LowerBound)
+				| (Bounds, UpperBound)
+				| (Bounds, Bounds)
+				| (Domain, _)
+		)
 	}
 }
