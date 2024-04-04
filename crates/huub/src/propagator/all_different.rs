@@ -1,11 +1,11 @@
 use crate::{
 	propagator::{
 		conflict::Conflict, init_action::InitializationActions, int_event::IntEvent,
-		propagation_action::PropagationActions, reason::Reason, Propagator,
+		propagation_action::PropagationActions, reason::Reason, Initialize, Propagator,
 	},
 	solver::{
 		engine::{int_var::BoolVarMap, queue::PriorityLevel},
-		IntView,
+		IntView, SatSolver,
 	},
 };
 
@@ -25,12 +25,6 @@ impl AllDifferentValue {
 }
 
 impl Propagator for AllDifferentValue {
-	fn initialize(&mut self, actions: &mut InitializationActions<'_>) {
-		for (i, v) in self.vars.iter().enumerate() {
-			actions.subscribe_int(*v, IntEvent::Fixed, i as u32)
-		}
-	}
-
 	fn notify_event(&mut self, data: u32) -> Option<PriorityLevel> {
 		self.action_list.push(data);
 		Some(PriorityLevel::Low)
@@ -56,22 +50,33 @@ impl Propagator for AllDifferentValue {
 	}
 }
 
+impl Initialize for AllDifferentValue {
+	fn initialize<Sat: SatSolver>(&mut self, actions: &mut InitializationActions<'_, Sat>) {
+		for (i, v) in self.vars.iter().enumerate() {
+			actions.subscribe_int(*v, IntEvent::Fixed, i as u32)
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use flatzinc_serde::RangeList;
-	use pindakaas::{solver::SolveResult, Cnf};
+	use pindakaas::{
+		solver::{cadical::Cadical, SolveResult},
+		Cnf,
+	};
 
 	use super::*;
-	use crate::solver::engine::int_var::IntVar;
+	use crate::{solver::engine::int_var::IntVar, Solver};
 
 	#[test]
 	fn test_all_different_value_sat() {
-		let mut slv = Cnf::default().into();
+		let mut slv: Solver<Cadical> = Cnf::default().into();
 		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]));
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]));
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]));
 
-		slv.add_propagator(Box::new(AllDifferentValue::new(vec![a, b, c])));
+		slv.add_propagator(AllDifferentValue::new(vec![a, b, c]));
 		assert_eq!(
 			slv.solve(|val| {
 				assert_ne!(val(a.into()), val(b.into()));
@@ -84,12 +89,12 @@ mod tests {
 
 	#[test]
 	fn test_all_different_value_unsat() {
-		let mut slv = Cnf::default().into();
+		let mut slv: Solver<Cadical> = Cnf::default().into();
 		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]));
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]));
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]));
 
-		slv.add_propagator(Box::new(AllDifferentValue::new(vec![a, b, c])));
+		slv.add_propagator(AllDifferentValue::new(vec![a, b, c]));
 		assert_eq!(slv.solve(|_| { assert!(false) }), SolveResult::Unsat)
 	}
 }
