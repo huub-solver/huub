@@ -87,7 +87,7 @@ fn main() -> Result<()> {
 	}
 
 	// Run the solver!
-	match slv.solve(|value| {
+	let res = slv.solve(|value| {
 		for ident in &fzn.output {
 			if let Some(arr) = fzn.arrays.get(ident) {
 				println!(
@@ -103,7 +103,8 @@ fn main() -> Result<()> {
 			}
 		}
 		println!("----------");
-	}) {
+	});
+	match res {
 		SolveResult::Sat => {}
 		SolveResult::Unsat => {
 			println!("=====UNSATISFIABLE=====")

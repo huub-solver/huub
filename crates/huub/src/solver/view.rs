@@ -36,7 +36,7 @@ pub struct BoolView(pub(crate) RawLit);
 impl BoolView {
 	pub fn add_to_reverse_map<M: Extend<(NonZeroI32, String)>>(&self, map: &mut M, name: &str) {
 		let i: NonZeroI32 = self.0.into();
-		map.extend([(i, format!("{name}")), (-i, format!("not {name}"))])
+		map.extend([(i, name.to_string()), (-i, format!("not {name}"))])
 	}
 }
 
@@ -58,7 +58,6 @@ impl IntView {
 				for (lit, val) in var
 					.one_hot
 					.clone()
-					.into_iter()
 					.zip(var.orig_domain.clone().into_iter().flatten())
 				{
 					let i: NonZeroI32 = lit.into();
