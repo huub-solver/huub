@@ -6,7 +6,8 @@ pub use model::{
 	BoolExpr, BoolVar, Constraint, Literal, Model, SimplifiedBool, SimplifiedInt,
 	SimplifiedVariable, Variable, VariableMap,
 };
-pub use solver::{Solver, Valuation, Value};
+pub use pindakaas::solver::SolveResult;
+pub use solver::{BoolView, IntView, Solver, Valuation, Value};
 
 #[cfg(test)]
 mod tests {
@@ -30,8 +31,11 @@ mod tests {
 			unreachable!()
 		};
 
-		slv.solve(|value| {
-			assert_ne!(value(a.into()), value(b.into()));
-		})
+		assert_eq!(
+			slv.solve(|value| {
+				assert_ne!(value(a.into()), value(b.into()));
+			}),
+			SolveResult::Sat
+		);
 	}
 }

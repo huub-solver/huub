@@ -1,7 +1,7 @@
 pub(crate) mod int_var;
 pub(crate) mod queue;
 
-use std::{any::Any, collections::HashMap, iter::once, mem};
+use std::{any::Any, collections::HashMap, iter::once, mem, num::NonZeroI32};
 
 use flatzinc_serde::RangeList;
 use index_vec::IndexVec;
@@ -9,6 +9,7 @@ use pindakaas::{
 	solver::{Propagator as IpasirPropagator, SolvingActions},
 	Lit as RawLit, Var as RawVar,
 };
+use tracing::trace;
 
 use crate::{
 	propagator::{
@@ -54,6 +55,14 @@ impl IpasirPropagator for Engine {
 	}
 
 	fn notify_assignment(&mut self, var: RawVar, val: bool, persistent: bool) {
+		trace!(
+			lit = {
+				let v: NonZeroI32 = if val { var.into() } else { (!var).into() };
+				v
+			},
+			persistent,
+			"assignment"
+		);
 		if persistent {
 			self.persistent.push((var, val))
 		}
@@ -113,10 +122,12 @@ impl IpasirPropagator for Engine {
 	}
 
 	fn notify_new_decision_level(&mut self) {
+		trace!("new decision level");
 		self.trail_level.push(self.int_domain_trail.len())
 	}
 
 	fn notify_backtrack(&mut self, new_level: usize) {
+		trace!(new_level, "backtrack");
 		// Determine size of reverted trail
 		let dom_trail_size = if new_level > 0 {
 			self.trail_level[new_level - 1]
@@ -142,6 +153,7 @@ impl IpasirPropagator for Engine {
 		None
 	}
 
+	#[tracing::instrument(level = "debug", skip(self, slv))]
 	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Vec<pindakaas::Lit> {
 		let mut context = PropagationActions {
 			prop: PropRef::new(0), // will be replaced
@@ -160,11 +172,13 @@ impl IpasirPropagator for Engine {
 	}
 
 	fn add_reason_clause(&mut self, propagated_lit: pindakaas::Lit) -> Vec<pindakaas::Lit> {
-		match &self.reason_map[&propagated_lit] {
+		let reason = match &self.reason_map[&propagated_lit] {
 			Reason::Lazy(_, _) => todo!(),
 			Reason::Eager(v) => once(propagated_lit).chain(v.iter().map(|l| !l)).collect(),
 			Reason::Simple(l) => vec![propagated_lit, !l],
-		}
+		};
+		trace!(clause = ?reason.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "give reason clause");
+		reason
 	}
 
 	fn check_model(&mut self, sat_value: &dyn pindakaas::Valuation) -> bool {

@@ -3,9 +3,13 @@ pub(crate) mod value;
 pub(crate) mod view;
 
 use pindakaas::{
-	solver::{cadical::Cadical, LearnCallback, PropagatingSolver, SolveAssuming, TermCallback},
-	Cnf,
+	solver::{
+		cadical::Cadical, LearnCallback, PropagatingSolver, SolveAssuming, SolveResult,
+		TermCallback,
+	},
+	Cnf, Lit as RawLit,
 };
+use tracing::debug;
 
 pub use crate::solver::{
 	value::{Valuation, Value},
@@ -32,7 +36,7 @@ impl<Sat: SatSolver> Solver<Sat> {
 		self.core.propagator_mut().unwrap()
 	}
 
-	pub fn solve(&mut self, mut on_sol: impl FnMut(&dyn Valuation)) {
+	pub fn solve(&mut self, mut on_sol: impl FnMut(&dyn Valuation)) -> SolveResult {
 		// TODO: This is bad, but we cannot access propagator in the value function.
 		// If we could, then we could (hopefully) just access the current domain
 		let int_vars = self.engine().int_vars.clone();
@@ -55,7 +59,7 @@ impl<Sat: SatSolver> Solver<Sat> {
 				},
 			};
 			on_sol(wrapper);
-		});
+		})
 	}
 }
 
@@ -63,8 +67,13 @@ impl<Sat: SatSolver + From<Cnf>> From<Cnf> for Solver<Sat> {
 	fn from(value: Cnf) -> Self {
 		let mut core: Sat = value.into();
 		core.set_external_propagator(Some(Box::new(Engine::default())));
+		core.set_learn_callback(Some(learn_clause_cb));
 		Self { core }
 	}
+}
+
+fn learn_clause_cb(clause: &mut dyn Iterator<Item = RawLit>) {
+	debug!(clause = ?clause.map(|x| i32::from(x)).collect::<Vec<i32>>(), "learn clause");
 }
 
 impl Solver {
