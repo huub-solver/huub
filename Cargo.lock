@@ -547,7 +547,7 @@ checksum = "bda66fc9667c18cb2758a2ac84d1167245054bcf85d5d1aaa6923f45801bdd02"
 [[package]]
 name = "pindakaas"
 version = "0.1.0"
-source = "git+https://github.com/pindakaashq/pindakaas.git#5c6146e5f6c6fa84d5d7793d2545ad1a0a1f376a"
+source = "git+https://github.com/pindakaashq/pindakaas.git#4f77fa3d96c465edb9cbd5d890291bc092c506fe"
 dependencies = [
  "cached",
  "iset",
@@ -561,7 +561,7 @@ dependencies = [
 [[package]]
 name = "pindakaas-build-macros"
 version = "0.1.0"
-source = "git+https://github.com/pindakaashq/pindakaas.git#5c6146e5f6c6fa84d5d7793d2545ad1a0a1f376a"
+source = "git+https://github.com/pindakaashq/pindakaas.git#4f77fa3d96c465edb9cbd5d890291bc092c506fe"
 dependencies = [
  "cc",
  "paste",
@@ -570,7 +570,7 @@ dependencies = [
 [[package]]
 name = "pindakaas-cadical"
 version = "1.9.5"
-source = "git+https://github.com/pindakaashq/pindakaas.git#5c6146e5f6c6fa84d5d7793d2545ad1a0a1f376a"
+source = "git+https://github.com/pindakaashq/pindakaas.git#4f77fa3d96c465edb9cbd5d890291bc092c506fe"
 dependencies = [
  "cc",
  "pindakaas-build-macros",
@@ -579,7 +579,7 @@ dependencies = [
 [[package]]
 name = "pindakaas-derive"
 version = "0.1.0"
-source = "git+https://github.com/pindakaashq/pindakaas.git#5c6146e5f6c6fa84d5d7793d2545ad1a0a1f376a"
+source = "git+https://github.com/pindakaashq/pindakaas.git#4f77fa3d96c465edb9cbd5d890291bc092c506fe"
 dependencies = [
  "darling 0.20.8",
  "quote",

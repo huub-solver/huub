@@ -10,17 +10,15 @@ use std::{
 	time::Duration,
 };
 
+use ::tracing::Level;
 use clap::Parser;
 use flatzinc_serde::{FlatZinc, Literal};
 use huub::{
 	SimplifiedBool, SimplifiedInt, SimplifiedVariable, SolveResult, Solver, Valuation, Value,
 };
 use miette::{IntoDiagnostic, Result, WrapErr};
-
-use ::tracing::Level;
-use tracing_subscriber::fmt::time::uptime;
-
 use tracing::FmtLitFields;
+use tracing_subscriber::fmt::time::uptime;
 
 /// fzn-huub entry point
 ///

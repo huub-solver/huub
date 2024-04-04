@@ -1,0 +1,24 @@
+name: Check Format
+
+on:
+  pull_request:
+    branches-ignore: ["dependabot/**"]
+
+env:
+  # Lets us format with unstable rustfmt options
+  RUST_CHANNEL: nightly
+
+jobs:
+  check_format:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Check formatting of Rust files
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install --profile minimal --component rustfmt --no-self-update ${{ env.RUST_CHANNEL }}
+          rustup default ${{ env.RUST_CHANNEL }}
+      - name: Run cargo format
+        run: cargo +nightly fmt --all --check

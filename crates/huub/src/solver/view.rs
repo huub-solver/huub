@@ -2,7 +2,10 @@ use std::num::NonZeroI32;
 
 use pindakaas::Lit as RawLit;
 
-use crate::{solver::engine::int_var::IntVarRef, solver::SatSolver, Solver};
+use crate::{
+	solver::{engine::int_var::IntVarRef, SatSolver},
+	Solver,
+};
 
 pub enum SolverView {
 	Bool(BoolView),
