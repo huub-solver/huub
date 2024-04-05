@@ -148,9 +148,9 @@ checksum = "ade8366b8bd5ba243f0a58f036cc0ca8a2f069cff1a2351ef1cac6b083e16fc0"
 
 [[package]]
 name = "cc"
-version = "1.0.90"
+version = "1.0.91"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cd6604a82acf3039f1144f54b8eb34e91ffba622051189e71b781822d5ee1f5"
+checksum = "1fd97381a8cc6493395a5afc4c691c1084b3768db713b73aa215217aa245d153"
 dependencies = [
  "jobserver",
  "libc",
@@ -357,6 +357,7 @@ version = "0.1.0"
 dependencies = [
  "flatzinc-serde",
  "index_vec",
+ "itertools",
  "pindakaas",
  "thiserror",
  "tracing",
@@ -551,7 +552,7 @@ checksum = "bda66fc9667c18cb2758a2ac84d1167245054bcf85d5d1aaa6923f45801bdd02"
 [[package]]
 name = "pindakaas"
 version = "0.1.0"
-source = "git+https://github.com/pindakaashq/pindakaas.git#4f77fa3d96c465edb9cbd5d890291bc092c506fe"
+source = "git+https://github.com/pindakaashq/pindakaas.git#bf2d672cfb538b2cf359cdd5559ba1441702d492"
 dependencies = [
  "cached",
  "iset",
@@ -565,7 +566,7 @@ dependencies = [
 [[package]]
 name = "pindakaas-build-macros"
 version = "0.1.0"
-source = "git+https://github.com/pindakaashq/pindakaas.git#4f77fa3d96c465edb9cbd5d890291bc092c506fe"
+source = "git+https://github.com/pindakaashq/pindakaas.git#bf2d672cfb538b2cf359cdd5559ba1441702d492"
 dependencies = [
  "cc",
  "paste",
@@ -574,7 +575,7 @@ dependencies = [
 [[package]]
 name = "pindakaas-cadical"
 version = "1.9.5"
-source = "git+https://github.com/pindakaashq/pindakaas.git#4f77fa3d96c465edb9cbd5d890291bc092c506fe"
+source = "git+https://github.com/pindakaashq/pindakaas.git#bf2d672cfb538b2cf359cdd5559ba1441702d492"
 dependencies = [
  "cc",
  "pindakaas-build-macros",
@@ -583,7 +584,7 @@ dependencies = [
 [[package]]
 name = "pindakaas-derive"
 version = "0.1.0"
-source = "git+https://github.com/pindakaashq/pindakaas.git#4f77fa3d96c465edb9cbd5d890291bc092c506fe"
+source = "git+https://github.com/pindakaashq/pindakaas.git#bf2d672cfb538b2cf359cdd5559ba1441702d492"
 dependencies = [
  "darling 0.20.8",
  "quote",

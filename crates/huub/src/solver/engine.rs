@@ -16,7 +16,7 @@ use crate::{
 		int_event::IntEvent, propagation_action::PropagationActions, reason::Reason, Propagator,
 	},
 	solver::engine::{
-		int_var::{BoolVarMap, IntVar, IntVarRef},
+		int_var::{IntVar, IntVarRef, LitMeaning},
 		queue::PriorityQueue,
 	},
 };
@@ -72,9 +72,18 @@ impl IpasirPropagator for Engine {
 			}
 		}
 		if let Some(iv) = self.bool_to_int.get(&var) {
+			let lb = *self.int_vars[*iv].domain.lower_bound().unwrap();
+			let ub = *self.int_vars[*iv].domain.upper_bound().unwrap();
 			// Enact domain changes and determine change e
-			let event = match self.int_vars[*iv].map_bool_var(var) {
-				BoolVarMap::Eq(i) => {
+			let lit = if val { var.into() } else { !var };
+			let event = match self.int_vars[*iv].lit_meaning(lit) {
+				LitMeaning::Eq(i) => {
+					let old_dom =
+						mem::replace(&mut self.int_vars[*iv].domain, RangeList::from(i..=i));
+					self.int_domain_trail.push((*iv, old_dom));
+					IntEvent::Fixed
+				}
+				LitMeaning::NotEq(i) => {
 					let range_without = |rl: &RangeList<i64>, i| {
 						rl.into_iter()
 							.flat_map(|r| {
@@ -86,27 +95,75 @@ impl IpasirPropagator for Engine {
 							})
 							.collect()
 					};
-					if val {
-						let old_dom =
-							mem::replace(&mut self.int_vars[*iv].domain, RangeList::from(i..=i));
-						self.int_domain_trail.push((*iv, old_dom));
+					let new_dom: RangeList<i64> = range_without(&self.int_vars[*iv].domain, i);
+					let singular = new_dom.lower_bound() == new_dom.upper_bound();
+					let old_dom = mem::replace(&mut self.int_vars[*iv].domain, new_dom);
+					self.int_domain_trail.push((*iv, old_dom));
+					if singular {
+						IntEvent::Fixed
+					} else if i == lb {
+						IntEvent::LowerBound
+					} else if i == ub {
+						IntEvent::UpperBound
+					} else {
+						IntEvent::Domain
+					}
+				}
+				LitMeaning::GreaterEq(new_lb) => {
+					if new_lb <= lb {
+						return;
+					}
+					let new_dom = if new_lb == ub {
+						RangeList::from(new_lb..=new_lb)
+					} else {
+						(&self.int_vars[*iv].domain)
+							.into_iter()
+							.filter_map(|r| {
+								if r.contains(&&new_lb) {
+									Some(new_lb..=**r.end())
+								} else if new_lb < **r.start() {
+									Some(**r.start()..=**r.end())
+								} else {
+									None
+								}
+							})
+							.collect()
+					};
+					let old_dom = mem::replace(&mut self.int_vars[*iv].domain, new_dom);
+					self.int_domain_trail.push((*iv, old_dom));
+					if new_lb == ub {
 						IntEvent::Fixed
 					} else {
-						let lb = *self.int_vars[*iv].domain.lower_bound().unwrap();
-						let ub = *self.int_vars[*iv].domain.upper_bound().unwrap();
-						let new_dom: RangeList<i64> = range_without(&self.int_vars[*iv].domain, i);
-						let singular = new_dom.lower_bound() == new_dom.upper_bound();
-						let old_dom = mem::replace(&mut self.int_vars[*iv].domain, new_dom);
-						self.int_domain_trail.push((*iv, old_dom));
-						if singular {
-							IntEvent::Fixed
-						} else if i == lb {
-							IntEvent::LowerBound
-						} else if i == ub {
-							IntEvent::UpperBound
-						} else {
-							IntEvent::Domain
-						}
+						IntEvent::LowerBound
+					}
+				}
+				LitMeaning::Less(i) => {
+					let new_ub = i - 1;
+					if new_ub >= ub {
+						return;
+					}
+					let new_dom = if new_ub == lb {
+						RangeList::from(new_ub..=new_ub)
+					} else {
+						(&self.int_vars[*iv].domain)
+							.into_iter()
+							.filter_map(|r| {
+								if r.contains(&&new_ub) {
+									Some(**r.start()..=new_ub)
+								} else if **r.end() < new_ub {
+									Some(**r.start()..=**r.end())
+								} else {
+									None
+								}
+							})
+							.collect()
+					};
+					let old_dom = mem::replace(&mut self.int_vars[*iv].domain, new_dom);
+					self.int_domain_trail.push((*iv, old_dom));
+					if new_ub == lb {
+						IntEvent::Fixed
+					} else {
+						IntEvent::UpperBound
 					}
 				}
 			};
@@ -187,22 +244,12 @@ impl IpasirPropagator for Engine {
 	}
 
 	fn check_model(&mut self, sat_value: &dyn pindakaas::Valuation) -> bool {
-		let value = &|iv: &IntVar| {
-			for (i, l) in iv.one_hot.clone().enumerate() {
-				if sat_value(l.into()) == Some(true) {
-					// TODO: Does not account for holes
-					return iv.orig_domain.lower_bound().unwrap() + i as i64;
-				}
-			}
-			unreachable!()
-		};
-
 		for (r, iv) in self.int_vars.iter_mut().enumerate() {
 			let lb = iv.domain.lower_bound().unwrap();
 			let ub = iv.domain.upper_bound().unwrap();
 			if lb != ub {
 				let r = IntVarRef::new(r);
-				let val = value(iv);
+				let val = iv.get_value(sat_value);
 				let old_dom = mem::replace(&mut iv.domain, RangeList::from(val..=val));
 				self.int_domain_trail.push((r, old_dom));
 

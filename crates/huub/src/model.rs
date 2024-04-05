@@ -51,7 +51,7 @@ impl Model {
 		// Create integer data structures within the solver
 		for i in 0..self.int_vars.len() {
 			let var = &self.int_vars[i];
-			let view = SlvIntVar::new_in(&mut slv, var.domain.clone());
+			let view = SlvIntVar::new_in(&mut slv, var.domain.clone(), true); // TODO!
 			map.insert(
 				Variable::Int(IntVar(i as u32)),
 				SimplifiedVariable::Int(SimplifiedInt::Var(view)),
