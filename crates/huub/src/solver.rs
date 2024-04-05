@@ -45,17 +45,7 @@ impl<Sat: SatSolver> Solver<Sat> {
 			let wrapper: &dyn Valuation = &|x| match x {
 				SolverView::Bool(lit) => sat_value(lit.0).map(Value::Bool),
 				SolverView::Int(var) => match var.0 {
-					IntViewInner::VarRef(iv) => {
-						for (i, l) in int_vars[iv].one_hot.clone().enumerate() {
-							if sat_value(l.into()) == Some(true) {
-								// TODO: Does not account for holes
-								return Some(Value::Int(
-									int_vars[iv].orig_domain.lower_bound().unwrap() + i as i64,
-								));
-							}
-						}
-						unreachable!()
-					}
+					IntViewInner::VarRef(iv) => Some(Value::Int(int_vars[iv].get_value(sat_value))),
 				},
 			};
 			on_sol(wrapper);

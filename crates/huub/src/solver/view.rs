@@ -56,19 +56,32 @@ impl IntView {
 		match self.0 {
 			IntViewInner::VarRef(v) => {
 				let var = &slv.engine().int_vars[v];
-				// eprintln!("one_hot: {:?}", var.one_hot);
-				// eprintln!("dom: {:?}", var.orig_domain);
-				for (lit, val) in var
-					.one_hot
-					.clone()
-					.zip(var.orig_domain.clone().into_iter().flatten())
-				{
+				let mut var_iter = var.vars.clone().into_iter();
+
+				let mut val_iter = var.orig_domain.clone().into_iter().flatten();
+				val_iter.next().unwrap();
+				while let Some(val) = val_iter.next() {
+					let lit = var_iter.next().unwrap();
 					let i: NonZeroI32 = lit.into();
-					map.extend([(i, format!("{name}={val}")), (-i, format!("{name}!={val}"))])
+					map.extend([(i, format!("{name}>={val}")), (-i, format!("{name}<{val}"))])
 				}
+
+				if var.has_direct && var.orig_domain_len > 2 {
+					let mut val_iter = var.orig_domain.clone().into_iter().flatten();
+					val_iter.next().unwrap();
+					val_iter.next_back().unwrap();
+					while let Some(val) = val_iter.next() {
+						let lit = var_iter.next().unwrap();
+						let i: NonZeroI32 = lit.into();
+						map.extend([(i, format!("{name}={val}")), (-i, format!("{name}!={val}"))])
+					}
+				}
+
+				debug_assert!(var_iter.next().is_none());
 			}
 		}
 	}
+
 	pub fn add_to_int_reverse_map<M: Extend<(usize, String)>>(&self, map: &mut M, name: &str) {
 		match self.0 {
 			IntViewInner::VarRef(v) => map.extend([(v.into(), name.to_string())]),

@@ -4,7 +4,7 @@ use crate::{
 		propagation_action::PropagationActions, reason::Reason, Initialize, Propagator,
 	},
 	solver::{
-		engine::{int_var::BoolVarMap, queue::PriorityLevel},
+		engine::{int_var::LitMeaning, queue::PriorityLevel},
 		IntView, SatSolver,
 	},
 };
@@ -38,7 +38,7 @@ impl Propagator for AllDifferentValue {
 		while let Some(i) = self.action_list.pop() {
 			let var = self.vars[i as usize];
 			let val = actions.int_get_val(var).unwrap();
-			let lit = actions.int_get_bool_lit(var, BoolVarMap::Eq(val));
+			let lit = actions.int_get_bool_lit(var, LitMeaning::Eq(val));
 			for (j, &v) in self.vars.iter().enumerate() {
 				let j_val = actions.int_get_val(v);
 				if (j as u32) != i && (j_val.is_none() || j_val.unwrap() == val) {
@@ -72,9 +72,9 @@ mod tests {
 	#[test]
 	fn test_all_different_value_sat() {
 		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]));
-		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]));
-		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]));
+		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
+		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
+		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 
 		slv.add_propagator(AllDifferentValue::new(vec![a, b, c]));
 		assert_eq!(
@@ -90,9 +90,9 @@ mod tests {
 	#[test]
 	fn test_all_different_value_unsat() {
 		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]));
-		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]));
-		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]));
+		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
+		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
+		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
 		slv.add_propagator(AllDifferentValue::new(vec![a, b, c]));
 		assert_eq!(slv.solve(|_| { assert!(false) }), SolveResult::Unsat)

@@ -7,7 +7,7 @@ use crate::{
 	propagator::{conflict::Conflict, reason::Reason},
 	solver::{
 		engine::{
-			int_var::{BoolVarMap, IntVar, IntVarRef},
+			int_var::{IntVar, IntVarRef, LitMeaning},
 			PropRef,
 		},
 		view::IntViewInner,
@@ -25,7 +25,7 @@ pub struct PropagationActions<'a> {
 }
 
 impl PropagationActions<'_> {
-	pub fn int_get_bool_lit(&mut self, var: IntView, bv: BoolVarMap) -> RawLit {
+	pub fn int_get_bool_lit(&mut self, var: IntView, bv: LitMeaning) -> RawLit {
 		match var.0 {
 			IntViewInner::VarRef(iv) => self.int_vars[iv].get_bool_var(bv),
 		}
@@ -47,7 +47,7 @@ impl PropagationActions<'_> {
 	pub fn int_neq_val(&mut self, var: IntView, val: i64, r: Reason) -> Result<(), Conflict> {
 		match var.0 {
 			IntViewInner::VarRef(iv) => {
-				let lit = self.int_vars[iv].get_bool_var(BoolVarMap::Eq(val));
+				let lit = self.int_vars[iv].get_bool_var(LitMeaning::Eq(val));
 				self.reason_map.insert(!lit, r);
 				self.lit_queue.push(!lit);
 				// TODO: Should this trigger notify?
