@@ -438,7 +438,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.4",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -551,7 +551,7 @@ checksum = "bda66fc9667c18cb2758a2ac84d1167245054bcf85d5d1aaa6923f45801bdd02"
 [[package]]
 name = "pindakaas"
 version = "0.1.0"
-source = "git+https://github.com/pindakaashq/pindakaas.git#4f77fa3d96c465edb9cbd5d890291bc092c506fe"
+source = "git+https://github.com/pindakaashq/pindakaas.git#bf2d672cfb538b2cf359cdd5559ba1441702d492"
 dependencies = [
  "cached",
  "iset",
@@ -565,7 +565,7 @@ dependencies = [
 [[package]]
 name = "pindakaas-build-macros"
 version = "0.1.0"
-source = "git+https://github.com/pindakaashq/pindakaas.git#4f77fa3d96c465edb9cbd5d890291bc092c506fe"
+source = "git+https://github.com/pindakaashq/pindakaas.git#bf2d672cfb538b2cf359cdd5559ba1441702d492"
 dependencies = [
  "cc",
  "paste",
@@ -574,7 +574,7 @@ dependencies = [
 [[package]]
 name = "pindakaas-cadical"
 version = "1.9.5"
-source = "git+https://github.com/pindakaashq/pindakaas.git#4f77fa3d96c465edb9cbd5d890291bc092c506fe"
+source = "git+https://github.com/pindakaashq/pindakaas.git#bf2d672cfb538b2cf359cdd5559ba1441702d492"
 dependencies = [
  "cc",
  "pindakaas-build-macros",
@@ -583,7 +583,7 @@ dependencies = [
 [[package]]
 name = "pindakaas-derive"
 version = "0.1.0"
-source = "git+https://github.com/pindakaashq/pindakaas.git#4f77fa3d96c465edb9cbd5d890291bc092c506fe"
+source = "git+https://github.com/pindakaashq/pindakaas.git#bf2d672cfb538b2cf359cdd5559ba1441702d492"
 dependencies = [
  "darling 0.20.8",
  "quote",
