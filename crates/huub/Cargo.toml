@@ -6,7 +6,7 @@ authors = ["Jip J. Dekker <jip@dekker.one>"]
 license = "MIT"
 
 [dependencies]
-flatzinc-serde = "0.1"
+flatzinc-serde = "0.2"
 index_vec = "0.1.3"
 pindakaas = { git = "https://github.com/pindakaashq/pindakaas.git", features = [
   "ipasir-up",
