@@ -37,12 +37,12 @@ impl Propagator for AllDifferentValue {
 	fn propagate(&mut self, actions: &mut PropagationActions<'_>) -> Result<(), Conflict> {
 		while let Some(i) = self.action_list.pop() {
 			let var = self.vars[i as usize];
-			let val = actions.int_get_val(var).unwrap();
-			let lit = actions.int_get_bool_lit(var, LitMeaning::Eq(val));
+			let val = actions.get_int_val(var).unwrap();
+			let lit = actions.get_int_lit(var, LitMeaning::Eq(val));
 			for (j, &v) in self.vars.iter().enumerate() {
-				let j_val = actions.int_get_val(v);
+				let j_val = actions.get_int_val(v);
 				if (j as u32) != i && (j_val.is_none() || j_val.unwrap() == val) {
-					actions.int_neq_val(v, val, Reason::Simple(lit))?
+					actions.set_int_not_eq(v, val, Reason::Simple(lit))?
 				}
 			}
 		}

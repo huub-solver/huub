@@ -7,6 +7,7 @@ use pindakaas::{
 	Lit as RawLit,
 };
 
+use super::TrailedInt;
 use crate::{
 	solver::{view::IntViewInner, IntView, SatSolver},
 	Solver,
@@ -17,10 +18,13 @@ index_vec::define_index_type! {
 	pub struct IntVarRef = u32;
 }
 
+pub type IntVal = i64;
+
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub(crate) struct IntVar {
-	pub(crate) domain: RangeList<i64>,
-	pub(crate) orig_domain: RangeList<i64>,
+	pub(crate) lower_bound: TrailedInt,
+	pub(crate) upper_bound: TrailedInt,
+	pub(crate) orig_domain: RangeList<IntVal>,
 	pub(crate) orig_domain_len: usize,
 	pub(crate) vars: VarRange,
 	pub(crate) has_direct: bool,
@@ -67,9 +71,16 @@ impl IntVar {
 
 		// Create the resulting integer variable
 		let iv = Self {
-			orig_domain: domain.clone(),
+			lower_bound: slv
+				.engine_mut()
+				.int_trail
+				.track(*domain.lower_bound().unwrap()),
+			upper_bound: slv
+				.engine_mut()
+				.int_trail
+				.track(*domain.upper_bound().unwrap()),
+			orig_domain: domain,
 			orig_domain_len,
-			domain,
 			vars: vars.clone(),
 			has_direct: direct_encoding,
 		};
