@@ -1,9 +1,9 @@
 pub(crate) mod int_var;
 pub(crate) mod queue;
+pub(crate) mod trail;
 
-use std::{any::Any, collections::HashMap, iter::once, mem, num::NonZeroI32};
+use std::{any::Any, collections::HashMap, iter::once, num::NonZeroI32};
 
-use flatzinc_serde::RangeList;
 use index_vec::IndexVec;
 use pindakaas::{
 	solver::{Propagator as IpasirPropagator, SolvingActions},
@@ -11,6 +11,10 @@ use pindakaas::{
 };
 use tracing::trace;
 
+use self::{
+	int_var::IntVal,
+	trail::{SatTrail, Trail},
+};
 use crate::{
 	propagator::{
 		int_event::IntEvent, propagation_action::PropagationActions, reason::Reason, Propagator,
@@ -40,10 +44,11 @@ pub struct Engine {
 	pub(crate) propagators: IndexVec<PropRef, Box<dyn Propagator>>,
 	/// Storage for the integer variables
 	pub(crate) int_vars: IndexVec<IntVarRef, IntVar>,
-	/// Domain trail
-	// TODO: Inefficient, optimise!
-	int_domain_trail: Vec<(IntVarRef, RangeList<i64>)>,
-	trail_level: Vec<usize>,
+	/// Trailed integers
+	/// Includes lower and upper bounds
+	int_trail: Trail<TrailedInt, IntVal>,
+	// Boolean trail
+	bool_trail: SatTrail,
 
 	external_queue: Vec<Vec<RawLit>>,
 	persistent: Vec<(RawVar, bool)>,
@@ -66,45 +71,44 @@ impl IpasirPropagator for Engine {
 		if persistent {
 			self.persistent.push((var, val))
 		}
+		self.bool_trail.assign(var, val);
 		for (prop, data) in self.bool_subscribers.get(&var).into_iter().flatten() {
 			if let Some(l) = self.propagators[*prop].notify_event(*data) {
 				self.prop_queue.insert(l, *prop);
 			}
 		}
 		if let Some(iv) = self.bool_to_int.get(&var) {
-			let lb = *self.int_vars[*iv].domain.lower_bound().unwrap();
-			let ub = *self.int_vars[*iv].domain.upper_bound().unwrap();
+			let lb = self.int_trail[self.int_vars[*iv].lower_bound];
+			let ub = self.int_trail[self.int_vars[*iv].upper_bound];
 			// Enact domain changes and determine change e
 			let lit = if val { var.into() } else { !var };
 			let event = match self.int_vars[*iv].lit_meaning(lit) {
 				LitMeaning::Eq(i) => {
-					let old_dom =
-						mem::replace(&mut self.int_vars[*iv].domain, RangeList::from(i..=i));
-					self.int_domain_trail.push((*iv, old_dom));
+					if i == lb || i == ub {
+						return;
+					}
+					self.int_trail.assign(self.int_vars[*iv].lower_bound, i);
+					self.int_trail.assign(self.int_vars[*iv].upper_bound, i);
 					IntEvent::Fixed
 				}
 				LitMeaning::NotEq(i) => {
-					let range_without = |rl: &RangeList<i64>, i| {
-						rl.into_iter()
-							.flat_map(|r| {
-								if r.contains(&&i) {
-									vec![**r.start()..=(i - 1), (i + 1)..=**r.end()]
-								} else {
-									vec![**r.start()..=**r.end()]
-								}
-							})
-							.collect()
-					};
-					let new_dom: RangeList<i64> = range_without(&self.int_vars[*iv].domain, i);
-					let singular = new_dom.lower_bound() == new_dom.upper_bound();
-					let old_dom = mem::replace(&mut self.int_vars[*iv].domain, new_dom);
-					self.int_domain_trail.push((*iv, old_dom));
-					if singular {
-						IntEvent::Fixed
-					} else if i == lb {
-						IntEvent::LowerBound
-					} else if i == ub {
-						IntEvent::UpperBound
+					if i < lb || i > ub {
+						return;
+					}
+					if lb == i {
+						self.int_trail.assign(self.int_vars[*iv].lower_bound, i + 1);
+						if lb + 1 == ub {
+							IntEvent::Fixed
+						} else {
+							IntEvent::LowerBound
+						}
+					} else if ub == i {
+						self.int_trail.assign(self.int_vars[*iv].upper_bound, i - 1);
+						if lb == ub - 1 {
+							IntEvent::Fixed
+						} else {
+							IntEvent::UpperBound
+						}
 					} else {
 						IntEvent::Domain
 					}
@@ -113,24 +117,8 @@ impl IpasirPropagator for Engine {
 					if new_lb <= lb {
 						return;
 					}
-					let new_dom = if new_lb == ub {
-						RangeList::from(new_lb..=new_lb)
-					} else {
-						(&self.int_vars[*iv].domain)
-							.into_iter()
-							.filter_map(|r| {
-								if r.contains(&&new_lb) {
-									Some(new_lb..=**r.end())
-								} else if new_lb < **r.start() {
-									Some(**r.start()..=**r.end())
-								} else {
-									None
-								}
-							})
-							.collect()
-					};
-					let old_dom = mem::replace(&mut self.int_vars[*iv].domain, new_dom);
-					self.int_domain_trail.push((*iv, old_dom));
+					self.int_trail
+						.assign(self.int_vars[*iv].lower_bound, new_lb);
 					if new_lb == ub {
 						IntEvent::Fixed
 					} else {
@@ -142,24 +130,8 @@ impl IpasirPropagator for Engine {
 					if new_ub >= ub {
 						return;
 					}
-					let new_dom = if new_ub == lb {
-						RangeList::from(new_ub..=new_ub)
-					} else {
-						(&self.int_vars[*iv].domain)
-							.into_iter()
-							.filter_map(|r| {
-								if r.contains(&&new_ub) {
-									Some(**r.start()..=new_ub)
-								} else if **r.end() < new_ub {
-									Some(**r.start()..=**r.end())
-								} else {
-									None
-								}
-							})
-							.collect()
-					};
-					let old_dom = mem::replace(&mut self.int_vars[*iv].domain, new_dom);
-					self.int_domain_trail.push((*iv, old_dom));
+					self.int_trail
+						.assign(self.int_vars[*iv].upper_bound, new_ub);
 					if new_ub == lb {
 						IntEvent::Fixed
 					} else {
@@ -180,21 +152,17 @@ impl IpasirPropagator for Engine {
 
 	fn notify_new_decision_level(&mut self) {
 		trace!("new decision level");
-		self.trail_level.push(self.int_domain_trail.len())
+
+		self.int_trail.notify_new_decision_level();
+		self.bool_trail.notify_new_decision_level();
 	}
 
 	fn notify_backtrack(&mut self, new_level: usize) {
 		trace!(new_level, "backtrack");
-		// Determine size of reverted trail
-		let dom_trail_size = if new_level > 0 {
-			self.trail_level[new_level - 1]
-		} else {
-			0
-		};
+
 		// Revert changes to previous decision level
-		for (var, dom) in self.int_domain_trail.drain(dom_trail_size..).rev() {
-			self.int_vars[var].domain = dom;
-		}
+		self.int_trail.notify_backtrack(new_level);
+		self.bool_trail.notify_backtrack(new_level);
 		self.external_queue.clear();
 		for p in &mut self.propagators {
 			p.notify_backtrack(new_level);
@@ -203,7 +171,9 @@ impl IpasirPropagator for Engine {
 		for (var, val) in self.persistent.clone() {
 			self.notify_assignment(var, val, false);
 		}
-		self.persistent.clear()
+		if new_level == 0 {
+			self.persistent.clear()
+		}
 	}
 
 	fn decide(&mut self) -> Option<pindakaas::Lit> {
@@ -218,6 +188,8 @@ impl IpasirPropagator for Engine {
 			sat: slv,
 			int_vars: &mut self.int_vars,
 			reason_map: &mut self.reason_map,
+			int_trail: &mut self.int_trail,
+			sat_trail: &mut self.bool_trail,
 		};
 		while let Some(p) = self.prop_queue.pop() {
 			let prop = self.propagators[p].as_mut();
@@ -245,13 +217,13 @@ impl IpasirPropagator for Engine {
 
 	fn check_model(&mut self, sat_value: &dyn pindakaas::Valuation) -> bool {
 		for (r, iv) in self.int_vars.iter_mut().enumerate() {
-			let lb = iv.domain.lower_bound().unwrap();
-			let ub = iv.domain.upper_bound().unwrap();
+			let r = IntVarRef::new(r);
+			let lb = self.int_trail[iv.lower_bound];
+			let ub = self.int_trail[iv.upper_bound];
 			if lb != ub {
-				let r = IntVarRef::new(r);
 				let val = iv.get_value(sat_value);
-				let old_dom = mem::replace(&mut iv.domain, RangeList::from(val..=val));
-				self.int_domain_trail.push((r, old_dom));
+				self.int_trail.assign(iv.lower_bound, val);
+				self.int_trail.assign(iv.upper_bound, val);
 
 				for (prop, level, data) in self.int_subscribers.get(&r).into_iter().flatten() {
 					if level.is_activated_by(&IntEvent::Fixed) {
@@ -300,4 +272,9 @@ impl IpasirPropagator for Engine {
 index_vec::define_index_type! {
 	/// Identifies an propagator in a [`Solver`]
 	pub struct PropRef = u32;
+}
+
+index_vec::define_index_type! {
+	/// Identifies an trailed integer tracked within [`Solver`]
+	pub struct TrailedInt = u32;
 }

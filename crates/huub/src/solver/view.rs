@@ -56,11 +56,11 @@ impl IntView {
 		match self.0 {
 			IntViewInner::VarRef(v) => {
 				let var = &slv.engine().int_vars[v];
-				let mut var_iter = var.vars.clone().into_iter();
+				let mut var_iter = var.vars.clone();
 
 				let mut val_iter = var.orig_domain.clone().into_iter().flatten();
 				val_iter.next().unwrap();
-				while let Some(val) = val_iter.next() {
+				for val in val_iter {
 					let lit = var_iter.next().unwrap();
 					let i: NonZeroI32 = lit.into();
 					map.extend([(i, format!("{name}>={val}")), (-i, format!("{name}<{val}"))])
@@ -70,7 +70,7 @@ impl IntView {
 					let mut val_iter = var.orig_domain.clone().into_iter().flatten();
 					val_iter.next().unwrap();
 					val_iter.next_back().unwrap();
-					while let Some(val) = val_iter.next() {
+					for val in val_iter {
 						let lit = var_iter.next().unwrap();
 						let i: NonZeroI32 = lit.into();
 						map.extend([(i, format!("{name}={val}")), (-i, format!("{name}!={val}"))])
