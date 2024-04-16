@@ -1,7 +1,8 @@
 mod tracing;
 
 use std::{
-	collections::{BTreeMap, HashMap},
+	collections::HashMap,
+	fmt::Debug,
 	fs::File,
 	io::{self, BufReader},
 	num::NonZeroI32,
@@ -17,8 +18,9 @@ use huub::{
 	SimplifiedBool, SimplifiedInt, SimplifiedVariable, SolveResult, Solver, Valuation, Value,
 };
 use miette::{IntoDiagnostic, Result, WrapErr};
-use tracing::FmtLitFields;
+use tracing::{FmtLitFields, LitName};
 use tracing_subscriber::fmt::time::uptime;
+use ustr::{ustr, Ustr, UstrMap};
 
 /// fzn-huub entry point
 ///
@@ -29,8 +31,8 @@ fn main() -> Result<()> {
 	let args = Args::parse();
 
 	// Enable tracing functionality
-	let lit_reverse_map: Arc<Mutex<HashMap<NonZeroI32, String>>> = Arc::default();
-	let int_reverse_map: Arc<Mutex<HashMap<usize, String>>> = Arc::default();
+	let lit_reverse_map: Arc<Mutex<HashMap<NonZeroI32, LitName>>> = Arc::default();
+	let int_reverse_map: Arc<Mutex<Vec<Ustr>>> = Arc::default();
 	tracing_subscriber::fmt()
 		.with_max_level(match args.verbose {
 			0 => Level::INFO,
@@ -50,7 +52,7 @@ fn main() -> Result<()> {
 			.into_diagnostic()
 			.wrap_err_with(|| format!("Unable to open file “{}”", args.path.display()))?,
 	);
-	let fzn: FlatZinc = serde_json::from_reader(rdr)
+	let fzn: FlatZinc<Ustr> = serde_json::from_reader(rdr)
 		.into_diagnostic()
 		.wrap_err_with(|| {
 			format!(
@@ -63,24 +65,34 @@ fn main() -> Result<()> {
 	let (mut slv, var_map): (Solver, _) = Solver::from_fzn(&fzn)
 		.into_diagnostic()
 		.wrap_err("Error while processing FlatZinc")?;
+	let var_map: UstrMap<SimplifiedVariable> = var_map.into_iter().collect();
 
 	// Create reverse map for solver variables if required
 	if args.verbose > 0 {
-		let mut lit_map = HashMap::new();
-		let mut int_map = HashMap::new();
+		let mut bool_var_map = HashMap::new();
+		let mut int_lit_map = HashMap::new();
+		let mut int_map = vec![ustr(""); slv.num_int_vars()];
 		for (name, v) in var_map.iter() {
 			match v {
 				SimplifiedVariable::Bool(SimplifiedBool::Lit(l)) => {
-					l.add_to_reverse_map(&mut lit_map, name)
+					l.add_to_reverse_map(&mut bool_var_map, *name)
 				}
 				SimplifiedVariable::Int(SimplifiedInt::Var(r)) => {
-					r.add_to_lit_reverse_map(&slv, &mut lit_map, name);
-					r.add_to_int_reverse_map(&mut int_map, name);
+					r.add_to_lit_reverse_map(&slv, &mut int_lit_map);
+					r.add_to_int_reverse_map(&mut int_map, *name);
 				}
 				_ => {}
 			}
 		}
-		*lit_reverse_map.lock().unwrap() = lit_map;
+		*lit_reverse_map.lock().unwrap() = bool_var_map
+			.into_iter()
+			.map(|(k, (i, p))| (k, LitName::BoolVar(i, p)))
+			.chain(
+				int_lit_map
+					.into_iter()
+					.map(|(k, (i, m))| (k, LitName::IntLit(i, m))),
+			)
+			.collect();
 		*int_reverse_map.lock().unwrap() = int_map;
 	}
 
@@ -184,8 +196,8 @@ fn print_var(value: &dyn Valuation, var: &SimplifiedVariable) -> String {
 
 fn print_lit(
 	value: &dyn Valuation,
-	var_map: &BTreeMap<String, SimplifiedVariable>,
-	lit: &Literal,
+	var_map: &UstrMap<SimplifiedVariable>,
+	lit: &Literal<Ustr>,
 ) -> String {
 	match lit {
 		Literal::Int(i) => format!("{i}"),

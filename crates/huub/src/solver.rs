@@ -12,6 +12,7 @@ use pindakaas::{
 use tracing::debug;
 
 pub use crate::solver::{
+	engine::int_var::LitMeaning,
 	value::{Valuation, Value},
 	view::{BoolView, IntView, SolverView},
 };
@@ -50,6 +51,10 @@ impl<Sat: SatSolver> Solver<Sat> {
 			};
 			on_sol(wrapper);
 		})
+	}
+
+	pub fn num_int_vars(&self) -> usize {
+		self.engine().int_vars.len()
 	}
 }
 
