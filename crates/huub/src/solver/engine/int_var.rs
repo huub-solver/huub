@@ -196,7 +196,8 @@ impl IntVar {
 	}
 }
 
-pub(crate) enum LitMeaning {
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum LitMeaning {
 	Eq(i64),
 	NotEq(i64),
 	GreaterEq(i64),

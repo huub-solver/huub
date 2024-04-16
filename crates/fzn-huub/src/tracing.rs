@@ -5,6 +5,7 @@ use std::{
 	sync::{Arc, Mutex},
 };
 
+use huub::LitMeaning;
 use tracing::field::{Field, Visit};
 use tracing_subscriber::{
 	field::{MakeVisitor, RecordFields, VisitOutput},
@@ -13,20 +14,45 @@ use tracing_subscriber::{
 		FormatFields,
 	},
 };
+use ustr::Ustr;
 
 pub type LitInt = NonZeroI32;
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum LitName {
+	BoolVar(Ustr, bool), // name, positive
+	IntLit(usize, LitMeaning),
+}
+
+impl LitName {
+	pub fn to_string(&self, int_map: &[Ustr]) -> String {
+		match self {
+			LitName::BoolVar(name, pos) => {
+				format!("{}{name}", if *pos { "" } else { "not " })
+			}
+			LitName::IntLit(var, meaning) => {
+				let var = int_map[*var];
+				match meaning {
+					LitMeaning::Eq(val) => format!("{var}={val}"),
+					LitMeaning::NotEq(val) => format!("{var}!={val}"),
+					LitMeaning::GreaterEq(val) => format!("{var}>={val}"),
+					LitMeaning::Less(val) => format!("{var}<{val}"),
+				}
+			}
+		}
+	}
+}
 
 pub struct FmtLitFields {
 	fmt: DefaultFields,
-	lit_reverse_map: Arc<Mutex<HashMap<LitInt, String>>>,
-	int_reverse_map: Arc<Mutex<HashMap<usize, String>>>,
+	lit_reverse_map: Arc<Mutex<HashMap<LitInt, LitName>>>,
+	int_reverse_map: Arc<Mutex<Vec<Ustr>>>,
 }
 
 impl FmtLitFields {
 	pub fn new(
 		fmt: DefaultFields,
-		lit_reverse_map: Arc<Mutex<HashMap<LitInt, String>>>,
-		int_reverse_map: Arc<Mutex<HashMap<usize, String>>>,
+		lit_reverse_map: Arc<Mutex<HashMap<LitInt, LitName>>>,
+		int_reverse_map: Arc<Mutex<Vec<Ustr>>>,
 	) -> Self {
 		Self {
 			fmt,
@@ -51,8 +77,8 @@ impl<'writer> FormatFields<'writer> for FmtLitFields {
 #[derive(Debug, Clone)]
 struct LitNames<'a, V> {
 	inner: V,
-	lit_reverse_map: &'a HashMap<LitInt, String>,
-	int_reverse_map: &'a HashMap<usize, String>,
+	lit_reverse_map: &'a HashMap<LitInt, LitName>,
+	int_reverse_map: &'a Vec<Ustr>,
 }
 
 impl<'a, V> LitNames<'a, V> {
@@ -63,8 +89,8 @@ impl<'a, V> LitNames<'a, V> {
 	/// [`MakeVisitor`]: tracing_subscriber::field::MakeVisitor
 	pub fn new(
 		inner: V,
-		lit_reverse_map: &'a HashMap<LitInt, String>,
-		int_reverse_map: &'a HashMap<usize, String>,
+		lit_reverse_map: &'a HashMap<LitInt, LitName>,
+		int_reverse_map: &'a Vec<Ustr>,
 	) -> Self {
 		LitNames {
 			inner,
@@ -82,7 +108,8 @@ impl<'a, V: Visit> LitNames<'a, V> {
 				.lit_reverse_map
 				.get(&NonZeroI32::new(value as i32).unwrap())
 			{
-				self.inner.record_str(field, name);
+				self.inner
+					.record_str(field, &name.to_string(self.int_reverse_map));
 				return true;
 			}
 		}
@@ -92,7 +119,7 @@ impl<'a, V: Visit> LitNames<'a, V> {
 	#[inline]
 	fn check_int_var(&mut self, field: &Field, value: u64) -> bool {
 		if matches!(field.name(), "int_var") {
-			if let Some(name) = self.int_reverse_map.get(&(value as usize)) {
+			if let Some(name) = self.int_reverse_map.get(value as usize) {
 				self.inner.record_str(field, name);
 				return true;
 			}
@@ -108,7 +135,7 @@ impl<'a, V: Visit> LitNames<'a, V> {
 				let mut v: Vec<String> = Vec::with_capacity(clause.len());
 				for i in clause {
 					if let Some(l) = self.lit_reverse_map.get(&NonZeroI32::new(i).unwrap()) {
-						v.push(l.clone());
+						v.push(l.to_string(self.int_reverse_map));
 					} else {
 						v.push(format!("Lit({})", i));
 					}

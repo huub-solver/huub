@@ -7,7 +7,7 @@ pub use model::{
 	SimplifiedVariable, Variable, VariableMap,
 };
 pub use pindakaas::solver::SolveResult;
-pub use solver::{BoolView, IntView, Solver, Valuation, Value};
+pub use solver::{BoolView, IntView, LitMeaning, Solver, Valuation, Value};
 
 #[cfg(test)]
 mod tests {

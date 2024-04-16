@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt::Debug, ops::Deref};
 
 use flatzinc_serde::{Argument, Domain, FlatZinc, Literal, Type, Variable};
 use thiserror::Error;
@@ -9,12 +9,14 @@ use crate::{
 };
 
 impl Model {
-	pub fn from_fzn(fzn: &FlatZinc) -> Result<(Self, BTreeMap<String, MVar>), FlatZincError> {
-		let mut map = BTreeMap::<String, MVar>::new();
+	pub fn from_fzn<S: Ord + Deref<Target = str> + Clone + Debug>(
+		fzn: &FlatZinc<S>,
+	) -> Result<(Self, BTreeMap<S, MVar>), FlatZincError> {
+		let mut map = BTreeMap::<S, MVar>::new();
 		let mut prb = Model::default();
 
 		for c in fzn.constraints.iter() {
-			match c.id.as_str() {
+			match c.id.deref() {
 				"bool_clause" => {
 					if let [pos, neg] = c.args.as_slice() {
 						let pos = arg_array(fzn, pos)?;
@@ -57,13 +59,13 @@ impl Model {
 						});
 					}
 				}
-				_ => return Err(FlatZincError::UnknownConstraint(c.id.clone())),
+				_ => return Err(FlatZincError::UnknownConstraint(c.id.to_string())),
 			}
 		}
 
 		// Ensure all variables in the output are in the model
 		for ident in fzn.output.iter() {
-			let mut ensure_exists = |ident: &String, var| {
+			let mut ensure_exists = |ident: &S, var| {
 				if !map.contains_key(ident) {
 					map.insert(ident.clone(), new_var(&mut prb, var));
 				}
@@ -76,12 +78,12 @@ impl Model {
 						if let Some(var) = fzn.variables.get(ident) {
 							ensure_exists(ident, var)
 						} else {
-							return Err(FlatZincError::UnknownIdentifier(ident.into()));
+							return Err(FlatZincError::UnknownIdentifier(ident.to_string()));
 						}
 					}
 				}
 			} else {
-				return Err(FlatZincError::UnknownIdentifier(ident.into()));
+				return Err(FlatZincError::UnknownIdentifier(ident.to_string()));
 			}
 		}
 
@@ -91,9 +93,9 @@ impl Model {
 
 // TODO: Make generic on underlying solver
 impl Solver {
-	pub fn from_fzn(
-		fzn: &FlatZinc,
-	) -> Result<(Self, BTreeMap<String, SimplifiedVariable>), FlatZincError> {
+	pub fn from_fzn<S: Ord + Deref<Target = str> + Clone + Debug>(
+		fzn: &FlatZinc<S>,
+	) -> Result<(Self, BTreeMap<S, SimplifiedVariable>), FlatZincError> {
 		let (prb, map) = Model::from_fzn(fzn)?;
 		let (slv, remap) = prb.to_solver();
 		let map = map.into_iter().map(|(k, v)| (k, remap.get(&v))).collect();
@@ -101,14 +103,17 @@ impl Solver {
 	}
 }
 
-fn arg_array<'a>(fzn: &'a FlatZinc, arg: &'a Argument) -> Result<&'a Vec<Literal>, FlatZincError> {
+fn arg_array<'a, S: Ord + Deref<Target = str> + Clone + Debug>(
+	fzn: &'a FlatZinc<S>,
+	arg: &'a Argument<S>,
+) -> Result<&'a Vec<Literal<S>>, FlatZincError> {
 	match arg {
 		Argument::Array(x) => Ok(x),
 		Argument::Literal(Literal::Identifier(ident)) => {
 			if let Some(arr) = fzn.arrays.get(ident) {
 				Ok(&arr.contents)
 			} else {
-				Err(FlatZincError::UnknownIdentifier(ident.clone()))
+				Err(FlatZincError::UnknownIdentifier(ident.to_string()))
 			}
 		}
 		Argument::Literal(x) => Err(FlatZincError::InvalidArgumentType {
@@ -118,7 +123,10 @@ fn arg_array<'a>(fzn: &'a FlatZinc, arg: &'a Argument) -> Result<&'a Vec<Literal
 	}
 }
 
-fn new_var(prb: &mut Model, var: &Variable) -> MVar {
+fn new_var<S: Ord + Deref<Target = str> + Clone + Debug>(
+	prb: &mut Model,
+	var: &Variable<S>,
+) -> MVar {
 	match var.ty {
 		Type::Bool => MVar::Bool(prb.new_bool_var()),
 		Type::Int => match &var.domain {
@@ -130,11 +138,11 @@ fn new_var(prb: &mut Model, var: &Variable) -> MVar {
 	}
 }
 
-fn lit_bool(
-	fzn: &FlatZinc,
+fn lit_bool<S: Ord + Deref<Target = str> + Clone + Debug>(
+	fzn: &FlatZinc<S>,
 	prb: &mut Model,
-	map: &mut BTreeMap<String, MVar>,
-	lit: &Literal,
+	map: &mut BTreeMap<S, MVar>,
+	lit: &Literal<S>,
 ) -> Result<BoolExpr, FlatZincError> {
 	match lit {
 		Literal::Identifier(ident) => {
@@ -155,7 +163,7 @@ fn lit_bool(
 					})
 				}
 			} else {
-				Err(FlatZincError::UnknownIdentifier(ident.clone()))
+				Err(FlatZincError::UnknownIdentifier(ident.to_string()))
 			}
 		}
 		Literal::Bool(v) => Ok(BoolExpr::Val(*v)),
@@ -163,11 +171,11 @@ fn lit_bool(
 	}
 }
 
-fn lit_int(
-	fzn: &FlatZinc,
+fn lit_int<S: Ord + Deref<Target = str> + Clone + Debug>(
+	fzn: &FlatZinc<S>,
 	prb: &mut Model,
-	map: &mut BTreeMap<String, MVar>,
-	lit: &Literal,
+	map: &mut BTreeMap<S, MVar>,
+	lit: &Literal<S>,
 ) -> Result<IntExpr, FlatZincError> {
 	match lit {
 		Literal::Identifier(ident) => {
@@ -187,7 +195,7 @@ fn lit_int(
 					})
 				}
 			} else {
-				Err(FlatZincError::UnknownIdentifier(ident.clone()))
+				Err(FlatZincError::UnknownIdentifier(ident.to_string()))
 			}
 		}
 		Literal::Bool(v) => Ok(IntExpr::Val(if *v { 1 } else { 0 })),
