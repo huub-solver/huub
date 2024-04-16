@@ -102,9 +102,9 @@ impl IntVar {
 
 		// Setup the boolean to integer mapping
 		let iv = slv.engine_mut().int_vars.push(iv);
+		slv.engine_mut().bool_to_int.insert(vars.clone(), iv);
 		for l in vars {
 			<Sat as PropagatingSolver>::add_observed_var(&mut slv.core, l);
-			slv.engine_mut().bool_to_int.insert(l, iv);
 		}
 		IntView(IntViewInner::VarRef(iv))
 	}

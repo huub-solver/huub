@@ -1,3 +1,4 @@
+pub(crate) mod bool_to_int;
 pub(crate) mod int_var;
 pub(crate) mod queue;
 pub(crate) mod trail;
@@ -12,6 +13,7 @@ use pindakaas::{
 use tracing::trace;
 
 use self::{
+	bool_to_int::BoolToIntMap,
 	int_var::IntVal,
 	trail::{SatTrail, Trail},
 };
@@ -32,8 +34,8 @@ pub struct Engine {
 	/// Integer variable subscriptions
 	// TODO: Shrink Propref and IntEvent to fit in 32 bits
 	pub(crate) int_subscribers: HashMap<IntVarRef, Vec<(PropRef, IntEvent, u32)>>,
-	// TODO: (URGENT) this is incredibly inefficient. Maybe use a BTreeMap over the ranges?
-	pub(crate) bool_to_int: HashMap<RawVar, IntVarRef>,
+	/// Mapping from boolean variables to integer variables
+	pub(crate) bool_to_int: BoolToIntMap,
 
 	/// Queue of propagators awaiting action
 	prop_queue: PriorityQueue<PropRef>,
@@ -77,18 +79,18 @@ impl IpasirPropagator for Engine {
 				self.prop_queue.insert(l, *prop);
 			}
 		}
-		if let Some(iv) = self.bool_to_int.get(&var) {
-			let lb = self.int_trail[self.int_vars[*iv].lower_bound];
-			let ub = self.int_trail[self.int_vars[*iv].upper_bound];
+		if let Some(iv) = self.bool_to_int.get(var) {
+			let lb = self.int_trail[self.int_vars[iv].lower_bound];
+			let ub = self.int_trail[self.int_vars[iv].upper_bound];
 			// Enact domain changes and determine change e
 			let lit = if val { var.into() } else { !var };
-			let event = match self.int_vars[*iv].lit_meaning(lit) {
+			let event = match self.int_vars[iv].lit_meaning(lit) {
 				LitMeaning::Eq(i) => {
 					if i == lb || i == ub {
 						return;
 					}
-					self.int_trail.assign(self.int_vars[*iv].lower_bound, i);
-					self.int_trail.assign(self.int_vars[*iv].upper_bound, i);
+					self.int_trail.assign(self.int_vars[iv].lower_bound, i);
+					self.int_trail.assign(self.int_vars[iv].upper_bound, i);
 					IntEvent::Fixed
 				}
 				LitMeaning::NotEq(i) => {
@@ -96,14 +98,14 @@ impl IpasirPropagator for Engine {
 						return;
 					}
 					if lb == i {
-						self.int_trail.assign(self.int_vars[*iv].lower_bound, i + 1);
+						self.int_trail.assign(self.int_vars[iv].lower_bound, i + 1);
 						if lb + 1 == ub {
 							IntEvent::Fixed
 						} else {
 							IntEvent::LowerBound
 						}
 					} else if ub == i {
-						self.int_trail.assign(self.int_vars[*iv].upper_bound, i - 1);
+						self.int_trail.assign(self.int_vars[iv].upper_bound, i - 1);
 						if lb == ub - 1 {
 							IntEvent::Fixed
 						} else {
@@ -117,8 +119,7 @@ impl IpasirPropagator for Engine {
 					if new_lb <= lb {
 						return;
 					}
-					self.int_trail
-						.assign(self.int_vars[*iv].lower_bound, new_lb);
+					self.int_trail.assign(self.int_vars[iv].lower_bound, new_lb);
 					if new_lb == ub {
 						IntEvent::Fixed
 					} else {
@@ -130,8 +131,7 @@ impl IpasirPropagator for Engine {
 					if new_ub >= ub {
 						return;
 					}
-					self.int_trail
-						.assign(self.int_vars[*iv].upper_bound, new_ub);
+					self.int_trail.assign(self.int_vars[iv].upper_bound, new_ub);
 					if new_ub == lb {
 						IntEvent::Fixed
 					} else {
@@ -140,7 +140,7 @@ impl IpasirPropagator for Engine {
 				}
 			};
 
-			for (prop, level, data) in self.int_subscribers.get(iv).into_iter().flatten() {
+			for (prop, level, data) in self.int_subscribers.get(&iv).into_iter().flatten() {
 				if level.is_activated_by(&event) {
 					if let Some(l) = self.propagators[*prop].notify_event(*data) {
 						self.prop_queue.insert(l, *prop)
