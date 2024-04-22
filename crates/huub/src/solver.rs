@@ -47,6 +47,7 @@ impl<Sat: SatSolver> Solver<Sat> {
 				SolverView::Bool(lit) => sat_value(lit.0).map(Value::Bool),
 				SolverView::Int(var) => match var.0 {
 					IntViewInner::VarRef(iv) => Some(Value::Int(int_vars[iv].get_value(sat_value))),
+					IntViewInner::Const(i) => Some(Value::Int(i)),
 				},
 			};
 			on_sol(wrapper);
@@ -78,8 +79,13 @@ impl<Sat: SatSolver> Solver<Sat> {
 			prop_ref,
 			slv: self,
 		};
-		prop.initialize(&mut actions);
+		let enqueue = prop.initialize(&mut actions);
+		if enqueue {
+			let level = prop.queue_priority_level();
+			self.engine_mut().prop_queue.insert(level, prop_ref);
+		}
 		self.engine_mut().propagators.push(Box::new(prop));
+		self.engine_mut().enqueued.push(enqueue);
 	}
 }
 

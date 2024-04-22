@@ -35,6 +35,7 @@ impl<Sat: SatSolver> InitializationActions<'_, Sat> {
 				.entry(var)
 				.or_default()
 				.push((self.prop_ref, event, data)),
+			Const(_) => {}
 		}
 	}
 }

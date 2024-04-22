@@ -2,6 +2,7 @@ use pindakaas::Lit;
 
 use crate::solver::engine::PropRef;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Reason {
 	/// A promise that a given propagator will compute a causation of the change
 	/// when given the attached data

@@ -38,12 +38,14 @@ pub struct Engine {
 	pub(crate) bool_to_int: BoolToIntMap,
 
 	/// Queue of propagators awaiting action
-	prop_queue: PriorityQueue<PropRef>,
+	pub(crate) prop_queue: PriorityQueue<PropRef>,
 
 	pub(crate) reason_map: HashMap<RawLit, Reason>,
 
-	/// Storage for the propagators used by the
+	/// Storage of the propagators
 	pub(crate) propagators: IndexVec<PropRef, Box<dyn Propagator>>,
+	/// Flag for whether a propagator is enqueued
+	pub(crate) enqueued: IndexVec<PropRef, bool>,
 	/// Storage for the integer variables
 	pub(crate) int_vars: IndexVec<IntVarRef, IntVar>,
 	/// Trailed integers
@@ -70,15 +72,20 @@ impl IpasirPropagator for Engine {
 			persistent,
 			"assignment"
 		);
-		if persistent {
+
+		// Process Boolean assignment
+		if persistent && self.int_trail.decision_level() != 0 {
 			self.persistent.push((var, val))
 		}
 		self.bool_trail.assign(var, val);
-		for (prop, data) in self.bool_subscribers.get(&var).into_iter().flatten() {
-			if let Some(l) = self.propagators[*prop].notify_event(*data) {
-				self.prop_queue.insert(l, *prop);
+		for &(prop, data) in self.bool_subscribers.get(&var).into_iter().flatten() {
+			if self.propagators[prop].notify_event(data) && !self.enqueued[prop] {
+				let level = self.propagators[prop].queue_priority_level();
+				self.prop_queue.insert(level, prop);
 			}
 		}
+
+		// Process Integer consequences
 		if let Some(iv) = self.bool_to_int.get(var) {
 			let lb = self.int_trail[self.int_vars[iv].lower_bound];
 			let ub = self.int_trail[self.int_vars[iv].upper_bound];
@@ -141,10 +148,12 @@ impl IpasirPropagator for Engine {
 			};
 
 			for (prop, level, data) in self.int_subscribers.get(&iv).into_iter().flatten() {
-				if level.is_activated_by(&event) {
-					if let Some(l) = self.propagators[*prop].notify_event(*data) {
-						self.prop_queue.insert(l, *prop)
-					}
+				if level.is_activated_by(&event)
+					&& self.propagators[*prop].notify_event(*data)
+					&& !self.enqueued[*prop]
+				{
+					let level = self.propagators[*prop].queue_priority_level();
+					self.prop_queue.insert(level, *prop);
 				}
 			}
 		}
@@ -193,7 +202,16 @@ impl IpasirPropagator for Engine {
 		};
 		while let Some(p) = self.prop_queue.pop() {
 			let prop = self.propagators[p].as_mut();
-			if prop.propagate(&mut context).is_err() {
+			let _ = prop.propagate(&mut context);
+			if !context.lit_queue.is_empty() {
+				trace!(
+					lits = ?context
+						.lit_queue
+						.iter()
+						.map(|&x| i32::from(x))
+						.collect::<Vec<i32>>(),
+					"propagate"
+				);
 				break;
 			}
 		}
@@ -201,21 +219,26 @@ impl IpasirPropagator for Engine {
 	}
 
 	fn add_reason_clause(&mut self, propagated_lit: pindakaas::Lit) -> Vec<pindakaas::Lit> {
-		let reason = match &self.reason_map[&propagated_lit] {
-			Reason::Lazy(prop, data) => {
-				let reason = self.propagators[*prop].explain(*data);
-				once(propagated_lit)
-					.chain(reason.iter().map(|l| !l))
-					.collect()
-			}
-			Reason::Eager(v) => once(propagated_lit).chain(v.iter().map(|l| !l)).collect(),
-			Reason::Simple(l) => vec![propagated_lit, !l],
-		};
+		let reason = self
+			.reason_map
+			.get(&propagated_lit)
+			.map(|r| match r {
+				Reason::Lazy(prop, data) => {
+					let reason = self.propagators[*prop].explain(*data);
+					once(propagated_lit)
+						.chain(reason.iter().map(|l| !l))
+						.collect()
+				}
+				Reason::Eager(v) => once(propagated_lit).chain(v.iter().map(|l| !l)).collect(),
+				Reason::Simple(l) => vec![propagated_lit, !l],
+			})
+			.unwrap_or_else(|| vec![propagated_lit]);
 		trace!(clause = ?reason.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "give reason clause");
 		reason
 	}
 
 	fn check_model(&mut self, sat_value: &dyn pindakaas::Valuation) -> bool {
+		trace!("check model");
 		for (r, iv) in self.int_vars.iter_mut().enumerate() {
 			let r = IntVarRef::new(r);
 			let lb = self.int_trail[iv.lower_bound];
@@ -226,10 +249,11 @@ impl IpasirPropagator for Engine {
 				self.int_trail.assign(iv.upper_bound, val);
 
 				for (prop, level, data) in self.int_subscribers.get(&r).into_iter().flatten() {
-					if level.is_activated_by(&IntEvent::Fixed) {
-						if let Some(l) = self.propagators[*prop].notify_event(*data) {
-							self.prop_queue.insert(l, *prop)
-						}
+					if level.is_activated_by(&IntEvent::Fixed)
+						&& self.propagators[*prop].notify_event(*data)
+					{
+						let l = self.propagators[*prop].queue_priority_level();
+						self.prop_queue.insert(l, *prop)
 					}
 				}
 			}

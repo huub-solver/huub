@@ -1,7 +1,7 @@
 use std::{collections::HashMap, mem, ops::Index};
 
 use index_vec::{Idx, IndexVec};
-use pindakaas::Var as RawVar;
+use pindakaas::{Lit as RawLit, Var as RawVar};
 
 #[derive(Debug)]
 pub struct Trail<I: Idx, E> {
@@ -35,6 +35,10 @@ impl<I: Idx, E> Trail<I, E> {
 		for (i, val) in self.trail.drain(len..).rev() {
 			self.value[i] = val;
 		}
+	}
+
+	pub fn decision_level(&self) -> usize {
+		self.prev_len.len()
 	}
 }
 
@@ -88,7 +92,8 @@ impl SatTrail {
 		}
 	}
 
-	pub fn get(&self, var: RawVar) -> Option<bool> {
-		self.value.get(&var).copied()
+	pub fn get<L: Into<RawLit>>(&self, lit: L) -> Option<bool> {
+		let lit = lit.into();
+		self.value.get(&lit.var()).copied().map(|x| !x)
 	}
 }

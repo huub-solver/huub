@@ -16,8 +16,8 @@ pub use self::{
 use crate::{
 	model::int::IntVarDef,
 	propagator::all_different::AllDifferentValue,
-	solver::{engine::int_var::IntVar as SlvIntVar, BoolView, SatSolver},
-	Solver,
+	solver::{engine::int_var::IntVar as SlvIntVar, view::IntViewInner, BoolView, SatSolver},
+	IntView, Solver,
 };
 
 #[derive(Debug, Default)]
@@ -108,18 +108,13 @@ impl Constraint {
 				}
 			}
 			Constraint::AllDifferent(v) => {
-				let (vars, vals): (Vec<_>, _) = v
+				let vars: Vec<_> = v
 					.iter()
 					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.partition(|x| matches!(x, SimplifiedInt::Var(_)));
-				if !vals.is_empty() {
-					todo!()
-				}
-				slv.add_propagator(AllDifferentValue::new(vars.into_iter().map(|v| {
-					let SimplifiedInt::Var(v) = v else {
-						unreachable!()
-					};
-					v
+					.collect();
+				slv.add_propagator(AllDifferentValue::new(vars.into_iter().map(|v| match v {
+					SimplifiedInt::Val(i) => IntView(IntViewInner::Const(i)),
+					SimplifiedInt::Var(v) => v,
 				})))
 			}
 		}
