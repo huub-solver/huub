@@ -2,7 +2,7 @@ use std::num::NonZeroI32;
 
 use pindakaas::Lit as RawLit;
 
-use super::engine::int_var::LitMeaning;
+use super::engine::int_var::{IntVal, LitMeaning};
 use crate::{
 	solver::{engine::int_var::IntVarRef, SatSolver},
 	Solver,
@@ -90,6 +90,7 @@ impl IntView {
 
 				debug_assert!(var_iter.next().is_none());
 			}
+			IntViewInner::Const(_) => {}
 		}
 	}
 
@@ -99,6 +100,7 @@ impl IntView {
 				let pos: usize = v.into();
 				map[pos] = name;
 			}
+			IntViewInner::Const(_) => {}
 		}
 	}
 }
@@ -106,4 +108,5 @@ impl IntView {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum IntViewInner {
 	VarRef(IntVarRef),
+	Const(IntVal),
 }

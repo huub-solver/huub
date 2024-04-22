@@ -129,7 +129,7 @@ impl<'a, V: Visit> LitNames<'a, V> {
 
 	#[inline]
 	fn check_clause(&mut self, field: &Field, value: &dyn fmt::Debug) -> bool {
-		if matches!(field.name(), "clause") {
+		if matches!(field.name(), "clause" | "lits") {
 			let res: Result<Vec<i32>, _> = serde_json::from_str(&format!("{:?}", value));
 			if let Ok(clause) = res {
 				let mut v: Vec<String> = Vec::with_capacity(clause.len());
@@ -140,7 +140,11 @@ impl<'a, V: Visit> LitNames<'a, V> {
 						v.push(format!("Lit({})", i));
 					}
 				}
-				self.inner.record_str(field, &v.join(" ∨ "));
+				if field.name() == "clause" {
+					self.inner.record_str(field, &v.join(" ∨ "));
+				} else {
+					self.inner.record_str(field, &v.join(", "));
+				}
 				return true;
 			}
 		}

@@ -1,9 +1,10 @@
+use super::engine::int_var::IntVal;
 use crate::solver::SolverView;
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub enum Value {
 	Bool(bool),
-	Int(i64),
+	Int(IntVal),
 }
 
 pub trait Valuation: Fn(SolverView) -> Option<Value> {}

@@ -5,6 +5,7 @@ use crate::{
 	},
 	solver::{
 		engine::{int_var::LitMeaning, queue::PriorityLevel},
+		view::IntViewInner,
 		IntView, SatSolver,
 	},
 };
@@ -17,17 +18,30 @@ pub struct AllDifferentValue {
 
 impl AllDifferentValue {
 	pub fn new<V: Into<IntView>, I: IntoIterator<Item = V>>(vars: I) -> Self {
-		Self {
-			vars: vars.into_iter().map(Into::into).collect(),
-			action_list: Vec::new(),
-		}
+		let vars: Vec<IntView> = vars.into_iter().map(Into::into).collect();
+		let action_list = vars
+			.iter()
+			.enumerate()
+			.filter_map(|(i, v)| {
+				if matches!(v.0, IntViewInner::Const(_)) {
+					Some(i as u32)
+				} else {
+					None
+				}
+			})
+			.collect();
+		Self { vars, action_list }
 	}
 }
 
 impl Propagator for AllDifferentValue {
-	fn notify_event(&mut self, data: u32) -> Option<PriorityLevel> {
+	fn notify_event(&mut self, data: u32) -> bool {
 		self.action_list.push(data);
-		Some(PriorityLevel::Low)
+		true
+	}
+
+	fn queue_priority_level(&self) -> PriorityLevel {
+		PriorityLevel::Low
 	}
 
 	fn notify_backtrack(&mut self, _new_level: usize) {
@@ -38,11 +52,13 @@ impl Propagator for AllDifferentValue {
 		while let Some(i) = self.action_list.pop() {
 			let var = self.vars[i as usize];
 			let val = actions.get_int_val(var).unwrap();
-			let lit = actions.get_int_lit(var, LitMeaning::Eq(val));
+			let r = actions
+				.get_int_lit(var, LitMeaning::Eq(val))
+				.map(Reason::Simple);
 			for (j, &v) in self.vars.iter().enumerate() {
 				let j_val = actions.get_int_val(v);
 				if (j as u32) != i && (j_val.is_none() || j_val.unwrap() == val) {
-					actions.set_int_not_eq(v, val, Reason::Simple(lit))?
+					actions.set_int_not_eq(v, val, r.clone())?
 				}
 			}
 		}
@@ -51,10 +67,11 @@ impl Propagator for AllDifferentValue {
 }
 
 impl Initialize for AllDifferentValue {
-	fn initialize<Sat: SatSolver>(&mut self, actions: &mut InitializationActions<'_, Sat>) {
+	fn initialize<Sat: SatSolver>(&mut self, actions: &mut InitializationActions<'_, Sat>) -> bool {
 		for (i, v) in self.vars.iter().enumerate() {
 			actions.subscribe_int(*v, IntEvent::Fixed, i as u32)
 		}
+		!self.action_list.is_empty()
 	}
 }
 
@@ -95,6 +112,6 @@ mod tests {
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
 		slv.add_propagator(AllDifferentValue::new(vec![a, b, c]));
-		assert_eq!(slv.solve(|_| { assert!(false) }), SolveResult::Unsat)
+		assert_eq!(slv.solve(|_| { unreachable!() }), SolveResult::Unsat)
 	}
 }

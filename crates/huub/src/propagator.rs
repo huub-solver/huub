@@ -19,14 +19,20 @@ use crate::{
 
 pub trait Propagator: Debug {
 	/// The method called by the solver to notify the propagator of a variable
-	/// event to which it has subscribed. The propagator can choose a priority
-	/// level if it wants to be placed in the propagation queue.
+	/// event to which it has subscribed. The method returns true if the
+	/// propagator should be placed in the propagation queue.
 	///
 	/// The [`data`] argument will contain the data that the propagater has set
 	/// when subscribing to an event.
-	fn notify_event(&mut self, data: u32) -> Option<PriorityLevel> {
+	fn notify_event(&mut self, data: u32) -> bool {
 		let _ = data;
-		Some(PriorityLevel::Medium)
+		false
+	}
+
+	/// The method called by the solver to request at what priority level the
+	/// propagator should be placed in the propagation queue.œ
+	fn queue_priority_level(&self) -> PriorityLevel {
+		PriorityLevel::Medium
 	}
 
 	/// This method is called when the solver backtracks to a previous decision
@@ -59,10 +65,13 @@ pub trait Propagator: Debug {
 }
 
 pub trait Initialize {
-	/// The method called when registering a propagator with the solver. This
-	/// method is generally used to register variable event subscriptions with the
-	/// solver.
-	fn initialize<Sat: SatSolver>(&mut self, actions: &mut InitializationActions<'_, Sat>) {
+	/// The method called when registering a propagator with the solver, the method
+	/// returns true when the propagator needs to be enqued immediately.œ
+	///
+	/// This method is generally used to register variable event
+	/// subscriptions with the solver.
+	fn initialize<Sat: SatSolver>(&mut self, actions: &mut InitializationActions<'_, Sat>) -> bool {
 		let _ = actions;
+		false
 	}
 }
