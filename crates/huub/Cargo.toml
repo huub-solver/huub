@@ -12,5 +12,5 @@ itertools = "0.12.1"
 pindakaas = { git = "https://github.com/pindakaashq/pindakaas.git", features = [
   "ipasir-up",
 ] }
-thiserror = "1.0.56"
+thiserror = "1.0.59"
 tracing = "0.1.40"
