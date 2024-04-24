@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::{
 	model::{IntExpr, Variable as MVar},
-	BoolExpr, Constraint, Model, SimplifiedVariable, Solver,
+	BoolExpr, Constraint, Model, Solver, SolverView,
 };
 
 impl Model {
@@ -95,7 +95,7 @@ impl Model {
 impl Solver {
 	pub fn from_fzn<S: Ord + Deref<Target = str> + Clone + Debug>(
 		fzn: &FlatZinc<S>,
-	) -> Result<(Self, BTreeMap<S, SimplifiedVariable>), FlatZincError> {
+	) -> Result<(Self, BTreeMap<S, SolverView>), FlatZincError> {
 		let (prb, map) = Model::from_fzn(fzn)?;
 		let (slv, remap) = prb.to_solver();
 		let map = map.into_iter().map(|(k, v)| (k, remap.get(&v))).collect();

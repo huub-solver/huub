@@ -11,6 +11,7 @@ use pindakaas::{
 };
 use tracing::debug;
 
+use self::view::BoolViewInner;
 pub use crate::solver::{
 	engine::int_var::LitMeaning,
 	value::{Valuation, Value},
@@ -44,7 +45,10 @@ impl<Sat: SatSolver> Solver<Sat> {
 
 		self.core.solve(|sat_value| {
 			let wrapper: &dyn Valuation = &|x| match x {
-				SolverView::Bool(lit) => sat_value(lit.0).map(Value::Bool),
+				SolverView::Bool(lit) => match lit.0 {
+					BoolViewInner::Lit(lit) => sat_value(lit).map(Value::Bool),
+					BoolViewInner::Const(b) => Some(Value::Bool(b)),
+				},
 				SolverView::Int(var) => match var.0 {
 					IntViewInner::VarRef(iv) => Some(Value::Int(int_vars[iv].get_value(sat_value))),
 					IntViewInner::Const(i) => Some(Value::Int(i)),

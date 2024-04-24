@@ -82,14 +82,11 @@ impl SatTrail {
 		}
 	}
 
-	pub fn assign(&mut self, var: RawVar, val: bool) {
-		if self.value.get(&var) == Some(&val) {
-			return;
-		}
-		self.value.insert(var, val);
+	pub fn assign(&mut self, var: RawVar, val: bool) -> bool {
 		if !self.prev_len.is_empty() {
 			self.trail.push(var);
 		}
+		self.value.insert(var, val).is_none()
 	}
 
 	pub fn get<L: Into<RawLit>>(&self, lit: L) -> Option<bool> {

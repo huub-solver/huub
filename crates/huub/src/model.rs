@@ -6,18 +6,18 @@ mod reformulate;
 use std::ops::AddAssign;
 
 use flatzinc_serde::RangeList;
-use pindakaas::{ClauseDatabase, Cnf, Var as RawVar};
+use pindakaas::{ClauseDatabase, Cnf, Lit as RawLit, Var as RawVar};
 
 pub use self::{
 	bool::{BoolExpr, BoolVar, Literal},
 	int::{IntExpr, IntVar},
-	reformulate::{ReifContext, SimplifiedBool, SimplifiedInt, SimplifiedVariable, VariableMap},
+	reformulate::{ReifContext, VariableMap},
 };
 use crate::{
 	model::int::IntVarDef,
 	propagator::all_different::AllDifferentValue,
-	solver::{engine::int_var::IntVar as SlvIntVar, view::IntViewInner, BoolView, SatSolver},
-	IntView, Solver,
+	solver::{engine::int_var::IntVar as SlvIntVar, view::BoolViewInner, SatSolver, SolverView},
+	Solver,
 };
 
 #[derive(Debug, Default)]
@@ -52,10 +52,7 @@ impl Model {
 		for i in 0..self.int_vars.len() {
 			let var = &self.int_vars[i];
 			let view = SlvIntVar::new_in(&mut slv, var.domain.clone(), true); // TODO!
-			map.insert(
-				Variable::Int(IntVar(i as u32)),
-				SimplifiedVariable::Int(SimplifiedInt::Var(view)),
-			);
+			map.insert(Variable::Int(IntVar(i as u32)), SolverView::Int(view));
 		}
 
 		// Create constraint data structures within the solve
@@ -94,17 +91,16 @@ impl Constraint {
 		struct Satisfied;
 		match self {
 			Constraint::Clause(v) => {
-				let lits: Result<Vec<BoolView>, Satisfied> = v
+				let lits: Result<Vec<RawLit>, Satisfied> = v
 					.iter()
-					.filter_map(|x| match x.to_arg(ReifContext::Pos, slv, map) {
-						SimplifiedBool::Lit(l) => Some(Ok(l)),
-						SimplifiedBool::Val(true) => Some(Err(Satisfied)),
-						SimplifiedBool::Val(false) => None,
+					.filter_map(|x| match x.to_arg(ReifContext::Pos, slv, map).0 {
+						BoolViewInner::Lit(l) => Some(Ok(l)),
+						BoolViewInner::Const(true) => Some(Err(Satisfied)),
+						BoolViewInner::Const(false) => None,
 					})
 					.collect();
 				if let Ok(lits) = lits {
-					// TODO: early unsat detection?
-					let _ = slv.core.add_clause(lits.into_iter().map(|l| l.0));
+					let _ = slv.core.add_clause(lits);
 				}
 			}
 			Constraint::AllDifferent(v) => {
@@ -112,10 +108,7 @@ impl Constraint {
 					.iter()
 					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
-				slv.add_propagator(AllDifferentValue::new(vars.into_iter().map(|v| match v {
-					SimplifiedInt::Val(i) => IntView(IntViewInner::Const(i)),
-					SimplifiedInt::Var(v) => v,
-				})))
+				slv.add_propagator(AllDifferentValue::new(vars));
 			}
 		}
 	}
