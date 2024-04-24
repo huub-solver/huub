@@ -8,8 +8,8 @@ use pindakaas::{Lit as RawLit, Var as RawVar};
 
 use crate::{
 	model::ReifContext,
-	solver::{BoolView, SatSolver},
-	SimplifiedBool, Solver, VariableMap,
+	solver::{view::BoolViewInner, BoolView, SatSolver},
+	Solver, VariableMap,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -25,11 +25,11 @@ impl BoolExpr {
 		ctx: ReifContext,
 		slv: &mut Solver<S>,
 		map: &mut VariableMap,
-	) -> SimplifiedBool {
+	) -> BoolView {
 		match self {
 			BoolExpr::Not(b) => b.to_negated_arg(ctx, slv, map),
-			BoolExpr::Lit(l) => SimplifiedBool::Lit(BoolView(l.0)),
-			BoolExpr::Val(v) => SimplifiedBool::Val(*v),
+			BoolExpr::Lit(l) => BoolView(BoolViewInner::Lit(l.0)),
+			BoolExpr::Val(v) => BoolView(BoolViewInner::Const(*v)),
 		}
 	}
 
@@ -38,11 +38,11 @@ impl BoolExpr {
 		ctx: ReifContext,
 		slv: &mut Solver<S>,
 		map: &mut VariableMap,
-	) -> SimplifiedBool {
+	) -> BoolView {
 		match self {
 			BoolExpr::Not(v) => v.to_arg(ctx, slv, map),
-			BoolExpr::Lit(v) => SimplifiedBool::Lit(BoolView((!v).0)),
-			BoolExpr::Val(v) => SimplifiedBool::Val(!v),
+			BoolExpr::Lit(v) => BoolView(BoolViewInner::Lit((!v).0)),
+			BoolExpr::Val(v) => BoolView(BoolViewInner::Const(!v)),
 		}
 	}
 }

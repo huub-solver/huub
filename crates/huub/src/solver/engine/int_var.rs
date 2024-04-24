@@ -9,8 +9,11 @@ use pindakaas::{
 
 use super::TrailedInt;
 use crate::{
-	solver::{view::IntViewInner, IntView, SatSolver},
-	Solver,
+	solver::{
+		view::{BoolViewInner, IntViewInner},
+		IntView, SatSolver,
+	},
+	BoolView, Solver,
 };
 
 index_vec::define_index_type! {
@@ -90,12 +93,12 @@ impl IntVar {
 		for (ord_i, ord_j) in iv.order_vars().tuple_windows() {
 			let ord_i: RawLit = ord_i.into();
 			let ord_j: RawLit = ord_j.into();
-			slv.core.add_clause([!ord_j, ord_i]).unwrap();
+			slv.core.add_clause([!ord_j, ord_i]).unwrap(); // ord_j -> ord_i
 			if direct_encoding {
 				let eq_i: RawLit = direct_enc_iter.next().unwrap().into();
-				slv.core.add_clause([!eq_i, ord_i]).unwrap();
-				slv.core.add_clause([!eq_i, !ord_j]).unwrap();
-				slv.core.add_clause([!ord_i, ord_j, eq_i]).unwrap();
+				slv.core.add_clause([!eq_i, ord_i]).unwrap(); // eq_i -> ord_i
+				slv.core.add_clause([!eq_i, !ord_j]).unwrap(); // eq_i -> !ord_j
+				slv.core.add_clause([eq_i, !ord_i, ord_j]).unwrap(); // !eq_i -> !ord_i \/ ord_j
 			}
 		}
 		debug_assert!(direct_enc_iter.next().is_none());
@@ -129,7 +132,7 @@ impl IntVar {
 		}
 	}
 
-	pub(crate) fn get_bool_var(&self, bv: LitMeaning) -> RawLit {
+	pub(crate) fn get_bool_lit(&self, bv: LitMeaning) -> BoolView {
 		let mut bv = bv;
 		let mut negate = false;
 		if matches!(bv, LitMeaning::Less(_) | LitMeaning::NotEq(_)) {
@@ -137,48 +140,72 @@ impl IntVar {
 			negate = true;
 		}
 
+		let ret_const = |b: bool| BoolView(BoolViewInner::Const(if negate { !b } else { b }));
+
 		let lb = *self.orig_domain.lower_bound().unwrap();
+		let ub = *self.orig_domain.upper_bound().unwrap();
 		let lit = match bv {
 			LitMeaning::GreaterEq(i) => {
-				debug_assert_ne!(i, lb);
-				debug_assert!(self.orig_domain.contains(&i));
-				let offset = (i - lb - 1) as usize;
+				if i <= lb {
+					return ret_const(true);
+				} else if i > ub {
+					return ret_const(false);
+				}
+				// Calculate the offset in the VarRange
+				let mut offset = -1; // -1 to account for the lower bound
+				for r in &self.orig_domain {
+					if i < **r.start() {
+						break;
+					} else if r.contains(&&i) {
+						offset += i - *r.start();
+						break;
+					} else {
+						offset += *r.end() - *r.start() + 1;
+					}
+				}
+				// Look up the corresponding variable
 				debug_assert!(
-					offset < self.order_vars().len(),
+					(offset as usize) < self.order_vars().len(),
 					"var range offset, {}, must be in [{}, {})",
 					offset,
 					0,
 					self.order_vars().len(),
 				);
-				self.order_vars().index(offset).into()
+				self.order_vars().index(offset as usize).into()
 			}
 			LitMeaning::Eq(i) => {
-				debug_assert!(self.orig_domain.contains(&i));
-				let ub = *self.orig_domain.upper_bound().unwrap();
 				if i == lb {
 					!self.order_vars().next().unwrap()
 				} else if i == ub {
 					self.order_vars().next_back().unwrap().into()
+				} else if i > ub {
+					return ret_const(false);
 				} else {
-					// TODO: Fix (does not account for holes)
-					let offset = (i - lb - 1) as usize;
+					// Calculate the offset in the VarRange
+					let mut offset = -1; // -1 to account for the lower bound
+					for r in &self.orig_domain {
+						if i < **r.start() {
+							return ret_const(false);
+						} else if r.contains(&&i) {
+							offset += i - *r.start();
+							break;
+						} else {
+							offset += *r.end() - *r.start() + 1;
+						}
+					}
 					debug_assert!(
-						offset < self.direct_vars().len(),
+						(offset as usize) < self.direct_vars().len(),
 						"var range offset, {}, must be in [{}, {})",
 						offset,
 						0,
 						self.direct_vars().len(),
 					);
-					self.direct_vars().index(offset).into()
+					self.direct_vars().index(offset as usize).into()
 				}
 			}
 			_ => unreachable!(),
 		};
-		if negate {
-			!lit
-		} else {
-			lit
-		}
+		BoolView(BoolViewInner::Lit(if negate { !lit } else { lit }))
 	}
 
 	pub(crate) fn get_value(&self, value: &dyn pindakaas::Valuation) -> i64 {
@@ -187,7 +214,7 @@ impl IntVar {
 			match value(l.into()) {
 				Some(false) => return val_iter.next().unwrap(),
 				Some(true) => {
-					val_iter.next().unwrap();
+					let _ = val_iter.next();
 				}
 				None => unreachable!(),
 			}
@@ -214,5 +241,130 @@ impl Not for LitMeaning {
 			LitMeaning::GreaterEq(i) => LitMeaning::Less(i),
 			LitMeaning::Less(i) => LitMeaning::GreaterEq(i),
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use flatzinc_serde::RangeList;
+	use pindakaas::{solver::cadical::Cadical, Cnf};
+
+	use crate::{
+		solver::{
+			engine::int_var::IntVar,
+			view::{BoolViewInner, IntViewInner},
+		},
+		BoolView, IntView, LitMeaning, Solver,
+	};
+
+	#[test]
+	fn test_retrieve_lit() {
+		let get_lit = |lit: BoolView| -> i32 {
+			if let BoolView(BoolViewInner::Lit(lit)) = lit {
+				lit.into()
+			} else {
+				unreachable!()
+			}
+		};
+		let mut slv: Solver<Cadical> = Cnf::default().into();
+		let a = IntVar::new_in(&mut slv, RangeList::from(1..=4), true);
+		let IntView(IntViewInner::VarRef(a)) = a else {
+			unreachable!()
+		};
+		let a = &slv.engine_mut().int_vars[a];
+		let lit = a.get_bool_lit(LitMeaning::GreaterEq(2));
+		assert_eq!(get_lit(lit), 1);
+		let lit = a.get_bool_lit(LitMeaning::Less(2));
+		assert_eq!(get_lit(lit), -1);
+		let lit = a.get_bool_lit(LitMeaning::GreaterEq(3));
+		assert_eq!(get_lit(lit), 2);
+		let lit = a.get_bool_lit(LitMeaning::GreaterEq(4));
+		assert_eq!(get_lit(lit), 3);
+		let lit = a.get_bool_lit(LitMeaning::Less(4));
+		assert_eq!(get_lit(lit), -3);
+		let lit = a.get_bool_lit(LitMeaning::Eq(1));
+		assert_eq!(get_lit(lit), -1);
+		let lit = a.get_bool_lit(LitMeaning::Eq(2));
+		assert_eq!(get_lit(lit), 4);
+		let lit = a.get_bool_lit(LitMeaning::Eq(3));
+		assert_eq!(get_lit(lit), 5);
+		let lit = a.get_bool_lit(LitMeaning::Eq(4));
+		assert_eq!(get_lit(lit), 3);
+
+		let mut slv: Solver<Cadical> = Cnf::default().into();
+		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=3, 8..=10]), true);
+		let IntView(IntViewInner::VarRef(a)) = a else {
+			unreachable!()
+		};
+		let a = &slv.engine_mut().int_vars[a];
+		let lit = a.get_bool_lit(LitMeaning::GreaterEq(2));
+		assert_eq!(get_lit(lit), 1);
+		let lit = a.get_bool_lit(LitMeaning::GreaterEq(3));
+		assert_eq!(get_lit(lit), 2);
+		let lit = a.get_bool_lit(LitMeaning::GreaterEq(4));
+		assert_eq!(get_lit(lit), 3);
+		let lit = a.get_bool_lit(LitMeaning::Less(4));
+		assert_eq!(get_lit(lit), -3);
+		let lit = a.get_bool_lit(LitMeaning::GreaterEq(8));
+		assert_eq!(get_lit(lit), 3);
+		let lit = a.get_bool_lit(LitMeaning::Less(8));
+		assert_eq!(get_lit(lit), -3);
+		let lit = a.get_bool_lit(LitMeaning::GreaterEq(10));
+		assert_eq!(get_lit(lit), 5);
+		let lit = a.get_bool_lit(LitMeaning::Less(10));
+		assert_eq!(get_lit(lit), -5);
+		let lit = a.get_bool_lit(LitMeaning::Eq(1)).into();
+		assert_eq!(get_lit(lit), -1);
+		let lit = a.get_bool_lit(LitMeaning::Eq(2)).into();
+		assert_eq!(get_lit(lit), 6);
+		let lit = a.get_bool_lit(LitMeaning::Eq(3)).into();
+		assert_eq!(get_lit(lit), 7);
+		let lit = a.get_bool_lit(LitMeaning::Eq(8)).into();
+		assert_eq!(get_lit(lit), 8);
+		let lit = a.get_bool_lit(LitMeaning::Eq(10)).into();
+		assert_eq!(get_lit(lit), 5);
+
+		assert_eq!(
+			a.get_bool_lit(LitMeaning::GreaterEq(1)),
+			BoolView(BoolViewInner::Const(true))
+		);
+		assert_eq!(
+			a.get_bool_lit(LitMeaning::Less(11)),
+			BoolView(BoolViewInner::Const(true))
+		);
+		assert_eq!(
+			a.get_bool_lit(LitMeaning::Less(1)),
+			BoolView(BoolViewInner::Const(false))
+		);
+		assert_eq!(
+			a.get_bool_lit(LitMeaning::GreaterEq(11)),
+			BoolView(BoolViewInner::Const(false))
+		);
+
+		assert_eq!(
+			a.get_bool_lit(LitMeaning::Eq(0)),
+			BoolView(BoolViewInner::Const(false))
+		);
+		assert_eq!(
+			a.get_bool_lit(LitMeaning::Eq(11)),
+			BoolView(BoolViewInner::Const(false))
+		);
+		assert_eq!(
+			a.get_bool_lit(LitMeaning::Eq(5)),
+			BoolView(BoolViewInner::Const(false))
+		);
+
+		assert_eq!(
+			a.get_bool_lit(LitMeaning::NotEq(0)),
+			BoolView(BoolViewInner::Const(true))
+		);
+		assert_eq!(
+			a.get_bool_lit(LitMeaning::NotEq(11)),
+			BoolView(BoolViewInner::Const(true))
+		);
+		assert_eq!(
+			a.get_bool_lit(LitMeaning::NotEq(5)),
+			BoolView(BoolViewInner::Const(true))
+		);
 	}
 }

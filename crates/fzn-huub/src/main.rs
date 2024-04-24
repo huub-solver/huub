@@ -14,9 +14,7 @@ use std::{
 use ::tracing::Level;
 use clap::Parser;
 use flatzinc_serde::{FlatZinc, Literal};
-use huub::{
-	SimplifiedBool, SimplifiedInt, SimplifiedVariable, SolveResult, Solver, Valuation, Value,
-};
+use huub::{SolveResult, Solver, SolverView, Valuation};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use tracing::{FmtLitFields, LitName};
 use tracing_subscriber::fmt::time::uptime;
@@ -65,7 +63,7 @@ fn main() -> Result<()> {
 	let (mut slv, var_map): (Solver, _) = Solver::from_fzn(&fzn)
 		.into_diagnostic()
 		.wrap_err("Error while processing FlatZinc")?;
-	let var_map: UstrMap<SimplifiedVariable> = var_map.into_iter().collect();
+	let var_map: UstrMap<SolverView> = var_map.into_iter().collect();
 
 	// Create reverse map for solver variables if required
 	if args.verbose > 0 {
@@ -74,14 +72,11 @@ fn main() -> Result<()> {
 		let mut int_map = vec![ustr(""); slv.num_int_vars()];
 		for (name, v) in var_map.iter() {
 			match v {
-				SimplifiedVariable::Bool(SimplifiedBool::Lit(l)) => {
-					l.add_to_reverse_map(&mut bool_var_map, *name)
+				SolverView::Bool(bv) => bv.add_to_reverse_map(&mut bool_var_map, *name),
+				SolverView::Int(iv) => {
+					iv.add_to_lit_reverse_map(&slv, &mut int_lit_map);
+					iv.add_to_int_reverse_map(&mut int_map, *name);
 				}
-				SimplifiedVariable::Int(SimplifiedInt::Var(r)) => {
-					r.add_to_lit_reverse_map(&slv, &mut int_lit_map);
-					r.add_to_int_reverse_map(&mut int_map, *name);
-				}
-				_ => {}
 			}
 		}
 		*lit_reverse_map.lock().unwrap() = bool_var_map
@@ -109,7 +104,7 @@ fn main() -> Result<()> {
 						.join(",")
 				)
 			} else {
-				println!("{ident} = {}", print_var(value, &var_map[ident]))
+				println!("{ident} = {}", value(var_map[ident]).unwrap())
 			}
 		}
 		println!("----------");
@@ -165,44 +160,13 @@ fn parse_time_limit(s: &str) -> Result<Duration, humantime::DurationError> {
 	}
 }
 
-fn print_var(value: &dyn Valuation, var: &SimplifiedVariable) -> String {
-	match var {
-		SimplifiedVariable::Bool(SimplifiedBool::Lit(l)) => {
-			format!(
-				"{}",
-				value(l.into())
-					.map(|b| {
-						let Value::Bool(b) = b else { unreachable!() };
-						b
-					})
-					.unwrap()
-			)
-		}
-		SimplifiedVariable::Bool(SimplifiedBool::Val(b)) => format!("{b}"),
-		SimplifiedVariable::Int(SimplifiedInt::Var(i)) => {
-			format!(
-				"{}",
-				value(i.into())
-					.map(|v| {
-						let Value::Int(v) = v else { unreachable!() };
-						v
-					})
-					.unwrap()
-			)
-		}
-		SimplifiedVariable::Int(SimplifiedInt::Val(i)) => format!("{i}"),
-	}
-}
-
-fn print_lit(
-	value: &dyn Valuation,
-	var_map: &UstrMap<SimplifiedVariable>,
-	lit: &Literal<Ustr>,
-) -> String {
+fn print_lit(value: &dyn Valuation, var_map: &UstrMap<SolverView>, lit: &Literal<Ustr>) -> String {
 	match lit {
 		Literal::Int(i) => format!("{i}"),
 		Literal::Float(f) => format!("{f}"),
-		Literal::Identifier(ident) => print_var(value, &var_map[ident]),
+		Literal::Identifier(ident) => {
+			format!("{}", value(var_map[ident]).unwrap())
+		}
 		Literal::Bool(b) => format!("{b}"),
 		Literal::IntSet(is) => is
 			.into_iter()

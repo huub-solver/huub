@@ -1,9 +1,10 @@
 use tracing::trace;
 
+use super::reason::ReasonBuilder;
 use crate::{
 	propagator::{
 		conflict::Conflict, init_action::InitializationActions, int_event::IntEvent,
-		propagation_action::PropagationActions, reason::Reason, Initialize, Propagator,
+		propagation_action::PropagationActions, Initialize, Propagator,
 	},
 	solver::{
 		engine::{int_var::LitMeaning, queue::PriorityLevel},
@@ -61,13 +62,11 @@ impl Propagator for AllDifferentValue {
 			);
 			let var = self.vars[i as usize];
 			let val = actions.get_int_val(var).unwrap();
-			let r = actions
-				.get_int_lit(var, LitMeaning::Eq(val))
-				.map(Reason::Simple);
+			let reason = ReasonBuilder::Simple(actions.get_int_lit(var, LitMeaning::Eq(val)));
 			for (j, &v) in self.vars.iter().enumerate() {
 				let j_val = actions.get_int_val(v);
 				if (j as u32) != i && (j_val.is_none() || j_val.unwrap() == val) {
-					actions.set_int_not_eq(v, val, r.clone())?
+					actions.set_int_not_eq(v, val, reason.clone())?
 				}
 			}
 		}

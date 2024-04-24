@@ -8,6 +8,7 @@ use crate::{
 	Solver,
 };
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SolverView {
 	Bool(BoolView),
 	Int(IntView),
@@ -35,7 +36,7 @@ impl From<&IntView> for SolverView {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct BoolView(pub(crate) RawLit);
+pub struct BoolView(pub(crate) BoolViewInner);
 
 impl BoolView {
 	pub fn add_to_reverse_map<S: Clone, M: Extend<(NonZeroI32, (S, bool))>>(
@@ -43,9 +44,20 @@ impl BoolView {
 		map: &mut M,
 		name: S,
 	) {
-		let i: NonZeroI32 = self.0.into();
-		map.extend([(i, (name.clone(), true)), (-i, (name, false))])
+		match self.0 {
+			BoolViewInner::Lit(v) => {
+				let i: NonZeroI32 = v.into();
+				map.extend([(i, (name.clone(), true)), (-i, (name, false))])
+			}
+			BoolViewInner::Const(_) => {}
+		}
 	}
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum BoolViewInner {
+	Lit(RawLit),
+	Const(bool),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -64,7 +76,7 @@ impl IntView {
 				let pos = v.into();
 
 				let mut val_iter = var.orig_domain.clone().into_iter().flatten();
-				val_iter.next().unwrap();
+				let _ = val_iter.next();
 				for val in val_iter {
 					let lit = var_iter.next().unwrap();
 					let i: NonZeroI32 = lit.into();
@@ -76,8 +88,8 @@ impl IntView {
 
 				if var.has_direct && var.orig_domain_len > 2 {
 					let mut val_iter = var.orig_domain.clone().into_iter().flatten();
-					val_iter.next().unwrap();
-					val_iter.next_back().unwrap();
+					let _ = val_iter.next();
+					let _ = val_iter.next_back();
 					for val in val_iter {
 						let lit = var_iter.next().unwrap();
 						let i: NonZeroI32 = lit.into();

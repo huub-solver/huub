@@ -64,6 +64,9 @@ impl IpasirPropagator for Engine {
 	}
 
 	fn notify_assignment(&mut self, var: RawVar, val: bool, persistent: bool) {
+		if !self.bool_trail.assign(var, val) {
+			return;
+		}
 		trace!(
 			lit = {
 				let v: NonZeroI32 = if val { var.into() } else { (!var).into() };
@@ -77,7 +80,6 @@ impl IpasirPropagator for Engine {
 		if persistent && self.int_trail.decision_level() != 0 {
 			self.persistent.push((var, val))
 		}
-		self.bool_trail.assign(var, val);
 		for &(prop, data) in self.bool_subscribers.get(&var).into_iter().flatten() {
 			if self.propagators[prop].notify_event(data) && !self.enqueued[prop] {
 				let level = self.propagators[prop].queue_priority_level();

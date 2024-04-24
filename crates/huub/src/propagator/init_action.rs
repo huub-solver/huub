@@ -2,7 +2,7 @@ use pindakaas::solver::PropagatingSolver;
 
 use crate::{
 	propagator::int_event::IntEvent,
-	solver::{engine::PropRef, BoolView, IntView, SatSolver},
+	solver::{engine::PropRef, view::BoolViewInner, BoolView, IntView, SatSolver},
 	Solver,
 };
 
@@ -14,14 +14,18 @@ pub struct InitializationActions<'a, Sat: SatSolver> {
 impl<Sat: SatSolver> InitializationActions<'_, Sat> {
 	#[allow(dead_code)] // TODO
 	pub fn subscribe_bool(&mut self, var: BoolView, data: u32) {
-		let var = var.0.var();
-		<Sat as PropagatingSolver>::add_observed_var(&mut self.slv.core, var);
-		self.slv
-			.engine_mut()
-			.bool_subscribers
-			.entry(var)
-			.or_default()
-			.push((self.prop_ref, data))
+		match var.0 {
+			BoolViewInner::Lit(lit) => {
+				<Sat as PropagatingSolver>::add_observed_var(&mut self.slv.core, lit.var());
+				self.slv
+					.engine_mut()
+					.bool_subscribers
+					.entry(lit.var())
+					.or_default()
+					.push((self.prop_ref, data))
+			}
+			BoolViewInner::Const(_) => {}
+		}
 	}
 
 	pub fn subscribe_int(&mut self, var: IntView, event: IntEvent, data: u32) {
