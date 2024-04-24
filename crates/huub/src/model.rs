@@ -8,13 +8,13 @@ use std::ops::AddAssign;
 use flatzinc_serde::RangeList;
 use pindakaas::{ClauseDatabase, Cnf, Lit as RawLit, Var as RawVar};
 
-pub use self::{
-	bool::{BoolExpr, BoolVar, Literal},
+use self::{
+	bool::{BoolExpr, BoolVar},
 	int::{IntExpr, IntVar},
-	reformulate::{ReifContext, VariableMap},
+	reformulate::VariableMap,
 };
 use crate::{
-	model::int::IntVarDef,
+	model::{int::IntVarDef, reformulate::ReifContext},
 	propagator::all_different::AllDifferentValue,
 	solver::{engine::int_var::IntVar as SlvIntVar, view::BoolViewInner, SatSolver, SolverView},
 	Solver,

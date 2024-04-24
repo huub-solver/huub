@@ -16,15 +16,15 @@ use tracing_subscriber::{
 };
 use ustr::Ustr;
 
-pub type LitInt = NonZeroI32;
+pub(crate) type LitInt = NonZeroI32;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum LitName {
+pub(crate) enum LitName {
 	BoolVar(Ustr, bool), // name, positive
 	IntLit(usize, LitMeaning),
 }
 
 impl LitName {
-	pub fn to_string(&self, int_map: &[Ustr]) -> String {
+	pub(crate) fn to_string(&self, int_map: &[Ustr]) -> String {
 		match self {
 			LitName::BoolVar(name, pos) => {
 				format!("{}{name}", if *pos { "" } else { "not " })
@@ -42,14 +42,14 @@ impl LitName {
 	}
 }
 
-pub struct FmtLitFields {
+pub(crate) struct FmtLitFields {
 	fmt: DefaultFields,
 	lit_reverse_map: Arc<Mutex<HashMap<LitInt, LitName>>>,
 	int_reverse_map: Arc<Mutex<Vec<Ustr>>>,
 }
 
 impl FmtLitFields {
-	pub fn new(
+	pub(crate) fn new(
 		fmt: DefaultFields,
 		lit_reverse_map: Arc<Mutex<HashMap<LitInt, LitName>>>,
 		int_reverse_map: Arc<Mutex<Vec<Ustr>>>,
@@ -87,7 +87,7 @@ impl<'a, V> LitNames<'a, V> {
 	/// names.
 	///
 	/// [`MakeVisitor`]: tracing_subscriber::field::MakeVisitor
-	pub fn new(
+	pub(crate) fn new(
 		inner: V,
 		lit_reverse_map: &'a HashMap<LitInt, LitName>,
 		int_reverse_map: &'a Vec<Ustr>,

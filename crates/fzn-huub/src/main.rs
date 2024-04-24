@@ -40,7 +40,11 @@ fn main() -> Result<()> {
 		.with_writer(io::stderr)
 		.with_timer(uptime())
 		.map_fmt_fields(|fmt| {
-			FmtLitFields::new(fmt, lit_reverse_map.clone(), int_reverse_map.clone())
+			FmtLitFields::new(
+				fmt,
+				Arc::clone(&lit_reverse_map),
+				Arc::clone(&int_reverse_map),
+			)
 		})
 		.init();
 

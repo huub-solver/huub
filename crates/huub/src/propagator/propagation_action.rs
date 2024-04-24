@@ -8,17 +8,17 @@ use crate::{
 	propagator::{conflict::Conflict, reason::Reason},
 	solver::{
 		engine::{
-			int_var::{IntVal, IntVar, IntVarRef, LitMeaning},
+			int_var::{IntVar, IntVarRef, LitMeaning},
 			trail::{SatTrail, Trail},
 			PropRef, TrailedInt,
 		},
 		view::{BoolViewInner, IntViewInner},
 		IntView,
 	},
-	BoolView,
+	BoolView, IntVal,
 };
 
-pub struct PropagationActions<'a> {
+pub(crate) struct PropagationActions<'a> {
 	pub(crate) prop: PropRef,
 	pub(crate) lit_queue: Vec<RawLit>,
 	#[allow(dead_code)] // TODO
@@ -31,14 +31,14 @@ pub struct PropagationActions<'a> {
 
 impl PropagationActions<'_> {
 	#[allow(dead_code)] // TODO
-	pub fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
+	pub(crate) fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
 		match bv.0 {
 			BoolViewInner::Lit(lit) => self.sat_trail.get(lit),
 			BoolViewInner::Const(b) => Some(b),
 		}
 	}
 
-	pub fn get_int_lit(&mut self, var: IntView, bv: LitMeaning) -> BoolView {
+	pub(crate) fn get_int_lit(&mut self, var: IntView, bv: LitMeaning) -> BoolView {
 		match var.0 {
 			IntViewInner::VarRef(iv) => self.int_vars[iv].get_bool_lit(bv),
 			IntViewInner::Const(c) => BoolView(BoolViewInner::Const(match bv {
@@ -50,21 +50,21 @@ impl PropagationActions<'_> {
 		}
 	}
 
-	pub fn get_int_lower_bound(&self, var: IntView) -> IntVal {
+	pub(crate) fn get_int_lower_bound(&self, var: IntView) -> IntVal {
 		match var.0 {
 			IntViewInner::VarRef(iv) => self.int_trail[self.int_vars[iv].lower_bound],
 			IntViewInner::Const(i) => i,
 		}
 	}
 
-	pub fn get_int_upper_bound(&self, var: IntView) -> IntVal {
+	pub(crate) fn get_int_upper_bound(&self, var: IntView) -> IntVal {
 		match var.0 {
 			IntViewInner::VarRef(iv) => self.int_trail[self.int_vars[iv].upper_bound],
 			IntViewInner::Const(i) => i,
 		}
 	}
 
-	pub fn get_int_val(&self, var: IntView) -> Option<IntVal> {
+	pub(crate) fn get_int_val(&self, var: IntView) -> Option<IntVal> {
 		let lb = self.get_int_lower_bound(var);
 		let ub = self.get_int_upper_bound(var);
 		if lb == ub {
@@ -74,7 +74,7 @@ impl PropagationActions<'_> {
 		}
 	}
 
-	pub fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool {
+	pub(crate) fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool {
 		match var.0 {
 			IntViewInner::VarRef(iv) => {
 				match self.int_vars[iv].get_bool_lit(LitMeaning::Eq(val)).0 {
@@ -87,7 +87,7 @@ impl PropagationActions<'_> {
 	}
 
 	#[allow(dead_code)]
-	pub fn set_int_lower_bound<R: TryInto<Reason, Error = bool>>(
+	pub(crate) fn set_int_lower_bound<R: TryInto<Reason, Error = bool>>(
 		&mut self,
 		var: IntView,
 		val: IntVal,
@@ -105,7 +105,7 @@ impl PropagationActions<'_> {
 				};
 				match reason.try_into() {
 					Ok(reason) => {
-						self.reason_map.insert(lit, reason);
+						let _ = self.reason_map.insert(lit, reason);
 					}
 					Err(false) => return Ok(()),
 					Err(true) => (),
@@ -122,7 +122,7 @@ impl PropagationActions<'_> {
 	}
 
 	#[allow(dead_code)]
-	pub fn set_int_upper_bound<R: TryInto<Reason, Error = bool>>(
+	pub(crate) fn set_int_upper_bound<R: TryInto<Reason, Error = bool>>(
 		&mut self,
 		var: IntView,
 		val: IntVal,
@@ -140,7 +140,7 @@ impl PropagationActions<'_> {
 				};
 				match reason.try_into() {
 					Ok(reason) => {
-						self.reason_map.insert(lit, reason);
+						let _ = self.reason_map.insert(lit, reason);
 					}
 					Err(false) => return Ok(()),
 					Err(true) => (),
@@ -157,7 +157,7 @@ impl PropagationActions<'_> {
 	}
 
 	#[allow(dead_code)]
-	pub fn set_int_val<R: TryInto<Reason, Error = bool>>(
+	pub(crate) fn set_int_val<R: TryInto<Reason, Error = bool>>(
 		&mut self,
 		var: IntView,
 		val: IntVal,
@@ -175,7 +175,7 @@ impl PropagationActions<'_> {
 				};
 				match reason.try_into() {
 					Ok(reason) => {
-						self.reason_map.insert(lit, reason);
+						let _ = self.reason_map.insert(lit, reason);
 					}
 					Err(false) => return Ok(()),
 					Err(true) => (),
@@ -193,7 +193,7 @@ impl PropagationActions<'_> {
 		Ok(())
 	}
 
-	pub fn set_int_not_eq<R: TryInto<Reason, Error = bool>>(
+	pub(crate) fn set_int_not_eq<R: TryInto<Reason, Error = bool>>(
 		&mut self,
 		var: IntView,
 		val: IntVal,
@@ -211,7 +211,7 @@ impl PropagationActions<'_> {
 				};
 				match reason.try_into() {
 					Ok(reason) => {
-						self.reason_map.insert(lit, reason);
+						let _ = self.reason_map.insert(lit, reason);
 					}
 					Err(false) => return Ok(()),
 					Err(true) => (),
@@ -230,7 +230,7 @@ impl PropagationActions<'_> {
 	}
 
 	#[allow(dead_code)] // TODO
-	pub fn lazy_reason(&self, data: u64) -> ReasonBuilder {
+	pub(crate) fn lazy_reason(&self, data: u64) -> ReasonBuilder {
 		ReasonBuilder::Lazy(self.prop, data)
 	}
 }

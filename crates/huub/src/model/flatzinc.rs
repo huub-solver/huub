@@ -3,9 +3,10 @@ use std::{collections::BTreeMap, fmt::Debug, ops::Deref};
 use flatzinc_serde::{Argument, Domain, FlatZinc, Literal, Type, Variable};
 use thiserror::Error;
 
+use super::bool::BoolExpr;
 use crate::{
 	model::{IntExpr, Variable as MVar},
-	BoolExpr, Constraint, Model, Solver, SolverView,
+	Constraint, Model, Solver, SolverView,
 };
 
 impl Model {
@@ -67,7 +68,7 @@ impl Model {
 		for ident in fzn.output.iter() {
 			let mut ensure_exists = |ident: &S, var| {
 				if !map.contains_key(ident) {
-					map.insert(ident.clone(), new_var(&mut prb, var));
+					let _ = map.insert(ident.clone(), new_var(&mut prb, var));
 				}
 			};
 			if let Some(var) = fzn.variables.get(ident) {

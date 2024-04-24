@@ -14,7 +14,6 @@ use tracing::trace;
 
 use self::{
 	bool_to_int::BoolToIntMap,
-	int_var::IntVal,
 	trail::{SatTrail, Trail},
 };
 use crate::{
@@ -25,10 +24,11 @@ use crate::{
 		int_var::{IntVar, IntVarRef, LitMeaning},
 		queue::PriorityQueue,
 	},
+	IntVal,
 };
 
 #[derive(Default)]
-pub struct Engine {
+pub(crate) struct Engine {
 	/// Boolean variable subscriptions
 	pub(crate) bool_subscribers: HashMap<RawVar, Vec<(PropRef, u32)>>,
 	/// Integer variable subscriptions

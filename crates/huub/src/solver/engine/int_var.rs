@@ -13,15 +13,13 @@ use crate::{
 		view::{BoolViewInner, IntViewInner},
 		IntView, SatSolver,
 	},
-	BoolView, Solver,
+	BoolView, IntVal, Solver,
 };
 
 index_vec::define_index_type! {
 	/// Identifies an integer variable in a [`Solver`]
 	pub struct IntVarRef = u32;
 }
-
-pub type IntVal = i64;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub(crate) struct IntVar {

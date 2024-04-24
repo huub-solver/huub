@@ -3,3 +3,58 @@
 members = ["crates/fzn-huub", "crates/huub"]
 
 resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Jip J. Dekker <jip@dekker.one>"]
+edition = "2021"
+license = "MIT"
+homepage = "https://github.com/Dekker1/huub"
+categories = ["algorithms", "mathematics", "science"]
+keywords = ["sat", "lcg", "flatzinc", "minizinc", "optimization"]
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+# missing_docs = "warn"
+non_ascii_idents = "deny"
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+unit_bindings = "warn"
+# unnameable_types = "warn"
+unreachable_pub = "warn"
+unused_crate_dependencies = "deny"
+unused_import_braces = "warn"
+unused_lifetimes = "warn"
+unused_macro_rules = "warn"
+unused_qualifications = "warn"
+unused_results = "warn"
+variant_size_differences = "warn"
+
+[workspace.lints.clippy]
+allow_attributes_without_reason = "deny"
+# cargo_common_metadata = "warn"
+clone_on_ref_ptr = "warn"
+default_union_representation = "deny"
+# missing_docs_in_private_items = "warn"
+mixed_read_write_in_expression = "deny"
+# multiple_crate_versions = "warn"
+negative_feature_names = "deny"
+rc_buffer = "warn"
+rc_mutex = "warn"
+redundant_feature_names = "warn"
+redundant_type_annotations = "warn"
+rest_pat_in_fully_bound_structs = "warn"
+# same_name_method = "warn"
+str_to_string = "warn"
+string_add = "warn"
+string_add_assign = "warn"
+string_lit_chars_any = "warn"
+string_to_string = "warn"
+tests_outside_test_module = "warn"
+try_err = "warn"
+undocumented_unsafe_blocks = "warn"
+unnecessary_safety_comment = "warn"
+unseparated_literal_suffix = "warn"
+unnecessary_safety_doc = "warn"
+wildcard_dependencies = "warn"
+wrong_self_convention = "warn"

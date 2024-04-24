@@ -1,4 +1,4 @@
-use pindakaas::Lit;
+use pindakaas::Lit as RawLit;
 
 use crate::{
 	solver::{engine::PropRef, view::BoolViewInner},
@@ -6,17 +6,17 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Reason {
+pub(crate) enum Reason {
 	/// A promise that a given propagator will compute a causation of the change
 	/// when given the attached data
 	Lazy(PropRef, u64),
 	/// A conjunction of literals forming the causation of the change
-	Eager(Box<[Lit]>),
-	Simple(Lit),
+	Eager(Box<[RawLit]>),
+	Simple(RawLit),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ReasonBuilder {
+pub(crate) enum ReasonBuilder {
 	Lazy(PropRef, u64),
 	#[allow(dead_code)] // TODO
 	Eager(Vec<BoolView>),
