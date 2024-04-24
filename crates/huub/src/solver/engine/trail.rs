@@ -4,7 +4,7 @@ use index_vec::{Idx, IndexVec};
 use pindakaas::{Lit as RawLit, Var as RawVar};
 
 #[derive(Debug)]
-pub struct Trail<I: Idx, E> {
+pub(crate) struct Trail<I: Idx, E> {
 	value: IndexVec<I, E>,
 	trail: Vec<(I, E)>,
 	prev_len: Vec<usize>,
@@ -21,11 +21,11 @@ impl<I: Idx, E> Default for Trail<I, E> {
 }
 
 impl<I: Idx, E> Trail<I, E> {
-	pub fn track(&mut self, val: E) -> I {
+	pub(crate) fn track(&mut self, val: E) -> I {
 		self.value.push(val)
 	}
 
-	pub fn notify_new_decision_level(&mut self) {
+	pub(crate) fn notify_new_decision_level(&mut self) {
 		self.prev_len.push(self.trail.len())
 	}
 
@@ -37,13 +37,13 @@ impl<I: Idx, E> Trail<I, E> {
 		}
 	}
 
-	pub fn decision_level(&self) -> usize {
+	pub(crate) fn decision_level(&self) -> usize {
 		self.prev_len.len()
 	}
 }
 
 impl<I: Idx, E: PartialEq> Trail<I, E> {
-	pub fn assign(&mut self, i: I, val: E) {
+	pub(crate) fn assign(&mut self, i: I, val: E) {
 		if self.value[i] == val {
 			return;
 		}
@@ -63,14 +63,14 @@ impl<I: Idx, E> Index<I> for Trail<I, E> {
 }
 
 #[derive(Debug, Default)]
-pub struct SatTrail {
+pub(crate) struct SatTrail {
 	value: HashMap<RawVar, bool>,
 	trail: Vec<RawVar>,
 	prev_len: Vec<usize>,
 }
 
 impl SatTrail {
-	pub fn notify_new_decision_level(&mut self) {
+	pub(crate) fn notify_new_decision_level(&mut self) {
 		self.prev_len.push(self.trail.len())
 	}
 
@@ -82,14 +82,14 @@ impl SatTrail {
 		}
 	}
 
-	pub fn assign(&mut self, var: RawVar, val: bool) -> bool {
+	pub(crate) fn assign(&mut self, var: RawVar, val: bool) -> bool {
 		if !self.prev_len.is_empty() {
 			self.trail.push(var);
 		}
 		self.value.insert(var, val).is_none()
 	}
 
-	pub fn get<L: Into<RawLit>>(&self, lit: L) -> Option<bool> {
+	pub(crate) fn get<L: Into<RawLit>>(&self, lit: L) -> Option<bool> {
 		let lit = lit.into();
 		self.value
 			.get(&lit.var())

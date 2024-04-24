@@ -6,14 +6,14 @@ use crate::{
 	Solver,
 };
 
-pub struct InitializationActions<'a, Sat: SatSolver> {
+pub(crate) struct InitializationActions<'a, Sat: SatSolver> {
 	pub(crate) prop_ref: PropRef,
 	pub(crate) slv: &'a mut Solver<Sat>,
 }
 
 impl<Sat: SatSolver> InitializationActions<'_, Sat> {
 	#[allow(dead_code)] // TODO
-	pub fn subscribe_bool(&mut self, var: BoolView, data: u32) {
+	pub(crate) fn subscribe_bool(&mut self, var: BoolView, data: u32) {
 		match var.0 {
 			BoolViewInner::Lit(lit) => {
 				<Sat as PropagatingSolver>::add_observed_var(&mut self.slv.core, lit.var());
@@ -28,7 +28,7 @@ impl<Sat: SatSolver> InitializationActions<'_, Sat> {
 		}
 	}
 
-	pub fn subscribe_int(&mut self, var: IntView, event: IntEvent, data: u32) {
+	pub(crate) fn subscribe_int(&mut self, var: IntView, event: IntEvent, data: u32) {
 		use crate::solver::view::IntViewInner::*;
 
 		match var.0 {

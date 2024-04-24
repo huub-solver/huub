@@ -1,0 +1,4 @@
+enforced-import-renames = [
+  { path = "pindakaas::Lit", rename = "RawLit" },
+  { path = "pindakaas::Var", rename = "RawVar" },
+]

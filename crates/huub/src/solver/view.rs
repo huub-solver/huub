@@ -2,10 +2,10 @@ use std::num::NonZeroI32;
 
 use pindakaas::Lit as RawLit;
 
-use super::engine::int_var::{IntVal, LitMeaning};
+use super::engine::int_var::LitMeaning;
 use crate::{
 	solver::{engine::int_var::IntVarRef, SatSolver},
-	Solver,
+	IntVal, Solver,
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -55,6 +55,7 @@ impl BoolView {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[allow(variant_size_differences)]
 pub(crate) enum BoolViewInner {
 	Lit(RawLit),
 	Const(bool),

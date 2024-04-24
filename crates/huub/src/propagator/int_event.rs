@@ -1,4 +1,4 @@
-pub enum IntEvent {
+pub(crate) enum IntEvent {
 	Fixed,
 	LowerBound,
 	UpperBound,
@@ -8,7 +8,7 @@ pub enum IntEvent {
 }
 
 impl IntEvent {
-	pub fn is_activated_by(&self, other: &IntEvent) -> bool {
+	pub(crate) fn is_activated_by(&self, other: &IntEvent) -> bool {
 		use IntEvent::*;
 		matches!(
 			(self, other),

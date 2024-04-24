@@ -2,9 +2,9 @@ pub(crate) mod model;
 pub(crate) mod propagator;
 pub(crate) mod solver;
 
-pub use model::{BoolExpr, BoolVar, Constraint, Literal, Model, Variable, VariableMap};
+pub use model::{Constraint, Model, Variable};
 pub use pindakaas::solver::SolveResult;
-pub use solver::{BoolView, IntView, LitMeaning, Solver, SolverView, Valuation, Value};
+pub use solver::{BoolView, IntVal, IntView, LitMeaning, Solver, SolverView, Valuation, Value};
 
 #[cfg(test)]
 mod tests {

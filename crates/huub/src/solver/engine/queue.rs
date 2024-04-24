@@ -1,5 +1,5 @@
 #[derive(Debug)]
-pub struct PriorityQueue<E> {
+pub(crate) struct PriorityQueue<E> {
 	storage: [Vec<E>; 6],
 }
 
@@ -19,13 +19,13 @@ impl<E> Default for PriorityQueue<E> {
 }
 
 impl<E> PriorityQueue<E> {
-	pub fn insert(&mut self, priority: PriorityLevel, elem: E) {
+	pub(crate) fn insert(&mut self, priority: PriorityLevel, elem: E) {
 		let i = priority as usize;
 		debug_assert!((0..=5).contains(&i));
 		self.storage[i].push(elem)
 	}
 
-	pub fn pop(&mut self) -> Option<E> {
+	pub(crate) fn pop(&mut self) -> Option<E> {
 		for queue in self.storage.iter_mut().rev() {
 			if !queue.is_empty() {
 				return queue.pop();
@@ -37,7 +37,7 @@ impl<E> PriorityQueue<E> {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
-pub enum PriorityLevel {
+pub(crate) enum PriorityLevel {
 	#[allow(dead_code)] // TODO
 	/// The lowest priority level, all other priority levels are more important
 	Lowest,

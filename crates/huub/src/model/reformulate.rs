@@ -22,12 +22,12 @@ impl VariableMap {
 	}
 
 	pub fn insert(&mut self, index: Variable, elem: SolverView) {
-		self.map.insert(index, elem);
+		let _ = self.map.insert(index, elem);
 	}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ReifContext {
+pub(crate) enum ReifContext {
 	Pos,
 	#[allow(dead_code)]
 	Neg,

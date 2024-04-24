@@ -14,13 +14,13 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct AllDifferentValue {
+pub(crate) struct AllDifferentValue {
 	vars: Vec<IntView>,
 	action_list: Vec<u32>,
 }
 
 impl AllDifferentValue {
-	pub fn new<V: Into<IntView>, I: IntoIterator<Item = V>>(vars: I) -> Self {
+	pub(crate) fn new<V: Into<IntView>, I: IntoIterator<Item = V>>(vars: I) -> Self {
 		let vars: Vec<IntView> = vars.into_iter().map(Into::into).collect();
 		let action_list = vars
 			.iter()

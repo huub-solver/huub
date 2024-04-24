@@ -1,9 +1,9 @@
 use flatzinc_serde::RangeList;
 
+use super::reformulate::{ReifContext, VariableMap};
 use crate::{
-	model::ReifContext,
 	solver::{view::IntViewInner, SatSolver},
-	IntView, Solver, SolverView, Variable, VariableMap,
+	IntView, Solver, SolverView, Variable,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

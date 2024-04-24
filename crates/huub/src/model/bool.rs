@@ -6,10 +6,10 @@ use std::{
 
 use pindakaas::{Lit as RawLit, Var as RawVar};
 
+use super::reformulate::{ReifContext, VariableMap};
 use crate::{
-	model::ReifContext,
 	solver::{view::BoolViewInner, BoolView, SatSolver},
-	Solver, VariableMap,
+	Solver,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

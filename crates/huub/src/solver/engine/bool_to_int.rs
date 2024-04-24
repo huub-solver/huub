@@ -3,12 +3,12 @@ use pindakaas::{solver::VarRange, Var as RawVar};
 use super::int_var::IntVarRef;
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
-pub struct BoolToIntMap {
+pub(crate) struct BoolToIntMap {
 	storage: Vec<(VarRange, IntVarRef)>,
 }
 
 impl BoolToIntMap {
-	pub fn insert(&mut self, range: VarRange, var: IntVarRef) {
+	pub(crate) fn insert(&mut self, range: VarRange, var: IntVarRef) {
 		if range.is_empty() {
 			return;
 		}
@@ -19,7 +19,7 @@ impl BoolToIntMap {
 		panic!("Literal Mapping not added in the correct order")
 	}
 
-	pub fn get(&self, var: RawVar) -> Option<IntVarRef> {
+	pub(crate) fn get(&self, var: RawVar) -> Option<IntVarRef> {
 		self.storage
 			.binary_search_by(|(range, _)| {
 				if range.start() > var {

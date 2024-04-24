@@ -14,7 +14,7 @@ use tracing::debug;
 use self::view::BoolViewInner;
 pub use crate::solver::{
 	engine::int_var::LitMeaning,
-	value::{Valuation, Value},
+	value::{IntVal, Valuation, Value},
 	view::{BoolView, IntView, SolverView},
 };
 use crate::{
@@ -25,6 +25,7 @@ use crate::{
 	},
 };
 
+#[derive(Debug)]
 pub struct Solver<Sat: SatSolver = Cadical> {
 	pub(crate) core: Sat,
 }
@@ -66,7 +67,9 @@ impl<Sat: SatSolver> Solver<Sat> {
 impl<Sat: SatSolver + From<Cnf>> From<Cnf> for Solver<Sat> {
 	fn from(value: Cnf) -> Self {
 		let mut core: Sat = value.into();
-		core.set_external_propagator(Some(Box::<Engine>::default()));
+		let None = core.set_external_propagator(Some(Box::<Engine>::default())) else {
+			unreachable!()
+		};
 		core.set_learn_callback(Some(learn_clause_cb));
 		Self { core }
 	}
@@ -88,8 +91,10 @@ impl<Sat: SatSolver> Solver<Sat> {
 			let level = prop.queue_priority_level();
 			self.engine_mut().prop_queue.insert(level, prop_ref);
 		}
-		self.engine_mut().propagators.push(Box::new(prop));
-		self.engine_mut().enqueued.push(enqueue);
+		let p = self.engine_mut().propagators.push(Box::new(prop));
+		debug_assert_eq!(prop_ref, p);
+		let p = self.engine_mut().enqueued.push(enqueue);
+		debug_assert_eq!(prop_ref, p);
 	}
 }
 
