@@ -29,8 +29,8 @@ impl<I: Idx, E> Trail<I, E> {
 		self.prev_len.push(self.trail.len())
 	}
 
-	pub fn notify_backtrack(&mut self, level: usize) {
-		self.prev_len.truncate(level);
+	pub(crate) fn notify_backtrack(&mut self, level: usize) {
+		self.prev_len.truncate(level + 1);
 		let len = self.prev_len.pop().unwrap_or(0);
 		for (i, val) in self.trail.drain(len..).rev() {
 			self.value[i] = val;
@@ -74,11 +74,11 @@ impl SatTrail {
 		self.prev_len.push(self.trail.len())
 	}
 
-	pub fn notify_backtrack(&mut self, level: usize) {
-		self.prev_len.truncate(level);
+	pub(crate) fn notify_backtrack(&mut self, level: usize) {
+		self.prev_len.truncate(level + 1);
 		let len = self.prev_len.pop().unwrap_or(0);
 		for v in self.trail.drain(len..).rev() {
-			self.value.remove(&v);
+			let _ = self.value.remove(&v);
 		}
 	}
 
@@ -94,6 +94,9 @@ impl SatTrail {
 
 	pub fn get<L: Into<RawLit>>(&self, lit: L) -> Option<bool> {
 		let lit = lit.into();
-		self.value.get(&lit.var()).copied().map(|x| !x)
+		self.value
+			.get(&lit.var())
+			.copied()
+			.map(|x| if lit.is_negated() { !x } else { x })
 	}
 }

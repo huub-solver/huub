@@ -91,7 +91,7 @@ impl IpasirPropagator for Engine {
 			let ub = self.int_trail[self.int_vars[iv].upper_bound];
 			// Enact domain changes and determine change e
 			let lit = if val { var.into() } else { !var };
-			let event = match self.int_vars[iv].lit_meaning(lit) {
+			let event: IntEvent = match self.int_vars[iv].lit_meaning(lit) {
 				LitMeaning::Eq(i) => {
 					if i == lb || i == ub {
 						return;
@@ -201,6 +201,7 @@ impl IpasirPropagator for Engine {
 			sat_trail: &mut self.bool_trail,
 		};
 		while let Some(p) = self.prop_queue.pop() {
+			self.enqueued[p] = false;
 			let prop = self.propagators[p].as_mut();
 			let _ = prop.propagate(&mut context);
 			if !context.lit_queue.is_empty() {

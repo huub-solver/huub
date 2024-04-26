@@ -105,6 +105,12 @@ impl IntView {
 	}
 }
 
+impl From<IntVal> for IntView {
+	fn from(value: IntVal) -> Self {
+		Self(IntViewInner::Const(value))
+	}
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum IntViewInner {
 	VarRef(IntVarRef),
