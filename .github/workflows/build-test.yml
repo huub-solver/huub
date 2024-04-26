@@ -1,9 +1,6 @@
 name: Build and test
 
-on:
-  push:
-    branches: ["develop"]
-  pull_request:
+on: [push]
 
 env:
   RUST_CHANNEL: "stable"
@@ -26,7 +23,7 @@ jobs:
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.4
       - name: Build fzn-huub
-        run: cargo install --root dist/ --path crates/fzn-huub
+        run: cargo install --locked --root dist/ --path crates/fzn-huub
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -50,7 +47,7 @@ jobs:
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.4
       - name: Run cargo test
-        run: cargo test
+        run: cargo test --locked
         env:
           CARGO_INCREMENTAL: "0"
           RUSTFLAGS: "-Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort"
