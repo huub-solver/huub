@@ -8,9 +8,7 @@ pub use solver::{BoolView, IntVal, IntView, LitMeaning, Solver, SolverView, Valu
 
 #[cfg(test)]
 mod tests {
-	use crate::{
-		Constraint, Model, SimplifiedBool, SimplifiedVariable, SolveResult, Solver, Variable,
-	};
+	use crate::{Constraint, Model, SolveResult, Solver, Variable};
 
 	#[test]
 	fn it_works() {

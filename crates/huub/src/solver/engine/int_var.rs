@@ -3,8 +3,8 @@ use std::ops::{Not, RangeBounds};
 use flatzinc_serde::RangeList;
 use itertools::Itertools;
 use pindakaas::{
-	solver::{PropagatingSolver, VarRange},
-	Lit as RawLit,
+	solver::{PropagatingSolver, PropagatorAccess, Solver as SolverTrait, VarRange},
+	Lit as RawLit, Valuation as SatValuation,
 };
 
 use super::TrailedInt;
@@ -50,7 +50,10 @@ impl IntVar {
 		}
 	}
 
-	pub(crate) fn new_in<Sat: SatSolver>(
+	pub(crate) fn new_in<
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	>(
 		slv: &mut Solver<Sat>,
 		domain: RangeList<i64>,
 		direct_encoding: bool,
@@ -206,10 +209,10 @@ impl IntVar {
 		BoolView(BoolViewInner::Lit(if negate { !lit } else { lit }))
 	}
 
-	pub(crate) fn get_value(&self, value: &dyn pindakaas::Valuation) -> i64 {
+	pub(crate) fn get_value<V: SatValuation + ?Sized>(&self, model: &V) -> i64 {
 		let mut val_iter = self.orig_domain.clone().into_iter().flatten();
 		for l in self.order_vars() {
-			match value(l.into()) {
+			match model.value(l.into()) {
 				Some(false) => return val_iter.next().unwrap(),
 				Some(true) => {
 					let _ = val_iter.next();

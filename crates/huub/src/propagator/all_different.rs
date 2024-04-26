@@ -1,3 +1,7 @@
+use pindakaas::{
+	solver::{PropagatorAccess, Solver as SolverTrait},
+	Valuation as SatValuation,
+};
 use tracing::trace;
 
 use super::reason::ReasonBuilder;
@@ -75,7 +79,13 @@ impl Propagator for AllDifferentValue {
 }
 
 impl Initialize for AllDifferentValue {
-	fn initialize<Sat: SatSolver>(&mut self, actions: &mut InitializationActions<'_, Sat>) -> bool {
+	fn initialize<
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	>(
+		&mut self,
+		actions: &mut InitializationActions<'_, Sat>,
+	) -> bool {
 		for (i, v) in self.vars.iter().enumerate() {
 			actions.subscribe_int(*v, IntEvent::Fixed, i as u32)
 		}
@@ -93,8 +103,7 @@ mod tests {
 	};
 
 	use crate::{
-		propagator::all_different::AllDifferentValue,
-		solver::engine::int_var::{IntVal, IntVar},
+		propagator::all_different::AllDifferentValue, solver::engine::int_var::IntVar, IntVal,
 		IntView, Solver,
 	};
 

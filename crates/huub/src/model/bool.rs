@@ -4,7 +4,10 @@ use std::{
 	ops::Not,
 };
 
-use pindakaas::{Lit as RawLit, Var as RawVar};
+use pindakaas::{
+	solver::{PropagatorAccess, Solver as SolverTrait},
+	Lit as RawLit, Valuation as SatValuation, Var as RawVar,
+};
 
 use super::reformulate::{ReifContext, VariableMap};
 use crate::{
@@ -20,10 +23,13 @@ pub enum BoolExpr {
 }
 
 impl BoolExpr {
-	pub(crate) fn to_arg<S: SatSolver>(
+	pub(crate) fn to_arg<
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	>(
 		&self,
 		ctx: ReifContext,
-		slv: &mut Solver<S>,
+		slv: &mut Solver<Sat>,
 		map: &mut VariableMap,
 	) -> BoolView {
 		match self {
@@ -33,10 +39,13 @@ impl BoolExpr {
 		}
 	}
 
-	fn to_negated_arg<S: SatSolver>(
+	fn to_negated_arg<
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	>(
 		&self,
 		ctx: ReifContext,
-		slv: &mut Solver<S>,
+		slv: &mut Solver<Sat>,
 		map: &mut VariableMap,
 	) -> BoolView {
 		match self {
@@ -54,7 +63,6 @@ impl Not for BoolExpr {
 			BoolExpr::Lit(l) => BoolExpr::Lit(!l),
 			BoolExpr::Val(v) => BoolExpr::Val(!v),
 			BoolExpr::Not(e) => *e,
-			//			e => BoolExpr::Not(Box::new(e)),
 		}
 	}
 }
@@ -66,7 +74,6 @@ impl Not for &BoolExpr {
 			BoolExpr::Lit(l) => BoolExpr::Lit(!*l),
 			BoolExpr::Val(v) => BoolExpr::Val(!*v),
 			BoolExpr::Not(e) => (**e).clone(),
-			//			e => BoolExpr::Not(Box::new(e.clone())),
 		}
 	}
 }
