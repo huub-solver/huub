@@ -11,8 +11,9 @@ pub use solver::{BoolView, IntView, LitMeaning, Solver, Valuation, Value};
 
 #[cfg(test)]
 mod tests {
-
-	use super::*;
+	use crate::{
+		Constraint, Model, SimplifiedBool, SimplifiedVariable, SolveResult, Solver, Variable,
+	};
 
 	#[test]
 	fn it_works() {
