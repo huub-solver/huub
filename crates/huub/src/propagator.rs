@@ -7,7 +7,10 @@ pub(crate) mod reason;
 
 use std::fmt::Debug;
 
-use pindakaas::Lit as RawLit;
+use pindakaas::{
+	solver::{PropagatorAccess, Solver as SolverTrait},
+	Lit as RawLit, Valuation as SatValuation,
+};
 
 use crate::{
 	propagator::{
@@ -70,7 +73,13 @@ pub(crate) trait Initialize {
 	///
 	/// This method is generally used to register variable event
 	/// subscriptions with the solver.
-	fn initialize<Sat: SatSolver>(&mut self, actions: &mut InitializationActions<'_, Sat>) -> bool {
+	fn initialize<
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	>(
+		&mut self,
+		actions: &mut InitializationActions<'_, Sat>,
+	) -> bool {
 		let _ = actions;
 		false
 	}

@@ -240,14 +240,18 @@ impl IpasirPropagator for Engine {
 		reason
 	}
 
-	fn check_model(&mut self, sat_value: &dyn pindakaas::Valuation) -> bool {
+	fn check_model(
+		&mut self,
+		slv: &mut dyn SolvingActions,
+		model: &dyn pindakaas::Valuation,
+	) -> bool {
 		trace!("check model");
 		for (r, iv) in self.int_vars.iter_mut().enumerate() {
 			let r = IntVarRef::new(r);
 			let lb = self.int_trail[iv.lower_bound];
 			let ub = self.int_trail[iv.upper_bound];
 			if lb != ub {
-				let val = iv.get_value(sat_value);
+				let val = iv.get_value(model);
 				self.int_trail.assign(iv.lower_bound, val);
 				self.int_trail.assign(iv.upper_bound, val);
 
@@ -261,21 +265,7 @@ impl IpasirPropagator for Engine {
 				}
 			}
 		}
-		struct NoOp {}
-		impl SolvingActions for NoOp {
-			fn new_var(&mut self) -> RawVar {
-				todo!()
-			}
-
-			fn add_observed_var(&mut self, _var: RawVar) {
-				todo!()
-			}
-
-			fn is_decision(&mut self, _lit: pindakaas::Lit) -> bool {
-				todo!()
-			}
-		}
-		let lits = self.propagate(&mut NoOp {});
+		let lits = self.propagate(slv);
 		for lit in lits {
 			let clause = self.add_reason_clause(lit);
 			self.external_queue.push(clause);
@@ -283,7 +273,10 @@ impl IpasirPropagator for Engine {
 		self.external_queue.is_empty()
 	}
 
-	fn add_external_clause(&mut self) -> Option<Vec<pindakaas::Lit>> {
+	fn add_external_clause(
+		&mut self,
+		_slv: &mut dyn SolvingActions,
+	) -> Option<Vec<pindakaas::Lit>> {
 		self.external_queue.pop()
 	}
 

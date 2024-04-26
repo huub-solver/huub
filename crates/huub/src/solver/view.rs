@@ -1,6 +1,9 @@
 use std::num::NonZeroI32;
 
-use pindakaas::Lit as RawLit;
+use pindakaas::{
+	solver::{PropagatorAccess, Solver as SolverTrait},
+	Lit as RawLit, Valuation as SatValuation,
+};
 
 use super::engine::int_var::LitMeaning;
 use crate::{
@@ -65,7 +68,11 @@ pub(crate) enum BoolViewInner {
 pub struct IntView(pub(crate) IntViewInner);
 
 impl IntView {
-	pub fn add_to_lit_reverse_map<Sat: SatSolver, M: Extend<(NonZeroI32, (usize, LitMeaning))>>(
+	pub fn add_to_lit_reverse_map<
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+		M: Extend<(NonZeroI32, (usize, LitMeaning))>,
+	>(
 		&self,
 		slv: &Solver<Sat>,
 		map: &mut M,

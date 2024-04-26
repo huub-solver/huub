@@ -1,4 +1,8 @@
 use flatzinc_serde::RangeList;
+use pindakaas::{
+	solver::{PropagatorAccess, Solver as SolverTrait},
+	Valuation as SatValuation,
+};
 
 use super::reformulate::{ReifContext, VariableMap};
 use crate::{
@@ -13,10 +17,13 @@ pub enum IntExpr {
 }
 
 impl IntExpr {
-	pub(crate) fn to_arg<S: SatSolver>(
+	pub(crate) fn to_arg<
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	>(
 		&self,
 		_ctx: ReifContext,
-		_slv: &mut Solver<S>,
+		_slv: &mut Solver<Sat>,
 		map: &mut VariableMap,
 	) -> IntView {
 		match self {

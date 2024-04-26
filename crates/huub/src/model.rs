@@ -6,7 +6,10 @@ mod reformulate;
 use std::ops::AddAssign;
 
 use flatzinc_serde::RangeList;
-use pindakaas::{ClauseDatabase, Cnf, Lit as RawLit, Var as RawVar};
+use pindakaas::{
+	solver::{PropagatorAccess, Solver as SolverTrait},
+	ClauseDatabase, Cnf, Lit as RawLit, Valuation as SatValuation, Var as RawVar,
+};
 
 use self::{
 	bool::{BoolExpr, BoolVar},
@@ -39,7 +42,12 @@ impl Model {
 	}
 
 	// TODO: Make generic on Solver again (need var range trait)
-	pub fn to_solver<Sat: SatSolver>(&self) -> (Solver<Sat>, VariableMap) {
+	pub fn to_solver<
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	>(
+		&self,
+	) -> (Solver<Sat>, VariableMap) {
 		let mut map = VariableMap::default();
 
 		// TODO: run SAT simplification
@@ -87,7 +95,14 @@ pub enum Constraint {
 }
 
 impl Constraint {
-	fn to_solver<Sat: SatSolver>(&self, slv: &mut Solver<Sat>, map: &mut VariableMap) {
+	fn to_solver<
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	>(
+		&self,
+		slv: &mut Solver<Sat>,
+		map: &mut VariableMap,
+	) {
 		struct Satisfied;
 		match self {
 			Constraint::Clause(v) => {

@@ -4,10 +4,10 @@ pub(crate) mod view;
 
 use pindakaas::{
 	solver::{
-		cadical::Cadical, LearnCallback, NextVarRange, PropagatingSolver, SolveAssuming,
-		SolveResult, TermCallback,
+		cadical::Cadical, LearnCallback, NextVarRange, PropagatingSolver, PropagatorAccess,
+		SolveAssuming, SolveResult, Solver as SolverTrait, TermCallback,
 	},
-	Cnf, Lit as RawLit,
+	Cnf, Lit as RawLit, Valuation as SatValuation,
 };
 use tracing::debug;
 
@@ -26,11 +26,16 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct Solver<Sat: SatSolver = Cadical> {
+pub struct Solver<Sat: SatSolver = Cadical>
+where
+	<Sat as SolverTrait>::ValueFn: PropagatorAccess,
+{
 	pub(crate) core: Sat,
 }
 
-impl<Sat: SatSolver> Solver<Sat> {
+impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn = Sol>>
+	Solver<Sat>
+{
 	pub(crate) fn engine(&self) -> &Engine {
 		self.core.propagator().unwrap()
 	}
@@ -40,18 +45,17 @@ impl<Sat: SatSolver> Solver<Sat> {
 	}
 
 	pub fn solve(&mut self, mut on_sol: impl FnMut(&dyn Valuation)) -> SolveResult {
-		// TODO: This is bad, but we cannot access propagator in the value function.
-		// If we could, then we could (hopefully) just access the current domain
-		let int_vars = self.engine().int_vars.clone();
-
-		self.core.solve(|sat_value| {
+		self.core.solve(|model| {
+			let engine: &Engine = model.propagator().unwrap();
 			let wrapper: &dyn Valuation = &|x| match x {
 				SolverView::Bool(lit) => match lit.0 {
-					BoolViewInner::Lit(lit) => sat_value(lit).map(Value::Bool),
+					BoolViewInner::Lit(lit) => model.value(lit).map(Value::Bool),
 					BoolViewInner::Const(b) => Some(Value::Bool(b)),
 				},
 				SolverView::Int(var) => match var.0 {
-					IntViewInner::VarRef(iv) => Some(Value::Int(int_vars[iv].get_value(sat_value))),
+					IntViewInner::VarRef(iv) => {
+						Some(Value::Int(engine.int_vars[iv].get_value(model)))
+					}
 					IntViewInner::Const(i) => Some(Value::Int(i)),
 				},
 			};
@@ -64,7 +68,9 @@ impl<Sat: SatSolver> Solver<Sat> {
 	}
 }
 
-impl<Sat: SatSolver + From<Cnf>> From<Cnf> for Solver<Sat> {
+impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn = Sol>> From<Cnf>
+	for Solver<Sat>
+{
 	fn from(value: Cnf) -> Self {
 		let mut core: Sat = value.into();
 		let None = core.set_external_propagator(Some(Box::<Engine>::default())) else {
@@ -79,7 +85,9 @@ fn learn_clause_cb(clause: &mut dyn Iterator<Item = RawLit>) {
 	debug!(clause = ?clause.map(i32::from).collect::<Vec<i32>>(), "learn clause");
 }
 
-impl<Sat: SatSolver> Solver<Sat> {
+impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn = Sol>>
+	Solver<Sat>
+{
 	pub(crate) fn add_propagator(&mut self, mut prop: impl Propagator + Initialize + 'static) {
 		let prop_ref = PropRef::from(self.engine().propagators.len());
 		let mut actions = InitializationActions {
@@ -100,10 +108,13 @@ impl<Sat: SatSolver> Solver<Sat> {
 
 pub trait SatSolver:
 	PropagatingSolver + TermCallback + LearnCallback + SolveAssuming + NextVarRange + From<Cnf>
+where
+	<Self as SolverTrait>::ValueFn: PropagatorAccess,
 {
 }
-impl<
-		X: PropagatingSolver + TermCallback + LearnCallback + SolveAssuming + NextVarRange + From<Cnf>,
-	> SatSolver for X
+impl<X> SatSolver for X
+where
+	X: PropagatingSolver + TermCallback + LearnCallback + SolveAssuming + NextVarRange + From<Cnf>,
+	<X as SolverTrait>::ValueFn: PropagatorAccess,
 {
 }

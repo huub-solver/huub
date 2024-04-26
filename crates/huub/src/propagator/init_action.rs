@@ -1,4 +1,7 @@
-use pindakaas::solver::PropagatingSolver;
+use pindakaas::{
+	solver::{PropagatingSolver, PropagatorAccess, Solver as SolverTrait},
+	Valuation as SatValuation,
+};
 
 use crate::{
 	propagator::int_event::IntEvent,
@@ -6,12 +9,17 @@ use crate::{
 	Solver,
 };
 
-pub(crate) struct InitializationActions<'a, Sat: SatSolver> {
+pub(crate) struct InitializationActions<'a, Sat: SatSolver>
+where
+	<Sat as SolverTrait>::ValueFn: PropagatorAccess,
+{
 	pub(crate) prop_ref: PropRef,
 	pub(crate) slv: &'a mut Solver<Sat>,
 }
 
-impl<Sat: SatSolver> InitializationActions<'_, Sat> {
+impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn = Sol>>
+	InitializationActions<'_, Sat>
+{
 	#[allow(dead_code)] // TODO
 	pub(crate) fn subscribe_bool(&mut self, var: BoolView, data: u32) {
 		match var.0 {
