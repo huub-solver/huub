@@ -3,7 +3,7 @@ use std::{collections::HashMap, mem, ops::Index};
 use index_vec::{Idx, IndexVec};
 use pindakaas::{Lit as RawLit, Var as RawVar};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Trail<I: Idx, E> {
 	value: IndexVec<I, E>,
 	trail: Vec<(I, E)>,
@@ -62,7 +62,7 @@ impl<I: Idx, E> Index<I> for Trail<I, E> {
 	}
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct SatTrail {
 	value: HashMap<RawVar, bool>,
 	trail: Vec<RawVar>,

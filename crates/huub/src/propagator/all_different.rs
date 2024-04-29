@@ -17,7 +17,7 @@ use crate::{
 	},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct AllDifferentValue {
 	vars: Vec<IntView>,
 	action_list: Vec<u32>,

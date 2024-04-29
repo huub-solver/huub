@@ -27,7 +27,7 @@ use crate::{
 	IntVal,
 };
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct Engine {
 	/// Boolean variable subscriptions
 	pub(crate) bool_subscribers: HashMap<RawVar, Vec<(PropRef, u32)>>,

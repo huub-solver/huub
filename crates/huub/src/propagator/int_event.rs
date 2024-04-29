@@ -1,3 +1,4 @@
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum IntEvent {
 	Fixed,
 	LowerBound,

@@ -20,7 +20,7 @@ use crate::{
 	solver::{engine::queue::PriorityLevel, SatSolver},
 };
 
-pub(crate) trait Propagator: Debug {
+pub(crate) trait Propagator: Debug + DynPropClone {
 	/// The method called by the solver to notify the propagator of a variable
 	/// event to which it has subscribed. The method returns true if the
 	/// propagator should be placed in the propagation queue.
@@ -82,5 +82,19 @@ pub(crate) trait Initialize {
 	) -> bool {
 		let _ = actions;
 		false
+	}
+}
+
+pub(crate) trait DynPropClone {
+	fn clone_dyn_prop(&self) -> Box<dyn Propagator>;
+}
+impl<P: Propagator + Clone + 'static> DynPropClone for P {
+	fn clone_dyn_prop(&self) -> Box<dyn Propagator> {
+		Box::new(self.clone())
+	}
+}
+impl Clone for Box<dyn Propagator> {
+	fn clone(&self) -> Box<dyn Propagator> {
+		self.clone_dyn_prop()
 	}
 }

@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PriorityQueue<E> {
 	storage: [Vec<E>; 6],
 }
