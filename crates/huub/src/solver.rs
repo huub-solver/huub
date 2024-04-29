@@ -81,6 +81,20 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 	}
 }
 
+impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn = Sol> + Clone>
+	Clone for Solver<Sat>
+{
+	fn clone(&self) -> Self {
+		let mut core = self.core.clone();
+		let engine = self.engine().clone();
+		let None = core.set_external_propagator(Some(Box::new(engine))) else {
+			unreachable!()
+		};
+		core.set_learn_callback(Some(learn_clause_cb));
+		Self { core }
+	}
+}
+
 fn learn_clause_cb(clause: &mut dyn Iterator<Item = RawLit>) {
 	debug!(clause = ?clause.map(i32::from).collect::<Vec<i32>>(), "learn clause");
 }
