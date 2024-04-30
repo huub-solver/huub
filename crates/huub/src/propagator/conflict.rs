@@ -1,8 +1,7 @@
 use std::{error::Error, fmt};
 
-use crate::solver::engine::PropRef;
-
 use super::reason::{Reason, ReasonBuilder};
+use crate::solver::engine::PropRef;
 
 /// Conflict is an error type returned when a variable is assigned two
 /// inconsistent values.

@@ -4,7 +4,7 @@ pub(crate) mod propagation_context;
 pub(crate) mod queue;
 pub(crate) mod trail;
 
-use std::{any::Any, collections::HashMap, iter::once, num::NonZeroI32};
+use std::{any::Any, collections::HashMap, iter::once};
 
 use index_vec::IndexVec;
 use pindakaas::{
@@ -47,20 +47,11 @@ pub(crate) struct Engine {
 }
 
 impl IpasirPropagator for Engine {
-	fn notify_assignment(&mut self, var: RawVar, val: bool, persistent: bool) {
-		if self.state.notify_sat_assignment(var, val) == HasChanged::NoChange {
+	fn notify_assignment(&mut self, lit: RawLit, persistent: bool) {
+		if self.state.notify_sat_assignment(lit) == HasChanged::NoChange {
 			return;
 		}
-		trace!(
-			lit = {
-				let v: NonZeroI32 = if val { var.into() } else { (!var).into() };
-				v
-			},
-			persistent,
-			"assignment"
-		);
-
-		let lit = if val { var.into() } else { !var };
+		trace!(lit = i32::from(lit), persistent, "assignment");
 
 		// Process Boolean assignment
 		if persistent && self.state.decision_level() != 0 {
@@ -112,7 +103,7 @@ impl IpasirPropagator for Engine {
 
 		// Re-apply persistent changes
 		for lit in self.persistent.clone() {
-			self.notify_assignment(lit.var(), !lit.is_negated(), false);
+			self.notify_assignment(lit, false);
 		}
 		if new_level == 0 {
 			self.persistent.clear()
@@ -277,8 +268,8 @@ pub(crate) struct State {
 }
 
 impl State {
-	fn notify_sat_assignment(&mut self, var: RawVar, val: bool) -> HasChanged {
-		self.sat_trail.assign(var, val)
+	fn notify_sat_assignment(&mut self, lit: RawLit) -> HasChanged {
+		self.sat_trail.assign(lit.var(), lit.is_negated())
 	}
 
 	fn determine_int_event(&mut self, lit: RawLit) -> Option<(IntVarRef, IntEvent)> {
