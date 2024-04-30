@@ -8,13 +8,13 @@ use std::{
 	num::NonZeroI32,
 	path::PathBuf,
 	sync::{Arc, Mutex},
-	time::Duration,
+	time::{Duration, Instant},
 };
 
 use ::tracing::Level;
 use clap::Parser;
 use flatzinc_serde::{FlatZinc, Literal};
-use huub::{SolveResult, Solver, SolverView, Valuation};
+use huub::{SlvTermSignal, SolveResult, Solver, SolverView, Valuation};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use tracing::{FmtLitFields, LitName};
 use tracing_subscriber::fmt::time::uptime;
@@ -47,6 +47,9 @@ fn main() -> Result<()> {
 			)
 		})
 		.init();
+
+	let start = Instant::now();
+	let deadline = args.time_limit.map(|t| start + t);
 
 	// Parse FlatZinc JSON file
 	let rdr = BufReader::new(
@@ -93,6 +96,17 @@ fn main() -> Result<()> {
 			)
 			.collect();
 		*int_reverse_map.lock().unwrap() = int_map;
+	}
+
+	// Set time limit if required
+	if let Some(deadline) = deadline {
+		slv.set_terminate_callback(Some(|| {
+			if Instant::now() >= deadline {
+				SlvTermSignal::Terminate
+			} else {
+				SlvTermSignal::Continue
+			}
+		}));
 	}
 
 	// Run the solver!

@@ -3,7 +3,7 @@ pub(crate) mod propagator;
 pub(crate) mod solver;
 
 pub use model::{Constraint, Model, Variable};
-pub use pindakaas::solver::SolveResult;
+pub use pindakaas::solver::{SlvTermSignal, SolveResult};
 use pindakaas::Lit as RawLit;
 pub use solver::{BoolView, IntVal, IntView, LitMeaning, Solver, SolverView, Valuation, Value};
 
