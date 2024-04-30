@@ -61,7 +61,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 				let BoolView(BoolViewInner::Lit(lit)) =
 					self.state.int_vars[iv].get_bool_lit(LitMeaning::GreaterEq(val))
 				else {
-					unreachable!()
+					return Err(Conflict::new(reason, self.prop));
 				};
 				self.state.register_reason(lit, reason, self.prop);
 				self.prop_queue.push(lit);
@@ -88,7 +88,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 				let BoolView(BoolViewInner::Lit(lit)) =
 					self.state.int_vars[iv].get_bool_lit(LitMeaning::Less(val + 1))
 				else {
-					unreachable!()
+					return Err(Conflict::new(reason, self.prop));
 				};
 				self.state.register_reason(lit, reason, self.prop);
 				self.prop_queue.push(lit);
@@ -115,7 +115,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 				let BoolView(BoolViewInner::Lit(lit)) =
 					self.state.int_vars[iv].get_bool_lit(LitMeaning::Eq(val))
 				else {
-					unreachable!()
+					return Err(Conflict::new(reason, self.prop));
 				};
 				self.state.register_reason(lit, reason, self.prop);
 				self.prop_queue.push(lit);
@@ -144,7 +144,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 				let BoolView(BoolViewInner::Lit(lit)) =
 					self.state.int_vars[iv].get_bool_lit(LitMeaning::NotEq(val))
 				else {
-					unreachable!()
+					return Err(Conflict::new(reason, self.prop));
 				};
 				self.state.register_reason(lit, reason, self.prop);
 				self.prop_queue.push(lit);
