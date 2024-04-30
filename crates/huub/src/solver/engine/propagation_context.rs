@@ -68,7 +68,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 			}
 			IntViewInner::Const(i) => {
 				if i < val {
-					todo!()
+					return Err(Conflict::new(reason, self.prop));
 				}
 			}
 		}
@@ -95,7 +95,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 			}
 			IntViewInner::Const(i) => {
 				if i > val {
-					todo!()
+					return Err(Conflict::new(reason, self.prop));
 				}
 			}
 		}
@@ -124,7 +124,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 			}
 			IntViewInner::Const(i) => {
 				if i != val {
-					todo!()
+					return Err(Conflict::new(reason, self.prop));
 				}
 			}
 		};
@@ -153,7 +153,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 			}
 			IntViewInner::Const(i) => {
 				if i == val {
-					todo!()
+					return Err(Conflict::new(reason, self.prop));
 				}
 			}
 		};
