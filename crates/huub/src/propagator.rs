@@ -5,12 +5,11 @@ pub(crate) mod reason;
 
 use std::fmt::Debug;
 
+use self::{int_event::IntEvent, reason::ReasonBuilder};
 use crate::{
 	propagator::conflict::Conflict, solver::engine::queue::PriorityLevel, BoolView, Conjunction,
 	IntVal, IntView, LitMeaning,
 };
-
-use self::{int_event::IntEvent, reason::ReasonBuilder};
 
 pub(crate) trait Propagator: Debug + DynPropClone {
 	/// The method called when registering a propagator with the solver, the method

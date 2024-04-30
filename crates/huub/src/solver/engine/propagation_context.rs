@@ -1,3 +1,4 @@
+use super::{PropRef, State};
 use crate::{
 	propagator::{conflict::Conflict, reason::ReasonBuilder, PropagationActions},
 	solver::{
@@ -6,8 +7,6 @@ use crate::{
 	},
 	BoolView, Conjunction, IntVal, IntView, LitMeaning,
 };
-
-use super::{PropRef, State};
 
 pub(crate) struct PropagationContext<'a> {
 	pub(crate) prop: PropRef,

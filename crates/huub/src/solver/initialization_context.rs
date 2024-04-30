@@ -3,15 +3,14 @@ use pindakaas::{
 	Valuation as SatValuation,
 };
 
-use crate::{
-	propagator::{int_event::IntEvent, InitializationActions},
-	BoolView, IntView, Solver,
-};
-
 use super::{
 	engine::PropRef,
 	view::{BoolViewInner, IntViewInner},
 	SatSolver,
+};
+use crate::{
+	propagator::{int_event::IntEvent, InitializationActions},
+	BoolView, IntView, Solver,
 };
 
 pub(crate) struct InitializationContext<'a, Sat: SatSolver>
