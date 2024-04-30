@@ -18,7 +18,7 @@ use self::{
 };
 use crate::{
 	model::{int::IntVarDef, reformulate::ReifContext},
-	propagator::all_different::AllDifferentValue,
+	propagator::{all_different::AllDifferentValue, linear::LinearLE},
 	solver::{engine::int_var::IntVar as SlvIntVar, view::BoolViewInner, SatSolver, SolverView},
 	Solver,
 };
@@ -92,6 +92,7 @@ impl ClauseDatabase for Model {
 pub enum Constraint {
 	Clause(Vec<BoolExpr>),
 	AllDifferent(Vec<IntExpr>),
+	LinearLE(Vec<i64>, Vec<IntExpr>, i64),
 }
 
 impl Constraint {
@@ -124,6 +125,13 @@ impl Constraint {
 					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
 				slv.add_propagator(AllDifferentValue::new(vars));
+			}
+			Constraint::LinearLE(coeffs, vars, c) => {
+				let vars: Vec<_> = vars
+					.iter()
+					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
+					.collect();
+				slv.add_propagator(LinearLE::new(coeffs, vars, c));
 			}
 		}
 	}

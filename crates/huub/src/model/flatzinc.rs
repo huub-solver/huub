@@ -60,6 +60,39 @@ impl Model {
 						});
 					}
 				}
+				"int_linear_le" => {
+					if let [coeffs, vars, rhs] = c.args.as_slice() {
+						let coeffs = arg_array(fzn, coeffs)?;
+						let vars = arg_array(fzn, vars)?;
+						let Argument::Literal(Literal::Int(rhs)) = rhs else {
+							return Err(FlatZincError::InvalidArgumentType {
+								expected: "int",
+								found: format!("{:?}", rhs),
+							});
+						};
+						let coeffs: Result<Vec<_>, _> = coeffs
+							.iter()
+							.map(|l| match l {
+								Literal::Int(v) => Ok(*v),
+								_ => Err(FlatZincError::InvalidArgumentType {
+									expected: "int",
+									found: format!("{:?}", l),
+								}),
+							})
+							.collect();
+						let vars: Result<Vec<_>, _> = vars
+							.iter()
+							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
+							.collect();
+						prb += Constraint::LinearLE(coeffs?, vars?, *rhs);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "int_linear_le",
+							found: c.args.len(),
+							expected: 3,
+						});
+					}
+				}
 				_ => return Err(FlatZincError::UnknownConstraint(c.id.to_string())),
 			}
 		}
