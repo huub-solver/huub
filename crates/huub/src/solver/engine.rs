@@ -4,14 +4,14 @@ pub(crate) mod propagation_context;
 pub(crate) mod queue;
 pub(crate) mod trail;
 
-use std::{any::Any, collections::HashMap, iter::once};
+use std::{any::Any, collections::HashMap};
 
 use index_vec::IndexVec;
 use pindakaas::{
 	solver::{Propagator as IpasirPropagator, SolvingActions},
 	Lit as RawLit, Var as RawVar,
 };
-use tracing::trace;
+use tracing::{debug, trace};
 
 use self::{
 	bool_to_int::BoolToIntMap,
@@ -44,7 +44,7 @@ pub(crate) struct Engine {
 	/// Temporary storage of literals that have been persistently propagated
 	persistent: Conjunction,
 	/// Temporary storage of a conflict clause that was detected during propagation
-	conflict_reason: Option<Reason>,
+	conflict_clauses: Vec<Clause>,
 }
 
 impl IpasirPropagator for Engine {
@@ -99,8 +99,8 @@ impl IpasirPropagator for Engine {
 		for p in &mut self.propagators {
 			p.notify_backtrack(new_level);
 		}
-		// Clear the clause queue
-		self.conflict_reason = None;
+		// Clear the conflict reasons
+		self.conflict_clauses.clear();
 
 		// Re-apply persistent changes
 		for lit in self.persistent.clone() {
@@ -117,6 +117,9 @@ impl IpasirPropagator for Engine {
 
 	#[tracing::instrument(level = "debug", skip(self, _slv))]
 	fn propagate(&mut self, _slv: &mut dyn SolvingActions) -> Vec<pindakaas::Lit> {
+		if self.has_conflict() {
+			return Vec::new();
+		}
 		while let Some(p) = self.state.prop_queue.pop() {
 			self.state.enqueued[p] = false;
 			let prop = self.propagators[p].as_mut();
@@ -126,7 +129,9 @@ impl IpasirPropagator for Engine {
 				prop_queue: Vec::new(),
 			};
 			if let Err(Conflict { reason }) = prop.propagate(&mut ctx) {
-				self.conflict_reason = Some(reason);
+				trace!(lits = ?reason, "conflict detected");
+				self.conflict_clauses
+					.push(reason.to_clause(&mut self.propagators, &mut self.state));
 				return Vec::new();
 			} else if !ctx.prop_queue.is_empty() {
 				trace!(
@@ -144,32 +149,26 @@ impl IpasirPropagator for Engine {
 	}
 
 	fn add_reason_clause(&mut self, propagated_lit: pindakaas::Lit) -> Clause {
-		let reason = self.state.reason_map.remove(&propagated_lit);
-		let clause = if let Some(reason) = reason {
-			match reason {
-				Reason::Lazy(prop, data) => {
-					let reason = self.propagators[prop].explain(&mut self.state, data);
-					once(propagated_lit)
-						.chain(reason.iter().map(|l| !l))
-						.collect()
-				}
-				Reason::Eager(v) => once(propagated_lit).chain(v.iter().map(|l| !l)).collect(),
-				Reason::Simple(l) => vec![propagated_lit, !l],
-			}
-		} else {
-			vec![propagated_lit]
-		};
+		let mut clause = self
+			.state
+			.reason_map
+			.remove(&propagated_lit)
+			.map_or_else(Vec::new, |r| {
+				r.to_clause(&mut self.propagators, &mut self.state)
+			});
+		clause.push(propagated_lit);
 		trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "give reason clause");
 		clause
 	}
 
+	#[tracing::instrument(level = "debug", skip(self, slv, model))]
 	fn check_model(
 		&mut self,
 		slv: &mut dyn SolvingActions,
 		model: &dyn pindakaas::Valuation,
 	) -> bool {
-		trace!("check model");
 		if self.has_conflict() {
+			trace!("check model failed: existing conflict");
 			return false;
 		}
 		for (r, iv) in self.state.int_vars.iter_mut().enumerate() {
@@ -194,22 +193,26 @@ impl IpasirPropagator for Engine {
 			}
 		}
 		let lits = self.propagate(slv);
-		debug_assert!(lits.is_empty(), "propagating literals in check_model");
-		self.has_conflict()
+		// If any additional literal were propagated, then conjoin then with their
+		// reasons into conflict clauses to check with the oracle
+		for lit in lits {
+			let mut clause = self
+				.state
+				.reason_map
+				.remove(&lit)
+				.map_or_else(Vec::new, |r| {
+					r.to_clause(&mut self.propagators, &mut self.state)
+				});
+			clause.push(lit);
+			self.conflict_clauses.push(clause)
+		}
+		trace!(correct = !self.has_conflict(), "check model result");
+		!self.has_conflict()
 	}
 
 	fn add_external_clause(&mut self, _slv: &mut dyn SolvingActions) -> Option<Clause> {
-		if let Some(reason) = &self.conflict_reason {
-			let clause = match reason {
-				Reason::Lazy(prop, data) => self.propagators[*prop]
-					.explain(&mut self.state, *data)
-					.into_iter()
-					.map(|l| !l)
-					.collect(),
-				Reason::Eager(v) => v.iter().map(|l| !l).collect(),
-				Reason::Simple(l) => vec![!l],
-			};
-			trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "declare conflict");
+		if let Some(clause) = self.conflict_clauses.pop() {
+			debug!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "declare conflict");
 			Some(clause)
 		} else {
 			None
@@ -219,7 +222,6 @@ impl IpasirPropagator for Engine {
 	fn as_any(&self) -> &dyn Any {
 		self
 	}
-
 	fn as_mut_any(&mut self) -> &mut dyn Any {
 		self
 	}
@@ -227,7 +229,7 @@ impl IpasirPropagator for Engine {
 
 impl Engine {
 	fn has_conflict(&self) -> bool {
-		self.conflict_reason.is_some()
+		!self.conflict_clauses.is_empty()
 	}
 }
 
@@ -270,7 +272,7 @@ pub(crate) struct State {
 
 impl State {
 	fn notify_sat_assignment(&mut self, lit: RawLit) -> HasChanged {
-		self.sat_trail.assign(lit.var(), lit.is_negated())
+		self.sat_trail.assign(lit.var(), !lit.is_negated())
 	}
 
 	fn determine_int_event(&mut self, lit: RawLit) -> Option<(IntVarRef, IntEvent)> {

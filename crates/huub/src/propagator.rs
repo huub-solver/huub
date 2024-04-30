@@ -118,17 +118,18 @@ pub(crate) trait ExplainActions {
 		}
 	}
 	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool {
-		self.get_bool_val(self.get_int_lit(var, LitMeaning::Eq(val)))
-			.unwrap_or(true)
+		if self.get_int_lower_bound(var) <= val && val <= self.get_int_upper_bound(var) {
+			let eq_lit = self.get_int_lit(var, LitMeaning::Eq(val));
+			self.get_bool_val(eq_lit).unwrap_or(true)
+		} else {
+			false
+		}
 	}
 
 	fn get_int_lit(&self, var: IntView, meaning: LitMeaning) -> BoolView;
 	fn get_int_val_lit(&self, var: IntView) -> Option<BoolView> {
-		if let Some(v) = self.get_int_val(var) {
-			Some(self.get_int_lit(var, LitMeaning::Eq(v)))
-		} else {
-			None
-		}
+		self.get_int_val(var)
+			.map(|v| self.get_int_lit(var, LitMeaning::Eq(v)))
 	}
 	fn get_int_lower_bound_lit(&self, var: IntView) -> BoolView {
 		let lb = self.get_int_lower_bound(var);

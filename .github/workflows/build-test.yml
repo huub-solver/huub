@@ -69,4 +69,4 @@ jobs:
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.4
       - name: Run clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --tests -- -D warnings
