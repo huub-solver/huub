@@ -1,6 +1,10 @@
+use std::iter::once;
+
+use index_vec::IndexVec;
 use pindakaas::Lit as RawLit;
 
 use crate::{
+	propagator::{ExplainActions, Propagator},
 	solver::{engine::PropRef, view::BoolViewInner},
 	BoolView, Conjunction,
 };
@@ -41,6 +45,21 @@ impl Reason {
 				BoolViewInner::Lit(lit) => Ok(Self::Simple(lit)),
 				BoolViewInner::Const(b) => Err(b),
 			},
+		}
+	}
+
+	pub(crate) fn to_clause<Clause: FromIterator<RawLit>>(
+		&self,
+		props: &mut IndexVec<PropRef, Box<dyn Propagator>>,
+		actions: &mut dyn ExplainActions,
+	) -> Clause {
+		match self {
+			Reason::Lazy(prop, data) => {
+				let reason = props[*prop].explain(actions, *data);
+				reason.iter().map(|l| !l).collect()
+			}
+			Reason::Eager(v) => v.iter().map(|l| !l).collect(),
+			Reason::Simple(l) => once(!l).collect(),
 		}
 	}
 }

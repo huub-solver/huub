@@ -57,15 +57,13 @@ impl Propagator for AllDifferentValue {
 
 	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
 		while let Some(i) = self.action_list.pop() {
-			trace!("Propagating all different value for variable {}", i);
-			trace!(
-				"Variable {} domain upper bound {} and lower bound {}",
-				i,
-				actions.get_int_upper_bound(self.vars[i as usize]),
-				actions.get_int_lower_bound(self.vars[i as usize])
-			);
 			let var = self.vars[i as usize];
 			let val = actions.get_int_val(var).unwrap();
+			trace!(
+				int_var = ?var,
+				value = val,
+				"value propagation all_different",
+			);
 			let reason = ReasonBuilder::Simple(actions.get_int_lit(var, LitMeaning::Eq(val)));
 			for (j, &v) in self.vars.iter().enumerate() {
 				let j_val = actions.get_int_val(v);
@@ -209,15 +207,15 @@ mod tests {
 	fn test_sudoku_1() {
 		test_sudoku(
 			vec![
-				"2581.4.37".to_string(),
-				"936827514".to_string(),
-				"47153.28.".to_string(),
-				"7152.3.4.".to_string(),
-				"849675321".to_string(),
-				"36241..75".to_string(),
-				"1249..753".to_string(),
-				"593742168".to_string(),
-				"687351492".to_string(),
+				"2581.4.37".to_owned(),
+				"936827514".to_owned(),
+				"47153.28.".to_owned(),
+				"7152.3.4.".to_owned(),
+				"849675321".to_owned(),
+				"36241..75".to_owned(),
+				"1249..753".to_owned(),
+				"593742168".to_owned(),
+				"687351492".to_owned(),
 			],
 			SolveResult::Sat,
 		);
@@ -227,15 +225,15 @@ mod tests {
 	fn test_sudoku_2() {
 		test_sudoku(
 			vec![
-				"...2.5...".to_string(),
-				".9....73.".to_string(),
-				"..2..9.6.".to_string(),
-				"2.....4.9".to_string(),
-				"....7....".to_string(),
-				"6.9.....1".to_string(),
-				".8.4..1..".to_string(),
-				".63....8.".to_string(),
-				"...6.8...".to_string(),
+				"...2.5...".to_owned(),
+				".9....73.".to_owned(),
+				"..2..9.6.".to_owned(),
+				"2.....4.9".to_owned(),
+				"....7....".to_owned(),
+				"6.9.....1".to_owned(),
+				".8.4..1..".to_owned(),
+				".63....8.".to_owned(),
+				"...6.8...".to_owned(),
 			],
 			SolveResult::Sat,
 		);
@@ -245,15 +243,15 @@ mod tests {
 	fn test_sudoku_3() {
 		test_sudoku(
 			vec![
-				"3..9.4..1".to_string(),
-				"..2...4..".to_string(),
-				".61...79.".to_string(),
-				"6..247..5".to_string(),
-				".........".to_string(),
-				"2..836..4".to_string(),
-				".46...23.".to_string(),
-				"..9...6..".to_string(),
-				"5..3.9..8".to_string(),
+				"3..9.4..1".to_owned(),
+				"..2...4..".to_owned(),
+				".61...79.".to_owned(),
+				"6..247..5".to_owned(),
+				".........".to_owned(),
+				"2..836..4".to_owned(),
+				".46...23.".to_owned(),
+				"..9...6..".to_owned(),
+				"5..3.9..8".to_owned(),
 			],
 			SolveResult::Sat,
 		);
@@ -263,15 +261,15 @@ mod tests {
 	fn test_sudoku_4() {
 		test_sudoku(
 			vec![
-				"....1....".to_string(),
-				"3.14..86.".to_string(),
-				"9..5..2..".to_string(),
-				"7..16....".to_string(),
-				".2.8.5.1.".to_string(),
-				"....97..4".to_string(),
-				"..3..4..6".to_string(),
-				".48..69.7".to_string(),
-				"....8....".to_string(),
+				"....1....".to_owned(),
+				"3.14..86.".to_owned(),
+				"9..5..2..".to_owned(),
+				"7..16....".to_owned(),
+				".2.8.5.1.".to_owned(),
+				"....97..4".to_owned(),
+				"..3..4..6".to_owned(),
+				".48..69.7".to_owned(),
+				"....8....".to_owned(),
 			],
 			SolveResult::Sat,
 		);
@@ -281,15 +279,15 @@ mod tests {
 	fn test_sudoku_5() {
 		test_sudoku(
 			vec![
-				"..4..3.7.".to_string(),
-				".8..7....".to_string(),
-				".7...82.5".to_string(),
-				"4.....31.".to_string(),
-				"9.......8".to_string(),
-				".15.....4".to_string(),
-				"1.69...3.".to_string(),
-				"....2..6.".to_string(),
-				".2.4..5..".to_string(),
+				"..4..3.7.".to_owned(),
+				".8..7....".to_owned(),
+				".7...82.5".to_owned(),
+				"4.....31.".to_owned(),
+				"9.......8".to_owned(),
+				".15.....4".to_owned(),
+				"1.69...3.".to_owned(),
+				"....2..6.".to_owned(),
+				".2.4..5..".to_owned(),
 			],
 			SolveResult::Sat,
 		);
@@ -299,15 +297,15 @@ mod tests {
 	fn test_sudoku_6() {
 		test_sudoku(
 			vec![
-				".43.8.25.".to_string(),
-				"6........".to_string(),
-				".....1.94".to_string(),
-				"9....4.7.".to_string(),
-				"...6.8...".to_string(),
-				".1.2....3".to_string(),
-				"82.5.....".to_string(),
-				"........5".to_string(),
-				".34.9.71.".to_string(),
+				".43.8.25.".to_owned(),
+				"6........".to_owned(),
+				".....1.94".to_owned(),
+				"9....4.7.".to_owned(),
+				"...6.8...".to_owned(),
+				".1.2....3".to_owned(),
+				"82.5.....".to_owned(),
+				"........5".to_owned(),
+				".34.9.71.".to_owned(),
 			],
 			SolveResult::Sat,
 		);

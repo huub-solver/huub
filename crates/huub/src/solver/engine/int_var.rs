@@ -316,15 +316,15 @@ mod tests {
 		assert_eq!(get_lit(lit), 5);
 		let lit = a.get_bool_lit(LitMeaning::Less(10));
 		assert_eq!(get_lit(lit), -5);
-		let lit = a.get_bool_lit(LitMeaning::Eq(1)).into();
+		let lit = a.get_bool_lit(LitMeaning::Eq(1));
 		assert_eq!(get_lit(lit), -1);
-		let lit = a.get_bool_lit(LitMeaning::Eq(2)).into();
+		let lit = a.get_bool_lit(LitMeaning::Eq(2));
 		assert_eq!(get_lit(lit), 6);
-		let lit = a.get_bool_lit(LitMeaning::Eq(3)).into();
+		let lit = a.get_bool_lit(LitMeaning::Eq(3));
 		assert_eq!(get_lit(lit), 7);
-		let lit = a.get_bool_lit(LitMeaning::Eq(8)).into();
+		let lit = a.get_bool_lit(LitMeaning::Eq(8));
 		assert_eq!(get_lit(lit), 8);
-		let lit = a.get_bool_lit(LitMeaning::Eq(10)).into();
+		let lit = a.get_bool_lit(LitMeaning::Eq(10));
 		assert_eq!(get_lit(lit), 5);
 
 		assert_eq!(
