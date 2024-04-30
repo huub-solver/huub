@@ -1,19 +1,12 @@
-use pindakaas::{
-	solver::{PropagatorAccess, Solver as SolverTrait},
-	Valuation as SatValuation,
-};
 use tracing::trace;
 
-use super::reason::ReasonBuilder;
+use super::{reason::ReasonBuilder, InitializationActions, PropagationActions};
 use crate::{
-	propagator::{
-		conflict::Conflict, init_action::InitializationActions, int_event::IntEvent,
-		propagation_action::PropagationActions, Initialize, Propagator,
-	},
+	propagator::{conflict::Conflict, int_event::IntEvent, Propagator},
 	solver::{
 		engine::{int_var::LitMeaning, queue::PriorityLevel},
 		view::IntViewInner,
-		IntView, SatSolver,
+		IntView,
 	},
 };
 
@@ -42,6 +35,13 @@ impl AllDifferentValue {
 }
 
 impl Propagator for AllDifferentValue {
+	fn initialize(&mut self, actions: &mut dyn InitializationActions) -> bool {
+		for (i, v) in self.vars.iter().enumerate() {
+			actions.subscribe_int(*v, IntEvent::Fixed, i as u32)
+		}
+		!self.action_list.is_empty()
+	}
+
 	fn notify_event(&mut self, data: u32) -> bool {
 		self.action_list.push(data);
 		true
@@ -55,7 +55,7 @@ impl Propagator for AllDifferentValue {
 		self.action_list.clear()
 	}
 
-	fn propagate(&mut self, actions: &mut PropagationActions<'_>) -> Result<(), Conflict> {
+	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
 		while let Some(i) = self.action_list.pop() {
 			trace!("Propagating all different value for variable {}", i);
 			trace!(
@@ -70,26 +70,11 @@ impl Propagator for AllDifferentValue {
 			for (j, &v) in self.vars.iter().enumerate() {
 				let j_val = actions.get_int_val(v);
 				if (j as u32) != i && (j_val.is_none() || j_val.unwrap() == val) {
-					actions.set_int_not_eq(v, val, reason.clone())?
+					actions.set_int_not_eq(v, val, &reason)?
 				}
 			}
 		}
 		Ok(())
-	}
-}
-
-impl Initialize for AllDifferentValue {
-	fn initialize<
-		Sol: PropagatorAccess + SatValuation,
-		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
-	>(
-		&mut self,
-		actions: &mut InitializationActions<'_, Sat>,
-	) -> bool {
-		for (i, v) in self.vars.iter().enumerate() {
-			actions.subscribe_int(*v, IntEvent::Fixed, i as u32)
-		}
-		!self.action_list.is_empty()
 	}
 }
 

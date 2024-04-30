@@ -115,7 +115,7 @@ impl Constraint {
 					})
 					.collect();
 				if let Ok(lits) = lits {
-					let _ = slv.core.add_clause(lits);
+					let _ = slv.oracle.add_clause(lits);
 				}
 			}
 			Constraint::AllDifferent(v) => {

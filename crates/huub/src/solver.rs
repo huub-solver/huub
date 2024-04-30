@@ -1,4 +1,5 @@
 pub(crate) mod engine;
+pub(crate) mod initialization_context;
 pub(crate) mod value;
 pub(crate) mod view;
 
@@ -18,9 +19,10 @@ pub use crate::solver::{
 	view::{BoolView, IntView, SolverView},
 };
 use crate::{
-	propagator::{init_action::InitializationActions, Initialize, Propagator},
+	propagator::Propagator,
 	solver::{
 		engine::{Engine, PropRef},
+		initialization_context::InitializationContext,
 		view::IntViewInner,
 	},
 };
@@ -30,22 +32,22 @@ pub struct Solver<Sat: SatSolver = Cadical>
 where
 	<Sat as SolverTrait>::ValueFn: PropagatorAccess,
 {
-	pub(crate) core: Sat,
+	pub(crate) oracle: Sat,
 }
 
 impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn = Sol>>
 	Solver<Sat>
 {
 	pub(crate) fn engine(&self) -> &Engine {
-		self.core.propagator().unwrap()
+		self.oracle.propagator().unwrap()
 	}
 
 	pub(crate) fn engine_mut(&mut self) -> &mut Engine {
-		self.core.propagator_mut().unwrap()
+		self.oracle.propagator_mut().unwrap()
 	}
 
 	pub fn solve(&mut self, mut on_sol: impl FnMut(&dyn Valuation)) -> SolveResult {
-		self.core.solve(|model| {
+		self.oracle.solve(|model| {
 			let engine: &Engine = model.propagator().unwrap();
 			let wrapper: &dyn Valuation = &|x| match x {
 				SolverView::Bool(lit) => match lit.0 {
@@ -54,7 +56,7 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 				},
 				SolverView::Int(var) => match var.0 {
 					IntViewInner::VarRef(iv) => {
-						Some(Value::Int(engine.int_vars[iv].get_value(model)))
+						Some(Value::Int(engine.state.int_vars[iv].get_value(model)))
 					}
 					IntViewInner::Const(i) => Some(Value::Int(i)),
 				},
@@ -64,7 +66,7 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 	}
 
 	pub fn num_int_vars(&self) -> usize {
-		self.engine().int_vars.len()
+		self.engine().state.int_vars.len()
 	}
 }
 
@@ -77,7 +79,7 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 			unreachable!()
 		};
 		core.set_learn_callback(Some(learn_clause_cb));
-		Self { core }
+		Self { oracle: core }
 	}
 }
 
@@ -85,13 +87,13 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 	Clone for Solver<Sat>
 {
 	fn clone(&self) -> Self {
-		let mut core = self.core.clone();
+		let mut core = self.oracle.clone();
 		let engine = self.engine().clone();
 		let None = core.set_external_propagator(Some(Box::new(engine))) else {
 			unreachable!()
 		};
 		core.set_learn_callback(Some(learn_clause_cb));
-		Self { core }
+		Self { oracle: core }
 	}
 }
 
@@ -102,20 +104,19 @@ fn learn_clause_cb(clause: &mut dyn Iterator<Item = RawLit>) {
 impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn = Sol>>
 	Solver<Sat>
 {
-	pub(crate) fn add_propagator(&mut self, mut prop: impl Propagator + Initialize + 'static) {
+	pub(crate) fn add_propagator(&mut self, mut prop: impl Propagator + 'static) {
 		let prop_ref = PropRef::from(self.engine().propagators.len());
-		let mut actions = InitializationActions {
-			prop_ref,
+		let enqueue = prop.initialize(&mut InitializationContext {
 			slv: self,
-		};
-		let enqueue = prop.initialize(&mut actions);
+			prop: prop_ref,
+		});
 		if enqueue {
 			let level = prop.queue_priority_level();
-			self.engine_mut().prop_queue.insert(level, prop_ref);
+			self.engine_mut().state.prop_queue.insert(level, prop_ref);
 		}
 		let p = self.engine_mut().propagators.push(Box::new(prop));
 		debug_assert_eq!(prop_ref, p);
-		let p = self.engine_mut().enqueued.push(enqueue);
+		let p = self.engine_mut().state.enqueued.push(enqueue);
 		debug_assert_eq!(prop_ref, p);
 	}
 }
