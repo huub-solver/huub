@@ -2,7 +2,7 @@ use pindakaas::Lit as RawLit;
 
 use crate::{
 	solver::{engine::PropRef, view::BoolViewInner},
-	BoolView,
+	BoolView, Conjunction,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -15,20 +15,10 @@ pub(crate) enum Reason {
 	Simple(RawLit),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum ReasonBuilder {
-	Lazy(PropRef, u64),
-	#[allow(dead_code)] // TODO
-	Eager(Vec<BoolView>),
-	Simple(BoolView),
-}
-
-impl TryFrom<ReasonBuilder> for Reason {
-	type Error = bool;
-
-	fn try_from(value: ReasonBuilder) -> Result<Self, Self::Error> {
-		match value {
-			ReasonBuilder::Lazy(prop, data) => Ok(Reason::Lazy(prop, data)),
+impl Reason {
+	pub(crate) fn build_reason(builder: &ReasonBuilder, prop: PropRef) -> Result<Self, bool> {
+		match builder {
+			ReasonBuilder::Lazy(data) => Ok(Self::Lazy(prop, *data)),
 			ReasonBuilder::Eager(views) => {
 				let mut lits = Vec::with_capacity(views.len());
 				for view in views {
@@ -44,13 +34,22 @@ impl TryFrom<ReasonBuilder> for Reason {
 				if lits.is_empty() {
 					Err(true)
 				} else {
-					Ok(Reason::Eager(lits.into_boxed_slice()))
+					Ok(Self::Eager(lits.into_boxed_slice()))
 				}
 			}
 			ReasonBuilder::Simple(view) => match view.0 {
-				BoolViewInner::Lit(lit) => Ok(Reason::Simple(lit)),
+				BoolViewInner::Lit(lit) => Ok(Self::Simple(lit)),
 				BoolViewInner::Const(b) => Err(b),
 			},
 		}
 	}
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum ReasonBuilder {
+	#[allow(dead_code)] // TODOs
+	Lazy(u64),
+	#[allow(dead_code)] // TODO
+	Eager(Conjunction<BoolView>),
+	Simple(BoolView),
 }

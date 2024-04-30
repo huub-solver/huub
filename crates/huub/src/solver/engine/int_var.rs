@@ -69,7 +69,7 @@ impl IntVar {
 			num_vars += orig_domain_len - 2;
 		}
 		let vars = slv
-			.core
+			.oracle
 			.next_var_range(num_vars)
 			.expect("Boolean variable pool exhausted");
 
@@ -77,10 +77,12 @@ impl IntVar {
 		let iv = Self {
 			lower_bound: slv
 				.engine_mut()
+				.state
 				.int_trail
 				.track(*domain.lower_bound().unwrap()),
 			upper_bound: slv
 				.engine_mut()
+				.state
 				.int_trail
 				.track(*domain.upper_bound().unwrap()),
 			orig_domain: domain,
@@ -94,21 +96,21 @@ impl IntVar {
 		for (ord_i, ord_j) in iv.order_vars().tuple_windows() {
 			let ord_i: RawLit = ord_i.into();
 			let ord_j: RawLit = ord_j.into();
-			slv.core.add_clause([!ord_j, ord_i]).unwrap(); // ord_j -> ord_i
+			slv.oracle.add_clause([!ord_j, ord_i]).unwrap(); // ord_j -> ord_i
 			if direct_encoding {
 				let eq_i: RawLit = direct_enc_iter.next().unwrap().into();
-				slv.core.add_clause([!eq_i, ord_i]).unwrap(); // eq_i -> ord_i
-				slv.core.add_clause([!eq_i, !ord_j]).unwrap(); // eq_i -> !ord_j
-				slv.core.add_clause([eq_i, !ord_i, ord_j]).unwrap(); // !eq_i -> !ord_i \/ ord_j
+				slv.oracle.add_clause([!eq_i, ord_i]).unwrap(); // eq_i -> ord_i
+				slv.oracle.add_clause([!eq_i, !ord_j]).unwrap(); // eq_i -> !ord_j
+				slv.oracle.add_clause([eq_i, !ord_i, ord_j]).unwrap(); // !eq_i -> !ord_i \/ ord_j
 			}
 		}
 		debug_assert!(direct_enc_iter.next().is_none());
 
 		// Setup the boolean to integer mapping
-		let iv = slv.engine_mut().int_vars.push(iv);
-		slv.engine_mut().bool_to_int.insert(vars.clone(), iv);
+		let iv = slv.engine_mut().state.int_vars.push(iv);
+		slv.engine_mut().state.bool_to_int.insert(vars.clone(), iv);
 		for l in vars {
-			<Sat as PropagatingSolver>::add_observed_var(&mut slv.core, l);
+			<Sat as PropagatingSolver>::add_observed_var(&mut slv.oracle, l);
 		}
 		IntView(IntViewInner::VarRef(iv))
 	}
@@ -272,7 +274,7 @@ mod tests {
 		let IntView(IntViewInner::VarRef(a)) = a else {
 			unreachable!()
 		};
-		let a = &slv.engine_mut().int_vars[a];
+		let a = &slv.engine_mut().state.int_vars[a];
 		let lit = a.get_bool_lit(LitMeaning::GreaterEq(2));
 		assert_eq!(get_lit(lit), 1);
 		let lit = a.get_bool_lit(LitMeaning::Less(2));
@@ -297,7 +299,7 @@ mod tests {
 		let IntView(IntViewInner::VarRef(a)) = a else {
 			unreachable!()
 		};
-		let a = &slv.engine_mut().int_vars[a];
+		let a = &slv.engine_mut().state.int_vars[a];
 		let lit = a.get_bool_lit(LitMeaning::GreaterEq(2));
 		assert_eq!(get_lit(lit), 1);
 		let lit = a.get_bool_lit(LitMeaning::GreaterEq(3));

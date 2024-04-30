@@ -79,7 +79,7 @@ impl IntView {
 	) {
 		match self.0 {
 			IntViewInner::VarRef(v) => {
-				let var = &slv.engine().int_vars[v];
+				let var = &slv.engine().state.int_vars[v];
 				let mut var_iter = var.vars.clone();
 				let pos = v.into();
 
