@@ -43,14 +43,15 @@ impl<I: Idx, E> Trail<I, E> {
 }
 
 impl<I: Idx, E: PartialEq> Trail<I, E> {
-	pub(crate) fn assign(&mut self, i: I, val: E) {
+	pub(crate) fn assign(&mut self, i: I, val: E) -> HasChanged {
 		if self.value[i] == val {
-			return;
+			return HasChanged::NoChange;
 		}
 		let old = mem::replace(&mut self.value[i], val);
 		if !self.prev_len.is_empty() {
 			self.trail.push((i, old));
 		}
+		HasChanged::Changed
 	}
 }
 
@@ -82,11 +83,15 @@ impl SatTrail {
 		}
 	}
 
-	pub(crate) fn assign(&mut self, var: RawVar, val: bool) -> bool {
+	pub(crate) fn assign(&mut self, var: RawVar, val: bool) -> HasChanged {
+		if let Some(x) = self.value.insert(var, val) {
+			debug_assert_eq!(x, val);
+			return HasChanged::NoChange;
+		}
 		if !self.prev_len.is_empty() {
 			self.trail.push(var);
 		}
-		self.value.insert(var, val).is_none()
+		HasChanged::Changed
 	}
 
 	pub(crate) fn get<L: Into<RawLit>>(&self, lit: L) -> Option<bool> {
@@ -96,4 +101,14 @@ impl SatTrail {
 			.copied()
 			.map(|x| if lit.is_negated() { !x } else { x })
 	}
+
+	pub(crate) fn decision_level(&self) -> usize {
+		self.prev_len.len()
+	}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HasChanged {
+	Changed,
+	NoChange,
 }

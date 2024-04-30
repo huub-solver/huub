@@ -1,26 +1,28 @@
 pub(crate) mod all_different;
 pub(crate) mod conflict;
-pub(crate) mod init_action;
 pub(crate) mod int_event;
-pub(crate) mod propagation_action;
 pub(crate) mod reason;
 
 use std::fmt::Debug;
 
-use pindakaas::{
-	solver::{PropagatorAccess, Solver as SolverTrait},
-	Lit as RawLit, Valuation as SatValuation,
+use crate::{
+	propagator::conflict::Conflict, solver::engine::queue::PriorityLevel, BoolView, Conjunction,
+	IntVal, IntView, LitMeaning,
 };
 
-use crate::{
-	propagator::{
-		conflict::Conflict, init_action::InitializationActions,
-		propagation_action::PropagationActions,
-	},
-	solver::{engine::queue::PriorityLevel, SatSolver},
-};
+use self::{int_event::IntEvent, reason::ReasonBuilder};
 
 pub(crate) trait Propagator: Debug + DynPropClone {
+	/// The method called when registering a propagator with the solver, the method
+	/// returns true when the propagator needs to be enqued immediately.œ
+	///
+	/// This method is generally used to register variable event
+	/// subscriptions with the solver.
+	fn initialize(&mut self, actions: &mut dyn InitializationActions) -> bool {
+		let _ = actions;
+		false
+	}
+
 	/// The method called by the solver to notify the propagator of a variable
 	/// event to which it has subscribed. The method returns true if the
 	/// propagator should be placed in the propagation queue.
@@ -49,7 +51,7 @@ pub(crate) trait Propagator: Debug + DynPropClone {
 
 	/// The propagate method is called during the search process to allow the
 	/// propagator to enforce
-	fn propagate(&mut self, actions: &mut PropagationActions<'_>) -> Result<(), Conflict> {
+	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
 		let _ = actions;
 		Ok(())
 	}
@@ -60,29 +62,58 @@ pub(crate) trait Propagator: Debug + DynPropClone {
 	/// lazy explaination emitted by the propagator. The propagator must now
 	/// produce the conjunction of literals that led to a literal being
 	/// propagated.
-	fn explain(&mut self, data: u64) -> Vec<RawLit> {
+	fn explain(&mut self, data: u64) -> Conjunction {
 		let _ = data;
 		// Method will only be called if `propagate` used a lazy reason.
 		panic!("propagator did not provide an explain implementation")
 	}
 }
 
-pub(crate) trait Initialize {
-	/// The method called when registering a propagator with the solver, the method
-	/// returns true when the propagator needs to be enqued immediately.œ
-	///
-	/// This method is generally used to register variable event
-	/// subscriptions with the solver.
-	fn initialize<
-		Sol: PropagatorAccess + SatValuation,
-		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
-	>(
+pub(crate) trait PropagationActions {
+	fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
+
+	fn set_bool_val(
 		&mut self,
-		actions: &mut InitializationActions<'_, Sat>,
-	) -> bool {
-		let _ = actions;
-		false
-	}
+		bv: BoolView,
+		val: bool,
+		reason: &ReasonBuilder,
+	) -> Result<(), Conflict>;
+
+	fn get_int_lit(&mut self, var: IntView, bv: LitMeaning) -> BoolView;
+	fn get_int_lower_bound(&self, var: IntView) -> IntVal;
+	fn get_int_upper_bound(&self, var: IntView) -> IntVal;
+	fn get_int_val(&self, var: IntView) -> Option<IntVal>;
+	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool;
+
+	fn set_int_lower_bound(
+		&mut self,
+		var: IntView,
+		val: IntVal,
+		reason: &ReasonBuilder,
+	) -> Result<(), Conflict>;
+	fn set_int_upper_bound(
+		&mut self,
+		var: IntView,
+		val: IntVal,
+		reason: &ReasonBuilder,
+	) -> Result<(), Conflict>;
+	fn set_int_val(
+		&mut self,
+		var: IntView,
+		val: IntVal,
+		reason: &ReasonBuilder,
+	) -> Result<(), Conflict>;
+	fn set_int_not_eq(
+		&mut self,
+		var: IntView,
+		val: IntVal,
+		reason: &ReasonBuilder,
+	) -> Result<(), Conflict>;
+}
+
+pub(crate) trait InitializationActions {
+	fn subscribe_bool(&mut self, var: BoolView, data: u32);
+	fn subscribe_int(&mut self, var: IntView, event: IntEvent, data: u32);
 }
 
 pub(crate) trait DynPropClone {
