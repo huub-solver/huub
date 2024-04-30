@@ -18,19 +18,20 @@ use self::{
 	propagation_context::PropagationContext,
 	trail::{SatTrail, Trail},
 };
+use super::view::{BoolViewInner, IntViewInner};
 use crate::{
 	propagator::{
 		conflict::Conflict,
 		int_event::IntEvent,
 		reason::{Reason, ReasonBuilder},
-		Propagator,
+		ExplainActions, Propagator,
 	},
 	solver::engine::{
 		int_var::{IntVar, IntVarRef, LitMeaning},
 		queue::PriorityQueue,
 		trail::HasChanged,
 	},
-	Clause, Conjunction, IntVal,
+	BoolView, Clause, Conjunction, IntVal,
 };
 
 #[derive(Default, Clone)]
@@ -142,24 +143,24 @@ impl IpasirPropagator for Engine {
 		Vec::new()
 	}
 
-	fn add_reason_clause(&mut self, propagated_lit: pindakaas::Lit) -> Vec<pindakaas::Lit> {
-		let reason = self
-			.state
-			.reason_map
-			.get(&propagated_lit)
-			.map(|r| match r {
+	fn add_reason_clause(&mut self, propagated_lit: pindakaas::Lit) -> Clause {
+		let reason = self.state.reason_map.remove(&propagated_lit);
+		let clause = if let Some(reason) = reason {
+			match reason {
 				Reason::Lazy(prop, data) => {
-					let reason = self.propagators[*prop].explain(*data);
+					let reason = self.propagators[prop].explain(&mut self.state, data);
 					once(propagated_lit)
 						.chain(reason.iter().map(|l| !l))
 						.collect()
 				}
 				Reason::Eager(v) => once(propagated_lit).chain(v.iter().map(|l| !l)).collect(),
 				Reason::Simple(l) => vec![propagated_lit, !l],
-			})
-			.unwrap_or_else(|| vec![propagated_lit]);
-		trace!(clause = ?reason.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "give reason clause");
-		reason
+			}
+		} else {
+			vec![propagated_lit]
+		};
+		trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "give reason clause");
+		clause
 	}
 
 	fn check_model(
@@ -201,7 +202,7 @@ impl IpasirPropagator for Engine {
 		if let Some(reason) = &self.conflict_reason {
 			let clause = match reason {
 				Reason::Lazy(prop, data) => self.propagators[*prop]
-					.explain(*data)
+					.explain(&mut self.state, *data)
 					.into_iter()
 					.map(|l| !l)
 					.collect(),
@@ -371,6 +372,40 @@ impl State {
 			}
 			Err(true) => (),
 			Err(false) => unreachable!("invalid reason"),
+		}
+	}
+}
+
+impl ExplainActions for State {
+	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
+		match bv.0 {
+			BoolViewInner::Lit(lit) => self.sat_trail.get(lit),
+			BoolViewInner::Const(b) => Some(b),
+		}
+	}
+
+	fn get_int_lower_bound(&self, var: crate::IntView) -> IntVal {
+		match var.0 {
+			IntViewInner::VarRef(iv) => self.int_trail[self.int_vars[iv].lower_bound],
+			IntViewInner::Const(i) => i,
+		}
+	}
+	fn get_int_upper_bound(&self, var: crate::IntView) -> IntVal {
+		match var.0 {
+			IntViewInner::VarRef(iv) => self.int_trail[self.int_vars[iv].upper_bound],
+			IntViewInner::Const(i) => i,
+		}
+	}
+
+	fn get_int_lit(&self, var: crate::IntView, meaning: LitMeaning) -> BoolView {
+		match var.0 {
+			IntViewInner::VarRef(iv) => self.int_vars[iv].get_bool_lit(meaning),
+			IntViewInner::Const(c) => BoolView(BoolViewInner::Const(match meaning {
+				LitMeaning::Eq(i) => c == i,
+				LitMeaning::NotEq(i) => c != i,
+				LitMeaning::GreaterEq(i) => c >= i,
+				LitMeaning::Less(i) => c < i,
+			})),
 		}
 	}
 }

@@ -10,6 +10,7 @@ categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
+delegate = "0.12"
 flatzinc-serde = "0.2"
 index_vec = "0.1.3"
 itertools = "0.12.1"

@@ -61,28 +61,21 @@ pub(crate) trait Propagator: Debug + DynPropClone {
 	/// lazy explaination emitted by the propagator. The propagator must now
 	/// produce the conjunction of literals that led to a literal being
 	/// propagated.
-	fn explain(&mut self, data: u64) -> Conjunction {
+	fn explain(&mut self, actions: &mut dyn ExplainActions, data: u64) -> Conjunction {
+		let _ = actions;
 		let _ = data;
 		// Method will only be called if `propagate` used a lazy reason.
 		panic!("propagator did not provide an explain implementation")
 	}
 }
 
-pub(crate) trait PropagationActions {
-	fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
-
+pub(crate) trait PropagationActions: ExplainActions {
 	fn set_bool_val(
 		&mut self,
 		bv: BoolView,
 		val: bool,
 		reason: &ReasonBuilder,
 	) -> Result<(), Conflict>;
-
-	fn get_int_lit(&mut self, var: IntView, bv: LitMeaning) -> BoolView;
-	fn get_int_lower_bound(&self, var: IntView) -> IntVal;
-	fn get_int_upper_bound(&self, var: IntView) -> IntVal;
-	fn get_int_val(&self, var: IntView) -> Option<IntVal>;
-	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool;
 
 	fn set_int_lower_bound(
 		&mut self,
@@ -108,6 +101,43 @@ pub(crate) trait PropagationActions {
 		val: IntVal,
 		reason: &ReasonBuilder,
 	) -> Result<(), Conflict>;
+}
+
+pub(crate) trait ExplainActions {
+	fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
+
+	fn get_int_lower_bound(&self, var: IntView) -> IntVal;
+	fn get_int_upper_bound(&self, var: IntView) -> IntVal;
+	fn get_int_val(&self, var: IntView) -> Option<IntVal> {
+		let lb = self.get_int_lower_bound(var);
+		let ub = self.get_int_upper_bound(var);
+		if lb == ub {
+			Some(lb)
+		} else {
+			None
+		}
+	}
+	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool {
+		self.get_bool_val(self.get_int_lit(var, LitMeaning::Eq(val)))
+			.unwrap_or(true)
+	}
+
+	fn get_int_lit(&self, var: IntView, meaning: LitMeaning) -> BoolView;
+	fn get_int_val_lit(&self, var: IntView) -> Option<BoolView> {
+		if let Some(v) = self.get_int_val(var) {
+			Some(self.get_int_lit(var, LitMeaning::Eq(v)))
+		} else {
+			None
+		}
+	}
+	fn get_int_lower_bound_lit(&self, var: IntView) -> BoolView {
+		let lb = self.get_int_lower_bound(var);
+		self.get_int_lit(var, LitMeaning::Less(lb + 1))
+	}
+	fn get_int_upper_bound_lit(&self, var: IntView) -> BoolView {
+		let ub = self.get_int_upper_bound(var);
+		self.get_int_lit(var, LitMeaning::GreaterEq(ub))
+	}
 }
 
 pub(crate) trait InitializationActions {
