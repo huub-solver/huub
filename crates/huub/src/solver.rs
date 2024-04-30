@@ -3,10 +3,11 @@ pub(crate) mod initialization_context;
 pub(crate) mod value;
 pub(crate) mod view;
 
+use delegate::delegate;
 use pindakaas::{
 	solver::{
 		cadical::Cadical, LearnCallback, NextVarRange, PropagatingSolver, PropagatorAccess,
-		SolveAssuming, SolveResult, Solver as SolverTrait, TermCallback,
+		SlvTermSignal, SolveAssuming, SolveResult, Solver as SolverTrait, TermCallback,
 	},
 	Cnf, Lit as RawLit, Valuation as SatValuation,
 };
@@ -68,42 +69,7 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 	pub fn num_int_vars(&self) -> usize {
 		self.engine().state.int_vars.len()
 	}
-}
 
-impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn = Sol>> From<Cnf>
-	for Solver<Sat>
-{
-	fn from(value: Cnf) -> Self {
-		let mut core: Sat = value.into();
-		let None = core.set_external_propagator(Some(Box::<Engine>::default())) else {
-			unreachable!()
-		};
-		core.set_learn_callback(Some(learn_clause_cb));
-		Self { oracle: core }
-	}
-}
-
-impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn = Sol> + Clone>
-	Clone for Solver<Sat>
-{
-	fn clone(&self) -> Self {
-		let mut core = self.oracle.clone();
-		let engine = self.engine().clone();
-		let None = core.set_external_propagator(Some(Box::new(engine))) else {
-			unreachable!()
-		};
-		core.set_learn_callback(Some(learn_clause_cb));
-		Self { oracle: core }
-	}
-}
-
-fn learn_clause_cb(clause: &mut dyn Iterator<Item = RawLit>) {
-	debug!(clause = ?clause.map(i32::from).collect::<Vec<i32>>(), "learn clause");
-}
-
-impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn = Sol>>
-	Solver<Sat>
-{
 	pub(crate) fn add_propagator(&mut self, mut prop: impl Propagator + 'static) {
 		let prop_ref = PropRef::from(self.engine().propagators.len());
 		let enqueue = prop.initialize(&mut InitializationContext {
@@ -119,6 +85,58 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 		let p = self.engine_mut().state.enqueued.push(enqueue);
 		debug_assert_eq!(prop_ref, p);
 	}
+
+	pub fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = RawLit>)>(
+		&mut self,
+		cb: Option<F>,
+	) {
+		if let Some(mut f) = cb {
+			let g = move |clause: &mut dyn Iterator<Item = RawLit>| {
+				trace_learned_clause(clause);
+				f(clause)
+			};
+			self.oracle.set_learn_callback(Some(Box::new(g)));
+		} else {
+			self.oracle.set_learn_callback(Some(trace_learned_clause));
+		}
+	}
+
+	delegate! {
+		to self.oracle {
+			pub fn set_terminate_callback<F: FnMut() -> SlvTermSignal>(&mut self, cb: Option<F>);
+		}
+	}
+}
+
+impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn = Sol>> From<Cnf>
+	for Solver<Sat>
+{
+	fn from(value: Cnf) -> Self {
+		let mut core: Sat = value.into();
+		let None = core.set_external_propagator(Some(Box::<Engine>::default())) else {
+			unreachable!()
+		};
+		core.set_learn_callback(Some(trace_learned_clause));
+		Self { oracle: core }
+	}
+}
+
+impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn = Sol> + Clone>
+	Clone for Solver<Sat>
+{
+	fn clone(&self) -> Self {
+		let mut core = self.oracle.clone();
+		let engine = self.engine().clone();
+		let None = core.set_external_propagator(Some(Box::new(engine))) else {
+			unreachable!()
+		};
+		core.set_learn_callback(Some(trace_learned_clause));
+		Self { oracle: core }
+	}
+}
+
+fn trace_learned_clause(clause: &mut dyn Iterator<Item = RawLit>) {
+	debug!(clause = ?clause.map(i32::from).collect::<Vec<i32>>(), "learn clause");
 }
 
 pub trait SatSolver:
