@@ -60,6 +60,10 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 						Some(Value::Int(engine.state.int_vars[iv].get_value(model)))
 					}
 					IntViewInner::Const(i) => Some(Value::Int(i)),
+					IntViewInner::Linear { var, scale, offset } => Some(Value::Int(
+						engine.state.int_vars[var].get_value(model) * (scale as i64)
+							+ (offset as i64),
+					)),
 				},
 			};
 			on_sol(wrapper);

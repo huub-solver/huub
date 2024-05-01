@@ -1,3 +1,5 @@
+use core::panic;
+
 use tracing::trace;
 
 use super::{reason::ReasonBuilder, ExplainActions, InitializationActions, PropagationActions};
@@ -13,7 +15,6 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct LinearLE {
-	coeffs: Vec<i64>,      // Coefficients of the linear inequality
 	vars: Vec<IntView>,    // Variables in the linear inequality
 	rhs: i64,              // Lower bound of the linear inequality
 	action_list: Vec<u32>, // List of variables that have been modified since the last propagation
@@ -21,21 +22,30 @@ pub(crate) struct LinearLE {
 
 impl LinearLE {
 	pub(crate) fn new<V: Into<IntView>, VI: IntoIterator<Item = V>>(
-		coeffs: &Vec<i64>,
+		coeffs: &[i64],
 		vars: VI,
 		rhs: &i64,
 	) -> Self {
 		let vars: Vec<IntView> = vars.into_iter().map(Into::into).collect();
-		let coeffs: Vec<i64> = coeffs.clone();
-		let mut max_sum = rhs.clone();
-		vars.iter().enumerate().for_each(|(i, var)| {
-			if let IntViewInner::Const(c) = var.0 {
-				max_sum -= coeffs[i] * c;
+		let mut max_sum = *rhs;
+		let scaled_vars: Vec<IntView> = vars
+			.iter()
+			.enumerate()
+			.filter_map(|(i, v)| {
+				match v.0 {
+				IntViewInner::Const(c) => {
+					max_sum -= coeffs[i] * c;
+					None
+				}
+				IntViewInner::VarRef(iv) => {
+					Some(IntView(IntViewInner::Linear { var: iv, scale: coeffs[i] as i32, offset: 0 }))
+				}
+				_ => panic!("Unexpected IntViewInner variant from default conversion of vars in LinearLE::new()"),
 			}
-		});
+			})
+			.collect();
 		Self {
-			coeffs,
-			vars,
+			vars: scaled_vars,
 			rhs: max_sum,
 			action_list: Vec::new(),
 		}
@@ -62,26 +72,23 @@ impl Propagator for LinearLE {
 		self.action_list.clear()
 	}
 
-	// propagation rule: x[i] <= ub - sum_{j != i} x[j].upper_bound * coeffs[j]
+	// propagation rule: x[i] <= rhs - sum_{j != i} x[j].lower_bound
 	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
 		// sum the coefficients x var.lower_bound
-		let mut max_sum = self.rhs.clone();
-		self.vars.iter().enumerate().for_each(|(i, v)| {
-			max_sum -= self.coeffs[i] * actions.get_int_lower_bound(*v);
-		});
+		let max_sum = self
+			.vars
+			.iter()
+			.map(|v| actions.get_int_lower_bound(*v))
+			.fold(self.rhs, |sum, val| sum - val);
 		// propagate the upper bound of the variables
 		for (j, &v) in self.vars.iter().enumerate() {
 			trace!(
-				"Propagating lower bound for variable {} to {}",
-				j,
-				max_sum + self.coeffs[j] * actions.get_int_lower_bound(v)
+				int_var = ?v,
+				value = max_sum + actions.get_int_lower_bound(v),
+				"bounds propagation linear_le",
 			);
 			let reason = ReasonBuilder::Lazy(j as u64);
-			actions.set_int_upper_bound(
-				v,
-				max_sum + self.coeffs[j] * actions.get_int_lower_bound(v),
-				&reason,
-			)?
+			actions.set_int_upper_bound(v, max_sum + actions.get_int_lower_bound(v), &reason)?
 		}
 		Ok(())
 	}
@@ -111,27 +118,73 @@ mod tests {
 		Cnf,
 	};
 
-	use crate::{propagator::linear::LinearLE, solver::engine::int_var::IntVar, Solver};
+	use crate::{propagator::linear::LinearLE, solver::engine::int_var::IntVar, Solver, Value};
 
 	#[test]
-	fn test_linear_ge_unsat() {
+	fn test_linear_le_sat() {
+		let mut slv: Solver<Cadical> = Cnf::default().into();
+		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
+		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
+		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
+
+		slv.add_propagator(LinearLE::new(&[2, 1, 1], vec![a, b, c], &10));
+		let result = slv.solve(|val| {
+			let Value::Int(a_val) = val(a.into()).unwrap() else {
+				panic!()
+			};
+			let Value::Int(b_val) = val(b.into()).unwrap() else {
+				panic!()
+			};
+			let Value::Int(c_val) = val(c.into()).unwrap() else {
+				panic!()
+			};
+			assert!(a_val * 2 + b_val + c_val <= 10)
+		});
+		assert_eq!(result, SolveResult::Sat)
+	}
+
+	#[test]
+	fn test_linear_le_unsat() {
 		let mut slv: Solver<Cadical> = Cnf::default().into();
 		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 
-		slv.add_propagator(LinearLE::new(&vec![2, 1, 1], vec![a, b, c], &3));
+		slv.add_propagator(LinearLE::new(&[2, 1, 1], vec![a, b, c], &3));
 		assert_eq!(slv.solve(|_| {}), SolveResult::Unsat)
 	}
 
 	#[test]
 	fn test_linear_ge_sat() {
 		let mut slv: Solver<Cadical> = Cnf::default().into();
+		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
+		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
+		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
+
+		slv.add_propagator(LinearLE::new(&[-2, -1, -1], vec![a, b, c], &-3));
+		let result = slv.solve(|val| {
+			let Value::Int(a_val) = val(a.into()).unwrap() else {
+				panic!()
+			};
+			let Value::Int(b_val) = val(b.into()).unwrap() else {
+				panic!()
+			};
+			let Value::Int(c_val) = val(c.into()).unwrap() else {
+				panic!()
+			};
+			assert!(a_val * 2 + b_val + c_val >= 3)
+		});
+		assert_eq!(result, SolveResult::Sat)
+	}
+
+	#[test]
+	fn test_linear_ge_unsat() {
+		let mut slv: Solver<Cadical> = Cnf::default().into();
 		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
-		slv.add_propagator(LinearLE::new(&vec![2, 1, 1], vec![a, b, c], &10));
-		assert_eq!(slv.solve(|_| {}), SolveResult::Sat)
+		slv.add_propagator(LinearLE::new(&[-2, -1, -1], vec![a, b, c], &-10));
+		assert_eq!(slv.solve(|_| {}), SolveResult::Unsat)
 	}
 }

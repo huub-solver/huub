@@ -71,6 +71,21 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 					return Err(Conflict::new(reason, self.prop));
 				}
 			}
+			IntViewInner::Linear { var, scale, offset } => {
+				if scale > 0 {
+					return self.set_int_upper_bound(
+						IntView(IntViewInner::VarRef(var)),
+						(val - (offset as i64)) / (scale as i64),
+						reason,
+					);
+				} else {
+					return self.set_int_lower_bound(
+						IntView(IntViewInner::VarRef(var)),
+						(val - (offset as i64)) / (scale as i64),
+						reason,
+					);
+				}
+			}
 		}
 		Ok(())
 	}
@@ -96,6 +111,21 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 			IntViewInner::Const(i) => {
 				if i > val {
 					return Err(Conflict::new(reason, self.prop));
+				}
+			}
+			IntViewInner::Linear { var, scale, offset } => {
+				if scale > 0 {
+					return self.set_int_upper_bound(
+						IntView(IntViewInner::VarRef(var)),
+						(val - (offset as i64)) / (scale as i64),
+						reason,
+					);
+				} else {
+					return self.set_int_lower_bound(
+						IntView(IntViewInner::VarRef(var)),
+						(val - (offset as i64)) / (scale as i64),
+						reason,
+					);
 				}
 			}
 		}
@@ -127,6 +157,15 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 					return Err(Conflict::new(reason, self.prop));
 				}
 			}
+			IntViewInner::Linear { var, scale, offset } => {
+				if (val - offset as i64) % scale.abs() as i64 == 0 {
+					let val_inner = (val - offset as i64) / scale as i64;
+					return self.set_int_val(IntView(IntViewInner::VarRef(var)), val_inner, reason);
+				} else {
+					// (scale * var) + offset cannot equal to val
+					return Err(Conflict::new(reason, self.prop));
+				}
+			}
 		};
 		Ok(())
 	}
@@ -154,6 +193,15 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 			IntViewInner::Const(i) => {
 				if i == val {
 					return Err(Conflict::new(reason, self.prop));
+				}
+			}
+			IntViewInner::Linear { var, scale, offset } => {
+				if (val - offset as i64) % scale.abs() as i64 == 0 {
+					let val_inner = (val - offset as i64) / scale as i64;
+					return self.set_int_val(IntView(IntViewInner::VarRef(var)), val_inner, reason);
+				} else {
+					// (scale * var) + offset will not equal to val
+					return Ok(());
 				}
 			}
 		};

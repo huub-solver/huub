@@ -31,7 +31,7 @@ use crate::{
 		queue::PriorityQueue,
 		trail::HasChanged,
 	},
-	BoolView, Clause, Conjunction, IntVal,
+	BoolView, Clause, Conjunction, IntVal, IntView,
 };
 
 #[derive(Default, Clone)]
@@ -386,20 +386,38 @@ impl ExplainActions for State {
 		}
 	}
 
-	fn get_int_lower_bound(&self, var: crate::IntView) -> IntVal {
+	fn get_int_lower_bound(&self, var: IntView) -> IntVal {
 		match var.0 {
 			IntViewInner::VarRef(iv) => self.int_trail[self.int_vars[iv].lower_bound],
 			IntViewInner::Const(i) => i,
+			IntViewInner::Linear { var, scale, offset } => {
+				if scale > 0 {
+					self.get_int_lower_bound(IntView(IntViewInner::VarRef(var))) * (scale as i64)
+						+ (offset as i64)
+				} else {
+					self.get_int_upper_bound(IntView(IntViewInner::VarRef(var))) * (scale as i64)
+						+ (offset as i64)
+				}
+			}
 		}
 	}
-	fn get_int_upper_bound(&self, var: crate::IntView) -> IntVal {
+	fn get_int_upper_bound(&self, var: IntView) -> IntVal {
 		match var.0 {
 			IntViewInner::VarRef(iv) => self.int_trail[self.int_vars[iv].upper_bound],
 			IntViewInner::Const(i) => i,
+			IntViewInner::Linear { var, scale, offset } => {
+				if scale > 0 {
+					self.get_int_upper_bound(IntView(IntViewInner::VarRef(var))) * (scale as i64)
+						+ (offset as i64)
+				} else {
+					self.get_int_lower_bound(IntView(IntViewInner::VarRef(var))) * (scale as i64)
+						+ (offset as i64)
+				}
+			}
 		}
 	}
 
-	fn get_int_lit(&self, var: crate::IntView, meaning: LitMeaning) -> BoolView {
+	fn get_int_lit(&self, var: IntView, meaning: LitMeaning) -> BoolView {
 		match var.0 {
 			IntViewInner::VarRef(iv) => self.int_vars[iv].get_bool_lit(meaning),
 			IntViewInner::Const(c) => BoolView(BoolViewInner::Const(match meaning {
@@ -408,6 +426,40 @@ impl ExplainActions for State {
 				LitMeaning::GreaterEq(i) => c >= i,
 				LitMeaning::Less(i) => c < i,
 			})),
+			IntViewInner::Linear { var, scale, offset } => match meaning {
+				LitMeaning::Eq(i) => {
+					if (i - (offset as i64)) % (scale as i64) == 0 {
+						self.int_vars[var]
+							.get_bool_lit(LitMeaning::Eq((i - (offset as i64)) / (scale as i64)))
+					} else {
+						BoolView(BoolViewInner::Const(false))
+					}
+				}
+				LitMeaning::NotEq(i) => {
+					if (i - (offset as i64)) % (scale as i64) == 0 {
+						self.int_vars[var]
+							.get_bool_lit(LitMeaning::NotEq((i - (offset as i64)) / (scale as i64)))
+					} else {
+						BoolView(BoolViewInner::Const(true))
+					}
+				}
+				LitMeaning::GreaterEq(i) => {
+					let val = (i - (offset as i64)) / (scale as i64);
+					if scale > 0 {
+						self.int_vars[var].get_bool_lit(LitMeaning::GreaterEq(val))
+					} else {
+						self.int_vars[var].get_bool_lit(LitMeaning::Less(val + 1))
+					}
+				}
+				LitMeaning::Less(i) => {
+					let val = (i - (offset as i64)) / (scale as i64);
+					if scale > 0 {
+						self.int_vars[var].get_bool_lit(LitMeaning::Less(val + 1))
+					} else {
+						self.int_vars[var].get_bool_lit(LitMeaning::GreaterEq(val))
+					}
+				}
+			},
 		}
 	}
 }
