@@ -111,6 +111,9 @@ impl IntView {
 				debug_assert!(var_iter.next().is_none());
 			}
 			IntViewInner::Const(_) => {}
+			IntViewInner::Linear { var, .. } => {
+				IntView(IntViewInner::VarRef(var)).add_to_lit_reverse_map(slv, map);
+			}
 		}
 	}
 
@@ -121,6 +124,10 @@ impl IntView {
 				map[pos] = name;
 			}
 			IntViewInner::Const(_) => {}
+			IntViewInner::Linear { var, .. } => {
+				let pos: usize = var.into();
+				map[pos] = name;
+			}
 		}
 	}
 }
@@ -135,4 +142,9 @@ impl From<IntVal> for IntView {
 pub(crate) enum IntViewInner {
 	VarRef(IntVarRef),
 	Const(IntVal),
+	Linear {
+		var: IntVarRef,
+		scale: i32,
+		offset: i32,
+	}, // var * scale + offset
 }
