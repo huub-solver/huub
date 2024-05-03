@@ -71,6 +71,7 @@ pub(crate) trait Propagator: Debug + DynPropClone {
 }
 
 pub(crate) trait PropagationActions: ExplainActions {
+	#[allow(dead_code)]
 	fn set_bool_val(
 		&mut self,
 		bv: BoolView,
@@ -128,10 +129,12 @@ pub(crate) trait ExplainActions {
 	}
 
 	fn get_int_lit(&self, var: IntView, meaning: LitMeaning) -> BoolView;
+	#[allow(dead_code)]
 	fn get_int_val_lit(&self, var: IntView) -> Option<BoolView> {
 		self.get_int_val(var)
 			.map(|v| self.get_int_lit(var, LitMeaning::Eq(v)))
 	}
+	#[allow(dead_code)]
 	fn get_int_lower_bound_lit(&self, var: IntView) -> BoolView {
 		let lb = self.get_int_lower_bound(var);
 		self.get_int_lit(var, LitMeaning::Less(lb + 1))
@@ -143,6 +146,7 @@ pub(crate) trait ExplainActions {
 }
 
 pub(crate) trait InitializationActions {
+	#[allow(dead_code)]
 	fn subscribe_bool(&mut self, var: BoolView, data: u32);
 	fn subscribe_int(&mut self, var: IntView, event: IntEvent, data: u32);
 }
