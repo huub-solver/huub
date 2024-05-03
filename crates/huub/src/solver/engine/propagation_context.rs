@@ -58,10 +58,12 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 				if self.get_int_lower_bound(var) >= val {
 					return Ok(());
 				}
-				let BoolView(BoolViewInner::Lit(lit)) =
-					self.state.int_vars[iv].get_bool_lit(LitMeaning::GreaterEq(val))
-				else {
-					return Err(Conflict::new(reason, self.prop));
+				let lit = match self.state.int_vars[iv].get_bool_lit(LitMeaning::GreaterEq(val)) {
+					BoolView(BoolViewInner::Lit(lit)) => lit,
+					BoolView(BoolViewInner::Const(false)) => {
+						return Err(Conflict::new(reason, self.prop));
+					}
+					_ => unreachable!(),
 				};
 				self.state.register_reason(lit, reason, self.prop);
 				self.prop_queue.push(lit);
@@ -100,10 +102,12 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 				if self.get_int_upper_bound(var) <= val {
 					return Ok(());
 				}
-				let BoolView(BoolViewInner::Lit(lit)) =
-					self.state.int_vars[iv].get_bool_lit(LitMeaning::Less(val + 1))
-				else {
-					return Err(Conflict::new(reason, self.prop));
+				let lit = match self.state.int_vars[iv].get_bool_lit(LitMeaning::Less(val + 1)) {
+					BoolView(BoolViewInner::Lit(lit)) => lit,
+					BoolView(BoolViewInner::Const(false)) => {
+						return Err(Conflict::new(reason, self.prop));
+					}
+					_ => unreachable!(),
 				};
 				self.state.register_reason(lit, reason, self.prop);
 				self.prop_queue.push(lit);
@@ -142,10 +146,12 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 				if self.get_int_val(var) == Some(val) {
 					return Ok(());
 				}
-				let BoolView(BoolViewInner::Lit(lit)) =
-					self.state.int_vars[iv].get_bool_lit(LitMeaning::Eq(val))
-				else {
-					return Err(Conflict::new(reason, self.prop));
+				let lit = match self.state.int_vars[iv].get_bool_lit(LitMeaning::Eq(val)) {
+					BoolView(BoolViewInner::Lit(lit)) => lit,
+					BoolView(BoolViewInner::Const(false)) => {
+						return Err(Conflict::new(reason, self.prop));
+					}
+					_ => unreachable!(),
 				};
 				self.state.register_reason(lit, reason, self.prop);
 				self.prop_queue.push(lit);
@@ -180,10 +186,12 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 				if !self.check_int_in_domain(var, val) {
 					return Ok(());
 				}
-				let BoolView(BoolViewInner::Lit(lit)) =
-					self.state.int_vars[iv].get_bool_lit(LitMeaning::NotEq(val))
-				else {
-					return Err(Conflict::new(reason, self.prop));
+				let lit = match self.state.int_vars[iv].get_bool_lit(LitMeaning::NotEq(val)) {
+					BoolView(BoolViewInner::Lit(lit)) => lit,
+					BoolView(BoolViewInner::Const(false)) => {
+						return Err(Conflict::new(reason, self.prop));
+					}
+					_ => unreachable!(),
 				};
 				self.state.register_reason(lit, reason, self.prop);
 				self.prop_queue.push(lit);
