@@ -60,7 +60,8 @@ impl Model {
 						});
 					}
 				}
-				"int_linear_le" => {
+				"int_lin_le" | "int_lin_eq" => {
+					let is_eq = c.id.deref() == "int_lin_eq";
 					if let [coeffs, vars, rhs] = c.args.as_slice() {
 						let coeffs = arg_array(fzn, coeffs)?;
 						let vars = arg_array(fzn, vars)?;
@@ -84,10 +85,14 @@ impl Model {
 							.iter()
 							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
 							.collect();
-						prb += Constraint::LinearLE(coeffs?, vars?, *rhs);
+						prb += if is_eq {
+							Constraint::IntLinEq
+						} else {
+							Constraint::IntLinLessEq
+						}(coeffs?, vars?, *rhs);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
-							name: "int_linear_le",
+							name: if is_eq { "int_lin_eq" } else { "int_linear_le" },
 							found: c.args.len(),
 							expected: 3,
 						});

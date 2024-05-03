@@ -14,7 +14,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct LinearLE {
 	vars: Vec<IntView>,    // Variables in the linear inequality
-	rhs: i64,              // Lower bound of the linear inequality
+	rhs: IntVal,           // Lower bound of the linear inequality
 	action_list: Vec<u32>, // List of variables that have been modified since the last propagation
 }
 
@@ -22,10 +22,9 @@ impl LinearLE {
 	pub(crate) fn new<V: Into<IntView>, VI: IntoIterator<Item = V>>(
 		coeffs: &[IntVal],
 		vars: VI,
-		rhs: &IntVal,
+		mut max_sum: IntVal,
 	) -> Self {
 		let vars: Vec<IntView> = vars.into_iter().map(Into::into).collect();
-		let mut max_sum = *rhs;
 		let scaled_vars: Vec<IntView> =
 			vars.iter()
 				.enumerate()
@@ -127,7 +126,7 @@ mod tests {
 		Cnf,
 	};
 
-	use crate::{propagator::linear::LinearLE, solver::engine::int_var::IntVar, Solver, Value};
+	use crate::{propagator::int_lin_le::LinearLE, solver::engine::int_var::IntVar, Solver, Value};
 
 	#[test]
 	fn test_linear_le_sat() {
@@ -136,7 +135,7 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
-		slv.add_propagator(LinearLE::new(&[2, 1, 1], vec![a, b, c], &10));
+		slv.add_propagator(LinearLE::new(&[2, 1, 1], vec![a, b, c], 10));
 		let result = slv.solve(|val| {
 			let Value::Int(a_val) = val(a.into()).unwrap() else {
 				panic!()
@@ -159,7 +158,7 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 
-		slv.add_propagator(LinearLE::new(&[2, 1, 1], vec![a, b, c], &3));
+		slv.add_propagator(LinearLE::new(&[2, 1, 1], vec![a, b, c], 3));
 		assert_eq!(slv.solve(|_| {}), SolveResult::Unsat)
 	}
 
@@ -170,7 +169,7 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 
-		slv.add_propagator(LinearLE::new(&[-2, -1, -1], vec![a, b, c], &-3));
+		slv.add_propagator(LinearLE::new(&[-2, -1, -1], vec![a, b, c], -3));
 		let result = slv.solve(|val| {
 			let Value::Int(a_val) = val(a.into()).unwrap() else {
 				panic!()
@@ -193,7 +192,7 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
-		slv.add_propagator(LinearLE::new(&[-2, -1, -1], vec![a, b, c], &-10));
+		slv.add_propagator(LinearLE::new(&[-2, -1, -1], vec![a, b, c], -10));
 		assert_eq!(slv.solve(|_| {}), SolveResult::Unsat)
 	}
 }

@@ -1,7 +1,7 @@
 pub(crate) mod all_different;
 pub(crate) mod conflict;
 pub(crate) mod int_event;
-pub(crate) mod linear;
+pub(crate) mod int_lin_le;
 pub(crate) mod reason;
 
 use std::fmt::Debug;
