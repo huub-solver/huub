@@ -391,12 +391,12 @@ impl ExplainActions for State {
 			IntViewInner::VarRef(iv) => self.int_trail[self.int_vars[iv].lower_bound],
 			IntViewInner::Const(i) => i,
 			IntViewInner::Linear { var, scale, offset } => {
-				if scale > 0 {
-					self.get_int_lower_bound(IntView(IntViewInner::VarRef(var))) * (scale as i64)
-						+ (offset as i64)
+				if scale.is_positive() {
+					let lb = self.int_trail[self.int_vars[var].lower_bound];
+					IntView::linear_transform(lb, scale, offset)
 				} else {
-					self.get_int_upper_bound(IntView(IntViewInner::VarRef(var))) * (scale as i64)
-						+ (offset as i64)
+					let ub = self.int_trail[self.int_vars[var].upper_bound];
+					IntView::linear_transform(ub, scale, offset)
 				}
 			}
 		}
@@ -406,12 +406,12 @@ impl ExplainActions for State {
 			IntViewInner::VarRef(iv) => self.int_trail[self.int_vars[iv].upper_bound],
 			IntViewInner::Const(i) => i,
 			IntViewInner::Linear { var, scale, offset } => {
-				if scale > 0 {
-					self.get_int_upper_bound(IntView(IntViewInner::VarRef(var))) * (scale as i64)
-						+ (offset as i64)
+				if scale.is_positive() {
+					let ub = self.int_trail[self.int_vars[var].upper_bound];
+					IntView::linear_transform(ub, scale, offset)
 				} else {
-					self.get_int_lower_bound(IntView(IntViewInner::VarRef(var))) * (scale as i64)
-						+ (offset as i64)
+					let lb = self.int_trail[self.int_vars[var].lower_bound];
+					IntView::linear_transform(lb, scale, offset)
 				}
 			}
 		}
@@ -428,32 +428,34 @@ impl ExplainActions for State {
 			})),
 			IntViewInner::Linear { var, scale, offset } => match meaning {
 				LitMeaning::Eq(i) => {
-					if (i - (offset as i64)) % (scale as i64) == 0 {
-						self.int_vars[var]
-							.get_bool_lit(LitMeaning::Eq((i - (offset as i64)) / (scale as i64)))
+					if IntView::linear_is_integer(i, scale, offset) {
+						self.int_vars[var].get_bool_lit(LitMeaning::Eq(
+							IntView::rev_linear_transform(i, scale, offset),
+						))
 					} else {
 						BoolView(BoolViewInner::Const(false))
 					}
 				}
 				LitMeaning::NotEq(i) => {
-					if (i - (offset as i64)) % (scale as i64) == 0 {
-						self.int_vars[var]
-							.get_bool_lit(LitMeaning::NotEq((i - (offset as i64)) / (scale as i64)))
+					if IntView::linear_is_integer(i, scale, offset) {
+						self.int_vars[var].get_bool_lit(LitMeaning::NotEq(
+							IntView::rev_linear_transform(i, scale, offset),
+						))
 					} else {
 						BoolView(BoolViewInner::Const(true))
 					}
 				}
 				LitMeaning::GreaterEq(i) => {
-					let val = (i - (offset as i64)) / (scale as i64);
-					if scale > 0 {
+					let val = IntView::rev_linear_transform(i, scale, offset);
+					if scale.is_positive() {
 						self.int_vars[var].get_bool_lit(LitMeaning::GreaterEq(val))
 					} else {
 						self.int_vars[var].get_bool_lit(LitMeaning::Less(val + 1))
 					}
 				}
 				LitMeaning::Less(i) => {
-					let val = (i - (offset as i64)) / (scale as i64);
-					if scale > 0 {
+					let val = IntView::rev_linear_transform(i, scale, offset);
+					if scale.is_positive() {
 						self.int_vars[var].get_bool_lit(LitMeaning::Less(val + 1))
 					} else {
 						self.int_vars[var].get_bool_lit(LitMeaning::GreaterEq(val))

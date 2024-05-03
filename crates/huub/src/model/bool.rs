@@ -11,7 +11,10 @@ use pindakaas::{
 
 use super::reformulate::{ReifContext, VariableMap};
 use crate::{
-	solver::{view::BoolViewInner, BoolView, SatSolver},
+	solver::{
+		view::{BoolView, BoolViewInner},
+		SatSolver,
+	},
 	Solver,
 };
 

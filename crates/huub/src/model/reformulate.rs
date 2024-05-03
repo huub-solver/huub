@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
 	model::Variable,
-	solver::{view::BoolViewInner, BoolView, SolverView},
+	solver::view::{BoolView, BoolViewInner, SolverView},
 };
 
 /// A reformulation mapping helper that automatically maps variables to

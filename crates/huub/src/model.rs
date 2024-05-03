@@ -19,7 +19,11 @@ use self::{
 use crate::{
 	model::{int::IntVarDef, reformulate::ReifContext},
 	propagator::{all_different::AllDifferentValue, linear::LinearLE},
-	solver::{engine::int_var::IntVar as SlvIntVar, view::BoolViewInner, SatSolver, SolverView},
+	solver::{
+		engine::int_var::IntVar as SlvIntVar,
+		view::{BoolViewInner, SolverView},
+		SatSolver,
+	},
 	Solver,
 };
 

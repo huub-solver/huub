@@ -72,16 +72,16 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 				}
 			}
 			IntViewInner::Linear { var, scale, offset } => {
-				if scale > 0 {
-					return self.set_int_upper_bound(
+				if scale.is_positive() {
+					return self.set_int_lower_bound(
 						IntView(IntViewInner::VarRef(var)),
-						(val - (offset as i64)) / (scale as i64),
+						IntView::rev_linear_transform(val, scale, offset),
 						reason,
 					);
 				} else {
-					return self.set_int_lower_bound(
+					return self.set_int_upper_bound(
 						IntView(IntViewInner::VarRef(var)),
-						(val - (offset as i64)) / (scale as i64),
+						IntView::rev_linear_transform(val, scale, offset),
 						reason,
 					);
 				}
@@ -114,16 +114,16 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 				}
 			}
 			IntViewInner::Linear { var, scale, offset } => {
-				if scale > 0 {
+				if scale.is_positive() {
 					return self.set_int_upper_bound(
 						IntView(IntViewInner::VarRef(var)),
-						(val - (offset as i64)) / (scale as i64),
+						IntView::rev_linear_transform(val, scale, offset),
 						reason,
 					);
 				} else {
 					return self.set_int_lower_bound(
 						IntView(IntViewInner::VarRef(var)),
-						(val - (offset as i64)) / (scale as i64),
+						IntView::rev_linear_transform(val, scale, offset),
 						reason,
 					);
 				}
@@ -158,8 +158,8 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 				}
 			}
 			IntViewInner::Linear { var, scale, offset } => {
-				if (val - offset as i64) % scale.abs() as i64 == 0 {
-					let val_inner = (val - offset as i64) / scale as i64;
+				if IntView::linear_is_integer(val, scale, offset) {
+					let val_inner = IntView::rev_linear_transform(val, scale, offset);
 					return self.set_int_val(IntView(IntViewInner::VarRef(var)), val_inner, reason);
 				} else {
 					// (scale * var) + offset cannot equal to val
@@ -196,8 +196,8 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 				}
 			}
 			IntViewInner::Linear { var, scale, offset } => {
-				if (val - offset as i64) % scale.abs() as i64 == 0 {
-					let val_inner = (val - offset as i64) / scale as i64;
+				if IntView::linear_is_integer(val, scale, offset) {
+					let val_inner = IntView::rev_linear_transform(val, scale, offset);
 					return self.set_int_val(IntView(IntViewInner::VarRef(var)), val_inner, reason);
 				} else {
 					// (scale * var) + offset will not equal to val

@@ -6,8 +6,11 @@ use pindakaas::{
 
 use super::reformulate::{ReifContext, VariableMap};
 use crate::{
-	solver::{view::IntViewInner, SatSolver},
-	IntView, Solver, SolverView, Variable,
+	solver::{
+		view::{IntView, IntViewInner, SolverView},
+		SatSolver,
+	},
+	Solver, Variable,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

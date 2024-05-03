@@ -5,7 +5,7 @@ use pindakaas::{
 	Lit as RawLit, Valuation as SatValuation,
 };
 
-use super::engine::int_var::LitMeaning;
+use super::{engine::int_var::LitMeaning, value::NonZeroIntVal};
 use crate::{
 	solver::{engine::int_var::IntVarRef, SatSolver},
 	IntVal, Solver,
@@ -140,11 +140,34 @@ impl From<IntVal> for IntView {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum IntViewInner {
+	/// (Raw) Integer Variable
+	/// Reference to location in the Engine's State
 	VarRef(IntVarRef),
+	/// Constant Integer Value
 	Const(IntVal),
+	/// Linear View of an Integer Variable
+	/// `(var * scale) + offset`
 	Linear {
 		var: IntVarRef,
-		scale: i32,
-		offset: i32,
-	}, // var * scale + offset
+		scale: NonZeroIntVal,
+		offset: IntVal,
+	},
+}
+
+impl IntView {
+	#[inline]
+	pub(crate) fn linear_transform(val: IntVal, scale: NonZeroIntVal, offset: IntVal) -> IntVal {
+		(val * scale.get()) + offset
+	}
+	#[inline]
+	pub(crate) fn rev_linear_transform(
+		view: IntVal,
+		scale: NonZeroIntVal,
+		offset: IntVal,
+	) -> IntVal {
+		(view - offset) / scale.get()
+	}
+	pub(crate) fn linear_is_integer(val: IntVal, scale: NonZeroIntVal, offset: IntVal) -> bool {
+		(val - offset) % scale.get() == 0
+	}
 }
