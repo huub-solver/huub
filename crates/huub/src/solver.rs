@@ -13,11 +13,9 @@ use pindakaas::{
 };
 use tracing::debug;
 
-use self::view::BoolViewInner;
-pub use crate::solver::{
-	engine::int_var::LitMeaning,
-	value::{IntVal, Valuation, Value},
-	view::{BoolView, IntView, SolverView},
+use self::{
+	value::{Valuation, Value},
+	view::{BoolViewInner, IntView, SolverView},
 };
 use crate::{
 	propagator::Propagator,
@@ -60,10 +58,13 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 						Some(Value::Int(engine.state.int_vars[iv].get_value(model)))
 					}
 					IntViewInner::Const(i) => Some(Value::Int(i)),
-					IntViewInner::Linear { var, scale, offset } => Some(Value::Int(
-						engine.state.int_vars[var].get_value(model) * (scale as i64)
-							+ (offset as i64),
-					)),
+					IntViewInner::Linear { var, scale, offset } => {
+						Some(Value::Int(IntView::linear_transform(
+							engine.state.int_vars[var].get_value(model),
+							scale,
+							offset,
+						)))
+					}
 				},
 			};
 			on_sol(wrapper);

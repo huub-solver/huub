@@ -5,8 +5,7 @@ use crate::{
 	propagator::{conflict::Conflict, int_event::IntEvent, Propagator},
 	solver::{
 		engine::{int_var::LitMeaning, queue::PriorityLevel},
-		view::IntViewInner,
-		IntView,
+		view::{IntView, IntViewInner},
 	},
 };
 

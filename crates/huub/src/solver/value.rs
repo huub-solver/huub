@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, num::NonZeroI64};
 
 use crate::solver::SolverView;
 
@@ -10,6 +10,7 @@ pub enum Value {
 }
 
 pub type IntVal = i64;
+pub type NonZeroIntVal = NonZeroI64;
 
 pub trait Valuation: Fn(SolverView) -> Option<Value> {}
 impl<F: Fn(SolverView) -> Option<Value>> Valuation for F {}

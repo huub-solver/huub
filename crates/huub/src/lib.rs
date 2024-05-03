@@ -5,7 +5,12 @@ pub(crate) mod solver;
 pub use model::{Constraint, Model, Variable};
 pub use pindakaas::solver::{SlvTermSignal, SolveResult};
 use pindakaas::Lit as RawLit;
-pub use solver::{BoolView, IntVal, IntView, LitMeaning, Solver, SolverView, Valuation, Value};
+pub use solver::{
+	engine::int_var::LitMeaning,
+	value::{IntVal, NonZeroIntVal, Valuation, Value},
+	view::{BoolView, IntView, SolverView},
+	Solver,
+};
 
 /// Type alias for a disjunction of literals (clause), used for internal type documentation.
 type Clause<L = RawLit> = Vec<L>;
