@@ -55,7 +55,7 @@ impl IntVar {
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 	>(
 		slv: &mut Solver<Sat>,
-		domain: RangeList<i64>,
+		domain: RangeList<IntVal>,
 		direct_encoding: bool,
 	) -> IntView {
 		let orig_domain_len = (&domain)
@@ -122,11 +122,11 @@ impl IntVar {
 		let direct_offset = self.orig_domain_len - 1;
 
 		let meaning = if offset < direct_offset {
-			LitMeaning::GreaterEq(*self.orig_domain.lower_bound().unwrap() + 1 + offset as i64)
+			LitMeaning::GreaterEq(*self.orig_domain.lower_bound().unwrap() + 1 + offset as IntVal)
 		} else {
 			debug_assert!(self.has_direct);
 			let offset = offset - direct_offset;
-			LitMeaning::Eq(*self.orig_domain.lower_bound().unwrap() + 1 + offset as i64)
+			LitMeaning::Eq(*self.orig_domain.lower_bound().unwrap() + 1 + offset as IntVal)
 		};
 		if lit.is_negated() {
 			!meaning
@@ -211,7 +211,7 @@ impl IntVar {
 		BoolView(BoolViewInner::Lit(if negate { !lit } else { lit }))
 	}
 
-	pub(crate) fn get_value<V: SatValuation + ?Sized>(&self, model: &V) -> i64 {
+	pub(crate) fn get_value<V: SatValuation + ?Sized>(&self, model: &V) -> IntVal {
 		let mut val_iter = self.orig_domain.clone().into_iter().flatten();
 		for l in self.order_vars() {
 			match model.value(l.into()) {
@@ -228,10 +228,10 @@ impl IntVar {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LitMeaning {
-	Eq(i64),
-	NotEq(i64),
-	GreaterEq(i64),
-	Less(i64),
+	Eq(IntVal),
+	NotEq(IntVal),
+	GreaterEq(IntVal),
+	Less(IntVal),
 }
 
 impl Not for LitMeaning {

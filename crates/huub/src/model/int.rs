@@ -10,13 +10,13 @@ use crate::{
 		view::{IntView, IntViewInner, SolverView},
 		SatSolver,
 	},
-	Solver, Variable,
+	IntVal, Solver, Variable,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IntExpr {
 	Var(IntVar),
-	Val(i64),
+	Val(IntVal),
 }
 
 impl IntExpr {
@@ -47,5 +47,5 @@ pub struct IntVar(pub(crate) u32);
 
 #[derive(Debug)]
 pub(crate) struct IntVarDef {
-	pub(crate) domain: RangeList<i64>,
+	pub(crate) domain: RangeList<IntVal>,
 }

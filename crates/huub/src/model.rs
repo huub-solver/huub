@@ -6,6 +6,7 @@ mod reformulate;
 use std::ops::AddAssign;
 
 use flatzinc_serde::RangeList;
+use itertools::Itertools;
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
 	ClauseDatabase, Cnf, Lit as RawLit, Valuation as SatValuation, Var as RawVar,
@@ -18,13 +19,13 @@ use self::{
 };
 use crate::{
 	model::{int::IntVarDef, reformulate::ReifContext},
-	propagator::{all_different::AllDifferentValue, linear::LinearLE},
+	propagator::{all_different::AllDifferentValue, int_lin_le::LinearLE},
 	solver::{
 		engine::int_var::IntVar as SlvIntVar,
 		view::{BoolViewInner, SolverView},
 		SatSolver,
 	},
-	Solver,
+	IntVal, Solver,
 };
 
 #[derive(Debug, Default)]
@@ -96,7 +97,8 @@ impl ClauseDatabase for Model {
 pub enum Constraint {
 	Clause(Vec<BoolExpr>),
 	AllDifferent(Vec<IntExpr>),
-	LinearLE(Vec<i64>, Vec<IntExpr>, i64),
+	IntLinLessEq(Vec<IntVal>, Vec<IntExpr>, IntVal),
+	IntLinEq(Vec<IntVal>, Vec<IntExpr>, IntVal),
 }
 
 impl Constraint {
@@ -130,12 +132,37 @@ impl Constraint {
 					.collect();
 				slv.add_propagator(AllDifferentValue::new(vars));
 			}
-			Constraint::LinearLE(coeffs, vars, c) => {
+			Constraint::IntLinLessEq(coeffs, vars, c) => {
+				let vars: Vec<_> = vars
+					.iter()
+					.zip_eq(coeffs.iter())
+					.map(|(v, &c)| {
+						v.to_arg(
+							if c >= 0 {
+								ReifContext::Pos
+							} else {
+								ReifContext::Neg
+							},
+							slv,
+							map,
+						)
+					})
+					.collect();
+				slv.add_propagator(LinearLE::new(coeffs, vars, *c));
+			}
+			Constraint::IntLinEq(coeffs, vars, c) => {
 				let vars: Vec<_> = vars
 					.iter()
 					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
-				slv.add_propagator(LinearLE::new(coeffs, vars, c));
+				// coeffs * vars <= c
+				slv.add_propagator(LinearLE::new(coeffs, vars.clone(), *c));
+				// coeffs * vars >= c <=>  -coeffs * vars <= -c
+				slv.add_propagator(LinearLE::new(
+					&coeffs.iter().map(|c| -c).collect_vec(),
+					vars,
+					-c,
+				))
 			}
 		}
 	}
