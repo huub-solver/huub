@@ -29,8 +29,9 @@ pub(crate) trait Propagator: Debug + DynPropClone {
 	///
 	/// The [`data`] argument will contain the data that the propagater has set
 	/// when subscribing to an event.
-	fn notify_event(&mut self, data: u32) -> bool {
+	fn notify_event(&mut self, data: u32, event: &IntEvent) -> bool {
 		let _ = data;
+		let _ = event;
 		false
 	}
 

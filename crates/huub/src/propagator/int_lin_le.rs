@@ -66,7 +66,7 @@ impl Propagator for LinearLE {
 		!self.action_list.is_empty()
 	}
 
-	fn notify_event(&mut self, _: u32) -> bool {
+	fn notify_event(&mut self, _: u32, _: &IntEvent) -> bool {
 		true
 	}
 

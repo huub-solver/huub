@@ -41,7 +41,7 @@ impl Propagator for AllDifferentValue {
 		!self.action_list.is_empty()
 	}
 
-	fn notify_event(&mut self, data: u32) -> bool {
+	fn notify_event(&mut self, data: u32, _: &IntEvent) -> bool {
 		self.action_list.push(data);
 		true
 	}
