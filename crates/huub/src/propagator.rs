@@ -134,14 +134,19 @@ pub(crate) trait ExplainActions {
 		self.get_int_val(var)
 			.map(|v| self.get_int_lit(var, LitMeaning::Eq(v)))
 	}
-	#[allow(dead_code)]
+	fn get_int_greater_than_equal_to_lit(&self, var: IntView, val: IntVal) -> BoolView {
+		self.get_int_lit(var, LitMeaning::GreaterEq(val))
+	}
+	fn get_int_less_than_equal_to_lit(&self, var: IntView, val: IntVal) -> BoolView {
+		self.get_int_lit(var, LitMeaning::Less(val + 1))
+	}
 	fn get_int_lower_bound_lit(&self, var: IntView) -> BoolView {
 		let lb = self.get_int_lower_bound(var);
-		self.get_int_lit(var, LitMeaning::Less(lb + 1))
+		self.get_int_greater_than_equal_to_lit(var, lb)
 	}
 	fn get_int_upper_bound_lit(&self, var: IntView) -> BoolView {
 		let ub = self.get_int_upper_bound(var);
-		self.get_int_lit(var, LitMeaning::GreaterEq(ub))
+		self.get_int_less_than_equal_to_lit(var, ub)
 	}
 }
 
