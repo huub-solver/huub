@@ -17,7 +17,7 @@ impl Conflict {
 	pub(crate) fn new(reason: &ReasonBuilder, prop: PropRef) -> Self {
 		match Reason::build_reason(reason, prop) {
 			Ok(reason) => Self { reason },
-			Err(true) => panic!("constructing empty conflict"),
+			Err(true) => Self { reason: Reason::Eager(Box::new([])) },
 			Err(false) => unreachable!("invalid reason"),
 		}
 	}
