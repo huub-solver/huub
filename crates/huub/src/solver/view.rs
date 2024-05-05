@@ -188,4 +188,19 @@ impl IntView {
 	pub(crate) fn linear_is_integer(val: IntVal, scale: NonZeroIntVal, offset: IntVal) -> bool {
 		(val - offset) % scale.get() == 0
 	}
+	pub(crate) fn negated(&self) -> Self {
+		match self.0 {
+			IntViewInner::VarRef(v) => IntView(IntViewInner::Linear{
+				var: v, 
+				scale: NonZeroIntVal::new(-1).unwrap(),
+				offset: 0,
+			}),
+			IntViewInner::Const(i) => IntView(IntViewInner::Const(-i)),
+			IntViewInner::Linear { var, scale, offset } => IntView(IntViewInner::Linear {
+				var,
+				scale: NonZeroIntVal::new(-scale.get()).unwrap(),
+				offset: -offset,
+			}),
+		}
+	}
 }
