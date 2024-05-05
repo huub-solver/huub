@@ -142,6 +142,7 @@ pub(crate) trait ExplainActions {
 	fn get_int_less_than_equal_to_lit(&self, var: IntView, val: IntVal) -> BoolView {
 		self.get_int_lit(var, LitMeaning::Less(val + 1))
 	}
+	#[allow(dead_code)]
 	fn get_int_lower_bound_lit(&self, var: IntView) -> BoolView {
 		let lb = self.get_int_lower_bound(var);
 		self.get_int_greater_than_equal_to_lit(var, lb)
