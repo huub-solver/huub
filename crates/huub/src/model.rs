@@ -20,7 +20,7 @@ use self::{
 };
 use crate::{
 	model::{int::IntVarDef, reformulate::ReifContext},
-	propagator::{all_different::AllDifferentValue, int_lin_le::LinearLE},
+	propagator::{all_different::AllDifferentValue, int_lin_le::LinearLE, minimum::Minimum},
 	solver::{engine::int_var::IntVar as SlvIntVar, view::SolverView, SatSolver},
 	IntVal, Solver,
 };
@@ -109,6 +109,8 @@ pub enum Constraint {
 	AllDifferent(Vec<IntExpr>),
 	IntLinLessEq(Vec<IntVal>, Vec<IntExpr>, IntVal),
 	IntLinEq(Vec<IntVal>, Vec<IntExpr>, IntVal),
+	Minimum(Vec<IntExpr>, IntExpr),
+	Maximum(Vec<IntExpr>, IntExpr),
 }
 
 impl Constraint {
@@ -164,6 +166,23 @@ impl Constraint {
 					-c,
 				));
 				Ok(())
+			}
+			Constraint::Minimum(vars, y) => {
+				let vars: Vec<_> = vars
+					.iter()
+					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
+					.collect();
+				let y = y.to_arg(ReifContext::Mixed, slv, map);
+				slv.add_propagator(Minimum::new(vars, y));
+			}
+			Constraint::Maximum(vars, y) => {
+				let vars: Vec<_> = vars
+					.iter()
+					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
+					.map(|v| v.negated())
+					.collect();
+				let y = y.to_arg(ReifContext::Mixed, slv, map);
+				slv.add_propagator(Minimum::new(vars, y));
 			}
 		}
 	}

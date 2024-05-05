@@ -196,6 +196,34 @@ impl Model {
 						});
 					}
 				}
+				"minimum" | "maximum" => {
+					let is_maximum = c.id.deref() == "maximum";
+					if let [args, y] = c.args.as_slice() {
+						let args = arg_array(fzn, args)?;
+						let args: Result<Vec<_>, _> = args
+							.iter()
+							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
+							.collect();
+						let Argument::Literal(y) = y else {
+							return Err(FlatZincError::InvalidArgumentType {
+								expected: "liter",
+								found: format!("{:?}", y),
+							});
+						};
+						let y = lit_int(fzn, &mut prb, &mut map, y)?;
+						if is_maximum {
+							prb += Constraint::Maximum(args?, y);
+						} else {
+							prb += Constraint::Minimum(args?, y);
+						}
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: if is_maximum { "maximum" } else { "minimum" },
+							found: c.args.len(),
+							expected: 2,
+						});
+					}
+				}
 				_ => return Err(FlatZincError::UnknownConstraint(c.id.to_string())),
 			}
 		}
