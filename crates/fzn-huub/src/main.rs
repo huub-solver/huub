@@ -14,7 +14,9 @@ use std::{
 use ::tracing::Level;
 use clap::Parser;
 use flatzinc_serde::{FlatZinc, Literal};
-use huub::{SlvTermSignal, SolveResult, Solver, SolverView, Valuation};
+use huub::{
+	FlatZincError, ReformulationError, SlvTermSignal, SolveResult, Solver, SolverView, Valuation,
+};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use tracing::{FmtLitFields, LitName};
 use tracing_subscriber::fmt::time::uptime;
@@ -67,10 +69,20 @@ fn main() -> Result<()> {
 		})?;
 
 	// Convert FlatZinc model to internal Solver representation
-	let (mut slv, var_map): (Solver, _) = Solver::from_fzn(&fzn)
-		.into_diagnostic()
-		.wrap_err("Error while processing FlatZinc")?;
-	let var_map: UstrMap<SolverView> = var_map.into_iter().collect();
+	let res = Solver::from_fzn(&fzn);
+	// Resolve any errors that may have occurred during the conversion
+	let (mut slv, var_map): (Solver, UstrMap<SolverView>) = match res {
+		Err(FlatZincError::ReformulationError(ReformulationError::TrivialUnsatisfiable)) => {
+			println!("=====UNSATISFIABLE=====");
+			return Ok(());
+		}
+		Err(err) => {
+			return Err(err)
+				.into_diagnostic()
+				.wrap_err("Error while processing FlatZinc")
+		}
+		Ok((slv, var_map)) => (slv, var_map.into_iter().collect()),
+	};
 
 	// Create reverse map for solver variables if required
 	if args.verbose > 0 {
@@ -114,7 +126,7 @@ fn main() -> Result<()> {
 		for ident in &fzn.output {
 			if let Some(arr) = fzn.arrays.get(ident) {
 				println!(
-					"{ident} = [{}]",
+					"{ident} = [{}];",
 					arr.contents
 						.iter()
 						.map(|lit| print_lit(value, &var_map, lit))
@@ -122,7 +134,7 @@ fn main() -> Result<()> {
 						.join(",")
 				)
 			} else {
-				println!("{ident} = {}", value(var_map[ident]).unwrap())
+				println!("{ident} = {};", value(var_map[ident]).unwrap())
 			}
 		}
 		println!("----------");

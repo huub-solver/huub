@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fmt::Debug, ops::Deref};
 use flatzinc_serde::{Argument, Domain, FlatZinc, Literal, Type, Variable};
 use thiserror::Error;
 
-use super::bool::BoolExpr;
+use super::{bool::BoolExpr, reformulate::ReformulationError};
 use crate::{
 	model::{IntExpr, Variable as MVar},
 	Constraint, Model, Solver, SolverView,
@@ -18,6 +18,39 @@ impl Model {
 
 		for c in fzn.constraints.iter() {
 			match c.id.deref() {
+				"array_bool_and" => {
+					if let [es, r] = c.args.as_slice() {
+						let es = arg_array(fzn, es)?;
+						let r = arg_bool(fzn, &mut prb, &mut map, r)?;
+						let es: Result<Vec<_>, _> = es
+							.iter()
+							.map(|l| lit_bool(fzn, &mut prb, &mut map, l))
+							.collect();
+						prb += BoolExpr::Equiv(vec![r, BoolExpr::And(es?)]);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "array_bool_and",
+							found: c.args.len(),
+							expected: 2,
+						});
+					}
+				}
+				"array_bool_xor" => {
+					if let [es] = c.args.as_slice() {
+						let es = arg_array(fzn, es)?;
+						let es: Result<Vec<_>, _> = es
+							.iter()
+							.map(|l| lit_bool(fzn, &mut prb, &mut map, l))
+							.collect();
+						prb += BoolExpr::Xor(es?);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "array_bool_xor",
+							found: c.args.len(),
+							expected: 2,
+						});
+					}
+				}
 				"bool_clause" => {
 					if let [pos, neg] = c.args.as_slice() {
 						let pos = arg_array(fzn, pos)?;
@@ -29,16 +62,81 @@ impl Model {
 						}
 						for l in neg {
 							let e = lit_bool(fzn, &mut prb, &mut map, l)?;
-							lits.push(match e {
-								BoolExpr::Lit(l) => BoolExpr::Lit(!l),
-								BoolExpr::Val(v) => BoolExpr::Val(!v),
-								e => BoolExpr::Not(Box::new(e)),
-							})
+							lits.push(!e)
 						}
-						prb += Constraint::Clause(lits);
+						prb += BoolExpr::Or(lits);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_clause",
+							found: c.args.len(),
+							expected: 2,
+						});
+					}
+				}
+				"bool_clause_reif" => {
+					if let [pos, neg, r] = c.args.as_slice() {
+						let pos = arg_array(fzn, pos)?;
+						let neg = arg_array(fzn, neg)?;
+						let r = arg_bool(fzn, &mut prb, &mut map, r)?;
+						let mut lits = Vec::with_capacity(pos.len() + neg.len());
+						for l in pos {
+							let e = lit_bool(fzn, &mut prb, &mut map, l)?;
+							lits.push(e);
+						}
+						for l in neg {
+							let e = lit_bool(fzn, &mut prb, &mut map, l)?;
+							lits.push(!e)
+						}
+						prb += BoolExpr::Equiv(vec![r, BoolExpr::Or(lits)]);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "bool_clause_reif",
+							found: c.args.len(),
+							expected: 3,
+						});
+					}
+				}
+				"bool_eq_reif" => {
+					if let [a, b, r] = c.args.as_slice() {
+						let a = arg_bool(fzn, &mut prb, &mut map, a)?;
+						let b = arg_bool(fzn, &mut prb, &mut map, b)?;
+						let r = arg_bool(fzn, &mut prb, &mut map, r)?;
+						prb += BoolExpr::Equiv(vec![r, BoolExpr::Equiv(vec![a, b])]);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "bool_eq_reif",
+							found: c.args.len(),
+							expected: 3,
+						});
+					}
+				}
+				"bool_not" => {
+					if let [a, b] = c.args.as_slice() {
+						let a = arg_bool(fzn, &mut prb, &mut map, a)?;
+						let b = arg_bool(fzn, &mut prb, &mut map, b)?;
+						// TODO: This should not need two variables
+						prb += BoolExpr::Equiv(vec![b, !a]);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "bool_not",
+							found: c.args.len(),
+							expected: 2,
+						});
+					}
+				}
+				"bool_xor" => {
+					if (2..=3).contains(&c.args.len()) {
+						let a = arg_bool(fzn, &mut prb, &mut map, &c.args[0])?;
+						let b = arg_bool(fzn, &mut prb, &mut map, &c.args[1])?;
+						let mut f = BoolExpr::Xor(vec![a, b]);
+						if c.args.len() == 3 {
+							let r = arg_bool(fzn, &mut prb, &mut map, &c.args[2])?;
+							f = BoolExpr::Equiv(vec![r, f]);
+						}
+						prb += f;
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "bool_xor",
 							found: c.args.len(),
 							expected: 2,
 						});
@@ -136,7 +234,7 @@ impl Solver {
 		fzn: &FlatZinc<S>,
 	) -> Result<(Self, BTreeMap<S, SolverView>), FlatZincError> {
 		let (prb, map) = Model::from_fzn(fzn)?;
-		let (slv, remap) = prb.to_solver();
+		let (slv, remap) = prb.to_solver()?;
 		let map = map.into_iter().map(|(k, v)| (k, remap.get(&v))).collect();
 		Ok((slv, map))
 	}
@@ -210,6 +308,21 @@ fn lit_bool<S: Ord + Deref<Target = str> + Clone + Debug>(
 	}
 }
 
+fn arg_bool<S: Ord + Deref<Target = str> + Clone + Debug>(
+	fzn: &FlatZinc<S>,
+	prb: &mut Model,
+	map: &mut BTreeMap<S, MVar>,
+	arg: &Argument<S>,
+) -> Result<BoolExpr, FlatZincError> {
+	match arg {
+		Argument::Literal(l) => lit_bool(fzn, prb, map, l),
+		_ => Err(FlatZincError::InvalidArgumentType {
+			expected: "bool",
+			found: format!("{:?}", arg),
+		}),
+	}
+}
+
 fn lit_int<S: Ord + Deref<Target = str> + Clone + Debug>(
 	fzn: &FlatZinc<S>,
 	prb: &mut Model,
@@ -262,4 +375,6 @@ pub enum FlatZincError {
 		expected: &'static str,
 		found: String,
 	},
+	#[error("error reformulating generated model `{0}'")]
+	ReformulationError(#[from] ReformulationError),
 }
