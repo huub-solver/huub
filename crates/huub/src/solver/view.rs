@@ -1,4 +1,4 @@
-use std::num::NonZeroI32;
+use std::{num::NonZeroI32, ops::Not};
 
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
@@ -62,6 +62,27 @@ impl BoolView {
 pub(crate) enum BoolViewInner {
 	Lit(RawLit),
 	Const(bool),
+}
+
+impl Not for BoolView {
+	type Output = Self;
+
+	fn not(self) -> Self::Output {
+		match self.0 {
+			BoolViewInner::Lit(l) => BoolView(BoolViewInner::Lit(!l)),
+			BoolViewInner::Const(b) => BoolView(BoolViewInner::Const(!b)),
+		}
+	}
+}
+impl Not for &BoolView {
+	type Output = BoolView;
+
+	fn not(self) -> Self::Output {
+		match self.0 {
+			BoolViewInner::Lit(l) => BoolView(BoolViewInner::Lit(!l)),
+			BoolViewInner::Const(b) => BoolView(BoolViewInner::Const(!b)),
+		}
+	}
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]

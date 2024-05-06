@@ -1,7 +1,7 @@
-mod bool;
-mod flatzinc;
-mod int;
-mod reformulate;
+pub(crate) mod bool;
+pub(crate) mod flatzinc;
+pub(crate) mod int;
+pub(crate) mod reformulate;
 
 use std::ops::AddAssign;
 
@@ -9,22 +9,19 @@ use flatzinc_serde::RangeList;
 use itertools::Itertools;
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
-	ClauseDatabase, Cnf, Lit as RawLit, Valuation as SatValuation, Var as RawVar,
+	ClauseDatabase, Cnf, ConditionalDatabase, Lit as RawLit, Valuation as SatValuation,
+	Var as RawVar,
 };
 
 use self::{
 	bool::{BoolExpr, BoolVar},
 	int::{IntExpr, IntVar},
-	reformulate::VariableMap,
+	reformulate::{ReformulationError, VariableMap},
 };
 use crate::{
 	model::{int::IntVarDef, reformulate::ReifContext},
 	propagator::{all_different::AllDifferentValue, int_lin_le::LinearLE},
-	solver::{
-		engine::int_var::IntVar as SlvIntVar,
-		view::{BoolViewInner, SolverView},
-		SatSolver,
-	},
+	solver::{engine::int_var::IntVar as SlvIntVar, view::SolverView, SatSolver},
 	IntVal, Solver,
 };
 
@@ -46,13 +43,12 @@ impl Model {
 		iv
 	}
 
-	// TODO: Make generic on Solver again (need var range trait)
 	pub fn to_solver<
 		Sol: PropagatorAccess + SatValuation,
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 	>(
 		&self,
-	) -> (Solver<Sat>, VariableMap) {
+	) -> Result<(Solver<Sat>, VariableMap), ReformulationError> {
 		let mut map = VariableMap::default();
 
 		// TODO: run SAT simplification
@@ -70,10 +66,10 @@ impl Model {
 
 		// Create constraint data structures within the solve
 		for c in self.constraints.iter() {
-			c.to_solver(&mut slv, &mut map)
+			c.to_solver(&mut slv, &mut map)?;
 		}
 
-		(slv, map)
+		Ok((slv, map))
 	}
 }
 
@@ -82,20 +78,30 @@ impl AddAssign<Constraint> for Model {
 		self.constraints.push(rhs)
 	}
 }
+impl AddAssign<BoolExpr> for Model {
+	fn add_assign(&mut self, rhs: BoolExpr) {
+		self.constraints.push(Constraint::SimpleBool(rhs))
+	}
+}
 
 impl ClauseDatabase for Model {
 	fn new_var(&mut self) -> RawVar {
 		self.cnf.new_var()
 	}
 
-	fn add_clause<I: IntoIterator<Item = pindakaas::Lit>>(&mut self, cl: I) -> pindakaas::Result {
+	fn add_clause<I: IntoIterator<Item = RawLit>>(&mut self, cl: I) -> pindakaas::Result {
 		self.cnf.add_clause(cl)
+	}
+
+	type CondDB = Model;
+	fn with_conditions(&mut self, conditions: Vec<RawLit>) -> ConditionalDatabase<Self::CondDB> {
+		ConditionalDatabase::new(self, conditions)
 	}
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub enum Constraint {
-	Clause(Vec<BoolExpr>),
+	SimpleBool(BoolExpr),
 	AllDifferent(Vec<IntExpr>),
 	IntLinLessEq(Vec<IntVal>, Vec<IntExpr>, IntVal),
 	IntLinEq(Vec<IntVal>, Vec<IntExpr>, IntVal),
@@ -109,28 +115,16 @@ impl Constraint {
 		&self,
 		slv: &mut Solver<Sat>,
 		map: &mut VariableMap,
-	) {
-		struct Satisfied;
+	) -> Result<(), ReformulationError> {
 		match self {
-			Constraint::Clause(v) => {
-				let lits: Result<Vec<RawLit>, Satisfied> = v
-					.iter()
-					.filter_map(|x| match x.to_arg(ReifContext::Pos, slv, map).0 {
-						BoolViewInner::Lit(l) => Some(Ok(l)),
-						BoolViewInner::Const(true) => Some(Err(Satisfied)),
-						BoolViewInner::Const(false) => None,
-					})
-					.collect();
-				if let Ok(lits) = lits {
-					let _ = slv.oracle.add_clause(lits);
-				}
-			}
+			Constraint::SimpleBool(exp) => exp.constrain(slv, map),
 			Constraint::AllDifferent(v) => {
 				let vars: Vec<_> = v
 					.iter()
 					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
 				slv.add_propagator(AllDifferentValue::new(vars));
+				Ok(())
 			}
 			Constraint::IntLinLessEq(coeffs, vars, c) => {
 				let vars: Vec<_> = vars
@@ -149,6 +143,7 @@ impl Constraint {
 					})
 					.collect();
 				slv.add_propagator(LinearLE::new(coeffs, vars, *c));
+				Ok(())
 			}
 			Constraint::IntLinEq(coeffs, vars, c) => {
 				let vars: Vec<_> = vars
@@ -162,7 +157,8 @@ impl Constraint {
 					&coeffs.iter().map(|c| -c).collect_vec(),
 					vars,
 					-c,
-				))
+				));
+				Ok(())
 			}
 		}
 	}

@@ -2,7 +2,10 @@ pub(crate) mod model;
 pub(crate) mod propagator;
 pub(crate) mod solver;
 
-pub use model::{Constraint, Model, Variable};
+pub use model::{
+	bool::BoolExpr, flatzinc::FlatZincError, int::IntExpr, reformulate::ReformulationError,
+	Constraint, Model, Variable,
+};
 pub use pindakaas::solver::{SlvTermSignal, SolveResult};
 use pindakaas::Lit as RawLit;
 pub use solver::{
@@ -19,7 +22,7 @@ type Conjunction<L = RawLit> = Vec<L>;
 
 #[cfg(test)]
 mod tests {
-	use crate::{Constraint, Model, SolveResult, Solver, Variable};
+	use crate::{BoolExpr, Model, SolveResult, Solver, Variable};
 
 	#[test]
 	fn it_works() {
@@ -27,10 +30,10 @@ mod tests {
 		let a = prb.new_bool_var();
 		let b = prb.new_bool_var();
 
-		prb += Constraint::Clause(vec![(!a).into(), (!b).into()]);
-		prb += Constraint::Clause(vec![a.into(), b.into()]);
+		prb += BoolExpr::Or(vec![(!a).into(), (!b).into()]);
+		prb += BoolExpr::Or(vec![a.into(), b.into()]);
 
-		let (mut slv, map): (Solver, _) = prb.to_solver();
+		let (mut slv, map): (Solver, _) = prb.to_solver().unwrap();
 		let a = map.get(&Variable::Bool(a));
 		let b = map.get(&Variable::Bool(b));
 
