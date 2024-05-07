@@ -2,7 +2,7 @@ mod tracing;
 
 use std::{
 	collections::HashMap,
-	fmt::Debug,
+	fmt::{self, Debug, Display},
 	fs::File,
 	io::{self, BufReader},
 	num::NonZeroI32,
@@ -11,11 +11,12 @@ use std::{
 	time::{Duration, Instant},
 };
 
-use ::tracing::Level;
+use ::tracing::{warn, Level};
 use clap::Parser;
-use flatzinc_serde::{FlatZinc, Literal};
+use flatzinc_serde::{FlatZinc, Literal, Method};
 use huub::{
-	FlatZincError, ReformulationError, SlvTermSignal, SolveResult, Solver, SolverView, Valuation,
+	FlatZincError, Goal, ReformulationError, SlvTermSignal, SolveResult, Solver, SolverView,
+	Valuation,
 };
 use miette::{IntoDiagnostic, Result, WrapErr};
 use tracing::{FmtLitFields, LitName};
@@ -121,48 +122,104 @@ fn main() -> Result<()> {
 		}));
 	}
 
+	// Determine Goal and Objective
+	let goal = if fzn.solve.method != Method::Satisfy {
+		let obj_expr = fzn.solve.objective.as_ref().unwrap();
+		if let Literal::Identifier(ident) = obj_expr {
+			Some((
+				if fzn.solve.method == Method::Minimize {
+					Goal::Minimize
+				} else {
+					Goal::Maximize
+				},
+				if let SolverView::Int(iv) = var_map[ident] {
+					iv
+				} else {
+					todo!()
+				},
+			))
+		} else {
+			None
+		}
+	} else {
+		None
+	};
+
 	// Run the solver!
-	let print_sol = |value: &dyn Valuation, fzn: &FlatZinc<Ustr>, var_map: &UstrMap<SolverView>| {
-		for ident in &fzn.output {
-			if let Some(arr) = fzn.arrays.get(ident) {
-				println!(
-					"{ident} = [{}];",
-					arr.contents
-						.iter()
-						.map(|lit| print_lit(value, &var_map, lit))
-						.collect::<Vec<_>>()
-						.join(",")
-				)
+	let res = match goal {
+		Some((goal, obj)) => {
+			if args.all_solutions {
+				warn!("--all-solutions is ignored when optimizing, use --intermediate-solutions or --all-optimal-solutions instead")
+			}
+			if args.intermediate_solutions {
+				slv.branch_and_bound(obj, goal, |value| {
+					print!(
+						"{}",
+						Solution {
+							value,
+							fzn: &fzn,
+							var_map: &var_map
+						}
+					)
+				})
 			} else {
-				println!("{ident} = {};", value(var_map[ident]).unwrap())
+				let mut last_sol = String::new();
+				let res = slv.branch_and_bound(obj, goal, |value| {
+					last_sol = format!(
+						"{}",
+						Solution {
+							value,
+							fzn: &fzn,
+							var_map: &var_map
+						}
+					);
+				});
+				println!("{}", last_sol);
+				res
 			}
 		}
-		println!("{}", FZN_SEPERATOR);
-	};
-	let res = if args.all_solutions {
-		let vars: Vec<_> = fzn
-			.output
-			.iter()
-			.flat_map(|ident| {
-				if let Some(arr) = fzn.arrays.get(ident) {
-					arr.contents
-						.iter()
-						.filter_map(|lit| {
-							if let Literal::Identifier(ident) = lit {
-								Some(var_map[ident])
-							} else {
-								None
-							}
-						})
-						.collect()
-				} else {
-					vec![var_map[ident]]
-				}
+		None if args.all_solutions => {
+			let vars: Vec<_> = fzn
+				.output
+				.iter()
+				.flat_map(|ident| {
+					if let Some(arr) = fzn.arrays.get(ident) {
+						arr.contents
+							.iter()
+							.filter_map(|lit| {
+								if let Literal::Identifier(ident) = lit {
+									Some(var_map[ident])
+								} else {
+									None
+								}
+							})
+							.collect()
+					} else {
+						vec![var_map[ident]]
+					}
+				})
+				.collect();
+			slv.all_solutions(&vars, |value| {
+				print!(
+					"{}",
+					Solution {
+						value,
+						fzn: &fzn,
+						var_map: &var_map
+					}
+				)
 			})
-			.collect();
-		slv.all_solutions(&vars, |value| print_sol(value, &fzn, &var_map))
-	} else {
-		slv.solve(|value| print_sol(value, &fzn, &var_map))
+		}
+		None => slv.solve(|value| {
+			print!(
+				"{}",
+				Solution {
+					value,
+					fzn: &fzn,
+					var_map: &var_map
+				}
+			)
+		}),
 	};
 	match res {
 		SolveResult::Satisfied => {}
@@ -222,25 +279,57 @@ fn parse_time_limit(s: &str) -> Result<Duration, humantime::DurationError> {
 	}
 }
 
-fn print_lit(value: &dyn Valuation, var_map: &UstrMap<SolverView>, lit: &Literal<Ustr>) -> String {
-	match lit {
-		Literal::Int(i) => format!("{i}"),
-		Literal::Float(f) => format!("{f}"),
-		Literal::Identifier(ident) => {
-			format!("{}", value(var_map[ident]).unwrap())
+struct Solution<'a> {
+	value: &'a dyn Valuation,
+	fzn: &'a FlatZinc<Ustr>,
+	var_map: &'a UstrMap<SolverView>,
+}
+impl Display for Solution<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		for ident in &self.fzn.output {
+			if let Some(arr) = self.fzn.arrays.get(ident) {
+				writeln!(
+					f,
+					"{ident} = [{}];",
+					arr.contents
+						.iter()
+						.map(|lit| self.print_lit(lit))
+						.collect::<Vec<_>>()
+						.join(",")
+				)?
+			} else {
+				writeln!(
+					f,
+					"{ident} = {};",
+					(self.value)(self.var_map[ident]).unwrap()
+				)?
+			}
 		}
-		Literal::Bool(b) => format!("{b}"),
-		Literal::IntSet(is) => is
-			.into_iter()
-			.map(|r| format!("{}..{}", r.start(), r.end()))
-			.collect::<Vec<_>>()
-			.join(" union "),
-		Literal::FloatSet(fs) => fs
-			.into_iter()
-			.map(|r| format!("{}..{}", r.start(), r.end()))
-			.collect::<Vec<_>>()
-			.join(" union "),
-		Literal::String(s) => s.clone(),
+		writeln!(f, "{}", FZN_SEPERATOR)
+	}
+}
+
+impl Solution<'_> {
+	fn print_lit(&self, lit: &Literal<Ustr>) -> String {
+		match lit {
+			Literal::Int(i) => format!("{i}"),
+			Literal::Float(f) => format!("{f}"),
+			Literal::Identifier(ident) => {
+				format!("{}", (self.value)(self.var_map[ident]).unwrap())
+			}
+			Literal::Bool(b) => format!("{b}"),
+			Literal::IntSet(is) => is
+				.into_iter()
+				.map(|r| format!("{}..{}", r.start(), r.end()))
+				.collect::<Vec<_>>()
+				.join(" union "),
+			Literal::FloatSet(fs) => fs
+				.into_iter()
+				.map(|r| format!("{}..{}", r.start(), r.end()))
+				.collect::<Vec<_>>()
+				.join(" union "),
+			Literal::String(s) => s.clone(),
+		}
 	}
 }
 

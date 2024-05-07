@@ -16,7 +16,7 @@ use pindakaas::{
 use tracing::debug;
 
 use self::{
-	value::{Valuation, Value},
+	value::{AssumptionChecker, ConstantFailure, Valuation, Value},
 	view::{BoolViewInner, IntView, SolverView},
 };
 use crate::{
@@ -26,19 +26,22 @@ use crate::{
 		initialization_context::InitializationContext,
 		view::IntViewInner,
 	},
-	BoolView, LitMeaning,
+	BoolView, LitMeaning, ReformulationError,
 };
 
 #[derive(Debug)]
-pub struct Solver<Sat: SatSolver = Cadical>
+pub struct Solver<Sat = Cadical>
 where
+	Sat: SatSolver,
 	<Sat as SolverTrait>::ValueFn: PropagatorAccess,
 {
 	pub(crate) oracle: Sat,
 }
 
-impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn = Sol>>
-	Solver<Sat>
+impl<Sol, Sat> Solver<Sat>
+where
+	Sol: PropagatorAccess + SatValuation,
+	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 {
 	pub(crate) fn engine(&self) -> &Engine {
 		self.oracle.propagator().unwrap()
@@ -48,30 +51,55 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 		self.oracle.propagator_mut().unwrap()
 	}
 
-	pub fn solve(&mut self, mut on_sol: impl FnMut(&dyn Valuation)) -> SolveResult {
-		let status = self.oracle.solve(|model| {
-			let engine: &Engine = model.propagator().unwrap();
-			let wrapper: &dyn Valuation = &|x| match x {
-				SolverView::Bool(lit) => match lit.0 {
-					BoolViewInner::Lit(lit) => model.value(lit).map(Value::Bool),
-					BoolViewInner::Const(b) => Some(Value::Bool(b)),
-				},
-				SolverView::Int(var) => match var.0 {
-					IntViewInner::VarRef(iv) => {
-						Some(Value::Int(engine.state.int_vars[iv].get_value(model)))
-					}
-					IntViewInner::Const(i) => Some(Value::Int(i)),
-					IntViewInner::Linear { var, scale, offset } => {
-						Some(Value::Int(IntView::linear_transform(
-							engine.state.int_vars[var].get_value(model),
-							scale,
-							offset,
-						)))
-					}
-				},
-			};
-			on_sol(wrapper);
-		});
+	/// Try and find a solution to the problem for which the Solver was initialized, given a list of
+	/// Boolean assumptions.
+	pub fn solve_assuming(
+		&mut self,
+		assumptions: impl IntoIterator<Item = BoolView>,
+		mut on_sol: impl FnMut(&dyn Valuation),
+		on_fail: impl FnOnce(&dyn AssumptionChecker),
+	) -> SolveResult {
+		// Process assumptions
+		let Ok(assumptions): Result<Vec<RawLit>, _> = assumptions
+			.into_iter()
+			.filter_map(|bv| match bv.0 {
+				BoolViewInner::Lit(lit) => Some(Ok(lit)),
+				BoolViewInner::Const(true) => None,
+				BoolViewInner::Const(false) => Some(Err(ReformulationError::TrivialUnsatisfiable)),
+			})
+			.collect()
+		else {
+			on_fail(&ConstantFailure);
+			return SolveResult::Unsatisfiable;
+		};
+
+		let status = self.oracle.solve_assuming(
+			assumptions,
+			|model| {
+				let engine: &Engine = model.propagator().unwrap();
+				let wrapper: &dyn Valuation = &|x| match x {
+					SolverView::Bool(lit) => match lit.0 {
+						BoolViewInner::Lit(lit) => model.value(lit).map(Value::Bool),
+						BoolViewInner::Const(b) => Some(Value::Bool(b)),
+					},
+					SolverView::Int(var) => match var.0 {
+						IntViewInner::VarRef(iv) => {
+							Some(Value::Int(engine.state.int_vars[iv].get_value(model)))
+						}
+						IntViewInner::Const(i) => Some(Value::Int(i)),
+						IntViewInner::Linear { var, scale, offset } => {
+							Some(Value::Int(IntView::linear_transform(
+								engine.state.int_vars[var].get_value(model),
+								scale,
+								offset,
+							)))
+						}
+					},
+				};
+				on_sol(wrapper);
+			},
+			|fail_fn| on_fail(fail_fn),
+		);
 		match status {
 			SatSolveResult::Sat => SolveResult::Satisfied,
 			SatSolveResult::Unsat => SolveResult::Unsatisfiable,
@@ -79,7 +107,12 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 		}
 	}
 
-	/// Generate all solutions with regard to a list of given variables.
+	/// Try and find a solution to the problem for which the Solver was initialized.
+	pub fn solve(&mut self, on_sol: impl FnMut(&dyn Valuation)) -> SolveResult {
+		self.solve_assuming([], on_sol, |_| {})
+	}
+
+	/// Find all solutions with regard to a list of given variables.
 	///
 	/// WARNING: This method will add additional clauses into the solver to prevent the same solution
 	/// from being generated twice. This will make repeated use of the Solver object impossible. Note
@@ -104,7 +137,7 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 				SolveResult::Satisfied => {
 					let nogood: Vec<RawLit> = vars
 						.iter()
-						.zip_eq(vals.into_iter())
+						.zip_eq(vals)
 						.filter_map(|(var, val)| match var {
 							SolverView::Bool(BoolView(BoolViewInner::Lit(l))) => {
 								let Value::Bool(val) = val? else {
@@ -125,7 +158,7 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 							_ => None,
 						})
 						.collect();
-					if let Err(_) = self.oracle.add_clause(nogood) {
+					if self.oracle.add_clause(nogood).is_err() {
 						return SolveResult::Complete;
 					}
 				}
@@ -144,6 +177,74 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 					}
 				}
 				_ => unreachable!(),
+			}
+		}
+	}
+
+	/// Find an optimal solution with regards to the given objective and goal.
+	///
+	/// Note that this method uses assumptions iteratively increase the lower bound of the objective.
+	/// This does not impact the state of the solver for continued use.œ
+	pub fn branch_and_bound(
+		&mut self,
+		objective: IntView,
+		goal: Goal,
+		mut on_sol: impl FnMut(&dyn Valuation),
+	) -> SolveResult {
+		let mut obj_curr = None;
+		let obj_best = match goal {
+			Goal::Minimize => self.engine().state.get_int_lower_bound(objective),
+			Goal::Maximize => self.engine().state.get_int_upper_bound(objective),
+		};
+		let mut assump = None;
+		loop {
+			let status = self.solve_assuming(
+				assump,
+				|value| {
+					obj_curr = value(SolverView::Int(objective)).map(|val| {
+						if let Value::Int(i) = val {
+							i
+						} else {
+							unreachable!()
+						}
+					});
+					on_sol(value);
+				},
+				|_| {},
+			);
+			match status {
+				SolveResult::Satisfied => {
+					if obj_curr == Some(obj_best) {
+						return SolveResult::Complete;
+					} else {
+						assump = match goal {
+							Goal::Minimize => Some(
+								self.engine()
+									.state
+									.get_int_lit(objective, LitMeaning::Less(obj_curr.unwrap())),
+							),
+							Goal::Maximize => Some(self.engine().state.get_int_lit(
+								objective,
+								LitMeaning::GreaterEq(obj_curr.unwrap() + 1),
+							)),
+						};
+					}
+				}
+				SolveResult::Unsatisfiable => {
+					return if obj_curr.is_none() {
+						SolveResult::Unsatisfiable
+					} else {
+						SolveResult::Complete
+					}
+				}
+				SolveResult::Unknown => {
+					return if obj_curr.is_none() {
+						SolveResult::Unknown
+					} else {
+						SolveResult::Satisfied
+					}
+				}
+				SolveResult::Complete => unreachable!(),
 			}
 		}
 	}
@@ -190,8 +291,10 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 	}
 }
 
-impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn = Sol>> From<Cnf>
-	for Solver<Sat>
+impl<Sol, Sat> From<Cnf> for Solver<Sat>
+where
+	Sol: PropagatorAccess + SatValuation,
+	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 {
 	fn from(value: Cnf) -> Self {
 		let mut core: Sat = value.into();
@@ -203,8 +306,10 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 	}
 }
 
-impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn = Sol> + Clone>
-	Clone for Solver<Sat>
+impl<Sol, Sat> Clone for Solver<Sat>
+where
+	Sol: PropagatorAccess + SatValuation,
+	Sat: SatSolver + SolverTrait<ValueFn = Sol> + Clone,
 {
 	fn clone(&self) -> Self {
 		let mut core = self.oracle.clone();
@@ -240,4 +345,10 @@ pub enum SolveResult {
 	Unsatisfiable,
 	Complete,
 	Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Goal {
+	Maximize,
+	Minimize,
 }

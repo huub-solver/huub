@@ -20,15 +20,16 @@ pub enum IntExpr {
 }
 
 impl IntExpr {
-	pub(crate) fn to_arg<
-		Sol: PropagatorAccess + SatValuation,
-		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
-	>(
+	pub(crate) fn to_arg<Sol, Sat>(
 		&self,
 		_ctx: ReifContext,
 		_slv: &mut Solver<Sat>,
 		map: &mut VariableMap,
-	) -> IntView {
+	) -> IntView
+	where
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	{
 		match self {
 			IntExpr::Var(v) => {
 				if let SolverView::Int(i) = map.get(&Variable::Int(*v)) {

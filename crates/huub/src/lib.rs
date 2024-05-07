@@ -12,7 +12,7 @@ pub use solver::{
 	engine::int_var::LitMeaning,
 	value::{IntVal, NonZeroIntVal, Valuation, Value},
 	view::{BoolView, IntView, SolverView},
-	SolveResult, Solver,
+	Goal, SolveResult, Solver,
 };
 
 /// Type alias for a disjunction of literals (clause), used for internal type documentation.

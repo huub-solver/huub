@@ -8,7 +8,7 @@ use std::ops::AddAssign;
 use flatzinc_serde::RangeList;
 use itertools::Itertools;
 use pindakaas::{
-	solver::{PropagatorAccess, Solver as SolverTrait},
+	solver::{NextVarRange, PropagatorAccess, Solver as SolverTrait},
 	ClauseDatabase, Cnf, ConditionalDatabase, Lit as RawLit, Valuation as SatValuation,
 	Var as RawVar,
 };
@@ -35,6 +35,10 @@ pub struct Model {
 impl Model {
 	pub fn new_bool_var(&mut self) -> BoolVar {
 		BoolVar(self.cnf.new_var())
+	}
+
+	pub fn new_bool_var_range(&mut self, len: usize) -> Vec<BoolVar> {
+		self.cnf.next_var_range(len).unwrap().map(BoolVar).collect()
 	}
 
 	pub fn new_int_var(&mut self, domain: RangeList<i64>) -> IntVar {
@@ -108,14 +112,15 @@ pub enum Constraint {
 }
 
 impl Constraint {
-	fn to_solver<
-		Sol: PropagatorAccess + SatValuation,
-		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
-	>(
+	fn to_solver<Sol, Sat>(
 		&self,
 		slv: &mut Solver<Sat>,
 		map: &mut VariableMap,
-	) -> Result<(), ReformulationError> {
+	) -> Result<(), ReformulationError>
+	where
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	{
 		match self {
 			Constraint::SimpleBool(exp) => exp.constrain(slv, map),
 			Constraint::AllDifferent(v) => {
