@@ -89,15 +89,12 @@ impl Not for &BoolView {
 pub struct IntView(pub(crate) IntViewInner);
 
 impl IntView {
-	pub fn add_to_lit_reverse_map<
+	pub fn add_to_lit_reverse_map<Sol, Sat, M>(&self, slv: &Solver<Sat>, map: &mut M)
+	where
 		Sol: PropagatorAccess + SatValuation,
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 		M: Extend<(NonZeroI32, (usize, LitMeaning))>,
-	>(
-		&self,
-		slv: &Solver<Sat>,
-		map: &mut M,
-	) {
+	{
 		match self.0 {
 			IntViewInner::VarRef(v) => {
 				let var = &slv.engine().state.int_vars[v];

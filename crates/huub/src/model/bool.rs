@@ -36,14 +36,15 @@ pub enum BoolExpr {
 }
 
 impl BoolExpr {
-	pub(crate) fn constrain<
-		Sol: PropagatorAccess + SatValuation,
-		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
-	>(
+	pub(crate) fn constrain<Sol, Sat>(
 		&self,
 		slv: &mut Solver<Sat>,
 		map: &mut VariableMap,
-	) -> Result<(), ReformulationError> {
+	) -> Result<(), ReformulationError>
+	where
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	{
 		match self {
 			BoolExpr::Val(false) => Err(ReformulationError::TrivialUnsatisfiable),
 			BoolExpr::Val(true) => Ok(()),
@@ -179,16 +180,17 @@ impl BoolExpr {
 		}
 	}
 
-	pub(crate) fn to_arg<
-		Sol: PropagatorAccess + SatValuation,
-		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
-	>(
+	pub(crate) fn to_arg<Sol, Sat>(
 		&self,
 		ctx: ReifContext,
 		slv: &mut Solver<Sat>,
 		map: &mut VariableMap,
 		name: Option<RawLit>,
-	) -> Result<BoolView, ReformulationError> {
+	) -> Result<BoolView, ReformulationError>
+	where
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	{
 		let bind_lit = |oracle: &mut Sat, lit| {
 			Ok(BoolView(BoolViewInner::Lit(if let Some(name) = name {
 				oracle
@@ -347,16 +349,17 @@ impl BoolExpr {
 		}
 	}
 
-	fn to_negated_arg<
-		Sol: PropagatorAccess + SatValuation,
-		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
-	>(
+	fn to_negated_arg<Sol, Sat>(
 		&self,
 		ctx: ReifContext,
 		slv: &mut Solver<Sat>,
 		map: &mut VariableMap,
 		name: Option<RawLit>,
-	) -> Result<BoolView, ReformulationError> {
+	) -> Result<BoolView, ReformulationError>
+	where
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	{
 		match self {
 			BoolExpr::Not(v) => v.to_arg(!ctx, slv, map, name),
 			BoolExpr::Lit(v) => Ok(BoolView(BoolViewInner::Lit((!v).0))),
@@ -493,5 +496,72 @@ impl From<Literal> for BoolExpr {
 impl Display for Literal {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		self.0.fmt(f)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use itertools::Itertools;
+
+	use crate::{BoolExpr, Model, SolveResult, Solver, Value};
+
+	#[test]
+	fn test_bool_and() {
+		// Simple Satisfiable test case
+		let mut m = Model::default();
+		let b = m.new_bool_var_range(3);
+
+		m += BoolExpr::And(b.iter().copied().map_into().collect());
+		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
+		assert_eq!(
+			slv.solve(|sol| {
+				for &l in &b {
+					assert_eq!(sol(map.get(&l.into())), Some(Value::Bool(true)));
+				}
+			}),
+			SolveResult::Satisfied
+		);
+
+		// Simple Unsatisfiable test case
+		let mut m = Model::default();
+		let b = m.new_bool_var_range(3);
+
+		m += BoolExpr::And(b.iter().copied().map_into().collect());
+		m += BoolExpr::from(!b[0]);
+		let (mut slv, _): (Solver, _) = m.to_solver().unwrap();
+		assert_eq!(
+			slv.solve(|_| { unreachable!("expected unsatisfiable") }),
+			SolveResult::Unsatisfiable
+		);
+	}
+
+	#[test]
+	fn test_bool_or() {
+		// Simple Satisfiable test case
+		let mut m = Model::default();
+		let b = m.new_bool_var_range(3);
+
+		m += BoolExpr::Or(b.iter().copied().map_into().collect());
+		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
+		assert_eq!(
+			slv.solve(|sol| {
+				assert!(b
+					.iter()
+					.any(|&l| sol(map.get(&l.into())) == Some(Value::Bool(true))));
+			}),
+			SolveResult::Satisfied
+		);
+
+		// Simple Unsatisfiable test case
+		let mut m = Model::default();
+		let b = m.new_bool_var_range(3);
+
+		m += BoolExpr::Or(b.iter().copied().map_into().collect());
+		m += BoolExpr::And(b.iter().copied().map(|l| (!l).into()).collect());
+		let (mut slv, _): (Solver, _) = m.to_solver().unwrap();
+		assert_eq!(
+			slv.solve(|_| { unreachable!("expected unsatisfiable") }),
+			SolveResult::Unsatisfiable
+		);
 	}
 }
