@@ -79,14 +79,11 @@ impl Propagator for AllDifferentValue {
 mod tests {
 	use flatzinc_serde::RangeList;
 	use itertools::Itertools;
-	use pindakaas::{
-		solver::{cadical::Cadical, SolveResult},
-		Cnf,
-	};
+	use pindakaas::{solver::cadical::Cadical, Cnf};
 
 	use crate::{
 		propagator::all_different::AllDifferentValue, solver::engine::int_var::IntVar, IntVal,
-		IntView, Solver,
+		IntView, SolveResult, Solver,
 	};
 
 	#[test]
@@ -103,7 +100,7 @@ mod tests {
 				assert_ne!(val(b.into()), val(c.into()));
 				assert_ne!(val(a.into()), val(c.into()));
 			}),
-			SolveResult::Sat
+			SolveResult::Satisfied
 		)
 	}
 
@@ -115,7 +112,10 @@ mod tests {
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
 		slv.add_propagator(AllDifferentValue::new(vec![a, b, c]));
-		assert_eq!(slv.solve(|_| { unreachable!() }), SolveResult::Unsat)
+		assert_eq!(
+			slv.solve(|_| { unreachable!() }),
+			SolveResult::Unsatisfiable
+		)
 	}
 
 	fn test_sudoku(grid: Vec<String>, expected: SolveResult) {
@@ -216,7 +216,7 @@ mod tests {
 				"593742168".to_owned(),
 				"687351492".to_owned(),
 			],
-			SolveResult::Sat,
+			SolveResult::Satisfied,
 		);
 	}
 
@@ -234,7 +234,7 @@ mod tests {
 				".63....8.".to_owned(),
 				"...6.8...".to_owned(),
 			],
-			SolveResult::Sat,
+			SolveResult::Satisfied,
 		);
 	}
 
@@ -252,7 +252,7 @@ mod tests {
 				"..9...6..".to_owned(),
 				"5..3.9..8".to_owned(),
 			],
-			SolveResult::Sat,
+			SolveResult::Satisfied,
 		);
 	}
 
@@ -270,7 +270,7 @@ mod tests {
 				".48..69.7".to_owned(),
 				"....8....".to_owned(),
 			],
-			SolveResult::Sat,
+			SolveResult::Satisfied,
 		);
 	}
 
@@ -288,7 +288,7 @@ mod tests {
 				"....2..6.".to_owned(),
 				".2.4..5..".to_owned(),
 			],
-			SolveResult::Sat,
+			SolveResult::Satisfied,
 		);
 	}
 
@@ -306,7 +306,7 @@ mod tests {
 				"........5".to_owned(),
 				".34.9.71.".to_owned(),
 			],
-			SolveResult::Sat,
+			SolveResult::Satisfied,
 		);
 	}
 }
