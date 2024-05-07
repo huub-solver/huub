@@ -7,7 +7,10 @@ use std::{
 	io::{self, BufReader},
 	num::NonZeroI32,
 	path::PathBuf,
-	sync::{Arc, Mutex},
+	sync::{
+		atomic::{AtomicBool, Ordering},
+		Arc, Mutex,
+	},
 	time::{Duration, Instant},
 };
 
@@ -111,17 +114,6 @@ fn main() -> Result<()> {
 		*int_reverse_map.lock().unwrap() = int_map;
 	}
 
-	// Set time limit if required
-	if let Some(deadline) = deadline {
-		slv.set_terminate_callback(Some(|| {
-			if Instant::now() >= deadline {
-				SlvTermSignal::Terminate
-			} else {
-				SlvTermSignal::Continue
-			}
-		}));
-	}
-
 	// Determine Goal and Objective
 	let goal = if fzn.solve.method != Method::Satisfy {
 		let obj_expr = fzn.solve.objective.as_ref().unwrap();
@@ -145,6 +137,42 @@ fn main() -> Result<()> {
 		None
 	};
 
+	// Set termination conditions for solver
+	let interrupt_handling = goal.is_some() && !args.intermediate_solutions;
+	let interrupted = Arc::new(AtomicBool::new(false));
+	match (interrupt_handling, deadline) {
+		(true, Some(deadline)) => {
+			let int_bool = Arc::clone(&interrupted);
+			slv.set_terminate_callback(Some(move || {
+				if int_bool.load(Ordering::SeqCst) || Instant::now() >= deadline {
+					SlvTermSignal::Terminate
+				} else {
+					SlvTermSignal::Continue
+				}
+			}));
+		}
+		(true, None) => {
+			let int_bool = Arc::clone(&interrupted);
+			slv.set_terminate_callback(Some(move || {
+				if int_bool.load(Ordering::SeqCst) {
+					SlvTermSignal::Terminate
+				} else {
+					SlvTermSignal::Continue
+				}
+			}));
+		}
+		(false, Some(deadline)) => {
+			slv.set_terminate_callback(Some(move || {
+				if Instant::now() >= deadline {
+					SlvTermSignal::Terminate
+				} else {
+					SlvTermSignal::Continue
+				}
+			}));
+		}
+		_ => {}
+	};
+
 	// Run the solver!
 	let res = match goal {
 		Some((goal, obj)) => {
@@ -163,6 +191,13 @@ fn main() -> Result<()> {
 					)
 				})
 			} else {
+				// Set up Ctrl-C handler (to allow printing last solution)
+				if let Err(err) = ctrlc::set_handler(move || {
+					interrupted.store(false, Ordering::SeqCst);
+				}) {
+					warn!("unable to set Ctrl-C handler: {}", err);
+				}
+
 				let mut last_sol = String::new();
 				let res = slv.branch_and_bound(obj, goal, |value| {
 					last_sol = format!(
