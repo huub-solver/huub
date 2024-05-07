@@ -3,4 +3,5 @@ enforced-import-renames = [
   { path = "pindakaas::Var", rename = "RawVar" },
   { path = "pindakaas::solver::Solver", rename = "SolverTrait" },
   { path = "pindakaas::Valuation", rename = "SatValuation" },
+  { path = "pindakaas::solver::SolveResult", rename = "SatSolveResult" },
 ]

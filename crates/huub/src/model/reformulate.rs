@@ -28,7 +28,11 @@ impl VariableMap {
 		let SolverView::Bool(v) = self.get(&Variable::Bool(BoolVar(lit.0.var()))) else {
 			unreachable!()
 		};
-		v
+		if lit.is_negated() {
+			!v
+		} else {
+			v
+		}
 	}
 
 	pub fn insert(&mut self, index: Variable, elem: SolverView) {

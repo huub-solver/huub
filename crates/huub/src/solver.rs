@@ -4,10 +4,12 @@ pub(crate) mod value;
 pub(crate) mod view;
 
 use delegate::delegate;
+use itertools::Itertools;
 use pindakaas::{
 	solver::{
 		cadical::Cadical, LearnCallback, NextVarRange, PropagatingSolver, PropagatorAccess,
-		SlvTermSignal, SolveAssuming, SolveResult, Solver as SolverTrait, TermCallback,
+		SlvTermSignal, SolveAssuming, SolveResult as SatSolveResult, Solver as SolverTrait,
+		TermCallback,
 	},
 	Cnf, Lit as RawLit, Valuation as SatValuation,
 };
@@ -18,12 +20,13 @@ use self::{
 	view::{BoolViewInner, IntView, SolverView},
 };
 use crate::{
-	propagator::Propagator,
+	propagator::{ExplainActions, Propagator},
 	solver::{
 		engine::{Engine, PropRef},
 		initialization_context::InitializationContext,
 		view::IntViewInner,
 	},
+	BoolView, LitMeaning,
 };
 
 #[derive(Debug)]
@@ -46,7 +49,7 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 	}
 
 	pub fn solve(&mut self, mut on_sol: impl FnMut(&dyn Valuation)) -> SolveResult {
-		self.oracle.solve(|model| {
+		let status = self.oracle.solve(|model| {
 			let engine: &Engine = model.propagator().unwrap();
 			let wrapper: &dyn Valuation = &|x| match x {
 				SolverView::Bool(lit) => match lit.0 {
@@ -68,7 +71,81 @@ impl<Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn 
 				},
 			};
 			on_sol(wrapper);
-		})
+		});
+		match status {
+			SatSolveResult::Sat => SolveResult::Satisfied,
+			SatSolveResult::Unsat => SolveResult::Unsatisfiable,
+			SatSolveResult::Unknown => SolveResult::Unknown,
+		}
+	}
+
+	/// Generate all solutions with regard to a list of given variables.
+	///
+	/// WARNING: This method will add additional clauses into the solver to prevent the same solution
+	/// from being generated twice. This will make repeated use of the Solver object impossible. Note
+	/// that you can clone the Solver object before calling this method to work around this
+	/// limitation.
+	pub fn all_solutions(
+		&mut self,
+		vars: &[SolverView],
+		mut on_sol: impl FnMut(&dyn Valuation),
+	) -> SolveResult {
+		let mut num_sol = 0;
+		loop {
+			let mut vals = Vec::with_capacity(vars.len());
+			let status = self.solve(|value| {
+				num_sol += 1;
+				for v in vars {
+					vals.push(value(*v));
+				}
+				on_sol(value);
+			});
+			match status {
+				SolveResult::Satisfied => {
+					let nogood: Vec<RawLit> = vars
+						.iter()
+						.zip_eq(vals.into_iter())
+						.filter_map(|(var, val)| match var {
+							SolverView::Bool(BoolView(BoolViewInner::Lit(l))) => {
+								let Value::Bool(val) = val? else {
+									unreachable!()
+								};
+								Some(if val { !l } else { *l })
+							}
+							SolverView::Int(iv) => {
+								let Value::Int(val) = val? else {
+									unreachable!()
+								};
+								match self.engine().state.get_int_lit(*iv, LitMeaning::Eq(val)).0 {
+									BoolViewInner::Lit(l) => Some(!l),
+									BoolViewInner::Const(true) => None,
+									BoolViewInner::Const(false) => unreachable!(),
+								}
+							}
+							_ => None,
+						})
+						.collect();
+					if let Err(_) = self.oracle.add_clause(nogood) {
+						return SolveResult::Complete;
+					}
+				}
+				SolveResult::Unsatisfiable => {
+					if num_sol == 0 {
+						return SolveResult::Unsatisfiable;
+					} else {
+						return SolveResult::Complete;
+					}
+				}
+				SolveResult::Unknown => {
+					if num_sol == 0 {
+						return SolveResult::Unknown;
+					} else {
+						return SolveResult::Satisfied;
+					}
+				}
+				_ => unreachable!(),
+			}
+		}
 	}
 
 	pub fn num_int_vars(&self) -> usize {
@@ -155,4 +232,12 @@ where
 	X: PropagatingSolver + TermCallback + LearnCallback + SolveAssuming + NextVarRange + From<Cnf>,
 	<X as SolverTrait>::ValueFn: PropagatorAccess,
 {
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SolveResult {
+	Satisfied,
+	Unsatisfiable,
+	Complete,
+	Unknown,
 }

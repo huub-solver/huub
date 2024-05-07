@@ -6,13 +6,13 @@ pub use model::{
 	bool::BoolExpr, flatzinc::FlatZincError, int::IntExpr, reformulate::ReformulationError,
 	Constraint, Model, Variable,
 };
-pub use pindakaas::solver::{SlvTermSignal, SolveResult};
+pub use pindakaas::solver::SlvTermSignal;
 use pindakaas::Lit as RawLit;
 pub use solver::{
 	engine::int_var::LitMeaning,
 	value::{IntVal, NonZeroIntVal, Valuation, Value},
 	view::{BoolView, IntView, SolverView},
-	Solver,
+	SolveResult, Solver,
 };
 
 /// Type alias for a disjunction of literals (clause), used for internal type documentation.
@@ -41,7 +41,7 @@ mod tests {
 			slv.solve(|value| {
 				assert_ne!(value(a), value(b));
 			}),
-			SolveResult::Sat
+			SolveResult::Satisfied
 		);
 	}
 }

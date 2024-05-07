@@ -73,7 +73,7 @@ fn main() -> Result<()> {
 	// Resolve any errors that may have occurred during the conversion
 	let (mut slv, var_map): (Solver, UstrMap<SolverView>) = match res {
 		Err(FlatZincError::ReformulationError(ReformulationError::TrivialUnsatisfiable)) => {
-			println!("=====UNSATISFIABLE=====");
+			println!("{}", FZN_UNSATISFIABLE);
 			return Ok(());
 		}
 		Err(err) => {
@@ -122,7 +122,7 @@ fn main() -> Result<()> {
 	}
 
 	// Run the solver!
-	let res = slv.solve(|value| {
+	let print_sol = |value: &dyn Valuation, fzn: &FlatZinc<Ustr>, var_map: &UstrMap<SolverView>| {
 		for ident in &fzn.output {
 			if let Some(arr) = fzn.arrays.get(ident) {
 				println!(
@@ -137,15 +137,43 @@ fn main() -> Result<()> {
 				println!("{ident} = {};", value(var_map[ident]).unwrap())
 			}
 		}
-		println!("----------");
-	});
+		println!("{}", FZN_SEPERATOR);
+	};
+	let res = if args.all_solutions {
+		let vars: Vec<_> = fzn
+			.output
+			.iter()
+			.flat_map(|ident| {
+				if let Some(arr) = fzn.arrays.get(ident) {
+					arr.contents
+						.iter()
+						.filter_map(|lit| {
+							if let Literal::Identifier(ident) = lit {
+								Some(var_map[ident])
+							} else {
+								None
+							}
+						})
+						.collect()
+				} else {
+					vec![var_map[ident]]
+				}
+			})
+			.collect();
+		slv.all_solutions(&vars, |value| print_sol(value, &fzn, &var_map))
+	} else {
+		slv.solve(|value| print_sol(value, &fzn, &var_map))
+	};
 	match res {
-		SolveResult::Sat => {}
-		SolveResult::Unsat => {
-			println!("=====UNSATISFIABLE=====")
+		SolveResult::Satisfied => {}
+		SolveResult::Unsatisfiable => {
+			println!("{}", FZN_UNSATISFIABLE);
 		}
 		SolveResult::Unknown => {
-			println!("=====UNKNOWN=====")
+			println!("{}", FZN_UNKNOWN)
+		}
+		SolveResult::Complete => {
+			println!("{}", FZN_COMPLETE)
 		}
 	}
 	Ok(())
@@ -160,6 +188,10 @@ struct Args {
 	/// Path to the FlatZinc JSON input file
 	#[arg(required = true)]
 	path: PathBuf,
+
+	/// Output all (satisfiable) solutions
+	#[arg(short, long)]
+	all_solutions: bool,
 
 	/// Output intermediate solutions
 	#[arg(short, long)]
@@ -211,3 +243,8 @@ fn print_lit(value: &dyn Valuation, var_map: &UstrMap<SolverView>, lit: &Literal
 		Literal::String(s) => s.clone(),
 	}
 }
+
+const FZN_COMPLETE: &str = "==========";
+const FZN_SEPERATOR: &str = "----------";
+const FZN_UNKNOWN: &str = "=====UNKNOWN=====";
+const FZN_UNSATISFIABLE: &str = "=====UNSATISFIABLE=====";
