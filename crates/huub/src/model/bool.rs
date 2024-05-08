@@ -501,9 +501,10 @@ impl Display for Literal {
 
 #[cfg(test)]
 mod tests {
+	use expect_test::expect;
 	use itertools::Itertools;
 
-	use crate::{BoolExpr, Model, SolveResult, Solver, Value};
+	use crate::{BoolExpr, Model, Solver};
 
 	#[test]
 	fn test_bool_and() {
@@ -513,14 +514,8 @@ mod tests {
 
 		m += BoolExpr::And(b.iter().copied().map_into().collect());
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
-		assert_eq!(
-			slv.solve(|sol| {
-				for &l in &b {
-					assert_eq!(sol(map.get(&l.into())), Some(Value::Bool(true)));
-				}
-			}),
-			SolveResult::Satisfied
-		);
+		let vars: Vec<_> = b.into_iter().map(|x| map.get(&x.into())).collect();
+		slv.expect_solutions(&vars, expect!["true, true, true"]);
 
 		// Simple Unsatisfiable test case
 		let mut m = Model::default();
@@ -529,10 +524,7 @@ mod tests {
 		m += BoolExpr::And(b.iter().copied().map_into().collect());
 		m += BoolExpr::from(!b[0]);
 		let (mut slv, _): (Solver, _) = m.to_solver().unwrap();
-		assert_eq!(
-			slv.solve(|_| { unreachable!("expected unsatisfiable") }),
-			SolveResult::Unsatisfiable
-		);
+		slv.assert_unsatisfiable();
 	}
 
 	#[test]
@@ -543,13 +535,17 @@ mod tests {
 
 		m += BoolExpr::Or(b.iter().copied().map_into().collect());
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
-		assert_eq!(
-			slv.solve(|sol| {
-				assert!(b
-					.iter()
-					.any(|&l| sol(map.get(&l.into())) == Some(Value::Bool(true))));
-			}),
-			SolveResult::Satisfied
+		let vars: Vec<_> = b.into_iter().map(|x| map.get(&x.into())).collect();
+		slv.expect_solutions(
+			&vars,
+			expect![[r#"
+    false, false, true
+    false, true, false
+    false, true, true
+    true, false, false
+    true, false, true
+    true, true, false
+    true, true, true"#]],
 		);
 
 		// Simple Unsatisfiable test case
@@ -559,9 +555,101 @@ mod tests {
 		m += BoolExpr::Or(b.iter().copied().map_into().collect());
 		m += BoolExpr::And(b.iter().copied().map(|l| (!l).into()).collect());
 		let (mut slv, _): (Solver, _) = m.to_solver().unwrap();
-		assert_eq!(
-			slv.solve(|_| { unreachable!("expected unsatisfiable") }),
-			SolveResult::Unsatisfiable
+		slv.assert_unsatisfiable()
+	}
+
+	#[test]
+	fn test_bool_xor() {
+		// Simple Satisfiable test case
+		let mut m = Model::default();
+		let b = m.new_bool_var_range(3);
+
+		m += BoolExpr::Xor(b.iter().copied().map_into().collect());
+		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
+		let vars: Vec<_> = b.into_iter().map(|x| map.get(&x.into())).collect();
+		slv.expect_solutions(
+			&vars,
+			expect![[r#"
+    false, false, true
+    false, true, false
+    true, false, false
+    true, true, true"#]],
+		);
+
+		// Simple Unsatisfiable test case
+		let mut m = Model::default();
+		let b = m.new_bool_var_range(2);
+
+		m += BoolExpr::Xor(b.iter().copied().map_into().collect());
+		m += BoolExpr::from(!b[0]);
+		m += BoolExpr::from(!b[1]);
+		let (mut slv, _): (Solver, _) = m.to_solver().unwrap();
+		slv.assert_unsatisfiable();
+	}
+
+	#[test]
+	fn test_bool_eq_reif() {
+		// Simple Satisfiable test case
+		let mut m = Model::default();
+		let b = m.new_bool_var_range(3);
+
+		m += BoolExpr::Equiv(vec![
+			b[0].into(),
+			BoolExpr::Equiv(vec![b[1].into(), b[2].into()]),
+		]);
+		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
+		let vars: Vec<_> = b.into_iter().map(|x| map.get(&x.into())).collect();
+		slv.expect_solutions(
+			&vars,
+			expect![[r#"
+    false, false, true
+    false, true, false
+    true, false, false
+    true, true, true"#]],
+		);
+	}
+
+	#[test]
+	fn test_bool_and_reif() {
+		// Simple Satisfiable test case
+		let mut m = Model::default();
+		let b = m.new_bool_var_range(3);
+
+		m += BoolExpr::Equiv(vec![
+			b[0].into(),
+			BoolExpr::And(vec![b[1].into(), b[2].into()]),
+		]);
+		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
+		let vars: Vec<_> = b.into_iter().map(|x| map.get(&x.into())).collect();
+		slv.expect_solutions(
+			&vars,
+			expect![[r#"
+    false, false, false
+    false, false, true
+    false, true, false
+    true, true, true"#]],
+		);
+	}
+
+	#[test]
+	fn test_bool_clause_reif() {
+		// Simple Satisfiable test case
+		let mut m = Model::default();
+		let b = m.new_bool_var_range(3);
+
+		m += BoolExpr::Equiv(vec![
+			b[0].into(),
+			BoolExpr::Or(vec![b[1].into(), b[2].into()]),
+		]);
+		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
+		let vars: Vec<_> = b.into_iter().map(|x| map.get(&x.into())).collect();
+		slv.expect_solutions(
+			&vars,
+			expect![[r#"
+    false, false, false
+    true, false, true
+    true, true, false
+    true, true, true"#]],
 		);
 	}
 }
