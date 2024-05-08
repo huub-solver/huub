@@ -113,6 +113,7 @@ where
 	}
 
 	/// Find all solutions with regard to a list of given variables.
+	/// The given closure will be called for each solution found.
 	///
 	/// WARNING: This method will add additional clauses into the solver to prevent the same solution
 	/// from being generated twice. This will make repeated use of the Solver object impossible. Note
@@ -179,6 +180,25 @@ where
 				_ => unreachable!(),
 			}
 		}
+	}
+
+	/// Wrapper function for `all_solutions` that collects all solutions and returns them in a vector
+	/// of solution values.
+	///
+	/// WARNING: This method will add additional clauses into the solver to prevent the same solution
+	/// from being generated twice. This will make repeated use of the Solver object impossible. Note
+	/// that you can clone the Solver object before calling this method to work around this
+	/// limitation.
+	pub fn get_all_solutions(&mut self, vars: &[SolverView]) -> (SolveResult, Vec<Vec<Value>>) {
+		let mut solutions = Vec::new();
+		let status = self.all_solutions(vars, |sol| {
+			let mut sol_vec = Vec::with_capacity(vars.len());
+			for v in vars {
+				sol_vec.push(sol(*v).unwrap());
+			}
+			solutions.push(sol_vec);
+		});
+		(status, solutions)
 	}
 
 	/// Find an optimal solution with regards to the given objective and goal.

@@ -22,3 +22,6 @@ tracing = "0.1.40"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+expect-test = "1.5.0"

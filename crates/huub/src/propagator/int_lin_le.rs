@@ -123,10 +123,7 @@ mod tests {
 	use flatzinc_serde::RangeList;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
 
-	use crate::{
-		propagator::int_lin_le::LinearLE, solver::engine::int_var::IntVar, SolveResult, Solver,
-		Value,
-	};
+	use crate::{propagator::int_lin_le::LinearLE, solver::engine::int_var::IntVar, Solver, Value};
 
 	#[test]
 	fn test_linear_le_sat() {
@@ -136,19 +133,10 @@ mod tests {
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
 		slv.add_propagator(LinearLE::new(&[2, 1, 1], vec![a, b, c], 10));
-		let result = slv.solve(|val| {
-			let Value::Int(a_val) = val(a.into()).unwrap() else {
-				panic!()
-			};
-			let Value::Int(b_val) = val(b.into()).unwrap() else {
-				panic!()
-			};
-			let Value::Int(c_val) = val(c.into()).unwrap() else {
-				panic!()
-			};
-			assert!(a_val * 2 + b_val + c_val <= 10)
+
+		slv.assert_all_solutions(&[a.into(), b.into(), c.into()], |sol: &[Value]| {
+			sol[0].as_int().unwrap() * 2 + sol[1].as_int().unwrap() + sol[2].as_int().unwrap() <= 10
 		});
-		assert_eq!(result, SolveResult::Satisfied)
 	}
 
 	#[test]
@@ -159,7 +147,7 @@ mod tests {
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 
 		slv.add_propagator(LinearLE::new(&[2, 1, 1], vec![a, b, c], 3));
-		assert_eq!(slv.solve(|_| {}), SolveResult::Unsatisfiable)
+		slv.assert_unsatisfiable()
 	}
 
 	#[test]
@@ -170,19 +158,9 @@ mod tests {
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 
 		slv.add_propagator(LinearLE::new(&[-2, -1, -1], vec![a, b, c], -3));
-		let result = slv.solve(|val| {
-			let Value::Int(a_val) = val(a.into()).unwrap() else {
-				panic!()
-			};
-			let Value::Int(b_val) = val(b.into()).unwrap() else {
-				panic!()
-			};
-			let Value::Int(c_val) = val(c.into()).unwrap() else {
-				panic!()
-			};
-			assert!(a_val * 2 + b_val + c_val >= 3)
+		slv.assert_all_solutions(&[a.into(), b.into(), c.into()], |sol: &[Value]| {
+			sol[0].as_int().unwrap() * 2 + sol[1].as_int().unwrap() + sol[2].as_int().unwrap() >= 3
 		});
-		assert_eq!(result, SolveResult::Satisfied)
 	}
 
 	#[test]
@@ -193,6 +171,6 @@ mod tests {
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
 		slv.add_propagator(LinearLE::new(&[-2, -1, -1], vec![a, b, c], -10));
-		assert_eq!(slv.solve(|_| {}), SolveResult::Unsatisfiable)
+		slv.assert_unsatisfiable()
 	}
 }

@@ -94,14 +94,9 @@ mod tests {
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 
 		slv.add_propagator(AllDifferentValue::new(vec![a, b, c]));
-		assert_eq!(
-			slv.solve(|val| {
-				assert_ne!(val(a.into()), val(b.into()));
-				assert_ne!(val(b.into()), val(c.into()));
-				assert_ne!(val(a.into()), val(c.into()));
-			}),
-			SolveResult::Satisfied
-		)
+		slv.assert_all_solutions(&[a.into(), b.into(), c.into()], |sol| {
+			sol.iter().all_unique()
+		})
 	}
 
 	#[test]
@@ -112,13 +107,10 @@ mod tests {
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
 		slv.add_propagator(AllDifferentValue::new(vec![a, b, c]));
-		assert_eq!(
-			slv.solve(|_| { unreachable!() }),
-			SolveResult::Unsatisfiable
-		)
+		slv.assert_unsatisfiable()
 	}
 
-	fn test_sudoku(grid: Vec<String>, expected: SolveResult) {
+	fn test_sudoku(grid: &[&str], expected: SolveResult) {
 		let mut slv: Solver<Cadical> = Cnf::default().into();
 		let mut all_vars = vec![];
 		// create variables and add all different propagator for each row
@@ -158,42 +150,42 @@ mod tests {
 		}
 		assert_eq!(
 			slv.solve(|val| {
-				for i in &all_vars {
-					for j in i {
-						eprint!("{:?}", val(j.into()).unwrap())
-					}
-					eprintln!()
-				}
 				(0..9).for_each(|r| {
+					let row = all_vars[r]
+						.iter()
+						.map(|v| val(v.into()).unwrap())
+						.collect_vec();
 					assert!(
-						all_vars[r]
-							.iter()
-							.map(|v| val(v.into()).unwrap())
-							.all_unique(),
-						"Values in row {} are not all different",
-						r
+						row.iter().all_unique(),
+						"Values in row {} are not all different: {:?}",
+						r,
+						row
 					);
 				});
 				(0..9).for_each(|c| {
+					let col = all_vars
+						.iter()
+						.map(|row| val(row[c].into()).unwrap())
+						.collect_vec();
 					assert!(
-						all_vars
-							.iter()
-							.map(|row| val(row[c].into()).unwrap())
-							.all_unique(),
-						"Values in column {} are not all different",
-						c
+						col.iter().all_unique(),
+						"Values in column {} are not all different: {:?}",
+						c,
+						col
 					);
 				});
 				(0..3).for_each(|i| {
 					(0..3).for_each(|j| {
+						let block = (0..3)
+							.flat_map(|x| (0..3).map(move |y| (x, y)))
+							.map(|(x, y)| val(all_vars[3 * i + x][3 * j + y].into()).unwrap())
+							.collect_vec();
 						assert!(
-							(0..3)
-								.flat_map(|x| (0..3).map(move |y| (x, y)))
-								.map(|(x, y)| val(all_vars[3 * i + x][3 * j + y].into()).unwrap())
-								.all_unique(),
-							"Values in block ({}, {}) are not all different",
+							block.iter().all_unique(),
+							"Values in block ({}, {}) are not all different: {:?}",
 							i,
-							j
+							j,
+							block
 						);
 					});
 				});
@@ -205,16 +197,16 @@ mod tests {
 	#[test]
 	fn test_sudoku_1() {
 		test_sudoku(
-			vec![
-				"2581.4.37".to_owned(),
-				"936827514".to_owned(),
-				"47153.28.".to_owned(),
-				"7152.3.4.".to_owned(),
-				"849675321".to_owned(),
-				"36241..75".to_owned(),
-				"1249..753".to_owned(),
-				"593742168".to_owned(),
-				"687351492".to_owned(),
+			&[
+				"2581.4.37",
+				"936827514",
+				"47153.28.",
+				"7152.3.4.",
+				"849675321",
+				"36241..75",
+				"1249..753",
+				"593742168",
+				"687351492",
 			],
 			SolveResult::Satisfied,
 		);
@@ -223,16 +215,16 @@ mod tests {
 	#[test]
 	fn test_sudoku_2() {
 		test_sudoku(
-			vec![
-				"...2.5...".to_owned(),
-				".9....73.".to_owned(),
-				"..2..9.6.".to_owned(),
-				"2.....4.9".to_owned(),
-				"....7....".to_owned(),
-				"6.9.....1".to_owned(),
-				".8.4..1..".to_owned(),
-				".63....8.".to_owned(),
-				"...6.8...".to_owned(),
+			&[
+				"...2.5...",
+				".9....73.",
+				"..2..9.6.",
+				"2.....4.9",
+				"....7....",
+				"6.9.....1",
+				".8.4..1..",
+				".63....8.",
+				"...6.8...",
 			],
 			SolveResult::Satisfied,
 		);
@@ -241,16 +233,16 @@ mod tests {
 	#[test]
 	fn test_sudoku_3() {
 		test_sudoku(
-			vec![
-				"3..9.4..1".to_owned(),
-				"..2...4..".to_owned(),
-				".61...79.".to_owned(),
-				"6..247..5".to_owned(),
-				".........".to_owned(),
-				"2..836..4".to_owned(),
-				".46...23.".to_owned(),
-				"..9...6..".to_owned(),
-				"5..3.9..8".to_owned(),
+			&[
+				"3..9.4..1",
+				"..2...4..",
+				".61...79.",
+				"6..247..5",
+				".........",
+				"2..836..4",
+				".46...23.",
+				"..9...6..",
+				"5..3.9..8",
 			],
 			SolveResult::Satisfied,
 		);
@@ -259,16 +251,16 @@ mod tests {
 	#[test]
 	fn test_sudoku_4() {
 		test_sudoku(
-			vec![
-				"....1....".to_owned(),
-				"3.14..86.".to_owned(),
-				"9..5..2..".to_owned(),
-				"7..16....".to_owned(),
-				".2.8.5.1.".to_owned(),
-				"....97..4".to_owned(),
-				"..3..4..6".to_owned(),
-				".48..69.7".to_owned(),
-				"....8....".to_owned(),
+			&[
+				"....1....",
+				"3.14..86.",
+				"9..5..2..",
+				"7..16....",
+				".2.8.5.1.",
+				"....97..4",
+				"..3..4..6",
+				".48..69.7",
+				"....8....",
 			],
 			SolveResult::Satisfied,
 		);
@@ -277,16 +269,16 @@ mod tests {
 	#[test]
 	fn test_sudoku_5() {
 		test_sudoku(
-			vec![
-				"..4..3.7.".to_owned(),
-				".8..7....".to_owned(),
-				".7...82.5".to_owned(),
-				"4.....31.".to_owned(),
-				"9.......8".to_owned(),
-				".15.....4".to_owned(),
-				"1.69...3.".to_owned(),
-				"....2..6.".to_owned(),
-				".2.4..5..".to_owned(),
+			&[
+				"..4..3.7.",
+				".8..7....",
+				".7...82.5",
+				"4.....31.",
+				"9.......8",
+				".15.....4",
+				"1.69...3.",
+				"....2..6.",
+				".2.4..5..",
 			],
 			SolveResult::Satisfied,
 		);
@@ -295,16 +287,16 @@ mod tests {
 	#[test]
 	fn test_sudoku_6() {
 		test_sudoku(
-			vec![
-				".43.8.25.".to_owned(),
-				"6........".to_owned(),
-				".....1.94".to_owned(),
-				"9....4.7.".to_owned(),
-				"...6.8...".to_owned(),
-				".1.2....3".to_owned(),
-				"82.5.....".to_owned(),
-				"........5".to_owned(),
-				".34.9.71.".to_owned(),
+			&[
+				".43.8.25.",
+				"6........",
+				".....1.94",
+				"9....4.7.",
+				"...6.8...",
+				".1.2....3",
+				"82.5.....",
+				"........5",
+				".34.9.71.",
 			],
 			SolveResult::Satisfied,
 		);
