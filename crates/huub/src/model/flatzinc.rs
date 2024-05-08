@@ -73,29 +73,6 @@ impl Model {
 						});
 					}
 				}
-				"bool_clause_reif" => {
-					if let [pos, neg, r] = c.args.as_slice() {
-						let pos = arg_array(fzn, pos)?;
-						let neg = arg_array(fzn, neg)?;
-						let r = arg_bool(fzn, &mut prb, &mut map, r)?;
-						let mut lits = Vec::with_capacity(pos.len() + neg.len());
-						for l in pos {
-							let e = lit_bool(fzn, &mut prb, &mut map, l)?;
-							lits.push(e);
-						}
-						for l in neg {
-							let e = lit_bool(fzn, &mut prb, &mut map, l)?;
-							lits.push(!e)
-						}
-						prb += BoolExpr::Equiv(vec![r, BoolExpr::Or(lits)]);
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "bool_clause_reif",
-							found: c.args.len(),
-							expected: 3,
-						});
-					}
-				}
 				"bool_eq_reif" => {
 					if let [a, b, r] = c.args.as_slice() {
 						let a = arg_bool(fzn, &mut prb, &mut map, a)?;
@@ -155,6 +132,29 @@ impl Model {
 							name: "huub_all_different",
 							found: c.args.len(),
 							expected: 1,
+						});
+					}
+				}
+				"huub_bool_clause_reif" => {
+					if let [pos, neg, r] = c.args.as_slice() {
+						let pos = arg_array(fzn, pos)?;
+						let neg = arg_array(fzn, neg)?;
+						let r = arg_bool(fzn, &mut prb, &mut map, r)?;
+						let mut lits = Vec::with_capacity(pos.len() + neg.len());
+						for l in pos {
+							let e = lit_bool(fzn, &mut prb, &mut map, l)?;
+							lits.push(e);
+						}
+						for l in neg {
+							let e = lit_bool(fzn, &mut prb, &mut map, l)?;
+							lits.push(!e)
+						}
+						prb += BoolExpr::Equiv(vec![r, BoolExpr::Or(lits)]);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "bool_clause_reif",
+							found: c.args.len(),
+							expected: 3,
 						});
 					}
 				}
