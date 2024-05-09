@@ -66,7 +66,7 @@ impl Propagator for LinearLE {
 		!self.action_list.is_empty()
 	}
 
-	fn notify_event(&mut self, _: u32) -> bool {
+	fn notify_event(&mut self, _: u32, _: &IntEvent) -> bool {
 		true
 	}
 
@@ -134,7 +134,7 @@ mod tests {
 
 		slv.add_propagator(LinearLE::new(&[2, 1, 1], vec![a, b, c], 10));
 
-		slv.assert_all_solutions(&[a.into(), b.into(), c.into()], |sol: &[Value]| {
+		slv.assert_all_solutions(&[a, b, c], |sol: &[Value]| {
 			sol[0].as_int().unwrap() * 2 + sol[1].as_int().unwrap() + sol[2].as_int().unwrap() <= 10
 		});
 	}
@@ -158,7 +158,7 @@ mod tests {
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 
 		slv.add_propagator(LinearLE::new(&[-2, -1, -1], vec![a, b, c], -3));
-		slv.assert_all_solutions(&[a.into(), b.into(), c.into()], |sol: &[Value]| {
+		slv.assert_all_solutions(&[a, b, c], |sol: &[Value]| {
 			sol[0].as_int().unwrap() * 2 + sol[1].as_int().unwrap() + sol[2].as_int().unwrap() >= 3
 		});
 	}

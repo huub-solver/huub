@@ -65,7 +65,9 @@ impl IpasirPropagator for Engine {
 			.into_iter()
 			.flatten()
 		{
-			if self.propagators[prop].notify_event(data) && !self.state.enqueued[prop] {
+			if self.propagators[prop].notify_event(data, &IntEvent::Fixed)
+				&& !self.state.enqueued[prop]
+			{
 				let level = self.propagators[prop].queue_priority_level();
 				self.state.prop_queue.insert(level, prop);
 			}
@@ -75,7 +77,7 @@ impl IpasirPropagator for Engine {
 		if let Some((iv, event)) = self.state.determine_int_event(lit) {
 			for (prop, level, data) in self.state.int_subscribers.get(&iv).into_iter().flatten() {
 				if level.is_activated_by(&event)
-					&& self.propagators[*prop].notify_event(*data)
+					&& self.propagators[*prop].notify_event(*data, &event)
 					&& !self.state.enqueued[*prop]
 				{
 					let level = self.propagators[*prop].queue_priority_level();
@@ -184,7 +186,7 @@ impl IpasirPropagator for Engine {
 				for (prop, level, data) in self.state.int_subscribers.get(&r).into_iter().flatten()
 				{
 					if level.is_activated_by(&IntEvent::Fixed)
-						&& self.propagators[*prop].notify_event(*data)
+						&& self.propagators[*prop].notify_event(*data, &IntEvent::Fixed)
 					{
 						let l = self.propagators[*prop].queue_priority_level();
 						self.state.prop_queue.insert(l, *prop)

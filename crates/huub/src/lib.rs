@@ -5,8 +5,8 @@ pub(crate) mod solver;
 pub(crate) mod tests;
 
 pub use model::{
-	bool::BoolExpr, flatzinc::FlatZincError, int::IntExpr, reformulate::ReformulationError,
-	Constraint, Model, Variable,
+	bool::BoolExpr, constraint::Constraint, flatzinc::FlatZincError, int::IntExpr,
+	reformulate::ReformulationError, Model, Variable,
 };
 pub use pindakaas::solver::SlvTermSignal;
 use pindakaas::Lit as RawLit;

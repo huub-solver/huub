@@ -1,7 +1,9 @@
 use expect_test::Expect;
 use itertools::Itertools;
 
-use crate::{BoolExpr, Model, SolveResult, Solver, SolverView, Value, Variable};
+use crate::{
+	BoolExpr, Model, ReformulationError, SolveResult, Solver, SolverView, Value, Variable,
+};
 
 #[test]
 fn it_works() {
@@ -24,15 +26,26 @@ fn it_works() {
 	);
 }
 
+impl Model {
+	pub(crate) fn assert_unsatisfiable(&mut self) {
+		let err: Result<(Solver, _), _> = self.to_solver();
+		assert!(
+			matches!(err, Err(ReformulationError::TrivialUnsatisfiable)),
+			"expected unsatisfiable"
+		);
+	}
+}
+
 impl Solver {
-	pub(crate) fn assert_all_solutions(
+	pub(crate) fn assert_all_solutions<V: Into<SolverView> + Clone>(
 		&mut self,
-		vars: &[SolverView],
+		vars: &[V],
 		pred: impl Fn(&[Value]) -> bool,
 	) {
-		let status = self.all_solutions(vars, |value| {
+		let vars: Vec<_> = vars.iter().map(|v| v.clone().into()).collect();
+		let status = self.all_solutions(&vars, |value| {
 			let mut soln = Vec::with_capacity(vars.len());
-			for var in vars {
+			for var in &vars {
 				soln.push(value(*var).unwrap());
 			}
 			assert!(pred(&soln));

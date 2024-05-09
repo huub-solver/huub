@@ -2,6 +2,7 @@ pub(crate) mod all_different;
 pub(crate) mod conflict;
 pub(crate) mod int_event;
 pub(crate) mod int_lin_le;
+pub(crate) mod minimum;
 pub(crate) mod reason;
 
 use std::fmt::Debug;
@@ -29,8 +30,9 @@ pub(crate) trait Propagator: Debug + DynPropClone {
 	///
 	/// The [`data`] argument will contain the data that the propagater has set
 	/// when subscribing to an event.
-	fn notify_event(&mut self, data: u32) -> bool {
+	fn notify_event(&mut self, data: u32, event: &IntEvent) -> bool {
 		let _ = data;
+		let _ = event;
 		false
 	}
 
@@ -134,14 +136,13 @@ pub(crate) trait ExplainActions {
 		self.get_int_val(var)
 			.map(|v| self.get_int_lit(var, LitMeaning::Eq(v)))
 	}
-	#[allow(dead_code)]
 	fn get_int_lower_bound_lit(&self, var: IntView) -> BoolView {
 		let lb = self.get_int_lower_bound(var);
-		self.get_int_lit(var, LitMeaning::Less(lb + 1))
+		self.get_int_lit(var, LitMeaning::GreaterEq(lb))
 	}
 	fn get_int_upper_bound_lit(&self, var: IntView) -> BoolView {
 		let ub = self.get_int_upper_bound(var);
-		self.get_int_lit(var, LitMeaning::GreaterEq(ub))
+		self.get_int_lit(var, LitMeaning::Less(ub + 1))
 	}
 }
 
