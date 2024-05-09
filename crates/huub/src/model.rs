@@ -1,12 +1,12 @@
 pub(crate) mod bool;
+pub(crate) mod constraint;
 pub(crate) mod flatzinc;
 pub(crate) mod int;
 pub(crate) mod reformulate;
 
-use std::ops::AddAssign;
+use std::{collections::VecDeque, iter::repeat, ops::AddAssign};
 
 use flatzinc_serde::RangeList;
-use itertools::Itertools;
 use pindakaas::{
 	solver::{NextVarRange, PropagatorAccess, Solver as SolverTrait},
 	ClauseDatabase, Cnf, ConditionalDatabase, Lit as RawLit, Valuation as SatValuation,
@@ -19,10 +19,9 @@ use self::{
 	reformulate::{ReformulationError, VariableMap},
 };
 use crate::{
-	model::{int::IntVarDef, reformulate::ReifContext},
-	propagator::{all_different::AllDifferentValue, int_lin_le::LinearLE, minimum::Minimum},
+	model::int::IntVarDef,
 	solver::{engine::int_var::IntVar as SlvIntVar, view::SolverView, SatSolver},
-	IntVal, Solver,
+	Constraint, Solver,
 };
 
 #[derive(Debug, Default)]
@@ -30,6 +29,8 @@ pub struct Model {
 	pub(crate) cnf: Cnf,
 	constraints: Vec<Constraint>,
 	int_vars: Vec<IntVarDef>,
+	prop_queue: VecDeque<usize>,
+	enqueued: Vec<bool>,
 }
 
 impl Model {
@@ -37,26 +38,38 @@ impl Model {
 		BoolVar(self.cnf.new_var())
 	}
 
-	pub fn new_bool_var_range(&mut self, len: usize) -> Vec<BoolVar> {
+	pub fn new_bool_vars(&mut self, len: usize) -> Vec<BoolVar> {
 		self.cnf.next_var_range(len).unwrap().map(BoolVar).collect()
 	}
 
 	pub fn new_int_var(&mut self, domain: RangeList<i64>) -> IntVar {
 		let iv = IntVar(self.int_vars.len() as u32);
-		self.int_vars.push(IntVarDef { domain });
+		self.int_vars.push(IntVarDef::with_domain(domain));
 		iv
+	}
+
+	pub fn new_int_vars(&mut self, len: usize, domain: RangeList<i64>) -> Vec<IntVar> {
+		let iv = IntVar(self.int_vars.len() as u32);
+		self.int_vars
+			.extend(repeat(IntVarDef::with_domain(domain)).take(len - 1));
+		(0..len).map(|i| IntVar(iv.0 + i as u32)).collect()
 	}
 
 	pub fn to_solver<
 		Sol: PropagatorAccess + SatValuation,
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 	>(
-		&self,
+		&mut self,
 	) -> Result<(Solver<Sat>, VariableMap), ReformulationError> {
 		let mut map = VariableMap::default();
 
 		// TODO: run SAT simplification
 		let mut slv = self.cnf.clone().into();
+
+		while let Some(con) = self.prop_queue.pop_front() {
+			self.propagate(con)?;
+			self.enqueued[con] = false;
+		}
 
 		// TODO: Find Views
 		// TODO: Analyse/Choose Integer encodings
@@ -75,16 +88,26 @@ impl Model {
 
 		Ok((slv, map))
 	}
+
+	fn enqueue(&mut self, constraint: usize) {
+		if !self.enqueued[constraint] {
+			self.prop_queue.push_back(constraint);
+			self.enqueued[constraint] = true;
+		}
+	}
 }
 
 impl AddAssign<Constraint> for Model {
 	fn add_assign(&mut self, rhs: Constraint) {
-		self.constraints.push(rhs)
+		self.constraints.push(rhs);
+		self.enqueued.push(false);
+		self.enqueue(self.constraints.len() - 1);
+		self.subscribe(self.constraints.len() - 1);
 	}
 }
 impl AddAssign<BoolExpr> for Model {
 	fn add_assign(&mut self, rhs: BoolExpr) {
-		self.constraints.push(Constraint::SimpleBool(rhs))
+		self.add_assign(Constraint::SimpleBool(rhs))
 	}
 }
 
@@ -100,91 +123,6 @@ impl ClauseDatabase for Model {
 	type CondDB = Model;
 	fn with_conditions(&mut self, conditions: Vec<RawLit>) -> ConditionalDatabase<Self::CondDB> {
 		ConditionalDatabase::new(self, conditions)
-	}
-}
-
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub enum Constraint {
-	SimpleBool(BoolExpr),
-	AllDifferent(Vec<IntExpr>),
-	IntLinLessEq(Vec<IntVal>, Vec<IntExpr>, IntVal),
-	IntLinEq(Vec<IntVal>, Vec<IntExpr>, IntVal),
-	Minimum(Vec<IntExpr>, IntExpr),
-	Maximum(Vec<IntExpr>, IntExpr),
-}
-
-impl Constraint {
-	fn to_solver<Sol, Sat>(
-		&self,
-		slv: &mut Solver<Sat>,
-		map: &mut VariableMap,
-	) -> Result<(), ReformulationError>
-	where
-		Sol: PropagatorAccess + SatValuation,
-		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
-	{
-		match self {
-			Constraint::SimpleBool(exp) => exp.constrain(slv, map),
-			Constraint::AllDifferent(v) => {
-				let vars: Vec<_> = v
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
-				slv.add_propagator(AllDifferentValue::new(vars));
-				Ok(())
-			}
-			Constraint::IntLinLessEq(coeffs, vars, c) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.zip_eq(coeffs.iter())
-					.map(|(v, &c)| {
-						v.to_arg(
-							if c >= 0 {
-								ReifContext::Pos
-							} else {
-								ReifContext::Neg
-							},
-							slv,
-							map,
-						)
-					})
-					.collect();
-				slv.add_propagator(LinearLE::new(coeffs, vars, *c));
-				Ok(())
-			}
-			Constraint::IntLinEq(coeffs, vars, c) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
-				// coeffs * vars <= c
-				slv.add_propagator(LinearLE::new(coeffs, vars.clone(), *c));
-				// coeffs * vars >= c <=>  -coeffs * vars <= -c
-				slv.add_propagator(LinearLE::new(
-					&coeffs.iter().map(|c| -c).collect_vec(),
-					vars,
-					-c,
-				));
-				Ok(())
-			}
-			Constraint::Minimum(vars, y) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
-				let y = y.to_arg(ReifContext::Mixed, slv, map);
-				slv.add_propagator(Minimum::new(vars, y));
-			}
-			Constraint::Maximum(vars, y) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.map(|v| v.negated())
-					.collect();
-				let y = y.to_arg(ReifContext::Mixed, slv, map);
-				slv.add_propagator(Minimum::new(vars, y));
-			}
-		}
 	}
 }
 

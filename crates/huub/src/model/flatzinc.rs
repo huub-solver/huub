@@ -135,6 +135,32 @@ impl Model {
 						});
 					}
 				}
+				"huub_array_int_maximum" | "huub_array_int_minimum" => {
+					let is_maximum = c.id.deref() == "huub_array_int_maximum";
+					if let [m, args] = c.args.as_slice() {
+						let args = arg_array(fzn, args)?;
+						let args: Result<Vec<_>, _> = args
+							.iter()
+							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
+							.collect();
+						let m = arg_int(fzn, &mut prb, &mut map, m)?;
+						if is_maximum {
+							prb += Constraint::Maximum(args?, m);
+						} else {
+							prb += Constraint::Minimum(args?, m);
+						}
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: if is_maximum {
+								"huub_array_int_maximum"
+							} else {
+								"huub_array_int_minimum"
+							},
+							found: c.args.len(),
+							expected: 2,
+						});
+					}
+				}
 				"huub_bool_clause_reif" => {
 					if let [pos, neg, r] = c.args.as_slice() {
 						let pos = arg_array(fzn, pos)?;
@@ -196,34 +222,6 @@ impl Model {
 						});
 					}
 				}
-				"minimum" | "maximum" => {
-					let is_maximum = c.id.deref() == "maximum";
-					if let [args, y] = c.args.as_slice() {
-						let args = arg_array(fzn, args)?;
-						let args: Result<Vec<_>, _> = args
-							.iter()
-							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
-							.collect();
-						let Argument::Literal(y) = y else {
-							return Err(FlatZincError::InvalidArgumentType {
-								expected: "liter",
-								found: format!("{:?}", y),
-							});
-						};
-						let y = lit_int(fzn, &mut prb, &mut map, y)?;
-						if is_maximum {
-							prb += Constraint::Maximum(args?, y);
-						} else {
-							prb += Constraint::Minimum(args?, y);
-						}
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: if is_maximum { "maximum" } else { "minimum" },
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
-				}
 				_ => return Err(FlatZincError::UnknownConstraint(c.id.to_string())),
 			}
 		}
@@ -261,7 +259,7 @@ impl Solver {
 	pub fn from_fzn<S: Ord + Deref<Target = str> + Clone + Debug>(
 		fzn: &FlatZinc<S>,
 	) -> Result<(Self, BTreeMap<S, SolverView>), FlatZincError> {
-		let (prb, map) = Model::from_fzn(fzn)?;
+		let (mut prb, map) = Model::from_fzn(fzn)?;
 		let (slv, remap) = prb.to_solver()?;
 		let map = map.into_iter().map(|(k, v)| (k, remap.get(&v))).collect();
 		Ok((slv, map))
@@ -345,7 +343,7 @@ fn arg_bool<S: Ord + Deref<Target = str> + Clone + Debug>(
 	match arg {
 		Argument::Literal(l) => lit_bool(fzn, prb, map, l),
 		_ => Err(FlatZincError::InvalidArgumentType {
-			expected: "bool",
+			expected: "boolean literal",
 			found: format!("{:?}", arg),
 		}),
 	}
@@ -381,6 +379,21 @@ fn lit_int<S: Ord + Deref<Target = str> + Clone + Debug>(
 		Literal::Bool(v) => Ok(IntExpr::Val(if *v { 1 } else { 0 })),
 		Literal::Int(v) => Ok(IntExpr::Val(*v)),
 		_ => todo!(),
+	}
+}
+
+fn arg_int<S: Ord + Deref<Target = str> + Clone + Debug>(
+	fzn: &FlatZinc<S>,
+	prb: &mut Model,
+	map: &mut BTreeMap<S, MVar>,
+	arg: &Argument<S>,
+) -> Result<IntExpr, FlatZincError> {
+	match arg {
+		Argument::Literal(l) => lit_int(fzn, prb, map, l),
+		_ => Err(FlatZincError::InvalidArgumentType {
+			expected: "integer literal",
+			found: format!("{:?}", arg),
+		}),
 	}
 }
 

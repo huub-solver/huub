@@ -510,7 +510,7 @@ mod tests {
 	fn test_bool_and() {
 		// Simple Satisfiable test case
 		let mut m = Model::default();
-		let b = m.new_bool_var_range(3);
+		let b = m.new_bool_vars(3);
 
 		m += BoolExpr::And(b.iter().copied().map_into().collect());
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
@@ -519,7 +519,7 @@ mod tests {
 
 		// Simple Unsatisfiable test case
 		let mut m = Model::default();
-		let b = m.new_bool_var_range(3);
+		let b = m.new_bool_vars(3);
 
 		m += BoolExpr::And(b.iter().copied().map_into().collect());
 		m += BoolExpr::from(!b[0]);
@@ -531,7 +531,7 @@ mod tests {
 	fn test_bool_or() {
 		// Simple Satisfiable test case
 		let mut m = Model::default();
-		let b = m.new_bool_var_range(3);
+		let b = m.new_bool_vars(3);
 
 		m += BoolExpr::Or(b.iter().copied().map_into().collect());
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
@@ -550,7 +550,7 @@ mod tests {
 
 		// Simple Unsatisfiable test case
 		let mut m = Model::default();
-		let b = m.new_bool_var_range(3);
+		let b = m.new_bool_vars(3);
 
 		m += BoolExpr::Or(b.iter().copied().map_into().collect());
 		m += BoolExpr::And(b.iter().copied().map(|l| (!l).into()).collect());
@@ -562,7 +562,7 @@ mod tests {
 	fn test_bool_xor() {
 		// Simple Satisfiable test case
 		let mut m = Model::default();
-		let b = m.new_bool_var_range(3);
+		let b = m.new_bool_vars(3);
 
 		m += BoolExpr::Xor(b.iter().copied().map_into().collect());
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
@@ -578,7 +578,7 @@ mod tests {
 
 		// Simple Unsatisfiable test case
 		let mut m = Model::default();
-		let b = m.new_bool_var_range(2);
+		let b = m.new_bool_vars(2);
 
 		m += BoolExpr::Xor(b.iter().copied().map_into().collect());
 		m += BoolExpr::from(!b[0]);
@@ -591,7 +591,7 @@ mod tests {
 	fn test_bool_eq_reif() {
 		// Simple Satisfiable test case
 		let mut m = Model::default();
-		let b = m.new_bool_var_range(3);
+		let b = m.new_bool_vars(3);
 
 		m += BoolExpr::Equiv(vec![
 			b[0].into(),
@@ -613,7 +613,7 @@ mod tests {
 	fn test_bool_and_reif() {
 		// Simple Satisfiable test case
 		let mut m = Model::default();
-		let b = m.new_bool_var_range(3);
+		let b = m.new_bool_vars(3);
 
 		m += BoolExpr::Equiv(vec![
 			b[0].into(),
@@ -635,7 +635,7 @@ mod tests {
 	fn test_bool_clause_reif() {
 		// Simple Satisfiable test case
 		let mut m = Model::default();
-		let b = m.new_bool_var_range(3);
+		let b = m.new_bool_vars(3);
 
 		m += BoolExpr::Equiv(vec![
 			b[0].into(),

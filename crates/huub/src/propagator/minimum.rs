@@ -2,6 +2,7 @@ use super::{reason::ReasonBuilder, InitializationActions, PropagationActions};
 use crate::{
 	propagator::{conflict::Conflict, int_event::IntEvent, Propagator},
 	solver::{engine::queue::PriorityLevel, value::IntVal, view::IntView},
+	LitMeaning,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -55,41 +56,41 @@ impl Propagator for Minimum {
 
 	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
 		if !self.action_list.is_empty() {
-			let (min_upper_bound, min_lower_bound) =
+			let min_lb = self
+				.vars
+				.iter()
+				.map(|&x| actions.get_int_lower_bound(x))
+				.min()
+				.unwrap();
+			let (min_ub, min_ub_var) =
 				self.vars
 					.iter()
-					.fold((IntVal::MAX, IntVal::MAX), |(min_ub, min_lb), x| {
-						let x_ub = actions.get_int_upper_bound(*x);
-						let x_lb = actions.get_int_lower_bound(*x);
-						(min_ub.min(x_ub), min_lb.min(x_lb))
+					.fold((IntVal::MAX, self.y), |(ub, var), &e| {
+						let e_ub = actions.get_int_upper_bound(e);
+						if e_ub < ub {
+							(e_ub, e)
+						} else {
+							(ub, var)
+						}
 					});
 			// set y to be less than or equal to the minimum of upper bounds of x_i
-			if actions.get_int_upper_bound(self.y) > min_upper_bound {
-				actions.set_int_upper_bound(
-					self.y,
-					min_upper_bound,
-					&ReasonBuilder::Eager(
-						self.vars
-							.iter()
-							.map(|x| actions.get_int_less_than_equal_to_lit(*x, min_upper_bound))
-							.collect(),
-					),
-				)?;
-			}
+			actions.set_int_upper_bound(
+				self.y,
+				min_ub,
+				&ReasonBuilder::Simple(actions.get_int_upper_bound_lit(min_ub_var)),
+			)?;
 
 			// set y to be greater than or equal to the minimum of lower bounds of x_i
-			if actions.get_int_lower_bound(self.y) < min_lower_bound {
-				actions.set_int_lower_bound(
-					self.y,
-					min_lower_bound,
-					&ReasonBuilder::Eager(
-						self.vars
-							.iter()
-							.map(|x| actions.get_int_greater_than_equal_to_lit(*x, min_lower_bound))
-							.collect(),
-					),
-				)?;
-			}
+			actions.set_int_lower_bound(
+				self.y,
+				min_lb,
+				&ReasonBuilder::Eager(
+					self.vars
+						.iter()
+						.map(|&x| actions.get_int_lit(x, LitMeaning::GreaterEq(min_lb)))
+						.collect(),
+				),
+			)?;
 		}
 
 		// set x_i to be greater than or equal to y.lowerbound
@@ -99,7 +100,7 @@ impl Propagator for Minimum {
 				actions.set_int_lower_bound(
 					x,
 					y_lb,
-					&ReasonBuilder::Simple(actions.get_int_upper_bound_lit(self.y)),
+					&ReasonBuilder::Simple(actions.get_int_lower_bound_lit(self.y)),
 				)?
 			}
 		}
@@ -110,12 +111,11 @@ impl Propagator for Minimum {
 #[cfg(test)]
 mod tests {
 	use flatzinc_serde::RangeList;
-	use pindakaas::{
-		solver::{cadical::Cadical, SolveResult},
-		Cnf,
-	};
+	use pindakaas::{solver::cadical::Cadical, Cnf};
 
-	use crate::{propagator::minimum::Minimum, solver::engine::int_var::IntVar, Solver, Value};
+	use crate::{
+		propagator::minimum::Minimum, solver::engine::int_var::IntVar, Constraint, Model, Solver,
+	};
 
 	#[test]
 	fn test_minimum_sat() {
@@ -126,35 +126,21 @@ mod tests {
 		let y = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 
 		slv.add_propagator(Minimum::new(vec![a, b, c], y));
-		let result = slv.solve(|val| {
-			let Value::Int(a_val) = val(a.into()).unwrap() else {
-				panic!()
-			};
-			let Value::Int(b_val) = val(b.into()).unwrap() else {
-				panic!()
-			};
-			let Value::Int(c_val) = val(c.into()).unwrap() else {
-				panic!()
-			};
-			let Value::Int(y_val) = val(y.into()).unwrap() else {
-				panic!()
-			};
-
-			assert!(a_val.min(b_val).min(c_val) == y_val)
+		slv.assert_all_solutions(&[y, a, b, c], |sol| {
+			sol[0] == *sol[1..=3].iter().min().unwrap()
 		});
-		assert_eq!(result, SolveResult::Sat)
 	}
 
 	#[test]
 	fn test_minimum_unsat() {
-		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, RangeList::from_iter([3..=5]), true);
-		let b = IntVar::new_in(&mut slv, RangeList::from_iter([4..=5]), true);
-		let c = IntVar::new_in(&mut slv, RangeList::from_iter([4..=10]), true);
-		let y = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
+		let mut prb = Model::default();
+		let a = prb.new_int_var((3..=5).into());
+		let b = prb.new_int_var((4..=5).into());
+		let c = prb.new_int_var((4..=10).into());
+		let y = prb.new_int_var((1..=2).into());
 
-		slv.add_propagator(Minimum::new(vec![a, b, c], y));
-		assert_eq!(slv.solve(|_| {}), SolveResult::Unsat)
+		prb += Constraint::Minimum(vec![a.into(), b.into(), c.into()], y.into());
+		prb.assert_unsatisfiable();
 	}
 
 	#[test]
@@ -165,41 +151,21 @@ mod tests {
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=3]), true);
 		let y = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 
-		slv.add_propagator(Minimum::new(
-			vec![a.negated(), b.negated(), c.negated()],
-			y.negated(),
-		));
-		let result = slv.solve(|val| {
-			let Value::Int(a_val) = val(a.into()).unwrap() else {
-				panic!()
-			};
-			let Value::Int(b_val) = val(b.into()).unwrap() else {
-				panic!()
-			};
-			let Value::Int(c_val) = val(c.into()).unwrap() else {
-				panic!()
-			};
-			let Value::Int(y_val) = val(y.into()).unwrap() else {
-				panic!()
-			};
-
-			assert!(a_val.max(b_val).max(c_val) == y_val)
+		slv.add_propagator(Minimum::new(vec![-a, -b, -c], -y));
+		slv.assert_all_solutions(&[y, a, b, c], |sol| {
+			sol[0] == *sol[1..=3].iter().max().unwrap()
 		});
-		assert_eq!(result, SolveResult::Sat)
 	}
 
 	#[test]
 	fn test_maximum_unsat() {
-		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, RangeList::from_iter([3..=5]), true);
-		let b = IntVar::new_in(&mut slv, RangeList::from_iter([4..=5]), true);
-		let c = IntVar::new_in(&mut slv, RangeList::from_iter([4..=10]), true);
-		let y = IntVar::new_in(&mut slv, RangeList::from_iter([13..=20]), true);
+		let mut prb = Model::default();
+		let a = prb.new_int_var((3..=5).into());
+		let b = prb.new_int_var((4..=5).into());
+		let c = prb.new_int_var((4..=10).into());
+		let y = prb.new_int_var((13..=20).into());
 
-		slv.add_propagator(Minimum::new(
-			vec![a.negated(), b.negated(), c.negated()],
-			y.negated(),
-		));
-		assert_eq!(slv.solve(|_| {}), SolveResult::Unsat)
+		prb += Constraint::Maximum(vec![a.into(), b.into(), c.into()], y.into());
+		prb.assert_unsatisfiable();
 	}
 }
