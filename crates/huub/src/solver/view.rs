@@ -1,4 +1,7 @@
-use std::{num::NonZeroI32, ops::Not};
+use std::{
+	num::NonZeroI32,
+	ops::{Neg, Not},
+};
 
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
@@ -187,5 +190,24 @@ impl IntView {
 	}
 	pub(crate) fn linear_is_integer(val: IntVal, scale: NonZeroIntVal, offset: IntVal) -> bool {
 		(val - offset) % scale.get() == 0
+	}
+}
+
+impl Neg for IntView {
+	type Output = Self;
+	fn neg(self) -> Self::Output {
+		match self.0 {
+			IntViewInner::VarRef(v) => IntView(IntViewInner::Linear {
+				var: v,
+				scale: NonZeroIntVal::new(-1).unwrap(),
+				offset: 0,
+			}),
+			IntViewInner::Const(i) => IntView(IntViewInner::Const(-i)),
+			IntViewInner::Linear { var, scale, offset } => IntView(IntViewInner::Linear {
+				var,
+				scale: NonZeroIntVal::new(-scale.get()).unwrap(),
+				offset: -offset,
+			}),
+		}
 	}
 }

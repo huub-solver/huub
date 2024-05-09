@@ -41,7 +41,7 @@ impl Propagator for AllDifferentValue {
 		!self.action_list.is_empty()
 	}
 
-	fn notify_event(&mut self, data: u32) -> bool {
+	fn notify_event(&mut self, data: u32, _: &IntEvent) -> bool {
 		self.action_list.push(data);
 		true
 	}
@@ -94,9 +94,7 @@ mod tests {
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 
 		slv.add_propagator(AllDifferentValue::new(vec![a, b, c]));
-		slv.assert_all_solutions(&[a.into(), b.into(), c.into()], |sol| {
-			sol.iter().all_unique()
-		})
+		slv.assert_all_solutions(&[a, b, c], |sol| sol.iter().all_unique())
 	}
 
 	#[test]

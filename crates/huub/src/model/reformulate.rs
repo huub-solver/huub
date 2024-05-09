@@ -60,7 +60,7 @@ impl Not for ReifContext {
 	}
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq, Eq)]
 pub enum ReformulationError {
 	#[error("The expression is trivially unsatisfiable")]
 	TrivialUnsatisfiable,
