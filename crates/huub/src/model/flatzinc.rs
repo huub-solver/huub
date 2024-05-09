@@ -6,7 +6,7 @@ use thiserror::Error;
 use super::{bool::BoolExpr, reformulate::ReformulationError};
 use crate::{
 	model::{IntExpr, Variable as MVar},
-	Constraint, Model, Solver, SolverView,
+	Constraint, IntVal, Model, Solver, SolverView,
 };
 
 impl Model {
@@ -189,22 +189,9 @@ impl Model {
 					if let [coeffs, vars, rhs] = c.args.as_slice() {
 						let coeffs = arg_array(fzn, coeffs)?;
 						let vars = arg_array(fzn, vars)?;
-						let Argument::Literal(Literal::Int(rhs)) = rhs else {
-							return Err(FlatZincError::InvalidArgumentType {
-								expected: "int",
-								found: format!("{:?}", rhs),
-							});
-						};
-						let coeffs: Result<Vec<_>, _> = coeffs
-							.iter()
-							.map(|l| match l {
-								Literal::Int(v) => Ok(*v),
-								_ => Err(FlatZincError::InvalidArgumentType {
-									expected: "int",
-									found: format!("{:?}", l),
-								}),
-							})
-							.collect();
+						let rhs = arg_par_int(fzn, rhs)?;
+						let coeffs: Result<Vec<_>, _> =
+							coeffs.iter().map(|l| par_int(fzn, l)).collect();
 						let vars: Result<Vec<_>, _> = vars
 							.iter()
 							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
@@ -213,12 +200,31 @@ impl Model {
 							Constraint::IntLinEq
 						} else {
 							Constraint::IntLinLessEq
-						}(coeffs?, vars?, *rhs);
+						}(coeffs?, vars?, rhs);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: if is_eq { "int_lin_eq" } else { "int_linear_le" },
 							found: c.args.len(),
 							expected: 3,
+						});
+					}
+				}
+				"int_max" | "int_min" => {
+					let is_maximum = c.id.deref() == "int_max";
+					if let [a, b, m] = c.args.as_slice() {
+						let a = arg_int(fzn, &mut prb, &mut map, a)?;
+						let b = arg_int(fzn, &mut prb, &mut map, b)?;
+						let m = arg_int(fzn, &mut prb, &mut map, m)?;
+						if is_maximum {
+							prb += Constraint::Maximum(vec![a, b], m);
+						} else {
+							prb += Constraint::Minimum(vec![a, b], m);
+						}
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: if is_maximum { "int_max" } else { "int_min" },
+							found: c.args.len(),
+							expected: 2,
 						});
 					}
 				}
@@ -382,6 +388,31 @@ fn lit_int<S: Ord + Deref<Target = str> + Clone + Debug>(
 	}
 }
 
+fn par_int<S: Ord + Deref<Target = str> + Clone + Debug>(
+	fzn: &FlatZinc<S>,
+	lit: &Literal<S>,
+) -> Result<IntVal, FlatZincError> {
+	match lit {
+		Literal::Identifier(ident) => {
+			if let Some(var) = fzn.variables.get(ident) {
+				if var.ty == Type::Int && var.value.is_some() {
+					par_int(fzn, var.value.as_ref().unwrap())
+				} else {
+					Err(FlatZincError::InvalidArgumentType {
+						expected: "par int",
+						found: format!("{:?}", var.ty),
+					})
+				}
+			} else {
+				Err(FlatZincError::UnknownIdentifier(ident.to_string()))
+			}
+		}
+		Literal::Bool(v) => Ok(if *v { 1 } else { 0 }),
+		Literal::Int(v) => Ok(*v),
+		_ => todo!(),
+	}
+}
+
 fn arg_int<S: Ord + Deref<Target = str> + Clone + Debug>(
 	fzn: &FlatZinc<S>,
 	prb: &mut Model,
@@ -392,6 +423,19 @@ fn arg_int<S: Ord + Deref<Target = str> + Clone + Debug>(
 		Argument::Literal(l) => lit_int(fzn, prb, map, l),
 		_ => Err(FlatZincError::InvalidArgumentType {
 			expected: "integer literal",
+			found: format!("{:?}", arg),
+		}),
+	}
+}
+
+fn arg_par_int<S: Ord + Deref<Target = str> + Clone + Debug>(
+	fzn: &FlatZinc<S>,
+	arg: &Argument<S>,
+) -> Result<IntVal, FlatZincError> {
+	match arg {
+		Argument::Literal(l) => par_int(fzn, l),
+		_ => Err(FlatZincError::InvalidArgumentType {
+			expected: "par integer literal",
 			found: format!("{:?}", arg),
 		}),
 	}
