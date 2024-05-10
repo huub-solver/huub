@@ -460,7 +460,7 @@ impl ExplainActions for State {
 					if scale.is_positive() {
 						self.int_vars[var].get_bool_lit(LitMeaning::Less(val + 1))
 					} else {
-						self.int_vars[var].get_bool_lit(LitMeaning::GreaterEq(val))
+						self.int_vars[var].get_bool_lit(LitMeaning::GreaterEq(val + 1))
 					}
 				}
 			},

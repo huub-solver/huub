@@ -110,6 +110,9 @@ impl Propagator for Minimum {
 
 #[cfg(test)]
 mod tests {
+	use std::ops::Neg;
+
+	use expect_test::expect;
 	use flatzinc_serde::RangeList;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
 
@@ -120,15 +123,18 @@ mod tests {
 	#[test]
 	fn test_minimum_sat() {
 		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
-		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=3]), true);
-		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=3]), true);
-		let y = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
+		let a = IntVar::new_in(&mut slv, RangeList::from_iter([3..=4]), true);
+		let b = IntVar::new_in(&mut slv, RangeList::from_iter([2..=3]), true);
+		let c = IntVar::new_in(&mut slv, RangeList::from_iter([2..=3]), true);
+		let y = IntVar::new_in(&mut slv, RangeList::from_iter([3..=4]), true);
 
 		slv.add_propagator(Minimum::new(vec![a, b, c], y));
-		slv.assert_all_solutions(&[y, a, b, c], |sol| {
-			sol[0] == *sol[1..=3].iter().min().unwrap()
-		});
+		slv.expect_solutions(
+			&[a, b, c, y],
+			expect![[r#"
+    3, 3, 3, 3
+    4, 3, 3, 3"#]],
+		);
 	}
 
 	#[test]
@@ -146,15 +152,22 @@ mod tests {
 	#[test]
 	fn test_maximum_sat() {
 		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
-		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=3]), true);
-		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=3]), true);
-		let y = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
+		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=6]), true);
+		let b = IntVar::new_in(&mut slv, RangeList::from_iter([3..=5]), true);
+		let c = IntVar::new_in(&mut slv, RangeList::from_iter([2..=5]), true);
+		let y = IntVar::new_in(&mut slv, RangeList::from_iter([1..=3]), true);
 
-		slv.add_propagator(Minimum::new(vec![-a, -b, -c], -y));
-		slv.assert_all_solutions(&[y, a, b, c], |sol| {
-			sol[0] == *sol[1..=3].iter().max().unwrap()
-		});
+		slv.add_propagator(Minimum::new(vec![a.neg(), b.neg(), c.neg()], y.neg()));
+		slv.expect_solutions(
+			&[a, b, c, y],
+			expect![[r#"
+    1, 3, 2, 3
+    1, 3, 3, 3
+    2, 3, 2, 3
+    2, 3, 3, 3
+    3, 3, 2, 3
+    3, 3, 3, 3"#]],
+		);
 	}
 
 	#[test]

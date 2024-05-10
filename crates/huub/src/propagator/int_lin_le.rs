@@ -108,7 +108,7 @@ impl Propagator for LinearLE {
 				if j == i {
 					return None;
 				}
-				if let BoolView(BoolViewInner::Lit(lit)) = actions.get_int_upper_bound_lit(*v) {
+				if let BoolView(BoolViewInner::Lit(lit)) = actions.get_int_lower_bound_lit(*v) {
 					Some(lit)
 				} else {
 					None
@@ -120,10 +120,11 @@ impl Propagator for LinearLE {
 
 #[cfg(test)]
 mod tests {
+	use expect_test::expect;
 	use flatzinc_serde::RangeList;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
 
-	use crate::{propagator::int_lin_le::LinearLE, solver::engine::int_var::IntVar, Solver, Value};
+	use crate::{propagator::int_lin_le::LinearLE, solver::engine::int_var::IntVar, Solver};
 
 	#[test]
 	fn test_linear_le_sat() {
@@ -132,11 +133,17 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
-		slv.add_propagator(LinearLE::new(&[2, 1, 1], vec![a, b, c], 10));
+		slv.add_propagator(LinearLE::new(&[2, 1, 1], vec![a, b, c], 6));
 
-		slv.assert_all_solutions(&[a, b, c], |sol: &[Value]| {
-			sol[0].as_int().unwrap() * 2 + sol[1].as_int().unwrap() + sol[2].as_int().unwrap() <= 10
-		});
+		slv.expect_solutions(
+			&[a, b, c],
+			expect![[r#"
+			1, 1, 1
+			1, 1, 2
+			1, 2, 1
+			1, 2, 2
+			2, 1, 1"#]],
+		);
 	}
 
 	#[test]
@@ -153,14 +160,20 @@ mod tests {
 	#[test]
 	fn test_linear_ge_sat() {
 		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
-		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
-		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
+		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
+		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
+		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
-		slv.add_propagator(LinearLE::new(&[-2, -1, -1], vec![a, b, c], -3));
-		slv.assert_all_solutions(&[a, b, c], |sol: &[Value]| {
-			sol[0].as_int().unwrap() * 2 + sol[1].as_int().unwrap() + sol[2].as_int().unwrap() >= 3
-		});
+		slv.add_propagator(LinearLE::new(&[-2, -1, -1], vec![a, b, c], -6));
+		slv.expect_solutions(
+			&[a, b, c],
+			expect![[r#"
+			1, 2, 2
+			2, 1, 1
+			2, 1, 2
+			2, 2, 1
+			2, 2, 2"#]],
+		);
 	}
 
 	#[test]
