@@ -316,6 +316,24 @@ impl Model {
 						});
 					}
 				}
+				"array_int_element" => {
+					if let [idx, arr, val] = c.args.as_slice() {
+						let arr = arg_array(fzn, arr)?;
+						let idx = arg_int(fzn, &mut prb, &mut map, idx)?;
+						let val = arg_int(fzn, &mut prb, &mut map, val)?;
+						let arr: Result<Vec<_>, _> = arr
+							.iter()
+							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
+							.collect();
+						prb += Constraint::Element(arr?, idx, val);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "array_int_element",
+							found: c.args.len(),
+							expected: 3,
+						});
+					}
+				}
 				_ => return Err(FlatZincError::UnknownConstraint(c.id.to_string())),
 			}
 		}

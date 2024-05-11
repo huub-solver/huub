@@ -10,7 +10,10 @@ use super::{
 	reformulate::{ReifContext, VariableMap},
 };
 use crate::{
-	propagator::{all_different::AllDifferentValue, int_lin_le::LinearLE, minimum::Minimum},
+	propagator::{
+		all_different::AllDifferentValue, element::IntElementBounds, int_lin_le::LinearLE,
+		minimum::Minimum,
+	},
 	solver::SatSolver,
 	BoolExpr, IntVal, Model, ReformulationError, Solver,
 };
@@ -22,6 +25,7 @@ pub enum Constraint {
 	IntLinLessEq(Vec<IntVal>, Vec<IntView>, IntVal),
 	Maximum(Vec<IntView>, IntView),
 	Minimum(Vec<IntView>, IntView),
+	Element(Vec<IntView>, IntView, IntView),
 	SimpleBool(BoolExpr),
 }
 
@@ -97,6 +101,16 @@ impl Constraint {
 				slv.add_propagator(Minimum::new(vars, y));
 				Ok(())
 			}
+			Constraint::Element(vars, idx, y) => {
+				let vars: Vec<_> = vars
+					.iter()
+					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
+					.collect();
+				let y = y.to_arg(ReifContext::Mixed, slv, map);
+				let idx = idx.to_arg(ReifContext::Mixed, slv, map);
+				slv.add_propagator(IntElementBounds::new(vars, y, idx));
+				Ok(())
+			}
 		}
 	}
 }
@@ -159,6 +173,26 @@ impl Model {
 				}
 				Ok(())
 			}
+			Constraint::Element(args, y, idx) => {
+				// make sure idx is within the range of args
+				self.set_int_lower_bound(&idx, 0, con)?;
+				self.set_int_upper_bound(&idx, args.len() as IntVal, con)?;
+				let (min_lb, max_ub) =
+					args.iter()
+						.fold((IntVal::MAX, IntVal::MIN), |(min_lb, max_ub), v| {
+							(
+								min_lb.min(self.get_int_lower_bound(v)),
+								max_ub.max(self.get_int_upper_bound(v)),
+							)
+						});
+				if min_lb > self.get_int_lower_bound(&y) {
+					self.set_int_lower_bound(&y, min_lb, con)?;
+				}
+				if max_ub < self.get_int_upper_bound(&y) {
+					self.set_int_upper_bound(&y, max_ub, con)?;
+				}
+				Ok(())
+			}
 			_ => Ok(()),
 		}
 	}
@@ -173,6 +207,19 @@ impl Model {
 				}
 				if let IntView::Var(m) = m {
 					self.int_vars[m.0 as usize].constraints.push(con);
+				}
+			}
+			Constraint::Element(args, y, idx) => {
+				for a in args {
+					if let IntExpr::Var(a) = a {
+						self.int_vars[a.0 as usize].constraints.push(con);
+					}
+				}
+				if let IntExpr::Var(y) = y {
+					self.int_vars[y.0 as usize].constraints.push(con);
+				}
+				if let IntExpr::Var(idx) = idx {
+					self.int_vars[idx.0 as usize].constraints.push(con);
 				}
 			}
 			_ => {}
