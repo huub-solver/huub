@@ -1,5 +1,6 @@
 pub(crate) mod all_different;
 pub(crate) mod conflict;
+pub(crate) mod element;
 pub(crate) mod int_event;
 pub(crate) mod int_lin_le;
 pub(crate) mod minimum;
