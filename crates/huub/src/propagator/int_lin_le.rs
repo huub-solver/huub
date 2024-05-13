@@ -25,31 +25,20 @@ impl LinearLE {
 		mut max_sum: IntVal,
 	) -> Self {
 		let vars: Vec<IntView> = vars.into_iter().map(Into::into).collect();
-		let scaled_vars: Vec<IntView> =
-			vars.iter()
-				.enumerate()
-				.filter_map(|(i, v)| match v.0 {
-					IntViewInner::Const(c) => {
-						max_sum -= coeffs[i] * c;
-						None
-					}
-					IntViewInner::VarRef(iv) => NonZeroIntVal::new(coeffs[i]).map(|scale| {
-						IntView(IntViewInner::Linear {
-							var: iv,
-							scale,
-							offset: 0,
-						})
-					}),
-					IntViewInner::Linear { var, scale, offset } => NonZeroIntVal::new(coeffs[i])
-						.map(|coeff| {
-							IntView(IntViewInner::Linear {
-								var,
-								scale: scale.checked_mul(coeff).unwrap(),
-								offset: offset * coeff.get(),
-							})
-						}),
-				})
-				.collect();
+		let scaled_vars: Vec<IntView> = vars
+			.iter()
+			.enumerate()
+			.filter_map(|(i, v)| {
+				if let IntViewInner::Const(c) = v.0 {
+					max_sum -= coeffs[i] * c;
+					None
+				} else if coeffs[i] != 0 {
+					Some(*v * NonZeroIntVal::new(coeffs[i]).unwrap())
+				} else {
+					None
+				}
+			})
+			.collect();
 		Self {
 			vars: scaled_vars,
 			rhs: max_sum,

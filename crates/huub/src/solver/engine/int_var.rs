@@ -50,14 +50,15 @@ impl IntVar {
 		}
 	}
 
-	pub(crate) fn new_in<
-		Sol: PropagatorAccess + SatValuation,
-		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
-	>(
+	pub(crate) fn new_in<Sol, Sat>(
 		slv: &mut Solver<Sat>,
 		domain: RangeList<IntVal>,
 		direct_encoding: bool,
-	) -> IntView {
+	) -> IntView
+	where
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	{
 		let orig_domain_len = (&domain)
 			.into_iter()
 			.map(|x| (*x.end() - *x.start() + 1) as usize)
