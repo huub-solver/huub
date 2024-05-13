@@ -1,6 +1,6 @@
 use delegate::delegate;
 
-use super::{PropRef, State};
+use super::{int_var::IntVarRef, PropRef, State};
 use crate::{
 	propagator::{conflict::Conflict, reason::ReasonBuilder, ExplainActions, PropagationActions},
 	solver::{
@@ -53,12 +53,17 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		val: IntVal,
 		reason: &ReasonBuilder,
 	) -> Result<(), Conflict> {
+		let mut lit_req = LitMeaning::GreaterEq(val);
+		if let IntViewInner::Linear { transformer, .. } = var.0 {
+			lit_req = transformer.rev_transform_lit(lit_req).unwrap();
+		}
+
 		match var.0 {
-			IntViewInner::VarRef(iv) => {
-				if self.get_int_lower_bound(var) >= val {
+			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
+				if self.check_satisfied(iv, &lit_req) {
 					return Ok(());
 				}
-				let lit = match self.state.int_vars[iv].get_bool_lit(LitMeaning::GreaterEq(val)) {
+				let lit = match self.state.int_vars[iv].get_bool_lit(lit_req) {
 					BoolView(BoolViewInner::Lit(lit)) => lit,
 					BoolView(BoolViewInner::Const(false)) => {
 						return Err(Conflict::new(reason, self.prop));
@@ -73,21 +78,6 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 					return Err(Conflict::new(reason, self.prop));
 				}
 			}
-			IntViewInner::Linear { var, scale, offset } => {
-				if scale.is_positive() {
-					return self.set_int_lower_bound(
-						IntView(IntViewInner::VarRef(var)),
-						IntView::rev_linear_transform(val, scale, offset),
-						reason,
-					);
-				} else {
-					return self.set_int_upper_bound(
-						IntView(IntViewInner::VarRef(var)),
-						IntView::rev_linear_transform(val, scale, offset),
-						reason,
-					);
-				}
-			}
 		}
 		Ok(())
 	}
@@ -97,12 +87,17 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		val: IntVal,
 		reason: &ReasonBuilder,
 	) -> Result<(), Conflict> {
+		let mut lit_req = LitMeaning::Less(val + 1);
+		if let IntViewInner::Linear { transformer, .. } = var.0 {
+			lit_req = transformer.rev_transform_lit(lit_req).unwrap();
+		}
+
 		match var.0 {
-			IntViewInner::VarRef(iv) => {
-				if self.get_int_upper_bound(var) <= val {
+			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
+				if self.check_satisfied(iv, &lit_req) {
 					return Ok(());
 				}
-				let lit = match self.state.int_vars[iv].get_bool_lit(LitMeaning::Less(val + 1)) {
+				let lit = match self.state.int_vars[iv].get_bool_lit(lit_req) {
 					BoolView(BoolViewInner::Lit(lit)) => lit,
 					BoolView(BoolViewInner::Const(false)) => {
 						return Err(Conflict::new(reason, self.prop));
@@ -117,21 +112,6 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 					return Err(Conflict::new(reason, self.prop));
 				}
 			}
-			IntViewInner::Linear { var, scale, offset } => {
-				if scale.is_positive() {
-					return self.set_int_upper_bound(
-						IntView(IntViewInner::VarRef(var)),
-						IntView::rev_linear_transform(val, scale, offset),
-						reason,
-					);
-				} else {
-					return self.set_int_lower_bound(
-						IntView(IntViewInner::VarRef(var)),
-						IntView::rev_linear_transform(val, scale, offset),
-						reason,
-					);
-				}
-			}
 		}
 		Ok(())
 	}
@@ -141,12 +121,21 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		val: IntVal,
 		reason: &ReasonBuilder,
 	) -> Result<(), Conflict> {
+		let mut lit_req = LitMeaning::Eq(val);
+		if let IntViewInner::Linear { transformer, .. } = var.0 {
+			if let Some(lit) = transformer.rev_transform_lit(lit_req) {
+				lit_req = lit;
+			} else {
+				return Err(Conflict::new(reason, self.prop));
+			}
+		}
+
 		match var.0 {
-			IntViewInner::VarRef(iv) => {
-				if self.get_int_val(var) == Some(val) {
+			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
+				if self.check_satisfied(iv, &lit_req) {
 					return Ok(());
 				}
-				let lit = match self.state.int_vars[iv].get_bool_lit(LitMeaning::Eq(val)) {
+				let lit = match self.state.int_vars[iv].get_bool_lit(lit_req) {
 					BoolView(BoolViewInner::Lit(lit)) => lit,
 					BoolView(BoolViewInner::Const(false)) => {
 						return Err(Conflict::new(reason, self.prop));
@@ -163,15 +152,6 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 					return Err(Conflict::new(reason, self.prop));
 				}
 			}
-			IntViewInner::Linear { var, scale, offset } => {
-				if IntView::linear_is_integer(val, scale, offset) {
-					let val_inner = IntView::rev_linear_transform(val, scale, offset);
-					return self.set_int_val(IntView(IntViewInner::VarRef(var)), val_inner, reason);
-				} else {
-					// (scale * var) + offset cannot equal to val
-					return Err(Conflict::new(reason, self.prop));
-				}
-			}
 		};
 		Ok(())
 	}
@@ -181,12 +161,21 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		val: IntVal,
 		reason: &ReasonBuilder,
 	) -> Result<(), Conflict> {
+		let mut lit_req = LitMeaning::NotEq(val);
+		if let IntViewInner::Linear { transformer, .. } = var.0 {
+			if let Some(lit) = transformer.rev_transform_lit(lit_req) {
+				lit_req = lit;
+			} else {
+				return Ok(());
+			}
+		}
+
 		match var.0 {
-			IntViewInner::VarRef(iv) => {
-				if !self.check_int_in_domain(var, val) {
+			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
+				if self.check_satisfied(iv, &lit_req) {
 					return Ok(());
 				}
-				let lit = match self.state.int_vars[iv].get_bool_lit(LitMeaning::NotEq(val)) {
+				let lit = match self.state.int_vars[iv].get_bool_lit(lit_req) {
 					BoolView(BoolViewInner::Lit(lit)) => lit,
 					BoolView(BoolViewInner::Const(false)) => {
 						return Err(Conflict::new(reason, self.prop));
@@ -203,15 +192,6 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 					return Err(Conflict::new(reason, self.prop));
 				}
 			}
-			IntViewInner::Linear { var, scale, offset } => {
-				if IntView::linear_is_integer(val, scale, offset) {
-					let val_inner = IntView::rev_linear_transform(val, scale, offset);
-					return self.set_int_val(IntView(IntViewInner::VarRef(var)), val_inner, reason);
-				} else {
-					// (scale * var) + offset will not equal to val
-					return Ok(());
-				}
-			}
 		};
 		Ok(())
 	}
@@ -224,6 +204,37 @@ impl ExplainActions for PropagationContext<'_> {
 			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
 			fn get_int_upper_bound(&self, var: IntView) -> IntVal;
 			fn get_int_lit(&self, var: IntView, meaning: LitMeaning) -> BoolView;
+		}
+	}
+}
+
+impl PropagationContext<'_> {
+	#[inline]
+	pub(crate) fn check_satisfied(&self, var: IntVarRef, lit: &LitMeaning) -> bool {
+		match lit {
+			LitMeaning::Eq(i) => {
+				let lb = self.state.int_trail[self.state.int_vars[var].lower_bound];
+				let ub = self.state.int_trail[self.state.int_vars[var].upper_bound];
+				lb == *i && ub == *i
+			}
+			LitMeaning::NotEq(i) => {
+				let lb = self.state.int_trail[self.state.int_vars[var].lower_bound];
+				let ub = self.state.int_trail[self.state.int_vars[var].upper_bound];
+				if *i < lb || *i > ub {
+					true
+				} else {
+					let eq_lit = self.state.int_vars[var].get_bool_lit(LitMeaning::NotEq(*i));
+					self.get_bool_val(eq_lit).unwrap_or(false)
+				}
+			}
+			LitMeaning::GreaterEq(i) => {
+				let lb = self.state.int_trail[self.state.int_vars[var].lower_bound];
+				lb >= *i
+			}
+			LitMeaning::Less(i) => {
+				let ub = self.state.int_trail[self.state.int_vars[var].upper_bound];
+				ub < *i
+			}
 		}
 	}
 }

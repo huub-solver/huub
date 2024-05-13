@@ -51,8 +51,8 @@ impl<'a, Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<Valu
 				.or_default()
 				.push((self.prop, event, data)),
 			IntViewInner::Const(_) => {}
-			IntViewInner::Linear { var, scale, .. } => {
-				if scale.is_positive() {
+			IntViewInner::Linear { transformer, var } => {
+				if transformer.positive_scale() {
 					self.subscribe_int(IntView(IntViewInner::VarRef(var)), event, data)
 				} else {
 					let reverse_event = match event {
