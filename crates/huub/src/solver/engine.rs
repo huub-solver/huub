@@ -151,6 +151,7 @@ impl IpasirPropagator for Engine {
 	}
 
 	fn add_reason_clause(&mut self, propagated_lit: pindakaas::Lit) -> Clause {
+		debug_assert_ne!(self.state.reason_map.get(&propagated_lit), None);
 		let mut clause = self
 			.state
 			.reason_map
@@ -392,13 +393,16 @@ impl ExplainActions for State {
 		match var.0 {
 			IntViewInner::VarRef(iv) => self.int_trail[self.int_vars[iv].lower_bound],
 			IntViewInner::Const(i) => i,
-			IntViewInner::Linear { var, scale, offset } => {
-				if scale.is_positive() {
+			IntViewInner::Linear {
+				transformer: transform,
+				var,
+			} => {
+				if transform.positive_scale() {
 					let lb = self.int_trail[self.int_vars[var].lower_bound];
-					IntView::linear_transform(lb, scale, offset)
+					transform.transform(lb)
 				} else {
 					let ub = self.int_trail[self.int_vars[var].upper_bound];
-					IntView::linear_transform(ub, scale, offset)
+					transform.transform(ub)
 				}
 			}
 		}
@@ -407,63 +411,46 @@ impl ExplainActions for State {
 		match var.0 {
 			IntViewInner::VarRef(iv) => self.int_trail[self.int_vars[iv].upper_bound],
 			IntViewInner::Const(i) => i,
-			IntViewInner::Linear { var, scale, offset } => {
-				if scale.is_positive() {
+			IntViewInner::Linear {
+				transformer: transform,
+				var,
+			} => {
+				if transform.positive_scale() {
 					let ub = self.int_trail[self.int_vars[var].upper_bound];
-					IntView::linear_transform(ub, scale, offset)
+					transform.transform(ub)
 				} else {
 					let lb = self.int_trail[self.int_vars[var].lower_bound];
-					IntView::linear_transform(lb, scale, offset)
+					transform.transform(lb)
 				}
 			}
 		}
 	}
 
-	fn get_int_lit(&self, var: IntView, meaning: LitMeaning) -> BoolView {
+	fn get_int_lit(&self, var: IntView, mut meaning: LitMeaning) -> BoolView {
+		if let IntViewInner::Linear {
+			transformer: transform,
+			var: _,
+		} = var.0
+		{
+			if let Some(m) = transform.rev_transform_lit(meaning) {
+				meaning = m;
+			} else {
+				return BoolView(BoolViewInner::Const(false));
+			}
+		}
+
 		match var.0 {
-			IntViewInner::VarRef(iv) => self.int_vars[iv].get_bool_lit(meaning),
+			IntViewInner::VarRef(var)
+			| IntViewInner::Linear {
+				transformer: _,
+				var,
+			} => self.int_vars[var].get_bool_lit(meaning),
 			IntViewInner::Const(c) => BoolView(BoolViewInner::Const(match meaning {
 				LitMeaning::Eq(i) => c == i,
 				LitMeaning::NotEq(i) => c != i,
 				LitMeaning::GreaterEq(i) => c >= i,
 				LitMeaning::Less(i) => c < i,
 			})),
-			IntViewInner::Linear { var, scale, offset } => match meaning {
-				LitMeaning::Eq(i) => {
-					if IntView::linear_is_integer(i, scale, offset) {
-						self.int_vars[var].get_bool_lit(LitMeaning::Eq(
-							IntView::rev_linear_transform(i, scale, offset),
-						))
-					} else {
-						BoolView(BoolViewInner::Const(false))
-					}
-				}
-				LitMeaning::NotEq(i) => {
-					if IntView::linear_is_integer(i, scale, offset) {
-						self.int_vars[var].get_bool_lit(LitMeaning::NotEq(
-							IntView::rev_linear_transform(i, scale, offset),
-						))
-					} else {
-						BoolView(BoolViewInner::Const(true))
-					}
-				}
-				LitMeaning::GreaterEq(i) => {
-					let val = IntView::rev_linear_transform(i, scale, offset);
-					if scale.is_positive() {
-						self.int_vars[var].get_bool_lit(LitMeaning::GreaterEq(val))
-					} else {
-						self.int_vars[var].get_bool_lit(LitMeaning::Less(val + 1))
-					}
-				}
-				LitMeaning::Less(i) => {
-					let val = IntView::rev_linear_transform(i, scale, offset);
-					if scale.is_positive() {
-						self.int_vars[var].get_bool_lit(LitMeaning::Less(val + 1))
-					} else {
-						self.int_vars[var].get_bool_lit(LitMeaning::GreaterEq(val + 1))
-					}
-				}
-			},
 		}
 	}
 }

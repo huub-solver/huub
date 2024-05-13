@@ -87,12 +87,12 @@ where
 							Some(Value::Int(engine.state.int_vars[iv].get_value(model)))
 						}
 						IntViewInner::Const(i) => Some(Value::Int(i)),
-						IntViewInner::Linear { var, scale, offset } => {
-							Some(Value::Int(IntView::linear_transform(
-								engine.state.int_vars[var].get_value(model),
-								scale,
-								offset,
-							)))
+						IntViewInner::Linear {
+							transformer: transform,
+							var,
+						} => {
+							let val = engine.state.int_vars[var].get_value(model);
+							Some(Value::Int(transform.transform(val)))
 						}
 					},
 				};

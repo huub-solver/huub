@@ -17,6 +17,7 @@ pub enum Constraint {
 	AllDifferent(Vec<IntExpr>),
 	IntLinEq(Vec<IntVal>, Vec<IntExpr>, IntVal),
 	IntLinLessEq(Vec<IntVal>, Vec<IntExpr>, IntVal),
+	ReifiedIntLinLessEq(Vec<IntVal>, Vec<IntExpr>, IntVal, BoolExpr),
 	Maximum(Vec<IntExpr>, IntExpr),
 	Minimum(Vec<IntExpr>, IntExpr),
 	SimpleBool(BoolExpr),
@@ -40,6 +41,26 @@ impl Constraint {
 					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
 				slv.add_propagator(AllDifferentValue::new(vars));
+				Ok(())
+			}
+			Constraint::ReifiedIntLinLessEq(coeffs, vars, c, b) => {
+				let vars: Vec<_> = vars
+					.iter()
+					.zip_eq(coeffs.iter())
+					.map(|(v, &c)| {
+						v.to_arg(
+							if c >= 0 {
+								ReifContext::Pos
+							} else {
+								ReifContext::Neg
+							},
+							slv,
+							map,
+						)
+					})
+					.collect();
+				let b = b.to_arg(ReifContext::Mixed, slv, map, None)?;
+				slv.add_propagator(LinearLE::new(coeffs, vars, *c).reify(b));
 				Ok(())
 			}
 			Constraint::IntLinLessEq(coeffs, vars, c) => {

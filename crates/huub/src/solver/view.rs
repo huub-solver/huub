@@ -1,6 +1,6 @@
 use std::{
 	num::NonZeroI32,
-	ops::{Neg, Not},
+	ops::{Add, Mul, Neg, Not},
 };
 
 use pindakaas::{
@@ -167,47 +167,190 @@ pub(crate) enum IntViewInner {
 	/// Constant Integer Value
 	Const(IntVal),
 	/// Linear View of an Integer Variable
-	/// `(var * scale) + offset`
 	Linear {
+		transformer: LinearTransform,
 		var: IntVarRef,
-		scale: NonZeroIntVal,
-		offset: IntVal,
 	},
-}
-
-impl IntView {
-	#[inline]
-	pub(crate) fn linear_transform(val: IntVal, scale: NonZeroIntVal, offset: IntVal) -> IntVal {
-		(val * scale.get()) + offset
-	}
-	#[inline]
-	pub(crate) fn rev_linear_transform(
-		view: IntVal,
-		scale: NonZeroIntVal,
-		offset: IntVal,
-	) -> IntVal {
-		(view - offset) / scale.get()
-	}
-	pub(crate) fn linear_is_integer(val: IntVal, scale: NonZeroIntVal, offset: IntVal) -> bool {
-		(val - offset) % scale.get() == 0
-	}
 }
 
 impl Neg for IntView {
 	type Output = Self;
 	fn neg(self) -> Self::Output {
 		match self.0 {
-			IntViewInner::VarRef(v) => IntView(IntViewInner::Linear {
-				var: v,
-				scale: NonZeroIntVal::new(-1).unwrap(),
-				offset: 0,
+			IntViewInner::VarRef(var) => IntView(IntViewInner::Linear {
+				transformer: LinearTransform::scaled(NonZeroIntVal::new(-1).unwrap()),
+				var,
 			}),
 			IntViewInner::Const(i) => IntView(IntViewInner::Const(-i)),
-			IntViewInner::Linear { var, scale, offset } => IntView(IntViewInner::Linear {
+			IntViewInner::Linear {
+				transformer: transform,
 				var,
-				scale: NonZeroIntVal::new(-scale.get()).unwrap(),
-				offset: -offset,
+			} => IntView(IntViewInner::Linear {
+				transformer: -transform,
+				var,
 			}),
+		}
+	}
+}
+
+impl Add<IntVal> for IntView {
+	type Output = Self;
+	fn add(self, rhs: IntVal) -> Self::Output {
+		Self(match self.0 {
+			IntViewInner::VarRef(var) => IntViewInner::Linear {
+				transformer: LinearTransform::offset(rhs),
+				var,
+			},
+			IntViewInner::Const(i) => IntViewInner::Const(i + rhs),
+			IntViewInner::Linear {
+				transformer: transform,
+				var,
+			} => IntViewInner::Linear {
+				transformer: transform + rhs,
+				var,
+			},
+		})
+	}
+}
+
+impl Mul<NonZeroIntVal> for IntView {
+	type Output = Self;
+
+	fn mul(self, rhs: NonZeroIntVal) -> Self::Output {
+		Self(match self.0 {
+			IntViewInner::VarRef(iv) => IntViewInner::Linear {
+				transformer: LinearTransform::scaled(rhs),
+				var: iv,
+			},
+			IntViewInner::Const(c) => IntViewInner::Const(c * rhs.get()),
+			IntViewInner::Linear { transformer, var } => IntViewInner::Linear {
+				transformer: transformer * rhs,
+				var,
+			},
+		})
+	}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct LinearTransform {
+	scale: NonZeroIntVal,
+	offset: IntVal,
+}
+
+impl LinearTransform {
+	/// Creates a new linear transformation with the given scale and offset.
+	#[allow(dead_code)] // TODO!
+	pub(crate) fn new(scale: NonZeroIntVal, offset: IntVal) -> Self {
+		Self { scale, offset }
+	}
+	/// Creates a new linear transformation with the given scale and no offset.
+	pub(crate) fn scaled(scale: NonZeroIntVal) -> Self {
+		Self { scale, offset: 0 }
+	}
+	/// Creates a new linear transformation with the given offset and no scale.
+	pub(crate) fn offset(offset: IntVal) -> Self {
+		Self {
+			scale: NonZeroIntVal::new(1).unwrap(),
+			offset,
+		}
+	}
+
+	pub(crate) fn positive_scale(&self) -> bool {
+		self.scale.get() > 0
+	}
+
+	/// Perform the linear transformation on a value.
+	pub(crate) fn transform(&self, val: IntVal) -> IntVal {
+		(val * self.scale.get()) + self.offset
+	}
+
+	/// Perform the reverse linear transformation on a value.
+	pub(crate) fn rev_transform(&self, val: IntVal) -> IntVal {
+		(val - self.offset) / self.scale.get()
+	}
+
+	/// Returns whether a value remains an integer after reversing the transformation.
+	pub(crate) fn rev_remains_integer(&self, val: IntVal) -> bool {
+		(val - self.offset) % self.scale.get() == 0
+	}
+
+	/// Perform the reverse linear tranformation for a LitMeanning request.
+	///
+	/// Note that this performs the correct rounding to maintain the meaning of the literal. When
+	/// equality literals are requested, None is returned when no such integer value exists.
+	pub(crate) fn rev_transform_lit(&self, mut lit: LitMeaning) -> Option<LitMeaning> {
+		let mut transformer = *self;
+		if !self.positive_scale() {
+			// Make positive by doing `*-1` on lit meaning and transformer
+			(lit, transformer) = match lit {
+				// -x >= i === x <= -i === x < -i + 1
+				LitMeaning::GreaterEq(i) => (LitMeaning::Less(-i + 1), -transformer),
+				// -x < i === x > -i === x >= -i + 1
+				LitMeaning::Less(i) => (LitMeaning::GreaterEq(-i + 1), -transformer),
+				_ => (lit, transformer),
+			};
+		}
+
+		match lit {
+			LitMeaning::Eq(i) => {
+				if transformer.rev_remains_integer(i) {
+					Some(LitMeaning::Eq(transformer.rev_transform(i)))
+				} else {
+					None
+				}
+			}
+			LitMeaning::NotEq(i) => {
+				if transformer.rev_remains_integer(i) {
+					Some(LitMeaning::NotEq(transformer.rev_transform(i)))
+				} else {
+					None
+				}
+			}
+			LitMeaning::GreaterEq(i) => Some(LitMeaning::GreaterEq(div_ceil(
+				i - transformer.offset,
+				transformer.scale,
+			))),
+			LitMeaning::Less(i) => Some(LitMeaning::Less(div_ceil(
+				i - transformer.offset,
+				transformer.scale,
+			))),
+		}
+	}
+}
+
+#[inline]
+fn div_ceil(a: IntVal, b: NonZeroIntVal) -> IntVal {
+	a / b.get() + (0 != a % b.get()) as IntVal
+}
+
+impl Neg for LinearTransform {
+	type Output = Self;
+	fn neg(self) -> Self::Output {
+		Self {
+			scale: NonZeroIntVal::new(-self.scale.get()).unwrap(),
+			offset: -self.offset,
+		}
+	}
+}
+
+impl Add<IntVal> for LinearTransform {
+	type Output = Self;
+
+	fn add(self, rhs: IntVal) -> Self::Output {
+		LinearTransform {
+			scale: self.scale,
+			offset: self.offset + rhs,
+		}
+	}
+}
+
+impl Mul<NonZeroIntVal> for LinearTransform {
+	type Output = Self;
+
+	fn mul(self, rhs: NonZeroIntVal) -> Self::Output {
+		LinearTransform {
+			scale: NonZeroIntVal::new(self.scale.get() * rhs.get()).unwrap(),
+			offset: self.offset * rhs.get(),
 		}
 	}
 }

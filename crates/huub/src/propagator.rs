@@ -93,6 +93,7 @@ pub(crate) trait PropagationActions: ExplainActions {
 		val: IntVal,
 		reason: &ReasonBuilder,
 	) -> Result<(), Conflict>;
+	#[allow(dead_code)] // TODO
 	fn set_int_val(
 		&mut self,
 		var: IntView,
@@ -121,6 +122,7 @@ pub(crate) trait ExplainActions {
 			None
 		}
 	}
+	#[allow(dead_code)]
 	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool {
 		if self.get_int_lower_bound(var) <= val && val <= self.get_int_upper_bound(var) {
 			let eq_lit = self.get_int_lit(var, LitMeaning::Eq(val));
