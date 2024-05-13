@@ -306,7 +306,7 @@ impl LinearTransform {
 					None
 				}
 			}
-			LitMeaning::GreaterEq(i) => Some(LitMeaning::GreaterEq(div_floor(
+			LitMeaning::GreaterEq(i) => Some(LitMeaning::GreaterEq(div_ceil(
 				i - transformer.offset,
 				transformer.scale,
 			))),
@@ -321,11 +321,6 @@ impl LinearTransform {
 #[inline]
 fn div_ceil(a: IntVal, b: NonZeroIntVal) -> IntVal {
 	a / b.get() + (0 != a % b.get()) as IntVal
-}
-
-#[inline]
-fn div_floor(a: IntVal, b: NonZeroIntVal) -> IntVal {
-	a / b.get()
 }
 
 impl Neg for LinearTransform {
