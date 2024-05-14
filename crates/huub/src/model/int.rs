@@ -6,56 +6,28 @@ use pindakaas::{
 
 use super::reformulate::{ReifContext, VariableMap};
 use crate::{
-	solver::{
-		view::{IntView, IntViewInner, SolverView},
-		SatSolver,
-	},
-	IntVal, Model, ReformulationError, Solver, Variable,
+	helpers::linear_transform::LinearTransform,
+	solver::{view, SatSolver},
+	IntVal, Model, ReformulationError, Solver,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum IntExpr {
-	Var(IntVar),
-	Val(IntVal),
-}
-
-impl IntExpr {
+impl IntView {
 	pub(crate) fn to_arg<Sol, Sat>(
 		&self,
 		_ctx: ReifContext,
 		_slv: &mut Solver<Sat>,
 		map: &mut VariableMap,
-	) -> IntView
+	) -> view::IntView
 	where
 		Sol: PropagatorAccess + SatValuation,
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 	{
-		match self {
-			IntExpr::Var(v) => {
-				if let SolverView::Int(i) = map.get(&Variable::Int(*v)) {
-					i
-				} else {
-					unreachable!()
-				}
-			}
-			IntExpr::Val(v) => IntView(IntViewInner::Const(*v)),
-		}
+		map.get_int(self)
 	}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct IntVar(pub(crate) u32);
-
-impl From<IntVar> for IntExpr {
-	fn from(value: IntVar) -> Self {
-		IntExpr::Var(value)
-	}
-}
-impl From<IntVal> for IntExpr {
-	fn from(value: IntVal) -> Self {
-		IntExpr::Val(value)
-	}
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct IntVarDef {
@@ -72,48 +44,57 @@ impl IntVarDef {
 	}
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum IntView {
+	Var(IntVar),
+	Const(i64),
+	Linear(LinearTransform, IntVar),
+}
+
 impl Model {
-	pub(crate) fn get_int_lower_bound(&self, iv: &IntExpr) -> IntVal {
+	pub(crate) fn get_int_lower_bound(&self, iv: &IntView) -> IntVal {
 		match *iv {
-			IntExpr::Var(v) => {
+			IntView::Var(v) => {
 				let def = &self.int_vars[v.0 as usize];
 				*def.domain.lower_bound().unwrap()
 			}
-			IntExpr::Val(v) => v,
+			IntView::Const(v) => v,
+			IntView::Linear(_, _) => todo!(),
 		}
 	}
 
-	pub(crate) fn get_int_upper_bound(&self, iv: &IntExpr) -> IntVal {
+	pub(crate) fn get_int_upper_bound(&self, iv: &IntView) -> IntVal {
 		match *iv {
-			IntExpr::Var(v) => {
+			IntView::Var(v) => {
 				let def = &self.int_vars[v.0 as usize];
 				*def.domain.upper_bound().unwrap()
 			}
-			IntExpr::Val(v) => v,
+			IntView::Const(v) => v,
+			IntView::Linear(_, _) => todo!(),
 		}
 	}
 
 	pub(crate) fn set_int_lower_bound(
 		&mut self,
-		iv: &IntExpr,
+		iv: &IntView,
 		lb: IntVal,
 		con: usize,
 	) -> Result<(), ReformulationError> {
 		match *iv {
-			IntExpr::Var(v) => {
+			IntView::Var(v) => {
 				let def = &mut self.int_vars[v.0 as usize];
 				if lb <= *def.domain.lower_bound().unwrap() {
 					return Ok(());
 				} else if lb > *def.domain.upper_bound().unwrap() {
 					return Err(ReformulationError::TrivialUnsatisfiable);
 				}
-				def.domain = RangeList::from_iter((&def.domain).into_iter().filter_map(|r| {
-					if **r.end() < lb {
+				def.domain = RangeList::from_iter(def.domain.iter().filter_map(|r| {
+					if *r.end() < lb {
 						None
-					} else if **r.start() < lb {
-						Some(lb..=**r.end())
+					} else if *r.start() < lb {
+						Some(lb..=*r.end())
 					} else {
-						Some(**r.start()..=**r.end())
+						Some(r)
 					}
 				}));
 				let constraints = def.constraints.clone();
@@ -124,37 +105,38 @@ impl Model {
 				}
 				Ok(())
 			}
-			IntExpr::Val(v) => {
+			IntView::Const(v) => {
 				if v < lb {
 					Err(ReformulationError::TrivialUnsatisfiable)
 				} else {
 					Ok(())
 				}
 			}
+			IntView::Linear(_, _) => todo!(),
 		}
 	}
 
 	pub(crate) fn set_int_upper_bound(
 		&mut self,
-		iv: &IntExpr,
+		iv: &IntView,
 		ub: IntVal,
 		con: usize,
 	) -> Result<(), ReformulationError> {
 		match *iv {
-			IntExpr::Var(v) => {
+			IntView::Var(v) => {
 				let def = &mut self.int_vars[v.0 as usize];
 				if ub >= *def.domain.lower_bound().unwrap() {
 					return Ok(());
 				} else if ub < *def.domain.lower_bound().unwrap() {
 					return Err(ReformulationError::TrivialUnsatisfiable);
 				}
-				def.domain = RangeList::from_iter((&def.domain).into_iter().filter_map(|r| {
-					if ub < **r.start() {
+				def.domain = RangeList::from_iter(def.domain.iter().filter_map(|r| {
+					if ub < *r.start() {
 						None
-					} else if ub < **r.end() {
-						Some(**r.start()..=ub)
+					} else if ub < *r.end() {
+						Some(*r.start()..=ub)
 					} else {
-						Some(**r.start()..=**r.end())
+						Some(r)
 					}
 				}));
 				let constraints = def.constraints.clone();
@@ -165,24 +147,25 @@ impl Model {
 				}
 				Ok(())
 			}
-			IntExpr::Val(v) => {
+			IntView::Const(v) => {
 				if v > ub {
 					Err(ReformulationError::TrivialUnsatisfiable)
 				} else {
 					Ok(())
 				}
 			}
+			IntView::Linear(_, _) => todo!(),
 		}
 	}
 
 	pub(crate) fn diff_int_domain(
 		&mut self,
-		iv: &IntExpr,
+		iv: &IntView,
 		mask: &RangeList<IntVal>,
 		con: usize,
 	) -> Result<(), ReformulationError> {
 		match *iv {
-			IntExpr::Var(v) => {
+			IntView::Var(v) => {
 				let diff = diff_range_list(&self.int_vars[v.0 as usize].domain, mask);
 				if diff.is_empty() {
 					return Err(ReformulationError::TrivialUnsatisfiable);
@@ -198,13 +181,14 @@ impl Model {
 				}
 				Ok(())
 			}
-			IntExpr::Val(v) => {
+			IntView::Const(v) => {
 				if mask.contains(&v) {
 					Err(ReformulationError::TrivialUnsatisfiable)
 				} else {
 					Ok(())
 				}
 			}
+			IntView::Linear(_, _) => todo!(),
 		}
 	}
 }
@@ -214,8 +198,8 @@ fn diff_range_list(i: &RangeList<IntVal>, j: &RangeList<IntVal>) -> RangeList<In
 	if i.is_empty() {
 		return RangeList::from_iter([]);
 	}
-	let mut i = i.into_iter().map(|r| **r.start()..=**r.end()).peekable();
-	let mut j = j.into_iter().map(|r| **r.start()..=**r.end()).peekable();
+	let mut i = i.iter().peekable();
+	let mut j = j.iter().peekable();
 	let mut ranges = Vec::new();
 	let mut max: IntVal = *i.peek().unwrap().start();
 	loop {

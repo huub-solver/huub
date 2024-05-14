@@ -3,20 +3,53 @@ use std::{collections::BTreeMap, fmt::Debug, ops::Deref};
 use flatzinc_serde::{Argument, Domain, FlatZinc, Literal, Type, Variable};
 use thiserror::Error;
 
-use super::{bool::BoolExpr, reformulate::ReformulationError};
-use crate::{
-	model::{IntExpr, Variable as MVar},
-	Constraint, IntVal, Model, Solver, SolverView,
+use super::{
+	bool::{BoolExpr, BoolView},
+	int::IntView,
+	reformulate::ReformulationError,
+	ModelView,
 };
+use crate::{Constraint, IntVal, Model, Solver, SolverView};
 
 impl Model {
 	pub fn from_fzn<S: Ord + Deref<Target = str> + Clone + Debug>(
 		fzn: &FlatZinc<S>,
-	) -> Result<(Self, BTreeMap<S, MVar>), FlatZincError> {
-		let mut map = BTreeMap::<S, MVar>::new();
+	) -> Result<(Self, BTreeMap<S, ModelView>), FlatZincError> {
+		let mut map = BTreeMap::<S, ModelView>::new();
 		let mut prb = Model::default();
 
-		for c in fzn.constraints.iter() {
+		// Extract views from `defines_var` constraints
+		let processed = fzn
+			.constraints
+			.iter()
+			.map(|c| {
+				match (c.id.deref(), c.defines.as_ref()) {
+					("bool_not", Some(l)) => {
+						if let [a, b] = c.args.as_slice() {
+							match (a, b) {
+								(Argument::Literal(Literal::Identifier(x)), b)
+								| (b, Argument::Literal(Literal::Identifier(x)))
+									if x == l =>
+								{
+									let b = arg_bool(fzn, &mut prb, &mut map, b)?;
+									let _ = map.insert(l.clone(), (!b).into());
+									return Ok(true);
+								}
+								_ => {}
+							}
+						}
+					}
+					_ => {}
+				}
+				Ok(false)
+			})
+			.collect::<Result<Vec<_>, FlatZincError>>()?;
+
+		// Traditional relational constraints
+		for (i, c) in fzn.constraints.iter().enumerate() {
+			if processed[i] {
+				continue;
+			}
 			match c.id.deref() {
 				"array_bool_and" => {
 					if let [es, r] = c.args.as_slice() {
@@ -24,9 +57,9 @@ impl Model {
 						let r = arg_bool(fzn, &mut prb, &mut map, r)?;
 						let es: Result<Vec<_>, _> = es
 							.iter()
-							.map(|l| lit_bool(fzn, &mut prb, &mut map, l))
+							.map(|l| lit_bool(fzn, &mut prb, &mut map, l).map(Into::into))
 							.collect();
-						prb += BoolExpr::Equiv(vec![r, BoolExpr::And(es?)]);
+						prb += BoolExpr::Equiv(vec![r.into(), BoolExpr::And(es?)]);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_bool_and",
@@ -38,9 +71,9 @@ impl Model {
 				"array_bool_xor" => {
 					if let [es] = c.args.as_slice() {
 						let es = arg_array(fzn, es)?;
-						let es: Result<Vec<_>, _> = es
+						let es: Result<Vec<BoolExpr>, _> = es
 							.iter()
-							.map(|l| lit_bool(fzn, &mut prb, &mut map, l))
+							.map(|l| lit_bool(fzn, &mut prb, &mut map, l).map(Into::into))
 							.collect();
 						prb += BoolExpr::Xor(es?);
 					} else {
@@ -58,11 +91,11 @@ impl Model {
 						let mut lits = Vec::with_capacity(pos.len() + neg.len());
 						for l in pos {
 							let e = lit_bool(fzn, &mut prb, &mut map, l)?;
-							lits.push(e);
+							lits.push(e.into());
 						}
 						for l in neg {
 							let e = lit_bool(fzn, &mut prb, &mut map, l)?;
-							lits.push(!e)
+							lits.push((!e).into())
 						}
 						prb += BoolExpr::Or(lits);
 					} else {
@@ -78,7 +111,10 @@ impl Model {
 						let a = arg_bool(fzn, &mut prb, &mut map, a)?;
 						let b = arg_bool(fzn, &mut prb, &mut map, b)?;
 						let r = arg_bool(fzn, &mut prb, &mut map, r)?;
-						prb += BoolExpr::Equiv(vec![r, BoolExpr::Equiv(vec![a, b])]);
+						prb += BoolExpr::Equiv(vec![
+							r.into(),
+							BoolExpr::Equiv(vec![a.into(), b.into()]),
+						]);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_eq_reif",
@@ -91,8 +127,7 @@ impl Model {
 					if let [a, b] = c.args.as_slice() {
 						let a = arg_bool(fzn, &mut prb, &mut map, a)?;
 						let b = arg_bool(fzn, &mut prb, &mut map, b)?;
-						// TODO: This should not need two variables
-						prb += BoolExpr::Equiv(vec![b, !a]);
+						prb += BoolExpr::Equiv(vec![b.into(), (!a).into()]);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_not",
@@ -105,10 +140,10 @@ impl Model {
 					if (2..=3).contains(&c.args.len()) {
 						let a = arg_bool(fzn, &mut prb, &mut map, &c.args[0])?;
 						let b = arg_bool(fzn, &mut prb, &mut map, &c.args[1])?;
-						let mut f = BoolExpr::Xor(vec![a, b]);
+						let mut f = BoolExpr::Xor(vec![a.into(), b.into()]);
 						if c.args.len() == 3 {
 							let r = arg_bool(fzn, &mut prb, &mut map, &c.args[2])?;
-							f = BoolExpr::Equiv(vec![r, f]);
+							f = BoolExpr::Equiv(vec![r.into(), f]);
 						}
 						prb += f;
 					} else {
@@ -169,13 +204,13 @@ impl Model {
 						let mut lits = Vec::with_capacity(pos.len() + neg.len());
 						for l in pos {
 							let e = lit_bool(fzn, &mut prb, &mut map, l)?;
-							lits.push(e);
+							lits.push(e.into());
 						}
 						for l in neg {
 							let e = lit_bool(fzn, &mut prb, &mut map, l)?;
-							lits.push(!e)
+							lits.push((!e).into())
 						}
-						prb += BoolExpr::Equiv(vec![r, BoolExpr::Or(lits)]);
+						prb += BoolExpr::Equiv(vec![r.into(), BoolExpr::Or(lits)]);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_clause_reif",
@@ -295,11 +330,11 @@ fn arg_array<'a, S: Ord + Deref<Target = str> + Clone + Debug>(
 fn new_var<S: Ord + Deref<Target = str> + Clone + Debug>(
 	prb: &mut Model,
 	var: &Variable<S>,
-) -> MVar {
+) -> ModelView {
 	match var.ty {
-		Type::Bool => MVar::Bool(prb.new_bool_var()),
+		Type::Bool => ModelView::Bool(prb.new_bool_var()),
 		Type::Int => match &var.domain {
-			Some(Domain::Int(r)) => MVar::Int(prb.new_int_var(r.clone())),
+			Some(Domain::Int(r)) => ModelView::Int(prb.new_int_var(r.clone())),
 			Some(_) => unreachable!(),
 			None => todo!("Variables without a domain are not yet supported"),
 		},
@@ -310,21 +345,21 @@ fn new_var<S: Ord + Deref<Target = str> + Clone + Debug>(
 fn lit_bool<S: Ord + Deref<Target = str> + Clone + Debug>(
 	fzn: &FlatZinc<S>,
 	prb: &mut Model,
-	map: &mut BTreeMap<S, MVar>,
+	map: &mut BTreeMap<S, ModelView>,
 	lit: &Literal<S>,
-) -> Result<BoolExpr, FlatZincError> {
+) -> Result<BoolView, FlatZincError> {
 	match lit {
 		Literal::Identifier(ident) => {
 			if let Some(var) = fzn.variables.get(ident) {
 				if var.ty == Type::Bool {
 					// TODO: Add boolean views of integers
-					let MVar::Bool(ret) = map
+					let ModelView::Bool(ret) = map
 						.entry(ident.clone())
 						.or_insert_with(|| new_var(prb, var))
 					else {
 						unreachable!()
 					};
-					Ok(BoolExpr::Lit((*ret).into()))
+					Ok(*ret)
 				} else {
 					Err(FlatZincError::InvalidArgumentType {
 						expected: "bool",
@@ -335,7 +370,7 @@ fn lit_bool<S: Ord + Deref<Target = str> + Clone + Debug>(
 				Err(FlatZincError::UnknownIdentifier(ident.to_string()))
 			}
 		}
-		Literal::Bool(v) => Ok(BoolExpr::Val(*v)),
+		Literal::Bool(v) => Ok(BoolView::Const(*v)),
 		_ => todo!(),
 	}
 }
@@ -343,9 +378,9 @@ fn lit_bool<S: Ord + Deref<Target = str> + Clone + Debug>(
 fn arg_bool<S: Ord + Deref<Target = str> + Clone + Debug>(
 	fzn: &FlatZinc<S>,
 	prb: &mut Model,
-	map: &mut BTreeMap<S, MVar>,
+	map: &mut BTreeMap<S, ModelView>,
 	arg: &Argument<S>,
-) -> Result<BoolExpr, FlatZincError> {
+) -> Result<BoolView, FlatZincError> {
 	match arg {
 		Argument::Literal(l) => lit_bool(fzn, prb, map, l),
 		_ => Err(FlatZincError::InvalidArgumentType {
@@ -358,20 +393,20 @@ fn arg_bool<S: Ord + Deref<Target = str> + Clone + Debug>(
 fn lit_int<S: Ord + Deref<Target = str> + Clone + Debug>(
 	fzn: &FlatZinc<S>,
 	prb: &mut Model,
-	map: &mut BTreeMap<S, MVar>,
+	map: &mut BTreeMap<S, ModelView>,
 	lit: &Literal<S>,
-) -> Result<IntExpr, FlatZincError> {
+) -> Result<IntView, FlatZincError> {
 	match lit {
 		Literal::Identifier(ident) => {
 			if let Some(var) = fzn.variables.get(ident) {
 				if var.ty == Type::Int {
-					let MVar::Int(ret) = map
+					let ModelView::Int(ret) = map
 						.entry(ident.clone())
 						.or_insert_with(|| new_var(prb, var))
 					else {
 						unreachable!()
 					};
-					Ok(IntExpr::Var(*ret))
+					Ok(ret.clone())
 				} else {
 					Err(FlatZincError::InvalidArgumentType {
 						expected: "int",
@@ -382,8 +417,8 @@ fn lit_int<S: Ord + Deref<Target = str> + Clone + Debug>(
 				Err(FlatZincError::UnknownIdentifier(ident.to_string()))
 			}
 		}
-		Literal::Bool(v) => Ok(IntExpr::Val(if *v { 1 } else { 0 })),
-		Literal::Int(v) => Ok(IntExpr::Val(*v)),
+		Literal::Bool(v) => Ok(IntView::Const(if *v { 1 } else { 0 })),
+		Literal::Int(v) => Ok(IntView::Const(*v)),
 		_ => todo!(),
 	}
 }
@@ -416,9 +451,9 @@ fn par_int<S: Ord + Deref<Target = str> + Clone + Debug>(
 fn arg_int<S: Ord + Deref<Target = str> + Clone + Debug>(
 	fzn: &FlatZinc<S>,
 	prb: &mut Model,
-	map: &mut BTreeMap<S, MVar>,
+	map: &mut BTreeMap<S, ModelView>,
 	arg: &Argument<S>,
-) -> Result<IntExpr, FlatZincError> {
+) -> Result<IntView, FlatZincError> {
 	match arg {
 		Argument::Literal(l) => lit_int(fzn, prb, map, l),
 		_ => Err(FlatZincError::InvalidArgumentType {

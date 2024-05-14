@@ -354,9 +354,9 @@ dependencies = [
 
 [[package]]
 name = "flatzinc-serde"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbae672b6219c7363d7769ce9588cccd6ef1b6c0b251ccc2dc5adf747e69796b"
+checksum = "ef8eb90ee2a7128d99b67edd2e8a93c453f8c21b4792e35a83fc0afa5c3eefaa"
 dependencies = [
  "serde",
 ]

@@ -1,18 +1,14 @@
-use std::{
-	fmt::{self, Display},
-	num::NonZeroI32,
-	ops::Not,
-};
+use std::ops::Not;
 
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
-	Formula, Lit as RawLit, TseitinEncoder, Valuation as SatValuation, Var as RawVar,
+	Formula, Lit as RawLit, TseitinEncoder, Valuation as SatValuation,
 };
 
 use super::reformulate::{ReformulationError, ReifContext, VariableMap};
 use crate::{
 	solver::{
-		view::{BoolView, BoolViewInner},
+		view::{self, BoolViewInner},
 		SatSolver,
 	},
 	Solver,
@@ -20,8 +16,7 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BoolExpr {
-	Val(bool),
-	Lit(Literal),
+	View(BoolView),
 	Not(Box<BoolExpr>),
 	Or(Vec<BoolExpr>),
 	And(Vec<BoolExpr>),
@@ -46,10 +41,8 @@ impl BoolExpr {
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 	{
 		match self {
-			BoolExpr::Val(false) => Err(ReformulationError::TrivialUnsatisfiable),
-			BoolExpr::Val(true) => Ok(()),
-			BoolExpr::Lit(l) => {
-				let v = map.get_lit(l);
+			BoolExpr::View(bv) => {
+				let v = map.get_bool(*bv);
 				match v.0 {
 					BoolViewInner::Const(true) => Ok(()),
 					BoolViewInner::Const(false) => Err(ReformulationError::TrivialUnsatisfiable),
@@ -114,33 +107,22 @@ impl BoolExpr {
 			}
 			BoolExpr::Equiv(es) => {
 				// Try and find some constant or literal to start binding to
-				let mut res = es
-					.iter()
-					.find_map(|e| {
-						if let BoolExpr::Val(b) = e {
-							Some(BoolView(BoolViewInner::Const(*b)))
-						} else {
-							None
-						}
-					})
-					.or_else(|| {
-						es.iter().find_map(|e| {
-							if let BoolExpr::Lit(l) = e {
-								Some(map.get_lit(l))
-							} else {
-								None
-							}
-						})
-					});
+				let mut res = es.iter().find_map(|e| {
+					if let BoolExpr::View(b) = e {
+						Some(map.get_bool(*b))
+					} else {
+						None
+					}
+				});
 				for e in es {
 					match res {
-						Some(BoolView(BoolViewInner::Const(false))) => {
+						Some(view::BoolView(BoolViewInner::Const(false))) => {
 							(!e).constrain(slv, map)?;
 						}
-						Some(BoolView(BoolViewInner::Const(true))) => {
+						Some(view::BoolView(BoolViewInner::Const(true))) => {
 							e.constrain(slv, map)?;
 						}
-						Some(BoolView(BoolViewInner::Lit(name))) => {
+						Some(view::BoolView(BoolViewInner::Lit(name))) => {
 							res = Some(e.to_arg(ReifContext::Mixed, slv, map, Some(name))?);
 						}
 						None => res = Some(e.to_arg(ReifContext::Mixed, slv, map, None)?),
@@ -186,23 +168,25 @@ impl BoolExpr {
 		slv: &mut Solver<Sat>,
 		map: &mut VariableMap,
 		name: Option<RawLit>,
-	) -> Result<BoolView, ReformulationError>
+	) -> Result<view::BoolView, ReformulationError>
 	where
 		Sol: PropagatorAccess + SatValuation,
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 	{
 		let bind_lit = |oracle: &mut Sat, lit| {
-			Ok(BoolView(BoolViewInner::Lit(if let Some(name) = name {
-				oracle
-					.encode(
-						&Formula::Equiv(vec![Formula::Atom(name), Formula::Atom(lit)]),
-						&TseitinEncoder,
-					)
-					.map_err(|_| ReformulationError::TrivialUnsatisfiable)?;
-				name
-			} else {
-				lit
-			})))
+			Ok(view::BoolView(BoolViewInner::Lit(
+				if let Some(name) = name {
+					oracle
+						.encode(
+							&Formula::Equiv(vec![Formula::Atom(name), Formula::Atom(lit)]),
+							&TseitinEncoder,
+						)
+						.map_err(|_| ReformulationError::TrivialUnsatisfiable)?;
+					name
+				} else {
+					lit
+				},
+			)))
 		};
 		let bind_const = |oracle: &mut Sat, val| {
 			if let Some(name) = name {
@@ -210,12 +194,11 @@ impl BoolExpr {
 					.add_clause([if val { name } else { !name }])
 					.map_err(|_| ReformulationError::TrivialUnsatisfiable)?;
 			}
-			Ok(BoolView(BoolViewInner::Const(val)))
+			Ok(view::BoolView(BoolViewInner::Const(val)))
 		};
 		match self {
+			BoolExpr::View(v) => Ok(map.get_bool(*v)),
 			BoolExpr::Not(b) => b.to_negated_arg(ctx, slv, map, name),
-			BoolExpr::Lit(l) => bind_lit(&mut slv.oracle, l.0),
-			BoolExpr::Val(v) => bind_const(&mut slv.oracle, *v),
 			BoolExpr::Or(es) => {
 				let mut lits = Vec::with_capacity(es.len());
 				for e in es {
@@ -232,7 +215,7 @@ impl BoolExpr {
 						&TseitinEncoder,
 					)
 					.unwrap();
-				Ok(BoolView(BoolViewInner::Lit(r)))
+				Ok(view::BoolView(BoolViewInner::Lit(r)))
 			}
 			BoolExpr::And(es) => {
 				let mut lits = Vec::with_capacity(es.len());
@@ -250,7 +233,7 @@ impl BoolExpr {
 						&TseitinEncoder,
 					)
 					.unwrap();
-				Ok(BoolView(BoolViewInner::Lit(name)))
+				Ok(view::BoolView(BoolViewInner::Lit(name)))
 			}
 			BoolExpr::Implies(a, b) => {
 				let a = match a.to_arg(ReifContext::Neg, slv, map, None)?.0 {
@@ -277,7 +260,7 @@ impl BoolExpr {
 								&TseitinEncoder,
 							)
 							.unwrap();
-						Ok(BoolView(BoolViewInner::Lit(name)))
+						Ok(view::BoolView(BoolViewInner::Lit(name)))
 					}
 				}
 			}
@@ -309,7 +292,7 @@ impl BoolExpr {
 						&TseitinEncoder,
 					)
 					.unwrap();
-				Ok(BoolView(BoolViewInner::Lit(name)))
+				Ok(view::BoolView(BoolViewInner::Lit(name)))
 			}
 			BoolExpr::Xor(es) => {
 				let mut lits = Vec::with_capacity(es.len());
@@ -332,7 +315,7 @@ impl BoolExpr {
 						&TseitinEncoder,
 					)
 					.unwrap();
-				Ok(BoolView(BoolViewInner::Lit(name)))
+				Ok(view::BoolView(BoolViewInner::Lit(name)))
 			}
 			BoolExpr::IfThenElse { cond, then, els } => {
 				match cond.to_arg(ReifContext::Mixed, slv, map, None)?.0 {
@@ -355,15 +338,14 @@ impl BoolExpr {
 		slv: &mut Solver<Sat>,
 		map: &mut VariableMap,
 		name: Option<RawLit>,
-	) -> Result<BoolView, ReformulationError>
+	) -> Result<view::BoolView, ReformulationError>
 	where
 		Sol: PropagatorAccess + SatValuation,
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 	{
 		match self {
+			BoolExpr::View(v) => Ok(!map.get_bool(*v)),
 			BoolExpr::Not(v) => v.to_arg(!ctx, slv, map, name),
-			BoolExpr::Lit(v) => Ok(BoolView(BoolViewInner::Lit((!v).0))),
-			BoolExpr::Val(v) => Ok(BoolView(BoolViewInner::Const(!v))),
 			BoolExpr::Or(_)
 			| BoolExpr::And(_)
 			| BoolExpr::Implies(_, _)
@@ -384,8 +366,7 @@ impl Not for BoolExpr {
 	type Output = BoolExpr;
 	fn not(self) -> Self::Output {
 		match self {
-			BoolExpr::Lit(l) => BoolExpr::Lit(!l),
-			BoolExpr::Val(v) => BoolExpr::Val(!v),
+			BoolExpr::View(v) => BoolExpr::View(!v),
 			BoolExpr::Not(e) => *e,
 			BoolExpr::Or(es) => BoolExpr::And(es.into_iter().map(|e| !e).collect()),
 			BoolExpr::And(es) => BoolExpr::Or(es.into_iter().map(|e| !e).collect()),
@@ -407,95 +388,38 @@ impl Not for &BoolExpr {
 	}
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BoolVar(pub(crate) RawVar);
-
-impl Not for BoolVar {
-	type Output = Literal;
-	fn not(self) -> Self::Output {
-		!Literal::from(self)
+impl From<BoolView> for BoolExpr {
+	fn from(v: BoolView) -> Self {
+		Self::View(v)
 	}
 }
-impl Not for &BoolVar {
-	type Output = Literal;
+impl From<&BoolView> for BoolExpr {
+	fn from(v: &BoolView) -> Self {
+		Self::View(*v)
+	}
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[allow(variant_size_differences)]
+pub enum BoolView {
+	Lit(RawLit),
+	Const(bool),
+}
+
+impl Not for BoolView {
+	type Output = BoolView;
+	fn not(self) -> Self::Output {
+		match self {
+			BoolView::Lit(l) => BoolView::Lit(!l),
+			BoolView::Const(b) => BoolView::Const(!b),
+		}
+	}
+}
+
+impl Not for &BoolView {
+	type Output = BoolView;
 	fn not(self) -> Self::Output {
 		!*self
-	}
-}
-
-impl Display for BoolVar {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		self.0.fmt(f)
-	}
-}
-
-impl From<BoolVar> for NonZeroI32 {
-	fn from(val: BoolVar) -> Self {
-		val.0.into()
-	}
-}
-impl From<BoolVar> for i32 {
-	fn from(val: BoolVar) -> Self {
-		val.0.into()
-	}
-}
-impl From<BoolVar> for BoolExpr {
-	fn from(value: BoolVar) -> Self {
-		BoolExpr::Lit(value.into())
-	}
-}
-
-/// Literal is type that can be use to represent Boolean decision variables and
-/// their negations
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Literal(pub(crate) RawLit);
-
-impl Literal {
-	pub fn var(&self) -> BoolVar {
-		BoolVar(self.0.var())
-	}
-	pub fn is_negated(&self) -> bool {
-		self.0.is_negated()
-	}
-}
-
-impl Not for Literal {
-	type Output = Literal;
-	fn not(self) -> Self::Output {
-		Literal(!self.0)
-	}
-}
-impl Not for &Literal {
-	type Output = Literal;
-	fn not(self) -> Self::Output {
-		!(*self)
-	}
-}
-
-impl From<BoolVar> for Literal {
-	fn from(value: BoolVar) -> Self {
-		Literal(value.0.into())
-	}
-}
-impl From<Literal> for NonZeroI32 {
-	fn from(val: Literal) -> Self {
-		val.0.into()
-	}
-}
-impl From<Literal> for i32 {
-	fn from(val: Literal) -> Self {
-		val.0.into()
-	}
-}
-impl From<Literal> for BoolExpr {
-	fn from(value: Literal) -> Self {
-		BoolExpr::Lit(value)
-	}
-}
-
-impl Display for Literal {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		self.0.fmt(f)
 	}
 }
 

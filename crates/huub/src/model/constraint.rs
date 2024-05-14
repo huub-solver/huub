@@ -5,20 +5,23 @@ use pindakaas::{
 	Valuation as SatValuation,
 };
 
-use super::reformulate::{ReifContext, VariableMap};
+use super::{
+	int::IntView,
+	reformulate::{ReifContext, VariableMap},
+};
 use crate::{
 	propagator::{all_different::AllDifferentValue, int_lin_le::LinearLE, minimum::Minimum},
 	solver::SatSolver,
-	BoolExpr, IntExpr, IntVal, Model, ReformulationError, Solver,
+	BoolExpr, IntVal, Model, ReformulationError, Solver,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Constraint {
-	AllDifferent(Vec<IntExpr>),
-	IntLinEq(Vec<IntVal>, Vec<IntExpr>, IntVal),
-	IntLinLessEq(Vec<IntVal>, Vec<IntExpr>, IntVal),
-	Maximum(Vec<IntExpr>, IntExpr),
-	Minimum(Vec<IntExpr>, IntExpr),
+	AllDifferent(Vec<IntView>),
+	IntLinEq(Vec<IntVal>, Vec<IntView>, IntVal),
+	IntLinLessEq(Vec<IntVal>, Vec<IntView>, IntVal),
+	Maximum(Vec<IntView>, IntView),
+	Minimum(Vec<IntView>, IntView),
 	SimpleBool(BoolExpr),
 }
 
@@ -103,12 +106,12 @@ impl Model {
 		match self.constraints[con].clone() {
 			Constraint::AllDifferent(vars) => {
 				let (vals, vars): (Vec<_>, Vec<_>) =
-					vars.iter().partition(|v| matches!(v, IntExpr::Val(_)));
+					vars.iter().partition(|v| matches!(v, IntView::Const(_)));
 				if vals.is_empty() {
 					return Ok(());
 				}
 				let neg_dom = RangeList::from_iter(vals.iter().map(|i| {
-					let IntExpr::Val(i) = i else { unreachable!() };
+					let IntView::Const(i) = i else { unreachable!() };
 					*i..=*i
 				}));
 				for v in vars {
@@ -164,11 +167,11 @@ impl Model {
 		match &self.constraints[con] {
 			Constraint::Maximum(args, m) | Constraint::Minimum(args, m) => {
 				for a in args {
-					if let IntExpr::Var(a) = a {
+					if let IntView::Var(a) = a {
 						self.int_vars[a.0 as usize].constraints.push(con);
 					}
 				}
-				if let IntExpr::Var(m) = m {
+				if let IntView::Var(m) = m {
 					self.int_vars[m.0 as usize].constraints.push(con);
 				}
 			}
