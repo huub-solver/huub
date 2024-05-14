@@ -1,3 +1,5 @@
+use std::ops::{Add, Mul};
+
 use flatzinc_serde::RangeList;
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
@@ -8,7 +10,7 @@ use super::reformulate::{ReifContext, VariableMap};
 use crate::{
 	helpers::linear_transform::LinearTransform,
 	solver::{view, SatSolver},
-	IntVal, Model, ReformulationError, Solver,
+	IntVal, Model, NonZeroIntVal, ReformulationError, Solver,
 };
 
 impl IntView {
@@ -49,6 +51,28 @@ pub enum IntView {
 	Var(IntVar),
 	Const(i64),
 	Linear(LinearTransform, IntVar),
+}
+
+impl Add<IntVal> for IntView {
+	type Output = Self;
+	fn add(self, rhs: IntVal) -> Self::Output {
+		match self {
+			Self::Var(x) => Self::Linear(LinearTransform::offset(rhs), x),
+			Self::Const(v) => Self::Const(v + rhs),
+			Self::Linear(t, x) => Self::Linear(t + rhs, x),
+		}
+	}
+}
+
+impl Mul<NonZeroIntVal> for IntView {
+	type Output = Self;
+	fn mul(self, rhs: NonZeroIntVal) -> Self::Output {
+		match self {
+			Self::Var(x) => Self::Linear(LinearTransform::scaled(rhs), x),
+			Self::Const(v) => Self::Const(v * rhs.get()),
+			Self::Linear(t, x) => Self::Linear(t * rhs, x),
+		}
+	}
 }
 
 impl Model {
