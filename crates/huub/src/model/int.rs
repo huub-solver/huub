@@ -3,10 +3,13 @@ use std::ops::{Add, Mul};
 use flatzinc_serde::RangeList;
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
-	Valuation as SatValuation,
+	Lit as RawLit, Valuation as SatValuation,
 };
 
-use super::reformulate::{ReifContext, VariableMap};
+use super::{
+	bool::BoolView,
+	reformulate::{ReifContext, VariableMap},
+};
 use crate::{
 	helpers::linear_transform::LinearTransform,
 	solver::{view, SatSolver},
@@ -51,6 +54,7 @@ pub enum IntView {
 	Var(IntVar),
 	Const(i64),
 	Linear(LinearTransform, IntVar),
+	Bool(LinearTransform, RawLit),
 }
 
 impl Add<IntVal> for IntView {
@@ -60,6 +64,7 @@ impl Add<IntVal> for IntView {
 			Self::Var(x) => Self::Linear(LinearTransform::offset(rhs), x),
 			Self::Const(v) => Self::Const(v + rhs),
 			Self::Linear(t, x) => Self::Linear(t + rhs, x),
+			Self::Bool(t, x) => Self::Bool(t + rhs, x),
 		}
 	}
 }
@@ -71,6 +76,16 @@ impl Mul<NonZeroIntVal> for IntView {
 			Self::Var(x) => Self::Linear(LinearTransform::scaled(rhs), x),
 			Self::Const(v) => Self::Const(v * rhs.get()),
 			Self::Linear(t, x) => Self::Linear(t * rhs, x),
+			Self::Bool(t, x) => Self::Bool(t * rhs, x),
+		}
+	}
+}
+
+impl From<BoolView> for IntView {
+	fn from(value: BoolView) -> Self {
+		match value {
+			BoolView::Lit(x) => Self::Bool(LinearTransform::offset(0), x),
+			BoolView::Const(b) => Self::Const(b as IntVal),
 		}
 	}
 }
@@ -84,6 +99,7 @@ impl Model {
 			}
 			IntView::Const(v) => v,
 			IntView::Linear(_, _) => todo!(),
+			IntView::Bool(_, _) => todo!(),
 		}
 	}
 
@@ -95,6 +111,7 @@ impl Model {
 			}
 			IntView::Const(v) => v,
 			IntView::Linear(_, _) => todo!(),
+			IntView::Bool(_, _) => todo!(),
 		}
 	}
 
@@ -137,6 +154,7 @@ impl Model {
 				}
 			}
 			IntView::Linear(_, _) => todo!(),
+			IntView::Bool(_, _) => todo!(),
 		}
 	}
 
@@ -179,6 +197,7 @@ impl Model {
 				}
 			}
 			IntView::Linear(_, _) => todo!(),
+			IntView::Bool(_, _) => todo!(),
 		}
 	}
 
@@ -213,6 +232,7 @@ impl Model {
 				}
 			}
 			IntView::Linear(_, _) => todo!(),
+			IntView::Bool(_, _) => todo!(),
 		}
 	}
 }
