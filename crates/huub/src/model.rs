@@ -14,13 +14,13 @@ use pindakaas::{
 };
 
 use self::{
-	bool::{BoolExpr, BoolVar},
-	int::{IntExpr, IntVar},
+	bool::{BoolExpr, BoolView},
+	int::{IntVar, IntView},
 	reformulate::{ReformulationError, VariableMap},
 };
 use crate::{
 	model::int::IntVarDef,
-	solver::{engine::int_var::IntVar as SlvIntVar, view::SolverView, SatSolver},
+	solver::{engine::int_var::IntVar as SlvIntVar, SatSolver},
 	Constraint, Solver,
 };
 
@@ -34,18 +34,22 @@ pub struct Model {
 }
 
 impl Model {
-	pub fn new_bool_var(&mut self) -> BoolVar {
-		BoolVar(self.cnf.new_var())
+	pub fn new_bool_var(&mut self) -> BoolView {
+		BoolView::Lit(self.cnf.new_var().into())
 	}
 
-	pub fn new_bool_vars(&mut self, len: usize) -> Vec<BoolVar> {
-		self.cnf.next_var_range(len).unwrap().map(BoolVar).collect()
+	pub fn new_bool_vars(&mut self, len: usize) -> Vec<BoolView> {
+		self.cnf
+			.next_var_range(len)
+			.unwrap()
+			.map(|v| BoolView::Lit(v.into()))
+			.collect()
 	}
 
-	pub fn new_int_var(&mut self, domain: RangeList<i64>) -> IntVar {
+	pub fn new_int_var(&mut self, domain: RangeList<i64>) -> IntView {
 		let iv = IntVar(self.int_vars.len() as u32);
 		self.int_vars.push(IntVarDef::with_domain(domain));
-		iv
+		IntView::Var(iv)
 	}
 
 	pub fn new_int_vars(&mut self, len: usize, domain: RangeList<i64>) -> Vec<IntVar> {
@@ -78,7 +82,7 @@ impl Model {
 		for i in 0..self.int_vars.len() {
 			let var = &self.int_vars[i];
 			let view = SlvIntVar::new_in(&mut slv, var.domain.clone(), true); // TODO!
-			map.insert(Variable::Int(IntVar(i as u32)), SolverView::Int(view));
+			map.insert_int(IntVar(i as u32), view);
 		}
 
 		// Create constraint data structures within the solve
@@ -126,13 +130,18 @@ impl ClauseDatabase for Model {
 	}
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Variable {
-	Bool(BoolVar),
-	Int(IntVar),
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ModelView {
+	Bool(BoolView),
+	Int(IntView),
 }
-impl From<BoolVar> for Variable {
-	fn from(value: BoolVar) -> Self {
+impl From<IntView> for ModelView {
+	fn from(value: IntView) -> Self {
+		Self::Int(value)
+	}
+}
+impl From<BoolView> for ModelView {
+	fn from(value: BoolView) -> Self {
 		Self::Bool(value)
 	}
 }

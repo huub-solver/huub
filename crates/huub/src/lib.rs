@@ -1,12 +1,14 @@
+pub(crate) mod helpers;
 pub(crate) mod model;
 pub(crate) mod propagator;
 pub(crate) mod solver;
 #[cfg(test)]
 pub(crate) mod tests;
 
+pub use helpers::linear_transform::LinearTransform;
 pub use model::{
-	bool::BoolExpr, constraint::Constraint, flatzinc::FlatZincError, int::IntExpr,
-	reformulate::ReformulationError, Model, Variable,
+	bool::BoolExpr, constraint::Constraint, flatzinc::FlatZincError,
+	reformulate::ReformulationError, Model,
 };
 pub use pindakaas::solver::SlvTermSignal;
 use pindakaas::Lit as RawLit;

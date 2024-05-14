@@ -110,8 +110,6 @@ impl Propagator for Minimum {
 
 #[cfg(test)]
 mod tests {
-	use std::ops::Neg;
-
 	use expect_test::expect;
 	use flatzinc_serde::RangeList;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
@@ -145,7 +143,7 @@ mod tests {
 		let c = prb.new_int_var((4..=10).into());
 		let y = prb.new_int_var((1..=2).into());
 
-		prb += Constraint::Minimum(vec![a.into(), b.into(), c.into()], y.into());
+		prb += Constraint::Minimum(vec![a, b, c], y);
 		prb.assert_unsatisfiable();
 	}
 
@@ -157,7 +155,7 @@ mod tests {
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([2..=5]), true);
 		let y = IntVar::new_in(&mut slv, RangeList::from_iter([1..=3]), true);
 
-		slv.add_propagator(Minimum::new(vec![a.neg(), b.neg(), c.neg()], y.neg()));
+		slv.add_propagator(Minimum::new(vec![-a, -b, -c], -y));
 		slv.expect_solutions(
 			&[a, b, c, y],
 			expect![[r#"
@@ -178,7 +176,7 @@ mod tests {
 		let c = prb.new_int_var((4..=10).into());
 		let y = prb.new_int_var((13..=20).into());
 
-		prb += Constraint::Maximum(vec![a.into(), b.into(), c.into()], y.into());
+		prb += Constraint::Maximum(vec![a, b, c], y);
 		prb.assert_unsatisfiable();
 	}
 }

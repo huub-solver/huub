@@ -1,9 +1,7 @@
 use expect_test::Expect;
 use itertools::Itertools;
 
-use crate::{
-	BoolExpr, Model, ReformulationError, SolveResult, Solver, SolverView, Value, Variable,
-};
+use crate::{BoolExpr, Model, ReformulationError, SolveResult, Solver, SolverView, Value};
 
 #[test]
 fn it_works() {
@@ -15,12 +13,12 @@ fn it_works() {
 	prb += BoolExpr::Or(vec![a.into(), b.into()]);
 
 	let (mut slv, map): (Solver, _) = prb.to_solver().unwrap();
-	let a = map.get(&Variable::Bool(a));
-	let b = map.get(&Variable::Bool(b));
+	let a = map.get_bool(a);
+	let b = map.get_bool(b);
 
 	assert_eq!(
 		slv.solve(|value| {
-			assert_ne!(value(a), value(b));
+			assert_ne!(value(a.into()), value(b.into()));
 		}),
 		SolveResult::Satisfied
 	);
