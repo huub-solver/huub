@@ -9,7 +9,7 @@ use super::{
 	reformulate::ReformulationError,
 	ModelView,
 };
-use crate::{Constraint, IntVal, Model, Solver, SolverView};
+use crate::{Constraint, IntVal, Model, NonZeroIntVal, Solver, SolverView};
 
 impl Model {
 	pub fn from_fzn<S: Ord + Deref<Target = str> + Clone + Debug>(
@@ -24,20 +24,51 @@ impl Model {
 			.iter()
 			.map(|c| {
 				match (c.id.deref(), c.defines.as_ref()) {
-					("bool_not", Some(l)) => {
-						if let [a, b] = c.args.as_slice() {
-							match (a, b) {
-								(Argument::Literal(Literal::Identifier(x)), b)
-								| (b, Argument::Literal(Literal::Identifier(x)))
-									if x == l =>
-								{
-									let b = arg_bool(fzn, &mut prb, &mut map, b)?;
-									let _ = map.insert(l.clone(), (!b).into());
-									return Ok(true);
-								}
-								_ => {}
-							}
+					("bool_not", Some(l)) => match c.args.as_slice() {
+						[Argument::Literal(Literal::Identifier(x)), b]
+						| [b, Argument::Literal(Literal::Identifier(x))]
+							if x == l =>
+						{
+							let b = arg_bool(fzn, &mut prb, &mut map, b)?;
+							let _ = map.insert(l.clone(), (!b).into());
+							return Ok(true);
 						}
+						_ => {}
+					},
+					("int_lin_eq", Some(l))
+						if c.args
+							.get(1)
+							.map(|v| arg_has_length(fzn, v, 2))
+							.unwrap_or(false) =>
+					{
+						let [coeff, vars, sum] = c.args.as_slice() else {
+							return Ok(false);
+						};
+						let coeff = arg_array(fzn, coeff)?;
+						let vars = arg_array(fzn, vars)?;
+						let (c, (cy, vy)) = match vars.as_slice() {
+							[Literal::Identifier(v), y] if v == l => {
+								(par_int(fzn, &coeff[0])?, (par_int(fzn, &coeff[1])?, y))
+							}
+							[y, Literal::Identifier(v)] if v == l => {
+								(par_int(fzn, &coeff[1])?, (par_int(fzn, &coeff[0])?, y))
+							}
+							_ => return Ok(false),
+						};
+						let sum = arg_par_int(fzn, sum)?;
+						// c * l + cy * y = sum === l = (sum - cy * y) / c
+						if cy % c != 0 || sum % c != 0 {
+							return Ok(false);
+						}
+						let offset = sum / c;
+						let view = if let Some(scale) = NonZeroIntVal::new(-cy / c) {
+							let y = lit_int(fzn, &mut prb, &mut map, vy)?;
+							y * scale + offset
+						} else {
+							IntView::Const(offset)
+						};
+						let _ = map.insert(l.clone(), view.into());
+						return Ok(true);
 					}
 					_ => {}
 				}
@@ -324,6 +355,24 @@ fn arg_array<'a, S: Ord + Deref<Target = str> + Clone + Debug>(
 			expected: "array",
 			found: format!("{:?}", x),
 		}),
+	}
+}
+
+fn arg_has_length<'a, S: Ord + Deref<Target = str> + Clone + Debug>(
+	fzn: &'a FlatZinc<S>,
+	arg: &'a Argument<S>,
+	len: usize,
+) -> bool {
+	match arg {
+		Argument::Array(x) => x.len() == len,
+		Argument::Literal(Literal::Identifier(ident)) => {
+			if let Some(arr) = fzn.arrays.get(ident) {
+				arr.contents.len() == len
+			} else {
+				false
+			}
+		}
+		_ => false,
 	}
 }
 
