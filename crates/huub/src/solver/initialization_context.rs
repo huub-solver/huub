@@ -63,6 +63,9 @@ impl<'a, Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<Valu
 					self.subscribe_int(IntView(IntViewInner::VarRef(var)), reverse_event, data)
 				}
 			}
+			IntViewInner::Bool { lit, .. } => {
+				self.subscribe_bool(BoolView(BoolViewInner::Lit(lit)), data)
+			}
 		}
 	}
 }

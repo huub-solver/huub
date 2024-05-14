@@ -19,16 +19,17 @@ pub struct VariableMap {
 
 impl VariableMap {
 	pub fn get(&self, index: &ModelView) -> SolverView {
-		let i = match index {
-			ModelView::Bool(bool::BoolView::Const(l)) => {
-				return SolverView::Bool(BoolView(BoolViewInner::Const(*l)))
-			}
-			ModelView::Bool(bool::BoolView::Lit(l)) => Variable::Bool(l.var()),
-			ModelView::Int(int::IntView::Const(v)) => return SolverView::Int((*v).into()),
-			ModelView::Int(int::IntView::Var(v)) | ModelView::Int(int::IntView::Linear(_, v)) => {
-				Variable::Int(*v)
-			}
-		};
+		let i =
+			match index {
+				ModelView::Bool(bool::BoolView::Const(l)) => {
+					return SolverView::Bool(BoolView(BoolViewInner::Const(*l)))
+				}
+				ModelView::Bool(bool::BoolView::Lit(l))
+				| ModelView::Int(int::IntView::Bool(_, l)) => Variable::Bool(l.var()),
+				ModelView::Int(int::IntView::Const(v)) => return SolverView::Int((*v).into()),
+				ModelView::Int(int::IntView::Var(v))
+				| ModelView::Int(int::IntView::Linear(_, v)) => Variable::Int(*v),
+			};
 
 		let view = self.map.get(&i).cloned().unwrap_or_else(|| match i {
 			Variable::Bool(x) => SolverView::Bool(BoolView(BoolViewInner::Lit(x.into()))),
@@ -40,6 +41,12 @@ impl VariableMap {
 					unreachable!()
 				};
 				SolverView::Bool(!bv)
+			}
+			ModelView::Int(int::IntView::Bool(t, _)) => {
+				let SolverView::Bool(bv) = view else {
+					unreachable!()
+				};
+				SolverView::Int(IntView::from(bv) * t.scale + t.offset)
 			}
 			ModelView::Int(int::IntView::Linear(t, _)) => {
 				let SolverView::Int(iv) = view else {

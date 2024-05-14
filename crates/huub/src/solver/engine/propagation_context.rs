@@ -1,4 +1,5 @@
 use delegate::delegate;
+use pindakaas::Lit as RawLit;
 
 use super::{int_var::IntVarRef, PropRef, State};
 use crate::{
@@ -54,32 +55,25 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		reason: &ReasonBuilder,
 	) -> Result<(), Conflict> {
 		let mut lit_req = LitMeaning::GreaterEq(val);
-		if let IntViewInner::Linear { transformer, .. } = var.0 {
+		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
+			var.0
+		{
 			lit_req = transformer.rev_transform_lit(lit_req).unwrap();
 		}
 
 		match var.0 {
 			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				if self.check_satisfied(iv, &lit_req) {
-					return Ok(());
-				}
-				let lit = match self.state.int_vars[iv].get_bool_lit(lit_req) {
-					BoolView(BoolViewInner::Lit(lit)) => lit,
-					BoolView(BoolViewInner::Const(false)) => {
-						return Err(Conflict::new(reason, self.prop));
-					}
-					_ => unreachable!(),
-				};
-				self.state.register_reason(lit, reason, self.prop);
-				self.prop_queue.push(lit);
+				self.propagate_int(iv, lit_req, reason)
 			}
+			IntViewInner::Bool { lit, .. } => self.propagate_bool_lin(lit, lit_req, reason),
 			IntViewInner::Const(i) => {
 				if i < val {
-					return Err(Conflict::new(reason, self.prop));
+					Err(Conflict::new(reason, self.prop))
+				} else {
+					Ok(())
 				}
 			}
 		}
-		Ok(())
 	}
 	fn set_int_upper_bound(
 		&mut self,
@@ -88,32 +82,25 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		reason: &ReasonBuilder,
 	) -> Result<(), Conflict> {
 		let mut lit_req = LitMeaning::Less(val + 1);
-		if let IntViewInner::Linear { transformer, .. } = var.0 {
+		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
+			var.0
+		{
 			lit_req = transformer.rev_transform_lit(lit_req).unwrap();
 		}
 
 		match var.0 {
 			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				if self.check_satisfied(iv, &lit_req) {
-					return Ok(());
-				}
-				let lit = match self.state.int_vars[iv].get_bool_lit(lit_req) {
-					BoolView(BoolViewInner::Lit(lit)) => lit,
-					BoolView(BoolViewInner::Const(false)) => {
-						return Err(Conflict::new(reason, self.prop));
-					}
-					_ => unreachable!(),
-				};
-				self.state.register_reason(lit, reason, self.prop);
-				self.prop_queue.push(lit);
+				self.propagate_int(iv, lit_req, reason)
 			}
+			IntViewInner::Bool { lit, .. } => self.propagate_bool_lin(lit, lit_req, reason),
 			IntViewInner::Const(i) => {
 				if i > val {
-					return Err(Conflict::new(reason, self.prop));
+					Err(Conflict::new(reason, self.prop))
+				} else {
+					Ok(())
 				}
 			}
 		}
-		Ok(())
 	}
 	fn set_int_val(
 		&mut self,
@@ -122,7 +109,9 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		reason: &ReasonBuilder,
 	) -> Result<(), Conflict> {
 		let mut lit_req = LitMeaning::Eq(val);
-		if let IntViewInner::Linear { transformer, .. } = var.0 {
+		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
+			var.0
+		{
 			if let Some(lit) = transformer.rev_transform_lit(lit_req) {
 				lit_req = lit;
 			} else {
@@ -132,28 +121,17 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 
 		match var.0 {
 			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				if self.check_satisfied(iv, &lit_req) {
-					return Ok(());
-				}
-				let lit = match self.state.int_vars[iv].get_bool_lit(lit_req) {
-					BoolView(BoolViewInner::Lit(lit)) => lit,
-					BoolView(BoolViewInner::Const(false)) => {
-						return Err(Conflict::new(reason, self.prop));
-					}
-					_ => unreachable!(),
-				};
-				self.state.register_reason(lit, reason, self.prop);
-				self.prop_queue.push(lit);
-				// TODO: Should this trigger notify?
-				// TODO: Check conflict
+				self.propagate_int(iv, lit_req, reason)
 			}
+			IntViewInner::Bool { lit, .. } => self.propagate_bool_lin(lit, lit_req, reason),
 			IntViewInner::Const(i) => {
 				if i != val {
-					return Err(Conflict::new(reason, self.prop));
+					Err(Conflict::new(reason, self.prop))
+				} else {
+					Ok(())
 				}
 			}
-		};
-		Ok(())
+		}
 	}
 	fn set_int_not_eq(
 		&mut self,
@@ -162,7 +140,9 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		reason: &ReasonBuilder,
 	) -> Result<(), Conflict> {
 		let mut lit_req = LitMeaning::NotEq(val);
-		if let IntViewInner::Linear { transformer, .. } = var.0 {
+		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
+			var.0
+		{
 			if let Some(lit) = transformer.rev_transform_lit(lit_req) {
 				lit_req = lit;
 			} else {
@@ -172,28 +152,17 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 
 		match var.0 {
 			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				if self.check_satisfied(iv, &lit_req) {
-					return Ok(());
-				}
-				let lit = match self.state.int_vars[iv].get_bool_lit(lit_req) {
-					BoolView(BoolViewInner::Lit(lit)) => lit,
-					BoolView(BoolViewInner::Const(false)) => {
-						return Err(Conflict::new(reason, self.prop));
-					}
-					_ => unreachable!(),
-				};
-				self.state.register_reason(lit, reason, self.prop);
-				self.prop_queue.push(lit);
-				// TODO: Should this trigger notify?
-				// TODO: Check conflict
+				self.propagate_int(iv, lit_req, reason)
 			}
+			IntViewInner::Bool { lit, .. } => self.propagate_bool_lin(lit, lit_req, reason),
 			IntViewInner::Const(i) => {
 				if i == val {
-					return Err(Conflict::new(reason, self.prop));
+					Err(Conflict::new(reason, self.prop))
+				} else {
+					Ok(())
 				}
 			}
-		};
-		Ok(())
+		}
 	}
 }
 
@@ -235,6 +204,50 @@ impl PropagationContext<'_> {
 				let ub = self.state.int_trail[self.state.int_vars[var].upper_bound];
 				ub < *i
 			}
+		}
+	}
+
+	#[inline]
+	pub(crate) fn propagate_int(
+		&mut self,
+		iv: IntVarRef,
+		lit_req: LitMeaning,
+		reason: &ReasonBuilder,
+	) -> Result<(), Conflict> {
+		if self.check_satisfied(iv, &lit_req) {
+			return Ok(());
+		}
+		let lit = match self.state.int_vars[iv].get_bool_lit(lit_req) {
+			BoolView(BoolViewInner::Lit(lit)) => lit,
+			BoolView(BoolViewInner::Const(false)) => {
+				return Err(Conflict::new(reason, self.prop));
+			}
+			_ => unreachable!(),
+		};
+		self.state.register_reason(lit, reason, self.prop);
+		self.prop_queue.push(lit);
+		// TODO: Should this trigger notify?
+		// TODO: Check conflict
+		Ok(())
+	}
+
+	pub(crate) fn propagate_bool_lin(
+		&mut self,
+		lit: RawLit,
+		lit_req: LitMeaning,
+		reason: &ReasonBuilder,
+	) -> Result<(), Conflict> {
+		match lit_req {
+			LitMeaning::Eq(0) | LitMeaning::Less(1) | LitMeaning::NotEq(1) => {
+				self.set_bool_val(BoolView(BoolViewInner::Lit(lit)), false, reason)
+			}
+			LitMeaning::Eq(1) | LitMeaning::GreaterEq(1) | LitMeaning::NotEq(0) => {
+				self.set_bool_val(BoolView(BoolViewInner::Lit(lit)), true, reason)
+			}
+			LitMeaning::Eq(_) => Err(Conflict::new(reason, self.prop)),
+			LitMeaning::GreaterEq(i) if i > 1 => Err(Conflict::new(reason, self.prop)),
+			LitMeaning::Less(i) if i < 0 => Err(Conflict::new(reason, self.prop)),
+			LitMeaning::NotEq(_) | LitMeaning::GreaterEq(_) | LitMeaning::Less(_) => Ok(()),
 		}
 	}
 }

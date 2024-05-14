@@ -26,7 +26,7 @@ use crate::{
 		initialization_context::InitializationContext,
 		view::IntViewInner,
 	},
-	BoolView, LitMeaning, ReformulationError,
+	BoolView, IntVal, LitMeaning, ReformulationError,
 };
 
 #[derive(Debug)]
@@ -94,6 +94,9 @@ where
 							let val = engine.state.int_vars[var].get_value(model);
 							Some(Value::Int(transform.transform(val)))
 						}
+						IntViewInner::Bool { transformer, lit } => model
+							.value(lit)
+							.map(|v| Value::Int(transformer.transform(v as IntVal))),
 					},
 				};
 				on_sol(wrapper);

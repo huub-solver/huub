@@ -99,57 +99,44 @@ impl IntView {
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 		M: Extend<(NonZeroI32, (usize, LitMeaning))>,
 	{
-		match self.0 {
-			IntViewInner::VarRef(v) => {
-				let var = &slv.engine().state.int_vars[v];
-				let mut var_iter = var.vars.clone();
-				let pos = v.into();
+		if let IntViewInner::VarRef(v) = self.0 {
+			let var = &slv.engine().state.int_vars[v];
+			let mut var_iter = var.vars.clone();
+			let pos = v.into();
 
+			let mut val_iter = var.orig_domain.clone().into_iter().flatten();
+			let _ = val_iter.next();
+			for val in val_iter {
+				let lit = var_iter.next().unwrap();
+				let i: NonZeroI32 = lit.into();
+				map.extend([
+					(i, (pos, LitMeaning::GreaterEq(val))),
+					(-i, (pos, LitMeaning::Less(val))),
+				])
+			}
+
+			if var.has_direct && var.orig_domain_len > 2 {
 				let mut val_iter = var.orig_domain.clone().into_iter().flatten();
 				let _ = val_iter.next();
+				let _ = val_iter.next_back();
 				for val in val_iter {
 					let lit = var_iter.next().unwrap();
 					let i: NonZeroI32 = lit.into();
 					map.extend([
-						(i, (pos, LitMeaning::GreaterEq(val))),
-						(-i, (pos, LitMeaning::Less(val))),
+						(i, (pos, LitMeaning::Eq(val))),
+						(-i, (pos, LitMeaning::NotEq(val))),
 					])
 				}
-
-				if var.has_direct && var.orig_domain_len > 2 {
-					let mut val_iter = var.orig_domain.clone().into_iter().flatten();
-					let _ = val_iter.next();
-					let _ = val_iter.next_back();
-					for val in val_iter {
-						let lit = var_iter.next().unwrap();
-						let i: NonZeroI32 = lit.into();
-						map.extend([
-							(i, (pos, LitMeaning::Eq(val))),
-							(-i, (pos, LitMeaning::NotEq(val))),
-						])
-					}
-				}
-
-				debug_assert!(var_iter.next().is_none());
 			}
-			IntViewInner::Const(_) => {}
-			IntViewInner::Linear { var, .. } => {
-				IntView(IntViewInner::VarRef(var)).add_to_lit_reverse_map(slv, map);
-			}
+
+			debug_assert!(var_iter.next().is_none());
 		}
 	}
 
 	pub fn add_to_int_reverse_map<E>(&self, map: &mut [E], name: E) {
-		match self.0 {
-			IntViewInner::VarRef(v) => {
-				let pos: usize = v.into();
-				map[pos] = name;
-			}
-			IntViewInner::Const(_) => {}
-			IntViewInner::Linear { var, .. } => {
-				let pos: usize = var.into();
-				map[pos] = name;
-			}
+		if let IntViewInner::VarRef(v) = self.0 {
+			let pos: usize = v.into();
+			map[pos] = name;
 		}
 	}
 }
@@ -157,6 +144,17 @@ impl IntView {
 impl From<IntVal> for IntView {
 	fn from(value: IntVal) -> Self {
 		Self(IntViewInner::Const(value))
+	}
+}
+impl From<BoolView> for IntView {
+	fn from(value: BoolView) -> Self {
+		Self(match value.0 {
+			BoolViewInner::Lit(l) => IntViewInner::Bool {
+				transformer: LinearTransform::offset(0),
+				lit: l,
+			},
+			BoolViewInner::Const(c) => IntViewInner::Const(c as IntVal),
+		})
 	}
 }
 
@@ -172,25 +170,34 @@ pub(crate) enum IntViewInner {
 		transformer: LinearTransform,
 		var: IntVarRef,
 	},
+	/// Linear View of an Boolean Literal
+	Bool {
+		transformer: LinearTransform,
+		lit: RawLit,
+	},
 }
 
 impl Neg for IntView {
 	type Output = Self;
 	fn neg(self) -> Self::Output {
-		match self.0 {
-			IntViewInner::VarRef(var) => IntView(IntViewInner::Linear {
+		Self(match self.0 {
+			IntViewInner::VarRef(var) => IntViewInner::Linear {
 				transformer: LinearTransform::scaled(NonZeroIntVal::new(-1).unwrap()),
 				var,
-			}),
-			IntViewInner::Const(i) => IntView(IntViewInner::Const(-i)),
+			},
+			IntViewInner::Const(i) => IntViewInner::Const(-i),
 			IntViewInner::Linear {
 				transformer: transform,
 				var,
-			} => IntView(IntViewInner::Linear {
+			} => IntViewInner::Linear {
 				transformer: -transform,
 				var,
-			}),
-		}
+			},
+			IntViewInner::Bool { transformer, lit } => IntViewInner::Bool {
+				transformer: -transformer,
+				lit,
+			},
+		})
 	}
 }
 
@@ -210,6 +217,10 @@ impl Add<IntVal> for IntView {
 				transformer: transform + rhs,
 				var,
 			},
+			IntViewInner::Bool { transformer, lit } => IntViewInner::Bool {
+				transformer: transformer + rhs,
+				lit,
+			},
 		})
 	}
 }
@@ -227,6 +238,10 @@ impl Mul<NonZeroIntVal> for IntView {
 			IntViewInner::Linear { transformer, var } => IntViewInner::Linear {
 				transformer: transformer * rhs,
 				var,
+			},
+			IntViewInner::Bool { transformer, lit } => IntViewInner::Bool {
+				transformer: transformer * rhs,
+				lit,
 			},
 		})
 	}

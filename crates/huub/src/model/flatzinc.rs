@@ -24,6 +24,15 @@ impl Model {
 			.iter()
 			.map(|c| {
 				match (c.id.deref(), c.defines.as_ref()) {
+					("bool2int", Some(l)) => {
+						if let [b, Argument::Literal(Literal::Identifier(x))] = c.args.as_slice() {
+							if x == l {
+								let b = arg_bool(fzn, &mut prb, &mut map, b)?;
+								let _ = map.insert(l.clone(), IntView::from(b).into());
+								return Ok(true);
+							}
+						}
+					}
 					("bool_not", Some(l)) => match c.args.as_slice() {
 						[Argument::Literal(Literal::Identifier(x)), b]
 						| [b, Argument::Literal(Literal::Identifier(x))]
@@ -110,6 +119,19 @@ impl Model {
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_bool_xor",
+							found: c.args.len(),
+							expected: 2,
+						});
+					}
+				}
+				"bool2int" => {
+					if let [b, i] = c.args.as_slice() {
+						let b = arg_bool(fzn, &mut prb, &mut map, b)?;
+						let i = arg_int(fzn, &mut prb, &mut map, i)?;
+						prb += Constraint::IntLinEq(vec![1, -1], vec![b.into(), i], 0);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "bool2int",
 							found: c.args.len(),
 							expected: 2,
 						});
