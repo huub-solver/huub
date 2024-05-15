@@ -113,23 +113,30 @@ impl Propagator for Minimum {
 mod tests {
 	use expect_test::expect;
 	use flatzinc_serde::RangeList;
+	use itertools::Itertools;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
 
 	use crate::{
-		propagator::minimum::Minimum, solver::engine::int_var::IntVar, Constraint, Model, Solver,
+		model::ModelView, propagator::minimum::Minimum, solver::engine::int_var::IntVar,
+		Constraint, Model, Solver,
 	};
 
 	#[test]
 	fn test_minimum_sat() {
-		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, RangeList::from_iter([3..=4]), true);
-		let b = IntVar::new_in(&mut slv, RangeList::from_iter([2..=3]), true);
-		let c = IntVar::new_in(&mut slv, RangeList::from_iter([2..=3]), true);
-		let y = IntVar::new_in(&mut slv, RangeList::from_iter([3..=4]), true);
+		let mut prb = Model::default();
+		let a = prb.new_int_var((3..=4).into());
+		let b = prb.new_int_var((2..=3).into());
+		let c = prb.new_int_var((2..=3).into());
+		let y = prb.new_int_var((3..=4).into());
 
-		slv.add_propagator(Minimum::new(vec![a, b, c], y));
+		prb += Constraint::Minimum(vec![a.clone(), b.clone(), c.clone()], y.clone());
+		let (mut slv, map) = prb.to_solver().unwrap();
+		let vars = vec![a, b, c, y]
+			.into_iter()
+			.map(|x| map.get(&ModelView::from(x)))
+			.collect_vec();
 		slv.expect_solutions(
-			&[a, b, c, y],
+			&vars,
 			expect![[r#"
     3, 3, 3, 3
     4, 3, 3, 3"#]],
