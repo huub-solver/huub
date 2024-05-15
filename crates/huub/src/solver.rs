@@ -3,6 +3,8 @@ pub(crate) mod initialization_context;
 pub(crate) mod value;
 pub(crate) mod view;
 
+use std::fmt;
+
 use delegate::delegate;
 use itertools::Itertools;
 use pindakaas::{
@@ -29,7 +31,6 @@ use crate::{
 	BoolView, IntVal, LitMeaning, ReformulationError,
 };
 
-#[derive(Debug)]
 pub struct Solver<Sat = Cadical>
 where
 	Sat: SatSolver,
@@ -311,6 +312,19 @@ where
 		to self.oracle {
 			pub fn set_terminate_callback<F: FnMut() -> SlvTermSignal>(&mut self, cb: Option<F>);
 		}
+	}
+}
+
+impl<Sol, Sat> fmt::Debug for Solver<Sat>
+where
+	Sol: PropagatorAccess + SatValuation,
+	Sat: SatSolver + SolverTrait<ValueFn = Sol> + fmt::Debug,
+{
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Solver")
+			.field("oracle", &self.oracle)
+			.field("engine", self.engine())
+			.finish()
 	}
 }
 
