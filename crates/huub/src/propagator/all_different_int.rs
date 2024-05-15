@@ -8,12 +8,12 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct AllDifferentValue {
+pub(crate) struct AllDifferentIntValue {
 	vars: Vec<IntView>,
 	action_list: Vec<u32>,
 }
 
-impl AllDifferentValue {
+impl AllDifferentIntValue {
 	pub(crate) fn new<V: Into<IntView>, I: IntoIterator<Item = V>>(vars: I) -> Self {
 		let vars: Vec<IntView> = vars.into_iter().map(Into::into).collect();
 		let action_list = vars
@@ -31,7 +31,7 @@ impl AllDifferentValue {
 	}
 }
 
-impl Propagator for AllDifferentValue {
+impl Propagator for AllDifferentIntValue {
 	fn initialize(&mut self, actions: &mut dyn InitializationActions) -> bool {
 		for (i, v) in self.vars.iter().enumerate() {
 			actions.subscribe_int(*v, IntEvent::Fixed, i as u32)
@@ -76,8 +76,8 @@ mod tests {
 	use pindakaas::{solver::cadical::Cadical, Cnf};
 
 	use crate::{
-		propagator::all_different::AllDifferentValue, solver::engine::int_var::IntVar, IntVal,
-		IntView, SolveResult, Solver,
+		propagator::all_different_int::AllDifferentIntValue, solver::engine::int_var::IntVar,
+		IntVal, IntView, SolveResult, Solver,
 	};
 
 	#[test]
@@ -87,7 +87,7 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 
-		slv.add_propagator(AllDifferentValue::new(vec![a, b, c]));
+		slv.add_propagator(AllDifferentIntValue::new(vec![a, b, c]));
 		slv.assert_all_solutions(&[a, b, c], |sol| sol.iter().all_unique())
 	}
 
@@ -98,7 +98,7 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
-		slv.add_propagator(AllDifferentValue::new(vec![a, b, c]));
+		slv.add_propagator(AllDifferentIntValue::new(vec![a, b, c]));
 		slv.assert_unsatisfiable()
 	}
 
@@ -120,13 +120,13 @@ mod tests {
 					));
 				}
 			}
-			slv.add_propagator(AllDifferentValue::new(vars.clone()));
+			slv.add_propagator(AllDifferentIntValue::new(vars.clone()));
 			all_vars.push(vars);
 		});
 		// add all different propagator for each column
 		for i in 0..9 {
 			let col_vars: Vec<IntView> = (0..9).map(|j| all_vars[j][i]).collect();
-			slv.add_propagator(AllDifferentValue::new(col_vars));
+			slv.add_propagator(AllDifferentIntValue::new(col_vars));
 		}
 		// add all different propagator for each 3 by 3 grid
 		for i in 0..3 {
@@ -137,7 +137,7 @@ mod tests {
 						block_vars.push(all_vars[3 * i + x][3 * j + y]);
 					}
 				}
-				slv.add_propagator(AllDifferentValue::new(block_vars));
+				slv.add_propagator(AllDifferentIntValue::new(block_vars));
 			}
 		}
 		assert_eq!(

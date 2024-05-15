@@ -6,14 +6,14 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct IntElementBounds {
+pub(crate) struct ArrayIntElementBounds {
 	vars: Vec<IntView>,                // Variables to be selected
 	y: IntView,                        // The selected variable
 	idx: IntView,                      // Variable that stores the index of the selected variable
 	action_list: Vec<(u32, IntEvent)>, // List of x variables that have been modified since the last propagation
 }
 
-impl IntElementBounds {
+impl ArrayIntElementBounds {
 	pub(crate) fn new<V: Into<IntView>, VI: IntoIterator<Item = V>>(
 		vars: VI,
 		y: IntView,
@@ -30,7 +30,7 @@ impl IntElementBounds {
 	}
 }
 
-impl Propagator for IntElementBounds {
+impl Propagator for ArrayIntElementBounds {
 	fn initialize(&mut self, actions: &mut dyn InitializationActions) -> bool {
 		for (i, v) in self.vars.iter().enumerate() {
 			actions.subscribe_int(*v, IntEvent::Bounds, i as u32);
@@ -52,6 +52,7 @@ impl Propagator for IntElementBounds {
 		self.action_list.clear();
 	}
 
+	#[tracing::instrument(name = "array_int_element", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
 		let idx_is_fixed =
 			actions.get_int_lower_bound(self.idx) == actions.get_int_upper_bound(self.idx);
@@ -207,8 +208,8 @@ mod tests {
 	use pindakaas::{solver::cadical::Cadical, Cnf};
 
 	use crate::{
-		propagator::element::IntElementBounds, solver::engine::int_var::IntVar, Constraint, Model,
-		Solver,
+		propagator::array_int_element::ArrayIntElementBounds, solver::engine::int_var::IntVar,
+		Constraint, Model, Solver,
 	};
 
 	#[test]
@@ -220,7 +221,7 @@ mod tests {
 		let y = IntVar::new_in(&mut slv, RangeList::from_iter([3..=4]), true);
 		let idx = IntVar::new_in(&mut slv, RangeList::from_iter([0..=2]), true);
 
-		slv.add_propagator(IntElementBounds::new(vec![a, b, c], y, idx));
+		slv.add_propagator(ArrayIntElementBounds::new(vec![a, b, c], y, idx));
 		slv.expect_solutions(
 			&[idx, y, a, b, c],
 			expect![[r#"
@@ -252,7 +253,7 @@ mod tests {
 		let y = prb.new_int_var((1..=2).into());
 		let idx = prb.new_int_var((0..=2).into());
 
-		prb += Constraint::Element(vec![a.into(), b.into(), c.into()], y.into(), idx.into());
+		prb += Constraint::ArrayIntElement(vec![a, b, c], y, idx);
 		prb.assert_unsatisfiable();
 	}
 }

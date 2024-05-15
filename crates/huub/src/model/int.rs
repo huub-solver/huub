@@ -1,4 +1,4 @@
-use std::ops::{Add, Mul};
+use std::ops::{Add, Mul, Neg};
 
 use flatzinc_serde::RangeList;
 use pindakaas::{
@@ -77,6 +77,20 @@ impl Mul<NonZeroIntVal> for IntView {
 			Self::Const(v) => Self::Const(v * rhs.get()),
 			Self::Linear(t, x) => Self::Linear(t * rhs, x),
 			Self::Bool(t, x) => Self::Bool(t * rhs, x),
+		}
+	}
+}
+
+impl Neg for IntView {
+	type Output = Self;
+	fn neg(self) -> Self::Output {
+		match self {
+			Self::Var(x) => {
+				Self::Linear(LinearTransform::scaled(NonZeroIntVal::new(-1).unwrap()), x)
+			}
+			Self::Const(v) => Self::Const(-v),
+			Self::Linear(t, x) => Self::Linear(-t, x),
+			Self::Bool(t, x) => Self::Bool(-t, x),
 		}
 	}
 }

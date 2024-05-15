@@ -6,14 +6,14 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct Minimum {
+pub(crate) struct ArrayIntMinimumBounds {
 	vars: Vec<IntView>,                // Variables in the minimum constraints
 	y: IntView,                        // Variable that stores the minimum value
 	action_list: Vec<(u32, IntEvent)>, // List of x variables that have been modified since the last propagation
 	y_change: bool,                    // Whether the lower bound of y has been changed
 }
 
-impl Minimum {
+impl ArrayIntMinimumBounds {
 	pub(crate) fn new<V: Into<IntView>, VI: IntoIterator<Item = V>>(vars: VI, y: IntView) -> Self {
 		let vars: Vec<IntView> = vars.into_iter().map(Into::into).collect();
 		let sz = vars.len();
@@ -26,7 +26,7 @@ impl Minimum {
 	}
 }
 
-impl Propagator for Minimum {
+impl Propagator for ArrayIntMinimumBounds {
 	fn initialize(&mut self, actions: &mut dyn InitializationActions) -> bool {
 		for (i, v) in self.vars.iter().enumerate() {
 			actions.subscribe_int(*v, IntEvent::UpperBound, i as u32);
@@ -117,8 +117,8 @@ mod tests {
 	use pindakaas::{solver::cadical::Cadical, Cnf};
 
 	use crate::{
-		model::ModelView, propagator::minimum::Minimum, solver::engine::int_var::IntVar,
-		Constraint, Model, Solver,
+		model::ModelView, propagator::array_int_minimum::ArrayIntMinimumBounds,
+		solver::engine::int_var::IntVar, Constraint, Model, Solver,
 	};
 
 	#[test]
@@ -129,7 +129,7 @@ mod tests {
 		let c = prb.new_int_var((2..=3).into());
 		let y = prb.new_int_var((3..=4).into());
 
-		prb += Constraint::Minimum(vec![a.clone(), b.clone(), c.clone()], y.clone());
+		prb += Constraint::ArrayIntMinimum(vec![a.clone(), b.clone(), c.clone()], y.clone());
 		let (mut slv, map) = prb.to_solver().unwrap();
 		let vars = vec![a, b, c, y]
 			.into_iter()
@@ -151,7 +151,7 @@ mod tests {
 		let c = prb.new_int_var((4..=10).into());
 		let y = prb.new_int_var((1..=2).into());
 
-		prb += Constraint::Minimum(vec![a, b, c], y);
+		prb += Constraint::ArrayIntMinimum(vec![a, b, c], y);
 		prb.assert_unsatisfiable();
 	}
 
@@ -163,7 +163,7 @@ mod tests {
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([2..=5]), true);
 		let y = IntVar::new_in(&mut slv, RangeList::from_iter([1..=3]), true);
 
-		slv.add_propagator(Minimum::new(vec![-a, -b, -c], -y));
+		slv.add_propagator(ArrayIntMinimumBounds::new(vec![-a, -b, -c], -y));
 		slv.expect_solutions(
 			&[a, b, c, y],
 			expect![[r#"
@@ -184,7 +184,7 @@ mod tests {
 		let c = prb.new_int_var((4..=10).into());
 		let y = prb.new_int_var((13..=20).into());
 
-		prb += Constraint::Maximum(vec![a, b, c], y);
+		prb += Constraint::ArrayIntMaximum(vec![a, b, c], y);
 		prb.assert_unsatisfiable();
 	}
 }

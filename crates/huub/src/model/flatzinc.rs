@@ -1,6 +1,11 @@
 use std::{collections::BTreeMap, fmt::Debug, ops::Deref};
 
 use flatzinc_serde::{Argument, Domain, FlatZinc, Literal, Type, Variable};
+use itertools::Itertools;
+use pindakaas::{
+	solver::{PropagatorAccess, Solver as SolverTrait},
+	Valuation as SatValuation,
+};
 use thiserror::Error;
 
 use super::{
@@ -9,7 +14,7 @@ use super::{
 	reformulate::ReformulationError,
 	ModelView,
 };
-use crate::{Constraint, IntVal, Model, NonZeroIntVal, Solver, SolverView};
+use crate::{solver::SatSolver, Constraint, IntVal, Model, NonZeroIntVal, Solver, SolverView};
 
 impl Model {
 	pub fn from_fzn<S: Ord + Deref<Target = str> + Clone + Debug>(
@@ -124,11 +129,29 @@ impl Model {
 						});
 					}
 				}
+				"array_int_element" => {
+					if let [idx, arr, val] = c.args.as_slice() {
+						let arr = arg_array(fzn, arr)?;
+						let idx = arg_int(fzn, &mut prb, &mut map, idx)?;
+						let val = arg_int(fzn, &mut prb, &mut map, val)?;
+						let arr: Result<Vec<_>, _> = arr
+							.iter()
+							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
+							.collect();
+						prb += Constraint::ArrayIntElement(arr?, idx, val);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "array_int_element",
+							found: c.args.len(),
+							expected: 3,
+						});
+					}
+				}
 				"bool2int" => {
 					if let [b, i] = c.args.as_slice() {
 						let b = arg_bool(fzn, &mut prb, &mut map, b)?;
 						let i = arg_int(fzn, &mut prb, &mut map, i)?;
-						prb += Constraint::IntLinEq(vec![1, -1], vec![b.into(), i], 0);
+						prb += Constraint::IntLinEq(vec![b.into(), -i], 0);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool2int",
@@ -214,7 +237,7 @@ impl Model {
 							.iter()
 							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
 							.collect();
-						prb += Constraint::AllDifferent(args?);
+						prb += Constraint::AllDifferentInt(args?);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_all_different",
@@ -233,9 +256,9 @@ impl Model {
 							.collect();
 						let m = arg_int(fzn, &mut prb, &mut map, m)?;
 						if is_maximum {
-							prb += Constraint::Maximum(args?, m);
+							prb += Constraint::ArrayIntMaximum(args?, m);
 						} else {
-							prb += Constraint::Minimum(args?, m);
+							prb += Constraint::ArrayIntMinimum(args?, m);
 						}
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
@@ -275,20 +298,25 @@ impl Model {
 				"int_lin_le" | "int_lin_eq" => {
 					let is_eq = c.id.deref() == "int_lin_eq";
 					if let [coeffs, vars, rhs] = c.args.as_slice() {
-						let coeffs = arg_array(fzn, coeffs)?;
-						let vars = arg_array(fzn, vars)?;
-						let rhs = arg_par_int(fzn, rhs)?;
-						let coeffs: Result<Vec<_>, _> =
-							coeffs.iter().map(|l| par_int(fzn, l)).collect();
-						let vars: Result<Vec<_>, _> = vars
+						let coeffs: Vec<_> = arg_array(fzn, coeffs)?
+							.iter()
+							.map(|l| par_int(fzn, l))
+							.try_collect()?;
+						let vars: Vec<_> = arg_array(fzn, vars)?
 							.iter()
 							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
+							.try_collect()?;
+						let rhs = arg_par_int(fzn, rhs)?;
+						let vars: Vec<IntView> = vars
+							.into_iter()
+							.zip(coeffs.into_iter())
+							.filter_map(|(x, c)| NonZeroIntVal::new(c).map(|c| x * c))
 							.collect();
 						prb += if is_eq {
 							Constraint::IntLinEq
 						} else {
 							Constraint::IntLinLessEq
-						}(coeffs?, vars?, rhs);
+						}(vars, rhs);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: if is_eq { "int_lin_eq" } else { "int_linear_le" },
@@ -304,33 +332,15 @@ impl Model {
 						let b = arg_int(fzn, &mut prb, &mut map, b)?;
 						let m = arg_int(fzn, &mut prb, &mut map, m)?;
 						if is_maximum {
-							prb += Constraint::Maximum(vec![a, b], m);
+							prb += Constraint::ArrayIntMaximum(vec![a, b], m);
 						} else {
-							prb += Constraint::Minimum(vec![a, b], m);
+							prb += Constraint::ArrayIntMinimum(vec![a, b], m);
 						}
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: if is_maximum { "int_max" } else { "int_min" },
 							found: c.args.len(),
 							expected: 2,
-						});
-					}
-				}
-				"array_int_element" => {
-					if let [idx, arr, val] = c.args.as_slice() {
-						let arr = arg_array(fzn, arr)?;
-						let idx = arg_int(fzn, &mut prb, &mut map, idx)?;
-						let val = arg_int(fzn, &mut prb, &mut map, val)?;
-						let arr: Result<Vec<_>, _> = arr
-							.iter()
-							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
-							.collect();
-						prb += Constraint::Element(arr?, idx, val);
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "array_int_element",
-							found: c.args.len(),
-							expected: 3,
 						});
 					}
 				}
@@ -366,8 +376,11 @@ impl Model {
 	}
 }
 
-// TODO: Make generic on underlying solver
-impl Solver {
+impl<Sol, Sat> Solver<Sat>
+where
+	Sol: PropagatorAccess + SatValuation,
+	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+{
 	pub fn from_fzn<S: Ord + Deref<Target = str> + Clone + Debug>(
 		fzn: &FlatZinc<S>,
 	) -> Result<(Self, BTreeMap<S, SolverView>), FlatZincError> {
