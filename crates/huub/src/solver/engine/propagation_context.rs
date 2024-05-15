@@ -44,7 +44,6 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 					self.state
 						.register_reason(propagated_lit, reason, self.prop);
 					self.prop_queue.push(propagated_lit);
-					// TODO: Trigger Propagators
 					Ok(())
 				}
 			},
@@ -238,7 +237,6 @@ impl PropagationContext<'_> {
 		self.state.register_reason(lit, reason, self.prop);
 		self.prop_queue.push(lit);
 		// TODO: Update domain
-		// TODO: Trigger Propagators
 		// TODO: Check conflict
 		Ok(())
 	}

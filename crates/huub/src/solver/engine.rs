@@ -49,7 +49,7 @@ pub(crate) struct Engine {
 
 impl IpasirPropagator for Engine {
 	fn notify_assignment(&mut self, lit: RawLit, persistent: bool) {
-		if self.state.notify_sat_assignment(lit) == HasChanged::NoChange {
+		if self.state.sat_trail.assign(lit.var(), !lit.is_negated()) == HasChanged::NoChange {
 			return;
 		}
 		trace!(lit = i32::from(lit), persistent, "assignment");
@@ -58,33 +58,7 @@ impl IpasirPropagator for Engine {
 		if persistent && self.state.decision_level() != 0 {
 			self.persistent.push(lit)
 		}
-		for &(prop, data) in self
-			.state
-			.bool_subscribers
-			.get(&lit.var())
-			.into_iter()
-			.flatten()
-		{
-			if self.propagators[prop].notify_event(data, &IntEvent::Fixed)
-				&& !self.state.enqueued[prop]
-			{
-				let level = self.propagators[prop].queue_priority_level();
-				self.state.prop_queue.insert(level, prop);
-			}
-		}
-
-		// Process Integer consequences
-		if let Some((iv, event)) = self.state.determine_int_event(lit) {
-			for (prop, level, data) in self.state.int_subscribers.get(&iv).into_iter().flatten() {
-				if level.is_activated_by(&event)
-					&& self.propagators[*prop].notify_event(*data, &event)
-					&& !self.state.enqueued[*prop]
-				{
-					let level = self.propagators[*prop].queue_priority_level();
-					self.state.prop_queue.insert(level, *prop);
-				}
-			}
-		}
+		self.notify_propagators(lit, None);
 	}
 
 	fn notify_new_decision_level(&mut self) {
@@ -139,15 +113,18 @@ impl IpasirPropagator for Engine {
 				}
 				return Vec::new();
 			} else if !ctx.prop_queue.is_empty() {
+				let queue = ctx.prop_queue;
 				trace!(
-					lits = ?ctx
-						.prop_queue
+					lits = ?queue
 						.iter()
 						.map(|&x| i32::from(x))
 						.collect::<Vec<i32>>(),
 					"propagate"
 				);
-				return ctx.prop_queue;
+				for lit in queue.iter() {
+					self.notify_propagators(*lit, None);
+				}
+				return queue;
 			}
 		}
 		Vec::new()
@@ -236,6 +213,41 @@ impl Engine {
 	fn has_conflict(&self) -> bool {
 		!self.conflict_clauses.is_empty()
 	}
+
+	fn notify_propagators(&mut self, lit: RawLit, skip: Option<PropRef>) {
+		trace!(lit = i32::from(lit), "notify propagators");
+		for &(prop, data) in self
+			.state
+			.bool_subscribers
+			.get(&lit.var())
+			.into_iter()
+			.flatten()
+		{
+			if Some(prop) == skip || self.state.enqueued[prop] {
+				continue;
+			}
+			if self.propagators[prop].notify_event(data, &IntEvent::Fixed) {
+				let level = self.propagators[prop].queue_priority_level();
+				self.state.prop_queue.insert(level, prop);
+			}
+		}
+
+		// Process Integer consequences
+		if let Some((iv, event)) = self.state.determine_int_event(lit) {
+			for (prop, level, data) in self.state.int_subscribers.get(&iv).into_iter().flatten() {
+				if Some(*prop) == skip
+					|| self.state.enqueued[*prop]
+					|| !level.is_activated_by(&event)
+				{
+					continue;
+				}
+				if self.propagators[*prop].notify_event(*data, &event) {
+					let level = self.propagators[*prop].queue_priority_level();
+					self.state.prop_queue.insert(level, *prop);
+				}
+			}
+		}
+	}
 }
 
 index_vec::define_index_type! {
@@ -276,10 +288,6 @@ pub(crate) struct State {
 }
 
 impl State {
-	fn notify_sat_assignment(&mut self, lit: RawLit) -> HasChanged {
-		self.sat_trail.assign(lit.var(), !lit.is_negated())
-	}
-
 	fn determine_int_event(&mut self, lit: RawLit) -> Option<(IntVarRef, IntEvent)> {
 		if let Some(iv) = self.bool_to_int.get(lit.var()) {
 			let lb = self.int_trail[self.int_vars[iv].lower_bound];

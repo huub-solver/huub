@@ -64,9 +64,12 @@ impl IntVar {
 			.map(|x| (x.end() - x.start() + 1) as usize)
 			.sum();
 		assert!(
-			orig_domain_len > 1,
-			"Unable to create integer variable with singular or empty domain"
+			orig_domain_len != 0,
+			"Unable to create integer variable empty domain"
 		);
+		if orig_domain_len == 1 {
+			return IntView(IntViewInner::Const(*domain.lower_bound().unwrap()));
+		}
 		if orig_domain_len == 2 {
 			let lit = slv.oracle.new_var().into();
 			let lb = *domain.lower_bound().unwrap();
