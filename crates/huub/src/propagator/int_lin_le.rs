@@ -3,7 +3,7 @@ use crate::{
 	propagator::{conflict::Conflict, int_event::IntEvent, Propagator},
 	solver::{
 		engine::queue::PriorityLevel,
-		value::{IntVal, NonZeroIntVal},
+		value::IntVal,
 		view::{BoolViewInner, IntView, IntViewInner},
 	},
 	BoolView, Conjunction,
@@ -18,27 +18,23 @@ pub(crate) struct LinearLE {
 
 impl LinearLE {
 	pub(crate) fn new<V: Into<IntView>, VI: IntoIterator<Item = V>>(
-		coeffs: &[IntVal],
 		vars: VI,
 		mut max_sum: IntVal,
 	) -> Self {
-		let vars: Vec<IntView> = vars.into_iter().map(Into::into).collect();
-		let scaled_vars: Vec<IntView> = vars
-			.iter()
-			.enumerate()
-			.filter_map(|(i, v)| {
+		let filtered_vars: Vec<IntView> = vars
+			.into_iter()
+			.filter_map(|v| {
+				let v = v.into();
 				if let IntViewInner::Const(c) = v.0 {
-					max_sum -= coeffs[i] * c;
+					max_sum -= c;
 					None
-				} else if coeffs[i] != 0 {
-					Some(*v * NonZeroIntVal::new(coeffs[i]).unwrap())
 				} else {
-					None
+					Some(v)
 				}
 			})
 			.collect();
 		Self {
-			vars: scaled_vars,
+			vars: filtered_vars,
 			rhs: max_sum,
 			action_list: Vec::new(),
 		}
@@ -107,7 +103,9 @@ mod tests {
 	use flatzinc_serde::RangeList;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
 
-	use crate::{propagator::int_lin_le::LinearLE, solver::engine::int_var::IntVar, Solver};
+	use crate::{
+		propagator::int_lin_le::LinearLE, solver::engine::int_var::IntVar, NonZeroIntVal, Solver,
+	};
 
 	#[test]
 	fn test_linear_le_sat() {
@@ -116,7 +114,10 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
-		slv.add_propagator(LinearLE::new(&[2, 1, 1], vec![a, b, c], 6));
+		slv.add_propagator(LinearLE::new(
+			vec![a * NonZeroIntVal::new(2).unwrap(), b, c],
+			6,
+		));
 
 		slv.expect_solutions(
 			&[a, b, c],
@@ -136,7 +137,10 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 
-		slv.add_propagator(LinearLE::new(&[2, 1, 1], vec![a, b, c], 3));
+		slv.add_propagator(LinearLE::new(
+			vec![a * NonZeroIntVal::new(2).unwrap(), b, c],
+			3,
+		));
 		slv.assert_unsatisfiable()
 	}
 
@@ -147,7 +151,10 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
-		slv.add_propagator(LinearLE::new(&[-2, -1, -1], vec![a, b, c], -6));
+		slv.add_propagator(LinearLE::new(
+			vec![a * NonZeroIntVal::new(-2).unwrap(), -b, -c],
+			-6,
+		));
 		slv.expect_solutions(
 			&[a, b, c],
 			expect![[r#"
@@ -166,7 +173,10 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
-		slv.add_propagator(LinearLE::new(&[-2, -1, -1], vec![a, b, c], -10));
+		slv.add_propagator(LinearLE::new(
+			vec![a * NonZeroIntVal::new(-2).unwrap(), -b, -c],
+			-10,
+		));
 		slv.assert_unsatisfiable()
 	}
 }

@@ -11,8 +11,8 @@ use super::{
 };
 use crate::{
 	propagator::{
-		all_different::AllDifferentValue, element::IntElementBounds, int_lin_le::LinearLE,
-		minimum::Minimum,
+		all_different_int::AllDifferentIntValue, array_int_element::ArrayIntElementBounds,
+		array_int_minimum::ArrayIntMinimumBounds, int_lin_le::LinearLE,
 	},
 	solver::SatSolver,
 	BoolExpr, IntVal, Model, ReformulationError, Solver,
@@ -20,13 +20,13 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Constraint {
-	AllDifferent(Vec<IntView>),
-	IntLinEq(Vec<IntVal>, Vec<IntView>, IntVal),
-	IntLinLessEq(Vec<IntVal>, Vec<IntView>, IntVal),
-	Maximum(Vec<IntView>, IntView),
-	Minimum(Vec<IntView>, IntView),
-	Element(Vec<IntView>, IntView, IntView),
-	SimpleBool(BoolExpr),
+	AllDifferentInt(Vec<IntView>),
+	ArrayIntElement(Vec<IntView>, IntView, IntView),
+	ArrayIntMaximum(Vec<IntView>, IntView),
+	ArrayIntMinimum(Vec<IntView>, IntView),
+	IntLinEq(Vec<IntView>, IntVal),
+	IntLinLessEq(Vec<IntView>, IntVal),
+	PropLogic(BoolExpr),
 }
 
 impl Constraint {
@@ -40,75 +40,63 @@ impl Constraint {
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 	{
 		match self {
-			Constraint::SimpleBool(exp) => exp.constrain(slv, map),
-			Constraint::AllDifferent(v) => {
+			Constraint::PropLogic(exp) => exp.constrain(slv, map),
+			Constraint::AllDifferentInt(v) => {
 				let vars: Vec<_> = v
 					.iter()
 					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
-				slv.add_propagator(AllDifferentValue::new(vars));
+				slv.add_propagator(AllDifferentIntValue::new(vars));
 				Ok(())
 			}
-			Constraint::IntLinLessEq(coeffs, vars, c) => {
+			Constraint::IntLinLessEq(vars, c) => {
 				let vars: Vec<_> = vars
 					.iter()
-					.zip_eq(coeffs.iter())
-					.map(|(v, &c)| {
-						v.to_arg(
-							if c >= 0 {
-								ReifContext::Pos
-							} else {
-								ReifContext::Neg
-							},
-							slv,
-							map,
-						)
-					})
+					.map(|v| v.to_arg(ReifContext::Pos, slv, map))
 					.collect();
-				slv.add_propagator(LinearLE::new(coeffs, vars, *c));
+				slv.add_propagator(LinearLE::new(vars, *c));
 				Ok(())
 			}
-			Constraint::IntLinEq(coeffs, vars, c) => {
+			Constraint::IntLinEq(vars, c) => {
 				let vars: Vec<_> = vars
 					.iter()
 					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
 				// coeffs * vars <= c
-				slv.add_propagator(LinearLE::new(coeffs, vars.clone(), *c));
+				slv.add_propagator(LinearLE::new(vars.clone(), *c));
 				// coeffs * vars >= c <=>  -coeffs * vars <= -c
 				slv.add_propagator(LinearLE::new(
-					&coeffs.iter().map(|c| -c).collect_vec(),
-					vars,
+					vars.into_iter().map(|v| -v).collect_vec(),
 					-c,
 				));
 				Ok(())
 			}
-			Constraint::Minimum(vars, y) => {
+			Constraint::ArrayIntMinimum(vars, y) => {
 				let vars: Vec<_> = vars
 					.iter()
 					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
 				let y = y.to_arg(ReifContext::Mixed, slv, map);
-				slv.add_propagator(Minimum::new(vars, y));
+				slv.add_propagator(ArrayIntMinimumBounds::new(vars, y));
 				Ok(())
 			}
-			Constraint::Maximum(vars, y) => {
+			Constraint::ArrayIntMaximum(vars, y) => {
 				let vars: Vec<_> = vars
 					.iter()
 					.map(|v| -v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
 				let y = -y.to_arg(ReifContext::Mixed, slv, map);
-				slv.add_propagator(Minimum::new(vars, y));
+				slv.add_propagator(ArrayIntMinimumBounds::new(vars, y));
 				Ok(())
 			}
-			Constraint::Element(vars, idx, y) => {
+			Constraint::ArrayIntElement(vars, idx, y) => {
 				let vars: Vec<_> = vars
 					.iter()
 					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
 				let y = y.to_arg(ReifContext::Mixed, slv, map);
 				let idx = idx.to_arg(ReifContext::Mixed, slv, map);
-				slv.add_propagator(IntElementBounds::new(vars, y, idx));
+				slv.add_propagator(ArrayIntElementBounds::new(vars, y, idx));
 				Ok(())
 			}
 		}
@@ -118,7 +106,7 @@ impl Constraint {
 impl Model {
 	pub(crate) fn propagate(&mut self, con: usize) -> Result<(), ReformulationError> {
 		match self.constraints[con].clone() {
-			Constraint::AllDifferent(vars) => {
+			Constraint::AllDifferentInt(vars) => {
 				let (vals, vars): (Vec<_>, Vec<_>) =
 					vars.iter().partition(|v| matches!(v, IntView::Const(_)));
 				if vals.is_empty() {
@@ -133,7 +121,7 @@ impl Model {
 				}
 				Ok(())
 			}
-			Constraint::Maximum(args, m) => {
+			Constraint::ArrayIntMaximum(args, m) => {
 				let max_lb = args
 					.iter()
 					.map(|a| self.get_int_lower_bound(a))
@@ -153,7 +141,7 @@ impl Model {
 				}
 				Ok(())
 			}
-			Constraint::Minimum(args, m) => {
+			Constraint::ArrayIntMinimum(args, m) => {
 				let min_lb = args
 					.iter()
 					.map(|a| self.get_int_lower_bound(a))
@@ -173,7 +161,7 @@ impl Model {
 				}
 				Ok(())
 			}
-			Constraint::Element(args, y, idx) => {
+			Constraint::ArrayIntElement(args, y, idx) => {
 				// make sure idx is within the range of args
 				self.set_int_lower_bound(&idx, 0, con)?;
 				self.set_int_upper_bound(&idx, args.len() as IntVal, con)?;
@@ -199,7 +187,7 @@ impl Model {
 
 	pub(crate) fn subscribe(&mut self, con: usize) {
 		match &self.constraints[con] {
-			Constraint::Maximum(args, m) | Constraint::Minimum(args, m) => {
+			Constraint::ArrayIntMaximum(args, m) | Constraint::ArrayIntMinimum(args, m) => {
 				for a in args {
 					if let IntView::Var(a) = a {
 						self.int_vars[a.0 as usize].constraints.push(con);
@@ -209,16 +197,16 @@ impl Model {
 					self.int_vars[m.0 as usize].constraints.push(con);
 				}
 			}
-			Constraint::Element(args, y, idx) => {
+			Constraint::ArrayIntElement(args, y, idx) => {
 				for a in args {
-					if let IntExpr::Var(a) = a {
+					if let IntView::Var(a) = a {
 						self.int_vars[a.0 as usize].constraints.push(con);
 					}
 				}
-				if let IntExpr::Var(y) = y {
+				if let IntView::Var(y) = y {
 					self.int_vars[y.0 as usize].constraints.push(con);
 				}
-				if let IntExpr::Var(idx) = idx {
+				if let IntView::Var(idx) = idx {
 					self.int_vars[idx.0 as usize].constraints.push(con);
 				}
 			}

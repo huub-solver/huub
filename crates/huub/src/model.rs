@@ -111,7 +111,7 @@ impl AddAssign<Constraint> for Model {
 }
 impl AddAssign<BoolExpr> for Model {
 	fn add_assign(&mut self, rhs: BoolExpr) {
-		self.add_assign(Constraint::SimpleBool(rhs))
+		self.add_assign(Constraint::PropLogic(rhs))
 	}
 }
 
