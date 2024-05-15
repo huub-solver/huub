@@ -1,5 +1,3 @@
-use tracing::trace;
-
 use super::{reason::ReasonBuilder, InitializationActions, PropagationActions};
 use crate::{
 	propagator::{conflict::Conflict, int_event::IntEvent, Propagator},
@@ -54,15 +52,11 @@ impl Propagator for AllDifferentValue {
 		self.action_list.clear()
 	}
 
+	#[tracing::instrument(name = "all_different", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
 		while let Some(i) = self.action_list.pop() {
 			let var = self.vars[i as usize];
 			let val = actions.get_int_val(var).unwrap();
-			trace!(
-				int_var = ?var,
-				value = val,
-				"value propagation all_different",
-			);
 			let reason = ReasonBuilder::Simple(actions.get_int_lit(var, LitMeaning::Eq(val)));
 			for (j, &v) in self.vars.iter().enumerate() {
 				let j_val = actions.get_int_val(v);

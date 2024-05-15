@@ -84,8 +84,10 @@ impl SatTrail {
 	}
 
 	pub(crate) fn assign(&mut self, var: RawVar, val: bool) -> HasChanged {
-		if let Some(x) = self.value.insert(var, val) {
-			debug_assert_eq!(x, val);
+		if self.value.insert(var, val).is_some() {
+			// Variable was updated with a new value
+			// This might be a new (inconsistent) value if the SAT solver is still propagating given
+			// literals.
 			return HasChanged::NoChange;
 		}
 		if !self.prev_len.is_empty() {
