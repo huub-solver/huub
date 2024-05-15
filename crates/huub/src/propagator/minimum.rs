@@ -54,6 +54,7 @@ impl Propagator for Minimum {
 		self.y_change = false;
 	}
 
+	#[tracing::instrument(name = "array_int_minimum", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
 		if !self.action_list.is_empty() {
 			let min_lb = self

@@ -1,5 +1,3 @@
-use tracing::trace;
-
 use super::{reason::ReasonBuilder, ExplainActions, InitializationActions, PropagationActions};
 use crate::{
 	propagator::{conflict::Conflict, int_event::IntEvent, Propagator},
@@ -68,6 +66,7 @@ impl Propagator for LinearLE {
 	}
 
 	// propagation rule: x[i] <= rhs - sum_{j != i} x[j].lower_bound
+	#[tracing::instrument(name = "int_lin_le", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
 		// sum the coefficients x var.lower_bound
 		let max_sum = self
@@ -77,11 +76,6 @@ impl Propagator for LinearLE {
 			.fold(self.rhs, |sum, val| sum - val);
 		// propagate the upper bound of the variables
 		for (j, &v) in self.vars.iter().enumerate() {
-			trace!(
-				int_var = ?v,
-				value = max_sum + actions.get_int_lower_bound(v),
-				"bounds propagation linear_le",
-			);
 			let reason = ReasonBuilder::Lazy(j as u64);
 			actions.set_int_upper_bound(v, max_sum + actions.get_int_lower_bound(v), &reason)?
 		}

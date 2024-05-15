@@ -13,7 +13,7 @@ use crate::{
 		view::{BoolViewInner, IntViewInner},
 		IntView, SatSolver,
 	},
-	BoolView, IntVal, Solver,
+	BoolView, IntVal, LinearTransform, NonZeroIntVal, Solver,
 };
 
 index_vec::define_index_type! {
@@ -59,11 +59,26 @@ impl IntVar {
 		Sol: PropagatorAccess + SatValuation,
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 	{
-		let orig_domain_len = (&domain)
-			.into_iter()
-			.map(|x| (*x.end() - *x.start() + 1) as usize)
+		let orig_domain_len = domain
+			.iter()
+			.map(|x| (x.end() - x.start() + 1) as usize)
 			.sum();
-		debug_assert!(orig_domain_len >= 2, "Domain must have at least two values");
+		assert!(
+			orig_domain_len > 1,
+			"Unable to create integer variable with singular or empty domain"
+		);
+		if orig_domain_len == 2 {
+			let lit = slv.oracle.new_var().into();
+			let lb = *domain.lower_bound().unwrap();
+			let ub = *domain.upper_bound().unwrap();
+			return IntView(IntViewInner::Bool {
+				transformer: LinearTransform {
+					scale: NonZeroIntVal::new(ub - lb).unwrap(),
+					offset: lb,
+				},
+				lit,
+			});
+		}
 
 		let mut num_vars = orig_domain_len - 1;
 		if direct_encoding {
@@ -157,14 +172,14 @@ impl IntVar {
 				}
 				// Calculate the offset in the VarRange
 				let mut offset = -1; // -1 to account for the lower bound
-				for r in &self.orig_domain {
-					if i < **r.start() {
+				for r in self.orig_domain.iter() {
+					if i < *r.start() {
 						break;
-					} else if r.contains(&&i) {
-						offset += i - *r.start();
+					} else if r.contains(&i) {
+						offset += i - r.start();
 						break;
 					} else {
-						offset += *r.end() - *r.start() + 1;
+						offset += r.end() - r.start() + 1;
 					}
 				}
 				// Look up the corresponding variable
@@ -187,14 +202,14 @@ impl IntVar {
 				} else {
 					// Calculate the offset in the VarRange
 					let mut offset = -1; // -1 to account for the lower bound
-					for r in &self.orig_domain {
-						if i < **r.start() {
+					for r in self.orig_domain.iter() {
+						if i < *r.start() {
 							return ret_const(false);
-						} else if r.contains(&&i) {
-							offset += i - *r.start();
+						} else if r.contains(&i) {
+							offset += i - r.start();
 							break;
 						} else {
-							offset += *r.end() - *r.start() + 1;
+							offset += r.end() - r.start() + 1;
 						}
 					}
 					debug_assert!(

@@ -150,6 +150,26 @@ impl<'a, V: Visit> LitNames<'a, V> {
 		}
 		false
 	}
+
+	#[inline]
+	fn check_int_vars(&mut self, field: &Field, value: &dyn fmt::Debug) -> bool {
+		if matches!(field.name(), "int_vars") {
+			let res: Result<Vec<usize>, _> = serde_json::from_str(&format!("{:?}", value));
+			if let Ok(vars) = res {
+				let mut v: Vec<String> = Vec::with_capacity(vars.len());
+				for i in vars {
+					if let Some(name) = self.int_reverse_map.get(i) {
+						v.push(name.to_string());
+					} else {
+						v.push(format!("IntVar({})", i));
+					}
+				}
+				self.inner.record_str(field, &v.join(", "));
+				return true;
+			}
+		}
+		false
+	}
 }
 
 impl<'a, V: Visit> Visit for LitNames<'a, V> {
@@ -186,6 +206,9 @@ impl<'a, V: Visit> Visit for LitNames<'a, V> {
 	#[inline]
 	fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
 		if self.check_clause(field, value) {
+			return;
+		}
+		if self.check_int_vars(field, value) {
 			return;
 		}
 		self.inner.record_debug(field, value)

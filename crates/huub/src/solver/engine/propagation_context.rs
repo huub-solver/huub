@@ -1,5 +1,6 @@
 use delegate::delegate;
 use pindakaas::Lit as RawLit;
+use tracing::trace;
 
 use super::{int_var::IntVarRef, PropRef, State};
 use crate::{
@@ -33,15 +34,17 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 					self.prop,
 				)),
 				None => {
+					let propagated_lit = if val { lit } else { !lit };
+					trace!(lit = i32::from(propagated_lit), "propagate bool");
 					let change = self
 						.state
 						.sat_trail
 						.assign(lit.var(), if lit.is_negated() { !val } else { val });
 					debug_assert_eq!(change, HasChanged::Changed);
-					let propagated_lit = if val { lit } else { !lit };
 					self.state
 						.register_reason(propagated_lit, reason, self.prop);
 					self.prop_queue.push(propagated_lit);
+					// TODO: Trigger Propagators
 					Ok(())
 				}
 			},
@@ -224,6 +227,7 @@ impl PropagationContext<'_> {
 		if self.check_satisfied(iv, &lit_req) {
 			return Ok(());
 		}
+		trace!(int_var = usize::from(iv), effect = ?lit_req, "propagate int");
 		let lit = match self.state.int_vars[iv].get_bool_lit(lit_req) {
 			BoolView(BoolViewInner::Lit(lit)) => lit,
 			BoolView(BoolViewInner::Const(false)) => {
@@ -233,7 +237,8 @@ impl PropagationContext<'_> {
 		};
 		self.state.register_reason(lit, reason, self.prop);
 		self.prop_queue.push(lit);
-		// TODO: Should this trigger notify?
+		// TODO: Update domain
+		// TODO: Trigger Propagators
 		// TODO: Check conflict
 		Ok(())
 	}
