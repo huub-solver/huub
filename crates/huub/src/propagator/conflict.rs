@@ -1,5 +1,7 @@
 use std::{error::Error, fmt};
 
+use pindakaas::Lit as RawLit;
+
 use super::reason::{Reason, ReasonBuilder};
 use crate::solver::engine::PropRef;
 
@@ -7,6 +9,10 @@ use crate::solver::engine::PropRef;
 /// inconsistent values.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Conflict {
+	/// The subject of the conflict (i.e., the literal that couldn't be propagated).
+	///
+	/// If `None`, the conflict is a root conflict.
+	pub(crate) subject: Option<RawLit>,
 	/// The reason for the conflict
 	/// This reason must result a conjunction that implies false
 	pub(crate) reason: Reason,
@@ -14,9 +20,9 @@ pub(crate) struct Conflict {
 
 impl Conflict {
 	/// Create a new conflict with the given reason
-	pub(crate) fn new(reason: &ReasonBuilder, prop: PropRef) -> Self {
+	pub(crate) fn new(subject: Option<RawLit>, reason: &ReasonBuilder, prop: PropRef) -> Self {
 		match Reason::build_reason(reason, prop) {
-			Ok(reason) => Self { reason },
+			Ok(reason) => Self { subject, reason },
 			Err(true) => panic!("constructing empty conflict"),
 			Err(false) => unreachable!("invalid reason"),
 		}

@@ -27,20 +27,27 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		match bv.0 {
 			BoolViewInner::Lit(lit) => match self.state.sat_trail.get(lit) {
 				Some(b) if b == val => Ok(()),
-				Some(_) => Err(Conflict::new(reason, self.prop)),
+				Some(_) => Err(Conflict::new(
+					Some(if val { lit } else { !lit }),
+					reason,
+					self.prop,
+				)),
 				None => {
 					let change = self
 						.state
 						.sat_trail
 						.assign(lit.var(), if lit.is_negated() { !val } else { val });
 					debug_assert_eq!(change, HasChanged::Changed);
-					self.prop_queue.push(if val { lit } else { !lit });
+					let propagated_lit = if val { lit } else { !lit };
+					self.state
+						.register_reason(propagated_lit, reason, self.prop);
+					self.prop_queue.push(propagated_lit);
 					Ok(())
 				}
 			},
 			BoolViewInner::Const(b) => {
 				if b != val {
-					Err(Conflict::new(reason, self.prop))
+					Err(Conflict::new(None, reason, self.prop))
 				} else {
 					Ok(())
 				}
@@ -68,7 +75,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 			IntViewInner::Bool { lit, .. } => self.propagate_bool_lin(lit, lit_req, reason),
 			IntViewInner::Const(i) => {
 				if i < val {
-					Err(Conflict::new(reason, self.prop))
+					Err(Conflict::new(None, reason, self.prop))
 				} else {
 					Ok(())
 				}
@@ -95,7 +102,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 			IntViewInner::Bool { lit, .. } => self.propagate_bool_lin(lit, lit_req, reason),
 			IntViewInner::Const(i) => {
 				if i > val {
-					Err(Conflict::new(reason, self.prop))
+					Err(Conflict::new(None, reason, self.prop))
 				} else {
 					Ok(())
 				}
@@ -115,7 +122,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 			if let Some(lit) = transformer.rev_transform_lit(lit_req) {
 				lit_req = lit;
 			} else {
-				return Err(Conflict::new(reason, self.prop));
+				return Err(Conflict::new(None, reason, self.prop));
 			}
 		}
 
@@ -126,7 +133,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 			IntViewInner::Bool { lit, .. } => self.propagate_bool_lin(lit, lit_req, reason),
 			IntViewInner::Const(i) => {
 				if i != val {
-					Err(Conflict::new(reason, self.prop))
+					Err(Conflict::new(None, reason, self.prop))
 				} else {
 					Ok(())
 				}
@@ -157,7 +164,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 			IntViewInner::Bool { lit, .. } => self.propagate_bool_lin(lit, lit_req, reason),
 			IntViewInner::Const(i) => {
 				if i == val {
-					Err(Conflict::new(reason, self.prop))
+					Err(Conflict::new(None, reason, self.prop))
 				} else {
 					Ok(())
 				}
@@ -220,7 +227,7 @@ impl PropagationContext<'_> {
 		let lit = match self.state.int_vars[iv].get_bool_lit(lit_req) {
 			BoolView(BoolViewInner::Lit(lit)) => lit,
 			BoolView(BoolViewInner::Const(false)) => {
-				return Err(Conflict::new(reason, self.prop));
+				return Err(Conflict::new(None, reason, self.prop));
 			}
 			_ => unreachable!(),
 		};
@@ -244,9 +251,9 @@ impl PropagationContext<'_> {
 			LitMeaning::Eq(1) | LitMeaning::GreaterEq(1) | LitMeaning::NotEq(0) => {
 				self.set_bool_val(BoolView(BoolViewInner::Lit(lit)), true, reason)
 			}
-			LitMeaning::Eq(_) => Err(Conflict::new(reason, self.prop)),
-			LitMeaning::GreaterEq(i) if i > 1 => Err(Conflict::new(reason, self.prop)),
-			LitMeaning::Less(i) if i < 0 => Err(Conflict::new(reason, self.prop)),
+			LitMeaning::Eq(_) => Err(Conflict::new(None, reason, self.prop)),
+			LitMeaning::GreaterEq(i) if i > 1 => Err(Conflict::new(None, reason, self.prop)),
+			LitMeaning::Less(i) if i < 0 => Err(Conflict::new(None, reason, self.prop)),
 			LitMeaning::NotEq(_) | LitMeaning::GreaterEq(_) | LitMeaning::Less(_) => Ok(()),
 		}
 	}
