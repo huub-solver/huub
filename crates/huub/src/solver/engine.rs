@@ -34,7 +34,7 @@ use crate::{
 	BoolView, Clause, Conjunction, IntVal, IntView,
 };
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct Engine {
 	/// Storage of the propagators
 	pub(crate) propagators: IndexVec<PropRef, Box<dyn Propagator>>,
@@ -130,10 +130,13 @@ impl IpasirPropagator for Engine {
 				state: &mut self.state,
 				prop_queue: Vec::new(),
 			};
-			if let Err(Conflict { reason }) = prop.propagate(&mut ctx) {
+			if let Err(Conflict { subject, reason }) = prop.propagate(&mut ctx) {
 				trace!(lits = ?reason, "conflict detected");
 				self.conflict_clauses
 					.push(reason.to_clause(&mut self.propagators, &mut self.state));
+				if let Some(subject) = subject {
+					self.conflict_clauses.last_mut().unwrap().push(subject);
+				}
 				return Vec::new();
 			} else if !ctx.prop_queue.is_empty() {
 				trace!(
@@ -402,7 +405,7 @@ impl ExplainActions for State {
 				}
 			}
 			IntViewInner::Bool { transformer, lit } => {
-				let val = self.sat_trail.get(lit).map(Into::into);
+				let val = self.sat_trail.get(lit).map(IntVal::from);
 				let lb = val.unwrap_or(0);
 				let ub = val.unwrap_or(1);
 				if transformer.positive_scale() {
