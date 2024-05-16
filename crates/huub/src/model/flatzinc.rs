@@ -138,7 +138,7 @@ impl Model {
 							.iter()
 							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
 							.collect();
-						prb += Constraint::ArrayIntElement(arr?, idx, val);
+						prb += Constraint::ArrayVarIntElement(arr?, idx, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_int_element",

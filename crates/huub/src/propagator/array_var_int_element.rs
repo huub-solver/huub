@@ -6,14 +6,14 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct ArrayIntElementBounds {
+pub(crate) struct ArrayVarIntElementBounds {
 	vars: Vec<IntView>,                // Variables to be selected
 	y: IntView,                        // The selected variable
 	idx: IntView,                      // Variable that stores the index of the selected variable
 	action_list: Vec<(u32, IntEvent)>, // List of x variables that have been modified since the last propagation
 }
 
-impl ArrayIntElementBounds {
+impl ArrayVarIntElementBounds {
 	pub(crate) fn new<V: Into<IntView>, VI: IntoIterator<Item = V>>(
 		vars: VI,
 		y: IntView,
@@ -30,7 +30,7 @@ impl ArrayIntElementBounds {
 	}
 }
 
-impl Propagator for ArrayIntElementBounds {
+impl Propagator for ArrayVarIntElementBounds {
 	fn initialize(&mut self, actions: &mut dyn InitializationActions) -> bool {
 		for (i, v) in self.vars.iter().enumerate() {
 			actions.subscribe_int(*v, IntEvent::Bounds, i as u32);
@@ -208,8 +208,8 @@ mod tests {
 	use pindakaas::{solver::cadical::Cadical, Cnf};
 
 	use crate::{
-		propagator::array_int_element::ArrayIntElementBounds, solver::engine::int_var::IntVar,
-		Constraint, Model, Solver,
+		propagator::array_var_int_element::ArrayVarIntElementBounds,
+		solver::engine::int_var::IntVar, Constraint, Model, Solver,
 	};
 
 	#[test]
@@ -221,7 +221,7 @@ mod tests {
 		let y = IntVar::new_in(&mut slv, RangeList::from_iter([3..=4]), true);
 		let idx = IntVar::new_in(&mut slv, RangeList::from_iter([0..=2]), true);
 
-		slv.add_propagator(ArrayIntElementBounds::new(vec![a, b, c], y, idx));
+		slv.add_propagator(ArrayVarIntElementBounds::new(vec![a, b, c], y, idx));
 		slv.expect_solutions(
 			&[idx, y, a, b, c],
 			expect![[r#"
@@ -253,7 +253,7 @@ mod tests {
 		let y = prb.new_int_var((1..=2).into());
 		let idx = prb.new_int_var((0..=2).into());
 
-		prb += Constraint::ArrayIntElement(vec![a, b, c], y, idx);
+		prb += Constraint::ArrayVarIntElement(vec![a, b, c], y, idx);
 		prb.assert_unsatisfiable();
 	}
 }

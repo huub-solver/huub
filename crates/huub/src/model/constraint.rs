@@ -11,8 +11,8 @@ use super::{
 use crate::{
 	propagator::{
 		all_different_int::AllDifferentIntValue,
-		array_int_element::ArrayIntElementBounds,
 		array_int_minimum::ArrayIntMinimumBounds,
+		array_var_int_element::ArrayVarIntElementBounds,
 		int_lin_le::{IntLinearLessEqBounds, IntLinearLessEqImpBounds},
 	},
 	solver::{view::BoolViewInner, SatSolver},
@@ -22,7 +22,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Constraint {
 	AllDifferentInt(Vec<IntView>),
-	ArrayIntElement(Vec<IntView>, IntView, IntView),
+	ArrayVarIntElement(Vec<IntView>, IntView, IntView),
 	ArrayIntMaximum(Vec<IntView>, IntView),
 	ArrayIntMinimum(Vec<IntView>, IntView),
 	IntLinEq(Vec<IntView>, IntVal),
@@ -185,14 +185,14 @@ impl Constraint {
 				slv.add_propagator(ArrayIntMinimumBounds::new(vars, y));
 				Ok(())
 			}
-			Constraint::ArrayIntElement(vars, idx, y) => {
+			Constraint::ArrayVarIntElement(vars, idx, y) => {
 				let vars: Vec<_> = vars
 					.iter()
 					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
 				let y = y.to_arg(ReifContext::Mixed, slv, map);
 				let idx = idx.to_arg(ReifContext::Mixed, slv, map);
-				slv.add_propagator(ArrayIntElementBounds::new(vars, y, idx));
+				slv.add_propagator(ArrayVarIntElementBounds::new(vars, y, idx));
 				Ok(())
 			}
 		}
@@ -257,7 +257,7 @@ impl Model {
 				}
 				Ok(())
 			}
-			Constraint::ArrayIntElement(args, y, idx) => {
+			Constraint::ArrayVarIntElement(args, y, idx) => {
 				// make sure idx is within the range of args
 				self.set_int_lower_bound(&idx, 0, con)?;
 				self.set_int_upper_bound(&idx, args.len() as IntVal, con)?;
@@ -293,7 +293,7 @@ impl Model {
 					self.int_vars[m.0 as usize].constraints.push(con);
 				}
 			}
-			Constraint::ArrayIntElement(args, y, idx) => {
+			Constraint::ArrayVarIntElement(args, y, idx) => {
 				for a in args {
 					if let IntView::Var(a) = a {
 						self.int_vars[a.0 as usize].constraints.push(con);
