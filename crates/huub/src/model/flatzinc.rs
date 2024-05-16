@@ -325,6 +325,32 @@ impl Model {
 						});
 					}
 				}
+				"int_lin_le_reif" => {
+					if let [coeffs, vars, rhs, reified] = c.args.as_slice() {
+						let coeffs: Vec<_> = arg_array(fzn, coeffs)?
+							.iter()
+							.map(|l| par_int(fzn, l))
+							.try_collect()?;
+						let vars: Vec<_> = arg_array(fzn, vars)?
+							.iter()
+							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
+							.try_collect()?;
+						let rhs = arg_par_int(fzn, rhs)?;
+						let reified = arg_bool(fzn, &mut prb, &mut map, reified)?;
+						let vars: Vec<IntView> = vars
+							.into_iter()
+							.zip(coeffs.into_iter())
+							.filter_map(|(x, c)| NonZeroIntVal::new(c).map(|c| x * c))
+							.collect();
+						prb += Constraint::ReifiedIntLinLessEq(vars, rhs, reified.into());
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "int_lin_le_reif",
+							found: c.args.len(),
+							expected: 3,
+						});
+					}
+				}
 				"int_max" | "int_min" => {
 					let is_maximum = c.id.deref() == "int_max";
 					if let [a, b, m] = c.args.as_slice() {

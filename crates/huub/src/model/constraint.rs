@@ -26,6 +26,7 @@ pub enum Constraint {
 	ArrayIntMinimum(Vec<IntView>, IntView),
 	IntLinEq(Vec<IntView>, IntVal),
 	IntLinLessEq(Vec<IntView>, IntVal),
+	ReifiedIntLinLessEq(Vec<IntView>, IntVal, BoolExpr),
 	PropLogic(BoolExpr),
 }
 
@@ -69,6 +70,15 @@ impl Constraint {
 					vars.into_iter().map(|v| -v).collect_vec(),
 					-c,
 				));
+				Ok(())
+			}
+			Constraint::ReifiedIntLinLessEq(vars, c, b) => {
+				let vars: Vec<_> = vars
+					.iter()
+					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
+					.collect();
+				let b = b.to_arg(ReifContext::Mixed, slv, map, None)?;
+				slv.add_propagator(LinearLE::new(vars, *c).reify(b));
 				Ok(())
 			}
 			Constraint::ArrayIntMinimum(vars, y) => {
