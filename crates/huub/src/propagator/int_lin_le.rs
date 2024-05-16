@@ -2,7 +2,7 @@ use pindakaas::Lit as RawLit;
 
 use super::{reason::ReasonBuilder, ExplainActions, InitializationActions, PropagationActions};
 use crate::{
-	helpers::static_option::OptField,
+	helpers::opt_field::OptField,
 	propagator::{conflict::Conflict, int_event::IntEvent, Propagator},
 	solver::{
 		engine::queue::PriorityLevel,
