@@ -295,7 +295,7 @@ impl Model {
 						});
 					}
 				}
-				"int_lin_le" | "int_lin_eq" => {
+				"int_lin_eq" | "int_lin_le" => {
 					let is_eq = c.id.deref() == "int_lin_eq";
 					if let [coeffs, vars, rhs] = c.args.as_slice() {
 						let coeffs: Vec<_> = arg_array(fzn, coeffs)?
@@ -325,7 +325,7 @@ impl Model {
 						});
 					}
 				}
-				"int_lin_le_reif" => {
+				"int_lin_eq_imp" | "int_lin_eq_reif" | "int_lin_le_imp" | "int_lin_le_reif" => {
 					if let [coeffs, vars, rhs, reified] = c.args.as_slice() {
 						let coeffs: Vec<_> = arg_array(fzn, coeffs)?
 							.iter()
@@ -342,12 +342,24 @@ impl Model {
 							.zip(coeffs.into_iter())
 							.filter_map(|(x, c)| NonZeroIntVal::new(c).map(|c| x * c))
 							.collect();
-						prb += Constraint::ReifiedIntLinLessEq(vars, rhs, reified.into());
+						prb += match c.id.deref() {
+							"int_lin_eq_imp" => Constraint::IntLinLessEqImp,
+							"int_lin_eq_reif" => Constraint::IntLinLessEqImp,
+							"int_lin_le_imp" => Constraint::IntLinLessEqImp,
+							"int_lin_le_reif" => Constraint::IntLinLessEqImp,
+							_ => unreachable!(),
+						}(vars, rhs, reified.into());
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
-							name: "int_lin_le_reif",
+							name: match c.id.deref() {
+								"int_lin_eq_imp" => "int_lin_eq_imp",
+								"int_lin_eq_reif" => "int_lin_eq_reif",
+								"int_lin_le_imp" => "int_lin_le_imp",
+								"int_lin_le_reif" => "int_lin_le_reif",
+								_ => unreachable!(),
+							},
 							found: c.args.len(),
-							expected: 3,
+							expected: 4,
 						});
 					}
 				}

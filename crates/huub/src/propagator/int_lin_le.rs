@@ -2,6 +2,7 @@ use pindakaas::Lit as RawLit;
 
 use super::{reason::ReasonBuilder, ExplainActions, InitializationActions, PropagationActions};
 use crate::{
+	helpers::static_option::OptField,
 	propagator::{conflict::Conflict, int_event::IntEvent, Propagator},
 	solver::{
 		engine::queue::PriorityLevel,
@@ -11,16 +12,18 @@ use crate::{
 	BoolView, Conjunction,
 };
 
-// todo: consider using template for reified version of linear propagation
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct LinearLE {
-	vars: Vec<IntView>,    // Variables in the linear inequality
-	rhs: IntVal,           // Lower bound of the linear inequality
-	reified: BoolView,     // Reified variable
+pub(crate) struct IntLinearLessEqBoundsImpl<const R: usize> {
+	vars: Vec<IntView>,           // Variables in the linear inequality
+	rhs: IntVal,                  // Lower bound of the linear inequality
+	reified: OptField<R, RawLit>, // Reified variable
 	action_list: Vec<u32>, // List of variables that have been modified since the last propagation
 }
 
-impl LinearLE {
+pub(crate) type IntLinearLessEqBounds = IntLinearLessEqBoundsImpl<0>;
+pub(crate) type IntLinearLessEqImpBounds = IntLinearLessEqBoundsImpl<1>;
+
+impl IntLinearLessEqBounds {
 	pub(crate) fn new<V: Into<IntView>, VI: IntoIterator<Item = V>>(
 		vars: VI,
 		mut max_sum: IntVal,
@@ -40,25 +43,47 @@ impl LinearLE {
 		Self {
 			vars: filtered_vars,
 			rhs: max_sum,
-			reified: BoolView(BoolViewInner::Const(true)),
+			reified: Default::default(),
 			action_list: Vec::new(),
 		}
 	}
+}
 
-	pub(crate) fn reify<B: Into<BoolView>>(mut self, reified: B) -> Self {
-		self.reified = reified.into();
-		self
+impl IntLinearLessEqImpBounds {
+	pub(crate) fn new<V: Into<IntView>, VI: IntoIterator<Item = V>>(
+		vars: VI,
+		mut max_sum: IntVal,
+		r: RawLit,
+	) -> Self {
+		let filtered_vars: Vec<IntView> = vars
+			.into_iter()
+			.filter_map(|v| {
+				let v = v.into();
+				if let IntViewInner::Const(c) = v.0 {
+					max_sum -= c;
+					None
+				} else {
+					Some(v)
+				}
+			})
+			.collect();
+		Self {
+			vars: filtered_vars,
+			rhs: max_sum,
+			reified: OptField::<1, RawLit>::new(r),
+			action_list: Vec::new(),
+		}
 	}
 }
 
-impl Propagator for LinearLE {
+impl<const B: usize> Propagator for IntLinearLessEqBoundsImpl<B> {
 	fn initialize(&mut self, actions: &mut dyn InitializationActions) -> bool {
 		for (i, v) in self.vars.iter().enumerate() {
 			actions.subscribe_int(*v, IntEvent::UpperBound, i as u32)
 		}
 
-		if let BoolView(BoolViewInner::Lit(_)) = self.reified {
-			actions.subscribe_bool(self.reified, self.vars.len() as u32)
+		if let Some(l) = self.reified.get() {
+			actions.subscribe_bool(BoolView(BoolViewInner::Lit(*l)), self.vars.len() as u32)
 		}
 
 		!self.action_list.is_empty()
@@ -79,9 +104,14 @@ impl Propagator for LinearLE {
 	// propagation rule: x[i] <= rhs - sum_{j != i} x[j].lower_bound
 	#[tracing::instrument(name = "int_lin_le", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
-		// if the reified variable is false, skip propagation
-		if !actions.get_bool_val(self.reified).unwrap_or(true) {
-			return Ok(());
+		// If the reified variable is false, skip propagation
+		if let Some(r) = self.reified.get() {
+			if !actions
+				.get_bool_val(BoolView(BoolViewInner::Lit(*r)))
+				.unwrap_or(true)
+			{
+				return Ok(());
+			}
 		}
 
 		// get the difference between the right-hand-side value and the sum of variable lower bounds
@@ -92,7 +122,7 @@ impl Propagator for LinearLE {
 			.fold(self.rhs, |sum, val| sum - val);
 
 		// propagate the reified variable if the sum of lower bounds is greater than the right-hand-side value
-		if let BoolView(BoolViewInner::Lit(lit)) = self.reified {
+		if let Some(r) = self.reified.get() {
 			if max_sum < 0 {
 				let clause = self
 					.vars
@@ -100,7 +130,7 @@ impl Propagator for LinearLE {
 					.map(|v| actions.get_int_lower_bound_lit(*v))
 					.collect();
 				actions.set_bool_val(
-					BoolView(BoolViewInner::Lit(lit)),
+					BoolView(BoolViewInner::Lit(*r)),
 					false,
 					&ReasonBuilder::Eager(clause),
 				)?
@@ -108,8 +138,13 @@ impl Propagator for LinearLE {
 		}
 
 		// skip the remaining propagation if the reified variable is not assigned to true
-		if !actions.get_bool_val(self.reified).unwrap_or(false) {
-			return Ok(());
+		if let Some(r) = self.reified.get() {
+			if !actions
+				.get_bool_val(BoolView(BoolViewInner::Lit(*r)))
+				.unwrap_or(false)
+			{
+				return Ok(());
+			}
 		}
 
 		// propagate the upper bound of the variables
@@ -138,8 +173,8 @@ impl Propagator for LinearLE {
 				}
 			})
 			.collect();
-		if let BoolView(BoolViewInner::Lit(lit)) = self.reified {
-			var_lits.push(lit)
+		if let Some(r) = self.reified.get() {
+			var_lits.push(*r)
 		}
 		var_lits
 	}
@@ -151,10 +186,8 @@ mod tests {
 	use flatzinc_serde::RangeList;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
 
-	use crate::{
-		propagator::int_lin_le::LinearLE, solver::engine::int_var::IntVar, Constraint, Model,
-		NonZeroIntVal, Solver,
-	};
+	use super::IntLinearLessEqBounds;
+	use crate::{solver::engine::int_var::IntVar, Constraint, Model, NonZeroIntVal, Solver};
 
 	#[test]
 	fn test_linear_le_sat() {
@@ -163,7 +196,7 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
-		slv.add_propagator(LinearLE::new(
+		slv.add_propagator(IntLinearLessEqBounds::new(
 			vec![a * NonZeroIntVal::new(2).unwrap(), b, c],
 			6,
 		));
@@ -186,7 +219,7 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 
-		slv.add_propagator(LinearLE::new(
+		slv.add_propagator(IntLinearLessEqBounds::new(
 			vec![a * NonZeroIntVal::new(2).unwrap(), b, c],
 			3,
 		));
@@ -200,7 +233,7 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
-		slv.add_propagator(LinearLE::new(
+		slv.add_propagator(IntLinearLessEqBounds::new(
 			vec![a * NonZeroIntVal::new(-2).unwrap(), -b, -c],
 			-6,
 		));
@@ -222,7 +255,7 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
-		slv.add_propagator(LinearLE::new(
+		slv.add_propagator(IntLinearLessEqBounds::new(
 			vec![a * NonZeroIntVal::new(-2).unwrap(), -b, -c],
 			-10,
 		));
@@ -237,7 +270,7 @@ mod tests {
 		let b = prb.new_int_var((1..=2).into());
 		let c = prb.new_int_var((1..=2).into());
 
-		prb += Constraint::ReifiedIntLinLessEq(
+		prb += Constraint::IntLinLessEqImp(
 			vec![
 				a.clone() * NonZeroIntVal::new(2).unwrap(),
 				b.clone(),
@@ -276,7 +309,7 @@ mod tests {
 		let b = prb.new_int_var((1..=2).into());
 		let c = prb.new_int_var((1..=2).into());
 
-		prb += Constraint::ReifiedIntLinLessEq(
+		prb += Constraint::IntLinLessEqImp(
 			vec![
 				a.clone() * NonZeroIntVal::new(-2).unwrap(),
 				-b.clone(),
