@@ -1,7 +1,7 @@
 {
   "name" : "Huub",
   "version": "0.1.0",
-  "id": "dev.minizinc.huub",
+  "id": "one.dekker.huub",
   "inputType": "JSON",
   "executable": "./target/debug/fzn-huub",
   "mznlib": "./share/minizinc/huub/",
