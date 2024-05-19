@@ -112,8 +112,11 @@ impl Model {
 				*def.domain.lower_bound().unwrap()
 			}
 			IntView::Const(v) => v,
-			IntView::Linear(_, _) => todo!(),
-			IntView::Bool(_, _) => todo!(),
+			IntView::Linear(t, v) => {
+				let def = &self.int_vars[v.0 as usize];
+				t.transform(*def.domain.lower_bound().unwrap())
+			}
+			IntView::Bool(t, _) => t.transform(0),
 		}
 	}
 
@@ -124,8 +127,11 @@ impl Model {
 				*def.domain.upper_bound().unwrap()
 			}
 			IntView::Const(v) => v,
-			IntView::Linear(_, _) => todo!(),
-			IntView::Bool(_, _) => todo!(),
+			IntView::Linear(t, v) => {
+				let def = &self.int_vars[v.0 as usize];
+				t.transform(*def.domain.upper_bound().unwrap())
+			}
+			IntView::Bool(t, _) => t.transform(1),
 		}
 	}
 

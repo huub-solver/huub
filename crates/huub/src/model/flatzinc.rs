@@ -129,7 +129,7 @@ impl Model {
 						});
 					}
 				}
-				"array_int_element" => {
+				"array_var_int_element" => {
 					if let [idx, arr, val] = c.args.as_slice() {
 						let arr = arg_array(fzn, arr)?;
 						let idx = arg_int(fzn, &mut prb, &mut map, idx)?;
@@ -290,6 +290,41 @@ impl Model {
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_clause_reif",
+							found: c.args.len(),
+							expected: 3,
+						});
+					}
+				}
+				"int_le" => {
+					if let [a, b] = c.args.as_slice() {
+						let a = arg_int(fzn, &mut prb, &mut map, a)?;
+						let b = arg_int(fzn, &mut prb, &mut map, b)?;
+						prb += Constraint::IntLinLessEq(vec![a, -b], 0);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "int_le",
+							found: c.args.len(),
+							expected: 2,
+						});
+					}
+				}
+				"int_le_imp" | "int_le_reif" => {
+					if let [a, b, r] = c.args.as_slice() {
+						let a = arg_int(fzn, &mut prb, &mut map, a)?;
+						let b = arg_int(fzn, &mut prb, &mut map, b)?;
+						let r = arg_bool(fzn, &mut prb, &mut map, r)?;
+						prb += match c.id.deref() {
+							"int_le_imp" => Constraint::IntLinLessEqImp,
+							"int_le_reif" => Constraint::IntLinLessEqReif,
+							_ => unreachable!(),
+						}(vec![a, -b], 0, r.into());
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: match c.id.deref() {
+								"int_le_imp" => "int_le_imp",
+								"int_le_reif" => "int_le_reif",
+								_ => unreachable!(),
+							},
 							found: c.args.len(),
 							expected: 3,
 						});
