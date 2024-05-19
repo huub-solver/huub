@@ -181,7 +181,7 @@ impl Model {
 		match *iv {
 			IntView::Var(v) => {
 				let def = &mut self.int_vars[v.0 as usize];
-				if ub >= *def.domain.lower_bound().unwrap() {
+				if ub >= *def.domain.upper_bound().unwrap() {
 					return Ok(());
 				} else if ub < *def.domain.lower_bound().unwrap() {
 					return Err(ReformulationError::TrivialUnsatisfiable);

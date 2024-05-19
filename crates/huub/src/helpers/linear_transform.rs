@@ -1,5 +1,6 @@
 use std::ops::{Add, Mul, Neg};
 
+use super::div_ceil;
 use crate::{IntVal, LitMeaning, NonZeroIntVal};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -86,11 +87,6 @@ impl LinearTransform {
 			))),
 		}
 	}
-}
-
-#[inline]
-fn div_ceil(a: IntVal, b: NonZeroIntVal) -> IntVal {
-	a / b.get() + (0 != a % b.get()) as IntVal
 }
 
 impl Neg for LinearTransform {

@@ -382,6 +382,20 @@ impl Model {
 						});
 					}
 				}
+				"int_times" => {
+					if let [x, y, z] = c.args.as_slice() {
+						let a = arg_int(fzn, &mut prb, &mut map, x)?;
+						let b = arg_int(fzn, &mut prb, &mut map, y)?;
+						let m = arg_int(fzn, &mut prb, &mut map, z)?;
+						prb += Constraint::IntTimes(a, b, m);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "int_times",
+							found: c.args.len(),
+							expected: 3,
+						});
+					}
+				}
 				_ => return Err(FlatZincError::UnknownConstraint(c.id.to_string())),
 			}
 		}

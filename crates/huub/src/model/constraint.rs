@@ -9,14 +9,16 @@ use super::{
 	reformulate::{ReifContext, VariableMap},
 };
 use crate::{
+	helpers::{div_ceil, div_floor},
 	propagator::{
 		all_different_int::AllDifferentIntValue,
 		array_int_minimum::ArrayIntMinimumBounds,
 		array_var_int_element::ArrayVarIntElementBounds,
 		int_lin_le::{IntLinearLessEqBounds, IntLinearLessEqImpBounds},
+		int_times::IntTimesBounds,
 	},
 	solver::{view::BoolViewInner, SatSolver},
-	BoolExpr, IntVal, Model, ReformulationError, Solver,
+	BoolExpr, IntVal, Model, NonZeroIntVal, ReformulationError, Solver,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -31,6 +33,7 @@ pub enum Constraint {
 	IntLinLessEq(Vec<IntView>, IntVal),
 	IntLinLessEqImp(Vec<IntView>, IntVal, BoolExpr),
 	IntLinLessEqReif(Vec<IntView>, IntVal, BoolExpr),
+	IntTimes(IntView, IntView, IntView),
 	PropLogic(BoolExpr),
 }
 
@@ -195,6 +198,13 @@ impl Constraint {
 				slv.add_propagator(ArrayVarIntElementBounds::new(vars, y, idx));
 				Ok(())
 			}
+			Constraint::IntTimes(x, y, z) => {
+				let x = x.to_arg(ReifContext::Mixed, slv, map);
+				let y = y.to_arg(ReifContext::Mixed, slv, map);
+				let z = z.to_arg(ReifContext::Mixed, slv, map);
+				slv.add_propagator(IntTimesBounds::new(x, y, z));
+				Ok(())
+			}
 		}
 	}
 }
@@ -275,6 +285,66 @@ impl Model {
 				if max_ub < self.get_int_upper_bound(&y) {
 					self.set_int_upper_bound(&y, max_ub, con)?;
 				}
+				Ok(())
+			}
+			Constraint::IntTimes(x, y, z) => {
+				let x_lb = self.get_int_lower_bound(&x);
+				let x_ub = self.get_int_upper_bound(&x);
+				let y_lb = self.get_int_lower_bound(&y);
+				let y_ub = self.get_int_upper_bound(&y);
+				let z_lb = self.get_int_lower_bound(&z);
+				let z_ub = self.get_int_upper_bound(&z);
+
+				let bounds = [x_lb * y_lb, x_lb * y_ub, x_ub * y_lb, x_ub * y_ub];
+				self.set_int_lower_bound(&z, *bounds.iter().min().unwrap(), con)?;
+				self.set_int_upper_bound(&z, *bounds.iter().max().unwrap(), con)?;
+
+				if y_lb > 0 || y_ub < 0 {
+					let bounds = [(z_lb, y_lb), (z_lb, y_ub), (z_ub, y_lb), (z_ub, y_ub)];
+					let min = bounds
+						.iter()
+						.filter_map(|(z, y)| {
+							let y = NonZeroIntVal::new(*y)?;
+							Some(div_ceil(*z, y))
+						})
+						.min()
+						.unwrap();
+					self.set_int_lower_bound(&x, min, con)?;
+
+					let max = bounds
+						.iter()
+						.filter_map(|(z, y)| {
+							let y = NonZeroIntVal::new(*y)?;
+							Some(div_floor(*z, y))
+						})
+						.max()
+						.unwrap();
+					self.set_int_upper_bound(&x, max, con)?;
+				}
+
+				if x_lb > 0 || x_ub < 0 {
+					let bounds = [(z_lb, x_lb), (z_lb, x_ub), (z_ub, x_lb), (z_ub, x_ub)];
+					let min = bounds
+						.iter()
+						.filter_map(|(z, x)| {
+							let x = NonZeroIntVal::new(*x)?;
+							Some(div_ceil(*z, x))
+						})
+						.min()
+						.unwrap();
+					self.set_int_lower_bound(&y, min, con)?;
+
+					let max = bounds
+						.iter()
+						.filter_map(|(z, x)| {
+							let x = NonZeroIntVal::new(*x)?;
+							Some(div_floor(*z, x))
+						})
+						.max()
+						.unwrap();
+					self.set_int_upper_bound(&y, max, con)?;
+				}
+
 				Ok(())
 			}
 			_ => Ok(()),

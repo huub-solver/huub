@@ -4,6 +4,7 @@ pub(crate) mod array_var_int_element;
 pub(crate) mod conflict;
 pub(crate) mod int_event;
 pub(crate) mod int_lin_le;
+pub(crate) mod int_times;
 pub(crate) mod reason;
 
 use std::fmt::Debug;
@@ -16,7 +17,7 @@ use crate::{
 
 pub(crate) trait Propagator: Debug + DynPropClone {
 	/// The method called when registering a propagator with the solver, the method
-	/// returns true when the propagator needs to be enqued immediately.œ
+	/// returns true when the propagator needs to be enqued immediately.
 	///
 	/// This method is generally used to register variable event
 	/// subscriptions with the solver.
