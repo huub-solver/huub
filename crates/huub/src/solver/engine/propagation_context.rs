@@ -227,18 +227,9 @@ impl PropagationContext<'_> {
 			return Ok(());
 		}
 		trace!(int_var = usize::from(iv), effect = ?lit_req, "propagate int");
-		let lit = match self.state.int_vars[iv].get_bool_lit(lit_req) {
-			BoolView(BoolViewInner::Lit(lit)) => lit,
-			BoolView(BoolViewInner::Const(false)) => {
-				return Err(Conflict::new(None, reason, self.prop));
-			}
-			_ => unreachable!(),
-		};
-		self.state.register_reason(lit, reason, self.prop);
-		self.prop_queue.push(lit);
-		// TODO: Update domain
-		// TODO: Check conflict
-		Ok(())
+		// TODO: Update domain??
+		let bv = self.state.int_vars[iv].get_bool_lit(lit_req);
+		self.set_bool_val(bv, true, reason)
 	}
 
 	pub(crate) fn propagate_bool_lin(

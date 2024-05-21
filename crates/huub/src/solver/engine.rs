@@ -11,7 +11,7 @@ use pindakaas::{
 	solver::{Propagator as IpasirPropagator, SolvingActions},
 	Lit as RawLit, Var as RawVar,
 };
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 
 use self::{
 	bool_to_int::BoolToIntMap,
@@ -49,15 +49,16 @@ pub(crate) struct Engine {
 
 impl IpasirPropagator for Engine {
 	fn notify_assignment(&mut self, lit: RawLit, persistent: bool) {
+		trace!(lit = i32::from(lit), persistent, "assignment");
+		// Process Boolean assignment
+		if persistent && self.state.decision_level() != 0 {
+			// Note that the assignment
+			self.persistent.push(lit)
+		}
 		if self.state.sat_trail.assign(lit.var(), !lit.is_negated()) == HasChanged::NoChange {
 			return;
 		}
-		trace!(lit = i32::from(lit), persistent, "assignment");
 
-		// Process Boolean assignment
-		if persistent && self.state.decision_level() != 0 {
-			self.persistent.push(lit)
-		}
 		self.notify_propagators(lit, None);
 	}
 
@@ -91,7 +92,7 @@ impl IpasirPropagator for Engine {
 		None
 	}
 
-	#[tracing::instrument(level = "debug", skip(self, _slv))]
+	#[tracing::instrument(level = "debug", skip(self, _slv), fields(level = self.state.decision_level()))]
 	fn propagate(&mut self, _slv: &mut dyn SolvingActions) -> Vec<pindakaas::Lit> {
 		if self.has_conflict() {
 			return Vec::new();
@@ -123,6 +124,29 @@ impl IpasirPropagator for Engine {
 				);
 				for lit in queue.iter() {
 					self.notify_propagators(*lit, None);
+				}
+				// Debug helper to ensure that any reason is based on known true literals
+				#[cfg(debug_assertions)]
+				{
+					for lit in queue.iter() {
+						if let Some(reason) = self.state.reason_map.get(lit).cloned() {
+							let clause: Vec<_> =
+								reason.to_clause(&mut self.propagators, &mut self.state);
+							for l in &clause {
+								let val = self.state.sat_trail.get(!l);
+								if !val.unwrap_or(false) {
+									error!(lit_prop = i32::from(*lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
+								}
+								debug_assert!(
+									val.unwrap_or(false),
+									"Literal {} in Reason for {} is {:?}, but should be known true",
+									!l,
+									lit,
+									val
+								);
+							}
+						}
+					}
 				}
 				return queue;
 			}

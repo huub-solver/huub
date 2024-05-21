@@ -103,7 +103,7 @@ impl<'a, V> LitNames<'a, V> {
 impl<'a, V: Visit> LitNames<'a, V> {
 	#[inline]
 	fn check_lit(&mut self, field: &Field, value: i64) -> bool {
-		if matches!(field.name(), "lit" | "bool_var") {
+		if field.name().starts_with("lit") | field.name().starts_with("bool_var") {
 			if let Some(name) = self
 				.lit_reverse_map
 				.get(&NonZeroI32::new(value as i32).unwrap())
@@ -118,7 +118,7 @@ impl<'a, V: Visit> LitNames<'a, V> {
 
 	#[inline]
 	fn check_int_var(&mut self, field: &Field, value: u64) -> bool {
-		if matches!(field.name(), "int_var") {
+		if field.name().starts_with("int_var") {
 			if let Some(name) = self.int_reverse_map.get(value as usize) {
 				self.inner.record_str(field, name);
 				return true;
@@ -129,7 +129,7 @@ impl<'a, V: Visit> LitNames<'a, V> {
 
 	#[inline]
 	fn check_clause(&mut self, field: &Field, value: &dyn fmt::Debug) -> bool {
-		if matches!(field.name(), "clause" | "lits") {
+		if field.name().starts_with("clause") || field.name().starts_with("lits") {
 			let res: Result<Vec<i32>, _> = serde_json::from_str(&format!("{:?}", value));
 			if let Ok(clause) = res {
 				let mut v: Vec<String> = Vec::with_capacity(clause.len());
@@ -153,7 +153,7 @@ impl<'a, V: Visit> LitNames<'a, V> {
 
 	#[inline]
 	fn check_int_vars(&mut self, field: &Field, value: &dyn fmt::Debug) -> bool {
-		if matches!(field.name(), "int_vars") {
+		if field.name().starts_with("int_vars") {
 			let res: Result<Vec<usize>, _> = serde_json::from_str(&format!("{:?}", value));
 			if let Ok(vars) = res {
 				let mut v: Vec<String> = Vec::with_capacity(vars.len());

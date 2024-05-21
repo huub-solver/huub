@@ -173,7 +173,56 @@ impl Model {
 					Ok(())
 				}
 			}
-			IntView::Linear(_, _) => todo!(),
+			IntView::Linear(t, x) => {
+				let def = &mut self.int_vars[x.0 as usize];
+				if t.positive_scale() {
+					let new_lb = t.rev_transform(lb);
+					if new_lb > *def.domain.upper_bound().unwrap() {
+						return Err(ReformulationError::TrivialUnsatisfiable);
+					} else if new_lb <= *def.domain.lower_bound().unwrap() {
+						return Ok(());
+					}
+					def.domain = RangeList::from_iter(def.domain.iter().filter_map(|r| {
+						if *r.end() < new_lb {
+							None
+						} else if *r.start() < new_lb {
+							Some(new_lb..=*r.end())
+						} else {
+							Some(r)
+						}
+					}));
+					let constraints = def.constraints.clone();
+					for c in constraints {
+						if c != con {
+							self.enqueue(c);
+						}
+					}
+					Ok(())
+				} else {
+					let new_ub = t.rev_transform(lb);
+					if new_ub < *def.domain.lower_bound().unwrap() {
+						return Err(ReformulationError::TrivialUnsatisfiable);
+					} else if new_ub >= *def.domain.upper_bound().unwrap() {
+						return Ok(());
+					}
+					def.domain = RangeList::from_iter(def.domain.iter().filter_map(|r| {
+						if *r.end() < new_ub {
+							None
+						} else if *r.start() < new_ub {
+							Some(new_ub..=*r.end())
+						} else {
+							Some(r)
+						}
+					}));
+					let constraints = def.constraints.clone();
+					for c in constraints {
+						if c != con {
+							self.enqueue(c);
+						}
+					}
+					Ok(())
+				}
+			}
 			IntView::Bool(_, _) => todo!(),
 		}
 	}
@@ -216,7 +265,56 @@ impl Model {
 					Ok(())
 				}
 			}
-			IntView::Linear(_, _) => todo!(),
+			IntView::Linear(t, x) => {
+				let def = &mut self.int_vars[x.0 as usize];
+				if t.positive_scale() {
+					let new_ub = t.rev_transform(ub);
+					if new_ub < *def.domain.lower_bound().unwrap() {
+						return Err(ReformulationError::TrivialUnsatisfiable);
+					} else if new_ub >= *def.domain.upper_bound().unwrap() {
+						return Ok(());
+					}
+					def.domain = RangeList::from_iter(def.domain.iter().filter_map(|r| {
+						if new_ub < *r.start() {
+							None
+						} else if new_ub < *r.end() {
+							Some(*r.start()..=new_ub)
+						} else {
+							Some(r)
+						}
+					}));
+					let constraints = def.constraints.clone();
+					for c in constraints {
+						if c != con {
+							self.enqueue(c);
+						}
+					}
+					Ok(())
+				} else {
+					let new_lb = t.rev_transform(ub);
+					if new_lb > *def.domain.upper_bound().unwrap() {
+						return Err(ReformulationError::TrivialUnsatisfiable);
+					} else if new_lb <= *def.domain.lower_bound().unwrap() {
+						return Ok(());
+					}
+					def.domain = RangeList::from_iter(def.domain.iter().filter_map(|r| {
+						if new_lb > *r.end() {
+							None
+						} else if new_lb > *r.start() {
+							Some(*r.start()..=new_lb)
+						} else {
+							Some(r)
+						}
+					}));
+					let constraints = def.constraints.clone();
+					for c in constraints {
+						if c != con {
+							self.enqueue(c);
+						}
+					}
+					Ok(())
+				}
+			}
 			IntView::Bool(_, _) => todo!(),
 		}
 	}
