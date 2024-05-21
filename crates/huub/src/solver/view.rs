@@ -89,6 +89,12 @@ impl Not for &BoolView {
 	}
 }
 
+impl From<bool> for BoolView {
+	fn from(value: bool) -> Self {
+		BoolView(BoolViewInner::Const(value))
+	}
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IntView(pub(crate) IntViewInner);
 

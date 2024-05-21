@@ -9,12 +9,12 @@ fn it_works() {
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
 
-	prb += BoolExpr::Or(vec![(!a).into(), (!b).into()]);
-	prb += BoolExpr::Or(vec![a.into(), b.into()]);
+	prb += BoolExpr::Or(vec![(!a.clone()).into(), (!b.clone()).into()]);
+	prb += BoolExpr::Or(vec![a.clone().into(), b.clone().into()]);
 
 	let (mut slv, map): (Solver, _) = prb.to_solver().unwrap();
-	let a = map.get_bool(a);
-	let b = map.get_bool(b);
+	let a = map.get_bool(&slv, &a);
+	let b = map.get_bool(&slv, &b);
 
 	assert_eq!(
 		slv.solve(|value| {

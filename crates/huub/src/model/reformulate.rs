@@ -1,12 +1,19 @@
 use std::{collections::HashMap, ops::Not};
 
-use pindakaas::Var as RawVar;
+use pindakaas::{
+	solver::{PropagatorAccess, Solver as SolverTrait},
+	Valuation as SatValuation, Var as RawVar,
+};
 use thiserror::Error;
 
 use super::{bool, int, int::IntVar, ModelView};
 use crate::{
-	solver::view::{BoolView, BoolViewInner, SolverView},
-	IntView,
+	propagator::ExplainActions,
+	solver::{
+		view::{BoolView, BoolViewInner, IntViewInner, SolverView},
+		SatSolver,
+	},
+	IntVal, IntView, LitMeaning, Solver,
 };
 
 /// A reformulation mapping helper that automatically maps variables to
@@ -18,58 +25,82 @@ pub struct VariableMap {
 }
 
 impl VariableMap {
-	pub fn get(&self, index: &ModelView) -> SolverView {
-		let i =
-			match index {
-				ModelView::Bool(bool::BoolView::Const(l)) => {
-					return SolverView::Bool(BoolView(BoolViewInner::Const(*l)))
-				}
-				ModelView::Bool(bool::BoolView::Lit(l))
-				| ModelView::Int(int::IntView::Bool(_, l)) => Variable::Bool(l.var()),
-				ModelView::Int(int::IntView::Const(v)) => return SolverView::Int((*v).into()),
-				ModelView::Int(int::IntView::Var(v))
-				| ModelView::Int(int::IntView::Linear(_, v)) => Variable::Int(*v),
-			};
-
-		let view = self.map.get(&i).cloned().unwrap_or_else(|| match i {
-			Variable::Bool(x) => SolverView::Bool(BoolView(BoolViewInner::Lit(x.into()))),
-			Variable::Int(_) => unreachable!(),
-		});
+	pub fn get<Sat, Sol>(&self, slv: &Solver<Sat>, index: &ModelView) -> SolverView
+	where
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	{
 		match index {
-			ModelView::Bool(bool::BoolView::Lit(l)) if l.is_negated() => {
-				let SolverView::Bool(bv) = view else {
-					unreachable!()
-				};
-				SolverView::Bool(!bv)
-			}
-			ModelView::Int(int::IntView::Bool(t, _)) => {
-				let SolverView::Bool(bv) = view else {
-					unreachable!()
-				};
-				SolverView::Int(IntView::from(bv) * t.scale + t.offset)
-			}
-			ModelView::Int(int::IntView::Linear(t, _)) => {
-				let SolverView::Int(iv) = view else {
-					unreachable!()
-				};
-				SolverView::Int(iv * t.scale + t.offset)
-			}
-			_ => view,
+			ModelView::Bool(b) => SolverView::Bool(self.get_bool(slv, b)),
+			ModelView::Int(i) => SolverView::Int(self.get_int(slv, i)),
 		}
 	}
 
-	pub fn get_bool(&self, bv: bool::BoolView) -> BoolView {
-		let SolverView::Bool(v) = self.get(&ModelView::Bool(bv)) else {
-			unreachable!()
+	pub fn get_bool<Sat, Sol>(&self, slv: &Solver<Sat>, bv: &bool::BoolView) -> BoolView
+	where
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	{
+		let get_int_lit = |slv: &Solver<Sat>, iv: &int::IntView, lit_meaning: LitMeaning| {
+			let iv = self.get_int(slv, iv);
+			slv.engine().state.get_int_lit(iv, lit_meaning)
 		};
-		v
+
+		match bv {
+			bool::BoolView::Lit(l) => {
+				let SolverView::Bool(bv) = self
+					.map
+					.get(&Variable::Bool(l.var()))
+					.cloned()
+					.unwrap_or_else(|| {
+						SolverView::Bool(BoolView(BoolViewInner::Lit(l.var().into())))
+					})
+				else {
+					unreachable!()
+				};
+				if l.is_negated() {
+					!bv
+				} else {
+					bv
+				}
+			}
+			bool::BoolView::Const(c) => (*c).into(),
+			bool::BoolView::IntEq(v, i) => get_int_lit(slv, v, LitMeaning::Eq(*i)),
+			bool::BoolView::IntGreater(v, i) => get_int_lit(slv, v, LitMeaning::GreaterEq(i + 1)),
+			bool::BoolView::IntGreaterEq(v, i) => get_int_lit(slv, v, LitMeaning::GreaterEq(*i)),
+			bool::BoolView::IntLess(v, i) => get_int_lit(slv, v, LitMeaning::Less(*i)),
+			bool::BoolView::IntLessEq(v, i) => get_int_lit(slv, v, LitMeaning::Less(i - 1)),
+			bool::BoolView::IntNotEq(v, i) => get_int_lit(slv, v, LitMeaning::NotEq(*i)),
+		}
 	}
 
-	pub fn get_int(&self, iv: &int::IntView) -> IntView {
-		let SolverView::Int(v) = self.get(&ModelView::Int(iv.clone())) else {
-			unreachable!()
+	pub fn get_int<Sat, Sol>(&self, slv: &Solver<Sat>, iv: &int::IntView) -> IntView
+	where
+		Sol: PropagatorAccess + SatValuation,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	{
+		let get_int_var = |v: &IntVar| {
+			let SolverView::Int(i) = self.map.get(&Variable::Int(*v)).cloned().unwrap() else {
+				unreachable!()
+			};
+			i
 		};
-		v
+
+		match iv {
+			int::IntView::Var(i) => get_int_var(i),
+			int::IntView::Const(c) => (*c).into(),
+			int::IntView::Linear(t, i) => get_int_var(i) * t.scale + t.offset,
+			int::IntView::Bool(t, bv) => {
+				let bv = self.get_bool(slv, bv);
+				match bv.0 {
+					BoolViewInner::Lit(lit) => IntView(IntViewInner::Bool {
+						transformer: *t,
+						lit,
+					}),
+					BoolViewInner::Const(b) => t.transform(b as IntVal).into(),
+				}
+			}
+		}
 	}
 
 	pub(crate) fn insert_int(&mut self, index: IntVar, elem: IntView) {

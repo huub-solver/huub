@@ -277,13 +277,13 @@ mod tests {
 				c.clone(),
 			],
 			5,
-			r.into(),
+			r.clone().into(),
 		);
 		let (mut slv, map): (Solver, _) = prb.to_solver().unwrap();
-		let a = map.get(&a.into());
-		let b = map.get(&b.into());
-		let c = map.get(&c.into());
-		let r = map.get(&r.into());
+		let a = map.get(&slv, &a.into());
+		let b = map.get(&slv, &b.into());
+		let c = map.get(&slv, &c.into());
+		let r = map.get(&slv, &r.into());
 		slv.expect_solutions(
 			&[r, a, b, c],
 			expect![[r#"
@@ -316,13 +316,13 @@ mod tests {
 				-c.clone(),
 			],
 			-7,
-			r.into(),
+			r.clone().into(),
 		);
 		let (mut slv, map): (Solver, _) = prb.to_solver().unwrap();
-		let a = map.get(&a.into());
-		let b = map.get(&b.into());
-		let c = map.get(&c.into());
-		let r = map.get(&r.into());
+		let a = map.get(&slv, &a.into());
+		let b = map.get(&slv, &b.into());
+		let c = map.get(&slv, &c.into());
+		let r = map.get(&slv, &r.into());
 		slv.expect_solutions(
 			&[r, a, b, c],
 			expect![[r#"

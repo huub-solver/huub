@@ -133,7 +133,7 @@ mod tests {
 		let (mut slv, map) = prb.to_solver().unwrap();
 		let vars = vec![a, b, c, y]
 			.into_iter()
-			.map(|x| map.get(&ModelView::from(x)))
+			.map(|x| map.get(&slv, &ModelView::from(x)))
 			.collect_vec();
 		slv.expect_solutions(
 			&vars,

@@ -473,7 +473,10 @@ where
 	) -> Result<(Self, BTreeMap<S, SolverView>), FlatZincError> {
 		let (mut prb, map) = Model::from_fzn(fzn)?;
 		let (slv, remap) = prb.to_solver()?;
-		let map = map.into_iter().map(|(k, v)| (k, remap.get(&v))).collect();
+		let map = map
+			.into_iter()
+			.map(|(k, v)| (k, remap.get(&slv, &v)))
+			.collect();
 		Ok((slv, map))
 	}
 }
@@ -548,7 +551,7 @@ fn lit_bool<S: Ord + Deref<Target = str> + Clone + Debug>(
 					else {
 						unreachable!()
 					};
-					Ok(*ret)
+					Ok(ret.clone())
 				} else {
 					Err(FlatZincError::InvalidArgumentType {
 						expected: "bool",

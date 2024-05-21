@@ -5,13 +5,16 @@ use pindakaas::{
 	Formula, Lit as RawLit, TseitinEncoder, Valuation as SatValuation,
 };
 
-use super::reformulate::{ReformulationError, ReifContext, VariableMap};
+use super::{
+	int,
+	reformulate::{ReformulationError, ReifContext, VariableMap},
+};
 use crate::{
 	solver::{
 		view::{self, BoolViewInner},
 		SatSolver,
 	},
-	Solver,
+	IntVal, Solver,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -42,7 +45,7 @@ impl BoolExpr {
 	{
 		match self {
 			BoolExpr::View(bv) => {
-				let v = map.get_bool(*bv);
+				let v = map.get_bool(slv, bv);
 				match v.0 {
 					BoolViewInner::Const(true) => Ok(()),
 					BoolViewInner::Const(false) => Err(ReformulationError::TrivialUnsatisfiable),
@@ -109,7 +112,7 @@ impl BoolExpr {
 				// Try and find some constant or literal to start binding to
 				let mut res = es.iter().find_map(|e| {
 					if let BoolExpr::View(b) = e {
-						Some(map.get_bool(*b))
+						Some(map.get_bool(slv, b))
 					} else {
 						None
 					}
@@ -197,7 +200,7 @@ impl BoolExpr {
 			Ok(view::BoolView(BoolViewInner::Const(val)))
 		};
 		match self {
-			BoolExpr::View(v) => Ok(map.get_bool(*v)),
+			BoolExpr::View(v) => Ok(map.get_bool(slv, v)),
 			BoolExpr::Not(b) => b.to_negated_arg(ctx, slv, map, name),
 			BoolExpr::Or(es) => {
 				let mut lits = Vec::with_capacity(es.len());
@@ -344,7 +347,7 @@ impl BoolExpr {
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 	{
 		match self {
-			BoolExpr::View(v) => Ok(!map.get_bool(*v)),
+			BoolExpr::View(v) => Ok(!map.get_bool(slv, v)),
 			BoolExpr::Not(v) => v.to_arg(!ctx, slv, map, name),
 			BoolExpr::Or(_)
 			| BoolExpr::And(_)
@@ -395,15 +398,21 @@ impl From<BoolView> for BoolExpr {
 }
 impl From<&BoolView> for BoolExpr {
 	fn from(v: &BoolView) -> Self {
-		Self::View(*v)
+		Self::View(v.clone())
 	}
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[allow(variant_size_differences)]
 pub enum BoolView {
 	Lit(RawLit),
 	Const(bool),
+	IntEq(Box<int::IntView>, IntVal),
+	IntGreater(Box<int::IntView>, IntVal),
+	IntGreaterEq(Box<int::IntView>, IntVal),
+	IntLess(Box<int::IntView>, IntVal),
+	IntLessEq(Box<int::IntView>, IntVal),
+	IntNotEq(Box<int::IntView>, IntVal),
 }
 
 impl Not for BoolView {
@@ -412,6 +421,12 @@ impl Not for BoolView {
 		match self {
 			BoolView::Lit(l) => BoolView::Lit(!l),
 			BoolView::Const(b) => BoolView::Const(!b),
+			BoolView::IntEq(v, i) => BoolView::IntNotEq(v, i),
+			BoolView::IntGreater(v, i) => BoolView::IntLessEq(v, i),
+			BoolView::IntGreaterEq(v, i) => BoolView::IntLess(v, i),
+			BoolView::IntLess(v, i) => BoolView::IntGreaterEq(v, i),
+			BoolView::IntLessEq(v, i) => BoolView::IntGreater(v, i),
+			BoolView::IntNotEq(v, i) => BoolView::IntEq(v, i),
 		}
 	}
 }
@@ -419,7 +434,7 @@ impl Not for BoolView {
 impl Not for &BoolView {
 	type Output = BoolView;
 	fn not(self) -> Self::Output {
-		!*self
+		!(self.clone())
 	}
 }
 
@@ -436,17 +451,17 @@ mod tests {
 		let mut m = Model::default();
 		let b = m.new_bool_vars(3);
 
-		m += BoolExpr::And(b.iter().copied().map_into().collect());
+		m += BoolExpr::And(b.iter().cloned().map_into().collect());
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
-		let vars: Vec<_> = b.into_iter().map(|x| map.get(&x.into())).collect();
+		let vars: Vec<_> = b.into_iter().map(|x| map.get(&slv, &x.into())).collect();
 		slv.expect_solutions(&vars, expect!["true, true, true"]);
 
 		// Simple Unsatisfiable test case
 		let mut m = Model::default();
 		let b = m.new_bool_vars(3);
 
-		m += BoolExpr::And(b.iter().copied().map_into().collect());
-		m += BoolExpr::from(!b[0]);
+		m += BoolExpr::And(b.iter().cloned().map_into().collect());
+		m += BoolExpr::from(!b[0].clone());
 		let (mut slv, _): (Solver, _) = m.to_solver().unwrap();
 		slv.assert_unsatisfiable();
 	}
@@ -457,9 +472,9 @@ mod tests {
 		let mut m = Model::default();
 		let b = m.new_bool_vars(3);
 
-		m += BoolExpr::Or(b.iter().copied().map_into().collect());
+		m += BoolExpr::Or(b.iter().cloned().map_into().collect());
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
-		let vars: Vec<_> = b.into_iter().map(|x| map.get(&x.into())).collect();
+		let vars: Vec<_> = b.into_iter().map(|x| map.get(&slv, &x.into())).collect();
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
@@ -476,8 +491,8 @@ mod tests {
 		let mut m = Model::default();
 		let b = m.new_bool_vars(3);
 
-		m += BoolExpr::Or(b.iter().copied().map_into().collect());
-		m += BoolExpr::And(b.iter().copied().map(|l| (!l).into()).collect());
+		m += BoolExpr::Or(b.iter().cloned().map_into().collect());
+		m += BoolExpr::And(b.iter().cloned().map(|l| (!l).into()).collect());
 		let (mut slv, _): (Solver, _) = m.to_solver().unwrap();
 		slv.assert_unsatisfiable()
 	}
@@ -488,9 +503,9 @@ mod tests {
 		let mut m = Model::default();
 		let b = m.new_bool_vars(3);
 
-		m += BoolExpr::Xor(b.iter().copied().map_into().collect());
+		m += BoolExpr::Xor(b.iter().cloned().map_into().collect());
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
-		let vars: Vec<_> = b.into_iter().map(|x| map.get(&x.into())).collect();
+		let vars: Vec<_> = b.into_iter().map(|x| map.get(&slv, &x.into())).collect();
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
@@ -504,9 +519,9 @@ mod tests {
 		let mut m = Model::default();
 		let b = m.new_bool_vars(2);
 
-		m += BoolExpr::Xor(b.iter().copied().map_into().collect());
-		m += BoolExpr::from(!b[0]);
-		m += BoolExpr::from(!b[1]);
+		m += BoolExpr::Xor(b.iter().cloned().map_into().collect());
+		m += BoolExpr::from(!b[0].clone());
+		m += BoolExpr::from(!b[1].clone());
 		let (mut slv, _): (Solver, _) = m.to_solver().unwrap();
 		slv.assert_unsatisfiable();
 	}
@@ -518,11 +533,11 @@ mod tests {
 		let b = m.new_bool_vars(3);
 
 		m += BoolExpr::Equiv(vec![
-			b[0].into(),
-			BoolExpr::Equiv(vec![b[1].into(), b[2].into()]),
+			b[0].clone().into(),
+			BoolExpr::Equiv(vec![b[1].clone().into(), b[2].clone().into()]),
 		]);
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
-		let vars: Vec<_> = b.into_iter().map(|x| map.get(&x.into())).collect();
+		let vars: Vec<_> = b.into_iter().map(|x| map.get(&slv, &x.into())).collect();
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
@@ -540,11 +555,11 @@ mod tests {
 		let b = m.new_bool_vars(3);
 
 		m += BoolExpr::Equiv(vec![
-			b[0].into(),
-			BoolExpr::And(vec![b[1].into(), b[2].into()]),
+			b[0].clone().into(),
+			BoolExpr::And(vec![b[1].clone().into(), b[2].clone().into()]),
 		]);
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
-		let vars: Vec<_> = b.into_iter().map(|x| map.get(&x.into())).collect();
+		let vars: Vec<_> = b.into_iter().map(|x| map.get(&slv, &x.into())).collect();
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
@@ -562,11 +577,11 @@ mod tests {
 		let b = m.new_bool_vars(3);
 
 		m += BoolExpr::Equiv(vec![
-			b[0].into(),
-			BoolExpr::Or(vec![b[1].into(), b[2].into()]),
+			b[0].clone().into(),
+			BoolExpr::Or(vec![b[1].clone().into(), b[2].clone().into()]),
 		]);
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
-		let vars: Vec<_> = b.into_iter().map(|x| map.get(&x.into())).collect();
+		let vars: Vec<_> = b.into_iter().map(|x| map.get(&slv, &x.into())).collect();
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"

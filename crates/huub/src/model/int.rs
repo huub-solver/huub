@@ -3,7 +3,7 @@ use std::ops::{Add, Mul, Neg};
 use flatzinc_serde::RangeList;
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
-	Lit as RawLit, Valuation as SatValuation,
+	Valuation as SatValuation,
 };
 
 use super::{
@@ -20,14 +20,14 @@ impl IntView {
 	pub(crate) fn to_arg<Sol, Sat>(
 		&self,
 		_ctx: ReifContext,
-		_slv: &mut Solver<Sat>,
+		slv: &mut Solver<Sat>,
 		map: &mut VariableMap,
 	) -> view::IntView
 	where
 		Sol: PropagatorAccess + SatValuation,
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 	{
-		map.get_int(self)
+		map.get_int(slv, self)
 	}
 }
 
@@ -54,7 +54,7 @@ pub enum IntView {
 	Var(IntVar),
 	Const(i64),
 	Linear(LinearTransform, IntVar),
-	Bool(LinearTransform, RawLit),
+	Bool(LinearTransform, BoolView),
 }
 
 impl Add<IntVal> for IntView {
@@ -98,8 +98,8 @@ impl Neg for IntView {
 impl From<BoolView> for IntView {
 	fn from(value: BoolView) -> Self {
 		match value {
-			BoolView::Lit(x) => Self::Bool(LinearTransform::offset(0), x),
 			BoolView::Const(b) => Self::Const(b as IntVal),
+			x => Self::Bool(LinearTransform::offset(0), x),
 		}
 	}
 }
