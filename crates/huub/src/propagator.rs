@@ -115,9 +115,11 @@ pub(crate) trait ExplainActions {
 
 	fn get_int_lower_bound(&self, var: IntView) -> IntVal;
 	fn get_int_upper_bound(&self, var: IntView) -> IntVal;
+	fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal) {
+		(self.get_int_lower_bound(var), self.get_int_upper_bound(var))
+	}
 	fn get_int_val(&self, var: IntView) -> Option<IntVal> {
-		let lb = self.get_int_lower_bound(var);
-		let ub = self.get_int_upper_bound(var);
+		let (lb, ub) = self.get_int_bounds(var);
 		if lb == ub {
 			Some(lb)
 		} else {

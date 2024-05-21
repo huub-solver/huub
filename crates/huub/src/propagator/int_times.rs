@@ -1,5 +1,3 @@
-use itertools::Itertools;
-
 use super::{
 	conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, InitializationActions,
 	PropagationActions, Propagator,
@@ -48,107 +46,78 @@ impl Propagator for IntTimesBounds {
 
 	#[tracing::instrument(name = "int_times", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
-		let x_lb = actions.get_int_lower_bound(self.x);
+		let (x_lb, x_ub) = actions.get_int_bounds(self.x);
 		let x_lb_lit = actions.get_int_lower_bound_lit(self.x);
-		let x_ub = actions.get_int_upper_bound(self.x);
 		let x_ub_lit = actions.get_int_upper_bound_lit(self.x);
-		let y_lb = actions.get_int_lower_bound(self.y);
+		let (y_lb, y_ub) = actions.get_int_bounds(self.y);
 		let y_lb_lit = actions.get_int_lower_bound_lit(self.y);
-		let y_ub = actions.get_int_upper_bound(self.y);
 		let y_ub_lit = actions.get_int_upper_bound_lit(self.y);
-		let z_lb = actions.get_int_lower_bound(self.z);
+		let (z_lb, z_ub) = actions.get_int_bounds(self.z);
 		let z_lb_lit = actions.get_int_lower_bound_lit(self.z);
-		let z_ub = actions.get_int_upper_bound(self.z);
 		let z_ub_lit = actions.get_int_upper_bound_lit(self.z);
+
+		// TODO: Filter possibilities based on whether variables can be both positive and negative.
 
 		// Calculate possible bounds for the product `z`
 		let bounds = [x_lb * y_lb, x_lb * y_ub, x_ub * y_lb, x_ub * y_ub];
-		let bounds_reason = |pos| {
-			ReasonBuilder::Eager(match pos {
-				0 => vec![x_lb_lit, y_lb_lit],
-				1 => vec![x_lb_lit, y_ub_lit],
-				2 => vec![x_ub_lit, y_lb_lit],
-				3 => vec![x_ub_lit, y_ub_lit],
-				_ => unreachable!(),
-			})
-		};
+		let reason = ReasonBuilder::Eager(vec![x_lb_lit, x_ub_lit, y_lb_lit, y_ub_lit]);
 		// z >= x * y
-		let pos_min = bounds.iter().position_min().unwrap();
-		actions.set_int_lower_bound(self.z, bounds[pos_min], &bounds_reason(pos_min))?;
+		let min = bounds.iter().min().unwrap();
+		actions.set_int_lower_bound(self.z, *min, &reason)?;
 		// z <= x * y
-		let pos_max = bounds.iter().position_max().unwrap();
-		actions.set_int_upper_bound(self.z, bounds[pos_max], &bounds_reason(pos_max))?;
+		let max = bounds.iter().max().unwrap();
+		actions.set_int_upper_bound(self.z, *max, &reason)?;
 
 		if y_lb > 0 || y_ub < 0 {
 			// Calculate possible bounds for the first factor `x`
 			let bounds = [(z_lb, y_lb), (z_lb, y_ub), (z_ub, y_lb), (z_ub, y_ub)];
-			let bounds_reason = |pos| {
-				ReasonBuilder::Eager(match pos {
-					0 => vec![z_lb_lit, y_lb_lit],
-					1 => vec![z_lb_lit, y_ub_lit],
-					2 => vec![z_ub_lit, y_lb_lit],
-					3 => vec![z_ub_lit, y_ub_lit],
-					_ => unreachable!(),
-				})
-			};
+			let reason = ReasonBuilder::Eager(vec![z_lb_lit, z_ub_lit, y_lb_lit, y_ub_lit]);
 			// x >= z / y
-			let pos_min = bounds
+			let min = bounds
 				.iter()
-				.enumerate()
-				.filter_map(|(i, (z, y))| {
-					let y = NonZeroIntVal::new(*y)?;
-					Some((i, div_ceil(*z, y)))
+				.map(|(z, y)| {
+					let y = NonZeroIntVal::new(*y).unwrap();
+					div_ceil(*z, y)
 				})
-				.min_by_key(|(_, v)| *v)
+				.min()
 				.unwrap();
-			actions.set_int_lower_bound(self.x, pos_min.1, &bounds_reason(pos_min.0))?;
+			actions.set_int_lower_bound(self.x, min, &reason)?;
 			// x <= z / y
-			let pos_max = bounds
+			let max = bounds
 				.iter()
-				.enumerate()
-				.filter_map(|(i, (z, y))| {
-					let y = NonZeroIntVal::new(*y)?;
-					Some((i, div_floor(*z, y)))
+				.map(|(z, y)| {
+					let y = NonZeroIntVal::new(*y).unwrap();
+					div_floor(*z, y)
 				})
-				.max_by_key(|(_, v)| *v)
+				.max()
 				.unwrap();
-			actions.set_int_upper_bound(self.x, pos_max.1, &bounds_reason(pos_max.0))?;
+			actions.set_int_upper_bound(self.x, max, &reason)?;
 		}
 
 		if x_lb > 0 || x_ub < 0 {
 			// Calculate possible bounds for the first factor `y`
 			let bounds = [(z_lb, x_lb), (z_lb, x_ub), (z_ub, x_lb), (z_ub, x_ub)];
-			let bounds_reason = |pos| {
-				ReasonBuilder::Eager(match pos {
-					0 => vec![z_lb_lit, x_lb_lit],
-					1 => vec![z_lb_lit, x_ub_lit],
-					2 => vec![z_ub_lit, x_lb_lit],
-					3 => vec![z_ub_lit, x_ub_lit],
-					_ => unreachable!(),
-				})
-			};
+			let reason = ReasonBuilder::Eager(vec![z_lb_lit, z_ub_lit, x_lb_lit, x_ub_lit]);
 			// y >= z / x
-			let pos_min = bounds
+			let min = bounds
 				.iter()
-				.enumerate()
-				.filter_map(|(i, (z, x))| {
-					let x = NonZeroIntVal::new(*x)?;
-					Some((i, div_ceil(*z, x)))
+				.map(|(z, x)| {
+					let y = NonZeroIntVal::new(*x).unwrap();
+					div_ceil(*z, y)
 				})
-				.min_by_key(|(_, v)| *v)
+				.min()
 				.unwrap();
-			actions.set_int_lower_bound(self.y, pos_min.1, &bounds_reason(pos_min.0))?;
+			actions.set_int_lower_bound(self.y, min, &reason)?;
 			// y <= z / x
-			let pos_max = bounds
+			let max = bounds
 				.iter()
-				.enumerate()
-				.filter_map(|(i, (z, x))| {
-					let x = NonZeroIntVal::new(*x)?;
-					Some((i, div_floor(*z, x)))
+				.map(|(z, x)| {
+					let y = NonZeroIntVal::new(*x).unwrap();
+					div_floor(*z, y)
 				})
-				.max_by_key(|(_, v)| *v)
+				.max()
 				.unwrap();
-			actions.set_int_upper_bound(self.y, pos_max.1, &bounds_reason(pos_max.0))?;
+			actions.set_int_upper_bound(self.y, max, &reason)?;
 		}
 		Ok(())
 	}
@@ -167,22 +136,28 @@ mod tests {
 		let mut slv: Solver<Cadical> = Cnf::default().into();
 		let a = IntVar::new_in(&mut slv, (-2..=1).into(), true);
 		let b = IntVar::new_in(&mut slv, (-1..=2).into(), true);
-		let c = IntVar::new_in(&mut slv, (-4..=4).into(), true);
+		let c = IntVar::new_in(&mut slv, (-4..=2).into(), true);
 
 		slv.add_propagator(IntTimesBounds::new(a, b, c));
 		slv.expect_solutions(
 			&[a, b, c],
 			expect![[r#"
-    -2, 2, -4
-    -1, 2, -2
-    0, -1, 0
-    0, 0, 0
-    0, 1, 0
-    0, 2, 0
-    1, -1, -1
-    1, 0, 0
-    1, 1, 1
-    1, 2, 2"#]],
+		-2, -1, 2
+		-2, 0, 0
+		-2, 1, -2
+		-2, 2, -4
+		-1, -1, 1
+		-1, 0, 0
+		-1, 1, -1
+		-1, 2, -2
+		0, -1, 0
+		0, 0, 0
+		0, 1, 0
+		0, 2, 0
+		1, -1, -1
+		1, 0, 0
+		1, 1, 1
+		1, 2, 2"#]],
 		);
 	}
 }

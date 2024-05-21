@@ -52,7 +52,7 @@ impl IpasirPropagator for Engine {
 		trace!(lit = i32::from(lit), persistent, "assignment");
 		// Process Boolean assignment
 		if persistent && self.state.decision_level() != 0 {
-			// Note that the assignment
+			// Note that the assignment might already be known and trailed, but not previously marked as persistent
 			self.persistent.push(lit)
 		}
 		if self.state.sat_trail.assign(lit.var(), !lit.is_negated()) == HasChanged::NoChange {
@@ -469,6 +469,34 @@ impl ExplainActions for State {
 					transformer.transform(ub)
 				} else {
 					transformer.transform(lb)
+				}
+			}
+		}
+	}
+	fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal) {
+		match var.0 {
+			IntViewInner::VarRef(iv) => (
+				self.int_trail[self.int_vars[iv].lower_bound],
+				self.int_trail[self.int_vars[iv].upper_bound],
+			),
+			IntViewInner::Const(i) => (i, i),
+			IntViewInner::Linear { transformer, var } => {
+				let lb = transformer.transform(self.int_trail[self.int_vars[var].lower_bound]);
+				let ub = transformer.transform(self.int_trail[self.int_vars[var].upper_bound]);
+				if lb <= ub {
+					(lb, ub)
+				} else {
+					(ub, lb)
+				}
+			}
+			IntViewInner::Bool { transformer, lit } => {
+				let val = self.sat_trail.get(lit).map(Into::into);
+				let lb = transformer.transform(val.unwrap_or(0));
+				let ub = transformer.transform(val.unwrap_or(1));
+				if lb <= ub {
+					(lb, ub)
+				} else {
+					(ub, lb)
 				}
 			}
 		}

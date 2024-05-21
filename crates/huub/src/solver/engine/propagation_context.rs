@@ -181,6 +181,7 @@ impl ExplainActions for PropagationContext<'_> {
 			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
 			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
 			fn get_int_upper_bound(&self, var: IntView) -> IntVal;
+			fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal);
 			fn get_int_lit(&self, var: IntView, meaning: LitMeaning) -> BoolView;
 		}
 	}
