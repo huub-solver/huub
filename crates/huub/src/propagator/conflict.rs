@@ -23,7 +23,10 @@ impl Conflict {
 	pub(crate) fn new(subject: Option<RawLit>, reason: &ReasonBuilder, prop: PropRef) -> Self {
 		match Reason::build_reason(reason, prop) {
 			Ok(reason) => Self { subject, reason },
-			Err(true) => panic!("constructing empty conflict"),
+			Err(true) => Self {
+				subject,
+				reason: Reason::Eager(Box::from([])),
+			},
 			Err(false) => unreachable!("invalid reason"),
 		}
 	}
