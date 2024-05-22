@@ -1,6 +1,6 @@
 use pindakaas::Lit as RawLit;
 
-use super::{reason::ReasonBuilder, ExplainActions, InitializationActions, PropagationActions};
+use super::{reason::ReasonBuilder, InitializationActions, PropagationActions};
 use crate::{
 	helpers::opt_field::OptField,
 	propagator::{conflict::Conflict, int_event::IntEvent, Propagator},
@@ -9,7 +9,7 @@ use crate::{
 		value::IntVal,
 		view::{BoolViewInner, IntView, IntViewInner},
 	},
-	BoolView, Conjunction,
+	BoolView,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -149,34 +149,26 @@ impl<const B: usize> Propagator for IntLinearLessEqBoundsImpl<B> {
 
 		// propagate the upper bound of the variables
 		for (j, &v) in self.vars.iter().enumerate() {
-			let reason = ReasonBuilder::Lazy(j as u64);
 			let ub = max_sum + actions.get_int_lower_bound(v);
+			let mut var_lits: Vec<BoolView> = self
+				.vars
+				.iter()
+				.enumerate()
+				.filter_map(|(i, v)| {
+					if j == i {
+						None
+					} else {
+						Some(actions.get_int_lower_bound_lit(*v))
+					}
+				})
+				.collect();
+			if let Some(r) = self.reified.get() {
+				var_lits.push(BoolView(BoolViewInner::Lit(*r)))
+			}
+			let reason = ReasonBuilder::Eager(var_lits);
 			actions.set_int_upper_bound(v, ub, &reason)?
 		}
 		Ok(())
-	}
-
-	fn explain(&mut self, actions: &mut dyn ExplainActions, data: u64) -> Conjunction {
-		let i = data as usize;
-		let mut var_lits: Vec<RawLit> = self
-			.vars
-			.iter()
-			.enumerate()
-			.filter_map(|(j, v)| {
-				if j == i {
-					return None;
-				}
-				if let BoolView(BoolViewInner::Lit(lit)) = actions.get_int_lower_bound_lit(*v) {
-					Some(lit)
-				} else {
-					None
-				}
-			})
-			.collect();
-		if let Some(r) = self.reified.get() {
-			var_lits.push(*r)
-		}
-		var_lits
 	}
 }
 
