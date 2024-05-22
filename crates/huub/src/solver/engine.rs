@@ -409,7 +409,9 @@ impl State {
 			Ok(reason) => {
 				let _ = self.reason_map.insert(lit, reason);
 			}
-			Err(true) => (),
+			Err(true) => {
+				let _ = self.reason_map.insert(lit, Reason::Eager(Box::from([])));
+			}
 			Err(false) => unreachable!("invalid reason"),
 		}
 	}
