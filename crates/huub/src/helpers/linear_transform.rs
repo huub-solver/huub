@@ -89,6 +89,15 @@ impl LinearTransform {
 	}
 }
 
+impl Default for LinearTransform {
+	fn default() -> Self {
+		Self {
+			scale: NonZeroIntVal::new(1).unwrap(),
+			offset: 0,
+		}
+	}
+}
+
 impl Neg for LinearTransform {
 	type Output = Self;
 	fn neg(self) -> Self::Output {

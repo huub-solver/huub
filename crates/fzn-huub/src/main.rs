@@ -18,8 +18,8 @@ use ::tracing::{warn, Level};
 use clap::Parser;
 use flatzinc_serde::{FlatZinc, Literal, Method};
 use huub::{
-	FlatZincError, Goal, ReformulationError, SlvTermSignal, SolveResult, Solver, SolverView,
-	Valuation,
+	FlatZincError, Goal, LitMeaning, ReformulationError, SlvTermSignal, SolveResult, Solver,
+	SolverView, Valuation,
 };
 use miette::{IntoDiagnostic, Result, WrapErr};
 use tracing::{FmtLitFields, LitName};
@@ -90,27 +90,48 @@ fn main() -> Result<()> {
 
 	// Create reverse map for solver variables if required
 	if args.verbose > 0 {
-		let mut bool_var_map = HashMap::new();
-		let mut int_lit_map = HashMap::new();
+		let mut lit_map = HashMap::new();
 		let mut int_map = vec![ustr(""); slv.num_int_vars()];
 		for (name, v) in var_map.iter() {
 			match v {
-				SolverView::Bool(bv) => bv.add_to_reverse_map(&mut bool_var_map, *name),
+				SolverView::Bool(bv) => {
+					if let Some(info) = bv.reverse_map_info() {
+						let _ = lit_map.insert(info, LitName::BoolVar(*name, true));
+						let _ = lit_map.insert(-info, LitName::BoolVar(*name, false));
+					}
+				}
 				SolverView::Int(iv) => {
-					iv.add_to_lit_reverse_map(&slv, &mut int_lit_map);
-					iv.add_to_int_reverse_map(&mut int_map, *name);
+					let (pos, is_view) = iv.int_reverse_map_info();
+					if let Some(i) = pos {
+						if !is_view || int_map[i].is_empty() {
+							int_map[i] = *name;
+							for (lit, meaning) in iv.lit_reverse_map_info(&slv) {
+								let _ = lit_map.insert(lit, LitName::IntLit(i, meaning));
+							}
+						} else {
+							debug_assert!(iv
+								.lit_reverse_map_info(&slv)
+								.iter()
+								.all(|(lit, _)| { lit_map.contains_key(lit) }));
+						}
+					} else {
+						debug_assert!(is_view);
+						for (lit, meaning) in iv.lit_reverse_map_info(&slv) {
+							let _ = lit_map.entry(lit).or_insert_with(|| {
+								let (op, val) = match meaning {
+									LitMeaning::Eq(v) => ("=", v),
+									LitMeaning::NotEq(v) => ("!=", v),
+									LitMeaning::GreaterEq(v) => (">=", v),
+									LitMeaning::Less(v) => ("<", v),
+								};
+								LitName::BoolVar(format!("{name}{op}{val}").into(), true)
+							});
+						}
+					}
 				}
 			}
 		}
-		*lit_reverse_map.lock().unwrap() = bool_var_map
-			.into_iter()
-			.map(|(k, (i, p))| (k, LitName::BoolVar(i, p)))
-			.chain(
-				int_lit_map
-					.into_iter()
-					.map(|(k, (i, m))| (k, LitName::IntLit(i, m))),
-			)
-			.collect();
+		*lit_reverse_map.lock().unwrap() = lit_map;
 		*int_reverse_map.lock().unwrap() = int_map;
 	}
 

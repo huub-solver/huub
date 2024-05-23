@@ -46,17 +46,10 @@ impl From<&IntView> for SolverView {
 pub struct BoolView(pub(crate) BoolViewInner);
 
 impl BoolView {
-	pub fn add_to_reverse_map<S: Clone, M: Extend<(NonZeroI32, (S, bool))>>(
-		&self,
-		map: &mut M,
-		name: S,
-	) {
+	pub fn reverse_map_info(&self) -> Option<NonZeroI32> {
 		match self.0 {
-			BoolViewInner::Lit(v) => {
-				let i: NonZeroI32 = v.into();
-				map.extend([(i, (name.clone(), true)), (-i, (name, false))])
-			}
-			BoolViewInner::Const(_) => {}
+			BoolViewInner::Lit(v) => Some(v.into()),
+			BoolViewInner::Const(_) => None,
 		}
 	}
 }
@@ -99,50 +92,66 @@ impl From<bool> for BoolView {
 pub struct IntView(pub(crate) IntViewInner);
 
 impl IntView {
-	pub fn add_to_lit_reverse_map<Sol, Sat, M>(&self, slv: &Solver<Sat>, map: &mut M)
+	pub fn lit_reverse_map_info<Sol, Sat>(&self, slv: &Solver<Sat>) -> Vec<(NonZeroI32, LitMeaning)>
 	where
 		Sol: PropagatorAccess + SatValuation,
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
-		M: Extend<(NonZeroI32, (usize, LitMeaning))>,
 	{
-		if let IntViewInner::VarRef(v) = self.0 {
-			let var = &slv.engine().state.int_vars[v];
-			let mut var_iter = var.vars.clone();
-			let pos = v.into();
-
-			let mut val_iter = var.orig_domain.clone().into_iter().flatten();
-			let _ = val_iter.next();
-			for val in val_iter {
-				let lit = var_iter.next().unwrap();
-				let i: NonZeroI32 = lit.into();
-				map.extend([
-					(i, (pos, LitMeaning::GreaterEq(val))),
-					(-i, (pos, LitMeaning::Less(val))),
-				])
+		let transformer = match self.0 {
+			IntViewInner::Bool { transformer, .. } | IntViewInner::Linear { transformer, .. } => {
+				transformer
 			}
+			_ => LinearTransform::default(),
+		};
+		match self.0 {
+			IntViewInner::VarRef(v) | IntViewInner::Linear { var: v, .. } => {
+				let var = &slv.engine().state.int_vars[v];
+				let mut var_iter = var.vars.clone();
 
-			if var.has_direct && var.orig_domain_len > 2 {
 				let mut val_iter = var.orig_domain.clone().into_iter().flatten();
 				let _ = val_iter.next();
-				let _ = val_iter.next_back();
+				let mut lits = Vec::with_capacity(
+					(var.orig_domain_len - 2) * 2 * if var.has_direct { 2 } else { 1 },
+				);
 				for val in val_iter {
 					let lit = var_iter.next().unwrap();
 					let i: NonZeroI32 = lit.into();
-					map.extend([
-						(i, (pos, LitMeaning::Eq(val))),
-						(-i, (pos, LitMeaning::NotEq(val))),
-					])
+					let geq = LitMeaning::GreaterEq(transformer.transform(val));
+					let lt = LitMeaning::Less(transformer.transform(val));
+					lits.extend([(i, geq), (-i, lt)])
 				}
-			}
 
-			debug_assert!(var_iter.next().is_none());
+				if var.has_direct && var.orig_domain_len > 2 {
+					let mut val_iter = var.orig_domain.clone().into_iter().flatten();
+					let _ = val_iter.next();
+					let _ = val_iter.next_back();
+					for val in val_iter {
+						let lit = var_iter.next().unwrap();
+						let i: NonZeroI32 = lit.into();
+						let eq = LitMeaning::Eq(transformer.transform(val));
+						let ne = LitMeaning::NotEq(transformer.transform(val));
+						lits.extend([(i, eq), (-i, ne)])
+					}
+				}
+				debug_assert!(var_iter.next().is_none());
+				lits
+			}
+			IntViewInner::Bool { lit, .. } => {
+				let i: NonZeroI32 = lit.into();
+				let lb = LitMeaning::Eq(transformer.transform(0));
+				let ub = LitMeaning::Eq(transformer.transform(1));
+				vec![(i, ub), (-i, lb)]
+			}
+			_ => Vec::new(),
 		}
 	}
 
-	pub fn add_to_int_reverse_map<E>(&self, map: &mut [E], name: E) {
-		if let IntViewInner::VarRef(v) = self.0 {
-			let pos: usize = v.into();
-			map[pos] = name;
+	pub fn int_reverse_map_info(&self) -> (Option<usize>, bool) {
+		match self.0 {
+			IntViewInner::VarRef(v) => (Some(v.into()), false),
+			IntViewInner::Bool { .. } => (None, true),
+			IntViewInner::Linear { var, .. } => (Some(var.into()), true),
+			_ => (None, true),
 		}
 	}
 }
