@@ -221,16 +221,14 @@ fn main() -> Result<()> {
 
 				let mut last_sol = String::new();
 				let res = slv.branch_and_bound(obj, goal, |value| {
-					last_sol = format!(
-						"{}",
-						Solution {
-							value,
-							fzn: &fzn,
-							var_map: &var_map
-						}
-					);
+					last_sol = Solution {
+						value,
+						fzn: &fzn,
+						var_map: &var_map,
+					}
+					.to_string()
 				});
-				println!("{}", last_sol);
+				print!("{}", last_sol);
 				res
 			}
 		}
