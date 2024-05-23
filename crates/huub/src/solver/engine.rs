@@ -11,7 +11,7 @@ use pindakaas::{
 	solver::{Propagator as IpasirPropagator, SolvingActions},
 	Lit as RawLit, Var as RawVar,
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, trace};
 
 use self::{
 	bool_to_int::BoolToIntMap,
@@ -135,7 +135,7 @@ impl IpasirPropagator for Engine {
 							for l in &clause {
 								let val = self.state.sat_trail.get(!l);
 								if !val.unwrap_or(false) {
-									error!(lit_prop = i32::from(*lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
+									tracing::error!(lit_prop = i32::from(*lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
 								}
 								debug_assert!(
 									val.unwrap_or(false),
