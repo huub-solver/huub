@@ -163,9 +163,9 @@ fn main() -> Result<()> {
 	let interrupted = Arc::new(AtomicBool::new(false));
 	match (interrupt_handling, deadline) {
 		(true, Some(deadline)) => {
-			let int_bool = Arc::clone(&interrupted);
+			let interrupted = Arc::clone(&interrupted);
 			slv.set_terminate_callback(Some(move || {
-				if int_bool.load(Ordering::SeqCst) || Instant::now() >= deadline {
+				if interrupted.load(Ordering::SeqCst) || Instant::now() >= deadline {
 					SlvTermSignal::Terminate
 				} else {
 					SlvTermSignal::Continue
@@ -173,9 +173,9 @@ fn main() -> Result<()> {
 			}));
 		}
 		(true, None) => {
-			let int_bool = Arc::clone(&interrupted);
+			let interrupted = Arc::clone(&interrupted);
 			slv.set_terminate_callback(Some(move || {
-				if int_bool.load(Ordering::SeqCst) {
+				if interrupted.load(Ordering::SeqCst) {
 					SlvTermSignal::Terminate
 				} else {
 					SlvTermSignal::Continue
@@ -214,7 +214,7 @@ fn main() -> Result<()> {
 			} else {
 				// Set up Ctrl-C handler (to allow printing last solution)
 				if let Err(err) = ctrlc::set_handler(move || {
-					interrupted.store(false, Ordering::SeqCst);
+					interrupted.store(true, Ordering::SeqCst);
 				}) {
 					warn!("unable to set Ctrl-C handler: {}", err);
 				}
