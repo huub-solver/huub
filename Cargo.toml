@@ -58,3 +58,7 @@ unseparated_literal_suffix = "warn"
 unnecessary_safety_doc = "warn"
 wildcard_dependencies = "warn"
 wrong_self_convention = "warn"
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
