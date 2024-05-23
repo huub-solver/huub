@@ -49,6 +49,45 @@ impl Model {
 						}
 						_ => {}
 					},
+					("int_eq_reif", Some(l)) => match c.args.as_slice() {
+						[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))] |
+						[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
+							if r == l =>
+						{
+							let x = lit_int(fzn, &mut prb, &mut map, x)?;
+							let _ = map.insert(l.clone(), BoolView::IntEq(Box::new(x), *i).into());
+							return Ok(true);
+						}
+						_ => {}
+					},
+					("int_le_reif", Some(l)) => match c.args.as_slice() {
+						[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
+							if r == l =>
+						{
+							let x = lit_int(fzn, &mut prb, &mut map, x)?;
+							let _ = map.insert(l.clone(), BoolView::IntLessEq(Box::new(x), *i).into());
+							return Ok(true);
+						}
+						[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
+								if r == l =>
+							{
+								let x = lit_int(fzn, &mut prb, &mut map, x)?;
+								let _ = map.insert(l.clone(), BoolView::IntGreater(Box::new(x), *i).into());
+								return Ok(true);
+							}
+						_ => {}
+					},
+					("int_ne_reif", Some(l)) => match c.args.as_slice() {
+						[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))] |
+						[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
+							if r == l =>
+						{
+							let x = lit_int(fzn, &mut prb, &mut map, x)?;
+							let _ = map.insert(l.clone(), BoolView::IntNotEq(Box::new(x), *i).into());
+							return Ok(true);
+						}
+						_ => {}
+					},
 					("int_lin_eq", Some(l))
 						if c.args
 							.get(1)
