@@ -2,7 +2,6 @@ use delegate::delegate;
 use pindakaas::Lit as RawLit;
 use tracing::trace;
 
-use super::{int_var::IntVarRef, PropRef, State};
 use crate::{
 	actions::{
 		explanation::ExplanationActions, inspection::InspectionActions,
@@ -10,7 +9,7 @@ use crate::{
 	},
 	propagator::{conflict::Conflict, reason::ReasonBuilder},
 	solver::{
-		engine::trail::HasChanged,
+		engine::{int_var::IntVarRef, trail::HasChanged, PropRef, State},
 		view::{BoolViewInner, IntViewInner},
 	},
 	BoolView, Conjunction, IntVal, IntView, LitMeaning,

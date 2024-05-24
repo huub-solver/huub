@@ -13,12 +13,6 @@ use pindakaas::{
 };
 use tracing::{debug, trace};
 
-use self::{
-	bool_to_int::BoolToIntMap,
-	propagation_context::PropagationContext,
-	trail::{SatTrail, Trail},
-};
-use super::view::{BoolViewInner, IntViewInner};
 use crate::{
 	actions::{explanation::ExplanationActions, inspection::InspectionActions},
 	propagator::{
@@ -27,10 +21,15 @@ use crate::{
 		reason::{Reason, ReasonBuilder},
 		Propagator,
 	},
-	solver::engine::{
-		int_var::{IntVar, IntVarRef, LitMeaning},
-		queue::PriorityQueue,
-		trail::HasChanged,
+	solver::{
+		engine::{
+			bool_to_int::BoolToIntMap,
+			int_var::{IntVar, IntVarRef, LitMeaning},
+			propagation_context::PropagationContext,
+			queue::PriorityQueue,
+			trail::{HasChanged, SatTrail, Trail},
+		},
+		view::{BoolViewInner, IntViewInner},
 	},
 	BoolView, Clause, Conjunction, IntVal, IntView,
 };

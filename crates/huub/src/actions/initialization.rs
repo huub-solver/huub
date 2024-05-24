@@ -1,8 +1,7 @@
 use crate::{
-	propagator::int_event::IntEvent, solver::engine::TrailedInt, BoolView, IntVal, IntView,
+	actions::inspection::InspectionActions, propagator::int_event::IntEvent,
+	solver::engine::TrailedInt, BoolView, IntVal, IntView,
 };
-
-use super::inspection::InspectionActions;
 
 pub(crate) trait InitializationActions: InspectionActions {
 	fn subscribe_bool(&mut self, var: BoolView, data: u32);

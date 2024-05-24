@@ -1,9 +1,10 @@
-use super::{
-	conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions, Propagator,
-};
 use crate::{
 	actions::initialization::InitializationActions,
 	helpers::{div_ceil, div_floor},
+	propagator::{
+		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions,
+		Propagator,
+	},
 	solver::{engine::queue::PriorityLevel, poster::Poster},
 	IntView, NonZeroIntVal,
 };
@@ -144,8 +145,7 @@ mod tests {
 	use expect_test::expect;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
 
-	use super::IntTimesBounds;
-	use crate::{solver::engine::int_var::IntVar, Solver};
+	use crate::{propagator::int_times::IntTimesBounds, solver::engine::int_var::IntVar, Solver};
 
 	#[test]
 	fn test_int_times_sat() {

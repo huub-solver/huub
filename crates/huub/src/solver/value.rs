@@ -2,8 +2,10 @@ use std::{fmt::Display, num::NonZeroI64};
 
 use pindakaas::solver::FailedAssumtions;
 
-use super::view::BoolViewInner;
-use crate::{solver::SolverView, BoolView};
+use crate::{
+	solver::{view::BoolViewInner, SolverView},
+	BoolView,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[allow(variant_size_differences)]

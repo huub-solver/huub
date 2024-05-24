@@ -9,10 +9,9 @@ pub(crate) mod reason;
 
 use std::fmt::Debug;
 
-use self::int_event::IntEvent;
 use crate::{
 	actions::{explanation::ExplanationActions, propagation::PropagationActions},
-	propagator::conflict::Conflict,
+	propagator::{conflict::Conflict, int_event::IntEvent},
 	solver::engine::queue::PriorityLevel,
 	Conjunction,
 };

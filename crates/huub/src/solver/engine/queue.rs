@@ -65,7 +65,7 @@ pub(crate) enum PriorityLevel {
 mod test {
 	#[test]
 	fn priority_order() {
-		use super::PriorityLevel::*;
+		use crate::solver::engine::queue::PriorityLevel::*;
 		assert!(Immediate > Highest);
 		assert!(Highest > High);
 		assert!(High > Medium);

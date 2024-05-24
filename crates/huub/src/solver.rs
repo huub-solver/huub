@@ -18,17 +18,14 @@ use pindakaas::{
 };
 use tracing::debug;
 
-use self::{
-	poster::Poster,
-	value::{AssumptionChecker, ConstantFailure, Valuation, Value},
-	view::{BoolViewInner, IntView, SolverView},
-};
 use crate::{
 	actions::{explanation::ExplanationActions, inspection::InspectionActions},
 	solver::{
 		engine::{Engine, PropRef},
 		initialization_context::InitializationContext,
-		view::IntViewInner,
+		poster::Poster,
+		value::{AssumptionChecker, ConstantFailure, Valuation, Value},
+		view::{BoolViewInner, IntView, IntViewInner, SolverView},
 	},
 	BoolView, IntVal, LitMeaning, ReformulationError,
 };

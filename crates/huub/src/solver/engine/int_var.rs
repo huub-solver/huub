@@ -7,9 +7,9 @@ use pindakaas::{
 	Lit as RawLit, Valuation as SatValuation,
 };
 
-use super::TrailedInt;
 use crate::{
 	solver::{
+		engine::TrailedInt,
 		view::{BoolViewInner, IntViewInner},
 		IntView, SatSolver,
 	},

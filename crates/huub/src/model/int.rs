@@ -6,12 +6,12 @@ use pindakaas::{
 	Valuation as SatValuation,
 };
 
-use super::{
-	bool::BoolView,
-	reformulate::{ReifContext, VariableMap},
-};
 use crate::{
 	helpers::linear_transform::LinearTransform,
+	model::{
+		bool::BoolView,
+		reformulate::{ReifContext, VariableMap},
+	},
 	solver::{view, SatSolver},
 	IntVal, Model, NonZeroIntVal, ReformulationError, Solver,
 };

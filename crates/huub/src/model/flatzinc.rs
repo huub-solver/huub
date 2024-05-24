@@ -8,13 +8,16 @@ use pindakaas::{
 };
 use thiserror::Error;
 
-use super::{
-	bool::{BoolExpr, BoolView},
-	int::IntView,
-	reformulate::ReformulationError,
-	ModelView,
+use crate::{
+	model::{
+		bool::{BoolExpr, BoolView},
+		int::IntView,
+		reformulate::ReformulationError,
+		ModelView,
+	},
+	solver::SatSolver,
+	Constraint, IntVal, Model, NonZeroIntVal, Solver, SolverView,
 };
-use crate::{solver::SatSolver, Constraint, IntVal, Model, NonZeroIntVal, Solver, SolverView};
 
 impl Model {
 	pub fn from_fzn<S: Ord + Deref<Target = str> + Clone + Debug>(

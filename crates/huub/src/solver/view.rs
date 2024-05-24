@@ -8,10 +8,13 @@ use pindakaas::{
 	Lit as RawLit, Valuation as SatValuation,
 };
 
-use super::{engine::int_var::LitMeaning, value::NonZeroIntVal};
 use crate::{
 	helpers::linear_transform::LinearTransform,
-	solver::{engine::int_var::IntVarRef, SatSolver},
+	solver::{
+		engine::int_var::{IntVarRef, LitMeaning},
+		value::NonZeroIntVal,
+		SatSolver,
+	},
 	IntVal, Solver,
 };
 

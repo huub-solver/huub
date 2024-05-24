@@ -1,6 +1,6 @@
 use pindakaas::{solver::VarRange, Var as RawVar};
 
-use super::int_var::IntVarRef;
+use crate::solver::engine::int_var::IntVarRef;
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BoolToIntMap {

@@ -1,10 +1,12 @@
 use pindakaas::Lit as RawLit;
 
-use super::{reason::ReasonBuilder, ExplanationActions, PropagationActions};
 use crate::{
 	actions::initialization::InitializationActions,
 	helpers::opt_field::OptField,
-	propagator::{conflict::Conflict, int_event::IntEvent, Propagator},
+	propagator::{
+		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, ExplanationActions,
+		PropagationActions, Propagator,
+	},
 	solver::{
 		engine::queue::PriorityLevel,
 		poster::Poster,
@@ -195,8 +197,10 @@ mod tests {
 	use flatzinc_serde::RangeList;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
 
-	use super::IntLinearLessEqBounds;
-	use crate::{solver::engine::int_var::IntVar, Constraint, Model, NonZeroIntVal, Solver};
+	use crate::{
+		propagator::int_lin_le::IntLinearLessEqBounds, solver::engine::int_var::IntVar, Constraint,
+		Model, NonZeroIntVal, Solver,
+	};
 
 	#[test]
 	fn test_linear_le_sat() {

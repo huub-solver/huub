@@ -6,9 +6,9 @@ use pindakaas::{
 };
 use thiserror::Error;
 
-use super::{bool, int, int::IntVar, ModelView};
 use crate::{
 	actions::explanation::ExplanationActions,
+	model::{bool, int, int::IntVar, ModelView},
 	solver::{
 		view::{BoolView, BoolViewInner, IntViewInner, SolverView},
 		SatSolver,

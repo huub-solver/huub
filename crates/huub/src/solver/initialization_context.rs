@@ -4,14 +4,14 @@ use pindakaas::{
 	Valuation as SatValuation,
 };
 
-use super::{
-	engine::{PropRef, TrailedInt},
-	view::{BoolViewInner, IntViewInner},
-	SatSolver,
-};
 use crate::{
 	actions::{initialization::InitializationActions, inspection::InspectionActions},
 	propagator::int_event::IntEvent,
+	solver::{
+		engine::{PropRef, TrailedInt},
+		view::{BoolViewInner, IntViewInner},
+		SatSolver,
+	},
 	BoolView, IntVal, IntView, Solver,
 };
 

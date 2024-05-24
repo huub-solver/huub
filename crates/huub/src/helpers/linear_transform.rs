@@ -1,7 +1,6 @@
 use std::ops::{Add, Mul, Neg};
 
-use super::div_ceil;
-use crate::{IntVal, LitMeaning, NonZeroIntVal};
+use crate::{helpers::div_ceil, IntVal, LitMeaning, NonZeroIntVal};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LinearTransform {

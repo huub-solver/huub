@@ -5,11 +5,11 @@ use pindakaas::{
 	Formula, Lit as RawLit, TseitinEncoder, Valuation as SatValuation,
 };
 
-use super::{
-	int,
-	reformulate::{ReformulationError, ReifContext, VariableMap},
-};
 use crate::{
+	model::{
+		int,
+		reformulate::{ReformulationError, ReifContext, VariableMap},
+	},
 	solver::{
 		view::{self, BoolViewInner},
 		SatSolver,

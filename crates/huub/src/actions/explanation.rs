@@ -1,6 +1,4 @@
-use crate::{BoolView, IntView, LitMeaning};
-
-use super::inspection::InspectionActions;
+use crate::{actions::inspection::InspectionActions, BoolView, IntView, LitMeaning};
 
 pub(crate) trait ExplanationActions: InspectionActions {
 	fn get_int_lit(&self, var: IntView, meaning: LitMeaning) -> BoolView;

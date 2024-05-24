@@ -4,12 +4,12 @@ use pindakaas::{
 	Valuation as SatValuation,
 };
 
-use super::{
-	int::IntView,
-	reformulate::{ReifContext, VariableMap},
-};
 use crate::{
 	helpers::{div_ceil, div_floor},
+	model::{
+		int::IntView,
+		reformulate::{ReifContext, VariableMap},
+	},
 	propagator::{
 		all_different_int::AllDifferentIntValue,
 		array_int_minimum::ArrayIntMinimumBounds,

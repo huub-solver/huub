@@ -2,8 +2,10 @@ use std::{error::Error, fmt};
 
 use pindakaas::Lit as RawLit;
 
-use super::reason::{Reason, ReasonBuilder};
-use crate::solver::engine::PropRef;
+use crate::{
+	propagator::reason::{Reason, ReasonBuilder},
+	solver::engine::PropRef,
+};
 
 /// Conflict is an error type returned when a variable is assigned two
 /// inconsistent values.

@@ -1,9 +1,8 @@
 use crate::{
+	actions::explanation::ExplanationActions,
 	propagator::{conflict::Conflict, reason::ReasonBuilder},
 	BoolView, IntVal, IntView,
 };
-
-use super::explanation::ExplanationActions;
 
 pub(crate) trait PropagationActions: ExplanationActions {
 	fn set_bool_val(

@@ -13,13 +13,12 @@ use pindakaas::{
 	Var as RawVar,
 };
 
-use self::{
-	bool::{BoolExpr, BoolView},
-	int::{IntVar, IntView},
-	reformulate::{ReformulationError, VariableMap},
-};
 use crate::{
-	model::int::IntVarDef,
+	model::{
+		bool::{BoolExpr, BoolView},
+		int::{IntVar, IntVarDef, IntView},
+		reformulate::{ReformulationError, VariableMap},
+	},
 	solver::{engine::int_var::IntVar as SlvIntVar, SatSolver},
 	Constraint, Solver,
 };
