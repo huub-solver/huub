@@ -202,6 +202,34 @@ impl Model {
 						});
 					}
 				}
+				"bool_lin_eq" => {
+					if let [coeffs, vars, sum] = c.args.as_slice() {
+						let coeffs: Vec<_> = arg_array(fzn, coeffs)?
+							.iter()
+							.map(|l| par_int(fzn, l))
+							.try_collect()?;
+						let vars: Vec<_> = arg_array(fzn, vars)?
+							.iter()
+							.map(|l| lit_bool(fzn, &mut prb, &mut map, l))
+							.try_collect()?;
+						let sum = arg_int(fzn, &mut prb, &mut map, sum)?;
+						let vars: Vec<IntView> = vars
+							.into_iter()
+							.zip(coeffs.into_iter())
+							.filter_map(|(x, c)| {
+								NonZeroIntVal::new(c).map(|c| IntView::from(x) * c)
+							})
+							.chain(Some(-sum))
+							.collect();
+						prb += Constraint::IntLinEq(vars, 0);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "bool_lin_eq",
+							found: c.args.len(),
+							expected: 3,
+						});
+					}
+				}
 				"bool_clause" => {
 					if let [pos, neg] = c.args.as_slice() {
 						let pos = arg_array(fzn, pos)?;
