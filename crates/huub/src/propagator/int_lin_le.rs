@@ -9,7 +9,7 @@ use crate::{
 	},
 	solver::{
 		engine::queue::PriorityLevel,
-		poster::Poster,
+		poster::{BoxedPropagator, Poster},
 		value::IntVal,
 		view::{BoolViewInner, IntView, IntViewInner},
 	},
@@ -76,7 +76,9 @@ impl IntLinearLessEqImpBounds {
 	}
 }
 
-impl<const B: usize> Propagator for IntLinearLessEqBoundsImpl<B> {
+impl<const B: usize, P: PropagationActions, E: ExplanationActions> Propagator<P, E>
+	for IntLinearLessEqBoundsImpl<B>
+{
 	fn notify_event(&mut self, _: u32, _: &IntEvent) -> bool {
 		true
 	}
@@ -91,7 +93,7 @@ impl<const B: usize> Propagator for IntLinearLessEqBoundsImpl<B> {
 
 	// propagation rule: x[i] <= rhs - sum_{j != i} x[j].lower_bound
 	#[tracing::instrument(name = "int_lin_le", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
+	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		// If the reified variable is false, skip propagation
 		if let Some(r) = self.reification.get() {
 			if !actions
@@ -144,7 +146,7 @@ impl<const B: usize> Propagator for IntLinearLessEqBoundsImpl<B> {
 		Ok(())
 	}
 
-	fn explain(&mut self, actions: &mut dyn ExplanationActions, data: u64) -> Conjunction {
+	fn explain(&mut self, actions: &mut E, data: u64) -> Conjunction {
 		let i = data as usize;
 		let mut var_lits: Vec<RawLit> = self
 			.vars
@@ -174,7 +176,7 @@ struct IntLinearLessEqBoundsPoster<const R: usize> {
 	reification: OptField<R, RawLit>,
 }
 impl<const R: usize> Poster for IntLinearLessEqBoundsPoster<R> {
-	fn post<I: InitializationActions>(self, actions: &mut I) -> (Box<dyn Propagator>, bool) {
+	fn post<I: InitializationActions>(self, actions: &mut I) -> (BoxedPropagator, bool) {
 		let prop = IntLinearLessEqBoundsImpl {
 			vars: self.vars,
 			max: self.max,

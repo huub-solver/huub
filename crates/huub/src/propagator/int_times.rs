@@ -1,11 +1,14 @@
 use crate::{
-	actions::initialization::InitializationActions,
+	actions::{explanation::ExplanationActions, initialization::InitializationActions},
 	helpers::{div_ceil, div_floor},
 	propagator::{
 		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions,
 		Propagator,
 	},
-	solver::{engine::queue::PriorityLevel, poster::Poster},
+	solver::{
+		engine::queue::PriorityLevel,
+		poster::{BoxedPropagator, Poster},
+	},
 	IntView, NonZeroIntVal,
 };
 
@@ -26,7 +29,7 @@ impl IntTimesBounds {
 	}
 }
 
-impl Propagator for IntTimesBounds {
+impl<P: PropagationActions, E: ExplanationActions> Propagator<P, E> for IntTimesBounds {
 	fn notify_event(&mut self, _data: u32, _event: &IntEvent) -> bool {
 		true
 	}
@@ -38,7 +41,7 @@ impl Propagator for IntTimesBounds {
 	fn notify_backtrack(&mut self, _new_level: usize) {}
 
 	#[tracing::instrument(name = "int_times", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
+	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		let (x_lb, x_ub) = actions.get_int_bounds(self.x);
 		let x_lb_lit = actions.get_int_lower_bound_lit(self.x);
 		let x_ub_lit = actions.get_int_upper_bound_lit(self.x);
@@ -122,10 +125,7 @@ struct IntTimesBoundsPoster {
 	z: IntView,
 }
 impl Poster for IntTimesBoundsPoster {
-	fn post<I: InitializationActions + ?Sized>(
-		self,
-		actions: &mut I,
-	) -> (Box<dyn Propagator + 'static>, bool) {
+	fn post<I: InitializationActions + ?Sized>(self, actions: &mut I) -> (BoxedPropagator, bool) {
 		actions.subscribe_int(self.x, IntEvent::Bounds, 1);
 		actions.subscribe_int(self.y, IntEvent::Bounds, 2);
 		actions.subscribe_int(self.z, IntEvent::Bounds, 3);

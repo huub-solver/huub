@@ -1,12 +1,12 @@
 use crate::{
-	actions::initialization::InitializationActions,
+	actions::{explanation::ExplanationActions, initialization::InitializationActions},
 	propagator::{
 		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions,
 		Propagator,
 	},
 	solver::{
 		engine::{int_var::LitMeaning, queue::PriorityLevel},
-		poster::Poster,
+		poster::{BoxedPropagator, Poster},
 		view::{IntView, IntViewInner},
 	},
 };
@@ -24,7 +24,7 @@ impl AllDifferentIntValue {
 	}
 }
 
-impl Propagator for AllDifferentIntValue {
+impl<P: PropagationActions, E: ExplanationActions> Propagator<P, E> for AllDifferentIntValue {
 	fn notify_event(&mut self, data: u32, _: &IntEvent) -> bool {
 		self.action_list.push(data);
 		true
@@ -39,7 +39,7 @@ impl Propagator for AllDifferentIntValue {
 	}
 
 	#[tracing::instrument(name = "all_different", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
+	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		while let Some(i) = self.action_list.pop() {
 			let var = self.vars[i as usize];
 			let val = actions.get_int_val(var).unwrap();
@@ -59,7 +59,7 @@ struct AllDifferentIntValuePoster {
 	vars: Vec<IntView>,
 }
 impl Poster for AllDifferentIntValuePoster {
-	fn post<I: InitializationActions>(self, actions: &mut I) -> (Box<dyn Propagator>, bool) {
+	fn post<I: InitializationActions>(self, actions: &mut I) -> (BoxedPropagator, bool) {
 		let action_list: Vec<u32> = self
 			.vars
 			.iter()

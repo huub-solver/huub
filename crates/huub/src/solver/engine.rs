@@ -19,7 +19,6 @@ use crate::{
 		conflict::Conflict,
 		int_event::IntEvent,
 		reason::{Reason, ReasonBuilder},
-		Propagator,
 	},
 	solver::{
 		engine::{
@@ -29,6 +28,7 @@ use crate::{
 			queue::PriorityQueue,
 			trail::{HasChanged, SatTrail, Trail},
 		},
+		poster::BoxedPropagator,
 		view::{BoolViewInner, IntViewInner},
 	},
 	BoolView, Clause, Conjunction, IntVal, IntView,
@@ -37,7 +37,7 @@ use crate::{
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Engine {
 	/// Storage of the propagators
-	pub(crate) propagators: IndexVec<PropRef, Box<dyn Propagator>>,
+	pub(crate) propagators: IndexVec<PropRef, BoxedPropagator>,
 	/// Internal State representation of the constraint programming engine
 	pub(crate) state: State,
 

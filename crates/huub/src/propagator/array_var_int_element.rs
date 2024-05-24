@@ -1,10 +1,15 @@
 use crate::{
-	actions::initialization::InitializationActions,
+	actions::{explanation::ExplanationActions, initialization::InitializationActions},
 	propagator::{
 		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions,
 		Propagator,
 	},
-	solver::{engine::queue::PriorityLevel, poster::Poster, value::IntVal, view::IntView},
+	solver::{
+		engine::queue::PriorityLevel,
+		poster::{BoxedPropagator, Poster},
+		value::IntVal,
+		view::IntView,
+	},
 	LitMeaning,
 };
 
@@ -30,7 +35,7 @@ impl ArrayVarIntElementBounds {
 	}
 }
 
-impl Propagator for ArrayVarIntElementBounds {
+impl<P: PropagationActions, E: ExplanationActions> Propagator<P, E> for ArrayVarIntElementBounds {
 	fn notify_event(&mut self, _: u32, _: &IntEvent) -> bool {
 		true
 	}
@@ -44,7 +49,7 @@ impl Propagator for ArrayVarIntElementBounds {
 	}
 
 	#[tracing::instrument(name = "array_int_element", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
+	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		let idx_is_fixed =
 			actions.get_int_lower_bound(self.idx) == actions.get_int_upper_bound(self.idx);
 		if idx_is_fixed {
@@ -198,7 +203,7 @@ struct ArrayVarIntElementBoundsPoster {
 	vars: Vec<IntView>,
 }
 impl Poster for ArrayVarIntElementBoundsPoster {
-	fn post<I: InitializationActions>(self, actions: &mut I) -> (Box<dyn Propagator>, bool) {
+	fn post<I: InitializationActions>(self, actions: &mut I) -> (BoxedPropagator, bool) {
 		let prop = ArrayVarIntElementBounds {
 			vars: self.vars.into_iter().map(Into::into).collect(),
 			y: self.y,

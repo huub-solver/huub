@@ -1,10 +1,15 @@
 use crate::{
-	actions::initialization::InitializationActions,
+	actions::{explanation::ExplanationActions, initialization::InitializationActions},
 	propagator::{
 		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions,
 		Propagator,
 	},
-	solver::{engine::queue::PriorityLevel, poster::Poster, value::IntVal, view::IntView},
+	solver::{
+		engine::queue::PriorityLevel,
+		poster::{BoxedPropagator, Poster},
+		value::IntVal,
+		view::IntView,
+	},
 	LitMeaning,
 };
 
@@ -28,7 +33,7 @@ impl ArrayIntMinimumBounds {
 	}
 }
 
-impl Propagator for ArrayIntMinimumBounds {
+impl<P: PropagationActions, E: ExplanationActions> Propagator<P, E> for ArrayIntMinimumBounds {
 	fn notify_event(&mut self, data: u32, event: &IntEvent) -> bool {
 		if data == self.vars.len() as u32 {
 			self.y_change = true;
@@ -48,7 +53,7 @@ impl Propagator for ArrayIntMinimumBounds {
 	}
 
 	#[tracing::instrument(name = "array_int_minimum", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
+	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		if !self.action_list.is_empty() {
 			let min_lb = self
 				.vars
@@ -107,10 +112,7 @@ struct ArrayIntMinimumBoundsPoster {
 	min: IntView,
 }
 impl Poster for ArrayIntMinimumBoundsPoster {
-	fn post<I: InitializationActions>(
-		self,
-		actions: &mut I,
-	) -> (Box<dyn Propagator + 'static>, bool) {
+	fn post<I: InitializationActions>(self, actions: &mut I) -> (BoxedPropagator, bool) {
 		let prop = ArrayIntMinimumBounds {
 			vars: self.vars,
 			min: self.min,

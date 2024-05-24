@@ -12,11 +12,16 @@ use std::fmt::Debug;
 use crate::{
 	actions::{explanation::ExplanationActions, propagation::PropagationActions},
 	propagator::{conflict::Conflict, int_event::IntEvent},
-	solver::engine::queue::PriorityLevel,
+	solver::{
+		engine::{propagation_context::PropagationContext, queue::PriorityLevel, State},
+		poster::BoxedPropagator,
+	},
 	Conjunction,
 };
 
-pub(crate) trait Propagator: Debug + DynPropClone {
+pub(crate) trait Propagator<P: PropagationActions, E: ExplanationActions>:
+	Debug + DynPropClone
+{
 	/// The method called by the solver to notify the propagator of a variable
 	/// event to which it has subscribed. The method returns true if the
 	/// propagator should be placed in the propagation queue.
@@ -46,7 +51,7 @@ pub(crate) trait Propagator: Debug + DynPropClone {
 
 	/// The propagate method is called during the search process to allow the
 	/// propagator to enforce
-	fn propagate(&mut self, actions: &mut dyn PropagationActions) -> Result<(), Conflict> {
+	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		let _ = actions;
 		Ok(())
 	}
@@ -57,7 +62,7 @@ pub(crate) trait Propagator: Debug + DynPropClone {
 	/// lazy explaination emitted by the propagator. The propagator must now
 	/// produce the conjunction of literals that led to a literal being
 	/// propagated.
-	fn explain(&mut self, actions: &mut dyn ExplanationActions, data: u64) -> Conjunction {
+	fn explain(&mut self, actions: &mut E, data: u64) -> Conjunction {
 		let _ = actions;
 		let _ = data;
 		// Method will only be called if `propagate` used a lazy reason.
@@ -66,15 +71,15 @@ pub(crate) trait Propagator: Debug + DynPropClone {
 }
 
 pub(crate) trait DynPropClone {
-	fn clone_dyn_prop(&self) -> Box<dyn Propagator>;
+	fn clone_dyn_prop(&self) -> BoxedPropagator;
 }
-impl<P: Propagator + Clone + 'static> DynPropClone for P {
-	fn clone_dyn_prop(&self) -> Box<dyn Propagator> {
+impl<P: for<'a> Propagator<PropagationContext<'a>, State> + Clone + 'static> DynPropClone for P {
+	fn clone_dyn_prop(&self) -> BoxedPropagator {
 		Box::new(self.clone())
 	}
 }
-impl Clone for Box<dyn Propagator> {
-	fn clone(&self) -> Box<dyn Propagator> {
+impl Clone for BoxedPropagator {
+	fn clone(&self) -> BoxedPropagator {
 		self.clone_dyn_prop()
 	}
 }
