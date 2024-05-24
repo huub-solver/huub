@@ -1,7 +1,12 @@
-use super::{reason::ReasonBuilder, InitializationActions, PropagationActions};
+use super::{reason::ReasonBuilder, PropagationActions};
 use crate::{
 	propagator::{conflict::Conflict, int_event::IntEvent, Propagator},
-	solver::{engine::queue::PriorityLevel, value::IntVal, view::IntView},
+	solver::{
+		engine::queue::PriorityLevel,
+		poster::{InitializationActions, Poster},
+		value::IntVal,
+		view::IntView,
+	},
 	LitMeaning,
 };
 
@@ -14,32 +19,20 @@ pub(crate) struct ArrayVarIntElementBounds {
 }
 
 impl ArrayVarIntElementBounds {
-	pub(crate) fn new<V: Into<IntView>, VI: IntoIterator<Item = V>>(
+	pub(crate) fn prepare<V: Into<IntView>, VI: IntoIterator<Item = V>>(
 		vars: VI,
 		y: IntView,
 		idx: IntView,
-	) -> Self {
-		let vars: Vec<IntView> = vars.into_iter().map(Into::into).collect();
-		let sz = vars.len();
-		Self {
-			vars,
+	) -> impl Poster {
+		ArrayVarIntElementBoundsPoster {
+			vars: vars.into_iter().map(Into::into).collect(),
 			y,
 			idx,
-			action_list: Vec::with_capacity(sz),
 		}
 	}
 }
 
 impl Propagator for ArrayVarIntElementBounds {
-	fn initialize(&mut self, actions: &mut dyn InitializationActions) -> bool {
-		for (i, v) in self.vars.iter().enumerate() {
-			actions.subscribe_int(*v, IntEvent::Bounds, i as u32);
-		}
-		actions.subscribe_int(self.y, IntEvent::Bounds, self.vars.len() as u32);
-		actions.subscribe_int(self.idx, IntEvent::Domain, self.vars.len() as u32 + 1);
-		true
-	}
-
 	fn notify_event(&mut self, _: u32, _: &IntEvent) -> bool {
 		true
 	}
@@ -201,6 +194,28 @@ impl Propagator for ArrayVarIntElementBounds {
 	}
 }
 
+struct ArrayVarIntElementBoundsPoster {
+	idx: IntView,
+	y: IntView,
+	vars: Vec<IntView>,
+}
+impl Poster for ArrayVarIntElementBoundsPoster {
+	fn post<I: InitializationActions>(self, actions: &mut I) -> (Box<dyn Propagator>, bool) {
+		let prop = ArrayVarIntElementBounds {
+			vars: self.vars.into_iter().map(Into::into).collect(),
+			y: self.y,
+			idx: self.idx,
+			action_list: Vec::new(),
+		};
+		for (i, v) in prop.vars.iter().enumerate() {
+			actions.subscribe_int(*v, IntEvent::Bounds, i as u32);
+		}
+		actions.subscribe_int(prop.y, IntEvent::Bounds, prop.vars.len() as u32);
+		actions.subscribe_int(prop.idx, IntEvent::Domain, prop.vars.len() as u32 + 1);
+		(Box::new(prop), false)
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
@@ -221,7 +236,7 @@ mod tests {
 		let y = IntVar::new_in(&mut slv, RangeList::from_iter([3..=4]), true);
 		let idx = IntVar::new_in(&mut slv, RangeList::from_iter([0..=2]), true);
 
-		slv.add_propagator(ArrayVarIntElementBounds::new(vec![a, b, c], y, idx));
+		slv.add_propagator(ArrayVarIntElementBounds::prepare(vec![a, b, c], y, idx));
 		slv.expect_solutions(
 			&[idx, y, a, b, c],
 			expect![[r#"

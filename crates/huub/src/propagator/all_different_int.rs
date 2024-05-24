@@ -1,8 +1,9 @@
-use super::{reason::ReasonBuilder, InitializationActions, PropagationActions};
+use super::{reason::ReasonBuilder, PropagationActions};
 use crate::{
 	propagator::{conflict::Conflict, int_event::IntEvent, Propagator},
 	solver::{
 		engine::{int_var::LitMeaning, queue::PriorityLevel},
+		poster::{InitializationActions, Poster},
 		view::{IntView, IntViewInner},
 	},
 };
@@ -14,31 +15,13 @@ pub(crate) struct AllDifferentIntValue {
 }
 
 impl AllDifferentIntValue {
-	pub(crate) fn new<V: Into<IntView>, I: IntoIterator<Item = V>>(vars: I) -> Self {
+	pub(crate) fn prepare<V: Into<IntView>, I: IntoIterator<Item = V>>(vars: I) -> impl Poster {
 		let vars: Vec<IntView> = vars.into_iter().map(Into::into).collect();
-		let action_list = vars
-			.iter()
-			.enumerate()
-			.filter_map(|(i, v)| {
-				if matches!(v.0, IntViewInner::Const(_)) {
-					Some(i as u32)
-				} else {
-					None
-				}
-			})
-			.collect();
-		Self { vars, action_list }
+		AllDifferentIntValuePoster { vars }
 	}
 }
 
 impl Propagator for AllDifferentIntValue {
-	fn initialize(&mut self, actions: &mut dyn InitializationActions) -> bool {
-		for (i, v) in self.vars.iter().enumerate() {
-			actions.subscribe_int(*v, IntEvent::Fixed, i as u32)
-		}
-		!self.action_list.is_empty()
-	}
-
 	fn notify_event(&mut self, data: u32, _: &IntEvent) -> bool {
 		self.action_list.push(data);
 		true
@@ -69,6 +52,35 @@ impl Propagator for AllDifferentIntValue {
 	}
 }
 
+struct AllDifferentIntValuePoster {
+	vars: Vec<IntView>,
+}
+impl Poster for AllDifferentIntValuePoster {
+	fn post<I: InitializationActions>(self, actions: &mut I) -> (Box<dyn Propagator>, bool) {
+		let action_list: Vec<u32> = self
+			.vars
+			.iter()
+			.enumerate()
+			.filter_map(|(i, v)| {
+				if matches!(v.0, IntViewInner::Const(_)) {
+					Some(i as u32)
+				} else {
+					None
+				}
+			})
+			.collect();
+		let enqueue = !action_list.is_empty();
+		let prop = AllDifferentIntValue {
+			vars: self.vars,
+			action_list,
+		};
+		for (i, v) in prop.vars.iter().enumerate() {
+			actions.subscribe_int(*v, IntEvent::Fixed, i as u32)
+		}
+		(Box::new(prop), enqueue)
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use flatzinc_serde::RangeList;
@@ -87,7 +99,7 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
 
-		slv.add_propagator(AllDifferentIntValue::new(vec![a, b, c]));
+		slv.add_propagator(AllDifferentIntValue::prepare(vec![a, b, c]));
 		slv.assert_all_solutions(&[a, b, c], |sol| sol.iter().all_unique())
 	}
 
@@ -98,7 +110,7 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
 
-		slv.add_propagator(AllDifferentIntValue::new(vec![a, b, c]));
+		slv.add_propagator(AllDifferentIntValue::prepare(vec![a, b, c]));
 		slv.assert_unsatisfiable()
 	}
 
@@ -120,13 +132,13 @@ mod tests {
 					));
 				}
 			}
-			slv.add_propagator(AllDifferentIntValue::new(vars.clone()));
+			slv.add_propagator(AllDifferentIntValue::prepare(vars.clone()));
 			all_vars.push(vars);
 		});
 		// add all different propagator for each column
 		for i in 0..9 {
 			let col_vars: Vec<IntView> = (0..9).map(|j| all_vars[j][i]).collect();
-			slv.add_propagator(AllDifferentIntValue::new(col_vars));
+			slv.add_propagator(AllDifferentIntValue::prepare(col_vars));
 		}
 		// add all different propagator for each 3 by 3 grid
 		for i in 0..3 {
@@ -137,7 +149,7 @@ mod tests {
 						block_vars.push(all_vars[3 * i + x][3 * j + y]);
 					}
 				}
-				slv.add_propagator(AllDifferentIntValue::new(block_vars));
+				slv.add_propagator(AllDifferentIntValue::prepare(block_vars));
 			}
 		}
 		assert_eq!(

@@ -1,10 +1,12 @@
 use super::{
-	conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, InitializationActions,
-	PropagationActions, Propagator,
+	conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions, Propagator,
 };
 use crate::{
 	helpers::{div_ceil, div_floor},
-	solver::engine::queue::PriorityLevel,
+	solver::{
+		engine::queue::PriorityLevel,
+		poster::{InitializationActions, Poster},
+	},
 	IntView, NonZeroIntVal,
 };
 
@@ -20,20 +22,12 @@ pub(crate) struct IntTimesBounds {
 }
 
 impl IntTimesBounds {
-	pub(crate) fn new(x: IntView, y: IntView, z: IntView) -> Self {
-		Self { x, y, z }
+	pub(crate) fn prepare(x: IntView, y: IntView, z: IntView) -> impl Poster {
+		IntTimesBoundsPoster { x, y, z }
 	}
 }
 
 impl Propagator for IntTimesBounds {
-	fn initialize(&mut self, actions: &mut dyn InitializationActions) -> bool {
-		actions.subscribe_int(self.x, IntEvent::Bounds, 1);
-		actions.subscribe_int(self.y, IntEvent::Bounds, 2);
-		actions.subscribe_int(self.z, IntEvent::Bounds, 3);
-
-		false
-	}
-
 	fn notify_event(&mut self, _data: u32, _event: &IntEvent) -> bool {
 		true
 	}
@@ -123,6 +117,30 @@ impl Propagator for IntTimesBounds {
 	}
 }
 
+struct IntTimesBoundsPoster {
+	x: IntView,
+	y: IntView,
+	z: IntView,
+}
+impl Poster for IntTimesBoundsPoster {
+	fn post<I: InitializationActions + ?Sized>(
+		self,
+		actions: &mut I,
+	) -> (Box<dyn Propagator + 'static>, bool) {
+		actions.subscribe_int(self.x, IntEvent::Bounds, 1);
+		actions.subscribe_int(self.y, IntEvent::Bounds, 2);
+		actions.subscribe_int(self.z, IntEvent::Bounds, 3);
+		(
+			Box::new(IntTimesBounds {
+				x: self.x,
+				y: self.y,
+				z: self.z,
+			}),
+			false,
+		)
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
@@ -138,7 +156,7 @@ mod tests {
 		let b = IntVar::new_in(&mut slv, (-1..=2).into(), true);
 		let c = IntVar::new_in(&mut slv, (-4..=2).into(), true);
 
-		slv.add_propagator(IntTimesBounds::new(a, b, c));
+		slv.add_propagator(IntTimesBounds::prepare(a, b, c));
 		slv.expect_solutions(
 			&[a, b, c],
 			expect![[r#"

@@ -54,7 +54,7 @@ impl Constraint {
 					.iter()
 					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
-				slv.add_propagator(AllDifferentIntValue::new(vars));
+				slv.add_propagator(AllDifferentIntValue::prepare(vars));
 				Ok(())
 			}
 			Constraint::IntLinLessEq(vars, c) => {
@@ -62,7 +62,7 @@ impl Constraint {
 					.iter()
 					.map(|v| v.to_arg(ReifContext::Pos, slv, map))
 					.collect();
-				slv.add_propagator(IntLinearLessEqBounds::new(vars, *c));
+				slv.add_propagator(IntLinearLessEqBounds::prepare(vars, *c));
 				Ok(())
 			}
 			Constraint::IntLinEq(vars, c) => {
@@ -71,9 +71,12 @@ impl Constraint {
 					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
 				// coeffs * vars <= c
-				slv.add_propagator(IntLinearLessEqBounds::new(vars.clone(), *c));
+				slv.add_propagator(IntLinearLessEqBounds::prepare(vars.clone(), *c));
 				// coeffs * vars >= c <=>  -coeffs * vars <= -c
-				slv.add_propagator(IntLinearLessEqBounds::new(vars.into_iter().map(|v| -v), -c));
+				slv.add_propagator(IntLinearLessEqBounds::prepare(
+					vars.into_iter().map(|v| -v),
+					-c,
+				));
 				Ok(())
 			}
 			Constraint::IntLinEqImp(vars, c, r) => {
@@ -84,16 +87,16 @@ impl Constraint {
 				let r = r.to_arg(ReifContext::Neg, slv, map, None)?;
 				match r.0 {
 					BoolViewInner::Const(true) => {
-						slv.add_propagator(IntLinearLessEqBounds::new(vars.clone(), *c));
-						slv.add_propagator(IntLinearLessEqBounds::new(
+						slv.add_propagator(IntLinearLessEqBounds::prepare(vars.clone(), *c));
+						slv.add_propagator(IntLinearLessEqBounds::prepare(
 							vars.into_iter().map(|v| -v),
 							-c,
 						));
 					}
 					BoolViewInner::Const(false) => {}
 					BoolViewInner::Lit(r) => {
-						slv.add_propagator(IntLinearLessEqImpBounds::new(vars.clone(), *c, r));
-						slv.add_propagator(IntLinearLessEqImpBounds::new(
+						slv.add_propagator(IntLinearLessEqImpBounds::prepare(vars.clone(), *c, r));
+						slv.add_propagator(IntLinearLessEqImpBounds::prepare(
 							vars.into_iter().map(|v| -v),
 							-c,
 							r,
@@ -110,8 +113,8 @@ impl Constraint {
 				let r = r.to_arg(ReifContext::Mixed, slv, map, None)?;
 				match r.0 {
 					BoolViewInner::Const(true) => {
-						slv.add_propagator(IntLinearLessEqBounds::new(vars.clone(), *c));
-						slv.add_propagator(IntLinearLessEqBounds::new(
+						slv.add_propagator(IntLinearLessEqBounds::prepare(vars.clone(), *c));
+						slv.add_propagator(IntLinearLessEqBounds::prepare(
 							vars.into_iter().map(|v| -v),
 							-c,
 						));
@@ -120,8 +123,8 @@ impl Constraint {
 						todo!("implement int_lin_ne")
 					}
 					BoolViewInner::Lit(r) => {
-						slv.add_propagator(IntLinearLessEqImpBounds::new(vars.clone(), *c, r));
-						slv.add_propagator(IntLinearLessEqImpBounds::new(
+						slv.add_propagator(IntLinearLessEqImpBounds::prepare(vars.clone(), *c, r));
+						slv.add_propagator(IntLinearLessEqImpBounds::prepare(
 							vars.into_iter().map(|v| -v),
 							-c,
 							r,
@@ -139,11 +142,11 @@ impl Constraint {
 				let r = r.to_arg(ReifContext::Neg, slv, map, None)?;
 				match r.0 {
 					BoolViewInner::Const(true) => {
-						slv.add_propagator(IntLinearLessEqBounds::new(vars, *c));
+						slv.add_propagator(IntLinearLessEqBounds::prepare(vars, *c));
 					}
 					BoolViewInner::Const(false) => {}
 					BoolViewInner::Lit(r) => {
-						slv.add_propagator(IntLinearLessEqImpBounds::new(vars, *c, r));
+						slv.add_propagator(IntLinearLessEqImpBounds::prepare(vars, *c, r));
 					}
 				}
 				Ok(())
@@ -156,16 +159,16 @@ impl Constraint {
 				let r = r.to_arg(ReifContext::Mixed, slv, map, None)?;
 				match r.0 {
 					BoolViewInner::Const(true) => {
-						slv.add_propagator(IntLinearLessEqBounds::new(vars, *c));
+						slv.add_propagator(IntLinearLessEqBounds::prepare(vars, *c));
 					}
 					BoolViewInner::Const(false) => {
-						slv.add_propagator(IntLinearLessEqBounds::new(
+						slv.add_propagator(IntLinearLessEqBounds::prepare(
 							vars.into_iter().map(|v| -v),
 							-c + 1,
 						));
 					}
 					BoolViewInner::Lit(r) => {
-						slv.add_propagator(IntLinearLessEqImpBounds::new(vars, *c, r));
+						slv.add_propagator(IntLinearLessEqImpBounds::prepare(vars, *c, r));
 					}
 				}
 				Ok(())
@@ -176,7 +179,7 @@ impl Constraint {
 					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
 				let y = y.to_arg(ReifContext::Mixed, slv, map);
-				slv.add_propagator(ArrayIntMinimumBounds::new(vars, y));
+				slv.add_propagator(ArrayIntMinimumBounds::prepare(vars, y));
 				Ok(())
 			}
 			Constraint::ArrayIntMaximum(vars, y) => {
@@ -185,7 +188,7 @@ impl Constraint {
 					.map(|v| -v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
 				let y = -y.to_arg(ReifContext::Mixed, slv, map);
-				slv.add_propagator(ArrayIntMinimumBounds::new(vars, y));
+				slv.add_propagator(ArrayIntMinimumBounds::prepare(vars, y));
 				Ok(())
 			}
 			Constraint::ArrayVarIntElement(vars, idx, y) => {
@@ -195,14 +198,14 @@ impl Constraint {
 					.collect();
 				let y = y.to_arg(ReifContext::Mixed, slv, map);
 				let idx = idx.to_arg(ReifContext::Mixed, slv, map);
-				slv.add_propagator(ArrayVarIntElementBounds::new(vars, y, idx));
+				slv.add_propagator(ArrayVarIntElementBounds::prepare(vars, y, idx));
 				Ok(())
 			}
 			Constraint::IntTimes(x, y, z) => {
 				let x = x.to_arg(ReifContext::Mixed, slv, map);
 				let y = y.to_arg(ReifContext::Mixed, slv, map);
 				let z = z.to_arg(ReifContext::Mixed, slv, map);
-				slv.add_propagator(IntTimesBounds::new(x, y, z));
+				slv.add_propagator(IntTimesBounds::prepare(x, y, z));
 				Ok(())
 			}
 		}

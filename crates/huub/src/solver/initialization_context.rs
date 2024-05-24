@@ -5,15 +5,13 @@ use pindakaas::{
 
 use super::{
 	engine::PropRef,
+	poster::InitializationActions,
 	view::{BoolViewInner, IntViewInner},
 	SatSolver,
 };
-use crate::{
-	propagator::{int_event::IntEvent, InitializationActions},
-	BoolView, IntView, Solver,
-};
+use crate::{propagator::int_event::IntEvent, BoolView, IntView, Solver};
 
-pub(crate) struct InitializationContext<'a, Sat: SatSolver>
+pub(crate) struct InitializationContext<'a, Sat: SatSolver + 'a>
 where
 	<Sat as SolverTrait>::ValueFn: PropagatorAccess,
 {

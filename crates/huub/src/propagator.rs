@@ -16,16 +16,6 @@ use crate::{
 };
 
 pub(crate) trait Propagator: Debug + DynPropClone {
-	/// The method called when registering a propagator with the solver, the method
-	/// returns true when the propagator needs to be enqued immediately.
-	///
-	/// This method is generally used to register variable event
-	/// subscriptions with the solver.
-	fn initialize(&mut self, actions: &mut dyn InitializationActions) -> bool {
-		let _ = actions;
-		false
-	}
-
 	/// The method called by the solver to notify the propagator of a variable
 	/// event to which it has subscribed. The method returns true if the
 	/// propagator should be placed in the propagation queue.
@@ -150,12 +140,6 @@ pub(crate) trait ExplainActions {
 		let ub = self.get_int_upper_bound(var);
 		self.get_int_lit(var, LitMeaning::Less(ub + 1))
 	}
-}
-
-pub(crate) trait InitializationActions {
-	#[allow(dead_code)]
-	fn subscribe_bool(&mut self, var: BoolView, data: u32);
-	fn subscribe_int(&mut self, var: IntView, event: IntEvent, data: u32);
 }
 
 pub(crate) trait DynPropClone {

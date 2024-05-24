@@ -1,5 +1,6 @@
 pub(crate) mod engine;
 pub(crate) mod initialization_context;
+pub(crate) mod poster;
 pub(crate) mod value;
 pub(crate) mod view;
 
@@ -18,11 +19,12 @@ use pindakaas::{
 use tracing::debug;
 
 use self::{
+	poster::Poster,
 	value::{AssumptionChecker, ConstantFailure, Valuation, Value},
 	view::{BoolViewInner, IntView, SolverView},
 };
 use crate::{
-	propagator::{ExplainActions, Propagator},
+	propagator::ExplainActions,
 	solver::{
 		engine::{Engine, PropRef},
 		initialization_context::InitializationContext,
@@ -277,17 +279,18 @@ where
 		self.engine().state.int_vars.len()
 	}
 
-	pub(crate) fn add_propagator(&mut self, mut prop: impl Propagator + 'static) {
+	pub(crate) fn add_propagator<P: Poster>(&mut self, poster: P) {
 		let prop_ref = PropRef::from(self.engine().propagators.len());
-		let enqueue = prop.initialize(&mut InitializationContext {
+		let mut actions = InitializationContext {
 			slv: self,
 			prop: prop_ref,
-		});
+		};
+		let (prop, enqueue) = poster.post(&mut actions);
 		if enqueue {
 			let level = prop.queue_priority_level();
 			self.engine_mut().state.prop_queue.insert(level, prop_ref);
 		}
-		let p = self.engine_mut().propagators.push(Box::new(prop));
+		let p = self.engine_mut().propagators.push(prop);
 		debug_assert_eq!(prop_ref, p);
 		let p = self.engine_mut().state.enqueued.push(enqueue);
 		debug_assert_eq!(prop_ref, p);

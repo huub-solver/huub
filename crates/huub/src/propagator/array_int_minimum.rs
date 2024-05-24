@@ -1,41 +1,36 @@
-use super::{reason::ReasonBuilder, InitializationActions, PropagationActions};
+use super::{reason::ReasonBuilder, PropagationActions};
 use crate::{
 	propagator::{conflict::Conflict, int_event::IntEvent, Propagator},
-	solver::{engine::queue::PriorityLevel, value::IntVal, view::IntView},
+	solver::{
+		engine::queue::PriorityLevel,
+		poster::{InitializationActions, Poster},
+		value::IntVal,
+		view::IntView,
+	},
 	LitMeaning,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ArrayIntMinimumBounds {
 	vars: Vec<IntView>,                // Variables in the minimum constraints
-	y: IntView,                        // Variable that stores the minimum value
+	min: IntView,                      // Variable that stores the minimum value
 	action_list: Vec<(u32, IntEvent)>, // List of x variables that have been modified since the last propagation
 	y_change: bool,                    // Whether the lower bound of y has been changed
 }
 
 impl ArrayIntMinimumBounds {
-	pub(crate) fn new<V: Into<IntView>, VI: IntoIterator<Item = V>>(vars: VI, y: IntView) -> Self {
-		let vars: Vec<IntView> = vars.into_iter().map(Into::into).collect();
-		let sz = vars.len();
-		Self {
-			vars,
-			y,
-			action_list: Vec::with_capacity(sz),
-			y_change: false,
+	pub(crate) fn prepare<V: Into<IntView>, VI: IntoIterator<Item = V>>(
+		vars: VI,
+		min: IntView,
+	) -> impl Poster {
+		ArrayIntMinimumBoundsPoster {
+			vars: vars.into_iter().map(Into::into).collect(),
+			min,
 		}
 	}
 }
 
 impl Propagator for ArrayIntMinimumBounds {
-	fn initialize(&mut self, actions: &mut dyn InitializationActions) -> bool {
-		for (i, v) in self.vars.iter().enumerate() {
-			actions.subscribe_int(*v, IntEvent::UpperBound, i as u32);
-			actions.subscribe_int(*v, IntEvent::LowerBound, i as u32);
-		}
-		actions.subscribe_int(self.y, IntEvent::LowerBound, self.vars.len() as u32);
-		true
-	}
-
 	fn notify_event(&mut self, data: u32, event: &IntEvent) -> bool {
 		if data == self.vars.len() as u32 {
 			self.y_change = true;
@@ -66,7 +61,7 @@ impl Propagator for ArrayIntMinimumBounds {
 			let (min_ub, min_ub_var) =
 				self.vars
 					.iter()
-					.fold((IntVal::MAX, self.y), |(ub, var), &e| {
+					.fold((IntVal::MAX, self.min), |(ub, var), &e| {
 						let e_ub = actions.get_int_upper_bound(e);
 						if e_ub < ub {
 							(e_ub, e)
@@ -76,14 +71,14 @@ impl Propagator for ArrayIntMinimumBounds {
 					});
 			// set y to be less than or equal to the minimum of upper bounds of x_i
 			actions.set_int_upper_bound(
-				self.y,
+				self.min,
 				min_ub,
 				&ReasonBuilder::Simple(actions.get_int_upper_bound_lit(min_ub_var)),
 			)?;
 
 			// set y to be greater than or equal to the minimum of lower bounds of x_i
 			actions.set_int_lower_bound(
-				self.y,
+				self.min,
 				min_lb,
 				&ReasonBuilder::Eager(
 					self.vars
@@ -96,16 +91,40 @@ impl Propagator for ArrayIntMinimumBounds {
 
 		// set x_i to be greater than or equal to y.lowerbound
 		if self.y_change {
-			let y_lb = actions.get_int_lower_bound(self.y);
+			let y_lb = actions.get_int_lower_bound(self.min);
 			for &x in self.vars.iter() {
 				actions.set_int_lower_bound(
 					x,
 					y_lb,
-					&ReasonBuilder::Simple(actions.get_int_lower_bound_lit(self.y)),
+					&ReasonBuilder::Simple(actions.get_int_lower_bound_lit(self.min)),
 				)?
 			}
 		}
 		Ok(())
+	}
+}
+
+struct ArrayIntMinimumBoundsPoster {
+	vars: Vec<IntView>,
+	min: IntView,
+}
+impl Poster for ArrayIntMinimumBoundsPoster {
+	fn post<I: InitializationActions>(
+		self,
+		actions: &mut I,
+	) -> (Box<dyn Propagator + 'static>, bool) {
+		let prop = ArrayIntMinimumBounds {
+			vars: self.vars,
+			min: self.min,
+			action_list: Vec::new(),
+			y_change: false,
+		};
+		for (i, v) in prop.vars.iter().enumerate() {
+			actions.subscribe_int(*v, IntEvent::UpperBound, i as u32);
+			actions.subscribe_int(*v, IntEvent::LowerBound, i as u32);
+		}
+		actions.subscribe_int(prop.min, IntEvent::LowerBound, prop.vars.len() as u32);
+		(Box::new(prop), false)
 	}
 }
 
@@ -163,7 +182,7 @@ mod tests {
 		let c = IntVar::new_in(&mut slv, RangeList::from_iter([2..=5]), true);
 		let y = IntVar::new_in(&mut slv, RangeList::from_iter([1..=3]), true);
 
-		slv.add_propagator(ArrayIntMinimumBounds::new(vec![-a, -b, -c], -y));
+		slv.add_propagator(ArrayIntMinimumBounds::prepare(vec![-a, -b, -c], -y));
 		slv.expect_solutions(
 			&[a, b, c, y],
 			expect![[r#"
