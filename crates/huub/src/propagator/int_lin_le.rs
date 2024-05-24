@@ -1,12 +1,13 @@
 use pindakaas::Lit as RawLit;
 
-use super::{reason::ReasonBuilder, ExplainActions, PropagationActions};
+use super::{reason::ReasonBuilder, ExplanationActions, PropagationActions};
 use crate::{
+	actions::initialization::InitializationActions,
 	helpers::opt_field::OptField,
 	propagator::{conflict::Conflict, int_event::IntEvent, Propagator},
 	solver::{
 		engine::queue::PriorityLevel,
-		poster::{InitializationActions, Poster},
+		poster::Poster,
 		value::IntVal,
 		view::{BoolViewInner, IntView, IntViewInner},
 	},
@@ -141,7 +142,7 @@ impl<const B: usize> Propagator for IntLinearLessEqBoundsImpl<B> {
 		Ok(())
 	}
 
-	fn explain(&mut self, actions: &mut dyn ExplainActions, data: u64) -> Conjunction {
+	fn explain(&mut self, actions: &mut dyn ExplanationActions, data: u64) -> Conjunction {
 		let i = data as usize;
 		let mut var_lits: Vec<RawLit> = self
 			.vars

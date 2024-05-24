@@ -24,7 +24,7 @@ use self::{
 	view::{BoolViewInner, IntView, SolverView},
 };
 use crate::{
-	propagator::ExplainActions,
+	actions::{explanation::ExplanationActions, inspection::InspectionActions},
 	solver::{
 		engine::{Engine, PropRef},
 		initialization_context::InitializationContext,

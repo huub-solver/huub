@@ -1,15 +1,19 @@
+use delegate::delegate;
 use pindakaas::{
 	solver::{PropagatingSolver, PropagatorAccess, Solver as SolverTrait},
 	Valuation as SatValuation,
 };
 
 use super::{
-	engine::PropRef,
-	poster::InitializationActions,
+	engine::{PropRef, TrailedInt},
 	view::{BoolViewInner, IntViewInner},
 	SatSolver,
 };
-use crate::{propagator::int_event::IntEvent, BoolView, IntView, Solver};
+use crate::{
+	actions::{initialization::InitializationActions, inspection::InspectionActions},
+	propagator::int_event::IntEvent,
+	BoolView, IntVal, IntView, Solver,
+};
 
 pub(crate) struct InitializationContext<'a, Sat: SatSolver + 'a>
 where
@@ -19,8 +23,10 @@ where
 	pub(crate) slv: &'a mut Solver<Sat>,
 }
 
-impl<'a, Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<ValueFn = Sol>>
-	InitializationActions for InitializationContext<'a, Sat>
+impl<'a, Sol, Sat> InitializationActions for InitializationContext<'a, Sat>
+where
+	Sol: PropagatorAccess + SatValuation,
+	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 {
 	fn subscribe_bool(&mut self, var: BoolView, data: u32) {
 		match var.0 {
@@ -64,6 +70,27 @@ impl<'a, Sol: PropagatorAccess + SatValuation, Sat: SatSolver + SolverTrait<Valu
 			IntViewInner::Bool { lit, .. } => {
 				self.subscribe_bool(BoolView(BoolViewInner::Lit(lit)), data)
 			}
+		}
+	}
+
+	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
+		self.slv.engine_mut().state.int_trail.track(init)
+	}
+}
+
+impl<'a, Sol, Sat> InspectionActions for InitializationContext<'a, Sat>
+where
+	Sol: PropagatorAccess + SatValuation,
+	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+{
+	delegate! {
+		to self.slv.engine().state {
+			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
+			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
+			fn get_int_upper_bound(&self, var: IntView) -> IntVal;
+			fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal);
+			fn get_int_val(&self, var: IntView) -> Option<IntVal>;
+			fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool;
 		}
 	}
 }

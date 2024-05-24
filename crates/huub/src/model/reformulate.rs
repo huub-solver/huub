@@ -8,7 +8,7 @@ use thiserror::Error;
 
 use super::{bool, int, int::IntVar, ModelView};
 use crate::{
-	propagator::ExplainActions,
+	actions::explanation::ExplanationActions,
 	solver::{
 		view::{BoolView, BoolViewInner, IntViewInner, SolverView},
 		SatSolver,

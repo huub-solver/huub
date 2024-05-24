@@ -1,7 +1,4 @@
-use crate::{
-	propagator::{int_event::IntEvent, Propagator},
-	BoolView, IntView,
-};
+use crate::{actions::initialization::InitializationActions, propagator::Propagator};
 
 /// The trait used called to registering a propagator with the solver.
 pub(crate) trait Poster {
@@ -15,9 +12,4 @@ pub(crate) trait Poster {
 	/// which includes the ability to subscribe to variable events, creating
 	/// trailed data structures, and inspecting the current state of varaibles.
 	fn post<I: InitializationActions>(self, actions: &mut I) -> (Box<dyn Propagator>, bool);
-}
-
-pub(crate) trait InitializationActions {
-	fn subscribe_bool(&mut self, var: BoolView, data: u32);
-	fn subscribe_int(&mut self, var: IntView, event: IntEvent, data: u32);
 }

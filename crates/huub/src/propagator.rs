@@ -9,10 +9,12 @@ pub(crate) mod reason;
 
 use std::fmt::Debug;
 
-use self::{int_event::IntEvent, reason::ReasonBuilder};
+use self::int_event::IntEvent;
 use crate::{
-	propagator::conflict::Conflict, solver::engine::queue::PriorityLevel, BoolView, Conjunction,
-	IntVal, IntView, LitMeaning,
+	actions::{explanation::ExplanationActions, propagation::PropagationActions},
+	propagator::conflict::Conflict,
+	solver::engine::queue::PriorityLevel,
+	Conjunction,
 };
 
 pub(crate) trait Propagator: Debug + DynPropClone {
@@ -56,89 +58,11 @@ pub(crate) trait Propagator: Debug + DynPropClone {
 	/// lazy explaination emitted by the propagator. The propagator must now
 	/// produce the conjunction of literals that led to a literal being
 	/// propagated.
-	fn explain(&mut self, actions: &mut dyn ExplainActions, data: u64) -> Conjunction {
+	fn explain(&mut self, actions: &mut dyn ExplanationActions, data: u64) -> Conjunction {
 		let _ = actions;
 		let _ = data;
 		// Method will only be called if `propagate` used a lazy reason.
 		panic!("propagator did not provide an explain implementation")
-	}
-}
-
-pub(crate) trait PropagationActions: ExplainActions {
-	#[allow(dead_code)]
-	fn set_bool_val(
-		&mut self,
-		bv: BoolView,
-		val: bool,
-		reason: &ReasonBuilder,
-	) -> Result<(), Conflict>;
-
-	fn set_int_lower_bound(
-		&mut self,
-		var: IntView,
-		val: IntVal,
-		reason: &ReasonBuilder,
-	) -> Result<(), Conflict>;
-	fn set_int_upper_bound(
-		&mut self,
-		var: IntView,
-		val: IntVal,
-		reason: &ReasonBuilder,
-	) -> Result<(), Conflict>;
-	#[allow(dead_code)] // TODO
-	fn set_int_val(
-		&mut self,
-		var: IntView,
-		val: IntVal,
-		reason: &ReasonBuilder,
-	) -> Result<(), Conflict>;
-	fn set_int_not_eq(
-		&mut self,
-		var: IntView,
-		val: IntVal,
-		reason: &ReasonBuilder,
-	) -> Result<(), Conflict>;
-}
-
-pub(crate) trait ExplainActions {
-	fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
-
-	fn get_int_lower_bound(&self, var: IntView) -> IntVal;
-	fn get_int_upper_bound(&self, var: IntView) -> IntVal;
-	fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal) {
-		(self.get_int_lower_bound(var), self.get_int_upper_bound(var))
-	}
-	fn get_int_val(&self, var: IntView) -> Option<IntVal> {
-		let (lb, ub) = self.get_int_bounds(var);
-		if lb == ub {
-			Some(lb)
-		} else {
-			None
-		}
-	}
-	#[allow(dead_code)]
-	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool {
-		if self.get_int_lower_bound(var) <= val && val <= self.get_int_upper_bound(var) {
-			let eq_lit = self.get_int_lit(var, LitMeaning::Eq(val));
-			self.get_bool_val(eq_lit).unwrap_or(true)
-		} else {
-			false
-		}
-	}
-
-	fn get_int_lit(&self, var: IntView, meaning: LitMeaning) -> BoolView;
-	#[allow(dead_code)]
-	fn get_int_val_lit(&self, var: IntView) -> Option<BoolView> {
-		self.get_int_val(var)
-			.map(|v| self.get_int_lit(var, LitMeaning::Eq(v)))
-	}
-	fn get_int_lower_bound_lit(&self, var: IntView) -> BoolView {
-		let lb = self.get_int_lower_bound(var);
-		self.get_int_lit(var, LitMeaning::GreaterEq(lb))
-	}
-	fn get_int_upper_bound_lit(&self, var: IntView) -> BoolView {
-		let ub = self.get_int_upper_bound(var);
-		self.get_int_lit(var, LitMeaning::Less(ub + 1))
 	}
 }
 

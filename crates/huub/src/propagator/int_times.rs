@@ -2,11 +2,9 @@ use super::{
 	conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions, Propagator,
 };
 use crate::{
+	actions::initialization::InitializationActions,
 	helpers::{div_ceil, div_floor},
-	solver::{
-		engine::queue::PriorityLevel,
-		poster::{InitializationActions, Poster},
-	},
+	solver::{engine::queue::PriorityLevel, poster::Poster},
 	IntView, NonZeroIntVal,
 };
 

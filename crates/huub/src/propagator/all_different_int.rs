@@ -1,9 +1,10 @@
 use super::{reason::ReasonBuilder, PropagationActions};
 use crate::{
+	actions::initialization::InitializationActions,
 	propagator::{conflict::Conflict, int_event::IntEvent, Propagator},
 	solver::{
 		engine::{int_var::LitMeaning, queue::PriorityLevel},
-		poster::{InitializationActions, Poster},
+		poster::Poster,
 		view::{IntView, IntViewInner},
 	},
 };

@@ -20,11 +20,12 @@ use self::{
 };
 use super::view::{BoolViewInner, IntViewInner};
 use crate::{
+	actions::{explanation::ExplanationActions, inspection::InspectionActions},
 	propagator::{
 		conflict::Conflict,
 		int_event::IntEvent,
 		reason::{Reason, ReasonBuilder},
-		ExplainActions, Propagator,
+		Propagator,
 	},
 	solver::engine::{
 		int_var::{IntVar, IntVarRef, LitMeaning},
@@ -293,7 +294,7 @@ pub(crate) struct State {
 	pub(crate) bool_to_int: BoolToIntMap,
 	/// Trailed integers
 	/// Includes lower and upper bounds
-	int_trail: Trail<TrailedInt, IntVal>,
+	pub(crate) int_trail: Trail<TrailedInt, IntVal>,
 	/// Boolean trail
 	sat_trail: SatTrail,
 	/// Reasons for setting values
@@ -415,7 +416,7 @@ impl State {
 	}
 }
 
-impl ExplainActions for State {
+impl InspectionActions for State {
 	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
 		match bv.0 {
 			BoolViewInner::Lit(lit) => self.sat_trail.get(lit),
@@ -501,7 +502,17 @@ impl ExplainActions for State {
 			}
 		}
 	}
+	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool {
+		if self.get_int_lower_bound(var) <= val && val <= self.get_int_upper_bound(var) {
+			let eq_lit = self.get_int_lit(var, LitMeaning::Eq(val));
+			self.get_bool_val(eq_lit).unwrap_or(true)
+		} else {
+			false
+		}
+	}
+}
 
+impl ExplanationActions for State {
 	fn get_int_lit(&self, var: IntView, mut meaning: LitMeaning) -> BoolView {
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
 			var.0

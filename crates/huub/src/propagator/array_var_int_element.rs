@@ -1,12 +1,8 @@
 use super::{reason::ReasonBuilder, PropagationActions};
 use crate::{
+	actions::initialization::InitializationActions,
 	propagator::{conflict::Conflict, int_event::IntEvent, Propagator},
-	solver::{
-		engine::queue::PriorityLevel,
-		poster::{InitializationActions, Poster},
-		value::IntVal,
-		view::IntView,
-	},
+	solver::{engine::queue::PriorityLevel, poster::Poster, value::IntVal, view::IntView},
 	LitMeaning,
 };
 

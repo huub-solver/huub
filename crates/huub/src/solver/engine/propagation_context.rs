@@ -4,7 +4,11 @@ use tracing::trace;
 
 use super::{int_var::IntVarRef, PropRef, State};
 use crate::{
-	propagator::{conflict::Conflict, reason::ReasonBuilder, ExplainActions, PropagationActions},
+	actions::{
+		explanation::ExplanationActions, inspection::InspectionActions,
+		propagation::PropagationActions,
+	},
+	propagator::{conflict::Conflict, reason::ReasonBuilder},
 	solver::{
 		engine::trail::HasChanged,
 		view::{BoolViewInner, IntViewInner},
@@ -175,14 +179,25 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 	}
 }
 
-impl ExplainActions for PropagationContext<'_> {
+impl ExplanationActions for PropagationContext<'_> {
+	delegate! {
+		to self.state {
+			fn get_int_lit(&self, var: IntView, meaning: LitMeaning) -> BoolView;
+			fn get_int_val_lit(&self, var: IntView) -> Option<BoolView>;
+			fn get_int_lower_bound_lit(&self, var: IntView) -> BoolView;
+			fn get_int_upper_bound_lit(&self, var: IntView) -> BoolView;
+		}
+	}
+}
+impl InspectionActions for PropagationContext<'_> {
 	delegate! {
 		to self.state {
 			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
 			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
 			fn get_int_upper_bound(&self, var: IntView) -> IntVal;
 			fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal);
-			fn get_int_lit(&self, var: IntView, meaning: LitMeaning) -> BoolView;
+			fn get_int_val(&self, var: IntView) -> Option<IntVal>;
+			fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool;
 		}
 	}
 }

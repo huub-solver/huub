@@ -4,7 +4,7 @@ use index_vec::IndexVec;
 use pindakaas::Lit as RawLit;
 
 use crate::{
-	propagator::{ExplainActions, Propagator},
+	propagator::{ExplanationActions, Propagator},
 	solver::{engine::PropRef, view::BoolViewInner},
 	BoolView, Conjunction,
 };
@@ -51,7 +51,7 @@ impl Reason {
 	pub(crate) fn to_clause<Clause: FromIterator<RawLit>>(
 		&self,
 		props: &mut IndexVec<PropRef, Box<dyn Propagator>>,
-		actions: &mut dyn ExplainActions,
+		actions: &mut dyn ExplanationActions,
 	) -> Clause {
 		match self {
 			Reason::Lazy(prop, data) => {
