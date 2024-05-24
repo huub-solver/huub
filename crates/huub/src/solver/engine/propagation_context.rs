@@ -9,7 +9,7 @@ use crate::{
 	},
 	propagator::{conflict::Conflict, reason::ReasonBuilder},
 	solver::{
-		engine::{int_var::IntVarRef, trail::HasChanged, PropRef, State},
+		engine::{int_var::IntVarRef, trail::HasChanged, PropRef, State, TrailedInt},
 		view::{BoolViewInner, IntViewInner},
 	},
 	BoolView, Conjunction, IntVal, IntView, LitMeaning,
@@ -192,6 +192,7 @@ impl InspectionActions for PropagationContext<'_> {
 	delegate! {
 		to self.state {
 			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
+			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
 			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
 			fn get_int_upper_bound(&self, var: IntView) -> IntVal;
 			fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal);

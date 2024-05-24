@@ -423,6 +423,10 @@ impl InspectionActions for State {
 		}
 	}
 
+	fn get_trailed_int(&self, x: TrailedInt) -> IntVal {
+		self.int_trail[x]
+	}
+
 	fn get_int_lower_bound(&self, var: IntView) -> IntVal {
 		match var.0 {
 			IntViewInner::VarRef(iv) => self.int_trail[self.int_vars[iv].lower_bound],
