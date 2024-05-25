@@ -1,5 +1,8 @@
 use crate::{
-	actions::{explanation::ExplanationActions, initialization::InitializationActions},
+	actions::{
+		explanation::ExplanationActions, initialization::InitializationActions,
+		trailing::TrailingActions,
+	},
 	helpers::{div_ceil, div_floor},
 	propagator::{
 		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions,
@@ -29,8 +32,13 @@ impl IntTimesBounds {
 	}
 }
 
-impl<P: PropagationActions, E: ExplanationActions> Propagator<P, E> for IntTimesBounds {
-	fn notify_event(&mut self, _data: u32, _event: &IntEvent) -> bool {
+impl<P, E, T> Propagator<P, E, T> for IntTimesBounds
+where
+	P: PropagationActions,
+	E: ExplanationActions,
+	T: TrailingActions,
+{
+	fn notify_event(&mut self, _: u32, _: &IntEvent, _: &mut T) -> bool {
 		true
 	}
 

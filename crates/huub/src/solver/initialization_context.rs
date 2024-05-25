@@ -5,7 +5,10 @@ use pindakaas::{
 };
 
 use crate::{
-	actions::{initialization::InitializationActions, inspection::InspectionActions},
+	actions::{
+		initialization::InitializationActions, inspection::InspectionActions,
+		trailing::TrailingActions,
+	},
 	propagator::int_event::IntEvent,
 	solver::{
 		engine::{PropRef, TrailedInt},
@@ -78,6 +81,21 @@ where
 	}
 }
 
+impl<'a, Sol, Sat> TrailingActions for InitializationContext<'a, Sat>
+where
+	Sol: PropagatorAccess + SatValuation,
+	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+{
+	delegate! {
+		to self.slv.engine().state {
+			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
+		}
+		to self.slv.engine_mut().state {
+			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal);
+		}
+	}
+}
+
 impl<'a, Sol, Sat> InspectionActions for InitializationContext<'a, Sat>
 where
 	Sol: PropagatorAccess + SatValuation,
@@ -86,7 +104,6 @@ where
 	delegate! {
 		to self.slv.engine().state {
 			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
-			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
 			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
 			fn get_int_upper_bound(&self, var: IntView) -> IntVal;
 			fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal);

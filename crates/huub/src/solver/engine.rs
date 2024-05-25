@@ -6,6 +6,7 @@ pub(crate) mod trail;
 
 use std::{any::Any, collections::HashMap};
 
+use delegate::delegate;
 use index_vec::IndexVec;
 use pindakaas::{
 	solver::{Propagator as IpasirPropagator, SolvingActions},
@@ -14,7 +15,9 @@ use pindakaas::{
 use tracing::{debug, trace};
 
 use crate::{
-	actions::{explanation::ExplanationActions, inspection::InspectionActions},
+	actions::{
+		explanation::ExplanationActions, inspection::InspectionActions, trailing::TrailingActions,
+	},
 	propagator::{
 		conflict::Conflict,
 		int_event::IntEvent,
@@ -190,8 +193,11 @@ impl IpasirPropagator for Engine {
 				for (prop, level, data) in self.state.int_subscribers.get(&r).into_iter().flatten()
 				{
 					if level.is_activated_by(&IntEvent::Fixed)
-						&& self.propagators[*prop].notify_event(*data, &IntEvent::Fixed)
-					{
+						&& self.propagators[*prop].notify_event(
+							*data,
+							&IntEvent::Fixed,
+							&mut self.state.int_trail,
+						) {
 						let l = self.propagators[*prop].queue_priority_level();
 						self.state.prop_queue.insert(l, *prop)
 					}
@@ -250,7 +256,11 @@ impl Engine {
 			if Some(prop) == skip || self.state.enqueued[prop] {
 				continue;
 			}
-			if self.propagators[prop].notify_event(data, &IntEvent::Fixed) {
+			if self.propagators[prop].notify_event(
+				data,
+				&IntEvent::Fixed,
+				&mut self.state.int_trail,
+			) {
 				let level = self.propagators[prop].queue_priority_level();
 				self.state.prop_queue.insert(level, prop);
 			}
@@ -265,7 +275,7 @@ impl Engine {
 				{
 					continue;
 				}
-				if self.propagators[*prop].notify_event(*data, &event) {
+				if self.propagators[*prop].notify_event(*data, &event, &mut self.state.int_trail) {
 					let level = self.propagators[*prop].queue_priority_level();
 					self.state.prop_queue.insert(level, *prop);
 				}
@@ -415,16 +425,21 @@ impl State {
 	}
 }
 
+impl TrailingActions for State {
+	delegate! {
+		to self.int_trail {
+			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
+			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal);
+		}
+	}
+}
+
 impl InspectionActions for State {
 	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
 		match bv.0 {
 			BoolViewInner::Lit(lit) => self.sat_trail.get(lit),
 			BoolViewInner::Const(b) => Some(b),
 		}
-	}
-
-	fn get_trailed_int(&self, x: TrailedInt) -> IntVal {
-		self.int_trail[x]
 	}
 
 	fn get_int_lower_bound(&self, var: IntView) -> IntVal {

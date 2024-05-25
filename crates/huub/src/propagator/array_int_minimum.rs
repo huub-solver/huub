@@ -1,5 +1,8 @@
 use crate::{
-	actions::{explanation::ExplanationActions, initialization::InitializationActions},
+	actions::{
+		explanation::ExplanationActions, initialization::InitializationActions,
+		trailing::TrailingActions,
+	},
 	propagator::{
 		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions,
 		Propagator,
@@ -33,8 +36,13 @@ impl ArrayIntMinimumBounds {
 	}
 }
 
-impl<P: PropagationActions, E: ExplanationActions> Propagator<P, E> for ArrayIntMinimumBounds {
-	fn notify_event(&mut self, data: u32, event: &IntEvent) -> bool {
+impl<P, E, T> Propagator<P, E, T> for ArrayIntMinimumBounds
+where
+	P: PropagationActions,
+	E: ExplanationActions,
+	T: TrailingActions,
+{
+	fn notify_event(&mut self, data: u32, event: &IntEvent, _: &mut T) -> bool {
 		if data == self.vars.len() as u32 {
 			self.y_change = true;
 		} else {

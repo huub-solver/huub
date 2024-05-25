@@ -3,6 +3,8 @@ use std::{collections::HashMap, mem, ops::Index};
 use index_vec::{Idx, IndexVec};
 use pindakaas::{Lit as RawLit, Var as RawVar};
 
+use crate::{actions::trailing::TrailingActions, solver::engine::TrailedInt, IntVal};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Trail<I: Idx, E> {
 	value: IndexVec<I, E>,
@@ -60,6 +62,15 @@ impl<I: Idx, E> Index<I> for Trail<I, E> {
 
 	fn index(&self, index: I) -> &Self::Output {
 		self.value.index(index)
+	}
+}
+
+impl TrailingActions for Trail<TrailedInt, IntVal> {
+	fn get_trailed_int(&self, x: TrailedInt) -> IntVal {
+		self[x]
+	}
+	fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) {
+		let _ = self.assign(x, v);
 	}
 }
 

@@ -1,5 +1,8 @@
 use crate::{
-	actions::{explanation::ExplanationActions, initialization::InitializationActions},
+	actions::{
+		explanation::ExplanationActions, initialization::InitializationActions,
+		trailing::TrailingActions,
+	},
 	propagator::{
 		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions,
 		Propagator,
@@ -23,9 +26,13 @@ impl AllDifferentIntValue {
 		AllDifferentIntValuePoster { vars }
 	}
 }
-
-impl<P: PropagationActions, E: ExplanationActions> Propagator<P, E> for AllDifferentIntValue {
-	fn notify_event(&mut self, data: u32, _: &IntEvent) -> bool {
+impl<P, E, T> Propagator<P, E, T> for AllDifferentIntValue
+where
+	P: PropagationActions,
+	E: ExplanationActions,
+	T: TrailingActions,
+{
+	fn notify_event(&mut self, data: u32, _: &IntEvent, _: &mut T) -> bool {
 		self.action_list.push(data);
 		true
 	}

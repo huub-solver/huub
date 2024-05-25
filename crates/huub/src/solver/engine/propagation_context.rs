@@ -5,7 +5,7 @@ use tracing::trace;
 use crate::{
 	actions::{
 		explanation::ExplanationActions, inspection::InspectionActions,
-		propagation::PropagationActions,
+		propagation::PropagationActions, trailing::TrailingActions,
 	},
 	propagator::{conflict::Conflict, reason::ReasonBuilder},
 	solver::{
@@ -178,13 +178,11 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 	}
 }
 
-impl ExplanationActions for PropagationContext<'_> {
+impl TrailingActions for PropagationContext<'_> {
 	delegate! {
 		to self.state {
-			fn get_int_lit(&self, var: IntView, meaning: LitMeaning) -> BoolView;
-			fn get_int_val_lit(&self, var: IntView) -> Option<BoolView>;
-			fn get_int_lower_bound_lit(&self, var: IntView) -> BoolView;
-			fn get_int_upper_bound_lit(&self, var: IntView) -> BoolView;
+			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
+			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal);
 		}
 	}
 }
@@ -192,12 +190,21 @@ impl InspectionActions for PropagationContext<'_> {
 	delegate! {
 		to self.state {
 			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
-			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
 			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
 			fn get_int_upper_bound(&self, var: IntView) -> IntVal;
 			fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal);
 			fn get_int_val(&self, var: IntView) -> Option<IntVal>;
 			fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool;
+		}
+	}
+}
+impl ExplanationActions for PropagationContext<'_> {
+	delegate! {
+		to self.state {
+			fn get_int_lit(&self, var: IntView, meaning: LitMeaning) -> BoolView;
+			fn get_int_val_lit(&self, var: IntView) -> Option<BoolView>;
+			fn get_int_lower_bound_lit(&self, var: IntView) -> BoolView;
+			fn get_int_upper_bound_lit(&self, var: IntView) -> BoolView;
 		}
 	}
 }

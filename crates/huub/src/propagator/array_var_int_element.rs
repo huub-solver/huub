@@ -1,5 +1,8 @@
 use crate::{
-	actions::{explanation::ExplanationActions, initialization::InitializationActions},
+	actions::{
+		explanation::ExplanationActions, initialization::InitializationActions,
+		trailing::TrailingActions,
+	},
 	propagator::{
 		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions,
 		Propagator,
@@ -35,8 +38,13 @@ impl ArrayVarIntElementBounds {
 	}
 }
 
-impl<P: PropagationActions, E: ExplanationActions> Propagator<P, E> for ArrayVarIntElementBounds {
-	fn notify_event(&mut self, _: u32, _: &IntEvent) -> bool {
+impl<P, E, T> Propagator<P, E, T> for ArrayVarIntElementBounds
+where
+	P: PropagationActions,
+	E: ExplanationActions,
+	T: TrailingActions,
+{
+	fn notify_event(&mut self, _: u32, _: &IntEvent, _: &mut T) -> bool {
 		true
 	}
 

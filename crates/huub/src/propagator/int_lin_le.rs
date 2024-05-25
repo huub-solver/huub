@@ -1,7 +1,7 @@
 use pindakaas::Lit as RawLit;
 
 use crate::{
-	actions::initialization::InitializationActions,
+	actions::{initialization::InitializationActions, trailing::TrailingActions},
 	helpers::opt_field::OptField,
 	propagator::{
 		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, ExplanationActions,
@@ -76,10 +76,13 @@ impl IntLinearLessEqImpBounds {
 	}
 }
 
-impl<const B: usize, P: PropagationActions, E: ExplanationActions> Propagator<P, E>
-	for IntLinearLessEqBoundsImpl<B>
+impl<const R: usize, P, E, T> Propagator<P, E, T> for IntLinearLessEqBoundsImpl<R>
+where
+	P: PropagationActions,
+	E: ExplanationActions,
+	T: TrailingActions,
 {
-	fn notify_event(&mut self, _: u32, _: &IntEvent) -> bool {
+	fn notify_event(&mut self, _: u32, _: &IntEvent, _: &mut T) -> bool {
 		true
 	}
 

@@ -1,10 +1,7 @@
-use crate::{solver::engine::TrailedInt, BoolView, IntVal, IntView};
+use crate::{actions::trailing::TrailingActions, BoolView, IntVal, IntView};
 
-pub(crate) trait InspectionActions {
+pub(crate) trait InspectionActions: TrailingActions {
 	fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
-
-	#[allow(dead_code)]
-	fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
 
 	fn get_int_lower_bound(&self, var: IntView) -> IntVal;
 	fn get_int_upper_bound(&self, var: IntView) -> IntVal;

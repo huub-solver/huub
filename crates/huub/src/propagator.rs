@@ -10,16 +10,21 @@ pub(crate) mod reason;
 use std::fmt::Debug;
 
 use crate::{
-	actions::{explanation::ExplanationActions, propagation::PropagationActions},
+	actions::{
+		explanation::ExplanationActions, propagation::PropagationActions, trailing::TrailingActions,
+	},
 	propagator::{conflict::Conflict, int_event::IntEvent},
 	solver::{
-		engine::{propagation_context::PropagationContext, queue::PriorityLevel, State},
+		engine::{
+			propagation_context::PropagationContext, queue::PriorityLevel, trail::Trail, State,
+			TrailedInt,
+		},
 		poster::BoxedPropagator,
 	},
-	Conjunction,
+	Conjunction, IntVal,
 };
 
-pub(crate) trait Propagator<P: PropagationActions, E: ExplanationActions>:
+pub(crate) trait Propagator<P: PropagationActions, E: ExplanationActions, T: TrailingActions>:
 	Debug + DynPropClone
 {
 	/// The method called by the solver to notify the propagator of a variable
@@ -28,9 +33,10 @@ pub(crate) trait Propagator<P: PropagationActions, E: ExplanationActions>:
 	///
 	/// The [`data`] argument will contain the data that the propagater has set
 	/// when subscribing to an event.
-	fn notify_event(&mut self, data: u32, event: &IntEvent) -> bool {
+	fn notify_event(&mut self, data: u32, event: &IntEvent, actions: &mut T) -> bool {
 		let _ = data;
 		let _ = event;
+		let _ = actions;
 		false
 	}
 
@@ -73,7 +79,12 @@ pub(crate) trait Propagator<P: PropagationActions, E: ExplanationActions>:
 pub(crate) trait DynPropClone {
 	fn clone_dyn_prop(&self) -> BoxedPropagator;
 }
-impl<P: for<'a> Propagator<PropagationContext<'a>, State> + Clone + 'static> DynPropClone for P {
+impl<
+		P: for<'a> Propagator<PropagationContext<'a>, State, Trail<TrailedInt, IntVal>>
+			+ Clone
+			+ 'static,
+	> DynPropClone for P
+{
 	fn clone_dyn_prop(&self) -> BoxedPropagator {
 		Box::new(self.clone())
 	}
