@@ -82,6 +82,11 @@ impl IpasirPropagator for Engine {
 		// Clear the conflict reasons
 		self.conflict_clauses.clear();
 
+		// Empty propagation queue
+		while let Some(p) = self.state.prop_queue.pop() {
+			self.state.enqueued[p] = false;
+		}
+
 		// Re-apply persistent changes
 		for lit in self.persistent.clone() {
 			self.notify_assignment(lit, false);

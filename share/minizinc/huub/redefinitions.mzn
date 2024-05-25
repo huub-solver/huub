@@ -34,6 +34,10 @@ let {
 	any: tup = div_mod(a, b);
 } in c = tup.1;
 
+predicate int_eq_imp(var int: a, var int: b, var bool: r);
+predicate int_le_imp(var int: a, var int: b, var bool: r);
+predicate int_ne_imp(var int: a, var int: b, var bool: r);
+
 predicate int_lin_eq_imp(
 	array [int] of int: as,
 	array [int] of var int: bs,
@@ -41,6 +45,12 @@ predicate int_lin_eq_imp(
 	var bool: r
 );
 predicate int_lin_le_imp(
+	array [int] of int: as,
+	array [int] of var int: bs,
+	int: c,
+	var bool: r
+);
+predicate int_lin_ne_imp(
 	array [int] of int: as,
 	array [int] of var int: bs,
 	int: c,
