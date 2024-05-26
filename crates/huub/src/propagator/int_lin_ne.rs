@@ -8,7 +8,7 @@ use crate::{
 		PropagationActions, Propagator,
 	},
 	solver::{
-		engine::{queue::PriorityLevel, TrailedInt},
+		engine::{queue::PriorityLevel, trail::TrailedInt},
 		poster::{BoxedPropagator, Poster},
 		value::IntVal,
 		view::{BoolViewInner, IntView, IntViewInner},
@@ -88,7 +88,7 @@ where
 {
 	fn notify_event(&mut self, _: u32, _: &IntEvent, actions: &mut T) -> bool {
 		let num_fixed = actions.get_trailed_int(self.num_fixed) + 1;
-		actions.set_trailed_int(self.num_fixed, num_fixed);
+		let _ = actions.set_trailed_int(self.num_fixed, num_fixed);
 		let size = self.vars.len() + R;
 		size as i64 - num_fixed <= 1
 	}

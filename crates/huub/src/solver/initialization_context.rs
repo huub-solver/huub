@@ -11,7 +11,7 @@ use crate::{
 	},
 	propagator::int_event::IntEvent,
 	solver::{
-		engine::{PropRef, TrailedInt},
+		engine::{trail::TrailedInt, PropRef},
 		view::{BoolViewInner, IntViewInner},
 		SatSolver,
 	},
@@ -77,7 +77,7 @@ where
 	}
 
 	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
-		self.slv.engine_mut().state.int_trail.track(init)
+		self.slv.engine_mut().state.trail.track_int(init)
 	}
 }
 
@@ -91,7 +91,7 @@ where
 			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
 		}
 		to self.slv.engine_mut().state {
-			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal);
+			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal;
 		}
 	}
 }

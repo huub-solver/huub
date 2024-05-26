@@ -18,11 +18,10 @@ use crate::{
 	solver::{
 		engine::{
 			propagation_context::PropagationContext, queue::PriorityLevel, trail::Trail, State,
-			TrailedInt,
 		},
 		poster::BoxedPropagator,
 	},
-	Conjunction, IntVal,
+	Conjunction,
 };
 
 pub(crate) trait Propagator<P: PropagationActions, E: ExplanationActions, T: TrailingActions>:
@@ -80,11 +79,8 @@ pub(crate) trait Propagator<P: PropagationActions, E: ExplanationActions, T: Tra
 pub(crate) trait DynPropClone {
 	fn clone_dyn_prop(&self) -> BoxedPropagator;
 }
-impl<
-		P: for<'a> Propagator<PropagationContext<'a>, State, Trail<TrailedInt, IntVal>>
-			+ Clone
-			+ 'static,
-	> DynPropClone for P
+impl<P: for<'a> Propagator<PropagationContext<'a>, State, Trail> + Clone + 'static> DynPropClone
+	for P
 {
 	fn clone_dyn_prop(&self) -> BoxedPropagator {
 		Box::new(self.clone())

@@ -1,6 +1,6 @@
 use crate::{
 	actions::inspection::InspectionActions, propagator::int_event::IntEvent,
-	solver::engine::TrailedInt, BoolView, IntVal, IntView,
+	solver::engine::trail::TrailedInt, BoolView, IntVal, IntView,
 };
 
 pub(crate) trait InitializationActions: InspectionActions {

@@ -9,7 +9,7 @@ use pindakaas::{
 
 use crate::{
 	solver::{
-		engine::TrailedInt,
+		engine::trail::TrailedInt,
 		view::{BoolViewInner, IntViewInner},
 		IntView, SatSolver,
 	},
@@ -97,13 +97,13 @@ impl IntVar {
 			lower_bound: slv
 				.engine_mut()
 				.state
-				.int_trail
-				.track(*domain.lower_bound().unwrap()),
+				.trail
+				.track_int(*domain.lower_bound().unwrap()),
 			upper_bound: slv
 				.engine_mut()
 				.state
-				.int_trail
-				.track(*domain.upper_bound().unwrap()),
+				.trail
+				.track_int(*domain.upper_bound().unwrap()),
 			orig_domain: domain,
 			orig_domain_len,
 			vars: vars.clone(),

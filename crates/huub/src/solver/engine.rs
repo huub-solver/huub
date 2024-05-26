@@ -29,7 +29,7 @@ use crate::{
 			int_var::{IntVar, IntVarRef, LitMeaning},
 			propagation_context::PropagationContext,
 			queue::PriorityQueue,
-			trail::{HasChanged, SatTrail, Trail},
+			trail::{Trail, TrailedInt},
 		},
 		poster::BoxedPropagator,
 		view::{BoolViewInner, IntViewInner},
@@ -58,7 +58,7 @@ impl IpasirPropagator for Engine {
 			// Note that the assignment might already be known and trailed, but not previously marked as persistent
 			self.persistent.push(lit)
 		}
-		if self.state.sat_trail.assign(lit.var(), !lit.is_negated()) == HasChanged::NoChange {
+		if self.state.trail.assign_sat(lit).is_some() {
 			return;
 		}
 
@@ -141,7 +141,7 @@ impl IpasirPropagator for Engine {
 							let clause: Vec<_> =
 								reason.to_clause(&mut self.propagators, &mut self.state);
 							for l in &clause {
-								let val = self.state.sat_trail.get(!l);
+								let val = self.state.trail.get_sat_value(!l);
 								if !val.unwrap_or(false) {
 									tracing::error!(lit_prop = i32::from(*lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
 								}
@@ -162,15 +162,19 @@ impl IpasirPropagator for Engine {
 		Vec::new()
 	}
 
-	fn add_reason_clause(&mut self, propagated_lit: pindakaas::Lit) -> Clause {
-		let mut clause = self
-			.state
-			.reason_map
-			.remove(&propagated_lit)
-			.map_or_else(Vec::new, |r| {
-				r.to_clause(&mut self.propagators, &mut self.state)
-			});
+	fn add_reason_clause(&mut self, propagated_lit: RawLit) -> Clause {
+		// Find reason
+		let reason = self.state.reason_map.remove(&propagated_lit);
+		// Restore the current state to the state when the propagation happened if explaining lazily
+		if matches!(reason, Some(Reason::Lazy(_, _))) {
+			self.state.trail.undo_until_found_lit(propagated_lit)
+		}
+		// Create a clause from the reason
+		let mut clause = reason.map_or_else(Vec::new, |r| {
+			r.to_clause(&mut self.propagators, &mut self.state)
+		});
 		clause.push(propagated_lit);
+
 		trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "give reason clause");
 		clause
 	}
@@ -187,13 +191,13 @@ impl IpasirPropagator for Engine {
 		}
 		for (r, iv) in self.state.int_vars.iter_mut().enumerate() {
 			let r = IntVarRef::new(r);
-			let lb = self.state.int_trail[iv.lower_bound];
-			let ub = self.state.int_trail[iv.upper_bound];
+			let lb = self.state.trail.get_trailed_int(iv.lower_bound);
+			let ub = self.state.trail.get_trailed_int(iv.upper_bound);
 			if lb != ub {
 				let val = iv.get_value(model);
-				let change_lb = self.state.int_trail.assign(iv.lower_bound, val);
-				let change_ub = self.state.int_trail.assign(iv.upper_bound, val);
-				debug_assert!(change_lb == HasChanged::Changed || change_ub == HasChanged::Changed);
+				let prev_lb = self.state.trail.set_trailed_int(iv.lower_bound, val);
+				let prev_ub = self.state.trail.set_trailed_int(iv.upper_bound, val);
+				debug_assert!(prev_lb < val || prev_ub > val);
 
 				for (prop, level, data) in self.state.int_subscribers.get(&r).into_iter().flatten()
 				{
@@ -201,7 +205,7 @@ impl IpasirPropagator for Engine {
 						&& self.propagators[*prop].notify_event(
 							*data,
 							&IntEvent::Fixed,
-							&mut self.state.int_trail,
+							&mut self.state.trail,
 						) {
 						let l = self.propagators[*prop].queue_priority_level();
 						self.state.prop_queue.insert(l, *prop)
@@ -261,11 +265,7 @@ impl Engine {
 			if Some(prop) == skip || self.state.enqueued[prop] {
 				continue;
 			}
-			if self.propagators[prop].notify_event(
-				data,
-				&IntEvent::Fixed,
-				&mut self.state.int_trail,
-			) {
+			if self.propagators[prop].notify_event(data, &IntEvent::Fixed, &mut self.state.trail) {
 				let level = self.propagators[prop].queue_priority_level();
 				self.state.prop_queue.insert(level, prop);
 			}
@@ -280,7 +280,7 @@ impl Engine {
 				{
 					continue;
 				}
-				if self.propagators[*prop].notify_event(*data, &event, &mut self.state.int_trail) {
+				if self.propagators[*prop].notify_event(*data, &event, &mut self.state.trail) {
 					let level = self.propagators[*prop].queue_priority_level();
 					self.state.prop_queue.insert(level, *prop);
 				}
@@ -294,11 +294,6 @@ index_vec::define_index_type! {
 	pub struct PropRef = u32;
 }
 
-index_vec::define_index_type! {
-	/// Identifies an trailed integer tracked within [`Solver`]
-	pub struct TrailedInt = u32;
-}
-
 #[derive(Clone, Debug, Default)]
 pub(crate) struct State {
 	// ---- Trailed Value Infrastructure (e.g., decision variables) ----
@@ -306,11 +301,9 @@ pub(crate) struct State {
 	pub(crate) int_vars: IndexVec<IntVarRef, IntVar>,
 	/// Mapping from boolean variables to integer variables
 	pub(crate) bool_to_int: BoolToIntMap,
-	/// Trailed integers
-	/// Includes lower and upper bounds
-	pub(crate) int_trail: Trail<TrailedInt, IntVal>,
-	/// Boolean trail
-	sat_trail: SatTrail,
+	/// Trailed Storage
+	/// Includes lower and upper bounds for integer variables and Boolean variable assignments
+	pub(crate) trail: Trail,
 	/// Reasons for setting values
 	pub(crate) reason_map: HashMap<RawLit, Reason>,
 
@@ -329,19 +322,17 @@ pub(crate) struct State {
 impl State {
 	fn determine_int_event(&mut self, lit: RawLit) -> Option<(IntVarRef, IntEvent)> {
 		if let Some(iv) = self.bool_to_int.get(lit.var()) {
-			let lb = self.int_trail[self.int_vars[iv].lower_bound];
-			let ub = self.int_trail[self.int_vars[iv].upper_bound];
+			let lb = self.get_trailed_int(self.int_vars[iv].lower_bound);
+			let ub = self.get_trailed_int(self.int_vars[iv].upper_bound);
 			// Enact domain changes and determine change event
 			let event: IntEvent = match self.int_vars[iv].lit_meaning(lit) {
 				LitMeaning::Eq(i) => {
 					if i == lb || i == ub {
 						return None;
 					}
-					let change_lb = self.int_trail.assign(self.int_vars[iv].lower_bound, i);
-					let change_ub = self.int_trail.assign(self.int_vars[iv].upper_bound, i);
-					debug_assert!(
-						change_lb == HasChanged::Changed || change_ub == HasChanged::Changed
-					);
+					let prev_lb = self.set_trailed_int(self.int_vars[iv].lower_bound, i);
+					let prev_ub = self.set_trailed_int(self.int_vars[iv].upper_bound, i);
+					debug_assert!(prev_lb < i || prev_ub > i);
 					IntEvent::Fixed
 				}
 				LitMeaning::NotEq(i) => {
@@ -349,16 +340,16 @@ impl State {
 						return None;
 					}
 					if lb == i {
-						let change = self.int_trail.assign(self.int_vars[iv].lower_bound, i + 1);
-						debug_assert_eq!(change, HasChanged::Changed);
+						let prev = self.set_trailed_int(self.int_vars[iv].lower_bound, i + 1);
+						debug_assert!(prev < (i + 1));
 						if lb + 1 == ub {
 							IntEvent::Fixed
 						} else {
 							IntEvent::LowerBound
 						}
 					} else if ub == i {
-						let change = self.int_trail.assign(self.int_vars[iv].upper_bound, i - 1);
-						debug_assert_eq!(change, HasChanged::Changed);
+						let prev = self.set_trailed_int(self.int_vars[iv].upper_bound, i - 1);
+						debug_assert!((i - 1) < prev);
 						if lb == ub - 1 {
 							IntEvent::Fixed
 						} else {
@@ -372,8 +363,8 @@ impl State {
 					if new_lb <= lb {
 						return None;
 					}
-					let change = self.int_trail.assign(self.int_vars[iv].lower_bound, new_lb);
-					debug_assert_eq!(change, HasChanged::Changed);
+					let prev = self.set_trailed_int(self.int_vars[iv].lower_bound, new_lb);
+					debug_assert!(prev < new_lb);
 					if new_lb == ub {
 						IntEvent::Fixed
 					} else {
@@ -385,8 +376,8 @@ impl State {
 					if new_ub >= ub {
 						return None;
 					}
-					let change = self.int_trail.assign(self.int_vars[iv].upper_bound, new_ub);
-					debug_assert_eq!(change, HasChanged::Changed);
+					let prev = self.set_trailed_int(self.int_vars[iv].upper_bound, new_ub);
+					debug_assert!(new_ub < prev);
 					if new_ub == lb {
 						IntEvent::Fixed
 					} else {
@@ -401,22 +392,13 @@ impl State {
 	}
 
 	fn decision_level(&self) -> usize {
-		debug_assert_eq!(
-			self.sat_trail.decision_level(),
-			self.int_trail.decision_level()
-		);
-
-		self.sat_trail.decision_level()
+		self.trail.decision_level()
 	}
-
 	fn notify_new_decision_level(&mut self) {
-		self.int_trail.notify_new_decision_level();
-		self.sat_trail.notify_new_decision_level();
+		self.trail.notify_new_decision_level();
 	}
-
 	fn notify_backtrack(&mut self, level: usize) {
-		self.int_trail.notify_backtrack(level);
-		self.sat_trail.notify_backtrack(level);
+		self.trail.notify_backtrack(level);
 	}
 
 	fn register_reason(&mut self, lit: RawLit, builder: &ReasonBuilder, prop: PropRef) {
@@ -436,9 +418,9 @@ impl State {
 
 impl TrailingActions for State {
 	delegate! {
-		to self.int_trail {
+		to self.trail {
 			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
-			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal);
+			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal;
 		}
 	}
 }
@@ -446,26 +428,26 @@ impl TrailingActions for State {
 impl InspectionActions for State {
 	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
 		match bv.0 {
-			BoolViewInner::Lit(lit) => self.sat_trail.get(lit),
+			BoolViewInner::Lit(lit) => self.trail.get_sat_value(lit),
 			BoolViewInner::Const(b) => Some(b),
 		}
 	}
 
 	fn get_int_lower_bound(&self, var: IntView) -> IntVal {
 		match var.0 {
-			IntViewInner::VarRef(iv) => self.int_trail[self.int_vars[iv].lower_bound],
+			IntViewInner::VarRef(iv) => self.get_trailed_int(self.int_vars[iv].lower_bound),
 			IntViewInner::Const(i) => i,
 			IntViewInner::Linear { transformer, var } => {
 				if transformer.positive_scale() {
-					let lb = self.int_trail[self.int_vars[var].lower_bound];
+					let lb = self.get_trailed_int(self.int_vars[var].lower_bound);
 					transformer.transform(lb)
 				} else {
-					let ub = self.int_trail[self.int_vars[var].upper_bound];
+					let ub = self.get_trailed_int(self.int_vars[var].upper_bound);
 					transformer.transform(ub)
 				}
 			}
 			IntViewInner::Bool { transformer, lit } => {
-				let val = self.sat_trail.get(lit).map(IntVal::from);
+				let val = self.trail.get_sat_value(lit).map(IntVal::from);
 				let lb = val.unwrap_or(0);
 				let ub = val.unwrap_or(1);
 				if transformer.positive_scale() {
@@ -478,19 +460,19 @@ impl InspectionActions for State {
 	}
 	fn get_int_upper_bound(&self, var: IntView) -> IntVal {
 		match var.0 {
-			IntViewInner::VarRef(iv) => self.int_trail[self.int_vars[iv].upper_bound],
+			IntViewInner::VarRef(iv) => self.get_trailed_int(self.int_vars[iv].upper_bound),
 			IntViewInner::Const(i) => i,
 			IntViewInner::Linear { transformer, var } => {
 				if transformer.positive_scale() {
-					let ub = self.int_trail[self.int_vars[var].upper_bound];
+					let ub = self.get_trailed_int(self.int_vars[var].upper_bound);
 					transformer.transform(ub)
 				} else {
-					let lb = self.int_trail[self.int_vars[var].lower_bound];
+					let lb = self.get_trailed_int(self.int_vars[var].lower_bound);
 					transformer.transform(lb)
 				}
 			}
 			IntViewInner::Bool { transformer, lit } => {
-				let val = self.sat_trail.get(lit).map(Into::into);
+				let val = self.trail.get_sat_value(lit).map(Into::into);
 				let lb = val.unwrap_or(0);
 				let ub = val.unwrap_or(1);
 				if transformer.positive_scale() {
@@ -504,13 +486,15 @@ impl InspectionActions for State {
 	fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal) {
 		match var.0 {
 			IntViewInner::VarRef(iv) => (
-				self.int_trail[self.int_vars[iv].lower_bound],
-				self.int_trail[self.int_vars[iv].upper_bound],
+				self.get_trailed_int(self.int_vars[iv].lower_bound),
+				self.get_trailed_int(self.int_vars[iv].upper_bound),
 			),
 			IntViewInner::Const(i) => (i, i),
 			IntViewInner::Linear { transformer, var } => {
-				let lb = transformer.transform(self.int_trail[self.int_vars[var].lower_bound]);
-				let ub = transformer.transform(self.int_trail[self.int_vars[var].upper_bound]);
+				let lb =
+					transformer.transform(self.get_trailed_int(self.int_vars[var].lower_bound));
+				let ub =
+					transformer.transform(self.get_trailed_int(self.int_vars[var].upper_bound));
 				if lb <= ub {
 					(lb, ub)
 				} else {
@@ -518,7 +502,7 @@ impl InspectionActions for State {
 				}
 			}
 			IntViewInner::Bool { transformer, lit } => {
-				let val = self.sat_trail.get(lit).map(Into::into);
+				let val = self.trail.get_sat_value(lit).map(Into::into);
 				let lb = transformer.transform(val.unwrap_or(0));
 				let ub = transformer.transform(val.unwrap_or(1));
 				if lb <= ub {

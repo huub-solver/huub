@@ -9,7 +9,7 @@ use crate::{
 	},
 	propagator::{conflict::Conflict, reason::ReasonBuilder},
 	solver::{
-		engine::{int_var::IntVarRef, trail::HasChanged, PropRef, State, TrailedInt},
+		engine::{int_var::IntVarRef, trail::TrailedInt, PropRef, State},
 		view::{BoolViewInner, IntViewInner},
 	},
 	BoolView, Conjunction, IntVal, IntView, LitMeaning,
@@ -29,7 +29,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		reason: &ReasonBuilder,
 	) -> Result<(), Conflict> {
 		match bv.0 {
-			BoolViewInner::Lit(lit) => match self.state.sat_trail.get(lit) {
+			BoolViewInner::Lit(lit) => match self.state.trail.get_sat_value(lit) {
 				Some(b) if b == val => Ok(()),
 				Some(_) => Err(Conflict::new(
 					Some(if val { lit } else { !lit }),
@@ -39,11 +39,8 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 				None => {
 					let propagated_lit = if val { lit } else { !lit };
 					trace!(lit = i32::from(propagated_lit), "propagate bool");
-					let change = self
-						.state
-						.sat_trail
-						.assign(lit.var(), if lit.is_negated() { !val } else { val });
-					debug_assert_eq!(change, HasChanged::Changed);
+					let change = self.state.trail.assign_sat(propagated_lit);
+					debug_assert_eq!(change, None);
 					self.state
 						.register_reason(propagated_lit, reason, self.prop);
 					self.prop_queue.push(propagated_lit);
@@ -182,7 +179,7 @@ impl TrailingActions for PropagationContext<'_> {
 	delegate! {
 		to self.state {
 			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
-			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal);
+			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal;
 		}
 	}
 }
@@ -214,13 +211,13 @@ impl PropagationContext<'_> {
 	pub(crate) fn check_satisfied(&self, var: IntVarRef, lit: &LitMeaning) -> bool {
 		match lit {
 			LitMeaning::Eq(i) => {
-				let lb = self.state.int_trail[self.state.int_vars[var].lower_bound];
-				let ub = self.state.int_trail[self.state.int_vars[var].upper_bound];
+				let lb = self.get_trailed_int(self.state.int_vars[var].lower_bound);
+				let ub = self.get_trailed_int(self.state.int_vars[var].upper_bound);
 				lb == *i && ub == *i
 			}
 			LitMeaning::NotEq(i) => {
-				let lb = self.state.int_trail[self.state.int_vars[var].lower_bound];
-				let ub = self.state.int_trail[self.state.int_vars[var].upper_bound];
+				let lb = self.get_trailed_int(self.state.int_vars[var].lower_bound);
+				let ub = self.get_trailed_int(self.state.int_vars[var].upper_bound);
 				if *i < lb || *i > ub {
 					true
 				} else {
@@ -229,11 +226,11 @@ impl PropagationContext<'_> {
 				}
 			}
 			LitMeaning::GreaterEq(i) => {
-				let lb = self.state.int_trail[self.state.int_vars[var].lower_bound];
+				let lb = self.get_trailed_int(self.state.int_vars[var].lower_bound);
 				lb >= *i
 			}
 			LitMeaning::Less(i) => {
-				let ub = self.state.int_trail[self.state.int_vars[var].upper_bound];
+				let ub = self.get_trailed_int(self.state.int_vars[var].upper_bound);
 				ub < *i
 			}
 		}

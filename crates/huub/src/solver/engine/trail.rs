@@ -1,127 +1,195 @@
-use std::{collections::HashMap, mem, ops::Index};
+use std::{
+	collections::HashMap,
+	mem::{self, transmute},
+};
 
-use index_vec::{Idx, IndexVec};
+use index_vec::IndexVec;
 use pindakaas::{Lit as RawLit, Var as RawVar};
 
-use crate::{actions::trailing::TrailingActions, solver::engine::TrailedInt, IntVal};
+use crate::{actions::trailing::TrailingActions, IntVal};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Trail<I: Idx, E> {
-	value: IndexVec<I, E>,
-	trail: Vec<(I, E)>,
-	prev_len: Vec<usize>,
+index_vec::define_index_type! {
+	/// Identifies an trailed integer tracked within [`Solver`]
+	pub struct TrailedInt = u32;
 }
 
-impl<I: Idx, E> Default for Trail<I, E> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Trail {
+	trail: Vec<u32>,
+	prev_len: Vec<usize>,
+
+	int_value: IndexVec<TrailedInt, IntVal>,
+	sat_value: HashMap<RawVar, bool>,
+}
+
+impl Default for Trail {
 	fn default() -> Self {
 		Self {
-			value: IndexVec::new(),
 			trail: Vec::new(),
 			prev_len: Vec::new(),
+			int_value: IndexVec::new(),
+			sat_value: HashMap::new(),
 		}
 	}
 }
 
-impl<I: Idx, E> Trail<I, E> {
-	pub(crate) fn track(&mut self, val: E) -> I {
-		self.value.push(val)
+impl Trail {
+	fn push_trail(&mut self, event: TrailEvent) {
+		match event {
+			TrailEvent::SatAssignment(r) => {
+				let r = i32::from(r);
+				self.trail.push(r as u32)
+			}
+			TrailEvent::IntAssignment(i, v) => {
+				let (low, high) = (v as i32, (v >> 32) as i32);
+				self.trail.push(low as u32);
+				self.trail.push(high as u32);
+				let i = -(usize::from(i) as i32);
+				self.trail.push(i as u32)
+			}
+		}
+	}
+	fn pop_trail(&mut self) -> Option<TrailEvent> {
+		if self.trail.is_empty() {
+			return None;
+		}
+		let i = self.trail.pop().unwrap() as i32;
+		Some(if i.is_positive() {
+			// SAFETY: This is safe because RawVar uses the same representation as i32
+			TrailEvent::SatAssignment(unsafe { transmute(i) })
+		} else {
+			let i = -i as usize;
+			let high = self.trail.pop().unwrap() as u64;
+			let low = self.trail.pop().unwrap() as u64;
+			TrailEvent::IntAssignment(i.into(), ((high << 32) | low) as i64)
+		})
+	}
+	fn undo_event(&mut self, event: TrailEvent) {
+		match event {
+			TrailEvent::SatAssignment(r) => {
+				let _ = self.sat_value.remove(&r);
+			}
+			TrailEvent::IntAssignment(i, v) => {
+				self.int_value[i] = v;
+			}
+		}
+	}
+
+	pub(crate) fn undo_until_found_lit(&mut self, lit: RawLit) {
+		let var = lit.var();
+		while let Some(event) = self.pop_trail() {
+			let found = matches!(event, TrailEvent::SatAssignment(r) if r == var);
+			self.undo_event(event);
+			if found {
+				return;
+			}
+		}
+		panic!("literal {:?} was never assigned", lit)
 	}
 
 	pub(crate) fn notify_new_decision_level(&mut self) {
-		self.prev_len.push(self.trail.len())
+		self.prev_len.push(self.trail.len());
 	}
-
 	pub(crate) fn notify_backtrack(&mut self, level: usize) {
 		self.prev_len.truncate(level + 1);
 		let len = self.prev_len.pop().unwrap_or(0);
-		for (i, val) in self.trail.drain(len..).rev() {
-			self.value[i] = val;
+		debug_assert!(
+			len <= self.trail.len(),
+			"backtracking to level {level} length {len}, but trail is already at length {}",
+			self.trail.len()
+		);
+		while self.trail.len() > len {
+			let event = self.pop_trail().unwrap();
+			self.undo_event(event);
 		}
+		debug_assert_eq!(self.trail.len(), len);
 	}
-
 	pub(crate) fn decision_level(&self) -> usize {
 		self.prev_len.len()
 	}
-}
 
-impl<I: Idx, E: PartialEq> Trail<I, E> {
-	pub(crate) fn assign(&mut self, i: I, val: E) -> HasChanged {
-		if self.value[i] == val {
-			return HasChanged::NoChange;
-		}
-		let old = mem::replace(&mut self.value[i], val);
-		if !self.prev_len.is_empty() {
-			self.trail.push((i, old));
-		}
-		HasChanged::Changed
-	}
-}
-
-impl<I: Idx, E> Index<I> for Trail<I, E> {
-	type Output = E;
-
-	fn index(&self, index: I) -> &Self::Output {
-		self.value.index(index)
-	}
-}
-
-impl TrailingActions for Trail<TrailedInt, IntVal> {
-	fn get_trailed_int(&self, x: TrailedInt) -> IntVal {
-		self[x]
-	}
-	fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) {
-		let _ = self.assign(x, v);
-	}
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub(crate) struct SatTrail {
-	value: HashMap<RawVar, bool>,
-	trail: Vec<RawVar>,
-	prev_len: Vec<usize>,
-}
-
-impl SatTrail {
-	pub(crate) fn notify_new_decision_level(&mut self) {
-		self.prev_len.push(self.trail.len())
+	pub(crate) fn track_int(&mut self, val: IntVal) -> TrailedInt {
+		self.int_value.push(val)
 	}
 
-	pub(crate) fn notify_backtrack(&mut self, level: usize) {
-		self.prev_len.truncate(level + 1);
-		let len = self.prev_len.pop().unwrap_or(0);
-		for v in self.trail.drain(len..).rev() {
-			let _ = self.value.remove(&v);
-		}
-	}
-
-	pub(crate) fn assign(&mut self, var: RawVar, val: bool) -> HasChanged {
-		if self.value.insert(var, val).is_some() {
-			// Variable was updated with a new value
-			// This might be a new (inconsistent) value if the SAT solver is still propagating given
-			// literals.
-			return HasChanged::NoChange;
-		}
-		if !self.prev_len.is_empty() {
-			self.trail.push(var);
-		}
-		HasChanged::Changed
-	}
-
-	pub(crate) fn get<L: Into<RawLit>>(&self, lit: L) -> Option<bool> {
+	pub(crate) fn get_sat_value(&self, lit: impl Into<RawLit>) -> Option<bool> {
 		let lit = lit.into();
-		self.value
+		self.sat_value
 			.get(&lit.var())
 			.copied()
 			.map(|x| if lit.is_negated() { !x } else { x })
 	}
+	pub(crate) fn assign_sat(&mut self, lit: RawLit) -> Option<bool> {
+		let var = lit.var();
+		let val = !lit.is_negated();
 
-	pub(crate) fn decision_level(&self) -> usize {
-		self.prev_len.len()
+		let x = self.sat_value.insert(var, val);
+		if x.is_none() && !self.prev_len.is_empty() {
+			self.push_trail(TrailEvent::SatAssignment(var));
+		}
+		x
 	}
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HasChanged {
-	Changed,
-	NoChange,
+impl TrailingActions for Trail {
+	fn get_trailed_int(&self, i: TrailedInt) -> IntVal {
+		self.int_value[i]
+	}
+	fn set_trailed_int(&mut self, i: TrailedInt, v: IntVal) -> IntVal {
+		if self.int_value[i] == v {
+			return v;
+		}
+		let old = mem::replace(&mut self.int_value[i], v);
+		if !self.prev_len.is_empty() {
+			self.push_trail(TrailEvent::IntAssignment(i, old));
+		}
+		old
+	}
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TrailEvent {
+	SatAssignment(RawVar),
+	IntAssignment(TrailedInt, IntVal),
+}
+
+#[cfg(test)]
+mod tests {
+	use pindakaas::solver::{cadical::Cadical, NextVarRange};
+
+	use crate::{
+		solver::engine::trail::{Trail, TrailEvent, TrailedInt},
+		IntVal,
+	};
+
+	#[test]
+	fn test_trail_event() {
+		let mut slv = Cadical::default();
+		let lits = slv.next_var_range(10).unwrap();
+		let int_events: [(u32, IntVal); 10] = [
+			(0, 0),
+			(1, 1),
+			(2, -1),
+			(i32::MAX as u32, IntVal::MAX),
+			(9474, IntVal::MIN),
+			(6966, 4084),
+			(4099, -9967),
+			(1977, 9076),
+			(2729, -4312),
+			(941, 1718),
+		];
+
+		let mut trail = Trail::default();
+		for (l, (i, v)) in lits.clone().zip(int_events.iter()) {
+			trail.push_trail(TrailEvent::SatAssignment(l));
+			trail.push_trail(TrailEvent::IntAssignment(TrailedInt::from_raw(*i), *v));
+		}
+		for (l, (i, v)) in lits.rev().zip(int_events.iter().rev()) {
+			assert_eq!(
+				trail.pop_trail().unwrap(),
+				TrailEvent::IntAssignment(TrailedInt::from_raw(*i), *v)
+			);
+			assert_eq!(trail.pop_trail().unwrap(), TrailEvent::SatAssignment(l))
+		}
+	}
 }
