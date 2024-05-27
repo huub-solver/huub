@@ -171,6 +171,33 @@ impl Model {
 						});
 					}
 				}
+				"array_int_element" => {
+					if let [idx, arr, val] = c.args.as_slice() {
+						let arr = arg_array(fzn, arr)?;
+						let idx = arg_int(fzn, &mut prb, &mut map, idx)?;
+						let val = arg_int(fzn, &mut prb, &mut map, val)?;
+						let arr: Result<Vec<_>, _> = arr.iter().map(|l| par_int(fzn, l)).collect();
+						// add clause (idx = i + 1) => (val = arr[i])
+						(arr?).iter().enumerate().for_each(|(i, x)| {
+							prb += BoolExpr::Implies(
+								Box::new(BoolExpr::View(BoolView::IntEq(
+									Box::new(idx.clone()),
+									(i + 1) as i64,
+								))),
+								Box::new(BoolExpr::View(BoolView::IntEq(
+									Box::new(val.clone()),
+									*x,
+								))),
+							);
+						});
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "array_int_element",
+							found: c.args.len(),
+							expected: 3,
+						});
+					}
+				}
 				"array_var_int_element" => {
 					if let [idx, arr, val] = c.args.as_slice() {
 						let arr: Result<Vec<_>, _> = arg_array(fzn, arr)?
