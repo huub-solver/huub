@@ -167,23 +167,22 @@ impl Model {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_bool_xor",
 							found: c.args.len(),
-							expected: 2,
+							expected: 1,
 						});
 					}
 				}
 				"array_var_int_element" => {
 					if let [idx, arr, val] = c.args.as_slice() {
-						let arr = arg_array(fzn, arr)?;
-						let idx = arg_int(fzn, &mut prb, &mut map, idx)?;
-						let val = arg_int(fzn, &mut prb, &mut map, val)?;
-						let arr: Result<Vec<_>, _> = arr
+						let arr: Result<Vec<_>, _> = arg_array(fzn, arr)?
 							.iter()
 							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
 							.collect();
+						let idx = arg_int(fzn, &mut prb, &mut map, idx)?;
+						let val = arg_int(fzn, &mut prb, &mut map, val)?;
 						prb += Constraint::ArrayVarIntElement(arr?, idx, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
-							name: "array_int_element",
+							name: "array_var_int_element",
 							found: c.args.len(),
 							expected: 3,
 						});
@@ -191,46 +190,17 @@ impl Model {
 				}
 				"array_var_bool_element" => {
 					if let [idx, arr, val] = c.args.as_slice() {
-						let arr = arg_array(fzn, arr)?;
+						let arr: Result<Vec<_>, FlatZincError> = arg_array(fzn, arr)?
+							.iter()
+							.map(|l| {
+								let x: BoolView = lit_bool(fzn, &mut prb, &mut map, l)?;
+								Ok(x.into())
+							})
+							.collect();
 						let idx = arg_int(fzn, &mut prb, &mut map, idx)?;
 						let val = arg_bool(fzn, &mut prb, &mut map, val)?;
 
-						// add clause (idx = i + 1 /\ arr[i]) => val
-						// add clause (idx = i + 1 /\ !arr[i]) => !val
-						arr.iter().enumerate().for_each(|(i, l)| {
-							let l = lit_bool(fzn, &mut prb, &mut map, l).unwrap();
-							prb += BoolExpr::Implies(
-								Box::from(BoolExpr::And(vec![
-									l.clone().into(),
-									BoolView::IntEq(Box::new(idx.clone()), (i + 1) as i64).into(),
-								])),
-								Box::from(BoolExpr::View(val.clone())),
-							);
-							prb += BoolExpr::Implies(
-								Box::from(BoolExpr::And(vec![
-									(!l).clone().into(),
-									BoolView::IntEq(Box::new(idx.clone()), (i + 1) as i64).into(),
-								])),
-								Box::from(BoolExpr::View(!val.clone())),
-							);
-						});
-
-						// add clause (arr[1] /\ arr[2] /\ ... /\ arr[n]) => val
-						// add clause (!arr[1] /\ !arr[2] /\ ... /\ !arr[n]) => !val
-						let all_lits = arr
-							.iter()
-							.map(|l| lit_bool(fzn, &mut prb, &mut map, l))
-							.collect::<Result<Vec<_>, _>>()?;
-						let all_true = all_lits.iter().map(|l| l.clone().into()).collect();
-						prb += BoolExpr::Implies(
-							Box::from(BoolExpr::And(all_true)),
-							Box::from(BoolExpr::View(val.clone())),
-						);
-						let all_false = all_lits.iter().map(|l| (!l).clone().into()).collect();
-						prb += BoolExpr::Implies(
-							Box::from(BoolExpr::And(all_false)),
-							Box::from(BoolExpr::View(!val.clone())),
-						);
+						prb += Constraint::ArrayVarBoolElement(arr?, idx, val.into());
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_var_bool_element",

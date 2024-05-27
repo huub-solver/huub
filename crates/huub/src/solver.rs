@@ -293,6 +293,26 @@ where
 		debug_assert_eq!(prop_ref, p);
 	}
 
+	pub(crate) fn add_clause<I: IntoIterator<Item = BoolView>>(
+		&mut self,
+		iter: I,
+	) -> Result<(), ReformulationError> {
+		let mut clause = Vec::new();
+		for lit in iter {
+			match lit.0 {
+				BoolViewInner::Lit(l) => clause.push(l),
+				BoolViewInner::Const(true) => return Ok(()),
+				BoolViewInner::Const(false) => (),
+			}
+		}
+		if clause.is_empty() {
+			return Err(ReformulationError::TrivialUnsatisfiable);
+		}
+		self.oracle
+			.add_clause(clause)
+			.map_err(|_| ReformulationError::TrivialUnsatisfiable)
+	}
+
 	pub fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = RawLit>)>(
 		&mut self,
 		cb: Option<F>,

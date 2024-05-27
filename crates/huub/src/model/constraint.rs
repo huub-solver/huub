@@ -1,10 +1,14 @@
+use std::iter::once;
+
 use flatzinc_serde::RangeList;
+use itertools::Itertools;
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
 	Valuation as SatValuation,
 };
 
 use crate::{
+	actions::explanation::ExplanationActions,
 	helpers::{div_ceil, div_floor},
 	model::{
 		int::IntView,
@@ -18,14 +22,18 @@ use crate::{
 		int_lin_ne::{IntLinearNotEqImpValue, IntLinearNotEqValue},
 		int_times::IntTimesBounds,
 	},
-	solver::{view::BoolViewInner, SatSolver},
-	BoolExpr, IntVal, Model, NonZeroIntVal, ReformulationError, Solver,
+	solver::{
+		view::{BoolViewInner, IntViewInner},
+		SatSolver,
+	},
+	BoolExpr, IntVal, LitMeaning, Model, NonZeroIntVal, ReformulationError, Solver,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Constraint {
 	AllDifferentInt(Vec<IntView>),
 	ArrayVarIntElement(Vec<IntView>, IntView, IntView),
+	ArrayVarBoolElement(Vec<BoolExpr>, IntView, BoolExpr),
 	ArrayIntMaximum(Vec<IntView>, IntView),
 	ArrayIntMinimum(Vec<IntView>, IntView),
 	IntLinEq(Vec<IntView>, IntVal),
@@ -262,6 +270,40 @@ impl Constraint {
 				let y = y.to_arg(ReifContext::Mixed, slv, map);
 				let idx = idx.to_arg(ReifContext::Mixed, slv, map);
 				slv.add_propagator(ArrayVarIntElementBounds::prepare(vars, y, idx));
+				Ok(())
+			}
+			Constraint::ArrayVarBoolElement(vars, idx, y) => {
+				let idx = idx.to_arg(ReifContext::Mixed, slv, map);
+				// If the index is already fixed, implement simple equivalence
+				if let IntViewInner::Const(idx) = idx.0 {
+					let idx = idx as usize;
+					return BoolExpr::Equiv(vec![vars[idx - 1].clone(), y.clone()])
+						.constrain(slv, map);
+				}
+
+				// Evaluate result literal
+				let y = y.to_arg(ReifContext::Mixed, slv, map, None)?;
+				let arr: Vec<_> = vars
+					.iter()
+					.map(|v| v.to_arg(ReifContext::Mixed, slv, map, None))
+					.try_collect()?;
+
+				for (i, l) in arr.iter().enumerate() {
+					// Evaluate array literal
+					let idx_eq = slv
+						.engine()
+						.state
+						.get_int_lit(idx, LitMeaning::Eq((i + 1) as IntVal));
+					// add clause (idx = i + 1 /\ arr[i]) => val
+					slv.add_clause([!idx_eq, !l, y])?;
+					// add clause (idx = i + 1 /\ !arr[i]) => !val
+					slv.add_clause([!idx_eq, *l, !y])?
+				}
+
+				// add clause (arr[1] /\ arr[2] /\ ... /\ arr[n]) => val
+				slv.add_clause(arr.iter().map(|l| !l).chain(once(y)))?;
+				// add clause (!arr[1] /\ !arr[2] /\ ... /\ !arr[n]) => !val
+				slv.add_clause(arr.into_iter().chain(once(!y)))?;
 				Ok(())
 			}
 			Constraint::IntTimes(x, y, z) => {
