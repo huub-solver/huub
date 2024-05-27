@@ -25,7 +25,16 @@ impl Conflict {
 	pub(crate) fn new(subject: Option<RawLit>, reason: &ReasonBuilder, prop: PropRef) -> Self {
 		match Reason::build_reason(reason, prop) {
 			Ok(reason) => Self { subject, reason },
-			Err(true) => panic!("constructing empty conflict"),
+			Err(true) => {
+				if let Some(subject) = subject {
+					Self {
+						subject: None,
+						reason: Reason::Simple(!subject),
+					}
+				} else {
+					panic!("constructing empty conflict")
+				}
+			}
 			Err(false) => unreachable!("invalid reason"),
 		}
 	}
