@@ -189,6 +189,56 @@ impl Model {
 						});
 					}
 				}
+				"array_var_bool_element" => {
+					if let [idx, arr, val] = c.args.as_slice() {
+						let arr = arg_array(fzn, arr)?;
+						let idx = arg_int(fzn, &mut prb, &mut map, idx)?;
+						let val = arg_bool(fzn, &mut prb, &mut map, val)?;
+
+						// add clause (idx = i + 1 /\ arr[i]) => val
+						// add clause (idx = i + 1 /\ !arr[i]) => !val
+						arr.iter().enumerate().for_each(|(i, l)| {
+							let l = lit_bool(fzn, &mut prb, &mut map, l).unwrap();
+							prb += BoolExpr::Implies(
+								Box::from(BoolExpr::And(vec![
+									l.clone().into(),
+									BoolView::IntEq(Box::new(idx.clone()), (i + 1) as i64).into(),
+								])),
+								Box::from(BoolExpr::View(val.clone())),
+							);
+							prb += BoolExpr::Implies(
+								Box::from(BoolExpr::And(vec![
+									(!l).clone().into(),
+									BoolView::IntEq(Box::new(idx.clone()), (i + 1) as i64).into(),
+								])),
+								Box::from(BoolExpr::View(!val.clone())),
+							);
+						});
+
+						// add clause (arr[1] /\ arr[2] /\ ... /\ arr[n]) => val
+						// add clause (!arr[1] /\ !arr[2] /\ ... /\ !arr[n]) => !val
+						let all_lits = arr
+							.iter()
+							.map(|l| lit_bool(fzn, &mut prb, &mut map, l))
+							.collect::<Result<Vec<_>, _>>()?;
+						let all_true = all_lits.iter().map(|l| l.clone().into()).collect();
+						prb += BoolExpr::Implies(
+							Box::from(BoolExpr::And(all_true)),
+							Box::from(BoolExpr::View(val.clone())),
+						);
+						let all_false = all_lits.iter().map(|l| (!l).clone().into()).collect();
+						prb += BoolExpr::Implies(
+							Box::from(BoolExpr::And(all_false)),
+							Box::from(BoolExpr::View(!val.clone())),
+						);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "array_var_bool_element",
+							found: c.args.len(),
+							expected: 3,
+						});
+					}
+				}
 				"bool2int" => {
 					if let [b, i] = c.args.as_slice() {
 						let b = arg_bool(fzn, &mut prb, &mut map, b)?;
