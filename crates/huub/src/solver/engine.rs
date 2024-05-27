@@ -422,9 +422,13 @@ impl State {
 	fn register_reason(&mut self, lit: RawLit, builder: &ReasonBuilder, prop: PropRef) {
 		match Reason::build_reason(builder, prop) {
 			Ok(reason) => {
+				// Insert new reason, possibly overwriting old one (from previous search attempt)
 				let _ = self.reason_map.insert(lit, reason);
 			}
-			Err(true) => (),
+			Err(true) => {
+				// No (previous) reason required
+				let _ = self.reason_map.remove(&lit);
+			}
 			Err(false) => unreachable!("invalid reason"),
 		}
 	}
