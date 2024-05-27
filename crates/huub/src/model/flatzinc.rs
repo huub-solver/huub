@@ -8,13 +8,9 @@ use pindakaas::{
 };
 use thiserror::Error;
 
+use super::bool::BoolView;
 use crate::{
-	model::{
-		bool::{BoolExpr, BoolView},
-		int::IntView,
-		reformulate::ReformulationError,
-		ModelView,
-	},
+	model::{bool::BoolExpr, int::IntView, reformulate::ReformulationError, ModelView},
 	solver::SatSolver,
 	Constraint, IntSetVal, IntVal, Model, NonZeroIntVal, Solver, SolverView,
 };
@@ -569,6 +565,21 @@ impl Model {
 							name: "set_in",
 							found: c.args.len(),
 							expected: 2,
+						});
+					}
+				}
+				"set_in_reif" => {
+					if let [x, s, r] = c.args.as_slice() {
+						let x = arg_int(fzn, &mut prb, &mut map, x)?;
+						let s = arg_par_set(fzn, s)?;
+						let r = arg_bool(fzn, &mut prb, &mut map, r)?;
+
+						prb += Constraint::SetInReif(x, s, r.into());
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "set_in_reif",
+							found: c.args.len(),
+							expected: 3,
 						});
 					}
 				}

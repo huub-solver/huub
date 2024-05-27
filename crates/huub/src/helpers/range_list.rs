@@ -82,7 +82,7 @@ pub(crate) fn intersect_range_list(
 				let _ = rhs.next();
 			}
 			RangeOrdering::Overlap => {
-				ranges.push(max(l.start(), r.start()).clone()..=min(l.end(), r.end()).clone());
+				ranges.push(max(*l.start(), *r.start())..=min(*l.end(), *r.end()));
 				if l.end() <= r.end() {
 					let _ = lhs.next();
 				} else {

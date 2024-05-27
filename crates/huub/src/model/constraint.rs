@@ -11,6 +11,7 @@ use crate::{
 	actions::explanation::ExplanationActions,
 	helpers::{div_ceil, div_floor},
 	model::{
+		bool::BoolView,
 		int::IntView,
 		reformulate::{ReifContext, VariableMap},
 	},
@@ -26,7 +27,7 @@ use crate::{
 		view::{BoolViewInner, IntViewInner},
 		SatSolver,
 	},
-	BoolExpr, IntVal, LitMeaning, Model, NonZeroIntVal, ReformulationError, Solver,
+	BoolExpr, IntSetVal, IntVal, LitMeaning, Model, NonZeroIntVal, ReformulationError, Solver,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -48,6 +49,7 @@ pub enum Constraint {
 	IntLinNotEqReif(Vec<IntView>, IntVal, BoolExpr),
 	IntTimes(IntView, IntView, IntView),
 	PropLogic(BoolExpr),
+	SetInReif(IntView, IntSetVal, BoolExpr),
 }
 
 impl Constraint {
@@ -340,6 +342,27 @@ impl Constraint {
 				Ok(())
 			}
 			Constraint::PropLogic(exp) => exp.constrain(slv, map),
+			Constraint::SetInReif(x, s, r) => {
+				if s.iter().len() == 1 {
+					let lb = *s.lower_bound().unwrap();
+					let ub = *s.upper_bound().unwrap();
+					BoolExpr::Equiv(vec![
+						BoolExpr::And(vec![
+							BoolView::IntGreaterEq(Box::from(x.clone()), lb).into(),
+							BoolView::IntLessEq(Box::from(x.clone()), ub).into(),
+						]),
+						r.clone(),
+					])
+					.constrain(slv, map)
+				} else {
+					let eq_lits = s
+						.iter()
+						.flatten()
+						.map(|v| BoolView::IntEq(Box::new(x.clone()), v).into())
+						.collect();
+					BoolExpr::Equiv(vec![r.clone(), BoolExpr::Or(eq_lits)]).constrain(slv, map)
+				}
+			}
 		}
 	}
 }
