@@ -69,7 +69,7 @@ impl VariableMap {
 			bool::BoolView::IntGreater(v, i) => get_int_lit(slv, v, LitMeaning::GreaterEq(i + 1)),
 			bool::BoolView::IntGreaterEq(v, i) => get_int_lit(slv, v, LitMeaning::GreaterEq(*i)),
 			bool::BoolView::IntLess(v, i) => get_int_lit(slv, v, LitMeaning::Less(*i)),
-			bool::BoolView::IntLessEq(v, i) => get_int_lit(slv, v, LitMeaning::Less(i - 1)),
+			bool::BoolView::IntLessEq(v, i) => get_int_lit(slv, v, LitMeaning::Less(i + 1)),
 			bool::BoolView::IntNotEq(v, i) => get_int_lit(slv, v, LitMeaning::NotEq(*i)),
 		}
 	}
