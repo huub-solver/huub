@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fmt::Debug, ops::Deref};
 
-use flatzinc_serde::{Argument, Domain, FlatZinc, Literal, Type, Variable};
+use flatzinc_serde::{Argument, Domain, FlatZinc, Literal, RangeList, Type, Variable};
 use itertools::Itertools;
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
@@ -167,6 +167,43 @@ impl Model {
 						});
 					}
 				}
+				"array_bool_element" => {
+					if let [idx, arr, val] = c.args.as_slice() {
+						let arr: Vec<_> = arg_array(fzn, arr)?
+							.iter()
+							.map(|l| par_bool(fzn, l))
+							.try_collect()?;
+						let idx = arg_int(fzn, &mut prb, &mut map, idx)?;
+						let val = arg_bool(fzn, &mut prb, &mut map, val)?;
+
+						// Convert array of boolean values to a set literals of the indices where
+						// the value is true
+						let mut ranges = Vec::new();
+						let mut start = None;
+						for (i, b) in arr.iter().enumerate() {
+							match (b, start) {
+								(true, None) => start = Some((i + 1) as IntVal),
+								(false, Some(s)) => {
+									ranges.push(s..=i as IntVal);
+									start = None;
+								}
+								(false, None) | (true, Some(_)) => {}
+							}
+						}
+						if let Some(s) = start {
+							ranges.push(s..=arr.len() as IntVal);
+						}
+						let s = RangeList::from_iter(ranges);
+
+						prb += Constraint::SetInReif(idx, s, val.into());
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "array_bool_element",
+							found: c.args.len(),
+							expected: 3,
+						});
+					}
+				}
 				"array_int_element" => {
 					if let [idx, arr, val] = c.args.as_slice() {
 						let arr: Result<Vec<_>, _> = arg_array(fzn, arr)?
@@ -179,23 +216,6 @@ impl Model {
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_int_element",
-							found: c.args.len(),
-							expected: 3,
-						});
-					}
-				}
-				"array_var_int_element" => {
-					if let [idx, arr, val] = c.args.as_slice() {
-						let arr: Result<Vec<_>, _> = arg_array(fzn, arr)?
-							.iter()
-							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
-							.collect();
-						let idx = arg_int(fzn, &mut prb, &mut map, idx)?;
-						let val = arg_int(fzn, &mut prb, &mut map, val)?;
-						prb += Constraint::ArrayVarIntElement(arr?, idx, val);
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "array_var_int_element",
 							found: c.args.len(),
 							expected: 3,
 						});
@@ -217,6 +237,23 @@ impl Model {
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_var_bool_element",
+							found: c.args.len(),
+							expected: 3,
+						});
+					}
+				}
+				"array_var_int_element" => {
+					if let [idx, arr, val] = c.args.as_slice() {
+						let arr: Result<Vec<_>, _> = arg_array(fzn, arr)?
+							.iter()
+							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
+							.collect();
+						let idx = arg_int(fzn, &mut prb, &mut map, idx)?;
+						let val = arg_int(fzn, &mut prb, &mut map, val)?;
+						prb += Constraint::ArrayVarIntElement(arr?, idx, val);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "array_var_int_element",
 							found: c.args.len(),
 							expected: 3,
 						});
@@ -715,6 +752,30 @@ fn lit_bool<S: Ord + Deref<Target = str> + Clone + Debug>(
 			}
 		}
 		Literal::Bool(v) => Ok(BoolView::Const(*v)),
+		_ => todo!(),
+	}
+}
+
+fn par_bool<S: Ord + Deref<Target = str> + Clone + Debug>(
+	fzn: &FlatZinc<S>,
+	lit: &Literal<S>,
+) -> Result<bool, FlatZincError> {
+	match lit {
+		Literal::Identifier(ident) => {
+			if let Some(var) = fzn.variables.get(ident) {
+				if var.ty == Type::Bool && var.value.is_some() {
+					par_bool(fzn, var.value.as_ref().unwrap())
+				} else {
+					Err(FlatZincError::InvalidArgumentType {
+						expected: "par bool",
+						found: format!("{:?}", var.ty),
+					})
+				}
+			} else {
+				Err(FlatZincError::UnknownIdentifier(ident.to_string()))
+			}
+		}
+		Literal::Bool(v) => Ok(*v),
 		_ => todo!(),
 	}
 }
