@@ -16,7 +16,7 @@ use crate::{
 		ModelView,
 	},
 	solver::SatSolver,
-	Constraint, IntVal, Model, NonZeroIntVal, Solver, SolverView,
+	Constraint, IntSetVal, IntVal, Model, NonZeroIntVal, Solver, SolverView,
 };
 
 impl Model {
@@ -558,6 +558,20 @@ impl Model {
 						});
 					}
 				}
+				"set_in" => {
+					if let [x, s] = c.args.as_slice() {
+						let x = arg_int(fzn, &mut prb, &mut map, x)?;
+						let s = arg_par_set(fzn, s)?;
+
+						prb.intersect_int_domain(&x, &s, prb.constraints.len())?;
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "set_in",
+							found: c.args.len(),
+							expected: 2,
+						});
+					}
+				}
 				_ => return Err(FlatZincError::UnknownConstraint(c.id.to_string())),
 			}
 		}
@@ -790,6 +804,43 @@ fn arg_par_int<S: Ord + Deref<Target = str> + Clone + Debug>(
 		Argument::Literal(l) => par_int(fzn, l),
 		_ => Err(FlatZincError::InvalidArgumentType {
 			expected: "par integer literal",
+			found: format!("{:?}", arg),
+		}),
+	}
+}
+
+fn par_set<S: Ord + Deref<Target = str> + Clone + Debug>(
+	fzn: &FlatZinc<S>,
+	lit: &Literal<S>,
+) -> Result<IntSetVal, FlatZincError> {
+	match lit {
+		Literal::Identifier(ident) => {
+			if let Some(var) = fzn.variables.get(ident) {
+				if var.ty == Type::IntSet && var.value.is_some() {
+					par_set(fzn, var.value.as_ref().unwrap())
+				} else {
+					Err(FlatZincError::InvalidArgumentType {
+						expected: "par set",
+						found: format!("{:?}", var.ty),
+					})
+				}
+			} else {
+				Err(FlatZincError::UnknownIdentifier(ident.to_string()))
+			}
+		}
+		Literal::IntSet(v) => Ok(v.clone()),
+		_ => todo!(),
+	}
+}
+
+fn arg_par_set<S: Ord + Deref<Target = str> + Clone + Debug>(
+	fzn: &FlatZinc<S>,
+	arg: &Argument<S>,
+) -> Result<IntSetVal, FlatZincError> {
+	match arg {
+		Argument::Literal(l) => par_set(fzn, l),
+		_ => Err(FlatZincError::InvalidArgumentType {
+			expected: "par set literal",
 			found: format!("{:?}", arg),
 		}),
 	}

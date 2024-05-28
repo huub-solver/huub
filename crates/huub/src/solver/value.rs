@@ -1,5 +1,6 @@
 use std::{fmt::Display, num::NonZeroI64};
 
+use flatzinc_serde::RangeList;
 use pindakaas::solver::FailedAssumtions;
 
 use crate::{
@@ -33,6 +34,8 @@ impl Value {
 
 pub type IntVal = i64;
 pub type NonZeroIntVal = NonZeroI64;
+
+pub type IntSetVal = RangeList<IntVal>;
 
 pub trait Valuation: Fn(SolverView) -> Option<Value> {}
 impl<F: Fn(SolverView) -> Option<Value>> Valuation for F {}

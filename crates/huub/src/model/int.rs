@@ -7,7 +7,10 @@ use pindakaas::{
 };
 
 use crate::{
-	helpers::linear_transform::LinearTransform,
+	helpers::{
+		linear_transform::LinearTransform,
+		range_list::{diff_range_list, intersect_range_list},
+	},
 	model::{
 		bool::BoolView,
 		reformulate::{ReifContext, VariableMap},
@@ -353,63 +356,39 @@ impl Model {
 			IntView::Bool(_, _) => todo!(),
 		}
 	}
-}
 
-/// Compute the RangeList that is i diff j
-fn diff_range_list(i: &RangeList<IntVal>, j: &RangeList<IntVal>) -> RangeList<IntVal> {
-	if i.is_empty() {
-		return RangeList::from_iter([]);
-	}
-	let mut i = i.iter().peekable();
-	let mut j = j.iter().peekable();
-	let mut ranges = Vec::new();
-	let mut max: IntVal = *i.peek().unwrap().start();
-	loop {
-		if i.peek().is_none() {
-			break;
-		}
-		let mut min = max + 1;
-		max = *i.peek().unwrap().end();
-		if min > *i.peek().unwrap().end() {
-			let _ = i.next();
-			if let Some(r) = i.peek() {
-				min = *r.start();
-				max = *r.end();
-			} else {
-				break;
-			}
-		}
-		while let Some(r) = j.peek() {
-			if r.end() < i.peek().unwrap().start() {
-				let _ = j.next();
-			} else {
-				break;
-			}
-		}
-		if let Some(r) = j.peek() {
-			if *r.start() <= max {
-				// Interval min..max must be shurk
-				if min >= *r.start() && max <= *r.end() {
-					// Interval min..max is completely covered by r
-					continue;
+	pub(crate) fn intersect_int_domain(
+		&mut self,
+		iv: &IntView,
+		mask: &RangeList<IntVal>,
+		con: usize,
+	) -> Result<(), ReformulationError> {
+		match *iv {
+			IntView::Var(v) => {
+				let intersect = intersect_range_list(&self.int_vars[v.0 as usize].domain, mask);
+				if intersect.is_empty() {
+					return Err(ReformulationError::TrivialUnsatisfiable);
+				} else if self.int_vars[v.0 as usize].domain == intersect {
+					return Ok(());
 				}
-				if *r.start() <= min {
-					// Interval min..max overlaps on the left
-					min = r.end() + 1;
-					// Search for max
-					let _ = j.next();
-					if let Some(r) = j.peek() {
-						if *r.start() <= max {
-							max = r.start() - 1;
-						}
+				self.int_vars[v.0 as usize].domain = intersect;
+				let constraints = self.int_vars[v.0 as usize].constraints.clone();
+				for c in constraints {
+					if c != con {
+						self.enqueue(c);
 					}
+				}
+				Ok(())
+			}
+			IntView::Const(v) => {
+				if mask.contains(&v) {
+					Err(ReformulationError::TrivialUnsatisfiable)
 				} else {
-					// Interval overlaps on the right
-					max = r.start() - 1;
+					Ok(())
 				}
 			}
+			IntView::Linear(_, _) => todo!(),
+			IntView::Bool(_, _) => todo!(),
 		}
-		ranges.push(min..=max);
 	}
-	RangeList::from_iter(ranges)
 }

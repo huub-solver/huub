@@ -15,7 +15,7 @@ pub use pindakaas::solver::SlvTermSignal;
 use pindakaas::Lit as RawLit;
 pub use solver::{
 	engine::int_var::LitMeaning,
-	value::{IntVal, NonZeroIntVal, Valuation, Value},
+	value::{IntSetVal, IntVal, NonZeroIntVal, Valuation, Value},
 	view::{BoolView, IntView, SolverView},
 	Goal, SolveResult, Solver,
 };
