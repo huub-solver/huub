@@ -173,23 +173,13 @@ impl Model {
 				}
 				"array_int_element" => {
 					if let [idx, arr, val] = c.args.as_slice() {
-						let arr = arg_array(fzn, arr)?;
+						let arr: Result<Vec<_>, _> = arg_array(fzn, arr)?
+							.iter()
+							.map(|l| par_int(fzn, l))
+							.collect();
 						let idx = arg_int(fzn, &mut prb, &mut map, idx)?;
 						let val = arg_int(fzn, &mut prb, &mut map, val)?;
-						let arr: Result<Vec<_>, _> = arr.iter().map(|l| par_int(fzn, l)).collect();
-						// add clause (idx = i + 1) => (val = arr[i])
-						(arr?).iter().enumerate().for_each(|(i, x)| {
-							prb += BoolExpr::Implies(
-								Box::new(BoolExpr::View(BoolView::IntEq(
-									Box::new(idx.clone()),
-									(i + 1) as i64,
-								))),
-								Box::new(BoolExpr::View(BoolView::IntEq(
-									Box::new(val.clone()),
-									*x,
-								))),
-							);
-						});
+						prb += Constraint::ArrayIntElement(arr?, idx, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_int_element",

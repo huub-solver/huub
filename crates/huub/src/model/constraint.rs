@@ -32,10 +32,11 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Constraint {
 	AllDifferentInt(Vec<IntView>),
-	ArrayVarIntElement(Vec<IntView>, IntView, IntView),
-	ArrayVarBoolElement(Vec<BoolExpr>, IntView, BoolExpr),
+	ArrayIntElement(Vec<IntVal>, IntView, IntView),
 	ArrayIntMaximum(Vec<IntView>, IntView),
 	ArrayIntMinimum(Vec<IntView>, IntView),
+	ArrayVarBoolElement(Vec<BoolExpr>, IntView, BoolExpr),
+	ArrayVarIntElement(Vec<IntView>, IntView, IntView),
 	IntLinEq(Vec<IntView>, IntVal),
 	IntLinEqImp(Vec<IntView>, IntVal, BoolExpr),
 	IntLinEqReif(Vec<IntView>, IntVal, BoolExpr),
@@ -60,13 +61,100 @@ impl Constraint {
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 	{
 		match self {
-			Constraint::PropLogic(exp) => exp.constrain(slv, map),
 			Constraint::AllDifferentInt(v) => {
 				let vars: Vec<_> = v
 					.iter()
 					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
 				slv.add_propagator(AllDifferentIntValue::prepare(vars));
+				Ok(())
+			}
+			Constraint::ArrayIntElement(arr, idx, y) => {
+				let idx = idx.to_arg(ReifContext::Mixed, slv, map);
+				let y = y.to_arg(ReifContext::Mixed, slv, map);
+
+				let idx_map = arr
+					.iter()
+					.enumerate()
+					.map(|(i, v)| (*v, (i + 1) as IntVal))
+					.into_group_map();
+
+				for (val, idxs) in idx_map {
+					let val_eq = slv.engine().state.get_int_lit(y, LitMeaning::Eq(val));
+					let idxs: Vec<_> = idxs
+						.into_iter()
+						.map(|i| slv.engine().state.get_int_lit(idx, LitMeaning::Eq(i)))
+						.collect();
+
+					for i in idxs.iter() {
+						// (idx = i) -> (val = arr[i])
+						slv.add_clause([!i, val_eq])?;
+					}
+					// (idx not in idxs) -> (val != arr[i])
+					slv.add_clause(idxs.into_iter().chain(once(!val_eq)))?
+				}
+				Ok(())
+			}
+			Constraint::ArrayIntMinimum(vars, y) => {
+				let vars: Vec<_> = vars
+					.iter()
+					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
+					.collect();
+				let y = y.to_arg(ReifContext::Mixed, slv, map);
+				slv.add_propagator(ArrayIntMinimumBounds::prepare(vars, y));
+				Ok(())
+			}
+			Constraint::ArrayIntMaximum(vars, y) => {
+				let vars: Vec<_> = vars
+					.iter()
+					.map(|v| -v.to_arg(ReifContext::Mixed, slv, map))
+					.collect();
+				let y = -y.to_arg(ReifContext::Mixed, slv, map);
+				slv.add_propagator(ArrayIntMinimumBounds::prepare(vars, y));
+				Ok(())
+			}
+			Constraint::ArrayVarIntElement(vars, idx, y) => {
+				let vars: Vec<_> = vars
+					.iter()
+					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
+					.collect();
+				let y = y.to_arg(ReifContext::Mixed, slv, map);
+				let idx = idx.to_arg(ReifContext::Mixed, slv, map);
+				slv.add_propagator(ArrayVarIntElementBounds::prepare(vars, y, idx));
+				Ok(())
+			}
+			Constraint::ArrayVarBoolElement(vars, idx, y) => {
+				let idx = idx.to_arg(ReifContext::Mixed, slv, map);
+				// If the index is already fixed, implement simple equivalence
+				if let IntViewInner::Const(idx) = idx.0 {
+					let idx = idx as usize;
+					return BoolExpr::Equiv(vec![vars[idx - 1].clone(), y.clone()])
+						.constrain(slv, map);
+				}
+
+				// Evaluate result literal
+				let y = y.to_arg(ReifContext::Mixed, slv, map, None)?;
+				let arr: Vec<_> = vars
+					.iter()
+					.map(|v| v.to_arg(ReifContext::Mixed, slv, map, None))
+					.try_collect()?;
+
+				for (i, l) in arr.iter().enumerate() {
+					// Evaluate array literal
+					let idx_eq = slv
+						.engine()
+						.state
+						.get_int_lit(idx, LitMeaning::Eq((i + 1) as IntVal));
+					// add clause (idx = i + 1 /\ arr[i]) => val
+					slv.add_clause([!idx_eq, !l, y])?;
+					// add clause (idx = i + 1 /\ !arr[i]) => !val
+					slv.add_clause([!idx_eq, *l, !y])?
+				}
+
+				// add clause (arr[1] /\ arr[2] /\ ... /\ arr[n]) => val
+				slv.add_clause(arr.iter().map(|l| !l).chain(once(y)))?;
+				// add clause (!arr[1] /\ !arr[2] /\ ... /\ !arr[n]) => !val
+				slv.add_clause(arr.into_iter().chain(once(!y)))?;
 				Ok(())
 			}
 			Constraint::IntLinEq(vars, c) => {
@@ -244,68 +332,6 @@ impl Constraint {
 				}
 				Ok(())
 			}
-			Constraint::ArrayIntMinimum(vars, y) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
-				let y = y.to_arg(ReifContext::Mixed, slv, map);
-				slv.add_propagator(ArrayIntMinimumBounds::prepare(vars, y));
-				Ok(())
-			}
-			Constraint::ArrayIntMaximum(vars, y) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| -v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
-				let y = -y.to_arg(ReifContext::Mixed, slv, map);
-				slv.add_propagator(ArrayIntMinimumBounds::prepare(vars, y));
-				Ok(())
-			}
-			Constraint::ArrayVarIntElement(vars, idx, y) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
-				let y = y.to_arg(ReifContext::Mixed, slv, map);
-				let idx = idx.to_arg(ReifContext::Mixed, slv, map);
-				slv.add_propagator(ArrayVarIntElementBounds::prepare(vars, y, idx));
-				Ok(())
-			}
-			Constraint::ArrayVarBoolElement(vars, idx, y) => {
-				let idx = idx.to_arg(ReifContext::Mixed, slv, map);
-				// If the index is already fixed, implement simple equivalence
-				if let IntViewInner::Const(idx) = idx.0 {
-					let idx = idx as usize;
-					return BoolExpr::Equiv(vec![vars[idx - 1].clone(), y.clone()])
-						.constrain(slv, map);
-				}
-
-				// Evaluate result literal
-				let y = y.to_arg(ReifContext::Mixed, slv, map, None)?;
-				let arr: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map, None))
-					.try_collect()?;
-
-				for (i, l) in arr.iter().enumerate() {
-					// Evaluate array literal
-					let idx_eq = slv
-						.engine()
-						.state
-						.get_int_lit(idx, LitMeaning::Eq((i + 1) as IntVal));
-					// add clause (idx = i + 1 /\ arr[i]) => val
-					slv.add_clause([!idx_eq, !l, y])?;
-					// add clause (idx = i + 1 /\ !arr[i]) => !val
-					slv.add_clause([!idx_eq, *l, !y])?
-				}
-
-				// add clause (arr[1] /\ arr[2] /\ ... /\ arr[n]) => val
-				slv.add_clause(arr.iter().map(|l| !l).chain(once(y)))?;
-				// add clause (!arr[1] /\ !arr[2] /\ ... /\ !arr[n]) => !val
-				slv.add_clause(arr.into_iter().chain(once(!y)))?;
-				Ok(())
-			}
 			Constraint::IntTimes(x, y, z) => {
 				let x = x.to_arg(ReifContext::Mixed, slv, map);
 				let y = y.to_arg(ReifContext::Mixed, slv, map);
@@ -313,6 +339,7 @@ impl Constraint {
 				slv.add_propagator(IntTimesBounds::prepare(x, y, z));
 				Ok(())
 			}
+			Constraint::PropLogic(exp) => exp.constrain(slv, map),
 		}
 	}
 }
