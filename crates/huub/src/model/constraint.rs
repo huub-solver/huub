@@ -21,6 +21,7 @@ use crate::{
 		array_var_int_element::ArrayVarIntElementBounds,
 		int_lin_le::{IntLinearLessEqBounds, IntLinearLessEqImpBounds},
 		int_lin_ne::{IntLinearNotEqImpValue, IntLinearNotEqValue},
+		int_pow::IntPowBounds,
 		int_times::IntTimesBounds,
 	},
 	solver::{
@@ -47,6 +48,7 @@ pub enum Constraint {
 	IntLinNotEq(Vec<IntView>, IntVal),
 	IntLinNotEqImp(Vec<IntView>, IntVal, BoolExpr),
 	IntLinNotEqReif(Vec<IntView>, IntVal, BoolExpr),
+	IntPow(IntView, IntView, IntView),
 	IntTimes(IntView, IntView, IntView),
 	PropLogic(BoolExpr),
 	SetInReif(IntView, IntSetVal, BoolExpr),
@@ -332,6 +334,13 @@ impl Constraint {
 						));
 					}
 				}
+				Ok(())
+			}
+			Constraint::IntPow(base, exponent, res) => {
+				let base = base.to_arg(ReifContext::Mixed, slv, map);
+				let exponent = exponent.to_arg(ReifContext::Mixed, slv, map);
+				let result = res.to_arg(ReifContext::Mixed, slv, map);
+				slv.add_propagator(IntPowBounds::prepare(base, exponent, result));
 				Ok(())
 			}
 			Constraint::IntTimes(x, y, z) => {

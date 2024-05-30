@@ -577,6 +577,21 @@ impl Model {
 						});
 					}
 				}
+				"int_pow" => {
+					if let [base, exponent, res] = c.args.as_slice() {
+						let base = arg_int(fzn, &mut prb, &mut map, base)?;
+						let exponent = arg_int(fzn, &mut prb, &mut map, exponent)?;
+						let res = arg_int(fzn, &mut prb, &mut map, res)?;
+
+						prb += Constraint::IntPow(base, exponent, res);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "int_pow",
+							found: c.args.len(),
+							expected: 3,
+						});
+					}
+				}
 				"int_times" => {
 					if let [x, y, z] = c.args.as_slice() {
 						let a = arg_int(fzn, &mut prb, &mut map, x)?;

@@ -51,7 +51,6 @@ pub(crate) enum PriorityLevel {
 	/// A high level of priority, all apart from one normal priority level are
 	/// less important.
 	High,
-	#[allow(dead_code)] // TODO
 	/// The highest normal priority level, this priority level is the most
 	/// important normal level of priority.
 	Highest,
