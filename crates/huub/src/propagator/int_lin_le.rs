@@ -192,7 +192,7 @@ impl<const R: usize> Poster for IntLinearLessEqBoundsPoster<R> {
 		if let Some(r) = prop.reification.get() {
 			actions.subscribe_bool(BoolView(BoolViewInner::Lit(*r)), prop.vars.len() as u32)
 		}
-		(Box::new(prop), false)
+		(Box::new(prop), true)
 	}
 }
 
