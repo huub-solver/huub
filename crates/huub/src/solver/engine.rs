@@ -56,7 +56,10 @@ impl IpasirPropagator for Engine {
 		// Process Boolean assignment
 		if persistent && self.state.decision_level() != 0 {
 			// Note that the assignment might already be known and trailed, but not previously marked as persistent
-			self.persistent.push(lit)
+			self.persistent.push(lit);
+			if self.state.trail.is_backtracking() {
+				return;
+			}
 		}
 		if self.state.trail.assign_sat(lit).is_some() {
 			return;
