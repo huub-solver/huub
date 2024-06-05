@@ -313,16 +313,17 @@ where
 			.map_err(|_| ReformulationError::TrivialUnsatisfiable)
 	}
 
-	pub fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = RawLit>)>(
+	pub fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = RawLit>) + 'static>(
 		&mut self,
 		cb: Option<F>,
 	) {
 		if let Some(mut f) = cb {
-			let g = move |clause: &mut dyn Iterator<Item = RawLit>| {
-				trace_learned_clause(clause);
-				f(clause)
-			};
-			self.oracle.set_learn_callback(Some(Box::new(g)));
+			self.oracle.set_learn_callback(Some(
+				move |clause: &mut dyn Iterator<Item = RawLit>| {
+					trace_learned_clause(clause);
+					f(clause)
+				},
+			));
 		} else {
 			self.oracle.set_learn_callback(Some(trace_learned_clause));
 		}
@@ -330,7 +331,7 @@ where
 
 	delegate! {
 		to self.oracle {
-			pub fn set_terminate_callback<F: FnMut() -> SlvTermSignal>(&mut self, cb: Option<F>);
+			pub fn set_terminate_callback<F: FnMut() -> SlvTermSignal + 'static>(&mut self, cb: Option<F>);
 		}
 	}
 }
