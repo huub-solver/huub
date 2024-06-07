@@ -31,7 +31,7 @@ impl Default for Trail {
 			trail: Vec::new(),
 			pos: 0,
 			prev_len: Vec::new(),
-			int_value: IndexVec::new(),
+			int_value: IndexVec::from_vec(vec![0]),
 			sat_value: HashMap::new(),
 			sat_restore_value: HashMap::new(),
 		}
@@ -39,6 +39,8 @@ impl Default for Trail {
 }
 
 impl Trail {
+	pub(crate) const CURRENT_BRANCHER: TrailedInt = TrailedInt { _raw: 0 };
+
 	fn push_trail(&mut self, event: TrailEvent) {
 		debug_assert_eq!(self.pos, self.trail.len());
 		match event {
@@ -181,8 +183,8 @@ impl Trail {
 		self.trail.truncate(len);
 		self.sat_restore_value.clear();
 	}
-	pub(crate) fn decision_level(&self) -> usize {
-		self.prev_len.len()
+	pub(crate) fn decision_level(&self) -> u32 {
+		self.prev_len.len() as u32
 	}
 
 	pub(crate) fn track_int(&mut self, val: IntVal) -> TrailedInt {

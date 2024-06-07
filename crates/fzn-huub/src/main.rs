@@ -33,8 +33,11 @@ ARGUMENTS
   FILE    File name of the FlatZinc JSON input file.
 
 FLAGS
+                      === STANDARD FLATZINC OPTIONS ===
   -a, --all-solutions             Find all possible solutions for the given (satisfaction) instance.
   -i, --intermediate-solutions    Display all intermediate solutions found during the search.
+  -f, --free-search               Allow the solver to adjust any search options as it judges best.
+																	This flag overrides all other search-related flags.
   -s, --statistics                Print statistics about the solving process.
   -t, --time-limit <value>        Set a time limit for the solver. The value can be a number of
 	                                milliseconds or a human-readable duration string.
@@ -42,9 +45,19 @@ FLAGS
 	                                Can be used multiple times to increase verbosity.
                                   (0: INFO, 1: DEBUG, 2: TRACE)
 
+                      === INITIALIZATION OPTIONS ===
   --int-eager-limit               Set the maximum cardinality for which all order literals to
                                   represent an integer variable are created eagerly.
 																	(default: 255)
+
+										  === SOLVING OPTIONS ===
+	--vsids-after <value>           Switch to the VSIDS search heuristic after a certain number of
+																	conflicts. (overwritten by --toggle-vsids and --vsids-only)
+	--toggle-vsids                  Switch between the activity-based search heuristic and the user-
+																	specific search heuristic after every restart.
+																	(overwritten by --vsids-only)
+  --vsids-only                    Only use the activity-based search heuristic provided by the SAT
+                                  solver. Ignore the user-specific search heuristic.
 
 DESCRIPTION
   Create a Huub Solver instance tailored to a given FlatZinc JSON input file and solve the problem.
@@ -84,6 +97,8 @@ struct Cli {
 	all_solutions: bool,
 	/// Output intermediate solutions
 	intermediate_solutions: bool,
+	/// Allow the solver to adjust search configuration
+	free_search: bool,
 	/// Print solving statistics
 	statistics: bool,
 	/// Solving time limit
@@ -91,8 +106,17 @@ struct Cli {
 	/// Level of verbosity
 	verbose: u8,
 
-	/// Solver configuration
+	// --- Initialization configuration ---
+	/// Cardinatility cutoff for eager order literals
 	int_eager_limit: Option<usize>,
+
+	// --- Solving configuration ---
+	/// Switch to the VSIDS heuristic after a certain number of conflicts
+	vsids_after: Option<u32>,
+	/// Alternate between the SAT and VSIDS heuristic after every restart
+	toggle_vsids: bool,
+	/// Only use the SAT VSIDS heuristic for search
+	vsids_only: bool,
 }
 
 /// Solution struct to display the results of the solver
@@ -182,8 +206,10 @@ impl Cli {
 		};
 
 		if self.statistics {
+			let stats = slv.init_statistics();
 			println!("%%%mzn-stat: blockType={:?}", "init");
-			println!("%%%mzn-stat: intVariables={:?}", slv.num_int_vars());
+			println!("%%%mzn-stat: intVariables={:?}", stats.int_vars());
+			println!("%%%mzn-stat: propagators={:?}", stats.propagators());
 			println!(
 				"%%%mzn-stat: initTime={:?}",
 				Instant::now().duration_since(start).as_secs_f64()
@@ -194,7 +220,7 @@ impl Cli {
 		// Create reverse map for solver variables if required
 		if self.verbose > 0 {
 			let mut lit_map = HashMap::new();
-			let mut int_map = vec![ustr(""); slv.num_int_vars()];
+			let mut int_map = vec![ustr(""); slv.init_statistics().int_vars()];
 			for (name, v) in var_map.iter() {
 				match v {
 					SolverView::Bool(bv) => {
@@ -238,7 +264,17 @@ impl Cli {
 			*int_reverse_map.lock().unwrap() = int_map;
 		}
 
+		// Set Solver Configuration
+		if self.free_search {
+			slv.set_toggle_vsids(true);
+		} else {
+			slv.set_vsids_only(self.vsids_only);
+			slv.set_toggle_vsids(self.toggle_vsids);
+			slv.set_vsids_after(self.vsids_after);
+		}
+
 		// Determine Goal and Objective
+		let start_solve = Instant::now();
 		let goal = if fzn.solve.method != Method::Satisfy {
 			let obj_expr = fzn.solve.objective.as_ref().unwrap();
 			if let Literal::Identifier(ident) = obj_expr {
@@ -378,6 +414,20 @@ impl Cli {
 				)
 			}),
 		};
+		// output solving statistics
+		if self.statistics {
+			let stats = slv.search_statistics();
+			println!("%%%mzn-stat: blockType={:?}", "complete");
+			println!(
+				"%%%mzn-stat: solveTime={}",
+				(Instant::now() - start_solve).as_secs_f64()
+			);
+			println!("%%%mzn-stat: failures={:?}", stats.conflicts());
+			println!("%%%mzn-stat: peakDepth={:?}", stats.peak_depth());
+			println!("%%%mzn-stat: propagations={:?}", stats.propagations());
+			println!("%%%mzn-stat: restarts={:?}", stats.restarts());
+			println!("%%%mzn-stat-end");
+		}
 		match res {
 			SolveResult::Satisfied => {}
 			SolveResult::Unsatisfiable => {
@@ -413,13 +463,22 @@ impl TryFrom<Arguments> for Cli {
 		let cli = Cli {
 			all_solutions: args.contains(["-a", "--all-solutions"]),
 			intermediate_solutions: args.contains(["-i", "--intermediate-solutions"]),
+			free_search: args.contains(["-f", "--free-search"]),
 			statistics: args.contains(["-s", "--statistics"]),
 			time_limit: args
 				.opt_value_from_fn(["-t", "--time-limit"], parse_time_limit)
 				.map_err(|e| e.to_string())?,
+
 			int_eager_limit: args
 				.opt_value_from_str("--int-eager-limit")
 				.map_err(|e| e.to_string())?,
+
+			toggle_vsids: args.contains("--toggle-vsids"),
+			vsids_only: args.contains("--vsids-only"),
+			vsids_after: args
+				.opt_value_from_str("--vsids-after")
+				.map_err(|e| e.to_string())?,
+
 			verbose,
 			path: args
 				.free_from_os_str(|s| -> Result<PathBuf, &'static str> { Ok(s.into()) })
@@ -498,6 +557,5 @@ impl Display for Solution<'_> {
 #[cfg(test)]
 mod tests {
 	// Used in integration tests
-	use assert_cmd as _;
 	use expect_test as _;
 }

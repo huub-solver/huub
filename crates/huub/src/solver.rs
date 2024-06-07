@@ -16,6 +16,7 @@ use pindakaas::{
 	},
 	Cnf, Lit as RawLit, Valuation as SatValuation,
 };
+use poster::BrancherPoster;
 use tracing::debug;
 
 use crate::{
@@ -27,15 +28,54 @@ use crate::{
 			int_var::{IntVarRef, LazyLitDef},
 			trace_new_lit,
 			trail::TrailedInt,
-			Engine, PropRef,
+			Engine, PropRef, SearchStatistics,
 		},
-		initialization_context::InitializationContext,
+		initialization_context::{InitRef, InitializationContext},
 		poster::Poster,
 		value::{AssumptionChecker, ConstantFailure, Valuation, Value},
 		view::{BoolViewInner, IntView, IntViewInner, SolverView},
 	},
 	BoolView, IntVal, LitMeaning, ReformulationError,
 };
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct SolverConfiguration {
+	/// Switch between the activity-based search heuristic and the user-specific search heuristic after each restart.
+	///
+	/// This option is ignored if [`vsids_only`] is set to `true`.
+	toggle_vsids: bool,
+	/// Switch to the activity-based search heuristic after the given number of conflicts.
+	///
+	/// This option is ignored if [`toggle_vsids`] or [`vsids_only`] is set to `true`.
+	vsids_after: Option<u32>,
+	/// Only use the activity-based search heuristic provided by the SAT solver. Ignore the user-specific search heuristic.
+	vsids_only: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Goal {
+	Maximize,
+	Minimize,
+}
+
+/// Statistics related to the initialization of the solver
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InitStatistics {
+	// TODO
+	// /// Number of (non-view) boolean variables present in the solver
+	// bool_vars: usize,
+	/// Number of (non-view) integer variables represented in the solver
+	int_vars: usize,
+	/// Number of propagators in the solver
+	propagators: usize,
+}
+
+pub trait SatSolver:
+	PropagatingSolver + TermCallback + LearnCallback + SolveAssuming + NextVarRange + From<Cnf>
+where
+	<Self as SolverTrait>::ValueFn: PropagatorAccess,
+{
+}
 
 pub struct Solver<Sat = Cadical>
 where
@@ -45,81 +85,78 @@ where
 	pub(crate) oracle: Sat,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SolveResult {
+	Satisfied,
+	Unsatisfiable,
+	Complete,
+	Unknown,
+}
+
+fn trace_learned_clause(clause: &mut dyn Iterator<Item = RawLit>) {
+	debug!(clause = ?clause.map(i32::from).collect::<Vec<i32>>(), "learn clause");
+}
+
+impl InitStatistics {
+	pub fn int_vars(&self) -> usize {
+		self.int_vars
+	}
+	pub fn propagators(&self) -> usize {
+		self.propagators
+	}
+}
+
 impl<Sol, Sat> Solver<Sat>
 where
 	Sol: PropagatorAccess + SatValuation,
 	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 {
-	pub(crate) fn engine(&self) -> &Engine {
-		self.oracle.propagator().unwrap()
-	}
-
-	pub(crate) fn engine_mut(&mut self) -> &mut Engine {
-		self.oracle.propagator_mut().unwrap()
-	}
-
-	/// Try and find a solution to the problem for which the Solver was initialized, given a list of
-	/// Boolean assumptions.
-	pub fn solve_assuming(
-		&mut self,
-		assumptions: impl IntoIterator<Item = BoolView>,
-		mut on_sol: impl FnMut(&dyn Valuation),
-		on_fail: impl FnOnce(&dyn AssumptionChecker),
-	) -> SolveResult {
-		// Process assumptions
-		let Ok(assumptions): Result<Vec<RawLit>, _> = assumptions
-			.into_iter()
-			.filter_map(|bv| match bv.0 {
-				BoolViewInner::Lit(lit) => Some(Ok(lit)),
-				BoolViewInner::Const(true) => None,
-				BoolViewInner::Const(false) => Some(Err(ReformulationError::TrivialUnsatisfiable)),
-			})
-			.collect()
-		else {
-			on_fail(&ConstantFailure);
-			return SolveResult::Unsatisfiable;
+	pub(crate) fn add_brancher<P: BrancherPoster>(&mut self, poster: P) {
+		let mut actions = InitializationContext {
+			slv: self,
+			init_ref: InitRef::Brancher,
 		};
-
-		let status = self.oracle.solve_assuming(
-			assumptions,
-			|model| {
-				let engine: &Engine = model.propagator().unwrap();
-				let wrapper: &dyn Valuation = &|x| match x {
-					SolverView::Bool(lit) => match lit.0 {
-						BoolViewInner::Lit(lit) => model.value(lit).map(Value::Bool),
-						BoolViewInner::Const(b) => Some(Value::Bool(b)),
-					},
-					SolverView::Int(var) => match var.0 {
-						IntViewInner::VarRef(iv) => {
-							Some(Value::Int(engine.state.int_vars[iv].get_value(model)))
-						}
-						IntViewInner::Const(i) => Some(Value::Int(i)),
-						IntViewInner::Linear {
-							transformer: transform,
-							var,
-						} => {
-							let val = engine.state.int_vars[var].get_value(model);
-							Some(Value::Int(transform.transform(val)))
-						}
-						IntViewInner::Bool { transformer, lit } => model
-							.value(lit)
-							.map(|v| Value::Int(transformer.transform(v as IntVal))),
-					},
-				};
-				on_sol(wrapper);
-			},
-			|fail_fn| on_fail(fail_fn),
-		);
-		match status {
-			SatSolveResult::Sat => SolveResult::Satisfied,
-			SatSolveResult::Unsat => SolveResult::Unsatisfiable,
-			SatSolveResult::Unknown => SolveResult::Unknown,
-		}
+		let brancher = poster.post(&mut actions);
+		self.engine_mut().branchers.push(brancher);
 	}
 
-	/// Try and find a solution to the problem for which the Solver was initialized.
-	pub fn solve(&mut self, on_sol: impl FnMut(&dyn Valuation)) -> SolveResult {
-		self.solve_assuming([], on_sol, |_| {})
+	pub(crate) fn add_clause<I: IntoIterator<Item = BoolView>>(
+		&mut self,
+		iter: I,
+	) -> Result<(), ReformulationError> {
+		let mut clause = Vec::new();
+		for lit in iter {
+			match lit.0 {
+				BoolViewInner::Lit(l) => clause.push(l),
+				BoolViewInner::Const(true) => return Ok(()),
+				BoolViewInner::Const(false) => (),
+			}
+		}
+		if clause.is_empty() {
+			return Err(ReformulationError::TrivialUnsatisfiable);
+		}
+		self.oracle
+			.add_clause(clause)
+			.map_err(|_| ReformulationError::TrivialUnsatisfiable)
+	}
+
+	pub(crate) fn add_propagator<P: Poster>(&mut self, poster: P) {
+		let prop_ref = PropRef::from(self.engine().propagators.len());
+		let mut actions = InitializationContext {
+			slv: self,
+			init_ref: InitRef::Propagator(prop_ref),
+		};
+		let (prop, queue_pref) = poster.post(&mut actions);
+		let p = self.engine_mut().propagators.push(prop);
+		debug_assert_eq!(prop_ref, p);
+		let engine = self.engine_mut();
+		let p = engine.state.prop_priority.push(queue_pref.priority);
+		debug_assert_eq!(prop_ref, p);
+		let p = self.engine_mut().state.enqueued.push(false);
+		debug_assert_eq!(prop_ref, p);
+		if queue_pref.enqueue_on_post {
+			self.engine_mut().state.enqueue_propagator(prop_ref);
+		}
 	}
 
 	/// Find all solutions with regard to a list of given variables.
@@ -193,25 +230,6 @@ where
 		}
 	}
 
-	/// Wrapper function for `all_solutions` that collects all solutions and returns them in a vector
-	/// of solution values.
-	///
-	/// WARNING: This method will add additional clauses into the solver to prevent the same solution
-	/// from being generated twice. This will make repeated use of the Solver object impossible. Note
-	/// that you can clone the Solver object before calling this method to work around this
-	/// limitation.
-	pub fn get_all_solutions(&mut self, vars: &[SolverView]) -> (SolveResult, Vec<Vec<Value>>) {
-		let mut solutions = Vec::new();
-		let status = self.all_solutions(vars, |sol| {
-			let mut sol_vec = Vec::with_capacity(vars.len());
-			for v in vars {
-				sol_vec.push(sol(*v).unwrap());
-			}
-			solutions.push(sol_vec);
-		});
-		(status, solutions)
-	}
-
 	/// Find an optimal solution with regards to the given objective and goal.
 	///
 	/// Note that this method uses assumptions iteratively increase the lower bound of the objective.
@@ -278,47 +296,42 @@ where
 		}
 	}
 
-	pub fn num_int_vars(&self) -> usize {
-		self.engine().state.int_vars.len()
+	pub(crate) fn engine(&self) -> &Engine {
+		self.oracle.propagator().unwrap()
 	}
 
-	pub(crate) fn add_propagator<P: Poster>(&mut self, poster: P) {
-		let prop_ref = PropRef::from(self.engine().propagators.len());
-		let mut actions = InitializationContext {
-			slv: self,
-			prop: prop_ref,
-		};
-		let (prop, queue_pref) = poster.post(&mut actions);
-		let p = self.engine_mut().propagators.push(prop);
-		debug_assert_eq!(prop_ref, p);
-		let engine = self.engine_mut();
-		let p = engine.state.prop_priority.push(queue_pref.priority);
-		debug_assert_eq!(prop_ref, p);
-		let p = self.engine_mut().state.enqueued.push(false);
-		debug_assert_eq!(prop_ref, p);
-		if queue_pref.enqueue_on_post {
-			self.engine_mut().state.enqueue_propagator(prop_ref);
-		}
+	pub(crate) fn engine_mut(&mut self) -> &mut Engine {
+		self.oracle.propagator_mut().unwrap()
 	}
 
-	pub(crate) fn add_clause<I: IntoIterator<Item = BoolView>>(
-		&mut self,
-		iter: I,
-	) -> Result<(), ReformulationError> {
-		let mut clause = Vec::new();
-		for lit in iter {
-			match lit.0 {
-				BoolViewInner::Lit(l) => clause.push(l),
-				BoolViewInner::Const(true) => return Ok(()),
-				BoolViewInner::Const(false) => (),
+	/// Wrapper function for `all_solutions` that collects all solutions and returns them in a vector
+	/// of solution values.
+	///
+	/// WARNING: This method will add additional clauses into the solver to prevent the same solution
+	/// from being generated twice. This will make repeated use of the Solver object impossible. Note
+	/// that you can clone the Solver object before calling this method to work around this
+	/// limitation.
+	pub fn get_all_solutions(&mut self, vars: &[SolverView]) -> (SolveResult, Vec<Vec<Value>>) {
+		let mut solutions = Vec::new();
+		let status = self.all_solutions(vars, |sol| {
+			let mut sol_vec = Vec::with_capacity(vars.len());
+			for v in vars {
+				sol_vec.push(sol(*v).unwrap());
 			}
+			solutions.push(sol_vec);
+		});
+		(status, solutions)
+	}
+
+	pub fn init_statistics(&self) -> InitStatistics {
+		InitStatistics {
+			int_vars: self.engine().state.int_vars.len(),
+			propagators: self.engine().propagators.len(),
 		}
-		if clause.is_empty() {
-			return Err(ReformulationError::TrivialUnsatisfiable);
-		}
-		self.oracle
-			.add_clause(clause)
-			.map_err(|_| ReformulationError::TrivialUnsatisfiable)
+	}
+
+	pub fn search_statistics(&self) -> &SearchStatistics {
+		&self.engine().state.statistics
 	}
 
 	pub fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = RawLit>) + 'static>(
@@ -341,7 +354,84 @@ where
 		to self.oracle {
 			pub fn set_terminate_callback<F: FnMut() -> SlvTermSignal + 'static>(&mut self, cb: Option<F>);
 		}
+		to self.engine_mut().state {
+			pub fn set_vsids_after(&mut self, conflicts: Option<u32>);
+			pub fn set_vsids_only(&mut self, enable: bool);
+			pub fn set_toggle_vsids(&mut self, enable: bool);
+		}
 	}
+
+	/// Try and find a solution to the problem for which the Solver was initialized.
+	pub fn solve(&mut self, on_sol: impl FnMut(&dyn Valuation)) -> SolveResult {
+		self.solve_assuming([], on_sol, |_| {})
+	}
+
+	/// Try and find a solution to the problem for which the Solver was initialized, given a list of
+	/// Boolean assumptions.
+	pub fn solve_assuming(
+		&mut self,
+		assumptions: impl IntoIterator<Item = BoolView>,
+		mut on_sol: impl FnMut(&dyn Valuation),
+		on_fail: impl FnOnce(&dyn AssumptionChecker),
+	) -> SolveResult {
+		// Process assumptions
+		let Ok(assumptions): Result<Vec<RawLit>, _> = assumptions
+			.into_iter()
+			.filter_map(|bv| match bv.0 {
+				BoolViewInner::Lit(lit) => Some(Ok(lit)),
+				BoolViewInner::Const(true) => None,
+				BoolViewInner::Const(false) => Some(Err(ReformulationError::TrivialUnsatisfiable)),
+			})
+			.collect()
+		else {
+			on_fail(&ConstantFailure);
+			return SolveResult::Unsatisfiable;
+		};
+
+		let status = self.oracle.solve_assuming(
+			assumptions,
+			|model| {
+				let engine: &Engine = model.propagator().unwrap();
+				let wrapper: &dyn Valuation = &|x| match x {
+					SolverView::Bool(lit) => match lit.0 {
+						BoolViewInner::Lit(lit) => model.value(lit).map(Value::Bool),
+						BoolViewInner::Const(b) => Some(Value::Bool(b)),
+					},
+					SolverView::Int(var) => match var.0 {
+						IntViewInner::VarRef(iv) => {
+							Some(Value::Int(engine.state.int_vars[iv].get_value(model)))
+						}
+						IntViewInner::Const(i) => Some(Value::Int(i)),
+						IntViewInner::Linear {
+							transformer: transform,
+							var,
+						} => {
+							let val = engine.state.int_vars[var].get_value(model);
+							Some(Value::Int(transform.transform(val)))
+						}
+						IntViewInner::Bool { transformer, lit } => model
+							.value(lit)
+							.map(|v| Value::Int(transformer.transform(v as IntVal))),
+					},
+				};
+				on_sol(wrapper);
+			},
+			|fail_fn| on_fail(fail_fn),
+		);
+		match status {
+			SatSolveResult::Sat => SolveResult::Satisfied,
+			SatSolveResult::Unsat => SolveResult::Unsatisfiable,
+			SatSolveResult::Unknown => SolveResult::Unknown,
+		}
+	}
+}
+
+impl<Slv> SatSolver for Slv
+where
+	Slv:
+		PropagatingSolver + TermCallback + LearnCallback + SolveAssuming + NextVarRange + From<Cnf>,
+	<Slv as SolverTrait>::ValueFn: PropagatorAccess,
+{
 }
 
 impl<Sol, Sat> fmt::Debug for Solver<Sat>
@@ -459,35 +549,4 @@ where
 			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal;
 		}
 	}
-}
-
-fn trace_learned_clause(clause: &mut dyn Iterator<Item = RawLit>) {
-	debug!(clause = ?clause.map(i32::from).collect::<Vec<i32>>(), "learn clause");
-}
-
-pub trait SatSolver:
-	PropagatingSolver + TermCallback + LearnCallback + SolveAssuming + NextVarRange + From<Cnf>
-where
-	<Self as SolverTrait>::ValueFn: PropagatorAccess,
-{
-}
-impl<X> SatSolver for X
-where
-	X: PropagatingSolver + TermCallback + LearnCallback + SolveAssuming + NextVarRange + From<Cnf>,
-	<X as SolverTrait>::ValueFn: PropagatorAccess,
-{
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SolveResult {
-	Satisfied,
-	Unsatisfiable,
-	Complete,
-	Unknown,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Goal {
-	Maximize,
-	Minimize,
 }

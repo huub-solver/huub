@@ -1,4 +1,5 @@
 pub(crate) mod actions;
+pub(crate) mod brancher;
 pub(crate) mod helpers;
 pub(crate) mod model;
 pub(crate) mod propagator;

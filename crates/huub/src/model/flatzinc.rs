@@ -1,6 +1,15 @@
-use std::{cell::RefCell, collections::BTreeMap, fmt::Debug, ops::Deref, rc::Rc};
+use std::{
+	cell::RefCell,
+	collections::BTreeMap,
+	fmt::{Debug, Display},
+	ops::Deref,
+	rc::Rc,
+};
 
-use flatzinc_serde::{Argument, Domain, FlatZinc, Literal, Type, Variable};
+use flatzinc_serde::{
+	Annotation, AnnotationArgument, AnnotationCall, AnnotationLiteral, Argument, Domain, FlatZinc,
+	Literal, Type, Variable,
+};
 use itertools::Itertools;
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
@@ -8,16 +17,19 @@ use pindakaas::{
 };
 use rangelist::{IntervalIter, RangeList};
 use thiserror::Error;
+use tracing::warn;
 
-use super::bool::BoolView;
+use super::{
+	bool::BoolView,
+	branching::{Branching, ValueSelection, VariableSelection},
+};
 use crate::{
 	model::{int::IntView, reformulate::ReformulationError, ModelView},
 	solver::SatSolver,
 	BoolExpr, Constraint, InitConfig, IntSetVal, IntVal, Model, NonZeroIntVal, Solver, SolverView,
 };
-
 impl Model {
-	pub fn from_fzn<S: Ord + Deref<Target = str> + Clone + Debug>(
+	pub fn from_fzn<S: Ord + Deref<Target = str> + Clone + Debug + Display>(
 		fzn: &FlatZinc<S>,
 	) -> Result<(Self, BTreeMap<S, ModelView>), FlatZincError> {
 		let mut map = BTreeMap::<S, ModelView>::new();
@@ -203,14 +215,15 @@ impl Model {
 						if r == l =>
 					{
 						let x = lit_int(fzn, &mut prb, &mut map, x)?;
-						let _ = map.insert(l.clone(), BoolView::IntLessEq(Box::new(x), *i).into());
+						let _ =
+							map.insert(l.clone(), BoolView::IntGreaterEq(Box::new(x), *i).into());
 						mark_processed();
 					}
 					[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
 						if r == l =>
 					{
 						let x = lit_int(fzn, &mut prb, &mut map, x)?;
-						let _ = map.insert(l.clone(), BoolView::IntGreater(Box::new(x), *i).into());
+						let _ = map.insert(l.clone(), BoolView::IntLessEq(Box::new(x), *i).into());
 						mark_processed();
 					}
 					_ => {}
@@ -789,6 +802,21 @@ impl Model {
 			}
 		}
 
+		// Extract search annotations
+		for ann in fzn.solve.ann.iter() {
+			match ann {
+				Annotation::Call(c)
+					if matches!(c.id.deref(), "bool_search" | "int_search" | "seq_search") =>
+				{
+					let branchings = ann_to_branchings(fzn, &mut prb, &mut map, c)?;
+					for b in branchings {
+						prb += b;
+					}
+				}
+				_ => warn!("unsupported search annotation: {}", ann),
+			}
+		}
+
 		// Ensure all variables in the output are in the model
 		for ident in fzn.output.iter() {
 			let mut ensure_exists = |ident: &S, var| {
@@ -822,7 +850,7 @@ where
 	Sol: PropagatorAccess + SatValuation,
 	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 {
-	pub fn from_fzn<S: Ord + Deref<Target = str> + Clone + Debug>(
+	pub fn from_fzn<S: Ord + Deref<Target = str> + Clone + Debug + Display>(
 		fzn: &FlatZinc<S>,
 		config: &InitConfig,
 	) -> Result<(Self, BTreeMap<S, SolverView>), FlatZincError> {
@@ -852,6 +880,103 @@ fn arg_array<'a, S: Ord + Deref<Target = str> + Clone + Debug>(
 		Argument::Literal(x) => Err(FlatZincError::InvalidArgumentType {
 			expected: "array",
 			found: format!("{:?}", x),
+		}),
+	}
+}
+
+fn ann_to_branchings<'a, S: Ord + Deref<Target = str> + Clone + Debug + Display>(
+	fzn: &'a FlatZinc<S>,
+	prb: &mut Model,
+	map: &mut BTreeMap<S, ModelView>,
+	c: &'a AnnotationCall<S>,
+) -> Result<Vec<Branching>, FlatZincError> {
+	let mut branchings = Vec::new();
+	match c.id.deref() {
+		"bool_search" => {
+			if let [vars, var_sel, val_sel, _] = c.args.as_slice() {
+				let vars = ann_arg_var_array(fzn, vars)?
+					.iter()
+					.map(|l| lit_bool(fzn, prb, map, l))
+					.try_collect()?;
+				let var_sel = ann_var_sel(var_sel)?;
+				let val_sel = ann_val_sel(val_sel)?;
+
+				branchings.push(Branching::Bool(vars, var_sel, val_sel));
+			} else {
+				return Err(FlatZincError::InvalidNumArgs {
+					name: "bool_search",
+					found: c.args.len(),
+					expected: 4,
+				});
+			}
+		}
+		"int_search" => {
+			if let [vars, var_sel, val_sel, _] = c.args.as_slice() {
+				let vars = ann_arg_var_array(fzn, vars)?
+					.iter()
+					.map(|l| lit_int(fzn, prb, map, l))
+					.try_collect()?;
+				let var_sel = ann_var_sel(var_sel)?;
+				let val_sel = ann_val_sel(val_sel)?;
+
+				branchings.push(Branching::Int(vars, var_sel, val_sel));
+			} else {
+				return Err(FlatZincError::InvalidNumArgs {
+					name: "int_search",
+					found: c.args.len(),
+					expected: 4,
+				});
+			}
+		}
+		"seq_search" => {
+			if let [AnnotationArgument::Array(searches)] = c.args.as_slice() {
+				searches.iter().for_each(|search| {
+					if let AnnotationLiteral::Annotation(Annotation::Call(sub_call)) = search {
+						let res = ann_to_branchings(fzn, prb, map, sub_call);
+						if let Ok(mut bs) = res {
+							branchings.append(&mut bs);
+						}
+					}
+				})
+			} else {
+				return Err(FlatZincError::InvalidNumArgs {
+					name: "seq_search",
+					found: c.args.len(),
+					expected: 1,
+				});
+			}
+		}
+		_ => warn!("unsupported search annotation: {}", c),
+	}
+	Ok(branchings)
+}
+
+// Get an array of variable literals from an annotation argument
+fn ann_arg_var_array<'a, S: Ord + Deref<Target = str> + Clone + Debug>(
+	fzn: &'a FlatZinc<S>,
+	arg: &'a AnnotationArgument<S>,
+) -> Result<Vec<Literal<S>>, FlatZincError> {
+	match arg {
+		AnnotationArgument::Array(x) => Ok(x
+			.iter()
+			.filter_map(|l| {
+				if let AnnotationLiteral::BaseLiteral(l) = l {
+					Some(l.clone())
+				} else {
+					None
+				}
+			})
+			.collect()),
+		AnnotationArgument::Literal(AnnotationLiteral::BaseLiteral(Literal::Identifier(ident))) => {
+			if let Some(arr) = fzn.arrays.get(ident) {
+				Ok(arr.contents.clone())
+			} else {
+				Err(FlatZincError::UnknownIdentifier(ident.to_string()))
+			}
+		}
+		_ => Err(FlatZincError::InvalidArgumentType {
+			expected: "identifier",
+			found: format!("{:?}", arg),
 		}),
 	}
 }
@@ -956,6 +1081,67 @@ fn arg_bool<S: Ord + Deref<Target = str> + Clone + Debug>(
 		Argument::Literal(l) => lit_bool(fzn, prb, map, l),
 		_ => Err(FlatZincError::InvalidArgumentType {
 			expected: "boolean literal",
+			found: format!("{:?}", arg),
+		}),
+	}
+}
+
+fn ann_var_sel<S: Ord + Deref<Target = str> + Clone + Debug + Display>(
+	arg: &AnnotationArgument<S>,
+) -> Result<VariableSelection, FlatZincError> {
+	match arg {
+		AnnotationArgument::Literal(AnnotationLiteral::BaseLiteral(Literal::Identifier(s))) => {
+			match s.deref() {
+				"anti_first_fail" => Ok(VariableSelection::AntiFirstFail),
+				// "dom_w_deg" => Ok(VariableSelection::DomWDeg),
+				"first_fail" => Ok(VariableSelection::FirstFail),
+				"input_order" => Ok(VariableSelection::InputOrder),
+				"largest" => Ok(VariableSelection::Largest),
+				// "max_regret" => Ok(VariableSelection::MaxRegret),
+				// "most_constrained" => Ok(VariableSelection::MostConstrained),
+				// "occurrence" => Ok(VariableSelection::Occurrence),
+				"smallest" => Ok(VariableSelection::Smallest),
+				_ => {
+					warn!(
+						"unsupported variable selection `{}', using `input_order'",
+						s
+					);
+					Ok(VariableSelection::InputOrder)
+				}
+			}
+		}
+		_ => Err(FlatZincError::InvalidArgumentType {
+			expected: "string",
+			found: format!("{:?}", arg),
+		}),
+	}
+}
+
+fn ann_val_sel<S: Ord + Deref<Target = str> + Clone + Debug + Display>(
+	arg: &AnnotationArgument<S>,
+) -> Result<ValueSelection, FlatZincError> {
+	match arg {
+		AnnotationArgument::Literal(AnnotationLiteral::BaseLiteral(Literal::Identifier(s))) => {
+			match s.deref() {
+				"indomain" | "indomain_min" => Ok(ValueSelection::IndomainMin),
+				"indomain_max" => Ok(ValueSelection::IndomainMax),
+				// "indomain_median" => Ok(ValueSelection::IndomainMedian),
+				// "indomain_random" => Ok(ValueSelection::IndomainRandom),
+				// "indomain_split" => Ok(ValueSelection::IndomainSplit),
+				// "indomain_split_random" => Ok(ValueSelection::IndomainSplitRandom),
+				// "indomain_reverse_split" => Ok(ValueSelection::IndomainReverseSplit),
+				"outdomain_max" => Ok(ValueSelection::OutdomainMax),
+				"outdomain_min" => Ok(ValueSelection::OutdomainMin),
+				// "outdomain_median" => Ok(ValueSelection::OutdomainMedian),
+				// "outdomain_random" => Ok(ValueSelection::OutdomainRandom),
+				_ => {
+					warn!("unsupported value selection `{}', using `indomain_min'", s);
+					Ok(ValueSelection::IndomainMin)
+				}
+			}
+		}
+		_ => Err(FlatZincError::InvalidArgumentType {
+			expected: "string",
 			found: format!("{:?}", arg),
 		}),
 	}

@@ -13,7 +13,7 @@ use crate::{
 		value::IntVal,
 		view::{BoolViewInner, IntView, IntViewInner},
 	},
-	BoolView, Conjunction,
+	BoolView,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -80,6 +80,33 @@ impl IntLinearNotEqImpValue {
 	}
 }
 
+impl<const R: usize> IntLinearNotEqValueImpl<R> {
+	fn reason<P: PropagationActions>(&self, actions: &mut P, data: usize) -> ReasonBuilder {
+		let mut conj: Vec<_> = self
+			.vars
+			.iter()
+			.enumerate()
+			.filter_map(|(i, v)| {
+				if data != i {
+					Some(actions.get_int_val_lit(*v).unwrap())
+				} else {
+					None
+				}
+			})
+			.collect();
+		if let Some(&r) = self.reification.get() {
+			if data != self.vars.len() {
+				conj.push(BoolView(BoolViewInner::Lit(r)))
+			}
+		}
+		if conj.len() == 1 {
+			ReasonBuilder::Simple(conj.pop().unwrap())
+		} else {
+			ReasonBuilder::Eager(conj)
+		}
+	}
+}
+
 impl<const R: usize, P, E, T> Propagator<P, E, T> for IntLinearNotEqValueImpl<R>
 where
 	P: PropagationActions,
@@ -120,45 +147,19 @@ where
 					))) == Some(true)
 			);
 			let val = self.violation - sum;
-			actions.set_int_not_eq(*v, val, &ReasonBuilder::Lazy(i as u64))
+			let reason = self.reason(actions, i);
+			actions.set_int_not_eq(*v, val, &reason)
 		} else if sum == self.violation {
 			let bv = if let Some(r) = self.reification.get() {
 				BoolView(BoolViewInner::Lit(*r))
 			} else {
 				true.into()
 			};
-			actions.set_bool_val(bv, false, &ReasonBuilder::Lazy(self.vars.len() as u64))
+			let reason = self.reason(actions, self.vars.len());
+			actions.set_bool_val(bv, false, &reason)
 		} else {
 			Ok(())
 		}
-	}
-
-	fn explain(&mut self, actions: &mut E, data: u64) -> Conjunction {
-		let i = data as usize;
-		let mut conj: Vec<_> = self
-			.vars
-			.iter()
-			.enumerate()
-			.filter_map(|(j, v)| {
-				if i != j {
-					match actions.get_int_val_lit(*v).unwrap().0 {
-						BoolViewInner::Lit(l) => Some(l),
-						BoolViewInner::Const(b) => {
-							debug_assert!(b);
-							None
-						}
-					}
-				} else {
-					None
-				}
-			})
-			.collect();
-		if let Some(r) = self.reification.get() {
-			if i != self.vars.len() {
-				conj.push(*r)
-			}
-		}
-		conj
 	}
 }
 

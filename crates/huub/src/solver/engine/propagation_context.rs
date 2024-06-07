@@ -46,6 +46,7 @@ impl<'a> PropagationContext<'a> {
 			self.current_prop = p;
 			let prop = propagators[p].as_mut();
 			let res = prop.propagate(self);
+			self.state.statistics.propagations += 1;
 			self.current_prop = PropRef::new(u32::MAX as usize);
 			if let Err(Conflict { subject, reason }) = res {
 				self.state.conflict = true;

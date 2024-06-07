@@ -1,0 +1,15 @@
+{
+  "variables": {
+    "x" : { "type" : "int", "domain" : [[1, 5]] },
+    "y" : { "type" : "int", "domain" : [[3, 5]] }
+  },
+  "arrays": {
+    "X_INTRODUCED_0_" : { "a": [1, -1] }
+  },
+  "constraints": [
+    { "id" : "int_lin_ne", "args" : ["X_INTRODUCED_0_", ["x", "y"], 0]}
+  ],
+  "output": ["x", "y"],
+  "solve": { "method" : "satisfy", "ann" : [{ "id" : "int_search", "args" : [["x", "y"], "first_fail", "indomain_max", "complete"]}] },
+  "version": "1.0"
+}

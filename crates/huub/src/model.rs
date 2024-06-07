@@ -1,4 +1,5 @@
 pub(crate) mod bool;
+pub(crate) mod branching;
 pub(crate) mod constraint;
 pub(crate) mod flatzinc;
 pub(crate) mod int;
@@ -20,6 +21,7 @@ use rangelist::{IntervalIter, RangeList};
 use crate::{
 	model::{
 		bool::{BoolExpr, BoolView},
+		branching::Branching,
 		int::{IntVar, IntVarDef, IntView},
 		reformulate::{InitConfig, ReformulationError, VariableMap},
 	},
@@ -33,6 +35,7 @@ use crate::{
 #[derive(Debug, Default)]
 pub struct Model {
 	pub(crate) cnf: Cnf,
+	branchings: Vec<Branching>,
 	constraints: Vec<Constraint>,
 	int_vars: Vec<IntVarDef>,
 	prop_queue: VecDeque<usize>,
@@ -100,10 +103,8 @@ impl Model {
 						}
 					}
 				}
-				Constraint::ArrayVarIntElement(_, idx, _) => {
-					if let IntView::Var(iv) | IntView::Linear(_, iv) = idx {
-						let _ = eager_direct.insert(*iv);
-					}
+				Constraint::ArrayVarIntElement(_, IntView::Var(iv) | IntView::Linear(_, iv), _) => {
+					let _ = eager_direct.insert(*iv);
 				}
 				_ => {}
 			}
@@ -129,9 +130,13 @@ impl Model {
 			map.insert_int(IntVar(i as u32), view);
 		}
 
-		// Create constraint data structures within the solve
+		// Create constraint data structures within the solver
 		for c in self.constraints.iter() {
 			c.to_solver(&mut slv, &mut map)?;
+		}
+		// Add branching data structures to the solver
+		for b in self.branchings.iter() {
+			b.to_solver(&mut slv, &mut map);
 		}
 
 		Ok((slv, map))
@@ -156,6 +161,12 @@ impl AddAssign<Constraint> for Model {
 impl AddAssign<BoolExpr> for Model {
 	fn add_assign(&mut self, rhs: BoolExpr) {
 		self.add_assign(Constraint::PropLogic(rhs))
+	}
+}
+
+impl AddAssign<Branching> for Model {
+	fn add_assign(&mut self, rhs: Branching) {
+		self.branchings.push(rhs);
 	}
 }
 

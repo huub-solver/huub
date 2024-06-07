@@ -16,12 +16,13 @@ use pindakaas::{
 	solver::{Propagator as IpasirPropagator, SolvingActions},
 	Lit as RawLit, Var as RawVar,
 };
-use tracing::trace;
+use tracing::{debug, trace};
 
 use crate::{
 	actions::{
 		explanation::ExplanationActions, inspection::InspectionActions, trailing::TrailingActions,
 	},
+	brancher::Brancher,
 	propagator::{
 		int_event::IntEvent,
 		reason::{Reason, ReasonBuilder},
@@ -36,6 +37,7 @@ use crate::{
 		},
 		poster::BoxedPropagator,
 		view::{BoolViewInner, IntViewInner},
+		SolverConfiguration,
 	},
 	BoolView, Clause, Conjunction, IntVal, IntView,
 };
@@ -58,10 +60,24 @@ macro_rules! trace_new_lit {
 }
 pub(crate) use trace_new_lit;
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct ChangeLog {
+	ty: VecDeque<ChangeType<usize>>,
+	lits: VecDeque<RawLit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum ChangeType<T> {
+	Propagate(T),
+	AddClause(T),
+}
+
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Engine {
 	/// Storage of the propagators
 	pub(crate) propagators: IndexVec<PropRef, BoxedPropagator>,
+	/// Storage of the branchers
+	pub(crate) branchers: Vec<Brancher>,
 	/// Internal State representation of the constraint programming engine
 	pub(crate) state: State,
 	/// Storage of literals that have been persistently propagated
@@ -70,6 +86,150 @@ pub(crate) struct Engine {
 	/// backtracks to level zero, then the changes can be permanently applied, and
 	/// the list can be cleared.
 	persistent: Conjunction,
+}
+
+index_vec::define_index_type! {
+	/// Identifies an propagator in a [`Solver`]
+	pub struct PropRef = u32;
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct SearchStatistics {
+	// Number of conflicts encountered
+	conflicts: u64,
+	// Peak search depth
+	peak_depth: u32,
+	// Number of times a CP propagator was called
+	propagations: u64,
+	// Number of backtracks to level 0
+	restarts: u32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct State {
+	// Solver confifguration
+	pub(crate) config: SolverConfiguration,
+
+	// ---- Trailed Value Infrastructure (e.g., decision variables) ----
+	/// Storage for the integer variables
+	pub(crate) int_vars: IndexVec<IntVarRef, IntVar>,
+	/// Mapping from boolean variables to integer variables
+	pub(crate) bool_to_int: BoolToIntMap,
+	/// Trailed Storage
+	/// Includes lower and upper bounds for integer variables and Boolean variable assignments
+	pub(crate) trail: Trail,
+	/// Reasons for setting values
+	pub(crate) reason_map: HashMap<RawLit, Reason>,
+	/// Whether conflict has (already) been detected
+	pub(crate) conflict: bool,
+
+	// ---- Non-Trailed Infrastructure ----
+	/// Storage for changes to be communicated to the solver
+	pub(crate) changes: ChangeLog,
+	/// Solving statistics
+	pub(crate) statistics: SearchStatistics,
+	/// Whether VSIDS is currently enabled
+	pub(crate) vsids: bool,
+
+	// ---- Queueing Infrastructure ----
+	/// Boolean variable subscriptions
+	pub(crate) bool_subscribers: HashMap<RawVar, Vec<(PropRef, u32)>>,
+	/// Integer variable subscriptions
+	// TODO: Shrink Propref and IntEvent to fit in 32 bits
+	pub(crate) int_subscribers: HashMap<IntVarRef, Vec<(PropRef, IntEvent, u32)>>,
+	/// Queue of propagators awaiting action
+	pub(crate) prop_queue: PriorityQueue<PropRef>,
+	/// Priority within the queue for each propagator
+	pub(crate) prop_priority: IndexVec<PropRef, PriorityLevel>,
+	/// Flag for whether a propagator is enqueued
+	pub(crate) enqueued: IndexVec<PropRef, bool>,
+}
+
+impl ChangeLog {
+	fn add_clause(&mut self, clause: impl IntoIterator<Item = RawLit>) {
+		let len = self.lits.len();
+		self.lits.extend(clause);
+		let len = self.lits.len() - len;
+		if len > 0 {
+			self.ty.push_back(ChangeType::AddClause(len));
+		}
+	}
+
+	fn clear_propagation(&mut self) {
+		let ChangeLog { ty, lits } = self
+			.filter(|e| !matches!(e, ChangeType::Propagate(_)))
+			.collect();
+		self.ty = ty;
+		self.lits = lits;
+		debug_assert_eq!(self.ty.is_empty(), self.lits.is_empty());
+	}
+
+	fn is_empty(&self) -> bool {
+		debug_assert_eq!(self.ty.is_empty(), self.lits.is_empty());
+		self.ty.is_empty()
+	}
+
+	fn peek_ty(&self) -> Option<ChangeType<()>> {
+		self.ty.front().map(|ty| match ty {
+			ChangeType::Propagate(_) => ChangeType::Propagate(()),
+			ChangeType::AddClause(_) => ChangeType::AddClause(()),
+		})
+	}
+
+	fn pop(&mut self) -> Option<ChangeType<Vec<RawLit>>> {
+		let mut split_off = |n| {
+			let mut lits = Vec::with_capacity(n);
+			for _ in 0..n {
+				lits.push(self.lits.pop_front().unwrap())
+			}
+			lits
+		};
+		self.ty.pop_front().map(|ty| match ty {
+			ChangeType::Propagate(n) => ChangeType::Propagate(split_off(n)),
+			ChangeType::AddClause(n) => ChangeType::AddClause(split_off(n)),
+		})
+	}
+
+	fn propagate(&mut self, lit: RawLit) {
+		self.lits.push_back(lit);
+		if let Some(ChangeType::Propagate(n)) = self.ty.back_mut() {
+			*n += 1
+		} else {
+			self.ty.push_back(ChangeType::Propagate(1))
+		}
+		debug_assert!(matches!(self.ty.back(), Some(ChangeType::Propagate(_))))
+	}
+}
+
+impl<I: IntoIterator<Item = RawLit>> FromIterator<ChangeType<I>> for ChangeLog {
+	fn from_iter<T: IntoIterator<Item = ChangeType<I>>>(iter: T) -> Self {
+		let mut log = Self::default();
+		for ty in iter {
+			match ty {
+				ChangeType::Propagate(lits) => {
+					let len = log.lits.len();
+					log.lits.extend(lits);
+					let added = log.lits.len() - len;
+					if let Some(ChangeType::Propagate(n)) = log.ty.back_mut() {
+						*n += added
+					} else if added > 0 {
+						log.ty.push_back(ChangeType::Propagate(added))
+					}
+					debug_assert!(matches!(log.ty.back(), Some(ChangeType::Propagate(_))))
+				}
+				ChangeType::AddClause(lits) => log.add_clause(lits),
+			}
+		}
+		log
+	}
+}
+
+impl Iterator for ChangeLog {
+	type Item = ChangeType<Vec<RawLit>>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.pop()
+	}
 }
 
 impl IpasirPropagator for Engine {
@@ -121,6 +281,23 @@ impl IpasirPropagator for Engine {
 	}
 
 	fn decide(&mut self) -> Option<RawLit> {
+		if !self.state.vsids {
+			let current = self.state.trail.get_trailed_int(Trail::CURRENT_BRANCHER);
+			if current as usize == self.branchers.len() {
+				return None;
+			}
+			for (i, brancher) in self.branchers.iter_mut().enumerate().skip(current as usize) {
+				if let Some(lit) = brancher.decide(&mut self.state) {
+					debug!(lit = i32::from(lit), "decide");
+					return Some(lit);
+				} else {
+					let _ = self
+						.state
+						.trail
+						.set_trailed_int(Trail::CURRENT_BRANCHER, i as i64 + 1);
+				}
+			}
+		}
 		None
 	}
 
@@ -254,7 +431,7 @@ impl IpasirPropagator for Engine {
 		accept &= !self.state.ensure_clause_changes(&mut self.propagators);
 
 		// Revert to real decision level
-		self.notify_backtrack(level);
+		self.notify_backtrack(level as usize);
 
 		trace!(accept, "check model result");
 		accept
@@ -280,143 +457,19 @@ impl IpasirPropagator for Engine {
 	}
 }
 
-impl Engine {}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct ChangeLog {
-	ty: VecDeque<ChangeType<usize>>,
-	lits: VecDeque<RawLit>,
-}
-
-impl ChangeLog {
-	fn add_clause(&mut self, clause: impl IntoIterator<Item = RawLit>) {
-		let len = self.lits.len();
-		self.lits.extend(clause);
-		let len = self.lits.len() - len;
-		if len > 0 {
-			self.ty.push_back(ChangeType::AddClause(len));
-		}
+impl SearchStatistics {
+	pub fn conflicts(&self) -> u64 {
+		self.conflicts
 	}
-
-	fn clear_propagation(&mut self) {
-		let ChangeLog { ty, lits } = self
-			.filter(|e| !matches!(e, ChangeType::Propagate(_)))
-			.collect();
-		self.ty = ty;
-		self.lits = lits;
-		debug_assert_eq!(self.ty.is_empty(), self.lits.is_empty());
+	pub fn peak_depth(&self) -> u32 {
+		self.peak_depth
 	}
-
-	fn is_empty(&self) -> bool {
-		debug_assert_eq!(self.ty.is_empty(), self.lits.is_empty());
-		self.ty.is_empty()
+	pub fn propagations(&self) -> u64 {
+		self.propagations
 	}
-
-	fn peek_ty(&self) -> Option<ChangeType<()>> {
-		self.ty.front().map(|ty| match ty {
-			ChangeType::Propagate(_) => ChangeType::Propagate(()),
-			ChangeType::AddClause(_) => ChangeType::AddClause(()),
-		})
+	pub fn restarts(&self) -> u32 {
+		self.restarts
 	}
-
-	fn pop(&mut self) -> Option<ChangeType<Vec<RawLit>>> {
-		let mut split_off = |n| {
-			let mut lits = Vec::with_capacity(n);
-			for _ in 0..n {
-				lits.push(self.lits.pop_front().unwrap())
-			}
-			lits
-		};
-		self.ty.pop_front().map(|ty| match ty {
-			ChangeType::Propagate(n) => ChangeType::Propagate(split_off(n)),
-			ChangeType::AddClause(n) => ChangeType::AddClause(split_off(n)),
-		})
-	}
-
-	fn propagate(&mut self, lit: RawLit) {
-		self.lits.push_back(lit);
-		if let Some(ChangeType::Propagate(n)) = self.ty.back_mut() {
-			*n += 1
-		} else {
-			self.ty.push_back(ChangeType::Propagate(1))
-		}
-		debug_assert!(matches!(self.ty.back(), Some(ChangeType::Propagate(_))))
-	}
-}
-
-impl Iterator for ChangeLog {
-	type Item = ChangeType<Vec<RawLit>>;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		self.pop()
-	}
-}
-
-impl<I: IntoIterator<Item = RawLit>> FromIterator<ChangeType<I>> for ChangeLog {
-	fn from_iter<T: IntoIterator<Item = ChangeType<I>>>(iter: T) -> Self {
-		let mut log = Self::default();
-		for ty in iter {
-			match ty {
-				ChangeType::Propagate(lits) => {
-					let len = log.lits.len();
-					log.lits.extend(lits);
-					let added = log.lits.len() - len;
-					if let Some(ChangeType::Propagate(n)) = log.ty.back_mut() {
-						*n += added
-					} else if added > 0 {
-						log.ty.push_back(ChangeType::Propagate(added))
-					}
-					debug_assert!(matches!(log.ty.back(), Some(ChangeType::Propagate(_))))
-				}
-				ChangeType::AddClause(lits) => log.add_clause(lits),
-			}
-		}
-		log
-	}
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum ChangeType<T> {
-	Propagate(T),
-	AddClause(T),
-}
-
-index_vec::define_index_type! {
-	/// Identifies an propagator in a [`Solver`]
-	pub struct PropRef = u32;
-}
-
-#[derive(Clone, Debug, Default)]
-pub(crate) struct State {
-	// ---- Trailed Value Infrastructure (e.g., decision variables) ----
-	/// Storage for the integer variables
-	pub(crate) int_vars: IndexVec<IntVarRef, IntVar>,
-	/// Mapping from boolean variables to integer variables
-	pub(crate) bool_to_int: BoolToIntMap,
-	/// Trailed Storage
-	/// Includes lower and upper bounds for integer variables and Boolean variable assignments
-	pub(crate) trail: Trail,
-	/// Reasons for setting values
-	pub(crate) reason_map: HashMap<RawLit, Reason>,
-	/// Whether conflict has (already) been detected
-	pub(crate) conflict: bool,
-
-	// ---- Non-Trailed Infrastructure ----
-	/// Storage for changes to be communicated to the solver
-	pub(crate) changes: ChangeLog,
-
-	// ---- Queueing Infrastructure ----
-	/// Boolean variable subscriptions
-	pub(crate) bool_subscribers: HashMap<RawVar, Vec<(PropRef, u32)>>,
-	/// Integer variable subscriptions
-	// TODO: Shrink Propref and IntEvent to fit in 32 bits
-	pub(crate) int_subscribers: HashMap<IntVarRef, Vec<(PropRef, IntEvent, u32)>>,
-	/// Queue of propagators awaiting action
-	pub(crate) prop_queue: PriorityQueue<PropRef>,
-	/// Priority within the queue for each propagator
-	pub(crate) prop_priority: IndexVec<PropRef, PriorityLevel>,
-	/// Flag for whether a propagator is enqueued
-	pub(crate) enqueued: IndexVec<PropRef, bool>,
 }
 
 impl State {
@@ -494,7 +547,7 @@ impl State {
 		}
 	}
 
-	fn decision_level(&self) -> usize {
+	fn decision_level(&self) -> u32 {
 		self.trail.decision_level()
 	}
 
@@ -535,9 +588,18 @@ impl State {
 
 	fn notify_new_decision_level(&mut self) {
 		self.trail.notify_new_decision_level();
+
+		// Update peak decision level
+		let new_level = self.decision_level();
+		if new_level > self.statistics.peak_depth {
+			self.statistics.peak_depth = new_level;
+		}
 	}
 
 	fn notify_backtrack(&mut self, level: usize) {
+		// Update conflict statistics
+		self.statistics.conflicts += 1;
+
 		// Resolve the conflict status
 		self.conflict = false;
 		// Remove (now invalid) propagations (but leave clauses in place)
@@ -548,9 +610,36 @@ impl State {
 		while let Some(p) = self.prop_queue.pop() {
 			self.enqueued[p] = false;
 		}
+
+		// Switch to VSIDS if the number of conflicts exceeds the threshold
+		if let Some(conflicts) = self.config.vsids_after {
+			if !self.config.vsids_only
+				&& !self.config.toggle_vsids
+				&& self.statistics.conflicts > conflicts as u64
+			{
+				debug_assert!(!self.vsids);
+				self.vsids = true;
+				debug!(
+					vsids = self.vsids,
+					conflicts = self.statistics.conflicts,
+					"enable vsids after N conflicts"
+				);
+			}
+		}
+
 		if level == 0 {
+			// Update restart statistics
+			self.statistics.restarts += 1;
+			if self.config.toggle_vsids && !self.config.vsids_only {
+				self.vsids = !self.vsids;
+				debug!(
+					vsids = self.vsids,
+					restart = self.statistics.restarts,
+					"toggling vsids"
+				);
+			}
 			// Memory cleanup (Reasons are known to no longer be relevant)
-			self.reason_map.clear()
+			self.reason_map.clear();
 		}
 	}
 
@@ -605,13 +694,114 @@ impl State {
 			Err(false) => unreachable!("invalid reason"),
 		}
 	}
+
+	pub(crate) fn set_vsids_after(&mut self, conflicts: Option<u32>) {
+		self.config.vsids_after = conflicts;
+	}
+
+	pub(crate) fn set_toggle_vsids(&mut self, enabled: bool) {
+		self.config.toggle_vsids = enabled;
+	}
+
+	pub(crate) fn set_vsids_only(&mut self, enable: bool) {
+		self.config.vsids_only = enable;
+		self.vsids = enable;
+	}
 }
 
-impl TrailingActions for State {
-	delegate! {
-		to self.trail {
-			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
-			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal;
+impl ExplanationActions for State {
+	fn try_int_lit(&self, var: IntView, mut meaning: LitMeaning) -> Option<BoolView> {
+		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
+			var.0
+		{
+			if let Some(m) = transformer.rev_transform_lit(meaning) {
+				meaning = m;
+			} else {
+				return Some(BoolView(BoolViewInner::Const(false)));
+			}
+		}
+
+		match var.0 {
+			IntViewInner::VarRef(var) | IntViewInner::Linear { var, .. } => {
+				self.int_vars[var].get_bool_lit(meaning)
+			}
+			IntViewInner::Const(c) => Some(BoolView(BoolViewInner::Const(match meaning {
+				LitMeaning::Eq(i) => c == i,
+				LitMeaning::NotEq(i) => c != i,
+				LitMeaning::GreaterEq(i) => c >= i,
+				LitMeaning::Less(i) => c < i,
+			}))),
+			IntViewInner::Bool { lit, .. } => {
+				let (meaning, negated) =
+					if matches!(meaning, LitMeaning::NotEq(_) | LitMeaning::Less(_)) {
+						(!meaning, true)
+					} else {
+						(meaning, false)
+					};
+				let bv = BoolView(match meaning {
+					LitMeaning::Eq(0) => BoolViewInner::Lit(!lit),
+					LitMeaning::Eq(1) => BoolViewInner::Lit(lit),
+					LitMeaning::Eq(_) => BoolViewInner::Const(false),
+					LitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
+					LitMeaning::GreaterEq(i) if i > 1 => BoolViewInner::Const(false),
+					LitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
+					_ => unreachable!(),
+				});
+				Some(if negated { !bv } else { bv })
+			}
+		}
+	}
+
+	fn get_intref_lit(&mut self, var: IntVarRef, meaning: LitMeaning) -> BoolView {
+		self.int_vars[var]
+			.get_bool_lit(meaning)
+			.expect("literals part of explanations should have been created during propagation")
+	}
+
+	fn get_int_val_lit(&mut self, var: IntView) -> Option<BoolView> {
+		self.get_int_val(var)
+			.map(|v| self.get_int_lit(var, LitMeaning::Eq(v)))
+	}
+
+	fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView {
+		match var.0 {
+			IntViewInner::VarRef(var) => self.int_vars[var].get_lower_bound_lit(self),
+			IntViewInner::Linear { transformer, var } => {
+				if transformer.positive_scale() {
+					self.int_vars[var].get_lower_bound_lit(self)
+				} else {
+					self.int_vars[var].get_upper_bound_lit(self)
+				}
+			}
+			IntViewInner::Const(_) => BoolView(BoolViewInner::Const(true)),
+			IntViewInner::Bool { lit, transformer } => BoolView(
+				match (self.trail.get_sat_value(lit), transformer.positive_scale()) {
+					(Some(true), true) => BoolViewInner::Lit(lit),
+					(Some(false), false) => BoolViewInner::Lit(!lit),
+					_ => BoolViewInner::Const(true),
+				},
+			),
+		}
+	}
+
+	fn get_int_upper_bound_lit(&mut self, var: IntView) -> BoolView {
+		match var.0 {
+			IntViewInner::VarRef(var) => self.int_vars[var].get_upper_bound_lit(self),
+			IntViewInner::Linear { transformer, var } => {
+				if transformer.positive_scale() {
+					self.int_vars[var].get_upper_bound_lit(self)
+				} else {
+					self.int_vars[var].get_lower_bound_lit(self)
+				}
+			}
+			IntViewInner::Const(_) => BoolView(BoolViewInner::Const(true)),
+			IntViewInner::Bool { lit, transformer } => BoolView(
+				match (self.trail.get_sat_value(lit), transformer.positive_scale()) {
+					(Some(false), true) => BoolViewInner::Lit(!lit),
+					(Some(true), false) => BoolViewInner::Lit(lit),
+					_ => BoolViewInner::Const(true),
+				},
+			),
 		}
 	}
 }
@@ -715,94 +905,11 @@ impl InspectionActions for State {
 	}
 }
 
-impl ExplanationActions for State {
-	fn try_int_lit(&self, var: IntView, mut meaning: LitMeaning) -> Option<BoolView> {
-		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
-			var.0
-		{
-			if let Some(m) = transformer.rev_transform_lit(meaning) {
-				meaning = m;
-			} else {
-				return Some(BoolView(BoolViewInner::Const(false)));
-			}
-		}
-
-		match var.0 {
-			IntViewInner::VarRef(var) | IntViewInner::Linear { var, .. } => {
-				self.int_vars[var].get_bool_lit(meaning)
-			}
-			IntViewInner::Const(c) => Some(BoolView(BoolViewInner::Const(match meaning {
-				LitMeaning::Eq(i) => c == i,
-				LitMeaning::NotEq(i) => c != i,
-				LitMeaning::GreaterEq(i) => c >= i,
-				LitMeaning::Less(i) => c < i,
-			}))),
-			IntViewInner::Bool { lit, .. } => {
-				let (meaning, negated) =
-					if matches!(meaning, LitMeaning::NotEq(_) | LitMeaning::Less(_)) {
-						(!meaning, true)
-					} else {
-						(meaning, false)
-					};
-				let bv = BoolView(match meaning {
-					LitMeaning::Eq(0) => BoolViewInner::Lit(!lit),
-					LitMeaning::Eq(1) => BoolViewInner::Lit(lit),
-					LitMeaning::Eq(_) => BoolViewInner::Const(false),
-					LitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
-					LitMeaning::GreaterEq(i) if i > 1 => BoolViewInner::Const(false),
-					LitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
-					_ => unreachable!(),
-				});
-				Some(if negated { !bv } else { bv })
-			}
-		}
-	}
-
-	fn get_intref_lit(&mut self, var: IntVarRef, meaning: LitMeaning) -> BoolView {
-		self.int_vars[var]
-			.get_bool_lit(meaning)
-			.expect("literals part of explanations should have been created during propagation")
-	}
-
-	fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView {
-		match var.0 {
-			IntViewInner::VarRef(var) => self.int_vars[var].get_lower_bound_lit(self),
-			IntViewInner::Linear { transformer, var } => {
-				if transformer.positive_scale() {
-					self.int_vars[var].get_lower_bound_lit(self)
-				} else {
-					self.int_vars[var].get_upper_bound_lit(self)
-				}
-			}
-			IntViewInner::Const(_) => BoolView(BoolViewInner::Const(true)),
-			IntViewInner::Bool { lit, transformer } => BoolView(
-				match (self.trail.get_sat_value(lit), transformer.positive_scale()) {
-					(Some(true), true) => BoolViewInner::Lit(lit),
-					(Some(false), false) => BoolViewInner::Lit(!lit),
-					_ => BoolViewInner::Const(true),
-				},
-			),
-		}
-	}
-
-	fn get_int_upper_bound_lit(&mut self, var: IntView) -> BoolView {
-		match var.0 {
-			IntViewInner::VarRef(var) => self.int_vars[var].get_upper_bound_lit(self),
-			IntViewInner::Linear { transformer, var } => {
-				if transformer.positive_scale() {
-					self.int_vars[var].get_upper_bound_lit(self)
-				} else {
-					self.int_vars[var].get_lower_bound_lit(self)
-				}
-			}
-			IntViewInner::Const(_) => BoolView(BoolViewInner::Const(true)),
-			IntViewInner::Bool { lit, transformer } => BoolView(
-				match (self.trail.get_sat_value(lit), transformer.positive_scale()) {
-					(Some(false), true) => BoolViewInner::Lit(!lit),
-					(Some(true), false) => BoolViewInner::Lit(lit),
-					_ => BoolViewInner::Const(true),
-				},
-			),
+impl TrailingActions for State {
+	delegate! {
+		to self.trail {
+			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
+			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal;
 		}
 	}
 }

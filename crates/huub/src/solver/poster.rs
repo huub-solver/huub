@@ -1,5 +1,6 @@
 use crate::{
 	actions::initialization::InitializationActions,
+	brancher::Brancher,
 	propagator::Propagator,
 	solver::engine::{
 		propagation_context::PropagationContext, queue::PriorityLevel, trail::Trail, State,
@@ -28,4 +29,16 @@ pub(crate) struct QueuePreferences {
 	pub(crate) enqueue_on_post: bool,
 	/// Priority level in the queue used for the propagator
 	pub(crate) priority: PriorityLevel,
+}
+
+/// The trait used to register a brancher with the solver.
+pub(crate) trait BrancherPoster {
+	/// Register the brancher with the solver.
+	///
+	/// This method is expected to return the brancher to be registered.
+	///
+	/// The post method is given access to the solver's initialization actions,
+	/// which includes the ability to subscribe to variable events, creating
+	/// trailed data structures, and inspecting the current state of varaibles.
+	fn post<I: InitializationActions>(self, actions: &mut I) -> Brancher;
 }

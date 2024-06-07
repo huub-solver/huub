@@ -18,11 +18,19 @@ use crate::{
 	BoolView, IntVal, IntView, Solver,
 };
 
+/// Reference to the construct that we are intilizing
+pub(crate) enum InitRef {
+	// a brancher
+	Brancher,
+	// a specific propagator
+	Propagator(PropRef),
+}
+
 pub(crate) struct InitializationContext<'a, Sat: SatSolver + 'a>
 where
 	<Sat as SolverTrait>::ValueFn: PropagatorAccess,
 {
-	pub(crate) prop: PropRef,
+	pub(crate) init_ref: InitRef,
 	pub(crate) slv: &'a mut Solver<Sat>,
 }
 
@@ -35,19 +43,24 @@ where
 		match var.0 {
 			BoolViewInner::Lit(lit) => {
 				<Sat as PropagatingSolver>::add_observed_var(&mut self.slv.oracle, lit.var());
-				self.slv
-					.engine_mut()
-					.state
-					.bool_subscribers
-					.entry(lit.var())
-					.or_default()
-					.push((self.prop, data))
+				if let InitRef::Propagator(prop) = self.init_ref {
+					self.slv
+						.engine_mut()
+						.state
+						.bool_subscribers
+						.entry(lit.var())
+						.or_default()
+						.push((prop, data))
+				}
 			}
 			BoolViewInner::Const(_) => {}
 		}
 	}
 
 	fn subscribe_int(&mut self, var: IntView, event: IntEvent, data: u32) {
+		let InitRef::Propagator(prop) = self.init_ref else {
+			unreachable!()
+		};
 		match var.0 {
 			IntViewInner::VarRef(var) => self
 				.slv
@@ -56,7 +69,7 @@ where
 				.int_subscribers
 				.entry(var)
 				.or_default()
-				.push((self.prop, event, data)),
+				.push((prop, event, data)),
 			IntViewInner::Const(_) => {}
 			IntViewInner::Linear { transformer, var } => {
 				if transformer.positive_scale() {

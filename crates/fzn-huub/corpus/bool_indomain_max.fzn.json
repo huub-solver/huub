@@ -1,0 +1,15 @@
+{
+  "variables": {
+    "x" : { "type" : "bool" },
+    "y" : { "type" : "bool", "defined" : true }
+  },
+  "arrays": {
+
+  },
+  "constraints": [
+    { "id" : "bool_not", "args" : ["x", "y"], "defines" : "y"}
+  ],
+  "output": ["x", "y"],
+  "solve": { "method" : "satisfy", "ann" : [{ "id" : "bool_search", "args" : [["x", "y"], "input_order", "indomain_max", "complete"]}] },
+  "version": "1.0"
+}
