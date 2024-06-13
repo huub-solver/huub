@@ -356,9 +356,7 @@ where
 {
 	fn from(value: Cnf) -> Self {
 		let mut core: Sat = value.into();
-		let None = core.set_external_propagator(Some(Box::<Engine>::default())) else {
-			unreachable!()
-		};
+		core.set_external_propagator(Some(Engine::default()));
 		core.set_learn_callback(Some(trace_learned_clause));
 		Self { oracle: core }
 	}
@@ -372,9 +370,7 @@ where
 	fn clone(&self) -> Self {
 		let mut core = self.oracle.clone();
 		let engine = self.engine().clone();
-		let None = core.set_external_propagator(Some(Box::new(engine))) else {
-			unreachable!()
-		};
+		core.set_external_propagator(Some(engine));
 		core.set_learn_callback(Some(trace_learned_clause));
 		Self { oracle: core }
 	}
