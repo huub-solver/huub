@@ -234,7 +234,7 @@ impl TrailEvent {
 	#[inline]
 	fn sat_from_raw(raw: u32) -> Self {
 		// SAFETY: This is safe because RawVar uses the same representation as i32
-		TrailEvent::SatAssignment(unsafe { transmute(raw) })
+		TrailEvent::SatAssignment(unsafe { transmute::<u32, RawVar>(raw) })
 	}
 
 	#[inline]

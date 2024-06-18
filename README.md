@@ -58,7 +58,7 @@ cargo add huub
 
 ## Naming
 
-Huub is named after Hubert Dekker, a passionate business administration and accounting teacher who spent his holidays creating the rosters for his school by hand, allowing students to pick any combination of possible subjects.
+Huub is named after Hubertus Dekker, a passionate business administration and accounting teacher who spent his holidays creating the rosters for his school by hand, allowing students to pick any combination of possible subjects.
 This solver is dedicated to him in the hope that it allows problems to be solved with the same flexibility and care that he put into his rosters.
 The logo of the solver is based on an old caricature of him as a teacher, made to include his features at an older age.
 
@@ -88,3 +88,26 @@ Huub is inspired by the following LCG solvers, among others.
 
 - [Chuffed](https://github.com/chuffed/chuffed)
 - [OR-Tools](https://github.com/google/or-tools)
+
+## Development
+
+When working on the integration of Huub with MiniZinc, you would likely want to compile a MiniZinc instance and run it using a current build of `fzn-huub`.
+This process can be split into two steps.
+First, the required `.fzn.json` and `.ozn` files can be produced using the following command.
+
+```sh
+minizinc --solver share/minizinc/solvers/huub.msc --compile [OTHER FLAGS AND INSTANCE FILES]
+```
+
+Then, you can run the current version of `fzn-huub` using `cargo` and pipe the result back into MiniZinc to evaluate the output using the following command.
+
+```sh
+cargo run [BUILD FLAGS] -- [HUUB FLAGS AND FZNJSON FILE] | minizinc --ozn-file [OZN FILE]
+```
+
+Note that if you are intending to use a debugger on `fzn-huub`, then you would find the latest build in `./target/debug` or `./target/release-with-debug` (created using `cargo build` or `cargo build --profile release-with-debug`) to give to the debugger in combination with the `[HUUB FLAGS AND FZNJSON FILE]`.
+For example, the following command can be used to run `fzn-huub` with the `lldb` debugger.
+
+```sh
+lldb -- ./target/debug/fzn-huub [HUUB FLAGS AND FZNJSON FILE]
+```

@@ -8,6 +8,7 @@ license.workspace = true
 homepage.workspace = true
 categories.workspace = true
 keywords.workspace = true
+repository.workspace = true
 
 [dependencies]
 delegate = "0.12"

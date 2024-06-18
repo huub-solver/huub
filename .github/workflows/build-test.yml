@@ -1,4 +1,4 @@
-name: Build and test
+name: Run Tests
 
 on: [push]
 
@@ -9,26 +9,6 @@ env:
   RUSTC_WRAPPER: "sccache"
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest] # TODO: Add windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install --profile minimal --no-self-update ${{ env.RUST_CHANNEL }}
-          rustup default ${{ env.RUST_CHANNEL }}
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.4
-      - name: Build fzn-huub
-        run: cargo install --locked --root dist/ --path crates/fzn-huub
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: fzn-huub-${{ matrix.os }}
-          path: dist/
   test:
     runs-on: ${{ matrix.os }}
     strategy:
