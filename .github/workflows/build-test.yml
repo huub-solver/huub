@@ -25,7 +25,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.4
+        uses: mozilla-actions/sccache-action@v0.0.5
       - name: Run cargo test
         run: cargo test --locked
         env:
@@ -47,6 +47,6 @@ jobs:
           rustup toolchain install --profile minimal --component clippy --no-self-update ${{ env.RUST_CHANNEL }}
           rustup default ${{ env.RUST_CHANNEL }}
       - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.4
+        uses: mozilla-actions/sccache-action@v0.0.5
       - name: Run clippy
         run: cargo clippy --tests -- -D warnings
