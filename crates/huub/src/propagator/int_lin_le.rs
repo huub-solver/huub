@@ -9,7 +9,7 @@ use crate::{
 	},
 	solver::{
 		engine::queue::PriorityLevel,
-		poster::{BoxedPropagator, Poster},
+		poster::{BoxedPropagator, Poster, QueuePreferences},
 		value::IntVal,
 		view::{BoolViewInner, IntView, IntViewInner},
 	},
@@ -86,10 +86,6 @@ where
 		true
 	}
 
-	fn queue_priority_level(&self) -> PriorityLevel {
-		PriorityLevel::Low
-	}
-
 	fn notify_backtrack(&mut self, _new_level: usize) {
 		self.action_list.clear()
 	}
@@ -128,10 +124,7 @@ where
 					&ReasonBuilder::Eager(clause),
 				)?
 			}
-		}
-
-		// skip the remaining propagation if the reified variable is not assigned to true
-		if let Some(r) = self.reification.get() {
+			// skip the remaining propagation if the reified variable is not assigned to true
 			if !actions
 				.get_bool_val(BoolView(BoolViewInner::Lit(*r)))
 				.unwrap_or(false)
@@ -179,7 +172,10 @@ struct IntLinearLessEqBoundsPoster<const R: usize> {
 	reification: OptField<R, RawLit>,
 }
 impl<const R: usize> Poster for IntLinearLessEqBoundsPoster<R> {
-	fn post<I: InitializationActions>(self, actions: &mut I) -> (BoxedPropagator, bool) {
+	fn post<I: InitializationActions>(
+		self,
+		actions: &mut I,
+	) -> (BoxedPropagator, QueuePreferences) {
 		let prop = IntLinearLessEqBoundsImpl {
 			vars: self.vars,
 			max: self.max,
@@ -192,7 +188,13 @@ impl<const R: usize> Poster for IntLinearLessEqBoundsPoster<R> {
 		if let Some(r) = prop.reification.get() {
 			actions.subscribe_bool(BoolView(BoolViewInner::Lit(*r)), prop.vars.len() as u32)
 		}
-		(Box::new(prop), true)
+		(
+			Box::new(prop),
+			QueuePreferences {
+				enqueue_on_post: true,
+				priority: PriorityLevel::Low,
+			},
+		)
 	}
 }
 
@@ -201,18 +203,36 @@ mod tests {
 	use expect_test::expect;
 	use flatzinc_serde::RangeList;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
+	use tracing_test::traced_test;
 
 	use crate::{
-		propagator::int_lin_le::IntLinearLessEqBounds, solver::engine::int_var::IntVar, Constraint,
-		Model, NonZeroIntVal, Solver,
+		propagator::int_lin_le::IntLinearLessEqBounds,
+		solver::engine::int_var::{EncodingType, IntVar},
+		Constraint, Model, NonZeroIntVal, Solver,
 	};
 
 	#[test]
+	#[traced_test]
 	fn test_linear_le_sat() {
 		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
-		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
-		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
+		let a = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=2]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=2]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let c = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=2]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
 
 		slv.add_propagator(IntLinearLessEqBounds::prepare(
 			vec![a * NonZeroIntVal::new(2).unwrap(), b, c],
@@ -231,25 +251,39 @@ mod tests {
 	}
 
 	#[test]
+	#[traced_test]
 	fn test_linear_le_unsat() {
-		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
-		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
-		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
+		let mut prb = Model::default();
+		let a = prb.new_int_var((1..=4).into());
+		let b = prb.new_int_var((1..=4).into());
+		let c = prb.new_int_var((1..=4).into());
 
-		slv.add_propagator(IntLinearLessEqBounds::prepare(
-			vec![a * NonZeroIntVal::new(2).unwrap(), b, c],
-			3,
-		));
-		slv.assert_unsatisfiable()
+		prb += Constraint::IntLinEq(vec![a * 2, b, c], 3);
+		prb.assert_unsatisfiable();
 	}
 
 	#[test]
+	#[traced_test]
 	fn test_linear_ge_sat() {
 		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
-		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
-		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
+		let a = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=2]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=2]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let c = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=2]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
 
 		slv.add_propagator(IntLinearLessEqBounds::prepare(
 			vec![a * NonZeroIntVal::new(-2).unwrap(), -b, -c],
@@ -267,20 +301,19 @@ mod tests {
 	}
 
 	#[test]
+	#[traced_test]
 	fn test_linear_ge_unsat() {
-		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
-		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
-		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
+		let mut prb = Model::default();
+		let a = prb.new_int_var((1..=2).into());
+		let b = prb.new_int_var((1..=2).into());
+		let c = prb.new_int_var((1..=2).into());
 
-		slv.add_propagator(IntLinearLessEqBounds::prepare(
-			vec![a * NonZeroIntVal::new(-2).unwrap(), -b, -c],
-			-10,
-		));
-		slv.assert_unsatisfiable()
+		prb += Constraint::IntLinEq(vec![a * -2, -b, -c], -10);
+		prb.assert_unsatisfiable();
 	}
 
 	#[test]
+	#[traced_test]
 	fn test_reified_linear_le_sat() {
 		let mut prb = Model::default();
 		let r = prb.new_bool_var();
@@ -298,10 +331,10 @@ mod tests {
 			r.clone().into(),
 		);
 		let (mut slv, map): (Solver, _) = prb.to_solver().unwrap();
-		let a = map.get(&slv, &a.into());
-		let b = map.get(&slv, &b.into());
-		let c = map.get(&slv, &c.into());
-		let r = map.get(&slv, &r.into());
+		let a = map.get(&mut slv, &a.into());
+		let b = map.get(&mut slv, &b.into());
+		let c = map.get(&mut slv, &c.into());
+		let r = map.get(&mut slv, &r.into());
 		slv.expect_solutions(
 			&[r, a, b, c],
 			expect![[r#"
@@ -320,6 +353,7 @@ mod tests {
 	}
 
 	#[test]
+	#[traced_test]
 	fn test_reified_linear_ge_sat() {
 		let mut prb = Model::default();
 		let r = prb.new_bool_var();
@@ -337,10 +371,10 @@ mod tests {
 			r.clone().into(),
 		);
 		let (mut slv, map): (Solver, _) = prb.to_solver().unwrap();
-		let a = map.get(&slv, &a.into());
-		let b = map.get(&slv, &b.into());
-		let c = map.get(&slv, &c.into());
-		let r = map.get(&slv, &r.into());
+		let a = map.get(&mut slv, &a.into());
+		let b = map.get(&mut slv, &b.into());
+		let c = map.get(&mut slv, &c.into());
+		let r = map.get(&mut slv, &r.into());
 		slv.expect_solutions(
 			&[r, a, b, c],
 			expect![[r#"

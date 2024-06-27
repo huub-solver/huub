@@ -9,7 +9,7 @@ use crate::{
 	},
 	solver::{
 		engine::queue::PriorityLevel,
-		poster::{BoxedPropagator, Poster},
+		poster::{BoxedPropagator, Poster, QueuePreferences},
 	},
 	IntVal, IntView, LitMeaning,
 };
@@ -273,12 +273,6 @@ where
 		true
 	}
 
-	fn queue_priority_level(&self) -> PriorityLevel {
-		PriorityLevel::Highest
-	}
-
-	fn notify_backtrack(&mut self, _new_level: usize) {}
-
 	#[tracing::instrument(name = "int_pow", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		self.propagate_result(actions)?;
@@ -295,7 +289,10 @@ struct IntPowBoundsPoster {
 	result: IntView,
 }
 impl Poster for IntPowBoundsPoster {
-	fn post<I: InitializationActions + ?Sized>(self, actions: &mut I) -> (BoxedPropagator, bool) {
+	fn post<I: InitializationActions + ?Sized>(
+		self,
+		actions: &mut I,
+	) -> (BoxedPropagator, QueuePreferences) {
 		actions.subscribe_int(self.base, IntEvent::Bounds, 1);
 		actions.subscribe_int(self.exponent, IntEvent::Bounds, 2);
 		actions.subscribe_int(self.result, IntEvent::Bounds, 3);
@@ -305,7 +302,10 @@ impl Poster for IntPowBoundsPoster {
 				exponent: self.exponent,
 				result: self.result,
 			}),
-			false,
+			QueuePreferences {
+				enqueue_on_post: false,
+				priority: PriorityLevel::Highest,
+			},
 		)
 	}
 }
@@ -335,15 +335,36 @@ fn pow(base: IntVal, exponent: IntVal) -> Option<IntVal> {
 mod tests {
 	use expect_test::expect;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
+	use tracing_test::traced_test;
 
-	use crate::{propagator::int_pow::IntPowBounds, solver::engine::int_var::IntVar, Solver};
+	use crate::{
+		propagator::int_pow::IntPowBounds,
+		solver::engine::int_var::{EncodingType, IntVar},
+		Solver,
+	};
 
 	#[test]
+	#[traced_test]
 	fn test_int_pow_sat() {
 		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, (-2..=3).into(), true);
-		let b = IntVar::new_in(&mut slv, (-2..=2).into(), true);
-		let c = IntVar::new_in(&mut slv, (-2..=9).into(), true);
+		let a = IntVar::new_in(
+			&mut slv,
+			(-2..=3).into(),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			(-2..=2).into(),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let c = IntVar::new_in(
+			&mut slv,
+			(-2..=9).into(),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
 
 		slv.add_propagator(IntPowBounds::prepare(a, b, c));
 		slv.expect_solutions(

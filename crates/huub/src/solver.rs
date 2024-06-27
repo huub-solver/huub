@@ -19,9 +19,16 @@ use pindakaas::{
 use tracing::debug;
 
 use crate::{
-	actions::{explanation::ExplanationActions, inspection::InspectionActions},
+	actions::{
+		explanation::ExplanationActions, inspection::InspectionActions, trailing::TrailingActions,
+	},
 	solver::{
-		engine::{Engine, PropRef},
+		engine::{
+			int_var::{IntVarRef, LazyLitDef},
+			trace_new_lit,
+			trail::TrailedInt,
+			Engine, PropRef,
+		},
 		initialization_context::InitializationContext,
 		poster::Poster,
 		value::{AssumptionChecker, ConstantFailure, Valuation, Value},
@@ -153,7 +160,7 @@ where
 								let Value::Int(val) = val? else {
 									unreachable!()
 								};
-								match self.engine().state.get_int_lit(*iv, LitMeaning::Eq(val)).0 {
+								match self.get_int_lit(*iv, LitMeaning::Eq(val)).0 {
 									BoolViewInner::Lit(l) => Some(!l),
 									BoolViewInner::Const(true) => None,
 									BoolViewInner::Const(false) => unreachable!(),
@@ -162,6 +169,7 @@ where
 							_ => None,
 						})
 						.collect();
+					debug!(clause = ?nogood.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "solution nogood");
 					if nogood.is_empty() || self.oracle.add_clause(nogood).is_err() {
 						return SolveResult::Complete;
 					}
@@ -216,8 +224,8 @@ where
 	) -> SolveResult {
 		let mut obj_curr = None;
 		let obj_best = match goal {
-			Goal::Minimize => self.engine().state.get_int_lower_bound(objective),
-			Goal::Maximize => self.engine().state.get_int_upper_bound(objective),
+			Goal::Minimize => self.get_int_lower_bound(objective),
+			Goal::Maximize => self.get_int_upper_bound(objective),
 		};
 		let mut assump = None;
 		loop {
@@ -242,11 +250,9 @@ where
 					} else {
 						assump = match goal {
 							Goal::Minimize => Some(
-								self.engine()
-									.state
-									.get_int_lit(objective, LitMeaning::Less(obj_curr.unwrap())),
+								self.get_int_lit(objective, LitMeaning::Less(obj_curr.unwrap())),
 							),
-							Goal::Maximize => Some(self.engine().state.get_int_lit(
+							Goal::Maximize => Some(self.get_int_lit(
 								objective,
 								LitMeaning::GreaterEq(obj_curr.unwrap() + 1),
 							)),
@@ -282,15 +288,17 @@ where
 			slv: self,
 			prop: prop_ref,
 		};
-		let (prop, enqueue) = poster.post(&mut actions);
-		if enqueue {
-			let level = prop.queue_priority_level();
-			self.engine_mut().state.prop_queue.insert(level, prop_ref);
-		}
+		let (prop, queue_pref) = poster.post(&mut actions);
 		let p = self.engine_mut().propagators.push(prop);
 		debug_assert_eq!(prop_ref, p);
-		let p = self.engine_mut().state.enqueued.push(enqueue);
+		let engine = self.engine_mut();
+		let p = engine.state.prop_priority.push(queue_pref.priority);
 		debug_assert_eq!(prop_ref, p);
+		let p = self.engine_mut().state.enqueued.push(false);
+		debug_assert_eq!(prop_ref, p);
+		if queue_pref.enqueue_on_post {
+			self.engine_mut().state.enqueue_propagator(prop_ref);
+		}
 	}
 
 	pub(crate) fn add_clause<I: IntoIterator<Item = BoolView>>(
@@ -373,6 +381,83 @@ where
 		core.set_external_propagator(Some(engine));
 		core.set_learn_callback(Some(trace_learned_clause));
 		Self { oracle: core }
+	}
+}
+
+impl<Sol, Sat> ExplanationActions for Solver<Sat>
+where
+	Sol: PropagatorAccess + SatValuation,
+	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+{
+	delegate! {
+		to self.engine().state {
+			fn try_int_lit(&self, var: IntView, meaning: LitMeaning) -> Option<BoolView>;
+		}
+		to self.engine_mut().state {
+			fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView;
+			fn get_int_upper_bound_lit(&mut self, var: IntView) -> BoolView;
+		}
+	}
+
+	fn get_intref_lit(&mut self, iv: IntVarRef, meaning: LitMeaning) -> BoolView {
+		// TODO: We currently copy the integer variable struct here to avoid
+		// borrowing issues. Hopefully the compiler sees that this is unnecessary,
+		// but we should check and see if we can avoid this.
+		let mut var = self.engine_mut().state.int_vars[iv].clone();
+		let new_var = |def: LazyLitDef| {
+			// Create new variable
+			let v = self.oracle.new_var();
+			trace_new_lit!(iv, def, v);
+			self.oracle.add_observed_var(v);
+			self.engine_mut()
+				.state
+				.bool_to_int
+				.insert_lazy(v, iv, def.meaning.clone());
+			// Add clauses to define the new variable
+			for cl in def.meaning.defining_clauses(
+				v.into(),
+				def.prev.map(Into::into),
+				def.next.map(Into::into),
+			) {
+				self.oracle.add_clause(cl).unwrap();
+			}
+			v
+		};
+		let bv = var.bool_lit(meaning, new_var);
+		self.engine_mut().state.int_vars[iv] = var;
+		bv
+	}
+}
+
+impl<Sol, Sat> InspectionActions for Solver<Sat>
+where
+	Sol: PropagatorAccess + SatValuation,
+	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+{
+	delegate! {
+		to self.engine().state {
+			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
+			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
+			fn get_int_upper_bound(&self, var: IntView) -> IntVal;
+			fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal);
+			fn get_int_val(&self, var: IntView) -> Option<IntVal>;
+			fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool;
+		}
+	}
+}
+
+impl<Sol, Sat> TrailingActions for Solver<Sat>
+where
+	Sol: PropagatorAccess + SatValuation,
+	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+{
+	delegate! {
+		to self.engine().state {
+			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
+		}
+		to self.engine_mut().state {
+			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal;
+		}
 	}
 }
 

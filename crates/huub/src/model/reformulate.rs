@@ -25,7 +25,7 @@ pub struct VariableMap {
 }
 
 impl VariableMap {
-	pub fn get<Sat, Sol>(&self, slv: &Solver<Sat>, index: &ModelView) -> SolverView
+	pub fn get<Sat, Sol>(&self, slv: &mut Solver<Sat>, index: &ModelView) -> SolverView
 	where
 		Sol: PropagatorAccess + SatValuation,
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
@@ -36,14 +36,14 @@ impl VariableMap {
 		}
 	}
 
-	pub fn get_bool<Sat, Sol>(&self, slv: &Solver<Sat>, bv: &bool::BoolView) -> BoolView
+	pub fn get_bool<Sat, Sol>(&self, slv: &mut Solver<Sat>, bv: &bool::BoolView) -> BoolView
 	where
 		Sol: PropagatorAccess + SatValuation,
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 	{
-		let get_int_lit = |slv: &Solver<Sat>, iv: &int::IntView, lit_meaning: LitMeaning| {
+		let get_int_lit = |slv: &mut Solver<Sat>, iv: &int::IntView, lit_meaning: LitMeaning| {
 			let iv = self.get_int(slv, iv);
-			slv.engine().state.get_int_lit(iv, lit_meaning)
+			slv.get_int_lit(iv, lit_meaning)
 		};
 
 		match bv {
@@ -74,7 +74,7 @@ impl VariableMap {
 		}
 	}
 
-	pub fn get_int<Sat, Sol>(&self, slv: &Solver<Sat>, iv: &int::IntView) -> IntView
+	pub fn get_int<Sat, Sol>(&self, slv: &mut Solver<Sat>, iv: &int::IntView) -> IntView
 	where
 		Sol: PropagatorAccess + SatValuation,
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
@@ -116,9 +116,7 @@ impl VariableMap {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ReifContext {
 	Pos,
-	#[allow(dead_code)]
 	Neg,
-	#[allow(dead_code)]
 	Mixed,
 }
 

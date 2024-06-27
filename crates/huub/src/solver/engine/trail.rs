@@ -161,8 +161,8 @@ impl Trail {
 		self.prev_len.push(self.trail.len());
 	}
 	pub(crate) fn notify_backtrack(&mut self, level: usize) {
-		self.prev_len.truncate(level + 1);
-		let len = self.prev_len.pop().unwrap_or(0);
+		let len = self.prev_len[level];
+		self.prev_len.truncate(level);
 		debug_assert!(
 			len <= self.trail.len(),
 			"backtracking to level {level} length {len}, but trail is already at length {}",

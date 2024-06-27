@@ -84,6 +84,17 @@ impl Mul<NonZeroIntVal> for IntView {
 	}
 }
 
+impl Mul<IntVal> for IntView {
+	type Output = Self;
+	fn mul(self, rhs: IntVal) -> Self::Output {
+		if rhs == 0 {
+			Self::Const(0)
+		} else {
+			self.mul(NonZeroIntVal::new(rhs).unwrap())
+		}
+	}
+}
+
 impl Neg for IntView {
 	type Output = Self;
 	fn neg(self) -> Self::Output {

@@ -676,10 +676,10 @@ where
 		fzn: &FlatZinc<S>,
 	) -> Result<(Self, BTreeMap<S, SolverView>), FlatZincError> {
 		let (mut prb, map) = Model::from_fzn(fzn)?;
-		let (slv, remap) = prb.to_solver()?;
+		let (mut slv, remap) = prb.to_solver()?;
 		let map = map
 			.into_iter()
-			.map(|(k, v)| (k, remap.get(&slv, &v)))
+			.map(|(k, v)| (k, remap.get(&mut slv, &v)))
 			.collect();
 		Ok((slv, map))
 	}

@@ -1,7 +1,9 @@
 use crate::{
 	actions::initialization::InitializationActions,
 	propagator::Propagator,
-	solver::engine::{propagation_context::PropagationContext, trail::Trail, State},
+	solver::engine::{
+		propagation_context::PropagationContext, queue::PriorityLevel, trail::Trail, State,
+	},
 };
 
 pub(crate) type BoxedPropagator = Box<dyn for<'a> Propagator<PropagationContext<'a>, State, Trail>>;
@@ -17,5 +19,13 @@ pub(crate) trait Poster {
 	/// The post method is given access to the solver's initialization actions,
 	/// which includes the ability to subscribe to variable events, creating
 	/// trailed data structures, and inspecting the current state of varaibles.
-	fn post<I: InitializationActions>(self, actions: &mut I) -> (BoxedPropagator, bool);
+	fn post<I: InitializationActions>(self, actions: &mut I)
+		-> (BoxedPropagator, QueuePreferences);
+}
+
+pub(crate) struct QueuePreferences {
+	/// Whether to immediately add the propagator to the queue when the propagator is posted
+	pub(crate) enqueue_on_post: bool,
+	/// Priority level in the queue used for the propagator
+	pub(crate) priority: PriorityLevel,
 }

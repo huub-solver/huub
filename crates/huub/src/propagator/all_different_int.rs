@@ -9,7 +9,7 @@ use crate::{
 	},
 	solver::{
 		engine::{int_var::LitMeaning, queue::PriorityLevel},
-		poster::{BoxedPropagator, Poster},
+		poster::{BoxedPropagator, Poster, QueuePreferences},
 		view::{IntView, IntViewInner},
 	},
 };
@@ -37,10 +37,6 @@ where
 		true
 	}
 
-	fn queue_priority_level(&self) -> PriorityLevel {
-		PriorityLevel::Low
-	}
-
 	fn notify_backtrack(&mut self, _new_level: usize) {
 		self.action_list.clear()
 	}
@@ -66,7 +62,10 @@ struct AllDifferentIntValuePoster {
 	vars: Vec<IntView>,
 }
 impl Poster for AllDifferentIntValuePoster {
-	fn post<I: InitializationActions>(self, actions: &mut I) -> (BoxedPropagator, bool) {
+	fn post<I: InitializationActions>(
+		self,
+		actions: &mut I,
+	) -> (BoxedPropagator, QueuePreferences) {
 		let action_list: Vec<u32> = self
 			.vars
 			.iter()
@@ -87,7 +86,13 @@ impl Poster for AllDifferentIntValuePoster {
 		for (i, v) in prop.vars.iter().enumerate() {
 			actions.subscribe_int(*v, IntEvent::Fixed, i as u32)
 		}
-		(Box::new(prop), enqueue)
+		(
+			Box::new(prop),
+			QueuePreferences {
+				enqueue_on_post: enqueue,
+				priority: PriorityLevel::Low,
+			},
+		)
 	}
 }
 
@@ -96,29 +101,63 @@ mod tests {
 	use flatzinc_serde::RangeList;
 	use itertools::Itertools;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
+	use tracing_test::traced_test;
 
 	use crate::{
-		propagator::all_different_int::AllDifferentIntValue, solver::engine::int_var::IntVar,
+		propagator::all_different_int::AllDifferentIntValue,
+		solver::engine::int_var::{EncodingType, IntVar},
 		IntVal, IntView, SolveResult, Solver,
 	};
 
 	#[test]
+	#[traced_test]
 	fn test_all_different_value_sat() {
 		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
-		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
-		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=4]), true);
+		let a = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=4]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=4]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let c = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=4]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
 
 		slv.add_propagator(AllDifferentIntValue::prepare(vec![a, b, c]));
 		slv.assert_all_solutions(&[a, b, c], |sol| sol.iter().all_unique())
 	}
 
 	#[test]
+	#[traced_test]
 	fn test_all_different_value_unsat() {
 		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
-		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
-		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
+		let a = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=2]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=2]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let c = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=2]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
 
 		slv.add_propagator(AllDifferentIntValue::prepare(vec![a, b, c]));
 		slv.assert_unsatisfiable()
@@ -138,7 +177,8 @@ mod tests {
 					vars.push(IntVar::new_in(
 						&mut slv,
 						RangeList::from_iter([1..=9]),
-						true,
+						EncodingType::Eager,
+						EncodingType::Eager,
 					));
 				}
 			}
@@ -209,6 +249,7 @@ mod tests {
 	}
 
 	#[test]
+	#[traced_test]
 	fn test_sudoku_1() {
 		test_sudoku(
 			&[
@@ -227,6 +268,7 @@ mod tests {
 	}
 
 	#[test]
+	#[traced_test]
 	fn test_sudoku_2() {
 		test_sudoku(
 			&[
@@ -245,6 +287,7 @@ mod tests {
 	}
 
 	#[test]
+	#[traced_test]
 	fn test_sudoku_3() {
 		test_sudoku(
 			&[
@@ -263,6 +306,7 @@ mod tests {
 	}
 
 	#[test]
+	#[traced_test]
 	fn test_sudoku_4() {
 		test_sudoku(
 			&[
@@ -281,6 +325,7 @@ mod tests {
 	}
 
 	#[test]
+	#[traced_test]
 	fn test_sudoku_5() {
 		test_sudoku(
 			&[
@@ -299,6 +344,7 @@ mod tests {
 	}
 
 	#[test]
+	#[traced_test]
 	fn test_sudoku_6() {
 		test_sudoku(
 			&[

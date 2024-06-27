@@ -17,9 +17,7 @@ use crate::{
 	},
 	propagator::{conflict::Conflict, int_event::IntEvent},
 	solver::{
-		engine::{
-			propagation_context::PropagationContext, queue::PriorityLevel, trail::Trail, State,
-		},
+		engine::{propagation_context::PropagationContext, trail::Trail, State},
 		poster::BoxedPropagator,
 	},
 	Conjunction,
@@ -39,12 +37,6 @@ pub(crate) trait Propagator<P: PropagationActions, E: ExplanationActions, T: Tra
 		let _ = event;
 		let _ = actions;
 		false
-	}
-
-	/// The method called by the solver to request at what priority level the
-	/// propagator should be placed in the propagation queue.œ
-	fn queue_priority_level(&self) -> PriorityLevel {
-		PriorityLevel::Medium
 	}
 
 	/// This method is called when the solver backtracks to a previous decision

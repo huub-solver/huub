@@ -3,7 +3,6 @@ pub(crate) enum IntEvent {
 	Fixed,
 	LowerBound,
 	UpperBound,
-	#[allow(dead_code)] // TODO
 	Bounds,
 	Domain,
 }

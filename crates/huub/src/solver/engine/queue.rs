@@ -35,28 +35,29 @@ impl<E> PriorityQueue<E> {
 	}
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub(crate) enum PriorityLevel {
-	#[allow(dead_code)] // TODO
 	/// The lowest priority level, all other priority levels are more important
+	#[allow(dead_code)] // TODO
 	Lowest,
 	/// A low level of priority, all apart from one priority level are more
 	/// important
 	Low,
 	/// A medium level of priority, there are just as many normal priority levels
 	/// more as less important than this one.
-	Medium,
 	#[allow(dead_code)] // TODO
+	Medium,
 	/// A high level of priority, all apart from one normal priority level are
 	/// less important.
+	#[allow(dead_code)] // TODO
 	High,
 	/// The highest normal priority level, this priority level is the most
 	/// important normal level of priority.
 	Highest,
-	#[allow(dead_code)] // TODO
 	/// An extraordinarily high level of priority, generally used to ensure
 	/// something will happen next.
+	#[allow(dead_code)] // TODO
 	Immediate,
 }
 

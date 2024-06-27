@@ -11,7 +11,7 @@ use pindakaas::{
 use crate::{
 	helpers::linear_transform::LinearTransform,
 	solver::{
-		engine::int_var::{IntVarRef, LitMeaning},
+		engine::int_var::{DirectStorage, IntVarRef, LitMeaning, OrderStorage},
 		value::NonZeroIntVal,
 		SatSolver,
 	},
@@ -109,34 +109,30 @@ impl IntView {
 		match self.0 {
 			IntViewInner::VarRef(v) | IntViewInner::Linear { var: v, .. } => {
 				let var = &slv.engine().state.int_vars[v];
-				let mut var_iter = var.vars.clone();
+				let mut lits = Vec::new();
 
-				let mut val_iter = var.orig_domain.clone().into_iter().flatten();
-				let _ = val_iter.next();
-				let mut lits = Vec::with_capacity(
-					(var.orig_domain_len - 2) * 2 * if var.has_direct { 2 } else { 1 },
-				);
-				for val in val_iter {
-					let lit = var_iter.next().unwrap();
-					let i: NonZeroI32 = lit.into();
-					let geq = LitMeaning::GreaterEq(transformer.transform(val));
-					let lt = LitMeaning::Less(transformer.transform(val));
-					lits.extend([(i, geq), (-i, lt)])
+				if let OrderStorage::Eager { storage, .. } = &var.order_encoding {
+					let mut val_iter = var.domain.clone().into_iter().flatten();
+					let _ = val_iter.next();
+					for (lit, val) in storage.clone().zip(val_iter) {
+						let i: NonZeroI32 = lit.into();
+						let geq = LitMeaning::GreaterEq(transformer.transform(val));
+						let lt = LitMeaning::Less(transformer.transform(val));
+						lits.extend([(i, geq), (-i, lt)])
+					}
 				}
 
-				if var.has_direct && var.orig_domain_len > 2 {
-					let mut val_iter = var.orig_domain.clone().into_iter().flatten();
+				if let DirectStorage::Eager(vars) = &var.direct_encoding {
+					let mut val_iter = var.domain.clone().into_iter().flatten();
 					let _ = val_iter.next();
 					let _ = val_iter.next_back();
-					for val in val_iter {
-						let lit = var_iter.next().unwrap();
+					for (lit, val) in vars.clone().zip(val_iter) {
 						let i: NonZeroI32 = lit.into();
 						let eq = LitMeaning::Eq(transformer.transform(val));
 						let ne = LitMeaning::NotEq(transformer.transform(val));
 						lits.extend([(i, eq), (-i, ne)])
 					}
 				}
-				debug_assert!(var_iter.next().is_none());
 				lits
 			}
 			IntViewInner::Bool { lit, .. } => {

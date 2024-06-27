@@ -9,7 +9,7 @@ use crate::{
 	},
 	solver::{
 		engine::{queue::PriorityLevel, trail::TrailedInt},
-		poster::{BoxedPropagator, Poster},
+		poster::{BoxedPropagator, Poster, QueuePreferences},
 		value::IntVal,
 		view::{BoolViewInner, IntView, IntViewInner},
 	},
@@ -93,10 +93,6 @@ where
 		size as i64 - num_fixed <= 1
 	}
 
-	fn queue_priority_level(&self) -> PriorityLevel {
-		PriorityLevel::Low
-	}
-
 	fn notify_backtrack(&mut self, _new_level: usize) {}
 
 	#[tracing::instrument(name = "int_lin_ne", level = "trace", skip(self, actions))]
@@ -172,7 +168,10 @@ struct IntLinearNotEqValuePoster<const R: usize> {
 	reification: OptField<R, RawLit>,
 }
 impl<const R: usize> Poster for IntLinearNotEqValuePoster<R> {
-	fn post<I: InitializationActions>(self, actions: &mut I) -> (BoxedPropagator, bool) {
+	fn post<I: InitializationActions>(
+		self,
+		actions: &mut I,
+	) -> (BoxedPropagator, QueuePreferences) {
 		let prop = IntLinearNotEqValueImpl {
 			vars: self.vars,
 			violation: self.val,
@@ -185,7 +184,13 @@ impl<const R: usize> Poster for IntLinearNotEqValuePoster<R> {
 		if let Some(r) = prop.reification.get() {
 			actions.subscribe_bool(BoolView(BoolViewInner::Lit(*r)), prop.vars.len() as u32)
 		}
-		(Box::new(prop), false)
+		(
+			Box::new(prop),
+			QueuePreferences {
+				enqueue_on_post: false,
+				priority: PriorityLevel::Low,
+			},
+		)
 	}
 }
 
@@ -194,18 +199,36 @@ mod tests {
 	use expect_test::expect;
 	use flatzinc_serde::RangeList;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
+	use tracing_test::traced_test;
 
 	use crate::{
-		propagator::int_lin_ne::IntLinearNotEqValue, solver::engine::int_var::IntVar, Constraint,
-		Model, NonZeroIntVal, Solver,
+		propagator::int_lin_ne::IntLinearNotEqValue,
+		solver::engine::int_var::{EncodingType, IntVar},
+		Constraint, Model, NonZeroIntVal, Solver,
 	};
 
 	#[test]
+	#[traced_test]
 	fn test_linear_ne_sat() {
 		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
-		let b = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
-		let c = IntVar::new_in(&mut slv, RangeList::from_iter([1..=2]), true);
+		let a = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=2]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=2]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let c = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=2]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
 
 		slv.add_propagator(IntLinearNotEqValue::prepare(
 			vec![a * NonZeroIntVal::new(2).unwrap(), b, c],
@@ -225,6 +248,7 @@ mod tests {
 	}
 
 	#[test]
+	#[traced_test]
 	fn test_reified_linear_ne_sat() {
 		let mut prb = Model::default();
 		let r = prb.new_bool_var();
@@ -242,10 +266,10 @@ mod tests {
 			r.clone().into(),
 		);
 		let (mut slv, map): (Solver, _) = prb.to_solver().unwrap();
-		let a = map.get(&slv, &a.into());
-		let b = map.get(&slv, &b.into());
-		let c = map.get(&slv, &c.into());
-		let r = map.get(&slv, &r.into());
+		let a = map.get(&mut slv, &a.into());
+		let b = map.get(&mut slv, &b.into());
+		let c = map.get(&mut slv, &c.into());
+		let r = map.get(&mut slv, &r.into());
 		slv.expect_solutions(
 			&[r, a, b, c],
 			expect![[r#"

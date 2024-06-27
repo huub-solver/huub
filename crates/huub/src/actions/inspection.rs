@@ -16,6 +16,5 @@ pub(crate) trait InspectionActions: TrailingActions {
 			None
 		}
 	}
-	#[allow(dead_code)]
 	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool;
 }

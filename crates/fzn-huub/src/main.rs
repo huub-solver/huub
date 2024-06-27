@@ -1,10 +1,10 @@
-mod tracing;
+mod trace;
 
 use std::{
 	collections::HashMap,
 	fmt::{self, Debug, Display},
 	fs::File,
-	io::{self, BufReader},
+	io::BufReader,
 	num::NonZeroI32,
 	path::PathBuf,
 	process::ExitCode,
@@ -15,16 +15,16 @@ use std::{
 	time::{Duration, Instant},
 };
 
-use ::tracing::{warn, Level};
 use flatzinc_serde::{FlatZinc, Literal, Method};
 use huub::{
 	FlatZincError, Goal, LitMeaning, ReformulationError, SlvTermSignal, SolveResult, Solver,
 	SolverView, Valuation,
 };
 use pico_args::Arguments;
-use tracing::{FmtLitFields, LitName};
-use tracing_subscriber::fmt::time::uptime;
+use tracing::{subscriber::set_global_default, warn};
 use ustr::{ustr, Ustr, UstrMap};
+
+use crate::trace::LitName;
 
 const CLI_HELP: &str = r#"USAGE
   $ fzn-huub [-a] [-i] [-s] [-t <value>] [-v] FILE
@@ -36,7 +36,7 @@ FLAGS
   -a, --all-solutions             Find all possible solutions for the given (satisfaction) instance.
   -i, --intermediate-solutions    Display all intermediate solutions found during the search.
   -s, --statistics                Print statistics about the solving process.
-  -t, --time-limit <value>        Set a time limit for the solver. The value can be a number of 
+  -t, --time-limit <value>        Set a time limit for the solver. The value can be a number of
 	                                milliseconds or a human-readable duration string.
   -v, --verbose                   Display addtional information about actions taken by the solver.
 	                                Can be used multiple times to increase verbosity.
@@ -137,22 +137,13 @@ impl Cli {
 		// Enable tracing functionality
 		let lit_reverse_map: Arc<Mutex<HashMap<NonZeroI32, LitName>>> = Arc::default();
 		let int_reverse_map: Arc<Mutex<Vec<Ustr>>> = Arc::default();
-		tracing_subscriber::fmt()
-			.with_max_level(match self.verbose {
-				0 => Level::INFO,
-				1 => Level::DEBUG,
-				_ => Level::TRACE, // 2 or more
-			})
-			.with_writer(io::stderr)
-			.with_timer(uptime())
-			.map_fmt_fields(|fmt| {
-				FmtLitFields::new(
-					fmt,
-					Arc::clone(&lit_reverse_map),
-					Arc::clone(&int_reverse_map),
-				)
-			})
-			.init();
+		let subscriber = trace::create_subscriber(
+			self.verbose,
+			Arc::clone(&lit_reverse_map),
+			Arc::clone(&int_reverse_map),
+		);
+		set_global_default(subscriber)
+			.map_err(|e| format!("unable to initialize tracing framework: {}", e))?;
 
 		let start = Instant::now();
 		let deadline = self.time_limit.map(|t| start + t);

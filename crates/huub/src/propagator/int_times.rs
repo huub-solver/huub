@@ -10,7 +10,7 @@ use crate::{
 	},
 	solver::{
 		engine::queue::PriorityLevel,
-		poster::{BoxedPropagator, Poster},
+		poster::{BoxedPropagator, Poster, QueuePreferences},
 	},
 	IntView, NonZeroIntVal,
 };
@@ -41,12 +41,6 @@ where
 	fn notify_event(&mut self, _: u32, _: &IntEvent, _: &mut T) -> bool {
 		true
 	}
-
-	fn queue_priority_level(&self) -> PriorityLevel {
-		PriorityLevel::Highest
-	}
-
-	fn notify_backtrack(&mut self, _new_level: usize) {}
 
 	#[tracing::instrument(name = "int_times", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
@@ -133,7 +127,10 @@ struct IntTimesBoundsPoster {
 	z: IntView,
 }
 impl Poster for IntTimesBoundsPoster {
-	fn post<I: InitializationActions + ?Sized>(self, actions: &mut I) -> (BoxedPropagator, bool) {
+	fn post<I: InitializationActions + ?Sized>(
+		self,
+		actions: &mut I,
+	) -> (BoxedPropagator, QueuePreferences) {
 		actions.subscribe_int(self.x, IntEvent::Bounds, 1);
 		actions.subscribe_int(self.y, IntEvent::Bounds, 2);
 		actions.subscribe_int(self.z, IntEvent::Bounds, 3);
@@ -143,7 +140,10 @@ impl Poster for IntTimesBoundsPoster {
 				y: self.y,
 				z: self.z,
 			}),
-			false,
+			QueuePreferences {
+				enqueue_on_post: false,
+				priority: PriorityLevel::Highest,
+			},
 		)
 	}
 }
@@ -152,15 +152,36 @@ impl Poster for IntTimesBoundsPoster {
 mod tests {
 	use expect_test::expect;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
+	use tracing_test::traced_test;
 
-	use crate::{propagator::int_times::IntTimesBounds, solver::engine::int_var::IntVar, Solver};
+	use crate::{
+		propagator::int_times::IntTimesBounds,
+		solver::engine::int_var::{EncodingType, IntVar},
+		Solver,
+	};
 
 	#[test]
+	#[traced_test]
 	fn test_int_times_sat() {
 		let mut slv: Solver<Cadical> = Cnf::default().into();
-		let a = IntVar::new_in(&mut slv, (-2..=1).into(), true);
-		let b = IntVar::new_in(&mut slv, (-1..=2).into(), true);
-		let c = IntVar::new_in(&mut slv, (-4..=2).into(), true);
+		let a = IntVar::new_in(
+			&mut slv,
+			(-2..=1).into(),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			(-1..=2).into(),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let c = IntVar::new_in(
+			&mut slv,
+			(-4..=2).into(),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
 
 		slv.add_propagator(IntTimesBounds::prepare(a, b, c));
 		slv.expect_solutions(

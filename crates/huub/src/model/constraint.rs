@@ -84,10 +84,10 @@ impl Constraint {
 					.into_group_map();
 
 				for (val, idxs) in idx_map {
-					let val_eq = slv.engine().state.get_int_lit(y, LitMeaning::Eq(val));
+					let val_eq = slv.get_int_lit(y, LitMeaning::Eq(val));
 					let idxs: Vec<_> = idxs
 						.into_iter()
-						.map(|i| slv.engine().state.get_int_lit(idx, LitMeaning::Eq(i)))
+						.map(|i| slv.get_int_lit(idx, LitMeaning::Eq(i)))
 						.collect();
 
 					for i in idxs.iter() {
@@ -145,10 +145,7 @@ impl Constraint {
 
 				for (i, l) in arr.iter().enumerate() {
 					// Evaluate array literal
-					let idx_eq = slv
-						.engine()
-						.state
-						.get_int_lit(idx, LitMeaning::Eq((i + 1) as IntVal));
+					let idx_eq = slv.get_int_lit(idx, LitMeaning::Eq((i + 1) as IntVal));
 					// add clause (idx = i + 1 /\ arr[i]) => val
 					slv.add_clause([!idx_eq, !l, y])?;
 					// add clause (idx = i + 1 /\ !arr[i]) => !val
@@ -451,6 +448,18 @@ impl Model {
 				}
 				if max_ub < self.get_int_upper_bound(&y) {
 					self.set_int_upper_bound(&y, max_ub, con)?;
+				}
+				Ok(())
+			}
+			Constraint::IntLinEq(args, cons) => {
+				let sum = args
+					.iter()
+					.map(|v| self.get_int_lower_bound(v))
+					.fold(cons, |sum, val| sum - val);
+
+				for v in &args {
+					let ub = sum + self.get_int_lower_bound(v);
+					self.set_int_upper_bound(v, ub, con)?
 				}
 				Ok(())
 			}

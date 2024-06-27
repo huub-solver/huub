@@ -19,7 +19,10 @@ use crate::{
 		int::{IntVar, IntVarDef, IntView},
 		reformulate::{ReformulationError, VariableMap},
 	},
-	solver::{engine::int_var::IntVar as SlvIntVar, SatSolver},
+	solver::{
+		engine::int_var::{EncodingType, IntVar as SlvIntVar},
+		SatSolver,
+	},
 	Constraint, Solver,
 };
 
@@ -80,7 +83,12 @@ impl Model {
 		// Create integer data structures within the solver
 		for i in 0..self.int_vars.len() {
 			let var = &self.int_vars[i];
-			let view = SlvIntVar::new_in(&mut slv, var.domain.clone(), true); // TODO!
+			let view = SlvIntVar::new_in(
+				&mut slv,
+				var.domain.clone(),
+				EncodingType::Eager,
+				EncodingType::Eager,
+			); // TODO!
 			map.insert_int(IntVar(i as u32), view);
 		}
 

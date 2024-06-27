@@ -453,7 +453,10 @@ mod tests {
 
 		m += BoolExpr::And(b.iter().cloned().map_into().collect());
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
-		let vars: Vec<_> = b.into_iter().map(|x| map.get(&slv, &x.into())).collect();
+		let vars: Vec<_> = b
+			.into_iter()
+			.map(|x| map.get(&mut slv, &x.into()))
+			.collect();
 		slv.expect_solutions(&vars, expect!["true, true, true"]);
 
 		// Simple Unsatisfiable test case
@@ -474,7 +477,10 @@ mod tests {
 
 		m += BoolExpr::Or(b.iter().cloned().map_into().collect());
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
-		let vars: Vec<_> = b.into_iter().map(|x| map.get(&slv, &x.into())).collect();
+		let vars: Vec<_> = b
+			.into_iter()
+			.map(|x| map.get(&mut slv, &x.into()))
+			.collect();
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
@@ -505,7 +511,10 @@ mod tests {
 
 		m += BoolExpr::Xor(b.iter().cloned().map_into().collect());
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
-		let vars: Vec<_> = b.into_iter().map(|x| map.get(&slv, &x.into())).collect();
+		let vars: Vec<_> = b
+			.into_iter()
+			.map(|x| map.get(&mut slv, &x.into()))
+			.collect();
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
@@ -537,7 +546,10 @@ mod tests {
 			BoolExpr::Equiv(vec![b[1].clone().into(), b[2].clone().into()]),
 		]);
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
-		let vars: Vec<_> = b.into_iter().map(|x| map.get(&slv, &x.into())).collect();
+		let vars: Vec<_> = b
+			.into_iter()
+			.map(|x| map.get(&mut slv, &x.into()))
+			.collect();
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
@@ -559,7 +571,10 @@ mod tests {
 			BoolExpr::And(vec![b[1].clone().into(), b[2].clone().into()]),
 		]);
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
-		let vars: Vec<_> = b.into_iter().map(|x| map.get(&slv, &x.into())).collect();
+		let vars: Vec<_> = b
+			.into_iter()
+			.map(|x| map.get(&mut slv, &x.into()))
+			.collect();
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
@@ -581,7 +596,10 @@ mod tests {
 			BoolExpr::Or(vec![b[1].clone().into(), b[2].clone().into()]),
 		]);
 		let (mut slv, map): (Solver, _) = m.to_solver().unwrap();
-		let vars: Vec<_> = b.into_iter().map(|x| map.get(&slv, &x.into())).collect();
+		let vars: Vec<_> = b
+			.into_iter()
+			.map(|x| map.get(&mut slv, &x.into()))
+			.collect();
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"

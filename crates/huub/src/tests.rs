@@ -13,8 +13,8 @@ fn it_works() {
 	prb += BoolExpr::Or(vec![a.clone().into(), b.clone().into()]);
 
 	let (mut slv, map): (Solver, _) = prb.to_solver().unwrap();
-	let a = map.get_bool(&slv, &a);
-	let b = map.get_bool(&slv, &b);
+	let a = map.get_bool(&mut slv, &a);
+	let b = map.get_bool(&mut slv, &b);
 
 	assert_eq!(
 		slv.solve(|value| {

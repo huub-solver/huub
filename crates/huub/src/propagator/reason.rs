@@ -69,9 +69,7 @@ impl Reason {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum ReasonBuilder {
-	#[allow(dead_code)] // TODOs
 	Lazy(u64),
-	#[allow(dead_code)] // TODO
 	Eager(Conjunction<BoolView>),
 	Simple(BoolView),
 }
