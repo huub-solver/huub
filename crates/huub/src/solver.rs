@@ -162,7 +162,7 @@ where
 							_ => None,
 						})
 						.collect();
-					if self.oracle.add_clause(nogood).is_err() {
+					if nogood.is_empty() || self.oracle.add_clause(nogood).is_err() {
 						return SolveResult::Complete;
 					}
 				}
