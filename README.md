@@ -35,7 +35,7 @@ The following file can serve as a template for the solver configuration file for
 {
   "name": "Huub",
   "version": "0.1.0",
-  "id": "one.dekker.huub",
+  "id": "solutions.huub",
   "inputType": "JSON",
   "executable": "PATH_TO_HUUB_EXECUTABLE",
   "mznlib": "PATH_TO_HUUB_MZNLIB",
