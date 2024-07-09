@@ -8,7 +8,7 @@ use pindakaas::{
 use rangelist::RangeList;
 
 use crate::{
-	actions::explanation::ExplanationActions,
+	actions::{explanation::ExplanationActions, inspection::InspectionActions},
 	helpers::{div_ceil, div_floor},
 	model::{
 		bool::BoolView,
@@ -19,6 +19,7 @@ use crate::{
 		all_different_int::AllDifferentIntValue,
 		array_int_minimum::ArrayIntMinimumBounds,
 		array_var_int_element::ArrayVarIntElementBounds,
+		disjunctive::DisjunctiveEdgeFinding,
 		int_lin_le::{IntLinearLessEqBounds, IntLinearLessEqImpBounds},
 		int_lin_ne::{IntLinearNotEqImpValue, IntLinearNotEqValue},
 		int_pow::IntPowBounds,
@@ -34,6 +35,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Constraint {
 	AllDifferentInt(Vec<IntView>),
+	Disjunctive(Vec<IntView>, Vec<IntVal>),
 	ArrayIntElement(Vec<IntVal>, IntView, IntView),
 	ArrayIntMaximum(Vec<IntView>, IntView),
 	ArrayIntMinimum(Vec<IntView>, IntView),
@@ -71,6 +73,41 @@ impl Constraint {
 					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
 					.collect();
 				slv.add_propagator(AllDifferentIntValue::prepare(vars));
+				Ok(())
+			}
+			Constraint::Disjunctive(v, d) => {
+				let vars: Vec<_> = v
+					.iter()
+					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
+					.collect();
+				let durs = d
+					.iter()
+					.map(|d| {
+						assert!(
+							*d >= 0,
+							"duration of tasks in disjunctive constraint must be non-negative"
+						);
+						*d
+					})
+					.collect_vec();
+				// Add propagator for lower bound propagation
+				slv.add_propagator(DisjunctiveEdgeFinding::prepare(vars.clone(), durs.clone()));
+
+				// Add symmetric propagator for upper bound propagation
+				let horizon = vars
+					.iter()
+					.zip(durs.iter())
+					.map(|(v, d)| slv.engine().state.get_int_upper_bound(*v) + d)
+					.max()
+					.unwrap();
+				let symmetric_vars = vars
+					.iter()
+					.zip(durs.iter())
+					.map(|(v, d)| -*v + (horizon - d));
+				slv.add_propagator(DisjunctiveEdgeFinding::prepare(
+					symmetric_vars,
+					durs.clone(),
+				));
 				Ok(())
 			}
 			Constraint::ArrayIntElement(arr, idx, y) => {
@@ -391,6 +428,31 @@ impl Model {
 					self.diff_int_domain(v, &neg_dom, con)?
 				}
 				Some(Constraint::AllDifferentInt(vars))
+			}
+			Constraint::Disjunctive(starts, durations) => {
+				// return trivialunsatisfiable if overload is detected
+				let (earliest_start, latest_completion) =
+					starts.iter().zip(durations.clone()).fold(
+						(IntVal::MAX, IntVal::MIN),
+						|(earliest_start, latest_completion), (start, duration)| {
+							(
+								i64::min(
+									earliest_start.min(self.get_int_lower_bound(start)),
+									earliest_start,
+								),
+								i64::max(
+									latest_completion
+										.max(self.get_int_upper_bound(start) + duration),
+									latest_completion,
+								),
+							)
+						},
+					);
+				let total_duration = durations.iter().sum::<IntVal>();
+				if earliest_start + total_duration > latest_completion {
+					return Err(ReformulationError::TrivialUnsatisfiable);
+				}
+				Some(Constraint::Disjunctive(starts, durations))
 			}
 			Constraint::ArrayIntMaximum(args, m) => {
 				let max_lb = args

@@ -536,6 +536,25 @@ impl Model {
 						});
 					}
 				}
+				"huub_disjunctive_strict" => {
+					if let [starts, durations] = c.args.as_slice() {
+						let starts = arg_array(fzn, starts)?
+							.iter()
+							.map(|l| lit_int(fzn, &mut prb, &mut map, l))
+							.try_collect()?;
+						let durations = arg_array(fzn, durations)?
+							.iter()
+							.map(|l| par_int(fzn, l))
+							.try_collect()?;
+						prb += Constraint::Disjunctive(starts, durations);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "huub_disjunctive_strict",
+							found: c.args.len(),
+							expected: 2,
+						});
+					}
+				}
 				"huub_array_int_maximum" | "huub_array_int_minimum" => {
 					let is_maximum = c.id.deref() == "huub_array_int_maximum";
 					if let [m, args] = c.args.as_slice() {

@@ -2,6 +2,7 @@ pub(crate) mod all_different_int;
 pub(crate) mod array_int_minimum;
 pub(crate) mod array_var_int_element;
 pub(crate) mod conflict;
+pub(crate) mod disjunctive;
 pub(crate) mod int_event;
 pub(crate) mod int_lin_le;
 pub(crate) mod int_lin_ne;
