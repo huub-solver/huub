@@ -18,7 +18,7 @@ itertools = "0.13.0"
 pindakaas = { git = "https://github.com/pindakaashq/pindakaas.git", features = [
   "ipasir-up",
 ] }
-thiserror = "1.0.59"
+thiserror = "1.0.62"
 tracing = "0.1.40"
 
 [dev-dependencies]
