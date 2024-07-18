@@ -1,7 +1,7 @@
 name: Check Format
 
 on:
-  push:
+  pull_request:
     branches-ignore: ["dependabot/**"]
 
 env:
