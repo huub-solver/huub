@@ -12,13 +12,13 @@ repository.workspace = true
 
 [dependencies]
 delegate = "0.12"
-flatzinc-serde = "0.3"
+flatzinc-serde = { git = "https://github.com/shackle-rs/shackle/" }
 index_vec = "0.1.3"
 itertools = "0.13.0"
 pindakaas = { git = "https://github.com/pindakaashq/pindakaas.git", features = [
   "ipasir-up",
 ] }
-rangelist = { git = "https://github.com/shackle-rs/shackle/", version = "0.1" }
+rangelist = { git = "https://github.com/shackle-rs/shackle/" }
 thiserror = "1.0.63"
 tracing = "0.1.40"
 

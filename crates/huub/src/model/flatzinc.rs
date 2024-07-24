@@ -1,18 +1,19 @@
-use std::{collections::BTreeMap, fmt::Debug, ops::Deref};
+use std::{cell::RefCell, collections::BTreeMap, fmt::Debug, ops::Deref, rc::Rc};
 
-use flatzinc_serde::{Argument, Domain, FlatZinc, Literal, RangeList, Type, Variable};
+use flatzinc_serde::{Argument, Domain, FlatZinc, Literal, Type, Variable};
 use itertools::Itertools;
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
 	Valuation as SatValuation,
 };
+use rangelist::{IntervalIter, RangeList};
 use thiserror::Error;
 
 use super::bool::BoolView;
 use crate::{
-	model::{bool::BoolExpr, int::IntView, reformulate::ReformulationError, ModelView},
+	model::{int::IntView, reformulate::ReformulationError, ModelView},
 	solver::SatSolver,
-	Constraint, InitConfig, IntSetVal, IntVal, Model, NonZeroIntVal, Solver, SolverView,
+	BoolExpr, Constraint, InitConfig, IntSetVal, IntVal, Model, NonZeroIntVal, Solver, SolverView,
 };
 
 impl Model {
@@ -22,111 +23,247 @@ impl Model {
 		let mut map = BTreeMap::<S, ModelView>::new();
 		let mut prb = Model::default();
 
-		// Extract views from `defines_var` constraints
-		let processed = fzn
-			.constraints
-			.iter()
-			.map(|c| {
-				match (c.id.deref(), c.defines.as_ref()) {
-					("bool2int", Some(l)) => {
-						if let [b, Argument::Literal(Literal::Identifier(x))] = c.args.as_slice() {
-							if x == l {
-								let b = arg_bool(fzn, &mut prb, &mut map, b)?;
-								let _ = map.insert(l.clone(), IntView::from(b).into());
-								return Ok(true);
-							}
+		// Unify variables (e.g., from `bool_eq` and `int_eq` constraints)
+		let mut processed = vec![false; fzn.constraints.len()];
+		let mut unify_map = BTreeMap::<S, Rc<RefCell<Vec<Literal<S>>>>>::new();
+		let unify_map_find = |map: &BTreeMap<S, Rc<RefCell<Vec<Literal<S>>>>>, a: &Literal<S>| {
+			if let Literal::Identifier(x) = a {
+				map.get(x).map(Rc::clone)
+			} else {
+				None
+			}
+		};
+		let record_unify = |map: &mut BTreeMap<S, Rc<RefCell<Vec<Literal<S>>>>>, a, b| {
+			let a_set = unify_map_find(map, a);
+			let b_set = unify_map_find(map, b);
+			match (a_set, b_set) {
+				(Some(a_set), Some(b_set)) => {
+					let mut members = (*a_set).borrow_mut();
+					members.extend(b_set.take());
+					for b in members.iter() {
+						if let Literal::Identifier(b) = b {
+							let _ = map.insert(b.clone(), Rc::clone(&a_set));
 						}
 					}
-					("bool_not", Some(l)) => match c.args.as_slice() {
-						[Argument::Literal(Literal::Identifier(x)), b]
-						| [b, Argument::Literal(Literal::Identifier(x))]
-							if x == l =>
-						{
-							let b = arg_bool(fzn, &mut prb, &mut map, b)?;
-							let _ = map.insert(l.clone(), (!b).into());
-							return Ok(true);
-						}
-						_ => {}
-					},
-					("int_eq_reif", Some(l)) => match c.args.as_slice() {
-						[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))] |
-						[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
-							if r == l =>
-						{
-							let x = lit_int(fzn, &mut prb, &mut map, x)?;
-							let _ = map.insert(l.clone(), BoolView::IntEq(Box::new(x), *i).into());
-							return Ok(true);
-						}
-						_ => {}
-					},
-					("int_le_reif", Some(l)) => match c.args.as_slice() {
-						[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
-							if r == l =>
-						{
-							let x = lit_int(fzn, &mut prb, &mut map, x)?;
-							let _ = map.insert(l.clone(), BoolView::IntLessEq(Box::new(x), *i).into());
-							return Ok(true);
-						}
-						[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
-								if r == l =>
-							{
-								let x = lit_int(fzn, &mut prb, &mut map, x)?;
-								let _ = map.insert(l.clone(), BoolView::IntGreater(Box::new(x), *i).into());
-								return Ok(true);
+				}
+				(Some(a_set), None) => {
+					let mut members = (*a_set).borrow_mut();
+					members.push(b.clone());
+					if let Literal::Identifier(b) = b {
+						let _ = map.insert(b.clone(), Rc::clone(&a_set));
+					}
+				}
+				(None, Some(b_set)) => {
+					let mut members = (*b_set).borrow_mut();
+					members.push(a.clone());
+					if let Literal::Identifier(a) = a {
+						let _ = map.insert(a.clone(), Rc::clone(&b_set));
+					}
+				}
+				(None, None) => {
+					let n_set = Rc::new(RefCell::new(vec![a.clone(), b.clone()]));
+					if let Literal::Identifier(a) = a {
+						let _ = map.insert(a.clone(), Rc::clone(&n_set));
+					}
+					if let Literal::Identifier(b) = b {
+						let _ = map.insert(b.clone(), n_set);
+					}
+				}
+			};
+		};
+		for (i, c) in fzn.constraints.iter().enumerate() {
+			let mut mark_processed = || processed[i] = true;
+			match c.id.deref() {
+				"bool_eq" => {
+					if let [Argument::Literal(a), Argument::Literal(b)] = c.args.as_slice() {
+						record_unify(&mut unify_map, a, b);
+						mark_processed();
+					}
+				}
+				"int_eq" => {
+					if let [Argument::Literal(a), Argument::Literal(b)] = c.args.as_slice() {
+						record_unify(&mut unify_map, a, b);
+						mark_processed();
+					}
+				}
+				_ => {}
+			}
+		}
+		for (k, li) in unify_map {
+			if map.contains_key(&k) {
+				continue;
+			}
+			let ty = &fzn.variables[&k].ty;
+			let li = li.borrow();
+			let var = match ty {
+				Type::Bool => {
+					let mut domain = None;
+					for lit in li.iter() {
+						match lit {
+							Literal::Bool(b) => {
+								if domain == Some(!b) {
+									return Err(ReformulationError::TrivialUnsatisfiable.into());
+								} else {
+									domain = Some(*b);
+								}
 							}
-						_ => {}
-					},
-					("int_ne_reif", Some(l)) => match c.args.as_slice() {
-						[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))] |
-						[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
-							if r == l =>
-						{
-							let x = lit_int(fzn, &mut prb, &mut map, x)?;
-							let _ = map.insert(l.clone(), BoolView::IntNotEq(Box::new(x), *i).into());
-							return Ok(true);
-						}
-						_ => {}
-					},
-					("int_lin_eq", Some(l))
-						if c.args
-							.get(1)
-							.map(|v| arg_has_length(fzn, v, 2))
-							.unwrap_or(false) =>
-					{
-						let [coeff, vars, sum] = c.args.as_slice() else {
-							return Ok(false);
+							Literal::Identifier(_) => {}
+							_ => unreachable!(),
 						};
-						let coeff = arg_array(fzn, coeff)?;
-						let vars = arg_array(fzn, vars)?;
-						let (c, (cy, vy)) = match vars.as_slice() {
-							[Literal::Identifier(v), y] if v == l => {
-								(par_int(fzn, &coeff[0])?, (par_int(fzn, &coeff[1])?, y))
+					}
+					match domain {
+						Some(b) => ModelView::Bool(BoolView::Const(b)),
+						None => ModelView::Bool(prb.new_bool_var()),
+					}
+				}
+				Type::Int => {
+					let mut domain = None::<RangeList<IntVal>>;
+					for lit in li.iter() {
+						match lit {
+							Literal::Int(i) => {
+								let rl = (*i..=*i).into();
+								if let Some(dom) = domain {
+									domain = Some(dom.intersect(&rl));
+								} else {
+									domain = Some(rl);
+								}
 							}
-							[y, Literal::Identifier(v)] if v == l => {
-								(par_int(fzn, &coeff[1])?, (par_int(fzn, &coeff[0])?, y))
+							Literal::Identifier(id) => {
+								if let Some(Domain::Int(d)) = &fzn.variables[id].domain {
+									if let Some(dom) = domain {
+										domain = Some(dom.intersect(d));
+									} else {
+										domain = Some(d.clone());
+									}
+								}
 							}
-							_ => return Ok(false),
+							_ => unreachable!(),
 						};
-						let sum = arg_par_int(fzn, sum)?;
-						// c * l + cy * y = sum === l = (sum - cy * y) / c
-						if cy % c != 0 || sum % c != 0 {
-							return Ok(false);
-						}
-						let offset = sum / c;
-						let view = if let Some(scale) = NonZeroIntVal::new(-cy / c) {
-							let y = lit_int(fzn, &mut prb, &mut map, vy)?;
-							y * scale + offset
+					}
+					if let Some(domain) = domain {
+						if domain.is_empty() {
+							return Err(ReformulationError::TrivialUnsatisfiable.into());
+						} else if domain.card() == 1 {
+							ModelView::Int(IntView::Const(*domain.lower_bound().unwrap()))
 						} else {
-							IntView::Const(offset)
-						};
-						let _ = map.insert(l.clone(), view.into());
-						return Ok(true);
+							ModelView::Int(prb.new_int_var(domain))
+						}
+					} else {
+						todo!("Variables without a domain are not yet supported")
+					}
+				}
+				_ => unreachable!(),
+			};
+			for lit in li.iter() {
+				if let Literal::Identifier(id) = lit {
+					let x = map.insert(id.clone(), var.clone());
+					debug_assert!(x.is_none());
+				}
+			}
+		}
+
+		// Extract views from `defines_var` constraints
+		for (i, c) in fzn.constraints.iter().enumerate() {
+			let mut mark_processed = || processed[i] = true;
+
+			match (c.id.deref(), c.defines.as_ref()) {
+				("bool2int", Some(l)) => {
+					if let [b, Argument::Literal(Literal::Identifier(x))] = c.args.as_slice() {
+						if x == l {
+							let b = arg_bool(fzn, &mut prb, &mut map, b)?;
+							let _ = map.insert(l.clone(), IntView::from(b).into());
+							mark_processed();
+						}
+					}
+				}
+				("bool_not", Some(l)) => match c.args.as_slice() {
+					[Argument::Literal(Literal::Identifier(x)), b]
+					| [b, Argument::Literal(Literal::Identifier(x))]
+						if x == l =>
+					{
+						let b = arg_bool(fzn, &mut prb, &mut map, b)?;
+						let _ = map.insert(l.clone(), (!b).into());
+						mark_processed();
 					}
 					_ => {}
+				},
+				("int_eq_reif", Some(l)) => match c.args.as_slice() {
+					[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
+					| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
+						if r == l =>
+					{
+						let x = lit_int(fzn, &mut prb, &mut map, x)?;
+						let _ = map.insert(l.clone(), BoolView::IntEq(Box::new(x), *i).into());
+						mark_processed();
+					}
+					_ => {}
+				},
+				("int_le_reif", Some(l)) => match c.args.as_slice() {
+					[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
+						if r == l =>
+					{
+						let x = lit_int(fzn, &mut prb, &mut map, x)?;
+						let _ = map.insert(l.clone(), BoolView::IntLessEq(Box::new(x), *i).into());
+						mark_processed();
+					}
+					[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
+						if r == l =>
+					{
+						let x = lit_int(fzn, &mut prb, &mut map, x)?;
+						let _ = map.insert(l.clone(), BoolView::IntGreater(Box::new(x), *i).into());
+						mark_processed();
+					}
+					_ => {}
+				},
+				("int_ne_reif", Some(l)) => match c.args.as_slice() {
+					[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
+					| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
+						if r == l =>
+					{
+						let x = lit_int(fzn, &mut prb, &mut map, x)?;
+						let _ = map.insert(l.clone(), BoolView::IntNotEq(Box::new(x), *i).into());
+						mark_processed();
+					}
+					_ => {}
+				},
+				("int_lin_eq", Some(l))
+					if c.args
+						.get(1)
+						.map(|v| arg_has_length(fzn, v, 2))
+						.unwrap_or(false) =>
+				'int_lin_eq: {
+					let [coeff, vars, sum] = c.args.as_slice() else {
+						break 'int_lin_eq;
+					};
+					let coeff = arg_array(fzn, coeff)?;
+					let vars = arg_array(fzn, vars)?;
+					let (c, (cy, vy)) = match vars.as_slice() {
+						[Literal::Identifier(v), y] if v == l => {
+							(par_int(fzn, &coeff[0])?, (par_int(fzn, &coeff[1])?, y))
+						}
+						[y, Literal::Identifier(v)] if v == l => {
+							(par_int(fzn, &coeff[1])?, (par_int(fzn, &coeff[0])?, y))
+						}
+						_ => break 'int_lin_eq,
+					};
+					let sum = arg_par_int(fzn, sum)?;
+					// c * l + cy * y = sum === l = (sum - cy * y) / c
+					if cy % c != 0 || sum % c != 0 {
+						break 'int_lin_eq;
+					}
+					let offset = sum / c;
+					let view = if let Some(scale) = NonZeroIntVal::new(-cy / c) {
+						let y = lit_int(fzn, &mut prb, &mut map, vy)?;
+						y * scale + offset
+					} else {
+						IntView::Const(offset)
+					};
+					let _ = map.insert(l.clone(), view.into());
+					mark_processed();
 				}
-				Ok(false)
-			})
-			.collect::<Result<Vec<_>, FlatZincError>>()?;
+				_ => {}
+			}
+		}
 
 		// Traditional relational constraints
 		for (i, c) in fzn.constraints.iter().enumerate() {
@@ -443,6 +580,19 @@ impl Model {
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "int_le",
+							found: c.args.len(),
+							expected: 2,
+						});
+					}
+				}
+				"int_ne" => {
+					if let [a, b] = c.args.as_slice() {
+						let a = arg_int(fzn, &mut prb, &mut map, a)?;
+						let b = arg_int(fzn, &mut prb, &mut map, b)?;
+						prb += Constraint::IntLinNotEq(vec![a, -b], 0);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "int_ne",
 							found: c.args.len(),
 							expected: 2,
 						});

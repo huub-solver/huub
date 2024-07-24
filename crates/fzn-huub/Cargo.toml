@@ -12,7 +12,7 @@ repository.workspace = true
 
 [dependencies]
 ctrlc = "3.4.4"
-flatzinc-serde = "0.3"
+flatzinc-serde = { git = "https://github.com/shackle-rs/shackle/" }
 humantime = "2.1.0"
 huub = { path = "../huub" }
 pico-args = { version = "0.5.0", features = ["combined-flags"] }

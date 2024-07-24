@@ -227,10 +227,10 @@ dependencies = [
 
 [[package]]
 name = "flatzinc-serde"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef8eb90ee2a7128d99b67edd2e8a93c453f8c21b4792e35a83fc0afa5c3eefaa"
+version = "0.4.0"
+source = "git+https://github.com/shackle-rs/shackle/#2c22a77d8339d052bfbb8cfcc3cf2c04ebd31747"
 dependencies = [
+ "rangelist",
  "serde",
 ]
 
