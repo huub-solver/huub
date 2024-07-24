@@ -17,8 +17,8 @@ use std::{
 
 use flatzinc_serde::{FlatZinc, Literal, Method};
 use huub::{
-	FlatZincError, Goal, LitMeaning, ReformulationError, SlvTermSignal, SolveResult, Solver,
-	SolverView, Valuation,
+	FlatZincError, Goal, InitConfig, LitMeaning, ReformulationError, SlvTermSignal, SolveResult,
+	Solver, SolverView, Valuation,
 };
 use pico_args::Arguments;
 use tracing::{subscriber::set_global_default, warn};
@@ -41,6 +41,10 @@ FLAGS
   -v, --verbose                   Display addtional information about actions taken by the solver.
 	                                Can be used multiple times to increase verbosity.
                                   (0: INFO, 1: DEBUG, 2: TRACE)
+
+  --int-eager-limit               Set the maximum cardinality for which all order literals to
+                                  represent an integer variable are created eagerly.
+																	(default: 255)
 
 DESCRIPTION
   Create a Huub Solver instance tailored to a given FlatZinc JSON input file and solve the problem.
@@ -86,6 +90,9 @@ struct Cli {
 	time_limit: Option<Duration>,
 	/// Level of verbosity
 	verbose: u8,
+
+	/// Solver configuration
+	int_eager_limit: Option<usize>,
 }
 
 /// Solution struct to display the results of the solver
@@ -161,7 +168,7 @@ impl Cli {
 		})?;
 
 		// Convert FlatZinc model to internal Solver representation
-		let res = Solver::from_fzn(&fzn);
+		let res = Solver::from_fzn(&fzn, &self.init_config());
 		// Resolve any errors that may have occurred during the conversion
 		let (mut slv, var_map): (Solver, UstrMap<SolverView>) = match res {
 			Err(FlatZincError::ReformulationError(ReformulationError::TrivialUnsatisfiable)) => {
@@ -385,6 +392,14 @@ impl Cli {
 		}
 		Ok(())
 	}
+
+	fn init_config(&self) -> InitConfig {
+		let mut config = InitConfig::default();
+		if let Some(eager_limit) = self.int_eager_limit {
+			config = config.with_int_eager_limit(eager_limit);
+		}
+		config
+	}
 }
 
 impl TryFrom<Arguments> for Cli {
@@ -401,6 +416,9 @@ impl TryFrom<Arguments> for Cli {
 			statistics: args.contains(["-s", "--statistics"]),
 			time_limit: args
 				.opt_value_from_fn(["-t", "--time-limit"], parse_time_limit)
+				.map_err(|e| e.to_string())?,
+			int_eager_limit: args
+				.opt_value_from_str("--int-eager-limit")
 				.map_err(|e| e.to_string())?,
 			verbose,
 			path: args

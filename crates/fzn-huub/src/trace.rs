@@ -330,10 +330,6 @@ impl<S: Subscriber> Layer<S> for RegisterLazyLits {
 	fn event_enabled(&self, event: &Event<'_>, _: Context<'_, S>) -> bool {
 		let mut rec = RecordLazyLits::default();
 		event.record(&mut rec);
-		if rec.finish(&self.lit_reverse_map) {
-			false
-		} else {
-			true
-		}
+		!rec.finish(&self.lit_reverse_map)
 	}
 }

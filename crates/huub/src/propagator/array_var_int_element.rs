@@ -227,8 +227,8 @@ impl Poster for ArrayVarIntElementBoundsPoster {
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use flatzinc_serde::RangeList;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
+	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
 	use crate::{
@@ -305,7 +305,7 @@ mod tests {
 		let y = prb.new_int_var((1..=2).into());
 		let idx = prb.new_int_var((0..=2).into());
 
-		prb += Constraint::ArrayVarIntElement(vec![a, b, c], y, idx);
+		prb += Constraint::ArrayVarIntElement(vec![a, b, c], idx, y);
 		prb.assert_unsatisfiable();
 	}
 }

@@ -49,7 +49,7 @@ impl<'a> PropagationContext<'a> {
 			self.current_prop = PropRef::new(u32::MAX as usize);
 			if let Err(Conflict { subject, reason }) = res {
 				self.state.conflict = true;
-				let mut clause: Clause = reason.to_clause(propagators, &mut self.state);
+				let mut clause: Clause = reason.to_clause(propagators, self.state);
 				if let Some(subject) = subject {
 					clause.push(subject);
 				}

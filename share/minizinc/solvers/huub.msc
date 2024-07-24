@@ -7,5 +7,7 @@
   "executable": "../../../fzn-huub",
   "mznlib": "../huub",
   "stdFlags": ["-a", "-i", "-s", "-t", "-v"],
-  "extraFlags": []
+  "extraFlags": [
+  	["--int-eager-limit", "Set the maximum cardinality for which all order literals to represent an integer variable are created eagerly", "int", 255]
+  ]
 }

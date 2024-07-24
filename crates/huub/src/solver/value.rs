@@ -1,7 +1,7 @@
 use std::{fmt::Display, num::NonZeroI64};
 
-use flatzinc_serde::RangeList;
 use pindakaas::solver::FailedAssumtions;
+use rangelist::RangeList;
 
 use crate::{
 	solver::{view::BoolViewInner, SolverView},

@@ -98,9 +98,9 @@ impl Poster for AllDifferentIntValuePoster {
 
 #[cfg(test)]
 mod tests {
-	use flatzinc_serde::RangeList;
 	use itertools::Itertools;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
+	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
 	use crate::{

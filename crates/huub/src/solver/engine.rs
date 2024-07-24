@@ -228,7 +228,7 @@ impl IpasirPropagator for Engine {
 		let mut ctx = PropagationContext::new(slv, &mut self.state);
 
 		// Calculate values of each integer and notify popgators
-		for r in (0..ctx.state.int_vars.len()).map(|i| IntVarRef::new(i)) {
+		for r in (0..ctx.state.int_vars.len()).map(IntVarRef::new) {
 			let (lb, ub) = ctx.state.int_vars[r].get_bounds(&ctx.state.trail);
 			if lb != ub {
 				let val = ctx.state.int_vars[r].get_value(model);
@@ -292,9 +292,9 @@ impl ChangeLog {
 	fn add_clause(&mut self, clause: impl IntoIterator<Item = RawLit>) {
 		let len = self.lits.len();
 		self.lits.extend(clause);
-		if self.lits.len() > 0 {
-			self.ty
-				.push_back(ChangeType::AddClause(self.lits.len() - len));
+		let len = self.lits.len() - len;
+		if len > 0 {
+			self.ty.push_back(ChangeType::AddClause(len));
 		}
 	}
 

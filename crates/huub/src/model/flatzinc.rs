@@ -12,7 +12,7 @@ use super::bool::BoolView;
 use crate::{
 	model::{bool::BoolExpr, int::IntView, reformulate::ReformulationError, ModelView},
 	solver::SatSolver,
-	Constraint, IntSetVal, IntVal, Model, NonZeroIntVal, Solver, SolverView,
+	Constraint, InitConfig, IntSetVal, IntVal, Model, NonZeroIntVal, Solver, SolverView,
 };
 
 impl Model {
@@ -195,7 +195,7 @@ impl Model {
 						}
 						let s = RangeList::from_iter(ranges);
 
-						prb += Constraint::SetInReif(idx, s, val.into());
+						prb += Constraint::SetInReif(idx, s.iter().collect(), val.into());
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_bool_element",
@@ -674,9 +674,10 @@ where
 {
 	pub fn from_fzn<S: Ord + Deref<Target = str> + Clone + Debug>(
 		fzn: &FlatZinc<S>,
+		config: &InitConfig,
 	) -> Result<(Self, BTreeMap<S, SolverView>), FlatZincError> {
 		let (mut prb, map) = Model::from_fzn(fzn)?;
-		let (mut slv, remap) = prb.to_solver()?;
+		let (mut slv, remap) = prb.to_solver(config)?;
 		let map = map
 			.into_iter()
 			.map(|(k, v)| (k, remap.get(&mut slv, &v)))
@@ -730,7 +731,7 @@ fn new_var<S: Ord + Deref<Target = str> + Clone + Debug>(
 	match var.ty {
 		Type::Bool => ModelView::Bool(prb.new_bool_var()),
 		Type::Int => match &var.domain {
-			Some(Domain::Int(r)) => ModelView::Int(prb.new_int_var(r.clone())),
+			Some(Domain::Int(r)) => ModelView::Int(prb.new_int_var(r.iter().collect())),
 			Some(_) => unreachable!(),
 			None => todo!("Variables without a domain are not yet supported"),
 		},
@@ -915,7 +916,7 @@ fn par_set<S: Ord + Deref<Target = str> + Clone + Debug>(
 				Err(FlatZincError::UnknownIdentifier(ident.to_string()))
 			}
 		}
-		Literal::IntSet(v) => Ok(v.clone()),
+		Literal::IntSet(v) => Ok(v.iter().collect()),
 		_ => todo!(),
 	}
 }

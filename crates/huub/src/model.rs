@@ -4,20 +4,24 @@ pub(crate) mod flatzinc;
 pub(crate) mod int;
 pub(crate) mod reformulate;
 
-use std::{collections::VecDeque, iter::repeat, ops::AddAssign};
+use std::{
+	collections::{HashSet, VecDeque},
+	iter::repeat,
+	ops::AddAssign,
+};
 
-use flatzinc_serde::RangeList;
 use pindakaas::{
 	solver::{NextVarRange, PropagatorAccess, Solver as SolverTrait},
 	ClauseDatabase, Cnf, ConditionalDatabase, Lit as RawLit, Valuation as SatValuation,
 	Var as RawVar,
 };
+use rangelist::{IntervalIter, RangeList};
 
 use crate::{
 	model::{
 		bool::{BoolExpr, BoolView},
 		int::{IntVar, IntVarDef, IntView},
-		reformulate::{ReformulationError, VariableMap},
+		reformulate::{InitConfig, ReformulationError, VariableMap},
 	},
 	solver::{
 		engine::int_var::{EncodingType, IntVar as SlvIntVar},
@@ -66,6 +70,7 @@ impl Model {
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 	>(
 		&mut self,
+		config: &InitConfig,
 	) -> Result<(Solver<Sat>, VariableMap), ReformulationError> {
 		let mut map = VariableMap::default();
 
@@ -77,18 +82,50 @@ impl Model {
 			self.enqueued[con] = false;
 		}
 
-		// TODO: Find Views
-		// TODO: Analyse/Choose Integer encodings
+		// TODO: Detect Views From Model
+
+		// Determine encoding types for integer variables
+		let eager_order = HashSet::<IntVar>::new();
+		let mut eager_direct = HashSet::<IntVar>::new();
+
+		for c in &self.constraints {
+			match c {
+				Constraint::AllDifferentInt(vars) => {
+					for v in vars {
+						if let IntView::Var(iv) | IntView::Linear(_, iv) = v {
+							if self.int_vars[iv.0 as usize].domain.card() <= (vars.len() * 100 / 80)
+							{
+								let _ = eager_direct.insert(*iv);
+							}
+						}
+					}
+				}
+				Constraint::ArrayVarIntElement(_, idx, _) => {
+					if let IntView::Var(iv) | IntView::Linear(_, iv) = idx {
+						let _ = eager_direct.insert(*iv);
+					}
+				}
+				_ => {}
+			}
+		}
 
 		// Create integer data structures within the solver
 		for i in 0..self.int_vars.len() {
 			let var = &self.int_vars[i];
-			let view = SlvIntVar::new_in(
-				&mut slv,
-				var.domain.clone(),
-				EncodingType::Eager,
-				EncodingType::Eager,
-			); // TODO!
+			let direct_enc = if eager_direct.contains(&IntVar(i as u32)) {
+				EncodingType::Eager
+			} else {
+				EncodingType::Lazy
+			};
+			let order_enc = if eager_order.contains(&IntVar(i as u32))
+				|| eager_direct.contains(&IntVar(i as u32))
+				|| var.domain.card() <= config.int_eager_limit()
+			{
+				EncodingType::Eager
+			} else {
+				EncodingType::Lazy
+			};
+			let view = SlvIntVar::new_in(&mut slv, var.domain.clone(), order_enc, direct_enc);
 			map.insert_int(IntVar(i as u32), view);
 		}
 

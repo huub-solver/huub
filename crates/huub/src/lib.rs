@@ -8,8 +8,11 @@ pub(crate) mod tests;
 
 pub use helpers::linear_transform::LinearTransform;
 pub use model::{
-	bool::BoolExpr, constraint::Constraint, flatzinc::FlatZincError,
-	reformulate::ReformulationError, Model,
+	bool::BoolExpr,
+	constraint::Constraint,
+	flatzinc::FlatZincError,
+	reformulate::{InitConfig, ReformulationError},
+	Model,
 };
 pub use pindakaas::solver::SlvTermSignal;
 use pindakaas::Lit as RawLit;

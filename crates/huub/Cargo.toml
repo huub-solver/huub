@@ -18,7 +18,8 @@ itertools = "0.13.0"
 pindakaas = { git = "https://github.com/pindakaashq/pindakaas.git", features = [
   "ipasir-up",
 ] }
-thiserror = "1.0.62"
+rangelist = { git = "https://github.com/shackle-rs/shackle/", version = "0.1" }
+thiserror = "1.0.63"
 tracing = "0.1.40"
 
 [dev-dependencies]

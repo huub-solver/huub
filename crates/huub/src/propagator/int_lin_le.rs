@@ -201,14 +201,14 @@ impl<const R: usize> Poster for IntLinearLessEqBoundsPoster<R> {
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use flatzinc_serde::RangeList;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
+	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
 	use crate::{
 		propagator::int_lin_le::IntLinearLessEqBounds,
 		solver::engine::int_var::{EncodingType, IntVar},
-		Constraint, Model, NonZeroIntVal, Solver,
+		Constraint, InitConfig, Model, NonZeroIntVal, Solver,
 	};
 
 	#[test]
@@ -330,7 +330,7 @@ mod tests {
 			5,
 			r.clone().into(),
 		);
-		let (mut slv, map): (Solver, _) = prb.to_solver().unwrap();
+		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let a = map.get(&mut slv, &a.into());
 		let b = map.get(&mut slv, &b.into());
 		let c = map.get(&mut slv, &c.into());
@@ -370,7 +370,7 @@ mod tests {
 			-7,
 			r.clone().into(),
 		);
-		let (mut slv, map): (Solver, _) = prb.to_solver().unwrap();
+		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let a = map.get(&mut slv, &a.into());
 		let b = map.get(&mut slv, &b.into());
 		let c = map.get(&mut slv, &c.into());

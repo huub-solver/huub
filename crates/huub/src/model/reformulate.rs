@@ -16,12 +16,74 @@ use crate::{
 	IntVal, IntView, LitMeaning, Solver,
 };
 
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
+pub struct InitConfig {
+	/// The maximum cardinality of the domain of an integer variable before its order encoding is created lazily.
+	int_eager_limit: Option<usize>,
+}
+
+#[derive(Error, Debug, PartialEq, Eq)]
+pub enum ReformulationError {
+	#[error("The expression is trivially unsatisfiable")]
+	TrivialUnsatisfiable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ReifContext {
+	Pos,
+	Neg,
+	Mixed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Variable {
+	Bool(RawVar),
+	Int(IntVar),
+}
+
 /// A reformulation mapping helper that automatically maps variables to
 /// themselves unless otherwise specified
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct VariableMap {
 	// Note the "to" of the mapping will likely need to be appended
 	map: HashMap<Variable, SolverView>,
+}
+
+impl InitConfig {
+	/// The default maximum cardinality of the domain of an integer variable before its order encoding is created lazily.
+	pub const DEFAULT_INT_EAGER_LIMIT: usize = 255;
+
+	pub fn with_int_eager_limit(mut self, limit: usize) -> Self {
+		self.int_eager_limit = Some(limit);
+		self
+	}
+
+	pub fn int_eager_limit(&self) -> usize {
+		self.int_eager_limit
+			.unwrap_or(Self::DEFAULT_INT_EAGER_LIMIT)
+	}
+}
+
+impl Not for ReifContext {
+	type Output = Self;
+	fn not(self) -> Self::Output {
+		match self {
+			ReifContext::Pos => ReifContext::Neg,
+			ReifContext::Neg => ReifContext::Pos,
+			ReifContext::Mixed => ReifContext::Mixed,
+		}
+	}
+}
+
+impl From<RawVar> for Variable {
+	fn from(value: RawVar) -> Self {
+		Self::Bool(value)
+	}
+}
+impl From<IntVar> for Variable {
+	fn from(value: IntVar) -> Self {
+		Self::Int(value)
+	}
 }
 
 impl VariableMap {
@@ -110,45 +172,5 @@ impl VariableMap {
 	#[allow(dead_code)] // TODO
 	pub(crate) fn insert_bool(&mut self, index: RawVar, elem: BoolView) {
 		let _ = self.map.insert(index.into(), elem.into());
-	}
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum ReifContext {
-	Pos,
-	Neg,
-	Mixed,
-}
-
-impl Not for ReifContext {
-	type Output = Self;
-	fn not(self) -> Self::Output {
-		match self {
-			ReifContext::Pos => ReifContext::Neg,
-			ReifContext::Neg => ReifContext::Pos,
-			ReifContext::Mixed => ReifContext::Mixed,
-		}
-	}
-}
-
-#[derive(Error, Debug, PartialEq, Eq)]
-pub enum ReformulationError {
-	#[error("The expression is trivially unsatisfiable")]
-	TrivialUnsatisfiable,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum Variable {
-	Bool(RawVar),
-	Int(IntVar),
-}
-impl From<RawVar> for Variable {
-	fn from(value: RawVar) -> Self {
-		Self::Bool(value)
-	}
-}
-impl From<IntVar> for Variable {
-	fn from(value: IntVar) -> Self {
-		Self::Int(value)
 	}
 }

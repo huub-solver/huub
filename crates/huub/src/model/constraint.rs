@@ -1,11 +1,11 @@
 use std::iter::once;
 
-use flatzinc_serde::RangeList;
 use itertools::Itertools;
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
 	Valuation as SatValuation,
 };
+use rangelist::RangeList;
 
 use crate::{
 	actions::explanation::ExplanationActions,
@@ -431,9 +431,9 @@ impl Model {
 				}
 				Ok(())
 			}
-			Constraint::ArrayVarIntElement(args, y, idx) => {
+			Constraint::ArrayVarIntElement(args, idx, y) => {
 				// make sure idx is within the range of args
-				self.set_int_lower_bound(&idx, 0, con)?;
+				self.set_int_lower_bound(&idx, 1, con)?;
 				self.set_int_upper_bound(&idx, args.len() as IntVal, con)?;
 				let (min_lb, max_ub) =
 					args.iter()
@@ -539,7 +539,7 @@ impl Model {
 					self.int_vars[m.0 as usize].constraints.push(con);
 				}
 			}
-			Constraint::ArrayVarIntElement(args, y, idx) => {
+			Constraint::ArrayVarIntElement(args, idx, y) => {
 				for a in args {
 					if let IntView::Var(a) = a {
 						self.int_vars[a.0 as usize].constraints.push(con);

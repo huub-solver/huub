@@ -138,7 +138,7 @@ mod tests {
 	use itertools::Itertools;
 	use tracing_test::traced_test;
 
-	use crate::{model::ModelView, Constraint, Model};
+	use crate::{model::ModelView, Constraint, InitConfig, Model};
 
 	#[test]
 	#[traced_test]
@@ -150,7 +150,7 @@ mod tests {
 		let y = prb.new_int_var((3..=4).into());
 
 		prb += Constraint::ArrayIntMinimum(vec![a.clone(), b.clone(), c.clone()], y.clone());
-		let (mut slv, map) = prb.to_solver().unwrap();
+		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
 		let vars = vec![a, b, c, y]
 			.into_iter()
 			.map(|x| map.get(&mut slv, &ModelView::from(x)))
@@ -186,7 +186,7 @@ mod tests {
 		let y = prb.new_int_var((1..=3).into());
 
 		prb += Constraint::ArrayIntMaximum(vec![a.clone(), b.clone(), c.clone()], y.clone());
-		let (mut slv, map) = prb.to_solver().unwrap();
+		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
 		let vars = vec![a, b, c, y]
 			.into_iter()
 			.map(|x| map.get(&mut slv, &ModelView::from(x)))

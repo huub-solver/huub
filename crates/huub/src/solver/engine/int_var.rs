@@ -7,12 +7,12 @@ use std::{
 	ops::{Index, IndexMut, Not, RangeBounds, RangeInclusive},
 };
 
-use flatzinc_serde::RangeList;
 use itertools::Itertools;
 use pindakaas::{
 	solver::{PropagatingSolver, PropagatorAccess, Solver as SolverTrait, VarRange},
 	Lit as RawLit, Valuation as SatValuation, Var as RawVar,
 };
+use rangelist::RangeList;
 
 use crate::{
 	actions::trailing::TrailingActions,
@@ -1063,8 +1063,8 @@ impl Not for LitMeaning {
 
 #[cfg(test)]
 mod tests {
-	use flatzinc_serde::RangeList;
 	use pindakaas::{solver::cadical::Cadical, Cnf};
+	use rangelist::RangeList;
 
 	use crate::{
 		solver::{

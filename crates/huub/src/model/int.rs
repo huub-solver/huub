@@ -1,16 +1,13 @@
 use std::ops::{Add, Mul, Neg};
 
-use flatzinc_serde::RangeList;
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
 	Valuation as SatValuation,
 };
+use rangelist::{IntervalIter, RangeList};
 
 use crate::{
-	helpers::{
-		linear_transform::LinearTransform,
-		range_list::{diff_range_list, intersect_range_list},
-	},
+	helpers::linear_transform::LinearTransform,
 	model::{
 		bool::BoolView,
 		reformulate::{ReifContext, VariableMap},
@@ -341,7 +338,7 @@ impl Model {
 	) -> Result<(), ReformulationError> {
 		match *iv {
 			IntView::Var(v) => {
-				let diff = diff_range_list(&self.int_vars[v.0 as usize].domain, mask);
+				let diff: RangeList<_> = self.int_vars[v.0 as usize].domain.diff(mask);
 				if diff.is_empty() {
 					return Err(ReformulationError::TrivialUnsatisfiable);
 				} else if self.int_vars[v.0 as usize].domain == diff {
@@ -376,7 +373,7 @@ impl Model {
 	) -> Result<(), ReformulationError> {
 		match *iv {
 			IntView::Var(v) => {
-				let intersect = intersect_range_list(&self.int_vars[v.0 as usize].domain, mask);
+				let intersect: RangeList<_> = self.int_vars[v.0 as usize].domain.intersect(mask);
 				if intersect.is_empty() {
 					return Err(ReformulationError::TrivialUnsatisfiable);
 				} else if self.int_vars[v.0 as usize].domain == intersect {
