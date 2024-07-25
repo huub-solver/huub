@@ -375,10 +375,11 @@ impl Constraint {
 
 impl Model {
 	pub(crate) fn propagate(&mut self, con: usize) -> Result<(), ReformulationError> {
-		match self.constraints[con].clone() {
+		let simplified = match self.constraints[con].clone() {
 			Constraint::AllDifferentInt(vars) => {
-				let (vals, vars): (Vec<_>, Vec<_>) =
-					vars.iter().partition(|v| matches!(v, IntView::Const(_)));
+				let (vals, vars): (Vec<_>, Vec<_>) = vars
+					.into_iter()
+					.partition(|v| matches!(v, IntView::Const(_)));
 				if vals.is_empty() {
 					return Ok(());
 				}
@@ -386,10 +387,10 @@ impl Model {
 					let IntView::Const(i) = i else { unreachable!() };
 					*i..=*i
 				}));
-				for v in vars {
+				for v in &vars {
 					self.diff_int_domain(v, &neg_dom, con)?
 				}
-				Ok(())
+				Some(Constraint::AllDifferentInt(vars))
 			}
 			Constraint::ArrayIntMaximum(args, m) => {
 				let max_lb = args
@@ -406,10 +407,10 @@ impl Model {
 				self.set_int_upper_bound(&m, max_ub, con)?;
 
 				let ub = self.get_int_upper_bound(&m);
-				for a in args {
-					self.set_int_upper_bound(&a, ub, con)?;
+				for a in &args {
+					self.set_int_upper_bound(a, ub, con)?;
 				}
-				Ok(())
+				Some(Constraint::ArrayIntMaximum(args, m))
 			}
 			Constraint::ArrayIntMinimum(args, m) => {
 				let min_lb = args
@@ -426,10 +427,10 @@ impl Model {
 				self.set_int_upper_bound(&m, min_ub, con)?;
 
 				let lb = self.get_int_lower_bound(&m);
-				for a in args {
-					self.set_int_lower_bound(&a, lb, con)?;
+				for a in &args {
+					self.set_int_lower_bound(a, lb, con)?;
 				}
-				Ok(())
+				Some(Constraint::ArrayIntMinimum(args, m))
 			}
 			Constraint::ArrayVarIntElement(args, idx, y) => {
 				// make sure idx is within the range of args
@@ -449,7 +450,7 @@ impl Model {
 				if max_ub < self.get_int_upper_bound(&y) {
 					self.set_int_upper_bound(&y, max_ub, con)?;
 				}
-				Ok(())
+				Some(Constraint::ArrayVarIntElement(args, idx, y))
 			}
 			Constraint::IntLinEq(args, cons) => {
 				let sum = args
@@ -461,7 +462,7 @@ impl Model {
 					let ub = sum + self.get_int_lower_bound(v);
 					self.set_int_upper_bound(v, ub, con)?
 				}
-				Ok(())
+				Some(Constraint::IntLinEq(args, cons))
 			}
 			Constraint::IntTimes(x, y, z) => {
 				let x_lb = self.get_int_lower_bound(&x);
@@ -521,10 +522,17 @@ impl Model {
 					self.set_int_upper_bound(&y, max, con)?;
 				}
 
-				Ok(())
+				Some(Constraint::IntTimes(x, y, z))
 			}
-			_ => Ok(()),
+			con => Some(con),
+		};
+		match simplified {
+			Some(simplified) => self.constraints[con] = simplified,
+			None => {
+				self.constraints[con] = Constraint::PropLogic(BoolExpr::View(BoolView::Const(true)))
+			}
 		}
+		Ok(())
 	}
 
 	pub(crate) fn subscribe(&mut self, con: usize) {

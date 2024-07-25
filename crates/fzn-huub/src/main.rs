@@ -494,3 +494,10 @@ impl Display for Solution<'_> {
 		writeln!(f, "{}", FZN_SEPERATOR)
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	// Used in integration tests
+	use assert_cmd as _;
+	use expect_test as _;
+}
