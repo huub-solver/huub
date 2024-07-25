@@ -1,6 +1,7 @@
 use std::{
 	collections::HashMap,
-	fmt, io,
+	fmt::{self, Display},
+	io,
 	num::NonZeroI32,
 	sync::{Arc, Mutex},
 };
@@ -108,7 +109,11 @@ impl LitName {
 				format!("{}{name}", if *pos { "" } else { "not " })
 			}
 			LitName::IntLit(var, meaning) => {
-				let var = int_map[*var];
+				let var: &dyn Display = if int_map.len() > *var {
+					&int_map[*var]
+				} else {
+					&format!("int_var[{var}]")
+				};
 				match meaning {
 					LitMeaning::Eq(val) => format!("{var}={val}"),
 					LitMeaning::NotEq(val) => format!("{var}≠{val}"),

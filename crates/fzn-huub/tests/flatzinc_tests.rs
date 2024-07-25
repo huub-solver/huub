@@ -1,8 +1,8 @@
+#![allow(clippy::tests_outside_test_module)]
+
 mod helpers;
 
-use helpers::assert_all_solutions;
-
-use crate::helpers::assert_optimal;
+use helpers::{assert_all_solutions, assert_optimal};
 
 assert_optimal!(jobshop, |sol: &str| {
 	// Only optimal solution
