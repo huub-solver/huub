@@ -125,7 +125,11 @@ impl Model {
 			IntView::Const(v) => v,
 			IntView::Linear(t, v) => {
 				let def = &self.int_vars[v.0 as usize];
-				t.transform(*def.domain.lower_bound().unwrap())
+				if t.positive_scale() {
+					t.transform(*def.domain.lower_bound().unwrap())
+				} else {
+					t.transform(*def.domain.upper_bound().unwrap())
+				}
 			}
 			IntView::Bool(t, _) => t.transform(0),
 		}
@@ -140,7 +144,11 @@ impl Model {
 			IntView::Const(v) => v,
 			IntView::Linear(t, v) => {
 				let def = &self.int_vars[v.0 as usize];
-				t.transform(*def.domain.upper_bound().unwrap())
+				if t.positive_scale() {
+					t.transform(*def.domain.upper_bound().unwrap())
+				} else {
+					t.transform(*def.domain.lower_bound().unwrap())
+				}
 			}
 			IntView::Bool(t, _) => t.transform(1),
 		}
