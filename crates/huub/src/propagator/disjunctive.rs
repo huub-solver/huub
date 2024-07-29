@@ -466,9 +466,10 @@ where
 		Ok(())
 	}
 
+	// todo: check whether this explanation can be generalized?
 	fn explain(&mut self, actions: &mut E, task_no: u64) -> Conjunction {
 		// explain why the set of tasks Lcut(j) ∪ {i} cannot be completed before lct_j
-		// since energy of the set of tasks within the window [lb, time_bound) is overloaded
+		// since energy of the set of tasks (including i) within the time window [earliest_start, latest_completion] is overloaded
 		// explain lower bound propagation for edge finding
 		let task_no = task_no as usize;
 		let mut clause = Vec::new();
@@ -481,9 +482,10 @@ where
 			earliest_start,
 			latest_completion
 		);
-		// [start(t) >= l] /\ forall (t' in O) [start(t') >= l] /\ forall (t' in O) [end(t') <= u] -> [start(t) >= u].
-		// collect at least latest_completion - earliest_start - durations[task_no] energy, from tasks bracketed in [lb, ub]
-		// todo: check whether this explanation can be generalized?
+		// collect at least latest_completion - earliest_start energy (including durations[task_no])
+		// from tasks bracketed in [earliest_start, latest_completion] and form a set O 
+		// [start(t) >= latest_completion + 1] because  
+		// [start(t) >= earliest_start] /\ forall (t' in O) [start(t') >= earliest_start] /\ forall (t' in O) [end(t') <= latest_completion]
 		clause.push(actions.get_int_lit(
 			self.start_times[task_no],
 			LitMeaning::GreaterEq(earliest_start),
@@ -500,7 +502,7 @@ where
 					LitMeaning::Less(latest_completion - self.durations[i] + 1),
 				));
 				energy -= self.durations[i];
-				if energy <= 0 {
+				if energy < 0 {
 					break;
 				}
 			}
