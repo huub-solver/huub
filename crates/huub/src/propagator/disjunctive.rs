@@ -10,7 +10,7 @@ use crate::{
 		Propagator,
 	},
 	solver::{
-		engine::{int_var::LitMeaning, queue::PriorityLevel, trail::TrailedInt},
+		engine::{queue::PriorityLevel, trail::TrailedInt},
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 		view::{BoolView, BoolViewInner, IntView},
 	},
@@ -319,16 +319,18 @@ impl DisjunctiveEdgeFinding {
 		}
 		trace!(slack = slack, "slack");
 		trace!(e_tasks = ?e_tasks, "tasks contributing to the overload");
-		let r_end = time_bound - slack;
 		e_tasks
 			.iter()
 			.map(|&i| {
 				(
-					actions.get_int_lit(self.start_times[i], LitMeaning::GreaterEq(lb as i64)),
-					actions.get_int_lit(
-						self.start_times[i],
-						LitMeaning::Less(r_end as i64 - self.durations[i]),
-					),
+					actions.get_int_lower_bound_lit(self.start_times[i]),
+					actions.get_int_upper_bound_lit(self.start_times[i]),
+					// generalized explanations:
+					// actions.get_int_lit(self.start_times[i], LitMeaning::GreaterEq(lb as i64)),
+					// actions.get_int_lit(
+					// 	self.start_times[i],
+					// 	LitMeaning::Less((time_bound - slack) as i64 - self.durations[i]),
+					// ),
 				)
 			})
 			.fold(Vec::new(), |acc, (a, b)| [acc, vec![a, b]].concat())
@@ -483,13 +485,15 @@ where
 			latest_completion
 		);
 		// collect at least latest_completion - earliest_start energy (including durations[task_no])
-		// from tasks bracketed in [earliest_start, latest_completion] and form a set O 
-		// [start(t) >= latest_completion + 1] because  
+		// from tasks bracketed in [earliest_start, latest_completion] and form a set O
+		// [start(t) >= latest_completion + 1] because
 		// [start(t) >= earliest_start] /\ forall (t' in O) [start(t') >= earliest_start] /\ forall (t' in O) [end(t') <= latest_completion]
-		clause.push(actions.get_int_lit(
-			self.start_times[task_no],
-			LitMeaning::GreaterEq(earliest_start),
-		));
+		clause.push(actions.get_int_lower_bound_lit(self.start_times[task_no]));
+		// generalized explanations:
+		// clause.push(actions.get_int_lit(
+		// 	self.start_times[task_no],
+		// 	LitMeaning::GreaterEq(earliest_start),
+		// ));
 		let mut energy = latest_completion - earliest_start - self.durations[task_no];
 		for i in 0..self.start_times.len() {
 			if i != task_no
@@ -497,10 +501,12 @@ where
 				&& self.latest_completion_time(i, actions) <= latest_completion as i32
 			{
 				clause.push(actions.get_int_lower_bound_lit(self.start_times[i]));
-				clause.push(actions.get_int_lit(
-					self.start_times[i],
-					LitMeaning::Less(latest_completion - self.durations[i] + 1),
-				));
+				clause.push(actions.get_int_upper_bound_lit(self.start_times[i]));
+				// generalized explanations:
+				// clause.push(actions.get_int_lit(
+				// 	self.start_times[i],
+				// 	LitMeaning::Less(latest_completion - self.durations[i] + 1),
+				// ));
 				energy -= self.durations[i];
 				if energy < 0 {
 					break;
