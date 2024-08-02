@@ -258,7 +258,7 @@ mod tests {
 		let b = prb.new_int_var((1..=4).into());
 		let c = prb.new_int_var((1..=4).into());
 
-		prb += Constraint::IntLinEq(vec![a * 2, b, c], 3);
+		prb += Constraint::IntLinLessEq(vec![a * 2, b, c], 3);
 		prb.assert_unsatisfiable();
 	}
 
@@ -308,7 +308,7 @@ mod tests {
 		let b = prb.new_int_var((1..=2).into());
 		let c = prb.new_int_var((1..=2).into());
 
-		prb += Constraint::IntLinEq(vec![a * -2, -b, -c], -10);
+		prb += Constraint::IntLinLessEq(vec![a * -2, -b, -c], -10);
 		prb.assert_unsatisfiable();
 	}
 

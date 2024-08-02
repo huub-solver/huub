@@ -240,7 +240,7 @@ impl Model {
 						if *r.end() < new_ub {
 							None
 						} else if *r.start() < new_ub {
-							Some(new_ub..=*r.end())
+							Some(*r.start()..=new_ub)
 						} else {
 							Some(r)
 						}
@@ -358,7 +358,7 @@ impl Model {
 						if new_lb > *r.end() {
 							None
 						} else if new_lb > *r.start() {
-							Some(*r.start()..=new_lb)
+							Some(new_lb..=*r.end())
 						} else {
 							Some(r)
 						}
