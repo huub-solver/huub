@@ -146,7 +146,7 @@ impl OmegaThetaTree {
 
 	// Find the gray task responsible for pushing the earliest completion time
 	pub(crate) fn blocked_task(&self, earliest_completion_time: i32) -> usize {
-		assert!(self.nodes[0].earliest_completion < earliest_completion_time);
+		assert!(self.nodes[0].earliest_completion <= earliest_completion_time);
 		assert!(self.nodes[0].earliest_completion_gray >= earliest_completion_time);
 		let mut node_id = 0;
 		let mut earliest_completion_time = earliest_completion_time;
@@ -213,7 +213,7 @@ impl OmegaThetaTree {
 	// - S is the set of tasks in the tree
 	// - task i is one of the gray task in the tree
 	pub(crate) fn gray_est_responsible_task(&self, earliest_completion_time: i32) -> usize {
-		assert!(self.nodes[0].earliest_completion < earliest_completion_time);
+		assert!(self.nodes[0].earliest_completion <= earliest_completion_time);
 		assert!(self.nodes[0].earliest_completion_gray >= earliest_completion_time);
 		let mut node_id = 0;
 		let mut earliest_completion_time = earliest_completion_time;
