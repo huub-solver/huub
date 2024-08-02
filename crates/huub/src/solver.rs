@@ -17,7 +17,7 @@ use pindakaas::{
 	Cnf, Lit as RawLit, Valuation as SatValuation,
 };
 use poster::BrancherPoster;
-use tracing::debug;
+use tracing::{debug, trace};
 
 use crate::{
 	actions::{
@@ -509,6 +509,7 @@ where
 				def.prev.map(Into::into),
 				def.next.map(Into::into),
 			) {
+				trace!(clause = ?cl.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add clause");
 				self.oracle.add_clause(cl).unwrap();
 			}
 			v
