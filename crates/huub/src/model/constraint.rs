@@ -514,7 +514,7 @@ impl Model {
 				}
 				Some(Constraint::ArrayVarIntElement(args, idx, y))
 			}
-			Constraint::IntLinEq(args, cons) => {
+			Constraint::IntLinLessEq(args, cons) => {
 				let sum = args
 					.iter()
 					.map(|v| self.get_int_lower_bound(v))
@@ -524,7 +524,7 @@ impl Model {
 					let ub = sum + self.get_int_lower_bound(v);
 					self.set_int_upper_bound(v, ub, con)?
 				}
-				Some(Constraint::IntLinEq(args, cons))
+				Some(Constraint::IntLinLessEq(args, cons))
 			}
 			Constraint::IntTimes(x, y, z) => {
 				let x_lb = self.get_int_lower_bound(&x);

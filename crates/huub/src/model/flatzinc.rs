@@ -716,8 +716,8 @@ impl Model {
 							.filter_map(|(x, c)| NonZeroIntVal::new(c).map(|c| x * c))
 							.collect();
 						prb += match c.id.deref() {
-							"int_lin_eq_imp" => Constraint::IntLinLessEqImp,
-							"int_lin_eq_reif" => Constraint::IntLinLessEqReif,
+							"int_lin_eq_imp" => Constraint::IntLinEqImp,
+							"int_lin_eq_reif" => Constraint::IntLinEqReif,
 							"int_lin_le_imp" => Constraint::IntLinLessEqImp,
 							"int_lin_le_reif" => Constraint::IntLinLessEqReif,
 							"int_lin_ne_imp" => Constraint::IntLinNotEqImp,
