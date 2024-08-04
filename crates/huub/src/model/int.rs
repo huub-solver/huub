@@ -2,7 +2,7 @@ use std::ops::{Add, Mul, Neg};
 
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
-	Valuation as SatValuation,
+	ClauseDatabase, Valuation as SatValuation,
 };
 use rangelist::{IntervalIter, RangeList};
 
@@ -172,7 +172,7 @@ impl Model {
 		lb: IntVal,
 		con: usize,
 	) -> Result<(), ReformulationError> {
-		match *iv {
+		match iv {
 			IntView::Var(v) => {
 				let def = &mut self.int_vars[v.0 as usize];
 				if lb <= *def.domain.lower_bound().unwrap() {
@@ -198,7 +198,7 @@ impl Model {
 				Ok(())
 			}
 			IntView::Const(v) => {
-				if v < lb {
+				if *v < lb {
 					Err(ReformulationError::TrivialUnsatisfiable)
 				} else {
 					Ok(())
@@ -240,7 +240,7 @@ impl Model {
 						if *r.end() < new_ub {
 							None
 						} else if *r.start() < new_ub {
-							Some(new_ub..=*r.end())
+							Some(*r.start()..=new_ub)
 						} else {
 							Some(r)
 						}
@@ -254,7 +254,33 @@ impl Model {
 					Ok(())
 				}
 			}
-			IntView::Bool(_, _) => todo!(),
+			IntView::Bool(t, b) => {
+				if t.positive_scale() {
+					let new_lb = t.rev_transform(lb);
+					if new_lb > 1 {
+						return Err(ReformulationError::TrivialUnsatisfiable);
+					} else if new_lb > 0 {
+						if let BoolView::Lit(l) = b.clone() {
+							let _ = self.add_clause(vec![l]);
+						} else {
+							todo!()
+						}
+					}
+					Ok(())
+				} else {
+					let new_ub = t.rev_transform(lb);
+					if new_ub < 0 {
+						return Err(ReformulationError::TrivialUnsatisfiable);
+					} else if new_ub < 1 {
+						if let BoolView::Lit(l) = b {
+							let _ = self.add_clause(vec![!l]);
+						} else {
+							todo!()
+						}
+					}
+					Ok(())
+				}
+			}
 		}
 	}
 
@@ -264,7 +290,7 @@ impl Model {
 		ub: IntVal,
 		con: usize,
 	) -> Result<(), ReformulationError> {
-		match *iv {
+		match iv {
 			IntView::Var(v) => {
 				let def = &mut self.int_vars[v.0 as usize];
 				if ub >= *def.domain.upper_bound().unwrap() {
@@ -290,7 +316,7 @@ impl Model {
 				Ok(())
 			}
 			IntView::Const(v) => {
-				if v > ub {
+				if *v > ub {
 					Err(ReformulationError::TrivialUnsatisfiable)
 				} else {
 					Ok(())
@@ -332,7 +358,7 @@ impl Model {
 						if new_lb > *r.end() {
 							None
 						} else if new_lb > *r.start() {
-							Some(*r.start()..=new_lb)
+							Some(new_lb..=*r.end())
 						} else {
 							Some(r)
 						}
@@ -346,7 +372,33 @@ impl Model {
 					Ok(())
 				}
 			}
-			IntView::Bool(_, _) => todo!(),
+			IntView::Bool(t, b) => {
+				if t.positive_scale() {
+					let new_ub = t.rev_transform(ub);
+					if new_ub < 0 {
+						return Err(ReformulationError::TrivialUnsatisfiable);
+					} else if new_ub < 1 {
+						if let BoolView::Lit(l) = b.clone() {
+							let _ = self.add_clause(vec![!l]);
+						} else {
+							todo!()
+						}
+					}
+					Ok(())
+				} else {
+					let new_lb = t.rev_transform(ub);
+					if new_lb > 1 {
+						return Err(ReformulationError::TrivialUnsatisfiable);
+					} else if new_lb > 0 {
+						if let BoolView::Lit(l) = b.clone() {
+							let _ = self.add_clause(vec![l]);
+						} else {
+							todo!()
+						}
+					}
+					Ok(())
+				}
+			}
 		}
 	}
 
