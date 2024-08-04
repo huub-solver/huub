@@ -172,7 +172,7 @@ impl Model {
 		lb: IntVal,
 		con: usize,
 	) -> Result<(), ReformulationError> {
-		match iv.clone() {
+		match iv {
 			IntView::Var(v) => {
 				let def = &mut self.int_vars[v.0 as usize];
 				if lb <= *def.domain.lower_bound().unwrap() {
@@ -198,7 +198,7 @@ impl Model {
 				Ok(())
 			}
 			IntView::Const(v) => {
-				if v < lb {
+				if *v < lb {
 					Err(ReformulationError::TrivialUnsatisfiable)
 				} else {
 					Ok(())
@@ -290,7 +290,7 @@ impl Model {
 		ub: IntVal,
 		con: usize,
 	) -> Result<(), ReformulationError> {
-		match iv.clone() {
+		match iv {
 			IntView::Var(v) => {
 				let def = &mut self.int_vars[v.0 as usize];
 				if ub >= *def.domain.upper_bound().unwrap() {
@@ -316,7 +316,7 @@ impl Model {
 				Ok(())
 			}
 			IntView::Const(v) => {
-				if v > ub {
+				if *v > ub {
 					Err(ReformulationError::TrivialUnsatisfiable)
 				} else {
 					Ok(())
