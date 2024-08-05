@@ -14,6 +14,11 @@ homepage = "https://github.com/Dekker1/huub"
 categories = ["algorithms", "mathematics", "science"]
 keywords = ["sat", "lcg", "flatzinc", "minizinc", "optimization"]
 
+[workspace.dependencies]
+flatzinc-serde = { git = "https://github.com/shackle-rs/shackle/" }
+tracing = "0.1.40"
+expect-test = "1.5"
+
 [workspace.lints.rust]
 missing_debug_implementations = "warn"
 # missing_docs = "warn"
@@ -72,9 +77,9 @@ include = ["share/"]
 installers = []
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = [
-  "aarch64-apple-darwin",
-  "x86_64-apple-darwin",
-  "x86_64-unknown-linux-gnu",
+	"aarch64-apple-darwin",
+	"x86_64-apple-darwin",
+	"x86_64-unknown-linux-gnu",
 ]
 # Publish jobs to run in CI
 pr-run-mode = "upload"

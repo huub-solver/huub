@@ -280,21 +280,19 @@ impl IpasirPropagator for Engine {
 		}
 	}
 
-	fn decide(&mut self) -> Option<RawLit> {
+	fn decide(&mut self, slv: &mut dyn SolvingActions) -> Option<RawLit> {
 		if !self.state.vsids {
 			let current = self.state.trail.get_trailed_int(Trail::CURRENT_BRANCHER);
 			if current as usize == self.branchers.len() {
 				return None;
 			}
+			let mut ctx = PropagationContext::new(slv, &mut self.state);
 			for (i, brancher) in self.branchers.iter_mut().enumerate().skip(current as usize) {
-				if let Some(lit) = brancher.decide(&mut self.state) {
+				if let Some(lit) = brancher.decide(&mut ctx) {
 					debug!(lit = i32::from(lit), "decide");
 					return Some(lit);
 				} else {
-					let _ = self
-						.state
-						.trail
-						.set_trailed_int(Trail::CURRENT_BRANCHER, i as i64 + 1);
+					let _ = ctx.set_trailed_int(Trail::CURRENT_BRANCHER, i as i64 + 1);
 				}
 			}
 		}

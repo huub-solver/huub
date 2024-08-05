@@ -12,18 +12,18 @@ repository.workspace = true
 
 [dependencies]
 delegate = "0.12"
-flatzinc-serde = { git = "https://github.com/shackle-rs/shackle/" }
+flatzinc-serde = { workspace = true }
 index_vec = "0.1.3"
 itertools = "0.13.0"
 pindakaas = { git = "https://github.com/pindakaashq/pindakaas.git", features = [
-  "ipasir-up",
+	"ipasir-up",
 ] }
 rangelist = { git = "https://github.com/shackle-rs/shackle/" }
 thiserror = "1.0.63"
-tracing = "0.1.40"
+tracing = { workspace = true }
 
 [dev-dependencies]
-expect-test = "1.5.0"
+expect-test = { workspace = true }
 tracing-test = "0.2.5"
 
 [lints]

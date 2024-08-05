@@ -563,7 +563,7 @@ checksum = "bda66fc9667c18cb2758a2ac84d1167245054bcf85d5d1aaa6923f45801bdd02"
 [[package]]
 name = "pindakaas"
 version = "0.1.0"
-source = "git+https://github.com/pindakaashq/pindakaas.git#dbded2ba5ae6101d305a1bcb6b21f0e19cdd81f3"
+source = "git+https://github.com/pindakaashq/pindakaas.git#180c3dc426ce276425d4fedda6d3831a6cd8bd8e"
 dependencies = [
  "cached",
  "iset",
@@ -577,7 +577,7 @@ dependencies = [
 [[package]]
 name = "pindakaas-build-macros"
 version = "0.1.0"
-source = "git+https://github.com/pindakaashq/pindakaas.git#dbded2ba5ae6101d305a1bcb6b21f0e19cdd81f3"
+source = "git+https://github.com/pindakaashq/pindakaas.git#180c3dc426ce276425d4fedda6d3831a6cd8bd8e"
 dependencies = [
  "cc",
  "paste",
@@ -586,7 +586,7 @@ dependencies = [
 [[package]]
 name = "pindakaas-cadical"
 version = "2.0.0"
-source = "git+https://github.com/pindakaashq/pindakaas.git#dbded2ba5ae6101d305a1bcb6b21f0e19cdd81f3"
+source = "git+https://github.com/pindakaashq/pindakaas.git#180c3dc426ce276425d4fedda6d3831a6cd8bd8e"
 dependencies = [
  "cc",
  "pindakaas-build-macros",
@@ -595,7 +595,7 @@ dependencies = [
 [[package]]
 name = "pindakaas-derive"
 version = "0.1.0"
-source = "git+https://github.com/pindakaashq/pindakaas.git#dbded2ba5ae6101d305a1bcb6b21f0e19cdd81f3"
+source = "git+https://github.com/pindakaashq/pindakaas.git#180c3dc426ce276425d4fedda6d3831a6cd8bd8e"
 dependencies = [
  "darling 0.20.10",
  "quote",
@@ -640,9 +640,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.10.5"
+version = "1.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b91213439dad192326a0d7c6ee3955910425f441d7038e0d6933b0aec5c4517f"
+checksum = "4219d74c6b67a3654a9fbebc4b419e22126d13d2f3c4a07ee0cb61ff79a79619"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -728,9 +728,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.121"
+version = "1.0.122"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ab380d7d9f22ef3f21ad3e6c1ebe8e4fc7a2000ccba2e4d71fc96f15b2cb609"
+checksum = "784b6203951c57ff748476b126ccb5e8e2959a5c19e5c617ab1956be3dbc68da"
 dependencies = [
  "itoa",
  "memchr",

@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 
 use pindakaas::Lit as RawLit;
-use tracing::debug;
 
 use crate::{
 	actions::{explanation::ExplanationActions, initialization::InitializationActions},
@@ -135,18 +134,15 @@ fn decide_int<E: ExplanationActions>(
 			vars[first_unfixed] = fixed_var;
 			vars[i] = unfixed_var;
 			first_unfixed += 1;
+		} else if let Some((_, sel_score)) = selection {
+			let new_score = score(vars[i]);
+			if is_better(sel_score, new_score) {
+				selection = Some((vars[i], new_score));
+			}
 		} else {
-			debug!(i, score = score(vars[i]), "search observing");
-			if let Some((_, sel_score)) = selection {
-				let new_score = score(vars[i]);
-				if is_better(sel_score, new_score) {
-					selection = Some((vars[i], new_score));
-				}
-			} else {
-				selection = Some((vars[i], score(vars[i])));
-				if var_sel == VariableSelection::InputOrder {
-					break;
-				}
+			selection = Some((vars[i], score(vars[i])));
+			if var_sel == VariableSelection::InputOrder {
+				break;
 			}
 		}
 	}
@@ -154,8 +150,7 @@ fn decide_int<E: ExplanationActions>(
 	let _ = actions.set_trailed_int(next, first_unfixed as i64);
 
 	// return if all variables have been assigned
-	let (next_var, score) = selection?;
-	debug!(sel = ?next_var, score, "search selecting");
+	let (next_var, _) = selection?;
 	// select the next value to branch on based on the value selection strategy
 	let view = match val_sel {
 		ValueSelection::IndomainMin => actions.get_int_lit(
