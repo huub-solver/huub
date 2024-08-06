@@ -68,7 +68,7 @@ wrong_self_convention = "warn"
 # Config for 'cargo dist'
 [workspace.metadata.dist]
 # The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.16.0"
+cargo-dist-version = "0.19.1"
 # CI backends to support
 ci = "github"
 # Extra static files to include in each App (path relative to this Cargo.toml's dir)
@@ -76,13 +76,11 @@ include = ["share/"]
 # The installers to generate for each app
 installers = []
 # Target platforms to build apps for (Rust target-triple syntax)
-targets = [
-	"aarch64-apple-darwin",
-	"x86_64-apple-darwin",
-	"x86_64-unknown-linux-gnu",
-]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 # Publish jobs to run in CI
 pr-run-mode = "upload"
+# Trigger releases on pushes to this branch instead of tag pushes
+release-branch = "develop"
 
 # The profile that 'cargo dist' will build with
 [profile.dist]
