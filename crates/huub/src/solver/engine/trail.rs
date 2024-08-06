@@ -5,7 +5,7 @@ use std::{
 
 use index_vec::IndexVec;
 use pindakaas::{Lit as RawLit, Var as RawVar};
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 
 use crate::{actions::trailing::TrailingActions, IntVal};
 
