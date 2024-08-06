@@ -20,31 +20,10 @@ Huub can be used either as a [MiniZinc](https://www.minizinc.org/) solver or as 
 
 ### Installing Huub as a MiniZinc solver
 
-The following command can be used to install the Huub FlatZinc interface, which can be used as a MiniZinc solver.
-
-```bash
-cargo install fzn-huub
-```
-
-- [crates.io](https://crates.io/crates/fzn-huub)
-
-After installation of the `fzn-huub` executable, a MiniZinc solver configuration file must be added to a directory on the [`MZN_SOLVER_PATH`](https://www.minizinc.org/doc-latest/en/fzn-spec.html#solver-configuration-files).
-The following file can serve as a template for the solver configuration file for Huub.
-
-```json
-{
-  "name": "Huub",
-  "version": "0.1.0",
-  "id": "solutions.huub",
-  "inputType": "JSON",
-  "executable": "PATH_TO_HUUB_EXECUTABLE",
-  "mznlib": "PATH_TO_HUUB_MZNLIB",
-  "stdFlags": ["-a", "-i", "-s", "-t", "-v"],
-  "extraFlags": []
-}
-```
-
-Note that `PATH_TO_HUUB_EXECUTABLE` should be replaced with the path to the `fzn-huub` executable and `PATH_TO_HUUB_MZNLIB` should be replaced with the path where the `share/minizinc/huub` folder from this repository is placed.
+1. Download the latest release of Huub from the [releases page](https://github.com/Dekker1/huub/releases) and download the `fzn-huub` archive that matches your system.
+2. Extract (and install) the downloaded archive to a sensible location on your system.
+3. Add the `share` directory from the extracted archive to the [`MZN_SOLVER_PATH`](https://docs.minizinc.dev/en/stable/fzn-spec.html#solver-configuration-files) environment variable.
+4. `Huub` should now show up in the list of solvers when running `minizinc --solvers` and in the MiniZinc IDE.
 
 ### Installing Huub as a Rust library
 
