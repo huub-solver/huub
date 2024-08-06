@@ -5,7 +5,7 @@ use std::{
 
 use index_vec::IndexVec;
 use pindakaas::{Lit as RawLit, Var as RawVar};
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use crate::{actions::trailing::TrailingActions, IntVal};
 
@@ -163,6 +163,16 @@ impl Trail {
 		self.prev_len.push(self.trail.len());
 	}
 	pub(crate) fn notify_backtrack(&mut self, level: usize) {
+		// TODO: this is a fix for an issue in the Cadical implementation of the IPASIR UP interface: https://github.com/arminbiere/cadical/issues/92
+		if level >= self.prev_len.len() {
+			warn!(
+				current = self.prev_len.len(),
+				requested = level,
+				"backtrack to unknown level"
+			);
+			return;
+		}
+
 		let len = self.prev_len[level];
 		self.prev_len.truncate(level);
 		debug_assert!(
