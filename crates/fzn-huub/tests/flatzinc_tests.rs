@@ -8,6 +8,8 @@ mod tests {
 	assert_all_solutions!(sudoku);
 	assert_all_solutions!(unification);
 
+	assert_all_solutions!(array_var_int_element);
+
 	assert_optimal!(jobshop);
 
 	assert_search_order!(bool_indomain_max);
