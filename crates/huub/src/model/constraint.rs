@@ -161,7 +161,8 @@ impl Constraint {
 					.collect();
 				let y = y.to_arg(ReifContext::Mixed, slv, map);
 				let idx = idx.to_arg(ReifContext::Mixed, slv, map);
-				slv.add_propagator(ArrayVarIntElementBounds::prepare(vars, y, idx));
+				// tranform 1-based index into 0-based index array
+				slv.add_propagator(ArrayVarIntElementBounds::prepare(vars, y, idx + (-1)));
 				Ok(())
 			}
 			Constraint::ArrayVarBoolElement(vars, idx, y) => {
