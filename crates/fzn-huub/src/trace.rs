@@ -1,8 +1,9 @@
 use std::{
 	collections::HashMap,
 	fmt::{self, Display},
-	io,
+	fs, io,
 	num::NonZeroI32,
+	path::PathBuf,
 	sync::{Arc, Mutex},
 };
 
@@ -62,18 +63,42 @@ struct RegisterLazyLits {
 
 pub(crate) fn create_subscriber(
 	verbose: u8,
+	log_file: Option<PathBuf>,
 	lit_reverse_map: Arc<Mutex<HashMap<LitInt, LitName>>>,
 	int_reverse_map: Arc<Mutex<Vec<Ustr>>>,
 ) -> impl Subscriber {
-	tracing_subscriber::fmt()
+	let logged_to_file = log_file.is_some();
+	// Function that will create the writer for the log output
+	let make_writer = move || -> Box<dyn io::Write> {
+		if let Some(path) = log_file.clone() {
+			Box::new(
+				fs::OpenOptions::new()
+					.create(true)
+					.append(true)
+					.open(path)
+					.expect("Failed to open log file"),
+			)
+		} else {
+			Box::new(io::stderr())
+		}
+	};
+
+	// Builder for the formatting subscriber
+	let builder = tracing_subscriber::fmt()
 		.with_max_level(match verbose {
 			0 => Level::INFO,
 			1 => Level::DEBUG,
 			_ => Level::TRACE, // 2 or more
 		})
-		.with_writer(io::stderr)
+		.with_writer(make_writer)
+		.with_ansi(!logged_to_file)
 		.with_timer(uptime())
-		.map_fmt_fields(|fmt| FmtLitFields::new(fmt, Arc::clone(&lit_reverse_map), int_reverse_map))
+		.map_fmt_fields(|fmt| {
+			FmtLitFields::new(fmt, Arc::clone(&lit_reverse_map), int_reverse_map)
+		});
+
+	// Create final subscriber and add the layer that will register new lazily created literals
+	builder
 		.finish()
 		.with(RegisterLazyLits::new(lit_reverse_map))
 }

@@ -2,6 +2,7 @@ mod trace;
 
 use std::{
 	collections::HashMap,
+	convert::Infallible,
 	fmt::{self, Debug, Display},
 	fs::File,
 	io::BufReader,
@@ -37,27 +38,31 @@ FLAGS
   -a, --all-solutions             Find all possible solutions for the given (satisfaction) instance.
   -i, --intermediate-solutions    Display all intermediate solutions found during the search.
   -f, --free-search               Allow the solver to adjust any search options as it judges best.
-																	This flag overrides all other search-related flags.
+                                  This flag overrides all other search-related flags.
   -s, --statistics                Print statistics about the solving process.
   -t, --time-limit <value>        Set a time limit for the solver. The value can be a number of
-	                                milliseconds or a human-readable duration string.
+                                  milliseconds or a human-readable duration string.
   -v, --verbose                   Display addtional information about actions taken by the solver.
-	                                Can be used multiple times to increase verbosity.
+                                  Can be used multiple times to increase verbosity.
                                   (0: INFO, 1: DEBUG, 2: TRACE)
 
                       === INITIALIZATION OPTIONS ===
   --int-eager-limit               Set the maximum cardinality for which all order literals to
                                   represent an integer variable are created eagerly.
-																	(default: 255)
+                                  (default: 255)
 
-										  === SOLVING OPTIONS ===
-	--vsids-after <value>           Switch to the VSIDS search heuristic after a certain number of
-																	conflicts. (overwritten by --toggle-vsids and --vsids-only)
-	--toggle-vsids                  Switch between the activity-based search heuristic and the user-
-																	specific search heuristic after every restart.
-																	(overwritten by --vsids-only)
+                      === SOLVING OPTIONS ===
+  --vsids-after <value>           Switch to the VSIDS search heuristic after a certain number of
+                                  conflicts. (overwritten by --toggle-vsids and --vsids-only)
+  --toggle-vsids                  Switch between the activity-based search heuristic and the user-
+                                  specific search heuristic after every restart.
+                                  (overwritten by --vsids-only)
   --vsids-only                    Only use the activity-based search heuristic provided by the SAT
                                   solver. Ignore the user-specific search heuristic.
+
+
+                      === BEHAVIOUR OPTIONS ===
+  --log-file <FILE>	              Output log messages from the solver to a file, instead of stderr.
 
 DESCRIPTION
   Create a Huub Solver instance tailored to a given FlatZinc JSON input file and solve the problem.
@@ -105,6 +110,8 @@ struct Cli {
 	time_limit: Option<Duration>,
 	/// Level of verbosity
 	verbose: u8,
+	/// Log file
+	log_file: Option<PathBuf>,
 
 	// --- Initialization configuration ---
 	/// Cardinatility cutoff for eager order literals
@@ -170,6 +177,7 @@ impl Cli {
 		let int_reverse_map: Arc<Mutex<Vec<Ustr>>> = Arc::default();
 		let subscriber = trace::create_subscriber(
 			self.verbose,
+			self.log_file.clone(),
 			Arc::clone(&lit_reverse_map),
 			Arc::clone(&int_reverse_map),
 		);
@@ -477,6 +485,12 @@ impl TryFrom<Arguments> for Cli {
 			vsids_only: args.contains("--vsids-only"),
 			vsids_after: args
 				.opt_value_from_str("--vsids-after")
+				.map_err(|e| e.to_string())?,
+
+			log_file: args
+				.opt_value_from_os_str("--log-file", |s| -> Result<PathBuf, Infallible> {
+					Ok(s.into())
+				})
 				.map_err(|e| e.to_string())?,
 
 			verbose,
