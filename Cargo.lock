@@ -228,7 +228,7 @@ dependencies = [
 [[package]]
 name = "flatzinc-serde"
 version = "0.4.0"
-source = "git+https://github.com/shackle-rs/shackle/#2c22a77d8339d052bfbb8cfcc3cf2c04ebd31747"
+source = "git+https://github.com/shackle-rs/shackle/#2c7852db2f627855d026475e9ea25d3c90e708ac"
 dependencies = [
  "rangelist",
  "serde",
@@ -622,8 +622,8 @@ dependencies = [
 
 [[package]]
 name = "rangelist"
-version = "0.1.0"
-source = "git+https://github.com/shackle-rs/shackle/#2c22a77d8339d052bfbb8cfcc3cf2c04ebd31747"
+version = "0.2.0"
+source = "git+https://github.com/shackle-rs/shackle/#2c7852db2f627855d026475e9ea25d3c90e708ac"
 dependencies = [
  "castaway",
  "num",
@@ -728,9 +728,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.122"
+version = "1.0.124"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "784b6203951c57ff748476b126ccb5e8e2959a5c19e5c617ab1956be3dbc68da"
+checksum = "66ad62847a56b3dba58cc891acd13884b9c61138d330c0d7b6181713d4fce38d"
 dependencies = [
  "itoa",
  "memchr",
