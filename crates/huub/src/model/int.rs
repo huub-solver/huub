@@ -4,7 +4,7 @@ use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
 	ClauseDatabase, Valuation as SatValuation,
 };
-use rangelist::{IntervalIter, RangeList};
+use rangelist::{IntervalIterator, RangeList};
 
 use crate::{
 	helpers::linear_transform::LinearTransform,

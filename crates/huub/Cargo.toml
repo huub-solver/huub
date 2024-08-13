@@ -18,7 +18,7 @@ itertools = "0.13.0"
 pindakaas = { git = "https://github.com/pindakaashq/pindakaas.git", features = [
 	"ipasir-up",
 ] }
-rangelist = { git = "https://github.com/shackle-rs/shackle/" }
+rangelist = "0.2"
 thiserror = "1.0.63"
 tracing = { workspace = true }
 

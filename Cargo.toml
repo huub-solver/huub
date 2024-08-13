@@ -15,7 +15,7 @@ categories = ["algorithms", "mathematics", "science"]
 keywords = ["sat", "lcg", "flatzinc", "minizinc", "optimization"]
 
 [workspace.dependencies]
-flatzinc-serde = { git = "https://github.com/shackle-rs/shackle/" }
+flatzinc-serde = "0.4"
 tracing = "0.1.40"
 expect-test = "1.5"
 

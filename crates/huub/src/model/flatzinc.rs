@@ -15,7 +15,7 @@ use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
 	Valuation as SatValuation,
 };
-use rangelist::{IntervalIter, RangeList};
+use rangelist::{IntervalIterator, RangeList};
 use thiserror::Error;
 use tracing::warn;
 

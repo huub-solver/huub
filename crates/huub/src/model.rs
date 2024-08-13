@@ -16,7 +16,7 @@ use pindakaas::{
 	ClauseDatabase, Cnf, ConditionalDatabase, Lit as RawLit, Valuation as SatValuation,
 	Var as RawVar,
 };
-use rangelist::{IntervalIter, RangeList};
+use rangelist::{IntervalIterator, RangeList};
 
 use crate::{
 	model::{
