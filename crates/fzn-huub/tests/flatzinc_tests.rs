@@ -10,6 +10,8 @@ mod tests {
 
 	assert_all_solutions!(array_var_int_element);
 
+	assert_all_solutions!(xor);
+
 	assert_optimal!(jobshop);
 
 	assert_search_order!(bool_indomain_max);

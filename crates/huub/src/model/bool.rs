@@ -118,6 +118,12 @@ impl BoolExpr {
 					}
 				});
 				for e in es {
+					// skip if we already have a binding
+					if let BoolExpr::View(b) = e {
+						if res == Some(map.get_bool(slv, b)) {
+							continue;
+						}
+					}
 					match res {
 						Some(view::BoolView(BoolViewInner::Const(false))) => {
 							(!e).constrain(slv, map)?;
@@ -143,7 +149,11 @@ impl BoolExpr {
 						BoolViewInner::Lit(l) => lits.push(Formula::Atom(l)),
 					}
 				}
-				let mut formula = Formula::Xor(lits);
+				let mut formula = if lits.len() == 1 {
+					lits[0].clone()
+				} else {
+					Formula::Xor(lits)
+				};
 				if count % 2 == 1 {
 					formula = !formula;
 				}
@@ -308,7 +318,11 @@ impl BoolExpr {
 					}
 				}
 				let name = name.unwrap_or_else(|| slv.oracle.new_var().into());
-				let mut formula = Formula::Xor(lits);
+				let mut formula = if lits.len() == 1 {
+					lits[0].clone()
+				} else {
+					Formula::Xor(lits)
+				};
 				if count % 2 == 1 {
 					formula = !formula;
 				}
