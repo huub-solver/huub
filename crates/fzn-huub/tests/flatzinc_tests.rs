@@ -5,10 +5,12 @@ mod tests {
 	use crate::helpers::{
 		assert_all_solutions, assert_first_solution, assert_optimal, assert_search_order,
 	};
-	assert_all_solutions!(sudoku);
-	assert_all_solutions!(unification);
 
 	assert_all_solutions!(array_var_int_element);
+	assert_all_solutions!(sudoku);
+	assert_all_solutions!(unification);
+	assert_all_solutions!(unify_element_1);
+	assert_all_solutions!(unify_element_2);
 
 	assert_optimal!(jobshop);
 

@@ -1,0 +1,15 @@
+{
+  "variables": {
+    "x" : { "type" : "bool", "defined" : true },
+    "idx" : { "type" : "int", "domain" : [[1, 3]] }
+  },
+  "arrays": {
+    
+  },
+  "constraints": [
+    { "id" : "array_bool_element", "args" : ["idx", [false, false], "x"], "defines" : "x"}
+  ],
+  "output": ["x"],
+  "solve": { "method" : "satisfy" },
+  "version": "1.0"
+}

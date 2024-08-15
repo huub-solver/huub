@@ -98,6 +98,23 @@ impl Model {
 						mark_processed();
 					}
 				}
+				"array_bool_element" | "array_int_element" => {
+					if let [idx, arr, Argument::Literal(b)] = c.args.as_slice() {
+						let arr = arg_array(fzn, arr)?;
+						let idx = arg_int(fzn, &mut prb, &mut map, idx)?;
+						// unify if the index is constant
+						if let IntView::Const(idx) = idx {
+							let a = &arr[(idx - 1) as usize];
+							record_unify(&mut unify_map, a, b);
+							mark_processed();
+						}
+						// unify if all values in arr are equal
+						if !arr.is_empty() && arr.iter().all_equal() {
+							record_unify(&mut unify_map, &arr[0], b);
+							mark_processed();
+						}
+					}
+				}
 				_ => {}
 			}
 		}
@@ -343,9 +360,9 @@ impl Model {
 						if let Some(s) = start {
 							ranges.push(s..=arr.len() as IntVal);
 						}
-						let s = RangeList::from_iter(ranges);
+						assert_ne!(ranges.len(), 0, "unexpected empty range list");
 
-						prb += Constraint::SetInReif(idx, s.iter().collect(), val.into());
+						prb += Constraint::SetInReif(idx, RangeList::from_iter(ranges), val.into());
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_bool_element",
