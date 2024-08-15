@@ -239,12 +239,12 @@ mod tests {
 		slv.expect_solutions(
 			&[a, b, c],
 			expect![[r#"
-    1, 1, 1
-    1, 1, 2
-    1, 2, 1
-    2, 1, 2
-    2, 2, 1
-    2, 2, 2"#]],
+		1, 1, 1
+		1, 1, 2
+		1, 2, 1
+		2, 1, 2
+		2, 2, 1
+		2, 2, 2"#]],
 		);
 	}
 
@@ -274,20 +274,20 @@ mod tests {
 		slv.expect_solutions(
 			&[r, a, b, c],
 			expect![[r#"
-    false, 1, 1, 1
-    false, 1, 1, 2
-    false, 1, 2, 1
-    false, 1, 2, 2
-    false, 2, 1, 1
-    false, 2, 1, 2
-    false, 2, 2, 1
-    false, 2, 2, 2
-    true, 1, 1, 1
-    true, 1, 1, 2
-    true, 1, 2, 1
-    true, 2, 1, 2
-    true, 2, 2, 1
-    true, 2, 2, 2"#]],
+		false, 1, 1, 1
+		false, 1, 1, 2
+		false, 1, 2, 1
+		false, 1, 2, 2
+		false, 2, 1, 1
+		false, 2, 1, 2
+		false, 2, 2, 1
+		false, 2, 2, 2
+		true, 1, 1, 1
+		true, 1, 1, 2
+		true, 1, 2, 1
+		true, 2, 1, 2
+		true, 2, 2, 1
+		true, 2, 2, 2"#]],
 		);
 	}
 }

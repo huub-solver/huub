@@ -443,7 +443,7 @@ mod tests {
 	use expect_test::expect;
 	use itertools::Itertools;
 
-	use crate::{BoolExpr, InitConfig, Model, Solver};
+	use crate::{model::bool::BoolView, BoolExpr, InitConfig, Model, Solver};
 
 	#[test]
 	fn test_bool_and() {
@@ -484,13 +484,13 @@ mod tests {
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
-    false, false, true
-    false, true, false
-    false, true, true
-    true, false, false
-    true, false, true
-    true, true, false
-    true, true, true"#]],
+		false, false, true
+		false, true, false
+		false, true, true
+		true, false, false
+		true, false, true
+		true, true, false
+		true, true, true"#]],
 		);
 
 		// Simple Unsatisfiable test case
@@ -518,10 +518,33 @@ mod tests {
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
-    false, false, true
-    false, true, false
-    true, false, false
-    true, true, true"#]],
+				false, false, true
+				false, true, false
+				true, false, false
+				true, true, true"#]],
+		);
+
+		// Regression test case
+		let mut m = Model::default();
+		let b = m.new_bool_vars(2);
+
+		m += BoolExpr::Equiv(vec![
+			BoolExpr::View(b[1].clone()),
+			BoolExpr::Xor(vec![
+				BoolExpr::View(BoolView::Const(true)),
+				BoolExpr::View(b[0].clone()),
+			]),
+		]);
+		let (mut slv, map): (Solver, _) = m.to_solver(&InitConfig::default()).unwrap();
+		let vars: Vec<_> = b
+			.into_iter()
+			.map(|x| map.get(&mut slv, &x.into()))
+			.collect();
+		slv.expect_solutions(
+			&vars,
+			expect![[r#"
+				false, true
+				true, false"#]],
 		);
 
 		// Simple Unsatisfiable test case
@@ -553,10 +576,10 @@ mod tests {
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
-    false, false, true
-    false, true, false
-    true, false, false
-    true, true, true"#]],
+		false, false, true
+		false, true, false
+		true, false, false
+		true, true, true"#]],
 		);
 	}
 
@@ -578,10 +601,10 @@ mod tests {
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
-    false, false, false
-    false, false, true
-    false, true, false
-    true, true, true"#]],
+		false, false, false
+		false, false, true
+		false, true, false
+		true, true, true"#]],
 		);
 	}
 
@@ -603,10 +626,10 @@ mod tests {
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
-    false, false, false
-    true, false, true
-    true, true, false
-    true, true, true"#]],
+		false, false, false
+		true, false, true
+		true, true, false
+		true, true, true"#]],
 		);
 	}
 }

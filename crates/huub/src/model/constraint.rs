@@ -203,7 +203,7 @@ impl Constraint {
 					.collect();
 				// coeffs * vars <= c
 				slv.add_propagator(IntLinearLessEqBounds::prepare(vars.clone(), *c));
-				// coeffs * vars >= c <=>  -coeffs * vars <= -c
+				// coeffs * vars >= c <=> -coeffs * vars <= -c
 				slv.add_propagator(IntLinearLessEqBounds::prepare(
 					vars.into_iter().map(|v| -v),
 					-c,
