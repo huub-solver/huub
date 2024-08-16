@@ -38,6 +38,7 @@ impl ArrayVarIntElementBounds {
 	}
 }
 
+// todo: incremental propagation for bounds consistency of the element constraint
 impl<P, E, T> Propagator<P, E, T> for ArrayVarIntElementBounds
 where
 	P: PropagationActions,
@@ -52,7 +53,7 @@ where
 		self.action_list.clear();
 	}
 
-	#[tracing::instrument(name = "array_int_element", level = "trace", skip(self, actions))]
+	#[tracing::instrument(name = "array_var_int_element", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		let idx_is_fixed =
 			actions.get_int_lower_bound(self.idx) == actions.get_int_upper_bound(self.idx);
@@ -146,14 +147,19 @@ where
 				self.vars
 					.iter()
 					.enumerate()
-					.map(|(i, &v)| {
+					.filter_map(|(i, &v)| {
 						if actions.check_int_in_domain(self.idx, i as IntVal) {
-							actions.get_int_lit(v, LitMeaning::GreaterEq(min_lb))
+							Some(actions.get_int_lit(v, LitMeaning::GreaterEq(min_lb)))
 						} else {
-							actions.get_int_lit(self.idx, LitMeaning::NotEq(i as IntVal))
+							let l = actions.get_int_lit(self.idx, LitMeaning::NotEq(i as IntVal));
+							if let crate::solver::view::BoolViewInner::Const(false) = l.0 {
+								None
+							} else {
+								Some(l)
+							}
 						}
 					})
-					.collect(),
+					.collect()
 			);
 			actions.set_int_lower_bound(self.y, min_lb, &reason)?;
 		}
@@ -177,11 +183,16 @@ where
 				self.vars
 					.iter()
 					.enumerate()
-					.map(|(i, &v)| {
+					.filter_map(|(i, &v)| {
 						if actions.check_int_in_domain(self.idx, i as IntVal) {
-							actions.get_int_lit(v, LitMeaning::Less(max_ub + 1))
+							Some(actions.get_int_lit(v, LitMeaning::Less(max_ub + 1)))
 						} else {
-							actions.get_int_lit(self.idx, LitMeaning::NotEq(i as IntVal))
+							let l = actions.get_int_lit(self.idx, LitMeaning::NotEq(i as IntVal));
+							if let crate::solver::view::BoolViewInner::Const(false) = l.0 {
+								None 
+							} else {
+								Some(l)
+							}
 						}
 					})
 					.collect(),
@@ -307,5 +318,45 @@ mod tests {
 
 		prb += Constraint::ArrayVarIntElement(vec![a, b, c], idx, y);
 		prb.assert_unsatisfiable();
+	}
+
+
+	#[test]
+	#[traced_test]
+	fn test_idx_with_holes() {
+		let mut slv: Solver<Cadical> = Cnf::default().into();
+		let a = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=3]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=3]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let y = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([3..=4]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let idx = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([0..=0, 3..=3]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+
+		slv.add_propagator(ArrayVarIntElementBounds::prepare(vec![a, b], y, idx));
+		slv.expect_solutions(
+			&[idx, y, a, b],
+			expect![[r#"
+    0, 3, 3, 1
+    0, 3, 3, 2
+    0, 3, 3, 3"#]],
+		);
 	}
 }
