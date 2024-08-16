@@ -204,18 +204,14 @@ impl BoolExpr {
 			BoolExpr::Not(b) => b.to_negated_arg(ctx, slv, map, name),
 			BoolExpr::Or(es) => {
 				let mut lits = Vec::with_capacity(es.len());
-				let mut all_false = true;
 				for e in es {
 					match e.to_arg(ReifContext::Pos, slv, map, None)?.0 {
 						BoolViewInner::Const(false) => {}
 						BoolViewInner::Const(true) => return bind_const(&mut slv.oracle, true),
-						BoolViewInner::Lit(l) => {
-							lits.push(Formula::Atom(l));
-							all_false = false;
-						}
+						BoolViewInner::Lit(l) => lits.push(Formula::Atom(l)),
 					}
 				}
-				if all_false {
+				if lits.is_empty() {
 					return bind_const(&mut slv.oracle, false);
 				}
 
@@ -230,18 +226,14 @@ impl BoolExpr {
 			}
 			BoolExpr::And(es) => {
 				let mut lits = Vec::with_capacity(es.len());
-				let mut all_true = true;
 				for e in es {
 					match e.to_arg(ReifContext::Pos, slv, map, None)?.0 {
 						BoolViewInner::Const(true) => {}
 						BoolViewInner::Const(false) => return bind_const(&mut slv.oracle, false),
-						BoolViewInner::Lit(l) => {
-							lits.push(Formula::Atom(l));
-							all_true = false;
-						}
+						BoolViewInner::Lit(l) => lits.push(Formula::Atom(l)),
 					}
 				}
-				if all_true {
+				if lits.is_empty() {
 					return bind_const(&mut slv.oracle, true);
 				}
 				let name = name.unwrap_or_else(|| slv.oracle.new_var().into());
