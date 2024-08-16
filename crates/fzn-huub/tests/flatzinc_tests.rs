@@ -12,6 +12,8 @@ mod tests {
 	assert_all_solutions!(unify_element_1);
 	assert_all_solutions!(unify_element_2);
 
+	assert_all_solutions!(unify_bool_clause);
+
 	assert_optimal!(jobshop);
 
 	assert_search_order!(bool_indomain_max);

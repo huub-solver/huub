@@ -1,0 +1,23 @@
+{
+  "variables": {
+    "x" : { "type" : "int", "domain" : [[1, 1]] },
+    "y" : { "type" : "int", "domain" : [[3, 3]] },
+    "z" : { "type" : "int", "domain" : [[4, 5]] },
+    "b_1_" : { "type" : "bool", "defined" : true },
+    "b_2_" : { "type" : "bool", "defined" : true },
+    "b_3_" : { "type" : "bool", "defined" : true },
+    "res" : { "type" : "bool", "defined" : true }
+  },
+  "arrays": {
+    "X_INTRODUCED_0_" : { "a": ["x", "y", "z"] }
+  },
+  "constraints": [
+    { "id" : "int_eq_reif", "args" : ["x", 8, "b_1_"], "defines" : "b_1_"},
+    { "id" : "int_eq_reif", "args" : ["y", 5, "b_2_"], "defines" : "b_2_"},
+    { "id" : "int_eq_reif", "args" : ["z", 3, "b_3_"], "defines" : "b_3_"},
+    { "id" : "huub_bool_clause_reif", "args" : [["b_1_", "b_2_", "b_3_"], [], "res"], "defines" : "res"}
+  ],
+  "output": ["x", "y", "z", "res"],
+  "solve": { "method" : "satisfy" },
+  "version": "1.0"
+}
