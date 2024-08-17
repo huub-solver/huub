@@ -11,9 +11,9 @@ use crate::{
 		engine::queue::PriorityLevel,
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 		value::IntVal,
-		view::IntView,
+		view::{BoolViewInner, IntView},
 	},
-	LitMeaning,
+	BoolView, LitMeaning,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -143,24 +143,17 @@ where
 			}
 		}
 		if min_lb > y_lb {
-			let reason = ReasonBuilder::Eager(
-				self.vars
-					.iter()
-					.enumerate()
-					.filter_map(|(i, &v)| {
-						if actions.check_int_in_domain(self.idx, i as IntVal) {
-							Some(actions.get_int_lit(v, LitMeaning::GreaterEq(min_lb)))
-						} else {
-							let l = actions.get_int_lit(self.idx, LitMeaning::NotEq(i as IntVal));
-							if let crate::solver::view::BoolViewInner::Const(false) = l.0 {
-								None
-							} else {
-								Some(l)
-							}
-						}
-					})
-					.collect()
-			);
+			let mut lits = Vec::new();
+			for (i, var) in self.vars.iter().enumerate() {
+				if actions.check_int_in_domain(self.idx, i as IntVal) {
+					lits.push(actions.get_int_lit(*var, LitMeaning::GreaterEq(min_lb)));
+				} else if let BoolView(BoolViewInner::Lit(l)) =
+					actions.get_int_lit(self.idx, LitMeaning::NotEq(i as IntVal))
+				{
+					lits.push(BoolView(BoolViewInner::Lit(l)));
+				}
+			}
+			let reason = ReasonBuilder::Eager(lits);
 			actions.set_int_lower_bound(self.y, min_lb, &reason)?;
 		}
 
@@ -179,24 +172,17 @@ where
 			}
 		}
 		if max_ub < y_ub {
-			let reason = ReasonBuilder::Eager(
-				self.vars
-					.iter()
-					.enumerate()
-					.filter_map(|(i, &v)| {
-						if actions.check_int_in_domain(self.idx, i as IntVal) {
-							Some(actions.get_int_lit(v, LitMeaning::Less(max_ub + 1)))
-						} else {
-							let l = actions.get_int_lit(self.idx, LitMeaning::NotEq(i as IntVal));
-							if let crate::solver::view::BoolViewInner::Const(false) = l.0 {
-								None 
-							} else {
-								Some(l)
-							}
-						}
-					})
-					.collect(),
-			);
+			let mut lits = Vec::new();
+			for (i, var) in self.vars.iter().enumerate() {
+				if actions.check_int_in_domain(self.idx, i as IntVal) {
+					lits.push(actions.get_int_lit(*var, LitMeaning::Less(max_ub + 1)));
+				} else if let BoolView(BoolViewInner::Lit(l)) =
+					actions.get_int_lit(self.idx, LitMeaning::NotEq(i as IntVal))
+				{
+					lits.push(BoolView(BoolViewInner::Lit(l)));
+				}
+			}
+			let reason = ReasonBuilder::Eager(lits);
 			actions.set_int_upper_bound(self.y, max_ub, &reason)?;
 		}
 
@@ -319,7 +305,6 @@ mod tests {
 		prb += Constraint::ArrayVarIntElement(vec![a, b, c], idx, y);
 		prb.assert_unsatisfiable();
 	}
-
 
 	#[test]
 	#[traced_test]
