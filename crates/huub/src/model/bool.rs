@@ -196,8 +196,15 @@ impl BoolExpr {
 			}
 			Ok(view::BoolView(BoolViewInner::Const(val)))
 		};
+		let bind_view = |oracle: &mut Sat, view: view::BoolView| match view.0 {
+			BoolViewInner::Lit(l) => bind_lit(oracle, l),
+			BoolViewInner::Const(c) => bind_const(oracle, c),
+		};
 		match self {
-			BoolExpr::View(v) => Ok(map.get_bool(slv, v)),
+			BoolExpr::View(v) => {
+				let view = map.get_bool(slv, v);
+				bind_view(&mut slv.oracle, view)
+			}
 			BoolExpr::Not(x) => {
 				if let Some(y) = x.push_not_inward() {
 					y.to_arg(slv, map, name)
