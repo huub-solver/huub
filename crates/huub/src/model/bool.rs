@@ -391,6 +391,11 @@ impl Not for &BoolExpr {
 	}
 }
 
+impl From<bool> for BoolExpr {
+	fn from(v: bool) -> Self {
+		Self::View(v.into())
+	}
+}
 impl From<BoolView> for BoolExpr {
 	fn from(v: BoolView) -> Self {
 		Self::View(v)
@@ -415,6 +420,11 @@ pub enum BoolView {
 	IntNotEq(Box<int::IntView>, IntVal),
 }
 
+impl From<bool> for BoolView {
+	fn from(v: bool) -> Self {
+		BoolView::Const(v)
+	}
+}
 impl Not for BoolView {
 	type Output = BoolView;
 	fn not(self) -> Self::Output {
@@ -467,6 +477,18 @@ mod tests {
 		m += BoolExpr::from(!b[0].clone());
 		let (mut slv, _): (Solver, _) = m.to_solver(&InitConfig::default()).unwrap();
 		slv.assert_unsatisfiable();
+
+		// Regression test case: empty and
+		let mut m = Model::default();
+		let b = m.new_bool_var();
+
+		m += BoolExpr::Equiv(vec![
+			b.clone().into(),
+			BoolExpr::And(vec![true.into(), true.into(), true.into()]),
+		]);
+		let (mut slv, map): (Solver, _) = m.to_solver(&InitConfig::default()).unwrap();
+		let vars = vec![map.get(&mut slv, &b.into())];
+		slv.expect_solutions(&vars, expect!["true"]);
 	}
 
 	#[test]
@@ -500,7 +522,19 @@ mod tests {
 		m += BoolExpr::Or(b.iter().cloned().map_into().collect());
 		m += BoolExpr::And(b.iter().cloned().map(|l| (!l).into()).collect());
 		let (mut slv, _): (Solver, _) = m.to_solver(&InitConfig::default()).unwrap();
-		slv.assert_unsatisfiable()
+		slv.assert_unsatisfiable();
+
+		// Regression test case: empty or
+		let mut m = Model::default();
+		let b = m.new_bool_var();
+
+		m += BoolExpr::Equiv(vec![
+			b.clone().into(),
+			BoolExpr::Or(vec![false.into(), false.into(), false.into()]),
+		]);
+		let (mut slv, map): (Solver, _) = m.to_solver(&InitConfig::default()).unwrap();
+		let vars = vec![map.get(&mut slv, &b.into())];
+		slv.expect_solutions(&vars, expect!["false"]);
 	}
 
 	#[test]
