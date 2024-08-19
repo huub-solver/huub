@@ -10,11 +10,7 @@ use rangelist::RangeList;
 use crate::{
 	actions::{explanation::ExplanationActions, inspection::InspectionActions},
 	helpers::{div_ceil, div_floor},
-	model::{
-		bool::BoolView,
-		int::IntView,
-		reformulate::{ReifContext, VariableMap},
-	},
+	model::{bool::BoolView, int::IntView, reformulate::VariableMap},
 	propagator::{
 		all_different_int::AllDifferentIntValue,
 		array_int_minimum::ArrayIntMinimumBounds,
@@ -68,18 +64,12 @@ impl Constraint {
 	{
 		match self {
 			Constraint::AllDifferentInt(v) => {
-				let vars: Vec<_> = v
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
+				let vars: Vec<_> = v.iter().map(|v| v.to_arg(slv, map)).collect();
 				slv.add_propagator(AllDifferentIntValue::prepare(vars));
 				Ok(())
 			}
 			Constraint::Disjunctive(v, d) => {
-				let vars: Vec<_> = v
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
+				let vars: Vec<_> = v.iter().map(|v| v.to_arg(slv, map)).collect();
 				let durs = d
 					.iter()
 					.map(|d| {
@@ -111,8 +101,8 @@ impl Constraint {
 				Ok(())
 			}
 			Constraint::ArrayIntElement(arr, idx, y) => {
-				let idx = idx.to_arg(ReifContext::Mixed, slv, map);
-				let y = y.to_arg(ReifContext::Mixed, slv, map);
+				let idx = idx.to_arg(slv, map);
+				let y = y.to_arg(slv, map);
 
 				let idx_map = arr
 					.iter()
@@ -137,36 +127,27 @@ impl Constraint {
 				Ok(())
 			}
 			Constraint::ArrayIntMinimum(vars, y) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
-				let y = y.to_arg(ReifContext::Mixed, slv, map);
+				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
+				let y = y.to_arg(slv, map);
 				slv.add_propagator(ArrayIntMinimumBounds::prepare(vars, y));
 				Ok(())
 			}
 			Constraint::ArrayIntMaximum(vars, y) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| -v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
-				let y = -y.to_arg(ReifContext::Mixed, slv, map);
+				let vars: Vec<_> = vars.iter().map(|v| -v.to_arg(slv, map)).collect();
+				let y = -y.to_arg(slv, map);
 				slv.add_propagator(ArrayIntMinimumBounds::prepare(vars, y));
 				Ok(())
 			}
 			Constraint::ArrayVarIntElement(vars, idx, y) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
-				let y = y.to_arg(ReifContext::Mixed, slv, map);
-				let idx = idx.to_arg(ReifContext::Mixed, slv, map);
+				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
+				let y = y.to_arg(slv, map);
+				let idx = idx.to_arg(slv, map);
 				// tranform 1-based index into 0-based index array
 				slv.add_propagator(ArrayVarIntElementBounds::prepare(vars, y, idx + (-1)));
 				Ok(())
 			}
 			Constraint::ArrayVarBoolElement(vars, idx, y) => {
-				let idx = idx.to_arg(ReifContext::Mixed, slv, map);
+				let idx = idx.to_arg(slv, map);
 				// If the index is already fixed, implement simple equivalence
 				if let IntViewInner::Const(idx) = idx.0 {
 					let idx = idx as usize;
@@ -175,10 +156,10 @@ impl Constraint {
 				}
 
 				// Evaluate result literal
-				let y = y.to_arg(ReifContext::Mixed, slv, map, None)?;
+				let y = y.to_arg(slv, map, None)?;
 				let arr: Vec<_> = vars
 					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map, None))
+					.map(|v| v.to_arg(slv, map, None))
 					.try_collect()?;
 
 				for (i, l) in arr.iter().enumerate() {
@@ -197,10 +178,7 @@ impl Constraint {
 				Ok(())
 			}
 			Constraint::IntLinEq(vars, c) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
+				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
 				// coeffs * vars <= c
 				slv.add_propagator(IntLinearLessEqBounds::prepare(vars.clone(), *c));
 				// coeffs * vars >= c <=> -coeffs * vars <= -c
@@ -211,11 +189,8 @@ impl Constraint {
 				Ok(())
 			}
 			Constraint::IntLinEqImp(vars, c, r) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
-				let r = r.to_arg(ReifContext::Neg, slv, map, None)?;
+				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
+				let r = r.to_arg(slv, map, None)?;
 				match r.0 {
 					BoolViewInner::Const(true) => {
 						slv.add_propagator(IntLinearLessEqBounds::prepare(vars.clone(), *c));
@@ -237,11 +212,8 @@ impl Constraint {
 				Ok(())
 			}
 			Constraint::IntLinEqReif(vars, c, r) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
-				let r = r.to_arg(ReifContext::Mixed, slv, map, None)?;
+				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
+				let r = r.to_arg(slv, map, None)?;
 				match r.0 {
 					BoolViewInner::Const(true) => {
 						slv.add_propagator(IntLinearLessEqBounds::prepare(vars.clone(), *c));
@@ -266,19 +238,13 @@ impl Constraint {
 				Ok(())
 			}
 			Constraint::IntLinLessEq(vars, c) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Pos, slv, map))
-					.collect();
+				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
 				slv.add_propagator(IntLinearLessEqBounds::prepare(vars, *c));
 				Ok(())
 			}
 			Constraint::IntLinLessEqImp(vars, c, r) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
-				let r = r.to_arg(ReifContext::Neg, slv, map, None)?;
+				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
+				let r = r.to_arg(slv, map, None)?;
 				match r.0 {
 					BoolViewInner::Const(true) => {
 						slv.add_propagator(IntLinearLessEqBounds::prepare(vars, *c));
@@ -291,11 +257,8 @@ impl Constraint {
 				Ok(())
 			}
 			Constraint::IntLinLessEqReif(vars, c, r) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
-				let r = r.to_arg(ReifContext::Mixed, slv, map, None)?;
+				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
+				let r = r.to_arg(slv, map, None)?;
 				match r.0 {
 					BoolViewInner::Const(true) => {
 						slv.add_propagator(IntLinearLessEqBounds::prepare(vars, *c));
@@ -318,19 +281,13 @@ impl Constraint {
 				Ok(())
 			}
 			Constraint::IntLinNotEq(vars, c) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Pos, slv, map))
-					.collect();
+				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
 				slv.add_propagator(IntLinearNotEqValue::prepare(vars, *c));
 				Ok(())
 			}
 			Constraint::IntLinNotEqImp(vars, c, r) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
-				let r = r.to_arg(ReifContext::Neg, slv, map, None)?;
+				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
+				let r = r.to_arg(slv, map, None)?;
 				match r.0 {
 					BoolViewInner::Const(true) => {
 						slv.add_propagator(IntLinearNotEqValue::prepare(vars, *c));
@@ -343,11 +300,8 @@ impl Constraint {
 				Ok(())
 			}
 			Constraint::IntLinNotEqReif(vars, c, r) => {
-				let vars: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
-				let r = r.to_arg(ReifContext::Mixed, slv, map, None)?;
+				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
+				let r = r.to_arg(slv, map, None)?;
 				match r.0 {
 					BoolViewInner::Const(true) => {
 						slv.add_propagator(IntLinearNotEqValue::prepare(vars, *c));
@@ -372,16 +326,16 @@ impl Constraint {
 				Ok(())
 			}
 			Constraint::IntPow(base, exponent, res) => {
-				let base = base.to_arg(ReifContext::Mixed, slv, map);
-				let exponent = exponent.to_arg(ReifContext::Mixed, slv, map);
-				let result = res.to_arg(ReifContext::Mixed, slv, map);
+				let base = base.to_arg(slv, map);
+				let exponent = exponent.to_arg(slv, map);
+				let result = res.to_arg(slv, map);
 				slv.add_propagator(IntPowBounds::prepare(base, exponent, result));
 				Ok(())
 			}
 			Constraint::IntTimes(x, y, z) => {
-				let x = x.to_arg(ReifContext::Mixed, slv, map);
-				let y = y.to_arg(ReifContext::Mixed, slv, map);
-				let z = z.to_arg(ReifContext::Mixed, slv, map);
+				let x = x.to_arg(slv, map);
+				let y = y.to_arg(slv, map);
+				let z = z.to_arg(slv, map);
 				slv.add_propagator(IntTimesBounds::prepare(x, y, z));
 				Ok(())
 			}

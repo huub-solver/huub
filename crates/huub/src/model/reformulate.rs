@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Not};
+use std::collections::HashMap;
 
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
@@ -28,13 +28,6 @@ pub enum ReformulationError {
 	TrivialUnsatisfiable,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum ReifContext {
-	Pos,
-	Neg,
-	Mixed,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Variable {
 	Bool(RawVar),
@@ -61,17 +54,6 @@ impl InitConfig {
 	pub fn int_eager_limit(&self) -> usize {
 		self.int_eager_limit
 			.unwrap_or(Self::DEFAULT_INT_EAGER_LIMIT)
-	}
-}
-
-impl Not for ReifContext {
-	type Output = Self;
-	fn not(self) -> Self::Output {
-		match self {
-			ReifContext::Pos => ReifContext::Neg,
-			ReifContext::Neg => ReifContext::Pos,
-			ReifContext::Mixed => ReifContext::Mixed,
-		}
 	}
 }
 

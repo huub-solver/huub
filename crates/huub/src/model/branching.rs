@@ -5,11 +5,7 @@ use pindakaas::{
 
 use crate::{
 	brancher::Brancher,
-	model::{
-		bool::BoolView,
-		int::IntView,
-		reformulate::{ReifContext, VariableMap},
-	},
+	model::{bool::BoolView, int::IntView, reformulate::VariableMap},
 	solver::SatSolver,
 	Solver,
 };
@@ -50,10 +46,7 @@ impl Branching {
 				slv.add_brancher(Brancher::prepare_bool(vars, *var_sel, *val_sel));
 			}
 			Branching::Int(v, var_sel, val_sel) => {
-				let vars: Vec<_> = v
-					.iter()
-					.map(|v| v.to_arg(ReifContext::Mixed, slv, map))
-					.collect();
+				let vars: Vec<_> = v.iter().map(|v| v.to_arg(slv, map)).collect();
 				slv.add_brancher(Brancher::prepare_int(vars, *var_sel, *val_sel));
 			}
 			Branching::Seq(branchings) => {

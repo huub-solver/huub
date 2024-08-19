@@ -1,4 +1,4 @@
-use std::ops::Not;
+use std::{iter::once, ops::Not};
 
 use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
@@ -8,7 +8,7 @@ use pindakaas::{
 use crate::{
 	model::{
 		int,
-		reformulate::{ReformulationError, ReifContext, VariableMap},
+		reformulate::{ReformulationError, VariableMap},
 	},
 	solver::{
 		view::{self, BoolViewInner},
@@ -46,20 +46,20 @@ impl BoolExpr {
 		match self {
 			BoolExpr::View(bv) => {
 				let v = map.get_bool(slv, bv);
-				match v.0 {
-					BoolViewInner::Const(true) => Ok(()),
-					BoolViewInner::Const(false) => Err(ReformulationError::TrivialUnsatisfiable),
-					BoolViewInner::Lit(l) => slv
-						.oracle
-						.add_clause([l])
-						.map_err(|_| ReformulationError::TrivialUnsatisfiable),
+				slv.add_clause([v])
+			}
+			BoolExpr::Not(x) => {
+				if let Some(y) = x.push_not_inward() {
+					y.constrain(slv, map)
+				} else {
+					let r = x.to_arg(slv, map, None)?;
+					slv.add_clause([!r])
 				}
 			}
-			BoolExpr::Not(x) => (!*x.clone()).constrain(slv, map),
 			BoolExpr::Or(es) => {
 				let mut lits = Vec::with_capacity(es.len());
 				for e in es {
-					match e.to_arg(ReifContext::Pos, slv, map, None)?.0 {
+					match e.to_arg(slv, map, None)?.0 {
 						BoolViewInner::Const(false) => {}
 						BoolViewInner::Const(true) => return Ok(()),
 						BoolViewInner::Lit(l) => lits.push(l),
@@ -71,7 +71,7 @@ impl BoolExpr {
 			}
 			BoolExpr::And(es) => {
 				for e in es {
-					match e.to_arg(ReifContext::Pos, slv, map, None)?.0 {
+					match e.to_arg(slv, map, None)?.0 {
 						BoolViewInner::Const(false) => {
 							return Err(ReformulationError::TrivialUnsatisfiable)
 						}
@@ -85,7 +85,7 @@ impl BoolExpr {
 				Ok(())
 			}
 			BoolExpr::Implies(a, b) => {
-				let a = match a.to_arg(ReifContext::Neg, slv, map, None)?.0 {
+				let a = match a.to_arg(slv, map, None)?.0 {
 					BoolViewInner::Const(true) => {
 						return b.constrain(slv, map);
 					}
@@ -96,7 +96,7 @@ impl BoolExpr {
 				};
 
 				// TODO: Conditional Compilation
-				match b.to_arg(ReifContext::Pos, slv, map, None)?.0 {
+				match b.to_arg(slv, map, None)?.0 {
 					BoolViewInner::Const(true) => Ok(()),
 					BoolViewInner::Const(false) => slv
 						.oracle
@@ -126,9 +126,9 @@ impl BoolExpr {
 							e.constrain(slv, map)?;
 						}
 						Some(view::BoolView(BoolViewInner::Lit(name))) => {
-							res = Some(e.to_arg(ReifContext::Mixed, slv, map, Some(name))?);
+							res = Some(e.to_arg(slv, map, Some(name))?);
 						}
-						None => res = Some(e.to_arg(ReifContext::Mixed, slv, map, None)?),
+						None => res = Some(e.to_arg(slv, map, None)?),
 					}
 				}
 				Ok(())
@@ -137,7 +137,7 @@ impl BoolExpr {
 				let mut lits = Vec::with_capacity(es.len());
 				let mut count = 0;
 				for e in es {
-					match e.to_arg(ReifContext::Mixed, slv, map, None)?.0 {
+					match e.to_arg(slv, map, None)?.0 {
 						BoolViewInner::Const(true) => count += 1,
 						BoolViewInner::Const(false) => {}
 						BoolViewInner::Lit(l) => lits.push(Formula::Atom(l)),
@@ -151,23 +151,20 @@ impl BoolExpr {
 					.encode(&formula, &TseitinEncoder)
 					.map_err(|_| ReformulationError::TrivialUnsatisfiable)
 			}
-			BoolExpr::IfThenElse { cond, then, els } => {
-				match cond.to_arg(ReifContext::Mixed, slv, map, None)?.0 {
-					BoolViewInner::Const(true) => then.constrain(slv, map),
-					BoolViewInner::Const(false) => els.constrain(slv, map),
-					BoolViewInner::Lit(_) => BoolExpr::And(vec![
-						BoolExpr::Or(vec![!*cond.clone(), *then.clone()]),
-						BoolExpr::Or(vec![*cond.clone(), *els.clone()]),
-					])
-					.constrain(slv, map),
-				}
-			}
+			BoolExpr::IfThenElse { cond, then, els } => match cond.to_arg(slv, map, None)?.0 {
+				BoolViewInner::Const(true) => then.constrain(slv, map),
+				BoolViewInner::Const(false) => els.constrain(slv, map),
+				BoolViewInner::Lit(_) => BoolExpr::And(vec![
+					BoolExpr::Or(vec![!*cond.clone(), *then.clone()]),
+					BoolExpr::Or(vec![*cond.clone(), *els.clone()]),
+				])
+				.constrain(slv, map),
+			},
 		}
 	}
 
 	pub(crate) fn to_arg<Sol, Sat>(
 		&self,
-		ctx: ReifContext,
 		slv: &mut Solver<Sat>,
 		map: &mut VariableMap,
 		name: Option<RawLit>,
@@ -201,11 +198,18 @@ impl BoolExpr {
 		};
 		match self {
 			BoolExpr::View(v) => Ok(map.get_bool(slv, v)),
-			BoolExpr::Not(b) => b.to_negated_arg(ctx, slv, map, name),
+			BoolExpr::Not(x) => {
+				if let Some(y) = x.push_not_inward() {
+					y.to_arg(slv, map, name)
+				} else {
+					let r = x.to_arg(slv, map, name.map(|e| !e))?;
+					Ok(!r)
+				}
+			}
 			BoolExpr::Or(es) => {
 				let mut lits = Vec::with_capacity(es.len());
 				for e in es {
-					match e.to_arg(ReifContext::Pos, slv, map, None)?.0 {
+					match e.to_arg(slv, map, None)?.0 {
 						BoolViewInner::Const(false) => {}
 						BoolViewInner::Const(true) => return bind_const(&mut slv.oracle, true),
 						BoolViewInner::Lit(l) => lits.push(Formula::Atom(l)),
@@ -223,7 +227,7 @@ impl BoolExpr {
 			BoolExpr::And(es) => {
 				let mut lits = Vec::with_capacity(es.len());
 				for e in es {
-					match e.to_arg(ReifContext::Pos, slv, map, None)?.0 {
+					match e.to_arg(slv, map, None)?.0 {
 						BoolViewInner::Const(true) => {}
 						BoolViewInner::Const(false) => return bind_const(&mut slv.oracle, false),
 						BoolViewInner::Lit(l) => lits.push(Formula::Atom(l)),
@@ -239,14 +243,14 @@ impl BoolExpr {
 				Ok(view::BoolView(BoolViewInner::Lit(name)))
 			}
 			BoolExpr::Implies(a, b) => {
-				let a = match a.to_arg(ReifContext::Neg, slv, map, None)?.0 {
-					BoolViewInner::Const(true) => return b.to_arg(ctx, slv, map, name),
+				let a = match a.to_arg(slv, map, None)?.0 {
+					BoolViewInner::Const(true) => return b.to_arg(slv, map, name),
 					BoolViewInner::Const(false) => return bind_const(&mut slv.oracle, true),
 					BoolViewInner::Lit(l) => l,
 				};
 
 				// TODO: Conditional encoding
-				match b.to_arg(ctx, slv, map, None)?.0 {
+				match b.to_arg(slv, map, None)?.0 {
 					BoolViewInner::Const(true) => bind_const(&mut slv.oracle, true),
 					BoolViewInner::Const(false) => bind_lit(&mut slv.oracle, !a),
 					BoolViewInner::Lit(b) => {
@@ -271,7 +275,7 @@ impl BoolExpr {
 				let mut lits = Vec::with_capacity(es.len());
 				let mut res = None;
 				for e in es {
-					match e.to_arg(ReifContext::Mixed, slv, map, None)?.0 {
+					match e.to_arg(slv, map, None)?.0 {
 						BoolViewInner::Const(b) => match res {
 							None => res = Some(b),
 							Some(b2) if b != b2 => {
@@ -301,7 +305,7 @@ impl BoolExpr {
 				let mut lits = Vec::with_capacity(es.len());
 				let mut count = 0;
 				for e in es {
-					match e.to_arg(ReifContext::Mixed, slv, map, None)?.0 {
+					match e.to_arg(slv, map, None)?.0 {
 						BoolViewInner::Const(true) => count += 1,
 						BoolViewInner::Const(false) => {}
 						BoolViewInner::Lit(l) => lits.push(Formula::Atom(l)),
@@ -321,47 +325,43 @@ impl BoolExpr {
 				Ok(view::BoolView(BoolViewInner::Lit(name)))
 			}
 			BoolExpr::IfThenElse { cond, then, els } => {
-				match cond.to_arg(ReifContext::Mixed, slv, map, None)?.0 {
-					BoolViewInner::Const(true) => then.to_arg(ctx, slv, map, name),
-					BoolViewInner::Const(false) => then.to_arg(ctx, slv, map, name),
+				match cond.to_arg(slv, map, None)?.0 {
+					BoolViewInner::Const(true) => then.to_arg(slv, map, name),
+					BoolViewInner::Const(false) => then.to_arg(slv, map, name),
 					// TODO: Conditional encoding
 					BoolViewInner::Lit(_) => BoolExpr::And(vec![
 						BoolExpr::Or(vec![!*cond.clone(), *then.clone()]),
 						BoolExpr::Or(vec![*cond.clone(), *els.clone()]),
 					])
-					.to_arg(ctx, slv, map, name),
+					.to_arg(slv, map, name),
 				}
 			}
 		}
 	}
 
-	fn to_negated_arg<Sol, Sat>(
-		&self,
-		ctx: ReifContext,
-		slv: &mut Solver<Sat>,
-		map: &mut VariableMap,
-		name: Option<RawLit>,
-	) -> Result<view::BoolView, ReformulationError>
-	where
-		Sol: PropagatorAccess + SatValuation,
-		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
-	{
-		match self {
-			BoolExpr::View(v) => Ok(!map.get_bool(slv, v)),
-			BoolExpr::Not(v) => v.to_arg(!ctx, slv, map, name),
-			BoolExpr::Or(_)
-			| BoolExpr::And(_)
-			| BoolExpr::Implies(_, _)
-			| BoolExpr::IfThenElse {
-				cond: _,
-				then: _,
-				els: _,
-			} => (!self).to_arg(ctx, slv, map, name),
-			_ => {
-				let r = self.to_arg(ReifContext::Mixed, slv, map, name)?;
-				Ok(!r)
+	fn push_not_inward(&self) -> Option<BoolExpr> {
+		Some(match self {
+			BoolExpr::View(v) => BoolExpr::View(!v),
+			BoolExpr::Not(e) => *e.clone(),
+			BoolExpr::Or(es) => BoolExpr::And(es.iter().map(|e| !e).collect()),
+			BoolExpr::And(es) => BoolExpr::Or(es.iter().map(|e| !e).collect()),
+			BoolExpr::Implies(a, b) => BoolExpr::And(vec![*a.clone(), !*b.clone()]),
+			BoolExpr::IfThenElse { cond, then, els } => BoolExpr::IfThenElse {
+				cond: cond.clone(),
+				then: Box::new(!*then.clone()),
+				els: Box::new(!*els.clone()),
+			},
+			BoolExpr::Xor(es) => {
+				BoolExpr::Xor(once(true.into()).chain(es.iter().cloned()).collect())
 			}
-		}
+			BoolExpr::Equiv(es) => {
+				if let [a, b] = es.as_slice() {
+					BoolExpr::Xor(vec![a.clone(), b.clone()])
+				} else {
+					return None;
+				}
+			}
+		})
 	}
 }
 
@@ -371,14 +371,6 @@ impl Not for BoolExpr {
 		match self {
 			BoolExpr::View(v) => BoolExpr::View(!v),
 			BoolExpr::Not(e) => *e,
-			BoolExpr::Or(es) => BoolExpr::And(es.into_iter().map(|e| !e).collect()),
-			BoolExpr::And(es) => BoolExpr::Or(es.into_iter().map(|e| !e).collect()),
-			BoolExpr::Implies(a, b) => BoolExpr::And(vec![*a, !*b]),
-			BoolExpr::IfThenElse { cond, then, els } => BoolExpr::IfThenElse {
-				cond,
-				then: Box::new(!*then),
-				els: Box::new(!*els),
-			},
 			_ => BoolExpr::Not(Box::new(self)),
 		}
 	}
@@ -664,6 +656,47 @@ mod tests {
 		true, false, true
 		true, true, false
 		true, true, true"#]],
+		);
+	}
+
+	#[test]
+	fn test_bool_not() {
+		// Satisfiable test case that rewrites the expression
+		let mut m = Model::default();
+		let b = m.new_bool_vars(2);
+
+		m += BoolExpr::Not(Box::new(BoolExpr::Xor(b.iter().map_into().collect())));
+		let (mut slv, map): (Solver, _) = m.to_solver(&InitConfig::default()).unwrap();
+		let vars: Vec<_> = b
+			.into_iter()
+			.map(|x| map.get(&mut slv, &x.into()))
+			.collect();
+		slv.expect_solutions(
+			&vars,
+			expect![[r#"
+    false, false
+    true, true"#]],
+		);
+
+		// Simple Satisfiable test case that reifies the test case
+		let mut m = Model::default();
+		let b = m.new_bool_vars(3);
+
+		m += BoolExpr::Not(Box::new(BoolExpr::Equiv(b.iter().map_into().collect())));
+		let (mut slv, map): (Solver, _) = m.to_solver(&InitConfig::default()).unwrap();
+		let vars: Vec<_> = b
+			.into_iter()
+			.map(|x| map.get(&mut slv, &x.into()))
+			.collect();
+		slv.expect_solutions(
+			&vars,
+			expect![[r#"
+    false, false, true
+    false, true, false
+    false, true, true
+    true, false, false
+    true, false, true
+    true, true, false"#]],
 		);
 	}
 }

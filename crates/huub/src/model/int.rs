@@ -8,10 +8,7 @@ use rangelist::{IntervalIterator, RangeList};
 
 use crate::{
 	helpers::linear_transform::LinearTransform,
-	model::{
-		bool::BoolView,
-		reformulate::{ReifContext, VariableMap},
-	},
+	model::{bool::BoolView, reformulate::VariableMap},
 	solver::{view, SatSolver},
 	IntVal, Model, NonZeroIntVal, ReformulationError, Solver,
 };
@@ -19,7 +16,6 @@ use crate::{
 impl IntView {
 	pub(crate) fn to_arg<Sol, Sat>(
 		&self,
-		_ctx: ReifContext,
 		slv: &mut Solver<Sat>,
 		map: &mut VariableMap,
 	) -> view::IntView
