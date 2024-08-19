@@ -55,7 +55,10 @@ impl BoolExpr {
 						.map_err(|_| ReformulationError::TrivialUnsatisfiable),
 				}
 			}
-			BoolExpr::Not(x) => (!*x.clone()).constrain(slv, map),
+			BoolExpr::Not(x) => {
+				BoolExpr::Xor(vec![*x.clone(), BoolExpr::View(BoolView::Const(true))])
+					.constrain(slv, map)
+			}
 			BoolExpr::Or(es) => {
 				let mut lits = Vec::with_capacity(es.len());
 				for e in es {
