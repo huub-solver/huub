@@ -44,11 +44,14 @@ impl LinearTransform {
 		(val - self.offset) % self.scale.get() == 0
 	}
 
-	/// Perform the reverse linear tranformation for a LitMeanning request.
+	/// Perform the reverse linear tranformation for a `LitMeaning`.
 	///
-	/// Note that this performs the correct rounding to maintain the meaning of the literal. When
-	/// equality literals are requested, None is returned when no such integer value exists.
-	pub fn rev_transform_lit(&self, mut lit: LitMeaning) -> Option<LitMeaning> {
+	/// Note that this performs the correct rounding to maintain the meaning of
+	/// the literal.
+	///
+	/// If equality literals are requested that cannot be correctly rounded, then
+	/// a boolean `Err` is returned with wether the `LitMeaning` implicitly holds.
+	pub fn rev_transform_lit(&self, mut lit: LitMeaning) -> Result<LitMeaning, bool> {
 		let mut transformer = *self;
 		if !self.positive_scale() {
 			// Make positive by doing `*-1` on lit meaning and transformer
@@ -64,23 +67,23 @@ impl LinearTransform {
 		match lit {
 			LitMeaning::Eq(i) => {
 				if transformer.rev_remains_integer(i) {
-					Some(LitMeaning::Eq(transformer.rev_transform(i)))
+					Ok(LitMeaning::Eq(transformer.rev_transform(i)))
 				} else {
-					None
+					Err(false)
 				}
 			}
 			LitMeaning::NotEq(i) => {
 				if transformer.rev_remains_integer(i) {
-					Some(LitMeaning::NotEq(transformer.rev_transform(i)))
+					Ok(LitMeaning::NotEq(transformer.rev_transform(i)))
 				} else {
-					None
+					Err(true)
 				}
 			}
-			LitMeaning::GreaterEq(i) => Some(LitMeaning::GreaterEq(div_ceil(
+			LitMeaning::GreaterEq(i) => Ok(LitMeaning::GreaterEq(div_ceil(
 				i - transformer.offset,
 				transformer.scale,
 			))),
-			LitMeaning::Less(i) => Some(LitMeaning::Less(div_ceil(
+			LitMeaning::Less(i) => Ok(LitMeaning::Less(div_ceil(
 				i - transformer.offset,
 				transformer.scale,
 			))),

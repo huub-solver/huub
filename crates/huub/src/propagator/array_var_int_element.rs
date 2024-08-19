@@ -308,4 +308,43 @@ mod tests {
 		prb += Constraint::ArrayVarIntElement(vec![a, b, c], idx, y);
 		prb.assert_unsatisfiable();
 	}
+
+	#[test]
+	#[traced_test]
+	fn test_element_holes() {
+		let mut slv: Solver<Cadical> = Cnf::default().into();
+		let a = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=3]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=3]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let y = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([3..=4]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let idx = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([0..=0, 3..=3]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+
+		slv.add_propagator(ArrayVarIntElementBounds::prepare(vec![a, b], y, idx));
+		slv.expect_solutions(
+			&[idx, y, a, b],
+			expect![[r#"
+    0, 3, 3, 1
+    0, 3, 3, 2
+    0, 3, 3, 3"#]],
+		);
+	}
 }

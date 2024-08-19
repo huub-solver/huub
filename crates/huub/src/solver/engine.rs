@@ -712,10 +712,9 @@ impl ExplanationActions for State {
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
 			var.0
 		{
-			if let Some(m) = transformer.rev_transform_lit(meaning) {
-				meaning = m;
-			} else {
-				return Some(BoolView(BoolViewInner::Const(false)));
+			match transformer.rev_transform_lit(meaning) {
+				Ok(m) => meaning = m,
+				Err(v) => return Some(BoolView(BoolViewInner::Const(v))),
 			}
 		}
 

@@ -273,10 +273,12 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
 			var.0
 		{
-			if let Some(lit) = transformer.rev_transform_lit(lit_req) {
-				lit_req = lit;
-			} else {
-				return Err(Conflict::new(None, reason, self.current_prop));
+			match transformer.rev_transform_lit(lit_req) {
+				Ok(lit) => lit_req = lit,
+				Err(v) => {
+					debug_assert!(!v);
+					return Err(Conflict::new(None, reason, self.current_prop));
+				}
 			}
 		}
 
@@ -304,10 +306,12 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
 			var.0
 		{
-			if let Some(lit) = transformer.rev_transform_lit(lit_req) {
-				lit_req = lit;
-			} else {
-				return Ok(());
+			match transformer.rev_transform_lit(lit_req) {
+				Ok(lit) => lit_req = lit,
+				Err(v) => {
+					debug_assert!(v);
+					return Ok(());
+				}
 			}
 		}
 
