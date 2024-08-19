@@ -4,6 +4,7 @@ use pindakaas::{
 	solver::{PropagatorAccess, Solver as SolverTrait},
 	Formula, Lit as RawLit, TseitinEncoder, Valuation as SatValuation,
 };
+use tracing::trace;
 
 use crate::{
 	model::{
@@ -43,6 +44,7 @@ impl BoolExpr {
 		Sol: PropagatorAccess + SatValuation,
 		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 	{
+		trace!("Constraining {:?}", self);
 		match self {
 			BoolExpr::View(bv) => {
 				let v = map.get_bool(slv, bv);
@@ -55,7 +57,10 @@ impl BoolExpr {
 						.map_err(|_| ReformulationError::TrivialUnsatisfiable),
 				}
 			}
-			BoolExpr::Not(x) => (!*x.clone()).constrain(slv, map),
+			BoolExpr::Not(x) => {
+				BoolExpr::Xor(vec![*x.clone(), BoolExpr::View(BoolView::Const(true))])
+					.constrain(slv, map)
+			}
 			BoolExpr::Or(es) => {
 				let mut lits = Vec::with_capacity(es.len());
 				for e in es {
