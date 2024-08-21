@@ -1,6 +1,6 @@
 use std::{
 	cell::RefCell,
-	collections::BTreeMap,
+	collections::{btree_map::Entry, BTreeMap},
 	fmt::{Debug, Display},
 	ops::Deref,
 	rc::Rc,
@@ -35,8 +35,120 @@ impl Model {
 		let mut map = BTreeMap::<S, ModelView>::new();
 		let mut prb = Model::default();
 
-		// Unify variables (e.g., from `bool_eq` and `int_eq` constraints)
+		// Extract views from `defines_var` constraints
 		let mut processed = vec![false; fzn.constraints.len()];
+		for (i, c) in fzn.constraints.iter().enumerate() {
+			let mut add_view = |map: &mut BTreeMap<_, _>, name: S, view: ModelView| {
+				let e = map.insert(name, view);
+				debug_assert!(e.is_none());
+				processed[i] = true;
+			};
+
+			match (c.id.deref(), c.defines.as_ref()) {
+				("bool2int", Some(l)) => {
+					if let [b, Argument::Literal(Literal::Identifier(x))] = c.args.as_slice() {
+						if x == l {
+							let b = arg_bool(fzn, &mut prb, &mut map, b)?;
+							add_view(&mut map, l.clone(), IntView::from(b).into());
+						}
+					}
+				}
+				("bool_not", Some(l)) => match c.args.as_slice() {
+					[Argument::Literal(Literal::Identifier(x)), b]
+					| [b, Argument::Literal(Literal::Identifier(x))]
+						if x == l =>
+					{
+						let b = arg_bool(fzn, &mut prb, &mut map, b)?;
+						add_view(&mut map, l.clone(), (!b).into());
+					}
+					_ => {}
+				},
+				("int_eq_reif", Some(l)) => match c.args.as_slice() {
+					[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
+					| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
+						if r == l =>
+					{
+						let x = lit_int(fzn, &mut prb, &mut map, x)?;
+						add_view(&mut map, l.clone(), BoolView::IntEq(Box::new(x), *i).into());
+					}
+					_ => {}
+				},
+				("int_le_reif", Some(l)) => match c.args.as_slice() {
+					[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
+						if r == l =>
+					{
+						let x = lit_int(fzn, &mut prb, &mut map, x)?;
+						add_view(
+							&mut map,
+							l.clone(),
+							BoolView::IntGreaterEq(Box::new(x), *i).into(),
+						);
+					}
+					[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
+						if r == l =>
+					{
+						let x = lit_int(fzn, &mut prb, &mut map, x)?;
+						add_view(
+							&mut map,
+							l.clone(),
+							BoolView::IntLessEq(Box::new(x), *i).into(),
+						);
+					}
+					_ => {}
+				},
+				("int_ne_reif", Some(l)) => match c.args.as_slice() {
+					[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
+					| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
+						if r == l =>
+					{
+						let x = lit_int(fzn, &mut prb, &mut map, x)?;
+						add_view(
+							&mut map,
+							l.clone(),
+							BoolView::IntNotEq(Box::new(x), *i).into(),
+						);
+					}
+					_ => {}
+				},
+				("int_lin_eq", Some(l))
+					if c.args
+						.get(1)
+						.map(|v| arg_has_length(fzn, v, 2))
+						.unwrap_or(false) =>
+				'int_lin_eq: {
+					let [coeff, vars, sum] = c.args.as_slice() else {
+						break 'int_lin_eq;
+					};
+					let coeff = arg_array(fzn, coeff)?;
+					let vars = arg_array(fzn, vars)?;
+					let (c, (cy, vy)) = match vars.as_slice() {
+						[Literal::Identifier(v), y] if v == l => {
+							(par_int(fzn, &coeff[0])?, (par_int(fzn, &coeff[1])?, y))
+						}
+						[y, Literal::Identifier(v)] if v == l => {
+							(par_int(fzn, &coeff[1])?, (par_int(fzn, &coeff[0])?, y))
+						}
+						_ => break 'int_lin_eq,
+					};
+					let sum = arg_par_int(fzn, sum)?;
+					// c * l + cy * y = sum === l = (sum - cy * y) / c
+					if cy % c != 0 || sum % c != 0 {
+						break 'int_lin_eq;
+					}
+					let offset = sum / c;
+					let view = if let Some(scale) = NonZeroIntVal::new(-cy / c) {
+						let y = lit_int(fzn, &mut prb, &mut map, vy)?;
+						y * scale + offset
+					} else {
+						IntView::Const(offset)
+					};
+					add_view(&mut map, l.clone(), view.into());
+				}
+				_ => {}
+			}
+		}
+
+		// Unify variables (e.g., from `bool_eq` and `int_eq` constraints)
 		let mut unify_map = BTreeMap::<S, Rc<RefCell<Vec<Literal<S>>>>>::new();
 		let unify_map_find = |map: &BTreeMap<S, Rc<RefCell<Vec<Literal<S>>>>>, a: &Literal<S>| {
 			if let Literal::Identifier(x) = a {
@@ -124,7 +236,8 @@ impl Model {
 			}
 			let ty = &fzn.variables[&k].ty;
 			let li = li.borrow();
-			let var = match ty {
+			// Determine the domain of the list of literals
+			let domain: Option<Literal<S>> = match ty {
 				Type::Bool => {
 					let mut domain = None;
 					for lit in li.iter() {
@@ -140,10 +253,7 @@ impl Model {
 							_ => unreachable!(),
 						};
 					}
-					match domain {
-						Some(b) => ModelView::Bool(BoolView::Const(b)),
-						None => ModelView::Bool(prb.new_bool_var()),
-					}
+					domain.map(Literal::Bool)
 				}
 				Type::Int => {
 					let mut domain = None::<RangeList<IntVal>>;
@@ -169,129 +279,60 @@ impl Model {
 							_ => unreachable!(),
 						};
 					}
-					if let Some(domain) = domain {
-						if domain.is_empty() {
-							return Err(ReformulationError::TrivialUnsatisfiable.into());
-						} else if domain.card() == 1 {
-							ModelView::Int(IntView::Const(*domain.lower_bound().unwrap()))
-						} else {
-							ModelView::Int(prb.new_int_var(domain))
-						}
-					} else {
-						todo!("Variables without a domain are not yet supported")
-					}
+					domain.map(Literal::IntSet)
 				}
 				_ => unreachable!(),
 			};
+			// Find any view that is part of a unified group
+			let var = li
+				.iter()
+				.find_map(|lit| -> Option<ModelView> {
+					if let Literal::Identifier(id) = lit {
+						map.get(id).cloned()
+					} else {
+						None
+					}
+				})
+				// Create a new variable if no view is found
+				.unwrap_or_else(|| match domain {
+					Some(Literal::Bool(b)) => BoolView::Const(b).into(),
+					Some(Literal::IntSet(dom)) => prb.new_int_var(dom).into(),
+					Some(_) => unreachable!(),
+					None => match ty {
+						Type::Bool => prb.new_bool_var().into(),
+						Type::Int => panic!("unbounded integer variables are not supported yet"),
+						_ => unreachable!(),
+					},
+				});
+
+			// Map (or equate) all names in the group to the new variable
 			for lit in li.iter() {
 				if let Literal::Identifier(id) = lit {
-					let x = map.insert(id.clone(), var.clone());
-					debug_assert!(x.is_none());
-				}
-			}
-		}
-
-		// Extract views from `defines_var` constraints
-		for (i, c) in fzn.constraints.iter().enumerate() {
-			let mut mark_processed = || processed[i] = true;
-
-			match (c.id.deref(), c.defines.as_ref()) {
-				("bool2int", Some(l)) => {
-					if let [b, Argument::Literal(Literal::Identifier(x))] = c.args.as_slice() {
-						if x == l {
-							let b = arg_bool(fzn, &mut prb, &mut map, b)?;
-							let _ = map.insert(l.clone(), IntView::from(b).into());
-							mark_processed();
+					match map.entry(id.clone()) {
+						Entry::Vacant(e) => {
+							let _ = e.insert(var.clone());
 						}
+						Entry::Occupied(e) => match ty {
+							Type::Bool => {
+								let (ModelView::Bool(new), ModelView::Bool(existing)) =
+									(var.clone(), e.get().clone())
+								else {
+									unreachable!()
+								};
+								prb += BoolExpr::Equiv(vec![new.into(), existing.into()])
+							}
+							Type::Int => {
+								let (ModelView::Int(new), ModelView::Int(existing)) =
+									(var.clone(), e.get().clone())
+								else {
+									unreachable!()
+								};
+								prb += Constraint::IntLinEq(vec![new, existing * -1], 0)
+							}
+							_ => unreachable!(),
+						},
 					}
 				}
-				("bool_not", Some(l)) => match c.args.as_slice() {
-					[Argument::Literal(Literal::Identifier(x)), b]
-					| [b, Argument::Literal(Literal::Identifier(x))]
-						if x == l =>
-					{
-						let b = arg_bool(fzn, &mut prb, &mut map, b)?;
-						let _ = map.insert(l.clone(), (!b).into());
-						mark_processed();
-					}
-					_ => {}
-				},
-				("int_eq_reif", Some(l)) => match c.args.as_slice() {
-					[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
-					| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
-						if r == l =>
-					{
-						let x = lit_int(fzn, &mut prb, &mut map, x)?;
-						let _ = map.insert(l.clone(), BoolView::IntEq(Box::new(x), *i).into());
-						mark_processed();
-					}
-					_ => {}
-				},
-				("int_le_reif", Some(l)) => match c.args.as_slice() {
-					[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
-						if r == l =>
-					{
-						let x = lit_int(fzn, &mut prb, &mut map, x)?;
-						let _ =
-							map.insert(l.clone(), BoolView::IntGreaterEq(Box::new(x), *i).into());
-						mark_processed();
-					}
-					[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
-						if r == l =>
-					{
-						let x = lit_int(fzn, &mut prb, &mut map, x)?;
-						let _ = map.insert(l.clone(), BoolView::IntLessEq(Box::new(x), *i).into());
-						mark_processed();
-					}
-					_ => {}
-				},
-				("int_ne_reif", Some(l)) => match c.args.as_slice() {
-					[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
-					| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
-						if r == l =>
-					{
-						let x = lit_int(fzn, &mut prb, &mut map, x)?;
-						let _ = map.insert(l.clone(), BoolView::IntNotEq(Box::new(x), *i).into());
-						mark_processed();
-					}
-					_ => {}
-				},
-				("int_lin_eq", Some(l))
-					if c.args
-						.get(1)
-						.map(|v| arg_has_length(fzn, v, 2))
-						.unwrap_or(false) =>
-				'int_lin_eq: {
-					let [coeff, vars, sum] = c.args.as_slice() else {
-						break 'int_lin_eq;
-					};
-					let coeff = arg_array(fzn, coeff)?;
-					let vars = arg_array(fzn, vars)?;
-					let (c, (cy, vy)) = match vars.as_slice() {
-						[Literal::Identifier(v), y] if v == l => {
-							(par_int(fzn, &coeff[0])?, (par_int(fzn, &coeff[1])?, y))
-						}
-						[y, Literal::Identifier(v)] if v == l => {
-							(par_int(fzn, &coeff[1])?, (par_int(fzn, &coeff[0])?, y))
-						}
-						_ => break 'int_lin_eq,
-					};
-					let sum = arg_par_int(fzn, sum)?;
-					// c * l + cy * y = sum === l = (sum - cy * y) / c
-					if cy % c != 0 || sum % c != 0 {
-						break 'int_lin_eq;
-					}
-					let offset = sum / c;
-					let view = if let Some(scale) = NonZeroIntVal::new(-cy / c) {
-						let y = lit_int(fzn, &mut prb, &mut map, vy)?;
-						y * scale + offset
-					} else {
-						IntView::Const(offset)
-					};
-					let _ = map.insert(l.clone(), view.into());
-					mark_processed();
-				}
-				_ => {}
 			}
 		}
 

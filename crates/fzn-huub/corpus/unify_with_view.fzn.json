@@ -1,0 +1,19 @@
+{
+  "variables": {
+    "x" : { "type" : "bool"},
+    "y" : { "type" : "bool"},
+    "z" : { "type" : "bool"},
+    "ivar" : { "type" : "int", "domain" : [[1, 3]]}
+  },
+  "arrays": {
+
+  },
+  "constraints": [
+    { "id" : "bool_eq", "args" : ["x", "y"], "ann" : ["domain_change_constraint"]},
+    { "id" : "bool_eq", "args" : ["x", "z"], "ann" : ["domain_change_constraint"]}, 
+    { "id" : "int_le_reif", "args" : ["ivar", 2, "x"], "defines" : "x"}
+  ],
+  "output": ["x", "y", "z", "ivar"],
+  "solve": { "method" : "satisfy"},
+  "version": "1.0"
+}
