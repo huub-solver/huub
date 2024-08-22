@@ -200,6 +200,15 @@ impl Model {
 			match c.id.deref() {
 				"bool_eq" => {
 					if let [Argument::Literal(a), Argument::Literal(b)] = c.args.as_slice() {
+						if let (Literal::Identifier(a_s), Literal::Identifier(b_s)) = (a, b) {
+							if map.contains_key(a_s) && map.contains_key(b_s) {
+								let a_lit = lit_bool(fzn, &mut prb, &mut map, a)?;
+								let b_lit = lit_bool(fzn, &mut prb, &mut map, b)?;
+								prb += BoolExpr::Equiv(vec![a_lit.into(), b_lit.into()]);
+								mark_processed();
+								continue;
+							}
+						}
 						record_unify(&mut unify_map, a, b);
 						mark_processed();
 					}
