@@ -700,7 +700,7 @@ impl Model {
 						let r = arg_bool(fzn, &mut prb, &mut map, r)?;
 						prb += match c.id.deref() {
 							"int_eq_imp" => Constraint::IntLinEqImp,
-							"int_eq_reif" => Constraint::IntLinEqImp,
+							"int_eq_reif" => Constraint::IntLinEqReif,
 							"int_le_imp" => Constraint::IntLinLessEqImp,
 							"int_le_reif" => Constraint::IntLinLessEqReif,
 							"int_ne_imp" => Constraint::IntLinNotEqImp,
