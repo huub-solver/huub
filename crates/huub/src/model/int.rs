@@ -457,7 +457,7 @@ impl Model {
 				Ok(())
 			}
 			IntView::Const(v) => {
-				if mask.contains(&v) {
+				if !mask.contains(&v) {
 					Err(ReformulationError::TrivialUnsatisfiable)
 				} else {
 					Ok(())
