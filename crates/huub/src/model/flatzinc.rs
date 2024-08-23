@@ -230,10 +230,8 @@ impl Model {
 				_ => {}
 			}
 		}
-		for (k, li) in unify_map {
-			if map.contains_key(&k) {
-				continue;
-			}
+
+		while let Some((k, li)) = unify_map.pop_first() {
 			let ty = &fzn.variables[&k].ty;
 			let li = li.borrow();
 			// Determine the domain of the list of literals
@@ -312,26 +310,32 @@ impl Model {
 						Entry::Vacant(e) => {
 							let _ = e.insert(var.clone());
 						}
-						Entry::Occupied(e) => match ty {
-							Type::Bool => {
-								let (ModelView::Bool(new), ModelView::Bool(existing)) =
-									(var.clone(), e.get().clone())
-								else {
-									unreachable!()
-								};
-								prb += BoolExpr::Equiv(vec![new.into(), existing.into()])
+						Entry::Occupied(e) => {
+							if var != *e.get() {
+								match ty {
+									Type::Bool => {
+										let (ModelView::Bool(new), ModelView::Bool(existing)) =
+											(var.clone(), e.get().clone())
+										else {
+											unreachable!()
+										};
+										prb += BoolExpr::Equiv(vec![new.into(), existing.into()])
+									}
+									Type::Int => {
+										let (ModelView::Int(new), ModelView::Int(existing)) =
+											(var.clone(), e.get().clone())
+										else {
+											unreachable!()
+										};
+										prb += Constraint::IntLinEq(vec![new, existing * -1], 0)
+									}
+									_ => unreachable!(),
+								}
 							}
-							Type::Int => {
-								let (ModelView::Int(new), ModelView::Int(existing)) =
-									(var.clone(), e.get().clone())
-								else {
-									unreachable!()
-								};
-								prb += Constraint::IntLinEq(vec![new, existing * -1], 0)
-							}
-							_ => unreachable!(),
-						},
+						}
 					}
+					let x = unify_map.remove(id);
+					debug_assert!(x.is_some() || *id == k);
 				}
 			}
 		}

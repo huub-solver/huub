@@ -11,7 +11,8 @@ mod tests {
 	assert_all_solutions!(unification);
 	assert_all_solutions!(unify_element_1);
 	assert_all_solutions!(unify_element_2);
-	assert_all_solutions!(unify_with_view);
+	assert_all_solutions!(unify_with_view_1);
+	assert_all_solutions!(unify_with_view_2);
 
 	assert_optimal!(jobshop);
 
