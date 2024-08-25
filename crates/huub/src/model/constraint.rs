@@ -481,6 +481,29 @@ impl Model {
 				}
 				Some(Constraint::IntLinLessEq(args, cons))
 			}
+			Constraint::IntLinEq(args, cons) => {
+				let lb_sum = args
+					.iter()
+					.map(|v| self.get_int_lower_bound(v))
+					.fold(cons, |sum, val| sum - val);
+
+				for v in &args {
+					let ub = lb_sum + self.get_int_lower_bound(v);
+					self.set_int_upper_bound(v, ub, con)?
+				}
+
+				let ub_sum = args
+					.iter()
+					.map(|v| self.get_int_upper_bound(v))
+					.fold(cons, |sum, val| sum - val);
+
+				for v in &args {
+					let lb = ub_sum + self.get_int_upper_bound(v);
+					self.set_int_lower_bound(v, lb, con)?
+				}
+
+				Some(Constraint::IntLinEq(args, cons))
+			}
 			Constraint::IntTimes(x, y, z) => {
 				let x_lb = self.get_int_lower_bound(&x);
 				let x_ub = self.get_int_upper_bound(&x);

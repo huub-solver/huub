@@ -8,7 +8,7 @@ use expect_test::ExpectFile;
 
 const FZN_COMPLETE: &str = "==========\n";
 const FZN_SEPERATOR: &str = "----------\n";
-// const FZN_UNSATISFIABLE: &str = "=====UNSATISFIABLE=====\n";
+const FZN_UNSATISFIABLE: &str = "=====UNSATISFIABLE=====\n";
 
 fn cargo_bin(name: &str) -> PathBuf {
 	let env_var = format!("CARGO_BIN_EXE_{}", name);
@@ -85,6 +85,20 @@ pub(crate) fn check_final(file: &str, expect_optimal: bool, expect_sol: ExpectFi
 	expect_sol.assert_eq(slice);
 }
 
+pub(crate) fn check_unsat(file: &str) {
+	let output = fzn_huub(&[file]).output().unwrap();
+	assert!(
+		output.status.success(),
+		"Solver did not finish with success exit code"
+	);
+	let stdout = String::from_utf8(output.stdout).unwrap();
+	let slice: &str = stdout.as_str();
+	assert!(
+		slice.ends_with(FZN_UNSATISFIABLE),
+		"Solver did not finish with unsat marker"
+	);
+}
+
 pub(crate) fn fzn_huub(args: &[&str]) -> Command {
 	let mut cmd = cargo_cmd(env!("CARGO_PKG_NAME"));
 	let _ = cmd.args(args);
@@ -104,6 +118,16 @@ macro_rules! assert_all_solutions {
 	};
 }
 pub(crate) use assert_all_solutions;
+
+macro_rules! assert_unsat {
+	($file:ident) => {
+		#[test]
+		fn $file() {
+			$crate::helpers::check_unsat(&format!("./corpus/{}.fzn.json", stringify!($file)))
+		}
+	};
+}
+pub(crate) use assert_unsat;
 
 macro_rules! assert_optimal {
 	($file:ident) => {

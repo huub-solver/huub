@@ -1,0 +1,19 @@
+{
+  "variables": {
+    "a" : { "type" : "bool" },
+    "b" : { "type" : "bool" },
+    "x" : { "type" : "int", "domain" : [[0, 1]], "defined" : true },
+    "y" : { "type" : "int", "domain" : [[0, 1]], "defined" : true  }
+  },
+  "arrays": {
+    
+  },
+  "constraints": [
+    { "id" : "int_lin_eq", "args" : [[1, 1], ["x", "y"], -1]},
+    { "id" : "bool2int", "args" : ["a", "x"], "defines" : "x"},
+    { "id" : "bool2int", "args" : ["b", "y"], "defines" : "y"}
+  ],
+  "output": ["x", "y", "a", "b"],
+  "solve": { "method" : "satisfy" },
+  "version": "1.0"
+}
