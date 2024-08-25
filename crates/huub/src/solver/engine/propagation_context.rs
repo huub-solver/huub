@@ -121,7 +121,7 @@ impl<'a> PropagationContext<'a> {
 			LitMeaning::GreaterEq(i) if i > 1 => {
 				Err(Conflict::new(None, reason, self.current_prop))
 			}
-			LitMeaning::Less(i) if i < 0 => Err(Conflict::new(None, reason, self.current_prop)),
+			LitMeaning::Less(i) if i <= 0 => Err(Conflict::new(None, reason, self.current_prop)),
 			LitMeaning::NotEq(_) | LitMeaning::GreaterEq(_) | LitMeaning::Less(_) => Ok(()),
 		}
 	}
