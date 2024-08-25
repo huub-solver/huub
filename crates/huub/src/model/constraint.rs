@@ -266,14 +266,14 @@ impl Constraint {
 					BoolViewInner::Const(false) => {
 						slv.add_propagator(IntLinearLessEqBounds::prepare(
 							vars.into_iter().map(|v| -v),
-							-c + 1,
+							-(c + 1),
 						));
 					}
 					BoolViewInner::Lit(r) => {
 						slv.add_propagator(IntLinearLessEqImpBounds::prepare(vars.clone(), *c, r));
 						slv.add_propagator(IntLinearLessEqImpBounds::prepare(
 							vars.into_iter().map(|v| -v),
-							-c + 1,
+							-(c + 1),
 							!r,
 						));
 					}
