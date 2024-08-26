@@ -1,6 +1,9 @@
 use crate::{
 	actions::explanation::ExplanationActions,
-	propagator::{conflict::Conflict, reason::ReasonBuilder},
+	propagator::{
+		conflict::Conflict,
+		reason::{LazyReason, ReasonBuilder},
+	},
 	BoolView, IntVal, IntView,
 };
 
@@ -9,31 +12,33 @@ pub(crate) trait PropagationActions: ExplanationActions {
 		&mut self,
 		bv: BoolView,
 		val: bool,
-		reason: &ReasonBuilder,
+		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict>;
 
 	fn set_int_lower_bound(
 		&mut self,
 		var: IntView,
 		val: IntVal,
-		reason: &ReasonBuilder,
+		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict>;
 	fn set_int_upper_bound(
 		&mut self,
 		var: IntView,
 		val: IntVal,
-		reason: &ReasonBuilder,
+		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict>;
 	fn set_int_val(
 		&mut self,
 		var: IntView,
 		val: IntVal,
-		reason: &ReasonBuilder,
+		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict>;
 	fn set_int_not_eq(
 		&mut self,
 		var: IntView,
 		val: IntVal,
-		reason: &ReasonBuilder,
+		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict>;
+
+	fn deferred_reason(&self, data: u64) -> LazyReason;
 }

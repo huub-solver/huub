@@ -3,10 +3,7 @@ use crate::{
 		explanation::ExplanationActions, initialization::InitializationActions,
 		trailing::TrailingActions,
 	},
-	propagator::{
-		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions,
-		Propagator,
-	},
+	propagator::{conflict::Conflict, int_event::IntEvent, PropagationActions, Propagator},
 	solver::{
 		engine::{int_var::LitMeaning, queue::PriorityLevel},
 		poster::{BoxedPropagator, Poster, QueuePreferences},
@@ -46,11 +43,11 @@ where
 		while let Some(i) = self.action_list.pop() {
 			let var = self.vars[i as usize];
 			let val = actions.get_int_val(var).unwrap();
-			let reason = ReasonBuilder::Simple(actions.get_int_lit(var, LitMeaning::Eq(val)));
+			let reason = actions.get_int_lit(var, LitMeaning::Eq(val));
 			for (j, &v) in self.vars.iter().enumerate() {
 				let j_val = actions.get_int_val(v);
 				if (j as u32) != i && (j_val.is_none() || j_val.unwrap() == val) {
-					actions.set_int_not_eq(v, val, &reason)?
+					actions.set_int_not_eq(v, val, reason)?
 				}
 			}
 		}

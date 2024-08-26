@@ -3,8 +3,8 @@ use std::{error::Error, fmt};
 use pindakaas::Lit as RawLit;
 
 use crate::{
+	actions::explanation::ExplanationActions,
 	propagator::reason::{Reason, ReasonBuilder},
-	solver::engine::PropRef,
 };
 
 /// Conflict is an error type returned when a variable is assigned two
@@ -22,8 +22,12 @@ pub(crate) struct Conflict {
 
 impl Conflict {
 	/// Create a new conflict with the given reason
-	pub(crate) fn new(subject: Option<RawLit>, reason: &ReasonBuilder, prop: PropRef) -> Self {
-		match Reason::build_reason(reason, prop) {
+	pub(crate) fn new<A: ExplanationActions>(
+		actions: &mut A,
+		subject: Option<RawLit>,
+		reason: impl ReasonBuilder<A>,
+	) -> Self {
+		match reason.build_reason(actions) {
 			Ok(reason) => Self { subject, reason },
 			Err(true) => {
 				if let Some(subject) = subject {

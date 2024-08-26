@@ -1,11 +1,11 @@
+use itertools::Itertools;
 use pindakaas::Lit as RawLit;
 
 use crate::{
 	actions::{initialization::InitializationActions, trailing::TrailingActions},
 	helpers::opt_field::OptField,
 	propagator::{
-		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, ExplanationActions,
-		PropagationActions, Propagator,
+		conflict::Conflict, int_event::IntEvent, ExplanationActions, PropagationActions, Propagator,
 	},
 	solver::{
 		engine::queue::PriorityLevel,
@@ -113,16 +113,12 @@ where
 		// propagate the reified variable if the sum of lower bounds is greater than the right-hand-side value
 		if let Some(r) = self.reification.get() {
 			if sum < 0 {
-				let clause = self
-					.vars
-					.iter()
-					.map(|v| actions.get_int_lower_bound_lit(*v))
-					.collect();
-				actions.set_bool_val(
-					BoolView(BoolViewInner::Lit(*r)),
-					false,
-					&ReasonBuilder::Eager(clause),
-				)?
+				actions.set_bool_val(BoolView(BoolViewInner::Lit(*r)), false, |a: &mut P| {
+					self.vars
+						.iter()
+						.map(|v| a.get_int_lower_bound_lit(*v))
+						.collect_vec()
+				})?
 			}
 			// skip the remaining propagation if the reified variable is not assigned to true
 			if !actions
@@ -135,9 +131,9 @@ where
 
 		// propagate the upper bound of the variables
 		for (j, &v) in self.vars.iter().enumerate() {
-			let reason = ReasonBuilder::Lazy(j as u64);
+			let reason = actions.deferred_reason(j as u64);
 			let ub = sum + actions.get_int_lower_bound(v);
-			actions.set_int_upper_bound(v, ub, &reason)?
+			actions.set_int_upper_bound(v, ub, reason)?
 		}
 		Ok(())
 	}

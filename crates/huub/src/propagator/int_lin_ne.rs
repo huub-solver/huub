@@ -81,28 +81,26 @@ impl IntLinearNotEqImpValue {
 }
 
 impl<const R: usize> IntLinearNotEqValueImpl<R> {
-	fn reason<P: PropagationActions>(&self, actions: &mut P, data: usize) -> ReasonBuilder {
-		let mut conj: Vec<_> = self
-			.vars
-			.iter()
-			.enumerate()
-			.filter_map(|(i, v)| {
-				if data != i {
-					Some(actions.get_int_val_lit(*v).unwrap())
-				} else {
-					None
+	fn reason<A: ExplanationActions>(&self, data: usize) -> impl ReasonBuilder<A> + '_ {
+		move |actions: &mut A| {
+			let mut conj: Vec<_> = self
+				.vars
+				.iter()
+				.enumerate()
+				.filter_map(|(i, v)| {
+					if data != i {
+						Some(actions.get_int_val_lit(*v).unwrap())
+					} else {
+						None
+					}
+				})
+				.collect();
+			if let Some(&r) = self.reification.get() {
+				if data != self.vars.len() {
+					conj.push(BoolView(BoolViewInner::Lit(r)))
 				}
-			})
-			.collect();
-		if let Some(&r) = self.reification.get() {
-			if data != self.vars.len() {
-				conj.push(BoolView(BoolViewInner::Lit(r)))
 			}
-		}
-		if conj.len() == 1 {
-			ReasonBuilder::Simple(conj.pop().unwrap())
-		} else {
-			ReasonBuilder::Eager(conj)
+			conj
 		}
 	}
 }
@@ -147,16 +145,14 @@ where
 					))) == Some(true)
 			);
 			let val = self.violation - sum;
-			let reason = self.reason(actions, i);
-			actions.set_int_not_eq(*v, val, &reason)
+			actions.set_int_not_eq(*v, val, self.reason(i))
 		} else if sum == self.violation {
 			let bv = if let Some(r) = self.reification.get() {
 				BoolView(BoolViewInner::Lit(*r))
 			} else {
 				true.into()
 			};
-			let reason = self.reason(actions, self.vars.len());
-			actions.set_bool_val(bv, false, &reason)
+			actions.set_bool_val(bv, false, self.reason(self.vars.len()))
 		} else {
 			Ok(())
 		}

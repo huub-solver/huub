@@ -5,7 +5,7 @@ use crate::{
 	},
 	helpers::{div_ceil, div_floor},
 	propagator::{
-		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions,
+		conflict::Conflict, int_event::IntEvent, reason::CachedReason, PropagationActions,
 		Propagator,
 	},
 	solver::{
@@ -58,18 +58,20 @@ where
 
 		// Calculate possible bounds for the product `z`
 		let bounds = [x_lb * y_lb, x_lb * y_ub, x_ub * y_lb, x_ub * y_ub];
-		let reason = ReasonBuilder::Eager(vec![x_lb_lit, x_ub_lit, y_lb_lit, y_ub_lit]);
+		let reason_storage = [x_lb_lit, x_ub_lit, y_lb_lit, y_ub_lit];
+		let mut reason = CachedReason::new(&reason_storage[..]);
 		// z >= x * y
 		let min = bounds.iter().min().unwrap();
-		actions.set_int_lower_bound(self.z, *min, &reason)?;
+		actions.set_int_lower_bound(self.z, *min, &mut reason)?;
 		// z <= x * y
 		let max = bounds.iter().max().unwrap();
-		actions.set_int_upper_bound(self.z, *max, &reason)?;
+		actions.set_int_upper_bound(self.z, *max, &mut reason)?;
 
 		if y_lb > 0 || y_ub < 0 {
 			// Calculate possible bounds for the first factor `x`
 			let bounds = [(z_lb, y_lb), (z_lb, y_ub), (z_ub, y_lb), (z_ub, y_ub)];
-			let reason = ReasonBuilder::Eager(vec![z_lb_lit, z_ub_lit, y_lb_lit, y_ub_lit]);
+			let reason_storage = [z_lb_lit, z_ub_lit, y_lb_lit, y_ub_lit];
+			let mut reason = CachedReason::new(&reason_storage[..]);
 			// x >= z / y
 			let min = bounds
 				.iter()
@@ -79,7 +81,7 @@ where
 				})
 				.min()
 				.unwrap();
-			actions.set_int_lower_bound(self.x, min, &reason)?;
+			actions.set_int_lower_bound(self.x, min, &mut reason)?;
 			// x <= z / y
 			let max = bounds
 				.iter()
@@ -89,13 +91,14 @@ where
 				})
 				.max()
 				.unwrap();
-			actions.set_int_upper_bound(self.x, max, &reason)?;
+			actions.set_int_upper_bound(self.x, max, &mut reason)?;
 		}
 
 		if x_lb > 0 || x_ub < 0 {
 			// Calculate possible bounds for the first factor `y`
 			let bounds = [(z_lb, x_lb), (z_lb, x_ub), (z_ub, x_lb), (z_ub, x_ub)];
-			let reason = ReasonBuilder::Eager(vec![z_lb_lit, z_ub_lit, x_lb_lit, x_ub_lit]);
+			let reason_storage = [z_lb_lit, z_ub_lit, x_lb_lit, x_ub_lit];
+			let mut reason = CachedReason::new(&reason_storage[..]);
 			// y >= z / x
 			let min = bounds
 				.iter()
@@ -105,7 +108,7 @@ where
 				})
 				.min()
 				.unwrap();
-			actions.set_int_lower_bound(self.y, min, &reason)?;
+			actions.set_int_lower_bound(self.y, min, &mut reason)?;
 			// y <= z / x
 			let max = bounds
 				.iter()
@@ -115,7 +118,7 @@ where
 				})
 				.max()
 				.unwrap();
-			actions.set_int_upper_bound(self.y, max, &reason)?;
+			actions.set_int_upper_bound(self.y, max, &mut reason)?;
 		}
 		Ok(())
 	}

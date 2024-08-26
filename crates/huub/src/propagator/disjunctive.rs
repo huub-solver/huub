@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use tracing::trace;
 
 use crate::{
@@ -12,7 +13,7 @@ use crate::{
 	solver::{
 		engine::{queue::PriorityLevel, trail::TrailedInt},
 		poster::{BoxedPropagator, Poster, QueuePreferences},
-		view::{BoolView, BoolViewInner, IntView},
+		view::{BoolViewInner, IntView},
 	},
 	Conjunction,
 };
@@ -288,52 +289,53 @@ impl DisjunctiveEdgeFinding {
 
 	// Explain why the current set of tasks in the tree must be completed after time_bound
 	#[inline]
-	fn explain_earliest_completion_time<P: PropagationActions>(
+	fn explain_earliest_completion_time<A: ExplanationActions>(
 		&self,
 		time_bound: i32,
-		actions: &mut P,
-	) -> Vec<BoolView> {
-		let mut binding_task_idx = self.ot_tree.binding_task(time_bound, 0);
-		let binding_task = self.tasks_sorted_earliest_start[binding_task_idx];
-		let lb = self.earliest_start_time(binding_task, actions);
-		let mut slack = time_bound - lb;
-		let mut e_tasks = Vec::new();
-		trace!(
-			"conflict due to overload within the window [{}..{}]",
-			lb,
-			time_bound
-		);
-		// collect sufficient energy within the window [lb, time_bound)
-		while binding_task_idx < self.tasks_sorted_earliest_start.len() {
-			let xj = self.tasks_sorted_earliest_start[binding_task_idx];
-			if self.earliest_start_time(xj, actions) >= lb
-				&& self.latest_completion_time(xj, actions) < time_bound
-			{
-				e_tasks.push(xj);
-				slack -= self.durations[xj] as i32;
-				if slack <= 0 {
-					break;
+	) -> impl ReasonBuilder<A> + '_ {
+		move |actions: &mut A| {
+			let mut binding_task_idx = self.ot_tree.binding_task(time_bound, 0);
+			let binding_task = self.tasks_sorted_earliest_start[binding_task_idx];
+			let lb = self.earliest_start_time(binding_task, actions);
+			let mut slack = time_bound - lb;
+			let mut e_tasks = Vec::new();
+			trace!(
+				"conflict due to overload within the window [{}..{}]",
+				lb,
+				time_bound
+			);
+			// collect sufficient energy within the window [lb, time_bound)
+			while binding_task_idx < self.tasks_sorted_earliest_start.len() {
+				let xj = self.tasks_sorted_earliest_start[binding_task_idx];
+				if self.earliest_start_time(xj, actions) >= lb
+					&& self.latest_completion_time(xj, actions) < time_bound
+				{
+					e_tasks.push(xj);
+					slack -= self.durations[xj] as i32;
+					if slack <= 0 {
+						break;
+					}
 				}
+				binding_task_idx += 1;
 			}
-			binding_task_idx += 1;
+			trace!(slack = slack, "slack");
+			trace!(e_tasks = ?e_tasks, "tasks contributing to the overload");
+			e_tasks
+				.iter()
+				.flat_map(|&i| {
+					[
+						actions.get_int_lower_bound_lit(self.start_times[i]),
+						actions.get_int_upper_bound_lit(self.start_times[i]),
+						// generalized explanations:
+						// actions.get_int_lit(self.start_times[i], LitMeaning::GreaterEq(lb as i64)),
+						// actions.get_int_lit(
+						// 	self.start_times[i],
+						// 	LitMeaning::Less((time_bound - slack) as i64 - self.durations[i]),
+						// ),
+					]
+				})
+				.collect_vec()
 		}
-		trace!(slack = slack, "slack");
-		trace!(e_tasks = ?e_tasks, "tasks contributing to the overload");
-		e_tasks
-			.iter()
-			.map(|&i| {
-				(
-					actions.get_int_lower_bound_lit(self.start_times[i]),
-					actions.get_int_upper_bound_lit(self.start_times[i]),
-					// generalized explanations:
-					// actions.get_int_lit(self.start_times[i], LitMeaning::GreaterEq(lb as i64)),
-					// actions.get_int_lit(
-					// 	self.start_times[i],
-					// 	LitMeaning::Less((time_bound - slack) as i64 - self.durations[i]),
-					// ),
-				)
-			})
-			.fold(Vec::new(), |acc, (a, b)| [acc, vec![a, b]].concat())
 	}
 
 	fn propagate_lower_bounds<P: PropagationActions>(
@@ -377,11 +379,10 @@ impl DisjunctiveEdgeFinding {
 		let lct_task = self.tasks_sorted_lastest_completion[0];
 		let time_bound = self.latest_completion_time(lct_task, actions);
 		if self.ot_tree.root().earliest_completion > time_bound {
-			let clause = self.explain_earliest_completion_time(time_bound + 1, actions);
 			actions.set_int_lower_bound(
 				self.start_times[lct_task],
 				self.ot_tree.root().earliest_completion as i64 - self.durations[lct_task],
-				&ReasonBuilder::Eager(clause),
+				self.explain_earliest_completion_time(time_bound + 1),
 			)?;
 		}
 		self.ot_tree
@@ -394,14 +395,13 @@ impl DisjunctiveEdgeFinding {
 			let time_bound = self.latest_completion_time(lct_task, actions);
 			if earliest_completion_time > time_bound {
 				// resource overload detected, eagerly build the reason clause for conflict
-				let clause = self.explain_earliest_completion_time(time_bound + 1, actions);
-				trace!("resource overload detected, conflict clause: {:?}", clause);
+				// trace!("resource overload detected, conflict clause: {:?}", clause);
 				trace!("earliest completion time: {:?}", earliest_start);
 				trace!("latest completion time: {:?}", latest_completion);
 				actions.set_int_lower_bound(
 					self.start_times[lct_task],
 					earliest_completion_time as i64 - self.durations[lct_task],
-					&ReasonBuilder::Eager(clause),
+					self.explain_earliest_completion_time(time_bound + 1),
 				)?;
 			}
 			while self.ot_tree.root().earliest_completion_gray
@@ -435,7 +435,7 @@ impl DisjunctiveEdgeFinding {
 					actions.set_int_lower_bound(
 						self.start_times[blocked_task],
 						earliest_completion,
-						&ReasonBuilder::Lazy(blocked_task as u64),
+						actions.deferred_reason(blocked_task as u64),
 					)?;
 				}
 				self.ot_tree.remove_task(blocked_task_rank);

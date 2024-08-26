@@ -1,12 +1,11 @@
+use itertools::Itertools;
+
 use crate::{
 	actions::{
 		explanation::ExplanationActions, initialization::InitializationActions,
 		trailing::TrailingActions,
 	},
-	propagator::{
-		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions,
-		Propagator,
-	},
+	propagator::{conflict::Conflict, int_event::IntEvent, PropagationActions, Propagator},
 	solver::{
 		engine::queue::PriorityLevel,
 		poster::{BoxedPropagator, Poster, QueuePreferences},
@@ -77,25 +76,24 @@ where
 						}
 					});
 			// set y to be less than or equal to the minimum of upper bounds of x_i
-			let reason = ReasonBuilder::Simple(actions.get_int_upper_bound_lit(min_ub_var));
-			actions.set_int_upper_bound(self.min, min_ub, &reason)?;
+			let reason = actions.get_int_upper_bound_lit(min_ub_var);
+			actions.set_int_upper_bound(self.min, min_ub, reason)?;
 
 			// set y to be greater than or equal to the minimum of lower bounds of x_i
-			let reason = ReasonBuilder::Eager(
+			actions.set_int_lower_bound(self.min, min_lb, |a: &mut P| {
 				self.vars
 					.iter()
-					.map(|&x| actions.get_int_lit(x, LitMeaning::GreaterEq(min_lb)))
-					.collect(),
-			);
-			actions.set_int_lower_bound(self.min, min_lb, &reason)?;
+					.map(|&x| a.get_int_lit(x, LitMeaning::GreaterEq(min_lb)))
+					.collect_vec()
+			})?;
 		}
 
 		// set x_i to be greater than or equal to y.lowerbound
-		let reason = ReasonBuilder::Simple(actions.get_int_lower_bound_lit(self.min));
+		let reason = actions.get_int_lower_bound_lit(self.min);
 		if self.y_change {
 			let y_lb = actions.get_int_lower_bound(self.min);
 			for &x in self.vars.iter() {
-				actions.set_int_lower_bound(x, y_lb, &reason)?
+				actions.set_int_lower_bound(x, y_lb, reason)?
 			}
 		}
 		Ok(())

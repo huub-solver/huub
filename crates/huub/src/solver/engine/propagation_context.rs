@@ -8,7 +8,10 @@ use crate::{
 		explanation::ExplanationActions, inspection::InspectionActions,
 		propagation::PropagationActions, trailing::TrailingActions,
 	},
-	propagator::{conflict::Conflict, reason::ReasonBuilder},
+	propagator::{
+		conflict::Conflict,
+		reason::{LazyReason, ReasonBuilder},
+	},
 	solver::{
 		engine::{
 			int_var::{IntVarRef, LazyLitDef},
@@ -92,7 +95,7 @@ impl<'a> PropagationContext<'a> {
 		&mut self,
 		iv: IntVarRef,
 		lit_req: LitMeaning,
-		reason: &ReasonBuilder,
+		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict> {
 		if self.check_satisfied(iv, &lit_req) {
 			return Ok(());
@@ -108,7 +111,7 @@ impl<'a> PropagationContext<'a> {
 		&mut self,
 		lit: RawLit,
 		lit_req: LitMeaning,
-		reason: &ReasonBuilder,
+		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict> {
 		match lit_req {
 			LitMeaning::Eq(0) | LitMeaning::Less(1) | LitMeaning::NotEq(1) => {
@@ -117,11 +120,9 @@ impl<'a> PropagationContext<'a> {
 			LitMeaning::Eq(1) | LitMeaning::GreaterEq(1) | LitMeaning::NotEq(0) => {
 				self.set_bool_val(BoolView(BoolViewInner::Lit(lit)), true, reason)
 			}
-			LitMeaning::Eq(_) => Err(Conflict::new(None, reason, self.current_prop)),
-			LitMeaning::GreaterEq(i) if i > 1 => {
-				Err(Conflict::new(None, reason, self.current_prop))
-			}
-			LitMeaning::Less(i) if i <= 0 => Err(Conflict::new(None, reason, self.current_prop)),
+			LitMeaning::Eq(_) => Err(Conflict::new(self, None, reason)),
+			LitMeaning::GreaterEq(i) if i > 1 => Err(Conflict::new(self, None, reason)),
+			LitMeaning::Less(i) if i <= 0 => Err(Conflict::new(self, None, reason)),
 			LitMeaning::NotEq(_) | LitMeaning::GreaterEq(_) | LitMeaning::Less(_) => Ok(()),
 		}
 	}
@@ -178,21 +179,21 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		&mut self,
 		bv: BoolView,
 		val: bool,
-		reason: &ReasonBuilder,
+		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict> {
 		match bv.0 {
 			BoolViewInner::Lit(lit) => match self.state.trail.get_sat_value(lit) {
 				Some(b) if b == val => Ok(()),
 				Some(_) => Err(Conflict::new(
+					self,
 					Some(if val { lit } else { !lit }),
 					reason,
-					self.current_prop,
 				)),
 				None => {
 					let propagated_lit = if val { lit } else { !lit };
+					let reason = reason.build_reason(self);
 					trace!(lit = i32::from(propagated_lit), reason = ?reason, "propagate bool");
-					self.state
-						.register_reason(propagated_lit, reason, self.current_prop);
+					self.state.register_reason(propagated_lit, reason);
 					self.state.changes.propagate(propagated_lit);
 					let prev = self.state.trail.assign_sat(propagated_lit);
 					debug_assert!(prev.is_none());
@@ -201,7 +202,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 			},
 			BoolViewInner::Const(b) => {
 				if b != val {
-					Err(Conflict::new(None, reason, self.current_prop))
+					Err(Conflict::new(self, None, reason))
 				} else {
 					Ok(())
 				}
@@ -213,7 +214,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		&mut self,
 		var: IntView,
 		val: IntVal,
-		reason: &ReasonBuilder,
+		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict> {
 		let mut lit_req = LitMeaning::GreaterEq(val);
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
@@ -229,7 +230,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 			IntViewInner::Bool { lit, .. } => self.propagate_bool_lin(lit, lit_req, reason),
 			IntViewInner::Const(i) => {
 				if i < val {
-					Err(Conflict::new(None, reason, self.current_prop))
+					Err(Conflict::new(self, None, reason))
 				} else {
 					Ok(())
 				}
@@ -240,7 +241,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		&mut self,
 		var: IntView,
 		val: IntVal,
-		reason: &ReasonBuilder,
+		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict> {
 		let mut lit_req = LitMeaning::Less(val + 1);
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
@@ -256,7 +257,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 			IntViewInner::Bool { lit, .. } => self.propagate_bool_lin(lit, lit_req, reason),
 			IntViewInner::Const(i) => {
 				if i > val {
-					Err(Conflict::new(None, reason, self.current_prop))
+					Err(Conflict::new(self, None, reason))
 				} else {
 					Ok(())
 				}
@@ -267,7 +268,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		&mut self,
 		var: IntView,
 		val: IntVal,
-		reason: &ReasonBuilder,
+		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict> {
 		let mut lit_req = LitMeaning::Eq(val);
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
@@ -277,7 +278,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 				Ok(lit) => lit_req = lit,
 				Err(v) => {
 					debug_assert!(!v);
-					return Err(Conflict::new(None, reason, self.current_prop));
+					return Err(Conflict::new(self, None, reason));
 				}
 			}
 		}
@@ -289,7 +290,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 			IntViewInner::Bool { lit, .. } => self.propagate_bool_lin(lit, lit_req, reason),
 			IntViewInner::Const(i) => {
 				if i != val {
-					Err(Conflict::new(None, reason, self.current_prop))
+					Err(Conflict::new(self, None, reason))
 				} else {
 					Ok(())
 				}
@@ -300,7 +301,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 		&mut self,
 		var: IntView,
 		val: IntVal,
-		reason: &ReasonBuilder,
+		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict> {
 		let mut lit_req = LitMeaning::NotEq(val);
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
@@ -322,12 +323,16 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 			IntViewInner::Bool { lit, .. } => self.propagate_bool_lin(lit, lit_req, reason),
 			IntViewInner::Const(i) => {
 				if i == val {
-					Err(Conflict::new(None, reason, self.current_prop))
+					Err(Conflict::new(self, None, reason))
 				} else {
 					Ok(())
 				}
 			}
 		}
+	}
+
+	fn deferred_reason(&self, data: u64) -> LazyReason {
+		LazyReason(self.current_prop, data)
 	}
 }
 

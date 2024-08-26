@@ -23,10 +23,7 @@ use crate::{
 		explanation::ExplanationActions, inspection::InspectionActions, trailing::TrailingActions,
 	},
 	brancher::Brancher,
-	propagator::{
-		int_event::IntEvent,
-		reason::{Reason, ReasonBuilder},
-	},
+	propagator::{int_event::IntEvent, reason::Reason},
 	solver::{
 		engine::{
 			bool_to_int::BoolToIntMap,
@@ -679,8 +676,8 @@ impl State {
 		}
 	}
 
-	fn register_reason(&mut self, lit: RawLit, builder: &ReasonBuilder, prop: PropRef) {
-		match Reason::build_reason(builder, prop) {
+	fn register_reason(&mut self, lit: RawLit, built_reason: Result<Reason, bool>) {
+		match built_reason {
 			Ok(reason) => {
 				// Insert new reason, possibly overwriting old one (from previous search attempt)
 				let _ = self.reason_map.insert(lit, reason);

@@ -1,12 +1,11 @@
+use itertools::Itertools;
+
 use crate::{
 	actions::{
 		explanation::ExplanationActions, initialization::InitializationActions,
 		trailing::TrailingActions,
 	},
-	propagator::{
-		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions,
-		Propagator,
-	},
+	propagator::{conflict::Conflict, int_event::IntEvent, PropagationActions, Propagator},
 	solver::{
 		engine::queue::PriorityLevel,
 		poster::{BoxedPropagator, Poster, QueuePreferences},
@@ -61,41 +60,45 @@ where
 			// propagate only when the fixed index is not out of bound
 			if fixed_idx >= 0 && fixed_idx < self.vars.len() as IntVal {
 				let fixed_var = self.vars[fixed_idx as usize];
-				let reason = ReasonBuilder::Eager(vec![
-					actions.get_int_lit(self.idx, LitMeaning::Eq(fixed_idx)),
-					actions.get_int_lower_bound_lit(fixed_var),
-				]);
 				actions.set_int_lower_bound(
 					self.y,
 					actions.get_int_lower_bound(fixed_var),
-					&reason,
+					|a: &mut P| {
+						[
+							a.get_int_lit(self.idx, LitMeaning::Eq(fixed_idx)),
+							a.get_int_lower_bound_lit(fixed_var),
+						]
+					},
 				)?;
-				let reason = ReasonBuilder::Eager(vec![
-					actions.get_int_lit(self.idx, LitMeaning::Eq(fixed_idx)),
-					actions.get_int_lower_bound_lit(self.y),
-				]);
 				actions.set_int_lower_bound(
 					fixed_var,
 					actions.get_int_lower_bound(self.y),
-					&reason,
+					|a: &mut P| {
+						[
+							a.get_int_lit(self.idx, LitMeaning::Eq(fixed_idx)),
+							a.get_int_lower_bound_lit(self.y),
+						]
+					},
 				)?;
-				let reason = ReasonBuilder::Eager(vec![
-					actions.get_int_lit(self.idx, LitMeaning::Eq(fixed_idx)),
-					actions.get_int_upper_bound_lit(fixed_var),
-				]);
 				actions.set_int_upper_bound(
 					self.y,
 					actions.get_int_upper_bound(self.y),
-					&reason,
+					|a: &mut P| {
+						[
+							a.get_int_lit(self.idx, LitMeaning::Eq(fixed_idx)),
+							a.get_int_upper_bound_lit(fixed_var),
+						]
+					},
 				)?;
-				let reason = ReasonBuilder::Eager(vec![
-					actions.get_int_lit(self.idx, LitMeaning::Eq(fixed_idx)),
-					actions.get_int_upper_bound_lit(self.y),
-				]);
 				actions.set_int_upper_bound(
 					fixed_var,
 					actions.get_int_upper_bound(self.y),
-					&reason,
+					|a: &mut P| {
+						[
+							a.get_int_lit(self.idx, LitMeaning::Eq(fixed_idx)),
+							a.get_int_upper_bound_lit(self.y),
+						]
+					},
 				)?;
 				return Ok(());
 			}
@@ -111,18 +114,20 @@ where
 				let v_lb = actions.get_int_lower_bound(*v);
 				let v_ub = actions.get_int_upper_bound(*v);
 				if y_ub < v_lb {
-					let reason = ReasonBuilder::Eager(vec![
-						actions.get_int_lit(self.y, LitMeaning::Less(v_lb)),
-						actions.get_int_lower_bound_lit(*v),
-					]);
-					actions.set_int_not_eq(self.idx, i as IntVal, &reason)?;
+					actions.set_int_not_eq(self.idx, i as IntVal, |a: &mut P| {
+						[
+							a.get_int_lit(self.y, LitMeaning::Less(v_lb)),
+							a.get_int_lower_bound_lit(*v),
+						]
+					})?;
 				}
 				if v_ub < y_lb {
-					let reason = ReasonBuilder::Eager(vec![
-						actions.get_int_lit(self.y, LitMeaning::GreaterEq(v_ub + 1)),
-						actions.get_int_upper_bound_lit(*v),
-					]);
-					actions.set_int_not_eq(self.idx, i as IntVal, &reason)?;
+					actions.set_int_not_eq(self.idx, i as IntVal, |a: &mut P| {
+						[
+							a.get_int_lit(self.y, LitMeaning::GreaterEq(v_ub + 1)),
+							a.get_int_upper_bound_lit(*v),
+						]
+					})?;
 				}
 			}
 		}
@@ -142,20 +147,19 @@ where
 			}
 		}
 		if min_lb > y_lb {
-			let reason = ReasonBuilder::Eager(
+			actions.set_int_lower_bound(self.y, min_lb, |a: &mut P| {
 				self.vars
 					.iter()
 					.enumerate()
 					.map(|(i, &v)| {
-						if actions.check_int_in_domain(self.idx, i as IntVal) {
-							actions.get_int_lit(v, LitMeaning::GreaterEq(min_lb))
+						if a.check_int_in_domain(self.idx, i as IntVal) {
+							a.get_int_lit(v, LitMeaning::GreaterEq(min_lb))
 						} else {
-							actions.get_int_lit(self.idx, LitMeaning::NotEq(i as IntVal))
+							a.get_int_lit(self.idx, LitMeaning::NotEq(i as IntVal))
 						}
 					})
-					.collect(),
-			);
-			actions.set_int_lower_bound(self.y, min_lb, &reason)?;
+					.collect_vec()
+			})?;
 		}
 
 		// propagate the upper bound of the selected variable y
@@ -173,20 +177,19 @@ where
 			}
 		}
 		if max_ub < y_ub {
-			let reason = ReasonBuilder::Eager(
+			actions.set_int_upper_bound(self.y, max_ub, |a: &mut P| {
 				self.vars
 					.iter()
 					.enumerate()
 					.map(|(i, &v)| {
-						if actions.check_int_in_domain(self.idx, i as IntVal) {
-							actions.get_int_lit(v, LitMeaning::Less(max_ub + 1))
+						if a.check_int_in_domain(self.idx, i as IntVal) {
+							a.get_int_lit(v, LitMeaning::Less(max_ub + 1))
 						} else {
-							actions.get_int_lit(self.idx, LitMeaning::NotEq(i as IntVal))
+							a.get_int_lit(self.idx, LitMeaning::NotEq(i as IntVal))
 						}
 					})
-					.collect(),
-			);
-			actions.set_int_upper_bound(self.y, max_ub, &reason)?;
+					.collect_vec()
+			})?;
 		}
 
 		Ok(())

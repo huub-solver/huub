@@ -4,7 +4,7 @@ use crate::{
 		trailing::TrailingActions,
 	},
 	propagator::{
-		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions,
+		conflict::Conflict, int_event::IntEvent, reason::CachedReason, PropagationActions,
 		Propagator,
 	},
 	solver::{
@@ -58,18 +58,21 @@ impl IntPowBounds {
 			exp_lb + 1
 		};
 
-		let base_lb_lit = actions.get_int_lower_bound_lit(self.base);
-		let base_ub_lit = actions.get_int_upper_bound_lit(self.base);
-		let exp_lb_lit = actions.get_int_lower_bound_lit(self.exponent);
-		let exp_ub_lit = actions.get_int_upper_bound_lit(self.exponent);
+		let mut reason = CachedReason::new(|actions: &mut P| {
+			let base_lb_lit = actions.get_int_lower_bound_lit(self.base);
+			let base_ub_lit = actions.get_int_upper_bound_lit(self.base);
+			let exp_lb_lit = actions.get_int_lower_bound_lit(self.exponent);
+			let exp_ub_lit = actions.get_int_upper_bound_lit(self.exponent);
+			vec![base_lb_lit, base_ub_lit, exp_lb_lit, exp_ub_lit]
+		});
 
 		if exp_lb == exp_ub && exp_lb == 0 {
 			let exp_val_lit = actions.get_int_val_lit(self.exponent).unwrap();
-			return actions.set_int_val(self.result, 1, &ReasonBuilder::Simple(exp_val_lit));
+			return actions.set_int_val(self.result, 1, exp_val_lit);
 		}
 
 		let base_bnd = base_lb..=base_ub;
-		let min: IntVal = vec![
+		let min: IntVal = [
 			pow(base_lb, exp_lb),             // base and exp always both positive
 			pow(base_lb, exp_largest_uneven), // base maybe negative
 			pow(base_ub, exp_smallest_even),  // negative base, but forced even exponent
@@ -88,11 +91,7 @@ impl IntPowBounds {
 		.min()
 		.unwrap();
 
-		actions.set_int_lower_bound(
-			self.result,
-			min,
-			&ReasonBuilder::Eager(vec![base_lb_lit, base_ub_lit, exp_lb_lit, exp_ub_lit]),
-		)?;
+		actions.set_int_lower_bound(self.result, min, &mut reason)?;
 
 		let max: IntVal = vec![
 			pow(base_ub, exp_ub),              // base and exp have positive upper bounds
@@ -113,11 +112,7 @@ impl IntPowBounds {
 		.max()
 		.unwrap();
 
-		actions.set_int_upper_bound(
-			self.result,
-			max,
-			&ReasonBuilder::Eager(vec![base_lb_lit, base_ub_lit, exp_lb_lit, exp_ub_lit]),
-		)?;
+		actions.set_int_upper_bound(self.result, max, &mut reason)?;
 
 		Ok(())
 	}
@@ -137,17 +132,20 @@ impl IntPowBounds {
 			_ => exp_lb,
 		};
 
-		let res_lb_lit = actions.get_int_lower_bound_lit(self.result);
-		let res_ub_lit = actions.get_int_upper_bound_lit(self.result);
-		let exp_lb_lit = actions.get_int_lower_bound_lit(self.exponent);
-		let exp_ub_lit = actions.get_int_upper_bound_lit(self.exponent);
+		let mut reason = CachedReason::new(|actions: &mut P| {
+			let res_lb_lit = actions.get_int_lower_bound_lit(self.result);
+			let res_ub_lit = actions.get_int_upper_bound_lit(self.result);
+			let exp_lb_lit = actions.get_int_lower_bound_lit(self.exponent);
+			let exp_ub_lit = actions.get_int_upper_bound_lit(self.exponent);
+			vec![res_lb_lit, res_ub_lit, exp_lb_lit, exp_ub_lit]
+		});
 
 		if (exp_lb..=exp_ub).contains(&0) && (res_lb..=res_ub).contains(&1) {
 			return Ok(());
 		}
 		if exp_ub < 0 {
 			let exp_neg_lit = actions.get_int_lit(self.exponent, LitMeaning::Less(0));
-			return actions.set_int_not_eq(self.base, 0, &ReasonBuilder::Simple(exp_neg_lit));
+			return actions.set_int_not_eq(self.base, 0, exp_neg_lit);
 		}
 		// The following logic does not work for for negative values
 		if exp_lb <= 0 || res_lb <= 0 || base_lb <= 0 {
@@ -172,15 +170,11 @@ impl IntPowBounds {
 			{
 				min -= 1;
 			}
-			actions.set_int_lower_bound(
-				self.base,
-				min,
-				&ReasonBuilder::Eager(vec![res_lb_lit, res_ub_lit, exp_lb_lit, exp_ub_lit]),
-			)?;
+			actions.set_int_lower_bound(self.base, min, &mut reason)?;
 		}
 
 		// Propagate upper bound
-		let mut max = vec![
+		let mut max = [
 			(res_ub as f64).powf(1_f64 / (exp_lb as f64)),
 			(res_ub as f64).powf(1_f64 / (exp_pos_uneven as f64)),
 			(res_lb as f64).powf(1_f64 / (exp_pos_even as f64)),
@@ -196,11 +190,7 @@ impl IntPowBounds {
 			if res_ub >= pow(max + 1, if min < 0 { exp_pos_even } else { exp_lb }).unwrap() {
 				max += 1;
 			}
-			actions.set_int_upper_bound(
-				self.base,
-				max,
-				&ReasonBuilder::Eager(vec![res_lb_lit, res_ub_lit, exp_lb_lit, exp_ub_lit]),
-			)?;
+			actions.set_int_upper_bound(self.base, max, &mut reason)?;
 		}
 		Ok(())
 	}
@@ -214,11 +204,7 @@ impl IntPowBounds {
 
 		if base_ub == base_lb && base_lb == 0 {
 			let base_val_lit = actions.get_int_val_lit(self.base).unwrap();
-			return actions.set_int_lower_bound(
-				self.exponent,
-				0,
-				&ReasonBuilder::Simple(base_val_lit),
-			);
+			return actions.set_int_lower_bound(self.exponent, 0, base_val_lit);
 		}
 		if base_lb <= 1 || res_lb <= 1 {
 			// TODO: It seems there should be propagation possible, but log2() certainly won't work.
@@ -226,10 +212,13 @@ impl IntPowBounds {
 		}
 
 		let (exp_lb, exp_ub) = actions.get_int_bounds(self.exponent);
-		let res_lb_lit = actions.get_int_lit(self.base, LitMeaning::GreaterEq(1));
-		let res_ub_lit = actions.get_int_upper_bound_lit(self.result);
-		let base_lb_lit = actions.get_int_lit(self.base, LitMeaning::GreaterEq(1));
-		let base_ub_lit = actions.get_int_upper_bound_lit(self.base);
+		let mut reason = CachedReason::new(|actions: &mut P| {
+			let res_lb_lit = actions.get_int_lit(self.base, LitMeaning::GreaterEq(1));
+			let res_ub_lit = actions.get_int_upper_bound_lit(self.result);
+			let base_lb_lit = actions.get_int_lit(self.base, LitMeaning::GreaterEq(1));
+			let base_ub_lit = actions.get_int_upper_bound_lit(self.base);
+			vec![res_lb_lit, res_ub_lit, base_lb_lit, base_ub_lit]
+		});
 
 		// Propagate lower bound
 		let mut min = ((res_lb as f64).log2() / (base_ub as f64).log2()).ceil() as IntVal;
@@ -238,11 +227,7 @@ impl IntPowBounds {
 			if res_lb <= pow(base_lb, min - 1).unwrap() {
 				min -= 1;
 			}
-			actions.set_int_lower_bound(
-				self.base,
-				min,
-				&ReasonBuilder::Eager(vec![res_lb_lit, res_ub_lit, base_lb_lit, base_ub_lit]),
-			)?;
+			actions.set_int_lower_bound(self.base, min, &mut reason)?;
 		}
 
 		// Propagate upper bound
@@ -252,11 +237,7 @@ impl IntPowBounds {
 			if res_ub <= pow(base_ub, max + 1).unwrap() {
 				max += 1;
 			}
-			actions.set_int_upper_bound(
-				self.base,
-				max,
-				&ReasonBuilder::Eager(vec![res_lb_lit, res_ub_lit, base_lb_lit, base_ub_lit]),
-			)?;
+			actions.set_int_upper_bound(self.base, max, &mut reason)?;
 		}
 
 		Ok(())
