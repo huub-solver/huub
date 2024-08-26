@@ -220,13 +220,13 @@ impl BrancherPoster for BoolBrancherPoster {
 			.vars
 			.into_iter()
 			.filter_map(|b| match b.0 {
-				BoolViewInner::Lit(l) => Some(l),
+				BoolViewInner::Lit(l) => {
+					actions.subscribe_bool(BoolView(BoolViewInner::Lit(l)), 0);
+					Some(l)
+				}
 				BoolViewInner::Const(_) => None,
 			})
 			.collect();
-		for &l in vars.iter() {
-			actions.subscribe_bool(BoolView(BoolViewInner::Lit(l)), 0);
-		}
 		Brancher {
 			vars: BrancherVars::Bool(vars),
 			var_sel: self.var_sel,
@@ -241,7 +241,14 @@ impl BrancherPoster for IntBrancherPoster {
 		let vars: Vec<_> = self
 			.vars
 			.into_iter()
-			.filter(|i| !matches!(i.0, IntViewInner::Const(_)))
+			.filter(|i| match i.0 {
+				IntViewInner::Const(_) => false,
+				IntViewInner::Bool { lit, .. } => {
+					actions.subscribe_bool(BoolView(BoolViewInner::Lit(lit)), 0);
+					true
+				}
+				_ => true,
+			})
 			.collect();
 		Brancher {
 			vars: BrancherVars::Int(vars),
