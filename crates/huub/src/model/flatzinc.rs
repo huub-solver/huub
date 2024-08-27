@@ -1,7 +1,8 @@
 use std::{
 	cell::RefCell,
-	collections::{btree_map::Entry, BTreeMap},
+	collections::{hash_map::Entry, HashMap, HashSet},
 	fmt::{Debug, Display},
+	hash::Hash,
 	ops::Deref,
 	rc::Rc,
 };
@@ -32,23 +33,26 @@ use crate::{
 };
 
 /// Builder for creating a model from a FlatZinc instance
-struct FznModelBuilder<'a, S: Ord> {
+struct FznModelBuilder<'a, S: Eq + Hash + Ord> {
 	/// The FlatZinc instance to build the model from
 	fzn: &'a FlatZinc<S>,
 	/// A mapping from FlatZinc identifiers to model views
-	map: BTreeMap<S, ModelView>,
+	map: HashMap<S, ModelView>,
 	/// The incumbent model
 	prb: Model,
 	/// Flags indicating which constraints have been processed
 	processed: Vec<bool>,
 }
 
-impl<'a, S: Ord + Deref<Target = str> + Clone + Debug + Display> FznModelBuilder<'a, S> {
+impl<'a, S> FznModelBuilder<'a, S>
+where
+	S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
+{
 	/// Create a new builder to create a model from a FlatZinc instance
 	fn new(fzn: &'a FlatZinc<S>) -> Self {
 		Self {
 			fzn,
-			map: BTreeMap::new(),
+			map: HashMap::new(),
 			prb: Model::default(),
 			processed: vec![false; fzn.constraints.len()],
 		}
@@ -57,7 +61,7 @@ impl<'a, S: Ord + Deref<Target = str> + Clone + Debug + Display> FznModelBuilder
 	/// Add a view to the model and the mapping
 	fn extract_views(&mut self) -> Result<(), FlatZincError> {
 		// Create a mapping from identifiers to the constraint that defines them
-		let defined_by: BTreeMap<&S, usize> = self
+		let defined_by: HashMap<&S, usize> = self
 			.fzn
 			.constraints
 			.iter()
@@ -78,7 +82,7 @@ impl<'a, S: Ord + Deref<Target = str> + Clone + Debug + Display> FznModelBuilder
 
 	fn extract_view(
 		&mut self,
-		defined_by: &BTreeMap<&S, usize>,
+		defined_by: &HashMap<&S, usize>,
 		con: usize,
 	) -> Result<(), FlatZincError> {
 		debug_assert!(!self.processed[con]);
@@ -207,8 +211,8 @@ impl<'a, S: Ord + Deref<Target = str> + Clone + Debug + Display> FznModelBuilder
 
 	/// Unify variables (e.g., from `bool_eq` and `int_eq` constraints)
 	fn unify_variables(&mut self) -> Result<(), FlatZincError> {
-		let mut unify_map = BTreeMap::<S, Rc<RefCell<Vec<Literal<S>>>>>::new();
-		let unify_map_find = |map: &BTreeMap<S, Rc<RefCell<Vec<Literal<S>>>>>, a: &Literal<S>| {
+		let mut unify_map = HashMap::<S, Rc<RefCell<Vec<Literal<S>>>>>::new();
+		let unify_map_find = |map: &HashMap<S, Rc<RefCell<Vec<Literal<S>>>>>, a: &Literal<S>| {
 			if let Literal::Identifier(x) = a {
 				map.get(x).map(Rc::clone)
 			} else {
@@ -216,7 +220,7 @@ impl<'a, S: Ord + Deref<Target = str> + Clone + Debug + Display> FznModelBuilder
 			}
 		};
 
-		let record_unify = |map: &mut BTreeMap<S, Rc<RefCell<Vec<Literal<S>>>>>, a, b| {
+		let record_unify = |map: &mut HashMap<S, Rc<RefCell<Vec<Literal<S>>>>>, a, b| {
 			let a_set = unify_map_find(map, a);
 			let b_set = unify_map_find(map, b);
 			match (a_set, b_set) {
@@ -294,8 +298,12 @@ impl<'a, S: Ord + Deref<Target = str> + Clone + Debug + Display> FznModelBuilder
 			}
 		}
 
-		while let Some((k, li)) = unify_map.pop_first() {
-			let ty = &self.fzn.variables[&k].ty;
+		let mut resolved = HashSet::new();
+		for (k, li) in unify_map.iter() {
+			if resolved.contains(k) {
+				continue;
+			}
+			let ty = &self.fzn.variables[k].ty;
 			let li = li.borrow();
 			// Determine the domain of the list of literals
 			let domain: Option<Literal<S>> = match ty {
@@ -399,8 +407,8 @@ impl<'a, S: Ord + Deref<Target = str> + Clone + Debug + Display> FznModelBuilder
 							}
 						}
 					}
-					let x = unify_map.remove(id);
-					debug_assert!(x.is_some() || *id == k);
+					let new = resolved.insert(id.clone());
+					debug_assert!(new);
 				}
 			}
 		}
@@ -1001,7 +1009,7 @@ impl<'a, S: Ord + Deref<Target = str> + Clone + Debug + Display> FznModelBuilder
 	}
 
 	/// Finalize the builder and return the model
-	fn finalize(self) -> (Model, BTreeMap<S, ModelView>) {
+	fn finalize(self) -> (Model, HashMap<S, ModelView>) {
 		(self.prb, self.map)
 	}
 
@@ -1354,9 +1362,10 @@ impl<'a, S: Ord + Deref<Target = str> + Clone + Debug + Display> FznModelBuilder
 }
 
 impl Model {
-	pub fn from_fzn<S: Ord + Deref<Target = str> + Clone + Debug + Display>(
-		fzn: &FlatZinc<S>,
-	) -> Result<(Self, BTreeMap<S, ModelView>), FlatZincError> {
+	pub fn from_fzn<S>(fzn: &FlatZinc<S>) -> Result<(Self, HashMap<S, ModelView>), FlatZincError>
+	where
+		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
+	{
 		let mut builder = FznModelBuilder::new(fzn);
 		builder.extract_views()?;
 		builder.unify_variables()?;
@@ -1373,10 +1382,13 @@ where
 	Sol: PropagatorAccess + SatValuation,
 	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 {
-	pub fn from_fzn<S: Ord + Deref<Target = str> + Clone + Debug + Display>(
+	pub fn from_fzn<S>(
 		fzn: &FlatZinc<S>,
 		config: &InitConfig,
-	) -> Result<(Self, BTreeMap<S, SolverView>), FlatZincError> {
+	) -> Result<(Self, HashMap<S, SolverView>), FlatZincError>
+	where
+		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
+	{
 		let (mut prb, map) = Model::from_fzn(fzn)?;
 		let (mut slv, remap) = prb.to_solver(config)?;
 		let map = map
