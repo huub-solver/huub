@@ -20,7 +20,10 @@ mod tests {
 	assert_first_solution!(seq_search_3);
 	assert_first_solution!(seq_search_4);
 
-	assert_optimal!(jobshop);
+	assert_optimal!(jobshop_small);
+	assert_optimal!(jobshop_la01);
+	assert_optimal!(jobshop_la04);
+	assert_optimal!(jobshop_la05);
 
 	assert_search_order!(bool_indomain_max);
 	assert_search_order!(bool_indomain_min);
