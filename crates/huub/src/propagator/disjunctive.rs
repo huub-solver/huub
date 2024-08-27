@@ -395,9 +395,15 @@ impl DisjunctiveEdgeFinding {
 			let time_bound = self.latest_completion_time(lct_task, actions);
 			if earliest_completion_time > time_bound {
 				// resource overload detected, eagerly build the reason clause for conflict
-				// trace!("resource overload detected, conflict clause: {:?}", clause);
 				trace!("earliest completion time: {:?}", earliest_start);
 				trace!("latest completion time: {:?}", latest_completion);
+				trace!(
+					"Set task {:?} (lower bound: {:?}, upper bound: {:?}) to new lower bound {:?}",
+					lct_task,
+					actions.get_int_lower_bound(self.start_times[lct_task]),
+					actions.get_int_upper_bound(self.start_times[lct_task]),
+					earliest_completion_time as i64 - self.durations[lct_task]
+				);
 				actions.set_int_lower_bound(
 					self.start_times[lct_task],
 					earliest_completion_time as i64 - self.durations[lct_task],
@@ -426,9 +432,11 @@ impl DisjunctiveEdgeFinding {
 						(time_bound - 1) as i64,
 					);
 					trace!(
-						"set bound {} for task {}",
+						"set bound {} for task {} (lower bound {}, upper bound {})",
 						earliest_completion,
-						blocked_task
+						blocked_task,
+						actions.get_int_lower_bound(self.start_times[blocked_task]),
+						actions.get_int_upper_bound(self.start_times[blocked_task])
 					);
 					trace!("earliest completion time: {:?}", earliest_start);
 					trace!("latest completion time: {:?}", latest_completion);
