@@ -67,8 +67,10 @@ impl<'a, S: Ord + Deref<Target = str> + Clone + Debug + Display> FznModelBuilder
 
 		// Extract views for all constraints that define an identifier
 		for (i, c) in self.fzn.constraints.iter().enumerate() {
-			if !self.processed[i] && c.defines.is_some() {
-				self.extract_view(&defined_by, i)?;
+			if let Some(ident) = &c.defines {
+				if !self.map.contains_key(ident) {
+					self.extract_view(&defined_by, i)?;
+				}
 			}
 		}
 		Ok(())
@@ -105,6 +107,7 @@ impl<'a, S: Ord + Deref<Target = str> + Clone + Debug + Display> FznModelBuilder
 		};
 
 		let l = c.defines.as_ref().unwrap();
+		debug_assert!(!self.map.contains_key(l));
 		match c.id.deref() {
 			"bool2int" => {
 				if let [b, Argument::Literal(Literal::Identifier(x))] = c.args.as_slice() {
