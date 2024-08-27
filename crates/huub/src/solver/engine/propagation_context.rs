@@ -102,8 +102,28 @@ impl<'a> PropagationContext<'a> {
 		}
 		trace!(int_var = usize::from(iv), effect = ?lit_req, "propagate int");
 		// TODO: Update domain??
-		let bv = self.get_intref_lit(iv, lit_req);
-		self.set_bool_val(bv, true, reason)
+		let bv = self.get_intref_lit(iv, lit_req.clone());
+		if let BoolViewInner::Lit(lit) = bv.0 {
+			// return conflict for a newly created lazy literals representing conflict domain changes
+			let (lb, ub) = self.state.int_vars[iv].get_bounds(self);
+			match (self.state.trail.get_sat_value(lit), lit_req) {
+				(None, LitMeaning::GreaterEq(v)) if v > ub => {
+					Err(Conflict::new(self, Some(lit), reason))
+				}
+				(None, LitMeaning::Less(v)) if v <= lb => {
+					Err(Conflict::new(self, Some(lit), reason))
+				}
+				(None, LitMeaning::Eq(v)) if (v < lb || v > ub) => {
+					Err(Conflict::new(self, Some(lit), reason))
+				}
+				(None, LitMeaning::NotEq(v)) if (v == lb && v == ub) => {
+					Err(Conflict::new(self, Some(lit), reason))
+				}
+				_ => self.set_bool_val(bv, true, reason),
+			}
+		} else {
+			self.set_bool_val(bv, true, reason)
+		}
 	}
 
 	#[inline]
