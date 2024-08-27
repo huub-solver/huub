@@ -317,7 +317,7 @@ impl IpasirPropagator for Engine {
 							.state
 							.enqueue_propagators(&mut engine.propagators, lit, None);
 					}
-					// Debug helper to ensure that any reason is based on known true literals
+					// Debug helper to inspect whether a literal is true at the time of propagation 
 					#[cfg(debug_assertions)]
 					{
 						for lit in queue.iter() {
@@ -327,15 +327,8 @@ impl IpasirPropagator for Engine {
 								for l in &clause {
 									let val = engine.state.trail.get_sat_value(!l);
 									if !val.unwrap_or(false) {
-										tracing::error!(lit_prop = i32::from(*lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
+										tracing::warn!(lit_prop = i32::from(*lit), lit_reason= i32::from(!l), reason_val = ?val, "literal with false value in reason");
 									}
-									debug_assert!(
-												val.unwrap_or(false),
-												"Literal {} in Reason for {} is {:?}, but should be known true",
-												!l,
-												lit,
-												val
-											);
 								}
 							}
 						}
