@@ -5,7 +5,7 @@ use std::{
 
 use index_vec::IndexVec;
 use pindakaas::{Lit as RawLit, Var as RawVar};
-use tracing::{debug, trace};
+use tracing::trace;
 
 use crate::{actions::trailing::TrailingActions, IntVal};
 
@@ -122,17 +122,13 @@ impl Trail {
 			if !self.sat_restore_value.contains_key(&var) {
 				panic!("literal is not present in the trail")
 			}
-			debug!(
-				lit = i32::from(lit),
-				"literal is already unset, restoring to point of setting literal"
-			);
 			while let Some(event) = self.redo() {
 				let found = matches!(event, TrailEvent::SatAssignment(r) if r == var);
 				if found {
 					trace!(
 						len = self.pos,
 						lit = i32::from(lit),
-						"reversed the trail to find literal"
+						"redo to setting literal"
 					);
 					return;
 				}
@@ -147,7 +143,7 @@ impl Trail {
 				trace!(
 					len = self.pos,
 					lit = i32::from(lit),
-					"reversed the trail to find literal"
+					"undo to setting literal"
 				);
 				return;
 			}

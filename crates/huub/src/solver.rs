@@ -207,7 +207,7 @@ where
 							_ => None,
 						})
 						.collect();
-					debug!(clause = ?nogood.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "solution nogood");
+					debug!(clause = ?nogood.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add solution nogood");
 					if nogood.is_empty() || self.oracle.add_clause(nogood).is_err() {
 						return SolveResult::Complete;
 					}
@@ -234,7 +234,7 @@ where
 	/// Find an optimal solution with regards to the given objective and goal.
 	///
 	/// Note that this method uses assumptions iteratively increase the lower bound of the objective.
-	/// This does not impact the state of the solver for continued use.œ
+	/// This does not impact the state of the solver for continued use.
 	pub fn branch_and_bound(
 		&mut self,
 		objective: IntView,
@@ -242,11 +242,12 @@ where
 		mut on_sol: impl FnMut(&dyn Valuation),
 	) -> SolveResult {
 		let mut obj_curr = None;
-		let obj_best = match goal {
+		let obj_bound = match goal {
 			Goal::Minimize => self.get_int_lower_bound(objective),
 			Goal::Maximize => self.get_int_upper_bound(objective),
 		};
 		let mut assump = None;
+		debug!(obj_bound, "start branch and bound");
 		loop {
 			let status = self.solve_assuming(
 				assump,
@@ -262,9 +263,10 @@ where
 				},
 				|_| {},
 			);
+			debug!(?status, ?obj_curr, obj_bound, ?goal, "oracle solve result");
 			match status {
 				SolveResult::Satisfied => {
-					if obj_curr == Some(obj_best) {
+					if obj_curr == Some(obj_bound) {
 						return SolveResult::Complete;
 					} else {
 						assump = match goal {
@@ -276,6 +278,15 @@ where
 								LitMeaning::GreaterEq(obj_curr.unwrap() + 1),
 							)),
 						};
+						debug!(
+							lit = i32::from({
+								let BoolViewInner::Lit(l) = assump.unwrap().0 else {
+									unreachable!()
+								};
+								l
+							}),
+							"add objective bound"
+						)
 					}
 				}
 				SolveResult::Unsatisfiable => {

@@ -162,7 +162,7 @@ impl IpasirPropagator for Engine {
 	}
 
 	fn notify_backtrack(&mut self, new_level: usize) {
-		trace!(new_level, "backtrack");
+		debug!(new_level, "backtrack");
 
 		// Revert value changes to previous decision level
 		self.state.notify_backtrack(new_level);
@@ -218,7 +218,7 @@ impl IpasirPropagator for Engine {
 		if queue.is_empty() {
 			return Vec::new(); // Early return to avoid tracing statements
 		}
-		trace!(
+		debug!(
 			lits = ?queue
 				.iter()
 				.map(|&x| i32::from(x))
@@ -267,7 +267,7 @@ impl IpasirPropagator for Engine {
 		});
 		clause.push(propagated_lit);
 
-		trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add reason clause");
+		debug!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add reason clause");
 		clause
 	}
 
@@ -281,6 +281,7 @@ impl IpasirPropagator for Engine {
 		// If there is a known conflict, return false
 		if !self.state.propagation_queue.is_empty() || self.state.conflict.is_some() {
 			self.state.ensure_clause_changes(&mut self.propagators);
+			debug!(accept = false, "check model");
 			return false;
 		}
 
@@ -327,22 +328,23 @@ impl IpasirPropagator for Engine {
 		// Revert to real decision level
 		self.notify_backtrack(level as usize);
 
-		trace!(accept, "check model result");
+		debug!(accept, "check model");
 		accept
 	}
 
 	fn add_external_clause(&mut self, _slv: &mut dyn SolvingActions) -> Option<Clause> {
-		let clause = if !self.state.clauses.is_empty() {
-			self.state.clauses.pop_front() // Known to be `Some`
+		if !self.state.clauses.is_empty() {
+			let clause = self.state.clauses.pop_front(); // Known to be `Some`
+			trace!(clause = ?clause.as_ref().unwrap().iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add external clause");
+			clause
 		} else if !self.state.propagation_queue.is_empty() {
 			None // Require that the solver first applies the remaining propagation
+		} else if let Some(conflict) = self.state.conflict.clone() {
+			debug!(clause = ?conflict.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add conflict clause");
+			Some(conflict)
 		} else {
-			self.state.conflict.clone() // Clone the conflict state is not lost
-		};
-		if let Some(clause) = &clause {
-			trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add external clause");
+			None
 		}
-		clause
 	}
 
 	fn as_any(&self) -> &dyn Any {
