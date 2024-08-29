@@ -1,12 +1,15 @@
 name: Run Tests
 
-on: [pull_request]
+on:
+  push:
+    branches:
+      - "develop"
+  pull_request:
+  workflow_dispatch:
 
 env:
   RUST_CHANNEL: "stable"
   RUST_TEST_CHANNEL: "nightly"
-  SCCACHE_GHA_ENABLED: "true"
-  RUSTC_WRAPPER: "sccache"
 
 jobs:
   test:
@@ -17,15 +20,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
-        run: |
-          rustup toolchain install --profile minimal --no-self-update ${{ env.RUST_TEST_CHANNEL }}
-          rustup default ${{ env.RUST_TEST_CHANNEL }}
+        uses: moonrepo/setup-rust@v0
+        with:
+          channel: ${{ env.RUST_TEST_CHANNEL }}
       - name: Install grcov
         uses: SierraSoftworks/setup-grcov@v1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.5
       - name: Run cargo test
         run: cargo test --locked
         env:
@@ -38,15 +39,33 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: ./lcov.info
+  benchmarks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust toolchain and codspeed
+        uses: moonrepo/setup-rust@v0
+        with:
+          channel: ${{ env.RUST_CHANNEL }}
+          cache-target: release
+          bins: cargo-codspeed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build the benchmark target(s)
+        run: cargo codspeed build
+      - name: Run the benchmarks
+        uses: CodSpeedHQ/action@v3
+        with:
+          run: cargo codspeed run
+          token: ${{ secrets.CODSPEED_TOKEN }}
   clippy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install --profile minimal --component clippy --no-self-update ${{ env.RUST_CHANNEL }}
-          rustup default ${{ env.RUST_CHANNEL }}
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.5
+      - name: Install Rust toolchain and clippy
+        uses: moonrepo/setup-rust@v0
+        with:
+          channel: ${{ env.RUST_CHANNEL }}
+          components: clippy
       - name: Run clippy
         run: cargo clippy --tests -- -D warnings

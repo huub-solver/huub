@@ -170,16 +170,3 @@ macro_rules! assert_first_solution {
 	};
 }
 pub(crate) use assert_first_solution;
-
-/// References for the dependencies used by the executable
-mod main_depencencies {
-	use ctrlc as _;
-	use flatzinc_serde as _;
-	use humantime as _;
-	use huub as _;
-	use pico_args as _;
-	use serde_json as _;
-	use tracing as _;
-	use tracing_subscriber as _;
-	use ustr as _;
-}

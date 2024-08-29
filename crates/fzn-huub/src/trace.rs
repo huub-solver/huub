@@ -1,9 +1,7 @@
 use std::{
 	collections::HashMap,
 	fmt::{self, Display},
-	fs, io,
 	num::NonZeroI32,
-	path::PathBuf,
 	sync::{Arc, Mutex},
 };
 
@@ -17,7 +15,7 @@ use tracing_subscriber::{
 	fmt::{
 		format::{DefaultFields, Writer},
 		time::uptime,
-		FormatFields,
+		FormatFields, MakeWriter,
 	},
 	layer::{Context, SubscriberExt},
 	Layer,
@@ -61,28 +59,16 @@ struct RegisterLazyLits {
 	lit_reverse_map: Arc<Mutex<HashMap<LitInt, LitName>>>,
 }
 
-pub(crate) fn create_subscriber(
+pub(crate) fn create_subscriber<W>(
 	verbose: u8,
-	log_file: Option<PathBuf>,
+	make_writer: W,
+	ansi: bool,
 	lit_reverse_map: Arc<Mutex<HashMap<LitInt, LitName>>>,
 	int_reverse_map: Arc<Mutex<Vec<Ustr>>>,
-) -> impl Subscriber {
-	let logged_to_file = log_file.is_some();
-	// Function that will create the writer for the log output
-	let make_writer = move || -> Box<dyn io::Write> {
-		if let Some(path) = log_file.clone() {
-			Box::new(
-				fs::OpenOptions::new()
-					.create(true)
-					.append(true)
-					.open(path)
-					.expect("Failed to open log file"),
-			)
-		} else {
-			Box::new(io::stderr())
-		}
-	};
-
+) -> impl Subscriber
+where
+	W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
+{
 	// Builder for the formatting subscriber
 	let builder = tracing_subscriber::fmt()
 		.with_max_level(match verbose {
@@ -91,7 +77,7 @@ pub(crate) fn create_subscriber(
 			_ => Level::TRACE, // 2 or more
 		})
 		.with_writer(make_writer)
-		.with_ansi(!logged_to_file)
+		.with_ansi(ansi)
 		.with_timer(uptime())
 		.map_fmt_fields(|fmt| {
 			FmtLitFields::new(fmt, Arc::clone(&lit_reverse_map), int_reverse_map)
