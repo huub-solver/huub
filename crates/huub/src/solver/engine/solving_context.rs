@@ -34,6 +34,12 @@ pub(crate) struct SolvingContext<'a> {
 	pub(crate) current_prop: PropRef,
 }
 
+enum ChangeType {
+	Redundant,
+	New,
+	Conflicting,
+}
+
 impl<'a> SolvingContext<'a> {
 	pub(crate) fn new(slv: &'a mut dyn SolvingActions, state: &'a mut State) -> Self {
 		Self {
@@ -69,24 +75,26 @@ impl<'a> SolvingContext<'a> {
 	}
 
 	#[inline]
-	fn check_satisfied(&self, var: IntVarRef, lit: &LitMeaning) -> bool {
+	fn check_change(&self, var: IntVarRef, change: &LitMeaning) -> ChangeType {
 		let (lb, ub) = self.state.int_vars[var].get_bounds(self);
-		match lit {
-			LitMeaning::Eq(i) => lb == *i && ub == *i,
-			LitMeaning::NotEq(i) => {
-				if *i < lb || *i > ub {
-					true
-				} else {
-					let eq_lit = self.state.int_vars[var].get_bool_lit(LitMeaning::NotEq(*i));
-					if let Some(eq_lit) = eq_lit {
-						self.get_bool_val(eq_lit).unwrap_or(false)
-					} else {
-						false
-					}
+		match change {
+			LitMeaning::Eq(i) if lb == *i && ub == *i => ChangeType::Redundant,
+			LitMeaning::Eq(i) if *i < lb || *i > ub => ChangeType::Conflicting,
+			LitMeaning::NotEq(i) if *i < lb || *i > ub => ChangeType::Redundant,
+			LitMeaning::Eq(_) | LitMeaning::NotEq(_) => {
+				let lit = self.state.int_vars[var].get_bool_lit(change.clone());
+				let val = lit.and_then(|lit| self.get_bool_val(lit));
+				match val {
+					Some(true) => ChangeType::Redundant,
+					Some(false) => ChangeType::Conflicting,
+					None => ChangeType::New,
 				}
 			}
-			LitMeaning::GreaterEq(i) => lb >= *i,
-			LitMeaning::Less(i) => ub < *i,
+			LitMeaning::GreaterEq(i) if *i <= lb => ChangeType::Redundant,
+			LitMeaning::GreaterEq(i) if *i > ub => ChangeType::Conflicting,
+			LitMeaning::Less(i) if *i > ub => ChangeType::Redundant,
+			LitMeaning::Less(i) if *i <= lb => ChangeType::Conflicting,
+			_ => ChangeType::New,
 		}
 	}
 
@@ -97,13 +105,24 @@ impl<'a> SolvingContext<'a> {
 		lit_req: LitMeaning,
 		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict> {
-		if self.check_satisfied(iv, &lit_req) {
-			return Ok(());
+		match self.check_change(iv, &lit_req) {
+			ChangeType::Redundant => Ok(()),
+			ChangeType::Conflicting => {
+				let bv = self.get_intref_lit(iv, lit_req.clone());
+				let lit = match bv.0 {
+					BoolViewInner::Lit(l) => Some(l),
+					BoolViewInner::Const(b) => {
+						debug_assert!(!b);
+						None
+					}
+				};
+				Err(Conflict::new(self, lit, reason))
+			}
+			ChangeType::New => {
+				let bv = self.get_intref_lit(iv, lit_req.clone());
+				self.set_bool_val(bv, true, reason)
+			}
 		}
-		trace!(int_var = usize::from(iv), effect = ?lit_req, "propagate int");
-		// TODO: Update domain??
-		let bv = self.get_intref_lit(iv, lit_req);
-		self.set_bool_val(bv, true, reason)
 	}
 
 	#[inline]
