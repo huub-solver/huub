@@ -310,6 +310,47 @@ impl IntVar {
 		if negate { !bv } else { bv }.into()
 	}
 
+	/// Returns the boolean view associated with `≥ v` if it exists or weaker version otherwise.
+	///
+	/// ## Warning
+	/// This function assumes that `v <= lb`.
+	pub(crate) fn get_greater_eq_lit_or_weaker(
+		&self,
+		trail: &impl TrailingActions,
+		v: IntVal,
+	) -> (BoolView, IntVal) {
+		debug_assert!(v <= self.get_lower_bound(trail));
+		if v <= *self.domain.lower_bound().unwrap() {
+			return (BoolView(BoolViewInner::Const(true)), v);
+		}
+
+		match &self.order_encoding {
+			OrderStorage::Eager { storage, .. } => {
+				let (_, offset, _) = OrderStorage::resolve_val(&self.domain, v);
+				let bv = BoolView(BoolViewInner::Lit(storage.index(offset).into()));
+				(bv, v)
+			}
+			OrderStorage::Lazy(storage) => {
+				let mut ret = (BoolView(BoolViewInner::Const(true)), v);
+				let lb_index = trail.get_trailed_int(storage.lb_index);
+				let mut index = if lb_index < 0 {
+					return ret;
+				} else {
+					lb_index as usize
+				};
+				while storage.storage[index].val >= v {
+					let node = &storage.storage[index];
+					ret = (BoolView(BoolViewInner::Lit(node.var.into())), node.val);
+					if !node.has_prev {
+						break;
+					}
+					index = node.prev as usize;
+				}
+				ret
+			}
+		}
+	}
+
 	pub(crate) fn get_value<V: SatValuation + ?Sized>(&self, model: &V) -> IntVal {
 		match &self.order_encoding {
 			OrderStorage::Eager { storage, .. } => {
@@ -343,6 +384,47 @@ impl IntVar {
 		}
 	}
 
+	/// Returns the boolean view associated with `< v` if it exists or weaker version otherwise.
+	///
+	/// ## Warning
+	/// This function assumes that `v >= ub`.
+	pub(crate) fn get_less_lit_or_weaker(
+		&self,
+		trail: &impl TrailingActions,
+		v: IntVal,
+	) -> (BoolView, IntVal) {
+		debug_assert!(v >= self.get_upper_bound(trail));
+		if v > *self.domain.upper_bound().unwrap() {
+			return (BoolView(BoolViewInner::Const(true)), v);
+		}
+
+		match &self.order_encoding {
+			OrderStorage::Eager { storage, .. } => {
+				let (_, offset, _) = OrderStorage::resolve_val(&self.domain, v);
+				let bv = BoolView(BoolViewInner::Lit(!storage.index(offset)));
+				(bv, v)
+			}
+			OrderStorage::Lazy(storage) => {
+				let mut ret = (BoolView(BoolViewInner::Const(true)), v);
+				let ub_index = trail.get_trailed_int(storage.ub_index);
+				let mut index = if ub_index < 0 {
+					return ret;
+				} else {
+					ub_index as usize
+				};
+				while storage.storage[index].val <= v {
+					let node = &storage.storage[index];
+					ret = (BoolView(BoolViewInner::Lit(!node.var)), node.val);
+					if !node.has_next {
+						break;
+					}
+					index = node.next as usize;
+				}
+				ret
+			}
+		}
+	}
+
 	/// Returns the lower bound of the current state of the integer variable.
 	pub(crate) fn get_lower_bound(&self, trail: &impl TrailingActions) -> IntVal {
 		match &self.order_encoding {
@@ -361,9 +443,18 @@ impl IntVar {
 	/// Returns the boolean view associated with the lower bound of the variable being this value.
 	pub(crate) fn get_lower_bound_lit(&self, trail: &impl TrailingActions) -> BoolView {
 		match &self.order_encoding {
-			OrderStorage::Eager { lower_bound, .. } => {
+			OrderStorage::Eager {
+				lower_bound,
+				storage,
+				..
+			} => {
 				let lb = trail.get_trailed_int(*lower_bound);
-				self.get_bool_lit(LitMeaning::GreaterEq(lb)).unwrap()
+				BoolView(if lb == *self.domain.lower_bound().unwrap() {
+					BoolViewInner::Const(true)
+				} else {
+					let (_, offset, _) = OrderStorage::resolve_val(&self.domain, lb);
+					BoolViewInner::Lit(storage.index(offset).into())
+				})
 			}
 			OrderStorage::Lazy(storage) => {
 				let lb_index = trail.get_trailed_int(storage.lb_index);
@@ -394,9 +485,18 @@ impl IntVar {
 	/// Returns the boolean view associated with the upper bound of the variable being this value.
 	pub(crate) fn get_upper_bound_lit(&self, trail: &impl TrailingActions) -> BoolView {
 		match &self.order_encoding {
-			OrderStorage::Eager { upper_bound, .. } => {
+			OrderStorage::Eager {
+				upper_bound,
+				storage,
+				..
+			} => {
 				let ub = trail.get_trailed_int(*upper_bound);
-				self.get_bool_lit(LitMeaning::Less(ub + 1)).unwrap()
+				BoolView(if ub == *self.domain.upper_bound().unwrap() {
+					BoolViewInner::Const(true)
+				} else {
+					let (_, offset, _) = OrderStorage::resolve_val(&self.domain, ub + 1);
+					BoolViewInner::Lit(!storage.index(offset))
+				})
 			}
 			OrderStorage::Lazy(storage) => {
 				let ub_index = trail.get_trailed_int(storage.ub_index);
@@ -439,7 +539,7 @@ impl IntVar {
 	}
 
 	/// Notify that a new lower bound has been propagated for the variable,
-	/// returning the literal previous lower bound.
+	/// returning the previous lower bound.
 	///
 	/// # Warning
 	///
@@ -484,7 +584,7 @@ impl IntVar {
 	}
 
 	/// Notify that a new upper bound has been propagated for the variable,
-	/// returning the literal previous upper bound.
+	/// returning the previous upper bound.
 	///
 	/// # Warning
 	///

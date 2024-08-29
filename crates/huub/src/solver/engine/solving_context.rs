@@ -5,7 +5,7 @@ use tracing::trace;
 
 use crate::{
 	actions::{
-		explanation::ExplanationActions, inspection::InspectionActions,
+		decision::DecisionActions, explanation::ExplanationActions, inspection::InspectionActions,
 		propagation::PropagationActions, trailing::TrailingActions,
 	},
 	propagator::{
@@ -25,7 +25,7 @@ use crate::{
 	BoolView, Clause, IntVal, IntView, LitMeaning,
 };
 
-pub(crate) struct PropagationContext<'a> {
+pub(crate) struct SolvingContext<'a> {
 	/// Actions to create new variables in the oracle
 	pub(crate) slv: &'a mut dyn SolvingActions,
 	/// Engine state object
@@ -34,7 +34,7 @@ pub(crate) struct PropagationContext<'a> {
 	pub(crate) current_prop: PropRef,
 }
 
-impl<'a> PropagationContext<'a> {
+impl<'a> SolvingContext<'a> {
 	pub(crate) fn new(slv: &'a mut dyn SolvingActions, state: &'a mut State) -> Self {
 		Self {
 			slv,
@@ -44,7 +44,8 @@ impl<'a> PropagationContext<'a> {
 	}
 
 	pub(crate) fn run_propagators(&mut self, propagators: &mut IndexVec<PropRef, BoxedPropagator>) {
-		while let Some(p) = self.state.prop_queue.pop() {
+		while let Some(p) = self.state.propagator_queue.pop() {
+			debug_assert!(self.state.conflict.is_none());
 			self.state.enqueued[p] = false;
 			self.current_prop = p;
 			let prop = propagators[p].as_mut();
@@ -52,19 +53,18 @@ impl<'a> PropagationContext<'a> {
 			self.state.statistics.propagations += 1;
 			self.current_prop = PropRef::new(u32::MAX as usize);
 			if let Err(Conflict { subject, reason }) = res {
-				self.state.conflict = true;
 				let mut clause: Clause = reason.to_clause(propagators, self.state);
 				if let Some(subject) = subject {
 					clause.push(subject);
 				}
 				trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "conflict detected");
 				debug_assert!(!clause.is_empty());
-				self.state.changes.add_clause(clause);
+				debug_assert!(self.state.conflict.is_none());
+				self.state.conflict = Some(clause);
 			}
-			if !self.state.changes.is_empty() {
+			if self.state.conflict.is_some() || !self.state.propagation_queue.is_empty() {
 				return;
 			}
-			debug_assert!(!self.state.conflict);
 		}
 	}
 
@@ -128,15 +128,7 @@ impl<'a> PropagationContext<'a> {
 	}
 }
 
-impl ExplanationActions for PropagationContext<'_> {
-	delegate! {
-		to self.state {
-			fn try_int_lit(&self, var: IntView, meaning: LitMeaning) -> Option<BoolView>;
-			fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView;
-			fn get_int_upper_bound_lit(&mut self, var: IntView) -> BoolView;
-		}
-	}
-
+impl DecisionActions for SolvingContext<'_> {
 	fn get_intref_lit(&mut self, iv: IntVarRef, meaning: LitMeaning) -> BoolView {
 		let var = &mut self.state.int_vars[iv];
 		let new_var = |def: LazyLitDef| {
@@ -153,7 +145,7 @@ impl ExplanationActions for PropagationContext<'_> {
 				def.prev.map(Into::into),
 				def.next.map(Into::into),
 			) {
-				self.state.changes.add_clause(cl);
+				self.state.clauses.push_back(cl);
 			}
 			v
 		};
@@ -161,7 +153,23 @@ impl ExplanationActions for PropagationContext<'_> {
 	}
 }
 
-impl InspectionActions for PropagationContext<'_> {
+impl ExplanationActions for SolvingContext<'_> {
+	delegate! {
+		to self.state {
+			fn try_int_lit(&self, var: IntView, meaning: LitMeaning) -> Option<BoolView>;
+			fn get_int_lit_relaxed(&mut self, var: IntView, meaning: LitMeaning) -> (BoolView, LitMeaning);
+			fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView;
+			fn get_int_upper_bound_lit(&mut self, var: IntView) -> BoolView;
+		}
+	}
+
+	fn get_int_val_lit(&mut self, var: IntView) -> Option<BoolView> {
+		let val = self.get_int_val(var)?;
+		Some(self.get_int_lit(var, LitMeaning::Eq(val)))
+	}
+}
+
+impl InspectionActions for SolvingContext<'_> {
 	delegate! {
 		to self.state {
 			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
@@ -174,7 +182,7 @@ impl InspectionActions for PropagationContext<'_> {
 	}
 }
 
-impl<'a> PropagationActions for PropagationContext<'a> {
+impl PropagationActions for SolvingContext<'_> {
 	fn set_bool_val(
 		&mut self,
 		bv: BoolView,
@@ -194,7 +202,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 					let reason = reason.build_reason(self);
 					trace!(lit = i32::from(propagated_lit), reason = ?reason, "propagate bool");
 					self.state.register_reason(propagated_lit, reason);
-					self.state.changes.propagate(propagated_lit);
+					self.state.propagation_queue.push(propagated_lit);
 					let prev = self.state.trail.assign_sat(propagated_lit);
 					debug_assert!(prev.is_none());
 					Ok(())
@@ -336,7 +344,7 @@ impl<'a> PropagationActions for PropagationContext<'a> {
 	}
 }
 
-impl TrailingActions for PropagationContext<'_> {
+impl TrailingActions for SolvingContext<'_> {
 	delegate! {
 		to self.state {
 			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;

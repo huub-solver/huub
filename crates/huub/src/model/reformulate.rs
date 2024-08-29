@@ -7,8 +7,12 @@ use pindakaas::{
 use thiserror::Error;
 
 use crate::{
-	actions::explanation::ExplanationActions,
-	model::{bool, int, int::IntVar, ModelView},
+	actions::decision::DecisionActions,
+	model::{
+		bool,
+		int::{self, IntVar},
+		ModelView,
+	},
 	solver::{
 		view::{BoolView, BoolViewInner, IntViewInner, SolverView},
 		SatSolver,

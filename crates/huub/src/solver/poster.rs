@@ -2,12 +2,10 @@ use crate::{
 	actions::initialization::InitializationActions,
 	brancher::Brancher,
 	propagator::Propagator,
-	solver::engine::{
-		propagation_context::PropagationContext, queue::PriorityLevel, trail::Trail, State,
-	},
+	solver::engine::{queue::PriorityLevel, solving_context::SolvingContext, trail::Trail, State},
 };
 
-pub(crate) type BoxedPropagator = Box<dyn for<'a> Propagator<PropagationContext<'a>, State, Trail>>;
+pub(crate) type BoxedPropagator = Box<dyn for<'a> Propagator<SolvingContext<'a>, State, Trail>>;
 
 /// The trait used called to registering a propagator with the solver.
 pub(crate) trait Poster {

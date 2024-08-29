@@ -18,7 +18,7 @@ use crate::{
 	},
 	propagator::{conflict::Conflict, int_event::IntEvent},
 	solver::{
-		engine::{propagation_context::PropagationContext, trail::Trail, State},
+		engine::{solving_context::SolvingContext, trail::Trail, State},
 		poster::BoxedPropagator,
 	},
 	Conjunction,
@@ -73,9 +73,7 @@ pub(crate) trait Propagator<P: PropagationActions, E: ExplanationActions, T: Tra
 pub(crate) trait DynPropClone {
 	fn clone_dyn_prop(&self) -> BoxedPropagator;
 }
-impl<P: for<'a> Propagator<PropagationContext<'a>, State, Trail> + Clone + 'static> DynPropClone
-	for P
-{
+impl<P: for<'a> Propagator<SolvingContext<'a>, State, Trail> + Clone + 'static> DynPropClone for P {
 	fn clone_dyn_prop(&self) -> BoxedPropagator {
 		Box::new(self.clone())
 	}

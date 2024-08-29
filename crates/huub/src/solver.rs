@@ -21,7 +21,8 @@ use tracing::{debug, trace};
 
 use crate::{
 	actions::{
-		explanation::ExplanationActions, inspection::InspectionActions, trailing::TrailingActions,
+		decision::DecisionActions, explanation::ExplanationActions, inspection::InspectionActions,
+		trailing::TrailingActions,
 	},
 	solver::{
 		engine::{
@@ -150,7 +151,7 @@ where
 		let p = self.engine_mut().propagators.push(prop);
 		debug_assert_eq!(prop_ref, p);
 		let engine = self.engine_mut();
-		let p = engine.state.prop_priority.push(queue_pref.priority);
+		let p = engine.state.propagator_priority.push(queue_pref.priority);
 		debug_assert_eq!(prop_ref, p);
 		let p = self.engine_mut().state.enqueued.push(false);
 		debug_assert_eq!(prop_ref, p);
@@ -474,21 +475,11 @@ where
 	}
 }
 
-impl<Sol, Sat> ExplanationActions for Solver<Sat>
+impl<Sol, Sat> DecisionActions for Solver<Sat>
 where
 	Sol: PropagatorAccess + SatValuation,
 	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 {
-	delegate! {
-		to self.engine().state {
-			fn try_int_lit(&self, var: IntView, meaning: LitMeaning) -> Option<BoolView>;
-		}
-		to self.engine_mut().state {
-			fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView;
-			fn get_int_upper_bound_lit(&mut self, var: IntView) -> BoolView;
-		}
-	}
-
 	fn get_intref_lit(&mut self, iv: IntVarRef, meaning: LitMeaning) -> BoolView {
 		// TODO: We currently copy the integer variable struct here to avoid
 		// borrowing issues. Hopefully the compiler sees that this is unnecessary,
@@ -517,6 +508,28 @@ where
 		let bv = var.bool_lit(meaning, new_var);
 		self.engine_mut().state.int_vars[iv] = var;
 		bv
+	}
+}
+
+impl<Sol, Sat> ExplanationActions for Solver<Sat>
+where
+	Sol: PropagatorAccess + SatValuation,
+	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+{
+	delegate! {
+		to self.engine().state {
+			fn try_int_lit(&self, var: IntView, meaning: LitMeaning) -> Option<BoolView>;
+		}
+		to self.engine_mut().state {
+			fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView;
+			fn get_int_upper_bound_lit(&mut self, var: IntView) -> BoolView;
+			fn get_int_lit_relaxed(&mut self, var: IntView, meaning: LitMeaning) -> (BoolView, LitMeaning);
+		}
+	}
+
+	fn get_int_val_lit(&mut self, var: IntView) -> Option<BoolView> {
+		let val = self.get_int_val(var)?;
+		Some(self.get_int_lit(var, LitMeaning::Eq(val)))
 	}
 }
 

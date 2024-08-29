@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use pindakaas::Lit as RawLit;
 
 use crate::{
-	actions::{explanation::ExplanationActions, initialization::InitializationActions},
+	actions::{decision::DecisionActions, initialization::InitializationActions},
 	model::branching::{ValueSelection, VariableSelection},
 	solver::{
 		engine::trail::TrailedInt,
@@ -41,8 +41,8 @@ struct IntBrancherPoster {
 	val_sel: ValueSelection,
 }
 
-fn decide_bool<E: ExplanationActions>(
-	actions: &mut E,
+fn decide_bool<D: DecisionActions>(
+	actions: &mut D,
 	vars: &[RawLit],
 	var_sel: VariableSelection,
 	val_sel: ValueSelection,
@@ -92,8 +92,8 @@ fn decide_bool<E: ExplanationActions>(
 	})
 }
 
-fn decide_int<E: ExplanationActions>(
-	actions: &mut E,
+fn decide_int<D: DecisionActions>(
+	actions: &mut D,
 	vars: &mut [IntView],
 	var_sel: VariableSelection,
 	val_sel: ValueSelection,
@@ -178,7 +178,7 @@ fn decide_int<E: ExplanationActions>(
 }
 
 impl Brancher {
-	pub(crate) fn decide<E: ExplanationActions>(&mut self, actions: &mut E) -> Option<RawLit> {
+	pub(crate) fn decide<D: DecisionActions>(&mut self, actions: &mut D) -> Option<RawLit> {
 		match &mut self.vars {
 			BrancherVars::Bool(vars) => {
 				decide_bool(actions, vars, self.var_sel, self.val_sel, self.next)

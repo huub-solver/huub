@@ -1,7 +1,7 @@
 pub(crate) mod bool_to_int;
 pub(crate) mod int_var;
-pub(crate) mod propagation_context;
 pub(crate) mod queue;
+pub(crate) mod solving_context;
 pub(crate) mod trail;
 
 use std::{
@@ -20,7 +20,8 @@ use tracing::{debug, trace};
 
 use crate::{
 	actions::{
-		explanation::ExplanationActions, inspection::InspectionActions, trailing::TrailingActions,
+		decision::DecisionActions, explanation::ExplanationActions, inspection::InspectionActions,
+		trailing::TrailingActions,
 	},
 	brancher::Brancher,
 	propagator::{int_event::IntEvent, reason::Reason},
@@ -28,8 +29,8 @@ use crate::{
 		engine::{
 			bool_to_int::BoolToIntMap,
 			int_var::{IntVar, IntVarRef, LitMeaning, OrderStorage},
-			propagation_context::PropagationContext,
 			queue::{PriorityLevel, PriorityQueue},
+			solving_context::SolvingContext,
 			trail::{Trail, TrailedInt},
 		},
 		poster::BoxedPropagator,
@@ -56,18 +57,6 @@ macro_rules! trace_new_lit {
 	};
 }
 pub(crate) use trace_new_lit;
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct ChangeLog {
-	ty: VecDeque<ChangeType<usize>>,
-	lits: VecDeque<RawLit>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum ChangeType<T> {
-	Propagate(T),
-	AddClause(T),
-}
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Engine {
@@ -115,14 +104,16 @@ pub(crate) struct State {
 	/// Trailed Storage
 	/// Includes lower and upper bounds for integer variables and Boolean variable assignments
 	pub(crate) trail: Trail,
+	/// Literals to be propagated by the oracle
+	pub(crate) propagation_queue: Conjunction,
 	/// Reasons for setting values
 	pub(crate) reason_map: HashMap<RawLit, Reason>,
 	/// Whether conflict has (already) been detected
-	pub(crate) conflict: bool,
+	pub(crate) conflict: Option<Clause>,
 
 	// ---- Non-Trailed Infrastructure ----
-	/// Storage for changes to be communicated to the solver
-	pub(crate) changes: ChangeLog,
+	/// Storage for clauses to be communicated to the solver
+	pub(crate) clauses: VecDeque<Clause>,
 	/// Solving statistics
 	pub(crate) statistics: SearchStatistics,
 	/// Whether VSIDS is currently enabled
@@ -135,98 +126,11 @@ pub(crate) struct State {
 	// TODO: Shrink Propref and IntEvent to fit in 32 bits
 	pub(crate) int_subscribers: HashMap<IntVarRef, Vec<(PropRef, IntEvent, u32)>>,
 	/// Queue of propagators awaiting action
-	pub(crate) prop_queue: PriorityQueue<PropRef>,
+	pub(crate) propagator_queue: PriorityQueue<PropRef>,
 	/// Priority within the queue for each propagator
-	pub(crate) prop_priority: IndexVec<PropRef, PriorityLevel>,
+	pub(crate) propagator_priority: IndexVec<PropRef, PriorityLevel>,
 	/// Flag for whether a propagator is enqueued
 	pub(crate) enqueued: IndexVec<PropRef, bool>,
-}
-
-impl ChangeLog {
-	fn add_clause(&mut self, clause: impl IntoIterator<Item = RawLit>) {
-		let len = self.lits.len();
-		self.lits.extend(clause);
-		let len = self.lits.len() - len;
-		if len > 0 {
-			self.ty.push_back(ChangeType::AddClause(len));
-		}
-	}
-
-	fn clear_propagation(&mut self) {
-		let ChangeLog { ty, lits } = self
-			.filter(|e| !matches!(e, ChangeType::Propagate(_)))
-			.collect();
-		self.ty = ty;
-		self.lits = lits;
-		debug_assert_eq!(self.ty.is_empty(), self.lits.is_empty());
-	}
-
-	fn is_empty(&self) -> bool {
-		debug_assert_eq!(self.ty.is_empty(), self.lits.is_empty());
-		self.ty.is_empty()
-	}
-
-	fn peek_ty(&self) -> Option<ChangeType<()>> {
-		self.ty.front().map(|ty| match ty {
-			ChangeType::Propagate(_) => ChangeType::Propagate(()),
-			ChangeType::AddClause(_) => ChangeType::AddClause(()),
-		})
-	}
-
-	fn pop(&mut self) -> Option<ChangeType<Vec<RawLit>>> {
-		let mut split_off = |n| {
-			let mut lits = Vec::with_capacity(n);
-			for _ in 0..n {
-				lits.push(self.lits.pop_front().unwrap())
-			}
-			lits
-		};
-		self.ty.pop_front().map(|ty| match ty {
-			ChangeType::Propagate(n) => ChangeType::Propagate(split_off(n)),
-			ChangeType::AddClause(n) => ChangeType::AddClause(split_off(n)),
-		})
-	}
-
-	fn propagate(&mut self, lit: RawLit) {
-		self.lits.push_back(lit);
-		if let Some(ChangeType::Propagate(n)) = self.ty.back_mut() {
-			*n += 1
-		} else {
-			self.ty.push_back(ChangeType::Propagate(1))
-		}
-		debug_assert!(matches!(self.ty.back(), Some(ChangeType::Propagate(_))))
-	}
-}
-
-impl<I: IntoIterator<Item = RawLit>> FromIterator<ChangeType<I>> for ChangeLog {
-	fn from_iter<T: IntoIterator<Item = ChangeType<I>>>(iter: T) -> Self {
-		let mut log = Self::default();
-		for ty in iter {
-			match ty {
-				ChangeType::Propagate(lits) => {
-					let len = log.lits.len();
-					log.lits.extend(lits);
-					let added = log.lits.len() - len;
-					if let Some(ChangeType::Propagate(n)) = log.ty.back_mut() {
-						*n += added
-					} else if added > 0 {
-						log.ty.push_back(ChangeType::Propagate(added))
-					}
-					debug_assert!(matches!(log.ty.back(), Some(ChangeType::Propagate(_))))
-				}
-				ChangeType::AddClause(lits) => log.add_clause(lits),
-			}
-		}
-		log
-	}
-}
-
-impl Iterator for ChangeLog {
-	type Item = ChangeType<Vec<RawLit>>;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		self.pop()
-	}
 }
 
 impl IpasirPropagator for Engine {
@@ -245,14 +149,14 @@ impl IpasirPropagator for Engine {
 		}
 
 		// Enqueue propagators, if no conflict has been found
-		if !self.state.conflict {
+		if self.state.conflict.is_none() {
 			self.state
 				.enqueue_propagators(&mut self.propagators, lit, None);
 		}
 	}
 
 	fn notify_new_decision_level(&mut self) {
-		debug_assert!(!self.state.conflict);
+		debug_assert!(self.state.conflict.is_none());
 		trace!("new decision level");
 		self.state.notify_new_decision_level();
 	}
@@ -283,7 +187,7 @@ impl IpasirPropagator for Engine {
 			if current as usize == self.branchers.len() {
 				return None;
 			}
-			let mut ctx = PropagationContext::new(slv, &mut self.state);
+			let mut ctx = SolvingContext::new(slv, &mut self.state);
 			for (i, brancher) in self.branchers.iter_mut().enumerate().skip(current as usize) {
 				if let Some(lit) = brancher.decide(&mut ctx) {
 					debug!(lit = i32::from(lit), "decide");
@@ -298,67 +202,56 @@ impl IpasirPropagator for Engine {
 
 	#[tracing::instrument(level = "debug", skip(self, slv), fields(level = self.state.decision_level()))]
 	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Vec<RawLit> {
-		// Helper function to handle returning a change
-		let ret_change = |engine: &mut Self, change| {
-			match change {
-				ChangeType::Propagate(_) => {
-					let ChangeType::Propagate(queue) = engine.state.changes.pop().unwrap() else {
-						unreachable!()
-					};
-					trace!(
-						lits = ?queue
-							.iter()
-							.map(|&x| i32::from(x))
-							.collect::<Vec<i32>>(),
-						"propagate"
-					);
-					for &lit in queue.iter() {
-						engine
-							.state
-							.enqueue_propagators(&mut engine.propagators, lit, None);
-					}
-					// Debug helper to ensure that any reason is based on known true literals
-					#[cfg(debug_assertions)]
-					{
-						for lit in queue.iter() {
-							if let Some(reason) = engine.state.reason_map.get(lit).cloned() {
-								let clause: Vec<_> =
-									reason.to_clause(&mut engine.propagators, &mut engine.state);
-								for l in &clause {
-									let val = engine.state.trail.get_sat_value(!l);
-									if !val.unwrap_or(false) {
-										tracing::error!(lit_prop = i32::from(*lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
-									}
-									debug_assert!(
-												val.unwrap_or(false),
-												"Literal {} in Reason for {} is {:?}, but should be known true",
-												!l,
-												lit,
-												val
-											);
-								}
-							}
+		// Check whether there are previous clauses to be communicated
+		if !self.state.clauses.is_empty() {
+			return Vec::new();
+		}
+		if self.state.propagation_queue.is_empty() && self.state.conflict.is_none() {
+			// If there are no previous changes, run propagators
+			SolvingContext::new(slv, &mut self.state).run_propagators(&mut self.propagators);
+		}
+		// Check whether there are new clauses that need to be communicated first
+		if !self.state.clauses.is_empty() {
+			return Vec::new();
+		}
+		let queue = mem::take(&mut self.state.propagation_queue);
+		if queue.is_empty() {
+			return Vec::new(); // Early return to avoid tracing statements
+		}
+		trace!(
+			lits = ?queue
+				.iter()
+				.map(|&x| i32::from(x))
+				.collect::<Vec<i32>>(),
+			"propagate"
+		);
+		for &lit in queue.iter() {
+			self.state
+				.enqueue_propagators(&mut self.propagators, lit, None);
+		}
+		// Debug helper to ensure that any reason is based on known true literals
+		#[cfg(debug_assertions)]
+		{
+			for lit in queue.iter() {
+				if let Some(reason) = self.state.reason_map.get(lit).cloned() {
+					let clause: Vec<_> = reason.to_clause(&mut self.propagators, &mut self.state);
+					for l in &clause {
+						let val = self.state.trail.get_sat_value(!l);
+						if !val.unwrap_or(false) {
+							tracing::error!(lit_prop = i32::from(*lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
 						}
+						debug_assert!(
+							val.unwrap_or(false),
+							"Literal {} in Reason for {} is {:?}, but should be known true",
+							!l,
+							lit,
+							val
+						);
 					}
-					queue
 				}
-				// Clause must be added to the oracle, before further propagation
-				ChangeType::AddClause(_) => Vec::new(),
 			}
-		};
-
-		// Check whether there are previous changes to be communicated
-		if let Some(change) = self.state.changes.peek_ty() {
-			return ret_change(self, change);
 		}
-		debug_assert!(!self.state.conflict);
-		// Otherwise run propagagors
-		PropagationContext::new(slv, &mut self.state).run_propagators(&mut self.propagators);
-		if let Some(change) = self.state.changes.peek_ty() {
-			ret_change(self, change)
-		} else {
-			Vec::new()
-		}
+		queue
 	}
 
 	fn add_reason_clause(&mut self, propagated_lit: RawLit) -> Clause {
@@ -384,11 +277,10 @@ impl IpasirPropagator for Engine {
 		slv: &mut dyn SolvingActions,
 		model: &dyn pindakaas::Valuation,
 	) -> bool {
-		debug_assert!(!self.state.conflict);
+		debug_assert!(self.state.conflict.is_none());
 		// If there is a known conflict, return false
-		if self.state.conflict {
-			debug_assert!(!self.state.changes.is_empty());
-			let _ = self.state.ensure_clause_changes(&mut self.propagators);
+		if !self.state.propagation_queue.is_empty() || self.state.conflict.is_some() {
+			self.state.ensure_clause_changes(&mut self.propagators);
 			return false;
 		}
 
@@ -397,7 +289,7 @@ impl IpasirPropagator for Engine {
 		self.notify_new_decision_level();
 
 		// Create a propagation context
-		let mut ctx = PropagationContext::new(slv, &mut self.state);
+		let mut ctx = SolvingContext::new(slv, &mut self.state);
 
 		// Calculate values of each integer and notify popgators
 		for r in (0..ctx.state.int_vars.len()).map(IntVarRef::new) {
@@ -422,8 +314,15 @@ impl IpasirPropagator for Engine {
 
 		// Process propagation results
 		// Accept model if no conflict is detected, and no propagation is performed (but allow creation of defining clauses)
-		let mut accept = !self.state.conflict;
-		accept &= !self.state.ensure_clause_changes(&mut self.propagators);
+		let accept = self.state.conflict.is_none() && self.state.propagation_queue.is_empty();
+		if !self.state.propagation_queue.is_empty() {
+			// Move propations and their reasons to clauses before backtrack
+			self.state.ensure_clause_changes(&mut self.propagators);
+		}
+		if let Some(conflict) = self.state.conflict.clone() {
+			// Move conflict to clauses before backtrack
+			self.state.clauses.push_back(conflict);
+		}
 
 		// Revert to real decision level
 		self.notify_backtrack(level as usize);
@@ -433,15 +332,17 @@ impl IpasirPropagator for Engine {
 	}
 
 	fn add_external_clause(&mut self, _slv: &mut dyn SolvingActions) -> Option<Clause> {
-		if let Some(ChangeType::AddClause(())) = self.state.changes.peek_ty() {
-			let ChangeType::AddClause(clause) = self.state.changes.pop().unwrap() else {
-				unreachable!()
-			};
-			trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add external clause");
-			Some(clause)
+		let clause = if !self.state.clauses.is_empty() {
+			self.state.clauses.pop_front() // Known to be `Some`
+		} else if !self.state.propagation_queue.is_empty() {
+			None // Require that the solver first applies the remaining propagation
 		} else {
-			None
+			self.state.conflict.clone() // Clone the conflict state is not lost
+		};
+		if let Some(clause) = &clause {
+			trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add external clause");
 		}
+		clause
 	}
 
 	fn as_any(&self) -> &dyn Any {
@@ -548,37 +449,24 @@ impl State {
 
 	pub(crate) fn enqueue_propagator(&mut self, prop: PropRef) {
 		debug_assert!(!self.enqueued[prop]);
-		self.prop_queue.insert(self.prop_priority[prop], prop);
+		self.propagator_queue
+			.insert(self.propagator_priority[prop], prop);
 	}
 
 	// Helper method that ensures that all changes are communicated to the solver as clauses.
 	//
 	// The method returns whether any propagations were converted to clauses.
 	#[inline]
-	fn ensure_clause_changes(
-		&mut self,
-		propagators: &mut IndexVec<PropRef, BoxedPropagator>,
-	) -> bool {
-		let mut converted = false;
-		let old = mem::take(&mut self.changes);
-		self.changes = old
-			.flat_map(|change| match change {
-				ChangeType::Propagate(lits) => lits
-					.into_iter()
-					.map(|lit| {
-						converted = true;
-						let mut clause = self
-							.reason_map
-							.remove(&lit)
-							.map_or_else(Vec::new, |r| r.to_clause(propagators, self));
-						clause.push(lit);
-						ChangeType::AddClause(clause)
-					})
-					.collect(),
-				ChangeType::AddClause(_) => vec![change],
-			})
-			.collect();
-		converted
+	fn ensure_clause_changes(&mut self, propagators: &mut IndexVec<PropRef, BoxedPropagator>) {
+		let queue = mem::take(&mut self.propagation_queue);
+		for lit in queue {
+			let mut clause = self
+				.reason_map
+				.remove(&lit)
+				.map_or_else(Vec::new, |r| r.to_clause(propagators, self));
+			clause.push(lit);
+			self.clauses.push_back(clause)
+		}
 	}
 
 	fn notify_new_decision_level(&mut self) {
@@ -596,13 +484,13 @@ impl State {
 		self.statistics.conflicts += 1;
 
 		// Resolve the conflict status
-		self.conflict = false;
+		self.conflict = None;
 		// Remove (now invalid) propagations (but leave clauses in place)
-		self.changes.clear_propagation();
+		self.propagation_queue.clear();
 		// Backtrack trail
 		self.trail.notify_backtrack(level);
 		// Empty propagation queue
-		while let Some(p) = self.prop_queue.pop() {
+		while let Some(p) = self.propagator_queue.pop() {
 			self.enqueued[p] = false;
 		}
 
@@ -650,7 +538,8 @@ impl State {
 				continue;
 			}
 			if propagators[*prop].notify_event(*data, &event, &mut self.trail) {
-				self.prop_queue.insert(self.prop_priority[*prop], *prop);
+				self.propagator_queue
+					.insert(self.propagator_priority[*prop], *prop);
 			}
 		}
 	}
@@ -666,7 +555,8 @@ impl State {
 				continue;
 			}
 			if propagators[prop].notify_event(data, &IntEvent::Fixed, &mut self.trail) {
-				self.prop_queue.insert(self.prop_priority[prop], prop);
+				self.propagator_queue
+					.insert(self.propagator_priority[prop], prop);
 			}
 		}
 
@@ -746,15 +636,79 @@ impl ExplanationActions for State {
 		}
 	}
 
-	fn get_intref_lit(&mut self, var: IntVarRef, meaning: LitMeaning) -> BoolView {
-		self.int_vars[var]
-			.get_bool_lit(meaning)
-			.expect("literals part of explanations should have been created during propagation")
+	fn get_int_lit_relaxed(&mut self, var: IntView, meaning: LitMeaning) -> (BoolView, LitMeaning) {
+		debug_assert!(
+			matches!(meaning, LitMeaning::GreaterEq(_) | LitMeaning::Less(_)),
+			"relaxed integer literals are only supported for LitMeaning::GreaterEq and LitMeaning::Less"
+		);
+		// Transform literal meaning if view is a linear transformation
+		let meaning = match var.0 {
+			IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } => {
+				match transformer.rev_transform_lit(meaning.clone()) {
+					Ok(m) => m,
+					Err(v) => return (BoolView(BoolViewInner::Const(v)), meaning),
+				}
+			}
+			_ => meaning,
+		};
+
+		// Get the (relaxed) boolean view representing the meaning and the actual (relaxed) meaning
+		let (bv, meaning) = match var.0 {
+			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
+				let var = &mut self.int_vars[iv];
+				match meaning {
+					LitMeaning::GreaterEq(v) => {
+						let (bv, v) = var.get_greater_eq_lit_or_weaker(&self.trail, v);
+						(bv, LitMeaning::GreaterEq(v))
+					}
+					LitMeaning::Less(v) => {
+						let (bv, v) = var.get_less_lit_or_weaker(&self.trail, v);
+						(bv, LitMeaning::Less(v))
+					}
+					_ => unreachable!(),
+				}
+			}
+			IntViewInner::Const(c) => (
+				BoolView(BoolViewInner::Const(match meaning {
+					LitMeaning::GreaterEq(i) => c >= i,
+					LitMeaning::Less(i) => c < i,
+					_ => unreachable!(),
+				})),
+				meaning,
+			),
+			IntViewInner::Bool { lit, .. } => {
+				let (b_meaning, negated) =
+					if matches!(meaning, LitMeaning::NotEq(_) | LitMeaning::Less(_)) {
+						(!meaning.clone(), true)
+					} else {
+						(meaning.clone(), false)
+					};
+				let bv = BoolView(match b_meaning {
+					LitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
+					LitMeaning::GreaterEq(i) if i > 1 => BoolViewInner::Const(false),
+					LitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
+					_ => unreachable!(),
+				});
+				(if negated { !bv } else { bv }, meaning)
+			}
+		};
+
+		// Transform the meaning back to fit the original view if it was linearly transformed
+		let meaning = if let IntViewInner::Linear { transformer, .. }
+		| IntViewInner::Bool { transformer, .. } = var.0
+		{
+			transformer.transform_lit(meaning)
+		} else {
+			meaning
+		};
+		(bv, meaning)
 	}
 
 	fn get_int_val_lit(&mut self, var: IntView) -> Option<BoolView> {
-		self.get_int_val(var)
-			.map(|v| self.get_int_lit(var, LitMeaning::Eq(v)))
+		self.get_int_val(var).map(|v| {
+			self.try_int_lit(var, LitMeaning::Eq(v))
+				.expect("value literals cannot be created during explanation")
+		})
 	}
 
 	fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView {

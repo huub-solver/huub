@@ -1,3 +1,4 @@
+pub(crate) mod decision;
 pub(crate) mod explanation;
 pub(crate) mod initialization;
 pub(crate) mod inspection;

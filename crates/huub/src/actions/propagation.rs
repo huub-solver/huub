@@ -1,5 +1,5 @@
 use crate::{
-	actions::explanation::ExplanationActions,
+	actions::{decision::DecisionActions, explanation::ExplanationActions},
 	propagator::{
 		conflict::Conflict,
 		reason::{LazyReason, ReasonBuilder},
@@ -7,7 +7,7 @@ use crate::{
 	BoolView, IntVal, IntView,
 };
 
-pub(crate) trait PropagationActions: ExplanationActions {
+pub(crate) trait PropagationActions: ExplanationActions + DecisionActions {
 	fn set_bool_val(
 		&mut self,
 		bv: BoolView,

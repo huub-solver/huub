@@ -34,6 +34,28 @@ impl LinearTransform {
 		(val * self.scale.get()) + self.offset
 	}
 
+	/// Perform the linear tranformation for a `LitMeaning`.
+	pub fn transform_lit(&self, mut lit: LitMeaning) -> LitMeaning {
+		let mut transformer = *self;
+		if !self.positive_scale() {
+			// Make positive by doing `*-1` on lit meaning and transformer
+			(lit, transformer) = match lit {
+				// -x >= i === x <= -i === x < -i + 1
+				LitMeaning::GreaterEq(i) => (LitMeaning::Less(-i + 1), -transformer),
+				// -x < i === x > -i === x >= -i + 1
+				LitMeaning::Less(i) => (LitMeaning::GreaterEq(-i + 1), -transformer),
+				_ => (lit, transformer),
+			};
+		}
+
+		match lit {
+			LitMeaning::Eq(v) => LitMeaning::Eq(transformer.transform(v)),
+			LitMeaning::NotEq(v) => LitMeaning::NotEq(transformer.transform(v)),
+			LitMeaning::GreaterEq(v) => LitMeaning::GreaterEq(transformer.transform(v)),
+			LitMeaning::Less(v) => LitMeaning::Less(transformer.transform(v)),
+		}
+	}
+
 	/// Perform the reverse linear transformation on a value.
 	pub fn rev_transform(&self, val: IntVal) -> IntVal {
 		(val - self.offset) / self.scale.get()
