@@ -191,7 +191,6 @@ impl ExplanationActions for SolvingContext<'_> {
 impl InspectionActions for SolvingContext<'_> {
 	delegate! {
 		to self.state {
-			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
 			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
 			fn get_int_upper_bound(&self, var: IntView) -> IntVal;
 			fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal);
@@ -366,6 +365,7 @@ impl PropagationActions for SolvingContext<'_> {
 impl TrailingActions for SolvingContext<'_> {
 	delegate! {
 		to self.state {
+			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
 			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
 			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal;
 		}

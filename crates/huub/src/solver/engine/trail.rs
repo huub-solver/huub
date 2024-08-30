@@ -7,7 +7,7 @@ use index_vec::IndexVec;
 use pindakaas::{Lit as RawLit, Var as RawVar};
 use tracing::trace;
 
-use crate::{actions::trailing::TrailingActions, IntVal};
+use crate::{actions::trailing::TrailingActions, solver::view::BoolViewInner, BoolView, IntVal};
 
 index_vec::define_index_type! {
 	/// Identifies an trailed integer tracked within [`Solver`]
@@ -212,6 +212,13 @@ impl Trail {
 }
 
 impl TrailingActions for Trail {
+	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
+		match bv.0 {
+			BoolViewInner::Lit(lit) => self.get_sat_value(lit),
+			BoolViewInner::Const(b) => Some(b),
+		}
+	}
+
 	fn get_trailed_int(&self, i: TrailedInt) -> IntVal {
 		self.int_value[i]
 	}

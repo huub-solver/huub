@@ -340,7 +340,11 @@ impl IntVar {
 				};
 				while storage.storage[index].val >= v {
 					let node = &storage.storage[index];
-					ret = (BoolView(BoolViewInner::Lit(node.var.into())), node.val);
+					let lit = BoolView(BoolViewInner::Lit(node.var.into()));
+					if let Some(v) = trail.get_bool_val(lit) {
+						debug_assert!(v);
+						ret = (lit, node.val);
+					}
 					if !node.has_prev {
 						break;
 					}
@@ -414,7 +418,11 @@ impl IntVar {
 				};
 				while storage.storage[index].val <= v {
 					let node = &storage.storage[index];
-					ret = (BoolView(BoolViewInner::Lit(!node.var)), node.val);
+					let lit = BoolView(BoolViewInner::Lit(!node.var));
+					if let Some(v) = trail.get_bool_val(lit) {
+						debug_assert!(v);
+						ret = (lit, node.val);
+					}
 					if !node.has_next {
 						break;
 					}

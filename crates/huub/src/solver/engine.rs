@@ -757,13 +757,6 @@ impl ExplanationActions for State {
 }
 
 impl InspectionActions for State {
-	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
-		match bv.0 {
-			BoolViewInner::Lit(lit) => self.trail.get_sat_value(lit),
-			BoolViewInner::Const(b) => Some(b),
-		}
-	}
-
 	fn get_int_lower_bound(&self, var: IntView) -> IntVal {
 		match var.0 {
 			IntViewInner::VarRef(iv) => self.int_vars[iv].get_lower_bound(self),
@@ -858,6 +851,7 @@ impl InspectionActions for State {
 impl TrailingActions for State {
 	delegate! {
 		to self.trail {
+			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
 			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
 			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal;
 		}

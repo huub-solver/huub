@@ -101,6 +101,7 @@ where
 {
 	delegate! {
 		to self.slv.engine().state {
+			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
 			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
 		}
 		to self.slv.engine_mut().state {
@@ -116,7 +117,6 @@ where
 {
 	delegate! {
 		to self.slv.engine().state {
-			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
 			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
 			fn get_int_upper_bound(&self, var: IntView) -> IntVal;
 			fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal);
