@@ -747,6 +747,20 @@ where
 						});
 					}
 				}
+				"int_div" => {
+					if let [num, denom, res] = c.args.as_slice() {
+						let num = self.arg_int(num)?;
+						let denom = self.arg_int(denom)?;
+						let res = self.arg_int(res)?;
+						self.prb += Constraint::IntDiv(num, denom, res);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "int_div",
+							found: c.args.len(),
+							expected: 3,
+						});
+					}
+				}
 				"int_le" => {
 					if let [a, b] = c.args.as_slice() {
 						let a = self.arg_int(a)?;

@@ -16,6 +16,7 @@ use crate::{
 		array_int_minimum::ArrayIntMinimumBounds,
 		array_var_int_element::ArrayVarIntElementBounds,
 		disjunctive::DisjunctiveEdgeFinding,
+		int_div::IntDivBounds,
 		int_lin_le::{IntLinearLessEqBounds, IntLinearLessEqImpBounds},
 		int_lin_ne::{IntLinearNotEqImpValue, IntLinearNotEqValue},
 		int_pow::IntPowBounds,
@@ -37,6 +38,7 @@ pub enum Constraint {
 	ArrayIntMinimum(Vec<IntView>, IntView),
 	ArrayVarBoolElement(Vec<BoolExpr>, IntView, BoolExpr),
 	ArrayVarIntElement(Vec<IntView>, IntView, IntView),
+	IntDiv(IntView, IntView, IntView),
 	IntLinEq(Vec<IntView>, IntVal),
 	IntLinEqImp(Vec<IntView>, IntVal, BoolExpr),
 	IntLinEqReif(Vec<IntView>, IntVal, BoolExpr),
@@ -175,6 +177,13 @@ impl Constraint {
 				slv.add_clause(arr.iter().map(|l| !l).chain(once(y)))?;
 				// add clause (!arr[1] /\ !arr[2] /\ ... /\ !arr[n]) => !val
 				slv.add_clause(arr.into_iter().chain(once(!y)))?;
+				Ok(())
+			}
+			Constraint::IntDiv(numerator, denominator, result) => {
+				let numerator = numerator.to_arg(slv, map);
+				let denominator = denominator.to_arg(slv, map);
+				let result = result.to_arg(slv, map);
+				slv.add_propagator(IntDivBounds::prepare(numerator, denominator, result));
 				Ok(())
 			}
 			Constraint::IntLinEq(vars, c) => {
@@ -468,6 +477,10 @@ impl Model {
 					self.set_int_upper_bound(&y, max_ub, con)?;
 				}
 				Some(Constraint::ArrayVarIntElement(args, idx, y))
+			}
+			Constraint::IntDiv(num, denom, res) => {
+				self.diff_int_domain(&denom, &RangeList::from(0..=0), con)?;
+				Some(Constraint::IntDiv(num, denom, res))
 			}
 			Constraint::IntLinLessEq(args, cons) => {
 				let sum = args
