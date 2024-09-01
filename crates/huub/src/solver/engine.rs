@@ -393,25 +393,7 @@ impl State {
 					if i < lb || i > ub {
 						return None;
 					}
-					if lb == i {
-						let prev = self.int_vars[iv].notify_lower_bound(&mut self.trail, i + 1);
-						debug_assert!(prev < (i + 1));
-						if lb + 1 == ub {
-							IntEvent::Fixed
-						} else {
-							IntEvent::LowerBound
-						}
-					} else if ub == i {
-						let prev = self.int_vars[iv].notify_upper_bound(&mut self.trail, i - 1);
-						debug_assert!((i - 1) < prev);
-						if lb == ub - 1 {
-							IntEvent::Fixed
-						} else {
-							IntEvent::UpperBound
-						}
-					} else {
-						IntEvent::Domain
-					}
+					IntEvent::Domain
 				}
 				LitMeaning::GreaterEq(new_lb) => {
 					if new_lb <= lb {
