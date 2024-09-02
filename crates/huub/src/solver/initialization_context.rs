@@ -69,34 +69,36 @@ where
 	}
 
 	fn subscribe_int(&mut self, var: IntView, event: IntEvent, data: u32) {
-		let InitRef::Propagator(prop) = self.init_ref else {
-			unreachable!()
-		};
-		match var.0 {
-			IntViewInner::VarRef(var) => self
-				.slv
+		let mut subscribe_intref = |var, prop, event| {
+			self.slv
 				.engine_mut()
 				.state
 				.int_subscribers
 				.entry(var)
 				.or_default()
-				.push((prop, event, data)),
-			IntViewInner::Const(_) => {}
-			IntViewInner::Linear { transformer, var } => {
-				if transformer.positive_scale() {
-					self.subscribe_int(IntView(IntViewInner::VarRef(var)), event, data)
+				.push((prop, event, data))
+		};
+		match (&self.init_ref, var.0) {
+			(InitRef::Propagator(prop), IntViewInner::VarRef(var)) => {
+				subscribe_intref(var, *prop, event);
+			}
+			(InitRef::Propagator(prop), IntViewInner::Linear { transformer, var }) => {
+				let event = if transformer.positive_scale() {
+					event
 				} else {
-					let reverse_event = match event {
+					match event {
 						IntEvent::LowerBound => IntEvent::UpperBound,
 						IntEvent::UpperBound => IntEvent::LowerBound,
 						_ => event,
-					};
-					self.subscribe_int(IntView(IntViewInner::VarRef(var)), reverse_event, data)
-				}
+					}
+				};
+				subscribe_intref(var, *prop, event);
 			}
-			IntViewInner::Bool { lit, .. } => {
+			(_, IntViewInner::Const(_)) => {} // ignore
+			(_, IntViewInner::Bool { lit, .. }) => {
 				self.subscribe_bool(BoolView(BoolViewInner::Lit(lit)), data)
 			}
+			(InitRef::Brancher, _) => {} // ignore: branchers don't receive notifications, and contained literals are already observed.
 		}
 	}
 }

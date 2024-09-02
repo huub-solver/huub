@@ -23,7 +23,7 @@ use crate::{
 		decision::DecisionActions, explanation::ExplanationActions, inspection::InspectionActions,
 		trailing::TrailingActions,
 	},
-	brancher::Brancher,
+	brancher::Decision,
 	propagator::{int_event::IntEvent, reason::Reason},
 	solver::{
 		engine::{
@@ -33,7 +33,7 @@ use crate::{
 			solving_context::SolvingContext,
 			trail::{Trail, TrailedInt},
 		},
-		poster::BoxedPropagator,
+		poster::{BoxedBrancher, BoxedPropagator},
 		view::{BoolViewInner, IntViewInner},
 		SolverConfiguration,
 	},
@@ -63,7 +63,7 @@ pub(crate) struct Engine {
 	/// Storage of the propagators
 	pub(crate) propagators: IndexVec<PropRef, BoxedPropagator>,
 	/// Storage of the branchers
-	pub(crate) branchers: Vec<Brancher>,
+	pub(crate) branchers: Vec<BoxedBrancher>,
 	/// Internal State representation of the constraint programming engine
 	pub(crate) state: State,
 	/// Storage of literals that have been persistently propagated
@@ -188,12 +188,23 @@ impl IpasirPropagator for Engine {
 				return None;
 			}
 			let mut ctx = SolvingContext::new(slv, &mut self.state);
-			for (i, brancher) in self.branchers.iter_mut().enumerate().skip(current as usize) {
-				if let Some(lit) = brancher.decide(&mut ctx) {
-					debug!(lit = i32::from(lit), "decide");
-					return Some(lit);
-				} else {
-					let _ = ctx.set_trailed_int(Trail::CURRENT_BRANCHER, i as i64 + 1);
+			for i in (current as usize)..self.branchers.len() {
+				match self.branchers[i].decide(&mut ctx) {
+					Decision::Select(lit) => {
+						debug!(lit = i32::from(lit), "decide");
+						return Some(lit);
+					}
+					Decision::Exhausted => {
+						let _ = ctx.set_trailed_int(Trail::CURRENT_BRANCHER, i as i64 + 1);
+					}
+					Decision::Consumed => {
+						// Remove the brancher
+						//
+						// Note that this shifts all subsequent branchers (so we don't need to
+						// increment current), but has bad complexity. However, due to the low
+						// number of branchers, this is (likely) acceptable.
+						let _ = self.branchers.remove(i);
+					}
 				}
 			}
 		}

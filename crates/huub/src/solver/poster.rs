@@ -7,6 +7,7 @@ use crate::{
 };
 
 pub(crate) type BoxedPropagator = Box<dyn for<'a> Propagator<SolvingContext<'a>, State, Trail>>;
+pub(crate) type BoxedBrancher = Box<dyn for<'a> Brancher<SolvingContext<'a>>>;
 
 /// The trait used called to registering a propagator with the solver.
 pub(crate) trait Poster {
@@ -41,5 +42,5 @@ pub(crate) trait BrancherPoster {
 	/// The post method is given access to the solver's initialization actions,
 	/// which includes the ability to subscribe to variable events, creating
 	/// trailed data structures, and inspecting the current state of varaibles.
-	fn post<I: InitializationActions>(self, actions: &mut I) -> Brancher;
+	fn post<I: InitializationActions>(self, actions: &mut I) -> BoxedBrancher;
 }

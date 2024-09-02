@@ -4,7 +4,7 @@ use pindakaas::{
 };
 
 use crate::{
-	brancher::Brancher,
+	brancher::{BoolBrancher, IntBrancher},
 	model::{bool::BoolView, int::IntView, reformulate::VariableMap},
 	solver::SatSolver,
 	Solver,
@@ -43,11 +43,11 @@ impl Branching {
 		match self {
 			Branching::Bool(vars, var_sel, val_sel) => {
 				let vars: Vec<_> = vars.iter().map(|v| map.get_bool(slv, v)).collect();
-				slv.add_brancher(Brancher::prepare_bool(vars, *var_sel, *val_sel));
+				slv.add_brancher(BoolBrancher::prepare(vars, *var_sel, *val_sel));
 			}
 			Branching::Int(v, var_sel, val_sel) => {
 				let vars: Vec<_> = v.iter().map(|v| v.to_arg(slv, map)).collect();
-				slv.add_brancher(Brancher::prepare_int(vars, *var_sel, *val_sel));
+				slv.add_brancher(IntBrancher::prepare(vars, *var_sel, *val_sel));
 			}
 			Branching::Seq(branchings) => {
 				for b in branchings {
