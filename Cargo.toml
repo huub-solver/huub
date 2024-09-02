@@ -82,15 +82,19 @@ pr-run-mode = "plan"
 # Trigger releases on pushes to this branch instead of tag pushes
 # release-branch = "develop"
 
+[profile.bench]
+inherits = "release"
+debug = true
+strip = "none"
+
 # The profile that 'cargo dist' will build with
 [profile.dist]
 inherits = "release"
-
-[profile.release-with-debug]
-inherits = "release"
-debug = true
+strip = "symbols"
+debug = false
 
 [profile.release]
 lto = "fat"
 codegen-units = 1
-strip = "symbols"
+debug = true      # TODO: Remove once `cargo codspeed build` can use `bench` profile
+# strip = "symbols"
