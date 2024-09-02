@@ -12,7 +12,7 @@ use crate::{
 		value::IntVal,
 		view::IntView,
 	},
-	LitMeaning,
+	LitMeaning, ReformulationError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -108,7 +108,7 @@ impl Poster for ArrayIntMinimumBoundsPoster {
 	fn post<I: InitializationActions>(
 		self,
 		actions: &mut I,
-	) -> (BoxedPropagator, QueuePreferences) {
+	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
 		let prop = ArrayIntMinimumBounds {
 			vars: self.vars,
 			min: self.min,
@@ -120,13 +120,13 @@ impl Poster for ArrayIntMinimumBoundsPoster {
 			actions.subscribe_int(*v, IntEvent::LowerBound, i as u32);
 		}
 		actions.subscribe_int(prop.min, IntEvent::LowerBound, prop.vars.len() as u32);
-		(
+		Ok((
 			Box::new(prop),
 			QueuePreferences {
 				enqueue_on_post: true,
 				priority: PriorityLevel::Low,
 			},
-		)
+		))
 	}
 }
 

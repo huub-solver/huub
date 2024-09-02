@@ -27,6 +27,7 @@ pub(crate) trait PropagationActions: ExplanationActions + DecisionActions {
 		val: IntVal,
 		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict>;
+	#[allow(dead_code)] // TODO
 	fn set_int_val(
 		&mut self,
 		var: IntView,

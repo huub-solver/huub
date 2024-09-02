@@ -9,6 +9,7 @@ use crate::{
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 		view::{IntView, IntViewInner},
 	},
+	ReformulationError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -62,7 +63,7 @@ impl Poster for AllDifferentIntValuePoster {
 	fn post<I: InitializationActions>(
 		self,
 		actions: &mut I,
-	) -> (BoxedPropagator, QueuePreferences) {
+	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
 		let action_list: Vec<u32> = self
 			.vars
 			.iter()
@@ -83,13 +84,13 @@ impl Poster for AllDifferentIntValuePoster {
 		for (i, v) in prop.vars.iter().enumerate() {
 			actions.subscribe_int(*v, IntEvent::Fixed, i as u32)
 		}
-		(
+		Ok((
 			Box::new(prop),
 			QueuePreferences {
 				enqueue_on_post: enqueue,
 				priority: PriorityLevel::Low,
 			},
-		)
+		))
 	}
 }
 
@@ -129,7 +130,8 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		slv.add_propagator(AllDifferentIntValue::prepare(vec![a, b, c]));
+		slv.add_propagator(AllDifferentIntValue::prepare(vec![a, b, c]))
+			.unwrap();
 		slv.assert_all_solutions(&[a, b, c], |sol| sol.iter().all_unique())
 	}
 
@@ -156,7 +158,8 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		slv.add_propagator(AllDifferentIntValue::prepare(vec![a, b, c]));
+		slv.add_propagator(AllDifferentIntValue::prepare(vec![a, b, c]))
+			.unwrap();
 		slv.assert_unsatisfiable()
 	}
 
@@ -179,13 +182,15 @@ mod tests {
 					));
 				}
 			}
-			slv.add_propagator(AllDifferentIntValue::prepare(vars.clone()));
+			slv.add_propagator(AllDifferentIntValue::prepare(vars.clone()))
+				.unwrap();
 			all_vars.push(vars);
 		});
 		// add all different propagator for each column
 		for i in 0..9 {
 			let col_vars: Vec<IntView> = (0..9).map(|j| all_vars[j][i]).collect();
-			slv.add_propagator(AllDifferentIntValue::prepare(col_vars));
+			slv.add_propagator(AllDifferentIntValue::prepare(col_vars))
+				.unwrap();
 		}
 		// add all different propagator for each 3 by 3 grid
 		for i in 0..3 {
@@ -196,7 +201,8 @@ mod tests {
 						block_vars.push(all_vars[3 * i + x][3 * j + y]);
 					}
 				}
-				slv.add_propagator(AllDifferentIntValue::prepare(block_vars));
+				slv.add_propagator(AllDifferentIntValue::prepare(block_vars))
+					.unwrap();
 			}
 		}
 		assert_eq!(

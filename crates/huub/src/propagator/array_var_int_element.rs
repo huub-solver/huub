@@ -12,7 +12,7 @@ use crate::{
 		value::IntVal,
 		view::IntView,
 	},
-	LitMeaning,
+	LitMeaning, ReformulationError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -205,7 +205,7 @@ impl Poster for ArrayVarIntElementBoundsPoster {
 	fn post<I: InitializationActions>(
 		self,
 		actions: &mut I,
-	) -> (BoxedPropagator, QueuePreferences) {
+	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
 		let prop = ArrayVarIntElementBounds {
 			vars: self.vars.into_iter().map(Into::into).collect(),
 			y: self.y,
@@ -217,13 +217,13 @@ impl Poster for ArrayVarIntElementBoundsPoster {
 		}
 		actions.subscribe_int(prop.y, IntEvent::Bounds, prop.vars.len() as u32);
 		actions.subscribe_int(prop.idx, IntEvent::Domain, prop.vars.len() as u32 + 1);
-		(
+		Ok((
 			Box::new(prop),
 			QueuePreferences {
 				enqueue_on_post: false,
 				priority: PriorityLevel::Low,
 			},
-		)
+		))
 	}
 }
 
@@ -275,7 +275,8 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		slv.add_propagator(ArrayVarIntElementBounds::prepare(vec![a, b, c], y, idx));
+		slv.add_propagator(ArrayVarIntElementBounds::prepare(vec![a, b, c], y, idx))
+			.unwrap();
 		slv.expect_solutions(
 			&[idx, y, a, b, c],
 			expect![[r#"
@@ -341,7 +342,8 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		slv.add_propagator(ArrayVarIntElementBounds::prepare(vec![a, b], y, idx));
+		slv.add_propagator(ArrayVarIntElementBounds::prepare(vec![a, b], y, idx))
+			.unwrap();
 		slv.expect_solutions(
 			&[idx, y, a, b],
 			expect![[r#"

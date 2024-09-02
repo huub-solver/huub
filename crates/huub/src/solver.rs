@@ -141,13 +141,16 @@ where
 			.map_err(|_| ReformulationError::TrivialUnsatisfiable)
 	}
 
-	pub(crate) fn add_propagator<P: Poster>(&mut self, poster: P) {
+	pub(crate) fn add_propagator<P: Poster>(
+		&mut self,
+		poster: P,
+	) -> Result<(), ReformulationError> {
 		let prop_ref = PropRef::from(self.engine().propagators.len());
 		let mut actions = InitializationContext {
 			slv: self,
 			init_ref: InitRef::Propagator(prop_ref),
 		};
-		let (prop, queue_pref) = poster.post(&mut actions);
+		let (prop, queue_pref) = poster.post(&mut actions)?;
 		let p = self.engine_mut().propagators.push(prop);
 		debug_assert_eq!(prop_ref, p);
 		let engine = self.engine_mut();
@@ -158,6 +161,7 @@ where
 		if queue_pref.enqueue_on_post {
 			self.engine_mut().state.enqueue_propagator(prop_ref);
 		}
+		Ok(())
 	}
 
 	/// Find all solutions with regard to a list of given variables.

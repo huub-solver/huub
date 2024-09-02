@@ -1,7 +1,5 @@
 use std::mem;
 
-use tracing::trace;
-
 use crate::{
 	actions::{
 		explanation::ExplanationActions, initialization::InitializationActions,
@@ -13,7 +11,7 @@ use crate::{
 		engine::queue::PriorityLevel,
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 	},
-	IntView, LitMeaning, NonZeroIntVal,
+	IntView, LitMeaning, NonZeroIntVal, ReformulationError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -113,54 +111,6 @@ impl IntDivBounds {
 		Ok(())
 	}
 
-	/// Propagate the signs of the result and the numerator, assuming the
-	/// denominator is positive.
-	fn propagate_signs<P: PropagationActions>(
-		actions: &mut P,
-		numerator: IntView,
-		denominator: IntView,
-		result: IntView,
-	) -> Result<(), Conflict> {
-		let (num_lb, num_ub) = actions.get_int_bounds(numerator);
-		let (res_lb, res_ub) = actions.get_int_bounds(result);
-		let (denom_lb, denom_ub) = actions.get_int_bounds(denominator);
-		trace!(num_lb, num_ub, denom_lb, denom_ub, res_lb, res_ub, "bounds");
-
-		if num_lb >= 0 && res_lb < 0 {
-			actions.set_int_lower_bound(result, 0, |a: &mut P| {
-				[
-					a.get_int_lit(numerator, LitMeaning::GreaterEq(0)),
-					a.get_int_lit(denominator, LitMeaning::GreaterEq(1)),
-				]
-			})?;
-		}
-		if num_lb <= 0 && res_lb > 0 {
-			actions.set_int_lower_bound(numerator, 1, |a: &mut P| {
-				[
-					a.get_int_lit(result, LitMeaning::GreaterEq(1)),
-					a.get_int_lit(denominator, LitMeaning::GreaterEq(1)),
-				]
-			})?;
-		}
-		if num_ub <= 0 && res_ub > 0 {
-			actions.set_int_upper_bound(result, 0, |a: &mut P| {
-				[
-					a.get_int_lit(numerator, LitMeaning::Less(1)),
-					a.get_int_lit(denominator, LitMeaning::GreaterEq(1)),
-				]
-			})?;
-		}
-		if num_ub >= 0 && res_ub < 0 {
-			actions.set_int_upper_bound(numerator, -1, |a: &mut P| {
-				[
-					a.get_int_lit(result, LitMeaning::Less(0)),
-					a.get_int_lit(denominator, LitMeaning::GreaterEq(1)),
-				]
-			})?;
-		}
-		Ok(())
-	}
-
 	/// Propagate the  upper bounds of the result and numerator, assuming the
 	/// signs of the result and the numerator are positive.
 	fn propagate_upper_bounds<P: PropagationActions>(
@@ -230,10 +180,6 @@ where
 			mem::swap(&mut numerator, &mut neg_num);
 		}
 
-		// Propagate the signs of the result and the numerator, knowing the
-		// denominator is positive.
-		Self::propagate_signs(actions, numerator, denominator, self.result)?;
-
 		// If both the upper bound of the numerator and the upper bound of the
 		// right-hand side are positive, then propagate their upper bounds directly.
 		if actions.get_int_upper_bound(numerator) >= 0
@@ -269,11 +215,35 @@ impl Poster for IntDivBoundsPoster {
 	fn post<I: InitializationActions + ?Sized>(
 		self,
 		actions: &mut I,
-	) -> (BoxedPropagator, QueuePreferences) {
+	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
+		// Subscribe to bounds changes on each of the variables.
 		actions.subscribe_int(self.numerator, IntEvent::Bounds, 1);
 		actions.subscribe_int(self.denominator, IntEvent::Bounds, 2);
 		actions.subscribe_int(self.result, IntEvent::Bounds, 3);
-		(
+
+		// Ensure the consistency of the signs of the three variables using the following clauses.
+		if actions.get_int_lower_bound(self.numerator) < 0
+			|| actions.get_int_lower_bound(self.denominator) < 0
+			|| actions.get_int_lower_bound(self.result) < 0
+		{
+			let num_pos = actions.get_int_lit(self.numerator, LitMeaning::GreaterEq(0));
+			let num_neg = actions.get_int_lit(self.numerator, LitMeaning::Less(1));
+			let denom_pos = actions.get_int_lit(self.denominator, LitMeaning::GreaterEq(0));
+			let denom_neg = !denom_pos;
+			let res_pos = actions.get_int_lit(self.result, LitMeaning::GreaterEq(0));
+			let res_neg = actions.get_int_lit(self.result, LitMeaning::Less(1));
+
+			// num >= 0 /\ denom > 0 => res >= 0
+			actions.add_clause(vec![!num_pos, !denom_pos, res_pos])?;
+			// num <= 0 /\ denom < 0 => res >= 0
+			actions.add_clause(vec![!num_neg, !denom_neg, res_pos])?;
+			// num >= 0 /\ denom < 0 => res < 0
+			actions.add_clause(vec![!num_pos, !denom_neg, res_neg])?;
+			// num < 0 /\ denom >= 0 => res < 0
+			actions.add_clause(vec![!num_neg, !denom_pos, res_neg])?;
+		}
+
+		Ok((
 			Box::new(IntDivBounds {
 				numerator: self.numerator,
 				denominator: self.denominator,
@@ -283,7 +253,7 @@ impl Poster for IntDivBoundsPoster {
 				enqueue_on_post: false,
 				priority: PriorityLevel::Highest,
 			},
-		)
+		))
 	}
 }
 
@@ -323,7 +293,7 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		slv.add_propagator(IntDivBounds::prepare(a, b, c));
+		slv.add_propagator(IntDivBounds::prepare(a, b, c)).unwrap();
 		slv.expect_solutions(
 			&[a, b, c],
 			expect![[r#"

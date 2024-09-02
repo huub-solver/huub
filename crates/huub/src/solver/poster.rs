@@ -3,6 +3,7 @@ use crate::{
 	brancher::Brancher,
 	propagator::Propagator,
 	solver::engine::{queue::PriorityLevel, solving_context::SolvingContext, trail::Trail, State},
+	ReformulationError,
 };
 
 pub(crate) type BoxedPropagator = Box<dyn for<'a> Propagator<SolvingContext<'a>, State, Trail>>;
@@ -18,8 +19,10 @@ pub(crate) trait Poster {
 	/// The post method is given access to the solver's initialization actions,
 	/// which includes the ability to subscribe to variable events, creating
 	/// trailed data structures, and inspecting the current state of varaibles.
-	fn post<I: InitializationActions>(self, actions: &mut I)
-		-> (BoxedPropagator, QueuePreferences);
+	fn post<I: InitializationActions>(
+		self,
+		actions: &mut I,
+	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError>;
 }
 
 pub(crate) struct QueuePreferences {

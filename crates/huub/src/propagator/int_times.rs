@@ -12,7 +12,7 @@ use crate::{
 		engine::queue::PriorityLevel,
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 	},
-	IntView, NonZeroIntVal,
+	IntView, NonZeroIntVal, ReformulationError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -133,11 +133,11 @@ impl Poster for IntTimesBoundsPoster {
 	fn post<I: InitializationActions + ?Sized>(
 		self,
 		actions: &mut I,
-	) -> (BoxedPropagator, QueuePreferences) {
+	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
 		actions.subscribe_int(self.x, IntEvent::Bounds, 1);
 		actions.subscribe_int(self.y, IntEvent::Bounds, 2);
 		actions.subscribe_int(self.z, IntEvent::Bounds, 3);
-		(
+		Ok((
 			Box::new(IntTimesBounds {
 				x: self.x,
 				y: self.y,
@@ -147,7 +147,7 @@ impl Poster for IntTimesBoundsPoster {
 				enqueue_on_post: false,
 				priority: PriorityLevel::Highest,
 			},
-		)
+		))
 	}
 }
 
@@ -186,7 +186,8 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		slv.add_propagator(IntTimesBounds::prepare(a, b, c));
+		slv.add_propagator(IntTimesBounds::prepare(a, b, c))
+			.unwrap();
 		slv.expect_solutions(
 			&[a, b, c],
 			expect![[r#"

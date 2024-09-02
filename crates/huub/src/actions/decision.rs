@@ -1,5 +1,5 @@
 use crate::{
-	actions::{inspection::InspectionActions, trailing::TrailingActions},
+	actions::inspection::InspectionActions,
 	solver::{
 		engine::int_var::IntVarRef,
 		view::{BoolViewInner, IntViewInner},
@@ -7,7 +7,7 @@ use crate::{
 	BoolView, IntView, LitMeaning,
 };
 
-pub(crate) trait DecisionActions: InspectionActions + TrailingActions {
+pub(crate) trait DecisionActions: InspectionActions {
 	fn get_int_lit(&mut self, var: IntView, mut meaning: LitMeaning) -> BoolView {
 		{
 			if let IntViewInner::Linear { transformer, .. }

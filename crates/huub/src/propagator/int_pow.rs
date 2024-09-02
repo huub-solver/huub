@@ -11,7 +11,7 @@ use crate::{
 		engine::queue::PriorityLevel,
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 	},
-	IntVal, IntView, LitMeaning,
+	IntVal, IntView, LitMeaning, ReformulationError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -65,11 +65,6 @@ impl IntPowBounds {
 			let exp_ub_lit = actions.get_int_upper_bound_lit(self.exponent);
 			vec![base_lb_lit, base_ub_lit, exp_lb_lit, exp_ub_lit]
 		});
-
-		if exp_lb == exp_ub && exp_lb == 0 {
-			let exp_val_lit = actions.get_int_val_lit(self.exponent).unwrap();
-			return actions.set_int_val(self.result, 1, exp_val_lit);
-		}
 
 		let base_bnd = base_lb..=base_ub;
 		let min: IntVal = [
@@ -132,6 +127,14 @@ impl IntPowBounds {
 			_ => exp_lb,
 		};
 
+		if (exp_lb..=exp_ub).contains(&0) && (res_lb..=res_ub).contains(&1) {
+			return Ok(());
+		}
+		// The following logic does not work for for negative values
+		if exp_lb <= 0 || res_lb <= 0 || base_lb <= 0 {
+			return Ok(());
+		}
+
 		let mut reason = CachedReason::new(|actions: &mut P| {
 			let res_lb_lit = actions.get_int_lower_bound_lit(self.result);
 			let res_ub_lit = actions.get_int_upper_bound_lit(self.result);
@@ -139,18 +142,6 @@ impl IntPowBounds {
 			let exp_ub_lit = actions.get_int_upper_bound_lit(self.exponent);
 			vec![res_lb_lit, res_ub_lit, exp_lb_lit, exp_ub_lit]
 		});
-
-		if (exp_lb..=exp_ub).contains(&0) && (res_lb..=res_ub).contains(&1) {
-			return Ok(());
-		}
-		if exp_ub < 0 {
-			let exp_neg_lit = actions.get_int_lit(self.exponent, LitMeaning::Less(0));
-			return actions.set_int_not_eq(self.base, 0, exp_neg_lit);
-		}
-		// The following logic does not work for for negative values
-		if exp_lb <= 0 || res_lb <= 0 || base_lb <= 0 {
-			return Ok(());
-		}
 
 		// Propagate lower bound
 		let mut min = vec![
@@ -202,10 +193,6 @@ impl IntPowBounds {
 		let (base_lb, base_ub) = actions.get_int_bounds(self.base);
 		let (res_lb, res_ub) = actions.get_int_bounds(self.result);
 
-		if base_ub == base_lb && base_lb == 0 {
-			let base_val_lit = actions.get_int_val_lit(self.base).unwrap();
-			return actions.set_int_lower_bound(self.exponent, 0, base_val_lit);
-		}
 		if base_lb <= 1 || res_lb <= 1 {
 			// TODO: It seems there should be propagation possible, but log2() certainly won't work.
 			return Ok(());
@@ -273,11 +260,35 @@ impl Poster for IntPowBoundsPoster {
 	fn post<I: InitializationActions + ?Sized>(
 		self,
 		actions: &mut I,
-	) -> (BoxedPropagator, QueuePreferences) {
+	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
+		// Subscribe to bounds changes for each of the variables
 		actions.subscribe_int(self.base, IntEvent::Bounds, 1);
 		actions.subscribe_int(self.exponent, IntEvent::Bounds, 2);
 		actions.subscribe_int(self.result, IntEvent::Bounds, 3);
-		(
+
+		// Ensure that if the base is negative, then the exponent cannot be zero
+		let (exp_lb, exp_ub) = actions.get_int_bounds(self.exponent);
+		let (base_lb, base_ub) = actions.get_int_bounds(self.base);
+		if exp_lb < 0 || (base_lb..=base_ub).contains(&0) {
+			// (exp < 0) -> (base != 0)
+			let clause = vec![
+				actions.get_int_lit(self.exponent, LitMeaning::GreaterEq(0)),
+				actions.get_int_lit(self.base, LitMeaning::NotEq(0)),
+			];
+			actions.add_clause(clause)?;
+		}
+
+		// Ensure that if the exponent is zero, then the result is one
+		if (exp_lb..=exp_ub).contains(&0) {
+			// (exp == 0) -> (res == 1)
+			let clause = vec![
+				actions.get_int_lit(self.exponent, LitMeaning::NotEq(0)),
+				actions.get_int_lit(self.result, LitMeaning::Eq(1)),
+			];
+			actions.add_clause(clause)?;
+		}
+
+		Ok((
 			Box::new(IntPowBounds {
 				base: self.base,
 				exponent: self.exponent,
@@ -287,7 +298,7 @@ impl Poster for IntPowBoundsPoster {
 				enqueue_on_post: false,
 				priority: PriorityLevel::Highest,
 			},
-		)
+		))
 	}
 }
 
@@ -347,7 +358,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		slv.add_propagator(IntPowBounds::prepare(a, b, c));
+		slv.add_propagator(IntPowBounds::prepare(a, b, c)).unwrap();
 		slv.expect_solutions(
 			&[a, b, c],
 			expect![[r#"

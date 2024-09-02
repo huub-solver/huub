@@ -13,7 +13,7 @@ use crate::{
 		value::IntVal,
 		view::{BoolViewInner, IntView, IntViewInner},
 	},
-	BoolView,
+	BoolView, ReformulationError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -168,7 +168,7 @@ impl<const R: usize> Poster for IntLinearNotEqValuePoster<R> {
 	fn post<I: InitializationActions>(
 		self,
 		actions: &mut I,
-	) -> (BoxedPropagator, QueuePreferences) {
+	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
 		let prop = IntLinearNotEqValueImpl {
 			vars: self.vars,
 			violation: self.val,
@@ -181,13 +181,13 @@ impl<const R: usize> Poster for IntLinearNotEqValuePoster<R> {
 		if let Some(r) = prop.reification.get() {
 			actions.subscribe_bool(BoolView(BoolViewInner::Lit(*r)), prop.vars.len() as u32)
 		}
-		(
+		Ok((
 			Box::new(prop),
 			QueuePreferences {
 				enqueue_on_post: false,
 				priority: PriorityLevel::Low,
 			},
-		)
+		))
 	}
 }
 
@@ -230,7 +230,8 @@ mod tests {
 		slv.add_propagator(IntLinearNotEqValue::prepare(
 			vec![a * NonZeroIntVal::new(2).unwrap(), b, c],
 			6,
-		));
+		))
+		.unwrap();
 
 		slv.expect_solutions(
 			&[a, b, c],

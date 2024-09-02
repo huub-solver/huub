@@ -6,16 +6,16 @@ use pindakaas::{
 
 use crate::{
 	actions::{
-		initialization::InitializationActions, inspection::InspectionActions,
-		trailing::TrailingActions,
+		decision::DecisionActions, initialization::InitializationActions,
+		inspection::InspectionActions, trailing::TrailingActions,
 	},
 	propagator::int_event::IntEvent,
 	solver::{
-		engine::{trail::TrailedInt, PropRef},
+		engine::{int_var::IntVarRef, trail::TrailedInt, PropRef},
 		view::{BoolViewInner, IntViewInner},
 		SatSolver,
 	},
-	BoolView, IntVal, IntView, Solver,
+	BoolView, IntVal, IntView, LitMeaning, Solver,
 };
 
 /// Reference to the construct that we are intilizing
@@ -39,6 +39,17 @@ where
 	Sol: PropagatorAccess + SatValuation,
 	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 {
+	fn add_clause<I: IntoIterator<Item = BoolView>>(
+		&mut self,
+		clause: I,
+	) -> Result<(), crate::ReformulationError> {
+		self.slv.add_clause(clause)
+	}
+
+	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
+		self.slv.engine_mut().state.trail.track_int(init)
+	}
+
 	fn subscribe_bool(&mut self, var: BoolView, data: u32) {
 		match var.0 {
 			BoolViewInner::Lit(lit) => {
@@ -88,10 +99,6 @@ where
 			}
 		}
 	}
-
-	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
-		self.slv.engine_mut().state.trail.track_int(init)
-	}
 }
 
 impl<'a, Sol, Sat> TrailingActions for InitializationContext<'a, Sat>
@@ -122,6 +129,18 @@ where
 			fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal);
 			fn get_int_val(&self, var: IntView) -> Option<IntVal>;
 			fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool;
+		}
+	}
+}
+
+impl<'a, Sol, Sat> DecisionActions for InitializationContext<'a, Sat>
+where
+	Sol: PropagatorAccess + SatValuation,
+	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+{
+	delegate! {
+		to self.slv {
+			fn get_intref_lit(&mut self, var: IntVarRef, meaning: LitMeaning) -> BoolView;
 		}
 	}
 }

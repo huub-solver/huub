@@ -15,7 +15,7 @@ use crate::{
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 		view::{BoolViewInner, IntView},
 	},
-	Conjunction, LitMeaning,
+	Conjunction, LitMeaning, ReformulationError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -531,7 +531,7 @@ impl Poster for DisjunctiveEdgeFindingPoster {
 	fn post<I: InitializationActions>(
 		self,
 		actions: &mut I,
-	) -> (BoxedPropagator, QueuePreferences) {
+	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
 		let n = self.start_times.len();
 		let prop = DisjunctiveEdgeFinding {
 			start_times: self.start_times,
@@ -553,13 +553,13 @@ impl Poster for DisjunctiveEdgeFindingPoster {
 			actions.subscribe_int(*v, IntEvent::Bounds, i as u32)
 		}
 
-		(
+		Ok((
 			Box::new(prop),
 			QueuePreferences {
 				enqueue_on_post: true,
 				priority: PriorityLevel::Low,
 			},
-		)
+		))
 	}
 }
 
@@ -602,14 +602,16 @@ mod tests {
 		slv.add_propagator(DisjunctiveEdgeFinding::prepare(
 			[a, b, c],
 			durations.clone(),
-		));
+		))
+		.unwrap();
 		slv.add_propagator(DisjunctiveEdgeFinding::prepare(
 			[a, b, c]
 				.iter()
 				.zip(durations.iter())
 				.map(|(v, d)| -*v + (7 - d)),
 			durations.clone(),
-		));
+		))
+		.unwrap();
 
 		slv.expect_solutions(
 			&[a, b, c],

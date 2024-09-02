@@ -13,7 +13,7 @@ use crate::{
 		value::IntVal,
 		view::{BoolViewInner, IntView, IntViewInner},
 	},
-	BoolView, Conjunction,
+	BoolView, Conjunction, ReformulationError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -171,7 +171,7 @@ impl<const R: usize> Poster for IntLinearLessEqBoundsPoster<R> {
 	fn post<I: InitializationActions>(
 		self,
 		actions: &mut I,
-	) -> (BoxedPropagator, QueuePreferences) {
+	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
 		let prop = IntLinearLessEqBoundsImpl {
 			vars: self.vars,
 			max: self.max,
@@ -184,13 +184,13 @@ impl<const R: usize> Poster for IntLinearLessEqBoundsPoster<R> {
 		if let Some(r) = prop.reification.get() {
 			actions.subscribe_bool(BoolView(BoolViewInner::Lit(*r)), prop.vars.len() as u32)
 		}
-		(
+		Ok((
 			Box::new(prop),
 			QueuePreferences {
 				enqueue_on_post: true,
 				priority: PriorityLevel::Low,
 			},
-		)
+		))
 	}
 }
 
@@ -233,7 +233,8 @@ mod tests {
 		slv.add_propagator(IntLinearLessEqBounds::prepare(
 			vec![a * NonZeroIntVal::new(2).unwrap(), b, c],
 			6,
-		));
+		))
+		.unwrap();
 
 		slv.expect_solutions(
 			&[a, b, c],
@@ -284,7 +285,8 @@ mod tests {
 		slv.add_propagator(IntLinearLessEqBounds::prepare(
 			vec![a * NonZeroIntVal::new(-2).unwrap(), -b, -c],
 			-6,
-		));
+		))
+		.unwrap();
 		slv.expect_solutions(
 			&[a, b, c],
 			expect![[r#"
