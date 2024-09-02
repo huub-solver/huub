@@ -22,6 +22,7 @@ jobs:
       - name: Install Rust toolchain
         uses: moonrepo/setup-rust@v0
         with:
+          cache: false
           channel: ${{ env.RUST_TEST_CHANNEL }}
       - name: Install grcov
         uses: SierraSoftworks/setup-grcov@v1
