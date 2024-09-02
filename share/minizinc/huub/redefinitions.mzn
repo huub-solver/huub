@@ -30,7 +30,7 @@ predicate int_lin_ne_imp(
 );
 
 predicate int_mod(var int: a, var int: b, var int: c) =
-	a=(a div b)*b+z;
+	a=(a div b)*b+c;
 
 %%% NOTE: because of a mistake in the MiniZinc standard library, the
 % `warm_start` annotation is overloaded on the FlatZinc level, the following
