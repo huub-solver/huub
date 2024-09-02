@@ -8,6 +8,7 @@ use crate::{
 };
 
 pub(crate) trait DecisionActions: InspectionActions {
+	/// Get (or create) a literal for the given integer view with the given meaning.
 	fn get_int_lit(&mut self, var: IntView, mut meaning: LitMeaning) -> BoolView {
 		{
 			if let IntViewInner::Linear { transformer, .. }
@@ -55,5 +56,8 @@ pub(crate) trait DecisionActions: InspectionActions {
 		}
 	}
 
+	/// Get (or create) a literal for the given referenced integer variable with the given meaning.
 	fn get_intref_lit(&mut self, var: IntVarRef, meaning: LitMeaning) -> BoolView;
+	/// Returns the number of conflicts up to this point in the search process.
+	fn get_num_conflicts(&self) -> u64;
 }

@@ -170,6 +170,10 @@ impl DecisionActions for SolvingContext<'_> {
 		};
 		var.bool_lit(meaning, new_var)
 	}
+
+	fn get_num_conflicts(&self) -> u64 {
+		self.state.statistics.conflicts
+	}
 }
 
 impl ExplanationActions for SolvingContext<'_> {

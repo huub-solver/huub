@@ -61,6 +61,17 @@ struct IntBrancherPoster {
 	val_sel: ValueSelection,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WarmStartBrancher {
+	decisions: Vec<RawLit>,
+	conflicts: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WarmStartBrancherPoster {
+	decisions: Vec<BoolView>,
+}
+
 impl<B: for<'a> Brancher<SolvingContext<'a>> + Clone + 'static> DynBranchClone for B {
 	fn clone_dyn_branch(&self) -> BoxedBrancher {
 		Box::new(self.clone())
@@ -274,6 +285,49 @@ impl BrancherPoster for IntBrancherPoster {
 			var_sel: self.var_sel,
 			val_sel: self.val_sel,
 			next: actions.new_trailed_int(0),
+		})
+	}
+}
+
+impl WarmStartBrancher {
+	pub(crate) fn prepare(decisions: Vec<BoolView>) -> impl BrancherPoster {
+		WarmStartBrancherPoster { decisions }
+	}
+}
+
+impl<D: DecisionActions> Brancher<D> for WarmStartBrancher {
+	fn decide(&mut self, actions: &mut D) -> Decision {
+		if actions.get_num_conflicts() > self.conflicts {
+			return Decision::Consumed;
+		}
+		while let Some(lit) = self.decisions.pop() {
+			match actions.get_bool_val(BoolView(BoolViewInner::Lit(lit))) {
+				Some(true) => {}
+				Some(false) => return Decision::Consumed,
+				None => return Decision::Select(lit),
+			}
+		}
+		Decision::Consumed
+	}
+}
+
+impl BrancherPoster for WarmStartBrancherPoster {
+	fn post<I: InitializationActions>(self, actions: &mut I) -> BoxedBrancher {
+		let decisions: Vec<_> = self
+			.decisions
+			.into_iter()
+			.filter_map(|b| match b.0 {
+				BoolViewInner::Lit(l) => {
+					actions.subscribe_bool(BoolView(BoolViewInner::Lit(l)), 0);
+					Some(l)
+				}
+				BoolViewInner::Const(_) => None,
+			})
+			.rev()
+			.collect();
+		Box::new(WarmStartBrancher {
+			decisions,
+			conflicts: actions.get_num_conflicts(),
 		})
 	}
 }

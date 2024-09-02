@@ -31,3 +31,14 @@ predicate int_lin_ne_imp(
 
 predicate int_mod(var int: a, var int: b, var int: c) =
 	a=(a div b)*b+z;
+
+%%% NOTE: because of a mistake in the MiniZinc standard library, the
+% `warm_start` annotation is overloaded on the FlatZinc level, the following
+% definitions disambiguate these annotations within Huub.
+
+annotation warm_start_bool(array[int] of var bool: x, array[int] of bool: v);
+annotation warm_start(array[int] of var bool: x, array[int] of bool: v) = warm_start_bool(x, v);
+annotation warm_start_int(array[int] of var int: x, array[int] of int: v);
+annotation warm_start(array[int] of var int: x, array[int] of int: v) = warm_start_int(x, v);
+annotation warm_start_float(array[int] of var float: x, array[int] of float: v);
+annotation warm_start(array[int] of var float: x, array[int] of float: v) = warm_start_float(x, v);

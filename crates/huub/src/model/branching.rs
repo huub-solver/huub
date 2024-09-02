@@ -4,7 +4,7 @@ use pindakaas::{
 };
 
 use crate::{
-	brancher::{BoolBrancher, IntBrancher},
+	brancher::{BoolBrancher, IntBrancher, WarmStartBrancher},
 	model::{bool::BoolView, int::IntView, reformulate::VariableMap},
 	solver::SatSolver,
 	Solver,
@@ -32,6 +32,7 @@ pub enum Branching {
 	Bool(Vec<BoolView>, VariableSelection, ValueSelection),
 	Int(Vec<IntView>, VariableSelection, ValueSelection),
 	Seq(Vec<Branching>),
+	WarmStart(Vec<BoolView>),
 }
 
 impl Branching {
@@ -42,7 +43,7 @@ impl Branching {
 	{
 		match self {
 			Branching::Bool(vars, var_sel, val_sel) => {
-				let vars: Vec<_> = vars.iter().map(|v| map.get_bool(slv, v)).collect();
+				let vars = vars.iter().map(|v| map.get_bool(slv, v)).collect();
 				slv.add_brancher(BoolBrancher::prepare(vars, *var_sel, *val_sel));
 			}
 			Branching::Int(v, var_sel, val_sel) => {
@@ -53,6 +54,10 @@ impl Branching {
 				for b in branchings {
 					b.to_solver(slv, map);
 				}
+			}
+			Branching::WarmStart(exprs) => {
+				let decisions = exprs.iter().map(|v| map.get_bool(slv, v)).collect();
+				slv.add_brancher(WarmStartBrancher::prepare(decisions));
 			}
 		}
 	}

@@ -183,19 +183,20 @@ impl IpasirPropagator for Engine {
 
 	fn decide(&mut self, slv: &mut dyn SolvingActions) -> Option<RawLit> {
 		if !self.state.vsids {
-			let current = self.state.trail.get_trailed_int(Trail::CURRENT_BRANCHER);
-			if current as usize == self.branchers.len() {
+			let mut current = self.state.trail.get_trailed_int(Trail::CURRENT_BRANCHER) as usize;
+			if current == self.branchers.len() {
 				return None;
 			}
 			let mut ctx = SolvingContext::new(slv, &mut self.state);
-			for i in (current as usize)..self.branchers.len() {
-				match self.branchers[i].decide(&mut ctx) {
+			while current < self.branchers.len() {
+				match self.branchers[current].decide(&mut ctx) {
 					Decision::Select(lit) => {
 						debug!(lit = i32::from(lit), "decide");
 						return Some(lit);
 					}
 					Decision::Exhausted => {
-						let _ = ctx.set_trailed_int(Trail::CURRENT_BRANCHER, i as i64 + 1);
+						current += 1;
+						let _ = ctx.set_trailed_int(Trail::CURRENT_BRANCHER, current as i64);
 					}
 					Decision::Consumed => {
 						// Remove the brancher
@@ -203,7 +204,7 @@ impl IpasirPropagator for Engine {
 						// Note that this shifts all subsequent branchers (so we don't need to
 						// increment current), but has bad complexity. However, due to the low
 						// number of branchers, this is (likely) acceptable.
-						let _ = self.branchers.remove(i);
+						let _ = self.branchers.remove(current);
 					}
 				}
 			}

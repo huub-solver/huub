@@ -988,18 +988,27 @@ where
 
 	/// Create branchers according to the search annotations in the FlatZinc instance
 	fn create_branchers(&mut self) -> Result<(), FlatZincError> {
+		let mut general = Vec::new();
+		let mut warm = Vec::new();
 		for ann in self.fzn.solve.ann.iter() {
 			match ann {
-				Annotation::Call(c)
-					if matches!(c.id.deref(), "bool_search" | "int_search" | "seq_search") =>
-				{
-					let branchings = self.ann_to_branchings(c)?;
-					for b in branchings {
-						self.prb += b;
+				Annotation::Call(c) => match c.id.deref() {
+					"bool_search" | "int_search" | "seq_search" => {
+						general.extend(self.ann_to_branchings(c)?);
 					}
-				}
+					"warm_start_bool" | "warm_start_int" | "warm_start_array" => {
+						warm.extend(self.ann_to_warm_start(c)?);
+					}
+					_ => warn!("unsupported search annotation: {}", ann),
+				},
 				_ => warn!("unsupported search annotation: {}", ann),
 			}
+		}
+		if !general.is_empty() {
+			self.prb += Branching::WarmStart(warm);
+		}
+		for b in general {
+			self.prb += b;
 		}
 		Ok(())
 	}
@@ -1044,73 +1053,6 @@ where
 		}
 	}
 
-	fn ann_to_branchings(
-		&mut self,
-		c: &'a AnnotationCall<S>,
-	) -> Result<Vec<Branching>, FlatZincError> {
-		let mut branchings = Vec::new();
-		match c.id.deref() {
-			"bool_search" => {
-				if let [vars, var_sel, val_sel, _] = c.args.as_slice() {
-					let vars = self
-						.ann_arg_var_array(vars)?
-						.iter()
-						.map(|l| self.lit_bool(l))
-						.try_collect()?;
-					let var_sel = Self::ann_var_sel(var_sel)?;
-					let val_sel = Self::ann_val_sel(val_sel)?;
-
-					branchings.push(Branching::Bool(vars, var_sel, val_sel));
-				} else {
-					return Err(FlatZincError::InvalidNumArgs {
-						name: "bool_search",
-						found: c.args.len(),
-						expected: 4,
-					});
-				}
-			}
-			"int_search" => {
-				if let [vars, var_sel, val_sel, _] = c.args.as_slice() {
-					let vars = self
-						.ann_arg_var_array(vars)?
-						.iter()
-						.map(|l| self.lit_int(l))
-						.try_collect()?;
-					let var_sel = Self::ann_var_sel(var_sel)?;
-					let val_sel = Self::ann_val_sel(val_sel)?;
-
-					branchings.push(Branching::Int(vars, var_sel, val_sel));
-				} else {
-					return Err(FlatZincError::InvalidNumArgs {
-						name: "int_search",
-						found: c.args.len(),
-						expected: 4,
-					});
-				}
-			}
-			"seq_search" => {
-				if let [AnnotationArgument::Array(searches)] = c.args.as_slice() {
-					searches.iter().for_each(|search| {
-						if let AnnotationLiteral::Annotation(Annotation::Call(sub_call)) = search {
-							let res = self.ann_to_branchings(sub_call);
-							if let Ok(mut bs) = res {
-								branchings.append(&mut bs);
-							}
-						}
-					})
-				} else {
-					return Err(FlatZincError::InvalidNumArgs {
-						name: "seq_search",
-						found: c.args.len(),
-						expected: 1,
-					});
-				}
-			}
-			_ => warn!("unsupported search annotation: {}", c),
-		}
-		Ok(branchings)
-	}
-
 	// Get an array of variable literals from an annotation argument
 	fn ann_arg_var_array(
 		&self,
@@ -1139,6 +1081,154 @@ where
 			_ => Err(FlatZincError::InvalidArgumentType {
 				expected: "identifier",
 				found: format!("{:?}", arg),
+			}),
+		}
+	}
+
+	fn ann_to_branchings(
+		&mut self,
+		c: &'a AnnotationCall<S>,
+	) -> Result<Vec<Branching>, FlatZincError> {
+		match c.id.deref() {
+			"bool_search" => {
+				if let [vars, var_sel, val_sel, _] = c.args.as_slice() {
+					let vars = self
+						.ann_arg_var_array(vars)?
+						.iter()
+						.map(|l| self.lit_bool(l))
+						.try_collect()?;
+					let var_sel = Self::ann_var_sel(var_sel)?;
+					let val_sel = Self::ann_val_sel(val_sel)?;
+
+					Ok(vec![Branching::Bool(vars, var_sel, val_sel)])
+				} else {
+					Err(FlatZincError::InvalidNumArgs {
+						name: "bool_search",
+						found: c.args.len(),
+						expected: 4,
+					})
+				}
+			}
+			"int_search" => {
+				if let [vars, var_sel, val_sel, _] = c.args.as_slice() {
+					let vars = self
+						.ann_arg_var_array(vars)?
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+					let var_sel = Self::ann_var_sel(var_sel)?;
+					let val_sel = Self::ann_val_sel(val_sel)?;
+
+					Ok(vec![Branching::Int(vars, var_sel, val_sel)])
+				} else {
+					Err(FlatZincError::InvalidNumArgs {
+						name: "int_search",
+						found: c.args.len(),
+						expected: 4,
+					})
+				}
+			}
+			"seq_search" => {
+				if let [AnnotationArgument::Array(searches)] = c.args.as_slice() {
+					let mut branchings = Vec::new();
+					for search in searches {
+						if let AnnotationLiteral::Annotation(Annotation::Call(sub_call)) = search {
+							branchings.extend(self.ann_to_branchings(sub_call)?);
+						}
+					}
+					Ok(branchings)
+				} else {
+					Err(FlatZincError::InvalidNumArgs {
+						name: "seq_search",
+						found: c.args.len(),
+						expected: 1,
+					})
+				}
+			}
+			other => Err(FlatZincError::InvalidArgumentType {
+				expected: "search annotation",
+				found: other.to_owned(),
+			}),
+		}
+	}
+
+	fn ann_to_warm_start(
+		&mut self,
+		c: &'a AnnotationCall<S>,
+	) -> Result<Vec<BoolView>, FlatZincError> {
+		match c.id.deref() {
+			"warm_start_array" => {
+				if let [AnnotationArgument::Array(searches)] = c.args.as_slice() {
+					let mut decisions = Vec::new();
+					for search in searches {
+						if let AnnotationLiteral::Annotation(Annotation::Call(sub_call)) = search {
+							decisions.extend(self.ann_to_warm_start(sub_call)?);
+						}
+					}
+					Ok(decisions)
+				} else {
+					Err(FlatZincError::InvalidNumArgs {
+						name: "warm_start_array",
+						found: c.args.len(),
+						expected: 1,
+					})
+				}
+			}
+			"warm_start_bool" => {
+				if let [vars, vals] = c.args.as_slice() {
+					let vars: Vec<_> = self
+						.ann_arg_var_array(vars)?
+						.iter()
+						.map(|l| self.lit_bool(l))
+						.try_collect()?;
+					let vals: Vec<_> = self
+						.ann_arg_var_array(vals)?
+						.iter()
+						.map(|l| self.par_bool(l))
+						.try_collect()?;
+
+					Ok(vars
+						.into_iter()
+						.zip(vals)
+						.map(|(v, b)| if b { v } else { !v })
+						.collect())
+				} else {
+					Err(FlatZincError::InvalidNumArgs {
+						name: "warm_start_bool",
+						found: c.args.len(),
+						expected: 2,
+					})
+				}
+			}
+			"warm_start_int" => {
+				if let [vars, vals] = c.args.as_slice() {
+					let vars: Vec<_> = self
+						.ann_arg_var_array(vars)?
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+					let vals: Vec<_> = self
+						.ann_arg_var_array(vals)?
+						.iter()
+						.map(|l| self.par_int(l))
+						.try_collect()?;
+
+					Ok(vars
+						.into_iter()
+						.zip(vals)
+						.map(|(var, val)| BoolView::IntEq(Box::new(var), val))
+						.collect())
+				} else {
+					Err(FlatZincError::InvalidNumArgs {
+						name: "warm_start_int",
+						found: c.args.len(),
+						expected: 2,
+					})
+				}
+			}
+			other => Err(FlatZincError::InvalidArgumentType {
+				expected: "warm_start_annotation",
+				found: other.to_owned(),
 			}),
 		}
 	}

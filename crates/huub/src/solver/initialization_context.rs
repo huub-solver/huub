@@ -143,6 +143,7 @@ where
 	delegate! {
 		to self.slv {
 			fn get_intref_lit(&mut self, var: IntVarRef, meaning: LitMeaning) -> BoolView;
+			fn get_num_conflicts(&self) -> u64;
 		}
 	}
 }

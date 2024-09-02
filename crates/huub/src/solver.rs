@@ -524,6 +524,10 @@ where
 		self.engine_mut().state.int_vars[iv] = var;
 		bv
 	}
+
+	fn get_num_conflicts(&self) -> u64 {
+		self.engine().state.statistics.conflicts()
+	}
 }
 
 impl<Sol, Sat> ExplanationActions for Solver<Sat>
