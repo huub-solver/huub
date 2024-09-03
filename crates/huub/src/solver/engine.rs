@@ -161,11 +161,11 @@ impl IpasirPropagator for Engine {
 		self.state.notify_new_decision_level();
 	}
 
-	fn notify_backtrack(&mut self, new_level: usize) {
-		debug!(new_level, "backtrack");
+	fn notify_backtrack(&mut self, new_level: usize, restart: bool) {
+		debug!(new_level, restart, "backtrack");
 
 		// Revert value changes to previous decision level
-		self.state.notify_backtrack(new_level);
+		self.state.notify_backtrack(new_level, restart);
 		// Notify propagators to backtrack
 		for p in &mut self.propagators {
 			p.notify_backtrack(new_level);
@@ -338,7 +338,7 @@ impl IpasirPropagator for Engine {
 		}
 
 		// Revert to real decision level
-		self.notify_backtrack(level as usize);
+		self.notify_backtrack(level as usize, false);
 
 		debug!(accept, "check model");
 		accept
@@ -475,7 +475,7 @@ impl State {
 		}
 	}
 
-	fn notify_backtrack(&mut self, level: usize) {
+	fn notify_backtrack(&mut self, level: usize, restart: bool) {
 		// Update conflict statistics
 		self.statistics.conflicts += 1;
 
@@ -506,7 +506,7 @@ impl State {
 			}
 		}
 
-		if level == 0 {
+		if restart {
 			// Update restart statistics
 			self.statistics.restarts += 1;
 			if self.config.toggle_vsids && !self.config.vsids_only {
@@ -517,6 +517,9 @@ impl State {
 					"toggling vsids"
 				);
 			}
+		}
+
+		if level == 0 {
 			// Memory cleanup (Reasons are known to no longer be relevant)
 			self.reason_map.clear();
 		}
