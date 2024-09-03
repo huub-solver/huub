@@ -691,7 +691,7 @@ where
 							.iter()
 							.map(|l| self.par_int(l))
 							.try_collect()?;
-						self.prb += Constraint::Disjunctive(starts, durations);
+						self.prb += Constraint::DisjunctiveStrict(starts, durations);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_disjunctive_strict",

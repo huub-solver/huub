@@ -15,7 +15,7 @@ use crate::{
 		all_different_int::AllDifferentIntValue,
 		array_int_minimum::ArrayIntMinimumBounds,
 		array_var_int_element::ArrayVarIntElementBounds,
-		disjunctive::DisjunctiveEdgeFinding,
+		disjunctive_stict::DisjunctiveStrictEdgeFinding,
 		int_div::IntDivBounds,
 		int_lin_le::{IntLinearLessEqBounds, IntLinearLessEqImpBounds},
 		int_lin_ne::{IntLinearNotEqImpValue, IntLinearNotEqValue},
@@ -32,12 +32,12 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Constraint {
 	AllDifferentInt(Vec<IntView>),
-	Disjunctive(Vec<IntView>, Vec<IntVal>),
 	ArrayIntElement(Vec<IntVal>, IntView, IntView),
 	ArrayIntMaximum(Vec<IntView>, IntView),
 	ArrayIntMinimum(Vec<IntView>, IntView),
 	ArrayVarBoolElement(Vec<BoolExpr>, IntView, BoolExpr),
 	ArrayVarIntElement(Vec<IntView>, IntView, IntView),
+	DisjunctiveStrict(Vec<IntView>, Vec<IntVal>),
 	IntDiv(IntView, IntView, IntView),
 	IntLinEq(Vec<IntView>, IntVal),
 	IntLinEqImp(Vec<IntView>, IntVal, BoolExpr),
@@ -68,38 +68,6 @@ impl Constraint {
 			Constraint::AllDifferentInt(v) => {
 				let vars: Vec<_> = v.iter().map(|v| v.to_arg(slv, map)).collect();
 				slv.add_propagator(AllDifferentIntValue::prepare(vars))?;
-				Ok(())
-			}
-			Constraint::Disjunctive(v, d) => {
-				let vars: Vec<_> = v.iter().map(|v| v.to_arg(slv, map)).collect();
-				let durs = d
-					.iter()
-					.map(|d| {
-						assert!(
-							*d >= 0,
-							"duration of tasks in disjunctive constraint must be non-negative"
-						);
-						*d
-					})
-					.collect_vec();
-				// Add propagator for lower bound propagation
-				slv.add_propagator(DisjunctiveEdgeFinding::prepare(vars.clone(), durs.clone()))?;
-
-				// Add symmetric propagator for upper bound propagation
-				let horizon = vars
-					.iter()
-					.zip(durs.iter())
-					.map(|(v, d)| slv.engine().state.get_int_upper_bound(*v) + d)
-					.max()
-					.unwrap();
-				let symmetric_vars = vars
-					.iter()
-					.zip(durs.iter())
-					.map(|(v, d)| -*v + (horizon - d));
-				slv.add_propagator(DisjunctiveEdgeFinding::prepare(
-					symmetric_vars,
-					durs.clone(),
-				))?;
 				Ok(())
 			}
 			Constraint::ArrayIntElement(arr, idx, y) => {
@@ -177,6 +145,41 @@ impl Constraint {
 				slv.add_clause(arr.iter().map(|l| !l).chain(once(y)))?;
 				// add clause (!arr[1] /\ !arr[2] /\ ... /\ !arr[n]) => !val
 				slv.add_clause(arr.into_iter().chain(once(!y)))?;
+				Ok(())
+			}
+			Constraint::DisjunctiveStrict(v, d) => {
+				let vars: Vec<_> = v.iter().map(|v| v.to_arg(slv, map)).collect();
+				let durs = d
+					.iter()
+					.map(|d| {
+						assert!(
+							*d >= 0,
+							"duration of tasks in disjunctive constraint must be non-negative"
+						);
+						*d
+					})
+					.collect_vec();
+				// Add propagator for lower bound propagation
+				slv.add_propagator(DisjunctiveStrictEdgeFinding::prepare(
+					vars.clone(),
+					durs.clone(),
+				))?;
+
+				// Add symmetric propagator for upper bound propagation
+				let horizon = vars
+					.iter()
+					.zip(durs.iter())
+					.map(|(v, d)| slv.engine().state.get_int_upper_bound(*v) + d)
+					.max()
+					.unwrap();
+				let symmetric_vars = vars
+					.iter()
+					.zip(durs.iter())
+					.map(|(v, d)| -*v + (horizon - d));
+				slv.add_propagator(DisjunctiveStrictEdgeFinding::prepare(
+					symmetric_vars,
+					durs.clone(),
+				))?;
 				Ok(())
 			}
 			Constraint::IntDiv(numerator, denominator, result) => {
@@ -397,31 +400,6 @@ impl Model {
 				}
 				Some(Constraint::AllDifferentInt(vars))
 			}
-			Constraint::Disjunctive(starts, durations) => {
-				// return trivialunsatisfiable if overload is detected
-				let (earliest_start, latest_completion) =
-					starts.iter().zip(durations.clone()).fold(
-						(IntVal::MAX, IntVal::MIN),
-						|(earliest_start, latest_completion), (start, duration)| {
-							(
-								i64::min(
-									earliest_start.min(self.get_int_lower_bound(start)),
-									earliest_start,
-								),
-								i64::max(
-									latest_completion
-										.max(self.get_int_upper_bound(start) + duration),
-									latest_completion,
-								),
-							)
-						},
-					);
-				let total_duration = durations.iter().sum::<IntVal>();
-				if earliest_start + total_duration > latest_completion {
-					return Err(ReformulationError::TrivialUnsatisfiable);
-				}
-				Some(Constraint::Disjunctive(starts, durations))
-			}
 			Constraint::ArrayIntMaximum(args, m) => {
 				let max_lb = args
 					.iter()
@@ -481,6 +459,31 @@ impl Model {
 					self.set_int_upper_bound(&y, max_ub, con)?;
 				}
 				Some(Constraint::ArrayVarIntElement(args, idx, y))
+			}
+			Constraint::DisjunctiveStrict(starts, durations) => {
+				// return trivialunsatisfiable if overload is detected
+				let (earliest_start, latest_completion) =
+					starts.iter().zip(durations.clone()).fold(
+						(IntVal::MAX, IntVal::MIN),
+						|(earliest_start, latest_completion), (start, duration)| {
+							(
+								i64::min(
+									earliest_start.min(self.get_int_lower_bound(start)),
+									earliest_start,
+								),
+								i64::max(
+									latest_completion
+										.max(self.get_int_upper_bound(start) + duration),
+									latest_completion,
+								),
+							)
+						},
+					);
+				let total_duration = durations.iter().sum::<IntVal>();
+				if earliest_start + total_duration > latest_completion {
+					return Err(ReformulationError::TrivialUnsatisfiable);
+				}
+				Some(Constraint::DisjunctiveStrict(starts, durations))
 			}
 			Constraint::IntDiv(num, denom, res) => {
 				self.diff_int_domain(&denom, &RangeList::from(0..=0), con)?;

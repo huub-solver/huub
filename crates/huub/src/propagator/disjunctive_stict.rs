@@ -247,7 +247,7 @@ struct TaskInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct DisjunctiveEdgeFinding {
+pub(crate) struct DisjunctiveStrictEdgeFinding {
 	// Parameters
 	start_times: Vec<IntView>,
 	durations: Vec<i64>,
@@ -265,7 +265,7 @@ pub(crate) struct DisjunctiveEdgeFinding {
 	trailed_info: Vec<TaskInfo>,
 }
 
-impl DisjunctiveEdgeFinding {
+impl DisjunctiveStrictEdgeFinding {
 	pub(crate) fn prepare<V: Into<IntView>, I: IntoIterator<Item = V>>(
 		start_times: I,
 		durations: Vec<i64>,
@@ -442,7 +442,7 @@ impl DisjunctiveEdgeFinding {
 	}
 }
 
-impl<P, E, T> Propagator<P, E, T> for DisjunctiveEdgeFinding
+impl<P, E, T> Propagator<P, E, T> for DisjunctiveStrictEdgeFinding
 where
 	P: PropagationActions,
 	E: ExplanationActions,
@@ -533,7 +533,7 @@ impl Poster for DisjunctiveEdgeFindingPoster {
 		actions: &mut I,
 	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
 		let n = self.start_times.len();
-		let prop = DisjunctiveEdgeFinding {
+		let prop = DisjunctiveStrictEdgeFinding {
 			start_times: self.start_times,
 			durations: self.durations,
 			action_list: Vec::new(),
@@ -571,7 +571,7 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		propagator::disjunctive::DisjunctiveEdgeFinding,
+		propagator::disjunctive_stict::DisjunctiveStrictEdgeFinding,
 		solver::engine::int_var::{EncodingType, IntVar},
 		Solver,
 	};
@@ -599,12 +599,12 @@ mod tests {
 			EncodingType::Lazy,
 		);
 		let durations = vec![2, 3, 1];
-		slv.add_propagator(DisjunctiveEdgeFinding::prepare(
+		slv.add_propagator(DisjunctiveStrictEdgeFinding::prepare(
 			[a, b, c],
 			durations.clone(),
 		))
 		.unwrap();
-		slv.add_propagator(DisjunctiveEdgeFinding::prepare(
+		slv.add_propagator(DisjunctiveStrictEdgeFinding::prepare(
 			[a, b, c]
 				.iter()
 				.zip(durations.iter())
