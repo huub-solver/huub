@@ -747,6 +747,19 @@ where
 						});
 					}
 				}
+				"int_abs" => {
+					if let [origin, abs] = c.args.as_slice() {
+						let origin = self.arg_int(origin)?;
+						let abs = self.arg_int(abs)?;
+						self.prb += Constraint::IntAbs(origin, abs);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "int_abs",
+							found: c.args.len(),
+							expected: 2,
+						});
+					}
+				}
 				"int_div" => {
 					if let [num, denom, res] = c.args.as_slice() {
 						let num = self.arg_int(num)?;
