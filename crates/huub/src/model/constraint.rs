@@ -16,6 +16,7 @@ use crate::{
 		array_int_minimum::ArrayIntMinimumBounds,
 		array_var_int_element::ArrayVarIntElementBounds,
 		disjunctive_stict::DisjunctiveStrictEdgeFinding,
+		int_abs::IntAbsBounds,
 		int_div::IntDivBounds,
 		int_lin_le::{IntLinearLessEqBounds, IntLinearLessEqImpBounds},
 		int_lin_ne::{IntLinearNotEqImpValue, IntLinearNotEqValue},
@@ -38,6 +39,7 @@ pub enum Constraint {
 	ArrayVarBoolElement(Vec<BoolExpr>, IntView, BoolExpr),
 	ArrayVarIntElement(Vec<IntView>, IntView, IntView),
 	DisjunctiveStrict(Vec<IntView>, Vec<IntVal>),
+	IntAbs(IntView, IntView),
 	IntDiv(IntView, IntView, IntView),
 	IntLinEq(Vec<IntView>, IntVal),
 	IntLinEqImp(Vec<IntView>, IntVal, BoolExpr),
@@ -180,6 +182,12 @@ impl Constraint {
 					symmetric_vars,
 					durs.clone(),
 				))?;
+				Ok(())
+			}
+			Constraint::IntAbs(origin, abs) => {
+				let origin = origin.to_arg(slv, map);
+				let abs = abs.to_arg(slv, map);
+				slv.add_propagator(IntAbsBounds::prepare(origin, abs))?;
 				Ok(())
 			}
 			Constraint::IntDiv(numerator, denominator, result) => {
@@ -484,6 +492,31 @@ impl Model {
 					return Err(ReformulationError::TrivialUnsatisfiable);
 				}
 				Some(Constraint::DisjunctiveStrict(starts, durations))
+			}
+			Constraint::IntAbs(origin, abs) => {
+				let lb = self.get_int_lower_bound(&origin);
+				let ub = self.get_int_upper_bound(&origin);
+				if ub < 0 {
+					self.set_int_lower_bound(&abs, -ub, con)?;
+					self.set_int_upper_bound(&abs, -lb, con)?;
+				} else if lb >= 0 {
+					self.set_int_lower_bound(&abs, lb, con)?;
+					self.set_int_upper_bound(&abs, ub, con)?;
+				} else {
+					self.set_int_lower_bound(&abs, 0, con)?;
+					let abs_max = ub.max(-lb);
+					self.set_int_upper_bound(&abs, abs_max, con)?;
+				}
+				let abs_ub = ub.abs();
+				debug_assert!(abs_ub >= 0);
+				self.set_int_lower_bound(&origin, -abs_ub, con)?;
+				self.set_int_upper_bound(&abs, abs_ub, con)?;
+				if lb >= 0 {
+					// TODO: Unify
+					Some(Constraint::IntLinEq(vec![origin, -abs], 0))
+				} else {
+					Some(Constraint::IntAbs(origin, abs))
+				}
 			}
 			Constraint::IntDiv(num, denom, res) => {
 				self.diff_int_domain(&denom, &RangeList::from(0..=0), con)?;
