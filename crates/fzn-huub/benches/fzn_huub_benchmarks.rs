@@ -1,4 +1,7 @@
-#![allow(unused_crate_dependencies)]
+#![expect(
+	unused_crate_dependencies,
+	reason = "only dependencies for benchmarking are used in this file"
+)]
 use std::{
 	io::Write,
 	path::{Path, PathBuf},

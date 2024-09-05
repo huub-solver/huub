@@ -2,7 +2,6 @@ use crate::{actions::inspection::InspectionActions, BoolView, IntView, LitMeanin
 
 pub(crate) trait ExplanationActions: InspectionActions {
 	fn try_int_lit(&self, var: IntView, meaning: LitMeaning) -> Option<BoolView>;
-	#[allow(unused)] // TODO
 	/// Get a literal that represents the given meaning (that is currently `true`)
 	/// or a relaxation if the literal does not yet exist.
 	fn get_int_lit_relaxed(&mut self, var: IntView, meaning: LitMeaning) -> (BoolView, LitMeaning);

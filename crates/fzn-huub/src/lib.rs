@@ -495,7 +495,7 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 				.map_err(|e| e.to_string())?,
 
 			stdout: io::stdout(),
-			#[allow(trivial_casts)] // Doesn't compile without the cast
+			#[expect(trivial_casts, reason = "doesn't compile without the case")]
 			stderr: io::stderr as fn() -> io::Stderr,
 			ansi_color: true,
 		};

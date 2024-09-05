@@ -9,7 +9,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[allow(variant_size_differences)]
+#[allow(variant_size_differences, reason = "`Int` cannot be as smal as `Bool`")]
 pub enum Value {
 	Bool(bool),
 	Int(IntVal),

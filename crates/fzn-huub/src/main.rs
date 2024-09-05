@@ -1,4 +1,7 @@
-#![allow(unused_crate_dependencies)]
+#![allow(
+	unused_crate_dependencies,
+	reason = "other dependencies are used in the lib.rs file"
+)]
 use std::{convert::Infallible, fs, path::PathBuf, process::ExitCode};
 
 use fzn_huub::Cli;

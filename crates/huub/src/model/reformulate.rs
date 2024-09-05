@@ -155,7 +155,10 @@ impl VariableMap {
 		let _ = self.map.insert(index.into(), elem.into());
 	}
 
-	#[allow(dead_code)] // TODO
+	#[expect(
+		dead_code,
+		reason = "TODO: investigate whether this can be used for SAT rewriting"
+	)]
 	pub(crate) fn insert_bool(&mut self, index: RawVar, elem: BoolView) {
 		let _ = self.map.insert(index.into(), elem.into());
 	}

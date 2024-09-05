@@ -38,26 +38,38 @@ impl<E> PriorityQueue<E> {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub(crate) enum PriorityLevel {
+	#[allow(
+		dead_code,
+		reason = "TODO: no current propagators are this priority level"
+	)]
 	/// The lowest priority level, all other priority levels are more important
-	#[allow(dead_code)] // TODO
 	Lowest,
 	/// A low level of priority, all apart from one priority level are more
 	/// important
 	Low,
+	#[allow(
+		dead_code,
+		reason = "TODO: no current propagators are this priority level"
+	)]
 	/// A medium level of priority, there are just as many normal priority levels
 	/// more as less important than this one.
-	#[allow(dead_code)] // TODO
 	Medium,
+	#[allow(
+		dead_code,
+		reason = "TODO: no current propagators are this priority level"
+	)]
 	/// A high level of priority, all apart from one normal priority level are
 	/// less important.
-	#[allow(dead_code)] // TODO
 	High,
 	/// The highest normal priority level, this priority level is the most
 	/// important normal level of priority.
 	Highest,
+	#[allow(
+		dead_code,
+		reason = "TODO: no current propagators are this priority level"
+	)]
 	/// An extraordinarily high level of priority, generally used to ensure
 	/// something will happen next.
-	#[allow(dead_code)] // TODO
 	Immediate,
 }
 

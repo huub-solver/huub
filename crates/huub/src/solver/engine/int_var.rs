@@ -637,7 +637,10 @@ impl IntVar {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(variant_size_differences)]
+#[allow(
+	variant_size_differences,
+	reason = "TODO: Investigate if using Box improves performance"
+)]
 pub(crate) enum OrderStorage {
 	/// Variables for all inequality conditions are eagerly created and stored in order
 	Eager {

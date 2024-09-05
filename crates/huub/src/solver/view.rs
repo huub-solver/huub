@@ -58,7 +58,7 @@ impl BoolView {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-#[allow(variant_size_differences)]
+#[allow(variant_size_differences, reason = "`Lit` cannot be as smal as `bool`")]
 pub(crate) enum BoolViewInner {
 	Lit(RawLit),
 	Const(bool),

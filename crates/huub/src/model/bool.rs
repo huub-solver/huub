@@ -407,7 +407,10 @@ impl From<&BoolView> for BoolExpr {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-#[allow(variant_size_differences)]
+#[allow(
+	variant_size_differences,
+	reason = "`bool` is smaller than all other variants"
+)]
 pub enum BoolView {
 	Lit(RawLit),
 	Const(bool),
