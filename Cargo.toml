@@ -96,5 +96,4 @@ debug = false
 [profile.release]
 lto = "fat"
 codegen-units = 1
-debug = true      # TODO: Remove once `cargo codspeed build` can use `bench` profile
-# strip = "symbols"
+strip = "symbols"
