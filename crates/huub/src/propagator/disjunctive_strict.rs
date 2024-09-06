@@ -34,20 +34,29 @@ struct OmegaThetaTreeNode {
 struct OmegaThetaTree {
 	nodes: Vec<OmegaThetaTreeNode>,
 	size: usize,
-	levaes_start_idx: usize,
-}
-
-#[inline]
-fn left_child(i: usize) -> usize {
-	(i << 1) + 1
-}
-
-#[inline]
-fn right_child(i: usize) -> usize {
-	(i << 1) + 2
+	leaves_start_idx: usize,
 }
 
 impl OmegaThetaTree {
+	#[inline]
+	/// Calculate the index of the left child of a node `i`
+	fn left_child(i: usize) -> usize {
+		(i << 1) + 1
+	}
+
+	#[inline]
+	/// Calculate the index of the right child of a node `i`
+	fn right_child(i: usize) -> usize {
+		(i << 1) + 2
+	}
+
+	#[inline]
+	/// Calculate the index of the parent of a node `i`
+	fn parent(i: usize) -> usize {
+		debug_assert_ne!(i, 0);
+		(i - 1) >> 1
+	}
+
 	pub(crate) fn new(tasks_no: usize) -> Self {
 		let tree_size = (1 << (33 - (tasks_no as i32 - 1).leading_zeros())) - 1;
 		OmegaThetaTree {
@@ -61,16 +70,16 @@ impl OmegaThetaTree {
 				tree_size
 			],
 			size: tree_size,
-			levaes_start_idx: tree_size / 2,
+			leaves_start_idx: tree_size / 2,
 		}
 	}
 
 	// task are sorted by earliest start time
-	pub(crate) fn fill(&mut self, sorted_tasks: &[usize], sorted_time: &[i32], durations: &[i64]) {
+	fn fill(&mut self, sorted_tasks: &[usize], sorted_time: &[i32], durations: &[i64]) {
 		let n = sorted_tasks.len();
 		// fill the leave nodes
 		for i in 0..n {
-			let idx = self.levaes_start_idx + i;
+			let idx = self.leaves_start_idx + i;
 			let ect = sorted_time[i] + durations[sorted_tasks[i]] as i32;
 			self.nodes[idx].total_durations = durations[sorted_tasks[i]] as i32;
 			self.nodes[idx].earliest_completion = ect;
@@ -78,19 +87,19 @@ impl OmegaThetaTree {
 			self.nodes[idx].earliest_completion_gray = ect;
 		}
 
-		// udpate internal nodes in a botoom-up fashion
-		(0..self.levaes_start_idx).rev().for_each(|i| {
+		// update internal nodes in a bottom-up fashion
+		(0..self.leaves_start_idx).rev().for_each(|i| {
 			self.update_internal_node(i);
 		});
 	}
 
-	pub(crate) fn root(&self) -> &OmegaThetaTreeNode {
+	fn root(&self) -> &OmegaThetaTreeNode {
 		&self.nodes[0]
 	}
 
-	pub(crate) fn remove_task(&mut self, i: usize) {
-		assert!(self.levaes_start_idx + i < self.size);
-		let idx = self.levaes_start_idx + i;
+	fn remove_task(&mut self, i: usize) {
+		assert!(self.leaves_start_idx + i < self.size);
+		let idx = self.leaves_start_idx + i;
 		self.nodes[idx].total_durations = 0;
 		self.nodes[idx].earliest_completion = i32::MIN;
 		self.nodes[idx].total_durations_gray = 0;
@@ -98,9 +107,9 @@ impl OmegaThetaTree {
 		self.recursive_update(idx);
 	}
 
-	pub(crate) fn annotate_gray_task(&mut self, i: usize) {
-		assert!(self.levaes_start_idx + i < self.size);
-		let idx = self.levaes_start_idx + i;
+	fn annotate_gray_task(&mut self, i: usize) {
+		assert!(self.leaves_start_idx + i < self.size);
+		let idx = self.leaves_start_idx + i;
 		self.nodes[idx].total_durations = 0;
 		self.nodes[idx].earliest_completion = i32::MIN;
 		self.recursive_update(idx);
@@ -110,14 +119,14 @@ impl OmegaThetaTree {
 		if i == 0 {
 			return;
 		}
-		let parent = (i - 1) >> 1;
+		let parent = Self::parent(i);
 		self.update_internal_node(parent);
 		self.recursive_update(parent);
 	}
 
 	fn update_internal_node(&mut self, i: usize) {
-		let left_child = left_child(i);
-		let right_child = right_child(i);
+		let left_child = Self::left_child(i);
+		let right_child = Self::right_child(i);
 		let left_total_durations = self.nodes[left_child].total_durations;
 		let right_total_durations = self.nodes[right_child].total_durations;
 		let left_total_durations_gray = self.nodes[left_child].total_durations_gray;
@@ -146,81 +155,85 @@ impl OmegaThetaTree {
 	}
 
 	// Find the gray task responsible for pushing the earliest completion time
-	pub(crate) fn blocked_task(&self, earliest_completion_time: i32) -> usize {
+	fn blocked_task(&self, earliest_completion_time: i32) -> usize {
 		assert!(self.nodes[0].earliest_completion <= earliest_completion_time);
 		assert!(self.nodes[0].earliest_completion_gray >= earliest_completion_time);
 		let mut node_id = 0;
 		let mut earliest_completion_time = earliest_completion_time;
-		while node_id < self.levaes_start_idx {
-			if self.nodes[left_child(node_id)].total_durations_gray == 0 {
-				node_id = right_child(node_id);
-			} else if self.nodes[right_child(node_id)].total_durations_gray == 0 {
-				node_id = left_child(node_id);
-			} else if self.nodes[right_child(node_id)].earliest_completion_gray
+		while node_id < self.leaves_start_idx {
+			if self.nodes[Self::left_child(node_id)].total_durations_gray == 0 {
+				node_id = Self::right_child(node_id);
+			} else if self.nodes[Self::right_child(node_id)].total_durations_gray == 0 {
+				node_id = Self::left_child(node_id);
+			} else if self.nodes[Self::right_child(node_id)].earliest_completion_gray
 				>= earliest_completion_time
 			{
-				node_id = right_child(node_id);
-			} else if self.nodes[left_child(node_id)].earliest_completion
-				+ self.nodes[right_child(node_id)].total_durations_gray
+				node_id = Self::right_child(node_id);
+			} else if self.nodes[Self::left_child(node_id)].earliest_completion
+				+ self.nodes[Self::right_child(node_id)].total_durations_gray
 				>= earliest_completion_time
 			{
 				// The binding task is to the left, blocked task contributes only to the sum
-				earliest_completion_time -= self.nodes[left_child(node_id)].earliest_completion;
-				node_id = right_child(node_id);
-				while node_id < self.levaes_start_idx {
-					if self.nodes[left_child(node_id)].total_durations_gray
-						+ self.nodes[right_child(node_id)].total_durations
+				earliest_completion_time -=
+					self.nodes[Self::left_child(node_id)].earliest_completion;
+				node_id = Self::right_child(node_id);
+				while node_id < self.leaves_start_idx {
+					if self.nodes[Self::left_child(node_id)].total_durations_gray
+						+ self.nodes[Self::right_child(node_id)].total_durations
 						== earliest_completion_time
 					{
 						earliest_completion_time -=
-							self.nodes[right_child(node_id)].total_durations;
-						node_id = left_child(node_id);
-					} else if self.nodes[left_child(node_id)].total_durations
-						+ self.nodes[right_child(node_id)].total_durations_gray
+							self.nodes[Self::right_child(node_id)].total_durations;
+						node_id = Self::left_child(node_id);
+					} else if self.nodes[Self::left_child(node_id)].total_durations
+						+ self.nodes[Self::right_child(node_id)].total_durations_gray
 						>= earliest_completion_time
 					{
-						earliest_completion_time -= self.nodes[left_child(node_id)].total_durations;
-						node_id = right_child(node_id);
+						earliest_completion_time -=
+							self.nodes[Self::left_child(node_id)].total_durations;
+						node_id = Self::right_child(node_id);
 					} else {
 						unreachable!("unexpected case");
 					}
 				}
 				break;
 			} else {
-				earliest_completion_time -= self.nodes[right_child(node_id)].total_durations;
-				node_id = left_child(node_id);
+				earliest_completion_time -= self.nodes[Self::right_child(node_id)].total_durations;
+				node_id = Self::left_child(node_id);
 			}
 		}
-		node_id - self.levaes_start_idx
+		node_id - self.leaves_start_idx
 	}
 
 	// Finding the task responsible for pushing the earliest completion time beyond the time_bound
-	pub(crate) fn binding_task(&self, time_bound: i32, node_id: usize) -> usize {
+	fn binding_task(&self, time_bound: i32, node_id: usize) -> usize {
 		assert!(self.nodes[0].earliest_completion >= time_bound);
 		let mut node_id = node_id;
 		let mut earliest_completion_time = time_bound;
-		while node_id < self.levaes_start_idx {
-			if self.nodes[right_child(node_id)].earliest_completion >= earliest_completion_time {
-				node_id = right_child(node_id);
+		while node_id < self.leaves_start_idx {
+			if self.nodes[Self::right_child(node_id)].earliest_completion
+				>= earliest_completion_time
+			{
+				node_id = Self::right_child(node_id);
 			} else {
-				earliest_completion_time -= self.nodes[right_child(node_id)].total_durations;
-				node_id = left_child(node_id);
+				earliest_completion_time -= self.nodes[Self::right_child(node_id)].total_durations;
+				node_id = Self::left_child(node_id);
 			}
 		}
-		node_id - self.levaes_start_idx
+		node_id - self.leaves_start_idx
 	}
 
 	// Finding the task responsible for min{est_S, est_i} where
 	// - S is the set of tasks in the tree
 	// - task i is one of the gray task in the tree
-	pub(crate) fn gray_est_responsible_task(&self, earliest_completion_time: i32) -> usize {
+	fn gray_est_responsible_task(&self, earliest_completion_time: i32) -> usize {
 		assert!(self.nodes[0].earliest_completion <= earliest_completion_time);
 		assert!(self.nodes[0].earliest_completion_gray >= earliest_completion_time);
 		let mut node_id = 0;
 		let mut earliest_completion_time = earliest_completion_time;
-		while node_id < self.levaes_start_idx {
-			let left_child = left_child(node_id);
-			let right_child = right_child(node_id);
+		while node_id < self.leaves_start_idx {
+			let left_child = Self::left_child(node_id);
+			let right_child = Self::right_child(node_id);
 			if self.nodes[right_child].earliest_completion_gray >= earliest_completion_time {
 				node_id = right_child;
 			} else if self.nodes[left_child].earliest_completion
@@ -236,7 +249,7 @@ impl OmegaThetaTree {
 				node_id = left_child;
 			}
 		}
-		node_id - self.levaes_start_idx
+		node_id - self.leaves_start_idx
 	}
 }
 
@@ -251,8 +264,6 @@ pub(crate) struct DisjunctiveStrictEdgeFinding {
 	// Parameters
 	start_times: Vec<IntView>,
 	durations: Vec<i64>,
-	// Action List
-	action_list: Vec<u32>,
 
 	// Internal state for propagation
 	tasks_sorted_earliest_start: Vec<usize>,
@@ -351,19 +362,18 @@ impl DisjunctiveStrictEdgeFinding {
 			.collect();
 
 		self.tasks_sorted_earliest_start
-			.sort_unstable_by_key(|&i| actions.get_int_lower_bound(self.start_times[i]));
+			.sort_by_key(|&i| earliest_start[i]);
 		self.tasks_sorted_lastest_completion
-			.sort_unstable_by_key(|&i| {
-				-(actions.get_int_upper_bound(self.start_times[i]) + self.durations[i])
-			});
-		let sorted_ealiest_start = self
+			.sort_by_key(|&i| -latest_completion[i]);
+
+		let sorted_earliest_start = self
 			.tasks_sorted_earliest_start
 			.iter()
-			.map(|&i| actions.get_int_lower_bound(self.start_times[i]) as i32)
-			.collect::<Vec<_>>();
+			.map(|&i| earliest_start[i] as i32)
+			.collect_vec();
 		self.ot_tree.fill(
 			&self.tasks_sorted_earliest_start,
-			&sorted_ealiest_start,
+			&sorted_earliest_start,
 			&self.durations,
 		);
 		for ii in 0..self.tasks_sorted_earliest_start.len() {
@@ -390,14 +400,20 @@ impl DisjunctiveStrictEdgeFinding {
 			let time_bound = self.latest_completion_time(lct_task, actions);
 			if earliest_completion_time > time_bound {
 				// resource overload detected, eagerly build the reason clause for conflict
+				let expl = self
+					.explain_earliest_completion_time(time_bound + 1)
+					.build_reason(actions);
 				// trace!("resource overload detected, conflict clause: {:?}", clause);
 				trace!("earliest completion time: {:?}", earliest_start);
 				trace!("latest completion time: {:?}", latest_completion);
-				actions.set_int_lower_bound(
-					self.start_times[lct_task],
-					earliest_completion_time as i64 - self.durations[lct_task],
-					self.explain_earliest_completion_time(time_bound + 1),
-				)?;
+				let err = actions
+					.set_int_lower_bound(
+						self.start_times[lct_task],
+						earliest_completion_time as i64 - self.durations[lct_task],
+						expl,
+					)
+					.unwrap_err();
+				return Err(err);
 			}
 			while self.ot_tree.root().earliest_completion_gray
 				> self.latest_completion_time(lct_task, actions)
@@ -448,13 +464,8 @@ where
 	E: ExplanationActions,
 	T: TrailingActions,
 {
-	fn notify_event(&mut self, data: u32, _: &IntEvent, _: &mut T) -> bool {
-		self.action_list.push(data);
+	fn notify_event(&mut self, _: u32, _: &IntEvent, _: &mut T) -> bool {
 		true
-	}
-
-	fn notify_backtrack(&mut self, _new_level: usize) {
-		self.action_list.clear()
 	}
 
 	#[tracing::instrument(name = "disjunctive_bounds", level = "trace", skip(self, actions))]
@@ -536,7 +547,6 @@ impl Poster for DisjunctiveEdgeFindingPoster {
 		let prop = DisjunctiveStrictEdgeFinding {
 			start_times: self.start_times,
 			durations: self.durations,
-			action_list: Vec::new(),
 			tasks_sorted_earliest_start: (0..n).collect(),
 			tasks_sorted_lastest_completion: (0..n).collect(),
 			task_rankings_by_earliest_start: (0..n).collect(),
@@ -571,7 +581,7 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		propagator::disjunctive_stict::DisjunctiveStrictEdgeFinding,
+		propagator::disjunctive_strict::DisjunctiveStrictEdgeFinding,
 		solver::engine::int_var::{EncodingType, IntVar},
 		Solver,
 	};

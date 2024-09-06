@@ -26,8 +26,8 @@ mod tests {
 	assert_first_solution!(warm_start_success);
 	assert_first_solution!(warm_start_fail);
 
-	assert_optimal!(jobshop_la04);
 	assert_optimal!(jobshop_la05);
+	assert_optimal!(jobshop_newspaper);
 
 	assert_search_order!(bool_indomain_max);
 	assert_search_order!(bool_indomain_min);

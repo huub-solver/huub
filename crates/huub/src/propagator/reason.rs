@@ -138,3 +138,9 @@ impl<A: ExplanationActions> ReasonBuilder<A> for Reason {
 		Ok(self)
 	}
 }
+
+impl<A: ExplanationActions> ReasonBuilder<A> for Result<Reason, bool> {
+	fn build_reason(self, _: &mut A) -> Result<Reason, bool> {
+		self
+	}
+}

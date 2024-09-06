@@ -15,7 +15,7 @@ use crate::{
 		all_different_int::AllDifferentIntValue,
 		array_int_minimum::ArrayIntMinimumBounds,
 		array_var_int_element::ArrayVarIntElementBounds,
-		disjunctive_stict::DisjunctiveStrictEdgeFinding,
+		disjunctive_strict::DisjunctiveStrictEdgeFinding,
 		int_abs::IntAbsBounds,
 		int_div::IntDivBounds,
 		int_lin_le::{IntLinearLessEqBounds, IntLinearLessEqImpBounds},

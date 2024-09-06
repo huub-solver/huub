@@ -2,7 +2,7 @@ pub(crate) mod all_different_int;
 pub(crate) mod array_int_minimum;
 pub(crate) mod array_var_int_element;
 pub(crate) mod conflict;
-pub(crate) mod disjunctive_stict;
+pub(crate) mod disjunctive_strict;
 pub(crate) mod int_abs;
 pub(crate) mod int_div;
 pub(crate) mod int_event;
