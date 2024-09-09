@@ -138,6 +138,13 @@ impl IntVar {
 			order_encoding,
 			direct_encoding,
 		});
+		// Create propagator activation list
+		let r = slv
+			.engine_mut()
+			.state
+			.int_activation
+			.push(Default::default());
+		debug_assert_eq!(iv, r);
 
 		// Setup the boolean to integer mapping
 		if let OrderStorage::Eager { storage, .. } = &slv.engine().state.int_vars[iv].order_encoding

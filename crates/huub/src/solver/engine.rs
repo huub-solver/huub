@@ -1,3 +1,4 @@
+pub(crate) mod activation_list;
 pub(crate) mod bool_to_int;
 pub(crate) mod int_var;
 pub(crate) mod queue;
@@ -27,6 +28,7 @@ use crate::{
 	propagator::{int_event::IntEvent, reason::Reason},
 	solver::{
 		engine::{
+			activation_list::ActivationList,
 			bool_to_int::BoolToIntMap,
 			int_var::{IntVar, IntVarRef, LitMeaning, OrderStorage},
 			queue::{PriorityLevel, PriorityQueue},
@@ -97,7 +99,7 @@ pub(crate) struct State {
 	pub(crate) config: SolverConfiguration,
 
 	// ---- Trailed Value Infrastructure (e.g., decision variables) ----
-	/// Storage for the integer variables
+	/// Storage for the integer variables and
 	pub(crate) int_vars: IndexVec<IntVarRef, IntVar>,
 	/// Mapping from boolean variables to integer variables
 	pub(crate) bool_to_int: BoolToIntMap,
@@ -120,11 +122,10 @@ pub(crate) struct State {
 	pub(crate) vsids: bool,
 
 	// ---- Queueing Infrastructure ----
-	/// Boolean variable subscriptions
-	pub(crate) bool_subscribers: HashMap<RawVar, Vec<(PropRef, u32)>>,
-	/// Integer variable subscriptions
-	// TODO: Shrink Propref and IntEvent to fit in 32 bits
-	pub(crate) int_subscribers: HashMap<IntVarRef, Vec<(PropRef, IntEvent, u32)>>,
+	/// Boolean variable enqueueing information
+	pub(crate) bool_activation: HashMap<RawVar, Vec<PropRef>>,
+	/// Integer variable enqueueing information
+	pub(crate) int_activation: IndexVec<IntVarRef, ActivationList>,
 	/// Queue of propagators awaiting action
 	pub(crate) propagator_queue: PriorityQueue<PropRef>,
 	/// Priority within the queue for each propagator
@@ -150,8 +151,7 @@ impl IpasirPropagator for Engine {
 
 		// Enqueue propagators, if no conflict has been found
 		if self.state.conflict.is_none() {
-			self.state
-				.enqueue_propagators(&mut self.propagators, lit, None);
+			self.state.enqueue_propagators(lit, None);
 		}
 	}
 
@@ -166,10 +166,6 @@ impl IpasirPropagator for Engine {
 
 		// Revert value changes to previous decision level
 		self.state.notify_backtrack(new_level, restart);
-		// Notify propagators to backtrack
-		for p in &mut self.propagators {
-			p.notify_backtrack(new_level);
-		}
 
 		// Re-apply persistent changes
 		for lit in self.persistent.clone() {
@@ -177,7 +173,7 @@ impl IpasirPropagator for Engine {
 		}
 		if new_level == 0 {
 			// Persistent changes are now permanently applied in the Trail
-			self.persistent.clear()
+			self.persistent.clear();
 		}
 	}
 
@@ -238,8 +234,7 @@ impl IpasirPropagator for Engine {
 			"propagate"
 		);
 		for &lit in queue.iter() {
-			self.state
-				.enqueue_propagators(&mut self.propagators, lit, None);
+			self.state.enqueue_propagators(lit, None);
 		}
 		// Debug helper to ensure that any reason is based on known true literals
 		#[cfg(debug_assertions)]
@@ -271,7 +266,7 @@ impl IpasirPropagator for Engine {
 		let reason = self.state.reason_map.remove(&propagated_lit);
 		// Restore the current state to the state when the propagation happened if explaining lazily
 		if matches!(reason, Some(Reason::Lazy(_, _))) {
-			self.state.trail.undo_until_found_lit(propagated_lit)
+			self.state.trail.undo_until_found_lit(propagated_lit);
 		}
 		// Create a clause from the reason
 		let mut clause = reason.map_or_else(Vec::new, |r| {
@@ -318,8 +313,7 @@ impl IpasirPropagator for Engine {
 				let prev_ub = ctx.state.int_vars[r].notify_upper_bound(&mut ctx.state.trail, val);
 				debug_assert!(prev_lb < val || prev_ub > val);
 
-				ctx.state
-					.enqueue_int_propagators(&mut self.propagators, r, IntEvent::Fixed, None);
+				ctx.state.enqueue_int_propagators(r, IntEvent::Fixed, None);
 			}
 		}
 		// Run propgagators to find any additional changes required
@@ -461,7 +455,7 @@ impl State {
 				.remove(&lit)
 				.map_or_else(Vec::new, |r| r.to_clause(propagators, self));
 			clause.push(lit);
-			self.clauses.push_back(clause)
+			self.clauses.push_back(clause);
 		}
 	}
 
@@ -527,33 +521,21 @@ impl State {
 
 	fn enqueue_int_propagators(
 		&mut self,
-		propagators: &mut IndexVec<PropRef, BoxedPropagator>,
 		int_var: IntVarRef,
 		event: IntEvent,
 		skip: Option<PropRef>,
 	) {
-		for (prop, level, data) in self.int_subscribers.get(&int_var).into_iter().flatten() {
-			if Some(*prop) == skip || self.enqueued[*prop] || !level.is_activated_by(&event) {
-				continue;
-			}
-			if propagators[*prop].notify_event(*data, &event, &mut self.trail) {
+		for prop in self.int_activation[int_var].activated_by(event) {
+			if Some(prop) != skip && !self.enqueued[prop] {
 				self.propagator_queue
-					.insert(self.propagator_priority[*prop], *prop);
+					.insert(self.propagator_priority[prop], prop);
 			}
 		}
 	}
 
-	fn enqueue_propagators(
-		&mut self,
-		propagators: &mut IndexVec<PropRef, BoxedPropagator>,
-		lit: RawLit,
-		skip: Option<PropRef>,
-	) {
-		for &(prop, data) in self.bool_subscribers.get(&lit.var()).into_iter().flatten() {
-			if Some(prop) == skip || self.enqueued[prop] {
-				continue;
-			}
-			if propagators[prop].notify_event(data, &IntEvent::Fixed, &mut self.trail) {
+	fn enqueue_propagators(&mut self, lit: RawLit, skip: Option<PropRef>) {
+		for &prop in self.bool_activation.get(&lit.var()).into_iter().flatten() {
+			if Some(prop) != skip && !self.enqueued[prop] {
 				self.propagator_queue
 					.insert(self.propagator_priority[prop], prop);
 			}
@@ -561,7 +543,7 @@ impl State {
 
 		// Process Integer consequences
 		if let Some((iv, event)) = self.determine_int_event(lit) {
-			self.enqueue_int_propagators(propagators, iv, event, skip)
+			self.enqueue_int_propagators(iv, event, skip);
 		}
 	}
 

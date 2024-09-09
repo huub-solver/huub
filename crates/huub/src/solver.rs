@@ -290,7 +290,7 @@ where
 								l
 							}),
 							"add objective bound"
-						)
+						);
 					}
 				}
 				SolveResult::Unsatisfiable => {
@@ -358,7 +358,7 @@ where
 			self.oracle.set_learn_callback(Some(
 				move |clause: &mut dyn Iterator<Item = RawLit>| {
 					trace_learned_clause(clause);
-					f(clause)
+					f(clause);
 				},
 			));
 		} else {

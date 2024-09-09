@@ -230,7 +230,7 @@ impl<'a, V: Visit> LitNames<'a, V> {
 impl<'a, V: Visit> Visit for LitNames<'a, V> {
 	#[inline]
 	fn record_f64(&mut self, field: &Field, value: f64) {
-		self.inner.record_f64(field, value)
+		self.inner.record_f64(field, value);
 	}
 
 	#[inline]
@@ -238,7 +238,7 @@ impl<'a, V: Visit> Visit for LitNames<'a, V> {
 		if self.check_lit(field, value) {
 			return;
 		}
-		self.inner.record_i64(field, value)
+		self.inner.record_i64(field, value);
 	}
 
 	#[inline]
@@ -246,16 +246,16 @@ impl<'a, V: Visit> Visit for LitNames<'a, V> {
 		if self.check_int_var(field, value) || self.check_lit(field, value as i64) {
 			return;
 		}
-		self.inner.record_u64(field, value)
+		self.inner.record_u64(field, value);
 	}
 
 	#[inline]
 	fn record_bool(&mut self, field: &Field, value: bool) {
-		self.inner.record_bool(field, value)
+		self.inner.record_bool(field, value);
 	}
 
 	fn record_str(&mut self, field: &Field, value: &str) {
-		self.inner.record_str(field, value)
+		self.inner.record_str(field, value);
 	}
 
 	#[inline]
@@ -266,7 +266,7 @@ impl<'a, V: Visit> Visit for LitNames<'a, V> {
 		if self.check_int_vars(field, value) {
 			return;
 		}
-		self.inner.record_debug(field, value)
+		self.inner.record_debug(field, value);
 	}
 }
 

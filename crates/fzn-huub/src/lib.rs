@@ -300,7 +300,7 @@ where
 		let res = match goal {
 			Some((goal, obj)) => {
 				if self.all_solutions {
-					warn!("--all-solutions is ignored when optimizing, use --intermediate-solutions or --all-optimal-solutions instead")
+					warn!("--all-solutions is ignored when optimizing, use --intermediate-solutions or --all-optimal-solutions instead");
 				}
 				if self.intermediate_solutions {
 					slv.branch_and_bound(obj, goal, |value| {
@@ -312,7 +312,7 @@ where
 								fzn: &fzn,
 								var_map: &var_map
 							}
-						)
+						);
 					})
 				} else {
 					// Set up Ctrl-C handler (to allow printing last solution)
@@ -329,7 +329,7 @@ where
 							fzn: &fzn,
 							var_map: &var_map,
 						}
-						.to_string()
+						.to_string();
 					});
 					output!(self.stdout, "{}", last_sol);
 					res
@@ -365,7 +365,7 @@ where
 							fzn: &fzn,
 							var_map: &var_map
 						}
-					)
+					);
 				})
 			}
 			None => slv.solve(|value| {
@@ -377,7 +377,7 @@ where
 						fzn: &fzn,
 						var_map: &var_map
 					}
-				)
+				);
 			}),
 		};
 		// output solving statistics
@@ -556,13 +556,13 @@ impl Display for Solution<'_> {
 						.map(|lit| self.print_lit(lit))
 						.collect::<Vec<_>>()
 						.join(",")
-				)?
+				)?;
 			} else {
 				writeln!(
 					f,
 					"{ident} = {};",
 					(self.value)(self.var_map[ident]).unwrap()
-				)?
+				)?;
 			}
 		}
 		writeln!(f, "{}", FZN_SEPERATOR)

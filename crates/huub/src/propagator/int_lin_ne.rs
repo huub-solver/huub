@@ -1,7 +1,7 @@
 use pindakaas::Lit as RawLit;
 
 use crate::{
-	actions::{initialization::InitializationActions, trailing::TrailingActions},
+	actions::initialization::InitializationActions,
 	helpers::opt_field::OptField,
 	propagator::{
 		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, ExplanationActions,
@@ -97,7 +97,7 @@ impl<const R: usize> IntLinearNotEqValueImpl<R> {
 				.collect();
 			if let Some(&r) = self.reification.get() {
 				if data != self.vars.len() {
-					conj.push(BoolView(BoolViewInner::Lit(r)))
+					conj.push(BoolView(BoolViewInner::Lit(r)));
 				}
 			}
 			conj
@@ -105,54 +105,42 @@ impl<const R: usize> IntLinearNotEqValueImpl<R> {
 	}
 }
 
-impl<const R: usize, P, E, T> Propagator<P, E, T> for IntLinearNotEqValueImpl<R>
+impl<const R: usize, P, E> Propagator<P, E> for IntLinearNotEqValueImpl<R>
 where
 	P: PropagationActions,
 	E: ExplanationActions,
-	T: TrailingActions,
 {
-	fn notify_event(&mut self, _: u32, _: &IntEvent, actions: &mut T) -> bool {
-		let num_fixed = actions.get_trailed_int(self.num_fixed) + 1;
-		let _ = actions.set_trailed_int(self.num_fixed, num_fixed);
-		let size = self.vars.len() + R;
-		size as i64 - num_fixed <= 1
-	}
-
-	fn notify_backtrack(&mut self, _new_level: usize) {}
-
 	#[tracing::instrument(name = "int_lin_ne", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		if let Some(r) = self.reification.get() {
-			if actions.get_bool_val(BoolView(BoolViewInner::Lit(*r))) == Some(false) {
-				return Ok(());
+		let (r, r_fixed) = if let Some(r) = self.reification.get() {
+			let r_bv = BoolView(BoolViewInner::Lit(*r));
+			match actions.get_bool_val(r_bv) {
+				Some(false) => return Ok(()),
+				Some(true) => (r_bv, true),
+				None => (r_bv, false),
 			}
-		}
+		} else {
+			(true.into(), true)
+		};
 		let mut sum = 0;
 		let mut unfixed = None;
 		for (i, v) in self.vars.iter().enumerate() {
 			if let Some(val) = actions.get_int_val(*v) {
 				sum += val;
+			} else if unfixed.is_some() {
+				return Ok(());
 			} else {
-				debug_assert_eq!(unfixed, None);
 				unfixed = Some((i, v));
 			}
 		}
 		if let Some((i, v)) = unfixed {
-			debug_assert!(
-				self.reification.get().is_none()
-					|| actions.get_bool_val(BoolView(BoolViewInner::Lit(
-						*self.reification.get().unwrap()
-					))) == Some(true)
-			);
+			if !r_fixed {
+				return Ok(());
+			}
 			let val = self.violation - sum;
 			actions.set_int_not_eq(*v, val, self.reason(i))
 		} else if sum == self.violation {
-			let bv = if let Some(r) = self.reification.get() {
-				BoolView(BoolViewInner::Lit(*r))
-			} else {
-				true.into()
-			};
-			actions.set_bool_val(bv, false, self.reason(self.vars.len()))
+			actions.set_bool_val(r, false, self.reason(self.vars.len()))
 		} else {
 			Ok(())
 		}
@@ -175,11 +163,11 @@ impl<const R: usize> Poster for IntLinearNotEqValuePoster<R> {
 			reification: self.reification,
 			num_fixed: actions.new_trailed_int(0),
 		};
-		for (i, v) in prop.vars.iter().enumerate() {
-			actions.subscribe_int(*v, IntEvent::Fixed, i as u32)
+		for &v in prop.vars.iter() {
+			actions.enqueue_on_int_change(v, IntEvent::Fixed);
 		}
 		if let Some(r) = prop.reification.get() {
-			actions.subscribe_bool(BoolView(BoolViewInner::Lit(*r)), prop.vars.len() as u32)
+			actions.enqueue_on_bool_change(BoolView(BoolViewInner::Lit(*r)));
 		}
 		Ok((
 			Box::new(prop),

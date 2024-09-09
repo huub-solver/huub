@@ -288,7 +288,7 @@ impl TrailEvent {
 				let low = val as u32;
 				trail[0] = -(usize::from(*i) as i32) as u32;
 				trail[1] = high;
-				trail[2] = low
+				trail[2] = low;
 			}
 		}
 	}

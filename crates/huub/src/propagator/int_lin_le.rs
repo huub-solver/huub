@@ -2,7 +2,7 @@ use itertools::Itertools;
 use pindakaas::Lit as RawLit;
 
 use crate::{
-	actions::{initialization::InitializationActions, trailing::TrailingActions},
+	actions::initialization::InitializationActions,
 	helpers::opt_field::OptField,
 	propagator::{
 		conflict::Conflict, int_event::IntEvent, ExplanationActions, PropagationActions, Propagator,
@@ -21,7 +21,6 @@ pub(crate) struct IntLinearLessEqBoundsImpl<const R: usize> {
 	vars: Vec<IntView>,               // Variables in the linear inequality
 	max: IntVal,                      // Lower bound of the linear inequality
 	reification: OptField<R, RawLit>, // Reified variable
-	action_list: Vec<u32>, // List of variables that have been modified since the last propagation
 }
 
 pub(crate) type IntLinearLessEqBounds = IntLinearLessEqBoundsImpl<0>;
@@ -76,20 +75,11 @@ impl IntLinearLessEqImpBounds {
 	}
 }
 
-impl<const R: usize, P, E, T> Propagator<P, E, T> for IntLinearLessEqBoundsImpl<R>
+impl<const R: usize, P, E> Propagator<P, E> for IntLinearLessEqBoundsImpl<R>
 where
 	P: PropagationActions,
 	E: ExplanationActions,
-	T: TrailingActions,
 {
-	fn notify_event(&mut self, _: u32, _: &IntEvent, _: &mut T) -> bool {
-		true
-	}
-
-	fn notify_backtrack(&mut self, _new_level: usize) {
-		self.action_list.clear()
-	}
-
 	// propagation rule: x[i] <= rhs - sum_{j != i} x[j].lower_bound
 	#[tracing::instrument(name = "int_lin_le", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
@@ -118,7 +108,7 @@ where
 						.iter()
 						.map(|v| a.get_int_lower_bound_lit(*v))
 						.collect_vec()
-				})?
+				})?;
 			}
 			// skip the remaining propagation if the reified variable is not assigned to true
 			if !actions
@@ -133,7 +123,7 @@ where
 		for (j, &v) in self.vars.iter().enumerate() {
 			let reason = actions.deferred_reason(j as u64);
 			let ub = sum + actions.get_int_lower_bound(v);
-			actions.set_int_upper_bound(v, ub, reason)?
+			actions.set_int_upper_bound(v, ub, reason)?;
 		}
 		Ok(())
 	}
@@ -156,7 +146,7 @@ where
 			})
 			.collect();
 		if let Some(r) = self.reification.get() {
-			var_lits.push(*r)
+			var_lits.push(*r);
 		}
 		var_lits
 	}
@@ -176,13 +166,12 @@ impl<const R: usize> Poster for IntLinearLessEqBoundsPoster<R> {
 			vars: self.vars,
 			max: self.max,
 			reification: self.reification,
-			action_list: Vec::new(),
 		};
-		for (i, v) in prop.vars.iter().enumerate() {
-			actions.subscribe_int(*v, IntEvent::UpperBound, i as u32)
+		for &v in prop.vars.iter() {
+			actions.enqueue_on_int_change(v, IntEvent::UpperBound);
 		}
 		if let Some(r) = prop.reification.get() {
-			actions.subscribe_bool(BoolView(BoolViewInner::Lit(*r)), prop.vars.len() as u32)
+			actions.enqueue_on_bool_change(BoolView(BoolViewInner::Lit(*r)));
 		}
 		Ok((
 			Box::new(prop),

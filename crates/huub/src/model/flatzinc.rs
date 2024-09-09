@@ -391,7 +391,7 @@ where
 											unreachable!()
 										};
 										self.prb +=
-											BoolExpr::Equiv(vec![new.into(), existing.into()])
+											BoolExpr::Equiv(vec![new.into(), existing.into()]);
 									}
 									Type::Int => {
 										let (ModelView::Int(new), ModelView::Int(existing)) =
@@ -400,7 +400,7 @@ where
 											unreachable!()
 										};
 										self.prb +=
-											Constraint::IntLinEq(vec![new, existing * -1], 0)
+											Constraint::IntLinEq(vec![new, existing * -1], 0);
 									}
 									_ => unreachable!(),
 								}
@@ -606,7 +606,7 @@ where
 						}
 						for l in neg {
 							let e = self.lit_bool(l)?;
-							lits.push((!e).into())
+							lits.push((!e).into());
 						}
 						self.prb += BoolExpr::Or(lits);
 					} else {
@@ -736,7 +736,7 @@ where
 						}
 						for l in neg {
 							let e = self.lit_bool(l)?;
-							lits.push((!e).into())
+							lits.push((!e).into());
 						}
 						self.prb += BoolExpr::Equiv(vec![r.into(), BoolExpr::Or(lits)]);
 					} else {

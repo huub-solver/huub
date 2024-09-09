@@ -1,10 +1,7 @@
 use std::mem;
 
 use crate::{
-	actions::{
-		explanation::ExplanationActions, initialization::InitializationActions,
-		trailing::TrailingActions,
-	},
+	actions::{explanation::ExplanationActions, initialization::InitializationActions},
 	helpers::div_ceil,
 	propagator::{conflict::Conflict, int_event::IntEvent, PropagationActions, Propagator},
 	solver::{
@@ -149,16 +146,11 @@ impl IntDivBounds {
 	}
 }
 
-impl<P, E, T> Propagator<P, E, T> for IntDivBounds
+impl<P, E> Propagator<P, E> for IntDivBounds
 where
 	P: PropagationActions,
 	E: ExplanationActions,
-	T: TrailingActions,
 {
-	fn notify_event(&mut self, _: u32, _: &IntEvent, _: &mut T) -> bool {
-		true
-	}
-
 	#[tracing::instrument(name = "int_div", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		let mut denominator = self.denominator;
@@ -217,9 +209,9 @@ impl Poster for IntDivBoundsPoster {
 		actions: &mut I,
 	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
 		// Subscribe to bounds changes on each of the variables.
-		actions.subscribe_int(self.numerator, IntEvent::Bounds, 1);
-		actions.subscribe_int(self.denominator, IntEvent::Bounds, 2);
-		actions.subscribe_int(self.result, IntEvent::Bounds, 3);
+		actions.enqueue_on_int_change(self.numerator, IntEvent::Bounds);
+		actions.enqueue_on_int_change(self.denominator, IntEvent::Bounds);
+		actions.enqueue_on_int_change(self.result, IntEvent::Bounds);
 
 		// Ensure the consistency of the signs of the three variables using the following clauses.
 		if actions.get_int_lower_bound(self.numerator) < 0

@@ -50,7 +50,7 @@ where
 		self.slv.engine_mut().state.trail.track_int(init)
 	}
 
-	fn subscribe_bool(&mut self, var: BoolView, data: u32) {
+	fn enqueue_on_bool_change(&mut self, var: BoolView) {
 		match var.0 {
 			BoolViewInner::Lit(lit) => {
 				<Sat as PropagatingSolver>::add_observed_var(&mut self.slv.oracle, lit.var());
@@ -58,45 +58,39 @@ where
 					self.slv
 						.engine_mut()
 						.state
-						.bool_subscribers
+						.bool_activation
 						.entry(lit.var())
 						.or_default()
-						.push((prop, data))
+						.push(prop);
 				}
 			}
 			BoolViewInner::Const(_) => {}
 		}
 	}
 
-	fn subscribe_int(&mut self, var: IntView, event: IntEvent, data: u32) {
-		let mut subscribe_intref = |var, prop, event| {
-			self.slv
-				.engine_mut()
-				.state
-				.int_subscribers
-				.entry(var)
-				.or_default()
-				.push((prop, event, data))
+	fn enqueue_on_int_change(&mut self, var: IntView, condition: IntEvent) {
+		let mut subscribe_intref = |var: IntVarRef, prop, cond| {
+			self.slv.engine_mut().state.int_activation[var].add(prop, cond);
 		};
 		match (&self.init_ref, var.0) {
 			(InitRef::Propagator(prop), IntViewInner::VarRef(var)) => {
-				subscribe_intref(var, *prop, event);
+				subscribe_intref(var, *prop, condition);
 			}
 			(InitRef::Propagator(prop), IntViewInner::Linear { transformer, var }) => {
 				let event = if transformer.positive_scale() {
-					event
+					condition
 				} else {
-					match event {
+					match condition {
 						IntEvent::LowerBound => IntEvent::UpperBound,
 						IntEvent::UpperBound => IntEvent::LowerBound,
-						_ => event,
+						_ => condition,
 					}
 				};
 				subscribe_intref(var, *prop, event);
 			}
 			(_, IntViewInner::Const(_)) => {} // ignore
 			(_, IntViewInner::Bool { lit, .. }) => {
-				self.subscribe_bool(BoolView(BoolViewInner::Lit(lit)), data)
+				self.enqueue_on_bool_change(BoolView(BoolViewInner::Lit(lit)));
 			}
 			(InitRef::Brancher, _) => {} // ignore: branchers don't receive notifications, and contained literals are already observed.
 		}

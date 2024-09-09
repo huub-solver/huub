@@ -24,7 +24,7 @@ impl BoolToIntMap {
 
 	pub(crate) fn insert_lazy(&mut self, var: RawVar, iv: IntVarRef, lit: LitMeaning) {
 		let x = self.lazy.insert(var, (iv, lit));
-		debug_assert_eq!(x, None, "lazy literal already exists")
+		debug_assert_eq!(x, None, "lazy literal already exists");
 	}
 
 	pub(crate) fn get(&self, var: RawVar) -> Option<(IntVarRef, Option<LitMeaning>)> {

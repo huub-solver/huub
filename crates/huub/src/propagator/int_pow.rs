@@ -1,8 +1,5 @@
 use crate::{
-	actions::{
-		explanation::ExplanationActions, initialization::InitializationActions,
-		trailing::TrailingActions,
-	},
+	actions::{explanation::ExplanationActions, initialization::InitializationActions},
 	propagator::{
 		conflict::Conflict, int_event::IntEvent, reason::CachedReason, PropagationActions,
 		Propagator,
@@ -231,16 +228,11 @@ impl IntPowBounds {
 	}
 }
 
-impl<P, E, T> Propagator<P, E, T> for IntPowBounds
+impl<P, E> Propagator<P, E> for IntPowBounds
 where
 	P: PropagationActions,
 	E: ExplanationActions,
-	T: TrailingActions,
 {
-	fn notify_event(&mut self, _: u32, _: &IntEvent, _: &mut T) -> bool {
-		true
-	}
-
 	#[tracing::instrument(name = "int_pow", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		self.propagate_result(actions)?;
@@ -262,9 +254,9 @@ impl Poster for IntPowBoundsPoster {
 		actions: &mut I,
 	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
 		// Subscribe to bounds changes for each of the variables
-		actions.subscribe_int(self.base, IntEvent::Bounds, 1);
-		actions.subscribe_int(self.exponent, IntEvent::Bounds, 2);
-		actions.subscribe_int(self.result, IntEvent::Bounds, 3);
+		actions.enqueue_on_int_change(self.base, IntEvent::Bounds);
+		actions.enqueue_on_int_change(self.exponent, IntEvent::Bounds);
+		actions.enqueue_on_int_change(self.result, IntEvent::Bounds);
 
 		// Ensure that if the base is negative, then the exponent cannot be zero
 		let (exp_lb, exp_ub) = actions.get_int_bounds(self.exponent);

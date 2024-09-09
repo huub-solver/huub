@@ -1,10 +1,7 @@
 use itertools::Itertools;
 
 use crate::{
-	actions::{
-		explanation::ExplanationActions, initialization::InitializationActions,
-		trailing::TrailingActions,
-	},
+	actions::{explanation::ExplanationActions, initialization::InitializationActions},
 	propagator::{conflict::Conflict, int_event::IntEvent, PropagationActions, Propagator},
 	solver::{
 		engine::queue::PriorityLevel,
@@ -17,10 +14,9 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ArrayVarIntElementBounds {
-	vars: Vec<IntView>,                // Variables to be selected
-	y: IntView,                        // The selected variable
-	idx: IntView,                      // Variable that stores the index of the selected variable
-	action_list: Vec<(u32, IntEvent)>, // List of x variables that have been modified since the last propagation
+	vars: Vec<IntView>, // Variables to be selected
+	y: IntView,         // The selected variable
+	idx: IntView,       // Variable that stores the index of the selected variable
 }
 
 impl ArrayVarIntElementBounds {
@@ -37,20 +33,11 @@ impl ArrayVarIntElementBounds {
 	}
 }
 
-impl<P, E, T> Propagator<P, E, T> for ArrayVarIntElementBounds
+impl<P, E> Propagator<P, E> for ArrayVarIntElementBounds
 where
 	P: PropagationActions,
 	E: ExplanationActions,
-	T: TrailingActions,
 {
-	fn notify_event(&mut self, _: u32, _: &IntEvent, _: &mut T) -> bool {
-		true
-	}
-
-	fn notify_backtrack(&mut self, _new_level: usize) {
-		self.action_list.clear();
-	}
-
 	#[tracing::instrument(name = "array_int_element", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		let idx_is_fixed =
@@ -210,13 +197,12 @@ impl Poster for ArrayVarIntElementBoundsPoster {
 			vars: self.vars.into_iter().map(Into::into).collect(),
 			y: self.y,
 			idx: self.idx,
-			action_list: Vec::new(),
 		};
-		for (i, v) in prop.vars.iter().enumerate() {
-			actions.subscribe_int(*v, IntEvent::Bounds, i as u32);
+		for &v in prop.vars.iter() {
+			actions.enqueue_on_int_change(v, IntEvent::Bounds);
 		}
-		actions.subscribe_int(prop.y, IntEvent::Bounds, prop.vars.len() as u32);
-		actions.subscribe_int(prop.idx, IntEvent::Domain, prop.vars.len() as u32 + 1);
+		actions.enqueue_on_int_change(prop.y, IntEvent::Bounds);
+		actions.enqueue_on_int_change(prop.idx, IntEvent::Domain);
 		Ok((
 			Box::new(prop),
 			QueuePreferences {

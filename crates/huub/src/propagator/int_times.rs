@@ -1,8 +1,5 @@
 use crate::{
-	actions::{
-		explanation::ExplanationActions, initialization::InitializationActions,
-		trailing::TrailingActions,
-	},
+	actions::{explanation::ExplanationActions, initialization::InitializationActions},
 	helpers::{div_ceil, div_floor},
 	propagator::{
 		conflict::Conflict, int_event::IntEvent, reason::CachedReason, PropagationActions,
@@ -32,16 +29,11 @@ impl IntTimesBounds {
 	}
 }
 
-impl<P, E, T> Propagator<P, E, T> for IntTimesBounds
+impl<P, E> Propagator<P, E> for IntTimesBounds
 where
 	P: PropagationActions,
 	E: ExplanationActions,
-	T: TrailingActions,
 {
-	fn notify_event(&mut self, _: u32, _: &IntEvent, _: &mut T) -> bool {
-		true
-	}
-
 	#[tracing::instrument(name = "int_times", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		let (x_lb, x_ub) = actions.get_int_bounds(self.x);
@@ -134,9 +126,9 @@ impl Poster for IntTimesBoundsPoster {
 		self,
 		actions: &mut I,
 	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
-		actions.subscribe_int(self.x, IntEvent::Bounds, 1);
-		actions.subscribe_int(self.y, IntEvent::Bounds, 2);
-		actions.subscribe_int(self.z, IntEvent::Bounds, 3);
+		actions.enqueue_on_int_change(self.x, IntEvent::Bounds);
+		actions.enqueue_on_int_change(self.y, IntEvent::Bounds);
+		actions.enqueue_on_int_change(self.z, IntEvent::Bounds);
 		Ok((
 			Box::new(IntTimesBounds {
 				x: self.x,

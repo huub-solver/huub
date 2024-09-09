@@ -8,6 +8,10 @@ pub(crate) enum IntEvent {
 }
 
 impl IntEvent {
+	#[allow(
+		dead_code,
+		reason = "TODO: leftover method from previous activation model. Reevaluate whether this method is still required"
+	)]
 	pub(crate) fn is_activated_by(&self, other: &IntEvent) -> bool {
 		use IntEvent::*;
 		matches!(

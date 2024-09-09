@@ -146,7 +146,7 @@ impl BrancherPoster for BoolBrancherPoster {
 			.into_iter()
 			.filter_map(|b| match b.0 {
 				BoolViewInner::Lit(l) => {
-					actions.subscribe_bool(BoolView(BoolViewInner::Lit(l)), 0);
+					actions.enqueue_on_bool_change(BoolView(BoolViewInner::Lit(l)));
 					Some(l)
 				}
 				BoolViewInner::Const(_) => None,
@@ -277,7 +277,7 @@ impl BrancherPoster for IntBrancherPoster {
 			.collect();
 
 		for v in &vars {
-			actions.subscribe_int(*v, IntEvent::Domain, 0);
+			actions.enqueue_on_int_change(*v, IntEvent::Domain);
 		}
 
 		Box::new(IntBrancher {
@@ -318,7 +318,7 @@ impl BrancherPoster for WarmStartBrancherPoster {
 			.into_iter()
 			.filter_map(|b| match b.0 {
 				BoolViewInner::Lit(l) => {
-					actions.subscribe_bool(BoolView(BoolViewInner::Lit(l)), 0);
+					actions.enqueue_on_bool_change(BoolView(BoolViewInner::Lit(l)));
 					Some(l)
 				}
 				BoolViewInner::Const(_) => None,

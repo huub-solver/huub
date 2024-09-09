@@ -4,7 +4,7 @@ use tracing::trace;
 use crate::{
 	actions::{
 		explanation::ExplanationActions, initialization::InitializationActions,
-		inspection::InspectionActions, trailing::TrailingActions,
+		inspection::InspectionActions,
 	},
 	propagator::{
 		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions,
@@ -458,16 +458,11 @@ impl DisjunctiveStrictEdgeFinding {
 	}
 }
 
-impl<P, E, T> Propagator<P, E, T> for DisjunctiveStrictEdgeFinding
+impl<P, E> Propagator<P, E> for DisjunctiveStrictEdgeFinding
 where
 	P: PropagationActions,
 	E: ExplanationActions,
-	T: TrailingActions,
 {
-	fn notify_event(&mut self, _: u32, _: &IntEvent, _: &mut T) -> bool {
-		true
-	}
-
 	#[tracing::instrument(name = "disjunctive_bounds", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		self.propagate_lower_bounds(actions)?;
@@ -559,8 +554,8 @@ impl Poster for DisjunctiveEdgeFindingPoster {
 				.collect(),
 		};
 
-		for (i, v) in prop.start_times.iter().enumerate() {
-			actions.subscribe_int(*v, IntEvent::Bounds, i as u32)
+		for &v in prop.start_times.iter() {
+			actions.enqueue_on_int_change(v, IntEvent::Bounds);
 		}
 
 		Ok((

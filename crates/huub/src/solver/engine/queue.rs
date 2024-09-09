@@ -22,7 +22,7 @@ impl<E> PriorityQueue<E> {
 	pub(crate) fn insert(&mut self, priority: PriorityLevel, elem: E) {
 		let i = priority as usize;
 		debug_assert!((0..=5).contains(&i));
-		self.storage[i].push(elem)
+		self.storage[i].push(elem);
 	}
 
 	pub(crate) fn pop(&mut self) -> Option<E> {

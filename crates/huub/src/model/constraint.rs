@@ -94,7 +94,7 @@ impl Constraint {
 						slv.add_clause([!i, val_eq])?;
 					}
 					// (idx not in idxs) -> (val != arr[i])
-					slv.add_clause(idxs.into_iter().chain(once(!val_eq)))?
+					slv.add_clause(idxs.into_iter().chain(once(!val_eq)))?;
 				}
 				Ok(())
 			}
@@ -140,7 +140,7 @@ impl Constraint {
 					// add clause (idx = i + 1 /\ arr[i]) => val
 					slv.add_clause([!idx_eq, !l, y])?;
 					// add clause (idx = i + 1 /\ !arr[i]) => !val
-					slv.add_clause([!idx_eq, *l, !y])?
+					slv.add_clause([!idx_eq, *l, !y])?;
 				}
 
 				// add clause (arr[1] /\ arr[2] /\ ... /\ arr[n]) => val
@@ -404,7 +404,7 @@ impl Model {
 					*i..=*i
 				}));
 				for v in &vars {
-					self.diff_int_domain(v, &neg_dom, con)?
+					self.diff_int_domain(v, &neg_dom, con)?;
 				}
 				Some(Constraint::AllDifferentInt(vars))
 			}
@@ -530,7 +530,7 @@ impl Model {
 
 				for v in &args {
 					let ub = sum + self.get_int_lower_bound(v);
-					self.set_int_upper_bound(v, ub, con)?
+					self.set_int_upper_bound(v, ub, con)?;
 				}
 				Some(Constraint::IntLinLessEq(args, cons))
 			}
@@ -542,7 +542,7 @@ impl Model {
 
 				for v in &args {
 					let ub = lb_sum + self.get_int_lower_bound(v);
-					self.set_int_upper_bound(v, ub, con)?
+					self.set_int_upper_bound(v, ub, con)?;
 				}
 
 				let ub_sum = args
@@ -552,7 +552,7 @@ impl Model {
 
 				for v in &args {
 					let lb = ub_sum + self.get_int_upper_bound(v);
-					self.set_int_lower_bound(v, lb, con)?
+					self.set_int_lower_bound(v, lb, con)?;
 				}
 
 				Some(Constraint::IntLinEq(args, cons))
@@ -622,7 +622,8 @@ impl Model {
 		match simplified {
 			Some(simplified) => self.constraints[con] = simplified,
 			None => {
-				self.constraints[con] = Constraint::PropLogic(BoolExpr::View(BoolView::Const(true)))
+				self.constraints[con] =
+					Constraint::PropLogic(BoolExpr::View(BoolView::Const(true)));
 			}
 		}
 		Ok(())

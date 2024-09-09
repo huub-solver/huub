@@ -118,7 +118,7 @@ impl IntView {
 						let i: NonZeroI32 = lit.into();
 						let geq = LitMeaning::GreaterEq(transformer.transform(val));
 						let lt = LitMeaning::Less(transformer.transform(val));
-						lits.extend([(i, geq), (-i, lt)])
+						lits.extend([(i, geq), (-i, lt)]);
 					}
 				}
 
@@ -130,7 +130,7 @@ impl IntView {
 						let i: NonZeroI32 = lit.into();
 						let eq = LitMeaning::Eq(transformer.transform(val));
 						let ne = LitMeaning::NotEq(transformer.transform(val));
-						lits.extend([(i, eq), (-i, ne)])
+						lits.extend([(i, eq), (-i, ne)]);
 					}
 				}
 				lits

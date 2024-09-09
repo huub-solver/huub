@@ -1,8 +1,5 @@
 use crate::{
-	actions::{
-		explanation::ExplanationActions, initialization::InitializationActions,
-		trailing::TrailingActions,
-	},
+	actions::{explanation::ExplanationActions, initialization::InitializationActions},
 	propagator::{conflict::Conflict, int_event::IntEvent, PropagationActions, Propagator},
 	solver::{
 		engine::{int_var::LitMeaning, queue::PriorityLevel},
@@ -24,31 +21,21 @@ impl AllDifferentIntValue {
 		AllDifferentIntValuePoster { vars }
 	}
 }
-impl<P, E, T> Propagator<P, E, T> for AllDifferentIntValue
+impl<P, E> Propagator<P, E> for AllDifferentIntValue
 where
 	P: PropagationActions,
 	E: ExplanationActions,
-	T: TrailingActions,
 {
-	fn notify_event(&mut self, data: u32, _: &IntEvent, _: &mut T) -> bool {
-		self.action_list.push(data);
-		true
-	}
-
-	fn notify_backtrack(&mut self, _new_level: usize) {
-		self.action_list.clear()
-	}
-
 	#[tracing::instrument(name = "all_different", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		while let Some(i) = self.action_list.pop() {
-			let var = self.vars[i as usize];
-			let val = actions.get_int_val(var).unwrap();
-			let reason = actions.get_int_lit(var, LitMeaning::Eq(val));
-			for (j, &v) in self.vars.iter().enumerate() {
-				let j_val = actions.get_int_val(v);
-				if (j as u32) != i && (j_val.is_none() || j_val.unwrap() == val) {
-					actions.set_int_not_eq(v, val, reason)?
+		for (i, &var) in self.vars.iter().enumerate() {
+			if let Some(val) = actions.get_int_val(var) {
+				let reason = actions.get_int_lit(var, LitMeaning::Eq(val));
+				for (j, &other) in self.vars.iter().enumerate() {
+					let other_val = actions.get_int_val(other);
+					if j != i && (other_val.is_none() || other_val.unwrap() == val) {
+						actions.set_int_not_eq(other, val, reason)?;
+					}
 				}
 			}
 		}
@@ -81,8 +68,8 @@ impl Poster for AllDifferentIntValuePoster {
 			vars: self.vars,
 			action_list,
 		};
-		for (i, v) in prop.vars.iter().enumerate() {
-			actions.subscribe_int(*v, IntEvent::Fixed, i as u32)
+		for &v in prop.vars.iter() {
+			actions.enqueue_on_int_change(v, IntEvent::Fixed);
 		}
 		Ok((
 			Box::new(prop),
@@ -132,7 +119,7 @@ mod tests {
 
 		slv.add_propagator(AllDifferentIntValue::prepare(vec![a, b, c]))
 			.unwrap();
-		slv.assert_all_solutions(&[a, b, c], |sol| sol.iter().all_unique())
+		slv.assert_all_solutions(&[a, b, c], |sol| sol.iter().all_unique());
 	}
 
 	#[test]
@@ -160,7 +147,7 @@ mod tests {
 
 		slv.add_propagator(AllDifferentIntValue::prepare(vec![a, b, c]))
 			.unwrap();
-		slv.assert_unsatisfiable()
+		slv.assert_unsatisfiable();
 	}
 
 	fn test_sudoku(grid: &[&str], expected: SolveResult) {
