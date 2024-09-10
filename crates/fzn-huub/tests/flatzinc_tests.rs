@@ -23,8 +23,9 @@ mod tests {
 	assert_first_solution!(seq_search_2);
 	assert_first_solution!(seq_search_3);
 	assert_first_solution!(seq_search_4);
-	assert_first_solution!(warm_start_success);
 	assert_first_solution!(warm_start_fail);
+	assert_first_solution!(warm_start_in_seq_search);
+	assert_first_solution!(warm_start_success);
 
 	assert_optimal!(jobshop_la05);
 	assert_optimal!(jobshop_newspaper);

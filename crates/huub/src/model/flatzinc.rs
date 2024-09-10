@@ -1001,26 +1001,22 @@ where
 
 	/// Create branchers according to the search annotations in the FlatZinc instance
 	fn create_branchers(&mut self) -> Result<(), FlatZincError> {
-		let mut general = Vec::new();
-		let mut warm = Vec::new();
+		let mut branchings = Vec::new();
+		let mut warm_start = Vec::new();
 		for ann in self.fzn.solve.ann.iter() {
 			match ann {
-				Annotation::Call(c) => match c.id.deref() {
-					"bool_search" | "int_search" | "seq_search" => {
-						general.extend(self.ann_to_branchings(c)?);
-					}
-					"warm_start_bool" | "warm_start_int" | "warm_start_array" => {
-						warm.extend(self.ann_to_warm_start(c)?);
-					}
-					_ => warn!("unsupported search annotation: {}", ann),
-				},
-				_ => warn!("unsupported search annotation: {}", ann),
+				Annotation::Call(c) => {
+					let (w, b) = self.ann_to_branchings(c)?;
+					warm_start.extend(w);
+					branchings.extend(b);
+				}
+				_ => warn!("ignoring unsupported search annotation: {}", ann),
 			}
 		}
-		if !general.is_empty() {
-			self.prb += Branching::WarmStart(warm);
+		if !warm_start.is_empty() {
+			self.prb += Branching::WarmStart(warm_start);
 		}
-		for b in general {
+		for b in branchings {
 			self.prb += b;
 		}
 		Ok(())
@@ -1101,7 +1097,7 @@ where
 	fn ann_to_branchings(
 		&mut self,
 		c: &'a AnnotationCall<S>,
-	) -> Result<Vec<Branching>, FlatZincError> {
+	) -> Result<(Vec<BoolView>, Vec<Branching>), FlatZincError> {
 		match c.id.deref() {
 			"bool_search" => {
 				if let [vars, var_sel, val_sel, _] = c.args.as_slice() {
@@ -1113,7 +1109,7 @@ where
 					let var_sel = Self::ann_var_sel(var_sel)?;
 					let val_sel = Self::ann_val_sel(val_sel)?;
 
-					Ok(vec![Branching::Bool(vars, var_sel, val_sel)])
+					Ok((Vec::new(), vec![Branching::Bool(vars, var_sel, val_sel)]))
 				} else {
 					Err(FlatZincError::InvalidNumArgs {
 						name: "bool_search",
@@ -1132,7 +1128,7 @@ where
 					let var_sel = Self::ann_var_sel(var_sel)?;
 					let val_sel = Self::ann_val_sel(val_sel)?;
 
-					Ok(vec![Branching::Int(vars, var_sel, val_sel)])
+					Ok((Vec::new(), vec![Branching::Int(vars, var_sel, val_sel)]))
 				} else {
 					Err(FlatZincError::InvalidNumArgs {
 						name: "int_search",
@@ -1141,47 +1137,28 @@ where
 					})
 				}
 			}
-			"seq_search" => {
+			"seq_search" | "warm_start_array" => {
 				if let [AnnotationArgument::Array(searches)] = c.args.as_slice() {
+					let mut warm_start = Vec::new();
 					let mut branchings = Vec::new();
-					for search in searches {
-						if let AnnotationLiteral::Annotation(Annotation::Call(sub_call)) = search {
-							branchings.extend(self.ann_to_branchings(sub_call)?);
+					for ann in searches {
+						match ann {
+							AnnotationLiteral::Annotation(Annotation::Call(sub_call)) => {
+								let (w, b) = self.ann_to_branchings(sub_call)?;
+								warm_start.extend(w);
+								branchings.extend(b);
+							}
+							_ => warn!("unsupported search annotation: {}", ann),
 						}
 					}
-					Ok(branchings)
+					Ok((warm_start, branchings))
 				} else {
 					Err(FlatZincError::InvalidNumArgs {
-						name: "seq_search",
-						found: c.args.len(),
-						expected: 1,
-					})
-				}
-			}
-			other => Err(FlatZincError::InvalidArgumentType {
-				expected: "search annotation",
-				found: other.to_owned(),
-			}),
-		}
-	}
-
-	fn ann_to_warm_start(
-		&mut self,
-		c: &'a AnnotationCall<S>,
-	) -> Result<Vec<BoolView>, FlatZincError> {
-		match c.id.deref() {
-			"warm_start_array" => {
-				if let [AnnotationArgument::Array(searches)] = c.args.as_slice() {
-					let mut decisions = Vec::new();
-					for search in searches {
-						if let AnnotationLiteral::Annotation(Annotation::Call(sub_call)) = search {
-							decisions.extend(self.ann_to_warm_start(sub_call)?);
-						}
-					}
-					Ok(decisions)
-				} else {
-					Err(FlatZincError::InvalidNumArgs {
-						name: "warm_start_array",
+						name: if c.id.deref() == "seq_search" {
+							"seq_search"
+						} else {
+							"warm_start_array"
+						},
 						found: c.args.len(),
 						expected: 1,
 					})
@@ -1200,11 +1177,13 @@ where
 						.map(|l| self.par_bool(l))
 						.try_collect()?;
 
-					Ok(vars
-						.into_iter()
-						.zip(vals)
-						.map(|(v, b)| if b { v } else { !v })
-						.collect())
+					Ok((
+						vars.into_iter()
+							.zip(vals)
+							.map(|(v, b)| if b { v } else { !v })
+							.collect(),
+						Vec::new(),
+					))
 				} else {
 					Err(FlatZincError::InvalidNumArgs {
 						name: "warm_start_bool",
@@ -1226,11 +1205,13 @@ where
 						.map(|l| self.par_int(l))
 						.try_collect()?;
 
-					Ok(vars
-						.into_iter()
-						.zip(vals)
-						.map(|(var, val)| BoolView::IntEq(Box::new(var), val))
-						.collect())
+					Ok((
+						vars.into_iter()
+							.zip(vals)
+							.map(|(var, val)| BoolView::IntEq(Box::new(var), val))
+							.collect(),
+						Vec::new(),
+					))
 				} else {
 					Err(FlatZincError::InvalidNumArgs {
 						name: "warm_start_int",
@@ -1239,10 +1220,10 @@ where
 					})
 				}
 			}
-			other => Err(FlatZincError::InvalidArgumentType {
-				expected: "warm_start_annotation",
-				found: other.to_owned(),
-			}),
+			other => {
+				warn!("ignoring unsupported search annotation: {}", other);
+				Ok((Vec::new(), Vec::new()))
+			}
 		}
 	}
 
