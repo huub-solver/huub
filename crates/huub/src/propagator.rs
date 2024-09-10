@@ -5,7 +5,6 @@ pub(crate) mod conflict;
 pub(crate) mod disjunctive_strict;
 pub(crate) mod int_abs;
 pub(crate) mod int_div;
-pub(crate) mod int_event;
 pub(crate) mod int_lin_le;
 pub(crate) mod int_lin_ne;
 pub(crate) mod int_pow;

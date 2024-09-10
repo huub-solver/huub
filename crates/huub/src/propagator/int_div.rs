@@ -3,9 +3,9 @@ use std::mem;
 use crate::{
 	actions::{explanation::ExplanationActions, initialization::InitializationActions},
 	helpers::div_ceil,
-	propagator::{conflict::Conflict, int_event::IntEvent, PropagationActions, Propagator},
+	propagator::{conflict::Conflict, PropagationActions, Propagator},
 	solver::{
-		engine::queue::PriorityLevel,
+		engine::{activation_list::IntPropCond, queue::PriorityLevel},
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 	},
 	IntView, LitMeaning, NonZeroIntVal, ReformulationError,
@@ -209,9 +209,9 @@ impl Poster for IntDivBoundsPoster {
 		actions: &mut I,
 	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
 		// Subscribe to bounds changes on each of the variables.
-		actions.enqueue_on_int_change(self.numerator, IntEvent::Bounds);
-		actions.enqueue_on_int_change(self.denominator, IntEvent::Bounds);
-		actions.enqueue_on_int_change(self.result, IntEvent::Bounds);
+		actions.enqueue_on_int_change(self.numerator, IntPropCond::Bounds);
+		actions.enqueue_on_int_change(self.denominator, IntPropCond::Bounds);
+		actions.enqueue_on_int_change(self.result, IntPropCond::Bounds);
 
 		// Ensure the consistency of the signs of the three variables using the following clauses.
 		if actions.get_int_lower_bound(self.numerator) < 0

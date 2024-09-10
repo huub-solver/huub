@@ -4,11 +4,9 @@ use pindakaas::Lit as RawLit;
 use crate::{
 	actions::initialization::InitializationActions,
 	helpers::opt_field::OptField,
-	propagator::{
-		conflict::Conflict, int_event::IntEvent, ExplanationActions, PropagationActions, Propagator,
-	},
+	propagator::{conflict::Conflict, ExplanationActions, PropagationActions, Propagator},
 	solver::{
-		engine::queue::PriorityLevel,
+		engine::{activation_list::IntPropCond, queue::PriorityLevel},
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 		value::IntVal,
 		view::{BoolViewInner, IntView, IntViewInner},
@@ -168,7 +166,7 @@ impl<const R: usize> Poster for IntLinearLessEqBoundsPoster<R> {
 			reification: self.reification,
 		};
 		for &v in prop.vars.iter() {
-			actions.enqueue_on_int_change(v, IntEvent::UpperBound);
+			actions.enqueue_on_int_change(v, IntPropCond::UpperBound);
 		}
 		if let Some(r) = prop.reification.get() {
 			actions.enqueue_on_bool_change(BoolView(BoolViewInner::Lit(*r)));

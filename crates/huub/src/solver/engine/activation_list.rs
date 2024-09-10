@@ -1,6 +1,6 @@
-use std::mem;
+use std::{mem, ops::Add};
 
-use crate::{propagator::int_event::IntEvent, solver::engine::PropRef};
+use crate::solver::engine::PropRef;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 /// A data structure that store a list of propagators to be enqueued based on
@@ -23,10 +23,48 @@ pub(crate) struct ActivationList {
 	domain_idx: u16,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Change that has occurred in the domain of an integer variable.
+pub(crate) enum IntEvent {
+	/// The variable has been fixed to a single value.
+	Fixed,
+	/// Both of the bounds of the variable has changed.
+	Bounds,
+	/// The lower bound of the variable has changed.
+	LowerBound,
+	/// The upper bound of the variable has changed.
+	UpperBound,
+	/// One or more values (exluding the bounds) have been removed from the domain
+	/// of the variable.
+	Domain,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// The conditions of an integer variable domain change that can trigger a
+/// propagator to be enqueued.
+pub(crate) enum IntPropCond {
+	/// Condition that triggers when the variable is fixed.
+	Fixed,
+	/// Condition that triggers when the lower bound of the variable changes.
+	///
+	/// This includes the case where the variable is fixed.
+	LowerBound,
+	/// Condition that triggers when the upper bound of the variable changes.
+	///
+	/// This includes the case where the variable is fixed.
+	UpperBound,
+	/// Condition that triggers when either of the bounds of the variable change.
+	///
+	/// This includes the case where the variable is fixed.
+	Bounds,
+	/// Condition that triggers for any change in the domain of the variable.
+	Domain,
+}
+
 impl ActivationList {
 	/// Add a propagator to the list of propagators to be enqueued based on the
 	/// given condition.
-	pub(crate) fn add(&mut self, mut prop: PropRef, condition: IntEvent) {
+	pub(crate) fn add(&mut self, mut prop: PropRef, condition: IntPropCond) {
 		assert!(self.activations.len() < u16::MAX as usize, "Unable to add more than u16::MAX propagators to the activation list of a single variable.");
 		// TODO: Optimize insertion using swapping
 		let mut cond_swap = |idx: u16| {
@@ -36,7 +74,7 @@ impl ActivationList {
 			}
 		};
 		match condition {
-			IntEvent::Fixed => {
+			IntPropCond::Fixed => {
 				cond_swap(self.lower_bound_idx);
 				if self.lower_bound_idx < self.upper_bound_idx {
 					cond_swap(self.upper_bound_idx);
@@ -53,7 +91,7 @@ impl ActivationList {
 				self.domain_idx += 1;
 				self.activations.push(prop);
 			}
-			IntEvent::LowerBound => {
+			IntPropCond::LowerBound => {
 				cond_swap(self.upper_bound_idx);
 				if self.upper_bound_idx < self.bounds_idx {
 					cond_swap(self.bounds_idx);
@@ -66,7 +104,7 @@ impl ActivationList {
 				self.domain_idx += 1;
 				self.activations.push(prop);
 			}
-			IntEvent::UpperBound => {
+			IntPropCond::UpperBound => {
 				cond_swap(self.bounds_idx);
 				if self.bounds_idx < self.domain_idx {
 					cond_swap(self.domain_idx);
@@ -75,12 +113,12 @@ impl ActivationList {
 				self.domain_idx += 1;
 				self.activations.push(prop);
 			}
-			IntEvent::Bounds => {
+			IntPropCond::Bounds => {
 				cond_swap(self.domain_idx);
 				self.domain_idx += 1;
 				self.activations.push(prop);
 			}
-			IntEvent::Domain => self.activations.push(prop),
+			IntPropCond::Domain => self.activations.push(prop),
 		};
 	}
 
@@ -93,8 +131,10 @@ impl ActivationList {
 		};
 		let r2 = match event {
 			IntEvent::Fixed => 0..,
+			// NOTE: Bounds (Event) should trigger both LowerBound and UpperBound conditions
+			IntEvent::Bounds => self.lower_bound_idx as usize..,
 			IntEvent::UpperBound => self.upper_bound_idx as usize..,
-			IntEvent::Bounds | IntEvent::LowerBound => self.bounds_idx as usize..,
+			IntEvent::LowerBound => self.bounds_idx as usize..,
 			IntEvent::Domain => self.domain_idx as usize..,
 		};
 		self.activations[r1]
@@ -104,37 +144,63 @@ impl ActivationList {
 	}
 }
 
+impl Add<IntEvent> for IntEvent {
+	type Output = IntEvent;
+
+	fn add(self, rhs: IntEvent) -> Self::Output {
+		use IntEvent::*;
+		match (self, rhs) {
+			(Fixed, _) | (_, Fixed) => Fixed,
+			(Bounds, _) | (_, Bounds) => Bounds,
+			(LowerBound, UpperBound) | (UpperBound, LowerBound) => Bounds,
+			(LowerBound, _) | (_, LowerBound) => LowerBound,
+			(UpperBound, _) | (_, UpperBound) => UpperBound,
+			(Domain, Domain) => Domain,
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use std::collections::HashSet;
 
 	use itertools::Itertools;
 
-	use crate::{
-		propagator::int_event::IntEvent,
-		solver::engine::{activation_list::ActivationList, PropRef},
+	use crate::solver::engine::{
+		activation_list::{ActivationList, IntEvent, IntPropCond},
+		PropRef,
 	};
 
 	#[test]
 	fn test_activation_list() {
 		let props = [
-			(PropRef::from(0), IntEvent::Fixed),
-			(PropRef::from(1), IntEvent::LowerBound),
-			(PropRef::from(2), IntEvent::UpperBound),
-			(PropRef::from(3), IntEvent::Bounds),
-			(PropRef::from(4), IntEvent::Domain),
+			(PropRef::from(0), IntPropCond::Fixed),
+			(PropRef::from(1), IntPropCond::LowerBound),
+			(PropRef::from(2), IntPropCond::UpperBound),
+			(PropRef::from(3), IntPropCond::Bounds),
+			(PropRef::from(4), IntPropCond::Domain),
 		];
 
 		for list in props.iter().permutations(5) {
 			let mut activation_list = ActivationList::default();
 			for (prop, cond) in list.iter() {
-				activation_list.add(*prop, cond.clone());
+				activation_list.add(*prop, *cond);
 			}
 			let fixed: HashSet<_> = activation_list.activated_by(IntEvent::Fixed).collect();
 			assert_eq!(
 				fixed,
 				HashSet::from_iter([
 					PropRef::from(0),
+					PropRef::from(1),
+					PropRef::from(2),
+					PropRef::from(3),
+					PropRef::from(4)
+				])
+			);
+			let bounds: HashSet<_> = activation_list.activated_by(IntEvent::Bounds).collect();
+			assert_eq!(
+				bounds,
+				HashSet::from_iter([
 					PropRef::from(1),
 					PropRef::from(2),
 					PropRef::from(3),
@@ -152,11 +218,6 @@ mod tests {
 			assert_eq!(
 				upper_bound,
 				HashSet::from_iter([PropRef::from(2), PropRef::from(3), PropRef::from(4)])
-			);
-			let bounds: HashSet<_> = activation_list.activated_by(IntEvent::Bounds).collect();
-			assert_eq!(
-				bounds,
-				HashSet::from_iter([PropRef::from(3), PropRef::from(4)])
 			);
 			let domain: HashSet<_> = activation_list.activated_by(IntEvent::Domain).collect();
 			assert_eq!(domain, HashSet::from_iter([PropRef::from(4)]));

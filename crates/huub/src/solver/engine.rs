@@ -25,10 +25,10 @@ use crate::{
 		trailing::TrailingActions,
 	},
 	brancher::Decision,
-	propagator::{int_event::IntEvent, reason::Reason},
+	propagator::reason::Reason,
 	solver::{
 		engine::{
-			activation_list::ActivationList,
+			activation_list::{ActivationList, IntEvent},
 			bool_to_int::BoolToIntMap,
 			int_var::{IntVar, IntVarRef, LitMeaning, OrderStorage},
 			queue::{PriorityLevel, PriorityQueue},

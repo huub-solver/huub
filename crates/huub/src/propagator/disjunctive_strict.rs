@@ -6,12 +6,9 @@ use crate::{
 		explanation::ExplanationActions, initialization::InitializationActions,
 		inspection::InspectionActions,
 	},
-	propagator::{
-		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, PropagationActions,
-		Propagator,
-	},
+	propagator::{conflict::Conflict, reason::ReasonBuilder, PropagationActions, Propagator},
 	solver::{
-		engine::{queue::PriorityLevel, trail::TrailedInt},
+		engine::{activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt},
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 		view::{BoolViewInner, IntView},
 	},
@@ -555,7 +552,7 @@ impl Poster for DisjunctiveEdgeFindingPoster {
 		};
 
 		for &v in prop.start_times.iter() {
-			actions.enqueue_on_int_change(v, IntEvent::Bounds);
+			actions.enqueue_on_int_change(v, IntPropCond::Bounds);
 		}
 
 		Ok((

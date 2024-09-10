@@ -1,8 +1,8 @@
 use crate::{
 	actions::{explanation::ExplanationActions, initialization::InitializationActions},
-	propagator::{conflict::Conflict, int_event::IntEvent, PropagationActions, Propagator},
+	propagator::{conflict::Conflict, PropagationActions, Propagator},
 	solver::{
-		engine::{int_var::LitMeaning, queue::PriorityLevel},
+		engine::{activation_list::IntPropCond, int_var::LitMeaning, queue::PriorityLevel},
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 		view::{IntView, IntViewInner},
 	},
@@ -69,7 +69,7 @@ impl Poster for AllDifferentIntValuePoster {
 			action_list,
 		};
 		for &v in prop.vars.iter() {
-			actions.enqueue_on_int_change(v, IntEvent::Fixed);
+			actions.enqueue_on_int_change(v, IntPropCond::Fixed);
 		}
 		Ok((
 			Box::new(prop),

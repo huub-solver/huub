@@ -4,11 +4,11 @@ use crate::{
 	actions::initialization::InitializationActions,
 	helpers::opt_field::OptField,
 	propagator::{
-		conflict::Conflict, int_event::IntEvent, reason::ReasonBuilder, ExplanationActions,
-		PropagationActions, Propagator,
+		conflict::Conflict, reason::ReasonBuilder, ExplanationActions, PropagationActions,
+		Propagator,
 	},
 	solver::{
-		engine::{queue::PriorityLevel, trail::TrailedInt},
+		engine::{activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt},
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 		value::IntVal,
 		view::{BoolViewInner, IntView, IntViewInner},
@@ -164,7 +164,7 @@ impl<const R: usize> Poster for IntLinearNotEqValuePoster<R> {
 			num_fixed: actions.new_trailed_int(0),
 		};
 		for &v in prop.vars.iter() {
-			actions.enqueue_on_int_change(v, IntEvent::Fixed);
+			actions.enqueue_on_int_change(v, IntPropCond::Fixed);
 		}
 		if let Some(r) = prop.reification.get() {
 			actions.enqueue_on_bool_change(BoolView(BoolViewInner::Lit(*r)));

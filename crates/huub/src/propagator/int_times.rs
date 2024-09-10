@@ -1,12 +1,9 @@
 use crate::{
 	actions::{explanation::ExplanationActions, initialization::InitializationActions},
 	helpers::{div_ceil, div_floor},
-	propagator::{
-		conflict::Conflict, int_event::IntEvent, reason::CachedReason, PropagationActions,
-		Propagator,
-	},
+	propagator::{conflict::Conflict, reason::CachedReason, PropagationActions, Propagator},
 	solver::{
-		engine::queue::PriorityLevel,
+		engine::{activation_list::IntPropCond, queue::PriorityLevel},
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 	},
 	IntView, NonZeroIntVal, ReformulationError,
@@ -126,9 +123,9 @@ impl Poster for IntTimesBoundsPoster {
 		self,
 		actions: &mut I,
 	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
-		actions.enqueue_on_int_change(self.x, IntEvent::Bounds);
-		actions.enqueue_on_int_change(self.y, IntEvent::Bounds);
-		actions.enqueue_on_int_change(self.z, IntEvent::Bounds);
+		actions.enqueue_on_int_change(self.x, IntPropCond::Bounds);
+		actions.enqueue_on_int_change(self.y, IntPropCond::Bounds);
+		actions.enqueue_on_int_change(self.z, IntPropCond::Bounds);
 		Ok((
 			Box::new(IntTimesBounds {
 				x: self.x,

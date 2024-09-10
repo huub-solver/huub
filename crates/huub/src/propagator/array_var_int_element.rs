@@ -2,9 +2,9 @@ use itertools::Itertools;
 
 use crate::{
 	actions::{explanation::ExplanationActions, initialization::InitializationActions},
-	propagator::{conflict::Conflict, int_event::IntEvent, PropagationActions, Propagator},
+	propagator::{conflict::Conflict, PropagationActions, Propagator},
 	solver::{
-		engine::{queue::PriorityLevel, trail::TrailedInt},
+		engine::{activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt},
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 		value::IntVal,
 		view::IntView,
@@ -204,7 +204,7 @@ impl Poster for ArrayVarIntElementBoundsPoster {
 		let mut max_ub = IntVal::MIN;
 		for (i, v) in self.vars.iter().enumerate() {
 			if actions.check_int_in_domain(self.index, i as IntVal) {
-				actions.enqueue_on_int_change(*v, IntEvent::Bounds);
+				actions.enqueue_on_int_change(*v, IntPropCond::Bounds);
 				let (lb, ub) = actions.get_int_bounds(*v);
 				if min_support == -1 || lb < min_lb {
 					min_support = i as IntVal;
@@ -224,8 +224,8 @@ impl Poster for ArrayVarIntElementBoundsPoster {
 			min_support: actions.new_trailed_int(min_support),
 			max_support: actions.new_trailed_int(max_support),
 		};
-		actions.enqueue_on_int_change(prop.result, IntEvent::Bounds);
-		actions.enqueue_on_int_change(prop.index, IntEvent::Domain);
+		actions.enqueue_on_int_change(prop.result, IntPropCond::Bounds);
+		actions.enqueue_on_int_change(prop.index, IntPropCond::Domain);
 		Ok((
 			Box::new(prop),
 			QueuePreferences {

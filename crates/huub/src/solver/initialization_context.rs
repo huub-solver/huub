@@ -9,9 +9,8 @@ use crate::{
 		decision::DecisionActions, initialization::InitializationActions,
 		inspection::InspectionActions, trailing::TrailingActions,
 	},
-	propagator::int_event::IntEvent,
 	solver::{
-		engine::{int_var::IntVarRef, trail::TrailedInt, PropRef},
+		engine::{activation_list::IntPropCond, int_var::IntVarRef, trail::TrailedInt, PropRef},
 		view::{BoolViewInner, IntViewInner},
 		SatSolver,
 	},
@@ -68,7 +67,7 @@ where
 		}
 	}
 
-	fn enqueue_on_int_change(&mut self, var: IntView, condition: IntEvent) {
+	fn enqueue_on_int_change(&mut self, var: IntView, condition: IntPropCond) {
 		let mut subscribe_intref = |var: IntVarRef, prop, cond| {
 			self.slv.engine_mut().state.int_activation[var].add(prop, cond);
 		};
@@ -81,8 +80,8 @@ where
 					condition
 				} else {
 					match condition {
-						IntEvent::LowerBound => IntEvent::UpperBound,
-						IntEvent::UpperBound => IntEvent::LowerBound,
+						IntPropCond::LowerBound => IntPropCond::UpperBound,
+						IntPropCond::UpperBound => IntPropCond::LowerBound,
 						_ => condition,
 					}
 				};
