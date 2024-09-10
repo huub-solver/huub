@@ -112,10 +112,7 @@ fn a_few_seconds(c: &mut Criterion) {
 	let instances = vec![
 		("jobshop_la02", InstanceType::Optimization),
 		("jobshop_la04", InstanceType::Optimization),
-		("kidney_exchange_3_20_0_15_3", InstanceType::Optimization),
-		("kidney_exchange_3_25_0_10_2", InstanceType::Optimization),
 		("svrp_s4_v2_c3", InstanceType::Optimization),
-		("rotating_workforce_25_s_7", InstanceType::Satisfaction),
 		("amaze3_2012_03_19", InstanceType::Satisfaction),
 	];
 	for (instance, instance_type) in instances {
