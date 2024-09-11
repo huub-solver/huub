@@ -141,18 +141,18 @@ impl IpasirPropagator for Engine {
 		if persistent && self.state.decision_level() != 0 {
 			// Note that the assignment might already be known and trailed, but not previously marked as persistent
 			self.persistent.push(lit);
-			if self.state.trail.is_backtracking() {
+			if self.state.trail.is_explaining() {
 				return;
 			}
 		}
-		if self.state.trail.get_sat_value(lit).is_some() || self.state.conflict.is_some() {
+		if self.state.conflict.is_some() || self.state.trail.is_assigned(lit) {
 			return;
 		}
 
 		// Enqueue propagators and process integer consequences
 		self.state.enqueue_propagators(lit, None);
 		// Trail the SAT assignment
-		let _ = self.state.trail.assign_sat(lit).is_some();
+		let _ = self.state.trail.assign_lit(lit).is_some();
 	}
 
 	fn notify_new_decision_level(&mut self) {
@@ -261,7 +261,7 @@ impl IpasirPropagator for Engine {
 		let reason = self.state.reason_map.remove(&propagated_lit);
 		// Restore the current state to the state when the propagation happened if explaining lazily
 		if matches!(reason, Some(Reason::Lazy(_, _))) {
-			self.state.trail.undo_until_found_lit(propagated_lit);
+			self.state.trail.goto_assign_lit(propagated_lit);
 		}
 		// Create a clause from the reason
 		let mut clause = reason.map_or_else(Vec::new, |r| {

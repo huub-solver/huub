@@ -52,6 +52,7 @@ where
 	fn enqueue_on_bool_change(&mut self, var: BoolView) {
 		match var.0 {
 			BoolViewInner::Lit(lit) => {
+				self.slv.engine_mut().state.trail.grow_to_boolvar(lit.var());
 				<Sat as PropagatingSolver>::add_observed_var(&mut self.slv.oracle, lit.var());
 				if let InitRef::Propagator(prop) = self.init_ref {
 					self.slv
