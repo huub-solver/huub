@@ -9,7 +9,8 @@ use std::{
 };
 
 use codspeed_criterion_compat::{
-	criterion_group, criterion_main, BenchmarkId, Criterion, SamplingMode,
+	criterion_group, criterion_main, measurement::Measurement, BenchmarkGroup, BenchmarkId,
+	Criterion, SamplingMode,
 };
 use expect_test::expect_file;
 use fzn_huub::Cli;
@@ -19,14 +20,37 @@ const FZN_COMPLETE: &str = "==========\n";
 const FZN_SEPERATOR: &str = "----------\n";
 // const FZN_UNSATISFIABLE: &str = "=====UNSATISFIABLE=====\n";
 
+#[derive(Debug, Clone)]
+struct CriterionConfig {
+	sampling_mode: Option<SamplingMode>,
+	sample_size: Option<usize>,
+	measurement_time: Option<Duration>,
+}
+
+const INSTANT_CONFIG: CriterionConfig = CriterionConfig {
+	sampling_mode: None,
+	sample_size: Some(60),
+	measurement_time: None,
+};
+const MILLISECONDS_CONFIG: CriterionConfig = CriterionConfig {
+	sampling_mode: Some(SamplingMode::Flat),
+	sample_size: Some(20),
+	measurement_time: Some(Duration::from_secs(20)),
+};
+const FEW_SECONDS_CONFIG: CriterionConfig = CriterionConfig {
+	sampling_mode: Some(SamplingMode::Flat),
+	sample_size: Some(10),
+	measurement_time: Some(Duration::from_secs(60)),
+};
+
+#[derive(Debug, Clone, Copy)]
+struct DummyOutput;
+
 #[derive(Debug, Clone, Copy)]
 enum InstanceType {
 	Optimization,
 	Satisfaction,
 }
-
-#[derive(Debug, Clone, Copy)]
-struct DummyOutput;
 
 fn run_solver(fzn: &Path) -> Vec<u8> {
 	let args = Arguments::from_vec(vec![fzn.into()]);
@@ -38,7 +62,7 @@ fn run_solver(fzn: &Path) -> Vec<u8> {
 	out
 }
 
-pub(crate) fn check_final(name: &str, instance_type: InstanceType) {
+fn check_final(name: &str, instance_type: InstanceType) {
 	let base = PathBuf::from("./corpus/").join(name);
 	let fzn = base.with_extension("fzn.json");
 	let out = run_solver(&fzn);
@@ -62,68 +86,63 @@ pub(crate) fn check_final(name: &str, instance_type: InstanceType) {
 	}
 }
 
-/// Instances that can be solve instantly
-fn instant(c: &mut Criterion) {
-	let mut group = c.benchmark_group("instant");
-	let group = group.sample_size(60);
+fn optimization(c: &mut Criterion) {
+	let mut group = c.benchmark_group("optimization");
 	let instances = vec![
-		("jobshop_newspaper", InstanceType::Optimization),
-		("radiation_i6_9", InstanceType::Optimization),
-		("jobshop_la05", InstanceType::Optimization),
-		("steiner_t3_k4_N8", InstanceType::Satisfaction),
-		("steiner_t6_k6_N7", InstanceType::Satisfaction),
+		("jobshop_la01", &MILLISECONDS_CONFIG),
+		("jobshop_la02", &FEW_SECONDS_CONFIG),
+		("jobshop_la03", &MILLISECONDS_CONFIG),
+		("jobshop_la04", &FEW_SECONDS_CONFIG),
+		("jobshop_la05", &INSTANT_CONFIG),
+		("jobshop_newspaper", &INSTANT_CONFIG),
+		("radiation_i6_9", &INSTANT_CONFIG),
+		("radiation_i8_9", &MILLISECONDS_CONFIG),
+		("svrp_s4_v2_c3", &FEW_SECONDS_CONFIG),
 	];
-	for (instance, instance_type) in instances {
+
+	for (instance, config) in instances {
+		config.apply(&mut group);
 		let _ = group.bench_with_input(BenchmarkId::from_parameter(instance), &instance, |b, s| {
-			b.iter(|| check_final(s, instance_type))
+			b.iter(|| check_final(s, InstanceType::Optimization))
 		});
 	}
+	group.finish();
 }
 
-/// Instances that can be solved under a second
-fn milliseconds(c: &mut Criterion) {
-	let mut group = c.benchmark_group("under_second");
-	let group = group
-		.sample_size(20)
-		.measurement_time(Duration::from_secs(20))
-		.sampling_mode(SamplingMode::Flat);
-	// optimization instances
+fn satisfaction(c: &mut Criterion) {
+	let mut group = c.benchmark_group("satisfaction");
 	let instances = vec![
-		("jobshop_la01", InstanceType::Optimization),
-		("jobshop_la03", InstanceType::Optimization),
-		("radiation_i8_9", InstanceType::Optimization),
-		("sudoku_p48", InstanceType::Satisfaction),
+		("amaze3_2012_03_19", &FEW_SECONDS_CONFIG),
+		("steiner_t3_k4_N8", &INSTANT_CONFIG),
+		("steiner_t6_k6_N7", &INSTANT_CONFIG),
+		("sudoku_p48", &MILLISECONDS_CONFIG),
 	];
-	for (instance, instance_type) in instances {
+
+	for (instance, config) in instances {
+		config.apply(&mut group);
 		let _ = group.bench_with_input(BenchmarkId::from_parameter(instance), &instance, |b, s| {
-			b.iter(|| check_final(s, instance_type))
+			b.iter(|| check_final(s, InstanceType::Satisfaction))
 		});
 	}
+	group.finish();
 }
 
-/// Instances that be solved within 5 seconds
-fn a_few_seconds(c: &mut Criterion) {
-	let mut group = c.benchmark_group("a_few_seconds");
-	let group = group
-		.sample_size(10)
-		.measurement_time(Duration::from_secs(60))
-		.sampling_mode(SamplingMode::Flat);
-
-	let instances = vec![
-		("jobshop_la02", InstanceType::Optimization),
-		("jobshop_la04", InstanceType::Optimization),
-		("svrp_s4_v2_c3", InstanceType::Optimization),
-		("amaze3_2012_03_19", InstanceType::Satisfaction),
-	];
-	for (instance, instance_type) in instances {
-		let _ = group.bench_with_input(BenchmarkId::from_parameter(instance), &instance, |b, s| {
-			b.iter(|| check_final(s, instance_type))
-		});
-	}
-}
-
-criterion_group!(benches, instant, milliseconds, a_few_seconds);
+criterion_group!(benches, optimization, satisfaction);
 criterion_main!(benches);
+
+impl CriterionConfig {
+	fn apply<M: Measurement>(&self, group: &mut BenchmarkGroup<'_, M>) {
+		if let Some(sampling_mode) = self.sampling_mode {
+			let _ = group.sampling_mode(sampling_mode);
+		}
+		if let Some(sample_size) = self.sample_size {
+			let _ = group.sample_size(sample_size);
+		}
+		if let Some(measurement_time) = self.measurement_time {
+			let _ = group.measurement_time(measurement_time);
+		}
+	}
+}
 
 impl Write for DummyOutput {
 	fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
