@@ -409,7 +409,23 @@ impl State {
 					}
 				}
 				LitMeaning::Less(i) => {
-					let new_ub = i - 1;
+					let mut new_ub = i - 1;
+					let domain = &self.int_vars[iv].domain;
+					// search the real upper bound
+					for r in domain.iter().rev() {
+						if new_ub < *r.start() {
+							// continue if the new upper bound is below the current range
+							continue;
+						} else if new_ub > *r.end() {
+							// if the new upper bound is above the current range
+							// strengthen the upper bound to the end of the range
+							new_ub = *r.end();
+							break;
+						} else {
+							// `new_ub` within the current range is a real upper bound
+							break;
+						}
+					}
 					if new_ub >= ub {
 						return None;
 					}
