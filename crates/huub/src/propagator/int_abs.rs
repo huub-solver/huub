@@ -2,9 +2,9 @@ use std::iter::once;
 
 use crate::{
 	actions::{explanation::ExplanationActions, initialization::InitializationActions},
-	propagator::{conflict::Conflict, int_event::IntEvent, PropagationActions, Propagator},
+	propagator::{conflict::Conflict, PropagationActions, Propagator},
 	solver::{
-		engine::queue::PriorityLevel,
+		engine::{activation_list::IntPropCond, queue::PriorityLevel},
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 	},
 	IntView, LitMeaning, ReformulationError,
@@ -90,9 +90,9 @@ impl Poster for IntAbsBoundsPoster {
 		actions: &mut I,
 	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
 		// Subscribe to both bounds of the origin variable
-		actions.enqueue_on_int_change(self.origin, IntEvent::Bounds);
+		actions.enqueue_on_int_change(self.origin, IntPropCond::Bounds);
 		// Subscribe only to the upper bound of the absolute value variable
-		actions.enqueue_on_int_change(self.abs, IntEvent::UpperBound);
+		actions.enqueue_on_int_change(self.abs, IntPropCond::UpperBound);
 
 		Ok((
 			Box::new(IntAbsBounds {

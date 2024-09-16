@@ -153,6 +153,7 @@ impl DecisionActions for SolvingContext<'_> {
 		let new_var = |def: LazyLitDef| {
 			// Create new variable
 			let v = self.slv.new_var();
+			self.state.trail.grow_to_boolvar(v);
 			trace_new_lit!(iv, def, v);
 			self.slv.add_observed_var(v);
 			self.state
@@ -225,7 +226,8 @@ impl PropagationActions for SolvingContext<'_> {
 					trace!(lit = i32::from(propagated_lit), reason = ?reason, "propagate bool");
 					self.state.register_reason(propagated_lit, reason);
 					self.state.propagation_queue.push(propagated_lit);
-					let prev = self.state.trail.assign_sat(propagated_lit);
+					self.state.enqueue_propagators(propagated_lit, None);
+					let prev = self.state.trail.assign_lit(propagated_lit);
 					debug_assert!(prev.is_none());
 					Ok(())
 				}

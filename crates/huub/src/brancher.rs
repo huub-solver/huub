@@ -5,9 +5,10 @@ use pindakaas::Lit as RawLit;
 use crate::{
 	actions::{decision::DecisionActions, initialization::InitializationActions},
 	model::branching::{ValueSelection, VariableSelection},
-	propagator::int_event::IntEvent,
 	solver::{
-		engine::{solving_context::SolvingContext, trail::TrailedInt},
+		engine::{
+			activation_list::IntPropCond, solving_context::SolvingContext, trail::TrailedInt,
+		},
 		poster::{BoxedBrancher, BrancherPoster},
 		view::{BoolViewInner, IntView, IntViewInner},
 	},
@@ -276,8 +277,8 @@ impl BrancherPoster for IntBrancherPoster {
 			.filter(|i| !matches!(i.0, IntViewInner::Const(_)))
 			.collect();
 
-		for v in &vars {
-			actions.enqueue_on_int_change(*v, IntEvent::Domain);
+		for &v in &vars {
+			actions.enqueue_on_int_change(v, IntPropCond::Domain);
 		}
 
 		Box::new(IntBrancher {

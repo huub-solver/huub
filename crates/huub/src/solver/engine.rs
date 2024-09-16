@@ -25,10 +25,10 @@ use crate::{
 		trailing::TrailingActions,
 	},
 	brancher::Decision,
-	propagator::{int_event::IntEvent, reason::Reason},
+	propagator::reason::Reason,
 	solver::{
 		engine::{
-			activation_list::ActivationList,
+			activation_list::{ActivationList, IntEvent},
 			bool_to_int::BoolToIntMap,
 			int_var::{IntVar, IntVarRef, LitMeaning, OrderStorage},
 			queue::{PriorityLevel, PriorityQueue},
@@ -141,18 +141,18 @@ impl IpasirPropagator for Engine {
 		if persistent && self.state.decision_level() != 0 {
 			// Note that the assignment might already be known and trailed, but not previously marked as persistent
 			self.persistent.push(lit);
-			if self.state.trail.is_backtracking() {
+			if self.state.trail.is_explaining() {
 				return;
 			}
 		}
-		if self.state.trail.assign_sat(lit).is_some() {
+		if self.state.conflict.is_some() || self.state.trail.is_assigned(lit) {
 			return;
 		}
 
-		// Enqueue propagators, if no conflict has been found
-		if self.state.conflict.is_none() {
-			self.state.enqueue_propagators(lit, None);
-		}
+		// Enqueue propagators and process integer consequences
+		self.state.enqueue_propagators(lit, None);
+		// Trail the SAT assignment
+		let _ = self.state.trail.assign_lit(lit).is_some();
 	}
 
 	fn notify_new_decision_level(&mut self) {
@@ -233,9 +233,6 @@ impl IpasirPropagator for Engine {
 				.collect::<Vec<i32>>(),
 			"propagate"
 		);
-		for &lit in queue.iter() {
-			self.state.enqueue_propagators(lit, None);
-		}
 		// Debug helper to ensure that any reason is based on known true literals
 		#[cfg(debug_assertions)]
 		{
@@ -243,16 +240,14 @@ impl IpasirPropagator for Engine {
 				if let Some(reason) = self.state.reason_map.get(lit).cloned() {
 					let clause: Vec<_> = reason.to_clause(&mut self.propagators, &mut self.state);
 					for l in &clause {
-						let val = self.state.trail.get_sat_value(!l);
-						if !val.unwrap_or(false) {
+						let val = self.state.reason_lit_known_positive(!l);
+						if !val {
 							tracing::error!(lit_prop = i32::from(*lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
 						}
 						debug_assert!(
-							val.unwrap_or(false),
+							val,
 							"Literal {} in Reason for {} is {:?}, but should be known true",
-							!l,
-							lit,
-							val
+							!l, lit, val
 						);
 					}
 				}
@@ -266,7 +261,7 @@ impl IpasirPropagator for Engine {
 		let reason = self.state.reason_map.remove(&propagated_lit);
 		// Restore the current state to the state when the propagation happened if explaining lazily
 		if matches!(reason, Some(Reason::Lazy(_, _))) {
-			self.state.trail.undo_until_found_lit(propagated_lit);
+			self.state.trail.goto_assign_lit(propagated_lit);
 		}
 		// Create a clause from the reason
 		let mut clause = reason.map_or_else(Vec::new, |r| {
@@ -544,6 +539,26 @@ impl State {
 		// Process Integer consequences
 		if let Some((iv, event)) = self.determine_int_event(lit) {
 			self.enqueue_int_propagators(iv, event, skip);
+		}
+	}
+
+	#[cfg(debug_assertions)]
+	fn reason_lit_known_positive(&self, lit: RawLit) -> bool {
+		if let Some(val) = self.trail.get_sat_value(lit) {
+			val
+		} else if let Some((iv, meaning)) = self.bool_to_int.get(lit.var()) {
+			let meaning = meaning
+				.map(|l| if lit.is_negated() { !l } else { l })
+				.unwrap_or_else(|| self.int_vars[iv].lit_meaning(lit));
+			let (lb, ub) = self.int_vars[iv].get_bounds(&self.trail);
+			match meaning {
+				LitMeaning::Eq(v) => lb == v && v == ub,
+				LitMeaning::NotEq(_) => false, // TODO: Is this possible?
+				LitMeaning::GreaterEq(v) => lb >= v,
+				LitMeaning::Less(v) => ub < v,
+			}
+		} else {
+			false
 		}
 	}
 

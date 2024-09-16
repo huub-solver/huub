@@ -2,9 +2,9 @@ use itertools::Itertools;
 
 use crate::{
 	actions::{explanation::ExplanationActions, initialization::InitializationActions},
-	propagator::{conflict::Conflict, int_event::IntEvent, PropagationActions, Propagator},
+	propagator::{conflict::Conflict, PropagationActions, Propagator},
 	solver::{
-		engine::queue::PriorityLevel,
+		engine::{activation_list::IntPropCond, queue::PriorityLevel},
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 		value::IntVal,
 		view::IntView,
@@ -91,9 +91,9 @@ impl Poster for ArrayIntMinimumBoundsPoster {
 			min: self.min,
 		};
 		for &v in prop.vars.iter() {
-			actions.enqueue_on_int_change(v, IntEvent::Bounds);
+			actions.enqueue_on_int_change(v, IntPropCond::Bounds);
 		}
-		actions.enqueue_on_int_change(prop.min, IntEvent::LowerBound);
+		actions.enqueue_on_int_change(prop.min, IntPropCond::LowerBound);
 		Ok((
 			Box::new(prop),
 			QueuePreferences {

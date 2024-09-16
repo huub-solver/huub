@@ -9,9 +9,8 @@ use crate::{
 		decision::DecisionActions, initialization::InitializationActions,
 		inspection::InspectionActions, trailing::TrailingActions,
 	},
-	propagator::int_event::IntEvent,
 	solver::{
-		engine::{int_var::IntVarRef, trail::TrailedInt, PropRef},
+		engine::{activation_list::IntPropCond, int_var::IntVarRef, trail::TrailedInt, PropRef},
 		view::{BoolViewInner, IntViewInner},
 		SatSolver,
 	},
@@ -53,6 +52,7 @@ where
 	fn enqueue_on_bool_change(&mut self, var: BoolView) {
 		match var.0 {
 			BoolViewInner::Lit(lit) => {
+				self.slv.engine_mut().state.trail.grow_to_boolvar(lit.var());
 				<Sat as PropagatingSolver>::add_observed_var(&mut self.slv.oracle, lit.var());
 				if let InitRef::Propagator(prop) = self.init_ref {
 					self.slv
@@ -68,7 +68,7 @@ where
 		}
 	}
 
-	fn enqueue_on_int_change(&mut self, var: IntView, condition: IntEvent) {
+	fn enqueue_on_int_change(&mut self, var: IntView, condition: IntPropCond) {
 		let mut subscribe_intref = |var: IntVarRef, prop, cond| {
 			self.slv.engine_mut().state.int_activation[var].add(prop, cond);
 		};
@@ -81,8 +81,8 @@ where
 					condition
 				} else {
 					match condition {
-						IntEvent::LowerBound => IntEvent::UpperBound,
-						IntEvent::UpperBound => IntEvent::LowerBound,
+						IntPropCond::LowerBound => IntPropCond::UpperBound,
+						IntPropCond::UpperBound => IntPropCond::LowerBound,
 						_ => condition,
 					}
 				};

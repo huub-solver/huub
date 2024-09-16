@@ -504,6 +504,7 @@ where
 			// Create new variable
 			let v = self.oracle.new_var();
 			trace_new_lit!(iv, def, v);
+			self.engine_mut().state.trail.grow_to_boolvar(v);
 			self.oracle.add_observed_var(v);
 			self.engine_mut()
 				.state

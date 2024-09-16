@@ -1,6 +1,7 @@
 use crate::{
-	actions::decision::DecisionActions, propagator::int_event::IntEvent,
-	solver::engine::trail::TrailedInt, BoolView, IntVal, IntView, ReformulationError,
+	actions::decision::DecisionActions,
+	solver::engine::{activation_list::IntPropCond, trail::TrailedInt},
+	BoolView, IntVal, IntView, ReformulationError,
 };
 
 pub(crate) trait InitializationActions: DecisionActions {
@@ -14,5 +15,5 @@ pub(crate) trait InitializationActions: DecisionActions {
 	fn enqueue_on_bool_change(&mut self, var: BoolView);
 	/// Enqueue a propagator to be enqueued when an integer variable is changed
 	/// according to the given propagation condition.
-	fn enqueue_on_int_change(&mut self, var: IntView, condition: IntEvent);
+	fn enqueue_on_int_change(&mut self, var: IntView, condition: IntPropCond);
 }

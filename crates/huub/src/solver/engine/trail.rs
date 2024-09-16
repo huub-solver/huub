@@ -1,13 +1,16 @@
-use std::{
-	collections::HashMap,
-	mem::{self, transmute},
-};
+use std::mem;
 
 use index_vec::IndexVec;
 use pindakaas::{Lit as RawLit, Var as RawVar};
 use tracing::trace;
 
 use crate::{actions::trailing::TrailingActions, solver::view::BoolViewInner, BoolView, IntVal};
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct BoolStore {
+	value: Option<bool>,
+	restore: Option<bool>,
+}
 
 index_vec::define_index_type! {
 	/// Identifies an trailed integer tracked within [`Solver`]
@@ -21,8 +24,7 @@ pub(crate) struct Trail {
 	prev_len: Vec<usize>,
 
 	int_value: IndexVec<TrailedInt, IntVal>,
-	sat_value: HashMap<RawVar, bool>,
-	sat_restore_value: HashMap<RawVar, bool>,
+	sat_store: Vec<BoolStore>,
 }
 
 impl Default for Trail {
@@ -32,8 +34,7 @@ impl Default for Trail {
 			pos: 0,
 			prev_len: Vec::new(),
 			int_value: IndexVec::from_vec(vec![0]),
-			sat_value: HashMap::new(),
-			sat_restore_value: HashMap::new(),
+			sat_store: Vec::new(),
 		}
 	}
 }
@@ -41,6 +42,15 @@ impl Default for Trail {
 impl Trail {
 	pub(crate) const CURRENT_BRANCHER: TrailedInt = TrailedInt { _raw: 0 };
 
+	#[inline]
+	/// Return the index for `sat_store` based on a [`RawVar`].
+	fn sat_index(var: RawVar) -> usize {
+		// TODO: Consider grounding (either always deduct 1 because there is no var
+		// 0, or at the least observed var)
+		i32::from(var) as usize
+	}
+
+	/// Internal method to push a change to the trail
 	fn push_trail(&mut self, event: TrailEvent) {
 		debug_assert_eq!(self.pos, self.trail.len());
 		match event {
@@ -50,6 +60,13 @@ impl Trail {
 		event.write_trail(&mut self.trail[self.pos..]);
 		self.pos = self.trail.len();
 	}
+
+	/// Internal method to undo the last change on the trail.
+	///
+	/// Note that his method will return `None` if the trail is empty.
+	///
+	/// When the generic `RESTORE` is set to true, then the changes that have been
+	/// undone can be redone. See [`Self::redo`] for more details.
 	fn undo<const RESTORE: bool>(&mut self) -> Option<TrailEvent> {
 		debug_assert!(self.pos <= self.trail.len());
 		if self.pos == 0 {
@@ -66,10 +83,12 @@ impl Trail {
 
 		match event {
 			TrailEvent::SatAssignment(r) => {
-				let b = self.sat_value.remove(&r).unwrap();
+				let store = &mut self.sat_store[Self::sat_index(r)];
+				let b = mem::take(&mut store.value);
 				if RESTORE {
-					let x = self.sat_restore_value.insert(r, b);
-					debug_assert!(x.is_none());
+					// Note that `store.restore` might (before assignment)
+					// contain a previous value to be restored.
+					store.restore = b;
 				}
 			}
 			TrailEvent::IntAssignment(i, v) => {
@@ -84,6 +103,16 @@ impl Trail {
 		Some(event)
 	}
 
+	/// Internal method to redo the last undone change on the trail
+	///
+	/// Note that this method will return `None` if no change has been undone
+	/// since the last `backtrack` or the creation of the trail.
+	///
+	/// This method is required because:
+	/// - The solver might not ask for explanations in order (and we restore the
+	///   trail to the point of propagation for correctness).
+	/// - The solver might decide to perform chronological backtracking (and not
+	///   backtrack to the decision level of earliest explained change).
 	fn redo(&mut self) -> Option<TrailEvent> {
 		debug_assert!(self.pos <= self.trail.len());
 
@@ -101,9 +130,10 @@ impl Trail {
 
 		match event {
 			TrailEvent::SatAssignment(r) => {
-				let b = self.sat_restore_value.remove(&r).unwrap();
-				let x = self.sat_value.insert(r, b);
-				debug_assert!(x.is_none());
+				let store = &mut self.sat_store[Self::sat_index(r)];
+				debug_assert!(store.restore.is_some());
+				debug_assert!(store.value.is_none());
+				mem::swap(&mut store.restore, &mut store.value);
 			}
 			TrailEvent::IntAssignment(i, v) => {
 				let x = self.int_value[i];
@@ -116,15 +146,18 @@ impl Trail {
 		Some(event)
 	}
 
-	pub(crate) fn undo_until_found_lit(&mut self, lit: RawLit) {
+	/// Method used to restore the state of all value to the point at which a
+	/// literal was assigned.
+	///
+	/// This method is used when creating lazy explanations, as the oracle doesn not allow the usage of literals that are not
+	pub(crate) fn goto_assign_lit(&mut self, lit: RawLit) {
 		let var = lit.var();
-		if !self.sat_value.contains_key(&var) {
-			if !self.sat_restore_value.contains_key(&var) {
+		if self.sat_store[Self::sat_index(var)].value.is_none() {
+			if self.sat_store[Self::sat_index(var)].restore.is_none() {
 				panic!("literal is not present in the trail")
 			}
 			while let Some(event) = self.redo() {
-				let found = matches!(event, TrailEvent::SatAssignment(r) if r == var);
-				if found {
+				if matches!(event, TrailEvent::SatAssignment(r) if r == var) {
 					trace!(
 						len = self.pos,
 						lit = i32::from(lit),
@@ -136,8 +169,7 @@ impl Trail {
 			unreachable!("literal not on trail")
 		}
 		while let Some(event) = self.undo::<true>() {
-			let found = matches!(event, TrailEvent::SatAssignment(r) if r == var);
-			if found {
+			if matches!(event, TrailEvent::SatAssignment(r) if r == var) {
 				let e = self.redo();
 				debug_assert_eq!(e, Some(TrailEvent::SatAssignment(var)));
 				trace!(
@@ -151,13 +183,20 @@ impl Trail {
 		// return to the root level, lit is a persistent literal
 	}
 
-	pub(crate) fn is_backtracking(&self) -> bool {
+	/// Returns whether the Trail is currently in an intermediate state to
+	/// construct explanations.
+	pub(crate) fn is_explaining(&self) -> bool {
 		self.pos != self.trail.len()
 	}
 
+	/// Notify the Trail of a new decision level to which the trail can be restored.
 	pub(crate) fn notify_new_decision_level(&mut self) {
 		self.prev_len.push(self.trail.len());
 	}
+
+	/// Notify the Trail of a backtracking operation.
+	///
+	/// The state of the trailed values is restored to the requested level.
 	pub(crate) fn notify_backtrack(&mut self, level: usize) {
 		// TODO: this is a fix for an issue in the Cadical implementation of the IPASIR UP interface: https://github.com/arminbiere/cadical/issues/92
 		if level >= self.prev_len.len() {
@@ -182,32 +221,60 @@ impl Trail {
 		}
 		debug_assert_eq!(self.pos, len);
 		self.trail.truncate(len);
-		self.sat_restore_value.clear();
 	}
+
+	/// Return the current decision level
 	pub(crate) fn decision_level(&self) -> u32 {
 		self.prev_len.len() as u32
 	}
 
+	/// Create a new trailed integer with initial value `val`
 	pub(crate) fn track_int(&mut self, val: IntVal) -> TrailedInt {
 		self.int_value.push(val)
 	}
 
+	/// Get the current assigned value for a literal (if any).
 	pub(crate) fn get_sat_value(&self, lit: impl Into<RawLit>) -> Option<bool> {
 		let lit = lit.into();
-		self.sat_value
-			.get(&lit.var())
-			.copied()
+		// Note that this doesn't use direct indexing as some operations might check
+		// the value of the variable before it is observed by the solver
+		self.sat_store
+			.get(Self::sat_index(lit.var()))
+			.and_then(|store| store.value)
 			.map(|x| if lit.is_negated() { !x } else { x })
 	}
-	pub(crate) fn assign_sat(&mut self, lit: RawLit) -> Option<bool> {
+
+	/// Record the assignment of a literal in the Trail
+	///
+	/// # Warning
+	/// This method expects that `self.sat_store` has already been extended to the
+	/// correct length (using [`Self::grow_to_boolvar`]).
+	pub(crate) fn assign_lit(&mut self, lit: RawLit) -> Option<bool> {
 		let var = lit.var();
 		let val = !lit.is_negated();
 
-		let x = self.sat_value.insert(var, val);
+		let x = mem::replace(&mut self.sat_store[Self::sat_index(var)].value, Some(val));
 		if x.is_none() && !self.prev_len.is_empty() {
 			self.push_trail(TrailEvent::SatAssignment(var));
 		}
 		x
+	}
+	/// Record the assignment of a literal in the Trail
+	///
+	/// # Warning
+	/// This method expects that `self.sat_store` has already been extended to the
+	/// correct length (using [`Self::grow_to_boolvar`]).
+	pub(crate) fn is_assigned(&self, lit: RawLit) -> bool {
+		self.sat_store[Self::sat_index(lit.var())].value.is_some()
+	}
+
+	/// Grow the storage for the state of Boolean variables to include enough
+	/// space for `var`.
+	pub(crate) fn grow_to_boolvar(&mut self, var: RawVar) {
+		let idx = Self::sat_index(var);
+		if idx >= self.sat_store.len() {
+			self.sat_store.resize(idx + 1, Default::default());
+		}
 	}
 }
 
@@ -242,12 +309,16 @@ pub(crate) enum TrailEvent {
 
 impl TrailEvent {
 	#[inline]
+	/// Internal method used to tranform from [`u32`] to [`RawVar`] to recover a
+	/// Boolean variable from the compressed storage formal of the trail.
 	fn sat_from_raw(raw: u32) -> Self {
 		// SAFETY: This is safe because RawVar uses the same representation as i32
-		TrailEvent::SatAssignment(unsafe { transmute::<u32, RawVar>(raw) })
+		TrailEvent::SatAssignment(unsafe { mem::transmute::<u32, RawVar>(raw) })
 	}
 
 	#[inline]
+	/// Internal method used to tranform a slice of the trail to a
+	/// [`TrailEvent::IntAssignment`] object for the [`Trail::undo`] method.
 	fn int_from_trail(raw: [u32; 3]) -> Self {
 		let i = -(raw[2] as i32) as usize;
 		let high = raw[1] as u64;
@@ -256,6 +327,8 @@ impl TrailEvent {
 	}
 
 	#[inline]
+	/// Internal method used to tranform a slice of the trail to a
+	/// [`TrailEvent::IntAssignment`] object for the [`Trail::redo`] method.
 	fn int_from_rev_trail(raw: [u32; 3]) -> Self {
 		let i = -(raw[0] as i32) as usize;
 		let high = raw[1] as u64;
@@ -264,6 +337,8 @@ impl TrailEvent {
 	}
 
 	#[inline]
+	/// Internal method to write a [`TailEvent`] to the slice `trail` using an
+	/// efficient format.
 	fn write_trail(&self, trail: &mut [u32]) {
 		match self {
 			TrailEvent::SatAssignment(var) => trail[0] = i32::from(*var) as u32,
@@ -279,6 +354,8 @@ impl TrailEvent {
 	}
 
 	#[inline]
+	/// Internal method to write a [`TailEvent`] in reverse order to `trail` so it
+	/// can be redone later.
 	fn write_rev_trail(&self, trail: &mut [u32]) {
 		match self {
 			TrailEvent::SatAssignment(var) => trail[0] = i32::from(*var) as u32,
@@ -308,6 +385,7 @@ mod tests {
 		let mut slv = Cadical::default();
 		let mut trail = Trail::default();
 		let lits = slv.next_var_range(10).unwrap();
+		trail.grow_to_boolvar(lits.clone().end());
 		let int_events: Vec<_> = [
 			0,
 			1,
@@ -326,7 +404,7 @@ mod tests {
 
 		for (l, (i, v)) in lits.clone().zip(int_events.iter()) {
 			trail.push_trail(TrailEvent::SatAssignment(l));
-			let _ = trail.assign_sat(if usize::from(*i) % 2 == 0 {
+			let _ = trail.assign_lit(if usize::from(*i) % 2 == 0 {
 				l.into()
 			} else {
 				!l

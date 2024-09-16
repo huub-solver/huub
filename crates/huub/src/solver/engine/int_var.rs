@@ -158,6 +158,10 @@ impl IntVar {
 				.state
 				.bool_to_int
 				.insert_eager(vars.clone(), iv);
+			slv.engine_mut()
+				.state
+				.trail
+				.grow_to_boolvar(vars.clone().last().unwrap());
 			for l in vars {
 				<Sat as PropagatingSolver>::add_observed_var(&mut slv.oracle, l);
 			}

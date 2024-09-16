@@ -1,11 +1,8 @@
 use crate::{
 	actions::{explanation::ExplanationActions, initialization::InitializationActions},
-	propagator::{
-		conflict::Conflict, int_event::IntEvent, reason::CachedReason, PropagationActions,
-		Propagator,
-	},
+	propagator::{conflict::Conflict, reason::CachedReason, PropagationActions, Propagator},
 	solver::{
-		engine::queue::PriorityLevel,
+		engine::{activation_list::IntPropCond, queue::PriorityLevel},
 		poster::{BoxedPropagator, Poster, QueuePreferences},
 	},
 	IntVal, IntView, LitMeaning, ReformulationError,
@@ -254,9 +251,9 @@ impl Poster for IntPowBoundsPoster {
 		actions: &mut I,
 	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError> {
 		// Subscribe to bounds changes for each of the variables
-		actions.enqueue_on_int_change(self.base, IntEvent::Bounds);
-		actions.enqueue_on_int_change(self.exponent, IntEvent::Bounds);
-		actions.enqueue_on_int_change(self.result, IntEvent::Bounds);
+		actions.enqueue_on_int_change(self.base, IntPropCond::Bounds);
+		actions.enqueue_on_int_change(self.exponent, IntPropCond::Bounds);
+		actions.enqueue_on_int_change(self.result, IntPropCond::Bounds);
 
 		// Ensure that if the base is negative, then the exponent cannot be zero
 		let (exp_lb, exp_ub) = actions.get_int_bounds(self.exponent);
