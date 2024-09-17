@@ -1,5 +1,6 @@
 use itertools::Itertools;
 use pindakaas::Lit as RawLit;
+use tracing::trace;
 
 use crate::{
 	actions::initialization::InitializationActions,
@@ -11,7 +12,7 @@ use crate::{
 		value::IntVal,
 		view::{BoolViewInner, IntView, IntViewInner},
 	},
-	BoolView, Conjunction, ReformulationError,
+	BoolView, Conjunction, LitMeaning, NonZeroIntVal, ReformulationError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -128,21 +129,62 @@ where
 
 	fn explain(&mut self, actions: &mut E, data: u64) -> Conjunction {
 		let i = data as usize;
-		let mut var_lits: Vec<RawLit> = self
+		// the propagation rule w[i] * x[i] <= rhs - sum_{j != i} w[j] * x[j].lower_bound
+		// can be executed when rhs - sum_{j != i} w[j] * x[j].lower_bound < w[i] * (x[i].upper_bound + 1)
+		// which means rhs - w[i] * (x[i].upper_bound + 1) < sum_{j != i} w[j] * x[j].lower_bound
+		let lb_sum = self
 			.vars
 			.iter()
 			.enumerate()
-			.filter_map(|(j, v)| {
-				if j == i {
-					return None;
+			.filter(|(j, _)| *j != i)
+			.map(|(_, v)| actions.get_int_lower_bound(*v))
+			.sum::<IntVal>();
+		let propagated_ub = self.max - lb_sum;
+
+		// check whether the variable upper bound can be further generalized
+		let mut slack = match self.vars[i].0 {
+			IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. }
+				if transformer.scale != NonZeroIntVal::new(1).unwrap() =>
+			{
+				match transformer.relaxed_lit(LitMeaning::Less(propagated_ub + 1)) {
+					LitMeaning::Less(shifted_relaxed_ub) => shifted_relaxed_ub - 1 - propagated_ub,
+					_ => unreachable!(
+						"relaxed_lit should always return LitMeaning::Less with the input LitMeaning::Less"
+					),
 				}
+			}
+			_ => 0,
+		};
+		debug_assert!(slack >= 0);
+
+		let mut var_lits = Vec::new();
+		for (_, v) in self.vars.iter().enumerate().filter(|(j, _)| *j != i) {
+			if slack == 0 {
+				// no generalization if slack is 0
 				if let BoolView(BoolViewInner::Lit(lit)) = actions.get_int_lower_bound_lit(*v) {
-					Some(lit)
-				} else {
-					None
+					var_lits.push(lit);
 				}
-			})
-			.collect();
+			} else {
+				// generalize explanations for linear propagator
+				let lb = actions.get_int_lower_bound(*v);
+				match actions.get_int_lit_relaxed(*v, LitMeaning::GreaterEq(lb - slack)) {
+					(BoolView(BoolViewInner::Lit(lit)), LitMeaning::GreaterEq(actual_lb)) => {
+						var_lits.push(lit);
+						slack -= lb - actual_lb;
+					}
+					(BoolView(BoolViewInner::Const(true)), LitMeaning::GreaterEq(actual_lb)) => {
+						// TODO: handle the case where LitMeaning::GreaterEq(actual_lb) is a newly created lazy literal
+						// 		 which has not been assigned true yet
+						//       investigate this using instance radiation_i6_9.fzn.json and radiation_i8_9.fzn.json
+						slack -= lb - actual_lb;
+					}
+					_ => unreachable!(
+						"get relaxed lower bound literal must be either constant true or a literal"
+					),
+				}
+			}
+		}
+
 		if let Some(r) = self.reification.get() {
 			var_lits.push(*r);
 		}

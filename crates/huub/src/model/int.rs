@@ -69,6 +69,7 @@ impl Mul<NonZeroIntVal> for IntView {
 	type Output = Self;
 	fn mul(self, rhs: NonZeroIntVal) -> Self::Output {
 		match self {
+			Self::Var(_) if rhs == NonZeroIntVal::new(1).unwrap() => self,
 			Self::Var(x) => Self::Linear(LinearTransform::scaled(rhs), x),
 			Self::Const(v) => Self::Const(v * rhs.get()),
 			Self::Linear(t, x) => Self::Linear(t * rhs, x),
@@ -96,6 +97,7 @@ impl Neg for IntView {
 				Self::Linear(LinearTransform::scaled(NonZeroIntVal::new(-1).unwrap()), x)
 			}
 			Self::Const(v) => Self::Const(-v),
+			Self::Linear(t, x) if t.scale.get() == -1 => Self::Var(x),
 			Self::Linear(t, x) => Self::Linear(-t, x),
 			Self::Bool(t, x) => Self::Bool(-t, x),
 		}
