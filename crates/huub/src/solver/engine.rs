@@ -165,7 +165,7 @@ impl IpasirPropagator for Engine {
 		debug!(new_level, restart, "backtrack");
 
 		// Revert value changes to previous decision level
-		self.state.notify_backtrack(new_level, restart);
+		self.state.notify_backtrack::<false>(new_level, restart);
 
 		// Re-apply persistent changes
 		for lit in self.persistent.clone() {
@@ -296,9 +296,12 @@ impl IpasirPropagator for Engine {
 			return false;
 		}
 
-		// Add temporary decision level
+		// Check model consistency assuming that all currently unfixed integer
+		// variables take the lower bound as its value.
+		//
+		// Add artificial decision level to fix unfixed integer variables
 		let level = self.state.decision_level();
-		self.notify_new_decision_level();
+		self.state.notify_new_decision_level();
 
 		// Create a propagation context
 		let mut ctx = SolvingContext::new(slv, &mut self.state);
@@ -307,36 +310,42 @@ impl IpasirPropagator for Engine {
 		for r in (0..ctx.state.int_vars.len()).map(IntVarRef::new) {
 			let (lb, ub) = ctx.state.int_vars[r].get_bounds(&ctx.state.trail);
 			if lb != ub {
-				let val = ctx.state.int_vars[r].get_value(model);
-				let prev_lb = ctx.state.int_vars[r].notify_lower_bound(&mut ctx.state.trail, val);
-				// TODO: this two step approach could be unified
-				if matches!(ctx.state.int_vars[r].order_encoding, OrderStorage::Lazy(_)) {
-					// Ensure lazy literal exists
-					let _ = ctx.get_intref_lit(r, LitMeaning::Less(val + 1));
+				debug_assert!(matches!(
+					ctx.state.int_vars[r].order_encoding,
+					OrderStorage::Lazy(_)
+				));
+				debug_assert_eq!(lb, ctx.state.int_vars[r].get_value(model));
+
+				// Ensure the lazy literal for the upper bound exists
+				let ub_lit = ctx.get_intref_lit(r, LitMeaning::Less(lb + 1));
+				if let BoolViewInner::Lit(ub_lit) = ub_lit.0 {
+					let prev = ctx.state.trail.assign_lit(ub_lit);
+					debug_assert_eq!(prev, None);
 				}
-				let prev_ub = ctx.state.int_vars[r].notify_upper_bound(&mut ctx.state.trail, val);
-				debug_assert!(prev_lb < val || prev_ub > val);
+				let prev_ub = ctx.state.int_vars[r].notify_upper_bound(&mut ctx.state.trail, lb);
+				debug_assert!(prev_ub > lb);
 
 				ctx.state.enqueue_int_propagators(r, IntEvent::Fixed, None);
 			}
 		}
-		// Run propgagators to find any additional changes required
-		ctx.run_propagators(&mut self.propagators);
 
-		// Process propagation results
-		// Accept model if no conflict is detected, and no propagation is performed (but allow creation of defining clauses)
-		let accept = self.state.conflict.is_none() && self.state.propagation_queue.is_empty();
-		if !self.state.propagation_queue.is_empty() {
-			// Move propations and their reasons to clauses before backtrack
-			self.state.ensure_clause_changes(&mut self.propagators);
-		}
-		if let Some(conflict) = self.state.conflict.clone() {
+		// Run propgagators to find any conflicts
+		ctx.run_propagators(&mut self.propagators);
+		// No propagation can be triggered (all variables are fixed, so only
+		// conflicts are possible)
+		debug_assert!(self.state.propagation_queue.is_empty());
+
+		// Process propagation results, and accept model if no conflict is detected
+		let accept = if let Some(conflict) = self.state.conflict.clone() {
 			// Move conflict to clauses before backtrack
 			self.state.clauses.push_back(conflict);
-		}
+			false
+		} else {
+			true
+		};
 
 		// Revert to real decision level
-		self.notify_backtrack(level as usize, false);
+		self.state.notify_backtrack::<true>(level as usize, false);
 
 		debug!(accept, "check model");
 		accept
@@ -473,10 +482,17 @@ impl State {
 		}
 	}
 
-	fn notify_backtrack(&mut self, level: usize, restart: bool) {
-		// Update conflict statistics
-		self.statistics.conflicts += 1;
-
+	/// Internal method called to process the backtracking to an earlier decision
+	/// level.
+	///
+	/// The generic artugment `ARTIFICIAL` is used to signal when the solver is
+	/// backtracking from an artificial decision level. An example of the use of
+	/// artificial decision levels is found in the [`Engine::check_model`] method,
+	/// where it is used to artificially fix any integer variables using lazy
+	/// encodings.
+	fn notify_backtrack<const ARTIFICIAL: bool>(&mut self, level: usize, restart: bool) {
+		debug_assert!(!ARTIFICIAL || level as u32 == self.trail.decision_level() - 1);
+		debug_assert!(!ARTIFICIAL || !restart);
 		// Resolve the conflict status
 		self.conflict = None;
 		// Remove (now invalid) propagations (but leave clauses in place)
@@ -487,6 +503,12 @@ impl State {
 		while let Some(p) = self.propagator_queue.pop() {
 			self.enqueued[p] = false;
 		}
+		if ARTIFICIAL {
+			return;
+		}
+
+		// Update conflict statistics
+		self.statistics.conflicts += 1;
 
 		// Switch to VSIDS if the number of conflicts exceeds the threshold
 		if let Some(conflicts) = self.config.vsids_after {
@@ -515,11 +537,10 @@ impl State {
 					"toggling vsids"
 				);
 			}
-		}
-
-		if level == 0 {
-			// Memory cleanup (Reasons are known to no longer be relevant)
-			self.reason_map.clear();
+			if level == 0 {
+				// Memory cleanup (Reasons are known to no longer be relevant)
+				self.reason_map.clear();
+			}
 		}
 	}
 
