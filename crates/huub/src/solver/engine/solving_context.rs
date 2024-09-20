@@ -41,6 +41,8 @@ enum ChangeType {
 }
 
 impl<'a> SolvingContext<'a> {
+	/// Create a new SolvingContext given the solver actions exposed by the SAT
+	/// oracle and the engine state.
 	pub(crate) fn new(slv: &'a mut dyn SolvingActions, state: &'a mut State) -> Self {
 		Self {
 			slv,
@@ -49,6 +51,8 @@ impl<'a> SolvingContext<'a> {
 		}
 	}
 
+	/// Run the propagators in the queue until a propagator detects a conflict,
+	/// returns literals to be propagated by the SAT oracle, or the queue is empty.
 	pub(crate) fn run_propagators(&mut self, propagators: &mut IndexVec<PropRef, BoxedPropagator>) {
 		while let Some(p) = self.state.propagator_queue.pop() {
 			debug_assert!(self.state.conflict.is_none());
@@ -75,21 +79,14 @@ impl<'a> SolvingContext<'a> {
 	}
 
 	#[inline]
+	/// Check whether a change is redundant, conflicting, or new with respect to
+	/// the bounds of an integer variable
 	fn check_change(&self, var: IntVarRef, change: &LitMeaning) -> ChangeType {
 		let (lb, ub) = self.state.int_vars[var].get_bounds(self);
 		match change {
 			LitMeaning::Eq(i) if lb == *i && ub == *i => ChangeType::Redundant,
 			LitMeaning::Eq(i) if *i < lb || *i > ub => ChangeType::Conflicting,
 			LitMeaning::NotEq(i) if *i < lb || *i > ub => ChangeType::Redundant,
-			LitMeaning::Eq(_) | LitMeaning::NotEq(_) => {
-				let lit = self.state.int_vars[var].get_bool_lit(change.clone());
-				let val = lit.and_then(|lit| self.get_bool_val(lit));
-				match val {
-					Some(true) => ChangeType::Redundant,
-					Some(false) => ChangeType::Conflicting,
-					None => ChangeType::New,
-				}
-			}
 			LitMeaning::GreaterEq(i) if *i <= lb => ChangeType::Redundant,
 			LitMeaning::GreaterEq(i) if *i > ub => ChangeType::Conflicting,
 			LitMeaning::Less(i) if *i > ub => ChangeType::Redundant,
@@ -99,6 +96,8 @@ impl<'a> SolvingContext<'a> {
 	}
 
 	#[inline]
+	/// Internal method used to propagate an integer variable given a literal
+	/// description to be enforced.
 	fn propagate_int(
 		&mut self,
 		iv: IntVarRef,
@@ -120,12 +119,14 @@ impl<'a> SolvingContext<'a> {
 			}
 			ChangeType::New => {
 				let bv = self.get_intref_lit(iv, lit_req.clone());
-				self.set_bool_val(bv, true, reason)
+				self.set_bool(bv, reason)
 			}
 		}
 	}
 
 	#[inline]
+	/// Internal method used to propagate a boolean variable used as a integer
+	/// given a literal description to be enforced.
 	fn propagate_bool_lin(
 		&mut self,
 		lit: RawLit,
@@ -134,10 +135,10 @@ impl<'a> SolvingContext<'a> {
 	) -> Result<(), Conflict> {
 		match lit_req {
 			LitMeaning::Eq(0) | LitMeaning::Less(1) | LitMeaning::NotEq(1) => {
-				self.set_bool_val(BoolView(BoolViewInner::Lit(lit)), false, reason)
+				self.set_bool(BoolView(BoolViewInner::Lit(!lit)), reason)
 			}
 			LitMeaning::Eq(1) | LitMeaning::GreaterEq(1) | LitMeaning::NotEq(0) => {
-				self.set_bool_val(BoolView(BoolViewInner::Lit(lit)), true, reason)
+				self.set_bool(BoolView(BoolViewInner::Lit(lit)), reason)
 			}
 			LitMeaning::Eq(_) => Err(Conflict::new(self, None, reason)),
 			LitMeaning::GreaterEq(i) if i > 1 => Err(Conflict::new(self, None, reason)),
@@ -206,38 +207,21 @@ impl InspectionActions for SolvingContext<'_> {
 }
 
 impl PropagationActions for SolvingContext<'_> {
-	fn set_bool_val(
-		&mut self,
-		bv: BoolView,
-		val: bool,
-		reason: impl ReasonBuilder<Self>,
-	) -> Result<(), Conflict> {
+	fn set_bool(&mut self, bv: BoolView, reason: impl ReasonBuilder<Self>) -> Result<(), Conflict> {
 		match bv.0 {
 			BoolViewInner::Lit(lit) => match self.state.trail.get_sat_value(lit) {
-				Some(b) if b == val => Ok(()),
-				Some(_) => Err(Conflict::new(
-					self,
-					Some(if val { lit } else { !lit }),
-					reason,
-				)),
+				Some(true) => Ok(()),
+				Some(false) => Err(Conflict::new(self, Some(lit), reason)),
 				None => {
-					let propagated_lit = if val { lit } else { !lit };
 					let reason = reason.build_reason(self);
-					trace!(lit = i32::from(propagated_lit), reason = ?reason, "propagate bool");
-					self.state.register_reason(propagated_lit, reason);
-					self.state.propagation_queue.push(propagated_lit);
-					let prev = self.state.trail.assign_lit(propagated_lit);
-					debug_assert!(prev.is_none());
+					trace!(lit = i32::from(lit), reason = ?reason, "propagate bool");
+					self.state.register_reason(lit, reason);
+					self.state.propagation_queue.push(lit);
 					Ok(())
 				}
 			},
-			BoolViewInner::Const(b) => {
-				if b != val {
-					Err(Conflict::new(self, None, reason))
-				} else {
-					Ok(())
-				}
-			}
+			BoolViewInner::Const(false) => Err(Conflict::new(self, None, reason)),
+			BoolViewInner::Const(true) => Ok(()),
 		}
 	}
 

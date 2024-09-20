@@ -233,13 +233,16 @@ impl IpasirPropagator for Engine {
 				.collect::<Vec<i32>>(),
 			"propagate"
 		);
-		for &lit in queue.iter() {
-			self.state.enqueue_propagators(lit, None);
-		}
 		// Debug helper to ensure that any reason is based on known true literals
 		#[cfg(debug_assertions)]
 		{
+			let mut prev = None;
 			for lit in queue.iter() {
+				// Notify of the assignment of the previous literal so it is available
+				// when checking the reason.
+				if let Some(prev) = prev {
+					self.notify_assignment(prev, false);
+				}
 				if let Some(reason) = self.state.reason_map.get(lit).cloned() {
 					let clause: Vec<_> = reason.to_clause(&mut self.propagators, &mut self.state);
 					for l in &clause {
@@ -256,6 +259,7 @@ impl IpasirPropagator for Engine {
 						);
 					}
 				}
+				prev = Some(*lit);
 			}
 		}
 		queue

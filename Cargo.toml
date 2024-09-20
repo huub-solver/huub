@@ -91,8 +91,6 @@ strip = "none"
 # The profile that 'cargo dist' will build with
 [profile.dist]
 inherits = "release"
-strip = "symbols"
-debug = false
 
 [profile.release]
 lto = "fat"

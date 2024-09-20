@@ -8,12 +8,7 @@ use crate::{
 };
 
 pub(crate) trait PropagationActions: ExplanationActions + DecisionActions {
-	fn set_bool_val(
-		&mut self,
-		bv: BoolView,
-		val: bool,
-		reason: impl ReasonBuilder<Self>,
-	) -> Result<(), Conflict>;
+	fn set_bool(&mut self, bv: BoolView, reason: impl ReasonBuilder<Self>) -> Result<(), Conflict>;
 
 	fn set_int_lower_bound(
 		&mut self,

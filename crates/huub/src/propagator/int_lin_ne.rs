@@ -140,7 +140,7 @@ where
 			let val = self.violation - sum;
 			actions.set_int_not_eq(*v, val, self.reason(i))
 		} else if sum == self.violation {
-			actions.set_bool_val(r, false, self.reason(self.vars.len()))
+			actions.set_bool(!r, self.reason(self.vars.len()))
 		} else {
 			Ok(())
 		}

@@ -101,7 +101,7 @@ where
 		// propagate the reified variable if the sum of lower bounds is greater than the right-hand-side value
 		if let Some(r) = self.reification.get() {
 			if sum < 0 {
-				actions.set_bool_val(BoolView(BoolViewInner::Lit(*r)), false, |a: &mut P| {
+				actions.set_bool(BoolView(BoolViewInner::Lit(!r)), |a: &mut P| {
 					self.vars
 						.iter()
 						.map(|v| a.get_int_lower_bound_lit(*v))

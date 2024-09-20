@@ -153,29 +153,31 @@ impl Trail {
 	pub(crate) fn goto_assign_lit(&mut self, lit: RawLit) {
 		let var = lit.var();
 		if self.sat_store[Self::sat_index(var)].value.is_none() {
-			if self.sat_store[Self::sat_index(var)].restore.is_none() {
-				panic!("literal is not present in the trail")
-			}
 			while let Some(event) = self.redo() {
 				if matches!(event, TrailEvent::SatAssignment(r) if r == var) {
+					let e: Option<TrailEvent> = self.undo::<true>();
+					debug_assert_eq!(e, Some(TrailEvent::SatAssignment(var)));
 					trace!(
 						len = self.pos,
 						lit = i32::from(lit),
-						"redo to setting literal"
+						"redo to when literal was set"
 					);
 					return;
 				}
 			}
-			unreachable!("literal not on trail")
+			trace!(
+				len = self.pos,
+				lit = i32::from(lit),
+				"trail reset for unknown literal"
+			);
+			return;
 		}
 		while let Some(event) = self.undo::<true>() {
 			if matches!(event, TrailEvent::SatAssignment(r) if r == var) {
-				let e = self.redo();
-				debug_assert_eq!(e, Some(TrailEvent::SatAssignment(var)));
 				trace!(
 					len = self.pos,
 					lit = i32::from(lit),
-					"undo to setting literal"
+					"undo to when literal was set"
 				);
 				return;
 			}
