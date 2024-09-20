@@ -13,6 +13,8 @@ pub(crate) mod reason;
 
 use std::fmt::Debug;
 
+use pindakaas::Lit as RawLit;
+
 use crate::{
 	actions::{explanation::ExplanationActions, propagation::PropagationActions},
 	propagator::conflict::Conflict,
@@ -39,8 +41,13 @@ pub(crate) trait Propagator<P: PropagationActions, E: ExplanationActions>:
 	/// lazy explaination emitted by the propagator. The propagator must now
 	/// produce the conjunction of literals that led to a literal being
 	/// propagated.
-	fn explain(&mut self, actions: &mut E, data: u64) -> Conjunction {
+	///
+	/// The method is called with the data that was passed to the
+	/// `deferred_reason` method, and the literal that was propagated. If the
+	/// `lit` argument is `None`, then the reason was used to explain `false`.
+	fn explain(&mut self, actions: &mut E, lit: Option<RawLit>, data: u64) -> Conjunction {
 		let _ = actions;
+		let _ = lit;
 		let _ = data;
 		// Method will only be called if `propagate` used a lazy reason.
 		panic!("propagator did not provide an explain implementation")

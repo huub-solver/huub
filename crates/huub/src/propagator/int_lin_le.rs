@@ -126,7 +126,7 @@ where
 		Ok(())
 	}
 
-	fn explain(&mut self, actions: &mut E, data: u64) -> Conjunction {
+	fn explain(&mut self, actions: &mut E, _: Option<RawLit>, data: u64) -> Conjunction {
 		let i = data as usize;
 		let mut var_lits: Vec<RawLit> = self
 			.vars

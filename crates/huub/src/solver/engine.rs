@@ -237,18 +237,22 @@ impl IpasirPropagator for Engine {
 		#[cfg(debug_assertions)]
 		{
 			let mut prev = None;
-			for lit in queue.iter() {
+			for &lit in queue.iter() {
 				// Notify of the assignment of the previous literal so it is available
 				// when checking the reason.
 				if let Some(prev) = prev {
 					self.notify_assignment(prev, false);
 				}
-				if let Some(reason) = self.state.reason_map.get(lit).cloned() {
-					let clause: Vec<_> = reason.to_clause(&mut self.propagators, &mut self.state);
+				if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
+					let clause: Clause =
+						reason.explain(&mut self.propagators, &mut self.state, Some(lit));
 					for l in &clause {
+						if l == &lit {
+							continue;
+						}
 						let val = self.state.trail.get_sat_value(!l);
 						if !val.unwrap_or(false) {
-							tracing::error!(lit_prop = i32::from(*lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
+							tracing::error!(lit_prop = i32::from(lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
 						}
 						debug_assert!(
 							val.unwrap_or(false),
@@ -259,7 +263,7 @@ impl IpasirPropagator for Engine {
 						);
 					}
 				}
-				prev = Some(*lit);
+				prev = Some(lit);
 			}
 		}
 		queue
@@ -273,10 +277,11 @@ impl IpasirPropagator for Engine {
 			self.state.trail.goto_assign_lit(propagated_lit);
 		}
 		// Create a clause from the reason
-		let mut clause = reason.map_or_else(Vec::new, |r| {
-			r.to_clause(&mut self.propagators, &mut self.state)
-		});
-		clause.push(propagated_lit);
+		let clause = if let Some(reason) = reason {
+			reason.explain(&mut self.propagators, &mut self.state, Some(propagated_lit))
+		} else {
+			vec![propagated_lit]
+		};
 
 		debug!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add reason clause");
 		clause
@@ -463,11 +468,11 @@ impl State {
 	fn ensure_clause_changes(&mut self, propagators: &mut IndexVec<PropRef, BoxedPropagator>) {
 		let queue = mem::take(&mut self.propagation_queue);
 		for lit in queue {
-			let mut clause = self
-				.reason_map
-				.remove(&lit)
-				.map_or_else(Vec::new, |r| r.to_clause(propagators, self));
-			clause.push(lit);
+			let clause = if let Some(reason) = self.reason_map.remove(&lit) {
+				reason.explain(propagators, self, Some(lit))
+			} else {
+				vec![lit]
+			};
 			self.clauses.push_back(clause);
 		}
 	}

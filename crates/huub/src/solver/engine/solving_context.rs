@@ -63,10 +63,7 @@ impl<'a> SolvingContext<'a> {
 			self.state.statistics.propagations += 1;
 			self.current_prop = PropRef::new(u32::MAX as usize);
 			if let Err(Conflict { subject, reason }) = res {
-				let mut clause: Clause = reason.to_clause(propagators, self.state);
-				if let Some(subject) = subject {
-					clause.push(subject);
-				}
+				let clause: Clause = reason.explain(propagators, self.state, subject);
 				trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "conflict detected");
 				debug_assert!(!clause.is_empty());
 				debug_assert!(self.state.conflict.is_none());

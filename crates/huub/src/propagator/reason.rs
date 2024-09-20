@@ -49,18 +49,23 @@ impl<A: ExplanationActions, R: ReasonBuilder<A>> CachedReason<A, R> {
 }
 
 impl Reason {
-	pub(crate) fn to_clause<Clause: FromIterator<RawLit>>(
+	/// Make the reason produce an explanation of the `lit`.
+	///
+	/// Expalanation is in terms of a clause that can be added to the solver.
+	/// When the `lit` argument is `None`, the reason is explaining `false`.
+	pub(crate) fn explain<Clause: FromIterator<RawLit>>(
 		&self,
 		props: &mut IndexVec<PropRef, BoxedPropagator>,
 		actions: &mut State,
+		lit: Option<RawLit>,
 	) -> Clause {
 		match self {
 			Reason::Lazy(prop, data) => {
-				let reason = props[*prop].explain(actions, *data);
-				reason.iter().map(|l| !l).collect()
+				let reason = props[*prop].explain(actions, lit, *data);
+				reason.into_iter().map(|l| !l).chain(lit).collect()
 			}
-			Reason::Eager(v) => v.iter().map(|l| !l).collect(),
-			Reason::Simple(l) => once(!l).collect(),
+			Reason::Eager(v) => v.iter().map(|l| !l).chain(lit).collect(),
+			Reason::Simple(reason) => once(!reason).chain(lit).collect(),
 		}
 	}
 

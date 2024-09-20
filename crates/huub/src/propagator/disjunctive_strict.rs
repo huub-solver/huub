@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use pindakaas::Lit as RawLit;
 use tracing::trace;
 
 use crate::{
@@ -467,7 +468,7 @@ where
 	}
 
 	// todo: check whether this explanation can be generalized?
-	fn explain(&mut self, actions: &mut E, task_no: u64) -> Conjunction {
+	fn explain(&mut self, actions: &mut E, _: Option<RawLit>, task_no: u64) -> Conjunction {
 		// explain why the set of tasks Lcut(j) ∪ {i} cannot be completed before lct_j
 		// since energy of the set of tasks (including i) within the time window [earliest_start, latest_completion] is overloaded
 		// explain lower bound propagation for edge finding
