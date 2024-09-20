@@ -259,14 +259,6 @@ impl Trail {
 		}
 		x
 	}
-	/// Record the assignment of a literal in the Trail
-	///
-	/// # Warning
-	/// This method expects that `self.sat_store` has already been extended to the
-	/// correct length (using [`Self::grow_to_boolvar`]).
-	pub(crate) fn is_assigned(&self, lit: RawLit) -> bool {
-		self.sat_store[Self::sat_index(lit.var())].value.is_some()
-	}
 
 	/// Grow the storage for the state of Boolean variables to include enough
 	/// space for `var`.

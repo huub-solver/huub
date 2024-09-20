@@ -226,7 +226,6 @@ impl PropagationActions for SolvingContext<'_> {
 					trace!(lit = i32::from(propagated_lit), reason = ?reason, "propagate bool");
 					self.state.register_reason(propagated_lit, reason);
 					self.state.propagation_queue.push(propagated_lit);
-					self.state.enqueue_propagators(propagated_lit, None);
 					let prev = self.state.trail.assign_lit(propagated_lit);
 					debug_assert!(prev.is_none());
 					Ok(())
