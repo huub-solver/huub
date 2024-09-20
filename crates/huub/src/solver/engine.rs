@@ -418,7 +418,7 @@ impl State {
 					}
 				}
 				LitMeaning::Less(i) => {
-					let new_ub = i - 1;
+					let new_ub = self.int_vars[iv].tighten_upper_bound(i - 1);
 					if new_ub >= ub {
 						return None;
 					}

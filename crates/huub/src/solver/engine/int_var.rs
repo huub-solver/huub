@@ -39,10 +39,26 @@ index_vec::define_index_type! {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+/// The structure used to store information about an integer variable within
+/// the solver.
 pub(crate) struct IntVar {
-	pub(crate) domain: RangeList<IntVal>,
-	pub(crate) order_encoding: OrderStorage,
+	/// The direct encoding of the integer variable.
+	///
+	/// Literals in this encoding are used to reason about whether an integer
+	/// variable takes a certain value.
 	pub(crate) direct_encoding: DirectStorage,
+	/// The domain of the integer variable at the time of its creation.
+	pub(crate) domain: RangeList<IntVal>,
+	/// The order encoding of the integer variable.
+	///
+	/// Literals in this encoding are used to reason about the bounds of the
+	/// integer variable.
+	pub(crate) order_encoding: OrderStorage,
+	/// A Trailed integer representing the current upper bound of the integer
+	/// variable.
+	///
+	/// Note that the lower bound is tracked within [`Self::order_encoding`].
+	upper_bound: TrailedInt,
 }
 
 impl IntVar {
@@ -83,10 +99,10 @@ impl IntVar {
 			direct_encoding != EncodingType::Eager || order_encoding == EncodingType::Eager
 		);
 
+		let upper_bound = slv.engine_mut().state.trail.track_int(ub);
 		let order_encoding = match order_encoding {
 			EncodingType::Eager => OrderStorage::Eager {
 				lower_bound: slv.engine_mut().state.trail.track_int(lb),
-				upper_bound: slv.engine_mut().state.trail.track_int(ub),
 				storage: slv
 					.oracle
 					.next_var_range(orig_domain_len - 1)
@@ -134,9 +150,10 @@ impl IntVar {
 
 		// Create the resulting integer variable
 		let iv = slv.engine_mut().state.int_vars.push(Self {
+			direct_encoding,
 			domain,
 			order_encoding,
-			direct_encoding,
+			upper_bound,
 		});
 		// Create propagator activation list
 		let r = slv
@@ -488,28 +505,14 @@ impl IntVar {
 
 	/// Returns the upper bound of the current state of the integer variable.
 	pub(crate) fn get_upper_bound(&self, trail: &impl TrailingActions) -> IntVal {
-		match &self.order_encoding {
-			OrderStorage::Eager { upper_bound, .. } => trail.get_trailed_int(*upper_bound),
-			OrderStorage::Lazy(storage) => {
-				let high = trail.get_trailed_int(storage.ub_index);
-				if high >= 0 {
-					storage.storage[high as usize].val - 1
-				} else {
-					*self.domain.upper_bound().unwrap()
-				}
-			}
-		}
+		trail.get_trailed_int(self.upper_bound)
 	}
 
 	/// Returns the boolean view associated with the upper bound of the variable being this value.
 	pub(crate) fn get_upper_bound_lit(&self, trail: &impl TrailingActions) -> BoolView {
 		match &self.order_encoding {
-			OrderStorage::Eager {
-				upper_bound,
-				storage,
-				..
-			} => {
-				let ub = trail.get_trailed_int(*upper_bound);
+			OrderStorage::Eager { storage, .. } => {
+				let ub = trail.get_trailed_int(self.upper_bound);
 				BoolView(if ub == *self.domain.upper_bound().unwrap() {
 					BoolViewInner::Const(true)
 				} else {
@@ -530,31 +533,18 @@ impl IntVar {
 
 	/// Returns the lower and upper bounds of the current state of the integer variable.
 	pub(crate) fn get_bounds(&self, trail: &impl TrailingActions) -> (IntVal, IntVal) {
-		match &self.order_encoding {
-			OrderStorage::Eager {
-				upper_bound,
-				lower_bound,
-				..
-			} => (
-				trail.get_trailed_int(*lower_bound),
-				trail.get_trailed_int(*upper_bound),
-			),
+		let lb = match &self.order_encoding {
+			OrderStorage::Eager { lower_bound, .. } => trail.get_trailed_int(*lower_bound),
 			OrderStorage::Lazy(storage) => {
-				let high = trail.get_trailed_int(storage.ub_index);
 				let low = trail.get_trailed_int(storage.lb_index);
-				let lb = if low >= 0 {
+				if low >= 0 {
 					storage.storage[low as usize].val
 				} else {
 					*self.domain.lower_bound().unwrap()
-				};
-				let ub = if high >= 0 {
-					storage.storage[high as usize].val - 1
-				} else {
-					*self.domain.upper_bound().unwrap()
-				};
-				(lb, ub)
+				}
 			}
-		}
+		};
+		(lb, trail.get_trailed_int(self.upper_bound))
 	}
 
 	/// Notify that a new lower bound has been propagated for the variable,
@@ -613,36 +603,45 @@ impl IntVar {
 		trail: &mut impl TrailingActions,
 		val: IntVal,
 	) -> IntVal {
-		match &self.order_encoding {
-			OrderStorage::Eager { upper_bound, .. } => trail.set_trailed_int(*upper_bound, val),
-			OrderStorage::Lazy(
-				storage @ LazyOrderStorage {
-					max_index,
-					ub_index,
-					..
-				},
-			) => {
-				let ub = *self.domain.upper_bound().unwrap();
-				if val == ub {
-					return ub;
-				}
-				let (val, _, _) = OrderStorage::resolve_val(&self.domain, val + 1);
-				let cur_index = trail.get_trailed_int(*ub_index);
-				let cur_index = if cur_index < 0 {
-					*max_index
-				} else {
-					cur_index as u32
-				};
-				let new_index = storage.find_index(cur_index, SearchDirection::Decreasing, val);
-				debug_assert_eq!(storage[new_index].val, val);
-				let old_index = trail.set_trailed_int(*ub_index, new_index as IntVal);
-				debug_assert!(old_index < 0 || cur_index == old_index as u32);
-				if old_index < 0 {
-					ub
-				} else {
-					storage[cur_index].val - 1
-				}
-			}
+		let prev_ub = trail.set_trailed_int(self.upper_bound, val);
+		if prev_ub == val {
+			return val;
+		}
+		if let OrderStorage::Lazy(
+			storage @ LazyOrderStorage {
+				max_index,
+				ub_index,
+				..
+			},
+		) = &self.order_encoding
+		{
+			let (val, _, _) = OrderStorage::resolve_val(&self.domain, val + 1);
+			let cur_index = trail.get_trailed_int(*ub_index);
+			let cur_index = if cur_index < 0 {
+				*max_index
+			} else {
+				cur_index as u32
+			};
+			let new_index = storage.find_index(cur_index, SearchDirection::Decreasing, val);
+			debug_assert_eq!(storage[new_index].val, val);
+			let old_index = trail.set_trailed_int(*ub_index, new_index as IntVal);
+			debug_assert!(old_index < 0 || cur_index == old_index as u32);
+		}
+		prev_ub
+	}
+
+	/// Method used to tighten the upper bound given when notified by a
+	/// [`LitMeaning::Less`] literal.
+	pub(crate) fn tighten_upper_bound(&self, val: IntVal) -> IntVal {
+		let ranges = self.domain.iter();
+		if ranges.len() == 1 {
+			return val;
+		}
+		let range = ranges.rev().find(|r| val >= *r.start()).unwrap();
+		if val > *range.end() {
+			*range.end()
+		} else {
+			val
 		}
 	}
 }
@@ -656,7 +655,6 @@ pub(crate) enum OrderStorage {
 	/// Variables for all inequality conditions are eagerly created and stored in order
 	Eager {
 		lower_bound: TrailedInt,
-		upper_bound: TrailedInt,
 		storage: VarRange,
 	},
 	/// Variables for inequality conditions are lazily created and stored in a hashmap
