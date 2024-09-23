@@ -12,7 +12,7 @@ mod tests {
 	};
 
 	assert_all_solutions!(array_var_int_element);
-	assert_all_solutions!(sudoku);
+	assert_all_solutions!(sudoku_p0);
 	assert_all_solutions!(unification);
 	assert_all_solutions!(unify_element_1);
 	assert_all_solutions!(unify_element_2);
