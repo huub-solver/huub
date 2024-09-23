@@ -11,7 +11,7 @@
   "constraints": [
     { "id" : "bool_eq", "args" : ["x", "y"], "ann" : ["domain_change_constraint"]},
     { "id" : "bool_eq", "args" : ["x", "z"], "ann" : ["domain_change_constraint"]}, 
-    { "id" : "int_le_reif", "args" : ["ivar", 2, "x"], "defines" : "x"}
+    { "id" : "huub_int_le_view_reif", "args" : ["ivar", 2, "x"], "defines" : "x"}
   ],
   "output": ["x", "y", "z", "ivar"],
   "solve": { "method" : "satisfy"},

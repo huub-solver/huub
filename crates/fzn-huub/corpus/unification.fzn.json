@@ -32,15 +32,15 @@
 	"arrays": {},
 	"constraints": [
 		{
-			"id": "int_eq",
+			"id": "huub_int_eq",
 			"args": ["a", "b"]
 		},
 		{
-			"id": "int_eq",
+			"id": "huub_int_eq",
 			"args": ["c", "d"]
 		},
 		{
-			"id": "int_eq",
+			"id": "huub_int_eq",
 			"args": ["d", "a"]
 		},
 		{

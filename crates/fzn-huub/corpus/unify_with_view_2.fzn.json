@@ -10,8 +10,8 @@
   },
   "constraints": [
     { "id" : "bool_eq", "args" : ["x", "y"], "ann" : ["domain_change_constraint"]},
-    { "id" : "int_le_reif", "args" : ["ivar1", 2, "x"], "defines" : "x"}, 
-    { "id" : "int_le_reif", "args" : [3, "ivar2", "y"], "defines" : "y"}
+    { "id" : "huub_int_le_view_reif", "args" : ["ivar1", 2, "x"], "defines" : "x"}, 
+    { "id" : "huub_int_ge_view_reif", "args" : ["ivar2", 3, "y"], "defines" : "y"}
   ],
   "output": ["x", "y", "ivar1", "ivar2"],
   "solve": { "method" : "satisfy"},

@@ -18,10 +18,10 @@
     { "id" : "huub_all_different_int", "args" : ["X_INTRODUCED_4_"]},
     { "id" : "array_bool_and", "args" : [["X_INTRODUCED_0_", "X_INTRODUCED_1_"], "p"], "defines" : "p"},
     { "id" : "array_bool_and", "args" : [["X_INTRODUCED_2_", "X_INTRODUCED_3_"], "q"], "defines" : "q"},
-    { "id" : "int_le_reif", "args" : ["w", 4, "X_INTRODUCED_0_"], "defines" : "X_INTRODUCED_0_"},
-    { "id" : "int_le_reif", "args" : [6, "x", "X_INTRODUCED_1_"], "defines" : "X_INTRODUCED_1_"},
-    { "id" : "int_le_reif", "args" : ["y", 4, "X_INTRODUCED_2_"], "defines" : "X_INTRODUCED_2_"},
-    { "id" : "int_le_reif", "args" : [6, "z", "X_INTRODUCED_3_"], "defines" : "X_INTRODUCED_3_"}
+    { "id" : "huub_int_le_view_reif", "args" : ["w", 4, "X_INTRODUCED_0_"], "defines" : "X_INTRODUCED_0_"},
+    { "id" : "huub_int_ge_view_reif", "args" : ["x", 6, "X_INTRODUCED_1_"], "defines" : "X_INTRODUCED_1_"},
+    { "id" : "huub_int_le_view_reif", "args" : ["y", 4, "X_INTRODUCED_2_"], "defines" : "X_INTRODUCED_2_"},
+    { "id" : "huub_int_ge_view_reif", "args" : ["z", 6, "X_INTRODUCED_3_"], "defines" : "X_INTRODUCED_3_"}
   ],
   "output": ["w", "x", "y", "z", "p", "q"],
   "solve": { "method" : "satisfy", "ann" : [{ "id" : "seq_search", "args" : [[{ "id" : "seq_search", "args" : [[{ "id" : "int_search", "args" : [["w", "x"], "input_order", "indomain_min", "complete"]}, { "id" : "bool_search", "args" : [["p", "q"], "input_order", "indomain_max", "complete"]}]]}, { "id" : "int_search", "args" : [["y", "z"], "input_order", "indomain_max", "complete"]}]]}] },

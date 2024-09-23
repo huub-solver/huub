@@ -131,9 +131,8 @@ where
 				}
 				_ => {}
 			},
-			"int_eq_reif" => match c.args.as_slice() {
-				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
-				| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
+			"huub_int_eq_view_reif" => match c.args.as_slice() {
+				[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
 					if r == l =>
 				{
 					let x = lit_int_view(self, x)?;
@@ -141,8 +140,8 @@ where
 				}
 				_ => {}
 			},
-			"int_le_reif" => match c.args.as_slice() {
-				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
+			"huub_int_ge_view_reif" => match c.args.as_slice() {
+				[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
 					if r == l =>
 				{
 					let x = lit_int_view(self, x)?;
@@ -152,6 +151,9 @@ where
 						BoolView::IntGreaterEq(Box::new(x), *i).into(),
 					);
 				}
+				_ => {}
+			},
+			"huub_int_le_view_reif" => match c.args.as_slice() {
 				[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
 					if r == l =>
 				{
@@ -160,9 +162,8 @@ where
 				}
 				_ => {}
 			},
-			"int_ne_reif" => match c.args.as_slice() {
-				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
-				| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
+			"huub_int_ne_view_reif" => match c.args.as_slice() {
+				[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
 					if r == l =>
 				{
 					let x = lit_int_view(self, x)?;
@@ -265,18 +266,6 @@ where
 			}
 			let mark_processed = |me: &mut Self| me.processed[i] = true;
 			match c.id.deref() {
-				"bool_eq" => {
-					if let [Argument::Literal(a), Argument::Literal(b)] = c.args.as_slice() {
-						record_unify(&mut unify_map, a, b);
-						mark_processed(self);
-					}
-				}
-				"int_eq" => {
-					if let [Argument::Literal(a), Argument::Literal(b)] = c.args.as_slice() {
-						record_unify(&mut unify_map, a, b);
-						mark_processed(self);
-					}
-				}
 				"array_bool_element" | "array_int_element" => {
 					if let [idx, arr, Argument::Literal(b)] = c.args.as_slice() {
 						let arr = self.arg_array(arr)?;
@@ -292,6 +281,18 @@ where
 							record_unify(&mut unify_map, &arr[0], b);
 							mark_processed(self);
 						}
+					}
+				}
+				"bool_eq" => {
+					if let [Argument::Literal(a), Argument::Literal(b)] = c.args.as_slice() {
+						record_unify(&mut unify_map, a, b);
+						mark_processed(self);
+					}
+				}
+				"huub_int_eq" | "huub_int_eq_view" => {
+					if let [Argument::Literal(a), Argument::Literal(b)] = c.args.as_slice() {
+						record_unify(&mut unify_map, a, b);
+						mark_processed(self);
 					}
 				}
 				_ => {}
@@ -679,27 +680,6 @@ where
 						});
 					}
 				}
-				"huub_disjunctive_strict" => {
-					if let [starts, durations] = c.args.as_slice() {
-						let starts = self
-							.arg_array(starts)?
-							.iter()
-							.map(|l| self.lit_int(l))
-							.try_collect()?;
-						let durations = self
-							.arg_array(durations)?
-							.iter()
-							.map(|l| self.par_int(l))
-							.try_collect()?;
-						self.prb += Constraint::DisjunctiveStrict(starts, durations);
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "huub_disjunctive_strict",
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
-				}
 				"huub_array_int_maximum" | "huub_array_int_minimum" => {
 					let is_maximum = c.id.deref() == "huub_array_int_maximum";
 					if let [m, args] = c.args.as_slice() {
@@ -747,6 +727,117 @@ where
 						});
 					}
 				}
+				"huub_disjunctive_strict" => {
+					if let [starts, durations] = c.args.as_slice() {
+						let starts = self
+							.arg_array(starts)?
+							.iter()
+							.map(|l| self.lit_int(l))
+							.try_collect()?;
+						let durations = self
+							.arg_array(durations)?
+							.iter()
+							.map(|l| self.par_int(l))
+							.try_collect()?;
+						self.prb += Constraint::DisjunctiveStrict(starts, durations);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "huub_disjunctive_strict",
+							found: c.args.len(),
+							expected: 2,
+						});
+					}
+				}
+				"huub_int_le" | "huub_int_le_view" | "huub_int_ge_view" => {
+					if let [a, b] = c.args.as_slice() {
+						let (a, b) = if c.id.deref() == "huub_int_ge_view" {
+							(b, a)
+						} else {
+							(a, b)
+						};
+						let a = self.arg_int(a)?;
+						let b = self.arg_int(b)?;
+						self.prb += Constraint::IntLinLessEq(vec![a, -b], 0);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: match c.id.deref() {
+								"huub_int_le" => "huub_int_le",
+								"huub_int_le_view" => "huub_int_le_view",
+								"huub_int_ge_view" => "huub_int_ge_view",
+								_ => unreachable!(),
+							},
+							found: c.args.len(),
+							expected: 2,
+						});
+					}
+				}
+				"huub_int_ne" | "huub_int_ne_view" => {
+					if let [a, b] = c.args.as_slice() {
+						let a = self.arg_int(a)?;
+						let b = self.arg_int(b)?;
+						self.prb += Constraint::IntLinNotEq(vec![a, -b], 0);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "huub_int_ne",
+							found: c.args.len(),
+							expected: 2,
+						});
+					}
+				}
+				"huub_int_eq_imp"
+				| "huub_int_eq_reif"
+				| "huub_int_eq_view_reif"
+				| "huub_int_ge_view_reif"
+				| "huub_int_le_imp"
+				| "huub_int_le_reif"
+				| "huub_int_le_view_reif"
+				| "huub_int_ne_imp"
+				| "huub_int_ne_reif"
+				| "huub_int_ne_view_reif" => {
+					if let [a, b, r] = c.args.as_slice() {
+						let (a, b) = if c.id.deref() == "huub_int_ge_view_reif" {
+							(b, a)
+						} else {
+							(a, b)
+						};
+						let a = self.arg_int(a)?;
+						let b = self.arg_int(b)?;
+						let r = self.arg_bool(r)?;
+						self.prb += match c.id.deref() {
+							"huub_int_eq_imp" => Constraint::IntLinEqImp,
+							"huub_int_eq_reif" | "huub_int_eq_view_reif" => {
+								Constraint::IntLinEqReif
+							}
+							"huub_int_le_imp" => Constraint::IntLinLessEqImp,
+							"huub_int_le_reif"
+							| "huub_int_le_view_reif"
+							| "huub_int_ge_view_reif" => Constraint::IntLinLessEqReif,
+							"huub_int_ne_imp" => Constraint::IntLinNotEqImp,
+							"huub_int_ne_reif" | "huub_int_ne_view_reif" => {
+								Constraint::IntLinNotEqReif
+							}
+							_ => unreachable!(),
+						}(vec![a, -b], 0, r.into());
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: match c.id.deref() {
+								"huub_int_eq_imp" => "huub_int_eq_imp",
+								"huub_int_eq_reif" => "huub_int_eq_reif",
+								"huub_int_eq_view_reif" => "huub_int_eq_view_reif",
+								"huub_int_ge_view_reif" => "huub_int_ge_view_reif",
+								"huub_int_le_imp" => "huub_int_le_imp",
+								"huub_int_le_reif" => "huub_int_le_reif",
+								"huub_int_le_view_reif" => "huub_int_le_view_reif",
+								"huub_int_ne_imp" => "huub_int_ne_imp",
+								"huub_int_ne_reif" => "huub_int_ne_reif",
+								"huub_int_ne_view_reif" => "huub_int_ne_view_reif",
+								_ => unreachable!(),
+							},
+							found: c.args.len(),
+							expected: 3,
+						});
+					}
+				}
 				"int_abs" => {
 					if let [origin, abs] = c.args.as_slice() {
 						let origin = self.arg_int(origin)?;
@@ -769,63 +860,6 @@ where
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "int_div",
-							found: c.args.len(),
-							expected: 3,
-						});
-					}
-				}
-				"int_le" => {
-					if let [a, b] = c.args.as_slice() {
-						let a = self.arg_int(a)?;
-						let b = self.arg_int(b)?;
-						self.prb += Constraint::IntLinLessEq(vec![a, -b], 0);
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "int_le",
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
-				}
-				"int_ne" => {
-					if let [a, b] = c.args.as_slice() {
-						let a = self.arg_int(a)?;
-						let b = self.arg_int(b)?;
-						self.prb += Constraint::IntLinNotEq(vec![a, -b], 0);
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "int_ne",
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
-				}
-				"int_eq_imp" | "int_eq_reif" | "int_le_imp" | "int_le_reif" | "int_ne_imp"
-				| "int_ne_reif" => {
-					if let [a, b, r] = c.args.as_slice() {
-						let a = self.arg_int(a)?;
-						let b = self.arg_int(b)?;
-						let r = self.arg_bool(r)?;
-						self.prb += match c.id.deref() {
-							"int_eq_imp" => Constraint::IntLinEqImp,
-							"int_eq_reif" => Constraint::IntLinEqReif,
-							"int_le_imp" => Constraint::IntLinLessEqImp,
-							"int_le_reif" => Constraint::IntLinLessEqReif,
-							"int_ne_imp" => Constraint::IntLinNotEqImp,
-							"int_ne_reif" => Constraint::IntLinNotEqReif,
-							_ => unreachable!(),
-						}(vec![a, -b], 0, r.into());
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: match c.id.deref() {
-								"int_eq_imp" => "int_eq_imp",
-								"int_eq_reif" => "int_eq_reif",
-								"int_le_imp" => "int_le_imp",
-								"int_le_reif" => "int_le_reif",
-								"int_ne_imp" => "int_ne_imp",
-								"int_ne_reif" => "int_ne_reif",
-								_ => unreachable!(),
-							},
 							found: c.args.len(),
 							expected: 3,
 						});
