@@ -4,9 +4,19 @@ predicate bool_lt(var bool: a, var bool: b) = not a /\ b;
 predicate bool_lt_imp(var bool: a, var bool: b, var bool: r) = r -> (not a /\ b);
 predicate bool_lt_reif(var bool: a, var bool: b, var bool: r) = r = (not a /\ b);
 
+% Half-reify integer comparisons with two variables
 predicate int_eq_imp(var int: a, var int: b, var bool: r);
 predicate int_le_imp(var int: a, var int: b, var bool: r);
 predicate int_ne_imp(var int: a, var int: b, var bool: r);
+
+% Fully reify integer comparisons of a variable and a constant (these become
+% literal views)
+predicate int_eq_reif(var int: a, int: b, var bool: r);
+predicate int_eq_reif(int: a, var int: b, var bool: r);
+predicate int_le_reif(var int: a, int: b, var bool: r);
+predicate int_le_reif(int: a, var int: b, var bool: r);
+predicate int_ne_reif(var int: a, int: b, var bool: r);
+predicate int_ne_reif(int: a, var int: b, var bool: r);
 
 predicate int_lin_eq_imp(
 	array [int] of int: as,
