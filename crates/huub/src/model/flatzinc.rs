@@ -64,7 +64,7 @@ impl FlatZincStatistics {
 	///   representation instead of reified constraints)
 	/// - linear views (i.e., scaled and offset views of integer variables)
 	/// - Boolean linear views (i.e., scaled and offset views of Boolean
-	/// variables, able to represent any integer value with two values)
+	///   variables, able to represent any integer value with two values)
 	pub fn extracted_views(&self) -> u32 {
 		self.extracted_views
 	}
@@ -1514,7 +1514,7 @@ impl Model {
 impl<Sol, Sat> Solver<Sat>
 where
 	Sol: PropagatorAccess + SatValuation,
-	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+	Sat: SatSolver + SolverTrait<ValueFn = Sol> + 'static,
 {
 	pub fn from_fzn<S>(
 		fzn: &FlatZinc<S>,

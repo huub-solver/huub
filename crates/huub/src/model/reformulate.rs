@@ -24,6 +24,10 @@ use crate::{
 pub struct InitConfig {
 	/// The maximum cardinality of the domain of an integer variable before its order encoding is created lazily.
 	int_eager_limit: Option<usize>,
+	/// Whether to enable restarts in the oracle solver.
+	restart: bool,
+	/// Whether to enable the vivification in the oracle solver.
+	vivification: bool,
 }
 
 #[derive(Error, Debug, PartialEq, Eq)]
@@ -47,17 +51,44 @@ pub struct VariableMap {
 }
 
 impl InitConfig {
-	/// The default maximum cardinality of the domain of an integer variable before its order encoding is created lazily.
+	/// The default maximum cardinality of the domain of an integer variable
+	/// before its order encoding is created lazily.
 	pub const DEFAULT_INT_EAGER_LIMIT: usize = 255;
 
+	/// Get the maximum cardinality of the domain of an integer variable before
+	/// its order encoding is created lazily.
+	pub fn int_eager_limit(&self) -> usize {
+		self.int_eager_limit
+			.unwrap_or(Self::DEFAULT_INT_EAGER_LIMIT)
+	}
+
+	/// Get whether to enable restarts in the oracle solver.
+	pub fn restart(&self) -> bool {
+		self.restart
+	}
+
+	/// Get whether to enable the vivification in the oracle solver.
+	pub fn vivification(&self) -> bool {
+		self.vivification
+	}
+
+	/// Change the maximum cardinality of the domain of an integer variable before
+	/// its order encoding is created lazily.
 	pub fn with_int_eager_limit(mut self, limit: usize) -> Self {
 		self.int_eager_limit = Some(limit);
 		self
 	}
 
-	pub fn int_eager_limit(&self) -> usize {
-		self.int_eager_limit
-			.unwrap_or(Self::DEFAULT_INT_EAGER_LIMIT)
+	/// Change whether to enable restarts in the oracle solver.
+	pub fn with_restart(mut self, restart: bool) -> Self {
+		self.restart = restart;
+		self
+	}
+
+	/// Change whether to enable the vivification in the oracle solver.
+	pub fn with_vivification(mut self, vivification: bool) -> Self {
+		self.vivification = vivification;
+		self
 	}
 }
 

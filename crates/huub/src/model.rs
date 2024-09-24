@@ -6,17 +6,19 @@ pub(crate) mod int;
 pub(crate) mod reformulate;
 
 use std::{
+	any::Any,
 	collections::{HashSet, VecDeque},
 	iter::repeat,
 	ops::AddAssign,
 };
 
 use pindakaas::{
-	solver::{NextVarRange, PropagatorAccess, Solver as SolverTrait},
+	solver::{cadical::Cadical, NextVarRange, PropagatorAccess, Solver as SolverTrait},
 	ClauseDatabase, Cnf, ConditionalDatabase, Lit as RawLit, Valuation as SatValuation,
 	Var as RawVar,
 };
 use rangelist::{IntervalIterator, RangeList};
+use tracing::warn;
 
 use crate::{
 	model::{
@@ -70,7 +72,7 @@ impl Model {
 
 	pub fn to_solver<
 		Sol: PropagatorAccess + SatValuation,
-		Sat: SatSolver + SolverTrait<ValueFn = Sol>,
+		Sat: SatSolver + SolverTrait<ValueFn = Sol> + 'static,
 	>(
 		&mut self,
 		config: &InitConfig,
@@ -78,7 +80,14 @@ impl Model {
 		let mut map = VariableMap::default();
 
 		// TODO: run SAT simplification
-		let mut slv = self.cnf.clone().into();
+		let mut slv: Solver<Sat> = self.cnf.clone().into();
+		let any_slv: &mut dyn Any = &mut slv.oracle;
+		if let Some(r) = any_slv.downcast_mut::<Cadical>() {
+			r.set_option("restart", config.restart() as i32);
+			r.set_option("vivify", config.vivification() as i32);
+		} else {
+			warn!("unknown solver: vivification and restart options are ignored");
+		}
 
 		while let Some(con) = self.prop_queue.pop_front() {
 			self.propagate(con)?;

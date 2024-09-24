@@ -67,10 +67,14 @@ pub struct Cli<Stdout, Stderr> {
 	int_eager_limit: Option<usize>,
 
 	// --- Solving configuration ---
-	/// Switch to the VSIDS heuristic after a certain number of conflicts
-	vsids_after: Option<u32>,
+	/// Whether solver is allowed to restart
+	restart: bool,
 	/// Alternate between the SAT and VSIDS heuristic after every restart
 	toggle_vsids: bool,
+	/// Whether the vivification heuristic is enabled
+	vivification: bool,
+	/// Switch to the VSIDS heuristic after a certain number of conflicts
+	vsids_after: Option<u32>,
 	/// Only use the SAT VSIDS heuristic for search
 	vsids_only: bool,
 
@@ -123,6 +127,9 @@ where
 		if let Some(eager_limit) = self.int_eager_limit {
 			config = config.with_int_eager_limit(eager_limit);
 		}
+		config = config
+			.with_restart(self.free_search || self.restart)
+			.with_vivification(self.vivification);
 		config
 	}
 
@@ -437,8 +444,10 @@ where
 			time_limit: self.time_limit,
 			verbose: self.verbose,
 			int_eager_limit: self.int_eager_limit,
-			vsids_after: self.vsids_after,
+			restart: self.restart,
 			toggle_vsids: self.toggle_vsids,
+			vivification: self.vivification,
+			vsids_after: self.vsids_after,
 			vsids_only: self.vsids_only,
 			stdout: self.stdout,
 		}
@@ -456,8 +465,10 @@ where
 			time_limit: self.time_limit,
 			verbose: self.verbose,
 			int_eager_limit: self.int_eager_limit,
-			vsids_after: self.vsids_after,
+			restart: self.restart,
 			toggle_vsids: self.toggle_vsids,
+			vivification: self.vivification,
+			vsids_after: self.vsids_after,
 			vsids_only: self.vsids_only,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
@@ -473,6 +484,15 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			verbose += 1;
 		}
 
+		let parse_bool_arg = |s: &str| match s {
+			"true" | "on" | "1" => Ok(true),
+			"false" | "off" | "0" => Ok(false),
+			_ => Err(format!(
+				"expected 'true','false','on','off','0', or '1', found '{}'",
+				s
+			)),
+		};
+
 		let cli = Cli {
 			all_solutions: args.contains(["-a", "--all-solutions"]),
 			intermediate_solutions: args.contains(["-i", "--intermediate-solutions"]),
@@ -486,7 +506,15 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 				.opt_value_from_str("--int-eager-limit")
 				.map_err(|e| e.to_string())?,
 
+			restart: args
+				.opt_value_from_fn("--restart", parse_bool_arg)
+				.map(|x| x.unwrap_or(false))
+				.map_err(|e| e.to_string())?,
 			toggle_vsids: args.contains("--toggle-vsids"),
+			vivification: args
+				.opt_value_from_fn("--vivify", parse_bool_arg)
+				.map(|x| x.unwrap_or(false)) // TODO: investigate whether this can be re-enabled
+				.map_err(|e| e.to_string())?,
 			vsids_only: args.contains("--vsids-only"),
 			vsids_after: args
 				.opt_value_from_str("--vsids-after")
