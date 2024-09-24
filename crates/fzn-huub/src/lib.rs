@@ -16,8 +16,8 @@ use std::{
 
 use flatzinc_serde::{FlatZinc, Literal, Method};
 use huub::{
-	FlatZincError, Goal, InitConfig, LitMeaning, ReformulationError, SlvTermSignal, SolveResult,
-	Solver, SolverView, Valuation,
+	FlatZincError, FlatZincStatistics, Goal, InitConfig, LitMeaning, ReformulationError,
+	SlvTermSignal, SolveResult, Solver, SolverView, Valuation,
 };
 use pico_args::Arguments;
 use tracing::{subscriber::set_default, warn};
@@ -104,6 +104,15 @@ fn parse_time_limit(s: &str) -> Result<Duration, humantime::DurationError> {
 	}
 }
 
+/// Print a statistics block formulated for MiniZinc
+fn print_statistics_block<W: io::Write>(stream: &mut W, name: &str, stats: &[(&str, &dyn Debug)]) {
+	outputln!(stream, "%%%mzn-stat: blockType={:?}", name);
+	for stat in stats {
+		outputln!(stream, "%%%mzn-stat: {}={:?}", stat.0, stat.1);
+	}
+	outputln!(stream, "%%%mzn-stat-end");
+}
+
 impl<Stdout, Stderr> Cli<Stdout, Stderr>
 where
 	Stdout: io::Write,
@@ -148,36 +157,36 @@ where
 		// Convert FlatZinc model to internal Solver representation
 		let res = Solver::from_fzn(&fzn, &self.init_config());
 		// Resolve any errors that may have occurred during the conversion
-		let (mut slv, var_map): (Solver, UstrMap<SolverView>) = match res {
-			Err(FlatZincError::ReformulationError(ReformulationError::TrivialUnsatisfiable)) => {
-				outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
-				return Ok(());
-			}
-			Err(err) => {
-				return Err(err.to_string());
-			}
-			Ok((slv, var_map)) => (slv, var_map.into_iter().collect()),
-		};
+		let (mut slv, var_map, fzn_stats): (Solver, UstrMap<SolverView>, FlatZincStatistics) =
+			match res {
+				Err(FlatZincError::ReformulationError(
+					ReformulationError::TrivialUnsatisfiable,
+				)) => {
+					outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
+					return Ok(());
+				}
+				Err(err) => {
+					return Err(err.to_string());
+				}
+				Ok((slv, var_map, fzn_stats)) => (slv, var_map.into_iter().collect(), fzn_stats),
+			};
 
 		if self.statistics {
 			let stats = slv.init_statistics();
-			outputln!(self.stdout, "%%%mzn-stat: blockType={:?}", "init");
-			outputln!(
-				self.stdout,
-				"%%%mzn-stat: intVariables={:?}",
-				stats.int_vars()
+			print_statistics_block(
+				&mut self.stdout,
+				"init",
+				&[
+					("intVariables", &stats.int_vars()),
+					("propagators", &stats.propagators()),
+					("unifiedVariables", &fzn_stats.unified_variables()),
+					("extractedViews", &fzn_stats.extracted_views()),
+					(
+						"initTime",
+						&Instant::now().duration_since(start).as_secs_f64(),
+					),
+				],
 			);
-			outputln!(
-				self.stdout,
-				"%%%mzn-stat: propagators={:?}",
-				stats.propagators()
-			);
-			outputln!(
-				self.stdout,
-				"%%%mzn-stat: initTime={:?}",
-				Instant::now().duration_since(start).as_secs_f64()
-			);
-			outputln!(self.stdout, "%%%mzn-stat-end");
 		}
 
 		// Create reverse map for solver variables if required
@@ -383,25 +392,19 @@ where
 		// output solving statistics
 		if self.statistics {
 			let stats = slv.search_statistics();
-			outputln!(self.stdout, "%%%mzn-stat: blockType={:?}", "complete");
-			outputln!(
-				self.stdout,
-				"%%%mzn-stat: solveTime={}",
-				(Instant::now() - start_solve).as_secs_f64()
+			print_statistics_block(
+				&mut self.stdout,
+				"complete",
+				&[
+					("solveTime", &(Instant::now() - start_solve).as_secs_f64()),
+					("failures", &stats.conflicts()),
+					("peakDepth", &stats.peak_depth()),
+					("propagations", &stats.propagations()),
+					("restarts", &stats.restarts()),
+					("oracleDecisions", &stats.oracle_decisions()),
+					("userDecisions", &stats.user_decisions()),
+				],
 			);
-			outputln!(self.stdout, "%%%mzn-stat: failures={:?}", stats.conflicts());
-			outputln!(
-				self.stdout,
-				"%%%mzn-stat: peakDepth={:?}",
-				stats.peak_depth()
-			);
-			outputln!(
-				self.stdout,
-				"%%%mzn-stat: propagations={:?}",
-				stats.propagations()
-			);
-			outputln!(self.stdout, "%%%mzn-stat: restarts={:?}", stats.restarts());
-			outputln!(self.stdout, "%%%mzn-stat-end");
 		}
 		match res {
 			SolveResult::Satisfied => {}

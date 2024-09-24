@@ -83,14 +83,18 @@ index_vec::define_index_type! {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct SearchStatistics {
-	// Number of conflicts encountered
+	/// Number of conflicts encountered
 	conflicts: u64,
-	// Peak search depth
+	/// Number of search decisions left to the oracle solver
+	oracle_decisions: u64,
+	/// Peak search depth
 	peak_depth: u32,
-	// Number of times a CP propagator was called
+	/// Number of times a CP propagator was called
 	propagations: u64,
-	// Number of backtracks to level 0
+	/// Number of backtracks to level 0
 	restarts: u32,
+	/// Number of decisions following the user-specified search heuristics
+	user_decisions: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -181,6 +185,7 @@ impl IpasirPropagator for Engine {
 		if !self.state.vsids {
 			let mut current = self.state.trail.get_trailed_int(Trail::CURRENT_BRANCHER) as usize;
 			if current == self.branchers.len() {
+				self.state.statistics.oracle_decisions += 1;
 				return None;
 			}
 			let mut ctx = SolvingContext::new(slv, &mut self.state);
@@ -188,6 +193,7 @@ impl IpasirPropagator for Engine {
 				match self.branchers[current].decide(&mut ctx) {
 					Decision::Select(lit) => {
 						debug!(lit = i32::from(lit), "decide");
+						self.state.statistics.user_decisions += 1;
 						return Some(lit);
 					}
 					Decision::Exhausted => {
@@ -205,6 +211,7 @@ impl IpasirPropagator for Engine {
 				}
 			}
 		}
+		self.state.statistics.oracle_decisions += 1;
 		None
 	}
 
@@ -380,17 +387,31 @@ impl IpasirPropagator for Engine {
 }
 
 impl SearchStatistics {
+	/// Returns the number of conflicts encountered during the search.
 	pub fn conflicts(&self) -> u64 {
 		self.conflicts
 	}
+	/// Returns the peak depth of the search tree.
 	pub fn peak_depth(&self) -> u32 {
 		self.peak_depth
 	}
+	/// Return the number of search decisions that was left to the oracle solver.
+	pub fn oracle_decisions(&self) -> u64 {
+		self.oracle_decisions
+	}
+	/// Returns the number of propagations performed by the constraint programming
+	/// engine during the search.
 	pub fn propagations(&self) -> u64 {
 		self.propagations
 	}
+	/// Returns the number of times the search was restarted by the oracle solver.
 	pub fn restarts(&self) -> u32 {
 		self.restarts
+	}
+	/// Returns the number of search decisions that followed the user specified
+	/// search heuristic.
+	pub fn user_decisions(&self) -> u64 {
+		self.user_decisions
 	}
 }
 

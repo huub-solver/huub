@@ -32,6 +32,16 @@ use crate::{
 	BoolExpr, Constraint, InitConfig, IntSetVal, IntVal, Model, NonZeroIntVal, Solver, SolverView,
 };
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+/// Statistical information about the extraction process that creates a
+/// [`Model`] from a [`FlatZinc`] instance.
+pub struct FlatZincStatistics {
+	/// Number of literal views extracted from the FlatZinc specification
+	extracted_views: u32,
+	/// Number of variables removed by unification
+	vars_unified: u32,
+}
+
 /// Builder for creating a model from a FlatZinc instance
 struct FznModelBuilder<'a, S: Eq + Hash + Ord> {
 	/// The FlatZinc instance to build the model from
@@ -42,6 +52,27 @@ struct FznModelBuilder<'a, S: Eq + Hash + Ord> {
 	prb: Model,
 	/// Flags indicating which constraints have been processed
 	processed: Vec<bool>,
+	/// Statistics about the extraction process
+	stats: FlatZincStatistics,
+}
+
+impl FlatZincStatistics {
+	/// Returns the number of views extracted from the FlatZinc instance
+	///
+	/// Views currently creates the following types of views:
+	/// - literal views (i.e., direct use of literals used to as part of variable
+	///   representation instead of reified constraints)
+	/// - linear views (i.e., scaled and offset views of integer variables)
+	/// - Boolean linear views (i.e., scaled and offset views of Boolean
+	/// variables, able to represent any integer value with two values)
+	pub fn extracted_views(&self) -> u32 {
+		self.extracted_views
+	}
+
+	/// Returns the number of variables removed by unification
+	pub fn unified_variables(&self) -> u32 {
+		self.vars_unified
+	}
 }
 
 impl<'a, S> FznModelBuilder<'a, S>
@@ -55,6 +86,7 @@ where
 			map: HashMap::new(),
 			prb: Model::default(),
 			processed: vec![false; fzn.constraints.len()],
+			stats: FlatZincStatistics::default(),
 		}
 	}
 
@@ -90,6 +122,7 @@ where
 
 		let add_view = |me: &mut Self, name: S, view: ModelView| {
 			let e = me.map.insert(name, view);
+			me.stats.extracted_views += 1;
 			debug_assert!(e.is_none());
 			me.processed[con] = true;
 		};
@@ -380,6 +413,7 @@ where
 					match self.map.entry(id.clone()) {
 						Entry::Vacant(e) => {
 							let _ = e.insert(var.clone());
+							self.stats.vars_unified += 1;
 						}
 						Entry::Occupied(e) => {
 							if var != *e.get() {
@@ -1041,8 +1075,8 @@ where
 	}
 
 	/// Finalize the builder and return the model
-	fn finalize(self) -> (Model, HashMap<S, ModelView>) {
-		(self.prb, self.map)
+	fn finalize(self) -> (Model, HashMap<S, ModelView>, FlatZincStatistics) {
+		(self.prb, self.map, self.stats)
 	}
 
 	fn arg_array(&self, arg: &'a Argument<S>) -> Result<&'a Vec<Literal<S>>, FlatZincError> {
@@ -1460,7 +1494,9 @@ where
 }
 
 impl Model {
-	pub fn from_fzn<S>(fzn: &FlatZinc<S>) -> Result<(Self, HashMap<S, ModelView>), FlatZincError>
+	pub fn from_fzn<S>(
+		fzn: &FlatZinc<S>,
+	) -> Result<(Self, HashMap<S, ModelView>, FlatZincStatistics), FlatZincError>
 	where
 		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
 	{
@@ -1483,17 +1519,17 @@ where
 	pub fn from_fzn<S>(
 		fzn: &FlatZinc<S>,
 		config: &InitConfig,
-	) -> Result<(Self, HashMap<S, SolverView>), FlatZincError>
+	) -> Result<(Self, HashMap<S, SolverView>, FlatZincStatistics), FlatZincError>
 	where
 		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
 	{
-		let (mut prb, map) = Model::from_fzn(fzn)?;
+		let (mut prb, map, fzn_stats) = Model::from_fzn(fzn)?;
 		let (mut slv, remap) = prb.to_solver(config)?;
 		let map = map
 			.into_iter()
 			.map(|(k, v)| (k, remap.get(&mut slv, &v)))
 			.collect();
-		Ok((slv, map))
+		Ok((slv, map, fzn_stats))
 	}
 }
 

@@ -11,7 +11,7 @@ pub use helpers::linear_transform::LinearTransform;
 pub use model::{
 	bool::BoolExpr,
 	constraint::Constraint,
-	flatzinc::FlatZincError,
+	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::{InitConfig, ReformulationError},
 	Model,
 };
