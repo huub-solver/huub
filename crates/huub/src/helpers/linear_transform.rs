@@ -1,5 +1,7 @@
 use std::ops::{Add, Mul, Neg};
 
+use rangelist::RangeList;
+
 use crate::{helpers::div_ceil, IntVal, LitMeaning, NonZeroIntVal};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -110,6 +112,28 @@ impl LinearTransform {
 				transformer.scale,
 			))),
 		}
+	}
+
+	pub(crate) fn rev_transform_mask(&self, mask: &RangeList<IntVal>) -> RangeList<IntVal> {
+		let get_val = |meaning| match meaning {
+			LitMeaning::GreaterEq(i) => i,
+			LitMeaning::Less(i) => i - 1,
+			_ => unreachable!(),
+		};
+
+		mask.iter()
+			.map(|r| {
+				let a = get_val(
+					self.rev_transform_lit(LitMeaning::GreaterEq(*r.start()))
+						.unwrap(),
+				);
+				let b = get_val(
+					self.rev_transform_lit(LitMeaning::Less(r.end() + 1))
+						.unwrap(),
+				);
+				a.min(b)..=a.max(b)
+			})
+			.collect()
 	}
 }
 

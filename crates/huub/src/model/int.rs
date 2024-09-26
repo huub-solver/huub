@@ -10,7 +10,7 @@ use crate::{
 	helpers::linear_transform::LinearTransform,
 	model::{bool::BoolView, reformulate::VariableMap},
 	solver::{view, SatSolver},
-	IntVal, Model, NonZeroIntVal, ReformulationError, Solver,
+	IntVal, LitMeaning, Model, NonZeroIntVal, ReformulationError, Solver,
 };
 
 impl IntView {
@@ -112,6 +112,53 @@ impl From<BoolView> for IntView {
 }
 
 impl Model {
+	pub(crate) fn diff_int_domain(
+		&mut self,
+		iv: &IntView,
+		mask: &RangeList<IntVal>,
+		con: usize,
+	) -> Result<(), ReformulationError> {
+		match iv {
+			IntView::Var(v) => {
+				let diff: RangeList<_> = self.int_vars[v.0 as usize].domain.diff(mask);
+				if diff.is_empty() {
+					return Err(ReformulationError::TrivialUnsatisfiable);
+				} else if self.int_vars[v.0 as usize].domain == diff {
+					return Ok(());
+				}
+				self.int_vars[v.0 as usize].domain = diff;
+				let constraints = self.int_vars[v.0 as usize].constraints.clone();
+				for c in constraints {
+					if c != con {
+						self.enqueue(c);
+					}
+				}
+				Ok(())
+			}
+			IntView::Const(v) => {
+				if mask.contains(v) {
+					Err(ReformulationError::TrivialUnsatisfiable)
+				} else {
+					Ok(())
+				}
+			}
+			IntView::Linear(trans, iv) => {
+				let mask = trans.rev_transform_mask(mask);
+				self.diff_int_domain(&IntView::Var(*iv), &mask, con)
+			}
+			IntView::Bool(trans, b) => {
+				let mask = trans.rev_transform_mask(mask);
+				if mask.contains(&0) {
+					self.set_bool(b, con)?;
+				}
+				if mask.contains(&1) {
+					self.set_bool(&!b, con)?;
+				}
+				Ok(())
+			}
+		}
+	}
+
 	pub(crate) fn get_int_lower_bound(&self, iv: &IntView) -> IntVal {
 		match *iv {
 			IntView::Var(v) => {
@@ -162,6 +209,71 @@ impl Model {
 		}
 	}
 
+	pub(crate) fn intersect_int_domain(
+		&mut self,
+		iv: &IntView,
+		mask: &RangeList<IntVal>,
+		con: usize,
+	) -> Result<(), ReformulationError> {
+		match iv {
+			IntView::Var(v) => {
+				let intersect: RangeList<_> = self.int_vars[v.0 as usize].domain.intersect(mask);
+				if intersect.is_empty() {
+					return Err(ReformulationError::TrivialUnsatisfiable);
+				} else if self.int_vars[v.0 as usize].domain == intersect {
+					return Ok(());
+				}
+				self.int_vars[v.0 as usize].domain = intersect;
+				let constraints = self.int_vars[v.0 as usize].constraints.clone();
+				for c in constraints {
+					if c != con {
+						self.enqueue(c);
+					}
+				}
+				Ok(())
+			}
+			IntView::Const(v) => {
+				if !mask.contains(v) {
+					Err(ReformulationError::TrivialUnsatisfiable)
+				} else {
+					Ok(())
+				}
+			}
+			IntView::Linear(trans, iv) => {
+				let mask = trans.rev_transform_mask(mask);
+				self.intersect_int_domain(&IntView::Var(*iv), &mask, con)
+			}
+			IntView::Bool(trans, b) => {
+				let mask = trans.rev_transform_mask(mask);
+				if !mask.contains(&0) {
+					self.set_bool(b, con)?;
+				}
+				if !mask.contains(&1) {
+					self.set_bool(&!b, con)?;
+				}
+				Ok(())
+			}
+		}
+	}
+
+	pub(crate) fn set_bool(&mut self, b: &BoolView, con: usize) -> Result<(), ReformulationError> {
+		match b {
+			BoolView::Lit(l) => self
+				.add_clause([*l])
+				.map_err(|_| ReformulationError::TrivialUnsatisfiable),
+			BoolView::Const(true) => Ok(()),
+			BoolView::Const(false) => Err(ReformulationError::TrivialUnsatisfiable),
+			BoolView::IntEq(iv, val) => self.set_int_value(iv, *val, con),
+			BoolView::IntGreater(iv, val) => self.set_int_lower_bound(iv, val + 1, con),
+			BoolView::IntGreaterEq(iv, val) => self.set_int_lower_bound(iv, *val, con),
+			BoolView::IntLess(iv, val) => self.set_int_upper_bound(iv, val - 1, con),
+			BoolView::IntLessEq(iv, val) => self.set_int_upper_bound(iv, *val, con),
+			BoolView::IntNotEq(iv, val) => {
+				self.diff_int_domain(iv, &RangeList::from(*val..=*val), con)
+			}
+		}
+	}
+
 	pub(crate) fn set_int_lower_bound(
 		&mut self,
 		iv: &IntView,
@@ -200,83 +312,30 @@ impl Model {
 					Ok(())
 				}
 			}
-			IntView::Linear(t, x) => {
-				let def = &mut self.int_vars[x.0 as usize];
-				if t.positive_scale() {
-					let new_lb = t.rev_transform(lb);
-					if new_lb > *def.domain.upper_bound().unwrap() {
-						return Err(ReformulationError::TrivialUnsatisfiable);
-					} else if new_lb <= *def.domain.lower_bound().unwrap() {
-						return Ok(());
+			IntView::Linear(trans, iv) => {
+				match trans.rev_transform_lit(LitMeaning::GreaterEq(lb)) {
+					Ok(LitMeaning::GreaterEq(val)) => {
+						self.set_int_lower_bound(&IntView::Var(*iv), val, con)
 					}
-					def.domain = RangeList::from_iter(def.domain.iter().filter_map(|r| {
-						if *r.end() < new_lb {
-							None
-						} else if *r.start() < new_lb {
-							Some(new_lb..=*r.end())
-						} else {
-							Some(r)
-						}
-					}));
-					let constraints = def.constraints.clone();
-					for c in constraints {
-						if c != con {
-							self.enqueue(c);
-						}
+					Ok(LitMeaning::Less(val)) => {
+						self.set_int_upper_bound(&IntView::Var(*iv), val - 1, con)
 					}
-					Ok(())
-				} else {
-					let new_ub = t.rev_transform(lb);
-					if new_ub < *def.domain.lower_bound().unwrap() {
-						return Err(ReformulationError::TrivialUnsatisfiable);
-					} else if new_ub >= *def.domain.upper_bound().unwrap() {
-						return Ok(());
-					}
-					def.domain = RangeList::from_iter(def.domain.iter().filter_map(|r| {
-						if *r.end() < new_ub {
-							None
-						} else if *r.start() < new_ub {
-							Some(*r.start()..=new_ub)
-						} else {
-							Some(r)
-						}
-					}));
-					let constraints = def.constraints.clone();
-					for c in constraints {
-						if c != con {
-							self.enqueue(c);
-						}
-					}
-					Ok(())
+					_ => unreachable!(),
 				}
 			}
-			IntView::Bool(t, b) => {
-				if t.positive_scale() {
-					let new_lb = t.rev_transform(lb);
-					if new_lb > 1 {
-						return Err(ReformulationError::TrivialUnsatisfiable);
-					} else if new_lb > 0 {
-						if let BoolView::Lit(l) = b.clone() {
-							let _ = self.add_clause(vec![l]);
-						} else {
-							todo!()
-						}
-					}
-					Ok(())
-				} else {
-					let new_ub = t.rev_transform(lb);
-					if new_ub < 0 {
-						return Err(ReformulationError::TrivialUnsatisfiable);
-					} else if new_ub < 1 {
-						if let BoolView::Lit(l) = b {
-							let _ = self.add_clause(vec![!l]);
-						} else {
-							todo!()
-						}
-					}
-					Ok(())
+			IntView::Bool(trans, b) => match trans.rev_transform_lit(LitMeaning::GreaterEq(lb)) {
+				Ok(LitMeaning::GreaterEq(1)) => self.set_bool(b, con),
+				Ok(LitMeaning::GreaterEq(val)) if val >= 2 => {
+					Err(ReformulationError::TrivialUnsatisfiable)
 				}
-			}
+				Ok(LitMeaning::GreaterEq(_)) => Ok(()),
+				Ok(LitMeaning::Less(1)) => self.set_bool(&!b, con),
+				Ok(LitMeaning::Less(val)) if val <= 0 => {
+					Err(ReformulationError::TrivialUnsatisfiable)
+				}
+				Ok(LitMeaning::Less(_)) => Ok(()),
+				_ => unreachable!(),
+			},
 		}
 	}
 
@@ -318,24 +377,42 @@ impl Model {
 					Ok(())
 				}
 			}
-			IntView::Linear(t, x) => {
-				let def = &mut self.int_vars[x.0 as usize];
-				if t.positive_scale() {
-					let new_ub = t.rev_transform(ub);
-					if new_ub < *def.domain.lower_bound().unwrap() {
-						return Err(ReformulationError::TrivialUnsatisfiable);
-					} else if new_ub >= *def.domain.upper_bound().unwrap() {
-						return Ok(());
-					}
-					def.domain = RangeList::from_iter(def.domain.iter().filter_map(|r| {
-						if new_ub < *r.start() {
-							None
-						} else if new_ub < *r.end() {
-							Some(*r.start()..=new_ub)
-						} else {
-							Some(r)
-						}
-					}));
+			IntView::Linear(trans, iv) => match trans.rev_transform_lit(LitMeaning::Less(ub + 1)) {
+				Ok(LitMeaning::GreaterEq(val)) => {
+					self.set_int_lower_bound(&IntView::Var(*iv), val, con)
+				}
+				Ok(LitMeaning::Less(val)) => {
+					self.set_int_upper_bound(&IntView::Var(*iv), val - 1, con)
+				}
+				_ => unreachable!(),
+			},
+			IntView::Bool(trans, b) => match trans.rev_transform_lit(LitMeaning::Less(ub + 1)) {
+				Ok(LitMeaning::GreaterEq(1)) => self.set_bool(b, con),
+				Ok(LitMeaning::GreaterEq(val)) if val >= 2 => {
+					Err(ReformulationError::TrivialUnsatisfiable)
+				}
+				Ok(LitMeaning::GreaterEq(_)) => Ok(()),
+				Ok(LitMeaning::Less(1)) => self.set_bool(&!b, con),
+				Ok(LitMeaning::Less(val)) if val <= 0 => {
+					Err(ReformulationError::TrivialUnsatisfiable)
+				}
+				Ok(LitMeaning::Less(_)) => Ok(()),
+				_ => unreachable!(),
+			},
+		}
+	}
+
+	pub(crate) fn set_int_value(
+		&mut self,
+		iv: &IntView,
+		val: IntVal,
+		con: usize,
+	) -> Result<(), ReformulationError> {
+		match iv {
+			IntView::Var(v) => {
+				let def = &mut self.int_vars[v.0 as usize];
+				if def.domain.contains(&val) {
+					def.domain = RangeList::from(val..=val);
 					let constraints = def.constraints.clone();
 					for c in constraints {
 						if c != con {
@@ -344,127 +421,31 @@ impl Model {
 					}
 					Ok(())
 				} else {
-					let new_lb = t.rev_transform(ub);
-					if new_lb > *def.domain.upper_bound().unwrap() {
-						return Err(ReformulationError::TrivialUnsatisfiable);
-					} else if new_lb <= *def.domain.lower_bound().unwrap() {
-						return Ok(());
-					}
-					def.domain = RangeList::from_iter(def.domain.iter().filter_map(|r| {
-						if new_lb > *r.end() {
-							None
-						} else if new_lb > *r.start() {
-							Some(new_lb..=*r.end())
-						} else {
-							Some(r)
-						}
-					}));
-					let constraints = def.constraints.clone();
-					for c in constraints {
-						if c != con {
-							self.enqueue(c);
-						}
-					}
-					Ok(())
-				}
-			}
-			IntView::Bool(t, b) => {
-				if t.positive_scale() {
-					let new_ub = t.rev_transform(ub);
-					if new_ub < 0 {
-						return Err(ReformulationError::TrivialUnsatisfiable);
-					} else if new_ub < 1 {
-						if let BoolView::Lit(l) = b.clone() {
-							let _ = self.add_clause(vec![!l]);
-						} else {
-							todo!()
-						}
-					}
-					Ok(())
-				} else {
-					let new_lb = t.rev_transform(ub);
-					if new_lb > 1 {
-						return Err(ReformulationError::TrivialUnsatisfiable);
-					} else if new_lb > 0 {
-						if let BoolView::Lit(l) = b.clone() {
-							let _ = self.add_clause(vec![l]);
-						} else {
-							todo!()
-						}
-					}
-					Ok(())
-				}
-			}
-		}
-	}
-
-	pub(crate) fn diff_int_domain(
-		&mut self,
-		iv: &IntView,
-		mask: &RangeList<IntVal>,
-		con: usize,
-	) -> Result<(), ReformulationError> {
-		match *iv {
-			IntView::Var(v) => {
-				let diff: RangeList<_> = self.int_vars[v.0 as usize].domain.diff(mask);
-				if diff.is_empty() {
-					return Err(ReformulationError::TrivialUnsatisfiable);
-				} else if self.int_vars[v.0 as usize].domain == diff {
-					return Ok(());
-				}
-				self.int_vars[v.0 as usize].domain = diff;
-				let constraints = self.int_vars[v.0 as usize].constraints.clone();
-				for c in constraints {
-					if c != con {
-						self.enqueue(c);
-					}
-				}
-				Ok(())
-			}
-			IntView::Const(v) => {
-				if mask.contains(&v) {
 					Err(ReformulationError::TrivialUnsatisfiable)
-				} else {
-					Ok(())
 				}
 			}
-			IntView::Linear(_, _) => todo!(),
-			IntView::Bool(_, _) => todo!(),
-		}
-	}
-
-	pub(crate) fn intersect_int_domain(
-		&mut self,
-		iv: &IntView,
-		mask: &RangeList<IntVal>,
-		con: usize,
-	) -> Result<(), ReformulationError> {
-		match *iv {
-			IntView::Var(v) => {
-				let intersect: RangeList<_> = self.int_vars[v.0 as usize].domain.intersect(mask);
-				if intersect.is_empty() {
-					return Err(ReformulationError::TrivialUnsatisfiable);
-				} else if self.int_vars[v.0 as usize].domain == intersect {
-					return Ok(());
-				}
-				self.int_vars[v.0 as usize].domain = intersect;
-				let constraints = self.int_vars[v.0 as usize].constraints.clone();
-				for c in constraints {
-					if c != con {
-						self.enqueue(c);
-					}
-				}
-				Ok(())
-			}
-			IntView::Const(v) => {
-				if !mask.contains(&v) {
+			IntView::Const(i) if *i == val => Ok(()),
+			IntView::Const(_) => Err(ReformulationError::TrivialUnsatisfiable),
+			IntView::Linear(trans, iv) => match trans.rev_transform_lit(LitMeaning::Eq(val)) {
+				Ok(LitMeaning::Eq(val)) => self.set_int_value(&IntView::Var(*iv), val, con),
+				Err(b) => {
+					debug_assert!(!b);
 					Err(ReformulationError::TrivialUnsatisfiable)
-				} else {
-					Ok(())
 				}
-			}
-			IntView::Linear(_, _) => todo!(),
-			IntView::Bool(_, _) => todo!(),
+				_ => unreachable!(),
+			},
+			IntView::Bool(trans, b) => match trans.rev_transform_lit(LitMeaning::Eq(val)) {
+				Ok(LitMeaning::Eq(val)) => match val {
+					0 => self.set_bool(&!b, con),
+					1 => self.set_bool(b, con),
+					_ => Err(ReformulationError::TrivialUnsatisfiable),
+				},
+				Err(b) => {
+					debug_assert!(!b);
+					Err(ReformulationError::TrivialUnsatisfiable)
+				}
+				_ => unreachable!(),
+			},
 		}
 	}
 }
