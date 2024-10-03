@@ -44,7 +44,10 @@ FLAGS
                                   (overwritten by --vsids-only)
   --vsids-only                    Only use the activity-based search heuristic provided by the SAT
                                   solver. Ignore the user-specific search heuristic.
-
+  --additive-factor <value>       Additive factor for increasing the activity scores of propagators.
+  --multiplicative-factor <value> Multiplicative factor for decaying the activity scores of propagators.
+  --propagator-threshold <value>  The threshold of activity score for propagators to be activated in
+                                  the propagation phase.
 
                       === BEHAVIOUR OPTIONS ===
   --log-file <FILE>	              Output log messages from the solver to a file, instead of stderr.

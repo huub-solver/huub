@@ -39,7 +39,7 @@ use crate::{
 	BoolView, IntVal, LitMeaning, ReformulationError,
 };
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct SolverConfiguration {
 	/// Switch between the activity-based search heuristic and the user-specific search heuristic after each restart.
 	///
@@ -51,6 +51,12 @@ pub(crate) struct SolverConfiguration {
 	vsids_after: Option<u32>,
 	/// Only use the activity-based search heuristic provided by the SAT solver. Ignore the user-specific search heuristic.
 	vsids_only: bool,
+	/// Additive constant for the activity-based activation of propagators.
+	propagtor_additive_factor: f64,
+	/// Multiplicative constant for the activity-based activation of propagators.
+	propagtor_multiplicative_factor: f64,
+	/// The threshold for the activity-based activation of propagators.
+	propagator_activity_threshold: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,6 +200,8 @@ where
 		let p = engine.state.propagator_priority.push(queue_pref.priority);
 		debug_assert_eq!(prop_ref, p);
 		let p = self.engine_mut().state.enqueued.push(false);
+		debug_assert_eq!(prop_ref, p);
+		let p = self.engine_mut().state.activity_scores.push(1.0);
 		debug_assert_eq!(prop_ref, p);
 		if queue_pref.enqueue_on_post {
 			let state = &mut self.engine_mut().state;
@@ -398,6 +406,7 @@ where
 			pub fn set_vsids_after(&mut self, conflicts: Option<u32>);
 			pub fn set_vsids_only(&mut self, enable: bool);
 			pub fn set_toggle_vsids(&mut self, enable: bool);
+			pub fn set_propagator_activity_factors(&mut self, threshold: f64, additive: f64, multiplicative: f64);
 		}
 	}
 

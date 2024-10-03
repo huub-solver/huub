@@ -130,6 +130,8 @@ pub(crate) struct State {
 	pub(crate) propagator_priority: IndexVec<PropRef, PriorityLevel>,
 	/// Flag for whether a propagator is enqueued
 	pub(crate) enqueued: IndexVec<PropRef, bool>,
+	/// Activity scores for propagators to determine whether they are active or not
+	pub(crate) activity_scores: IndexVec<PropRef, f64>,
 }
 
 impl IpasirPropagator for Engine {
@@ -205,7 +207,8 @@ impl IpasirPropagator for Engine {
 		}
 		if self.state.propagation_queue.is_empty() && self.state.conflict.is_none() {
 			// If there are no previous changes, run propagators
-			SolvingContext::new(slv, &mut self.state).run_propagators(&mut self.propagators);
+			SolvingContext::new(slv, &mut self.state)
+				.run_propagators::<true>(&mut self.propagators);
 		}
 		// Check whether there are new clauses that need to be communicated first
 		if !self.state.clauses.is_empty() {
@@ -324,7 +327,7 @@ impl IpasirPropagator for Engine {
 		}
 
 		// Run propgagators to find any conflicts
-		ctx.run_propagators(&mut self.propagators);
+		ctx.run_propagators::<false>(&mut self.propagators);
 		// No propagation can be triggered (all variables are fixed, so only
 		// conflicts are possible)
 		debug_assert!(self.state.propagation_queue.is_empty());
@@ -514,7 +517,7 @@ impl State {
 		// Backtrack trail
 		self.trail.notify_backtrack(level);
 		// Empty propagation queue
-		while let Some(p) = self.propagator_queue.pop() {
+		while let Some(p) = self.propagator_queue.pop::<true>() {
 			self.enqueued[p] = false;
 		}
 		if ARTIFICIAL {
@@ -566,9 +569,14 @@ impl State {
 	) {
 		for prop in self.int_activation[int_var].activated_by(event) {
 			if Some(prop) != skip && !self.enqueued[prop] {
-				self.propagator_queue
-					.insert(self.propagator_priority[prop], prop);
-				self.enqueued[prop] = true;
+				let priority =
+					if self.activity_scores[prop] < self.config.propagator_activity_threshold {
+						trace!(propagator = usize::from(prop), "deactivate propagator");
+						PriorityLevel::Inactive
+					} else {
+						self.propagator_priority[prop]
+					};
+				self.propagator_queue.insert(priority, prop);
 			}
 		}
 	}
@@ -576,9 +584,14 @@ impl State {
 	fn enqueue_propagators(&mut self, lit: RawLit, skip: Option<PropRef>) {
 		for &prop in self.bool_activation.get(&lit.var()).into_iter().flatten() {
 			if Some(prop) != skip && !self.enqueued[prop] {
-				self.propagator_queue
-					.insert(self.propagator_priority[prop], prop);
-				self.enqueued[prop] = true;
+				let priority =
+					if self.activity_scores[prop] < self.config.propagator_activity_threshold {
+						trace!(propagator = usize::from(prop), "deactivate propagator");
+						PriorityLevel::Inactive
+					} else {
+						self.propagator_priority[prop]
+					};
+				self.propagator_queue.insert(priority, prop);
 			}
 		}
 
@@ -613,6 +626,17 @@ impl State {
 	pub(crate) fn set_vsids_only(&mut self, enable: bool) {
 		self.config.vsids_only = enable;
 		self.vsids = enable;
+	}
+
+	pub(crate) fn set_propagator_activity_factors(
+		&mut self,
+		threshold: f64,
+		additive: f64,
+		multiplicative: f64,
+	) {
+		self.config.propagator_activity_threshold = threshold;
+		self.config.propagtor_additive_factor = additive;
+		self.config.propagtor_multiplicative_factor = multiplicative;
 	}
 }
 

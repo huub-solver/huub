@@ -53,25 +53,38 @@ impl<'a> SolvingContext<'a> {
 
 	/// Run the propagators in the queue until a propagator detects a conflict,
 	/// returns literals to be propagated by the SAT oracle, or the queue is empty.
-	pub(crate) fn run_propagators(&mut self, propagators: &mut IndexVec<PropRef, BoxedPropagator>) {
-		while let Some(p) = self.state.propagator_queue.pop() {
+	/// The generic artugment `SKIP_INACTIVE` is used to skip the inactive propagators in the queue.
+	pub(crate) fn run_propagators<const SKIP_INACTIVE: bool>(
+		&mut self,
+		propagators: &mut IndexVec<PropRef, BoxedPropagator>,
+	) {
+		while let Some(p) = self.state.propagator_queue.pop::<SKIP_INACTIVE>() {
 			debug_assert!(self.state.conflict.is_none());
+			let propagation_before = self.state.propagation_queue.len();
 			self.state.enqueued[p] = false;
 			self.current_prop = p;
 			let prop = propagators[p].as_mut();
 			let res = prop.propagate(self);
 			self.state.statistics.propagations += 1;
 			self.current_prop = PropRef::new(u32::MAX as usize);
+			// If the propagator detected a conflict or add new literals to the propagation queue,
+			// additively increase the activity score of the propagator
 			if let Err(Conflict { subject, reason }) = res {
 				let clause: Clause = reason.explain(propagators, self.state, subject);
-				trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "conflict detected");
+				trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), prop =? p, "conflict detected");
 				debug_assert!(!clause.is_empty());
 				debug_assert!(self.state.conflict.is_none());
 				self.state.conflict = Some(clause);
+				self.state.activity_scores[p] += self.state.config.propagtor_additive_factor;
+			} else if propagation_before != self.state.propagation_queue.len() {
+				trace!(prop =? p, "literal propagated");
+				self.state.activity_scores[p] += self.state.config.propagtor_additive_factor;
 			}
 			if self.state.conflict.is_some() || !self.state.propagation_queue.is_empty() {
 				return;
 			}
+			// After wake-up, multiplicatively decay the activity score of the propagator
+			self.state.activity_scores[p] *= self.state.config.propagtor_multiplicative_factor;
 		}
 	}
 
