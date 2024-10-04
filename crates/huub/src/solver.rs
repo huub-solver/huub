@@ -159,7 +159,11 @@ where
 		let p = self.engine_mut().state.enqueued.push(false);
 		debug_assert_eq!(prop_ref, p);
 		if queue_pref.enqueue_on_post {
-			self.engine_mut().state.enqueue_propagator(prop_ref);
+			let state = &mut self.engine_mut().state;
+			state
+				.propagator_queue
+				.insert(state.propagator_priority[prop_ref], prop_ref);
+			state.enqueued[prop_ref] = true;
 		}
 		Ok(())
 	}

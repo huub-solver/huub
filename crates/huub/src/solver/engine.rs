@@ -428,6 +428,15 @@ impl State {
 					if i == lb || i == ub {
 						return None;
 					}
+					if i < lb || i > ub {
+						// Notified of invalid assignment, do nothing.
+						//
+						// Although we do not expect this to happen, it seems that Cadical
+						// chronological backtracking might send notifications before
+						// additional propagation.
+						trace!(lit = i32::from(lit), lb, ub, "invalid eq notification");
+						return None;
+					}
 					let prev_lb = self.int_vars[iv].notify_lower_bound(&mut self.trail, i);
 					let prev_ub = self.int_vars[iv].notify_upper_bound(&mut self.trail, i);
 					debug_assert!(prev_lb < i || prev_ub > i);
@@ -474,12 +483,6 @@ impl State {
 
 	fn decision_level(&self) -> u32 {
 		self.trail.decision_level()
-	}
-
-	pub(crate) fn enqueue_propagator(&mut self, prop: PropRef) {
-		debug_assert!(!self.enqueued[prop]);
-		self.propagator_queue
-			.insert(self.propagator_priority[prop], prop);
 	}
 
 	// Helper method that ensures that all changes are communicated to the solver as clauses.
@@ -580,6 +583,7 @@ impl State {
 			if Some(prop) != skip && !self.enqueued[prop] {
 				self.propagator_queue
 					.insert(self.propagator_priority[prop], prop);
+				self.enqueued[prop] = true;
 			}
 		}
 	}
@@ -589,6 +593,7 @@ impl State {
 			if Some(prop) != skip && !self.enqueued[prop] {
 				self.propagator_queue
 					.insert(self.propagator_priority[prop], prop);
+				self.enqueued[prop] = true;
 			}
 		}
 
