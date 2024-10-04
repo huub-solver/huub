@@ -347,7 +347,8 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		slv.add_propagator(IntPowBounds::prepare(a, b, c)).unwrap();
+		slv.add_propagator(IntPowBounds::prepare(a, b, c), false)
+			.unwrap();
 		slv.expect_solutions(
 			&[a, b, c],
 			expect![[r#"

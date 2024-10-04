@@ -39,6 +39,7 @@ pub struct Model {
 	pub(crate) cnf: Cnf,
 	branchings: Vec<Branching>,
 	constraints: Vec<Constraint>,
+	functional: Vec<bool>,
 	int_vars: Vec<IntVarDef>,
 	prop_queue: VecDeque<usize>,
 	enqueued: Vec<bool>,
@@ -140,8 +141,8 @@ impl Model {
 		}
 
 		// Create constraint data structures within the solver
-		for c in self.constraints.iter() {
-			c.to_solver(&mut slv, &mut map)?;
+		for (i, c) in self.constraints.iter().enumerate() {
+			c.to_solver(&mut slv, &mut map, self.functional[i])?;
 		}
 		// Add branching data structures to the solver
 		for b in self.branchings.iter() {
@@ -163,6 +164,7 @@ impl AddAssign<Constraint> for Model {
 	fn add_assign(&mut self, rhs: Constraint) {
 		self.constraints.push(rhs);
 		self.enqueued.push(false);
+		self.functional.push(false);
 		self.enqueue(self.constraints.len() - 1);
 		self.subscribe(self.constraints.len() - 1);
 	}

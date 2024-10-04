@@ -187,6 +187,7 @@ where
 	pub(crate) fn add_propagator<P: Poster>(
 		&mut self,
 		poster: P,
+		functional: bool,
 	) -> Result<(), ReformulationError> {
 		let prop_ref = PropRef::from(self.engine().propagators.len());
 		let mut actions = InitializationContext {
@@ -202,6 +203,8 @@ where
 		let p = self.engine_mut().state.enqueued.push(false);
 		debug_assert_eq!(prop_ref, p);
 		let p = self.engine_mut().state.activity_scores.push(1.0);
+		debug_assert_eq!(prop_ref, p);
+		let p = self.engine_mut().state.functional.push(functional);
 		debug_assert_eq!(prop_ref, p);
 		if queue_pref.enqueue_on_post {
 			let state = &mut self.engine_mut().state;

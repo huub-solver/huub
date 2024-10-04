@@ -132,6 +132,8 @@ pub(crate) struct State {
 	pub(crate) enqueued: IndexVec<PropRef, bool>,
 	/// Activity scores for propagators to determine whether they are active or not
 	pub(crate) activity_scores: IndexVec<PropRef, f64>,
+	/// Whether the propagator is functional
+	pub(crate) functional: IndexVec<PropRef, bool>,
 }
 
 impl IpasirPropagator for Engine {
@@ -442,6 +444,7 @@ impl State {
 						return None;
 					}
 					let prev = self.int_vars[iv].notify_lower_bound(&mut self.trail, new_lb);
+					debug_assert!(new_lb <= ub);
 					debug_assert!(prev < new_lb);
 					if new_lb == ub {
 						IntEvent::Fixed
@@ -455,6 +458,7 @@ impl State {
 						return None;
 					}
 					let prev = self.int_vars[iv].notify_upper_bound(&mut self.trail, new_ub);
+					debug_assert!(new_ub >= lb);
 					debug_assert!(new_ub < prev);
 					if new_ub == lb {
 						IntEvent::Fixed
@@ -569,14 +573,14 @@ impl State {
 	) {
 		for prop in self.int_activation[int_var].activated_by(event) {
 			if Some(prop) != skip && !self.enqueued[prop] {
-				let priority =
-					if self.activity_scores[prop] < self.config.propagator_activity_threshold {
-						trace!(propagator = usize::from(prop), "deactivate propagator");
-						PriorityLevel::Inactive
-					} else {
-						self.propagator_priority[prop]
-					};
-				self.propagator_queue.insert(priority, prop);
+				if self.activity_scores[prop] >= self.config.propagator_activity_threshold {
+					self.propagator_queue
+						.insert(self.propagator_priority[prop], prop);
+				} else {
+					trace!(propagator = usize::from(prop), "deactivate propagator");
+					self.propagator_queue.insert(PriorityLevel::Inactive, prop);
+				}
+				self.enqueued[prop] = true;
 			}
 		}
 	}
@@ -584,14 +588,14 @@ impl State {
 	fn enqueue_propagators(&mut self, lit: RawLit, skip: Option<PropRef>) {
 		for &prop in self.bool_activation.get(&lit.var()).into_iter().flatten() {
 			if Some(prop) != skip && !self.enqueued[prop] {
-				let priority =
-					if self.activity_scores[prop] < self.config.propagator_activity_threshold {
-						trace!(propagator = usize::from(prop), "deactivate propagator");
-						PriorityLevel::Inactive
-					} else {
-						self.propagator_priority[prop]
-					};
-				self.propagator_queue.insert(priority, prop);
+				if self.activity_scores[prop] >= self.config.propagator_activity_threshold {
+					self.propagator_queue
+						.insert(self.propagator_priority[prop], prop);
+				} else {
+					trace!(propagator = usize::from(prop), "deactivate propagator");
+					self.propagator_queue.insert(PriorityLevel::Inactive, prop);
+				}
+				self.enqueued[prop] = true;
 			}
 		}
 

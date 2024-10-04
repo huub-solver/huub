@@ -71,20 +71,28 @@ impl<'a> SolvingContext<'a> {
 			// additively increase the activity score of the propagator
 			if let Err(Conflict { subject, reason }) = res {
 				let clause: Clause = reason.explain(propagators, self.state, subject);
-				trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), prop =? p, "conflict detected");
+				trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "conflict detected");
 				debug_assert!(!clause.is_empty());
 				debug_assert!(self.state.conflict.is_none());
 				self.state.conflict = Some(clause);
-				self.state.activity_scores[p] += self.state.config.propagtor_additive_factor;
+				if !self.state.functional[p] {
+					self.state.activity_scores[p] += self.state.config.propagtor_additive_factor;
+					trace!(prop =? p, score =? self.state.activity_scores[p], "conflict detected");
+				}
 			} else if propagation_before != self.state.propagation_queue.len() {
-				trace!(prop =? p, "literal propagated");
-				self.state.activity_scores[p] += self.state.config.propagtor_additive_factor;
+				if !self.state.functional[p] {
+					self.state.activity_scores[p] += self.state.config.propagtor_additive_factor;
+					trace!(prop =? p, score =? self.state.activity_scores[p], "literal propagated");
+				}
+			} else if !self.state.functional[p] {
+				// After wake-up, multiplicatively decay the activity score of the propagator if no propagations
+				self.state.activity_scores[p] *= self.state.config.propagtor_multiplicative_factor;
+				trace!(prop =? p, score =? self.state.activity_scores[p], "decay activity score");
 			}
+
 			if self.state.conflict.is_some() || !self.state.propagation_queue.is_empty() {
 				return;
 			}
-			// After wake-up, multiplicatively decay the activity score of the propagator
-			self.state.activity_scores[p] *= self.state.config.propagtor_multiplicative_factor;
 		}
 	}
 

@@ -284,7 +284,7 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		slv.add_propagator(ArrayVarIntElementBounds::prepare(vec![a, b, c], y, index))
+		slv.add_propagator(ArrayVarIntElementBounds::prepare(vec![a, b, c], y, index), false)
 			.unwrap();
 		slv.expect_solutions(
 			&[index, y, a, b, c],
@@ -351,7 +351,7 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		slv.add_propagator(ArrayVarIntElementBounds::prepare(vec![a, b], y, index))
+		slv.add_propagator(ArrayVarIntElementBounds::prepare(vec![a, b], y, index), false)
 			.unwrap();
 		slv.expect_solutions(
 			&[index, y, a, b],

@@ -136,7 +136,8 @@ mod tests {
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
-		slv.add_propagator(IntAbsBounds::prepare(a, b)).unwrap();
+		slv.add_propagator(IntAbsBounds::prepare(a, b), false)
+			.unwrap();
 		slv.expect_solutions(
 			&[a, b],
 			expect![[r#"

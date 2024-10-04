@@ -602,18 +602,21 @@ mod tests {
 			EncodingType::Lazy,
 		);
 		let durations = vec![2, 3, 1];
-		slv.add_propagator(DisjunctiveStrictEdgeFinding::prepare(
-			[a, b, c],
-			durations.clone(),
-		))
+		slv.add_propagator(
+			DisjunctiveStrictEdgeFinding::prepare([a, b, c], durations.clone()),
+			false,
+		)
 		.unwrap();
-		slv.add_propagator(DisjunctiveStrictEdgeFinding::prepare(
-			[a, b, c]
-				.iter()
-				.zip(durations.iter())
-				.map(|(v, d)| -*v + (7 - d)),
-			durations.clone(),
-		))
+		slv.add_propagator(
+			DisjunctiveStrictEdgeFinding::prepare(
+				[a, b, c]
+					.iter()
+					.zip(durations.iter())
+					.map(|(v, d)| -*v + (7 - d)),
+				durations.clone(),
+			),
+			false,
+		)
 		.unwrap();
 
 		slv.expect_solutions(

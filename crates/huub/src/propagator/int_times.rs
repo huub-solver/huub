@@ -175,7 +175,7 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		slv.add_propagator(IntTimesBounds::prepare(a, b, c))
+		slv.add_propagator(IntTimesBounds::prepare(a, b, c), false)
 			.unwrap();
 		slv.expect_solutions(
 			&[a, b, c],

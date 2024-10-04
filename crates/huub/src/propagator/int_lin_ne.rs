@@ -215,10 +215,10 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		slv.add_propagator(IntLinearNotEqValue::prepare(
-			vec![a * NonZeroIntVal::new(2).unwrap(), b, c],
-			6,
-		))
+		slv.add_propagator(
+			IntLinearNotEqValue::prepare(vec![a * NonZeroIntVal::new(2).unwrap(), b, c], 6),
+			false,
+		)
 		.unwrap();
 
 		slv.expect_solutions(
