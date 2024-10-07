@@ -86,6 +86,9 @@ pub struct Cli<Stdout, Stderr> {
 	/// Threshold for propagator activation
 	propagator_activity_threshold: f64,
 
+	/// Interval in milliseconds to trace propagator activities
+	trace_propagations: Option<u128>,
+
 	// --- Output configuration ---
 	/// Output stream for (intermediate) solutions and statistics
 	///
@@ -264,6 +267,7 @@ where
 			self.propagator_activity_threshold,
 			self.propagator_additive_factor,
 			self.propagator_multiplicative_factor,
+			self.trace_propagations,
 		);
 
 		// Determine Goal and Objective
@@ -513,6 +517,7 @@ where
 			propagator_additive_factor: self.propagator_additive_factor,
 			propagator_multiplicative_factor: self.propagator_multiplicative_factor,
 			propagator_activity_threshold: self.propagator_activity_threshold,
+			trace_propagations: self.trace_propagations,
 			stdout: self.stdout,
 		}
 	}
@@ -538,6 +543,7 @@ where
 			propagator_additive_factor: self.propagator_additive_factor,
 			propagator_multiplicative_factor: self.propagator_multiplicative_factor,
 			propagator_activity_threshold: self.propagator_activity_threshold,
+			trace_propagations: self.trace_propagations,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
 		}
@@ -605,6 +611,9 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 				.opt_value_from_fn("--propagator-threshold", parse_float_arg)
 				.map(|x| x.unwrap_or(0.5))
 				.map_err(|e| e.to_string())?,
+			trace_propagations: args
+				.opt_value_from_str("--trace-propagations")
+				.map_err(|e| e.to_string())?,
 
 			verbose,
 			path: args
@@ -614,7 +623,7 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			stdout: io::stdout(),
 			#[expect(trivial_casts, reason = "doesn't compile without the case")]
 			stderr: io::stderr as fn() -> io::Stderr,
-			ansi_color: true,
+			ansi_color: args.contains("--ansi-color"),
 		};
 
 		let remaining = args.finish();

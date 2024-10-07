@@ -1,7 +1,7 @@
 use delegate::delegate;
 use index_vec::IndexVec;
 use pindakaas::{solver::SolvingActions, Lit as RawLit};
-use tracing::trace;
+use tracing::{info, trace};
 
 use crate::{
 	actions::{
@@ -58,6 +58,30 @@ impl<'a> SolvingContext<'a> {
 		&mut self,
 		propagators: &mut IndexVec<PropRef, BoxedPropagator>,
 	) {
+		// Update tracing statistics on new decision level
+		if self.state.config.trace_propagations.is_some()
+			&& self.state.timer.elapsed().as_millis()
+				/ self.state.config.trace_propagations.unwrap()
+				- self.state.time_slot as u128
+				> 0
+		{
+			info!(
+				"time={time} propagation results conflicts={conflicts}, propagations={propagations}, no_propagations={no_propagations}, explanations={explanations}, trace_interval={interval}", 
+				time= self.state.time_slot,
+				conflicts = self.state.conflicts,
+				propagations = self.state.propagations,
+				no_propagations = self.state.no_propagations,
+				explanations = self.state.explanations,
+				interval = self.state.config.trace_propagations.unwrap()
+			);
+			self.state.time_slot = (self.state.timer.elapsed().as_millis()
+				/ self.state.config.trace_propagations.unwrap()) as usize;
+			self.state.conflicts = 0;
+			self.state.propagations = 0;
+			self.state.no_propagations = 0;
+			self.state.explanations = 0;
+		}
+
 		while let Some(p) = self.state.propagator_queue.pop::<SKIP_INACTIVE>() {
 			debug_assert!(self.state.conflict.is_none());
 			let propagation_before = self.state.propagation_queue.len();
@@ -77,21 +101,23 @@ impl<'a> SolvingContext<'a> {
 				self.state.conflict = Some(clause);
 				if !self.state.functional[p] {
 					self.state.activity_scores[p] += self.state.config.propagtor_additive_factor;
-					trace!(prop =? p, score =? self.state.activity_scores[p], "conflict detected");
 				}
+				self.state.conflicts += 1;
 			} else if propagation_before != self.state.propagation_queue.len() {
 				if !self.state.functional[p] {
 					self.state.activity_scores[p] += self.state.config.propagtor_additive_factor;
-					trace!(prop =? p, score =? self.state.activity_scores[p], "literal propagated");
 				}
+				self.state.propagations += 1;
 			} else if !self.state.functional[p] {
 				// After wake-up, multiplicatively decay the activity score of the propagator if no propagations
 				self.state.activity_scores[p] *= self.state.config.propagtor_multiplicative_factor;
-				trace!(prop =? p, score =? self.state.activity_scores[p], "decay activity score");
+				self.state.no_propagations += 1;
+			} else {
+				self.state.no_propagations += 1;
 			}
 
 			if self.state.conflict.is_some() || !self.state.propagation_queue.is_empty() {
-				return;
+				break;
 			}
 		}
 	}

@@ -79,6 +79,10 @@ impl Poster for AllDifferentIntValuePoster {
 			},
 		))
 	}
+
+	fn name(&self) -> &'static str {
+		"AllDifferentIntValue"
+	}
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ use std::{
 	any::Any,
 	collections::{HashMap, VecDeque},
 	mem,
+	time::Instant,
 };
 
 use delegate::delegate;
@@ -91,8 +92,19 @@ pub struct SearchStatistics {
 	user_decisions: u64,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub(crate) struct State {
+	// ---- Propagator Tracing Value Infrastructure (e.g., timer) ----
+	/// Timer
+	pub(crate) timer: Instant,
+	/// Propagator activity statistics in the last time slot
+	pub(crate) explanations: usize,
+	pub(crate) propagations: usize,
+	pub(crate) conflicts: usize,
+	pub(crate) no_propagations: usize,
+	/// Last time slot for propagator tracing
+	pub(crate) time_slot: usize,
+
 	// Solver confifguration
 	pub(crate) config: SolverConfiguration,
 
@@ -134,6 +146,39 @@ pub(crate) struct State {
 	pub(crate) activity_scores: IndexVec<PropRef, f64>,
 	/// Whether the propagator is functional
 	pub(crate) functional: IndexVec<PropRef, bool>,
+	/// Name of the propagator
+	pub(crate) propagator_types: IndexVec<PropRef, &'static str>,
+}
+
+impl Default for State {
+	fn default() -> Self {
+		Self {
+			timer: Instant::now(),
+			explanations: Default::default(),
+			propagations: Default::default(),
+			conflicts: Default::default(),
+			no_propagations: Default::default(),
+			time_slot: Default::default(),
+			config: Default::default(),
+			int_vars: Default::default(),
+			bool_to_int: Default::default(),
+			trail: Default::default(),
+			propagation_queue: Default::default(),
+			reason_map: Default::default(),
+			conflict: Default::default(),
+			clauses: Default::default(),
+			statistics: Default::default(),
+			vsids: false,
+			bool_activation: Default::default(),
+			int_activation: Default::default(),
+			propagator_queue: Default::default(),
+			propagator_priority: Default::default(),
+			enqueued: Default::default(),
+			activity_scores: Default::default(),
+			functional: Default::default(),
+			propagator_types: Default::default(),
+		}
+	}
 }
 
 impl IpasirPropagator for Engine {
@@ -207,7 +252,10 @@ impl IpasirPropagator for Engine {
 		if !self.state.clauses.is_empty() {
 			return Vec::new();
 		}
-		if self.state.propagation_queue.is_empty() && self.state.conflict.is_none() {
+		if self.state.propagation_queue.is_empty()
+			&& self.state.conflict.is_none()
+			&& !self.state.propagator_queue.is_empty()
+		{
 			// If there are no previous changes, run propagators
 			SolvingContext::new(slv, &mut self.state)
 				.run_propagators::<true>(&mut self.propagators);
@@ -277,6 +325,9 @@ impl IpasirPropagator for Engine {
 			vec![propagated_lit]
 		};
 
+		// TODO: how to get the propagator for explanations of the propagated literals?
+		self.state.explanations += 1;
+
 		debug!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add reason clause");
 		clause
 	}
@@ -329,7 +380,9 @@ impl IpasirPropagator for Engine {
 		}
 
 		// Run propgagators to find any conflicts
-		ctx.run_propagators::<false>(&mut self.propagators);
+		if !ctx.state.propagator_queue.is_empty() {
+			ctx.run_propagators::<false>(&mut self.propagators);
+		}
 		// No propagation can be triggered (all variables are fixed, so only
 		// conflicts are possible)
 		debug_assert!(self.state.propagation_queue.is_empty());
@@ -419,7 +472,7 @@ impl State {
 						return None;
 					}
 					if i < lb || i > ub {
-						// Notified of invalid assignment, do nothing.
+						// TODO: Notification of an invalid assignment, do nothing.
 						//
 						// Although we do not expect this to happen, it seems that Cadical
 						// chronological backtracking might send notifications before
@@ -443,8 +496,12 @@ impl State {
 					if new_lb <= lb {
 						return None;
 					}
+					if new_lb > ub {
+						// TODO: Notification of an invalid assignment, do nothing.
+						trace!(lit = i32::from(lit), lb, ub, "invalid geq notification");
+						return None;
+					}
 					let prev = self.int_vars[iv].notify_lower_bound(&mut self.trail, new_lb);
-					debug_assert!(new_lb <= ub);
 					debug_assert!(prev < new_lb);
 					if new_lb == ub {
 						IntEvent::Fixed
@@ -457,8 +514,12 @@ impl State {
 					if new_ub >= ub {
 						return None;
 					}
+					if new_ub < lb {
+						// TODO: Notification of an invalid assignment, do nothing.
+						trace!(lit = i32::from(lit), lb, ub, "invalid less notification");
+						return None;
+					}
 					let prev = self.int_vars[iv].notify_upper_bound(&mut self.trail, new_ub);
-					debug_assert!(new_ub >= lb);
 					debug_assert!(new_ub < prev);
 					if new_ub == lb {
 						IntEvent::Fixed
@@ -573,7 +634,9 @@ impl State {
 	) {
 		for prop in self.int_activation[int_var].activated_by(event) {
 			if Some(prop) != skip && !self.enqueued[prop] {
-				if self.activity_scores[prop] >= self.config.propagator_activity_threshold {
+				if !self.vsids
+					|| self.activity_scores[prop] >= self.config.propagator_activity_threshold
+				{
 					self.propagator_queue
 						.insert(self.propagator_priority[prop], prop);
 				} else {
@@ -588,7 +651,9 @@ impl State {
 	fn enqueue_propagators(&mut self, lit: RawLit, skip: Option<PropRef>) {
 		for &prop in self.bool_activation.get(&lit.var()).into_iter().flatten() {
 			if Some(prop) != skip && !self.enqueued[prop] {
-				if self.activity_scores[prop] >= self.config.propagator_activity_threshold {
+				if !self.vsids
+					&& self.activity_scores[prop] >= self.config.propagator_activity_threshold
+				{
 					self.propagator_queue
 						.insert(self.propagator_priority[prop], prop);
 				} else {
@@ -637,10 +702,12 @@ impl State {
 		threshold: f64,
 		additive: f64,
 		multiplicative: f64,
+		trace_propagations: Option<u128>,
 	) {
 		self.config.propagator_activity_threshold = threshold;
 		self.config.propagtor_additive_factor = additive;
 		self.config.propagtor_multiplicative_factor = multiplicative;
+		self.config.trace_propagations = trace_propagations;
 	}
 }
 

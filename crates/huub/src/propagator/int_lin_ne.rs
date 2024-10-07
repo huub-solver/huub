@@ -177,6 +177,10 @@ impl<const R: usize> Poster for IntLinearNotEqValuePoster<R> {
 			},
 		))
 	}
+
+	fn name(&self) -> &'static str {
+		"IntLinearNotEqValue"
+	}
 }
 
 #[cfg(test)]

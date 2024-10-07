@@ -36,6 +36,10 @@ impl<E> PriorityQueue<E> {
 		}
 		None
 	}
+
+	pub(crate) fn is_empty(&self) -> bool {
+		self.storage.iter().all(Vec::is_empty)
+	}
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

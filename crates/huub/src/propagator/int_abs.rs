@@ -105,6 +105,10 @@ impl Poster for IntAbsBoundsPoster {
 			},
 		))
 	}
+
+	fn name(&self) -> &'static str {
+		"IntAbsBounds"
+	}
 }
 
 #[cfg(test)]

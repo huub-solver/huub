@@ -289,6 +289,10 @@ impl Poster for IntPowBoundsPoster {
 			},
 		))
 	}
+
+	fn name(&self) -> &'static str {
+		"IntPowBounds"
+	}
 }
 
 fn pow(base: IntVal, exponent: IntVal) -> Option<IntVal> {

@@ -234,6 +234,10 @@ impl Poster for ArrayVarIntElementBoundsPoster {
 			},
 		))
 	}
+
+	fn name(&self) -> &'static str {
+		"ArrayVarIntElementBounds"
+	}
 }
 
 #[cfg(test)]
@@ -284,8 +288,11 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		slv.add_propagator(ArrayVarIntElementBounds::prepare(vec![a, b, c], y, index), false)
-			.unwrap();
+		slv.add_propagator(
+			ArrayVarIntElementBounds::prepare(vec![a, b, c], y, index),
+			false,
+		)
+		.unwrap();
 		slv.expect_solutions(
 			&[index, y, a, b, c],
 			expect![[r#"
@@ -351,8 +358,11 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		slv.add_propagator(ArrayVarIntElementBounds::prepare(vec![a, b], y, index), false)
-			.unwrap();
+		slv.add_propagator(
+			ArrayVarIntElementBounds::prepare(vec![a, b], y, index),
+			false,
+		)
+		.unwrap();
 		slv.expect_solutions(
 			&[index, y, a, b],
 			expect![[r#"

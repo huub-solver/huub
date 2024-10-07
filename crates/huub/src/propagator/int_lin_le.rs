@@ -179,6 +179,10 @@ impl<const R: usize> Poster for IntLinearLessEqBoundsPoster<R> {
 			},
 		))
 	}
+
+	fn name(&self) -> &'static str {
+		"IntLinearLessEqBounds"
+	}
 }
 
 #[cfg(test)]

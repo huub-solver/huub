@@ -116,7 +116,10 @@ impl Constraint {
 				let y = y.to_arg(slv, map);
 				let idx = idx.to_arg(slv, map);
 				// tranform 1-based index into 0-based index array
-				slv.add_propagator(ArrayVarIntElementBounds::prepare(vars, y, idx + (-1)), functional)?;
+				slv.add_propagator(
+					ArrayVarIntElementBounds::prepare(vars, y, idx + (-1)),
+					functional,
+				)?;
 				Ok(())
 			}
 			Constraint::ArrayVarBoolElement(vars, idx, y) => {
@@ -163,10 +166,10 @@ impl Constraint {
 					})
 					.collect_vec();
 				// Add propagator for lower bound propagation
-				slv.add_propagator(DisjunctiveStrictEdgeFinding::prepare(
-					vars.clone(),
-					durs.clone(),
-				), functional)?;
+				slv.add_propagator(
+					DisjunctiveStrictEdgeFinding::prepare(vars.clone(), durs.clone()),
+					functional,
+				)?;
 
 				// Add symmetric propagator for upper bound propagation
 				let horizon = vars
@@ -179,10 +182,10 @@ impl Constraint {
 					.iter()
 					.zip(durs.iter())
 					.map(|(v, d)| -*v + (horizon - d));
-				slv.add_propagator(DisjunctiveStrictEdgeFinding::prepare(
-					symmetric_vars,
-					durs.clone(),
-				), functional)?;
+				slv.add_propagator(
+					DisjunctiveStrictEdgeFinding::prepare(symmetric_vars, durs.clone()),
+					functional,
+				)?;
 				Ok(())
 			}
 			Constraint::IntAbs(origin, abs) => {
@@ -195,7 +198,10 @@ impl Constraint {
 				let numerator = numerator.to_arg(slv, map);
 				let denominator = denominator.to_arg(slv, map);
 				let result = result.to_arg(slv, map);
-				slv.add_propagator(IntDivBounds::prepare(numerator, denominator, result), functional)?;
+				slv.add_propagator(
+					IntDivBounds::prepare(numerator, denominator, result),
+					functional,
+				)?;
 				Ok(())
 			}
 			Constraint::IntLinEq(vars, c) => {
@@ -203,10 +209,10 @@ impl Constraint {
 				// coeffs * vars <= c
 				slv.add_propagator(IntLinearLessEqBounds::prepare(vars.clone(), *c), functional)?;
 				// coeffs * vars >= c <=> -coeffs * vars <= -c
-				slv.add_propagator(IntLinearLessEqBounds::prepare(
-					vars.into_iter().map(|v| -v),
-					-c,
-				), functional)?;
+				slv.add_propagator(
+					IntLinearLessEqBounds::prepare(vars.into_iter().map(|v| -v), -c),
+					functional,
+				)?;
 				Ok(())
 			}
 			Constraint::IntLinEqImp(vars, c, r) => {
@@ -214,20 +220,25 @@ impl Constraint {
 				let r = r.to_arg(slv, map, None)?;
 				match r.0 {
 					BoolViewInner::Const(true) => {
-						slv.add_propagator(IntLinearLessEqBounds::prepare(vars.clone(), *c), functional)?;
-						slv.add_propagator(IntLinearLessEqBounds::prepare(
-							vars.into_iter().map(|v| -v),
-							-c,
-						), functional)?;
+						slv.add_propagator(
+							IntLinearLessEqBounds::prepare(vars.clone(), *c),
+							functional,
+						)?;
+						slv.add_propagator(
+							IntLinearLessEqBounds::prepare(vars.into_iter().map(|v| -v), -c),
+							functional,
+						)?;
 					}
 					BoolViewInner::Const(false) => {}
 					BoolViewInner::Lit(r) => {
-						slv.add_propagator(IntLinearLessEqImpBounds::prepare(vars.clone(), *c, r), functional)?;
-						slv.add_propagator(IntLinearLessEqImpBounds::prepare(
-							vars.into_iter().map(|v| -v),
-							-c,
-							r,
-						), functional)?;
+						slv.add_propagator(
+							IntLinearLessEqImpBounds::prepare(vars.clone(), *c, r),
+							functional,
+						)?;
+						slv.add_propagator(
+							IntLinearLessEqImpBounds::prepare(vars.into_iter().map(|v| -v), -c, r),
+							functional,
+						)?;
 					}
 				}
 				Ok(())
@@ -237,23 +248,31 @@ impl Constraint {
 				let r = r.to_arg(slv, map, None)?;
 				match r.0 {
 					BoolViewInner::Const(true) => {
-						slv.add_propagator(IntLinearLessEqBounds::prepare(vars.clone(), *c), functional)?;
-						slv.add_propagator(IntLinearLessEqBounds::prepare(
-							vars.into_iter().map(|v| -v),
-							-c,
-						), functional)?;
+						slv.add_propagator(
+							IntLinearLessEqBounds::prepare(vars.clone(), *c),
+							functional,
+						)?;
+						slv.add_propagator(
+							IntLinearLessEqBounds::prepare(vars.into_iter().map(|v| -v), -c),
+							functional,
+						)?;
 					}
 					BoolViewInner::Const(false) => {
 						slv.add_propagator(IntLinearNotEqValue::prepare(vars, *c), functional)?;
 					}
 					BoolViewInner::Lit(r) => {
-						slv.add_propagator(IntLinearLessEqImpBounds::prepare(vars.clone(), *c, r), functional)?;
-						slv.add_propagator(IntLinearLessEqImpBounds::prepare(
-							vars.iter().map(|v| -(*v)),
-							-c,
-							r,
-						), functional)?;
-						slv.add_propagator(IntLinearNotEqImpValue::prepare(vars, *c, !r), functional)?;
+						slv.add_propagator(
+							IntLinearLessEqImpBounds::prepare(vars.clone(), *c, r),
+							functional,
+						)?;
+						slv.add_propagator(
+							IntLinearLessEqImpBounds::prepare(vars.iter().map(|v| -(*v)), -c, r),
+							functional,
+						)?;
+						slv.add_propagator(
+							IntLinearNotEqImpValue::prepare(vars, *c, !r),
+							functional,
+						)?;
 					}
 				}
 				Ok(())
@@ -272,7 +291,10 @@ impl Constraint {
 					}
 					BoolViewInner::Const(false) => {}
 					BoolViewInner::Lit(r) => {
-						slv.add_propagator(IntLinearLessEqImpBounds::prepare(vars, *c, r), functional)?;
+						slv.add_propagator(
+							IntLinearLessEqImpBounds::prepare(vars, *c, r),
+							functional,
+						)?;
 					}
 				}
 				Ok(())
@@ -285,18 +307,24 @@ impl Constraint {
 						slv.add_propagator(IntLinearLessEqBounds::prepare(vars, *c), functional)?;
 					}
 					BoolViewInner::Const(false) => {
-						slv.add_propagator(IntLinearLessEqBounds::prepare(
-							vars.into_iter().map(|v| -v),
-							-(c + 1),
-						), functional)?;
+						slv.add_propagator(
+							IntLinearLessEqBounds::prepare(vars.into_iter().map(|v| -v), -(c + 1)),
+							functional,
+						)?;
 					}
 					BoolViewInner::Lit(r) => {
-						slv.add_propagator(IntLinearLessEqImpBounds::prepare(vars.clone(), *c, r), functional)?;
-						slv.add_propagator(IntLinearLessEqImpBounds::prepare(
-							vars.into_iter().map(|v| -v),
-							-(c + 1),
-							!r,
-						), functional)?;
+						slv.add_propagator(
+							IntLinearLessEqImpBounds::prepare(vars.clone(), *c, r),
+							functional,
+						)?;
+						slv.add_propagator(
+							IntLinearLessEqImpBounds::prepare(
+								vars.into_iter().map(|v| -v),
+								-(c + 1),
+								!r,
+							),
+							functional,
+						)?;
 					}
 				}
 				Ok(())
@@ -315,7 +343,10 @@ impl Constraint {
 					}
 					BoolViewInner::Const(false) => {}
 					BoolViewInner::Lit(r) => {
-						slv.add_propagator(IntLinearNotEqImpValue::prepare(vars, *c, r), functional)?;
+						slv.add_propagator(
+							IntLinearNotEqImpValue::prepare(vars, *c, r),
+							functional,
+						)?;
 					}
 				}
 				Ok(())
@@ -328,24 +359,28 @@ impl Constraint {
 						slv.add_propagator(IntLinearNotEqValue::prepare(vars, *c), functional)?;
 					}
 					BoolViewInner::Const(false) => {
-						slv.add_propagator(IntLinearLessEqBounds::prepare(vars.clone(), *c), functional)?;
-						slv.add_propagator(IntLinearLessEqBounds::prepare(
-							vars.into_iter().map(|v| -v),
-							-c,
-						), functional)?;
+						slv.add_propagator(
+							IntLinearLessEqBounds::prepare(vars.clone(), *c),
+							functional,
+						)?;
+						slv.add_propagator(
+							IntLinearLessEqBounds::prepare(vars.into_iter().map(|v| -v), -c),
+							functional,
+						)?;
 					}
 					BoolViewInner::Lit(r) => {
-						slv.add_propagator(IntLinearNotEqImpValue::prepare(vars.clone(), *c, r), functional)?;
-						slv.add_propagator(IntLinearLessEqImpBounds::prepare(
-							vars.clone(),
-							*c,
-							!r,
-						), functional)?;
-						slv.add_propagator(IntLinearLessEqImpBounds::prepare(
-							vars.iter().map(|v| -(*v)),
-							-c,
-							!r,
-						), functional)?;
+						slv.add_propagator(
+							IntLinearNotEqImpValue::prepare(vars.clone(), *c, r),
+							functional,
+						)?;
+						slv.add_propagator(
+							IntLinearLessEqImpBounds::prepare(vars.clone(), *c, !r),
+							functional,
+						)?;
+						slv.add_propagator(
+							IntLinearLessEqImpBounds::prepare(vars.iter().map(|v| -(*v)), -c, !r),
+							functional,
+						)?;
 					}
 				}
 				Ok(())

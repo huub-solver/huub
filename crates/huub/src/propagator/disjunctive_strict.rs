@@ -564,6 +564,10 @@ impl Poster for DisjunctiveEdgeFindingPoster {
 			},
 		))
 	}
+
+	fn name(&self) -> &'static str {
+		"DisjunctiveStrictEdgeFinding"
+	}
 }
 
 #[cfg(test)]

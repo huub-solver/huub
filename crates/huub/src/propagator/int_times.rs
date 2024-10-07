@@ -138,6 +138,10 @@ impl Poster for IntTimesBoundsPoster {
 			},
 		))
 	}
+
+	fn name(&self) -> &'static str {
+		"IntTimesBounds"
+	}
 }
 
 #[cfg(test)]

@@ -247,6 +247,10 @@ impl Poster for IntDivBoundsPoster {
 			},
 		))
 	}
+
+	fn name(&self) -> &'static str {
+		"IntDivBounds"
+	}
 }
 
 #[cfg(test)]

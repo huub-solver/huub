@@ -57,6 +57,8 @@ pub(crate) struct SolverConfiguration {
 	propagtor_multiplicative_factor: f64,
 	/// The threshold for the activity-based activation of propagators.
 	propagator_activity_threshold: f64,
+	/// Interval in milliseconds to trace propagator activities.
+	trace_propagations: Option<u128>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,6 +192,8 @@ where
 		functional: bool,
 	) -> Result<(), ReformulationError> {
 		let prop_ref = PropRef::from(self.engine().propagators.len());
+		let p = self.engine_mut().state.propagator_types.push(poster.name());
+		debug_assert_eq!(prop_ref, p);
 		let mut actions = InitializationContext {
 			slv: self,
 			init_ref: InitRef::Propagator(prop_ref),
@@ -409,7 +413,7 @@ where
 			pub fn set_vsids_after(&mut self, conflicts: Option<u32>);
 			pub fn set_vsids_only(&mut self, enable: bool);
 			pub fn set_toggle_vsids(&mut self, enable: bool);
-			pub fn set_propagator_activity_factors(&mut self, threshold: f64, additive: f64, multiplicative: f64);
+			pub fn set_propagator_activity_factors(&mut self, threshold: f64, additive: f64, multiplicative: f64, trace_propagations: Option<u128>);
 		}
 	}
 
