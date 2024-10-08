@@ -197,7 +197,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_linear_le_sat() {
-		let mut slv: Solver<Cadical> = Cnf::default().into();
+		let mut slv = Solver::<Cadical>::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
@@ -249,7 +249,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_linear_ge_sat() {
-		let mut slv: Solver<Cadical> = Cnf::default().into();
+		let mut slv = Solver::<Cadical>::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),

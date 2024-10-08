@@ -72,7 +72,12 @@ pub struct InitStatistics {
 }
 
 pub trait SatSolver:
-	PropagatingSolver + TermCallback + LearnCallback + SolveAssuming + NextVarRange + From<Cnf>
+	PropagatingSolver
+	+ TermCallback
+	+ LearnCallback
+	+ SolveAssuming
+	+ NextVarRange
+	+ for<'a> From<&'a Cnf>
 where
 	<Self as SolverTrait>::ValueFn: PropagatorAccess,
 {
@@ -463,8 +468,12 @@ where
 
 impl<Slv> SatSolver for Slv
 where
-	Slv:
-		PropagatingSolver + TermCallback + LearnCallback + SolveAssuming + NextVarRange + From<Cnf>,
+	Slv: PropagatingSolver
+		+ TermCallback
+		+ LearnCallback
+		+ SolveAssuming
+		+ NextVarRange
+		+ for<'a> From<&'a Cnf>,
 	<Slv as SolverTrait>::ValueFn: PropagatorAccess,
 {
 }
@@ -482,12 +491,12 @@ where
 	}
 }
 
-impl<Sol, Sat> From<Cnf> for Solver<Sat>
+impl<Sol, Sat> From<&Cnf> for Solver<Sat>
 where
 	Sol: PropagatorAccess + SatValuation,
 	Sat: SatSolver + SolverTrait<ValueFn = Sol>,
 {
-	fn from(value: Cnf) -> Self {
+	fn from(value: &Cnf) -> Self {
 		let mut core: Sat = value.into();
 		core.set_external_propagator(Some(Engine::default()));
 		core.set_learn_callback(Some(trace_learned_clause));

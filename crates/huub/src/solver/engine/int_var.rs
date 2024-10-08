@@ -1203,7 +1203,7 @@ mod tests {
 				unreachable!()
 			}
 		};
-		let mut slv: Solver<Cadical> = Cnf::default().into();
+		let mut slv = Solver::<Cadical>::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from(1..=4),
@@ -1233,7 +1233,7 @@ mod tests {
 		let lit = a.get_bool_lit(LitMeaning::Eq(4)).unwrap();
 		assert_eq!(get_lit(lit), 3);
 
-		let mut slv: Solver<Cadical> = Cnf::default().into();
+		let mut slv = Solver::<Cadical>::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=3, 8..=10]),

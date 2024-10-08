@@ -195,7 +195,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_linear_ne_sat() {
-		let mut slv: Solver<Cadical> = Cnf::default().into();
+		let mut slv = Solver::<Cadical>::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),

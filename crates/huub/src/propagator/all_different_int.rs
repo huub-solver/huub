@@ -97,7 +97,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_all_different_value_sat() {
-		let mut slv: Solver<Cadical> = Cnf::default().into();
+		let mut slv = Solver::<Cadical>::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=4]),
@@ -125,7 +125,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_all_different_value_unsat() {
-		let mut slv: Solver<Cadical> = Cnf::default().into();
+		let mut slv = Solver::<Cadical>::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
@@ -151,7 +151,7 @@ mod tests {
 	}
 
 	fn test_sudoku(grid: &[&str], expected: SolveResult) {
-		let mut slv: Solver<Cadical> = Cnf::default().into();
+		let mut slv = Solver::<Cadical>::from(&Cnf::default());
 		let mut all_vars = vec![];
 		// create variables and add all different propagator for each row
 		grid.iter().for_each(|row| {

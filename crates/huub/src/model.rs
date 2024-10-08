@@ -80,7 +80,7 @@ impl Model {
 		let mut map = VariableMap::default();
 
 		// TODO: run SAT simplification
-		let mut slv: Solver<Sat> = self.cnf.clone().into();
+		let mut slv = Solver::<Sat>::from(&self.cnf);
 		let any_slv: &mut dyn Any = &mut slv.oracle;
 		if let Some(r) = any_slv.downcast_mut::<Cadical>() {
 			r.set_option("restart", config.restart() as i32);

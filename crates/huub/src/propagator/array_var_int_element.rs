@@ -252,7 +252,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_element_bounds_sat() {
-		let mut slv: Solver<Cadical> = Cnf::default().into();
+		let mut slv = Solver::<Cadical>::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([3..=4]),
@@ -325,7 +325,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_element_holes() {
-		let mut slv: Solver<Cadical> = Cnf::default().into();
+		let mut slv = Solver::<Cadical>::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=3]),
