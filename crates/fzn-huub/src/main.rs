@@ -16,6 +16,7 @@ ARGUMENTS
 FLAGS
                       === STANDARD FLATZINC OPTIONS ===
   -a, --all-solutions             Find all possible solutions for the given (satisfaction) instance.
+  --all-optimal                   Find all optimal solutions for the given (optimization) instance.
   -i, --intermediate-solutions    Display all intermediate solutions found during the search.
   -f, --free-search               Allow the solver to adjust any search options as it judges best.
                                   This flag overrides all other search-related flags.

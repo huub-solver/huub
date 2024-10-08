@@ -51,6 +51,8 @@ pub struct Cli<Stdout, Stderr> {
 	path: PathBuf,
 	/// Output all (satisfiable) solutions
 	all_solutions: bool,
+	/// Output all optimal solutions
+	all_optimal: bool,
 	/// Output intermediate solutions
 	intermediate_solutions: bool,
 	/// Allow the solver to adjust search configuration
@@ -312,13 +314,42 @@ where
 			_ => {}
 		};
 
+		// Variables that the user is interested in
+		let output_vars: Vec<_> = fzn
+			.output
+			.iter()
+			.flat_map(|ident| {
+				if let Some(arr) = fzn.arrays.get(ident) {
+					arr.contents
+						.iter()
+						.filter_map(|lit| {
+							if let Literal::Identifier(ident) = lit {
+								Some(var_map[ident])
+							} else {
+								None
+							}
+						})
+						.collect()
+				} else {
+					vec![var_map[ident]]
+				}
+			})
+			.collect();
 		// Run the solver!
 		let res = match goal {
 			Some((goal, obj)) => {
 				if self.all_solutions {
-					warn!("--all-solutions is ignored when optimizing, use --intermediate-solutions or --all-optimal-solutions instead");
+					warn!("--all-solutions is ignored when optimizing, use --intermediate-solutions or --all-optimal instead");
 				}
-				if self.intermediate_solutions {
+				let mut no_good_vals = vec![
+					None;
+					if self.all_optimal {
+						output_vars.len()
+					} else {
+						0
+					}
+				];
+				let (status, obj_val) = if self.intermediate_solutions {
 					slv.branch_and_bound(obj, goal, |value| {
 						output!(
 							self.stdout,
@@ -329,6 +360,11 @@ where
 								var_map: &var_map
 							}
 						);
+						if self.all_optimal {
+							for (i, var) in output_vars.iter().enumerate() {
+								no_good_vals[i] = value(*var);
+							}
+						}
 					})
 				} else {
 					// Set up Ctrl-C handler (to allow printing last solution)
@@ -346,44 +382,56 @@ where
 							var_map: &var_map,
 						}
 						.to_string();
+						if self.all_optimal {
+							for (i, var) in output_vars.iter().enumerate() {
+								no_good_vals[i] = value(*var);
+							}
+						}
 					});
 					output!(self.stdout, "{}", last_sol);
 					res
+				};
+				if status == SolveResult::Complete && self.all_optimal {
+					// Ensure all following solutions have the same objective value as the
+					// first optimal solution
+					let Some(obj_val) = obj_val else {
+						unreachable!()
+					};
+					let obj_lit = slv.get_int_lit(obj, LitMeaning::Eq(obj_val));
+					slv.add_clause([obj_lit]).unwrap();
+					// Ensure all following solutions are different from the first optimal
+					// solution
+					if slv.add_no_good(&output_vars, &no_good_vals).is_err() {
+						SolveResult::Complete
+					} else {
+						// Find remaining optimal solutions
+						slv.all_solutions(&output_vars, |value| {
+							output!(
+								self.stdout,
+								"{}",
+								Solution {
+									value,
+									fzn: &fzn,
+									var_map: &var_map
+								}
+							);
+						})
+					}
+				} else {
+					status
 				}
 			}
-			None if self.all_solutions => {
-				let vars: Vec<_> = fzn
-					.output
-					.iter()
-					.flat_map(|ident| {
-						if let Some(arr) = fzn.arrays.get(ident) {
-							arr.contents
-								.iter()
-								.filter_map(|lit| {
-									if let Literal::Identifier(ident) = lit {
-										Some(var_map[ident])
-									} else {
-										None
-									}
-								})
-								.collect()
-						} else {
-							vec![var_map[ident]]
-						}
-					})
-					.collect();
-				slv.all_solutions(&vars, |value| {
-					output!(
-						self.stdout,
-						"{}",
-						Solution {
-							value,
-							fzn: &fzn,
-							var_map: &var_map
-						}
-					);
-				})
-			}
+			None if self.all_solutions => slv.all_solutions(&output_vars, |value| {
+				output!(
+					self.stdout,
+					"{}",
+					Solution {
+						value,
+						fzn: &fzn,
+						var_map: &var_map
+					}
+				);
+			}),
 			None => slv.solve(|value| {
 				output!(
 					self.stdout,
@@ -438,6 +486,7 @@ where
 			// Copy the rest of the fields
 			path: self.path,
 			all_solutions: self.all_solutions,
+			all_optimal: self.all_optimal,
 			intermediate_solutions: self.intermediate_solutions,
 			free_search: self.free_search,
 			statistics: self.statistics,
@@ -459,6 +508,7 @@ where
 			// Copy the rest of the fields
 			path: self.path,
 			all_solutions: self.all_solutions,
+			all_optimal: self.all_optimal,
 			intermediate_solutions: self.intermediate_solutions,
 			free_search: self.free_search,
 			statistics: self.statistics,
@@ -495,6 +545,7 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 
 		let cli = Cli {
 			all_solutions: args.contains(["-a", "--all-solutions"]),
+			all_optimal: args.contains("--all-optimal"),
 			intermediate_solutions: args.contains(["-i", "--intermediate-solutions"]),
 			free_search: args.contains(["-f", "--free-search"]),
 			statistics: args.contains(["-s", "--statistics"]),

@@ -7,8 +7,8 @@ mod helpers;
 #[cfg(test)]
 mod tests {
 	use crate::helpers::{
-		assert_all_solutions, assert_first_solution, assert_optimal, assert_search_order,
-		assert_unsat,
+		assert_all_optimal, assert_all_solutions, assert_first_solution, assert_optimal,
+		assert_search_order, assert_unsat,
 	};
 
 	assert_all_solutions!(array_var_int_element);
@@ -18,6 +18,8 @@ mod tests {
 	assert_all_solutions!(unify_element_2);
 	assert_all_solutions!(unify_with_view_1);
 	assert_all_solutions!(unify_with_view_2);
+
+	assert_all_optimal!(simple_sum);
 
 	assert_first_solution!(seq_search_1);
 	assert_first_solution!(seq_search_2);

@@ -8,7 +8,7 @@ use pindakaas::{
 use rangelist::RangeList;
 
 use crate::{
-	actions::{decision::DecisionActions, inspection::InspectionActions},
+	actions::inspection::InspectionActions,
 	helpers::{div_ceil, div_floor},
 	model::{bool::BoolView, int::IntView, reformulate::VariableMap},
 	propagator::{

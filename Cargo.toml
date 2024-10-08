@@ -15,9 +15,9 @@ categories = ["algorithms", "mathematics", "science"]
 keywords = ["sat", "lcg", "flatzinc", "minizinc", "optimization"]
 
 [workspace.dependencies]
+expect-test = "1.5"
 flatzinc-serde = "0.4"
 tracing = "0.1.40"
-expect-test = "1.5"
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"

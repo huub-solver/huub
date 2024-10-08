@@ -121,7 +121,9 @@ where
 		self.engine_mut().branchers.push(brancher);
 	}
 
-	pub(crate) fn add_clause<I: IntoIterator<Item = BoolView>>(
+	#[doc(hidden)]
+	/// Add a clause to the solver
+	pub fn add_clause<I: IntoIterator<Item = BoolView>>(
 		&mut self,
 		iter: I,
 	) -> Result<(), ReformulationError> {
@@ -130,15 +132,45 @@ where
 			match lit.0 {
 				BoolViewInner::Lit(l) => clause.push(l),
 				BoolViewInner::Const(true) => return Ok(()),
-				BoolViewInner::Const(false) => (),
+				BoolViewInner::Const(false) => {}
 			}
-		}
-		if clause.is_empty() {
-			return Err(ReformulationError::TrivialUnsatisfiable);
 		}
 		self.oracle
 			.add_clause(clause)
 			.map_err(|_| ReformulationError::TrivialUnsatisfiable)
+	}
+
+	#[doc(hidden)]
+	/// Method used to add a no-good clause from a solution. This clause can be
+	/// used to ensure that the same solution is not found again.
+	///
+	/// ## Warning
+	/// This method will panic if the number of variables and values do not match.
+	pub fn add_no_good(
+		&mut self,
+		vars: &[SolverView],
+		vals: &[Option<Value>],
+	) -> Result<(), ReformulationError> {
+		let clause = vars
+			.iter()
+			.zip_eq(vals)
+			.filter_map(|(var, val)| match var {
+				SolverView::Bool(bv) => {
+					let Value::Bool(val) = val.clone()? else {
+						unreachable!()
+					};
+					Some(if val { !bv } else { *bv })
+				}
+				SolverView::Int(iv) => {
+					let Value::Int(val) = val.clone()? else {
+						unreachable!()
+					};
+					Some(self.get_int_lit(*iv, LitMeaning::NotEq(val)))
+				}
+			})
+			.collect_vec();
+		debug!(clause = ?clause.iter().filter_map(|&x| if let BoolView(BoolViewInner::Lit(x)) = x { Some(i32::from(x)) } else { None }).collect::<Vec<i32>>(), "add solution nogood");
+		self.add_clause(clause)
 	}
 
 	pub(crate) fn add_propagator<P: Poster>(
@@ -192,31 +224,7 @@ where
 			});
 			match status {
 				SolveResult::Satisfied => {
-					let nogood: Vec<RawLit> = vars
-						.iter()
-						.zip_eq(vals)
-						.filter_map(|(var, val)| match var {
-							SolverView::Bool(BoolView(BoolViewInner::Lit(l))) => {
-								let Value::Bool(val) = val? else {
-									unreachable!()
-								};
-								Some(if val { !l } else { *l })
-							}
-							SolverView::Int(iv) => {
-								let Value::Int(val) = val? else {
-									unreachable!()
-								};
-								match self.get_int_lit(*iv, LitMeaning::Eq(val)).0 {
-									BoolViewInner::Lit(l) => Some(!l),
-									BoolViewInner::Const(true) => None,
-									BoolViewInner::Const(false) => unreachable!(),
-								}
-							}
-							_ => None,
-						})
-						.collect();
-					debug!(clause = ?nogood.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add solution nogood");
-					if nogood.is_empty() || self.oracle.add_clause(nogood).is_err() {
+					if self.add_no_good(vars, &vals).is_err() {
 						return SolveResult::Complete;
 					}
 				}
@@ -248,7 +256,7 @@ where
 		objective: IntView,
 		goal: Goal,
 		mut on_sol: impl FnMut(&dyn Valuation),
-	) -> SolveResult {
+	) -> (SolveResult, Option<IntVal>) {
 		let mut obj_curr = None;
 		let obj_bound = match goal {
 			Goal::Minimize => self.get_int_lower_bound(objective),
@@ -275,7 +283,7 @@ where
 			match status {
 				SolveResult::Satisfied => {
 					if obj_curr == Some(obj_bound) {
-						return SolveResult::Complete;
+						return (SolveResult::Complete, obj_curr);
 					} else {
 						assump = match goal {
 							Goal::Minimize => Some(
@@ -299,16 +307,16 @@ where
 				}
 				SolveResult::Unsatisfiable => {
 					return if obj_curr.is_none() {
-						SolveResult::Unsatisfiable
+						(SolveResult::Unsatisfiable, None)
 					} else {
-						SolveResult::Complete
+						(SolveResult::Complete, obj_curr)
 					}
 				}
 				SolveResult::Unknown => {
 					return if obj_curr.is_none() {
-						SolveResult::Unknown
+						(SolveResult::Unknown, None)
 					} else {
-						SolveResult::Satisfied
+						(SolveResult::Satisfied, obj_curr)
 					}
 				}
 				SolveResult::Complete => unreachable!(),
@@ -341,6 +349,13 @@ where
 			solutions.push(sol_vec);
 		});
 		(status, solutions)
+	}
+
+	#[doc(hidden)]
+	/// Get the boolean view that corresponds to the given meaning of the given
+	/// integer view.
+	pub fn get_int_lit(&mut self, var: IntView, meaning: LitMeaning) -> BoolView {
+		DecisionActions::get_int_lit(self, var, meaning)
 	}
 
 	pub fn init_statistics(&self) -> InitStatistics {

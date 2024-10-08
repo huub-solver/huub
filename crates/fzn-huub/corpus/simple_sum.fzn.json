@@ -1,0 +1,19 @@
+{
+  "variables": {
+    "X_INTRODUCED_0_" : { "type" : "int", "domain" : [[0, 4]] },
+    "X_INTRODUCED_1_" : { "type" : "int", "domain" : [[0, 4]] },
+    "X_INTRODUCED_2_" : { "type" : "int", "domain" : [[0, 4]] },
+    "X_INTRODUCED_3_" : { "type" : "int", "domain" : [[0, 4]] },
+    "_objective" : { "type" : "int", "domain" : [[0, 16]], "defined" : true }
+  },
+  "arrays": {
+    "x" : { "a": ["X_INTRODUCED_0_", "X_INTRODUCED_1_", "X_INTRODUCED_2_", "X_INTRODUCED_3_"] }
+  },
+  "constraints": [
+    { "id" : "huub_all_different_int", "args" : ["x"]},
+    { "id" : "int_lin_eq", "args" : [[1, 1, 1, 1, -1], ["X_INTRODUCED_0_", "X_INTRODUCED_1_", "X_INTRODUCED_2_", "X_INTRODUCED_3_", "_objective"], 0], "ann" : ["ctx_pos"], "defines" : "_objective"}
+  ],
+  "output": ["x", "_objective"],
+  "solve": { "method" : "maximize", "objective" : "_objective" },
+  "version": "1.0"
+}

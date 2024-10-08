@@ -45,7 +45,25 @@ fn cargo_cmd<S: AsRef<str>>(name: S) -> Command {
 }
 
 pub(crate) fn check_all_solutions(file: &str, sort: bool, solns: ExpectFile) {
-	let output = fzn_huub(&["-a", file]).output().unwrap();
+	let output = fzn_huub(&["--all-solutions", file]).output().unwrap();
+	assert!(
+		output.status.success(),
+		"Solver did not finish with success exit code"
+	);
+	let stdout = String::from_utf8(output.stdout).unwrap();
+	assert!(!stdout.is_empty(), "Solver did not produce any output");
+	let mut stdout: Vec<&str> = stdout.split(FZN_SEPERATOR).collect();
+	let marker = stdout.pop().unwrap(); // complete marker
+	if sort {
+		stdout.sort();
+	}
+	stdout.push(marker);
+	let stdout = stdout.join(FZN_SEPERATOR);
+	solns.assert_eq(&stdout);
+}
+
+pub(crate) fn check_all_optimal(file: &str, sort: bool, solns: ExpectFile) {
+	let output = fzn_huub(&["--all-optimal", file]).output().unwrap();
 	assert!(
 		output.status.success(),
 		"Solver did not finish with success exit code"
@@ -118,6 +136,20 @@ macro_rules! assert_all_solutions {
 	};
 }
 pub(crate) use assert_all_solutions;
+
+macro_rules! assert_all_optimal {
+	($file:ident) => {
+		#[test]
+		fn $file() {
+			$crate::helpers::check_all_optimal(
+				&format!("./corpus/{}.fzn.json", stringify!($file)),
+				true,
+				expect_test::expect_file![&format!("../corpus/{}.sol", stringify!($file))],
+			)
+		}
+	};
+}
+pub(crate) use assert_all_optimal;
 
 macro_rules! assert_unsat {
 	($file:ident) => {
