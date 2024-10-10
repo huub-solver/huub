@@ -185,12 +185,6 @@ impl Trail {
 		// return to the root level, lit is a persistent literal
 	}
 
-	/// Returns whether the Trail is currently in an intermediate state to
-	/// construct explanations.
-	pub(crate) fn is_explaining(&self) -> bool {
-		self.pos != self.trail.len()
-	}
-
 	/// Notify the Trail of a new decision level to which the trail can be restored.
 	pub(crate) fn notify_new_decision_level(&mut self) {
 		self.prev_len.push(self.trail.len());

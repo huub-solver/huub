@@ -14,7 +14,7 @@ use std::{
 use delegate::delegate;
 use index_vec::IndexVec;
 use pindakaas::{
-	solver::{Propagator as IpasirPropagator, SolvingActions},
+	solver::{ClausePersistence, Propagator as IpasirPropagator, SearchDecision, SolvingActions},
 	Lit as RawLit, Var as RawVar,
 };
 use tracing::{debug, trace};
@@ -68,12 +68,6 @@ pub(crate) struct Engine {
 	pub(crate) branchers: Vec<BoxedBrancher>,
 	/// Internal State representation of the constraint programming engine
 	pub(crate) state: State,
-	/// Storage of literals that have been persistently propagated
-	///
-	/// These literals are repeatedly propagated when backtracking. If the engine
-	/// backtracks to level zero, then the changes can be permanently applied, and
-	/// the list can be cleared.
-	persistent: Conjunction,
 }
 
 index_vec::define_index_type! {
@@ -139,23 +133,21 @@ pub(crate) struct State {
 }
 
 impl IpasirPropagator for Engine {
-	fn notify_assignment(&mut self, lit: RawLit, persistent: bool) {
-		trace!(lit = i32::from(lit), persistent, "assignment");
-		// Process Boolean assignment
-		if persistent && self.state.decision_level() != 0 {
-			// Note that the assignment might already be known and trailed, but not previously marked as persistent
-			self.persistent.push(lit);
-			if self.state.trail.is_explaining() {
-				return;
-			}
-		}
-		if self.state.trail.assign_lit(lit).is_some() {
-			return;
-		}
+	fn reason_persistence(&self) -> ClausePersistence {
+		ClausePersistence::Irreduntant
+	}
 
-		// Enqueue propagators, if no conflict has been found
-		if self.state.conflict.is_none() {
-			self.state.enqueue_propagators(lit, None);
+	fn notify_assignments(&mut self, lits: &[RawLit]) {
+		debug!(lits = ?lits.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "assignments");
+		for &lit in lits {
+			// Process Boolean assignment
+			if self.state.trail.assign_lit(lit).is_some() {
+				continue;
+			}
+			// Enqueue propagators, if no conflict has been found
+			if self.state.conflict.is_none() {
+				self.state.enqueue_propagators(lit, None);
+			}
 		}
 	}
 
@@ -167,26 +159,16 @@ impl IpasirPropagator for Engine {
 
 	fn notify_backtrack(&mut self, new_level: usize, restart: bool) {
 		debug!(new_level, restart, "backtrack");
-
 		// Revert value changes to previous decision level
 		self.state.notify_backtrack::<false>(new_level, restart);
-
-		// Re-apply persistent changes
-		for lit in self.persistent.clone() {
-			self.notify_assignment(lit, false);
-		}
-		if new_level == 0 {
-			// Persistent changes are now permanently applied in the Trail
-			self.persistent.clear();
-		}
 	}
 
-	fn decide(&mut self, slv: &mut dyn SolvingActions) -> Option<RawLit> {
+	fn decide(&mut self, slv: &mut dyn SolvingActions) -> SearchDecision {
 		if !self.state.vsids {
 			let mut current = self.state.trail.get_trailed_int(Trail::CURRENT_BRANCHER) as usize;
 			if current == self.branchers.len() {
 				self.state.statistics.oracle_decisions += 1;
-				return None;
+				return SearchDecision::Free;
 			}
 			let mut ctx = SolvingContext::new(slv, &mut self.state);
 			while current < self.branchers.len() {
@@ -194,7 +176,7 @@ impl IpasirPropagator for Engine {
 					Decision::Select(lit) => {
 						debug!(lit = i32::from(lit), "decide");
 						self.state.statistics.user_decisions += 1;
-						return Some(lit);
+						return SearchDecision::Assign(lit);
 					}
 					Decision::Exhausted => {
 						current += 1;
@@ -212,7 +194,7 @@ impl IpasirPropagator for Engine {
 			}
 		}
 		self.state.statistics.oracle_decisions += 1;
-		None
+		SearchDecision::Free
 	}
 
 	#[tracing::instrument(level = "debug", skip(self, slv), fields(level = self.state.decision_level()))]
@@ -248,7 +230,7 @@ impl IpasirPropagator for Engine {
 				// Notify of the assignment of the previous literal so it is available
 				// when checking the reason.
 				if let Some(prev) = prev {
-					self.notify_assignment(prev, false);
+					self.notify_assignments(&[prev]);
 				}
 				if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
 					let clause: Clause =
@@ -363,16 +345,19 @@ impl IpasirPropagator for Engine {
 		accept
 	}
 
-	fn add_external_clause(&mut self, _slv: &mut dyn SolvingActions) -> Option<Clause> {
+	fn add_external_clause(
+		&mut self,
+		_slv: &mut dyn SolvingActions,
+	) -> Option<(Clause, ClausePersistence)> {
 		if !self.state.clauses.is_empty() {
 			let clause = self.state.clauses.pop_front(); // Known to be `Some`
 			trace!(clause = ?clause.as_ref().unwrap().iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add external clause");
-			clause
+			clause.map(|c| (c, ClausePersistence::Irreduntant))
 		} else if !self.state.propagation_queue.is_empty() {
 			None // Require that the solver first applies the remaining propagation
 		} else if let Some(conflict) = self.state.conflict.clone() {
 			debug!(clause = ?conflict.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add conflict clause");
-			Some(conflict)
+			Some((conflict, ClausePersistence::Forgettable))
 		} else {
 			None
 		}
