@@ -13,6 +13,9 @@
     ["--toggle-vsids", "Alternate between the activity-based search heuristic and the user-specific search heuristic after every restart.", "bool", "false"],
     ["--vivify","whether to enable vivification","bool:false:true","false"],
     ["--vsids-after", "Switch to activity-based search heuristic provided by the SAT solver after the given number of conflicts.", "int", "0"],
-    ["--vsids-only", "Only use the activity-based search provided by the SAT solver", "bool", "false"]
+    ["--vsids-only", "Only use the activity-based search provided by the SAT solver", "bool", "false"], 
+    ["--additive-factor", "Additive factor for increasing the activity scores of propagators.", "float", "0.0"],
+    ["--multiplicative-factor", "Multiplicative factor for decaying the activity scores of propagators.", "float", "1.0"],
+    ["--propagator-threshold", "The threshold of activity score for propagators to be activated in the propagation phase.", "float", "0.5"],
   ]
 }

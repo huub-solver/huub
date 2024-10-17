@@ -9,6 +9,7 @@ use std::{
 	any::Any,
 	collections::{HashMap, VecDeque},
 	mem,
+	time::Instant,
 };
 
 use delegate::delegate;
@@ -91,8 +92,19 @@ pub struct SearchStatistics {
 	user_decisions: u64,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub(crate) struct State {
+	// ---- Propagator Tracing Value Infrastructure (e.g., timer) ----
+	/// Timer
+	pub(crate) timer: Instant,
+	/// Propagator activity statistics in the last time slot
+	pub(crate) explanations: usize,
+	pub(crate) propagations: usize,
+	pub(crate) conflicts: usize,
+	pub(crate) no_propagations: usize,
+	/// Last time slot for propagator tracing
+	pub(crate) time_slot: usize,
+
 	// Solver confifguration
 	pub(crate) config: SolverConfiguration,
 
@@ -106,8 +118,8 @@ pub(crate) struct State {
 	pub(crate) trail: Trail,
 	/// Literals to be propagated by the oracle
 	pub(crate) propagation_queue: Conjunction,
-	/// Reasons for setting values
-	pub(crate) reason_map: HashMap<RawLit, Reason>,
+	/// Reasons and Propagators for setting values of literals
+	pub(crate) reason_map: HashMap<RawLit, (PropRef, Reason)>,
 	/// Whether conflict has (already) been detected
 	pub(crate) conflict: Option<Clause>,
 
@@ -130,6 +142,43 @@ pub(crate) struct State {
 	pub(crate) propagator_priority: IndexVec<PropRef, PriorityLevel>,
 	/// Flag for whether a propagator is enqueued
 	pub(crate) enqueued: IndexVec<PropRef, bool>,
+	/// Activity scores for propagators to determine whether they are active or not
+	pub(crate) activity_scores: IndexVec<PropRef, f64>,
+	/// Whether the propagator is functional
+	pub(crate) functional: IndexVec<PropRef, bool>,
+	/// Name of the propagator
+	pub(crate) propagator_types: IndexVec<PropRef, &'static str>,
+}
+
+impl Default for State {
+	fn default() -> Self {
+		Self {
+			timer: Instant::now(),
+			explanations: Default::default(),
+			propagations: Default::default(),
+			conflicts: Default::default(),
+			no_propagations: Default::default(),
+			time_slot: Default::default(),
+			config: Default::default(),
+			int_vars: Default::default(),
+			bool_to_int: Default::default(),
+			trail: Default::default(),
+			propagation_queue: Default::default(),
+			reason_map: Default::default(),
+			conflict: Default::default(),
+			clauses: Default::default(),
+			statistics: Default::default(),
+			vsids: false,
+			bool_activation: Default::default(),
+			int_activation: Default::default(),
+			propagator_queue: Default::default(),
+			propagator_priority: Default::default(),
+			enqueued: Default::default(),
+			activity_scores: Default::default(),
+			functional: Default::default(),
+			propagator_types: Default::default(),
+		}
+	}
 }
 
 impl IpasirPropagator for Engine {
@@ -203,9 +252,13 @@ impl IpasirPropagator for Engine {
 		if !self.state.clauses.is_empty() {
 			return Vec::new();
 		}
-		if self.state.propagation_queue.is_empty() && self.state.conflict.is_none() {
+		if self.state.propagation_queue.is_empty()
+			&& self.state.conflict.is_none()
+			&& !self.state.propagator_queue.is_empty()
+		{
 			// If there are no previous changes, run propagators
-			SolvingContext::new(slv, &mut self.state).run_propagators(&mut self.propagators);
+			SolvingContext::new(slv, &mut self.state)
+				.run_propagators::<true>(&mut self.propagators);
 		}
 		// Check whether there are new clauses that need to be communicated first
 		if !self.state.clauses.is_empty() {
@@ -232,9 +285,9 @@ impl IpasirPropagator for Engine {
 				if let Some(prev) = prev {
 					self.notify_assignments(&[prev]);
 				}
-				if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
+				if let Some((prop, reason)) = self.state.reason_map.get(&lit).cloned() {
 					let clause: Clause =
-						reason.explain(&mut self.propagators, &mut self.state, Some(lit));
+						reason.explain(&mut self.propagators[prop], &mut self.state, Some(lit));
 					for l in &clause {
 						if l == &lit {
 							continue;
@@ -262,12 +315,19 @@ impl IpasirPropagator for Engine {
 		// Find reason
 		let reason = self.state.reason_map.remove(&propagated_lit);
 		// Restore the current state to the state when the propagation happened if explaining lazily
-		if matches!(reason, Some(Reason::Lazy(_, _))) {
+		if matches!(reason, Some((_, Reason::Lazy(_)))) {
 			self.state.trail.goto_assign_lit(propagated_lit);
 		}
 		// Create a clause from the reason
-		let clause = if let Some(reason) = reason {
-			reason.explain(&mut self.propagators, &mut self.state, Some(propagated_lit))
+		let clause = if let Some((p, reason)) = reason {
+			self.state.explanations += 1;
+			self.state.activity_scores[p] += self.state.config.propagtor_additive_factor;
+
+			reason.explain(
+				&mut self.propagators[p],
+				&mut self.state,
+				Some(propagated_lit),
+			)
 		} else {
 			vec![propagated_lit]
 		};
@@ -324,7 +384,9 @@ impl IpasirPropagator for Engine {
 		}
 
 		// Run propgagators to find any conflicts
-		ctx.run_propagators(&mut self.propagators);
+		if !ctx.state.propagator_queue.is_empty() {
+			ctx.run_propagators::<false>(&mut self.propagators);
+		}
 		// No propagation can be triggered (all variables are fixed, so only
 		// conflicts are possible)
 		debug_assert!(self.state.propagation_queue.is_empty());
@@ -414,7 +476,7 @@ impl State {
 						return None;
 					}
 					if i < lb || i > ub {
-						// Notified of invalid assignment, do nothing.
+						// TODO: Notification of an invalid assignment, do nothing.
 						//
 						// Although we do not expect this to happen, it seems that Cadical
 						// chronological backtracking might send notifications before
@@ -438,6 +500,11 @@ impl State {
 					if new_lb <= lb {
 						return None;
 					}
+					if new_lb > ub {
+						// TODO: Notification of an invalid assignment, do nothing.
+						trace!(lit = i32::from(lit), lb, ub, "invalid geq notification");
+						return None;
+					}
 					let prev = self.int_vars[iv].notify_lower_bound(&mut self.trail, new_lb);
 					debug_assert!(prev < new_lb);
 					if new_lb == ub {
@@ -449,6 +516,11 @@ impl State {
 				LitMeaning::Less(i) => {
 					let new_ub = self.int_vars[iv].tighten_upper_bound(i - 1);
 					if new_ub >= ub {
+						return None;
+					}
+					if new_ub < lb {
+						// TODO: Notification of an invalid assignment, do nothing.
+						trace!(lit = i32::from(lit), lb, ub, "invalid less notification");
 						return None;
 					}
 					let prev = self.int_vars[iv].notify_upper_bound(&mut self.trail, new_ub);
@@ -477,8 +549,8 @@ impl State {
 	fn ensure_clause_changes(&mut self, propagators: &mut IndexVec<PropRef, BoxedPropagator>) {
 		let queue = mem::take(&mut self.propagation_queue);
 		for lit in queue {
-			let clause = if let Some(reason) = self.reason_map.remove(&lit) {
-				reason.explain(propagators, self, Some(lit))
+			let clause = if let Some((prop, reason)) = self.reason_map.remove(&lit) {
+				reason.explain(&mut propagators[prop], self, Some(lit))
 			} else {
 				vec![lit]
 			};
@@ -514,7 +586,7 @@ impl State {
 		// Backtrack trail
 		self.trail.notify_backtrack(level);
 		// Empty propagation queue
-		while let Some(p) = self.propagator_queue.pop() {
+		while let Some(p) = self.propagator_queue.pop::<true>() {
 			self.enqueued[p] = false;
 		}
 		if ARTIFICIAL {
@@ -566,8 +638,15 @@ impl State {
 	) {
 		for prop in self.int_activation[int_var].activated_by(event) {
 			if Some(prop) != skip && !self.enqueued[prop] {
-				self.propagator_queue
-					.insert(self.propagator_priority[prop], prop);
+				if !self.vsids
+					|| self.activity_scores[prop] >= self.config.propagator_activity_threshold
+				{
+					self.propagator_queue
+						.insert(self.propagator_priority[prop], prop);
+				} else {
+					trace!(propagator = usize::from(prop), "deactivate propagator");
+					self.propagator_queue.insert(PriorityLevel::Inactive, prop);
+				}
 				self.enqueued[prop] = true;
 			}
 		}
@@ -576,8 +655,15 @@ impl State {
 	fn enqueue_propagators(&mut self, lit: RawLit, skip: Option<PropRef>) {
 		for &prop in self.bool_activation.get(&lit.var()).into_iter().flatten() {
 			if Some(prop) != skip && !self.enqueued[prop] {
-				self.propagator_queue
-					.insert(self.propagator_priority[prop], prop);
+				if !self.vsids
+					|| self.activity_scores[prop] >= self.config.propagator_activity_threshold
+				{
+					self.propagator_queue
+						.insert(self.propagator_priority[prop], prop);
+				} else {
+					trace!(propagator = usize::from(prop), "deactivate propagator");
+					self.propagator_queue.insert(PriorityLevel::Inactive, prop);
+				}
 				self.enqueued[prop] = true;
 			}
 		}
@@ -588,11 +674,11 @@ impl State {
 		}
 	}
 
-	fn register_reason(&mut self, lit: RawLit, built_reason: Result<Reason, bool>) {
+	fn register_reason(&mut self, lit: RawLit, prop: PropRef, built_reason: Result<Reason, bool>) {
 		match built_reason {
 			Ok(reason) => {
 				// Insert new reason, possibly overwriting old one (from previous search attempt)
-				let _ = self.reason_map.insert(lit, reason);
+				let _ = self.reason_map.insert(lit, (prop, reason));
 			}
 			Err(true) => {
 				// No (previous) reason required
@@ -613,6 +699,19 @@ impl State {
 	pub(crate) fn set_vsids_only(&mut self, enable: bool) {
 		self.config.vsids_only = enable;
 		self.vsids = enable;
+	}
+
+	pub(crate) fn set_propagator_activity_factors(
+		&mut self,
+		threshold: f64,
+		additive: f64,
+		multiplicative: f64,
+		trace_propagations: Option<u128>,
+	) {
+		self.config.propagator_activity_threshold = threshold;
+		self.config.propagtor_additive_factor = additive;
+		self.config.propagtor_multiplicative_factor = multiplicative;
+		self.config.trace_propagations = trace_propagations;
 	}
 }
 

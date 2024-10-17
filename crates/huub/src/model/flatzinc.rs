@@ -1028,6 +1028,9 @@ where
 				}
 				_ => return Err(FlatZincError::UnknownConstraint(c.id.to_string())),
 			}
+
+			let n = self.prb.functional.len() - 1;
+			self.prb.functional[n] = c.defines.is_some();
 		}
 
 		Ok(())

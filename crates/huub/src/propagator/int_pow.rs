@@ -289,6 +289,10 @@ impl Poster for IntPowBoundsPoster {
 			},
 		))
 	}
+
+	fn name(&self) -> &'static str {
+		"IntPowBounds"
+	}
 }
 
 fn pow(base: IntVal, exponent: IntVal) -> Option<IntVal> {
@@ -347,7 +351,8 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		slv.add_propagator(IntPowBounds::prepare(a, b, c)).unwrap();
+		slv.add_propagator(IntPowBounds::prepare(a, b, c), false)
+			.unwrap();
 		slv.expect_solutions(
 			&[a, b, c],
 			expect![[r#"

@@ -1,6 +1,5 @@
 use std::{iter::once, marker::PhantomData, mem};
 
-use index_vec::IndexVec;
 use pindakaas::Lit as RawLit;
 
 use crate::{
@@ -30,7 +29,7 @@ pub(crate) struct LazyReason(pub(crate) PropRef, pub(crate) u64);
 pub(crate) enum Reason {
 	/// A promise that a given propagator will compute a causation of the change
 	/// when given the attached data
-	Lazy(PropRef, u64),
+	Lazy(u64),
 	/// A conjunction of literals forming the causation of the change
 	Eager(Box<[RawLit]>),
 	Simple(RawLit),
@@ -55,13 +54,13 @@ impl Reason {
 	/// When the `lit` argument is `None`, the reason is explaining `false`.
 	pub(crate) fn explain<Clause: FromIterator<RawLit>>(
 		&self,
-		props: &mut IndexVec<PropRef, BoxedPropagator>,
+		prop: &mut BoxedPropagator,
 		actions: &mut State,
 		lit: Option<RawLit>,
 	) -> Clause {
 		match self {
-			Reason::Lazy(prop, data) => {
-				let reason = props[*prop].explain(actions, lit, *data);
+			Reason::Lazy(data) => {
+				let reason = prop.explain(actions, lit, *data);
 				reason.into_iter().map(|l| !l).chain(lit).collect()
 			}
 			Reason::Eager(v) => v.iter().map(|l| !l).chain(lit).collect(),
@@ -134,7 +133,7 @@ where
 
 impl<A: ExplanationActions> ReasonBuilder<A> for LazyReason {
 	fn build_reason(self, _: &mut A) -> Result<Reason, bool> {
-		Ok(Reason::Lazy(self.0, self.1))
+		Ok(Reason::Lazy(self.1))
 	}
 }
 

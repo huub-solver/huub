@@ -102,6 +102,10 @@ impl Poster for ArrayIntMinimumBoundsPoster {
 			},
 		))
 	}
+
+	fn name(&self) -> &'static str {
+		"ArrayIntMinimumBounds"
+	}
 }
 
 #[cfg(test)]

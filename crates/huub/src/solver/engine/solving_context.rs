@@ -1,7 +1,7 @@
 use delegate::delegate;
 use index_vec::IndexVec;
 use pindakaas::{solver::SolvingActions, Lit as RawLit};
-use tracing::trace;
+use tracing::{info, trace};
 
 use crate::{
 	actions::{
@@ -53,24 +53,64 @@ impl<'a> SolvingContext<'a> {
 
 	/// Run the propagators in the queue until a propagator detects a conflict,
 	/// returns literals to be propagated by the SAT oracle, or the queue is empty.
-	pub(crate) fn run_propagators(&mut self, propagators: &mut IndexVec<PropRef, BoxedPropagator>) {
-		while let Some(p) = self.state.propagator_queue.pop() {
+	/// The generic artugment `SKIP_INACTIVE` is used to skip the inactive propagators in the queue.
+	pub(crate) fn run_propagators<const SKIP_INACTIVE: bool>(
+		&mut self,
+		propagators: &mut IndexVec<PropRef, BoxedPropagator>,
+	) {
+		// Update tracing statistics on new decision level
+		if self.state.config.trace_propagations.is_some()
+			&& self.state.timer.elapsed().as_millis()
+				/ self.state.config.trace_propagations.unwrap()
+				- self.state.time_slot as u128
+				> 0
+		{
+			info!(
+				"time={time} propagation results conflicts={conflicts}, propagations={propagations}, no_propagations={no_propagations}, explanations={explanations}, search={search}",
+				time= self.state.time_slot,
+				conflicts = self.state.conflicts,
+				propagations = self.state.propagations,
+				no_propagations = self.state.no_propagations,
+				explanations = self.state.explanations,
+				search = if self.state.vsids { "VSIDS" } else { "User" }
+			);
+			self.state.time_slot = (self.state.timer.elapsed().as_millis()
+				/ self.state.config.trace_propagations.unwrap()) as usize;
+			self.state.conflicts = 0;
+			self.state.propagations = 0;
+			self.state.no_propagations = 0;
+			self.state.explanations = 0;
+		}
+
+		while let Some(p) = self.state.propagator_queue.pop::<SKIP_INACTIVE>() {
 			debug_assert!(self.state.conflict.is_none());
+			let propagation_before = self.state.propagation_queue.len();
 			self.state.enqueued[p] = false;
 			self.current_prop = p;
 			let prop = propagators[p].as_mut();
 			let res = prop.propagate(self);
 			self.state.statistics.propagations += 1;
 			self.current_prop = PropRef::new(u32::MAX as usize);
+			// If the propagator detected a conflict or add new literals to the propagation queue,
+			// additively increase the activity score of the propagator
 			if let Err(Conflict { subject, reason }) = res {
-				let clause: Clause = reason.explain(propagators, self.state, subject);
+				let clause: Clause = reason.explain(&mut propagators[p], self.state, subject);
 				trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "conflict detected");
 				debug_assert!(!clause.is_empty());
 				debug_assert!(self.state.conflict.is_none());
 				self.state.conflict = Some(clause);
+				self.state.activity_scores[p] += self.state.config.propagtor_additive_factor;
+				self.state.conflicts += 1;
+			} else if propagation_before != self.state.propagation_queue.len() {
+				self.state.propagations += 1;
+			} else {
+				// After wake-up, multiplicatively decay the activity score of the propagator if no propagations
+				self.state.activity_scores[p] *= self.state.config.propagtor_multiplicative_factor;
+				self.state.no_propagations += 1;
 			}
+
 			if self.state.conflict.is_some() || !self.state.propagation_queue.is_empty() {
-				return;
+				break;
 			}
 		}
 	}
@@ -212,7 +252,7 @@ impl PropagationActions for SolvingContext<'_> {
 				None => {
 					let reason = reason.build_reason(self);
 					trace!(lit = i32::from(lit), reason = ?reason, "propagate bool");
-					self.state.register_reason(lit, reason);
+					self.state.register_reason(lit, self.current_prop, reason);
 					self.state.propagation_queue.push(lit);
 					Ok(())
 				}

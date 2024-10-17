@@ -247,6 +247,10 @@ impl Poster for IntDivBoundsPoster {
 			},
 		))
 	}
+
+	fn name(&self) -> &'static str {
+		"IntDivBounds"
+	}
 }
 
 #[cfg(test)]
@@ -285,7 +289,8 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		slv.add_propagator(IntDivBounds::prepare(a, b, c)).unwrap();
+		slv.add_propagator(IntDivBounds::prepare(a, b, c), false)
+			.unwrap();
 		slv.expect_solutions(
 			&[a, b, c],
 			expect![[r#"

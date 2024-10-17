@@ -79,6 +79,15 @@ pub struct Cli<Stdout, Stderr> {
 	vsids_after: Option<u32>,
 	/// Only use the SAT VSIDS heuristic for search
 	vsids_only: bool,
+	/// Additive factor for propagator activation
+	propagator_additive_factor: f64,
+	/// Multiplicative factor for propagator activation
+	propagator_multiplicative_factor: f64,
+	/// Threshold for propagator activation
+	propagator_activity_threshold: f64,
+
+	/// Interval in milliseconds to trace propagator activities
+	trace_propagations: Option<u128>,
 
 	// --- Output configuration ---
 	/// Output stream for (intermediate) solutions and statistics
@@ -188,6 +197,7 @@ where
 				&[
 					("intVariables", &stats.int_vars()),
 					("propagators", &stats.propagators()),
+					("functional_propagators", &stats.functional_propagators()),
 					("unifiedVariables", &fzn_stats.unified_variables()),
 					("extractedViews", &fzn_stats.extracted_views()),
 					(
@@ -253,6 +263,13 @@ where
 			slv.set_toggle_vsids(self.toggle_vsids);
 			slv.set_vsids_after(self.vsids_after);
 		}
+
+		slv.set_propagator_activity_factors(
+			self.propagator_activity_threshold,
+			self.propagator_additive_factor,
+			self.propagator_multiplicative_factor,
+			self.trace_propagations,
+		);
 
 		// Determine Goal and Objective
 		let start_solve = Instant::now();
@@ -498,6 +515,10 @@ where
 			vivification: self.vivification,
 			vsids_after: self.vsids_after,
 			vsids_only: self.vsids_only,
+			propagator_additive_factor: self.propagator_additive_factor,
+			propagator_multiplicative_factor: self.propagator_multiplicative_factor,
+			propagator_activity_threshold: self.propagator_activity_threshold,
+			trace_propagations: self.trace_propagations,
 			stdout: self.stdout,
 		}
 	}
@@ -520,6 +541,10 @@ where
 			vivification: self.vivification,
 			vsids_after: self.vsids_after,
 			vsids_only: self.vsids_only,
+			propagator_additive_factor: self.propagator_additive_factor,
+			propagator_multiplicative_factor: self.propagator_multiplicative_factor,
+			propagator_activity_threshold: self.propagator_activity_threshold,
+			trace_propagations: self.trace_propagations,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
 		}
@@ -541,6 +566,11 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 				"expected 'true','false','on','off','0', or '1', found '{}'",
 				s
 			)),
+		};
+
+		let parse_float_arg = |s: &str| match s.parse::<f64>() {
+			Ok(v) => Ok(v),
+			Err(_) => Err(format!("expected a floating point number, found '{}'", s)),
 		};
 
 		let cli = Cli {
@@ -570,6 +600,21 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			vsids_after: args
 				.opt_value_from_str("--vsids-after")
 				.map_err(|e| e.to_string())?,
+			propagator_additive_factor: args
+				.opt_value_from_fn("--additive-factor", parse_float_arg)
+				.map(|x| x.unwrap_or(0.0))
+				.map_err(|e| e.to_string())?,
+			propagator_multiplicative_factor: args
+				.opt_value_from_fn("--multiplicative-factor", parse_float_arg)
+				.map(|x| x.unwrap_or(1.0))
+				.map_err(|e| e.to_string())?,
+			propagator_activity_threshold: args
+				.opt_value_from_fn("--propagator-threshold", parse_float_arg)
+				.map(|x| x.unwrap_or(0.5))
+				.map_err(|e| e.to_string())?,
+			trace_propagations: args
+				.opt_value_from_str("--trace-propagations")
+				.map_err(|e| e.to_string())?,
 
 			verbose,
 			path: args
@@ -579,7 +624,7 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			stdout: io::stdout(),
 			#[expect(trivial_casts, reason = "doesn't compile without the case")]
 			stderr: io::stderr as fn() -> io::Stderr,
-			ansi_color: true,
+			ansi_color: args.contains("--ansi-color"),
 		};
 
 		let remaining = args.finish();

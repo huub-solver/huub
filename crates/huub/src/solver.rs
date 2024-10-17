@@ -39,7 +39,7 @@ use crate::{
 	BoolView, IntVal, LitMeaning, ReformulationError,
 };
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct SolverConfiguration {
 	/// Switch between the activity-based search heuristic and the user-specific search heuristic after each restart.
 	///
@@ -51,6 +51,14 @@ pub(crate) struct SolverConfiguration {
 	vsids_after: Option<u32>,
 	/// Only use the activity-based search heuristic provided by the SAT solver. Ignore the user-specific search heuristic.
 	vsids_only: bool,
+	/// Additive constant for the activity-based activation of propagators.
+	propagtor_additive_factor: f64,
+	/// Multiplicative constant for the activity-based activation of propagators.
+	propagtor_multiplicative_factor: f64,
+	/// The threshold for the activity-based activation of propagators.
+	propagator_activity_threshold: f64,
+	/// Interval in milliseconds to trace propagator activities.
+	trace_propagations: Option<u128>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +77,8 @@ pub struct InitStatistics {
 	int_vars: usize,
 	/// Number of propagators in the solver
 	propagators: usize,
+	/// Number of functional propagators in the solver
+	functional_propagators: usize,
 }
 
 pub trait SatSolver:
@@ -109,6 +119,9 @@ impl InitStatistics {
 	}
 	pub fn propagators(&self) -> usize {
 		self.propagators
+	}
+	pub fn functional_propagators(&self) -> usize {
+		self.functional_propagators
 	}
 }
 
@@ -181,8 +194,11 @@ where
 	pub(crate) fn add_propagator<P: Poster>(
 		&mut self,
 		poster: P,
+		functional: bool,
 	) -> Result<(), ReformulationError> {
 		let prop_ref = PropRef::from(self.engine().propagators.len());
+		let p = self.engine_mut().state.propagator_types.push(poster.name());
+		debug_assert_eq!(prop_ref, p);
 		let mut actions = InitializationContext {
 			slv: self,
 			init_ref: InitRef::Propagator(prop_ref),
@@ -194,6 +210,10 @@ where
 		let p = engine.state.propagator_priority.push(queue_pref.priority);
 		debug_assert_eq!(prop_ref, p);
 		let p = self.engine_mut().state.enqueued.push(false);
+		debug_assert_eq!(prop_ref, p);
+		let p = self.engine_mut().state.activity_scores.push(1.0);
+		debug_assert_eq!(prop_ref, p);
+		let p = self.engine_mut().state.functional.push(functional);
 		debug_assert_eq!(prop_ref, p);
 		if queue_pref.enqueue_on_post {
 			let state = &mut self.engine_mut().state;
@@ -367,6 +387,13 @@ where
 		InitStatistics {
 			int_vars: self.engine().state.int_vars.len(),
 			propagators: self.engine().propagators.len(),
+			functional_propagators: self
+				.engine()
+				.state
+				.functional
+				.iter()
+				.filter(|&&x| x)
+				.count(),
 		}
 	}
 
@@ -398,6 +425,7 @@ where
 			pub fn set_vsids_after(&mut self, conflicts: Option<u32>);
 			pub fn set_vsids_only(&mut self, enable: bool);
 			pub fn set_toggle_vsids(&mut self, enable: bool);
+			pub fn set_propagator_activity_factors(&mut self, threshold: f64, additive: f64, multiplicative: f64, trace_propagations: Option<u128>);
 		}
 	}
 

@@ -1,12 +1,15 @@
+const PRIORITY_LEVEL_COUNT: usize = PriorityLevel::Immediate as usize + 1;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PriorityQueue<E> {
-	storage: [Vec<E>; 6],
+	storage: [Vec<E>; PRIORITY_LEVEL_COUNT],
 }
 
 impl<E> Default for PriorityQueue<E> {
 	fn default() -> Self {
 		Self {
 			storage: [
+				Vec::new(),
 				Vec::new(),
 				Vec::new(),
 				Vec::new(),
@@ -21,23 +24,29 @@ impl<E> Default for PriorityQueue<E> {
 impl<E> PriorityQueue<E> {
 	pub(crate) fn insert(&mut self, priority: PriorityLevel, elem: E) {
 		let i = priority as usize;
-		debug_assert!((0..=5).contains(&i));
+		debug_assert!((0..=PRIORITY_LEVEL_COUNT - 1).contains(&i));
 		self.storage[i].push(elem);
 	}
 
-	pub(crate) fn pop(&mut self) -> Option<E> {
-		for queue in self.storage.iter_mut().rev() {
+	pub(crate) fn pop<const SKIP_INACTIVE: bool>(&mut self) -> Option<E> {
+		for queue in self.storage.iter_mut().skip(SKIP_INACTIVE as usize).rev() {
 			if !queue.is_empty() {
 				return queue.pop();
 			}
 		}
 		None
 	}
+
+	pub(crate) fn is_empty(&self) -> bool {
+		self.storage.iter().all(Vec::is_empty)
+	}
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub(crate) enum PriorityLevel {
+	/// The inactive priority level, only triggered in check model
+	Inactive,
 	#[allow(
 		dead_code,
 		reason = "TODO: no current propagators are this priority level"

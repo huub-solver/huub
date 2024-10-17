@@ -179,6 +179,10 @@ impl<const R: usize> Poster for IntLinearLessEqBoundsPoster<R> {
 			},
 		))
 	}
+
+	fn name(&self) -> &'static str {
+		"IntLinearLessEqBounds"
+	}
 }
 
 #[cfg(test)]
@@ -217,10 +221,10 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		slv.add_propagator(IntLinearLessEqBounds::prepare(
-			vec![a * NonZeroIntVal::new(2).unwrap(), b, c],
-			6,
-		))
+		slv.add_propagator(
+			IntLinearLessEqBounds::prepare(vec![a * NonZeroIntVal::new(2).unwrap(), b, c], 6),
+			false,
+		)
 		.unwrap();
 
 		slv.expect_solutions(
@@ -269,10 +273,10 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		slv.add_propagator(IntLinearLessEqBounds::prepare(
-			vec![a * NonZeroIntVal::new(-2).unwrap(), -b, -c],
-			-6,
-		))
+		slv.add_propagator(
+			IntLinearLessEqBounds::prepare(vec![a * NonZeroIntVal::new(-2).unwrap(), -b, -c], -6),
+			false,
+		)
 		.unwrap();
 		slv.expect_solutions(
 			&[a, b, c],

@@ -79,6 +79,10 @@ impl Poster for AllDifferentIntValuePoster {
 			},
 		))
 	}
+
+	fn name(&self) -> &'static str {
+		"AllDifferentIntValue"
+	}
 }
 
 #[cfg(test)]
@@ -117,7 +121,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		slv.add_propagator(AllDifferentIntValue::prepare(vec![a, b, c]))
+		slv.add_propagator(AllDifferentIntValue::prepare(vec![a, b, c]), false)
 			.unwrap();
 		slv.assert_all_solutions(&[a, b, c], |sol| sol.iter().all_unique());
 	}
@@ -145,7 +149,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		slv.add_propagator(AllDifferentIntValue::prepare(vec![a, b, c]))
+		slv.add_propagator(AllDifferentIntValue::prepare(vec![a, b, c]), false)
 			.unwrap();
 		slv.assert_unsatisfiable();
 	}
@@ -169,14 +173,14 @@ mod tests {
 					));
 				}
 			}
-			slv.add_propagator(AllDifferentIntValue::prepare(vars.clone()))
+			slv.add_propagator(AllDifferentIntValue::prepare(vars.clone()), false)
 				.unwrap();
 			all_vars.push(vars);
 		});
 		// add all different propagator for each column
 		for i in 0..9 {
 			let col_vars: Vec<IntView> = (0..9).map(|j| all_vars[j][i]).collect();
-			slv.add_propagator(AllDifferentIntValue::prepare(col_vars))
+			slv.add_propagator(AllDifferentIntValue::prepare(col_vars), false)
 				.unwrap();
 		}
 		// add all different propagator for each 3 by 3 grid
@@ -188,7 +192,7 @@ mod tests {
 						block_vars.push(all_vars[3 * i + x][3 * j + y]);
 					}
 				}
-				slv.add_propagator(AllDifferentIntValue::prepare(block_vars))
+				slv.add_propagator(AllDifferentIntValue::prepare(block_vars), false)
 					.unwrap();
 			}
 		}

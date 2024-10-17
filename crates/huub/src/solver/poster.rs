@@ -24,6 +24,8 @@ pub(crate) trait Poster {
 		self,
 		actions: &mut I,
 	) -> Result<(BoxedPropagator, QueuePreferences), ReformulationError>;
+
+	fn name(&self) -> &'static str;
 }
 
 pub(crate) struct QueuePreferences {
