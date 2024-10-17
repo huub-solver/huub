@@ -77,6 +77,8 @@ pub struct InitStatistics {
 	int_vars: usize,
 	/// Number of propagators in the solver
 	propagators: usize,
+	/// Number of functional propagators in the solver
+	functional_propagators: usize,
 }
 
 pub trait SatSolver:
@@ -117,6 +119,9 @@ impl InitStatistics {
 	}
 	pub fn propagators(&self) -> usize {
 		self.propagators
+	}
+	pub fn functional_propagators(&self) -> usize {
+		self.functional_propagators
 	}
 }
 
@@ -382,6 +387,13 @@ where
 		InitStatistics {
 			int_vars: self.engine().state.int_vars.len(),
 			propagators: self.engine().propagators.len(),
+			functional_propagators: self
+				.engine()
+				.state
+				.functional
+				.iter()
+				.filter(|&&x| x)
+				.count(),
 		}
 	}
 

@@ -197,6 +197,7 @@ where
 				&[
 					("intVariables", &stats.int_vars()),
 					("propagators", &stats.propagators()),
+					("functional_propagators", &stats.functional_propagators()),
 					("unifiedVariables", &fzn_stats.unified_variables()),
 					("extractedViews", &fzn_stats.extracted_views()),
 					(

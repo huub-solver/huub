@@ -118,8 +118,8 @@ pub(crate) struct State {
 	pub(crate) trail: Trail,
 	/// Literals to be propagated by the oracle
 	pub(crate) propagation_queue: Conjunction,
-	/// Reasons for setting values
-	pub(crate) reason_map: HashMap<RawLit, Reason>,
+	/// Reasons and Propagators for setting values of literals
+	pub(crate) reason_map: HashMap<RawLit, (PropRef, Reason)>,
 	/// Whether conflict has (already) been detected
 	pub(crate) conflict: Option<Clause>,
 
@@ -285,9 +285,9 @@ impl IpasirPropagator for Engine {
 				if let Some(prev) = prev {
 					self.notify_assignments(&[prev]);
 				}
-				if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
+				if let Some((prop, reason)) = self.state.reason_map.get(&lit).cloned() {
 					let clause: Clause =
-						reason.explain(&mut self.propagators, &mut self.state, Some(lit));
+						reason.explain(&mut self.propagators[prop], &mut self.state, Some(lit));
 					for l in &clause {
 						if l == &lit {
 							continue;
@@ -315,18 +315,22 @@ impl IpasirPropagator for Engine {
 		// Find reason
 		let reason = self.state.reason_map.remove(&propagated_lit);
 		// Restore the current state to the state when the propagation happened if explaining lazily
-		if matches!(reason, Some(Reason::Lazy(_, _))) {
+		if matches!(reason, Some((_, Reason::Lazy(_)))) {
 			self.state.trail.goto_assign_lit(propagated_lit);
 		}
 		// Create a clause from the reason
-		let clause = if let Some(reason) = reason {
-			reason.explain(&mut self.propagators, &mut self.state, Some(propagated_lit))
+		let clause = if let Some((p, reason)) = reason {
+			self.state.explanations += 1;
+			self.state.activity_scores[p] += self.state.config.propagtor_additive_factor;
+
+			reason.explain(
+				&mut self.propagators[p],
+				&mut self.state,
+				Some(propagated_lit),
+			)
 		} else {
 			vec![propagated_lit]
 		};
-
-		// TODO: how to get the propagator for explanations of the propagated literals?
-		self.state.explanations += 1;
 
 		debug!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add reason clause");
 		clause
@@ -545,8 +549,8 @@ impl State {
 	fn ensure_clause_changes(&mut self, propagators: &mut IndexVec<PropRef, BoxedPropagator>) {
 		let queue = mem::take(&mut self.propagation_queue);
 		for lit in queue {
-			let clause = if let Some(reason) = self.reason_map.remove(&lit) {
-				reason.explain(propagators, self, Some(lit))
+			let clause = if let Some((prop, reason)) = self.reason_map.remove(&lit) {
+				reason.explain(&mut propagators[prop], self, Some(lit))
 			} else {
 				vec![lit]
 			};
@@ -652,7 +656,7 @@ impl State {
 		for &prop in self.bool_activation.get(&lit.var()).into_iter().flatten() {
 			if Some(prop) != skip && !self.enqueued[prop] {
 				if !self.vsids
-					&& self.activity_scores[prop] >= self.config.propagator_activity_threshold
+					|| self.activity_scores[prop] >= self.config.propagator_activity_threshold
 				{
 					self.propagator_queue
 						.insert(self.propagator_priority[prop], prop);
@@ -670,11 +674,11 @@ impl State {
 		}
 	}
 
-	fn register_reason(&mut self, lit: RawLit, built_reason: Result<Reason, bool>) {
+	fn register_reason(&mut self, lit: RawLit, prop: PropRef, built_reason: Result<Reason, bool>) {
 		match built_reason {
 			Ok(reason) => {
 				// Insert new reason, possibly overwriting old one (from previous search attempt)
-				let _ = self.reason_map.insert(lit, reason);
+				let _ = self.reason_map.insert(lit, (prop, reason));
 			}
 			Err(true) => {
 				// No (previous) reason required
