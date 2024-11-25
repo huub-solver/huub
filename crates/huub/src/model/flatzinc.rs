@@ -495,6 +495,13 @@ where
 			debug_assert!(e.is_none());
 			me.processed[con] = true;
 		};
+		let add_implied_view = |me: &mut Self, name: S, view: BoolView| {
+			let reif = view;
+			let imp_lit = me.lit_bool(&Literal::Identifier(name.clone()))?;
+			me.prb += BoolExpr::Implies(Box::new(imp_lit.clone().into()), Box::new(reif.into()));
+			add_view(me, name, imp_lit.into());
+			Ok::<(), FlatZincError>(())
+		};
 		let arg_bool_view = |me: &mut Self, arg: &Argument<S>| -> Result<BoolView, FlatZincError> {
 			if let Argument::Literal(Literal::Identifier(x)) = arg {
 				if !me.map.contains_key(x) && defined_by.contains_key(x) {
@@ -533,6 +540,16 @@ where
 				}
 				_ => {}
 			},
+			"int_eq_imp" => match c.args.as_slice() {
+				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
+				| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
+					if r == l =>
+				{
+					let x = lit_int_view(self, x)?;
+					add_implied_view(self, l.clone(), BoolView::IntEq(Box::new(x), *i))?;
+				}
+				_ => {}
+			},
 			"int_eq_reif" => match c.args.as_slice() {
 				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
 				| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
@@ -540,6 +557,21 @@ where
 				{
 					let x = lit_int_view(self, x)?;
 					add_view(self, l.clone(), BoolView::IntEq(Box::new(x), *i).into());
+				}
+				_ => {}
+			},
+			"int_le_imp" => match c.args.as_slice() {
+				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
+					if r == l =>
+				{
+					let x = lit_int_view(self, x)?;
+					add_implied_view(self, l.clone(), BoolView::IntGreaterEq(Box::new(x), *i))?;
+				}
+				[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
+					if r == l =>
+				{
+					let x = lit_int_view(self, x)?;
+					add_implied_view(self, l.clone(), BoolView::IntLessEq(Box::new(x), *i))?;
 				}
 				_ => {}
 			},
@@ -559,6 +591,16 @@ where
 				{
 					let x = lit_int_view(self, x)?;
 					add_view(self, l.clone(), BoolView::IntLessEq(Box::new(x), *i).into());
+				}
+				_ => {}
+			},
+			"int_ne_imp" => match c.args.as_slice() {
+				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
+				| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
+					if r == l =>
+				{
+					let x = lit_int_view(self, x)?;
+					add_implied_view(self, l.clone(), BoolView::IntNotEq(Box::new(x), *i))?;
 				}
 				_ => {}
 			},
