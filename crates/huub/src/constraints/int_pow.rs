@@ -1,13 +1,37 @@
-//! Propagators for the `int_pow` constraint, which enforces that the result of
-//! exponentiation of two integer variables is equal to a third integer
-//! variable.
+//! Structures and algorithms for the `int_pow` constraint, which enforces that
+//! the result of exponentiation of two integer variables is equal to a third
+//! integer variable.
 
 use crate::{
-	actions::{ExplanationActions, PropagatorInitActions},
-	constraints::{CachedReason, Conflict, PropagationActions, Propagator},
+	actions::{
+		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+	},
+	constraints::{CachedReason, Conflict, Constraint, PropagationActions, Propagator},
+	model::int::IntExpr,
 	solver::{activation_list::IntPropCond, queue::PriorityLevel},
 	IntVal, IntView, LitMeaning, ReformulationError,
 };
+
+use pindakaas::ClauseDatabaseTools;
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Representation of the `int_pow` constraint within a model.
+///
+/// This constraint enforces that a base integer decision variable
+/// exponentiated by an exponent integer decision variable is equal to a result
+/// integer decision variable.
+///
+/// Note that the exponentiation with negative exponents has similar behaviour
+/// to integer division, including the fact the constraint will remove any
+/// (semi-)division by zero.
+pub struct IntPow {
+	/// The base in the exponentiation
+	pub(crate) base: IntExpr,
+	/// The exponent in the exponentiation
+	pub(crate) exponent: IntExpr,
+	/// The result of exponentiation
+	pub(crate) result: IntExpr,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds propagator for the constraint `result = base^exponent`.
@@ -43,14 +67,26 @@ fn pow(base: IntVal, exponent: IntVal) -> Option<IntVal> {
 	})
 }
 
+impl<S: SimplificationActions> Constraint<S> for IntPow {
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let base = slv.get_solver_int(self.base);
+		let exponent = slv.get_solver_int(self.exponent);
+		let result = slv.get_solver_int(self.result);
+		IntPowBounds::new_in(slv, base, exponent, result)
+	}
+}
+
 impl IntPowBounds {
 	/// Create a new [`IntPowBounds`] propagator and post it in the solver.
-	pub fn new_in(
-		solver: &mut impl PropagatorInitActions,
+	pub fn new_in<P>(
+		solver: &mut P,
 		base: IntView,
 		exponent: IntView,
 		result: IntView,
-	) -> Result<(), ReformulationError> {
+	) -> Result<(), ReformulationError>
+	where
+		P: PropagatorInitActions + ?Sized,
+	{
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				base,
@@ -70,7 +106,7 @@ impl IntPowBounds {
 		let (base_lb, base_ub) = solver.get_int_bounds(base);
 		if exp_lb < 0 || (base_lb..=base_ub).contains(&0) {
 			// (exp < 0) -> (base != 0)
-			let clause = vec![
+			let clause = [
 				solver.get_int_lit(exponent, LitMeaning::GreaterEq(0)),
 				solver.get_int_lit(base, LitMeaning::NotEq(0)),
 			];
@@ -80,7 +116,7 @@ impl IntPowBounds {
 		// Ensure that if the exponent is zero, then the result is one
 		if (exp_lb..=exp_ub).contains(&0) {
 			// (exp == 0) -> (res == 1)
-			let clause = vec![
+			let clause = [
 				solver.get_int_lit(exponent, LitMeaning::NotEq(0)),
 				solver.get_int_lit(result, LitMeaning::Eq(1)),
 			];

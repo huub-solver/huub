@@ -1,14 +1,29 @@
-//! Propagators for the `int_abs` constraint, which enforces that one variable
-//! is takes absolute value of another.
+//! Structures and algorithms for the `int_abs` constraint, which enforces that
+//! one variable is takes absolute value of another.
 
 use std::iter::once;
 
 use crate::{
-	actions::{ExplanationActions, PropagatorInitActions},
-	constraints::{Conflict, PropagationActions, Propagator},
+	actions::{
+		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+	},
+	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
+	model::int::IntExpr,
 	solver::{activation_list::IntPropCond, queue::PriorityLevel},
-	IntView, LitMeaning,
+	IntView, LitMeaning, ReformulationError,
 };
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Representation of the `int_abs` constraint within a model.
+///
+/// This constraint enforces that the second integer decision variable takes the
+/// absolute value of the first integer decision variable.
+pub struct IntAbs {
+	/// The integer decision variable whose absolute value is being taken
+	pub(crate) origin: IntExpr,
+	/// The integer decision variable representing the absolute value
+	pub(crate) abs: IntExpr,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds propagator for one integer variable being the absolute value of another
@@ -19,9 +34,46 @@ pub struct IntAbsBounds {
 	abs: IntView,
 }
 
+impl<S: SimplificationActions> Constraint<S> for IntAbs {
+	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+		let (lb, ub) = actions.get_int_bounds(self.origin);
+		if ub < 0 {
+			actions.set_int_lower_bound(self.abs, -ub)?;
+			actions.set_int_upper_bound(self.abs, -lb)?;
+		} else if lb >= 0 {
+			actions.set_int_lower_bound(self.abs, lb)?;
+			actions.set_int_upper_bound(self.abs, ub)?;
+		} else {
+			actions.set_int_lower_bound(self.abs, 0)?;
+			let abs_max = ub.max(-lb);
+			actions.set_int_upper_bound(self.abs, abs_max)?;
+		}
+		let abs_ub = actions.get_int_upper_bound(self.abs);
+		actions.set_int_lower_bound(self.origin, -abs_ub)?;
+		actions.set_int_upper_bound(self.abs, abs_ub)?;
+		if lb >= 0 {
+			// TODO: Unify
+			actions.add_constraint((self.origin - self.abs).eq(0));
+			return Ok(SimplificationStatus::Subsumed);
+		}
+
+		Ok(SimplificationStatus::Fixpoint)
+	}
+
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let origin = slv.get_solver_int(self.origin);
+		let abs = slv.get_solver_int(self.abs);
+		IntAbsBounds::new_in(slv, origin, abs);
+		Ok(())
+	}
+}
+
 impl IntAbsBounds {
 	/// Create a new [`IntAbsBounds`] propagator and post it in the solver.
-	pub fn new_in(solver: &mut impl PropagatorInitActions, origin: IntView, abs: IntView) {
+	pub fn new_in<P>(solver: &mut P, origin: IntView, abs: IntView)
+	where
+		P: PropagatorInitActions + ?Sized,
+	{
 		let prop = solver.add_propagator(Box::new(Self { origin, abs }), PriorityLevel::Highest);
 		// Subscribe to both bounds of the origin variable
 		solver.enqueue_on_int_change(prop, origin, IntPropCond::Bounds);

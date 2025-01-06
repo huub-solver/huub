@@ -9,7 +9,11 @@ use index_vec::IndexVec;
 use pindakaas::{Lit as RawLit, Var as RawVar};
 use tracing::trace;
 
-use crate::{actions::TrailingActions, solver::view::BoolViewInner, BoolView, IntVal};
+use crate::{
+	actions::TrailingActions,
+	solver::view::{BoolView, BoolViewInner},
+	IntVal,
+};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 /// A structure that stores the currently assigned value of a Boolean variable

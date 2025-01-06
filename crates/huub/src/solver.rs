@@ -20,7 +20,7 @@ use pindakaas::{
 		propagation::{PropagatingSolver, WithPropagator},
 		LearnCallback, SlvTermSignal, SolveResult as SatSolveResult, TermCallback,
 	},
-	Cnf, Lit as RawLit, Valuation as SatValuation,
+	ClauseDatabase, Cnf, Lit as RawLit, Unsatisfiable, Valuation as SatValuation,
 };
 use tracing::{debug, trace};
 
@@ -29,18 +29,18 @@ use crate::{
 		BrancherInitActions, DecisionActions, ExplanationActions, InspectionActions,
 		PropagatorInitActions, TrailingActions,
 	},
+	branchers::BoxedBrancher,
+	constraints::BoxedPropagator,
 	solver::{
 		activation_list::IntPropCond,
-		engine::{
-			trace_new_lit, BoxedBrancher, BoxedPropagator, Engine, PropRef, SearchStatistics,
-		},
+		engine::{trace_new_lit, Engine, PropRef, SearchStatistics},
 		int_var::{IntVarRef, LazyLitDef, OrderStorage},
 		queue::PriorityLevel,
 		trail::TrailedInt,
 		value::{AssumptionChecker, NoAssumptions, Valuation, Value},
-		view::{BoolViewInner, IntView, IntViewInner, SolverView},
+		view::{BoolView, BoolViewInner, IntView, IntViewInner, SolverView},
 	},
-	BoolView, IntVal, LitMeaning, ReformulationError,
+	IntVal, LitMeaning, ReformulationError,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,21 +172,15 @@ where
 
 impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 	/// Add a clause to the solver
-	pub fn add_clause<I: IntoIterator<Item = BoolView>>(
-		&mut self,
-		iter: I,
-	) -> Result<(), ReformulationError> {
-		let mut clause = Vec::new();
-		for lit in iter {
-			match lit.0 {
-				BoolViewInner::Lit(l) => clause.push(l),
-				BoolViewInner::Const(true) => return Ok(()),
-				BoolViewInner::Const(false) => {}
-			}
-		}
-		self.oracle
-			.add_clause(clause)
-			.map_err(|_| ReformulationError::TrivialUnsatisfiable)
+	pub fn add_clause<Iter>(&mut self, clause: Iter) -> Result<(), ReformulationError>
+	where
+		Iter: IntoIterator,
+		Iter::Item: Into<BoolView>,
+	{
+		Ok(pindakaas::ClauseDatabaseTools::add_clause(
+			self,
+			clause.into_iter().map(Into::into),
+		)?)
 	}
 
 	#[doc(hidden)]
@@ -506,6 +500,15 @@ impl<Oracle: PropagatingSolver<Engine>> BrancherInitActions for Solver<Oracle> {
 	}
 }
 
+impl<Oracle: ClauseDatabase> ClauseDatabase for Solver<Oracle> {
+	delegate! {
+		to self.oracle {
+			fn add_clause_from_slice(&mut self, clause: &[RawLit]) -> Result<(), Unsatisfiable>;
+			fn new_var_range(&mut self, len: usize) -> pindakaas::VarRange;
+		}
+	}
+}
+
 impl<Oracle: PropagatingSolver<Engine>> DecisionActions for Solver<Oracle> {
 	fn get_intref_lit(&mut self, iv: IntVarRef, meaning: LitMeaning) -> BoolView {
 		let mut clauses = Vec::new();
@@ -534,7 +537,7 @@ impl<Oracle: PropagatingSolver<Engine>> DecisionActions for Solver<Oracle> {
 		let bv = var.bool_lit(meaning, new_var);
 		for cl in clauses {
 			self.oracle
-				.add_clause(cl)
+				.add_clause_from_slice(&cl)
 				.expect("functional definition cannot make the problem unsatisfiable");
 		}
 		bv
@@ -589,13 +592,6 @@ impl<Oracle: PropagatingSolver<Engine>> InspectionActions for Solver<Oracle> {
 }
 
 impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle> {
-	fn add_clause<I: IntoIterator<Item = BoolView>>(
-		&mut self,
-		clause: I,
-	) -> Result<(), ReformulationError> {
-		self.add_clause(clause)
-	}
-
 	fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef {
 		let engine = self.engine_mut();
 		let prop_ref = engine.propagators.push(propagator);

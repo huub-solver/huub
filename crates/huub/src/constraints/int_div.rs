@@ -1,16 +1,39 @@
-//! Propagators for the `int_div` constraint, which enforces that a numerator, a
-//! denominator, and a result variable are correctly related by integer
-//! division.
+//! Structures and algorithms for the `int_div` constraint, which enforces that
+//! a numerator, a denominator, and a result variable are correctly related by
+//! integer division.
 
 use std::mem;
 
 use crate::{
-	actions::{ExplanationActions, PropagatorInitActions},
-	constraints::{Conflict, PropagationActions, Propagator},
+	actions::{
+		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+	},
+	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
 	helpers::div_ceil,
+	model::int::IntExpr,
 	solver::{activation_list::IntPropCond, queue::PriorityLevel},
 	IntView, LitMeaning, NonZeroIntVal, ReformulationError,
 };
+
+use pindakaas::ClauseDatabaseTools;
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Representation of the `int_div` constraint within a model.
+///
+/// This constraint enforces that a numerator decision integer variable divided
+/// by a denominator integer decision variable is equal to a result integer
+/// decision variable.
+///
+/// Note that the division is integer division, i.e. the result is rounded
+/// towards zero.
+pub struct IntDiv {
+	/// The numerator of the division
+	pub(crate) numerator: IntExpr,
+	/// The denominator of the division
+	pub(crate) denominator: IntExpr,
+	/// Result of the division
+	pub(crate) result: IntExpr,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds propagator for the division of two integer variables.
@@ -26,14 +49,31 @@ pub struct IntDivBounds {
 	result: IntView,
 }
 
+impl<S: SimplificationActions> Constraint<S> for IntDiv {
+	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+		actions.set_int_not_eq(self.denominator, 0)?;
+		Ok(SimplificationStatus::Fixpoint)
+	}
+
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let numerator = slv.get_solver_int(self.numerator);
+		let denominator = slv.get_solver_int(self.denominator);
+		let result = slv.get_solver_int(self.result);
+		IntDivBounds::new_in(slv, numerator, denominator, result)
+	}
+}
+
 impl IntDivBounds {
 	/// Create a new [`IntDivBounds`] propagator and post it in the solver.
-	pub fn new_in(
-		solver: &mut impl PropagatorInitActions,
+	pub fn new_in<P>(
+		solver: &mut P,
 		numerator: IntView,
 		denominator: IntView,
 		result: IntView,
-	) -> Result<(), ReformulationError> {
+	) -> Result<(), ReformulationError>
+	where
+		P: PropagatorInitActions + ?Sized,
+	{
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				numerator,
@@ -60,13 +100,13 @@ impl IntDivBounds {
 			let res_neg = solver.get_int_lit(result, LitMeaning::Less(1));
 
 			// num >= 0 /\ denom > 0 => res >= 0
-			solver.add_clause(vec![!num_pos, !denom_pos, res_pos])?;
+			solver.add_clause([!num_pos, !denom_pos, res_pos])?;
 			// num <= 0 /\ denom < 0 => res >= 0
-			solver.add_clause(vec![!num_neg, !denom_neg, res_pos])?;
+			solver.add_clause([!num_neg, !denom_neg, res_pos])?;
 			// num >= 0 /\ denom < 0 => res < 0
-			solver.add_clause(vec![!num_pos, !denom_neg, res_neg])?;
+			solver.add_clause([!num_pos, !denom_neg, res_neg])?;
 			// num < 0 /\ denom >= 0 => res < 0
-			solver.add_clause(vec![!num_neg, !denom_pos, res_neg])?;
+			solver.add_clause([!num_neg, !denom_pos, res_neg])?;
 		}
 
 		Ok(())

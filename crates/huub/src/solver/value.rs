@@ -6,9 +6,9 @@ use std::{fmt::Display, num::NonZeroI64};
 use pindakaas::solver::FailedAssumtions;
 use rangelist::RangeList;
 
-use crate::{
-	solver::{view::BoolViewInner, SolverView},
-	BoolView,
+use crate::solver::{
+	view::{BoolView, BoolViewInner},
+	SolverView,
 };
 
 /// Trait implemented by the object given to the callback on detecting failure

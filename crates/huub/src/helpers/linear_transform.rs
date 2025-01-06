@@ -17,6 +17,11 @@ pub struct LinearTransform {
 }
 
 impl LinearTransform {
+	/// Check whether the linear transformation is an identity transformation.
+	pub(crate) fn is_identity(&self) -> bool {
+		self.scale.get() == 1 && self.offset == 0
+	}
+
 	/// Creates a new linear transformation with the given scale and offset.
 	pub fn new(scale: NonZeroIntVal, offset: IntVal) -> Self {
 		Self { scale, offset }

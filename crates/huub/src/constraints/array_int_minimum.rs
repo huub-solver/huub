@@ -1,28 +1,86 @@
-//! Propagators for the `array_int_minimum` constraint, which enforces that a
-//! variable takes the minimum value of an array of variables.
+//! Structures and algorithms for the `array_int_minimum` constraint, which
+//! enforces that a variable takes the minimum value of an array of variables.
 
 use itertools::Itertools;
 
 use crate::{
-	actions::{ExplanationActions, PropagatorInitActions},
-	constraints::{Conflict, PropagationActions, Propagator},
+	actions::{
+		ConstraintInitActions, ExplanationActions, PropagatorInitActions, ReformulationActions,
+		SimplificationActions,
+	},
+	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
+	model::int::IntExpr,
 	solver::{activation_list::IntPropCond, queue::PriorityLevel, value::IntVal, view::IntView},
-	LitMeaning,
+	LitMeaning, ReformulationError,
 };
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Representation of the `array_int_minimum` constraint within a model.
+///
+/// This constraint enforces that an integer decision variable takes the minimum
+/// value of an array of integer decision variables.
+pub struct ArrayIntMinimum {
+	/// Set of decision variables from which the mimimum must be taken
+	pub(crate) vars: Vec<IntExpr>,
+	/// Decision variable that represents the minimum value
+	pub(crate) min: IntExpr,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds cosistent propagator for the `array_int_minimum` constraint.
 pub struct ArrayIntMinimumBounds {
-	/// Set of variable from which the mimimum must be taken
+	/// Set of decision variables from which the mimimum must be taken
 	vars: Vec<IntView>,
-	/// Variable that represents the minimum value
+	/// Decision variable that represents the minimum value
 	min: IntView,
+}
+
+impl<S: SimplificationActions> Constraint<S> for ArrayIntMinimum {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		for v in &self.vars {
+			actions.simplify_on_change_int(*v);
+		}
+		actions.simplify_on_change_int(self.min);
+	}
+
+	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+		let min_lb = self
+			.vars
+			.iter()
+			.map(|&v| actions.get_int_lower_bound(v))
+			.min()
+			.unwrap();
+		let min_ub = self
+			.vars
+			.iter()
+			.map(|&v| actions.get_int_upper_bound(v))
+			.min()
+			.unwrap();
+		actions.set_int_lower_bound(self.min, min_lb)?;
+		actions.set_int_upper_bound(self.min, min_ub)?;
+
+		let lb = actions.get_int_lower_bound(self.min);
+		for &v in &self.vars {
+			actions.set_int_lower_bound(v, lb)?;
+		}
+		Ok(SimplificationStatus::Fixpoint)
+	}
+
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let vars: Vec<_> = self.vars.iter().map(|v| slv.get_solver_int(*v)).collect();
+		let min = slv.get_solver_int(self.min);
+		ArrayIntMinimumBounds::new_in(slv, vars, min);
+		Ok(())
+	}
 }
 
 impl ArrayIntMinimumBounds {
 	/// Create a new [`ArrayIntMinimumBounds`] propagator and post it in the
 	/// solver.
-	pub fn new_in(solver: &mut impl PropagatorInitActions, vars: Vec<IntView>, min: IntView) {
+	pub fn new_in<P>(solver: &mut P, vars: Vec<IntView>, min: IntView)
+	where
+		P: PropagatorInitActions + ?Sized,
+	{
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				vars: vars.clone(),
@@ -91,7 +149,9 @@ mod tests {
 	use itertools::Itertools;
 	use tracing_test::traced_test;
 
-	use crate::{model::ModelView, Constraint, InitConfig, Model};
+	use crate::{
+		array_int_maximum, array_int_minimum, model::reformulate::ModelView, InitConfig, Model,
+	};
 
 	#[test]
 	#[traced_test]
@@ -102,7 +162,7 @@ mod tests {
 		let c = prb.new_int_var((2..=5).into());
 		let y = prb.new_int_var((1..=3).into());
 
-		prb += Constraint::ArrayIntMaximum(vec![a.clone(), b.clone(), c.clone()], y.clone());
+		prb += array_int_maximum(vec![a, b, c], y);
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
 		let vars = vec![a, b, c, y]
 			.into_iter()
@@ -130,7 +190,7 @@ mod tests {
 		let c = prb.new_int_var((4..=10).into());
 		let y = prb.new_int_var((13..=20).into());
 
-		prb += Constraint::ArrayIntMaximum(vec![a, b, c], y);
+		prb += array_int_maximum(vec![a, b, c], y);
 		prb.assert_unsatisfiable();
 	}
 
@@ -143,7 +203,7 @@ mod tests {
 		let c = prb.new_int_var((2..=3).into());
 		let y = prb.new_int_var((3..=4).into());
 
-		prb += Constraint::ArrayIntMinimum(vec![a.clone(), b.clone(), c.clone()], y.clone());
+		prb += array_int_minimum(vec![a, b, c], y);
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
 		let vars = vec![a, b, c, y]
 			.into_iter()
@@ -166,7 +226,7 @@ mod tests {
 		let c = prb.new_int_var((4..=10).into());
 		let y = prb.new_int_var((1..=2).into());
 
-		prb += Constraint::ArrayIntMinimum(vec![a, b, c], y);
+		prb += array_int_minimum(vec![a, b, c], y);
 		prb.assert_unsatisfiable();
 	}
 }

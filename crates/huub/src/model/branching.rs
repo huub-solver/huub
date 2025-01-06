@@ -4,7 +4,7 @@ use pindakaas::solver::propagation::PropagatingSolver;
 
 use crate::{
 	branchers::{BoolBrancher, IntBrancher, WarmStartBrancher},
-	model::{bool::BoolView, int::IntView, reformulate::VariableMap},
+	model::{bool::BoolView, int::IntExpr, reformulate::VariableMap},
 	solver::engine::Engine,
 	Solver,
 };
@@ -19,7 +19,7 @@ pub enum Branching {
 	/// Make a search decision by using the [`VariableSelection`] to select a
 	/// integer decision variable, and then limit the domain of the variable by
 	/// using the [`ValueSelection`].
-	Int(Vec<IntView>, VariableSelection, ValueSelection),
+	Int(Vec<IntExpr>, VariableSelection, ValueSelection),
 	/// Search by sequentially applying the given branching strategies.
 	Seq(Vec<Branching>),
 	/// Search by enforcing the given Boolean expressions, but abandon the search
@@ -73,11 +73,11 @@ impl Branching {
 	) {
 		match self {
 			Branching::Bool(vars, var_sel, val_sel) => {
-				let vars = vars.iter().map(|v| map.get_bool(slv, v)).collect();
+				let vars = vars.iter().map(|v| map.get_bool(slv, *v)).collect();
 				BoolBrancher::new_in(slv, vars, *var_sel, *val_sel);
 			}
 			Branching::Int(v, var_sel, val_sel) => {
-				let vars: Vec<_> = v.iter().map(|v| v.to_arg(slv, map)).collect();
+				let vars: Vec<_> = v.iter().map(|v| v.as_solver_arg(slv, map)).collect();
 				IntBrancher::new_in(slv, vars, *var_sel, *val_sel);
 			}
 			Branching::Seq(branchings) => {
@@ -86,7 +86,7 @@ impl Branching {
 				}
 			}
 			Branching::WarmStart(exprs) => {
-				let decisions = exprs.iter().map(|v| map.get_bool(slv, v)).collect();
+				let decisions = exprs.iter().map(|v| map.get_bool(slv, *v)).collect();
 				WarmStartBrancher::new_in(slv, decisions);
 			}
 		}

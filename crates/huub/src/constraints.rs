@@ -1,15 +1,17 @@
 //! Module containing the definitions for propagators and their implementations.
 
 pub mod all_different_int;
+pub mod array_int_element;
 pub mod array_int_minimum;
+pub mod array_var_bool_element;
 pub mod array_var_int_element;
 pub mod disjunctive_strict;
 pub mod int_abs;
 pub mod int_div;
-pub mod int_lin_le;
-pub mod int_lin_ne;
+pub mod int_linear;
 pub mod int_pow;
 pub mod int_times;
+pub mod set_in_reif;
 pub mod table_int;
 
 use std::{
@@ -24,14 +26,23 @@ use index_vec::IndexVec;
 use pindakaas::Lit as RawLit;
 
 use crate::{
-	actions::{ExplanationActions, PropagationActions},
-	solver::{
-		engine::{BoxedPropagator, PropRef, State},
-		solving_context::SolvingContext,
-		view::BoolViewInner,
+	actions::{
+		ConstraintInitActions, ExplanationActions, PropagationActions, ReformulationActions,
+		SimplificationActions,
 	},
-	BoolView, Conjunction,
+	solver::{
+		engine::{PropRef, State},
+		solving_context::SolvingContext,
+		view::{BoolView, BoolViewInner},
+	},
+	Conjunction, Model, ReformulationError,
 };
+
+pub(crate) type BoxedConstraint = Box<dyn Constraint<Model>>;
+
+/// Type alias to represent [`Propagator`] contained in a [`Box`], that is used
+/// by [`Engine`].
+pub(crate) type BoxedPropagator = Box<dyn for<'a> Propagator<SolvingContext<'a>, State>>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A `ReasonBuilder` whose result is cached so it can be used multiple times,
@@ -56,12 +67,52 @@ pub struct Conflict {
 	pub(crate) reason: Reason,
 }
 
+/// A trait for constraints that can be placed in a [`Model`] object.
+///
+/// Constraints specified in the library implement this trait, but are using
+/// their explicit type in an enumerated type to allow for global model
+/// analysis.
+pub trait Constraint<S: SimplificationActions>: Debug + DynConstraintClone {
+	/// Method called when a constraint is added to the model, allowing the
+	/// constraint to request addtional calls to its [`Constraint::simplify`]
+	/// method when decision variables change.
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		let _ = actions;
+		// Default implementation does nothing
+	}
+
+	/// Simplify the [`Model`] given the current constraint.
+	///
+	/// This method is expected to reduce the domains of decision variables,
+	/// rewrite the constraint to a simpler form, or detect when the constraint is
+	/// already subsumed by the current state of the model.
+	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+		let _ = actions;
+		Ok(SimplificationStatus::Fixpoint)
+	}
+
+	/// Encode the constraint using [`Propagator`] objects or clauses for a
+	/// [`Solver`] object.
+	///
+	/// This method is should place all required propagators and/or clauses in a
+	/// [`Solver`] object to ensure the constraint will not be violated.
+	fn to_solver(&self, actions: &mut dyn ReformulationActions) -> Result<(), ReformulationError>;
+}
+
+/// A trait to allow the cloning of user boxed constraint.
+///
+/// This trait allows us to implement [`Clone`] for [`BoxedConstraint`].
+pub trait DynConstraintClone {
+	/// Clone the object and store it as a boxed trait object.
+	fn clone_dyn_constraint(&self) -> BoxedConstraint;
+}
+
 /// A trait to allow the cloning of boxed propagators.
 ///
 /// This trait allows us to implement [`Clone`] for [`BoxedPropagator`].
-pub trait DynPropClone {
+pub trait DynPropagatorClone {
 	/// Clone the object and store it as a boxed trait object.
-	fn clone_dyn_prop(&self) -> BoxedPropagator;
+	fn clone_dyn_propagator(&self) -> BoxedPropagator;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -78,7 +129,11 @@ pub struct LazyReason(pub(crate) PropRef, pub(crate) u64);
 /// [`PropagationActions::deferred_reason`]. If the explanation is needed, then
 /// the propagation engine will revert the state of the solver and call
 /// [`Propagator::explain`] to receive the explanation.
-pub trait Propagator<P: PropagationActions, E: ExplanationActions>: Debug + DynPropClone {
+pub trait Propagator<P, E>: Debug + DynPropagatorClone
+where
+	P: PropagationActions,
+	E: ExplanationActions,
+{
 	/// The propagate method is called during the search process to allow the
 	/// propagator to enforce
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
@@ -128,6 +183,22 @@ pub trait ReasonBuilder<A: ExplanationActions + ?Sized> {
 	fn build_reason(self, actions: &mut A) -> Result<Reason, bool>;
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+/// Status returned by the [`SimplificationActions::simplify`] method,
+/// indicating whether the constraint has been subsumed (such that it can be
+/// removed from the [`Model`]) or not.
+pub enum SimplificationStatus {
+	/// The constraint has been simplified as much as possible, but should be kept
+	/// in the [`Model`].
+	///
+	/// Simplification can be triggered again if any of the decision variables the
+	/// constraint depends on change.
+	Fixpoint,
+	/// The constraint has been simplified to the point where it is subsumed. The
+	/// constraint can be removed from the [`Model`].
+	Subsumed,
+}
+
 impl<A: ExplanationActions> ReasonBuilder<A> for BoolView {
 	fn build_reason(self, _: &mut A) -> Result<Reason, bool> {
 		match self.0 {
@@ -143,9 +214,21 @@ impl<A: ExplanationActions> ReasonBuilder<A> for &[BoolView] {
 	}
 }
 
+impl Clone for BoxedConstraint {
+	fn clone(&self) -> BoxedConstraint {
+		self.clone_dyn_constraint()
+	}
+}
+
 impl Clone for BoxedPropagator {
 	fn clone(&self) -> BoxedPropagator {
-		self.clone_dyn_prop()
+		self.clone_dyn_propagator()
+	}
+}
+
+impl<C: Constraint<Model> + Clone + 'static> DynConstraintClone for C {
+	fn clone_dyn_constraint(&self) -> BoxedConstraint {
+		Box::new(self.clone())
 	}
 }
 
@@ -228,8 +311,8 @@ impl<A: ExplanationActions> ReasonBuilder<A> for LazyReason {
 	}
 }
 
-impl<P: for<'a> Propagator<SolvingContext<'a>, State> + Clone + 'static> DynPropClone for P {
-	fn clone_dyn_prop(&self) -> BoxedPropagator {
+impl<P: for<'a> Propagator<SolvingContext<'a>, State> + Clone + 'static> DynPropagatorClone for P {
+	fn clone_dyn_propagator(&self) -> BoxedPropagator {
 		Box::new(self.clone())
 	}
 }
@@ -250,8 +333,8 @@ impl Reason {
 				let reason = props[*prop].explain(actions, lit, *data);
 				reason.into_iter().map(|l| !l).chain(lit).collect()
 			}
-			Reason::Eager(v) => v.iter().map(|l| !l).chain(lit).collect(),
-			Reason::Simple(reason) => once(!reason).chain(lit).collect(),
+			Reason::Eager(v) => v.iter().map(|&l| !l).chain(lit).collect(),
+			&Reason::Simple(reason) => once(!reason).chain(lit).collect(),
 		}
 	}
 

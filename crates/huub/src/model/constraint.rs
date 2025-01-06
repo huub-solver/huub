@@ -1,129 +1,85 @@
 //! Definitions of constraints that can be used as part of a model.
 
-use std::iter::once;
+use std::ops::AddAssign;
 
-use itertools::Itertools;
-use pindakaas::solver::propagation::PropagatingSolver;
-use rangelist::RangeList;
+use pindakaas::{
+	propositional_logic::Formula, solver::propagation::PropagatingSolver, ClauseDatabaseTools,
+};
+use rangelist::{IntervalIterator, RangeList};
 
 use crate::{
-	actions::InspectionActions,
+	actions::{ConstraintInitActions, SimplificationActions},
 	constraints::{
-		all_different_int::AllDifferentIntValue,
-		array_int_minimum::ArrayIntMinimumBounds,
-		array_var_int_element::ArrayVarIntElementBounds,
-		disjunctive_strict::DisjunctiveStrictEdgeFinding,
-		int_abs::IntAbsBounds,
-		int_div::IntDivBounds,
-		int_lin_le::{IntLinearLessEqBounds, IntLinearLessEqImpBounds},
-		int_lin_ne::{IntLinearNotEqImpValue, IntLinearNotEqValue},
-		int_pow::IntPowBounds,
-		int_times::IntTimesBounds,
-		table_int::encode_table_int_gac,
+		all_different_int::AllDifferentInt, array_int_element::ArrayIntElement,
+		array_int_minimum::ArrayIntMinimum, array_var_bool_element::ArrayVarBoolElement,
+		array_var_int_element::ArrayVarIntElement, disjunctive_strict::DisjunctiveStrict,
+		int_abs::IntAbs, int_div::IntDiv, int_linear::IntLinear, int_pow::IntPow,
+		int_times::IntTimes, set_in_reif::SetInReif, table_int::TableInt, BoxedConstraint,
+		Constraint, SimplificationStatus,
 	},
-	helpers::{div_ceil, div_floor},
-	model::{bool::BoolView, int::IntView, reformulate::VariableMap},
-	solver::{engine::Engine, view::IntViewInner},
-	BoolExpr, IntSetVal, IntVal, LitMeaning, Model, NonZeroIntVal, ReformulationError, Solver,
+	model::{
+		bool::BoolView,
+		int::IntExpr,
+		reformulate::{ReformulationContext, VariableMap},
+	},
+	solver::engine::Engine,
+	IntSetVal, IntVal, LitMeaning, Model, ReformulationError, Solver,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// The collection of possible constraint that can be part of a [`Model`].
-pub enum Constraint {
-	/// `all_different_int` constraint, which enforces that all the given integer
-	/// decision variables take different values.
-	AllDifferentInt(Vec<IntView>),
-	/// `array_int_element` which enforces that the final integer decision
-	/// variable takes the value equal the element of the given array of integer
-	/// integer values at the index given by the integer decision variable.
-	ArrayIntElement(Vec<IntVal>, IntView, IntView),
-	/// `array_int_maximum` constraint, which enforces that the final integer
-	/// decision variable takes the maximum value of the given array of integer
-	/// decision variables.
-	ArrayIntMaximum(Vec<IntView>, IntView),
-	/// `array_int_minimum` constraint, which enforces that the final integer
-	/// decision variable takes the minimum value of the given array of integer
-	/// decision variables.
-	ArrayIntMinimum(Vec<IntView>, IntView),
-	/// `array_var_bool_element` constraint, which enforces that the final Boolean
-	/// decision variable takes the value equal the element of the given array of
-	/// Boolean decision variables at the index given by the integer decision
-	/// variable.
-	ArrayVarBoolElement(Vec<BoolExpr>, IntView, BoolExpr),
-	/// `array_var_int_element` constraint, which enforces that final integer
-	/// decision variable takes the value equal the element of the given array of
-	/// integer decision variables at the index given by the second integer
-	/// decision variable.
-	ArrayVarIntElement(Vec<IntView>, IntView, IntView),
-	/// `disjuctive_strict` constraint, which enforces that the given a list of
-	/// integer decision variables representing the start times of tasks and a
-	/// list of integer values representing the durations of tasks, the tasks do
-	/// not overlap in time.
-	DisjunctiveStrict(Vec<IntView>, Vec<IntVal>),
-	/// `int_abs` constraint, which enforces that the second integer decision
-	/// variable takes the absolute value of the first integer decision variable.
-	IntAbs(IntView, IntView),
-	/// `int_div` constraint, which enforces that the first integer variable
-	/// divided by the second integer variable is equal to the third integer
-	/// variable.
-	///
-	/// Note that the division is integer division, i.e. the result is rounded
-	/// towards zero.
-	IntDiv(IntView, IntView, IntView),
-	/// `int_lin_eq` constraint, which enforces that the sum of the integer views
-	/// is equal to the given integer value.
-	IntLinEq(Vec<IntView>, IntVal),
-	/// `int_lin_eq_imp` constraint, which enforces that if the given Boolean
-	/// decision variable is `true`, then the sum of the integer views is equal to
-	/// the given integer value.
-	IntLinEqImp(Vec<IntView>, IntVal, BoolExpr),
-	/// `int_lin_eq_reif` constraint, which enforces that the given Boolean
-	/// decision variable is `true` if-and-only-if the sum of the integer views is
-	/// equal to the given integer value.
-	IntLinEqReif(Vec<IntView>, IntVal, BoolExpr),
-	/// `int_lin_le` constraint, which enforces that the sum of the integer views
-	/// is less than or equal to the given integer value.
-	IntLinLessEq(Vec<IntView>, IntVal),
-	/// `int_lin_le_imp` constraint, which enforces that if the given Boolean
-	/// decision variable is `true`, then the sum of the integer views is less
-	/// than or equal to the given integer value.
-	IntLinLessEqImp(Vec<IntView>, IntVal, BoolExpr),
-	/// `int_lin_le_reif` constraint, which enforces that the given Boolean
-	/// decision variable is `true` if-and-only-if the sum of the integer views is
-	/// less than or equal to the given integer value.
-	IntLinLessEqReif(Vec<IntView>, IntVal, BoolExpr),
-	/// `int_lin_ne` constraint, which enforces that the sum of the integer views
-	/// is not equal to the given integer value.
-	IntLinNotEq(Vec<IntView>, IntVal),
-	/// `int_lin_ne_imp` constraint, which enforces that if the given Boolean
-	/// decision variable is `true`, then the sum of the integer views is not
-	/// equal to the given integer value.
-	IntLinNotEqImp(Vec<IntView>, IntVal, BoolExpr),
-	/// `int_lin_ne_reif` constraint, which enforces that the given Boolean
-	/// variable is `true` if-and-only-if the sum of the integer views is not
-	/// equal to the given integer value.
-	IntLinNotEqReif(Vec<IntView>, IntVal, BoolExpr),
-	/// `int_pow` constraint, which enforces that the first (base) integer
-	/// variable exponentiated by the second (exponent) integer variable is equal
-	/// to the third (result) integer variable.
-	IntPow(IntView, IntView, IntView),
-	/// `int_times` constraint, which enforces that the product of the first two
-	/// integer variables is equal to a third.
-	IntTimes(IntView, IntView, IntView),
-	/// A constraint given as a propasitional logic formula, which is enforced to
-	/// be `true`.
-	PropLogic(BoolExpr),
-	/// `set_in_reif` constraint, which enforces that the given Boolean variable
-	/// takes the value `true` if-and-only-if an integer variable is in a given
-	/// set.
-	SetInReif(IntView, IntSetVal, BoolExpr),
-	/// `table_int` constraint, which enforces that the given list of integer
-	/// views take their values according to one of the given list of integer
-	/// values.
-	TableInt(Vec<IntView>, Vec<Vec<IntVal>>),
+/// Wrapper around [`Model`] that knows the constraint being initialized.
+struct ConstraintInitContext<'a> {
+	/// Index of the constraint being initialized.
+	con: usize,
+	/// Reference to the Model in which the constraint exists.
+	model: &'a mut Model,
 }
 
-impl Constraint {
+#[allow(
+	clippy::missing_docs_in_private_items,
+	reason = "constraints are generally documented on their own types"
+)]
+#[derive(Clone, Debug)]
+/// An disambiguation of the different constraints objects that can be used in a
+/// [`Model`] object.
+///
+/// This enum type is used to store and analyze the constraints in a [`Model`].
+pub(crate) enum ConstraintStore {
+	AllDifferentInt(AllDifferentInt),
+	ArrayIntElement(ArrayIntElement),
+	ArrayIntMinimum(ArrayIntMinimum),
+	ArrayVarBoolElement(ArrayVarBoolElement),
+	ArrayVarIntElement(ArrayVarIntElement),
+	DisjunctiveStrict(DisjunctiveStrict),
+	IntAbs(IntAbs),
+	IntDiv(IntDiv),
+	IntLinear(IntLinear),
+	IntPow(IntPow),
+	IntTimes(IntTimes),
+	/// A constraint given as a propasitional logic formula, which is enforced to
+	/// be `true`.
+	PropLogic(Formula<BoolView>),
+	SetInReif(SetInReif),
+	TableInt(TableInt),
+	UserCustom(BoxedConstraint),
+}
+
+impl ConstraintInitActions for ConstraintInitContext<'_> {
+	fn simplify_on_change_bool(&mut self, _var: BoolView) {
+		todo!()
+	}
+
+	fn simplify_on_change_int(&mut self, var: IntExpr) {
+		match var {
+			IntExpr::Bool(_, v) => self.simplify_on_change_bool(v),
+			IntExpr::Linear(_, v) | IntExpr::Var(v) => {
+				self.model.int_vars[v].constraints.push(self.con);
+			}
+			IntExpr::Const(_) => {}
+		}
+	}
+}
+
+impl ConstraintStore {
 	/// Map the constraint into propagators and clauses to be added to the given
 	/// solver, using the variable mapping provided.
 	pub(crate) fn to_solver<Oracle: PropagatingSolver<Engine>>(
@@ -131,226 +87,51 @@ impl Constraint {
 		slv: &mut Solver<Oracle>,
 		map: &mut VariableMap,
 	) -> Result<(), ReformulationError> {
+		let mut actions = ReformulationContext { slv, map };
 		match self {
-			Constraint::AllDifferentInt(v) => {
-				let vars: Vec<_> = v.iter().map(|v| v.to_arg(slv, map)).collect();
-				AllDifferentIntValue::new_in(slv, vars);
-				Ok(())
+			ConstraintStore::AllDifferentInt(con) => {
+				<AllDifferentInt as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			Constraint::ArrayIntElement(arr, idx, y) => {
-				let idx = idx.to_arg(slv, map);
-				let y = y.to_arg(slv, map);
-
-				let idx_map = arr
-					.iter()
-					.enumerate()
-					.map(|(i, v)| (*v, (i + 1) as IntVal))
-					.into_group_map();
-
-				for (val, idxs) in idx_map {
-					let val_eq = slv.get_int_lit(y, LitMeaning::Eq(val));
-					let idxs: Vec<_> = idxs
-						.into_iter()
-						.map(|i| slv.get_int_lit(idx, LitMeaning::Eq(i)))
-						.collect();
-
-					for i in idxs.iter() {
-						// (idx = i) -> (val = arr[i])
-						slv.add_clause([!i, val_eq])?;
-					}
-					// (idx not in idxs) -> (val != arr[i])
-					slv.add_clause(idxs.into_iter().chain(once(!val_eq)))?;
-				}
-				Ok(())
+			ConstraintStore::ArrayIntElement(con) => {
+				<ArrayIntElement as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			Constraint::ArrayIntMinimum(vars, y) => {
-				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
-				let y = y.to_arg(slv, map);
-				ArrayIntMinimumBounds::new_in(slv, vars, y);
-				Ok(())
+			ConstraintStore::ArrayIntMinimum(con) => {
+				<ArrayIntMinimum as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			Constraint::ArrayIntMaximum(vars, y) => {
-				let vars: Vec<_> = vars.iter().map(|v| -v.to_arg(slv, map)).collect();
-				let y = -y.to_arg(slv, map);
-				ArrayIntMinimumBounds::new_in(slv, vars, y);
-				Ok(())
+			ConstraintStore::ArrayVarBoolElement(con) => {
+				<ArrayVarBoolElement as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			Constraint::ArrayVarIntElement(vars, idx, y) => {
-				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
-				let y = y.to_arg(slv, map);
-				let idx = idx.to_arg(slv, map);
-				// tranform 1-based index into 0-based index array
-				ArrayVarIntElementBounds::new_in(slv, vars, y, idx + (-1))
+			ConstraintStore::ArrayVarIntElement(con) => {
+				<ArrayVarIntElement as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			Constraint::ArrayVarBoolElement(vars, idx, y) => {
-				let idx = idx.to_arg(slv, map);
-				// If the index is already fixed, implement simple equivalence
-				if let IntViewInner::Const(idx) = idx.0 {
-					let idx = idx as usize;
-					return BoolExpr::Equiv(vec![vars[idx - 1].clone(), y.clone()])
-						.constrain(slv, map);
-				}
-
-				// Evaluate result literal
-				let y = y.to_arg(slv, map, None)?;
-				let arr: Vec<_> = vars
-					.iter()
-					.map(|v| v.to_arg(slv, map, None))
-					.try_collect()?;
-
-				for (i, l) in arr.iter().enumerate() {
-					// Evaluate array literal
-					let idx_eq = slv.get_int_lit(idx, LitMeaning::Eq((i + 1) as IntVal));
-					// add clause (idx = i + 1 /\ arr[i]) => val
-					slv.add_clause([!idx_eq, !l, y])?;
-					// add clause (idx = i + 1 /\ !arr[i]) => !val
-					slv.add_clause([!idx_eq, *l, !y])?;
-				}
-
-				// add clause (arr[1] /\ arr[2] /\ ... /\ arr[n]) => val
-				slv.add_clause(arr.iter().map(|l| !l).chain(once(y)))?;
-				// add clause (!arr[1] /\ !arr[2] /\ ... /\ !arr[n]) => !val
-				slv.add_clause(arr.into_iter().chain(once(!y)))?;
-				Ok(())
+			ConstraintStore::DisjunctiveStrict(con) => {
+				<DisjunctiveStrict as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			Constraint::DisjunctiveStrict(v, d) => {
-				let vars: Vec<_> = v.iter().map(|v| v.to_arg(slv, map)).collect();
-				let durs = d
-					.iter()
-					.map(|d| {
-						assert!(
-							*d >= 0,
-							"duration of tasks in disjunctive constraint must be non-negative"
-						);
-						*d
-					})
-					.collect_vec();
-				// Add propagator for lower bound propagation
-				DisjunctiveStrictEdgeFinding::new_in(slv, vars.clone(), durs.clone());
-
-				// Add symmetric propagator for upper bound propagation
-				let horizon = vars
-					.iter()
-					.zip(durs.iter())
-					.map(|(v, d)| slv.engine().state.get_int_upper_bound(*v) + d)
-					.max()
-					.unwrap();
-				let symmetric_vars = vars
-					.iter()
-					.zip(durs.iter())
-					.map(|(v, d)| -*v + (horizon - d))
-					.collect();
-				DisjunctiveStrictEdgeFinding::new_in(slv, symmetric_vars, durs);
-				Ok(())
+			ConstraintStore::IntAbs(con) => {
+				<IntAbs as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			Constraint::IntAbs(origin, abs) => {
-				let origin = origin.to_arg(slv, map);
-				let abs = abs.to_arg(slv, map);
-				IntAbsBounds::new_in(slv, origin, abs);
-				Ok(())
+			ConstraintStore::IntDiv(con) => {
+				<IntDiv as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			Constraint::IntDiv(numerator, denominator, result) => {
-				let numerator = numerator.to_arg(slv, map);
-				let denominator = denominator.to_arg(slv, map);
-				let result = result.to_arg(slv, map);
-				IntDivBounds::new_in(slv, numerator, denominator, result)
+			ConstraintStore::IntLinear(con) => {
+				<IntLinear as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			Constraint::IntLinEq(vars, c) => {
-				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
-				// coeffs * vars <= c
-				IntLinearLessEqBounds::new_in(slv, vars.clone(), *c);
-				// coeffs * vars >= c <=> -coeffs * vars <= -c
-				IntLinearLessEqBounds::new_in(slv, vars.into_iter().map(|v| -v), -c);
-				Ok(())
+			ConstraintStore::IntPow(con) => {
+				<IntPow as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			Constraint::IntLinEqImp(vars, c, r) => {
-				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
-				let r = r.to_arg(slv, map, None)?;
-				IntLinearLessEqImpBounds::new_in(slv, vars.clone(), *c, r);
-				IntLinearLessEqImpBounds::new_in(slv, vars.into_iter().map(|v| -v), -c, r);
-				Ok(())
+			ConstraintStore::IntTimes(con) => {
+				<IntTimes as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			Constraint::IntLinEqReif(vars, c, r) => {
-				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
-				let r = r.to_arg(slv, map, None)?;
-				IntLinearLessEqImpBounds::new_in(slv, vars.clone(), *c, r);
-				IntLinearLessEqImpBounds::new_in(slv, vars.iter().map(|v| -(*v)), -c, r);
-				IntLinearNotEqImpValue::new_in(slv, vars, *c, !r);
-				Ok(())
+			ConstraintStore::PropLogic(exp) => {
+				<Formula<BoolView> as Constraint<Model>>::to_solver(exp, &mut actions)
 			}
-			Constraint::IntLinLessEq(vars, c) => {
-				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
-				IntLinearLessEqBounds::new_in(slv, vars, *c);
-				Ok(())
+			ConstraintStore::SetInReif(con) => {
+				<SetInReif as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			Constraint::IntLinLessEqImp(vars, c, r) => {
-				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
-				let r = r.to_arg(slv, map, None)?;
-				IntLinearLessEqImpBounds::new_in(slv, vars, *c, r);
-				Ok(())
+			ConstraintStore::TableInt(con) => {
+				<TableInt as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			Constraint::IntLinLessEqReif(vars, c, r) => {
-				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
-				let r = r.to_arg(slv, map, None)?;
-				IntLinearLessEqImpBounds::new_in(slv, vars.clone(), *c, r);
-				IntLinearLessEqImpBounds::new_in(slv, vars.into_iter().map(|v| -v), -(c + 1), !r);
-				Ok(())
-			}
-			Constraint::IntLinNotEq(vars, c) => {
-				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
-				IntLinearNotEqValue::new_in(slv, vars, *c);
-				Ok(())
-			}
-			Constraint::IntLinNotEqImp(vars, c, r) => {
-				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
-				let r = r.to_arg(slv, map, None)?;
-				IntLinearNotEqImpValue::new_in(slv, vars, *c, r);
-				Ok(())
-			}
-			Constraint::IntLinNotEqReif(vars, c, r) => {
-				let vars: Vec<_> = vars.iter().map(|v| v.to_arg(slv, map)).collect();
-				let r = r.to_arg(slv, map, None)?;
-				IntLinearNotEqImpValue::new_in(slv, vars.clone(), *c, r);
-				IntLinearLessEqImpBounds::new_in(slv, vars.clone(), *c, !r);
-				IntLinearLessEqImpBounds::new_in(slv, vars.iter().map(|v| -(*v)), -c, !r);
-				Ok(())
-			}
-			Constraint::IntPow(base, exponent, res) => {
-				let base = base.to_arg(slv, map);
-				let exponent = exponent.to_arg(slv, map);
-				let result = res.to_arg(slv, map);
-				IntPowBounds::new_in(slv, base, exponent, result)
-			}
-			Constraint::IntTimes(x, y, z) => {
-				let x = x.to_arg(slv, map);
-				let y = y.to_arg(slv, map);
-				let z = z.to_arg(slv, map);
-				IntTimesBounds::new_in(slv, x, y, z);
-				Ok(())
-			}
-			Constraint::PropLogic(exp) => exp.constrain(slv, map),
-			Constraint::SetInReif(x, s, r) => {
-				if s.iter().len() == 1 {
-					let lb = *s.lower_bound().unwrap();
-					let ub = *s.upper_bound().unwrap();
-					BoolExpr::Equiv(vec![
-						BoolExpr::And(vec![
-							BoolView::IntGreaterEq(Box::from(x.clone()), lb).into(),
-							BoolView::IntLessEq(Box::from(x.clone()), ub).into(),
-						]),
-						r.clone(),
-					])
-					.constrain(slv, map)
-				} else {
-					let eq_lits = s
-						.iter()
-						.flatten()
-						.map(|v| BoolView::IntEq(Box::new(x.clone()), v).into())
-						.collect();
-					BoolExpr::Equiv(vec![r.clone(), BoolExpr::Or(eq_lits)]).constrain(slv, map)
-				}
-			}
-			Constraint::TableInt(vars, vals) => encode_table_int_gac(slv, map, vars, vals),
+			ConstraintStore::UserCustom(con) => con.to_solver(&mut actions),
 		}
 	}
 }
@@ -359,280 +140,33 @@ impl Model {
 	/// Propagate the constraint at index `con`, updating the domains of the
 	/// variables and rewriting the constraint if necessary.
 	pub(crate) fn propagate(&mut self, con: usize) -> Result<(), ReformulationError> {
-		let simplified = match self.constraints[con].clone() {
-			Constraint::AllDifferentInt(vars) => {
-				let (vals, vars): (Vec<_>, Vec<_>) = vars
-					.into_iter()
-					.partition(|v| matches!(v, IntView::Const(_)));
-				if vals.is_empty() {
-					return Ok(());
-				}
-				let neg_dom = RangeList::from_iter(vals.iter().map(|i| {
-					let IntView::Const(i) = i else { unreachable!() };
-					*i..=*i
-				}));
-				for v in &vars {
-					self.diff_int_domain(v, &neg_dom, con)?;
-				}
-				Some(Constraint::AllDifferentInt(vars))
-			}
-			Constraint::ArrayIntMaximum(args, m) => {
-				let max_lb = args
-					.iter()
-					.map(|a| self.get_int_lower_bound(a))
-					.max()
-					.unwrap();
-				let max_ub = args
-					.iter()
-					.map(|a| self.get_int_upper_bound(a))
-					.max()
-					.unwrap();
-				self.set_int_lower_bound(&m, max_lb, con)?;
-				self.set_int_upper_bound(&m, max_ub, con)?;
-
-				let ub = self.get_int_upper_bound(&m);
-				for a in &args {
-					self.set_int_upper_bound(a, ub, con)?;
-				}
-				Some(Constraint::ArrayIntMaximum(args, m))
-			}
-			Constraint::ArrayIntMinimum(args, m) => {
-				let min_lb = args
-					.iter()
-					.map(|a| self.get_int_lower_bound(a))
-					.min()
-					.unwrap();
-				let min_ub = args
-					.iter()
-					.map(|a| self.get_int_upper_bound(a))
-					.min()
-					.unwrap();
-				self.set_int_lower_bound(&m, min_lb, con)?;
-				self.set_int_upper_bound(&m, min_ub, con)?;
-
-				let lb = self.get_int_lower_bound(&m);
-				for a in &args {
-					self.set_int_lower_bound(a, lb, con)?;
-				}
-				Some(Constraint::ArrayIntMinimum(args, m))
-			}
-			Constraint::ArrayVarIntElement(args, idx, y) => {
-				// make sure idx is within the range of args
-				self.set_int_lower_bound(&idx, 1, con)?;
-				self.set_int_upper_bound(&idx, args.len() as IntVal, con)?;
-				let (min_lb, max_ub) =
-					args.iter()
-						.fold((IntVal::MAX, IntVal::MIN), |(min_lb, max_ub), v| {
-							(
-								min_lb.min(self.get_int_lower_bound(v)),
-								max_ub.max(self.get_int_upper_bound(v)),
-							)
-						});
-				if min_lb > self.get_int_lower_bound(&y) {
-					self.set_int_lower_bound(&y, min_lb, con)?;
-				}
-				if max_ub < self.get_int_upper_bound(&y) {
-					self.set_int_upper_bound(&y, max_ub, con)?;
-				}
-				Some(Constraint::ArrayVarIntElement(args, idx, y))
-			}
-			Constraint::DisjunctiveStrict(starts, durations) => {
-				// return trivialunsatisfiable if overload is detected
-				let (earliest_start, latest_completion) =
-					starts.iter().zip(durations.clone()).fold(
-						(IntVal::MAX, IntVal::MIN),
-						|(earliest_start, latest_completion), (start, duration)| {
-							(
-								i64::min(
-									earliest_start.min(self.get_int_lower_bound(start)),
-									earliest_start,
-								),
-								i64::max(
-									latest_completion
-										.max(self.get_int_upper_bound(start) + duration),
-									latest_completion,
-								),
-							)
-						},
-					);
-				let total_duration = durations.iter().sum::<IntVal>();
-				if earliest_start + total_duration > latest_completion {
-					return Err(ReformulationError::TrivialUnsatisfiable);
-				}
-				Some(Constraint::DisjunctiveStrict(starts, durations))
-			}
-			Constraint::IntAbs(origin, abs) => {
-				let lb = self.get_int_lower_bound(&origin);
-				let ub = self.get_int_upper_bound(&origin);
-				if ub < 0 {
-					self.set_int_lower_bound(&abs, -ub, con)?;
-					self.set_int_upper_bound(&abs, -lb, con)?;
-				} else if lb >= 0 {
-					self.set_int_lower_bound(&abs, lb, con)?;
-					self.set_int_upper_bound(&abs, ub, con)?;
-				} else {
-					self.set_int_lower_bound(&abs, 0, con)?;
-					let abs_max = ub.max(-lb);
-					self.set_int_upper_bound(&abs, abs_max, con)?;
-				}
-				let abs_ub = ub.abs();
-				debug_assert!(abs_ub >= 0);
-				self.set_int_lower_bound(&origin, -abs_ub, con)?;
-				self.set_int_upper_bound(&abs, abs_ub, con)?;
-				if lb >= 0 {
-					// TODO: Unify
-					Some(Constraint::IntLinEq(vec![origin, -abs], 0))
-				} else {
-					Some(Constraint::IntAbs(origin, abs))
-				}
-			}
-			Constraint::IntDiv(num, denom, res) => {
-				self.diff_int_domain(&denom, &RangeList::from(0..=0), con)?;
-				Some(Constraint::IntDiv(num, denom, res))
-			}
-			Constraint::IntLinLessEq(args, cons) => {
-				let sum = args
-					.iter()
-					.map(|v| self.get_int_lower_bound(v))
-					.fold(cons, |sum, val| sum - val);
-
-				for v in &args {
-					let ub = sum + self.get_int_lower_bound(v);
-					self.set_int_upper_bound(v, ub, con)?;
-				}
-				Some(Constraint::IntLinLessEq(args, cons))
-			}
-			Constraint::IntLinEq(args, cons) => {
-				let lb_sum = args
-					.iter()
-					.map(|v| self.get_int_lower_bound(v))
-					.fold(cons, |sum, val| sum - val);
-
-				for v in &args {
-					let ub = lb_sum + self.get_int_lower_bound(v);
-					self.set_int_upper_bound(v, ub, con)?;
-				}
-
-				let ub_sum = args
-					.iter()
-					.map(|v| self.get_int_upper_bound(v))
-					.fold(cons, |sum, val| sum - val);
-
-				for v in &args {
-					let lb = ub_sum + self.get_int_upper_bound(v);
-					self.set_int_lower_bound(v, lb, con)?;
-				}
-
-				Some(Constraint::IntLinEq(args, cons))
-			}
-			Constraint::IntTimes(x, y, z) => {
-				let x_lb = self.get_int_lower_bound(&x);
-				let x_ub = self.get_int_upper_bound(&x);
-				let y_lb = self.get_int_lower_bound(&y);
-				let y_ub = self.get_int_upper_bound(&y);
-				let z_lb = self.get_int_lower_bound(&z);
-				let z_ub = self.get_int_upper_bound(&z);
-
-				let bounds = [x_lb * y_lb, x_lb * y_ub, x_ub * y_lb, x_ub * y_ub];
-				self.set_int_lower_bound(&z, *bounds.iter().min().unwrap(), con)?;
-				self.set_int_upper_bound(&z, *bounds.iter().max().unwrap(), con)?;
-
-				if y_lb > 0 || y_ub < 0 {
-					let bounds = [(z_lb, y_lb), (z_lb, y_ub), (z_ub, y_lb), (z_ub, y_ub)];
-					let min = bounds
-						.iter()
-						.filter_map(|(z, y)| {
-							let y = NonZeroIntVal::new(*y)?;
-							Some(div_ceil(*z, y))
-						})
-						.min()
-						.unwrap();
-					self.set_int_lower_bound(&x, min, con)?;
-
-					let max = bounds
-						.iter()
-						.filter_map(|(z, y)| {
-							let y = NonZeroIntVal::new(*y)?;
-							Some(div_floor(*z, y))
-						})
-						.max()
-						.unwrap();
-					self.set_int_upper_bound(&x, max, con)?;
-				}
-
-				if x_lb > 0 || x_ub < 0 {
-					let bounds = [(z_lb, x_lb), (z_lb, x_ub), (z_ub, x_lb), (z_ub, x_ub)];
-					let min = bounds
-						.iter()
-						.filter_map(|(z, x)| {
-							let x = NonZeroIntVal::new(*x)?;
-							Some(div_ceil(*z, x))
-						})
-						.min()
-						.unwrap();
-					self.set_int_lower_bound(&y, min, con)?;
-
-					let max = bounds
-						.iter()
-						.filter_map(|(z, x)| {
-							let x = NonZeroIntVal::new(*x)?;
-							Some(div_floor(*z, x))
-						})
-						.max()
-						.unwrap();
-					self.set_int_upper_bound(&y, max, con)?;
-				}
-
-				Some(Constraint::IntTimes(x, y, z))
-			}
-			Constraint::TableInt(vars, table) => {
-				debug_assert!(!vars.is_empty());
-				if vars.len() == 1 {
-					let dom = table.into_iter().map(|v| v[0]..=v[0]).collect();
-					self.intersect_int_domain(&vars[0], &dom, con)?;
-					None
-				} else {
-					// Remove any tuples that contain values outside of the domain of the
-					// variables.
-					let table = table
-						.into_iter()
-						.filter(|tup| {
-							tup.iter()
-								.enumerate()
-								.all(|(j, val)| self.check_int_in_domain(&vars[j], *val))
-						})
-						.collect_vec();
-
-					// If no tuples remain, then the problem is trivially unsatisfiable.
-					if table.is_empty() {
-						return Err(ReformulationError::TrivialUnsatisfiable);
-					}
-
-					// Restrict the domain of the variables to the values it can take in the
-					// tuple.
-					if table.len() == 1 {
-						for (j, var) in vars.iter().enumerate() {
-							self.set_int_value(var, table[0][j], con)?;
-						}
-						None
-					} else {
-						for (j, var) in vars.iter().enumerate() {
-							let dom = (0..table.len())
-								.map(|i| table[i][j]..=table[i][j])
-								.collect();
-							self.intersect_int_domain(var, &dom, con)?;
-						}
-						Some(Constraint::TableInt(vars, table))
-					}
-				}
-			}
-			con => Some(con),
+		let Some(mut con_obj) = self.constraints[con].take() else {
+			return Ok(());
 		};
-		match simplified {
-			Some(simplified) => self.constraints[con] = simplified,
-			None => {
-				self.constraints[con] =
-					Constraint::PropLogic(BoolExpr::View(BoolView::Const(true)));
+
+		let status = match &mut con_obj {
+			ConstraintStore::AllDifferentInt(c) => c.simplify(self),
+			ConstraintStore::ArrayIntElement(c) => c.simplify(self),
+			ConstraintStore::ArrayIntMinimum(c) => c.simplify(self),
+			ConstraintStore::ArrayVarBoolElement(c) => c.simplify(self),
+			ConstraintStore::ArrayVarIntElement(c) => c.simplify(self),
+			ConstraintStore::DisjunctiveStrict(c) => c.simplify(self),
+			ConstraintStore::IntAbs(c) => c.simplify(self),
+			ConstraintStore::IntDiv(c) => c.simplify(self),
+			ConstraintStore::IntLinear(c) => c.simplify(self),
+			ConstraintStore::IntPow(c) => c.simplify(self),
+			ConstraintStore::IntTimes(c) => c.simplify(self),
+			ConstraintStore::PropLogic(exp) => exp.simplify(self),
+			ConstraintStore::SetInReif(c) => c.simplify(self),
+			ConstraintStore::TableInt(con) => con.simplify(self),
+			ConstraintStore::UserCustom(con) => con.simplify(self),
+		}?;
+		match status {
+			SimplificationStatus::Subsumed => {
+				// Constraint is known to be satisfied, no need to place back.
+			}
+			SimplificationStatus::Fixpoint => {
+				self.constraints[con] = Some(con_obj);
 			}
 		}
 		Ok(())
@@ -641,31 +175,383 @@ impl Model {
 	/// Subscribe the constraint located at index `con` to changes in the
 	/// variables it depends on.
 	pub(crate) fn subscribe(&mut self, con: usize) {
-		match &self.constraints[con] {
-			Constraint::ArrayIntMaximum(args, m) | Constraint::ArrayIntMinimum(args, m) => {
-				for a in args {
-					if let IntView::Var(a) = a {
-						self.int_vars[a.0 as usize].constraints.push(con);
-					}
-				}
-				if let IntView::Var(m) = m {
-					self.int_vars[m.0 as usize].constraints.push(con);
+		let con_store = self.constraints[con].take().unwrap();
+		let mut ctx = ConstraintInitContext { con, model: self };
+		match &con_store {
+			ConstraintStore::AllDifferentInt(con) => {
+				<AllDifferentInt as Constraint<Model>>::initialize(con, &mut ctx)
+			}
+			ConstraintStore::ArrayIntElement(con) => {
+				<ArrayIntElement as Constraint<Model>>::initialize(con, &mut ctx)
+			}
+			ConstraintStore::ArrayIntMinimum(con) => {
+				<ArrayIntMinimum as Constraint<Model>>::initialize(con, &mut ctx)
+			}
+			ConstraintStore::ArrayVarBoolElement(con) => {
+				<ArrayVarBoolElement as Constraint<Model>>::initialize(con, &mut ctx)
+			}
+			ConstraintStore::ArrayVarIntElement(con) => {
+				<ArrayVarIntElement as Constraint<Model>>::initialize(con, &mut ctx)
+			}
+			ConstraintStore::DisjunctiveStrict(con) => {
+				<DisjunctiveStrict as Constraint<Model>>::initialize(con, &mut ctx)
+			}
+			ConstraintStore::IntAbs(con) => {
+				<IntAbs as Constraint<Model>>::initialize(con, &mut ctx)
+			}
+			ConstraintStore::IntDiv(con) => {
+				<IntDiv as Constraint<Model>>::initialize(con, &mut ctx)
+			}
+			ConstraintStore::IntLinear(con) => {
+				<IntLinear as Constraint<Model>>::initialize(con, &mut ctx)
+			}
+			ConstraintStore::IntPow(con) => {
+				<IntPow as Constraint<Model>>::initialize(con, &mut ctx)
+			}
+			ConstraintStore::IntTimes(con) => {
+				<IntTimes as Constraint<Model>>::initialize(con, &mut ctx)
+			}
+			ConstraintStore::PropLogic(exp) => {
+				<Formula<BoolView> as Constraint<Model>>::initialize(exp, &mut ctx)
+			}
+			ConstraintStore::SetInReif(con) => {
+				<SetInReif as Constraint<Model>>::initialize(con, &mut ctx)
+			}
+			ConstraintStore::TableInt(con) => {
+				<TableInt as Constraint<Model>>::initialize(con, &mut ctx)
+			}
+			ConstraintStore::UserCustom(con) => con.initialize(&mut ctx),
+		}
+		self.constraints[con] = Some(con_store);
+	}
+}
+
+impl SimplificationActions for Model {
+	fn add_constraint<C>(&mut self, constraint: C)
+	where
+		Model: AddAssign<C>,
+	{
+		*self += constraint;
+	}
+
+	fn check_int_in_domain(&self, var: IntExpr, val: IntVal) -> bool {
+		match var {
+			IntExpr::Var(v) => self.int_vars[v].domain.contains(&val),
+			IntExpr::Const(v) => v == val,
+			IntExpr::Linear(t, v) => match t.rev_transform_lit(LitMeaning::Eq(val)) {
+				Ok(LitMeaning::Eq(val)) => self.int_vars[v].domain.contains(&val),
+				Err(false) => false,
+				_ => unreachable!(),
+			},
+			IntExpr::Bool(t, _) => match t.rev_transform_lit(LitMeaning::Eq(val)) {
+				Ok(LitMeaning::Eq(val)) => val == 0 || val == 1,
+				Err(false) => false,
+				_ => unreachable!(),
+			},
+		}
+	}
+
+	fn get_bool_val(&self, _: BoolView) -> Option<bool> {
+		None // TODO
+	}
+
+	fn get_int_lower_bound(&self, var: IntExpr) -> IntVal {
+		match var {
+			IntExpr::Var(v) => {
+				let def = &self.int_vars[v];
+				*def.domain.lower_bound().unwrap()
+			}
+			IntExpr::Const(v) => v,
+			IntExpr::Linear(t, v) => {
+				let def = &self.int_vars[v];
+				if t.positive_scale() {
+					t.transform(*def.domain.lower_bound().unwrap())
+				} else {
+					t.transform(*def.domain.upper_bound().unwrap())
 				}
 			}
-			Constraint::ArrayVarIntElement(args, idx, y) => {
-				for a in args {
-					if let IntView::Var(a) = a {
-						self.int_vars[a.0 as usize].constraints.push(con);
-					}
-				}
-				if let IntView::Var(y) = y {
-					self.int_vars[y.0 as usize].constraints.push(con);
-				}
-				if let IntView::Var(idx) = idx {
-					self.int_vars[idx.0 as usize].constraints.push(con);
+			IntExpr::Bool(t, _) => {
+				if t.positive_scale() {
+					t.transform(0)
+				} else {
+					t.transform(1)
 				}
 			}
-			_ => {}
+		}
+	}
+
+	fn get_int_upper_bound(&self, var: IntExpr) -> IntVal {
+		match var {
+			IntExpr::Var(v) => {
+				let def = &self.int_vars[v];
+				*def.domain.upper_bound().unwrap()
+			}
+			IntExpr::Const(v) => v,
+			IntExpr::Linear(t, v) => {
+				let def = &self.int_vars[v];
+				if t.positive_scale() {
+					t.transform(*def.domain.upper_bound().unwrap())
+				} else {
+					t.transform(*def.domain.lower_bound().unwrap())
+				}
+			}
+			IntExpr::Bool(t, _) => {
+				if t.positive_scale() {
+					t.transform(1)
+				} else {
+					t.transform(0)
+				}
+			}
+		}
+	}
+
+	fn set_bool(&mut self, var: BoolView) -> Result<(), ReformulationError> {
+		match var {
+			BoolView::Lit(l) => Ok(self.cnf.add_clause([l])?),
+			BoolView::Const(true) => Ok(()),
+			BoolView::Const(false) => Err(ReformulationError::TrivialUnsatisfiable),
+			BoolView::IntEq(iv, val) => self.set_int_val(iv.into(), val),
+			BoolView::IntGreaterEq(iv, val) => self.set_int_lower_bound(iv.into(), val),
+			BoolView::IntLess(iv, val) => self.set_int_upper_bound(iv.into(), val - 1),
+			BoolView::IntNotEq(iv, val) => self.set_int_not_eq(iv.into(), val),
+		}
+	}
+
+	fn set_int_in_set(
+		&mut self,
+		var: IntExpr,
+		values: &IntSetVal,
+	) -> Result<(), ReformulationError> {
+		match var {
+			IntExpr::Var(v) => {
+				let intersect: RangeList<_> = self.int_vars[v].domain.intersect(values);
+				if intersect.is_empty() {
+					return Err(ReformulationError::TrivialUnsatisfiable);
+				} else if self.int_vars[v].domain == intersect {
+					return Ok(());
+				}
+				self.int_vars[v].domain = intersect;
+				let constraints = self.int_vars[v].constraints.clone();
+				for c in constraints {
+					self.enqueue(c);
+				}
+				Ok(())
+			}
+			IntExpr::Const(v) => {
+				if !values.contains(&v) {
+					Err(ReformulationError::TrivialUnsatisfiable)
+				} else {
+					Ok(())
+				}
+			}
+			IntExpr::Linear(trans, iv) => {
+				let values = trans.rev_transform_int_set(values);
+				self.set_int_in_set(iv.into(), &values)
+			}
+			IntExpr::Bool(trans, b) => {
+				let values = trans.rev_transform_int_set(values);
+				if !values.contains(&0) {
+					self.set_bool(b)?;
+				}
+				if !values.contains(&1) {
+					self.set_bool(!b)?;
+				}
+				Ok(())
+			}
+		}
+	}
+
+	fn set_int_lower_bound(&mut self, var: IntExpr, lb: IntVal) -> Result<(), ReformulationError> {
+		match var {
+			IntExpr::Var(v) => {
+				let def = &mut self.int_vars[v];
+				if lb <= *def.domain.lower_bound().unwrap() {
+					return Ok(());
+				} else if lb > *def.domain.upper_bound().unwrap() {
+					return Err(ReformulationError::TrivialUnsatisfiable);
+				}
+				def.domain = RangeList::from_iter(def.domain.iter().filter_map(|r| {
+					if *r.end() < lb {
+						None
+					} else if *r.start() < lb {
+						Some(lb..=*r.end())
+					} else {
+						Some(r)
+					}
+				}));
+				let constraints = def.constraints.clone();
+				for c in constraints {
+					self.enqueue(c);
+				}
+				Ok(())
+			}
+			IntExpr::Const(v) => {
+				if v < lb {
+					Err(ReformulationError::TrivialUnsatisfiable)
+				} else {
+					Ok(())
+				}
+			}
+			IntExpr::Linear(trans, iv) => {
+				match trans.rev_transform_lit(LitMeaning::GreaterEq(lb)) {
+					Ok(LitMeaning::GreaterEq(val)) => self.set_int_lower_bound(iv.into(), val),
+					Ok(LitMeaning::Less(val)) => self.set_int_upper_bound(iv.into(), val - 1),
+					_ => unreachable!(),
+				}
+			}
+			IntExpr::Bool(trans, b) => match trans.rev_transform_lit(LitMeaning::GreaterEq(lb)) {
+				Ok(LitMeaning::GreaterEq(1)) => self.set_bool(b),
+				Ok(LitMeaning::GreaterEq(val)) if val >= 2 => {
+					Err(ReformulationError::TrivialUnsatisfiable)
+				}
+				Ok(LitMeaning::GreaterEq(_)) => Ok(()),
+				Ok(LitMeaning::Less(1)) => self.set_bool(!b),
+				Ok(LitMeaning::Less(val)) if val <= 0 => {
+					Err(ReformulationError::TrivialUnsatisfiable)
+				}
+				Ok(LitMeaning::Less(_)) => Ok(()),
+				_ => unreachable!(),
+			},
+		}
+	}
+
+	fn set_int_upper_bound(&mut self, var: IntExpr, ub: IntVal) -> Result<(), ReformulationError> {
+		match var {
+			IntExpr::Var(v) => {
+				let def = &mut self.int_vars[v];
+				if ub >= *def.domain.upper_bound().unwrap() {
+					return Ok(());
+				} else if ub < *def.domain.lower_bound().unwrap() {
+					return Err(ReformulationError::TrivialUnsatisfiable);
+				}
+				def.domain = RangeList::from_iter(def.domain.iter().filter_map(|r| {
+					if ub < *r.start() {
+						None
+					} else if ub < *r.end() {
+						Some(*r.start()..=ub)
+					} else {
+						Some(r)
+					}
+				}));
+				let constraints = def.constraints.clone();
+				for c in constraints {
+					self.enqueue(c);
+				}
+				Ok(())
+			}
+			IntExpr::Const(v) => {
+				if v > ub {
+					Err(ReformulationError::TrivialUnsatisfiable)
+				} else {
+					Ok(())
+				}
+			}
+			IntExpr::Linear(trans, iv) => match trans.rev_transform_lit(LitMeaning::Less(ub + 1)) {
+				Ok(LitMeaning::GreaterEq(val)) => self.set_int_lower_bound(iv.into(), val),
+				Ok(LitMeaning::Less(val)) => self.set_int_upper_bound(iv.into(), val - 1),
+				_ => unreachable!(),
+			},
+			IntExpr::Bool(trans, b) => match trans.rev_transform_lit(LitMeaning::Less(ub + 1)) {
+				Ok(LitMeaning::GreaterEq(1)) => self.set_bool(b),
+				Ok(LitMeaning::GreaterEq(val)) if val >= 2 => {
+					Err(ReformulationError::TrivialUnsatisfiable)
+				}
+				Ok(LitMeaning::GreaterEq(_)) => Ok(()),
+				Ok(LitMeaning::Less(1)) => self.set_bool(!b),
+				Ok(LitMeaning::Less(val)) if val <= 0 => {
+					Err(ReformulationError::TrivialUnsatisfiable)
+				}
+				Ok(LitMeaning::Less(_)) => Ok(()),
+				_ => unreachable!(),
+			},
+		}
+	}
+
+	fn set_int_val(&mut self, var: IntExpr, val: IntVal) -> Result<(), ReformulationError> {
+		match var {
+			IntExpr::Var(v) => {
+				let def = &mut self.int_vars[v];
+				if def.domain.contains(&val) {
+					def.domain = RangeList::from(val..=val);
+					let constraints = def.constraints.clone();
+					for c in constraints {
+						self.enqueue(c);
+					}
+					Ok(())
+				} else {
+					Err(ReformulationError::TrivialUnsatisfiable)
+				}
+			}
+			IntExpr::Const(i) if i == val => Ok(()),
+			IntExpr::Const(_) => Err(ReformulationError::TrivialUnsatisfiable),
+			IntExpr::Linear(trans, iv) => match trans.rev_transform_lit(LitMeaning::Eq(val)) {
+				Ok(LitMeaning::Eq(val)) => self.set_int_val(iv.into(), val),
+				Err(b) => {
+					debug_assert!(!b);
+					Err(ReformulationError::TrivialUnsatisfiable)
+				}
+				_ => unreachable!(),
+			},
+			IntExpr::Bool(trans, b) => match trans.rev_transform_lit(LitMeaning::Eq(val)) {
+				Ok(LitMeaning::Eq(val)) => match val {
+					0 => self.set_bool(!b),
+					1 => self.set_bool(b),
+					_ => Err(ReformulationError::TrivialUnsatisfiable),
+				},
+				Err(b) => {
+					debug_assert!(!b);
+					Err(ReformulationError::TrivialUnsatisfiable)
+				}
+				_ => unreachable!(),
+			},
+		}
+	}
+
+	fn set_int_not_eq(&mut self, var: IntExpr, val: IntVal) -> Result<(), ReformulationError> {
+		self.set_int_in_set(var, &(val..=val).into())
+	}
+
+	fn set_int_not_in_set(
+		&mut self,
+		var: IntExpr,
+		values: &IntSetVal,
+	) -> Result<(), ReformulationError> {
+		match var {
+			IntExpr::Var(v) => {
+				let diff: RangeList<_> = self.int_vars[v].domain.diff(values);
+				if diff.is_empty() {
+					return Err(ReformulationError::TrivialUnsatisfiable);
+				} else if self.int_vars[v].domain == diff {
+					return Ok(());
+				}
+				self.int_vars[v].domain = diff;
+				let constraints = self.int_vars[v].constraints.clone();
+				for c in constraints {
+					self.enqueue(c);
+				}
+				Ok(())
+			}
+			IntExpr::Const(v) => {
+				if values.contains(&v) {
+					Err(ReformulationError::TrivialUnsatisfiable)
+				} else {
+					Ok(())
+				}
+			}
+			IntExpr::Linear(trans, iv) => {
+				let mask = trans.rev_transform_int_set(values);
+				self.set_int_not_in_set(iv.into(), &mask)
+			}
+			IntExpr::Bool(trans, b) => {
+				let values = trans.rev_transform_int_set(values);
+				if values.contains(&0) {
+					self.set_bool(b)?;
+				}
+				if values.contains(&1) {
+					self.set_bool(!b)?;
+				}
+				Ok(())
+			}
 		}
 	}
 }

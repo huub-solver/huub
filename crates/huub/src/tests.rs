@@ -1,9 +1,8 @@
 use expect_test::Expect;
 use itertools::Itertools;
+use pindakaas::propositional_logic::Formula;
 
-use crate::{
-	BoolExpr, InitConfig, Model, ReformulationError, SolveResult, Solver, SolverView, Value,
-};
+use crate::{InitConfig, Model, ReformulationError, SolveResult, Solver, SolverView, Value};
 
 #[test]
 fn it_works() {
@@ -11,12 +10,12 @@ fn it_works() {
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
 
-	prb += BoolExpr::Or(vec![(!a.clone()).into(), (!b.clone()).into()]);
-	prb += BoolExpr::Or(vec![a.clone().into(), b.clone().into()]);
+	prb += Formula::Or(vec![(!a).into(), (!b).into()]);
+	prb += Formula::Or(vec![a.into(), b.into()]);
 
 	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-	let a = map.get_bool(&mut slv, &a);
-	let b = map.get_bool(&mut slv, &b);
+	let a = map.get_bool(&mut slv, a);
+	let b = map.get_bool(&mut slv, b);
 
 	assert_eq!(
 		slv.solve(|value| {

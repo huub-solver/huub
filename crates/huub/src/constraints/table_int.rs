@@ -1,78 +1,135 @@
-//! Propagation methods for the `table_int` constraint, which constraints a
-//! sequence of integer decision variable to be assigned to a set of possible
+//! Structures and algorithms for the `table_int` constraint, which constraints
+//! a sequence of integer decision variable to be assigned to a set of possible
 //! sequences of integer values.
 
 use itertools::Itertools;
-use pindakaas::{solver::propagation::PropagatingSolver, VarRange};
+use pindakaas::ClauseDatabaseTools;
 
 use crate::{
-	actions::InspectionActions,
-	model::{int::IntView, reformulate::VariableMap},
-	solver::engine::Engine,
-	BoolView, IntVal, LitMeaning, ReformulationError, Solver,
+	actions::{ReformulationActions, SimplificationActions},
+	constraints::{Constraint, SimplificationStatus},
+	model::int::IntExpr,
+	solver::view::BoolView,
+	IntVal, LitMeaning, ReformulationError,
 };
 
-/// Encode a [`Constraint::TableInt`] constraint into clauses in the solver such
-/// that using clausal propagation will enforce global arc consistency.
-pub(crate) fn encode_table_int_gac<Oracle: PropagatingSolver<Engine>>(
-	slv: &mut Solver<Oracle>,
-	map: &mut VariableMap,
-	vars: &[IntView],
-	vals: &[Vec<IntVal>],
-) -> Result<(), ReformulationError> {
-	assert!(vars.len() >= 2);
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Representation of the `table_int` constraint within a model.
+///
+/// This constraint enforces that the given list of integer views take their
+/// values according to one of the given lists of integer values.
+pub struct TableInt {
+	/// List of variables that must take the values of a row in the table.
+	pub(crate) vars: Vec<IntExpr>,
+	/// The table of possible values for the variables.
+	pub(crate) table: Vec<Vec<IntVal>>,
+}
 
-	let selector = if vars.len() != 2 {
-		slv.oracle.new_var_range(vals.len())
-	} else {
-		VarRange::empty()
-	};
-	let vars = vars.iter().map(|iv| map.get_int(slv, iv)).collect_vec();
-
-	// Create clauses that say foreach tuple i, if `selector[i]` is true, then the
-	// variable `j` equals `vals[i][j]`.
-	if vars.len() != 2 {
-		for (i, tup) in vals.iter().enumerate() {
-			assert!(tup.len() == vars.len());
-			let lit: BoolView = selector.index(i).into();
-			for (j, var) in vars.iter().enumerate() {
-				let clause = [!lit, slv.get_int_lit(*var, LitMeaning::Eq(tup[j]))];
-				slv.add_clause(clause)?;
+impl<S: SimplificationActions> Constraint<S> for TableInt {
+	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+		match self.vars.len() {
+			0 => return Ok(SimplificationStatus::Subsumed),
+			1 => {
+				let dom = self.table.iter().map(|v| v[0]..=v[0]).collect();
+				actions.set_int_in_set(self.vars[0], &dom)?;
+				return Ok(SimplificationStatus::Subsumed);
 			}
+			_ => {}
 		}
+
+		// Remove any tuples that contain values outside of the domain of the
+		// variables.
+		let table = self
+			.table
+			.iter()
+			.filter(|tup| {
+				tup.iter()
+					.enumerate()
+					.all(|(j, val)| actions.check_int_in_domain(self.vars[j], *val))
+			})
+			.collect_vec();
+
+		// If no tuples remain, then the problem is trivially unsatisfiable.
+		if table.is_empty() {
+			return Err(ReformulationError::TrivialUnsatisfiable);
+		}
+
+		// Restrict the domain of the variables to the values it can take in the
+		// tuple.
+		if table.len() == 1 {
+			for (j, &var) in self.vars.iter().enumerate() {
+				actions.set_int_val(var, table[0][j])?;
+			}
+			return Ok(SimplificationStatus::Subsumed);
+		}
+
+		for (j, &var) in self.vars.iter().enumerate() {
+			let dom = (0..table.len())
+				.map(|i| table[i][j]..=table[i][j])
+				.collect();
+			actions.set_int_in_set(var, &dom)?;
+		}
+		Ok(SimplificationStatus::Fixpoint)
 	}
 
-	// Create clauses that map from the value taken by the variables back to the
-	// possible selectors that can be active.
-	for (j, var) in vars.iter().enumerate() {
-		let (lb, ub) = slv.get_int_bounds(*var);
-		let mut support_clauses: Vec<Vec<BoolView>> = vec![Vec::new(); (ub - lb + 1) as usize];
-		for (i, tup) in vals.iter().enumerate() {
-			let k = tup[j] - lb;
-			if !(0..support_clauses.len() as IntVal).contains(&k) {
-				// Value is not in the domain of the variable, so this tuple should not
-				// be considered.
-				continue;
-			}
-			// Add tuple i to be in support of value `k`.
-			if vars.len() == 2 {
-				// Special case where we can use the values of the other variables as
-				// the selection variables directly.
-				support_clauses[k as usize]
-					.push(slv.get_int_lit(vars[1 - j], LitMeaning::Eq(tup[1 - j])));
-			} else {
-				support_clauses[k as usize].push(selector.index(i).into());
-			}
-		}
-		for (i, mut clause) in support_clauses.into_iter().enumerate() {
-			if slv.check_int_in_domain(*var, lb + i as IntVal) {
-				clause.push(slv.get_int_lit(vars[j], LitMeaning::NotEq(lb + i as IntVal)));
-				slv.add_clause(clause)?;
-			}
-		}
-	}
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		assert!(self.vars.len() >= 2);
 
-	Ok(())
+		let selector = if self.vars.len() != 2 {
+			(0..self.table.len()).map(|_| slv.new_bool_var()).collect()
+		} else {
+			Vec::new()
+		};
+		let vars = self
+			.vars
+			.iter()
+			.map(|&iv| slv.get_solver_int(iv))
+			.collect_vec();
+
+		// Create clauses that say foreach tuple i, if `selector[i]` is true, then the
+		// variable `j` equals `vals[i][j]`.
+		if vars.len() != 2 {
+			for (i, tup) in self.table.iter().enumerate() {
+				assert!(tup.len() == vars.len());
+				for (j, var) in vars.iter().enumerate() {
+					let clause = [!selector[i], slv.get_int_lit(*var, LitMeaning::Eq(tup[j]))];
+					slv.add_clause(clause)?;
+				}
+			}
+		}
+
+		// Create clauses that map from the value taken by the variables back to the
+		// possible selectors that can be active.
+		for (j, var) in vars.iter().enumerate() {
+			let (lb, ub) = slv.get_int_bounds(*var);
+			let mut support_clauses: Vec<Vec<BoolView>> = vec![Vec::new(); (ub - lb + 1) as usize];
+			for (i, tup) in self.table.iter().enumerate() {
+				let k = tup[j] - lb;
+				if !(0..support_clauses.len() as IntVal).contains(&k) {
+					// Value is not in the domain of the variable, so this tuple should not
+					// be considered.
+					continue;
+				}
+				// Add tuple i to be in support of value `k`.
+				if vars.len() == 2 {
+					// Special case where we can use the values of the other variables as
+					// the selection variables directly.
+					support_clauses[k as usize]
+						.push(slv.get_int_lit(vars[1 - j], LitMeaning::Eq(tup[1 - j])));
+				} else {
+					support_clauses[k as usize].push(selector[i]);
+				}
+			}
+			for (i, mut clause) in support_clauses.into_iter().enumerate() {
+				if slv.check_int_in_domain(*var, lb + i as IntVal) {
+					clause.push(slv.get_int_lit(vars[j], LitMeaning::NotEq(lb + i as IntVal)));
+					slv.add_clause(clause)?;
+				}
+			}
+		}
+
+		Ok(())
+	}
 }
 
 #[cfg(test)]
@@ -80,7 +137,7 @@ mod tests {
 	use expect_test::expect;
 	use itertools::Itertools;
 
-	use crate::{model::ModelView, Constraint, InitConfig, Model};
+	use crate::{model::reformulate::ModelView, table_int, InitConfig, Model};
 
 	#[test]
 	fn test_binary_table_sat() {
@@ -98,8 +155,8 @@ mod tests {
 			vec![5, 2],
 			vec![5, 3],
 		];
-		prb += Constraint::TableInt(vec![vars[0].into(), vars[1].into()], table.clone());
-		prb += Constraint::TableInt(vec![vars[1].into(), vars[2].into()], table.clone());
+		prb += table_int(vec![vars[0].into(), vars[1].into()], table.clone());
+		prb += table_int(vec![vars[1].into(), vars[2].into()], table.clone());
 
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
 		let vars = vars
@@ -146,12 +203,12 @@ mod tests {
 			vec![5, 3, 1],
 			vec![5, 3, 5],
 		];
-		prb += Constraint::TableInt(
-			vars[0..3].iter().cloned().map_into().collect_vec(),
+		prb += table_int(
+			vars[0..3].iter().cloned().map_into().collect(),
 			table.clone(),
 		);
-		prb += Constraint::TableInt(
-			vars[2..5].iter().cloned().map_into().collect_vec(),
+		prb += table_int(
+			vars[2..5].iter().cloned().map_into().collect(),
 			table.clone(),
 		);
 

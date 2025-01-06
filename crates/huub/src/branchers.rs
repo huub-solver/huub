@@ -8,12 +8,11 @@ use crate::{
 	actions::{BrancherInitActions, DecisionActions},
 	model::branching::{ValueSelection, VariableSelection},
 	solver::{
-		engine::BoxedBrancher,
 		solving_context::SolvingContext,
 		trail::TrailedInt,
-		view::{BoolViewInner, IntView, IntViewInner},
+		view::{BoolView, BoolViewInner, IntView, IntViewInner},
 	},
-	BoolView, LitMeaning, SolverView,
+	LitMeaning, SolverView,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -32,8 +31,12 @@ pub struct BoolBrancher {
 	next: TrailedInt,
 }
 
+/// Type alias to represent [`Brancher`] contained in a [`Box`], that is used by
+/// [`Engine`].
+pub(crate) type BoxedBrancher = Box<dyn for<'a> Brancher<SolvingContext<'a>>>;
+
 /// A trait for making search decisions in the solver
-pub trait Brancher<D: DecisionActions>: DynBranchClone + Debug {
+pub trait Brancher<D: DecisionActions>: DynBrancherClone + Debug {
 	/// Make a next search decision using the given decision actions.
 	fn decide(&mut self, actions: &mut D) -> Decision;
 }
@@ -54,9 +57,9 @@ pub enum Decision {
 /// A trait to allow the cloning of boxed branchers.
 ///
 /// This trait allows us to implement [`Clone`] for [`BoxedBrancher`].
-pub trait DynBranchClone {
+pub trait DynBrancherClone {
 	/// Clone the object and store it as a boxed trait object.
-	fn clone_dyn_branch(&self) -> BoxedBrancher;
+	fn clone_dyn_brancher(&self) -> BoxedBrancher;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,8 +89,8 @@ pub struct WarmStartBrancher {
 	conflicts: u64,
 }
 
-impl<B: for<'a> Brancher<SolvingContext<'a>> + Clone + 'static> DynBranchClone for B {
-	fn clone_dyn_branch(&self) -> BoxedBrancher {
+impl<B: for<'a> Brancher<SolvingContext<'a>> + Clone + 'static> DynBrancherClone for B {
+	fn clone_dyn_brancher(&self) -> BoxedBrancher {
 		Box::new(self.clone())
 	}
 }
@@ -168,7 +171,7 @@ impl<D: DecisionActions> Brancher<D> for BoolBrancher {
 
 impl Clone for BoxedBrancher {
 	fn clone(&self) -> BoxedBrancher {
-		self.clone_dyn_branch()
+		self.clone_dyn_brancher()
 	}
 }
 

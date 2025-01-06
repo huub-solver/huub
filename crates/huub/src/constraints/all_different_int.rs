@@ -1,16 +1,32 @@
-//! Propagators for the `all_different_int` constraint, which enforces that a
-//! list of integer variables each take a different value.
+//! Structure and algorithms for the `all_different_int` constraint, which
+//! enforces that a list of integer variables each take a different value.
+
+use rangelist::{IntervalIterator, RangeList};
 
 use crate::{
-	actions::{ExplanationActions, PropagatorInitActions},
-	constraints::{Conflict, PropagationActions, Propagator},
+	actions::{
+		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+	},
+	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
+	model::int::IntExpr,
 	solver::{
 		activation_list::IntPropCond,
 		int_var::LitMeaning,
 		queue::PriorityLevel,
 		view::{IntView, IntViewInner},
 	},
+	ReformulationError,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Representation of the `all_different_int` constraint within a model.
+///
+/// This constraint enforces that all the given integer decisions take different
+/// values.
+pub struct AllDifferentInt {
+	/// List of integer decision variables that must take different values.
+	pub(crate) vars: Vec<IntExpr>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Value consistent propagator for the `all_different_int` constraint.
@@ -19,10 +35,43 @@ pub struct AllDifferentIntValue {
 	vars: Vec<IntView>,
 }
 
+impl<S: SimplificationActions> Constraint<S> for AllDifferentInt {
+	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+		let (vals, vars): (Vec<_>, Vec<_>) = self
+			.vars
+			.iter()
+			.partition(|v| matches!(v, IntExpr::Const(_)));
+		self.vars = vars;
+		let neg_dom = RangeList::from_iter(vals.iter().map(|i| {
+			let IntExpr::Const(i) = i else { unreachable!() };
+			*i..=*i
+		}));
+		if neg_dom.card() != vals.len() {
+			return Err(ReformulationError::TrivialUnsatisfiable);
+		}
+		if self.vars.is_empty() {
+			return Ok(SimplificationStatus::Subsumed);
+		}
+		if vals.is_empty() {
+			return Ok(SimplificationStatus::Fixpoint);
+		}
+		for v in &self.vars {
+			actions.set_int_not_in_set(*v, &neg_dom)?;
+		}
+		Ok(SimplificationStatus::Fixpoint)
+	}
+
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let vars: Vec<_> = self.vars.iter().map(|v| slv.get_solver_int(*v)).collect();
+		AllDifferentIntValue::new_in(slv, vars);
+		Ok(())
+	}
+}
+
 impl AllDifferentIntValue {
 	/// Create a new [`AllDifferentIntValue`] propagator and post it in the
 	/// solver.
-	pub fn new_in(solver: &mut impl PropagatorInitActions, vars: Vec<IntView>) {
+	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, vars: Vec<IntView>) {
 		let enqueue = vars
 			.iter()
 			.any(|v| matches!(v, IntView(IntViewInner::Const(_))));
@@ -173,7 +222,7 @@ mod tests {
 		assert_eq!(
 			slv.solve(|val| {
 				(0..9).for_each(|r| {
-					let row = all_vars[r].iter().map(|v| val(v.into())).collect_vec();
+					let row = all_vars[r].iter().map(|&v| val(v.into())).collect_vec();
 					assert!(
 						row.iter().all_unique(),
 						"Values in row {} are not all different: {:?}",

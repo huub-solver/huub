@@ -1,30 +1,49 @@
-//! Propagators for the `disjunctive_strict` constraint, which enforces that no
-//! two tasks overlap from a list of tasks.
+//! Structures and algorithms for the `disjunctive_strict` constraint, which
+//! enforces that no two tasks overlap from a list of tasks.
 
 use itertools::Itertools;
 use pindakaas::Lit as RawLit;
 use tracing::trace;
 
 use crate::{
-	actions::{ExplanationActions, InspectionActions, PropagatorInitActions},
-	constraints::{Conflict, PropagationActions, Propagator, ReasonBuilder},
+	actions::{
+		ExplanationActions, InspectionActions, PropagatorInitActions, ReformulationActions,
+		SimplificationActions,
+	},
+	constraints::{
+		Conflict, Constraint, PropagationActions, Propagator, ReasonBuilder, SimplificationStatus,
+	},
+	model::int::IntExpr,
 	solver::{
 		activation_list::IntPropCond,
 		queue::PriorityLevel,
 		trail::TrailedInt,
 		view::{BoolViewInner, IntView},
 	},
-	Conjunction, LitMeaning,
+	Conjunction, IntVal, LitMeaning, ReformulationError,
 };
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Representation of the `disjunctive_strict` constraint within a model.
+///
+/// This constraint enforces that the given a list of integer decision variables
+/// representing the start times of tasks and a list of integer values
+/// representing the durations of tasks, the tasks do not overlap in time.
+pub struct DisjunctiveStrict {
+	/// Start time variables of each task.
+	pub(crate) start_times: Vec<IntExpr>,
+	/// Durations of each task.
+	pub(crate) durations: Vec<IntVal>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// A propagator for the `disjunctive` constraint using the Strict Edge Finding
-/// algorithm.
+/// A propagator for the `disjunctive_strict` constraint using the Strict Edge
+/// Finding algorithm.
 pub struct DisjunctiveStrictEdgeFinding {
 	/// Start time variables of each task.
 	start_times: Vec<IntView>,
 	/// Durations of each task.
-	durations: Vec<i64>,
+	durations: Vec<IntVal>,
 
 	// Internal state for propagation
 	/// Indexes of the tasks sorted by earliest start time.
@@ -77,6 +96,54 @@ struct TaskInfo {
 	latest_completion: TrailedInt,
 }
 
+impl<S: SimplificationActions> Constraint<S> for DisjunctiveStrict {
+	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+		// return TrivialUnsatisfiable if overload is detected
+		let (earliest_start, latest_completion) =
+			self.start_times.iter().zip(self.durations.iter()).fold(
+				(IntVal::MAX, IntVal::MIN),
+				|(earliest_start, latest_completion), (&start, &duration)| {
+					(
+						i64::min(
+							earliest_start.min(actions.get_int_lower_bound(start)),
+							earliest_start,
+						),
+						i64::max(
+							latest_completion.max(actions.get_int_upper_bound(start) + duration),
+							latest_completion,
+						),
+					)
+				},
+			);
+		let total_duration = self.durations.iter().sum::<IntVal>();
+		if earliest_start + total_duration > latest_completion {
+			return Err(ReformulationError::TrivialUnsatisfiable);
+		}
+		Ok(SimplificationStatus::Fixpoint)
+	}
+
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let start_times = self
+			.start_times
+			.iter()
+			.map(|&v| slv.get_solver_int(v))
+			.collect_vec();
+		// Add propagator for lower bound propagation
+		DisjunctiveStrictEdgeFinding::new_in(slv, start_times.clone(), self.durations.clone());
+
+		// Add symmetric propagator for upper bound propagation
+		let iter = start_times.iter().zip(self.durations.iter());
+		let horizon = iter
+			.clone()
+			.map(|(v, d)| slv.get_int_upper_bound(*v) + d)
+			.max()
+			.unwrap();
+		let symmetric_vars = iter.map(|(v, d)| -*v + (horizon - d)).collect();
+		DisjunctiveStrictEdgeFinding::new_in(slv, symmetric_vars, self.durations.clone());
+		Ok(())
+	}
+}
+
 impl DisjunctiveStrictEdgeFinding {
 	#[inline]
 	/// Return the (current) earliest start time of task `i`.
@@ -123,7 +190,7 @@ impl DisjunctiveStrictEdgeFinding {
 				.flat_map(|&i| {
 					let (bv, _) = actions.get_int_lit_relaxed(
 						self.start_times[i],
-						LitMeaning::Less((time_bound - slack) as i64 - self.durations[i]),
+						LitMeaning::Less((time_bound - slack) as IntVal - self.durations[i]),
 					);
 					[actions.get_int_lower_bound_lit(self.start_times[i]), bv]
 				})
@@ -139,11 +206,10 @@ impl DisjunctiveStrictEdgeFinding {
 
 	/// Create a new [`DisjunctiveStrictEdgeFinding`] propagator and post it in
 	/// the solver.
-	pub fn new_in(
-		solver: &mut impl PropagatorInitActions,
-		start_times: Vec<IntView>,
-		durations: Vec<i64>,
-	) {
+	pub fn new_in<P>(solver: &mut P, start_times: Vec<IntView>, durations: Vec<IntVal>)
+	where
+		P: PropagatorInitActions + ?Sized,
+	{
 		let n = start_times.len();
 		let trailed_info = (0..n)
 			.map(|_| TaskInfo {

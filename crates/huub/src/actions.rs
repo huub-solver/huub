@@ -1,21 +1,26 @@
 //! Traits that encapsulate different sets of actions that can be performed at
 //! different phases and by different objects in the solving process.
 
+use std::ops::AddAssign;
+
+use pindakaas::{AsDynClauseDatabase, ClauseDatabase};
+
 use crate::{
-	constraints::{Conflict, LazyReason, ReasonBuilder},
+	branchers::BoxedBrancher,
+	constraints::{BoxedPropagator, Conflict, LazyReason, ReasonBuilder},
+	model::{self, int::IntExpr},
 	solver::{
 		activation_list::IntPropCond,
-		engine::{BoxedBrancher, BoxedPropagator, PropRef},
+		engine::PropRef,
 		int_var::IntVarRef,
 		queue::PriorityLevel,
 		trail::TrailedInt,
-		view::{BoolViewInner, IntViewInner},
+		view::{BoolView, BoolViewInner, IntViewInner},
 	},
-	BoolView, IntVal, IntView, LitMeaning, ReformulationError, SolverView,
+	IntSetVal, IntVal, IntView, LitMeaning, Model, ReformulationError, SolverView,
 };
 
-/// Actions that can be performed during the initlization of propagators and
-/// branchers.
+/// Actions that can be performed during the initialization of branchers.
 pub trait BrancherInitActions: DecisionActions {
 	/// Ensure that any relevant decision variable are marked internally as a
 	/// decidable variable.
@@ -27,6 +32,18 @@ pub trait BrancherInitActions: DecisionActions {
 	/// Push a new [`crate::branchers::Brancher`] to the end of the solving
 	/// branching queue.
 	fn push_brancher(&mut self, brancher: BoxedBrancher);
+}
+
+/// Actions that can be performed when a constraint is initialized within a
+/// model object.
+pub trait ConstraintInitActions {
+	/// Schedule the simplify method of the calling constraint when the given
+	/// boolean expression changes.
+	fn simplify_on_change_bool(&mut self, var: model::bool::BoolView);
+
+	/// Schedule the simplify method of the calling constraint when the given
+	/// integer expression changes.
+	fn simplify_on_change_int(&mut self, var: IntExpr);
 }
 
 /// Actions that can be performed by a [`crate::branchers::Brancher`] when
@@ -195,13 +212,7 @@ pub trait PropagationActions: ExplanationActions + DecisionActions {
 }
 
 /// Actions that can be performed during the initialization of propagators.
-pub trait PropagatorInitActions: DecisionActions {
-	/// Add a clause to the solver.
-	fn add_clause<I: IntoIterator<Item = BoolView>>(
-		&mut self,
-		clause: I,
-	) -> Result<(), ReformulationError>;
-
+pub trait PropagatorInitActions: AsDynClauseDatabase + ClauseDatabase + DecisionActions {
 	/// Add a propagator to the solver.
 	fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef;
 
@@ -217,6 +228,94 @@ pub trait PropagatorInitActions: DecisionActions {
 	/// Enqueue a propagator to be enqueued when an integer variable is changed
 	/// according to the given propagation condition.
 	fn enqueue_on_int_change(&mut self, prop: PropRef, var: IntView, condition: IntPropCond);
+}
+
+/// Actions that can be performed when reformulating a [`Model`] object into a
+/// [`Solver`] object.
+pub trait ReformulationActions: PropagatorInitActions {
+	/// Lookup the solver [`BoolView`] to which the given model
+	/// [`model::bool::BoolView`] maps.
+	fn get_solver_bool(&mut self, bv: model::bool::BoolView) -> BoolView;
+
+	/// Lookup the solver [`IntExpr`] to which the given model
+	/// [`model::int::IntView`] maps.
+	fn get_solver_int(&mut self, iv: IntExpr) -> IntView;
+
+	/// Create a new Boolean decision variable to use in the encoding.
+	fn new_bool_var(&mut self) -> BoolView;
+}
+
+/// Actions that can be performed to simplify a Model considering a given
+/// constraint.
+pub trait SimplificationActions {
+	/// Add a constraint to the model (to replace the current constraint).
+	fn add_constraint<C>(&mut self, constraint: C)
+	where
+		Model: AddAssign<C>;
+
+	/// Check whether a given integer view can take a given value.
+	fn check_int_in_domain(&self, var: IntExpr, val: IntVal) -> bool;
+
+	/// Get the current value of a [`BoolView`], if it has been assigned.
+	fn get_bool_val(&self, bv: model::bool::BoolView) -> Option<bool>;
+
+	/// Get the minimum value that an integer view is guaranteed to take.
+	fn get_int_lower_bound(&self, var: IntExpr) -> IntVal;
+
+	/// Get the maximum value that an integer view is guaranteed to take.
+	fn get_int_upper_bound(&self, var: IntExpr) -> IntVal;
+
+	/// Convenience method to get both the lower and upper bounds of an integer
+	/// view.
+	fn get_int_bounds(&self, var: IntExpr) -> (IntVal, IntVal) {
+		(self.get_int_lower_bound(var), self.get_int_upper_bound(var))
+	}
+
+	/// Get the current value of an integer view, if it has been assigned.
+	fn get_int_val(&self, var: IntExpr) -> Option<IntVal> {
+		let (lb, ub) = self.get_int_bounds(var);
+		if lb == ub {
+			Some(lb)
+		} else {
+			None
+		}
+	}
+
+	/// Enforce a boolean view to be `true`.
+	///
+	/// Note that it is possible to enforce that a boolean view is `false` by
+	/// negating the view, i.e. `!bv`.
+	fn set_bool(&mut self, bv: model::bool::BoolView) -> Result<(), ReformulationError>;
+
+	/// Enforce that the given integer expression takes a value in in the given
+	/// set.
+	fn set_int_in_set(
+		&mut self,
+		var: IntExpr,
+		values: &IntSetVal,
+	) -> Result<(), ReformulationError>;
+
+	/// Enforce that a an integer view takes a value that is greater or equal to
+	/// `val`.
+	fn set_int_lower_bound(&mut self, var: IntExpr, val: IntVal) -> Result<(), ReformulationError>;
+
+	/// Enforce that a an integer view takes a value that is less or equal to
+	/// `val`.
+	fn set_int_upper_bound(&mut self, var: IntExpr, val: IntVal) -> Result<(), ReformulationError>;
+
+	/// Enforce that a an integer view takes a value `val`.
+	fn set_int_val(&mut self, var: IntExpr, val: IntVal) -> Result<(), ReformulationError>;
+
+	/// Enforce that a an integer view cannot take a value `val`.
+	fn set_int_not_eq(&mut self, var: IntExpr, val: IntVal) -> Result<(), ReformulationError>;
+
+	/// Enforce that a given integer expression cannot take any of the values in
+	/// the given set.
+	fn set_int_not_in_set(
+		&mut self,
+		var: IntExpr,
+		values: &IntSetVal,
+	) -> Result<(), ReformulationError>;
 }
 
 /// Basic actions that can be performed when the trailing infrastructure is

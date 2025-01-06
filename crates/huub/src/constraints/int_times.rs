@@ -1,13 +1,33 @@
-//! Propagators for the `int_times` constraint, which enforces that the product
-//! of two integer variables is equal to a third integer variable.
+//! Structures and algorithms for the `int_times` constraint, which enforces
+//! that the product of two integer variables is equal to a third integer
+//! variable.
 
 use crate::{
-	actions::{ExplanationActions, PropagatorInitActions},
-	constraints::{CachedReason, Conflict, PropagationActions, Propagator},
+	actions::{
+		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+	},
+	constraints::{
+		CachedReason, Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus,
+	},
 	helpers::{div_ceil, div_floor},
+	model::int::IntExpr,
 	solver::{activation_list::IntPropCond, queue::PriorityLevel},
-	IntView, NonZeroIntVal,
+	IntView, NonZeroIntVal, ReformulationError,
 };
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Representation of the `int_times` constraint within a model.
+///
+/// This constraint enforces that the product of the two integer decision
+/// variables is equal to a third.
+pub struct IntTimes {
+	/// First factor variable
+	pub(crate) factor1: IntExpr,
+	/// Second factor variable
+	pub(crate) factor2: IntExpr,
+	/// Product variable
+	pub(crate) product: IntExpr,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds propagator for the constraint `z = x * y`.
@@ -20,14 +40,89 @@ pub struct IntTimesBounds {
 	product: IntView,
 }
 
+impl<S: SimplificationActions> Constraint<S> for IntTimes {
+	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+		let (f1_lb, f1_ub) = actions.get_int_bounds(self.factor1);
+		let (f2_lb, f2_ub) = actions.get_int_bounds(self.factor2);
+		let (prd_lb, prd_ub) = actions.get_int_bounds(self.product);
+
+		let bounds = [f1_lb * f2_lb, f1_lb * f2_ub, f1_ub * f2_lb, f1_ub * f2_ub];
+		actions.set_int_lower_bound(self.product, *bounds.iter().min().unwrap())?;
+		actions.set_int_upper_bound(self.product, *bounds.iter().max().unwrap())?;
+
+		if f2_lb > 0 || f2_ub < 0 {
+			let bounds = [
+				(prd_lb, f2_lb),
+				(prd_lb, f2_ub),
+				(prd_ub, f2_lb),
+				(prd_ub, f2_ub),
+			];
+			let min = bounds
+				.iter()
+				.filter_map(|(z, y)| {
+					let y = NonZeroIntVal::new(*y)?;
+					Some(div_ceil(*z, y))
+				})
+				.min()
+				.unwrap();
+			actions.set_int_lower_bound(self.factor1, min)?;
+
+			let max = bounds
+				.iter()
+				.filter_map(|(z, y)| {
+					let y = NonZeroIntVal::new(*y)?;
+					Some(div_floor(*z, y))
+				})
+				.max()
+				.unwrap();
+			actions.set_int_upper_bound(self.factor1, max)?;
+		}
+
+		if f1_lb > 0 || f1_ub < 0 {
+			let bounds = [
+				(prd_lb, f1_lb),
+				(prd_lb, f1_ub),
+				(prd_ub, f1_lb),
+				(prd_ub, f1_ub),
+			];
+			let min = bounds
+				.iter()
+				.filter_map(|(z, x)| {
+					let x = NonZeroIntVal::new(*x)?;
+					Some(div_ceil(*z, x))
+				})
+				.min()
+				.unwrap();
+			actions.set_int_lower_bound(self.factor2, min)?;
+
+			let max = bounds
+				.iter()
+				.filter_map(|(z, x)| {
+					let x = NonZeroIntVal::new(*x)?;
+					Some(div_floor(*z, x))
+				})
+				.max()
+				.unwrap();
+			actions.set_int_upper_bound(self.factor2, max)?;
+		}
+		Ok(SimplificationStatus::Fixpoint)
+	}
+
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let factor1 = slv.get_solver_int(self.factor1);
+		let factor2 = slv.get_solver_int(self.factor2);
+		let product = slv.get_solver_int(self.product);
+		IntTimesBounds::new_in(slv, factor1, factor2, product);
+		Ok(())
+	}
+}
+
 impl IntTimesBounds {
 	/// Create a new [`IntTimesBounds`] propagator and post it in the solver.
-	pub fn new_in(
-		solver: &mut impl PropagatorInitActions,
-		factor1: IntView,
-		factor2: IntView,
-		product: IntView,
-	) {
+	pub fn new_in<P>(solver: &mut P, factor1: IntView, factor2: IntView, product: IntView)
+	where
+		P: PropagatorInitActions + ?Sized,
+	{
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				factor1,

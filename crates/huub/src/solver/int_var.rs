@@ -10,7 +10,10 @@ use std::{
 };
 
 use itertools::Itertools;
-use pindakaas::{solver::propagation::PropagatingSolver, Lit as RawLit, Var as RawVar, VarRange};
+use pindakaas::{
+	solver::propagation::PropagatingSolver, ClauseDatabaseTools, Lit as RawLit, Var as RawVar,
+	VarRange,
+};
 use rangelist::RangeList;
 
 use crate::{
@@ -18,10 +21,10 @@ use crate::{
 	solver::{
 		engine::Engine,
 		trail::TrailedInt,
-		view::{BoolViewInner, IntViewInner},
+		view::{BoolView, BoolViewInner, IntViewInner},
 		IntView,
 	},
-	BoolView, Clause, IntSetVal, IntVal, LinearTransform, NonZeroIntVal, Solver,
+	Clause, IntSetVal, IntVal, LinearTransform, NonZeroIntVal, Solver,
 };
 
 /// An entry in the [`DirectStorage`] that can be used to access the
@@ -1284,9 +1287,9 @@ mod tests {
 	use crate::{
 		solver::{
 			int_var::{EncodingType, IntVar},
-			view::{BoolViewInner, IntViewInner},
+			view::{BoolView, BoolViewInner, IntViewInner},
 		},
-		BoolView, IntView, LitMeaning, Solver,
+		IntView, LitMeaning, Solver,
 	};
 
 	#[test]

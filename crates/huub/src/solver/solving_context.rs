@@ -15,12 +15,13 @@ use crate::{
 	},
 	constraints::{Conflict, LazyReason, ReasonBuilder},
 	solver::{
-		engine::{trace_new_lit, BoxedPropagator, PropRef, State},
+		engine::{trace_new_lit, PropRef, State},
 		int_var::{IntVarRef, LazyLitDef},
 		trail::TrailedInt,
-		view::{BoolViewInner, IntViewInner},
+		view::{BoolView, BoolViewInner, IntViewInner},
+		BoxedPropagator,
 	},
-	BoolView, Clause, IntVal, IntView, LitMeaning,
+	Clause, IntVal, IntView, LitMeaning,
 };
 
 /// Type used to communicate whether a change is redundant, conflicting, or new.
@@ -37,6 +38,11 @@ enum ChangeType {
 /// [`SolvingActions`] exposed by the SAT oracle.
 ///
 /// This structure is used to run the propagators that have been scheduled.
+///
+/// Note that this structure is public to the user to allow the user to
+/// construct [`BoxedPropgator`] and [`BoxedBrancher`], but it is not intended
+/// to be constructed by the user. It should merely be seen as the
+/// implementation of the [`PropagationActions`] trait.
 pub struct SolvingContext<'a> {
 	/// Actions to create new variables in the oracle
 	pub(crate) slv: &'a mut dyn SolvingActions,

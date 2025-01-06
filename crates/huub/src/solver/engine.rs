@@ -36,8 +36,8 @@ use tracing::{debug, trace};
 
 use crate::{
 	actions::{DecisionActions, ExplanationActions, InspectionActions, TrailingActions},
-	branchers::{Brancher, Decision},
-	constraints::{Propagator, Reason},
+	branchers::{BoxedBrancher, Decision},
+	constraints::{BoxedPropagator, Reason},
 	solver::{
 		activation_list::{ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
@@ -45,19 +45,11 @@ use crate::{
 		queue::{PriorityLevel, PriorityQueue},
 		solving_context::SolvingContext,
 		trail::{Trail, TrailedInt},
-		view::{BoolViewInner, IntViewInner},
+		view::{BoolView, BoolViewInner, IntViewInner},
 		SolverConfiguration,
 	},
-	BoolView, Clause, Conjunction, IntVal, IntView,
+	Clause, Conjunction, IntVal, IntView,
 };
-
-/// Type alias to represent [`Brancher`] contained in a [`Box`], that is used by
-/// [`Engine`].
-pub(crate) type BoxedBrancher = Box<dyn for<'a> Brancher<SolvingContext<'a>>>;
-
-/// Type alias to represent [`Propagator`] contained in a [`Box`], that is used
-/// by [`Engine`].
-pub(crate) type BoxedPropagator = Box<dyn for<'a> Propagator<SolvingContext<'a>, State>>;
 
 #[derive(Debug, Default, Clone)]
 /// A propagation engine implementing the [`Propagator`] trait.
@@ -87,8 +79,15 @@ pub struct SearchStatistics {
 }
 
 #[derive(Clone, Debug, Default)]
+/// Internal state representation of the propagation engine disconnected from
+/// the storage of the propagators and branchers.
+///
+/// Note that this structure is public to the user to allow the user to
+/// construct [`BoxedPropgator`], but it is not intended to be constructed by
+/// the user. It should merely be seen as the implementation of the
+/// [`ExplanationActions`] trait.
 pub struct State {
-	/// Solver confifguration
+	/// Solver configuration
 	pub(crate) config: SolverConfiguration,
 
 	// ---- Trailed Value Infrastructure (e.g., decision variables) ----
@@ -342,8 +341,8 @@ impl PropagatorExtension for Engine {
 				if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
 					let clause: Clause =
 						reason.explain(&mut self.propagators, &mut self.state, Some(lit));
-					for l in &clause {
-						if l == &lit {
+					for &l in &clause {
+						if l == lit {
 							continue;
 						}
 						let val = self.state.trail.get_sat_value(!l);
