@@ -6,7 +6,10 @@ use std::fmt::{self, Debug, Formatter};
 
 use delegate::delegate;
 use index_vec::IndexVec;
-use pindakaas::{solver::propagation::SolvingActions, Lit as RawLit};
+use pindakaas::{
+	solver::propagation::{ClausePersistence, SolvingActions},
+	Lit as RawLit,
+};
 use tracing::trace;
 
 use crate::{
@@ -186,7 +189,9 @@ impl DecisionActions for SolvingContext<'_> {
 				def.prev.map(Into::into),
 				def.next.map(Into::into),
 			) {
-				self.state.clauses.push_back(cl);
+				self.state
+					.clauses
+					.push_back((cl, ClausePersistence::Irreduntant));
 			}
 			v
 		};
@@ -222,6 +227,8 @@ impl InspectionActions for SolvingContext<'_> {
 			fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal);
 			fn get_int_val(&self, var: IntView) -> Option<IntVal>;
 			fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool;
+			fn get_forward_explanations(&self) -> bool;
+			fn get_forward_limit(&self) -> usize;
 		}
 	}
 }
@@ -239,7 +246,7 @@ impl PropagationActions for SolvingContext<'_> {
 					let reason = reason.build_reason(self);
 					trace!(lit = i32::from(lit), reason = ?reason, "propagate bool");
 					self.state.register_reason(lit, reason);
-					self.state.propagation_queue.push(lit);
+					self.state.propagation_queue.push_back(lit);
 					Ok(())
 				}
 			},

@@ -11,8 +11,11 @@ use crate::{
 	},
 	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
-	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView},
-	IntDecision, IntVal,
+	solver::{
+		activation_list::IntPropCond, queue::PriorityLevel, BoolView, BoolViewInner, IntLitMeaning,
+		IntView,
+	},
+	Conjunction, IntDecision, IntVal,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -102,6 +105,21 @@ where
 	P: PropagationActions,
 	E: ExplanationActions,
 {
+	fn explain(&mut self, actions: &mut E, _: Option<pindakaas::Lit>, min_lb: u64) -> Conjunction {
+		self.vars
+			.iter()
+			.map(|&x| {
+				actions
+					.get_int_lit_relaxed(x, IntLitMeaning::GreaterEq(min_lb as IntVal))
+					.0 // weaker than eager explanation if the literal is not created before
+			})
+			.filter_map(|b| match b {
+				BoolView(BoolViewInner::Lit(l)) => Some(l),
+				_ => None,
+			})
+			.collect_vec()
+	}
+
 	#[tracing::instrument(name = "array_int_minimum", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		let min_lb = self
@@ -126,13 +144,20 @@ where
 		actions.set_int_upper_bound(self.min, min_ub, reason)?;
 
 		// set y to be greater than or equal to the minimum of lower bounds of x_i
-		actions.set_int_lower_bound(self.min, min_lb, |a: &mut P| {
-			self.vars
-				.iter()
-				.map(|&x| a.get_int_lit(x, IntLitMeaning::GreaterEq(min_lb)))
-				.collect_vec()
-		})?;
-
+		if actions.get_forward_explanations() && self.vars.len() > actions.get_forward_limit() {
+			actions.set_int_lower_bound(
+				self.min,
+				min_lb,
+				actions.deferred_reason(min_lb as u64),
+			)?;
+		} else {
+			actions.set_int_lower_bound(self.min, min_lb, |a: &mut P| {
+				self.vars
+					.iter()
+					.map(|&x| a.get_int_lit(x, IntLitMeaning::GreaterEq(min_lb)))
+					.collect_vec()
+			})?;
+		}
 		// set x_i to be greater than or equal to y.lowerbound
 		let reason = actions.get_int_lower_bound_lit(self.min);
 		let y_lb = actions.get_int_lower_bound(self.min);

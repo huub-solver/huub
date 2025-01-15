@@ -369,6 +369,8 @@ impl InspectionActions for ReformulationContext<'_> {
 			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
 			fn get_int_upper_bound(&self, var: IntView) -> IntVal;
 			fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool;
+			fn get_forward_explanations(&self) -> bool;
+			fn get_forward_limit(&self) -> usize;
 		}
 	}
 }

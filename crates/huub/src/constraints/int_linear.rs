@@ -3,6 +3,8 @@
 //! constraint enforce a condition on the sum of (linear transformations of)
 //! integer decision variables.
 
+use std::vec;
+
 use itertools::{Either, Itertools};
 use pindakaas::{
 	bool_linear::{BoolLinAggregator, BoolLinExp, BoolLinVariant, BoolLinear},
@@ -23,6 +25,8 @@ use crate::{
 	},
 	BoolDecision, BoolFormula, Conjunction, IntDecision, IntVal, LinearTransform, NonZeroIntVal,
 };
+
+use super::Reason;
 
 /// Representation of an integer equality constraint that cannot be unified.
 ///
@@ -527,32 +531,42 @@ impl IntLinearLessEqBounds {
 	}
 }
 
+impl<const R: usize> IntLinearLessEqBoundsImpl<R> {
+	/// Helper function to construct the conjunction for propagation given the index of
+	/// the variable in the list of variables to sum or the length of the list, if
+	/// explaining the reification.
+	fn reason<A: ExplanationActions>(&self, data: usize) -> impl ReasonBuilder<A> + '_ {
+		move |actions: &mut A| {
+			let mut conj: Vec<_> = self
+				.terms
+				.iter()
+				.enumerate()
+				.filter(|(i, _)| *i != data)
+				.map(|(_, &v)| actions.get_int_lower_bound_lit(v))
+				.collect();
+			if let Some(&r) = self.reification.get() {
+				if data != self.terms.len() {
+					conj.push(BoolView(BoolViewInner::Lit(r)));
+				}
+			}
+			conj
+		}
+	}
+}
+
 impl<const R: usize, P, E> Propagator<P, E> for IntLinearLessEqBoundsImpl<R>
 where
 	P: PropagationActions,
 	E: ExplanationActions,
 {
 	fn explain(&mut self, actions: &mut E, _: Option<RawLit>, data: u64) -> Conjunction {
-		let i = data as usize;
-		let mut var_lits: Vec<RawLit> = self
-			.terms
-			.iter()
-			.enumerate()
-			.filter_map(|(j, v)| {
-				if j == i {
-					return None;
-				}
-				if let BoolView(BoolViewInner::Lit(lit)) = actions.get_int_lower_bound_lit(*v) {
-					Some(lit)
-				} else {
-					None
-				}
-			})
-			.collect();
-		if let Some(r) = self.reification.get() {
-			var_lits.push(*r);
+		let reason = self.reason(data as usize).build_reason(actions);
+		match reason {
+			Err(true) => vec![],
+			Ok(Reason::Eager(conj)) => conj.iter().map(|&l| l).collect(),
+			Ok(Reason::Simple(l)) => vec![l],
+			_ => unreachable!(),
 		}
-		var_lits
 	}
 	// propagation rule: x[i] <= rhs - sum_{j != i} x[j].lower_bound
 	#[tracing::instrument(name = "int_lin_le", level = "trace", skip(self, actions))]
@@ -578,12 +592,13 @@ where
 		if let Some(&r) = self.reification.get() {
 			let r = BoolView(BoolViewInner::Lit(r));
 			if sum < 0 {
-				actions.set_bool(!r, |a: &mut P| {
-					self.terms
-						.iter()
-						.map(|v| a.get_int_lower_bound_lit(*v))
-						.collect_vec()
-				})?;
+				if actions.get_forward_explanations()
+					&& self.terms.len() > actions.get_forward_limit()
+				{
+					actions.set_bool(!r, actions.deferred_reason(self.terms.len() as u64))?;
+				} else {
+					actions.set_bool(!r, self.reason(self.terms.len()))?;
+				}
 			}
 			// skip the remaining propagation if the reified variable is not assigned to true
 			if !actions.get_bool_val(r).unwrap_or(false) {
@@ -593,9 +608,16 @@ where
 
 		// propagate the upper bound of the variables
 		for (j, &v) in self.terms.iter().enumerate() {
-			let reason = actions.deferred_reason(j as u64);
 			let ub = sum + actions.get_int_lower_bound(v);
-			actions.set_int_upper_bound(v, ub, reason)?;
+			if ub < actions.get_int_upper_bound(v) {
+				if actions.get_forward_explanations()
+					&& self.terms.len() > actions.get_forward_limit()
+				{
+					actions.set_int_upper_bound(v, ub, actions.deferred_reason(j as u64))?;
+				} else {
+					actions.set_int_upper_bound(v, ub, self.reason(j))?;
+				}
+			}
 		}
 		Ok(())
 	}
@@ -736,13 +758,8 @@ impl<const R: usize> IntLinearNotEqValueImpl<R> {
 				.terms
 				.iter()
 				.enumerate()
-				.filter_map(|(i, v)| {
-					if data != i {
-						Some(actions.get_int_val_lit(*v).unwrap())
-					} else {
-						None
-					}
-				})
+				.filter(|(i, _)| *i != data)
+				.map(|(_, &v)| actions.get_int_val_lit(v).unwrap())
 				.collect();
 			if let Some(&r) = self.reification.get() {
 				if data != self.terms.len() {
@@ -759,6 +776,15 @@ where
 	P: PropagationActions,
 	E: ExplanationActions,
 {
+	fn explain(&mut self, actions: &mut E, _: Option<RawLit>, data: u64) -> Conjunction {
+		let reason = self.reason(data as usize).build_reason(actions);
+		match reason {
+			Err(true) => vec![],
+			Ok(Reason::Eager(conj)) => conj.iter().map(|&l| l).collect(),
+			Ok(Reason::Simple(l)) => vec![l],
+			_ => unreachable!(),
+		}
+	}
 	#[tracing::instrument(name = "int_lin_ne", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		let (r, r_fixed) = if let Some(&r) = self.reification.get() {

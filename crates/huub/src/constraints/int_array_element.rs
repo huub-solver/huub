@@ -15,10 +15,10 @@ use crate::{
 	constraints::{Conflict, Constraint, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, IntLitMeaning,
-		IntView,
+		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, BoolView,
+		BoolViewInner, IntLitMeaning, IntView,
 	},
-	IntDecision, IntVal,
+	Conjunction, IntDecision, IntVal,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -183,6 +183,43 @@ where
 	P: PropagationActions,
 	E: ExplanationActions,
 {
+	// explain the propagation of bounds of the result variable (0 for lower bound, 1 for upper bound)
+	#[tracing::instrument(name = "array_int_element", level = "trace", skip(self, actions))]
+	fn explain(&mut self, actions: &mut E, _: Option<pindakaas::Lit>, data: u64) -> Conjunction {
+		assert!(data == 0 || data == 1);
+		let bound = if data == 0 {
+			let support = actions.get_trailed_int(self.min_support);
+			actions.get_int_lower_bound(self.vars[support as usize])
+		} else {
+			let support = actions.get_trailed_int(self.max_support);
+			actions.get_int_upper_bound(self.vars[support as usize])
+		};
+		let mut conj = Vec::new();
+		for (i, &v) in self.vars.iter().enumerate() {
+			let bv = if actions.check_int_in_domain(self.index, i as IntVal) {
+				if data == 0 {
+					actions
+						.get_int_lit_relaxed(v, IntLitMeaning::GreaterEq(bound))
+						.0 // weaker than eager explanation if the literal is not created before
+				} else {
+					actions
+						.get_int_lit_relaxed(v, IntLitMeaning::Less(bound + 1))
+						.0 // weaker than eager explanation if the literal is not created before
+				}
+			} else {
+				actions
+					.try_int_lit(self.index, IntLitMeaning::NotEq(i as IntVal))
+					.unwrap() // safe because the index variable is always eagerly encoded
+			};
+			match bv {
+				BoolView(BoolViewInner::Lit(l)) => conj.push(l),
+				BoolView(BoolViewInner::Const(true)) => {}
+				BoolView(BoolViewInner::Const(false)) => unreachable!(),
+			}
+		}
+		conj
+	}
+
 	#[tracing::instrument(name = "array_int_element", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		// ensure bounds of result and self.vars[self.index] are consistent when self.index is fixed
@@ -286,38 +323,46 @@ where
 		// result.lower_bound >= min(i in domain(x))(self.vars[i].lower_bound)
 		// only trigger when self.vars[min_support] is changed or self.vars[min_support] is out of domain
 		if new_min > result_lb {
-			actions.set_int_lower_bound(self.result, new_min, |a: &mut P| {
-				self.vars
-					.iter()
-					.enumerate()
-					.map(|(i, &v)| {
-						if a.check_int_in_domain(self.index, i as IntVal) {
-							a.get_int_lit(v, IntLitMeaning::GreaterEq(new_min))
-						} else {
-							a.get_int_lit(self.index, IntLitMeaning::NotEq(i as IntVal))
-						}
-					})
-					.collect_vec()
-			})?;
+			if actions.get_forward_explanations() && self.vars.len() > actions.get_forward_limit() {
+				actions.set_int_lower_bound(self.result, new_min, actions.deferred_reason(0))?;
+			} else {
+				actions.set_int_lower_bound(self.result, new_min, |a: &mut P| {
+					self.vars
+						.iter()
+						.enumerate()
+						.map(|(i, &v)| {
+							if a.check_int_in_domain(self.index, i as IntVal) {
+								a.get_int_lit(v, IntLitMeaning::GreaterEq(new_min))
+							} else {
+								a.get_int_lit(self.index, IntLitMeaning::NotEq(i as IntVal))
+							}
+						})
+						.collect_vec()
+				})?;
+			}
 		}
 
 		// propagate the upper bound of the selected variable y if max_support is not valid anymore
 		// result.upper_bound <= max(i in domain(x))(self.vars[i].upper_bound)
 		// only trigger when self.vars[max_support] is changed or self.vars[max_support] is out of domain
 		if new_max < result_ub {
-			actions.set_int_upper_bound(self.result, new_max, |a: &mut P| {
-				self.vars
-					.iter()
-					.enumerate()
-					.map(|(i, &v)| {
-						if a.check_int_in_domain(self.index, i as IntVal) {
-							a.get_int_lit(v, IntLitMeaning::Less(new_max + 1))
-						} else {
-							a.get_int_lit(self.index, IntLitMeaning::NotEq(i as IntVal))
-						}
-					})
-					.collect_vec()
-			})?;
+			if actions.get_forward_explanations() && self.vars.len() > actions.get_forward_limit() {
+				actions.set_int_upper_bound(self.result, new_max, actions.deferred_reason(1))?;
+			} else {
+				actions.set_int_upper_bound(self.result, new_max, |a: &mut P| {
+					self.vars
+						.iter()
+						.enumerate()
+						.map(|(i, &v)| {
+							if a.check_int_in_domain(self.index, i as IntVal) {
+								a.get_int_lit(v, IntLitMeaning::Less(new_max + 1))
+							} else {
+								a.get_int_lit(self.index, IntLitMeaning::NotEq(i as IntVal))
+							}
+						})
+						.collect_vec()
+				})?;
+			}
 		}
 
 		Ok(())
