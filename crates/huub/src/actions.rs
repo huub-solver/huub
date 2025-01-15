@@ -163,6 +163,12 @@ pub trait InspectionActions: TrailingActions {
 	/// Check whether a given integer view can take a given value (given the
 	/// current search decisions).
 	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool;
+
+	/// Get whether the propagator is forwarding explanations to the SAT solver. 
+	fn get_forward_explanations(&self) -> bool;
+	
+	/// Get the solving configuration
+	fn get_forward_limit(&self) -> usize;
 }
 
 /// Actions that can be performed during propagation.

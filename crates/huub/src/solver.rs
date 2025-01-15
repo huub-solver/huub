@@ -199,6 +199,10 @@ pub(crate) struct SolverConfiguration {
 	vsids_after: Option<u32>,
 	/// Only use the activity-based search heuristic provided by the SAT solver. Ignore the user-specific search heuristic.
 	vsids_only: bool,
+	/// Maximum number of terms to use eager explanation
+	forward_limit: usize,
+	/// Whether the engine forward explanation cluase eagerly
+	forward_explanation: bool,
 }
 
 /// A trait for a function that can be used to evaluate a `SolverView` to a
@@ -960,6 +964,11 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 			/// Set wether the solver should make all search decisions based on the VSIDS
 			/// only.
 			pub fn set_vsids_only(&mut self, enable: bool);
+			/// Set whether the solver should eagerly forward explanation cluases to the
+			/// SAT engine.
+			pub fn set_forward_explanation(&mut self, enable: bool);
+			/// Set maximum number of terms in linear inequality constraint
+			pub fn set_forward_limit(&mut self, forward_limit: usize);
 		}
 	}
 }
@@ -1085,6 +1094,8 @@ impl<Oracle: PropagatingSolver<Engine>> InspectionActions for Solver<Oracle> {
 			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
 			fn get_int_upper_bound(&self, var: IntView) -> IntVal;
 			fn get_int_val(&self, var: IntView) -> Option<IntVal>;
+			fn get_forward_explanations(&self) -> bool;
+			fn get_forward_limit(&self) -> usize;
 		}
 	}
 }

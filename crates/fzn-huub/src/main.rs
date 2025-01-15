@@ -51,6 +51,11 @@ FLAGS
                                   (overwritten by --vsids-only)
   --vsids-only                    Only use the activity-based search heuristic provided by the SAT
                                   solver. Ignore the user-specific search heuristic.
+  --forward-limit <value>         Set the number of literals in an explanation at which the engine
+                                  push explanations to the SAT solver as external clauses. 
+                                  (default: 1)
+  --forward-explanation           Eagerly generate and forward explanation clauses to SAT engine. 
+                                  (default: off)
 
                       === BEHAVIOUR OPTIONS ===
   --log-file <FILE>	              Output log messages from the solver to a file, instead of stderr.

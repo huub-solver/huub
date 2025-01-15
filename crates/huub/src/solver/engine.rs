@@ -47,7 +47,7 @@ use crate::{
 		trail::{Trail, TrailedInt},
 		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, SolverConfiguration,
 	},
-	Clause, Conjunction, IntVal,
+	Clause, IntVal,
 };
 
 #[derive(Debug, Default, Clone)]
@@ -98,7 +98,7 @@ pub struct State {
 	/// Includes lower and upper bounds for integer variables and Boolean variable assignments
 	pub(crate) trail: Trail,
 	/// Literals to be propagated by the oracle
-	pub(crate) propagation_queue: Conjunction,
+	pub(crate) propagation_queue: VecDeque<RawLit>,
 	/// Reasons for setting values
 	pub(crate) reason_map: HashMap<RawLit, Reason>,
 	/// Whether conflict has (already) been detected
@@ -113,7 +113,7 @@ pub struct State {
 
 	// ---- Non-Trailed Infrastructure ----
 	/// Storage for clauses to be communicated to the solver
-	pub(crate) clauses: VecDeque<Clause>,
+	pub(crate) clauses: VecDeque<(Clause, ClausePersistence)>,
 	/// Solving statistics
 	pub(crate) statistics: EngineStatistics,
 	/// Whether VSIDS is currently enabled
@@ -145,9 +145,12 @@ impl PropagatorExtension for Engine {
 		_slv: &mut dyn SolvingActions,
 	) -> Option<(Clause, ClausePersistence)> {
 		if !self.state.clauses.is_empty() {
-			let clause = self.state.clauses.pop_front(); // Known to be `Some`
-			trace!(clause = ?clause.as_ref().unwrap().iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add external clause");
-			clause.map(|c| (c, ClausePersistence::Irreduntant))
+			if let Some((c, persistent)) = self.state.clauses.pop_front() {
+				trace!(clause = ? c.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add external clause");
+				Some((c, persistent))
+			} else {
+				None
+			}
 		} else if !self.state.propagation_queue.is_empty() {
 			None // Require that the solver first applies the remaining propagation
 		} else if let Some(conflict) = self.state.conflict.take() {
@@ -420,7 +423,36 @@ impl PropagatorExtension for Engine {
 		if !self.state.clauses.is_empty() {
 			return Vec::new();
 		}
-		let queue = mem::take(&mut self.state.propagation_queue);
+		let queue = if self.state.config.forward_explanation {
+			// Forward explanation which are not lazy
+			// Each propagator is responsible for determining the reason type based on `forward_limit`
+			let mut queue = Vec::new();
+			while let Some(lit) = self.state.propagation_queue.pop_front() {
+				if self
+					.state
+					.reason_map
+					.get(&lit)
+					.map_or(true, |r| matches!(r, Reason::Lazy(_)))
+				{
+					queue.push(lit); // Push as many literals with lazy explanations as possible
+				} else {
+					let clause = self
+						.state
+						.reason_map
+						.remove(&lit)
+						.map_or(Clause::from(vec![lit]), |r| {
+							r.explain(&mut self.propagators, &mut self.state, Some(lit))
+						});
+					self.state
+						.clauses
+						.push_back((clause, ClausePersistence::Forgettable));
+					break; // Only forward one explanation per call
+				}
+			}
+			queue
+		} else {
+			Vec::from_iter(self.state.propagation_queue.drain(..))
+		};
 		if queue.is_empty() {
 			return Vec::new(); // Early return to avoid tracing statements
 		}
@@ -604,6 +636,17 @@ impl State {
 	pub(crate) fn set_vsids_only(&mut self, enable: bool) {
 		self.config.vsids_only = enable;
 		self.vsids = enable;
+	}
+
+	/// Set whether the solver should eagerly forward explanation cluases to the
+	/// SAT engine.
+	pub(crate) fn set_forward_explanation(&mut self, enable: bool) {
+		self.config.forward_explanation = enable;
+	}
+
+	/// Set maximum number of terms in linear inequality constraint
+	pub(crate) fn set_forward_limit(&mut self, forward_limit: usize) {
+		self.config.forward_limit = forward_limit;
 	}
 }
 
@@ -915,6 +958,12 @@ impl InspectionActions for State {
 				}
 			}
 		}
+	}
+	fn get_forward_explanations(&self) -> bool {
+		self.config.forward_explanation
+	}
+	fn get_forward_limit(&self) -> usize {
+		self.config.forward_limit
 	}
 }
 

@@ -100,7 +100,11 @@ pub struct Cli<Stdout, Stderr> {
 	vsids_after: Option<u32>,
 	/// Only use the SAT VSIDS heuristic for search
 	vsids_only: bool,
-
+	/// Maximum number of terms in linear inequality for eager explanation
+	forward_limit: usize,
+	/// Whether the solver should eagerly forward explanation cluases to the
+	/// SAT engine.
+	forward_explanation: bool,
 	// --- Output configuration ---
 	/// Output stream for (intermediate) solutions and statistics
 	///
@@ -280,6 +284,9 @@ where
 			slv.set_toggle_vsids(self.toggle_vsids);
 			slv.set_vsids_after(self.vsids_after);
 		}
+		slv.set_forward_limit(self.forward_limit);
+
+		slv.set_forward_explanation(self.forward_explanation);
 
 		// Determine Goal and Objective
 		let start_solve = Instant::now();
@@ -537,6 +544,8 @@ where
 			vivification: self.vivification,
 			vsids_after: self.vsids_after,
 			vsids_only: self.vsids_only,
+			forward_limit: self.forward_limit,
+			forward_explanation: self.forward_explanation,
 			stdout: self.stdout,
 		}
 	}
@@ -560,6 +569,8 @@ where
 			vivification: self.vivification,
 			vsids_after: self.vsids_after,
 			vsids_only: self.vsids_only,
+			forward_limit: self.forward_limit,
+			forward_explanation: self.forward_explanation,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
 		}
@@ -611,6 +622,11 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			vsids_after: args
 				.opt_value_from_str("--vsids-after")
 				.map_err(|e| e.to_string())?,
+			forward_limit: args
+				.opt_value_from_str("--forward-limit")
+				.map(|x| x.unwrap_or(1))
+				.map_err(|e| e.to_string())?,
+			forward_explanation: args.contains("--forward-explanation"),
 
 			verbose,
 			path: args
