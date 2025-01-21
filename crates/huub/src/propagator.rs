@@ -11,6 +11,7 @@ pub(crate) mod int_lin_ne;
 pub(crate) mod int_pow;
 pub(crate) mod int_times;
 pub(crate) mod table_int;
+pub(crate) mod all_different_bounds;
 
 use std::{
 	error::Error,
