@@ -22,7 +22,7 @@ pub(crate) struct AllDifferentBound {
     min_sorted: Vec<usize>,
     max_sorted: Vec<usize>,
     nb: IntVal,            //TODO: Give better names
-    bound: Vec<IntVal>,
+    bounds: Vec<IntVal>,
     t: Vec<IntVal>,
     d: Vec<IntVal>,
     h: Vec<IntVal>,
@@ -37,7 +37,7 @@ struct AllDifferentBoundPoster {
     min_sorted: Vec<usize>,
     max_sorted: Vec<usize>,
     nb: IntVal,            //TODO: Give better names
-    bound: Vec<IntVal>,
+    bounds: Vec<IntVal>,
     t: Vec<IntVal>,
     d: Vec<IntVal>,
     h: Vec<IntVal>,
@@ -56,13 +56,13 @@ impl AllDifferentBound {
         let nb: IntVal = 0;
 
         let n: usize = 2 * size + 2;
-        let bound: Vec<IntVal> = Vec::with_capacity(n);
-        let t: Vec<IntVal> = Vec::with_capacity(n);
-        let d: Vec<IntVal> = Vec::with_capacity(n);
-        let h: Vec<IntVal> = Vec::with_capacity(n);
+        let bounds: Vec<IntVal> = Vec::with_capacity(n); // Sorted array min and max bounds
+        let t: Vec<IntVal> = Vec::with_capacity(n); // Critical capacity pointers
+        let d: Vec<IntVal> = Vec::with_capacity(n); // Difference between critical capacities
+        let h: Vec<IntVal> = Vec::with_capacity(n); // Hall interval pointers
         let bucket: Vec<IntVal> = Vec::with_capacity(n);
 
-        AllDifferentBoundPoster { vars, interval, min_sorted, max_sorted, nb, bound, t, d, h, bucket }
+        AllDifferentBoundPoster { vars, interval, min_sorted, max_sorted, nb, bounds, t, d, h, bucket }
     }
 }
 
@@ -74,22 +74,110 @@ where
 
     #[tracing::instrument(name = "all_different", level = "trace", skip(self, actions))]
     fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-        let size: usize = self.vars.len();
-        for i in (0..size).rev() {
-            let t: usize  = self.min_sorted[i];
-            self.interval[t].min = actions.get_int_lower_bound(self.vars[t]);
-            for j in (i..size) {
-                if self.interval[t].min < self.interval[self.min_sorted[j+1]].min {
-                    break;
-                }
-                self.min_sorted[j] = t;
-            }
-            self.min_sorted[j] = t;
-        }
+        self.sort(actions);
+
+
         Ok(())
     }
 }
 
+impl AllDifferentBound {
+
+    fn filter_lower<P: PropagationActions>(&mut self, actions: &mut P) {
+        
+    }
+    fn filter_upper<P: PropagationActions>(&mut self, actions: &mut P) {
+
+    }
+    fn sort<P: PropagationActions>(&mut self, actions: &mut P) {
+        let size: usize = self.vars.len();
+        let mut saved_j = 0;
+
+        for i in (0..size).rev() {
+            let t: usize = self.min_sorted[i];
+            self.interval[t].min = actions.get_int_lower_bound(self.vars[t]);
+            saved_j = i;
+            for j in i..size {
+                if self.interval[t].min < self.interval[self.min_sorted[j + 1]].min {
+                    saved_j = j;
+                    break;
+                }
+                self.min_sorted[j] = self.min_sorted[j + 1];
+            }
+            self.min_sorted[saved_j] = t;
+        }
+
+        for i in (0..size).rev() {
+            let t: usize = self.max_sorted[i];
+            self.interval[t].max = actions.get_int_upper_bound(self.vars[t]) + 1;
+            saved_j = i;
+            for j in i..size { // index might be incorrect
+                if self.interval[t].max < self.interval[self.max_sorted[j + 1]].max {
+                    saved_j = j;
+                    break;
+                }
+                self.max_sorted[j] = self.max_sorted[j + 1];
+            }
+            self.max_sorted[saved_j] = t;
+        }
+
+        let mut min: IntVal = self.interval[self.min_sorted[0]].min;
+        let mut max: IntVal = self.interval[self.max_sorted[0]].max;
+        let mut last: IntVal = min - 2;
+        self.bounds[0] = min - 2;
+
+        let mut i = 0;
+        let mut j = 0;
+        loop {
+            if i < size && min <= max {
+                if min != last {
+                    self.nb += 1;
+                    last = min;
+                    self.bounds[self.nb] = min;
+                }
+                self.interval[self.min_sorted[i]].min_rank = self.nb;
+                i += 1;
+                if i < size {
+                    min = self.interval[self.min_sorted[i]].min;
+                }
+            } else {
+                if max != last {
+                    self.nb += 1;
+                    last = max;
+                    self.bounds[self.nb] = max;
+                }
+                self.interval[self.max_sorted[i]].max_rank = self.nb;
+                j += 1;
+                if j == size {
+                    break;
+                }
+                max = self.interval[self.max_sorted[i]].max;
+            }
+        }
+        self.bounds[self.nb + 1] = self.bounds[self.nb] + 2;
+    }
+    fn path_set(t: &mut Vec<IntVal>, start: IntVal, end: IntVal, to: IntVal) -> () {
+        let mut k: IntVal = start;;
+        let mut l: IntVal = start;
+        while k != end {
+            t[k] = to;
+            l = t[k];
+            k = l;
+        }
+    }
+    fn path_max(t: Vec<IntVal>, mut i: IntVal) -> IntVal {
+        while t[i] < i {
+            i = t[i];
+        }
+        i
+    }
+    fn path_min(t: Vec<IntVal>, mut i: IntVal) -> IntVal {
+        while t[i] > i {
+            i = t[i];
+        }
+        i
+    }
+}
 
 
 impl Poster for AllDifferentBoundPoster {
