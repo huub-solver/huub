@@ -216,7 +216,7 @@ impl AllDifferentBound {
                 self.t[z] = j;
             }
             AllDifferentBound::path_set(&mut self.t, max_rank - 1, z, z);
-            // if self.d[z] < self.bounds[z] - self.bounds[max_rank]
+            // if self.d[z] < self.bounds[z] - self.bounds[max_rank]  Is this needed?
             
 
             if self.h[max_rank] > max_rank {
@@ -298,6 +298,7 @@ impl AllDifferentBound {
 
         let mut i = 0;
         let mut j = 0;
+        self.nb = 0;
         loop {
             if i < size && min <= max {
                 if min != last {
@@ -316,12 +317,12 @@ impl AllDifferentBound {
                     last = max;
                     self.bounds[self.nb] = max;
                 }
-                self.interval[self.max_sorted[i]].max_rank = self.nb;
+                self.interval[self.max_sorted[j]].max_rank = self.nb;
                 j += 1;
                 if j == size {
                     break;
                 }
-                max = self.interval[self.max_sorted[i]].max;
+                max = self.interval[self.max_sorted[j]].max;
             }
         }
         self.bounds[self.nb + 1] = self.bounds[self.nb] + 2;
