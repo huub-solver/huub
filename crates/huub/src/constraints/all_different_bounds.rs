@@ -1,6 +1,6 @@
 use std::cmp;
 use std::ops::Not;
-
+use itertools::Itertools;
 use crate::{
     actions::{ExplanationActions, InitializationActions}, 
     propagator::{Conflict, PropagationActions, Propagator}, 
@@ -259,8 +259,8 @@ impl AllDifferentBound {
     }
     fn sort<P: PropagationActions>(&mut self, actions: &mut P) {
         let size: usize = self.vars.len();
-        let mut saved_j;
-
+        //let mut saved_j;
+        /*
         for i in (0..size).rev() {
             let t: usize = self.min_sorted[i];
             self.interval[t].min = actions.get_int_lower_bound(self.vars[t]);
@@ -275,21 +275,38 @@ impl AllDifferentBound {
             }
             self.min_sorted[saved_j] = t;
         }
+        */
+        let mut min_values = vec![0; size];
+        let mut max_values = vec![0; size];
+        for i in 0..size {
+            self.interval[i].min = actions.get_int_lower_bound(self.vars[i]);
+            self.interval[i].max = actions.get_int_upper_bound(self.vars[i]);
 
-        for i in (0..size).rev() {
-            let t: usize = self.max_sorted[i];
-            self.interval[t].max = actions.get_int_upper_bound(self.vars[t]) + 1;
-            saved_j = i;
-            for j in i..size - 1 {
-                if self.interval[t].max < self.interval[self.max_sorted[j + 1]].max {
-                    saved_j = j;
-                    break;
-                }
-                self.max_sorted[j] = self.max_sorted[j + 1];
-                saved_j = j;
-            }
-            self.max_sorted[saved_j] = t;
+            min_values[i] = self.interval[i].min;
+            max_values[i] = self.interval[i].max;
         }
+
+        self.min_sorted.sort_by(|a, b| min_values[*a].cmp(&min_values[*b]));
+        self.max_sorted.sort_by(|a, b| max_values[*a].cmp(&max_values[*b]));
+
+
+
+
+
+        // for i in (0..size).rev() {
+        //     let t: usize = self.max_sorted[i];
+        //     self.interval[t].max = actions.get_int_upper_bound(self.vars[t]) + 1;
+        //     saved_j = i;
+        //     for j in i..size - 1 {
+        //         if self.interval[t].max < self.interval[self.max_sorted[j + 1]].max {
+        //             saved_j = j;
+        //             break;
+        //         }
+        //         self.max_sorted[j] = self.max_sorted[j + 1];
+        //         saved_j = j;
+        //     }
+        //     self.max_sorted[saved_j] = t;
+        // }
 
         let mut min: IntVal = self.interval[self.min_sorted[0]].min;
         let mut max: IntVal = self.interval[self.max_sorted[0]].max;
@@ -397,19 +414,19 @@ mod tests {
         let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
         let a = IntVar::new_in(
             &mut slv,
-            RangeList::from_iter([1..=4]),
+            RangeList::from_iter([2..=5]),
             EncodingType::Eager,
             EncodingType::Eager,
         );
         let b = IntVar::new_in(
             &mut slv,
-            RangeList::from_iter([1..=4]),
+            RangeList::from_iter([1..=3]),
             EncodingType::Eager,
             EncodingType::Eager,
         );
         let c = IntVar::new_in(
             &mut slv,
-            RangeList::from_iter([1..=4]),
+            RangeList::from_iter([3..=4]),
             EncodingType::Eager,
             EncodingType::Eager,
         );
