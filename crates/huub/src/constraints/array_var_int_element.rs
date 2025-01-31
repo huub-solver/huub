@@ -3,6 +3,7 @@
 //! variables, chosen by an index variable.
 
 use itertools::Itertools;
+use pindakaas::ClauseDatabaseTools;
 
 use crate::{
 	actions::{
@@ -10,14 +11,13 @@ use crate::{
 		SimplificationActions,
 	},
 	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
-	model::int::IntExpr,
+	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, value::IntVal,
-		view::IntView,
+		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, IntLitMeaning,
+		IntView,
 	},
-	LitMeaning, ReformulationError,
+	IntDecision, IntVal,
 };
-use pindakaas::ClauseDatabaseTools;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// Representation of the `array_var_int_element` constraint within a model.
@@ -27,11 +27,11 @@ use pindakaas::ClauseDatabaseTools;
 /// the given index decision variable.
 pub struct ArrayVarIntElement {
 	/// The array of integer values
-	pub(crate) array: Vec<IntExpr>,
+	pub(crate) array: Vec<IntDecision>,
 	/// The index variable
-	pub(crate) index: IntExpr,
+	pub(crate) index: IntDecision,
 	/// The resulting variable
-	pub(crate) result: IntExpr,
+	pub(crate) result: IntDecision,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -101,8 +101,8 @@ impl ArrayVarIntElementBounds {
 		P: PropagatorInitActions + ?Sized,
 	{
 		// Remove out-of-bound values from the index variables
-		let index_ub = solver.get_int_lit(index, LitMeaning::Less(collection.len() as IntVal));
-		let index_lb = solver.get_int_lit(index, LitMeaning::GreaterEq(0));
+		let index_ub = solver.get_int_lit(index, IntLitMeaning::Less(collection.len() as IntVal));
+		let index_lb = solver.get_int_lit(index, IntLitMeaning::GreaterEq(0));
 		solver.add_clause([index_ub])?;
 		solver.add_clause([index_lb])?;
 
@@ -223,7 +223,7 @@ where
 			if result_ub < v_lb {
 				actions.set_int_not_eq(self.index, i as IntVal, |a: &mut P| {
 					[
-						a.get_int_lit(self.result, LitMeaning::Less(v_lb)),
+						a.get_int_lit(self.result, IntLitMeaning::Less(v_lb)),
 						a.get_int_lower_bound_lit(*v),
 					]
 				})?;
@@ -232,7 +232,7 @@ where
 			if v_ub < result_lb {
 				actions.set_int_not_eq(self.index, i as IntVal, |a: &mut P| {
 					[
-						a.get_int_lit(self.result, LitMeaning::GreaterEq(v_ub + 1)),
+						a.get_int_lit(self.result, IntLitMeaning::GreaterEq(v_ub + 1)),
 						a.get_int_upper_bound_lit(*v),
 					]
 				})?;
@@ -266,9 +266,9 @@ where
 					.enumerate()
 					.map(|(i, &v)| {
 						if a.check_int_in_domain(self.index, i as IntVal) {
-							a.get_int_lit(v, LitMeaning::GreaterEq(new_min))
+							a.get_int_lit(v, IntLitMeaning::GreaterEq(new_min))
 						} else {
-							a.get_int_lit(self.index, LitMeaning::NotEq(i as IntVal))
+							a.get_int_lit(self.index, IntLitMeaning::NotEq(i as IntVal))
 						}
 					})
 					.collect_vec()
@@ -285,9 +285,9 @@ where
 					.enumerate()
 					.map(|(i, &v)| {
 						if a.check_int_in_domain(self.index, i as IntVal) {
-							a.get_int_lit(v, LitMeaning::Less(new_max + 1))
+							a.get_int_lit(v, IntLitMeaning::Less(new_max + 1))
 						} else {
-							a.get_int_lit(self.index, LitMeaning::NotEq(i as IntVal))
+							a.get_int_lit(self.index, IntLitMeaning::NotEq(i as IntVal))
 						}
 					})
 					.collect_vec()
@@ -308,8 +308,11 @@ mod tests {
 	use crate::{
 		array_var_int_element,
 		constraints::array_var_int_element::ArrayVarIntElementBounds,
-		solver::int_var::{EncodingType, IntVar},
-		Model, Solver,
+		solver::{
+			int_var::{EncodingType, IntVar},
+			Solver,
+		},
+		Model,
 	};
 
 	#[test]

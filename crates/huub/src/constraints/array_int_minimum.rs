@@ -9,9 +9,9 @@ use crate::{
 		SimplificationActions,
 	},
 	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
-	model::int::IntExpr,
-	solver::{activation_list::IntPropCond, queue::PriorityLevel, value::IntVal, view::IntView},
-	LitMeaning, ReformulationError,
+	reformulate::ReformulationError,
+	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView},
+	IntDecision, IntVal,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -21,9 +21,9 @@ use crate::{
 /// value of an array of integer decision variables.
 pub struct ArrayIntMinimum {
 	/// Set of decision variables from which the mimimum must be taken
-	pub(crate) vars: Vec<IntExpr>,
+	pub(crate) vars: Vec<IntDecision>,
 	/// Decision variable that represents the minimum value
-	pub(crate) min: IntExpr,
+	pub(crate) min: IntDecision,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -128,7 +128,7 @@ where
 		actions.set_int_lower_bound(self.min, min_lb, |a: &mut P| {
 			self.vars
 				.iter()
-				.map(|&x| a.get_int_lit(x, LitMeaning::GreaterEq(min_lb)))
+				.map(|&x| a.get_int_lit(x, IntLitMeaning::GreaterEq(min_lb)))
 				.collect_vec()
 		})?;
 
@@ -149,9 +149,7 @@ mod tests {
 	use itertools::Itertools;
 	use tracing_test::traced_test;
 
-	use crate::{
-		array_int_maximum, array_int_minimum, model::reformulate::ModelView, InitConfig, Model,
-	};
+	use crate::{array_int_maximum, array_int_minimum, reformulate::InitConfig, Decision, Model};
 
 	#[test]
 	#[traced_test]
@@ -166,7 +164,7 @@ mod tests {
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
 		let vars = vec![a, b, c, y]
 			.into_iter()
-			.map(|x| map.get(&mut slv, &ModelView::from(x)))
+			.map(|x| map.get(&mut slv, &Decision::from(x)))
 			.collect_vec();
 
 		slv.expect_solutions(
@@ -207,7 +205,7 @@ mod tests {
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
 		let vars = vec![a, b, c, y]
 			.into_iter()
-			.map(|x| map.get(&mut slv, &ModelView::from(x)))
+			.map(|x| map.get(&mut slv, &Decision::from(x)))
 			.collect_vec();
 		slv.expect_solutions(
 			&vars,

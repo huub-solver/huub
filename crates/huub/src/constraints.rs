@@ -30,14 +30,17 @@ use crate::{
 		ConstraintInitActions, ExplanationActions, PropagationActions, ReformulationActions,
 		SimplificationActions,
 	},
+	reformulate::ReformulationError,
 	solver::{
 		engine::{PropRef, State},
 		solving_context::SolvingContext,
-		view::{BoolView, BoolViewInner},
+		BoolView, BoolViewInner,
 	},
-	Conjunction, Model, ReformulationError,
+	Conjunction, Model,
 };
 
+/// Type alias to represent a user [`Constraint`], stored in a [`Box`], that is
+/// used by [`Model`].
 pub(crate) type BoxedConstraint = Box<dyn Constraint<Model>>;
 
 /// Type alias to represent [`Propagator`] contained in a [`Box`], that is used

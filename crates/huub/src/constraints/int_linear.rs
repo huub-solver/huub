@@ -3,7 +3,7 @@
 //! constraint enforce a condition on the sum of (linear transformations of)
 //! integer decision variables.
 
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use pindakaas::Lit as RawLit;
 
 use crate::{
@@ -13,14 +13,12 @@ use crate::{
 		SimplificationStatus,
 	},
 	helpers::opt_field::OptField,
-	model::{bool::BoolView as ModelBoolView, int::IntExpr},
+	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond,
-		queue::PriorityLevel,
-		value::IntVal,
-		view::{BoolView, BoolViewInner, IntView, IntViewInner},
+		activation_list::IntPropCond, queue::PriorityLevel, BoolView, BoolViewInner, IntView,
+		IntViewInner,
 	},
-	Conjunction, ReformulationError,
+	BoolDecision, Conjunction, IntDecision, IntVal,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -42,7 +40,7 @@ pub(crate) enum LinOperator {
 /// the implication or reification or whether this is so.
 pub struct IntLinear {
 	/// The integer linear terms that are being summed.
-	pub(crate) terms: Vec<IntExpr>,
+	pub(crate) terms: Vec<IntDecision>,
 	/// The operator that is used to compare the sum to the right-hand side.
 	pub(crate) operator: LinOperator,
 	/// The constant right-hand side value.
@@ -100,10 +98,10 @@ pub struct IntLinearNotEqValueImpl<const R: usize> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Reification possibilities for a linear constraint.
 pub(crate) enum Reification {
-	/// The constraint is half-reified by the given [`ModelBoolView`].
-	ImpliedBy(ModelBoolView),
-	/// The constraint is reified by the given [`ModelBoolView`].
-	ReifiedBy(ModelBoolView),
+	/// The constraint is half-reified by the given [`BoolDecision`].
+	ImpliedBy(BoolDecision),
+	/// The constraint is reified by the given [`BoolDecision`].
+	ReifiedBy(BoolDecision),
 }
 
 impl IntLinear {
@@ -113,7 +111,7 @@ impl IntLinear {
 	/// The integer linear constraint must hold when the given Boolean decision
 	/// variable is `true`. If the constraint does not hold, then the Boolean
 	/// decision variable must be `false`.
-	pub fn implied_by(self, b: ModelBoolView) -> Self {
+	pub fn implied_by(self, b: BoolDecision) -> Self {
 		assert!(
 			self.reif.is_none(),
 			"IntLinear is already implied or reified."
@@ -129,7 +127,7 @@ impl IntLinear {
 	///
 	/// The integer linear constraint must hold if-and-only-if the given Boolean
 	/// decision variable is `true`.
-	pub fn reified_by(self, b: ModelBoolView) -> Self {
+	pub fn reified_by(self, b: BoolDecision) -> Self {
 		assert!(
 			self.reif.is_none(),
 			"IntLinear is already implied or reified."
@@ -183,6 +181,38 @@ impl<S: SimplificationActions> Constraint<S> for IntLinear {
 			}
 		}
 
+		// Filter known values from the terms
+		let (vals, terms): (Vec<_>, _) =
+			self.terms
+				.iter()
+				.partition_map(|&var| match actions.get_int_val(var) {
+					Some(val) => Either::Left(val),
+					None => Either::Right(var),
+				});
+		self.terms = terms;
+		self.rhs -= vals.iter().sum::<IntVal>();
+
+		// Perform single-term domain changes and any possible unification
+		match *self.terms.as_slice() {
+			[var] if self.reif.is_none() => {
+				match self.operator {
+					LinOperator::Equal => actions.set_int_val(var, self.rhs)?,
+					LinOperator::LessEq => {
+						actions.set_int_upper_bound(*self.terms.last().unwrap(), self.rhs)?;
+					}
+					LinOperator::NotEqual => actions.set_int_not_eq(var, self.rhs)?,
+				}
+				return Ok(SimplificationStatus::Subsumed);
+			}
+			[_var] => {
+				// TODO: Unify `self.reif` with the integer literal.
+			}
+			[_a, _b] if self.operator == LinOperator::Equal && self.reif.is_none() => {
+				// TODO: Unify integers
+			}
+			_ => {}
+		}
+
 		// Collect variable bounds and create their sums
 		let lb = self
 			.terms
@@ -198,38 +228,40 @@ impl<S: SimplificationActions> Constraint<S> for IntLinear {
 		let lb_sum: IntVal = lb.iter().sum();
 		let ub_sum: IntVal = ub.iter().sum();
 
-		// Detection for not-equal constraints. Mark as subsumed, unsatisfiable, or
-		// stop.
-		if self.operator == LinOperator::NotEqual {
-			if self.rhs < lb_sum || self.rhs > ub_sum {
-				if let Some(Reification::ReifiedBy(r)) = self.reif {
-					actions.set_bool(r)?;
-				}
-				return Ok(SimplificationStatus::Subsumed);
-			} else if lb_sum == ub_sum && lb_sum == self.rhs {
-				if let Some(Reification::ImpliedBy(r) | Reification::ReifiedBy(r)) = self.reif {
-					actions.set_bool(!r)?;
-					return Ok(SimplificationStatus::Subsumed);
-				}
-				return Err(ReformulationError::TrivialUnsatisfiable);
+		// Check if the constraint is already known to be true or false
+		let known_result = match self.operator {
+			LinOperator::Equal if lb_sum > self.rhs || ub_sum < self.rhs => Some(false),
+			LinOperator::Equal if lb_sum == ub_sum => {
+				debug_assert_eq!(lb_sum, self.rhs);
+				Some(true)
 			}
+			LinOperator::LessEq if ub_sum <= self.rhs => Some(true),
+			LinOperator::LessEq if lb_sum > self.rhs => Some(false),
+			LinOperator::NotEqual if lb_sum > self.rhs || ub_sum < self.rhs => Some(true),
+			LinOperator::NotEqual if lb_sum == ub_sum => {
+				debug_assert_eq!(lb_sum, self.rhs);
+				Some(false)
+			}
+			_ => None,
+		};
+		if let Some(satisfied) = known_result {
+			return match self.reif {
+				Some(Reification::ImpliedBy(r)) => {
+					if !satisfied {
+						actions.set_bool(!r)?;
+					}
+					Ok(SimplificationStatus::Subsumed)
+				}
+				Some(Reification::ReifiedBy(r)) => {
+					actions.set_bool(if satisfied { r } else { !r })?;
+					Ok(SimplificationStatus::Subsumed)
+				}
+				None if !satisfied => Err(ReformulationError::TrivialUnsatisfiable),
+				None => Ok(SimplificationStatus::Subsumed),
+			};
+		} else if self.operator == LinOperator::NotEqual {
+			// No futher bounds propagation possible
 			return Ok(SimplificationStatus::Fixpoint);
-		}
-		debug_assert_ne!(self.operator, LinOperator::NotEqual);
-
-		// Check whether LessEq constraint are already subsumed
-		if ub_sum < self.rhs || (self.operator == LinOperator::Equal && lb_sum > self.rhs) {
-			if let Some(Reification::ReifiedBy(r)) = self.reif {
-				actions.set_bool(if self.operator == LinOperator::LessEq {
-					r
-				} else {
-					!r
-				})?;
-			}
-			if self.operator == LinOperator::Equal {
-				return Err(ReformulationError::TrivialUnsatisfiable);
-			}
-			return Ok(SimplificationStatus::Subsumed);
 		}
 
 		// The difference between the right-hand-side value and the sum of the lower
@@ -398,7 +430,10 @@ where
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		// If the reified variable is false, skip propagation
 		if let Some(&r) = self.reification.get() {
-			if !actions.get_bool_val(r.into()).unwrap_or(true) {
+			if !actions
+				.get_bool_val(BoolView(BoolViewInner::Lit(r)))
+				.unwrap_or(true)
+			{
 				return Ok(());
 			}
 		}
@@ -412,8 +447,9 @@ where
 
 		// propagate the reified variable if the sum of lower bounds is greater than the right-hand-side value
 		if let Some(&r) = self.reification.get() {
+			let r = BoolView(BoolViewInner::Lit(r));
 			if sum < 0 {
-				actions.set_bool((!r).into(), |a: &mut P| {
+				actions.set_bool(!r, |a: &mut P| {
 					self.terms
 						.iter()
 						.map(|v| a.get_int_lower_bound_lit(*v))
@@ -421,7 +457,7 @@ where
 				})?;
 			}
 			// skip the remaining propagation if the reified variable is not assigned to true
-			if !actions.get_bool_val(r.into()).unwrap_or(false) {
+			if !actions.get_bool_val(r).unwrap_or(false) {
 				return Ok(());
 			}
 		}
@@ -476,7 +512,7 @@ impl IntLinearLessEqImpBounds {
 		for &v in vars.iter() {
 			solver.enqueue_on_int_change(prop, v, IntPropCond::UpperBound);
 		}
-		solver.enqueue_on_bool_change(prop, reification.into());
+		solver.enqueue_on_bool_change(prop, BoolView(BoolViewInner::Lit(reification)));
 	}
 }
 
@@ -523,7 +559,7 @@ impl IntLinearNotEqImpValue {
 		for &v in vars.iter() {
 			solver.enqueue_on_int_change(prop, v, IntPropCond::Fixed);
 		}
-		solver.enqueue_on_bool_change(prop, reification.into());
+		solver.enqueue_on_bool_change(prop, BoolView(BoolViewInner::Lit(reification)));
 	}
 }
 
@@ -581,7 +617,7 @@ impl<const R: usize> IntLinearNotEqValueImpl<R> {
 				.collect();
 			if let Some(&r) = self.reification.get() {
 				if data != self.terms.len() {
-					conj.push(r.into());
+					conj.push(BoolView(BoolViewInner::Lit(r)));
 				}
 			}
 			conj
@@ -597,11 +633,11 @@ where
 	#[tracing::instrument(name = "int_lin_ne", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		let (r, r_fixed) = if let Some(&r) = self.reification.get() {
-			let r_bv = r.into();
-			match actions.get_bool_val(r_bv) {
+			let r = BoolView(BoolViewInner::Lit(r));
+			match actions.get_bool_val(r) {
 				Some(false) => return Ok(()),
-				Some(true) => (r_bv, true),
-				None => (r_bv, false),
+				Some(true) => (r, true),
+				None => (r, false),
 			}
 		} else {
 			(true.into(), true)
@@ -640,8 +676,12 @@ mod tests {
 
 	use crate::{
 		constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
-		solver::int_var::{EncodingType, IntVar},
-		InitConfig, Model, NonZeroIntVal, Solver,
+		reformulate::InitConfig,
+		solver::{
+			int_var::{EncodingType, IntVar},
+			Solver,
+		},
+		Model, NonZeroIntVal,
 	};
 
 	#[test]

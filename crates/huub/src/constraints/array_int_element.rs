@@ -10,8 +10,9 @@ use pindakaas::ClauseDatabaseTools;
 use crate::{
 	actions::{ReformulationActions, SimplificationActions},
 	constraints::Constraint,
-	model::int::IntExpr,
-	IntVal, LitMeaning, ReformulationError,
+	reformulate::ReformulationError,
+	solver::IntLitMeaning,
+	IntDecision, IntVal,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -24,9 +25,9 @@ pub struct ArrayIntElement {
 	/// The array of integer values
 	pub(crate) array: Vec<IntVal>,
 	/// The index variable
-	pub(crate) index: IntExpr,
+	pub(crate) index: IntDecision,
 	/// The resulting variable
-	pub(crate) result: IntExpr,
+	pub(crate) result: IntDecision,
 }
 
 impl<S: SimplificationActions> Constraint<S> for ArrayIntElement {
@@ -42,13 +43,13 @@ impl<S: SimplificationActions> Constraint<S> for ArrayIntElement {
 			.into_group_map();
 
 		for (val, idxs) in idx_map {
-			let val_eq = slv.get_int_lit(result, LitMeaning::Eq(val));
+			let val_eq = slv.get_int_lit(result, IntLitMeaning::Eq(val));
 			let idxs: Vec<_> = idxs
 				.into_iter()
-				.map(|i| slv.get_int_lit(index, LitMeaning::Eq(i)))
+				.map(|i| slv.get_int_lit(index, IntLitMeaning::Eq(i)))
 				.collect();
 
-			for i in idxs.iter() {
+			for &i in idxs.iter() {
 				// (idx = i) -> (val = arr[i])
 				slv.add_clause([!i, val_eq])?;
 			}

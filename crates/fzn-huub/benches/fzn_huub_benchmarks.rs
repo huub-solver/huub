@@ -87,13 +87,15 @@ fn check_final(name: &str, instance_type: InstanceType) {
 	if let InstanceType::Optimization = instance_type {
 		assert!(
 			slice.ends_with(FZN_COMPLETE),
-			"Solver did not finish with complete marker"
+			"Solver did not finish with complete marker: ```\n{}\n'''",
+			slice
 		);
 		slice = &slice[..slice.len() - FZN_COMPLETE.len()];
 	}
 	assert!(
 		slice.ends_with(FZN_SEPERATOR),
-		"Solution did not end with a seperator"
+		"Solution did not end with a seperator: ```\n{}\n'''",
+		slice
 	);
 	slice = &slice[..slice.len() - FZN_SEPERATOR.len()];
 	let sol = base.with_extension("sol").canonicalize().unwrap();

@@ -10,9 +10,9 @@ use crate::{
 		CachedReason, Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus,
 	},
 	helpers::{div_ceil, div_floor},
-	model::int::IntExpr,
-	solver::{activation_list::IntPropCond, queue::PriorityLevel},
-	IntView, NonZeroIntVal, ReformulationError,
+	reformulate::ReformulationError,
+	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntView},
+	IntDecision, NonZeroIntVal,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -22,11 +22,11 @@ use crate::{
 /// variables is equal to a third.
 pub struct IntTimes {
 	/// First factor variable
-	pub(crate) factor1: IntExpr,
+	pub(crate) factor1: IntDecision,
 	/// Second factor variable
-	pub(crate) factor2: IntExpr,
+	pub(crate) factor2: IntDecision,
 	/// Product variable
-	pub(crate) product: IntExpr,
+	pub(crate) product: IntDecision,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -248,8 +248,10 @@ mod tests {
 
 	use crate::{
 		constraints::int_times::IntTimesBounds,
-		solver::int_var::{EncodingType, IntVar},
-		Solver,
+		solver::{
+			int_var::{EncodingType, IntVar},
+			Solver,
+		},
 	};
 
 	#[test]

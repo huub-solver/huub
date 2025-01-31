@@ -1,6 +1,7 @@
 //! Structure and algorithms for the `all_different_int` constraint, which
 //! enforces that a list of integer variables each take a different value.
 
+use itertools::{Either, Itertools};
 use rangelist::{IntervalIterator, RangeList};
 
 use crate::{
@@ -8,14 +9,11 @@ use crate::{
 		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
 	},
 	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
-	model::int::IntExpr,
+	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond,
-		int_var::LitMeaning,
-		queue::PriorityLevel,
-		view::{IntView, IntViewInner},
+		activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView, IntViewInner,
 	},
-	ReformulationError,
+	IntDecision,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -25,7 +23,7 @@ use crate::{
 /// values.
 pub struct AllDifferentInt {
 	/// List of integer decision variables that must take different values.
-	pub(crate) vars: Vec<IntExpr>,
+	pub(crate) vars: Vec<IntDecision>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -37,15 +35,15 @@ pub struct AllDifferentIntValue {
 
 impl<S: SimplificationActions> Constraint<S> for AllDifferentInt {
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		let (vals, vars): (Vec<_>, Vec<_>) = self
-			.vars
-			.iter()
-			.partition(|v| matches!(v, IntExpr::Const(_)));
+		let (vals, vars): (Vec<_>, Vec<_>) = self.vars.iter().partition_map(|&var| {
+			if let Some(val) = actions.get_int_val(var) {
+				Either::Left(val)
+			} else {
+				Either::Right(var)
+			}
+		});
 		self.vars = vars;
-		let neg_dom = RangeList::from_iter(vals.iter().map(|i| {
-			let IntExpr::Const(i) = i else { unreachable!() };
-			*i..=*i
-		}));
+		let neg_dom = RangeList::from_iter(vals.iter().map(|&i| i..=i));
 		if neg_dom.card() != vals.len() {
 			return Err(ReformulationError::TrivialUnsatisfiable);
 		}
@@ -94,7 +92,7 @@ where
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		for (i, &var) in self.vars.iter().enumerate() {
 			if let Some(val) = actions.get_int_val(var) {
-				let reason = actions.get_int_lit(var, LitMeaning::Eq(val));
+				let reason = actions.get_int_lit(var, IntLitMeaning::Eq(val));
 				for (j, &other) in self.vars.iter().enumerate() {
 					let other_val = actions.get_int_val(other);
 					if j != i && (other_val.is_none() || other_val.unwrap() == val) {
@@ -116,8 +114,11 @@ mod tests {
 
 	use crate::{
 		constraints::all_different_int::AllDifferentIntValue,
-		solver::int_var::{EncodingType, IntVar},
-		IntVal, IntView, SolveResult, Solver,
+		solver::{
+			int_var::{EncodingType, IntVar},
+			IntView, SolveResult, Solver,
+		},
+		IntVal,
 	};
 
 	#[test]

@@ -8,23 +8,19 @@ use pindakaas::{AsDynClauseDatabase, ClauseDatabase};
 use crate::{
 	branchers::BoxedBrancher,
 	constraints::{BoxedPropagator, Conflict, LazyReason, ReasonBuilder},
-	model::{self, int::IntExpr},
+	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond,
-		engine::PropRef,
-		int_var::IntVarRef,
-		queue::PriorityLevel,
-		trail::TrailedInt,
-		view::{BoolView, BoolViewInner, IntViewInner},
+		activation_list::IntPropCond, engine::PropRef, int_var::IntVarRef, queue::PriorityLevel,
+		trail::TrailedInt, BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, View,
 	},
-	IntSetVal, IntVal, IntView, LitMeaning, Model, ReformulationError, SolverView,
+	BoolDecision, IntDecision, IntSetVal, IntVal, Model,
 };
 
 /// Actions that can be performed during the initialization of branchers.
 pub trait BrancherInitActions: DecisionActions {
 	/// Ensure that any relevant decision variable are marked internally as a
 	/// decidable variable.
-	fn ensure_decidable(&mut self, view: SolverView);
+	fn ensure_decidable(&mut self, view: View);
 
 	/// Create a new trailed integer value with the given initial value.
 	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt;
@@ -39,18 +35,18 @@ pub trait BrancherInitActions: DecisionActions {
 pub trait ConstraintInitActions {
 	/// Schedule the simplify method of the calling constraint when the given
 	/// boolean expression changes.
-	fn simplify_on_change_bool(&mut self, var: model::bool::BoolView);
+	fn simplify_on_change_bool(&mut self, var: BoolDecision);
 
 	/// Schedule the simplify method of the calling constraint when the given
 	/// integer expression changes.
-	fn simplify_on_change_int(&mut self, var: IntExpr);
+	fn simplify_on_change_int(&mut self, var: IntDecision);
 }
 
 /// Actions that can be performed by a [`crate::branchers::Brancher`] when
 /// making search decisions.
 pub trait DecisionActions: InspectionActions {
 	/// Get (or create) a literal for the given integer view with the given meaning.
-	fn get_int_lit(&mut self, var: IntView, mut meaning: LitMeaning) -> BoolView {
+	fn get_int_lit(&mut self, var: IntView, mut meaning: IntLitMeaning) -> BoolView {
 		{
 			if let IntViewInner::Linear { transformer, .. }
 			| IntViewInner::Bool { transformer, .. } = var.0
@@ -66,25 +62,25 @@ pub trait DecisionActions: InspectionActions {
 					self.get_intref_lit(var, meaning)
 				}
 				IntViewInner::Const(c) => BoolView(BoolViewInner::Const(match meaning {
-					LitMeaning::Eq(i) => c == i,
-					LitMeaning::NotEq(i) => c != i,
-					LitMeaning::GreaterEq(i) => c >= i,
-					LitMeaning::Less(i) => c < i,
+					IntLitMeaning::Eq(i) => c == i,
+					IntLitMeaning::NotEq(i) => c != i,
+					IntLitMeaning::GreaterEq(i) => c >= i,
+					IntLitMeaning::Less(i) => c < i,
 				})),
 				IntViewInner::Bool { lit, .. } => {
 					let (meaning, negated) =
-						if matches!(meaning, LitMeaning::NotEq(_) | LitMeaning::Less(_)) {
+						if matches!(meaning, IntLitMeaning::NotEq(_) | IntLitMeaning::Less(_)) {
 							(!meaning, true)
 						} else {
 							(meaning, false)
 						};
 					let bv = BoolView(match meaning {
-						LitMeaning::Eq(0) => BoolViewInner::Lit(!lit),
-						LitMeaning::Eq(1) => BoolViewInner::Lit(lit),
-						LitMeaning::Eq(_) => BoolViewInner::Const(false),
-						LitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
-						LitMeaning::GreaterEq(i) if i > 1 => BoolViewInner::Const(false),
-						LitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
+						IntLitMeaning::Eq(0) => BoolViewInner::Lit(!lit),
+						IntLitMeaning::Eq(1) => BoolViewInner::Lit(lit),
+						IntLitMeaning::Eq(_) => BoolViewInner::Const(false),
+						IntLitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
+						IntLitMeaning::GreaterEq(i) if i > 1 => BoolViewInner::Const(false),
+						IntLitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
 						_ => unreachable!(),
 					});
 					if negated {
@@ -98,7 +94,7 @@ pub trait DecisionActions: InspectionActions {
 	}
 
 	/// Get (or create) a literal for the given referenced integer variable with the given meaning.
-	fn get_intref_lit(&mut self, var: IntVarRef, meaning: LitMeaning) -> BoolView;
+	fn get_intref_lit(&mut self, var: IntVarRef, meaning: IntLitMeaning) -> BoolView;
 
 	/// Returns the number of conflicts up to this point in the search process.
 	fn get_num_conflicts(&self) -> u64;
@@ -109,12 +105,16 @@ pub trait DecisionActions: InspectionActions {
 pub trait ExplanationActions: InspectionActions {
 	/// Get a Boolean view that represents the given meaning (that is currently
 	/// `true`) on the integer view, if it already exists.
-	fn try_int_lit(&self, var: IntView, meaning: LitMeaning) -> Option<BoolView>;
+	fn try_int_lit(&self, var: IntView, meaning: IntLitMeaning) -> Option<BoolView>;
 
 	/// Get a Boolean view that represents the given meaning (that is currently
 	/// `true`) on the integer view, or a relaxation if the literal does not yet
 	/// exist.
-	fn get_int_lit_relaxed(&mut self, var: IntView, meaning: LitMeaning) -> (BoolView, LitMeaning);
+	fn get_int_lit_relaxed(
+		&mut self,
+		var: IntView,
+		meaning: IntLitMeaning,
+	) -> (BoolView, IntLitMeaning);
 
 	/// Get the Boolean view that represents the current assignment of the integer
 	/// view, or `None` if the integer view is not assigned.
@@ -235,11 +235,11 @@ pub trait PropagatorInitActions: AsDynClauseDatabase + ClauseDatabase + Decision
 pub trait ReformulationActions: PropagatorInitActions {
 	/// Lookup the solver [`BoolView`] to which the given model
 	/// [`model::bool::BoolView`] maps.
-	fn get_solver_bool(&mut self, bv: model::bool::BoolView) -> BoolView;
+	fn get_solver_bool(&mut self, bv: BoolDecision) -> BoolView;
 
 	/// Lookup the solver [`IntExpr`] to which the given model
 	/// [`model::int::IntView`] maps.
-	fn get_solver_int(&mut self, iv: IntExpr) -> IntView;
+	fn get_solver_int(&mut self, iv: IntDecision) -> IntView;
 
 	/// Create a new Boolean decision variable to use in the encoding.
 	fn new_bool_var(&mut self) -> BoolView;
@@ -254,25 +254,25 @@ pub trait SimplificationActions {
 		Model: AddAssign<C>;
 
 	/// Check whether a given integer view can take a given value.
-	fn check_int_in_domain(&self, var: IntExpr, val: IntVal) -> bool;
+	fn check_int_in_domain(&self, var: IntDecision, val: IntVal) -> bool;
 
 	/// Get the current value of a [`BoolView`], if it has been assigned.
-	fn get_bool_val(&self, bv: model::bool::BoolView) -> Option<bool>;
+	fn get_bool_val(&self, bv: BoolDecision) -> Option<bool>;
 
 	/// Get the minimum value that an integer view is guaranteed to take.
-	fn get_int_lower_bound(&self, var: IntExpr) -> IntVal;
+	fn get_int_lower_bound(&self, var: IntDecision) -> IntVal;
 
 	/// Get the maximum value that an integer view is guaranteed to take.
-	fn get_int_upper_bound(&self, var: IntExpr) -> IntVal;
+	fn get_int_upper_bound(&self, var: IntDecision) -> IntVal;
 
 	/// Convenience method to get both the lower and upper bounds of an integer
 	/// view.
-	fn get_int_bounds(&self, var: IntExpr) -> (IntVal, IntVal) {
+	fn get_int_bounds(&self, var: IntDecision) -> (IntVal, IntVal) {
 		(self.get_int_lower_bound(var), self.get_int_upper_bound(var))
 	}
 
 	/// Get the current value of an integer view, if it has been assigned.
-	fn get_int_val(&self, var: IntExpr) -> Option<IntVal> {
+	fn get_int_val(&self, var: IntDecision) -> Option<IntVal> {
 		let (lb, ub) = self.get_int_bounds(var);
 		if lb == ub {
 			Some(lb)
@@ -285,35 +285,43 @@ pub trait SimplificationActions {
 	///
 	/// Note that it is possible to enforce that a boolean view is `false` by
 	/// negating the view, i.e. `!bv`.
-	fn set_bool(&mut self, bv: model::bool::BoolView) -> Result<(), ReformulationError>;
+	fn set_bool(&mut self, bv: BoolDecision) -> Result<(), ReformulationError>;
 
 	/// Enforce that the given integer expression takes a value in in the given
 	/// set.
 	fn set_int_in_set(
 		&mut self,
-		var: IntExpr,
+		var: IntDecision,
 		values: &IntSetVal,
 	) -> Result<(), ReformulationError>;
 
 	/// Enforce that a an integer view takes a value that is greater or equal to
 	/// `val`.
-	fn set_int_lower_bound(&mut self, var: IntExpr, val: IntVal) -> Result<(), ReformulationError>;
+	fn set_int_lower_bound(
+		&mut self,
+		var: IntDecision,
+		val: IntVal,
+	) -> Result<(), ReformulationError>;
 
 	/// Enforce that a an integer view takes a value that is less or equal to
 	/// `val`.
-	fn set_int_upper_bound(&mut self, var: IntExpr, val: IntVal) -> Result<(), ReformulationError>;
+	fn set_int_upper_bound(
+		&mut self,
+		var: IntDecision,
+		val: IntVal,
+	) -> Result<(), ReformulationError>;
 
 	/// Enforce that a an integer view takes a value `val`.
-	fn set_int_val(&mut self, var: IntExpr, val: IntVal) -> Result<(), ReformulationError>;
+	fn set_int_val(&mut self, var: IntDecision, val: IntVal) -> Result<(), ReformulationError>;
 
 	/// Enforce that a an integer view cannot take a value `val`.
-	fn set_int_not_eq(&mut self, var: IntExpr, val: IntVal) -> Result<(), ReformulationError>;
+	fn set_int_not_eq(&mut self, var: IntDecision, val: IntVal) -> Result<(), ReformulationError>;
 
 	/// Enforce that a given integer expression cannot take any of the values in
 	/// the given set.
 	fn set_int_not_in_set(
 		&mut self,
-		var: IntExpr,
+		var: IntDecision,
 		values: &IntSetVal,
 	) -> Result<(), ReformulationError>;
 }

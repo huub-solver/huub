@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use pindakaas::{Var as RawVar, VarRange};
 
-use crate::{solver::int_var::IntVarRef, LitMeaning};
+use crate::{solver::int_var::IntVarRef, IntLitMeaning};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 /// A mapping of Boolean variables to integer variables of which they represent
@@ -15,14 +15,14 @@ pub(crate) struct BoolToIntMap {
 	eager: Vec<(VarRange, IntVarRef)>,
 	/// The mapping of lazily created Boolean variables to the integer variables
 	/// and their meanings.
-	lazy: HashMap<RawVar, (IntVarRef, LitMeaning)>,
+	lazy: HashMap<RawVar, (IntVarRef, IntLitMeaning)>,
 }
 
 impl BoolToIntMap {
 	/// Return the integer variable the given Boolean variable represents a
 	/// condition for, if any. If the Boolean variable was lazily created, then
 	/// also return the [`LitMeaning`] of the literal.
-	pub(crate) fn get(&self, var: RawVar) -> Option<(IntVarRef, Option<LitMeaning>)> {
+	pub(crate) fn get(&self, var: RawVar) -> Option<(IntVarRef, Option<IntLitMeaning>)> {
 		let is_eager = self
 			.eager
 			.last()
@@ -62,7 +62,7 @@ impl BoolToIntMap {
 
 	/// Insert a mapping of a lazily created Boolean variable to the integer
 	/// variable and the meaning of the literal on the integer variable.
-	pub(crate) fn insert_lazy(&mut self, var: RawVar, iv: IntVarRef, lit: LitMeaning) {
+	pub(crate) fn insert_lazy(&mut self, var: RawVar, iv: IntVarRef, lit: IntLitMeaning) {
 		let x = self.lazy.insert(var, (iv, lit));
 		debug_assert_eq!(x, None, "lazy literal already exists");
 	}

@@ -8,9 +8,9 @@ use crate::{
 		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
 	},
 	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
-	model::int::IntExpr,
-	solver::{activation_list::IntPropCond, queue::PriorityLevel},
-	IntView, LitMeaning, ReformulationError,
+	reformulate::ReformulationError,
+	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView},
+	IntDecision,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -20,9 +20,9 @@ use crate::{
 /// absolute value of the first integer decision variable.
 pub struct IntAbs {
 	/// The integer decision variable whose absolute value is being taken
-	pub(crate) origin: IntExpr,
+	pub(crate) origin: IntDecision,
 	/// The integer decision variable representing the absolute value
-	pub(crate) abs: IntExpr,
+	pub(crate) abs: IntDecision,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -96,7 +96,7 @@ where
 			actions.set_int_upper_bound(self.abs, -lb, |a: &mut P| {
 				vec![
 					a.get_int_lower_bound_lit(self.origin),
-					a.get_int_lit(self.origin, LitMeaning::Less(0)),
+					a.get_int_lit(self.origin, IntLitMeaning::Less(0)),
 				]
 			})?;
 			actions.set_int_lower_bound(self.abs, -ub, |a: &mut P| {
@@ -110,7 +110,7 @@ where
 			actions.set_int_upper_bound(self.abs, ub, |a: &mut P| {
 				vec![
 					a.get_int_upper_bound_lit(self.origin),
-					a.get_int_lit(self.origin, LitMeaning::GreaterEq(0)),
+					a.get_int_lit(self.origin, IntLitMeaning::GreaterEq(0)),
 				]
 			})?;
 		} else {
@@ -119,8 +119,8 @@ where
 			let abs_max = ub.max(-lb);
 			actions.set_int_upper_bound(self.abs, abs_max, |a: &mut P| {
 				vec![
-					a.get_int_lit(self.origin, LitMeaning::GreaterEq(-abs_max)),
-					a.get_int_lit(self.origin, LitMeaning::Less(abs_max + 1)),
+					a.get_int_lit(self.origin, IntLitMeaning::GreaterEq(-abs_max)),
+					a.get_int_lit(self.origin, IntLitMeaning::Less(abs_max + 1)),
 				]
 			})?;
 		}

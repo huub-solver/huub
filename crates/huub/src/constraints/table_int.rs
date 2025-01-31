@@ -8,9 +8,9 @@ use pindakaas::ClauseDatabaseTools;
 use crate::{
 	actions::{ReformulationActions, SimplificationActions},
 	constraints::{Constraint, SimplificationStatus},
-	model::int::IntExpr,
-	solver::view::BoolView,
-	IntVal, LitMeaning, ReformulationError,
+	reformulate::ReformulationError,
+	solver::{BoolView, IntLitMeaning},
+	IntDecision, IntVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -20,7 +20,7 @@ use crate::{
 /// values according to one of the given lists of integer values.
 pub struct TableInt {
 	/// List of variables that must take the values of a row in the table.
-	pub(crate) vars: Vec<IntExpr>,
+	pub(crate) vars: Vec<IntDecision>,
 	/// The table of possible values for the variables.
 	pub(crate) table: Vec<Vec<IntVal>>,
 }
@@ -92,7 +92,10 @@ impl<S: SimplificationActions> Constraint<S> for TableInt {
 			for (i, tup) in self.table.iter().enumerate() {
 				assert!(tup.len() == vars.len());
 				for (j, var) in vars.iter().enumerate() {
-					let clause = [!selector[i], slv.get_int_lit(*var, LitMeaning::Eq(tup[j]))];
+					let clause = [
+						!selector[i],
+						slv.get_int_lit(*var, IntLitMeaning::Eq(tup[j])),
+					];
 					slv.add_clause(clause)?;
 				}
 			}
@@ -115,14 +118,14 @@ impl<S: SimplificationActions> Constraint<S> for TableInt {
 					// Special case where we can use the values of the other variables as
 					// the selection variables directly.
 					support_clauses[k as usize]
-						.push(slv.get_int_lit(vars[1 - j], LitMeaning::Eq(tup[1 - j])));
+						.push(slv.get_int_lit(vars[1 - j], IntLitMeaning::Eq(tup[1 - j])));
 				} else {
 					support_clauses[k as usize].push(selector[i]);
 				}
 			}
 			for (i, mut clause) in support_clauses.into_iter().enumerate() {
 				if slv.check_int_in_domain(*var, lb + i as IntVal) {
-					clause.push(slv.get_int_lit(vars[j], LitMeaning::NotEq(lb + i as IntVal)));
+					clause.push(slv.get_int_lit(vars[j], IntLitMeaning::NotEq(lb + i as IntVal)));
 					slv.add_clause(clause)?;
 				}
 			}
@@ -137,7 +140,7 @@ mod tests {
 	use expect_test::expect;
 	use itertools::Itertools;
 
-	use crate::{model::reformulate::ModelView, table_int, InitConfig, Model};
+	use crate::{reformulate::InitConfig, table_int, Decision, Model};
 
 	#[test]
 	fn test_binary_table_sat() {
@@ -155,13 +158,13 @@ mod tests {
 			vec![5, 2],
 			vec![5, 3],
 		];
-		prb += table_int(vec![vars[0].into(), vars[1].into()], table.clone());
-		prb += table_int(vec![vars[1].into(), vars[2].into()], table.clone());
+		prb += table_int(vec![vars[0], vars[1]], table.clone());
+		prb += table_int(vec![vars[1], vars[2]], table.clone());
 
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
 		let vars = vars
 			.into_iter()
-			.map(|x| map.get(&mut slv, &ModelView::Int(x.into())))
+			.map(|x| map.get(&mut slv, &Decision::Int(x)))
 			.collect_vec();
 		slv.expect_solutions(
 			&vars,
@@ -215,7 +218,7 @@ mod tests {
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
 		let vars = vars
 			.into_iter()
-			.map(|x| map.get(&mut slv, &ModelView::Int(x.into())))
+			.map(|x| map.get(&mut slv, &Decision::Int(x)))
 			.collect_vec();
 		slv.expect_solutions(
 			&vars,

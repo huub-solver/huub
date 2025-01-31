@@ -6,13 +6,11 @@ use pindakaas::Lit as RawLit;
 
 use crate::{
 	actions::{BrancherInitActions, DecisionActions},
-	model::branching::{ValueSelection, VariableSelection},
 	solver::{
-		solving_context::SolvingContext,
-		trail::TrailedInt,
-		view::{BoolView, BoolViewInner, IntView, IntViewInner},
+		solving_context::SolvingContext, trail::TrailedInt, BoolView, BoolViewInner, IntLitMeaning,
+		IntView, IntViewInner, View,
 	},
-	LitMeaning, SolverView,
+	ValueSelection, VariableSelection,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -108,7 +106,7 @@ impl BoolBrancher {
 			.into_iter()
 			.filter_map(|b| match b.0 {
 				BoolViewInner::Lit(l) => {
-					solver.ensure_decidable(SolverView::Bool(l.into()));
+					solver.ensure_decidable(View::Bool(b));
 					Some(l)
 				}
 				BoolViewInner::Const(_) => None,
@@ -146,7 +144,10 @@ impl<D: DecisionActions> Brancher<D> for BoolBrancher {
 
 		let mut loc = None;
 		for (i, &var) in self.vars.iter().enumerate().skip(begin) {
-			if actions.get_bool_val(var.into()).is_none() {
+			if actions
+				.get_bool_val(BoolView(BoolViewInner::Lit(var)))
+				.is_none()
+			{
 				loc = Some(i);
 				break;
 			}
@@ -267,19 +268,19 @@ impl<D: DecisionActions> Brancher<D> for IntBrancher {
 		let view = match self.val_sel {
 			ValueSelection::IndomainMin => actions.get_int_lit(
 				next_var,
-				LitMeaning::Less(actions.get_int_lower_bound(next_var) + 1),
+				IntLitMeaning::Less(actions.get_int_lower_bound(next_var) + 1),
 			),
 			ValueSelection::IndomainMax => actions.get_int_lit(
 				next_var,
-				LitMeaning::GreaterEq(actions.get_int_upper_bound(next_var)),
+				IntLitMeaning::GreaterEq(actions.get_int_upper_bound(next_var)),
 			),
 			ValueSelection::OutdomainMin => actions.get_int_lit(
 				next_var,
-				LitMeaning::GreaterEq(actions.get_int_lower_bound(next_var) + 1),
+				IntLitMeaning::GreaterEq(actions.get_int_lower_bound(next_var) + 1),
 			),
 			ValueSelection::OutdomainMax => actions.get_int_lit(
 				next_var,
-				LitMeaning::Less(actions.get_int_upper_bound(next_var)),
+				IntLitMeaning::Less(actions.get_int_upper_bound(next_var)),
 			),
 		};
 
@@ -300,7 +301,7 @@ impl WarmStartBrancher {
 		for d in decisions {
 			match d.0 {
 				BoolViewInner::Lit(l) => {
-					solver.ensure_decidable(SolverView::Bool(l.into()));
+					solver.ensure_decidable(View::Bool(d));
 					filtered_decision.push(l);
 				}
 				// Warm starts decision conflict here, we don't have to add this or any
@@ -327,7 +328,7 @@ impl<D: DecisionActions> Brancher<D> for WarmStartBrancher {
 			return Decision::Consumed;
 		}
 		while let Some(lit) = self.decisions.pop() {
-			match actions.get_bool_val(lit.into()) {
+			match actions.get_bool_val(BoolView(BoolViewInner::Lit(lit))) {
 				Some(true) => {}
 				Some(false) => return Decision::Consumed,
 				None => return Decision::Select(lit),

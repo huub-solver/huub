@@ -2,17 +2,17 @@
 //! the result of exponentiation of two integer variables is equal to a third
 //! integer variable.
 
+use pindakaas::ClauseDatabaseTools;
+
 use crate::{
 	actions::{
 		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
 	},
 	constraints::{CachedReason, Conflict, Constraint, PropagationActions, Propagator},
-	model::int::IntExpr,
-	solver::{activation_list::IntPropCond, queue::PriorityLevel},
-	IntVal, IntView, LitMeaning, ReformulationError,
+	reformulate::ReformulationError,
+	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView},
+	IntDecision, IntVal,
 };
-
-use pindakaas::ClauseDatabaseTools;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// Representation of the `int_pow` constraint within a model.
@@ -26,11 +26,11 @@ use pindakaas::ClauseDatabaseTools;
 /// (semi-)division by zero.
 pub struct IntPow {
 	/// The base in the exponentiation
-	pub(crate) base: IntExpr,
+	pub(crate) base: IntDecision,
 	/// The exponent in the exponentiation
-	pub(crate) exponent: IntExpr,
+	pub(crate) exponent: IntDecision,
 	/// The result of exponentiation
-	pub(crate) result: IntExpr,
+	pub(crate) result: IntDecision,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -107,8 +107,8 @@ impl IntPowBounds {
 		if exp_lb < 0 || (base_lb..=base_ub).contains(&0) {
 			// (exp < 0) -> (base != 0)
 			let clause = [
-				solver.get_int_lit(exponent, LitMeaning::GreaterEq(0)),
-				solver.get_int_lit(base, LitMeaning::NotEq(0)),
+				solver.get_int_lit(exponent, IntLitMeaning::GreaterEq(0)),
+				solver.get_int_lit(base, IntLitMeaning::NotEq(0)),
 			];
 			solver.add_clause(clause)?;
 		}
@@ -117,8 +117,8 @@ impl IntPowBounds {
 		if (exp_lb..=exp_ub).contains(&0) {
 			// (exp == 0) -> (res == 1)
 			let clause = [
-				solver.get_int_lit(exponent, LitMeaning::NotEq(0)),
-				solver.get_int_lit(result, LitMeaning::Eq(1)),
+				solver.get_int_lit(exponent, IntLitMeaning::NotEq(0)),
+				solver.get_int_lit(result, IntLitMeaning::Eq(1)),
 			];
 			solver.add_clause(clause)?;
 		}
@@ -217,9 +217,9 @@ impl IntPowBounds {
 
 		let (exp_lb, exp_ub) = actions.get_int_bounds(self.exponent);
 		let mut reason = CachedReason::new(|actions: &mut P| {
-			let res_lb_lit = actions.get_int_lit(self.base, LitMeaning::GreaterEq(1));
+			let res_lb_lit = actions.get_int_lit(self.base, IntLitMeaning::GreaterEq(1));
 			let res_ub_lit = actions.get_int_upper_bound_lit(self.result);
-			let base_lb_lit = actions.get_int_lit(self.base, LitMeaning::GreaterEq(1));
+			let base_lb_lit = actions.get_int_lit(self.base, IntLitMeaning::GreaterEq(1));
 			let base_ub_lit = actions.get_int_upper_bound_lit(self.base);
 			vec![res_lb_lit, res_ub_lit, base_lb_lit, base_ub_lit]
 		});
@@ -351,8 +351,10 @@ mod tests {
 
 	use crate::{
 		constraints::int_pow::IntPowBounds,
-		solver::int_var::{EncodingType, IntVar},
-		Solver,
+		solver::{
+			int_var::{EncodingType, IntVar},
+			Solver,
+		},
 	};
 
 	#[test]

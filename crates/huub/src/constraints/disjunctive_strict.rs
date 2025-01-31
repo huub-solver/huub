@@ -13,14 +13,12 @@ use crate::{
 	constraints::{
 		Conflict, Constraint, PropagationActions, Propagator, ReasonBuilder, SimplificationStatus,
 	},
-	model::int::IntExpr,
+	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond,
-		queue::PriorityLevel,
-		trail::TrailedInt,
-		view::{BoolViewInner, IntView},
+		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, BoolViewInner,
+		IntLitMeaning, IntView,
 	},
-	Conjunction, IntVal, LitMeaning, ReformulationError,
+	Conjunction, IntDecision, IntVal,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -31,7 +29,7 @@ use crate::{
 /// representing the durations of tasks, the tasks do not overlap in time.
 pub struct DisjunctiveStrict {
 	/// Start time variables of each task.
-	pub(crate) start_times: Vec<IntExpr>,
+	pub(crate) start_times: Vec<IntDecision>,
 	/// Durations of each task.
 	pub(crate) durations: Vec<IntVal>,
 }
@@ -190,7 +188,7 @@ impl DisjunctiveStrictEdgeFinding {
 				.flat_map(|&i| {
 					let (bv, _) = actions.get_int_lit_relaxed(
 						self.start_times[i],
-						LitMeaning::Less((time_bound - slack) as IntVal - self.durations[i]),
+						IntLitMeaning::Less((time_bound - slack) as IntVal - self.durations[i]),
 					);
 					[actions.get_int_lower_bound_lit(self.start_times[i]), bv]
 				})
@@ -264,7 +262,7 @@ where
 		// [start(t) >= earliest_start] /\ forall (t' in O) [start(t') >= earliest_start] /\ forall (t' in O) [end(t') <= latest_completion]
 		let (bv, _) = actions.get_int_lit_relaxed(
 			self.start_times[task_no],
-			LitMeaning::GreaterEq(earliest_start),
+			IntLitMeaning::GreaterEq(earliest_start),
 		);
 		clause.push(bv);
 		let mut energy = latest_completion - earliest_start - self.durations[task_no];
@@ -276,7 +274,7 @@ where
 				clause.push(actions.get_int_lower_bound_lit(self.start_times[i]));
 				let (bv, _) = actions.get_int_lit_relaxed(
 					self.start_times[i],
-					LitMeaning::Less(latest_completion - self.durations[i] + 1),
+					IntLitMeaning::Less(latest_completion - self.durations[i] + 1),
 				);
 				clause.push(bv);
 				energy -= self.durations[i];

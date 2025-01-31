@@ -4,18 +4,18 @@
 
 use std::mem;
 
+use pindakaas::ClauseDatabaseTools;
+
 use crate::{
 	actions::{
 		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
 	},
 	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
 	helpers::div_ceil,
-	model::int::IntExpr,
-	solver::{activation_list::IntPropCond, queue::PriorityLevel},
-	IntView, LitMeaning, NonZeroIntVal, ReformulationError,
+	reformulate::ReformulationError,
+	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView},
+	IntDecision, NonZeroIntVal,
 };
-
-use pindakaas::ClauseDatabaseTools;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// Representation of the `int_div` constraint within a model.
@@ -28,11 +28,11 @@ use pindakaas::ClauseDatabaseTools;
 /// towards zero.
 pub struct IntDiv {
 	/// The numerator of the division
-	pub(crate) numerator: IntExpr,
+	pub(crate) numerator: IntDecision,
 	/// The denominator of the division
-	pub(crate) denominator: IntExpr,
+	pub(crate) denominator: IntDecision,
 	/// Result of the division
-	pub(crate) result: IntExpr,
+	pub(crate) result: IntDecision,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -92,12 +92,12 @@ impl IntDivBounds {
 			|| solver.get_int_lower_bound(denominator) < 0
 			|| solver.get_int_lower_bound(result) < 0
 		{
-			let num_pos = solver.get_int_lit(numerator, LitMeaning::GreaterEq(0));
-			let num_neg = solver.get_int_lit(numerator, LitMeaning::Less(1));
-			let denom_pos = solver.get_int_lit(denominator, LitMeaning::GreaterEq(0));
+			let num_pos = solver.get_int_lit(numerator, IntLitMeaning::GreaterEq(0));
+			let num_neg = solver.get_int_lit(numerator, IntLitMeaning::Less(1));
+			let denom_pos = solver.get_int_lit(denominator, IntLitMeaning::GreaterEq(0));
 			let denom_neg = !denom_pos;
-			let res_pos = solver.get_int_lit(result, LitMeaning::GreaterEq(0));
-			let res_neg = solver.get_int_lit(result, LitMeaning::Less(1));
+			let res_pos = solver.get_int_lit(result, IntLitMeaning::GreaterEq(0));
+			let res_neg = solver.get_int_lit(result, IntLitMeaning::Less(1));
 
 			// num >= 0 /\ denom > 0 => res >= 0
 			solver.add_clause([!num_pos, !denom_pos, res_pos])?;
@@ -129,7 +129,7 @@ impl IntDivBounds {
 			actions.set_int_lower_bound(result, new_res_lb, |a: &mut P| {
 				[
 					a.get_int_lower_bound_lit(numerator),
-					a.get_int_lit(denominator, LitMeaning::GreaterEq(1)),
+					a.get_int_lit(denominator, IntLitMeaning::GreaterEq(1)),
 					a.get_int_upper_bound_lit(denominator),
 				]
 			})?;
@@ -151,9 +151,9 @@ impl IntDivBounds {
 				actions.set_int_upper_bound(denominator, new_denom_ub, |a: &mut P| {
 					[
 						a.get_int_upper_bound_lit(numerator),
-						a.get_int_lit(numerator, LitMeaning::GreaterEq(0)),
+						a.get_int_lit(numerator, IntLitMeaning::GreaterEq(0)),
 						a.get_int_lower_bound_lit(result),
-						a.get_int_lit(denominator, LitMeaning::GreaterEq(1)),
+						a.get_int_lit(denominator, IntLitMeaning::GreaterEq(1)),
 					]
 				})?;
 			}
@@ -166,8 +166,8 @@ impl IntDivBounds {
 					[
 						a.get_int_lower_bound_lit(numerator),
 						a.get_int_upper_bound_lit(result),
-						a.get_int_lit(result, LitMeaning::GreaterEq(0)),
-						a.get_int_lit(denominator, LitMeaning::GreaterEq(1)),
+						a.get_int_lit(result, IntLitMeaning::GreaterEq(0)),
+						a.get_int_lit(denominator, IntLitMeaning::GreaterEq(1)),
 					]
 				})?;
 			}
@@ -204,7 +204,7 @@ impl IntDivBounds {
 		if new_num_ub < num_ub {
 			actions.set_int_upper_bound(numerator, new_num_ub, |a: &mut P| {
 				[
-					a.get_int_lit(denominator, LitMeaning::GreaterEq(1)),
+					a.get_int_lit(denominator, IntLitMeaning::GreaterEq(1)),
 					a.get_int_upper_bound_lit(denominator),
 					a.get_int_upper_bound_lit(result),
 				]
@@ -280,8 +280,10 @@ mod tests {
 
 	use crate::{
 		constraints::int_div::IntDivBounds,
-		solver::int_var::{EncodingType, IntVar},
-		Solver,
+		solver::{
+			int_var::{EncodingType, IntVar},
+			Solver,
+		},
 	};
 
 	#[test]

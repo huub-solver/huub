@@ -8,8 +8,8 @@ use pindakaas::propositional_logic::Formula;
 use crate::{
 	actions::{ConstraintInitActions, ReformulationActions, SimplificationActions},
 	constraints::{Constraint, SimplificationStatus},
-	model::{bool::BoolView, int::IntExpr},
-	IntSetVal, ReformulationError,
+	reformulate::ReformulationError,
+	BoolDecision, IntDecision, IntSetVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -19,12 +19,12 @@ use crate::{
 /// `true` if-and-only-if an integer variable is in a given set.
 pub struct SetInReif {
 	/// The integer decision variable monitored.
-	pub(crate) var: IntExpr,
+	pub(crate) var: IntDecision,
 	/// The set of considered values for the integer decision variable.
 	pub(crate) set: IntSetVal,
 	/// The Boolean variable that indicates if the integer decision variable is in
 	/// the set.
-	pub(crate) reif: BoolView,
+	pub(crate) reif: BoolDecision,
 }
 
 impl<S: SimplificationActions> Constraint<S> for SetInReif {
@@ -50,7 +50,7 @@ impl<S: SimplificationActions> Constraint<S> for SetInReif {
 		if self.set.iter().len() == 1 {
 			let lb = *self.set.lower_bound().unwrap();
 			let ub = *self.set.upper_bound().unwrap();
-			<Formula<BoolView> as Constraint<S>>::to_solver(
+			<Formula<BoolDecision> as Constraint<S>>::to_solver(
 				&Formula::Equiv(vec![
 					Formula::And(vec![self.var.geq(lb).into(), self.var.leq(ub).into()]),
 					self.reif.into(),
@@ -64,7 +64,7 @@ impl<S: SimplificationActions> Constraint<S> for SetInReif {
 				.flatten()
 				.map(|v| self.var.eq(v).into())
 				.collect();
-			<Formula<BoolView> as Constraint<S>>::to_solver(
+			<Formula<BoolDecision> as Constraint<S>>::to_solver(
 				&Formula::Equiv(vec![self.reif.into(), Formula::Or(eq_lits)]),
 				slv,
 			)

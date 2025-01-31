@@ -11,7 +11,7 @@ use tracing::trace;
 
 use crate::{
 	actions::TrailingActions,
-	solver::view::{BoolView, BoolViewInner},
+	solver::{BoolView, BoolViewInner},
 	IntVal,
 };
 
@@ -418,7 +418,7 @@ mod tests {
 		.map(|i| (trail.track_int(0), i))
 		.collect();
 
-		for (l, (i, v)) in lits.clone().zip(int_events.iter()) {
+		for (l, (i, v)) in lits.zip(int_events.iter()) {
 			trail.push_trail(TrailEvent::SatAssignment(l));
 			let _ = trail.assign_lit(if usize::from(*i) % 2 == 0 {
 				l.into()

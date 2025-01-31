@@ -15,26 +15,18 @@ use flatzinc_serde::{
 	Literal, Type,
 };
 use itertools::Itertools;
-use pindakaas::{propositional_logic::Formula, solver::propagation::PropagatingSolver, Cnf};
+use pindakaas::propositional_logic::Formula;
 use rangelist::{IntervalIterator, RangeList};
 use thiserror::Error;
 use tracing::warn;
 
 use crate::{
-	actions::SimplificationActions,
-	all_different_int, array_int_element, array_int_maximum, array_int_minimum,
-	array_var_bool_element, array_var_int_element,
-	constraints::table_int::TableInt,
-	disjunctive_strict, int_abs, int_div, int_pow, int_times,
-	model::{
-		bool::BoolView,
-		branching::{Branching, ValueSelection, VariableSelection},
-		int::IntExpr,
-		reformulate::{ModelView, ReformulationError},
-	},
-	set_in_reif,
-	solver::engine::Engine,
-	table_int, InitConfig, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal, Solver, SolverView,
+	actions::SimplificationActions, all_different_int, array_int_element, array_int_maximum,
+	array_int_minimum, array_var_bool_element, array_var_int_element,
+	constraints::table_int::TableInt, disjunctive_strict, int_abs, int_div, int_pow, int_times,
+	reformulate::ReformulationError, set_in_reif, table_int, BoolDecision, Branching, Decision,
+	IntDecision, IntDecisionInner, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal,
+	ValueSelection, VariableSelection,
 };
 
 #[derive(Error, Debug)]
@@ -86,11 +78,11 @@ pub struct FlatZincStatistics {
 }
 
 /// Builder for creating a model from a FlatZinc instance
-struct FznModelBuilder<'a, S: Eq + Hash + Ord> {
+pub(crate) struct FznModelBuilder<'a, S: Eq + Hash + Ord> {
 	/// The FlatZinc instance to build the model from
 	fzn: &'a FlatZinc<S>,
 	/// A mapping from FlatZinc identifiers to model views
-	map: HashMap<S, ModelView>,
+	map: HashMap<S, Decision>,
 	/// The incumbent model
 	prb: Model,
 	/// Flags indicating which constraints have been processed
@@ -160,7 +152,7 @@ where
 	fn ann_to_branchings(
 		&mut self,
 		c: &'a AnnotationCall<S>,
-	) -> Result<(Vec<BoolView>, Vec<Branching>), FlatZincError> {
+	) -> Result<(Vec<BoolDecision>, Vec<Branching>), FlatZincError> {
 		match c.id.deref() {
 			"bool_search" => {
 				if let [vars, var_sel, val_sel, _] = c.args.as_slice() {
@@ -374,7 +366,7 @@ where
 	/// Extract a Boolean decision variable from the an [`Argument`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
 	/// returned if the argument was not a Boolean decision variable.
-	fn arg_bool(&mut self, arg: &Argument<S>) -> Result<BoolView, FlatZincError> {
+	fn arg_bool(&mut self, arg: &Argument<S>) -> Result<BoolDecision, FlatZincError> {
 		match arg {
 			Argument::Literal(l) => self.lit_bool(l),
 			_ => Err(FlatZincError::InvalidArgumentType {
@@ -402,7 +394,7 @@ where
 	/// Extract a integer decision variable from the an [`Argument`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
 	/// returned if the argument was not a integer decision variable.
-	fn arg_int(&mut self, arg: &Argument<S>) -> Result<IntExpr, FlatZincError> {
+	fn arg_int(&mut self, arg: &Argument<S>) -> Result<IntDecision, FlatZincError> {
 		match arg {
 			Argument::Literal(l) => self.lit_int(l),
 			_ => Err(FlatZincError::InvalidArgumentType {
@@ -445,7 +437,7 @@ where
 	/// [`Constraint::TableInt`] constraints.
 	fn convert_regular_to_tables(
 		&mut self,
-		vars: Vec<IntExpr>,
+		vars: Vec<IntDecision>,
 		transitions: Vec<Vec<IntVal>>,
 		init_state: IntVal,
 		accept_states: HashSet<IntVal>,
@@ -486,28 +478,27 @@ where
 			.prb
 			.new_int_vars(vars.len() - 1, (1..=transitions.len() as IntVal).into())
 			.into_iter()
-			.map(IntExpr::from)
 			.collect_vec();
 
 		// Add table constraint to force a transition for the starting state
-		let sx: Vec<IntExpr> = vec![vars[0], state_vars[0]];
+		let sx: Vec<IntDecision> = vec![vars[0], state_vars[0]];
 		table_constraints.push(table_int(sx, start));
 
 		// Add table constraint to force valid transition for the intermediate
 		// states
 		for i in 1..vars.len() - 1 {
-			let mx: Vec<IntExpr> = vec![state_vars[i - 1], vars[i], state_vars[i]];
+			let mx: Vec<IntDecision> = vec![state_vars[i - 1], vars[i], state_vars[i]];
 			table_constraints.push(table_int(mx, middle.clone()));
 		}
 
 		// Add table constraint to force ending in an accepting state
-		let ex: Vec<IntExpr> = vec![*state_vars.last().unwrap(), *vars.last().unwrap()];
+		let ex: Vec<IntDecision> = vec![*state_vars.last().unwrap(), *vars.last().unwrap()];
 		table_constraints.push(table_int(ex, end));
 		table_constraints
 	}
 
 	/// Create branchers according to the search annotations in the FlatZinc instance
-	fn create_branchers(&mut self) -> Result<(), FlatZincError> {
+	pub(crate) fn create_branchers(&mut self) -> Result<(), FlatZincError> {
 		let mut branchings = Vec::new();
 		let mut warm_start = Vec::new();
 		for ann in self.fzn.solve.ann.iter() {
@@ -530,7 +521,7 @@ where
 	}
 
 	/// Ensure all variables in the FlatZinc instance output are in the model
-	fn ensure_output(&mut self) -> Result<(), FlatZincError> {
+	pub(crate) fn ensure_output(&mut self) -> Result<(), FlatZincError> {
 		for ident in self.fzn.output.iter() {
 			if self.fzn.variables.contains_key(ident) {
 				let _ = self.lookup_or_create_var(ident)?;
@@ -560,28 +551,30 @@ where
 		debug_assert!(!self.processed[con]);
 		let c = &self.fzn.constraints[con];
 
-		let add_view = |me: &mut Self, name: S, view: ModelView| {
+		let add_view = |me: &mut Self, name: S, view: Decision| {
 			let e = me.map.insert(name, view);
 			me.stats.extracted_views += 1;
 			debug_assert!(e.is_none());
 			me.processed[con] = true;
 		};
-		let arg_bool_view = |me: &mut Self, arg: &Argument<S>| -> Result<BoolView, FlatZincError> {
-			if let Argument::Literal(Literal::Identifier(x)) = arg {
-				if !me.map.contains_key(x) && defined_by.contains_key(x) {
-					me.extract_view(defined_by, defined_by[x])?;
+		let arg_bool_view =
+			|me: &mut Self, arg: &Argument<S>| -> Result<BoolDecision, FlatZincError> {
+				if let Argument::Literal(Literal::Identifier(x)) = arg {
+					if !me.map.contains_key(x) && defined_by.contains_key(x) {
+						me.extract_view(defined_by, defined_by[x])?;
+					}
 				}
-			}
-			me.arg_bool(arg)
-		};
-		let lit_int_view = |me: &mut Self, lit: &Literal<S>| -> Result<IntExpr, FlatZincError> {
-			if let Literal::Identifier(x) = lit {
-				if !me.map.contains_key(x) && defined_by.contains_key(x) {
-					me.extract_view(defined_by, defined_by[x])?;
+				me.arg_bool(arg)
+			};
+		let lit_int_view =
+			|me: &mut Self, lit: &Literal<S>| -> Result<IntDecision, FlatZincError> {
+				if let Literal::Identifier(x) = lit {
+					if !me.map.contains_key(x) && defined_by.contains_key(x) {
+						me.extract_view(defined_by, defined_by[x])?;
+					}
 				}
-			}
-			me.lit_int(lit)
-		};
+				me.lit_int(lit)
+			};
 
 		let l = c.defines.as_ref().unwrap();
 		debug_assert!(!self.map.contains_key(l));
@@ -590,7 +583,7 @@ where
 				if let [b, Argument::Literal(Literal::Identifier(x))] = c.args.as_slice() {
 					if x == l {
 						let b = arg_bool_view(self, b)?;
-						add_view(self, l.clone(), IntExpr::from(b).into());
+						add_view(self, l.clone(), IntDecision::from(b).into());
 					}
 				}
 			}
@@ -669,7 +662,7 @@ where
 					let y = lit_int_view(self, vy)?;
 					y * scale + offset
 				} else {
-					IntExpr::Const(offset)
+					offset.into()
 				};
 				add_view(self, l.clone(), view.into());
 			}
@@ -680,7 +673,7 @@ where
 
 	/// Preprocess the [`FlatZinc`] instance to find variables that can be seen as
 	/// views of other variables.
-	fn extract_views(&mut self) -> Result<(), FlatZincError> {
+	pub(crate) fn extract_views(&mut self) -> Result<(), FlatZincError> {
 		// Create a mapping from identifiers to the constraint that defines them
 		let defined_by: HashMap<&S, usize> = self
 			.fzn
@@ -702,23 +695,25 @@ where
 	}
 
 	/// Finalize the builder and return the model
-	fn finalize(self) -> (Model, HashMap<S, ModelView>, FlatZincStatistics) {
-		(self.prb, self.map, self.stats)
+	pub(crate) fn finalize<MapTy: FromIterator<(S, Decision)>>(
+		self,
+	) -> (Model, MapTy, FlatZincStatistics) {
+		(self.prb, self.map.into_iter().collect(), self.stats)
 	}
 
 	/// Extract a Boolean decision variable from the a [`Literal`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
 	/// returned if the argument was not a Boolean decision variable.
-	fn lit_bool(&mut self, lit: &Literal<S>) -> Result<BoolView, FlatZincError> {
+	fn lit_bool(&mut self, lit: &Literal<S>) -> Result<BoolDecision, FlatZincError> {
 		match lit {
 			Literal::Identifier(ident) => self.lookup_or_create_var(ident).map(|mv| match mv {
-				ModelView::Bool(bv) => Ok(bv),
-				ModelView::Int(_) => Err(FlatZincError::InvalidArgumentType {
+				Decision::Bool(bv) => Ok(bv),
+				Decision::Int(_) => Err(FlatZincError::InvalidArgumentType {
 					expected: "bool",
 					found: "int".to_owned(),
 				}),
 			})?,
-			Literal::Bool(v) => Ok(BoolView::Const(*v)),
+			&Literal::Bool(v) => Ok(v.into()),
 			_ => todo!(),
 		}
 	}
@@ -726,32 +721,32 @@ where
 	/// Extract a integer decision variable from a [`Literal`] in a [`FlatZinc`]
 	/// instance. A [`FlatZincError::InvalidArgumentType`] will be returned if the
 	/// argument was not a integer decision variable.
-	fn lit_int(&mut self, lit: &Literal<S>) -> Result<IntExpr, FlatZincError> {
+	fn lit_int(&mut self, lit: &Literal<S>) -> Result<IntDecision, FlatZincError> {
 		match lit {
 			Literal::Identifier(ident) => self.lookup_or_create_var(ident).map(|mv| match mv {
-				ModelView::Int(iv) => Ok(iv),
-				ModelView::Bool(_) => Err(FlatZincError::InvalidArgumentType {
+				Decision::Int(iv) => Ok(iv),
+				Decision::Bool(_) => Err(FlatZincError::InvalidArgumentType {
 					expected: "int",
 					found: "bool".to_owned(),
 				}),
 			})?,
-			Literal::Bool(v) => Ok(IntExpr::Const(if *v { 1 } else { 0 })),
-			Literal::Int(v) => Ok(IntExpr::Const(*v)),
+			&Literal::Bool(v) => Ok((v as IntVal).into()),
+			&Literal::Int(v) => Ok(v.into()),
 			_ => todo!(),
 		}
 	}
 
 	/// Find the decision variable, i.e. [`ModelView`], associated with the given
 	/// identifier, or create a new one if it doesn't yet exist.
-	fn lookup_or_create_var(&mut self, ident: &S) -> Result<ModelView, FlatZincError> {
+	fn lookup_or_create_var(&mut self, ident: &S) -> Result<Decision, FlatZincError> {
 		match self.map.entry(ident.clone()) {
 			Entry::Vacant(e) => {
 				if let Some(var) = self.fzn.variables.get(ident) {
 					Ok(e.insert(match var.ty {
-						Type::Bool => ModelView::Bool(self.prb.new_bool_var()),
+						Type::Bool => Decision::Bool(self.prb.new_bool_var()),
 						Type::Int => match &var.domain {
 							Some(Domain::Int(r)) => {
-								ModelView::Int(self.prb.new_int_var(r.iter().collect()))
+								Decision::Int(self.prb.new_int_var(r.iter().collect()))
 							}
 							Some(_) => unreachable!(),
 							None => todo!("Variables without a domain are not yet supported"),
@@ -767,7 +762,7 @@ where
 		}
 	}
 	/// Create a new builder to create a model from a FlatZinc instance
-	fn new(fzn: &'a FlatZinc<S>) -> Self {
+	pub(crate) fn new(fzn: &'a FlatZinc<S>) -> Self {
 		Self {
 			fzn,
 			map: HashMap::new(),
@@ -852,7 +847,7 @@ where
 
 	/// Process the [`FlatZinc::constraints`] field and add [`Constraint`] items
 	/// to the [`Model`] to enforce the constraints.
-	fn post_constraints(&mut self) -> Result<(), FlatZincError> {
+	pub(crate) fn post_constraints(&mut self) -> Result<(), FlatZincError> {
 		// Traditional relational constraints
 		for (i, c) in self.fzn.constraints.iter().enumerate() {
 			if self.processed[i] {
@@ -879,7 +874,7 @@ where
 				"array_bool_xor" => {
 					if let [es] = c.args.as_slice() {
 						let es = self.arg_array(es)?;
-						let es: Vec<Formula<BoolView>> = es
+						let es: Vec<Formula<BoolDecision>> = es
 							.iter()
 							.map(|l| self.lit_bool(l).map(Into::into))
 							.try_collect()?;
@@ -989,7 +984,7 @@ where
 					if let [b, i] = c.args.as_slice() {
 						let b = self.arg_bool(b)?;
 						let i = self.arg_int(i)?;
-						self.prb += (IntExpr::from(b) - i).eq(0);
+						self.prb += (IntDecision::from(b) - i).eq(0);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool2int",
@@ -1016,7 +1011,7 @@ where
 							.into_iter()
 							.zip(coeffs.into_iter())
 							.filter_map(|(x, c)| {
-								NonZeroIntVal::new(c).map(|c| IntExpr::from(x) * c)
+								NonZeroIntVal::new(c).map(|c| IntDecision::from(x) * c)
 							})
 							.chain(once(-sum))
 							.sum();
@@ -1519,7 +1514,7 @@ where
 	///
 	/// This can happen because of `bool_eq` and `int_eq` constraints in the
 	/// [`FlatZinc`] instance.
-	fn unify_variables(&mut self) -> Result<(), FlatZincError> {
+	pub(crate) fn unify_variables(&mut self) -> Result<(), FlatZincError> {
 		let mut unify_map = HashMap::<S, Rc<RefCell<Vec<Literal<S>>>>>::new();
 		let unify_map_find = |map: &HashMap<S, Rc<RefCell<Vec<Literal<S>>>>>, a: &Literal<S>| {
 			if let Literal::Identifier(x) = a {
@@ -1591,7 +1586,7 @@ where
 						let arr = self.arg_array(arr)?;
 						let idx = self.arg_int(idx)?;
 						// unify if the index is constant
-						if let IntExpr::Const(idx) = idx {
+						if let IntDecisionInner::Const(idx) = idx.0 {
 							let a = &arr[(idx - 1) as usize];
 							record_unify(&mut unify_map, a, b);
 							mark_processed(self);
@@ -1664,7 +1659,7 @@ where
 			// Find any view that is part of a unified group
 			let var = li
 				.iter()
-				.find_map(|lit| -> Option<ModelView> {
+				.find_map(|lit| -> Option<Decision> {
 					if let Literal::Identifier(id) = lit {
 						self.map.get(id).cloned()
 					} else {
@@ -1673,7 +1668,7 @@ where
 				})
 				// Create a new variable if no view is found
 				.unwrap_or_else(|| match domain {
-					Some(Literal::Bool(b)) => BoolView::Const(b).into(),
+					Some(Literal::Bool(b)) => BoolDecision::from(b).into(),
 					Some(Literal::IntSet(dom)) => self.prb.new_int_var(dom).into(),
 					Some(_) => unreachable!(),
 					None => match ty {
@@ -1695,7 +1690,7 @@ where
 							if var != *e.get() {
 								match ty {
 									Type::Bool => {
-										let (ModelView::Bool(new), ModelView::Bool(existing)) =
+										let (Decision::Bool(new), Decision::Bool(existing)) =
 											(var.clone(), e.get().clone())
 										else {
 											unreachable!()
@@ -1704,7 +1699,7 @@ where
 											Formula::Equiv(vec![new.into(), existing.into()]);
 									}
 									Type::Int => {
-										let (ModelView::Int(new), ModelView::Int(existing)) =
+										let (Decision::Int(new), Decision::Int(existing)) =
 											(var.clone(), e.get().clone())
 										else {
 											unreachable!()
@@ -1722,47 +1717,5 @@ where
 			}
 		}
 		Ok(())
-	}
-}
-
-impl Model {
-	/// Create a new [`Model`] instance from a [`FlatZinc`] instance.
-	pub fn from_fzn<S>(
-		fzn: &FlatZinc<S>,
-	) -> Result<(Self, HashMap<S, ModelView>, FlatZincStatistics), FlatZincError>
-	where
-		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
-	{
-		let mut builder = FznModelBuilder::new(fzn);
-		builder.extract_views()?;
-		builder.unify_variables()?;
-		builder.post_constraints()?;
-		builder.create_branchers()?;
-		builder.ensure_output()?;
-
-		Ok(builder.finalize())
-	}
-}
-
-impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle>
-where
-	Solver<Oracle>: for<'a> From<&'a Cnf>,
-	Oracle::Slv: 'static,
-{
-	/// Create a new [`Solver`] instance from a [`FlatZinc`] instance.
-	pub fn from_fzn<S>(
-		fzn: &FlatZinc<S>,
-		config: &InitConfig,
-	) -> Result<(Self, HashMap<S, SolverView>, FlatZincStatistics), FlatZincError>
-	where
-		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
-	{
-		let (mut prb, map, fzn_stats) = Model::from_fzn(fzn)?;
-		let (mut slv, remap) = prb.to_solver(config)?;
-		let map = map
-			.into_iter()
-			.map(|(k, v)| (k, remap.get(&mut slv, &v)))
-			.collect();
-		Ok((slv, map, fzn_stats))
 	}
 }

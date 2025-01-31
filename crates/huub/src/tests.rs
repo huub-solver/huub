@@ -2,7 +2,10 @@ use expect_test::Expect;
 use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;
 
-use crate::{InitConfig, Model, ReformulationError, SolveResult, Solver, SolverView, Value};
+use crate::{
+	solver::{SolveResult, Value, View},
+	InitConfig, Model, ReformulationError, Solver,
+};
 
 #[test]
 fn it_works() {
@@ -36,7 +39,7 @@ impl Model {
 }
 
 impl Solver {
-	pub(crate) fn assert_all_solutions<V: Into<SolverView> + Clone>(
+	pub(crate) fn assert_all_solutions<V: Into<View> + Clone>(
 		&mut self,
 		vars: &[V],
 		pred: impl Fn(&[Value]) -> bool,
@@ -56,11 +59,7 @@ impl Solver {
 		assert_eq!(self.solve(|_| unreachable!()), SolveResult::Unsatisfiable);
 	}
 
-	pub(crate) fn expect_solutions<V: Into<SolverView> + Clone>(
-		&mut self,
-		vars: &[V],
-		expected: Expect,
-	) {
+	pub(crate) fn expect_solutions<V: Into<View> + Clone>(&mut self, vars: &[V], expected: Expect) {
 		let vars: Vec<_> = vars.iter().map(|v| v.clone().into()).collect();
 		let (status, mut solns) = self.get_all_solutions(&vars);
 		assert_eq!(status, SolveResult::Complete);

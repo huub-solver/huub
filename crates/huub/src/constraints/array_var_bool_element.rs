@@ -9,8 +9,9 @@ use pindakaas::{propositional_logic::Formula, ClauseDatabaseTools};
 use crate::{
 	actions::{ReformulationActions, SimplificationActions},
 	constraints::{Constraint, SimplificationStatus},
-	model::{bool::BoolView, int::IntExpr},
-	IntVal, LitMeaning, ReformulationError,
+	reformulate::ReformulationError,
+	solver::IntLitMeaning,
+	BoolDecision, IntDecision, IntVal,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -20,12 +21,12 @@ use crate::{
 /// value equal the element of the given array of Boolean decision varaibles at
 /// the index given by the index integer decision variable.
 pub struct ArrayVarBoolElement {
-	/// The array of Boolean decision expressions
-	pub(crate) array: Vec<BoolView>,
+	/// The array of Boolean decision variables
+	pub(crate) array: Vec<BoolDecision>,
 	/// The index variable
-	pub(crate) index: IntExpr,
+	pub(crate) index: IntDecision,
 	/// The resulting variable
-	pub(crate) result: BoolView,
+	pub(crate) result: BoolDecision,
 }
 
 impl<S: SimplificationActions> Constraint<S> for ArrayVarBoolElement {
@@ -47,17 +48,17 @@ impl<S: SimplificationActions> Constraint<S> for ArrayVarBoolElement {
 		// Evaluate result literal
 		let arr: Vec<_> = self.array.iter().map(|&v| slv.get_solver_bool(v)).collect();
 
-		for (i, l) in arr.iter().enumerate() {
+		for (i, &l) in arr.iter().enumerate() {
 			// Evaluate array literal
-			let idx_eq = slv.get_int_lit(index, LitMeaning::Eq(i as IntVal));
+			let idx_eq = slv.get_int_lit(index, IntLitMeaning::Eq(i as IntVal));
 			// add clause (idx = i + 1 /\ arr[i]) => val
 			slv.add_clause([!idx_eq, !l, result])?;
 			// add clause (idx = i + 1 /\ !arr[i]) => !val
-			slv.add_clause([!idx_eq, *l, !result])?;
+			slv.add_clause([!idx_eq, l, !result])?;
 		}
 
 		// add clause (arr[1] /\ arr[2] /\ ... /\ arr[n]) => val
-		slv.add_clause(arr.iter().map(|l| !l).chain(once(result)))?;
+		slv.add_clause(arr.iter().map(|&l| !l).chain(once(result)))?;
 		// add clause (!arr[1] /\ !arr[2] /\ ... /\ !arr[n]) => !val
 		slv.add_clause(arr.into_iter().chain(once(!result)))?;
 		Ok(())

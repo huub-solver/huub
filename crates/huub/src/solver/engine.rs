@@ -6,10 +6,10 @@ macro_rules! trace_new_lit {
 		tracing::debug!(
 			lit = i32::from($lit),
 			int_var = usize::from($iv),
-			is_eq = matches!($def.meaning, LitMeaning::Eq(_)),
+			is_eq = matches!($def.meaning, IntLitMeaning::Eq(_)),
 			val = match $def.meaning {
-				LitMeaning::Eq(val) => val,
-				LitMeaning::Less(val) => val,
+				IntLitMeaning::Eq(val) => val,
+				IntLitMeaning::Less(val) => val,
 				_ => unreachable!(),
 			},
 			"register new literal"
@@ -41,14 +41,13 @@ use crate::{
 	solver::{
 		activation_list::{ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
-		int_var::{IntVar, IntVarRef, LitMeaning, OrderStorage},
+		int_var::{IntVar, IntVarRef, OrderStorage},
 		queue::{PriorityLevel, PriorityQueue},
 		solving_context::SolvingContext,
 		trail::{Trail, TrailedInt},
-		view::{BoolView, BoolViewInner, IntViewInner},
-		SolverConfiguration,
+		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, SolverConfiguration,
 	},
-	Clause, Conjunction, IntVal, IntView,
+	Clause, Conjunction, IntVal,
 };
 
 #[derive(Debug, Default, Clone)]
@@ -203,7 +202,7 @@ impl PropagatorExtension for Engine {
 				));
 
 				// Ensure the lazy literal for the upper bound exists
-				let ub_lit = ctx.get_intref_lit(r, LitMeaning::Less(lb + 1));
+				let ub_lit = ctx.get_intref_lit(r, IntLitMeaning::Less(lb + 1));
 				if let BoolViewInner::Lit(ub_lit) = ub_lit.0 {
 					let prev = ctx.state.trail.assign_lit(ub_lit);
 					debug_assert_eq!(prev, None);
@@ -415,7 +414,7 @@ impl State {
 				.unwrap_or_else(|| self.int_vars[iv].lit_meaning(lit));
 			// Enact domain changes and determine change event
 			let event: IntEvent = match meaning {
-				LitMeaning::Eq(i) => {
+				IntLitMeaning::Eq(i) => {
 					if i == lb || i == ub {
 						return None;
 					}
@@ -434,13 +433,13 @@ impl State {
 					debug_assert_eq!(self.get_int_val(IntView(IntViewInner::VarRef(iv))), Some(i));
 					IntEvent::Fixed
 				}
-				LitMeaning::NotEq(i) => {
+				IntLitMeaning::NotEq(i) => {
 					if i < lb || i > ub {
 						return None;
 					}
 					IntEvent::Domain
 				}
-				LitMeaning::GreaterEq(new_lb) => {
+				IntLitMeaning::GreaterEq(new_lb) => {
 					if new_lb <= lb {
 						return None;
 					}
@@ -452,7 +451,7 @@ impl State {
 						IntEvent::LowerBound
 					}
 				}
-				LitMeaning::Less(i) => {
+				IntLitMeaning::Less(i) => {
 					let new_ub = self.int_vars[iv].tighten_upper_bound(i - 1);
 					if new_ub >= ub {
 						return None;
@@ -618,9 +617,13 @@ impl State {
 }
 
 impl ExplanationActions for State {
-	fn get_int_lit_relaxed(&mut self, var: IntView, meaning: LitMeaning) -> (BoolView, LitMeaning) {
+	fn get_int_lit_relaxed(
+		&mut self,
+		var: IntView,
+		meaning: IntLitMeaning,
+	) -> (BoolView, IntLitMeaning) {
 		debug_assert!(
-			matches!(meaning, LitMeaning::GreaterEq(_) | LitMeaning::Less(_)),
+			matches!(meaning, IntLitMeaning::GreaterEq(_) | IntLitMeaning::Less(_)),
 			"relaxed integer literals are only supported for LitMeaning::GreaterEq and LitMeaning::Less"
 		);
 		// Transform literal meaning if view is a linear transformation
@@ -639,36 +642,36 @@ impl ExplanationActions for State {
 			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
 				let var = &mut self.int_vars[iv];
 				match meaning {
-					LitMeaning::GreaterEq(v) => {
+					IntLitMeaning::GreaterEq(v) => {
 						let (bv, v) = var.get_greater_eq_lit_or_weaker(&self.trail, v);
-						(bv, LitMeaning::GreaterEq(v))
+						(bv, IntLitMeaning::GreaterEq(v))
 					}
-					LitMeaning::Less(v) => {
+					IntLitMeaning::Less(v) => {
 						let (bv, v) = var.get_less_lit_or_weaker(&self.trail, v);
-						(bv, LitMeaning::Less(v))
+						(bv, IntLitMeaning::Less(v))
 					}
 					_ => unreachable!(),
 				}
 			}
 			IntViewInner::Const(c) => (
 				BoolView(BoolViewInner::Const(match meaning {
-					LitMeaning::GreaterEq(i) => c >= i,
-					LitMeaning::Less(i) => c < i,
+					IntLitMeaning::GreaterEq(i) => c >= i,
+					IntLitMeaning::Less(i) => c < i,
 					_ => unreachable!(),
 				})),
 				meaning,
 			),
 			IntViewInner::Bool { lit, .. } => {
 				let (b_meaning, negated) =
-					if matches!(meaning, LitMeaning::NotEq(_) | LitMeaning::Less(_)) {
+					if matches!(meaning, IntLitMeaning::NotEq(_) | IntLitMeaning::Less(_)) {
 						(!meaning.clone(), true)
 					} else {
 						(meaning.clone(), false)
 					};
 				let bv = BoolView(match b_meaning {
-					LitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
-					LitMeaning::GreaterEq(i) if i > 1 => BoolViewInner::Const(false),
-					LitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
+					IntLitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
+					IntLitMeaning::GreaterEq(i) if i > 1 => BoolViewInner::Const(false),
+					IntLitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
 					_ => unreachable!(),
 				});
 				(if negated { !bv } else { bv }, meaning)
@@ -730,11 +733,11 @@ impl ExplanationActions for State {
 
 	fn get_int_val_lit(&mut self, var: IntView) -> Option<BoolView> {
 		self.get_int_val(var).map(|v| {
-			self.try_int_lit(var, LitMeaning::Eq(v))
+			self.try_int_lit(var, IntLitMeaning::Eq(v))
 				.expect("value literals cannot be created during explanation")
 		})
 	}
-	fn try_int_lit(&self, var: IntView, mut meaning: LitMeaning) -> Option<BoolView> {
+	fn try_int_lit(&self, var: IntView, mut meaning: IntLitMeaning) -> Option<BoolView> {
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
 			var.0
 		{
@@ -749,25 +752,25 @@ impl ExplanationActions for State {
 				self.int_vars[var].get_bool_lit(meaning)
 			}
 			IntViewInner::Const(c) => Some(BoolView(BoolViewInner::Const(match meaning {
-				LitMeaning::Eq(i) => c == i,
-				LitMeaning::NotEq(i) => c != i,
-				LitMeaning::GreaterEq(i) => c >= i,
-				LitMeaning::Less(i) => c < i,
+				IntLitMeaning::Eq(i) => c == i,
+				IntLitMeaning::NotEq(i) => c != i,
+				IntLitMeaning::GreaterEq(i) => c >= i,
+				IntLitMeaning::Less(i) => c < i,
 			}))),
 			IntViewInner::Bool { lit, .. } => {
 				let (meaning, negated) =
-					if matches!(meaning, LitMeaning::NotEq(_) | LitMeaning::Less(_)) {
+					if matches!(meaning, IntLitMeaning::NotEq(_) | IntLitMeaning::Less(_)) {
 						(!meaning, true)
 					} else {
 						(meaning, false)
 					};
 				let bv = BoolView(match meaning {
-					LitMeaning::Eq(0) => BoolViewInner::Lit(!lit),
-					LitMeaning::Eq(1) => BoolViewInner::Lit(lit),
-					LitMeaning::Eq(_) => BoolViewInner::Const(false),
-					LitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
-					LitMeaning::GreaterEq(i) if i > 1 => BoolViewInner::Const(false),
-					LitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
+					IntLitMeaning::Eq(0) => BoolViewInner::Lit(!lit),
+					IntLitMeaning::Eq(1) => BoolViewInner::Lit(lit),
+					IntLitMeaning::Eq(_) => BoolViewInner::Const(false),
+					IntLitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
+					IntLitMeaning::GreaterEq(i) if i > 1 => BoolViewInner::Const(false),
+					IntLitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
 					_ => unreachable!(),
 				});
 				Some(if negated { !bv } else { bv })
@@ -780,7 +783,7 @@ impl InspectionActions for State {
 	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool {
 		let (lb, ub) = self.get_int_bounds(var);
 		if lb <= val && val <= ub {
-			let eq_lit = self.try_int_lit(var, LitMeaning::Eq(val));
+			let eq_lit = self.try_int_lit(var, IntLitMeaning::Eq(val));
 			if let Some(eq_lit) = eq_lit {
 				self.get_bool_val(eq_lit).unwrap_or(true)
 			} else {
