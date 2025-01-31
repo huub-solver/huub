@@ -221,6 +221,15 @@ impl<A: FailedAssumtions> AssumptionChecker for A {
 	}
 }
 
+impl From<BoolView> for BoolVal {
+	fn from(val: BoolView) -> Self {
+		match val.0 {
+			BoolViewInner::Lit(l) => l.into(),
+			BoolViewInner::Const(b) => b.into(),
+		}
+	}
+}
+
 impl BoolView {
 	/// Return an integers that can used to identify the literal, if there is one.
 	pub fn reverse_map_info(&self) -> Option<NonZeroI32> {
@@ -234,15 +243,6 @@ impl BoolView {
 impl From<bool> for BoolView {
 	fn from(value: bool) -> Self {
 		BoolView(BoolViewInner::Const(value))
-	}
-}
-
-impl From<BoolView> for BoolVal {
-	fn from(val: BoolView) -> Self {
-		match val.0 {
-			BoolViewInner::Lit(l) => l.into(),
-			BoolViewInner::Const(b) => b.into(),
-		}
 	}
 }
 
@@ -700,6 +700,16 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 		}
 	}
 
+	/// Access the inner [`Engine`] object.
+	pub(crate) fn engine(&self) -> &Engine {
+		self.oracle.propagator()
+	}
+
+	/// Mutably access the inner [`Engine`] object.
+	pub(crate) fn engine_mut(&mut self) -> &mut Engine {
+		self.oracle.propagator_mut()
+	}
+
 	/// Create a new [`Solver`] instance from a [`FlatZinc`] instance.
 	pub fn from_fzn<S, MapTy: FromIterator<(S, View)>>(
 		fzn: &FlatZinc<S>,
@@ -717,16 +727,6 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 			.map(|(k, v)| (k, remap.get(&mut slv, &v)))
 			.collect();
 		Ok((slv, map, fzn_stats))
-	}
-
-	/// Access the inner [`Engine`] object.
-	pub(crate) fn engine(&self) -> &Engine {
-		self.oracle.propagator()
-	}
-
-	/// Mutably access the inner [`Engine`] object.
-	pub(crate) fn engine_mut(&mut self) -> &mut Engine {
-		self.oracle.propagator_mut()
 	}
 
 	/// Wrapper function for `all_solutions` that collects all solutions and returns them in a vector
@@ -884,6 +884,15 @@ impl<Oracle: ClauseDatabase> ClauseDatabase for Solver<Oracle> {
 	}
 }
 
+impl<Oracle: Debug + PropagatingSolver<Engine>> Debug for Solver<Oracle> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Solver")
+			.field("oracle", &self.oracle)
+			.field("engine", self.engine())
+			.finish()
+	}
+}
+
 impl<Oracle: PropagatingSolver<Engine>> DecisionActions for Solver<Oracle> {
 	fn get_intref_lit(&mut self, iv: IntVarRef, meaning: IntLitMeaning) -> BoolView {
 		let mut clauses = Vec::new();
@@ -977,10 +986,6 @@ impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle>
 		p
 	}
 
-	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
-		self.engine_mut().state.trail.track_int(init)
-	}
-
 	fn enqueue_now(&mut self, prop: PropRef) {
 		let state = &mut self.engine_mut().state;
 		if !state.enqueued[prop] {
@@ -1029,6 +1034,10 @@ impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle>
 		};
 		self.engine_mut().state.int_activation[var].add(prop, cond);
 	}
+
+	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
+		self.engine_mut().state.trail.track_int(init)
+	}
 }
 
 impl<Oracle: PropagatingSolver<Engine>> TrailingActions for Solver<Oracle> {
@@ -1040,15 +1049,6 @@ impl<Oracle: PropagatingSolver<Engine>> TrailingActions for Solver<Oracle> {
 		to self.engine_mut().state {
 			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal;
 		}
-	}
-}
-
-impl<Oracle: Debug + PropagatingSolver<Engine>> Debug for Solver<Oracle> {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		f.debug_struct("Solver")
-			.field("oracle", &self.oracle)
-			.field("engine", self.engine())
-			.finish()
 	}
 }
 

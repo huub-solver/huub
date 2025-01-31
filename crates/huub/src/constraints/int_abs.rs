@@ -1,5 +1,5 @@
-//! Structures and algorithms for the `int_abs` constraint, which enforces that
-//! one variable is takes absolute value of another.
+//! Structures and algorithms for the integer absolute value constraint, which
+//! enforces that one variable is takes absolute value of another.
 
 use std::iter::once;
 

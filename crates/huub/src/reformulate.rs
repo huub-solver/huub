@@ -16,12 +16,19 @@ use crate::{
 		SimplificationActions, TrailingActions,
 	},
 	constraints::{
-		all_different_int::AllDifferentInt, array_int_element::ArrayIntElement,
-		array_int_minimum::ArrayIntMinimum, array_var_bool_element::ArrayVarBoolElement,
-		array_var_int_element::ArrayVarIntElement, disjunctive_strict::DisjunctiveStrict,
-		int_abs::IntAbs, int_div::IntDiv, int_linear::IntLinear, int_pow::IntPow,
-		int_times::IntTimes, set_in_reif::SetInReif, table_int::TableInt, BoxedConstraint,
-		BoxedPropagator, Constraint, SimplificationStatus,
+		bool_array_element::BoolDecisionArrayElement,
+		disjunctive_strict::DisjunctiveStrict,
+		int_abs::IntAbs,
+		int_all_different::IntAllDifferent,
+		int_array_element::{IntDecisionArrayElement, IntValArrayElement},
+		int_array_minimum::IntArrayMinimum,
+		int_div::IntDiv,
+		int_in_set::IntInSetReif,
+		int_linear::IntLinear,
+		int_pow::IntPow,
+		int_table::IntTable,
+		int_times::IntTimes,
+		BoxedConstraint, BoxedPropagator, Constraint, SimplificationStatus,
 	},
 	helpers::linear_transform::LinearTransform,
 	solver::{
@@ -32,7 +39,7 @@ use crate::{
 		trail::TrailedInt,
 		BoolView, BoolViewInner, IntView, IntViewInner, View,
 	},
-	BoolDecision, Decision, IntDecision, IntLitMeaning, IntSetVal, IntVal, LogicFormula, Model,
+	BoolDecision, BoolFormula, Decision, IntDecision, IntLitMeaning, IntSetVal, IntVal, Model,
 	Solver,
 };
 
@@ -68,23 +75,21 @@ pub(crate) enum BoolDecisionInner {
 ///
 /// This enum type is used to store and analyze the constraints in a [`Model`].
 pub(crate) enum ConstraintStore {
-	AllDifferentInt(AllDifferentInt),
-	ArrayIntElement(ArrayIntElement),
-	ArrayIntMinimum(ArrayIntMinimum),
-	ArrayVarBoolElement(ArrayVarBoolElement),
-	ArrayVarIntElement(ArrayVarIntElement),
+	BoolDecisionArrayElement(BoolDecisionArrayElement),
+	BoolFormula(BoolFormula),
 	DisjunctiveStrict(DisjunctiveStrict),
 	IntAbs(IntAbs),
+	IntAllDifferent(IntAllDifferent),
+	IntArrayMinimum(IntArrayMinimum),
+	IntDecisionArrayElement(IntDecisionArrayElement),
 	IntDiv(IntDiv),
+	IntInSetReif(IntInSetReif),
 	IntLinear(IntLinear),
 	IntPow(IntPow),
+	IntTable(IntTable),
 	IntTimes(IntTimes),
-	/// A constraint given as a propasitional logic formula, which is enforced to
-	/// be `true`.
-	PropLogic(Formula<BoolDecision>),
-	SetInReif(SetInReif),
-	TableInt(TableInt),
-	UserCustom(BoxedConstraint),
+	IntValArrayElement(IntValArrayElement),
+	Other(BoxedConstraint),
 }
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
@@ -100,9 +105,16 @@ pub struct InitConfig {
 	vivification: bool,
 }
 
-define_index_type! {
-	/// Reference type for integer decision variables in a [`Model`].
-	pub(crate) struct IntDecisionIndex = u32;
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Definition of an integer decision variable in a [`Model`].
+pub(crate) struct IntDecisionDef {
+	/// The set of possible values that the variable can take.
+	pub(crate) domain: IntSetVal,
+	/// The list of (indexes of) constraints in which the variable appears.
+	///
+	/// This list is used to enqueue the constraints for propagation when the
+	/// domain of the variable changes.
+	pub(crate) constraints: Vec<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -117,18 +129,6 @@ pub(crate) enum IntDecisionInner {
 	Linear(LinearTransform, IntDecisionIndex),
 	/// Linear transformation of a Boolean variable.
 	Bool(LinearTransform, BoolDecision),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Definition of an integer decision variable in a [`Model`].
-pub(crate) struct IntDecisionDef {
-	/// The set of possible values that the variable can take.
-	pub(crate) domain: IntSetVal,
-	/// The list of (indexes of) constraints in which the variable appears.
-	///
-	/// This list is used to enqueue the constraints for propagation when the
-	/// domain of the variable changes.
-	pub(crate) constraints: Vec<usize>,
 }
 
 /// Context object used during the reformulation process that creates a
@@ -161,6 +161,31 @@ pub struct ReformulationMap {
 	pub(crate) bool_map: Vec<BoolView>,
 }
 
+impl<S: SimplificationActions> Constraint<S> for BoolFormula {
+	fn simplify(&mut self, _: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+		Ok(SimplificationStatus::Fixpoint)
+	}
+
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let mut resolver = |bv: BoolDecision| {
+			let inner = slv.get_solver_bool(bv);
+			match inner.0 {
+				BoolViewInner::Const(b) => Err(b),
+				BoolViewInner::Lit(l) => Ok(l),
+			}
+		};
+		let result: Result<Formula<RawLit>, _> = self.clone().simplify_with(&mut resolver);
+		match result {
+			Err(false) => Err(ReformulationError::TrivialUnsatisfiable),
+			Err(true) => Ok(()),
+			Ok(f) => {
+				let mut wrapper = slv.with_conditions(vec![]);
+				Ok(TseitinEncoder.encode(&mut wrapper, &f)?)
+			}
+		}
+	}
+}
+
 impl ConstraintStore {
 	/// Map the constraint into propagators and clauses to be added to the given
 	/// solver, using the variable mapping provided.
@@ -171,20 +196,11 @@ impl ConstraintStore {
 	) -> Result<(), ReformulationError> {
 		let mut actions = ReformulationContext { slv, map };
 		match self {
-			ConstraintStore::AllDifferentInt(con) => {
-				<AllDifferentInt as Constraint<Model>>::to_solver(con, &mut actions)
+			ConstraintStore::BoolDecisionArrayElement(con) => {
+				<BoolDecisionArrayElement as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			ConstraintStore::ArrayIntElement(con) => {
-				<ArrayIntElement as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::ArrayIntMinimum(con) => {
-				<ArrayIntMinimum as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::ArrayVarBoolElement(con) => {
-				<ArrayVarBoolElement as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::ArrayVarIntElement(con) => {
-				<ArrayVarIntElement as Constraint<Model>>::to_solver(con, &mut actions)
+			ConstraintStore::BoolFormula(exp) => {
+				<Formula<BoolDecision> as Constraint<Model>>::to_solver(exp, &mut actions)
 			}
 			ConstraintStore::DisjunctiveStrict(con) => {
 				<DisjunctiveStrict as Constraint<Model>>::to_solver(con, &mut actions)
@@ -192,8 +208,20 @@ impl ConstraintStore {
 			ConstraintStore::IntAbs(con) => {
 				<IntAbs as Constraint<Model>>::to_solver(con, &mut actions)
 			}
+			ConstraintStore::IntAllDifferent(con) => {
+				<IntAllDifferent as Constraint<Model>>::to_solver(con, &mut actions)
+			}
+			ConstraintStore::IntArrayMinimum(con) => {
+				<IntArrayMinimum as Constraint<Model>>::to_solver(con, &mut actions)
+			}
+			ConstraintStore::IntDecisionArrayElement(con) => {
+				<IntDecisionArrayElement as Constraint<Model>>::to_solver(con, &mut actions)
+			}
 			ConstraintStore::IntDiv(con) => {
 				<IntDiv as Constraint<Model>>::to_solver(con, &mut actions)
+			}
+			ConstraintStore::IntInSetReif(con) => {
+				<IntInSetReif as Constraint<Model>>::to_solver(con, &mut actions)
 			}
 			ConstraintStore::IntLinear(con) => {
 				<IntLinear as Constraint<Model>>::to_solver(con, &mut actions)
@@ -201,19 +229,16 @@ impl ConstraintStore {
 			ConstraintStore::IntPow(con) => {
 				<IntPow as Constraint<Model>>::to_solver(con, &mut actions)
 			}
+			ConstraintStore::IntTable(con) => {
+				<IntTable as Constraint<Model>>::to_solver(con, &mut actions)
+			}
 			ConstraintStore::IntTimes(con) => {
 				<IntTimes as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			ConstraintStore::PropLogic(exp) => {
-				<Formula<BoolDecision> as Constraint<Model>>::to_solver(exp, &mut actions)
+			ConstraintStore::IntValArrayElement(con) => {
+				<IntValArrayElement as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			ConstraintStore::SetInReif(con) => {
-				<SetInReif as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::TableInt(con) => {
-				<TableInt as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::UserCustom(con) => con.to_solver(&mut actions),
+			ConstraintStore::Other(con) => con.to_solver(&mut actions),
 		}
 	}
 }
@@ -266,31 +291,6 @@ impl IntDecisionDef {
 		Self {
 			domain: dom,
 			constraints: Vec::new(),
-		}
-	}
-}
-
-impl<S: SimplificationActions> Constraint<S> for LogicFormula {
-	fn simplify(&mut self, _: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		Ok(SimplificationStatus::Fixpoint)
-	}
-
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let mut resolver = |bv: BoolDecision| {
-			let inner = slv.get_solver_bool(bv);
-			match inner.0 {
-				BoolViewInner::Const(b) => Err(b),
-				BoolViewInner::Lit(l) => Ok(l),
-			}
-		};
-		let result: Result<Formula<RawLit>, _> = self.clone().simplify_with(&mut resolver);
-		match result {
-			Err(false) => Err(ReformulationError::TrivialUnsatisfiable),
-			Err(true) => Ok(()),
-			Ok(f) => {
-				let mut wrapper = slv.with_conditions(vec![]);
-				Ok(TseitinEncoder.encode(&mut wrapper, &f)?)
-			}
 		}
 	}
 }
@@ -429,4 +429,9 @@ impl ReformulationMap {
 			}
 		}
 	}
+}
+
+define_index_type! {
+	/// Reference type for integer decision variables in a [`Model`].
+	pub(crate) struct IntDecisionIndex = u32;
 }

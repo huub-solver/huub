@@ -21,17 +21,6 @@ use crate::{
 	BoolDecision, Conjunction, IntDecision, IntVal,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-/// Possible operators that can be used for in a linear constraint.
-pub(crate) enum LinOperator {
-	/// Sum is equal to the constant
-	Equal,
-	/// Sum is less than or equal to the constant
-	LessEq,
-	/// Sum is not equal to the constant
-	NotEqual,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Representation of an integer linear constraint within a model.
 ///
@@ -96,6 +85,17 @@ pub struct IntLinearNotEqValueImpl<const R: usize> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Possible operators that can be used for in a linear constraint.
+pub(crate) enum LinOperator {
+	/// Sum is equal to the constant
+	Equal,
+	/// Sum is less than or equal to the constant
+	LessEq,
+	/// Sum is not equal to the constant
+	NotEqual,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Reification possibilities for a linear constraint.
 pub(crate) enum Reification {
 	/// The constraint is half-reified by the given [`BoolDecision`].
@@ -122,22 +122,6 @@ impl IntLinear {
 		}
 	}
 
-	/// Change the integer linear constraint to be reified by the given Boolean
-	/// decision variable.
-	///
-	/// The integer linear constraint must hold if-and-only-if the given Boolean
-	/// decision variable is `true`.
-	pub fn reified_by(self, b: BoolDecision) -> Self {
-		assert!(
-			self.reif.is_none(),
-			"IntLinear is already implied or reified."
-		);
-		Self {
-			reif: Some(Reification::ReifiedBy(b)),
-			..self
-		}
-	}
-
 	/// Internal method to negate the linear constraint.
 	fn negate(self) -> Self {
 		match self.operator {
@@ -154,6 +138,22 @@ impl IntLinear {
 				operator: LinOperator::Equal,
 				..self
 			},
+		}
+	}
+
+	/// Change the integer linear constraint to be reified by the given Boolean
+	/// decision variable.
+	///
+	/// The integer linear constraint must hold if-and-only-if the given Boolean
+	/// decision variable is `true`.
+	pub fn reified_by(self, b: BoolDecision) -> Self {
+		assert!(
+			self.reif.is_none(),
+			"IntLinear is already implied or reified."
+		);
+		Self {
+			reif: Some(Reification::ReifiedBy(b)),
+			..self
 		}
 	}
 }

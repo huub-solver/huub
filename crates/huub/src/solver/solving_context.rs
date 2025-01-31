@@ -2,7 +2,7 @@
 //! during the progation and solution checking process. This structure contains
 //! the implementation of the actions that are exposed to the propagators.
 
-use std::fmt::{self, Formatter};
+use std::fmt::{self, Debug, Formatter};
 
 use delegate::delegate;
 use index_vec::IndexVec;
@@ -161,7 +161,7 @@ impl<'a> SolvingContext<'a> {
 	}
 }
 
-impl fmt::Debug for SolvingContext<'_> {
+impl Debug for SolvingContext<'_> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		f.debug_struct("SolvingContext")
 			.field("state", &self.state)

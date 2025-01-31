@@ -45,19 +45,18 @@ use crate::{
 	actions::{ConstraintInitActions, SimplificationActions},
 	branchers::{BoolBrancher, IntBrancher, WarmStartBrancher},
 	constraints::{
-		all_different_int::AllDifferentInt,
-		array_int_element::ArrayIntElement,
-		array_int_minimum::ArrayIntMinimum,
-		array_var_bool_element::ArrayVarBoolElement,
-		array_var_int_element::ArrayVarIntElement,
+		bool_array_element::BoolDecisionArrayElement,
 		disjunctive_strict::DisjunctiveStrict,
 		int_abs::IntAbs,
+		int_all_different::IntAllDifferent,
+		int_array_element::{IntDecisionArrayElement, IntValArrayElement},
+		int_array_minimum::IntArrayMinimum,
 		int_div::IntDiv,
+		int_in_set::IntInSetReif,
 		int_linear::{IntLinear, LinOperator},
 		int_pow::IntPow,
+		int_table::IntTable,
 		int_times::IntTimes,
-		set_in_reif::SetInReif,
-		table_int::TableInt,
 		BoxedConstraint, Constraint, SimplificationStatus,
 	},
 	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
@@ -82,6 +81,10 @@ use crate::{
 ///
 /// Note that decisions only represent where the decision is kept
 pub struct BoolDecision(BoolDecisionInner);
+
+/// Type alias for the type used to represent propositional logic formulas that
+/// can be used in [`Model`].
+pub type BoolFormula = Formula<BoolDecision>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Strategy for making a search decisions to be added to a [`Model`].
@@ -121,6 +124,23 @@ pub enum Decision {
 	Int(IntDecision),
 }
 
+/// Helper trait used to create array element constraints for on collections of
+/// different types.
+pub trait ElementConstraint: Sized {
+	/// The constraint type created and to be added to a [`Model`].
+	type Constraint;
+	/// The decision variable type to contain the selected element.
+	type Result;
+
+	/// Create a constraint that enforces that the `result` decision variables
+	/// takes the same value as `array[index]`.
+	fn element_constraint(
+		array: Vec<Self>,
+		index: IntDecision,
+		result: Self::Result,
+	) -> Self::Constraint;
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 /// A reference to an integer value or its transformation in a [`Model`].
 pub struct IntDecision(IntDecisionInner);
@@ -144,13 +164,6 @@ pub type IntSetVal = RangeList<IntVal>;
 /// Type alias for an parameter integer value.
 pub type IntVal = i64;
 
-/// Type alias for the type used to represent logic formulas that can be used in
-/// [`Model`].
-pub type LogicFormula = Formula<BoolDecision>;
-
-/// Type alias for a non-zero paremeter integer value.
-pub type NonZeroIntVal = NonZeroI64;
-
 #[derive(Clone, Debug, Default)]
 /// A formulation of a problem instance in terms of decisions and constraints.
 pub struct Model {
@@ -168,6 +181,9 @@ pub struct Model {
 	/// A flag for each constraint whether it has been enqueued for propagation.
 	enqueued: Vec<bool>,
 }
+
+/// Type alias for a non-zero paremeter integer value.
+pub type NonZeroIntVal = NonZeroI64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Strategy for limiting the domain of a selected decision variable as part of
@@ -205,78 +221,61 @@ pub enum VariableSelection {
 	Smallest,
 }
 
-/// Create a `all_different_int` constraint that enforces that all the given
-/// integer decisions take different values.
-pub fn all_different_int<Iter>(vars: Iter) -> AllDifferentInt
+/// Create a constraint that enforces that the second integer decision variable
+/// takes the absolute value of the first integer decision variable.
+pub fn abs_int(origin: IntDecision, abs: IntDecision) -> IntAbs {
+	IntAbs { origin, abs }
+}
+
+/// Create a constraint that enforces that all the given integer decisions take
+/// different values.
+pub fn all_different_int<Iter>(vars: Iter) -> IntAllDifferent
 where
 	Iter: IntoIterator,
 	Iter::Item: Into<IntDecision>,
 {
-	AllDifferentInt {
+	IntAllDifferent {
 		vars: vars.into_iter().map_into().collect(),
 	}
 }
 
-/// Create an `array_int_element` constraint that enforces that a result integer
-/// decision variable takes the value equal the element of the given array of
-/// integer values at the given index decision variable.
-pub fn array_int_element(
+/// Create a constraint that enforces that a result decision variable takes the
+/// value equal the element of the given array at the given index decision
+/// variable.
+pub fn array_element<E: ElementConstraint>(
+	array: Vec<E>,
 	index: IntDecision,
-	array: Vec<IntVal>,
-	result: IntDecision,
-) -> ArrayIntElement {
-	ArrayIntElement {
-		index,
-		array,
-		result,
-	}
+	result: <E as ElementConstraint>::Result,
+) -> <E as ElementConstraint>::Constraint {
+	<E as ElementConstraint>::element_constraint(array, index, result)
 }
 
-/// Create an `array_int_maximum` constraint that enforces that an integer
-/// decision variable takes the minimum value of an array of integer decision
-/// variables.
-pub fn array_int_maximum<Iter>(vars: Iter, max: IntDecision) -> ArrayIntMinimum
+/// Create a constraint that enforces that an integer decision variable takes
+/// the minimum value of an array of integer decision variables.
+pub fn array_maximum_int<Iter>(vars: Iter, max: IntDecision) -> IntArrayMinimum
 where
 	Iter: IntoIterator,
 	Iter::Item: Into<IntDecision>,
 {
-	array_int_minimum(vars.into_iter().map(|v| -v.into()), -max)
+	array_minimum_int(vars.into_iter().map(|v| -v.into()), -max)
 }
 
-/// Create an `array_int_minimum` constraint that enforces that an integer
-/// decision variable takes the minimum value of an array of integer decision
-/// variables.
-pub fn array_int_minimum<Iter>(vars: Iter, min: IntDecision) -> ArrayIntMinimum
+/// Create a constraint that enforces that an integer decision variable takes
+/// the minimum value of an array of integer decision variables.
+pub fn array_minimum_int<Iter>(vars: Iter, min: IntDecision) -> IntArrayMinimum
 where
 	Iter: IntoIterator,
 	Iter::Item: Into<IntDecision>,
 {
-	ArrayIntMinimum {
+	IntArrayMinimum {
 		vars: vars.into_iter().map_into().collect(),
 		min,
 	}
 }
 
-/// Create an `array_var_bool_element` constraint that enforces that a result
-/// Boolean decision variable takes the value equal the element of the given
-/// array of Boolean decision varaibles at the index given by the index integer
-/// decision variable.
-pub fn array_var_bool_element(
-	index: IntDecision,
-	array: Vec<BoolDecision>,
-	result: BoolDecision,
-) -> ArrayVarBoolElement {
-	ArrayVarBoolElement {
-		index,
-		array,
-		result,
-	}
-}
-
-/// Create a `disjunctive_strict` constraint that enforces that the given a list
-/// of integer decision variables representing the start times of tasks and a
-/// list of integer values representing the durations of tasks, the tasks do not
-/// overlap in time.
+/// Create a constraint that enforces that the given a list of integer decision
+/// variables representing the start times of tasks and a list of integer values
+/// representing the durations of tasks, the tasks do not overlap in time.
 pub fn disjunctive_strict(
 	start_times: Vec<IntDecision>,
 	durations: Vec<IntVal>,
@@ -296,32 +295,10 @@ pub fn disjunctive_strict(
 	}
 }
 
-/// Create an `array_var_int_element` constraint that enforces that a result
-/// integer decision variable takes the value equal the element of the given
-/// array of integer decision variable at the given index decision variable.
-pub fn array_var_int_element(
-	index: IntDecision,
-	array: Vec<IntDecision>,
-	result: IntDecision,
-) -> ArrayVarIntElement {
-	ArrayVarIntElement {
-		index,
-		array,
-		result,
-	}
-}
-
-/// Create an `int_abs` constraint that enforces that the second integer
-/// decision variable takes the absolute value of the first integer decision
-/// variable.
-pub fn int_abs(origin: IntDecision, abs: IntDecision) -> IntAbs {
-	IntAbs { origin, abs }
-}
-
-/// Create an `int_div` constraint that enforces that a numerator decision
-/// integer variable divided by a denominator integer decision variable is equal
-/// to a result integer decision variable.
-pub fn int_div(numerator: IntDecision, denominator: IntDecision, result: IntDecision) -> IntDiv {
+/// Create a constraint that enforces that a numerator decision integer variable
+/// divided by a denominator integer decision variable is equal to a result
+/// integer decision variable.
+pub fn div_int(numerator: IntDecision, denominator: IntDecision, result: IntDecision) -> IntDiv {
 	IntDiv {
 		numerator,
 		denominator,
@@ -329,10 +306,16 @@ pub fn int_div(numerator: IntDecision, denominator: IntDecision, result: IntDeci
 	}
 }
 
-/// Create an `int_pow` constraint that enforces that a base integer decision
-/// variable exponentiated by an exponent integer decision variable is equal to
-/// a result integer decision variable.
-pub fn int_pow(base: IntDecision, exponent: IntDecision, result: IntDecision) -> IntPow {
+/// Create constraint that enforces that the given Boolean variable takes the
+/// value `true` if-and-only-if an integer variable is in a given set.
+pub fn int_in_set_reif(var: IntDecision, set: IntSetVal, reif: BoolDecision) -> IntInSetReif {
+	IntInSetReif { var, set, reif }
+}
+
+/// Create a constraint that enforces that a base integer decision variable
+/// exponentiated by an exponent integer decision variable is equal to a result
+/// integer decision variable.
+pub fn pow_int(base: IntDecision, exponent: IntDecision, result: IntDecision) -> IntPow {
 	IntPow {
 		base,
 		exponent,
@@ -340,9 +323,17 @@ pub fn int_pow(base: IntDecision, exponent: IntDecision, result: IntDecision) ->
 	}
 }
 
-/// Create an `int_times` constraint that enforces that the product of the two
-/// integer decision variables is equal to a third.
-pub fn int_times(factor1: IntDecision, factor2: IntDecision, product: IntDecision) -> IntTimes {
+/// Create a `table_int` constraint that enforces that given list of integer
+/// views take their values according to one of the given lists of integer
+/// values.
+pub fn table_int(vars: Vec<IntDecision>, table: Vec<Vec<IntVal>>) -> IntTable {
+	assert!(table.iter().all(|tup| tup.len() == vars.len()), "The number of values in each row of the table must be equal to the number of decision variables.");
+	IntTable { vars, table }
+}
+
+/// Create a constraint that enforces that the product of the two integer
+/// decision variables is equal to a third.
+pub fn times_int(factor1: IntDecision, factor2: IntDecision, product: IntDecision) -> IntTimes {
 	IntTimes {
 		factor1,
 		factor2,
@@ -350,19 +341,21 @@ pub fn int_times(factor1: IntDecision, factor2: IntDecision, product: IntDecisio
 	}
 }
 
-/// Create a `set_in_reif` constraint that enforces that the given Boolean
-/// variable takes the value `true` if-and-only-if an integer variable is in a
-/// given set.
-pub fn set_in_reif(var: IntDecision, set: IntSetVal, reif: BoolDecision) -> SetInReif {
-	SetInReif { var, set, reif }
-}
+impl ElementConstraint for BoolDecision {
+	type Constraint = BoolDecisionArrayElement;
+	type Result = BoolDecision;
 
-/// Create a `table_int` constraint that enforces that given list of integer
-/// views take their values according to one of the given lists of integer
-/// values.
-pub fn table_int(vars: Vec<IntDecision>, table: Vec<Vec<IntVal>>) -> TableInt {
-	assert!(table.iter().all(|tup| tup.len() == vars.len()), "The number of values in each row of the table must be equal to the number of decision variables.");
-	TableInt { vars, table }
+	fn element_constraint(
+		array: Vec<Self>,
+		index: IntDecision,
+		result: Self::Result,
+	) -> Self::Constraint {
+		Self::Constraint {
+			index,
+			array,
+			result,
+		}
+	}
 }
 
 impl From<bool> for BoolDecision {
@@ -385,6 +378,12 @@ impl Not for BoolDecision {
 			IntLess(v, i) => IntGreaterEq(v, i),
 			IntNotEq(v, i) => IntEq(v, i),
 		})
+	}
+}
+
+impl From<BoolDecision> for BoolFormula {
+	fn from(v: BoolDecision) -> Self {
+		Self::Atom(v)
 	}
 }
 
@@ -458,15 +457,21 @@ impl IntDecision {
 	}
 
 	/// Get a Boolean view that represent whether the integer view is greater than
+	/// or equal to the given value.
+	pub fn geq(&self, v: IntVal) -> BoolDecision {
+		!self.lt(v)
+	}
+
+	/// Get a Boolean view that represent whether the integer view is greater than
 	/// the given value.
 	pub fn gt(&self, v: IntVal) -> BoolDecision {
 		self.geq(v + 1)
 	}
 
-	/// Get a Boolean view that represent whether the integer view is greater than
-	/// or equal to the given value.
-	pub fn geq(&self, v: IntVal) -> BoolDecision {
-		!self.lt(v)
+	/// Get a Boolean view that represent whether the integer view is less than or
+	/// equal to the given value.
+	pub fn leq(&self, v: IntVal) -> BoolDecision {
+		self.lt(v + 1)
 	}
 
 	/// Get a Boolean view that represent whether the integer view is less than
@@ -494,12 +499,6 @@ impl IntDecision {
 				_ => unreachable!(),
 			},
 		}
-	}
-
-	/// Get a Boolean view that represent whether the integer view is less than or
-	/// equal to the given value.
-	pub fn leq(&self, v: IntVal) -> BoolDecision {
-		self.lt(v + 1)
 	}
 
 	/// Get a Boolean view that represent whether the integer view is not equal to
@@ -544,9 +543,20 @@ impl Add<IntVal> for IntDecision {
 	}
 }
 
-impl From<i64> for IntDecision {
-	fn from(value: i64) -> Self {
-		IntDecision(IntDecisionInner::Const(value))
+impl ElementConstraint for IntDecision {
+	type Constraint = IntDecisionArrayElement;
+	type Result = IntDecision;
+
+	fn element_constraint(
+		array: Vec<Self>,
+		index: IntDecision,
+		result: Self::Result,
+	) -> Self::Constraint {
+		Self::Constraint {
+			index,
+			array,
+			result,
+		}
 	}
 }
 
@@ -556,6 +566,12 @@ impl From<BoolDecision> for IntDecision {
 			BoolDecisionInner::Const(b) => (b as IntVal).into(),
 			_ => IntDecision(IntDecisionInner::Bool(LinearTransform::offset(0), value)),
 		}
+	}
+}
+
+impl From<i64> for IntDecision {
+	fn from(value: i64) -> Self {
+		IntDecision(IntDecisionInner::Const(value))
 	}
 }
 
@@ -619,23 +635,6 @@ impl Sub<IntVal> for IntDecision {
 
 impl IntLinExpr {
 	/// Create a new integer linear constraint that enforces that the sum of the
-	/// expressions in the object is less than or equal to the given value.
-	pub fn lt(self, rhs: IntVal) -> IntLinear {
-		self.leq(rhs - 1)
-	}
-
-	/// Create a new integer linear constraint that enforces that the sum of the
-	/// expressions in the object is less than the given value.
-	pub fn leq(self, rhs: IntVal) -> IntLinear {
-		IntLinear {
-			terms: self.terms,
-			operator: LinOperator::LessEq,
-			rhs,
-			reif: None,
-		}
-	}
-
-	/// Create a new integer linear constraint that enforces that the sum of the
 	/// expressions in the object is equal to the given value.
 	pub fn eq(self, rhs: IntVal) -> IntLinear {
 		IntLinear {
@@ -657,6 +656,22 @@ impl IntLinExpr {
 	/// expressions in the object is greater than the given value.
 	pub fn gt(self, rhs: IntVal) -> IntLinear {
 		self.geq(rhs + 1)
+	}
+
+	/// Create a new integer linear constraint that enforces that the sum of the
+	/// expressions in the object is less than the given value.
+	pub fn leq(self, rhs: IntVal) -> IntLinear {
+		IntLinear {
+			terms: self.terms,
+			operator: LinOperator::LessEq,
+			rhs,
+			reif: None,
+		}
+	}
+	/// Create a new integer linear constraint that enforces that the sum of the
+	/// expressions in the object is less than or equal to the given value.
+	pub fn lt(self, rhs: IntVal) -> IntLinear {
+		self.leq(rhs - 1)
 	}
 	/// Create a new integer linear constraint that enforces that the sum of the
 	/// expressions in the object is not equal to the given value.
@@ -723,12 +738,22 @@ impl Sum<IntDecision> for IntLinExpr {
 	}
 }
 
-impl From<BoolDecision> for LogicFormula {
-	fn from(v: BoolDecision) -> Self {
-		Self::Atom(v)
+impl ElementConstraint for IntVal {
+	type Constraint = IntValArrayElement;
+	type Result = IntDecision;
+
+	fn element_constraint(
+		array: Vec<Self>,
+		index: IntDecision,
+		result: Self::Result,
+	) -> Self::Constraint {
+		Self::Constraint {
+			index,
+			array,
+			result,
+		}
 	}
 }
-
 impl Model {
 	/// Internal method to add a constraint to the model.
 	///
@@ -807,21 +832,21 @@ impl Model {
 		};
 
 		let status = match &mut con_obj {
-			ConstraintStore::AllDifferentInt(c) => c.simplify(self),
-			ConstraintStore::ArrayIntElement(c) => c.simplify(self),
-			ConstraintStore::ArrayIntMinimum(c) => c.simplify(self),
-			ConstraintStore::ArrayVarBoolElement(c) => c.simplify(self),
-			ConstraintStore::ArrayVarIntElement(c) => c.simplify(self),
+			ConstraintStore::IntAllDifferent(c) => c.simplify(self),
+			ConstraintStore::IntValArrayElement(c) => c.simplify(self),
+			ConstraintStore::IntArrayMinimum(c) => c.simplify(self),
+			ConstraintStore::BoolDecisionArrayElement(c) => c.simplify(self),
+			ConstraintStore::IntDecisionArrayElement(c) => c.simplify(self),
 			ConstraintStore::DisjunctiveStrict(c) => c.simplify(self),
 			ConstraintStore::IntAbs(c) => c.simplify(self),
 			ConstraintStore::IntDiv(c) => c.simplify(self),
 			ConstraintStore::IntLinear(c) => c.simplify(self),
 			ConstraintStore::IntPow(c) => c.simplify(self),
 			ConstraintStore::IntTimes(c) => c.simplify(self),
-			ConstraintStore::PropLogic(exp) => exp.simplify(self),
-			ConstraintStore::SetInReif(c) => c.simplify(self),
-			ConstraintStore::TableInt(con) => con.simplify(self),
-			ConstraintStore::UserCustom(con) => con.simplify(self),
+			ConstraintStore::BoolFormula(exp) => exp.simplify(self),
+			ConstraintStore::IntInSetReif(c) => c.simplify(self),
+			ConstraintStore::IntTable(con) => con.simplify(self),
+			ConstraintStore::Other(con) => con.simplify(self),
 		}?;
 		match status {
 			SimplificationStatus::Subsumed => {
@@ -865,20 +890,20 @@ impl Model {
 		let con_store = self.constraints[con].take().unwrap();
 		let mut ctx = ConstraintInitContext { con, model: self };
 		match &con_store {
-			ConstraintStore::AllDifferentInt(con) => {
-				<AllDifferentInt as Constraint<Model>>::initialize(con, &mut ctx);
+			ConstraintStore::IntAllDifferent(con) => {
+				<IntAllDifferent as Constraint<Model>>::initialize(con, &mut ctx);
 			}
-			ConstraintStore::ArrayIntElement(con) => {
-				<ArrayIntElement as Constraint<Model>>::initialize(con, &mut ctx);
+			ConstraintStore::IntValArrayElement(con) => {
+				<IntValArrayElement as Constraint<Model>>::initialize(con, &mut ctx);
 			}
-			ConstraintStore::ArrayIntMinimum(con) => {
-				<ArrayIntMinimum as Constraint<Model>>::initialize(con, &mut ctx);
+			ConstraintStore::IntArrayMinimum(con) => {
+				<IntArrayMinimum as Constraint<Model>>::initialize(con, &mut ctx);
 			}
-			ConstraintStore::ArrayVarBoolElement(con) => {
-				<ArrayVarBoolElement as Constraint<Model>>::initialize(con, &mut ctx);
+			ConstraintStore::BoolDecisionArrayElement(con) => {
+				<BoolDecisionArrayElement as Constraint<Model>>::initialize(con, &mut ctx);
 			}
-			ConstraintStore::ArrayVarIntElement(con) => {
-				<ArrayVarIntElement as Constraint<Model>>::initialize(con, &mut ctx);
+			ConstraintStore::IntDecisionArrayElement(con) => {
+				<IntDecisionArrayElement as Constraint<Model>>::initialize(con, &mut ctx);
 			}
 			ConstraintStore::DisjunctiveStrict(con) => {
 				<DisjunctiveStrict as Constraint<Model>>::initialize(con, &mut ctx);
@@ -898,16 +923,16 @@ impl Model {
 			ConstraintStore::IntTimes(con) => {
 				<IntTimes as Constraint<Model>>::initialize(con, &mut ctx);
 			}
-			ConstraintStore::PropLogic(exp) => {
+			ConstraintStore::BoolFormula(exp) => {
 				<Formula<BoolDecision> as Constraint<Model>>::initialize(exp, &mut ctx);
 			}
-			ConstraintStore::SetInReif(con) => {
-				<SetInReif as Constraint<Model>>::initialize(con, &mut ctx);
+			ConstraintStore::IntInSetReif(con) => {
+				<IntInSetReif as Constraint<Model>>::initialize(con, &mut ctx);
 			}
-			ConstraintStore::TableInt(con) => {
-				<TableInt as Constraint<Model>>::initialize(con, &mut ctx);
+			ConstraintStore::IntTable(con) => {
+				<IntTable as Constraint<Model>>::initialize(con, &mut ctx);
 			}
-			ConstraintStore::UserCustom(con) => con.initialize(&mut ctx),
+			ConstraintStore::Other(con) => con.initialize(&mut ctx),
 		}
 		self.constraints[con] = Some(con_store);
 	}
@@ -957,7 +982,7 @@ impl Model {
 
 		for c in self.constraints.iter().flatten() {
 			match c {
-				ConstraintStore::AllDifferentInt(c) => {
+				ConstraintStore::IntAllDifferent(c) => {
 					for v in &c.vars {
 						if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = v.0 {
 							if self.int_vars[iv].domain.card() <= (c.vars.len() * 100 / 80) {
@@ -966,22 +991,22 @@ impl Model {
 						}
 					}
 				}
-				ConstraintStore::ArrayIntElement(c) => {
+				ConstraintStore::IntValArrayElement(c) => {
 					if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = c.index.0 {
 						let _ = eager_direct.insert(iv);
 					}
 				}
-				ConstraintStore::ArrayVarBoolElement(c) => {
+				ConstraintStore::BoolDecisionArrayElement(c) => {
 					if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = c.index.0 {
 						let _ = eager_direct.insert(iv);
 					}
 				}
-				ConstraintStore::ArrayVarIntElement(c) => {
+				ConstraintStore::IntDecisionArrayElement(c) => {
 					if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = c.index.0 {
 						let _ = eager_direct.insert(iv);
 					}
 				}
-				ConstraintStore::TableInt(con) => {
+				ConstraintStore::IntTable(con) => {
 					for &v in &con.vars {
 						if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = v.0 {
 							let _ = eager_direct.insert(iv);
@@ -1014,25 +1039,6 @@ impl Model {
 			})
 			.collect();
 
-		// self.cnf.variables().map(|v| slv.new_lit()).collect();
-		// for (i, var) in  {
-		// 	let direct_enc = if eager_direct.contains(&i) {
-		// 		EncodingType::Eager
-		// 	} else {
-		// 		EncodingType::Lazy
-		// 	};
-		// 	let order_enc = if eager_order.contains(&i)
-		// 		|| eager_direct.contains(&i)
-		// 		|| var.domain.card() <= config.int_eager_limit()
-		// 	{
-		// 		EncodingType::Eager
-		// 	} else {
-		// 		EncodingType::Lazy
-		// 	};
-		// 	let view = SlvIntVar::new_in(&mut slv, var.domain.clone(), order_enc, direct_enc);
-		// 	map.insert_int(i, view);
-		// }
-		//
 		let map = ReformulationMap { bool_map, int_map };
 
 		// Create constraint data structures within the solver
@@ -1048,39 +1054,15 @@ impl Model {
 	}
 }
 
-impl AddAssign<AllDifferentInt> for Model {
-	fn add_assign(&mut self, constraint: AllDifferentInt) {
-		self.add_constraint(ConstraintStore::AllDifferentInt(constraint));
+impl AddAssign<BoolDecisionArrayElement> for Model {
+	fn add_assign(&mut self, constraint: BoolDecisionArrayElement) {
+		self.add_constraint(ConstraintStore::BoolDecisionArrayElement(constraint));
 	}
 }
 
-impl AddAssign<ArrayIntElement> for Model {
-	fn add_assign(&mut self, constraint: ArrayIntElement) {
-		self.add_constraint(ConstraintStore::ArrayIntElement(constraint));
-	}
-}
-
-impl AddAssign<ArrayIntMinimum> for Model {
-	fn add_assign(&mut self, constraint: ArrayIntMinimum) {
-		self.add_constraint(ConstraintStore::ArrayIntMinimum(constraint));
-	}
-}
-
-impl AddAssign<ArrayVarBoolElement> for Model {
-	fn add_assign(&mut self, constraint: ArrayVarBoolElement) {
-		self.add_constraint(ConstraintStore::ArrayVarBoolElement(constraint));
-	}
-}
-
-impl AddAssign<ArrayVarIntElement> for Model {
-	fn add_assign(&mut self, constraint: ArrayVarIntElement) {
-		self.add_constraint(ConstraintStore::ArrayVarIntElement(constraint));
-	}
-}
-
-impl AddAssign<Formula<BoolDecision>> for Model {
-	fn add_assign(&mut self, constraint: Formula<BoolDecision>) {
-		self.add_constraint(ConstraintStore::PropLogic(constraint));
+impl AddAssign<BoxedConstraint> for Model {
+	fn add_assign(&mut self, constraint: BoxedConstraint) {
+		self.add_constraint(ConstraintStore::Other(constraint));
 	}
 }
 
@@ -1090,15 +1072,15 @@ impl AddAssign<Branching> for Model {
 	}
 }
 
-impl AddAssign<BoxedConstraint> for Model {
-	fn add_assign(&mut self, constraint: BoxedConstraint) {
-		self.add_constraint(ConstraintStore::UserCustom(constraint));
-	}
-}
-
 impl AddAssign<DisjunctiveStrict> for Model {
 	fn add_assign(&mut self, constraint: DisjunctiveStrict) {
 		self.add_constraint(ConstraintStore::DisjunctiveStrict(constraint));
+	}
+}
+
+impl AddAssign<Formula<BoolDecision>> for Model {
+	fn add_assign(&mut self, constraint: Formula<BoolDecision>) {
+		self.add_constraint(ConstraintStore::BoolFormula(constraint));
 	}
 }
 
@@ -1108,9 +1090,33 @@ impl AddAssign<IntAbs> for Model {
 	}
 }
 
+impl AddAssign<IntAllDifferent> for Model {
+	fn add_assign(&mut self, constraint: IntAllDifferent) {
+		self.add_constraint(ConstraintStore::IntAllDifferent(constraint));
+	}
+}
+
+impl AddAssign<IntArrayMinimum> for Model {
+	fn add_assign(&mut self, constraint: IntArrayMinimum) {
+		self.add_constraint(ConstraintStore::IntArrayMinimum(constraint));
+	}
+}
+
+impl AddAssign<IntDecisionArrayElement> for Model {
+	fn add_assign(&mut self, constraint: IntDecisionArrayElement) {
+		self.add_constraint(ConstraintStore::IntDecisionArrayElement(constraint));
+	}
+}
+
 impl AddAssign<IntDiv> for Model {
 	fn add_assign(&mut self, constraint: IntDiv) {
 		self.add_constraint(ConstraintStore::IntDiv(constraint));
+	}
+}
+
+impl AddAssign<IntInSetReif> for Model {
+	fn add_assign(&mut self, constraint: IntInSetReif) {
+		self.add_constraint(ConstraintStore::IntInSetReif(constraint));
 	}
 }
 
@@ -1126,21 +1132,21 @@ impl AddAssign<IntPow> for Model {
 	}
 }
 
+impl AddAssign<IntTable> for Model {
+	fn add_assign(&mut self, constraint: IntTable) {
+		self.add_constraint(ConstraintStore::IntTable(constraint));
+	}
+}
+
 impl AddAssign<IntTimes> for Model {
 	fn add_assign(&mut self, constraint: IntTimes) {
 		self.add_constraint(ConstraintStore::IntTimes(constraint));
 	}
 }
 
-impl AddAssign<SetInReif> for Model {
-	fn add_assign(&mut self, constraint: SetInReif) {
-		self.add_constraint(ConstraintStore::SetInReif(constraint));
-	}
-}
-
-impl AddAssign<TableInt> for Model {
-	fn add_assign(&mut self, constraint: TableInt) {
-		self.add_constraint(ConstraintStore::TableInt(constraint));
+impl AddAssign<IntValArrayElement> for Model {
+	fn add_assign(&mut self, constraint: IntValArrayElement) {
+		self.add_constraint(ConstraintStore::IntValArrayElement(constraint));
 	}
 }
 
@@ -1361,6 +1367,56 @@ impl SimplificationActions for Model {
 		}
 	}
 
+	fn set_int_not_eq(&mut self, var: IntDecision, val: IntVal) -> Result<(), ReformulationError> {
+		self.set_int_not_in_set(var, &(val..=val).into())
+	}
+
+	fn set_int_not_in_set(
+		&mut self,
+		var: IntDecision,
+		values: &IntSetVal,
+	) -> Result<(), ReformulationError> {
+		use IntDecisionInner::*;
+
+		match var.0 {
+			Var(v) => {
+				let diff: RangeList<_> = self.int_vars[v].domain.diff(values);
+				if diff.is_empty() {
+					return Err(ReformulationError::TrivialUnsatisfiable);
+				} else if self.int_vars[v].domain == diff {
+					return Ok(());
+				}
+				self.int_vars[v].domain = diff;
+				let constraints = self.int_vars[v].constraints.clone();
+				for c in constraints {
+					self.enqueue(c);
+				}
+				Ok(())
+			}
+			Const(v) => {
+				if values.contains(&v) {
+					Err(ReformulationError::TrivialUnsatisfiable)
+				} else {
+					Ok(())
+				}
+			}
+			Linear(trans, iv) => {
+				let mask = trans.rev_transform_int_set(values);
+				self.set_int_not_in_set(IntDecision(Var(iv)), &mask)
+			}
+			Bool(trans, b) => {
+				let values = trans.rev_transform_int_set(values);
+				if values.contains(&0) {
+					self.set_bool(b)?;
+				}
+				if values.contains(&1) {
+					self.set_bool(!b)?;
+				}
+				Ok(())
+			}
+		}
+	}
+
 	fn set_int_upper_bound(
 		&mut self,
 		var: IntDecision,
@@ -1459,54 +1515,40 @@ impl SimplificationActions for Model {
 			},
 		}
 	}
+}
 
-	fn set_int_not_eq(&mut self, var: IntDecision, val: IntVal) -> Result<(), ReformulationError> {
-		self.set_int_in_set(var, &(val..=val).into())
-	}
+impl ElementConstraint for bool {
+	type Constraint = IntInSetReif;
+	type Result = BoolDecision;
 
-	fn set_int_not_in_set(
-		&mut self,
-		var: IntDecision,
-		values: &IntSetVal,
-	) -> Result<(), ReformulationError> {
-		use IntDecisionInner::*;
+	fn element_constraint(
+		array: Vec<Self>,
+		index: IntDecision,
+		result: Self::Result,
+	) -> Self::Constraint {
+		// Convert array of boolean values to a set literals of the indices where
+		// the value is true
+		let mut ranges = Vec::new();
+		let mut start = None;
+		for (i, b) in array.iter().enumerate() {
+			match (b, start) {
+				(true, None) => start = Some(i as IntVal),
+				(false, Some(s)) => {
+					ranges.push(s..=i as IntVal);
+					start = None;
+				}
+				(false, None) | (true, Some(_)) => {}
+			}
+		}
+		if let Some(s) = start {
+			ranges.push(s..=array.len() as IntVal);
+		}
+		assert_ne!(ranges.len(), 0, "unexpected empty range list");
 
-		match var.0 {
-			Var(v) => {
-				let diff: RangeList<_> = self.int_vars[v].domain.diff(values);
-				if diff.is_empty() {
-					return Err(ReformulationError::TrivialUnsatisfiable);
-				} else if self.int_vars[v].domain == diff {
-					return Ok(());
-				}
-				self.int_vars[v].domain = diff;
-				let constraints = self.int_vars[v].constraints.clone();
-				for c in constraints {
-					self.enqueue(c);
-				}
-				Ok(())
-			}
-			Const(v) => {
-				if values.contains(&v) {
-					Err(ReformulationError::TrivialUnsatisfiable)
-				} else {
-					Ok(())
-				}
-			}
-			Linear(trans, iv) => {
-				let mask = trans.rev_transform_int_set(values);
-				self.set_int_not_in_set(IntDecision(Var(iv)), &mask)
-			}
-			Bool(trans, b) => {
-				let values = trans.rev_transform_int_set(values);
-				if values.contains(&0) {
-					self.set_bool(b)?;
-				}
-				if values.contains(&1) {
-					self.set_bool(!b)?;
-				}
-				Ok(())
-			}
+		Self::Constraint {
+			var: index,
+			set: RangeList::from_iter(ranges),
+			reif: result,
 		}
 	}
 }

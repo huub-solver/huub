@@ -16,17 +16,16 @@ use flatzinc_serde::{
 };
 use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;
-use rangelist::{IntervalIterator, RangeList};
+use rangelist::IntervalIterator;
 use thiserror::Error;
 use tracing::warn;
 
 use crate::{
-	actions::SimplificationActions, all_different_int, array_int_element, array_int_maximum,
-	array_int_minimum, array_var_bool_element, array_var_int_element,
-	constraints::table_int::TableInt, disjunctive_strict, int_abs, int_div, int_pow, int_times,
-	reformulate::ReformulationError, set_in_reif, table_int, BoolDecision, Branching, Decision,
-	IntDecision, IntDecisionInner, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal,
-	ValueSelection, VariableSelection,
+	abs_int, actions::SimplificationActions, all_different_int, array_element, array_maximum_int,
+	array_minimum_int, constraints::int_table::IntTable, disjunctive_strict, div_int,
+	int_in_set_reif, pow_int, reformulate::ReformulationError, table_int, times_int, BoolDecision,
+	Branching, Decision, IntDecision, IntDecisionInner, IntLinExpr, IntSetVal, IntVal, Model,
+	NonZeroIntVal, ValueSelection, VariableSelection,
 };
 
 #[derive(Error, Debug)]
@@ -441,7 +440,7 @@ where
 		transitions: Vec<Vec<IntVal>>,
 		init_state: IntVal,
 		accept_states: HashSet<IntVal>,
-	) -> Vec<TableInt> {
+	) -> Vec<IntTable> {
 		// TODO: Add the regular checking
 
 		let mut table_constraints = Vec::new();
@@ -897,26 +896,7 @@ where
 						let idx = self.arg_int(idx)?;
 						let val = self.arg_bool(val)?;
 
-						// Convert array of boolean values to a set literals of the indices where
-						// the value is true
-						let mut ranges = Vec::new();
-						let mut start = None;
-						for (i, b) in arr.iter().enumerate() {
-							match (b, start) {
-								(true, None) => start = Some((i + 1) as IntVal),
-								(false, Some(s)) => {
-									ranges.push(s..=i as IntVal);
-									start = None;
-								}
-								(false, None) | (true, Some(_)) => {}
-							}
-						}
-						if let Some(s) = start {
-							ranges.push(s..=arr.len() as IntVal);
-						}
-						assert_ne!(ranges.len(), 0, "unexpected empty range list");
-
-						self.prb += set_in_reif(idx, RangeList::from_iter(ranges), val);
+						self.prb += array_element(arr, idx - 1, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_bool_element",
@@ -927,14 +907,14 @@ where
 				}
 				"array_int_element" => {
 					if let [idx, arr, val] = c.args.as_slice() {
-						let arr: Result<Vec<_>, _> = self
+						let arr: Vec<_> = self
 							.arg_array(arr)?
 							.iter()
 							.map(|l| self.par_int(l))
-							.collect();
+							.try_collect()?;
 						let idx = self.arg_int(idx)?;
 						let val = self.arg_int(val)?;
-						self.prb += array_int_element(idx - 1, arr?, val);
+						self.prb += array_element(arr, idx - 1, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_int_element",
@@ -953,7 +933,7 @@ where
 						let idx = self.arg_int(idx)?;
 						let val = self.arg_bool(val)?;
 
-						self.prb += array_var_bool_element(idx - 1, arr, val);
+						self.prb += array_element(arr, idx - 1, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_var_bool_element",
@@ -964,14 +944,15 @@ where
 				}
 				"array_var_int_element" => {
 					if let [idx, arr, val] = c.args.as_slice() {
-						let arr: Result<Vec<_>, _> = self
+						let arr: Vec<_> = self
 							.arg_array(arr)?
 							.iter()
 							.map(|l| self.lit_int(l))
-							.collect();
+							.try_collect()?;
 						let idx = self.arg_int(idx)?;
 						let val = self.arg_int(val)?;
-						self.prb += array_var_int_element(idx - 1, arr?, val);
+
+						self.prb += array_element(arr, idx - 1, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_var_int_element",
@@ -1117,9 +1098,9 @@ where
 							args.iter().map(|l| self.lit_int(l)).collect();
 						let m = self.arg_int(m)?;
 						if is_maximum {
-							self.prb += array_int_maximum(args?, m);
+							self.prb += array_maximum_int(args?, m);
 						} else {
-							self.prb += array_int_minimum(args?, m);
+							self.prb += array_minimum_int(args?, m);
 						}
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
@@ -1257,7 +1238,7 @@ where
 					if let [origin, abs] = c.args.as_slice() {
 						let origin = self.arg_int(origin)?;
 						let abs = self.arg_int(abs)?;
-						self.prb += int_abs(origin, abs);
+						self.prb += abs_int(origin, abs);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "int_abs",
@@ -1271,7 +1252,7 @@ where
 						let num = self.arg_int(num)?;
 						let denom = self.arg_int(denom)?;
 						let res = self.arg_int(res)?;
-						self.prb += int_div(num, denom, res);
+						self.prb += div_int(num, denom, res);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "int_div",
@@ -1434,9 +1415,9 @@ where
 						let b = self.arg_int(b)?;
 						let m = self.arg_int(m)?;
 						if is_maximum {
-							self.prb += array_int_maximum(vec![a, b], m);
+							self.prb += array_maximum_int(vec![a, b], m);
 						} else {
-							self.prb += array_int_minimum(vec![a, b], m);
+							self.prb += array_minimum_int(vec![a, b], m);
 						}
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
@@ -1451,7 +1432,7 @@ where
 						let base = self.arg_int(base)?;
 						let exponent = self.arg_int(exponent)?;
 						let res = self.arg_int(res)?;
-						self.prb += int_pow(base, exponent, res);
+						self.prb += pow_int(base, exponent, res);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "int_pow",
@@ -1465,7 +1446,7 @@ where
 						let a = self.arg_int(x)?;
 						let b = self.arg_int(y)?;
 						let m = self.arg_int(z)?;
-						self.prb += int_times(a, b, m);
+						self.prb += times_int(a, b, m);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "int_times",
@@ -1494,7 +1475,7 @@ where
 						let s = self.arg_par_set(s)?;
 						let r = self.arg_bool(r)?;
 
-						self.prb += set_in_reif(x, s, r);
+						self.prb += int_in_set_reif(x, s, r);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "set_in_reif",

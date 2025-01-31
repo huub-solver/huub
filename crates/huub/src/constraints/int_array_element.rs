@@ -1,16 +1,18 @@
-//! Structures and algorithms for the `array_var_int_element` constraint, which
-//! enforces that a resulting variable equals an element of an array of
-//! variables, chosen by an index variable.
+//! Structures and algorithms for the integer array element constraint, which
+//! enforces that a resulting variable equals an element of an array of integer
+//! values or decision variables, chosen by an index variable.
+
+use std::iter::once;
 
 use itertools::Itertools;
 use pindakaas::ClauseDatabaseTools;
 
 use crate::{
 	actions::{
-		ConstraintInitActions, ExplanationActions, PropagatorInitActions, ReformulationActions,
-		SimplificationActions,
+		ConstraintInitActions, ExplanationActions, PropagationActions, PropagatorInitActions,
+		ReformulationActions, SimplificationActions,
 	},
-	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
+	constraints::{Conflict, Constraint, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, IntLitMeaning,
@@ -20,12 +22,13 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// Representation of the `array_var_int_element` constraint within a model.
+/// Representation of the `array_element` constraint with an array of integer
+/// decision variables within a model.
 ///
 /// This constraint enforces that a result integer decision variable takes the
 /// value equal the element of the given array of integer decision variable at
 /// the given index decision variable.
-pub struct ArrayVarIntElement {
+pub struct IntDecisionArrayElement {
 	/// The array of integer values
 	pub(crate) array: Vec<IntDecision>,
 	/// The index variable
@@ -35,8 +38,9 @@ pub struct ArrayVarIntElement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Bounds consistent propagator for the `array_var_int_element` constraint.
-pub struct ArrayVarIntElementBounds {
+/// Bounds consistent propagator for the `array_element` constraint with an
+/// array of integer decision variables.
+pub struct IntDecisionArrayElementBounds {
 	/// Array of variables from which the element is selected
 	vars: Vec<IntView>,
 	/// Variable that represent the result of the selection
@@ -49,7 +53,23 @@ pub struct ArrayVarIntElementBounds {
 	max_support: TrailedInt,
 }
 
-impl<S: SimplificationActions> Constraint<S> for ArrayVarIntElement {
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Representation of the `array_element` constraint with an array of integer
+/// values within a model.
+///
+/// This constraint enforces that a result integer decision variable takes the
+/// value equal the element of the given array of integer values at the given
+/// index decision variable.
+pub struct IntValArrayElement {
+	/// The array of integer values
+	pub(crate) array: Vec<IntVal>,
+	/// The index variable
+	pub(crate) index: IntDecision,
+	/// The resulting variable
+	pub(crate) result: IntDecision,
+}
+
+impl<S: SimplificationActions> Constraint<S> for IntDecisionArrayElement {
 	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
 		for &a in &self.array {
 			actions.simplify_on_change_int(a);
@@ -84,11 +104,11 @@ impl<S: SimplificationActions> Constraint<S> for ArrayVarIntElement {
 		let array = self.array.iter().map(|&v| slv.get_solver_int(v)).collect();
 		let result = slv.get_solver_int(self.result);
 		let index = slv.get_solver_int(self.index);
-		ArrayVarIntElementBounds::new_in(slv, array, result, index)
+		IntDecisionArrayElementBounds::new_in(slv, array, result, index)
 	}
 }
 
-impl ArrayVarIntElementBounds {
+impl IntDecisionArrayElementBounds {
 	/// Create a new [`ArrayVarIntElementBounds`] propagator and post it in the
 	/// solver.
 	pub fn new_in<P>(
@@ -152,7 +172,7 @@ impl ArrayVarIntElementBounds {
 	}
 }
 
-impl<P, E> Propagator<P, E> for ArrayVarIntElementBounds
+impl<P, E> Propagator<P, E> for IntDecisionArrayElementBounds
 where
 	P: PropagationActions,
 	E: ExplanationActions,
@@ -298,6 +318,36 @@ where
 	}
 }
 
+impl<S: SimplificationActions> Constraint<S> for IntValArrayElement {
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let index = slv.get_solver_int(self.index);
+		let result = slv.get_solver_int(self.result);
+
+		let idx_map = self
+			.array
+			.iter()
+			.enumerate()
+			.map(|(i, v)| (*v, i as IntVal))
+			.into_group_map();
+
+		for (val, idxs) in idx_map {
+			let val_eq = slv.get_int_lit(result, IntLitMeaning::Eq(val));
+			let idxs: Vec<_> = idxs
+				.into_iter()
+				.map(|i| slv.get_int_lit(index, IntLitMeaning::Eq(i)))
+				.collect();
+
+			for &i in idxs.iter() {
+				// (idx = i) -> (val = arr[i])
+				slv.add_clause([!i, val_eq])?;
+			}
+			// (idx not in idxs) -> (val != arr[i])
+			slv.add_clause(idxs.into_iter().chain(once(!val_eq)))?;
+		}
+		Ok(())
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
@@ -306,8 +356,8 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		array_var_int_element,
-		constraints::array_var_int_element::ArrayVarIntElementBounds,
+		array_element,
+		constraints::int_array_element::IntDecisionArrayElementBounds,
 		solver::{
 			int_var::{EncodingType, IntVar},
 			Solver,
@@ -350,7 +400,7 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		ArrayVarIntElementBounds::new_in(&mut slv, vec![a, b, c], y, index).unwrap();
+		IntDecisionArrayElementBounds::new_in(&mut slv, vec![a, b, c], y, index).unwrap();
 
 		slv.expect_solutions(
 			&[index, y, a, b, c],
@@ -403,7 +453,7 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		ArrayVarIntElementBounds::new_in(&mut slv, vec![a, b], y, index).unwrap();
+		IntDecisionArrayElementBounds::new_in(&mut slv, vec![a, b], y, index).unwrap();
 
 		slv.expect_solutions(
 			&[index, y, a, b],
@@ -424,7 +474,7 @@ mod tests {
 		let result = prb.new_int_var((1..=2).into());
 		let index = prb.new_int_var((0..=2).into());
 
-		prb += array_var_int_element(index, vec![a, b, c], result);
+		prb += array_element(vec![a, b, c], index, result);
 		prb.assert_unsatisfiable();
 	}
 }

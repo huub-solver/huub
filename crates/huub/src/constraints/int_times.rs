@@ -1,4 +1,4 @@
-//! Structures and algorithms for the `int_times` constraint, which enforces
+//! Structures and algorithms for the integer times constraint, which enforces
 //! that the product of two integer variables is equal to a third integer
 //! variable.
 
@@ -16,7 +16,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// Representation of the `int_times` constraint within a model.
+/// Representation of the `times_int` constraint within a model.
 ///
 /// This constraint enforces that the product of the two integer decision
 /// variables is equal to a third.

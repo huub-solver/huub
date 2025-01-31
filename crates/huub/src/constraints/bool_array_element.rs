@@ -1,4 +1,4 @@
-//! Structures and algorithms for the `array_var_bool_element` constraint, which
+//! Structures and algorithms for the Boolean array element constraint, which
 //! enforces that a resulting variable equals an element of an array of Boolean
 //! decision variables, chosen by an index variable.
 
@@ -15,12 +15,13 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// Representation of the `array_var_bool_element` constraint within a model.
+/// Representation of the `array_element` constraint with an array of Boolean
+/// decision variables within a model.
 ///
 /// This constraint enforces that a result Boolean decision variable takes the
 /// value equal the element of the given array of Boolean decision varaibles at
 /// the index given by the index integer decision variable.
-pub struct ArrayVarBoolElement {
+pub struct BoolDecisionArrayElement {
 	/// The array of Boolean decision variables
 	pub(crate) array: Vec<BoolDecision>,
 	/// The index variable
@@ -29,7 +30,7 @@ pub struct ArrayVarBoolElement {
 	pub(crate) result: BoolDecision,
 }
 
-impl<S: SimplificationActions> Constraint<S> for ArrayVarBoolElement {
+impl<S: SimplificationActions> Constraint<S> for BoolDecisionArrayElement {
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		if let Some(i) = actions.get_int_val(self.index) {
 			actions.add_constraint(Formula::Equiv(vec![

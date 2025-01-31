@@ -1,6 +1,6 @@
-//! Structures and algorithms for the `int_div` constraint, which enforces that
-//! a numerator, a denominator, and a result variable are correctly related by
-//! integer division.
+//! Structures and algorithms for the integer division constraint, which
+//! enforces that a numerator, a denominator, and a result variable are
+//! correctly related by integer division.
 
 use std::mem;
 
@@ -18,7 +18,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// Representation of the `int_div` constraint within a model.
+/// Representation of the `div_int` constraint within a model.
 ///
 /// This constraint enforces that a numerator decision integer variable divided
 /// by a denominator integer decision variable is equal to a result integer

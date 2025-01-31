@@ -1,6 +1,6 @@
-//! Structures and algorithms for the `int_pow` constraint, which enforces that
-//! the result of exponentiation of two integer variables is equal to a third
-//! integer variable.
+//! Structures and algorithms for the integer power constraint, which enforces
+//! that the result of exponentiation of two integer variables is equal to a
+//! third integer variable.
 
 use pindakaas::ClauseDatabaseTools;
 
@@ -15,7 +15,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// Representation of the `int_pow` constraint within a model.
+/// Representation of the `pow_int` constraint within a model.
 ///
 /// This constraint enforces that a base integer decision variable
 /// exponentiated by an exponent integer decision variable is equal to a result

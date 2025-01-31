@@ -1,6 +1,6 @@
-//! Structures and algorithms for the `table_int` constraint, which constraints
-//! a sequence of integer decision variable to be assigned to a set of possible
-//! sequences of integer values.
+//! Structures and algorithms for the integer table constraint, which
+//! constraints a sequence of integer decision variable to be assigned to a set
+//! of possible sequences of integer values.
 
 use itertools::Itertools;
 use pindakaas::ClauseDatabaseTools;
@@ -18,14 +18,14 @@ use crate::{
 ///
 /// This constraint enforces that the given list of integer views take their
 /// values according to one of the given lists of integer values.
-pub struct TableInt {
+pub struct IntTable {
 	/// List of variables that must take the values of a row in the table.
 	pub(crate) vars: Vec<IntDecision>,
 	/// The table of possible values for the variables.
 	pub(crate) table: Vec<Vec<IntVal>>,
 }
 
-impl<S: SimplificationActions> Constraint<S> for TableInt {
+impl<S: SimplificationActions> Constraint<S> for IntTable {
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		match self.vars.len() {
 			0 => return Ok(SimplificationStatus::Subsumed),

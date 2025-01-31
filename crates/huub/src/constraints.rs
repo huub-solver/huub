@@ -1,18 +1,17 @@
 //! Module containing the definitions for propagators and their implementations.
 
-pub mod all_different_int;
-pub mod array_int_element;
-pub mod array_int_minimum;
-pub mod array_var_bool_element;
-pub mod array_var_int_element;
+pub mod bool_array_element;
 pub mod disjunctive_strict;
 pub mod int_abs;
+pub mod int_all_different;
+pub mod int_array_element;
+pub mod int_array_minimum;
 pub mod int_div;
+pub mod int_in_set;
 pub mod int_linear;
 pub mod int_pow;
+pub mod int_table;
 pub mod int_times;
-pub mod set_in_reif;
-pub mod table_int;
 
 use std::{
 	error::Error,

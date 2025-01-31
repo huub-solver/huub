@@ -1,4 +1,4 @@
-//! Structures and algorithms for the `set_in_reif` constraint, which
+//! Structures and algorithms for the integer in set constraint, which
 //! constraints that an integer decision variable is assigned to a member of a
 //! given set if-and-only-if a given Boolean decision variable is assigned to
 //! `true`.
@@ -13,11 +13,11 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Representation of the `set_in_reif` constraint within a model.
+/// Representation of the `int_in_set_reif` constraint within a model.
 ///
 /// This constraint enforces that the given Boolean variable takes the value
 /// `true` if-and-only-if an integer variable is in a given set.
-pub struct SetInReif {
+pub struct IntInSetReif {
 	/// The integer decision variable monitored.
 	pub(crate) var: IntDecision,
 	/// The set of considered values for the integer decision variable.
@@ -27,7 +27,7 @@ pub struct SetInReif {
 	pub(crate) reif: BoolDecision,
 }
 
-impl<S: SimplificationActions> Constraint<S> for SetInReif {
+impl<S: SimplificationActions> Constraint<S> for IntInSetReif {
 	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
 		actions.simplify_on_change_bool(self.reif);
 	}

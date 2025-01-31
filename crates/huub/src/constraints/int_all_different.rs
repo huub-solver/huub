@@ -1,4 +1,4 @@
-//! Structure and algorithms for the `all_different_int` constraint, which
+//! Structure and algorithms for the integer all different constraint, which
 //! enforces that a list of integer variables each take a different value.
 
 use itertools::{Either, Itertools};
@@ -21,19 +21,19 @@ use crate::{
 ///
 /// This constraint enforces that all the given integer decisions take different
 /// values.
-pub struct AllDifferentInt {
+pub struct IntAllDifferent {
 	/// List of integer decision variables that must take different values.
 	pub(crate) vars: Vec<IntDecision>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Value consistent propagator for the `all_different_int` constraint.
-pub struct AllDifferentIntValue {
+pub struct IntAllDifferentValue {
 	/// List of integer variables that must take different values.
 	vars: Vec<IntView>,
 }
 
-impl<S: SimplificationActions> Constraint<S> for AllDifferentInt {
+impl<S: SimplificationActions> Constraint<S> for IntAllDifferent {
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		let (vals, vars): (Vec<_>, Vec<_>) = self.vars.iter().partition_map(|&var| {
 			if let Some(val) = actions.get_int_val(var) {
@@ -53,20 +53,20 @@ impl<S: SimplificationActions> Constraint<S> for AllDifferentInt {
 		if vals.is_empty() {
 			return Ok(SimplificationStatus::Fixpoint);
 		}
-		for v in &self.vars {
-			actions.set_int_not_in_set(*v, &neg_dom)?;
+		for &v in &self.vars {
+			actions.set_int_not_in_set(v, &neg_dom)?;
 		}
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let vars: Vec<_> = self.vars.iter().map(|v| slv.get_solver_int(*v)).collect();
-		AllDifferentIntValue::new_in(slv, vars);
+		IntAllDifferentValue::new_in(slv, vars);
 		Ok(())
 	}
 }
 
-impl AllDifferentIntValue {
+impl IntAllDifferentValue {
 	/// Create a new [`AllDifferentIntValue`] propagator and post it in the
 	/// solver.
 	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, vars: Vec<IntView>) {
@@ -83,7 +83,7 @@ impl AllDifferentIntValue {
 	}
 }
 
-impl<P, E> Propagator<P, E> for AllDifferentIntValue
+impl<P, E> Propagator<P, E> for IntAllDifferentValue
 where
 	P: PropagationActions,
 	E: ExplanationActions,
@@ -113,7 +113,7 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		constraints::all_different_int::AllDifferentIntValue,
+		constraints::int_all_different::IntAllDifferentValue,
 		solver::{
 			int_var::{EncodingType, IntVar},
 			IntView, SolveResult, Solver,
@@ -144,7 +144,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		AllDifferentIntValue::new_in(&mut slv, vec![a, b, c]);
+		IntAllDifferentValue::new_in(&mut slv, vec![a, b, c]);
 
 		slv.assert_all_solutions(&[a, b, c], |sol| sol.iter().all_unique());
 	}
@@ -172,7 +172,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		AllDifferentIntValue::new_in(&mut slv, vec![a, b, c]);
+		IntAllDifferentValue::new_in(&mut slv, vec![a, b, c]);
 
 		slv.assert_unsatisfiable();
 	}
@@ -197,7 +197,7 @@ mod tests {
 				}
 			}
 
-			AllDifferentIntValue::new_in(&mut slv, vars.clone());
+			IntAllDifferentValue::new_in(&mut slv, vars.clone());
 
 			all_vars.push(vars);
 		});
@@ -205,7 +205,7 @@ mod tests {
 		for i in 0..9 {
 			let col_vars: Vec<IntView> = (0..9).map(|j| all_vars[j][i]).collect();
 
-			AllDifferentIntValue::new_in(&mut slv, col_vars);
+			IntAllDifferentValue::new_in(&mut slv, col_vars);
 		}
 		// add all different propagator for each 3 by 3 grid
 		for i in 0..3 {
@@ -217,7 +217,7 @@ mod tests {
 					}
 				}
 
-				AllDifferentIntValue::new_in(&mut slv, block_vars);
+				IntAllDifferentValue::new_in(&mut slv, block_vars);
 			}
 		}
 		assert_eq!(
