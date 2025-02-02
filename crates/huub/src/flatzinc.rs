@@ -1584,12 +1584,13 @@ where
 		}
 
 		let mut resolved = HashSet::new();
-		for (k, li) in unify_map.iter() {
+		let keys = unify_map.keys().sorted();
+		for k in keys {
+			let li = unify_map[k].borrow();
 			if resolved.contains(k) {
 				continue;
 			}
 			let ty = &self.fzn.variables[k].ty;
-			let li = li.borrow();
 			// Determine the domain of the list of literals
 			let domain: Option<Literal<S>> = match ty {
 				Type::Bool => {

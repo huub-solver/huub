@@ -226,7 +226,10 @@ where
 		if self.verbose > 0 {
 			let mut lit_map = HashMap::new();
 			let mut int_map = vec![ustr(""); slv.init_statistics().int_vars()];
-			for (name, v) in var_map.iter() {
+			let mut keys: Vec<_> = var_map.keys().collect();
+			keys.sort();
+			for name in keys {
+				let v = var_map[name];
 				match v {
 					View::Bool(bv) => {
 						if let Some(info) = bv.reverse_map_info() {

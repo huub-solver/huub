@@ -323,18 +323,23 @@ impl<S: SimplificationActions> Constraint<S> for IntValArrayElement {
 		let index = slv.get_solver_int(self.index);
 		let result = slv.get_solver_int(self.result);
 
+		// Make a map from the values of the array to the indexes at which they
+		// occur
 		let idx_map = self
 			.array
 			.iter()
 			.enumerate()
 			.map(|(i, v)| (*v, i as IntVal))
 			.into_group_map();
+		// Sort keys to ensure deterministic order
+		let keys = idx_map.keys().sorted();
 
-		for (val, idxs) in idx_map {
+		for &val in keys {
+			let idxs = &idx_map[&val];
 			let val_eq = slv.get_int_lit(result, IntLitMeaning::Eq(val));
 			let idxs: Vec<_> = idxs
-				.into_iter()
-				.map(|i| slv.get_int_lit(index, IntLitMeaning::Eq(i)))
+				.iter()
+				.map(|&i| slv.get_int_lit(index, IntLitMeaning::Eq(i)))
 				.collect();
 
 			for &i in idxs.iter() {
