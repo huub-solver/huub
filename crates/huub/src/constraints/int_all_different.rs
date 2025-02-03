@@ -28,21 +28,6 @@ pub struct IntAllDifferentValue {
 	vars: Vec<IntView>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Bounds consistent propagator for the `all_different_int` constraint.
-pub struct IntAllDifferentBounds {
-	/// List of integer variables that must take different values.
-	vars: Vec<IntView>,      /// Integer variables with domains
-	interval: Vec<Interval>, /// Struct to store information about variable
-	min_sorted: Vec<usize>,  /// Index (from vars) of all variables sorted by min bound
-	max_sorted: Vec<usize>,  /// Index (from vars) of all variables sorted by max bound
-	num_bounds: usize,       /// Number of different bounds
-	bounds: Vec<IntVal>,     /// Ordered vector of all different max and min bounds with dummies
-	t: Vec<usize>,
-	d: Vec<IntVal>,
-	h: Vec<usize>,
-	bucket: Vec<usize>
-}
 
 impl<S: SimplificationActions> Constraint<S> for IntAllDifferent {
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
@@ -72,7 +57,6 @@ impl<S: SimplificationActions> Constraint<S> for IntAllDifferent {
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let vars: Vec<_> = self.vars.iter().map(|v| slv.get_solver_int(*v)).collect();
-		//IntAllDifferentValue::new_in(slv, vars);
 		IntAllDifferentBounds::new_in(slv, vars);
 		Ok(())
 	}
@@ -124,8 +108,24 @@ struct Interval {
 	min_rank: usize,            // Min index in bounds vector
 	max_rank: usize             // Max index in bounds vector
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Bounds consistent propagator for the `all_different_int` constraint.
+pub struct IntAllDifferentBounds {
+	/// List of integer variables that must take different values.
+	vars: Vec<IntView>,      /// Integer variables with domains
+	interval: Vec<Interval>, /// Struct to store information about variable
+	min_sorted: Vec<usize>,  /// Index (from vars) of all variables sorted by min bound
+	max_sorted: Vec<usize>,  /// Index (from vars) of all variables sorted by max bound
+	num_bounds: usize,       /// Number of different bounds
+	bounds: Vec<IntVal>,     /// Ordered vector of all different max and min bounds with dummies
+	t: Vec<usize>,
+	d: Vec<IntVal>,
+	h: Vec<usize>,
+	bucket: Vec<usize>
+}
 impl IntAllDifferentBounds {
-	/// Prepare a new [`crate::constraints::all_different_bounds::AllDifferentBound`] propagator to be posted to the
+	/// Prepare a new [`AllDifferentBounds`] propagator to be posted to the
 	/// solver.
 	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, vars: Vec<IntView>) {
 		let size: usize = vars.len();
@@ -184,7 +184,6 @@ impl IntAllDifferentBounds {
 	// Follows path i, t[i], t[t[i]], ... until we stop increasing
 	fn path_max(t: &Vec<usize>, mut i: usize) -> usize{
 		while t[i] > i {
-			println!("path max");
 			i = t[i];
 		}
 		i
@@ -193,7 +192,6 @@ impl IntAllDifferentBounds {
 	// Follows path i, t[i], t[t[i]], ... until we stop decreasing
 	fn path_min(t: &Vec<usize>, mut i: usize) -> usize {
 		while t[i] < i {
-			println!("path min");
 			i = t[i];
 		}
 		i
@@ -205,7 +203,6 @@ impl IntAllDifferentBounds {
 		let mut z: usize;
 		let mut w: usize;
 
-		println!("filter lower");
 		for i in 1..=self.num_bounds + 1 {
 			self.h[i] = i - 1;
 			self.t[i] = self.h[i];
@@ -216,7 +213,7 @@ impl IntAllDifferentBounds {
 		for i in 0..size {
 			let max_rank = self.interval[self.max_sorted[i]].max_rank;
 			let min_rank = self.interval[self.max_sorted[i]].min_rank;
-			println!("var {:?}, [{:?}, {:?}))", self.max_sorted[i], self.bounds[min_rank], self.bounds[max_rank]);
+			// println!("var {:?}, [{:?}, {:?}))", self.max_sorted[i], self.bounds[min_rank], self.bounds[max_rank]);
 
 			z = IntAllDifferentBounds::path_max(&self.t, min_rank + 1);
 			j = self.t[z];
@@ -229,10 +226,6 @@ impl IntAllDifferentBounds {
 				self.t[z] = j;
 			}
 			IntAllDifferentBounds::path_set(&mut self.t, min_rank + 1, z, z);
-
-			if self.d[z] < self.bounds[z] - self.bounds[max_rank] {
-				println!("No solution lower bound"); // We should probably not enter here
-			}
 
 			if self.h[min_rank] > min_rank {
 				w = IntAllDifferentBounds::path_max(&self.h, self.h[min_rank]);
@@ -249,32 +242,30 @@ impl IntAllDifferentBounds {
 				}
 
 				k = w;
-				println!("hall interval [{:?}, {:?})", hall_min, hall_max);
+				// println!("hall interval [{:?}, {:?})", hall_min, hall_max);
 				let mut reason = Vec::new();
-				println!("Reason [[ var {:?}: [{:?}, {:?}) >= {:?}]", i, self.interval[self.max_sorted[i]].min, self.interval[self.max_sorted[i]].max, hall_min);
+				// println!("Reason [[ var {:?}: [{:?}, {:?}) >= {:?}]", i, self.interval[self.max_sorted[i]].min, self.interval[self.max_sorted[i]].max, hall_min);
 				reason.push(actions.get_int_lit(self.vars[self.max_sorted[i]], IntLitMeaning::GreaterEq(hall_min)));
 				while self.bounds[k] > hall_min {
 					let mut l = self.bucket[k];
 					while l != usize::MAX {
-						println!("Reason [[var {:?} [{:?}, {:?}) >= {:?}]", l, self.interval[l].min, self.interval[l].max, hall_max);
+						// println!("Reason [[var {:?} [{:?}, {:?}) >= {:?}]", l, self.interval[l].min, self.interval[l].max, hall_max);
 						reason.push(actions.get_int_lit(self.vars[l], IntLitMeaning::GreaterEq(hall_min)));
-						println!("Reason [[ var {:?} [{:?}, {:?}) < {:?}]", l, self.interval[l].min, self.interval[l].max, hall_max);
+						// println!("Reason [[ var {:?} [{:?}, {:?}) < {:?}]", l, self.interval[l].min, self.interval[l].max, hall_max);
 						reason.push(actions.get_int_lit(self.vars[l], IntLitMeaning::Less(hall_max))); // since [x<d+1] = [x<=d]
 						l = self.interval[l].next;
 					}
 					k -= 1;
 				}
 
-				actions.set_int_lower_bound(self.vars[self.max_sorted[i]], hall_max, &*reason)?; //reason type might be an issue
+				actions.set_int_lower_bound(self.vars[self.max_sorted[i]], hall_max, reason)?; //reason type might be an issue
 				self.interval[self.max_sorted[i]].min = hall_max;
 				IntAllDifferentBounds::path_set(&mut self.h, min_rank, w, w);
 			}
 			if self.d[z] == self.bounds[z] - self.bounds[max_rank] {
 				let h_max_rank = self.h[max_rank];
 				// Save Hall interval
-				println!("1");
 				IntAllDifferentBounds::path_set(&mut self.h, h_max_rank, j - 1, max_rank);
-				println!("2");
 				self.h[max_rank] = j - 1;
 			}
 		}
@@ -287,7 +278,6 @@ impl IntAllDifferentBounds {
 		let mut z: usize;
 		let mut w: usize;
 
-		println!("filter upper");
 		for i in 0..=self.num_bounds {
 			self.h[i] = i + 1;
 			self.t[i] = self.h[i];
@@ -299,7 +289,7 @@ impl IntAllDifferentBounds {
 			let max_rank = self.interval[self.min_sorted[i]].max_rank;
 			let min_rank = self.interval[self.min_sorted[i]].min_rank;
 
-			println!("var {:?}, [{:?}, {:?})", self.min_sorted[i], self.bounds[min_rank], self.bounds[max_rank]);
+			// println!("var {:?}, [{:?}, {:?})", self.min_sorted[i], self.bounds[min_rank], self.bounds[max_rank]);
 			z = IntAllDifferentBounds::path_min(&self.t, max_rank - 1);
 			j = self.t[z];
 			self.d[z] -= 1;
@@ -311,10 +301,6 @@ impl IntAllDifferentBounds {
 				self.t[z] = j;
 			}
 			IntAllDifferentBounds::path_set(&mut self.t, max_rank - 1, z, z);
-
-			if self.d[z] < self.bounds[min_rank] - self.bounds[z] {
-				println!("No solution upper bound"); // If not solution is found
-			}
 
 			if self.h[max_rank] < max_rank {
 				w = IntAllDifferentBounds::path_min(&self.h, self.h[max_rank]);
@@ -331,32 +317,30 @@ impl IntAllDifferentBounds {
 				}
 
 				k = w;
-				println!("hall intervall [{:?}, {:?}))", hall_min, hall_max);
+				// println!("hall intervall [{:?}, {:?}))", hall_min, hall_max);
 				let mut reason = Vec::new();
 				reason.push(actions.get_int_lit(self.vars[self.min_sorted[i]], IntLitMeaning::Less(hall_max))); // since [x<d+1] = [x<=d]
-				println!("Reason [[ var {:?}: [{:?}, {:?}) < {:?}]", i, self.interval[self.min_sorted[i]].min, self.interval[self.min_sorted[i]].max, hall_max);
+				// println!("Reason [[ var {:?}: [{:?}, {:?}) < {:?}]", i, self.interval[self.min_sorted[i]].min, self.interval[self.min_sorted[i]].max, hall_max);
 				while self.bounds[k] < hall_max {
 					let mut l = self.bucket[k];
 					while l != usize::MAX {
 						reason.push(actions.get_int_lit(self.vars[l], IntLitMeaning::GreaterEq(hall_min)));
-						println!("Reason [[ var {:?}: [{:?}, {:?}) >= {:?}]", l, self.interval[l].min, self.interval[l].max, hall_min);
+						// println!("Reason [[ var {:?}: [{:?}, {:?}) >= {:?}]", l, self.interval[l].min, self.interval[l].max, hall_min);
 						reason.push(actions.get_int_lit(self.vars[l], IntLitMeaning::Less(hall_max))); // since [x<d+1] = [x<=d]
-						println!("Reason [[ var {:?}: [{:?}, {:?}) < {:?}]", l, self.interval[l].min, self.interval[l].max, hall_max);
+						// println!("Reason [[ var {:?}: [{:?}, {:?}) < {:?}]", l, self.interval[l].min, self.interval[l].max, hall_max);
 						l = self.interval[l].next;
 					}
 					k += 1;
 				}
-				println!("Setting upper bound of variable {:?} with bounds [{:?}, {:?})  to {:?}", self.min_sorted[i], self.interval[self.min_sorted[i]].min, self.interval[self.min_sorted[i]].max, hall_min );
-				actions.set_int_upper_bound(self.vars[self.min_sorted[i]], hall_min - 1, &*reason)?;
+				// println!("Setting upper bound of variable {:?} with bounds [{:?}, {:?})  to {:?}", self.min_sorted[i], self.interval[self.min_sorted[i]].min, self.interval[self.min_sorted[i]].max, hall_min );
+				actions.set_int_upper_bound(self.vars[self.min_sorted[i]], hall_min - 1, reason)?;
 				self.interval[self.min_sorted[i]].max = hall_min;
 
-				// What is this needed for?
-				// if actions.get_int_upper_bound(self.vars[self.min_sorted[i]]) < hall_min -1 PushInQueue()
 				IntAllDifferentBounds::path_set(&mut self.h, max_rank, w, w);
 			}
 
 			if self.d[z] == self.bounds[min_rank] - self.bounds[z] {
-				let h_min_rank = self.h[min_rank]; // Can't send borrowed item twice
+				let h_min_rank = self.h[min_rank];
 				// Save Hall interval
 				IntAllDifferentBounds::path_set(&mut self.h, h_min_rank, j + 1, min_rank);
 				self.h[min_rank] = j + 1;
@@ -436,11 +420,12 @@ where
 
 #[cfg(test)]
 mod tests {
+	use std::env::vars;
 	use itertools::Itertools;
 	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
-
+	use crate::{all_different_int, Model};
 	use crate::{
 		constraints::int_all_different::IntAllDifferentValue,
 		constraints::int_all_different::IntAllDifferentBounds,
@@ -450,6 +435,7 @@ mod tests {
 		},
 		IntVal,
 	};
+	use crate::solver::View;
 
 	#[test]
 	#[traced_test]
@@ -706,7 +692,7 @@ mod tests {
 
 	#[test]
 	#[traced_test]
-	fn test_all_different_bounds() {
+	fn test_all_different_bounds_sat_1() {
 		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
@@ -731,7 +717,7 @@ mod tests {
 	}
 	#[test]
 	#[traced_test]
-	fn test_all_different_bound_1() {
+	fn test_all_different_bounds_sat_2() {
 		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
@@ -772,5 +758,63 @@ mod tests {
 
 		IntAllDifferentBounds::new_in(&mut slv, vec![a, b, c, d, e, f]);
 		slv.assert_all_solutions(&[a, b, c, d, e, f], |sol| sol.iter().all_unique());
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_all_different_bounds_sat_3() {
+		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let a = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([3..=6]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([3..=4]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let c = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([2..=5]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let d = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([2..=4]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let e = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([3..=4]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let f = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=6]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+
+		IntAllDifferentBounds::new_in(&mut slv, vec![a, b, c, d, e, f]);
+		slv.assert_all_solutions(&[a, b, c, d, e, f], |sol| sol.iter().all_unique());
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_all_different_bounds_unsat() {
+		let mut prb = Model::default();
+		let a = prb.new_int_var((1..=3).into());
+		let b = prb.new_int_var((1..=3).into());
+		let c = prb.new_int_var((1..=3).into());
+		prb += all_different_int(vec![a, b, c]);
+		prb += (a + b + c).eq(3);
+		prb.assert_unsatisfiable()
+
 	}
 }
