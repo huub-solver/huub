@@ -389,12 +389,7 @@ mod tests {
     use rangelist::RangeList;
     use tracing_test::traced_test;
 
-    use crate::{
-        propagator::all_different_bounds::AllDifferentBound,
-        solver::engine::int_var::{EncodingType, IntVar},
-        // IntVal, IntView, SolveResult,
-        Solver,
-    };
+    use crate::{propagator::all_different_bounds::AllDifferentBound, solver::engine::int_var::{EncodingType, IntVar}, Model, Solver};
 
     #[test]
     #[traced_test]
@@ -518,28 +513,11 @@ mod tests {
     #[test]
     #[traced_test]
     fn test_all_different_bound_unsat() {
-        let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
-        let a = IntVar::new_in(
-            &mut slv,
-            RangeList::from_iter([1..=2]),
-            EncodingType::Eager,
-            EncodingType::Eager,
-        );
-        let b = IntVar::new_in(
-            &mut slv,
-            RangeList::from_iter([1..=2]),
-            EncodingType::Eager,
-            EncodingType::Eager,
-        );
-        let c = IntVar::new_in(
-            &mut slv,
-            RangeList::from_iter([1..=2]),
-            EncodingType::Eager,
-            EncodingType::Eager,
-        );
+        let mut prb = Model::default();
+        let a = prb.new_int_var((1..=3).into());
+        let b = prb.new_int_var((1..=3).into());
+        let c = prb.new_int_var((1..=3).into());
 
-        slv.add_propagator(AllDifferentBound::prepare(vec![a, b, c]))
-            .unwrap();
-        slv.assert_unsatisfiable();
+        prb += Constraint::AllDifferentBounds(vec![a, b, c]);
     }
 }
