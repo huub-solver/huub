@@ -420,7 +420,6 @@ where
 
 #[cfg(test)]
 mod tests {
-	use std::env::vars;
 	use itertools::Itertools;
 	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
 	use rangelist::RangeList;
@@ -435,7 +434,6 @@ mod tests {
 		},
 		IntVal,
 	};
-	use crate::solver::View;
 
 	#[test]
 	#[traced_test]
