@@ -39,8 +39,11 @@ use std::{
 
 use flatzinc_serde::{FlatZinc, Literal, Method};
 use huub::{
-	FlatZincError, FlatZincStatistics, Goal, InitConfig, LitMeaning, ReformulationError,
-	SlvTermSignal, SolveResult, Solver, SolverView, Valuation, Value,
+	actions::DecisionActions,
+	flatzinc::{FlatZincError, FlatZincStatistics},
+	reformulate::{InitConfig, ReformulationError},
+	solver::{Goal, IntLitMeaning, SolveResult, Solver, Valuation, Value, View},
+	SlvTermSignal,
 };
 use pico_args::Arguments;
 use tracing::{subscriber::set_default, warn};
@@ -116,7 +119,7 @@ struct Solution<'a> {
 	/// Mapping from solver views to solution values
 	value: &'a dyn Valuation,
 	/// Mapping from FlatZinc identifiers to solver views
-	var_map: &'a UstrMap<SolverView>,
+	var_map: &'a UstrMap<View>,
 }
 
 /// Parse time duration for the time limit flag
@@ -188,21 +191,18 @@ where
 		})?;
 
 		// Convert FlatZinc model to internal Solver representation
-		let res = Solver::from_fzn(&fzn, &self.init_config());
+		let res = Solver::from_fzn::<Ustr, UstrMap<View>>(&fzn, &self.init_config());
 		// Resolve any errors that may have occurred during the conversion
-		let (mut slv, var_map, fzn_stats): (Solver, UstrMap<SolverView>, FlatZincStatistics) =
-			match res {
-				Err(FlatZincError::ReformulationError(
-					ReformulationError::TrivialUnsatisfiable,
-				)) => {
-					outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
-					return Ok(());
-				}
-				Err(err) => {
-					return Err(err.to_string());
-				}
-				Ok((slv, var_map, fzn_stats)) => (slv, var_map.into_iter().collect(), fzn_stats),
-			};
+		let (mut slv, var_map, fzn_stats): (Solver, UstrMap<View>, FlatZincStatistics) = match res {
+			Err(FlatZincError::ReformulationError(ReformulationError::TrivialUnsatisfiable)) => {
+				outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
+				return Ok(());
+			}
+			Err(err) => {
+				return Err(err.to_string());
+			}
+			Ok(x) => x,
+		};
 
 		if self.statistics {
 			let stats = slv.init_statistics();
@@ -226,15 +226,18 @@ where
 		if self.verbose > 0 {
 			let mut lit_map = HashMap::new();
 			let mut int_map = vec![ustr(""); slv.init_statistics().int_vars()];
-			for (name, v) in var_map.iter() {
+			let mut keys: Vec<_> = var_map.keys().collect();
+			keys.sort();
+			for name in keys {
+				let v = var_map[name];
 				match v {
-					SolverView::Bool(bv) => {
+					View::Bool(bv) => {
 						if let Some(info) = bv.reverse_map_info() {
 							let _ = lit_map.insert(info, LitName::BoolVar(*name, true));
 							let _ = lit_map.insert(-info, LitName::BoolVar(*name, false));
 						}
 					}
-					SolverView::Int(iv) => {
+					View::Int(iv) => {
 						let (pos, is_view) = iv.int_reverse_map_info();
 						if let Some(i) = pos {
 							if !is_view || int_map[i].is_empty() {
@@ -253,10 +256,10 @@ where
 							for (lit, meaning) in iv.lit_reverse_map_info(&slv) {
 								let _ = lit_map.entry(lit).or_insert_with(|| {
 									let (op, val) = match meaning {
-										LitMeaning::Eq(v) => ("=", v),
-										LitMeaning::NotEq(v) => ("!=", v),
-										LitMeaning::GreaterEq(v) => (">=", v),
-										LitMeaning::Less(v) => ("<", v),
+										IntLitMeaning::Eq(v) => ("=", v),
+										IntLitMeaning::NotEq(v) => ("!=", v),
+										IntLitMeaning::GreaterEq(v) => (">=", v),
+										IntLitMeaning::Less(v) => ("<", v),
 									};
 									LitName::BoolVar(format!("{name}{op}{val}").into(), true)
 								});
@@ -289,7 +292,7 @@ where
 					} else {
 						Goal::Maximize
 					},
-					if let SolverView::Int(iv) = var_map[ident] {
+					if let View::Int(iv) = var_map[ident] {
 						iv
 					} else {
 						todo!()
@@ -421,7 +424,7 @@ where
 					let Some(obj_val) = obj_val else {
 						unreachable!()
 					};
-					let obj_lit = slv.get_int_lit(obj, LitMeaning::Eq(obj_val));
+					let obj_lit = slv.get_int_lit(obj, IntLitMeaning::Eq(obj_val));
 					slv.add_clause([obj_lit]).unwrap();
 					// Ensure all following solutions are different from the first optimal
 					// solution

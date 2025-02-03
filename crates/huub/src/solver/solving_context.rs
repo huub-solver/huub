@@ -2,6 +2,8 @@
 //! during the progation and solution checking process. This structure contains
 //! the implementation of the actions that are exposed to the propagators.
 
+use std::fmt::{self, Debug, Formatter};
+
 use delegate::delegate;
 use index_vec::IndexVec;
 use pindakaas::{solver::propagation::SolvingActions, Lit as RawLit};
@@ -11,18 +13,14 @@ use crate::{
 	actions::{
 		DecisionActions, ExplanationActions, InspectionActions, PropagationActions, TrailingActions,
 	},
-	propagator::{Conflict, LazyReason, ReasonBuilder},
+	constraints::{Conflict, LazyReason, ReasonBuilder},
 	solver::{
-		engine::{
-			int_var::{IntVarRef, LazyLitDef},
-			trace_new_lit,
-			trail::TrailedInt,
-			PropRef, State,
-		},
-		poster::BoxedPropagator,
-		view::{BoolViewInner, IntViewInner},
+		engine::{trace_new_lit, PropRef, State},
+		int_var::{IntVarRef, LazyLitDef},
+		trail::TrailedInt,
+		BoolView, BoolViewInner, BoxedPropagator, IntView, IntViewInner,
 	},
-	BoolView, Clause, IntVal, IntView, LitMeaning,
+	Clause, IntLitMeaning, IntVal,
 };
 
 /// Type used to communicate whether a change is redundant, conflicting, or new.
@@ -39,7 +37,12 @@ enum ChangeType {
 /// [`SolvingActions`] exposed by the SAT oracle.
 ///
 /// This structure is used to run the propagators that have been scheduled.
-pub(crate) struct SolvingContext<'a> {
+///
+/// Note that this structure is public to the user to allow the user to
+/// construct [`BoxedPropgator`] and [`BoxedBrancher`], but it is not intended
+/// to be constructed by the user. It should merely be seen as the
+/// implementation of the [`PropagationActions`] trait.
+pub struct SolvingContext<'a> {
 	/// Actions to create new variables in the oracle
 	pub(crate) slv: &'a mut dyn SolvingActions,
 	/// Engine state object
@@ -52,16 +55,16 @@ impl<'a> SolvingContext<'a> {
 	#[inline]
 	/// Check whether a change is redundant, conflicting, or new with respect to
 	/// the bounds of an integer variable
-	fn check_change(&self, var: IntVarRef, change: &LitMeaning) -> ChangeType {
+	fn check_change(&self, var: IntVarRef, change: &IntLitMeaning) -> ChangeType {
 		let (lb, ub) = self.state.int_vars[var].get_bounds(self);
 		match change {
-			LitMeaning::Eq(i) if lb == *i && ub == *i => ChangeType::Redundant,
-			LitMeaning::Eq(i) if *i < lb || *i > ub => ChangeType::Conflicting,
-			LitMeaning::NotEq(i) if *i < lb || *i > ub => ChangeType::Redundant,
-			LitMeaning::GreaterEq(i) if *i <= lb => ChangeType::Redundant,
-			LitMeaning::GreaterEq(i) if *i > ub => ChangeType::Conflicting,
-			LitMeaning::Less(i) if *i > ub => ChangeType::Redundant,
-			LitMeaning::Less(i) if *i <= lb => ChangeType::Conflicting,
+			IntLitMeaning::Eq(i) if lb == *i && ub == *i => ChangeType::Redundant,
+			IntLitMeaning::Eq(i) if *i < lb || *i > ub => ChangeType::Conflicting,
+			IntLitMeaning::NotEq(i) if *i < lb || *i > ub => ChangeType::Redundant,
+			IntLitMeaning::GreaterEq(i) if *i <= lb => ChangeType::Redundant,
+			IntLitMeaning::GreaterEq(i) if *i > ub => ChangeType::Conflicting,
+			IntLitMeaning::Less(i) if *i > ub => ChangeType::Redundant,
+			IntLitMeaning::Less(i) if *i <= lb => ChangeType::Conflicting,
 			_ => ChangeType::New,
 		}
 	}
@@ -82,20 +85,23 @@ impl<'a> SolvingContext<'a> {
 	fn propagate_bool_lin(
 		&mut self,
 		lit: RawLit,
-		lit_req: LitMeaning,
+		lit_req: IntLitMeaning,
 		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict> {
+		let bv = BoolView(BoolViewInner::Lit(lit));
 		match lit_req {
-			LitMeaning::Eq(0) | LitMeaning::Less(1) | LitMeaning::NotEq(1) => {
-				self.set_bool(BoolView(BoolViewInner::Lit(!lit)), reason)
+			IntLitMeaning::Eq(0) | IntLitMeaning::Less(1) | IntLitMeaning::NotEq(1) => {
+				self.set_bool(!bv, reason)
 			}
-			LitMeaning::Eq(1) | LitMeaning::GreaterEq(1) | LitMeaning::NotEq(0) => {
-				self.set_bool(BoolView(BoolViewInner::Lit(lit)), reason)
+			IntLitMeaning::Eq(1) | IntLitMeaning::GreaterEq(1) | IntLitMeaning::NotEq(0) => {
+				self.set_bool(bv, reason)
 			}
-			LitMeaning::Eq(_) => Err(Conflict::new(self, None, reason)),
-			LitMeaning::GreaterEq(i) if i > 1 => Err(Conflict::new(self, None, reason)),
-			LitMeaning::Less(i) if i <= 0 => Err(Conflict::new(self, None, reason)),
-			LitMeaning::NotEq(_) | LitMeaning::GreaterEq(_) | LitMeaning::Less(_) => Ok(()),
+			IntLitMeaning::Eq(_) => Err(Conflict::new(self, None, reason)),
+			IntLitMeaning::GreaterEq(i) if i > 1 => Err(Conflict::new(self, None, reason)),
+			IntLitMeaning::Less(i) if i <= 0 => Err(Conflict::new(self, None, reason)),
+			IntLitMeaning::NotEq(_) | IntLitMeaning::GreaterEq(_) | IntLitMeaning::Less(_) => {
+				Ok(())
+			}
 		}
 	}
 
@@ -105,7 +111,7 @@ impl<'a> SolvingContext<'a> {
 	fn propagate_int(
 		&mut self,
 		iv: IntVarRef,
-		lit_req: LitMeaning,
+		lit_req: IntLitMeaning,
 		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict> {
 		match self.check_change(iv, &lit_req) {
@@ -155,8 +161,17 @@ impl<'a> SolvingContext<'a> {
 	}
 }
 
+impl Debug for SolvingContext<'_> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		f.debug_struct("SolvingContext")
+			.field("state", &self.state)
+			.field("current_prop", &self.current_prop)
+			.finish()
+	}
+}
+
 impl DecisionActions for SolvingContext<'_> {
-	fn get_intref_lit(&mut self, iv: IntVarRef, meaning: LitMeaning) -> BoolView {
+	fn get_intref_lit(&mut self, iv: IntVarRef, meaning: IntLitMeaning) -> BoolView {
 		let var = &mut self.state.int_vars[iv];
 		let new_var = |def: LazyLitDef| {
 			// Create new variable
@@ -187,13 +202,13 @@ impl DecisionActions for SolvingContext<'_> {
 impl ExplanationActions for SolvingContext<'_> {
 	fn get_int_val_lit(&mut self, var: IntView) -> Option<BoolView> {
 		let val = self.get_int_val(var)?;
-		Some(self.get_int_lit(var, LitMeaning::Eq(val)))
+		Some(self.get_int_lit(var, IntLitMeaning::Eq(val)))
 	}
 
 	delegate! {
 		to self.state {
-			fn try_int_lit(&self, var: IntView, meaning: LitMeaning) -> Option<BoolView>;
-			fn get_int_lit_relaxed(&mut self, var: IntView, meaning: LitMeaning) -> (BoolView, LitMeaning);
+			fn try_int_lit(&self, var: IntView, meaning: IntLitMeaning) -> Option<BoolView>;
+			fn get_int_lit_relaxed(&mut self, var: IntView, meaning: IntLitMeaning) -> (BoolView, IntLitMeaning);
 			fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView;
 			fn get_int_upper_bound_lit(&mut self, var: IntView) -> BoolView;
 		}
@@ -240,7 +255,7 @@ impl PropagationActions for SolvingContext<'_> {
 		val: IntVal,
 		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict> {
-		let mut lit_req = LitMeaning::GreaterEq(val);
+		let mut lit_req = IntLitMeaning::GreaterEq(val);
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
 			var.0
 		{
@@ -267,7 +282,7 @@ impl PropagationActions for SolvingContext<'_> {
 		val: IntVal,
 		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict> {
-		let mut lit_req = LitMeaning::NotEq(val);
+		let mut lit_req = IntLitMeaning::NotEq(val);
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
 			var.0
 		{
@@ -300,7 +315,7 @@ impl PropagationActions for SolvingContext<'_> {
 		val: IntVal,
 		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict> {
-		let mut lit_req = LitMeaning::Less(val + 1);
+		let mut lit_req = IntLitMeaning::Less(val + 1);
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
 			var.0
 		{
@@ -327,7 +342,7 @@ impl PropagationActions for SolvingContext<'_> {
 		val: IntVal,
 		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict> {
-		let mut lit_req = LitMeaning::Eq(val);
+		let mut lit_req = IntLitMeaning::Eq(val);
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
 			var.0
 		{

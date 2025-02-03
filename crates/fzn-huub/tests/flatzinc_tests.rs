@@ -1,3 +1,6 @@
+//! A collection of integration tests that open files containing FlatZinc JSON,
+//! run the solver on the problem, and check the results.
+
 #![expect(
 	unused_crate_dependencies,
 	reason = "only dependencies for testing are used in this file"

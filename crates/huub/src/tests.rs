@@ -1,8 +1,10 @@
 use expect_test::Expect;
 use itertools::Itertools;
+use pindakaas::propositional_logic::Formula;
 
 use crate::{
-	BoolExpr, InitConfig, Model, ReformulationError, SolveResult, Solver, SolverView, Value,
+	solver::{SolveResult, Value, View},
+	InitConfig, Model, ReformulationError, Solver,
 };
 
 #[test]
@@ -11,12 +13,12 @@ fn it_works() {
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
 
-	prb += BoolExpr::Or(vec![(!a.clone()).into(), (!b.clone()).into()]);
-	prb += BoolExpr::Or(vec![a.clone().into(), b.clone().into()]);
+	prb += Formula::Or(vec![(!a).into(), (!b).into()]);
+	prb += Formula::Or(vec![a.into(), b.into()]);
 
 	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-	let a = map.get_bool(&mut slv, &a);
-	let b = map.get_bool(&mut slv, &b);
+	let a = map.get_bool(&mut slv, a);
+	let b = map.get_bool(&mut slv, b);
 
 	assert_eq!(
 		slv.solve(|value| {
@@ -37,7 +39,7 @@ impl Model {
 }
 
 impl Solver {
-	pub(crate) fn assert_all_solutions<V: Into<SolverView> + Clone>(
+	pub(crate) fn assert_all_solutions<V: Into<View> + Clone>(
 		&mut self,
 		vars: &[V],
 		pred: impl Fn(&[Value]) -> bool,
@@ -57,11 +59,7 @@ impl Solver {
 		assert_eq!(self.solve(|_| unreachable!()), SolveResult::Unsatisfiable);
 	}
 
-	pub(crate) fn expect_solutions<V: Into<SolverView> + Clone>(
-		&mut self,
-		vars: &[V],
-		expected: Expect,
-	) {
+	pub(crate) fn expect_solutions<V: Into<View> + Clone>(&mut self, vars: &[V], expected: Expect) {
 		let vars: Vec<_> = vars.iter().map(|v| v.clone().into()).collect();
 		let (status, mut solns) = self.get_all_solutions(&vars);
 		assert_eq!(status, SolveResult::Complete);

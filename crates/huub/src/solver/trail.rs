@@ -9,7 +9,11 @@ use index_vec::IndexVec;
 use pindakaas::{Lit as RawLit, Var as RawVar};
 use tracing::trace;
 
-use crate::{actions::TrailingActions, solver::view::BoolViewInner, BoolView, IntVal};
+use crate::{
+	actions::TrailingActions,
+	solver::{BoolView, BoolViewInner},
+	IntVal,
+};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 /// A structure that stores the currently assigned value of a Boolean variable
@@ -388,7 +392,7 @@ mod tests {
 	use pindakaas::{solver::cadical::Cadical, ClauseDatabase};
 
 	use crate::{
-		solver::engine::trail::{Trail, TrailEvent},
+		solver::trail::{Trail, TrailEvent},
 		IntVal,
 	};
 
@@ -414,7 +418,7 @@ mod tests {
 		.map(|i| (trail.track_int(0), i))
 		.collect();
 
-		for (l, (i, v)) in lits.clone().zip(int_events.iter()) {
+		for (l, (i, v)) in lits.zip(int_events.iter()) {
 			trail.push_trail(TrailEvent::SatAssignment(l));
 			let _ = trail.assign_lit(if usize::from(*i) % 2 == 0 {
 				l.into()

@@ -36,8 +36,8 @@ const FZN_COMPLETE: &str = "==========\n";
 /// The string that is printed after every solution.
 const FZN_SEPERATOR: &str = "----------\n";
 
-/// The string that is printed when the solver has proven that the instance is
-/// unsatisfiable.
+// /// The string that is printed when the solver has proven that the instance is
+// /// unsatisfiable.
 // const FZN_UNSATISFIABLE: &str = "=====UNSATISFIABLE=====\n";
 
 /// A configuration for instances that run in a few milliseconds.
@@ -87,13 +87,15 @@ fn check_final(name: &str, instance_type: InstanceType) {
 	if let InstanceType::Optimization = instance_type {
 		assert!(
 			slice.ends_with(FZN_COMPLETE),
-			"Solver did not finish with complete marker"
+			"Solver did not finish with complete marker: ```\n{}\n'''",
+			slice
 		);
 		slice = &slice[..slice.len() - FZN_COMPLETE.len()];
 	}
 	assert!(
 		slice.ends_with(FZN_SEPERATOR),
-		"Solution did not end with a seperator"
+		"Solution did not end with a seperator: ```\n{}\n'''",
+		slice
 	);
 	slice = &slice[..slice.len() - FZN_SEPERATOR.len()];
 	let sol = base.with_extension("sol").canonicalize().unwrap();

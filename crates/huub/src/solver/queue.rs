@@ -4,7 +4,7 @@
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 /// The priority levels at which propagators can be scheduled.
-pub(crate) enum PriorityLevel {
+pub enum PriorityLevel {
 	#[allow(
 		dead_code,
 		reason = "TODO: no current propagators are this priority level"
@@ -86,7 +86,7 @@ impl<E> Default for PriorityQueue<E> {
 mod test {
 	#[test]
 	fn priority_order() {
-		use crate::solver::engine::queue::PriorityLevel::*;
+		use crate::solver::queue::PriorityLevel::*;
 		assert!(Immediate > Highest);
 		assert!(Highest > High);
 		assert!(High > Medium);

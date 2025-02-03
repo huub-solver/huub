@@ -8,7 +8,7 @@ use std::{
 	sync::{Arc, Mutex},
 };
 
-use huub::{IntVal, LitMeaning};
+use huub::{solver::IntLitMeaning, IntVal};
 use tracing::{
 	field::{Field, Visit},
 	Event, Level, Subscriber,
@@ -55,7 +55,7 @@ pub(crate) enum LitName {
 	/// The tuple contains the index of the variable in the FlatZinc model (which
 	/// is used as the key in [`FmtLitFields::int_reverse_map`]), and
 	/// [`LitMeaning`] of the literal.
-	IntLit(usize, LitMeaning),
+	IntLit(usize, IntLitMeaning),
 }
 
 /// A visitor wrapper that ensures any fields containing literals are renamed
@@ -171,10 +171,10 @@ impl LitName {
 					&format!("int_var[{var}]")
 				};
 				match meaning {
-					LitMeaning::Eq(val) => format!("{var}={val}"),
-					LitMeaning::NotEq(val) => format!("{var}≠{val}"),
-					LitMeaning::GreaterEq(val) => format!("{var}≥{val}"),
-					LitMeaning::Less(val) => format!("{var}<{val}"),
+					IntLitMeaning::Eq(val) => format!("{var}={val}"),
+					IntLitMeaning::NotEq(val) => format!("{var}≠{val}"),
+					IntLitMeaning::GreaterEq(val) => format!("{var}≥{val}"),
+					IntLitMeaning::Less(val) => format!("{var}<{val}"),
 				}
 			}
 		}
@@ -200,7 +200,7 @@ impl<'a, V> LitNames<'a, V> {
 	}
 }
 
-impl<'a, V: Visit> LitNames<'a, V> {
+impl<V: Visit> LitNames<'_, V> {
 	#[inline]
 	/// Check if the field should and can be formatted as a clause or a list of
 	/// literals.
@@ -277,7 +277,7 @@ impl<'a, V: Visit> LitNames<'a, V> {
 	}
 }
 
-impl<'a, V: Visit> Visit for LitNames<'a, V> {
+impl<V: Visit> Visit for LitNames<'_, V> {
 	#[inline]
 	fn record_bool(&mut self, field: &Field, value: bool) {
 		self.inner.record_bool(field, value);
@@ -342,9 +342,9 @@ impl RecordLazyLits {
 			self.lit,
 		) {
 			let meaning = if is_eq {
-				LitMeaning::Eq
+				IntLitMeaning::Eq
 			} else {
-				LitMeaning::Less
+				IntLitMeaning::Less
 			}(val);
 			let mut guard = lit_reverse_map.lock().unwrap();
 			let _ = guard.insert(lit, LitName::IntLit(iv, meaning.clone()));

@@ -5,22 +5,18 @@ use std::fmt::Debug;
 use pindakaas::Lit as RawLit;
 
 use crate::{
-	actions::{DecisionActions, InitializationActions},
-	model::branching::{ValueSelection, VariableSelection},
+	actions::{BrancherInitActions, DecisionActions},
 	solver::{
-		engine::{
-			activation_list::IntPropCond, solving_context::SolvingContext, trail::TrailedInt,
-		},
-		poster::{BoxedBrancher, BrancherPoster},
-		view::{BoolViewInner, IntView, IntViewInner},
+		solving_context::SolvingContext, trail::TrailedInt, BoolView, BoolViewInner, IntLitMeaning,
+		IntView, IntViewInner, View,
 	},
-	BoolView, LitMeaning,
+	ValueSelection, VariableSelection,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// General brancher for Boolean variables that makes search decision by
 /// following a given [`VariableSelection`] and [`ValueSelection`] strategy.
-pub(crate) struct BoolBrancher {
+pub struct BoolBrancher {
 	/// Boolean variables to be branched on.
 	vars: Vec<RawLit>,
 	/// [`VariableSelection`] strategy used to select the next decision variable
@@ -33,27 +29,19 @@ pub(crate) struct BoolBrancher {
 	next: TrailedInt,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-/// [`BrancherPoster`] for [`BoolBrancher`].
-pub(crate) struct BoolBrancherPoster {
-	/// Boolean variables to be branched on.
-	vars: Vec<BoolView>,
-	/// [`VariableSelection`] strategy used to select the next decision variable
-	/// to branch on.
-	var_sel: VariableSelection,
-	/// [`ValueSelection`] strategy used to select the way in which to branch on
-	/// the selected decision variable.
-	val_sel: ValueSelection,
-}
+/// Type alias to represent [`Brancher`] contained in a [`Box`], that is used by
+/// [`Engine`].
+pub(crate) type BoxedBrancher = Box<dyn for<'a> Brancher<SolvingContext<'a>>>;
 
 /// A trait for making search decisions in the solver
-pub(crate) trait Brancher<D: DecisionActions>: DynBranchClone + Debug {
+pub trait Brancher<D: DecisionActions>: DynBrancherClone + Debug {
 	/// Make a next search decision using the given decision actions.
 	fn decide(&mut self, actions: &mut D) -> Decision;
 }
 
 /// An search decision made by a [`Brancher`].
-pub(crate) enum Decision {
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+pub enum Decision {
 	/// Make the decision to branch on the given literal.
 	Select(RawLit),
 	/// The brancher has exhausted all possible decisions, but can be backtracked
@@ -67,15 +55,15 @@ pub(crate) enum Decision {
 /// A trait to allow the cloning of boxed branchers.
 ///
 /// This trait allows us to implement [`Clone`] for [`BoxedBrancher`].
-pub(crate) trait DynBranchClone {
+pub trait DynBrancherClone {
 	/// Clone the object and store it as a boxed trait object.
-	fn clone_dyn_branch(&self) -> BoxedBrancher;
+	fn clone_dyn_brancher(&self) -> BoxedBrancher;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// General brancher for integer variables that makes search decision by
 /// following a given [`VariableSelection`] and [`ValueSelection`] strategy.
-pub(crate) struct IntBrancher {
+pub struct IntBrancher {
 	/// Integer variables to be branched on.
 	vars: Vec<IntView>,
 	/// [`VariableSelection`] strategy used to select the next decision variable
@@ -89,55 +77,49 @@ pub(crate) struct IntBrancher {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// A [`BrancherPoster`] for [`IntBrancher`].
-struct IntBrancherPoster {
-	/// Integer variables to be branched on.
-	vars: Vec<IntView>,
-	/// [`VariableSelection`] strategy used to select the next decision variable
-	/// to branch on.
-	var_sel: VariableSelection,
-	/// [`ValueSelection`] strategy used to select the way in which to branch on
-	/// the selected decision variable.
-	val_sel: ValueSelection,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 /// A brancher that enforces Boolean conditions that is abandoned when a
 /// conflict is encountered. These branchers are generally used to warm start,
 /// i.e. quickly reach, a (partial) known or expected solution.
-pub(crate) struct WarmStartBrancher {
+pub struct WarmStartBrancher {
 	/// Boolean conditions to be tried.
 	decisions: Vec<RawLit>,
 	/// Number of conflicts at the time of posting the brancher.
 	conflicts: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-/// A [`BrancherPoster`] for [`WarmStartBrancher`].
-pub(crate) struct WarmStartBrancherPoster {
-	/// Boolean conditions to be tried.
-	decisions: Vec<BoolView>,
-}
-
-impl<B: for<'a> Brancher<SolvingContext<'a>> + Clone + 'static> DynBranchClone for B {
-	fn clone_dyn_branch(&self) -> BoxedBrancher {
+impl<B: for<'a> Brancher<SolvingContext<'a>> + Clone + 'static> DynBrancherClone for B {
+	fn clone_dyn_brancher(&self) -> BoxedBrancher {
 		Box::new(self.clone())
 	}
 }
 
 impl BoolBrancher {
-	/// Prepare a general Boolean brancher with the given variables and selection
-	/// strategies to be posted in a [`Solver`].
-	pub(crate) fn prepare(
+	/// Create a new [`BoolBrancher`] brancher and add to the end of the branching
+	/// queue in the solver.
+	pub fn new_in(
+		solver: &mut impl BrancherInitActions,
 		vars: Vec<BoolView>,
 		var_sel: VariableSelection,
 		val_sel: ValueSelection,
-	) -> impl BrancherPoster {
-		BoolBrancherPoster {
+	) {
+		let vars: Vec<_> = vars
+			.into_iter()
+			.filter_map(|b| match b.0 {
+				BoolViewInner::Lit(l) => {
+					solver.ensure_decidable(View::Bool(b));
+					Some(l)
+				}
+				BoolViewInner::Const(_) => None,
+			})
+			.collect();
+
+		let next = solver.new_trailed_int(0);
+		solver.push_brancher(Box::new(BoolBrancher {
 			vars,
 			var_sel,
 			val_sel,
-		}
+			next,
+		}));
 	}
 }
 
@@ -188,47 +170,37 @@ impl<D: DecisionActions> Brancher<D> for BoolBrancher {
 	}
 }
 
-impl BrancherPoster for BoolBrancherPoster {
-	fn post<I: InitializationActions>(self, actions: &mut I) -> BoxedBrancher {
-		let vars: Vec<_> = self
-			.vars
-			.into_iter()
-			.filter_map(|b| match b.0 {
-				BoolViewInner::Lit(l) => {
-					actions.enqueue_on_bool_change(BoolView(BoolViewInner::Lit(l)));
-					Some(l)
-				}
-				BoolViewInner::Const(_) => None,
-			})
-			.collect();
-		Box::new(BoolBrancher {
-			vars,
-			var_sel: self.var_sel,
-			val_sel: self.val_sel,
-			next: actions.new_trailed_int(0),
-		})
-	}
-}
-
 impl Clone for BoxedBrancher {
 	fn clone(&self) -> BoxedBrancher {
-		self.clone_dyn_branch()
+		self.clone_dyn_brancher()
 	}
 }
 
 impl IntBrancher {
-	/// Prepare a general integer brancher with the given variables and selection
-	/// strategies to be posted in a [`Solver`].
-	pub(crate) fn prepare(
+	/// Create a new [`IntBrancher`] brancher and add to the end of the branching
+	/// queue in the solver.
+	pub fn new_in(
+		solver: &mut impl BrancherInitActions,
 		vars: Vec<IntView>,
 		var_sel: VariableSelection,
 		val_sel: ValueSelection,
-	) -> impl BrancherPoster {
-		IntBrancherPoster {
+	) {
+		let vars: Vec<_> = vars
+			.into_iter()
+			.filter(|i| !matches!(i.0, IntViewInner::Const(_)))
+			.collect();
+
+		for &v in &vars {
+			solver.ensure_decidable(v.into());
+		}
+
+		let next = solver.new_trailed_int(0);
+		solver.push_brancher(Box::new(IntBrancher {
 			vars,
 			var_sel,
 			val_sel,
-		}
+			next,
+		}));
 	}
 }
 
@@ -296,19 +268,19 @@ impl<D: DecisionActions> Brancher<D> for IntBrancher {
 		let view = match self.val_sel {
 			ValueSelection::IndomainMin => actions.get_int_lit(
 				next_var,
-				LitMeaning::Less(actions.get_int_lower_bound(next_var) + 1),
+				IntLitMeaning::Less(actions.get_int_lower_bound(next_var) + 1),
 			),
 			ValueSelection::IndomainMax => actions.get_int_lit(
 				next_var,
-				LitMeaning::GreaterEq(actions.get_int_upper_bound(next_var)),
+				IntLitMeaning::GreaterEq(actions.get_int_upper_bound(next_var)),
 			),
 			ValueSelection::OutdomainMin => actions.get_int_lit(
 				next_var,
-				LitMeaning::GreaterEq(actions.get_int_lower_bound(next_var) + 1),
+				IntLitMeaning::GreaterEq(actions.get_int_lower_bound(next_var) + 1),
 			),
 			ValueSelection::OutdomainMax => actions.get_int_lit(
 				next_var,
-				LitMeaning::Less(actions.get_int_upper_bound(next_var)),
+				IntLitMeaning::Less(actions.get_int_upper_bound(next_var)),
 			),
 		};
 
@@ -319,31 +291,34 @@ impl<D: DecisionActions> Brancher<D> for IntBrancher {
 	}
 }
 
-impl BrancherPoster for IntBrancherPoster {
-	fn post<I: InitializationActions>(self, actions: &mut I) -> BoxedBrancher {
-		let vars: Vec<_> = self
-			.vars
-			.into_iter()
-			.filter(|i| !matches!(i.0, IntViewInner::Const(_)))
-			.collect();
-
-		for &v in &vars {
-			actions.enqueue_on_int_change(v, IntPropCond::Domain);
+impl WarmStartBrancher {
+	/// Create a new [`BoolBrancher`] brancher and add to the end of the branching
+	/// queue in the solver.
+	pub fn new_in(solver: &mut impl BrancherInitActions, decisions: Vec<BoolView>) {
+		// Filter out the decisions that are already satisfied or are known to cause
+		// a conflict
+		let mut filtered_decision = Vec::new();
+		for d in decisions {
+			match d.0 {
+				BoolViewInner::Lit(l) => {
+					solver.ensure_decidable(View::Bool(d));
+					filtered_decision.push(l);
+				}
+				// Warm starts decision conflict here, we don't have to add this or any
+				// other decisions to the brancher
+				BoolViewInner::Const(false) => break,
+				// Warm starts decision is already satisfied, we don't have to add this
+				BoolViewInner::Const(true) => {}
+			}
 		}
 
-		Box::new(IntBrancher {
-			vars,
-			var_sel: self.var_sel,
-			val_sel: self.val_sel,
-			next: actions.new_trailed_int(0),
-		})
-	}
-}
-
-impl WarmStartBrancher {
-	/// Prepare a warm start branch to be posted to a [`Solver`].
-	pub(crate) fn prepare(decisions: Vec<BoolView>) -> impl BrancherPoster {
-		WarmStartBrancherPoster { decisions }
+		if !filtered_decision.is_empty() {
+			filtered_decision.reverse();
+			solver.push_brancher(Box::new(WarmStartBrancher {
+				decisions: filtered_decision,
+				conflicts: solver.get_num_conflicts(),
+			}));
+		}
 	}
 }
 
@@ -360,26 +335,5 @@ impl<D: DecisionActions> Brancher<D> for WarmStartBrancher {
 			}
 		}
 		Decision::Consumed
-	}
-}
-
-impl BrancherPoster for WarmStartBrancherPoster {
-	fn post<I: InitializationActions>(self, actions: &mut I) -> BoxedBrancher {
-		let decisions: Vec<_> = self
-			.decisions
-			.into_iter()
-			.filter_map(|b| match b.0 {
-				BoolViewInner::Lit(l) => {
-					actions.enqueue_on_bool_change(BoolView(BoolViewInner::Lit(l)));
-					Some(l)
-				}
-				BoolViewInner::Const(_) => None,
-			})
-			.rev()
-			.collect();
-		Box::new(WarmStartBrancher {
-			decisions,
-			conflicts: actions.get_num_conflicts(),
-		})
 	}
 }
