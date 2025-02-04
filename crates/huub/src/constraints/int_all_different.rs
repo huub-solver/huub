@@ -57,7 +57,7 @@ impl<S: SimplificationActions> Constraint<S> for IntAllDifferent {
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let vars: Vec<_> = self.vars.iter().map(|v| slv.get_solver_int(*v)).collect();
-		IntAllDifferentBounds::new_in(slv, vars);
+		IntAllDifferentValue::new_in(slv, vars);
 		Ok(())
 	}
 }
@@ -811,7 +811,7 @@ mod tests {
 		let b = prb.new_int_var((1..=3).into());
 		let c = prb.new_int_var((1..=3).into());
 		prb += all_different_int(vec![a, b, c]);
-		prb += (a + b + c).eq(3);
+		prb += (a + b + c).geq(8);
 		prb.assert_unsatisfiable()
 
 	}
