@@ -1,6 +1,8 @@
 //! Data structures to store [`Model`] parts for analyses and for the
 //! reformulation process of creating a [`Solver`] object from a [`Model`].
 
+use std::collections::HashSet;
+
 use delegate::delegate;
 use index_vec::{define_index_type, IndexVec};
 use pindakaas::{
@@ -8,6 +10,7 @@ use pindakaas::{
 	solver::propagation::PropagatingSolver,
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit as RawLit, Unsatisfiable,
 };
+use rangelist::IntervalIterator;
 use thiserror::Error;
 
 use crate::{
@@ -34,7 +37,7 @@ use crate::{
 	solver::{
 		activation_list::IntPropCond,
 		engine::{Engine, PropRef},
-		int_var::IntVarRef,
+		int_var::{EncodingType, IntVar, IntVarRef},
 		queue::PriorityLevel,
 		trail::TrailedInt,
 		BoolView, BoolViewInner, IntView, IntViewInner, View,
@@ -42,6 +45,19 @@ use crate::{
 	BoolDecision, BoolFormula, Decision, IntDecision, IntLitMeaning, IntSetVal, IntVal, Model,
 	Solver,
 };
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Definition of an Boolean decision variable in a [`Model`].
+pub(crate) struct BoolDecisionDef {
+	/// Whether the Boolean variable has already been assigned a value, or has
+	/// been aliased to another variable.
+	pub(crate) alias: Option<BoolDecision>,
+	/// The list of (indexes of) constraints in which the variable appears.
+	///
+	/// This list is used to enqueue the constraints for propagation when the
+	/// domain of the variable changes.
+	pub(crate) constraints: Vec<usize>,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[allow(
@@ -55,13 +71,13 @@ pub(crate) enum BoolDecisionInner {
 	Lit(RawLit),
 	/// A constant Boolean value.
 	Const(bool),
-	/// Wether an integer is equal to a constant.
+	/// Whether an integer is equal to a constant.
 	IntEq(IntDecisionIndex, IntVal),
-	/// Wether an integer is greater or equal to a constant.
+	/// Whether an integer is greater or equal to a constant.
 	IntGreaterEq(IntDecisionIndex, IntVal),
-	/// Wether an integer is less than a constant.
+	/// Whether an integer is less than a constant.
 	IntLess(IntDecisionIndex, IntVal),
-	/// Wether an integer is not equal to a constant.
+	/// Whether an integer is not equal to a constant.
 	IntNotEq(IntDecisionIndex, IntVal),
 }
 
@@ -92,6 +108,16 @@ pub(crate) enum ConstraintStore {
 	Other(BoxedConstraint),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Wrapper type to distinguish between a variable with a domain, and an alias
+/// to another variable.
+pub(crate) enum Domain<E, Alias> {
+	/// A normal variable with a domain.
+	Domain(E),
+	/// An alias to another variable.
+	Alias(Alias),
+}
+
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
 /// Configuration object for the reformulation process of creating a [`Solver`]
 /// object from a [`crate::Model`].
@@ -109,7 +135,7 @@ pub struct InitConfig {
 /// Definition of an integer decision variable in a [`Model`].
 pub(crate) struct IntDecisionDef {
 	/// The set of possible values that the variable can take.
-	pub(crate) domain: IntSetVal,
+	pub(crate) domain: Domain<IntSetVal, IntDecision>,
 	/// The list of (indexes of) constraints in which the variable appears.
 	///
 	/// This list is used to enqueue the constraints for propagation when the
@@ -155,10 +181,30 @@ pub enum ReformulationError {
 /// [`View`] that is used to represent it in a [`Solver`] object.
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct ReformulationMap {
-	/// Map of integer decisions to integer views.
-	pub(crate) int_map: IndexVec<IntDecisionIndex, IntView>,
 	/// Map of Boolean decisions to Boolean views.
 	pub(crate) bool_map: Vec<BoolView>,
+	/// Map of integer decisions to integer views.
+	pub(crate) int_map: IndexVec<IntDecisionIndex, IntView>,
+}
+
+/// Helper type to create a [`ReformulationMap`] object.
+///
+/// This type is primiraly meant to resolve the order of creation issue when
+/// dealing with aliased variables.
+pub(crate) struct ReformulationMapBuilder {
+	/// Map of Boolean decisions to Boolean views.
+	pub(crate) bool_map: Vec<Option<BoolView>>,
+	/// Set of integer decision for which the direct encoding should be created
+	/// eagerly.
+	pub(crate) int_eager_direct: HashSet<IntDecisionIndex>,
+	/// The (default) maximum cardinality of the domain of an integer variable
+	/// before its order encoding is created lazily.
+	pub(crate) int_eager_limit: usize,
+	/// Set of integer decision for which the order encoding should be created
+	/// eagerly.
+	pub(crate) int_eager_order: HashSet<IntDecisionIndex>,
+	/// Map of integer decisions to integer views.
+	pub(crate) int_map: IndexVec<IntDecisionIndex, Option<IntView>>,
 }
 
 impl<S: SimplificationActions> Constraint<S> for BoolFormula {
@@ -289,7 +335,7 @@ impl IntDecisionDef {
 	/// Create a new integer variable definition with the given domain.
 	pub(crate) fn with_domain(dom: IntSetVal) -> Self {
 		Self {
-			domain: dom,
+			domain: Domain::Domain(dom),
 			constraints: Vec::new(),
 		}
 	}
@@ -427,6 +473,127 @@ impl ReformulationMap {
 					BoolViewInner::Const(b) => t.transform(b as IntVal).into(),
 				}
 			}
+		}
+	}
+}
+
+impl ReformulationMapBuilder {
+	/// Get the representation of a Integer decision variable in the [`Solver`] or
+	/// create it if it does not yet exist.
+	///
+	/// Note that this method will function recursively (toghether with
+	/// [`Self::get_or_create_bool`]) to resolve aliased variables.
+	pub(crate) fn get_or_create_int<Oracle: PropagatingSolver<Engine>>(
+		&mut self,
+		model: &Model,
+		slv: &mut Solver<Oracle>,
+		iv: IntDecisionIndex,
+	) -> IntView {
+		use IntDecisionInner::*;
+
+		if let Some(v) = self.int_map[iv] {
+			return v;
+		}
+
+		let def = &model.int_vars[iv];
+		let view = match &def.domain {
+			Domain::Domain(dom) => {
+				let direct_enc = if self.int_eager_direct.contains(&iv) {
+					EncodingType::Eager
+				} else {
+					EncodingType::Lazy
+				};
+				let order_enc = if self.int_eager_order.contains(&iv)
+					|| self.int_eager_direct.contains(&iv)
+					|| dom.card() <= self.int_eager_limit
+				{
+					EncodingType::Eager
+				} else {
+					EncodingType::Lazy
+				};
+				IntVar::new_in(slv, dom.clone(), order_enc, direct_enc)
+			}
+			Domain::Alias(alias) => match alias.0 {
+				Var(idx) => self.get_or_create_int(model, slv, idx),
+				Const(c) => c.into(),
+				Linear(lt, idx) => {
+					let iv = self.get_or_create_int(model, slv, idx);
+					iv * lt.scale + lt.offset
+				}
+				Bool(lt, bv) => {
+					let bv = self.get_or_create_bool(model, slv, bv);
+					bv * lt.scale.get() + lt.offset
+				}
+			},
+		};
+
+		self.int_map[iv] = Some(view);
+		view
+	}
+
+	/// Get the representation of a Boolean decision variable in the [`Solver`] or
+	/// create it if it does not yet exist.
+	///
+	/// Note that this method will function recursively (toghether with
+	/// [`Self::get_or_create_bool`]) to resolve aliased variables.
+	pub(crate) fn get_or_create_bool<Oracle: PropagatingSolver<Engine>>(
+		&mut self,
+		model: &Model,
+		slv: &mut Solver<Oracle>,
+		bv: BoolDecision,
+	) -> BoolView {
+		use BoolDecisionInner::*;
+		match bv.0 {
+			Lit(lit) => {
+				let idx = Into::<i32>::into(lit.var()) as usize - 1;
+				if let Some(v) = self.bool_map[idx] {
+					return if lit.is_negated() { !v } else { v };
+				}
+				let def = &model.bool_vars[idx];
+				let view = match def.alias {
+					Some(alias) => self.get_or_create_bool(model, slv, alias),
+					None => {
+						let v = slv.new_lit();
+						BoolView(BoolViewInner::Lit(v))
+					}
+				};
+				self.bool_map[idx] = Some(view);
+				view
+			}
+			Const(b) => b.into(),
+			IntEq(idx, val) => {
+				let iv = self.get_or_create_int(model, slv, idx);
+				slv.get_int_lit(iv, IntLitMeaning::Eq(val))
+			}
+			IntGreaterEq(idx, val) => {
+				let iv = self.get_or_create_int(model, slv, idx);
+				slv.get_int_lit(iv, IntLitMeaning::GreaterEq(val))
+			}
+			IntLess(idx, val) => {
+				let iv = self.get_or_create_int(model, slv, idx);
+				slv.get_int_lit(iv, IntLitMeaning::Less(val))
+			}
+			IntNotEq(idx, val) => {
+				let iv = self.get_or_create_int(model, slv, idx);
+				slv.get_int_lit(iv, IntLitMeaning::NotEq(val))
+			}
+		}
+	}
+
+	/// Create the [`ReformulationMap`] object ensuring that all variables have a
+	/// representation in the [`Solver`].
+	pub(crate) fn finalize(self) -> ReformulationMap {
+		ReformulationMap {
+			bool_map: self
+				.bool_map
+				.into_iter()
+				.map(|v| v.expect("variable should be resolved before finalize()"))
+				.collect(),
+			int_map: self
+				.int_map
+				.into_iter()
+				.map(|v| v.expect("variable should be resolved before finalize()"))
+				.collect(),
 		}
 	}
 }

@@ -18,7 +18,7 @@ use crate::{
 		activation_list::IntPropCond, queue::PriorityLevel, BoolView, BoolViewInner, IntView,
 		IntViewInner,
 	},
-	BoolDecision, Conjunction, IntDecision, IntVal,
+	BoolDecision, BoolFormula, Conjunction, IntDecision, IntVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -204,11 +204,24 @@ impl<S: SimplificationActions> Constraint<S> for IntLinear {
 				}
 				return Ok(SimplificationStatus::Subsumed);
 			}
-			[_var] => {
-				// TODO: Unify `self.reif` with the integer literal.
+			[var] => {
+				let lit = match self.operator {
+					LinOperator::Equal => var.eq(self.rhs),
+					LinOperator::LessEq => var.leq(self.rhs),
+					LinOperator::NotEqual => var.ne(self.rhs),
+				};
+				match self.reif.unwrap() {
+					Reification::ImpliedBy(r) => actions.add_constraint(BoolFormula::Implies(
+						Box::new(BoolFormula::Atom(r)),
+						Box::new(BoolFormula::Atom(lit)),
+					)),
+					Reification::ReifiedBy(r) => actions.unify_bool(r, lit)?,
+				}
+				return Ok(SimplificationStatus::Subsumed);
 			}
-			[_a, _b] if self.operator == LinOperator::Equal && self.reif.is_none() => {
-				// TODO: Unify integers
+			[a, b] if self.operator == LinOperator::Equal && self.reif.is_none() => {
+				actions.unify_int(-a, b - self.rhs)?;
+				return Ok(SimplificationStatus::Subsumed);
 			}
 			_ => {}
 		}

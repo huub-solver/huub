@@ -1,6 +1,6 @@
 //! Methods to perform linear transformations.
 
-use std::ops::{Add, Mul, Neg};
+use std::ops::{Add, Mul, Neg, Sub};
 
 use crate::{helpers::div_ceil, solver::IntLitMeaning, IntSetVal, IntVal, NonZeroIntVal};
 
@@ -17,6 +17,12 @@ pub(crate) struct LinearTransform {
 }
 
 impl LinearTransform {
+	/// Check whether the linear transformation can be divided by a divisor
+	/// without remainder.
+	pub(crate) fn can_divide_by(&self, divisor: IntVal) -> bool {
+		self.scale.get() % divisor == 0 && self.offset % divisor == 0
+	}
+
 	/// Check whether the linear transformation is an identity transformation.
 	pub(crate) fn is_identity(&self) -> bool {
 		self.scale.get() == 1 && self.offset == 0
@@ -123,7 +129,29 @@ impl LinearTransform {
 		(val * self.scale.get()) + self.offset
 	}
 
-	/// Perform the linear tranformation on a `LitMeaning`.
+	/// Perform the linear transformation on a set of integer values.
+	///
+	/// ## Warning
+	///
+	/// Use this method sparingly, as it will iterate over the individual values
+	/// of the set.
+	pub(crate) fn transform_int_set(&self, val: IntSetVal) -> IntSetVal {
+		if self.scale.get() == 1 {
+			return val
+				.iter()
+				.map(|v| self.transform(*v.start())..=self.transform(*v.end()))
+				.collect();
+		}
+		val.iter()
+			.flatten()
+			.map(|v| {
+				let v = self.transform(v);
+				v..=v
+			})
+			.collect()
+	}
+
+	/// Perform the linear transformation on a `LitMeaning`.
 	pub(crate) fn transform_lit(&self, mut lit: IntLitMeaning) -> IntLitMeaning {
 		let mut transformer = *self;
 		if !self.positive_scale() {
@@ -185,5 +213,13 @@ impl Neg for LinearTransform {
 			scale: NonZeroIntVal::new(-self.scale.get()).unwrap(),
 			offset: -self.offset,
 		}
+	}
+}
+
+impl Sub<IntVal> for LinearTransform {
+	type Output = Self;
+
+	fn sub(self, rhs: IntVal) -> Self::Output {
+		self.add(-rhs)
 	}
 }
