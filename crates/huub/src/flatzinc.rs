@@ -6,7 +6,7 @@ use std::{
 	fmt::{Debug, Display},
 	hash::Hash,
 	iter::once,
-	ops::Deref,
+	ops::{Deref, Not},
 	rc::Rc,
 };
 
@@ -24,8 +24,8 @@ use crate::{
 	abs_int, actions::SimplificationActions, all_different_int, array_element, array_maximum_int,
 	array_minimum_int, constraints::int_table::IntTable, diffn_int, disjunctive_strict, div_int,
 	int_in_set_reif, pow_int, reformulate::ReformulationError, table_int, times_int, BoolDecision,
-	Branching, Decision, IntDecision, IntDecisionInner, IntLinExpr, IntSetVal, IntVal, Model,
-	NonZeroIntVal, ValueSelection, VariableSelection,
+	BoolDecisionInner, Branching, Decision, IntDecision, IntDecisionInner, IntLinExpr, IntSetVal,
+	IntVal, Model, NonZeroIntVal, ValueSelection, VariableSelection,
 };
 
 #[derive(Error, Debug)]
@@ -550,84 +550,94 @@ where
 		debug_assert!(!self.processed[con]);
 		let c = &self.fzn.constraints[con];
 
-		let add_view = |me: &mut Self, name: S, view: Decision| {
-			let e = me.map.insert(name, view);
+		let add_view = |me: &mut Self, name: S, view: Decision| -> Result<(), FlatZincError> {
+			match me.map.entry(name) {
+				Entry::Occupied(e) => match *e.get() {
+					Decision::Bool(bv) => {
+						let Decision::Bool(view) = view else {
+							unreachable!()
+						};
+						me.prb.unify_bool(bv, view)?;
+					}
+					Decision::Int(iv) => {
+						let Decision::Int(view) = view else {
+							unreachable!()
+						};
+						me.prb.unify_int(iv, view)?;
+					}
+				},
+				Entry::Vacant(e) => {
+					let _ = e.insert(view);
+				}
+			}
 			me.stats.extracted_views += 1;
-			debug_assert!(e.is_none());
 			me.processed[con] = true;
+			Ok(())
 		};
-		let arg_bool_view =
-			|me: &mut Self, arg: &Argument<S>| -> Result<BoolDecision, FlatZincError> {
-				if let Argument::Literal(Literal::Identifier(x)) = arg {
-					if !me.map.contains_key(x) && defined_by.contains_key(x) {
-						me.extract_view(defined_by, defined_by[x])?;
-					}
+		let arg_bool_view = |me: &mut Self,
+		                     arg: &Argument<S>|
+		 -> Result<BoolDecision, FlatZincError> {
+			if let Argument::Literal(Literal::Identifier(x)) = arg {
+				if !me.map.contains_key(x) && defined_by.contains_key(x) && defined_by[x] != con {
+					me.extract_view(defined_by, defined_by[x])?;
 				}
-				me.arg_bool(arg)
-			};
-		let lit_int_view =
-			|me: &mut Self, lit: &Literal<S>| -> Result<IntDecision, FlatZincError> {
-				if let Literal::Identifier(x) = lit {
-					if !me.map.contains_key(x) && defined_by.contains_key(x) {
-						me.extract_view(defined_by, defined_by[x])?;
-					}
+			}
+			me.arg_bool(arg)
+		};
+		let lit_int_view = |me: &mut Self,
+		                    lit: &Literal<S>|
+		 -> Result<IntDecision, FlatZincError> {
+			if let Literal::Identifier(x) = lit {
+				if !me.map.contains_key(x) && defined_by.contains_key(x) && defined_by[x] != con {
+					me.extract_view(defined_by, defined_by[x])?;
 				}
-				me.lit_int(lit)
-			};
+			}
+			me.lit_int(lit)
+		};
 
-		let l = c.defines.as_ref().unwrap();
-		debug_assert!(!self.map.contains_key(l));
 		match c.id.deref() {
 			"bool2int" => {
 				if let [b, Argument::Literal(Literal::Identifier(x))] = c.args.as_slice() {
-					if x == l {
-						let b = arg_bool_view(self, b)?;
-						add_view(self, l.clone(), IntDecision::from(b).into());
-					}
+					let b = arg_bool_view(self, b)?;
+					add_view(self, x.clone(), IntDecision::from(b).into())?;
 				}
 			}
 			"bool_not" => match c.args.as_slice() {
-				[Argument::Literal(Literal::Identifier(x)), b]
-				| [b, Argument::Literal(Literal::Identifier(x))]
-					if x == l =>
-				{
+				[b, Argument::Literal(Literal::Identifier(x))]
+				| [Argument::Literal(Literal::Identifier(x)), b] => {
 					let b = arg_bool_view(self, b)?;
-					add_view(self, l.clone(), (!b).into());
+					add_view(self, x.clone(), (!b).into())?;
 				}
 				_ => {}
 			},
 			"int_eq_reif" => match c.args.as_slice() {
 				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
-				| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
-					if r == l =>
+				| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))] =>
 				{
 					let x = lit_int_view(self, x)?;
-					add_view(self, l.clone(), x.eq(*i).into());
+					add_view(self, r.clone(), x.eq(*i).into())?;
 				}
 				_ => {}
 			},
 			"int_le_reif" => match c.args.as_slice() {
-				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
-					if r == l =>
+				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))] =>
 				{
 					let x = lit_int_view(self, x)?;
-					add_view(self, l.clone(), x.geq(*i).into());
+					add_view(self, r.clone(), x.geq(*i).into())?;
 				}
-				[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
-					if r == l =>
+				[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))] =>
 				{
 					let x = lit_int_view(self, x)?;
-					add_view(self, l.clone(), x.leq(*i).into());
+					add_view(self, r.clone(), x.leq(*i).into())?;
 				}
 				_ => {}
 			},
 			"int_ne_reif" => match c.args.as_slice() {
 				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
-				| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))]
-					if r == l =>
+				| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))] =>
 				{
 					let x = lit_int_view(self, x)?;
-					add_view(self, l.clone(), x.ne(*i).into());
+					add_view(self, r.clone(), x.ne(*i).into())?;
 				}
 				_ => {}
 			},
@@ -640,6 +650,10 @@ where
 				let [coeff, vars, sum] = c.args.as_slice() else {
 					break 'int_lin_eq;
 				};
+				let Some(l) = &c.defines else {
+					break 'int_lin_eq;
+				};
+
 				let coeff = self.arg_array(coeff)?;
 				let vars = self.arg_array(vars)?;
 				let (c, (cy, vy)) = match vars.as_slice() {
@@ -663,7 +677,7 @@ where
 				} else {
 					offset.into()
 				};
-				add_view(self, l.clone(), view.into());
+				add_view(self, l.clone(), view.into())?;
 			}
 			_ => {}
 		}
@@ -683,11 +697,9 @@ where
 			.collect();
 
 		// Extract views for all constraints that define an identifier
-		for (i, c) in self.fzn.constraints.iter().enumerate() {
-			if let Some(ident) = &c.defines {
-				if !self.map.contains_key(ident) {
-					self.extract_view(&defined_by, i)?;
-				}
+		for (i, _) in self.fzn.constraints.iter().enumerate() {
+			if !self.processed[i] {
+				self.extract_view(&defined_by, i)?;
 			}
 		}
 		Ok(())
@@ -706,7 +718,7 @@ where
 	fn lit_bool(&mut self, lit: &Literal<S>) -> Result<BoolDecision, FlatZincError> {
 		match lit {
 			Literal::Identifier(ident) => self.lookup_or_create_var(ident).map(|mv| match mv {
-				Decision::Bool(bv) => Ok(bv),
+				Decision::Bool(bv) => Ok(bv.resolve_alias(&self.prb)),
 				Decision::Int(_) => Err(FlatZincError::InvalidArgumentType {
 					expected: "bool",
 					found: "int".to_owned(),
@@ -723,7 +735,7 @@ where
 	fn lit_int(&mut self, lit: &Literal<S>) -> Result<IntDecision, FlatZincError> {
 		match lit {
 			Literal::Identifier(ident) => self.lookup_or_create_var(ident).map(|mv| match mv {
-				Decision::Int(iv) => Ok(iv),
+				Decision::Int(iv) => Ok(iv.resolve_alias(&self.prb)),
 				Decision::Bool(_) => Err(FlatZincError::InvalidArgumentType {
 					expected: "int",
 					found: "bool".to_owned(),
@@ -965,7 +977,7 @@ where
 					if let [b, i] = c.args.as_slice() {
 						let b = self.arg_bool(b)?;
 						let i = self.arg_int(i)?;
-						self.prb += (IntDecision::from(b) - i).eq(0);
+						self.prb.unify_int(b.into(), i)?;
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool2int",
@@ -1011,15 +1023,34 @@ where
 						let pos = self.arg_array(pos)?;
 						let neg = self.arg_array(neg)?;
 						let mut lits = Vec::with_capacity(pos.len() + neg.len());
-						for l in pos {
-							let e = self.lit_bool(l)?;
-							lits.push(e.into());
+						let mut satisfied = false;
+						for lit in pos
+							.iter()
+							.map(|l| self.lit_bool(l))
+							.collect_vec()
+							.into_iter()
+							.chain(neg.iter().map(|l| self.lit_bool(l).map(Not::not)))
+						{
+							match lit?.0 {
+								BoolDecisionInner::Const(true) => {
+									satisfied = true;
+									break;
+								}
+								BoolDecisionInner::Const(false) => {}
+								x => lits.push(BoolDecision(x)),
+							}
 						}
-						for l in neg {
-							let e = self.lit_bool(l)?;
-							lits.push((!e).into());
+						if !satisfied {
+							match lits.len() {
+								0 => {
+									return Err(FlatZincError::ReformulationError(
+										ReformulationError::TrivialUnsatisfiable,
+									))
+								}
+								1 => self.prb.set_bool(lits[0])?,
+								_ => self.prb += Formula::Or(lits.into_iter().map_into().collect()),
+							}
 						}
-						self.prb += Formula::Or(lits);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_clause",
@@ -1049,7 +1080,7 @@ where
 					if let [a, b] = c.args.as_slice() {
 						let a = self.arg_bool(a)?;
 						let b = self.arg_bool(b)?;
-						self.prb += Formula::Equiv(vec![b.into(), (!a).into()]);
+						self.prb.unify_bool(a, !b)?;
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_not",
@@ -1655,11 +1686,10 @@ where
 			}
 		}
 
-		let mut resolved = HashSet::new();
 		let keys = unify_map.keys().sorted();
 		for k in keys {
 			let li = unify_map[k].borrow();
-			if resolved.contains(k) {
+			if self.map.contains_key(k) {
 				continue;
 			}
 			let ty = &self.fzn.variables[k].ty;
@@ -1735,38 +1765,8 @@ where
 			// Map (or equate) all names in the group to the new variable
 			for lit in li.iter() {
 				if let Literal::Identifier(id) = lit {
-					match self.map.entry(id.clone()) {
-						Entry::Vacant(e) => {
-							let _ = e.insert(var.clone());
-							self.stats.vars_unified += 1;
-						}
-						Entry::Occupied(e) => {
-							if var != *e.get() {
-								match ty {
-									Type::Bool => {
-										let (Decision::Bool(new), Decision::Bool(existing)) =
-											(var.clone(), e.get().clone())
-										else {
-											unreachable!()
-										};
-										self.prb +=
-											Formula::Equiv(vec![new.into(), existing.into()]);
-									}
-									Type::Int => {
-										let (Decision::Int(new), Decision::Int(existing)) =
-											(var.clone(), e.get().clone())
-										else {
-											unreachable!()
-										};
-										self.prb += (new - existing).eq(0);
-									}
-									_ => unreachable!(),
-								}
-							}
-						}
-					}
-					let new = resolved.insert(id.clone());
-					debug_assert!(new);
+					let prev = self.map.insert(id.clone(), var.clone());
+					debug_assert_eq!(prev, None);
 				}
 			}
 		}

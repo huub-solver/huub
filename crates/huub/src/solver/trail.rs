@@ -11,6 +11,7 @@ use tracing::trace;
 
 use crate::{
 	actions::TrailingActions,
+	helpers::var_from_u32,
 	solver::{BoolView, BoolViewInner},
 	IntVal,
 };
@@ -204,7 +205,7 @@ impl Trail {
 		// Find event at current position
 		let event = if (self.trail[self.pos] as i32).is_positive() {
 			self.pos += 1;
-			TrailEvent::sat_from_raw(self.trail[self.pos - 1])
+			TrailEvent::SatAssignment(var_from_u32(self.trail[self.pos - 1]))
 		} else {
 			self.pos += 3;
 			TrailEvent::int_from_rev_trail(self.trail[self.pos - 3..self.pos].try_into().unwrap())
@@ -255,7 +256,7 @@ impl Trail {
 		// Find event before current position
 		let event = if (self.trail[self.pos - 1] as i32).is_positive() {
 			self.pos -= 1;
-			TrailEvent::sat_from_raw(self.trail[self.pos])
+			TrailEvent::SatAssignment(var_from_u32(self.trail[self.pos]))
 		} else {
 			self.pos -= 3;
 			TrailEvent::int_from_trail(self.trail[self.pos..=self.pos + 2].try_into().unwrap())
@@ -338,13 +339,6 @@ impl TrailEvent {
 		let high = raw[1] as u64;
 		let low = raw[0] as u64;
 		TrailEvent::IntAssignment(i.into(), ((high << 32) | low) as i64)
-	}
-	#[inline]
-	/// Internal method used to tranform from [`u32`] to [`RawVar`] to recover a
-	/// Boolean variable from the compressed storage formal of the trail.
-	fn sat_from_raw(raw: u32) -> Self {
-		// SAFETY: This is safe because RawVar uses the same representation as i32
-		TrailEvent::SatAssignment(unsafe { mem::transmute::<u32, RawVar>(raw) })
 	}
 
 	#[inline]
