@@ -25,7 +25,7 @@ use std::{
 	fmt::{Debug, Display},
 	hash::Hash,
 	iter::{repeat, repeat_with, Sum},
-	mem::replace,
+	mem,
 	num::NonZeroI64,
 	ops::{Add, AddAssign, Deref, Mul, Neg, Not, Sub},
 };
@@ -1777,8 +1777,29 @@ impl SimplificationActions for Model {
 				};
 				let store = &mut self.bool_vars[i32::from(x.var()) as usize - 1];
 				debug_assert_eq!(store.alias, None);
-				self.bool_vars[i32::from(x.var()) as usize - 1].alias =
-					Some(if x.is_negated() { !y } else { y });
+				let idx = i32::from(x.var()) as usize - 1;
+				self.bool_vars[idx].alias = Some(if x.is_negated() { !y } else { y });
+
+				// Move subscriptions from aliased variable to the new primary variable
+				let constraints = mem::take(&mut self.bool_vars[idx].constraints);
+				let notify = match y.0 {
+					// Move subscriptions to another Boolean decision
+					Lit(lit) => {
+						let jdx = i32::from(lit.var()) as usize - 1;
+						self.bool_vars[jdx].constraints.extend(constraints);
+						&self.bool_vars[jdx].constraints
+					}
+					// Move subscriptions to an integer decision
+					IntEq(j, _) | IntGreaterEq(j, _) | IntLess(j, _) | IntNotEq(j, _) => {
+						self.int_vars[j].constraints.extend(constraints);
+						&self.int_vars[j].constraints
+					}
+					Const(_) => unreachable!(),
+				};
+				// Notify constraints subscribed to either variable about the change
+				for c in notify.clone() {
+					self.enqueue(c);
+				}
 				Ok(())
 			}
 			(x, y) => {
@@ -1799,12 +1820,12 @@ impl SimplificationActions for Model {
 		let x = x.resolve_alias(self);
 		let y = y.resolve_alias(self);
 
-		match (x.0, y.0) {
-			(x, y) if x == y => Ok(()),
-			(Const(x), Const(y)) if x != y => Err(ReformulationError::TrivialUnsatisfiable),
+		let (idx, alias, dom) = match (x.0, y.0) {
+			(x, y) if x == y => return Ok(()),
+			(Const(x), Const(y)) if x != y => return Err(ReformulationError::TrivialUnsatisfiable),
 			(Const(y), x) | (x, Const(y)) => {
 				let x = IntDecision(x);
-				self.set_int_val(x, y)
+				return self.set_int_val(x, y);
 			}
 			(Var(x), y) | (y, Var(x)) => {
 				let (x, y) = if let Var(y) = y {
@@ -1816,11 +1837,13 @@ impl SimplificationActions for Model {
 				} else {
 					(x, IntDecision(y))
 				};
-				let store = &mut self.int_vars[x];
-				let Domain::Domain(x_dom) = replace(&mut store.domain, Domain::Alias(y)) else {
+				let Domain::Domain(x_dom) = mem::replace(
+					&mut self.int_vars[x].domain,
+					Domain::Domain(RangeList::default()),
+				) else {
 					unreachable!()
 				};
-				self.set_int_in_set(y, &x_dom)
+				(x, y, Some(x_dom))
 			}
 			(Linear(x_t, x_i), Linear(y_t, y_i)) => {
 				// Decide which variable to redefine based on the other.
@@ -1836,20 +1859,18 @@ impl SimplificationActions for Model {
 					todo!()
 				};
 
-				// Perform the transformation and add the aliasing domain to x
-				let store = &mut self.int_vars[x_i];
+				// Perform the transformation and add the aliasing domain to x:
 				// x_scale * x + x_scale = y_scale * y + y_offset
 				// === x = (y_scale / x_scale) * y + ((y_offset - x_offset) / x_scale)
 				let trans_y = IntDecision(Var(y_i)) * (y_t.scale.get() / x_t.scale.get())
 					+ (y_t.offset - x_t.offset) / x_t.scale.get();
-				let Domain::Domain(x_dom) = replace(&mut store.domain, Domain::Alias(trans_y))
-				else {
+
+				// Transform the domain for consequent reduction
+				let Domain::Domain(x_dom) = &self.int_vars[x_i].domain else {
 					unreachable!()
 				};
-
-				// Reduce the domain of y using the domain of the linear transformation
-				let x_dom = x_t.transform_int_set(x_dom);
-				self.set_int_in_set(y, &x_dom)
+				let x_dom = y_t.rev_transform_int_set(&x_t.transform_int_set(x_dom));
+				(x_i, trans_y, Some(x_dom))
 			}
 			(iv @ Linear(i_t, i_i), Bool(b_t, b_d)) | (Bool(b_t, b_d), iv @ Linear(i_t, i_i)) => {
 				let iv = IntDecision(iv);
@@ -1864,29 +1885,32 @@ impl SimplificationActions for Model {
 					let i_ub = i_t.rev_transform(ub);
 
 					debug_assert!(matches!(self.int_vars[i_i].domain, Domain::Domain(_)));
-					self.int_vars[i_i].domain = Domain::Alias(IntDecision(Bool(
-						LinearTransform {
-							scale: NonZeroI64::new(i_ub - i_lb).unwrap(),
-							offset: i_lb,
-						},
-						b_d,
-					)));
-					Ok(())
+					(
+						i_i,
+						IntDecision(Bool(
+							LinearTransform {
+								scale: NonZeroI64::new(i_ub - i_lb).unwrap(),
+								offset: i_lb,
+							},
+							b_d,
+						)),
+						None,
+					)
 				} else if contains_lb {
 					self.set_int_val(iv, lb)?;
-					self.set_bool(!b_d)
+					return self.set_bool(!b_d);
 				} else if contains_ub {
 					self.set_int_val(iv, ub)?;
-					self.set_bool(b_d)
+					return self.set_bool(b_d);
 				} else {
-					Err(ReformulationError::TrivialUnsatisfiable)
+					return Err(ReformulationError::TrivialUnsatisfiable);
 				}
 			}
 			(x @ Bool(x_t, x_i), y @ Bool(y_t, y_i)) => {
 				let (x_lb, x_ub) = self.get_int_bounds(IntDecision(x));
 				let (y_lb, y_ub) = self.get_int_bounds(IntDecision(y));
 
-				if x_lb == y_lb && x_ub == y_ub {
+				return if x_lb == y_lb && x_ub == y_ub {
 					self.unify_bool(x_i, if x_t == y_t { y_i } else { !y_i })
 				} else if x_lb == y_lb {
 					self.set_bool(!x_i)?;
@@ -1902,9 +1926,48 @@ impl SimplificationActions for Model {
 					self.set_bool(y_i)
 				} else {
 					Err(ReformulationError::TrivialUnsatisfiable)
-				}
+				};
 			}
+		};
+
+		self.int_vars[idx].domain = Domain::Alias(alias);
+		// Transfer any constraints from the aliased variable to new primary one
+		let constraints = mem::take(&mut self.int_vars[idx].constraints);
+		let notify = match alias.0 {
+			// Move subscriptions to other integer decision
+			Var(j)
+			| Linear(_, j)
+			| Bool(
+				_,
+				BoolDecision(
+					BoolDecisionInner::IntEq(j, _)
+					| BoolDecisionInner::IntNotEq(j, _)
+					| BoolDecisionInner::IntGreaterEq(j, _)
+					| BoolDecisionInner::IntLess(j, _),
+				),
+			) => {
+				self.int_vars[j].constraints.extend(constraints);
+				&self.int_vars[j].constraints
+			}
+			// Move subscription to Boolean decision
+			Bool(_, BoolDecision(BoolDecisionInner::Lit(l))) => {
+				let jdx = i32::from(l.var()) as usize - 1;
+				self.bool_vars[jdx].constraints.extend(constraints);
+				&self.bool_vars[jdx].constraints
+			}
+			// Notify current subscriptions one more time, then forget about them.
+			Const(_) | Bool(_, BoolDecision(BoolDecisionInner::Const(_))) => &constraints,
+		};
+		// Notify constraints listening to either variable of update
+		for c in notify.clone() {
+			self.enqueue(c);
 		}
+		// Restrict the domain of the new primary variable using the alias domain
+		if let Some(dom) = dom {
+			self.set_int_in_set(IntDecision(Var(idx)), &dom)?;
+		}
+
+		Ok(())
 	}
 }
 

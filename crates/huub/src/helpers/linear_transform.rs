@@ -135,7 +135,7 @@ impl LinearTransform {
 	///
 	/// Use this method sparingly, as it will iterate over the individual values
 	/// of the set.
-	pub(crate) fn transform_int_set(&self, val: IntSetVal) -> IntSetVal {
+	pub(crate) fn transform_int_set(&self, val: &IntSetVal) -> IntSetVal {
 		if self.scale.get() == 1 {
 			return val
 				.iter()
