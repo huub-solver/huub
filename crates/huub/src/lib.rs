@@ -55,7 +55,7 @@ use crate::{
 		int_diffn::IntDiffn,
 		int_div::IntDiv,
 		int_in_set::IntInSetReif,
-		int_linear::{IntLinear, LinOperator},
+		int_linear::{IntEq, IntLinear, LinOperator},
 		int_pow::IntPow,
 		int_table::IntTable,
 		int_times::IntTimes,
@@ -986,6 +986,7 @@ impl Model {
 			ConstraintStore::DisjunctiveStrict(c) => c.simplify(self),
 			ConstraintStore::IntAbs(c) => c.simplify(self),
 			ConstraintStore::IntDiv(c) => c.simplify(self),
+			ConstraintStore::IntEq(c) => c.simplify(self),
 			ConstraintStore::IntLinear(c) => c.simplify(self),
 			ConstraintStore::IntPow(c) => c.simplify(self),
 			ConstraintStore::IntTimes(c) => c.simplify(self),
@@ -1072,6 +1073,9 @@ impl Model {
 			}
 			ConstraintStore::IntDiv(con) => {
 				<IntDiv as Constraint<Model>>::initialize(con, &mut ctx);
+			}
+			ConstraintStore::IntEq(con) => {
+				<IntEq as Constraint<Model>>::initialize(con, &mut ctx);
 			}
 			ConstraintStore::IntLinear(con) => {
 				<IntLinear as Constraint<Model>>::initialize(con, &mut ctx);
@@ -1277,6 +1281,12 @@ impl AddAssign<IntDecisionArrayElement> for Model {
 impl AddAssign<IntDiv> for Model {
 	fn add_assign(&mut self, constraint: IntDiv) {
 		self.add_constraint(ConstraintStore::IntDiv(constraint));
+	}
+}
+
+impl AddAssign<IntEq> for Model {
+	fn add_assign(&mut self, constraint: IntEq) {
+		self.add_constraint(ConstraintStore::IntEq(constraint));
 	}
 }
 
@@ -1877,7 +1887,8 @@ impl SimplificationActions for Model {
 				} else if can_define_x {
 					((x_t, x_i), (y_t, y_i))
 				} else {
-					todo!()
+					*self += IntEq { vars: [x, y] };
+					return Ok(());
 				};
 
 				// Perform the transformation and add the aliasing domain to x:

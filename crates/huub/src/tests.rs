@@ -28,6 +28,28 @@ fn it_works() {
 	);
 }
 
+#[test]
+fn unification_impossible() {
+	let mut prb = Model::default();
+	let a = prb.new_int_var((1..=5).into());
+	let b = prb.new_int_var((1..=2).into());
+
+	let lin = (a * 2 - b * 5).eq(0);
+	prb += lin;
+
+	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+	let a = map.get_int(&mut slv, a);
+	let b = map.get_int(&mut slv, b);
+
+	assert_eq!(
+		slv.solve(|value| {
+			assert_eq!(value(a.into()), Value::Int(5));
+			assert_eq!(value(b.into()), Value::Int(2));
+		}),
+		SolveResult::Satisfied
+	);
+}
+
 impl Model {
 	pub(crate) fn assert_unsatisfiable(&mut self) {
 		let err: Result<(Solver, _), _> = self.to_solver(&InitConfig::default());
