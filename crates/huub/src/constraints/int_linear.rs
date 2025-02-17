@@ -21,6 +21,15 @@ use crate::{
 	BoolDecision, BoolFormula, Conjunction, IntDecision, IntVal,
 };
 
+/// Representation of an integer equality constraint that cannot be unified.
+///
+/// This constraint enforces that two integer decisions take the same value.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct IntEq {
+	/// The two integer decisions that must be equal.
+	pub(crate) vars: [IntDecision; 2],
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Representation of an integer linear constraint within a model.
 ///
@@ -43,7 +52,7 @@ pub struct IntLinear {
 pub type IntLinearLessEqBounds = IntLinearLessEqBoundsImpl<0>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Value consistent propagator for the `int_lin_le` or `int_lin_le_imp`
+/// Bounds consistent propagator for the `int_lin_le` or `int_lin_le_imp`
 /// constraint.
 ///
 /// `R` should be `0` if the propagator is not refied, or `1` if it is. Other
@@ -102,6 +111,45 @@ pub(crate) enum Reification {
 	ImpliedBy(BoolDecision),
 	/// The constraint is reified by the given [`BoolDecision`].
 	ReifiedBy(BoolDecision),
+}
+
+impl<S: SimplificationActions> Constraint<S> for IntEq {
+	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+		let (lb_0, ub_0) = actions.get_int_bounds(self.vars[0]);
+		let (lb_1, ub_1) = actions.get_int_bounds(self.vars[1]);
+
+		if lb_0 == ub_0 {
+			actions.set_int_val(self.vars[1], lb_0)?;
+			return Ok(SimplificationStatus::Subsumed);
+		}
+		if lb_1 == ub_1 {
+			actions.set_int_val(self.vars[0], lb_1)?;
+			return Ok(SimplificationStatus::Subsumed);
+		}
+		if lb_0 >= lb_1 {
+			actions.set_int_lower_bound(self.vars[1], lb_0)?;
+		}
+		if lb_1 >= lb_0 {
+			actions.set_int_lower_bound(self.vars[0], lb_1)?;
+		}
+		if ub_0 <= ub_1 {
+			actions.set_int_upper_bound(self.vars[1], ub_0)?;
+		}
+		if ub_1 <= ub_0 {
+			actions.set_int_upper_bound(self.vars[0], ub_1)?;
+		}
+		Ok(SimplificationStatus::Fixpoint)
+	}
+
+	fn to_solver(&self, actions: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let lin = IntLinear {
+			terms: vec![self.vars[0], -self.vars[1]],
+			operator: LinOperator::Equal,
+			rhs: 0,
+			reif: None,
+		};
+		<IntLinear as Constraint<S>>::to_solver(&lin, actions)
+	}
 }
 
 impl IntLinear {

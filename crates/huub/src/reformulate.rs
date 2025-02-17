@@ -42,8 +42,8 @@ use crate::{
 		trail::TrailedInt,
 		BoolView, BoolViewInner, IntView, IntViewInner, View,
 	},
-	BoolDecision, BoolFormula, Decision, IntDecision, IntLitMeaning, IntSetVal, IntVal, Model,
-	Solver,
+	BoolDecision, BoolFormula, Decision, IntDecision, IntEq, IntLitMeaning, IntSetVal, IntVal,
+	Model, Solver,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -99,6 +99,7 @@ pub(crate) enum ConstraintStore {
 	IntArrayMinimum(IntArrayMinimum),
 	IntDecisionArrayElement(IntDecisionArrayElement),
 	IntDiv(IntDiv),
+	IntEq(IntEq),
 	IntInSetReif(IntInSetReif),
 	IntLinear(IntLinear),
 	IntPow(IntPow),
@@ -265,6 +266,9 @@ impl ConstraintStore {
 			}
 			ConstraintStore::IntDiv(con) => {
 				<IntDiv as Constraint<Model>>::to_solver(con, &mut actions)
+			}
+			ConstraintStore::IntEq(con) => {
+				<IntEq as Constraint<Model>>::to_solver(con, &mut actions)
 			}
 			ConstraintStore::IntInSetReif(con) => {
 				<IntInSetReif as Constraint<Model>>::to_solver(con, &mut actions)
