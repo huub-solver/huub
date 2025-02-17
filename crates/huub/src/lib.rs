@@ -511,6 +511,11 @@ impl IntDecision {
 				Ok(IntLitMeaning::Eq(1))  => x,
 				Ok(IntLitMeaning::Eq(0))  => !x,
 				Ok(IntLitMeaning::Eq(_)) /* if val != 0 */ => false.into(),
+				Err(b) => {
+					// After the transformation, the value `v` does not remain an integer.
+					debug_assert!(!b);
+					false.into()
+				}
 				_ => unreachable!(),
 			},
 		}
