@@ -379,6 +379,7 @@ impl BoolDecision {
 		use BoolDecisionInner::*;
 
 		let mut result = self;
+		// If the current Lit is an alias, then resolve it.
 		while let Lit(lit) = result.0 {
 			if let Some(alias) = model.bool_vars[i32::from(lit.var()) as usize - 1].alias {
 				debug_assert_ne!(alias, result);
@@ -387,6 +388,36 @@ impl BoolDecision {
 			} else {
 				break;
 			}
+		}
+		// If the current Lit is a integer view, check whether it is already fixed.
+		match result.0 {
+			IntEq(iv, val) => {
+				if let Some(v) = model.get_int_val(IntDecision(IntDecisionInner::Var(iv))) {
+					return BoolDecision(Const(v == val));
+				}
+			}
+			IntGreaterEq(iv, val) => {
+				let (lb, ub) = model.get_int_bounds(IntDecision(IntDecisionInner::Var(iv)));
+				if lb >= val {
+					return BoolDecision(Const(true));
+				} else if ub < val {
+					return BoolDecision(Const(false));
+				}
+			}
+			IntLess(iv, val) => {
+				let (lb, ub) = model.get_int_bounds(IntDecision(IntDecisionInner::Var(iv)));
+				if ub < val {
+					return BoolDecision(Const(true));
+				} else if lb >= val {
+					return BoolDecision(Const(false));
+				}
+			}
+			IntNotEq(iv, val) => {
+				if let Some(v) = model.get_int_val(IntDecision(IntDecisionInner::Var(iv))) {
+					return BoolDecision(Const(v != val));
+				}
+			}
+			_ => {}
 		}
 		result
 	}
@@ -599,6 +630,13 @@ impl IntDecision {
 					} else {
 						return IntDecision(Linear(t, x)) * scale + offset;
 					}
+				}
+				Bool(t, x) => {
+					let x = x.resolve_alias(model);
+					if let BoolDecisionInner::Const(b) = x.0 {
+						return IntDecision(Const(t.transform(b as IntVal) * scale + offset));
+					}
+					return IntDecision(Bool(t, x)) * scale + offset;
 				}
 				x => return IntDecision(x) * scale + offset,
 			}
@@ -1330,42 +1368,8 @@ impl SimplificationActions for Model {
 
 		let b = b.resolve_alias(self);
 		match b.0 {
-			Lit(lit) => {
-				debug_assert_eq!(
-					self.bool_vars[i32::from(lit.var()) as usize - 1].alias,
-					None
-				);
-				None
-			}
 			Const(b) => Some(b),
-			IntEq(iv, val) => {
-				let v = self.get_int_val(IntDecision(IntDecisionInner::Var(iv)))?;
-				Some(v == val)
-			}
-			IntGreaterEq(iv, val) => {
-				let (lb, ub) = self.get_int_bounds(IntDecision(IntDecisionInner::Var(iv)));
-				if lb >= val {
-					Some(true)
-				} else if ub < val {
-					Some(false)
-				} else {
-					None
-				}
-			}
-			IntLess(iv, val) => {
-				let (lb, ub) = self.get_int_bounds(IntDecision(IntDecisionInner::Var(iv)));
-				if ub < val {
-					Some(true)
-				} else if lb >= val {
-					Some(false)
-				} else {
-					None
-				}
-			}
-			IntNotEq(iv, val) => {
-				let v = self.get_int_val(IntDecision(IntDecisionInner::Var(iv)))?;
-				Some(v != val)
-			}
+			_ => None,
 		}
 	}
 
@@ -1440,15 +1444,8 @@ impl SimplificationActions for Model {
 
 		let var = var.resolve_alias(self);
 		match var.0 {
-			Linear(_, v) | Var(v) => {
-				let Domain::Domain(dom) = &self.int_vars[v].domain else {
-					unreachable!()
-				};
-				debug_assert!(dom.card() > 1);
-				None
-			}
 			Const(v) => Some(v),
-			Bool(t, bv) => self.get_bool_val(bv).map(|b| t.transform(b as IntVal)),
+			_ => None,
 		}
 	}
 
