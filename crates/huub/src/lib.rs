@@ -1996,7 +1996,7 @@ impl ElementConstraint for bool {
 			match (b, start) {
 				(true, None) => start = Some(i as IntVal),
 				(false, Some(s)) => {
-					ranges.push(s..=i as IntVal);
+					ranges.push(s..=(i - 1) as IntVal);
 					start = None;
 				}
 				(false, None) | (true, Some(_)) => {}
