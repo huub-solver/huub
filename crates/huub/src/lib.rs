@@ -1851,7 +1851,7 @@ impl SimplificationActions for Model {
 		let x = x.resolve_alias(self);
 		let y = y.resolve_alias(self);
 
-		let (idx, alias, dom) = match (x.0, y.0) {
+		let (idx, target, dom_con) = match (x.0, y.0) {
 			(x, y) if x == y => return Ok(()),
 			(Const(x), Const(y)) if x != y => return Err(ReformulationError::TrivialUnsatisfiable),
 			(Const(y), x) | (x, Const(y)) => {
@@ -1894,15 +1894,17 @@ impl SimplificationActions for Model {
 				// Perform the transformation and add the aliasing domain to x:
 				// x_scale * x + x_scale = y_scale * y + y_offset
 				// === x = (y_scale / x_scale) * y + ((y_offset - x_offset) / x_scale)
-				let trans_y = IntDecision(Var(y_i)) * (y_t.scale.get() / x_t.scale.get())
-					+ (y_t.offset - x_t.offset) / x_t.scale.get();
+				let trans_y = LinearTransform::scaled(
+					NonZeroIntVal::new(y_t.scale.get() / x_t.scale.get()).unwrap(),
+				) + (y_t.offset - x_t.offset) / x_t.scale.get();
+				let target = IntDecision(Var(y_i)) * trans_y.scale + trans_y.offset;
 
 				// Transform the domain for consequent reduction
 				let Domain::Domain(x_dom) = &self.int_vars[x_i].domain else {
 					unreachable!()
 				};
-				let x_dom = y_t.rev_transform_int_set(&x_t.transform_int_set(x_dom));
-				(x_i, trans_y, Some(x_dom))
+				let dom_con = trans_y.transform_int_set(x_dom);
+				(x_i, target, Some(dom_con))
 			}
 			(iv @ Linear(i_t, i_i), Bool(b_t, b_d)) | (Bool(b_t, b_d), iv @ Linear(i_t, i_i)) => {
 				let iv = IntDecision(iv);
@@ -1913,8 +1915,14 @@ impl SimplificationActions for Model {
 				let contains_ub = self.check_int_in_domain(iv, ub);
 
 				if contains_lb && contains_ub {
-					let i_lb = i_t.rev_transform(lb);
-					let i_ub = i_t.rev_transform(ub);
+					let Ok(IntLitMeaning::Eq(i_lb)) = i_t.rev_transform_lit(IntLitMeaning::Eq(lb))
+					else {
+						unreachable!()
+					};
+					let Ok(IntLitMeaning::Eq(i_ub)) = i_t.rev_transform_lit(IntLitMeaning::Eq(ub))
+					else {
+						unreachable!()
+					};
 
 					debug_assert!(matches!(self.int_vars[i_i].domain, Domain::Domain(_)));
 					(
@@ -1962,10 +1970,10 @@ impl SimplificationActions for Model {
 			}
 		};
 
-		self.int_vars[idx].domain = Domain::Alias(alias);
-		// Transfer any constraints from the aliased variable to new primary one
+		self.int_vars[idx].domain = Domain::Alias(target);
+		// Transfer any constraints from the aliased variable to the target variable
 		let constraints = mem::take(&mut self.int_vars[idx].constraints);
-		let notify = match alias.0 {
+		let notify = match target.0 {
 			// Move subscriptions to other integer decision
 			Var(j)
 			| Linear(_, j)
@@ -1994,11 +2002,11 @@ impl SimplificationActions for Model {
 		for c in notify.clone() {
 			self.enqueue(c);
 		}
-		// Restrict the domain of the new primary variable using the alias domain
-		if let Some(dom) = dom {
-			self.set_int_in_set(IntDecision(Var(idx)), &dom)?;
+		// Restrict the domain of the target variable using the variable domain
+		// being aliased.
+		if let Some(dom) = dom_con {
+			self.set_int_in_set(target, &dom)?;
 		}
-
 		Ok(())
 	}
 }
