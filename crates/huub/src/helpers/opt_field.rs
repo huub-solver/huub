@@ -66,3 +66,63 @@ impl<const B: usize, T: PartialEq> PartialEq for OptField<B, T> {
 		self.value == other.value
 	}
 }
+#[cfg(test)]
+mod tests {
+	use std::hash::{DefaultHasher, Hash, Hasher};
+
+	use super::OptField;
+
+	#[test]
+	fn test_optfield_new() {
+		let opt_field = OptField::new(42);
+		assert_eq!(opt_field.get(), Some(&42));
+	}
+
+	#[test]
+	fn test_optfield_default() {
+		let opt_field: OptField<0, i32> = OptField::default();
+		assert_eq!(opt_field.get(), None);
+
+		let opt_field: OptField<1, i32> = OptField::default();
+		assert_eq!(opt_field.get(), Some(&0));
+	}
+
+	#[test]
+	fn test_optfield_clone() {
+		let opt_field = OptField::new(42);
+		let cloned = opt_field.clone();
+		assert_eq!(opt_field.get(), cloned.get());
+		let opt_field: OptField<0, bool> = OptField::default();
+		let cloned = opt_field.clone();
+		assert_eq!(opt_field.get(), cloned.get());
+	}
+
+	#[test]
+	fn test_optfield_eq() {
+		let opt_field1 = OptField::new(42);
+		let opt_field2 = OptField::new(42);
+		assert_eq!(opt_field1, opt_field2);
+
+		let opt_field3 = OptField::new(43);
+		assert_ne!(opt_field1, opt_field3);
+
+		let opt_field1: OptField<0, i32> = OptField::default();
+		let opt_field2: OptField<0, i32> = OptField::default();
+		assert_eq!(opt_field1, opt_field2);
+	}
+
+	#[test]
+	fn test_optfield_hash() {
+		let opt_field = OptField::new(42);
+		let mut hasher = DefaultHasher::new();
+		opt_field.hash(&mut hasher);
+		let hash1 = hasher.finish();
+
+		let opt_field2 = OptField::new(42);
+		let mut hasher2 = DefaultHasher::new();
+		opt_field2.hash(&mut hasher2);
+		let hash2 = hasher2.finish();
+
+		assert_eq!(hash1, hash2);
+	}
+}
