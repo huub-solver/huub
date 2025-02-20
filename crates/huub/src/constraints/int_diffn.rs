@@ -1,3 +1,4 @@
+use itertools::izip;
 use crate::{actions::{
 	ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
 }, constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus}, reformulate::ReformulationError, solver::{
@@ -19,7 +20,7 @@ pub struct IntDiffn {
 /// Sweep based propagator for the `diffn_int` constraint.
 pub struct IntDiffnSweep {
     box_posn: Vec<Vec<IntView>>,
-    box_size: Vec<Vec<IntView>>,
+    box_size: Vec<Vec<IntVal>>,
     dimensions: usize
 }
 
@@ -40,27 +41,62 @@ impl IntDiffnSweep {
         box_posn: Vec<Vec<IntView>>, 
         box_size: Vec<Vec<IntView>>) {
         
-        // Make sure all sizes are constant before enqueueing
+        // Make sure all sizes are fixed before enqueueing
 		let enqueue = box_size
 			.iter()
             .flatten()
-			.all(|v| !matches!(v, IntView(IntViewInner::Const(_))));
+			.all(|v| matches!(v, IntView(IntViewInner::Const(_))));
 
+        if !enqueue { return () } // don't propagate if not all sizes are fixed
+
+        let box_size_fixed: Vec<Vec<IntVal>> = box_size.iter()
+             .map(|row|
+                  row.iter()
+                     .map(|&v| solver.get_int_lower_bound(v))
+                     .collect()
+             )
+             .collect();
+ 
 		let prop = solver.add_propagator(Box::new(Self {
             box_posn: box_posn.clone(),
-            box_size: box_size.clone(),
+            box_size: box_size_fixed,
             dimensions: box_posn[0].len()
         }), PriorityLevel::Low);
 
         for v in box_posn.into_iter().flatten() {
-            if enqueue {
-                solver.enqueue_on_int_change(prop, v, IntPropCond::Bounds);
-            }
+            solver.enqueue_on_int_change(prop, v, IntPropCond::Bounds);
         }
     }
 
-    /// Generates forbidden regions
-    fn gen_fr(o_idx:usize) -> ForbiddenRegions {
+    /// Generates forbidden regions given object o
+    fn gen_fr<P: PropagationActions>(&mut self, actions: &mut P, o_idx:usize) -> Option<ForbiddenRegions> {
+        let mut fr = ForbiddenRegions {
+            lb: Vec::new(),
+            ub: Vec::new()
+        };
+        let no_objects = self.box_posn.len();
+        let curr_obj_size = &self.box_size[o_idx];
+        for i in 0..no_objects {
+            if i == o_idx { continue };
+            let obj_pos = &self.box_posn[i];
+            let obj_size = &self.box_size[i];
+            for (&pos, size, curr_size) in izip!(obj_pos, obj_size, curr_obj_size) { 
+                let pos_ub: IntVal = actions.get_int_upper_bound(pos); 
+                let pos_lb: IntVal = actions.get_int_lower_bound(pos); 
+
+                let fr_lb = pos_ub - curr_size + 1;
+                let fr_ub = pos_lb + size - 1; 
+                
+
+            }
+            // izip!(obj_pos, obj_size, curr_obj_size)
+            //     .filter(|(pos, size, curr_size)| {
+            //         actions.get_int_upper_bound(pos) - curr_obj_size + 1 <= actions.get_int_lower_bound(pos)
+            //     })
+        }
+
+        Some(fr)
+
 
     }
 
