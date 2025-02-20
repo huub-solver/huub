@@ -52,8 +52,7 @@ impl<S: SimplificationActions> Constraint<S> for IntAbs {
 		actions.set_int_lower_bound(self.origin, -abs_ub)?;
 		actions.set_int_upper_bound(self.abs, abs_ub)?;
 		if lb >= 0 {
-			// TODO: Unify
-			actions.add_constraint((self.origin - self.abs).eq(0));
+			actions.unify_int(self.origin, self.abs)?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
 

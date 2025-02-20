@@ -240,9 +240,38 @@ impl BoolView {
 	}
 }
 
+impl Add<IntVal> for BoolView {
+	type Output = IntView;
+
+	fn add(self, rhs: IntVal) -> Self::Output {
+		match self.0 {
+			BoolViewInner::Lit(lit) => IntView(IntViewInner::Bool {
+				transformer: LinearTransform::offset(rhs),
+				lit,
+			}),
+			BoolViewInner::Const(b) => (b as IntVal + rhs).into(),
+		}
+	}
+}
+
 impl From<bool> for BoolView {
 	fn from(value: bool) -> Self {
 		BoolView(BoolViewInner::Const(value))
+	}
+}
+
+impl Mul<IntVal> for BoolView {
+	type Output = IntView;
+
+	fn mul(self, rhs: IntVal) -> Self::Output {
+		match self.0 {
+			_ if rhs == 0 => IntView(IntViewInner::Const(0)),
+			BoolViewInner::Lit(lit) => IntView(IntViewInner::Bool {
+				transformer: LinearTransform::scaled(NonZeroIntVal::new(rhs).unwrap()),
+				lit,
+			}),
+			BoolViewInner::Const(b) => (b as IntVal * rhs).into(),
+		}
 	}
 }
 
@@ -435,6 +464,7 @@ impl Mul<NonZeroIntVal> for IntView {
 
 	fn mul(self, rhs: NonZeroIntVal) -> Self::Output {
 		Self(match self.0 {
+			x if rhs.get() == 1 => x,
 			IntViewInner::VarRef(iv) => IntViewInner::Linear {
 				transformer: LinearTransform::scaled(rhs),
 				var: iv,

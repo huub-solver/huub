@@ -4,7 +4,19 @@
 pub(crate) mod linear_transform;
 pub(crate) mod opt_field;
 
+use std::mem;
+
+use pindakaas::Var as RawVar;
+
 use crate::{IntVal, NonZeroIntVal};
+
+#[inline]
+/// Helper function to deal with [`RawVar`] in data structure that have to
+/// represent them as plain bytes.
+pub(crate) fn var_from_u32(raw: u32) -> RawVar {
+	// SAFETY: This is safe because RawVar uses the same representation as i32
+	unsafe { mem::transmute::<u32, RawVar>(raw) }
+}
 
 #[inline]
 /// Integer division that rounds towards positive infinity.

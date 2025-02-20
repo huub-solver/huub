@@ -79,9 +79,15 @@ impl<S: SimplificationActions> Constraint<S> for IntDecisionArrayElement {
 	}
 
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		// make sure idx is within the range of args
+		// Fix the bounds of the index is to the length of the array
 		actions.set_int_lower_bound(self.index, 0)?;
 		actions.set_int_upper_bound(self.index, self.array.len() as IntVal - 1)?;
+		// Unify if the index is already fixed
+		if let Some(idx) = actions.get_int_val(self.index) {
+			actions.unify_int(self.array[idx as usize], self.result)?;
+			return Ok(SimplificationStatus::Subsumed);
+		}
+		// Match the bounds of the array elements to the result and vice versa
 		let (min_lb, max_ub) =
 			self.array
 				.iter()
@@ -319,6 +325,18 @@ where
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntValArrayElement {
+	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+		// Fix the bounds of the index is to the length of the array
+		actions.set_int_lower_bound(self.index, 0)?;
+		actions.set_int_upper_bound(self.index, self.array.len() as IntVal - 1)?;
+		// Unify if the index is already fixed
+		if let Some(idx) = actions.get_int_val(self.index) {
+			actions.set_int_val(self.result, self.array[idx as usize])?;
+			return Ok(SimplificationStatus::Subsumed);
+		}
+		Ok(SimplificationStatus::Fixpoint)
+	}
+
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let index = slv.get_solver_int(self.index);
 		let result = slv.get_solver_int(self.result);

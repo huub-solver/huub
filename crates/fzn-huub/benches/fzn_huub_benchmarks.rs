@@ -23,7 +23,7 @@ use fzn_huub::Cli;
 use pico_args::Arguments;
 
 /// A configuration for instances that run for a few seconds.
-const FEW_SECONDS_CONFIG: CriterionConfig = CriterionConfig {
+const _FEW_SECONDS_CONFIG: CriterionConfig = CriterionConfig {
 	sampling_mode: Some(SamplingMode::Flat),
 	sample_size: Some(10),
 	measurement_time: Some(Duration::from_secs(60)),
@@ -113,15 +113,15 @@ fn optimization(c: &mut Criterion) {
 	let mut group = c.benchmark_group("optimization");
 	let instances = vec![
 		("jobshop_la01", &MILLISECONDS_CONFIG),
-		("jobshop_la02", &FEW_SECONDS_CONFIG),
+		("jobshop_la02", &MILLISECONDS_CONFIG),
 		("jobshop_la03", &MILLISECONDS_CONFIG),
-		("jobshop_la04", &FEW_SECONDS_CONFIG),
+		("jobshop_la04", &MILLISECONDS_CONFIG),
 		("jobshop_la05", &INSTANT_CONFIG),
 		("jobshop_newspaper", &INSTANT_CONFIG),
 		("portal_10_9_10", &MILLISECONDS_CONFIG),
 		("radiation_i6_9", &INSTANT_CONFIG),
 		("radiation_i8_9", &MILLISECONDS_CONFIG),
-		("svrp_s4_v2_c3", &FEW_SECONDS_CONFIG),
+		("svrp_s4_v2_c3", &MILLISECONDS_CONFIG),
 	];
 
 	for (instance, config) in instances {
@@ -151,10 +151,10 @@ fn run_solver(fzn: &Path) -> Vec<u8> {
 fn satisfaction(c: &mut Criterion) {
 	let mut group = c.benchmark_group("satisfaction");
 	let instances = vec![
-		("amaze3_2012_03_19", &FEW_SECONDS_CONFIG),
+		("amaze3_2012_03_19", &MILLISECONDS_CONFIG),
 		("steiner_t3_k4_N8", &INSTANT_CONFIG),
 		("steiner_t6_k6_N7", &INSTANT_CONFIG),
-		("sudoku_p48", &MILLISECONDS_CONFIG),
+		("sudoku_p48", &INSTANT_CONFIG),
 	];
 
 	for (instance, config) in instances {

@@ -324,6 +324,14 @@ pub trait SimplificationActions {
 		var: IntDecision,
 		values: &IntSetVal,
 	) -> Result<(), ReformulationError>;
+
+	/// Mark two Boolean decisions as being equivalent, ensuring the two use the
+	/// same internal representation.
+	fn unify_bool(&mut self, x: BoolDecision, y: BoolDecision) -> Result<(), ReformulationError>;
+
+	/// Mark two integer decisions as being equivalent, ensuring the two use the
+	/// same internal representation.
+	fn unify_int(&mut self, x: IntDecision, y: IntDecision) -> Result<(), ReformulationError>;
 }
 
 /// Basic actions that can be performed when the trailing infrastructure is
