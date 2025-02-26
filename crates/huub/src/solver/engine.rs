@@ -415,7 +415,7 @@ impl State {
 			// Enact domain changes and determine change event
 			let event: IntEvent = match meaning {
 				IntLitMeaning::Eq(i) => {
-					if i == lb || i == ub {
+					if i == lb && i == ub {
 						return None;
 					}
 					if i < lb || i > ub {
