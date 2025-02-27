@@ -1875,12 +1875,14 @@ impl SimplificationActions for Model {
 				) + (y_t.offset - x_t.offset) / x_t.scale.get();
 				let target = IntDecision(Var(y_i)) * trans_y.scale + trans_y.offset;
 
-				// Transform the domain for consequent reduction
-				let Domain::Domain(x_dom) = &self.int_vars[x_i].domain else {
+				// Domain of target must be equivalent to the domain of x
+				let Domain::Domain(x_dom) = mem::replace(
+					&mut self.int_vars[x_i].domain,
+					Domain::Domain(RangeList::default()),
+				) else {
 					unreachable!()
 				};
-				let dom_con = trans_y.transform_int_set(x_dom);
-				(x_i, target, Some(dom_con))
+				(x_i, target, Some(x_dom))
 			}
 			(iv @ Linear(i_t, i_i), Bool(b_t, b_d)) | (Bool(b_t, b_d), iv @ Linear(i_t, i_i)) => {
 				let iv = IntDecision(iv);
