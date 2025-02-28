@@ -20,6 +20,7 @@ use crate::{
 		disjunctive_strict::DisjunctiveStrict,
 		int_abs::IntAbs,
 		int_all_different::IntAllDifferent,
+        int_diffn::IntDiffn,
 		int_array_element::{IntDecisionArrayElement, IntValArrayElement},
 		int_array_minimum::IntArrayMinimum,
 		int_div::IntDiv,
@@ -80,6 +81,7 @@ pub(crate) enum ConstraintStore {
 	DisjunctiveStrict(DisjunctiveStrict),
 	IntAbs(IntAbs),
 	IntAllDifferent(IntAllDifferent),
+    IntDiffn(IntDiffn),
 	IntArrayMinimum(IntArrayMinimum),
 	IntDecisionArrayElement(IntDecisionArrayElement),
 	IntDiv(IntDiv),
@@ -210,6 +212,9 @@ impl ConstraintStore {
 			}
 			ConstraintStore::IntAllDifferent(con) => {
 				<IntAllDifferent as Constraint<Model>>::to_solver(con, &mut actions)
+			}
+			ConstraintStore::IntDiffn(con) => {
+				<IntDiffn as Constraint<Model>>::to_solver(con, &mut actions)
 			}
 			ConstraintStore::IntArrayMinimum(con) => {
 				<IntArrayMinimum as Constraint<Model>>::to_solver(con, &mut actions)
