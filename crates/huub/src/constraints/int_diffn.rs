@@ -193,15 +193,6 @@ impl IntDiffnSweep {
         !(0..dimensions).any(|d|
                         actions.get_int_upper_bound(curr_obj_pos[d]) < fr.lb[d] ||
                         actions.get_int_lower_bound(curr_obj_pos[d]) > fr.ub[d])
-            //
-        // for d in 0..dimensions {
-        //     let no_overlap = actions.get_int_upper_bound(curr_obj_pos[d]) < fr.lb[d] ||
-        //         actions.get_int_lower_bound(curr_obj_pos[d]) > fr.ub[d];
-        //     if no_overlap {
-        //         return false;
-        //     }
-        // }
-        // true
     } 
 
         
@@ -211,12 +202,12 @@ impl IntDiffnSweep {
     fn generate_fr<P: PropagationActions>(
         &self,
         actions: &mut P,
-        o_idx:usize, //TODO: maybe send the whole objects rather than just the idx
+        o_idx:usize, 
         dimensions:usize
     ) -> Option<Vec<ForbiddenRegion>> {
         let mut all_fr:Vec<ForbiddenRegion> = vec![];
         let no_objects = self.box_posn.len();
-        let curr_obj_size = &self.box_size[o_idx]; // get the address &?
+        let curr_obj_size = &self.box_size[o_idx]; 
         for i in 0..no_objects {
             let mut fr = ForbiddenRegion {
                 lb: Vec::new(),
