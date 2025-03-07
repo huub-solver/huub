@@ -119,7 +119,7 @@ impl IntDiffnSweep {
         }
 
         if b {
-            //DO THE PRUNING
+            println!("PRUNING");
          }
         Ok(())
     }
@@ -146,9 +146,9 @@ impl IntDiffnSweep {
             infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
         }
 
-        // if b {
-        //     //DO THE PRUNING
-        // }
+       if b {
+           println!("PRUNING");
+       }
         Ok(())
     }
 
@@ -206,9 +206,17 @@ impl IntDiffnSweep {
         dimensions:usize
     ) -> bool {
         println!("size: {:?}", fr.lb.len());
-        !(0..dimensions).any(|d|
-                        actions.get_int_upper_bound(curr_obj_pos[d]) < fr.lb[d] ||
-                        actions.get_int_lower_bound(curr_obj_pos[d]) > fr.ub[d])
+        // !(0..dimensions).any(|d|
+        //                actions.get_int_upper_bound(curr_obj_pos[d]) < fr.lb[d] ||
+        //                actions.get_int_lower_bound(curr_obj_pos[d]) > fr.ub[d])
+        for d in (0..dimensions) {
+            let a = actions.get_int_upper_bound(curr_obj_pos[d]) < fr.lb[d];
+            let b = actions.get_int_lower_bound(curr_obj_pos[d]) > fr.ub[d];
+            if a || b {
+                return false;
+            }
+        }
+        true
     } 
 
         
@@ -242,21 +250,23 @@ impl IntDiffnSweep {
                 let fr_ub = pos_lb + size - 1; 
                 if fr_lb <= fr_ub {
                     fr.lb.push(fr_lb);
-                    fr.ub.push(fr_lb);
+                    fr.ub.push(fr_ub);
                 } else {
                     break;
                 }
             }
+            if fr.lb.len() == dimensions {
+                let is_overlapping = Self::overlaps::<P>(
+                    actions,
+                    &self.box_posn[o_idx],
+                    &fr,
+                    dimensions);
 
-            let is_overlapping = Self::overlaps::<P>(
-                actions,
-                &self.box_posn[o_idx],
-                &fr,
-                dimensions);
+                println!("HERE");
+                if is_overlapping{
+                    all_fr.push(fr);
+                }
 
-            println!("HERE");
-            if fr.lb.len() == dimensions && is_overlapping{
-                all_fr.push(fr);
             }
         }
         if all_fr.is_empty() { None } else { Some(all_fr) }
@@ -286,6 +296,21 @@ where
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
         for o_idx in 0..self.box_posn.len() {
             // Check whether there exists any forbidden regions
+            println!("object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
+                     0,
+                     actions.get_int_upper_bound(self.box_posn[0][0]),
+                     actions.get_int_lower_bound(self.box_posn[0][0]),
+                     actions.get_int_upper_bound(self.box_posn[0][1]),
+                     actions.get_int_lower_bound(self.box_posn[0][1]),
+            );
+
+            println!("object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
+                     1,
+                     actions.get_int_upper_bound(self.box_posn[1][0]),
+                     actions.get_int_lower_bound(self.box_posn[1][0]),
+                     actions.get_int_upper_bound(self.box_posn[1][1]),
+                     actions.get_int_lower_bound(self.box_posn[1][1]),
+            );
             if let Some(all_fr) = self.generate_fr(actions, o_idx, self.dimensions) {
                 for d in 0..self.dimensions {
                     self.prune_min(actions, o_idx, d, &all_fr)?;
@@ -317,13 +342,13 @@ mod tests {
 		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
 		let pos_1 = IntVar::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=5]),
+			RangeList::from_iter([0..=2]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let pos_2 = IntVar::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=3]),
+			RangeList::from_iter([0..=5]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);

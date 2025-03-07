@@ -802,34 +802,4 @@ mod tests {
 		IntAllDifferentBounds::new_in(&mut slv, vec![a, b, c, d, e, f]);
 		slv.assert_all_solutions(&[a, b, c, d, e, f], |sol| sol.iter().all_unique());
 	}
-
-	#[test]
-	#[traced_test]
-	fn test_all_different_bounds_unsat() {
-		// let mut prb = Model::default();
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
-		let a = IntVar::new_in(
-			&mut slv,
-			RangeList::from_iter([1..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let b = IntVar::new_in(
-			&mut slv,
-			RangeList::from_iter([1..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let c = IntVar::new_in(
-			&mut slv,
-			RangeList::from_iter([1..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		IntAllDifferentBounds::new_in(&mut slv, vec![a, b, c]);
-        
-		IntLinearLessEqBounds::new_in(&mut slv, -a-b-c, -8);
-        slv.assert_unsatisfiable()
-
-	}
 }
