@@ -1,6 +1,5 @@
 use itertools::izip;
-use std::cmp;
-use crate::{actions::{
+use std::cmp; use crate::{actions::{
 	ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
 }, constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus}, reformulate::ReformulationError, solver::{
 	activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView, IntViewInner,
@@ -112,6 +111,7 @@ impl IntDiffnSweep {
         }
         let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
         while b && infeasible_fr.is_some() {
+            println!("prune_min - in loop");
             jump[curr_dimension] = cmp::min(jump[curr_dimension], infeasible_fr.unwrap().ub[curr_dimension] + 1);
             // Contains side-effects to change sweep
             b = Self::adjust_sweep_min(actions, &mut sweep, &mut jump, &self.box_posn[curr_obj_idx], curr_dimension, self.dimensions);
@@ -140,15 +140,28 @@ impl IntDiffnSweep {
         }
         let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
         while b && infeasible_fr.is_some() {
+            //println!("prune max - in loop");
             jump[curr_dimension] = cmp::max(jump[curr_dimension], infeasible_fr.unwrap().lb[curr_dimension] - 1);
+            // println!("sweep before x: {:?} y: {:?}", sweep[0], sweep[1]);
+            // println!("jump before x: {:?} y: {:?}", jump[0], jump[1]);
             // Contains side-effects to change sweep
             b = Self::adjust_sweep_max(actions, &mut sweep, &mut jump, &self.box_posn[curr_obj_idx], curr_dimension, self.dimensions);
+            // println!("sweep after x: {:?} y: {:?}", sweep[0], sweep[1]);
+            // println!("jump after x: {:?} y: {:?}", jump[0], jump[1]);
             infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
         }
+        
+        
+        if b {
+            //println!("SWEEP IS x: {:?} y: {:?}", sweep[0], sweep[1]);
+            if curr_dimension == 1 {
+                println!("CURRENT SWEEP IS {:?} in dimension {:?} for object {:?}", sweep[curr_dimension], curr_dimension, curr_obj_idx);
+                let reason = actions.get_int_lit(self.box_posn[1][curr_dimension], IntLitMeaning::GreaterEq(4));
+                actions.set_int_upper_bound(self.box_posn[curr_obj_idx][curr_dimension], sweep[curr_dimension], reason)?;
+                println!("PRUNING DONE");
+            }
 
-       if b {
-           println!("PRUNING");
-       }
+        }
         Ok(())
     }
 
@@ -184,14 +197,19 @@ impl IntDiffnSweep {
     ) -> bool {
         for i in (0..dimensions).rev() {
             let rotation = (i + curr_dimension) % dimensions;
+            // println!("sweep before x: {:?} y: {:?}", sweep[0], sweep[1]);
+            // println!("jump before x: {:?} y: {:?}", jump[0], jump[1]);
             sweep[rotation] = jump[rotation];
             jump[rotation] = actions.get_int_lower_bound(curr_obj_pos[rotation]) - 1;
+            //println!("sweep after x: {:?} y: {:?}", sweep[0], sweep[1]);
+            //println!("jump after x: {:?} y: {:?}", jump[0], jump[1]);
             // Current sweep-point is withing the bounds of the current object
-            if sweep[rotation] <= actions.get_int_lower_bound(curr_obj_pos[rotation]) {
-                return true;
+            if sweep[rotation] >= actions.get_int_lower_bound(curr_obj_pos[rotation]) {
+                return true
             } else {
                 // Reset sweep-point
                 sweep[rotation] = actions.get_int_upper_bound(curr_obj_pos[rotation]);
+                //println!("sweep ADD x: {:?} y: {:?}", sweep[0], sweep[1]);
             }
         }
         false
@@ -209,7 +227,7 @@ impl IntDiffnSweep {
         // !(0..dimensions).any(|d|
         //                actions.get_int_upper_bound(curr_obj_pos[d]) < fr.lb[d] ||
         //                actions.get_int_lower_bound(curr_obj_pos[d]) > fr.ub[d])
-        for d in (0..dimensions) {
+        for d in 0..dimensions {
             let a = actions.get_int_upper_bound(curr_obj_pos[d]) < fr.lb[d];
             let b = actions.get_int_lower_bound(curr_obj_pos[d]) > fr.ub[d];
             if a || b {
@@ -279,11 +297,26 @@ impl IntDiffnSweep {
         all_fr: &'a Vec<ForbiddenRegion>
     ) -> Option<&'a ForbiddenRegion> {
         all_fr.iter()
-            .filter(|fr| 
-                    // TODO: Check if this is correect
-                    (0..dimensions).any(|i| sweep[i] < fr.lb[i] || sweep[i] > fr.ub[i]))
-            .next()
+            .find(|fr| 
+                    (0..dimensions).all(|i| sweep[i] >= fr.lb[i] && sweep[i] <= fr.ub[i]))
     }
+         // for fr in all_fr {
+         //     if !Self::isfeasible(sweep, dimensions, fr) {
+         //         return Some(fr)
+         //     }
+         // }
+         // None
+
+    // fn isfeasible(
+    //     sweep: &Vec<IntVal>,
+    //     dimensions: usize,
+    //     fr: &ForbiddenRegion
+    // ) -> bool {
+    //     for i in 0..dimensions {
+    //         if sweep[i] < fr.lb[i] || sweep[i] > fr.ub[i] { return true; }
+    //     }
+    //     false
+    // }
 }
 
 
@@ -312,6 +345,12 @@ where
                      actions.get_int_lower_bound(self.box_posn[1][1]),
             );
             if let Some(all_fr) = self.generate_fr(actions, o_idx, self.dimensions) {
+                println!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
+                         all_fr[0].ub[0],
+                         all_fr[0].lb[0],
+                         all_fr[0].ub[1],
+                         all_fr[0].lb[1],
+                );
                 for d in 0..self.dimensions {
                     self.prune_min(actions, o_idx, d, &all_fr)?;
                     self.prune_max(actions, o_idx, d, &all_fr)?;
