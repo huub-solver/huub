@@ -63,10 +63,10 @@ impl IntDiffnSweep {
 	/// Prepare a new [`IntDiffnSweep`] propagator to be posted to the
 	/// solver.
 	pub fn new_in<P: PropagatorInitActions + ?Sized>
-        (solver: &mut P, 
-        box_posn: Vec<Vec<IntView>>, 
+        (solver: &mut P,
+        box_posn: Vec<Vec<IntView>>,
         box_size: Vec<Vec<IntView>>) {
-        
+
         // Make sure all sizes are fixed before enqueueing
 		let enqueue = box_size
 			.iter()
@@ -82,7 +82,7 @@ impl IntDiffnSweep {
                      .collect()
              )
              .collect();
- 
+
 		let prop = solver.add_propagator(Box::new(Self {
             box_posn: box_posn.clone(),
             box_size: box_size_fixed,
@@ -97,6 +97,7 @@ impl IntDiffnSweep {
     fn prune_min<P: PropagationActions>(
         &mut self,
         actions: &mut P,
+        fr_support: &Vec<usize>,
         curr_obj_idx: usize,
         curr_dimension: usize,
         all_fr: &Vec<ForbiddenRegion>
@@ -118,14 +119,79 @@ impl IntDiffnSweep {
             infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
         }
 
+        // Start pruning here
         if b {
-            println!("PRUNING");
-         }
+            // Creating explanation clauses
+            let mut reason = Vec::new();
+
+            for o_idx in 0..self.box_posn.len() {
+                // There is no fr for jndex o_idx
+                if fr_support[o_idx] == 0 { continue }
+                if all_fr[o_idx].ub[curr_dimension] == sweep[curr_dimension] {
+                    // Explains that the objects ub is such that it doesnt exceed the sweep
+                    // let r = sweep[curr_dimension] - self.box_size[curr_obj_idx][curr_dimension] + 1;
+                    // reason.push(actions.get_int_lit(self.box_posn[o_idx][curr_dimension], IntLitMeaning::Less(r+1)));
+                    //
+                    // Not convinced this is correct since if we would enfore fr.ub[x] <= 3 on both
+                    // we are not constraining them to be less than 3 and if we are also setting fr.ub[x] == 3 then the
+                    // explanation might be invalid since one of them would be allowed to be > 3
+                    // +----------------+
+                    // |    |           |
+                    // | 1  |           |
+                    // +----+           |
+                    // |    |           |
+                    // | 2  |           |
+                    // |    |           |
+                    // +----------------+
+                    //      3
+                    reason.push(actions.get_int_upper_bound_lit(self.box_posn[o_idx][curr_dimension]))
+
+                } else {
+                    // Explain that in the other dimensions where we are exceeding the point where
+                    // we are sweeping, there is some space such that the current object could
+                    // still be place
+                    let valid_objs = (0..self.box_posn.len()).filter(|i| all_fr[o_idx].ub[curr_dimension] <= sweep[curr_dimension]).collect();
+                    for d in 0..self.dimensions {
+                        // We don't have to look at our current dimension
+                        if d == curr_dimension { continue }
+
+                        // +----+-----------+
+                        // |    |           |
+                        // |    |    2      |
+                        // |    +-----------+
+                        // | 1  |           |
+                        // |    |           |
+                        // |    |           |
+                        // +----+-----------+
+                        //
+                        if all_fr[o_idx].ub[d] > actions.get_int_upper_bound(self.box_posn[curr_obj_idx][d]) {
+                             let p =  self.find_lowest_point(actions, curr_dimension, curr_obj_idx, &valid_objs);
+                        }
+                        // +----+-----------+
+                        // |    |           |
+                        // |    |           |
+                        // |    |           |
+                        // | 1  +-----------+
+                        // |    |    2      |
+                        // |    |           |
+                        // +----+-----------+
+                        else if all_fr[o_idx].lb[d] < actions.get_int_lower_bound(self.box_posn[curr_obj_idx][d]) {
+                             let p =  self.find_highest_point(actions, curr_dimension, curr_obj_idx, &valid_objs);
+                        }
+
+                    }
+                }
+            }
+            actions.set_int_upper_bound(self.box_posn[curr_obj_idx][curr_dimension], sweep[curr_dimension], reason)?;
+
+        }
         Ok(())
     }
+
     fn prune_max<P: PropagationActions>(
         &mut self,
         actions: &mut P,
+        fr_support: &Vec<usize>,
         curr_obj_idx: usize,
         curr_dimension: usize,
         all_fr: &Vec<ForbiddenRegion>
@@ -150,8 +216,8 @@ impl IntDiffnSweep {
             // println!("jump after x: {:?} y: {:?}", jump[0], jump[1]);
             infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
         }
-        
-        
+
+
         if b {
             //println!("SWEEP IS x: {:?} y: {:?}", sweep[0], sweep[1]);
             if curr_dimension == 1 {
@@ -163,6 +229,30 @@ impl IntDiffnSweep {
 
         }
         Ok(())
+    }
+
+    fn find_highest_point<P: PropagationActions>(
+        &mut self,
+        actions: &mut P,
+        curr_dimension: usize,
+        curr_obj_idx: usize,
+        valid_objs: &Vec<usize>
+    ) -> IntVal {
+        for o in valid_objs {
+
+        }
+    }
+
+    fn find_lowest_point<P: PropagationActions>(
+        &mut self,
+        actions: &mut P,
+        curr_dimension: usize,
+        curr_obj_idx: usize,
+        valid_objs: &Vec<usize>
+    ) -> IntVal {
+        for o in valid_objs {
+
+        }
     }
 
     fn adjust_sweep_min<P: PropagationActions>(
@@ -215,7 +305,7 @@ impl IntDiffnSweep {
         false
     }
 
-    
+
 
     fn overlaps<P: PropagationActions>(
         actions: &mut P,
@@ -235,21 +325,22 @@ impl IntDiffnSweep {
             }
         }
         true
-    } 
+    }
 
-        
+
 
 
     /// Generates forbidden regions given object o
     fn generate_fr<P: PropagationActions>(
         &self,
         actions: &mut P,
-        o_idx:usize, 
+        fr_support: &mut Vec<usize>,
+        o_idx:usize,
         dimensions:usize
     ) -> Option<Vec<ForbiddenRegion>> {
         let mut all_fr:Vec<ForbiddenRegion> = vec![];
         let no_objects = self.box_posn.len();
-        let curr_obj_size = &self.box_size[o_idx]; 
+        let curr_obj_size = &self.box_size[o_idx];
         for i in 0..no_objects {
             let mut fr = ForbiddenRegion {
                 lb: Vec::new(),
@@ -260,16 +351,17 @@ impl IntDiffnSweep {
             let obj_pos = &self.box_posn[i];
             let obj_size = &self.box_size[i];
 
-            for (&pos, size, curr_size) in izip!(obj_pos, obj_size, curr_obj_size) { 
-                let pos_ub: IntVal = actions.get_int_upper_bound(pos); 
-                let pos_lb: IntVal = actions.get_int_lower_bound(pos); 
+            for (&pos, size, curr_size) in izip!(obj_pos, obj_size, curr_obj_size) {
+                let pos_ub: IntVal = actions.get_int_upper_bound(pos);
+                let pos_lb: IntVal = actions.get_int_lower_bound(pos);
 
                 let fr_lb = pos_ub - curr_size + 1;
-                let fr_ub = pos_lb + size - 1; 
+                let fr_ub = pos_lb + size - 1;
                 if fr_lb <= fr_ub {
                     fr.lb.push(fr_lb);
                     fr.ub.push(fr_ub);
                 } else {
+                    fr_support.push(0);
                     break;
                 }
             }
@@ -280,9 +372,11 @@ impl IntDiffnSweep {
                     &fr,
                     dimensions);
 
-                println!("HERE");
                 if is_overlapping{
+                    fr_support.push(1);
                     all_fr.push(fr);
+                } else {
+                    fr_support.push(0);
                 }
 
             }
@@ -290,33 +384,34 @@ impl IntDiffnSweep {
         if all_fr.is_empty() { None } else { Some(all_fr) }
     }
 
-    // Checks whether the sweep point is in a feasible position, if it is feas 
+    // Checks whether the sweep point is in a feasible position, if it is feas
     fn infeasible_sweep<'a>(
         sweep: &Vec<IntVal>,
         dimensions: usize,
         all_fr: &'a Vec<ForbiddenRegion>
     ) -> Option<&'a ForbiddenRegion> {
-        all_fr.iter()
-            .find(|fr| 
-                    (0..dimensions).all(|i| sweep[i] >= fr.lb[i] && sweep[i] <= fr.ub[i]))
-    }
-         // for fr in all_fr {
-         //     if !Self::isfeasible(sweep, dimensions, fr) {
-         //         return Some(fr)
-         //     }
-         // }
-         // None
-
-    // fn isfeasible(
-    //     sweep: &Vec<IntVal>,
-    //     dimensions: usize,
-    //     fr: &ForbiddenRegion
-    // ) -> bool {
-    //     for i in 0..dimensions {
-    //         if sweep[i] < fr.lb[i] || sweep[i] > fr.ub[i] { return true; }
-    //     }
-    //     false
+    //     all_fr.iter()
+    //         .find(|fr|
+    //                 (0..dimensions).all(|i| sweep[i] >= fr.lb[i] && sweep[i] <= fr.ub[i]))
     // }
+        for fr in all_fr {
+            if !Self::isfeasible(sweep, dimensions, fr) {
+                return Some(fr)
+            }
+        }
+        None
+    }
+
+    fn isfeasible(
+        sweep: &Vec<IntVal>,
+        dimensions: usize,
+        fr: &ForbiddenRegion
+    ) -> bool {
+        for i in 0..dimensions {
+            if sweep[i] < fr.lb[i] || sweep[i] > fr.ub[i] { return true; }
+        }
+        false
+    }
 }
 
 
@@ -344,7 +439,8 @@ where
                      actions.get_int_upper_bound(self.box_posn[1][1]),
                      actions.get_int_lower_bound(self.box_posn[1][1]),
             );
-            if let Some(all_fr) = self.generate_fr(actions, o_idx, self.dimensions) {
+            let mut fr_support: Vec<usize> = Vec::new();
+            if let Some(all_fr) = self.generate_fr(actions, &mut fr_support, o_idx, self.dimensions) {
                 println!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
                          all_fr[0].ub[0],
                          all_fr[0].lb[0],
@@ -352,8 +448,8 @@ where
                          all_fr[0].lb[1],
                 );
                 for d in 0..self.dimensions {
-                    self.prune_min(actions, o_idx, d, &all_fr)?;
-                    self.prune_max(actions, o_idx, d, &all_fr)?;
+                    self.prune_min(actions, &fr_support, o_idx, d, &all_fr)?;
+                    self.prune_max(actions, &fr_support, o_idx, d, &all_fr)?;
 
                 }
             }
