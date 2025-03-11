@@ -23,7 +23,7 @@ use fzn_huub::Cli;
 use pico_args::Arguments;
 
 /// A configuration for instances that run for a few seconds.
-const _FEW_SECONDS_CONFIG: CriterionConfig = CriterionConfig {
+const FEW_SECONDS_CONFIG: CriterionConfig = CriterionConfig {
 	sampling_mode: Some(SamplingMode::Flat),
 	sample_size: Some(10),
 	measurement_time: Some(Duration::from_secs(60)),
@@ -99,10 +99,7 @@ fn check_final(name: &str, instance_type: InstanceType) {
 	);
 	slice = &slice[..slice.len() - FZN_SEPERATOR.len()];
 	let sol = base.with_extension("sol").canonicalize().unwrap();
-	match instance_type {
-		InstanceType::Optimization => assert!(slice.contains(&expect_file![sol].data())),
-		InstanceType::Satisfaction => expect_file![sol].assert_eq(slice),
-	}
+	expect_file![sol].assert_eq(slice);
 }
 
 /// Benchmarks of optimization problems (finding the optimal solution).
@@ -113,7 +110,7 @@ fn optimization(c: &mut Criterion) {
 	let mut group = c.benchmark_group("optimization");
 	let instances = vec![
 		("jobshop_la01", &MILLISECONDS_CONFIG),
-		("jobshop_la02", &MILLISECONDS_CONFIG),
+		("jobshop_la02", &FEW_SECONDS_CONFIG),
 		("jobshop_la03", &MILLISECONDS_CONFIG),
 		("jobshop_la04", &MILLISECONDS_CONFIG),
 		("jobshop_la05", &INSTANT_CONFIG),
