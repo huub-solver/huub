@@ -9,18 +9,17 @@
 	reason = "only dependencies for benchmarking are used in this file"
 )]
 
-use std::{
-	io::Write,
-	path::{Path, PathBuf},
-	time::Duration,
-};
+#[path = "../tests/helpers/mod.rs"]
+mod helpers;
+
+use std::{path::PathBuf, time::Duration};
 
 use codspeed_criterion_compat::{
 	criterion_main, measurement::Measurement, BenchmarkGroup, BenchmarkId, Criterion, SamplingMode,
 };
 use expect_test::expect_file;
-use fzn_huub::Cli;
-use pico_args::Arguments;
+
+use crate::helpers::check_final;
 
 /// A configuration for instances that run for a few seconds.
 const FEW_SECONDS_CONFIG: CriterionConfig = CriterionConfig {
@@ -28,17 +27,6 @@ const FEW_SECONDS_CONFIG: CriterionConfig = CriterionConfig {
 	sample_size: Some(10),
 	measurement_time: Some(Duration::from_secs(60)),
 };
-
-/// The string that is printed when the solver has proven that no more/better
-/// solutions exist.
-const FZN_COMPLETE: &str = "==========\n";
-
-/// The string that is printed after every solution.
-const FZN_SEPERATOR: &str = "----------\n";
-
-// /// The string that is printed when the solver has proven that the instance is
-// /// unsatisfiable.
-// const FZN_UNSATISFIABLE: &str = "=====UNSATISFIABLE=====\n";
 
 /// A configuration for instances that run in a few milliseconds.
 const INSTANT_CONFIG: CriterionConfig = CriterionConfig {
@@ -65,43 +53,6 @@ struct CriterionConfig {
 	measurement_time: Option<Duration>,
 }
 
-#[derive(Debug, Clone, Copy)]
-/// Output stream that immediately discards all data.
-struct DummyOutput;
-
-#[derive(Debug, Clone, Copy)]
-/// What the goal is when running the solver on an instance.
-enum InstanceType {
-	/// An optimal solution should be found.
-	Optimization,
-	/// A correct solution should be found.
-	Satisfaction,
-}
-
-/// Run the solver on the given instance and check the output.
-fn check_final(name: &str, instance_type: InstanceType) {
-	let base = PathBuf::from("./corpus/").join(name);
-	let fzn = base.with_extension("fzn.json");
-	let out = run_solver(&fzn);
-	let mut slice: &str = std::str::from_utf8(&out).expect("invalid utf-8");
-	if let InstanceType::Optimization = instance_type {
-		assert!(
-			slice.ends_with(FZN_COMPLETE),
-			"Solver did not finish with complete marker: ```\n{}\n'''",
-			slice
-		);
-		slice = &slice[..slice.len() - FZN_COMPLETE.len()];
-	}
-	assert!(
-		slice.ends_with(FZN_SEPERATOR),
-		"Solution did not end with a seperator: ```\n{}\n'''",
-		slice
-	);
-	slice = &slice[..slice.len() - FZN_SEPERATOR.len()];
-	let sol = base.with_extension("sol").canonicalize().unwrap();
-	expect_file![sol].assert_eq(slice);
-}
-
 /// Benchmarks of optimization problems (finding the optimal solution).
 ///
 /// Note that it is assumed that the solver will always find the same optimal
@@ -124,21 +75,13 @@ fn optimization(c: &mut Criterion) {
 	for (instance, config) in instances {
 		config.apply(&mut group);
 		let _ = group.bench_with_input(BenchmarkId::from_parameter(instance), &instance, |b, s| {
-			b.iter(|| check_final(s, InstanceType::Optimization));
+			let base = PathBuf::from("./corpus/").join(s);
+			let fzn = base.with_extension("fzn.json");
+			let sol = base.with_extension("sol").canonicalize().unwrap();
+			b.iter(|| check_final(&fzn, true, expect_file![&sol]));
 		});
 	}
 	group.finish();
-}
-
-/// Run the solver on the given instance and return the output as raw bytes.
-fn run_solver(fzn: &Path) -> Vec<u8> {
-	let args = Arguments::from_vec(vec![fzn.into()]);
-	let cli: Cli<_, _> = args.try_into().unwrap();
-	let mut out = Vec::new();
-	let mut cli = cli.with_stdout(&mut out).with_stderr(|| DummyOutput, false);
-	cli.run()
-		.expect("unexpected error while running the solver");
-	out
 }
 
 /// Benchmarks of satisfaction problems (finding any correct solution).
@@ -157,7 +100,10 @@ fn satisfaction(c: &mut Criterion) {
 	for (instance, config) in instances {
 		config.apply(&mut group);
 		let _ = group.bench_with_input(BenchmarkId::from_parameter(instance), &instance, |b, s| {
-			b.iter(|| check_final(s, InstanceType::Satisfaction));
+			let base = PathBuf::from("./corpus/").join(s);
+			let fzn = base.with_extension("fzn.json");
+			let sol = base.with_extension("sol").canonicalize().unwrap();
+			b.iter(|| check_final(&fzn, false, expect_file![&sol]));
 		});
 	}
 	group.finish();
@@ -175,15 +121,6 @@ impl CriterionConfig {
 		if let Some(measurement_time) = self.measurement_time {
 			let _ = group.measurement_time(measurement_time);
 		}
-	}
-}
-
-impl Write for DummyOutput {
-	fn flush(&mut self) -> std::io::Result<()> {
-		Ok(())
-	}
-	fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-		Ok(buf.len())
 	}
 }
 
