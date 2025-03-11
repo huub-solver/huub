@@ -32,9 +32,6 @@ mod tests {
 	assert_first_solution!(warm_start_in_seq_search);
 	assert_first_solution!(warm_start_success);
 
-	assert_optimal!(jobshop_la05);
-	assert_optimal!(jobshop_newspaper);
-
 	assert_search_order!(bool_indomain_max);
 	assert_search_order!(bool_indomain_min);
 	assert_search_order!(int_indomain_max_1);
@@ -49,4 +46,21 @@ mod tests {
 	assert_search_order!(int_indomain_min_5);
 
 	assert_unsat!(int_lin_eq_prop);
+
+	// ../benches/fzn_huub_benchmarks
+	assert_first_solution!(amaze3_2012_03_19);
+	assert_first_solution!(steiner_t3_k4_N8);
+	assert_first_solution!(steiner_t6_k6_N7);
+	assert_first_solution!(sudoku_p48);
+
+	assert_optimal!(jobshop_la01);
+	assert_optimal!(jobshop_la02);
+	assert_optimal!(jobshop_la03);
+	assert_optimal!(jobshop_la04);
+	assert_optimal!(jobshop_la05);
+	assert_optimal!(jobshop_newspaper);
+	assert_optimal!(portal_10_9_10);
+	assert_optimal!(radiation_i6_9);
+	assert_optimal!(radiation_i8_9);
+	assert_optimal!(svrp_s4_v2_c3);
 }

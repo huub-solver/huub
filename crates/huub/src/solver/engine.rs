@@ -330,13 +330,8 @@ impl PropagatorExtension for Engine {
 		// Debug helper to ensure that any reason is based on known true literals
 		#[cfg(debug_assertions)]
 		{
-			let mut prev = None;
+			let mut prev: HashMap<RawVar, bool> = HashMap::new();
 			for &lit in queue.iter() {
-				// Notify of the assignment of the previous literal so it is available
-				// when checking the reason.
-				if let Some(prev) = prev {
-					self.notify_assignments(&[prev]);
-				}
 				if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
 					let clause: Clause =
 						reason.explain(&mut self.propagators, &mut self.state, Some(lit));
@@ -344,7 +339,9 @@ impl PropagatorExtension for Engine {
 						if l == lit {
 							continue;
 						}
-						let val = self.state.trail.get_sat_value(!l);
+						let val = self.state.trail.get_sat_value(!l).or(prev
+							.get(&l.var())
+							.map(|&v| if l.is_negated() { v } else { !v }));
 						if !val.unwrap_or(false) {
 							tracing::error!(lit_prop = i32::from(lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
 						}
@@ -357,7 +354,9 @@ impl PropagatorExtension for Engine {
 						);
 					}
 				}
-				prev = Some(lit);
+				// Recoprd assignment of the previous literal so it is available when
+				// checking next reason.
+				let _ = prev.insert(lit.var(), !lit.is_negated());
 			}
 		}
 		queue
