@@ -42,7 +42,7 @@ use crate::{
 		activation_list::IntPropCond,
 		engine::{trace_new_lit, Engine, PropRef, SearchStatistics},
 		int_var::{DirectStorage, IntVarRef, LazyLitDef, OrderStorage},
-		queue::PriorityLevel,
+		queue::{PriorityLevel, PropagatorInfo},
 		trail::TrailedInt,
 	},
 	Clause, IntVal, LinearTransform, Model, NonZeroIntVal, ReformulationError,
@@ -1009,21 +1009,17 @@ impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle>
 	fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef {
 		let engine = self.engine_mut();
 		let prop_ref = engine.propagators.push(propagator);
-		let p = engine.state.propagator_priority.push(priority);
-		debug_assert_eq!(prop_ref, p);
-		let p = self.engine_mut().state.enqueued.push(false);
+		let p = engine.state.propagator_queue.info.push(PropagatorInfo {
+			enqueued: false,
+			priority,
+		});
 		debug_assert_eq!(prop_ref, p);
 		p
 	}
 
 	fn enqueue_now(&mut self, prop: PropRef) {
 		let state = &mut self.engine_mut().state;
-		if !state.enqueued[prop] {
-			state
-				.propagator_queue
-				.insert(state.propagator_priority[prop], prop);
-			state.enqueued[prop] = true;
-		}
+		state.propagator_queue.enqueue_propagator(prop);
 	}
 
 	fn enqueue_on_bool_change(&mut self, prop: PropRef, var: BoolView) {

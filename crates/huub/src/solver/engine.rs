@@ -42,7 +42,7 @@ use crate::{
 		activation_list::{ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
 		int_var::{IntVar, IntVarRef, OrderStorage},
-		queue::{PriorityLevel, PriorityQueue},
+		queue::PropagatorQueue,
 		solving_context::SolvingContext,
 		trail::{Trail, TrailedInt},
 		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, SolverConfiguration,
@@ -125,11 +125,7 @@ pub struct State {
 	/// Integer variable enqueueing information
 	pub(crate) int_activation: IndexVec<IntVarRef, ActivationList>,
 	/// Queue of propagators awaiting action
-	pub(crate) propagator_queue: PriorityQueue<PropRef>,
-	/// Priority within the queue for each propagator
-	pub(crate) propagator_priority: IndexVec<PropRef, PriorityLevel>,
-	/// Flag for whether a propagator is enqueued
-	pub(crate) enqueued: IndexVec<PropRef, bool>,
+	pub(crate) propagator_queue: PropagatorQueue,
 }
 
 impl PropagatorExtension for Engine {
@@ -479,10 +475,8 @@ impl State {
 		skip: Option<PropRef>,
 	) {
 		for prop in self.int_activation[int_var].activated_by(event) {
-			if Some(prop) != skip && !self.enqueued[prop] {
-				self.propagator_queue
-					.insert(self.propagator_priority[prop], prop);
-				self.enqueued[prop] = true;
+			if Some(prop) != skip {
+				self.propagator_queue.enqueue_propagator(prop);
 			}
 		}
 	}
@@ -491,10 +485,8 @@ impl State {
 	/// assigned.
 	fn enqueue_propagators(&mut self, lit: RawLit, skip: Option<PropRef>) {
 		for &prop in self.bool_activation.get(&lit.var()).into_iter().flatten() {
-			if Some(prop) != skip && !self.enqueued[prop] {
-				self.propagator_queue
-					.insert(self.propagator_priority[prop], prop);
-				self.enqueued[prop] = true;
+			if Some(prop) != skip {
+				self.propagator_queue.enqueue_propagator(prop);
 			}
 		}
 
@@ -523,9 +515,7 @@ impl State {
 		// Backtrack trail
 		self.trail.notify_backtrack(level);
 		// Empty propagation queue
-		while let Some(p) = self.propagator_queue.pop() {
-			self.enqueued[p] = false;
-		}
+		while self.propagator_queue.pop().is_some() {}
 		if ARTIFICIAL {
 			return;
 		}
