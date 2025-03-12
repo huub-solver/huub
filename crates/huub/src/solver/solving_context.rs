@@ -140,7 +140,6 @@ impl<'a> SolvingContext<'a> {
 		while let Some(p) = self.state.propagator_queue.pop() {
 			debug_assert!(!self.state.failed);
 			debug_assert!(self.state.conflict.is_none());
-			self.state.enqueued[p] = false;
 			self.current_prop = p;
 			let prop = propagators[p].as_mut();
 			let res = prop.propagate(self);

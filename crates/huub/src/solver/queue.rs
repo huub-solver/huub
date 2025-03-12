@@ -1,6 +1,10 @@
 //! This module contains the defitions for the priority queue used by [`Engine`]
 //! to schedule propagators.
 
+use index_vec::IndexVec;
+
+use crate::solver::engine::PropRef;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 /// The priority levels at which propagators can be scheduled.
@@ -41,22 +45,38 @@ pub enum PriorityLevel {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-/// A priority queue for propagators.
+/// A priority queue with for element with a given [`PriorityLevel`].
 pub(crate) struct PriorityQueue<E> {
 	/// Internal storage of the queues for each priority level.
 	storage: [Vec<E>; 6],
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PropagatorInfo {
+	/// Whether the propagator is currently enqueued.
+	pub(crate) enqueued: bool,
+	/// The priority level of the propagator.
+	pub(crate) priority: PriorityLevel,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// A priority queue for propagators.
+pub(crate) struct PropagatorQueue {
+	/// Priority queue of the propagators.
+	queue: PriorityQueue<PropRef>,
+	/// General information about the propagators in the solver.
+	pub(crate) info: IndexVec<PropRef, PropagatorInfo>,
+}
+
 impl<E> PriorityQueue<E> {
-	/// Inserts a propagator into the queue at the end of the given priority
-	/// level.
+	/// Inserts an element into the queue at the end of the given priority level.
 	pub(crate) fn insert(&mut self, priority: PriorityLevel, elem: E) {
 		let i = priority as usize;
 		debug_assert!((0..=5).contains(&i));
 		self.storage[i].push(elem);
 	}
 
-	/// Pops the highest priority propagator from the queue.
+	/// Pops the highest priority element from the queue.
 	pub(crate) fn pop(&mut self) -> Option<E> {
 		for queue in self.storage.iter_mut().rev() {
 			if !queue.is_empty() {
@@ -79,6 +99,21 @@ impl<E> Default for PriorityQueue<E> {
 				Vec::new(),
 			],
 		}
+	}
+}
+
+impl PropagatorQueue {
+	/// Enqueue a given propagator when it is not already enqueued.
+	pub(crate) fn enqueue_propagator(&mut self, prop: PropRef) {
+		if !self.info[prop].enqueued {
+			self.queue.insert(self.info[prop].priority, prop);
+			self.info[prop].enqueued = true;
+		}
+	}
+
+	/// Pop a propagator from the queue if there are any.
+	pub(crate) fn pop(&mut self) -> Option<PropRef> {
+		self.queue.pop().inspect(|&p| self.info[p].enqueued = false)
 	}
 }
 
