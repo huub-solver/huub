@@ -4,7 +4,7 @@
 //! integer decision variables.
 
 use itertools::{Either, Itertools};
-use pindakaas::Lit as RawLit;
+use pindakaas::{ClauseDatabaseTools, Lit as RawLit};
 
 use crate::{
 	actions::{PropagatorInitActions, ReformulationActions, SimplificationActions},
@@ -15,8 +15,8 @@ use crate::{
 	helpers::opt_field::OptField,
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, BoolView, BoolViewInner, IntView,
-		IntViewInner,
+		activation_list::IntPropCond, queue::PriorityLevel, BoolView, BoolViewInner, IntLitMeaning,
+		IntView, IntViewInner,
 	},
 	BoolDecision, BoolFormula, Conjunction, IntDecision, IntVal,
 };
@@ -395,6 +395,35 @@ impl<S: SimplificationActions> Constraint<S> for IntLinear {
 				}
 				IntLinearLessEqImpBounds::new_in(slv, terms.iter().map(|&v| -v), -self.rhs, r);
 				IntLinearLessEqImpBounds::new_in(slv, terms, self.rhs, r);
+			}
+			(LinOperator::LessEq, None)
+				if terms.len() == 2
+					&& self.rhs == 1
+					&& terms
+						.iter()
+						.map(|&v| slv.get_int_bounds(v))
+						.all(|(lb, ub)| lb == 0 && ub == 1) =>
+			{
+				// Special case for binary pseudo-boolean constraints sum(vars) <= 1 === exists(i)(var_i = 0)
+				let clause = vec![
+					slv.get_int_lit(terms[0], IntLitMeaning::Eq(0)),
+					slv.get_int_lit(terms[1], IntLitMeaning::Eq(0)),
+				];
+				slv.add_clause(clause)?;
+			}
+			(LinOperator::LessEq, None)
+				if self.rhs == -1
+					&& terms
+						.iter()
+						.map(|&v| slv.get_int_bounds(v))
+						.all(|(lb, ub)| lb == -1 && ub == 0) =>
+			{
+				// Special case for pseudo-boolean constraints sum(vars) <= -1 === exists(i)(var_i = -1)
+				let clause = terms
+					.iter()
+					.map(|&v| slv.get_int_lit(v, IntLitMeaning::Eq(-1)))
+					.collect_vec();
+				slv.add_clause(clause)?;
 			}
 			(LinOperator::LessEq, None) => {
 				IntLinearLessEqBounds::new_in(slv, terms, self.rhs);
