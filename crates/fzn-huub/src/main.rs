@@ -41,7 +41,7 @@ FLAGS
 
                       === SOLVING OPTIONS ===
   --restart <on|off>              Whether to enable restarts of the search.
-                                  (default: on)
+                                  (default: off)
   --vivify <on|off>               Whether to enable vivification of the SAT solver.
                                   (default: off)
   --vsids-after <value>           Switch to the VSIDS search heuristic after a certain number of
