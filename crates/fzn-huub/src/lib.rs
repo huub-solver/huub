@@ -590,7 +590,7 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 
 			restart: args
 				.opt_value_from_fn("--restart", parse_bool_arg)
-				.map(|x| x.unwrap_or(false))
+				.map(|x| x.unwrap_or(true))
 				.map_err(|e| e.to_string())?,
 			toggle_vsids: args.contains("--toggle-vsids"),
 			vivification: args
