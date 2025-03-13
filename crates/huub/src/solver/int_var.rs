@@ -775,13 +775,12 @@ impl IntVar {
 	///
 	/// This method assumes the literal for the new lower bound has been created
 	/// (and propagated).
-	pub(crate) fn notify_lower_bound(
-		&mut self,
-		trail: &mut impl TrailingActions,
-		val: IntVal,
-	) -> IntVal {
+	pub(crate) fn notify_lower_bound(&mut self, trail: &mut impl TrailingActions, val: IntVal) {
+		debug_assert!(val > self.get_lower_bound(trail));
 		match &self.order_encoding {
-			OrderStorage::Eager { lower_bound, .. } => trail.set_trailed_int(*lower_bound, val),
+			OrderStorage::Eager { lower_bound, .. } => {
+				let _ = trail.set_trailed_int(*lower_bound, val);
+			}
 			OrderStorage::Lazy(
 				storage @ LazyOrderStorage {
 					min_index,
@@ -789,10 +788,6 @@ impl IntVar {
 					..
 				},
 			) => {
-				let lb = *self.domain.lower_bound().unwrap();
-				if val == lb {
-					return lb;
-				}
 				let cur_index = trail.get_trailed_int(*lb_index);
 				let cur_index = if cur_index < 0 {
 					*min_index
@@ -804,11 +799,6 @@ impl IntVar {
 				debug_assert_eq!(storage[new_index].val, val);
 				let old_index = trail.set_trailed_int(*lb_index, new_index as IntVal);
 				debug_assert!(old_index < 0 || cur_index == old_index as u32);
-				if old_index < 0 {
-					lb
-				} else {
-					storage[cur_index].val
-				}
 			}
 		}
 	}
@@ -819,15 +809,9 @@ impl IntVar {
 	/// # Warning
 	///
 	/// This method assumes the literal for the new upper bound has been created (and propagated).
-	pub(crate) fn notify_upper_bound(
-		&mut self,
-		trail: &mut impl TrailingActions,
-		val: IntVal,
-	) -> IntVal {
-		let prev_ub = trail.set_trailed_int(self.upper_bound, val);
-		if prev_ub == val {
-			return val;
-		}
+	pub(crate) fn notify_upper_bound(&mut self, trail: &mut impl TrailingActions, val: IntVal) {
+		debug_assert!(val < self.get_upper_bound(trail));
+		let _ = trail.set_trailed_int(self.upper_bound, val);
 		if let OrderStorage::Lazy(
 			storage @ LazyOrderStorage {
 				max_index,
@@ -848,7 +832,6 @@ impl IntVar {
 			let old_index = trail.set_trailed_int(*ub_index, new_index as IntVal);
 			debug_assert!(old_index < 0 || cur_index == old_index as u32);
 		}
-		prev_ub
 	}
 
 	/// Method used to tighten the upper bound given when notified by a

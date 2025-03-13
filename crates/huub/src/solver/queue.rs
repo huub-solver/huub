@@ -111,6 +111,13 @@ impl PropagatorQueue {
 		}
 	}
 
+	/// Enqueue all propagators from a given iterator.
+	pub(crate) fn enqueue_propagators(&mut self, props: impl IntoIterator<Item = PropRef>) {
+		for prop in props.into_iter() {
+			self.enqueue_propagator(prop);
+		}
+	}
+
 	/// Pop a propagator from the queue if there are any.
 	pub(crate) fn pop(&mut self) -> Option<PropRef> {
 		self.queue.pop().inspect(|&p| self.info[p].enqueued = false)
