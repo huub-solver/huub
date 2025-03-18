@@ -22,7 +22,7 @@ use tracing::warn;
 
 use crate::{
 	abs_int, actions::SimplificationActions, all_different_int, array_element, array_maximum_int,
-	array_minimum_int, constraints::int_table::IntTable, disjunctive_strict, div_int,
+	array_minimum_int, constraints::int_table::IntTable, disjunctive_strict, div_int, diffn_int,
 	int_in_set_reif, pow_int, reformulate::ReformulationError, table_int, times_int, BoolDecision,
 	Branching, Decision, IntDecision, IntDecisionInner, IntLinExpr, IntSetVal, IntVal, Model,
 	NonZeroIntVal, ValueSelection, VariableSelection,
@@ -1073,6 +1073,80 @@ where
 							name: "bool_xor",
 							found: c.args.len(),
 							expected: 2,
+						});
+					}
+				}
+				"huub_diffn_int" | "huub_diffn_nonstrict_int" => {
+					let is_nonstrict = c.id.deref() == "huub_diffn_nonstrict_int";
+					if let [x, y, dx, dy] = c.args.as_slice() {
+						let x = self.arg_array(x)?;
+						let y = self.arg_array(y)?;
+						let dx = self.arg_array(dx)?;
+						let dy = self.arg_array(dy)?;
+						let box_posn: Result<Vec<Vec<_>>, _> =
+							vec![x, y].iter()
+                            .map(|x|
+                                 x.iter()
+                                 .map(|l|
+                                      self.lit_int(l)).collect())
+                            .collect();
+
+						let box_size: Result<Vec<Vec<_>>, _> =
+							vec![dx, dy].iter()
+                            .map(|x|
+                                 x.iter()
+                                 .map(|l|
+                                      self.lit_int(l)).collect())
+                            .collect();
+                        if is_nonstrict {
+						    //self.prb += diffn_int_nonstrict(args?); TODO: Add nonstrict
+                        } else {
+						    self.prb += diffn_int(box_posn?, box_size?);
+                        }
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: if is_nonstrict {
+                                "huub_diffn_nonstrict"
+                            } else {
+                                "huub_diffn"
+                            }
+                                  ,
+							found: c.args.len(),
+							expected: 1,
+						});
+					}
+				}
+				"huub_diffn_k_int" | "huub_diffn_nonstrict_k_int" => {
+					let is_nonstrict = c.id.deref() == "huub_diffn_nonstrict_k_int";
+					if let [box_posn, box_size] = c.args.as_slice() {
+						let box_posn: Result<Vec<Vec<_>>, _> =
+							self.arg_array(box_posn)
+                            .iter()
+                            .map(|x|
+                                 x.iter()
+                                 .map(|l|
+                                      self.lit_int(l)).collect())
+                            .collect();
+
+						let box_size: Result<Vec<Vec<_>>, _> =
+							self.arg_array(box_size)
+                            .iter()
+                            .map(|x|
+                                 x.iter()
+                                 .map(|l|
+                                      self.lit_int(l)).collect())
+                            .collect();
+
+                        if is_nonstrict {
+						    //self.prb += diffn_int_nonstrict(args?); TODO: Add nonstrict
+                        } else {
+						    self.prb += diffn_int(box_posn?, box_size?);
+                        }
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "huub_all_different",
+							found: c.args.len(),
+							expected: 1,
 						});
 					}
 				}

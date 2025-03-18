@@ -1,8 +1,8 @@
 use itertools::izip;
 use std::cmp; use crate::{actions::{
 	ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
-}, constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus}, reformulate::ReformulationError, solver::{
-	activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView, IntViewInner,
+}, constraints::{Conflict, Constraint, PropagationActions, Propagator}, reformulate::ReformulationError, solver::{
+	activation_list::IntPropCond, queue::PriorityLevel, IntView, IntViewInner,
 }, IntDecision, IntVal};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -24,9 +24,18 @@ pub struct IntDiffnSweep {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntDiffn {
-	fn simplify(&mut self, _actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		Ok(SimplificationStatus::Fixpoint)
-	}
+    // TODO: Add good simplifications
+	// fn simplify(&mut self, _actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+	// 	let fixed = self.box_posn
+	// 		.iter()
+    //         .flatten()
+	// 		.all(|&v| matches!(v, IntDecision(IntDecisionInner::Const(_))));
+    //     if fixed {
+    //         Ok(SimplificationStatus::Subsumed)
+    //     } else {
+    //         Ok(SimplificationStatus::Fixpoint)
+    //     }
+	// }
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
         let box_pos: Vec<Vec<_>> = self.box_posn.iter()
@@ -111,7 +120,7 @@ impl IntDiffnSweep {
         }
         let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
         while b && infeasible_fr.is_some() {
-            println!("prune_min - in loop");
+            // println!("prune_min - in loop");
             jump[curr_dimension] = cmp::min(jump[curr_dimension], infeasible_fr.unwrap().ub[curr_dimension] + 1);
             // Contains side-effects to change sweep
             b = Self::adjust_sweep_min(actions, &mut sweep, &mut jump, &self.box_posn[curr_obj_idx], curr_dimension, self.dimensions);
@@ -119,92 +128,21 @@ impl IntDiffnSweep {
         }
 
         // Start pruning here
-        if b {
-            // Creating explanation clauses
+        if b && sweep[curr_dimension] != actions.get_int_lower_bound(self.box_posn[curr_obj_idx][curr_dimension]){
             let mut reason = Vec::new();
+            for &o_idx in fr_support {
+                for d in 0..self.dimensions {
+                    reason.push(actions.get_int_upper_bound_lit(self.box_posn[o_idx][d]));
+                    reason.push(actions.get_int_lower_bound_lit(self.box_posn[o_idx][d]));
 
-            for (fr_idx ,&o_idx) in fr_support.iter().enumerate() {
-                // There is no fr for jndex o_idx
-                if all_fr[fr_idx].ub[curr_dimension] == sweep[curr_dimension] {
-                    // Explains that the objects ub is such that it doesnt exceed the sweep
-                    // let r = sweep[curr_dimension] - self.box_size[curr_obj_idx][curr_dimension] + 1;
-                    // reason.push(actions.get_int_lit(self.box_posn[o_idx][curr_dimension], IntLitMeaning::Less(r+1)));
-                    //
-                    // Not convinced this is correct since if we would enfore fr.ub[x] <= 3 on both
-                    // we are not constraining them to be less than 3 and if we are also setting fr.ub[x] == 3 then the
-                    // explanation might be invalid since one of them would be allowed to be > 3
-                    // +----------------+
-                    // |    |           |
-                    // | 1  |           |
-                    // +----+           |
-                    // |    |           |
-                    // | 2  |           |
-                    // |    |           |
-                    // +----------------+
-                    //      3
-
-                    println!("Adding Reason: object {:?}, dimension {:?} [x < {:?}]",
-                             o_idx,
-                             self.dimensions,
-                             actions.get_int_upper_bound(self.box_posn[o_idx][curr_dimension])
-                             );
-                    reason.push(actions.get_int_upper_bound_lit(self.box_posn[o_idx][curr_dimension]))
-                } else {
-                    // Explain that in the other dimensions where we are exceeding the point where
-                    // we are sweeping, there is some space such that the current object could
-                    // still be place
-
-                    // Objects exceeding the sweep point in our current sweeping dimension
-                    let exceeding_objs = (0..all_fr.len())
-                        .filter(|&i|
-                               all_fr[i].ub[curr_dimension] <= sweep[curr_dimension])
-                        .collect();
-
-                    for d in 0..self.dimensions {
-                        // We don't have to look at our current dimension
-                        if d == curr_dimension { continue }
-
-                        if all_fr[o_idx].ub[d] > actions.get_int_upper_bound(self.box_posn[curr_obj_idx][d]) {
-                            // +----+-----------+
-                            // |    |           |
-                            // |    |    2      |
-                            // |    +-----------+
-                            // | 1  |           |
-                            // |    |           |
-                            // |    |           |
-                            // +----+-----------+
-                            let p = self.find_lowest_ub(actions, curr_dimension, curr_obj_idx, o_idx, &exceeding_objs);
-                            let prune_point = p + self.box_size[o_idx][d] - 1;
-                            println!("Adding Reason: object {:?}, dimension {:?} [x >= {:?}] ",
-                                     o_idx,
-                                     self.dimensions,
-                                     prune_point + 1
-                                     );
-                            reason.push(actions.get_int_lit(self.box_posn[o_idx][d], IntLitMeaning::GreaterEq(prune_point)));
-                        } else if all_fr[o_idx].lb[d] < actions.get_int_lower_bound(self.box_posn[curr_obj_idx][d]) {
-                            // +----+-----------+
-                            // |    |           |
-                            // |    |           |
-                            // |    |           |
-                            // | 1  +-----------+
-                            // |    |    2      |
-                            // |    |           |
-                            // +----+-----------+
-                            let p =  self.find_highest_lb(actions, curr_dimension, curr_obj_idx, o_idx, &exceeding_objs);
-                            let prune_point = p - self.box_size[o_idx][d] + 1;
-                            println!("Adding Reason: object {:?}, dimension {:?} [x < {:?}] ",
-                                     o_idx,
-                                     self.dimensions,
-                                     prune_point + 1
-                                     );
-                            reason.push(actions.get_int_lit(self.box_posn[o_idx][d], IntLitMeaning::Less(prune_point+1)));
-                        }
-                    }
                 }
             }
-            println!("CURRENT SWEEP IS {:?} in dimension {:?} for object {:?}", sweep[curr_dimension], curr_dimension, curr_obj_idx);
-            actions.set_int_upper_bound(self.box_posn[curr_obj_idx][curr_dimension], sweep[curr_dimension], reason)?;
-
+            for d in (0..self.dimensions).filter(|&x| x == curr_dimension) {
+                reason.push(actions.get_int_upper_bound_lit(self.box_posn[curr_obj_idx][d]));
+                reason.push(actions.get_int_lower_bound_lit(self.box_posn[curr_obj_idx][d]));
+            }
+            actions.set_int_lower_bound(self.box_posn[curr_obj_idx][curr_dimension], sweep[curr_dimension], reason)?;
+            // println!("Setting ub of object {} to {:?} in dimension {}",curr_obj_idx, sweep[curr_dimension], curr_dimension);
         }
         Ok(())
     }
@@ -227,71 +165,36 @@ impl IntDiffnSweep {
         }
         let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
         while b && infeasible_fr.is_some() {
-            //println!("prune max - in loop");
+            // println!("prune max - in loop");
             jump[curr_dimension] = cmp::max(jump[curr_dimension], infeasible_fr.unwrap().lb[curr_dimension] - 1);
-            // println!("sweep before x: {:?} y: {:?}", sweep[0], sweep[1]);
             // println!("jump before x: {:?} y: {:?}", jump[0], jump[1]);
             // Contains side-effects to change sweep
             b = Self::adjust_sweep_max(actions, &mut sweep, &mut jump, &self.box_posn[curr_obj_idx], curr_dimension, self.dimensions);
             // println!("sweep after x: {:?} y: {:?}", sweep[0], sweep[1]);
             // println!("jump after x: {:?} y: {:?}", jump[0], jump[1]);
             infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
+            // println!("sweep: {:?} y: {:?}", sweep[0], sweep[1]);
         }
 
 
-        if b {
-            //println!("SWEEP IS x: {:?} y: {:?}", sweep[0], sweep[1]);
-            if curr_dimension == 1 {
-                println!("CURRENT SWEEP IS {:?} in dimension {:?} for object {:?}", sweep[curr_dimension], curr_dimension, curr_obj_idx);
-                let reason = actions.get_int_lit(self.box_posn[1][curr_dimension], IntLitMeaning::GreaterEq(4));
-                actions.set_int_upper_bound(self.box_posn[curr_obj_idx][curr_dimension], sweep[curr_dimension], reason)?;
-                println!("PRUNING DONE");
+        if b && sweep[curr_dimension] != actions.get_int_upper_bound(self.box_posn[curr_obj_idx][curr_dimension]){
+            let mut reason = Vec::new();
+            for &o_idx in fr_support {
+                for d in 0..self.dimensions {
+                    reason.push(actions.get_int_upper_bound_lit(self.box_posn[o_idx][d]));
+                    reason.push(actions.get_int_lower_bound_lit(self.box_posn[o_idx][d]));
+
+                }
             }
+            for d in (0..self.dimensions).filter(|&x| x == curr_dimension) {
+                reason.push(actions.get_int_upper_bound_lit(self.box_posn[curr_obj_idx][d]));
+                reason.push(actions.get_int_lower_bound_lit(self.box_posn[curr_obj_idx][d]));
+            }
+            actions.set_int_upper_bound(self.box_posn[curr_obj_idx][curr_dimension], sweep[curr_dimension], reason)?;
+            // println!("Setting ub of object {} to {:?} in dimension {}",curr_obj_idx, sweep[curr_dimension], curr_dimension);
 
         }
         Ok(())
-    }
-
-    // TODO: rename function
-    fn find_highest_lb<P: PropagationActions>(
-        &mut self,
-        actions: &mut P,
-        curr_dimension: usize,
-        curr_obj_idx: usize,
-        explanation_obj: usize,
-        exceeding_objs: &Vec<usize>
-    ) -> IntVal {
-        let mut current_point = actions.get_int_upper_bound(self.box_posn[curr_obj_idx][curr_dimension]) + 1;
-        for &o in exceeding_objs {
-            let explanation_obj_ub = actions.get_int_upper_bound(self.box_posn[explanation_obj][curr_dimension]);
-            let obj_lb = actions.get_int_lower_bound(self.box_posn[o][curr_dimension]);
-
-            if obj_lb < current_point && explanation_obj_ub > obj_lb {
-                current_point = obj_lb;
-            }
-        }
-        current_point
-    }
-
-    // TODO: rename function
-    fn find_lowest_ub<P: PropagationActions>(
-        &mut self,
-        actions: &mut P,
-        curr_dimension: usize,
-        curr_obj_idx: usize,
-        explanation_obj: usize,
-        exceeding_objs: &Vec<usize>
-    ) -> IntVal {
-        let mut current_point = actions.get_int_lower_bound(self.box_posn[curr_obj_idx][curr_dimension]) - 1;
-        for &o in exceeding_objs {
-            let explanation_obj_lb = actions.get_int_lower_bound(self.box_posn[explanation_obj][curr_dimension]);
-            let obj_ub = actions.get_int_upper_bound(self.box_posn[o][curr_dimension]);
-
-            if obj_ub > current_point && explanation_obj_lb < obj_ub {
-                current_point = obj_ub;
-            }
-        }
-        current_point
     }
 
     fn adjust_sweep_min<P: PropagationActions>(
@@ -330,15 +233,15 @@ impl IntDiffnSweep {
             // println!("jump before x: {:?} y: {:?}", jump[0], jump[1]);
             sweep[rotation] = jump[rotation];
             jump[rotation] = actions.get_int_lower_bound(curr_obj_pos[rotation]) - 1;
-            //println!("sweep after x: {:?} y: {:?}", sweep[0], sweep[1]);
-            //println!("jump after x: {:?} y: {:?}", jump[0], jump[1]);
+            // println!("sweep after x: {:?} y: {:?}", sweep[0], sweep[1]);
+            // println!("jump after x: {:?} y: {:?}", jump[0], jump[1]);
             // Current sweep-point is withing the bounds of the current object
             if sweep[rotation] >= actions.get_int_lower_bound(curr_obj_pos[rotation]) {
                 return true
             } else {
                 // Reset sweep-point
                 sweep[rotation] = actions.get_int_upper_bound(curr_obj_pos[rotation]);
-                //println!("sweep ADD x: {:?} y: {:?}", sweep[0], sweep[1]);
+                // println!("sweep ADD x: {:?} y: {:?}", sweep[0], sweep[1]);
             }
         }
         false
@@ -352,7 +255,7 @@ impl IntDiffnSweep {
         fr: &ForbiddenRegion,
         dimensions:usize
     ) -> bool {
-        println!("size: {:?}", fr.lb.len());
+        // println!("size: {:?}", fr.lb.len());
         // !(0..dimensions).any(|d|
         //                actions.get_int_upper_bound(curr_obj_pos[d]) < fr.lb[d] ||
         //                actions.get_int_lower_bound(curr_obj_pos[d]) > fr.ub[d])
@@ -427,28 +330,9 @@ impl IntDiffnSweep {
         dimensions: usize,
         all_fr: &'a Vec<ForbiddenRegion>
     ) -> Option<&'a ForbiddenRegion> {
-        // This shold probably work the same
-        // all_fr.iter()
-        //     .find(|fr|
-        //             (0..dimensions).all(|i| sweep[i] >= fr.lb[i] && sweep[i] <= fr.ub[i]))
-        // }
-        for fr in all_fr {
-            if !Self::isfeasible(sweep, dimensions, fr) {
-                return Some(fr)
-            }
-        }
-        None
-    }
-
-    fn isfeasible(
-        sweep: &Vec<IntVal>,
-        dimensions: usize,
-        fr: &ForbiddenRegion
-    ) -> bool {
-        for i in 0..dimensions {
-            if sweep[i] < fr.lb[i] || sweep[i] > fr.ub[i] { return true; }
-        }
-        false
+        all_fr.iter()
+            .find(|fr|
+                    (0..dimensions).all(|i| sweep[i] >= fr.lb[i] && sweep[i] <= fr.ub[i]))
     }
 }
 
@@ -461,31 +345,31 @@ where
 	#[tracing::instrument(name = "diffn", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
         for o_idx in 0..self.box_posn.len() {
-            println!("MAIN OBJECT IS NOW {:?}", o_idx);
+            // println!("MAIN OBJECT IS NOW {:?}", o_idx);
 
             // ONLY DEBUGGING PURPOSES
-            for o in 0..self.box_posn.len() {
-                println!("object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
-                         o,
-                         actions.get_int_upper_bound(self.box_posn[o][0]),
-                         actions.get_int_lower_bound(self.box_posn[o][0]),
-                         actions.get_int_upper_bound(self.box_posn[o][1]),
-                         actions.get_int_lower_bound(self.box_posn[o][1]),
-                );
-            }
+            // for o in 0..self.box_posn.len() {
+                // println!("object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
+                //          o,
+                //          actions.get_int_upper_bound(self.box_posn[o][0]),
+                //          actions.get_int_lower_bound(self.box_posn[o][0]),
+                //          actions.get_int_upper_bound(self.box_posn[o][1]),
+                //          actions.get_int_lower_bound(self.box_posn[o][1]),
+                // );
+            // }
             let mut fr_support: Vec<usize> = Vec::new();
             if let Some(all_fr) = self.generate_fr(actions, &mut fr_support, o_idx, self.dimensions) {
-                for f in 0..all_fr.len() {
-                    println!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
-                             all_fr[f].ub[0],
-                             all_fr[f].lb[0],
-                             all_fr[f].ub[1],
-                             all_fr[f].lb[1],
-                    );
-                }
+                // for f in 0..all_fr.len() {
+                    //println!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
+                    //         all_fr[f].ub[0],
+                    //         all_fr[f].lb[0],
+                    //         all_fr[f].ub[1],
+                    //         all_fr[f].lb[1],
+                    //);
+                // }
                 for d in 0..self.dimensions {
                     self.prune_min(actions, &fr_support, o_idx, d, &all_fr)?;
-                    // self.prune_max(actions, &fr_support, o_idx, d, &all_fr)?;
+                    self.prune_max(actions, &fr_support, o_idx, d, &all_fr)?;
 
                 }
             }
@@ -499,7 +383,6 @@ mod tests {
 	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
-	use expect_test::expect;
 	use itertools::Itertools;
 
 	use crate::{diffn_int, reformulate::InitConfig, Decision, Model};
@@ -568,7 +451,7 @@ mod tests {
 
 		IntDiffnSweep::new_in(&mut slv, vec![vec![pos_1, pos_2], vec![pos_3, pos_4]], vec![vec![size_1, size_2], vec![size_3, size_4]] );
 
-        slv.assert_unsatisfiable();
+		slv.assert_all_solutions(&[pos_2, pos_4], |sol| sol.iter().all_unique());
     }
 
 	#[test]
@@ -621,7 +504,7 @@ mod tests {
             .collect_vec();
 
 	    let (solve_result, value) = slv.get_all_solutions(&pos_vars);
-        println!("solve_result {:?}, value {:?}",solve_result, value);
+        // println!("solve_result {:?}, value {:?}",solve_result, value);
     }
 
 }
