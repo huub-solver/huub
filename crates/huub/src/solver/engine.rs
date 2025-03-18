@@ -347,7 +347,6 @@ impl PropagatorExtension for Engine {
 						}
 					}
 				};
-				trace!(?event, ?fixed_val, "consequences");
 				if let Some(event) = event {
 					self.state
 						.propagator_queue
@@ -870,14 +869,15 @@ impl InspectionActions for State {
 			}
 			| IntViewInner::VarRef(var) => {
 				let val = self.int_vars[var].last_fixed;
-				let lit = self.int_vars[var]
+				self.int_vars[var]
 					.get_bool_lit(IntLitMeaning::Eq(val))
-					.unwrap();
-				if self.trail.get_bool_val(lit) == Some(true) {
-					Some(val)
-				} else {
-					None
-				}
+					.and_then(|lit| {
+						if self.trail.get_bool_val(lit) == Some(true) {
+							Some(val)
+						} else {
+							None
+						}
+					})
 			}
 			IntViewInner::Bool {
 				transformer: _,
