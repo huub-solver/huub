@@ -41,13 +41,13 @@ use crate::{
 	solver::{
 		activation_list::{ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
-		int_var::{IntVar, IntVarRef, OrderStorage},
+		int_var::{DirectStorage, IntVar, IntVarRef, OrderStorage},
 		queue::PropagatorQueue,
 		solving_context::SolvingContext,
 		trail::{Trail, TrailedInt},
 		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, SolverConfiguration,
 	},
-	Clause, Conjunction, IntVal,
+	Clause, Conjunction, IntVal, LinearTransform,
 };
 
 #[derive(Debug, Default, Clone)]
@@ -205,9 +205,27 @@ impl PropagatorExtension for Engine {
 				}
 				ctx.state.int_vars[r].notify_upper_bound(&mut ctx.state.trail, lb);
 
-				for prop in ctx.state.int_activation[r].activated_by(IntEvent::Fixed) {
-					ctx.state.propagator_queue.enqueue_propagator(prop);
+				ctx.state.propagator_queue.enqueue_propagators(
+					ctx.state.int_activation[r].activated_by(IntEvent::UpperBound),
+				);
+			}
+
+			// Create an (fixed) equality literal if propagators are listening
+			match &ctx.state.int_vars[r].direct_encoding {
+				DirectStorage::Lazy(map)
+					if ctx.state.int_activation[r].has_fixed_listeners()
+						&& !map.contains_key(&lb) =>
+				{
+					let eq_lit = ctx.get_intref_lit(r, IntLitMeaning::Eq(lb));
+					if let BoolViewInner::Lit(eq_lit) = eq_lit.0 {
+						let _ = ctx.state.trail.assign_lit(eq_lit);
+					}
+					ctx.state.int_vars[r].notify_fixed(lb);
+					for prop in ctx.state.int_activation[r].activated_by(IntEvent::Fixed) {
+						ctx.state.propagator_queue.enqueue_propagator(prop);
+					}
 				}
+				_ => {}
 			}
 		}
 
@@ -294,60 +312,56 @@ impl PropagatorExtension for Engine {
 					.unwrap_or_else(|| self.state.int_vars[iv].lit_meaning(lit));
 				// Enact domain changes and determine change event
 				let (lb, ub) = self.state.int_vars[iv].get_bounds(&self.state);
-				let event = match meaning {
-					IntLitMeaning::Eq(i) if i == lb && i == ub => None,
-					IntLitMeaning::Eq(i) if i < lb || i > ub => {
-						// Notified of invalid assignment, do nothing.
-						//
-						// Although we do not expect this to happen, it seems that Cadical
-						// chronological backtracking might send notifications before
-						// additional propagation.
-						trace!(lit = i32::from(lit), lb, ub, "invalid eq notification");
-						None
-					}
-					IntLitMeaning::Eq(i) => {
-						if lb < i {
-							self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, i);
-						}
-						if ub > i {
-							self.state.int_vars[iv].notify_upper_bound(&mut self.state.trail, i);
-						}
-						debug_assert_eq!(
-							self.state.get_int_val(IntView(IntViewInner::VarRef(iv))),
-							Some(i)
-						);
-						Some(IntEvent::Fixed)
-					}
-					IntLitMeaning::NotEq(i) if i < lb || i > ub => None,
-					IntLitMeaning::NotEq(_) => Some(IntEvent::Domain),
-					IntLitMeaning::GreaterEq(new_lb) if new_lb <= lb => None,
+				let (event, fixed_val) = match meaning {
+					IntLitMeaning::Eq(i) => (None, Some(i)),
+					IntLitMeaning::NotEq(i) if i < lb || i > ub => (None, None),
+					IntLitMeaning::NotEq(_) => (Some(IntEvent::Domain), None),
+					IntLitMeaning::GreaterEq(new_lb) if new_lb <= lb => (None, None),
 					IntLitMeaning::GreaterEq(new_lb) => {
 						self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, new_lb);
-						Some(if new_lb == ub {
-							IntEvent::Fixed
-						} else {
-							IntEvent::LowerBound
-						})
+						(
+							Some(IntEvent::LowerBound),
+							if new_lb == *self.state.int_vars[iv].domain.upper_bound().unwrap() {
+								Some(new_lb)
+							} else {
+								None
+							},
+						)
 					}
 					IntLitMeaning::Less(i) => {
 						let new_ub = self.state.int_vars[iv].tighten_upper_bound(i - 1);
 						if new_ub < ub {
 							self.state.int_vars[iv]
 								.notify_upper_bound(&mut self.state.trail, new_ub);
-							Some(if new_ub == lb {
-								IntEvent::Fixed
-							} else {
-								IntEvent::UpperBound
-							})
+							(
+								Some(IntEvent::UpperBound),
+								if new_ub == *self.state.int_vars[iv].domain.lower_bound().unwrap()
+								{
+									Some(new_ub)
+								} else {
+									None
+								},
+							)
 						} else {
-							None
+							(None, None)
 						}
 					}
 				};
+				trace!(?event, ?fixed_val, "consequences");
 				if let Some(event) = event {
 					self.state
 						.propagator_queue
 						.enqueue_propagators(self.state.int_activation[iv].activated_by(event));
+				}
+				if let Some(i) = fixed_val {
+					self.state.int_vars[iv].notify_fixed(i);
+					debug_assert_eq!(
+						self.state.get_int_val(IntView(IntViewInner::VarRef(iv))),
+						Some(i)
+					);
+					self.state.propagator_queue.enqueue_propagators(
+						self.state.int_activation[iv].activated_by(IntEvent::Fixed),
+					);
 				}
 			}
 		}
@@ -834,6 +848,43 @@ impl InspectionActions for State {
 				}
 			}
 		}
+	}
+
+	fn get_int_val(&self, var: IntView) -> Option<IntVal> {
+		let transform = match var.0 {
+			IntViewInner::Const(_) | IntViewInner::VarRef(_) => LinearTransform::default(),
+			IntViewInner::Linear {
+				transformer,
+				var: _,
+			}
+			| IntViewInner::Bool {
+				transformer,
+				lit: _,
+			} => transformer,
+		};
+		match var.0 {
+			IntViewInner::Const(c) => Some(c),
+			IntViewInner::Linear {
+				transformer: _,
+				var,
+			}
+			| IntViewInner::VarRef(var) => {
+				let val = self.int_vars[var].last_fixed;
+				let lit = self.int_vars[var]
+					.get_bool_lit(IntLitMeaning::Eq(val))
+					.unwrap();
+				if self.trail.get_bool_val(lit) == Some(true) {
+					Some(val)
+				} else {
+					None
+				}
+			}
+			IntViewInner::Bool {
+				transformer: _,
+				lit,
+			} => self.trail.get_sat_value(lit).map(|b| b as IntVal),
+		}
+		.map(|v| transform.transform(v))
 	}
 }
 

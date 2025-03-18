@@ -76,6 +76,8 @@ pub(crate) struct IntVar {
 	///
 	/// Note that the lower bound is tracked within [`Self::order_encoding`].
 	upper_bound: TrailedInt,
+	/// Last notified fixed value
+	pub(crate) last_fixed: IntVal,
 }
 
 #[derive(Debug)]
@@ -705,6 +707,7 @@ impl IntVar {
 			domain,
 			order_encoding,
 			upper_bound,
+			last_fixed: lb,
 		});
 		// Create propagator activation list
 		let r = slv
@@ -766,6 +769,11 @@ impl IntVar {
 			_ => {}
 		}
 		(lit, negate)
+	}
+
+	/// Notify that a positive equality has been propagated for the variable.
+	pub(crate) fn notify_fixed(&mut self, val: IntVal) {
+		self.last_fixed = val;
 	}
 
 	/// Notify that a new lower bound has been propagated for the variable,

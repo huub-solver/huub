@@ -147,14 +147,7 @@ pub trait InspectionActions: TrailingActions {
 	}
 
 	/// Get the current value of an integer view, if it has been assigned.
-	fn get_int_val(&self, var: IntView) -> Option<IntVal> {
-		let (lb, ub) = self.get_int_bounds(var);
-		if lb == ub {
-			Some(lb)
-		} else {
-			None
-		}
-	}
+	fn get_int_val(&self, var: IntView) -> Option<IntVal>;
 
 	/// Check whether a given integer view can take a given value (given the
 	/// current search decisions).

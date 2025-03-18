@@ -1,7 +1,7 @@
 //! Module containing data structures for the activation of propagators based on
 //! changes to decision variables.
 
-use std::{mem, ops::Add};
+use std::mem;
 
 use crate::solver::engine::PropRef;
 
@@ -41,8 +41,6 @@ pub(crate) struct ActivationList {
 pub(crate) enum IntEvent {
 	/// The variable has been fixed to a single value.
 	Fixed,
-	/// Both of the bounds of the variable has changed.
-	Bounds,
 	/// The lower bound of the variable has changed.
 	LowerBound,
 	/// The upper bound of the variable has changed.
@@ -59,16 +57,10 @@ pub enum IntPropCond {
 	/// Condition that triggers when the variable is fixed.
 	Fixed,
 	/// Condition that triggers when the lower bound of the variable changes.
-	///
-	/// This includes the case where the variable is fixed.
 	LowerBound,
 	/// Condition that triggers when the upper bound of the variable changes.
-	///
-	/// This includes the case where the variable is fixed.
 	UpperBound,
 	/// Condition that triggers when either of the bounds of the variable change.
-	///
-	/// This includes the case where the variable is fixed.
 	Bounds,
 	/// Condition that triggers for any change in the domain of the variable.
 	Domain,
@@ -77,24 +69,23 @@ pub enum IntPropCond {
 impl ActivationList {
 	/// Get an iterator over the list of propagators to be enqueued.
 	pub(crate) fn activated_by(&self, event: IntEvent) -> impl Iterator<Item = PropRef> + '_ {
-		let r1 = if event == IntEvent::LowerBound {
-			self.lower_bound_idx as usize..self.upper_bound_idx as usize
-		} else {
-			0..0
+		let closed_range = match event {
+			IntEvent::Domain | IntEvent::UpperBound => 0..0,
+			IntEvent::Fixed => 0..self.lower_bound_idx as usize,
+			IntEvent::LowerBound => self.lower_bound_idx as usize..self.upper_bound_idx as usize,
 		};
-		let r2 = match event {
-			IntEvent::Fixed => 0..,
-			// NOTE: Bounds (Event) should trigger both LowerBound and UpperBound conditions
-			IntEvent::Bounds => self.lower_bound_idx as usize..,
-			IntEvent::UpperBound => self.upper_bound_idx as usize..,
-			IntEvent::LowerBound => self.bounds_idx as usize..,
+		let open_range = match event {
 			IntEvent::Domain => self.domain_idx as usize..,
+			IntEvent::Fixed => self.activations.len()..,
+			IntEvent::LowerBound => self.bounds_idx as usize..,
+			IntEvent::UpperBound => self.upper_bound_idx as usize..,
 		};
-		self.activations[r1]
+		self.activations[closed_range]
 			.iter()
 			.copied()
-			.chain(self.activations[r2].iter().copied())
+			.chain(self.activations[open_range].iter().copied())
 	}
+
 	/// Add a propagator to the list of propagators to be enqueued based on the
 	/// given condition.
 	pub(crate) fn add(&mut self, mut prop: PropRef, condition: IntPropCond) {
@@ -153,21 +144,10 @@ impl ActivationList {
 			IntPropCond::Domain => self.activations.push(prop),
 		};
 	}
-}
 
-impl Add<IntEvent> for IntEvent {
-	type Output = IntEvent;
-
-	fn add(self, rhs: IntEvent) -> Self::Output {
-		use IntEvent::*;
-		match (self, rhs) {
-			(Fixed, _) | (_, Fixed) => Fixed,
-			(Bounds, _) | (_, Bounds) => Bounds,
-			(LowerBound, UpperBound) | (UpperBound, LowerBound) => Bounds,
-			(LowerBound, _) | (_, LowerBound) => LowerBound,
-			(UpperBound, _) | (_, UpperBound) => UpperBound,
-			(Domain, Domain) => Domain,
-		}
+	/// Check whether there are any propagators to fixed events
+	pub(crate) fn has_fixed_listeners(&self) -> bool {
+		self.lower_bound_idx > 0
 	}
 }
 
@@ -198,26 +178,7 @@ mod tests {
 				activation_list.add(*prop, *cond);
 			}
 			let fixed: HashSet<_> = activation_list.activated_by(IntEvent::Fixed).collect();
-			assert_eq!(
-				fixed,
-				HashSet::from_iter([
-					PropRef::from(0),
-					PropRef::from(1),
-					PropRef::from(2),
-					PropRef::from(3),
-					PropRef::from(4)
-				])
-			);
-			let bounds: HashSet<_> = activation_list.activated_by(IntEvent::Bounds).collect();
-			assert_eq!(
-				bounds,
-				HashSet::from_iter([
-					PropRef::from(1),
-					PropRef::from(2),
-					PropRef::from(3),
-					PropRef::from(4)
-				])
-			);
+			assert_eq!(fixed, HashSet::from_iter([PropRef::from(0)]));
 			let lower_bound: HashSet<_> =
 				activation_list.activated_by(IntEvent::LowerBound).collect();
 			assert_eq!(

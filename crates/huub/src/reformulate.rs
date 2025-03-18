@@ -368,6 +368,7 @@ impl InspectionActions for ReformulationContext<'_> {
 		to self.slv {
 			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
 			fn get_int_upper_bound(&self, var: IntView) -> IntVal;
+			fn get_int_val(&self, var: IntView) -> Option<IntVal>;
 			fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool;
 		}
 	}
