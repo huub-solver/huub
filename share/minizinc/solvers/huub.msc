@@ -4,7 +4,7 @@
   "id": "solutions.huub",
   "tags": ["int", "bool", "sat", "lcg"],
   "inputType": "JSON",
-  "executable": "../../fzn-huub",
+  "executable": "../../../target/release/fzn-huub",
   "mznlib": "../huub",
   "stdFlags": ["-a", "-i", "-f", "-s", "-t", "-v"],
   "extraFlags": [

@@ -241,26 +241,9 @@ where
 }
 /// Create a constraint that enforces that given decision variables of starting positions and sizes
 /// of k-dimensional hyperrectangles, none of the rectangles overlap.
-pub fn diffn_int<Iter>(box_posn: Vec<Iter>, box_size: Vec<Iter>) -> IntDiffn
-where
-	Iter: IntoIterator,
-	Iter::Item: Into<IntDecision>,
+pub fn diffn_int(box_posn: Vec<Vec<IntDecision>>, box_size: Vec<Vec<IntDecision>>) -> IntDiffn
 {
-    let box_posn_d = box_posn
-        .into_iter()
-        .map(|row|
-            row.into_iter().map_into().collect()
-        )
-        .collect();
-
-    let box_size_d = box_size
-        .into_iter()
-        .map(|row|
-             row.into_iter().map_into().collect()
-            )
-        .collect();
-
-	IntDiffn {box_posn: box_posn_d, box_size: box_size_d}
+	IntDiffn {box_posn, box_size}
 }
 
 /// Create a constraint that enforces that a result decision variable takes the

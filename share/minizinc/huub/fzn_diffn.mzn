@@ -11,4 +11,7 @@ predicate fzn_diffn(
   array [int] of var int: dx,
   array [int] of var int: dy,
 ) = 
-    huub_diffn_int(x, y, dx, dy);
+    forall (i, j in index_set(x) where i < j) (
+        x[i] + dx[i] <= x[j] \/ y[i] + dy[i] <= y[j] \/ x[j] + dx[j] <= x[i] \/ y[j] + dy[j] <= y[i]
+    ) /\ huub_diffn_int(x, y, dx, dy);
+
