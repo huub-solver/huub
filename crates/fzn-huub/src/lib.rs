@@ -74,6 +74,8 @@ pub struct Cli<Stdout, Stderr> {
 	all_solutions: bool,
 	/// Output all optimal solutions
 	all_optimal: bool,
+	/// Output solutions or not
+	output_solutions: bool,
 	/// Output intermediate solutions
 	intermediate_solutions: bool,
 	/// Allow the solver to adjust search configuration
@@ -181,6 +183,13 @@ where
 			.with_probing(self.probing)
 			.with_conditioning(self.conditioning);
 		config
+	}
+
+	#[inline]
+	fn output_solution(&mut self, sol: Solution) {
+		if self.output_solutions {
+			output!(self.stdout, "{}", sol);
+		}
 	}
 
 	/// Run the Huub solver in accordance to the given command line arguments.
@@ -415,15 +424,12 @@ where
 				];
 				let (status, obj_val) = if self.intermediate_solutions {
 					slv.branch_and_bound(obj, goal, |value| {
-						output!(
-							self.stdout,
-							"{}",
-							Solution {
-								value,
-								fzn: &fzn,
-								var_map: &var_map
-							}
-						);
+						let sol = Solution {
+							value,
+							fzn: &fzn,
+							var_map: &var_map,
+						};
+						self.output_solution(sol);
 						if self.all_optimal {
 							for (i, var) in output_vars.iter().enumerate() {
 								no_good_vals[i] = value(*var);
@@ -470,15 +476,12 @@ where
 					} else {
 						// Find remaining optimal solutions
 						slv.all_solutions(&output_vars, |value| {
-							output!(
-								self.stdout,
-								"{}",
-								Solution {
-									value,
-									fzn: &fzn,
-									var_map: &var_map
-								}
-							);
+							let sol = Solution {
+								value,
+								fzn: &fzn,
+								var_map: &var_map,
+							};
+							self.output_solution(sol);
 						})
 					}
 				} else {
@@ -486,26 +489,20 @@ where
 				}
 			}
 			None if self.all_solutions => slv.all_solutions(&output_vars, |value| {
-				output!(
-					self.stdout,
-					"{}",
-					Solution {
-						value,
-						fzn: &fzn,
-						var_map: &var_map
-					}
-				);
+				let sol = Solution {
+					value,
+					fzn: &fzn,
+					var_map: &var_map,
+				};
+				self.output_solution(sol);
 			}),
 			None => slv.solve(|value| {
-				output!(
-					self.stdout,
-					"{}",
-					Solution {
-						value,
-						fzn: &fzn,
-						var_map: &var_map
-					}
-				);
+				let sol = Solution {
+					value,
+					fzn: &fzn,
+					var_map: &var_map,
+				};
+				self.output_solution(sol);
 			}),
 		};
 		// output solving statistics
@@ -522,6 +519,7 @@ where
 					("restarts", &stats.restarts()),
 					("oracleDecisions", &stats.oracle_decisions()),
 					("userDecisions", &stats.user_decisions()),
+					("solutions", &stats.solutions()),
 				],
 			);
 		}
@@ -553,6 +551,7 @@ where
 			path: self.path,
 			all_solutions: self.all_solutions,
 			all_optimal: self.all_optimal,
+			output_solutions: self.output_solutions,
 			intermediate_solutions: self.intermediate_solutions,
 			free_search: self.free_search,
 			statistics: self.statistics,
@@ -584,6 +583,7 @@ where
 			path: self.path,
 			all_solutions: self.all_solutions,
 			all_optimal: self.all_optimal,
+			output_solutions: self.output_solutions,
 			intermediate_solutions: self.intermediate_solutions,
 			free_search: self.free_search,
 			statistics: self.statistics,
@@ -630,6 +630,10 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 		let cli = Cli {
 			all_solutions: args.contains(["-a", "--all-solutions"]),
 			all_optimal: args.contains("--all-optimal"),
+			output_solutions: args
+				.opt_value_from_fn("--output-solutions", parse_bool_arg)
+				.map(|x| x.unwrap_or(true))
+				.map_err(|e| e.to_string())?,
 			intermediate_solutions: args.contains(["-i", "--intermediate-solutions"]),
 			free_search: args.contains(["-f", "--free-search"]),
 			statistics: args.contains(["-s", "--statistics"]),
