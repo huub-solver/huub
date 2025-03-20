@@ -75,6 +75,8 @@ pub(crate) struct EngineStatistics {
 	pub(crate) restarts: u32,
 	/// Number of decisions following the user-specified search heuristics
 	pub(crate) user_decisions: u64,
+	/// Number of solutions found during search
+	pub(crate) solutions: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -241,6 +243,12 @@ impl PropagatorExtension for Engine {
 
 		let accept = self.state.conflict.is_none();
 		debug!(accept, "check model");
+
+		// Increment the number of solutions found
+		if accept {
+			self.state.statistics.solutions += 1;
+		}
+
 		accept
 	}
 

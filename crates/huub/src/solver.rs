@@ -162,6 +162,8 @@ pub struct SearchStatistics {
 	pub(crate) restarts: u32,
 	/// Number of decisions following the user-specified search heuristics
 	pub(crate) user_decisions: u64,
+	/// Number of solutions found during search
+	pub(crate) solutions: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -562,6 +564,10 @@ impl SearchStatistics {
 	pub fn user_decisions(&self) -> u64 {
 		self.user_decisions
 	}
+	/// Returns the number of solutions during search.
+	pub fn solutions(&self) -> u64 {
+		self.solutions
+	}
 }
 
 impl Add for SearchStatistics {
@@ -581,6 +587,7 @@ impl AddAssign for SearchStatistics {
 		self.propagations += other.propagations;
 		self.restarts += other.restarts;
 		self.user_decisions += other.user_decisions;
+		self.solutions += other.solutions;
 	}
 }
 
@@ -880,6 +887,7 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 			propagations: cp_stats.propagations,
 			restarts: cp_stats.restarts,
 			user_decisions: cp_stats.user_decisions,
+			solutions: cp_stats.solutions,
 		}
 	}
 
