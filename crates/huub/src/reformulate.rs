@@ -128,8 +128,20 @@ pub struct InitConfig {
 	int_eager_limit: Option<usize>,
 	/// Whether to enable restarts in the oracle solver.
 	restart: bool,
+	/// Whether to enable preprocessing in the oracle solver.
+	preprocessing: bool,
+	/// Whether to enable inprocessing in the oracle solver.
+	inprocessing: bool,
 	/// Whether to enable the vivification in the oracle solver.
 	vivification: bool,
+	/// Whether to enable the global forward subsumption in the oracle solver.
+	subsumption: bool,
+	/// Whether to enable the bounded variable elimination in the oracle solver.
+	variable_elimination: bool,
+	/// Whether to enable the failed literal probing in the oracle solver.
+	probing: bool,
+	/// Whether to enable the globally blocked clause elimination (conditioning)
+	conditioning: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -310,9 +322,39 @@ impl InitConfig {
 		self.restart
 	}
 
+	/// Get whether to enable preprocessing in the oracle solver.
+	pub fn preprocessing(&self) -> bool {
+		self.preprocessing
+	}
+
+	/// Get whether to enable inprocessing in the oracle solver.
+	pub fn inprocessing(&self) -> bool {
+		self.inprocessing
+	}
+
 	/// Get whether to enable the vivification in the oracle solver.
 	pub fn vivification(&self) -> bool {
 		self.vivification
+	}
+
+	/// Get whether to enable the global forward subsumption in the oracle solver.
+	pub fn subsumption(&self) -> bool {
+		self.subsumption
+	}
+
+	/// Get whether to enable the bounded variable elimination in the oracle solver.
+	pub fn variable_elimination(&self) -> bool {
+		self.variable_elimination
+	}
+
+	/// Get whether to enable the failed literal probing in the oracle solver.
+	pub fn probing(&self) -> bool {
+		self.probing
+	}
+
+	/// Get whether to enable the globally blocked clause elimination (conditioning) in the oracle solver.
+	pub fn conditioning(&self) -> bool {
+		self.conditioning
 	}
 
 	/// Change the maximum cardinality of the domain of an integer variable before
@@ -328,9 +370,45 @@ impl InitConfig {
 		self
 	}
 
+	/// Change whether to enable preprocessing in the oracle solver.
+	pub fn with_preprocessing(mut self, preprocessing: bool) -> Self {
+		self.preprocessing = preprocessing;
+		self
+	}
+
+	/// Change whether to enable inprocessing in the oracle solver.
+	pub fn with_inprocessing(mut self, inprocessing: bool) -> Self {
+		self.inprocessing = inprocessing;
+		self
+	}
+
 	/// Change whether to enable the vivification in the oracle solver.
 	pub fn with_vivification(mut self, vivification: bool) -> Self {
 		self.vivification = vivification;
+		self
+	}
+
+	/// Change whether to enable the global forward subsumption in the oracle solver.
+	pub fn with_subsumption(mut self, subsumption: bool) -> Self {
+		self.subsumption = subsumption;
+		self
+	}
+
+	/// Change whether to enable the bounded variable elimination in the oracle solver.
+	pub fn with_variable_elimination(mut self, variable_elimination: bool) -> Self {
+		self.variable_elimination = variable_elimination;
+		self
+	}
+
+	/// Change whether to enable the failed literal probing in the oracle solver.
+	pub fn with_probing(mut self, probing: bool) -> Self {
+		self.probing = probing;
+		self
+	}
+
+	/// Change whether to enable the globally blocked clause elimination (conditioning) in the oracle solver.
+	pub fn with_conditioning(mut self, conditioning: bool) -> Self {
+		self.conditioning = conditioning;
 		self
 	}
 }
