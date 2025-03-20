@@ -1,6 +1,7 @@
 use expect_test::Expect;
 use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;
+use rangelist::RangeList;
 
 use crate::{
 	solver::{SolveResult, Value, View},
@@ -29,7 +30,7 @@ fn it_works() {
 }
 
 #[test]
-fn unification_impossible() {
+fn test_unify_int_impossible() {
 	let mut prb = Model::default();
 	let a = prb.new_int_var((1..=5).into());
 	let b = prb.new_int_var((1..=2).into());
@@ -47,6 +48,28 @@ fn unification_impossible() {
 			assert_eq!(value(b.into()), Value::Int(2));
 		}),
 		SolveResult::Satisfied
+	);
+}
+
+#[test]
+fn test_unify_int_lin_view_domains() {
+	let mut prb = Model::default();
+	let a = prb.new_int_var(RangeList::from_iter([1..=1, 3..=3, 5..=5]));
+	let b = prb.new_int_var(RangeList::from_iter([1..=3]));
+
+	let lin = (a * 6 - b * 2).eq(0);
+	prb += lin;
+
+	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+	let a = map.get_int(&mut slv, a);
+	let b = map.get_int(&mut slv, b);
+
+	assert_eq!(
+		slv.get_all_solutions(&[a.into(), b.into()]),
+		(
+			SolveResult::Complete,
+			vec![vec![Value::Int(1), Value::Int(3)]]
+		)
 	);
 }
 

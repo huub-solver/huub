@@ -133,28 +133,6 @@ impl LinearTransform {
 		(val * self.scale.get()) + self.offset
 	}
 
-	/// Perform the linear transformation on a set of integer values.
-	///
-	/// ## Warning
-	///
-	/// Use this method sparingly, as it will iterate over the individual values
-	/// of the set.
-	pub(crate) fn transform_int_set(&self, val: &IntSetVal) -> IntSetVal {
-		if self.scale.get() == 1 {
-			return val
-				.iter()
-				.map(|v| self.transform(*v.start())..=self.transform(*v.end()))
-				.collect();
-		}
-		val.iter()
-			.flatten()
-			.map(|v| {
-				let v = self.transform(v);
-				v..=v
-			})
-			.collect()
-	}
-
 	/// Perform the linear transformation on a `LitMeaning`.
 	pub(crate) fn transform_lit(&self, mut lit: IntLitMeaning) -> IntLitMeaning {
 		let mut transformer = *self;
@@ -338,17 +316,6 @@ mod tests {
 			offset: 6,
 		};
 		assert_eq!(lt.transform(2), 12);
-	}
-
-	#[test]
-	fn test_transform_int_set() {
-		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(2).unwrap(),
-			offset: 4,
-		};
-		let set = IntSetVal::from_iter([0..=2]);
-		let result = IntSetVal::from_iter([4..=4, 6..=6, 8..=8]);
-		assert_eq!(lt.transform_int_set(&set), result);
 	}
 
 	#[test]

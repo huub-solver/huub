@@ -42,7 +42,7 @@ use crate::{
 		activation_list::{ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
 		int_var::{IntVar, IntVarRef, OrderStorage},
-		queue::{PriorityLevel, PriorityQueue},
+		queue::PropagatorQueue,
 		solving_context::SolvingContext,
 		trail::{Trail, TrailedInt},
 		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, SolverConfiguration,
@@ -125,11 +125,7 @@ pub struct State {
 	/// Integer variable enqueueing information
 	pub(crate) int_activation: IndexVec<IntVarRef, ActivationList>,
 	/// Queue of propagators awaiting action
-	pub(crate) propagator_queue: PriorityQueue<PropRef>,
-	/// Priority within the queue for each propagator
-	pub(crate) propagator_priority: IndexVec<PropRef, PriorityLevel>,
-	/// Flag for whether a propagator is enqueued
-	pub(crate) enqueued: IndexVec<PropRef, bool>,
+	pub(crate) propagator_queue: PropagatorQueue,
 }
 
 impl PropagatorExtension for Engine {
@@ -207,10 +203,11 @@ impl PropagatorExtension for Engine {
 					let prev = ctx.state.trail.assign_lit(ub_lit);
 					debug_assert_eq!(prev, None);
 				}
-				let prev_ub = ctx.state.int_vars[r].notify_upper_bound(&mut ctx.state.trail, lb);
-				debug_assert!(prev_ub > lb);
+				ctx.state.int_vars[r].notify_upper_bound(&mut ctx.state.trail, lb);
 
-				ctx.state.enqueue_int_propagators(r, IntEvent::Fixed, None);
+				for prop in ctx.state.int_activation[r].activated_by(IntEvent::Fixed) {
+					ctx.state.propagator_queue.enqueue_propagator(prop);
+				}
 			}
 		}
 
@@ -269,14 +266,89 @@ impl PropagatorExtension for Engine {
 
 	fn notify_assignments(&mut self, lits: &[RawLit]) {
 		debug!(lits = ?lits.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "assignments");
+		// Avoid doing more work if we are already in a failed state
+		if self.state.failed {
+			return;
+		}
+
+		// Enqueue propagators
 		for &lit in lits {
-			// Process Boolean assignment
 			if self.state.trail.assign_lit(lit).is_some() {
 				continue;
 			}
-			// Enqueue propagators, if no conflict has been found
-			if !self.state.failed {
-				self.state.enqueue_propagators(lit, None);
+
+			// Enqueue based on direct literal
+			self.state.propagator_queue.enqueue_propagators(
+				self.state
+					.bool_activation
+					.get(&lit.var())
+					.into_iter()
+					.flatten()
+					.copied(),
+			);
+
+			// Enqueue based on literal meaning in complex type
+			if let Some((iv, meaning)) = self.state.bool_to_int.get(lit.var()) {
+				let meaning = meaning
+					.map(|l| if lit.is_negated() { !l } else { l })
+					.unwrap_or_else(|| self.state.int_vars[iv].lit_meaning(lit));
+				// Enact domain changes and determine change event
+				let (lb, ub) = self.state.int_vars[iv].get_bounds(&self.state);
+				let event = match meaning {
+					IntLitMeaning::Eq(i) if i == lb && i == ub => None,
+					IntLitMeaning::Eq(i) if i < lb || i > ub => {
+						// Notified of invalid assignment, do nothing.
+						//
+						// Although we do not expect this to happen, it seems that Cadical
+						// chronological backtracking might send notifications before
+						// additional propagation.
+						trace!(lit = i32::from(lit), lb, ub, "invalid eq notification");
+						None
+					}
+					IntLitMeaning::Eq(i) => {
+						if lb < i {
+							self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, i);
+						}
+						if ub > i {
+							self.state.int_vars[iv].notify_upper_bound(&mut self.state.trail, i);
+						}
+						debug_assert_eq!(
+							self.state.get_int_val(IntView(IntViewInner::VarRef(iv))),
+							Some(i)
+						);
+						Some(IntEvent::Fixed)
+					}
+					IntLitMeaning::NotEq(i) if i < lb || i > ub => None,
+					IntLitMeaning::NotEq(_) => Some(IntEvent::Domain),
+					IntLitMeaning::GreaterEq(new_lb) if new_lb <= lb => None,
+					IntLitMeaning::GreaterEq(new_lb) => {
+						self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, new_lb);
+						Some(if new_lb == ub {
+							IntEvent::Fixed
+						} else {
+							IntEvent::LowerBound
+						})
+					}
+					IntLitMeaning::Less(i) => {
+						let new_ub = self.state.int_vars[iv].tighten_upper_bound(i - 1);
+						if new_ub < ub {
+							self.state.int_vars[iv]
+								.notify_upper_bound(&mut self.state.trail, new_ub);
+							Some(if new_ub == lb {
+								IntEvent::Fixed
+							} else {
+								IntEvent::UpperBound
+							})
+						} else {
+							None
+						}
+					}
+				};
+				if let Some(event) = event {
+					self.state
+						.propagator_queue
+						.enqueue_propagators(self.state.int_activation[iv].activated_by(event));
+				}
 			}
 		}
 	}
@@ -330,13 +402,8 @@ impl PropagatorExtension for Engine {
 		// Debug helper to ensure that any reason is based on known true literals
 		#[cfg(debug_assertions)]
 		{
-			let mut prev = None;
+			let mut prev: HashMap<RawVar, bool> = HashMap::new();
 			for &lit in queue.iter() {
-				// Notify of the assignment of the previous literal so it is available
-				// when checking the reason.
-				if let Some(prev) = prev {
-					self.notify_assignments(&[prev]);
-				}
 				if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
 					let clause: Clause =
 						reason.explain(&mut self.propagators, &mut self.state, Some(lit));
@@ -344,7 +411,9 @@ impl PropagatorExtension for Engine {
 						if l == lit {
 							continue;
 						}
-						let val = self.state.trail.get_sat_value(!l);
+						let val = self.state.trail.get_sat_value(!l).or(prev
+							.get(&l.var())
+							.map(|&v| if l.is_negated() { v } else { !v }));
 						if !val.unwrap_or(false) {
 							tracing::error!(lit_prop = i32::from(lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
 						}
@@ -357,7 +426,9 @@ impl PropagatorExtension for Engine {
 						);
 					}
 				}
-				prev = Some(lit);
+				// Recoprd assignment of the previous literal so it is available when
+				// checking next reason.
+				let _ = prev.insert(lit.var(), !lit.is_negated());
 			}
 		}
 		queue
@@ -401,109 +472,6 @@ impl State {
 	fn decision_level(&self) -> u32 {
 		self.trail.decision_level()
 	}
-	/// Determine whether assigning a literal triggers an event on an integer variable.
-	///
-	/// Returns `None` if the literal does not trigger an event on an integer
-	/// variable. Otherwise, returns the relevant `IntVarRef` and the `IntEvent`
-	/// that is triggered.
-	fn determine_int_event(&mut self, lit: RawLit) -> Option<(IntVarRef, IntEvent)> {
-		if let Some((iv, meaning)) = self.bool_to_int.get(lit.var()) {
-			let (lb, ub) = self.int_vars[iv].get_bounds(self);
-			let meaning = meaning
-				.map(|l| if lit.is_negated() { !l } else { l })
-				.unwrap_or_else(|| self.int_vars[iv].lit_meaning(lit));
-			// Enact domain changes and determine change event
-			let event: IntEvent = match meaning {
-				IntLitMeaning::Eq(i) => {
-					if i == lb || i == ub {
-						return None;
-					}
-					if i < lb || i > ub {
-						// Notified of invalid assignment, do nothing.
-						//
-						// Although we do not expect this to happen, it seems that Cadical
-						// chronological backtracking might send notifications before
-						// additional propagation.
-						trace!(lit = i32::from(lit), lb, ub, "invalid eq notification");
-						return None;
-					}
-					let prev_lb = self.int_vars[iv].notify_lower_bound(&mut self.trail, i);
-					let prev_ub = self.int_vars[iv].notify_upper_bound(&mut self.trail, i);
-					debug_assert!(prev_lb < i || prev_ub > i);
-					debug_assert_eq!(self.get_int_val(IntView(IntViewInner::VarRef(iv))), Some(i));
-					IntEvent::Fixed
-				}
-				IntLitMeaning::NotEq(i) => {
-					if i < lb || i > ub {
-						return None;
-					}
-					IntEvent::Domain
-				}
-				IntLitMeaning::GreaterEq(new_lb) => {
-					if new_lb <= lb {
-						return None;
-					}
-					let prev = self.int_vars[iv].notify_lower_bound(&mut self.trail, new_lb);
-					debug_assert!(prev < new_lb);
-					if new_lb == ub {
-						IntEvent::Fixed
-					} else {
-						IntEvent::LowerBound
-					}
-				}
-				IntLitMeaning::Less(i) => {
-					let new_ub = self.int_vars[iv].tighten_upper_bound(i - 1);
-					if new_ub >= ub {
-						return None;
-					}
-					let prev = self.int_vars[iv].notify_upper_bound(&mut self.trail, new_ub);
-					debug_assert!(new_ub < prev);
-					if new_ub == lb {
-						IntEvent::Fixed
-					} else {
-						IntEvent::UpperBound
-					}
-				}
-			};
-			Some((iv, event))
-		} else {
-			None
-		}
-	}
-
-	/// Enqueue all propagators that are activated because the [`IntEvent`]
-	/// `event` has happened to `int_var`.
-	fn enqueue_int_propagators(
-		&mut self,
-		int_var: IntVarRef,
-		event: IntEvent,
-		skip: Option<PropRef>,
-	) {
-		for prop in self.int_activation[int_var].activated_by(event) {
-			if Some(prop) != skip && !self.enqueued[prop] {
-				self.propagator_queue
-					.insert(self.propagator_priority[prop], prop);
-				self.enqueued[prop] = true;
-			}
-		}
-	}
-
-	/// Enqueue all propagators that are activated because `lit` has been
-	/// assigned.
-	fn enqueue_propagators(&mut self, lit: RawLit, skip: Option<PropRef>) {
-		for &prop in self.bool_activation.get(&lit.var()).into_iter().flatten() {
-			if Some(prop) != skip && !self.enqueued[prop] {
-				self.propagator_queue
-					.insert(self.propagator_priority[prop], prop);
-				self.enqueued[prop] = true;
-			}
-		}
-
-		// Process Integer consequences
-		if let Some((iv, event)) = self.determine_int_event(lit) {
-			self.enqueue_int_propagators(iv, event, skip);
-		}
-	}
 
 	/// Internal method called to process the backtracking to an earlier decision
 	/// level.
@@ -524,9 +492,7 @@ impl State {
 		// Backtrack trail
 		self.trail.notify_backtrack(level);
 		// Empty propagation queue
-		while let Some(p) = self.propagator_queue.pop() {
-			self.enqueued[p] = false;
-		}
+		while self.propagator_queue.pop().is_some() {}
 		if ARTIFICIAL {
 			return;
 		}

@@ -454,7 +454,7 @@ impl IntLinearLessEqBounds {
 		);
 		solver.enqueue_now(prop);
 		for &v in vars.iter() {
-			solver.enqueue_on_int_change(prop, v, IntPropCond::UpperBound);
+			solver.enqueue_on_int_change(prop, v, IntPropCond::LowerBound);
 		}
 	}
 }
@@ -571,7 +571,7 @@ impl IntLinearLessEqImpBounds {
 		);
 		solver.enqueue_now(prop);
 		for &v in vars.iter() {
-			solver.enqueue_on_int_change(prop, v, IntPropCond::UpperBound);
+			solver.enqueue_on_int_change(prop, v, IntPropCond::LowerBound);
 		}
 		solver.enqueue_on_bool_change(prop, BoolView(BoolViewInner::Lit(reification)));
 	}
