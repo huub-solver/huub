@@ -1,11 +1,10 @@
 //! Structure and algorithms for the integer all different constraint, which
 //! enforces that a list of integer variables each take a different value.
 
-use std::{cmp, iter::repeat_with};
+use std::cmp;
 
 use itertools::{Either, Itertools};
 use rangelist::{IntervalIterator, RangeList};
-use tracing::trace;
 
 use crate::{
 	actions::{
@@ -33,20 +32,31 @@ pub struct IntAllDifferent {
 /// Bounds consistent propagator for the `all_different_int` constraint.
 pub struct IntAllDifferentBounds {
 	/// List of integer variables that must take different values.
-	vars: Vec<IntView>,
-	interval: Vec<Interval>,
+	var: Vec<IntView>,
 	/// Struct to store information about variable
-	min_sorted: Vec<usize>,
+	var_info: Vec<AllDiffVarMeta>,
 	/// Index (from vars) of all variables sorted by min bound
-	max_sorted: Vec<usize>,
+	min_sorted: Vec<usize>,
 	/// Index (from vars) of all variables sorted by max bound
-	num_bounds: usize,
+	max_sorted: Vec<usize>,
 	/// Number of different bounds
-	bounds: Vec<IntVal>,
+	num_bounds: usize,
 	/// Ordered vector of all different max and min bounds with dummies
-	t: Vec<usize>,
-	d: Vec<IntVal>,
-	h: Vec<usize>,
+	bounds: Vec<IntVal>,
+	/// The critical capacity pointers; that is, `predecessor[i]` points to the
+	/// predecessor of i in the `bounds` list.
+	predecessor: Vec<usize>,
+	/// The diﬀerences between critical capacities; that is `diff[i]` is the
+	/// diﬀerence of capacities between `bounds[i]` and its predecessor element in
+	/// the list `bounds[predecessor[i]]`
+	diff: Vec<IntVal>,
+	/// The Hall interval pointers; that is, if `hall_interval[i] < i` then the
+	/// half-open interval [`bounds[hall_interval[i]]`, `bounds[i]`) is contained
+	/// in a Hall interval, and otherwise holds a pointer to the Hall interval it
+	/// belongs to. This Hall interval is represented by a tree, with the root
+	/// containing the value of its right end.
+	hall_interval: Vec<usize>,
+	/// Hall interval bucket transitions
 	bucket: Vec<usize>,
 }
 
@@ -58,15 +68,14 @@ pub struct IntAllDifferentValue {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct Interval {
+/// Information that is tracked for each variable for the propagation of
+/// [`IntAllDifferentBounds`]
+struct AllDiffVarMeta {
+	/// Transition for the variable's position in the Hall interval tree.
 	next: usize,
-	/// Minimum observed value of decision variable
-	min: IntVal,
-	/// Maximum observed value of decision variable
-	max: IntVal,
-	/// Minimum index in the bounds vector
+	/// Minimum index in the [`IntAllDifferentBounds::bounds`] vector
 	min_rank: usize,
-	/// Maximum index in the bounds vector
+	/// Maximum index in the [`IntAllDifferentBounds::bounds`] vector
 	max_rank: usize,
 }
 
@@ -104,217 +113,144 @@ impl<S: SimplificationActions> Constraint<S> for IntAllDifferent {
 }
 
 impl IntAllDifferentBounds {
+	/// Filter the lower bounds of the considered variables
 	fn filter_lower<P: PropagationActions>(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		let size: usize = self.vars.len();
-		let mut j: usize;
-		let mut z: usize;
-		let mut w: usize;
-
 		for i in 1..=self.num_bounds + 1 {
-			self.h[i] = i - 1;
-			self.t[i] = self.h[i];
-			self.d[i] = self.bounds[i] - self.bounds[i - 1];
+			self.hall_interval[i] = i - 1;
+			self.predecessor[i] = i - 1;
+			self.diff[i] = self.bounds[i] - self.bounds[i - 1];
 			self.bucket[i] = usize::MAX;
 		}
 
-		for i in 0..size {
-			let max_rank = self.interval[self.max_sorted[i]].max_rank;
-			let min_rank = self.interval[self.max_sorted[i]].min_rank;
-			trace!(
-				"var {:?}, [{:?}, {:?}))",
-				self.max_sorted[i],
-				self.bounds[min_rank],
-				self.bounds[max_rank]
-			);
+		for i in 0..self.var.len() {
+			let max_rank = self.var_info[self.max_sorted[i]].max_rank;
+			let min_rank = self.var_info[self.max_sorted[i]].min_rank;
 
-			z = IntAllDifferentBounds::path_max(&self.t, min_rank + 1);
-			j = self.t[z];
-			self.d[z] -= 1;
-			self.interval[self.max_sorted[i]].next = self.bucket[z];
+			let mut z = Self::path_max(&self.predecessor, min_rank + 1);
+			let j = self.predecessor[z];
+			self.diff[z] -= 1;
+			self.var_info[self.max_sorted[i]].next = self.bucket[z];
 			self.bucket[z] = self.max_sorted[i];
-			if self.d[z] == 0 {
-				self.t[z] = z + 1;
-				z = IntAllDifferentBounds::path_max(&self.t, self.t[z]);
-				self.t[z] = j;
-			}
-			IntAllDifferentBounds::path_set(&mut self.t, min_rank + 1, z, z);
+			if self.diff[z] == 0 {
+				self.predecessor[z] = z + 1;
+				z = Self::path_max(&self.predecessor, self.predecessor[z]);
+				self.predecessor[z] = j;
+			};
+			Self::path_set(&mut self.predecessor, min_rank + 1, z, z);
 
-			if self.h[min_rank] > min_rank {
-				w = IntAllDifferentBounds::path_max(&self.h, self.h[min_rank]);
-				let hall_max: IntVal = self.bounds[w];
-				let mut hall_min: IntVal = self.bounds[min_rank];
-				let mut k: usize = w;
+			if self.hall_interval[min_rank] > min_rank {
+				let w = Self::path_max(&self.hall_interval, self.hall_interval[min_rank]);
+				let hall_max = self.bounds[w];
+				let mut hall_min = self.bounds[min_rank];
+				let mut k = w;
 				while self.bounds[k] > hall_min {
 					let mut l = self.bucket[k];
 					while l != usize::MAX {
-						hall_min = cmp::min(hall_min, self.interval[l].min);
-						l = self.interval[l].next;
+						hall_min = cmp::min(hall_min, actions.get_int_lower_bound(self.var[l]));
+						l = self.var_info[l].next;
 					}
 					k -= 1;
 				}
 
-				k = w;
-				trace!(hall_min, hall_max, "hall interval");
+				let mut k = w;
 				let mut reason = Vec::new();
-				trace!(
-					"Reason [[ var {:?}: [{:?}, {:?}) >= {:?}]",
-					i,
-					self.interval[self.max_sorted[i]].min,
-					self.interval[self.max_sorted[i]].max,
-					hall_min
-				);
 				reason.push(actions.get_int_lit(
-					self.vars[self.max_sorted[i]],
+					self.var[self.max_sorted[i]],
 					IntLitMeaning::GreaterEq(hall_min),
 				));
 				while self.bounds[k] > hall_min {
 					let mut l = self.bucket[k];
 					while l != usize::MAX {
-						trace!(
-							"Reason [[var {:?} [{:?}, {:?}) >= {:?}]",
-							l,
-							self.interval[l].min,
-							self.interval[l].max,
-							hall_max
-						);
 						reason.push(
-							actions.get_int_lit(self.vars[l], IntLitMeaning::GreaterEq(hall_min)),
-						);
-						trace!(
-							"Reason [[ var {:?} [{:?}, {:?}) < {:?}]",
-							l,
-							self.interval[l].min,
-							self.interval[l].max,
-							hall_max
+							actions.get_int_lit(self.var[l], IntLitMeaning::GreaterEq(hall_min)),
 						);
 						reason
-							.push(actions.get_int_lit(self.vars[l], IntLitMeaning::Less(hall_max))); // since [x<d+1] = [x<=d]
-						l = self.interval[l].next;
+							.push(actions.get_int_lit(self.var[l], IntLitMeaning::Less(hall_max)));
+						l = self.var_info[l].next;
 					}
 					k -= 1;
 				}
 
-				actions.set_int_lower_bound(self.vars[self.max_sorted[i]], hall_max, reason)?; //reason type might be an issue
-				self.interval[self.max_sorted[i]].min = hall_max;
-				IntAllDifferentBounds::path_set(&mut self.h, min_rank, w, w);
+				actions.set_int_lower_bound(self.var[self.max_sorted[i]], hall_max, reason)?;
+				Self::path_set(&mut self.hall_interval, min_rank, w, w);
 			}
-			if self.d[z] == self.bounds[z] - self.bounds[max_rank] {
-				let h_max_rank = self.h[max_rank];
+			if self.diff[z] == self.bounds[z] - self.bounds[max_rank] {
+				let h_max_rank = self.hall_interval[max_rank];
 				// Save Hall interval
-				IntAllDifferentBounds::path_set(&mut self.h, h_max_rank, j - 1, max_rank);
-				self.h[max_rank] = j - 1;
+				Self::path_set(&mut self.hall_interval, h_max_rank, j - 1, max_rank);
+				self.hall_interval[max_rank] = j - 1;
 			}
 		}
 		Ok(())
 	}
 
+	/// Filter the upper bounds of the considered variables
 	fn filter_upper<P: PropagationActions>(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		let size: usize = self.vars.len();
-		let mut j: usize;
-		let mut z: usize;
-		let mut w: usize;
-
 		for i in 0..=self.num_bounds {
-			self.h[i] = i + 1;
-			self.t[i] = self.h[i];
-			self.d[i] = self.bounds[i + 1] - self.bounds[i];
+			self.hall_interval[i] = i + 1;
+			self.predecessor[i] = i + 1;
+			self.diff[i] = self.bounds[i + 1] - self.bounds[i];
 			self.bucket[i] = usize::MAX;
 		}
 
-		for i in (0..size).rev() {
-			let max_rank = self.interval[self.min_sorted[i]].max_rank;
-			let min_rank = self.interval[self.min_sorted[i]].min_rank;
+		for i in (0..self.var.len()).rev() {
+			let max_rank = self.var_info[self.min_sorted[i]].max_rank;
+			let min_rank = self.var_info[self.min_sorted[i]].min_rank;
 
-			trace!(
-				"var {:?}, [{:?}, {:?})",
-				self.min_sorted[i],
-				self.bounds[min_rank],
-				self.bounds[max_rank]
-			);
-			z = IntAllDifferentBounds::path_min(&self.t, max_rank - 1);
-			j = self.t[z];
-			self.d[z] -= 1;
-			self.interval[self.min_sorted[i]].next = self.bucket[z];
+			let mut z = Self::path_min(&self.predecessor, max_rank - 1);
+			let j = self.predecessor[z];
+			self.diff[z] -= 1;
+			self.var_info[self.min_sorted[i]].next = self.bucket[z];
 			self.bucket[z] = self.min_sorted[i];
-			if self.d[z] == 0 {
-				self.t[z] = z - 1;
-				z = IntAllDifferentBounds::path_min(&self.t, self.t[z]);
-				self.t[z] = j;
+			if self.diff[z] == 0 {
+				self.predecessor[z] = z - 1;
+				z = Self::path_min(&self.predecessor, self.predecessor[z]);
+				self.predecessor[z] = j;
 			}
-			IntAllDifferentBounds::path_set(&mut self.t, max_rank - 1, z, z);
+			Self::path_set(&mut self.predecessor, max_rank - 1, z, z);
 
-			if self.h[max_rank] < max_rank {
-				w = IntAllDifferentBounds::path_min(&self.h, self.h[max_rank]);
-				let hall_min: IntVal = self.bounds[w];
-				let mut hall_max: IntVal = self.bounds[max_rank];
-				let mut k: usize = w;
+			if self.hall_interval[max_rank] < max_rank {
+				let w = Self::path_min(&self.hall_interval, self.hall_interval[max_rank]);
+				let hall_min = self.bounds[w];
+				let mut hall_max = self.bounds[max_rank];
+				let mut k = w;
 				while self.bounds[k] < hall_max {
 					let mut l = self.bucket[k];
 					while l != usize::MAX {
-						hall_max = cmp::max(hall_max, self.interval[l].max);
-						l = self.interval[l].next;
+						hall_max = cmp::max(hall_max, actions.get_int_upper_bound(self.var[l]) + 1);
+						l = self.var_info[l].next;
 					}
 					k += 1;
 				}
 
-				k = w;
-				trace!(hall_min, hall_max, "hall interval");
+				let mut k = w;
 				let mut reason = Vec::new();
 				reason.push(
 					actions
-						.get_int_lit(self.vars[self.min_sorted[i]], IntLitMeaning::Less(hall_max)),
-				);
-				trace!(
-					"Reason [[ var {:?}: [{:?}, {:?}) < {:?}]",
-					i,
-					self.interval[self.min_sorted[i]].min,
-					self.interval[self.min_sorted[i]].max,
-					hall_max
+						.get_int_lit(self.var[self.min_sorted[i]], IntLitMeaning::Less(hall_max)),
 				);
 				while self.bounds[k] < hall_max {
 					let mut l = self.bucket[k];
 					while l != usize::MAX {
 						reason.push(
-							actions.get_int_lit(self.vars[l], IntLitMeaning::GreaterEq(hall_min)),
-						);
-						trace!(
-							"Reason [[ var {:?}: [{:?}, {:?}) >= {:?}]",
-							l,
-							self.interval[l].min,
-							self.interval[l].max,
-							hall_min
+							actions.get_int_lit(self.var[l], IntLitMeaning::GreaterEq(hall_min)),
 						);
 						reason
-							.push(actions.get_int_lit(self.vars[l], IntLitMeaning::Less(hall_max)));
-						trace!(
-							"Reason [[ var {:?}: [{:?}, {:?}) < {:?}]",
-							l,
-							self.interval[l].min,
-							self.interval[l].max,
-							hall_max
-						);
-						l = self.interval[l].next;
+							.push(actions.get_int_lit(self.var[l], IntLitMeaning::Less(hall_max)));
+						l = self.var_info[l].next;
 					}
 					k += 1;
 				}
-				trace!(
-					"Setting upper bound of variable {:?} with bounds [{:?}, {:?})  to {:?}",
-					self.min_sorted[i],
-					self.interval[self.min_sorted[i]].min,
-					self.interval[self.min_sorted[i]].max,
-					hall_min
-				);
-				actions.set_int_upper_bound(self.vars[self.min_sorted[i]], hall_min - 1, reason)?;
-				self.interval[self.min_sorted[i]].max = hall_min;
+				actions.set_int_upper_bound(self.var[self.min_sorted[i]], hall_min - 1, reason)?;
 
-				IntAllDifferentBounds::path_set(&mut self.h, max_rank, w, w);
+				Self::path_set(&mut self.hall_interval, max_rank, w, w);
 			}
 
-			if self.d[z] == self.bounds[min_rank] - self.bounds[z] {
-				let h_min_rank = self.h[min_rank];
+			if self.diff[z] == self.bounds[min_rank] - self.bounds[z] {
+				let h_min_rank = self.hall_interval[min_rank];
 				// Save Hall interval
-				IntAllDifferentBounds::path_set(&mut self.h, h_min_rank, j + 1, min_rank);
-				self.h[min_rank] = j + 1;
+				Self::path_set(&mut self.hall_interval, h_min_rank, j + 1, min_rank);
+				self.hall_interval[min_rank] = j + 1;
 			}
 		}
 		Ok(())
@@ -322,34 +258,29 @@ impl IntAllDifferentBounds {
 
 	/// Create a new [`AllDifferentBounds`] propagator and post it in the solver.
 	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, vars: Vec<IntView>) {
-		let interval = repeat_with(|| Interval {
-			next: 0,
-			min: 0,
-			max: 0,
-			min_rank: 0,
-			max_rank: 0,
-		})
-		.take(vars.len())
-		.collect();
+		let interval = vec![
+			AllDiffVarMeta {
+				next: 0,
+				min_rank: 0,
+				max_rank: 0
+			};
+			vars.len()
+		];
 		let min_sorted: Vec<_> = (0..vars.len()).collect();
 		let max_sorted: Vec<_> = (0..vars.len()).collect();
 
-		let num_bounds: usize = 0;
 		let n = 2 * vars.len() + 2;
-		let enqueue = vars
-			.iter()
-			.any(|v| matches!(v, IntView(IntViewInner::Const(_))));
 		let prop = solver.add_propagator(
 			Box::new(Self {
-				vars: vars.clone(),
-				interval,
+				var: vars.clone(),
+				var_info: interval,
 				min_sorted,
 				max_sorted,
-				num_bounds,
+				num_bounds: 0,
 				bounds: vec![0; n],
-				t: vec![0; n],
-				d: vec![0; n],
-				h: vec![0; n],
+				predecessor: vec![0; n],
+				diff: vec![0; n],
+				hall_interval: vec![0; n],
 				bucket: vec![0; n],
 			}),
 			PriorityLevel::Low,
@@ -357,57 +288,59 @@ impl IntAllDifferentBounds {
 		for v in vars {
 			solver.enqueue_on_int_change(prop, v, IntPropCond::Bounds);
 		}
-		if enqueue {
-			solver.enqueue_now(prop);
-		}
+		solver.enqueue_now(prop);
 	}
 
-	/// Follows path i, t[i], t[t[i]], ... until we stop increasing
-	fn path_max(t: &Vec<usize>, mut i: usize) -> usize {
-		while t[i] > i {
-			i = t[i];
+	/// Follows path given by `transition` from `start` until we stop increasing
+	fn path_max(transition: &[usize], mut start: usize) -> usize {
+		while transition[start] > start {
+			start = transition[start];
 		}
-		i
+		start
 	}
 
-	/// Follows path i, t[i], t[t[i]], ... until we stop decreasing
-	fn path_min(t: &Vec<usize>, mut i: usize) -> usize {
-		while t[i] < i {
-			i = t[i];
+	/// Follows path given by `transition` from `start` until we stop decreasing
+	fn path_min(transition: &[usize], mut start: usize) -> usize {
+		while transition[start] < start {
+			start = transition[start];
 		}
-		i
+		start
 	}
 
-	/// Sets everything in t, between start and end to to e.g.
-	/// start = 2, end = 3, to = 5
-	/// t = 0->4->3->1->2->0 gives:
-	/// 0->5->5->5->2->0
-	fn path_set(t: &mut Vec<usize>, start: usize, end: usize, to: usize) -> () {
-		let mut k;
-		let mut l = start;
-		while l != end {
-			k = l;
-			l = t[k];
-			t[k] = to;
+	/// Sets everything in the `transition` slice, between `start` and `end` to `to`
+	///
+	/// # Example
+	///
+	/// ```ignore
+	/// # use huub::constraints::int_all_different::IntAllDifferentBounds;
+	/// let mut transition = vec![4, 2, 0, 1, 3, 0]; // giving e.g. 0 -> 4 -> 3 -> 1 -> 2 -> 0
+	/// IntAllDifferentBounds::path_set(&mut transition, 2, 3, 5);
+	/// assert_eq!(transition, vec![5, 2, 5, 1, 5, 0]); // now gives // 0 -> 5 -> 0
+	/// ```
+	///
+	fn path_set(transition: &mut [usize], start: usize, end: usize, to: usize) {
+		let mut last;
+		let mut cur = start;
+		while cur != end {
+			last = cur;
+			cur = transition[cur];
+			transition[last] = to;
 		}
 	}
 
 	/// Sorts max_sorted and min_sorted and sets the bounds vector
 	fn sort<P: PropagationActions>(&mut self, actions: &mut P) {
-		let size: usize = self.vars.len();
+		let size: usize = self.var.len();
 
-		for i in 0..size {
-			self.interval[i].min = actions.get_int_lower_bound(self.vars[i]);
-			self.interval[i].max = actions.get_int_upper_bound(self.vars[i]) + 1;
-		}
+		self.min_sorted
+			.sort_by_key(|&i| actions.get_int_lower_bound(self.var[i]));
+		self.max_sorted
+			.sort_by_key(|&i| actions.get_int_upper_bound(self.var[i]) + 1);
 
-		self.min_sorted.sort_by_key(|&i| self.interval[i].min);
-		self.max_sorted.sort_by_key(|&i| self.interval[i].max);
-
-		let mut min: IntVal = self.interval[self.min_sorted[0]].min;
-		let mut max: IntVal = self.interval[self.max_sorted[0]].max;
+		let mut min: IntVal = actions.get_int_lower_bound(self.var[self.min_sorted[0]]);
+		let mut max: IntVal = actions.get_int_upper_bound(self.var[self.max_sorted[0]]) + 1;
 		let mut last: IntVal = min - 2;
-		self.bounds[0] = min - 2; // Dummy
+		self.bounds[0] = last; // Dummy
 
 		let mut i = 0;
 		let mut j = 0;
@@ -419,10 +352,10 @@ impl IntAllDifferentBounds {
 					last = min;
 					self.bounds[self.num_bounds] = min;
 				}
-				self.interval[self.min_sorted[i]].min_rank = self.num_bounds;
+				self.var_info[self.min_sorted[i]].min_rank = self.num_bounds;
 				i += 1;
 				if i < size {
-					min = self.interval[self.min_sorted[i]].min;
+					min = actions.get_int_lower_bound(self.var[self.min_sorted[i]]);
 				}
 			} else {
 				if max != last {
@@ -430,12 +363,12 @@ impl IntAllDifferentBounds {
 					last = max;
 					self.bounds[self.num_bounds] = max;
 				}
-				self.interval[self.max_sorted[j]].max_rank = self.num_bounds;
+				self.var_info[self.max_sorted[j]].max_rank = self.num_bounds;
 				j += 1;
 				if j == size {
 					break;
 				}
-				max = self.interval[self.max_sorted[j]].max;
+				max = actions.get_int_upper_bound(self.var[self.max_sorted[j]]) + 1;
 			}
 		}
 		self.bounds[self.num_bounds + 1] = self.bounds[self.num_bounds] + 2; // Dummy
