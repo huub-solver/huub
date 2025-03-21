@@ -1084,7 +1084,8 @@ where
 						let dx = self.arg_array(dx)?;
 						let dy = self.arg_array(dy)?;
 						let box_posn: Vec<Vec<_>> =
-							vec![x, y].iter()
+							x.iter().zip(y.iter())
+                            .map(|(a, b)| vec![a, b])
                             .map(|x|
                                  x.iter()
                                  .map(|l|
@@ -1092,7 +1093,8 @@ where
                             .try_collect()?;
 
 						let box_size: Vec<Vec<_>> =
-							vec![dx, dy].iter()
+							dx.iter().zip(dy.iter())
+                            .map(|(a, b)| vec![a, b])
                             .map(|x|
                                  x.iter()
                                  .map(|l|
@@ -1101,7 +1103,7 @@ where
                         if is_nonstrict {
 						    //self.prb += diffn_int_nonstrict(args?); TODO: Add nonstrict
                         } else {
-						    self.prb += diffn_int(box_posn, box_size);
+                            self.prb += diffn_int(box_posn, box_size);
                         }
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
@@ -1109,8 +1111,7 @@ where
                                 "huub_diffn_nonstrict"
                             } else {
                                 "huub_diffn"
-                            }
-                                  ,
+                            },
 							found: c.args.len(),
 							expected: 4,
 						});
@@ -1119,31 +1120,38 @@ where
 				"huub_diffn_k_int" | "huub_diffn_nonstrict_k_int" => {
 					let is_nonstrict = c.id.deref() == "huub_diffn_nonstrict_k_int";
 					if let [box_posn, box_size, d] = c.args.as_slice() {
-                        // println!("{:?}", dimensions);
                         let dimensions = self.arg_par_int(d)?;
 						let start_pos = self.arg_array(box_posn)?;
-						let start_pos: Vec<_> = start_pos.iter().map(|l| self.lit_int(l)).try_collect()?;
+						let start_pos: Vec<_> = start_pos
+                            .iter()
+                            .map(|l| self.lit_int(l))
+                            .try_collect()?;
 						let start_pos: Vec<Vec<_>> = start_pos
 							.chunks(dimensions.try_into().unwrap())
 							.map(|c| c.to_vec())
 							.collect();
 
 						let sizes = self.arg_array(box_size)?;
-						let sizes: Vec<_> = sizes.iter().map(|l| self.lit_int(l)).try_collect()?;
+						let sizes: Vec<_> = sizes
+                            .iter()
+                            .map(|l| self.lit_int(l))
+                            .try_collect()?;
 						let sizes: Vec<Vec<_>> = sizes
 							.chunks(dimensions.try_into().unwrap())
 							.map(|c| c.to_vec())
 							.collect();
-
-                        // println!("HERE {:?}", dimensions);
+                        if is_nonstrict {
+						    //self.prb += diffn_int_nonstrict(args?); TODO: Add nonstrict
+                        } else {
                         self.prb += diffn_int(start_pos, sizes);
-                        // if is_nonstrict {
-						//     //self.prb += diffn_int_nonstrict(args?); TODO: Add nonstrict
-                        // } else {
-                        // }
+                        }
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
-							name: "huub_diffn_k",
+							name: if is_nonstrict {
+                                "huub_diffn_k_nonstrict"
+                            } else {
+                                "huub_diffn_k"
+                            },
 							found: c.args.len(),
 							expected: 3,
 						});
