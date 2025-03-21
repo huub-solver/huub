@@ -19,6 +19,18 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Information that is tracked for each variable for the propagation of
+/// [`IntAllDifferentBounds`]
+struct AllDiffVarMeta {
+	/// Transition for the variable's position in the Hall interval tree.
+	next: usize,
+	/// Minimum index in the [`IntAllDifferentBounds::bounds`] vector
+	min_rank: usize,
+	/// Maximum index in the [`IntAllDifferentBounds::bounds`] vector
+	max_rank: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Representation of the `all_different_int` constraint within a model.
 ///
 /// This constraint enforces that all the given integer decisions take different
@@ -73,18 +85,6 @@ pub struct IntAllDifferentBounds {
 pub struct IntAllDifferentValue {
 	/// List of integer variables that must take different values.
 	vars: Vec<IntView>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Information that is tracked for each variable for the propagation of
-/// [`IntAllDifferentBounds`]
-struct AllDiffVarMeta {
-	/// Transition for the variable's position in the Hall interval tree.
-	next: usize,
-	/// Minimum index in the [`IntAllDifferentBounds::bounds`] vector
-	min_rank: usize,
-	/// Maximum index in the [`IntAllDifferentBounds::bounds`] vector
-	max_rank: usize,
 }
 
 impl IntAllDifferent {
