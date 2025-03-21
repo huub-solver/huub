@@ -26,6 +26,14 @@ use crate::{
 pub struct IntAllDifferent {
 	/// List of integer decision variables that must take different values.
 	pub(crate) vars: Vec<IntDecision>,
+	/// Whether to enable the bounds consistent propagator.
+	///
+	/// Defaults to `true`.
+	pub(crate) bounds_prop: Option<bool>,
+	/// Whether to enable the value consistent propagator.
+	///
+	/// Defaults to `false`.
+	pub(crate) value_prop: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -79,6 +87,38 @@ struct AllDiffVarMeta {
 	max_rank: usize,
 }
 
+impl IntAllDifferent {
+	/// Returns whether a bounds consistent propagator will be posted when
+	/// creating a [`Solver`] object.
+	pub fn bounds_consistent_propagator_enabled(&self) -> bool {
+		self.bounds_prop.unwrap_or(true)
+	}
+
+	/// Ensure the use of the bounds consistent propagator when this constraint is
+	/// posted to a [`Solver`] object.
+	///
+	/// Note that this method does not affect whether a value consistent
+	/// propagator will be used or not.
+	pub fn use_bounds_consistent_propagator(&mut self, enable: bool) {
+		self.bounds_prop = Some(enable);
+	}
+
+	/// Ensure the use of the value consistent propagator when this constraint is
+	/// posted to a [`Solver`] object.
+	///
+	/// Note that this method does not affect whether a bounds consistent
+	/// propagator will be used or not.
+	pub fn use_value_consistent_propagator(&mut self, enable: bool) {
+		self.value_prop = Some(enable);
+	}
+
+	/// Returns whether a value consistent propagator will be posted when
+	/// creating a [`Solver`] object.
+	pub fn value_consistent_propagator_enabled(&self) -> bool {
+		self.value_prop.unwrap_or(false)
+	}
+}
+
 impl<S: SimplificationActions> Constraint<S> for IntAllDifferent {
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		let (vals, vars): (Vec<_>, Vec<_>) = self.vars.iter().partition_map(|&var| {
@@ -107,7 +147,12 @@ impl<S: SimplificationActions> Constraint<S> for IntAllDifferent {
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let vars: Vec<_> = self.vars.iter().map(|v| slv.get_solver_int(*v)).collect();
-		IntAllDifferentValue::new_in(slv, vars);
+		if self.value_consistent_propagator_enabled() {
+			IntAllDifferentValue::new_in(slv, vars.clone());
+		}
+		if self.bounds_consistent_propagator_enabled() {
+			IntAllDifferentBounds::new_in(slv, vars);
+		}
 		Ok(())
 	}
 }
