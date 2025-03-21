@@ -119,6 +119,8 @@ pub struct Cli<Stdout, Stderr> {
 	/// Whether the solver should eagerly forward explanation cluases to the
 	/// SAT engine.
 	forward_explanation: bool,
+	/// Whether to deactivate inactive propagators
+	deactivate_inactive: bool,
 	// --- Output configuration ---
 	/// Output stream for (intermediate) solutions and statistics
 	///
@@ -247,6 +249,10 @@ where
 					("variableElimination", &(self.variable_elimination as usize)),
 					("probing", &(self.probing as usize)),
 					("conditioning", &(self.conditioning as usize)),
+					("deactivateInactive", &(self.deactivate_inactive as usize)),
+					("vsidsOnly", &(self.vsids_only as usize)),
+					("forwardLimit", &self.forward_limit),
+					("forwardExplanation", &(self.forward_explanation as usize)),
 				],
 			);
 			let stats = slv.init_statistics();
@@ -326,6 +332,7 @@ where
 		}
 		slv.set_forward_limit(self.forward_limit);
 		slv.set_forward_explanation(self.forward_explanation);
+		slv.set_deactivate_inactive(self.deactivate_inactive);
 
 		// Determine Goal and Objective
 		let start_solve = Instant::now();
@@ -571,6 +578,7 @@ where
 			vsids_only: self.vsids_only,
 			forward_limit: self.forward_limit,
 			forward_explanation: self.forward_explanation,
+			deactivate_inactive: self.deactivate_inactive,
 			stdout: self.stdout,
 		}
 	}
@@ -603,6 +611,7 @@ where
 			vsids_only: self.vsids_only,
 			forward_limit: self.forward_limit,
 			forward_explanation: self.forward_explanation,
+			deactivate_inactive: self.deactivate_inactive,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
 		}
@@ -630,10 +639,6 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 		let cli = Cli {
 			all_solutions: args.contains(["-a", "--all-solutions"]),
 			all_optimal: args.contains("--all-optimal"),
-			output_solutions: args
-				.opt_value_from_fn("--output-solutions", parse_bool_arg)
-				.map(|x| x.unwrap_or(true))
-				.map_err(|e| e.to_string())?,
 			intermediate_solutions: args.contains(["-i", "--intermediate-solutions"]),
 			free_search: args.contains(["-f", "--free-search"]),
 			statistics: args.contains(["-s", "--statistics"]),
@@ -687,6 +692,11 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 				.map(|x| x.unwrap_or(1))
 				.map_err(|e| e.to_string())?,
 			forward_explanation: args.contains("--forward-explanation"),
+			deactivate_inactive: args.contains("--deactivate-inactive"),
+			output_solutions: args
+				.opt_value_from_fn("--output-solutions", parse_bool_arg)
+				.map(|x| x.unwrap_or(true))
+				.map_err(|e| e.to_string())?,
 
 			verbose,
 			path: args

@@ -101,7 +101,7 @@ pub struct State {
 	/// Reasons for setting values
 	pub(crate) reason_map: HashMap<RawLit, Reason>,
 	/// Whether conflict has (already) been detected
-	pub(crate) conflict: Option<Clause>,
+	pub(crate) conflict: VecDeque<Clause>,
 	/// Whether the solver is in a failure state.
 	///
 	/// Triggered when a conflict is detected during propagation, the solver
@@ -141,7 +141,7 @@ impl PropagatorExtension for Engine {
 			}
 		} else if !self.state.propagation_queue.is_empty() {
 			None // Require that the solver first applies the remaining propagation
-		} else if let Some(conflict) = self.state.conflict.take() {
+		} else if let Some(conflict) = self.state.conflict.pop_front() {
 			debug!(clause = ?conflict.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add conflict clause");
 			Some((conflict, ClausePersistence::Forgettable))
 		} else {
@@ -176,7 +176,7 @@ impl PropagatorExtension for Engine {
 		// Solver should not be in a failed state (no propagator conflict should
 		// exist), and any conflict should have been communicated to the SAT oracle.
 		debug_assert!(!self.state.failed);
-		debug_assert!(self.state.conflict.is_none());
+		debug_assert!(self.state.conflict.is_empty());
 		// All propagation should have been communicated to the SAT oracle.
 		debug_assert!(self.state.propagation_queue.is_empty());
 
@@ -190,7 +190,7 @@ impl PropagatorExtension for Engine {
 		// Create a propagation context
 		let mut ctx = SolvingContext::new(slv, &mut self.state);
 
-		// Calculate values of each integer and notify popgators
+		// Calculate values of each integer and notify popagators
 		for r in (0..ctx.state.int_vars.len()).map(IntVarRef::new) {
 			let (lb, ub) = ctx.state.int_vars[r].get_bounds(&ctx.state.trail);
 			if lb != ub {
@@ -214,20 +214,21 @@ impl PropagatorExtension for Engine {
 		}
 
 		// Run propgagators to find any conflicts
-		ctx.run_propagators(&mut self.propagators);
+		if ctx.state.config.deactivate_inactive {
+			ctx.check_all_propagators(&mut self.propagators);
+		} else {
+			ctx.run_propagators(&mut self.propagators);
+		}
+
 		// No propagation can be triggered (all variables are fixed, so only
 		// conflicts are possible)
 		debug_assert!(self.state.propagation_queue.is_empty());
 
-		// Process propagation results, and accept model if no conflict is detected
-		let conflict = self.state.conflict.take();
-
 		// Revert to real decision level
 		self.state.notify_backtrack::<true>(level as usize, false);
-		debug_assert!(self.state.conflict.is_none());
-		self.state.conflict = conflict;
 
-		let accept = self.state.conflict.is_none();
+		// Process propagation results, and accept model if no conflict is detected
+		let accept = self.state.conflict.is_empty();
 		debug!(accept, "check model");
 
 		// Increment the number of solutions found
@@ -378,7 +379,7 @@ impl PropagatorExtension for Engine {
 		// Solver should not be in a failed state (no propagator conflict should
 		// exist), and any conflict should have been communicated to the SAT oracle.
 		debug_assert!(!self.state.failed);
-		debug_assert!(self.state.conflict.is_none());
+		debug_assert!(self.state.conflict.is_empty());
 		// All propagation should have been communicated to the SAT oracle.
 		debug_assert!(self.state.propagation_queue.is_empty());
 		// Note that `self.state.clauses` may not be empty becuase [`Self::decide`]
@@ -395,7 +396,7 @@ impl PropagatorExtension for Engine {
 		if !self.state.clauses.is_empty() {
 			return Vec::new();
 		}
-		if self.state.propagation_queue.is_empty() && self.state.conflict.is_none() {
+		if self.state.propagation_queue.is_empty() && self.state.conflict.is_empty() {
 			// If there are no previous changes, run propagators
 			SolvingContext::new(slv, &mut self.state).run_propagators(&mut self.propagators);
 		}
@@ -435,45 +436,6 @@ impl PropagatorExtension for Engine {
 			Vec::from_iter(self.state.propagation_queue.drain(..))
 		};
 
-		// debug!(
-		// 	lits = ?queue
-		// 		.iter()
-		// 		.map(|&x| i32::from(x))
-		// 		.collect::<Vec<i32>>(),
-		// 	"propagate"
-		// );
-		// // Debug helper to ensure that any reason is based on known true literals
-		// #[cfg(debug_assertions)]
-		// {
-		// 	let mut prev: HashMap<RawVar, bool> = HashMap::new();
-		// 	for &lit in queue.iter() {
-		// 		if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
-		// 			let clause: Clause =
-		// 				reason.explain(&mut self.propagators, &mut self.state, Some(lit));
-		// 			for &l in &clause {
-		// 				if l == lit {
-		// 					continue;
-		// 				}
-		// 				let val = self.state.trail.get_sat_value(!l).or(prev
-		// 					.get(&l.var())
-		// 					.map(|&v| if l.is_negated() { v } else { !v }));
-		// 				if !val.unwrap_or(false) {
-		// 					tracing::error!(lit_prop = i32::from(lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
-		// 				}
-		// 				debug_assert!(
-		// 					val.unwrap_or(false),
-		// 					"Literal {} in Reason for {} is {:?}, but should be known true",
-		// 					!l,
-		// 					lit,
-		// 					val
-		// 				);
-		// 			}
-		// 		}
-		// 		// Recoprd assignment of the previous literal so it is available when
-		// 		// checking next reason.
-		// 		let _ = prev.insert(lit.var(), !lit.is_negated());
-		// 	}
-		// }
 		queue
 	}
 	fn reason_persistence(&self) -> ClausePersistence {
@@ -534,19 +496,26 @@ impl State {
 		debug_assert!(!ARTIFICIAL || !restart);
 		// Resolve the conflict status
 		self.failed = false;
-		self.conflict = None;
+		// Move conflict clauses to the clause queue
+		if !ARTIFICIAL {
+			while let Some(clause) = self.conflict.pop_front() {
+				self.clauses
+					.push_back((clause, ClausePersistence::Forgettable));
+			}
+		}
 		// Remove (now invalid) propagations (but leave clauses in place)
 		self.propagation_queue.clear();
 		// Backtrack trail
 		self.trail.notify_backtrack(level);
 		// Empty propagation queue
-		while self.propagator_queue.pop().is_some() {}
+		while self.propagator_queue.pop(true).is_some() {}
 		if ARTIFICIAL {
 			return;
 		}
 
 		// Update conflict statistics
 		self.statistics.conflicts += 1;
+		self.propagator_queue.update_multiplier();
 
 		// Switch to VSIDS if the number of conflicts exceeds the threshold
 		if let Some(conflicts) = self.config.vsids_after {
@@ -638,6 +607,11 @@ impl State {
 	/// Set maximum number of terms in linear inequality constraint
 	pub(crate) fn set_forward_limit(&mut self, forward_limit: usize) {
 		self.config.forward_limit = forward_limit;
+	}
+
+	/// Set whether the solver should deactivate inactive propagators.
+	pub(crate) fn set_deactivate_inactive(&mut self, deactivate: bool) {
+		self.config.deactivate_inactive = deactivate;
 	}
 }
 

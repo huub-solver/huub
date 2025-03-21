@@ -185,6 +185,8 @@ pub(crate) struct SolverConfiguration {
 	forward_limit: usize,
 	/// Whether the engine forward explanation cluase eagerly
 	forward_explanation: bool,
+	/// Whether deactivate inactive propagators
+	deactivate_inactive: bool,
 }
 
 /// A trait for a function that can be used to evaluate a `SolverView` to a
@@ -886,6 +888,8 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 			pub fn set_forward_explanation(&mut self, enable: bool);
 			/// Set maximum number of terms in linear inequality constraint
 			pub fn set_forward_limit(&mut self, forward_limit: usize);
+			/// Set whether the solver should deactivate inactive propagators.
+			pub fn set_deactivate_inactive(&mut self, enable: bool);
 		}
 	}
 }
@@ -1023,7 +1027,13 @@ impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle>
 		let p = engine.state.propagator_queue.info.push(PropagatorInfo {
 			enqueued: false,
 			priority,
+			activity: 1.0,
 		});
+		trace!(
+			"add propagator {:?}: {:?}",
+			prop_ref,
+			engine.propagators.last()
+		);
 		debug_assert_eq!(prop_ref, p);
 		p
 	}
