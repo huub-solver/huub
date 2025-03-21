@@ -10,7 +10,7 @@ use pindakaas::{
 	solver::propagation::{ClausePersistence, SolvingActions},
 	Lit as RawLit,
 };
-use tracing::trace;
+use tracing::{debug, trace};
 
 use crate::{
 	actions::{
@@ -140,9 +140,9 @@ impl<'a> SolvingContext<'a> {
 	/// Run the propagators in the queue until a propagator detects a conflict,
 	/// returns literals to be propagated by the SAT oracle, or the queue is empty.
 	pub(crate) fn run_propagators(&mut self, propagators: &mut IndexVec<PropRef, BoxedPropagator>) {
-		while let Some(p) = self.state.propagator_queue.pop() {
+		while let Some(p) = self.state.propagator_queue.pop(true) {
 			debug_assert!(!self.state.failed);
-			debug_assert!(self.state.conflict.is_none());
+			debug_assert!(self.state.conflict.is_empty());
 			self.current_prop = p;
 			let prop = propagators[p].as_mut();
 			let res = prop.propagate(self);
@@ -150,14 +150,54 @@ impl<'a> SolvingContext<'a> {
 			self.current_prop = PropRef::new(u32::MAX as usize);
 			if let Err(Conflict { subject, reason }) = res {
 				let clause: Clause = reason.explain(propagators, self.state, subject);
-				trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "conflict detected");
+				trace!(prop =? p, clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "conflict detected");
 				debug_assert!(!clause.is_empty());
-				debug_assert!(self.state.conflict.is_none());
+				debug_assert!(self.state.conflict.is_empty());
 				self.state.failed = true;
-				self.state.conflict = Some(clause);
+				self.state.conflict.push_back(clause);
 			}
-			if self.state.conflict.is_some() || !self.state.propagation_queue.is_empty() {
+
+			// Update propagator activity if needed
+			if self.state.config.deactivate_inactive {
+				if !self.state.conflict.is_empty() || !self.state.propagation_queue.is_empty() {
+					self.state.propagator_queue.increase_activity(p);
+				} else {
+					self.state.propagator_queue.decrease_activity(p);
+				}
+			}
+
+			// Return immediately if a conflict was detected or some literals were propagated
+			if !self.state.conflict.is_empty() || !self.state.propagation_queue.is_empty() {
 				return;
+			}
+		}
+	}
+
+	// Check all propagators and find all conflicts
+	pub(crate) fn check_all_propagators(
+		&mut self,
+		propagators: &mut IndexVec<PropRef, BoxedPropagator>,
+	) {
+		while let Some(p) = self.state.propagator_queue.pop(false) {
+			self.current_prop = p;
+			let prop = propagators[p].as_mut();
+			let res = prop.propagate(self);
+			self.state.statistics.propagations += 1;
+			self.current_prop = PropRef::new(u32::MAX as usize);
+			if let Err(Conflict { subject, reason }) = res {
+				let clause: Clause = reason.explain(propagators, self.state, subject);
+				debug!(prop =? p, clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "check inactive propagators conflict detected");
+				self.state.failed = true;
+				self.state.conflict.push_back(clause);
+			}
+
+			// Update propagator activity if needed
+			if self.state.config.deactivate_inactive {
+				if !self.state.conflict.is_empty() || !self.state.propagation_queue.is_empty() {
+					self.state.propagator_queue.increase_activity(p);
+				} else {
+					self.state.propagator_queue.decrease_activity(p);
+				}
 			}
 		}
 	}
