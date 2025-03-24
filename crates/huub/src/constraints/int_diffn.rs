@@ -1,12 +1,10 @@
 //! Structure and algorithms for the integer diffn constraint, which
 //! enforces that a number of k-dimensional hyperrectangles do not overlap.
-
-use itertools::izip;
 use std::cmp; use crate::{actions::{
     ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
 },  constraints::{Conflict, Constraint, PropagationActions, Propagator},
     reformulate::ReformulationError, solver::{
-	activation_list::IntPropCond, queue::PriorityLevel, IntView, IntViewInner,
+	activation_list::IntPropCond, BoolView, queue::PriorityLevel, IntView, IntViewInner,
 },  IntDecision, IntVal};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -28,19 +26,6 @@ pub struct IntDiffnSweep {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntDiffn {
-    // TODO: Add good simplifications
-	// fn simplify(&mut self, _actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-	// 	let fixed = self.box_posn
-	// 		.iter()
-    //         .flatten()
-	// 		.all(|&v| matches!(v, IntDecision(IntDecisionInner::Const(_))));
-    //     if fixed {
-    //         Ok(SimplificationStatus::Subsumed)
-    //     } else {
-    //     }
-    //     Ok(SimplificationStatus::Fixpoint)
-	// }
-
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
         let box_pos: Vec<Vec<_>> = self.box_posn.iter()
             .map(|row|
@@ -106,6 +91,7 @@ impl IntDiffnSweep {
         }
     }
 
+    /// Prune the lower bounds of the domain
     fn prune_min<P: PropagationActions>(
         &mut self,
         actions: &mut P,
@@ -134,8 +120,6 @@ impl IntDiffnSweep {
             b = Self::adjust_sweep_min::<P>(&mut sweep, &mut jump, &lb_tracker[curr_obj_idx], &ub_tracker[curr_obj_idx], curr_dimension, self.dimensions);
             infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
         }
-        println!("sweep: x {} y {}", sweep[0], sweep[1]);
-
         // Start pruning here
         // TODO: Remove this b to so we dont have to reason for conflict in propagate
         if b && sweep[curr_dimension] != lb_tracker[curr_obj_idx][curr_dimension]{
@@ -153,11 +137,11 @@ impl IntDiffnSweep {
             }
             actions.set_int_lower_bound(self.box_posn[curr_obj_idx][curr_dimension], sweep[curr_dimension], reason)?;
             lb_tracker[curr_obj_idx][curr_dimension] = sweep[curr_dimension];
-            println!("Setting min of object {} to {:?} in dimension {} in min",curr_obj_idx, sweep[curr_dimension], curr_dimension);
         }
         Ok(b)
     }
 
+    /// Prune the upper bounds of the domain
     fn prune_max<P: PropagationActions>(
         &mut self,
         actions: &mut P,
@@ -182,17 +166,10 @@ impl IntDiffnSweep {
             for j in 0..self.dimensions {
                 jump[j] = cmp::max(jump[j], infeasible_fr.unwrap().lb[j] - 1);
             }
-            // println!("jump before x: {:?} y: {:?}", jump[0], jump[1]);
             // Contains side-effects to change sweep
-            println!("sweep before x: {:?} y: {:?}", sweep[0], sweep[1]);
             b = Self::adjust_sweep_max::<P>(&mut sweep, &mut jump, &lb_tracker[curr_obj_idx], &ub_tracker[curr_obj_idx], curr_dimension, self.dimensions);
-            println!("sweep after x: {:?} y: {:?}", sweep[0], sweep[1]);
-            // println!("jump after x: {:?} y: {:?}", jump[0], jump[1]);
             infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
-            // println!("sweep: {:?} y: {:?}", sweep[0], sweep[1]);
         }
-        println!("sweep: x {:?} y: {:?}", sweep[0], sweep[1]);
-
         // TODO: Remove this b to so we dont have to reason for conflict in propagate
         if b && sweep[curr_dimension] != ub_tracker[curr_obj_idx][curr_dimension]{
             let mut reason = Vec::new();
@@ -209,7 +186,6 @@ impl IntDiffnSweep {
             }
             actions.set_int_upper_bound(self.box_posn[curr_obj_idx][curr_dimension], sweep[curr_dimension], reason)?;
             ub_tracker[curr_obj_idx][curr_dimension] = sweep[curr_dimension];
-            println!("Setting ub of object {} to {:?} in dimension {} in max",curr_obj_idx, sweep[curr_dimension], curr_dimension);
         }
         Ok(b)
     }
@@ -247,7 +223,6 @@ impl IntDiffnSweep {
         for i in (0..dimensions).rev() {
             let rotation = (i + curr_dimension) % dimensions;
             sweep[rotation] = jump[rotation];
-            println!("sweep: x {:?} y: {:?} in rotation {}", sweep[0], sweep[1], rotation);
             jump[rotation] = curr_obj_lb[rotation] - 1;
             if sweep[rotation] >= curr_obj_lb[rotation] {
                 return true
@@ -261,18 +236,13 @@ impl IntDiffnSweep {
 
 
 
-    fn overlaps<P: PropagationActions>(
+    fn overlaps(
         curr_obj_lb: &Vec<IntVal>,
         curr_obj_ub: &Vec<IntVal>,
         fr: &ForbiddenRegion,
         dimensions:usize
     ) -> bool {
-        // println!("size: {:?}", fr.lb.len());
-        // (0..dimensions).all(|d|
-        //                actions.get_int_upper_bound(curr_obj_pos[d]) >= fr.lb[d] &&
-        //                actions.get_int_lower_bound(curr_obj_pos[d]) <= fr.ub[d])
         for d in 0..dimensions {
-            //TODO: Change to better names or use iterators
             if curr_obj_lb[d] > fr.ub[d] || curr_obj_ub[d] < fr.lb[d] {
                 return false;
             }
@@ -319,7 +289,7 @@ impl IntDiffnSweep {
                 }
             }
             if exists {
-                let is_overlapping = Self::overlaps::<P>(
+                let is_overlapping = Self::overlaps(
                     &lb_tracker[o_idx],
                     &ub_tracker[o_idx],
                     &fr,
@@ -327,7 +297,6 @@ impl IntDiffnSweep {
 
                 if is_overlapping{
                     fr_support.push(i);
-                    println!("Valid fr for {}", i);
                     all_fr.push(fr);
                 } else {
                 }
@@ -348,6 +317,28 @@ impl IntDiffnSweep {
             .find(|fr|
                     (0..dimensions).all(|i| sweep[i] >= fr.lb[i] && sweep[i] <= fr.ub[i]))
     }
+
+
+    /// Gives a reason for the conflict
+    fn explain_conflict<P: PropagationActions>(
+        &mut self,
+        actions: &mut P,
+        fr_support: &Vec<usize>,
+        curr_obj_idx: usize
+    ) -> Vec<BoolView> {
+        let mut reason: Vec<_> = Vec::new();
+        for &i in fr_support {
+            for d in 0..self.dimensions {
+                reason.push(actions.get_int_upper_bound_lit(self.box_posn[i][d]));
+                reason.push(actions.get_int_lower_bound_lit(self.box_posn[i][d]));
+            }
+        }
+        for d in 0..self.dimensions {
+            reason.push(actions.get_int_upper_bound_lit(self.box_posn[curr_obj_idx][d]));
+            reason.push(actions.get_int_lower_bound_lit(self.box_posn[curr_obj_idx][d]));
+        }
+        reason
+    }
 }
 
 
@@ -364,120 +355,42 @@ where
             .map(|row|
                  row.iter()
                  .map(|&v| actions.get_int_lower_bound(v))
-                 .collect()).collect();
+                 .collect())
+            .collect();
         let mut ub_tracker: Vec<Vec<IntVal>> = self.box_posn.iter()
             .map(|row|
                  row.iter()
                  .map(|&v| actions.get_int_upper_bound(v))
-                 .collect()).collect();
+                 .collect())
+            .collect();
 
         for o_idx in 0..self.box_posn.len() {
-            println!("DOING OBJECT {:?}", o_idx);
-            for o in 0..self.box_posn.len() {
-                println!("object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?}, size {}",
-                     o,
-                     ub_tracker[o][0],
-                     lb_tracker[o][0],
-                     ub_tracker[o][1],
-                     lb_tracker[o][1],
-                     self.box_size[o][0]
-                );
-            }
-
             let mut fr_support: Vec<usize> = Vec::new();
 
-            if let Some(all_fr) = self.generate_fr::<P>(
-                &mut fr_support,
-                o_idx,
-                &lb_tracker,
-                &ub_tracker,
-                self.dimensions) {
-                for f in 0..all_fr.len() {
-                    println!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
-                             all_fr[f].ub[0],
-                             all_fr[f].lb[0],
-                             all_fr[f].ub[1],
-                             all_fr[f].lb[1],
-                    );
-                }
-
-                let mut assigned = true;
+            if let Some(all_fr) = self.generate_fr::<P>(&mut fr_support, o_idx, &lb_tracker, &ub_tracker, self.dimensions) {
+                let mut is_assigned = true;
                 for d in 0..self.dimensions {
                     let fixed = actions.get_int_val(self.box_posn[o_idx][d]);
                     if fixed.is_none() {
-                        assigned = false;
+                        is_assigned = false;
                     }
                 }
-                if assigned {
-                    let mut reason: Vec<_> = Vec::new();
-                    for i in fr_support {
-                        for d in 0..self.dimensions {
-                            reason.push(actions.get_int_upper_bound_lit(self.box_posn[i][d]));
-                            reason.push(actions.get_int_lower_bound_lit(self.box_posn[i][d]));
-                        }
-                    }
-                    for d in 0..self.dimensions {
-                        reason.push(actions.get_int_upper_bound_lit(self.box_posn[o_idx][d]));
-                        reason.push(actions.get_int_lower_bound_lit(self.box_posn[o_idx][d]));
-                    }
+                if is_assigned {
+                    let reason = self.explain_conflict(actions, &fr_support, o_idx);
                     return Err(Conflict::new(actions, None, reason));
                 }
-
                 for d in 0..self.dimensions {
                     let fixed = lb_tracker[o_idx][d] == ub_tracker[o_idx][d];
-                    println!("fixed? {:?} dimension {}", fixed, d);
-
-                    let b1 = self.prune_min(
-                        actions,
-                        &fr_support,
-                        o_idx,
-                        &mut lb_tracker,
-                        &ub_tracker,
-                        d,
-                        &all_fr)?;
-
-                    println!("b1? {:?}", b1);
-                    if !fixed && !b1 {
-                        let mut reason: Vec<_> = Vec::new();
-                        for &i in &fr_support {
-                            for di in 0..self.dimensions {
-                                reason.push(actions.get_int_upper_bound_lit(self.box_posn[i][di]));
-                                reason.push(actions.get_int_lower_bound_lit(self.box_posn[i][di]));
-                            }
-                        }
-                        for di in 0..self.dimensions {
-                            reason.push(actions.get_int_upper_bound_lit(self.box_posn[o_idx][di]));
-                            reason.push(actions.get_int_lower_bound_lit(self.box_posn[o_idx][di]));
-                        }
-                        println!("CONFLICT in prune_min");
+                    if !fixed && !self.prune_min(actions, &fr_support, o_idx, &mut lb_tracker, &ub_tracker, d, &all_fr)? {
+                        // Conflict since there is no feasible origin in this dimension
+                        let reason = self.explain_conflict(actions, &fr_support, o_idx);
                         return Err(Conflict::new(actions, None, reason));
                     }
+
                     let fixed = lb_tracker[o_idx][d] == ub_tracker[o_idx][d];
-
-                    let b2 = self.prune_max(
-                        actions,
-                        &fr_support,
-                        o_idx,
-                        &lb_tracker,
-                        &mut ub_tracker,
-                        d,
-                        &all_fr)?;
-
-
-                    println!("b2? {:?}", b2);
-                    if !fixed && !b2 {
-                        let mut reason: Vec<_> = Vec::new();
-                        for i in fr_support {
-                            for di in 0..self.dimensions {
-                                reason.push(actions.get_int_upper_bound_lit(self.box_posn[i][di]));
-                                reason.push(actions.get_int_lower_bound_lit(self.box_posn[i][di]));
-                            }
-                        }
-                        for di in 0..self.dimensions {
-                            reason.push(actions.get_int_upper_bound_lit(self.box_posn[o_idx][di]));
-                            reason.push(actions.get_int_lower_bound_lit(self.box_posn[o_idx][di]));
-                        }
-                        println!("CONFLICT in prune_max");
+                    if !fixed && !self.prune_max(actions, &fr_support, o_idx, &lb_tracker, &mut ub_tracker, d, &all_fr)? {
+                        // Conflict since there is no feasible origin in this dimension
+                        let reason = self.explain_conflict(actions, &fr_support, o_idx);
                         return Err(Conflict::new(actions, None, reason));
                     }
                 }
