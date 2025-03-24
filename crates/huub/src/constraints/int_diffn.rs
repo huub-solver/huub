@@ -3,10 +3,11 @@
 
 use itertools::izip;
 use std::cmp; use crate::{actions::{
-	ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
-}, constraints::{Conflict, Constraint, PropagationActions, Propagator}, reformulate::ReformulationError, solver::{
+    ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+},  constraints::{Conflict, Constraint, PropagationActions, Propagator},
+    reformulate::ReformulationError, solver::{
 	activation_list::IntPropCond, queue::PriorityLevel, IntView, IntViewInner,
-}, IntDecision, IntVal};
+},  IntDecision, IntVal};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Representation of the `diffn_int` constraint within a model.
@@ -23,7 +24,7 @@ pub struct IntDiffn {
 pub struct IntDiffnSweep {
     box_posn: Vec<Vec<IntView>>,
     box_size: Vec<Vec<IntVal>>,
-    dimensions: usize
+    dimensions: usize,
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntDiffn {
@@ -36,8 +37,8 @@ impl<S: SimplificationActions> Constraint<S> for IntDiffn {
     //     if fixed {
     //         Ok(SimplificationStatus::Subsumed)
     //     } else {
-    //         Ok(SimplificationStatus::Fixpoint)
     //     }
+    //     Ok(SimplificationStatus::Fixpoint)
 	// }
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -97,7 +98,7 @@ impl IntDiffnSweep {
 		let prop = solver.add_propagator(Box::new(Self {
             box_posn: box_posn.clone(),
             box_size: box_size_fixed,
-            dimensions: box_posn[0].len()
+            dimensions: box_posn[0].len(),
         }), PriorityLevel::Low);
 
         for v in box_posn.into_iter().flatten() {
@@ -110,6 +111,8 @@ impl IntDiffnSweep {
         actions: &mut P,
         fr_support: &Vec<usize>,
         curr_obj_idx: usize,
+        lb_tracker: &mut Vec<Vec<IntVal>>,
+        ub_tracker: &Vec<Vec<IntVal>>,
         curr_dimension: usize,
         all_fr: &Vec<ForbiddenRegion>
     ) -> Result<bool, Conflict> {
@@ -117,21 +120,23 @@ impl IntDiffnSweep {
         let mut jump = vec![];
         let mut b = true;
 
-        for i in 0..self.dimensions {
-            sweep.push(actions.get_int_lower_bound(self.box_posn[curr_obj_idx][i]));
-            jump.push(actions.get_int_upper_bound(self.box_posn[curr_obj_idx][i]) + 1);
+        for d in 0..self.dimensions {
+            sweep.push(lb_tracker[curr_obj_idx][d]);
+            jump.push(ub_tracker[curr_obj_idx][d] + 1);
         }
         let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
         while b && infeasible_fr.is_some() {
             // println!("prune_min - in loop");
             jump[curr_dimension] = cmp::min(jump[curr_dimension], infeasible_fr.unwrap().ub[curr_dimension] + 1);
             // Contains side-effects to change sweep
-            b = Self::adjust_sweep_min(actions, &mut sweep, &mut jump, &self.box_posn[curr_obj_idx], curr_dimension, self.dimensions);
+            b = Self::adjust_sweep_min::<P>(&mut sweep, &mut jump, &lb_tracker[curr_obj_idx], &ub_tracker[curr_obj_idx], curr_dimension, self.dimensions);
             infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
         }
+        println!("sweep: x {} y {}", sweep[0], sweep[1]);
 
         // Start pruning here
-        if b && sweep[curr_dimension] != actions.get_int_lower_bound(self.box_posn[curr_obj_idx][curr_dimension]){
+        // TODO: Remove this b to so we dont have to reason for conflict in propagate
+        if b && sweep[curr_dimension] != lb_tracker[curr_obj_idx][curr_dimension]{
             let mut reason = Vec::new();
             for &o_idx in fr_support {
                 for d in 0..self.dimensions {
@@ -145,8 +150,8 @@ impl IntDiffnSweep {
                 reason.push(actions.get_int_lower_bound_lit(self.box_posn[curr_obj_idx][d]));
             }
             actions.set_int_lower_bound(self.box_posn[curr_obj_idx][curr_dimension], sweep[curr_dimension], reason)?;
-            // println!("Setting ub of object {} to {:?} in dimension {}",curr_obj_idx, sweep[curr_dimension], curr_dimension);
-            return Ok(b)
+            lb_tracker[curr_obj_idx][curr_dimension] = sweep[curr_dimension];
+            println!("Setting min of object {} to {:?} in dimension {} in min",curr_obj_idx, sweep[curr_dimension], curr_dimension);
         }
         Ok(b)
     }
@@ -156,6 +161,8 @@ impl IntDiffnSweep {
         actions: &mut P,
         fr_support: &Vec<usize>,
         curr_obj_idx: usize,
+        lb_tracker: &Vec<Vec<IntVal>>,
+        ub_tracker: &mut Vec<Vec<IntVal>>,
         curr_dimension: usize,
         all_fr: &Vec<ForbiddenRegion>
     ) -> Result<bool, Conflict> {
@@ -164,8 +171,8 @@ impl IntDiffnSweep {
         let mut b = true;
 
         for i in 0..self.dimensions {
-            sweep.push(actions.get_int_upper_bound(self.box_posn[curr_obj_idx][i]));
-            jump.push(actions.get_int_lower_bound(self.box_posn[curr_obj_idx][i]) - 1);
+            sweep.push(ub_tracker[curr_obj_idx][i]);
+            jump.push(lb_tracker[curr_obj_idx][i] - 1);
         }
         let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
         while b && infeasible_fr.is_some() {
@@ -173,15 +180,16 @@ impl IntDiffnSweep {
             jump[curr_dimension] = cmp::max(jump[curr_dimension], infeasible_fr.unwrap().lb[curr_dimension] - 1);
             // println!("jump before x: {:?} y: {:?}", jump[0], jump[1]);
             // Contains side-effects to change sweep
-            b = Self::adjust_sweep_max(actions, &mut sweep, &mut jump, &self.box_posn[curr_obj_idx], curr_dimension, self.dimensions);
+            b = Self::adjust_sweep_max::<P>(&mut sweep, &mut jump, &lb_tracker[curr_obj_idx], &ub_tracker[curr_obj_idx], curr_dimension, self.dimensions);
             // println!("sweep after x: {:?} y: {:?}", sweep[0], sweep[1]);
             // println!("jump after x: {:?} y: {:?}", jump[0], jump[1]);
             infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
             // println!("sweep: {:?} y: {:?}", sweep[0], sweep[1]);
         }
+        println!("sweep: {:?} y: {:?}", sweep[0], sweep[1]);
 
-
-        if b && sweep[curr_dimension] != actions.get_int_upper_bound(self.box_posn[curr_obj_idx][curr_dimension]){
+        // TODO: Remove this b to so we dont have to reason for conflict in propagate
+        if b && sweep[curr_dimension] != ub_tracker[curr_obj_idx][curr_dimension]{
             let mut reason = Vec::new();
             for &o_idx in fr_support {
                 for d in 0..self.dimensions {
@@ -195,57 +203,51 @@ impl IntDiffnSweep {
                 reason.push(actions.get_int_lower_bound_lit(self.box_posn[curr_obj_idx][d]));
             }
             actions.set_int_upper_bound(self.box_posn[curr_obj_idx][curr_dimension], sweep[curr_dimension], reason)?;
-            // println!("Setting ub of object {} to {:?} in dimension {}",curr_obj_idx, sweep[curr_dimension], curr_dimension);
-            return Ok(b)
+            ub_tracker[curr_obj_idx][curr_dimension] = sweep[curr_dimension];
+            println!("Setting ub of object {} to {:?} in dimension {} in max",curr_obj_idx, sweep[curr_dimension], curr_dimension);
         }
         Ok(b)
     }
 
     fn adjust_sweep_min<P: PropagationActions>(
-        actions: &mut P,
         sweep: &mut Vec<IntVal>,
         jump: &mut Vec<IntVal>,
-        curr_obj_pos: &Vec<IntView>,
+        curr_obj_lb: &Vec<IntVal>,
+        curr_obj_ub: &Vec<IntVal>,
         curr_dimension: usize,
         dimensions: usize
     ) -> bool {
         for i in (0..dimensions).rev() {
             let rotation = (i + curr_dimension) % dimensions;
             sweep[rotation] = jump[rotation];
-            jump[rotation] = actions.get_int_upper_bound(curr_obj_pos[rotation]) + 1;
-            if sweep[rotation] <= actions.get_int_upper_bound(curr_obj_pos[rotation]) {
+            jump[rotation] = curr_obj_ub[rotation] + 1;
+            if sweep[rotation] <= curr_obj_ub[rotation] {
                 return true;
             } else {
                 // Reset sweep-point
-                sweep[rotation] = actions.get_int_lower_bound(curr_obj_pos[rotation]);
+                sweep[rotation] = curr_obj_lb[rotation];
             }
         }
         false
     }
 
     fn adjust_sweep_max<P: PropagationActions>(
-        actions: &mut P,
         sweep: &mut Vec<IntVal>,
         jump: &mut Vec<IntVal>,
-        curr_obj_pos: &Vec<IntView>,
+        curr_obj_lb: &Vec<IntVal>,
+        curr_obj_ub: &Vec<IntVal>,
         curr_dimension: usize,
         dimensions: usize
     ) -> bool {
         for i in (0..dimensions).rev() {
             let rotation = (i + curr_dimension) % dimensions;
-            // println!("sweep before x: {:?} y: {:?}", sweep[0], sweep[1]);
-            // println!("jump before x: {:?} y: {:?}", jump[0], jump[1]);
             sweep[rotation] = jump[rotation];
-            jump[rotation] = actions.get_int_lower_bound(curr_obj_pos[rotation]) - 1;
-            // println!("sweep after x: {:?} y: {:?}", sweep[0], sweep[1]);
-            // println!("jump after x: {:?} y: {:?}", jump[0], jump[1]);
-            // Current sweep-point is withing the bounds of the current object
-            if sweep[rotation] >= actions.get_int_lower_bound(curr_obj_pos[rotation]) {
+            jump[rotation] = curr_obj_lb[rotation] - 1;
+            if sweep[rotation] >= curr_obj_lb[rotation] {
                 return true
             } else {
                 // Reset sweep-point
-                sweep[rotation] = actions.get_int_upper_bound(curr_obj_pos[rotation]);
-                // println!("sweep ADD x: {:?} y: {:?}", sweep[0], sweep[1]);
+                sweep[rotation] = curr_obj_ub[rotation];
             }
         }
         false
@@ -254,19 +256,18 @@ impl IntDiffnSweep {
 
 
     fn overlaps<P: PropagationActions>(
-        actions: &mut P,
-        curr_obj_pos: &Vec<IntView>,
+        curr_obj_lb: &Vec<IntVal>,
+        curr_obj_ub: &Vec<IntVal>,
         fr: &ForbiddenRegion,
         dimensions:usize
     ) -> bool {
         // println!("size: {:?}", fr.lb.len());
-        // !(0..dimensions).any(|d|
-        //                actions.get_int_upper_bound(curr_obj_pos[d]) < fr.lb[d] ||
-        //                actions.get_int_lower_bound(curr_obj_pos[d]) > fr.ub[d])
+        // (0..dimensions).all(|d|
+        //                actions.get_int_upper_bound(curr_obj_pos[d]) >= fr.lb[d] &&
+        //                actions.get_int_lower_bound(curr_obj_pos[d]) <= fr.ub[d])
         for d in 0..dimensions {
-            let a = actions.get_int_upper_bound(curr_obj_pos[d]) < fr.lb[d];
-            let b = actions.get_int_lower_bound(curr_obj_pos[d]) > fr.ub[d];
-            if a || b {
+            //TODO: Change to better names or use iterators
+            if curr_obj_lb[d] > fr.ub[d] || curr_obj_ub[d] < fr.lb[d] {
                 return false;
             }
         }
@@ -276,17 +277,18 @@ impl IntDiffnSweep {
 
 
 
-    /// Generates forbidden regions given object o
+    /// Generates forbidden regions given object o, forbidden regions that do not overlap with
+    /// the starting domain of o is not included
     fn generate_fr<P: PropagationActions>(
         &self,
-        actions: &mut P,
         fr_support: &mut Vec<usize>,
         o_idx:usize,
+        lb_tracker: &Vec<Vec<IntVal>>,
+        ub_tracker: &Vec<Vec<IntVal>>,
         dimensions:usize
     ) -> Option<Vec<ForbiddenRegion>> {
         let mut all_fr:Vec<ForbiddenRegion> = vec![];
         let no_objects = self.box_posn.len();
-        let curr_obj_size = &self.box_size[o_idx];
         for i in 0..no_objects {
             let mut fr = ForbiddenRegion {
                 lb: Vec::new(),
@@ -294,12 +296,12 @@ impl IntDiffnSweep {
             };
 
             if i == o_idx { continue };
-            let obj_pos = &self.box_posn[i];
-            let obj_size = &self.box_size[i];
-
-            for (&pos, size, curr_size) in izip!(obj_pos, obj_size, curr_obj_size) {
-                let pos_ub: IntVal = actions.get_int_upper_bound(pos);
-                let pos_lb: IntVal = actions.get_int_lower_bound(pos);
+            let mut exists = true;
+            for d in 0..self.dimensions {
+                let pos_ub: IntVal = ub_tracker[i][d];
+                let pos_lb: IntVal = lb_tracker[i][d];
+                let curr_size = self.box_size[o_idx][d];
+                let size = self.box_size[i][d];
 
                 let fr_lb = pos_ub - curr_size + 1;
                 let fr_ub = pos_lb + size - 1;
@@ -307,18 +309,19 @@ impl IntDiffnSweep {
                     fr.lb.push(fr_lb);
                     fr.ub.push(fr_ub);
                 } else {
-                    break;
+                    exists = false;
                 }
             }
-            if fr.lb.len() == dimensions {
+            if exists {
                 let is_overlapping = Self::overlaps::<P>(
-                    actions,
-                    &self.box_posn[o_idx],
+                    &lb_tracker[o_idx],
+                    &ub_tracker[o_idx],
                     &fr,
                     dimensions);
 
                 if is_overlapping{
                     fr_support.push(i);
+                    println!("Valid fr for {}", i);
                     all_fr.push(fr);
                 } else {
                 }
@@ -328,7 +331,8 @@ impl IntDiffnSweep {
         if all_fr.is_empty() { None } else { Some(all_fr) }
     }
 
-    // Checks whether the sweep point is in a feasible position, if it is feas
+    /// Checks whether the sweep point is in a feasible position, if it is not,
+    /// return the forbidden region it collided with
     fn infeasible_sweep<'a>(
         sweep: &Vec<IntVal>,
         dimensions: usize,
@@ -348,21 +352,49 @@ where
 {
 	#[tracing::instrument(name = "diffn", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
+        // TODO: Create a tracker which tracks all lower bounds and upper bounds aswell as
+        // commiting changes to them!!!!
+        let mut lb_tracker: Vec<Vec<IntVal>> = self.box_posn.iter()
+            .map(|row|
+                 row.iter()
+                 .map(|&v| actions.get_int_lower_bound(v))
+                 .collect()).collect();
+        let mut ub_tracker: Vec<Vec<IntVal>> = self.box_posn.iter()
+            .map(|row|
+                 row.iter()
+                 .map(|&v| actions.get_int_upper_bound(v))
+                 .collect()).collect();
+
         for o_idx in 0..self.box_posn.len() {
-            // println!("MAIN OBJECT IS NOW {:?}", o_idx);
-            //
-            // ONLY DEBUGGING PURPOSES
-            // for o in 0..self.box_posn.len() {
-                // println!("object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
-                //          o,
-                //          actions.get_int_upper_bound(self.box_posn[o][0]),
-                //          actions.get_int_lower_bound(self.box_posn[o][0]),
-                //          actions.get_int_upper_bound(self.box_posn[o][1]),
-                //          actions.get_int_lower_bound(self.box_posn[o][1]),
-                // );
-            // }
+            println!("DOING OBJECT {:?}", o_idx);
+            for o in 0..self.box_posn.len() {
+                println!("object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?}, size {}",
+                     o,
+                     ub_tracker[o][0],
+                     lb_tracker[o][0],
+                     ub_tracker[o][1],
+                     lb_tracker[o][1],
+                     self.box_size[o][0]
+                );
+            }
+
             let mut fr_support: Vec<usize> = Vec::new();
-            if let Some(all_fr) = self.generate_fr(actions, &mut fr_support, o_idx, self.dimensions) {
+
+            if let Some(all_fr) = self.generate_fr::<P>(
+                &mut fr_support,
+                o_idx,
+                &lb_tracker,
+                &ub_tracker,
+                self.dimensions) {
+                for f in 0..all_fr.len() {
+                    println!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
+                             all_fr[f].ub[0],
+                             all_fr[f].lb[0],
+                             all_fr[f].ub[1],
+                             all_fr[f].lb[1],
+                    );
+                }
+
                 let mut assigned = true;
                 for d in 0..self.dimensions {
                     let fixed = actions.get_int_val(self.box_posn[o_idx][d]);
@@ -384,49 +416,67 @@ where
                     }
                     return Err(Conflict::new(actions, None, reason));
                 }
-                // for f in 0..all_fr.len() {
-                    //println!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
-                    //         all_fr[f].ub[0],
-                    //         all_fr[f].lb[0],
-                    //         all_fr[f].ub[1],
-                    //         all_fr[f].lb[1],
-                    //);
-                // }
+
                 for d in 0..self.dimensions {
-                    let fixed = actions.get_int_val(self.box_posn[o_idx][d]);
-                    if fixed.is_none() && !self.prune_min(actions, &fr_support, o_idx, d, &all_fr)? {
+                    let fixed = lb_tracker[o_idx][d] == ub_tracker[o_idx][d];
+                    println!("fixed? {:?} dimension {}", fixed, d);
+
+                    let b1 = self.prune_min(
+                        actions,
+                        &fr_support,
+                        o_idx,
+                        &mut lb_tracker,
+                        &ub_tracker,
+                        d,
+                        &all_fr)?;
+
+                    println!("b1? {:?}", b1);
+                    if !fixed && !b1 {
                         let mut reason: Vec<_> = Vec::new();
-                        for i in fr_support {
-                            for d in 0..self.dimensions {
-                                reason.push(actions.get_int_upper_bound_lit(self.box_posn[i][d]));
-                                reason.push(actions.get_int_lower_bound_lit(self.box_posn[i][d]));
+                        for &i in &fr_support {
+                            for di in 0..self.dimensions {
+                                reason.push(actions.get_int_upper_bound_lit(self.box_posn[i][di]));
+                                reason.push(actions.get_int_lower_bound_lit(self.box_posn[i][di]));
                             }
                         }
-                        for d in 0..self.dimensions {
-                            reason.push(actions.get_int_upper_bound_lit(self.box_posn[o_idx][d]));
-                            reason.push(actions.get_int_lower_bound_lit(self.box_posn[o_idx][d]));
+                        for di in 0..self.dimensions {
+                            reason.push(actions.get_int_upper_bound_lit(self.box_posn[o_idx][di]));
+                            reason.push(actions.get_int_lower_bound_lit(self.box_posn[o_idx][di]));
                         }
-                        return Err(Conflict::new(actions, None, reason));
                     }
-                    if fixed.is_none() && !self.prune_max(actions, &fr_support, o_idx, d, &all_fr)? {
+                    let fixed = lb_tracker[o_idx][d] == ub_tracker[o_idx][d];
+
+                    let b2 = self.prune_max(
+                        actions,
+                        &fr_support,
+                        o_idx,
+                        &lb_tracker,
+                        &mut ub_tracker,
+                        d,
+                        &all_fr)?;
+
+
+                    println!("b2? {:?}", b2);
+                    if !fixed && !b2 {
                         let mut reason: Vec<_> = Vec::new();
                         for i in fr_support {
-                            for d in 0..self.dimensions {
-                                reason.push(actions.get_int_upper_bound_lit(self.box_posn[i][d]));
-                                reason.push(actions.get_int_lower_bound_lit(self.box_posn[i][d]));
+                            for di in 0..self.dimensions {
+                                reason.push(actions.get_int_upper_bound_lit(self.box_posn[i][di]));
+                                reason.push(actions.get_int_lower_bound_lit(self.box_posn[i][di]));
                             }
                         }
-                        for d in 0..self.dimensions {
-                            reason.push(actions.get_int_upper_bound_lit(self.box_posn[o_idx][d]));
-                            reason.push(actions.get_int_lower_bound_lit(self.box_posn[o_idx][d]));
+                        for di in 0..self.dimensions {
+                            reason.push(actions.get_int_upper_bound_lit(self.box_posn[o_idx][di]));
+                            reason.push(actions.get_int_lower_bound_lit(self.box_posn[o_idx][di]));
                         }
+                        println!("CONFLICT in prune_max");
                         return Err(Conflict::new(actions, None, reason));
                     }
                 }
             }
         }
         Ok(())
-	}
+    }
 }
 
 #[cfg(test)]
@@ -529,7 +579,6 @@ mod tests {
 		let y_size_3 = prb.new_int_var((2..=2).into());
 		let y_size_4 = prb.new_int_var((1..=1).into());
 
-
 		prb += diffn_int(
         vec![
             vec![x_pos_1, y_pos_1],
@@ -555,7 +604,52 @@ mod tests {
             .collect_vec();
 
 	    let (solve_result, value) = slv.get_all_solutions(&pos_vars);
-        // println!("solve_result {:?}, value {:?}",solve_result, value);
+        println!("solve_result {:?}, value {:?}",solve_result, value);
     }
 
+    #[test]
+    #[traced_test]
+    fn test_diffn_2() {
+        let mut prb = Model::default();
+		let x_pos_1 = prb.new_int_var((0..=3).into());
+		let x_pos_2 = prb.new_int_var((0..=3).into());
+		let x_pos_3 = prb.new_int_var((0..=1).into());
+
+		let x_size_1 = prb.new_int_var((1..=1).into());
+		let x_size_2 = prb.new_int_var((2..=2).into());
+		let x_size_3 = prb.new_int_var((3..=3).into());
+
+		let y_pos_1 = prb.new_int_var((0..=2).into());
+		let y_pos_2 = prb.new_int_var((0..=1).into());
+		let y_pos_3 = prb.new_int_var((0..=1).into());
+
+		let y_size_1 = prb.new_int_var((1..=1).into());
+		let y_size_2 = prb.new_int_var((2..=2).into());
+		let y_size_3 = prb.new_int_var((3..=3).into());
+
+
+        prb += diffn_int(
+            vec![
+                vec![x_pos_1, y_pos_1],
+                vec![x_pos_2, y_pos_2],
+                vec![x_pos_3, y_pos_3],
+            ],
+            vec![
+                vec![x_size_1, y_size_1],
+                vec![x_size_2, y_size_2],
+                vec![x_size_3, y_size_3],
+            ]);
+        let (mut slv, map) = prb.to_solver::<PropagatingCadical<_>>(&InitConfig::default()).unwrap();
+        let pos_vars = vec![
+            vec![x_pos_1, y_pos_1],
+            vec![x_pos_2, y_pos_2],
+            vec![x_pos_3, y_pos_3]]
+            .into_iter()
+            .flatten()
+            .map(|x| map.get(&mut slv, &Decision::from(x)))
+            .collect_vec();
+
+        let (solve_result, value) = slv.get_all_solutions(&pos_vars);
+        println!("solve_result {:?}, value {:?}",solve_result, value);
+    }
 }
