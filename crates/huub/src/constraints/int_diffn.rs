@@ -126,8 +126,10 @@ impl IntDiffnSweep {
         }
         let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
         while b && infeasible_fr.is_some() {
+            for j in 0..self.dimensions {
+                jump[j] = cmp::min(jump[j], infeasible_fr.unwrap().ub[j] + 1);
+            }
             // println!("prune_min - in loop");
-            jump[curr_dimension] = cmp::min(jump[curr_dimension], infeasible_fr.unwrap().ub[curr_dimension] + 1);
             // Contains side-effects to change sweep
             b = Self::adjust_sweep_min::<P>(&mut sweep, &mut jump, &lb_tracker[curr_obj_idx], &ub_tracker[curr_obj_idx], curr_dimension, self.dimensions);
             infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
@@ -177,16 +179,19 @@ impl IntDiffnSweep {
         let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
         while b && infeasible_fr.is_some() {
             // println!("prune max - in loop");
-            jump[curr_dimension] = cmp::max(jump[curr_dimension], infeasible_fr.unwrap().lb[curr_dimension] - 1);
+            for j in 0..self.dimensions {
+                jump[j] = cmp::max(jump[j], infeasible_fr.unwrap().lb[j] - 1);
+            }
             // println!("jump before x: {:?} y: {:?}", jump[0], jump[1]);
             // Contains side-effects to change sweep
+            println!("sweep before x: {:?} y: {:?}", sweep[0], sweep[1]);
             b = Self::adjust_sweep_max::<P>(&mut sweep, &mut jump, &lb_tracker[curr_obj_idx], &ub_tracker[curr_obj_idx], curr_dimension, self.dimensions);
-            // println!("sweep after x: {:?} y: {:?}", sweep[0], sweep[1]);
+            println!("sweep after x: {:?} y: {:?}", sweep[0], sweep[1]);
             // println!("jump after x: {:?} y: {:?}", jump[0], jump[1]);
             infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
             // println!("sweep: {:?} y: {:?}", sweep[0], sweep[1]);
         }
-        println!("sweep: {:?} y: {:?}", sweep[0], sweep[1]);
+        println!("sweep: x {:?} y: {:?}", sweep[0], sweep[1]);
 
         // TODO: Remove this b to so we dont have to reason for conflict in propagate
         if b && sweep[curr_dimension] != ub_tracker[curr_obj_idx][curr_dimension]{
@@ -242,6 +247,7 @@ impl IntDiffnSweep {
         for i in (0..dimensions).rev() {
             let rotation = (i + curr_dimension) % dimensions;
             sweep[rotation] = jump[rotation];
+            println!("sweep: x {:?} y: {:?} in rotation {}", sweep[0], sweep[1], rotation);
             jump[rotation] = curr_obj_lb[rotation] - 1;
             if sweep[rotation] >= curr_obj_lb[rotation] {
                 return true
@@ -443,6 +449,8 @@ where
                             reason.push(actions.get_int_upper_bound_lit(self.box_posn[o_idx][di]));
                             reason.push(actions.get_int_lower_bound_lit(self.box_posn[o_idx][di]));
                         }
+                        println!("CONFLICT in prune_min");
+                        return Err(Conflict::new(actions, None, reason));
                     }
                     let fixed = lb_tracker[o_idx][d] == ub_tracker[o_idx][d];
 
@@ -611,17 +619,17 @@ mod tests {
     #[traced_test]
     fn test_diffn_2() {
         let mut prb = Model::default();
-		let x_pos_1 = prb.new_int_var((0..=3).into());
-		let x_pos_2 = prb.new_int_var((0..=3).into());
-		let x_pos_3 = prb.new_int_var((0..=1).into());
+		let x_pos_1 = prb.new_int_var((0..=6).into());
+		let x_pos_2 = prb.new_int_var((0..=6).into());
+		let x_pos_3 = prb.new_int_var((0..=6).into());
 
 		let x_size_1 = prb.new_int_var((1..=1).into());
 		let x_size_2 = prb.new_int_var((2..=2).into());
 		let x_size_3 = prb.new_int_var((3..=3).into());
 
-		let y_pos_1 = prb.new_int_var((0..=2).into());
-		let y_pos_2 = prb.new_int_var((0..=1).into());
-		let y_pos_3 = prb.new_int_var((0..=1).into());
+		let y_pos_1 = prb.new_int_var((0..=6).into());
+		let y_pos_2 = prb.new_int_var((0..=6).into());
+		let y_pos_3 = prb.new_int_var((0..=6).into());
 
 		let y_size_1 = prb.new_int_var((1..=1).into());
 		let y_size_2 = prb.new_int_var((2..=2).into());
