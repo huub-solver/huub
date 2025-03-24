@@ -1,0 +1,8 @@
+output ["w:"++format(w)++" h:"++format(h)++" X:"++format(X)++" Y:"++format(Y)++" rec: "++format(rec)++" squares: "++format(SquaresX)++""];
+int: n = 3;
+int: w;
+int: h;
+array [1..n] of int: X;
+array [1..n] of int: Y;
+int: rec = w*h;
+array [1..n] of int: SquaresX = [3,4,5];

@@ -1,0 +1,36 @@
+{
+  "variables": {
+    "w" : { "type" : "int", "domain" : [[3, 50]] },
+    "h" : { "type" : "int", "domain" : [[3, 50]] },
+    "rec" : { "type" : "int", "domain" : [[9, 2500]], "defined" : true },
+    "X_INTRODUCED_0_" : { "type" : "int", "domain" : [[6, 15]] },
+    "X_INTRODUCED_1_" : { "type" : "int", "domain" : [[6, 15]] },
+    "X_INTRODUCED_2_" : { "type" : "int", "domain" : [[6, 15]] },
+    "X_INTRODUCED_3_" : { "type" : "int", "domain" : [[2, 12]] },
+    "X_INTRODUCED_4_" : { "type" : "int", "domain" : [[2, 12]] },
+    "X_INTRODUCED_5_" : { "type" : "int", "domain" : [[2, 12]] }
+  },
+  "arrays": {
+    "X_INTRODUCED_9_" : { "a": [1, -1] },
+    "SquaresY" : { "a": [10, 2, 2] },
+    "SquaresX" : { "a": [3, 4, 5] },
+    "X_INTRODUCED_16_" : { "a": [2, -1] },
+    "X" : { "a": ["X_INTRODUCED_0_", "X_INTRODUCED_1_", "X_INTRODUCED_2_"] },
+    "Y" : { "a": ["X_INTRODUCED_3_", "X_INTRODUCED_4_", "X_INTRODUCED_5_"] }
+  },
+  "constraints": [
+    { "id" : "int_lin_le", "args" : ["X_INTRODUCED_9_", ["X_INTRODUCED_0_", "w"], -3]},
+    { "id" : "int_lin_le", "args" : ["X_INTRODUCED_9_", ["X_INTRODUCED_3_", "h"], -10]},
+    { "id" : "int_lin_le", "args" : ["X_INTRODUCED_9_", ["X_INTRODUCED_1_", "w"], -4]},
+    { "id" : "int_lin_le", "args" : ["X_INTRODUCED_9_", ["X_INTRODUCED_4_", "h"], -2]},
+    { "id" : "int_lin_le", "args" : ["X_INTRODUCED_9_", ["X_INTRODUCED_2_", "w"], -5]},
+    { "id" : "int_lin_le", "args" : ["X_INTRODUCED_9_", ["X_INTRODUCED_5_", "h"], -2]},
+    { "id" : "huub_diffn_int", "args" : ["X", "Y", "SquaresX", "SquaresY"]},
+    { "id" : "int_lin_le", "args" : ["X_INTRODUCED_16_", ["X_INTRODUCED_2_", "w"], -1]},
+    { "id" : "int_lin_le", "args" : ["X_INTRODUCED_16_", ["X_INTRODUCED_5_", "h"], -1]},
+    { "id" : "int_times", "args" : ["w", "h", "rec"], "defines" : "rec"}
+  ],
+  "output": ["w", "h", "X", "Y"],
+  "solve": { "method" : "minimize", "objective" : "rec" },
+  "version": "1.0"
+}
