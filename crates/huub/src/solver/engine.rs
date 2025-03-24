@@ -268,6 +268,13 @@ impl PropagatorExtension for Engine {
 		debug!(lits = ?lits.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "assignments");
 		// Avoid doing more work if we are already in a failed state
 		if self.state.failed {
+			// In debug mode still register Boolean assignments for explanation
+			// checking
+			if cfg!(debug_assertions) {
+				for &lit in lits {
+					let _ = self.state.trail.assign_lit(lit);
+				}
+			}
 			return;
 		}
 
