@@ -237,6 +237,8 @@ where
 {
 	IntAllDifferent {
 		vars: vars.into_iter().map_into().collect(),
+		bounds_prop: None,
+		value_prop: None,
 	}
 }
 /// Create a constraint that enforces that given decision variables of starting positions and sizes
@@ -1139,7 +1141,7 @@ impl Model {
 
 		for c in self.constraints.iter().flatten() {
 			match c {
-				ConstraintStore::IntAllDifferent(c) => {
+				ConstraintStore::IntAllDifferent(c) if c.value_consistent_propagator_enabled() => {
 					for v in &c.vars {
 						let v = v.resolve_alias(self);
 						if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = v.0 {
