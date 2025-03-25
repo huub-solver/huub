@@ -115,7 +115,6 @@ impl IntDiffnSweep {
             for j in 0..self.dimensions {
                 jump[j] = cmp::min(jump[j], infeasible_fr.unwrap().ub[j] + 1);
             }
-            // println!("prune_min - in loop");
             // Contains side-effects to change sweep
             b = Self::adjust_sweep_min::<P>(&mut sweep, &mut jump, &lb_tracker[curr_obj_idx], &ub_tracker[curr_obj_idx], curr_dimension, self.dimensions);
             infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
@@ -132,12 +131,16 @@ impl IntDiffnSweep {
                 }
             }
             for d in 0..self.dimensions {
-                reason.push(actions.get_int_upper_bound_lit(self.box_posn[curr_obj_idx][d]));
-                reason.push(actions.get_int_lower_bound_lit(self.box_posn[curr_obj_idx][d]));
+                if d == curr_dimension {
+                    reason.push(actions.get_int_upper_bound_lit(self.box_posn[curr_obj_idx][d]));
+                } else {
+                    reason.push(actions.get_int_upper_bound_lit(self.box_posn[curr_obj_idx][d]));
+                    reason.push(actions.get_int_lower_bound_lit(self.box_posn[curr_obj_idx][d]));
+                }
             }
             actions.set_int_lower_bound(self.box_posn[curr_obj_idx][curr_dimension], sweep[curr_dimension], reason)?;
             lb_tracker[curr_obj_idx][curr_dimension] = sweep[curr_dimension];
-            println!("Setting lb of object {} to {:?} in dimension {} in max",curr_obj_idx, sweep[curr_dimension], curr_dimension);
+            // println!("Setting lb of object {} to {:?} in dimension {} in max",curr_obj_idx, sweep[curr_dimension], curr_dimension);
             return Ok((b, true));
         }
         Ok((b, false))
@@ -164,7 +167,6 @@ impl IntDiffnSweep {
         }
         let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
         while b && infeasible_fr.is_some() {
-            // println!("prune max - in loop");
             for j in 0..self.dimensions {
                 jump[j] = cmp::max(jump[j], infeasible_fr.unwrap().lb[j] - 1);
             }
@@ -183,12 +185,16 @@ impl IntDiffnSweep {
                 }
             }
             for d in 0..self.dimensions {
-                reason.push(actions.get_int_upper_bound_lit(self.box_posn[curr_obj_idx][d]));
-                reason.push(actions.get_int_lower_bound_lit(self.box_posn[curr_obj_idx][d]));
+                if d == curr_dimension {
+                    reason.push(actions.get_int_lower_bound_lit(self.box_posn[curr_obj_idx][d]));
+                } else {
+                    reason.push(actions.get_int_upper_bound_lit(self.box_posn[curr_obj_idx][d]));
+                    reason.push(actions.get_int_lower_bound_lit(self.box_posn[curr_obj_idx][d]));
+                }
             }
             actions.set_int_upper_bound(self.box_posn[curr_obj_idx][curr_dimension], sweep[curr_dimension], reason)?;
             ub_tracker[curr_obj_idx][curr_dimension] = sweep[curr_dimension];
-            println!("Setting ub of object {} to {:?} in dimension {} in max",curr_obj_idx, sweep[curr_dimension], curr_dimension);
+            // println!("Setting ub of object {} to {:?} in dimension {} in max",curr_obj_idx, sweep[curr_dimension], curr_dimension);
             return Ok((b, true));
         }
         Ok((b, false))
@@ -343,7 +349,7 @@ where
 {
 	#[tracing::instrument(name = "diffn", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-        println!("new propagation");
+        // println!("new propagation");
         let mut lb_tracker: Vec<Vec<IntVal>> = self.box_posn.iter()
             .map(|row|
                  row.iter()
@@ -361,28 +367,28 @@ where
         while nonfix {
             nonfix = false;
             for o_idx in 0..self.box_posn.len() {
-                println!("DOING OBJECT {:?}", o_idx);
-                for o in 0..self.box_posn.len() {
-                    println!("object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?}, size {}",
-                         o,
-                         ub_tracker[o][0],
-                         lb_tracker[o][0],
-                         ub_tracker[o][1],
-                         lb_tracker[o][1],
-                         self.box_size[o][0]
-                    );
-                }
+                // println!("DOING OBJECT {:?}", o_idx);
+                // for o in 0..self.box_posn.len() {
+                //     println!("object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?}, size {}",
+                //          o,
+                //          ub_tracker[o][0],
+                //          lb_tracker[o][0],
+                //          ub_tracker[o][1],
+                //          lb_tracker[o][1],
+                //          self.box_size[o][0]
+                //     );
+                // }
                 let mut fr_support: Vec<usize> = Vec::new();
 
                 if let Some(all_fr) = self.generate_fr::<P>(&mut fr_support, o_idx, &lb_tracker, &ub_tracker, self.dimensions) {
-                    for f in 0..all_fr.len() {
-                        println!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
-                                 all_fr[f].ub[0],
-                                 all_fr[f].lb[0],
-                                 all_fr[f].ub[1],
-                                 all_fr[f].lb[1],
-                        );
-                    }
+                    // for f in 0..all_fr.len() {
+                    //     println!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
+                    //              all_fr[f].ub[0],
+                    //              all_fr[f].lb[0],
+                    //              all_fr[f].ub[1],
+                    //              all_fr[f].lb[1],
+                    //     );
+                    // }
 
                     let mut is_assigned = true;
                     for d in 0..self.dimensions {
@@ -393,7 +399,7 @@ where
                     }
                     if is_assigned {
                         let reason = self.explain_conflict(actions, &fr_support, o_idx);
-                        println!("CONFLICT ASSIGNED");
+                        // println!("CONFLICT ASSIGNED");
                         return Err(Conflict::new(actions, None, reason));
                     }
                     for d in 0..self.dimensions {
@@ -402,7 +408,7 @@ where
                         if !fixed && !b1 {
                             // Conflict since there is no feasible origin in this dimension
                             let reason = self.explain_conflict(actions, &fr_support, o_idx);
-                            println!("CONFLICT prune_min");
+                            // println!("CONFLICT prune_min");
                             return Err(Conflict::new(actions, None, reason));
                         }
 
@@ -411,7 +417,7 @@ where
                         if !fixed && !b2 {
                             // Conflict since there is no feasible origin in this dimension
                             let reason = self.explain_conflict(actions, &fr_support, o_idx);
-                            println!("CONFLICT prune_max");
+                            // println!("CONFLICT prune_max");
                             return Err(Conflict::new(actions, None, reason));
                         }
                         if changed1 || changed2 {
