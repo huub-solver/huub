@@ -58,6 +58,7 @@ use crate::{
 		int_pow::IntPow,
 		int_table::IntTable,
 		int_times::IntTimes,
+		seq_precede_chain::SeqPrecedeChain,
 		BoxedConstraint, Constraint, SimplificationStatus,
 	},
 	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
@@ -338,6 +339,17 @@ pub fn times_int(factor1: IntDecision, factor2: IntDecision, product: IntDecisio
 		factor1,
 		factor2,
 		product,
+	}
+}
+
+/// Create a constraint that enforces that all integer values >0 occur in ascending order.
+pub fn seq_precede_chain<Iter>(vars: Iter) -> SeqPrecedeChain
+where
+	Iter: IntoIterator,
+	Iter::Item: Into<IntDecision>,
+{
+	SeqPrecedeChain {
+		vars: vars.into_iter().map_into().collect(),
 	}
 }
 
@@ -978,6 +990,7 @@ impl Model {
 			ConstraintStore::BoolFormula(exp) => exp.simplify(self),
 			ConstraintStore::IntInSetReif(c) => c.simplify(self),
 			ConstraintStore::IntTable(con) => con.simplify(self),
+			ConstraintStore::SeqPrecedeChain(con) => con.simplify(self),
 			ConstraintStore::Other(con) => con.simplify(self),
 		}?;
 		match status {
@@ -1076,6 +1089,9 @@ impl Model {
 			}
 			ConstraintStore::IntTable(con) => {
 				<IntTable as Constraint<Model>>::initialize(con, &mut ctx);
+			}
+			ConstraintStore::SeqPrecedeChain(con) => {
+				<SeqPrecedeChain as Constraint<Model>>::initialize(con, &mut ctx);
 			}
 			ConstraintStore::Other(con) => con.initialize(&mut ctx),
 		}
@@ -1299,6 +1315,12 @@ impl AddAssign<IntTimes> for Model {
 impl AddAssign<IntValArrayElement> for Model {
 	fn add_assign(&mut self, constraint: IntValArrayElement) {
 		self.add_constraint(ConstraintStore::IntValArrayElement(constraint));
+	}
+}
+
+impl AddAssign<SeqPrecedeChain> for Model {
+	fn add_assign(&mut self, constraint: SeqPrecedeChain) {
+		self.add_constraint(ConstraintStore::SeqPrecedeChain(constraint));
 	}
 }
 

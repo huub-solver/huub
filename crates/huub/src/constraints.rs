@@ -12,6 +12,7 @@ pub mod int_linear;
 pub mod int_pow;
 pub mod int_table;
 pub mod int_times;
+pub mod seq_precede_chain;
 
 use std::{
 	error::Error,

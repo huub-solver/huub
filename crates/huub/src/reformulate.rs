@@ -31,6 +31,7 @@ use crate::{
 		int_pow::IntPow,
 		int_table::IntTable,
 		int_times::IntTimes,
+		seq_precede_chain::SeqPrecedeChain,
 		BoxedConstraint, BoxedPropagator, Constraint, SimplificationStatus,
 	},
 	helpers::linear_transform::LinearTransform,
@@ -106,6 +107,7 @@ pub(crate) enum ConstraintStore {
 	IntTable(IntTable),
 	IntTimes(IntTimes),
 	IntValArrayElement(IntValArrayElement),
+	SeqPrecedeChain(SeqPrecedeChain),
 	Other(BoxedConstraint),
 }
 
@@ -287,6 +289,9 @@ impl ConstraintStore {
 			}
 			ConstraintStore::IntValArrayElement(con) => {
 				<IntValArrayElement as Constraint<Model>>::to_solver(con, &mut actions)
+			}
+			ConstraintStore::SeqPrecedeChain(con) => {
+				<SeqPrecedeChain as Constraint<Model>>::to_solver(con, &mut actions)
 			}
 			ConstraintStore::Other(con) => con.to_solver(&mut actions),
 		}
