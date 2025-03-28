@@ -216,7 +216,7 @@ impl<V: Visit> LitNames<'_, V> {
 						v.push(format!("Lit({})", i));
 					}
 				}
-				if field.name() == "clause" {
+				if field.name().starts_with("clause") {
 					self.inner.record_str(field, &v.join(" ∨ "));
 				} else {
 					self.inner.record_str(field, &v.join(", "));

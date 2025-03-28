@@ -24,7 +24,7 @@ use std::{
 	collections::{HashSet, VecDeque},
 	fmt::{Debug, Display},
 	hash::Hash,
-	iter::{repeat, repeat_with, Sum},
+	iter::{repeat_n, repeat_with, Sum},
 	mem,
 	num::NonZeroI64,
 	ops::{Add, AddAssign, Deref, Mul, Neg, Not, Sub},
@@ -965,8 +965,7 @@ impl Model {
 
 	/// Create `len` new integer variables with the given domain.
 	pub fn new_int_vars(&mut self, len: usize, domain: IntSetVal) -> Vec<IntDecision> {
-		repeat(IntDecisionDef::with_domain(domain))
-			.take(len)
+		repeat_n(IntDecisionDef::with_domain(domain), len)
 			.map(|v| IntDecision(IntDecisionInner::Var(self.int_vars.push(v))))
 			.collect()
 	}

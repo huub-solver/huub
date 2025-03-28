@@ -126,6 +126,17 @@ pub struct State {
 	pub(crate) int_activation: IndexVec<IntVarRef, ActivationList>,
 	/// Queue of propagators awaiting action
 	pub(crate) propagator_queue: PropagatorQueue,
+
+	// ---- Debugging Helpers ----
+	#[cfg(debug_assertions)]
+	/// The literals last emited by the [`PropagatorExtension::propagate`] method.
+	/// These literals will have their reasons checked when they are seen again in
+	/// [`PropagatorExtension::notify_assignments`].
+	pub(crate) check_reason: std::collections::HashSet<RawLit>,
+	#[cfg(debug_assertions)]
+	/// List of integer variables that have been notified as fixed, but should be
+	/// checked that the bounds match before propagation.
+	pub(crate) check_int_fixed: Vec<(IntVarRef, IntVal)>,
 }
 
 impl PropagatorExtension for Engine {
@@ -266,33 +277,38 @@ impl PropagatorExtension for Engine {
 
 	fn notify_assignments(&mut self, lits: &[RawLit]) {
 		debug!(lits = ?lits.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "assignments");
-		// Avoid doing more work if we are already in a failed state
-		if self.state.failed {
-			// In debug mode still register Boolean assignments for explanation
-			// checking
-			if cfg!(debug_assertions) {
-				for &lit in lits {
-					let _ = self.state.trail.assign_lit(lit);
-				}
-			}
+		// Avoid doing more work if we are already in a failed state, but continue
+		// in debug mode to check all reasons
+		if self.state.failed && !cfg!(debug_assertions) {
 			return;
 		}
 
 		// Enqueue propagators
 		for &lit in lits {
+			#[cfg(debug_assertions)]
+			{
+				// (DEBUG ONLY) if we propagated this literal, ensure its explanation is
+				// valid in its trail position.
+				if self.state.check_reason.contains(&lit) {
+					self.debug_check_reason(lit);
+				}
+			}
+
 			if self.state.trail.assign_lit(lit).is_some() {
 				continue;
 			}
 
 			// Enqueue based on direct literal
-			self.state.propagator_queue.enqueue_propagators(
-				self.state
-					.bool_activation
-					.get(&lit.var())
-					.into_iter()
-					.flatten()
-					.copied(),
-			);
+			if !self.state.failed {
+				self.state.propagator_queue.enqueue_propagators(
+					self.state
+						.bool_activation
+						.get(&lit.var())
+						.into_iter()
+						.flatten()
+						.copied(),
+				);
+			}
 
 			// Enqueue based on literal meaning in complex type
 			if let Some((iv, meaning)) = self.state.bool_to_int.get(lit.var()) {
@@ -302,8 +318,8 @@ impl PropagatorExtension for Engine {
 				// Enact domain changes and determine change event
 				let (lb, ub) = self.state.int_vars[iv].get_bounds(&self.state);
 				let event = match meaning {
-					IntLitMeaning::Eq(i) if i == lb && i == ub => None,
-					IntLitMeaning::Eq(i) if i < lb || i > ub => {
+					IntLitMeaning::Eq(val) if val == lb && val == ub => None,
+					IntLitMeaning::Eq(val) if val < lb || val > ub => {
 						// Notified of invalid assignment, do nothing.
 						//
 						// Although we do not expect this to happen, it seems that Cadical
@@ -312,23 +328,20 @@ impl PropagatorExtension for Engine {
 						trace!(lit = i32::from(lit), lb, ub, "invalid eq notification");
 						None
 					}
-					IntLitMeaning::Eq(i) => {
-						if lb < i {
-							self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, i);
+					IntLitMeaning::Eq(_val) => {
+						#[cfg(debug_assertions)]
+						{
+							// (DEBUG ONLY) Push the integer variable and its value to check
+							// that its bounds were updated before propagation occurs.
+							self.state.check_int_fixed.push((iv, _val));
 						}
-						if ub > i {
-							self.state.int_vars[iv].notify_upper_bound(&mut self.state.trail, i);
-						}
-						debug_assert_eq!(
-							self.state.get_int_val(IntView(IntViewInner::VarRef(iv))),
-							Some(i)
-						);
 						Some(IntEvent::Fixed)
 					}
 					IntLitMeaning::NotEq(i) if i < lb || i > ub => None,
 					IntLitMeaning::NotEq(_) => Some(IntEvent::Domain),
 					IntLitMeaning::GreaterEq(new_lb) if new_lb <= lb => None,
 					IntLitMeaning::GreaterEq(new_lb) => {
+						trace!(lit = i32::from(lit), lb = new_lb, "new lb");
 						self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, new_lb);
 						Some(if new_lb == ub {
 							IntEvent::Fixed
@@ -339,6 +352,7 @@ impl PropagatorExtension for Engine {
 					IntLitMeaning::Less(i) => {
 						let new_ub = self.state.int_vars[iv].tighten_upper_bound(i - 1);
 						if new_ub < ub {
+							trace!(lit = i32::from(lit), ub = new_ub, "new ub");
 							self.state.int_vars[iv]
 								.notify_upper_bound(&mut self.state.trail, new_ub);
 							Some(if new_ub == lb {
@@ -351,10 +365,12 @@ impl PropagatorExtension for Engine {
 						}
 					}
 				};
-				if let Some(event) = event {
-					self.state
-						.propagator_queue
-						.enqueue_propagators(self.state.int_activation[iv].activated_by(event));
+				if !self.state.failed {
+					if let Some(event) = event {
+						self.state
+							.propagator_queue
+							.enqueue_propagators(self.state.int_activation[iv].activated_by(event));
+					}
 				}
 			}
 		}
@@ -388,6 +404,15 @@ impl PropagatorExtension for Engine {
 			return Vec::new();
 		}
 		if self.state.propagation_queue.is_empty() && self.state.conflict.is_none() {
+			#[cfg(debug_assertions)]
+			{
+				// (DEBUG ONLY) Check that all integers that where fixed by equality
+				// literals had their bounds updated to match.
+				for (iv, i) in mem::take(&mut self.state.check_int_fixed) {
+					let iv = IntView(IntViewInner::VarRef(iv));
+					debug_assert_eq!(self.state.get_int_val(iv), Some(i));
+				}
+			}
 			// If there are no previous changes, run propagators
 			SolvingContext::new(slv, &mut self.state).run_propagators(&mut self.propagators);
 		}
@@ -406,42 +431,58 @@ impl PropagatorExtension for Engine {
 				.collect::<Vec<i32>>(),
 			"propagate"
 		);
-		// Debug helper to ensure that any reason is based on known true literals
+
 		#[cfg(debug_assertions)]
 		{
-			let mut prev: HashMap<RawVar, bool> = HashMap::new();
-			for &lit in queue.iter() {
-				if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
-					let clause: Clause =
-						reason.explain(&mut self.propagators, &mut self.state, Some(lit));
-					for &l in &clause {
-						if l == lit {
-							continue;
-						}
-						let val = self.state.trail.get_sat_value(!l).or(prev
-							.get(&l.var())
-							.map(|&v| if l.is_negated() { v } else { !v }));
-						if !val.unwrap_or(false) {
-							tracing::error!(lit_prop = i32::from(lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
-						}
-						debug_assert!(
-							val.unwrap_or(false),
-							"Literal {} in Reason for {} is {:?}, but should be known true",
-							!l,
-							lit,
-							val
-						);
-					}
-				}
-				// Recoprd assignment of the previous literal so it is available when
-				// checking next reason.
-				let _ = prev.insert(lit.var(), !lit.is_negated());
-			}
+			// (DEBUG ONLY) Store the propagated literals, so we know what explanations
+			// to check.
+			self.state.check_reason = queue.iter().cloned().collect();
 		}
+
 		queue
 	}
+
 	fn reason_persistence(&self) -> ClausePersistence {
 		ClausePersistence::Forgettable
+	}
+}
+
+impl Engine {
+	#[cfg(debug_assertions)]
+	/// (DEBUG ONLY) Check that the reason of a propagated literal contains only
+	/// known true literals
+	fn debug_check_reason(&mut self, lit: RawLit) {
+		if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
+			// Reason is in the form (a /\ b /\ ...), which then forms the
+			// implication (a /\ b /\ ...) -> lit
+			let clause: Clause = reason.explain(&mut self.propagators, &mut self.state, Some(lit));
+			// This is converted into a clause (¬a \/ ¬b \/ ... \/ lit)
+			for &l in &clause {
+				if l == lit {
+					continue;
+				}
+				// Get the value of the original reason lit by negating again: ¬¬a
+				// gives a
+				let val = self.state.trail.get_sat_value(!l);
+				if !val.unwrap_or(false) {
+					tracing::error!(lit_prop = i32::from(lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
+				}
+				debug_assert!(
+					val.unwrap_or(false),
+					"Literal {} in Reason for {} is {:?}, but should be known true",
+					!l,
+					lit,
+					val
+				);
+			}
+		} else {
+			debug_assert_eq!(
+				self.state.decision_level(),
+				0,
+				"Literal {} propagated without reason at non-zero decision level",
+				lit
+			);
+		}
 	}
 }
 
@@ -496,6 +537,12 @@ impl State {
 		self.conflict = None;
 		// Remove (now invalid) propagations (but leave clauses in place)
 		self.propagation_queue.clear();
+		#[cfg(debug_assertions)]
+		{
+			// (DEBUG ONLY) Clear the debug checking queues.
+			self.check_reason.clear();
+			self.check_int_fixed.clear();
+		}
 		// Backtrack trail
 		self.trail.notify_backtrack(level);
 		// Empty propagation queue
