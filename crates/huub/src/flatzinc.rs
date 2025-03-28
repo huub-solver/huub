@@ -344,6 +344,20 @@ where
 		}
 	}
 
+	/// Check whether an annotation atom is present in the given list of
+	/// annotations, marking it as used if found.
+	fn anns_contains(&self, ann: &[Annotation<S>], ann_used: &mut [bool], ident: &str) -> bool {
+		for (i, a) in ann.iter().enumerate() {
+			if let Annotation::Atom(x) = a {
+				if x.deref() == ident {
+					ann_used[i] = true;
+					return true;
+				}
+			}
+		}
+		false
+	}
+
 	/// Extract a [`Vec<Literal>`] from an [`Argument`].
 	fn arg_array(&self, arg: &'a Argument<S>) -> Result<&'a Vec<Literal<S>>, FlatZincError> {
 		match arg {
@@ -864,6 +878,7 @@ where
 			if self.processed[i] {
 				continue;
 			}
+			let mut ann_used = vec![false; c.ann.len()];
 			match c.id.deref() {
 				"array_bool_and" => {
 					if let [es, r] = c.args.as_slice() {
@@ -1112,7 +1127,18 @@ where
 						let args = self.arg_array(args)?;
 						let args: Result<Vec<_>, _> =
 							args.iter().map(|l| self.lit_int(l)).collect();
-						self.prb += all_different_int(args?);
+						let mut all_diff = all_different_int(args?);
+						let force_bounds = self.anns_contains(&c.ann, &mut ann_used, "bounds");
+						let force_value =
+							self.anns_contains(&c.ann, &mut ann_used, "value_propagation");
+						match (force_bounds, force_value) {
+							(false, false) => {} // No
+							(bounds, value) => {
+								all_diff.use_bounds_consistent_propagator(bounds);
+								all_diff.use_value_consistent_propagator(value);
+							}
+						}
+						self.prb += all_diff;
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_all_different",
@@ -1530,6 +1556,14 @@ where
 					}
 				}
 				_ => return Err(FlatZincError::UnknownConstraint(c.id.to_string())),
+			}
+			for (i, used) in ann_used.iter().enumerate() {
+				if !used {
+					warn!(
+						"ignored unsupported annotation `{}' on constraint type `{}`",
+						c.ann[i], c.id
+					);
+				}
 			}
 		}
 
