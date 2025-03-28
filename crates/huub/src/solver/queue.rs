@@ -103,6 +103,20 @@ impl<E> Default for PriorityQueue<E> {
 }
 
 impl PropagatorQueue {
+	#[cfg(debug_assertions)]
+	/// (TARGET DEBUG) Method used to create a dummy queue for temporary
+	/// replacement of the propagator queue.
+	///
+	/// Used in [`Engine::debug_check_reasons`].
+	pub(crate) fn dummy_queue(num_prop: usize) -> Self {
+		use index_vec::index_vec;
+
+		Self {
+			queue: PriorityQueue::default(),
+			info: index_vec![PropagatorInfo { enqueued: true, priority: PriorityLevel::Lowest }; num_prop],
+		}
+	}
+
 	/// Enqueue a given propagator when it is not already enqueued.
 	pub(crate) fn enqueue_propagator(&mut self, prop: PropRef) {
 		if !self.info[prop].enqueued {

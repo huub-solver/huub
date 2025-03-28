@@ -407,42 +407,96 @@ impl PropagatorExtension for Engine {
 			"propagate"
 		);
 		// Debug helper to ensure that any reason is based on known true literals
-		#[cfg(debug_assertions)]
-		{
-			let mut prev: HashMap<RawVar, bool> = HashMap::new();
-			for &lit in queue.iter() {
-				if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
-					let clause: Clause =
-						reason.explain(&mut self.propagators, &mut self.state, Some(lit));
-					for &l in &clause {
-						if l == lit {
-							continue;
-						}
-						let val = self.state.trail.get_sat_value(!l).or(prev
-							.get(&l.var())
-							.map(|&v| if l.is_negated() { v } else { !v }));
-						if !val.unwrap_or(false) {
-							tracing::error!(lit_prop = i32::from(lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
-						}
-						debug_assert!(
-							val.unwrap_or(false),
-							"Literal {} in Reason for {} is {:?}, but should be known true",
-							!l,
-							lit,
-							val
-						);
-					}
-				}
-				// Recoprd assignment of the previous literal so it is available when
-				// checking next reason.
-				let _ = prev.insert(lit.var(), !lit.is_negated());
-			}
-		}
+		self.debug_check_reasons(&queue);
 		queue
 	}
 	fn reason_persistence(&self) -> ClausePersistence {
 		ClausePersistence::Forgettable
 	}
+}
+
+impl Engine {
+	#[cfg(debug_assertions)]
+	/// (TARGET DEBUG) Check that the reason of each propagated literal contains only known true literals
+	fn debug_check_reasons(&mut self, propagated: &[RawLit]) {
+		// Backup the propagator queue as it will otherwise be modified during the
+		// check when using [`Self::notify_assignments`].
+		let num_prop = self.state.propagator_queue.info.len();
+		let pqueue_backup = mem::replace(
+			&mut self.state.propagator_queue,
+			PropagatorQueue::dummy_queue(num_prop),
+		);
+
+		// Add artificial decision level to process consequences of propagated
+		// literals
+		let level = self.state.decision_level();
+		self.state.notify_new_decision_level();
+
+		// Literal valuation function that also considers the consistency
+		// propagation that the SAT solver is expected to perform.
+		let value = |state: &State, lit: RawLit| -> Option<bool> {
+			// Check the whether the literal is assigned on the trail;
+			if let Some(val) = state.trail.get_sat_value(lit) {
+				return Some(val);
+			}
+			// Check whether the literal is assigned because of integer consequences
+			if let Some((iv, meaning)) = state.bool_to_int.get(lit.var()) {
+				let meaning = meaning.unwrap_or_else(|| state.int_vars[iv].lit_meaning(lit));
+				let (lb, ub) = state.int_vars[iv].get_bounds(state);
+
+				return match meaning {
+					IntLitMeaning::Eq(i) if i == lb && i == ub => Some(true),
+					IntLitMeaning::Eq(i) if i < lb || ub < i => Some(false),
+					IntLitMeaning::Less(i) if ub < i => Some(true),
+					IntLitMeaning::Less(i) if lb >= i => Some(false),
+					IntLitMeaning::NotEq(_) => unreachable!(),
+					IntLitMeaning::GreaterEq(_) => unreachable!(),
+					_ => None,
+				}
+				.map(|v| if lit.is_negated() { !v } else { v });
+			}
+			None
+		};
+
+		for &lit in propagated.iter() {
+			if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
+				// Reason is in the form (a /\ b /\ ...), which then forms the
+				// implication (a /\ b /\ ...) -> lit
+				let clause: Clause =
+					reason.explain(&mut self.propagators, &mut self.state, Some(lit));
+				// This is converted into a clause (¬a \/ ¬b \/ ... \/ lit)
+				for &l in &clause {
+					if l == lit {
+						continue;
+					}
+					// Get the value of the original reason lit by negating again: ¬¬a
+					// gives a
+					let val = value(&self.state, !l);
+					if !val.unwrap_or(false) {
+						tracing::error!(lit_prop = i32::from(lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
+					}
+					debug_assert!(
+						val.unwrap_or(false),
+						"Literal {} in Reason for {} is {:?}, but should be known true",
+						!l,
+						lit,
+						val
+					);
+				}
+			}
+			// Record assignment of the previous literal so it is available when
+			// checking next reason.
+			self.notify_assignments(&[lit]);
+		}
+
+		// Revert to real decision level
+		self.state.notify_backtrack::<true>(level as usize, false);
+		// Restore the propagation queue
+		self.state.propagator_queue = pqueue_backup;
+	}
+
+	#[cfg(not(debug_assertions))]
+	fn debug_check_reasons(&mut self, _propagated: &[RawLit]) {}
 }
 
 impl SearchStatistics {
