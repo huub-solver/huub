@@ -1,6 +1,7 @@
 //! Structure and algorithms for the seq_precede_chain constraint, which
 //! enforces that i precedes i+1 for all i>0 in a list of integer variables.
 
+use std::cmp::min;
 use tracing::trace;
 use crate::solver::trail::TrailedInt;
 use crate::solver::{BoolView, IntLitMeaning};
@@ -121,7 +122,9 @@ impl SeqPrecedeChainBounds {
 		}
 
 		for i in 1..self.last.len() {
-			let _ = actions.set_trailed_int(self.last_val[actions.get_trailed_int(self.last[i]) as usize], i as IntVal);
+			if self.last[i] < self.vars.len() {
+				let _ = actions.set_trailed_int(self.last_val[actions.get_trailed_int(self.last[i]) as usize], i as IntVal);
+			}
 		}
 
 		self.initialized = true;
@@ -130,11 +133,7 @@ impl SeqPrecedeChainBounds {
 	}
 
 	fn get_upper_limit<P: PropagationActions>(&self, actions: &mut P, k: usize) -> IntVal {
-		if k < self.last.len() {
-			actions.get_trailed_int(self.last[k])
-		} else {
-			self.vars.len() as IntVal - 1
-		}
+		min(actions.get_trailed_int(self.last[k]), self.vars.len() as IntVal - 1)
 	}
 
 	fn repair_upper<P: PropagationActions>(&self, actions: &mut P, mut k: IntVal) -> Result<(), Conflict> {
@@ -199,13 +198,9 @@ impl SeqPrecedeChainBounds {
 		let n = vars.len();
 		let ub = vars.iter()
 			.fold(0, |u, &item| if solver.get_int_upper_bound(item) > u { u + 1 } else { u });
-		let lb = vars.iter()
-			.map(|&item| solver.get_int_lower_bound(item))
-			.max()
-			.unwrap();
 
 		let first = (0..=ub).map(|_| solver.new_trailed_int(0)).collect();
-		let last = (0..=lb)
+		let last = (0..=ub)
 			.map(|i| if i == 0 {
 				solver.new_trailed_int(IntVal::MIN)
 			} else {
@@ -246,10 +241,10 @@ where
 			.map(|(i, &v)| if let Some(val) = actions.get_int_val(v) {Some((i, val))} else {None})
 			.flatten()
 			.collect::<Vec<_>>());
-		//trace!("first: {:?}", self.first.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		//trace!("last: {:?}", self.last.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		//trace!("first_val: {:?}", self.first_val.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		//trace!("last_val: {:?}", self.last_val.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
+		trace!("first: {:?}", self.first.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
+		trace!("last: {:?}", self.last.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
+		trace!("first_val: {:?}", self.first_val.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
+		trace!("last_val: {:?}", self.last_val.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
 
 		if self.initialized {
 			for (i, &var) in self.vars.iter().enumerate() {
@@ -287,7 +282,19 @@ mod tests {
 			Solver,
 		},
 	};
+	use crate::solver::Value;
 	use crate::solver::Value::Int;
+
+	fn check_valid_solution(sol: &[Value]) -> bool {
+		sol.iter()
+			.map(|v| {let Int(val) = *v else { return None }; Some(val)})
+			.fold(Some(0), |u, val| {
+				match (u, val) {
+					(Some(uv), Some(val)) => if val <= uv + 1 {Some(max(uv, val))} else {None},
+					_ => None,
+				}
+			}).is_some()
+	}
 
 	#[test]
 	#[traced_test]
@@ -349,16 +356,41 @@ mod tests {
 		);
 
 		SeqPrecedeChainBounds::new_in(&mut slv, vec![x1, x2, x3, x4, x5, x6, x7, x8, x9]);
+		slv.assert_all_solutions(&[x1, x2, x3, x4, x5, x6, x7, x8, x9], check_valid_solution);
 
-		slv.assert_all_solutions(&[x1, x2, x3, x4, x5, x6, x7, x8, x9],
-								 |sol| sol.iter()
-									 .map(|v| {let Int(val) = *v else { return None }; Some(val)})
-									 .fold(Some(0), |u, val| {
-										 match (u, val) {
-											 (Some(uv), Some(val)) => if val <= uv + 1 {Some(max(uv, val))} else {None},
-											 _ => None,
-										 }
-									 }).is_some());
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_seq_precede_chain_unrestricted() {
+		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let x1 = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=4]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let x2 = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=4]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let x3 = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=4]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let x4 = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=4]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+
+		SeqPrecedeChainBounds::new_in(&mut slv, vec![x1, x2, x3, x4]);
+		slv.assert_all_solutions(&[x1, x2, x3, x4], check_valid_solution);
 
 	}
 
