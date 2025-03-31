@@ -156,7 +156,7 @@ impl SeqPrecedeChainBounds {
 				let _= actions.set_trailed_int(self.first[k as usize], i);
 				let _= actions.set_trailed_int(self.first_val[i as usize], k);
 				k += 1;
-				if i < actions.get_trailed_int(self.first[k as usize]) {
+				if (k as usize) == self.first.len() || i < actions.get_trailed_int(self.first[k as usize]) {
 					return Ok(());
 				}
 				lim = self.get_upper_limit(actions, k as usize);
@@ -165,7 +165,7 @@ impl SeqPrecedeChainBounds {
 		}
 
 		if (i as usize) < self.vars.len() {
-			trace!("Hit the special case with i={}, k={}", i-1, k);
+			trace!("Hit right side border case with i={}, k={}", i-1, k);
 			actions.set_int_lower_bound(self.vars[i as usize - 1], k, |a: &mut P| self.explain_lower(a, i as usize - 1, k))?;
 		}
 
@@ -178,6 +178,7 @@ impl SeqPrecedeChainBounds {
 		trace!("Repairing lower for {k}");
 		let mut i = actions.get_trailed_int(self.last[k as usize]);
 		while k > 0 {
+
 			if actions.check_int_in_domain(self.vars[i as usize], k) {
 				let _= actions.set_trailed_int(self.last[k as usize], i);
 				let _= actions.set_trailed_int(self.last_val[i as usize], k);
@@ -190,7 +191,13 @@ impl SeqPrecedeChainBounds {
 					return Ok(());
 				}
 			}
+
 			i -= 1;
+			if i < 0 {
+				trace!("Hit left side border case with i={}, k={}", i, k);
+				actions.set_int_lower_bound(self.vars[0], k, |a: &mut P| self.explain_lower(a, 0, k))?;
+			}
+
 		}
 
 		Ok(())
@@ -248,11 +255,11 @@ where
 			.map(|(i, &v)| if let Some(val) = actions.get_int_val(v) {Some((i, val))} else {None})
 			.flatten()
 			.collect::<Vec<_>>());
-		trace!("first: {:?}", self.first.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		trace!("last: {:?}", self.last.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		trace!("first_val: {:?}", self.first_val.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		trace!("last_val: {:?}", self.last_val.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		trace!("max_last: {:?}", actions.get_trailed_int(self.max_last));
+		//trace!("first: {:?}", self.first.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
+		//trace!("last: {:?}", self.last.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
+		//trace!("first_val: {:?}", self.first_val.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
+		//trace!("last_val: {:?}", self.last_val.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
+		//trace!("max_last: {:?}", actions.get_trailed_int(self.max_last));
 
 		if self.initialized {
 			for (i, &var) in self.vars.iter().enumerate() {
