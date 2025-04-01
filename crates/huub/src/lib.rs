@@ -241,9 +241,9 @@ where
 }
 /// Create a constraint that enforces that given decision variables of starting positions and sizes
 /// of k-dimensional hyperrectangles, none of the rectangles overlap.
-pub fn diffn_int(box_posn: Vec<Vec<IntDecision>>, box_size: Vec<Vec<IntDecision>>) -> IntDiffn
+pub fn diffn_int(box_posn: Vec<Vec<IntDecision>>, box_size: Vec<Vec<IntDecision>>, non_strict: bool) -> IntDiffn
 {
-	IntDiffn {box_posn, box_size}
+	IntDiffn {box_posn, box_size, non_strict}
 }
 
 /// Create a constraint that enforces that a result decision variable takes the

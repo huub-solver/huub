@@ -1101,9 +1101,9 @@ where
                                       self.lit_int(l)).collect())
                             .try_collect()?;
                         if is_nonstrict {
-						    //self.prb += diffn_int_nonstrict(args?); TODO: Add nonstrict
+                            self.prb += diffn_int(box_posn, box_size, true);
                         } else {
-                            self.prb += diffn_int(box_posn, box_size);
+                            self.prb += diffn_int(box_posn, box_size, false);
                         }
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
@@ -1141,9 +1141,9 @@ where
 							.map(|c| c.to_vec())
 							.collect();
                         if is_nonstrict {
-						    //self.prb += diffn_int_nonstrict(args?); TODO: Add nonstrict
+						    self.prb += diffn_int(start_pos, sizes, true);
                         } else {
-                        self.prb += diffn_int(start_pos, sizes);
+                        self.prb += diffn_int(start_pos, sizes, false);
                         }
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
