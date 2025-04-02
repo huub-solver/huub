@@ -64,13 +64,9 @@ fn test_unify_int_lin_view_domains() {
 	let a = map.get_int(&mut slv, a);
 	let b = map.get_int(&mut slv, b);
 
-	assert_eq!(
-		slv.get_all_solutions(&[a.into(), b.into()]),
-		(
-			SolveResult::Complete,
-			vec![vec![Value::Int(1), Value::Int(3)]]
-		)
-	);
+	let (res, _, solns) = slv.get_all_solutions(&[a.into(), b.into()]);
+	assert_eq!(res, SolveResult::Complete);
+	assert_eq!(solns, vec![vec![Value::Int(1), Value::Int(3)]]);
 }
 
 impl Model {
@@ -85,12 +81,12 @@ impl Model {
 
 impl Solver {
 	pub(crate) fn assert_all_solutions<V: Into<View> + Clone>(
-		&mut self,
+		self,
 		vars: &[V],
 		pred: impl Fn(&[Value]) -> bool,
 	) {
 		let vars: Vec<_> = vars.iter().map(|v| v.clone().into()).collect();
-		let status = self.all_solutions(&vars, |value| {
+		let (status, _) = self.all_solutions(&vars, |value| {
 			let mut soln = Vec::with_capacity(vars.len());
 			for var in &vars {
 				soln.push(value(*var));
@@ -104,9 +100,9 @@ impl Solver {
 		assert_eq!(self.solve(|_| unreachable!()), SolveResult::Unsatisfiable);
 	}
 
-	pub(crate) fn expect_solutions<V: Into<View> + Clone>(&mut self, vars: &[V], expected: Expect) {
+	pub(crate) fn expect_solutions<V: Into<View> + Clone>(self, vars: &[V], expected: Expect) {
 		let vars: Vec<_> = vars.iter().map(|v| v.clone().into()).collect();
-		let (status, mut solns) = self.get_all_solutions(&vars);
+		let (status, _, mut solns) = self.get_all_solutions(&vars);
 		assert_eq!(status, SolveResult::Complete);
 		solns.sort();
 		let solns = format!(
