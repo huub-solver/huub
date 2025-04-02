@@ -1143,7 +1143,7 @@ where
                         if is_nonstrict {
 						    self.prb += diffn_int(start_pos, sizes, true);
                         } else {
-                        self.prb += diffn_int(start_pos, sizes, false);
+                            self.prb += diffn_int(start_pos, sizes, false);
                         }
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
