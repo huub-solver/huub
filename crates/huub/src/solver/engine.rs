@@ -62,7 +62,7 @@ pub struct Engine {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct SearchStatistics {
+pub(crate) struct EngineStatistics {
 	/// Number of conflicts encountered
 	pub(crate) conflicts: u64,
 	/// Number of search decisions left to the oracle solver
@@ -115,7 +115,7 @@ pub struct State {
 	/// Storage for clauses to be communicated to the solver
 	pub(crate) clauses: VecDeque<Clause>,
 	/// Solving statistics
-	pub(crate) statistics: SearchStatistics,
+	pub(crate) statistics: EngineStatistics,
 	/// Whether VSIDS is currently enabled
 	pub(crate) vsids: bool,
 
@@ -483,35 +483,6 @@ impl Engine {
 				lit
 			);
 		}
-	}
-}
-
-impl SearchStatistics {
-	/// Returns the number of conflicts encountered during the search.
-	pub fn conflicts(&self) -> u64 {
-		self.conflicts
-	}
-	/// Return the number of search decisions that was left to the oracle solver.
-	pub fn oracle_decisions(&self) -> u64 {
-		self.oracle_decisions
-	}
-	/// Returns the peak depth of the search tree.
-	pub fn peak_depth(&self) -> u32 {
-		self.peak_depth
-	}
-	/// Returns the number of propagations performed by the constraint programming
-	/// engine during the search.
-	pub fn propagations(&self) -> u64 {
-		self.propagations
-	}
-	/// Returns the number of times the search was restarted by the oracle solver.
-	pub fn restarts(&self) -> u32 {
-		self.restarts
-	}
-	/// Returns the number of search decisions that followed the user specified
-	/// search heuristic.
-	pub fn user_decisions(&self) -> u64 {
-		self.user_decisions
 	}
 }
 
