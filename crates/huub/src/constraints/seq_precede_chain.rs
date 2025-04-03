@@ -22,14 +22,13 @@ pub struct SeqPrecedeChain {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds propagator for the `seq_precede_chain` constraint.
-pub struct SeqPrecedeChainBounds {
+pub struct SeqPrecedeChainBounds {  //todo is the name based on what it propagates or what triggers propagation?
 	/// List of integer variables where first occurrences of all i>0 must be ordered.
 	vars: Vec<IntView>,
 	initialized: bool,
 	first: Vec<TrailedInt>,
 	last: Vec<TrailedInt>,
 	first_val: Vec<TrailedInt>,
-	last_val: Vec<TrailedInt>,
 	max_last: TrailedInt,
 }
 
@@ -107,6 +106,7 @@ impl SeqPrecedeChainBounds {
 				low = lb_v;
 			}
 		}
+		let _ = actions.set_trailed_int(self.max_last, low);
 
 		for (i, &v) in self.vars.iter().enumerate().rev() {
 			if actions.get_trailed_int(self.first[low as usize]) == i as IntVal {
@@ -121,16 +121,6 @@ impl SeqPrecedeChainBounds {
 				break;
 			}
 		}
-
-		let mut max_last = 0;
-		for i in 1..self.last.len() {
-			let lv = actions.get_trailed_int(self.last[i]) as usize;
-			if lv < self.vars.len() {
-				max_last = i;
-				let _ = actions.set_trailed_int(self.last_val[lv], i as IntVal);
-			}
-		}
-		let _ = actions.set_trailed_int(self.max_last, max_last as IntVal);
 
 		self.initialized = true;
 		Ok(())
@@ -155,6 +145,9 @@ impl SeqPrecedeChainBounds {
 			if actions.check_int_in_domain(self.vars[i as usize], k) {
 				let _= actions.set_trailed_int(self.first[k as usize], i);
 				let _= actions.set_trailed_int(self.first_val[i as usize], k);
+				if actions.get_trailed_int(self.last[k as usize]) == i {
+					actions.set_int_lower_bound(self.vars[i as usize], k, |a: &mut P| self.explain_lower(a, i as usize, k))?;
+				}
 				k += 1;
 				if (k as usize) == self.first.len() || i < actions.get_trailed_int(self.first[k as usize]) {
 					return Ok(());
@@ -169,11 +162,12 @@ impl SeqPrecedeChainBounds {
 			actions.set_int_lower_bound(self.vars[i as usize - 1], k, |a: &mut P| self.explain_lower(a, i as usize - 1, k))?;
 		}
 
+		let _ = actions.set_trailed_int(self.first[k as usize], 0);
 		Ok(())
 
 	}
 
-	fn repair_lower<P: PropagationActions>(&self, actions: &mut P, mut k: IntVal) -> Result<(), Conflict> {
+	fn repair_lower<P: PropagationActions>(&self, actions: &mut P, mut k: IntVal) -> Result<(IntVal, IntVal), Conflict> {
 
 		trace!("Repairing lower for {k}");
 		let mut i = actions.get_trailed_int(self.last[k as usize]);
@@ -181,14 +175,13 @@ impl SeqPrecedeChainBounds {
 
 			if actions.check_int_in_domain(self.vars[i as usize], k) {
 				let _= actions.set_trailed_int(self.last[k as usize], i);
-				let _= actions.set_trailed_int(self.last_val[i as usize], k);
 				if actions.get_trailed_int(self.first[k as usize]) == i {
 					trace!("Setting lower bound for var {i} to {k}");
 					actions.set_int_lower_bound(self.vars[i as usize], k, |a: &mut P| self.explain_lower(a, i as usize, k))? //todo lazy?
 				}
 				k -= 1;
 				if actions.get_trailed_int(self.last[k as usize]) < i {
-					return Ok(());
+					return Ok((i, k+1));
 				}
 			}
 
@@ -200,7 +193,7 @@ impl SeqPrecedeChainBounds {
 
 		}
 
-		Ok(())
+		Ok((i, 0))
 
 	}
 
@@ -220,7 +213,6 @@ impl SeqPrecedeChainBounds {
 			})
 			.collect();
 		let first_val = (0..n).map(|_| solver.new_trailed_int(0)).collect();
-		let last_val = (0..n).map(|_| solver.new_trailed_int(0)).collect();
 		let max_last = solver.new_trailed_int(0);
 
 		let prop = solver.add_propagator(
@@ -230,13 +222,12 @@ impl SeqPrecedeChainBounds {
 				first,
 				last,
 				first_val,
-				last_val,
 				max_last,
 			}),
 			PriorityLevel::Low);  //todo priority?
 
 		for v in vars {
-			solver.enqueue_on_int_change(prop, v, IntPropCond::Bounds);
+			solver.enqueue_on_int_change(prop, v, IntPropCond::Domain);  //todo domain or bounds?
 		}
 		solver.enqueue_now(prop); //todo is it good to enqueue now or init differently?
 
@@ -255,30 +246,36 @@ where
 			.map(|(i, &v)| if let Some(val) = actions.get_int_val(v) {Some((i, val))} else {None})
 			.flatten()
 			.collect::<Vec<_>>());
-		//trace!("first: {:?}", self.first.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		//trace!("last: {:?}", self.last.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		//trace!("first_val: {:?}", self.first_val.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		//trace!("last_val: {:?}", self.last_val.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		//trace!("max_last: {:?}", actions.get_trailed_int(self.max_last));
+		/*trace!("first: {:?}", self.first.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
+		trace!("last: {:?}", self.last.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
+		trace!("first_val: {:?}", self.first_val.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
+		trace!("max_last: {:?}", actions.get_trailed_int(self.max_last));*/
 
 		if self.initialized {
-			for (i, &var) in self.vars.iter().enumerate() {
-				let k = actions.get_trailed_int(self.first_val[i]);
-				if actions.get_trailed_int(self.first[k as usize]) == i as i64 && actions.get_int_upper_bound(var) < k {
-					self.repair_upper(actions, k)?
+			for (k, &t) in self.first.iter().enumerate() {
+				let i = actions.get_trailed_int(t);
+				if actions.get_trailed_int(self.first_val[i as usize]) == k as IntVal && actions.get_int_upper_bound(self.vars[i as usize]) < k as IntVal {
+					self.repair_upper(actions, k as IntVal)?;
 				}
 			}
-			for (i, &var) in self.vars.iter().enumerate() {
-				let lb = actions.get_int_lower_bound(var);
-				if lb > actions.get_trailed_int(self.max_last) {
-					let _ = actions.set_trailed_int(self.last[lb as usize], i as IntVal);
-					let _ = actions.set_trailed_int(self.max_last, lb);
-					self.repair_lower(actions, lb)?;
+			let mut i = self.vars.len() as IntVal;
+			let mut k = actions.get_trailed_int(self.max_last);
+			while i > 0 {
+				i -= 1;
+				if k > 0 && actions.get_trailed_int(self.last[k as usize - 1]) == i {
+					k -= 1;
+				}
+				let lb = actions.get_int_lower_bound(self.vars[i as usize]);
+				if lb > k {
+					let _ = actions.set_trailed_int(self.last[lb as usize], i);
+					if lb > actions.get_trailed_int(self.max_last) {
+						let _ = actions.set_trailed_int(self.max_last, lb);
+					}
+					(i, k) = self.repair_lower(actions, lb)?;
 					continue;
 				}
-				let k = actions.get_trailed_int(self.last_val[i]);
-				if actions.get_trailed_int(self.last[k as usize]) == i as i64 && !actions.check_int_in_domain(var, k) {
-					self.repair_lower(actions, k)?
+				if actions.get_trailed_int(self.last[k as usize]) == i && !actions.check_int_in_domain(self.vars[i as usize], k) {
+					(i, k) = self.repair_lower(actions, k)?;
 				}
 			}
 			return Ok(());
