@@ -512,8 +512,7 @@ impl IntDiffnSweep {
         dimensions:usize
     ) -> Option<Vec<ForbiddenRegion>> {
         let mut all_fr:Vec<ForbiddenRegion> = vec![];
-        let no_objects = self.box_posn.len();
-        for i in 0..no_objects {
+        for i in 0..self.box_posn.len() {
             let mut fr = ForbiddenRegion {
                 lb: Vec::new(),
                 ub: Vec::new()
@@ -535,6 +534,7 @@ impl IntDiffnSweep {
                     exists = false;
                 }
             }
+<<<<<<< Updated upstream
             assert!(all_fr.len() == fr_support.len());
             let mut regions_to_remove: Vec<(usize, usize)> = Vec::new();
             if exists && Self::overlaps(&lb_tracker[o_idx], &ub_tracker[o_idx], &fr, dimensions) {
@@ -581,10 +581,17 @@ impl IntDiffnSweep {
                 }
 
                 if exists {
+            if exists && Self::overlaps::<P>(&lb_tracker[o_idx], &ub_tracker[o_idx], &fr, dimensions) {
                     fr_support.push(i);
                     all_fr.push(fr);
                 }
 
+=======
+>>>>>>> Stashed changes
+            if exists && Self::overlaps::<P>(&lb_tracker[o_idx], &ub_tracker[o_idx], &fr, dimensions) {
+                    fr_support.push(i);
+                    println!("Valid fr for {}", i);
+                    all_fr.push(fr);
             }
         }
         if all_fr.is_empty() { None } else { Some(all_fr) }
@@ -869,6 +876,7 @@ where
                     //     );
                     // }
 
+<<<<<<< Updated upstream
                     if self.fixed_in_all_dimensions(&ub_tracker, &lb_tracker, o_idx) {
                         let reason = self.explain_conflict(actions,
                                                            &fr_support,
@@ -894,6 +902,45 @@ where
                                                                &lb_tracker,
                                                                &ub_tracker,
                                                                o_idx);
+=======
+            if let Some(all_fr) = self.generate_fr::<P>(
+                &mut fr_support,
+                o_idx,
+                &lb_tracker,
+                &ub_tracker,
+                self.dimensions) {
+                for f in 0..all_fr.len() {
+                    println!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
+                             all_fr[f].ub[0],
+                             all_fr[f].lb[0],
+                             all_fr[f].ub[1],
+                             all_fr[f].lb[1],
+                    );
+                }
+
+                let mut assigned = true;
+                for d in 0..self.dimensions {
+                    let fixed = lb_tracker[o_idx][d] == ub_tracker[o_idx][d];
+                    if !fixed {
+                        assigned = false;
+                    }
+                }
+                if assigned {
+                    let mut reason: Vec<_> = Vec::new();
+                    for i in fr_support {
+                        for d in 0..self.dimensions {
+                            reason.push(actions.get_int_upper_bound_lit(self.box_posn[i][d]));
+                            reason.push(actions.get_int_lower_bound_lit(self.box_posn[i][d]));
+                        }
+                    }
+                    for d in 0..self.dimensions {
+                        reason.push(actions.get_int_upper_bound_lit(self.box_posn[o_idx][d]));
+                        reason.push(actions.get_int_lower_bound_lit(self.box_posn[o_idx][d]));
+                    }
+                    println!("CONFLICT ASSIGN");
+                    return Err(Conflict::new(actions, None, reason));
+                }
+>>>>>>> Stashed changes
 
                             // trace!("CONFLICT assigned min {}", reason.len());
 
