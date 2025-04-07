@@ -24,8 +24,9 @@ use crate::{
 	abs_int, actions::SimplificationActions, all_different_int, array_element, array_maximum_int,
 	array_minimum_int, constraints::int_table::IntTable, disjunctive_strict, div_int,
 	int_in_set_reif, pow_int, reformulate::ReformulationError, seq_precede_chain, table_int,
-	times_int, BoolDecision, BoolDecisionInner, Branching, Decision, IntDecision, IntDecisionInner,
-	IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal, ValueSelection, VariableSelection,
+	times_int, value_precede_chain, BoolDecision, BoolDecisionInner, Branching, Decision,
+	IntDecision, IntDecisionInner, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal,
+	ValueSelection, VariableSelection,
 };
 
 #[derive(Error, Debug)]
@@ -1302,6 +1303,27 @@ where
 							name: "huub_seq_precede_chain",
 							found: c.args.len(),
 							expected: 1,
+						});
+					}
+				}
+				"huub_value_precede_chain_int" => {
+					if let [values, variables] = c.args.as_slice() {
+						let values = self
+							.arg_array(values)?
+							.iter()
+							.map(|l| self.par_int(l))
+							.try_collect()?;
+						let variables = self
+							.arg_array(variables)?
+							.iter()
+							.map(|l| self.lit_int(l))
+							.try_collect()?;
+						self.prb += value_precede_chain(values, variables);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "huub_value_precede_chain",
+							found: c.args.len(),
+							expected: 2,
 						});
 					}
 				}

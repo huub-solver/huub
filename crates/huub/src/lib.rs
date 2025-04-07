@@ -59,6 +59,7 @@ use crate::{
 		int_table::IntTable,
 		int_times::IntTimes,
 		seq_precede_chain::SeqPrecedeChain,
+		value_precede_chain::ValuePrecedeChain,
 		BoxedConstraint, Constraint, SimplificationStatus,
 	},
 	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
@@ -352,6 +353,18 @@ where
 {
 	SeqPrecedeChain {
 		vars: vars.into_iter().map_into().collect(),
+	}
+}
+
+/// Create a constraint that enforces that all values of the first list to occur in order for the
+/// first time in the second list.
+pub fn value_precede_chain(
+	values: Vec<IntVal>,
+	vars: Vec<IntDecision>,
+) -> ValuePrecedeChain {
+	ValuePrecedeChain {
+		values,
+		vars,
 	}
 }
 
@@ -993,6 +1006,7 @@ impl Model {
 			ConstraintStore::IntInSetReif(c) => c.simplify(self),
 			ConstraintStore::IntTable(con) => con.simplify(self),
 			ConstraintStore::SeqPrecedeChain(con) => con.simplify(self),
+			ConstraintStore::ValuePrecedeChain(con) => con.simplify(self),
 			ConstraintStore::Other(con) => con.simplify(self),
 		}?;
 		match status {
@@ -1094,6 +1108,9 @@ impl Model {
 			}
 			ConstraintStore::SeqPrecedeChain(con) => {
 				<SeqPrecedeChain as Constraint<Model>>::initialize(con, &mut ctx);
+			}
+			ConstraintStore::ValuePrecedeChain(con) => {
+				<ValuePrecedeChain as Constraint<Model>>::initialize(con, &mut ctx);
 			}
 			ConstraintStore::Other(con) => con.initialize(&mut ctx),
 		}
@@ -1323,6 +1340,12 @@ impl AddAssign<IntValArrayElement> for Model {
 impl AddAssign<SeqPrecedeChain> for Model {
 	fn add_assign(&mut self, constraint: SeqPrecedeChain) {
 		self.add_constraint(ConstraintStore::SeqPrecedeChain(constraint));
+	}
+}
+
+impl AddAssign<ValuePrecedeChain> for Model {
+	fn add_assign(&mut self, constraint: ValuePrecedeChain) {
+		self.add_constraint(ConstraintStore::ValuePrecedeChain(constraint));
 	}
 }
 
