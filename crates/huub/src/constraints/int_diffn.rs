@@ -173,8 +173,8 @@ impl IntDiffnSweep {
                     trace!(
                         "Reason [[var {:?} [{:?}, {:?}] < {:?}]",
                         o_idx,
-                        lb_tracker[curr_obj_idx][d],
-                        ub_tracker[curr_obj_idx][d],
+                        lb_tracker[o_idx][d],
+                        ub_tracker[o_idx][d],
                         ub_tracker[o_idx][d] + 1
                     );
                     reason.push(
@@ -185,42 +185,42 @@ impl IntDiffnSweep {
                     trace!(
                         "reason [[var {:?} [{:?}, {:?}] >= {:?}]",
                         o_idx,
-                        lb_tracker[curr_obj_idx][d],
-                        ub_tracker[curr_obj_idx][d],
+                        lb_tracker[o_idx][d],
+                        ub_tracker[o_idx][d],
                         lb_tracker[o_idx][d]
                     );
                 }
             }
             for d in 0..self.dimensions {
                 if d == curr_dimension {
-                    // if let Some(v) = self.find_smallest_lb(ub_tracker, lb_tracker, curr_obj_idx, curr_dimension, all_fr) {
-                    //     trace!("GENERALIZED min from {:?} to {:?}",lb_tracker[curr_obj_idx][d], v);
-                    //     reason.push(
-                    //         actions.get_int_lit(
-                    //             self.box_posn[curr_obj_idx][d],
-                    //             IntLitMeaning::GreaterEq(v))
-                    //     );
-                    //     trace!(
-                    //         "Reason [[var {:?} [{:?}, {:?}] >= {:?}]",
-                    //         curr_obj_idx,
-                    //         lb_tracker[curr_obj_idx][d],
-                    //         ub_tracker[curr_obj_idx][d],
-                    //         v
-                    //     );
-                    // } else {
-                    reason.push(
-                        actions.get_int_lit(
-                            self.box_posn[curr_obj_idx][d],
-                            IntLitMeaning::GreaterEq(lb_tracker[curr_obj_idx][d]))
-                    );
-                    trace!(
-                        "Reason [[var {:?} [{:?}, {:?}] >= {:?}]",
-                        curr_obj_idx,
-                        lb_tracker[curr_obj_idx][d],
-                        ub_tracker[curr_obj_idx][d],
-                        lb_tracker[curr_obj_idx][d]
-                    );
-                    // }
+                    if let Some(v) = self.find_smallest_lb(ub_tracker, lb_tracker, curr_obj_idx, curr_dimension, all_fr) {
+                        trace!("GENERALIZED min from {:?} to {:?}",lb_tracker[curr_obj_idx][d], v);
+                        reason.push(
+                            actions.get_int_lit(
+                                self.box_posn[curr_obj_idx][d],
+                                IntLitMeaning::GreaterEq(v))
+                        );
+                        trace!(
+                            "Reason [[var {:?} [{:?}, {:?}] >= {:?}]",
+                            curr_obj_idx,
+                            lb_tracker[curr_obj_idx][d],
+                            ub_tracker[curr_obj_idx][d],
+                            v
+                        );
+                    } else {
+                        reason.push(
+                            actions.get_int_lit(
+                                self.box_posn[curr_obj_idx][d],
+                                IntLitMeaning::GreaterEq(lb_tracker[curr_obj_idx][d]))
+                        );
+                        trace!(
+                            "Reason [[var {:?} [{:?}, {:?}] >= {:?}]",
+                            curr_obj_idx,
+                            lb_tracker[curr_obj_idx][d],
+                            ub_tracker[curr_obj_idx][d],
+                            lb_tracker[curr_obj_idx][d]
+                        );
+                    }
                     reason.push(
                         actions.get_int_lit(
                             self.box_posn[curr_obj_idx][d],
@@ -266,10 +266,10 @@ impl IntDiffnSweep {
                 sweep[curr_dimension], reason)?;
 
             lb_tracker[curr_obj_idx][curr_dimension] = sweep[curr_dimension];
-            // trace!("Setting lb of object {} to {:?} in dimension {} in max",
-            //        curr_obj_idx,
-            //        sweep[curr_dimension],
-            //        curr_dimension);
+            trace!("Setting lb of object {} to {:?} in dimension {} in max",
+                   curr_obj_idx,
+                   sweep[curr_dimension],
+                   curr_dimension);
         }
         Ok((b, changed))
     }
@@ -351,21 +351,21 @@ impl IntDiffnSweep {
             }
             for d in 0..self.dimensions {
                 if d == curr_dimension {
-                    // if let Some(v) = self.find_largest_ub(ub_tracker, lb_tracker, curr_obj_idx, curr_dimension, all_fr) {
-                    //     trace!("GENERALIZED max from {:?} to {:?}",ub_tracker[curr_obj_idx][d] + 1, v);
-                    //     reason.push(
-                    //         actions.get_int_lit(
-                    //             self.box_posn[curr_obj_idx][d],
-                    //             IntLitMeaning::Less(v + 1))
-                    //     );
-                    //     trace!(
-                    //         "Reason [[var {:?} [{:?}, {:?}] < {:?}]",
-                    //         curr_obj_idx,
-                    //         lb_tracker[curr_obj_idx][d],
-                    //         ub_tracker[curr_obj_idx][d],
-                    //         v + 1
-                    //     );
-                    // } else {
+                    if let Some(v) = self.find_largest_ub(ub_tracker, lb_tracker, curr_obj_idx, curr_dimension, all_fr) {
+                        trace!("GENERALIZED max from {:?} to {:?}",ub_tracker[curr_obj_idx][d] + 1, v);
+                        reason.push(
+                            actions.get_int_lit(
+                                self.box_posn[curr_obj_idx][d],
+                                IntLitMeaning::Less(v + 1))
+                        );
+                        trace!(
+                            "Reason [[var {:?} [{:?}, {:?}] < {:?}]",
+                            curr_obj_idx,
+                            lb_tracker[curr_obj_idx][d],
+                            ub_tracker[curr_obj_idx][d],
+                            v + 1
+                        );
+                    } else {
                         reason.push(
                             actions.get_int_lit(
                                 self.box_posn[curr_obj_idx][d],
@@ -378,7 +378,7 @@ impl IntDiffnSweep {
                             ub_tracker[curr_obj_idx][d],
                             ub_tracker[curr_obj_idx][d] + 1
                         );
-                    // }
+                    }
 
                     reason.push(
                         actions.get_int_lit(
@@ -417,8 +417,8 @@ impl IntDiffnSweep {
                     trace!(
                         "Reason [[var {:?} [{:?}, {:?}] >= {:?}]",
                         curr_obj_idx,
-                        actions.get_int_lower_bound(self.box_posn[curr_obj_idx][d]),
-                        actions.get_int_upper_bound(self.box_posn[curr_obj_idx][d]),
+                        lb_tracker[curr_obj_idx][d],
+                        ub_tracker[curr_obj_idx][d],
                         lb_tracker[curr_obj_idx][d]
                     );
                 }
@@ -427,10 +427,10 @@ impl IntDiffnSweep {
                 sweep[curr_dimension], reason)?;
 
             ub_tracker[curr_obj_idx][curr_dimension] = sweep[curr_dimension];
-            // trace!("Setting ub of object {} to {:?} in dimension {} in max",
-            //        curr_obj_idx,
-            //        sweep[curr_dimension],
-            //        curr_dimension);
+            trace!("Setting ub of object {} to {:?} in dimension {} in max",
+                   curr_obj_idx,
+                   sweep[curr_dimension],
+                   curr_dimension);
         }
         Ok((b, changed))
     }
@@ -575,7 +575,7 @@ impl IntDiffnSweep {
 
                 for (c, o) in regions_to_remove.iter().rev() {
                     assert!(fr_support[*c] == *o, "wrong fr support");
-                    println!("WOHOOO IGNORED WSHIT");
+                    //println!("WOHOOO IGNORED WSHIT");
                     let _ = all_fr.remove(*c);
                     fr_support.retain(|&x| x != *o);
                 }
@@ -709,6 +709,7 @@ impl IntDiffnSweep {
                 range_list = range_list.into_iter()
                     .filter(|v| !fr_range.contains(v))
                     .collect();
+                if range_list.is_empty() { break; }
             }
             if !range_list.is_empty() {
                 return None;
@@ -744,6 +745,7 @@ impl IntDiffnSweep {
                 range_list = range_list.into_iter()
                     .filter(|v| !fr_range.contains(v))
                     .collect();
+                if range_list.is_empty() { break; }
             }
             if !range_list.is_empty() {
                 return None;
@@ -842,87 +844,83 @@ where
                  .collect())
             .collect();
 
-        let mut nonfix = true;
-        while nonfix {
-            nonfix = false;
-            for o_idx in 0..self.box_posn.len() {
-                // trace!("DOING OBJECT {:?}", o_idx);
-                // for o in 0..self.box_posn.len() {
-                //     trace!("object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?}, size {}",
-                //          o,
-                //          ub_tracker[o][0],
-                //          lb_tracker[o][0],
-                //          ub_tracker[o][1],
-                //          lb_tracker[o][1],
-                //          self.box_size[o][0]
-                //     );
-                // }
-                let mut fr_support: Vec<usize> = Vec::new();
+        for o_idx in 0..self.box_posn.len() {
+            trace!("DOING OBJECT {:?}", o_idx);
+            for o in 0..self.box_posn.len() {
+                trace!("object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?}, size {}",
+                     o,
+                     ub_tracker[o][0],
+                     lb_tracker[o][0],
+                     ub_tracker[o][1],
+                     lb_tracker[o][1],
+                     self.box_size[o][0]
+                );
+            }
+            let mut fr_support: Vec<usize> = Vec::new();
 
-                if let Some(all_fr) = self.generate_fr::<P>(&mut fr_support, o_idx, &lb_tracker, &ub_tracker, self.dimensions) {
-                    // for f in 0..all_fr.len() {
-                    //     trace!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
-                    //              all_fr[f].ub[0],
-                    //              all_fr[f].lb[0],
-                    //              all_fr[f].ub[1],
-                    //              all_fr[f].lb[1],
-                    //     );
-                    // }
+            if let Some(all_fr) = self.generate_fr::<P>(&mut fr_support, o_idx, &lb_tracker, &ub_tracker, self.dimensions) {
+                for f in 0..all_fr.len() {
+                    trace!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
+                             all_fr[f].ub[0],
+                             all_fr[f].lb[0],
+                             all_fr[f].ub[1],
+                             all_fr[f].lb[1],
+                    );
+                }
 
-                    if self.fixed_in_all_dimensions(&ub_tracker, &lb_tracker, o_idx) {
+                if self.fixed_in_all_dimensions(&ub_tracker, &lb_tracker, o_idx) {
+                    let reason = self.explain_conflict(actions,
+                                                       &fr_support,
+                                                       &lb_tracker,
+                                                       &ub_tracker,
+                                                       o_idx);
+                    // trace!("CONFLICT assigned {:?}", reason.len());
+                    return Err(Conflict::new(actions, None, reason));
+                }
+                for d in 0..self.dimensions {
+                    let fixed = lb_tracker[o_idx][d] == ub_tracker[o_idx][d];
+                    let (b1, c1) = self.prune_min(actions,
+                                                  &fr_support,
+                                                  o_idx,
+                                                  &mut lb_tracker,
+                                                  &ub_tracker,
+                                                  d,
+                                                  &all_fr)?;
+                    if !fixed && !b1 {
+                        // Conflict since there is no feasible origin in this dimension
                         let reason = self.explain_conflict(actions,
                                                            &fr_support,
                                                            &lb_tracker,
                                                            &ub_tracker,
                                                            o_idx);
-                        // trace!("CONFLICT assigned {:?}", reason.len());
+
+                        // trace!("CONFLICT assigned min {}", reason.len());
+
                         return Err(Conflict::new(actions, None, reason));
                     }
-                    for d in 0..self.dimensions {
-                        let fixed = lb_tracker[o_idx][d] == ub_tracker[o_idx][d];
-                        let (b1, c1) = self.prune_min(actions,
-                                                      &fr_support,
-                                                      o_idx,
-                                                      &mut lb_tracker,
-                                                      &ub_tracker,
-                                                      d,
-                                                      &all_fr)?;
-                        if !fixed && !b1 {
-                            // Conflict since there is no feasible origin in this dimension
-                            let reason = self.explain_conflict(actions,
-                                                               &fr_support,
-                                                               &lb_tracker,
-                                                               &ub_tracker,
-                                                               o_idx);
 
-                            // trace!("CONFLICT assigned min {}", reason.len());
-
-                            return Err(Conflict::new(actions, None, reason));
-                        }
-
-                        let fixed = lb_tracker[o_idx][d] == ub_tracker[o_idx][d];
-                        let (b2, c2) = self.prune_max(actions,
-                                                      &fr_support,
-                                                      o_idx,
-                                                      &lb_tracker,
-                                                      &mut ub_tracker,
-                                                      d,
-                                                      &all_fr)?;
-                        if !fixed && !b2 {
-                            // Conflict since there is no feasible origin in this dimension
-                            let reason = self.explain_conflict(actions,
-                                                               &fr_support,
-                                                               &lb_tracker,
-                                                               &ub_tracker,
-                                                               o_idx);
-                            // trace!("CONFLICT assigned max");
-                            // trace!("CONFLICT prune_max");
-                            return Err(Conflict::new(actions, None, reason));
-                        }
-                        if c1 || c2 {
-                            nonfix = true;
-                        }
+                    let fixed = lb_tracker[o_idx][d] == ub_tracker[o_idx][d];
+                    let (b2, c2) = self.prune_max(actions,
+                                                  &fr_support,
+                                                  o_idx,
+                                                  &lb_tracker,
+                                                  &mut ub_tracker,
+                                                  d,
+                                                  &all_fr)?;
+                    if !fixed && !b2 {
+                        // Conflict since there is no feasible origin in this dimension
+                        let reason = self.explain_conflict(actions,
+                                                           &fr_support,
+                                                           &lb_tracker,
+                                                           &ub_tracker,
+                                                           o_idx);
+                        // trace!("CONFLICT assigned max");
+                        // trace!("CONFLICT prune_max");
+                        return Err(Conflict::new(actions, None, reason));
                     }
+                    // if c1 || c2 {
+                    //     nonfix = true;
+                    // }
                 }
             }
         }
