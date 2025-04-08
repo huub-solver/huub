@@ -22,7 +22,7 @@ pub struct SeqPrecedeChain {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds propagator for the `seq_precede_chain` constraint.
-pub struct SeqPrecedeChainBounds {  //todo is the name based on what it propagates or what triggers propagation?
+pub struct SeqPrecedeChainBounds {
 	/// List of integer variables where first occurrences of all i>0 must be ordered.
 	vars: Vec<IntView>,
 	initialized: bool,
@@ -34,13 +34,18 @@ pub struct SeqPrecedeChainBounds {  //todo is the name based on what it propagat
 
 impl<S: SimplificationActions> Constraint<S> for SeqPrecedeChain {
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		if self.vars.iter().all(|&v| actions.get_int_upper_bound(v) <= 0) {
+		let mut ub = 0;
+		for &v in self.vars.iter() {
+			if actions.check_int_in_domain(v, ub + 1) {
+				ub += 1;
+			}
+			actions.set_int_upper_bound(v, ub)?;
+		}
+		//todo this can become more powerful if updated upper bound from previous loop is available
+		self.vars.retain(|&v| actions.get_int_upper_bound(v) > 0);
+		if self.vars.len() == 0 {
 			return Ok(SimplificationStatus::Subsumed);
 		}
-		for (i, &v) in self.vars.iter().enumerate() {
-			actions.set_int_upper_bound(v, i as IntVal + 1)?;
-		}
-		//todo could do more sophisticated?
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
@@ -53,8 +58,6 @@ impl<S: SimplificationActions> Constraint<S> for SeqPrecedeChain {
 
 impl SeqPrecedeChainBounds {
 
-	//todo method annotations like inline
-
 	fn explain_upper<P: PropagationActions>(&self, actions: &mut P, i: usize, k: IntVal) -> Vec<BoolView> {
 		self.vars.iter()
 			.take(i)
@@ -64,8 +67,8 @@ impl SeqPrecedeChainBounds {
 
 	fn explain_lower<P: PropagationActions>(&self, actions: &mut P, i: usize, k: IntVal) -> Vec<BoolView> {
 		let mut v = self.ex_l(actions, i+1, k);
-		v.append(&mut self.explain_upper(actions, i, k));
-		v //todo other options to join?
+		v.extend(self.explain_upper(actions, i, k));
+		v
 	}
 
 	fn ex_l<P: PropagationActions>(&self, actions: &mut P, i: usize, k: IntVal) -> Vec<BoolView> {
@@ -87,7 +90,7 @@ impl SeqPrecedeChainBounds {
 		let mut low = 0;
 
 		for (i, &v) in self.vars.iter().enumerate() {
-			let mut ub_v = actions.get_int_upper_bound(v); //todo if this upper bound is changed, it is not immediately reflected in further calls
+			let mut ub_v = actions.get_int_upper_bound(v);
 			if ub_v > up + 1 {
 				if actions.check_int_in_domain(v, up+1) {
 					ub_v = up + 1;
@@ -224,12 +227,12 @@ impl SeqPrecedeChainBounds {
 				first_val,
 				max_last,
 			}),
-			PriorityLevel::Low);  //todo priority?
+			PriorityLevel::Low);
 
 		for v in vars {
 			solver.enqueue_on_int_change(prop, v, IntPropCond::Domain);  //todo domain or bounds?
 		}
-		solver.enqueue_now(prop); //todo is it good to enqueue now or init differently?
+		solver.enqueue_now(prop);
 
 	}
 }
