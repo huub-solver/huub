@@ -358,8 +358,7 @@ impl IntDiffnSweep {
         dimensions:usize
     ) -> Option<Vec<ForbiddenRegion>> {
         let mut all_fr:Vec<ForbiddenRegion> = vec![];
-        let no_objects = self.box_posn.len();
-        for i in 0..no_objects {
+        for i in 0..self.box_posn.len() {
             if actions.get_trailed_int(self.removed_objs) & (1 << o_idx) != 0 {
                 continue;
             }
@@ -803,7 +802,6 @@ impl IntDiffnSweep {
                                                  prune_upper)
                     {
                     reason.extend(r);
-
                 } else {
                     reason.push(
                         actions.get_int_lit(
@@ -885,26 +883,27 @@ where
                  .collect())
             .collect();
 
-        let mut internal_b = ForbiddenRegion {
-            lb: Vec::new(),
-            ub: Vec::new()
-        };
+        // let mut internal_b = ForbiddenRegion {
+        //     lb: Vec::new(),
+        //     ub: Vec::new()
+        // };
 
-        for i in 0..self.dimensions {
-            internal_b.lb.push(actions.get_trailed_int(self.bounded_box.lb[i]));
-            internal_b.ub.push(actions.get_trailed_int(self.bounded_box.ub[i]));
+        // for i in 0..self.dimensions {
+        //     internal_b.lb.push(actions.get_trailed_int(self.bounded_box.lb[i]));
+        //     internal_b.ub.push(actions.get_trailed_int(self.bounded_box.ub[i]));
 
-
-            let _ = actions.set_trailed_int(self.bounded_box.lb[i], i64::MAX);
-            let _ = actions.set_trailed_int(self.bounded_box.ub[i], i64::MIN);
-        }
+        //     let _ = actions.set_trailed_int(self.bounded_box.lb[i], i64::MAX);
+        //     let _ = actions.set_trailed_int(self.bounded_box.ub[i], i64::MIN);
+        // }
 
         for o_idx in 0..self.box_posn.len() {
             if actions.get_trailed_int(self.fixed) & (1 << o_idx) != 0 {
                 continue;
             }
 
-            // if !self.disjoint(&internal_b, &lb_tracker, &ub_tracker, o_idx) {
+            // TODO: add so that external events are also considered and affects
+            // the bounding box
+            // if self.disjoint(&internal_b, &lb_tracker, &ub_tracker, o_idx) {
             //     continue;
             // }
 
@@ -987,14 +986,14 @@ where
                     }
 
                     if c1 || c2 {
-                        for i in 0..self.dimensions {
-                            let _ = actions.set_trailed_int(self.bounded_box.lb[i],
-                                                            cmp::min(actions.get_trailed_int(self.bounded_box.lb[i]),
-                                                            lb_tracker[o_idx][i]));
-                            let _ = actions.set_trailed_int(self.bounded_box.ub[i],
-                                                            cmp::max(actions.get_trailed_int(self.bounded_box.ub[i]),
-                                                            ub_tracker[o_idx][i]) + self.box_size[o_idx][i] - 1);
-                        }
+                    //    for i in 0..self.dimensions {
+                    //        let _ = actions.set_trailed_int(self.bounded_box.lb[i],
+                    //                                        cmp::min(actions.get_trailed_int(self.bounded_box.lb[i]),
+                    //                                        lb_tracker[o_idx][i]));
+                    //        let _ = actions.set_trailed_int(self.bounded_box.ub[i],
+                    //                                        cmp::max(actions.get_trailed_int(self.bounded_box.ub[i]),
+                    //                                        ub_tracker[o_idx][i]) + self.box_size[o_idx][i] - 1);
+                    //    }
                     }
 
                 }
