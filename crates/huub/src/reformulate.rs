@@ -132,6 +132,11 @@ pub struct InitConfig {
 	restart: bool,
 	/// Whether to enable the vivification in the oracle solver.
 	vivification: bool,
+	// --- Experiment options for seq_precede_chain ---
+	/// Do domain propagation (true) or just bound propagation (false)
+	pub seq_domain_prop: bool,
+	/// Lazy level: 0 (all eager), 1 (lower bound lazy), 2 (all lazy)
+	pub seq_lazy_level: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

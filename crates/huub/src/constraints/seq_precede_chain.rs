@@ -2,14 +2,15 @@
 //! enforces that i precedes i+1 for all i>0 in a list of integer variables.
 
 use std::cmp::min;
+use pindakaas::Lit as RawLit;
 use tracing::trace;
 use crate::solver::trail::TrailedInt;
-use crate::solver::{BoolView, IntLitMeaning};
+use crate::solver::{BoolView, BoolViewInner, IntLitMeaning};
 use crate::{actions::{
 	ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
 }, constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus}, reformulate::ReformulationError, solver::{
 	activation_list::IntPropCond, queue::PriorityLevel, IntView,
-}, IntDecision, IntVal};
+}, Conjunction, IntDecision, IntVal};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Representation of the `seq_precede_chain` constraint within a model.
@@ -18,6 +19,10 @@ use crate::{actions::{
 pub struct SeqPrecedeChain {
 	/// List of integer decision variables where first occurrences of all i>0 must be ordered.
 	pub(crate) vars: Vec<IntDecision>,
+	/// Whether to propagate on domain (true) or bounds (false)
+	pub(crate) prop_domain: bool,
+	/// Lazy level: 0 (all eager), 1 (lower bounds lazy), 2 (all lazy)
+	pub(crate) lazy_level: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -30,6 +35,7 @@ pub struct SeqPrecedeChainBounds {
 	last: Vec<TrailedInt>,
 	first_val: Vec<TrailedInt>,
 	max_last: TrailedInt,
+	lazy_level: i32,
 }
 
 impl<S: SimplificationActions> Constraint<S> for SeqPrecedeChain {
@@ -51,35 +57,36 @@ impl<S: SimplificationActions> Constraint<S> for SeqPrecedeChain {
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let vars: Vec<_> = self.vars.iter().map(|v| slv.get_solver_int(*v)).collect();
-		SeqPrecedeChainBounds::new_in(slv, vars);
+		SeqPrecedeChainBounds::new_in(slv, vars, self.prop_domain, self.lazy_level);
 		Ok(())
 	}
 }
 
 impl SeqPrecedeChainBounds {
 
-	fn explain_upper<P: PropagationActions>(&self, actions: &mut P, i: usize, k: IntVal) -> Vec<BoolView> {
+	fn explain_upper<E: ExplanationActions>(&self, actions: &mut E, i: usize, k: IntVal) -> Vec<BoolView> {
 		self.vars.iter()
 			.take(i)
-			.map(|&v| actions.get_int_lit(v, IntLitMeaning::Less(k)))
+			.map(|&v| actions.get_int_lit_relaxed(v, IntLitMeaning::Less(k)).0)  //todo int_lit_relaxed vs int_lit?
 			.collect()
 	}
 
-	fn explain_lower<P: PropagationActions>(&self, actions: &mut P, i: usize, k: IntVal) -> Vec<BoolView> {
+	fn explain_lower<E: ExplanationActions>(&self, actions: &mut E, i: usize, k: IntVal) -> Vec<BoolView> {
 		let mut v = self.ex_l(actions, i+1, k);
 		v.extend(self.explain_upper(actions, i, k));
 		v
 	}
 
-	fn ex_l<P: PropagationActions>(&self, actions: &mut P, i: usize, k: IntVal) -> Vec<BoolView> {
+	fn ex_l<E: ExplanationActions>(&self, actions: &mut E, i: usize, k: IntVal) -> Vec<BoolView> {
 		if actions.get_int_lower_bound(self.vars[i]) > k {
-			return vec![actions.get_int_lit(self.vars[i], IntLitMeaning::GreaterEq(k+1))];
+			return vec![actions.get_int_lit_relaxed(self.vars[i], IntLitMeaning::GreaterEq(k+1)).0];
 		}
 		if actions.check_int_in_domain(self.vars[i], k) {
 			return self.ex_l(actions, i+1, k+1);
 		}
 		let mut v = self.ex_l(actions, i+1, k);
-		v.push(actions.get_int_lit(self.vars[i], IntLitMeaning::NotEq(k)));
+		v.push(actions.try_int_lit(self.vars[i], IntLitMeaning::NotEq(k)).unwrap());  //todo THIS MIGHT FAIL?
+		//v.push(actions.get_int_lit_relaxed(self.vars[i], IntLitMeaning::NotEq(k)).0);
 		v
 	}
 
@@ -96,7 +103,7 @@ impl SeqPrecedeChainBounds {
 					ub_v = up + 1;
 				}
 				trace!("Setting upper bound for var {i} to {}", up+1);
-				actions.set_int_upper_bound(v, up+1, |a: &mut P| self.explain_upper(a, i, up+1))?;  //todo lazy?
+				self.set_upper(actions, i, up+1)?;  //todo lazy?
 			}
 			if ub_v == up + 1 {
 				up += 1;
@@ -114,7 +121,7 @@ impl SeqPrecedeChainBounds {
 		for (i, &v) in self.vars.iter().enumerate().rev() {
 			if actions.get_trailed_int(self.first[low as usize]) == i as IntVal {
 				trace!("Setting lower bound for var {i} to {low}");
-				actions.set_int_lower_bound(v, low, |a: &mut P| self.explain_lower(a, i, low))?; //todo lazy?
+				self.set_lower(actions, i, low)?; //todo lazy?
 			}
 			if i as IntVal <= actions.get_trailed_int(self.last[low as usize]) && actions.check_int_in_domain(v, low) {
 				let _ = actions.set_trailed_int(self.last[low as usize], i as IntVal);
@@ -143,13 +150,13 @@ impl SeqPrecedeChainBounds {
 		while i <= lim {
 			if actions.get_int_upper_bound(self.vars[i as usize]) > k {
 				trace!("Setting upper bound for var {i} to {k}");
-				actions.set_int_upper_bound(self.vars[i as usize], k, |a: &mut P| self.explain_upper(a, i as usize, k))? //todo lazy?
+				self.set_upper(actions, i as usize, k)? //todo lazy?
 			}
 			if actions.check_int_in_domain(self.vars[i as usize], k) {
 				let _= actions.set_trailed_int(self.first[k as usize], i);
 				let _= actions.set_trailed_int(self.first_val[i as usize], k);
 				if actions.get_trailed_int(self.last[k as usize]) == i {
-					actions.set_int_lower_bound(self.vars[i as usize], k, |a: &mut P| self.explain_lower(a, i as usize, k))?;
+					self.set_lower(actions, i as usize, k)?;
 				}
 				k += 1;
 				if (k as usize) == self.first.len() || i < actions.get_trailed_int(self.first[k as usize]) {
@@ -162,7 +169,7 @@ impl SeqPrecedeChainBounds {
 
 		if (i as usize) < self.vars.len() {
 			trace!("Hit right side border case with i={}, k={}", i-1, k);
-			actions.set_int_lower_bound(self.vars[i as usize - 1], k, |a: &mut P| self.explain_lower(a, i as usize - 1, k))?;
+			self.set_lower(actions, i as usize - 1, k)?;
 		}
 
 		let _ = actions.set_trailed_int(self.first[k as usize], 0);
@@ -180,7 +187,7 @@ impl SeqPrecedeChainBounds {
 				let _= actions.set_trailed_int(self.last[k as usize], i);
 				if actions.get_trailed_int(self.first[k as usize]) == i {
 					trace!("Setting lower bound for var {i} to {k}");
-					actions.set_int_lower_bound(self.vars[i as usize], k, |a: &mut P| self.explain_lower(a, i as usize, k))? //todo lazy?
+					self.set_lower(actions, i as usize, k)? //todo lazy?
 				}
 				k -= 1;
 				if actions.get_trailed_int(self.last[k as usize]) < i {
@@ -191,7 +198,7 @@ impl SeqPrecedeChainBounds {
 			i -= 1;
 			if i < 0 {
 				trace!("Hit left side border case with i={}, k={}", i, k);
-				actions.set_int_lower_bound(self.vars[0], k, |a: &mut P| self.explain_lower(a, 0, k))?;
+				self.set_lower(actions, 0, k)?;
 			}
 
 		}
@@ -200,8 +207,22 @@ impl SeqPrecedeChainBounds {
 
 	}
 
+	fn set_upper<P: PropagationActions>(&self, actions: &mut P, i: usize, k: IntVal) -> Result<(), Conflict> {
+		if self.lazy_level > 1 {
+			return actions.set_int_upper_bound(self.vars[i], k, actions.deferred_reason((i as u64) << 32 | k as u64));
+		}
+		actions.set_int_upper_bound(self.vars[i], k, |a: &mut P| self.explain_upper(a, i, k))
+	}
+
+	fn set_lower<P: PropagationActions>(&self, actions: &mut P, i: usize, k: IntVal) -> Result<(), Conflict> {
+		if self.lazy_level > 0 {
+			return actions.set_int_lower_bound(self.vars[i], k, actions.deferred_reason(((-(i as i32)) as u64) << 32 | k as u64));
+		}
+		actions.set_int_lower_bound(self.vars[i], k, |a: &mut P| self.explain_upper(a, i, k))
+	}
+
 	/// Create a new [`SeqPrecedeChainBounds`] propagator and post it in the solver.
-	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, vars: Vec<IntView>) {
+	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, vars: Vec<IntView>, prop_domain: bool, lazy_level: i32) {
 
 		let n = vars.len();
 		let ub = vars.iter()
@@ -226,11 +247,12 @@ impl SeqPrecedeChainBounds {
 				last,
 				first_val,
 				max_last,
+				lazy_level,
 			}),
 			PriorityLevel::Low);
 
 		for v in vars {
-			solver.enqueue_on_int_change(prop, v, IntPropCond::Domain);  //todo domain or bounds?
+			solver.enqueue_on_int_change(prop, v, if prop_domain {IntPropCond::Domain} else {IntPropCond::Bounds});  //todo domain or bounds?
 		}
 		solver.enqueue_now(prop);
 
@@ -286,6 +308,28 @@ where
 
 		self.propagate_full(actions)
 
+	}
+
+	fn explain(&mut self, actions: &mut E, _: Option<RawLit>, data: u64) -> Conjunction {
+		let (i, k) = ((data >> 32) as i32, data as i32);
+		let ex = if i < 0 {
+			trace!("Getting lazy lower bound reason for i={i}, k={k}");
+			self.explain_lower(actions, (-i) as usize, k as IntVal)
+		} else {
+			trace!("Getting lazy upper bound reason for i={i}, k={k}");
+			self.explain_upper(actions, i as usize, k as IntVal)
+		};
+		ex.iter()
+			.filter_map(|bv| match bv.0 {
+				BoolViewInner::Lit(l) => Some(l),
+				BoolViewInner::Const(true) => None,
+				BoolViewInner::Const(false) => {
+					unreachable!(
+						"Unexpected false literal in the explanation of seq_precede_chain!"
+					)
+				}
+			})
+			.collect()
 	}
 
 }
@@ -377,7 +421,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		SeqPrecedeChainBounds::new_in(&mut slv, vec![x1, x2, x3, x4, x5, x6, x7, x8, x9]);
+		SeqPrecedeChainBounds::new_in(&mut slv, vec![x1, x2, x3, x4, x5, x6, x7, x8, x9], true, 2);
 		slv.assert_all_solutions(&[x1, x2, x3, x4, x5, x6, x7, x8, x9], check_valid_solution);
 
 	}
@@ -411,7 +455,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		SeqPrecedeChainBounds::new_in(&mut slv, vec![x1, x2, x3, x4]);
+		SeqPrecedeChainBounds::new_in(&mut slv, vec![x1, x2, x3, x4], true, 2);
 		slv.assert_all_solutions(&[x1, x2, x3, x4], check_valid_solution);
 
 	}

@@ -110,6 +110,13 @@ pub struct Cli<Stdout, Stderr> {
 	stderr: Stderr,
 	/// Whether to use ANSI color codes in the output (only for stderr)
 	ansi_color: bool,
+
+	// --- Experiment options for seq_precede_chain ---
+	/// Do domain propagation (true) or just bound propagation (false)
+	seq_domain_prop: bool,
+	/// Lazy level: 0 (all eager), 1 (lower bound lazy), 2 (all lazy)
+	seq_lazy_level: i32,
+
 }
 
 /// Solution struct to display the results of the solver
@@ -158,6 +165,8 @@ where
 		config = config
 			.with_restart(self.free_search || self.restart)
 			.with_vivification(self.vivification);
+		config.seq_domain_prop = self.seq_domain_prop;
+		config.seq_lazy_level = self.seq_lazy_level;
 		config
 	}
 
@@ -528,6 +537,8 @@ where
 			vsids_after: self.vsids_after,
 			vsids_only: self.vsids_only,
 			stdout: self.stdout,
+			seq_domain_prop: self.seq_domain_prop,
+			seq_lazy_level: self.seq_lazy_level,
 		}
 	}
 
@@ -552,6 +563,8 @@ where
 			vsids_only: self.vsids_only,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
+			seq_domain_prop: self.seq_domain_prop,
+			seq_lazy_level: self.seq_lazy_level,
 		}
 	}
 }
@@ -600,6 +613,15 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			vsids_only: args.contains("--vsids-only"),
 			vsids_after: args
 				.opt_value_from_str("--vsids-after")
+				.map_err(|e| e.to_string())?,
+
+			seq_domain_prop: args
+				.opt_value_from_fn("--seq-domain-prop", parse_bool_arg)
+				.map(|x| x.unwrap_or(true))
+				.map_err(|e| e.to_string())?,
+			seq_lazy_level: args
+				.opt_value_from_str("--seq-lazy-level")
+				.map(|x| x.unwrap_or(0))
 				.map_err(|e| e.to_string())?,
 
 			verbose,
