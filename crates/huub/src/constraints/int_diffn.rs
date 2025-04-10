@@ -34,7 +34,7 @@ pub struct IntDiffnSweep {
     fixed: TrailedInt,
     /// Trailed int of fixed objects that no longer have to be considered
     removed_objs: TrailedInt,
-    bounded_box: BoundedBox
+    // bounded_box: BoundedBox
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntDiffn {
@@ -67,12 +67,12 @@ struct ForbiddenRegion {
 	ub: Vec<IntVal>  // upper bound of each dimension
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+// #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 // Active forbidden regions
-struct BoundedBox {
-	lb: Vec<TrailedInt>, // lower bound of each dimension
-	ub: Vec<TrailedInt>  // upper bound of each dimension
-}
+// struct BoundedBox {
+// 	lb: Vec<TrailedInt>, // lower bound of each dimension
+// 	ub: Vec<TrailedInt>  // upper bound of each dimension
+// }
 
 
 impl IntDiffnSweep {
@@ -105,19 +105,19 @@ impl IntDiffnSweep {
 
         let mut box_posn_prop: Vec<Vec<IntView>> = box_posn.clone();
 
-        let bounded_lb = (0..box_posn.len())
-            .map(|_| solver.new_trailed_int(i64::MAX))
-            .collect();
+        // let bounded_lb = (0..box_posn.len())
+        //     .map(|_| solver.new_trailed_int(i64::MAX))
+        //     .collect();
 
-        let bounded_ub = (0..box_posn.len())
-            .map(|_| solver.new_trailed_int(i64::MIN))
-            .collect();
+        // let bounded_ub = (0..box_posn.len())
+        //     .map(|_| solver.new_trailed_int(i64::MIN))
+        //     .collect();
 
-        let bounded_box_trail = BoundedBox {
-            lb: bounded_lb,
-            ub: bounded_ub
+        // let bounded_box_trail = BoundedBox {
+        //     lb: bounded_lb,
+        //     ub: bounded_ub
 
-        };
+        // };
 
         if non_strict {
             let contains_zero: Vec<usize> = box_size_fixed.iter()
@@ -148,7 +148,7 @@ impl IntDiffnSweep {
             dimensions: box_posn[0].len(),
             fixed: fixed_trail,
             removed_objs: remove_trail,
-            bounded_box: bounded_box_trail
+            //bounded_box: bounded_box_trail
         }), PriorityLevel::Low);
 
         for v in box_posn.into_iter().flatten() {
@@ -166,8 +166,7 @@ impl IntDiffnSweep {
         ub_tracker: &Vec<Vec<IntVal>>,
         curr_dimension: usize,
         all_fr: &Vec<ForbiddenRegion>
-    //) -> Result<bool, Conflict> {
-    ) -> Result<(bool, bool), Conflict> {
+    ) -> Result<bool, Conflict> {
         let mut sweep = vec![];
         let mut jump = vec![];
         let mut b = true;
@@ -214,9 +213,8 @@ impl IntDiffnSweep {
                    curr_obj_idx,
                    sweep[curr_dimension],
                    curr_dimension);
-            return Ok((b, true));
         }
-        Ok((b, false))
+        Ok(b)
     }
 
     /// Prune the upper bounds of the domain
@@ -229,7 +227,7 @@ impl IntDiffnSweep {
         ub_tracker: &mut Vec<Vec<IntVal>>,
         curr_dimension: usize,
         all_fr: &Vec<ForbiddenRegion>
-    ) -> Result<(bool, bool), Conflict> {
+    ) -> Result<bool, Conflict> {
         let mut sweep = vec![];
         let mut jump = vec![];
         let mut b = true;
@@ -275,9 +273,8 @@ impl IntDiffnSweep {
                    curr_obj_idx,
                    sweep[curr_dimension],
                    curr_dimension);
-            return Ok((b, true));
         }
-        Ok((b, false))
+        Ok(b)
     }
 
     /// Adjusts the sweep and jump point when pruning the lower bound
@@ -359,7 +356,9 @@ impl IntDiffnSweep {
     ) -> Option<Vec<ForbiddenRegion>> {
         let mut all_fr:Vec<ForbiddenRegion> = vec![];
         for i in 0..self.box_posn.len() {
-            if actions.get_trailed_int(self.removed_objs) & (1 << o_idx) != 0 {
+            // Check if the current object can be ignored
+            if actions.get_trailed_int(self.removed_objs) & (1 << i) != 0 {
+                // println!("skipped iter");
                 continue;
             }
             let mut fr = ForbiddenRegion {
@@ -666,9 +665,6 @@ impl IntDiffnSweep {
     ) -> Vec<BoolView> {
         let mut reason = Vec::new();
         for &o_idx in fr_support {
-            if actions.get_trailed_int(self.removed_objs) & (1 << o_idx) != 0 {
-                continue;
-            }
             // for o_idx in 0..self.box_posn.len() {
             for d in 0..self.dimensions {
                 reason.push(
@@ -898,8 +894,15 @@ where
 
         for o_idx in 0..self.box_posn.len() {
             if actions.get_trailed_int(self.fixed) & (1 << o_idx) != 0 {
+                //println!("SKIPPING OBJ");
                 continue;
             }
+
+            // if actions.get_trailed_int(self.fixed) & (1 << o_idx) != 0 {
+            //     println!("here");
+            //     continue;
+            // }
+
 
             // TODO: add so that external events are also considered and affects
             // the bounding box
@@ -908,16 +911,16 @@ where
             // }
 
             trace!("DOING OBJECT {:?}", o_idx);
-            // for o in 0..self.box_posn.len() {
-            //     trace!("object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?}, size {}",
-            //          o,
-            //          ub_tracker[o][0],
-            //          lb_tracker[o][0],
-            //          ub_tracker[o][1],
-            //          lb_tracker[o][1],
-            //          self.box_size[o][0]
-            //     );
-            // }
+            for o in 0..self.box_posn.len() {
+                trace!("object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?}, size {}",
+                     o,
+                     ub_tracker[o][0],
+                     lb_tracker[o][0],
+                     ub_tracker[o][1],
+                     lb_tracker[o][1],
+                     self.box_size[o][0]
+                );
+            }
             let mut fr_support: Vec<usize> = Vec::new();
 
             if let Some(all_fr) = self.generate_fr::<P>(actions, &mut fr_support, o_idx, &lb_tracker, &ub_tracker, self.dimensions) {
@@ -942,7 +945,7 @@ where
                 let mut all_fixed = true;
                 for d in 0..self.dimensions {
                     let fixed = lb_tracker[o_idx][d] == ub_tracker[o_idx][d];
-                    let (b1, c1) = self.prune_min(actions,
+                    let b1 = self.prune_min(actions,
                                             &fr_support,
                                             o_idx,
                                             &mut lb_tracker,
@@ -963,7 +966,7 @@ where
                     }
 
                     let fixed = lb_tracker[o_idx][d] == ub_tracker[o_idx][d];
-                    let (b2, c2) = self.prune_max(actions,
+                    let b2 = self.prune_max(actions,
                                             &fr_support,
                                             o_idx,
                                             &lb_tracker,
@@ -981,40 +984,29 @@ where
                         // trace!("CONFLICT prune_max");
                         return Err(Conflict::new(actions, None, reason));
                     }
-                    if !fixed {
+                    if !(lb_tracker[o_idx][d] == ub_tracker[o_idx][d]) {
                         all_fixed = false;
                     }
-
-                    if c1 || c2 {
-                    //    for i in 0..self.dimensions {
-                    //        let _ = actions.set_trailed_int(self.bounded_box.lb[i],
-                    //                                        cmp::min(actions.get_trailed_int(self.bounded_box.lb[i]),
-                    //                                        lb_tracker[o_idx][i]));
-                    //        let _ = actions.set_trailed_int(self.bounded_box.ub[i],
-                    //                                        cmp::max(actions.get_trailed_int(self.bounded_box.ub[i]),
-                    //                                        ub_tracker[o_idx][i]) + self.box_size[o_idx][i] - 1);
-                    //    }
-                    }
-
                 }
                 if all_fixed {
+                    // println!("FIXING SHIT");
                     let fix_o_idx = actions.get_trailed_int(self.fixed) + (1 << o_idx);
                     let _ = actions.set_trailed_int(self.fixed, fix_o_idx);
                 }
             }
         }
 
+        // Source optimisations
         let mut active_b = ForbiddenRegion {
             lb: Vec::new(),
             ub: Vec::new()
         };
 
-        for i in 0..self.dimensions {
-            active_b.lb.push(actions.get_trailed_int(self.bounded_box.lb[i]));
-            active_b.ub.push(actions.get_trailed_int(self.bounded_box.ub[i]));
-
-            // let _ = actions.set_trailed_int(self.bounded_box.lb[i], i64::MAX);
-            // let _ = actions.set_trailed_int(self.bounded_box.ub[i], i64::MIN);
+        for _ in 0..self.dimensions {
+            // active_b.lb.push(actions.get_trailed_int(self.bounded_box.lb[i]));
+            // active_b.ub.push(actions.get_trailed_int(self.bounded_box.ub[i]));
+            active_b.lb.push(i64::MAX);
+            active_b.ub.push(i64::MIN);
         }
 
         for o_idx in 0..self.box_posn.len() {
@@ -1033,12 +1025,8 @@ where
                 self.disjoint(&active_b, &lb_tracker, &ub_tracker, o_idx)
             {
                 let rmv_o_idx = actions.get_trailed_int(self.removed_objs) + (1 << o_idx);
-                let _ = actions.set_trailed_int(self.fixed, rmv_o_idx);
+                let _ = actions.set_trailed_int(self.removed_objs, rmv_o_idx);
             }
-        }
-        for i in 0..self.dimensions {
-            let _ = actions.set_trailed_int(self.bounded_box.lb[i], i64::MAX);
-            let _ = actions.set_trailed_int(self.bounded_box.ub[i], i64::MIN);
         }
 
         Ok(())
