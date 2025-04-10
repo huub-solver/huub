@@ -614,8 +614,8 @@ impl ExplanationActions for State {
 		meaning: IntLitMeaning,
 	) -> (BoolView, IntLitMeaning) {
 		debug_assert!(
-			matches!(meaning, IntLitMeaning::GreaterEq(_) | IntLitMeaning::Less(_)),
-			"relaxed integer literals are only supported for LitMeaning::GreaterEq and LitMeaning::Less"
+			!matches!(meaning, IntLitMeaning::Eq(_)),
+			"relaxed integer literals are not yet supported for IntLitMeaning::Eq(_)"
 		);
 		// Transform literal meaning if view is a linear transformation
 		let meaning = match var.0 {
@@ -628,18 +628,39 @@ impl ExplanationActions for State {
 			_ => meaning,
 		};
 
-		// Get the (relaxed) boolean view representing the meaning and the actual (relaxed) meaning
+		// Get the (relaxed) boolean view representing the meaning and the actual
+		// (relaxed) meaning
 		let (bv, meaning) = match var.0 {
 			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				let var = &mut self.int_vars[iv];
+				let var_def = &mut self.int_vars[iv];
 				match meaning {
 					IntLitMeaning::GreaterEq(v) => {
-						let (bv, v) = var.get_greater_eq_lit_or_weaker(&self.trail, v);
+						let (bv, v) = var_def.get_greater_eq_lit_or_weaker(&self.trail, v);
 						(bv, IntLitMeaning::GreaterEq(v))
 					}
 					IntLitMeaning::Less(v) => {
-						let (bv, v) = var.get_less_lit_or_weaker(&self.trail, v);
+						let (bv, v) = var_def.get_less_lit_or_weaker(&self.trail, v);
 						(bv, IntLitMeaning::Less(v))
+					}
+					IntLitMeaning::NotEq(v) => {
+						if let Some(bv) = self.try_int_lit(var, meaning) {
+							(bv, IntLitMeaning::NotEq(v))
+						} else {
+							let lb = self.get_int_lower_bound(var);
+							if lb > v {
+								(
+									self.get_int_lower_bound_lit(var),
+									IntLitMeaning::GreaterEq(lb),
+								)
+							} else {
+								let ub = self.get_int_upper_bound(var);
+								debug_assert!(ub < v);
+								(
+									self.get_int_upper_bound_lit(var),
+									IntLitMeaning::Less(ub + 1),
+								)
+							}
+						}
 					}
 					_ => unreachable!(),
 				}
@@ -648,7 +669,8 @@ impl ExplanationActions for State {
 				BoolView(BoolViewInner::Const(match meaning {
 					IntLitMeaning::GreaterEq(i) => c >= i,
 					IntLitMeaning::Less(i) => c < i,
-					_ => unreachable!(),
+					IntLitMeaning::Eq(i) => c == i,
+					IntLitMeaning::NotEq(i) => c != i,
 				})),
 				meaning,
 			),
@@ -663,6 +685,9 @@ impl ExplanationActions for State {
 					IntLitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
 					IntLitMeaning::GreaterEq(i) if i > 1 => BoolViewInner::Const(false),
 					IntLitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
+					IntLitMeaning::Eq(0) => BoolViewInner::Lit(!lit),
+					IntLitMeaning::Eq(1) => BoolViewInner::Lit(lit),
+					IntLitMeaning::Eq(_) => BoolViewInner::Const(false),
 					_ => unreachable!(),
 				});
 				(if negated { !bv } else { bv }, meaning)
