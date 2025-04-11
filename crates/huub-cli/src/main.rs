@@ -1,4 +1,4 @@
-//! fzn-huub is a command-line interface (CLI) for the Huub solver.
+//! huub-cli is a command-line interface (CLI) for the Huub solver.
 //!
 //! The `main.rs` file only provides an entrypoint for the executable, all other
 //! functionality is contained in the `lib.rs` file, to allow testing the
@@ -10,12 +10,12 @@
 )]
 use std::{convert::Infallible, fs, path::PathBuf, process::ExitCode};
 
-use fzn_huub::Cli;
+use huub_cli::Cli;
 use pico_args::Arguments;
 
 /// Help message for the CLI.
 const CLI_HELP: &str = r#"USAGE
-  $ fzn-huub [-a] [-i] [-s] [-t <value>] [-v] FILE
+  $ huub [-a] [-i] [-s] [-t <value>] [-v] FILE
 
 ARGUMENTS
   FILE    File name of the FlatZinc JSON input file.
@@ -87,15 +87,15 @@ DESCRIPTION
 EXAMPLES
   Try and solve the `inst3.fzn.json` FlatZinc JSON input file with a time limit of 10 minutes.
 
-    $ fzn-huub --time-limit 10min inst3.fzn.json
+    $ huub --time-limit 10min inst3.fzn.json
 
   Solve the `schedule.fzn.json` FlatZinc JSON input file and display all intermediate solutions using
   the MiniZinc output model `schedule.ozn`.
 
-    $ fzn-huub -i schedule.fzn.json | minizinc --ozn-file schedule.ozn
+    $ huub -i schedule.fzn.json | minizinc --ozn-file schedule.ozn
 "#;
 
-/// fzn-huub entry point
+/// huub entry point
 ///
 /// This function performs command-line parsing and starts the solving process
 /// based on the arguments found.

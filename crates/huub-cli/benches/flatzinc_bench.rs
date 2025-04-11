@@ -1,4 +1,4 @@
-//! A Benchmarking framework for the full fzn-huub solver.
+//! A Benchmarking framework for the command line huub solver.
 //!
 //! Note that these benchmarks run through the full solver, providing the
 //! instances as file input, and reading the output from its output stream. The

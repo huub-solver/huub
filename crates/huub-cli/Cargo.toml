@@ -1,5 +1,5 @@
 [package]
-name = "fzn-huub"
+name = "huub-cli"
 
 authors.workspace = true
 version.workspace = true
@@ -10,8 +10,12 @@ categories.workspace = true
 keywords.workspace = true
 repository.workspace = true
 
+[[bin]]
+name = "huub"
+path = "src/main.rs"
+
 [[bench]]
-name = "fzn_huub_benchmarks"
+name = "flatzinc_bench"
 harness = false
 
 [dependencies]

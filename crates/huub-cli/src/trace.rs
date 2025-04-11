@@ -1,5 +1,5 @@
 //! Module that contains the implementation of a custom [`tracing::Subscriber`]
-//! for `fzn-huub`.
+//! for `huub`.
 
 use std::{
 	collections::HashMap,
@@ -96,7 +96,7 @@ struct RegisterLazyLits {
 	lit_reverse_map: Arc<Mutex<HashMap<LitInt, LitName>>>,
 }
 
-/// Create a [`tracing_subscriber::Subscriber`] specialized for `fzn-huub`.
+/// Create a [`tracing_subscriber::Subscriber`] specialized for `huub`.
 ///
 /// The given subscriber additionally formats literals and integer variables
 /// using the name mapping provided by `lit_reverse_map` and `int_reverse_map`.

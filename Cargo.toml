@@ -1,6 +1,6 @@
 [workspace]
 
-members = ["crates/fzn-huub", "crates/huub"]
+members = ["crates/huub", "crates/huub-cli"]
 
 resolver = "2"
 

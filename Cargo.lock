@@ -296,23 +296,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
-name = "fzn-huub"
-version = "0.1.0"
-dependencies = [
- "codspeed-divan-compat",
- "ctrlc",
- "expect-test",
- "flatzinc-serde",
- "humantime",
- "huub",
- "pico-args",
- "serde_json",
- "tracing",
- "tracing-subscriber",
- "ustr",
-]
-
-[[package]]
 name = "getrandom"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -350,6 +333,23 @@ dependencies = [
  "thiserror",
  "tracing",
  "tracing-test",
+]
+
+[[package]]
+name = "huub-cli"
+version = "0.1.0"
+dependencies = [
+ "codspeed-divan-compat",
+ "ctrlc",
+ "expect-test",
+ "flatzinc-serde",
+ "humantime",
+ "huub",
+ "pico-args",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+ "ustr",
 ]
 
 [[package]]
