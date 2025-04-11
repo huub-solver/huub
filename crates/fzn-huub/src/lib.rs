@@ -692,6 +692,6 @@ impl Display for Solution<'_> {
 #[cfg(test)]
 mod tests {
 	// Used by integration testing and benchmarks
-	use codspeed_criterion_compat as _;
+	use divan as _;
 	use expect_test as _;
 }
