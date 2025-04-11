@@ -608,6 +608,37 @@ impl State {
 }
 
 impl ExplanationActions for State {
+	fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning> {
+		match var.0 {
+			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
+				let (iv2, meaning) = self.bool_to_int.get(lit.var())?;
+				if iv != iv2 {
+					return None;
+				}
+				let mut meaning = meaning
+					.map(|l| if lit.is_negated() { !l } else { l })
+					.unwrap_or_else(|| self.int_vars[iv].lit_meaning(lit));
+				if let IntViewInner::Linear { transformer, .. } = var.0 {
+					meaning = transformer.transform_lit(meaning);
+				}
+				Some(meaning)
+			}
+			IntViewInner::Const(_) => None,
+			IntViewInner::Bool { lit: var_lit, .. } if lit.var() != var_lit.var() => None,
+			IntViewInner::Bool {
+				lit: var_lit,
+				transformer,
+			} => {
+				let mut meaning = IntLitMeaning::GreaterEq(1);
+				if var_lit != lit {
+					meaning = !meaning;
+				}
+				meaning = transformer.transform_lit(meaning);
+				Some(meaning)
+			}
+		}
+	}
+
 	fn get_int_lit_relaxed(
 		&mut self,
 		var: IntView,

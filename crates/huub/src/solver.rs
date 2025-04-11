@@ -1053,6 +1053,7 @@ impl<Oracle: PropagatingSolver<Engine>> ExplanationActions for Solver<Oracle> {
 
 	delegate! {
 		to self.engine().state {
+			fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning>;
 			fn try_int_lit(&self, var: IntView, meaning: IntLitMeaning) -> Option<BoolView>;
 		}
 		to self.engine_mut().state {
