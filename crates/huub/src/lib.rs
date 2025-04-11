@@ -367,6 +367,8 @@ pub fn value_precede_chain(
 	ValuePrecedeChain {
 		values,
 		vars,
+		prop_domain: false,
+		lazy_level: 0,
 	}
 }
 
@@ -1203,6 +1205,10 @@ impl Model {
 		for c in self.constraints.iter_mut().flatten() {
 			match c {
 				ConstraintStore::SeqPrecedeChain(con) => {
+					con.prop_domain = config.seq_domain_prop;
+					con.lazy_level = config.seq_lazy_level;
+				}
+				ConstraintStore::ValuePrecedeChain(con) => {
 					con.prop_domain = config.seq_domain_prop;
 					con.lazy_level = config.seq_lazy_level;
 				}

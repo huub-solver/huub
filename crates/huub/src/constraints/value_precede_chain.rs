@@ -2,15 +2,17 @@
 //! enforces that a fixed order of the first occurrences of a given list of integers in
 //! a list of integer variables.
 
-use std::cmp::min;
+use std::cmp::{max, min};
+use pindakaas::Lit as RawLit;
 use tracing::trace;
 use crate::solver::trail::TrailedInt;
-use crate::solver::{BoolView, IntLitMeaning};
+use crate::solver::{BoolView, BoolViewInner, IntLitMeaning};
 use crate::{actions::{
 	ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
 }, constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus}, reformulate::ReformulationError, solver::{
 	activation_list::IntPropCond, queue::PriorityLevel, IntView,
-}, IntDecision, IntVal};
+}, Conjunction, IntDecision, IntVal};
+use crate::actions::InspectionActions;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Representation of the `value_precede_chain` constraint within a model.
@@ -22,6 +24,10 @@ pub struct ValuePrecedeChain {
 	pub(crate) values: Vec<IntVal>,
 	/// List of integer decision variables where first occurrences of specified values must be ordered.
 	pub(crate) vars: Vec<IntDecision>,
+	/// Whether to propagate on domain (true) or bounds (false)
+	pub(crate) prop_domain: bool,
+	/// Lazy level: 0 (all eager), 1 (lower bounds lazy), 2 (all lazy)
+	pub(crate) lazy_level: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -35,91 +41,151 @@ pub struct ValuePrecedeChainValue {
 	first: Vec<TrailedInt>,
 	last: Vec<TrailedInt>,
 	first_val: Vec<TrailedInt>,
-	last_val: Vec<TrailedInt>,
 	max_last: TrailedInt,
 	min_val: IntVal,
 	max_val: IntVal,
+	min_hole: IntVal,
+	next_hole: Vec<IntVal>,
 	holes: Vec<IntVal>,
+	mapping: Vec<Option<usize>>,
+	lazy_level: i32,
 }
 
 impl<S: SimplificationActions> Constraint<S> for ValuePrecedeChain {
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		if self.vars.iter().all(|&var| !self.values.iter().any(|&val| actions.check_int_in_domain(var, val))) {
+		if self.values.len() == 0 {
 			return Ok(SimplificationStatus::Subsumed);
 		}
-		for (i, &var) in self.vars.iter().take(self.values.len() - 1).enumerate() {
-			for j in i+1..self.values.len() {
+		let mut ub = 0;
+		for &var in self.vars.iter() {
+			if actions.check_int_in_domain(var, self.values[ub]) {
+				ub += 1;
+			}
+			for j in ub..self.values.len() {
 				actions.set_int_not_eq(var, self.values[j])?;
 			}
+		}
+		//todo this can become more powerful if updated upper bound from previous loop is available
+		self.vars.retain(|&var| self.values.iter().any(|&val| actions.check_int_in_domain(var, val)));
+		if self.vars.len() == 0 {
+			return Ok(SimplificationStatus::Subsumed);
 		}
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let vars: Vec<_> = self.vars.iter().map(|v| slv.get_solver_int(*v)).collect();
-		ValuePrecedeChainValue::new_in(slv, self.values.clone(), vars);
+		ValuePrecedeChainValue::new_in(slv, self.values.clone(), vars, self.prop_domain, self.lazy_level);
 		Ok(())
 	}
 }
 
 impl ValuePrecedeChainValue {
 
+	fn set_upper<P: PropagationActions>(&self, actions: &mut P, i: usize, k: usize) -> Result<(), Conflict> {
+		if self.lazy_level > 1 {
+			return actions.set_int_not_eq(self.vars[i], self.values[k], actions.deferred_reason((i as u64) << 32 | k as u64));
+		}
+		actions.set_int_not_eq(self.vars[i], self.values[k], |a: &mut P| self.explain_upper(a, i, k))
+	}
+
 	fn propagate_upper_bound<P: PropagationActions>(&self, actions: &mut P, i: usize, j: usize) -> Result<(), Conflict> {
 		for k in j..self.values.len() {
-			if actions.check_int_in_domain(self.vars[i], self.values[k]) { //todo do we want to check or just propagate anyway?
+			if actions.check_int_in_domain(self.vars[i], self.values[k]) {
 				trace!("Upper bound restriction on var {i} removing {}", self.values[k]);
-				actions.set_int_not_eq(self.vars[i], self.values[k], |a: &mut P| self.explain_upper(a, i, k))?;
+				self.set_upper(actions, i, k)?;
 			}
 		}
 		Ok(())
 	}
 
-	fn explain_upper<P: PropagationActions>(&self, actions: &mut P, i: usize, j: usize) -> Vec<BoolView> {
+	fn explain_upper<E: ExplanationActions>(&self, actions: &mut E, i: usize, j: usize) -> Vec<BoolView> {
 		self.vars.iter()
 			.take(i)
-			.map(|&v| actions.get_int_lit(v, IntLitMeaning::NotEq(self.values[j-1])))
+			.map(|&v| actions.get_int_lit_relaxed(v, IntLitMeaning::NotEq(self.values[j-1])).0)
 			.collect()
 	}
 
-	fn get_lower_bound<P: PropagationActions>(&self, actions: &mut P, i: usize) -> Option<usize> {  //todo make more efficient?
-		if actions.get_int_lower_bound(self.vars[i]) < self.min_val ||
-			actions.get_int_upper_bound(self.vars[i]) > self.max_val ||
-			self.holes.iter().any(|&h| actions.check_int_in_domain(self.vars[i], h)) {
+	fn get_lower_bound<I: InspectionActions>(&self, actions: &mut I, i: usize) -> Option<usize> {
+		let lb = actions.get_int_lower_bound(self.vars[i]);
+		let ub = actions.get_int_upper_bound(self.vars[i]);
+		if lb < self.min_val || ub > self.max_val {
 			return None;
+		}
+		if lb == ub {
+			return self.mapping[(lb - self.min_val) as usize];
+		}
+		let mut h = max(lb, self.min_hole);
+		while ((h - self.min_hole) as usize) < self.next_hole.len() {
+			h = self.next_hole[(h - self.min_hole) as usize];
+			if h > ub {
+				break;
+			}
+			if actions.check_int_in_domain(self.vars[i], h) {
+				return None;
+			}
+			h += 1;
 		}
 		for (j, &val) in self.values.iter().enumerate() {
 			if actions.check_int_in_domain(self.vars[i], val) {
 				return Some(j+1);
 			}
 		}
-		Some(self.values.len())
+		Some(self.values.len() + 1)
+	}
+
+	fn set_lower<P: PropagationActions>(&self, actions: &mut P, val: IntVal, i: usize, k: usize) -> Result<(), Conflict> {
+		if self.lazy_level > 0 {
+			return if val < self.min_val {
+				actions.set_int_lower_bound(self.vars[i], self.min_val, actions.deferred_reason(((-(i as i32) - 1) as u64) << 32 | k as u64))
+			} else if val > self.max_val {
+				actions.set_int_upper_bound(self.vars[i], self.max_val, actions.deferred_reason(((-(i as i32) - 1) as u64) << 32 | k as u64))
+			} else {
+				actions.set_int_not_eq(self.vars[i], val, actions.deferred_reason(((-(i as i32) - 1) as u64) << 32 | k as u64))
+			}
+		}
+		if val < self.min_val {
+			actions.set_int_lower_bound(self.vars[i], self.min_val, |a: &mut P| self.explain_lower(a, i, k))
+		} else if val > self.max_val {
+			actions.set_int_upper_bound(self.vars[i], self.max_val, |a: &mut P| self.explain_lower(a, i, k))
+		} else {
+			actions.set_int_not_eq(self.vars[i], val, |a: &mut P| self.explain_lower(a, i, k))
+		}
 	}
 
 	fn propagate_lower_bound<P: PropagationActions>(&self, actions: &mut P, i: usize, j: usize) -> Result<(), Conflict> {  //todo could make more efficient?
-		if actions.get_int_lower_bound(self.vars[i]) < self.min_val {
+		let lb = actions.get_int_lower_bound(self.vars[i]);
+		let ub = actions.get_int_upper_bound(self.vars[i]);
+		if lb < self.min_val {
 			trace!("Lower bound restriction on var {i} removing values <{}", self.min_val);
-			actions.set_int_lower_bound(self.vars[i], self.min_val, |a: &mut P| self.explain_lower(a, i, j))?;
+			self.set_lower(actions, lb, i, j)?;
 		}
-		if actions.get_int_upper_bound(self.vars[i]) > self.max_val {
+		if ub > self.max_val {
 			trace!("Lower bound restriction on var {i} removing values >{}", self.max_val);
-			actions.set_int_upper_bound(self.vars[i], self.max_val, |a: &mut P| self.explain_lower(a, i, j))?;
+			self.set_lower(actions, ub, i, j)?;
 		}
-		for &h in self.holes.iter() {
+		let mut h = max(lb, self.min_hole);
+		while ((h - self.min_hole) as usize) < self.next_hole.len() {
+			h = self.next_hole[(h - self.min_hole) as usize];
+			if h > ub {
+				break;
+			}
 			if actions.check_int_in_domain(self.vars[i], h) {
 				trace!("Lower bound restriction on var {i} removing hole {h}");
-				actions.set_int_not_eq(self.vars[i], h, |a: &mut P| self.explain_lower(a, i, j))?
+				self.set_lower(actions, h, i, j)?;
 			}
+			h += 1;
 		}
 		for k in 0..j-1 {
 			if actions.check_int_in_domain(self.vars[i], self.values[k]) {
 				trace!("Lower bound restriction on var {i} removing {}", self.values[k]);
-				actions.set_int_not_eq(self.vars[i], self.values[k], |a: &mut P| self.explain_lower(a, i, j))?;
+				self.set_lower(actions, self.values[k], i, j)?;
 			}
 		}
 		Ok(())
 	}
 
-	fn explain_lower<P: PropagationActions>(&self, actions: &mut P, i: usize, j: usize) -> Vec<BoolView> {
+	fn explain_lower<E: ExplanationActions>(&self, actions: &mut E, i: usize, j: usize) -> Vec<BoolView> {
 		let mut v = self.ex_l(actions, i+1, j);
 		if j > 0 {
 			v.append(&mut self.explain_upper(actions, i, j));
@@ -127,13 +193,13 @@ impl ValuePrecedeChainValue {
 		v
 	}
 
-	fn ex_l<P: PropagationActions>(&self, actions: &mut P, i: usize, j: usize) -> Vec<BoolView> {
+	fn ex_l<E: ExplanationActions>(&self, actions: &mut E, i: usize, j: usize) -> Vec<BoolView> {
 		if let Some(lb) = self.get_lower_bound(actions, i) {
 			if lb > j {
-				let mut v = vec![actions.get_int_lit(self.vars[i], IntLitMeaning::GreaterEq(self.min_val)),
-								 actions.get_int_lit(self.vars[i], IntLitMeaning::Less(self.max_val+1))];
-				v.append(&mut self.holes.iter().map(|&h| actions.get_int_lit(self.vars[i], IntLitMeaning::NotEq(h))).collect());
-				v.append(&mut (0..j).into_iter().map(|k| actions.get_int_lit(self.vars[i], IntLitMeaning::NotEq(self.values[k]))).collect());
+				let mut v = vec![actions.get_int_lit_relaxed(self.vars[i], IntLitMeaning::GreaterEq(self.min_val)).0,
+								 actions.get_int_lit_relaxed(self.vars[i], IntLitMeaning::Less(self.max_val+1)).0];
+				v.append(&mut self.holes.iter().map(|&h| actions.get_int_lit_relaxed(self.vars[i], IntLitMeaning::NotEq(h)).0).collect());
+				v.append(&mut (0..j).into_iter().map(|k| actions.get_int_lit_relaxed(self.vars[i], IntLitMeaning::NotEq(self.values[k])).0).collect());
 				return v;
 			}
 		}
@@ -141,7 +207,7 @@ impl ValuePrecedeChainValue {
 			return self.ex_l(actions, i+1, j+1);
 		}
 		let mut v = self.ex_l(actions, i+1, j);
-		v.push(actions.get_int_lit(self.vars[i], IntLitMeaning::NotEq(self.values[j-1])));
+		v.push(actions.get_int_lit_relaxed(self.vars[i], IntLitMeaning::NotEq(self.values[j-1])).0);
 		v
 	}
 
@@ -168,7 +234,7 @@ impl ValuePrecedeChainValue {
 
 		for (i, &v) in self.vars.iter().enumerate().rev() {
 			if actions.get_trailed_int(self.first[low]) == i as IntVal {
-				self.propagate_upper_bound(actions, i, low)?;
+				self.propagate_lower_bound(actions, i, low)?;
 			}
 			if i as IntVal <= actions.get_trailed_int(self.last[low]) && actions.check_int_in_domain(v, self.values[low-1]) {
 				let _ = actions.set_trailed_int(self.last[low], i as IntVal);
@@ -178,16 +244,6 @@ impl ValuePrecedeChainValue {
 				break;
 			}
 		}
-
-		let mut max_last = 0;
-		for i in 1..self.last.len() {
-			let lv = actions.get_trailed_int(self.last[i]) as usize;
-			if lv < self.vars.len() {
-				max_last = i;
-				let _ = actions.set_trailed_int(self.last_val[lv], i as IntVal);
-			}
-		}
-		let _ = actions.set_trailed_int(self.max_last, max_last as IntVal);
 
 		self.initialized = true;
 		Ok(())
@@ -240,7 +296,6 @@ impl ValuePrecedeChainValue {
 
 			if actions.check_int_in_domain(self.vars[i as usize], self.values[k-1]) {
 				let _= actions.set_trailed_int(self.last[k], i);
-				let _= actions.set_trailed_int(self.last_val[i as usize], k as IntVal);
 				if actions.get_trailed_int(self.first[k]) == i {
 					self.propagate_lower_bound(actions, i as usize, k)?;
 				}
@@ -267,7 +322,7 @@ impl ValuePrecedeChainValue {
 	}
 
 	/// Create a new [`ValuePrecedeChainValue`] propagator and post it in the solver.
-	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, values: Vec<IntVal>, vars: Vec<IntView>) {
+	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, values: Vec<IntVal>, vars: Vec<IntView>, prop_domain: bool, lazy_level: i32) {
 
 		let n = vars.len();
 
@@ -287,14 +342,26 @@ impl ValuePrecedeChainValue {
 			})
 			.collect();
 		let first_val = (0..n).map(|_| solver.new_trailed_int(0)).collect();
-		let last_val = (0..n).map(|_| solver.new_trailed_int(0)).collect();
 		let max_last = solver.new_trailed_int(0);
-		let min_val = *values.iter().min().unwrap(); //todo somewhere make sure it is not empty?
-		let max_val = *values.iter().max().unwrap();
+		let min_val = *values.iter().min().unwrap_or(&IntVal::MAX);
+		let max_val = *values.iter().max().unwrap_or(&IntVal::MIN);
 		let holes = (min_val..=max_val).into_iter()
 			.filter(|&i| values.iter()
 				.all(|&v| v != i)).collect::<Vec<_>>();
-		trace!("Values has min {min_val}, max {max_val}, and holes {:?}", holes);
+		let min_hole = *holes.iter().min().unwrap_or(&0);
+		let mut next_hole = vec![0; (*holes.iter().max().unwrap_or(&-1) - min_hole + 1) as usize];
+		let mut cur_hole = 0;
+		for i in 0..next_hole.len() {
+			if i as IntVal + min_hole > holes[cur_hole] {
+				cur_hole += 1;
+			}
+			next_hole[i] = holes[cur_hole];
+		}
+		let mut mapping = vec![None; (max_val - min_val + 1) as usize];
+		for (i, &val) in values.iter().enumerate() {
+			mapping[(val - min_val) as usize] = Some(i+1);
+		}
+		trace!("Values has min {min_val}, max {max_val}, and holes {holes:?}, with min {min_hole} and next {next_hole:?}, and mapping {mapping:?}");
 
 		let prop = solver.add_propagator(
 			Box::new(Self {
@@ -304,16 +371,19 @@ impl ValuePrecedeChainValue {
 				first,
 				last,
 				first_val,
-				last_val,
 				max_last,
 				min_val,
 				max_val,
 				holes,
+				min_hole,
+				next_hole,
+				mapping,
+				lazy_level,
 			}),
-			PriorityLevel::Low);  //todo priority?
+			PriorityLevel::Low);
 
 		for v in vars {
-			solver.enqueue_on_int_change(prop, v, IntPropCond::Domain);
+			solver.enqueue_on_int_change(prop, v, if prop_domain {IntPropCond::Domain} else {IntPropCond::Bounds});
 		}
 		solver.enqueue_now(prop);
 
@@ -377,6 +447,28 @@ where
 
 		self.propagate_full(actions)
 
+	}
+
+	fn explain(&mut self, actions: &mut E, _: Option<RawLit>, data: u64) -> Conjunction {
+		let (i, k) = ((data >> 32) as i32, data as i32);
+		let ex = if i < 0 {
+			trace!("Getting lazy lower bound reason for i={i}, k={k}");
+			self.explain_lower(actions, (-i-1) as usize, k as usize)
+		} else {
+			trace!("Getting lazy upper bound reason for i={i}, k={k}");
+			self.explain_upper(actions, i as usize, k as usize)
+		};
+		ex.iter()
+			.filter_map(|bv| match bv.0 {
+				BoolViewInner::Lit(l) => Some(l),
+				BoolViewInner::Const(true) => None,
+				BoolViewInner::Const(false) => {
+					unreachable!(
+						"Unexpected false literal in the explanation of seq_precede_chain!"
+					)
+				}
+			})
+			.collect()
 	}
 
 }
@@ -476,7 +568,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		ValuePrecedeChainValue::new_in(&mut slv, vec![2, -2, 1, -1], vec![x0, x1, x2, x3, x4, x5, x6, x7, x8]);
+		ValuePrecedeChainValue::new_in(&mut slv, vec![2, -2, 1, -1], vec![x0, x1, x2, x3, x4, x5, x6, x7, x8], true, 2);
 		slv.assert_all_solutions(&[x0, x1, x2, x3, x4, x5, x6, x7, x8], check_valid_solution(vec![2, -2, 1, -1]));
 
 	}
@@ -510,7 +602,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		ValuePrecedeChainValue::new_in(&mut slv, vec![2, -2, 1, -1], vec![x0, x1, x2, x3]);
+		ValuePrecedeChainValue::new_in(&mut slv, vec![2, -2, 1, -1], vec![x0, x1, x2, x3], true, 2);
 		slv.assert_all_solutions(&[x0, x1, x2, x3], check_valid_solution(vec![2, -2, 1, -1]));
 
 	}
@@ -538,7 +630,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		ValuePrecedeChainValue::new_in(&mut slv, vec![1, 2], vec![x0, x1, x2]);
+		ValuePrecedeChainValue::new_in(&mut slv, vec![1, 2], vec![x0, x1, x2], true, 2);
 		slv.assert_all_solutions(&[x0, x1, x2], check_valid_solution(vec![1, 2]));
 
 	}
@@ -566,7 +658,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		ValuePrecedeChainValue::new_in(&mut slv, vec![1, 3], vec![x0, x1, x2]);
+		ValuePrecedeChainValue::new_in(&mut slv, vec![1, 3], vec![x0, x1, x2], true, 2);
 		slv.assert_all_solutions(&[x0, x1, x2], check_valid_solution(vec![1, 3]));
 
 	}
