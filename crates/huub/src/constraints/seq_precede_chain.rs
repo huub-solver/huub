@@ -216,9 +216,9 @@ impl SeqPrecedeChainBounds {
 
 	fn set_lower<P: PropagationActions>(&self, actions: &mut P, i: usize, k: IntVal) -> Result<(), Conflict> {
 		if self.lazy_level > 0 {
-			return actions.set_int_lower_bound(self.vars[i], k, actions.deferred_reason(((-(i as i32)) as u64) << 32 | k as u64));
+			return actions.set_int_lower_bound(self.vars[i], k, actions.deferred_reason(((-(i as i32)-1) as u64) << 32 | k as u64));
 		}
-		actions.set_int_lower_bound(self.vars[i], k, |a: &mut P| self.explain_upper(a, i, k))
+		actions.set_int_lower_bound(self.vars[i], k, |a: &mut P| self.explain_lower(a, i, k))
 	}
 
 	/// Create a new [`SeqPrecedeChainBounds`] propagator and post it in the solver.
@@ -314,7 +314,7 @@ where
 		let (i, k) = ((data >> 32) as i32, data as i32);
 		let ex = if i < 0 {
 			trace!("Getting lazy lower bound reason for i={i}, k={k}");
-			self.explain_lower(actions, (-i) as usize, k as IntVal)
+			self.explain_lower(actions, (-i-1) as usize, k as IntVal)
 		} else {
 			trace!("Getting lazy upper bound reason for i={i}, k={k}");
 			self.explain_upper(actions, i as usize, k as IntVal)
