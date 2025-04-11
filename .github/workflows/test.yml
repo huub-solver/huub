@@ -33,17 +33,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: codecov.json
   benchmarks:
+    name: Run benchmarks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Install Rust toolchain and codspeed
-        uses: moonrepo/setup-rust@v0
+      - uses: actions/checkout@v4
+      - name: Setup rust toolchain, cache and cargo-codspeed binary
+        uses: moonrepo/setup-rust@v1
         with:
           channel: ${{ env.RUST_CHANNEL }}
           cache-target: bench
           bins: cargo-codspeed
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Build the benchmark target(s)
         run: cargo codspeed build --profile bench
       - name: Run the benchmarks
