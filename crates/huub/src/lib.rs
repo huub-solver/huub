@@ -24,7 +24,7 @@ use std::{
 	collections::{HashSet, VecDeque},
 	fmt::{Debug, Display},
 	hash::Hash,
-	iter::{repeat, repeat_with, Sum},
+	iter::{repeat_n, repeat_with, Sum},
 	mem,
 	num::NonZeroI64,
 	ops::{Add, AddAssign, Deref, Mul, Neg, Not, Sub},
@@ -353,6 +353,8 @@ where
 {
 	SeqPrecedeChain {
 		vars: vars.into_iter().map_into().collect(),
+		prop_domain: false,
+		lazy_level: 0,
 	}
 }
 
@@ -976,8 +978,7 @@ impl Model {
 
 	/// Create `len` new integer variables with the given domain.
 	pub fn new_int_vars(&mut self, len: usize, domain: IntSetVal) -> Vec<IntDecision> {
-		repeat(IntDecisionDef::with_domain(domain))
-			.take(len)
+		repeat_n(IntDecisionDef::with_domain(domain), len)
 			.map(|v| IntDecision(IntDecisionInner::Var(self.int_vars.push(v))))
 			.collect()
 	}
@@ -1194,6 +1195,16 @@ impl Model {
 							let _ = int_eager_direct.insert(iv);
 						}
 					}
+				}
+				_ => {}
+			}
+		}
+
+		for c in self.constraints.iter_mut().flatten() {
+			match c {
+				ConstraintStore::SeqPrecedeChain(con) => {
+					con.prop_domain = config.seq_domain_prop;
+					con.lazy_level = config.seq_lazy_level;
 				}
 				_ => {}
 			}
