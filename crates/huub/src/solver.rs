@@ -12,11 +12,10 @@ use std::{
 	fmt::{self, Debug, Display, Formatter},
 	hash::Hash,
 	num::NonZeroI32,
-	ops::{Add, AddAssign, Deref, Mul, Neg, Not},
+	ops::{Add, AddAssign, Mul, Neg, Not},
 };
 
 use delegate::delegate;
-use flatzinc_serde::FlatZinc;
 use itertools::Itertools;
 use pindakaas::{
 	solver::{
@@ -36,8 +35,6 @@ use crate::{
 	},
 	branchers::BoxedBrancher,
 	constraints::BoxedPropagator,
-	flatzinc::{FlatZincError, FlatZincStatistics},
-	reformulate::InitConfig,
 	solver::{
 		activation_list::IntPropCond,
 		engine::{trace_new_lit, Engine, PropRef},
@@ -45,7 +42,7 @@ use crate::{
 		queue::{PriorityLevel, PropagatorInfo},
 		trail::TrailedInt,
 	},
-	Clause, IntVal, LinearTransform, Model, NonZeroIntVal, ReformulationError,
+	Clause, IntVal, LinearTransform, NonZeroIntVal, ReformulationError,
 };
 
 /// Trait implemented by the object given to the callback on detecting failure
@@ -816,17 +813,18 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 		self.oracle.propagator_mut()
 	}
 
+	#[cfg(feature = "flatzinc")]
 	/// Create a new [`Solver`] instance from a [`FlatZinc`] instance.
 	pub fn from_fzn<S, MapTy: FromIterator<(S, View)>>(
-		fzn: &FlatZinc<S>,
-		config: &InitConfig,
-	) -> Result<(Self, MapTy, FlatZincStatistics), FlatZincError>
+		fzn: &flatzinc_serde::FlatZinc<S>,
+		config: &crate::reformulate::InitConfig,
+	) -> Result<(Self, MapTy, crate::flatzinc::FlatZincStatistics), crate::flatzinc::FlatZincError>
 	where
-		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
+		S: Clone + Debug + std::ops::Deref<Target = str> + Display + Eq + Hash + Ord,
 		Solver<Oracle>: for<'a> From<&'a Cnf>,
 		Oracle::Slv: 'static,
 	{
-		let (mut prb, map, fzn_stats) = Model::from_fzn::<S, Vec<_>>(fzn)?;
+		let (mut prb, map, fzn_stats) = crate::Model::from_fzn::<S, Vec<_>>(fzn)?;
 		let (mut slv, remap) = prb.to_solver(config)?;
 		let map = map
 			.into_iter()

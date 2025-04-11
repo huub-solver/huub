@@ -12,6 +12,7 @@
 pub mod actions;
 pub mod branchers;
 pub mod constraints;
+#[cfg(feature = "flatzinc")]
 pub mod flatzinc;
 pub(crate) mod helpers;
 pub mod reformulate;
@@ -22,15 +23,14 @@ pub(crate) mod tests;
 use std::{
 	any::Any,
 	collections::{HashSet, VecDeque},
-	fmt::{Debug, Display},
+	fmt::Debug,
 	hash::Hash,
 	iter::{repeat_n, repeat_with, Sum},
 	mem,
 	num::NonZeroI64,
-	ops::{Add, AddAssign, Deref, Mul, Neg, Not, Sub},
+	ops::{Add, AddAssign, Mul, Neg, Not, Sub},
 };
 
-use flatzinc_serde::FlatZinc;
 use index_vec::{index_vec, IndexVec};
 use itertools::Itertools;
 pub use pindakaas::solver::SlvTermSignal;
@@ -61,7 +61,6 @@ use crate::{
 		int_value_precede::{IntSeqPrecedeChain, IntValuePrecedeChain},
 		BoxedConstraint, Constraint, SimplificationStatus,
 	},
-	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
 	helpers::{linear_transform::LinearTransform, var_from_u32},
 	reformulate::{
 		BoolDecisionDef, BoolDecisionInner, ConstraintStore, Domain, InitConfig, IntDecisionDef,
@@ -937,14 +936,15 @@ impl Model {
 		}
 	}
 
+	#[cfg(feature = "flatzinc")]
 	/// Create a new [`Model`] instance from a [`FlatZinc`] instance.
 	pub fn from_fzn<S, MapTy: FromIterator<(S, Decision)>>(
-		fzn: &FlatZinc<S>,
-	) -> Result<(Self, MapTy, FlatZincStatistics), FlatZincError>
+		fzn: &flatzinc_serde::FlatZinc<S>,
+	) -> Result<(Self, MapTy, flatzinc::FlatZincStatistics), flatzinc::FlatZincError>
 	where
-		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
+		S: Clone + Debug + std::ops::Deref<Target = str> + std::fmt::Display + Eq + Hash + Ord,
 	{
-		let mut builder = FznModelBuilder::new(fzn);
+		let mut builder = flatzinc::FznModelBuilder::new(fzn);
 		builder.unify_variables()?;
 		builder.extract_views()?;
 		builder.post_constraints()?;
