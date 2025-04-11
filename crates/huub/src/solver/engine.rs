@@ -62,7 +62,7 @@ pub struct Engine {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct SearchStatistics {
+pub(crate) struct EngineStatistics {
 	/// Number of conflicts encountered
 	pub(crate) conflicts: u64,
 	/// Number of search decisions left to the oracle solver
@@ -115,7 +115,7 @@ pub struct State {
 	/// Storage for clauses to be communicated to the solver
 	pub(crate) clauses: VecDeque<Clause>,
 	/// Solving statistics
-	pub(crate) statistics: SearchStatistics,
+	pub(crate) statistics: EngineStatistics,
 	/// Whether VSIDS is currently enabled
 	pub(crate) vsids: bool,
 
@@ -486,35 +486,6 @@ impl Engine {
 	}
 }
 
-impl SearchStatistics {
-	/// Returns the number of conflicts encountered during the search.
-	pub fn conflicts(&self) -> u64 {
-		self.conflicts
-	}
-	/// Return the number of search decisions that was left to the oracle solver.
-	pub fn oracle_decisions(&self) -> u64 {
-		self.oracle_decisions
-	}
-	/// Returns the peak depth of the search tree.
-	pub fn peak_depth(&self) -> u32 {
-		self.peak_depth
-	}
-	/// Returns the number of propagations performed by the constraint programming
-	/// engine during the search.
-	pub fn propagations(&self) -> u64 {
-		self.propagations
-	}
-	/// Returns the number of times the search was restarted by the oracle solver.
-	pub fn restarts(&self) -> u32 {
-		self.restarts
-	}
-	/// Returns the number of search decisions that followed the user specified
-	/// search heuristic.
-	pub fn user_decisions(&self) -> u64 {
-		self.user_decisions
-	}
-}
-
 impl State {
 	/// Returns the current decision level of the solver.
 	fn decision_level(&self) -> u32 {
@@ -637,14 +608,45 @@ impl State {
 }
 
 impl ExplanationActions for State {
+	fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning> {
+		match var.0 {
+			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
+				let (iv2, meaning) = self.bool_to_int.get(lit.var())?;
+				if iv != iv2 {
+					return None;
+				}
+				let mut meaning = meaning
+					.map(|l| if lit.is_negated() { !l } else { l })
+					.unwrap_or_else(|| self.int_vars[iv].lit_meaning(lit));
+				if let IntViewInner::Linear { transformer, .. } = var.0 {
+					meaning = transformer.transform_lit(meaning);
+				}
+				Some(meaning)
+			}
+			IntViewInner::Const(_) => None,
+			IntViewInner::Bool { lit: var_lit, .. } if lit.var() != var_lit.var() => None,
+			IntViewInner::Bool {
+				lit: var_lit,
+				transformer,
+			} => {
+				let mut meaning = IntLitMeaning::GreaterEq(1);
+				if var_lit != lit {
+					meaning = !meaning;
+				}
+				meaning = transformer.transform_lit(meaning);
+				Some(meaning)
+			}
+		}
+	}
+
 	fn get_int_lit_relaxed(
 		&mut self,
 		var: IntView,
 		meaning: IntLitMeaning,
 	) -> (BoolView, IntLitMeaning) {
 		debug_assert!(
-			matches!(meaning, IntLitMeaning::GreaterEq(_) | IntLitMeaning::Less(_)),
-			"relaxed integer literals are only supported for LitMeaning::GreaterEq and LitMeaning::Less"
+			!matches!(meaning, IntLitMeaning::Eq(_)),
+			"relaxed integer literals are not yet supported for IntLitMeaning::Eq(_)"
 		);
 		// Transform literal meaning if view is a linear transformation
 		let meaning = match var.0 {
@@ -657,18 +659,39 @@ impl ExplanationActions for State {
 			_ => meaning,
 		};
 
-		// Get the (relaxed) boolean view representing the meaning and the actual (relaxed) meaning
+		// Get the (relaxed) boolean view representing the meaning and the actual
+		// (relaxed) meaning
 		let (bv, meaning) = match var.0 {
 			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				let var = &mut self.int_vars[iv];
+				let var_def = &mut self.int_vars[iv];
 				match meaning {
 					IntLitMeaning::GreaterEq(v) => {
-						let (bv, v) = var.get_greater_eq_lit_or_weaker(&self.trail, v);
+						let (bv, v) = var_def.get_greater_eq_lit_or_weaker(&self.trail, v);
 						(bv, IntLitMeaning::GreaterEq(v))
 					}
 					IntLitMeaning::Less(v) => {
-						let (bv, v) = var.get_less_lit_or_weaker(&self.trail, v);
+						let (bv, v) = var_def.get_less_lit_or_weaker(&self.trail, v);
 						(bv, IntLitMeaning::Less(v))
+					}
+					IntLitMeaning::NotEq(v) => {
+						if let Some(bv) = self.try_int_lit(var, meaning) {
+							(bv, IntLitMeaning::NotEq(v))
+						} else {
+							let lb = self.get_int_lower_bound(var);
+							if lb > v {
+								(
+									self.get_int_lower_bound_lit(var),
+									IntLitMeaning::GreaterEq(lb),
+								)
+							} else {
+								let ub = self.get_int_upper_bound(var);
+								debug_assert!(ub < v);
+								(
+									self.get_int_upper_bound_lit(var),
+									IntLitMeaning::Less(ub + 1),
+								)
+							}
+						}
 					}
 					_ => unreachable!(),
 				}
@@ -677,7 +700,8 @@ impl ExplanationActions for State {
 				BoolView(BoolViewInner::Const(match meaning {
 					IntLitMeaning::GreaterEq(i) => c >= i,
 					IntLitMeaning::Less(i) => c < i,
-					_ => unreachable!(),
+					IntLitMeaning::Eq(i) => c == i,
+					IntLitMeaning::NotEq(i) => c != i,
 				})),
 				meaning,
 			),
@@ -692,6 +716,9 @@ impl ExplanationActions for State {
 					IntLitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
 					IntLitMeaning::GreaterEq(i) if i > 1 => BoolViewInner::Const(false),
 					IntLitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
+					IntLitMeaning::Eq(0) => BoolViewInner::Lit(!lit),
+					IntLitMeaning::Eq(1) => BoolViewInner::Lit(lit),
+					IntLitMeaning::Eq(_) => BoolViewInner::Const(false),
 					_ => unreachable!(),
 				});
 				(if negated { !bv } else { bv }, meaning)

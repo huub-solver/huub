@@ -372,7 +372,7 @@ where
 			})
 			.collect();
 		// Run the solver!
-		let res = match goal {
+		let (res, stats) = match goal {
 			Some((goal, obj)) => {
 				if self.all_solutions {
 					warn!("--all-solutions is ignored when optimizing, use --intermediate-solutions or --all-optimal instead");
@@ -385,7 +385,13 @@ where
 						0
 					}
 				];
-				let (status, obj_val) = if self.intermediate_solutions {
+				// TODO: Fix statistics
+				let all_opt_slv = if self.all_optimal {
+					Some(slv.clone())
+				} else {
+					None
+				};
+				let (status, stats, obj_val) = if self.intermediate_solutions {
 					slv.branch_and_bound(obj, goal, |value| {
 						output!(
 							self.stdout,
@@ -428,6 +434,7 @@ where
 					res
 				};
 				if status == SolveResult::Complete && self.all_optimal {
+					let mut slv = all_opt_slv.unwrap();
 					// Ensure all following solutions have the same objective value as the
 					// first optimal solution
 					let Some(obj_val) = obj_val else {
@@ -438,10 +445,10 @@ where
 					// Ensure all following solutions are different from the first optimal
 					// solution
 					if slv.add_no_good(&output_vars, &no_good_vals).is_err() {
-						SolveResult::Complete
+						(SolveResult::Complete, stats)
 					} else {
 						// Find remaining optimal solutions
-						slv.all_solutions(&output_vars, |value| {
+						let (res, stats_all) = slv.all_solutions(&output_vars, |value| {
 							output!(
 								self.stdout,
 								"{}",
@@ -451,10 +458,11 @@ where
 									var_map: &var_map
 								}
 							);
-						})
+						});
+						(res, stats + stats_all)
 					}
 				} else {
-					status
+					(status, stats)
 				}
 			}
 			None if self.all_solutions => slv.all_solutions(&output_vars, |value| {
@@ -468,21 +476,23 @@ where
 					}
 				);
 			}),
-			None => slv.solve(|value| {
-				output!(
-					self.stdout,
-					"{}",
-					Solution {
-						value,
-						fzn: &fzn,
-						var_map: &var_map
-					}
-				);
-			}),
+			None => {
+				let res = slv.solve(|value| {
+					output!(
+						self.stdout,
+						"{}",
+						Solution {
+							value,
+							fzn: &fzn,
+							var_map: &var_map
+						}
+					);
+				});
+				(res, slv.search_statistics())
+			}
 		};
 		// output solving statistics
 		if self.statistics {
-			let stats = slv.search_statistics();
 			print_statistics_block(
 				&mut self.stdout,
 				"complete",
@@ -490,7 +500,7 @@ where
 					("solveTime", &(Instant::now() - start_solve).as_secs_f64()),
 					("failures", &stats.conflicts()),
 					("peakDepth", &stats.peak_depth()),
-					("propagations", &stats.propagations()),
+					("propagations", &stats.cp_propagations()),
 					("restarts", &stats.restarts()),
 					("oracleDecisions", &stats.oracle_decisions()),
 					("userDecisions", &stats.user_decisions()),

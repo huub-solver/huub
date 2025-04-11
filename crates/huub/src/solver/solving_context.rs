@@ -206,6 +206,7 @@ impl ExplanationActions for SolvingContext<'_> {
 
 	delegate! {
 		to self.state {
+			fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning>;
 			fn try_int_lit(&self, var: IntView, meaning: IntLitMeaning) -> Option<BoolView>;
 			fn get_int_lit_relaxed(&mut self, var: IntView, meaning: IntLitMeaning) -> (BoolView, IntLitMeaning);
 			fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView;

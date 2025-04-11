@@ -12,7 +12,7 @@ use std::{
 	fmt::{self, Debug, Display, Formatter},
 	hash::Hash,
 	num::NonZeroI32,
-	ops::{Add, Deref, Mul, Neg, Not},
+	ops::{Add, AddAssign, Deref, Mul, Neg, Not},
 };
 
 use delegate::delegate;
@@ -40,7 +40,7 @@ use crate::{
 	reformulate::InitConfig,
 	solver::{
 		activation_list::IntPropCond,
-		engine::{trace_new_lit, Engine, PropRef, SearchStatistics},
+		engine::{trace_new_lit, Engine, PropRef},
 		int_var::{DirectStorage, IntVarRef, LazyLitDef, OrderStorage},
 		queue::{PriorityLevel, PropagatorInfo},
 		trail::TrailedInt,
@@ -145,6 +145,24 @@ pub(crate) enum IntViewInner {
 ///
 /// Note that this checker will always return false.
 pub(crate) struct NoAssumptions;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+/// Structure capturing statitical information about the search performed by the
+/// solver instance.
+pub struct SearchStatistics {
+	/// Number of conflicts encountered
+	pub(crate) conflicts: u64,
+	/// Number of search decisions left to the oracle solver
+	pub(crate) oracle_decisions: u64,
+	/// Peak search depth
+	pub(crate) peak_depth: u32,
+	/// Number of times a CP propagator was called
+	pub(crate) propagations: u64,
+	/// Number of backtracks to level 0
+	pub(crate) restarts: u32,
+	/// Number of decisions following the user-specified search heuristics
+	pub(crate) user_decisions: u64,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Result of a solving attempt
@@ -513,6 +531,55 @@ impl AssumptionChecker for NoAssumptions {
 	}
 }
 
+impl SearchStatistics {
+	/// Returns the number of conflicts encountered during the search.
+	pub fn conflicts(&self) -> u64 {
+		self.conflicts
+	}
+	/// Return the number of search decisions that was left to the oracle solver.
+	pub fn oracle_decisions(&self) -> u64 {
+		self.oracle_decisions
+	}
+	/// Returns the peak depth of the search tree.
+	pub fn peak_depth(&self) -> u32 {
+		self.peak_depth
+	}
+	/// Returns the number of propagations performed by the constraint programming
+	/// engine during the search.
+	pub fn cp_propagations(&self) -> u64 {
+		self.propagations
+	}
+	/// Returns the number of times the search was restarted by the oracle solver.
+	pub fn restarts(&self) -> u32 {
+		self.restarts
+	}
+	/// Returns the number of search decisions that followed the user specified
+	/// search heuristic.
+	pub fn user_decisions(&self) -> u64 {
+		self.user_decisions
+	}
+}
+
+impl Add for SearchStatistics {
+	type Output = SearchStatistics;
+
+	fn add(mut self, other: SearchStatistics) -> SearchStatistics {
+		self += other;
+		self
+	}
+}
+
+impl AddAssign for SearchStatistics {
+	fn add_assign(&mut self, other: SearchStatistics) {
+		self.conflicts += other.conflicts;
+		self.oracle_decisions += other.oracle_decisions;
+		self.peak_depth = self.peak_depth.max(other.peak_depth);
+		self.propagations += other.propagations;
+		self.restarts += other.restarts;
+		self.user_decisions += other.user_decisions;
+	}
+}
+
 impl<Oracle> Solver<Oracle>
 where
 	Oracle: PropagatingSolver<Engine>,
@@ -616,10 +683,14 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 	/// that you can clone the Solver object before calling this method to work around this
 	/// limitation.
 	pub fn all_solutions(
-		&mut self,
+		mut self,
 		vars: &[View],
 		mut on_sol: impl FnMut(&dyn Valuation),
-	) -> SolveResult {
+	) -> (SolveResult, SearchStatistics) {
+		use SolveResult::*;
+
+		let ret = |x: Self, status: SolveResult| (status, x.search_statistics());
+
 		let mut num_sol = 0;
 		loop {
 			let mut vals = Vec::with_capacity(vars.len());
@@ -631,23 +702,23 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 				on_sol(value);
 			});
 			match status {
-				SolveResult::Satisfied => {
+				Satisfied => {
 					if self.add_no_good(vars, &vals).is_err() {
-						return SolveResult::Complete;
+						return ret(self, Complete);
 					}
 				}
-				SolveResult::Unsatisfiable => {
+				Unsatisfiable => {
 					if num_sol == 0 {
-						return SolveResult::Unsatisfiable;
+						return ret(self, Unsatisfiable);
 					} else {
-						return SolveResult::Complete;
+						return ret(self, Complete);
 					}
 				}
-				SolveResult::Unknown => {
+				Unknown => {
 					if num_sol == 0 {
-						return SolveResult::Unknown;
+						return ret(self, Unknown);
 					} else {
-						return SolveResult::Satisfied;
+						return ret(self, Satisfied);
 					}
 				}
 				_ => unreachable!(),
@@ -660,38 +731,38 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 	/// Note that this method uses assumptions iteratively increase the lower bound of the objective.
 	/// This does not impact the state of the solver for continued use.
 	pub fn branch_and_bound(
-		&mut self,
+		mut self,
 		objective: IntView,
 		goal: Goal,
 		mut on_sol: impl FnMut(&dyn Valuation),
-	) -> (SolveResult, Option<IntVal>) {
+	) -> (SolveResult, SearchStatistics, Option<IntVal>) {
+		use SolveResult::*;
+		let ret = |x: Self, status: SolveResult, obj: Option<IntVal>| {
+			(status, x.search_statistics(), obj)
+		};
+
 		let mut obj_curr = None;
 		let obj_bound = match goal {
 			Goal::Minimize => self.get_int_lower_bound(objective),
 			Goal::Maximize => self.get_int_upper_bound(objective),
 		};
-		let mut assump = None;
 		debug!(obj_bound, "start branch and bound");
 		loop {
-			let status = self.solve_assuming(
-				assump,
-				|value| {
-					obj_curr = if let Value::Int(i) = value(View::Int(objective)) {
-						Some(i)
-					} else {
-						unreachable!()
-					};
-					on_sol(value);
-				},
-				|_| {},
-			);
+			let status = self.solve(|value| {
+				obj_curr = if let Value::Int(i) = value(View::Int(objective)) {
+					Some(i)
+				} else {
+					unreachable!()
+				};
+				on_sol(value);
+			});
 			debug!(?status, ?obj_curr, obj_bound, ?goal, "oracle solve result");
 			match status {
-				SolveResult::Satisfied => {
+				Satisfied => {
 					if obj_curr == Some(obj_bound) {
-						return (SolveResult::Complete, obj_curr);
+						return ret(self, Complete, obj_curr);
 					} else {
-						assump = match goal {
+						let bound_lit = match goal {
 							Goal::Minimize => Some(
 								self.get_int_lit(objective, IntLitMeaning::Less(obj_curr.unwrap())),
 							),
@@ -702,30 +773,31 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 						};
 						debug!(
 							lit = i32::from({
-								let BoolViewInner::Lit(l) = assump.unwrap().0 else {
+								let BoolViewInner::Lit(l) = bound_lit.unwrap().0 else {
 									unreachable!()
 								};
 								l
 							}),
 							"add objective bound"
 						);
+						self.add_clause([bound_lit.unwrap()]).unwrap();
 					}
 				}
-				SolveResult::Unsatisfiable => {
+				Unsatisfiable => {
 					return if obj_curr.is_none() {
-						(SolveResult::Unsatisfiable, None)
+						ret(self, Unsatisfiable, None)
 					} else {
-						(SolveResult::Complete, obj_curr)
-					}
+						ret(self, Complete, obj_curr)
+					};
 				}
-				SolveResult::Unknown => {
+				Unknown => {
 					return if obj_curr.is_none() {
-						(SolveResult::Unknown, None)
+						ret(self, Unknown, None)
 					} else {
-						(SolveResult::Satisfied, obj_curr)
+						ret(self, Satisfied, obj_curr)
 					}
 				}
-				SolveResult::Complete => unreachable!(),
+				Complete => unreachable!(),
 			}
 		}
 	}
@@ -766,16 +838,19 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 	/// from being generated twice. This will make repeated use of the Solver object impossible. Note
 	/// that you can clone the Solver object before calling this method to work around this
 	/// limitation.
-	pub fn get_all_solutions(&mut self, vars: &[View]) -> (SolveResult, Vec<Vec<Value>>) {
+	pub fn get_all_solutions(
+		self,
+		vars: &[View],
+	) -> (SolveResult, SearchStatistics, Vec<Vec<Value>>) {
 		let mut solutions = Vec::new();
-		let status = self.all_solutions(vars, |sol| {
+		let (status, stats) = self.all_solutions(vars, |sol| {
 			let mut sol_vec = Vec::with_capacity(vars.len());
 			for v in vars {
 				sol_vec.push(sol(*v));
 			}
 			solutions.push(sol_vec);
 		});
-		(status, solutions)
+		(status, stats, solutions)
 	}
 
 	/// Access the initilization statistics of the [`Solver`] object.
@@ -792,8 +867,16 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 	}
 
 	/// Access the search statistics for the search process up to this point.
-	pub fn search_statistics(&self) -> &SearchStatistics {
-		&self.engine().state.statistics
+	pub fn search_statistics(&self) -> SearchStatistics {
+		let cp_stats = &self.engine().state.statistics;
+		SearchStatistics {
+			conflicts: cp_stats.conflicts,
+			oracle_decisions: cp_stats.oracle_decisions,
+			peak_depth: cp_stats.peak_depth,
+			propagations: cp_stats.propagations,
+			restarts: cp_stats.restarts,
+			user_decisions: cp_stats.user_decisions,
+		}
 	}
 
 	/// Try and find a solution to the problem for which the Solver was
@@ -958,7 +1041,7 @@ impl<Oracle: PropagatingSolver<Engine>> DecisionActions for Solver<Oracle> {
 	}
 
 	fn get_num_conflicts(&self) -> u64 {
-		self.engine().state.statistics.conflicts()
+		self.engine().state.statistics.conflicts
 	}
 }
 
@@ -970,6 +1053,7 @@ impl<Oracle: PropagatingSolver<Engine>> ExplanationActions for Solver<Oracle> {
 
 	delegate! {
 		to self.engine().state {
+			fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning>;
 			fn try_int_lit(&self, var: IntView, meaning: IntLitMeaning) -> Option<BoolView>;
 		}
 		to self.engine_mut().state {
