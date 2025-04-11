@@ -3,7 +3,7 @@
 
 use std::ops::AddAssign;
 
-use pindakaas::{AsDynClauseDatabase, ClauseDatabase};
+use pindakaas::{AsDynClauseDatabase, ClauseDatabase, Lit as RawLit};
 
 use crate::{
 	branchers::BoxedBrancher,
@@ -103,9 +103,9 @@ pub trait DecisionActions: InspectionActions {
 /// Actions that can be performed when explaining a propagation that was
 /// performed.
 pub trait ExplanationActions: InspectionActions {
-	/// Get a Boolean view that represents the given meaning (that is currently
-	/// `true`) on the integer view, if it already exists.
-	fn try_int_lit(&self, var: IntView, meaning: IntLitMeaning) -> Option<BoolView>;
+	/// Get the meaning of the given literal with respect to the given integer
+	/// view, or `None` it has no direct meaning.
+	fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning>;
 
 	/// Get a Boolean view that represents the given meaning (that is currently
 	/// `true`) on the integer view, or a relaxation if the literal does not yet
@@ -127,6 +127,10 @@ pub trait ExplanationActions: InspectionActions {
 	/// Get the Boolean view that represents that the integer view will take a
 	/// value less or equal to its current upper bound.
 	fn get_int_upper_bound_lit(&mut self, var: IntView) -> BoolView;
+
+	/// Get a Boolean view that represents the given meaning (that is currently
+	/// `true`) on the integer view, if it already exists.
+	fn try_int_lit(&self, var: IntView, meaning: IntLitMeaning) -> Option<BoolView>;
 }
 
 /// Actions that can generally be performed when the solver is (partially)
