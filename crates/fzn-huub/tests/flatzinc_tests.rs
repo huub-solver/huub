@@ -63,5 +63,5 @@ mod tests {
 	assert_optimal!(radiation_i6_9);
 	assert_optimal!(radiation_i8_9);
 	assert_optimal!(svrp_s4_v2_c3);
-	assert_optimal!(ccmp_3_20_015_3);
+	assert_optimal!(ccmcp_3_20_015_3);
 }

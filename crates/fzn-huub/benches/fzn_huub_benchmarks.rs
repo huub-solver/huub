@@ -70,7 +70,7 @@ fn optimization(c: &mut Criterion) {
 		("radiation_i6_9", &INSTANT_CONFIG),
 		("radiation_i8_9", &MILLISECONDS_CONFIG),
 		("svrp_s4_v2_c3", &MILLISECONDS_CONFIG),
-		("ccmp_3_20_015_3", &MILLISECONDS_CONFIG),
+		("ccmcp_3_20_015_3", &MILLISECONDS_CONFIG),
 	];
 
 	for (instance, config) in instances {
