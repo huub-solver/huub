@@ -208,14 +208,14 @@ impl SeqPrecedeChainBounds {
 
 	fn set_upper<P: PropagationActions>(&self, actions: &mut P, i: usize, k: IntVal) -> Result<(), Conflict> {
 		if self.lazy_level > 1 {
-			return actions.set_int_upper_bound(self.vars[i], k, actions.deferred_reason(i as u64));
+			return actions.set_int_upper_bound(self.vars[i], k, actions.deferred_reason((i as u64) << 32 | k as u64));
 		}
 		actions.set_int_upper_bound(self.vars[i], k, |a: &mut P| self.explain_upper(a, i, k))
 	}
 
 	fn set_lower<P: PropagationActions>(&self, actions: &mut P, i: usize, k: IntVal) -> Result<(), Conflict> {
 		if self.lazy_level > 0 {
-			return actions.set_int_lower_bound(self.vars[i], k, actions.deferred_reason(i as u64));
+			return actions.set_int_lower_bound(self.vars[i], k, actions.deferred_reason(((-(i as i32) - 1) as u64) << 32 | k as u64));
 		}
 		actions.set_int_lower_bound(self.vars[i], k, |a: &mut P| self.explain_lower(a, i, k))
 	}
@@ -225,7 +225,7 @@ impl SeqPrecedeChainBounds {
 
 		let n = vars.len();
 		let ub = vars.iter()
-			.fold(0, |u, &item| if solver.get_int_upper_bound(item) > u { u + 1 } else { u });
+			.fold(0, |u, &item| if solver.get_int_upper_bound(item) > u { u + 1 } else { u });  //todo could this be a bit stronger?
 
 		let first = (0..=ub).map(|_| solver.new_trailed_int(0)).collect();
 		let last = (0..=ub)
@@ -270,6 +270,13 @@ where
 			.map(|(i, &v)| if let Some(val) = actions.get_int_val(v) {Some((i, val))} else {None})
 			.flatten()
 			.collect::<Vec<_>>());
+		/*for (i, &v) in self.vars.iter().enumerate() {
+			trace!("Domain of variable {i}: {:?}", (actions.get_int_lower_bound(v)..=actions.get_int_upper_bound(v))
+				.into_iter()
+				.map(|val| if actions.check_int_in_domain(v, val) {Some(val)} else {None})
+				.flatten()
+				.collect::<Vec<_>>());
+		}*/
 		/*trace!("first: {:?}", self.first.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
 		trace!("last: {:?}", self.last.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
 		trace!("first_val: {:?}", self.first_val.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
@@ -309,17 +316,14 @@ where
 
 	}
 
-	fn explain(&mut self, actions: &mut E, lit: Option<RawLit>, data: u64) -> Conjunction {
-		let ex = match actions.get_int_lit_meaning(self.vars[data as usize], lit.unwrap()) {
-			Some(IntLitMeaning::Less(k)) => {
-				trace!("Getting lazy upper bound reason for i={data}, k={}", k-1);
-				self.explain_upper(actions, data as usize, k-1)
-			}
-			Some(IntLitMeaning::GreaterEq(k)) => {
-				trace!("Getting lazy lower bound reason for i={data}, k={k}");
-				self.explain_lower(actions, data as usize, k)
-			}
-			_ => unreachable!("seq_precede_chain should always explain a lower or upper bound!")
+	fn explain(&mut self, actions: &mut E, _: Option<RawLit>, data: u64) -> Conjunction {
+		let (i, k) = ((data >> 32) as i32, data as i32);
+		let ex = if i < 0 {
+			trace!("Getting lazy lower bound reason for i={i}, k={k}");
+			self.explain_lower(actions, (-i-1) as usize, k as IntVal)
+		} else {
+			trace!("Getting lazy upper bound reason for i={i}, k={k}");
+			self.explain_upper(actions, i as usize, k as IntVal)
 		};
 		ex.iter()
 			.filter_map(|bv| match bv.0 {
