@@ -21,6 +21,7 @@ pindakaas = { git = "https://github.com/pindakaashq/pindakaas.git", features = [
 rangelist = "0.2"
 thiserror = "2.0"
 tracing = { workspace = true }
+xcsp3-serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 expect-test = { workspace = true }
@@ -31,3 +32,4 @@ workspace = true
 
 [features]
 flatzinc = ["flatzinc-serde"]
+xcsp3 = ["xcsp3-serde"]

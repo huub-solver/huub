@@ -19,6 +19,8 @@ pub mod reformulate;
 pub mod solver;
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(feature = "xcsp3")]
+pub mod xcsp3;
 
 use std::{
 	any::Any,
