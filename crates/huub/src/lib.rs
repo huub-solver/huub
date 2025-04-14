@@ -353,8 +353,6 @@ where
 {
 	SeqPrecedeChain {
 		vars: vars.into_iter().map_into().collect(),
-		prop_domain: false,
-		lazy_level: 0,
 	}
 }
 
@@ -367,8 +365,6 @@ pub fn value_precede_chain(
 	ValuePrecedeChain {
 		values,
 		vars,
-		prop_domain: false,
-		lazy_level: 0,
 	}
 }
 
@@ -1197,20 +1193,6 @@ impl Model {
 							let _ = int_eager_direct.insert(iv);
 						}
 					}
-				}
-				_ => {}
-			}
-		}
-
-		for c in self.constraints.iter_mut().flatten() {
-			match c {
-				ConstraintStore::SeqPrecedeChain(con) => {
-					con.prop_domain = config.seq_domain_prop;
-					con.lazy_level = config.seq_lazy_level;
-				}
-				ConstraintStore::ValuePrecedeChain(con) => {
-					con.prop_domain = config.seq_domain_prop;
-					con.lazy_level = config.seq_lazy_level;
 				}
 				_ => {}
 			}

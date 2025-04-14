@@ -71,6 +71,7 @@ fn optimization(c: &mut Criterion) {
 		("radiation_i8_9", &MILLISECONDS_CONFIG),
 		("svrp_s4_v2_c3", &MILLISECONDS_CONFIG),
 		("ccmcp_3_20_015_3", &MILLISECONDS_CONFIG),
+		("peaceable_queens_n5_q3", &MILLISECONDS_CONFIG),
 	];
 
 	for (instance, config) in instances {
