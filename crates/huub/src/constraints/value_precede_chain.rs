@@ -53,7 +53,7 @@ pub struct ValuePrecedeChainValue {
 
 impl<S: SimplificationActions> Constraint<S> for ValuePrecedeChain {
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		if self.values.len() == 0 {
+		if self.values.len() <= 1 {
 			return Ok(SimplificationStatus::Subsumed);
 		}
 		let mut ub = 0;
@@ -67,7 +67,7 @@ impl<S: SimplificationActions> Constraint<S> for ValuePrecedeChain {
 		}
 		//todo this can become more powerful if updated upper bound from previous loop is available
 		self.vars.retain(|&var| self.values.iter().any(|&val| actions.check_int_in_domain(var, val)));
-		if self.vars.len() == 0 {
+		if self.vars.len() <= 0 {
 			return Ok(SimplificationStatus::Subsumed);
 		}
 		Ok(SimplificationStatus::Fixpoint)
