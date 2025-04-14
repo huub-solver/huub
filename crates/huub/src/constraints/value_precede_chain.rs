@@ -58,7 +58,7 @@ impl<S: SimplificationActions> Constraint<S> for ValuePrecedeChain {
 		}
 		let mut ub = 0;
 		for &var in self.vars.iter() {
-			if actions.check_int_in_domain(var, self.values[ub]) {
+			if ub < self.values.len() && actions.check_int_in_domain(var, self.values[ub]) {
 				ub += 1;
 			}
 			for j in ub..self.values.len() {
@@ -395,7 +395,7 @@ where
 	P: PropagationActions,
 	E: ExplanationActions,
 {
-	#[tracing::instrument(name = "seq_precede_chain", level = "trace", skip(self, actions))]
+	#[tracing::instrument(name = "value_precede_chain", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 
 		trace!("Fixed assignments: {:?}", self.vars.iter().enumerate()
@@ -464,7 +464,7 @@ where
 				BoolViewInner::Const(true) => None,
 				BoolViewInner::Const(false) => {
 					unreachable!(
-						"Unexpected false literal in the explanation of seq_precede_chain!"
+						"Unexpected false literal in the explanation of value_precede_chain!"
 					)
 				}
 			})
@@ -575,7 +575,7 @@ mod tests {
 
 	#[test]
 	#[traced_test]
-	fn test_seq_value_precede_chain_unrestricted() {
+	fn test_value_precede_chain_unrestricted() {
 		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
 		let x0 = IntVar::new_in(
 			&mut slv,
@@ -609,7 +609,7 @@ mod tests {
 
 	#[test]
 	#[traced_test]
-	fn test_seq_value_precede_chain_simple() {
+	fn test_value_precede_chain_simple() {
 		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
 		let x0 = IntVar::new_in(
 			&mut slv,
@@ -637,7 +637,7 @@ mod tests {
 
 	#[test]
 	#[traced_test]
-	fn test_seq_value_precede_chain_out_of_bounds() {
+	fn test_value_precede_chain_out_of_bounds() {
 		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
 		let x0 = IntVar::new_in(
 			&mut slv,
