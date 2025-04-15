@@ -1,164 +1,266 @@
-   7.336205406s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: new propagation
-   7.336253220s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: DOING OBJECT 0
-   7.336298443s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
-   7.336343274s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
-   7.336387035s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 0 y - ub: 11, lb: 4, size 19
-   7.336423727s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 0 y - ub: 3, lb: 0, size 21
-   7.336464047s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
-   7.336518544s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: DOING OBJECT 1
-   7.336560048s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
-   7.336600125s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
-   7.336634386s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 0 y - ub: 11, lb: 4, size 19
-   7.336667785s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 0 y - ub: 3, lb: 0, size 21
-   7.336687031s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
-   7.336720313s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: DOING OBJECT 2
-   7.336752256s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
-   7.336790078s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
-   7.336832050s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 0 y - ub: 11, lb: 4, size 19
-   7.336876983s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 0 y - ub: 3, lb: 0, size 21
-   7.336912464s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
-   7.336955348s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: DOING OBJECT 3
-   7.336988442s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
-   7.337022477s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
-   7.337055294s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 0 y - ub: 11, lb: 4, size 19
-   7.337092070s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 0 y - ub: 3, lb: 0, size 21
-   7.337129083s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
-   7.337190612s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: GENERALIZED min from 0 to -6
-   7.337241262s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: Reason [[var 3 [0, 36] >= -6]
-   7.337291694s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: Reason [[var 3 [0, 36] < 37]
-   7.337340681s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: reason [[var 3 [0, 3] < 4]
-   7.337375296s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: reason [[var 3 [0, 3] >= 0]
-   7.337414843s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [0, 38] < 39]
-   7.337457007s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [0, 38] >= 0]
-   7.337491402s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: generalized
-   7.337533357s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [4, 11] < 12]
-   7.337573119s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [4, 11] >= -6]
-   7.337617951s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] < 15]
-   7.337662501s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] >= 1]
-   7.337703871s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: generalized
-   7.337724395s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] < 12]
-   7.337759004s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] >= 0]
-   7.337809533s TRACE propagate{level=5}:diffn: huub::solver::solving_context: propagate bool lit="X_INTRODUCED_3_≥24" reason=Ok(Eager([Lit(727), Lit(773), Lit(558), Lit(612), Lit(872), Lit(-858), Lit(918)]))
-   7.337862044s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: Setting lb of object 3 to 24 in dimension 0 in max
-   7.337898581s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: DOING OBJECT 4
-   7.337934569s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
-   7.337978006s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
-   7.338022870s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 0 y - ub: 11, lb: 4, size 19
-   7.338043953s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 24 y - ub: 3, lb: 0, size 21
-   7.338070875s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
-   7.338131901s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: GENERALIZED max from 15 to 44
-   7.338177722s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: Reason [[var 4 [1, 14] < 45]
-   7.338223008s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: Reason [[var 4 [1, 14] >= 1]
-   7.338273182s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: reason [[var 4 [0, 3] < 4]
-   7.338317017s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: reason [[var 4 [0, 3] >= 0]
-   7.338364427s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [24, 36] < 37]
-   7.338409620s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [24, 36] >= 24]
-   7.338428193s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: generalized
-   7.338455570s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [0, 3] < 4]
-   7.338501580s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [0, 3] >= -8]
-   7.338549957s TRACE propagate{level=5}:diffn: huub::solver::solving_context: propagate bool lit="X_INTRODUCED_4_<14" reason=Ok(Eager([Lit(902), Lit(-858), Lit(910), Lit(727), Lit(-714), Lit(773)]))
-   7.338601904s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: Setting ub of object 4 to 13 in dimension 0 in max
-   7.338660812s DEBUG propagate{level=5}: huub::solver::engine: propagate lits="X_INTRODUCED_3_≥24, X_INTRODUCED_4_<14"
-   7.338724257s DEBUG huub::solver::engine: assignments lits="X_INTRODUCED_3_≥24"
-   7.338767967s TRACE huub::solver::engine: new lb lit="X_INTRODUCED_3_≥24" lb=24
-   7.338873994s DEBUG huub::solver::engine: add reason clause clause="X_INTRODUCED_3_≥37 ∨ X_INTRODUCED_8_≥4 ∨ X_INTRODUCED_2_≥39 ∨ X_INTRODUCED_7_≥12 ∨ X_INTRODUCED_4_≥15 ∨ X_INTRODUCED_4_<1 ∨ X_INTRODUCED_9_≥12 ∨ X_INTRODUCED_3_≥24"
-   7.338950625s TRACE huub::solver::trail: undo to when literal was set len=225 lit="X_INTRODUCED_2_<39"
-   7.338990775s DEBUG huub::solver::engine: add reason clause clause="w≥58 ∨ X_INTRODUCED_2_<39"
-   7.339035036s TRACE huub::solver::trail: redo to when literal was set len=229 lit="X_INTRODUCED_3_<37"
-   7.339080511s DEBUG huub::solver::engine: add reason clause clause="w≥58 ∨ X_INTRODUCED_3_<37"
-   7.339217639s DEBUG huub::solver: learn clause clause="X_INTRODUCED_7_<4 ∨ X_INTRODUCED_4_≥15 ∨ X_INTRODUCED_4_≥17 ∨ X_INTRODUCED_9_≥4 ∨ rec<798"
-   7.339263301s DEBUG huub::solver::engine: backtrack new_level=4 restart=false
-   7.339289392s DEBUG huub::solver::engine: assignments lits="X_INTRODUCED_7_<4"
-   7.339321680s TRACE huub::solver::engine: new ub lit="X_INTRODUCED_7_<4" ub=3
-   7.339374221s DEBUG huub::solver::engine: assignments lits="X_INTRODUCED_7_<5, X_INTRODUCED_7_<6, X_INTRODUCED_7_<7, X_INTRODUCED_7_<8, X_INTRODUCED_7_<9, X_INTRODUCED_7_<10, X_INTRODUCED_7_<11"
-   7.339454060s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: new propagation
-   7.339497927s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: DOING OBJECT 0
-   7.339532130s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
-   7.339573746s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
-   7.339608883s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 0 y - ub: 3, lb: 0, size 19
-   7.339641803s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 0 y - ub: 9, lb: 0, size 21
-   7.339680139s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
-   7.339736735s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: DOING OBJECT 1
-   7.339772071s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
-   7.339797378s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
-   7.339829286s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 0 y - ub: 3, lb: 0, size 19
-   7.339874564s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 0 y - ub: 9, lb: 0, size 21
-   7.339897224s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
-   7.339935399s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: DOING OBJECT 2
-   7.339973016s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
-   7.340002882s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
-   7.340036364s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 0 y - ub: 3, lb: 0, size 19
-   7.340075919s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 0 y - ub: 9, lb: 0, size 21
-   7.340109893s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
-   7.340163320s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: GENERALIZED min from 0 to -4
-   7.340203148s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Reason [[var 2 [0, 38] >= -4]
-   7.340237450s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Reason [[var 2 [0, 38] < 39]
-   7.340280276s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: reason [[var 2 [0, 3] < 4]
-   7.340324812s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: reason [[var 2 [0, 3] >= 0]
-   7.340354239s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [0, 36] < 37]
-   7.340384327s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [0, 36] >= 0]
-   7.340419377s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: generalized
-   7.340447155s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [0, 9] < 10]
-   7.340482667s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [0, 9] >= -8]
-   7.340524036s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] < 15]
-   7.340565215s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] >= 1]
-   7.340604847s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: generalized
-   7.340655965s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] < 10]
-   7.340697820s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] >= 0]
-   7.340740284s TRACE propagate{level=4}:diffn: huub::solver::solving_context: propagate bool lit="X_INTRODUCED_2_≥24" reason=Ok(Eager([Lit(558), Lit(604), Lit(727), Lit(779), Lit(872), Lit(-858), Lit(916)]))
-   7.340792608s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Setting lb of object 2 to 24 in dimension 0 in max
-   7.340835625s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: DOING OBJECT 3
-   7.340878787s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
-   7.340920653s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
-   7.340946150s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 24 y - ub: 3, lb: 0, size 19
-   7.340977156s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 0 y - ub: 9, lb: 0, size 21
-   7.341009985s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
-   7.341060227s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: GENERALIZED max from 37 to 42
-   7.341096578s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Reason [[var 3 [0, 36] < 43]
-   7.341129956s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Reason [[var 3 [0, 36] >= 0]
-   7.341165352s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: reason [[var 3 [0, 9] < 10]
-   7.341199647s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: reason [[var 3 [0, 9] >= 0]
-   7.341222854s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [24, 38] < 39]
-   7.341263077s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [24, 38] >= 24]
-   7.341307086s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: generalized
-   7.341352015s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [0, 3] < 12]
-   7.341392409s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [0, 3] >= 0]
-   7.341431854s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: generalized
-   7.341461403s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] < 21]
-   7.341494419s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] >= 1]
-   7.341536599s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: generalized
-   7.341588771s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] < 12]
-   7.341632954s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] >= 0]
-   7.341683761s TRACE propagate{level=4}:diffn: huub::solver::solving_context: propagate bool lit="X_INTRODUCED_3_<18" reason=Ok(Eager([Lit(733), Lit(779), Lit(558), Lit(-543), Lit(612), Lit(878), Lit(-858), Lit(918)]))
-   7.341730683s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Setting ub of object 3 to 17 in dimension 0 in max
-   7.341772048s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: reason [[var 3 [0, 17] < 18]
-   7.341805812s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: reason [[var 3 [0, 17] >= 0]
-   7.341861077s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: GENERALIZED min from 0 to -8
-   7.341894985s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Reason [[var 3 [0, 9] >= -8]
-   7.341938594s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Reason [[var 3 [0, 9] < 10]
-   7.341983620s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: generalized
-   7.342030223s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [24, 38] < 39]
-   7.342076356s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [24, 38] >= -1]
-   7.342122223s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [0, 3] < 4]
-   7.342164900s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [0, 3] >= 0]
-   7.342208019s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: generalized
-   7.342247229s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: generalized
-   7.342295733s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] < 21]
-   7.342337290s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] >= -5]
-   7.342358234s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] < 4]
-   7.342385544s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] >= 0]
-   7.342438654s TRACE propagate{level=4}:diffn: huub::solver::solving_context: propagate bool lit="X_INTRODUCED_8_≥4" reason=Ok(Eager([Lit(708), Lit(779), Lit(558), Lit(604), Lit(878), Lit(910)]))
-   7.342497548s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Setting lb of object 3 to 4 in dimension 1 in max
-   7.342534033s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: DOING OBJECT 4
-   7.342575060s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
-   7.342618764s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
-   7.342661138s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 24 y - ub: 3, lb: 0, size 19
-   7.342688236s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 3: x - ub: 17 lb: 0 y - ub: 9, lb: 4, size 21
-   7.342719697s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
-   7.342775635s DEBUG propagate{level=4}: huub::solver::engine: propagate lits="X_INTRODUCED_2_≥24, X_INTRODUCED_3_<18, X_INTRODUCED_8_≥4"
-   7.342843298s DEBUG huub::solver::engine: assignments lits="X_INTRODUCED_2_≥24"
-   7.342891311s TRACE huub::solver::engine: new lb lit="X_INTRODUCED_2_≥24" lb=24
-   7.342988411s DEBUG huub::solver::engine: assignments lits="X_INTRODUCED_2_≥23, X_INTRODUCED_3_<24, X_INTRODUCED_2_≥22, w≥42, X_INTRODUCED_3_<25, X_INTRODUCED_8_≥4, X_INTRODUCED_2_≥21, w≥41, X_INTRODUCED_3_<26, X_INTRODUCED_8_≥3, h≥16, X_INTRODUCED_2_≥20, w≥40, X_INTRODUCED_3_<27, X_INTRODUCED_8_≥2, h≥15, w<52, w<50, X_INTRODUCED_2_≥19, w≥39, h<20, X_INTRODUCED_3_<28, X_INTRODUCED_8_≥1, w<57, w<53, X_INTRODUCED_0_<37, X_INTRODUCED_2_<33, X_INTRODUCED_1_<35, w<51, h≥17, X_INTRODUCED_2_≥18, h<21, X_INTRODUCED_6_<12, X_INTRODUCED_8_<8, X_INTRODUCED_5_<14, X_INTRODUCED_3_<29, X_INTRODUCED_3_<36, w<54, X_INTRODUCED_0_<38, X_INTRODUCED_2_<34, X_INTRODUCED_3_<12, X_INTRODUCED_1_<36, w<48, X_INTRODUCED_2_≥17, X_INTRODUCED_6_<13, X_INTRODUCED_8_<9, X_INTRODUCED_5_<15, X_INTRODUCED_3_<30, w<55, X_INTRODUCED_0_<39, X_INTRODUCED_2_<35, X_INTRODUCED_3_<13, X_INTRODUCED_1_<37, w<49, X_INTRODUCED_0_<33, X_INTRODUCED_1_<31, X_INTRODUCED_2_<29, X_INTRODUCED_2_≥16, X_INTRODUCED_3_<31, w<56, X_INTRODUCED_0_<40, X_INTRODUCED_2_<36, X_INTRODUCED_3_<14, X_INTRODUCED_1_<38, X_INTRODUCED_0_<34, X_INTRODUCED_1_<32, X_INTRODUCED_2_<30, X_INTRODUCED_3_<8, X_INTRODUCED_2_≥15, X_INTRODUCED_3_<32, X_INTRODUCED_0_<41, X_INTRODUCED_2_<37, X_INTRODUCED_3_<15, X_INTRODUCED_1_<39, X_INTRODUCED_0_<35, X_INTRODUCED_1_<33, X_INTRODUCED_2_<31, X_INTRODUCED_3_<9, X_INTRODUCED_2_≥14, X_INTRODUCED_3_<33, X_INTRODUCED_0_<42, X_INTRODUCED_2_<38, X_INTRODUCED_3_<16, X_INTRODUCED_1_<40, X_INTRODUCED_0_<36, X_INTRODUCED_1_<34, X_INTRODUCED_2_<32, X_INTRODUCED_3_<10, X_INTRODUCED_2_≥13, X_INTRODUCED_3_<34, X_INTRODUCED_3_<17, X_INTRODUCED_3_<11, X_INTRODUCED_2_≥12, X_INTRODUCED_3_<35, X_INTRODUCED_3_<18, X_INTRODUCED_2_≥11, X_INTRODUCED_3_<19, X_INTRODUCED_2_≥10, X_INTRODUCED_3_<20, X_INTRODUCED_2_≥9, X_INTRODUCED_3_<21, X_INTRODUCED_2_≥8, X_INTRODUCED_3_<22, X_INTRODUCED_2_≥7, X_INTRODUCED_3_<23, X_INTRODUCED_2_≥6, X_INTRODUCED_2_≥5, X_INTRODUCED_2_≥4, X_INTRODUCED_2_≥3, X_INTRODUCED_2_≥2, X_INTRODUCED_2_≥1"
-   7.343126151s TRACE huub::solver::engine: new ub lit="X_INTRODUCED_3_<24" ub=23
-   7.343160713s TRACE huub::solver::engine: new lb lit="w≥42" lb=42
-   7.343217530s ERROR huub::solver::engine: invalid reason lit_prop="X_INTRODUCED_8_≥4" lit_reason="X_INTRODUCED_3_<18" reason_val=None
+   6.433505085s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: new propagation
+   6.433543679s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: DOING OBJECT 0
+   6.433574397s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: object 0: x - ub: 32 lb: 0 y - ub: 13, lb: 0, size 15
+   6.433610108s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: object 1: x - ub: 30 lb: 0 y - ub: 11, lb: 0, size 17
+   6.433649079s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: object 2: x - ub: 28 lb: 21 y - ub: 9, lb: 4, size 19
+   6.433671122s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: object 3: x - ub: 7 lb: 0 y - ub: 7, lb: 4, size 21
+   6.433701774s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
+   6.433762063s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason [[var 0 [0, 32] < 33]
+   6.433799960s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason [[var 0 [0, 32] >= 0]
+   6.433838156s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: reason [[var 0 [0, 13] < 14]
+   6.433870665s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: reason [[var 0 [0, 13] >= 0]
+   6.433909618s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: generalized
+   6.433948903s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [21, 28] < 29]
+   6.433984821s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [21, 28] >= 14]
+   6.434029771s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [4, 9] < 10]
+   6.434072270s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [4, 9] >= 4]
+   6.434109366s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: generalized
+   6.434145614s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [0, 7] < 15]
+   6.434188600s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [0, 7] >= 0]
+   6.434220672s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: generalized
+   6.434258456s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [4, 7] < 8]
+   6.434297516s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [4, 7] >= 2]
+   6.434333810s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] < 15]
+   6.434372540s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] >= 1]
+   6.434412268s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: generalized
+   6.434447898s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] < 6]
+   6.434485447s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] >= 0]
+   6.434531899s TRACE propagate{level=7}:diffn: huub::solver::solving_context: propagate bool lit="X_INTRODUCED_0_≥24" reason=Ok(Eager([Lit(33), Lit(176), Lit(548), Lit(-533), Lit(610), Lit(-604), Lit(705), Lit(777), Lit(-771), Lit(872), Lit(-858), Lit(912)]))
+   6.434589042s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Setting lb of object 0 to 24 in dimension 0 in max
+   6.434631065s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: reason [[var 0 [24, 32] < 33]
+   6.434667888s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: reason [[var 0 [24, 32] >= 24]
+   6.434719922s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason [[var 0 [0, 13] < 14]
+   6.434754578s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason [[var 0 [0, 13] >= 0]
+   6.434791980s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: generalized
+   6.434824664s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: generalized
+   6.434860679s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [21, 28] < 39]
+   6.434904542s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [21, 28] >= 14]
+   6.434944716s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [4, 9] < 10]
+   6.434983876s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [4, 9] >= 4]
+   6.435019907s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: generalized
+   6.435058965s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [0, 7] < 39]
+   6.435097146s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [0, 7] >= 0]
+   6.435133816s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: generalized
+   6.435170639s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [4, 7] < 8]
+   6.435207892s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [4, 7] >= 2]
+   6.435243290s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: generalized
+   6.435286715s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] < 39]
+   6.435321088s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] >= 1]
+   6.435358604s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: generalized
+   6.435395322s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] < 6]
+   6.435435390s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] >= 0]
+   6.435477444s TRACE propagate{level=7}:diffn: huub::solver::solving_context: propagate bool lit="X_INTRODUCED_5_<4" reason=Ok(Eager([Lit(33), Lit(-24), Lit(176), Lit(558), Lit(-533), Lit(610), Lit(-604), Lit(729), Lit(777), Lit(-771), Lit(896), Lit(-858), Lit(912)]))
+   6.435522251s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Setting ub of object 0 to 3 in dimension 1 in max
+   6.435561055s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: DOING OBJECT 1
+   6.435600911s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: object 0: x - ub: 32 lb: 24 y - ub: 3, lb: 0, size 15
+   6.435642375s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: object 1: x - ub: 30 lb: 0 y - ub: 11, lb: 0, size 17
+   6.435663453s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: object 2: x - ub: 28 lb: 21 y - ub: 9, lb: 4, size 19
+   6.435693104s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: object 3: x - ub: 7 lb: 0 y - ub: 7, lb: 4, size 21
+   6.435726630s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
+   6.435759625s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason CONFLIGT [[var 0 [24, 32] < 33]
+   6.435791069s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason CONFLIGT [[var 0 [24, 32] >= 24]
+   6.435830856s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason CONFLIGT [[var 0 [0, 3] < 4]
+   6.435868776s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason CONFLIGT [[var 0 [0, 3] >= 0]
+   6.435909992s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason CONFLIGT [[var 2 [21, 28] < 29]
+   6.435951247s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason CONFLIGT [[var 2 [21, 28] >= 21]
+   6.435987093s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason CONFLIGT [[var 2 [4, 9] < 10]
+   6.436022282s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason CONFLIGT [[var 2 [4, 9] >= 4]
+   6.436062780s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason CONFLIGT [[var 3 [0, 7] < 8]
+   6.436103740s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason CONFLIGT [[var 3 [0, 7] >= 0]
+   6.436140095s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason CONFLIGT [[var 3 [4, 7] < 8]
+   6.436175553s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason CONFLIGT [[var 3 [4, 7] >= 4]
+   6.436213259s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason CONFLIGT [[var 4 [1, 14] < 15]
+   6.436255338s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason CONFLIGT [[var 4 [1, 14] >= 1]
+   6.436302765s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason CONFLIGT [[var 4 [0, 3] < 4]
+   6.436342508s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason CONFLIGT [[var 4 [0, 3] >= 0]
+   6.436383186s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason [[var 1 [0, 30] < 31]
+   6.436423056s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason [[var 1 [0, 30] >= 0]
+   6.436458772s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason [[var 1 [0, 11] < 12]
+   6.436495675s TRACE propagate{level=7}:diffn: huub::constraints::int_diffn: Reason [[var 1 [0, 11] >= 0]
+   6.436553236s TRACE propagate{level=7}: huub::solver::solving_context: conflict detected clause="X_INTRODUCED_0_≥33 ∨ X_INTRODUCED_0_<24 ∨ X_INTRODUCED_5_≥4 ∨ X_INTRODUCED_2_≥29 ∨ X_INTRODUCED_2_<21 ∨ X_INTRODUCED_7_≥10 ∨ X_INTRODUCED_7_<4 ∨ X_INTRODUCED_3_≥8 ∨ X_INTRODUCED_8_≥8 ∨ X_INTRODUCED_8_<4 ∨ X_INTRODUCED_4_≥15 ∨ X_INTRODUCED_4_<1 ∨ X_INTRODUCED_9_≥4 ∨ X_INTRODUCED_1_≥31 ∨ X_INTRODUCED_6_≥12"
+   6.436614816s DEBUG propagate{level=7}: huub::solver::engine: propagate lits="X_INTRODUCED_0_≥24, X_INTRODUCED_5_<4"
+   6.436667688s DEBUG huub::solver::engine: assignments lits="X_INTRODUCED_0_≥24"
+   6.436704859s TRACE huub::solver::engine: new lb lit="X_INTRODUCED_0_≥24" lb=24
+   6.436767547s DEBUG huub::solver::engine: assignments lits="X_INTRODUCED_0_≥23, X_INTRODUCED_0_≥22, X_INTRODUCED_5_<4, X_INTRODUCED_0_≥21, X_INTRODUCED_5_<5, X_INTRODUCED_0_≥20, X_INTRODUCED_5_<6, X_INTRODUCED_0_≥19, X_INTRODUCED_5_<7, X_INTRODUCED_0_≥18, X_INTRODUCED_5_<8, X_INTRODUCED_0_≥17, X_INTRODUCED_5_<9, X_INTRODUCED_0_≥16, X_INTRODUCED_5_<10, X_INTRODUCED_0_≥15, X_INTRODUCED_5_<11, X_INTRODUCED_0_≥14, X_INTRODUCED_5_<12, X_INTRODUCED_0_≥13, X_INTRODUCED_5_<13, X_INTRODUCED_0_≥12, X_INTRODUCED_0_≥11, X_INTRODUCED_0_≥10, X_INTRODUCED_0_≥9, X_INTRODUCED_0_≥8, X_INTRODUCED_0_≥7, X_INTRODUCED_0_≥6, X_INTRODUCED_0_≥5, X_INTRODUCED_0_≥4, X_INTRODUCED_0_≥3, X_INTRODUCED_0_≥2, X_INTRODUCED_0_≥1"
+   6.436877713s TRACE huub::solver::engine: new ub lit="X_INTRODUCED_5_<4" ub=3
+   6.436968744s DEBUG huub::solver::engine: add conflict clause clause="X_INTRODUCED_0_≥33 ∨ X_INTRODUCED_0_<24 ∨ X_INTRODUCED_5_≥4 ∨ X_INTRODUCED_2_≥29 ∨ X_INTRODUCED_2_<21 ∨ X_INTRODUCED_7_≥10 ∨ X_INTRODUCED_7_<4 ∨ X_INTRODUCED_3_≥8 ∨ X_INTRODUCED_8_≥8 ∨ X_INTRODUCED_8_<4 ∨ X_INTRODUCED_4_≥15 ∨ X_INTRODUCED_4_<1 ∨ X_INTRODUCED_9_≥4 ∨ X_INTRODUCED_1_≥31 ∨ X_INTRODUCED_6_≥12"
+   6.437050823s DEBUG huub::solver::engine: add reason clause clause="X_INTRODUCED_0_≥33 ∨ X_INTRODUCED_5_≥14 ∨ X_INTRODUCED_2_≥29 ∨ X_INTRODUCED_2_<14 ∨ X_INTRODUCED_7_≥10 ∨ X_INTRODUCED_7_<4 ∨ X_INTRODUCED_3_≥15 ∨ X_INTRODUCED_8_≥8 ∨ X_INTRODUCED_8_<2 ∨ X_INTRODUCED_4_≥15 ∨ X_INTRODUCED_4_<1 ∨ X_INTRODUCED_9_≥6 ∨ X_INTRODUCED_0_≥24"
+   6.437125869s DEBUG huub::solver::engine: add reason clause clause="X_INTRODUCED_2_≥29 ∨ X_INTRODUCED_7_≥10 ∨ X_INTRODUCED_7_<4 ∨ X_INTRODUCED_3_≥18 ∨ X_INTRODUCED_8_≥14 ∨ X_INTRODUCED_2_≥21"
+   6.437186005s DEBUG huub::solver::engine: add reason clause clause="X_INTRODUCED_3_≥40 ∨ X_INTRODUCED_8_≥8 ∨ X_INTRODUCED_8_<4 ∨ X_INTRODUCED_2_≥29 ∨ X_INTRODUCED_2_<21 ∨ X_INTRODUCED_7_≥16 ∨ X_INTRODUCED_3_<8"
+   6.437348249s DEBUG huub::solver: learn clause clause="h≥20 ∨ X_INTRODUCED_3_≥23 ∨ X_INTRODUCED_8_<4 ∨ X_INTRODUCED_7_<4 ∨ X_INTRODUCED_4_<1 ∨ X_INTRODUCED_4_≥15 ∨ X_INTRODUCED_9_≥4 ∨ rec<798"
+   6.437408030s DEBUG huub::solver::engine: backtrack new_level=6 restart=false
+   6.437459625s DEBUG huub::solver::engine: assignments lits="h≥20"
+   6.437503263s TRACE huub::solver::engine: new lb lit="h≥20" lb=20
+   6.437589859s DEBUG huub::solver: learn clause clause="X_INTRODUCED_8_<4 ∨ X_INTRODUCED_7_<4 ∨ X_INTRODUCED_4_≥15 ∨ X_INTRODUCED_4_≥17 ∨ X_INTRODUCED_9_≥4 ∨ rec<798"
+   6.437630341s DEBUG huub::solver::engine: backtrack new_level=5 restart=false
+   6.437666913s DEBUG huub::solver::engine: assignments lits="X_INTRODUCED_8_<4"
+   6.437699818s TRACE huub::solver::engine: new ub lit="X_INTRODUCED_8_<4" ub=3
+   6.437728387s DEBUG huub::solver::engine: assignments lits="X_INTRODUCED_8_<5, X_INTRODUCED_8_<6, X_INTRODUCED_8_<7, X_INTRODUCED_8_<8, X_INTRODUCED_8_<9"
+   6.437785470s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: new propagation
+   6.437824750s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: DOING OBJECT 0
+   6.437855407s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
+   6.437888482s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
+   6.437926804s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 0 y - ub: 11, lb: 4, size 19
+   6.437958585s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 0 y - ub: 3, lb: 0, size 21
+   6.437990033s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
+   6.438039542s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: DOING OBJECT 1
+   6.438069651s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
+   6.438086964s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
+   6.438111324s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 0 y - ub: 11, lb: 4, size 19
+   6.438145132s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 0 y - ub: 3, lb: 0, size 21
+   6.438180674s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
+   6.438226367s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: DOING OBJECT 2
+   6.438262049s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
+   6.438296746s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
+   6.438328657s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 0 y - ub: 11, lb: 4, size 19
+   6.438360159s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 0 y - ub: 3, lb: 0, size 21
+   6.438391555s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
+   6.438430411s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: DOING OBJECT 3
+   6.438461347s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
+   6.438492218s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
+   6.438522726s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 0 y - ub: 11, lb: 4, size 19
+   6.438553734s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 0 y - ub: 3, lb: 0, size 21
+   6.438596560s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
+   6.438645987s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: GENERALIZED min from 0 to -6
+   6.438680070s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: Reason [[var 3 [0, 36] >= -6]
+   6.438714765s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: Reason [[var 3 [0, 36] < 37]
+   6.438753975s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: reason [[var 3 [0, 3] < 4]
+   6.438788398s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: reason [[var 3 [0, 3] >= 0]
+   6.438833938s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [0, 38] < 39]
+   6.438871951s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [0, 38] >= 0]
+   6.438904585s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: generalized
+   6.438942944s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [4, 11] < 12]
+   6.438975666s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [4, 11] >= -6]
+   6.439013214s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] < 15]
+   6.439056556s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] >= 1]
+   6.439087167s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: generalized
+   6.439123121s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] < 12]
+   6.439161474s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] >= 0]
+   6.439210201s TRACE propagate{level=5}:diffn: huub::solver::solving_context: propagate bool lit="X_INTRODUCED_3_≥24" reason=Ok(Eager([Lit(727), Lit(773), Lit(558), Lit(612), Lit(872), Lit(-858), Lit(918)]))
+   6.439254954s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: Setting lb of object 3 to 24 in dimension 0 in max
+   6.439297672s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: DOING OBJECT 4
+   6.439329459s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
+   6.439366472s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
+   6.439384928s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 0 y - ub: 11, lb: 4, size 19
+   6.439414576s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 24 y - ub: 3, lb: 0, size 21
+   6.439451531s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
+   6.439502169s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: GENERALIZED max from 15 to 44
+   6.439537728s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: Reason [[var 4 [1, 14] < 45]
+   6.439573540s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: Reason [[var 4 [1, 14] >= 1]
+   6.439617858s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: reason [[var 4 [0, 3] < 4]
+   6.439651218s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: reason [[var 4 [0, 3] >= 0]
+   6.439687045s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [24, 36] < 37]
+   6.439723575s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [24, 36] >= 24]
+   6.439758751s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: generalized
+   6.439792510s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [0, 3] < 4]
+   6.439811605s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [0, 3] >= -8]
+   6.439841667s TRACE propagate{level=5}:diffn: huub::solver::solving_context: propagate bool lit="X_INTRODUCED_4_<14" reason=Ok(Eager([Lit(902), Lit(-858), Lit(910), Lit(727), Lit(-714), Lit(773)]))
+   6.439882815s TRACE propagate{level=5}:diffn: huub::constraints::int_diffn: Setting ub of object 4 to 13 in dimension 0 in max
+   6.439936610s DEBUG propagate{level=5}: huub::solver::engine: propagate lits="X_INTRODUCED_3_≥24, X_INTRODUCED_4_<14"
+   6.439994236s DEBUG huub::solver::engine: assignments lits="X_INTRODUCED_3_≥24"
+   6.440039150s TRACE huub::solver::engine: new lb lit="X_INTRODUCED_3_≥24" lb=24
+   6.440123448s DEBUG huub::solver::engine: add reason clause clause="X_INTRODUCED_3_≥37 ∨ X_INTRODUCED_8_≥4 ∨ X_INTRODUCED_2_≥39 ∨ X_INTRODUCED_7_≥12 ∨ X_INTRODUCED_4_≥15 ∨ X_INTRODUCED_4_<1 ∨ X_INTRODUCED_9_≥12 ∨ X_INTRODUCED_3_≥24"
+   6.440188781s TRACE huub::solver::trail: undo to when literal was set len=225 lit="X_INTRODUCED_2_<39"
+   6.440226485s DEBUG huub::solver::engine: add reason clause clause="w≥58 ∨ X_INTRODUCED_2_<39"
+   6.440283145s TRACE huub::solver::trail: redo to when literal was set len=229 lit="X_INTRODUCED_3_<37"
+   6.440324044s DEBUG huub::solver::engine: add reason clause clause="w≥58 ∨ X_INTRODUCED_3_<37"
+   6.440464715s DEBUG huub::solver: learn clause clause="X_INTRODUCED_7_<4 ∨ X_INTRODUCED_4_≥15 ∨ X_INTRODUCED_4_≥17 ∨ X_INTRODUCED_9_≥4 ∨ rec<798"
+   6.440505906s DEBUG huub::solver::engine: backtrack new_level=4 restart=false
+   6.440530514s DEBUG huub::solver::engine: assignments lits="X_INTRODUCED_7_<4"
+   6.440571782s TRACE huub::solver::engine: new ub lit="X_INTRODUCED_7_<4" ub=3
+   6.440626865s DEBUG huub::solver::engine: assignments lits="X_INTRODUCED_7_<5, X_INTRODUCED_7_<6, X_INTRODUCED_7_<7, X_INTRODUCED_7_<8, X_INTRODUCED_7_<9, X_INTRODUCED_7_<10, X_INTRODUCED_7_<11"
+   6.440700186s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: new propagation
+   6.440737816s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: DOING OBJECT 0
+   6.440773173s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
+   6.440808183s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
+   6.440845151s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 0 y - ub: 3, lb: 0, size 19
+   6.440882633s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 0 y - ub: 9, lb: 0, size 21
+   6.440926202s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
+   6.440973648s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: DOING OBJECT 1
+   6.441012234s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
+   6.441051042s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
+   6.441089048s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 0 y - ub: 3, lb: 0, size 19
+   6.441115832s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 0 y - ub: 9, lb: 0, size 21
+   6.441152804s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
+   6.441199926s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: DOING OBJECT 2
+   6.441233958s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
+   6.441266588s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
+   6.441308238s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 0 y - ub: 3, lb: 0, size 19
+   6.441346344s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 0 y - ub: 9, lb: 0, size 21
+   6.441384573s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
+   6.441437231s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: GENERALIZED min from 0 to -4
+   6.441474916s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Reason [[var 2 [0, 38] >= -4]
+   6.441514758s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Reason [[var 2 [0, 38] < 39]
+   6.441557872s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: reason [[var 2 [0, 3] < 4]
+   6.441595488s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: reason [[var 2 [0, 3] >= 0]
+   6.441633734s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [0, 36] < 37]
+   6.441672604s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [0, 36] >= 0]
+   6.441711033s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: generalized
+   6.441750337s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [0, 9] < 10]
+   6.441786319s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 3 [0, 9] >= -8]
+   6.441827378s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] < 15]
+   6.441869680s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] >= 1]
+   6.441906127s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: generalized
+   6.441943111s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] < 10]
+   6.441981430s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] >= 0]
+   6.442022710s TRACE propagate{level=4}:diffn: huub::solver::solving_context: propagate bool lit="X_INTRODUCED_2_≥24" reason=Ok(Eager([Lit(558), Lit(604), Lit(727), Lit(779), Lit(872), Lit(-858), Lit(916)]))
+   6.442073523s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Setting lb of object 2 to 24 in dimension 0 in max
+   6.442113748s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: DOING OBJECT 3
+   6.442148024s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
+   6.442180104s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
+   6.442212405s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 24 y - ub: 3, lb: 0, size 19
+   6.442250281s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 3: x - ub: 36 lb: 0 y - ub: 9, lb: 0, size 21
+   6.442285643s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
+   6.442321937s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: GENERALIZED max from 37 to 42
+   6.442350108s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Reason [[var 3 [0, 36] < 43]
+   6.442391800s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Reason [[var 3 [0, 36] >= 0]
+   6.442429638s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: reason [[var 3 [0, 9] < 10]
+   6.442465181s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: reason [[var 3 [0, 9] >= 0]
+   6.442499900s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [24, 38] < 39]
+   6.442534218s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [24, 38] >= 24]
+   6.442566051s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: generalized
+   6.442587509s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [0, 3] < 12]
+   6.442619744s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [0, 3] >= 0]
+   6.442652306s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: generalized
+   6.442695964s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] < 21]
+   6.442715750s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] >= 1]
+   6.442740141s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: generalized
+   6.442772043s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] < 12]
+   6.442804746s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] >= 0]
+   6.442844613s TRACE propagate{level=4}:diffn: huub::solver::solving_context: propagate bool lit="X_INTRODUCED_3_<18" reason=Ok(Eager([Lit(733), Lit(779), Lit(558), Lit(-543), Lit(612), Lit(878), Lit(-858), Lit(918)]))
+   6.442887002s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Setting ub of object 3 to 17 in dimension 0 in max
+   6.442931245s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: reason [[var 3 [0, 17] < 18]
+   6.442966319s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: reason [[var 3 [0, 17] >= 0]
+   6.443022233s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: GENERALIZED min from 0 to -8
+   6.443058891s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Reason [[var 3 [0, 9] >= -8]
+   6.443098131s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Reason [[var 3 [0, 9] < 10]
+   6.443143603s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: generalized
+   6.443177214s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [24, 38] < 39]
+   6.443195030s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [24, 38] >= -1]
+   6.443228435s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [0, 3] < 4]
+   6.443268197s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 2 [0, 3] >= 0]
+   6.443305776s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: generalized
+   6.443346452s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: generalized
+   6.443370555s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] < 21]
+   6.443459633s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [1, 14] >= -5]
+   6.443516668s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] < 4]
+   6.443561300s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: fr Reason [[var 4 [0, 3] >= 0]
+   6.443613240s TRACE propagate{level=4}:diffn: huub::solver::solving_context: propagate bool lit="X_INTRODUCED_8_≥4" reason=Ok(Eager([Lit(708), Lit(779), Lit(558), Lit(604), Lit(878), Lit(910)]))
+   6.443670953s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: Setting lb of object 3 to 4 in dimension 1 in max
+   6.443713188s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: DOING OBJECT 4
+   6.443754684s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 0: x - ub: 42 lb: 0 y - ub: 15, lb: 0, size 15
+   6.443798567s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 1: x - ub: 40 lb: 0 y - ub: 13, lb: 0, size 17
+   6.443856120s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 2: x - ub: 38 lb: 24 y - ub: 3, lb: 0, size 19
+   6.443896794s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 3: x - ub: 17 lb: 0 y - ub: 9, lb: 4, size 21
+   6.443934772s TRACE propagate{level=4}:diffn: huub::constraints::int_diffn: object 4: x - ub: 14 lb: 1 y - ub: 3, lb: 0, size 23
+   6.443995306s DEBUG propagate{level=4}: huub::solver::engine: propagate lits="X_INTRODUCED_2_≥24, X_INTRODUCED_3_<18, X_INTRODUCED_8_≥4"
+   6.444068059s DEBUG huub::solver::engine: assignments lits="X_INTRODUCED_2_≥24"
+   6.444108861s TRACE huub::solver::engine: new lb lit="X_INTRODUCED_2_≥24" lb=24
+   6.444194775s DEBUG huub::solver::engine: assignments lits="X_INTRODUCED_2_≥23, X_INTRODUCED_3_<24, X_INTRODUCED_2_≥22, w≥42, X_INTRODUCED_3_<25, X_INTRODUCED_8_≥4, X_INTRODUCED_2_≥21, w≥41, X_INTRODUCED_3_<26, X_INTRODUCED_8_≥3, h≥16, X_INTRODUCED_2_≥20, w≥40, X_INTRODUCED_3_<27, X_INTRODUCED_8_≥2, h≥15, w<52, w<50, X_INTRODUCED_2_≥19, w≥39, h<20, X_INTRODUCED_3_<28, X_INTRODUCED_8_≥1, w<57, w<53, X_INTRODUCED_0_<37, X_INTRODUCED_2_<33, X_INTRODUCED_1_<35, w<51, h≥17, X_INTRODUCED_2_≥18, h<21, X_INTRODUCED_6_<12, X_INTRODUCED_8_<8, X_INTRODUCED_5_<14, X_INTRODUCED_3_<29, X_INTRODUCED_3_<36, w<54, X_INTRODUCED_0_<38, X_INTRODUCED_2_<34, X_INTRODUCED_3_<12, X_INTRODUCED_1_<36, w<48, X_INTRODUCED_2_≥17, X_INTRODUCED_6_<13, X_INTRODUCED_8_<9, X_INTRODUCED_5_<15, X_INTRODUCED_3_<30, w<55, X_INTRODUCED_0_<39, X_INTRODUCED_2_<35, X_INTRODUCED_3_<13, X_INTRODUCED_1_<37, w<49, X_INTRODUCED_0_<33, X_INTRODUCED_1_<31, X_INTRODUCED_2_<29, X_INTRODUCED_2_≥16, X_INTRODUCED_3_<31, w<56, X_INTRODUCED_0_<40, X_INTRODUCED_2_<36, X_INTRODUCED_3_<14, X_INTRODUCED_1_<38, X_INTRODUCED_0_<34, X_INTRODUCED_1_<32, X_INTRODUCED_2_<30, X_INTRODUCED_3_<8, X_INTRODUCED_2_≥15, X_INTRODUCED_3_<32, X_INTRODUCED_0_<41, X_INTRODUCED_2_<37, X_INTRODUCED_3_<15, X_INTRODUCED_1_<39, X_INTRODUCED_0_<35, X_INTRODUCED_1_<33, X_INTRODUCED_2_<31, X_INTRODUCED_3_<9, X_INTRODUCED_2_≥14, X_INTRODUCED_3_<33, X_INTRODUCED_0_<42, X_INTRODUCED_2_<38, X_INTRODUCED_3_<16, X_INTRODUCED_1_<40, X_INTRODUCED_0_<36, X_INTRODUCED_1_<34, X_INTRODUCED_2_<32, X_INTRODUCED_3_<10, X_INTRODUCED_2_≥13, X_INTRODUCED_3_<34, X_INTRODUCED_3_<17, X_INTRODUCED_3_<11, X_INTRODUCED_2_≥12, X_INTRODUCED_3_<35, X_INTRODUCED_3_<18, X_INTRODUCED_2_≥11, X_INTRODUCED_3_<19, X_INTRODUCED_2_≥10, X_INTRODUCED_3_<20, X_INTRODUCED_2_≥9, X_INTRODUCED_3_<21, X_INTRODUCED_2_≥8, X_INTRODUCED_3_<22, X_INTRODUCED_2_≥7, X_INTRODUCED_3_<23, X_INTRODUCED_2_≥6, X_INTRODUCED_2_≥5, X_INTRODUCED_2_≥4, X_INTRODUCED_2_≥3, X_INTRODUCED_2_≥2, X_INTRODUCED_2_≥1"
+   6.444326956s TRACE huub::solver::engine: new ub lit="X_INTRODUCED_3_<24" ub=23
+   6.444362797s TRACE huub::solver::engine: new lb lit="w≥42" lb=42
+   6.444409875s ERROR huub::solver::engine: invalid reason lit_prop="X_INTRODUCED_8_≥4" lit_reason="X_INTRODUCED_3_<18" reason_val=None
+
+thread 'main' panicked at crates/huub/src/solver/engine.rs:470:17:
+Literal x₇₀₈ in Reason for ¬x₇₇₃ is None, but should be known true
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
