@@ -92,11 +92,6 @@ impl IntDiffnSweep {
 			.iter()
             .flatten()
 			.all(|&v| solver.get_int_val(v).is_some());
-        // TODO: is there some way to delay the propagator
-        // until all sizes are fixed
-        if !enqueue { return () }
-			.flatten()
-			.all(|v| matches!(v, IntView(IntViewInner::Const(_))));
 		// TODO: is there some way to delay the propagator
 		// until all sizes are fixed
 		if !enqueue {
@@ -1323,8 +1318,8 @@ mod tests {
 		.map(|x| map.get(&mut slv, &Decision::from(x)))
 		.collect_vec();
 
-		let (solve_result, value) = slv.get_all_solutions(&pos_vars);
-		println!("solve_result {:?}, value {:?}", solve_result, value);
+		// let (solve_result, value) = slv.get_all_solutions(&pos_vars);
+		// println!("solve_result {:?}, value {:?}", solve_result, value);
 	}
 
 	#[test]
@@ -1373,7 +1368,7 @@ mod tests {
 		.map(|x| map.get(&mut slv, &Decision::from(x)))
 		.collect_vec();
 
-		let (solve_result, value) = slv.get_all_solutions(&pos_vars);
-		println!("solve_result {:?}, value {:?}", solve_result, value);
+		// let (solve_result, value) = slv.get_all_solutions(&pos_vars);
+		// println!("solve_result {:?}, value {:?}", solve_result, value);
 	}
 }
