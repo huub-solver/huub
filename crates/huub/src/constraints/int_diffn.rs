@@ -90,6 +90,11 @@ impl IntDiffnSweep {
 		// Make sure all sizes are fixed before enqueueing
 		let enqueue = box_size
 			.iter()
+            .flatten()
+			.all(|&v| solver.get_int_val(v).is_some());
+        // TODO: is there some way to delay the propagator
+        // until all sizes are fixed
+        if !enqueue { return () }
 			.flatten()
 			.all(|v| matches!(v, IntView(IntViewInner::Const(_))));
 		// TODO: is there some way to delay the propagator
@@ -633,93 +638,87 @@ impl IntDiffnSweep {
 		false
 	}
 
-	/// Gives a reason for the conflict
-	fn explain_conflict<P: PropagationActions>(
-		&mut self,
-		actions: &mut P,
-		fr_support: &Vec<usize>,
-		lb_tracker: &Vec<Vec<IntVal>>,
-		ub_tracker: &Vec<Vec<IntVal>>,
-		curr_obj_idx: usize,
-		all_fr: &Vec<ForbiddenRegion>,
-	) -> Vec<BoolView> {
-		let mut reason: Vec<_> = self.explain_fr_conflict(
-			actions,
-			fr_support,
-			lb_tracker,
-			ub_tracker,
-			all_fr,
-			curr_obj_idx,
-		);
-		for d in 0..self.dimensions {
-			reason.push(actions.get_int_lit(
-				self.box_posn[curr_obj_idx][d],
-				IntLitMeaning::Less(ub_tracker[curr_obj_idx][d] + 1),
-			));
-			trace!(
-				"Reason [[var {:?} [{:?}, {:?}] < {:?}]",
-				curr_obj_idx,
-				actions.get_int_lower_bound(self.box_posn[curr_obj_idx][d]),
-				actions.get_int_upper_bound(self.box_posn[curr_obj_idx][d]),
-				ub_tracker[curr_obj_idx][d] + 1
-			);
-			reason.push(actions.get_int_lit(
-				self.box_posn[curr_obj_idx][d],
-				IntLitMeaning::GreaterEq(lb_tracker[curr_obj_idx][d]),
-			));
-			trace!(
-				"Reason [[var {:?} [{:?}, {:?}] >= {:?}]",
-				curr_obj_idx,
-				actions.get_int_lower_bound(self.box_posn[curr_obj_idx][d]),
-				actions.get_int_upper_bound(self.box_posn[curr_obj_idx][d]),
-				lb_tracker[curr_obj_idx][d]
-			);
-		}
-		reason
-	}
 
-	fn explain_fr_conflict<P: PropagationActions>(
-		&mut self,
-		actions: &mut P,
-		fr_support: &Vec<usize>,
-		lb_tracker: &Vec<Vec<IntVal>>,
-		ub_tracker: &Vec<Vec<IntVal>>,
-		all_fr: &Vec<ForbiddenRegion>,
-		curr_obj_idx: usize,
-	) -> Vec<BoolView> {
-		let mut reason = Vec::new();
-		for (fr, &o_idx) in fr_support.iter().enumerate() {
-			// for o_idx in 0..self.box_posn.len() {
-			for d in 0..self.dimensions {
-				let mut possible_ub = ub_tracker[o_idx][d];
-				reason.push(actions.get_int_lit(
-					self.box_posn[o_idx][d],
-					IntLitMeaning::Less(possible_ub + 1),
-				));
-				trace!(
-					"Reason [[var {:?} [{:?}, {:?}] < {:?}]",
-					o_idx,
-					lb_tracker[o_idx][d],
-					ub_tracker[o_idx][d],
-					possible_ub + 1
-				);
+    /// Gives a reason for the conflict
+    fn explain_conflict<P: PropagationActions>(
+        &mut self,
+        actions: &mut P,
+        fr_support: &Vec<usize>,
+        lb_tracker: &Vec<Vec<IntVal>>,
+        ub_tracker: &Vec<Vec<IntVal>>,
+        curr_obj_idx: usize,
+        all_fr: &Vec<ForbiddenRegion>
+    ) -> Vec<BoolView> {
+        let mut reason: Vec<_> = self.explain_fr_conflict(actions, fr_support, lb_tracker, ub_tracker);
+        for d in 0..self.dimensions {
+            reason.push(
+                actions.get_int_lit(self.box_posn[curr_obj_idx][d],
+                                    IntLitMeaning::Less(ub_tracker[curr_obj_idx][d] + 1))
+            );
+            trace!(
+                "Reason [[var {:?} [{:?}, {:?}] < {:?}]",
+                curr_obj_idx,
+                actions.get_int_lower_bound(self.box_posn[curr_obj_idx][d]),
+                actions.get_int_upper_bound(self.box_posn[curr_obj_idx][d]),
+                ub_tracker[curr_obj_idx][d] + 1
+            );
+            reason.push(
+                actions.get_int_lit(self.box_posn[curr_obj_idx][d],
+                                    IntLitMeaning::GreaterEq(lb_tracker[curr_obj_idx][d]))
+            );
+            trace!(
+                "Reason [[var {:?} [{:?}, {:?}] >= {:?}]",
+                curr_obj_idx,
+                actions.get_int_lower_bound(self.box_posn[curr_obj_idx][d]),
+                actions.get_int_upper_bound(self.box_posn[curr_obj_idx][d]),
+                lb_tracker[curr_obj_idx][d]
+            );
+        }
+        reason
+    }
 
-				let mut possible_lb = lb_tracker[o_idx][d];
-				reason.push(actions.get_int_lit(
-					self.box_posn[o_idx][d],
-					IntLitMeaning::GreaterEq(possible_lb),
-				));
-				trace!(
-					"reason [[var {:?} [{:?}, {:?}] >= {:?}]",
-					o_idx,
-					lb_tracker[o_idx][d],
-					ub_tracker[o_idx][d],
-					possible_lb
-				);
-			}
-		}
-		reason
-	}
+    fn explain_fr_conflict<P: PropagationActions>(
+        &mut self,
+        actions: &mut P,
+        fr_support: &Vec<usize>,
+        lb_tracker: &Vec<Vec<IntVal>>,
+        ub_tracker: &Vec<Vec<IntVal>>,
+    ) -> Vec<BoolView> {
+        let mut reason = Vec::new();
+        for &o_idx in fr_support {
+            // for o_idx in 0..self.box_posn.len() {
+            for d in 0..self.dimensions {
+                let possible_ub = ub_tracker[o_idx][d];
+                reason.push(
+                    actions.get_int_lit(
+                        self.box_posn[o_idx][d],
+                        IntLitMeaning::Less(possible_ub + 1))
+                );
+                trace!(
+                    "Reason CONFLIGT [[var {:?} [{:?}, {:?}] < {:?}]",
+                    o_idx,
+                    lb_tracker[o_idx][d],
+                    ub_tracker[o_idx][d],
+                    possible_ub + 1
+                );
+
+                let possible_lb = lb_tracker[o_idx][d];
+                reason.push(
+                    actions.get_int_lit(
+                        self.box_posn[o_idx][d],
+                        IntLitMeaning::GreaterEq(possible_lb))
+                );
+                trace!(
+                    "Reason CONFLIGT [[var {:?} [{:?}, {:?}] >= {:?}]",
+                    o_idx,
+                    lb_tracker[o_idx][d],
+                    ub_tracker[o_idx][d],
+                    possible_lb
+                );
+            }
+        }
+        reason
+    }
 
 	fn explain_fr<P: PropagationActions>(
 		&mut self,
@@ -740,60 +739,68 @@ impl IntDiffnSweep {
 				let mut possible_ub = ub_tracker[o_idx][d];
 				let mut origin_ub = ub_tracker[curr_obj_idx][d];
 
-				if prune_upper && generalized_bound.is_some() && self.dimensions == curr_dimension {
-					origin_ub = generalized_bound.unwrap();
-				}
+                let mut possible_lb = lb_tracker[o_idx][d];
+                let mut origin_lb = lb_tracker[curr_obj_idx][d];
 
-				if all_fr[fr].ub[d] > origin_ub {
-					// Calculate what the
-					possible_ub = ub_tracker[o_idx][d] + self.box_size[o_idx][d] - 1;
-				}
-				reason.push(actions.get_int_lit(
-					self.box_posn[o_idx][d],
-					IntLitMeaning::Less(possible_ub + 1),
-				));
-				trace!(
-					"fr Reason [[var {:?} [{:?}, {:?}] < {:?}]",
-					o_idx,
-					lb_tracker[o_idx][d],
-					ub_tracker[o_idx][d],
-					possible_ub + 1
-				);
+                if d == curr_dimension && generalized_bound.is_some() {
+                    if prune_upper {
+                        origin_ub = generalized_bound.unwrap();
+                    } else {
+                        origin_lb = generalized_bound.unwrap();
+                    }
+                }
+                // if prune_upper && generalized_bound.is_some() && d == curr_dimension {
+                //     origin_ub = generalized_bound.unwrap();
+                // }
 
-				let mut possible_lb = lb_tracker[o_idx][d];
-				let mut origin_lb = lb_tracker[curr_obj_idx][d];
+                if all_fr[fr].ub[d] > origin_ub{
+                    // Calculate what the
+                    trace!("generalized");
+                    possible_lb = origin_ub - self.box_size[o_idx][d] + 1;
+                }
 
-				if !prune_upper && generalized_bound.is_some() && self.dimensions == curr_dimension
-				{
-					origin_lb = generalized_bound.unwrap();
-				}
 
-				if all_fr[fr].lb[d] < origin_lb {
-					// Calculate what the
-					trace!("box_size {} dimension {} generalizing here from {} to {} where fr is {} and origin is {}",
-                           self.box_size[curr_obj_idx][d],
-                           d,
-                           possible_lb,
-                           lb_tracker[curr_obj_idx][d] - self.box_size[curr_obj_idx][d] + 1,
-                            all_fr[fr].lb[d],
-                            origin_lb);
-					possible_lb = lb_tracker[o_idx][d] - self.box_size[curr_obj_idx][d] + 1;
-				}
-				reason.push(actions.get_int_lit(
-					self.box_posn[o_idx][d],
-					IntLitMeaning::GreaterEq(possible_lb),
-				));
-				trace!(
-					"fr Reason [[var {:?} [{:?}, {:?}] >= {:?}]",
-					o_idx,
-					lb_tracker[o_idx][d],
-					ub_tracker[o_idx][d],
-					possible_lb
-				);
-			}
-		}
-		reason
-	}
+                // if !prune_upper && generalized_bound.is_some() && d == curr_dimension {
+                //     origin_lb = generalized_bound.unwrap();
+                // }
+
+
+
+                if all_fr[fr].lb[d] < origin_lb {
+                    // Calculate what the
+                    trace!("generalized");
+                    possible_ub = origin_lb + self.box_size[curr_obj_idx][d] - 1;
+                }
+
+                reason.push(
+                    actions.get_int_lit(
+                        self.box_posn[o_idx][d],
+                        IntLitMeaning::Less(possible_ub + 1))
+                );
+                trace!(
+                    "fr Reason [[var {:?} [{:?}, {:?}] < {:?}]",
+                    o_idx,
+                    lb_tracker[o_idx][d],
+                    ub_tracker[o_idx][d],
+                    possible_ub + 1
+                );
+
+                reason.push(
+                    actions.get_int_lit(
+                        self.box_posn[o_idx][d],
+                        IntLitMeaning::GreaterEq(possible_lb))
+                );
+                trace!(
+                    "fr Reason [[var {:?} [{:?}, {:?}] >= {:?}]",
+                    o_idx,
+                    lb_tracker[o_idx][d],
+                    ub_tracker[o_idx][d],
+                    possible_lb
+                );
+            }
+        }
+        reason
+    }
 
 	fn add_generalized_bound<P: PropagationActions>(
 		&mut self,
@@ -924,56 +931,58 @@ impl IntDiffnSweep {
 						ub_tracker[curr_obj_idx][d] + 1
 					);
 
-					reason.push(actions.get_int_lit(
-						self.box_posn[curr_obj_idx][d],
-						IntLitMeaning::GreaterEq(lb_tracker[curr_obj_idx][d]),
-					));
-					trace!(
-						"Reason [[var {:?} [{:?}, {:?}] >= {:?}]",
-						curr_obj_idx,
-						lb_tracker[curr_obj_idx][d],
-						ub_tracker[curr_obj_idx][d],
-						lb_tracker[curr_obj_idx][d]
-					);
-				}
-			} else {
-				reason.push(actions.get_int_lit(
-					self.box_posn[curr_obj_idx][d],
-					IntLitMeaning::Less(ub_tracker[curr_obj_idx][d] + 1),
-				));
-				trace!(
-					"reason [[var {:?} [{:?}, {:?}] < {:?}]",
-					curr_obj_idx,
-					lb_tracker[curr_obj_idx][d],
-					ub_tracker[curr_obj_idx][d],
-					ub_tracker[curr_obj_idx][d] + 1
-				);
-				reason.push(actions.get_int_lit(
-					self.box_posn[curr_obj_idx][d],
-					IntLitMeaning::GreaterEq(lb_tracker[curr_obj_idx][d]),
-				));
-				trace!(
-					"reason [[var {:?} [{:?}, {:?}] >= {:?}]",
-					curr_obj_idx,
-					lb_tracker[curr_obj_idx][d],
-					ub_tracker[curr_obj_idx][d],
-					lb_tracker[curr_obj_idx][d]
-				);
-			}
-		}
-		reason.extend(self.explain_fr(
-			actions,
-			fr_support,
-			lb_tracker,
-			ub_tracker,
-			all_fr,
-			curr_obj_idx,
-			curr_dimension,
-			generalized_bound,
-			prune_upper,
-		));
-		reason
-	}
+                    reason.push(
+                        actions.get_int_lit(
+                            self.box_posn[curr_obj_idx][d],
+                            IntLitMeaning::GreaterEq(lb_tracker[curr_obj_idx][d]))
+                    );
+                    trace!(
+                        "Reason [[var {:?} [{:?}, {:?}] >= {:?}]",
+                        curr_obj_idx,
+                        lb_tracker[curr_obj_idx][d],
+                        ub_tracker[curr_obj_idx][d],
+                        lb_tracker[curr_obj_idx][d]
+                    );
+                }
+            } else {
+                reason.push(
+                    actions.get_int_lit(
+                        self.box_posn[curr_obj_idx][d],
+                        IntLitMeaning::Less(ub_tracker[curr_obj_idx][d] + 1))
+                );
+                trace!(
+                    "reason [[var {:?} [{:?}, {:?}] < {:?}]",
+                    curr_obj_idx,
+                    lb_tracker[curr_obj_idx][d],
+                    ub_tracker[curr_obj_idx][d],
+                    ub_tracker[curr_obj_idx][d] + 1
+                );
+                reason.push(
+                    actions.get_int_lit(
+                        self.box_posn[curr_obj_idx][d],
+                        IntLitMeaning::GreaterEq(lb_tracker[curr_obj_idx][d]))
+                );
+                trace!(
+                    "reason [[var {:?} [{:?}, {:?}] >= {:?}]",
+                    curr_obj_idx,
+                    lb_tracker[curr_obj_idx][d],
+                    ub_tracker[curr_obj_idx][d],
+                    lb_tracker[curr_obj_idx][d]
+                );
+            }
+        }
+        reason.extend(self.explain_fr(actions,
+                                      fr_support,
+                                      lb_tracker,
+                                      ub_tracker,
+                                      all_fr,
+                                      curr_obj_idx,
+                                      curr_dimension,
+                                      generalized_bound,
+                                      prune_upper));
+        reason
+    }
+
 }
 
 impl<P, E> Propagator<P, E> for IntDiffnSweep
