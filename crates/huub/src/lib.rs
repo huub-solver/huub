@@ -239,7 +239,6 @@ where
 		vars: vars.into_iter().map_into().collect(),
 		bounds_prop: None,
 		value_prop: None,
-<<<<<<< HEAD
 	}
 }
 /// Create a constraint that enforces that given decision variables of starting positions and sizes
@@ -253,8 +252,6 @@ pub fn diffn_int(
 		box_posn,
 		box_size,
 		non_strict,
-=======
->>>>>>> upstream/develop
 	}
 }
 
