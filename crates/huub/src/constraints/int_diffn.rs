@@ -23,7 +23,7 @@ pub struct IntDiffn {
 /// Sweep based propagator for the `diffn_int` constraint.
 pub struct IntDiffnSweep {
     box_posn: Vec<Vec<IntView>>,
-    box_size: Vec<Vec<IntVal>>,
+    box_size: Vec<Vec<IntView>>,
     dimensions: usize,
 }
 
@@ -68,47 +68,48 @@ impl IntDiffnSweep {
         non_strict: bool
         ) {
         // Make sure all sizes are fixed before enqueueing
-		let enqueue = box_size
-			.iter()
-            .flatten()
-			.all(|v| matches!(v, IntView(IntViewInner::Const(_))));
+		// let enqueue = box_size
+		// 	.iter()
+        //     .flatten()
+		// 	.all(|v| matches!(v, IntView(IntViewInner::Const(_))));
         // TODO: is there some way to delay the propagator
         // until all sizes are fixed
-        if !enqueue { return () }
+        // if !enqueue { return () }
 
-        let box_size_fixed: Vec<Vec<IntVal>> = box_size.iter()
-             .map(|row|
-                  row.iter()
-                     .map(|&v| solver.get_int_lower_bound(v))
-                     .collect()
-             )
-             .collect();
-        println!("{:?}", box_size_fixed);
-        let mut box_posn_prop: Vec<Vec<IntView>> = box_posn.clone();
-        if non_strict {
-            let contains_zero: Vec<usize> = box_size_fixed.iter()
-                .map(|row| if row.contains(&0) { 1 } else { 0 })
-                .collect();
-            println!("{:?}", contains_zero);
+        // let box_size_fixed: Vec<Vec<IntVal>> = box_size.iter()
+        //      .map(|row|
+        //           row.iter()
+        //              .map(|&v| solver.get_int_lower_bound(v))
+        //              .collect()
+        //      )
+        //      .collect();
+        // println!("{:?}", box_size_fixed);
+        let box_posn_prop: Vec<Vec<IntView>> = box_posn.clone();
+        let box_size_prop: Vec<Vec<IntView>> = box_size.clone();
+        // if non_strict {
+        //     let contains_zero: Vec<usize> = box_size_fixed.iter()
+        //         .map(|row| if row.contains(&0) { 1 } else { 0 })
+        //         .collect();
+        //     println!("{:?}", contains_zero);
 
-            box_posn_prop = box_posn_prop.into_iter()
-                .enumerate()
-                .filter(|(i, _)| contains_zero[*i] == 0)
-                .map(|(_, row)| row)
-                .collect();
+        //     box_posn_prop = box_posn_prop.into_iter()
+        //         .enumerate()
+        //         .filter(|(i, _)| contains_zero[*i] == 0)
+        //         .map(|(_, row)| row)
+        //         .collect();
 
-            box_posn_prop = box_posn_prop.into_iter()
-                .enumerate()
-                .filter(|(i, _)| contains_zero[*i] == 0)
-                .map(|(_, row)| row)
-                .collect();
+        //     box_posn_prop = box_posn_prop.into_iter()
+        //         .enumerate()
+        //         .filter(|(i, _)| contains_zero[*i] == 0)
+        //         .map(|(_, row)| row)
+        //         .collect();
 
-            println!("{:?}", box_posn_prop.len());
-        }
+        //     println!("{:?}", box_posn_prop.len());
+        // }
 
 		let prop = solver.add_propagator(Box::new(Self {
             box_posn: box_posn_prop,
-            box_size: box_size_fixed,
+            box_size: box_size_prop,
             dimensions: box_posn[0].len(),
         }), PriorityLevel::Low);
 
@@ -483,6 +484,7 @@ impl IntDiffnSweep {
     /// the starting domain of o is not included
     fn generate_fr<P: PropagationActions>(
         &self,
+        actions: &mut P,
         fr_support: &mut Vec<usize>,
         o_idx:usize,
         lb_tracker: &Vec<Vec<IntVal>>,
@@ -502,8 +504,8 @@ impl IntDiffnSweep {
             for d in 0..self.dimensions {
                 let pos_ub: IntVal = ub_tracker[i][d];
                 let pos_lb: IntVal = lb_tracker[i][d];
-                let curr_size = self.box_size[o_idx][d];
-                let size = self.box_size[i][d];
+                let curr_size = actions.get_int_lower_bound(self.box_size[o_idx][d]);
+                let size = actions.get_int_lower_bound(self.box_size[i][d]);
                 let fr_lb = pos_ub - curr_size + 1;
                 let fr_ub = pos_lb + size - 1;
                 if fr_lb <= fr_ub {
@@ -650,12 +652,12 @@ where
                 //          lb_tracker[o][0],
                 //          ub_tracker[o][1],
                 //          lb_tracker[o][1],
-                //          self.box_size[o][0]
+                //          actions.get_int_lower_bound(self.box_size[o][0])
                 //     );
                 // }
                 let mut fr_support: Vec<usize> = Vec::new();
 
-                if let Some(all_fr) = self.generate_fr::<P>(&mut fr_support, o_idx, &lb_tracker, &ub_tracker, self.dimensions) {
+                if let Some(all_fr) = self.generate_fr::<P>(actions, &mut fr_support, o_idx, &lb_tracker, &ub_tracker, self.dimensions) {
                     // for f in 0..all_fr.len() {
                     //     trace!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
                     //              all_fr[f].ub[0],
