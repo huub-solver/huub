@@ -640,86 +640,82 @@ where
                  .collect())
             .collect();
 
-        let mut nonfix = true;
-        while nonfix {
-            nonfix = false;
-            for o_idx in 0..self.box_posn.len() {
-                // trace!("DOING OBJECT {:?}", o_idx);
-                // for o in 0..self.box_posn.len() {
-                //     trace!("object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?}, size {}",
-                //          o,
-                //          ub_tracker[o][0],
-                //          lb_tracker[o][0],
-                //          ub_tracker[o][1],
-                //          lb_tracker[o][1],
-                //          actions.get_int_lower_bound(self.box_size[o][0])
+        for o_idx in 0..self.box_posn.len() {
+            if self.box_size[o_idx].iter().any(|&x| actions.get_int_lower_bound(x) == 0) {
+                continue;
+            }
+            // trace!("DOING OBJECT {:?}", o_idx);
+            // for o in 0..self.box_posn.len() {
+            //     trace!("object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?}, size {}",
+            //          o,
+            //          ub_tracker[o][0],
+            //          lb_tracker[o][0],
+            //          ub_tracker[o][1],
+            //          lb_tracker[o][1],
+            //          actions.get_int_lower_bound(self.box_size[o][0])
+            //     );
+            // }
+            let mut fr_support: Vec<usize> = Vec::new();
+
+            if let Some(all_fr) = self.generate_fr::<P>(actions, &mut fr_support, o_idx, &lb_tracker, &ub_tracker, self.dimensions) {
+                // for f in 0..all_fr.len() {
+                //     trace!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
+                //              all_fr[f].ub[0],
+                //              all_fr[f].lb[0],
+                //              all_fr[f].ub[1],
+                //              all_fr[f].lb[1],
                 //     );
                 // }
-                let mut fr_support: Vec<usize> = Vec::new();
 
-                if let Some(all_fr) = self.generate_fr::<P>(actions, &mut fr_support, o_idx, &lb_tracker, &ub_tracker, self.dimensions) {
-                    // for f in 0..all_fr.len() {
-                    //     trace!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
-                    //              all_fr[f].ub[0],
-                    //              all_fr[f].lb[0],
-                    //              all_fr[f].ub[1],
-                    //              all_fr[f].lb[1],
-                    //     );
-                    // }
-
-                    if self.fixed_in_all_dimensions(&ub_tracker, &lb_tracker, o_idx) {
+                if self.fixed_in_all_dimensions(&ub_tracker, &lb_tracker, o_idx) {
+                    let reason = self.explain_conflict(actions,
+                                                       &fr_support,
+                                                       &lb_tracker,
+                                                       &ub_tracker,
+                                                       o_idx);
+                    // trace!("CONFLICT assigned {:?}", reason.len());
+                    return Err(Conflict::new(actions, None, reason));
+                }
+                for d in 0..self.dimensions {
+                    let fixed = lb_tracker[o_idx][d] == ub_tracker[o_idx][d];
+                    let (b1, _c1) = self.prune_min(actions,
+                                                  &fr_support,
+                                                  o_idx,
+                                                  &mut lb_tracker,
+                                                  &ub_tracker,
+                                                  d,
+                                                  &all_fr)?;
+                    if !fixed && !b1 {
+                        // Conflict since there is no feasible origin in this dimension
                         let reason = self.explain_conflict(actions,
                                                            &fr_support,
                                                            &lb_tracker,
                                                            &ub_tracker,
                                                            o_idx);
-                        // trace!("CONFLICT assigned {:?}", reason.len());
+
+                        // trace!("CONFLICT assigned min {}", reason.len());
+
                         return Err(Conflict::new(actions, None, reason));
                     }
-                    for d in 0..self.dimensions {
-                        let fixed = lb_tracker[o_idx][d] == ub_tracker[o_idx][d];
-                        let (b1, c1) = self.prune_min(actions,
-                                                      &fr_support,
-                                                      o_idx,
-                                                      &mut lb_tracker,
-                                                      &ub_tracker,
-                                                      d,
-                                                      &all_fr)?;
-                        if !fixed && !b1 {
-                            // Conflict since there is no feasible origin in this dimension
-                            let reason = self.explain_conflict(actions,
-                                                               &fr_support,
-                                                               &lb_tracker,
-                                                               &ub_tracker,
-                                                               o_idx);
 
-                            // trace!("CONFLICT assigned min {}", reason.len());
-
-                            return Err(Conflict::new(actions, None, reason));
-                        }
-
-                        let fixed = lb_tracker[o_idx][d] == ub_tracker[o_idx][d];
-                        let (b2, c2) = self.prune_max(actions,
-                                                      &fr_support,
-                                                      o_idx,
-                                                      &lb_tracker,
-                                                      &mut ub_tracker,
-                                                      d,
-                                                      &all_fr)?;
-                        if !fixed && !b2 {
-                            // Conflict since there is no feasible origin in this dimension
-                            let reason = self.explain_conflict(actions,
-                                                               &fr_support,
-                                                               &lb_tracker,
-                                                               &ub_tracker,
-                                                               o_idx);
-                            // trace!("CONFLICT assigned max");
-                            // trace!("CONFLICT prune_max");
-                            return Err(Conflict::new(actions, None, reason));
-                        }
-                        if c1 || c2 {
-                            nonfix = true;
-                        }
+                    let fixed = lb_tracker[o_idx][d] == ub_tracker[o_idx][d];
+                    let (b2, _c2) = self.prune_max(actions,
+                                                  &fr_support,
+                                                  o_idx,
+                                                  &lb_tracker,
+                                                  &mut ub_tracker,
+                                                  d,
+                                                  &all_fr)?;
+                    if !fixed && !b2 {
+                        // Conflict since there is no feasible origin in this dimension
+                        let reason = self.explain_conflict(actions,
+                                                           &fr_support,
+                                                           &lb_tracker,
+                                                           &ub_tracker,
+                                                           o_idx);
+                        // trace!("CONFLICT assigned max");
+                        // trace!("CONFLICT prune_max");
+                        return Err(Conflict::new(actions, None, reason));
                     }
                 }
             }
