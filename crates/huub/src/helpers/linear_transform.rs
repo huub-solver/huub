@@ -4,7 +4,7 @@ use std::ops::{Add, Mul, Neg, RangeInclusive, Sub};
 
 use crate::{helpers::div_ceil, solver::IntLitMeaning, IntSetVal, IntVal, NonZeroIntVal};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 /// An integer linear transformation of a discrete value.
 ///
 /// The transformation will take a discrete value `x` and transform it to `scale

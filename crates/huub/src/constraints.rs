@@ -12,6 +12,7 @@ pub mod int_linear;
 pub mod int_pow;
 pub mod int_table;
 pub mod int_times;
+pub mod difference_logic;
 
 use std::{
 	error::Error,
