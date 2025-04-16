@@ -68,10 +68,10 @@ impl IntDiffnSweep {
         non_strict: bool
         ) {
         // Make sure all sizes are fixed before enqueueing
-		// let enqueue = box_size
-		// 	.iter()
-        //     .flatten()
-		// 	.all(|v| matches!(v, IntView(IntViewInner::Const(_))));
+		let enqueue = box_size
+			.iter()
+            .flatten()
+			.all(|&v| solver.get_int_val(v).is_some());
         // TODO: is there some way to delay the propagator
         // until all sizes are fixed
         // if !enqueue { return () }
@@ -107,11 +107,20 @@ impl IntDiffnSweep {
         //     println!("{:?}", box_posn_prop.len());
         // }
 
-		let prop = solver.add_propagator(Box::new(Self {
-            box_posn: box_posn_prop,
-            box_size: box_size_prop,
-            dimensions: box_posn[0].len(),
-        }), PriorityLevel::Low);
+        let prop;
+        if enqueue {
+            prop = solver.add_propagator(Box::new(Self {
+                box_posn: box_posn_prop,
+                box_size: box_size_prop,
+                dimensions: box_posn[0].len(),
+            }), PriorityLevel::Low);
+        } else {
+            prop = solver.add_propagator(Box::new(Self {
+                box_posn: box_posn_prop,
+                box_size: box_size_prop,
+                dimensions: box_posn[0].len(),
+            }), PriorityLevel::Lowest);
+        }
 
         for v in box_posn.into_iter().flatten() {
             solver.enqueue_on_int_change(prop, v, IntPropCond::Bounds);
