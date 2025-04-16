@@ -358,14 +358,8 @@ where
 
 /// Create a constraint that enforces that all values of the first list to occur in order for the
 /// first time in the second list.
-pub fn value_precede_chain(
-	values: Vec<IntVal>,
-	vars: Vec<IntDecision>,
-) -> ValuePrecedeChain {
-	ValuePrecedeChain {
-		values,
-		vars,
-	}
+pub fn value_precede_chain(values: Vec<IntVal>, vars: Vec<IntDecision>) -> ValuePrecedeChain {
+	ValuePrecedeChain { values, vars }
 }
 
 impl ElementConstraint for BoolDecision {
