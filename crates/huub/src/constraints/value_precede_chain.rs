@@ -2,20 +2,23 @@
 //! enforces that a fixed order of the first occurrences of a given list of integers in
 //! a list of integer variables.
 
-use crate::actions::InspectionActions;
-use crate::solver::trail::TrailedInt;
-use crate::solver::{BoolView, IntLitMeaning};
+use std::cmp::{max, min};
+
+use tracing::trace;
+
 use crate::{
 	actions::{
-		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+		ExplanationActions, InspectionActions, PropagatorInitActions, ReformulationActions,
+		SimplificationActions,
 	},
 	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
-	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntView},
+	solver::{
+		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, BoolView,
+		IntLitMeaning, IntView,
+	},
 	IntDecision, IntVal,
 };
-use std::cmp::{max, min};
-use tracing::trace;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Representation of the `value_precede_chain` constraint within a model.
@@ -530,22 +533,23 @@ mod tests {
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
-	use crate::constraints::value_precede_chain::ValuePrecedeChainValue;
-	use crate::solver::Value;
-	use crate::solver::Value::Int;
-	use crate::solver::{
-		int_var::{EncodingType, IntVar},
-		Solver,
+	use crate::{
+		constraints::value_precede_chain::ValuePrecedeChainValue,
+		solver::{
+			int_var::{EncodingType, IntVar},
+			Solver, Value,
+			Value::Int,
+		},
+		IntVal,
 	};
-	use crate::IntVal;
 
 	fn check_valid_solution(values: Vec<IntVal>) -> impl Fn(&[Value]) -> bool {
 		move |sol| {
 			let mut cur_index = 0;
 			for v in sol.iter() {
 				if let Int(val) = *v {
-					for j in cur_index + 1..values.len() {
-						if values[j] == val {
+					for &forbidden in  values.iter().skip(cur_index + 1) {
+						if forbidden == val {
 							return false;
 						}
 					}

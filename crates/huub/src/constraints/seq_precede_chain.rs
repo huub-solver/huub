@@ -1,19 +1,22 @@
 //! Structure and algorithms for the seq_precede_chain constraint, which
 //! enforces that i precedes i+1 for all i>0 in a list of integer variables.
 
-use crate::solver::trail::TrailedInt;
-use crate::solver::{BoolView, IntLitMeaning};
+use std::cmp::min;
+
+use tracing::trace;
+
 use crate::{
 	actions::{
 		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
 	},
 	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
-	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntView},
+	solver::{
+		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, BoolView,
+		IntLitMeaning, IntView,
+	},
 	IntDecision, IntVal,
 };
-use std::cmp::min;
-use tracing::trace;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Representation of the `seq_precede_chain` constraint within a model.
@@ -363,18 +366,18 @@ where
 
 #[cfg(test)]
 mod tests {
+	use std::cmp::max;
+
 	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
 	use rangelist::RangeList;
-	use std::cmp::max;
 	use tracing_test::traced_test;
 
-	use crate::solver::Value;
-	use crate::solver::Value::Int;
 	use crate::{
 		constraints::seq_precede_chain::SeqPrecedeChainBounds,
 		solver::{
 			int_var::{EncodingType, IntVar},
-			Solver,
+			Solver, Value,
+			Value::Int,
 		},
 	};
 
@@ -384,8 +387,8 @@ mod tests {
 				let Int(val) = *v else { return None };
 				Some(val)
 			})
-			.fold(Some(0), |u, val| match (u, val) {
-				(Some(uv), Some(val)) => {
+			.try_fold(0, |u, val| match (u, val) {
+				(uv, Some(val)) => {
 					if val <= uv + 1 {
 						Some(max(uv, val))
 					} else {

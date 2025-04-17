@@ -29,7 +29,8 @@ const OPTIMIZATION_INSTANCES: &[&str] = &[
 	"radiation_i6_9",
 	"radiation_i8_9",
 	"svrp_s4_v2_c3",
-  "peaceable_queens_n5_q3",
+	"ccmcp_3_20_015_3",
+	"peaceable_queens_n5_q3",
 ];
 
 /// Benchmark an optimization problem (finding the optimal solution).
