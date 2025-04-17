@@ -132,7 +132,7 @@ pub struct State {
 	/// The literals last emited by the [`PropagatorExtension::propagate`] method.
 	/// These literals will have their reasons checked when they are seen again in
 	/// [`PropagatorExtension::notify_assignments`].
-	pub(crate) check_reason: std::collections::HashSet<RawLit>,
+	pub(crate) check_reason: VecDeque<RawLit>,
 	#[cfg(debug_assertions)]
 	/// List of integer variables that have been notified as fixed, but should be
 	/// checked that the bounds match before propagation.
@@ -289,8 +289,18 @@ impl PropagatorExtension for Engine {
 			{
 				// (DEBUG ONLY) if we propagated this literal, ensure its explanation is
 				// valid in its trail position.
-				if self.state.check_reason.contains(&lit) {
+				if self.state.check_reason.front() == Some(&lit) {
+					let _ = self.state.check_reason.pop_front();
 					self.debug_check_reason(lit);
+					// Other literals propagated might already have propagated because of
+					// unit propagated. Pop all literals from the queue that are already
+					// set.
+					while let Some(&l) = self.state.check_reason.front() {
+						if self.state.trail.get_sat_value(l).is_none() {
+							break;
+						}
+						let _ = self.state.check_reason.pop_front();
+					}
 				}
 			}
 
@@ -412,6 +422,9 @@ impl PropagatorExtension for Engine {
 					let iv = IntView(IntViewInner::VarRef(iv));
 					debug_assert_eq!(self.state.get_int_val(iv), Some(i));
 				}
+				// We've been notified of all previous propagated literals (and their
+				// reasons were checked).
+				debug_assert!(self.state.check_reason.is_empty());
 			}
 			// If there are no previous changes, run propagators
 			SolvingContext::new(slv, &mut self.state).run_propagators(&mut self.propagators);
@@ -436,7 +449,7 @@ impl PropagatorExtension for Engine {
 		{
 			// (DEBUG ONLY) Store the propagated literals, so we know what explanations
 			// to check.
-			self.state.check_reason = queue.iter().cloned().collect();
+			self.state.check_reason = queue.clone().into();
 		}
 
 		queue
