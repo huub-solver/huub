@@ -25,6 +25,7 @@ mod trace;
 
 use std::{
 	collections::HashMap,
+	convert::Infallible,
 	fmt::{self, Debug, Display},
 	fs::File,
 	io::{self, BufReader},
@@ -45,7 +46,7 @@ use huub::{
 	solver::{Goal, IntLitMeaning, SolveResult, Solver, Valuation, Value, View},
 	SlvTermSignal,
 };
-use pico_args::Arguments;
+use pico_args::{Arguments, Error::OptionWithoutAValue};
 use tracing::{subscriber::set_default, warn};
 use tracing_subscriber::fmt::MakeWriter;
 use ustr::{ustr, Ustr, UstrMap};
@@ -110,6 +111,12 @@ pub struct Cli<Stdout, Stderr> {
 	stderr: Stderr,
 	/// Whether to use ANSI color codes in the output (only for stderr)
 	ansi_color: bool,
+
+	// --- Proof Logging ---
+	// Whether proof logging is enabled (for convenience)
+	prove: bool,
+	// The path to the proof file, if enabled
+	proof_path: Option<PathBuf>,
 }
 
 /// Solution struct to display the results of the solver
@@ -157,7 +164,8 @@ where
 		}
 		config = config
 			.with_restart(self.free_search || self.restart)
-			.with_vivification(self.vivification);
+			.with_vivification(self.vivification)
+			.with_proof_logging(self.proof_path.clone());
 		config
 	}
 
@@ -538,6 +546,8 @@ where
 			vsids_after: self.vsids_after,
 			vsids_only: self.vsids_only,
 			stdout: self.stdout,
+			prove: self.prove,
+			proof_path: self.proof_path,
 		}
 	}
 
@@ -562,6 +572,8 @@ where
 			vsids_only: self.vsids_only,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
+			prove: self.prove,
+			proof_path: self.proof_path,
 		}
 	}
 }
@@ -582,6 +594,26 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 				"expected 'true','false','on','off','0', or '1', found '{}'",
 				s
 			)),
+		};
+
+		let path = args
+			.free_from_os_str(|s| -> Result<PathBuf, &'static str> { Ok(s.into()) })
+			.map_err(|e| e.to_string())?;
+
+		let prove_result = args
+			.opt_value_from_os_str("--prove", |s| -> Result<PathBuf, Infallible> {
+				Ok(s.into())
+			});
+
+		// If no path is provided with --prove, use the name of the fzn file and output
+		// to current working directory.
+		let proof_path = match prove_result {
+			Ok(value) => value,
+			Err(OptionWithoutAValue(_)) => {
+				assert!(args.contains("--prove")); // So we actually consume the arg
+				Some(PathBuf::from(path.clone().file_stem().unwrap()).with_extension("pbp"))
+			}
+			Err(e) => panic!("{e:?}"),
 		};
 
 		let cli = Cli {
@@ -613,14 +645,13 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 				.map_err(|e| e.to_string())?,
 
 			verbose,
-			path: args
-				.free_from_os_str(|s| -> Result<PathBuf, &'static str> { Ok(s.into()) })
-				.map_err(|e| e.to_string())?,
-
+			path,
 			stdout: io::stdout(),
 			#[expect(trivial_casts, reason = "doesn't compile without the case")]
 			stderr: io::stderr as fn() -> io::Stderr,
 			ansi_color: true,
+			prove: proof_path.is_some(),
+			proof_path,
 		};
 
 		let remaining = args.finish();

@@ -1105,8 +1105,15 @@ impl Model {
 		if let Some(r) = any_slv.downcast_mut::<Cadical>() {
 			r.set_option("restart", config.restart() as i32);
 			r.set_option("vivify", config.vivification() as i32);
+
+			if config.proof_path().is_some() {
+				r.set_option("huubtracer", 2);
+				let proof_path = config.proof_path().unwrap();
+				let path_str = proof_path.to_str().unwrap();
+				r.enable_proof(path_str);
+			}
 		} else {
-			warn!("unknown solver: vivification and restart options are ignored");
+			warn!("unknown solver: vivification, restart (and proof logging) options are ignored");
 		}
 
 		while let Some(con) = self.prop_queue.pop_front() {

@@ -80,3 +80,7 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 strip = "symbols"
+
+# Matthew (remove): Patch in my local pindakaas for now
+[patch."https://github.com/pindakaashq/pindakaas.git"]
+pindakaas = { path = "../pindakaas/crates/pindakaas" }

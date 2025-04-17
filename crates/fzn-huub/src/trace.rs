@@ -9,20 +9,24 @@ use std::{
 };
 
 use huub::{solver::IntLitMeaning, IntVal};
+
 use tracing::{
 	field::{Field, Visit},
-	Event, Level, Subscriber,
+	Event, Subscriber,
 };
+
 use tracing_subscriber::{
 	field::{MakeVisitor, RecordFields, VisitOutput},
+	filter::{LevelFilter, Targets},
 	fmt::{
 		format::{DefaultFields, Writer},
 		time::uptime,
 		FormatFields, MakeWriter,
 	},
 	layer::{Context, SubscriberExt},
-	Layer,
+	Layer, Registry,
 };
+
 use ustr::Ustr;
 
 /// A [`tracing_subscriber::FormatFields`] implementation that attempts to
@@ -110,24 +114,34 @@ pub(crate) fn create_subscriber<W>(
 where
 	W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
 {
-	// Builder for the formatting subscriber
-	let builder = tracing_subscriber::fmt()
-		.with_max_level(match verbose {
-			0 => Level::INFO,
-			1 => Level::DEBUG,
-			_ => Level::TRACE, // 2 or more
-		})
-		.with_writer(make_writer)
-		.with_ansi(ansi)
-		.with_timer(uptime())
-		.map_fmt_fields(|fmt| {
-			FmtLitFields::new(fmt, Arc::clone(&lit_reverse_map), int_reverse_map)
+	let debug_log_filter = Targets::new()
+		// TODO: Something like this will disable all proof_log tracing in the debug log
+		// .with_target("proof_log", LevelFilter::OFF)
+		// Otherwise, filter to the desired log level
+		.with_default(match verbose {
+			0 => LevelFilter::INFO,
+			1 => LevelFilter::DEBUG,
+			_ => LevelFilter::TRACE,
 		});
 
-	// Create final subscriber and add the layer that will register new lazily created literals
-	builder
-		.finish()
-		.with(RegisterLazyLits::new(lit_reverse_map))
+	// Formatting layer for debug logging
+	let fmt_layer = tracing_subscriber::fmt::layer()
+		.with_ansi(ansi)
+		.with_writer(make_writer)
+		.with_timer(uptime())
+		.map_fmt_fields(|fmt| FmtLitFields::new(fmt, Arc::clone(&lit_reverse_map), int_reverse_map))
+		.with_filter(debug_log_filter);
+
+	// TODO: Here we can add a subscriber layer to trace additional proof logging information
+	// let proof_layer = create_proof_layer(proof_file);
+
+	// Tracing subscriber with layers for both debug logging and proof logging.
+	let subscriber = Registry::default()
+		.with(fmt_layer)
+		.with(RegisterLazyLits::new(lit_reverse_map));
+	//TODO: .with(proof_layer);
+
+	subscriber
 }
 
 impl FmtLitFields {

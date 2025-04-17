@@ -1,7 +1,7 @@
 //! Data structures to store [`Model`] parts for analyses and for the
 //! reformulation process of creating a [`Solver`] object from a [`Model`].
 
-use std::collections::HashSet;
+use std::{collections::HashSet, path::PathBuf};
 
 use delegate::delegate;
 use index_vec::{define_index_type, IndexVec};
@@ -130,6 +130,8 @@ pub struct InitConfig {
 	restart: bool,
 	/// Whether to enable the vivification in the oracle solver.
 	vivification: bool,
+	// Whether proof logging is enabled in the oracle solver
+	proof_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -315,6 +317,11 @@ impl InitConfig {
 		self.vivification
 	}
 
+	/// Get whether to enable the proof logging in the oracle solver.
+	pub fn proof_path(&self) -> Option<PathBuf> {
+		self.proof_path.clone()
+	}
+
 	/// Change the maximum cardinality of the domain of an integer variable before
 	/// its order encoding is created lazily.
 	pub fn with_int_eager_limit(mut self, limit: usize) -> Self {
@@ -331,6 +338,12 @@ impl InitConfig {
 	/// Change whether to enable the vivification in the oracle solver.
 	pub fn with_vivification(mut self, vivification: bool) -> Self {
 		self.vivification = vivification;
+		self
+	}
+
+	/// Change whether to enable the proof logging in the oracle solver.
+	pub fn with_proof_logging(mut self, proof_path: Option<PathBuf>) -> Self {
+		self.proof_path = proof_path;
 		self
 	}
 }
