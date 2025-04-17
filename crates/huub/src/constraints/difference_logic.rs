@@ -1,8 +1,8 @@
 //! Structure and algorithms for a global difference logic propagator.
 
-use std::cmp::{min, Reverse};
+use std::cmp::Reverse;
 use petgraph::graphmap::DiGraphMap;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::RandomState;
 use std::iter::once;
 use petgraph::Direction;
@@ -34,8 +34,8 @@ pub struct DifferenceLogicBounds {
 	constraints: Vec<(IntView, IntView, IntVal)>,
 	imp_constraints: Vec<(BoolView, IntView, IntView, IntVal)>,
 	int_vars: Vec<IntView>,
-	lower_bounds: Vec<TrailedInt>,
-	upper_bounds: Vec<TrailedInt>,
+	lower_bounds: HashMap<IntView, TrailedInt>,
+	upper_bounds: HashMap<IntView, TrailedInt>,
 	bool_vars: Vec<BoolView>,
 }
 
@@ -66,23 +66,24 @@ impl DifferenceLogicBounds {
 		trace!("Performing inc_sat on {u:?}, {v:?}, {d:?}");
 		let mut queue = PriorityQueue::new();
 		let mut pi_new = HashMap::new(); // todo check if we can modify the potential function in place?
-		let gamma_v = self.pi.get(&u).unwrap_or(&0) + d - self.pi.get(&v).unwrap_or(&0);
+		let gamma_v = self.pi[&u] + d - self.pi[&v];
 		if gamma_v < 0 {
 			let _ = queue.push(v, Reverse(gamma_v));
 		}
 		while !queue.is_empty() && queue.get_priority(&u) == None {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
-			let _ = pi_new.insert(s, self.pi.get(&s).unwrap_or(&0) + gamma_s);
+			let _ = pi_new.insert(s, self.pi[&s] + gamma_s);
 			for (_, t, &d_e) in self.graph.edges(s) {
-				if !pi_new.contains_key(&t) || pi_new[t] == self.pi.get(&t).unwrap_or(&0) {
-					let gamma_t = pi_new.get(&s).unwrap_or(&0) + d_e - self.pi.get(&t).unwrap_or(&0);
+				if !pi_new.contains_key(&t) || pi_new[&t] == self.pi[&t] {
+					let gamma_t = pi_new[&s] + d_e - self.pi[&t];
 					if gamma_t < 0 {
-						let _ = queue.push_decrease(t, Reverse(gamma_t));
+						let _ = queue.push_increase(t, Reverse(gamma_t));
 					}
 				}
 			}
 		}
 		if queue.get_priority(&u) != None {
+			trace!("Found cycle with negative length...");
 			return Err(Conflict::new(actions, None, actions.deferred_reason(0)));  // todo...
 		}
 		let _ = self.graph.add_edge(u, v, d); // todo what if edge was already there? What is constraint is implied?
@@ -103,9 +104,9 @@ impl DifferenceLogicBounds {
 			let (s, Reverse(dist)) = queue.pop().unwrap();
 			trace!("dijkstra on current node {s:?} with dist {dist}");
 			for (n1, n2, &d) in self.graph.edges_directed(s, if reverse {Direction::Incoming} else {Direction::Outgoing}) {
-				let new_dist = dist + self.pi.get(&n1).unwrap_or(&0) + d - self.pi.get(&n2).unwrap_or(&0);  // todo store rc directly?
+				let new_dist = dist + self.pi[&n1] + d - self.pi[&n2];  // todo store rc directly?
 				let t = if reverse { n1 } else { n2 };
-				if !distances.contains_key(&t) || distances[t] > new_dist {
+				if !distances.contains_key(&t) || distances[&t] > new_dist {
 					let _ = queue.push(t, Reverse(new_dist));
 					trace!("dijkstra adding node {t:?} with dist {new_dist}");
 				}
@@ -128,26 +129,30 @@ impl DifferenceLogicBounds {
 	}
 
 	fn inc_lb<P: PropagationActions>(&mut self, actions: &mut P, v_l: Vec<IntView>) -> Result<(), Conflict> {
-		let pi0 = v_l.iter().map(|&v| actions.get_int_lower_bound(v) + self.pi[v]).max().unwrap(); //todo recalculate or store?
+		
+		trace!("Running inc_lb on {v_l:?}");
+		trace!("pi is {:?}", self.pi);
+		let pi0 = v_l.iter().map(|&v| actions.get_int_lower_bound(v) + self.pi[&v]).max().unwrap(); //todo recalculate or store?
 		let mut queue = PriorityQueue::new();
 		let mut lb = HashMap::new();
 		for &v in v_l.iter() {
-			queue.push(v, Reverse(pi0 - actions.get_int_lower_bound(v) + self.pi[v]));
+			let _ = queue.push(v, Reverse(pi0 - actions.get_int_lower_bound(v) - self.pi[&v]));
 		}
 		while !queue.is_empty() {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
-			lb.insert(s, gamma_s);
-			if pi0 - gamma_s - self.pi[s] > actions.get_int_lower_bound(s) {
+			let _ = lb.insert(s, gamma_s);
+			if pi0 - gamma_s - self.pi[&s] > actions.get_trailed_int(self.lower_bounds[&s]) {
 				for (_, t, &d_e) in self.graph.edges(s) {
-					if lb.contains_key(&t) {
-						queue.push_decrease(t, Reverse(self.pi[s] + d_e - self.pi[t]));
+					if !lb.contains_key(&t) {
+						let _ = queue.push_increase(t, Reverse(gamma_s + self.pi[&s] + d_e - self.pi[&t]));
 					}
 				}
 			}
 		}
 		for (&v, &gamma) in lb.iter() {  //todo or directly in loop?
-			let bound = pi0 - gamma - self.pi[v];
+			let bound = pi0 - gamma - self.pi[&v];
 			if bound > actions.get_int_lower_bound(v) {
+				trace!("Updating lower bound for {v:?} to {bound}");
 				actions.set_int_lower_bound(v, bound, actions.deferred_reason(0))? // todo explain...
 			}
 		}
@@ -155,26 +160,29 @@ impl DifferenceLogicBounds {
 	}
 
 	fn inc_ub<P: PropagationActions>(&mut self, actions: &mut P, v_u: Vec<IntView>) -> Result<(), Conflict> {
-		let pi0 = v_u.iter().map(|&v| actions.get_int_upper_bound(v) + self.pi[v]).min().unwrap(); //todo recalculate or store?
+
+		trace!("Running inc_ub on {v_u:?}");
+		let pi0 = v_u.iter().map(|&v| actions.get_int_upper_bound(v) + self.pi[&v]).min().unwrap(); //todo recalculate or store?
 		let mut queue = PriorityQueue::new();
 		let mut ub = HashMap::new();
 		for &v in v_u.iter() {
-			queue.push(v, Reverse(self.pi[v] + actions.get_int_lower_bound(v) - pi0));
+			let _ = queue.push(v, Reverse(self.pi[&v] + actions.get_int_upper_bound(v) - pi0));
 		}
 		while !queue.is_empty() {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
-			ub.insert(s, gamma_s);
-			if pi0 + gamma_s - self.pi[s] < actions.get_int_upper_bound(s) {
+			let _ = ub.insert(s, gamma_s);
+			if pi0 + gamma_s - self.pi[&s] < actions.get_int_upper_bound(s) {
 				for (t, _, &d_e) in self.graph.edges_directed(s, Direction::Incoming) {
 					if ub.contains_key(&t) {
-						queue.push_decrease(t, Reverse(self.pi[t] + d_e - self.pi[s]));
+						let _ = queue.push_increase(t, Reverse(self.pi[&t] + d_e - self.pi[&s]));
 					}
 				}
 			}
 		}
 		for (&v, &gamma) in ub.iter() {  //todo or directly in loop?
-			let bound = pi0 + gamma - self.pi[v] ;
+			let bound = pi0 + gamma - self.pi[&v] ;
 			if bound < actions.get_int_upper_bound(v) {
+				trace!("Updating upper bound for {v:?} to {bound}");
 				actions.set_int_upper_bound(v, bound, actions.deferred_reason(0))? // todo explain...
 			}
 		}
@@ -190,13 +198,14 @@ impl DifferenceLogicBounds {
 		int_vars.extend(imp_constraints.iter().flat_map(|(_, x, y, _)| once(*x).chain(once(*y))).collect::<Vec<_>>());
 		int_vars.sort();
 		int_vars.dedup();
-		let lower_bounds = int_vars.iter().map(|_| solver.new_trailed_int(IntVal::MAX)).collect::<Vec<_>>();
-		let upper_bounds = int_vars.iter().map(|_| solver.new_trailed_int(IntVal::MIN)).collect::<Vec<_>>();
+		let lower_bounds = int_vars.iter().map(|&v| (v, solver.new_trailed_int(IntVal::MIN))).collect();
+		let upper_bounds = int_vars.iter().map(|&v| (v, solver.new_trailed_int(IntVal::MAX))).collect();
 
 		let bool_vars = imp_constraints.iter().map(|(b, _, _, _)| *b).collect::<Vec<_>>();
 
 		let graph = DiGraphMap::new();
-		let pi = HashMap::new();
+		// todo init all or add dynamically?
+		let pi = int_vars.iter().map(|&v| (v, 0)).collect();
 
 		let prop = solver.add_propagator(
 			Box::new(Self {
@@ -237,19 +246,36 @@ where
 			trace!("Current graph: {:?}", Dot::with_attr_getters(&self.graph,
 				&[Config::NodeNoLabel, Config::EdgeNoLabel],
 				&|_, edge| format!("label = \"{:?}\"", edge.2),
-				&|_, node| format!("label = \"{:?}: {:?}\"", node.0, self.pi.get(&node.0).unwrap_or(&0))));
+				&|_, node| format!("label = \"{:?}: {:?}\"", node.0, self.pi[&node.0])));
 		}
 		self.constraints.clear();
 
-		// todo check changes of all int bounds, trigger updates of bounds...
+		// todo replace once we know what actually changed...
+		let lb_changes: Vec<_> = self.int_vars.iter()
+			.filter(|&v| actions.get_int_lower_bound(*v) > actions.get_trailed_int(self.lower_bounds[v]))
+			.map(|&v| v)
+			.collect();
+		if !lb_changes.is_empty() {
+			self.inc_lb(actions, lb_changes)?;
+		}
 
+		// todo replace once we know what actually changed...
+		let ub_changes: Vec<_> = self.int_vars.iter()
+			.filter(|&v| actions.get_int_upper_bound(*v) < actions.get_trailed_int(self.upper_bounds[v]))
+			.map(|&v| v)
+			.collect();
+		if !ub_changes.is_empty() {
+			self.inc_ub(actions, ub_changes)?;
+		}
+
+		panic!("Not further at the moment...");
 		Ok(())
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
+	
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
@@ -259,7 +285,6 @@ mod tests {
 		Solver,
 	}, Model};
 	use crate::reformulate::InitConfig;
-	use crate::solver::BoolView;
 
 	#[test]
 	#[traced_test]
