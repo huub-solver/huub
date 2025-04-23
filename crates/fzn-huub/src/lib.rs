@@ -596,27 +596,15 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			)),
 		};
 
-		let path = args
-			.free_from_os_str(|s| -> Result<PathBuf, &'static str> { Ok(s.into()) })
-			.map_err(|e| e.to_string())?;
-
 		let prove_result = args
 			.opt_value_from_os_str("--prove", |s| -> Result<PathBuf, Infallible> {
 				Ok(s.into())
 			});
 
-		// If no path is provided with --prove, use the name of the fzn file and output
-		// to current working directory.
-		let proof_path = match prove_result {
-			Ok(value) => value,
-			Err(OptionWithoutAValue(_)) => {
-				assert!(args.contains("--prove")); // So we actually consume the arg
-				Some(PathBuf::from(path.clone().file_stem().unwrap()).with_extension("pbp"))
-			}
-			Err(e) => panic!("{e:?}"),
-		};
+		let prove = args.contains("--prove"); // So we actually consume the arg
+		let proof_path = None;
 
-		let cli = Cli {
+		let mut cli = Cli {
 			all_solutions: args.contains(["-a", "--all-solutions"]),
 			all_optimal: args.contains("--all-optimal"),
 			intermediate_solutions: args.contains(["-i", "--intermediate-solutions"]),
@@ -645,14 +633,28 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 				.map_err(|e| e.to_string())?,
 
 			verbose,
-			path,
+			path: args
+				.free_from_os_str(|s| -> Result<PathBuf, &'static str> { Ok(s.into()) })
+				.map_err(|e| e.to_string())?,
 			stdout: io::stdout(),
 			#[expect(trivial_casts, reason = "doesn't compile without the case")]
 			stderr: io::stderr as fn() -> io::Stderr,
 			ansi_color: true,
-			prove: proof_path.is_some(),
+			prove,
 			proof_path,
 		};
+
+		// If no path is provided with --prove, use the name of the fzn file and output
+		// to current working directory.
+		cli.proof_path = match prove_result {
+			Ok(value) => value,
+			Err(OptionWithoutAValue(_)) => {
+				Some(PathBuf::from(cli.path.clone().file_stem().unwrap()).with_extension("pbp"))
+			}
+			Err(e) => panic!("{e:?}"),
+		};
+
+		cli.prove = cli.proof_path.is_some();
 
 		let remaining = args.finish();
 		match remaining.len() {
