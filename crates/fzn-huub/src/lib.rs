@@ -46,7 +46,7 @@ use huub::{
 	solver::{Goal, IntLitMeaning, SolveResult, Solver, Valuation, Value, View},
 	SlvTermSignal,
 };
-use pico_args::{Arguments, Error::OptionWithoutAValue};
+use pico_args::Arguments;
 use tracing::{subscriber::set_default, warn};
 use tracing_subscriber::fmt::MakeWriter;
 use ustr::{ustr, Ustr, UstrMap};
@@ -596,13 +596,11 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			)),
 		};
 
-		let prove_result = args
+		let proof_path = args
 			.opt_value_from_os_str("--prove", |s| -> Result<PathBuf, Infallible> {
 				Ok(s.into())
-			});
-
-		let prove = args.contains("--prove"); // So we actually consume the arg
-		let proof_path = None;
+			})
+			.map_err(|e| e.to_string())?;
 
 		let mut cli = Cli {
 			all_solutions: args.contains(["-a", "--all-solutions"]),
@@ -633,6 +631,8 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 				.map_err(|e| e.to_string())?,
 
 			verbose,
+			prove: proof_path.is_some(),
+			proof_path: proof_path,
 			path: args
 				.free_from_os_str(|s| -> Result<PathBuf, &'static str> { Ok(s.into()) })
 				.map_err(|e| e.to_string())?,
@@ -640,21 +640,20 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			#[expect(trivial_casts, reason = "doesn't compile without the case")]
 			stderr: io::stderr as fn() -> io::Stderr,
 			ansi_color: true,
-			prove,
-			proof_path,
 		};
 
 		// If no path is provided with --prove, use the name of the fzn file and output
 		// to current working directory.
-		cli.proof_path = match prove_result {
-			Ok(value) => value,
-			Err(OptionWithoutAValue(_)) => {
-				Some(PathBuf::from(cli.path.clone().file_stem().unwrap()).with_extension("pbp"))
-			}
-			Err(e) => panic!("{e:?}"),
-		};
-
-		cli.prove = cli.proof_path.is_some();
+		if cli
+			.proof_path
+			.as_ref()
+			.and_then(|p| p.to_str())
+			.filter(|s| *s == "default")
+			.is_some()
+		{
+			cli.proof_path =
+				Some(PathBuf::from(cli.path.clone().file_stem().unwrap()).with_extension("pbp"));
+		}
 
 		let remaining = args.finish();
 		match remaining.len() {

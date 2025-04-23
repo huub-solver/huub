@@ -4,7 +4,7 @@
   "id": "solutions.huub",
   "tags": ["int", "bool", "sat", "lcg"],
   "inputType": "JSON",
-  "executable": "../../fzn-huub",
+  "executable": "/Users/matthewmcilree/PhD_Code/huub/target/release/fzn-huub",
   "mznlib": "../huub",
   "stdFlags": ["-a", "-i", "-f", "-s", "-t", "-v"],
   "extraFlags": [
@@ -13,6 +13,7 @@
     ["--toggle-vsids", "Alternate between the activity-based search heuristic and the user-specific search heuristic after every restart.", "bool", "false"],
     ["--vivify","whether to enable vivification","bool:false:true","false"],
     ["--vsids-after", "Switch to activity-based search heuristic provided by the SAT solver after the given number of conflicts.", "int", "0"],
-    ["--vsids-only", "Only use the activity-based search provided by the SAT solver", "bool", "false"]
+    ["--vsids-only", "Only use the activity-based search provided by the SAT solver", "bool", "false"],
+    ["--prove", "(Experimental) enable proof logging", "string", ""]
   ]
 }
