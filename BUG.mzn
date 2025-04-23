@@ -4,10 +4,10 @@
 include "diffn.mzn";
 
 %% Parameters:
-int: n = 3; % The amount of squares
 int: maxLen = sum(k in 1..n)(k); % The maximum length of the rectangle
-array[1..n] of int: SquaresX = [3, 4, 5]; % Square[s] = dimension of square s (1x1, ..., nxn)
-array[1..n] of int: SquaresY = [10, 2, 2]; % Square[s] = dimension of square s (1x1, ..., nxn)
+int: n = 10;
+array[1..n] of int: SquaresX = [5, 7, 9, 11, 13, 15, 17, 19, 21, 23];
+array[1..n] of int: SquaresY = [3, 5, 7, 9, 11, 6, 8, 10, 12, 4];
 %% Derived parameters:
 % None
 
@@ -20,9 +20,9 @@ var n..50: h;
 var int: rec = w*h;
 
 % X[n] = the x coordinate of the lower-left corner of square n
-array [1..n] of var 6..15: X; %% = [11, 7, 6];
+array [1..n] of var 0..100: X; %% = [11, 7, 6];
 % Y[n] = the y coordinate of;;%%  %the lower-left corner of square n
-array [1..n] of var 2..12: Y; %% = [2, 10, 5];
+array [1..n] of var 0..100: Y; %% = [2, 10, 5];
 % No problem constraints are enforced by this choice of variables
 
 %% Redundant decision variables:

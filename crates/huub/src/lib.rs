@@ -46,13 +46,14 @@ use crate::{
 	branchers::{BoolBrancher, IntBrancher, WarmStartBrancher},
 	constraints::{
 		bool_array_element::BoolDecisionArrayElement,
+		cumulative::Cumulative,
 		disjunctive_strict::DisjunctiveStrict,
 		int_abs::IntAbs,
 		int_all_different::IntAllDifferent,
 		int_array_element::{IntDecisionArrayElement, IntValArrayElement},
 		int_array_minimum::IntArrayMinimum,
-		int_div::IntDiv,
 		int_diffn::IntDiffn,
+		int_div::IntDiv,
 		int_in_set::IntInSetReif,
 		int_linear::{IntLinear, LinOperator},
 		int_pow::IntPow,
@@ -241,11 +242,35 @@ where
 }
 /// Create a constraint that enforces that given decision variables of starting positions and sizes
 /// of k-dimensional hyperrectangles, none of the rectangles overlap.
-pub fn diffn_int(box_posn: Vec<Vec<IntDecision>>, box_size: Vec<Vec<IntDecision>>, non_strict: bool) -> IntDiffn
-{
-	IntDiffn {box_posn, box_size, non_strict}
+pub fn diffn_int(
+	box_posn: Vec<Vec<IntDecision>>,
+	box_size: Vec<Vec<IntDecision>>,
+	non_strict: bool,
+) -> IntDiffn {
+	IntDiffn {
+		box_posn,
+		box_size,
+		non_strict,
+	}
 }
 
+pub fn cumulative<Iter>(
+	start: Iter,
+	duration: Vec<IntVal>,
+	requirement: Vec<IntVal>,
+	bound: IntVal,
+) -> Cumulative
+where
+	Iter: IntoIterator,
+	Iter::Item: Into<IntDecision>,
+{
+	Cumulative {
+		start: start.into_iter().map_into().collect(),
+		duration,
+		requirement,
+		bound,
+	}
+}
 /// Create a constraint that enforces that a result decision variable takes the
 /// value equal the element of the given array at the given index decision
 /// variable.
@@ -841,6 +866,7 @@ impl Model {
 		let status = match &mut con_obj {
 			ConstraintStore::IntAllDifferent(c) => c.simplify(self),
 			ConstraintStore::IntDiffn(c) => c.simplify(self),
+			ConstraintStore::Cumulative(c) => c.simplify(self),
 			ConstraintStore::IntValArrayElement(c) => c.simplify(self),
 			ConstraintStore::IntArrayMinimum(c) => c.simplify(self),
 			ConstraintStore::BoolDecisionArrayElement(c) => c.simplify(self),
@@ -903,6 +929,9 @@ impl Model {
 			}
 			ConstraintStore::IntDiffn(con) => {
 				<IntDiffn as Constraint<Model>>::initialize(con, &mut ctx);
+			}
+			ConstraintStore::Cumulative(con) => {
+				<Cumulative as Constraint<Model>>::initialize(con, &mut ctx);
 			}
 			ConstraintStore::IntValArrayElement(con) => {
 				<IntValArrayElement as Constraint<Model>>::initialize(con, &mut ctx);
@@ -1110,6 +1139,12 @@ impl AddAssign<IntAllDifferent> for Model {
 impl AddAssign<IntDiffn> for Model {
 	fn add_assign(&mut self, constraint: IntDiffn) {
 		self.add_constraint(ConstraintStore::IntDiffn(constraint));
+	}
+}
+
+impl AddAssign<Cumulative> for Model {
+	fn add_assign(&mut self, constraint: Cumulative) {
+		self.add_constraint(ConstraintStore::Cumulative(constraint));
 	}
 }
 
