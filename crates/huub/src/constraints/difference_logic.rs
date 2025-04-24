@@ -10,7 +10,7 @@ use petgraph::dot::{Config, Dot};
 use priority_queue::PriorityQueue;
 use tracing::trace;
 use crate::solver::activation_list::IntPropCond;
-use crate::solver::BoolView;
+use crate::solver::{BoolView, IntLitMeaning};
 use crate::{actions::{
 	ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
 }, constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus}, reformulate::ReformulationError, solver::{
@@ -70,7 +70,7 @@ impl DifferenceLogicBounds {
 		if gamma_v < 0 {
 			let _ = queue.push(v, Reverse(gamma_v));
 		}
-		while !queue.is_empty() && queue.get_priority(&u) == None {
+		while !queue.is_empty() && queue.get_priority(&u).is_none() {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
 			let _ = pi_new.insert(s, self.pi[&s] + gamma_s);
 			for (_, t, &d_e) in self.graph.edges(s) {
@@ -82,7 +82,7 @@ impl DifferenceLogicBounds {
 				}
 			}
 		}
-		if queue.get_priority(&u) != None {
+		if queue.get_priority(&u).is_some() {
 			trace!("Found cycle with negative length...");
 			return Err(Conflict::new(actions, None, actions.deferred_reason(0)));  // todo...
 		}
@@ -122,7 +122,7 @@ impl DifferenceLogicBounds {
 		for (b, x, y, d_i) in self.imp_constraints.iter() {
 			if outgoing_u.contains_key(x) && incoming_v.contains_key(y) && outgoing_u[x] + d + incoming_v[y] <= *d_i { //todo better formulation?
 				trace!("Constraint {x:?} - {y:?} <= {d} is implied");
-				actions.set_bool(*b, actions.deferred_reason(0))? // todo explain!
+				//actions.set_bool(*b, actions.deferred_reason(0))? // todo explain!
 			}
 		}
 		Ok(())
@@ -131,29 +131,36 @@ impl DifferenceLogicBounds {
 	fn inc_lb<P: PropagationActions>(&mut self, actions: &mut P, v_l: Vec<IntView>) -> Result<(), Conflict> {
 		
 		trace!("Running inc_lb on {v_l:?}");
-		trace!("pi is {:?}", self.pi);
-		let pi0 = v_l.iter().map(|&v| actions.get_int_lower_bound(v) + self.pi[&v]).max().unwrap(); //todo recalculate or store?
+		//trace!("pi is {:?}", self.pi);
+		let pi0 = v_l.iter().map(|&v| actions.get_int_lower_bound(v) + self.pi[&v]).max().unwrap();  // todo store get_int_lower_bound directly?
 		let mut queue = PriorityQueue::new();
-		let mut lb = HashMap::new();
+		let mut lb = HashMap::new();  //todo empty and reuse vs. recreate?
+		let mut backtrace = HashMap::new();
 		for &v in v_l.iter() {
 			let _ = queue.push(v, Reverse(pi0 - actions.get_int_lower_bound(v) - self.pi[&v]));
 		}
 		while !queue.is_empty() {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
 			let _ = lb.insert(s, gamma_s);
-			if pi0 - gamma_s - self.pi[&s] > actions.get_trailed_int(self.lower_bounds[&s]) {
+			let bound = pi0 - gamma_s - self.pi[&s];
+			if bound > actions.get_trailed_int(self.lower_bounds[&s]) {
+				if bound > actions.get_int_lower_bound(s) {
+					trace!("Updating lower bound for {s:?} to {bound}");
+					let prev = backtrace[&s];
+					trace!("Reason is that {prev:?} >= {}", actions.get_trailed_int(self.lower_bounds[&prev]));
+					actions.set_int_lower_bound(s, bound, |a: &mut P| vec![a.get_int_lit(prev, IntLitMeaning::GreaterEq(a.get_trailed_int(self.lower_bounds[&prev])))])?;
+
+				}
+				let _ = actions.set_trailed_int(self.lower_bounds[&s], bound);  // todo requeue immediately for holes?
 				for (_, t, &d_e) in self.graph.edges(s) {
 					if !lb.contains_key(&t) {
-						let _ = queue.push_increase(t, Reverse(gamma_s + self.pi[&s] + d_e - self.pi[&t]));
+						let path = gamma_s + self.pi[&s] + d_e - self.pi[&t];
+						let old = queue.push_increase(t, Reverse(path));
+						if old.map_or(true, |Reverse(old_path)| path < old_path) {
+							let _ = backtrace.insert(t, s);
+						}
 					}
 				}
-			}
-		}
-		for (&v, &gamma) in lb.iter() {  //todo or directly in loop?
-			let bound = pi0 - gamma - self.pi[&v];
-			if bound > actions.get_int_lower_bound(v) {
-				trace!("Updating lower bound for {v:?} to {bound}");
-				actions.set_int_lower_bound(v, bound, actions.deferred_reason(0))? // todo explain...
 			}
 		}
 		Ok(())
@@ -165,25 +172,32 @@ impl DifferenceLogicBounds {
 		let pi0 = v_u.iter().map(|&v| actions.get_int_upper_bound(v) + self.pi[&v]).min().unwrap(); //todo recalculate or store?
 		let mut queue = PriorityQueue::new();
 		let mut ub = HashMap::new();
+		let mut backtrace = HashMap::new();
 		for &v in v_u.iter() {
 			let _ = queue.push(v, Reverse(self.pi[&v] + actions.get_int_upper_bound(v) - pi0));
 		}
 		while !queue.is_empty() {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
 			let _ = ub.insert(s, gamma_s);
-			if pi0 + gamma_s - self.pi[&s] < actions.get_int_upper_bound(s) {
+			let bound = pi0 + gamma_s - self.pi[&s];
+			if bound < actions.get_trailed_int(self.upper_bounds[&s]) {
+				if bound < actions.get_int_upper_bound(s) {
+					trace!("Updating upper bound for {s:?} to {bound}");
+					let prev = backtrace[&s];
+					trace!("Reason is that {prev:?} <= {}", actions.get_trailed_int(self.upper_bounds[&prev]));
+					actions.set_int_upper_bound(s, bound, |a: &mut P| vec![a.get_int_lit(prev, IntLitMeaning::Less(a.get_trailed_int(self.upper_bounds[&prev]) + 1))])?;
+
+				}
+				let _ = actions.set_trailed_int(self.upper_bounds[&s], bound);  // todo requeue immediately for holes?
 				for (t, _, &d_e) in self.graph.edges_directed(s, Direction::Incoming) {
-					if ub.contains_key(&t) {
-						let _ = queue.push_increase(t, Reverse(self.pi[&t] + d_e - self.pi[&s]));
+					if !ub.contains_key(&t) {
+						let path = gamma_s + self.pi[&t] + d_e - self.pi[&s];
+						let old = queue.push_increase(t, Reverse(path));
+						if old.map_or(true, |Reverse(old_path)| path < old_path) {
+							let _ = backtrace.insert(t, s);
+						}
 					}
 				}
-			}
-		}
-		for (&v, &gamma) in ub.iter() {  //todo or directly in loop?
-			let bound = pi0 + gamma - self.pi[&v] ;
-			if bound < actions.get_int_upper_bound(v) {
-				trace!("Updating upper bound for {v:?} to {bound}");
-				actions.set_int_upper_bound(v, bound, actions.deferred_reason(0))? // todo explain...
 			}
 		}
 		Ok(())
@@ -242,7 +256,7 @@ where
 		// todo look for changes of booleans, include implied constraints...
 		for (x, y, d) in self.constraints.clone().iter() { //todo prevent clone
 			self.inc_sat(actions, *x, *y, *d)?;
-			self.inc_imp(actions, *x, *y, *d)?;
+			self.inc_imp(actions, *x, *y, *d)?;  // todo do we want to remove edges that are not necessary? At least in the beginning?
 			trace!("Current graph: {:?}", Dot::with_attr_getters(&self.graph,
 				&[Config::NodeNoLabel, Config::EdgeNoLabel],
 				&|_, edge| format!("label = \"{:?}\"", edge.2),
@@ -268,7 +282,7 @@ where
 			self.inc_ub(actions, ub_changes)?;
 		}
 
-		panic!("Not further at the moment...");
+		//panic!("Not further at the moment...");
 		Ok(())
 	}
 }
@@ -285,6 +299,7 @@ mod tests {
 		Solver,
 	}, Model};
 	use crate::reformulate::InitConfig;
+	use crate::solver::Value::Int;
 
 	#[test]
 	#[traced_test]
@@ -297,25 +312,29 @@ mod tests {
 
 		let x = IntVar::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=10]),
+			RangeList::from_iter([1..=5]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let y = IntVar::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=10]),
+			RangeList::from_iter([1..=5]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let z = IntVar::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=10]),
+			RangeList::from_iter([1..=5]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		DifferenceLogicBounds::new_in(&mut slv, vec![(x, y, -2), (y, z, 3)], vec![(b, y, z, 4)]);
-		slv.assert_all_solutions(&[x, y, z], |sol| true);
-		//slv.assert_all_solutions(&[x, y, z], |sol| sol[x] - sol[y] <= -2 && sol[y] - sol[z] <= 3);
+		slv.assert_all_solutions(&[x, y, z], move |sol| {
+			let Int(x) = sol[0] else { return false };
+			let Int(y) = sol[1] else { return false };
+			let Int(z) = sol[2] else { return false };
+			x - y <= -2 && y - z <= 3
+		});
 	}
 
 	#[test]
@@ -329,43 +348,50 @@ mod tests {
 
 		let x = IntVar::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=20]),
+			RangeList::from_iter([1..=5]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let y = IntVar::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=20]),
+			RangeList::from_iter([1..=5]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let z = IntVar::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=20]),
+			RangeList::from_iter([1..=5]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let u = IntVar::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=20]),
+			RangeList::from_iter([1..=5]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let v = IntVar::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=20]),
+			RangeList::from_iter([1..=5]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let t = IntVar::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=20]),
+			RangeList::from_iter([1..=5]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		DifferenceLogicBounds::new_in(&mut slv, vec![(x, y, -2), (y, z, 3), (z, u, -1), (u, v, 2), (x, t, 1), (t, z, -1)], vec![(b, y, z, 4)]);
-		slv.assert_all_solutions(&[x, y, z], |sol| true);
-		//slv.assert_all_solutions(&[x, y, z], |sol| sol[x] - sol[y] <= -2 && sol[y] - sol[z] <= 3);
+		slv.assert_all_solutions(&[x, y, z, u, v, t], move |sol| {
+			let Int(x) = sol[0] else { return false };
+			let Int(y) = sol[1] else { return false };
+			let Int(z) = sol[2] else { return false };
+			let Int(u) = sol[3] else { return false };
+			let Int(v) = sol[4] else { return false };
+			let Int(t) = sol[5] else { return false };
+			x - y <= -2 && y - z <= 3 && z - u <= -1 && u - v <= 2 && x - t <= 1 && t - z <= -1
+		});
 	}
 
 }
