@@ -12,8 +12,9 @@ use crate::{actions::{
 }, constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus}, reformulate::ReformulationError, solver::{
 	queue::PriorityLevel, IntView,
 }, BoolDecision, IntDecision, IntVal};
-use crate::actions::InspectionActions;
+use crate::actions::{InspectionActions, TrailingActions};
 use crate::helpers::trailed_list::TrailedList;
+use crate::helpers::trailed_skip_list::TrailedSkipList;
 use crate::solver::trail::TrailedInt;
 
 
@@ -37,7 +38,7 @@ impl DiffEdge {
 			bool_var,
 		}
 	}
-	
+
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -58,7 +59,7 @@ pub struct VarNode {
 }
 
 impl VarNode {
-	
+
 	fn new<A: PropagatorInitActions + ?Sized>(actions: &mut A, var: IntView) -> Self {
 		Self {
 			var,
@@ -69,7 +70,7 @@ impl VarNode {
 			pi: 0,
 		}
 	}
-	
+
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,7 +80,7 @@ pub struct DifferenceLogicGraph {
 }
 
 impl DifferenceLogicGraph {
-	
+
 	fn new<A: PropagatorInitActions + ?Sized>(actions: &mut A, variables: Vec<IntView>) -> Self {
 		Self {
 			graph: variables.iter().map(|&v| (v, VarNode::new(actions, v))).collect(),
@@ -90,17 +91,15 @@ impl DifferenceLogicGraph {
 		self.graph.get_mut(&u).unwrap().edges.push(actions, DiffEdge::new(v, d, None));
 		self.graph.get_mut(&v).unwrap().reverse_edges.push(actions, DiffEdge::new(u, d, None));
 	}
-	
-	/// todo might not be needed later
-	fn get_stored_lower_bound<P: PropagationActions>(&mut self, actions: &mut P, v: IntView) -> IntVal {
+
+	fn get_stored_lower_bound<P: TrailingActions>(&mut self, actions: &P, v: IntView) -> IntVal {
 		actions.get_trailed_int(self.graph[&v].lower_bound)
 	}
 
-	/// todo might not be needed later
-	fn get_stored_upper_bound<P: PropagationActions>(&mut self, actions: &mut P, v: IntView) -> IntVal {
+	fn get_stored_upper_bound<P: TrailingActions>(&mut self, actions: &P, v: IntView) -> IntVal {
 		actions.get_trailed_int(self.graph[&v].upper_bound)
 	}
-	
+
 	fn get_cycle_reason(&mut self, node: IntView, backtrace: HashMap<IntView, (IntView, DiffEdge)>) -> Vec<BoolView> {
 		let mut reason = Vec::new();
 		let mut var = node;
@@ -116,7 +115,7 @@ impl DifferenceLogicGraph {
 		}
 	}
 
-	fn inc_sat<P: PropagationActions>(&mut self, actions: &mut P, u: IntView, v: IntView, d: IntVal, b: Option<BoolView>) -> Result<(), Conflict> {
+	fn inc_sat<P: PropagationActions>(&mut self, actions: &mut P, u: IntView, v: IntView, d: IntVal, b: Option<BoolView>) -> Result<bool, Conflict> {
 
 		trace!("Performing inc_sat on {u:?}, {v:?}, {d:?}");
 		let mut queue = PriorityQueue::new();
@@ -143,16 +142,17 @@ impl DifferenceLogicGraph {
 		}
 		if queue.get_priority(&u).is_some() {
 			trace!("Found cycle with negative length...");
-			if let Some(b) = b {
-				return actions.set_bool(!b, self.get_cycle_reason(u, backtrace));
+			return if let Some(b) = b {
+				actions.set_bool(!b, self.get_cycle_reason(u, backtrace))?;
+				Ok(false)
+			} else {
+				Err(Conflict::new(actions, None, self.get_cycle_reason(u, backtrace)))  // todo what if reason is empty?
 			}
-			return Err(Conflict::new(actions, None, self.get_cycle_reason(u, backtrace)));  // todo what if reason is empty?
 		}
-		self.add_edge(actions, u, v, d); // todo what if edge was already there? What if constraint is implied?
 		for (var, val) in pi_new {
 			self.graph.get_mut(&var).unwrap().pi = val;  // todo is this good?
 		}
-		Ok(())
+		Ok(true)
 	}
 
 	fn dijkstra<P: PropagationActions>(&mut self, actions: &mut P, source: IntView, reverse: bool) -> HashMap<IntView, IntVal> {
@@ -177,14 +177,15 @@ impl DifferenceLogicGraph {
 
 	}
 
-	fn inc_imp<P: PropagationActions>(&mut self, actions: &mut P, imp_constraints: Vec<(BoolView, IntView, IntView, IntVal)>, 
+	fn inc_imp<P: PropagationActions>(&mut self, actions: &mut P, imp_constraints: &TrailedSkipList<(BoolView, IntView, IntView, IntVal)>,
 									  u: IntView, v: IntView, d: IntVal) -> Result<(), Conflict> {
 		let outgoing_u = self.dijkstra(actions, u, false);
 		let incoming_v = self.dijkstra(actions, v, true);
-		for (b, x, y, d_i) in imp_constraints.iter() {
+		let mut imp_iter = imp_constraints.iter::<P>();
+		while let Some((_, x, y, d_i)) = imp_iter.next(actions) {
 			if outgoing_u.contains_key(x) && incoming_v.contains_key(y) && outgoing_u[x] + d + incoming_v[y] <= *d_i { //todo better formulation?
 				trace!("Constraint {x:?} - {y:?} <= {d} is implied");
-				//actions.set_bool(*b, actions.deferred_reason(0))? // todo explain!
+				imp_iter.remove(actions);
 			}
 		}
 		Ok(())
@@ -263,13 +264,13 @@ impl DifferenceLogicGraph {
 		}
 		Ok(())
 	}
-	
+
 	fn to_dot<I: InspectionActions>(&self, actions: &mut I) -> String {
-		let mut out = "digraph {".to_owned();
+		let mut out = "digraph {\n".to_owned();
 		for (&var, node) in self.graph.iter() {
-			out.push_str(format!("\"{var:?}\" [label=\"{var:?} (lb: {:?}, ub: {:?}, pi: {:?})\"]\n", 
-								 actions.get_trailed_int(node.lower_bound), 
-								 actions.get_trailed_int(node.upper_bound), 
+			out.push_str(format!("\"{var:?}\" [label=\"{var:?} (lb: {:?}, ub: {:?}, pi: {:?})\"]\n",
+								 actions.get_trailed_int(node.lower_bound),
+								 actions.get_trailed_int(node.upper_bound),
 								 node.pi).as_str());
 			for &edge in node.edges.iter(actions) {
 				out.push_str(format!("\"{var:?}\" -> \"{:?}\" [label=\"{:?} ({:?})\"]\n", edge.node, edge.val, edge.bool_var).as_str());
@@ -278,7 +279,7 @@ impl DifferenceLogicGraph {
 		out += "}";
 		out
 	}
-	
+
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -292,10 +293,15 @@ pub struct DifferenceLogic {
 #[derive(Debug, Clone, PartialEq, Eq)]  // todo do we need Hash here?
 /// Bounds consistent global different constraint propagator.
 pub struct DifferenceLogicBounds {
+	/// Constraint graph.
 	graph: DifferenceLogicGraph,
+	/// List of constraints. todo currently initial list, not to be modified later?
 	constraints: Vec<(IntView, IntView, IntVal)>,
-	imp_constraints: Vec<(BoolView, IntView, IntView, IntVal)>,
+	/// List of implied constraints. todo current trailing infrastructure requires known length?
+	imp_constraints: TrailedSkipList<(BoolView, IntView, IntView, IntVal)>,
+	/// List of all integer variables. todo allow later addition?
 	int_vars: Vec<IntView>,
+	/// List of all boolean variables. todo allow later addition?
 	bool_vars: Vec<BoolView>,
 }
 
@@ -335,12 +341,13 @@ impl DifferenceLogicBounds {
 
 		// todo init all or add dynamically?
 		let graph = DifferenceLogicGraph::new(solver, int_vars.clone());
+		let trailed_imp_constraints = TrailedSkipList::from(imp_constraints, solver);
 
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				graph,
 				constraints: constraints.clone(),
-				imp_constraints: imp_constraints.clone(),
+				imp_constraints: trailed_imp_constraints,
 				int_vars: int_vars.clone(),
 				bool_vars: bool_vars.clone(),
 			}),
@@ -365,13 +372,16 @@ where
 	#[tracing::instrument(name = "difference_logic", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 
-		// todo look for changes of booleans, include implied constraints...
-		for (x, y, d) in self.constraints.iter() { //todo prevent clone
-			self.graph.inc_sat(actions, *x, *y, *d, None)?;  // todo do we want to remove edges that are not necessary? At least in the beginning?
-			self.graph.inc_imp(actions, self.imp_constraints.clone(), *x, *y, *d)?;  // todo imp_constraint clone?
-			trace!("Current graph: {}", self.graph.to_dot(actions));
+		let mut graph_change = false;
+
+		for (x, y, d) in self.constraints.iter() {
+			graph_change = true;
+			let _ = self.graph.inc_sat(actions, *x, *y, *d, None)?;  // todo do we want to remove edges that are not necessary? At least in the beginning?
+			self.graph.add_edge(actions, *x, *y, *d); // todo what if constraint is implied?
+			self.graph.inc_imp(actions, &self.imp_constraints, *x, *y, *d)?;
 		}
 		self.constraints.clear();
+		trace!("Current graph: {}", self.graph.to_dot(actions));
 
 		// todo replace once we know what actually changed...
 		let lb_changes: Vec<_> = self.int_vars.iter()
@@ -391,7 +401,47 @@ where
 			self.graph.inc_ub(actions, ub_changes)?;
 		}
 
-		//panic!("Not further at the moment...");
+		trace!("Current graph after bound updates: {}", self.graph.to_dot(actions));
+
+		let mut imp_iter = self.imp_constraints.iter::<P>();
+		while let Some((b, x, y, d)) = imp_iter.next(actions) {
+			if self.graph.get_stored_upper_bound(actions, *x) - self.graph.get_stored_lower_bound(actions, *y) <= *d {
+				// Constraint is implied by bounds.
+				trace!("Constraint {b:?} -> {x:?} - {y:?} <= {d:?} is implied by bounds.");
+				imp_iter.remove(actions);
+			} else if self.graph.get_stored_lower_bound(actions, *x) - self.graph.get_stored_upper_bound(actions, *y) > *d {
+				// Constraint is falsified by bounds.
+				trace!("Constraint {b:?} -> {x:?} - {y:?} <= {d:?} is falsified by bounds.");
+				actions.set_bool(!*b, |a: &mut P| vec![a.get_int_lit(*x, IntLitMeaning::GreaterEq(self.graph.get_stored_lower_bound(a, *x))),
+													  a.get_int_lit(*y, IntLitMeaning::Less(self.graph.get_stored_upper_bound(a, *y) + 1))])?;
+				imp_iter.remove(actions);
+			} else if let Some(val) = actions.get_bool_val(*b) {
+				trace!("Constraint {b:?} -> {x:?} - {y:?} <= {d:?} has fixed boolean value {val:?}.");
+				if val {
+					trace!("Adding {x:?} - {y:?} <= {d:?}");
+					if self.graph.inc_sat(actions, *x, *y, *d, Some(*b))? {
+						self.graph.add_edge(actions, *x, *y, *d); // todo what if constraint is implied?
+						graph_change = true; // todo should do the remove here, but can't because of borrow issues...
+						self.graph.inc_imp(actions, &self.imp_constraints, *x, *y, *d)?;
+					}
+				}
+				imp_iter.remove(actions);
+			}
+		}
+
+		trace!("Current graph after implied checks: {}", self.graph.to_dot(actions));
+
+		if graph_change {
+			let mut imp_iter = self.imp_constraints.iter::<P>();
+			while let Some((b, x, y, d)) = imp_iter.next(actions) {
+				if !self.graph.inc_sat(actions, *x, *y, *d, Some(*b))? {
+					trace!("Constraint {b:?} -> {x:?} - {y:?} <= {d:?} is falsified by graph.");
+					imp_iter.remove(actions);
+				}
+			}
+			trace!("Current graph after boolean conflict checks: {}", self.graph.to_dot(actions));
+		}
+
 		Ok(())
 	}
 }
@@ -400,6 +450,7 @@ where
 mod tests {
 	
 	use rangelist::RangeList;
+	use tracing::trace;
 	use tracing_test::traced_test;
 
 	use crate::constraints::difference_logic::DifferenceLogicBounds;
@@ -408,6 +459,7 @@ mod tests {
 		Solver,
 	}, Model};
 	use crate::reformulate::InitConfig;
+	use crate::solver::IntView;
 	use crate::solver::Value::Int;
 
 	#[test]
@@ -437,12 +489,14 @@ mod tests {
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		DifferenceLogicBounds::new_in(&mut slv, vec![(x, y, -2), (y, z, 3)], vec![(b, y, z, 4)]);
-		slv.assert_all_solutions(&[x, y, z], move |sol| {
+		DifferenceLogicBounds::new_in(&mut slv, vec![(x, y, -2), (y, z, 3)], vec![(b, y, z, 4), (b, x, z, -2)]);
+		slv.assert_all_solutions(&[x, y, z, IntView::from(b)], move |sol| {
 			let Int(x) = sol[0] else { return false };
 			let Int(y) = sol[1] else { return false };
 			let Int(z) = sol[2] else { return false };
-			x - y <= -2 && y - z <= 3
+			let Int(b) = sol[3] else { return false };
+			trace!("Checking x = {}, y = {}, z = {}, b = {}", x, y, z, b);
+			x - y <= -2 && y - z <= 3 && (b < 1 || y - z <= 4) && (b < 1 || x - z <= -2)
 		});
 	}
 
