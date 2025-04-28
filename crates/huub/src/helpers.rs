@@ -3,6 +3,7 @@
 
 pub(crate) mod linear_transform;
 pub(crate) mod opt_field;
+pub(crate) mod trailed_list;
 
 use std::mem;
 

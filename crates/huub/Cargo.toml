@@ -20,7 +20,6 @@ pindakaas = { git = "https://github.com/pindakaashq/pindakaas.git", features = [
 ] }
 rangelist = "0.2"
 thiserror = "2.0"
-petgraph = "0.8.1"
 priority-queue = "2.3.1"
 tracing = { workspace = true }
 
