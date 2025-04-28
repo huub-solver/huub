@@ -105,20 +105,6 @@ impl IntDiffnSweep {
 
 		let mut box_posn_prop: Vec<Vec<IntView>> = box_posn.clone();
 
-		// let bounded_lb = (0..box_posn.len())
-		//     .map(|_| solver.new_trailed_int(i64::MAX))
-		//     .collect();
-
-		// let bounded_ub = (0..box_posn.len())
-		//     .map(|_| solver.new_trailed_int(i64::MIN))
-		//     .collect();
-
-		// let bounded_box_trail = BoundedBox {
-		//     lb: bounded_lb,
-		//     ub: bounded_ub
-
-		// };
-
 		if non_strict {
 			let contains_zero: Vec<usize> = box_size_fixed
 				.iter()
@@ -142,6 +128,7 @@ impl IntDiffnSweep {
 			println!("{:?}", box_posn_prop.len());
 		}
 
+        // Tracks
 		let fixed_trail = solver.new_trailed_int(0);
 		let remove_trail = solver.new_trailed_int(0);
 
@@ -493,7 +480,7 @@ impl IntDiffnSweep {
         let mut feasible_lb = None;
         let mut possible_lb: Vec<_> = all_fr
             .into_iter()
-            .filter(|fr| fr.lb[curr_dimension] <= lb_tracker[curr_obj_idx][curr_dimension])
+            .filter(|fr| fr.lb[curr_dimension] <= lb_tracker[curr_obj_idx][curr_dimension] - 1)
             .map(|fr| fr.lb[curr_dimension])
             .collect();
         possible_lb.sort_by(|a, b| b.cmp(a));
@@ -543,7 +530,7 @@ impl IntDiffnSweep {
         let mut feasible_ub = None;
         let mut possible_ub: Vec<_> = all_fr
             .into_iter()
-            .filter(|fr| fr.ub[curr_dimension] >= ub_tracker[curr_obj_idx][curr_dimension])
+            .filter(|fr| fr.ub[curr_dimension] >= ub_tracker[curr_obj_idx][curr_dimension] + 1)
             .map(|fr| fr.ub[curr_dimension])
             .collect();
 
@@ -1073,17 +1060,17 @@ where
 			// }
 
 			trace!("DOING OBJECT {:?}", o_idx);
-			for o in 0..self.box_posn.len() {
-				trace!(
-					"object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?}, size {}",
-					o,
-					ub_tracker[o][0],
-					lb_tracker[o][0],
-					ub_tracker[o][1],
-					lb_tracker[o][1],
-					self.box_size[o][0]
-				);
-			}
+			// for o in 0..self.box_posn.len() {
+			// 	trace!(
+			// 		"object {:?}: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?}, size {}",
+			// 		o,
+			// 		ub_tracker[o][0],
+			// 		lb_tracker[o][0],
+			// 		ub_tracker[o][1],
+			// 		lb_tracker[o][1],
+			// 		self.box_size[o][0]
+			// 	);
+			// }
 			let mut fr_support: Vec<usize> = Vec::new();
 
 			if let Some(all_fr) = self.generate_fr::<P>(
@@ -1094,14 +1081,14 @@ where
 				&ub_tracker,
 				self.dimensions,
 			) {
-				for f in 0..all_fr.len() {
-				    trace!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
-				             all_fr[f].ub[0],
-				             all_fr[f].lb[0],
-				             all_fr[f].ub[1],
-				             all_fr[f].lb[1],
-				    );
-				}
+				// for f in 0..all_fr.len() {
+				//     trace!("FORBIDDEN REGION: x - ub: {:?} lb: {:?} y - ub: {:?}, lb: {:?} ",
+				//              all_fr[f].ub[0],
+				//              all_fr[f].lb[0],
+				//              all_fr[f].ub[1],
+				//              all_fr[f].lb[1],
+				//     );
+				// }
 
 				if self.fixed_in_all_dimensions(&ub_tracker, &lb_tracker, o_idx) {
 					let reason = self.explain_conflict(
