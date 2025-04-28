@@ -26,18 +26,15 @@ pub struct DiffEdge {
 	val: IntVal,
 	/// Boolean for implied or reified constraints.
 	bool_var: Option<BoolView>,
-	/// true if the edge is a reified constraint, false if it is an implied constraint.
-	is_reif: bool,
 }
 
 impl DiffEdge {
 
-	fn new(to_node: IntView, val: IntVal, bool_var: Option<BoolView>, is_reif: bool) -> Self {
+	fn new(to_node: IntView, val: IntVal, bool_var: Option<BoolView>) -> Self {
 		Self {
 			node: to_node,
 			val,
 			bool_var,
-			is_reif,
 		}
 	}
 	
@@ -90,8 +87,8 @@ impl DifferenceLogicGraph {
 	}
 
 	fn add_edge<P: PropagationActions>(&mut self, actions: &mut P, u: IntView, v: IntView, d: IntVal) {
-		self.graph.get_mut(&u).unwrap().edges.push(actions, DiffEdge::new(v, d, None, false));
-		self.graph.get_mut(&v).unwrap().reverse_edges.push(actions, DiffEdge::new(u, d, None, false));
+		self.graph.get_mut(&u).unwrap().edges.push(actions, DiffEdge::new(v, d, None));
+		self.graph.get_mut(&v).unwrap().reverse_edges.push(actions, DiffEdge::new(u, d, None));
 	}
 	
 	/// todo might not be needed later
@@ -103,12 +100,28 @@ impl DifferenceLogicGraph {
 	fn get_stored_upper_bound<P: PropagationActions>(&mut self, actions: &mut P, v: IntView) -> IntVal {
 		actions.get_trailed_int(self.graph[&v].upper_bound)
 	}
+	
+	fn get_cycle_reason(&mut self, node: IntView, backtrace: HashMap<IntView, (IntView, DiffEdge)>) -> Vec<BoolView> {
+		let mut reason = Vec::new();
+		let mut var = node;
+		loop {
+			let (cur, edge) = backtrace[&var];
+			if edge.bool_var.is_some() {
+				reason.push(edge.bool_var.unwrap());
+			}
+			var = cur;
+			if !backtrace.contains_key(&var) {
+				break reason;
+			}
+		}
+	}
 
-	fn inc_sat<P: PropagationActions>(&mut self, actions: &mut P, u: IntView, v: IntView, d: IntVal) -> Result<(), Conflict> {
+	fn inc_sat<P: PropagationActions>(&mut self, actions: &mut P, u: IntView, v: IntView, d: IntVal, b: Option<BoolView>) -> Result<(), Conflict> {
 
 		trace!("Performing inc_sat on {u:?}, {v:?}, {d:?}");
 		let mut queue = PriorityQueue::new();
 		let mut pi_new = HashMap::new(); // todo check if we can modify the potential function in place?
+		let mut backtrace = HashMap::new();
 		let gamma_v = self.graph[&u].pi + d - self.graph[&v].pi;
 		if gamma_v < 0 {
 			let _ = queue.push(v, Reverse(gamma_v));
@@ -119,17 +132,23 @@ impl DifferenceLogicGraph {
 			for &edge in self.graph[&s].edges.iter(actions) {
 				if !pi_new.contains_key(&edge.node) || pi_new[&edge.node] == self.graph[&edge.node].pi {
 					let gamma_t = pi_new[&s] + edge.val - self.graph[&edge.node].pi;
-					if gamma_t < 0 {
-						let _ = queue.push_increase(edge.node, Reverse(gamma_t));
+					if gamma_t < 0 {  // todo check need for whole path?
+						let old = queue.push_increase(edge.node, Reverse(gamma_t));
+						if old.map_or(true, |Reverse(old_path)| gamma_t < old_path) {
+							let _ = backtrace.insert(edge.node, (s, edge));
+						}
 					}
 				}
 			}
 		}
 		if queue.get_priority(&u).is_some() {
 			trace!("Found cycle with negative length...");
-			return Err(Conflict::new(actions, None, actions.deferred_reason(0)));  // todo collect booleans along cycle
+			if let Some(b) = b {
+				return actions.set_bool(!b, self.get_cycle_reason(u, backtrace));
+			}
+			return Err(Conflict::new(actions, None, self.get_cycle_reason(u, backtrace)));  // todo what if reason is empty?
 		}
-		self.add_edge(actions, u, v, d); // todo what if edge was already there? What is constraint is implied?
+		self.add_edge(actions, u, v, d); // todo what if edge was already there? What if constraint is implied?
 		for (var, val) in pi_new {
 			self.graph.get_mut(&var).unwrap().pi = val;  // todo is this good?
 		}
@@ -253,7 +272,7 @@ impl DifferenceLogicGraph {
 								 actions.get_trailed_int(node.upper_bound), 
 								 node.pi).as_str());
 			for &edge in node.edges.iter(actions) {
-				out.push_str(format!("\"{var:?}\" -> \"{:?}\" [label=\"{:?} (var: {:?}, reif {})\"]\n", edge.node, edge.val, edge.bool_var, edge.is_reif).as_str());
+				out.push_str(format!("\"{var:?}\" -> \"{:?}\" [label=\"{:?} ({:?})\"]\n", edge.node, edge.val, edge.bool_var).as_str());
 			}
 		}
 		out += "}";
@@ -348,7 +367,7 @@ where
 
 		// todo look for changes of booleans, include implied constraints...
 		for (x, y, d) in self.constraints.iter() { //todo prevent clone
-			self.graph.inc_sat(actions, *x, *y, *d)?;  // todo do we want to remove edges that are not necessary? At least in the beginning?
+			self.graph.inc_sat(actions, *x, *y, *d, None)?;  // todo do we want to remove edges that are not necessary? At least in the beginning?
 			self.graph.inc_imp(actions, self.imp_constraints.clone(), *x, *y, *d)?;  // todo imp_constraint clone?
 			trace!("Current graph: {}", self.graph.to_dot(actions));
 		}
