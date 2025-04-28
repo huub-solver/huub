@@ -4,7 +4,7 @@
 
 use std::iter::once;
 
-use pindakaas::{propositional_logic::Formula, ClauseDatabaseTools};
+use pindakaas::ClauseDatabaseTools;
 
 use crate::{
 	actions::{ReformulationActions, SimplificationActions},
@@ -32,11 +32,12 @@ pub struct BoolDecisionArrayElement {
 
 impl<S: SimplificationActions> Constraint<S> for BoolDecisionArrayElement {
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+		// Fix the bounds of the index is to the length of the array
+		actions.set_int_lower_bound(self.index, 0)?;
+		actions.set_int_upper_bound(self.index, self.array.len() as IntVal - 1)?;
+		// Unify if the index is already fixed
 		if let Some(i) = actions.get_int_val(self.index) {
-			actions.add_constraint(Formula::Equiv(vec![
-				self.array[i as usize].into(),
-				self.result.into(),
-			]));
+			actions.unify_bool(self.array[i as usize], self.result)?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
 		Ok(SimplificationStatus::Fixpoint)

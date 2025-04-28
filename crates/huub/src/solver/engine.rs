@@ -42,12 +42,12 @@ use crate::{
 		activation_list::{ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
 		int_var::{IntVar, IntVarRef, OrderStorage},
-		queue::{PriorityLevel, PriorityQueue},
+		queue::PropagatorQueue,
 		solving_context::SolvingContext,
 		trail::{Trail, TrailedInt},
 		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, SolverConfiguration,
 	},
-	Clause, Conjunction, IntVal,
+	Clause, IntVal,
 };
 
 #[derive(Debug, Default, Clone)]
@@ -62,7 +62,7 @@ pub struct Engine {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct SearchStatistics {
+pub(crate) struct EngineStatistics {
 	/// Number of conflicts encountered
 	pub(crate) conflicts: u64,
 	/// Number of search decisions left to the oracle solver
@@ -98,7 +98,7 @@ pub struct State {
 	/// Includes lower and upper bounds for integer variables and Boolean variable assignments
 	pub(crate) trail: Trail,
 	/// Literals to be propagated by the oracle
-	pub(crate) propagation_queue: Conjunction,
+	pub(crate) propagation_queue: VecDeque<RawLit>,
 	/// Reasons for setting values
 	pub(crate) reason_map: HashMap<RawLit, Reason>,
 	/// Whether conflict has (already) been detected
@@ -115,7 +115,7 @@ pub struct State {
 	/// Storage for clauses to be communicated to the solver
 	pub(crate) clauses: VecDeque<Clause>,
 	/// Solving statistics
-	pub(crate) statistics: SearchStatistics,
+	pub(crate) statistics: EngineStatistics,
 	/// Whether VSIDS is currently enabled
 	pub(crate) vsids: bool,
 
@@ -125,11 +125,18 @@ pub struct State {
 	/// Integer variable enqueueing information
 	pub(crate) int_activation: IndexVec<IntVarRef, ActivationList>,
 	/// Queue of propagators awaiting action
-	pub(crate) propagator_queue: PriorityQueue<PropRef>,
-	/// Priority within the queue for each propagator
-	pub(crate) propagator_priority: IndexVec<PropRef, PriorityLevel>,
-	/// Flag for whether a propagator is enqueued
-	pub(crate) enqueued: IndexVec<PropRef, bool>,
+	pub(crate) propagator_queue: PropagatorQueue,
+
+	// ---- Debugging Helpers ----
+	#[cfg(debug_assertions)]
+	/// This literal was last emited by the [`PropagatorExtension::propagate`]
+	/// method. It will have its reasons checked when it is seen again in
+	/// [`PropagatorExtension::notify_assignments`].
+	pub(crate) last_propagated: Option<RawLit>,
+	#[cfg(debug_assertions)]
+	/// List of integer variables that have been notified as fixed, but should be
+	/// checked that the bounds match before propagation.
+	pub(crate) check_int_fixed: Vec<(IntVarRef, IntVal)>,
 }
 
 impl PropagatorExtension for Engine {
@@ -207,10 +214,11 @@ impl PropagatorExtension for Engine {
 					let prev = ctx.state.trail.assign_lit(ub_lit);
 					debug_assert_eq!(prev, None);
 				}
-				let prev_ub = ctx.state.int_vars[r].notify_upper_bound(&mut ctx.state.trail, lb);
-				debug_assert!(prev_ub > lb);
+				ctx.state.int_vars[r].notify_upper_bound(&mut ctx.state.trail, lb);
 
-				ctx.state.enqueue_int_propagators(r, IntEvent::Fixed, None);
+				for prop in ctx.state.int_activation[r].activated_by(IntEvent::Fixed) {
+					ctx.state.propagator_queue.enqueue_propagator(prop);
+				}
 			}
 		}
 
@@ -269,14 +277,102 @@ impl PropagatorExtension for Engine {
 
 	fn notify_assignments(&mut self, lits: &[RawLit]) {
 		debug!(lits = ?lits.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "assignments");
+		// Avoid doing more work if we are already in a failed state, but continue
+		// in debug mode to check all reasons
+		if self.state.failed && !cfg!(debug_assertions) {
+			return;
+		}
+
+		// Enqueue propagators
 		for &lit in lits {
-			// Process Boolean assignment
+			#[cfg(debug_assertions)]
+			{
+				// (DEBUG ONLY) if we propagated this literal, ensure its explanation is
+				// valid in its trail position.
+				if self.state.last_propagated == Some(lit) {
+					self.debug_check_reason(lit);
+					self.state.last_propagated = None;
+				}
+			}
+
 			if self.state.trail.assign_lit(lit).is_some() {
 				continue;
 			}
-			// Enqueue propagators, if no conflict has been found
+
+			// Enqueue based on direct literal
 			if !self.state.failed {
-				self.state.enqueue_propagators(lit, None);
+				self.state.propagator_queue.enqueue_propagators(
+					self.state
+						.bool_activation
+						.get(&lit.var())
+						.into_iter()
+						.flatten()
+						.copied(),
+				);
+			}
+
+			// Enqueue based on literal meaning in complex type
+			if let Some((iv, meaning)) = self.state.bool_to_int.get(lit.var()) {
+				let meaning = meaning
+					.map(|l| if lit.is_negated() { !l } else { l })
+					.unwrap_or_else(|| self.state.int_vars[iv].lit_meaning(lit));
+				// Enact domain changes and determine change event
+				let (lb, ub) = self.state.int_vars[iv].get_bounds(&self.state);
+				let event = match meaning {
+					IntLitMeaning::Eq(val) if val == lb && val == ub => None,
+					IntLitMeaning::Eq(val) if val < lb || val > ub => {
+						// Notified of invalid assignment, do nothing.
+						//
+						// Although we do not expect this to happen, it seems that Cadical
+						// chronological backtracking might send notifications before
+						// additional propagation.
+						trace!(lit = i32::from(lit), lb, ub, "invalid eq notification");
+						None
+					}
+					IntLitMeaning::Eq(_val) => {
+						#[cfg(debug_assertions)]
+						{
+							// (DEBUG ONLY) Push the integer variable and its value to check
+							// that its bounds were updated before propagation occurs.
+							self.state.check_int_fixed.push((iv, _val));
+						}
+						Some(IntEvent::Fixed)
+					}
+					IntLitMeaning::NotEq(i) if i < lb || i > ub => None,
+					IntLitMeaning::NotEq(_) => Some(IntEvent::Domain),
+					IntLitMeaning::GreaterEq(new_lb) if new_lb <= lb => None,
+					IntLitMeaning::GreaterEq(new_lb) => {
+						trace!(lit = i32::from(lit), lb = new_lb, "new lb");
+						self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, new_lb);
+						Some(if new_lb == ub {
+							IntEvent::Fixed
+						} else {
+							IntEvent::LowerBound
+						})
+					}
+					IntLitMeaning::Less(i) => {
+						let new_ub = self.state.int_vars[iv].tighten_upper_bound(i - 1);
+						if new_ub < ub {
+							trace!(lit = i32::from(lit), ub = new_ub, "new ub");
+							self.state.int_vars[iv]
+								.notify_upper_bound(&mut self.state.trail, new_ub);
+							Some(if new_ub == lb {
+								IntEvent::Fixed
+							} else {
+								IntEvent::UpperBound
+							})
+						} else {
+							None
+						}
+					}
+				};
+				if !self.state.failed {
+					if let Some(event) = event {
+						self.state
+							.propagator_queue
+							.enqueue_propagators(self.state.int_activation[iv].activated_by(event));
+					}
+				}
 			}
 		}
 	}
@@ -303,96 +399,93 @@ impl PropagatorExtension for Engine {
 	}
 
 	#[tracing::instrument(level = "debug", skip(self, slv), fields(level = self.state.decision_level()))]
-	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Vec<RawLit> {
+	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Option<RawLit> {
 		// Check whether there are previous clauses to be communicated
 		if !self.state.clauses.is_empty() {
-			return Vec::new();
+			return None;
+		}
+		while let Some(&lit) = self.state.propagation_queue.front() {
+			if self.state.trail.get_sat_value(lit) == Some(true) {
+				let _ = self.state.propagation_queue.pop_front();
+			} else {
+				break;
+			}
 		}
 		if self.state.propagation_queue.is_empty() && self.state.conflict.is_none() {
+			#[cfg(debug_assertions)]
+			{
+				// (DEBUG ONLY) Check that all integers that where fixed by equality
+				// literals had their bounds updated to match.
+				for (iv, i) in mem::take(&mut self.state.check_int_fixed) {
+					let iv = IntView(IntViewInner::VarRef(iv));
+					debug_assert_eq!(self.state.get_int_val(iv), Some(i));
+				}
+				// We've been notified of all previous propagated literals (and their
+				// reasons were checked).
+				debug_assert!(self.state.last_propagated.is_none());
+			}
 			// If there are no previous changes, run propagators
 			SolvingContext::new(slv, &mut self.state).run_propagators(&mut self.propagators);
 		}
 		// Check whether there are new clauses that need to be communicated first
 		if !self.state.clauses.is_empty() {
-			return Vec::new();
+			return None;
 		}
-		let queue = mem::take(&mut self.state.propagation_queue);
-		if queue.is_empty() {
-			return Vec::new(); // Early return to avoid tracing statements
-		}
-		debug!(
-			lits = ?queue
-				.iter()
-				.map(|&x| i32::from(x))
-				.collect::<Vec<i32>>(),
-			"propagate"
-		);
-		// Debug helper to ensure that any reason is based on known true literals
-		#[cfg(debug_assertions)]
-		{
-			let mut prev = None;
-			for &lit in queue.iter() {
-				// Notify of the assignment of the previous literal so it is available
-				// when checking the reason.
-				if let Some(prev) = prev {
-					self.notify_assignments(&[prev]);
-				}
-				if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
-					let clause: Clause =
-						reason.explain(&mut self.propagators, &mut self.state, Some(lit));
-					for &l in &clause {
-						if l == lit {
-							continue;
-						}
-						let val = self.state.trail.get_sat_value(!l);
-						if !val.unwrap_or(false) {
-							tracing::error!(lit_prop = i32::from(lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
-						}
-						debug_assert!(
-							val.unwrap_or(false),
-							"Literal {} in Reason for {} is {:?}, but should be known true",
-							!l,
-							lit,
-							val
-						);
-					}
-				}
-				prev = Some(lit);
+		if let Some(lit) = self.state.propagation_queue.pop_front() {
+			debug!(lit = i32::from(lit), "propagate");
+			#[cfg(debug_assertions)]
+			{
+				// (DEBUG ONLY) Store the propagated literals, so we know what explanations
+				// to check.
+				self.state.last_propagated = Some(lit);
 			}
+			Some(lit)
+		} else {
+			None
 		}
-		queue
 	}
+
 	fn reason_persistence(&self) -> ClausePersistence {
 		ClausePersistence::Forgettable
 	}
 }
 
-impl SearchStatistics {
-	/// Returns the number of conflicts encountered during the search.
-	pub fn conflicts(&self) -> u64 {
-		self.conflicts
-	}
-	/// Return the number of search decisions that was left to the oracle solver.
-	pub fn oracle_decisions(&self) -> u64 {
-		self.oracle_decisions
-	}
-	/// Returns the peak depth of the search tree.
-	pub fn peak_depth(&self) -> u32 {
-		self.peak_depth
-	}
-	/// Returns the number of propagations performed by the constraint programming
-	/// engine during the search.
-	pub fn propagations(&self) -> u64 {
-		self.propagations
-	}
-	/// Returns the number of times the search was restarted by the oracle solver.
-	pub fn restarts(&self) -> u32 {
-		self.restarts
-	}
-	/// Returns the number of search decisions that followed the user specified
-	/// search heuristic.
-	pub fn user_decisions(&self) -> u64 {
-		self.user_decisions
+impl Engine {
+	#[cfg(debug_assertions)]
+	/// (DEBUG ONLY) Check that the reason of a propagated literal contains only
+	/// known true literals
+	fn debug_check_reason(&mut self, lit: RawLit) {
+		if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
+			// Reason is in the form (a /\ b /\ ...), which then forms the
+			// implication (a /\ b /\ ...) -> lit
+			let clause: Clause = reason.explain(&mut self.propagators, &mut self.state, Some(lit));
+			// This is converted into a clause (¬a \/ ¬b \/ ... \/ lit)
+			for &l in &clause {
+				if l == lit {
+					continue;
+				}
+				// Get the value of the original reason lit by negating again: ¬¬a
+				// gives a
+				let val = self.state.trail.get_sat_value(!l);
+				if !val.unwrap_or(false) {
+					tracing::error!(lit_prop = i32::from(lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
+				}
+				debug_assert!(
+					val.unwrap_or(false),
+					"Literal {} in Reason for {} is {:?}, but should be known true",
+					!l,
+					lit,
+					val
+				);
+			}
+		} else {
+			debug_assert_eq!(
+				self.state.decision_level(),
+				0,
+				"Literal {} propagated without reason at non-zero decision level",
+				lit
+			);
+		}
 	}
 }
 
@@ -400,109 +493,6 @@ impl State {
 	/// Returns the current decision level of the solver.
 	fn decision_level(&self) -> u32 {
 		self.trail.decision_level()
-	}
-	/// Determine whether assigning a literal triggers an event on an integer variable.
-	///
-	/// Returns `None` if the literal does not trigger an event on an integer
-	/// variable. Otherwise, returns the relevant `IntVarRef` and the `IntEvent`
-	/// that is triggered.
-	fn determine_int_event(&mut self, lit: RawLit) -> Option<(IntVarRef, IntEvent)> {
-		if let Some((iv, meaning)) = self.bool_to_int.get(lit.var()) {
-			let (lb, ub) = self.int_vars[iv].get_bounds(self);
-			let meaning = meaning
-				.map(|l| if lit.is_negated() { !l } else { l })
-				.unwrap_or_else(|| self.int_vars[iv].lit_meaning(lit));
-			// Enact domain changes and determine change event
-			let event: IntEvent = match meaning {
-				IntLitMeaning::Eq(i) => {
-					if i == lb || i == ub {
-						return None;
-					}
-					if i < lb || i > ub {
-						// Notified of invalid assignment, do nothing.
-						//
-						// Although we do not expect this to happen, it seems that Cadical
-						// chronological backtracking might send notifications before
-						// additional propagation.
-						trace!(lit = i32::from(lit), lb, ub, "invalid eq notification");
-						return None;
-					}
-					let prev_lb = self.int_vars[iv].notify_lower_bound(&mut self.trail, i);
-					let prev_ub = self.int_vars[iv].notify_upper_bound(&mut self.trail, i);
-					debug_assert!(prev_lb < i || prev_ub > i);
-					debug_assert_eq!(self.get_int_val(IntView(IntViewInner::VarRef(iv))), Some(i));
-					IntEvent::Fixed
-				}
-				IntLitMeaning::NotEq(i) => {
-					if i < lb || i > ub {
-						return None;
-					}
-					IntEvent::Domain
-				}
-				IntLitMeaning::GreaterEq(new_lb) => {
-					if new_lb <= lb {
-						return None;
-					}
-					let prev = self.int_vars[iv].notify_lower_bound(&mut self.trail, new_lb);
-					debug_assert!(prev < new_lb);
-					if new_lb == ub {
-						IntEvent::Fixed
-					} else {
-						IntEvent::LowerBound
-					}
-				}
-				IntLitMeaning::Less(i) => {
-					let new_ub = self.int_vars[iv].tighten_upper_bound(i - 1);
-					if new_ub >= ub {
-						return None;
-					}
-					let prev = self.int_vars[iv].notify_upper_bound(&mut self.trail, new_ub);
-					debug_assert!(new_ub < prev);
-					if new_ub == lb {
-						IntEvent::Fixed
-					} else {
-						IntEvent::UpperBound
-					}
-				}
-			};
-			Some((iv, event))
-		} else {
-			None
-		}
-	}
-
-	/// Enqueue all propagators that are activated because the [`IntEvent`]
-	/// `event` has happened to `int_var`.
-	fn enqueue_int_propagators(
-		&mut self,
-		int_var: IntVarRef,
-		event: IntEvent,
-		skip: Option<PropRef>,
-	) {
-		for prop in self.int_activation[int_var].activated_by(event) {
-			if Some(prop) != skip && !self.enqueued[prop] {
-				self.propagator_queue
-					.insert(self.propagator_priority[prop], prop);
-				self.enqueued[prop] = true;
-			}
-		}
-	}
-
-	/// Enqueue all propagators that are activated because `lit` has been
-	/// assigned.
-	fn enqueue_propagators(&mut self, lit: RawLit, skip: Option<PropRef>) {
-		for &prop in self.bool_activation.get(&lit.var()).into_iter().flatten() {
-			if Some(prop) != skip && !self.enqueued[prop] {
-				self.propagator_queue
-					.insert(self.propagator_priority[prop], prop);
-				self.enqueued[prop] = true;
-			}
-		}
-
-		// Process Integer consequences
-		if let Some((iv, event)) = self.determine_int_event(lit) {
-			self.enqueue_int_propagators(iv, event, skip);
-		}
 	}
 
 	/// Internal method called to process the backtracking to an earlier decision
@@ -521,12 +511,16 @@ impl State {
 		self.conflict = None;
 		// Remove (now invalid) propagations (but leave clauses in place)
 		self.propagation_queue.clear();
+		#[cfg(debug_assertions)]
+		{
+			// (DEBUG ONLY) Clear the debug checking queues.
+			self.last_propagated = None;
+			self.check_int_fixed.clear();
+		}
 		// Backtrack trail
 		self.trail.notify_backtrack(level);
 		// Empty propagation queue
-		while let Some(p) = self.propagator_queue.pop() {
-			self.enqueued[p] = false;
-		}
+		while self.propagator_queue.pop().is_some() {}
 		if ARTIFICIAL {
 			return;
 		}
@@ -617,14 +611,45 @@ impl State {
 }
 
 impl ExplanationActions for State {
+	fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning> {
+		match var.0 {
+			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
+				let (iv2, meaning) = self.bool_to_int.get(lit.var())?;
+				if iv != iv2 {
+					return None;
+				}
+				let mut meaning = meaning
+					.map(|l| if lit.is_negated() { !l } else { l })
+					.unwrap_or_else(|| self.int_vars[iv].lit_meaning(lit));
+				if let IntViewInner::Linear { transformer, .. } = var.0 {
+					meaning = transformer.transform_lit(meaning);
+				}
+				Some(meaning)
+			}
+			IntViewInner::Const(_) => None,
+			IntViewInner::Bool { lit: var_lit, .. } if lit.var() != var_lit.var() => None,
+			IntViewInner::Bool {
+				lit: var_lit,
+				transformer,
+			} => {
+				let mut meaning = IntLitMeaning::GreaterEq(1);
+				if var_lit != lit {
+					meaning = !meaning;
+				}
+				meaning = transformer.transform_lit(meaning);
+				Some(meaning)
+			}
+		}
+	}
+
 	fn get_int_lit_relaxed(
 		&mut self,
 		var: IntView,
 		meaning: IntLitMeaning,
 	) -> (BoolView, IntLitMeaning) {
 		debug_assert!(
-			matches!(meaning, IntLitMeaning::GreaterEq(_) | IntLitMeaning::Less(_)),
-			"relaxed integer literals are only supported for LitMeaning::GreaterEq and LitMeaning::Less"
+			!matches!(meaning, IntLitMeaning::Eq(_)),
+			"relaxed integer literals are not yet supported for IntLitMeaning::Eq(_)"
 		);
 		// Transform literal meaning if view is a linear transformation
 		let meaning = match var.0 {
@@ -637,18 +662,39 @@ impl ExplanationActions for State {
 			_ => meaning,
 		};
 
-		// Get the (relaxed) boolean view representing the meaning and the actual (relaxed) meaning
+		// Get the (relaxed) boolean view representing the meaning and the actual
+		// (relaxed) meaning
 		let (bv, meaning) = match var.0 {
 			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				let var = &mut self.int_vars[iv];
+				let var_def = &mut self.int_vars[iv];
 				match meaning {
 					IntLitMeaning::GreaterEq(v) => {
-						let (bv, v) = var.get_greater_eq_lit_or_weaker(&self.trail, v);
+						let (bv, v) = var_def.get_greater_eq_lit_or_weaker(&self.trail, v);
 						(bv, IntLitMeaning::GreaterEq(v))
 					}
 					IntLitMeaning::Less(v) => {
-						let (bv, v) = var.get_less_lit_or_weaker(&self.trail, v);
+						let (bv, v) = var_def.get_less_lit_or_weaker(&self.trail, v);
 						(bv, IntLitMeaning::Less(v))
+					}
+					IntLitMeaning::NotEq(v) => {
+						if let Some(bv) = self.try_int_lit(var, meaning) {
+							(bv, IntLitMeaning::NotEq(v))
+						} else {
+							let lb = self.get_int_lower_bound(var);
+							if lb > v {
+								(
+									self.get_int_lower_bound_lit(var),
+									IntLitMeaning::GreaterEq(lb),
+								)
+							} else {
+								let ub = self.get_int_upper_bound(var);
+								debug_assert!(ub < v);
+								(
+									self.get_int_upper_bound_lit(var),
+									IntLitMeaning::Less(ub + 1),
+								)
+							}
+						}
 					}
 					_ => unreachable!(),
 				}
@@ -657,7 +703,8 @@ impl ExplanationActions for State {
 				BoolView(BoolViewInner::Const(match meaning {
 					IntLitMeaning::GreaterEq(i) => c >= i,
 					IntLitMeaning::Less(i) => c < i,
-					_ => unreachable!(),
+					IntLitMeaning::Eq(i) => c == i,
+					IntLitMeaning::NotEq(i) => c != i,
 				})),
 				meaning,
 			),
@@ -672,6 +719,9 @@ impl ExplanationActions for State {
 					IntLitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
 					IntLitMeaning::GreaterEq(i) if i > 1 => BoolViewInner::Const(false),
 					IntLitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
+					IntLitMeaning::Eq(0) => BoolViewInner::Lit(!lit),
+					IntLitMeaning::Eq(1) => BoolViewInner::Lit(lit),
+					IntLitMeaning::Eq(_) => BoolViewInner::Const(false),
 					_ => unreachable!(),
 				});
 				(if negated { !bv } else { bv }, meaning)

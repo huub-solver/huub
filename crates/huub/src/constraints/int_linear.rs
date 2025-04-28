@@ -4,7 +4,10 @@
 //! integer decision variables.
 
 use itertools::{Either, Itertools};
-use pindakaas::Lit as RawLit;
+use pindakaas::{
+	bool_linear::{BoolLinAggregator, BoolLinExp, BoolLinVariant, BoolLinear},
+	ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
+};
 
 use crate::{
 	actions::{PropagatorInitActions, ReformulationActions, SimplificationActions},
@@ -18,8 +21,17 @@ use crate::{
 		activation_list::IntPropCond, queue::PriorityLevel, BoolView, BoolViewInner, IntView,
 		IntViewInner,
 	},
-	BoolDecision, Conjunction, IntDecision, IntVal,
+	BoolDecision, BoolFormula, Conjunction, IntDecision, IntVal, LinearTransform, NonZeroIntVal,
 };
+
+/// Representation of an integer equality constraint that cannot be unified.
+///
+/// This constraint enforces that two integer decisions take the same value.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct IntEq {
+	/// The two integer decisions that must be equal.
+	pub(crate) vars: [IntDecision; 2],
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Representation of an integer linear constraint within a model.
@@ -43,7 +55,7 @@ pub struct IntLinear {
 pub type IntLinearLessEqBounds = IntLinearLessEqBoundsImpl<0>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Value consistent propagator for the `int_lin_le` or `int_lin_le_imp`
+/// Bounds consistent propagator for the `int_lin_le` or `int_lin_le_imp`
 /// constraint.
 ///
 /// `R` should be `0` if the propagator is not refied, or `1` if it is. Other
@@ -102,6 +114,45 @@ pub(crate) enum Reification {
 	ImpliedBy(BoolDecision),
 	/// The constraint is reified by the given [`BoolDecision`].
 	ReifiedBy(BoolDecision),
+}
+
+impl<S: SimplificationActions> Constraint<S> for IntEq {
+	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+		let (lb_0, ub_0) = actions.get_int_bounds(self.vars[0]);
+		let (lb_1, ub_1) = actions.get_int_bounds(self.vars[1]);
+
+		if lb_0 == ub_0 {
+			actions.set_int_val(self.vars[1], lb_0)?;
+			return Ok(SimplificationStatus::Subsumed);
+		}
+		if lb_1 == ub_1 {
+			actions.set_int_val(self.vars[0], lb_1)?;
+			return Ok(SimplificationStatus::Subsumed);
+		}
+		if lb_0 >= lb_1 {
+			actions.set_int_lower_bound(self.vars[1], lb_0)?;
+		}
+		if lb_1 >= lb_0 {
+			actions.set_int_lower_bound(self.vars[0], lb_1)?;
+		}
+		if ub_0 <= ub_1 {
+			actions.set_int_upper_bound(self.vars[1], ub_0)?;
+		}
+		if ub_1 <= ub_0 {
+			actions.set_int_upper_bound(self.vars[0], ub_1)?;
+		}
+		Ok(SimplificationStatus::Fixpoint)
+	}
+
+	fn to_solver(&self, actions: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let lin = IntLinear {
+			terms: vec![self.vars[0], -self.vars[1]],
+			operator: LinOperator::Equal,
+			rhs: 0,
+			reif: None,
+		};
+		<IntLinear as Constraint<S>>::to_solver(&lin, actions)
+	}
 }
 
 impl IntLinear {
@@ -204,11 +255,24 @@ impl<S: SimplificationActions> Constraint<S> for IntLinear {
 				}
 				return Ok(SimplificationStatus::Subsumed);
 			}
-			[_var] => {
-				// TODO: Unify `self.reif` with the integer literal.
+			[var] => {
+				let lit = match self.operator {
+					LinOperator::Equal => var.eq(self.rhs),
+					LinOperator::LessEq => var.leq(self.rhs),
+					LinOperator::NotEqual => var.ne(self.rhs),
+				};
+				match self.reif.unwrap() {
+					Reification::ImpliedBy(r) => actions.add_constraint(BoolFormula::Implies(
+						Box::new(BoolFormula::Atom(r)),
+						Box::new(BoolFormula::Atom(lit)),
+					)),
+					Reification::ReifiedBy(r) => actions.unify_bool(r, lit)?,
+				}
+				return Ok(SimplificationStatus::Subsumed);
 			}
-			[_a, _b] if self.operator == LinOperator::Equal && self.reif.is_none() => {
-				// TODO: Unify integers
+			[a, b] if self.operator == LinOperator::Equal && self.reif.is_none() => {
+				actions.unify_int(-a, b - self.rhs)?;
+				return Ok(SimplificationStatus::Subsumed);
 			}
 			_ => {}
 		}
@@ -321,43 +385,108 @@ impl<S: SimplificationActions> Constraint<S> for IntLinear {
 		});
 		let full_reif = matches!(self.reif, Some(ReifiedBy(_)));
 
-		match (self.operator, r) {
+		// Detect Pseudo-Boolean constraints, and simplify them if possible.
+		let (terms, operator, rhs) = if r.is_none()
+			&& self.operator != LinOperator::NotEqual
+			&& terms
+				.iter()
+				.all(|v| matches!(v.0, IntViewInner::Bool { .. }))
+		{
+			let mut offset = 0;
+			let bool_terms: Vec<(RawLit, IntVal)> = terms
+				.iter()
+				.map(|&v| {
+					let IntViewInner::Bool { transformer, lit } = v.0 else {
+						unreachable!()
+					};
+					offset += transformer.offset;
+					(lit, transformer.scale.into())
+				})
+				.collect();
+			let bool_lin = BoolLinExp::from_terms(&bool_terms);
+			let bool_lin = BoolLinear::new(
+				bool_lin,
+				match self.operator {
+					LinOperator::Equal => pindakaas::bool_linear::Comparator::Equal,
+					LinOperator::LessEq => pindakaas::bool_linear::Comparator::LessEq,
+					LinOperator::NotEqual => unreachable!(),
+				},
+				self.rhs - offset,
+			);
+			let map_cmp = |cmp| match cmp {
+				pindakaas::bool_linear::Comparator::Equal => LinOperator::Equal,
+				pindakaas::bool_linear::Comparator::LessEq => LinOperator::LessEq,
+				pindakaas::bool_linear::Comparator::GreaterEq => unreachable!(),
+			};
+
+			let (op, lin) = match BoolLinAggregator::default().aggregate(slv, &bool_lin) {
+				Err(Unsatisfiable) => return Err(ReformulationError::TrivialUnsatisfiable),
+				Ok(BoolLinVariant::Cardinality(card)) => (map_cmp(card.comparator()), card.into()),
+				Ok(BoolLinVariant::CardinalityOne(card))
+					if card.comparator() == pindakaas::bool_linear::Comparator::Equal =>
+				{
+					slv.add_clause(card.iter_lits())?;
+					(LinOperator::LessEq, card.into())
+				}
+				Ok(BoolLinVariant::CardinalityOne(card)) => (LinOperator::LessEq, card.into()),
+				Ok(BoolLinVariant::Linear(lin)) => (map_cmp(lin.comparator()), lin),
+				Ok(BoolLinVariant::Trivial) => return Ok(()),
+			};
+			(
+				lin.iter_terms()
+					.map(|(lit, coeff)| {
+						IntView(IntViewInner::Bool {
+							transformer: LinearTransform::scaled(
+								NonZeroIntVal::new(coeff).unwrap(),
+							),
+							lit,
+						})
+					})
+					.collect_vec(),
+				op,
+				lin.rhs(),
+			)
+		} else {
+			(terms, self.operator, self.rhs)
+		};
+
+		match (operator, r) {
 			(LinOperator::Equal, None) => {
 				// coeffs * vars >= c <=> -coeffs * vars <= -c
-				IntLinearLessEqBounds::new_in(slv, terms.iter().map(|&v| -v), -self.rhs);
+				IntLinearLessEqBounds::new_in(slv, terms.iter().map(|&v| -v), -rhs);
 				// coeffs * vars <= c
-				IntLinearLessEqBounds::new_in(slv, terms.clone(), self.rhs);
+				IntLinearLessEqBounds::new_in(slv, terms.clone(), rhs);
 			}
 			(LinOperator::Equal, Some(r)) => {
 				if full_reif {
-					IntLinearNotEqImpValue::new_in(slv, terms.clone(), self.rhs, !r);
+					IntLinearNotEqImpValue::new_in(slv, terms.clone(), rhs, !r);
 				}
-				IntLinearLessEqImpBounds::new_in(slv, terms.iter().map(|&v| -v), -self.rhs, r);
-				IntLinearLessEqImpBounds::new_in(slv, terms, self.rhs, r);
+				IntLinearLessEqImpBounds::new_in(slv, terms.iter().map(|&v| -v), -rhs, r);
+				IntLinearLessEqImpBounds::new_in(slv, terms, rhs, r);
 			}
 			(LinOperator::LessEq, None) => {
-				IntLinearLessEqBounds::new_in(slv, terms, self.rhs);
+				IntLinearLessEqBounds::new_in(slv, terms, rhs);
 			}
 			(LinOperator::LessEq, Some(r)) => {
 				if full_reif {
 					IntLinearLessEqImpBounds::new_in(
 						slv,
 						terms.iter().map(|&v| -v),
-						-(self.rhs + 1),
+						-(rhs + 1),
 						!r,
 					);
 				}
-				IntLinearLessEqImpBounds::new_in(slv, terms, self.rhs, r);
+				IntLinearLessEqImpBounds::new_in(slv, terms, rhs, r);
 			}
 			(LinOperator::NotEqual, None) => {
-				IntLinearNotEqValue::new_in(slv, terms, self.rhs);
+				IntLinearNotEqValue::new_in(slv, terms, rhs);
 			}
 			(LinOperator::NotEqual, Some(r)) => {
 				if full_reif {
-					IntLinearLessEqImpBounds::new_in(slv, terms.clone(), self.rhs, !r);
-					IntLinearLessEqImpBounds::new_in(slv, terms.iter().map(|&v| -v), -self.rhs, !r);
+					IntLinearLessEqImpBounds::new_in(slv, terms.clone(), rhs, !r);
+					IntLinearLessEqImpBounds::new_in(slv, terms.iter().map(|&v| -v), -rhs, !r);
 				}
-				IntLinearNotEqImpValue::new_in(slv, terms, self.rhs, r);
+				IntLinearNotEqImpValue::new_in(slv, terms, rhs, r);
 			}
 		}
 		Ok(())
@@ -393,7 +522,7 @@ impl IntLinearLessEqBounds {
 		);
 		solver.enqueue_now(prop);
 		for &v in vars.iter() {
-			solver.enqueue_on_int_change(prop, v, IntPropCond::UpperBound);
+			solver.enqueue_on_int_change(prop, v, IntPropCond::LowerBound);
 		}
 	}
 }
@@ -510,7 +639,7 @@ impl IntLinearLessEqImpBounds {
 		);
 		solver.enqueue_now(prop);
 		for &v in vars.iter() {
-			solver.enqueue_on_int_change(prop, v, IntPropCond::UpperBound);
+			solver.enqueue_on_int_change(prop, v, IntPropCond::LowerBound);
 		}
 		solver.enqueue_on_bool_change(prop, BoolView(BoolViewInner::Lit(reification)));
 	}
