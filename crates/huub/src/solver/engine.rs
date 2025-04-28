@@ -47,7 +47,7 @@ use crate::{
 		trail::{Trail, TrailedInt},
 		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, SolverConfiguration,
 	},
-	Clause, Conjunction, IntVal,
+	Clause, IntVal,
 };
 
 #[derive(Debug, Default, Clone)]
@@ -98,7 +98,7 @@ pub struct State {
 	/// Includes lower and upper bounds for integer variables and Boolean variable assignments
 	pub(crate) trail: Trail,
 	/// Literals to be propagated by the oracle
-	pub(crate) propagation_queue: Conjunction,
+	pub(crate) propagation_queue: VecDeque<RawLit>,
 	/// Reasons for setting values
 	pub(crate) reason_map: HashMap<RawLit, Reason>,
 	/// Whether conflict has (already) been detected
@@ -129,10 +129,10 @@ pub struct State {
 
 	// ---- Debugging Helpers ----
 	#[cfg(debug_assertions)]
-	/// The literals last emited by the [`PropagatorExtension::propagate`] method.
-	/// These literals will have their reasons checked when they are seen again in
+	/// This literal was last emited by the [`PropagatorExtension::propagate`]
+	/// method. It will have its reasons checked when it is seen again in
 	/// [`PropagatorExtension::notify_assignments`].
-	pub(crate) check_reason: VecDeque<RawLit>,
+	pub(crate) last_propagated: Option<RawLit>,
 	#[cfg(debug_assertions)]
 	/// List of integer variables that have been notified as fixed, but should be
 	/// checked that the bounds match before propagation.
@@ -289,18 +289,9 @@ impl PropagatorExtension for Engine {
 			{
 				// (DEBUG ONLY) if we propagated this literal, ensure its explanation is
 				// valid in its trail position.
-				if self.state.check_reason.front() == Some(&lit) {
-					let _ = self.state.check_reason.pop_front();
+				if self.state.last_propagated == Some(lit) {
 					self.debug_check_reason(lit);
-					// Other literals propagated might already have propagated because of
-					// unit propagated. Pop all literals from the queue that are already
-					// set.
-					while let Some(&l) = self.state.check_reason.front() {
-						if self.state.trail.get_sat_value(l).is_none() {
-							break;
-						}
-						let _ = self.state.check_reason.pop_front();
-					}
+					self.state.last_propagated = None;
 				}
 			}
 
@@ -408,10 +399,17 @@ impl PropagatorExtension for Engine {
 	}
 
 	#[tracing::instrument(level = "debug", skip(self, slv), fields(level = self.state.decision_level()))]
-	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Vec<RawLit> {
+	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Option<RawLit> {
 		// Check whether there are previous clauses to be communicated
 		if !self.state.clauses.is_empty() {
-			return Vec::new();
+			return None;
+		}
+		while let Some(&lit) = self.state.propagation_queue.front() {
+			if self.state.trail.get_sat_value(lit) == Some(true) {
+				let _ = self.state.propagation_queue.pop_front();
+			} else {
+				break;
+			}
 		}
 		if self.state.propagation_queue.is_empty() && self.state.conflict.is_none() {
 			#[cfg(debug_assertions)]
@@ -424,35 +422,27 @@ impl PropagatorExtension for Engine {
 				}
 				// We've been notified of all previous propagated literals (and their
 				// reasons were checked).
-				debug_assert!(self.state.check_reason.is_empty());
+				debug_assert!(self.state.last_propagated.is_none());
 			}
 			// If there are no previous changes, run propagators
 			SolvingContext::new(slv, &mut self.state).run_propagators(&mut self.propagators);
 		}
 		// Check whether there are new clauses that need to be communicated first
 		if !self.state.clauses.is_empty() {
-			return Vec::new();
+			return None;
 		}
-		let queue = mem::take(&mut self.state.propagation_queue);
-		if queue.is_empty() {
-			return Vec::new(); // Early return to avoid tracing statements
+		if let Some(lit) = self.state.propagation_queue.pop_front() {
+			debug!(lit = i32::from(lit), "propagate");
+			#[cfg(debug_assertions)]
+			{
+				// (DEBUG ONLY) Store the propagated literals, so we know what explanations
+				// to check.
+				self.state.last_propagated = Some(lit);
+			}
+			Some(lit)
+		} else {
+			None
 		}
-		debug!(
-			lits = ?queue
-				.iter()
-				.map(|&x| i32::from(x))
-				.collect::<Vec<i32>>(),
-			"propagate"
-		);
-
-		#[cfg(debug_assertions)]
-		{
-			// (DEBUG ONLY) Store the propagated literals, so we know what explanations
-			// to check.
-			self.state.check_reason = queue.clone().into();
-		}
-
-		queue
 	}
 
 	fn reason_persistence(&self) -> ClausePersistence {
@@ -524,7 +514,7 @@ impl State {
 		#[cfg(debug_assertions)]
 		{
 			// (DEBUG ONLY) Clear the debug checking queues.
-			self.check_reason.clear();
+			self.last_propagated = None;
 			self.check_int_fixed.clear();
 		}
 		// Backtrack trail
