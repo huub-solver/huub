@@ -240,7 +240,7 @@ impl PropagationActions for SolvingContext<'_> {
 					let reason = reason.build_reason(self);
 					trace!(lit = i32::from(lit), reason = ?reason, "propagate bool");
 					self.state.register_reason(lit, reason);
-					self.state.propagation_queue.push(lit);
+					self.state.propagation_queue.push_back(lit);
 					Ok(())
 				}
 			},
