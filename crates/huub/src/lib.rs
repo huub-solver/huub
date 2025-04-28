@@ -254,20 +254,16 @@ pub fn diffn_int(
 	}
 }
 
-pub fn cumulative<Iter>(
-	start: Iter,
-	duration: Vec<IntVal>,
-	requirement: Vec<IntVal>,
-	bound: IntVal,
-) -> Cumulative
-where
-	Iter: IntoIterator,
-	Iter::Item: Into<IntDecision>,
-{
+pub fn cumulative(
+	start: Vec<IntDecision>,
+	duration: Vec<IntDecision>,
+	resource: Vec<IntDecision>,
+	bound: IntDecision,
+) -> Cumulative {
 	Cumulative {
-		start: start.into_iter().map_into().collect(),
+		start,
 		duration,
-		requirement,
+		resource,
 		bound,
 	}
 }
