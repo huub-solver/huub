@@ -750,10 +750,13 @@ impl IntDiffnSweep {
 				// }
 
 				//assert!(fr < all_fr.len());
+                trace!("fr lb {} origin lb {}", all_fr[fr].lb[d], origin_lb);
 				if all_fr[fr].ub[d] > origin_ub {
 					// Calculate what the
-					trace!("generalized");
-					possible_lb = origin_ub - self.box_size[o_idx][d] + 1;
+					trace!("generalized lb");
+                    if origin_ub - self.box_size[o_idx][d] + 1 < possible_lb {
+                        possible_lb = origin_ub - self.box_size[o_idx][d] + 1;
+                    }
 				}
 
 				// if !prune_upper && generalized_bound.is_some() && d == curr_dimension {
@@ -762,8 +765,10 @@ impl IntDiffnSweep {
 
 				if all_fr[fr].lb[d] < origin_lb {
 					// Calculate what the
-					trace!("generalized");
-					possible_ub = origin_lb + self.box_size[curr_obj_idx][d] - 1;
+					trace!("generalized ub");
+                    if origin_lb + self.box_size[curr_obj_idx][d] - 1 > possible_ub {
+                        possible_ub = origin_lb + self.box_size[curr_obj_idx][d] - 1;
+                    }
 				}
 
 				reason.push(actions.get_int_lit(
@@ -784,7 +789,7 @@ impl IntDiffnSweep {
 					IntLitMeaning::GreaterEq(possible_lb),
 				));
 				trace!(
-					"fr Reason [[var {:?} [{:?}, {:?}] < {:?}] in dimension {}",
+					"fr Reason [[var {:?} [{:?}, {:?}] >= {:?}] in dimension {}",
 					o_idx,
 					lb_tracker[o_idx][d],
 					ub_tracker[o_idx][d],
