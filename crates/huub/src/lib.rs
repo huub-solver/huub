@@ -1103,8 +1103,17 @@ impl Model {
 		let mut slv = Solver::<Oracle>::from(&self.cnf);
 		let any_slv: &mut dyn Any = slv.oracle.solver_mut();
 		if let Some(r) = any_slv.downcast_mut::<Cadical>() {
-			r.set_option("restart", config.restart() as i32);
+			// Set the solver options for preprocessing/inprocessing
+			r.set_option("condition", config.conditioning() as i32);
+			r.set_option("elim", config.variable_elimination() as i32);
+			r.set_option("inprocessing", config.inprocessing() as i32);
+			r.set_limit("preprocessing", config.preprocessing() as i32);
+			r.set_option("probe", config.probing() as i32);
+			r.set_option("subsume", config.subsumption() as i32);
 			r.set_option("vivify", config.vivification() as i32);
+
+			// Set the solver options for search configurations
+			r.set_option("restart", config.restart() as i32);
 		} else {
 			warn!("unknown solver: vivification and restart options are ignored");
 		}
