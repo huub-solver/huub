@@ -548,7 +548,7 @@ mod tests {
 			let mut cur_index = 0;
 			for v in sol.iter() {
 				if let Int(val) = *v {
-					for &forbidden in  values.iter().skip(cur_index + 1) {
+					for &forbidden in values.iter().skip(cur_index + 1) {
 						if forbidden == val {
 							return false;
 						}
