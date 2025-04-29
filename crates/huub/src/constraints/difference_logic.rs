@@ -25,13 +25,13 @@ pub struct DiffEdge {
 	node: IntView,
 	/// Difference value.
 	val: IntVal,
-	/// Boolean for implied or reified constraints.
-	bool_var: Option<BoolView>,
+	/// Boolean for the difference constraints.
+	bool_var: BoolView,
 }
 
 impl DiffEdge {
 
-	fn new(to_node: IntView, val: IntVal, bool_var: Option<BoolView>) -> Self {
+	fn new(to_node: IntView, val: IntVal, bool_var: BoolView) -> Self {
 		Self {
 			node: to_node,
 			val,
@@ -87,7 +87,7 @@ impl DifferenceLogicGraph {
 		}
 	}
 
-	fn add_edge<P: PropagationActions>(&mut self, actions: &mut P, u: IntView, v: IntView, d: IntVal, b: Option<BoolView>) {
+	fn add_edge<P: PropagationActions>(&mut self, actions: &mut P, u: IntView, v: IntView, d: IntVal, b: BoolView) {
 		self.graph.get_mut(&u).unwrap().edges.push(actions, DiffEdge::new(v, d, b));
 		self.graph.get_mut(&v).unwrap().reverse_edges.push(actions, DiffEdge::new(u, d, b));
 	}
@@ -105,9 +105,7 @@ impl DifferenceLogicGraph {
 		let mut var = node;
 		loop {
 			let (cur, edge) = backtrace[&var];
-			if edge.bool_var.is_some() {
-				reason.push(edge.bool_var.unwrap());
-			}
+			reason.push(edge.bool_var);
 			var = cur;
 			if !backtrace.contains_key(&var) {
 				break reason;
@@ -190,14 +188,6 @@ impl DifferenceLogicGraph {
 		}
 		Ok(())
 	}
-	
-	fn get_lb_reason<P: PropagationActions>(&mut self, actions: &mut P, var: IntView, b: Option<BoolView>) -> Vec<BoolView> {
-		let mut reason = vec![actions.get_int_lit(var, IntLitMeaning::GreaterEq(actions.get_trailed_int(self.graph[&var].lower_bound)))];
-		if b.is_some() {
-			reason.push(b.unwrap());
-		}
-		reason
-	}
 
 	fn inc_lb<P: PropagationActions>(&mut self, actions: &mut P, v_l: Vec<IntView>) -> Result<(), Conflict> {
 
@@ -218,7 +208,7 @@ impl DifferenceLogicGraph {
 					trace!("Updating lower bound for {s:?} to {bound}");
 					let (prev, b) = backtrace[&s];
 					//trace!("Reason is that {prev:?} >= {} conditional on {b:?}", actions.get_trailed_int(self.graph[&prev].lower_bound));
-					actions.set_int_lower_bound(s, bound, |a: &mut P| self.get_lb_reason(a, prev, b))?;
+					actions.set_int_lower_bound(s, bound, |a: &mut P| vec![b, a.get_int_lit(prev, IntLitMeaning::GreaterEq(a.get_trailed_int(self.graph[&prev].lower_bound)))])?;
 
 				}
 				let _ = actions.set_trailed_int(self.graph[&s].lower_bound, bound);  // todo requeue immediately for holes?
@@ -234,14 +224,6 @@ impl DifferenceLogicGraph {
 			}
 		}
 		Ok(())
-	}
-
-	fn get_ub_reason<P: PropagationActions>(&mut self, actions: &mut P, var: IntView, b: Option<BoolView>) -> Vec<BoolView> {
-		let mut reason = vec![actions.get_int_lit(var, IntLitMeaning::Less(actions.get_trailed_int(self.graph[&var].upper_bound) + 1))];
-		if b.is_some() {
-			reason.push(b.unwrap());
-		}
-		reason
 	}
 
 	fn inc_ub<P: PropagationActions>(&mut self, actions: &mut P, v_u: Vec<IntView>) -> Result<(), Conflict> {
@@ -263,7 +245,7 @@ impl DifferenceLogicGraph {
 					trace!("Updating upper bound for {s:?} to {bound}");
 					let (prev, b) = backtrace[&s];
 					//trace!("Reason is that {prev:?} <= {} conditional on {b:?}", actions.get_trailed_int(self.graph[&prev].upper_bound));
-					actions.set_int_upper_bound(s, bound, |a: &mut P| self.get_ub_reason(a, prev, b))?;
+					actions.set_int_upper_bound(s, bound, |a: &mut P| vec![b, a.get_int_lit(prev, IntLitMeaning::Less(a.get_trailed_int(self.graph[&prev].upper_bound) + 1))])?;
 
 				}
 				let _ = actions.set_trailed_int(self.graph[&s].upper_bound, bound);  // todo requeue immediately for holes?
@@ -329,6 +311,7 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		// todo...
+		trace!("DifferenceLogic to_solver with {} constraints and {} imp_constraints", self.constraints.len(), self.imp_constraints.len());
 		let constraints: Vec<_> = self.constraints.iter()
 			.map(|(x, y, d)| (slv.get_solver_int(*x), slv.get_solver_int(*y), *d))
 			.collect();
@@ -393,7 +376,7 @@ where
 		for (x, y, d) in self.constraints.iter() {
 			graph_change = true;
 			let _ = self.graph.inc_sat(actions, *x, *y, *d, None)?;  // todo do we want to remove edges that are not necessary? At least in the beginning?
-			self.graph.add_edge(actions, *x, *y, *d, None); // todo what if constraint is implied?
+			self.graph.add_edge(actions, *x, *y, *d, BoolView::from(true)); // todo what if constraint is implied?
 			self.graph.inc_imp(actions, &self.imp_constraints, *x, *y, *d)?;
 		}
 		self.constraints.clear();
@@ -440,7 +423,7 @@ where
 				if val {
 					trace!("Adding {x:?} - {y:?} <= {d:?}");
 					if self.graph.inc_sat(actions, x, y, d, Some(b))? {
-						self.graph.add_edge(actions, x, y, d, Some(b)); // todo what if constraint is implied?
+						self.graph.add_edge(actions, x, y, d, b); // todo what if constraint is implied?
 						graph_change = true; // todo should do the remove here, but can't because of borrow issues...
 						self.graph.inc_imp(actions, &self.imp_constraints, x, y, d)?;
 					}
@@ -448,7 +431,7 @@ where
 			}
 		}
 
-		trace!("Current graph after implied checks: {}", self.graph.to_dot(actions));
+		//trace!("Current graph after implied checks: {}", self.graph.to_dot(actions));
 
 		if graph_change {
 			let mut imp_iter = self.imp_constraints.iter::<P>();
