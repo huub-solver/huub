@@ -822,7 +822,7 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 		Solver<Oracle>: for<'a> From<&'a Cnf>,
 		Oracle::Slv: 'static,
 	{
-		let (mut prb, map, fzn_stats) = Model::from_fzn::<S, Vec<_>>(fzn)?;
+		let (mut prb, map, fzn_stats) = Model::from_fzn::<S, Vec<_>>(fzn, config)?;
 		let (mut slv, remap) = prb.to_solver(config)?;
 		let map = map
 			.into_iter()

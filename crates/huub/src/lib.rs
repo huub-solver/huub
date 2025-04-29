@@ -69,6 +69,7 @@ use crate::{
 	},
 	solver::{engine::Engine, IntLitMeaning, Solver},
 };
+use crate::constraints::difference_logic::DifferenceLogic;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[allow(
@@ -340,6 +341,14 @@ pub fn times_int(factor1: IntDecision, factor2: IntDecision, product: IntDecisio
 		factor1,
 		factor2,
 		product,
+	}
+}
+
+/// Create an empty difference logic store.
+pub fn difference_logic() -> DifferenceLogic {
+	DifferenceLogic {
+		constraints: Vec::new(),
+		imp_constraints: Vec::new(),
 	}
 }
 
@@ -907,6 +916,7 @@ impl Model {
 	/// Create a new [`Model`] instance from a [`FlatZinc`] instance.
 	pub fn from_fzn<S, MapTy: FromIterator<(S, Decision)>>(
 		fzn: &FlatZinc<S>,
+		config: &InitConfig,
 	) -> Result<(Self, MapTy, FlatZincStatistics), FlatZincError>
 	where
 		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
@@ -914,7 +924,7 @@ impl Model {
 		let mut builder = FznModelBuilder::new(fzn);
 		builder.unify_variables()?;
 		builder.extract_views()?;
-		builder.post_constraints()?;
+		builder.post_constraints(config)?;
 		builder.create_branchers()?;
 		builder.ensure_output()?;
 
@@ -979,6 +989,7 @@ impl Model {
 			ConstraintStore::BoolFormula(exp) => exp.simplify(self),
 			ConstraintStore::IntInSetReif(c) => c.simplify(self),
 			ConstraintStore::IntTable(con) => con.simplify(self),
+			ConstraintStore::DifferenceLogic(con) => con.simplify(self),
 			ConstraintStore::Other(con) => con.simplify(self),
 		}?;
 		match status {
@@ -1077,6 +1088,9 @@ impl Model {
 			}
 			ConstraintStore::IntTable(con) => {
 				<IntTable as Constraint<Model>>::initialize(con, &mut ctx);
+			}
+			ConstraintStore::DifferenceLogic(con) => {
+				<DifferenceLogic as Constraint<Model>>::initialize(con, &mut ctx);
 			}
 			ConstraintStore::Other(con) => con.initialize(&mut ctx),
 		}
@@ -1300,6 +1314,12 @@ impl AddAssign<IntTimes> for Model {
 impl AddAssign<IntValArrayElement> for Model {
 	fn add_assign(&mut self, constraint: IntValArrayElement) {
 		self.add_constraint(ConstraintStore::IntValArrayElement(constraint));
+	}
+}
+
+impl AddAssign<DifferenceLogic> for Model {
+	fn add_assign(&mut self, constraint: DifferenceLogic) {
+		self.add_constraint(ConstraintStore::DifferenceLogic(constraint));
 	}
 }
 

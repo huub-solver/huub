@@ -100,6 +100,9 @@ pub struct Cli<Stdout, Stderr> {
 	vsids_after: Option<u32>,
 	/// Only use the SAT VSIDS heuristic for search
 	vsids_only: bool,
+	
+	/// Difference logic mode
+	diff_logic: Option<u32>,
 
 	// --- Output configuration ---
 	/// Output stream for (intermediate) solutions and statistics
@@ -158,6 +161,9 @@ where
 		config = config
 			.with_restart(self.free_search || self.restart)
 			.with_vivification(self.vivification);
+		if let Some(diff_logic) = self.diff_logic {
+			config = config.with_diff_logic(diff_logic);
+		}
 		config
 	}
 
@@ -537,6 +543,7 @@ where
 			vivification: self.vivification,
 			vsids_after: self.vsids_after,
 			vsids_only: self.vsids_only,
+			diff_logic: self.diff_logic,
 			stdout: self.stdout,
 		}
 	}
@@ -560,6 +567,7 @@ where
 			vivification: self.vivification,
 			vsids_after: self.vsids_after,
 			vsids_only: self.vsids_only,
+			diff_logic: self.diff_logic,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
 		}
@@ -610,6 +618,9 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			vsids_only: args.contains("--vsids-only"),
 			vsids_after: args
 				.opt_value_from_str("--vsids-after")
+				.map_err(|e| e.to_string())?,
+			diff_logic: args
+				.opt_value_from_str("--diff-logic")
 				.map_err(|e| e.to_string())?,
 
 			verbose,

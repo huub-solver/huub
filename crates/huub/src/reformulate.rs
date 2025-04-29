@@ -45,6 +45,7 @@ use crate::{
 	BoolDecision, BoolFormula, Decision, IntDecision, IntEq, IntLitMeaning, IntSetVal, IntVal,
 	Model, Solver,
 };
+use crate::constraints::difference_logic::DifferenceLogic;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// Definition of an Boolean decision variable in a [`Model`].
@@ -106,6 +107,7 @@ pub(crate) enum ConstraintStore {
 	IntTable(IntTable),
 	IntTimes(IntTimes),
 	IntValArrayElement(IntValArrayElement),
+	DifferenceLogic(DifferenceLogic),
 	Other(BoxedConstraint),
 }
 
@@ -130,6 +132,8 @@ pub struct InitConfig {
 	restart: bool,
 	/// Whether to enable the vivification in the oracle solver.
 	vivification: bool,
+	/// Difference logic mode
+	pub(crate) diff_logic: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -288,6 +292,9 @@ impl ConstraintStore {
 			ConstraintStore::IntValArrayElement(con) => {
 				<IntValArrayElement as Constraint<Model>>::to_solver(con, &mut actions)
 			}
+			ConstraintStore::DifferenceLogic(con) => {
+				<DifferenceLogic as Constraint<Model>>::to_solver(con, &mut actions)
+			}
 			ConstraintStore::Other(con) => con.to_solver(&mut actions),
 		}
 	}
@@ -331,6 +338,12 @@ impl InitConfig {
 	/// Change whether to enable the vivification in the oracle solver.
 	pub fn with_vivification(mut self, vivification: bool) -> Self {
 		self.vivification = vivification;
+		self
+	}
+
+	/// Change the difference logic mode in the oracle solver.
+	pub fn with_diff_logic(mut self, diff_logic: u32) -> Self {
+		self.diff_logic = diff_logic;
 		self
 	}
 }

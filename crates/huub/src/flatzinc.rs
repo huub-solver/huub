@@ -20,13 +20,8 @@ use rangelist::IntervalIterator;
 use thiserror::Error;
 use tracing::warn;
 
-use crate::{
-	abs_int, actions::SimplificationActions, all_different_int, array_element, array_maximum_int,
-	array_minimum_int, constraints::int_table::IntTable, disjunctive_strict, div_int,
-	int_in_set_reif, pow_int, reformulate::ReformulationError, table_int, times_int, BoolDecision,
-	BoolDecisionInner, Branching, Decision, IntDecision, IntDecisionInner, IntLinExpr, IntSetVal,
-	IntVal, Model, NonZeroIntVal, ValueSelection, VariableSelection,
-};
+use crate::{abs_int, actions::SimplificationActions, all_different_int, array_element, array_maximum_int, array_minimum_int, constraints::int_table::IntTable, difference_logic, disjunctive_strict, div_int, int_in_set_reif, pow_int, reformulate::ReformulationError, table_int, times_int, BoolDecision, BoolDecisionInner, Branching, Decision, IntDecision, IntDecisionInner, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal, ValueSelection, VariableSelection};
+use crate::reformulate::InitConfig;
 
 #[derive(Error, Debug)]
 /// Errors that can occur when converting a [`FlatZinc`] instance to a [`Model`]
@@ -872,7 +867,9 @@ where
 
 	/// Process the [`FlatZinc::constraints`] field and add [`Constraint`] items
 	/// to the [`Model`] to enforce the constraints.
-	pub(crate) fn post_constraints(&mut self) -> Result<(), FlatZincError> {
+	pub(crate) fn post_constraints(&mut self, config: &InitConfig) -> Result<(), FlatZincError> {
+		// Global propagators dealing with multiple constraints
+		let mut diff_logic = difference_logic();
 		// Traditional relational constraints
 		for (i, c) in self.fzn.constraints.iter().enumerate() {
 			if self.processed[i] {
@@ -1318,7 +1315,7 @@ where
 						});
 					}
 				}
-				"int_le" | "int_ne" => {
+				"int_le" | "int_ne" => { // todo diff logic
 					if let [a, b] = c.args.as_slice() {
 						let a = self.arg_int(a)?;
 						let b = self.arg_int(b)?;
@@ -1341,7 +1338,7 @@ where
 					}
 				}
 				"int_eq_imp" | "int_eq_reif" | "int_le_imp" | "int_le_reif" | "int_ne_imp"
-				| "int_ne_reif" => {
+				| "int_ne_reif" => { // todo diff logic
 					if let [a, b, r] = c.args.as_slice() {
 						let a = self.arg_int(a)?;
 						let b = self.arg_int(b)?;
@@ -1388,6 +1385,12 @@ where
 							.map(|l| self.lit_int(l))
 							.try_collect()?;
 						let rhs = self.arg_par_int(rhs)?;
+
+						if config.diff_logic > 0 && c.id.deref() == "int_lin_le" && coeffs.len() == 2 && coeffs[0] == 1 && coeffs[1] == -1 { // todo more general cases?
+							diff_logic.constraints.push((vars[0], vars[1], rhs));
+							continue;
+						}
+						
 						let lin_exp: IntLinExpr = vars
 							.into_iter()
 							.zip(coeffs.into_iter())
@@ -1428,6 +1431,15 @@ where
 							.try_collect()?;
 						let rhs = self.arg_par_int(rhs)?;
 						let reified = self.arg_bool(reified)?;
+
+						if config.diff_logic > 0 && c.id.deref().starts_with("int_lin_le") && coeffs.len() == 2 && coeffs[0] == 1 && coeffs[1] == -1 { // todo more general cases?
+							diff_logic.imp_constraints.push((reified, vars[0], vars[1], rhs));
+							if c.id.deref() == "int_lin_le_reif" {
+								diff_logic.imp_constraints.push((!reified, vars[1], vars[0], -rhs - 1));
+							}
+							continue;
+						}
+						
 						let lin_exp: IntLinExpr = vars
 							.into_iter()
 							.zip(coeffs.into_iter())
@@ -1551,6 +1563,11 @@ where
 					);
 				}
 			}
+		}
+		
+		// Add global propagators
+		if !diff_logic.constraints.is_empty() || !diff_logic.imp_constraints.is_empty() {
+			self.prb += diff_logic;
 		}
 
 		Ok(())
