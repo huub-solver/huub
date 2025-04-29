@@ -87,9 +87,9 @@ impl DifferenceLogicGraph {
 		}
 	}
 
-	fn add_edge<P: PropagationActions>(&mut self, actions: &mut P, u: IntView, v: IntView, d: IntVal) {
-		self.graph.get_mut(&u).unwrap().edges.push(actions, DiffEdge::new(v, d, None));
-		self.graph.get_mut(&v).unwrap().reverse_edges.push(actions, DiffEdge::new(u, d, None));
+	fn add_edge<P: PropagationActions>(&mut self, actions: &mut P, u: IntView, v: IntView, d: IntVal, b: Option<BoolView>) {
+		self.graph.get_mut(&u).unwrap().edges.push(actions, DiffEdge::new(v, d, b));
+		self.graph.get_mut(&v).unwrap().reverse_edges.push(actions, DiffEdge::new(u, d, b));
 	}
 
 	fn get_stored_lower_bound<P: TrailingActions>(&mut self, actions: &P, v: IntView) -> IntVal {
@@ -164,12 +164,12 @@ impl DifferenceLogicGraph {
 		let _ = queue.push(source, Reverse(0));
 		while !queue.is_empty() {
 			let (s, Reverse(dist)) = queue.pop().unwrap();
-			trace!("dijkstra on current node {s:?} with dist {dist}");
+			//trace!("dijkstra on current node {s:?} with dist {dist}");
 			for &edge in if reverse {self.graph[&s].edges.iter(actions)} else {self.graph[&s].reverse_edges.iter(actions)} {
 				let new_dist = dist + edge.val + ((self.graph[&s].pi - self.graph[&edge.node].pi) * if reverse {-1} else {1});
 				if !distances.contains_key(&edge.node) || distances[&edge.node] > new_dist {
 					let _ = queue.push(edge.node, Reverse(new_dist));
-					trace!("dijkstra adding node {:?} with dist {new_dist}", edge.node);
+					//trace!("dijkstra adding node {:?} with dist {new_dist}", edge.node);
 				}
 			}
 		}
@@ -190,6 +190,14 @@ impl DifferenceLogicGraph {
 		}
 		Ok(())
 	}
+	
+	fn get_lb_reason<P: PropagationActions>(&mut self, actions: &mut P, var: IntView, b: Option<BoolView>) -> Vec<BoolView> {
+		let mut reason = vec![actions.get_int_lit(var, IntLitMeaning::GreaterEq(actions.get_trailed_int(self.graph[&var].lower_bound)))];
+		if b.is_some() {
+			reason.push(b.unwrap());
+		}
+		reason
+	}
 
 	fn inc_lb<P: PropagationActions>(&mut self, actions: &mut P, v_l: Vec<IntView>) -> Result<(), Conflict> {
 
@@ -208,9 +216,9 @@ impl DifferenceLogicGraph {
 			if bound > actions.get_trailed_int(self.graph[&s].lower_bound) {
 				if bound > actions.get_int_lower_bound(s) {
 					trace!("Updating lower bound for {s:?} to {bound}");
-					let prev = backtrace[&s];
-					trace!("Reason is that {prev:?} >= {}", actions.get_trailed_int(self.graph[&prev].lower_bound));
-					actions.set_int_lower_bound(s, bound, |a: &mut P| vec![a.get_int_lit(prev, IntLitMeaning::GreaterEq(a.get_trailed_int(self.graph[&prev].lower_bound)))])?;
+					let (prev, b) = backtrace[&s];
+					//trace!("Reason is that {prev:?} >= {} conditional on {b:?}", actions.get_trailed_int(self.graph[&prev].lower_bound));
+					actions.set_int_lower_bound(s, bound, |a: &mut P| self.get_lb_reason(a, prev, b))?;
 
 				}
 				let _ = actions.set_trailed_int(self.graph[&s].lower_bound, bound);  // todo requeue immediately for holes?
@@ -219,13 +227,21 @@ impl DifferenceLogicGraph {
 						let path = gamma_s + self.graph[&s].pi + edge.val - self.graph[&edge.node].pi;
 						let old = queue.push_increase(edge.node, Reverse(path));
 						if old.map_or(true, |Reverse(old_path)| path < old_path) {
-							let _ = backtrace.insert(edge.node, s);
+							let _ = backtrace.insert(edge.node, (s, edge.bool_var));
 						}
 					}
 				}
 			}
 		}
 		Ok(())
+	}
+
+	fn get_ub_reason<P: PropagationActions>(&mut self, actions: &mut P, var: IntView, b: Option<BoolView>) -> Vec<BoolView> {
+		let mut reason = vec![actions.get_int_lit(var, IntLitMeaning::Less(actions.get_trailed_int(self.graph[&var].upper_bound) + 1))];
+		if b.is_some() {
+			reason.push(b.unwrap());
+		}
+		reason
 	}
 
 	fn inc_ub<P: PropagationActions>(&mut self, actions: &mut P, v_u: Vec<IntView>) -> Result<(), Conflict> {
@@ -245,9 +261,9 @@ impl DifferenceLogicGraph {
 			if bound < actions.get_trailed_int(self.graph[&s].upper_bound) {
 				if bound < actions.get_int_upper_bound(s) {
 					trace!("Updating upper bound for {s:?} to {bound}");
-					let prev = backtrace[&s];
-					trace!("Reason is that {prev:?} <= {}", actions.get_trailed_int(self.graph[&prev].upper_bound));
-					actions.set_int_upper_bound(s, bound, |a: &mut P| vec![a.get_int_lit(prev, IntLitMeaning::Less(a.get_trailed_int(self.graph[&prev].upper_bound) + 1))])?;
+					let (prev, b) = backtrace[&s];
+					//trace!("Reason is that {prev:?} <= {} conditional on {b:?}", actions.get_trailed_int(self.graph[&prev].upper_bound));
+					actions.set_int_upper_bound(s, bound, |a: &mut P| self.get_ub_reason(a, prev, b))?;
 
 				}
 				let _ = actions.set_trailed_int(self.graph[&s].upper_bound, bound);  // todo requeue immediately for holes?
@@ -256,7 +272,7 @@ impl DifferenceLogicGraph {
 						let path = gamma_s + self.graph[&edge.node].pi + edge.val - self.graph[&s].pi;
 						let old = queue.push_increase(edge.node, Reverse(path));
 						if old.map_or(true, |Reverse(old_path)| path < old_path) {
-							let _ = backtrace.insert(edge.node, s);
+							let _ = backtrace.insert(edge.node, (s, edge.bool_var));
 						}
 					}
 				}
@@ -377,11 +393,11 @@ where
 		for (x, y, d) in self.constraints.iter() {
 			graph_change = true;
 			let _ = self.graph.inc_sat(actions, *x, *y, *d, None)?;  // todo do we want to remove edges that are not necessary? At least in the beginning?
-			self.graph.add_edge(actions, *x, *y, *d); // todo what if constraint is implied?
+			self.graph.add_edge(actions, *x, *y, *d, None); // todo what if constraint is implied?
 			self.graph.inc_imp(actions, &self.imp_constraints, *x, *y, *d)?;
 		}
 		self.constraints.clear();
-		trace!("Current graph: {}", self.graph.to_dot(actions));
+		//trace!("Current graph: {}", self.graph.to_dot(actions));
 
 		// todo replace once we know what actually changed...
 		let lb_changes: Vec<_> = self.int_vars.iter()
@@ -401,31 +417,34 @@ where
 			self.graph.inc_ub(actions, ub_changes)?;
 		}
 
-		trace!("Current graph after bound updates: {}", self.graph.to_dot(actions));
+		if graph_change {
+			trace!("Current graph after bound updates: {}", self.graph.to_dot(actions));
+		}
 
 		let mut imp_iter = self.imp_constraints.iter::<P>();
 		while let Some((b, x, y, d)) = imp_iter.next(actions) {
-			if self.graph.get_stored_upper_bound(actions, *x) - self.graph.get_stored_lower_bound(actions, *y) <= *d {
+			let (b, x, y, d) = (*b, *x, *y, *d);
+			if self.graph.get_stored_upper_bound(actions, x) - self.graph.get_stored_lower_bound(actions, y) <= d {
 				// Constraint is implied by bounds.
 				trace!("Constraint {b:?} -> {x:?} - {y:?} <= {d:?} is implied by bounds.");
 				imp_iter.remove(actions);
-			} else if self.graph.get_stored_lower_bound(actions, *x) - self.graph.get_stored_upper_bound(actions, *y) > *d {
+			} else if self.graph.get_stored_lower_bound(actions, x) - self.graph.get_stored_upper_bound(actions, y) > d {
 				// Constraint is falsified by bounds.
 				trace!("Constraint {b:?} -> {x:?} - {y:?} <= {d:?} is falsified by bounds.");
-				actions.set_bool(!*b, |a: &mut P| vec![a.get_int_lit(*x, IntLitMeaning::GreaterEq(self.graph.get_stored_lower_bound(a, *x))),
-													  a.get_int_lit(*y, IntLitMeaning::Less(self.graph.get_stored_upper_bound(a, *y) + 1))])?;
+				actions.set_bool(!b, |a: &mut P| vec![a.get_int_lit(x, IntLitMeaning::GreaterEq(self.graph.get_stored_lower_bound(a, x))),
+													  a.get_int_lit(y, IntLitMeaning::Less(self.graph.get_stored_upper_bound(a, y) + 1))])?;
 				imp_iter.remove(actions);
-			} else if let Some(val) = actions.get_bool_val(*b) {
+			} else if let Some(val) = actions.get_bool_val(b) {
 				trace!("Constraint {b:?} -> {x:?} - {y:?} <= {d:?} has fixed boolean value {val:?}.");
+				imp_iter.remove(actions);
 				if val {
 					trace!("Adding {x:?} - {y:?} <= {d:?}");
-					if self.graph.inc_sat(actions, *x, *y, *d, Some(*b))? {
-						self.graph.add_edge(actions, *x, *y, *d); // todo what if constraint is implied?
+					if self.graph.inc_sat(actions, x, y, d, Some(b))? {
+						self.graph.add_edge(actions, x, y, d, Some(b)); // todo what if constraint is implied?
 						graph_change = true; // todo should do the remove here, but can't because of borrow issues...
-						self.graph.inc_imp(actions, &self.imp_constraints, *x, *y, *d)?;
+						self.graph.inc_imp(actions, &self.imp_constraints, x, y, d)?;
 					}
 				}
-				imp_iter.remove(actions);
 			}
 		}
 
@@ -439,7 +458,7 @@ where
 					imp_iter.remove(actions);
 				}
 			}
-			trace!("Current graph after boolean conflict checks: {}", self.graph.to_dot(actions));
+			//trace!("Current graph after boolean conflict checks: {}", self.graph.to_dot(actions));
 		}
 
 		Ok(())
@@ -489,7 +508,8 @@ mod tests {
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		DifferenceLogicBounds::new_in(&mut slv, vec![(x, y, -2), (y, z, 3)], vec![(b, y, z, 4), (b, x, z, -2)]);
+		DifferenceLogicBounds::new_in(&mut slv, vec![(x, y, -2), (y, z, 3)], 
+									  vec![(b, y, z, 4), (b, x, z, -2)]);
 		slv.assert_all_solutions(&[x, y, z, IntView::from(b)], move |sol| {
 			let Int(x) = sol[0] else { return false };
 			let Int(y) = sol[1] else { return false };
@@ -505,9 +525,11 @@ mod tests {
 	fn test_paper_medium() {
 		let mut prb = Model::default();
 		let b = prb.new_bool_var();
+		let c = prb.new_bool_var();
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let b = map.get_bool(&mut slv, b);
+		let c = map.get_bool(&mut slv, c);
 
 		let x = IntVar::new_in(
 			&mut slv,
@@ -529,13 +551,13 @@ mod tests {
 		);
 		let u = IntVar::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=5]),
+			RangeList::from_iter([1..=4]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let v = IntVar::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=5]),
+			RangeList::from_iter([1..=4]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
@@ -545,15 +567,19 @@ mod tests {
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		DifferenceLogicBounds::new_in(&mut slv, vec![(x, y, -2), (y, z, 3), (z, u, -1), (u, v, 2), (x, t, 1), (t, z, -1)], vec![(b, y, z, 4)]);
-		slv.assert_all_solutions(&[x, y, z, u, v, t], move |sol| {
+		DifferenceLogicBounds::new_in(&mut slv, vec![(x, y, -2), (y, z, 3), (z, u, -1), (u, v, 2), (x, t, 1), (t, z, -1)], 
+									  vec![(b, x, z, -2), (b, y, z, 4), (c, y, v, 1), (!c, v, y, -2)]);
+		slv.assert_all_solutions(&[x, y, z, u, v, t, IntView::from(b), IntView::from(c)], move |sol| {
 			let Int(x) = sol[0] else { return false };
 			let Int(y) = sol[1] else { return false };
 			let Int(z) = sol[2] else { return false };
 			let Int(u) = sol[3] else { return false };
 			let Int(v) = sol[4] else { return false };
 			let Int(t) = sol[5] else { return false };
-			x - y <= -2 && y - z <= 3 && z - u <= -1 && u - v <= 2 && x - t <= 1 && t - z <= -1
+			let Int(b) = sol[6] else { return false };
+			let Int(c) = sol[7] else { return false };
+			x - y <= -2 && y - z <= 3 && z - u <= -1 && u - v <= 2 && x - t <= 1 && t - z <= -1 
+				&& (b < 1 || x - z <= -2) && (b < 1 || y - z <= 4) && (c < 1 || y - v <= 1) && (c == 1 || y - v > 1)
 		});
 	}
 

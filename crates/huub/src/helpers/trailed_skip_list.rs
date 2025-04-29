@@ -53,8 +53,9 @@ impl<'a,T> TrailedSkipListIterator<'a,T> {
 		Some(&self.list.list[self.list_index as usize])
 	}
 	
-	pub(crate) fn remove<A: TrailingActions>(&self, actions: &mut A) {
+	pub(crate) fn remove<A: TrailingActions>(&mut self, actions: &mut A) {
 		let _ = actions.set_trailed_int(self.list.next[self.index], actions.get_trailed_int(self.list.next[(self.list_index + 1) as usize]));
+		self.list_index = self.index as IntVal - 1;
 	}
 	
 }
