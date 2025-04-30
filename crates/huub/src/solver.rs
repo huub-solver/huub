@@ -804,7 +804,7 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 	}
 
 	/// Access the inner [`Engine`] object.
-	pub(crate) fn engine(&self) -> &Engine {
+	pub fn engine(&self) -> &Engine {
 		self.oracle.propagator()
 	}
 
@@ -831,6 +831,35 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 			.map(|(k, v)| (k, remap.get(&mut slv, &v)))
 			.collect();
 		Ok((slv, map, fzn_stats))
+	}
+
+	#[cfg(feature = "xcsp3")]
+	/// Create a new [`Solver`] instance from a [`FlatZinc`] instance.
+	pub fn from_xcsp3<S, MapTy: FromIterator<(S, Vec<View>)>>(
+		instance: &xcsp3_serde::Instance<S>,
+		config: &crate::reformulate::InitConfig,
+	) -> Result<
+		(
+			Self,
+			MapTy,
+			crate::xcsp3::Xcsp3Statistics,
+			Option<(Goal, IntView)>,
+		),
+		crate::xcsp3::Xcsp3Error,
+	>
+	where
+		S: Clone + Debug + std::ops::Deref<Target = str> + Display + Eq + Hash + Ord,
+		Solver<Oracle>: for<'a> From<&'a Cnf>,
+		Oracle::Slv: 'static,
+	{
+		let (mut prb, map, stats, goal) = crate::Model::from_xcsp3::<S, Vec<_>>(instance)?;
+		let (mut slv, remap) = prb.to_solver(config)?;
+		let map = map
+			.into_iter()
+			.map(|(k, vars)| (k, vars.iter().map(|v| remap.get(&mut slv, &v)).collect()))
+			.collect();
+		let goal = goal.map(|(g, v)| (g, remap.get_int(&mut slv, v)));
+		Ok((slv, map, stats, goal))
 	}
 
 	/// Wrapper function for `all_solutions` that collects all solutions and returns them in a vector

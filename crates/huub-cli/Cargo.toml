@@ -22,7 +22,7 @@ harness = false
 ctrlc = "3.4.4"
 flatzinc-serde = { workspace = true }
 humantime = "2.1.0"
-huub = { path = "../huub", features = ["flatzinc"] }
+huub = { path = "../huub", features = ["flatzinc", "xcsp3"] }
 pico-args = { version = "0.5.0", features = ["combined-flags"] }
 serde_json = "1.0"
 tracing = { workspace = true }

@@ -44,6 +44,7 @@ use huub::{
 	flatzinc::FlatZincError,
 	reformulate::{InitConfig, ReformulationError},
 	solver::{BoolView, Goal, IntLitMeaning, IntView, SolveResult, Solver, Valuation, Value, View},
+	xcsp3::Xcsp3Error,
 	SlvTermSignal,
 };
 use pico_args::Arguments;
@@ -333,8 +334,79 @@ where
 				(slv, var_map, output, goal)
 			}
 			Format::Xcsp3 => {
-				let _instance: Xcsp3Instance = quick_xml::de::from_reader(rdr).unwrap();
-				todo!()
+				let instance: Xcsp3Instance<Ustr> =
+					quick_xml::de::from_reader(rdr).map_err(|err| {
+						format!(
+							"Unable to parse file “{}” as XCSP3 XML: {}",
+							self.path.display(),
+							err
+						)
+					})?;
+				let (slv, mut var_map, fzn_stats, goal) = match Solver::from_xcsp3::<
+					Ustr,
+					UstrMap<Vec<View>>,
+				>(&instance, &self.init_config())
+				{
+					// Resolve any errors that may have occurred during the conversion
+					Err(Xcsp3Error::ReformulationError(
+						ReformulationError::TrivialUnsatisfiable,
+					)) => {
+						outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
+						return Ok(());
+					}
+					Err(err) => {
+						if matches!(
+							err,
+							Xcsp3Error::UnsupportedConstraint(_)
+								| Xcsp3Error::UnsupportedFeature(_)
+								| Xcsp3Error::UnsupportedType(_)
+						) {
+							outputln!(self.stdout, "s UNSUPPORTED");
+						}
+						return Err(err.to_string());
+					}
+					Ok(x) => x,
+				};
+
+				if self.statistics {
+					let stats = slv.init_statistics();
+					self.print_statistics_block(
+						"init",
+						&[
+							("intVariables", &stats.int_vars()),
+							("propagators", &stats.propagators()),
+							("unifiedVariables", &fzn_stats.unified_variables()),
+							("extractedViews", &fzn_stats.extracted_views()),
+							(
+								"initTime",
+								&Instant::now().duration_since(start).as_secs_f64(),
+							),
+						],
+					);
+				}
+
+				(
+					slv,
+					Default::default(),
+					Output {
+						singletons: instance
+							.variables
+							.iter()
+							.map(|v| (v.identifier, var_map[&v.identifier][0]))
+							.collect(),
+						arrays: instance
+							.arrays
+							.iter()
+							.map(|a| {
+								(
+									format!("{}{}", a.identifier, "[]".repeat(a.size.len())).into(),
+									var_map.remove(&a.identifier).unwrap(),
+								)
+							})
+							.collect(),
+					},
+					goal,
+				)
 			}
 		};
 
@@ -413,6 +485,7 @@ where
 			Some((goal, obj)) => {
 				if self.all_solutions {
 					warn!("--all-solutions is ignored when optimizing, use --intermediate-solutions or --all-optimal instead");
+					self.all_solutions = false;
 				}
 				let mut no_good_vals = vec![
 					Value::Bool(false);
@@ -429,6 +502,9 @@ where
 				};
 				let (status, stats, obj_val) = if self.intermediate_solutions {
 					slv.branch_and_bound(obj, goal, |value| {
+						if self.format == Format::Xcsp3 {
+							outputln!(self.stdout, "o {}", value(obj.into()));
+						}
 						output!(
 							self.stdout,
 							"{}",
@@ -457,6 +533,9 @@ where
 
 					let mut last_sol = String::new();
 					let res = slv.branch_and_bound(obj, goal, |value| {
+						if self.format == Format::Xcsp3 {
+							outputln!(self.stdout, "o {}", value(obj.into()));
+						}
 						last_sol = Solution {
 							value,
 							format: self.format,
@@ -567,9 +646,26 @@ where
 					outputln!(self.stdout, "{}", FZN_COMPLETE);
 				}
 			},
-			Format::Xcsp3 => {
-				todo!()
-			}
+			Format::Xcsp3 => match result {
+				SolveResult::Satisfied => {
+					outputln!(self.stdout, "s SATISFIABLE");
+				}
+				SolveResult::Unsatisfiable => {
+					outputln!(self.stdout, "s UNSATISFIABLE");
+				}
+				SolveResult::Unknown => {
+					outputln!(self.stdout, "s UNKNOWN");
+				}
+				SolveResult::Complete if self.all_solutions => {
+					outputln!(self.stdout, "s ALL SATISFIABLE");
+				}
+				SolveResult::Complete if self.all_optimal => {
+					outputln!(self.stdout, "s ALL OPTIMAL");
+				}
+				SolveResult::Complete => {
+					outputln!(self.stdout, "s OPTIMUM FOUND");
+				}
+			},
 		}
 	}
 
@@ -584,7 +680,9 @@ where
 				outputln!(self.stdout, "%%%mzn-stat-end");
 			}
 			Format::Xcsp3 => {
-				todo!()
+				for stat in stats {
+					outputln!(self.stdout, "d {} {:?}", stat.0, stat.1);
+				}
 			}
 		}
 	}
@@ -835,7 +933,32 @@ impl Display for Solution<'_> {
 				}
 				writeln!(f, "{}", FZN_SEPERATOR)
 			}
-			Format::Xcsp3 => todo!(),
+			Format::Xcsp3 => {
+				writeln!(f, "v <instantiation>")?;
+				write!(f, "v <list> ")?;
+				for i in self
+					.output
+					.singletons
+					.iter()
+					.map(|(i, _)| i)
+					.chain(self.output.arrays.iter().map(|(i, _)| i))
+				{
+					write!(f, "{} ", i)?;
+				}
+				writeln!(f, "</list>")?;
+				write!(f, "v <values> ")?;
+				for i in self
+					.output
+					.singletons
+					.iter()
+					.map(|(_, v)| v)
+					.chain(self.output.arrays.iter().flat_map(|(_, vs)| vs))
+				{
+					write!(f, "{} ", (*self.value)(*i))?;
+				}
+				writeln!(f, "</values>")?;
+				writeln!(f, "v </instantiation>")
+			}
 		}
 	}
 }
