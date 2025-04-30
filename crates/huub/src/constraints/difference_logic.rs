@@ -117,7 +117,7 @@ impl DifferenceLogicGraph {
 
 		trace!("Performing inc_sat on {u:?}, {v:?}, {d:?}");
 		let mut queue = PriorityQueue::new();
-		let mut pi_new = HashMap::new(); // todo check if we can modify the potential function in place?
+		let mut pi_new = HashMap::new(); // todo check if we can modify the potential function in place? Yes, but needs to keep track of updates!
 		let mut backtrace = HashMap::new();
 		let gamma_v = self.graph[&u].pi + d - self.graph[&v].pi;
 		if gamma_v < 0 {
@@ -180,9 +180,13 @@ impl DifferenceLogicGraph {
 		let outgoing_u = self.dijkstra(actions, u, false);
 		let incoming_v = self.dijkstra(actions, v, true);
 		let mut imp_iter = imp_constraints.iter::<P>();
-		while let Some((_, x, y, d_i)) = imp_iter.next(actions) {
+		while let Some((b, x, y, d_i)) = imp_iter.next(actions) {
 			if outgoing_u.contains_key(x) && incoming_v.contains_key(y) && outgoing_u[x] + d + incoming_v[y] <= *d_i { //todo better formulation?
 				trace!("Constraint {x:?} - {y:?} <= {d} is implied");
+				imp_iter.remove(actions);
+			} else if outgoing_u.contains_key(y) && incoming_v.contains_key(x) && outgoing_u[y] + d + incoming_v[x] <= -*d_i - 1 { // todo slight double work for reified constraints
+				trace!("Constraint {y:?} - {x:?} <= {d} is falsified since inverse is implied");
+				let _ = self.inc_sat(actions, *x, *y, *d_i, Some(*b))?;
 				imp_iter.remove(actions);
 			}
 		}
@@ -203,7 +207,7 @@ impl DifferenceLogicGraph {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
 			let _ = lb.insert(s, gamma_s);
 			let bound = pi0 - gamma_s - self.graph[&s].pi;
-			if bound > actions.get_trailed_int(self.graph[&s].lower_bound) {
+			if bound > actions.get_trailed_int(self.graph[&s].lower_bound) {  // todo without stored lower bound this becomes a check if s has changed or bound > cur lower bound (so a HashMap for updated lb initialized with -inf for all changed vars)
 				if bound > actions.get_int_lower_bound(s) {
 					trace!("Updating lower bound for {s:?} to {bound}");
 					let (prev, b) = backtrace[&s];
@@ -371,7 +375,7 @@ where
 	#[tracing::instrument(name = "difference_logic", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 
-		let mut graph_change = false;
+		let mut graph_change = false; //todo remove
 
 		for (x, y, d) in self.constraints.iter() {
 			graph_change = true;
@@ -404,6 +408,7 @@ where
 			trace!("Current graph after bound updates: {}", self.graph.to_dot(actions));
 		}
 
+		// todo only iterate relevant constraints
 		let mut imp_iter = self.imp_constraints.iter::<P>();
 		while let Some((b, x, y, d)) = imp_iter.next(actions) {
 			let (b, x, y, d) = (*b, *x, *y, *d);
@@ -423,8 +428,7 @@ where
 				if val {
 					trace!("Adding {x:?} - {y:?} <= {d:?}");
 					if self.graph.inc_sat(actions, x, y, d, Some(b))? {
-						self.graph.add_edge(actions, x, y, d, b); // todo what if constraint is implied?
-						graph_change = true; // todo should do the remove here, but can't because of borrow issues...
+						self.graph.add_edge(actions, x, y, d, b); // todo what if constraint is implied? Afterwards there might be new bound propagation!
 						self.graph.inc_imp(actions, &self.imp_constraints, x, y, d)?;
 					}
 				}
@@ -432,17 +436,6 @@ where
 		}
 
 		//trace!("Current graph after implied checks: {}", self.graph.to_dot(actions));
-
-		if graph_change {
-			let mut imp_iter = self.imp_constraints.iter::<P>();
-			while let Some((b, x, y, d)) = imp_iter.next(actions) {
-				if !self.graph.inc_sat(actions, *x, *y, *d, Some(*b))? {
-					trace!("Constraint {b:?} -> {x:?} - {y:?} <= {d:?} is falsified by graph.");
-					imp_iter.remove(actions);
-				}
-			}
-			//trace!("Current graph after boolean conflict checks: {}", self.graph.to_dot(actions));
-		}
 
 		Ok(())
 	}
