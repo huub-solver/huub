@@ -95,6 +95,8 @@ pub struct VarNode {
 	pi: IntVal,
 	/// Backtrace for shortest path calculations.
 	backtrace: Option<(VarNodeRef, BoolView)>,
+	/// Visited state.
+	visited: bool,
 }
 
 impl VarNode {
@@ -106,6 +108,7 @@ impl VarNode {
 			reverse_edges: TrailedList::new(actions),
 			pi: 0,
 			backtrace: None,
+			visited: false,
 		}
 	}
 
@@ -145,6 +148,7 @@ impl Hash for VarNodeRef {
 /// A graph of difference constraints.
 pub struct DifferenceLogicGraph {
 	graph: HashMap<IntView, VarNodeRef>,
+	visited: Vec<VarNodeRef>,
 }
 
 impl DifferenceLogicGraph {
@@ -152,6 +156,7 @@ impl DifferenceLogicGraph {
 	fn new<A: PropagatorInitActions + ?Sized>(actions: &mut A, variables: Vec<IntView>) -> Self {
 		Self {
 			graph: variables.iter().map(|&v| (v, VarNodeRef::new(Rc::new(RefCell::new(VarNode::new(actions, v)))))).collect(),
+			visited: Vec::new(),
 		}
 	}
 
@@ -160,6 +165,18 @@ impl DifferenceLogicGraph {
 		let v = self.graph[&v].clone();
 		u.node.borrow_mut().edges.push(actions, DiffEdge::new(v.clone(), d, b));
 		v.node.borrow_mut().reverse_edges.push(actions, DiffEdge::new(u.clone(), d, b));
+	}
+	
+	fn visit(&mut self, node: VarNodeRef) {
+		node.node.borrow_mut().visited = true;
+		self.visited.push(node);
+	}
+	
+	fn finish_visit(&mut self) {
+		for node in self.visited.iter() {
+			node.node.borrow_mut().visited = false;
+		}
+		self.visited.clear();
 	}
 
 	fn get_cycle_reason(&self, node: VarNodeRef) -> Vec<BoolView> {
@@ -265,15 +282,14 @@ impl DifferenceLogicGraph {
 		let pi0 = v_nodes.iter().map(|n| actions.get_int_lower_bound(n.node.borrow().var) + n.node.borrow().pi).max().unwrap(); //todo maybe borrow once?
 		let mut queue = PriorityQueue::new();
 		// todo Could we put this node-based data into the node infrastructure? And just always overwrite it there? Saves more HashMaps... could also include new_lbs
-		let mut lb = HashMap::new(); // todo this is actually just a visited boolean in this case
 		for n in v_nodes.iter() {
 			let node = n.node.borrow();
 			let _ = queue.push(n.clone(), Reverse(pi0 - actions.get_int_lower_bound(node.var) - node.pi));
 		}
 		while !queue.is_empty() {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
+			self.visit(s.clone());
 			let node_s = s.node.borrow();
-			let _ = lb.insert(node_s.var, gamma_s);
 			let bound = pi0 - gamma_s - node_s.pi;
 			if bound > get_cur_lower_bound(actions, new_lbs, node_s.var) {
 				if bound > actions.get_int_lower_bound(node_s.var) {
@@ -287,7 +303,7 @@ impl DifferenceLogicGraph {
 				let _ = new_lbs.insert(node_s.var, bound);  // todo requeue immediately for holes?
 				for edge in node_s.edges.iter(actions) {
 					let mut node_t = edge.node_ref.node.borrow_mut();
-					if !lb.contains_key(&node_t.var) {
+					if !node_t.visited {
 						let path = gamma_s + node_s.pi + edge.val - node_t.pi;
 						let old = queue.push_increase(edge.node_ref.clone(), Reverse(path));
 						if old.map_or(true, |Reverse(old_path)| path < old_path) {
@@ -306,15 +322,14 @@ impl DifferenceLogicGraph {
 		let v_nodes = v_u.iter().map(|&v| self.graph[&v].clone()).collect::<Vec<_>>(); // todo maybe even get before going into function?
 		let pi0 = v_nodes.iter().map(|n| actions.get_int_upper_bound(n.node.borrow().var) + n.node.borrow().pi).min().unwrap();
 		let mut queue = PriorityQueue::new();
-		let mut ub = HashMap::new();
 		for n in v_nodes.iter() {
 			let node = n.node.borrow();
 			let _ = queue.push(n.clone(), Reverse(node.pi + actions.get_int_upper_bound(node.var) - pi0));
 		}
 		while !queue.is_empty() {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
+			self.visit(s.clone());
 			let node_s = s.node.borrow();
-			let _ = ub.insert(node_s.var, gamma_s);
 			let bound = pi0 + gamma_s - node_s.pi;
 			if bound < get_cur_upper_bound(actions, new_ubs, node_s.var) {
 				if bound < actions.get_int_upper_bound(node_s.var) {
@@ -328,7 +343,7 @@ impl DifferenceLogicGraph {
 				let _ = new_ubs.insert(node_s.var, bound);  // todo requeue immediately for holes?
 				for edge in node_s.reverse_edges.iter(actions) {
 					let mut node_t = edge.node_ref.node.borrow_mut();
-					if !ub.contains_key(&node_t.var) {
+					if !node_t.visited {
 						let path = gamma_s + node_t.pi + edge.val - node_s.pi;
 						let old = queue.push_increase(edge.node_ref.clone(), Reverse(path));
 						if old.map_or(true, |Reverse(old_path)| path < old_path) {
@@ -425,10 +440,12 @@ impl DifferenceLogicBounds {
 
 		if !lb_changes.is_empty() {
 			self.graph.inc_lb(actions, lb_changes, new_lbs)?;
+			self.graph.finish_visit();
 		}
 
 		if !ub_changes.is_empty() {
 			self.graph.inc_ub(actions, ub_changes, new_ubs)?;
+			self.graph.finish_visit();
 		}
 
 		let mut lb_new_changes = Vec::new();
