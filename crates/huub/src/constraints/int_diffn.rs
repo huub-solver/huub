@@ -43,8 +43,8 @@ pub struct IntDiffnSweep {
 	fixed: TrailedInt,
 	/// Trailed int of fixed objects that no longer have to be considered
 	removed_objs: TrailedInt,
-    /// Are all sizes fixed
-    fixed_sizes: bool,
+	/// Are all sizes fixed
+	fixed_sizes: bool,
 	// bounded_box: BoundedBox
 }
 
@@ -95,16 +95,15 @@ impl IntDiffnSweep {
 			.flatten()
 			.all(|&v| solver.get_int_val(v).is_some());
 
-
 		let mut box_posn_prop: Vec<Vec<IntView>> = box_posn.clone();
 		let box_size_prop: Vec<Vec<IntView>> = box_size.clone();
 
-        // Do not consider objects that are fixed and have a size of 0 when non_strict
+		// Do not consider objects that are fixed and have a size of 0 when non_strict
 		if non_strict && fixed {
-            let box_size_fixed: Vec<Vec<IntVal>> = box_size
-                .iter()
-                .map(|row| row.iter().map(|&v| solver.get_int_lower_bound(v)).collect())
-                .collect();
+			let box_size_fixed: Vec<Vec<IntVal>> = box_size
+				.iter()
+				.map(|row| row.iter().map(|&v| solver.get_int_lower_bound(v)).collect())
+				.collect();
 
 			let contains_zero: Vec<usize> = box_size_fixed
 				.iter()
@@ -128,7 +127,7 @@ impl IntDiffnSweep {
 			println!("{:?}", box_posn_prop.len());
 		}
 
-        // Tracks whether an rectangles posn domains are fixed
+		// Tracks whether an rectangles posn domains are fixed
 		let fixed_trail = solver.new_trailed_int(0);
 		let remove_trail = solver.new_trailed_int(0);
 
@@ -139,7 +138,7 @@ impl IntDiffnSweep {
 				dimensions: box_posn[0].len(),
 				fixed: fixed_trail,
 				removed_objs: remove_trail,
-                fixed_sizes: fixed,
+				fixed_sizes: fixed,
 				//bounded_box: bounded_box_trail
 			}),
 			PriorityLevel::Lowest,
@@ -160,6 +159,7 @@ impl IntDiffnSweep {
 		ub_tracker: &Vec<Vec<IntVal>>,
 		curr_dimension: usize,
 		all_fr: &Vec<ForbiddenRegion>,
+		all_fr_explain: &Vec<ForbiddenRegion>
 	) -> Result<bool, Conflict> {
 		let mut sweep = vec![];
 		let mut jump = vec![];
@@ -192,7 +192,7 @@ impl IntDiffnSweep {
 				actions,
 				lb_tracker,
 				ub_tracker,
-				all_fr,
+				all_fr_explain,
 				fr_support,
 				curr_obj_idx,
 				curr_dimension,
@@ -225,6 +225,7 @@ impl IntDiffnSweep {
 		ub_tracker: &mut Vec<Vec<IntVal>>,
 		curr_dimension: usize,
 		all_fr: &Vec<ForbiddenRegion>,
+		all_fr_explain: &Vec<ForbiddenRegion>
 	) -> Result<bool, Conflict> {
 		let mut sweep = vec![];
 		let mut jump = vec![];
@@ -256,7 +257,7 @@ impl IntDiffnSweep {
 				actions,
 				lb_tracker,
 				ub_tracker,
-				all_fr,
+				all_fr_explain,
 				fr_support,
 				curr_obj_idx,
 				curr_dimension,
@@ -351,8 +352,10 @@ impl IntDiffnSweep {
 		lb_tracker: &Vec<Vec<IntVal>>,
 		ub_tracker: &Vec<Vec<IntVal>>,
 		dimensions: usize,
-	) -> Option<Vec<ForbiddenRegion>> {
-		let mut all_fr: Vec<ForbiddenRegion> = vec![];
+	) -> Option<(Vec<ForbiddenRegion>, Vec<ForbiddenRegion>)> {
+		let mut all_fr: Vec<ForbiddenRegion> = Vec::new();
+        // all forbidden regions but excluding the combine optimization from coalesce
+		let mut all_fr_no_combine: Vec<ForbiddenRegion> = Vec::new();
 		for i in 0..self.box_posn.len() {
 			// Check if the current object can be ignored
 			if actions.get_trailed_int(self.removed_objs) & (1 << i) != 0 {
@@ -385,37 +388,33 @@ impl IntDiffnSweep {
 			assert!(all_fr.len() == fr_support.len());
 			let mut regions_to_remove: Vec<(usize, usize)> = Vec::new();
 			if exists && Self::overlaps(&lb_tracker[o_idx], &ub_tracker[o_idx], &fr, dimensions) {
+                let fr_copy = fr.clone();
 				let mut c = 0;
 				for f in &mut all_fr {
 					let fr_object = fr_support[c];
-					let v = Self::coalesce(f, &fr, self.dimensions);
+					let (v, e) = Self::coalesce(f, &fr, self.dimensions);
 
-					match v {
-						// No overlap
-						0 => continue,
+					match (v, e) {
 						// fr is a subset of f
-						1 => {
+                        (0 | 1, _) => {
 							//Do not add f vector of forbidden regions and do not track
 							exists = false;
 							break;
 						}
 						// f is a subset of fr
-						2 => {
+                        (2, _) => {
 							// remove that forbidden region from all_fr and remove it from tracking
 							regions_to_remove.push((c, fr_object));
 						}
-						// they overlap whilst none is a subset of another
-						// we coalesce with
-						3 => {
-                            trace!("removed3");
+						// they overlap whilst none is a subset of another combine them
+                        (3, Some(e)) => {
+                            f.lb[e] = cmp::min(f.lb[e], fr.lb[e]);
+                            f.ub[e] = cmp::max(f.ub[e], fr.ub[e]);
+                            // exists = false;
 							break;
 						}
-						// The regions are equal TODO: Could we ignore one of them?
-						4 => {
-                            trace!("removed4");
-							exists = false;
-							break;
-						}
+						// No overlap possible
+                        (4, _) => continue,
 						_ => panic!("should not be possible"),
 					}
 					c = c + 1;
@@ -425,19 +424,21 @@ impl IntDiffnSweep {
 					assert!(fr_support[*c] == *o, "wrong fr support");
 					//println!("WOHOOO IGNORED WSHIT");
 					let _ = all_fr.remove(*c);
+					let _ = all_fr_no_combine.remove(*c);
 					fr_support.retain(|&x| x != *o);
 				}
 
 				if exists {
 					fr_support.push(i);
 					all_fr.push(fr);
+					all_fr_no_combine.push(fr_copy);
 				}
 			}
 		}
 		if all_fr.is_empty() {
 			None
 		} else {
-			Some(all_fr)
+			Some((all_fr, all_fr_no_combine))
 		}
 	}
 
@@ -478,45 +479,47 @@ impl IntDiffnSweep {
 		curr_dimension: usize,
 		all_fr: &Vec<ForbiddenRegion>,
 	) -> Option<IntVal> {
-        let mut feasible_lb = None;
-        let mut possible_lb: Vec<_> = all_fr
-            .into_iter()
-            .filter(|fr| fr.lb[curr_dimension] <= lb_tracker[curr_obj_idx][curr_dimension] - 1)
-            .map(|fr| fr.lb[curr_dimension])
-            .collect();
-        possible_lb.sort_by(|a, b| b.cmp(a));
+		let mut feasible_lb = None;
+		let mut possible_lb: Vec<_> = all_fr
+			.into_iter()
+			.filter(|fr| fr.lb[curr_dimension] <= lb_tracker[curr_obj_idx][curr_dimension] - 1)
+			.map(|fr| fr.lb[curr_dimension])
+			.collect();
+		possible_lb.sort_by(|a, b| b.cmp(a));
 
-        for &lb in &possible_lb {
-            let feasible_fr: Vec<_> = all_fr
-                .into_iter()
-                .filter(|fr| fr.lb[curr_dimension] <= lb)
-                .collect();
+		for &lb in &possible_lb {
+			let feasible_fr: Vec<_> = all_fr
+				.into_iter()
+				.filter(|fr| fr.lb[curr_dimension] <= lb)
+				.collect();
 
-            if feasible_fr.is_empty() { return feasible_lb }
+			if feasible_fr.is_empty() {
+				return feasible_lb;
+			}
 
-            // Check all other dimensions so that
-            for d in 0..self.dimensions {
-                if d == curr_dimension {
-                    continue;
-                }
-                let posn_ub = ub_tracker[curr_obj_idx][d];
-                let posn_lb = lb_tracker[curr_obj_idx][d];
-                let mut range_list: Vec<_> = (posn_lb..=posn_ub).collect();
+			// Check all other dimensions so that
+			for d in 0..self.dimensions {
+				if d == curr_dimension {
+					continue;
+				}
+				let posn_ub = ub_tracker[curr_obj_idx][d];
+				let posn_lb = lb_tracker[curr_obj_idx][d];
+				let mut range_list: Vec<_> = (posn_lb..=posn_ub).collect();
 
-                for fr in &feasible_fr {
-                    range_list.retain(|&v| v < fr.lb[d] || v > fr.ub[d]);
+				for fr in &feasible_fr {
+					range_list.retain(|&v| v < fr.lb[d] || v > fr.ub[d]);
 
-                    if range_list.is_empty() {
-                        feasible_lb = Some(lb);
-                        break;
-                    }
-                }
-                if !range_list.is_empty() {
-                    return feasible_lb;
-                }
-            }
-        }
-		return feasible_lb
+					if range_list.is_empty() {
+						feasible_lb = Some(lb);
+						break;
+					}
+				}
+				if !range_list.is_empty() {
+					return feasible_lb;
+				}
+			}
+		}
+		return feasible_lb;
 	}
 
 	// TODO: Very bad name
@@ -528,45 +531,46 @@ impl IntDiffnSweep {
 		curr_dimension: usize,
 		all_fr: &Vec<ForbiddenRegion>,
 	) -> Option<IntVal> {
-        let mut feasible_ub = None;
-        let mut possible_ub: Vec<_> = all_fr
-            .into_iter()
-            .filter(|fr| fr.ub[curr_dimension] >= ub_tracker[curr_obj_idx][curr_dimension] + 1)
-            .map(|fr| fr.ub[curr_dimension])
-            .collect();
+		let mut feasible_ub = None;
+		let mut possible_ub: Vec<_> = all_fr
+			.into_iter()
+			.filter(|fr| fr.ub[curr_dimension] >= ub_tracker[curr_obj_idx][curr_dimension] + 1)
+			.map(|fr| fr.ub[curr_dimension])
+			.collect();
 
-        possible_ub.sort();
-        for &ub in &possible_ub {
-            let feasible_fr: Vec<_> = all_fr
-                .into_iter()
-                .filter(|fr| fr.ub[curr_dimension] >= ub)
-                .collect();
+		possible_ub.sort();
+		for &ub in &possible_ub {
+			let feasible_fr: Vec<_> = all_fr
+				.into_iter()
+				.filter(|fr| fr.ub[curr_dimension] >= ub)
+				.collect();
 
-            if feasible_fr.is_empty() { return feasible_ub }
+			if feasible_fr.is_empty() {
+				return feasible_ub;
+			}
 
+			for d in 0..self.dimensions {
+				if d == curr_dimension {
+					continue;
+				}
+				let posn_ub = ub_tracker[curr_obj_idx][d];
+				let posn_lb = lb_tracker[curr_obj_idx][d];
+				let mut range_list: Vec<_> = (posn_lb..=posn_ub).collect();
 
-            for d in 0..self.dimensions {
-                if d == curr_dimension {
-                    continue;
-                }
-                let posn_ub = ub_tracker[curr_obj_idx][d];
-                let posn_lb = lb_tracker[curr_obj_idx][d];
-                let mut range_list: Vec<_> = (posn_lb..=posn_ub).collect();
-
-                for fr in &feasible_fr {
-                    range_list.retain(|&v| v < fr.lb[d] || v > fr.ub[d]);
-                    if range_list.is_empty() {
-                        feasible_ub = Some(ub);
-                        break;
-                    }
-                }
-                if !range_list.is_empty() {
-                    return feasible_ub;
-            }
-            }
-        }
-    return feasible_ub;
-    }
+				for fr in &feasible_fr {
+					range_list.retain(|&v| v < fr.lb[d] || v > fr.ub[d]);
+					if range_list.is_empty() {
+						feasible_ub = Some(ub);
+						break;
+					}
+				}
+				if !range_list.is_empty() {
+					return feasible_ub;
+				}
+			}
+		}
+		return feasible_ub;
+	}
 
 	/// Checks if two forbidden regions can be coalesced into one
 	/// Returns:
@@ -576,12 +580,13 @@ impl IntDiffnSweep {
 	/// 3 - The regions are overlapping such that
 	///     they are equal in all dimensions except 1
 	/// 4 - The forbidden regions are equal
-	fn coalesce(fr1: &mut ForbiddenRegion, fr2: &ForbiddenRegion, dimensions: usize) -> usize {
+	fn coalesce(fr1: &mut ForbiddenRegion, fr2: &ForbiddenRegion, dimensions: usize) -> (usize, Option<usize>) {
 		let mut trend = 0;
+        let mut e = None;
 		for d in 0..dimensions {
 			// No overlapping possible
 			if fr1.ub[d] + 1 < fr2.lb[d] || fr1.lb[d] > fr2.ub[d] + 1 {
-				return 0;
+				return (4, None);
 			// The regions are equal
 			} else if fr1.lb[d] == fr2.lb[d] && fr1.ub[d] == fr2.ub[d] {
 				continue;
@@ -589,52 +594,39 @@ impl IntDiffnSweep {
 			} else if fr1.lb[d] <= fr2.lb[d] && fr1.ub[d] >= fr2.ub[d] {
 				match trend {
 					0 | 1 => trend = 1,
-					_ => return 0,
+					_ => return (4, None),
 				}
 			// fr1 is a subset of fr2
 			} else if fr1.lb[d] >= fr2.lb[d] && fr1.ub[d] <= fr2.ub[d] {
 				match trend {
 					0 | 2 => trend = 2,
-					_ => return 0,
+					_ => return (4, None),
 				}
 			// They overlap, but not such one is a subset of another
 			// only allow this trend in one dimensions
 			} else {
+                e = Some(d);
 				match trend {
 					0 => trend = 3,
-					_ => return 0,
+					_ => return (4, None),
 				}
 			}
 		}
-
-		match trend {
-			0 => 4,
-			1 => 1,
-			2 => 2,
-			3 => {
-				// The regions looks something like:
-				// +--------+----+-------+
-				// |        |    |       |
-				// |        |    |       |
-				// +--------+----+-------+
-				// fr1.lb[e] = cmp::min(fr1.lb[e], fr2.lb[e]);
-				// fr1.ub[e] = cmp::max(fr1.ub[e], fr2.ub[e]);
-				3
-			}
-			_ => 0,
-		}
+        return (trend, e)
 	}
 
 	fn disjoint<P: PropagationActions>(
 		&self,
-        actions: &mut P,
+		actions: &mut P,
 		bounding_box: &ForbiddenRegion,
 		lb_tracker: &Vec<Vec<IntVal>>,
 		ub_tracker: &Vec<Vec<IntVal>>,
 		curr_obj_idx: usize,
 	) -> bool {
 		for d in 0..self.dimensions {
-			if ub_tracker[curr_obj_idx][d] + actions.get_int_lower_bound(self.box_size[curr_obj_idx][d]) - 1 < bounding_box.lb[d]
+			if ub_tracker[curr_obj_idx][d]
+				+ actions.get_int_lower_bound(self.box_size[curr_obj_idx][d])
+				- 1 < bounding_box.lb[d]
 				|| lb_tracker[curr_obj_idx][d] > bounding_box.ub[d]
 			{
 				return true;
@@ -655,9 +647,9 @@ impl IntDiffnSweep {
 		let mut reason: Vec<_> =
 			self.explain_fr_conflict(actions, fr_support, lb_tracker, ub_tracker);
 		for d in 0..self.dimensions {
-            if !self.fixed_sizes {
-                reason.push(actions.get_int_upper_bound_lit(self.box_size[curr_obj_idx][d]))
-            }
+			if !self.fixed_sizes {
+				reason.push(actions.get_int_upper_bound_lit(self.box_size[curr_obj_idx][d]))
+			}
 			reason.push(actions.get_int_lit(
 				self.box_posn[curr_obj_idx][d],
 				IntLitMeaning::Less(ub_tracker[curr_obj_idx][d] + 1),
@@ -743,9 +735,9 @@ impl IntDiffnSweep {
 		for (fr, &o_idx) in fr_support.iter().enumerate() {
 			// for o_idx in 0..self.box_posn.len() {
 			for d in 0..self.dimensions {
-                if !self.fixed_sizes {
-                    reason.push(actions.get_int_upper_bound_lit(self.box_size[o_idx][d]))
-                }
+				if !self.fixed_sizes {
+					reason.push(actions.get_int_upper_bound_lit(self.box_size[o_idx][d]))
+				}
 				let mut possible_ub = ub_tracker[o_idx][d];
 				let mut origin_ub = ub_tracker[curr_obj_idx][d];
 
@@ -753,7 +745,7 @@ impl IntDiffnSweep {
 				let mut origin_lb = lb_tracker[curr_obj_idx][d];
 
 				if d == curr_dimension && generalized_bound.is_some() {
-                    trace!("gen_bound");
+					trace!("gen_bound");
 					if prune_upper {
 						origin_ub = generalized_bound.unwrap();
 					} else {
@@ -766,14 +758,20 @@ impl IntDiffnSweep {
 				// }
 
 				//assert!(fr < all_fr.len());
-                trace!("fr lb {} origin ub {}", all_fr[fr].lb[d], origin_ub);
+				trace!("fr lb {} origin ub {}", all_fr[fr].lb[d], origin_ub);
 				if all_fr[fr].ub[d] > origin_ub {
 					// Calculate what the
 					trace!("generalized lb");
-                    // if origin_ub - self.box_size[o_idx][d] + 1 < possible_lb {
-                    trace!("forbidden region {} origin {}, size {}",all_fr[fr].ub[d], origin_ub, actions.get_int_lower_bound(self.box_size[o_idx][d]));
-                    possible_lb = origin_ub - actions.get_int_lower_bound(self.box_size[o_idx][d]) + 1;
-                    // }
+					// if origin_ub - self.box_size[o_idx][d] + 1 < possible_lb {
+					trace!(
+						"forbidden region {} origin {}, size {}",
+						all_fr[fr].ub[d],
+						origin_ub,
+						actions.get_int_lower_bound(self.box_size[o_idx][d])
+					);
+					possible_lb =
+						origin_ub - actions.get_int_lower_bound(self.box_size[o_idx][d]) + 1;
+					// }
 				}
 
 				// if !prune_upper && generalized_bound.is_some() && d == curr_dimension {
@@ -783,11 +781,17 @@ impl IntDiffnSweep {
 				if all_fr[fr].lb[d] < origin_lb {
 					// Calculate what the
 					trace!("generalized ub");
-                    //
-                // if origin_lb + self.box_size[curr_obj_idx][d] - 1 > possible_ub {
-                    trace!("forbidden region {} origin {}, size {}", all_fr[fr].lb[d], origin_lb, actions.get_int_lower_bound(self.box_size[curr_obj_idx][d]));
-                    possible_ub = origin_lb + actions.get_int_lower_bound(self.box_size[curr_obj_idx][d]) - 1;
-                    // }
+					//
+					// if origin_lb + self.box_size[curr_obj_idx][d] - 1 > possible_ub {
+					trace!(
+						"forbidden region {} origin {}, size {}",
+						all_fr[fr].lb[d],
+						origin_lb,
+						actions.get_int_lower_bound(self.box_size[curr_obj_idx][d])
+					);
+					possible_ub =
+						origin_lb + actions.get_int_lower_bound(self.box_size[curr_obj_idx][d]) - 1;
+					// }
 				}
 
 				reason.push(actions.get_int_lit(
@@ -855,19 +859,19 @@ impl IntDiffnSweep {
 					curr_dimension
 				);
 
-				reason.push(actions.get_int_lit(
-					self.box_posn[curr_obj_idx][curr_dimension],
-					IntLitMeaning::GreaterEq(lb_tracker[curr_obj_idx][curr_dimension]),
-				));
+				// reason.push(actions.get_int_lit(
+				// 	self.box_posn[curr_obj_idx][curr_dimension],
+				// 	IntLitMeaning::GreaterEq(lb_tracker[curr_obj_idx][curr_dimension]),
+				// ));
 
-				trace!(
-					"Reason [[var {:?} [{:?}, {:?}] < {:?}] in dimension {}",
-					curr_obj_idx,
-					lb_tracker[curr_obj_idx][curr_dimension],
-					ub_tracker[curr_obj_idx][curr_dimension],
-					lb_tracker[curr_obj_idx][curr_dimension],
-					curr_dimension
-				);
+				// trace!(
+				// 	"Reason [[var {:?} [{:?}, {:?}] < {:?}] in dimension {}",
+				// 	curr_obj_idx,
+				// 	lb_tracker[curr_obj_idx][curr_dimension],
+				// 	ub_tracker[curr_obj_idx][curr_dimension],
+				// 	lb_tracker[curr_obj_idx][curr_dimension],
+				// 	curr_dimension
+				// );
 			} else {
 				return (None, generalized_bound);
 			}
@@ -893,18 +897,18 @@ impl IntDiffnSweep {
 					v,
 					curr_dimension
 				);
-				reason.push(actions.get_int_lit(
-					self.box_posn[curr_obj_idx][curr_dimension],
-					IntLitMeaning::Less(ub_tracker[curr_obj_idx][curr_dimension] + 1),
-				));
-				trace!(
-					"Reason [[var {:?} [{:?}, {:?}] < {:?}] in dimension {}",
-					curr_obj_idx,
-					lb_tracker[curr_obj_idx][curr_dimension],
-					ub_tracker[curr_obj_idx][curr_dimension],
-					ub_tracker[curr_obj_idx][curr_dimension] + 1,
-					curr_dimension
-				)
+				// reason.push(actions.get_int_lit(
+				// 	self.box_posn[curr_obj_idx][curr_dimension],
+				// 	IntLitMeaning::Less(ub_tracker[curr_obj_idx][curr_dimension] + 1),
+				// ));
+				// trace!(
+				// 	"Reason [[var {:?} [{:?}, {:?}] < {:?}] in dimension {}",
+				// 	curr_obj_idx,
+				// 	lb_tracker[curr_obj_idx][curr_dimension],
+				// 	ub_tracker[curr_obj_idx][curr_dimension],
+				// 	ub_tracker[curr_obj_idx][curr_dimension] + 1,
+				// 	curr_dimension
+				// )
 			} else {
 				return (None, generalized_bound);
 			}
@@ -927,11 +931,10 @@ impl IntDiffnSweep {
 		let mut reason: Vec<_> = Vec::new();
 		let mut generalized_bound = None;
 		for d in 0..self.dimensions {
-            // If sizes are not fixed, add reason for them
-            if !self.fixed_sizes {
-                reason.push(actions.get_int_upper_bound_lit(self.box_size[curr_obj_idx][d]))
-            }
-
+			// If sizes are not fixed, add reason for them
+			if !self.fixed_sizes {
+				reason.push(actions.get_int_upper_bound_lit(self.box_size[curr_obj_idx][d]))
+			}
 
 			if d == curr_dimension {
 				let (r, bound) = self.add_generalized_bound(
@@ -947,31 +950,33 @@ impl IntDiffnSweep {
 				if r.is_some() {
 					reason.extend(r.unwrap());
 				} else {
-					reason.push(actions.get_int_lit(
-						self.box_posn[curr_obj_idx][d],
-						IntLitMeaning::Less(ub_tracker[curr_obj_idx][d] + 1),
-					));
-					trace!(
-						"Reason [[var {:?} [{:?}, {:?}] < {:?}] in dimension {}",
-						curr_obj_idx,
-						lb_tracker[curr_obj_idx][d],
-						ub_tracker[curr_obj_idx][d],
-						ub_tracker[curr_obj_idx][d] + 1,
-						d
-					);
-
-					reason.push(actions.get_int_lit(
-						self.box_posn[curr_obj_idx][d],
-						IntLitMeaning::GreaterEq(lb_tracker[curr_obj_idx][d]),
-					));
-					trace!(
-						"Reason [[var {:?} [{:?}, {:?}] >= {:?}] in dimension {}",
-						curr_obj_idx,
-						lb_tracker[curr_obj_idx][d],
-						ub_tracker[curr_obj_idx][d],
-						lb_tracker[curr_obj_idx][d],
-						d
-					);
+					if prune_upper {
+						reason.push(actions.get_int_lit(
+							self.box_posn[curr_obj_idx][d],
+							IntLitMeaning::Less(ub_tracker[curr_obj_idx][d] + 1),
+						));
+						trace!(
+							"Reason [[var {:?} [{:?}, {:?}] < {:?}] in dimension {}",
+							curr_obj_idx,
+							lb_tracker[curr_obj_idx][d],
+							ub_tracker[curr_obj_idx][d],
+							ub_tracker[curr_obj_idx][d] + 1,
+							d
+						);
+					} else {
+						reason.push(actions.get_int_lit(
+							self.box_posn[curr_obj_idx][d],
+							IntLitMeaning::GreaterEq(lb_tracker[curr_obj_idx][d]),
+						));
+						trace!(
+							"Reason [[var {:?} [{:?}, {:?}] >= {:?}] in dimension {}",
+							curr_obj_idx,
+							lb_tracker[curr_obj_idx][d],
+							ub_tracker[curr_obj_idx][d],
+							lb_tracker[curr_obj_idx][d],
+							d
+						);
+					}
 				}
 			} else {
 				reason.push(actions.get_int_lit(
@@ -1054,6 +1059,10 @@ where
 		//     let _ = actions.set_trailed_int(self.bounded_box.lb[i], i64::MAX);
 		//     let _ = actions.set_trailed_int(self.bounded_box.ub[i], i64::MIN);
 		// }
+        //
+        // 11000
+        // 10000
+        //
 
 		for o_idx in 0..self.box_posn.len() {
 			if actions.get_trailed_int(self.fixed) & (1 << o_idx) != 0 {
@@ -1086,7 +1095,7 @@ where
 			// }
 			let mut fr_support: Vec<usize> = Vec::new();
 
-			if let Some(all_fr) = self.generate_fr::<P>(
+			if let Some((all_fr, all_fr_explain)) = self.generate_fr::<P>(
 				actions,
 				&mut fr_support,
 				o_idx,
@@ -1125,6 +1134,7 @@ where
 						&ub_tracker,
 						d,
 						&all_fr,
+						&all_fr_explain,
 					)?;
 					if !fixed && !b1 {
 						// Conflict since there is no feasible origin in this dimension
@@ -1150,6 +1160,7 @@ where
 						&mut ub_tracker,
 						d,
 						&all_fr,
+						&all_fr_explain,
 					)?;
 					if !fixed && !b2 {
 						// Conflict since there is no feasible origin in this dimension
