@@ -1,6 +1,7 @@
 use expect_test::Expect;
 use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;
+use rangelist::RangeList;
 
 use crate::{
 	solver::{SolveResult, Value, View},
@@ -28,6 +29,46 @@ fn it_works() {
 	);
 }
 
+#[test]
+fn test_unify_int_impossible() {
+	let mut prb = Model::default();
+	let a = prb.new_int_var((1..=5).into());
+	let b = prb.new_int_var((1..=2).into());
+
+	let lin = (a * 2 - b * 5).eq(0);
+	prb += lin;
+
+	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+	let a = map.get_int(&mut slv, a);
+	let b = map.get_int(&mut slv, b);
+
+	assert_eq!(
+		slv.solve(|value| {
+			assert_eq!(value(a.into()), Value::Int(5));
+			assert_eq!(value(b.into()), Value::Int(2));
+		}),
+		SolveResult::Satisfied
+	);
+}
+
+#[test]
+fn test_unify_int_lin_view_domains() {
+	let mut prb = Model::default();
+	let a = prb.new_int_var(RangeList::from_iter([1..=1, 3..=3, 5..=5]));
+	let b = prb.new_int_var(RangeList::from_iter([1..=3]));
+
+	let lin = (a * 6 - b * 2).eq(0);
+	prb += lin;
+
+	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+	let a = map.get_int(&mut slv, a);
+	let b = map.get_int(&mut slv, b);
+
+	let (res, _, solns) = slv.get_all_solutions(&[a.into(), b.into()]);
+	assert_eq!(res, SolveResult::Complete);
+	assert_eq!(solns, vec![vec![Value::Int(1), Value::Int(3)]]);
+}
+
 impl Model {
 	pub(crate) fn assert_unsatisfiable(&mut self) {
 		let err: Result<(Solver, _), _> = self.to_solver(&InitConfig::default());
@@ -40,12 +81,12 @@ impl Model {
 
 impl Solver {
 	pub(crate) fn assert_all_solutions<V: Into<View> + Clone>(
-		&mut self,
+		self,
 		vars: &[V],
 		pred: impl Fn(&[Value]) -> bool,
 	) {
 		let vars: Vec<_> = vars.iter().map(|v| v.clone().into()).collect();
-		let status = self.all_solutions(&vars, |value| {
+		let (status, _) = self.all_solutions(&vars, |value| {
 			let mut soln = Vec::with_capacity(vars.len());
 			for var in &vars {
 				soln.push(value(*var));
@@ -59,9 +100,9 @@ impl Solver {
 		assert_eq!(self.solve(|_| unreachable!()), SolveResult::Unsatisfiable);
 	}
 
-	pub(crate) fn expect_solutions<V: Into<View> + Clone>(&mut self, vars: &[V], expected: Expect) {
+	pub(crate) fn expect_solutions<V: Into<View> + Clone>(self, vars: &[V], expected: Expect) {
 		let vars: Vec<_> = vars.iter().map(|v| v.clone().into()).collect();
-		let (status, mut solns) = self.get_all_solutions(&vars);
+		let (status, _, mut solns) = self.get_all_solutions(&vars);
 		assert_eq!(status, SolveResult::Complete);
 		solns.sort();
 		let solns = format!(

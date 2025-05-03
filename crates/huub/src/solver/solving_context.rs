@@ -140,7 +140,6 @@ impl<'a> SolvingContext<'a> {
 		while let Some(p) = self.state.propagator_queue.pop() {
 			debug_assert!(!self.state.failed);
 			debug_assert!(self.state.conflict.is_none());
-			self.state.enqueued[p] = false;
 			self.current_prop = p;
 			let prop = propagators[p].as_mut();
 			let res = prop.propagate(self);
@@ -207,6 +206,7 @@ impl ExplanationActions for SolvingContext<'_> {
 
 	delegate! {
 		to self.state {
+			fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning>;
 			fn try_int_lit(&self, var: IntView, meaning: IntLitMeaning) -> Option<BoolView>;
 			fn get_int_lit_relaxed(&mut self, var: IntView, meaning: IntLitMeaning) -> (BoolView, IntLitMeaning);
 			fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView;
@@ -240,7 +240,7 @@ impl PropagationActions for SolvingContext<'_> {
 					let reason = reason.build_reason(self);
 					trace!(lit = i32::from(lit), reason = ?reason, "propagate bool");
 					self.state.register_reason(lit, reason);
-					self.state.propagation_queue.push(lit);
+					self.state.propagation_queue.push_back(lit);
 					Ok(())
 				}
 			},
