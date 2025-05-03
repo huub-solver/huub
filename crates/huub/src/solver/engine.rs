@@ -420,8 +420,8 @@ impl PropagatorExtension for Engine {
 					let iv = IntView(IntViewInner::VarRef(iv));
 					debug_assert_eq!(self.state.get_int_val(iv), Some(i));
 				}
-				// We've been notified of all previous propagated literals (and their
-				// reasons were checked).
+				// We've been notified of the previous propagated literal (and its
+				// reason was checked).
 				debug_assert!(self.state.last_propagated.is_none());
 			}
 			// If there are no previous changes, run propagators
@@ -435,8 +435,8 @@ impl PropagatorExtension for Engine {
 			debug!(lit = i32::from(lit), "propagate");
 			#[cfg(debug_assertions)]
 			{
-				// (DEBUG ONLY) Store the propagated literals, so we know what explanations
-				// to check.
+				// (DEBUG ONLY) Store the propagated literal, so we know when to check
+				// the explanation.
 				self.state.last_propagated = Some(lit);
 			}
 			Some(lit)
