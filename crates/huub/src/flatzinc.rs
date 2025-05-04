@@ -22,10 +22,10 @@ use tracing::warn;
 
 use crate::{
 	abs_int, actions::SimplificationActions, all_different_int, array_element, array_maximum_int,
-	array_minimum_int, constraints::int_table::IntTable, cumulative, diffn_int, disjunctive_strict,
-	div_int, int_in_set_reif, pow_int, reformulate::ReformulationError, table_int, times_int,
-    BoolDecisionInner, BoolDecision, Branching, Decision, IntDecision, IntDecisionInner, IntLinExpr, IntSetVal,
-    IntVal, Model, NonZeroIntVal, ValueSelection, VariableSelection,
+	array_minimum_int, constraints::int_table::IntTable, diffn_int, disjunctive_strict, div_int,
+	int_in_set_reif, pow_int, reformulate::ReformulationError, table_int, times_int, BoolDecision,
+	BoolDecisionInner, Branching, Decision, IntDecision, IntDecisionInner, IntLinExpr, IntSetVal,
+	IntVal, Model, NonZeroIntVal, ValueSelection, VariableSelection,
 };
 
 #[derive(Error, Debug)]
@@ -1191,33 +1191,6 @@ where
 							},
 							found: c.args.len(),
 							expected: 3,
-						});
-					}
-				}
-				"huub_cumulative" => {
-					if let [start, duration, resource, bound] = c.args.as_slice() {
-						let start = self
-							.arg_array(start)?
-							.iter()
-							.map(|l| self.lit_int(l))
-							.try_collect();
-						let duration = self
-							.arg_array(duration)?
-							.iter()
-							.map(|l| self.lit_int(l))
-							.try_collect();
-						let resource = self
-							.arg_array(resource)?
-							.iter()
-							.map(|l| self.lit_int(l))
-							.try_collect();
-						let bound = self.arg_int(bound)?;
-						self.prb += cumulative(start?, duration?, resource?, bound);
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "huub_cumulative",
-							found: c.args.len(),
-							expected: 4,
 						});
 					}
 				}

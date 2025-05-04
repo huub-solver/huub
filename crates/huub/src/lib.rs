@@ -47,7 +47,6 @@ use crate::{
 	branchers::{BoolBrancher, IntBrancher, WarmStartBrancher},
 	constraints::{
 		bool_array_element::BoolDecisionArrayElement,
-		cumulative::Cumulative,
 		disjunctive_strict::DisjunctiveStrict,
 		int_abs::IntAbs,
 		int_all_different::IntAllDifferent,
@@ -256,19 +255,6 @@ pub fn diffn_int(
 	}
 }
 
-pub fn cumulative(
-	start: Vec<IntDecision>,
-	duration: Vec<IntDecision>,
-	resource: Vec<IntDecision>,
-	bound: IntDecision,
-) -> Cumulative {
-	Cumulative {
-		start,
-		duration,
-		resource,
-		bound,
-	}
-}
 /// Create a constraint that enforces that a result decision variable takes the
 /// value equal the element of the given array at the given index decision
 /// variable.
@@ -994,7 +980,6 @@ impl Model {
 		let status = match &mut con_obj {
 			ConstraintStore::IntAllDifferent(c) => c.simplify(self),
 			ConstraintStore::IntDiffn(c) => c.simplify(self),
-			ConstraintStore::Cumulative(c) => c.simplify(self),
 			ConstraintStore::IntValArrayElement(c) => c.simplify(self),
 			ConstraintStore::IntArrayMinimum(c) => c.simplify(self),
 			ConstraintStore::BoolDecisionArrayElement(c) => c.simplify(self),
@@ -1068,9 +1053,6 @@ impl Model {
 			}
 			ConstraintStore::IntDiffn(con) => {
 				<IntDiffn as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::Cumulative(con) => {
-				<Cumulative as Constraint<Model>>::initialize(con, &mut ctx);
 			}
 			ConstraintStore::IntValArrayElement(con) => {
 				<IntValArrayElement as Constraint<Model>>::initialize(con, &mut ctx);
@@ -1282,12 +1264,6 @@ impl AddAssign<IntAllDifferent> for Model {
 impl AddAssign<IntDiffn> for Model {
 	fn add_assign(&mut self, constraint: IntDiffn) {
 		self.add_constraint(ConstraintStore::IntDiffn(constraint));
-	}
-}
-
-impl AddAssign<Cumulative> for Model {
-	fn add_assign(&mut self, constraint: Cumulative) {
-		self.add_constraint(ConstraintStore::Cumulative(constraint));
 	}
 }
 

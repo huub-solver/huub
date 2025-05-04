@@ -20,13 +20,12 @@ use crate::{
 	},
 	constraints::{
 		bool_array_element::BoolDecisionArrayElement,
-		cumulative::Cumulative,
 		disjunctive_strict::DisjunctiveStrict,
 		int_abs::IntAbs,
 		int_all_different::IntAllDifferent,
-        int_diffn::IntDiffn,
 		int_array_element::{IntDecisionArrayElement, IntValArrayElement},
 		int_array_minimum::IntArrayMinimum,
+		int_diffn::IntDiffn,
 		int_div::IntDiv,
 		int_in_set::IntInSetReif,
 		int_linear::IntLinear,
@@ -99,7 +98,6 @@ pub(crate) enum ConstraintStore {
 	IntAbs(IntAbs),
 	IntAllDifferent(IntAllDifferent),
 	IntDiffn(IntDiffn),
-	Cumulative(Cumulative),
 	IntArrayMinimum(IntArrayMinimum),
 	IntDecisionArrayElement(IntDecisionArrayElement),
 	IntDiv(IntDiv),
@@ -264,9 +262,6 @@ impl ConstraintStore {
 			}
 			ConstraintStore::IntDiffn(con) => {
 				<IntDiffn as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::Cumulative(con) => {
-				<Cumulative as Constraint<Model>>::to_solver(con, &mut actions)
 			}
 			ConstraintStore::IntArrayMinimum(con) => {
 				<IntArrayMinimum as Constraint<Model>>::to_solver(con, &mut actions)
