@@ -351,8 +351,9 @@ impl IntDiffnSweep {
 		lb_tracker: &Vec<Vec<IntVal>>,
 		ub_tracker: &Vec<Vec<IntVal>>,
 		dimensions: usize,
-	) -> Option<Vec<ForbiddenRegion>> {
+	) -> Option<(Vec<ForbiddenRegion>, Vec<ForbiddenRegion>)> {
 		let mut all_fr: Vec<ForbiddenRegion> = Vec::new();
+        let mut all_fr_no_combine: Vec<ForbiddenRegion> = Vec::new();
         // all forbidden regions but excluding the combine optimization from coalesce
 		for i in 0..self.box_posn.len() {
 			// Check if the current object can be ignored
