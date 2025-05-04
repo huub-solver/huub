@@ -127,8 +127,8 @@ impl IntDiffnSweep {
 		}
 
 		// Tracks whether an rectangles posn domains are fixed
-		let fixed_trail = vec![solver.new_trailed_int(0); box_size.len()];
-		let remove_trail = vec![solver.new_trailed_int(0); box_size.len()];
+		let fixed_trail = (0..box_size.len()).map(|_| solver.new_trailed_int(0)).collect();
+		let remove_trail = (0..box_size.len()).map(|_| solver.new_trailed_int(0)).collect();
 
 		let prop = solver.add_propagator(
 			Box::new(Self {
@@ -1047,7 +1047,7 @@ where
 
 		for o_idx in 0..self.box_posn.len() {
             if actions.get_trailed_int(self.fixed[o_idx]) == 1 || actions.get_trailed_int(self.removed_objs[o_idx]) == 1{
-				//println!("SKIPPING OBJ");
+				//println!("SindexKIPPING OBJ");
 				continue;
 			}
 
