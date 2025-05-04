@@ -12,7 +12,6 @@ use crate::{
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, BoolView, IntView,
-		IntViewInner,
 	},
 	IntDecision, IntLitMeaning, IntVal,
 };
