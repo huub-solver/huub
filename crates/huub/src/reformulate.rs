@@ -31,7 +31,7 @@ use crate::{
 		int_pow::IntPow,
 		int_table::IntTable,
 		int_times::IntTimes,
-		int_value_precede::{SeqPrecedeChain, ValuePrecedeChain},
+		int_value_precede::{IntSeqPrecedeChain, IntValuePrecedeChain},
 		BoxedConstraint, BoxedPropagator, Constraint, SimplificationStatus,
 	},
 	helpers::linear_transform::LinearTransform,
@@ -104,11 +104,11 @@ pub(crate) enum ConstraintStore {
 	IntInSetReif(IntInSetReif),
 	IntLinear(IntLinear),
 	IntPow(IntPow),
+	IntSeqPrecedeChain(IntSeqPrecedeChain),
 	IntTable(IntTable),
 	IntTimes(IntTimes),
 	IntValArrayElement(IntValArrayElement),
-	SeqPrecedeChain(SeqPrecedeChain),
-	ValuePrecedeChain(ValuePrecedeChain),
+	IntValuePrecedeChain(IntValuePrecedeChain),
 	Other(BoxedConstraint),
 }
 
@@ -282,6 +282,9 @@ impl ConstraintStore {
 			ConstraintStore::IntPow(con) => {
 				<IntPow as Constraint<Model>>::to_solver(con, &mut actions)
 			}
+			ConstraintStore::IntSeqPrecedeChain(con) => {
+				<IntSeqPrecedeChain as Constraint<Model>>::to_solver(con, &mut actions)
+			}
 			ConstraintStore::IntTable(con) => {
 				<IntTable as Constraint<Model>>::to_solver(con, &mut actions)
 			}
@@ -291,11 +294,8 @@ impl ConstraintStore {
 			ConstraintStore::IntValArrayElement(con) => {
 				<IntValArrayElement as Constraint<Model>>::to_solver(con, &mut actions)
 			}
-			ConstraintStore::SeqPrecedeChain(con) => {
-				<SeqPrecedeChain as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::ValuePrecedeChain(con) => {
-				<ValuePrecedeChain as Constraint<Model>>::to_solver(con, &mut actions)
+			ConstraintStore::IntValuePrecedeChain(con) => {
+				<IntValuePrecedeChain as Constraint<Model>>::to_solver(con, &mut actions)
 			}
 			ConstraintStore::Other(con) => con.to_solver(&mut actions),
 		}
@@ -491,57 +491,21 @@ impl ReformulationMap {
 }
 
 impl ReformulationMapBuilder {
-	/// Get the representation of a Integer decision variable in the [`Solver`] or
-	/// create it if it does not yet exist.
-	///
-	/// Note that this method will function recursively (toghether with
-	/// [`Self::get_or_create_bool`]) to resolve aliased variables.
-	pub(crate) fn get_or_create_int<Oracle: PropagatingSolver<Engine>>(
-		&mut self,
-		model: &Model,
-		slv: &mut Solver<Oracle>,
-		iv: IntDecisionIndex,
-	) -> IntView {
-		use IntDecisionInner::*;
-
-		if let Some(v) = self.int_map[iv] {
-			return v;
+	/// Create the [`ReformulationMap`] object ensuring that all variables have a
+	/// representation in the [`Solver`].
+	pub(crate) fn finalize(self) -> ReformulationMap {
+		ReformulationMap {
+			bool_map: self
+				.bool_map
+				.into_iter()
+				.map(|v| v.expect("variable should be resolved before finalize()"))
+				.collect(),
+			int_map: self
+				.int_map
+				.into_iter()
+				.map(|v| v.expect("variable should be resolved before finalize()"))
+				.collect(),
 		}
-
-		let def = &model.int_vars[iv];
-		let view = match &def.domain {
-			Domain::Domain(dom) => {
-				let direct_enc = if self.int_eager_direct.contains(&iv) {
-					EncodingType::Eager
-				} else {
-					EncodingType::Lazy
-				};
-				let order_enc = if self.int_eager_order.contains(&iv)
-					|| self.int_eager_direct.contains(&iv)
-					|| dom.card() <= self.int_eager_limit
-				{
-					EncodingType::Eager
-				} else {
-					EncodingType::Lazy
-				};
-				IntVar::new_in(slv, dom.clone(), order_enc, direct_enc)
-			}
-			Domain::Alias(alias) => match alias.0 {
-				Var(idx) => self.get_or_create_int(model, slv, idx),
-				Const(c) => c.into(),
-				Linear(lt, idx) => {
-					let iv = self.get_or_create_int(model, slv, idx);
-					iv * lt.scale + lt.offset
-				}
-				Bool(lt, bv) => {
-					let bv = self.get_or_create_bool(model, slv, bv);
-					bv * lt.scale.get() + lt.offset
-				}
-			},
-		};
-
-		self.int_map[iv] = Some(view);
-		view
 	}
 
 	/// Get the representation of a Boolean decision variable in the [`Solver`] or
@@ -593,21 +557,57 @@ impl ReformulationMapBuilder {
 		}
 	}
 
-	/// Create the [`ReformulationMap`] object ensuring that all variables have a
-	/// representation in the [`Solver`].
-	pub(crate) fn finalize(self) -> ReformulationMap {
-		ReformulationMap {
-			bool_map: self
-				.bool_map
-				.into_iter()
-				.map(|v| v.expect("variable should be resolved before finalize()"))
-				.collect(),
-			int_map: self
-				.int_map
-				.into_iter()
-				.map(|v| v.expect("variable should be resolved before finalize()"))
-				.collect(),
+	/// Get the representation of a Integer decision variable in the [`Solver`] or
+	/// create it if it does not yet exist.
+	///
+	/// Note that this method will function recursively (toghether with
+	/// [`Self::get_or_create_bool`]) to resolve aliased variables.
+	pub(crate) fn get_or_create_int<Oracle: PropagatingSolver<Engine>>(
+		&mut self,
+		model: &Model,
+		slv: &mut Solver<Oracle>,
+		iv: IntDecisionIndex,
+	) -> IntView {
+		use IntDecisionInner::*;
+
+		if let Some(v) = self.int_map[iv] {
+			return v;
 		}
+
+		let def = &model.int_vars[iv];
+		let view = match &def.domain {
+			Domain::Domain(dom) => {
+				let direct_enc = if self.int_eager_direct.contains(&iv) {
+					EncodingType::Eager
+				} else {
+					EncodingType::Lazy
+				};
+				let order_enc = if self.int_eager_order.contains(&iv)
+					|| self.int_eager_direct.contains(&iv)
+					|| dom.card() <= self.int_eager_limit
+				{
+					EncodingType::Eager
+				} else {
+					EncodingType::Lazy
+				};
+				IntVar::new_in(slv, dom.clone(), order_enc, direct_enc)
+			}
+			Domain::Alias(alias) => match alias.0 {
+				Var(idx) => self.get_or_create_int(model, slv, idx),
+				Const(c) => c.into(),
+				Linear(lt, idx) => {
+					let iv = self.get_or_create_int(model, slv, idx);
+					iv * lt.scale + lt.offset
+				}
+				Bool(lt, bv) => {
+					let bv = self.get_or_create_bool(model, slv, bv);
+					bv * lt.scale.get() + lt.offset
+				}
+			},
+		};
+
+		self.int_map[iv] = Some(view);
+		view
 	}
 }
 

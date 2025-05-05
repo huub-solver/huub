@@ -23,8 +23,8 @@ use tracing::warn;
 use crate::{
 	abs_int, actions::SimplificationActions, all_different_int, array_element, array_maximum_int,
 	array_minimum_int, constraints::int_table::IntTable, disjunctive_strict, div_int,
-	int_in_set_reif, pow_int, reformulate::ReformulationError, seq_precede_chain, table_int,
-	times_int, value_precede_chain, BoolDecision, BoolDecisionInner, Branching, Decision,
+	int_in_set_reif, pow_int, reformulate::ReformulationError, seq_precede_chain_int, table_int,
+	times_int, value_precede_chain_int, BoolDecision, BoolDecisionInner, Branching, Decision,
 	IntDecision, IntDecisionInner, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal,
 	ValueSelection, VariableSelection,
 };
@@ -1297,7 +1297,7 @@ where
 						let args = self.arg_array(args)?;
 						let args: Result<Vec<_>, _> =
 							args.iter().map(|l| self.lit_int(l)).collect();
-						self.prb += seq_precede_chain(args?);
+						self.prb += seq_precede_chain_int(args?);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_seq_precede_chain",
@@ -1308,17 +1308,17 @@ where
 				}
 				"huub_value_precede_chain_int" => {
 					if let [values, variables] = c.args.as_slice() {
-						let values = self
+						let values: Vec<_> = self
 							.arg_array(values)?
 							.iter()
 							.map(|l| self.par_int(l))
 							.try_collect()?;
-						let variables = self
+						let variables: Vec<_> = self
 							.arg_array(variables)?
 							.iter()
 							.map(|l| self.lit_int(l))
 							.try_collect()?;
-						self.prb += value_precede_chain(values, variables);
+						self.prb += value_precede_chain_int(variables, values);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_value_precede_chain",
