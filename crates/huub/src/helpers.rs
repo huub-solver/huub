@@ -4,7 +4,7 @@
 pub(crate) mod linear_transform;
 pub(crate) mod opt_field;
 pub(crate) mod trailed_list;
-pub(crate) mod trailed_skip_list;
+pub(crate) mod trailed_open_list;
 
 use std::mem;
 
