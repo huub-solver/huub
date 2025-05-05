@@ -39,7 +39,7 @@ use crate::{
 	branchers::{BoxedBrancher, Decision},
 	constraints::{BoxedPropagator, Reason},
 	solver::{
-		activation_list::{ActivationList, IntEvent},
+		activation_list::{ActivationAction, ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
 		int_var::{IntVar, IntVarRef, OrderStorage},
 		queue::PropagatorQueue,
@@ -121,7 +121,7 @@ pub struct State {
 
 	// ---- Queueing Infrastructure ----
 	/// Boolean variable enqueueing information
-	pub(crate) bool_activation: HashMap<RawVar, Vec<PropRef>>,
+	pub(crate) bool_activation: HashMap<RawVar, Vec<ActivationAction>>,
 	/// Integer variable enqueueing information
 	pub(crate) int_activation: IndexVec<IntVarRef, ActivationList>,
 	/// Queue of propagators awaiting action
@@ -216,7 +216,24 @@ impl PropagatorExtension for Engine {
 				}
 				ctx.state.int_vars[r].notify_upper_bound(&mut ctx.state.trail, lb);
 
-				for prop in ctx.state.int_activation[r].activated_by(IntEvent::Fixed) {
+				for action in ctx.state.int_activation[r]
+					.clone()
+					.activated_by(IntEvent::Fixed)
+				{
+					let prop = match *action {
+						ActivationAction::Advise(prop, data) => {
+							if !self.propagators[prop].advise_of_int_change(
+								ctx.state,
+								IntView(IntViewInner::VarRef(r)),
+								IntEvent::Fixed,
+								data,
+							) {
+								continue;
+							}
+							prop
+						}
+						ActivationAction::Enqueue(prop) => prop,
+					};
 					ctx.state.propagator_queue.enqueue_propagator(prop);
 				}
 			}
@@ -301,14 +318,29 @@ impl PropagatorExtension for Engine {
 
 			// Enqueue based on direct literal
 			if !self.state.failed {
-				self.state.propagator_queue.enqueue_propagators(
-					self.state
-						.bool_activation
-						.get(&lit.var())
-						.into_iter()
-						.flatten()
-						.copied(),
-				);
+				for action in self
+					.state
+					.bool_activation
+					.get(&lit.var())
+					.cloned()
+					.into_iter()
+					.flatten()
+				{
+					let prop = match action {
+						ActivationAction::Advise(prop, data) => {
+							if !self.propagators[prop].advise_of_bool_change(
+								&mut self.state,
+								BoolView(BoolViewInner::Lit(lit)),
+								data,
+							) {
+								continue;
+							}
+							prop
+						}
+						ActivationAction::Enqueue(prop) => prop,
+					};
+					self.state.propagator_queue.enqueue_propagator(prop);
+				}
 			}
 
 			// Enqueue based on literal meaning in complex type
@@ -368,9 +400,23 @@ impl PropagatorExtension for Engine {
 				};
 				if !self.state.failed {
 					if let Some(event) = event {
-						self.state
-							.propagator_queue
-							.enqueue_propagators(self.state.int_activation[iv].activated_by(event));
+						for action in self.state.int_activation[iv].clone().activated_by(event) {
+							let prop = match *action {
+								ActivationAction::Advise(prop, data) => {
+									if !self.propagators[prop].advise_of_int_change(
+										&mut self.state,
+										IntView(IntViewInner::VarRef(iv)),
+										event,
+										data,
+									) {
+										continue;
+									}
+									prop
+								}
+								ActivationAction::Enqueue(prop) => prop,
+							};
+							self.state.propagator_queue.enqueue_propagator(prop);
+						}
 					}
 				}
 			}
