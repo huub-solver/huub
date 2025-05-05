@@ -19,18 +19,18 @@ use expect_test::expect_file;
 use crate::helpers::check_final;
 
 const OPTIMIZATION_INSTANCES: &[&str] = &[
+	"ccmcp_3_20_0",
 	"jobshop_la01",
 	"jobshop_la02",
 	"jobshop_la03",
 	"jobshop_la04",
 	"jobshop_la05",
 	"jobshop_newspaper",
+	"peaceable_queens_n5_q3",
 	"portal_10_9_10",
 	"radiation_i6_9",
 	"radiation_i8_9",
 	"svrp_s4_v2_c3",
-	"ccmcp_3_20_015_3",
-	"peaceable_queens_n5_q3",
 ];
 
 /// Benchmark an optimization problem (finding the optimal solution).

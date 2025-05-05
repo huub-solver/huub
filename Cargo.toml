@@ -72,10 +72,6 @@ inherits = "release"
 debug = true
 strip = "none"
 
-# The profile that 'cargo dist' will build with
-[profile.dist]
-inherits = "release"
-
 [profile.release]
 lto = "fat"
 codegen-units = 1
