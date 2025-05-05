@@ -4,8 +4,6 @@
 
 use std::cmp::{max, min};
 
-use tracing::trace;
-
 use crate::{
 	actions::{
 		ExplanationActions, InspectionActions, PropagatorInitActions, ReformulationActions,
@@ -159,7 +157,6 @@ impl SeqPrecedeChainBounds {
 
 	/// Do a full propagation run, requires checking all variables in both directions.
 	fn propagate_full<P: PropagationActions>(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		trace!("Initial pass");
 		let mut up = 0;
 		let mut low = 0;
 
@@ -169,7 +166,6 @@ impl SeqPrecedeChainBounds {
 				if actions.check_int_in_domain(v, up + 1) {
 					ub_v = up + 1;
 				}
-				trace!("Setting upper bound for var {i} to {}", up + 1);
 				actions.set_int_upper_bound(self.vars[i], up + 1, |a: &mut P| {
 					self.explain_upper(a, i, up + 1)
 				})?;
@@ -189,7 +185,6 @@ impl SeqPrecedeChainBounds {
 
 		for (i, &v) in self.vars.iter().enumerate().rev() {
 			if actions.get_trailed_int(self.first[low as usize]) == i as IntVal {
-				trace!("Setting lower bound for var {i} to {low}");
 				actions.set_int_lower_bound(self.vars[i], low, |a: &mut P| {
 					self.explain_lower(a, i, low)
 				})?;
@@ -223,13 +218,11 @@ impl SeqPrecedeChainBounds {
 		actions: &mut P,
 		mut k: IntVal,
 	) -> Result<(), Conflict> {
-		trace!("Repairing upper for {k}");
 		let mut i = actions.get_trailed_int(self.first[k as usize]);
 		let mut lim = self.get_upper_limit(actions, k as usize);
 
 		while i <= lim {
 			if actions.get_int_upper_bound(self.vars[i as usize]) > k {
-				trace!("Setting upper bound for var {i} to {k}");
 				actions.set_int_upper_bound(self.vars[i as usize], k, |a: &mut P| {
 					self.explain_upper(a, i as usize, k)
 				})?;
@@ -254,7 +247,6 @@ impl SeqPrecedeChainBounds {
 		}
 
 		if (i as usize) < self.vars.len() {
-			trace!("Hit right side border case with i={}, k={}", i - 1, k);
 			actions.set_int_lower_bound(self.vars[i as usize - 1], k, |a: &mut P| {
 				self.explain_lower(a, i as usize - 1, k)
 			})?;
@@ -270,13 +262,11 @@ impl SeqPrecedeChainBounds {
 		actions: &mut P,
 		mut k: IntVal,
 	) -> Result<(IntVal, IntVal), Conflict> {
-		trace!("Repairing lower for {k}");
 		let mut i = actions.get_trailed_int(self.last[k as usize]);
 		while k > 0 {
 			if actions.check_int_in_domain(self.vars[i as usize], k) {
 				let _ = actions.set_trailed_int(self.last[k as usize], i);
 				if actions.get_trailed_int(self.first[k as usize]) == i {
-					trace!("Setting lower bound for var {i} to {k}");
 					actions.set_int_lower_bound(self.vars[i as usize], k, |a: &mut P| {
 						self.explain_lower(a, i as usize, k)
 					})?;
@@ -289,7 +279,6 @@ impl SeqPrecedeChainBounds {
 
 			i -= 1;
 			if i < 0 {
-				trace!("Hit left side border case with i={}, k={}", i, k);
 				actions.set_int_lower_bound(self.vars[0], k, |a: &mut P| {
 					self.explain_lower(a, 0, k)
 				})?;
@@ -349,26 +338,6 @@ where
 {
 	#[tracing::instrument(name = "seq_precede_chain", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		trace!(
-			"Fixed assignments: {:?}",
-			self.vars
-				.iter()
-				.enumerate()
-				.filter_map(|(i, &v)| actions.get_int_val(v).map(|val| (i, val)))
-				.collect::<Vec<_>>()
-		);
-		/*for (i, &v) in self.vars.iter().enumerate() {
-			trace!("Domain of variable {i}: {:?}", (actions.get_int_lower_bound(v)..=actions.get_int_upper_bound(v))
-				.into_iter()
-				.map(|val| if actions.check_int_in_domain(v, val) {Some(val)} else {None})
-				.flatten()
-				.collect::<Vec<_>>());
-		}*/
-		/*trace!("first: {:?}", self.first.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		trace!("last: {:?}", self.last.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		trace!("first_val: {:?}", self.first_val.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		trace!("max_last: {:?}", actions.get_trailed_int(self.max_last));*/
-
 		if self.initialized {
 			// Check upper bound updates, only necessary for all elements in first, not all variables.
 			for (k, &t) in self.first.iter().enumerate() {
@@ -452,10 +421,6 @@ impl ValuePrecedeChainValue {
 	) -> Result<(), Conflict> {
 		for k in j..self.values.len() {
 			if actions.check_int_in_domain(self.vars[i], self.values[k]) {
-				trace!(
-					"Upper bound restriction on var {i} removing {}",
-					self.values[k]
-				);
 				actions.set_int_not_eq(self.vars[i], self.values[k], |a: &mut P| {
 					self.explain_upper(a, i, k)
 				})?;
@@ -508,7 +473,8 @@ impl ValuePrecedeChainValue {
 		Some(self.values.len() + 1)
 	}
 
-	/// Propagate a lower bound by excluding all elements outside values, and values with lower index.
+	/// Propagate a lower bound by excluding all elements outside values, and
+	/// values with lower index.
 	fn propagate_lower_bound<P: PropagationActions>(
 		&self,
 		actions: &mut P,
@@ -518,19 +484,11 @@ impl ValuePrecedeChainValue {
 		let lb = actions.get_int_lower_bound(self.vars[i]);
 		let ub = actions.get_int_upper_bound(self.vars[i]);
 		if lb < self.min_val {
-			trace!(
-				"Lower bound restriction on var {i} removing values <{}",
-				self.min_val
-			);
 			actions.set_int_lower_bound(self.vars[i], self.min_val, |a: &mut P| {
 				self.explain_lower(a, i, j)
 			})?;
 		}
 		if ub > self.max_val {
-			trace!(
-				"Lower bound restriction on var {i} removing values >{}",
-				self.max_val
-			);
 			actions.set_int_upper_bound(self.vars[i], self.max_val, |a: &mut P| {
 				self.explain_lower(a, i, j)
 			})?;
@@ -542,17 +500,12 @@ impl ValuePrecedeChainValue {
 				break;
 			}
 			if actions.check_int_in_domain(self.vars[i], h) {
-				trace!("Lower bound restriction on var {i} removing hole {h}");
 				actions.set_int_not_eq(self.vars[i], h, |a: &mut P| self.explain_lower(a, i, j))?;
 			}
 			h += 1;
 		}
 		for k in 0..j - 1 {
 			if actions.check_int_in_domain(self.vars[i], self.values[k]) {
-				trace!(
-					"Lower bound restriction on var {i} removing {}",
-					self.values[k]
-				);
 				actions.set_int_not_eq(self.vars[i], self.values[k], |a: &mut P| {
 					self.explain_lower(a, i, j)
 				})?;
@@ -561,8 +514,8 @@ impl ValuePrecedeChainValue {
 		Ok(())
 	}
 
-	/// Lower bound explanation: Could not have this index earlier (=upper bound explanation)
-	/// and some later index requires the lower bound.
+	/// Lower bound explanation: Could not have this index earlier (=upper bound
+	/// explanation) and some later index requires the lower bound.
 	fn explain_lower<P: PropagationActions>(
 		&self,
 		actions: &mut P,
@@ -577,9 +530,12 @@ impl ValuePrecedeChainValue {
 	}
 
 	/// 3 cases:
-	/// - Current lower bound index is above k - This is the value that required the earlier lower bound.
-	/// - Index k is in the domain of var i - Go one step up and to the next variable.
-	/// - Index k is not in the domain of var i - i can be anything else, go to next variable.
+	/// - Current lower bound index is above k - This is the value that required
+	/// the earlier lower bound.
+	/// - Index k is in the domain of var i - Go one step
+	/// up and to the next variable.
+	/// - Index k is not in the domain of var i - i
+	/// can be anything else, go to next variable.
 	fn ex_l<P: PropagationActions>(&self, actions: &mut P, i: usize, j: usize) -> Vec<BoolView> {
 		if let Some(lb) = self.get_lower_bound(actions, i) {
 			if lb > j {
@@ -612,9 +568,9 @@ impl ValuePrecedeChainValue {
 		v
 	}
 
-	/// Do a full propagation run, requires checking all variables in both directions.
+	/// Do a full propagation run, requires checking all variables in both
+	/// directions.
 	fn propagate_full<P: PropagationActions>(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		trace!("Initial pass");
 		let mut up = 0;
 		let mut low = 0;
 
@@ -652,7 +608,8 @@ impl ValuePrecedeChainValue {
 		Ok(())
 	}
 
-	/// Get the latest occurrence of value index k, or the maximum variable index if there is no latest.
+	/// Get the latest occurrence of value index k, or the maximum variable index
+	/// if there is no latest.
 	fn get_upper_limit<P: PropagationActions>(&self, actions: &mut P, k: usize) -> IntVal {
 		min(
 			actions.get_trailed_int(self.last[k]),
@@ -660,13 +617,13 @@ impl ValuePrecedeChainValue {
 		)
 	}
 
-	/// Iteratively repair the upper bounds starting with k, only iterates as far as necessary.
+	/// Iteratively repair the upper bounds starting with k, only iterates as far
+	/// as necessary.
 	fn repair_upper<P: PropagationActions>(
 		&self,
 		actions: &mut P,
 		mut k: usize,
 	) -> Result<(), Conflict> {
-		trace!("Repairing upper for {k}");
 		let mut i = actions.get_trailed_int(self.first[k]);
 		let mut lim = self.get_upper_limit(actions, k);
 
@@ -688,7 +645,6 @@ impl ValuePrecedeChainValue {
 		}
 
 		if (i as usize) < self.vars.len() {
-			trace!("Hit right side border case with i={}, k={}", i - 1, k);
 			self.propagate_lower_bound(actions, i as usize - 1, k)?;
 			return Ok(()); //todo There is a conflict now, but it might need propagation to trigger
 		}
@@ -703,7 +659,6 @@ impl ValuePrecedeChainValue {
 		actions: &mut P,
 		mut k: usize,
 	) -> Result<(usize, usize), Conflict> {
-		trace!("Repairing lower for {k}");
 		let mut i = actions.get_trailed_int(self.last[k]);
 		while k > 0 {
 			if actions.check_int_in_domain(self.vars[i as usize], self.values[k - 1]) {
@@ -719,7 +674,6 @@ impl ValuePrecedeChainValue {
 
 			i -= 1;
 			if i < 0 {
-				trace!("Hit left side border case with i={}, k={}", i, k);
 				self.propagate_lower_bound(actions, 0, k)?;
 				return Ok((0, k)); //todo There is a conflict now, but it might need propagation to trigger
 			}
@@ -731,7 +685,8 @@ impl ValuePrecedeChainValue {
 		Ok((i as usize, 0))
 	}
 
-	/// Create a new [`ValuePrecedeChainValue`] propagator and post it in the solver.
+	/// Create a new [`ValuePrecedeChainValue`] propagator and post it in the
+	/// solver.
 	pub fn new_in<P: PropagatorInitActions + ?Sized>(
 		solver: &mut P,
 		values: Vec<IntVal>,
@@ -777,7 +732,6 @@ impl ValuePrecedeChainValue {
 		for (i, &val) in values.iter().enumerate() {
 			mapping[(val - min_val) as usize] = Some(i + 1);
 		}
-		trace!("Values has min {min_val}, max {max_val}, and holes {holes:?}, with min {min_hole} and next {next_hole:?}, and mapping {mapping:?}");
 
 		let prop = solver.add_propagator(
 			Box::new(Self {
@@ -812,26 +766,6 @@ where
 {
 	#[tracing::instrument(name = "value_precede_chain", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		trace!(
-			"Fixed assignments: {:?}",
-			self.vars
-				.iter()
-				.enumerate()
-				.filter_map(|(i, &v)| actions.get_int_val(v).map(|val| (i, val)))
-				.collect::<Vec<_>>()
-		);
-		/*for (i, &v) in self.vars.iter().enumerate() {
-			trace!("Domain of variable {i}: {:?}", (actions.get_int_lower_bound(v)..=actions.get_int_upper_bound(v))
-				.into_iter()
-				.map(|val| if actions.check_int_in_domain(v, val) {Some(val)} else {None})
-				.flatten()
-				.collect::<Vec<_>>());
-		}
-		trace!("first: {:?}", self.first.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		trace!("last: {:?}", self.last.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		trace!("first_val: {:?}", self.first_val.iter().map(|&t| actions.get_trailed_int(t)).collect::<Vec<_>>());
-		trace!("max_last: {:?}", actions.get_trailed_int(self.max_last));*/
-
 		if self.initialized {
 			// Check upper bound updates, only necessary for all elements in first, not all variables.
 			for (k, &t) in self.first.iter().enumerate().skip(1) {
