@@ -91,7 +91,7 @@ impl<'a> SolvingContext<'a> {
 		Self {
 			slv,
 			state,
-			current_prop: PropRef::new(u32::MAX as usize),
+			current_prop: PropRef::new(i32::MAX as usize),
 		}
 	}
 
@@ -160,7 +160,7 @@ impl<'a> SolvingContext<'a> {
 			let prop = propagators[p].as_mut();
 			let res = prop.propagate(self);
 			self.state.statistics.propagations += 1;
-			self.current_prop = PropRef::new(u32::MAX as usize);
+			self.current_prop = PropRef::new(i32::MAX as usize);
 			if let Err(Conflict { subject, reason }) = res {
 				let clause: Clause = reason.explain(propagators, self.state, subject);
 				trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "conflict detected");

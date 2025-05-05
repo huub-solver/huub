@@ -32,9 +32,10 @@ use crate::{
 	},
 	reformulate::ReformulationError,
 	solver::{
+		activation_list::IntEvent,
 		engine::{PropRef, State},
 		solving_context::SolvingContext,
-		BoolView, BoolViewInner,
+		BoolView, BoolViewInner, IntView,
 	},
 	Conjunction, Model,
 };
@@ -137,6 +138,39 @@ where
 	P: PropagationActions,
 	E: ExplanationActions,
 {
+	/// Advises the propagator that the solver is backtracking.
+	fn advise_of_backtrack(&mut self, actions: &mut E) {
+		let _ = actions;
+		unreachable!("propagator did not provide a backtrack advisor implementation")
+	}
+
+	/// Advises the propagator that a [`BoolView`] is assigned with the associated
+	/// data given when registering the advisor. If the advisor returns `true`,
+	/// then the propagator will be enqueued.
+	fn advise_of_bool_change(&mut self, actions: &mut E, view: BoolView, data: u64) -> bool {
+		let _ = actions;
+		let _ = view;
+		let _ = data;
+		unreachable!("propagator did not provide a Boolean advisor implementation")
+	}
+
+	/// Advises the propagator that a [`IntView`] has changed with the associated
+	/// data given when registering the advisor. If the advisor returns `true`,
+	/// then the propagator will be enqueued.
+	fn advise_of_int_change(
+		&mut self,
+		actions: &mut E,
+		view: IntView,
+		event: IntEvent,
+		data: u64,
+	) -> bool {
+		let _ = actions;
+		let _ = view;
+		let _ = event;
+		let _ = data;
+		unreachable!("propagator did not provide an integer advisor implementation")
+	}
+
 	/// The propagate method is called during the search process to allow the
 	/// propagator to enforce
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
