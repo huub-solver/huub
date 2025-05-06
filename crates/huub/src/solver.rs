@@ -39,7 +39,7 @@ use crate::{
 	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::InitConfig,
 	solver::{
-		activation_list::IntPropCond,
+		activation_list::{ActivationAction, IntPropCond},
 		engine::{trace_new_lit, Engine, PropRef},
 		int_var::{DirectStorage, IntVarRef, LazyLitDef, OrderStorage},
 		queue::{PriorityLevel, PropagatorInfo},
@@ -1101,6 +1101,51 @@ impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle>
 		p
 	}
 
+	fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView, data: u64) {
+		match var.0 {
+			BoolViewInner::Lit(lit) => {
+				self.engine_mut().state.trail.grow_to_boolvar(lit.var());
+				self.oracle.add_observed_var(lit.var());
+				self.engine_mut()
+					.state
+					.bool_activation
+					.entry(lit.var())
+					.or_default()
+					.push(ActivationAction::Advise(prop, data));
+			}
+			BoolViewInner::Const(_) => {}
+		}
+	}
+
+	fn advise_on_int_change(
+		&mut self,
+		prop: PropRef,
+		var: IntView,
+		condition: IntPropCond,
+		data: u64,
+	) {
+		let (var, cond) = match var.0 {
+			IntViewInner::VarRef(var) => (var, condition),
+			IntViewInner::Linear { transformer, var } => {
+				let condition = if transformer.positive_scale() {
+					condition
+				} else {
+					match condition {
+						IntPropCond::LowerBound => IntPropCond::UpperBound,
+						IntPropCond::UpperBound => IntPropCond::LowerBound,
+						_ => condition,
+					}
+				};
+				(var, condition)
+			}
+			IntViewInner::Const(_) => return, // ignore
+			IntViewInner::Bool { lit, .. } => {
+				return self.advise_on_bool_change(prop, BoolView(BoolViewInner::Lit(lit)), data)
+			}
+		};
+		self.engine_mut().state.int_activation[var].add(ActivationAction::Advise(prop, data), cond);
+	}
+
 	fn enqueue_now(&mut self, prop: PropRef) {
 		let state = &mut self.engine_mut().state;
 		state.propagator_queue.enqueue_propagator(prop);
@@ -1116,7 +1161,7 @@ impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle>
 					.bool_activation
 					.entry(lit.var())
 					.or_default()
-					.push(prop);
+					.push(ActivationAction::Enqueue(prop));
 			}
 			BoolViewInner::Const(_) => {}
 		}
@@ -1142,7 +1187,7 @@ impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle>
 				return self.enqueue_on_bool_change(prop, BoolView(BoolViewInner::Lit(lit)))
 			}
 		};
-		self.engine_mut().state.int_activation[var].add(prop, cond);
+		self.engine_mut().state.int_activation[var].add(ActivationAction::Enqueue(prop), cond);
 	}
 
 	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {

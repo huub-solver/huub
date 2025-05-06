@@ -220,16 +220,41 @@ pub trait PropagatorInitActions: AsDynClauseDatabase + ClauseDatabase + Decision
 	/// Add a propagator to the solver.
 	fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef;
 
+	/// Advise a propagator when a [`BoolView`] is assigned, allowing the
+	/// propagator to decide whether to enqueue itself.
+	///
+	/// Different from enqueueing, the propagator is always advised of the
+	/// assignment, not just when it is not yet enqueued.
+	///
+	/// This will call [`Propagator::advise_of_bool_change`] on the propagator.
+	fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView, data: u64);
+
+	/// Advise a propagator when an [`IntView`] is changed according to the given
+	/// propagation condition, allowing the propagator to decide whether to
+	/// enqueue itself.
+	///
+	/// Different from enqueueing, the propagator is always advised of the
+	/// integer change, not just when it is not yet enqueued.
+	///
+	/// This will call [`Propagator::advise_of_int_change`] on the propagator.
+	fn advise_on_int_change(
+		&mut self,
+		prop: PropRef,
+		var: IntView,
+		condition: IntPropCond,
+		data: u64,
+	);
+
 	/// Create a new trailed integer value with the given initial value.
 	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt;
 
 	/// Enqueue a propagator to be activated at the root node.
 	fn enqueue_now(&mut self, prop: PropRef);
 
-	/// Enqueue a propagator to be enqueued when a boolean variable is assigned.
+	/// Enqueue a propagator to be enqueued when a [`BoolView`] is assigned.
 	fn enqueue_on_bool_change(&mut self, prop: PropRef, var: BoolView);
 
-	/// Enqueue a propagator to be enqueued when an integer variable is changed
+	/// Enqueue a propagator to be enqueued when an [`IntView`] is changed
 	/// according to the given propagation condition.
 	fn enqueue_on_int_change(&mut self, prop: PropRef, var: IntView, condition: IntPropCond);
 }

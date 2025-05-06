@@ -39,7 +39,7 @@ use crate::{
 	branchers::{BoxedBrancher, Decision},
 	constraints::{BoxedPropagator, Reason},
 	solver::{
-		activation_list::{ActivationList, IntEvent},
+		activation_list::{ActivationAction, ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
 		int_var::{IntVar, IntVarRef, OrderStorage},
 		queue::PropagatorQueue,
@@ -47,7 +47,7 @@ use crate::{
 		trail::{Trail, TrailedInt},
 		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, SolverConfiguration,
 	},
-	Clause, Conjunction, IntVal,
+	Clause, IntVal,
 };
 
 #[derive(Debug, Default, Clone)]
@@ -98,7 +98,7 @@ pub struct State {
 	/// Includes lower and upper bounds for integer variables and Boolean variable assignments
 	pub(crate) trail: Trail,
 	/// Literals to be propagated by the oracle
-	pub(crate) propagation_queue: Conjunction,
+	pub(crate) propagation_queue: VecDeque<RawLit>,
 	/// Reasons for setting values
 	pub(crate) reason_map: HashMap<RawLit, Reason>,
 	/// Whether conflict has (already) been detected
@@ -121,7 +121,7 @@ pub struct State {
 
 	// ---- Queueing Infrastructure ----
 	/// Boolean variable enqueueing information
-	pub(crate) bool_activation: HashMap<RawVar, Vec<PropRef>>,
+	pub(crate) bool_activation: HashMap<RawVar, Vec<ActivationAction>>,
 	/// Integer variable enqueueing information
 	pub(crate) int_activation: IndexVec<IntVarRef, ActivationList>,
 	/// Queue of propagators awaiting action
@@ -129,10 +129,10 @@ pub struct State {
 
 	// ---- Debugging Helpers ----
 	#[cfg(debug_assertions)]
-	/// The literals last emited by the [`PropagatorExtension::propagate`] method.
-	/// These literals will have their reasons checked when they are seen again in
+	/// This literal was last emited by the [`PropagatorExtension::propagate`]
+	/// method. It will have its reasons checked when it is seen again in
 	/// [`PropagatorExtension::notify_assignments`].
-	pub(crate) check_reason: std::collections::HashSet<RawLit>,
+	pub(crate) last_propagated: Option<RawLit>,
 	#[cfg(debug_assertions)]
 	/// List of integer variables that have been notified as fixed, but should be
 	/// checked that the bounds match before propagation.
@@ -216,7 +216,24 @@ impl PropagatorExtension for Engine {
 				}
 				ctx.state.int_vars[r].notify_upper_bound(&mut ctx.state.trail, lb);
 
-				for prop in ctx.state.int_activation[r].activated_by(IntEvent::Fixed) {
+				for action in ctx.state.int_activation[r]
+					.clone()
+					.activated_by(IntEvent::Fixed)
+				{
+					let prop = match *action {
+						ActivationAction::Advise(prop, data) => {
+							if !self.propagators[prop].advise_of_int_change(
+								ctx.state,
+								IntView(IntViewInner::VarRef(r)),
+								IntEvent::Fixed,
+								data,
+							) {
+								continue;
+							}
+							prop
+						}
+						ActivationAction::Enqueue(prop) => prop,
+					};
 					ctx.state.propagator_queue.enqueue_propagator(prop);
 				}
 			}
@@ -289,8 +306,9 @@ impl PropagatorExtension for Engine {
 			{
 				// (DEBUG ONLY) if we propagated this literal, ensure its explanation is
 				// valid in its trail position.
-				if self.state.check_reason.contains(&lit) {
+				if self.state.last_propagated == Some(lit) {
 					self.debug_check_reason(lit);
+					self.state.last_propagated = None;
 				}
 			}
 
@@ -300,14 +318,29 @@ impl PropagatorExtension for Engine {
 
 			// Enqueue based on direct literal
 			if !self.state.failed {
-				self.state.propagator_queue.enqueue_propagators(
-					self.state
-						.bool_activation
-						.get(&lit.var())
-						.into_iter()
-						.flatten()
-						.copied(),
-				);
+				for action in self
+					.state
+					.bool_activation
+					.get(&lit.var())
+					.cloned()
+					.into_iter()
+					.flatten()
+				{
+					let prop = match action {
+						ActivationAction::Advise(prop, data) => {
+							if !self.propagators[prop].advise_of_bool_change(
+								&mut self.state,
+								BoolView(BoolViewInner::Lit(lit)),
+								data,
+							) {
+								continue;
+							}
+							prop
+						}
+						ActivationAction::Enqueue(prop) => prop,
+					};
+					self.state.propagator_queue.enqueue_propagator(prop);
+				}
 			}
 
 			// Enqueue based on literal meaning in complex type
@@ -367,9 +400,23 @@ impl PropagatorExtension for Engine {
 				};
 				if !self.state.failed {
 					if let Some(event) = event {
-						self.state
-							.propagator_queue
-							.enqueue_propagators(self.state.int_activation[iv].activated_by(event));
+						for action in self.state.int_activation[iv].clone().activated_by(event) {
+							let prop = match *action {
+								ActivationAction::Advise(prop, data) => {
+									if !self.propagators[prop].advise_of_int_change(
+										&mut self.state,
+										IntView(IntViewInner::VarRef(iv)),
+										event,
+										data,
+									) {
+										continue;
+									}
+									prop
+								}
+								ActivationAction::Enqueue(prop) => prop,
+							};
+							self.state.propagator_queue.enqueue_propagator(prop);
+						}
 					}
 				}
 			}
@@ -398,10 +445,17 @@ impl PropagatorExtension for Engine {
 	}
 
 	#[tracing::instrument(level = "debug", skip(self, slv), fields(level = self.state.decision_level()))]
-	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Vec<RawLit> {
+	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Option<RawLit> {
 		// Check whether there are previous clauses to be communicated
 		if !self.state.clauses.is_empty() {
-			return Vec::new();
+			return None;
+		}
+		while let Some(&lit) = self.state.propagation_queue.front() {
+			if self.state.trail.get_sat_value(lit) == Some(true) {
+				let _ = self.state.propagation_queue.pop_front();
+			} else {
+				break;
+			}
 		}
 		if self.state.propagation_queue.is_empty() && self.state.conflict.is_none() {
 			#[cfg(debug_assertions)]
@@ -412,34 +466,29 @@ impl PropagatorExtension for Engine {
 					let iv = IntView(IntViewInner::VarRef(iv));
 					debug_assert_eq!(self.state.get_int_val(iv), Some(i));
 				}
+				// We've been notified of the previous propagated literal (and its
+				// reason was checked).
+				debug_assert!(self.state.last_propagated.is_none());
 			}
 			// If there are no previous changes, run propagators
 			SolvingContext::new(slv, &mut self.state).run_propagators(&mut self.propagators);
 		}
 		// Check whether there are new clauses that need to be communicated first
 		if !self.state.clauses.is_empty() {
-			return Vec::new();
+			return None;
 		}
-		let queue = mem::take(&mut self.state.propagation_queue);
-		if queue.is_empty() {
-			return Vec::new(); // Early return to avoid tracing statements
+		if let Some(lit) = self.state.propagation_queue.pop_front() {
+			debug!(lit = i32::from(lit), "propagate");
+			#[cfg(debug_assertions)]
+			{
+				// (DEBUG ONLY) Store the propagated literal, so we know when to check
+				// the explanation.
+				self.state.last_propagated = Some(lit);
+			}
+			Some(lit)
+		} else {
+			None
 		}
-		debug!(
-			lits = ?queue
-				.iter()
-				.map(|&x| i32::from(x))
-				.collect::<Vec<i32>>(),
-			"propagate"
-		);
-
-		#[cfg(debug_assertions)]
-		{
-			// (DEBUG ONLY) Store the propagated literals, so we know what explanations
-			// to check.
-			self.state.check_reason = queue.iter().cloned().collect();
-		}
-
-		queue
 	}
 
 	fn reason_persistence(&self) -> ClausePersistence {
@@ -511,7 +560,7 @@ impl State {
 		#[cfg(debug_assertions)]
 		{
 			// (DEBUG ONLY) Clear the debug checking queues.
-			self.check_reason.clear();
+			self.last_propagated = None;
 			self.check_int_fixed.clear();
 		}
 		// Backtrack trail

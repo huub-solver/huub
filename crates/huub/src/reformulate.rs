@@ -390,6 +390,8 @@ impl PropagatorInitActions for ReformulationContext<'_> {
 	delegate! {
 		to self.slv {
 			fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef;
+			fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView, data: u64);
+			fn advise_on_int_change(&mut self, prop: PropRef, var: IntView, condition: IntPropCond, data: u64);
 			fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt;
 			fn enqueue_now(&mut self, prop: PropRef);
 			fn enqueue_on_bool_change(&mut self, prop: PropRef, var: BoolView);
