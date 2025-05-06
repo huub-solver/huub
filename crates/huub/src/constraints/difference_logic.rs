@@ -11,7 +11,7 @@ use std::rc::Rc;
 use itertools::Itertools;
 use priority_queue::PriorityQueue;
 use tracing::trace;
-use crate::solver::activation_list::IntPropCond;
+use crate::solver::activation_list::{IntEvent, IntPropCond};
 use crate::solver::{BoolView, IntLitMeaning};
 use crate::{actions::{
 	ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
@@ -21,7 +21,6 @@ use crate::{actions::{
 use crate::actions::InspectionActions;
 use crate::helpers::trailed_list::TrailedList;
 use crate::helpers::trailed_open_list::{TrailedOpenList, TrailedOpenListIterator};
-use crate::solver::trail::TrailedInt;
 
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -206,7 +205,7 @@ impl DifferenceLogicGraph {
 		edge.to.node.borrow_mut().reverse_edges.push(actions, index);
 	}
 
-	/// Close the implied edge given by the index. 
+	/// Close the implied edge given by the index.
 	/// Return true if the edge got closed by this call, false if it was already closed.
 	fn close_imp_edge<P: PropagationActions>(&mut self, actions: &mut P, index: usize) -> bool {
 		let from = &self.edges[index].from.clone();
@@ -280,7 +279,7 @@ impl DifferenceLogicGraph {
 	}
 
 	/// Update the stored upper bound for the node.
-	
+
 	fn update_ub(&mut self, node: VarNodeRef, val: IntVal, ub_updates: &mut Vec<VarNodeRef>) {
 		node.node.borrow_mut().upper_bound = Some(val);
 		ub_updates.push(node);
@@ -349,7 +348,7 @@ impl DifferenceLogicGraph {
 		Ok(true)
 	}
 
-	/// Perform dijkstra from the given node to all other nodes in the graph, return a map of 
+	/// Perform dijkstra from the given node to all other nodes in the graph, return a map of
 	/// distances. Can be performed in forward or backward direction.
 	fn dijkstra<P: PropagationActions>(&mut self, actions: &mut P, source: VarNodeRef, reverse: bool) -> HashMap<IntView, IntVal> {
 
@@ -422,7 +421,7 @@ impl DifferenceLogicGraph {
 	}
 
 	/// Perform incremental updates of lower bounds.
-	fn inc_lb<P: PropagationActions>(&mut self, actions: &mut P, v_l: Vec<VarNodeRef>, lb_updates: &mut Vec<VarNodeRef>) -> Result<(), Conflict> {
+	fn inc_lb<P: PropagationActions>(&mut self, actions: &mut P, v_l: &Vec<VarNodeRef>, lb_updates: &mut Vec<VarNodeRef>) -> Result<(), Conflict> {
 
 		trace!("Running inc_lb on {v_l:?}");
 		self.reset_visit();
@@ -462,7 +461,7 @@ impl DifferenceLogicGraph {
 	}
 
 	/// Perform incremental updates of upper bounds.
-	fn inc_ub<P: PropagationActions>(&mut self, actions: &mut P, v_u: Vec<VarNodeRef>, ub_updates: &mut Vec<VarNodeRef>) -> Result<(), Conflict> {
+	fn inc_ub<P: PropagationActions>(&mut self, actions: &mut P, v_u: &Vec<VarNodeRef>, ub_updates: &mut Vec<VarNodeRef>) -> Result<(), Conflict> {
 
 		trace!("Running inc_ub on {v_u:?}");
 		self.reset_visit();
@@ -502,6 +501,156 @@ impl DifferenceLogicGraph {
 		Ok(())
 	}
 
+
+	/// Propagate new bounds and fixed booleans.
+	fn propagate<P: PropagationActions>(&mut self, actions: &mut P, lb_changes: &mut HashSet<IntView>, ub_changes: &mut HashSet<IntView>, 
+										fixed_bools: &mut HashSet<BoolView>, lb_updates: &mut Vec<VarNodeRef>, ub_updates: &mut Vec<VarNodeRef>, 
+										bool_map: &HashMap<BoolView, Vec<usize>>) -> Result<(), Conflict> {
+
+		trace!("Propagating bounds on lb changes {lb_changes:?}, ub changes {ub_changes:?}, fixed booleans {fixed_bools:?}.");
+
+		// Lower bound updates
+		if !lb_changes.is_empty() {
+			let lb_changes_vec = lb_changes.iter().map(|v| self.nodes[v].clone()).collect();
+			self.inc_lb(actions, &lb_changes_vec, lb_updates)?;
+		}
+
+		// Upper bound updates
+		if !ub_changes.is_empty() {
+			let ub_changes_vec = ub_changes.iter().map(|v| self.nodes[v].clone()).collect();
+			self.inc_ub(actions, &ub_changes_vec, ub_updates)?;
+		}
+
+		// Consequences of lower bound updates on open implied constraints
+		for n in lb_updates.iter() {
+
+			let mut node = n.node.borrow_mut();
+			let lb = node.lower_bound.unwrap();
+
+			let mut open = node.open_edges.iter(actions);
+			while let Some(&index) = open.next() {
+				let edge = &self.edges[index];
+				let target_ub = self.get_cur_upper_bound(actions, edge.to.clone());
+				if lb - target_ub > edge.val {
+					// Constraint is falsified by bounds.
+					trace!("Constraint {:?} -> {:?} - {:?} <= {:?} is falsified by bounds.", edge.bool_var, n.var, edge.to.var, edge.val);
+					actions.set_bool(!edge.bool_var, |a: &mut P| vec![a.get_int_lit(n.var, IntLitMeaning::GreaterEq(lb)),
+																	  a.get_int_lit(edge.to.var, IntLitMeaning::Less(target_ub + 1))])?;
+					//let _ = fixed_bools.insert(!edge.bool_var.clone());
+					self.close_imp_edge_forward(actions, &mut open, index);
+				}
+			}
+
+			let mut rev_open = node.open_reverse_edges.iter(actions);
+			while let Some(&index) = rev_open.next() {
+				let edge = &self.edges[index];
+				if self.get_cur_upper_bound(actions, edge.from.clone()) - lb <= edge.val {
+					// Constraint is implied by bounds.
+					trace!("Constraint {:?} -> {:?} - {:?} <= {:?} is implied by bounds.", edge.bool_var, edge.from.var, n.var, edge.val);
+					self.close_imp_edge_backward(actions, &mut rev_open, index);
+				}
+			}
+
+		}
+
+		// Consequences of upper bound updates on open implied constraints
+		for n in ub_updates.iter() {
+
+			let mut node = n.node.borrow_mut();
+			let ub = node.upper_bound.unwrap();
+
+			let mut open = node.open_edges.iter(actions);
+			while let Some(&index) = open.next() {
+				let edge = &self.edges[index];
+				if ub - self.get_cur_lower_bound(actions, edge.to.clone()) <= edge.val {
+					// Constraint is implied by bounds.
+					trace!("Constraint {:?} -> {:?} - {:?} <= {:?} is implied by bounds.", edge.bool_var, n.var, edge.to.var, edge.val);
+					self.close_imp_edge_forward(actions, &mut open, index);
+				}
+			}
+
+			let mut rev_open = node.open_reverse_edges.iter(actions);
+			while let Some(&index) = rev_open.next() {
+				let edge = &self.edges[index];
+				let source_lb = self.get_cur_lower_bound(actions, edge.from.clone());
+				if source_lb - ub > edge.val {
+					// Constraint is falsified by bounds.
+					trace!("Constraint {:?} -> {:?} - {:?} <= {:?} is falsified by bounds.", edge.bool_var, edge.from.var, n.var, edge.val);
+					actions.set_bool(!edge.bool_var, |a: &mut P| vec![a.get_int_lit(edge.from.var, IntLitMeaning::GreaterEq(source_lb)),
+																	  a.get_int_lit(n.var, IntLitMeaning::Less(ub + 1))])?;
+					//let _ = fixed_bools.insert(!edge.bool_var.clone());
+					self.close_imp_edge_backward(actions, &mut rev_open, index);
+				}
+			}
+
+		}
+
+		// All bound changes are propagated, reset to capture new bound changes from boolean propagations.
+		lb_changes.clear();
+		ub_changes.clear();
+
+		// Handle fixed booleans
+		for b in fixed_bools.iter() {
+			if actions.get_bool_val(*b).is_none() {
+				trace!("Boolean {b:?} is actually not fixed.");  // todo could implement advisor on backtrack and just clear collections
+				continue;
+			}
+			trace!("Boolean {b:?} fixed to true.");
+			if let Some(edges) = bool_map.get(b) {
+				// Consequences of setting the boolean to true -> add all implied edges.
+				for &index in edges.iter() {
+					let closed_now = self.close_imp_edge(actions, index);
+					trace!("Processing adding edge {:?} - {:?} <= {:?} (open: {closed_now})", self.edges[index].from.var, self.edges[index].to.var, self.edges[index].val);
+					// Only continue if the edge was not already closed.
+					if closed_now {
+						// If the edge can't be added, a conflict will be generated
+						if self.inc_sat(actions, index)? {
+							self.activate_imp_edge(actions, index);
+							// If the edge was added, check the status of open edges.
+							self.inc_imp(actions, index)?;
+							let edge = &self.edges[index];
+							let lb_y = -edge.val + self.get_cur_lower_bound(actions, edge.from.clone());
+							if lb_y > self.get_cur_lower_bound(actions, edge.to.clone()) {
+								// New edge caused lower bound change.
+								actions.set_int_lower_bound(edge.to.var, lb_y, |a: &mut P| vec![*b, a.get_int_lit(edge.from.var, IntLitMeaning::GreaterEq(self.get_cur_lower_bound(a, edge.from.clone())))])?;
+								self.update_lb(edge.to.clone(), lb_y, lb_updates);
+							}
+							let ub_x = edge.val + self.get_cur_upper_bound(actions, edge.to.clone());
+							if ub_x < self.get_cur_upper_bound(actions, edge.from.clone()) {
+								// New edge caused upper bound change.
+								actions.set_int_upper_bound(edge.from.var, ub_x, |a: &mut P| vec![*b, a.get_int_lit(edge.to.var, IntLitMeaning::Less(self.get_cur_upper_bound(a, edge.to.clone()) + 1))])?;
+								self.update_ub(edge.from.clone(), ub_x, ub_updates);
+							}
+						}
+					}
+				}
+			}
+			let negation = !*b;
+			if let Some(edges) = bool_map.get(&negation) {
+				// Consequences of setting the negation of the boolean to false -> close all implied edges.
+				for &index in edges.iter() {
+					let edge_closed = self.close_imp_edge(actions, index);
+					trace!("Closing edge {:?} - {:?} <= {:?} (open: {edge_closed})", self.edges[index].from.var, self.edges[index].to.var, self.edges[index].val);
+				}
+			}
+		}
+		
+		// Reset fixed booleans.
+		fixed_bools.clear();
+
+		// If any bounds changed, propagate them recursively.
+		if !lb_changes.is_empty() || !ub_changes.is_empty() {  // todo never do this, wait for solver propagation!
+			trace!("Recursive propagation of new bound changes.");
+			self.propagate(actions, lb_changes, ub_changes, fixed_bools, lb_updates, ub_updates, bool_map)?;
+		}
+
+		//trace!("Current graph after implied checks: {}", self.graph.to_dot(actions));
+
+		Ok(())
+
+	}
+
+
 	/// Generate a dot presentation of the active graph.
 	fn to_dot<I: InspectionActions>(&self, actions: &mut I) -> String {
 		let mut out = "digraph {\n".to_owned();
@@ -537,13 +686,9 @@ pub struct DifferenceLogicBounds {
 	constraints: Vec<(IntView, IntView, IntVal)>,
 	/// List of implied constraints. todo currently initial list, not to be modified later?
 	imp_constraints: Vec<(BoolView, IntView, IntView, IntVal)>,
-	/// List of all integer variables. todo this should not be needed later
-	int_vars: Vec<IntView>,
-	/// List of all boolean variables. todo this should not be needed later
-	bool_vars: Vec<BoolView>,
-	lower_bounds: HashMap<IntView, TrailedInt>, // todo temporary
-	upper_bounds: HashMap<IntView, TrailedInt>, // todo temporary
-	fixed_bools: HashMap<BoolView, TrailedInt>, // todo temporary
+	lower_bound_changes: HashSet<IntView>,
+	upper_bound_changes: HashSet<IntView>,
+	fixed_bools: HashSet<BoolView>,
 }
 
 impl DifferenceLogicBounds {
@@ -563,9 +708,8 @@ impl DifferenceLogicBounds {
 		// todo init all or add dynamically?
 		let graph = DifferenceLogicGraph::new(solver, int_vars.clone());
 		let bool_map = bool_vars.iter().map(|&b| (b, Vec::new())).collect();
-		let lower_bounds = int_vars.iter().map(|&x| (x, solver.new_trailed_int(IntVal::MIN))).collect();
-		let upper_bounds = int_vars.iter().map(|&x| (x, solver.new_trailed_int(IntVal::MAX))).collect();
-		let fixed_bools = bool_vars.iter().map(|&b| (b, solver.new_trailed_int(0))).collect();
+		let lower_bound_changes = int_vars.iter().map(|&v| v).collect();
+		let upper_bound_changes = int_vars.iter().map(|&v| v).collect();
 
 		let prop = solver.add_propagator(
 			Box::new(Self {
@@ -575,155 +719,20 @@ impl DifferenceLogicBounds {
 				bool_map,
 				constraints: constraints.clone(),
 				imp_constraints: imp_constraints.clone(),
-				int_vars: int_vars.clone(),
-				bool_vars: bool_vars.clone(),
-				lower_bounds,
-				upper_bounds,
-				fixed_bools,
+				lower_bound_changes,
+				upper_bound_changes,
+				fixed_bools: HashSet::new(),
 			}),
 			PriorityLevel::Low, // todo priority (before individual diff constraints?)
 		);
 		for &v in int_vars.iter() {
-			solver.enqueue_on_int_change(prop, v, IntPropCond::Bounds);
+			solver.advise_on_int_change(prop, v, IntPropCond::LowerBound, 0);
+			solver.advise_on_int_change(prop, v, IntPropCond::UpperBound, 1);
 		}
-		for &v in bool_vars.iter() {
-			solver.enqueue_on_bool_change(prop, v);
+		for &v in bool_vars.iter() { // todo might run on both v and !v?
+			solver.advise_on_bool_change(prop, v, 0);
 		}
-		solver.enqueue_now(prop);
-	}
-
-	/// Propagate new bounds and fixed booleans.
-	fn propagate_bounds<P: PropagationActions>(&mut self, actions: &mut P, lb_changes: Vec<VarNodeRef>, ub_changes: Vec<VarNodeRef>, mut fixed_bools: Vec<BoolView>) -> Result<(), Conflict> {
-
-		trace!("Propagating bounds on lb changes {lb_changes:?}, ub changes {ub_changes:?}, fixed booleans {fixed_bools:?}.");
-
-		// Lower bound updates
-		if !lb_changes.is_empty() {
-			self.graph.inc_lb(actions, lb_changes, &mut self.lb_updates)?;
-		}
-
-		// Upper bound updates
-		if !ub_changes.is_empty() {
-			self.graph.inc_ub(actions, ub_changes, &mut self.ub_updates)?;
-		}
-
-		// Consequences of lower bound updates on open implied constraints
-		for n in self.lb_updates.iter() {
-
-			let mut node = n.node.borrow_mut();
-			let lb = node.lower_bound.unwrap();
-
-			let mut open = node.open_edges.iter(actions);
-			while let Some(&index) = open.next() {
-				let edge = &self.graph.edges[index];
-				let target_ub = self.graph.get_cur_upper_bound(actions, edge.to.clone());
-				if lb - target_ub > edge.val {
-					// Constraint is falsified by bounds.
-					trace!("Constraint {:?} -> {:?} - {:?} <= {:?} is falsified by bounds.", edge.bool_var, n.var, edge.to.var, edge.val);
-					actions.set_bool(!edge.bool_var, |a: &mut P| vec![a.get_int_lit(n.var, IntLitMeaning::GreaterEq(lb)),
-																	  a.get_int_lit(edge.to.var, IntLitMeaning::Less(target_ub + 1))])?;
-					fixed_bools.push(!edge.bool_var.clone());
-					self.graph.close_imp_edge_forward(actions, &mut open, index);
-				}
-			}
-
-			let mut rev_open = node.open_reverse_edges.iter(actions);
-			while let Some(&index) = rev_open.next() {
-				let edge = &self.graph.edges[index];
-				if self.graph.get_cur_upper_bound(actions, edge.from.clone()) - lb <= edge.val {
-					// Constraint is implied by bounds.
-					trace!("Constraint {:?} -> {:?} - {:?} <= {:?} is implied by bounds.", edge.bool_var, edge.from.var, n.var, edge.val);
-					self.graph.close_imp_edge_backward(actions, &mut rev_open, index);
-				}
-			}
-
-		}
-
-		// Consequences of upper bound updates on open implied constraints
-		for n in self.ub_updates.iter() {
-
-			let mut node = n.node.borrow_mut();
-			let ub = node.upper_bound.unwrap();
-
-			let mut open = node.open_edges.iter(actions);
-			while let Some(&index) = open.next() {
-				let edge = &self.graph.edges[index];
-				if ub - self.graph.get_cur_lower_bound(actions, edge.to.clone()) <= edge.val {
-					// Constraint is implied by bounds.
-					trace!("Constraint {:?} -> {:?} - {:?} <= {:?} is implied by bounds.", edge.bool_var, n.var, edge.to.var, edge.val);
-					self.graph.close_imp_edge_forward(actions, &mut open, index);
-				}
-			}
-
-			let mut rev_open = node.open_reverse_edges.iter(actions);
-			while let Some(&index) = rev_open.next() {
-				let edge = &self.graph.edges[index];
-				let source_lb = self.graph.get_cur_lower_bound(actions, edge.from.clone());
-				if source_lb - ub > edge.val {
-					// Constraint is falsified by bounds.
-					trace!("Constraint {:?} -> {:?} - {:?} <= {:?} is falsified by bounds.", edge.bool_var, edge.from.var, n.var, edge.val);
-					actions.set_bool(!edge.bool_var, |a: &mut P| vec![a.get_int_lit(edge.from.var, IntLitMeaning::GreaterEq(source_lb)),
-																	  a.get_int_lit(n.var, IntLitMeaning::Less(ub + 1))])?;
-					fixed_bools.push(!edge.bool_var.clone());
-					self.graph.close_imp_edge_backward(actions, &mut rev_open, index);
-				}
-			}
-
-		}
-
-		let mut lb_new_changes = Vec::new();
-		let mut ub_new_changes = Vec::new();
-		
-		// Handle fixed booleans
-		for b in fixed_bools.iter() {
-			trace!("Boolean {b:?} fixed to true.");
-			if let Some(edges) = self.bool_map.get(b) {
-				// Consequences of setting the boolean to true -> add all implied edges.
-				for &index in edges.iter() {
-					let closed_now = self.graph.close_imp_edge(actions, index);
-					trace!("Processing adding edge {:?} - {:?} <= {:?} (open: {closed_now})", self.graph.edges[index].from.var, self.graph.edges[index].to.var, self.graph.edges[index].val);
-					// Only continue if the edge was not already closed.
-					if closed_now {
-						// If the edge can't be added, a conflict will be generated
-						if self.graph.inc_sat(actions, index)? {
-							self.graph.activate_imp_edge(actions, index);
-							// If the edge was added, check the status of open edges.
-							self.graph.inc_imp(actions, index)?;
-							let edge = &self.graph.edges[index];
-							let lb_y = -edge.val + self.graph.get_cur_lower_bound(actions, edge.from.clone());
-							if lb_y > self.graph.get_cur_lower_bound(actions, edge.to.clone()) {
-								// New edge caused lower bound change.
-								lb_new_changes.push(edge.to.clone());
-							}
-							let ub_x = edge.val + self.graph.get_cur_upper_bound(actions, edge.to.clone());
-							if ub_x < self.graph.get_cur_upper_bound(actions, edge.from.clone()) {
-								// New edge caused upper bound change.
-								ub_new_changes.push(edge.from.clone());
-							}
-						}
-					}
-				}
-			}
-			let negation = !*b;
-			if let Some(edges) = self.bool_map.get(&negation) {
-				// Consequences of setting the negation of the boolean to false -> close all implied edges.
-				for &index in edges.iter() {
-					let edge_closed = self.graph.close_imp_edge(actions, index);
-					trace!("Closing edge {:?} - {:?} <= {:?} (open: {edge_closed})", self.graph.edges[index].from.var, self.graph.edges[index].to.var, self.graph.edges[index].val);
-				}
-			}
-		}
-
-		// If any bounds changed, propagate them recursively.
-		if !lb_new_changes.is_empty() || !ub_new_changes.is_empty() {
-			trace!("Recursive propagation of new bound changes.");
-			self.propagate_bounds(actions, lb_new_changes, ub_new_changes, Vec::new())?;
-		}
-
-		//trace!("Current graph after implied checks: {}", self.graph.to_dot(actions));
-
-		Ok(())
-
+		solver.enqueue_now(prop); // todo might be removed
 	}
 
 }
@@ -733,6 +742,27 @@ where
 	P: PropagationActions,
 	E: ExplanationActions,
 {
+	fn advise_of_bool_change(&mut self, actions: &mut E, view: BoolView, _data: u64) -> bool {
+		let val = actions.get_bool_val(view).unwrap();
+		trace!("Boolean {view:?} fixed to {val}.");
+		if val {
+			let _ = self.fixed_bools.insert(view);
+		} else {
+			let _ = self.fixed_bools.insert(!view);
+		}
+		true
+	}
+
+	fn advise_of_int_change(&mut self, _actions: &mut E, view: IntView, _event: IntEvent, data: u64) -> bool {
+		trace!("Integer {view:?} changed with data {data:?}.");
+		if data == 0 {
+			let _ = self.lower_bound_changes.insert(view);
+		} else {
+			let _ = self.upper_bound_changes.insert(view);
+		}
+		true
+	}
+
 	#[tracing::instrument(name = "difference_logic", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 
@@ -757,25 +787,6 @@ where
 		self.graph.reset_lb_updates(&mut self.lb_updates);  // todo check how this works with recursion!
 		self.graph.reset_ub_updates(&mut self.ub_updates);
 
-		// todo replace once we know what actually changed...
-		let lb_changes: Vec<_> = self.int_vars.iter()
-			.filter(|&v| actions.get_int_lower_bound(*v) > actions.get_trailed_int(self.lower_bounds[v]))
-			.map(|&v| self.graph.nodes[&v].clone())
-			.collect();
-
-		// todo replace once we know what actually changed...
-		let ub_changes: Vec<_> = self.int_vars.iter()
-			.filter(|&v| actions.get_int_upper_bound(*v) < actions.get_trailed_int(self.upper_bounds[v]))
-			.map(|&v| self.graph.nodes[&v].clone())
-			.collect();
-
-		// todo replace once we know what actually changed...
-		let bool_changes = self.bool_vars.iter()
-			.filter(|&b| actions.get_trailed_int(self.fixed_bools[b]) == 0 && actions.get_bool_val(*b).is_some())
-			.map(|&b| if actions.get_bool_val(b).unwrap() { b } else { !b })
-			.unique()
-			.collect::<Vec<_>>();
-
 		/*trace!("Full state before propagate bounds:");
 		for (v, node) in self.graph.graph.iter() {
 			trace!("{v:?}: {:?}", node.node.borrow().deref());
@@ -784,24 +795,12 @@ where
 			trace!("{edge:?}");
 		}*/
 
-		self.propagate_bounds(actions, lb_changes, ub_changes, bool_changes.clone())?;
-
-		for l in self.lb_updates.iter() {
-			let _ = actions.set_trailed_int(self.lower_bounds[&l.var], l.node.borrow().lower_bound.unwrap());
-		}
-
-		for u in self.ub_updates.iter() {
-			let _ = actions.set_trailed_int(self.upper_bounds[&u.var], u.node.borrow().upper_bound.unwrap());
-		}
-
-		for b in bool_changes {
-			if self.fixed_bools.contains_key(&b) {
-				let _ = actions.set_trailed_int(self.fixed_bools[&b], 1);
-			}
-			let negation = !b;
-			if self.fixed_bools.contains_key(&negation) {
-				let _ = actions.set_trailed_int(self.fixed_bools[&negation], 1);
-			}
+		if let Err(e) = self.graph.propagate(actions, &mut self.lower_bound_changes, &mut self.upper_bound_changes, &mut self.fixed_bools, 
+							 &mut self.lb_updates, &mut self.ub_updates, &self.bool_map) {
+			self.lower_bound_changes.clear();
+			self.upper_bound_changes.clear();
+			self.fixed_bools.clear();
+			return Err(e);
 		}
 
 		if graph_change {
