@@ -2,12 +2,13 @@
 
 use std::cell::RefCell;
 use std::cmp::Reverse;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher, RandomState};
 use std::iter::once;
 use std::ops::Deref;
 use std::rc::Rc;
+use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 use priority_queue::PriorityQueue;
 use tracing::trace;
@@ -125,7 +126,7 @@ impl VarNode {
 
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]  // todo should we implement Eq only on the IntView?
 /// A hashable reference to a node in the difference logic graph.
 pub struct VarNodeRef {
 	/// Variable associated with the node.
@@ -312,7 +313,7 @@ impl DifferenceLogicGraph {
 		let new_edge = &self.edges[new_index];
 		trace!("Performing inc_sat on {:?}, {:?}, {:?}", new_edge.from.var, new_edge.to.var, new_edge.val);
 		let mut queue = PriorityQueue::new();
-		let mut pi_new = HashMap::new(); // todo check if we can modify the potential function in place? Yes, but needs to keep track of updates!
+		let mut pi_new = IndexMap::new(); // todo Could be replaced by the visited state. Q1: Is state or map faster? Q2: Is keeping old pi in case of conflict better?
 		new_edge.to.node.borrow_mut().backtrace = None;
 		let gamma_v = new_edge.from.node.borrow().pi + new_edge.val - new_edge.to.node.borrow().pi;
 		if gamma_v < 0 {
@@ -325,11 +326,11 @@ impl DifferenceLogicGraph {
 			for index in node_s.edges.iter(actions) {
 				let edge = &self.edges[*index];
 				let mut node_t = edge.to.node.borrow_mut();
-				if !pi_new.contains_key(&edge.to.var) || pi_new[&edge.to.var] == node_t.pi {
+				if !pi_new.contains_key(&edge.to.var) {
 					let gamma_t = pi_new[&s.var] + edge.val - node_t.pi;
-					if gamma_t < 0 {  // todo check need for whole path?
+					if gamma_t < 0 {
 						let old = queue.push_increase(edge.to.clone(), Reverse(gamma_t));
-						if old.map_or(true, |Reverse(old_path)| gamma_t < old_path) { //todo check this!
+						if old.map_or(true, |Reverse(old_gamma)| gamma_t < old_gamma) {
 							node_t.backtrace = Some((s.clone(), edge.bool_var));
 						}
 					}
@@ -381,7 +382,7 @@ impl DifferenceLogicGraph {
 
 		let outgoing_u = self.dijkstra(actions, self.edges[new_index].from.clone(), false);
 		let incoming_v = self.dijkstra(actions, self.edges[new_index].to.clone(), true);
-		let changed: HashSet<&IntView, RandomState> = HashSet::from_iter(outgoing_u.keys().chain(incoming_v.keys()));  //todo rewrite this!!!
+		let changed: IndexSet<&IntView, RandomState> = IndexSet::from_iter(outgoing_u.keys().chain(incoming_v.keys()));  //todo rewrite this!!!
 		let new_edge_val = self.edges[new_index].val;
 		let mut fail_indices = Vec::new();
 
@@ -440,7 +441,7 @@ impl DifferenceLogicGraph {
 				self.update_lb(s.clone(), bound, lb_updates);
 				let node_s = s.node.borrow();
 				if bound > actions.get_int_lower_bound(s.var) {
-					trace!("Updating lower bound for {:?} to {bound}", s.var);  // todo requeue immediately for holes?
+					trace!("Updating lower bound for {:?} to {bound}", s.var);
 					let (prev, b) = node_s.clone().backtrace.unwrap();
 					actions.set_int_lower_bound(s.var, bound, |a: &mut P| vec![b, a.get_int_lit(prev.var, IntLitMeaning::GreaterEq(self.get_cur_lower_bound(a, prev.clone())))])?;
 				}
@@ -480,7 +481,7 @@ impl DifferenceLogicGraph {
 				self.update_ub(s.clone(), bound, ub_updates);
 				let node_s = s.node.borrow();
 				if bound < actions.get_int_upper_bound(s.var) {
-					trace!("Updating upper bound for {:?} to {bound}", s.var);  // todo requeue immediately for holes?
+					trace!("Updating upper bound for {:?} to {bound}", s.var);
 					let (prev, b) = node_s.clone().backtrace.unwrap();
 					actions.set_int_upper_bound(s.var, bound, |a: &mut P| vec![b, a.get_int_lit(prev.var, IntLitMeaning::Less(self.get_cur_upper_bound(a, prev.clone()) + 1))])?;
 
@@ -503,26 +504,24 @@ impl DifferenceLogicGraph {
 
 
 	/// Propagate new bounds and fixed booleans.
-	fn propagate<P: PropagationActions>(&mut self, actions: &mut P, lb_changes: &mut HashSet<IntView>, ub_changes: &mut HashSet<IntView>, 
-										fixed_bools: &mut HashSet<BoolView>, lb_updates: &mut Vec<VarNodeRef>, ub_updates: &mut Vec<VarNodeRef>, 
-										bool_map: &HashMap<BoolView, Vec<usize>>) -> Result<(), Conflict> {
+	fn propagate<P: PropagationActions>(&mut self, actions: &mut P, state: &mut DifferenceLogicState) -> Result<(), Conflict> {
 
-		trace!("Propagating bounds on lb changes {lb_changes:?}, ub changes {ub_changes:?}, fixed booleans {fixed_bools:?}.");
+		trace!("Propagating bounds on lb changes {:?}, ub changes {:?}, fixed booleans {:?}.", state.lower_bound_changes, state.upper_bound_changes, state.fixed_bools);
 
 		// Lower bound updates
-		if !lb_changes.is_empty() {
-			let lb_changes_vec = lb_changes.iter().map(|v| self.nodes[v].clone()).collect();
-			self.inc_lb(actions, &lb_changes_vec, lb_updates)?;
+		if !state.lower_bound_changes.is_empty() {
+			let lb_changes_vec = state.lower_bound_changes.iter().map(|v| self.nodes[v].clone()).collect();
+			self.inc_lb(actions, &lb_changes_vec, &mut state.lb_updates)?;
 		}
 
 		// Upper bound updates
-		if !ub_changes.is_empty() {
-			let ub_changes_vec = ub_changes.iter().map(|v| self.nodes[v].clone()).collect();
-			self.inc_ub(actions, &ub_changes_vec, ub_updates)?;
+		if !state.upper_bound_changes.is_empty() {
+			let ub_changes_vec = state.upper_bound_changes.iter().map(|v| self.nodes[v].clone()).collect();
+			self.inc_ub(actions, &ub_changes_vec, &mut state.ub_updates)?;
 		}
 
 		// Consequences of lower bound updates on open implied constraints
-		for n in lb_updates.iter() {
+		for n in state.lb_updates.iter() {
 
 			let mut node = n.node.borrow_mut();
 			let lb = node.lower_bound.unwrap();
@@ -554,7 +553,7 @@ impl DifferenceLogicGraph {
 		}
 
 		// Consequences of upper bound updates on open implied constraints
-		for n in ub_updates.iter() {
+		for n in state.ub_updates.iter() {
 
 			let mut node = n.node.borrow_mut();
 			let ub = node.upper_bound.unwrap();
@@ -585,18 +584,14 @@ impl DifferenceLogicGraph {
 
 		}
 
-		// All bound changes are propagated, reset to capture new bound changes from boolean propagations.
-		lb_changes.clear();
-		ub_changes.clear();
-
 		// Handle fixed booleans
-		for b in fixed_bools.iter() {
+		for b in state.fixed_bools.iter() {
 			if actions.get_bool_val(*b).is_none() {
 				trace!("Boolean {b:?} is actually not fixed.");  // todo could implement advisor on backtrack and just clear collections
 				continue;
 			}
 			trace!("Boolean {b:?} fixed to true.");
-			if let Some(edges) = bool_map.get(b) {
+			if let Some(edges) = state.bool_map.get(b) {
 				// Consequences of setting the boolean to true -> add all implied edges.
 				for &index in edges.iter() {
 					let closed_now = self.close_imp_edge(actions, index);
@@ -613,20 +608,20 @@ impl DifferenceLogicGraph {
 							if lb_y > self.get_cur_lower_bound(actions, edge.to.clone()) {
 								// New edge caused lower bound change.
 								actions.set_int_lower_bound(edge.to.var, lb_y, |a: &mut P| vec![*b, a.get_int_lit(edge.from.var, IntLitMeaning::GreaterEq(self.get_cur_lower_bound(a, edge.from.clone())))])?;
-								self.update_lb(edge.to.clone(), lb_y, lb_updates);
+								self.update_lb(edge.to.clone(), lb_y, &mut state.lb_updates);
 							}
 							let ub_x = edge.val + self.get_cur_upper_bound(actions, edge.to.clone());
 							if ub_x < self.get_cur_upper_bound(actions, edge.from.clone()) {
 								// New edge caused upper bound change.
 								actions.set_int_upper_bound(edge.from.var, ub_x, |a: &mut P| vec![*b, a.get_int_lit(edge.to.var, IntLitMeaning::Less(self.get_cur_upper_bound(a, edge.to.clone()) + 1))])?;
-								self.update_ub(edge.from.clone(), ub_x, ub_updates);
+								self.update_ub(edge.from.clone(), ub_x, &mut state.ub_updates);
 							}
 						}
 					}
 				}
 			}
 			let negation = !*b;
-			if let Some(edges) = bool_map.get(&negation) {
+			if let Some(edges) = state.bool_map.get(&negation) {
 				// Consequences of setting the negation of the boolean to false -> close all implied edges.
 				for &index in edges.iter() {
 					let edge_closed = self.close_imp_edge(actions, index);
@@ -634,18 +629,11 @@ impl DifferenceLogicGraph {
 				}
 			}
 		}
-		
-		// Reset fixed booleans.
-		fixed_bools.clear();
-
-		// If any bounds changed, propagate them recursively.
-		if !lb_changes.is_empty() || !ub_changes.is_empty() {  // todo never do this, wait for solver propagation!
-			trace!("Recursive propagation of new bound changes.");
-			self.propagate(actions, lb_changes, ub_changes, fixed_bools, lb_updates, ub_updates, bool_map)?;
-		}
 
 		//trace!("Current graph after implied checks: {}", self.graph.to_dot(actions));
 
+		// All state changes are done, new ones as a consequence will be propagated
+		state.reset_var_changes();
 		Ok(())
 
 	}
@@ -671,28 +659,59 @@ impl DifferenceLogicGraph {
 
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]  // todo do we need Hash here?
-/// Bounds consistent global difference constraint propagator.
-pub struct DifferenceLogicBounds {
-	/// Constraint graph.
-	graph: DifferenceLogicGraph,
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// Propagator state data.
+pub struct DifferenceLogicState {
 	/// List of variables with updated lower bounds.
 	lb_updates: Vec<VarNodeRef>,
 	/// List of variables with updated upper bounds.
 	ub_updates: Vec<VarNodeRef>,
 	/// Map from boolean variables to their implied edges.
 	bool_map: HashMap<BoolView, Vec<usize>>,
+	/// List of variables with reported lower bound changes.
+	lower_bound_changes: IndexSet<IntView>,
+	/// List of variables with reported upper bound changes.
+	upper_bound_changes: IndexSet<IntView>,
+	/// List of boolean variables that have recently been reported as fixed to true.
+	fixed_bools: IndexSet<BoolView>,
+}
+
+impl DifferenceLogicState {
+	
+	fn new(int_vars: Vec<IntView>, bool_vars: Vec<BoolView>) -> Self {
+		Self {
+			lb_updates: Vec::new(),
+			ub_updates: Vec::new(),
+			bool_map: bool_vars.iter().map(|&b| (b, Vec::new())).collect(),
+			lower_bound_changes: int_vars.iter().map(|&v| v).collect(),
+			upper_bound_changes: int_vars.iter().map(|&v| v).collect(),
+			fixed_bools: IndexSet::new(),
+		}
+	}
+	
+	fn reset_var_changes(&mut self) {
+		self.lower_bound_changes.clear();
+		self.upper_bound_changes.clear();
+		self.fixed_bools.clear();
+	}	
+	
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]  // todo do we need Hash here?
+/// Bounds consistent global difference constraint propagator.
+pub struct DifferenceLogicBounds {
+	/// Constraint graph.
+	graph: DifferenceLogicGraph,
 	/// List of constraints. todo currently initial list, not to be modified later?
 	constraints: Vec<(IntView, IntView, IntVal)>,
 	/// List of implied constraints. todo currently initial list, not to be modified later?
 	imp_constraints: Vec<(BoolView, IntView, IntView, IntVal)>,
-	lower_bound_changes: HashSet<IntView>,
-	upper_bound_changes: HashSet<IntView>,
-	fixed_bools: HashSet<BoolView>,
+	/// Propagator state data.
+	state: DifferenceLogicState,
 }
 
 impl DifferenceLogicBounds {
-	//todo check options for queue?
+	//todo check options for queue and hasher?
 
 	/// Create a new [`DifferenceLogicBounds`] propagator and post it in the solver.
 	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P,
@@ -707,23 +726,16 @@ impl DifferenceLogicBounds {
 
 		// todo init all or add dynamically?
 		let graph = DifferenceLogicGraph::new(solver, int_vars.clone());
-		let bool_map = bool_vars.iter().map(|&b| (b, Vec::new())).collect();
-		let lower_bound_changes = int_vars.iter().map(|&v| v).collect();
-		let upper_bound_changes = int_vars.iter().map(|&v| v).collect();
+		let state = DifferenceLogicState::new(int_vars.clone(), bool_vars.clone());
 
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				graph,
-				lb_updates: Vec::new(),
-				ub_updates: Vec::new(),
-				bool_map,
 				constraints: constraints.clone(),
 				imp_constraints: imp_constraints.clone(),
-				lower_bound_changes,
-				upper_bound_changes,
-				fixed_bools: HashSet::new(),
+				state,
 			}),
-			PriorityLevel::Low, // todo priority (before individual diff constraints?)
+			PriorityLevel::Low, // todo priority
 		);
 		for &v in int_vars.iter() {
 			solver.advise_on_int_change(prop, v, IntPropCond::LowerBound, 0);
@@ -746,9 +758,9 @@ where
 		let val = actions.get_bool_val(view).unwrap();
 		trace!("Boolean {view:?} fixed to {val}.");
 		if val {
-			let _ = self.fixed_bools.insert(view);
+			let _ = self.state.fixed_bools.insert(view);
 		} else {
-			let _ = self.fixed_bools.insert(!view);
+			let _ = self.state.fixed_bools.insert(!view);
 		}
 		true
 	}
@@ -756,9 +768,9 @@ where
 	fn advise_of_int_change(&mut self, _actions: &mut E, view: IntView, _event: IntEvent, data: u64) -> bool {
 		trace!("Integer {view:?} changed with data {data:?}.");
 		if data == 0 {
-			let _ = self.lower_bound_changes.insert(view);
+			let _ = self.state.lower_bound_changes.insert(view);
 		} else {
-			let _ = self.upper_bound_changes.insert(view);
+			let _ = self.state.upper_bound_changes.insert(view);
 		}
 		true
 	}
@@ -766,12 +778,11 @@ where
 	#[tracing::instrument(name = "difference_logic", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 
-		//todo empty and reuse vs. recreate for HashMaps, replace with faster implementation in general?
 		let mut graph_change = false; //todo remove
 
 		for (b, x, y, d) in self.imp_constraints.iter() {
 			let index = self.graph.new_imp_edge(DiffEdge::new(self.graph.nodes[x].clone(), self.graph.nodes[y].clone(), *d, *b));
-			self.bool_map.get_mut(b).unwrap().push(index);
+			self.state.bool_map.get_mut(b).unwrap().push(index);
 		}
 		self.imp_constraints.clear();
 
@@ -784,8 +795,8 @@ where
 		}
 		self.constraints.clear();
 
-		self.graph.reset_lb_updates(&mut self.lb_updates);  // todo check how this works with recursion!
-		self.graph.reset_ub_updates(&mut self.ub_updates);
+		self.graph.reset_lb_updates(&mut self.state.lb_updates);
+		self.graph.reset_ub_updates(&mut self.state.ub_updates);
 
 		/*trace!("Full state before propagate bounds:");
 		for (v, node) in self.graph.graph.iter() {
@@ -795,11 +806,8 @@ where
 			trace!("{edge:?}");
 		}*/
 
-		if let Err(e) = self.graph.propagate(actions, &mut self.lower_bound_changes, &mut self.upper_bound_changes, &mut self.fixed_bools, 
-							 &mut self.lb_updates, &mut self.ub_updates, &self.bool_map) {
-			self.lower_bound_changes.clear();
-			self.upper_bound_changes.clear();
-			self.fixed_bools.clear();
+		if let Err(e) = self.graph.propagate(actions, &mut self.state) {
+			self.state.reset_var_changes();
 			return Err(e);
 		}
 

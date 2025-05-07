@@ -344,6 +344,7 @@ dependencies = [
  "expect-test",
  "flatzinc-serde",
  "index_vec",
+ "indexmap",
  "itertools 0.14.0",
  "pindakaas",
  "priority-queue",
