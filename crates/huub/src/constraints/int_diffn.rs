@@ -845,10 +845,14 @@ where
 			.collect();
 
 		for o_idx in 0..self.box_posn.len() {
+
             if actions.get_trailed_int(self.fixed[o_idx]) == 1 || actions.get_trailed_int(self.removed_objs[o_idx]) == 1{
 				//println!("SindexKIPPING OBJ");
 				continue;
 			}
+            if (0..self.dimensions).any(|d| actions.get_int_val(self.box_size[o_idx][d]) == Some(0)) {
+                continue;
+            }
 
 			// if actions.get_trailed_int(self.fixed) & (1 << o_idx) != 0 {
 			//     println!("here");
