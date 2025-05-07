@@ -20,7 +20,8 @@ use rangelist::IntervalIterator;
 use thiserror::Error;
 use tracing::warn;
 
-use crate::{abs_int, actions::SimplificationActions, all_different_int, array_element, array_maximum_int, array_minimum_int, constraints::int_table::IntTable, difference_logic, disjunctive_strict, div_int, int_in_set_reif, pow_int, reformulate::ReformulationError, table_int, times_int, BoolDecision, BoolDecisionInner, Branching, Decision, IntDecision, IntDecisionInner, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal, ValueSelection, VariableSelection};
+use crate::{abs_int, actions::SimplificationActions, all_different_int, array_element, array_maximum_int, array_minimum_int, constraints::int_table::IntTable, disjunctive_strict, div_int, int_in_set_reif, pow_int, reformulate::ReformulationError, table_int, times_int, BoolDecision, BoolDecisionInner, Branching, Decision, IntDecision, IntDecisionInner, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal, ValueSelection, VariableSelection};
+use crate::constraints::difference_logic::DifferenceLogic;
 use crate::reformulate::InitConfig;
 
 #[derive(Error, Debug)]
@@ -869,7 +870,7 @@ where
 	/// to the [`Model`] to enforce the constraints.
 	pub(crate) fn post_constraints(&mut self, config: &InitConfig) -> Result<(), FlatZincError> {
 		// Global propagators dealing with multiple constraints
-		let mut diff_logic = difference_logic();
+		let mut diff_logic = DifferenceLogic::new();
 		// Traditional relational constraints
 		for (i, c) in self.fzn.constraints.iter().enumerate() {
 			if self.processed[i] {
@@ -1315,16 +1316,22 @@ where
 						});
 					}
 				}
-				"int_le" | "int_ne" => { // todo diff logic
+				"int_le" | "int_ne" => {
 					if let [a, b] = c.args.as_slice() {
 						let a = self.arg_int(a)?;
 						let b = self.arg_int(b)?;
-						let lin_exp = a - b;
-						self.prb += match c.id.deref() {
-							"int_le" => lin_exp.leq(0),
-							"int_ne" => lin_exp.ne(0),
-							_ => unreachable!(),
-						};
+						if config.diff_logic > 0 && c.id.deref() == "int_le" { //todo deal with versions where some of the decisions are fixed?
+							diff_logic.add_global(a, b, 0);
+						} else if config.diff_logic > 1 && c.id.deref() == "int_ne" { 
+							diff_logic.add_ne(&mut self.prb, a, b, 0);
+						} else {
+							let lin_exp = a - b;
+							self.prb += match c.id.deref() {
+								"int_le" => lin_exp.leq(0),
+								"int_ne" => lin_exp.ne(0),
+								_ => unreachable!(),
+							};
+						}
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: match c.id.deref() {
@@ -1338,11 +1345,27 @@ where
 					}
 				}
 				"int_eq_imp" | "int_eq_reif" | "int_le_imp" | "int_le_reif" | "int_ne_imp"
-				| "int_ne_reif" => { // todo diff logic
+				| "int_ne_reif" => {
 					if let [a, b, r] = c.args.as_slice() {
 						let a = self.arg_int(a)?;
 						let b = self.arg_int(b)?;
 						let r = self.arg_bool(r)?;
+						
+						if config.diff_logic > 0 {
+							let mut handled_by_diff = true;
+							match (config.diff_logic, c.id.deref()) {
+								(_, "int_eq_imp") => diff_logic.add_imp_eq(r, a, b, 0),
+								(d, "int_eq_reif") if d > 1 => diff_logic.add_reif_eq(&mut self.prb, r, a, b, 0),
+								(_, "int_le_imp") => diff_logic.add_imp(r, a, b, 0),
+								(_, "int_le_reif") => diff_logic.add_reif(r, a, b, 0),
+								(d, "int_ne_imp") if d > 1 => diff_logic.add_imp_ne(&mut self.prb, r, a, b, 0),
+								(d, "int_ne_reif") if d > 1 => diff_logic.add_reif_eq(&mut self.prb, !r, a, b, 0),
+								_ => handled_by_diff = false,
+							}
+							if handled_by_diff {
+								continue;
+							}
+						}
 
 						let lin_exp = a - b;
 						let lin = match c.id.deref() {
@@ -1386,9 +1409,25 @@ where
 							.try_collect()?;
 						let rhs = self.arg_par_int(rhs)?;
 
-						if config.diff_logic > 0 && c.id.deref() == "int_lin_le" && coeffs.len() == 2 && coeffs[0] == 1 && coeffs[1] == -1 { // todo more general cases?
-							diff_logic.constraints.push((vars[0], vars[1], rhs));
-							continue;
+						// diff logic only if there are exactly 2 coefficients
+						if config.diff_logic > 0 && coeffs.len() == 2 && c.id.deref() != "int_lin_eq" {
+							// Coefficients need to be (1, -1) or (-1, 1), reorder variables if pattern found todo what about f, -f with rhs div f integer?
+							let diff_vars = if coeffs[0] == 1 && coeffs[1] == -1 {
+								Some((vars[0], vars[1]))
+							} else if coeffs[0] == -1 && coeffs[1] == 1 {
+								Some((vars[1], vars[0]))
+							} else {
+								None
+							};
+							if let Some((x, y)) = diff_vars {
+								if c.id.deref() == "int_lin_le" {
+									diff_logic.add_global(x, y, rhs);
+									continue;
+								} else if config.diff_logic > 1 && c.id.deref() == "int_lin_ne" { 
+									diff_logic.add_ne(&mut self.prb, x, y, rhs);
+									continue;
+								}
+							}
 						}
 						
 						let lin_exp: IntLinExpr = vars
@@ -1432,12 +1471,31 @@ where
 						let rhs = self.arg_par_int(rhs)?;
 						let reified = self.arg_bool(reified)?;
 
-						if config.diff_logic > 0 && c.id.deref().starts_with("int_lin_le") && coeffs.len() == 2 && coeffs[0] == 1 && coeffs[1] == -1 { // todo more general cases?
-							diff_logic.imp_constraints.push((reified, vars[0], vars[1], rhs));
-							if c.id.deref() == "int_lin_le_reif" {
-								diff_logic.imp_constraints.push((!reified, vars[1], vars[0], -rhs - 1));
+						// diff logic only if there are exactly 2 coefficients
+						if config.diff_logic > 0 && coeffs.len() == 2 {
+							// Coefficients need to be (1, -1) or (-1, 1), reorder variables if pattern found todo what about f, -f with rhs div f integer?
+							let diff_vars = if coeffs[0] == 1 && coeffs[1] == -1 {
+								Some((vars[0], vars[1]))
+							} else if coeffs[0] == -1 && coeffs[1] == 1 {
+								Some((vars[1], vars[0]))
+							} else {
+								None
+							};
+							if let Some((x, y)) = diff_vars {
+								let mut handled_by_diff = true;
+								match (config.diff_logic, c.id.deref()) {
+									(_, "int_lin_eq_imp") => diff_logic.add_imp_eq(reified, x, y, rhs),
+									(d, "int_lin_eq_reif") if d > 1 => diff_logic.add_reif_eq(&mut self.prb, reified, x, y, rhs),
+									(_, "int_lin_le_imp") => diff_logic.add_imp(reified, x, y, rhs),
+									(_, "int_lin_le_reif") => diff_logic.add_reif(reified, x, y, rhs),
+									(d, "int_lin_ne_imp") if d > 1 => diff_logic.add_imp_ne(&mut self.prb, reified, x, y, rhs),
+									(d, "int_lin_ne_reif") if d > 1 => diff_logic.add_reif_eq(&mut self.prb, !reified, x, y, rhs),
+									_ => handled_by_diff = false,
+								}
+								if handled_by_diff {
+									continue;
+								}
 							}
-							continue;
 						}
 						
 						let lin_exp: IntLinExpr = vars
@@ -1566,7 +1624,7 @@ where
 		}
 		
 		// Add global propagators
-		if !diff_logic.constraints.is_empty() || !diff_logic.imp_constraints.is_empty() {
+		if diff_logic.is_active() {
 			self.prb += diff_logic;
 		}
 

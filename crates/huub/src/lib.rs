@@ -344,14 +344,6 @@ pub fn times_int(factor1: IntDecision, factor2: IntDecision, product: IntDecisio
 	}
 }
 
-/// Create an empty difference logic store.
-pub fn difference_logic() -> DifferenceLogic {
-	DifferenceLogic {
-		constraints: Vec::new(),
-		imp_constraints: Vec::new(),
-	}
-}
-
 impl ElementConstraint for BoolDecision {
 	type Constraint = BoolDecisionArrayElement;
 	type Result = BoolDecision;

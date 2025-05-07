@@ -51,6 +51,8 @@ FLAGS
                                   (overwritten by --vsids-only)
   --vsids-only                    Only use the activity-based search heuristic provided by the SAT
                                   solver. Ignore the user-specific search heuristic.
+  --diff-logic                    Mode to use for diff logic: 0 for off, 1 for usage except not 
+                                  equals, 2 for full usage
 
                       === BEHAVIOUR OPTIONS ===
   --log-file <FILE>	              Output log messages from the solver to a file, instead of stderr.

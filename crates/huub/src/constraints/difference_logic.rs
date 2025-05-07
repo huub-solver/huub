@@ -10,6 +10,7 @@ use std::ops::Deref;
 use std::rc::Rc;
 use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
+use pindakaas::propositional_logic::Formula;
 use priority_queue::PriorityQueue;
 use tracing::trace;
 use crate::solver::activation_list::{IntEvent, IntPropCond};
@@ -18,7 +19,7 @@ use crate::{actions::{
 	ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
 }, constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus}, reformulate::ReformulationError, solver::{
 	queue::PriorityLevel, IntView,
-}, BoolDecision, IntDecision, IntVal};
+}, BoolDecision, IntDecision, IntVal, Model};
 use crate::actions::InspectionActions;
 use crate::helpers::trailed_list::TrailedList;
 use crate::helpers::trailed_open_list::{TrailedOpenList, TrailedOpenListIterator};
@@ -28,9 +29,73 @@ use crate::helpers::trailed_open_list::{TrailedOpenList, TrailedOpenListIterator
 /// Representation of set of difference constraints within a model.
 pub struct DifferenceLogic {
 	/// List of difference constraints.
-	pub(crate) constraints: Vec<(IntDecision, IntDecision, IntVal)>,
+	constraints: Vec<(IntDecision, IntDecision, IntVal)>,
 	/// List of implied difference constraints.
-	pub(crate) imp_constraints: Vec<(BoolDecision, IntDecision, IntDecision, IntVal)>,
+	imp_constraints: Vec<(BoolDecision, IntDecision, IntDecision, IntVal)>,
+}
+
+impl DifferenceLogic {
+	
+	pub(crate) fn new() -> Self {
+		Self {
+			constraints: Vec::new(),
+			imp_constraints: Vec::new(),
+		}
+	}
+
+	/// Add a globally active difference constraint.
+	pub(crate) fn add_global(&mut self, x: IntDecision, y: IntDecision, d: IntVal) {
+		self.constraints.push((x, y, d));
+	}
+
+	/// Add an implied difference constraint.
+	pub(crate) fn add_imp(&mut self, b: BoolDecision, x: IntDecision, y: IntDecision, d: IntVal) {
+		self.imp_constraints.push((b, x, y, d));
+	}
+
+	/// Add a reified difference constraint (generates 2 implied difference constraints).
+	pub(crate) fn add_reif(&mut self, b: BoolDecision, x: IntDecision, y: IntDecision, d: IntVal) {
+		self.imp_constraints.push((b, x, y, d));
+		self.imp_constraints.push((!b, y, x, -d - 1));
+	}
+
+
+	/// Add an implied equality constraint (generates 2 implied difference constraints).
+	pub(crate) fn add_imp_eq(&mut self, b: BoolDecision, x: IntDecision, y: IntDecision, d: IntVal) {
+		self.imp_constraints.push((b, x, y, d));
+		self.imp_constraints.push((b, y, x, d));
+	}
+	
+	/// Add a not equals constraint (generates a new boolean decision variable and 2 implied difference constraints).
+	pub(crate) fn add_ne(&mut self, model: &mut Model, x: IntDecision, y: IntDecision, d: IntVal) {
+		let decision = model.new_bool_var();
+		self.imp_constraints.push((decision, x, y, d - 1));
+		self.imp_constraints.push((!decision, y, x, -d - 1));
+	}
+
+	/// Add an implied not equals constraint (generates 3 new boolean decision variables and 2 implied difference constraints).
+	pub(crate) fn add_imp_ne(&mut self, model: &mut Model, b: BoolDecision, x: IntDecision, y: IntDecision, d: IntVal) {
+		let decision = model.new_bool_var();
+		let implied1 = model.new_bool_var();
+		let implied2 = model.new_bool_var();
+		*model += Formula::Or(vec![Formula::from(!b), Formula::from(!decision), Formula::from(implied1)]);
+		*model += Formula::Or(vec![Formula::from(!b), Formula::from(decision), Formula::from(implied2)]);
+		self.imp_constraints.push((implied1, x, y, d - 1));
+		self.imp_constraints.push((implied2, y, x, -d - 1));
+	}
+
+	/// Add a reified equality constraint (adds an implied equality constraint and an implied not equals constraint, 
+	/// in total 3 new boolean decision variables and 4 implied difference constraints).
+	pub(crate) fn add_reif_eq(&mut self, model: &mut Model, b: BoolDecision, x: IntDecision, y: IntDecision, d: IntVal) {
+		self.add_imp_eq(b, x, y, d);
+		self.add_imp_ne(model, !b, x, y, d);
+	}
+	
+	/// Return true if any constraints have been added to the difference logic.
+	pub(crate) fn is_active(&self) -> bool {
+		!self.constraints.is_empty() || !self.imp_constraints.is_empty()
+	}
+	
 }
 
 impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
@@ -356,10 +421,10 @@ impl DifferenceLogicGraph {
 		trace!("Starting dijkstra for {source:?} in mode reverse={reverse}");
 		let mut distances = HashMap::new();  // todo?
 		let mut queue = PriorityQueue::new();
-		let _ = distances.insert(source.var, 0);
 		let _ = queue.push(source.clone(), Reverse(0));
 		while !queue.is_empty() {
 			let (s, Reverse(dist)) = queue.pop().unwrap();
+			let _ = distances.insert(s.var, dist);
 			let node_s = s.node.borrow();
 			//trace!("dijkstra on current node {s:?} with dist {dist}");
 			for index in if reverse {node_s.reverse_edges.iter(actions)} else {node_s.edges.iter(actions)} {
@@ -367,9 +432,9 @@ impl DifferenceLogicGraph {
 				let target = if reverse {edge.from.clone()} else {edge.to.clone()};
 				let node_t = target.node.borrow();
 				let new_dist = dist + edge.val + ((node_s.pi - node_t.pi) * if reverse {-1} else {1}); //todo could write differently without if
-				if !distances.contains_key(&target.var) || distances[&target.var] > new_dist {
-					let _ = queue.push(target.clone(), Reverse(new_dist));
-					//trace!("dijkstra adding node {:?} with dist {new_dist}", edge.node);
+				if !distances.contains_key(&target.var) {
+					let _ = queue.push_increase(target.clone(), Reverse(new_dist));
+					//trace!("dijkstra adding node {:?} with dist {new_dist}", target.var);
 				}
 			}
 		}
@@ -380,9 +445,11 @@ impl DifferenceLogicGraph {
 	/// Check if the new edge given by the index implies or falsifies any of the open edges.
 	fn inc_imp<P: PropagationActions>(&mut self, actions: &mut P, new_index: usize) -> Result<(), Conflict> {
 
-		let outgoing_u = self.dijkstra(actions, self.edges[new_index].from.clone(), false);
-		let incoming_v = self.dijkstra(actions, self.edges[new_index].to.clone(), true);
-		let changed: IndexSet<&IntView, RandomState> = IndexSet::from_iter(outgoing_u.keys().chain(incoming_v.keys()));  //todo rewrite this!!!
+		let incoming_u = self.dijkstra(actions, self.edges[new_index].from.clone(), true);
+		trace!("outgoing_u is {incoming_u:?}");
+		let outgoing_v = self.dijkstra(actions, self.edges[new_index].to.clone(), false);
+		trace!("incoming_v is {outgoing_v:?}");
+		let changed: IndexSet<&IntView, RandomState> = IndexSet::from_iter(incoming_u.keys().chain(outgoing_v.keys()));  //todo rewrite this!!!
 		let new_edge_val = self.edges[new_index].val;
 		let mut fail_indices = Vec::new();
 
@@ -392,10 +459,10 @@ impl DifferenceLogicGraph {
 			let mut open = node.open_edges.iter(actions);
 			while let Some(&index) = open.next() {
 				let edge = &self.edges[index];
-				if outgoing_u.contains_key(&edge.from.var) && incoming_v.contains_key(&edge.to.var) && outgoing_u[&edge.from.var] + new_edge_val + incoming_v[&edge.to.var] <= edge.val {
+				if incoming_u.contains_key(&edge.from.var) && outgoing_v.contains_key(&edge.to.var) && incoming_u[&edge.from.var] + new_edge_val + outgoing_v[&edge.to.var] <= edge.val {
 					trace!("Constraint {:?} - {:?} <= {} is implied", edge.from.var, edge.to.var, edge.val);
 					self.close_imp_edge_forward(actions, &mut open, index);
-				} else if outgoing_u.contains_key(&edge.to.var) && incoming_v.contains_key(&edge.from.var) && outgoing_u[&edge.to.var] + new_edge_val + incoming_v[&edge.from.var] <= -edge.val - 1 { // todo slight double work for reified constraints
+				} else if incoming_u.contains_key(&edge.to.var) && outgoing_v.contains_key(&edge.from.var) && incoming_u[&edge.to.var] + new_edge_val + outgoing_v[&edge.from.var] <= -edge.val - 1 { // todo slight double work for reified constraints
 					trace!("Constraint {:?} - {:?} <= {} is falsified since inverse is implied", edge.from.var, edge.to.var, edge.val);
 					fail_indices.push(index);
 					self.close_imp_edge_forward(actions, &mut open, index);
@@ -404,10 +471,10 @@ impl DifferenceLogicGraph {
 			let mut rev_open = node.open_reverse_edges.iter(actions);
 			while let Some(&index) = rev_open.next() {
 				let edge = &self.edges[index];
-				if outgoing_u.contains_key(&edge.from.var) && incoming_v.contains_key(&edge.to.var) && outgoing_u[&edge.from.var] + new_edge_val + incoming_v[&edge.to.var] <= edge.val {
+				if incoming_u.contains_key(&edge.from.var) && outgoing_v.contains_key(&edge.to.var) && incoming_u[&edge.from.var] + new_edge_val + outgoing_v[&edge.to.var] <= edge.val {
 					trace!("Constraint {:?} - {:?} <= {} is implied", edge.from.var, edge.to.var, edge.val);
 					self.close_imp_edge_backward(actions, &mut rev_open, index);
-				} else if outgoing_u.contains_key(&edge.to.var) && incoming_v.contains_key(&edge.from.var) && outgoing_u[&edge.to.var] + new_edge_val + incoming_v[&edge.from.var] <= -edge.val - 1 { // todo slight double work for reified constraints
+				} else if incoming_u.contains_key(&edge.to.var) && outgoing_v.contains_key(&edge.from.var) && incoming_u[&edge.to.var] + new_edge_val + outgoing_v[&edge.from.var] <= -edge.val - 1 { // todo slight double work for reified constraints
 					trace!("Constraint {:?} - {:?} <= {} is falsified since inverse is implied", edge.from.var, edge.to.var, edge.val);
 					fail_indices.push(index);
 					self.close_imp_edge_backward(actions, &mut rev_open, index);
@@ -719,6 +786,7 @@ impl DifferenceLogicBounds {
 
 		let bool_vars = imp_constraints.iter().map(|(b, _, _, _)| *b).unique().collect::<Vec<_>>();
 		trace!("Creating DifferenceLogicBounds propagator for {} int and {} bool vars.", int_vars.len(), bool_vars.len());
+		//panic!("Stop here for now...");
 
 		// todo init all or add dynamically?
 		let graph = DifferenceLogicGraph::new(solver, int_vars.clone());
@@ -795,6 +863,7 @@ where
 			let edge = DiffEdge::new(self.graph.nodes[x].clone(), self.graph.nodes[y].clone(), *d, BoolView::from(true));
 			let index = self.graph.new_edge(actions, edge);
 			let _ = self.graph.inc_sat(actions, index)?;
+			trace!("Graph after adding new edge: {}", self.graph.to_dot(actions));
 			self.graph.inc_imp(actions, index)?;
 		}
 		self.constraints.clear();
