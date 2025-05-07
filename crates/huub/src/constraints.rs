@@ -165,6 +165,13 @@ where
 		unreachable!("propagator did not provide an integer advisor implementation")
 	}
 
+	/// Advises the propagator that a backtrack has happened. If the advisor returns `true`,
+	/// then the propagator will be enqueued.
+	fn advise_of_backtrack(&mut self, actions: &mut E) -> bool {
+		let _ = actions;
+		unreachable!("propagator did not provide an backtrack advisor implementation")
+	}
+
 	/// The propagate method is called during the search process to allow the
 	/// propagator to enforce
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {

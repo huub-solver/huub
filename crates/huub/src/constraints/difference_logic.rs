@@ -586,10 +586,6 @@ impl DifferenceLogicGraph {
 
 		// Handle fixed booleans
 		for b in state.fixed_bools.iter() {
-			if actions.get_bool_val(*b).is_none() {
-				trace!("Boolean {b:?} is actually not fixed.");  // todo could implement advisor on backtrack and just clear collections
-				continue;
-			}
 			trace!("Boolean {b:?} fixed to true.");
 			if let Some(edges) = state.bool_map.get(b) {
 				// Consequences of setting the boolean to true -> add all implied edges.
@@ -744,6 +740,7 @@ impl DifferenceLogicBounds {
 		for &v in bool_vars.iter() { // todo might run on both v and !v?
 			solver.advise_on_bool_change(prop, v, 0);
 		}
+		solver.advise_on_backtrack(prop);
 		solver.enqueue_now(prop); // todo might be removed
 	}
 
@@ -774,6 +771,13 @@ where
 		}
 		true
 	}
+
+	fn advise_of_backtrack(&mut self, _actions: &mut E) -> bool {
+		trace!("Backtrack advise");
+		self.state.reset_var_changes();
+		false
+	}
+
 
 	#[tracing::instrument(name = "difference_logic", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {

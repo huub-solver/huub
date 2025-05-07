@@ -1146,6 +1146,10 @@ impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle>
 		self.engine_mut().state.int_activation[var].add(ActivationAction::Advise(prop, data), cond);
 	}
 
+	fn advise_on_backtrack(&mut self, prop: PropRef) {
+		self.engine_mut().state.backtrack_activation.push(prop);
+	}
+
 	fn enqueue_now(&mut self, prop: PropRef) {
 		let state = &mut self.engine_mut().state;
 		state.propagator_queue.enqueue_propagator(prop);

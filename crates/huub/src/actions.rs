@@ -245,6 +245,15 @@ pub trait PropagatorInitActions: AsDynClauseDatabase + ClauseDatabase + Decision
 		data: u64,
 	);
 
+	/// Advise a propagator when the solver backtracks, allowing the propagator to decide whether to
+	/// enqueue itself.
+	///
+	/// Different from enqueueing, the propagator is always advised of the
+	/// backtrack, not just when it is not yet enqueued.
+	///
+	/// This will call [`Propagator::advise_of_backtrack`] on the propagator.
+	fn advise_on_backtrack(&mut self, prop: PropRef);
+
 	/// Create a new trailed integer value with the given initial value.
 	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt;
 

@@ -124,6 +124,7 @@ pub struct State {
 	pub(crate) bool_activation: HashMap<RawVar, Vec<ActivationAction>>,
 	/// Integer variable enqueueing information
 	pub(crate) int_activation: IndexVec<IntVarRef, ActivationList>,
+	pub(crate) backtrack_activation: Vec<PropRef>,
 	/// Queue of propagators awaiting action
 	pub(crate) propagator_queue: PropagatorQueue,
 
@@ -427,6 +428,12 @@ impl PropagatorExtension for Engine {
 		debug!(new_level, restart, "backtrack");
 		// Revert value changes to previous decision level
 		self.state.notify_backtrack::<false>(new_level, restart);
+		// Advise propagators of backtrack
+		for &prop in self.state.backtrack_activation.clone().iter() {
+			if self.propagators[prop].advise_of_backtrack(&mut self.state) {
+				self.state.propagator_queue.enqueue_propagator(prop);
+			}
+		}
 	}
 
 	fn notify_new_decision_level(&mut self) {
