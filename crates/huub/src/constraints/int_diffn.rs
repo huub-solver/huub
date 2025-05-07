@@ -1,6 +1,7 @@
 //! Structure and algorithms for the integer diffn constraint, which
 //! enforces that a number of k-dimensional hyperrectangles do not overlap.
 use std::cmp;
+use itertools::Itertools;
 
 use tracing::trace;
 
@@ -99,14 +100,14 @@ impl IntDiffnSweep {
 
 		// Do not consider objects that are fixed and have a size of 0 when non_strict
 		if non_strict && fixed {
-			let box_size_fixed: Vec<Vec<IntVal>> = box_size
+			let mut box_size_fixed: Vec<_> = box_size
 				.iter()
-				.map(|row| row.iter().map(|&v| solver.get_int_lower_bound(v)).collect())
+				.map(|row| row.iter().map(|&v| { if solver.get_int_val(v) == Some(0) { 1 } else { 0 } }))
 				.collect();
 
 			let contains_zero: Vec<usize> = box_size_fixed
-				.iter()
-				.map(|row| if row.contains(&0) { 1 } else { 0 })
+				.iter_mut()
+				.map(|row| if row.contains(&1) { 1 } else { 0 })
 				.collect();
 
 			box_posn_prop = box_posn_prop
@@ -122,8 +123,6 @@ impl IntDiffnSweep {
 				.filter(|(i, _)| contains_zero[*i] == 0)
 				.map(|(_, row)| row)
 				.collect();
-
-			println!("{:?}", box_posn_prop.len());
 		}
 
 		// Tracks whether an rectangles posn domains are fixed
@@ -1021,8 +1020,11 @@ where
 			.collect();
 
 		for o_idx in 0..self.box_posn.len() {
+            if (0..self.dimensions).any(|d| actions.get_int_val(self.box_size[o_idx][d]) == Some(0)) {
+                continue;
+            }
+
             if actions.get_trailed_int(self.fixed[o_idx]) == 1 || actions.get_trailed_int(self.removed_objs[o_idx]) == 1{
-				//println!("SindexKIPPING OBJ");
 				continue;
 			}
 
