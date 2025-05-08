@@ -70,6 +70,14 @@ pub struct FlatZincStatistics {
 	extracted_views: u32,
 	/// Number of variables removed by unification
 	vars_unified: u32,
+	/// Number of integer variables involved in global difference logic
+	diff_logic_int_vars: usize,
+	/// Number of boolean variables involved in global difference logic
+	diff_logic_bool_vars: usize,
+	/// Number of globally active difference constraints
+	diff_logic_global_constraints: usize,
+	/// Number of implied difference constraints
+	diff_logic_implied_constraints: usize,
 }
 
 /// Builder for creating a model from a FlatZinc instance
@@ -103,6 +111,27 @@ impl FlatZincStatistics {
 	pub fn unified_variables(&self) -> u32 {
 		self.vars_unified
 	}
+
+	/// Returns the number of integer variables used by difference logic
+	pub fn diff_int_vars(&self) -> usize {
+		self.diff_logic_int_vars
+	}
+
+	/// Returns the number of boolean variables used by difference logic
+	pub fn diff_bool_vars(&self) -> usize {
+		self.diff_logic_bool_vars
+	}
+
+	/// Returns the number of globally active constraints used by difference logic
+	pub fn diff_globals(&self) -> usize {
+		self.diff_logic_global_constraints
+	}
+
+	/// Returns the number of implied constraints used by difference logic
+	pub fn diff_implied(&self) -> usize {
+		self.diff_logic_implied_constraints
+	}
+	
 }
 
 impl<'a, S> FznModelBuilder<'a, S>
@@ -1625,6 +1654,10 @@ where
 		
 		// Add global propagators
 		if diff_logic.is_active() {
+			(self.stats.diff_logic_int_vars, 
+			 self.stats.diff_logic_bool_vars, 
+			 self.stats.diff_logic_global_constraints, 
+			 self.stats.diff_logic_implied_constraints) = diff_logic.output_statistics();
 			self.prb += diff_logic;
 		}
 

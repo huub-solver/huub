@@ -224,6 +224,10 @@ where
 						"initTime",
 						&Instant::now().duration_since(start).as_secs_f64(),
 					),
+					("diffLogicIntVars", &fzn_stats.diff_int_vars()),
+					("diffLogicBoolVars", &fzn_stats.diff_bool_vars()),
+					("diffLogicGlobals", &fzn_stats.diff_globals()),
+					("diffLogicImplied", &fzn_stats.diff_implied()),
 				],
 			);
 		}

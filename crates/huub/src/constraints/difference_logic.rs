@@ -96,6 +96,23 @@ impl DifferenceLogic {
 		!self.constraints.is_empty() || !self.imp_constraints.is_empty()
 	}
 	
+	/// Return statistics of the captured difference logic constraints:
+	/// (# integer variables, # boolean variables, # globally active constraints, # implied constraints)
+	pub(crate) fn output_statistics(&self) -> (usize, usize, usize, usize) {
+		let mut int_vars = IndexSet::new();
+		let mut bool_vars = IndexSet::new();
+		for (x, y, _) in self.constraints.iter() {
+			let _ = int_vars.insert(*x);
+			let _ = int_vars.insert(*y);
+		}
+		for (b, x, y, _) in self.imp_constraints.iter() {
+			let _ = bool_vars.insert(*b);
+			let _ = int_vars.insert(*x);
+			let _ = int_vars.insert(*y);
+		}
+		(int_vars.len(), bool_vars.len(), self.constraints.len(), self.imp_constraints.len())
+	}
+	
 }
 
 impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
