@@ -1349,18 +1349,24 @@ where
 					if let [a, b] = c.args.as_slice() {
 						let a = self.arg_int(a)?;
 						let b = self.arg_int(b)?;
-						if config.diff_logic > 0 && c.id.deref() == "int_le" { //todo deal with versions where some of the decisions are fixed?
-							diff_logic.add_global(a, b, 0);
-						} else if config.diff_logic > 1 && c.id.deref() == "int_ne" { 
-							diff_logic.add_ne(&mut self.prb, a, b, 0);
-						} else {
-							let lin_exp = a - b;
-							self.prb += match c.id.deref() {
-								"int_le" => lin_exp.leq(0),
-								"int_ne" => lin_exp.ne(0),
-								_ => unreachable!(),
-							};
+						
+						if config.diff_logic > 0 && !matches!(a.0, IntDecisionInner::Const(_)) && !matches!(b.0, IntDecisionInner::Const(_)) {
+							if c.id.deref() == "int_le" {
+								diff_logic.add_global(a, b, 0);
+								continue
+							} else if config.diff_logic > 1 && c.id.deref() == "int_ne" {
+								diff_logic.add_ne(&mut self.prb, a, b, 0);
+								continue
+							}
 						}
+						
+						let lin_exp = a - b;
+						self.prb += match c.id.deref() {
+							"int_le" => lin_exp.leq(0),
+							"int_ne" => lin_exp.ne(0),
+							_ => unreachable!(),
+						};
+						
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: match c.id.deref() {
@@ -1380,7 +1386,7 @@ where
 						let b = self.arg_int(b)?;
 						let r = self.arg_bool(r)?;
 						
-						if config.diff_logic > 0 {
+						if config.diff_logic > 0 && !matches!(a.0, IntDecisionInner::Const(_)) && !matches!(b.0, IntDecisionInner::Const(_)) {
 							let mut handled_by_diff = true;
 							match (config.diff_logic, c.id.deref()) {
 								(_, "int_eq_imp") => diff_logic.add_imp_eq(r, a, b, 0),
@@ -1438,7 +1444,7 @@ where
 							.try_collect()?;
 						let rhs = self.arg_par_int(rhs)?;
 
-						// diff logic only if there are exactly 2 coefficients
+						// diff logic only if there are exactly 2 coefficients todo can I expect that none of them are constant?
 						if config.diff_logic > 0 && coeffs.len() == 2 && c.id.deref() != "int_lin_eq" {
 							// Coefficients need to be (1, -1) or (-1, 1), reorder variables if pattern found todo what about f, -f with rhs div f integer?
 							let diff_vars = if coeffs[0] == 1 && coeffs[1] == -1 {

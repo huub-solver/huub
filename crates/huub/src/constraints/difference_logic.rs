@@ -101,14 +101,14 @@ impl DifferenceLogic {
 	pub(crate) fn output_statistics(&self) -> (usize, usize, usize, usize) {
 		let mut int_vars = IndexSet::new();
 		let mut bool_vars = IndexSet::new();
-		for (x, y, _) in self.constraints.iter() {
-			let _ = int_vars.insert(*x);
-			let _ = int_vars.insert(*y);
+		for &(x, y, _) in self.constraints.iter() {
+			let _ = int_vars.insert(x);
+			let _ = int_vars.insert(y);
 		}
-		for (b, x, y, _) in self.imp_constraints.iter() {
-			let _ = bool_vars.insert(*b);
-			let _ = int_vars.insert(*x);
-			let _ = int_vars.insert(*y);
+		for &(b, x, y, _) in self.imp_constraints.iter() {
+			let _ = bool_vars.insert(b);
+			let _ = int_vars.insert(x);
+			let _ = int_vars.insert(y);
 		}
 		(int_vars.len(), bool_vars.len(), self.constraints.len(), self.imp_constraints.len())
 	}
@@ -125,10 +125,10 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 		// todo do simplification first, then transform graph here
 		trace!("DifferenceLogic to_solver with {} constraints and {} imp_constraints", self.constraints.len(), self.imp_constraints.len());
 		let constraints: Vec<_> = self.constraints.iter()
-			.map(|(x, y, d)| (slv.get_solver_int(*x), slv.get_solver_int(*y), *d))
+			.map(|&(x, y, d)| (slv.get_solver_int(x), slv.get_solver_int(y), d))
 			.collect();
 		let imp_constraints: Vec<_> = self.imp_constraints.iter()
-			.map(|(b, x, y, d)| (slv.get_solver_bool(*b), slv.get_solver_int(*x), slv.get_solver_int(*y), *d))
+			.map(|&(b, x, y, d)| (slv.get_solver_bool(b), slv.get_solver_int(x), slv.get_solver_int(y), d))
 			.collect();
 		DifferenceLogicBounds::new_in(slv, constraints, imp_constraints);
 		Ok(())
@@ -405,8 +405,8 @@ impl DifferenceLogicGraph {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
 			let node_s = s.node.borrow();
 			let _ = pi_new.insert(s.var, node_s.pi + gamma_s);
-			for index in node_s.edges.iter(actions) {
-				let edge = &self.edges[*index];
+			for &index in node_s.edges.iter(actions) {
+				let edge = &self.edges[index];
 				let mut node_t = edge.to.node.borrow_mut();
 				if !pi_new.contains_key(&edge.to.var) {
 					let gamma_t = pi_new[&s.var] + edge.val - node_t.pi;
@@ -444,8 +444,8 @@ impl DifferenceLogicGraph {
 			let _ = distances.insert(s.var, dist);
 			let node_s = s.node.borrow();
 			//trace!("dijkstra on current node {s:?} with dist {dist}");
-			for index in if reverse {node_s.reverse_edges.iter(actions)} else {node_s.edges.iter(actions)} {
-				let edge = &self.edges[*index];
+			for &index in if reverse {node_s.reverse_edges.iter(actions)} else {node_s.edges.iter(actions)} {
+				let edge = &self.edges[index];
 				let target = if reverse {edge.from.clone()} else {edge.to.clone()};
 				let node_t = target.node.borrow();
 				let new_dist = dist + edge.val + ((node_s.pi - node_t.pi) * if reverse {-1} else {1}); //todo could write differently without if
@@ -529,8 +529,8 @@ impl DifferenceLogicGraph {
 					let (prev, b) = node_s.clone().backtrace.unwrap();
 					actions.set_int_lower_bound(s.var, bound, |a: &mut P| vec![b, a.get_int_lit(prev.var, IntLitMeaning::GreaterEq(self.get_cur_lower_bound(a, prev.clone())))])?;
 				}
-				for index in node_s.edges.iter(actions) {
-					let edge = &self.edges[*index];
+				for &index in node_s.edges.iter(actions) {
+					let edge = &self.edges[index];
 					let mut node_t = edge.to.node.borrow_mut();
 					if !node_t.visited {
 						let path = gamma_s + node_s.pi + edge.val - node_t.pi;
@@ -570,8 +570,8 @@ impl DifferenceLogicGraph {
 					actions.set_int_upper_bound(s.var, bound, |a: &mut P| vec![b, a.get_int_lit(prev.var, IntLitMeaning::Less(self.get_cur_upper_bound(a, prev.clone()) + 1))])?;
 
 				}
-				for index in node_s.reverse_edges.iter(actions) {
-					let edge = &self.edges[*index];
+				for &index in node_s.reverse_edges.iter(actions) {
+					let edge = &self.edges[index];
 					let mut node_t = edge.from.node.borrow_mut();
 					if !node_t.visited {
 						let path = gamma_s + node_t.pi + edge.val - node_s.pi;
@@ -669,9 +669,9 @@ impl DifferenceLogicGraph {
 		}
 
 		// Handle fixed booleans
-		for b in state.fixed_bools.iter() {
+		for &b in state.fixed_bools.iter() {
 			trace!("Boolean {b:?} fixed to true.");
-			if let Some(edges) = state.bool_map.get(b) {
+			if let Some(edges) = state.bool_map.get(&b) {
 				// Consequences of setting the boolean to true -> add all implied edges.
 				for &index in edges.iter() {
 					let closed_now = self.close_imp_edge(actions, index);
@@ -687,20 +687,20 @@ impl DifferenceLogicGraph {
 							let lb_y = -edge.val + self.get_cur_lower_bound(actions, edge.from.clone());
 							if lb_y > self.get_cur_lower_bound(actions, edge.to.clone()) {
 								// New edge caused lower bound change.
-								actions.set_int_lower_bound(edge.to.var, lb_y, |a: &mut P| vec![*b, a.get_int_lit(edge.from.var, IntLitMeaning::GreaterEq(self.get_cur_lower_bound(a, edge.from.clone())))])?;
+								actions.set_int_lower_bound(edge.to.var, lb_y, |a: &mut P| vec![b, a.get_int_lit(edge.from.var, IntLitMeaning::GreaterEq(self.get_cur_lower_bound(a, edge.from.clone())))])?;
 								self.update_lb(edge.to.clone(), lb_y, &mut state.lb_updates);
 							}
 							let ub_x = edge.val + self.get_cur_upper_bound(actions, edge.to.clone());
 							if ub_x < self.get_cur_upper_bound(actions, edge.from.clone()) {
 								// New edge caused upper bound change.
-								actions.set_int_upper_bound(edge.from.var, ub_x, |a: &mut P| vec![*b, a.get_int_lit(edge.to.var, IntLitMeaning::Less(self.get_cur_upper_bound(a, edge.to.clone()) + 1))])?;
+								actions.set_int_upper_bound(edge.from.var, ub_x, |a: &mut P| vec![b, a.get_int_lit(edge.to.var, IntLitMeaning::Less(self.get_cur_upper_bound(a, edge.to.clone()) + 1))])?;
 								self.update_ub(edge.from.clone(), ub_x, &mut state.ub_updates);
 							}
 						}
 					}
 				}
 			}
-			let negation = !*b;
+			let negation = !b;
 			if let Some(edges) = state.bool_map.get(&negation) {
 				// Consequences of setting the negation of the boolean to false -> close all implied edges.
 				for &index in edges.iter() {
@@ -728,8 +728,8 @@ impl DifferenceLogicGraph {
 								 self.get_cur_lower_bound(actions, v.clone()),
 								 self.get_cur_upper_bound(actions, v.clone()),
 								 node.pi).as_str());
-			for index in node.edges.iter(actions) {
-				let edge = &self.edges[*index];
+			for &index in node.edges.iter(actions) {
+				let edge = &self.edges[index];
 				out.push_str(format!("\"{var:?}\" -> \"{:?}\" [label=\"{:?} ({:?})\"]\n", edge.to.var, edge.val, edge.bool_var).as_str());
 			}
 		}
@@ -797,13 +797,19 @@ impl DifferenceLogicBounds {
 	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P,
 													 constraints: Vec<(IntView, IntView, IntVal)>,  // todo capture all options: int_lin_le(_imp,_reif), int_le(_imp,_reif), also equality and non-equality?
 													 imp_constraints: Vec<(BoolView, IntView, IntView, IntVal)>) {
+		
+		let int_vars = constraints.iter().flat_map(|&(x, y, _)| once(x).chain(once(y)))
+			.chain(imp_constraints.iter().flat_map(|&(_, x, y, _)| once(x).chain(once(y)))).unique().collect::<Vec<_>>();
 
-		let int_vars = constraints.iter().flat_map(|(x, y, _)| once(*x).chain(once(*y)))
-			.chain(imp_constraints.iter().flat_map(|(_, x, y, _)| once(*x).chain(once(*y)))).unique().collect::<Vec<_>>();
-
-		let bool_vars = imp_constraints.iter().map(|(b, _, _, _)| *b).unique().collect::<Vec<_>>();
+		let bool_vars = imp_constraints.iter().map(|&(b, _, _, _)| b).unique().collect::<Vec<_>>();
 		trace!("Creating DifferenceLogicBounds propagator for {} int and {} bool vars.", int_vars.len(), bool_vars.len());
-		//panic!("Stop here for now...");
+
+		// todo at this point there might be some variables that have merged into a constant. For now we still keep them as otherwise the initial bound propagation will not be done. They should be dropped after simplify!
+		// todo this is a workaround if edges now are completely redundant connecting the same variable. Should only happen if both sides collapse to the same constant?
+		trace!("Original constraint lengths: {} and {}.", constraints.len(), imp_constraints.len());
+		let trimmed_constraints = constraints.into_iter().filter(|&(x, y, _)| x != y).collect::<Vec<_>>();
+		let trimmed_imp_constraints = imp_constraints.into_iter().filter(|&(_, x, y, _)| x != y).collect::<Vec<_>>();
+		trace!("Constraint lengths after trimming self-loops: {} and {}.", trimmed_constraints.len(), trimmed_imp_constraints.len());
 
 		// todo init all or add dynamically?
 		let graph = DifferenceLogicGraph::new(solver, int_vars.clone());
@@ -812,8 +818,8 @@ impl DifferenceLogicBounds {
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				graph,
-				constraints: constraints.clone(),
-				imp_constraints: imp_constraints.clone(),
+				constraints: trimmed_constraints,
+				imp_constraints: trimmed_imp_constraints,
 				state,
 			}),
 			PriorityLevel::Low, // todo priority
