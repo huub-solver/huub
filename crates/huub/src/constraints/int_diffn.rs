@@ -51,7 +51,9 @@ pub struct IntDiffnSweep {
     /// Tracks the lower bound of the positions
 	lb_tracker: Vec<Vec<IntVal>>,
     /// Tracks the lower bound of the sizes
-	lb_sizes: Vec<Vec<IntVal>>
+	lb_sizes: Vec<Vec<IntVal>>,
+    /// Are we using the non-strict version
+    non_strict: bool
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntDiffn {
@@ -148,7 +150,8 @@ impl IntDiffnSweep {
 				fixed_sizes: fixed,
                 ub_tracker: ub_tracker_prop,
                 lb_tracker: lb_tracker_prop,
-				lb_sizes: lb_sizes_prop
+				lb_sizes: lb_sizes_prop,
+                non_strict
 			}),
 			PriorityLevel::Lowest,
 		);
@@ -991,7 +994,7 @@ where
         }
 
 		for o_idx in 0..self.box_posn.len() {
-            if (0..self.dimensions).any(|d| actions.get_int_val(self.box_size[o_idx][d]) == Some(0)) {
+            if self.non_strict && (0..self.dimensions).any(|d| actions.get_int_val(self.box_size[o_idx][d]) == Some(0)) {
                 continue;
             }
 
