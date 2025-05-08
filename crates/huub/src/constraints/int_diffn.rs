@@ -2,6 +2,7 @@
 //! enforces that a number of k-dimensional hyperrectangles do not overlap.
 use std::cmp;
 use itertools::Itertools;
+use smallvec::SmallVec;
 
 use tracing::trace;
 
@@ -74,8 +75,8 @@ impl<S: SimplificationActions> Constraint<S> for IntDiffn {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 // Active forbidden regions
 struct ForbiddenRegion {
-	lb: Vec<IntVal>, // lower bound of each dimension
-	ub: Vec<IntVal>, // upper bound of each dimension
+	lb: SmallVec<[IntVal; 3]>, // lower bound of each dimension
+	ub: SmallVec<[IntVal; 3]>, // upper bound of each dimension
 }
 
 // #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -360,8 +361,8 @@ impl IntDiffnSweep {
 				continue;
 			}
 			let mut fr = ForbiddenRegion {
-				lb: Vec::new(),
-				ub: Vec::new(),
+				lb: SmallVec::<[IntVal; 3]>::new(),
+				ub: SmallVec::<[IntVal; 3]>::new(),
 			};
 
 			if i == o_idx {
@@ -1103,8 +1104,8 @@ where
 
 		// Source optimisations
 		let mut active_b = ForbiddenRegion {
-			lb: Vec::new(),
-			ub: Vec::new(),
+            lb: SmallVec::<[IntVal; 3]>::new(),
+            ub: SmallVec::<[IntVal; 3]>::new(),
 		};
 
 		for _ in 0..self.dimensions {
