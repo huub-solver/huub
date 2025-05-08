@@ -469,41 +469,55 @@ impl IntDiffnSweep {
 		is_assigned
 	}
 
-	// TODO: Very bad name
+// TODO: Very bad name
 	fn find_smallest_lb(
 		&self,
 		curr_obj_idx: usize,
 		curr_dimension: usize,
 		all_fr: &Vec<ForbiddenRegion>,
 	) -> Option<IntVal> {
-		let feasible_fr: Vec<_> = all_fr
+		let mut feasible_lb = None;
+		let mut possible_lb: Vec<_> = all_fr
 			.into_iter()
-			.filter(|fr| fr.lb[curr_dimension] < self.lb_tracker[curr_obj_idx][curr_dimension])
+			.filter(|fr| fr.lb[curr_dimension] <= self.lb_tracker[curr_obj_idx][curr_dimension] - 1)
+			.map(|fr| fr.lb[curr_dimension])
 			.collect();
+		possible_lb.sort_by(|a, b| b.cmp(a));
 
-		for d in 0..self.dimensions {
-			if d == curr_dimension {
-				continue;
+		for &lb in &possible_lb {
+			let feasible_fr: Vec<_> = all_fr
+				.into_iter()
+				.filter(|fr| fr.lb[curr_dimension] <= lb)
+				.collect();
+
+			if feasible_fr.is_empty() {
+				return feasible_lb;
 			}
-			let posn_ub = self.ub_tracker[curr_obj_idx][d];
-			let posn_lb = self.lb_tracker[curr_obj_idx][d];
-			let mut range_list: Vec<_> = (posn_lb..=posn_ub).collect();
 
-			for fr in &feasible_fr {
-				let fr_range: Vec<_> = (fr.lb[d]..=fr.ub[d]).collect();
-				range_list = range_list
-					.into_iter()
-					.filter(|v| !fr_range.contains(v))
-					.collect();
-				if range_list.is_empty() {
-					break;
+			// Check all other dimensions so that
+			for d in 0..self.dimensions {
+				if d == curr_dimension {
+					continue;
+				}
+				let posn_ub = self.ub_tracker[curr_obj_idx][d];
+				let posn_lb = self.lb_tracker[curr_obj_idx][d];
+				let mut range_list: Vec<_> = (posn_lb..=posn_ub).collect();
+
+				for fr in &feasible_fr {
+					range_list.retain(|&v| v < fr.lb[d] || v > fr.ub[d]);
+
+					if range_list.is_empty() {
+						feasible_lb = Some(lb);
+						break;
+					}
+				}
+				if !range_list.is_empty() {
+					return feasible_lb;
 				}
 			}
-			if !range_list.is_empty() {
-				return None;
-			}
 		}
-		feasible_fr.iter().map(|fr| fr.lb[curr_dimension]).max()	}
+		return feasible_lb;
+	}
 
 	// TODO: Very bad name
 	fn find_largest_ub(
@@ -512,34 +526,45 @@ impl IntDiffnSweep {
 		curr_dimension: usize,
 		all_fr: &Vec<ForbiddenRegion>,
 	) -> Option<IntVal> {
-        let feasible_fr: Vec<_> = all_fr
+		let mut feasible_ub = None;
+		let mut possible_ub: Vec<_> = all_fr
 			.into_iter()
-			.filter(|fr| fr.ub[curr_dimension] > self.ub_tracker[curr_obj_idx][curr_dimension])
+			.filter(|fr| fr.ub[curr_dimension] >= self.ub_tracker[curr_obj_idx][curr_dimension] + 1)
+			.map(|fr| fr.ub[curr_dimension])
 			.collect();
 
-		for d in 0..self.dimensions {
-			if d == curr_dimension {
-				continue;
-			}
-			let posn_ub = self.ub_tracker[curr_obj_idx][d];
-			let posn_lb = self.lb_tracker[curr_obj_idx][d];
-			let mut range_list: Vec<_> = (posn_lb..=posn_ub).collect();
+		possible_ub.sort();
+		for &ub in &possible_ub {
+			let feasible_fr: Vec<_> = all_fr
+				.into_iter()
+				.filter(|fr| fr.ub[curr_dimension] >= ub)
+				.collect();
 
-			for fr in &feasible_fr {
-				let fr_range: Vec<_> = (fr.lb[d]..=fr.ub[d]).collect();
-				range_list = range_list
-					.into_iter()
-					.filter(|v| !fr_range.contains(v))
-					.collect();
-				if range_list.is_empty() {
-					break;
+			if feasible_fr.is_empty() {
+				return feasible_ub;
+			}
+
+			for d in 0..self.dimensions {
+				if d == curr_dimension {
+					continue;
+				}
+				let posn_ub = self.ub_tracker[curr_obj_idx][d];
+				let posn_lb = self.lb_tracker[curr_obj_idx][d];
+				let mut range_list: Vec<_> = (posn_lb..=posn_ub).collect();
+
+				for fr in &feasible_fr {
+					range_list.retain(|&v| v < fr.lb[d] || v > fr.ub[d]);
+					if range_list.is_empty() {
+						feasible_ub = Some(ub);
+						break;
+					}
+				}
+				if !range_list.is_empty() {
+					return feasible_ub;
 				}
 			}
-			if !range_list.is_empty() {
-				return None;
-			}
 		}
-		feasible_fr.iter().map(|fr| fr.ub[curr_dimension]).min()
+		return feasible_ub;
 	}
 
 	/// Checks if two forbidden regions can be coalesced into one
