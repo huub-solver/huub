@@ -797,19 +797,25 @@ impl DifferenceLogicBounds {
 	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P,
 													 constraints: Vec<(IntView, IntView, IntVal)>,  // todo capture all options: int_lin_le(_imp,_reif), int_le(_imp,_reif), also equality and non-equality?
 													 imp_constraints: Vec<(BoolView, IntView, IntView, IntVal)>) {
-		
-		let int_vars = constraints.iter().flat_map(|&(x, y, _)| once(x).chain(once(y)))
-			.chain(imp_constraints.iter().flat_map(|&(_, x, y, _)| once(x).chain(once(y)))).unique().collect::<Vec<_>>();
-
-		let bool_vars = imp_constraints.iter().map(|&(b, _, _, _)| b).unique().collect::<Vec<_>>();
-		trace!("Creating DifferenceLogicBounds propagator for {} int and {} bool vars.", int_vars.len(), bool_vars.len());
 
 		// todo at this point there might be some variables that have merged into a constant. For now we still keep them as otherwise the initial bound propagation will not be done. They should be dropped after simplify!
 		// todo this is a workaround if edges now are completely redundant connecting the same variable. Should only happen if both sides collapse to the same constant?
 		trace!("Original constraint lengths: {} and {}.", constraints.len(), imp_constraints.len());
-		let trimmed_constraints = constraints.into_iter().filter(|&(x, y, _)| x != y).collect::<Vec<_>>();
-		let trimmed_imp_constraints = imp_constraints.into_iter().filter(|&(_, x, y, _)| x != y).collect::<Vec<_>>();
+		let trimmed_constraints = constraints.into_iter().filter(|&(x, y, d)| {
+			assert!(x != y || d == 0);  // todo this would mean a failure at the root node, deal with this in simplification
+			x != y
+		}).collect::<Vec<_>>();
+		let trimmed_imp_constraints = imp_constraints.into_iter().filter(|&(_, x, y, d)| {
+			assert!(x != y || d == 0);  // todo this would mean fixing the boolean at the root node to false, deal with this in simplification
+			x != y
+		}).collect::<Vec<_>>();
 		trace!("Constraint lengths after trimming self-loops: {} and {}.", trimmed_constraints.len(), trimmed_imp_constraints.len());
+
+		let int_vars = trimmed_constraints.iter().flat_map(|&(x, y, _)| once(x).chain(once(y)))
+			.chain(trimmed_imp_constraints.iter().flat_map(|&(_, x, y, _)| once(x).chain(once(y)))).unique().collect::<Vec<_>>();
+
+		let bool_vars = trimmed_imp_constraints.iter().map(|&(b, _, _, _)| b).unique().collect::<Vec<_>>();
+		trace!("Creating DifferenceLogicBounds propagator for {} int and {} bool vars.", int_vars.len(), bool_vars.len());
 
 		// todo init all or add dynamically?
 		let graph = DifferenceLogicGraph::new(solver, int_vars.clone());
@@ -886,7 +892,7 @@ where
 			let edge = DiffEdge::new(self.graph.nodes[x].clone(), self.graph.nodes[y].clone(), *d, BoolView::from(true));
 			let index = self.graph.new_edge(actions, edge);
 			let _ = self.graph.inc_sat(actions, index)?;
-			trace!("Graph after adding new edge: {}", self.graph.to_dot(actions));
+			//trace!("Graph after adding new edge: {}", self.graph.to_dot(actions));
 			self.graph.inc_imp(actions, index)?;
 		}
 		self.constraints.clear();
