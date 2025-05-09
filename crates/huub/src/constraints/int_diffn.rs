@@ -633,11 +633,12 @@ impl IntDiffnSweep {
 	fn explain_conflict<P: PropagationActions>(
 		&mut self,
 		actions: &mut P,
+        all_fr: &Vec<ForbiddenRegion>,
 		fr_support: &Vec<usize>,
 		curr_obj_idx: usize,
 	) -> Vec<BoolView> {
 		let mut reason: Vec<_> =
-			self.explain_fr_conflict(actions, fr_support);
+			self.explain_fr_conflict(actions, fr_support, all_fr, curr_obj_idx);
 		for d in 0..self.dimensions {
 			if !self.fixed_sizes {
 				reason.push(actions.get_int_upper_bound_lit(self.box_size[curr_obj_idx][d]))
@@ -674,12 +675,33 @@ impl IntDiffnSweep {
 		&mut self,
 		actions: &mut P,
 		fr_support: &Vec<usize>,
+		all_fr: &Vec<ForbiddenRegion>,
+		curr_obj_idx: usize,
 	) -> Vec<BoolView> {
 		let mut reason = Vec::new();
-		for &o_idx in fr_support {
+		for (fr, &o_idx) in fr_support.iter().enumerate() {
 			// for o_idx in 0..self.box_posn.len() {
 			for d in 0..self.dimensions {
-				let possible_ub = self.ub_tracker[o_idx][d];
+                if !self.fixed_sizes {
+                    reason.push(actions.get_int_upper_bound_lit(self.box_size[o_idx][d]))
+				}
+
+				let mut possible_ub = self.ub_tracker[o_idx][d];
+				let origin_ub = self.ub_tracker[curr_obj_idx][d];
+
+				let mut possible_lb = self.lb_tracker[o_idx][d];
+				let origin_lb = self.lb_tracker[curr_obj_idx][d];
+
+				if all_fr[fr].ub[d] > origin_ub {
+					possible_lb =
+						origin_ub - actions.get_int_lower_bound(self.box_size[o_idx][d]) + 1;
+                }
+
+				if all_fr[fr].lb[d] < origin_lb {
+					possible_ub =
+						origin_lb + actions.get_int_lower_bound(self.box_size[curr_obj_idx][d]) - 1;
+                }
+
 				reason.push(actions.get_int_lit(
 					self.box_posn[o_idx][d],
 					IntLitMeaning::Less(possible_ub + 1),
@@ -692,7 +714,6 @@ impl IntDiffnSweep {
 					possible_ub + 1
 				);
 
-				let possible_lb = self.lb_tracker[o_idx][d];
 				reason.push(actions.get_int_lit(
 					self.box_posn[o_idx][d],
 					IntLitMeaning::GreaterEq(possible_lb),
@@ -1019,14 +1040,13 @@ where
         }
 
 		for o_idx in 0..self.box_posn.len() {
-            if self.non_strict && (0..self.dimensions).any(|d| actions.get_int_val(self.box_size[o_idx][d]) == Some(0)) {
-                continue;
-            }
-
             if actions.get_trailed_int(self.fixed[o_idx]) == 1 || actions.get_trailed_int(self.removed_objs[o_idx]) == 1{
 				continue;
 			}
 
+            if self.non_strict && (0..self.dimensions).any(|d| actions.get_int_val(self.box_size[o_idx][d]) == Some(0)) {
+                continue;
+            }
 			// if actions.get_trailed_int(self.fixed) & (1 << o_idx) != 0 {
 			//     println!("here");
 			//     continue;
@@ -1070,6 +1090,7 @@ where
 				if self.fixed_in_all_dimensions(o_idx) {
 					let reason = self.explain_conflict(
 						actions,
+                        &all_fr_explain,
 						&fr_support,
 						o_idx,
 					);
@@ -1091,6 +1112,7 @@ where
 						// Conflict since there is no feasible origin in this dimension
 						let reason = self.explain_conflict(
 							actions,
+                            &all_fr_explain,
 							&fr_support,
 							o_idx,
 						);
@@ -1113,6 +1135,7 @@ where
 						// Conflict since there is no feasible origin in this dimension
 						let reason = self.explain_conflict(
 							actions,
+                            &all_fr_explain,
 							&fr_support,
 							o_idx,
 						);
