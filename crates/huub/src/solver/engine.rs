@@ -140,6 +140,26 @@ pub struct State {
 	pub(crate) check_int_fixed: Vec<(IntVarRef, IntVal)>,
 }
 
+/// Advise propagators of the enqueued event, add them to the propagator queue if requested.
+fn advise_and_enqueue(state: &mut State, propagators: &mut IndexVec<PropRef, BoxedPropagator>, action: &ActivationAction) {
+	let prop = match *action {
+		ActivationAction::AdviseInt(prop, var, event) => {
+			if !propagators[prop].advise_of_int_change(state, var, event) {
+				return;
+			}
+			prop
+		}
+		ActivationAction::AdviseBool(prop, var) => {
+			if !propagators[prop].advise_of_bool_change(state, var) {
+				return;
+			}
+			prop
+		}
+		ActivationAction::Enqueue(prop) => prop,
+	};
+	state.propagator_queue.enqueue_propagator(prop);
+}
+
 impl PropagatorExtension for Engine {
 	fn add_external_clause(
 		&mut self,
@@ -221,21 +241,7 @@ impl PropagatorExtension for Engine {
 					.clone()
 					.activated_by(IntEvent::Fixed)
 				{
-					let prop = match *action {
-						ActivationAction::Advise(prop, data) => {
-							if !self.propagators[prop].advise_of_int_change(
-								ctx.state,
-								IntView(IntViewInner::VarRef(r)),
-								IntEvent::Fixed,
-								data,
-							) {
-								continue;
-							}
-							prop
-						}
-						ActivationAction::Enqueue(prop) => prop,
-					};
-					ctx.state.propagator_queue.enqueue_propagator(prop);
+					advise_and_enqueue(ctx.state, &mut self.propagators, action);
 				}
 			}
 		}
@@ -327,20 +333,7 @@ impl PropagatorExtension for Engine {
 					.into_iter()
 					.flatten()
 				{
-					let prop = match action {
-						ActivationAction::Advise(prop, data) => {
-							if !self.propagators[prop].advise_of_bool_change(
-								&mut self.state,
-								BoolView(BoolViewInner::Lit(lit)),
-								data,
-							) {
-								continue;
-							}
-							prop
-						}
-						ActivationAction::Enqueue(prop) => prop,
-					};
-					self.state.propagator_queue.enqueue_propagator(prop);
+					advise_and_enqueue(&mut self.state, &mut self.propagators, &action);
 				}
 			}
 
@@ -402,21 +395,7 @@ impl PropagatorExtension for Engine {
 				if !self.state.failed {
 					if let Some(event) = event {
 						for action in self.state.int_activation[iv].clone().activated_by(event) {
-							let prop = match *action {
-								ActivationAction::Advise(prop, data) => {
-									if !self.propagators[prop].advise_of_int_change(
-										&mut self.state,
-										IntView(IntViewInner::VarRef(iv)),
-										event,
-										data,
-									) {
-										continue;
-									}
-									prop
-								}
-								ActivationAction::Enqueue(prop) => prop,
-							};
-							self.state.propagator_queue.enqueue_propagator(prop);
+							advise_and_enqueue(&mut self.state, &mut self.propagators, action);
 						}
 					}
 				}

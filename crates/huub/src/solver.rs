@@ -1089,6 +1089,25 @@ impl<Oracle: PropagatingSolver<Engine>> InspectionActions for Solver<Oracle> {
 	}
 }
 
+impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
+	/// Enqueue the given action on changes to the given boolean.
+	fn action_on_bool_change(&mut self, var: BoolView, action: ActivationAction) {
+		match var.0 {
+			BoolViewInner::Lit(lit) => {
+				self.engine_mut().state.trail.grow_to_boolvar(lit.var());
+				self.oracle.add_observed_var(lit.var());
+				self.engine_mut()
+					.state
+					.bool_activation
+					.entry(lit.var())
+					.or_default()
+					.push(action);
+			}
+			BoolViewInner::Const(_) => {}
+		}
+	}
+}
+
 impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle> {
 	fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef {
 		let engine = self.engine_mut();
@@ -1101,20 +1120,8 @@ impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle>
 		p
 	}
 
-	fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView, data: u64) {
-		match var.0 {
-			BoolViewInner::Lit(lit) => {
-				self.engine_mut().state.trail.grow_to_boolvar(lit.var());
-				self.oracle.add_observed_var(lit.var());
-				self.engine_mut()
-					.state
-					.bool_activation
-					.entry(lit.var())
-					.or_default()
-					.push(ActivationAction::Advise(prop, data));
-			}
-			BoolViewInner::Const(_) => {}
-		}
+	fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView) {
+		self.action_on_bool_change(var, ActivationAction::AdviseBool(prop, var));
 	}
 
 	fn advise_on_int_change(
@@ -1122,9 +1129,9 @@ impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle>
 		prop: PropRef,
 		var: IntView,
 		condition: IntPropCond,
-		data: u64,
 	) {
-		let (var, cond) = match var.0 {
+		let action = ActivationAction::AdviseInt(prop, var, condition);
+		let (var_ref, cond) = match var.0 {
 			IntViewInner::VarRef(var) => (var, condition),
 			IntViewInner::Linear { transformer, var } => {
 				let condition = if transformer.positive_scale() {
@@ -1140,10 +1147,10 @@ impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle>
 			}
 			IntViewInner::Const(_) => return, // ignore
 			IntViewInner::Bool { lit, .. } => {
-				return self.advise_on_bool_change(prop, BoolView(BoolViewInner::Lit(lit)), data)
+				return self.action_on_bool_change(BoolView(BoolViewInner::Lit(lit)), action);
 			}
 		};
-		self.engine_mut().state.int_activation[var].add(ActivationAction::Advise(prop, data), cond);
+		self.engine_mut().state.int_activation[var_ref].add(ActivationAction::AdviseInt(prop, var, condition), cond);
 	}
 
 	fn advise_on_backtrack(&mut self, prop: PropRef) {

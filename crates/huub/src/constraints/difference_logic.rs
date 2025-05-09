@@ -13,7 +13,7 @@ use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;
 use priority_queue::PriorityQueue;
 use tracing::trace;
-use crate::solver::activation_list::{IntEvent, IntPropCond};
+use crate::solver::activation_list::IntPropCond;
 use crate::solver::{BoolView, IntLitMeaning};
 use crate::{actions::{
 	ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
@@ -825,11 +825,11 @@ impl DifferenceLogicBounds {
 			PriorityLevel::Low, // todo priority
 		);
 		for &v in int_vars.iter() {
-			solver.advise_on_int_change(prop, v, IntPropCond::LowerBound, 0);
-			solver.advise_on_int_change(prop, v, IntPropCond::UpperBound, 1);
+			solver.advise_on_int_change(prop, v, IntPropCond::LowerBound);
+			solver.advise_on_int_change(prop, v, IntPropCond::UpperBound);
 		}
 		for &v in bool_vars.iter() { // todo might run on both v and !v?
-			solver.advise_on_bool_change(prop, v, 0);
+			solver.advise_on_bool_change(prop, v);
 		}
 		solver.advise_on_backtrack(prop);
 		solver.enqueue_now(prop); // todo might be removed
@@ -842,7 +842,7 @@ where
 	P: PropagationActions,
 	E: ExplanationActions,
 {
-	fn advise_of_bool_change(&mut self, actions: &mut E, view: BoolView, _data: u64) -> bool {
+	fn advise_of_bool_change(&mut self, actions: &mut E, view: BoolView) -> bool {
 		let val = actions.get_bool_val(view).unwrap();
 		trace!("Boolean {view:?} fixed to {val}.");
 		if val {
@@ -853,13 +853,13 @@ where
 		true
 	}
 
-	fn advise_of_int_change(&mut self, _actions: &mut E, view: IntView, _event: IntEvent, data: u64) -> bool {
-		trace!("Integer {view:?} changed with data {data:?}.");
-		if data == 0 {
-			let _ = self.state.lower_bound_changes.insert(view);
-		} else {
-			let _ = self.state.upper_bound_changes.insert(view);
-		}
+	fn advise_of_int_change(&mut self, _actions: &mut E, view: IntView, condition: IntPropCond) -> bool {
+		trace!("Integer {view:?} changed on condition {condition:?}.");
+		let _ = match condition {
+			IntPropCond::LowerBound => self.state.lower_bound_changes.insert(view),
+			IntPropCond::UpperBound => self.state.upper_bound_changes.insert(view),
+			_ => unreachable!("Condition was never enqueued."),
+		};
 		true
 	}
 

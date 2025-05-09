@@ -227,7 +227,7 @@ pub trait PropagatorInitActions: AsDynClauseDatabase + ClauseDatabase + Decision
 	/// assignment, not just when it is not yet enqueued.
 	///
 	/// This will call [`Propagator::advise_of_bool_change`] on the propagator.
-	fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView, data: u64);
+	fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView);
 
 	/// Advise a propagator when an [`IntView`] is changed according to the given
 	/// propagation condition, allowing the propagator to decide whether to
@@ -242,7 +242,6 @@ pub trait PropagatorInitActions: AsDynClauseDatabase + ClauseDatabase + Decision
 		prop: PropRef,
 		var: IntView,
 		condition: IntPropCond,
-		data: u64,
 	);
 
 	/// Advise a propagator when the solver backtracks, allowing the propagator to decide whether to

@@ -2,7 +2,7 @@
 //! changes to decision variables.
 
 use std::{mem, ops::Add};
-
+use crate::solver::{BoolView, IntView};
 use crate::solver::engine::PropRef;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -42,7 +42,8 @@ pub(crate) enum ActivationAction {
 	/// When activated, advise the propagator with the given [`PropRef`] of the
 	/// event that triggered the activation. If the advisal method returns `true`,
 	/// then enqueue the propagator if it is not already in the queue.
-	Advise(PropRef, u64),
+	AdviseInt(PropRef, IntView, IntPropCond),
+	AdviseBool(PropRef, BoolView),
 	/// When activated, simply add the propagator with the given [`PropRef`] to the
 	/// propagator queue if it is not already in the queue.
 	Enqueue(PropRef),
@@ -50,7 +51,7 @@ pub(crate) enum ActivationAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Change that has occurred in the domain of an integer variable.
-pub enum IntEvent {
+pub(crate) enum IntEvent {
 	/// The variable has been fixed to a single value.
 	Fixed,
 	/// Both of the bounds of the variable has changed.
