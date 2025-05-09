@@ -129,11 +129,6 @@ pub struct State {
 
 	// ---- Debugging Helpers ----
 	#[cfg(debug_assertions)]
-	/// This literal was last emited by the [`PropagatorExtension::propagate`]
-	/// method. It will have its reasons checked when it is seen again in
-	/// [`PropagatorExtension::notify_assignments`].
-	pub(crate) last_propagated: Option<RawLit>,
-	#[cfg(debug_assertions)]
 	/// List of integer variables that have been notified as fixed, but should be
 	/// checked that the bounds match before propagation.
 	pub(crate) check_int_fixed: Vec<(IntVarRef, IntVal)>,
@@ -285,16 +280,6 @@ impl PropagatorExtension for Engine {
 
 		// Enqueue propagators
 		for &lit in lits {
-			#[cfg(debug_assertions)]
-			{
-				// (DEBUG ONLY) if we propagated this literal, ensure its explanation is
-				// valid in its trail position.
-				if self.state.last_propagated == Some(lit) {
-					self.debug_check_reason(lit);
-					self.state.last_propagated = None;
-				}
-			}
-
 			if self.state.trail.assign_lit(lit).is_some() {
 				continue;
 			}
@@ -407,6 +392,8 @@ impl PropagatorExtension for Engine {
 		while let Some(&lit) = self.state.propagation_queue.front() {
 			if self.state.trail.get_sat_value(lit) == Some(true) {
 				let _ = self.state.propagation_queue.pop_front();
+				let reason = self.state.reason_map.remove(&lit);
+				debug_assert!(reason.is_some());
 			} else {
 				break;
 			}
@@ -420,9 +407,6 @@ impl PropagatorExtension for Engine {
 					let iv = IntView(IntViewInner::VarRef(iv));
 					debug_assert_eq!(self.state.get_int_val(iv), Some(i));
 				}
-				// We've been notified of the previous propagated literal (and its
-				// reason was checked).
-				debug_assert!(self.state.last_propagated.is_none());
 			}
 			// If there are no previous changes, run propagators
 			SolvingContext::new(slv, &mut self.state).run_propagators(&mut self.propagators);
@@ -435,9 +419,9 @@ impl PropagatorExtension for Engine {
 			debug!(lit = i32::from(lit), "propagate");
 			#[cfg(debug_assertions)]
 			{
-				// (DEBUG ONLY) Store the propagated literal, so we know when to check
-				// the explanation.
-				self.state.last_propagated = Some(lit);
+				// (DEBUG ONLY) Ensure the literal's explanation is valid in its trail
+				// position.
+				self.debug_check_reason(lit);
 			}
 			Some(lit)
 		} else {
@@ -514,7 +498,6 @@ impl State {
 		#[cfg(debug_assertions)]
 		{
 			// (DEBUG ONLY) Clear the debug checking queues.
-			self.last_propagated = None;
 			self.check_int_fixed.clear();
 		}
 		// Backtrack trail
