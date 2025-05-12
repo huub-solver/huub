@@ -538,6 +538,14 @@ impl State {
 					"toggling vsids"
 				);
 			}
+			if self.config.vsids_after_restart {
+				self.vsids = true;
+				debug!(
+					vsids = self.vsids,
+					restart = self.statistics.restarts,
+					"enable vsids after restart"
+				);
+			}
 			if level == 0 {
 				// Memory cleanup (Reasons are known to no longer be relevant)
 				self.reason_map.clear();
@@ -569,6 +577,10 @@ impl State {
 			}
 			Err(false) => unreachable!("invalid reason"),
 		}
+	}
+
+	pub(crate) fn set_vsids_after_restart(&mut self, enable: bool) {
+		self.config.vsids_after_restart = enable;
 	}
 
 	/// Set whether the solver should toggle between VSIDS and a user defined
