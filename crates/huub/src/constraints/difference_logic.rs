@@ -23,7 +23,7 @@ use crate::{actions::{
 use crate::actions::InspectionActions;
 use crate::helpers::trailed_list::TrailedList;
 use crate::helpers::trailed_open_list::{TrailedOpenList, TrailedOpenListIterator};
-
+use crate::solver::trail::TrailedInt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Representation of set of difference constraints within a model.
@@ -63,7 +63,7 @@ impl DifferenceLogic {
 	/// Add an implied equality constraint (generates 2 implied difference constraints).
 	pub(crate) fn add_imp_eq(&mut self, b: BoolDecision, x: IntDecision, y: IntDecision, d: IntVal) {
 		self.imp_constraints.push((b, x, y, d));
-		self.imp_constraints.push((b, y, x, d));
+		self.imp_constraints.push((b, y, x, -d));
 	}
 	
 	/// Add a not equals constraint (generates a new boolean decision variable and 2 implied difference constraints).
@@ -249,6 +249,8 @@ pub struct DifferenceLogicGraph {
 	edges: Vec<DiffEdge>,
 	/// Storage for the visited state.
 	visited: Vec<VarNodeRef>,
+	/// Number of open implication edges.
+	open_imp_edges: TrailedInt,
 }
 
 impl DifferenceLogicGraph {
@@ -258,6 +260,7 @@ impl DifferenceLogicGraph {
 			nodes: int_vars.iter().map(|&v| (v, VarNodeRef::new(actions, v))).collect(),
 			edges: Vec::new(),
 			visited: Vec::new(),
+			open_imp_edges: actions.new_trailed_int(0),
 		}
 	}
 
@@ -271,13 +274,14 @@ impl DifferenceLogicGraph {
 	}
 
 	/// Add a new open implied edge to the graph, return the index.
-	fn new_imp_edge(&mut self, mut edge: DiffEdge) -> usize {
+	fn new_imp_edge<P: PropagationActions>(&mut self, actions: &mut P, mut edge: DiffEdge) -> usize {
 		let index = self.edges.len();
 		edge.out_index = edge.from.node.borrow_mut().open_edges.len();
 		edge.in_index = edge.to.node.borrow_mut().open_reverse_edges.len();
 		edge.from.node.borrow_mut().open_edges.push(self.edges.len());
 		edge.to.node.borrow_mut().open_reverse_edges.push(self.edges.len());
 		self.edges.push(edge);
+		let _ = actions.set_trailed_int(self.open_imp_edges, actions.get_trailed_int(self.open_imp_edges) + 1);
 		index
 	}
 
@@ -295,8 +299,12 @@ impl DifferenceLogicGraph {
 		let to = &self.edges[index].to.clone();
 		let out_index = self.edges[index].out_index;
 		let in_index = self.edges[index].in_index;
-		from.node.borrow_mut().open_edges.close(actions, out_index, |&e, i| self.edges[e].out_index = i) &&
-			to.node.borrow_mut().open_reverse_edges.close(actions, in_index, |&e, i| self.edges[e].in_index = i)
+		let was_open = from.node.borrow_mut().open_edges.close(actions, out_index, |&e, i| self.edges[e].out_index = i) &&
+			to.node.borrow_mut().open_reverse_edges.close(actions, in_index, |&e, i| self.edges[e].in_index = i);
+		if was_open {
+			let _ = actions.set_trailed_int(self.open_imp_edges, actions.get_trailed_int(self.open_imp_edges) - 1);
+		}
+		was_open
 	}
 
 	/// Close the implied edge given by the index while iterating open edges in forward direction.
@@ -305,6 +313,7 @@ impl DifferenceLogicGraph {
 		let to = &self.edges[index].to.clone();
 		let in_index = self.edges[index].in_index;
 		let _ = to.node.borrow_mut().open_reverse_edges.close(actions, in_index, |&e, i| self.edges[e].in_index = i);
+		let _ = actions.set_trailed_int(self.open_imp_edges, actions.get_trailed_int(self.open_imp_edges) - 1);
 	}
 
 	/// Close the implied edge given by the index while iterating open edges in backward direction.
@@ -313,6 +322,7 @@ impl DifferenceLogicGraph {
 		let from = &self.edges[index].from.clone();
 		let out_index = self.edges[index].out_index;
 		let _ = from.node.borrow_mut().open_edges.close(actions, out_index, |&e, i| self.edges[e].out_index = i);
+		let _ = actions.set_trailed_int(self.open_imp_edges, actions.get_trailed_int(self.open_imp_edges) - 1);
 	}
 
 	/// Mark the given node as visited.
@@ -461,6 +471,11 @@ impl DifferenceLogicGraph {
 
 	/// Check if the new edge given by the index implies or falsifies any of the open edges.
 	fn inc_imp<P: PropagationActions>(&mut self, actions: &mut P, new_index: usize) -> Result<(), Conflict> {
+		
+		if actions.get_trailed_int(self.open_imp_edges) == 0 {
+			trace!("No open implications");
+			return Ok(());
+		}
 
 		let incoming_u = self.dijkstra(actions, self.edges[new_index].from.clone(), true);
 		trace!("outgoing_u is {incoming_u:?}");
@@ -882,7 +897,7 @@ where
 		let mut graph_change = false; //todo remove
 
 		for (b, x, y, d) in self.imp_constraints.iter() {
-			let index = self.graph.new_imp_edge(DiffEdge::new(self.graph.nodes[x].clone(), self.graph.nodes[y].clone(), *d, *b));
+			let index = self.graph.new_imp_edge(actions, DiffEdge::new(self.graph.nodes[x].clone(), self.graph.nodes[y].clone(), *d, *b));
 			self.state.bool_map.get_mut(b).unwrap().push(index);
 		}
 		self.imp_constraints.clear();
