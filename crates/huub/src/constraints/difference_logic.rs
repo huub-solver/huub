@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
-use std::hash::{Hash, Hasher, RandomState};
+use std::hash::{Hash, Hasher};
 use std::iter::once;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -210,7 +210,7 @@ impl VarNode {
 
 #[derive(Clone, PartialEq, Eq)]  // todo should we implement Eq only on the IntView?
 /// A hashable reference to a node in the difference logic graph.
-pub struct VarNodeRef {
+pub struct VarNodeRef {  // todo deal with the case that a node represents multiple vars! code_generation: var + linear transform are both in the graph. Could also be vars that are equal on the root node or similar structures!
 	/// Variable associated with the node.
 	var: IntView,
 	/// Reference to the node.
@@ -443,26 +443,52 @@ impl DifferenceLogicGraph {
 
 	/// Perform dijkstra from the given node to all other nodes in the graph, return a map of
 	/// distances. Can be performed in forward or backward direction.
-	fn dijkstra<P: PropagationActions>(&mut self, actions: &mut P, source: VarNodeRef, reverse: bool) -> HashMap<IntView, IntVal> {
-
-		trace!("Starting dijkstra for {source:?} in mode reverse={reverse}");
-		let mut distances = HashMap::new();  // todo?
+	fn dijkstra_relevant<P: PropagationActions>(&mut self, actions: &mut P, new_edge: usize, reverse: bool) -> IndexMap<IntView, IntVal> {
+		
+		trace!("Starting relevant dijkstra for {new_edge:?} in mode reverse={reverse}");
+		self.reset_visit();
+		let new_edge = &self.edges[new_edge];
+		let source = if reverse {new_edge.to.clone()} else {new_edge.from.clone()};
+		let mut distances = IndexMap::new();
+		let _ = distances.insert(if reverse {new_edge.from.var} else {new_edge.to.var}, new_edge.val);
 		let mut queue = PriorityQueue::new();
-		let _ = queue.push(source.clone(), Reverse(0));
-		while !queue.is_empty() {
+		let _ = queue.push(source, Reverse(0));
+		let mut relevant_count = 1;
+		while !queue.is_empty() && relevant_count > 0 {
 			let (s, Reverse(dist)) = queue.pop().unwrap();
-			let _ = distances.insert(s.var, dist);
+			self.visit(s.clone());
 			let node_s = s.node.borrow();
+			let s_relevant = distances.contains_key(&s.var);
 			//trace!("dijkstra on current node {s:?} with dist {dist}");
 			for &index in if reverse {node_s.reverse_edges.iter(actions)} else {node_s.edges.iter(actions)} {
 				let edge = &self.edges[index];
 				let target = if reverse {edge.from.clone()} else {edge.to.clone()};
 				let node_t = target.node.borrow();
-				let new_dist = dist + edge.val + ((node_s.pi - node_t.pi) * if reverse {-1} else {1}); //todo could write differently without if
-				if !distances.contains_key(&target.var) {
-					let _ = queue.push_increase(target.clone(), Reverse(new_dist));
+				let new_dist = dist + edge.val + if reverse {node_t.pi - node_s.pi} else {node_s.pi - node_t.pi};
+				if !node_t.visited {
+					let prev = queue.push_increase(target.clone(), Reverse(new_dist));
+					// Cases where we want to propagate the relevancy of s to t:
+					// - First path to t (equal to previous distance of infinity)
+					// - Path to t with lower distance than before
+					// - Path to t with same distance as before and s is not relevant (prefer irrelevancy in ties)
+					if prev.map_or(true, |Reverse(old_dist)| new_dist < old_dist || (new_dist == old_dist && !s_relevant)) {
+						if s_relevant {
+							// Add new distance to the map, if key was not present before increase relevant count.
+							if distances.insert(target.var, new_dist).is_none() {
+								relevant_count += 1;
+							}
+						} else {
+							// Remove old distance from the map, if key was present before decrease relevant count.
+							if distances.swap_remove(&target.var).is_some() {
+								relevant_count -= 1;
+							}
+						}
+					}
 					//trace!("dijkstra adding node {:?} with dist {new_dist}", target.var);
 				}
+			}
+			if s_relevant {
+				relevant_count -= 1;
 			}
 		}
 		distances
@@ -477,42 +503,52 @@ impl DifferenceLogicGraph {
 			return Ok(());
 		}
 
-		let incoming_u = self.dijkstra(actions, self.edges[new_index].from.clone(), true);
-		trace!("outgoing_u is {incoming_u:?}");
-		let outgoing_v = self.dijkstra(actions, self.edges[new_index].to.clone(), false);
-		trace!("incoming_v is {outgoing_v:?}");
-		let changed: IndexSet<&IntView, RandomState> = IndexSet::from_iter(incoming_u.keys().chain(outgoing_v.keys()));  //todo rewrite this!!!
+		let outgoing_u = self.dijkstra_relevant(actions, new_index, true);
+		trace!("outgoing_u is {outgoing_u:?}");
+		let incoming_v = self.dijkstra_relevant(actions, new_index, false);
+		trace!("incoming_v is {incoming_v:?}"); // todo check how to include pi change check at this point?
+		let indegree_u: usize = outgoing_u.iter().map(|(v, _)| self.nodes[v].node.borrow().open_reverse_edges.open_len(actions)).sum(); //todo do we want to store references instead?
+		let outdegree_v: usize = incoming_v.iter().map(|(v, _)| self.nodes[v].node.borrow().open_edges.open_len(actions)).sum();
+		
 		let new_edge_val = self.edges[new_index].val;
 		let mut fail_indices = Vec::new();
-
-		for &n in changed.iter() {
-			let temp_node = self.nodes[&n].clone();
-			let mut node = temp_node.node.borrow_mut();
-			let mut open = node.open_edges.iter(actions);
-			while let Some(&index) = open.next() {
-				let edge = &self.edges[index];
-				if incoming_u.contains_key(&edge.from.var) && outgoing_v.contains_key(&edge.to.var) && incoming_u[&edge.from.var] + new_edge_val + outgoing_v[&edge.to.var] <= edge.val {
-					trace!("Constraint {:?} - {:?} <= {} is implied", edge.from.var, edge.to.var, edge.val);
-					self.close_imp_edge_forward(actions, &mut open, index);
-				} else if incoming_u.contains_key(&edge.to.var) && outgoing_v.contains_key(&edge.from.var) && incoming_u[&edge.to.var] + new_edge_val + outgoing_v[&edge.from.var] <= -edge.val - 1 { // todo slight double work for reified constraints
-					trace!("Constraint {:?} - {:?} <= {} is falsified since inverse is implied", edge.from.var, edge.to.var, edge.val);
-					fail_indices.push(index);
-					self.close_imp_edge_forward(actions, &mut open, index);
+		
+		if indegree_u < outdegree_v {
+			for var in outgoing_u.keys() {
+				let temp_node = self.nodes[&var].clone();
+				let mut node = temp_node.node.borrow_mut();
+				let mut rev_open = node.open_reverse_edges.iter(actions);
+				while let Some(&index) = rev_open.next() {
+					let edge = &self.edges[index];
+					if incoming_v.contains_key(&edge.from.var) && incoming_v[&edge.from.var] + outgoing_u[&edge.to.var] - new_edge_val <= edge.val {
+						trace!("Constraint {:?} - {:?} <= {} is implied", edge.from.var, edge.to.var, edge.val);
+						self.close_imp_edge_backward(actions, &mut rev_open, index);
+					} else if incoming_v.contains_key(&edge.to.var) && incoming_v[&edge.to.var] + outgoing_u[&edge.from.var] - new_edge_val <= -edge.val - 1 { // todo slight double work for reified constraints
+						trace!("Constraint {:?} - {:?} <= {} is falsified since inverse is implied", edge.from.var, edge.to.var, edge.val);
+						fail_indices.push(index);
+						self.close_imp_edge_backward(actions, &mut rev_open, index);
+					}
 				}
 			}
-			let mut rev_open = node.open_reverse_edges.iter(actions);
-			while let Some(&index) = rev_open.next() {
-				let edge = &self.edges[index];
-				if incoming_u.contains_key(&edge.from.var) && outgoing_v.contains_key(&edge.to.var) && incoming_u[&edge.from.var] + new_edge_val + outgoing_v[&edge.to.var] <= edge.val {
-					trace!("Constraint {:?} - {:?} <= {} is implied", edge.from.var, edge.to.var, edge.val);
-					self.close_imp_edge_backward(actions, &mut rev_open, index);
-				} else if incoming_u.contains_key(&edge.to.var) && outgoing_v.contains_key(&edge.from.var) && incoming_u[&edge.to.var] + new_edge_val + outgoing_v[&edge.from.var] <= -edge.val - 1 { // todo slight double work for reified constraints
-					trace!("Constraint {:?} - {:?} <= {} is falsified since inverse is implied", edge.from.var, edge.to.var, edge.val);
-					fail_indices.push(index);
-					self.close_imp_edge_backward(actions, &mut rev_open, index);
+		} else {
+			for var in incoming_v.keys() {
+				let temp_node = self.nodes[&var].clone();
+				let mut node = temp_node.node.borrow_mut();
+				let mut open = node.open_edges.iter(actions);
+				while let Some(&index) = open.next() {
+					let edge = &self.edges[index];
+					if outgoing_u.contains_key(&edge.to.var) && incoming_v[&edge.from.var] + outgoing_u[&edge.to.var] - new_edge_val <= edge.val {
+						trace!("Constraint {:?} - {:?} <= {} is implied", edge.from.var, edge.to.var, edge.val);
+						self.close_imp_edge_forward(actions, &mut open, index);
+					} else if outgoing_u.contains_key(&edge.from.var) && incoming_v[&edge.to.var] + outgoing_u[&edge.from.var] - new_edge_val <= -edge.val - 1 { // todo slight double work for reified constraints
+						trace!("Constraint {:?} - {:?} <= {} is falsified since inverse is implied", edge.from.var, edge.to.var, edge.val);
+						fail_indices.push(index);
+						self.close_imp_edge_forward(actions, &mut open, index);
+					}
 				}
 			}
 		}
+
 		for index in fail_indices {  // todo check if we want this here?
 			let _ = self.inc_sat(actions, index)?;
 		}

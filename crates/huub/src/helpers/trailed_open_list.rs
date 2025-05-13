@@ -39,6 +39,10 @@ impl<T> TrailedOpenList<T> {
 	pub(crate) fn len(&self) -> usize {
 		self.list.len()
 	}
+	
+	pub(crate) fn open_len<A: TrailingActions>(&self, actions: &A) -> usize {
+		self.len() - actions.get_trailed_int(self.closed) as usize
+	}
 
 	pub(crate) fn new<A: PropagatorInitActions + ?Sized>(actions: &mut A) -> Self {
 		Self {
