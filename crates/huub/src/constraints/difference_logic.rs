@@ -7,9 +7,8 @@ use std::hash::Hash;
 use std::iter::once;
 use std::ops::Deref;
 use std::rc::Rc;
-use indexmap::{IndexMap, IndexSet};
 use pindakaas::propositional_logic::Formula;
-use priority_queue::PriorityQueue;
+use rustc_hash::FxBuildHasher;
 use tracing::trace;
 use crate::solver::activation_list::IntPropCond;
 use crate::solver::{BoolView, IntLitMeaning};
@@ -22,6 +21,11 @@ use crate::actions::InspectionActions;
 use crate::helpers::trailed_list::TrailedList;
 use crate::helpers::trailed_open_list::{TrailedOpenList, TrailedOpenListIterator};
 use crate::solver::trail::TrailedInt;
+
+// Redefine hash-based types using the fast FxBuildHasher.
+type IndexSet<T> = indexmap::IndexSet<T, FxBuildHasher>;
+type IndexMap<K, V> = indexmap::IndexMap<K, V, FxBuildHasher>;
+type PriorityQueue<I, P> = priority_queue::PriorityQueue<I, P, FxBuildHasher>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Representation of set of difference constraints within a model.
@@ -97,8 +101,8 @@ impl DifferenceLogic {
 	/// Return statistics of the captured difference logic constraints:
 	/// (# integer variables, # boolean variables, # globally active constraints, # implied constraints)
 	pub(crate) fn output_statistics(&self) -> (usize, usize, usize, usize) {
-		let mut int_vars = IndexSet::new();
-		let mut bool_vars = IndexSet::new();
+		let mut int_vars = IndexSet::default();
+		let mut bool_vars = IndexSet::default();
 		for &(x, y, _) in self.constraints.iter() {
 			let _ = int_vars.insert(x);
 			let _ = int_vars.insert(y);
@@ -403,8 +407,8 @@ impl DifferenceLogicGraph {
 		let from = &self.nodes[new_edge.from];
 		let to = &self.nodes[new_edge.to];
 		trace!("Performing inc_sat on {:?}, {:?}, {:?}", from.var, to.var, new_edge.val);
-		let mut queue = PriorityQueue::new();
-		let mut pi_new = IndexMap::new(); // todo Could be replaced by the visited state. Q1: Is state or map faster? Q2: Is keeping old pi in case of conflict better?
+		let mut queue = PriorityQueue::default();
+		let mut pi_new = IndexMap::default(); // todo Could be replaced by the visited state. Q1: Is state or map faster? Q2: Is keeping old pi in case of conflict better?
 		to.node.borrow_mut().backtrace = None;
 		let gamma_v = from.node.borrow().pi + new_edge.val - to.node.borrow().pi;
 		if gamma_v < 0 {
@@ -448,9 +452,9 @@ impl DifferenceLogicGraph {
 		self.reset_visit();
 		let new_edge = &self.edges[new_edge];
 		let source = if reverse {new_edge.to} else {new_edge.from};
-		let mut distances = IndexMap::new();
+		let mut distances = IndexMap::default();
 		let _ = distances.insert(if reverse {new_edge.from} else {new_edge.to}, new_edge.val);
-		let mut queue = PriorityQueue::new();
+		let mut queue = PriorityQueue::default();
 		let _ = queue.push(source, Reverse(0));
 		let mut relevant_count = 1;
 		while !queue.is_empty() && relevant_count > 0 {
@@ -564,7 +568,7 @@ impl DifferenceLogicGraph {
 			let node = &self.nodes[n];
 			actions.get_int_lower_bound(node.var) + node.node.borrow().pi
 		}).max().unwrap();
-		let mut queue = PriorityQueue::new();
+		let mut queue = PriorityQueue::default();
 		for &n in v_l.iter() {
 			let node = &self.nodes[n];
 			// Min value indicates that successors still need to be considered.
@@ -609,7 +613,7 @@ impl DifferenceLogicGraph {
 			let node = &self.nodes[n];
 			actions.get_int_upper_bound(node.var) + node.node.borrow().pi
 		}).min().unwrap();
-		let mut queue = PriorityQueue::new();
+		let mut queue = PriorityQueue::default();
 		for &n in v_u.iter() {
 			let node = self.nodes[n].clone();
 			// Max value indicates that predecessors still need to be considered.
@@ -827,7 +831,7 @@ impl DifferenceLogicState {
 			bool_implications: (0..bool_vars).into_iter().map(|_| Vec::new()).collect(),
 			lower_bound_changes: (0..int_vars).into_iter().collect(),
 			upper_bound_changes: (0..int_vars).into_iter().collect(),
-			fixed_bools: IndexSet::new(),
+			fixed_bools: IndexSet::default(),
 		}
 	}
 	
@@ -873,7 +877,7 @@ impl DifferenceLogicBounds {
 		}).collect::<Vec<_>>();
 		trace!("Constraint lengths after trimming self-loops: {} and {}.", trimmed_constraints.len(), trimmed_imp_constraints.len());
 		
-		let mut int_var_map = IndexMap::new();
+		let mut int_var_map = IndexMap::default();
 		for var in trimmed_constraints.iter().flat_map(|&(x, y, _)| once(x).chain(once(y)))
 			.chain(trimmed_imp_constraints.iter().flat_map(|&(_, x, y, _)| once(x).chain(once(y)))) {
 			if !int_var_map.contains_key(&var) {
@@ -881,7 +885,7 @@ impl DifferenceLogicBounds {
 			}
 		}
 		
-		let mut bool_var_map = IndexMap::new();
+		let mut bool_var_map = IndexMap::default();
 		for var in trimmed_imp_constraints.iter().map(|&(b, _, _, _)| b) {
 			if !bool_var_map.contains_key(&var) {
 				let _ = bool_var_map.insert(var, bool_var_map.len());

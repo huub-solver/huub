@@ -349,6 +349,7 @@ dependencies = [
  "pindakaas",
  "priority-queue",
  "rangelist",
+ "rustc-hash",
  "thiserror",
  "tracing",
  "tracing-test",
