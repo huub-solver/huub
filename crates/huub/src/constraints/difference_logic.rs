@@ -2,14 +2,12 @@
 
 use std::cell::RefCell;
 use std::cmp::Reverse;
-use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::iter::once;
 use std::ops::Deref;
 use std::rc::Rc;
 use indexmap::{IndexMap, IndexSet};
-use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;
 use priority_queue::PriorityQueue;
 use tracing::trace;
@@ -237,7 +235,7 @@ impl Debug for VarNodeRef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// A graph of difference constraints.
 pub struct DifferenceLogicGraph {
-	/// Mapping from variables to nodes.
+	/// Mapping from integer variable indices to nodes.
 	nodes: Vec<VarNodeRef>,
 	/// List of all edges in the graph. todo could make this a trailed list for dynamic addition
 	edges: Vec<DiffEdge>,
@@ -245,16 +243,19 @@ pub struct DifferenceLogicGraph {
 	visited: Vec<usize>,
 	/// Number of open implication edges.
 	open_imp_edges: TrailedInt,
+	/// Mapping from boolean variable indices to their views.
+	bool_map: Vec<BoolView>,
 }
 
 impl DifferenceLogicGraph {
 
-	fn new<A: PropagatorInitActions + ?Sized>(actions: &mut A, int_vars: Vec<IntView>) -> Self {
+	fn new<A: PropagatorInitActions + ?Sized>(actions: &mut A, int_vars: Vec<IntView>, bool_vars: Vec<BoolView>) -> Self {
 		Self {
 			nodes: int_vars.iter().map(|&v| VarNodeRef::new(actions, v)).collect(),
 			edges: Vec::new(),
 			visited: Vec::new(),
 			open_imp_edges: actions.new_trailed_int(0),
+			bool_map: bool_vars,
 		}
 	}
 
@@ -729,10 +730,12 @@ impl DifferenceLogicGraph {
 
 		// Handle fixed booleans
 		for &b in state.fixed_bools.iter() {
-			trace!("Boolean {b:?} fixed to true.");
-			if let Some(edges) = state.bool_map.get(&b) {
+			let var = self.bool_map[b];
+			let val = actions.get_bool_val(var).unwrap();
+			trace!("Boolean {b:?} fixed to {val}");
+			if val {
 				// Consequences of setting the boolean to true -> add all implied edges.
-				for &index in edges.iter() {
+				for &index in state.bool_implications[b].iter() {
 					let closed_now = self.close_imp_edge(actions, index);
 					trace!("Processing adding edge {:?} - {:?} <= {:?} (open: {closed_now})", self.edges[index].from, self.edges[index].to, self.edges[index].val);
 					// Only continue if the edge was not already closed.
@@ -746,23 +749,21 @@ impl DifferenceLogicGraph {
 							let lb_y = -edge.val + self.get_cur_lower_bound(actions, edge.from);
 							if lb_y > self.get_cur_lower_bound(actions, edge.to) {
 								// New edge caused lower bound change.
-								actions.set_int_lower_bound(self.nodes[edge.to].var, lb_y, |a: &mut P| vec![b, a.get_int_lit(self.nodes[edge.from].var, IntLitMeaning::GreaterEq(self.get_cur_lower_bound(a, edge.from)))])?;
+								actions.set_int_lower_bound(self.nodes[edge.to].var, lb_y, |a: &mut P| vec![var, a.get_int_lit(self.nodes[edge.from].var, IntLitMeaning::GreaterEq(self.get_cur_lower_bound(a, edge.from)))])?;
 								self.update_lb(edge.to, lb_y, &mut state.lb_updates);
 							}
 							let ub_x = edge.val + self.get_cur_upper_bound(actions, edge.to);
 							if ub_x < self.get_cur_upper_bound(actions, edge.from) {
 								// New edge caused upper bound change.
-								actions.set_int_upper_bound(self.nodes[edge.from].var, ub_x, |a: &mut P| vec![b, a.get_int_lit(self.nodes[edge.to].var, IntLitMeaning::Less(self.get_cur_upper_bound(a, edge.to) + 1))])?;
+								actions.set_int_upper_bound(self.nodes[edge.from].var, ub_x, |a: &mut P| vec![var, a.get_int_lit(self.nodes[edge.to].var, IntLitMeaning::Less(self.get_cur_upper_bound(a, edge.to) + 1))])?;
 								self.update_ub(edge.from, ub_x, &mut state.ub_updates);
 							}
 						}
 					}
 				}
-			}
-			let negation = !b;
-			if let Some(edges) = state.bool_map.get(&negation) {
-				// Consequences of setting the negation of the boolean to false -> close all implied edges.
-				for &index in edges.iter() {
+			} else {
+				// Consequences of setting the boolean to false -> close all implied edges.
+				for &index in state.bool_implications[b].iter() {
 					let edge_closed = self.close_imp_edge(actions, index);
 					trace!("Closing edge {:?} - {:?} <= {:?} (open: {edge_closed})", self.edges[index].from, self.edges[index].to, self.edges[index].val);
 				}
@@ -807,23 +808,23 @@ pub struct DifferenceLogicState {
 	lb_updates: Vec<usize>,
 	/// List of variables with updated upper bounds.
 	ub_updates: Vec<usize>,
-	/// Map from boolean variables to their implied edges.
-	bool_map: HashMap<BoolView, Vec<usize>>, //todo
-	/// List of variables with reported lower bound changes.
+	/// Map from boolean indices to their implied edges.
+	bool_implications: Vec<Vec<usize>>,
+	/// List of integer variable indices with reported lower bound changes.
 	lower_bound_changes: IndexSet<usize>,
-	/// List of variables with reported upper bound changes.
+	/// List of integer variable indices with reported upper bound changes.
 	upper_bound_changes: IndexSet<usize>,
-	/// List of boolean variables that have recently been reported as fixed to true.
-	fixed_bools: IndexSet<BoolView>,  //todo
+	/// List of boolean variable indices that have recently been reported as fixed to true.
+	fixed_bools: IndexSet<usize>,
 }
 
 impl DifferenceLogicState {
 	
-	fn new(int_vars: usize, bool_vars: Vec<BoolView>) -> Self {
+	fn new(int_vars: usize, bool_vars: usize) -> Self {
 		Self {
 			lb_updates: Vec::new(),
 			ub_updates: Vec::new(),
-			bool_map: bool_vars.iter().map(|&b| (b, Vec::new())).collect(),
+			bool_implications: (0..bool_vars).into_iter().map(|_| Vec::new()).collect(),
 			lower_bound_changes: (0..int_vars).into_iter().collect(),
 			upper_bound_changes: (0..int_vars).into_iter().collect(),
 			fixed_bools: IndexSet::new(),
@@ -846,7 +847,7 @@ pub struct DifferenceLogicBounds {
 	/// List of constraints. todo currently initial list, not to be modified later?
 	constraints: Vec<(usize, usize, IntVal)>,
 	/// List of implied constraints. todo currently initial list, not to be modified later?
-	imp_constraints: Vec<(BoolView, usize, usize, IntVal)>,
+	imp_constraints: Vec<(usize, usize, usize, IntVal)>,
 	/// Propagator state data.
 	state: DifferenceLogicState,
 }
@@ -879,19 +880,27 @@ impl DifferenceLogicBounds {
 				let _ = int_var_map.insert(var, int_var_map.len());
 			}
 		}
+		
+		let mut bool_var_map = IndexMap::new();
+		for var in trimmed_imp_constraints.iter().map(|&(b, _, _, _)| b) {
+			if !bool_var_map.contains_key(&var) {
+				let _ = bool_var_map.insert(var, bool_var_map.len());
+			}
+		}
 
-		let bool_vars = trimmed_imp_constraints.iter().map(|&(b, _, _, _)| b).unique().collect::<Vec<_>>();
-		trace!("Creating DifferenceLogicBounds propagator for {} int and {} bool vars.", int_var_map.len(), bool_vars.len());
+		trace!("Creating DifferenceLogicBounds propagator for {} int and {} bool vars.", int_var_map.len(), bool_var_map.len());
 
 		// todo init all or add dynamically?
-		let graph = DifferenceLogicGraph::new(solver, int_var_map.iter().map(|(&v, _)| v).collect());
-		let state = DifferenceLogicState::new(int_var_map.len(), bool_vars.clone());
+		let graph = DifferenceLogicGraph::new(solver, 
+											  int_var_map.iter().map(|(&v, _)| v).collect(), 
+											  bool_var_map.iter().map(|(&v, _)| v).collect());
+		let state = DifferenceLogicState::new(int_var_map.len(),bool_var_map.len());
 
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				graph,
 				constraints: trimmed_constraints.iter().map(|&(x, y, d)| (int_var_map[&x], int_var_map[&y], d)).collect(),
-				imp_constraints: trimmed_imp_constraints.iter().map(|&(b, x, y, d)| (b, int_var_map[&x], int_var_map[&y], d)).collect(),
+				imp_constraints: trimmed_imp_constraints.iter().map(|&(b, x, y, d)| (bool_var_map[&b], int_var_map[&x], int_var_map[&y], d)).collect(),
 				state,
 			}),
 			PriorityLevel::Low, // todo priority
@@ -900,8 +909,8 @@ impl DifferenceLogicBounds {
 			solver.advise_on_int_change(prop, v, IntPropCond::LowerBound, i as u64);
 			solver.advise_on_int_change(prop, v, IntPropCond::UpperBound, i as u64);
 		}
-		for &v in bool_vars.iter() { // todo might run on both v and !v?
-			solver.advise_on_bool_change(prop, v, 0); // todo data
+		for (&v, &i) in bool_var_map.iter() {
+			solver.advise_on_bool_change(prop, v, i as u64);
 		}
 		solver.advise_on_backtrack(prop);
 		solver.enqueue_now(prop); // todo might be removed
@@ -914,14 +923,9 @@ where
 	P: PropagationActions,
 	E: ExplanationActions,
 {
-	fn advise_of_bool_change(&mut self, actions: &mut E, view: BoolView, data: u64) -> bool {  // todo
-		let val = actions.get_bool_val(view).unwrap();
-		trace!("Boolean {view:?} fixed to {val}.");
-		if val {
-			let _ = self.state.fixed_bools.insert(view);
-		} else {
-			let _ = self.state.fixed_bools.insert(!view);
-		}
+	fn advise_of_bool_change(&mut self, _actions: &mut E, _view: BoolView, data: u64) -> bool {
+		trace!("Boolean {data} fixed.");
+		let _ = self.state.fixed_bools.insert(data as usize);
 		true
 	}
 
@@ -948,8 +952,8 @@ where
 		let mut graph_change = false; //todo remove
 
 		for &(b, x, y, d) in self.imp_constraints.iter() {
-			let index = self.graph.new_imp_edge(actions, DiffEdge::new(x, y, d, b));
-			self.state.bool_map.get_mut(&b).unwrap().push(index);
+			let index = self.graph.new_imp_edge(actions, DiffEdge::new(x, y, d, self.graph.bool_map[b]));
+			self.state.bool_implications.get_mut(b).unwrap().push(index);
 		}
 		self.imp_constraints.clear();
 
