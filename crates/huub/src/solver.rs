@@ -1120,8 +1120,8 @@ impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle>
 		p
 	}
 
-	fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView) {
-		self.action_on_bool_change(var, ActivationAction::AdviseBool(prop, var));
+	fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView, data: u64) {
+		self.action_on_bool_change(var, ActivationAction::AdviseBool(prop, var, data));
 	}
 
 	fn advise_on_int_change(
@@ -1129,8 +1129,9 @@ impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle>
 		prop: PropRef,
 		var: IntView,
 		condition: IntPropCond,
+		data: u64,
 	) {
-		let action = ActivationAction::AdviseInt(prop, var, condition);
+		let action = ActivationAction::AdviseInt(prop, var, condition, data);
 		let (var_ref, cond) = match var.0 {
 			IntViewInner::VarRef(var) => (var, condition),
 			IntViewInner::Linear { transformer, var } => {
@@ -1150,7 +1151,7 @@ impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle>
 				return self.action_on_bool_change(BoolView(BoolViewInner::Lit(lit)), action);
 			}
 		};
-		self.engine_mut().state.int_activation[var_ref].add(ActivationAction::AdviseInt(prop, var, condition), cond);
+		self.engine_mut().state.int_activation[var_ref].add(action, cond);
 	}
 
 	fn advise_on_backtrack(&mut self, prop: PropRef) {

@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::iter::once;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -139,9 +139,9 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 /// An edge in the difference logic graph (bool_var -> source - target <= val).
 pub struct DiffEdge {
 	/// Source node.
-	from: VarNodeRef,
+	from: usize,
 	/// Target node.
-	to: VarNodeRef,
+	to: usize,
 	/// Difference value.
 	val: IntVal,
 	/// Boolean for the difference constraints (true for globally active constraints).
@@ -154,7 +154,7 @@ pub struct DiffEdge {
 
 impl DiffEdge {
 
-	fn new(from: VarNodeRef, to: VarNodeRef, val: IntVal, bool_var: BoolView) -> Self {
+	fn new(from: usize, to: usize, val: IntVal, bool_var: BoolView) -> Self {
 		Self {
 			from,
 			to,
@@ -177,7 +177,7 @@ pub struct VarNode {
 	/// Potential function value.
 	pi: IntVal,
 	/// Backtrace for shortest path calculations.
-	backtrace: Option<(VarNodeRef, BoolView)>,
+	backtrace: Option<(usize, BoolView)>,
 	/// Visited state.
 	visited: bool,
 	/// Updated lower bound.
@@ -208,7 +208,7 @@ impl VarNode {
 
 }
 
-#[derive(Clone, PartialEq, Eq)]  // todo should we implement Eq only on the IntView?
+#[derive(Clone, PartialEq, Eq)]
 /// A hashable reference to a node in the difference logic graph.
 pub struct VarNodeRef {  // todo deal with the case that a node represents multiple vars! code_generation: var + linear transform are both in the graph. Could also be vars that are equal on the root node or similar structures!
 	/// Variable associated with the node.
@@ -234,21 +234,15 @@ impl Debug for VarNodeRef {
 	}
 }
 
-impl Hash for VarNodeRef {
-	fn hash<H: Hasher>(&self, state: &mut H) {
-		self.var.hash(state);
-	}
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// A graph of difference constraints.
 pub struct DifferenceLogicGraph {
 	/// Mapping from variables to nodes.
-	nodes: HashMap<IntView, VarNodeRef>,
+	nodes: Vec<VarNodeRef>,
 	/// List of all edges in the graph. todo could make this a trailed list for dynamic addition
 	edges: Vec<DiffEdge>,
 	/// Storage for the visited state.
-	visited: Vec<VarNodeRef>,
+	visited: Vec<usize>,
 	/// Number of open implication edges.
 	open_imp_edges: TrailedInt,
 }
@@ -257,7 +251,7 @@ impl DifferenceLogicGraph {
 
 	fn new<A: PropagatorInitActions + ?Sized>(actions: &mut A, int_vars: Vec<IntView>) -> Self {
 		Self {
-			nodes: int_vars.iter().map(|&v| (v, VarNodeRef::new(actions, v))).collect(),
+			nodes: int_vars.iter().map(|&v| VarNodeRef::new(actions, v)).collect(),
 			edges: Vec::new(),
 			visited: Vec::new(),
 			open_imp_edges: actions.new_trailed_int(0),
@@ -267,8 +261,8 @@ impl DifferenceLogicGraph {
 	/// Add a new globally active edge to the graph, return the index.
 	fn new_edge<P: PropagationActions>(&mut self, actions: &mut P, edge: DiffEdge) -> usize {
 		let index = self.edges.len();
-		edge.from.node.borrow_mut().edges.push(actions, index);
-		edge.to.node.borrow_mut().reverse_edges.push(actions, index);
+		self.nodes[edge.from].node.borrow_mut().edges.push(actions, index);
+		self.nodes[edge.to].node.borrow_mut().reverse_edges.push(actions, index);
 		self.edges.push(edge);
 		index
 	}
@@ -276,31 +270,33 @@ impl DifferenceLogicGraph {
 	/// Add a new open implied edge to the graph, return the index.
 	fn new_imp_edge<P: PropagationActions>(&mut self, actions: &mut P, mut edge: DiffEdge) -> usize {
 		let index = self.edges.len();
-		edge.out_index = edge.from.node.borrow_mut().open_edges.len();
-		edge.in_index = edge.to.node.borrow_mut().open_reverse_edges.len();
-		edge.from.node.borrow_mut().open_edges.push(self.edges.len());
-		edge.to.node.borrow_mut().open_reverse_edges.push(self.edges.len());
+		let mut from = self.nodes[edge.from].node.borrow_mut();
+		edge.out_index = from.open_edges.len();
+		from.open_edges.push(self.edges.len());
+		let mut to = self.nodes[edge.to].node.borrow_mut();
+		edge.in_index = to.open_reverse_edges.len();
+		to.open_reverse_edges.push(self.edges.len());
 		self.edges.push(edge);
 		let _ = actions.set_trailed_int(self.open_imp_edges, actions.get_trailed_int(self.open_imp_edges) + 1);
 		index
 	}
 
 	/// Activate the implied edge given by the index.
-	fn activate_imp_edge<P: PropagationActions>(&mut self, actions: &mut P, index: usize) {
+	fn activate_imp_edge<P: PropagationActions>(&self, actions: &mut P, index: usize) {
 		let edge = &self.edges[index];
-		edge.from.node.borrow_mut().edges.push(actions, index);
-		edge.to.node.borrow_mut().reverse_edges.push(actions, index);
+		self.nodes[edge.from].node.borrow_mut().edges.push(actions, index);
+		self.nodes[edge.to].node.borrow_mut().reverse_edges.push(actions, index);
 	}
 
 	/// Close the implied edge given by the index.
 	/// Return true if the edge got closed by this call, false if it was already closed.
 	fn close_imp_edge<P: PropagationActions>(&mut self, actions: &mut P, index: usize) -> bool {
-		let from = &self.edges[index].from.clone();
-		let to = &self.edges[index].to.clone();
+		let &from = &self.edges[index].from;
+		let &to = &self.edges[index].to;
 		let out_index = self.edges[index].out_index;
 		let in_index = self.edges[index].in_index;
-		let was_open = from.node.borrow_mut().open_edges.close(actions, out_index, |&e, i| self.edges[e].out_index = i) &&
-			to.node.borrow_mut().open_reverse_edges.close(actions, in_index, |&e, i| self.edges[e].in_index = i);
+		let was_open = self.nodes[from].node.borrow_mut().open_edges.close(actions, out_index, |&e, i| self.edges[e].out_index = i) &&
+			self.nodes[to].node.borrow_mut().open_reverse_edges.close(actions, in_index, |&e, i| self.edges[e].in_index = i);
 		if was_open {
 			let _ = actions.set_trailed_int(self.open_imp_edges, actions.get_trailed_int(self.open_imp_edges) - 1);
 		}
@@ -310,89 +306,89 @@ impl DifferenceLogicGraph {
 	/// Close the implied edge given by the index while iterating open edges in forward direction.
 	fn close_imp_edge_forward<P: PropagationActions>(&mut self, actions: &mut P, open: &mut TrailedOpenListIterator<usize>, index: usize) {
 		let _ = open.close(actions, |&e, i| self.edges[e].out_index = i);
-		let to = &self.edges[index].to.clone();
+		let &to = &self.edges[index].to;
 		let in_index = self.edges[index].in_index;
-		let _ = to.node.borrow_mut().open_reverse_edges.close(actions, in_index, |&e, i| self.edges[e].in_index = i);
+		let _ = self.nodes[to].node.borrow_mut().open_reverse_edges.close(actions, in_index, |&e, i| self.edges[e].in_index = i);
 		let _ = actions.set_trailed_int(self.open_imp_edges, actions.get_trailed_int(self.open_imp_edges) - 1);
 	}
 
 	/// Close the implied edge given by the index while iterating open edges in backward direction.
 	fn close_imp_edge_backward<P: PropagationActions>(&mut self, actions: &mut P, rev_open: &mut TrailedOpenListIterator<usize>, index: usize) {
 		let _ = rev_open.close(actions, |&e, i| self.edges[e].in_index = i);
-		let from = &self.edges[index].from.clone();
+		let &from = &self.edges[index].from;
 		let out_index = self.edges[index].out_index;
-		let _ = from.node.borrow_mut().open_edges.close(actions, out_index, |&e, i| self.edges[e].out_index = i);
+		let _ = self.nodes[from].node.borrow_mut().open_edges.close(actions, out_index, |&e, i| self.edges[e].out_index = i);
 		let _ = actions.set_trailed_int(self.open_imp_edges, actions.get_trailed_int(self.open_imp_edges) - 1);
 	}
 
 	/// Mark the given node as visited.
-	fn visit(&mut self, node: VarNodeRef) {
-		node.node.borrow_mut().visited = true;
+	fn visit(&mut self, node: usize) {
+		self.nodes[node].node.borrow_mut().visited = true;
 		self.visited.push(node);
 	}
 
 	/// Reset the visited state of all nodes.
 	fn reset_visit(&mut self) {
-		for node in self.visited.iter() {
-			node.node.borrow_mut().visited = false;
+		for &node in self.visited.iter() {
+			self.nodes[node].node.borrow_mut().visited = false;
 		}
 		self.visited.clear();
 	}
 
 	/// Get the current lower bound for the node, either stored or from the search.
-	fn get_cur_lower_bound<I: InspectionActions>(&self, actions: &I, v: VarNodeRef) -> IntVal {
-		let node = v.node.borrow();
-		match node.lower_bound {
+	fn get_cur_lower_bound<I: InspectionActions>(&self, actions: &I, v: usize) -> IntVal {
+		let node = &self.nodes[v];
+		match node.node.borrow().lower_bound {
 			Some(lb) => lb,
-			None => actions.get_int_lower_bound(v.var),
+			None => actions.get_int_lower_bound(node.var),
 		}
 	}
 
 	/// Update the stored lower bound for the node.
-	fn update_lb(&self, node: VarNodeRef, val: IntVal, lb_updates: &mut Vec<VarNodeRef>) {
-		node.node.borrow_mut().lower_bound = Some(val);
+	fn update_lb(&self, node: usize, val: IntVal, lb_updates: &mut Vec<usize>) {
+		self.nodes[node].node.borrow_mut().lower_bound = Some(val);
 		lb_updates.push(node);
 	}
 
 	/// Reset stored lower bounds of all nodes.
-	fn reset_lb_updates(&self, lb_updates: &mut Vec<VarNodeRef>) {
-		for node in lb_updates.iter() {
-			node.node.borrow_mut().lower_bound = None;
+	fn reset_lb_updates(&self, lb_updates: &mut Vec<usize>) {
+		for &node in lb_updates.iter() {
+			self.nodes[node].node.borrow_mut().lower_bound = None;
 		}
 		lb_updates.clear();
 	}
 
 	/// Get the current upper bound for the node, either stored or from the search.
-	fn get_cur_upper_bound<I: InspectionActions>(&self, actions: &I, v: VarNodeRef) -> IntVal {
-		let node = v.node.borrow();
-		match node.upper_bound {
+	fn get_cur_upper_bound<I: InspectionActions>(&self, actions: &I, v: usize) -> IntVal {
+		let node = &self.nodes[v];
+		match node.node.borrow().upper_bound {
 			Some(ub) => ub,
-			None => actions.get_int_upper_bound(v.var),
+			None => actions.get_int_upper_bound(node.var),
 		}
 	}
 
 	/// Update the stored upper bound for the node.
 
-	fn update_ub(&mut self, node: VarNodeRef, val: IntVal, ub_updates: &mut Vec<VarNodeRef>) {
-		node.node.borrow_mut().upper_bound = Some(val);
+	fn update_ub(&mut self, node: usize, val: IntVal, ub_updates: &mut Vec<usize>) {
+		self.nodes[node].node.borrow_mut().upper_bound = Some(val);
 		ub_updates.push(node);
 	}
 
 	/// Reset stored upper bounds of all nodes.
-	fn reset_ub_updates(&mut self, ub_updates: &mut Vec<VarNodeRef>) {
-		for node in ub_updates.iter() {
-			node.node.borrow_mut().upper_bound = None;
+	fn reset_ub_updates(&mut self, ub_updates: &mut Vec<usize>) {
+		for &node in ub_updates.iter() {
+			self.nodes[node].node.borrow_mut().upper_bound = None;
 		}
 		ub_updates.clear();
 	}
 
 	/// Get the reason for a cycle of negative lengths (all booleans along the cycle).
-	fn get_cycle_reason(&self, node: VarNodeRef) -> Vec<BoolView> {
+	fn get_cycle_reason(&self, node: usize) -> Vec<BoolView> {
 		let mut reason = Vec::new();
 		let mut var = node;
-		while let Some((cur, b)) = &var.clone().node.borrow().backtrace {
-			reason.push(*b);
-			var = cur.clone();
+		while let Some((cur, b)) = self.nodes[var].node.borrow().backtrace {
+			reason.push(b);
+			var = cur;
 		}
 		reason
 	}
@@ -403,27 +399,29 @@ impl DifferenceLogicGraph {
 	fn inc_sat<P: PropagationActions>(&mut self, actions: &mut P, new_index: usize) -> Result<bool, Conflict> {
 
 		let new_edge = &self.edges[new_index];
-		trace!("Performing inc_sat on {:?}, {:?}, {:?}", new_edge.from.var, new_edge.to.var, new_edge.val);
+		let from = &self.nodes[new_edge.from];
+		let to = &self.nodes[new_edge.to];
+		trace!("Performing inc_sat on {:?}, {:?}, {:?}", from.var, to.var, new_edge.val);
 		let mut queue = PriorityQueue::new();
 		let mut pi_new = IndexMap::new(); // todo Could be replaced by the visited state. Q1: Is state or map faster? Q2: Is keeping old pi in case of conflict better?
-		new_edge.to.node.borrow_mut().backtrace = None;
-		let gamma_v = new_edge.from.node.borrow().pi + new_edge.val - new_edge.to.node.borrow().pi;
+		to.node.borrow_mut().backtrace = None;
+		let gamma_v = from.node.borrow().pi + new_edge.val - to.node.borrow().pi;
 		if gamma_v < 0 {
-			let _ = queue.push(new_edge.to.clone(), Reverse(gamma_v));
+			let _ = queue.push(new_edge.to, Reverse(gamma_v));
 		}
 		while !queue.is_empty() && queue.get_priority(&new_edge.from).is_none() {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
-			let node_s = s.node.borrow();
-			let _ = pi_new.insert(s.var, node_s.pi + gamma_s);
+			let node_s = &self.nodes[s].node.borrow();
+			let _ = pi_new.insert(s, node_s.pi + gamma_s);
 			for &index in node_s.edges.iter(actions) {
 				let edge = &self.edges[index];
-				let mut node_t = edge.to.node.borrow_mut();
-				if !pi_new.contains_key(&edge.to.var) {
-					let gamma_t = pi_new[&s.var] + edge.val - node_t.pi;
+				let mut node_t = self.nodes[edge.to].node.borrow_mut();
+				if !pi_new.contains_key(&edge.to) {
+					let gamma_t = pi_new[&s] + edge.val - node_t.pi;
 					if gamma_t < 0 {
-						let old = queue.push_increase(edge.to.clone(), Reverse(gamma_t));
+						let old = queue.push_increase(edge.to, Reverse(gamma_t));
 						if old.map_or(true, |Reverse(old_gamma)| gamma_t < old_gamma) {
-							node_t.backtrace = Some((s.clone(), edge.bool_var));
+							node_t.backtrace = Some((s, edge.bool_var));
 						}
 					}
 				}
@@ -432,41 +430,41 @@ impl DifferenceLogicGraph {
 		// If the origin is in the queue, we have a cycle of negative length.
 		if queue.get_priority(&new_edge.from).is_some() {
 			trace!("Found cycle with negative length");
-			actions.set_bool(!new_edge.bool_var, self.get_cycle_reason(new_edge.from.clone()))?;
+			actions.set_bool(!new_edge.bool_var, self.get_cycle_reason(new_edge.from))?;
 			return Ok(false);
 		}
 		for (var, val) in pi_new {
-			self.nodes[&var].node.borrow_mut().pi = val;
+			self.nodes[var].node.borrow_mut().pi = val;
 		}
 		Ok(true)
 	}
 
 	/// Perform dijkstra from the given node to all other nodes in the graph, return a map of
 	/// distances. Can be performed in forward or backward direction.
-	fn dijkstra_relevant<P: PropagationActions>(&mut self, actions: &mut P, new_edge: usize, reverse: bool) -> IndexMap<IntView, IntVal> {
+	fn dijkstra_relevant<P: PropagationActions>(&mut self, actions: &mut P, new_edge: usize, reverse: bool) -> IndexMap<usize, IntVal> {
 		
 		trace!("Starting relevant dijkstra for {new_edge:?} in mode reverse={reverse}");
 		self.reset_visit();
 		let new_edge = &self.edges[new_edge];
-		let source = if reverse {new_edge.to.clone()} else {new_edge.from.clone()};
+		let source = if reverse {new_edge.to} else {new_edge.from};
 		let mut distances = IndexMap::new();
-		let _ = distances.insert(if reverse {new_edge.from.var} else {new_edge.to.var}, new_edge.val);
+		let _ = distances.insert(if reverse {new_edge.from} else {new_edge.to}, new_edge.val);
 		let mut queue = PriorityQueue::new();
 		let _ = queue.push(source, Reverse(0));
 		let mut relevant_count = 1;
 		while !queue.is_empty() && relevant_count > 0 {
 			let (s, Reverse(dist)) = queue.pop().unwrap();
-			self.visit(s.clone());
-			let node_s = s.node.borrow();
-			let s_relevant = distances.contains_key(&s.var);
+			self.visit(s);
+			let node_s = self.nodes[s].node.borrow();
+			let s_relevant = distances.contains_key(&s);
 			//trace!("dijkstra on current node {s:?} with dist {dist}");
 			for &index in if reverse {node_s.reverse_edges.iter(actions)} else {node_s.edges.iter(actions)} {
 				let edge = &self.edges[index];
-				let target = if reverse {edge.from.clone()} else {edge.to.clone()};
-				let node_t = target.node.borrow();
+				let target = if reverse {edge.from} else {edge.to};
+				let node_t = self.nodes[target].node.borrow();
 				let new_dist = dist + edge.val + if reverse {node_t.pi - node_s.pi} else {node_s.pi - node_t.pi};
 				if !node_t.visited {
-					let prev = queue.push_increase(target.clone(), Reverse(new_dist));
+					let prev = queue.push_increase(target, Reverse(new_dist));
 					// Cases where we want to propagate the relevancy of s to t:
 					// - First path to t (equal to previous distance of infinity)
 					// - Path to t with lower distance than before
@@ -474,12 +472,12 @@ impl DifferenceLogicGraph {
 					if prev.map_or(true, |Reverse(old_dist)| new_dist < old_dist || (new_dist == old_dist && !s_relevant)) {
 						if s_relevant {
 							// Add new distance to the map, if key was not present before increase relevant count.
-							if distances.insert(target.var, new_dist).is_none() {
+							if distances.insert(target, new_dist).is_none() {
 								relevant_count += 1;
 							}
 						} else {
 							// Remove old distance from the map, if key was present before decrease relevant count.
-							if distances.swap_remove(&target.var).is_some() {
+							if distances.swap_remove(&target).is_some() {
 								relevant_count -= 1;
 							}
 						}
@@ -503,45 +501,45 @@ impl DifferenceLogicGraph {
 			return Ok(());
 		}
 
-		let outgoing_u = self.dijkstra_relevant(actions, new_index, true);
+		let outgoing_u = self.dijkstra_relevant(actions, new_index, true); // todo could store distances at nodes as well?
 		trace!("outgoing_u is {outgoing_u:?}");
 		let incoming_v = self.dijkstra_relevant(actions, new_index, false);
 		trace!("incoming_v is {incoming_v:?}"); // todo check how to include pi change check at this point?
-		let indegree_u: usize = outgoing_u.iter().map(|(v, _)| self.nodes[v].node.borrow().open_reverse_edges.open_len(actions)).sum(); //todo do we want to store references instead?
-		let outdegree_v: usize = incoming_v.iter().map(|(v, _)| self.nodes[v].node.borrow().open_edges.open_len(actions)).sum();
+		let indegree_u: usize = outgoing_u.iter().map(|(&v, _)| self.nodes[v].node.borrow().open_reverse_edges.open_len(actions)).sum();
+		let outdegree_v: usize = incoming_v.iter().map(|(&v, _)| self.nodes[v].node.borrow().open_edges.open_len(actions)).sum();
 		
 		let new_edge_val = self.edges[new_index].val;
 		let mut fail_indices = Vec::new();
 		
 		if indegree_u < outdegree_v {
-			for var in outgoing_u.keys() {
-				let temp_node = self.nodes[&var].clone();
+			for &var in outgoing_u.keys() {
+				let temp_node = self.nodes[var].clone();
 				let mut node = temp_node.node.borrow_mut();
 				let mut rev_open = node.open_reverse_edges.iter(actions);
 				while let Some(&index) = rev_open.next() {
 					let edge = &self.edges[index];
-					if incoming_v.contains_key(&edge.from.var) && incoming_v[&edge.from.var] + outgoing_u[&edge.to.var] - new_edge_val <= edge.val {
-						trace!("Constraint {:?} - {:?} <= {} is implied", edge.from.var, edge.to.var, edge.val);
+					if incoming_v.contains_key(&edge.from) && incoming_v[&edge.from] + outgoing_u[&edge.to] - new_edge_val <= edge.val {
+						trace!("Constraint {:?} - {:?} <= {} is implied", edge.from, edge.to, edge.val);
 						self.close_imp_edge_backward(actions, &mut rev_open, index);
-					} else if incoming_v.contains_key(&edge.to.var) && incoming_v[&edge.to.var] + outgoing_u[&edge.from.var] - new_edge_val <= -edge.val - 1 { // todo slight double work for reified constraints
-						trace!("Constraint {:?} - {:?} <= {} is falsified since inverse is implied", edge.from.var, edge.to.var, edge.val);
+					} else if incoming_v.contains_key(&edge.to) && incoming_v[&edge.to] + outgoing_u[&edge.from] - new_edge_val <= -edge.val - 1 { // todo slight double work for reified constraints
+						trace!("Constraint {:?} - {:?} <= {} is falsified since inverse is implied", edge.from, edge.to, edge.val);
 						fail_indices.push(index);
 						self.close_imp_edge_backward(actions, &mut rev_open, index);
 					}
 				}
 			}
 		} else {
-			for var in incoming_v.keys() {
-				let temp_node = self.nodes[&var].clone();
+			for &var in incoming_v.keys() {
+				let temp_node = self.nodes[var].clone();
 				let mut node = temp_node.node.borrow_mut();
 				let mut open = node.open_edges.iter(actions);
 				while let Some(&index) = open.next() {
 					let edge = &self.edges[index];
-					if outgoing_u.contains_key(&edge.to.var) && incoming_v[&edge.from.var] + outgoing_u[&edge.to.var] - new_edge_val <= edge.val {
-						trace!("Constraint {:?} - {:?} <= {} is implied", edge.from.var, edge.to.var, edge.val);
+					if outgoing_u.contains_key(&edge.to) && incoming_v[&edge.from] + outgoing_u[&edge.to] - new_edge_val <= edge.val {
+						trace!("Constraint {:?} - {:?} <= {} is implied", edge.from, edge.to, edge.val);
 						self.close_imp_edge_forward(actions, &mut open, index);
-					} else if outgoing_u.contains_key(&edge.from.var) && incoming_v[&edge.to.var] + outgoing_u[&edge.from.var] - new_edge_val <= -edge.val - 1 { // todo slight double work for reified constraints
-						trace!("Constraint {:?} - {:?} <= {} is falsified since inverse is implied", edge.from.var, edge.to.var, edge.val);
+					} else if outgoing_u.contains_key(&edge.from) && incoming_v[&edge.to] + outgoing_u[&edge.from] - new_edge_val <= -edge.val - 1 { // todo slight double work for reified constraints
+						trace!("Constraint {:?} - {:?} <= {} is falsified since inverse is implied", edge.from, edge.to, edge.val);
 						fail_indices.push(index);
 						self.close_imp_edge_forward(actions, &mut open, index);
 					}
@@ -557,37 +555,42 @@ impl DifferenceLogicGraph {
 	}
 
 	/// Perform incremental updates of lower bounds.
-	fn inc_lb<P: PropagationActions>(&mut self, actions: &mut P, v_l: &Vec<VarNodeRef>, lb_updates: &mut Vec<VarNodeRef>) -> Result<(), Conflict> {
+	fn inc_lb<P: PropagationActions>(&mut self, actions: &mut P, v_l: &IndexSet<usize>, lb_updates: &mut Vec<usize>) -> Result<(), Conflict> {
 
 		trace!("Running inc_lb on {v_l:?}");
 		self.reset_visit();
-		let pi0 = v_l.iter().map(|n| actions.get_int_lower_bound(n.var) + n.node.borrow().pi).max().unwrap();
+		let pi0 = v_l.iter().map(|&n| {
+			let node = &self.nodes[n];
+			actions.get_int_lower_bound(node.var) + node.node.borrow().pi
+		}).max().unwrap();
 		let mut queue = PriorityQueue::new();
-		for n in v_l.iter() {
+		for &n in v_l.iter() {
+			let node = &self.nodes[n];
 			// Min value indicates that successors still need to be considered.
-			self.update_lb(n.clone(), IntVal::MIN, lb_updates);
-			let _ = queue.push(n.clone(), Reverse(pi0 - actions.get_int_lower_bound(n.var) - n.node.borrow().pi));
+			self.update_lb(n, IntVal::MIN, lb_updates);
+			let _ = queue.push(n, Reverse(pi0 - actions.get_int_lower_bound(node.var) - node.node.borrow().pi));
 		}
 		while !queue.is_empty() {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
-			self.visit(s.clone());
-			let bound = pi0 - gamma_s - s.node.borrow().pi;
-			if bound > self.get_cur_lower_bound(actions, s.clone()) {
-				self.update_lb(s.clone(), bound, lb_updates);
-				let node_s = s.node.borrow();
-				if bound > actions.get_int_lower_bound(s.var) {
-					trace!("Updating lower bound for {:?} to {bound}", s.var);
-					let (prev, b) = node_s.clone().backtrace.unwrap();
-					actions.set_int_lower_bound(s.var, bound, |a: &mut P| vec![b, a.get_int_lit(prev.var, IntLitMeaning::GreaterEq(self.get_cur_lower_bound(a, prev.clone())))])?;
+			self.visit(s);
+			let ref_s = &self.nodes[s];
+			let bound = pi0 - gamma_s - ref_s.node.borrow().pi;
+			if bound > self.get_cur_lower_bound(actions, s) {
+				self.update_lb(s, bound, lb_updates);
+				let node_s = ref_s.node.borrow();
+				if bound > actions.get_int_lower_bound(ref_s.var) {
+					trace!("Updating lower bound for {:?} to {bound}", ref_s.var);
+					let (prev, b) = node_s.backtrace.unwrap();
+					actions.set_int_lower_bound(ref_s.var, bound, |a: &mut P| vec![b, a.get_int_lit(self.nodes[prev].var, IntLitMeaning::GreaterEq(self.get_cur_lower_bound(a, prev)))])?;
 				}
 				for &index in node_s.edges.iter(actions) {
 					let edge = &self.edges[index];
-					let mut node_t = edge.to.node.borrow_mut();
+					let mut node_t = self.nodes[edge.to].node.borrow_mut();
 					if !node_t.visited {
 						let path = gamma_s + node_s.pi + edge.val - node_t.pi;
-						let old = queue.push_increase(edge.to.clone(), Reverse(path));
+						let old = queue.push_increase(edge.to, Reverse(path));
 						if old.map_or(true, |Reverse(old_path)| path < old_path) {
-							node_t.backtrace = Some((s.clone(), edge.bool_var));
+							node_t.backtrace = Some((s, edge.bool_var));
 						}
 					}
 				}
@@ -597,38 +600,43 @@ impl DifferenceLogicGraph {
 	}
 
 	/// Perform incremental updates of upper bounds.
-	fn inc_ub<P: PropagationActions>(&mut self, actions: &mut P, v_u: &Vec<VarNodeRef>, ub_updates: &mut Vec<VarNodeRef>) -> Result<(), Conflict> {
+	fn inc_ub<P: PropagationActions>(&mut self, actions: &mut P, v_u: &IndexSet<usize>, ub_updates: &mut Vec<usize>) -> Result<(), Conflict> {
 
 		trace!("Running inc_ub on {v_u:?}");
 		self.reset_visit();
-		let pi0 = v_u.iter().map(|n| actions.get_int_upper_bound(n.var) + n.node.borrow().pi).min().unwrap();
+		let pi0 = v_u.iter().map(|&n| {
+			let node = &self.nodes[n];
+			actions.get_int_upper_bound(node.var) + node.node.borrow().pi
+		}).min().unwrap();
 		let mut queue = PriorityQueue::new();
-		for n in v_u.iter() {
+		for &n in v_u.iter() {
+			let node = self.nodes[n].clone();
 			// Max value indicates that predecessors still need to be considered.
-			self.update_ub(n.clone(), IntVal::MAX, ub_updates);
-			let _ = queue.push(n.clone(), Reverse(n.node.borrow().pi + actions.get_int_upper_bound(n.var) - pi0));
+			self.update_ub(n, IntVal::MAX, ub_updates);
+			let _ = queue.push(n, Reverse(node.node.borrow().pi + actions.get_int_upper_bound(node.var) - pi0));
 		}
 		while !queue.is_empty() {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
-			self.visit(s.clone());
-			let bound = pi0 + gamma_s - s.node.borrow().pi;
-			if bound < self.get_cur_upper_bound(actions, s.clone()) {
-				self.update_ub(s.clone(), bound, ub_updates);
-				let node_s = s.node.borrow();
-				if bound < actions.get_int_upper_bound(s.var) {
-					trace!("Updating upper bound for {:?} to {bound}", s.var);
-					let (prev, b) = node_s.clone().backtrace.unwrap();
-					actions.set_int_upper_bound(s.var, bound, |a: &mut P| vec![b, a.get_int_lit(prev.var, IntLitMeaning::Less(self.get_cur_upper_bound(a, prev.clone()) + 1))])?;
+			self.visit(s);
+			let ref_s = self.nodes[s].clone();
+			let bound = pi0 + gamma_s - ref_s.node.borrow().pi;
+			if bound < self.get_cur_upper_bound(actions, s) {
+				self.update_ub(s, bound, ub_updates);
+				let node_s = ref_s.node.borrow();
+				if bound < actions.get_int_upper_bound(ref_s.var) {
+					trace!("Updating upper bound for {:?} to {bound}", ref_s.var);
+					let (prev, b) = node_s.backtrace.unwrap();
+					actions.set_int_upper_bound(ref_s.var, bound, |a: &mut P| vec![b, a.get_int_lit(self.nodes[prev].var, IntLitMeaning::Less(self.get_cur_upper_bound(a, prev) + 1))])?;
 
 				}
 				for &index in node_s.reverse_edges.iter(actions) {
 					let edge = &self.edges[index];
-					let mut node_t = edge.from.node.borrow_mut();
+					let mut node_t = self.nodes[edge.from].node.borrow_mut();
 					if !node_t.visited {
 						let path = gamma_s + node_t.pi + edge.val - node_s.pi;
-						let old = queue.push_increase(edge.from.clone(), Reverse(path));
+						let old = queue.push_increase(edge.from, Reverse(path));
 						if old.map_or(true, |Reverse(old_path)| path < old_path) {
-							node_t.backtrace = Some((s.clone(), edge.bool_var));
+							node_t.backtrace = Some((s, edge.bool_var));
 						}
 					}
 				}
@@ -645,31 +653,30 @@ impl DifferenceLogicGraph {
 
 		// Lower bound updates
 		if !state.lower_bound_changes.is_empty() {
-			let lb_changes_vec = state.lower_bound_changes.iter().map(|v| self.nodes[v].clone()).collect();
-			self.inc_lb(actions, &lb_changes_vec, &mut state.lb_updates)?;
+			self.inc_lb(actions, &state.lower_bound_changes, &mut state.lb_updates)?;
 		}
 
 		// Upper bound updates
 		if !state.upper_bound_changes.is_empty() {
-			let ub_changes_vec = state.upper_bound_changes.iter().map(|v| self.nodes[v].clone()).collect();
-			self.inc_ub(actions, &ub_changes_vec, &mut state.ub_updates)?;
+			self.inc_ub(actions, &state.upper_bound_changes, &mut state.ub_updates)?;
 		}
 
 		// Consequences of lower bound updates on open implied constraints
-		for n in state.lb_updates.iter() {
+		for &n in state.lb_updates.iter() {
 
-			let mut node = n.node.borrow_mut();
+			let node_ref = self.nodes[n].clone();
+			let mut node = node_ref.node.borrow_mut();
 			let lb = node.lower_bound.unwrap();
 
 			let mut open = node.open_edges.iter(actions);
 			while let Some(&index) = open.next() {
 				let edge = &self.edges[index];
-				let target_ub = self.get_cur_upper_bound(actions, edge.to.clone());
+				let target_ub = self.get_cur_upper_bound(actions, edge.to);
 				if lb - target_ub > edge.val {
 					// Constraint is falsified by bounds.
-					trace!("Constraint {:?} -> {:?} - {:?} <= {:?} is falsified by bounds.", edge.bool_var, n.var, edge.to.var, edge.val);
-					actions.set_bool(!edge.bool_var, |a: &mut P| vec![a.get_int_lit(n.var, IntLitMeaning::GreaterEq(lb)),
-																	  a.get_int_lit(edge.to.var, IntLitMeaning::Less(target_ub + 1))])?;
+					trace!("Constraint {:?} -> {:?} - {:?} <= {:?} is falsified by bounds.", edge.bool_var, node_ref.var, edge.to, edge.val);
+					actions.set_bool(!edge.bool_var, |a: &mut P| vec![a.get_int_lit(node_ref.var, IntLitMeaning::GreaterEq(lb)),
+																	  a.get_int_lit(self.nodes[edge.to].var, IntLitMeaning::Less(target_ub + 1))])?;
 					//let _ = fixed_bools.insert(!edge.bool_var.clone());
 					self.close_imp_edge_forward(actions, &mut open, index);
 				}
@@ -678,9 +685,9 @@ impl DifferenceLogicGraph {
 			let mut rev_open = node.open_reverse_edges.iter(actions);
 			while let Some(&index) = rev_open.next() {
 				let edge = &self.edges[index];
-				if self.get_cur_upper_bound(actions, edge.from.clone()) - lb <= edge.val {
+				if self.get_cur_upper_bound(actions, edge.from) - lb <= edge.val {
 					// Constraint is implied by bounds.
-					trace!("Constraint {:?} -> {:?} - {:?} <= {:?} is implied by bounds.", edge.bool_var, edge.from.var, n.var, edge.val);
+					trace!("Constraint {:?} -> {:?} - {:?} <= {:?} is implied by bounds.", edge.bool_var, edge.from, node_ref.var, edge.val);
 					self.close_imp_edge_backward(actions, &mut rev_open, index);
 				}
 			}
@@ -688,17 +695,18 @@ impl DifferenceLogicGraph {
 		}
 
 		// Consequences of upper bound updates on open implied constraints
-		for n in state.ub_updates.iter() {
+		for &n in state.ub_updates.iter() {
 
-			let mut node = n.node.borrow_mut();
+			let node_ref = self.nodes[n].clone();
+			let mut node = node_ref.node.borrow_mut();
 			let ub = node.upper_bound.unwrap();
 
 			let mut open = node.open_edges.iter(actions);
 			while let Some(&index) = open.next() {
 				let edge = &self.edges[index];
-				if ub - self.get_cur_lower_bound(actions, edge.to.clone()) <= edge.val {
+				if ub - self.get_cur_lower_bound(actions, edge.to) <= edge.val {
 					// Constraint is implied by bounds.
-					trace!("Constraint {:?} -> {:?} - {:?} <= {:?} is implied by bounds.", edge.bool_var, n.var, edge.to.var, edge.val);
+					trace!("Constraint {:?} -> {:?} - {:?} <= {:?} is implied by bounds.", edge.bool_var, node_ref.var, edge.to, edge.val);
 					self.close_imp_edge_forward(actions, &mut open, index);
 				}
 			}
@@ -706,12 +714,12 @@ impl DifferenceLogicGraph {
 			let mut rev_open = node.open_reverse_edges.iter(actions);
 			while let Some(&index) = rev_open.next() {
 				let edge = &self.edges[index];
-				let source_lb = self.get_cur_lower_bound(actions, edge.from.clone());
+				let source_lb = self.get_cur_lower_bound(actions, edge.from);
 				if source_lb - ub > edge.val {
 					// Constraint is falsified by bounds.
-					trace!("Constraint {:?} -> {:?} - {:?} <= {:?} is falsified by bounds.", edge.bool_var, edge.from.var, n.var, edge.val);
-					actions.set_bool(!edge.bool_var, |a: &mut P| vec![a.get_int_lit(edge.from.var, IntLitMeaning::GreaterEq(source_lb)),
-																	  a.get_int_lit(n.var, IntLitMeaning::Less(ub + 1))])?;
+					trace!("Constraint {:?} -> {:?} - {:?} <= {:?} is falsified by bounds.", edge.bool_var, edge.from, node_ref.var, edge.val);
+					actions.set_bool(!edge.bool_var, |a: &mut P| vec![a.get_int_lit(self.nodes[edge.from].var, IntLitMeaning::GreaterEq(source_lb)),
+																	  a.get_int_lit(node_ref.var, IntLitMeaning::Less(ub + 1))])?;
 					//let _ = fixed_bools.insert(!edge.bool_var.clone());
 					self.close_imp_edge_backward(actions, &mut rev_open, index);
 				}
@@ -726,7 +734,7 @@ impl DifferenceLogicGraph {
 				// Consequences of setting the boolean to true -> add all implied edges.
 				for &index in edges.iter() {
 					let closed_now = self.close_imp_edge(actions, index);
-					trace!("Processing adding edge {:?} - {:?} <= {:?} (open: {closed_now})", self.edges[index].from.var, self.edges[index].to.var, self.edges[index].val);
+					trace!("Processing adding edge {:?} - {:?} <= {:?} (open: {closed_now})", self.edges[index].from, self.edges[index].to, self.edges[index].val);
 					// Only continue if the edge was not already closed.
 					if closed_now {
 						// If the edge can't be added, a conflict will be generated
@@ -735,17 +743,17 @@ impl DifferenceLogicGraph {
 							// If the edge was added, check the status of open edges.
 							self.inc_imp(actions, index)?;
 							let edge = &self.edges[index];
-							let lb_y = -edge.val + self.get_cur_lower_bound(actions, edge.from.clone());
-							if lb_y > self.get_cur_lower_bound(actions, edge.to.clone()) {
+							let lb_y = -edge.val + self.get_cur_lower_bound(actions, edge.from);
+							if lb_y > self.get_cur_lower_bound(actions, edge.to) {
 								// New edge caused lower bound change.
-								actions.set_int_lower_bound(edge.to.var, lb_y, |a: &mut P| vec![b, a.get_int_lit(edge.from.var, IntLitMeaning::GreaterEq(self.get_cur_lower_bound(a, edge.from.clone())))])?;
-								self.update_lb(edge.to.clone(), lb_y, &mut state.lb_updates);
+								actions.set_int_lower_bound(self.nodes[edge.to].var, lb_y, |a: &mut P| vec![b, a.get_int_lit(self.nodes[edge.from].var, IntLitMeaning::GreaterEq(self.get_cur_lower_bound(a, edge.from)))])?;
+								self.update_lb(edge.to, lb_y, &mut state.lb_updates);
 							}
-							let ub_x = edge.val + self.get_cur_upper_bound(actions, edge.to.clone());
-							if ub_x < self.get_cur_upper_bound(actions, edge.from.clone()) {
+							let ub_x = edge.val + self.get_cur_upper_bound(actions, edge.to);
+							if ub_x < self.get_cur_upper_bound(actions, edge.from) {
 								// New edge caused upper bound change.
-								actions.set_int_upper_bound(edge.from.var, ub_x, |a: &mut P| vec![b, a.get_int_lit(edge.to.var, IntLitMeaning::Less(self.get_cur_upper_bound(a, edge.to.clone()) + 1))])?;
-								self.update_ub(edge.from.clone(), ub_x, &mut state.ub_updates);
+								actions.set_int_upper_bound(self.nodes[edge.from].var, ub_x, |a: &mut P| vec![b, a.get_int_lit(self.nodes[edge.to].var, IntLitMeaning::Less(self.get_cur_upper_bound(a, edge.to) + 1))])?;
+								self.update_ub(edge.from, ub_x, &mut state.ub_updates);
 							}
 						}
 					}
@@ -756,7 +764,7 @@ impl DifferenceLogicGraph {
 				// Consequences of setting the negation of the boolean to false -> close all implied edges.
 				for &index in edges.iter() {
 					let edge_closed = self.close_imp_edge(actions, index);
-					trace!("Closing edge {:?} - {:?} <= {:?} (open: {edge_closed})", self.edges[index].from.var, self.edges[index].to.var, self.edges[index].val);
+					trace!("Closing edge {:?} - {:?} <= {:?} (open: {edge_closed})", self.edges[index].from, self.edges[index].to, self.edges[index].val);
 				}
 			}
 		}
@@ -773,15 +781,17 @@ impl DifferenceLogicGraph {
 	/// Generate a dot presentation of the active graph.
 	fn to_dot<I: InspectionActions>(&self, actions: &mut I) -> String {
 		let mut out = "digraph {\n".to_owned();
-		for (&var, v) in self.nodes.iter() {
+		for (n, v) in self.nodes.iter().enumerate() {
 			let node = v.node.borrow();
-			out.push_str(format!("\"{var:?}\" [label=\"{var:?} (lb: {:?}, ub: {:?}, pi: {:?})\"]\n",
-								 self.get_cur_lower_bound(actions, v.clone()),
-								 self.get_cur_upper_bound(actions, v.clone()),
+			out.push_str(format!("\"{:?}\" [label=\"{:?} (lb: {:?}, ub: {:?}, pi: {:?})\"]\n",
+								 v.var,
+								 v.var,
+								 self.get_cur_lower_bound(actions, n),
+								 self.get_cur_upper_bound(actions, n),
 								 node.pi).as_str());
 			for &index in node.edges.iter(actions) {
 				let edge = &self.edges[index];
-				out.push_str(format!("\"{var:?}\" -> \"{:?}\" [label=\"{:?} ({:?})\"]\n", edge.to.var, edge.val, edge.bool_var).as_str());
+				out.push_str(format!("\"{:?}\" -> \"{:?}\" [label=\"{:?} ({:?})\"]\n", v.var, self.nodes[edge.to].var, edge.val, edge.bool_var).as_str());
 			}
 		}
 		out += "}";
@@ -794,28 +804,28 @@ impl DifferenceLogicGraph {
 /// Propagator state data.
 pub struct DifferenceLogicState {
 	/// List of variables with updated lower bounds.
-	lb_updates: Vec<VarNodeRef>,
+	lb_updates: Vec<usize>,
 	/// List of variables with updated upper bounds.
-	ub_updates: Vec<VarNodeRef>,
+	ub_updates: Vec<usize>,
 	/// Map from boolean variables to their implied edges.
-	bool_map: HashMap<BoolView, Vec<usize>>,
+	bool_map: HashMap<BoolView, Vec<usize>>, //todo
 	/// List of variables with reported lower bound changes.
-	lower_bound_changes: IndexSet<IntView>,
+	lower_bound_changes: IndexSet<usize>,
 	/// List of variables with reported upper bound changes.
-	upper_bound_changes: IndexSet<IntView>,
+	upper_bound_changes: IndexSet<usize>,
 	/// List of boolean variables that have recently been reported as fixed to true.
-	fixed_bools: IndexSet<BoolView>,
+	fixed_bools: IndexSet<BoolView>,  //todo
 }
 
 impl DifferenceLogicState {
 	
-	fn new(int_vars: Vec<IntView>, bool_vars: Vec<BoolView>) -> Self {
+	fn new(int_vars: usize, bool_vars: Vec<BoolView>) -> Self {
 		Self {
 			lb_updates: Vec::new(),
 			ub_updates: Vec::new(),
 			bool_map: bool_vars.iter().map(|&b| (b, Vec::new())).collect(),
-			lower_bound_changes: int_vars.iter().map(|&v| v).collect(),
-			upper_bound_changes: int_vars.iter().map(|&v| v).collect(),
+			lower_bound_changes: (0..int_vars).into_iter().collect(),
+			upper_bound_changes: (0..int_vars).into_iter().collect(),
 			fixed_bools: IndexSet::new(),
 		}
 	}
@@ -834,9 +844,9 @@ pub struct DifferenceLogicBounds {
 	/// Constraint graph.
 	graph: DifferenceLogicGraph,
 	/// List of constraints. todo currently initial list, not to be modified later?
-	constraints: Vec<(IntView, IntView, IntVal)>,
+	constraints: Vec<(usize, usize, IntVal)>,
 	/// List of implied constraints. todo currently initial list, not to be modified later?
-	imp_constraints: Vec<(BoolView, IntView, IntView, IntVal)>,
+	imp_constraints: Vec<(BoolView, usize, usize, IntVal)>,
 	/// Propagator state data.
 	state: DifferenceLogicState,
 }
@@ -861,32 +871,37 @@ impl DifferenceLogicBounds {
 			x != y
 		}).collect::<Vec<_>>();
 		trace!("Constraint lengths after trimming self-loops: {} and {}.", trimmed_constraints.len(), trimmed_imp_constraints.len());
-
-		let int_vars = trimmed_constraints.iter().flat_map(|&(x, y, _)| once(x).chain(once(y)))
-			.chain(trimmed_imp_constraints.iter().flat_map(|&(_, x, y, _)| once(x).chain(once(y)))).unique().collect::<Vec<_>>();
+		
+		let mut int_var_map = IndexMap::new();
+		for var in trimmed_constraints.iter().flat_map(|&(x, y, _)| once(x).chain(once(y)))
+			.chain(trimmed_imp_constraints.iter().flat_map(|&(_, x, y, _)| once(x).chain(once(y)))) {
+			if !int_var_map.contains_key(&var) {
+				let _ = int_var_map.insert(var, int_var_map.len());
+			}
+		}
 
 		let bool_vars = trimmed_imp_constraints.iter().map(|&(b, _, _, _)| b).unique().collect::<Vec<_>>();
-		trace!("Creating DifferenceLogicBounds propagator for {} int and {} bool vars.", int_vars.len(), bool_vars.len());
+		trace!("Creating DifferenceLogicBounds propagator for {} int and {} bool vars.", int_var_map.len(), bool_vars.len());
 
 		// todo init all or add dynamically?
-		let graph = DifferenceLogicGraph::new(solver, int_vars.clone());
-		let state = DifferenceLogicState::new(int_vars.clone(), bool_vars.clone());
+		let graph = DifferenceLogicGraph::new(solver, int_var_map.iter().map(|(&v, _)| v).collect());
+		let state = DifferenceLogicState::new(int_var_map.len(), bool_vars.clone());
 
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				graph,
-				constraints: trimmed_constraints,
-				imp_constraints: trimmed_imp_constraints,
+				constraints: trimmed_constraints.iter().map(|&(x, y, d)| (int_var_map[&x], int_var_map[&y], d)).collect(),
+				imp_constraints: trimmed_imp_constraints.iter().map(|&(b, x, y, d)| (b, int_var_map[&x], int_var_map[&y], d)).collect(),
 				state,
 			}),
 			PriorityLevel::Low, // todo priority
 		);
-		for &v in int_vars.iter() {
-			solver.advise_on_int_change(prop, v, IntPropCond::LowerBound);
-			solver.advise_on_int_change(prop, v, IntPropCond::UpperBound);
+		for (&v, &i) in int_var_map.iter() {
+			solver.advise_on_int_change(prop, v, IntPropCond::LowerBound, i as u64);
+			solver.advise_on_int_change(prop, v, IntPropCond::UpperBound, i as u64);
 		}
 		for &v in bool_vars.iter() { // todo might run on both v and !v?
-			solver.advise_on_bool_change(prop, v);
+			solver.advise_on_bool_change(prop, v, 0); // todo data
 		}
 		solver.advise_on_backtrack(prop);
 		solver.enqueue_now(prop); // todo might be removed
@@ -899,7 +914,7 @@ where
 	P: PropagationActions,
 	E: ExplanationActions,
 {
-	fn advise_of_bool_change(&mut self, actions: &mut E, view: BoolView) -> bool {
+	fn advise_of_bool_change(&mut self, actions: &mut E, view: BoolView, data: u64) -> bool {  // todo
 		let val = actions.get_bool_val(view).unwrap();
 		trace!("Boolean {view:?} fixed to {val}.");
 		if val {
@@ -910,11 +925,11 @@ where
 		true
 	}
 
-	fn advise_of_int_change(&mut self, _actions: &mut E, view: IntView, condition: IntPropCond) -> bool {
-		trace!("Integer {view:?} changed on condition {condition:?}.");
+	fn advise_of_int_change(&mut self, _actions: &mut E, _view: IntView, condition: IntPropCond, data: u64) -> bool {
+		trace!("Integer {data} changed on condition {condition:?}.");
 		let _ = match condition {
-			IntPropCond::LowerBound => self.state.lower_bound_changes.insert(view),
-			IntPropCond::UpperBound => self.state.upper_bound_changes.insert(view),
+			IntPropCond::LowerBound => self.state.lower_bound_changes.insert(data as usize),
+			IntPropCond::UpperBound => self.state.upper_bound_changes.insert(data as usize),
 			_ => unreachable!("Condition was never enqueued."),
 		};
 		true
@@ -932,15 +947,15 @@ where
 
 		let mut graph_change = false; //todo remove
 
-		for (b, x, y, d) in self.imp_constraints.iter() {
-			let index = self.graph.new_imp_edge(actions, DiffEdge::new(self.graph.nodes[x].clone(), self.graph.nodes[y].clone(), *d, *b));
-			self.state.bool_map.get_mut(b).unwrap().push(index);
+		for &(b, x, y, d) in self.imp_constraints.iter() {
+			let index = self.graph.new_imp_edge(actions, DiffEdge::new(x, y, d, b));
+			self.state.bool_map.get_mut(&b).unwrap().push(index);
 		}
 		self.imp_constraints.clear();
 
-		for (x, y, d) in self.constraints.iter() {  // todo this should be done earlier and simplified in the process
+		for &(x, y, d) in self.constraints.iter() {  // todo this should be done earlier and simplified in the process
 			graph_change = true;
-			let edge = DiffEdge::new(self.graph.nodes[x].clone(), self.graph.nodes[y].clone(), *d, BoolView::from(true));
+			let edge = DiffEdge::new(x, y, d, BoolView::from(true));
 			let index = self.graph.new_edge(actions, edge);
 			let _ = self.graph.inc_sat(actions, index)?;
 			//trace!("Graph after adding new edge: {}", self.graph.to_dot(actions));

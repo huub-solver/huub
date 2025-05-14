@@ -143,14 +143,14 @@ pub struct State {
 /// Advise propagators of the enqueued event, add them to the propagator queue if requested.
 fn advise_and_enqueue(state: &mut State, propagators: &mut IndexVec<PropRef, BoxedPropagator>, action: &ActivationAction) {
 	let prop = match *action {
-		ActivationAction::AdviseInt(prop, var, event) => {
-			if !propagators[prop].advise_of_int_change(state, var, event) {
+		ActivationAction::AdviseInt(prop, var, event, data) => {
+			if !propagators[prop].advise_of_int_change(state, var, event, data) {
 				return;
 			}
 			prop
 		}
-		ActivationAction::AdviseBool(prop, var) => {
-			if !propagators[prop].advise_of_bool_change(state, var) {
+		ActivationAction::AdviseBool(prop, var, data) => {
+			if !propagators[prop].advise_of_bool_change(state, var, data) {
 				return;
 			}
 			prop

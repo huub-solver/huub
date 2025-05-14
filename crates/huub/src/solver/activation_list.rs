@@ -42,8 +42,8 @@ pub(crate) enum ActivationAction {
 	/// When activated, advise the propagator with the given [`PropRef`] of the
 	/// event that triggered the activation. If the advisal method returns `true`,
 	/// then enqueue the propagator if it is not already in the queue.
-	AdviseInt(PropRef, IntView, IntPropCond),
-	AdviseBool(PropRef, BoolView),
+	AdviseInt(PropRef, IntView, IntPropCond, u64),
+	AdviseBool(PropRef, BoolView, u64),
 	/// When activated, simply add the propagator with the given [`PropRef`] to the
 	/// propagator queue if it is not already in the queue.
 	Enqueue(PropRef),
