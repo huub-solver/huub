@@ -122,26 +122,9 @@ impl<S: SimplificationActions> Constraint<S> for IntSeqPrecedeChain {
 }
 
 impl IntSeqPrecedeChainBounds {
-	/// Recursively explain a lower bound via 3 cases:
-	/// - Lower bound of var i is above k - This is the value that required the
-	///   earlier lower bound that is currently explained (end of recursion).
-	/// - k is in the domain of var i - Go one step up and to the next variable.
-	/// - k is not in the domain of var i - i can be anything else, go to next
-	///   variable.
-	fn explain_lower_recursive<P: PropagationActions>(&self, actions: &mut P, i: usize, k: IntVal) -> Vec<BoolView> {
-		if actions.get_int_lower_bound(self.vars[i]) > k {
-			return vec![actions.get_int_lit(self.vars[i], IntLitMeaning::GreaterEq(k + 1))];
-		}
-		if actions.check_int_in_domain(self.vars[i], k) {
-			return self.explain_lower_recursive(actions, i + 1, k + 1);
-		}
-		let mut v = self.explain_lower_recursive(actions, i + 1, k);
-		v.push(actions.get_int_lit(self.vars[i], IntLitMeaning::NotEq(k)));
-		v
-	}
-
 	/// Lower bound explanation: Could not have this value earlier (=upper bound
-	/// explanation) and some later value requires the lower bound (recursive lower bound).
+	/// explanation) and some later value requires the lower bound (recursive
+	/// lower bound).
 	fn explain_lower<P: PropagationActions>(
 		&self,
 		actions: &mut P,
@@ -150,6 +133,28 @@ impl IntSeqPrecedeChainBounds {
 	) -> Vec<BoolView> {
 		let mut v = self.explain_lower_recursive(actions, i + 1, k);
 		v.extend(self.explain_upper(actions, i, k));
+		v
+	}
+	/// Recursively explain a lower bound via 3 cases:
+	/// - Lower bound of var i is above k - This is the value that required the
+	///   earlier lower bound that is currently explained (end of recursion).
+	/// - k is in the domain of var i - Go one step up and to the next variable.
+	/// - k is not in the domain of var i - i can be anything else, go to next
+	///   variable.
+	fn explain_lower_recursive<P: PropagationActions>(
+		&self,
+		actions: &mut P,
+		i: usize,
+		k: IntVal,
+	) -> Vec<BoolView> {
+		if actions.get_int_lower_bound(self.vars[i]) > k {
+			return vec![actions.get_int_lit(self.vars[i], IntLitMeaning::GreaterEq(k + 1))];
+		}
+		if actions.check_int_in_domain(self.vars[i], k) {
+			return self.explain_lower_recursive(actions, i + 1, k + 1);
+		}
+		let mut v = self.explain_lower_recursive(actions, i + 1, k);
+		v.push(actions.get_int_lit(self.vars[i], IntLitMeaning::NotEq(k)));
 		v
 	}
 
@@ -176,52 +181,12 @@ impl IntSeqPrecedeChainBounds {
 		)
 	}
 
-	/// Create a new [`IntSeqPrecedeChainBounds`] propagator and post it in the
-	/// solver.
-	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, vars: Vec<IntView>) {
-		let n = vars.len();
-		let ub = vars.iter().fold(0, |u, &item| {
-			if solver.get_int_upper_bound(item) > u {
-				u + 1
-			} else {
-				u
-			}
-		});
-
-		let first = (0..=ub).map(|_| solver.new_trailed_int(0)).collect();
-		let last = (0..=ub)
-			.map(|i| {
-				if i == 0 {
-					solver.new_trailed_int(IntVal::MIN)
-				} else {
-					solver.new_trailed_int(IntVal::MAX)
-				}
-			})
-			.collect();
-		let first_val = (0..n).map(|_| solver.new_trailed_int(0)).collect();
-		let max_last = solver.new_trailed_int(0);
-
-		let prop = solver.add_propagator(
-			Box::new(Self {
-				vars: vars.clone(),
-				initialized: false,
-				first,
-				last,
-				first_val,
-				max_last,
-			}),
-			PriorityLevel::Low,
-		);
-
-		for v in vars {
-			solver.enqueue_on_int_change(prop, v, IntPropCond::Domain);
-		}
-		solver.enqueue_now(prop);
-	}
-
 	/// Do a full propagation run, requires checking all variables in both
 	/// directions.
-	fn initial_propagation<P: PropagationActions>(&mut self, actions: &mut P) -> Result<(), Conflict> {
+	fn initial_propagation<P: PropagationActions>(
+		&mut self,
+		actions: &mut P,
+	) -> Result<(), Conflict> {
 		// Current upper bound
 		let mut up = 0;
 		// Current lower bound
@@ -278,6 +243,49 @@ impl IntSeqPrecedeChainBounds {
 
 		self.initialized = true;
 		Ok(())
+	}
+
+	/// Create a new [`IntSeqPrecedeChainBounds`] propagator and post it in the
+	/// solver.
+	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, vars: Vec<IntView>) {
+		let n = vars.len();
+		let ub = vars.iter().fold(0, |u, &item| {
+			if solver.get_int_upper_bound(item) > u {
+				u + 1
+			} else {
+				u
+			}
+		});
+
+		let first = (0..=ub).map(|_| solver.new_trailed_int(0)).collect();
+		let last = (0..=ub)
+			.map(|i| {
+				if i == 0 {
+					solver.new_trailed_int(IntVal::MIN)
+				} else {
+					solver.new_trailed_int(IntVal::MAX)
+				}
+			})
+			.collect();
+		let first_val = (0..n).map(|_| solver.new_trailed_int(0)).collect();
+		let max_last = solver.new_trailed_int(0);
+
+		let prop = solver.add_propagator(
+			Box::new(Self {
+				vars: vars.clone(),
+				initialized: false,
+				first,
+				last,
+				first_val,
+				max_last,
+			}),
+			PriorityLevel::Low,
+		);
+
+		for v in vars {
+			solver.enqueue_on_int_change(prop, v, IntPropCond::Domain);
+		}
+		solver.enqueue_now(prop);
 	}
 
 	/// Iteratively repairs the lower bounds starting with k, only iterates as far
@@ -376,48 +384,48 @@ where
 {
 	#[tracing::instrument(name = "seq_precede_chain", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		if self.initialized {
-			// Check upper bound updates, only necessary for all elements in first,
-			// not all variables.
-			for (k, &t) in self.first.iter().enumerate() {
-				let i = actions.get_trailed_int(t);
-				if actions.get_trailed_int(self.first_val[i as usize]) == k as IntVal
-					&& actions.get_int_upper_bound(self.vars[i as usize]) < k as IntVal
-				{
-					self.repair_upper(actions, k as IntVal)?;
-				}
-			}
-			// Lower bound requires full pass to catch all potential propagations.
-			let mut i = self.vars.len() as IntVal;
-			let mut k = actions.get_trailed_int(self.max_last);
-			while i > 0 {
-				i -= 1;
-				if k > 0 && actions.get_trailed_int(self.last[k as usize - 1]) == i {
-					k -= 1;
-				}
-				let lb = actions.get_int_lower_bound(self.vars[i as usize]);
-				// Deal with increase of lower bound.
-				if lb > k {
-					let _ = actions.set_trailed_int(self.last[lb as usize], i);
-					// Update highest lower bound if necessary.
-					if lb > actions.get_trailed_int(self.max_last) {
-						let _ = actions.set_trailed_int(self.max_last, lb);
-					}
-					// If a repair is necessary, continue check where the repair ended.
-					(i, k) = self.repair_lower(actions, lb)?;
-					continue;
-				}
-				// Deal with moving the last possibility to have value k for the first.
-				if actions.get_trailed_int(self.last[k as usize]) == i
-					&& !actions.check_int_in_domain(self.vars[i as usize], k)
-				{
-					(i, k) = self.repair_lower(actions, k)?;
-				}
-			}
-			return Ok(());
+		if !self.initialized {
+			return self.initial_propagation(actions);
 		}
 
-		self.initial_propagation(actions)
+		// Check upper bound updates, only necessary for all elements in first,
+		// not all variables.
+		for (k, &t) in self.first.iter().enumerate() {
+			let i = actions.get_trailed_int(t);
+			if actions.get_trailed_int(self.first_val[i as usize]) == k as IntVal
+				&& actions.get_int_upper_bound(self.vars[i as usize]) < k as IntVal
+			{
+				self.repair_upper(actions, k as IntVal)?;
+			}
+		}
+		// Lower bound requires full pass to catch all potential propagations.
+		let mut i = self.vars.len() as IntVal;
+		let mut k = actions.get_trailed_int(self.max_last);
+		while i > 0 {
+			i -= 1;
+			if k > 0 && actions.get_trailed_int(self.last[k as usize - 1]) == i {
+				k -= 1;
+			}
+			let lb = actions.get_int_lower_bound(self.vars[i as usize]);
+			// Deal with increase of lower bound.
+			if lb > k {
+				let _ = actions.set_trailed_int(self.last[lb as usize], i);
+				// Update highest lower bound if necessary.
+				if lb > actions.get_trailed_int(self.max_last) {
+					let _ = actions.set_trailed_int(self.max_last, lb);
+				}
+				// If a repair is necessary, continue check where the repair ended.
+				(i, k) = self.repair_lower(actions, lb)?;
+				continue;
+			}
+			// Deal with moving the last possibility to have value k for the first.
+			if actions.get_trailed_int(self.last[k as usize]) == i
+				&& !actions.check_int_in_domain(self.vars[i as usize], k)
+			{
+				(i, k) = self.repair_lower(actions, k)?;
+			}
+		}
+		Ok(())
 	}
 }
 
@@ -457,6 +465,21 @@ impl<S: SimplificationActions> Constraint<S> for IntValuePrecedeChain {
 }
 
 impl IntValuePrecedeChainValue {
+	/// Lower bound explanation: Could not have this index earlier (=upper bound
+	/// explanation) and some later index requires the lower bound (recursive lower bound).
+	fn explain_lower<P: PropagationActions>(
+		&self,
+		actions: &mut P,
+		i: usize,
+		j: usize,
+	) -> Vec<BoolView> {
+		let mut v = self.explain_lower_recursive(actions, i + 1, j);
+		if j > 0 {
+			v.append(&mut self.explain_upper(actions, i, j));
+		}
+		v
+	}
+
 	/// Recursively explain a lower bound via 3 cases:
 	/// - Current lower bound index is above k - This is the value that required
 	///   the earlier lower bound that is currently explained (end of recursion).
@@ -464,7 +487,12 @@ impl IntValuePrecedeChainValue {
 	///   variable.
 	/// - Index k is not in the domain of var i - i can be anything else, go to
 	///   next variable.
-	fn explain_lower_recursive<P: PropagationActions>(&self, actions: &mut P, i: usize, j: usize) -> Vec<BoolView> {
+	fn explain_lower_recursive<P: PropagationActions>(
+		&self,
+		actions: &mut P,
+		i: usize,
+		j: usize,
+	) -> Vec<BoolView> {
 		// A lower bound is explained by stating that all untracked values are excluded
 		// (< min value, > max value, all holes), as well as all values with smaller indices.
 		if let Some(lb) = self.get_lowest_index(actions, i) {
@@ -498,22 +526,8 @@ impl IntValuePrecedeChainValue {
 		v
 	}
 
-	/// Lower bound explanation: Could not have this index earlier (=upper bound
-	/// explanation) and some later index requires the lower bound (recursive lower bound).
-	fn explain_lower<P: PropagationActions>(
-		&self,
-		actions: &mut P,
-		i: usize,
-		j: usize,
-	) -> Vec<BoolView> {
-		let mut v = self.explain_lower_recursive(actions, i + 1, j);
-		if j > 0 {
-			v.append(&mut self.explain_upper(actions, i, j));
-		}
-		v
-	}
-
-	/// Upper bound explanation: All previous indices are smaller (exclude values with larger index).
+	/// Upper bound explanation: All previous indices are smaller (exclude values
+	/// with larger index).
 	fn explain_upper<P: PropagationActions>(
 		&self,
 		actions: &mut P,
@@ -569,6 +583,59 @@ impl IntValuePrecedeChainValue {
 			actions.get_trailed_int(self.last[k]),
 			self.vars.len() as IntVal - 1,
 		)
+	}
+
+	/// Do a full propagation run, requires checking all variables in both
+	/// directions.
+	fn initial_propagation<P: PropagationActions>(
+		&mut self,
+		actions: &mut P,
+	) -> Result<(), Conflict> {
+		// Current upper bound
+		let mut up = 0;
+		// Current lower bound
+		let mut low = 0;
+
+		// Forward pass to set upper bounds and capture the highest lower bound.
+		for (i, &v) in self.vars.iter().enumerate() {
+			// Upper bound can only increase by 1, set new bound if larger values are in the domain.
+			self.propagate_upper_bound(actions, i, up + 1)?;
+			// The current var is the first possibility to reach index up + 1.
+			if up < self.values.len() && actions.check_int_in_domain(v, self.values[up]) {
+				up += 1;
+				let _ = actions.set_trailed_int(self.first[up], i as IntVal);
+				let _ = actions.set_trailed_int(self.first_val[i], up as IntVal);
+			}
+			// The lower bound will be needed for the backward pass.
+			if let Some(lb) = self.get_lowest_index(actions, i) {
+				if low < lb {
+					let _ = actions.set_trailed_int(self.last[lb], i as IntVal);
+					low = lb;
+				}
+			}
+		}
+
+		// Backward pass to set lower bounds.
+		for (i, &v) in self.vars.iter().enumerate().rev() {
+			// Lower bound is enforced if upper and lower bound coincide.
+			if actions.get_trailed_int(self.first[low]) == i as IntVal {
+				self.propagate_lower_bound(actions, i, low)?;
+			}
+			// Found possibility to use a lower value - reduce lower bound.
+			if i as IntVal <= actions.get_trailed_int(self.last[low])
+				&& actions.check_int_in_domain(v, self.values[low - 1])
+			{
+				let _ = actions.set_trailed_int(self.last[low], i as IntVal);
+				low -= 1;
+			}
+			// Stop early if no more lower bounds can be propagated.
+			if low == 0 {
+				break;
+			}
+		}
+
+		self.initialized = true;
+		Ok(())
 	}
 
 	/// Create a new [`ValuePrecedeChainValue`] propagator and post it in the
@@ -643,56 +710,6 @@ impl IntValuePrecedeChainValue {
 			solver.enqueue_on_int_change(prop, v, IntPropCond::Domain);
 		}
 		solver.enqueue_now(prop);
-	}
-
-	/// Do a full propagation run, requires checking all variables in both
-	/// directions.
-	fn initial_propagation<P: PropagationActions>(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		// Current upper bound
-		let mut up = 0;
-		// Current lower bound
-		let mut low = 0;
-
-		// Forward pass to set upper bounds and capture the highest lower bound.
-		for (i, &v) in self.vars.iter().enumerate() {
-			// Upper bound can only increase by 1, set new bound if larger values are in the domain.
-			self.propagate_upper_bound(actions, i, up + 1)?;
-			// The current var is the first possibility to reach index up + 1.
-			if up < self.values.len() && actions.check_int_in_domain(v, self.values[up]) {
-				up += 1;
-				let _ = actions.set_trailed_int(self.first[up], i as IntVal);
-				let _ = actions.set_trailed_int(self.first_val[i], up as IntVal);
-			}
-			// The lower bound will be needed for the backward pass.
-			if let Some(lb) = self.get_lowest_index(actions, i) {
-				if low < lb {
-					let _ = actions.set_trailed_int(self.last[lb], i as IntVal);
-					low = lb;
-				}
-			}
-		}
-
-		// Backward pass to set lower bounds.
-		for (i, &v) in self.vars.iter().enumerate().rev() {
-			// Lower bound is enforced if upper and lower bound coincide.
-			if actions.get_trailed_int(self.first[low]) == i as IntVal {
-				self.propagate_lower_bound(actions, i, low)?;
-			}
-			// Found possibility to use a lower value - reduce lower bound.
-			if i as IntVal <= actions.get_trailed_int(self.last[low])
-				&& actions.check_int_in_domain(v, self.values[low - 1])
-			{
-				let _ = actions.set_trailed_int(self.last[low], i as IntVal);
-				low -= 1;
-			}
-			// Stop early if no more lower bounds can be propagated.
-			if low == 0 {
-				break;
-			}
-		}
-
-		self.initialized = true;
-		Ok(())
 	}
 
 	/// Propagate a lower bound by excluding all elements outside values, and
@@ -785,7 +802,7 @@ impl IntValuePrecedeChainValue {
 			// Hit boundary case, this will cause a conflict.
 			if i < 0 {
 				self.propagate_lower_bound(actions, 0, k)?;
-				// Return Ok since the conflict is only detected during propagation 
+				// Return Ok since the conflict is only detected during propagation
 				// (several domain elements are removed separately).
 				return Ok((0, k));
 			}
@@ -831,7 +848,7 @@ impl IntValuePrecedeChainValue {
 		// Hit boundary case, this will cause a conflict.
 		if (i as usize) < self.vars.len() {
 			self.propagate_lower_bound(actions, i as usize - 1, k)?;
-			// Return Ok since the conflict is only detected during propagation 
+			// Return Ok since the conflict is only detected during propagation
 			// (several domain elements are removed separately).
 			return Ok(());
 		}
@@ -848,49 +865,49 @@ where
 {
 	#[tracing::instrument(name = "value_precede_chain", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		if self.initialized {
-			// Check upper bound updates, only necessary for all elements in first,
-			// not all variables.
-			for (k, &t) in self.first.iter().enumerate().skip(1) {
-				let i = actions.get_trailed_int(t);
-				if actions.get_trailed_int(self.first_val[i as usize]) == k as IntVal
-					&& !actions.check_int_in_domain(self.vars[i as usize], self.values[k - 1])
-				{
-					self.repair_upper(actions, k)?;
-				}
-			}
-			// Lower bound requires full pass to catch all potential propagations.
-			let mut i = self.vars.len();
-			let mut k = actions.get_trailed_int(self.max_last) as usize;
-			while i > 0 {
-				i -= 1;
-				if k > 0 && actions.get_trailed_int(self.last[k - 1]) == i as IntVal {
-					k -= 1;
-				}
-				if let Some(lb) = self.get_lowest_index(actions, i) {
-					// Deal with increase of lower bound.
-					if lb > k {
-						let _ = actions.set_trailed_int(self.last[lb], i as IntVal);
-						// Update highest lower bound if necessary.
-						if lb as IntVal > actions.get_trailed_int(self.max_last) {
-							let _ = actions.set_trailed_int(self.max_last, lb as IntVal);
-						}
-						// If a repair is necessary, continue check where the repair ended.
-						(i, k) = self.repair_lower(actions, lb)?;
-						continue;
-					}
-				}
-				// Deal with moving the last possibility to have value k for the first.
-				if actions.get_trailed_int(self.last[k]) == i as IntVal
-					&& !actions.check_int_in_domain(self.vars[i], self.values[k - 1])
-				{
-					(i, k) = self.repair_lower(actions, k)?;
-				}
-			}
-			return Ok(());
+		if !self.initialized {
+			return self.initial_propagation(actions);
 		}
 
-		self.initial_propagation(actions)
+		// Check upper bound updates, only necessary for all elements in first,
+		// not all variables.
+		for (k, &t) in self.first.iter().enumerate().skip(1) {
+			let i = actions.get_trailed_int(t);
+			if actions.get_trailed_int(self.first_val[i as usize]) == k as IntVal
+				&& !actions.check_int_in_domain(self.vars[i as usize], self.values[k - 1])
+			{
+				self.repair_upper(actions, k)?;
+			}
+		}
+		// Lower bound requires full pass to catch all potential propagations.
+		let mut i = self.vars.len();
+		let mut k = actions.get_trailed_int(self.max_last) as usize;
+		while i > 0 {
+			i -= 1;
+			if k > 0 && actions.get_trailed_int(self.last[k - 1]) == i as IntVal {
+				k -= 1;
+			}
+			if let Some(lb) = self.get_lowest_index(actions, i) {
+				// Deal with increase of lower bound.
+				if lb > k {
+					let _ = actions.set_trailed_int(self.last[lb], i as IntVal);
+					// Update highest lower bound if necessary.
+					if lb as IntVal > actions.get_trailed_int(self.max_last) {
+						let _ = actions.set_trailed_int(self.max_last, lb as IntVal);
+					}
+					// If a repair is necessary, continue check where the repair ended.
+					(i, k) = self.repair_lower(actions, lb)?;
+					continue;
+				}
+			}
+			// Deal with moving the last possibility to have value k for the first.
+			if actions.get_trailed_int(self.last[k]) == i as IntVal
+				&& !actions.check_int_in_domain(self.vars[i], self.values[k - 1])
+			{
+				(i, k) = self.repair_lower(actions, k)?;
+			}
+		}
+		Ok(())
 	}
 }
 
