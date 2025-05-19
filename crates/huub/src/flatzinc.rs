@@ -23,9 +23,10 @@ use tracing::warn;
 use crate::{
 	abs_int, actions::SimplificationActions, all_different_int, array_element, array_maximum_int,
 	array_minimum_int, constraints::int_table::IntTable, disjunctive_strict, div_int,
-	int_in_set_reif, pow_int, reformulate::ReformulationError, table_int, times_int, BoolDecision,
-	BoolDecisionInner, Branching, Decision, IntDecision, IntDecisionInner, IntLinExpr, IntSetVal,
-	IntVal, Model, NonZeroIntVal, ValueSelection, VariableSelection,
+	int_in_set_reif, pow_int, reformulate::ReformulationError, seq_precede_chain_int, table_int,
+	times_int, value_precede_chain_int, BoolDecision, BoolDecisionInner, Branching, Decision,
+	IntDecision, IntDecisionInner, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal,
+	ValueSelection, VariableSelection,
 };
 
 #[derive(Error, Debug)]
@@ -1286,6 +1287,41 @@ where
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_table_int",
+							found: c.args.len(),
+							expected: 2,
+						});
+					}
+				}
+				"huub_seq_precede_chain_int" => {
+					if let [args] = c.args.as_slice() {
+						let args = self.arg_array(args)?;
+						let args: Result<Vec<_>, _> =
+							args.iter().map(|l| self.lit_int(l)).collect();
+						self.prb += seq_precede_chain_int(args?);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "huub_seq_precede_chain",
+							found: c.args.len(),
+							expected: 1,
+						});
+					}
+				}
+				"huub_value_precede_chain_int" => {
+					if let [values, variables] = c.args.as_slice() {
+						let values: Vec<_> = self
+							.arg_array(values)?
+							.iter()
+							.map(|l| self.par_int(l))
+							.try_collect()?;
+						let variables: Vec<_> = self
+							.arg_array(variables)?
+							.iter()
+							.map(|l| self.lit_int(l))
+							.try_collect()?;
+						self.prb += value_precede_chain_int(variables, values);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "huub_value_precede_chain",
 							found: c.args.len(),
 							expected: 2,
 						});

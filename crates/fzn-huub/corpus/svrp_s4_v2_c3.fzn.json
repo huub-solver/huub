@@ -471,7 +471,7 @@
     { "id" : "bool_clause", "args" : [["X_INTRODUCED_370_", "X_INTRODUCED_360_"], []]},
     { "id" : "array_var_int_element", "args" : ["X_INTRODUCED_19_", "X_INTRODUCED_325_", "X_INTRODUCED_373_"], "defines" : "X_INTRODUCED_373_"},
     { "id" : "bool_clause", "args" : [["X_INTRODUCED_381_"], ["X_INTRODUCED_372_"]]},
-    { "id" : "bool_clause", "args" : [["X_INTRODUCED_382_", "X_INTRODUCED_372_"], []]},
+    { "id" : "bool_clause", "args" : [["X_INTRODUCED_372_", "X_INTRODUCED_382_"], []]},
     { "id" : "bool_clause", "args" : [["X_INTRODUCED_393_"], ["X_INTRODUCED_384_"]]},
     { "id" : "bool_clause", "args" : [["X_INTRODUCED_384_", "X_INTRODUCED_394_"], []]},
     { "id" : "bool_clause", "args" : [["X_INTRODUCED_405_"], ["X_INTRODUCED_396_"]]},

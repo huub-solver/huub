@@ -58,6 +58,7 @@ use crate::{
 		int_pow::IntPow,
 		int_table::IntTable,
 		int_times::IntTimes,
+		int_value_precede::{IntSeqPrecedeChain, IntValuePrecedeChain},
 		BoxedConstraint, Constraint, SimplificationStatus,
 	},
 	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
@@ -325,6 +326,18 @@ pub fn pow_int(base: IntDecision, exponent: IntDecision, result: IntDecision) ->
 	}
 }
 
+/// Create a sequential precede chain constraint that enforces that any integer
+/// value `i`, larger than one, will only occur in a position after the first
+/// occurrence of `i-1`.
+pub fn seq_precede_chain_int<It>(vars: impl IntoIterator<Item = It>) -> IntSeqPrecedeChain
+where
+	It: Into<IntDecision>,
+{
+	IntSeqPrecedeChain {
+		vars: vars.into_iter().map_into().collect(),
+	}
+}
+
 /// Create a `table_int` constraint that enforces that given list of integer
 /// views take their values according to one of the given lists of integer
 /// values.
@@ -343,20 +356,23 @@ pub fn times_int(factor1: IntDecision, factor2: IntDecision, product: IntDecisio
 	}
 }
 
-impl ElementConstraint for BoolDecision {
-	type Constraint = BoolDecisionArrayElement;
-	type Result = BoolDecision;
-
-	fn element_constraint(
-		array: Vec<Self>,
-		index: IntDecision,
-		result: Self::Result,
-	) -> Self::Constraint {
-		Self::Constraint {
-			index,
-			array,
-			result,
-		}
+/// Create a value precede chain constraint that enforces that the first
+/// occurence of each value in `values` among the decisions `vars` happens in
+/// the order of `values.
+///
+/// Note that `seq_precede_chain_int` is a special case of this constraint where
+/// the values are consecutive integers starting from 1.
+pub fn value_precede_chain_int<D, V>(
+	vars: impl IntoIterator<Item = D>,
+	values: impl IntoIterator<Item = V>,
+) -> IntValuePrecedeChain
+where
+	D: Into<IntDecision>,
+	V: Into<IntVal>,
+{
+	IntValuePrecedeChain {
+		values: values.into_iter().map_into().collect(),
+		vars: vars.into_iter().map_into().collect(),
 	}
 }
 
@@ -417,6 +433,23 @@ impl Add<IntVal> for BoolDecision {
 	fn add(self, rhs: IntVal) -> Self::Output {
 		let me: IntDecision = self.into();
 		me + rhs
+	}
+}
+
+impl ElementConstraint for BoolDecision {
+	type Constraint = BoolDecisionArrayElement;
+	type Result = BoolDecision;
+
+	fn element_constraint(
+		array: Vec<Self>,
+		index: IntDecision,
+		result: Self::Result,
+	) -> Self::Constraint {
+		Self::Constraint {
+			index,
+			array,
+			result,
+		}
 	}
 }
 
@@ -975,10 +1008,12 @@ impl Model {
 			ConstraintStore::IntEq(c) => c.simplify(self),
 			ConstraintStore::IntLinear(c) => c.simplify(self),
 			ConstraintStore::IntPow(c) => c.simplify(self),
+			ConstraintStore::IntSeqPrecedeChain(con) => con.simplify(self),
 			ConstraintStore::IntTimes(c) => c.simplify(self),
 			ConstraintStore::BoolFormula(exp) => exp.simplify(self),
 			ConstraintStore::IntInSetReif(c) => c.simplify(self),
 			ConstraintStore::IntTable(con) => con.simplify(self),
+			ConstraintStore::IntValuePrecedeChain(con) => con.simplify(self),
 			ConstraintStore::Other(con) => con.simplify(self),
 		}?;
 		match status {
@@ -1066,6 +1101,9 @@ impl Model {
 			ConstraintStore::IntPow(con) => {
 				<IntPow as Constraint<Model>>::initialize(con, &mut ctx);
 			}
+			ConstraintStore::IntSeqPrecedeChain(con) => {
+				<IntSeqPrecedeChain as Constraint<Model>>::initialize(con, &mut ctx);
+			}
 			ConstraintStore::IntTimes(con) => {
 				<IntTimes as Constraint<Model>>::initialize(con, &mut ctx);
 			}
@@ -1077,6 +1115,9 @@ impl Model {
 			}
 			ConstraintStore::IntTable(con) => {
 				<IntTable as Constraint<Model>>::initialize(con, &mut ctx);
+			}
+			ConstraintStore::IntValuePrecedeChain(con) => {
+				<IntValuePrecedeChain as Constraint<Model>>::initialize(con, &mut ctx);
 			}
 			ConstraintStore::Other(con) => con.initialize(&mut ctx),
 		}
@@ -1294,6 +1335,12 @@ impl AddAssign<IntPow> for Model {
 	}
 }
 
+impl AddAssign<IntSeqPrecedeChain> for Model {
+	fn add_assign(&mut self, constraint: IntSeqPrecedeChain) {
+		self.add_constraint(ConstraintStore::IntSeqPrecedeChain(constraint));
+	}
+}
+
 impl AddAssign<IntTable> for Model {
 	fn add_assign(&mut self, constraint: IntTable) {
 		self.add_constraint(ConstraintStore::IntTable(constraint));
@@ -1309,6 +1356,12 @@ impl AddAssign<IntTimes> for Model {
 impl AddAssign<IntValArrayElement> for Model {
 	fn add_assign(&mut self, constraint: IntValArrayElement) {
 		self.add_constraint(ConstraintStore::IntValArrayElement(constraint));
+	}
+}
+
+impl AddAssign<IntValuePrecedeChain> for Model {
+	fn add_assign(&mut self, constraint: IntValuePrecedeChain) {
+		self.add_constraint(ConstraintStore::IntValuePrecedeChain(constraint));
 	}
 }
 
