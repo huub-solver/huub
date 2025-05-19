@@ -299,7 +299,7 @@ where
 
 		// Set Solver Configuration
 		if self.free_search {
-			slv.set_toggle_vsids(true);
+			slv.set_vsids_after(Some(1000));
 		} else {
 			slv.set_vsids_only(self.vsids_only);
 			slv.set_toggle_vsids(self.toggle_vsids);
