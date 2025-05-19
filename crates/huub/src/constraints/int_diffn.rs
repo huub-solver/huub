@@ -542,7 +542,7 @@ impl IntDiffnSweep {
 			self.explain_fr_conflict(actions, fr_support, all_fr, curr_obj_idx);
 		for d in 0..self.dimensions {
 			if !self.fixed_sizes {
-				reason.push(actions.get_int_upper_bound_lit(self.box_size[curr_obj_idx][d]))
+				reason.push(actions.get_int_lower_bound_lit(self.box_size[curr_obj_idx][d]))
 			}
 			reason.push(actions.get_int_lit(
 				self.box_posn[curr_obj_idx][d],
@@ -584,7 +584,7 @@ impl IntDiffnSweep {
 			// for o_idx in 0..self.box_posn.len() {
 			for d in 0..self.dimensions {
                 if !self.fixed_sizes {
-                    reason.push(actions.get_int_upper_bound_lit(self.box_size[o_idx][d]))
+                    reason.push(actions.get_int_lower_bound_lit(self.box_size[o_idx][d]))
 				}
 
 				let mut possible_ub = self.ub_tracker[o_idx][d];
@@ -643,7 +643,7 @@ impl IntDiffnSweep {
 			// for o_idx in 0..self.box_posn.len() {
 			for d in 0..self.dimensions {
 				if !self.fixed_sizes {
-					reason.push(actions.get_int_upper_bound_lit(self.box_size[o_idx][d]))
+					reason.push(actions.get_int_lower_bound_lit(self.box_size[o_idx][d]))
 				}
 				let mut possible_ub = self.ub_tracker[o_idx][d];
 				let origin_ub = self.ub_tracker[curr_obj_idx][d];
@@ -746,7 +746,7 @@ impl IntDiffnSweep {
 		for d in 0..self.dimensions {
 			// If sizes are not fixed, add reason for them
 			if !self.fixed_sizes {
-				reason.push(actions.get_int_upper_bound_lit(self.box_size[curr_obj_idx][d]))
+				reason.push(actions.get_int_lower_bound_lit(self.box_size[curr_obj_idx][d]))
 			}
 
 			if d == curr_dimension {
@@ -916,11 +916,13 @@ where
 					)?;
 					if !fixed && !b1 {
 						// Conflict since there is no feasible origin in this dimension
-						let reason = self.explain_conflict(
+						let reason = self.explain_propagation(
 							actions,
                             &all_fr_explain,
 							&fr_support,
 							o_idx,
+                            d,
+                            false
 						);
 
 						// trace!("CONFLICT assigned min {}", reason.len());
@@ -939,11 +941,13 @@ where
 					)?;
 					if !fixed && !b2 {
 						// Conflict since there is no feasible origin in this dimension
-						let reason = self.explain_conflict(
+						let reason = self.explain_propagation(
 							actions,
                             &all_fr_explain,
 							&fr_support,
 							o_idx,
+                            d,
+                            true
 						);
 						// trace!("CONFLICT assigned max");
 						// trace!("CONFLICT prune_max");
