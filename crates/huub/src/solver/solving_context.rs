@@ -13,7 +13,7 @@ use crate::{
 	actions::{
 		DecisionActions, ExplanationActions, InspectionActions, PropagationActions, TrailingActions,
 	},
-	constraints::{Conflict, LazyReason, ReasonBuilder},
+	constraints::{Conflict, LazyReason, Reason, ReasonBuilder},
 	solver::{
 		engine::{trace_new_lit, PropRef, State},
 		int_var::{IntVarRef, LazyLitDef},
@@ -33,6 +33,10 @@ enum ChangeType {
 	Conflicting,
 }
 
+/// Helper struct that temporarily captures a built reason to print it for
+/// `tracing`.
+struct ReasonTracePrint<'a>(&'a Result<Reason, bool>);
+
 /// Structure to hold the internal [`State`] of the propagation engine and the
 /// [`SolvingActions`] exposed by the SAT oracle.
 ///
@@ -49,6 +53,18 @@ pub struct SolvingContext<'a> {
 	pub(crate) state: &'a mut State,
 	/// Current propagator being executed
 	pub(crate) current_prop: PropRef,
+}
+
+impl Debug for ReasonTracePrint<'_> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		match self.0 {
+			Err(false) => write!(f, "false"),
+			Err(true) => write!(f, "[]"),
+			Ok(Reason::Eager(conj)) => conj.iter().map(|&l| l.into()).collect::<Vec<i32>>().fmt(f),
+			Ok(Reason::Lazy(_)) => write!(f, "lazy"),
+			&Ok(Reason::Simple(l)) => vec![i32::from(l)].fmt(f),
+		}
+	}
 }
 
 impl<'a> SolvingContext<'a> {
@@ -238,7 +254,11 @@ impl PropagationActions for SolvingContext<'_> {
 				Some(false) => Err(Conflict::new(self, Some(lit), reason)),
 				None => {
 					let reason = reason.build_reason(self);
-					trace!(lit = i32::from(lit), reason = ?reason, "propagate bool");
+					trace!(
+						lit = i32::from(lit),
+						reason = ?ReasonTracePrint(&reason),
+						"propagate bool"
+					);
 					self.state.register_reason(lit, reason);
 					self.state.propagation_queue.push_back(lit);
 					Ok(())

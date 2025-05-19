@@ -205,7 +205,11 @@ impl<V: Visit> LitNames<'_, V> {
 	/// Check if the field should and can be formatted as a clause or a list of
 	/// literals.
 	fn check_clause(&mut self, field: &Field, value: &dyn fmt::Debug) -> bool {
-		if field.name().starts_with("clause") || field.name().starts_with("lits") {
+		if field.name().starts_with("clause")
+			|| field.name().starts_with("conj")
+			|| field.name().starts_with("lits")
+			|| field.name().starts_with("reason")
+		{
 			let res: Result<Vec<i32>, _> = serde_json::from_str(&format!("{:?}", value));
 			if let Ok(clause) = res {
 				let mut v: Vec<String> = Vec::with_capacity(clause.len());
@@ -216,11 +220,17 @@ impl<V: Visit> LitNames<'_, V> {
 						v.push(format!("Lit({})", i));
 					}
 				}
-				if field.name().starts_with("clause") {
-					self.inner.record_str(field, &v.join(" ∨ "));
-				} else {
-					self.inner.record_str(field, &v.join(", "));
-				}
+				self.inner.record_str(
+					field,
+					&v.join(if field.name().starts_with("clause") {
+						" ∨ "
+					} else if field.name().starts_with("conj") || field.name().starts_with("reason")
+					{
+						" ∧ "
+					} else {
+						", "
+					}),
+				);
 				return true;
 			}
 		}
