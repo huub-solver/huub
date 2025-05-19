@@ -189,8 +189,6 @@ pub struct Solver<Oracle = PropagatingCadical<Engine>> {
 /// Structure holding the options using to configure the solver during its
 /// initialization.
 pub(crate) struct SolverConfiguration {
-	/// The number of restarts after which the activity-based search heuristic is enabled.
-	vsids_after_restart: bool,
 	/// Switch between the activity-based search heuristic and the user-specific search heuristic after each restart.
 	///
 	/// This option is ignored if [`vsids_only`] is set to `true`.
@@ -198,7 +196,11 @@ pub(crate) struct SolverConfiguration {
 	/// Switch to the activity-based search heuristic after the given number of conflicts.
 	///
 	/// This option is ignored if [`toggle_vsids`] or [`vsids_only`] is set to `true`.
-	vsids_after: Option<u32>,
+	vsids_after_conflict: Option<u32>,
+	/// Switch to the activity-based search heuristic after restart.
+	///
+	/// This option is ignored if [`toggle_vsids`] or [`vsids_only`] is set to `true`.
+	vsids_after_restart: bool,
 	/// Only use the activity-based search heuristic provided by the SAT solver. Ignore the user-specific search heuristic.
 	vsids_only: bool,
 }
@@ -951,9 +953,6 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 
 	delegate! {
 		to self.engine_mut().state {
-			/// Set the number of restarts after which the solver should switch to using
-			/// VSIDS to make search decisions.
-			pub fn set_vsids_after_restart(&mut self, enable: bool);
 			/// Set whether the solver should toggle between VSIDS and a user defined
 			/// search strategy after every restart.
 			///
@@ -961,7 +960,10 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 			pub fn set_toggle_vsids(&mut self, enable: bool);
 			/// Set the number of conflicts after which the solver should switch to using
 			/// VSIDS to make search decisions.
-			pub fn set_vsids_after(&mut self, conflicts: Option<u32>);
+			pub fn set_vsids_after_conflict(&mut self, conflicts: Option<u32>);
+			/// Set the number of restarts after which the solver should switch to using
+			/// VSIDS to make search decisions.
+			pub fn set_vsids_after_restart(&mut self, enable: bool);
 			/// Set wether the solver should make all search decisions based on the VSIDS
 			/// only.
 			pub fn set_vsids_only(&mut self, enable: bool);

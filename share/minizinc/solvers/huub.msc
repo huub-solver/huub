@@ -17,9 +17,9 @@
     ["--subsumption","Whether to enable the global forward subsumption","bool:false:true","false"],
     ["--toggle-vsids", "Alternate between the activity-based search heuristic and the user-specific search heuristic after every restart.", "bool", "false"],
     ["--variable-elimination","Whether to enable the bounded variable elimination ","bool:false:true","false"],
-    ["--vsids-after-restart", "Switch to activity-based search heuristic provided by the SAT solver after the given number of restarts.", "bool", "false"],
     ["--vivify","Whether to enable vivification","bool:false:true","false"],
-    ["--vsids-after", "Switch to activity-based search heuristic provided by the SAT solver after the given number of conflicts.", "int", "None"],
+    ["--vsids-after-restart", "Switch to activity-based search heuristic provided by the SAT solver after restart.", "bool", "false"],
+    ["--vsids-after-conflict", "Switch to activity-based search heuristic provided by the SAT solver after the given number of conflicts.", "int", "None"],
     ["--vsids-only", "Only use the activity-based search provided by the SAT solver", "bool", "false"]
   ]
 }

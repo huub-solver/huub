@@ -512,7 +512,7 @@ impl State {
 		self.statistics.conflicts += 1;
 
 		// Switch to VSIDS if the number of conflicts exceeds the threshold
-		if let Some(conflicts) = self.config.vsids_after {
+		if let Some(conflicts) = self.config.vsids_after_conflict {
 			if !self.config.vsids_only
 				&& !self.config.toggle_vsids
 				&& self.statistics.conflicts > conflicts as u64
@@ -537,8 +537,7 @@ impl State {
 					restart = self.statistics.restarts,
 					"toggling vsids"
 				);
-			}
-			if self.config.vsids_after_restart {
+			} else if self.config.vsids_after_restart {
 				self.vsids = true;
 				debug!(
 					vsids = self.vsids,
@@ -579,10 +578,6 @@ impl State {
 		}
 	}
 
-	pub(crate) fn set_vsids_after_restart(&mut self, enable: bool) {
-		self.config.vsids_after_restart = enable;
-	}
-
 	/// Set whether the solver should toggle between VSIDS and a user defined
 	/// search strategy after every restart.
 	///
@@ -593,8 +588,13 @@ impl State {
 
 	/// Set the number of conflicts after which the solver should switch to using
 	/// VSIDS to make search decisions.
-	pub(crate) fn set_vsids_after(&mut self, conflicts: Option<u32>) {
-		self.config.vsids_after = conflicts;
+	pub(crate) fn set_vsids_after_conflict(&mut self, conflicts: Option<u32>) {
+		self.config.vsids_after_conflict = conflicts;
+	}
+
+	/// Set whether the solver should switch to using VSIDS after a restart.
+	pub(crate) fn set_vsids_after_restart(&mut self, enable: bool) {
+		self.config.vsids_after_restart = enable;
 	}
 
 	/// Set wether the solver should make all search decisions based on the VSIDS
