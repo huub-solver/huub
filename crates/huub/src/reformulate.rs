@@ -126,11 +126,23 @@ pub(crate) enum Domain<E, Alias> {
 /// Configuration object for the reformulation process of creating a [`Solver`]
 /// object from a [`crate::Model`].
 pub struct InitConfig {
+	/// Whether to enable the globally blocked clause elimination (conditioning)
+	conditioning: bool,
+	/// Whether to enable inprocessing in the oracle solver.
+	inprocessing: bool,
 	/// The maximum cardinality of the domain of an integer variable before its
 	/// order encoding is created lazily.
 	int_eager_limit: Option<usize>,
+	/// The number of preprocessing rounds in the oracle solver
+	preprocessing: Option<usize>,
+	/// Whether to enable the failed literal probing in the oracle solver.
+	probing: bool,
 	/// Whether to enable restarts in the oracle solver.
 	restart: bool,
+	/// Whether to enable the global forward subsumption in the oracle solver.
+	subsumption: bool,
+	/// Whether to enable the bounded variable elimination in the oracle solver.
+	variable_elimination: bool,
 	/// Whether to enable the vivification in the oracle solver.
 	vivification: bool,
 }
@@ -307,6 +319,19 @@ impl InitConfig {
 	/// before its order encoding is created lazily.
 	pub const DEFAULT_INT_EAGER_LIMIT: usize = 255;
 
+	/// Get the default number of preprocessing rounds in the oracle solver.
+	pub const DEFAULT_PREPROCESSING: usize = 0;
+
+	/// Get whether to enable the globally blocked clause elimination (conditioning) in the oracle solver.
+	pub fn conditioning(&self) -> bool {
+		self.conditioning
+	}
+
+	/// Get whether to enable inprocessing in the oracle solver.
+	pub fn inprocessing(&self) -> bool {
+		self.inprocessing
+	}
+
 	/// Get the maximum cardinality of the domain of an integer variable before
 	/// its order encoding is created lazily.
 	pub fn int_eager_limit(&self) -> usize {
@@ -314,14 +339,47 @@ impl InitConfig {
 			.unwrap_or(Self::DEFAULT_INT_EAGER_LIMIT)
 	}
 
+	/// Get whether to enable preprocessing in the oracle solver.
+	pub fn preprocessing(&self) -> usize {
+		self.preprocessing.unwrap_or(Self::DEFAULT_PREPROCESSING)
+	}
+
+	/// Get whether to enable the failed literal probing in the oracle solver.
+	pub fn probing(&self) -> bool {
+		self.probing
+	}
+
 	/// Get whether to enable restarts in the oracle solver.
 	pub fn restart(&self) -> bool {
 		self.restart
 	}
 
+	/// Get whether to enable the global forward subsumption in the oracle solver.
+	pub fn subsumption(&self) -> bool {
+		self.subsumption
+	}
+
+	/// Get whether to enable the bounded variable elimination in the oracle solver.
+	pub fn variable_elimination(&self) -> bool {
+		self.variable_elimination
+	}
+
 	/// Get whether to enable the vivification in the oracle solver.
 	pub fn vivification(&self) -> bool {
 		self.vivification
+	}
+
+	/// Change whether to enable the globally blocked clause elimination (conditioning)
+	/// in the oracle solver.
+	pub fn with_conditioning(mut self, conditioning: bool) -> Self {
+		self.conditioning = conditioning;
+		self
+	}
+
+	/// Change whether to enable inprocessing in the oracle solver.
+	pub fn with_inprocessing(mut self, inprocessing: bool) -> Self {
+		self.inprocessing = inprocessing;
+		self
 	}
 
 	/// Change the maximum cardinality of the domain of an integer variable before
@@ -331,9 +389,33 @@ impl InitConfig {
 		self
 	}
 
+	/// Change the number of preprocessing rounds in the oracle solver.
+	pub fn with_preprocessing(mut self, preprocessing: usize) -> Self {
+		self.preprocessing = Some(preprocessing);
+		self
+	}
+
+	/// Change whether to enable the failed literal probing in the oracle solver.
+	pub fn with_probing(mut self, probing: bool) -> Self {
+		self.probing = probing;
+		self
+	}
+
 	/// Change whether to enable restarts in the oracle solver.
 	pub fn with_restart(mut self, restart: bool) -> Self {
 		self.restart = restart;
+		self
+	}
+
+	/// Change whether to enable the global forward subsumption in the oracle solver.
+	pub fn with_subsumption(mut self, subsumption: bool) -> Self {
+		self.subsumption = subsumption;
+		self
+	}
+
+	/// Change whether to enable the bounded variable elimination in the oracle solver.
+	pub fn with_variable_elimination(mut self, variable_elimination: bool) -> Self {
+		self.variable_elimination = variable_elimination;
 		self
 	}
 

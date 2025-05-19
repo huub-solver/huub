@@ -39,10 +39,25 @@ FLAGS
                                   represent an integer variable are created eagerly.
                                   (default: 255)
 
-                      === SOLVING OPTIONS ===
-  --restart <on|off>              Whether to enable restarts of the search.
+                      === PREPROCESSING/INPROCESSING OPTIONS ===
+  --conditioning <on|off>         Whether to enable the globally blocked clause elimination of
+                                  the SAT solver.
+                                  (default: off)
+  --inprocessing <on|off>         Whether to enable inprocessing of the SAT solver.
+                                  (default: off)
+  --preprocessing <value>         Set the number of preprocessing rounds of the SAT solver.
+                                  (default: 0)
+  --probing <on|off>              Whether to enable failed literal probing of the SAT solver.
+                                  (default: off)
+  --subsumption <on|off>          Whether to enable global forward subsumption of the SAT solver.
+                                  (default: off)
+  --variable-elimination <on|off> Whether to enable bounded variable elimination of the SAT solver.
                                   (default: off)
   --vivify <on|off>               Whether to enable vivification of the SAT solver.
+                                  (default: off)
+
+                      === SEARCH OPTIONS ===
+  --restart <on|off>              Whether to enable restarts of the search.
                                   (default: off)
   --vsids-after <value>           Switch to the VSIDS search heuristic after a certain number of
                                   conflicts. (overwritten by --toggle-vsids and --vsids-only)
@@ -53,7 +68,7 @@ FLAGS
                                   solver. Ignore the user-specific search heuristic.
 
                       === BEHAVIOUR OPTIONS ===
-  --log-file <FILE>	              Output log messages from the solver to a file, instead of stderr.
+  --log-file <FILE>               Output log messages from the solver to a file, instead of stderr.
 
 DESCRIPTION
   Create a Huub Solver instance tailored to a given FlatZinc JSON input file and solve the problem.
