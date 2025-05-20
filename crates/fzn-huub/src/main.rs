@@ -59,10 +59,10 @@ FLAGS
                       === SEARCH OPTIONS ===
   --restart <on|off>              Whether to enable restarts of the search.
                                   (default: off)
-  --vsids-after-restart           Switch to the VSIDS search heuristic after restart 
-                                  (overwritten by --toggle-vsids and --vsids-only)
   --vsids-after-conflict <value>  Switch to the VSIDS search heuristic after a certain number of
                                   conflicts. (overwritten by --toggle-vsids and --vsids-only)
+  --vsids-after-restart           Switch to the VSIDS search heuristic after restart 
+                                  (overwritten by --toggle-vsids and --vsids-only)
   --toggle-vsids                  Switch between the activity-based search heuristic and the user-
                                   specific search heuristic after every restart.
                                   (overwritten by --vsids-only)

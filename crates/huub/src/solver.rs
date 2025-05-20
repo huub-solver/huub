@@ -961,10 +961,9 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 			/// Set the number of conflicts after which the solver should switch to using
 			/// VSIDS to make search decisions.
 			pub fn set_vsids_after_conflict(&mut self, conflicts: Option<u32>);
-			/// Set the number of restarts after which the solver should switch to using
-			/// VSIDS to make search decisions.
+			/// Set whether the solver should switch to VSIDS after restart to make search.
 			pub fn set_vsids_after_restart(&mut self, enable: bool);
-			/// Set wether the solver should make all search decisions based on the VSIDS
+			/// Set whether the solver should make all search decisions based on the VSIDS
 			/// only.
 			pub fn set_vsids_only(&mut self, enable: bool);
 		}
