@@ -4,7 +4,7 @@
 include "diffn.mzn";
 
 %% Parameters:
-int: n = 15; % The amount of squares
+int: n = 16; % The amount of squares
 int: maxLen = 100; % The maximum length of the rectangle
 array[1..n] of 1..n: Squares = [i | i in 1..n]; % Square[s] = dimension of square s (1x1, ..., nxn)
 %% Derived parameters:

@@ -153,7 +153,7 @@ impl IntDiffnSweep {
 				lb_sizes: lb_sizes_prop,
                 non_strict
 			}),
-			PriorityLevel::Low,
+			PriorityLevel::Lowest,
 		);
 
 		for v in box_posn.into_iter().flatten() {
@@ -916,13 +916,11 @@ where
 					)?;
 					if !fixed && !b1 {
 						// Conflict since there is no feasible origin in this dimension
-						let reason = self.explain_propagation(
+						let reason = self.explain_conflict(
 							actions,
                             &all_fr_explain,
 							&fr_support,
 							o_idx,
-                            d,
-                            false
 						);
 
 						// trace!("CONFLICT assigned min {}", reason.len());
@@ -941,13 +939,11 @@ where
 					)?;
 					if !fixed && !b2 {
 						// Conflict since there is no feasible origin in this dimension
-						let reason = self.explain_propagation(
+						let reason = self.explain_conflict(
 							actions,
                             &all_fr_explain,
 							&fr_support,
 							o_idx,
-                            d,
-                            true
 						);
 						// trace!("CONFLICT assigned max");
 						// trace!("CONFLICT prune_max");
