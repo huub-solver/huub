@@ -95,7 +95,9 @@ pub struct Cli<Stdout, Stderr> {
 	/// Alternate between the SAT and VSIDS heuristic after every restart
 	toggle_vsids: bool,
 	/// Switch to the VSIDS heuristic after a certain number of conflicts
-	vsids_after: Option<u32>,
+	vsids_after_conflict: Option<u32>,
+	/// Whether to switch to the VSIDS heuristic after a restart
+	vsids_after_restart: bool,
 	/// Only use the SAT VSIDS heuristic for search
 	vsids_only: bool,
 
@@ -297,11 +299,12 @@ where
 
 		// Set Solver Configuration
 		if self.free_search {
-			slv.set_toggle_vsids(true);
+			slv.set_vsids_after_conflict(Some(1000));
 		} else {
 			slv.set_vsids_only(self.vsids_only);
 			slv.set_toggle_vsids(self.toggle_vsids);
-			slv.set_vsids_after(self.vsids_after);
+			slv.set_vsids_after_conflict(self.vsids_after_conflict);
+			slv.set_vsids_after_restart(self.vsids_after_restart);
 		}
 
 		// Determine Goal and Objective
@@ -564,7 +567,8 @@ where
 			variable_elimination: self.variable_elimination,
 			probing: self.probing,
 			conditioning: self.conditioning,
-			vsids_after: self.vsids_after,
+			vsids_after_conflict: self.vsids_after_conflict,
+			vsids_after_restart: self.vsids_after_restart,
 			vsids_only: self.vsids_only,
 			stdout: self.stdout,
 		}
@@ -593,7 +597,8 @@ where
 			variable_elimination: self.variable_elimination,
 			probing: self.probing,
 			conditioning: self.conditioning,
-			vsids_after: self.vsids_after,
+			vsids_after_conflict: self.vsids_after_conflict,
+			vsids_after_restart: self.vsids_after_restart,
 			vsids_only: self.vsids_only,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
@@ -638,10 +643,11 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 				.map(|x| x.unwrap_or(false))
 				.map_err(|e| e.to_string())?,
 			toggle_vsids: args.contains("--toggle-vsids"),
-			vsids_only: args.contains("--vsids-only"),
-			vsids_after: args
-				.opt_value_from_str("--vsids-after")
+			vsids_after_conflict: args
+				.opt_value_from_str("--vsids-after-conflict")
 				.map_err(|e| e.to_string())?,
+			vsids_after_restart: args.contains("--vsids-after-restart"),
+			vsids_only: args.contains("--vsids-only"),
 
 			conditioning: args
 				.opt_value_from_fn("--conditioning", parse_bool_arg)

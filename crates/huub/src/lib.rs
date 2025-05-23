@@ -1154,7 +1154,12 @@ impl Model {
 			r.set_option("vivify", config.vivification() as i32);
 
 			// Set the solver options for search configurations
-			r.set_option("restart", config.restart() as i32);
+			// Enable restart if the config is set to true or if there are no
+			// user search heuristics are provided
+			r.set_option(
+				"restart",
+				(config.restart() || self.branchings.is_empty()) as i32,
+			);
 		} else {
 			warn!("unknown solver: vivification and restart options are ignored");
 		}
