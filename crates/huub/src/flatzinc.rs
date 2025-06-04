@@ -1208,7 +1208,22 @@ where
 							.iter()
 							.map(|l| self.par_int(l))
 							.try_collect()?;
-						self.prb += disjunctive_strict(start_times, durations);
+
+						let force_ef_prop =
+							self.anns_contains(&c.ann, &mut ann_used, "edge_finding");
+						let force_nl_prop = self.anns_contains(&c.ann, &mut ann_used, "not_last");
+						let force_dp_prop =
+							self.anns_contains(&c.ann, &mut ann_used, "detectable_precedence");
+						let mut disj_strict = disjunctive_strict(start_times, durations);
+						match (force_ef_prop, force_nl_prop, force_dp_prop) {
+							(false, false, false) => {} // Use default configuration
+							(ef_prop, nl_prop, dp_prop) => {
+								disj_strict.use_edge_finding_propagation(ef_prop);
+								disj_strict.use_not_last_propagation(nl_prop);
+								disj_strict.use_detectable_precedence_propagation(dp_prop);
+							}
+						}
+						self.prb += disj_strict;
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_disjunctive_strict",
