@@ -361,12 +361,13 @@ impl DisjunctiveStrictPropagator {
 				"Explain Resource Overload"
 			);
 			// collect sufficient energy within the window [lb, time_bound)
-			for i in 0..self.start_times.len() {
-				if self.earliest_start_time(i, actions) >= earliest_start
-					&& self.latest_completion_time(i, actions) < time_bound
+			for i in 0..self.tasks_sorted_by_earliest_start.len() {
+				let task_no = self.tasks_sorted_by_earliest_start[i];
+				if self.earliest_start_time(task_no, actions) >= earliest_start
+					&& self.latest_completion_time(task_no, actions) < time_bound
 				{
-					e_tasks.push(i);
-					slack -= self.durations[i];
+					e_tasks.push(task_no);
+					slack -= self.durations[task_no];
 					if slack <= 0 {
 						break;
 					}
@@ -954,7 +955,10 @@ where
 			.iter()
 			.map(|v| actions.get_int_lower_bound(*v))
 			.collect();
-		self.ot_tree.initialize(earliest_start.as_slice());
+		self.tasks_sorted_by_earliest_start
+			.sort_by_key(|&i| earliest_start[i]);
+		self.ot_tree
+			.initialize(self.tasks_sorted_by_earliest_start.as_slice());
 
 		// Propagate edge finding propagation rule with overload checking
 		// or perform overload checking only
@@ -1126,8 +1130,8 @@ impl OmegaThetaTree {
 
 	/// Initialize the tree to update the node index mapping by sorting the tasks
 	/// with their earliest start time
-	fn initialize(&mut self, earliest_start_time: &[i64]) {
-		self.task_no.sort_by_key(|&i| earliest_start_time[i]);
+	fn initialize(&mut self, task_sorted_by_earliest_start: &[usize]) {
+		self.task_no.copy_from_slice(task_sorted_by_earliest_start);
 		for i in 0..self.task_no.len() {
 			self.node_index_offset[self.task_no[i]] = i;
 		}
