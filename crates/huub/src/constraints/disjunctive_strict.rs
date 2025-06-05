@@ -717,10 +717,13 @@ impl DisjunctiveStrictPropagator {
 	) -> Result<bool, Conflict> {
 		let mut propagated = false;
 		// Add all tasks to the Omega-Theta tree
-		for i in 0..self.start_times.len() {
-			self.ot_tree
-				.add_task(i, self.earliest_start_time(i, actions), self.durations[i]);
-		}
+		let earliest_start: Vec<_> = self
+			.start_times
+			.iter()
+			.map(|v| actions.get_int_lower_bound(*v))
+			.collect();
+		self.ot_tree
+			.fill(earliest_start.as_slice(), self.durations.as_slice());
 
 		// Sort the tasks by non-increasing latest completion time
 		let latest_completion_times: Vec<_> = (0..self.start_times.len())
@@ -1100,6 +1103,24 @@ impl OmegaThetaTree {
 			self.nodes[i].earliest_completion = i64::MIN;
 			self.nodes[i].total_durations_gray = 0;
 			self.nodes[i].earliest_completion_gray = i64::MIN;
+		}
+	}
+
+	/// Fill the tree with task are sorted by earliest start time.
+	fn fill(&mut self, earliest_start: &[i64], durations: &[i64]) {
+		assert_eq!(earliest_start.len(), self.task_no.len());
+		for i in 0..self.task_no.len() {
+			let idx = self.node_index(i);
+			let ect = earliest_start[i] + durations[i];
+			self.nodes[idx].total_durations = durations[i];
+			self.nodes[idx].earliest_completion = ect;
+			self.nodes[idx].total_durations_gray = durations[i];
+			self.nodes[idx].earliest_completion_gray = ect;
+		}
+
+		// update internal nodes in a bottom-up manner
+		for i in (0..self.leaves_start_idx).rev() {
+			self.update_internal_node(i);
 		}
 	}
 
