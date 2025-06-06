@@ -47,6 +47,7 @@ use crate::{
 	branchers::{BoolBrancher, IntBrancher, WarmStartBrancher},
 	constraints::{
 		bool_array_element::BoolDecisionArrayElement,
+		cumulative::Cumulative,
 		disjunctive_strict::DisjunctiveStrict,
 		int_abs::IntAbs,
 		int_all_different::IntAllDifferent,
@@ -273,6 +274,44 @@ where
 	IntArrayMinimum {
 		vars: vars.into_iter().map_into().collect(),
 		min,
+	}
+}
+
+/// Create a constraint that enforces that the given a list of integer decision
+/// variables representing the start times of tasks, a list of integer values
+/// representing the durations of tasks, a list of integer values representing
+/// the resource usages of tasks, and a resource capacity, the sum of the
+/// resource usages of all tasks running at any time does not exceed the
+/// resource capacity.
+pub fn cumulative(
+	start_times: Vec<IntDecision>,
+	durations: Vec<IntVal>,
+	usages: Vec<IntVal>,
+	capacity: IntVal,
+) -> Cumulative {
+	assert_eq!(
+		start_times.len(),
+		durations.len(),
+		"cumulative must be given the same number of start times and durations."
+	);
+	assert_eq!(
+		start_times.len(),
+		usages.len(),
+		"cumulative must be given the same number of start times and usages."
+	);
+	assert!(
+		durations.iter().all(|&dur| dur >= 0),
+		"cumulative cannot be given any negative durations."
+	);
+	assert!(
+		usages.iter().all(|&usage| usage >= 0),
+		"cumulative cannot be given any negative usages."
+	);
+	Cumulative {
+		start_times,
+		durations,
+		usages,
+		capacity,
 	}
 }
 
@@ -1008,6 +1047,7 @@ impl Model {
 			ConstraintStore::IntArrayMinimum(c) => c.simplify(self),
 			ConstraintStore::BoolDecisionArrayElement(c) => c.simplify(self),
 			ConstraintStore::IntDecisionArrayElement(c) => c.simplify(self),
+			ConstraintStore::Cumulative(c) => c.simplify(self),
 			ConstraintStore::DisjunctiveStrict(c) => c.simplify(self),
 			ConstraintStore::IntAbs(c) => c.simplify(self),
 			ConstraintStore::IntDiv(c) => c.simplify(self),
@@ -1089,6 +1129,9 @@ impl Model {
 			}
 			ConstraintStore::IntDecisionArrayElement(con) => {
 				<IntDecisionArrayElement as Constraint<Model>>::initialize(con, &mut ctx);
+			}
+			ConstraintStore::Cumulative(con) => {
+				<Cumulative as Constraint<Model>>::initialize(con, &mut ctx);
 			}
 			ConstraintStore::DisjunctiveStrict(con) => {
 				<DisjunctiveStrict as Constraint<Model>>::initialize(con, &mut ctx);
@@ -1277,6 +1320,12 @@ impl AddAssign<BoxedConstraint> for Model {
 impl AddAssign<Branching> for Model {
 	fn add_assign(&mut self, rhs: Branching) {
 		self.branchings.push(rhs);
+	}
+}
+
+impl AddAssign<Cumulative> for Model {
+	fn add_assign(&mut self, constraint: Cumulative) {
+		self.add_constraint(ConstraintStore::Cumulative(constraint));
 	}
 }
 
