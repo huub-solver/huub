@@ -1529,6 +1529,7 @@ where
 									"int_lin_ne_reif" => diff_logic.add(DifferenceLogicConstraint::ReifiedEquals(!reified, x, y, rhs)),
 									_ => unreachable!(),
 								}
+								continue;
 							}
 						}
 						
