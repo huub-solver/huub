@@ -134,6 +134,8 @@ pub struct InitConfig {
 	vivification: bool,
 	/// Difference logic mode
 	pub(crate) diff_logic: u32,
+	/// Difference logic priority
+	pub(crate) diff_logic_prio: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -344,6 +346,12 @@ impl InitConfig {
 	/// Change the difference logic mode in the oracle solver.
 	pub fn with_diff_logic(mut self, diff_logic: u32) -> Self {
 		self.diff_logic = diff_logic;
+		self
+	}
+
+	/// Change the difference logic priority in the oracle solver.
+	pub fn with_diff_logic_prio(mut self, diff_logic_prio: Option<u8>) -> Self {
+		self.diff_logic_prio = diff_logic_prio.unwrap_or(1);
 		self
 	}
 }

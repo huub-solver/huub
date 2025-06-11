@@ -103,6 +103,8 @@ pub struct Cli<Stdout, Stderr> {
 	
 	/// Difference logic mode
 	diff_logic: Option<u32>,
+	/// Difference logic priority
+	diff_logic_prio: Option<u8>,
 
 	// --- Output configuration ---
 	/// Output stream for (intermediate) solutions and statistics
@@ -164,6 +166,7 @@ where
 		if let Some(diff_logic) = self.diff_logic {
 			config = config.with_diff_logic(diff_logic);
 		}
+		config = config.with_diff_logic_prio(self.diff_logic_prio);
 		config
 	}
 
@@ -548,6 +551,7 @@ where
 			vsids_after: self.vsids_after,
 			vsids_only: self.vsids_only,
 			diff_logic: self.diff_logic,
+			diff_logic_prio: self.diff_logic_prio,
 			stdout: self.stdout,
 		}
 	}
@@ -572,6 +576,7 @@ where
 			vsids_after: self.vsids_after,
 			vsids_only: self.vsids_only,
 			diff_logic: self.diff_logic,
+			diff_logic_prio: self.diff_logic_prio,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
 		}
@@ -625,6 +630,9 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 				.map_err(|e| e.to_string())?,
 			diff_logic: args
 				.opt_value_from_str("--diff-logic")
+				.map_err(|e| e.to_string())?,
+			diff_logic_prio: args
+				.opt_value_from_str("--diff-logic-prio")
 				.map_err(|e| e.to_string())?,
 
 			verbose,

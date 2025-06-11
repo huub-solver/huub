@@ -28,74 +28,120 @@ type IndexMap<K, V> = indexmap::IndexMap<K, V, FxBuildHasher>;
 type PriorityQueue<I, P> = priority_queue::PriorityQueue<I, P, FxBuildHasher>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Representation of set of difference constraints within a model.
+/// Different types of (potential) difference logic constraints.
+pub enum DifferenceLogicConstraint {
+	/// A globally active difference constraint:x - y <= d
+	Global(IntDecision, IntDecision, IntVal),
+	/// An implied difference constraint: b -> x - y <= d
+	Implied(BoolDecision, IntDecision, IntDecision, IntVal),
+	/// A reified difference constraint: b <-> x - y <= d
+	Reified(BoolDecision, IntDecision, IntDecision, IntVal),
+	/// An implied equality constraint: b -> x - y == d (without implication is covered by views)
+	ImpliedEquals(BoolDecision, IntDecision, IntDecision, IntVal),
+	/// A not equals constraint: x - y != d
+	NotEquals(IntDecision, IntDecision, IntVal),
+	/// An implied not equals constraint: b -> x - y != d
+	ImpliedNotEquals(BoolDecision, IntDecision, IntDecision, IntVal),
+	/// A reified equality constraint: b <-> x - y == d
+	ReifiedEquals(BoolDecision, IntDecision, IntDecision, IntVal),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Representation of set of potential difference constraints within a model.
 pub struct DifferenceLogic {
-	/// List of difference constraints.
-	constraints: Vec<(IntDecision, IntDecision, IntVal)>,
-	/// List of implied difference constraints.
+	/// Priority of the difference logic propagator
+	priority_level: PriorityLevel,
+	/// List of raw potential difference constraints.
+	raw_constraints: Vec<DifferenceLogicConstraint>,
+	/// List of global difference constraints to post to the solver.
+	global_constraints: Vec<(IntDecision, IntDecision, IntVal)>,
+	/// List of implied difference constraints to post to the solver.
 	imp_constraints: Vec<(BoolDecision, IntDecision, IntDecision, IntVal)>,
+}
+
+/// Transform an implied not equals constraint to implied difference constraints by introducing 3 new boolean decision variables.
+fn add_implied_not_equals(imp_constraints: &mut Vec<(BoolDecision, IntDecision, IntDecision, IntVal)>, model: &mut Model, b: BoolDecision, x: IntDecision, y: IntDecision, d: IntVal) {
+	let decision1 = model.new_bool_var();
+	let decision2 = model.new_bool_var();
+	*model += Formula::Or(vec![Formula::from(!b), Formula::from(decision1), Formula::from(decision2)]);
+	*model += Formula::Or(vec![Formula::from(!decision1), Formula::from(!decision2)]);
+	imp_constraints.push((decision1, x, y, d - 1));
+	imp_constraints.push((decision2, y, x, -d - 1));
 }
 
 impl DifferenceLogic {
 	
-	pub(crate) fn new() -> Self {
+	pub(crate) fn new(priority_level: PriorityLevel) -> Self {
 		Self {
-			constraints: Vec::new(),
+			priority_level,
+			raw_constraints: Vec::new(),
+			global_constraints: Vec::new(),
 			imp_constraints: Vec::new(),
 		}
 	}
 
-	/// Add a globally active difference constraint.
-	pub(crate) fn add_global(&mut self, x: IntDecision, y: IntDecision, d: IntVal) {
-		self.constraints.push((x, y, d));
-	}
-
-	/// Add an implied difference constraint.
-	pub(crate) fn add_imp(&mut self, b: BoolDecision, x: IntDecision, y: IntDecision, d: IntVal) {
-		self.imp_constraints.push((b, x, y, d));
-	}
-
-	/// Add a reified difference constraint (generates 2 implied difference constraints).
-	pub(crate) fn add_reif(&mut self, b: BoolDecision, x: IntDecision, y: IntDecision, d: IntVal) {
-		self.imp_constraints.push((b, x, y, d));
-		self.imp_constraints.push((!b, y, x, -d - 1));
-	}
-
-
-	/// Add an implied equality constraint (generates 2 implied difference constraints).
-	pub(crate) fn add_imp_eq(&mut self, b: BoolDecision, x: IntDecision, y: IntDecision, d: IntVal) {
-		self.imp_constraints.push((b, x, y, d));
-		self.imp_constraints.push((b, y, x, -d));
+	/// Add a raw difference constraint.
+	pub(crate) fn add(&mut self, constraint: DifferenceLogicConstraint) {
+		self.raw_constraints.push(constraint);
 	}
 	
-	/// Add a not equals constraint (generates a new boolean decision variable and 2 implied difference constraints).
-	pub(crate) fn add_ne(&mut self, model: &mut Model, x: IntDecision, y: IntDecision, d: IntVal) {
-		let decision = model.new_bool_var();
-		self.imp_constraints.push((decision, x, y, d - 1));
-		self.imp_constraints.push((!decision, y, x, -d - 1));
-	}
-
-	/// Add an implied not equals constraint (generates 3 new boolean decision variables and 2 implied difference constraints).
-	pub(crate) fn add_imp_ne(&mut self, model: &mut Model, b: BoolDecision, x: IntDecision, y: IntDecision, d: IntVal) {
-		let decision = model.new_bool_var();
-		let implied1 = model.new_bool_var();
-		let implied2 = model.new_bool_var();
-		*model += Formula::Or(vec![Formula::from(!b), Formula::from(!decision), Formula::from(implied1)]);
-		*model += Formula::Or(vec![Formula::from(!b), Formula::from(decision), Formula::from(implied2)]);
-		self.imp_constraints.push((implied1, x, y, d - 1));
-		self.imp_constraints.push((implied2, y, x, -d - 1));
-	}
-
-	/// Add a reified equality constraint (adds an implied equality constraint and an implied not equals constraint, 
-	/// in total 3 new boolean decision variables and 4 implied difference constraints).
-	pub(crate) fn add_reif_eq(&mut self, model: &mut Model, b: BoolDecision, x: IntDecision, y: IntDecision, d: IntVal) {
-		self.add_imp_eq(b, x, y, d);
-		self.add_imp_ne(model, !b, x, y, d);
-	}
-	
-	/// Return true if any constraints have been added to the difference logic.
-	pub(crate) fn is_active(&self) -> bool {
-		!self.constraints.is_empty() || !self.imp_constraints.is_empty()
+	/// Process the raw difference constraints, transform them to global and implied difference 
+	/// constraints and / or reemit them as standalone constraints depending on the given level 
+	/// parameter (binary encoding).
+	pub(crate) fn process(&mut self, model: &mut Model, level: u32) -> (usize, usize, usize, usize) {
+		for raw in self.raw_constraints.iter() {
+			match raw { 
+				// Always post global, implied, and reified constraints TODO could check if they are isolated etc?
+				DifferenceLogicConstraint::Global(x, y, d) => self.global_constraints.push((*x, *y, *d)),
+				DifferenceLogicConstraint::Implied(b, x, y, d) => self.imp_constraints.push((*b, *x, *y, *d)),
+				DifferenceLogicConstraint::Reified(b, x, y, d) => {
+					self.imp_constraints.push((*b, *x, *y, *d));
+					self.imp_constraints.push((!*b, *y, *x, -*d - 1));
+				},
+				// b -> x - y == d is transformed to b -> x - y <= d and b -> x - y >= d.
+				DifferenceLogicConstraint::ImpliedEquals(b, x, y, d) => {
+					if level & 0b1 > 0 {
+						self.imp_constraints.push((*b, *x, *y, *d));
+						self.imp_constraints.push((*b, *y, *x, -*d));
+					}
+					if level & 0b1 == 0 || level & 0b10 > 0 {
+						*model += (*x - *y).eq(*d).implied_by(*b);
+					}
+				},
+				// x - y != d is transformed to b -> x - y < d and !b -> x - y > d for a new boolean variable b.
+				DifferenceLogicConstraint::NotEquals(x, y, d) => {
+					if level & 0b100 > 0 {
+						let decision = model.new_bool_var();
+						self.imp_constraints.push((decision, *x, *y, *d - 1));
+						self.imp_constraints.push((!decision, *y, *x, -*d - 1));
+					}
+					if level & 0b100 == 0 || level & 0b1000 > 0 {
+						*model += (*x - *y).ne(*d);
+					}
+				},
+				// b -> x - y != d is transformed to b -> c \/ e; !c \/ !e; c -> x - y < d; e -> x - y > d for new boolean variables c and e. 
+				DifferenceLogicConstraint::ImpliedNotEquals(b, x, y, d) => {
+					if level & 0b10_000 > 0 {
+						add_implied_not_equals(&mut self.imp_constraints, model, *b, *x, *y, *d);
+					}
+					if level & 0b10_000 == 0 || level & 0b100_000 > 0 {
+						*model += (*x - *y).ne(*d).implied_by(*b);
+					}
+				},
+				// b <-> x - y == d is transformed to b -> x - y == d and !b -> x - y != d
+				DifferenceLogicConstraint::ReifiedEquals(b, x, y, d) => {
+					if level & 0b1000_000 > 0 {
+						self.imp_constraints.push((*b, *x, *y, *d));
+						self.imp_constraints.push((*b, *y, *x, -*d));
+						add_implied_not_equals(&mut self.imp_constraints, model, !*b, *x, *y, *d);
+					}
+					if level & 0b1000_000 == 0 || level & 0b10_000_000 > 0 {
+						*model += (*x - *y).eq(*d).reified_by(*b);
+					}
+				},
+			}
+		}
+		self.output_statistics()
 	}
 	
 	/// Return statistics of the captured difference logic constraints:
@@ -103,7 +149,7 @@ impl DifferenceLogic {
 	pub(crate) fn output_statistics(&self) -> (usize, usize, usize, usize) {
 		let mut int_vars = IndexSet::default();
 		let mut bool_vars = IndexSet::default();
-		for &(x, y, _) in self.constraints.iter() {
+		for &(x, y, _) in self.global_constraints.iter() {
 			let _ = int_vars.insert(x);
 			let _ = int_vars.insert(y);
 		}
@@ -112,7 +158,7 @@ impl DifferenceLogic {
 			let _ = int_vars.insert(x);
 			let _ = int_vars.insert(y);
 		}
-		(int_vars.len(), bool_vars.len(), self.constraints.len(), self.imp_constraints.len())
+		(int_vars.len(), bool_vars.len(), self.global_constraints.len(), self.imp_constraints.len())
 	}
 	
 }
@@ -125,14 +171,14 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		// todo do simplification first, then transform graph here
-		trace!("DifferenceLogic to_solver with {} constraints and {} imp_constraints", self.constraints.len(), self.imp_constraints.len());
-		let constraints: Vec<_> = self.constraints.iter()
+		trace!("DifferenceLogic to_solver with {} constraints and {} imp_constraints", self.global_constraints.len(), self.imp_constraints.len());
+		let constraints: Vec<_> = self.global_constraints.iter()
 			.map(|&(x, y, d)| (slv.get_solver_int(x), slv.get_solver_int(y), d))
 			.collect();
 		let imp_constraints: Vec<_> = self.imp_constraints.iter()
 			.map(|&(b, x, y, d)| (slv.get_solver_bool(b), slv.get_solver_int(x), slv.get_solver_int(y), d))
 			.collect();
-		DifferenceLogicBounds::new_in(slv, constraints, imp_constraints);
+		DifferenceLogicBounds::new_in(slv, self.priority_level, constraints, imp_constraints);
 		Ok(())
 	}
 }
@@ -861,6 +907,7 @@ impl DifferenceLogicBounds {
 
 	/// Create a new [`DifferenceLogicBounds`] propagator and post it in the solver.
 	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P,
+													 priority_level: PriorityLevel,
 													 constraints: Vec<(IntView, IntView, IntVal)>,  // todo capture all options: int_lin_le(_imp,_reif), int_le(_imp,_reif), also equality and non-equality?
 													 imp_constraints: Vec<(BoolView, IntView, IntView, IntVal)>) {
 
@@ -907,7 +954,7 @@ impl DifferenceLogicBounds {
 				imp_constraints: trimmed_imp_constraints.iter().map(|&(b, x, y, d)| (bool_var_map[&b], int_var_map[&x], int_var_map[&y], d)).collect(),
 				state,
 			}),
-			PriorityLevel::Low, // todo priority
+			priority_level,
 		);
 		for (&v, &i) in int_var_map.iter() {
 			solver.advise_on_int_change(prop, v, IntPropCond::LowerBound, i as u64);
@@ -1009,6 +1056,7 @@ mod tests {
 	}, Model};
 	use crate::reformulate::InitConfig;
 	use crate::solver::IntView;
+	use crate::solver::queue::PriorityLevel;
 	use crate::solver::Value::Int;
 
 	#[test]
@@ -1038,7 +1086,7 @@ mod tests {
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		DifferenceLogicBounds::new_in(&mut slv, vec![(x, y, -2), (y, z, 3)], 
+		DifferenceLogicBounds::new_in(&mut slv, PriorityLevel::Low, vec![(x, y, -2), (y, z, 3)], 
 									  vec![(b, y, z, 4), (b, x, z, -2)]);
 		slv.assert_all_solutions(&[x, y, z, IntView::from(b)], move |sol| {
 			let Int(x) = sol[0] else { return false };
@@ -1097,7 +1145,7 @@ mod tests {
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		DifferenceLogicBounds::new_in(&mut slv, vec![(x, y, -2), (y, z, 3), (z, u, -1), (u, v, 2), (x, t, 1), (t, z, -1)], 
+		DifferenceLogicBounds::new_in(&mut slv, PriorityLevel::Low, vec![(x, y, -2), (y, z, 3), (z, u, -1), (u, v, 2), (x, t, 1), (t, z, -1)], 
 									  vec![(b, x, z, -2), (b, y, z, 4), (c, y, v, 1), (!c, v, y, -2)]);
 		slv.assert_all_solutions(&[x, y, z, u, v, t, IntView::from(b), IntView::from(c)], move |sol| {
 			let Int(x) = sol[0] else { return false };
@@ -1138,7 +1186,7 @@ mod tests {
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		DifferenceLogicBounds::new_in(&mut slv, vec![(x, y, 3), (y, z, -2), (z, x, -2)], vec![]);
+		DifferenceLogicBounds::new_in(&mut slv, PriorityLevel::Low, vec![(x, y, 3), (y, z, -2), (z, x, -2)], vec![]);
 		slv.assert_unsatisfiable();
 	}
 

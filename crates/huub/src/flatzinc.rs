@@ -21,8 +21,9 @@ use thiserror::Error;
 use tracing::warn;
 
 use crate::{abs_int, actions::SimplificationActions, all_different_int, array_element, array_maximum_int, array_minimum_int, constraints::int_table::IntTable, disjunctive_strict, div_int, int_in_set_reif, pow_int, reformulate::ReformulationError, table_int, times_int, BoolDecision, BoolDecisionInner, Branching, Decision, IntDecision, IntDecisionInner, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal, ValueSelection, VariableSelection};
-use crate::constraints::difference_logic::DifferenceLogic;
+use crate::constraints::difference_logic::{DifferenceLogic, DifferenceLogicConstraint};
 use crate::reformulate::InitConfig;
+use crate::solver::queue::PriorityLevel;
 
 #[derive(Error, Debug)]
 /// Errors that can occur when converting a [`FlatZinc`] instance to a [`Model`]
@@ -899,7 +900,14 @@ where
 	/// to the [`Model`] to enforce the constraints.
 	pub(crate) fn post_constraints(&mut self, config: &InitConfig) -> Result<(), FlatZincError> {
 		// Global propagators dealing with multiple constraints
-		let mut diff_logic = DifferenceLogic::new();
+		let mut diff_logic = DifferenceLogic::new(match config.diff_logic_prio { 
+			0 => PriorityLevel::Lowest,
+			1 => PriorityLevel::Low,
+			2 => PriorityLevel::Medium,
+			3 => PriorityLevel::High,
+			4 => PriorityLevel::Highest,
+			_ => PriorityLevel::Immediate,
+		});
 		// Traditional relational constraints
 		for (i, c) in self.fzn.constraints.iter().enumerate() {
 			if self.processed[i] {
@@ -1351,13 +1359,12 @@ where
 						let b = self.arg_int(b)?;
 						
 						if config.diff_logic > 0 && !matches!(a.0, IntDecisionInner::Const(_)) && !matches!(b.0, IntDecisionInner::Const(_)) {
-							if c.id.deref() == "int_le" {
-								diff_logic.add_global(a, b, 0);
-								continue
-							} else if config.diff_logic > 1 && c.id.deref() == "int_ne" {
-								diff_logic.add_ne(&mut self.prb, a, b, 0);
-								continue
+							match c.id.deref() { 
+								"int_le" => diff_logic.add(DifferenceLogicConstraint::Global(a, b, 0)),
+								"int_ne" => diff_logic.add(DifferenceLogicConstraint::NotEquals(a, b, 0)),
+								_ => unreachable!(),
 							}
+							continue;
 						}
 						
 						let lin_exp = a - b;
@@ -1387,19 +1394,16 @@ where
 						let r = self.arg_bool(r)?;
 						
 						if config.diff_logic > 0 && !matches!(a.0, IntDecisionInner::Const(_)) && !matches!(b.0, IntDecisionInner::Const(_)) {
-							let mut handled_by_diff = true;
-							match (config.diff_logic, c.id.deref()) {
-								(_, "int_eq_imp") => diff_logic.add_imp_eq(r, a, b, 0),
-								(d, "int_eq_reif") if d > 1 => diff_logic.add_reif_eq(&mut self.prb, r, a, b, 0),
-								(_, "int_le_imp") => diff_logic.add_imp(r, a, b, 0),
-								(_, "int_le_reif") => diff_logic.add_reif(r, a, b, 0),
-								(d, "int_ne_imp") if d > 1 => diff_logic.add_imp_ne(&mut self.prb, r, a, b, 0),
-								(d, "int_ne_reif") if d > 1 => diff_logic.add_reif_eq(&mut self.prb, !r, a, b, 0),
-								_ => handled_by_diff = false,
+							match c.id.deref() {
+								"int_eq_imp" => diff_logic.add(DifferenceLogicConstraint::ImpliedEquals(r, a, b, 0)),
+								"int_eq_reif" => diff_logic.add(DifferenceLogicConstraint::ReifiedEquals(r, a, b, 0)),
+								"int_le_imp" => diff_logic.add(DifferenceLogicConstraint::Implied(r, a, b, 0)),
+								"int_le_reif" => diff_logic.add(DifferenceLogicConstraint::Reified(r, a, b, 0)),
+								"int_ne_imp" => diff_logic.add(DifferenceLogicConstraint::ImpliedNotEquals(r, a, b, 0)),
+								"int_ne_reif" => diff_logic.add(DifferenceLogicConstraint::ReifiedEquals(!r, a, b, 0)),
+								_ => unreachable!(),
 							}
-							if handled_by_diff {
-								continue;
-							}
+							continue;
 						}
 
 						let lin_exp = a - b;
@@ -1455,13 +1459,12 @@ where
 								None
 							};
 							if let Some((x, y)) = diff_vars {
-								if c.id.deref() == "int_lin_le" {
-									diff_logic.add_global(x, y, rhs);
-									continue;
-								} else if config.diff_logic > 1 && c.id.deref() == "int_lin_ne" { 
-									diff_logic.add_ne(&mut self.prb, x, y, rhs);
-									continue;
+								match c.id.deref() {
+									"int_lin_le" => diff_logic.add(DifferenceLogicConstraint::Global(x, y, rhs)),
+									"int_lin_ne" => diff_logic.add(DifferenceLogicConstraint::NotEquals(x, y, rhs)),
+									_ => unreachable!(),
 								}
+								continue;
 							}
 						}
 						
@@ -1517,18 +1520,14 @@ where
 								None
 							};
 							if let Some((x, y)) = diff_vars {
-								let mut handled_by_diff = true;
-								match (config.diff_logic, c.id.deref()) {
-									(_, "int_lin_eq_imp") => diff_logic.add_imp_eq(reified, x, y, rhs),
-									(d, "int_lin_eq_reif") if d > 1 => diff_logic.add_reif_eq(&mut self.prb, reified, x, y, rhs),
-									(_, "int_lin_le_imp") => diff_logic.add_imp(reified, x, y, rhs),
-									(_, "int_lin_le_reif") => diff_logic.add_reif(reified, x, y, rhs),
-									(d, "int_lin_ne_imp") if d > 1 => diff_logic.add_imp_ne(&mut self.prb, reified, x, y, rhs),
-									(d, "int_lin_ne_reif") if d > 1 => diff_logic.add_reif_eq(&mut self.prb, !reified, x, y, rhs),
-									_ => handled_by_diff = false,
-								}
-								if handled_by_diff {
-									continue;
+								match c.id.deref() {
+									"int_lin_eq_imp" => diff_logic.add(DifferenceLogicConstraint::ImpliedEquals(reified, x, y, rhs)),
+									"int_lin_eq_reif" => diff_logic.add(DifferenceLogicConstraint::ReifiedEquals(reified, x, y, rhs)),
+									"int_lin_le_imp" => diff_logic.add(DifferenceLogicConstraint::Implied(reified, x, y, rhs)),
+									"int_lin_le_reif" => diff_logic.add(DifferenceLogicConstraint::Reified(reified, x, y, rhs)),
+									"int_lin_ne_imp" => diff_logic.add(DifferenceLogicConstraint::ImpliedNotEquals(reified, x, y, rhs)),
+									"int_lin_ne_reif" => diff_logic.add(DifferenceLogicConstraint::ReifiedEquals(!reified, x, y, rhs)),
+									_ => unreachable!(),
 								}
 							}
 						}
@@ -1659,13 +1658,11 @@ where
 		}
 		
 		// Add global propagators
-		if diff_logic.is_active() {
-			(self.stats.diff_logic_int_vars, 
-			 self.stats.diff_logic_bool_vars, 
-			 self.stats.diff_logic_global_constraints, 
-			 self.stats.diff_logic_implied_constraints) = diff_logic.output_statistics();
-			self.prb += diff_logic;
-		}
+		(self.stats.diff_logic_int_vars, 
+		 self.stats.diff_logic_bool_vars, 
+		 self.stats.diff_logic_global_constraints, 
+		 self.stats.diff_logic_implied_constraints) = diff_logic.process(&mut self.prb, config.diff_logic);
+		self.prb += diff_logic;
 
 		Ok(())
 	}
