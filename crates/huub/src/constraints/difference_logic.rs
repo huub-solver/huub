@@ -542,9 +542,9 @@ impl DifferenceLogicGraph {
 					// - Path to t with same distance as before and s is not relevant (prefer irrelevancy in ties)
 					if prev.map_or(true, |Reverse(old_dist)| new_dist < old_dist || (new_dist == old_dist && !s_relevant)) {
 						if s_relevant || target == relevant_target {
-							// Add new distance to the map if key was not present before increase relevant count.
+							// Add new distance to the map, if key was not present before increase relevant count.
 							//trace!("Target {target:?} set to relevant");
-							if distances.insert(target, new_dist + if reverse {pi_origin - node_t.pi} else {node_t.pi - pi_origin}).is_none() && target != relevant_target {
+							if distances.insert(target, new_dist + if reverse {pi_origin - node_t.pi} else {node_t.pi - pi_origin}).is_none() {
 								relevant_count += 1;
 							}
 						} else {
