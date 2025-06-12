@@ -513,13 +513,15 @@ impl DifferenceLogicGraph {
 		trace!("Starting relevant dijkstra for e{new_edge:?} in mode reverse={reverse}");
 		self.reset_visit();
 		let new_edge = &self.edges[new_edge];
-		let source = if reverse {new_edge.to} else {new_edge.from};
+		let origin = if reverse {new_edge.to} else {new_edge.from};
+		let pi_origin = self.nodes[origin].node.borrow().pi;
 		let relevant_target = if reverse {new_edge.from} else {new_edge.to};
 		let mut distances = IndexMap::default();
-		let _ = distances.insert(if reverse {new_edge.from} else {new_edge.to}, new_edge.val);
+		let _ = distances.insert(relevant_target, new_edge.val);
 		let mut queue = PriorityQueue::default();
-		let _ = queue.push(source, Reverse(0));
-		let _ = queue.push(relevant_target, Reverse(new_edge.val));
+		let _ = queue.push(origin, Reverse(0));
+		let pi_relevant = self.nodes[relevant_target].node.borrow().pi;
+		let _ = queue.push(relevant_target, Reverse(new_edge.val + if reverse { pi_relevant - pi_origin } else { pi_origin - pi_relevant }));
 		let mut relevant_count = 1;
 		while !queue.is_empty() && relevant_count > 0 {
 			let (s, Reverse(dist)) = queue.pop().unwrap();
@@ -540,9 +542,9 @@ impl DifferenceLogicGraph {
 					// - Path to t with same distance as before and s is not relevant (prefer irrelevancy in ties)
 					if prev.map_or(true, |Reverse(old_dist)| new_dist < old_dist || (new_dist == old_dist && !s_relevant)) {
 						if s_relevant || target == relevant_target {
-							// Add new distance to the map, if key was not present before increase relevant count.
+							// Add new distance to the map if key was not present before increase relevant count.
 							//trace!("Target {target:?} set to relevant");
-							if distances.insert(target, new_dist).is_none() {
+							if distances.insert(target, new_dist + if reverse {pi_origin - node_t.pi} else {node_t.pi - pi_origin}).is_none() && target != relevant_target {
 								relevant_count += 1;
 							}
 						} else {
@@ -572,27 +574,37 @@ impl DifferenceLogicGraph {
 			return Ok(());
 		}
 
-		let outgoing_u = self.dijkstra_relevant(adapter, new_index, false); // todo could store distances at nodes as well?
-		trace!("outgoing_u is {outgoing_u:?}");
-		let incoming_v = self.dijkstra_relevant(adapter, new_index, true);
-		trace!("incoming_v is {incoming_v:?}"); // todo check how to include pi change check at this point?
-		let outdegree_u: usize = outgoing_u.iter().map(|(&v, _)| self.nodes[v].node.borrow().open_edges.open_len(adapter.get_trailing_actions())).sum();
-		let indegree_v: usize = incoming_v.iter().map(|(&v, _)| self.nodes[v].node.borrow().open_reverse_edges.open_len(adapter.get_trailing_actions())).sum();
+		// Incoming paths to relevant nodes starting from u via uv.
+		let incoming_u = self.dijkstra_relevant(adapter, new_index, false); // todo could store distances at nodes as well?
+		trace!("incoming_u is {incoming_u:?}");
+		// Outgoing paths from relevant nodes ending at v via uv.
+		let outgoing_v = self.dijkstra_relevant(adapter, new_index, true);
+		trace!("outgoing_v is {outgoing_v:?}"); // todo check how to include pi change check at this point?
+		let indegree_u: usize = incoming_u.iter().map(|(&v, _)| self.nodes[v].node.borrow().open_reverse_edges.open_len(adapter.get_trailing_actions())).sum();
+		let outdegree_v: usize = outgoing_v.iter().map(|(&v, _)| self.nodes[v].node.borrow().open_edges.open_len(adapter.get_trailing_actions())).sum();
+		trace!("indegree: {indegree_u:?}, outdegree: {outdegree_v:?}");
 		
 		let new_edge_val = self.edges[new_index].val;
 		let mut fail_indices = Vec::new();
 		
-		if outdegree_u < indegree_v {
-			for &var in outgoing_u.keys() {
+		if indegree_u < outdegree_v {
+			for &var in incoming_u.keys() {
 				let temp_node = self.nodes[var].clone();
 				let mut node = temp_node.node.borrow_mut();
+				let mut rev_open = node.open_reverse_edges.iter(adapter.get_trailing_actions());
+				while let Some(&index) = rev_open.next() {
+					let edge = &self.edges[index];
+					//trace!("Dealing with {edge:?} (incoming to {temp_node:?}, implied)");
+					if outgoing_v.contains_key(&edge.from) && outgoing_v[&edge.from] + incoming_u[&edge.to] - new_edge_val <= edge.val {
+						trace!("Constraint i{:?} - i{:?} <= {} is implied", edge.from, edge.to, edge.val);
+						self.close_imp_edge_backward(adapter, &mut rev_open, index);
+					}
+				}
 				let mut open = node.open_edges.iter(adapter.get_trailing_actions());
 				while let Some(&index) = open.next() {
 					let edge = &self.edges[index];
-					if incoming_v.contains_key(&edge.to) && incoming_v[&edge.to] + outgoing_u[&edge.from] - new_edge_val <= edge.val {
-						trace!("Constraint i{:?} - i{:?} <= {} is implied", edge.from, edge.to, edge.val);
-						self.close_imp_edge_forward(adapter, &mut open, index);
-					} else if incoming_v.contains_key(&edge.from) && incoming_v[&edge.from] + outgoing_u[&edge.to] - new_edge_val <= -edge.val - 1 { // todo slight double work for reified constraints
+					//trace!("Dealing with {edge:?} (outgoing from {temp_node:?}, reverse)");
+					if outgoing_v.contains_key(&edge.to) && outgoing_v[&edge.to] + incoming_u[&edge.from] - new_edge_val <= -edge.val - 1 { // todo slight double work for reified constraints
 						trace!("Constraint i{:?} - i{:?} <= {} is falsified since inverse is implied", edge.from, edge.to, edge.val);
 						fail_indices.push(index);
 						self.close_imp_edge_forward(adapter, &mut open, index);
@@ -600,16 +612,23 @@ impl DifferenceLogicGraph {
 				}
 			}
 		} else {
-			for &var in incoming_v.keys() {
+			for &var in outgoing_v.keys() {
 				let temp_node = self.nodes[var].clone();
 				let mut node = temp_node.node.borrow_mut();
+				let mut open = node.open_edges.iter(adapter.get_trailing_actions());
+				while let Some(&index) = open.next() {
+					let edge = &self.edges[index];
+					//trace!("Dealing with {edge:?} (outgoing from {temp_node:?}, implied)");
+					if incoming_u.contains_key(&edge.to) && outgoing_v[&edge.from] + incoming_u[&edge.to] - new_edge_val <= edge.val {
+						trace!("Constraint i{:?} - i{:?} <= {} is implied", edge.from, edge.to, edge.val);
+						self.close_imp_edge_forward(adapter, &mut open, index);
+					}
+				}
 				let mut rev_open = node.open_reverse_edges.iter(adapter.get_trailing_actions());
 				while let Some(&index) = rev_open.next() {
 					let edge = &self.edges[index];
-					if outgoing_u.contains_key(&edge.from) && incoming_v[&edge.to] + outgoing_u[&edge.from] - new_edge_val <= edge.val {
-						trace!("Constraint i{:?} - i{:?} <= {} is implied", edge.from, edge.to, edge.val);
-						self.close_imp_edge_backward(adapter, &mut rev_open, index);
-					} else if outgoing_u.contains_key(&edge.to) && incoming_v[&edge.from] + outgoing_u[&edge.to] - new_edge_val <= -edge.val - 1 { // todo slight double work for reified constraints
+					//trace!("Dealing with {edge:?} (incoming to {temp_node:?}, reverse)");
+					if incoming_u.contains_key(&edge.from) && outgoing_v[&edge.to] + incoming_u[&edge.from] - new_edge_val <= -edge.val - 1 { // todo slight double work for reified constraints
 						trace!("Constraint i{:?} - i{:?} <= {} is falsified since inverse is implied", edge.from, edge.to, edge.val);
 						fail_indices.push(index);
 						self.close_imp_edge_backward(adapter, &mut rev_open, index);
@@ -618,7 +637,7 @@ impl DifferenceLogicGraph {
 			}
 		}
 
-		for index in fail_indices {  // todo check if we want this here?
+		for index in fail_indices {  // todo check if we want this here or immediately inside the loops?
 			let _ = self.inc_sat(adapter, index)?;
 		}
 
@@ -1168,6 +1187,7 @@ where
 #[cfg(test)]
 mod tests {
 	use pindakaas::solver::propagation::PropagatingSolver;
+	use pindakaas::Lit as RawLit;
 	use rangelist::RangeList;
 	use tracing::trace;
 	use tracing_test::traced_test;
@@ -1177,6 +1197,7 @@ mod tests {
 		int_var::{EncodingType, IntVar},
 		Solver,
 	}, Model};
+	use crate::actions::TrailingActions;
 	use crate::helpers::initial_trail::InitialTrail;
 	use crate::reformulate::InitConfig;
 	use crate::solver::IntView;
@@ -1222,6 +1243,76 @@ mod tests {
 		assert_eq!(incoming_y.len(), 2);
 		assert!(incoming_y.contains_key(&2));
 		assert!(incoming_y.contains_key(&4));
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_inc_imp() {
+		let mut prb = Model::default();
+		let bools = (0..3).into_iter().map(|_| prb.new_bool_var()).collect::<Vec<_>>();
+		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+		let int_vars: Vec<_> = (0..3).into_iter().map(|_| IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=10]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		)).collect();
+		let bool_vars = bools.into_iter().map(|b| map.get_bool(&mut slv, b)).collect::<Vec<_>>();
+		let mut initial_trail = InitialTrail::new();
+		let mut graph = DifferenceLogicGraph::new(&mut initial_trail, int_vars.len());
+		initial_trail.init_trail(&mut slv);
+		graph.init_trail(&mut initial_trail);
+		let (solver, engine) = slv.oracle.access_solving();
+		let mut ctx = SolvingContext::new(solver, &mut engine.state);
+		let mut model_adapter = SolverModelAdapter::new(&mut ctx, &int_vars, &bool_vars);
+		let _  = graph.new_edge(&mut model_adapter, DiffEdge::new(0, 1, 2, None));
+		let new_index = graph.new_edge(&mut model_adapter, DiffEdge::new(2, 0, 1, None));
+		let _ = graph.new_imp_edge(&mut model_adapter, DiffEdge::new(1, 2, -4, Some(0)));
+		let _ = graph.new_imp_edge(&mut model_adapter, DiffEdge::new(2, 1, 3, Some(1)));
+		let _ = graph.new_imp_edge(&mut model_adapter, DiffEdge::new(2, 1, 2, Some(2)));
+		let _ = graph.inc_imp(&mut model_adapter, new_index);
+		assert_eq!(ctx.state.propagation_queue.pop_front().unwrap(),
+				   RawLit::from_raw(-bool_vars[0].reverse_map_info().unwrap()));
+		assert!(ctx.get_bool_val(bool_vars[1]).is_none());
+		assert!(ctx.get_bool_val(bool_vars[2]).is_none());
+		assert_eq!(graph.nodes[2].node.borrow().open_edges.open_len(&ctx), 1);
+		assert_eq!(graph.nodes[2].node.borrow().open_reverse_edges.open_len(&ctx), 0);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_inc_imp2() {
+		let mut prb = Model::default();
+		let bools = (0..4).into_iter().map(|_| prb.new_bool_var()).collect::<Vec<_>>();
+		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+		let int_vars: Vec<_> = (0..4).into_iter().map(|_| IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=10]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		)).collect();
+		let bool_vars = bools.into_iter().map(|b| map.get_bool(&mut slv, b)).collect::<Vec<_>>();
+		let mut initial_trail = InitialTrail::new();
+		let mut graph = DifferenceLogicGraph::new(&mut initial_trail, int_vars.len());
+		initial_trail.init_trail(&mut slv);
+		graph.init_trail(&mut initial_trail);
+		let (solver, engine) = slv.oracle.access_solving();
+		let mut ctx = SolvingContext::new(solver, &mut engine.state);
+		let mut model_adapter = SolverModelAdapter::new(&mut ctx, &int_vars, &bool_vars);
+		let _  = graph.new_edge(&mut model_adapter, DiffEdge::new(0, 1, 2, None));
+		let new_index = graph.new_edge(&mut model_adapter, DiffEdge::new(1, 2, 1, None));
+		let _ = graph.new_imp_edge(&mut model_adapter, DiffEdge::new(2, 0, -4, Some(0)));
+		let _ = graph.new_imp_edge(&mut model_adapter, DiffEdge::new(0, 2, 3, Some(1)));
+		let _ = graph.new_imp_edge(&mut model_adapter, DiffEdge::new(0, 2, 2, Some(2)));
+		let _ = graph.new_imp_edge(&mut model_adapter, DiffEdge::new(0, 3, 2, Some(3)));
+		let _ = graph.inc_imp(&mut model_adapter, new_index);
+		assert_eq!(ctx.state.propagation_queue.pop_front().unwrap(),
+				   RawLit::from_raw(-bool_vars[0].reverse_map_info().unwrap()));
+		assert!(ctx.get_bool_val(bool_vars[1]).is_none());
+		assert!(ctx.get_bool_val(bool_vars[2]).is_none());
+		assert!(ctx.get_bool_val(bool_vars[3]).is_none());
+		assert_eq!(graph.nodes[0].node.borrow().open_edges.open_len(&ctx), 2);
+		assert_eq!(graph.nodes[0].node.borrow().open_reverse_edges.open_len(&ctx), 0);
 	}
 
 	#[test]
