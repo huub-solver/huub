@@ -43,7 +43,7 @@ impl<S: SimplificationActions> Constraint<S> for BoolDecisionArrayElement {
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let result = slv.get_solver_bool(self.result);
 		let index = slv.get_solver_int(self.index);
 

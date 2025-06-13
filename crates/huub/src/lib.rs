@@ -1195,7 +1195,7 @@ impl Model {
 		let map = map_builder.finalize();
 
 		// Create constraint data structures within the solver
-		for c in self.constraints.iter().flatten() {
+		for c in self.constraints.iter_mut().flatten() {
 			c.to_solver(&mut slv, &map)?;
 		}
 		// Add branching data structures to the solver

@@ -46,12 +46,12 @@ impl<S: SimplificationActions> Constraint<S> for IntInSetReif {
 		}
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		if self.set.iter().len() == 1 {
 			let lb = *self.set.lower_bound().unwrap();
 			let ub = *self.set.upper_bound().unwrap();
 			<Formula<BoolDecision> as Constraint<S>>::to_solver(
-				&Formula::Equiv(vec![
+				&mut Formula::Equiv(vec![
 					Formula::And(vec![self.var.geq(lb).into(), self.var.leq(ub).into()]),
 					self.reif.into(),
 				]),
@@ -65,7 +65,7 @@ impl<S: SimplificationActions> Constraint<S> for IntInSetReif {
 				.map(|v| self.var.eq(v).into())
 				.collect();
 			<Formula<BoolDecision> as Constraint<S>>::to_solver(
-				&Formula::Equiv(vec![self.reif.into(), Formula::Or(eq_lits)]),
+				&mut Formula::Equiv(vec![self.reif.into(), Formula::Or(eq_lits)]),
 				slv,
 			)
 		}

@@ -59,7 +59,7 @@ impl<S: SimplificationActions> Constraint<S> for IntAbs {
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let origin = slv.get_solver_int(self.origin);
 		let abs = slv.get_solver_int(self.abs);
 		IntAbsBounds::new_in(slv, origin, abs);

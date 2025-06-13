@@ -219,7 +219,7 @@ impl<S: SimplificationActions> Constraint<S> for BoolFormula {
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let mut resolver = |bv: BoolDecision| {
 			let inner = slv.get_solver_bool(bv);
 			match inner.0 {
@@ -243,7 +243,7 @@ impl ConstraintStore {
 	/// Map the constraint into propagators and clauses to be added to the given
 	/// solver, using the variable mapping provided.
 	pub(crate) fn to_solver<Oracle: PropagatingSolver<Engine>>(
-		&self,
+		&mut self,
 		slv: &mut Solver<Oracle>,
 		map: &ReformulationMap,
 	) -> Result<(), ReformulationError> {

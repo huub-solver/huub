@@ -68,7 +68,7 @@ fn pow(base: IntVal, exponent: IntVal) -> Option<IntVal> {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntPow {
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let base = slv.get_solver_int(self.base);
 		let exponent = slv.get_solver_int(self.exponent);
 		let result = slv.get_solver_int(self.result);

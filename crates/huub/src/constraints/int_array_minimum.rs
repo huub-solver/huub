@@ -67,7 +67,7 @@ impl<S: SimplificationActions> Constraint<S> for IntArrayMinimum {
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let vars: Vec<_> = self.vars.iter().map(|v| slv.get_solver_int(*v)).collect();
 		let min = slv.get_solver_int(self.min);
 		IntArrayMinimumBounds::new_in(slv, vars, min);

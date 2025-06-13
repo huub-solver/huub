@@ -145,7 +145,7 @@ impl<S: SimplificationActions> Constraint<S> for IntAllDifferent {
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let vars: Vec<_> = self.vars.iter().map(|v| slv.get_solver_int(*v)).collect();
 		if self.value_consistent_propagator_enabled() {
 			IntAllDifferentValue::new_in(slv, vars.clone());

@@ -98,9 +98,9 @@ pub trait Constraint<S: SimplificationActions>: Debug + DynConstraintClone {
 	/// Encode the constraint using [`Propagator`] objects or clauses for a
 	/// [`Solver`] object.
 	///
-	/// This method is should place all required propagators and/or clauses in a
+	/// This method should place all required propagators and/or clauses in a
 	/// [`Solver`] object to ensure the constraint will not be violated.
-	fn to_solver(&self, actions: &mut dyn ReformulationActions) -> Result<(), ReformulationError>;
+	fn to_solver(&mut self, actions: &mut dyn ReformulationActions) -> Result<(), ReformulationError>;
 }
 
 /// A trait to allow the cloning of user boxed constraint.

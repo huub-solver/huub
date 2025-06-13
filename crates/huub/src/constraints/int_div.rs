@@ -55,7 +55,7 @@ impl<S: SimplificationActions> Constraint<S> for IntDiv {
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let numerator = slv.get_solver_int(self.numerator);
 		let denominator = slv.get_solver_int(self.denominator);
 		let result = slv.get_solver_int(self.result);

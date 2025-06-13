@@ -72,7 +72,7 @@ impl<S: SimplificationActions> Constraint<S> for IntTable {
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		assert!(self.vars.len() >= 2);
 
 		let selector = if self.vars.len() != 2 {

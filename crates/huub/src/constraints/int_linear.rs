@@ -144,14 +144,14 @@ impl<S: SimplificationActions> Constraint<S> for IntEq {
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
-	fn to_solver(&self, actions: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let lin = IntLinear {
+	fn to_solver(&mut self, actions: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let mut lin = IntLinear {
 			terms: vec![self.vars[0], -self.vars[1]],
 			operator: LinOperator::Equal,
 			rhs: 0,
 			reif: None,
 		};
-		<IntLinear as Constraint<S>>::to_solver(&lin, actions)
+		<IntLinear as Constraint<S>>::to_solver(&mut lin, actions)
 	}
 }
 
@@ -370,7 +370,7 @@ impl<S: SimplificationActions> Constraint<S> for IntLinear {
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		use Reification::*;
 
 		let terms = self

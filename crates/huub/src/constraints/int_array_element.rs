@@ -106,7 +106,7 @@ impl<S: SimplificationActions> Constraint<S> for IntDecisionArrayElement {
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let array = self.array.iter().map(|&v| slv.get_solver_int(v)).collect();
 		let result = slv.get_solver_int(self.result);
 		let index = slv.get_solver_int(self.index);
@@ -337,7 +337,7 @@ impl<S: SimplificationActions> Constraint<S> for IntValArrayElement {
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let index = slv.get_solver_int(self.index);
 		let result = slv.get_solver_int(self.result);
 

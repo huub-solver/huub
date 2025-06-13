@@ -108,7 +108,7 @@ impl<S: SimplificationActions> Constraint<S> for IntTimes {
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let factor1 = slv.get_solver_int(self.factor1);
 		let factor2 = slv.get_solver_int(self.factor2);
 		let product = slv.get_solver_int(self.product);
