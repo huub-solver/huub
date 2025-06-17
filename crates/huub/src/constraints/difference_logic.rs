@@ -238,31 +238,41 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 			}
 		}
 
-		trace!("Creating DifferenceLogicGraph for {} int and {} bool vars.", int_var_map.len(), bool_var_map.len());
+		trace!("Creating DifferenceLogicGraph for {} int and {} bool vars, {} global and {} implied edges.", int_var_map.len(), bool_var_map.len(), trimmed_constraints.len(), trimmed_imp_constraints.len());
 		let mut initial_trail = InitialTrail::new();
-		let mut graph = DifferenceLogicGraph::new(&mut initial_trail, int_var_map.len());
+		let mut graph = DifferenceLogicGraph::new(&mut initial_trail, int_var_map.len(), bool_var_map.len());
 		let int_vars = int_var_map.iter().map(|(&v, _)| v).collect_vec();
 		let bool_vars = bool_var_map.iter().map(|(&v, _)| v).collect_vec();
 		let mut model_adapter = SimplificationModelAdapter::new(actions, &mut initial_trail, &int_vars, &bool_vars);
-		let mut state = DifferenceLogicState::new(int_vars.len(), bool_vars.len());
+		let mut state = DifferenceLogicState::new(int_vars.len());
 
-		// Add global constraints  TODO propagate!!!
+		// Add global constraints
 		for (x, y, d) in trimmed_constraints.into_iter() {
-			let edge = DiffEdge::new(x, y, d, None);
-			let _ = graph.new_edge(&mut model_adapter, edge);
+			let _ = graph.new_edge(&mut model_adapter, DiffEdge::new(x, y, d, None));
 		}
 
 		// Add implied constraints
 		for (b, x, y, d) in trimmed_imp_constraints.into_iter() {
-			let index = graph.new_imp_edge(&mut model_adapter, DiffEdge::new(x, y, d, Some(b)));
-			state.bool_implications.get_mut(b).unwrap().push(index);
+			let _ = graph.new_imp_edge(&mut model_adapter, DiffEdge::new(x, y, d, Some(b)));
 		}
 		
 		trace!("Starting initial propagation");
-		// TODO different procedure for initial propagation, deal with fixed variables
-		graph.propagate(&mut model_adapter, &mut state)?;
+		graph.bellman_ford_init_pi(&mut model_adapter)?;
+		graph.propagate_bounds(&mut model_adapter, &mut state)?;
+		// TODO deal with fixed vars here?
+		graph.propagate_booleans(&mut model_adapter, &mut state)?;
+		graph.johnson_full(&mut model_adapter)?; // TODO order of method calls?
+		// TODO remove booleans where all edges are closed!
 
 		trace!("Initial graph: {}", graph.to_dot(&mut model_adapter));
+		/*trace!("Implied edges:");
+		for node in graph.nodes.iter() {
+			let mut node_ref = node.node.borrow_mut();
+			let mut open = node_ref.open_edges.iter(model_adapter.get_trailing_actions());
+			while let Some(&edge) = open.next() {
+				trace!("{:?}", graph.edges[edge]);
+			}
+		}*/
 
 		self.initial_graph = Some(DifferenceLogicInitial { initial_trail, graph, state, int_vars, bool_vars });
 		// TODO if all vars are fixed return subsumed
@@ -278,6 +288,10 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 		initial_graph.initial_trail.init_trail(slv);
 		initial_graph.graph.init_trail(&mut initial_graph.initial_trail);
 		let int_vars = initial_graph.int_vars.iter().map(|&v| slv.get_solver_int(v)).collect_vec();  // TODO variables might be unified here but not known before, need to check!
+		/*trace!("Transformed int vars:");
+		for &v in int_vars.iter() {
+			trace!("{v:?}: lb {:?}, ub: {:?}", slv.get_int_lower_bound(v), slv.get_int_upper_bound(v));
+		}*/
 		let bool_vars = initial_graph.bool_vars.iter().map(|&v| slv.get_solver_bool(v)).collect_vec();
 		DifferenceLogicBounds::new_in(slv, self.priority_level, int_vars, bool_vars,
 									  initial_graph.graph,
@@ -361,6 +375,8 @@ pub struct DiffEdge {
 	val: IntVal,
 	/// Index of the Boolean for the difference constraints (None for globally active constraints).
 	bool_var: Option<usize>,
+	/// Index of this edge in the list of edges implied by the boolean
+	bool_index: usize,
 	/// Index of this edge in the list of open outgoing edges
 	out_index: usize,
 	/// Index of this edge in the list of open incoming edges
@@ -375,6 +391,7 @@ impl DiffEdge {
 			to,
 			val,
 			bool_var,
+			bool_index: 0,
 			out_index: 0,
 			in_index: 0,
 		}
@@ -435,7 +452,7 @@ impl VarNode {
 /// A hashable reference to a node in the difference logic graph.
 pub struct VarNodeRef {  // todo deal with the case that a node represents multiple vars! code_generation: var + linear transform are both in the graph. Could also be vars that are equal on the root node or similar structures!
 	/// Variable index associated with the node.
-	var: usize,
+	var: usize,  // TODO should be able to kick this?
 	/// Reference to the node.
 	node: Rc<RefCell<VarNode>>,
 }
@@ -464,18 +481,21 @@ pub struct DifferenceLogicGraph {
 	nodes: Vec<VarNodeRef>,
 	/// List of all edges in the graph. todo could make this a trailed list for dynamic addition
 	edges: Vec<DiffEdge>,
+	/// Map from boolean indices to their implied edges (in RefCell to decouple from self).
+	bool_implications: Vec<Rc<RefCell<TrailedOpenList<usize>>>>,
 	/// Storage for the visited state.
-	visited: Vec<usize>,
+	visited: Vec<usize>, // TODO move to state?
 	/// Number of open implication edges.
 	open_imp_edges: TrailedInt,
 }
 
 impl DifferenceLogicGraph {
 
-	fn new(initial_trail: &mut InitialTrail, int_vars: usize) -> Self {
+	fn new(initial_trail: &mut InitialTrail, int_vars: usize, bool_vars: usize) -> Self {
 		Self {
 			nodes: (0..int_vars).into_iter().map(|v| VarNodeRef::new(initial_trail, v)).collect(),
 			edges: Vec::new(),
+			bool_implications: (0..bool_vars).into_iter().map(|_| Rc::new(RefCell::new(TrailedOpenList::new(initial_trail)))).collect(),
 			visited: Vec::new(),
 			open_imp_edges: initial_trail.new_trailed_int(0),
 		}
@@ -485,6 +505,9 @@ impl DifferenceLogicGraph {
 	fn init_trail(&mut self, initial_trail: &mut InitialTrail) {
 		for node in self.nodes.iter() {
 			node.node.borrow_mut().init_trail(initial_trail);
+		}
+		for implications in self.bool_implications.iter() {
+			implications.borrow_mut().init_trail(initial_trail);
 		}
 		self.open_imp_edges = initial_trail.map_to_trail(self.open_imp_edges);
 	}
@@ -501,6 +524,10 @@ impl DifferenceLogicGraph {
 	/// Add a new open implied edge to the graph, return the index.
 	fn new_imp_edge<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, mut edge: DiffEdge) -> usize {
 		let index = self.edges.len();
+		let b = edge.bool_var.unwrap();
+		let mut implications = self.bool_implications[b].borrow_mut();
+		edge.bool_index = implications.len();
+		implications.push(index);
 		let mut from = self.nodes[edge.from].node.borrow_mut();
 		edge.out_index = from.open_edges.len();
 		from.open_edges.push(self.edges.len());
@@ -520,29 +547,31 @@ impl DifferenceLogicGraph {
 		self.nodes[edge.to].node.borrow_mut().reverse_edges.push(adapter.get_trailing_actions(), index);
 	}
 
-	/// Close the implied edge given by the index.
-	/// Return true if the edge got closed by this call, false if it was already closed.
-	fn close_imp_edge<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, index: usize) -> bool {
-		let &from = &self.edges[index].from;
+	/// Close the implied edge given by the index while iterating implied edges via the boolean.
+	fn close_imp_edge_boolean<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, open: &mut TrailedOpenListIterator<usize>, index: usize) {
+		let actions = adapter.get_trailing_actions();
+		let _ = open.close(actions, |&e, i| self.edges[e].bool_index = i);
 		let &to = &self.edges[index].to;
+		let &from = &self.edges[index].from;
 		let out_index = self.edges[index].out_index;
 		let in_index = self.edges[index].in_index;
-		let actions = adapter.get_trailing_actions();
 		let was_open = self.nodes[from].node.borrow_mut().open_edges.close(actions, out_index, |&e, i| self.edges[e].out_index = i) &&
 			self.nodes[to].node.borrow_mut().open_reverse_edges.close(actions, in_index, |&e, i| self.edges[e].in_index = i);
-		if was_open {
-			let _ = actions.set_trailed_int(self.open_imp_edges, actions.get_trailed_int(self.open_imp_edges) - 1);
-		}
-		was_open
+		debug_assert!(was_open);
+		let _ = actions.set_trailed_int(self.open_imp_edges, actions.get_trailed_int(self.open_imp_edges) - 1);
 	}
 
 	/// Close the implied edge given by the index while iterating open edges in forward direction.
 	fn close_imp_edge_forward<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, open: &mut TrailedOpenListIterator<usize>, index: usize) {
 		let actions = adapter.get_trailing_actions();
 		let _ = open.close(actions, |&e, i| self.edges[e].out_index = i);
+		let &b = &self.edges[index].bool_var.unwrap();
 		let &to = &self.edges[index].to;
+		let bool_index = self.edges[index].bool_index;
 		let in_index = self.edges[index].in_index;
-		let _ = self.nodes[to].node.borrow_mut().open_reverse_edges.close(actions, in_index, |&e, i| self.edges[e].in_index = i);
+		let was_open = self.bool_implications[b].borrow_mut().close(actions, bool_index, |&e, i| self.edges[e].bool_index = i) &&
+			self.nodes[to].node.borrow_mut().open_reverse_edges.close(actions, in_index, |&e, i| self.edges[e].in_index = i);
+		debug_assert!(was_open);
 		let _ = actions.set_trailed_int(self.open_imp_edges, actions.get_trailed_int(self.open_imp_edges) - 1);
 	}
 
@@ -550,9 +579,13 @@ impl DifferenceLogicGraph {
 	fn close_imp_edge_backward<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, rev_open: &mut TrailedOpenListIterator<usize>, index: usize) {
 		let actions = adapter.get_trailing_actions();
 		let _ = rev_open.close(actions, |&e, i| self.edges[e].in_index = i);
+		let &b = &self.edges[index].bool_var.unwrap();
 		let &from = &self.edges[index].from;
+		let bool_index = self.edges[index].bool_index;
 		let out_index = self.edges[index].out_index;
-		let _ = self.nodes[from].node.borrow_mut().open_edges.close(actions, out_index, |&e, i| self.edges[e].out_index = i);
+		let was_open = self.bool_implications[b].borrow_mut().close(actions, bool_index, |&e, i| self.edges[e].bool_index = i) && 
+			self.nodes[from].node.borrow_mut().open_edges.close(actions, out_index, |&e, i| self.edges[e].out_index = i);
+		debug_assert!(was_open);
 		let _ = actions.set_trailed_int(self.open_imp_edges, actions.get_trailed_int(self.open_imp_edges) - 1);
 	}
 
@@ -612,6 +645,127 @@ impl DifferenceLogicGraph {
 			self.nodes[node].node.borrow_mut().upper_bound = None;
 		}
 		ub_updates.clear();
+	}
+
+	/// Compute initial pi values by assuming an additional vertex with a 0-cost path to every other
+	/// vertex and applying Bellman-Ford. Fail if a negative cycle is detected.
+	fn bellman_ford_init_pi<A: ModelAdapter<ReformulationError>>(&mut self, adapter: &mut A) -> Result<(), ReformulationError> {
+		trace!("Calculating initial pi values.");
+		let mut distance = vec![0; self.nodes.len() + 1];
+		//let mut predecessor = vec![self.nodes.len(); self.nodes.len() + 1];
+		let mut changed = false;
+		for _ in 0..self.nodes.len() {  // TODO fail faster in case of negative cycle?
+			for node in self.nodes.iter() {
+				for &edge in node.node.borrow().edges.iter(adapter.get_trailing_actions()) {
+					let edge = &self.edges[edge];
+					if distance[edge.from] + edge.val < distance[edge.to] {
+						distance[edge.to] = distance[edge.from] + edge.val;
+						//predecessor[edge.to] = edge.from;
+						changed = true;
+					}
+				}
+			}
+			if !changed {
+				break;
+			}
+		}
+		if changed {
+			for node in self.nodes.iter() {
+				for &edge in node.node.borrow().edges.iter(adapter.get_trailing_actions()) {
+					let edge = &self.edges[edge];
+					if distance[edge.from] + edge.val < distance[edge.to] {
+						trace!("Found negative cycle!");
+						return Err(ReformulationError::TrivialUnsatisfiable);  // TODO output cycle?
+					}
+				}
+			}
+		}
+		for node in self.nodes.iter() {
+			node.node.borrow_mut().pi = distance[node.var];
+		}
+		Ok(())
+	}
+
+	/// Use Johnson's algorithm to get all pairs of shortest paths. Remove edges not used in any 
+	/// shortest path, close implied edges if possible.
+	fn johnson_full<A: ModelAdapter<ReformulationError>>(&mut self, adapter: &mut A) -> Result<(), ReformulationError> {
+
+		trace!("Starting full dijkstra");
+		let mut distances = vec![vec![IntVal::MAX; self.nodes.len()]; self.nodes.len()];
+		let mut queue = PriorityQueue::default();
+		
+		for i in 0..self.nodes.len() {
+			self.reset_visit();
+			let _ = queue.push(i, Reverse(0));
+			while !queue.is_empty() {
+				let (s, Reverse(dist)) = queue.pop().unwrap();
+				self.visit(s);
+				let node_s = self.nodes[s].node.borrow();
+				//trace!("dijkstra on current node {s:?} with dist {dist}");
+				for &index in node_s.edges.iter(adapter.get_trailing_actions()) {
+					let edge = &self.edges[index];
+					let node_t = self.nodes[edge.to].node.borrow();
+					let new_dist = dist + edge.val + node_s.pi - node_t.pi;
+					if !node_t.visited {
+						let prev = queue.push_increase(edge.to, Reverse(new_dist));
+						if prev.map_or(true, |Reverse(old_dist)| new_dist < old_dist) {
+							distances[i][edge.to] = new_dist - node_s.pi + node_t.pi;
+						}
+						//trace!("dijkstra adding node {:?} with dist {new_dist}", target.var);
+					}
+				}
+			}
+		}
+		
+		trace!("Checking impact on edges");  // TODO can / should we eliminate different paths with the same length?
+		for i in 0..self.nodes.len() {
+			let temp_node = self.nodes[i].clone();
+			let mut node_ref = temp_node.node.borrow_mut();
+			
+			let mut j = 0;
+			while j < node_ref.edges.len(adapter.get_trailing_actions()) {
+				let edge = &self.edges[*node_ref.edges.index(adapter.get_trailing_actions(), j)];
+				if distances[edge.from][edge.to] < edge.val {
+					trace!("Global edge {edge:?} is redundant, shortest path of length {} found", distances[edge.from][edge.to]);
+					let _ = node_ref.edges.swap_remove(adapter.get_trailing_actions(), j);
+				} else {
+					j += 1;
+				}
+			}
+
+			let mut j = 0;
+			while j < node_ref.reverse_edges.len(adapter.get_trailing_actions()) {
+				let edge = &self.edges[*node_ref.reverse_edges.index(adapter.get_trailing_actions(), j)];
+				if distances[edge.from][edge.to] < edge.val {
+					trace!("Global edge {edge:?} is redundant, shortest path of length {} found", distances[edge.from][edge.to]);
+					let _ = node_ref.reverse_edges.swap_remove(adapter.get_trailing_actions(), j);
+				} else { 
+					j += 1;
+				}
+			}
+			
+			let mut open = node_ref.open_edges.iter(adapter.get_trailing_actions());
+			while let Some(&index) = open.next() {
+				let edge = &self.edges[index];
+				if distances[edge.from][edge.to] < edge.val {
+					trace!("Implied edge {edge:?} is redundant, shortest path of length {} found", distances[edge.from][edge.to]);
+					self.close_imp_edge_forward(adapter, &mut open, index);
+				}
+			}
+
+			let mut rev_open = node_ref.open_reverse_edges.iter(adapter.get_trailing_actions());
+			while let Some(&index) = rev_open.next() {
+				let edge = &self.edges[index];
+				if distances[edge.to][edge.from] < -edge.val - 1 {
+					trace!("Implied edge {edge:?} is falsified, opposite shortest path of length {} found", distances[edge.to][edge.from]);
+					adapter.set_bool_false(edge.bool_var, edge.from, 0, edge.to, 0)?;  // TODO invalid reason, but also not needed at this point -> different method?
+					self.close_imp_edge_backward(adapter, &mut rev_open, index);
+				}
+			}
+		}
+		
+		Ok(())
+
 	}
 
 	/// Get the reason for a cycle of negative lengths (all booleans along the cycle).
@@ -899,10 +1053,10 @@ impl DifferenceLogicGraph {
 	}
 
 
-	/// Propagate new bounds and fixed booleans.
-	fn propagate<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, state: &mut DifferenceLogicState) -> Result<(), E> {
-
-		trace!("Propagating bounds on lb changes {:?}, ub changes {:?}, fixed booleans {:?}.", state.lower_bound_changes, state.upper_bound_changes, state.fixed_bools);
+	/// Propagate new bounds.
+	fn propagate_bounds<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, state: &mut DifferenceLogicState) -> Result<(), E> {
+		
+		trace!("Propagating bounds on lb changes {:?}, ub changes {:?}.", state.lower_bound_changes, state.upper_bound_changes);
 		self.reset_lb_updates(&mut state.lb_updates);
 		self.reset_ub_updates(&mut state.ub_updates);
 
@@ -918,7 +1072,6 @@ impl DifferenceLogicGraph {
 
 		// Consequences of lower bound updates on open implied constraints
 		for &n in state.lb_updates.iter() {
-
 			let node_ref = self.nodes[n].clone();
 			let mut node = node_ref.node.borrow_mut();
 			let lb = node.lower_bound.unwrap();
@@ -944,12 +1097,10 @@ impl DifferenceLogicGraph {
 					self.close_imp_edge_backward(adapter, &mut rev_open, index);
 				}
 			}
-
 		}
 
 		// Consequences of upper bound updates on open implied constraints
 		for &n in state.ub_updates.iter() {
-
 			let node_ref = self.nodes[n].clone();
 			let mut node = node_ref.node.borrow_mut();
 			let ub = node.upper_bound.unwrap();
@@ -975,54 +1126,62 @@ impl DifferenceLogicGraph {
 					self.close_imp_edge_backward(adapter, &mut rev_open, index);
 				}
 			}
-
 		}
 
+		state.reset_bound_changes();
+		Ok(())
+		
+	}
+
+	/// Propagate fixed booleans.
+	fn propagate_booleans<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, state: &mut DifferenceLogicState) -> Result<(), E> {
+		
+		trace!("Propagating fixed booleans {:?}.", state.fixed_bools);
 		// Handle fixed booleans
 		for &b in state.fixed_bools.iter() {
 			let val = adapter.get_bool_val(b).unwrap();
 			trace!("Boolean b{b:?} fixed to {val}");
 			if val {
 				// Consequences of setting the boolean to true -> add all implied edges.
-				for &index in state.bool_implications[b].iter() {
-					let closed_now = self.close_imp_edge(adapter, index);
-					trace!("Processing adding edge i{:?} - i{:?} <= {:?} (open: {closed_now})", self.edges[index].from, self.edges[index].to, self.edges[index].val);
-					// Only continue if the edge was not already closed.
-					if closed_now {
-						// If the edge can't be added, a conflict will be generated
-						if self.inc_sat(adapter, index)? {
-							self.activate_imp_edge(adapter, index);
-							// If the edge was added, check the status of open edges.
-							self.inc_imp(adapter, index)?;
-							let edge = &self.edges[index];
-							let lb_y = -edge.val + self.get_cur_lower_bound(adapter, edge.from);
-							if lb_y > self.get_cur_lower_bound(adapter, edge.to) {
-								// New edge caused lower bound change.
-								adapter.set_int_lower_bound(self.nodes[edge.to].var, lb_y, Some(b), self.nodes[edge.from].var, self.get_cur_lower_bound(adapter, edge.from))?;
-								self.update_lb(edge.to, lb_y, &mut state.lb_updates);
-							}
-							let ub_x = edge.val + self.get_cur_upper_bound(adapter, edge.to);
-							if ub_x < self.get_cur_upper_bound(adapter, edge.from) {
-								// New edge caused upper bound change.
-								adapter.set_int_upper_bound(self.nodes[edge.from].var, ub_x, Some(b), self.nodes[edge.to].var, self.get_cur_upper_bound(adapter, edge.to))?;
-								self.update_ub(edge.from, ub_x, &mut state.ub_updates);
-							}
+				let list_ref = self.bool_implications[b].clone();
+				let mut mut_list = list_ref.borrow_mut();
+				let mut open = mut_list.iter(adapter.get_trailing_actions());
+				while let Some(&index) = open.next() {
+					trace!("Processing adding edge {:?}", self.edges[index]);
+					self.close_imp_edge_boolean(adapter, &mut open, index);
+					// If the edge can't be added, a conflict will be generated
+					if self.inc_sat(adapter, index)? {
+						self.activate_imp_edge(adapter, index);
+						// If the edge was added, check the status of open edges.
+						self.inc_imp(adapter, index)?;
+						let edge = &self.edges[index];
+						let lb_y = -edge.val + self.get_cur_lower_bound(adapter, edge.from);
+						if lb_y > self.get_cur_lower_bound(adapter, edge.to) {
+							// New edge caused lower bound change.
+							adapter.set_int_lower_bound(self.nodes[edge.to].var, lb_y, Some(b), self.nodes[edge.from].var, self.get_cur_lower_bound(adapter, edge.from))?;
+							self.update_lb(edge.to, lb_y, &mut state.lb_updates);
+						}
+						let ub_x = edge.val + self.get_cur_upper_bound(adapter, edge.to);
+						if ub_x < self.get_cur_upper_bound(adapter, edge.from) {
+							// New edge caused upper bound change.
+							adapter.set_int_upper_bound(self.nodes[edge.from].var, ub_x, Some(b), self.nodes[edge.to].var, self.get_cur_upper_bound(adapter, edge.to))?;
+							self.update_ub(edge.from, ub_x, &mut state.ub_updates);
 						}
 					}
 				}
 			} else {
 				// Consequences of setting the boolean to false -> close all implied edges.
-				for &index in state.bool_implications[b].iter() {
-					let edge_closed = self.close_imp_edge(adapter, index);
-					trace!("Closing edge i{:?} - i{:?} <= {:?} (open: {edge_closed})", self.edges[index].from, self.edges[index].to, self.edges[index].val);
+				let list_ref = self.bool_implications[b].clone();
+				let mut mut_list = list_ref.borrow_mut();
+				let mut open = mut_list.iter(adapter.get_trailing_actions());
+				while let Some(&index) = open.next() {
+					trace!("Closing edge {:?})", self.edges[index]);
+					self.close_imp_edge_boolean(adapter, &mut open, index);
 				}
 			}
 		}
 
-		//trace!("Current graph after implied checks: {}", self.graph.to_dot(actions));
-
-		// All state changes are done, new ones as a consequence will be propagated
-		state.reset_var_changes();
+		state.reset_bool_changes();
 		Ok(())
 
 	}
@@ -1156,8 +1315,6 @@ pub struct DifferenceLogicState {
 	lb_updates: Vec<usize>,
 	/// List of variables with updated upper bounds.
 	ub_updates: Vec<usize>,
-	/// Map from boolean indices to their implied edges.
-	bool_implications: Vec<Vec<usize>>,
 	/// List of integer variable indices with reported lower bound changes.
 	lower_bound_changes: IndexSet<usize>,
 	/// List of integer variable indices with reported upper bound changes.
@@ -1168,20 +1325,22 @@ pub struct DifferenceLogicState {
 
 impl DifferenceLogicState {
 	
-	fn new(int_vars: usize, bool_vars: usize) -> Self {
+	fn new(int_vars: usize) -> Self {
 		Self {
 			lb_updates: Vec::new(),
 			ub_updates: Vec::new(),
-			bool_implications: (0..bool_vars).into_iter().map(|_| Vec::new()).collect(),
 			lower_bound_changes: (0..int_vars).into_iter().collect(),
 			upper_bound_changes: (0..int_vars).into_iter().collect(),
 			fixed_bools: IndexSet::default(),
 		}
 	}
-	
-	fn reset_var_changes(&mut self) {
+
+	fn reset_bound_changes(&mut self) {
 		self.lower_bound_changes.clear();
 		self.upper_bound_changes.clear();
+	}
+
+	fn reset_bool_changes(&mut self) {
 		self.fixed_bools.clear();
 	}	
 	
@@ -1228,7 +1387,6 @@ impl DifferenceLogicBounds {
 			solver.advise_on_bool_change(prop, v, i as u64);
 		}
 		solver.advise_on_backtrack(prop);
-		solver.enqueue_now(prop); // TODO remove once initial simplification works
 
 	}
 
@@ -1257,15 +1415,20 @@ where
 
 	fn advise_of_backtrack(&mut self, _actions: &mut E) -> bool {
 		trace!("Backtrack advise");
-		self.state.reset_var_changes();
+		self.state.reset_bound_changes();
+		self.state.reset_bool_changes();
 		false
 	}
 
 	#[tracing::instrument(name = "difference_logic", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		let mut model_adapter = SolverModelAdapter::new(actions, &self.int_vars, &self.bool_vars);
-		if let Err(e) = self.graph.propagate(&mut model_adapter, &mut self.state) {
-			self.state.reset_var_changes();
+		if let Err(e) = self.graph.propagate_bounds(&mut model_adapter, &mut self.state) {
+			self.state.reset_bound_changes();
+			return Err(e);
+		}
+		if let Err(e) = self.graph.propagate_booleans(&mut model_adapter, &mut self.state) {
+			self.state.reset_bool_changes();
 			return Err(e);
 		}
 		Ok(())
@@ -1300,16 +1463,17 @@ mod tests {
 	#[traced_test]
 	fn test_relevant_dijkstra() {  // TODO test other methods like this
 		let mut prb = Model::default();
-		let (mut slv, _): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+		let b = prb.new_bool_var();
+		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let int_vars: Vec<_> = (0..10).into_iter().map(|_| IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=10]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		)).collect();
-		let bool_vars = vec![];
+		let bool_vars = vec![map.get_bool(&mut slv, b)];
 		let mut initial_trail = InitialTrail::new();
-		let mut graph = DifferenceLogicGraph::new(&mut initial_trail, int_vars.len());
+		let mut graph = DifferenceLogicGraph::new(&mut initial_trail, int_vars.len(), bool_vars.len());
 		initial_trail.init_trail(&mut slv);
 		graph.init_trail(&mut initial_trail);
 		let (solver, engine) = slv.oracle.access_solving();
@@ -1322,7 +1486,7 @@ mod tests {
 							  (7, 9, 1), (8, 9, 1)] {
 			let _ = graph.new_edge(&mut model_adapter, DiffEdge::new(x, y, d, None));
 		}
-		let new_index = graph.new_imp_edge(&mut model_adapter, DiffEdge::new(4, 5, 1, None));
+		let new_index = graph.new_imp_edge(&mut model_adapter, DiffEdge::new(4, 5, 1, Some(0)));
 
 		let outgoing_x = graph.dijkstra_relevant(&mut model_adapter, new_index, false);
 		trace!("{:?}", outgoing_x);
@@ -1350,7 +1514,7 @@ mod tests {
 		)).collect();
 		let bool_vars = bools.into_iter().map(|b| map.get_bool(&mut slv, b)).collect_vec();
 		let mut initial_trail = InitialTrail::new();
-		let mut graph = DifferenceLogicGraph::new(&mut initial_trail, int_vars.len());
+		let mut graph = DifferenceLogicGraph::new(&mut initial_trail, int_vars.len(), bool_vars.len());
 		initial_trail.init_trail(&mut slv);
 		graph.init_trail(&mut initial_trail);
 		let (solver, engine) = slv.oracle.access_solving();
@@ -1384,7 +1548,7 @@ mod tests {
 		)).collect();
 		let bool_vars = bools.into_iter().map(|b| map.get_bool(&mut slv, b)).collect_vec();
 		let mut initial_trail = InitialTrail::new();
-		let mut graph = DifferenceLogicGraph::new(&mut initial_trail, int_vars.len());
+		let mut graph = DifferenceLogicGraph::new(&mut initial_trail, int_vars.len(), bool_vars.len());
 		initial_trail.init_trail(&mut slv);
 		graph.init_trail(&mut initial_trail);
 		let (solver, engine) = slv.oracle.access_solving();
@@ -1412,7 +1576,6 @@ mod tests {
 		let mut prb = Model::default();
 		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=5]));
 		let b = prb.new_bool_var();
-		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let mut diff_logic = DifferenceLogic::new(PriorityLevel::Low);
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[0], int_vars[1], -2));
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[1], int_vars[2], 3));
@@ -1420,6 +1583,8 @@ mod tests {
 		diff_logic.add(DifferenceLogicConstraint::Implied(b, int_vars[0], int_vars[2], -2));
 		let _ = diff_logic.process(&mut prb, 2);  //TODO adapt level when definition changes
 		assert!(diff_logic.simplify(&mut prb).is_ok());
+
+		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let mut actions = ReformulationContext {
 			slv: &mut slv,
 			map: &map,
@@ -1445,7 +1610,6 @@ mod tests {
 		let int_vars4 = prb.new_int_vars(2, RangeList::from_iter([1..=4]));
 		let b = prb.new_bool_var();
 		let c = prb.new_bool_var();
-		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let mut diff_logic = DifferenceLogic::new(PriorityLevel::Low);
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars5[0], int_vars5[1], -2));
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars5[1], int_vars5[2], 3));
@@ -1459,6 +1623,8 @@ mod tests {
 		diff_logic.add(DifferenceLogicConstraint::Implied(!c, int_vars4[1], int_vars5[1], -2));
 		let _ = diff_logic.process(&mut prb, 2);  //TODO adapt level when definition changes
 		assert!(diff_logic.simplify(&mut prb).is_ok());
+
+		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let mut actions = ReformulationContext {
 			slv: &mut slv,
 			map: &map,

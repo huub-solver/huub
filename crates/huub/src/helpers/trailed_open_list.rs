@@ -104,7 +104,7 @@ pub(crate) struct TrailedOpenListIterator<'a, T> {
 	index: usize,
 }
 
-impl<T> TrailedOpenListIterator<'_, T> {
+impl<T> TrailedOpenListIterator<'_, T> {  // TODO implement actual Iterator trait (lifetimes...)
 
 	pub(crate) fn next(&mut self) -> Option<&T> {
 		if self.index >= self.list.len() {
