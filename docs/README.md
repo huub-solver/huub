@@ -27,7 +27,8 @@ Each file is exposed as a route based on its file name.
 
 Custom CSS styles are located in `src/styles/`.
 
-Static assets, like favicons, can be placed in the `public/` directory.
+Static assets that do not need to be processed, like favicons, can be placed in
+the `public/` directory.
 
 ## 🧞 Commands
 

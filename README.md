@@ -1,6 +1,6 @@
 <p align="center">
   <img
-    src="https://dekker.one/_next/static/media/huub.8da5f34e.svg"
+    src="https://huub.solutions/logo.svg"
     alt="Huub logo"
     height="350px">
 </p>
