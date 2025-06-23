@@ -36,6 +36,12 @@ impl<T> TrailedList<T> {
 		self.is_trailed = true;
 	}
 
+	/// Remove the trailed infrastructure for this list, only possible if not initialized.
+	pub(crate) fn remove_trail(&mut self, initial_trail: &mut InitialTrail) {
+		assert!(!self.is_trailed, "removal is only allowed before trailing");
+		initial_trail.remove(self.size);
+	}
+
 	/// Return an iterator over the active elements of the list.
 	pub(crate) fn iter<A: TrailingActions + ?Sized>(&self, actions: &A) -> Iter<'_, T> {
 		let len = self.len(actions);
@@ -71,7 +77,7 @@ impl<T> TrailedList<T> {
 	pub(crate) fn swap_remove<A: TrailingActions + ?Sized>(&mut self, actions: &mut A, index: usize) -> &T {
 		assert!(!self.is_trailed, "removal is only allowed before trailing");
 		let len = self.len(actions);
-		assert!(index < len, "index out of bounds");
+		assert!(index < len, "index {index} out of bounds {len}");
 		self.list.swap(index, len - 1);
 		let _ = actions.set_trailed_int(self.size, len as IntVal - 1);
 		&self.list[len - 1]

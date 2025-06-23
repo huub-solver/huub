@@ -32,6 +32,12 @@ impl<T> TrailedOpenList<T> {
 		self.closed = initial_trail.map_to_trail(self.closed);
 		self.is_trailed = true;
 	}
+
+	/// Remove the trailed infrastructure for this list, only possible if not initialized.
+	pub(crate) fn remove_trail(&mut self, initial_trail: &mut InitialTrail) {
+		assert!(!self.is_trailed, "removal is only allowed before trailing");
+		initial_trail.remove(self.closed);
+	}
 	
 	/// Return an iterator over the open elements of the list.
 	pub(crate) fn iter<A: TrailingActions + ?Sized>(&mut self, actions: &A) -> TrailedOpenListIterator<T> {
