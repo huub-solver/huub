@@ -257,7 +257,7 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 			let _ = graph.new_edge(&mut model_adapter, DiffEdge::new(x, y, d, Some(b)));
 		}
 		
-		trace!("Starting initial propagation");
+		trace!("Starting initial propagation with graph: {}", graph.to_dot(&mut model_adapter));
 		graph.bellman_ford_init_pi(&mut model_adapter)?;
 		graph.propagate_bounds(&mut model_adapter, &mut state)?;
 		graph.check_remove_fixed_nodes(&mut model_adapter);  //TODO position here? Or just at the end?
@@ -746,6 +746,7 @@ impl DifferenceLogicGraph {
 				continue;
 			}
 			self.reset_visit();
+			let pi_i = self.borrow_node(i).pi;
 			let _ = queue.push(i, Reverse(0));
 			while !queue.is_empty() {
 				let (s, Reverse(dist)) = queue.pop().unwrap();
@@ -759,7 +760,7 @@ impl DifferenceLogicGraph {
 					if !node_t.visited {
 						let prev = queue.push_increase(edge.to, Reverse(new_dist));
 						if prev.map_or(true, |Reverse(old_dist)| new_dist < old_dist) {
-							distances[i][edge.to] = new_dist - node_s.pi + node_t.pi;
+							distances[i][edge.to] = new_dist - pi_i + node_t.pi;
 						}
 						//trace!("dijkstra adding node {:?} with dist {new_dist}", target.var);
 					}
@@ -767,8 +768,12 @@ impl DifferenceLogicGraph {
 			}
 		}
 		
+		trace!("Distances:");
+		for (i, row) in distances.iter().enumerate() {
+			trace!("{i}: {:?}", row.iter().enumerate().filter(|(_, &val)| val < IntVal::MAX).collect_vec());
+		}
 		trace!("Checking impact on edges");  // TODO can / should we eliminate different paths with the same length? There might even be duplicate edges between the same nodes!
-		for i in 0..self.nodes.len() {
+		for i in 0..self.nodes.len() {  // TODO cycles of length 0!
 			if self.nodes[i].is_none() {  // TODO?
 				continue;
 			}
@@ -790,7 +795,6 @@ impl DifferenceLogicGraph {
 			while j < node_ref.reverse_edges.len(adapter.get_trailing_actions()) {
 				let edge = &self.edges[*node_ref.reverse_edges.index(adapter.get_trailing_actions(), j)];
 				if distances[edge.from][edge.to] < edge.val {
-					trace!("Global edge {edge:?} is redundant, shortest path of length {} found", distances[edge.from][edge.to]);
 					let _ = node_ref.reverse_edges.swap_remove(adapter.get_trailing_actions(), j);
 				} else { 
 					j += 1;
@@ -809,7 +813,7 @@ impl DifferenceLogicGraph {
 			let mut rev_open = node_ref.open_reverse_edges.iter(adapter.get_trailing_actions());
 			while let Some(&index) = rev_open.next() {
 				let edge = &self.edges[index];
-				if distances[edge.to][edge.from] < -edge.val - 1 {
+				if distances[edge.to][edge.from] < -edge.val {
 					trace!("Implied edge {edge:?} is falsified, opposite shortest path of length {} found", distances[edge.to][edge.from]);
 					adapter.set_bool_false(edge.bool_var, edge.from, 0, edge.to, 0)?;  // TODO invalid reason, but also not needed at this point -> different method?
 					self.close_imp_edge_backward(adapter, &mut rev_open, index);
