@@ -19,7 +19,7 @@ pub(crate) struct TrailedList<T> {
 	is_trailed: bool,
 }
 
-impl<T> TrailedList<T> {
+impl<T: PartialEq> TrailedList<T> {
 
 	pub(crate) fn new(initial_trail: &mut InitialTrail) -> Self {
 		Self {
@@ -70,6 +70,15 @@ impl<T> TrailedList<T> {
 		}
 		let prev = actions.set_trailed_int(self.size, len as IntVal + 1);
 		debug_assert_eq!(prev, len as IntVal);
+	}
+
+	/// Remove the given element by swapping it out of the active range.
+	/// Can only be called before trailing is initialized.
+	pub(crate) fn swap_remove_element<A: TrailingActions + ?Sized>(&mut self, actions: &mut A, element: &T) -> &T {
+		assert!(!self.is_trailed, "removal is only allowed before trailing");
+		let len = self.len(actions);
+		let index = self.list.iter().take(len).position(|x| *x == *element).unwrap();
+		self.swap_remove(actions, index)
 	}
 	
 	/// Remove the element at the given index by swapping it out of the active range. 

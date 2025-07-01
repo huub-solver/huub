@@ -258,6 +258,21 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 		}
 		
 		trace!("Starting initial propagation with graph: {}", graph.to_dot(&mut model_adapter));
+		trace!("Implied edges:");
+		for node in graph.nodes.iter() {
+			if let Some(node) = node {
+				let mut node_ref = node.borrow_mut();
+				let mut open = node_ref.open_edges.iter(model_adapter.get_trailing_actions());
+				while let Some(&edge) = open.next() {
+					trace!("Outgoing: {:?}", graph.edges[edge]);
+				}
+				let mut rev_open = node_ref.open_reverse_edges.iter(model_adapter.get_trailing_actions());
+				while let Some(&edge) = rev_open.next() {
+					trace!("Incoming: {:?}", graph.edges[edge]);
+				}
+			}
+		}
+		
 		graph.bellman_ford_init_pi(&mut model_adapter)?;
 		graph.propagate_bounds(&mut model_adapter, &mut state)?;
 		graph.check_remove_fixed_nodes(&mut model_adapter);  //TODO position here? Or just at the end?
@@ -267,14 +282,20 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 		graph.check_remove_isolated_booleans(&mut model_adapter);
 
 		trace!("Initial graph: {}", graph.to_dot(&mut model_adapter));
-		/*trace!("Implied edges:");
+		trace!("Implied edges:");
 		for node in graph.nodes.iter() {
-			let mut node_ref = node.node.borrow_mut();
-			let mut open = node_ref.open_edges.iter(model_adapter.get_trailing_actions());
-			while let Some(&edge) = open.next() {
-				trace!("{:?}", graph.edges[edge]);
+			if let Some(node) = node {
+				let mut node_ref = node.borrow_mut();
+				let mut open = node_ref.open_edges.iter(model_adapter.get_trailing_actions());
+				while let Some(&edge) = open.next() {
+					trace!("Outgoing: {:?}", graph.edges[edge]);
+				}
+				let mut rev_open = node_ref.open_reverse_edges.iter(model_adapter.get_trailing_actions());
+				while let Some(&edge) = rev_open.next() {
+					trace!("Incoming: {:?}", graph.edges[edge]);
+				}
 			}
-		}*/
+		}
 
 		self.initial_graph = Some(DifferenceLogicInitial { initial_trail, graph, state, int_vars, bool_vars });
 		// TODO if all vars are fixed return subsumed
@@ -837,17 +858,17 @@ impl DifferenceLogicGraph {
 				let val = adapter.get_int_lower_bound(n);
 				let temp_node = self.get_node_clone(n);
 				let mut node_ref = temp_node.borrow_mut();
-				for &edge in node_ref.edges.iter(adapter.get_trailing_actions()) {
-					let edge = &self.edges[edge];
+				for &e in node_ref.edges.iter(adapter.get_trailing_actions()) {
+					let edge = &self.edges[e];
 					trace!("Removing outgoing edge {edge:?}");
 					let mut to = self.borrow_node_mut(edge.to);
-					let _ = to.reverse_edges.swap_remove(adapter.get_trailing_actions(), edge.in_index);
+					let _ = to.reverse_edges.swap_remove_element(adapter.get_trailing_actions(), &e);
 				}
-				for &edge in node_ref.reverse_edges.iter(adapter.get_trailing_actions()) {
-					let edge = &self.edges[edge];
+				for &e in node_ref.reverse_edges.iter(adapter.get_trailing_actions()) {
+					let edge = &self.edges[e];
 					trace!("Removing incoming edge {edge:?}");
 					let mut from = self.borrow_node_mut(edge.from);
-					let _ = from.edges.swap_remove(adapter.get_trailing_actions(), edge.out_index);
+					let _ = from.edges.swap_remove_element(adapter.get_trailing_actions(), &e);
 				}
 				let mut open = node_ref.open_edges.iter(adapter.get_trailing_actions());
 				while let Some(&e) = open.next() {

@@ -123,7 +123,11 @@ impl<T> TrailedOpenListIterator<'_, T> {  // TODO implement actual Iterator trai
 	/// Close the element returned by the last call to [TrailedOpenListIterator::next].
 	pub(crate) fn close<A, F>(&mut self, actions: &mut A, idx_update: F) -> bool
 	where A: TrailingActions + ?Sized, F: FnMut(&T, usize) {
-		self.list.close(actions, self.index - 1, idx_update)
+		let ret = self.list.close(actions, self.index - 1, idx_update);
+		if ret && !self.list.is_trailed {
+			self.index -= 1;
+		}
+		ret
 	}
 
 }
