@@ -258,7 +258,7 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 		}
 		
 		trace!("Starting initial propagation with graph: {}", graph.to_dot(&mut model_adapter));
-		trace!("Implied edges:");
+		/*trace!("Implied edges:");
 		for node in graph.nodes.iter() {
 			if let Some(node) = node {
 				let mut node_ref = node.borrow_mut();
@@ -271,18 +271,18 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 					trace!("Incoming: {:?}", graph.edges[edge]);
 				}
 			}
-		}
+		}*/
 		
 		graph.bellman_ford_init_pi(&mut model_adapter)?;
 		graph.propagate_bounds(&mut model_adapter, &mut state)?;
 		graph.check_remove_fixed_nodes(&mut model_adapter);  //TODO position here? Or just at the end?
-		graph.propagate_booleans(&mut model_adapter, &mut state, false)?;
+		graph.propagate_booleans(&mut model_adapter, &mut state, false)?;  // TODO this stage does not know about the fixed booleans, so check them manually? Or make sure we requeue?
 		graph.johnson_full(&mut model_adapter)?;
 		graph.check_remove_isolated_nodes(&mut model_adapter);
 		graph.check_remove_isolated_booleans(&mut model_adapter);
 
 		trace!("Initial graph: {}", graph.to_dot(&mut model_adapter));
-		trace!("Implied edges:");
+		/*trace!("Implied edges:");
 		for node in graph.nodes.iter() {
 			if let Some(node) = node {
 				let mut node_ref = node.borrow_mut();
@@ -295,8 +295,9 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 					trace!("Incoming: {:?}", graph.edges[edge]);
 				}
 			}
-		}
+		}*/
 
+		// TODO deal with transformations of nodes
 		self.initial_graph = Some(DifferenceLogicInitial { initial_trail, graph, state, int_vars, bool_vars });
 		// TODO if all vars are fixed return subsumed
 		// TODO requeue for more simplification?
@@ -311,7 +312,7 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 		initial_graph.initial_trail.init_trail(slv);
 		initial_graph.graph.init_trail(&mut initial_graph.initial_trail);
 		// TODO some variables are not relevant any more (fixed), do not set advisors for them (also for bools)
-		let int_vars = initial_graph.int_vars.iter().map(|&v| slv.get_solver_int(v)).collect_vec();  // TODO variables might be unified here but not known before, need to check!
+		let int_vars = initial_graph.int_vars.iter().map(|&v| slv.get_solver_int(v)).collect_vec();  // TODO variables might be unified here but not known before, need to check! Make sure no constants are in graph!
 		/*trace!("Transformed int vars:");
 		for &v in int_vars.iter() {
 			trace!("{v:?}: lb {:?}, ub: {:?}", slv.get_int_lower_bound(v), slv.get_int_upper_bound(v));
@@ -610,17 +611,30 @@ impl DifferenceLogicGraph {
 	}
 
 	/// Close the implied edge given by the index while iterating implied edges via the boolean.
-	fn close_imp_edge_boolean<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, open: &mut TrailedOpenListIterator<usize>, index: usize) {
+	/// Might already be closed from a different side, in which case false is returned.
+	fn close_imp_edge_boolean<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, open: &mut TrailedOpenListIterator<usize>, index: usize) -> bool {
 		let actions = adapter.get_trailing_actions();
 		let _ = open.close(actions, |&e, i| self.edges[e].bool_index = i);
 		let &to = &self.edges[index].to;
 		let &from = &self.edges[index].from;
 		let out_index = self.edges[index].out_index;
 		let in_index = self.edges[index].in_index;
-		let was_open = self.get_node_clone(from).borrow_mut().open_edges.close(actions, out_index, |&e, i| self.edges[e].out_index = i) &&
-			self.get_node_clone(to).borrow_mut().open_reverse_edges.close(actions, in_index, |&e, i| self.edges[e].in_index = i);
-		debug_assert!(was_open);
-		let _ = actions.set_trailed_int(self.open_imp_edges, actions.get_trailed_int(self.open_imp_edges) - 1);
+		let was_open1 = self.get_node_clone(from).borrow_mut().open_edges.close(actions, out_index, |&e, i| self.edges[e].out_index = i);
+		let was_open2 = self.get_node_clone(to).borrow_mut().open_reverse_edges.close(actions, in_index, |&e, i| self.edges[e].in_index = i);
+		debug_assert_eq!(was_open1, was_open2);
+		let was_open = was_open1 | was_open2;
+		if !was_open  {
+			let _ = actions.set_trailed_int(self.open_imp_edges, actions.get_trailed_int(self.open_imp_edges) - 1);
+		}
+		was_open
+	}
+	
+	/// Try to close the edge on the boolean side, return None if not possible.
+	fn try_close_imp_edge_boolean<T: TrailingActions + ?Sized>(&mut self, actions: &mut T, b: usize, bool_index: usize) -> Option<bool> {
+		if let Ok(mut bool_mut) = self.get_implications_clone(b).try_borrow_mut() {
+			return Some(bool_mut.close(actions, bool_index, |&e, i| self.edges[e].bool_index = i));
+		}
+		None
 	}
 
 	/// Close the implied edge given by the index while iterating open edges in forward direction.
@@ -631,7 +645,7 @@ impl DifferenceLogicGraph {
 		let &to = &self.edges[index].to;
 		let bool_index = self.edges[index].bool_index;
 		let in_index = self.edges[index].in_index;
-		let was_open = self.get_implications_clone(b).borrow_mut().close(actions, bool_index, |&e, i| self.edges[e].bool_index = i) &&
+		let was_open = self.try_close_imp_edge_boolean(actions, b, bool_index).unwrap_or(true) &
 			self.get_node_clone(to).borrow_mut().open_reverse_edges.close(actions, in_index, |&e, i| self.edges[e].in_index = i);
 		debug_assert!(was_open);
 		let _ = actions.set_trailed_int(self.open_imp_edges, actions.get_trailed_int(self.open_imp_edges) - 1);
@@ -645,7 +659,7 @@ impl DifferenceLogicGraph {
 		let &from = &self.edges[index].from;
 		let bool_index = self.edges[index].bool_index;
 		let out_index = self.edges[index].out_index;
-		let was_open = self.get_implications_clone(b).borrow_mut().close(actions, bool_index, |&e, i| self.edges[e].bool_index = i) && 
+		let was_open = self.try_close_imp_edge_boolean(actions, b, bool_index).unwrap_or(true) &
 			self.get_node_clone(from).borrow_mut().open_edges.close(actions, out_index, |&e, i| self.edges[e].out_index = i);
 		debug_assert!(was_open);
 		let _ = actions.set_trailed_int(self.open_imp_edges, actions.get_trailed_int(self.open_imp_edges) - 1);
@@ -796,7 +810,7 @@ impl DifferenceLogicGraph {
 		trace!("Checking impact on edges");  // TODO can / should we eliminate different paths with the same length? There might even be duplicate edges between the same nodes!
 		for i in 0..self.nodes.len() {  // TODO cycles of length 0!
 			if self.nodes[i].is_none() {  // TODO?
-				continue;
+				continue;  // TODO could skip nodes that reach nothing
 			}
 			let temp_node = self.get_node_clone(i);
 			let mut node_ref = temp_node.borrow_mut();
@@ -980,7 +994,7 @@ impl DifferenceLogicGraph {
 		for (var, val) in pi_new {
 			self.borrow_node_mut(var).pi = val;
 		}
-		Ok(true)
+		Ok(true)  // TODO do / should we actually check if it is subsumed?
 	}
 
 	/// Perform dijkstra from the given node to all relevant nodes in the graph, return a map of
@@ -1073,7 +1087,7 @@ impl DifferenceLogicGraph {
 					let edge = &self.edges[index];
 					//trace!("Dealing with {edge:?} (incoming to {temp_node:?}, implied)");
 					if outgoing_v.contains_key(&edge.from) && outgoing_v[&edge.from] + incoming_u[&edge.to] - new_edge_val <= edge.val {
-						trace!("Constraint i{:?} - i{:?} <= {} is implied", edge.from, edge.to, edge.val);
+						trace!("Constraint {edge:?} is implied");
 						self.close_imp_edge_backward(adapter, &mut rev_open, index);
 					}
 				}
@@ -1082,7 +1096,7 @@ impl DifferenceLogicGraph {
 					let edge = &self.edges[index];
 					//trace!("Dealing with {edge:?} (outgoing from {temp_node:?}, reverse)");
 					if outgoing_v.contains_key(&edge.to) && outgoing_v[&edge.to] + incoming_u[&edge.from] - new_edge_val <= -edge.val - 1 { // todo slight double work for reified constraints
-						trace!("Constraint i{:?} - i{:?} <= {} is falsified since inverse is implied", edge.from, edge.to, edge.val);
+						trace!("Constraint {edge:?} is falsified since inverse is implied");
 						fail_indices.push(index);
 						self.close_imp_edge_forward(adapter, &mut open, index);
 					}
@@ -1115,7 +1129,7 @@ impl DifferenceLogicGraph {
 		}
 
 		for index in fail_indices {  // todo check if we want this here or immediately inside the loops?
-			let _ = self.inc_sat(adapter, index)?;
+			let _ = self.inc_sat(adapter, index)?;  // TODO could also try these ones lazy?
 		}
 
 		Ok(())
@@ -1302,9 +1316,12 @@ impl DifferenceLogicGraph {
 				let mut open = mut_list.iter(adapter.get_trailing_actions());
 				while let Some(&index) = open.next() {
 					trace!("Processing adding edge {:?}", self.edges[index]);
-					self.close_imp_edge_boolean(adapter, &mut open, index);
+					if !self.close_imp_edge_boolean(adapter, &mut open, index) {
+						// Indicates that the edge was already closed via inc_imp before.
+						continue;
+					}
 					// If the edge can't be added, a conflict will be generated
-					if self.inc_sat(adapter, index)? {
+					if self.inc_sat(adapter, index)? {  // TODO can we combine adding multiple edges?
 						self.activate_imp_edge(adapter, index);
 						if check_implied {
 							// If the edge was added, check the status of open edges.
@@ -1332,7 +1349,7 @@ impl DifferenceLogicGraph {
 				let mut open = mut_list.iter(adapter.get_trailing_actions());
 				while let Some(&index) = open.next() {
 					trace!("Closing edge {:?})", self.edges[index]);
-					self.close_imp_edge_boolean(adapter, &mut open, index);
+					let _ = self.close_imp_edge_boolean(adapter, &mut open, index);
 				}
 			}
 		}
