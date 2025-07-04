@@ -18,6 +18,7 @@ keywords = ["sat", "lcg", "flatzinc", "minizinc", "optimization"]
 expect-test = "1.5"
 flatzinc-serde = "0.4"
 tracing = "0.1.40"
+xcsp3-serde = "0.1.1"
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"

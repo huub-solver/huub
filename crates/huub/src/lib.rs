@@ -12,25 +12,27 @@
 pub mod actions;
 pub mod branchers;
 pub mod constraints;
+#[cfg(feature = "flatzinc")]
 pub mod flatzinc;
 pub(crate) mod helpers;
 pub mod reformulate;
 pub mod solver;
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(feature = "xcsp3")]
+pub mod xcsp3;
 
 use std::{
 	any::Any,
 	collections::{HashSet, VecDeque},
-	fmt::{Debug, Display},
+	fmt::Debug,
 	hash::Hash,
 	iter::{repeat_n, repeat_with, Sum},
 	mem,
 	num::NonZeroI64,
-	ops::{Add, AddAssign, Deref, Mul, Neg, Not, Sub},
+	ops::{Add, AddAssign, Mul, Neg, Not, Sub, SubAssign},
 };
 
-use flatzinc_serde::FlatZinc;
 use index_vec::{index_vec, IndexVec};
 use itertools::Itertools;
 pub use pindakaas::solver::SlvTermSignal;
@@ -61,7 +63,6 @@ use crate::{
 		int_value_precede::{IntSeqPrecedeChain, IntValuePrecedeChain},
 		BoxedConstraint, Constraint, SimplificationStatus,
 	},
-	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
 	helpers::{linear_transform::LinearTransform, var_from_u32},
 	reformulate::{
 		BoolDecisionDef, BoolDecisionInner, ConstraintStore, Domain, InitConfig, IntDecisionDef,
@@ -846,10 +847,18 @@ impl IntLinExpr {
 impl Add<IntDecision> for IntLinExpr {
 	type Output = IntLinExpr;
 
-	fn add(self, rhs: IntDecision) -> Self::Output {
-		let mut terms = self.terms;
-		terms.push(rhs);
-		IntLinExpr { terms }
+	fn add(mut self, rhs: IntDecision) -> Self::Output {
+		self += rhs;
+		self
+	}
+}
+
+impl Add<IntLinExpr> for IntLinExpr {
+	type Output = IntLinExpr;
+
+	fn add(mut self, rhs: IntLinExpr) -> Self::Output {
+		self += rhs;
+		self
 	}
 }
 
@@ -857,8 +866,34 @@ impl Add<IntVal> for IntLinExpr {
 	type Output = IntLinExpr;
 
 	fn add(mut self, rhs: IntVal) -> Self::Output {
-		self.terms[0] = self.terms[0] + rhs;
+		self += rhs;
 		self
+	}
+}
+
+impl AddAssign<IntDecision> for IntLinExpr {
+	fn add_assign(&mut self, rhs: IntDecision) {
+		if let IntDecisionInner::Const(c) = rhs.0 {
+			self.add_assign(c);
+		} else {
+			self.terms.push(rhs);
+		}
+	}
+}
+
+impl AddAssign<IntLinExpr> for IntLinExpr {
+	fn add_assign(&mut self, rhs: IntLinExpr) {
+		rhs.terms.into_iter().for_each(|term| self.add_assign(term));
+	}
+}
+
+impl AddAssign<IntVal> for IntLinExpr {
+	fn add_assign(&mut self, rhs: IntVal) {
+		if self.terms.is_empty() {
+			self.terms.push(rhs.into());
+		} else {
+			self.terms[0] = self.terms[0] + rhs;
+		}
 	}
 }
 
@@ -872,10 +907,27 @@ impl Mul<IntVal> for IntLinExpr {
 	}
 }
 
+impl Neg for IntLinExpr {
+	type Output = IntLinExpr;
+
+	fn neg(mut self) -> Self::Output {
+		self.terms.iter_mut().for_each(|x| *x = -*x);
+		self
+	}
+}
+
 impl Sub<IntDecision> for IntLinExpr {
 	type Output = IntLinExpr;
 
 	fn sub(self, rhs: IntDecision) -> Self::Output {
+		self + -rhs
+	}
+}
+
+impl Sub<IntLinExpr> for IntLinExpr {
+	type Output = IntLinExpr;
+
+	fn sub(self, rhs: IntLinExpr) -> Self::Output {
 		self + -rhs
 	}
 }
@@ -888,11 +940,27 @@ impl Sub<IntVal> for IntLinExpr {
 	}
 }
 
+impl SubAssign<IntDecision> for IntLinExpr {
+	fn sub_assign(&mut self, rhs: IntDecision) {
+		self.add_assign(-rhs);
+	}
+}
+
+impl SubAssign<IntLinExpr> for IntLinExpr {
+	fn sub_assign(&mut self, rhs: IntLinExpr) {
+		self.add_assign(-rhs);
+	}
+}
+
+impl SubAssign<IntVal> for IntLinExpr {
+	fn sub_assign(&mut self, rhs: IntVal) {
+		self.add_assign(-rhs);
+	}
+}
+
 impl Sum<IntDecision> for IntLinExpr {
 	fn sum<I: Iterator<Item = IntDecision>>(iter: I) -> Self {
-		IntLinExpr {
-			terms: iter.collect(),
-		}
+		iter.fold(IntLinExpr { terms: Vec::new() }, |acc, x| acc + x)
 	}
 }
 
@@ -937,14 +1005,15 @@ impl Model {
 		}
 	}
 
+	#[cfg(feature = "flatzinc")]
 	/// Create a new [`Model`] instance from a [`FlatZinc`] instance.
 	pub fn from_fzn<S, MapTy: FromIterator<(S, Decision)>>(
-		fzn: &FlatZinc<S>,
-	) -> Result<(Self, MapTy, FlatZincStatistics), FlatZincError>
+		fzn: &flatzinc_serde::FlatZinc<S>,
+	) -> Result<(Self, MapTy, flatzinc::FlatZincStatistics), flatzinc::FlatZincError>
 	where
-		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
+		S: Clone + Debug + std::ops::Deref<Target = str> + std::fmt::Display + Eq + Hash + Ord,
 	{
-		let mut builder = FznModelBuilder::new(fzn);
+		let mut builder = flatzinc::FznModelBuilder::new(fzn);
 		builder.unify_variables()?;
 		builder.extract_views()?;
 		builder.post_constraints()?;
@@ -953,6 +1022,32 @@ impl Model {
 
 		let res = builder.finalize();
 		Ok(res)
+	}
+
+	#[cfg(feature = "xcsp3")]
+	/// Create a new [`Model`] instance from a [`FlatZinc`] instance.
+	pub fn from_xcsp3<S, MapTy: FromIterator<(S, Vec<Decision>)>>(
+		instance: &xcsp3_serde::Instance<S>,
+	) -> Result<
+		(
+			Self,
+			MapTy,
+			xcsp3::Xcsp3Statistics,
+			Option<(solver::Goal, IntDecision)>,
+		),
+		xcsp3::Xcsp3Error,
+	>
+	where
+		S: Clone + Debug + std::ops::Deref<Target = str> + std::fmt::Display + Eq + Hash + Ord,
+	{
+		let mut builder = xcsp3::Xcsp3ModelBuilder::new(instance);
+		builder.create_decisions()?;
+		builder.post_constraints()?;
+		builder.create_branchers()?;
+		let goal = builder.extract_goal()?;
+
+		let (model, map, stats) = builder.finalize();
+		Ok((model, map, stats, goal))
 	}
 
 	/// Create a new Boolean variable.

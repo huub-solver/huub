@@ -25,6 +25,7 @@ mod trace;
 
 use std::{
 	collections::HashMap,
+	ffi::OsStr,
 	fmt::{self, Debug, Display},
 	fs::File,
 	io::{self, BufReader},
@@ -40,15 +41,18 @@ use std::{
 use flatzinc_serde::{FlatZinc, Literal, Method};
 use huub::{
 	actions::DecisionActions,
-	flatzinc::{FlatZincError, FlatZincStatistics},
+	flatzinc::FlatZincError,
 	reformulate::{InitConfig, ReformulationError},
-	solver::{Goal, IntLitMeaning, SolveResult, Solver, Valuation, Value, View},
+	solver::{BoolView, Goal, IntLitMeaning, IntView, SolveResult, Solver, Valuation, Value, View},
+	xcsp3::Xcsp3Error,
 	SlvTermSignal,
 };
 use pico_args::Arguments;
+use quick_xml as _;
 use tracing::{subscriber::set_default, warn};
 use tracing_subscriber::fmt::MakeWriter;
 use ustr::{ustr, Ustr, UstrMap};
+use xcsp3_serde::Instance as Xcsp3Instance;
 
 use crate::trace::LitName;
 
@@ -126,16 +130,37 @@ pub struct Cli<Stdout, Stderr> {
 	stderr: Stderr,
 	/// Whether to use ANSI color codes in the output (only for stderr)
 	ansi_color: bool,
+
+	// --- Derived information ---
+	/// Format of the input file, for which the output is matched.
+	format: Format,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// Input and output format
+enum Format {
+	/// FlatZinc (JSON)
+	FlatZinc,
+	/// XCSP3 (XML)
+	Xcsp3,
+}
+
+/// Output definition for the problem
+struct Output {
+	/// List of single variables with their names
+	singletons: Vec<(Ustr, View)>,
+	/// List of arrays of variables with their (array) names
+	arrays: Vec<(Ustr, Vec<View>)>,
 }
 
 /// Solution struct to display the results of the solver
 struct Solution<'a> {
-	/// FlatZinc instance
-	fzn: &'a FlatZinc<Ustr>,
+	/// What format to use to output a solution
+	format: Format,
 	/// Mapping from solver views to solution values
 	value: &'a dyn Valuation,
-	/// Mapping from FlatZinc identifiers to solver views
-	var_map: &'a UstrMap<View>,
+	/// Output definition of the problem
+	output: &'a Output,
 }
 
 /// Parse time duration for the time limit flag
@@ -150,13 +175,45 @@ fn parse_time_limit(s: &str) -> Result<Duration, humantime::DurationError> {
 	}
 }
 
-/// Print a statistics block formulated for MiniZinc
-fn print_statistics_block<W: io::Write>(stream: &mut W, name: &str, stats: &[(&str, &dyn Debug)]) {
-	outputln!(stream, "%%%mzn-stat: blockType={:?}", name);
-	for stat in stats {
-		outputln!(stream, "%%%mzn-stat: {}={:?}", stat.0, stat.1);
-	}
-	outputln!(stream, "%%%mzn-stat-end");
+/// Set the termination conditions of the [`Solver`] instance.
+fn solver_set_terminate(
+	solver: &mut Solver,
+	interrupted: &Arc<AtomicBool>,
+	interrupt_handling: bool,
+	deadline: Option<Instant>,
+) {
+	match (interrupt_handling, deadline) {
+		(true, Some(deadline)) => {
+			let interrupted = Arc::clone(interrupted);
+			solver.set_terminate_callback(Some(move || {
+				if interrupted.load(Ordering::SeqCst) || Instant::now() >= deadline {
+					SlvTermSignal::Terminate
+				} else {
+					SlvTermSignal::Continue
+				}
+			}));
+		}
+		(true, None) => {
+			let interrupted = Arc::clone(interrupted);
+			solver.set_terminate_callback(Some(move || {
+				if interrupted.load(Ordering::SeqCst) {
+					SlvTermSignal::Terminate
+				} else {
+					SlvTermSignal::Continue
+				}
+			}));
+		}
+		(false, Some(deadline)) => {
+			solver.set_terminate_callback(Some(move || {
+				if Instant::now() >= deadline {
+					SlvTermSignal::Terminate
+				} else {
+					SlvTermSignal::Continue
+				}
+			}));
+		}
+		_ => {}
+	};
 }
 
 impl<Stdout, Stderr> Cli<Stdout, Stderr>
@@ -208,44 +265,150 @@ where
 			File::open(&self.path)
 				.map_err(|_| format!("Unable to open file “{}”", self.path.display()))?,
 		);
-		let fzn: FlatZinc<Ustr> = serde_json::from_reader(rdr).map_err(|_| {
-			format!(
-				"Unable to parse file “{}” as FlatZinc JSON",
-				self.path.display()
-			)
-		})?;
 
-		// Convert FlatZinc model to internal Solver representation
-		let res = Solver::from_fzn::<Ustr, UstrMap<View>>(&fzn, &self.init_config());
-		// Resolve any errors that may have occurred during the conversion
-		let (mut slv, var_map, fzn_stats): (Solver, UstrMap<View>, FlatZincStatistics) = match res {
-			Err(FlatZincError::ReformulationError(ReformulationError::TrivialUnsatisfiable)) => {
-				outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
-				return Ok(());
+		let (mut slv, var_map, output, goal) = match self.format {
+			Format::FlatZinc => {
+				let fzn: FlatZinc<Ustr> = serde_json::from_reader(rdr).map_err(|_| {
+					format!(
+						"Unable to parse file “{}” as FlatZinc JSON",
+						self.path.display()
+					)
+				})?;
+				// Convert FlatZinc model to internal Solver representation
+				let (slv, var_map, fzn_stats) =
+					match Solver::from_fzn::<Ustr, UstrMap<View>>(&fzn, &self.init_config()) {
+						// Resolve any errors that may have occurred during the conversion
+						Err(FlatZincError::ReformulationError(
+							ReformulationError::TrivialUnsatisfiable,
+						)) => {
+							outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
+							return Ok(());
+						}
+						Err(err) => {
+							return Err(err.to_string());
+						}
+						Ok(x) => x,
+					};
+
+				if self.statistics {
+					let stats = slv.init_statistics();
+					self.print_statistics_block(
+						"init",
+						&[
+							("intVariables", &stats.int_vars()),
+							("propagators", &stats.propagators()),
+							("unifiedVariables", &fzn_stats.unified_variables()),
+							("extractedViews", &fzn_stats.extracted_views()),
+							(
+								"initTime",
+								&Instant::now().duration_since(start).as_secs_f64(),
+							),
+						],
+					);
+				}
+
+				let output = Output::from_fzn(&fzn, &var_map);
+
+				let goal = if fzn.solve.method != Method::Satisfy {
+					let obj_expr = fzn.solve.objective.as_ref().unwrap();
+					if let Literal::Identifier(ident) = obj_expr {
+						Some((
+							if fzn.solve.method == Method::Minimize {
+								Goal::Minimize
+							} else {
+								Goal::Maximize
+							},
+							if let View::Int(iv) = var_map[ident] {
+								iv
+							} else {
+								todo!()
+							},
+						))
+					} else {
+						None
+					}
+				} else {
+					None
+				};
+
+				(slv, var_map, output, goal)
 			}
-			Err(err) => {
-				return Err(err.to_string());
+			Format::Xcsp3 => {
+				let instance: Xcsp3Instance<Ustr> =
+					quick_xml::de::from_reader(rdr).map_err(|err| {
+						format!(
+							"Unable to parse file “{}” as XCSP3 XML: {}",
+							self.path.display(),
+							err
+						)
+					})?;
+				let (slv, mut var_map, fzn_stats, goal) = match Solver::from_xcsp3::<
+					Ustr,
+					UstrMap<Vec<View>>,
+				>(&instance, &self.init_config())
+				{
+					// Resolve any errors that may have occurred during the conversion
+					Err(Xcsp3Error::ReformulationError(
+						ReformulationError::TrivialUnsatisfiable,
+					)) => {
+						outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
+						return Ok(());
+					}
+					Err(err) => {
+						if matches!(
+							err,
+							Xcsp3Error::UnsupportedConstraint(_)
+								| Xcsp3Error::UnsupportedFeature(_)
+								| Xcsp3Error::UnsupportedType(_)
+						) {
+							outputln!(self.stdout, "s UNSUPPORTED");
+						}
+						return Err(err.to_string());
+					}
+					Ok(x) => x,
+				};
+
+				if self.statistics {
+					let stats = slv.init_statistics();
+					self.print_statistics_block(
+						"init",
+						&[
+							("intVariables", &stats.int_vars()),
+							("propagators", &stats.propagators()),
+							("unifiedVariables", &fzn_stats.unified_variables()),
+							("extractedViews", &fzn_stats.extracted_views()),
+							(
+								"initTime",
+								&Instant::now().duration_since(start).as_secs_f64(),
+							),
+						],
+					);
+				}
+
+				(
+					slv,
+					Default::default(),
+					Output {
+						singletons: instance
+							.variables
+							.iter()
+							.map(|v| (v.identifier, var_map[&v.identifier][0]))
+							.collect(),
+						arrays: instance
+							.arrays
+							.iter()
+							.map(|a| {
+								(
+									format!("{}{}", a.identifier, "[]".repeat(a.size.len())).into(),
+									var_map.remove(&a.identifier).unwrap(),
+								)
+							})
+							.collect(),
+					},
+					goal,
+				)
 			}
-			Ok(x) => x,
 		};
-
-		if self.statistics {
-			let stats = slv.init_statistics();
-			print_statistics_block(
-				&mut self.stdout,
-				"init",
-				&[
-					("intVariables", &stats.int_vars()),
-					("propagators", &stats.propagators()),
-					("unifiedVariables", &fzn_stats.unified_variables()),
-					("extractedViews", &fzn_stats.extracted_views()),
-					(
-						"initTime",
-						&Instant::now().duration_since(start).as_secs_f64(),
-					),
-				],
-			);
-		}
 
 		// Create reverse map for solver variables if required
 		if self.verbose > 0 {
@@ -296,6 +459,10 @@ where
 			*lit_reverse_map.lock().unwrap() = lit_map;
 			*int_reverse_map.lock().unwrap() = int_map;
 		}
+		drop(var_map);
+
+		// Flat list of output variables (used to create no-goods)
+		let output_vars: Vec<_> = output.iter_vars().collect();
 
 		// Set Solver Configuration
 		if self.free_search {
@@ -307,92 +474,18 @@ where
 			slv.set_vsids_after_restart(self.vsids_after_restart);
 		}
 
-		// Determine Goal and Objective
-		let start_solve = Instant::now();
-		let goal = if fzn.solve.method != Method::Satisfy {
-			let obj_expr = fzn.solve.objective.as_ref().unwrap();
-			if let Literal::Identifier(ident) = obj_expr {
-				Some((
-					if fzn.solve.method == Method::Minimize {
-						Goal::Minimize
-					} else {
-						Goal::Maximize
-					},
-					if let View::Int(iv) = var_map[ident] {
-						iv
-					} else {
-						todo!()
-					},
-				))
-			} else {
-				None
-			}
-		} else {
-			None
-		};
-
 		// Set termination conditions for solver
+		let start_solve = Instant::now();
 		let interrupt_handling = goal.is_some() && !self.intermediate_solutions;
 		let interrupted = Arc::new(AtomicBool::new(false));
-		match (interrupt_handling, deadline) {
-			(true, Some(deadline)) => {
-				let interrupted = Arc::clone(&interrupted);
-				slv.set_terminate_callback(Some(move || {
-					if interrupted.load(Ordering::SeqCst) || Instant::now() >= deadline {
-						SlvTermSignal::Terminate
-					} else {
-						SlvTermSignal::Continue
-					}
-				}));
-			}
-			(true, None) => {
-				let interrupted = Arc::clone(&interrupted);
-				slv.set_terminate_callback(Some(move || {
-					if interrupted.load(Ordering::SeqCst) {
-						SlvTermSignal::Terminate
-					} else {
-						SlvTermSignal::Continue
-					}
-				}));
-			}
-			(false, Some(deadline)) => {
-				slv.set_terminate_callback(Some(move || {
-					if Instant::now() >= deadline {
-						SlvTermSignal::Terminate
-					} else {
-						SlvTermSignal::Continue
-					}
-				}));
-			}
-			_ => {}
-		};
+		solver_set_terminate(&mut slv, &interrupted, interrupt_handling, deadline);
 
-		// Variables that the user is interested in
-		let output_vars: Vec<_> = fzn
-			.output
-			.iter()
-			.flat_map(|ident| {
-				if let Some(arr) = fzn.arrays.get(ident) {
-					arr.contents
-						.iter()
-						.filter_map(|lit| {
-							if let Literal::Identifier(ident) = lit {
-								Some(var_map[ident])
-							} else {
-								None
-							}
-						})
-						.collect()
-				} else {
-					vec![var_map[ident]]
-				}
-			})
-			.collect();
 		// Run the solver!
 		let (res, stats) = match goal {
 			Some((goal, obj)) => {
 				if self.all_solutions {
 					warn!("--all-solutions is ignored when optimizing, use --intermediate-solutions or --all-optimal instead");
+					self.all_solutions = false;
 				}
 				let mut no_good_vals = vec![
 					Value::Bool(false);
@@ -402,7 +495,6 @@ where
 						0
 					}
 				];
-				// TODO: Fix statistics
 				let all_opt_slv = if self.all_optimal {
 					Some(slv.clone())
 				} else {
@@ -410,40 +502,49 @@ where
 				};
 				let (status, stats, obj_val) = if self.intermediate_solutions {
 					slv.branch_and_bound(obj, goal, |value| {
+						if self.format == Format::Xcsp3 {
+							outputln!(self.stdout, "o {}", value(obj.into()));
+						}
 						output!(
 							self.stdout,
 							"{}",
 							Solution {
 								value,
-								fzn: &fzn,
-								var_map: &var_map
+								format: self.format,
+								output: &output,
 							}
 						);
 						if self.all_optimal {
-							for (i, var) in output_vars.iter().enumerate() {
-								no_good_vals[i] = value(*var);
+							for (i, &var) in output_vars.iter().enumerate() {
+								no_good_vals[i] = value(var);
 							}
 						}
 					})
 				} else {
 					// Set up Ctrl-C handler (to allow printing last solution)
-					if let Err(err) = ctrlc::set_handler(move || {
-						interrupted.store(true, Ordering::SeqCst);
+					if let Err(err) = ctrlc::set_handler({
+						let interrupted = Arc::clone(&interrupted);
+						move || {
+							interrupted.store(true, Ordering::SeqCst);
+						}
 					}) {
 						warn!("unable to set Ctrl-C handler: {}", err);
 					}
 
 					let mut last_sol = String::new();
 					let res = slv.branch_and_bound(obj, goal, |value| {
+						if self.format == Format::Xcsp3 {
+							outputln!(self.stdout, "o {}", value(obj.into()));
+						}
 						last_sol = Solution {
 							value,
-							fzn: &fzn,
-							var_map: &var_map,
+							format: self.format,
+							output: &output,
 						}
 						.to_string();
 						if self.all_optimal {
-							for (i, var) in output_vars.iter().enumerate() {
-								no_good_vals[i] = value(*var);
+							for (i, &var) in output_vars.iter().enumerate() {
+								no_good_vals[i] = value(var);
 							}
 						}
 					});
@@ -452,6 +553,7 @@ where
 				};
 				if status == SolveResult::Complete && self.all_optimal {
 					let mut slv = all_opt_slv.unwrap();
+					solver_set_terminate(&mut slv, &interrupted, interrupt_handling, deadline);
 					// Ensure all following solutions have the same objective value as the
 					// first optimal solution
 					let Some(obj_val) = obj_val else {
@@ -471,8 +573,8 @@ where
 								"{}",
 								Solution {
 									value,
-									fzn: &fzn,
-									var_map: &var_map
+									format: self.format,
+									output: &output,
 								}
 							);
 						});
@@ -488,8 +590,8 @@ where
 					"{}",
 					Solution {
 						value,
-						fzn: &fzn,
-						var_map: &var_map
+						format: self.format,
+						output: &output,
 					}
 				);
 			}),
@@ -500,18 +602,17 @@ where
 						"{}",
 						Solution {
 							value,
-							fzn: &fzn,
-							var_map: &var_map
+							format: self.format,
+							output: &output,
 						}
 					);
 				});
 				(res, slv.search_statistics())
 			}
 		};
-		// output solving statistics
+		// Output final solving statistics
 		if self.statistics {
-			print_statistics_block(
-				&mut self.stdout,
+			self.print_statistics_block(
 				"complete",
 				&[
 					("solveTime", &(Instant::now() - start_solve).as_secs_f64()),
@@ -524,19 +625,66 @@ where
 				],
 			);
 		}
-		match res {
-			SolveResult::Satisfied => {}
-			SolveResult::Unsatisfiable => {
-				outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
+		// Print the final solving status
+		self.print_result_status(res);
+		Ok(())
+	}
+
+	/// Print a status message for the given [`SolveResult`] in the enabled
+	/// format.
+	fn print_result_status(&mut self, result: SolveResult) {
+		match self.format {
+			Format::FlatZinc => match result {
+				SolveResult::Satisfied => {}
+				SolveResult::Unsatisfiable => {
+					outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
+				}
+				SolveResult::Unknown => {
+					outputln!(self.stdout, "{}", FZN_UNKNOWN);
+				}
+				SolveResult::Complete => {
+					outputln!(self.stdout, "{}", FZN_COMPLETE);
+				}
+			},
+			Format::Xcsp3 => match result {
+				SolveResult::Satisfied => {
+					outputln!(self.stdout, "s SATISFIABLE");
+				}
+				SolveResult::Unsatisfiable => {
+					outputln!(self.stdout, "s UNSATISFIABLE");
+				}
+				SolveResult::Unknown => {
+					outputln!(self.stdout, "s UNKNOWN");
+				}
+				SolveResult::Complete if self.all_solutions => {
+					outputln!(self.stdout, "s ALL SATISFIABLE");
+				}
+				SolveResult::Complete if self.all_optimal => {
+					outputln!(self.stdout, "s ALL OPTIMAL");
+				}
+				SolveResult::Complete => {
+					outputln!(self.stdout, "s OPTIMUM FOUND");
+				}
+			},
+		}
+	}
+
+	/// Print a statistics block formulated for the chosen format
+	fn print_statistics_block(&mut self, name: &str, stats: &[(&str, &dyn Debug)]) {
+		match self.format {
+			Format::FlatZinc => {
+				outputln!(self.stdout, "%%%mzn-stat: blockType={:?}", name);
+				for stat in stats {
+					outputln!(self.stdout, "%%%mzn-stat: {}={:?}", stat.0, stat.1);
+				}
+				outputln!(self.stdout, "%%%mzn-stat-end");
 			}
-			SolveResult::Unknown => {
-				outputln!(self.stdout, "{}", FZN_UNKNOWN);
-			}
-			SolveResult::Complete => {
-				outputln!(self.stdout, "{}", FZN_COMPLETE);
+			Format::Xcsp3 => {
+				for stat in stats {
+					outputln!(self.stdout, "d {} {:?}", stat.0, stat.1);
+				}
 			}
 		}
-		Ok(())
 	}
 
 	/// Set the writer that is used for error, warning, and other logging
@@ -571,6 +719,7 @@ where
 			vsids_after_restart: self.vsids_after_restart,
 			vsids_only: self.vsids_only,
 			stdout: self.stdout,
+			format: self.format,
 		}
 	}
 
@@ -602,6 +751,7 @@ where
 			vsids_only: self.vsids_only,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
+			format: self.format,
 		}
 	}
 }
@@ -624,7 +774,7 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			)),
 		};
 
-		let cli = Cli {
+		let mut cli = Cli {
 			all_solutions: args.contains(["-a", "--all-solutions"]),
 			all_optimal: args.contains("--all-optimal"),
 			intermediate_solutions: args.contains(["-i", "--intermediate-solutions"]),
@@ -686,8 +836,11 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			#[expect(trivial_casts, reason = "doesn't compile without the case")]
 			stderr: io::stderr as fn() -> io::Stderr,
 			ansi_color: true,
+
+			format: Format::FlatZinc, // Set to default
 		};
 
+		// Check whether there are any unexpected arguments remaining
 		let remaining = args.finish();
 		match remaining.len() {
 			0 => Ok(()),
@@ -704,53 +857,109 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 					.join(", ")
 			)),
 		}?;
+
+		// Initialize the correct input format based on the file extension.
+		match cli.path.extension().and_then(OsStr::to_str) {
+			Some("xml") => {
+				cli.format = Format::Xcsp3;
+			}
+			_ => {
+				if !cli.path.ends_with(".fzn.json") {
+					warn!(
+						"Model file with unknown extension “{}”, assuming FlatZinc JSON file",
+						cli.path.to_string_lossy()
+					);
+				}
+			}
+		}
+
 		Ok(cli)
 	}
 }
 
-impl Solution<'_> {
-	/// Method used to print a literal that is part of a solution.
-	fn print_lit(&self, lit: &Literal<Ustr>) -> String {
-		match lit {
-			Literal::Int(i) => format!("{i}"),
-			Literal::Float(f) => format!("{f}"),
-			Literal::Identifier(ident) => {
-				format!("{}", (self.value)(self.var_map[ident]))
+impl Output {
+	/// Iterate over all variables mentioned in the output specifications, both
+	/// single variables and variables contained in arrays.
+	fn iter_vars(&self) -> impl Iterator<Item = View> + '_ {
+		self.singletons.iter().map(|(_, var)| *var).chain(
+			self.arrays
+				.iter()
+				.flat_map(|(_, vars)| vars.iter().copied()),
+		)
+	}
+
+	/// Extract the output definition from a [`FlatZinc`] instance.
+	fn from_fzn(fzn: &FlatZinc<Ustr>, var_map: &UstrMap<View>) -> Self {
+		let mut arrays = Vec::new();
+		let mut singletons = Vec::new();
+		for &ident in &fzn.output {
+			match fzn.arrays.get(&ident) {
+				Some(arr) => {
+					let vars = arr
+						.contents
+						.iter()
+						.map(|x| match x {
+							Literal::Int(i) => IntView::from(*i).into(),
+							Literal::Identifier(ident) => var_map[ident],
+							Literal::Bool(b) => BoolView::from(*b).into(),
+							_ => unimplemented!("unsupported output type"),
+						})
+						.collect();
+					arrays.push((ident, vars));
+				}
+				None => singletons.push((ident, var_map[&ident])),
 			}
-			Literal::Bool(b) => format!("{b}"),
-			Literal::IntSet(is) => is
-				.into_iter()
-				.map(|r| format!("{}..{}", r.start(), r.end()))
-				.collect::<Vec<_>>()
-				.join(" union "),
-			Literal::FloatSet(fs) => fs
-				.into_iter()
-				.map(|r| format!("{}..{}", r.start(), r.end()))
-				.collect::<Vec<_>>()
-				.join(" union "),
-			Literal::String(s) => s.clone(),
 		}
+		Self { arrays, singletons }
 	}
 }
 
 impl Display for Solution<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		for ident in &self.fzn.output {
-			if let Some(arr) = self.fzn.arrays.get(ident) {
-				writeln!(
-					f,
-					"{ident} = [{}];",
-					arr.contents
-						.iter()
-						.map(|lit| self.print_lit(lit))
-						.collect::<Vec<_>>()
-						.join(",")
-				)?;
-			} else {
-				writeln!(f, "{ident} = {};", (self.value)(self.var_map[ident]))?;
+		match self.format {
+			Format::FlatZinc => {
+				for &(ident, var) in &self.output.singletons {
+					writeln!(f, "{ident} = {};", (self.value)(var))?;
+				}
+				for (ident, vars) in &self.output.arrays {
+					writeln!(
+						f,
+						"{ident} = [{}];",
+						vars.iter()
+							.map(|var| format!("{}", (self.value)(*var)))
+							.collect::<Vec<_>>()
+							.join(",")
+					)?;
+				}
+				writeln!(f, "{}", FZN_SEPERATOR)
+			}
+			Format::Xcsp3 => {
+				writeln!(f, "v <instantiation>")?;
+				write!(f, "v <list> ")?;
+				for i in self
+					.output
+					.singletons
+					.iter()
+					.map(|(i, _)| i)
+					.chain(self.output.arrays.iter().map(|(i, _)| i))
+				{
+					write!(f, "{} ", i)?;
+				}
+				writeln!(f, "</list>")?;
+				write!(f, "v <values> ")?;
+				for i in self
+					.output
+					.singletons
+					.iter()
+					.map(|(_, v)| v)
+					.chain(self.output.arrays.iter().flat_map(|(_, vs)| vs))
+				{
+					write!(f, "{} ", (*self.value)(*i))?;
+				}
+				writeln!(f, "</values>")?;
+				writeln!(f, "v </instantiation>")
 			}
 		}
-		writeln!(f, "{}", FZN_SEPERATOR)
 	}
 }
 

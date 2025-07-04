@@ -631,8 +631,8 @@ impl OmegaThetaTree {
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use flatzinc_serde::RangeList;
 	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
+	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
 	use crate::{
