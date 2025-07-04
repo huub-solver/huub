@@ -5,7 +5,6 @@
 //!
 
 use itertools::Itertools;
-use pindakaas::Lit as RawLit;
 use tracing::trace;
 
 use crate::{
@@ -18,10 +17,10 @@ use crate::{
 	},
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, BoolViewInner,
-		IntLitMeaning, IntView,
+		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, IntLitMeaning,
+		IntView,
 	},
-	Conjunction, IntDecision, IntVal,
+	IntDecision, IntVal,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -186,28 +185,6 @@ impl CumulativeTimeTable {
 		actions.get_int_upper_bound(self.start_times[i]) + self.durations[i]
 	}
 
-	#[inline]
-	/// Return the data stored for explanation from propagation rule and task number.
-	fn data_for_explanation(
-		&self,
-		task_no: usize,
-		propagation_rule: CumulativePropagationRule,
-	) -> u64 {
-		((propagation_rule as u64) << 62) + task_no as u64
-	}
-
-	#[inline]
-	/// Return the task number from the data stored for explanation.
-	fn task_no_from_data(&self, data: u64) -> usize {
-		((data << 2) >> 2) as usize
-	}
-
-	#[inline]
-	/// Return the propagation rule from the data stored for explanation.
-	fn propagation_rule_from_data(&self, data: u64) -> CumulativePropagationRule {
-		(data >> 62).into()
-	}
-
 	/// Build the time-table profile as a set of (time, height) rectangles.
 	/// Returns a tuple (bounds, heights), where bounds[i]..bounds[i+1] is the interval with height heights[i].
 	fn build_profile(&mut self, actions: &mut impl PropagationActions) {
@@ -329,10 +306,11 @@ impl CumulativeTimeTable {
 						actions.set_int_lower_bound(
 							self.start_times[task],
 							t,
-							actions.deferred_reason(self.data_for_explanation(
+							self.explain_sweeping(
 								task,
 								CumulativePropagationRule::ForwardShift,
-							)),
+								t - 1,
+							),
 						)?;
 						updated_est = t;
 					}
@@ -411,10 +389,11 @@ impl CumulativeTimeTable {
 						actions.set_int_upper_bound(
 							self.start_times[task] + self.durations[task],
 							t,
-							actions.deferred_reason(self.data_for_explanation(
+							self.explain_sweeping(
 								task,
 								CumulativePropagationRule::BackwardShift,
-							)),
+								t,
+							),
 						)?;
 						updated_lct = t;
 					}
@@ -489,6 +468,69 @@ impl CumulativeTimeTable {
 				.collect_vec()
 		}
 	}
+
+	fn explain_sweeping<A: PropagationActions>(
+		&self,
+		task_no: usize,
+		propagation_rule: CumulativePropagationRule,
+		timepoint: i64,
+	) -> impl ReasonBuilder<A> + '_ {
+		move |actions: &mut A| {
+			trace!(
+				task_no,
+				timepoint =? timepoint,
+				rule =? propagation_rule,
+				"Explain task sweeping"
+			);
+			let relevant_tasks = (0..self.start_times.len())
+				.filter(|&i| {
+					self.latest_start_time(i, actions) <= timepoint
+						&& self.earliest_completion_time(i, actions) > timepoint
+				})
+				.collect_vec();
+			assert_ne!(relevant_tasks.len(), 0);
+			trace!(
+				timepoint,
+				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
+					i,
+					self.durations[i],
+					self.latest_start_time(i, actions),
+					self.earliest_completion_time(i, actions),
+				)).collect_vec(),
+				rule =? propagation_rule,
+				"Explain task sweeping"
+			);
+
+			let mut clause = vec![];
+
+			relevant_tasks.iter().for_each(|&i| {
+				clause.push(
+					actions.get_int_lit(self.start_times[i], IntLitMeaning::Less(timepoint + 1)),
+				);
+				clause.push(actions.get_int_lit(
+					self.start_times[i] + self.durations[i],
+					IntLitMeaning::GreaterEq(timepoint + 1),
+				));
+			});
+
+			match propagation_rule {
+				CumulativePropagationRule::ForwardShift => {
+					clause.push(actions.get_int_lit(
+						self.start_times[task_no] + self.durations[task_no],
+						IntLitMeaning::GreaterEq(timepoint + 1),
+					));
+				}
+				CumulativePropagationRule::BackwardShift => {
+					clause.push(actions.get_int_lit(
+						self.start_times[task_no],
+						IntLitMeaning::Less(timepoint + 1),
+					));
+				}
+			}
+
+			clause
+		}
+	}
 }
 
 impl<P, E> Propagator<P, E> for CumulativeTimeTable
@@ -496,107 +538,6 @@ where
 	P: PropagationActions,
 	E: ExplanationActions,
 {
-	fn explain(&mut self, actions: &mut E, lit: Option<RawLit>, data: u64) -> Conjunction {
-		let task_no = self.task_no_from_data(data);
-		let rule = self.propagation_rule_from_data(data);
-		let dur = self.durations[task_no];
-		// Get the time point that is of concern which is either the lower bound of est - 1
-		// or the upper bound of lct
-		let timepoint = if let Some(l) = lit {
-			// Get the time point from lit meaning
-			let lit_meaning = actions
-				.get_int_lit_meaning(self.start_times[task_no], l)
-				.unwrap(); // safe as `lit` is not None
-			match lit_meaning {
-				IntLitMeaning::GreaterEq(v) => v - 1,
-				IntLitMeaning::Less(v) => v - 1 + dur,
-				_ => unreachable!(),
-			}
-		} else {
-			// Get the time point from trailed int if it is an immediate conflict
-			actions.get_trailed_int(self.trailed_timepoint[task_no])
-		};
-
-		trace!(
-			task_no,
-			timepoint =? timepoint,
-			rule =? rule,
-			"Explain shifting data"
-		);
-		let relevant_tasks = (0..self.start_times.len())
-			.filter(|&i| {
-				self.latest_start_time(i, actions) <= timepoint
-					&& self.earliest_completion_time(i, actions) > timepoint
-			})
-			.collect_vec();
-		assert_ne!(relevant_tasks.len(), 0);
-		trace!(
-			timepoint,
-			relevant_tasks = ?relevant_tasks.iter().map(|&i| (
-				i,
-				self.durations[i],
-				self.latest_start_time(i, actions),
-				self.earliest_completion_time(i, actions),
-			)).collect_vec(),
-			rule =? rule,
-			"Explain task shifting"
-		);
-
-		let mut clause = vec![];
-
-		relevant_tasks.iter().for_each(|&i| {
-			clause.push(
-				actions
-					.get_int_lit_relaxed(self.start_times[i], IntLitMeaning::Less(timepoint + 1))
-					.0,
-			);
-			clause.push(
-				actions
-					.get_int_lit_relaxed(
-						self.start_times[i] + self.durations[i],
-						IntLitMeaning::GreaterEq(timepoint + 1),
-					)
-					.0,
-			);
-		});
-
-		match rule {
-			CumulativePropagationRule::ForwardShift => {
-				clause.push(
-					actions
-						.get_int_lit_relaxed(
-							self.start_times[task_no] + self.durations[task_no],
-							IntLitMeaning::GreaterEq(timepoint + 1),
-						)
-						.0,
-				);
-			}
-			CumulativePropagationRule::BackwardShift => {
-				clause.push(
-					actions
-						.get_int_lit_relaxed(
-							self.start_times[task_no],
-							IntLitMeaning::Less(timepoint + 1),
-						)
-						.0,
-				);
-			}
-		}
-
-		clause
-			.iter()
-			.filter_map(|bv| match bv.0 {
-				BoolViewInner::Lit(l) => Some(l),
-				BoolViewInner::Const(true) => None,
-				BoolViewInner::Const(false) => {
-					unreachable!(
-						"Unexpected false literal in the explanation of disjunctive edge finding"
-					)
-				}
-			})
-			.collect()
-	}
-
 	#[tracing::instrument(name = "cumulative_timetable", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		self.build_profile(actions);
