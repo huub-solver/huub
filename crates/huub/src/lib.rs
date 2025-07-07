@@ -2000,6 +2000,10 @@ impl SimplificationActions for Model {
 		}
 		Ok(())
 	}
+
+	fn resolve_alias(&mut self, var: IntDecision) -> IntDecision {
+		var.resolve_alias(self)
+	}
 }
 
 impl ElementConstraint for bool {

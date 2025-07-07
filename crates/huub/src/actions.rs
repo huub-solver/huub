@@ -370,6 +370,9 @@ pub trait SimplificationActions {
 	/// Mark two integer decisions as being equivalent, ensuring the two use the
 	/// same internal representation.
 	fn unify_int(&mut self, x: IntDecision, y: IntDecision) -> Result<(), ReformulationError>;
+	
+	/// Return the underlying IntDecision.
+	fn resolve_alias(&mut self, var: IntDecision) -> IntDecision;
 }
 
 /// Basic actions that can be performed when the trailing infrastructure is
