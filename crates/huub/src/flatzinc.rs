@@ -141,7 +141,7 @@ where
 			}
 			_ => Err(FlatZincError::InvalidArgumentType {
 				expected: "identifier",
-				found: format!("{:?}", arg),
+				found: format!("{arg:?}"),
 			}),
 		}
 	}
@@ -308,7 +308,7 @@ where
 			}
 			_ => Err(FlatZincError::InvalidArgumentType {
 				expected: "string",
-				found: format!("{:?}", arg),
+				found: format!("{arg:?}"),
 			}),
 		}
 	}
@@ -340,7 +340,7 @@ where
 			}
 			_ => Err(FlatZincError::InvalidArgumentType {
 				expected: "string",
-				found: format!("{:?}", arg),
+				found: format!("{arg:?}"),
 			}),
 		}
 	}
@@ -372,7 +372,7 @@ where
 			}
 			Argument::Literal(x) => Err(FlatZincError::InvalidArgumentType {
 				expected: "array",
-				found: format!("{:?}", x),
+				found: format!("{x:?}"),
 			}),
 		}
 	}
@@ -385,7 +385,7 @@ where
 			Argument::Literal(l) => self.lit_bool(l),
 			_ => Err(FlatZincError::InvalidArgumentType {
 				expected: "boolean literal",
-				found: format!("{:?}", arg),
+				found: format!("{arg:?}"),
 			}),
 		}
 	}
@@ -413,7 +413,7 @@ where
 			Argument::Literal(l) => self.lit_int(l),
 			_ => Err(FlatZincError::InvalidArgumentType {
 				expected: "integer literal",
-				found: format!("{:?}", arg),
+				found: format!("{arg:?}"),
 			}),
 		}
 	}
@@ -426,7 +426,7 @@ where
 			Argument::Literal(l) => self.par_int(l),
 			_ => Err(FlatZincError::InvalidArgumentType {
 				expected: "par integer literal",
-				found: format!("{:?}", arg),
+				found: format!("{arg:?}"),
 			}),
 		}
 	}
@@ -442,7 +442,7 @@ where
 			Argument::Literal(l) => self.par_set(l),
 			_ => Err(FlatZincError::InvalidArgumentType {
 				expected: "par set literal",
-				found: format!("{:?}", arg),
+				found: format!("{arg:?}"),
 			}),
 		}
 	}

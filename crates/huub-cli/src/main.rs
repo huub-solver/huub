@@ -61,7 +61,7 @@ FLAGS
                                   (default: off)
   --vsids-after-conflict <value>  Switch to the VSIDS search heuristic after a certain number of
                                   conflicts. (overwritten by --toggle-vsids and --vsids-only)
-  --vsids-after-restart           Switch to the VSIDS search heuristic after restart 
+  --vsids-after-restart           Switch to the VSIDS search heuristic after restart
                                   (overwritten by --toggle-vsids and --vsids-only)
   --toggle-vsids                  Switch between the activity-based search heuristic and the user-
                                   specific search heuristic after every restart.
@@ -103,7 +103,7 @@ fn main() -> ExitCode {
 	// Parse commandline arguments
 	let mut args = Arguments::from_env();
 	if args.contains(["-h", "--help"]) {
-		print!("{}", CLI_HELP);
+		print!("{CLI_HELP}");
 		return ExitCode::SUCCESS;
 	}
 
@@ -115,7 +115,7 @@ fn main() -> ExitCode {
 	let mut cli: Cli<_, _> = match args.try_into() {
 		Ok(cli) => cli,
 		Err(e) => {
-			eprintln!("Error: {}", e);
+			eprintln!("Error: {e}");
 			return ExitCode::FAILURE;
 		}
 	};
@@ -136,7 +136,7 @@ fn main() -> ExitCode {
 		None => cli.run(),
 	};
 	if let Err(e) = result {
-		eprintln!("Error: {}", e);
+		eprintln!("Error: {e}");
 		return ExitCode::FAILURE;
 	}
 	ExitCode::SUCCESS

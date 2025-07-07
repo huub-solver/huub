@@ -111,8 +111,8 @@ impl Solver {
 				f(&format_args!(
 					"{}",
 					sol.iter().format_with(", ", |elt, g| match elt {
-						Value::Bool(b) => g(&format_args!("{}", b)),
-						Value::Int(i) => g(&format_args!("{}", i)),
+						Value::Bool(b) => g(&format_args!("{b}")),
+						Value::Int(i) => g(&format_args!("{i}")),
 					})
 				))
 			})

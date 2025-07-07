@@ -210,14 +210,14 @@ impl<V: Visit> LitNames<'_, V> {
 			|| field.name().starts_with("lits")
 			|| field.name().starts_with("reason")
 		{
-			let res: Result<Vec<i32>, _> = serde_json::from_str(&format!("{:?}", value));
+			let res: Result<Vec<i32>, _> = serde_json::from_str(&format!("{value:?}"));
 			if let Ok(clause) = res {
 				let mut v: Vec<String> = Vec::with_capacity(clause.len());
 				for i in clause {
 					if let Some(l) = self.lit_reverse_map.get(&NonZeroI32::new(i).unwrap()) {
 						v.push(l.to_string(self.int_reverse_map));
 					} else {
-						v.push(format!("Lit({})", i));
+						v.push(format!("Lit({i})"));
 					}
 				}
 				self.inner.record_str(
@@ -254,14 +254,14 @@ impl<V: Visit> LitNames<'_, V> {
 	/// variables.
 	fn check_int_vars(&mut self, field: &Field, value: &dyn fmt::Debug) -> bool {
 		if field.name().starts_with("int_vars") {
-			let res: Result<Vec<usize>, _> = serde_json::from_str(&format!("{:?}", value));
+			let res: Result<Vec<usize>, _> = serde_json::from_str(&format!("{value:?}"));
 			if let Ok(vars) = res {
 				let mut v: Vec<String> = Vec::with_capacity(vars.len());
 				for i in vars {
 					if let Some(name) = self.int_reverse_map.get(i) {
 						v.push(name.to_string());
 					} else {
-						v.push(format!("IntVar({})", i));
+						v.push(format!("IntVar({i})"));
 					}
 				}
 				self.inner.record_str(field, &v.join(", "));

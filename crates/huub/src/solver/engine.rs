@@ -466,8 +466,7 @@ impl Engine {
 			debug_assert_eq!(
 				self.state.decision_level(),
 				0,
-				"Literal {} propagated without reason at non-zero decision level",
-				lit
+				"Literal {lit} propagated without reason at non-zero decision level",
 			);
 		}
 	}

@@ -619,8 +619,7 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			"true" | "on" | "1" => Ok(true),
 			"false" | "off" | "0" => Ok(false),
 			_ => Err(format!(
-				"expected 'true','false','on','off','0', or '1', found '{}'",
-				s
+				"expected 'true','false','on','off','0', or '1', found '{s}'"
 			)),
 		};
 
@@ -750,7 +749,7 @@ impl Display for Solution<'_> {
 				writeln!(f, "{ident} = {};", (self.value)(self.var_map[ident]))?;
 			}
 		}
-		writeln!(f, "{}", FZN_SEPERATOR)
+		writeln!(f, "{FZN_SEPERATOR}")
 	}
 }
 
