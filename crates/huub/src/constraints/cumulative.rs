@@ -16,10 +16,7 @@ use crate::{
 		Conflict, Constraint, PropagationActions, Propagator, ReasonBuilder, SimplificationStatus,
 	},
 	reformulate::ReformulationError,
-	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, IntLitMeaning,
-		IntView,
-	},
+	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView},
 	IntDecision, IntVal,
 };
 
@@ -82,9 +79,6 @@ pub struct CumulativeTimeTable {
 	bounds: Vec<i64>,
 	/// Heights of the time intervals, representing the total resource usage at that time.
 	heights: Vec<IntVal>,
-
-	/// Trailed time point of each task for explanations.
-	trailed_timepoint: Vec<TrailedInt>,
 }
 
 impl<S: SimplificationActions> Constraint<S> for Cumulative {
@@ -146,8 +140,6 @@ impl CumulativeTimeTable {
 	) where
 		P: PropagatorInitActions + ?Sized,
 	{
-		let n = start_times.len();
-		let trailed_timepoint = vec![solver.new_trailed_int(0); n];
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				start_times: start_times.clone(),
@@ -156,7 +148,6 @@ impl CumulativeTimeTable {
 				capacity,
 				bounds: Vec::new(),
 				heights: Vec::new(),
-				trailed_timepoint,
 			}),
 			PriorityLevel::Low,
 		);
@@ -166,21 +157,25 @@ impl CumulativeTimeTable {
 	}
 
 	#[inline]
+	/// Get the earliest start time of the task `i`.
 	fn earliest_start_time<I: InspectionActions>(&self, i: usize, actions: &mut I) -> i64 {
 		actions.get_int_lower_bound(self.start_times[i])
 	}
 
 	#[inline]
+	/// Get the latest start time of the task `i`.
 	fn latest_start_time<I: InspectionActions>(&self, i: usize, actions: &mut I) -> i64 {
 		actions.get_int_upper_bound(self.start_times[i])
 	}
 
 	#[inline]
+	/// Get the earliest completion time of the task `i`.
 	fn earliest_completion_time<I: InspectionActions>(&self, i: usize, actions: &mut I) -> i64 {
 		actions.get_int_lower_bound(self.start_times[i]) + self.durations[i]
 	}
 
 	#[inline]
+	/// Get the latest completion time of the task `i`.
 	fn latest_completion_time<I: InspectionActions>(&self, i: usize, actions: &mut I) -> i64 {
 		actions.get_int_upper_bound(self.start_times[i]) + self.durations[i]
 	}
@@ -204,7 +199,7 @@ impl CumulativeTimeTable {
 		// Sort events by time
 		events.sort_unstable_by_key(|&(t, _)| t);
 
-		if events.len() > 0 {
+		if !events.is_empty() {
 			trace!(
 				events =? events,
 				"Events for compulosary parts from tasks"
@@ -229,7 +224,7 @@ impl CumulativeTimeTable {
 			self.heights.push(cur_height);
 		}
 
-		if self.bounds.len() > 0 {
+		if !self.bounds.is_empty() {
 			trace!(
 				bounds = ?self.bounds,
 				heights = ?self.heights,
@@ -293,15 +288,6 @@ impl CumulativeTimeTable {
 
 				for t in timepoints {
 					if t > updated_est {
-						// Trail the timepoint for explanations in case of conflict
-						let _ = actions.set_trailed_int(self.trailed_timepoint[task], t - 1);
-
-						trace!(
-							trailed_timepoint =? self.trailed_timepoint[task],
-							value = t - 1,
-							"Trail time point for shifting (forward)"
-						);
-
 						// Set new lower bound for the task's start time
 						actions.set_int_lower_bound(
 							self.start_times[task],
@@ -376,15 +362,6 @@ impl CumulativeTimeTable {
 
 				for t in timepoints {
 					if t < updated_lct {
-						// Trail the timepoint for explanations in case of conflict
-						let _ = actions.set_trailed_int(self.trailed_timepoint[task], t);
-
-						trace!(
-							trailed_timepoint =? self.trailed_timepoint[task],
-							value = t,
-							"Trail time point for shifting (backward)"
-						);
-
 						// Set new upper bound for the task's start time
 						actions.set_int_upper_bound(
 							self.start_times[task] + self.durations[task],
@@ -469,6 +446,7 @@ impl CumulativeTimeTable {
 		}
 	}
 
+	/// Construct a reason for the task sweeping propagation.
 	fn explain_sweeping<A: PropagationActions>(
 		&self,
 		task_no: usize,
@@ -542,7 +520,7 @@ where
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		self.build_profile(actions);
 
-		if self.bounds.len() > 0 {
+		if !self.bounds.is_empty() {
 			// Check if the resource usage exceeds capacity at any point
 			self.check_overload(actions)?;
 
