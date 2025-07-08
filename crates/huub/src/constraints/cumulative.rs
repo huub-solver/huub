@@ -536,3 +536,106 @@ where
 		Ok(())
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use expect_test::expect;
+	use flatzinc_serde::RangeList;
+	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
+	use tracing_test::traced_test;
+
+	use crate::{
+		constraints::cumulative::CumulativeTimeTable,
+		solver::int_var::{EncodingType, IntVar},
+		Solver,
+	};
+
+	#[test]
+	#[traced_test]
+	fn test_cumulative_sat() {
+		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let a = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([0..=4]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([0..=4]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let c = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([0..=4]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+
+		let durations = vec![2, 3, 1];
+		let resources_profile_1 = vec![1, 2, 3];
+		let resources_profile_2 = vec![2, 2, 1];
+		CumulativeTimeTable::new_in(
+			&mut slv,
+			vec![a, b, c],
+			durations.clone(),
+			resources_profile_1,
+			3,
+		);
+		CumulativeTimeTable::new_in(&mut slv, vec![a, b, c], durations, resources_profile_2, 2);
+
+		slv.expect_solutions(
+			&[a, b, c],
+			expect![[r#"
+    0, 3, 2
+    0, 4, 2
+    0, 4, 3
+    1, 3, 0
+    1, 4, 0
+    1, 4, 3
+    2, 4, 0
+    2, 4, 1
+    4, 0, 3
+    4, 1, 0"#]],
+		);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_cumulative_unsat() {
+		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let a = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([0..=3]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([0..=3]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let c = IntVar::new_in(
+			&mut slv,
+			RangeList::from_iter([0..=3]),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+
+		let durations = vec![2, 3, 2];
+		let resources_profile_1 = vec![2, 2, 3];
+		let resources_profile_2 = vec![2, 2, 2];
+		CumulativeTimeTable::new_in(
+			&mut slv,
+			vec![a, b, c],
+			durations.clone(),
+			resources_profile_1,
+			3,
+		);
+		CumulativeTimeTable::new_in(&mut slv, vec![a, b, c], durations, resources_profile_2, 3);
+
+		slv.assert_unsatisfiable();
+	}
+}
