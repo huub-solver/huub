@@ -1209,13 +1209,17 @@ where
 							.map(|l| self.par_int(l))
 							.try_collect()?;
 
-						let force_ef_prop =
+						let force_edge_finding =
 							self.anns_contains(&c.ann, &mut ann_used, "edge_finding");
-						let force_nl_prop = self.anns_contains(&c.ann, &mut ann_used, "not_last");
-						let force_dp_prop =
+						let force_not_last = self.anns_contains(&c.ann, &mut ann_used, "not_last");
+						let force_detectable_precedence =
 							self.anns_contains(&c.ann, &mut ann_used, "detectable_precedence");
 						let mut disj_strict = disjunctive_strict(start_times, durations);
-						match (force_ef_prop, force_nl_prop, force_dp_prop) {
+						match (
+							force_edge_finding,
+							force_not_last,
+							force_detectable_precedence,
+						) {
 							(false, false, false) => {} // Use default configuration
 							(ef_prop, nl_prop, dp_prop) => {
 								disj_strict.use_edge_finding_propagation(ef_prop);
