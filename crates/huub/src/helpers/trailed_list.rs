@@ -74,7 +74,7 @@ impl<T: PartialEq> TrailedList<T> {
 
 	/// Remove the given element by swapping it out of the active range.
 	/// Can only be called before trailing is initialized.
-	pub(crate) fn swap_remove_element<A: TrailingActions + ?Sized>(&mut self, actions: &mut A, element: &T) -> &T {
+	pub(crate) fn swap_remove_element<A: TrailingActions + ?Sized>(&mut self, actions: &mut A, element: &T) -> &T { // TODO check performance!
 		assert!(!self.is_trailed, "removal is only allowed before trailing");
 		let len = self.len(actions);
 		let index = self.list.iter().take(len).position(|x| *x == *element).unwrap();

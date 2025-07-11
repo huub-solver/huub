@@ -28,6 +28,7 @@ use crate::reformulate::{BoolDecisionInner, IntDecisionIndex, IntDecisionInner};
 use crate::solver::trail::TrailedInt;
 
 // Redefine hash-based types using the fast FxBuildHasher.
+type HashSet<T> = std::collections::HashSet<T, FxBuildHasher>;
 type IndexSet<T> = indexmap::IndexSet<T, FxBuildHasher>;
 type IndexMap<K, V> = indexmap::IndexMap<K, V, FxBuildHasher>;
 type PriorityQueue<I, P> = priority_queue::PriorityQueue<I, P, FxBuildHasher>;
@@ -259,7 +260,6 @@ fn check_vars_different<S: SimplificationActions>(actions: &mut S, x: IntDecisio
 /// A mapping that contains the decision variable, the underlying variable index, and the current bounds.
 struct IntDecisionMapping {
 	var: IntDecision,
-	var_index: VarIndex,
 	lower_bound: IntVal,
 	upper_bound: IntVal,
 }
@@ -268,7 +268,6 @@ impl IntDecisionMapping {
 	fn new(var: IntDecision) -> Self {
 		Self {
 			var,
-			var_index: get_int_var_index(var).unwrap(),
 			lower_bound: IntVal::MIN,
 			upper_bound: IntVal::MAX,
 		}
@@ -404,24 +403,7 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 				// If no nodes are left, there is nothing more to do
 				return Ok(SimplificationStatus::Subsumed);
 			}
-			graph.johnson_full(&mut model_adapter)?;  // TODO 0-cycles!
-
-			trace!("Initial graph: {}", graph.to_dot(&mut model_adapter));
-			/*trace!("Implied edges:");
-            for node in graph.nodes.iter() {
-                if let Some(node) = node {
-                    let mut node_ref = node.borrow_mut();
-                    let mut open = node_ref.open_edges.iter(model_adapter.get_trailing_actions());
-                    while let Some(&edge) = open.next() {
-                        trace!("Outgoing: {:?}", graph.edges[edge]);
-                    }
-                    let mut rev_open = node_ref.open_reverse_edges.iter(model_adapter.get_trailing_actions());
-                    while let Some(&edge) = rev_open.next() {
-                        trace!("Incoming: {:?}", graph.edges[edge]);
-                    }
-                }
-            }*/
-
+			graph.johnson_full(&mut model_adapter)?;  // TODO could keep the results to check further reductions (e.g., when unification duplicates edges). Or detect duplicate edges somewhere else?
 			self.initial_graph = Some(DifferenceLogicInitial { initial_trail, graph, state, int_vars, bool_vars });
 			
 		} else {
@@ -432,6 +414,7 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 			initial_graph.state.reset_bound_changes();
 			initial_graph.state.reset_bool_changes();
 			let mut model_adapter = SimplificationModelAdapter::new(actions, &mut initial_graph.initial_trail, &mut initial_graph.int_vars, &initial_graph.bool_vars);
+			let mut has_change = false;
 			for (i, state) in self.int_var_state.iter_mut().enumerate() {
 				if initial_graph.graph.nodes[i].is_some() {
 					let alias = model_adapter.get_simplification_actions().resolve_alias(state.var);
@@ -440,24 +423,20 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 						let (v_trans, vd) = update_transform(alias);
 						if let Some(new) = self.int_var_index.get_index_of(&v_trans) {
 							initial_graph.graph.unify_nodes(&mut model_adapter, &mut initial_graph.state, i, new, vd)?;
-						} else {
+						} else if !matches!(alias.0, IntDecisionInner::Const(_)) {
 							state.var = v_trans;
 							state.lower_bound -= vd;
 							state.upper_bound -= vd;
 							initial_graph.graph.update_node_offset(&mut model_adapter, i, vd)?;
-							model_adapter.get_int_vars().insert(i, v_trans);
+							model_adapter.get_int_vars()[i] = v_trans;
 						}
-
+						has_change = true;
 					}
 				}
 			}
-			let mut has_change = false;
 			for (i, state) in self.int_var_state.iter_mut().enumerate() {
 				if initial_graph.graph.nodes[i].is_none() {
 					continue;
-				}
-				if get_int_var_index(state.var).as_ref() != Some(&state.var_index) {  // TODO can be removed?
-					panic!("Underlying var representation has changed (is {:?}, was {:?})", state.var, state.var_index);
 				}
 				if state.lower_bound != model_adapter.get_int_lower_bound(i) {
 					let _ = initial_graph.state.lower_bound_changes.insert(i);
@@ -490,9 +469,11 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 		initial_graph.graph.check_remove_isolated_nodes(&mut model_adapter);
 		if initial_graph.graph.open_nodes == 0 {
 			// If no nodes are left, there is nothing more to do
+			trace!("No more nodes left, return subsumed");
 			return Ok(SimplificationStatus::Subsumed);
 		}
 		initial_graph.graph.check_remove_isolated_booleans(&mut model_adapter);
+		trace!("Graph at the end of simplify: {}", initial_graph.graph.to_dot(&mut model_adapter));
 		// Repeat simplification until fixpoint
 		self.simplify(actions)
 
@@ -624,6 +605,16 @@ impl<S: SimplificationActions> ModelAdapter<ReformulationError> for Simplificati
 			Box::new(BoolFormula::Atom(self.bool_vars[bool_var])),
 			bound,
 		))
+	}
+
+	fn unify_variables(&mut self, x: usize, y: usize, d: IntVal) -> Result<(), ReformulationError> {
+		let y_trans = IntDecision(match self.int_vars[y].0 {
+			IntDecisionInner::Var(i) => IntDecisionInner::Linear(LinearTransform::offset(d), i),
+			IntDecisionInner::Const(c) => IntDecisionInner::Const(c + d),
+			IntDecisionInner::Linear(transform, i) => IntDecisionInner::Linear(transform + d, i),
+			IntDecisionInner::Bool(transform, b) => IntDecisionInner::Bool(transform + d, b),
+		});
+		self.actions.unify_int(self.int_vars[x], y_trans)
 	}
 
 }
@@ -988,6 +979,7 @@ impl DifferenceLogicGraph {
 
 		trace!("Starting Johnson's");
 		let mut distances = vec![vec![IntVal::MAX; self.nodes.len()]; self.nodes.len()];
+		let mut pred = vec![vec![usize::MAX; self.nodes.len()]; self.nodes.len()];
 		let mut queue = PriorityQueue::default();
 		
 		for i in 0..self.nodes.len() {
@@ -1010,8 +1002,13 @@ impl DifferenceLogicGraph {
 						let prev = queue.push_increase(edge.to, Reverse(new_dist));
 						if prev.map_or(true, |Reverse(old_dist)| new_dist < old_dist) {
 							distances[i][edge.to] = new_dist - pi_i + node_t.pi;
+							pred[i][edge.to] = s;
 						}
 						//trace!("dijkstra adding node {:?} with dist {new_dist}", target.var);
+					} else if edge.to == i && new_dist < distances[i][i] {
+						// Loop back to origin - store distance, but don't enqueue again
+						distances[i][i] = new_dist;
+						pred[i][i] = s;
 					}
 				}
 			}
@@ -1021,31 +1018,40 @@ impl DifferenceLogicGraph {
 		for (i, row) in distances.iter().enumerate() {
 			trace!("{i}: {:?}", row.iter().enumerate().filter(|(_, &val)| val < IntVal::MAX).collect_vec());
 		}
-		trace!("Checking impact on edges");  // TODO can / should we eliminate different paths with the same length? There might even be duplicate edges between the same nodes!
-		for i in 0..self.nodes.len() {  // TODO cycles of length 0!
+		trace!("Checking impact on edges");
+		for i in 0..self.nodes.len() {
 			if self.nodes[i].is_none() {  // TODO?
-				continue;  // TODO could skip nodes that reach nothing
+				continue;
 			}
 			let temp_node = self.get_node_clone(i);
 			let mut node_ref = temp_node.borrow_mut();
-			
-			let mut j = 0;
-			while j < node_ref.edges.len(adapter.get_trailing_actions()) {
-				let edge = &self.edges[*node_ref.edges.index(adapter.get_trailing_actions(), j)];
-				if distances[edge.from][edge.to] < edge.val {
-					trace!("Global edge {edge:?} is redundant, shortest path of length {} found", distances[edge.from][edge.to]);
-					let _ = node_ref.edges.swap_remove(adapter.get_trailing_actions(), j);
-				} else {
-					j += 1;
+
+			if distances[i][i] == 0 {
+				trace!("Found cycle of length 0");
+				let mut cur = i;
+				loop {
+					let prev = pred[i][cur];
+					trace!("Unifying {prev} and {cur} with offset {:?}", distances[prev][cur]);
+					adapter.unify_variables(prev, cur, distances[prev][cur])?;
+					cur = prev;
+					distances[cur][cur] = IntVal::MAX;
+					if cur == i {
+						break;
+					}
 				}
 			}
 
+			let mut reached = HashSet::default();
 			let mut j = 0;
-			while j < node_ref.reverse_edges.len(adapter.get_trailing_actions()) {
-				let edge = &self.edges[*node_ref.reverse_edges.index(adapter.get_trailing_actions(), j)];
-				if distances[edge.from][edge.to] < edge.val {
-					let _ = node_ref.reverse_edges.swap_remove(adapter.get_trailing_actions(), j);
-				} else { 
+			while j < node_ref.edges.len(adapter.get_trailing_actions()) {
+				let e = *node_ref.edges.index(adapter.get_trailing_actions(), j);
+				let edge = &self.edges[e];
+				if distances[i][edge.to] < edge.val || (distances[i][edge.to] == edge.val && reached.contains(&edge.to)) {
+					trace!("Global edge {edge:?} is redundant, shortest path of length {} found", distances[i][edge.to]);
+					let _ = node_ref.edges.swap_remove(adapter.get_trailing_actions(), j);
+					let _ = self.borrow_node_mut(edge.to).reverse_edges.swap_remove_element(adapter.get_trailing_actions(), &e);
+				} else {
+					let _ = reached.insert(edge.to);
 					j += 1;
 				}
 			}
@@ -1053,8 +1059,8 @@ impl DifferenceLogicGraph {
 			let mut open = node_ref.open_edges.iter(adapter.get_trailing_actions());
 			while let Some(&index) = open.next() {
 				let edge = &self.edges[index];
-				if distances[edge.from][edge.to] < edge.val {
-					trace!("Implied edge {edge:?} is redundant, shortest path of length {} found", distances[edge.from][edge.to]);
+				if distances[i][edge.to] < edge.val {
+					trace!("Implied edge {edge:?} is redundant, shortest path of length {} found", distances[i][edge.to]);
 					self.close_imp_edge_forward(adapter, &mut open, index);
 				}
 			}
@@ -1062,9 +1068,9 @@ impl DifferenceLogicGraph {
 			let mut rev_open = node_ref.open_reverse_edges.iter(adapter.get_trailing_actions());
 			while let Some(&index) = rev_open.next() {
 				let edge = &self.edges[index];
-				if distances[edge.to][edge.from] < -edge.val {
-					trace!("Implied edge {edge:?} is falsified, opposite shortest path of length {} found", distances[edge.to][edge.from]);
-					adapter.set_bool_false(edge.bool_var, edge.from, 0, edge.to, 0)?;  // TODO invalid reason, but also not needed at this point -> different method?
+				if distances[i][edge.from] < -edge.val {
+					trace!("Implied edge {edge:?} is falsified, opposite shortest path of length {} found", distances[i][edge.from]);
+					adapter.set_bool_false(edge.bool_var, edge.from, 0, i, 0)?;  // TODO invalid reason, but also not needed at this point -> different method?
 					self.close_imp_edge_backward(adapter, &mut rev_open, index);
 				}
 			}
@@ -1096,10 +1102,9 @@ impl DifferenceLogicGraph {
 		i = 0;
 		while i < node_ref.reverse_edges.len(adapter.get_trailing_actions()) {
 			let e = *node_ref.reverse_edges.index(adapter.get_trailing_actions(), i);
-			self.edges.get_mut(e).unwrap().val += offset;
 			let edge = self.edges.get_mut(e).unwrap();
 			if adapter.check_vars_different(edge.from, v, edge.val, None)? {
-				self.edges.get_mut(e).unwrap().val += offset;
+				edge.val += offset;
 				i += 1;
 			} else {
 				let _ = self.borrow_node_mut(self.edges[e].from).edges.swap_remove_element(adapter.get_trailing_actions(), &e);
@@ -1212,14 +1217,12 @@ impl DifferenceLogicGraph {
 				for &e in node_ref.edges.iter(adapter.get_trailing_actions()) {
 					let edge = &self.edges[e];
 					trace!("Removing outgoing edge {edge:?}");
-					let mut to = self.borrow_node_mut(edge.to);
-					let _ = to.reverse_edges.swap_remove_element(adapter.get_trailing_actions(), &e);
+					let _ = self.borrow_node_mut(edge.to).reverse_edges.swap_remove_element(adapter.get_trailing_actions(), &e);
 				}
 				for &e in node_ref.reverse_edges.iter(adapter.get_trailing_actions()) {
 					let edge = &self.edges[e];
 					trace!("Removing incoming edge {edge:?}");
-					let mut from = self.borrow_node_mut(edge.from);
-					let _ = from.edges.swap_remove_element(adapter.get_trailing_actions(), &e);
+					let _ = self.borrow_node_mut(edge.from).edges.swap_remove_element(adapter.get_trailing_actions(), &e);
 				}
 				let mut open = node_ref.open_edges.iter(adapter.get_trailing_actions());
 				while let Some(&e) = open.next() {
@@ -1781,6 +1784,11 @@ trait ModelAdapter<E> {
 	fn add_implied_bound(&mut self, _bool_var: usize, _int_var: usize, _lt: bool, _value: IntVal) {
 		panic!("Adding constraints is not supported by this adapter!");
 	}
+
+	/// Unify the given variables with the given offset (x - y = d). Note that the default is to fail.
+	fn unify_variables(&mut self, _x: usize, _y: usize, _d: IntVal) -> Result<(), E> {
+		panic!("Unifying variables is not supported by this adapter!");
+	}
 	
 }
 
@@ -1985,6 +1993,7 @@ where
 
 #[cfg(test)]
 mod tests {
+	use std::num::NonZero;
 	use itertools::Itertools;
 	use pindakaas::solver::propagation::PropagatingSolver;
 	use pindakaas::Lit as RawLit;
@@ -1996,11 +2005,12 @@ mod tests {
 	use crate::{solver::{
 		int_var::{EncodingType, IntVar},
 		Solver,
-	}, Model};
-	use crate::actions::TrailingActions;
+	}, IntDecision, Model};
+	use crate::actions::{SimplificationActions, TrailingActions};
 	use crate::constraints::Constraint;
 	use crate::helpers::initial_trail::InitialTrail;
-	use crate::reformulate::{InitConfig, ReformulationContext};
+	use crate::helpers::linear_transform::LinearTransform;
+	use crate::reformulate::{InitConfig, IntDecisionInner, ReformulationContext};
 	use crate::solver::IntView;
 	use crate::solver::queue::PriorityLevel;
 	use crate::solver::solving_context::SolvingContext;
@@ -2207,6 +2217,152 @@ mod tests {
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[2], int_vars[0], -2));
 		let _ = diff_logic.process(&mut prb, 2);  //TODO adapt level when definition changes
 		assert!(diff_logic.simplify(&mut prb).is_err());
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_equal() {
+		let mut prb = Model::default();
+		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
+		let mut diff_logic = DifferenceLogic::new(PriorityLevel::Low);
+		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[0], int_vars[1], 3));
+		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[1], int_vars[2], -2));
+		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[2], int_vars[0], -1));
+		let _ = diff_logic.process(&mut prb, 2);  //TODO adapt level when definition changes
+		assert!(diff_logic.simplify(&mut prb).is_ok());
+
+		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+		let mut actions = ReformulationContext {
+			slv: &mut slv,
+			map: &map,
+		};
+		assert!(<DifferenceLogic as Constraint<Model>>::to_solver(&mut diff_logic, &mut actions).is_ok());
+		let int_views = int_vars.iter().map(|&v| map.get_int(&mut slv, v)).collect_vec();
+		slv.assert_all_solutions(&[int_views[0], int_views[1], int_views[2]], move |sol| {
+			let Int(x) = sol[0] else { return false };
+			let Int(y) = sol[1] else { return false };
+			let Int(z) = sol[2] else { return false };
+			trace!("Checking x = {x}, y = {y}, z = {z}");
+			x - y == 3 && y - z == -2 && z - x == -1
+		});
+
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_replacement() {
+		let mut prb = Model::default();
+		let int_vars = prb.new_int_vars(4, RangeList::from_iter([1..=10]));
+		let b = prb.new_bool_var();
+		let c = prb.new_bool_var();
+		let mut diff_logic = DifferenceLogic::new(PriorityLevel::Low);
+		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[0], int_vars[1], -2));
+		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[2], int_vars[0], 3));
+		diff_logic.add(DifferenceLogicConstraint::Implied(b, int_vars[0], int_vars[2], 2));
+		diff_logic.add(DifferenceLogicConstraint::Implied(b, int_vars[0], int_vars[1], -2));
+		diff_logic.add(DifferenceLogicConstraint::Implied(c, int_vars[1], int_vars[0], 2));
+		diff_logic.add(DifferenceLogicConstraint::Implied(c, int_vars[2], int_vars[0], -1));
+		let _ = diff_logic.process(&mut prb, 2);  //TODO adapt level when definition changes
+		assert!(diff_logic.simplify(&mut prb).is_ok());
+		let IntDecisionInner::Var(var_index) = int_vars[3].0 else {
+			panic!("Should not happen");
+		};
+		assert!(prb.unify_int(int_vars[0], IntDecision(IntDecisionInner::Linear(LinearTransform {scale: NonZero::new(2).unwrap(), offset: 1}, var_index))).is_ok());
+		assert!(diff_logic.simplify(&mut prb).is_ok());
+
+		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+		let mut actions = ReformulationContext {
+			slv: &mut slv,
+			map: &map,
+		};
+		assert!(<DifferenceLogic as Constraint<Model>>::to_solver(&mut diff_logic, &mut actions).is_ok());
+		let int_views = int_vars.iter().map(|&v| map.get_int(&mut slv, v)).collect_vec();
+		let b_view = IntView::from(map.get_bool(&mut slv, b));
+		let c_view = IntView::from(map.get_bool(&mut slv, c));
+		slv.assert_all_solutions(&[int_views[0], int_views[1], int_views[2], int_views[3], b_view, c_view], move |sol| {
+			let Int(x) = sol[0] else { return false };
+			let Int(y) = sol[1] else { return false };
+			let Int(z) = sol[2] else { return false };
+			let Int(t) = sol[3] else { return false };
+			let Int(b) = sol[4] else { return false };
+			let Int(c) = sol[5] else { return false };
+			trace!("Checking x = {x}, y = {y}, z = {z}, t = {t}, b = {b}, c = {c}");
+			x - y <= -2 && z - x <= 3 && (b < 1 || x - z <= 2) && (b < 1 || x - y <= -2) && (c < 1 || y - x <= 2) && (c < 1 || z - x <= -1) && 2*t+1 == x
+		});
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_unification() {
+		let mut prb = Model::default();
+		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
+		let b = prb.new_bool_var();
+		let c = prb.new_bool_var();
+		let mut diff_logic = DifferenceLogic::new(PriorityLevel::Low);
+		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[0], int_vars[1], -2));
+		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[2], int_vars[0], 3));
+		diff_logic.add(DifferenceLogicConstraint::Implied(b, int_vars[0], int_vars[2], 2));
+		diff_logic.add(DifferenceLogicConstraint::Implied(b, int_vars[0], int_vars[1], -2));
+		diff_logic.add(DifferenceLogicConstraint::Implied(c, int_vars[1], int_vars[0], 2));
+		diff_logic.add(DifferenceLogicConstraint::Implied(c, int_vars[2], int_vars[0], -1));
+		let _ = diff_logic.process(&mut prb, 2);  //TODO adapt level when definition changes
+		assert!(diff_logic.simplify(&mut prb).is_ok());
+		let IntDecisionInner::Var(var_index) = int_vars[2].0 else {
+			panic!("Should not happen");
+		};
+		assert!(prb.unify_int(int_vars[0], IntDecision(IntDecisionInner::Linear(LinearTransform::offset(1), var_index))).is_ok());
+		assert!(diff_logic.simplify(&mut prb).is_ok());
+
+		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+		let mut actions = ReformulationContext {
+			slv: &mut slv,
+			map: &map,
+		};
+		assert!(<DifferenceLogic as Constraint<Model>>::to_solver(&mut diff_logic, &mut actions).is_ok());
+		let int_views = int_vars.iter().map(|&v| map.get_int(&mut slv, v)).collect_vec();
+		let b_view = IntView::from(map.get_bool(&mut slv, b));
+		let c_view = IntView::from(map.get_bool(&mut slv, c));
+		slv.assert_all_solutions(&[int_views[0], int_views[1], int_views[2], b_view, c_view], move |sol| {
+			let Int(x) = sol[0] else { return false };
+			let Int(y) = sol[1] else { return false };
+			let Int(z) = sol[2] else { return false };
+			let Int(b) = sol[3] else { return false };
+			let Int(c) = sol[4] else { return false };
+			trace!("Checking x = {x}, y = {y}, z = {z}, b = {b}, c = {c}");
+			x - y <= -2 && z - x <= 3 && (b < 1 || x - z <= 2) && (b < 1 || x - y <= -2) && (c < 1 || y - x <= 2) && (c < 1 || z - x <= -1) && z+1 == x
+		});
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_constants() {
+		let mut prb = Model::default();
+		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
+		let mut diff_logic = DifferenceLogic::new(PriorityLevel::Low);
+		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[0], int_vars[1], 3));
+		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[1], int_vars[2], -2));
+		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[2], int_vars[0], 5));
+		let _ = diff_logic.process(&mut prb, 2);  //TODO adapt level when definition changes
+		assert!(diff_logic.simplify(&mut prb).is_ok());
+		assert!(prb.unify_int(int_vars[0], IntDecision::from(5)).is_ok());
+		assert!(prb.unify_int(int_vars[2], IntDecision::from(5)).is_ok());
+		assert!(diff_logic.simplify(&mut prb).is_ok());
+
+		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+		let mut actions = ReformulationContext {
+			slv: &mut slv,
+			map: &map,
+		};
+		assert!(<DifferenceLogic as Constraint<Model>>::to_solver(&mut diff_logic, &mut actions).is_ok());
+		let int_views = int_vars.iter().map(|&v| map.get_int(&mut slv, v)).collect_vec();
+		slv.assert_all_solutions(&[int_views[0], int_views[1], int_views[2]], move |sol| {
+			let Int(x) = sol[0] else { return false };
+			let Int(y) = sol[1] else { return false };
+			let Int(z) = sol[2] else { return false };
+			trace!("Checking x = {x}, y = {y}, z = {z}");
+			x - y <= 3 && y - z <= -2 && x == 5 && z == 5
+		});
+
 	}
 
 }
