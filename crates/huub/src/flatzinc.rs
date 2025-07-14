@@ -2,7 +2,7 @@
 
 use std::{
 	cell::RefCell,
-	collections::{hash_map::Entry, HashMap, HashSet},
+	collections::hash_map::Entry,
 	fmt::{Debug, Display},
 	hash::Hash,
 	iter::once,
@@ -17,6 +17,7 @@ use flatzinc_serde::{
 use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;
 use rangelist::IntervalIterator;
+use rustc_hash::{FxHashMap, FxHashSet};
 use thiserror::Error;
 use tracing::warn;
 
@@ -82,7 +83,7 @@ pub(crate) struct FznModelBuilder<'a, S: Eq + Hash + Ord> {
 	/// The FlatZinc instance to build the model from
 	fzn: &'a FlatZinc<S>,
 	/// A mapping from FlatZinc identifiers to model views
-	map: HashMap<S, Decision>,
+	map: FxHashMap<S, Decision>,
 	/// The incumbent model
 	prb: Model,
 	/// Flags indicating which constraints have been processed
@@ -454,7 +455,7 @@ where
 		vars: Vec<IntDecision>,
 		transitions: Vec<Vec<IntVal>>,
 		init_state: IntVal,
-		accept_states: HashSet<IntVal>,
+		accept_states: FxHashSet<IntVal>,
 	) -> Vec<IntTable> {
 		// TODO: Add the regular checking
 
@@ -559,7 +560,7 @@ where
 	/// consistent using propagators.
 	fn extract_view(
 		&mut self,
-		defined_by: &HashMap<&S, usize>,
+		defined_by: &FxHashMap<&S, usize>,
 		con: usize,
 	) -> Result<(), FlatZincError> {
 		debug_assert!(!self.processed[con]);
@@ -703,7 +704,7 @@ where
 	/// views of other variables.
 	pub(crate) fn extract_views(&mut self) -> Result<(), FlatZincError> {
 		// Create a mapping from identifiers to the constraint that defines them
-		let defined_by: HashMap<&S, usize> = self
+		let defined_by: FxHashMap<&S, usize> = self
 			.fzn
 			.constraints
 			.iter()
@@ -791,7 +792,7 @@ where
 	pub(crate) fn new(fzn: &'a FlatZinc<S>) -> Self {
 		Self {
 			fzn,
-			map: HashMap::new(),
+			map: FxHashMap::default(),
 			prb: Model::default(),
 			processed: vec![false; fzn.constraints.len()],
 			stats: FlatZincStatistics::default(),
@@ -1247,7 +1248,7 @@ where
 
 						let q0 = self.arg_par_int(q0)?;
 						let f = self.arg_par_set(f)?;
-						let f: HashSet<IntVal> = f.iter().flat_map(|r| r.into_iter()).collect();
+						let f: FxHashSet<IntVal> = f.iter().flat_map(|r| r.into_iter()).collect();
 
 						// Convert regular constraint in to table constraints and add them to the model
 						let tables = self.convert_regular_to_tables(x, d, q0, f);
@@ -1597,8 +1598,8 @@ where
 	/// This can happen because of `bool_eq` and `int_eq` constraints in the
 	/// [`FlatZinc`] instance.
 	pub(crate) fn unify_variables(&mut self) -> Result<(), FlatZincError> {
-		let mut unify_map = HashMap::<S, Rc<RefCell<Vec<Literal<S>>>>>::new();
-		let unify_map_find = |map: &HashMap<S, Rc<RefCell<Vec<Literal<S>>>>>, a: &Literal<S>| {
+		let mut unify_map = FxHashMap::<S, Rc<RefCell<Vec<Literal<S>>>>>::default();
+		let unify_map_find = |map: &FxHashMap<S, Rc<RefCell<Vec<Literal<S>>>>>, a: &Literal<S>| {
 			if let Literal::Identifier(x) = a {
 				map.get(x).map(Rc::clone)
 			} else {
@@ -1606,7 +1607,7 @@ where
 			}
 		};
 
-		let record_unify = |map: &mut HashMap<S, Rc<RefCell<Vec<Literal<S>>>>>, a, b| {
+		let record_unify = |map: &mut FxHashMap<S, Rc<RefCell<Vec<Literal<S>>>>>, a, b| {
 			let a_set = unify_map_find(map, a);
 			let b_set = unify_map_find(map, b);
 			match (a_set, b_set) {

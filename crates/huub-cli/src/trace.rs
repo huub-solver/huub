@@ -2,13 +2,13 @@
 //! for `huub`.
 
 use std::{
-	collections::HashMap,
 	fmt::{self, Display},
 	num::NonZeroI32,
 	sync::{Arc, Mutex},
 };
 
 use huub::{solver::IntLitMeaning, IntVal};
+use rustc_hash::FxHashMap;
 use tracing::{
 	field::{Field, Visit},
 	Event, Level, Subscriber,
@@ -34,7 +34,7 @@ struct FmtLitFields {
 	fmt: DefaultFields,
 	/// The mapping from integers representing literals to the definitions of
 	/// their names.
-	lit_reverse_map: Arc<Mutex<HashMap<LitInt, LitName>>>,
+	lit_reverse_map: Arc<Mutex<FxHashMap<LitInt, LitName>>>,
 	/// The mapping from indexes of integer variables to their names.
 	int_reverse_map: Arc<Mutex<Vec<Ustr>>>,
 }
@@ -66,7 +66,7 @@ struct LitNames<'a, V> {
 	inner: V,
 	/// The mapping from integers representing literals to the definitions of
 	/// their names.
-	lit_reverse_map: &'a HashMap<LitInt, LitName>,
+	lit_reverse_map: &'a FxHashMap<LitInt, LitName>,
 	/// The mapping from indexes of integer variables to their names.
 	int_reverse_map: &'a Vec<Ustr>,
 }
@@ -93,7 +93,7 @@ struct RecordLazyLits {
 /// literals for any future log messages.
 struct RegisterLazyLits {
 	/// A mapping from the literals to a definition of a literal name.
-	lit_reverse_map: Arc<Mutex<HashMap<LitInt, LitName>>>,
+	lit_reverse_map: Arc<Mutex<FxHashMap<LitInt, LitName>>>,
 }
 
 /// Create a [`tracing_subscriber::Subscriber`] specialized for `huub`.
@@ -104,7 +104,7 @@ pub(crate) fn create_subscriber<W>(
 	verbose: u8,
 	make_writer: W,
 	ansi: bool,
-	lit_reverse_map: Arc<Mutex<HashMap<LitInt, LitName>>>,
+	lit_reverse_map: Arc<Mutex<FxHashMap<LitInt, LitName>>>,
 	int_reverse_map: Arc<Mutex<Vec<Ustr>>>,
 ) -> impl Subscriber
 where
@@ -136,7 +136,7 @@ impl FmtLitFields {
 	/// `int_reverse_map`.
 	fn new(
 		fmt: DefaultFields,
-		lit_reverse_map: Arc<Mutex<HashMap<LitInt, LitName>>>,
+		lit_reverse_map: Arc<Mutex<FxHashMap<LitInt, LitName>>>,
 		int_reverse_map: Arc<Mutex<Vec<Ustr>>>,
 	) -> Self {
 		Self {
@@ -189,7 +189,7 @@ impl<'a, V> LitNames<'a, V> {
 	/// [`MakeVisitor`]: tracing_subscriber::field::MakeVisitor
 	fn new(
 		inner: V,
-		lit_reverse_map: &'a HashMap<LitInt, LitName>,
+		lit_reverse_map: &'a FxHashMap<LitInt, LitName>,
 		int_reverse_map: &'a Vec<Ustr>,
 	) -> Self {
 		LitNames {
@@ -343,7 +343,7 @@ impl RecordLazyLits {
 	/// If the visited fields match the expected fields of log message for a new
 	/// literal, then the method will register the literal in the
 	/// `lit_reverse_map` and return `true`. Otherwise, it will return `false`.
-	fn finish(self, lit_reverse_map: &Arc<Mutex<HashMap<LitInt, LitName>>>) -> bool {
+	fn finish(self, lit_reverse_map: &Arc<Mutex<FxHashMap<LitInt, LitName>>>) -> bool {
 		if self.other_values {
 			return false;
 		}
@@ -408,7 +408,7 @@ impl Visit for RecordLazyLits {
 
 impl RegisterLazyLits {
 	/// Create a new instance of the [`RegisterLazyLits`] layer.
-	fn new(lit_reverse_map: Arc<Mutex<HashMap<LitInt, LitName>>>) -> Self {
+	fn new(lit_reverse_map: Arc<Mutex<FxHashMap<LitInt, LitName>>>) -> Self {
 		Self { lit_reverse_map }
 	}
 }

@@ -24,7 +24,6 @@ macro_rules! outputln {
 mod trace;
 
 use std::{
-	collections::HashMap,
 	fmt::{self, Debug, Display},
 	fs::File,
 	io::{self, BufReader},
@@ -46,6 +45,7 @@ use huub::{
 	SlvTermSignal,
 };
 use pico_args::Arguments;
+use rustc_hash::FxHashMap;
 use tracing::{subscriber::set_default, warn};
 use tracing_subscriber::fmt::MakeWriter;
 use ustr::{ustr, Ustr, UstrMap};
@@ -189,7 +189,7 @@ where
 	/// Run the Huub solver in accordance to the given command line arguments.
 	pub fn run(&mut self) -> Result<(), String> {
 		// Enable tracing functionality
-		let lit_reverse_map: Arc<Mutex<HashMap<NonZeroI32, LitName>>> = Arc::default();
+		let lit_reverse_map: Arc<Mutex<FxHashMap<NonZeroI32, LitName>>> = Arc::default();
 		let int_reverse_map: Arc<Mutex<Vec<Ustr>>> = Arc::default();
 		let subscriber = trace::create_subscriber(
 			self.verbose,
@@ -249,7 +249,7 @@ where
 
 		// Create reverse map for solver variables if required
 		if self.verbose > 0 {
-			let mut lit_map = HashMap::new();
+			let mut lit_map = FxHashMap::default();
 			let mut int_map = vec![ustr(""); slv.init_statistics().int_vars()];
 			let mut keys: Vec<_> = var_map.keys().collect();
 			keys.sort();
