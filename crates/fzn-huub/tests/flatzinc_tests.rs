@@ -53,12 +53,14 @@ mod tests {
 	assert_first_solution!(steiner_t6_k6_N7);
 	assert_first_solution!(sudoku_p48);
 
+	assert_optimal!(ccmcp_3_20_0);
 	assert_optimal!(jobshop_la01);
 	assert_optimal!(jobshop_la02);
 	assert_optimal!(jobshop_la03);
 	assert_optimal!(jobshop_la04);
 	assert_optimal!(jobshop_la05);
 	assert_optimal!(jobshop_newspaper);
+	assert_optimal!(peaceable_queens_n5_q3);
 	assert_optimal!(portal_10_9_10);
 	assert_optimal!(radiation_i6_9);
 	assert_optimal!(radiation_i8_9);

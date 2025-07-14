@@ -28,6 +28,18 @@ INSTANCES = [
             "jobshop_newspaper.fzn.json": "https://gist.githubusercontent.com/Dekker1/6662819320b5741b57913813dfcc0afa/raw/11e882546aed599a33a7c9426a445b8d0ac986c7/jobshop_newspaper.dzn",
         },
     },
+    {   # Kidney Exchange
+        "model": "https://raw.githubusercontent.com/MiniZinc/mzn-challenge/refs/heads/develop/2023/kidney-exchange/ccmcp.mzn",
+        "instances": {
+            "ccmcp_3_20_0.fzn.json": "https://raw.githubusercontent.com/MiniZinc/mzn-challenge/refs/heads/develop/2023/kidney-exchange/3_20_0.15_3.dzn"
+        },
+    },
+    {   # (Generalized) Peacable Queens
+        "model": "https://raw.githubusercontent.com/MiniZinc/mzn-challenge/refs/heads/develop/2022/generalized-peacable-queens/peaceable_queens.mzn",
+        "instances": {
+            "peaceable_queens_n5_q3.fzn.json": "peaceable_queens_n5_q3.json"
+        }
+    },
     {
         # Portal
         "model": "https://raw.githubusercontent.com/MiniZinc/mzn-challenge/refs/heads/develop/2024/portal/portal.mzn",
