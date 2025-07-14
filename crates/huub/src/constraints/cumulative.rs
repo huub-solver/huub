@@ -28,11 +28,11 @@ pub struct Cumulative {
 	/// Start time variables of each task.
 	pub(crate) start_times: Vec<IntDecision>,
 	/// Durations of each task.
-	pub(crate) durations: Vec<IntVal>,
+	pub(crate) durations: Vec<IntDecision>,
 	/// Resource usages of each task.
-	pub(crate) usages: Vec<IntVal>,
+	pub(crate) usages: Vec<IntDecision>,
 	/// Resource capacity.
-	pub(crate) capacity: IntVal,
+	pub(crate) capacity: IntDecision,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -43,27 +43,9 @@ enum CumulativePropagationRule {
 	BackwardShift,
 }
 
-impl From<u64> for CumulativePropagationRule {
-	fn from(val: u64) -> Self {
-		match val {
-			0 => CumulativePropagationRule::ForwardShift,
-			1 => CumulativePropagationRule::BackwardShift,
-			_ => unreachable!("Invalid propagation rule"),
-		}
-	}
-}
-
-impl From<CumulativePropagationRule> for u64 {
-	fn from(value: CumulativePropagationRule) -> Self {
-		match value {
-			CumulativePropagationRule::ForwardShift => 0,
-			CumulativePropagationRule::BackwardShift => 1,
-		}
-	}
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A propagator for the `cumulative` constraint using time-table propagation.
+/// TODO: update duration, usages and capacity to `IntView`
 pub struct CumulativeTimeTable {
 	/// Start time variables of each task.
 	start_times: Vec<IntView>,
@@ -86,10 +68,11 @@ impl<S: SimplificationActions> Constraint<S> for Cumulative {
 		// Check if the cumulative constraint is trivially unsatisfiable
 		let mut earliest_start = IntVal::MAX;
 		let mut latest_completion = IntVal::MIN;
+		let capacity = actions.get_int_lower_bound(self.capacity);
 		let mut total_energy = 0;
 		for i in 0..self.start_times.len() {
-			let duration = self.durations[i];
-			let usage = self.usages[i];
+			let duration = actions.get_int_lower_bound(self.durations[i]);
+			let usage = actions.get_int_lower_bound(self.usages[i]);
 			let est_i = actions.get_int_lower_bound(self.start_times[i]);
 			let lst_i = actions.get_int_upper_bound(self.start_times[i]);
 			earliest_start = i64::min(earliest_start, est_i);
@@ -98,11 +81,11 @@ impl<S: SimplificationActions> Constraint<S> for Cumulative {
 				total_energy += usage * (est_i + duration - lst_i);
 			}
 		}
-		if total_energy > self.capacity * (latest_completion - earliest_start) {
+		if total_energy > capacity * (latest_completion - earliest_start) {
 			println!(
 				"Unsatisfiable {} {} {}",
 				total_energy,
-				self.capacity,
+				capacity,
 				(latest_completion - earliest_start)
 			);
 			return Err(ReformulationError::TrivialUnsatisfiable);
@@ -117,13 +100,45 @@ impl<S: SimplificationActions> Constraint<S> for Cumulative {
 			.iter()
 			.map(|&v| slv.get_solver_int(v))
 			.collect_vec();
-		CumulativeTimeTable::new_in(
-			slv,
-			start_times,
-			self.durations.clone(),
-			self.usages.clone(),
-			self.capacity,
-		);
+		let durations = self
+			.durations
+			.iter()
+			.map(|&v| {
+				let v = slv.get_solver_int(v);
+				// Ensure that durations are fixed to a single value
+				let bounds = slv.get_int_bounds(v);
+				assert_eq!(
+					bounds.0, bounds.1,
+					"Cumulative durations must be fixed to a single value."
+				);
+				bounds.0
+			})
+			.collect_vec();
+		let usages = self
+			.usages
+			.iter()
+			.map(|&v| {
+				let v = slv.get_solver_int(v);
+				// Ensure that usages are fixed to a single value
+				let bounds = slv.get_int_bounds(v);
+				assert_eq!(
+					bounds.0, bounds.1,
+					"Cumulative usages must be fixed to a single value."
+				);
+				bounds.0
+			})
+			.collect_vec();
+		let capacity = {
+			let v = slv.get_solver_int(self.capacity);
+			// Ensure that capacity is fixed to a single value
+			let bounds = slv.get_int_bounds(v);
+			assert_eq!(
+				bounds.0, bounds.1,
+				"Cumulative capacity must be fixed to a single value."
+			);
+			bounds.0
+		};
+		CumulativeTimeTable::new_in(slv, start_times, durations, usages, capacity);
 		Ok(())
 	}
 }

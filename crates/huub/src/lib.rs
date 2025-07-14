@@ -285,9 +285,9 @@ where
 /// resource capacity.
 pub fn cumulative(
 	start_times: Vec<IntDecision>,
-	durations: Vec<IntVal>,
-	usages: Vec<IntVal>,
-	capacity: IntVal,
+	durations: Vec<IntDecision>,
+	usages: Vec<IntDecision>,
+	capacity: IntDecision,
 ) -> Cumulative {
 	assert_eq!(
 		start_times.len(),
@@ -298,14 +298,6 @@ pub fn cumulative(
 		start_times.len(),
 		usages.len(),
 		"cumulative must be given the same number of start times and usages."
-	);
-	assert!(
-		durations.iter().all(|&dur| dur >= 0),
-		"cumulative cannot be given any negative durations."
-	);
-	assert!(
-		usages.iter().all(|&usage| usage >= 0),
-		"cumulative cannot be given any negative usages."
 	);
 	Cumulative {
 		start_times,

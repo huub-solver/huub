@@ -1249,14 +1249,14 @@ where
 						let durations = self
 							.arg_array(durations)?
 							.iter()
-							.map(|l| self.par_int(l))
+							.map(|l| self.lit_int(l))
 							.try_collect()?;
 						let heights = self
 							.arg_array(heights)?
 							.iter()
-							.map(|l| self.par_int(l))
+							.map(|l| self.lit_int(l))
 							.try_collect()?;
-						let r = self.arg_par_int(r)?;
+						let r = self.arg_int(r)?;
 						self.prb += cumulative(starts, durations, heights, r);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
