@@ -18,10 +18,7 @@ macro_rules! trace_new_lit {
 	};
 }
 
-use std::{
-	collections::{HashMap, VecDeque},
-	mem,
-};
+use std::{collections::VecDeque, mem};
 
 use delegate::delegate;
 use index_vec::IndexVec;
@@ -38,6 +35,7 @@ use crate::{
 	actions::{DecisionActions, ExplanationActions, InspectionActions, TrailingActions},
 	branchers::{BoxedBrancher, Decision},
 	constraints::{BoxedPropagator, Conflict, Reason},
+	helpers::hash_map::FastMap32,
 	solver::{
 		activation_list::{ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
@@ -100,7 +98,7 @@ pub struct State {
 	/// Literals to be propagated by the oracle
 	pub(crate) propagation_queue: VecDeque<RawLit>,
 	/// Reasons for setting values
-	pub(crate) reason_map: HashMap<RawLit, Reason>,
+	pub(crate) reason_map: FastMap32<RawLit, Reason>,
 	/// Whether conflict has (already) been detected
 	pub(crate) conflict: Option<Conflict>,
 	/// Whether the solver is in a failure state.
@@ -121,7 +119,7 @@ pub struct State {
 
 	// ---- Queueing Infrastructure ----
 	/// Boolean variable enqueueing information
-	pub(crate) bool_activation: HashMap<RawVar, Vec<PropRef>>,
+	pub(crate) bool_activation: FastMap32<RawVar, Vec<PropRef>>,
 	/// Integer variable enqueueing information
 	pub(crate) int_activation: IndexVec<IntVarRef, ActivationList>,
 	/// Queue of propagators awaiting action

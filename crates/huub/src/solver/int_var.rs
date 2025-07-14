@@ -1,10 +1,7 @@
 //! Module containing the representation of integer variables within the solver.
 
 use std::{
-	collections::{
-		hash_map::{self, VacantEntry},
-		HashMap,
-	},
+	collections::hash_map::{self, VacantEntry},
 	iter::{Map, Peekable},
 	ops::{Index, IndexMut, RangeBounds, RangeInclusive},
 };
@@ -18,6 +15,7 @@ use rangelist::{IntervalIterator, RangeList};
 
 use crate::{
 	actions::TrailingActions,
+	helpers::hash_map::FastMap64,
 	solver::{
 		engine::Engine, trail::TrailedInt, BoolView, BoolViewInner, IntLitMeaning, IntView,
 		IntViewInner,
@@ -43,7 +41,7 @@ pub(crate) enum DirectStorage {
 	/// Variables for all equality conditions are eagerly created and stored in order
 	Eager(VarRange),
 	/// Variables for equality conditions are lazily created and stored in a hashmap
-	Lazy(HashMap<IntVal, RawVar>),
+	Lazy(FastMap64<IntVal, RawVar>),
 }
 
 /// A type to represent when certain literals are created
@@ -673,7 +671,7 @@ impl IntVar {
 			EncodingType::Eager => {
 				DirectStorage::Eager(slv.oracle.new_var_range(orig_domain_len - 2))
 			}
-			EncodingType::Lazy => DirectStorage::Lazy(HashMap::default()),
+			EncodingType::Lazy => DirectStorage::Lazy(FastMap64::default()),
 		};
 
 		// Enforce consistency constraints for eager literals
