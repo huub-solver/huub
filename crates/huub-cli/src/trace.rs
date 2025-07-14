@@ -274,6 +274,9 @@ impl<V: Visit> LitNames<'_, V> {
 	/// Check if the field should and can be formatted as a literal.
 	fn check_lit(&mut self, field: &Field, value: i64) -> bool {
 		if field.name().starts_with("lit") | field.name().starts_with("bool_var") {
+			if value == 0 || value < i32::MIN as i64 || value > i32::MAX as i64 {
+				return false;
+			}
 			if let Some(name) = self
 				.lit_reverse_map
 				.get(&NonZeroI32::new(value as i32).unwrap())
@@ -383,7 +386,9 @@ impl Visit for RecordLazyLits {
 
 	fn record_i64(&mut self, field: &Field, value: i64) {
 		match field.name() {
-			"lit" => self.lit = Some(NonZeroI32::new(value as i32).unwrap()),
+			"lit" if value != 0 && value >= i32::MIN as i64 && value <= i32::MAX as i64 => {
+				self.lit = Some(NonZeroI32::new(value as i32).unwrap());
+			}
 			"val" => self.val = Some(value),
 			_ => self.other_values = true,
 		}
@@ -391,7 +396,9 @@ impl Visit for RecordLazyLits {
 
 	fn record_u64(&mut self, field: &Field, value: u64) {
 		match field.name() {
-			"lit" => self.lit = Some(NonZeroI32::new(value as i32).unwrap()),
+			"lit" if value != 0 && value <= i32::MAX as u64 => {
+				self.lit = Some(NonZeroI32::new(value as i32).unwrap());
+			}
 			"int_var" => self.int_var = Some(value as usize),
 			"val" => self.val = Some(value as i64),
 			_ => self.other_values = true,
