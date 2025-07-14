@@ -1,6 +1,7 @@
 //! Structure and algorithms for the integer diffn constraint, which
 //! enforces that a number of k-dimensional hyperrectangles do not overlap.
 use std::cmp;
+use tracing::trace;
 
 use itertools::Itertools;
 use smallvec::SmallVec;
@@ -210,6 +211,7 @@ impl IntDiffnSweep {
 		}
 		// Start pruning here
 		if sweep[curr_dimension] != self.lb_tracker[curr_obj_idx][curr_dimension] {
+            trace!("SET [{:?}..{:?}] >= {}", self.lb_tracker[curr_obj_idx][curr_dimension], self.ub_tracker[curr_obj_idx][curr_dimension], sweep[curr_dimension]);
 			let reason = self.explain_propagation(
 				actions,
 				all_fr_explain,
@@ -566,11 +568,13 @@ impl IntDiffnSweep {
 						origin_lb + actions.get_int_lower_bound(self.box_size[curr_obj_idx][d]) - 1;
 				}
 
+                trace!("reason [{:?}..{:?}] < {}", self.lb_tracker[o_idx][d], self.ub_tracker[o_idx][d], possible_ub+1);
 				reason.push(actions.get_int_lit(
 					self.box_posn[o_idx][d],
 					IntLitMeaning::Less(possible_ub + 1),
 				));
 
+                trace!("reason [{:?}..{:?}] >= {}", self.lb_tracker[o_idx][d], self.ub_tracker[o_idx][d], possible_lb);
 				reason.push(actions.get_int_lit(
 					self.box_posn[o_idx][d],
 					IntLitMeaning::GreaterEq(possible_lb),
@@ -590,30 +594,36 @@ impl IntDiffnSweep {
 		curr_dimension: usize,
 		prune_upper: bool,
 	) -> Vec<BoolView> {
+        trace!("PROPAGATION");
 		let mut reason: Vec<_> = Vec::new();
 		for d in 0..self.dimensions {
 			// If sizes are not fixed, add reason for them
 			if !self.fixed_sizes {
+                trace!("reason size [{:?}..{:?}] >= {}", actions.get_int_lower_bound(self.box_size[curr_obj_idx][d]), actions.get_int_upper_bound(self.box_size[curr_obj_idx][d]), actions.get_int_lower_bound(self.box_size[curr_obj_idx][d]));
 				reason.push(actions.get_int_lower_bound_lit(self.box_size[curr_obj_idx][d]));
 			}
 
 			if d == curr_dimension {
 				if prune_upper {
+                    trace!("reason [{:?}..{:?}] < {}", self.lb_tracker[curr_obj_idx][d], self.ub_tracker[curr_obj_idx][d], self.ub_tracker[curr_obj_idx][d] + 1);
 					reason.push(actions.get_int_lit(
 						self.box_posn[curr_obj_idx][d],
 						IntLitMeaning::Less(self.ub_tracker[curr_obj_idx][d] + 1),
 					));
 				} else {
+                    trace!("reason [{:?}..{:?}] >= {}", self.lb_tracker[curr_obj_idx][d], self.ub_tracker[curr_obj_idx][d], self.lb_tracker[curr_obj_idx][d]);
 					reason.push(actions.get_int_lit(
 						self.box_posn[curr_obj_idx][d],
 						IntLitMeaning::GreaterEq(self.lb_tracker[curr_obj_idx][d]),
 					));
 				}
 			} else {
+                trace!("reason [{:?}..{:?}] < {}", self.lb_tracker[curr_obj_idx][d], self.ub_tracker[curr_obj_idx][d], self.ub_tracker[curr_obj_idx][d] + 1);
 				reason.push(actions.get_int_lit(
 					self.box_posn[curr_obj_idx][d],
 					IntLitMeaning::Less(self.ub_tracker[curr_obj_idx][d] + 1),
 				));
+                trace!("reason [{:?}..{:?}] >= {}", self.lb_tracker[curr_obj_idx][d], self.ub_tracker[curr_obj_idx][d], self.lb_tracker[curr_obj_idx][d]);
 				reason.push(actions.get_int_lit(
 					self.box_posn[curr_obj_idx][d],
 					IntLitMeaning::GreaterEq(self.lb_tracker[curr_obj_idx][d]),
