@@ -392,8 +392,6 @@ impl PropagatorExtension for Engine {
 		while let Some(&lit) = self.state.propagation_queue.front() {
 			if self.state.trail.get_sat_value(lit) == Some(true) {
 				let _ = self.state.propagation_queue.pop_front();
-				let reason = self.state.reason_map.remove(&lit);
-				debug_assert!(reason.is_some());
 			} else {
 				break;
 			}

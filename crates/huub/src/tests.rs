@@ -1,11 +1,17 @@
-use expect_test::Expect;
+use expect_test::{expect, Expect};
 use itertools::Itertools;
-use pindakaas::propositional_logic::Formula;
+use pindakaas::{propositional_logic::Formula, Cnf};
 use rangelist::RangeList;
 
 use crate::{
-	solver::{SolveResult, Value, View},
-	InitConfig, Model, ReformulationError, Solver,
+	branchers::IntBrancher,
+	constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
+	solver::{
+		int_var::{EncodingType, IntVar},
+		SolveResult, Value, View,
+	},
+	InitConfig, Model, NonZeroIntVal, ReformulationError, Solver, ValueSelection,
+	VariableSelection,
 };
 
 #[test]
@@ -26,6 +32,47 @@ fn it_works() {
 			assert_ne!(value(a.into()), value(b.into()));
 		}),
 		SolveResult::Satisfied
+	);
+}
+
+#[test]
+/// Tests for when a propagator propagates the same literal twice within the
+/// same call.
+fn test_duplicate_propagation() {
+	let mut slv = Solver::from(&Cnf::default());
+	let a = IntVar::new_in(
+		&mut slv,
+		RangeList::from(0..=1),
+		EncodingType::Eager,
+		EncodingType::Lazy,
+	);
+	let b = IntVar::new_in(
+		&mut slv,
+		RangeList::from(0..=1),
+		EncodingType::Eager,
+		EncodingType::Lazy,
+	);
+	IntLinearLessEqBounds::new_in(
+		&mut slv,
+		[
+			a * NonZeroIntVal::new(3).unwrap(),
+			b,
+			b * NonZeroIntVal::new(2).unwrap(),
+		],
+		3,
+	);
+	IntLinearNotEqValue::new_in(&mut slv, [a * NonZeroIntVal::new(3).unwrap(), b], 3);
+	IntBrancher::new_in(
+		&mut slv,
+		vec![a, b],
+		VariableSelection::InputOrder,
+		ValueSelection::IndomainMax,
+	);
+	slv.expect_solutions(
+		&[a, b],
+		expect![[r#"
+    0, 0
+    0, 1"#]],
 	);
 }
 
