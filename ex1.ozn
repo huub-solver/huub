@@ -1,8 +1,0 @@
-output ["w:"++format(w)++" h:"++format(h)++" X:"++format(X)++" Y:"++format(Y)++" rec: "++format(rec)++" squares: "++format(Squares)++""];
-int: n = 8;
-int: w;
-int: h;
-array [1..n] of int: X;
-array [1..n] of int: Y;
-int: rec = w*h;
-array [1..n] of int: Squares = [1,2,3,4,5,6,7,8];

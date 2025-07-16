@@ -1,10 +1,10 @@
 //! Structure and algorithms for the integer diffn constraint, which
 //! enforces that a number of k-dimensional hyperrectangles do not overlap.
 use std::cmp;
-use tracing::trace;
 
 use itertools::Itertools;
 use smallvec::SmallVec;
+use tracing::trace;
 
 use crate::{
 	actions::{
@@ -211,7 +211,14 @@ impl IntDiffnSweep {
 		}
 		// Start pruning here
 		if sweep[curr_dimension] != self.lb_tracker[curr_obj_idx][curr_dimension] {
-            trace!("SET [{:?}..{:?}] >= {}", self.lb_tracker[curr_obj_idx][curr_dimension], self.ub_tracker[curr_obj_idx][curr_dimension], sweep[curr_dimension]);
+			trace!(
+				"SET obj {:?} in dimension {} [{:?}..{:?}] >= {}",
+				curr_obj_idx,
+				curr_dimension,
+				self.lb_tracker[curr_obj_idx][curr_dimension],
+				self.ub_tracker[curr_obj_idx][curr_dimension],
+				sweep[curr_dimension]
+			);
 			let reason = self.explain_propagation(
 				actions,
 				all_fr_explain,
@@ -568,13 +575,27 @@ impl IntDiffnSweep {
 						origin_lb + actions.get_int_lower_bound(self.box_size[curr_obj_idx][d]) - 1;
 				}
 
-                trace!("reason [{:?}..{:?}] < {}", self.lb_tracker[o_idx][d], self.ub_tracker[o_idx][d], possible_ub+1);
+				trace!(
+					"reason of obj {:?} in dimension {} [{:?}..{:?}] < {}",
+					o_idx,
+					d,
+					self.lb_tracker[o_idx][d],
+					self.ub_tracker[o_idx][d],
+					possible_ub + 1
+				);
 				reason.push(actions.get_int_lit(
 					self.box_posn[o_idx][d],
 					IntLitMeaning::Less(possible_ub + 1),
 				));
 
-                trace!("reason [{:?}..{:?}] >= {}", self.lb_tracker[o_idx][d], self.ub_tracker[o_idx][d], possible_lb);
+				trace!(
+					"reason of obj {:?} in dimension {} [{:?}..{:?}] >= {}",
+					o_idx,
+					d,
+					self.lb_tracker[o_idx][d],
+					self.ub_tracker[o_idx][d],
+					possible_lb
+				);
 				reason.push(actions.get_int_lit(
 					self.box_posn[o_idx][d],
 					IntLitMeaning::GreaterEq(possible_lb),
@@ -594,36 +615,71 @@ impl IntDiffnSweep {
 		curr_dimension: usize,
 		prune_upper: bool,
 	) -> Vec<BoolView> {
-        trace!("PROPAGATION");
+		trace!("PROPAGATION");
 		let mut reason: Vec<_> = Vec::new();
 		for d in 0..self.dimensions {
 			// If sizes are not fixed, add reason for them
 			if !self.fixed_sizes {
-                trace!("reason size [{:?}..{:?}] >= {}", actions.get_int_lower_bound(self.box_size[curr_obj_idx][d]), actions.get_int_upper_bound(self.box_size[curr_obj_idx][d]), actions.get_int_lower_bound(self.box_size[curr_obj_idx][d]));
+				trace!(
+					"reason size of obj {:?} in dimension {} [{:?}..{:?}] >= {}",
+					curr_obj_idx,
+					d,
+					actions.get_int_lower_bound(self.box_size[curr_obj_idx][d]),
+					actions.get_int_upper_bound(self.box_size[curr_obj_idx][d]),
+					actions.get_int_lower_bound(self.box_size[curr_obj_idx][d])
+				);
 				reason.push(actions.get_int_lower_bound_lit(self.box_size[curr_obj_idx][d]));
 			}
 
 			if d == curr_dimension {
 				if prune_upper {
-                    trace!("reason [{:?}..{:?}] < {}", self.lb_tracker[curr_obj_idx][d], self.ub_tracker[curr_obj_idx][d], self.ub_tracker[curr_obj_idx][d] + 1);
+					trace!(
+						"reason of obj {:?} in dimension {} [{:?}..{:?}] < {}",
+						curr_obj_idx,
+						d,
+						self.lb_tracker[curr_obj_idx][d],
+						self.ub_tracker[curr_obj_idx][d],
+						self.ub_tracker[curr_obj_idx][d] + 1
+					);
 					reason.push(actions.get_int_lit(
 						self.box_posn[curr_obj_idx][d],
 						IntLitMeaning::Less(self.ub_tracker[curr_obj_idx][d] + 1),
 					));
 				} else {
-                    trace!("reason [{:?}..{:?}] >= {}", self.lb_tracker[curr_obj_idx][d], self.ub_tracker[curr_obj_idx][d], self.lb_tracker[curr_obj_idx][d]);
+					trace!(
+						"reason of obj {:?} in dimension {} [{:?}..{:?}] >= {}",
+						curr_obj_idx,
+						d,
+						self.lb_tracker[curr_obj_idx][d],
+						self.ub_tracker[curr_obj_idx][d],
+						self.lb_tracker[curr_obj_idx][d]
+					);
 					reason.push(actions.get_int_lit(
 						self.box_posn[curr_obj_idx][d],
 						IntLitMeaning::GreaterEq(self.lb_tracker[curr_obj_idx][d]),
 					));
 				}
 			} else {
-                trace!("reason [{:?}..{:?}] < {}", self.lb_tracker[curr_obj_idx][d], self.ub_tracker[curr_obj_idx][d], self.ub_tracker[curr_obj_idx][d] + 1);
+				trace!(
+					"reason of obj {:?} in dimension {} [{:?}..{:?}] < {}",
+					curr_obj_idx,
+					d,
+					self.lb_tracker[curr_obj_idx][d],
+					self.ub_tracker[curr_obj_idx][d],
+					self.ub_tracker[curr_obj_idx][d] + 1
+				);
 				reason.push(actions.get_int_lit(
 					self.box_posn[curr_obj_idx][d],
 					IntLitMeaning::Less(self.ub_tracker[curr_obj_idx][d] + 1),
 				));
-                trace!("reason [{:?}..{:?}] >= {}", self.lb_tracker[curr_obj_idx][d], self.ub_tracker[curr_obj_idx][d], self.lb_tracker[curr_obj_idx][d]);
+				trace!(
+					"reason of obj {:?} in dimension {} [{:?}..{:?}] >= {}",
+					curr_obj_idx,
+					d,
+					self.lb_tracker[curr_obj_idx][d],
+					self.ub_tracker[curr_obj_idx][d],
+					self.lb_tracker[curr_obj_idx][d]
+				);
 				reason.push(actions.get_int_lit(
 					self.box_posn[curr_obj_idx][d],
 					IntLitMeaning::GreaterEq(self.lb_tracker[curr_obj_idx][d]),
@@ -642,6 +698,7 @@ where
 {
 	#[tracing::instrument(name = "diffn", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
+		trace!("START");
 		for o in 0..self.box_posn.len() {
 			for d in 0..self.dimensions {
 				self.ub_tracker[o][d] = actions.get_int_upper_bound(self.box_posn[o][d]);
@@ -732,189 +789,55 @@ where
 #[cfg(test)]
 mod tests {
 	use itertools::Itertools;
-	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
-	use rangelist::RangeList;
+	use pindakaas::solver::cadical::PropagatingCadical;
 	use tracing_test::traced_test;
 
-	use crate::{
-		constraints::int_diffn::IntDiffnSweep,
-		diffn_int,
-		reformulate::InitConfig,
-		solver::{
-			int_var::{EncodingType, IntVar},
-			Solver,
-		},
-		Decision, Model,
-	};
-
+	use crate::{diffn_int, reformulate::InitConfig, Decision, Model};
 	#[test]
 	#[traced_test]
-	fn test_diffn() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
-		let pos_1 = IntVar::new_in(
-			&mut slv,
-			RangeList::from_iter([0..=2]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let pos_2 = IntVar::new_in(
-			&mut slv,
-			RangeList::from_iter([0..=5]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let pos_3 = IntVar::new_in(
-			&mut slv,
-			RangeList::from_iter([1..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let pos_4 = IntVar::new_in(
-			&mut slv,
-			RangeList::from_iter([4..=4]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+	fn test_diffn_unsat_1() {
+		let mut prb = Model::default();
+		let x_pos_1 = prb.new_int_var((1..=1).into());
+		let x_pos_2 = prb.new_int_var((1..=1).into());
 
-		let size_1 = IntVar::new_in(
-			&mut slv,
-			RangeList::from_iter([4..=4]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let size_2 = IntVar::new_in(
-			&mut slv,
-			RangeList::from_iter([3..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let size_3 = IntVar::new_in(
-			&mut slv,
-			RangeList::from_iter([2..=2]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let size_4 = IntVar::new_in(
-			&mut slv,
-			RangeList::from_iter([2..=2]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let x_size_1 = prb.new_int_var((2..=4).into());
+		let x_size_2 = prb.new_int_var((1..=6).into());
 
-		IntDiffnSweep::new_in(
-			&mut slv,
-			vec![vec![pos_1, pos_2], vec![pos_3, pos_4]],
-			vec![vec![size_1, size_2], vec![size_3, size_4]],
+		let y_pos_1 = prb.new_int_var((1..=1).into());
+		let y_pos_2 = prb.new_int_var((1..=1).into());
+
+		let y_size_1 = prb.new_int_var((1..=3).into());
+		let y_size_2 = prb.new_int_var((1..=6).into());
+
+		prb += diffn_int(
+			vec![vec![x_pos_1, y_pos_1], vec![x_pos_2, y_pos_2]],
+			vec![vec![x_size_1, y_size_1], vec![x_size_2, y_size_2]],
 			false,
 		);
-
-		// slv.assert_all_solutions(&[pos_2, pos_4], |sol| sol.iter().all_unique());
+		prb.assert_unsatisfiable();
 	}
 
 	#[test]
 	#[traced_test]
-	fn test_diffn_1() {
+	fn test_diffn_unsat_2() {
 		let mut prb = Model::default();
-		let x_pos_1 = prb.new_int_var((0..=5).into());
-		let x_pos_2 = prb.new_int_var((1..=3).into());
-		let x_pos_3 = prb.new_int_var((1..=3).into());
-		let x_pos_4 = prb.new_int_var((3..=6).into());
+		let x_pos_1 = prb.new_int_var((1..=2).into());
+		let x_pos_2 = prb.new_int_var((1..=2).into());
 
 		let x_size_1 = prb.new_int_var((4..=4).into());
-		let x_size_2 = prb.new_int_var((1..=1).into());
-		let x_size_3 = prb.new_int_var((2..=2).into());
-		let x_size_4 = prb.new_int_var((2..=2).into());
+		let x_size_2 = prb.new_int_var((4..=4).into());
 
-		let y_pos_1 = prb.new_int_var((0..=5).into());
+		let y_pos_1 = prb.new_int_var((1..=2).into());
 		let y_pos_2 = prb.new_int_var((1..=2).into());
-		let y_pos_3 = prb.new_int_var((4..=4).into());
-		let y_pos_4 = prb.new_int_var((2..=2).into());
 
-		let y_size_1 = prb.new_int_var((3..=3).into());
-		let y_size_2 = prb.new_int_var((1..=1).into());
-		let y_size_3 = prb.new_int_var((2..=2).into());
-		let y_size_4 = prb.new_int_var((1..=1).into());
+		let y_size_1 = prb.new_int_var((4..=4).into());
+		let y_size_2 = prb.new_int_var((4..=4).into());
 
 		prb += diffn_int(
-			vec![
-				vec![x_pos_1, y_pos_1],
-				vec![x_pos_2, y_pos_2],
-				vec![x_pos_3, y_pos_3],
-				vec![x_pos_4, y_pos_4],
-			],
-			vec![
-				vec![x_size_1, y_size_1],
-				vec![x_size_2, y_size_2],
-				vec![x_size_3, y_size_3],
-				vec![x_size_4, y_size_4],
-			],
+			vec![vec![x_pos_1, y_pos_1], vec![x_pos_2, y_pos_2]],
+			vec![vec![x_size_1, y_size_1], vec![x_size_2, y_size_2]],
 			false,
 		);
-		let (mut slv, map) = prb
-			.to_solver::<PropagatingCadical<_>>(&InitConfig::default())
-			.unwrap();
-		let pos_vars = vec![
-			vec![x_pos_1, y_pos_1],
-			vec![x_pos_2, y_pos_2],
-			vec![x_pos_3, y_pos_3],
-			vec![x_pos_4, y_pos_4],
-		]
-		.into_iter()
-		.flatten()
-		.map(|x| map.get(&mut slv, &Decision::from(x)))
-		.collect_vec();
-
-		// let (solve_result, value) = slv.get_all_solutions(&pos_vars);
-		// println!("solve_result {:?}, value {:?}", solve_result, value);
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_diffn_2() {
-		let mut prb = Model::default();
-		let x_pos_1 = prb.new_int_var((0..=6).into());
-		let x_pos_2 = prb.new_int_var((0..=6).into());
-		let x_pos_3 = prb.new_int_var((0..=6).into());
-
-		let x_size_1 = prb.new_int_var((1..=1).into());
-		let x_size_2 = prb.new_int_var((2..=2).into());
-		let x_size_3 = prb.new_int_var((3..=3).into());
-
-		let y_pos_1 = prb.new_int_var((0..=6).into());
-		let y_pos_2 = prb.new_int_var((0..=6).into());
-		let y_pos_3 = prb.new_int_var((0..=6).into());
-
-		let y_size_1 = prb.new_int_var((1..=1).into());
-		let y_size_2 = prb.new_int_var((2..=2).into());
-		let y_size_3 = prb.new_int_var((3..=3).into());
-
-		prb += diffn_int(
-			vec![
-				vec![x_pos_1, y_pos_1],
-				vec![x_pos_2, y_pos_2],
-				vec![x_pos_3, y_pos_3],
-			],
-			vec![
-				vec![x_size_1, y_size_1],
-				vec![x_size_2, y_size_2],
-				vec![x_size_3, y_size_3],
-			],
-			false,
-		);
-		let (mut slv, map) = prb
-			.to_solver::<PropagatingCadical<_>>(&InitConfig::default())
-			.unwrap();
-		let pos_vars = vec![
-			vec![x_pos_1, y_pos_1],
-			vec![x_pos_2, y_pos_2],
-			vec![x_pos_3, y_pos_3],
-		]
-		.into_iter()
-		.flatten()
-		.map(|x| map.get(&mut slv, &Decision::from(x)))
-		.collect_vec();
-
-		// let (solve_result, value) = slv.get_all_solutions(&pos_vars);
-		// println!("solve_result {:?}, value {:?}", solve_result, value);
+		prb.assert_unsatisfiable();
 	}
 }
