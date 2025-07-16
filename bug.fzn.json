@@ -1,0 +1,17 @@
+{
+  "variables": {
+
+  },
+  "arrays": {
+    "posx" : { "a": [1, 1] },
+    "posy" : { "a": [1, 1] },
+    "sizex" : { "a": [4, 4] },
+    "sizey" : { "a": [4, 4] }
+  },
+  "constraints": [
+    { "id" : "huub_diffn_int", "args" : ["posx", "posy", "sizex", "sizey"]}
+  ],
+  "output": ["posx", "posy", "sizex", "sizey"],
+  "solve": { "method" : "satisfy" },
+  "version": "1.0"
+}

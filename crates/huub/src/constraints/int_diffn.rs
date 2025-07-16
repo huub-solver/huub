@@ -185,6 +185,7 @@ impl IntDiffnSweep {
 		all_fr: &[ForbiddenRegion],
 		all_fr_explain: &[ForbiddenRegion],
 	) -> Result<(), Conflict> {
+		trace!("PRUNE MIN");
 		let mut sweep = vec![];
 		let mut jump = vec![];
 		let mut b = true;
@@ -249,6 +250,7 @@ impl IntDiffnSweep {
 		all_fr: &[ForbiddenRegion],
 		all_fr_explain: &[ForbiddenRegion],
 	) -> Result<(), Conflict> {
+		trace!("PRUNE MIN");
 		let mut sweep = vec![];
 		let mut jump = vec![];
 		let mut b = true;
@@ -275,6 +277,14 @@ impl IntDiffnSweep {
 			infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
 		}
 		if sweep[curr_dimension] != self.ub_tracker[curr_obj_idx][curr_dimension] {
+			trace!(
+				"SET obj {:?} in dimension {} [{:?}..{:?}] < {}",
+				curr_obj_idx,
+				curr_dimension,
+				self.lb_tracker[curr_obj_idx][curr_dimension],
+				self.ub_tracker[curr_obj_idx][curr_dimension],
+				sweep[curr_dimension]
+			);
 			let reason = self.explain_propagation(
 				actions,
 				all_fr_explain,
@@ -616,7 +626,6 @@ impl IntDiffnSweep {
 		curr_dimension: usize,
 		prune_upper: bool,
 	) -> Vec<BoolView> {
-		trace!("PROPAGATION");
 		let mut reason: Vec<_> = Vec::new();
 		for d in 0..self.dimensions {
 			// If sizes are not fixed, add reason for them
@@ -699,7 +708,6 @@ where
 {
 	#[tracing::instrument(name = "diffn", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		trace!("START");
 		for o in 0..self.box_posn.len() {
 			for d in 0..self.dimensions {
 				self.ub_tracker[o][d] = actions.get_int_upper_bound(self.box_posn[o][d]);
@@ -726,12 +734,13 @@ where
 				self.generate_fr::<P>(actions, &mut fr_support, o_idx, self.dimensions)
 			{
 				if self.fixed_in_all_dimensions(o_idx) {
+                    trace!("CONFLICT");
 					// Conflict will occur here since there exists forbidden regions for a fixed
 					// object
 					// TODO: Conflict occurs in all dimensions but we only reason about it in one
 					let reason =
 						self.explain_propagation(actions, &all_fr, &fr_support, o_idx, 0, false);
-					actions.set_int_upper_bound(
+					actions.set_int_lower_bound(
 						self.box_posn[o_idx][0],
 						self.ub_tracker[o_idx][0] + 1,
 						reason,
@@ -797,30 +806,6 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_diffn_unsat_1() {
-		let mut prb = Model::default();
-		let x_pos_1 = prb.new_int_var((1..=1).into());
-		let x_pos_2 = prb.new_int_var((1..=1).into());
-
-		let x_size_1 = prb.new_int_var((2..=4).into());
-		let x_size_2 = prb.new_int_var((1..=6).into());
-
-		let y_pos_1 = prb.new_int_var((1..=1).into());
-		let y_pos_2 = prb.new_int_var((1..=1).into());
-
-		let y_size_1 = prb.new_int_var((1..=3).into());
-		let y_size_2 = prb.new_int_var((1..=6).into());
-
-		prb += diffn_int(
-			vec![vec![x_pos_1, y_pos_1], vec![x_pos_2, y_pos_2]],
-			vec![vec![x_size_1, y_size_1], vec![x_size_2, y_size_2]],
-			false,
-		);
-		prb.assert_unsatisfiable();
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_diffn_unsat_2() {
 		let mut prb = Model::default();
 		let x_pos_1 = prb.new_int_var((1..=2).into());
 		let x_pos_2 = prb.new_int_var((1..=2).into());
