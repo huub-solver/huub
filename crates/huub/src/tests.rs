@@ -4,6 +4,7 @@ use pindakaas::{propositional_logic::Formula, Cnf};
 use rangelist::RangeList;
 
 use crate::{
+	actions::SimplificationActions,
 	branchers::IntBrancher,
 	constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
 	solver::{
@@ -114,6 +115,22 @@ fn test_unify_int_lin_view_domains() {
 	let (res, _, solns) = slv.get_all_solutions(&[a.into(), b.into()]);
 	assert_eq!(res, SolveResult::Complete);
 	assert_eq!(solns, vec![vec![Value::Int(1), Value::Int(3)]]);
+}
+
+#[test]
+/// Test case to check if resolving a multistep linear alias works properly.
+fn lin_multi_alias() {
+	let mut prb = Model::default();
+	let x = prb.new_int_var(RangeList::from_iter([1..=10]));
+	let y = prb.new_int_var(RangeList::from_iter([1..=10]));
+	let z = prb.new_int_var(RangeList::from_iter([1..=10]));
+	let x_trans = x * -1 - 1;
+	let y_trans = y + 1;
+	let z_trans = z + 1;
+	assert!(prb.unify_int(x, y_trans).is_ok());
+	assert!(prb.unify_int(y, z_trans).is_ok());
+	assert_eq!(prb.get_int_lower_bound(x_trans), -11);
+	assert_eq!(prb.get_int_upper_bound(x_trans), -4);
 }
 
 impl Model {

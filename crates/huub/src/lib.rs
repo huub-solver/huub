@@ -645,9 +645,8 @@ impl IntDecision {
 				Linear(t, x) => {
 					if let Domain::Alias(alias) = model.int_vars[x].domain {
 						result = alias;
+						offset += scale * t.offset;
 						scale *= t.scale.get();
-						offset *= t.scale.get();
-						offset += t.offset;
 					} else {
 						return IntDecision(Linear(t, x)) * scale + offset;
 					}
