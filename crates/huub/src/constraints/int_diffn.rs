@@ -172,6 +172,7 @@ impl IntDiffnSweep {
 		for v in box_posn.into_iter().flatten() {
 			solver.enqueue_on_int_change(prop, v, IntPropCond::Bounds);
 		}
+        solver.enqueue_now(prop);
 	}
 
 	/// Prune the lower bounds of the domain
