@@ -220,6 +220,11 @@ pub trait PropagatorInitActions: AsDynClauseDatabase + ClauseDatabase + Decision
 	/// Add a propagator to the solver.
 	fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef;
 
+	/// Advise a propagator when the solver backtracks.
+	///
+	/// This will call [`Propagator::advise_of_backtrack`] on the propagator.
+	fn advise_on_backtrack(&mut self, prop: PropRef);
+
 	/// Advise a propagator when a [`BoolView`] is assigned, allowing the
 	/// propagator to decide whether to enqueue itself.
 	///
@@ -244,15 +249,6 @@ pub trait PropagatorInitActions: AsDynClauseDatabase + ClauseDatabase + Decision
 		condition: IntPropCond,
 		data: u64,
 	);
-
-	/// Advise a propagator when the solver backtracks, allowing the propagator to decide whether to
-	/// enqueue itself.
-	///
-	/// Different from enqueueing, the propagator is always advised of the
-	/// backtrack, not just when it is not yet enqueued.
-	///
-	/// This will call [`Propagator::advise_of_backtrack`] on the propagator.
-	fn advise_on_backtrack(&mut self, prop: PropRef);
 
 	/// Create a new trailed integer value with the given initial value.
 	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt;

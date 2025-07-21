@@ -33,7 +33,7 @@ use crate::{
 	},
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond,
+		activation_list::IntEvent,
 		engine::{PropRef, State},
 		solving_context::SolvingContext,
 		BoolView, BoolViewInner, IntView,
@@ -139,6 +139,12 @@ where
 	P: PropagationActions,
 	E: ExplanationActions,
 {
+	/// Advises the propagator that the solver is backtracking.
+	fn advise_of_backtrack(&mut self, actions: &mut E) {
+		let _ = actions;
+		unreachable!("propagator did not provide a backtrack advisor implementation")
+	}
+
 	/// Advises the propagator that a [`BoolView`] is assigned with the associated
 	/// data given when registering the advisor. If the advisor returns `true`,
 	/// then the propagator will be enqueued.
@@ -146,7 +152,7 @@ where
 		let _ = actions;
 		let _ = view;
 		let _ = data;
-		unreachable!("propagator did not provide an Boolean advisor implementation")
+		unreachable!("propagator did not provide a Boolean advisor implementation")
 	}
 
 	/// Advises the propagator that a [`IntView`] has changed with the associated
@@ -156,22 +162,16 @@ where
 		&mut self,
 		actions: &mut E,
 		view: IntView,
-		condition: IntPropCond,
+		event: IntEvent,
 		data: u64,
 	) -> bool {
 		let _ = actions;
 		let _ = view;
-		let _ = condition;
+		let _ = event;
 		let _ = data;
 		unreachable!("propagator did not provide an integer advisor implementation")
 	}
 
-	/// Advises the propagator that a backtrack has happened. If the advisor returns `true`,
-	/// then the propagator will be enqueued.
-	fn advise_of_backtrack(&mut self, actions: &mut E) -> bool {
-		let _ = actions;
-		unreachable!("propagator did not provide an backtrack advisor implementation")
-	}
 
 	/// The propagate method is called during the search process to allow the
 	/// propagator to enforce
