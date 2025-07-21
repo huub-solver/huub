@@ -1,9 +1,8 @@
 //! Module containing structures for tracking the relationships between Boolean
 //! variables and integer variables.
 
-use std::collections::HashMap;
-
 use pindakaas::{Var as RawVar, VarRange};
+use rustc_hash::FxHashMap;
 
 use crate::{solver::int_var::IntVarRef, IntLitMeaning};
 
@@ -15,7 +14,7 @@ pub(crate) struct BoolToIntMap {
 	eager: Vec<(VarRange, IntVarRef)>,
 	/// The mapping of lazily created Boolean variables to the integer variables
 	/// and their meanings.
-	lazy: HashMap<RawVar, (IntVarRef, IntLitMeaning)>,
+	lazy: FxHashMap<RawVar, (IntVarRef, IntLitMeaning)>,
 }
 
 impl BoolToIntMap {

@@ -196,7 +196,11 @@ pub(crate) struct SolverConfiguration {
 	/// Switch to the activity-based search heuristic after the given number of conflicts.
 	///
 	/// This option is ignored if [`toggle_vsids`] or [`vsids_only`] is set to `true`.
-	vsids_after: Option<u32>,
+	vsids_after_conflict: Option<u32>,
+	/// Switch to the activity-based search heuristic after restart.
+	///
+	/// This option is ignored if [`toggle_vsids`] or [`vsids_only`] is set to `true`.
+	vsids_after_restart: bool,
 	/// Only use the activity-based search heuristic provided by the SAT solver. Ignore the user-specific search heuristic.
 	vsids_only: bool,
 }
@@ -956,8 +960,10 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 			pub fn set_toggle_vsids(&mut self, enable: bool);
 			/// Set the number of conflicts after which the solver should switch to using
 			/// VSIDS to make search decisions.
-			pub fn set_vsids_after(&mut self, conflicts: Option<u32>);
-			/// Set wether the solver should make all search decisions based on the VSIDS
+			pub fn set_vsids_after_conflict(&mut self, conflicts: Option<u32>);
+			/// Set whether the solver should switch to VSIDS after restart to make search.
+			pub fn set_vsids_after_restart(&mut self, enable: bool);
+			/// Set whether the solver should make all search decisions based on the VSIDS
 			/// only.
 			pub fn set_vsids_only(&mut self, enable: bool);
 		}

@@ -740,18 +740,14 @@ mod tests {
 					let row = all_vars[r].iter().map(|&v| val(v.into())).collect_vec();
 					assert!(
 						row.iter().all_unique(),
-						"Values in row {} are not all different: {:?}",
-						r,
-						row
+						"Values in row {r} are not all different: {row:?}",
 					);
 				});
 				(0..9).for_each(|c| {
 					let col = all_vars.iter().map(|row| val(row[c].into())).collect_vec();
 					assert!(
 						col.iter().all_unique(),
-						"Values in column {} are not all different: {:?}",
-						c,
-						col
+						"Values in column {c} are not all different: {col:?}",
 					);
 				});
 				(0..3).for_each(|i| {
@@ -762,10 +758,7 @@ mod tests {
 							.collect_vec();
 						assert!(
 							block.iter().all_unique(),
-							"Values in block ({}, {}) are not all different: {:?}",
-							i,
-							j,
-							block
+							"Values in block ({i}, {j}) are not all different: {block:?}",
 						);
 					});
 				});

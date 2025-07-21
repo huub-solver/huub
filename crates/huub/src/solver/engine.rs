@@ -18,10 +18,7 @@ macro_rules! trace_new_lit {
 	};
 }
 
-use std::{
-	collections::{HashMap, VecDeque},
-	mem,
-};
+use std::{collections::VecDeque, mem};
 
 use delegate::delegate;
 use index_vec::IndexVec;
@@ -31,13 +28,14 @@ use pindakaas::{
 	},
 	Lit as RawLit, Var as RawVar,
 };
+use rustc_hash::FxHashMap;
 pub(crate) use trace_new_lit;
 use tracing::{debug, trace};
 
 use crate::{
 	actions::{DecisionActions, ExplanationActions, InspectionActions, TrailingActions},
 	branchers::{BoxedBrancher, Decision},
-	constraints::{BoxedPropagator, Reason},
+	constraints::{BoxedPropagator, Conflict, Reason},
 	solver::{
 		activation_list::{ActivationAction, ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
@@ -100,9 +98,9 @@ pub struct State {
 	/// Literals to be propagated by the oracle
 	pub(crate) propagation_queue: VecDeque<RawLit>,
 	/// Reasons for setting values
-	pub(crate) reason_map: HashMap<RawLit, Reason>,
+	pub(crate) reason_map: FxHashMap<RawLit, Reason>,
 	/// Whether conflict has (already) been detected
-	pub(crate) conflict: Option<Clause>,
+	pub(crate) conflict: Option<Conflict>,
 	/// Whether the solver is in a failure state.
 	///
 	/// Triggered when a conflict is detected during propagation, the solver
@@ -121,7 +119,7 @@ pub struct State {
 
 	// ---- Queueing Infrastructure ----
 	/// Boolean variable enqueueing information
-	pub(crate) bool_activation: HashMap<RawVar, Vec<ActivationAction>>,
+	pub(crate) bool_activation: FxHashMap<RawVar, Vec<ActivationAction>>,
 	/// Integer variable enqueueing information
 	pub(crate) int_activation: IndexVec<IntVarRef, ActivationList>,
 	pub(crate) backtrack_activation: Vec<PropRef>,
@@ -129,11 +127,6 @@ pub struct State {
 	pub(crate) propagator_queue: PropagatorQueue,
 
 	// ---- Debugging Helpers ----
-	#[cfg(debug_assertions)]
-	/// This literal was last emited by the [`PropagatorExtension::propagate`]
-	/// method. It will have its reasons checked when it is seen again in
-	/// [`PropagatorExtension::notify_assignments`].
-	pub(crate) last_propagated: Option<RawLit>,
 	#[cfg(debug_assertions)]
 	/// List of integer variables that have been notified as fixed, but should be
 	/// checked that the bounds match before propagation.
@@ -163,7 +156,7 @@ fn advise_and_enqueue(state: &mut State, propagators: &mut IndexVec<PropRef, Box
 impl PropagatorExtension for Engine {
 	fn add_external_clause(
 		&mut self,
-		_slv: &mut dyn SolvingActions,
+		slv: &mut dyn SolvingActions,
 	) -> Option<(Clause, ClausePersistence)> {
 		if !self.state.clauses.is_empty() {
 			let clause = self.state.clauses.pop_front(); // Known to be `Some`
@@ -172,22 +165,38 @@ impl PropagatorExtension for Engine {
 		} else if !self.state.propagation_queue.is_empty() {
 			None // Require that the solver first applies the remaining propagation
 		} else if let Some(conflict) = self.state.conflict.take() {
-			debug!(clause = ?conflict.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add conflict clause");
-			Some((conflict, ClausePersistence::Forgettable))
+			let ctx = SolvingContext::new(slv, &mut self.state);
+			let clause: Clause =
+				conflict
+					.reason
+					.explain(&mut self.propagators, ctx.state, conflict.subject);
+			debug!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add conflict clause");
+			Some((clause, ClausePersistence::Forgettable))
 		} else {
 			None
 		}
 	}
 
 	fn add_reason_clause(&mut self, propagated_lit: RawLit) -> Clause {
-		// Find reason
+		// Find reason in storage
 		let reason = self.state.reason_map.remove(&propagated_lit);
-		// Restore the current state to the state when the propagation happened if explaining lazily
-		if matches!(reason, Some(Reason::Lazy(_))) {
-			self.state.trail.goto_assign_lit(propagated_lit);
-		}
-		// Create a clause from the reason
+		// Create an explanation clause from the reason
 		let clause = if let Some(reason) = reason {
+			// If the reason is lazy, restore the current state to the state when the
+			// propagation happened before explaining.
+			//
+			// An exception is made when the literal is assigned to false (and thus
+			// the source of a conflict), then we are already in the right state.
+			if matches!(reason, Reason::Lazy(_))
+				&& self
+					.state
+					.trail
+					.get_sat_value(propagated_lit)
+					.unwrap_or(true)
+			{
+				self.state.trail.goto_assign_lit(propagated_lit);
+			}
+
 			reason.explain(&mut self.propagators, &mut self.state, Some(propagated_lit))
 		} else {
 			vec![propagated_lit]
@@ -301,24 +310,9 @@ impl PropagatorExtension for Engine {
 
 	fn notify_assignments(&mut self, lits: &[RawLit]) {
 		debug!(lits = ?lits.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "assignments");
-		// Avoid doing more work if we are already in a failed state, but continue
-		// in debug mode to check all reasons
-		if self.state.failed && !cfg!(debug_assertions) {
-			return;
-		}
 
 		// Enqueue propagators
 		for &lit in lits {
-			#[cfg(debug_assertions)]
-			{
-				// (DEBUG ONLY) if we propagated this literal, ensure its explanation is
-				// valid in its trail position.
-				if self.state.last_propagated == Some(lit) {
-					self.debug_check_reason(lit);
-					self.state.last_propagated = None;
-				}
-			}
-
 			if self.state.trail.assign_lit(lit).is_some() {
 				continue;
 			}
@@ -452,9 +446,6 @@ impl PropagatorExtension for Engine {
 					let iv = IntView(IntViewInner::VarRef(iv));
 					debug_assert_eq!(self.state.get_int_val(iv), Some(i));
 				}
-				// We've been notified of the previous propagated literal (and its
-				// reason was checked).
-				debug_assert!(self.state.last_propagated.is_none());
 			}
 			// If there are no previous changes, run propagators
 			SolvingContext::new(slv, &mut self.state).run_propagators(&mut self.propagators);
@@ -467,9 +458,9 @@ impl PropagatorExtension for Engine {
 			debug!(lit = i32::from(lit), "propagate");
 			#[cfg(debug_assertions)]
 			{
-				// (DEBUG ONLY) Store the propagated literal, so we know when to check
-				// the explanation.
-				self.state.last_propagated = Some(lit);
+				// (DEBUG ONLY) Ensure the literal's explanation is valid in its trail
+				// position.
+				self.debug_check_reason(lit);
 			}
 			Some(lit)
 		} else {
@@ -514,8 +505,7 @@ impl Engine {
 			debug_assert_eq!(
 				self.state.decision_level(),
 				0,
-				"Literal {} propagated without reason at non-zero decision level",
-				lit
+				"Literal {lit} propagated without reason at non-zero decision level",
 			);
 		}
 	}
@@ -546,7 +536,6 @@ impl State {
 		#[cfg(debug_assertions)]
 		{
 			// (DEBUG ONLY) Clear the debug checking queues.
-			self.last_propagated = None;
 			self.check_int_fixed.clear();
 		}
 		// Backtrack trail
@@ -561,7 +550,7 @@ impl State {
 		self.statistics.conflicts += 1;
 
 		// Switch to VSIDS if the number of conflicts exceeds the threshold
-		if let Some(conflicts) = self.config.vsids_after {
+		if let Some(conflicts) = self.config.vsids_after_conflict {
 			if !self.config.vsids_only
 				&& !self.config.toggle_vsids
 				&& self.statistics.conflicts > conflicts as u64
@@ -585,6 +574,13 @@ impl State {
 					vsids = self.vsids,
 					restart = self.statistics.restarts,
 					"toggling vsids"
+				);
+			} else if self.config.vsids_after_restart {
+				self.vsids = true;
+				debug!(
+					vsids = self.vsids,
+					restart = self.statistics.restarts,
+					"enable vsids after restart"
 				);
 			}
 			if level == 0 {
@@ -630,8 +626,13 @@ impl State {
 
 	/// Set the number of conflicts after which the solver should switch to using
 	/// VSIDS to make search decisions.
-	pub(crate) fn set_vsids_after(&mut self, conflicts: Option<u32>) {
-		self.config.vsids_after = conflicts;
+	pub(crate) fn set_vsids_after_conflict(&mut self, conflicts: Option<u32>) {
+		self.config.vsids_after_conflict = conflicts;
+	}
+
+	/// Set whether the solver should switch to using VSIDS after a restart.
+	pub(crate) fn set_vsids_after_restart(&mut self, enable: bool) {
+		self.config.vsids_after_restart = enable;
 	}
 
 	/// Set wether the solver should make all search decisions based on the VSIDS

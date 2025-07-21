@@ -70,11 +70,11 @@ impl Trail {
 		let var = lit.var();
 		let val = !lit.is_negated();
 
-		let x = mem::replace(&mut self.sat_store[Self::sat_index(var)].value, Some(val));
-		if x.is_none() && !self.prev_len.is_empty() {
+		let prev = self.sat_store[Self::sat_index(var)].value.replace(val);
+		if prev.is_none() && !self.prev_len.is_empty() {
 			self.push_trail(TrailEvent::SatAssignment(var));
 		}
-		x
+		prev
 	}
 
 	/// Return the current decision level

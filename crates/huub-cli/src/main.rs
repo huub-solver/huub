@@ -1,0 +1,152 @@
+//! huub-cli is a command-line interface (CLI) for the Huub solver.
+//!
+//! The `main.rs` file only provides an entrypoint for the executable, all other
+//! functionality is contained in the `lib.rs` file, to allow testing the
+//! functionality as a library.
+
+#![allow(
+	unused_crate_dependencies,
+	reason = "other dependencies are used in the lib.rs file"
+)]
+use std::{convert::Infallible, fs, path::PathBuf, process::ExitCode};
+
+use huub_cli::Cli;
+use pico_args::Arguments;
+
+/// Help message for the CLI.
+const CLI_HELP: &str = r#"USAGE
+  $ huub [-a] [-i] [-s] [-t <value>] [-v] FILE
+
+ARGUMENTS
+  FILE    File name of the FlatZinc JSON input file.
+
+FLAGS
+                      === STANDARD FLATZINC OPTIONS ===
+  -a, --all-solutions             Find all possible solutions for the given (satisfaction) instance.
+  --all-optimal                   Find all optimal solutions for the given (optimization) instance.
+  -i, --intermediate-solutions    Display all intermediate solutions found during the search.
+  -f, --free-search               Allow the solver to adjust any search options as it judges best.
+                                  This flag overrides all other search-related flags.
+  -s, --statistics                Print statistics about the solving process.
+  -t, --time-limit <value>        Set a time limit for the solver. The value can be a number of
+                                  milliseconds or a human-readable duration string.
+  -v, --verbose                   Display addtional information about actions taken by the solver.
+                                  Can be used multiple times to increase verbosity.
+                                  (0: INFO, 1: DEBUG, 2: TRACE)
+
+                      === INITIALIZATION OPTIONS ===
+  --int-eager-limit               Set the maximum cardinality for which all order literals to
+                                  represent an integer variable are created eagerly.
+                                  (default: 255)
+
+                      === PREPROCESSING/INPROCESSING OPTIONS ===
+  --conditioning <on|off>         Whether to enable the globally blocked clause elimination of
+                                  the SAT solver.
+                                  (default: off)
+  --inprocessing <on|off>         Whether to enable inprocessing of the SAT solver.
+                                  (default: off)
+  --preprocessing <value>         Set the number of preprocessing rounds of the SAT solver.
+                                  (default: 0)
+  --probing <on|off>              Whether to enable failed literal probing of the SAT solver.
+                                  (default: off)
+  --subsumption <on|off>          Whether to enable global forward subsumption of the SAT solver.
+                                  (default: off)
+  --variable-elimination <on|off> Whether to enable bounded variable elimination of the SAT solver.
+                                  (default: off)
+  --vivify <on|off>               Whether to enable vivification of the SAT solver.
+                                  (default: off)
+
+                      === SEARCH OPTIONS ===
+  --restart <on|off>              Whether to enable restarts of the search.
+                                  (default: off)
+  --vsids-after-conflict <value>  Switch to the VSIDS search heuristic after a certain number of
+                                  conflicts. (overwritten by --toggle-vsids and --vsids-only)
+  --vsids-after-restart           Switch to the VSIDS search heuristic after restart
+                                  (overwritten by --toggle-vsids and --vsids-only)
+  --toggle-vsids                  Switch between the activity-based search heuristic and the user-
+                                  specific search heuristic after every restart.
+                                  (overwritten by --vsids-only)
+  --vsids-only                    Only use the activity-based search heuristic provided by the SAT
+                                  solver. Ignore the user-specific search heuristic.
+  --diff-logic                    Mode to use for diff logic: 0 for off, otherwise bitwise 
+  								  interpretation: only difference (2), imp_eq (1), imp_eq+native (3), 
+  								  imp_eq+neq (5), imp_eq+neq+native_neq (13), imp_eq+neq+native (15),
+  								  imp_eq+(imp)_neq (21), imp_eq+(imp)_neq+native_imp_neq (53),
+  								  imp_eq+(imp)_neq+native_(imp)_neq (61), imp_eq+(imp)_neq+native (63),
+  								  all (85), all+native_reif_eq (213), all+native_reif_eq+imp_neq (245),
+  								  all+native_reif_eq+(imp)_neq (253), all+native (255)
+  --diff-logic-prio				  Priority for difference logic (default: 1, range: 0-5)
+  
+
+                      === BEHAVIOUR OPTIONS ===
+  --log-file <FILE>               Output log messages from the solver to a file, instead of stderr.
+
+DESCRIPTION
+  Create a Huub Solver instance tailored to a given FlatZinc JSON input file and solve the problem.
+
+  Huub is a Lazy Clause Generation (LCG) solver with a focus on modularity and maintainability in
+  addition to speed. LCG solvers are a class of solvers that can be used to solve decision and
+  optimization problems. They are characterized by their ability to dynamically add new Boolean
+  variables and clauses to a Boolean Satisfiability (SAT) solver during the search process. This
+  allows the solver exploit SAT solver's ability to learn from failures during the search process,
+  without having to encode the full problem into Boolean variables and clauses.
+
+  Head to https://huub.solutions/ for more information about Huub.
+
+EXAMPLES
+  Try and solve the `inst3.fzn.json` FlatZinc JSON input file with a time limit of 10 minutes.
+
+    $ huub --time-limit 10min inst3.fzn.json
+
+  Solve the `schedule.fzn.json` FlatZinc JSON input file and display all intermediate solutions using
+  the MiniZinc output model `schedule.ozn`.
+
+    $ huub -i schedule.fzn.json | minizinc --ozn-file schedule.ozn
+"#;
+
+/// huub entry point
+///
+/// This function performs command-line parsing and starts the solving process
+/// based on the arguments found.
+fn main() -> ExitCode {
+	// Parse commandline arguments
+	let mut args = Arguments::from_env();
+	if args.contains(["-h", "--help"]) {
+		print!("{CLI_HELP}");
+		return ExitCode::SUCCESS;
+	}
+
+	let log_file = args
+		.opt_value_from_os_str("--log-file", |s| -> Result<PathBuf, Infallible> {
+			Ok(s.into())
+		})
+		.unwrap();
+	let mut cli: Cli<_, _> = match args.try_into() {
+		Ok(cli) => cli,
+		Err(e) => {
+			eprintln!("Error: {e}");
+			return ExitCode::FAILURE;
+		}
+	};
+	let result = match log_file {
+		Some(log_file) => {
+			let mut cli = cli.with_stderr(
+				move || {
+					fs::OpenOptions::new()
+						.create(true)
+						.append(true)
+						.open(&log_file)
+						.expect("Failed to open log file")
+				},
+				false,
+			);
+			cli.run()
+		}
+		None => cli.run(),
+	};
+	if let Err(e) = result {
+		eprintln!("Error: {e}");
+		return ExitCode::FAILURE;
+	}
+	ExitCode::SUCCESS
+}
