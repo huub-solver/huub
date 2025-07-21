@@ -84,6 +84,11 @@ struct DifferenceLogicInitial {
 	int_vars: Vec<IntDecision>,
 	/// Boolean decision variables.
 	bool_vars: Vec<BoolDecision>,
+	/// Minimum distances in the global graph.
+	distances: Vec<Vec<IntVal>>,
+	/// Set of nodes reachable with a direct edge of minimum distance for each node.
+	direct_edge: Vec<HashSet<usize>>,
+
 }
 
 /// Transform an implied not equals constraint to implied difference constraints by introducing 2 new boolean decision variables.
@@ -242,6 +247,10 @@ fn update_transform(x: IntDecision) -> (IntDecision, IntVal) {
 
 /// Check if the underlying variables are different, if not reemit the potentially implied difference constraint.
 fn check_vars_different<S: SimplificationActions>(actions: &mut S, x: IntDecision, y: IntDecision, d: IntVal, b: Option<BoolDecision>) -> Result<bool, ReformulationError> {
+	if x == y && d >= 0 {
+		trace!("Removing redundant {b:?} implies {x:?} - {y:?} <= {d:?}");
+		return Ok(false);
+	}
 	let x_var = get_int_var_index(x);
 	let y_var = get_int_var_index(y);
 	if x_var == y_var || x_var.is_none() || y_var.is_none() {
@@ -370,6 +379,7 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 				let _ = graph.new_edge(&mut initial_trail, DiffEdge::new(x, y, d, Some(b)));
 			}
 
+			let num_nodes = int_vars.len();
 			let mut model_adapter = SimplificationModelAdapter::new(actions, &mut initial_trail, &mut int_vars, &bool_vars);
 			trace!("Starting initial propagation with graph: {}", graph.to_dot(&mut model_adapter));
 			/*trace!("Implied edges:");
@@ -403,8 +413,11 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 				// If no nodes are left, there is nothing more to do
 				return Ok(SimplificationStatus::Subsumed);
 			}
-			graph.johnson_full(&mut model_adapter)?;  // TODO could keep the results to check further reductions (e.g., when unification duplicates edges). Or detect duplicate edges somewhere else?
-			self.initial_graph = Some(DifferenceLogicInitial { initial_trail, graph, state, int_vars, bool_vars });
+
+			let mut distances = vec![vec![IntVal::MAX; num_nodes]; num_nodes];
+			let mut direct_edge = vec![HashSet::default(); num_nodes];
+			graph.johnson_full(&mut model_adapter, &mut distances, &mut direct_edge)?;
+			self.initial_graph = Some(DifferenceLogicInitial { initial_trail, graph, state, int_vars, bool_vars, distances, direct_edge });
 			
 		} else {
 			
@@ -422,7 +435,7 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 						trace!("Var alias is different (was {:?}, is {:?})", state.var, alias);
 						let (v_trans, vd) = update_transform(alias);
 						if let Some(new) = self.int_var_index.get_index_of(&v_trans) {
-							initial_graph.graph.unify_nodes(&mut model_adapter, &mut initial_graph.state, i, new, vd)?;
+							initial_graph.graph.unify_nodes(&mut model_adapter, &mut initial_graph.state, i, new, vd, &mut initial_graph.distances, &mut initial_graph.direct_edge)?;
 						} else if !matches!(alias.0, IntDecisionInner::Const(_)) {
 							state.var = v_trans;
 							state.lower_bound -= vd;
@@ -484,7 +497,6 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 		let mut initial_graph = mem::replace(&mut self.initial_graph, None).unwrap();
 		initial_graph.initial_trail.init_trail(slv);
 		initial_graph.graph.init_trail(&mut initial_graph.initial_trail);
-		// TODO some variables are not relevant any more (fixed), do not set advisors for them (also for bools)
 		trace!("Immediately before transformation:");
 		for (i, &v) in initial_graph.int_vars.iter().enumerate() {
 			if initial_graph.graph.nodes[i].is_some() {
@@ -975,10 +987,9 @@ impl DifferenceLogicGraph {
 
 	/// Use Johnson's algorithm to get all pairs of shortest paths. Remove edges not used in any 
 	/// shortest path, close implied edges if possible.
-	fn johnson_full<A: ModelAdapter<ReformulationError>>(&mut self, adapter: &mut A) -> Result<(), ReformulationError> {
+	fn johnson_full<A: ModelAdapter<ReformulationError>>(&mut self, adapter: &mut A, distances: &mut Vec<Vec<IntVal>>, direct_edge: &mut Vec<HashSet<usize>>) -> Result<(), ReformulationError> {
 
 		trace!("Starting Johnson's");
-		let mut distances = vec![vec![IntVal::MAX; self.nodes.len()]; self.nodes.len()];
 		let mut pred = vec![vec![usize::MAX; self.nodes.len()]; self.nodes.len()];
 		let mut queue = PriorityQueue::default();
 		
@@ -1026,22 +1037,7 @@ impl DifferenceLogicGraph {
 			let temp_node = self.get_node_clone(i);
 			let mut node_ref = temp_node.borrow_mut();
 
-			if distances[i][i] == 0 {
-				trace!("Found cycle of length 0");
-				let mut cur = i;
-				loop {
-					let prev = pred[i][cur];
-					trace!("Unifying {prev} and {cur} with offset {:?}", distances[prev][cur]);
-					adapter.unify_variables(prev, cur, distances[prev][cur])?;
-					cur = prev;
-					distances[cur][cur] = IntVal::MAX;
-					if cur == i {
-						break;
-					}
-				}
-			}
-
-			let mut reached = HashSet::default();
+			let reached = direct_edge.get_mut(i).unwrap();
 			let mut j = 0;
 			while j < node_ref.edges.len(adapter.get_trailing_actions()) {
 				let e = *node_ref.edges.index(adapter.get_trailing_actions(), j);
@@ -1059,7 +1055,7 @@ impl DifferenceLogicGraph {
 			let mut open = node_ref.open_edges.iter(adapter.get_trailing_actions());
 			while let Some(&index) = open.next() {
 				let edge = &self.edges[index];
-				if distances[i][edge.to] < edge.val {
+				if distances[i][edge.to] <= edge.val {
 					trace!("Implied edge {edge:?} is redundant, shortest path of length {} found", distances[i][edge.to]);
 					self.close_imp_edge_forward(adapter, &mut open, index);
 				}
@@ -1072,6 +1068,27 @@ impl DifferenceLogicGraph {
 					trace!("Implied edge {edge:?} is falsified, opposite shortest path of length {} found", distances[i][edge.from]);
 					adapter.set_bool_false(edge.bool_var, edge.from, 0, i, 0)?;  // TODO invalid reason, but also not needed at this point -> different method?
 					self.close_imp_edge_backward(adapter, &mut rev_open, index);
+				}
+			}
+		}
+
+		for i in 0..self.nodes.len() {
+			if self.nodes[i].is_none() {
+				continue;
+			}
+
+			if distances[i][i] == 0 {// TODO count offset and always unify with start of loop to prevent long unification chains?
+				trace!("Found cycle of length 0");
+				let mut cur = i;
+				loop {
+					let prev = pred[i][cur];
+					if prev == i {
+						break;
+					}
+					trace!("Unifying {prev} and {cur} with offset {:?}", distances[prev][cur]);
+					adapter.unify_variables(prev, cur, distances[prev][cur])?;
+					cur = prev;
+					distances[cur][cur] = IntVal::MAX;
 				}
 			}
 		}
@@ -1134,19 +1151,21 @@ impl DifferenceLogicGraph {
 	}
 
 	/// Moves all edges from the old node to the new node, adapted by the given offset.
-	fn unify_nodes<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, state: &mut DifferenceLogicState, old: usize, new: usize, offset: IntVal) -> Result<(), E> {  // TODO needs to consider consequences of adding different edges (inc_sat, imp)!!!
+	fn unify_nodes<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, state: &mut DifferenceLogicState, old: usize, new: usize, offset: IntVal, distances: &mut Vec<Vec<IntVal>>, direct_edge: &mut Vec<HashSet<usize>>) -> Result<(), E> {
 
 		trace!("Moving all edges from node {old} to node {new} with offset {offset}");
 		let temp_node_old = self.get_node_clone(old);
 		let mut node_ref_old = temp_node_old.borrow_mut();
 		let temp_node_new = self.get_node_clone(new);
 		let mut mod_edges = Vec::new();
+		let reached = direct_edge.get_mut(new).unwrap();
 		for &e in node_ref_old.edges.iter(adapter.get_trailing_actions()) {
 			let edge = self.edges.get_mut(e).unwrap();
-			if adapter.check_vars_different(new, edge.to, edge.val - offset, None)? {
+			if adapter.check_vars_different(new, edge.to, edge.val - offset, None)? && (distances[new][edge.to] > edge.val - offset || (distances[new][edge.to] == edge.val - offset && !reached.contains(&edge.to))) {
 				edge.from = new;
 				edge.val -= offset;
 				temp_node_new.borrow_mut().edges.push(adapter.get_trailing_actions(), e);
+				let _ = reached.insert(edge.to);
 				mod_edges.push(e);
 			} else {
 				let _ = self.borrow_node_mut(self.edges[e].to).reverse_edges.swap_remove_element(adapter.get_trailing_actions(), &e);
@@ -1154,10 +1173,12 @@ impl DifferenceLogicGraph {
 		}
 		for &e in node_ref_old.reverse_edges.iter(adapter.get_trailing_actions()) {
 			let edge = self.edges.get_mut(e).unwrap();
-			if adapter.check_vars_different(edge.from, new, edge.val + offset, None)? {
+			let reached = direct_edge.get_mut(edge.from).unwrap();
+			if adapter.check_vars_different(edge.from, new, edge.val + offset, None)? && (distances[edge.from][new] > edge.val + offset || (distances[edge.from][new] == edge.val + offset && !reached.contains(&new))) {
 				edge.to = new;
 				edge.val += offset;
 				temp_node_new.borrow_mut().reverse_edges.push(adapter.get_trailing_actions(), e);
+				let _ = reached.insert(new);
 				mod_edges.push(e);
 			} else {
 				let _ = self.borrow_node_mut(self.edges[e].from).edges.swap_remove_element(adapter.get_trailing_actions(), &e);
@@ -1648,7 +1669,6 @@ impl DifferenceLogicGraph {
 	fn propagate_edge_addition<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, lb_updates: &mut Vec<usize>, ub_updates: &mut Vec<usize>, index: usize, check_implied: bool) -> Result<bool, E> {
 		// If the edge can't be added, a conflict will be generated
 		if self.inc_sat(adapter, index)? {
-			self.activate_imp_edge(adapter, index);
 			if check_implied {
 				// If the edge was added, check the status of open edges.
 				self.inc_imp(adapter, index)?;
