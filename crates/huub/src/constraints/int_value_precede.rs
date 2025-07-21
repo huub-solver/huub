@@ -114,7 +114,7 @@ impl<S: SimplificationActions> Constraint<S> for IntSeqPrecedeChain {
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let vars: Vec<_> = self.vars.iter().map(|v| slv.get_solver_int(*v)).collect();
 		IntSeqPrecedeChainBounds::new_in(slv, vars);
 		Ok(())
@@ -457,7 +457,7 @@ impl<S: SimplificationActions> Constraint<S> for IntValuePrecedeChain {
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let vars: Vec<_> = self.vars.iter().map(|v| slv.get_solver_int(*v)).collect();
 		IntValuePrecedeChainValue::new_in(slv, self.values.clone(), vars);
 		Ok(())
