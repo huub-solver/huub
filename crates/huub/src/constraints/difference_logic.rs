@@ -12,7 +12,7 @@ use pindakaas::Lit as RawLit;
 use pindakaas::propositional_logic::Formula;
 use rustc_hash::FxBuildHasher;
 use tracing::trace;
-use crate::solver::activation_list::IntPropCond;
+use crate::solver::activation_list::{IntEvent, IntPropCond};
 use crate::solver::{BoolView, IntLitMeaning};
 use crate::{actions::{
 	ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
@@ -1972,27 +1972,29 @@ where
 	P: PropagationActions,
 	E: ExplanationActions,
 {
-	fn advise_of_bool_change(&mut self, _actions: &mut E, _view: BoolView, data: u64) -> bool {
-		trace!("Boolean b{data} fixed.");
-		let _ = self.state.fixed_bools.insert(data as usize);
-		true
-	}
 
-	fn advise_of_int_change(&mut self, _actions: &mut E, _view: IntView, condition: IntPropCond, data: u64) -> bool {
-		trace!("Integer i{data} changed on condition {condition:?}.");
-		let _ = match condition {
-			IntPropCond::LowerBound => self.state.lower_bound_changes.insert(data as usize),
-			IntPropCond::UpperBound => self.state.upper_bound_changes.insert(data as usize),
-			_ => unreachable!("Condition was never enqueued."),
-		};
-		true
-	}
-
-	fn advise_of_backtrack(&mut self, _actions: &mut E) -> bool {
+	fn advise_of_backtrack(&mut self, _actions: &mut E) {
 		trace!("Backtrack advise");
 		self.state.reset_bound_changes();
 		self.state.reset_bool_changes();
-		false
+	}
+
+	fn advise_of_bool_change(&mut self, _actions: &mut E, _view: BoolView, data: u64) -> bool {
+		trace!("Boolean b{data} fixed.");
+		self.state.fixed_bools.insert(data as usize)
+	}
+
+	fn advise_of_int_change(&mut self, _actions: &mut E, _view: IntView, event: IntEvent, data: u64) -> bool {
+		trace!("Integer i{data} changed on event {event:?}.");
+		match event {
+			IntEvent::LowerBound => self.state.lower_bound_changes.insert(data as usize),
+			IntEvent::UpperBound => self.state.upper_bound_changes.insert(data as usize),
+			IntEvent::Fixed => {  // TODO can we find out which one changed?
+				self.state.lower_bound_changes.insert(data as usize) |
+				self.state.upper_bound_changes.insert(data as usize)
+			},
+			_ => unreachable!("Event was never enqueued."),
+		}
 	}
 
 	#[tracing::instrument(name = "difference_logic", level = "trace", skip(self, actions))]

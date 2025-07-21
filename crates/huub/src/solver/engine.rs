@@ -140,7 +140,6 @@ pub struct State {
 	pub(crate) bool_activation: FxHashMap<RawVar, Vec<ActivationActionS>>,
 	/// Integer variable enqueueing information
 	pub(crate) int_activation: IndexVec<IntVarRef, ActivationList>,
-	pub(crate) backtrack_activation: Vec<PropRef>,
 	/// Queue of propagators awaiting action
 	pub(crate) propagator_queue: PropagatorQueue,
 
