@@ -3,7 +3,9 @@
 
 use std::{mem, ops::Add};
 
-use crate::solver::engine::PropRef;
+use itertools::Itertools;
+
+use crate::solver::engine::{Advisor, PropRef};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 /// A data structure that store a list of propagators to be enqueued based on
@@ -21,7 +23,7 @@ use crate::solver::engine::PropRef;
 pub(crate) struct ActivationList {
 	/// The list of propagators that are to be enqueue based on different
 	/// propagation conditions.
-	activations: Vec<PropRef>,
+	activations: Vec<ActivationActionS>,
 	/// The index for the first propagator to be activated when an event triggers
 	/// [`IntPropCond::LowerBound`].
 	lower_bound_idx: u32,
@@ -36,9 +38,25 @@ pub(crate) struct ActivationList {
 	domain_idx: u32,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Possible actions to be triggered by the activation list.
+pub(crate) enum ActivationAction {
+	/// When activated, advise the propagator with the given [`PropRef`] of the
+	/// event that triggered the activation. If the advisal method returns `true`,
+	/// then enqueue the propagator if it is not already in the queue.
+	Advise(Advisor),
+	/// When activated, simply add the propagator with the given [`PropRef`] to the
+	/// propagator queue if it is not already in the queue.
+	Enqueue(PropRef),
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+/// Object used to efficiently store an [`ActivationAction`].
+pub(crate) struct ActivationActionS(u32);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Change that has occurred in the domain of an integer variable.
-pub(crate) enum IntEvent {
+pub enum IntEvent {
 	/// The variable has been fixed to a single value.
 	Fixed,
 	/// Both of the bounds of the variable has changed.
@@ -74,9 +92,31 @@ pub enum IntPropCond {
 	Domain,
 }
 
+impl From<ActivationActionS> for ActivationAction {
+	fn from(value: ActivationActionS) -> Self {
+		if (value.0 & 0b1) == 1 {
+			Self::Advise(Advisor::from_raw(value.0 >> 1))
+		} else {
+			Self::Enqueue(PropRef::from_raw(value.0 >> 1))
+		}
+	}
+}
+
+impl From<ActivationAction> for ActivationActionS {
+	fn from(value: ActivationAction) -> Self {
+		Self(match value {
+			ActivationAction::Advise(advisor) => (advisor.raw() << 1) | 0b1,
+			ActivationAction::Enqueue(prop) => prop.raw() << 1,
+		})
+	}
+}
+
 impl ActivationList {
 	/// Get an iterator over the list of propagators to be enqueued.
-	pub(crate) fn activated_by(&self, event: IntEvent) -> impl Iterator<Item = PropRef> + '_ {
+	pub(crate) fn activated_by(
+		&self,
+		event: IntEvent,
+	) -> impl Iterator<Item = ActivationAction> + '_ {
 		let r1 = if event == IntEvent::LowerBound {
 			self.lower_bound_idx as usize..self.upper_bound_idx as usize
 		} else {
@@ -92,17 +132,19 @@ impl ActivationList {
 		};
 		self.activations[r1]
 			.iter()
+			.chain(self.activations[r2].iter())
 			.copied()
-			.chain(self.activations[r2].iter().copied())
+			.map_into()
 	}
 	/// Add a propagator to the list of propagators to be enqueued based on the
 	/// given condition.
-	pub(crate) fn add(&mut self, mut prop: PropRef, condition: IntPropCond) {
+	pub(crate) fn add(&mut self, action: ActivationAction, condition: IntPropCond) {
 		assert!(self.activations.len() < u32::MAX as usize, "Unable to add more than u32::MAX propagators to the activation list of a single variable.");
+		let mut action = action.into();
 		let mut cond_swap = |idx: u32| {
 			let idx = idx as usize;
 			if idx < self.activations.len() {
-				mem::swap(&mut prop, &mut self.activations[idx]);
+				mem::swap(&mut action, &mut self.activations[idx]);
 			}
 		};
 		match condition {
@@ -121,7 +163,7 @@ impl ActivationList {
 				self.upper_bound_idx += 1;
 				self.bounds_idx += 1;
 				self.domain_idx += 1;
-				self.activations.push(prop);
+				self.activations.push(action);
 			}
 			IntPropCond::LowerBound => {
 				cond_swap(self.upper_bound_idx);
@@ -134,7 +176,7 @@ impl ActivationList {
 				self.upper_bound_idx += 1;
 				self.bounds_idx += 1;
 				self.domain_idx += 1;
-				self.activations.push(prop);
+				self.activations.push(action);
 			}
 			IntPropCond::UpperBound => {
 				cond_swap(self.bounds_idx);
@@ -143,14 +185,14 @@ impl ActivationList {
 				}
 				self.bounds_idx += 1;
 				self.domain_idx += 1;
-				self.activations.push(prop);
+				self.activations.push(action);
 			}
 			IntPropCond::Bounds => {
 				cond_swap(self.domain_idx);
 				self.domain_idx += 1;
-				self.activations.push(prop);
+				self.activations.push(action);
 			}
-			IntPropCond::Domain => self.activations.push(prop),
+			IntPropCond::Domain => self.activations.push(action),
 		};
 	}
 }
@@ -178,7 +220,7 @@ mod tests {
 	use itertools::Itertools;
 
 	use crate::solver::{
-		activation_list::{ActivationList, IntEvent, IntPropCond},
+		activation_list::{ActivationAction, ActivationList, IntEvent, IntPropCond},
 		engine::PropRef,
 	};
 
@@ -195,43 +237,54 @@ mod tests {
 		for list in props.iter().permutations(5) {
 			let mut activation_list = ActivationList::default();
 			for (prop, cond) in list.iter() {
-				activation_list.add(*prop, *cond);
+				activation_list.add(ActivationAction::Enqueue(*prop), *cond);
 			}
 			let fixed: HashSet<_> = activation_list.activated_by(IntEvent::Fixed).collect();
 			assert_eq!(
 				fixed,
 				HashSet::from_iter([
-					PropRef::from(0),
-					PropRef::from(1),
-					PropRef::from(2),
-					PropRef::from(3),
-					PropRef::from(4)
+					ActivationAction::Enqueue(PropRef::from(0)),
+					ActivationAction::Enqueue(PropRef::from(1)),
+					ActivationAction::Enqueue(PropRef::from(2)),
+					ActivationAction::Enqueue(PropRef::from(3)),
+					ActivationAction::Enqueue(PropRef::from(4))
 				])
 			);
 			let bounds: HashSet<_> = activation_list.activated_by(IntEvent::Bounds).collect();
 			assert_eq!(
 				bounds,
 				HashSet::from_iter([
-					PropRef::from(1),
-					PropRef::from(2),
-					PropRef::from(3),
-					PropRef::from(4)
+					ActivationAction::Enqueue(PropRef::from(1)),
+					ActivationAction::Enqueue(PropRef::from(2)),
+					ActivationAction::Enqueue(PropRef::from(3)),
+					ActivationAction::Enqueue(PropRef::from(4))
 				])
 			);
 			let lower_bound: HashSet<_> =
 				activation_list.activated_by(IntEvent::LowerBound).collect();
 			assert_eq!(
 				lower_bound,
-				HashSet::from_iter([PropRef::from(1), PropRef::from(3), PropRef::from(4)])
+				HashSet::from_iter([
+					ActivationAction::Enqueue(PropRef::from(1)),
+					ActivationAction::Enqueue(PropRef::from(3)),
+					ActivationAction::Enqueue(PropRef::from(4))
+				])
 			);
 			let upper_bound: HashSet<_> =
 				activation_list.activated_by(IntEvent::UpperBound).collect();
 			assert_eq!(
 				upper_bound,
-				HashSet::from_iter([PropRef::from(2), PropRef::from(3), PropRef::from(4)])
+				HashSet::from_iter([
+					ActivationAction::Enqueue(PropRef::from(2)),
+					ActivationAction::Enqueue(PropRef::from(3)),
+					ActivationAction::Enqueue(PropRef::from(4))
+				])
 			);
 			let domain: HashSet<_> = activation_list.activated_by(IntEvent::Domain).collect();
-			assert_eq!(domain, HashSet::from_iter([PropRef::from(4)]));
+			assert_eq!(
+				domain,
+				HashSet::from_iter([ActivationAction::Enqueue(PropRef::from(4))])
+			);
 		}
 	}
 }

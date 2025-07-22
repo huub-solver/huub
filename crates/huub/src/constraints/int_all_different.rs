@@ -13,7 +13,9 @@ use crate::{
 	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView, IntViewInner,
+		activation_list::{IntEvent, IntPropCond},
+		queue::PriorityLevel,
+		IntLitMeaning, IntView, IntViewInner,
 	},
 	IntDecision, IntVal,
 };
@@ -85,6 +87,8 @@ pub struct IntAllDifferentBounds {
 pub struct IntAllDifferentValue {
 	/// List of integer variables that must take different values.
 	vars: Vec<IntView>,
+	/// List of (indexes of) variable signaled to be fixed.
+	action_list: Vec<usize>,
 }
 
 impl IntAllDifferent {
@@ -438,13 +442,38 @@ impl IntAllDifferentValue {
 	/// Create a new [`AllDifferentIntValue`] propagator and post it in the
 	/// solver.
 	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, vars: Vec<IntView>) {
-		let enqueue = vars
+		// Initialize a list of indices of decisions that already have a fixed
+		// value.
+		let action_list: Vec<usize> = vars
 			.iter()
-			.any(|v| matches!(v, IntView(IntViewInner::Const(_))));
-		let prop = solver.add_propagator(Box::new(Self { vars: vars.clone() }), PriorityLevel::Low);
-		for v in vars {
-			solver.enqueue_on_int_change(prop, v, IntPropCond::Fixed);
+			.enumerate()
+			.flat_map(|(i, v)| {
+				if let IntView(IntViewInner::Const(_)) = v {
+					Some(i)
+				} else {
+					None
+				}
+			})
+			.collect();
+		// If the list is not empty, then the propagator should be enqueued at the
+		// root level.
+		let enqueue = !action_list.is_empty();
+		// Post the propagator to the solver
+		let prop = solver.add_propagator(
+			Box::new(Self {
+				vars: vars.clone(),
+				action_list,
+			}),
+			PriorityLevel::Low,
+		);
+		// Let the propagator be advised when each specific decision is fixed to a
+		// value, with the index of the decision.
+		for (i, &v) in vars.iter().enumerate() {
+			solver.advise_on_int_change(prop, v, IntPropCond::Fixed, i as u64);
 		}
+		// Advise the propagator of backtracking to clear the list of fixed decision
+		// (indices).
+		solver.advise_on_backtrack(prop);
 		if enqueue {
 			solver.enqueue_now(prop);
 		}
@@ -456,19 +485,43 @@ where
 	P: PropagationActions,
 	E: ExplanationActions,
 {
+	fn advise_of_backtrack(&mut self, _actions: &mut E) {
+		// We forget any previously remembered fixed decisions.
+		self.action_list.clear();
+	}
+
+	fn advise_of_int_change(
+		&mut self,
+		_actions: &mut E,
+		_view: IntView,
+		event: IntEvent,
+		data: u64,
+	) -> bool {
+		// We remember that the decision at index `data` has been fixed to a value.
+		debug_assert_eq!(event, IntEvent::Fixed);
+		self.action_list.push(data as usize);
+		true
+	}
+
 	#[tracing::instrument(name = "all_different", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		for (i, &var) in self.vars.iter().enumerate() {
-			if let Some(val) = actions.get_int_val(var) {
-				let reason = actions.get_int_lit(var, IntLitMeaning::Eq(val));
-				for (j, &other) in self.vars.iter().enumerate() {
-					let other_val = actions.get_int_val(other);
-					if j != i && (other_val.is_none() || other_val.unwrap() == val) {
-						actions.set_int_not_eq(other, val, reason)?;
-					}
+		debug_assert!(!self.action_list.is_empty() && self.action_list.iter().all_unique());
+		// We walk through all fixed decisions (indices).
+		for &i in &self.action_list {
+			// Retrieve the value and value literal for the fixed decision.
+			let val = actions.get_int_val(self.vars[i]).unwrap();
+			let reason = actions.get_int_val_lit(self.vars[i]).unwrap();
+
+			// We now enforce that all other decisions (at different indices) are not
+			// equal to the fixed value.
+			for (j, &v) in self.vars.iter().enumerate() {
+				if j != i {
+					actions.set_int_not_eq(v, val, reason)?;
 				}
 			}
 		}
+		// We clear the list of indices of fixed decisions.
+		self.action_list.clear();
 		Ok(())
 	}
 }
