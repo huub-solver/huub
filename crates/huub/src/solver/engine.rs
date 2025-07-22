@@ -441,7 +441,8 @@ impl PropagatorExtension for Engine {
 				};
 				if !self.state.failed {
 					if let Some(event) = event {
-						for action in self.state.int_activation[iv].clone().activated_by(event) {
+						let activations = mem::take(&mut self.state.int_activation[iv]);
+						for action in activations.activated_by(event) {
 							let prop = match action {
 								ActivationAction::Advise(adv) => {
 									let &AdvisorDef {
@@ -469,6 +470,7 @@ impl PropagatorExtension for Engine {
 							};
 							self.state.propagator_queue.enqueue_propagator(prop);
 						}
+						self.state.int_activation[iv] = activations;
 					}
 				}
 			}
@@ -481,7 +483,7 @@ impl PropagatorExtension for Engine {
 		self.state.notify_backtrack::<false>(new_level, restart);
 
 		// Notify subscribed propagators of backtracking
-		for p in self.notify_of_backtrack.iter().cloned() {
+		for &p in self.notify_of_backtrack.iter() {
 			self.propagators[p].advise_of_backtrack(&mut self.state);
 		}
 	}
