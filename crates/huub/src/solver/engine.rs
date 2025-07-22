@@ -37,7 +37,7 @@ use crate::{
 	branchers::{BoxedBrancher, Decision},
 	constraints::{BoxedPropagator, Conflict, Reason},
 	solver::{
-		activation_list::{ActivationList, IntEvent},
+		activation_list::{ActivationAction, ActivationActionS, ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
 		int_var::{IntVar, IntVarRef, OrderStorage},
 		queue::PropagatorQueue,
@@ -48,11 +48,27 @@ use crate::{
 	Clause, IntVal,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Definition of an [`Advisor`] giving the information about the [`View`]
+/// subscribed to and the way in which to advise the propagator.
+pub(crate) struct AdvisorDef {
+	/// Whether the advise is on a [`BoolView`] being used as an [`IntView`]
+	pub(crate) bool2int: bool,
+	/// 64 bits of data communicated when advising propagator.
+	pub(crate) data: u64,
+	/// Whether the advise is on a [`IntView`] with a negative coefficient.
+	pub(crate) negated: bool,
+	/// The propagator being advised.
+	pub(crate) propagator: PropRef,
+}
+
 #[derive(Debug, Default, Clone)]
 /// A propagation engine implementing the [`Propagator`] trait.
 pub struct Engine {
 	/// Storage of the propagators.
 	pub(crate) propagators: IndexVec<PropRef, BoxedPropagator>,
+	/// List of propagators to advise of backtracking
+	pub(crate) notify_of_backtrack: Vec<PropRef>,
 	/// Storage of the branchers.
 	pub(crate) branchers: Vec<BoxedBrancher>,
 	/// Internal State representation of the propagation engine.
@@ -118,8 +134,10 @@ pub struct State {
 	pub(crate) vsids: bool,
 
 	// ---- Queueing Infrastructure ----
+	/// Advisor data storage
+	pub(crate) advisors: IndexVec<Advisor, AdvisorDef>,
 	/// Boolean variable enqueueing information
-	pub(crate) bool_activation: FxHashMap<RawVar, Vec<PropRef>>,
+	pub(crate) bool_activation: FxHashMap<RawVar, Vec<ActivationActionS>>,
 	/// Integer variable enqueueing information
 	pub(crate) int_activation: IndexVec<IntVarRef, ActivationList>,
 	/// Queue of propagators awaiting action
@@ -225,9 +243,28 @@ impl PropagatorExtension for Engine {
 				}
 				ctx.state.int_vars[r].notify_upper_bound(&mut ctx.state.trail, lb);
 
-				for prop in ctx.state.int_activation[r].activated_by(IntEvent::Fixed) {
+				let activation = mem::take(&mut ctx.state.int_activation[r]);
+				for action in activation.activated_by(IntEvent::Fixed) {
+					let prop = match action {
+						ActivationAction::Advise(adv) => {
+							let &AdvisorDef {
+								data, propagator, ..
+							} = &ctx.state.advisors[adv];
+							if !self.propagators[propagator].advise_of_int_change(
+								ctx.state,
+								IntView(IntViewInner::VarRef(r)),
+								IntEvent::Fixed,
+								data,
+							) {
+								continue;
+							}
+							propagator
+						}
+						ActivationAction::Enqueue(prop) => prop,
+					};
 					ctx.state.propagator_queue.enqueue_propagator(prop);
 				}
+				ctx.state.int_activation[r] = activation;
 			}
 		}
 
@@ -295,14 +332,50 @@ impl PropagatorExtension for Engine {
 
 			// Enqueue based on direct literal
 			if !self.state.failed {
-				self.state.propagator_queue.enqueue_propagators(
-					self.state
-						.bool_activation
-						.get(&lit.var())
-						.into_iter()
-						.flatten()
-						.copied(),
-				);
+				if let Some(activations) = self
+					.state
+					.bool_activation
+					.get_mut(&lit.var())
+					.map(mem::take)
+				{
+					for &action in &activations {
+						let prop = match action.into() {
+							ActivationAction::Advise(adv) => {
+								let &AdvisorDef {
+									bool2int,
+									data,
+									propagator,
+									..
+								} = &self.state.advisors[adv];
+								let enqueue = if bool2int {
+									self.propagators[propagator].advise_of_int_change(
+										&mut self.state,
+										IntView(IntViewInner::Bool {
+											transformer: Default::default(),
+											lit,
+										}),
+										IntEvent::Fixed,
+										data,
+									)
+								} else {
+									self.propagators[propagator].advise_of_bool_change(
+										&mut self.state,
+										BoolView(BoolViewInner::Lit(lit)),
+										data,
+									)
+								};
+								if !enqueue {
+									continue;
+								}
+								propagator
+							}
+							ActivationAction::Enqueue(prop) => prop,
+						};
+						self.state.propagator_queue.enqueue_propagator(prop);
+					}
+
+					*self.state.bool_activation.get_mut(&lit.var()).unwrap() = activations;
+				}
 			}
 
 			// Enqueue based on literal meaning in complex type
@@ -323,12 +396,18 @@ impl PropagatorExtension for Engine {
 						trace!(lit = i32::from(lit), lb, ub, "invalid eq notification");
 						None
 					}
-					IntLitMeaning::Eq(_val) => {
+					IntLitMeaning::Eq(val) => {
 						#[cfg(debug_assertions)]
 						{
 							// (DEBUG ONLY) Push the integer variable and its value to check
 							// that its bounds were updated before propagation occurs.
-							self.state.check_int_fixed.push((iv, _val));
+							self.state.check_int_fixed.push((iv, val));
+						}
+						if val > lb {
+							self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, val);
+						}
+						if val < ub {
+							self.state.int_vars[iv].notify_upper_bound(&mut self.state.trail, val);
 						}
 						Some(IntEvent::Fixed)
 					}
@@ -362,9 +441,36 @@ impl PropagatorExtension for Engine {
 				};
 				if !self.state.failed {
 					if let Some(event) = event {
-						self.state
-							.propagator_queue
-							.enqueue_propagators(self.state.int_activation[iv].activated_by(event));
+						let activations = mem::take(&mut self.state.int_activation[iv]);
+						for action in activations.activated_by(event) {
+							let prop = match action {
+								ActivationAction::Advise(adv) => {
+									let &AdvisorDef {
+										negated,
+										data,
+										propagator,
+										..
+									} = &self.state.advisors[adv];
+									let event = match event {
+										IntEvent::LowerBound if negated => IntEvent::UpperBound,
+										IntEvent::UpperBound if negated => IntEvent::LowerBound,
+										e => e,
+									};
+									if !self.propagators[propagator].advise_of_int_change(
+										&mut self.state,
+										IntView(IntViewInner::VarRef(iv)),
+										event,
+										data,
+									) {
+										continue;
+									}
+									propagator
+								}
+								ActivationAction::Enqueue(prop) => prop,
+							};
+							self.state.propagator_queue.enqueue_propagator(prop);
+						}
+						self.state.int_activation[iv] = activations;
 					}
 				}
 			}
@@ -375,6 +481,11 @@ impl PropagatorExtension for Engine {
 		debug!(new_level, restart, "backtrack");
 		// Revert value changes to previous decision level
 		self.state.notify_backtrack::<false>(new_level, restart);
+
+		// Notify subscribed propagators of backtracking
+		for &p in self.notify_of_backtrack.iter() {
+			self.propagators[p].advise_of_backtrack(&mut self.state);
+		}
 	}
 
 	fn notify_new_decision_level(&mut self) {
@@ -409,10 +520,20 @@ impl PropagatorExtension for Engine {
 			#[cfg(debug_assertions)]
 			{
 				// (DEBUG ONLY) Check that all integers that where fixed by equality
-				// literals had their bounds updated to match.
+				// literals had their bound literals set to match.
 				for (iv, i) in mem::take(&mut self.state.check_int_fixed) {
 					let iv = IntView(IntViewInner::VarRef(iv));
 					debug_assert_eq!(self.state.get_int_val(iv), Some(i));
+					let lb_lit = self
+						.state
+						.try_int_lit(iv, IntLitMeaning::GreaterEq(i))
+						.unwrap();
+					let ub_lit = self
+						.state
+						.try_int_lit(iv, IntLitMeaning::Less(i + 1))
+						.unwrap();
+					debug_assert_eq!(self.state.get_bool_val(lb_lit), Some(true));
+					debug_assert_eq!(self.state.get_bool_val(ub_lit), Some(true));
 				}
 			}
 			// If there are no previous changes, run propagators
@@ -935,4 +1056,13 @@ impl TrailingActions for State {
 index_vec::define_index_type! {
 	/// Identifies an propagator in a [`Solver`]
 	pub struct PropRef = u32;
+	// Allow storing as i32 in [`ActivationActionS`]
+	MAX_INDEX = i32::MAX as usize;
+}
+
+index_vec::define_index_type! {
+	/// Identifies an advisor in the [`State`]
+	pub struct Advisor = u32;
+	// Allow storing as i32 in [`ActivationActionS`]
+	MAX_INDEX = i32::MAX as usize;
 }
