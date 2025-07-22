@@ -22,6 +22,23 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// The propagation rules for the `disjunctive_strict` constraint.
+/// This enum is used to identify which propagation algorithm is being applied
+/// during the propagation phase of the `DisjunctiveStrictPropagator`.
+/// Values:
+/// - `EdgeFinding`: The edge finding propagation rule in function `propagate_edge_finding`.
+/// - `NotLast`: The not-last propagation rule in function `propagate_not_last`.
+/// - `Precedence`: The detectable precedence propagation rule in function `propagate_detectable_precedence`.
+enum DisjunctivePropagationRule {
+	/// The edge finding propagation in `propagate_edge_finding`.
+	EdgeFinding,
+	/// The not-last propagation in `propagate_not_last`.
+	NotLast,
+	/// The precedence propagation in `propagate_detectable_precedence`.
+	Precedence,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// Representation of the `disjunctive_strict` constraint within a model.
 ///
 /// This constraint enforces that the given a list of integer decision variables
@@ -44,23 +61,6 @@ pub struct DisjunctiveStrict {
 	///
 	/// Defaults to `false`.
 	pub(crate) detectable_precedence_prop: Option<bool>,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// The propagation rules for the `disjunctive_strict` constraint.
-/// This enum is used to identify which propagation algorithm is being applied
-/// during the propagation phase of the `DisjunctiveStrictPropagator`.
-/// Values:
-/// - `EdgeFinding`: The edge finding propagation rule in function `propagate_edge_finding`.
-/// - `NotLast`: The not-last propagation rule in function `propagate_not_last`.
-/// - `Precedence`: The detectable precedence propagation rule in function `propagate_detectable_precedence`.
-enum DisjunctivePropagationRule {
-	/// The edge finding propagation in `propagate_edge_finding`.
-	EdgeFinding,
-	/// The not-last propagation in `propagate_not_last`.
-	NotLast,
-	/// The precedence propagation in `propagate_detectable_precedence`.
-	Precedence,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -154,10 +154,31 @@ struct TaskInfo {
 }
 
 impl DisjunctiveStrict {
+	/// Return whether the detectable precedence algorithm will be used
+	/// when creating a [`Solver`] object.
+	pub fn detectable_precedence_propagation_enabled(&self) -> bool {
+		self.detectable_precedence_prop.unwrap_or(false)
+	}
+
 	/// Return whether the edge finding algorithm will be used
 	/// when creating a [`Solver`] object.
 	pub fn edge_finding_propagation_enabled(&self) -> bool {
 		self.edge_finding_prop.unwrap_or(true)
+	}
+
+	/// Return whether the not-last algorithm will be used
+	/// when creating a [`Solver`] object.
+	pub fn not_last_propagation_enabled(&self) -> bool {
+		self.not_last_prop.unwrap_or(false)
+	}
+
+	/// Ensure the use of the detectable precedence algorithm when this
+	/// constraint is posted to a [`Solver`] object.
+	///
+	/// Note that this method does not affect whether other propagation
+	/// algorithms will be used or not.
+	pub fn use_detectable_precedence_propagation(&mut self, enable: bool) {
+		self.detectable_precedence_prop = Some(enable);
 	}
 
 	/// Ensure the use of the edge finding algorithm when this constraint is
@@ -169,12 +190,6 @@ impl DisjunctiveStrict {
 		self.edge_finding_prop = Some(enable);
 	}
 
-	/// Return whether the not-last algorithm will be used
-	/// when creating a [`Solver`] object.
-	pub fn not_last_propagation_enabled(&self) -> bool {
-		self.not_last_prop.unwrap_or(false)
-	}
-
 	/// Ensure the use of the not-last algorithm when this constraint is
 	/// posted to a [`Solver`] object.
 	///
@@ -182,21 +197,6 @@ impl DisjunctiveStrict {
 	/// algorithms will be used or not.
 	pub fn use_not_last_propagation(&mut self, enable: bool) {
 		self.not_last_prop = Some(enable);
-	}
-
-	/// Return whether the detectable precedence algorithm will be used
-	/// when creating a [`Solver`] object.
-	pub fn detectable_precedence_propagation_enabled(&self) -> bool {
-		self.detectable_precedence_prop.unwrap_or(false)
-	}
-
-	/// Ensure the use of the detectable precedence algorithm when this
-	/// constraint is posted to a [`Solver`] object.
-	///
-	/// Note that this method does not affect whether other propagation
-	/// algorithms will be used or not.
-	pub fn use_detectable_precedence_propagation(&mut self, enable: bool) {
-		self.detectable_precedence_prop = Some(enable);
 	}
 }
 
@@ -264,26 +264,6 @@ impl<S: SimplificationActions> Constraint<S> for DisjunctiveStrict {
 }
 
 impl DisjunctiveStrictPropagator {
-	/// Return the (current) earliest start time of task `i`.
-	fn earliest_start_time<I: InspectionActions>(&self, i: usize, actions: &mut I) -> IntVal {
-		actions.get_int_lower_bound(self.start_times[i])
-	}
-
-	/// Return the (current) latest start time of task `i`.
-	fn latest_start_time<I: InspectionActions>(&self, i: usize, actions: &mut I) -> IntVal {
-		actions.get_int_upper_bound(self.start_times[i])
-	}
-
-	/// Return the (current) earliest completion time of task `i`.
-	fn earliest_completion_time<I: InspectionActions>(&self, i: usize, actions: &mut I) -> IntVal {
-		self.earliest_start_time(i, actions) + self.durations[i]
-	}
-
-	/// Return the (current) latest completion time of task `i`.
-	fn latest_completion_time<I: InspectionActions>(&self, i: usize, actions: &mut I) -> IntVal {
-		self.latest_start_time(i, actions) + self.durations[i]
-	}
-
 	/// Return the data stored for explanation from propagation rule and task number.
 	fn data_for_explanation(
 		&self,
@@ -293,72 +273,131 @@ impl DisjunctiveStrictPropagator {
 		((propagation_rule as u64) << 62) + task_no as u64
 	}
 
-	/// Return the task number from the data stored for explanation.
-	fn task_no_from_data(&self, data: u64) -> usize {
-		((data << 2) >> 2) as usize
+	/// Return the (current) earliest completion time of task `i`.
+	fn earliest_completion_time<I: InspectionActions>(&self, i: usize, actions: &mut I) -> IntVal {
+		self.earliest_start_time(i, actions) + self.durations[i]
 	}
 
-	/// Return the propagation rule from the data stored for explanation.
-	fn propagation_rule_from_data(&self, data: u64) -> DisjunctivePropagationRule {
-		match data >> 62 {
-			0 => DisjunctivePropagationRule::EdgeFinding,
-			1 => DisjunctivePropagationRule::NotLast,
-			2 => DisjunctivePropagationRule::Precedence,
-			_ => unreachable!("Invalid propagation rule in data"),
-		}
+	/// Return the (current) earliest start time of task `i`.
+	fn earliest_start_time<I: InspectionActions>(&self, i: usize, actions: &mut I) -> IntVal {
+		actions.get_int_lower_bound(self.start_times[i])
 	}
 
-	/// Overload checking detects if the total duration of any set of tasks
-	/// cannot fit within their available time window, indicating a resource overload.
-	///
-	/// For all subsets Ω of tasks:
-	///     est_Ω + p_Ω > lct_Ω ⇒ conflict (resource overload)
-	///
-	/// It is sufficient to check the "left cut" for each task j:
-	///     LCut(T, j) = { k ∈ T | lct_k ≤ lct_j }
-	/// If est_{LCut(T, j)} + p_{LCut(T, j)} > lct_{LCut(T, j)}, then conflict.
-	///
-	/// The algorithm processes tasks in order of increasing latest completion time.
-	/// For each task, it adds the task to the Omega-Theta tree, which maintains the set
-	/// of tasks with latest completion times up to the current one (the left cut).
-	/// If the tree's earliest completion time exceeds the current task's latest completion time,
-	/// a resource overload is detected and a conflict is triggered.
-	fn propagate_overload_checking<P: PropagationActions>(
+	/// Explain edge finding propagation for task `i` with the time window [`earliest_start`, `latest_completion`]
+	/// For details, refer to the CPAIOR paper by Vilim (2005).
+	fn explain_edge_finding<E: ExplanationActions>(
 		&mut self,
-		actions: &mut P,
-	) -> Result<(), Conflict> {
-		// Clear the Omega-Theta tree before propagation
-		self.ot_tree.clear();
-
-		// Sort the tasks by non-decreasing latest completion time
-		let tasks_sorted_by_lct = (0..self.start_times.len())
-			.map(|i| (i, self.latest_completion_time(i, actions)))
-			.sorted_by_key(|(_, lct)| *lct)
+		actions: &mut E,
+		task_no: usize,
+		earliest_start: i64,
+		latest_completion: i64,
+	) -> Vec<BoolView> {
+		// explain why the set of tasks LCut(j) ∪ {i} cannot be completed before lct_j
+		// since energy of the set of tasks (including i) within the time window [earliest_start, latest_completion] is overloaded
+		let latest_completion_times = (0..self.start_times.len())
+			.map(|i| self.latest_completion_time(i, actions))
 			.collect_vec();
+		let earliest_start_times = (0..self.start_times.len())
+			.map(|i| self.earliest_start_time(i, actions))
+			.collect_vec();
+		trace!(
+			task_no,
+			left_cut_set =? (0..self.start_times.len())
+				.filter(|&j| {
+					j != task_no
+					&& earliest_start_times[j] >= earliest_start
+					&& latest_completion_times[j] <= latest_completion
+				})
+				.map(|j| {
+					(
+						j,
+						earliest_start_times[j],
+						latest_completion_times[j],
+					)
+				})
+				.collect_vec(),
+			window =? (earliest_start, latest_completion),
+			"Explain Edge Finding"
+		);
 
-		// Traverse all tasks ordered by latest completion time and check resource overload
-		for (i, lct_i) in tasks_sorted_by_lct.iter() {
-			let est_i = self.earliest_start_time(*i, actions);
-			self.ot_tree.add_task(*i, est_i, self.durations[*i]);
-			let ect = self.ot_tree.root().earliest_completion;
-			if ect > *lct_i {
-				let binding_task = self
-					.ot_tree
-					.binding_task(self.ot_tree.root().earliest_completion, 0);
-				let earliest_start = actions.get_int_lower_bound(self.start_times[binding_task]);
-				let expl = self.explain_overload_checking(lct_i + 1);
-				trace!(
-					time_window =? (earliest_start, lct_i),
-					"Resource overload"
+		// collect at least latest_completion - earliest_start energy (including durations[task_no])
+		// from tasks bracketed in [earliest_start, latest_completion] and form a set O
+		// [start(t) >= latest_completion + 1] because
+		// [start(t) >= earliest_start] /\ forall (t' in O) [start(t') >= earliest_start] /\ forall (t' in O) [end(t') <= latest_completion]
+		let mut clause = Vec::new();
+		let (bv, _) = actions.get_int_lit_relaxed(
+			self.start_times[task_no],
+			IntLitMeaning::GreaterEq(earliest_start),
+		);
+		clause.push(bv);
+		let mut energy = latest_completion - earliest_start - self.durations[task_no];
+		for i in 0..self.start_times.len() {
+			if i != task_no
+				&& earliest_start_times[i] >= earliest_start
+				&& latest_completion_times[i] <= latest_completion
+			{
+				clause.push(actions.get_int_lower_bound_lit(self.start_times[i]));
+				let (bv, _) = actions.get_int_lit_relaxed(
+					self.start_times[i],
+					IntLitMeaning::Less(latest_completion - self.durations[i] + 1),
 				);
-				actions.set_int_lower_bound(
-					self.start_times[*i] + self.durations[*i],
-					ect,
-					expl,
-				)?;
+				clause.push(bv);
+				energy -= self.durations[i];
+				if energy < 0 {
+					break;
+				}
 			}
 		}
-		Ok(())
+		clause
+	}
+
+	/// Explain Not-Last propagation for task `i` with the time window [`earliest_start`, `updated_lct_i`]
+	/// For details, refer to the CPAIOR paper by Vilim (2005).
+	fn explain_not_last<E: ExplanationActions>(
+		&mut self,
+		actions: &mut E,
+		task_no: usize,
+		earliest_start: i64,
+		updated_lct_i: i64,
+	) -> Vec<BoolView> {
+		// Collect the set of tasks in NLset(i) = { j | lst_j < lct_i && est_j + p_j ≥ earliest_start & j ≠ i }
+		let nlset = (0..self.start_times.len())
+			.filter(|j| {
+				{
+					*j != task_no
+						&& self.latest_start_time(*j, actions) <= updated_lct_i
+						&& self.earliest_start_time(*j, actions) >= earliest_start
+				}
+			})
+			.collect_vec();
+
+		trace!(
+			task_no,
+			window =? (earliest_start, updated_lct_i),
+			nlset = ? nlset.iter().map(|&j| (j, self.durations[j], self.earliest_start_time(j, actions), self.latest_start_time(j, actions))).collect_vec(),
+			"Explain Not Last"
+		);
+
+		assert_ne!(nlset.len(), 0);
+
+		// Explain the reason why task i cannot be the last task
+		let mut clause = Vec::new();
+		clause.push(actions.get_int_upper_bound_lit(self.start_times[task_no]));
+		for j in nlset {
+			// explain the reason why all tasks in NLset(i) will stay in NLset(i)
+			// (1) If for all j in NLset(i) [est_j ≥ earliest_start], then ect_Ω > lst_i, and NLset(i) \not\prec i
+			let (bv, _) = actions.get_int_lit_relaxed(
+				self.start_times[j],
+				IntLitMeaning::GreaterEq(earliest_start),
+			);
+			clause.push(bv);
+			// (2) explain the reason why the latest completion time of task i is set to latest_completion
+			// If for all j in NLset(i) [lst_j ≤ lct_i'], then max{lst_j, j \in Ω} ≤ lct_i', and lct_i' should be set
+			let (bv, _) = actions
+				.get_int_lit_relaxed(self.start_times[j], IntLitMeaning::Less(updated_lct_i + 1));
+			clause.push(bv);
+		}
+		clause
 	}
 
 	/// Explain resource overload within the time window [`earliest_start`, `time_bound`]
@@ -401,6 +440,105 @@ impl DisjunctiveStrictPropagator {
 					[actions.get_int_lower_bound_lit(self.start_times[i]), bv]
 				})
 				.collect_vec()
+		}
+	}
+
+	/// Explain precedence propagation for task `i` with the earliest start time
+	/// For details, refer to the CPAIOR paper by Vilim (2005).
+	fn explain_precedence<E: ExplanationActions>(
+		&mut self,
+		actions: &mut E,
+		task_no: usize,
+		earliest_start: i64,
+		latest_start: i64,
+	) -> Vec<BoolView> {
+		// Collect all tasks of which the earliest start time greater than `earliest_start`
+		let precedence_set = (0..self.start_times.len())
+			.filter(|&j| {
+				j != task_no
+					&& self.earliest_start_time(j, actions) >= earliest_start
+					&& self.latest_start_time(j, actions) < latest_start
+			})
+			.collect_vec();
+
+		trace!(
+			task_no,
+			window =? (earliest_start, latest_start),
+			precedence_set = ?precedence_set,
+			"Explain Detectable Precedence"
+		);
+
+		assert_ne!(precedence_set.len(), 0);
+		// Compute the latest start time of the tasks in precedence_set
+		let task_i_est = self.earliest_start_time(task_no, actions);
+
+		// Explain the reason why task i must be scheduled after a certain time bound
+		let mut clause = Vec::new();
+		let (bv, _) = actions.get_int_lit_relaxed(
+			self.start_times[task_no],
+			IntLitMeaning::GreaterEq(task_i_est),
+		);
+		clause.push(bv);
+		for j in precedence_set {
+			let v = self.start_times[j];
+			// (1) explain the reason why all tasks in precedence_set will stay in precedence_set
+			let (bv, _) = actions.get_int_lit_relaxed(v, IntLitMeaning::GreaterEq(earliest_start));
+			clause.push(bv);
+			// (2) explain the reason why the earliest start time of task i is set to earliest completeion time of the precedence set
+			let (bv, _) = actions
+				.get_int_lit_relaxed(v, IntLitMeaning::Less(task_i_est + self.durations[task_no]));
+			clause.push(bv);
+		}
+		clause
+	}
+
+	/// Return the (current) latest completion time of task `i`.
+	fn latest_completion_time<I: InspectionActions>(&self, i: usize, actions: &mut I) -> IntVal {
+		self.latest_start_time(i, actions) + self.durations[i]
+	}
+
+	/// Return the (current) latest start time of task `i`.
+	fn latest_start_time<I: InspectionActions>(&self, i: usize, actions: &mut I) -> IntVal {
+		actions.get_int_upper_bound(self.start_times[i])
+	}
+
+	/// Create a new [`DisjunctiveStrict`] propagator and post it in the solver.
+	pub fn new_in<P>(
+		solver: &mut P,
+		start_times: Vec<IntView>,
+		durations: Vec<IntVal>,
+		edge_finding_enabled: bool,
+		not_last_enabled: bool,
+		detectable_precedence_enabled: bool,
+	) where
+		P: PropagatorInitActions + ?Sized,
+	{
+		let n = start_times.len();
+		let trailed_info = (0..n)
+			.map(|_| TaskInfo {
+				earliest_start: solver.new_trailed_int(0),
+				latest_completion: solver.new_trailed_int(0),
+			})
+			.collect();
+		let prop = solver.add_propagator(
+			Box::new(Self {
+				start_times: start_times.clone(),
+				durations,
+				ot_tree: OmegaThetaTree::new(n),
+				trailed_info,
+				edge_finding_enabled,
+				not_last_enabled,
+				detectable_precedence_enabled,
+				tasks_sorted_by_earliest_start: (0..n).collect_vec(),
+				tasks_sorted_by_latest_start: (0..n).collect_vec(),
+				tasks_sorted_by_earliest_completion: (0..n).collect_vec(),
+				tasks_sorted_by_latest_completion: (0..n).collect_vec(),
+			}),
+			PriorityLevel::Low,
+		);
+
+		for v in start_times {
+			solver.enqueue_on_int_change(prop, v, IntPropCond::Bounds);
 		}
 	}
 
@@ -533,53 +671,111 @@ impl DisjunctiveStrictPropagator {
 		Ok(propagated)
 	}
 
-	/// Explain precedence propagation for task `i` with the earliest start time
-	/// For details, refer to the CPAIOR paper by Vilim (2005).
-	fn explain_precedence<E: ExplanationActions>(
+	/// Edge finding propagation rule checks if a task must be scheduled after a set of tasks.
+	///
+	/// For a set $Ω \subseteq T$ and a task $i \in (T \setminus Ω)$,
+	/// task $i$ must be scheduled after $Ω$ if:
+	///   $ect_{Ω \cup \{i\}} > lct_Ω$
+	/// In this case, update the earliest start time of $i$:
+	///   $est_i := \max(est_i, ect_Ω)$
+	///
+	/// When the resource is not overloaded for $Ω \cup \{i\}$,
+	/// it suffices to consider the left cut $LCut(T, j) = \{k \in T \mid lct_k \leq lct_j\}$.
+	/// For all $i \in T \setminus LCut(T, j)$, if $ect_{LCut(T, j) \cup \{i\}} > lct_j$,
+	/// then $est_i := \max(est_i, ect_{LCut(T, j)})$.
+	///
+	/// The algorithm maintains $LCut(T, j)$ using the Omega-Theta tree,
+	/// iterating tasks in decreasing order of latest completion time.
+	/// At each step, resource overload is checked for the current set.
+	/// If not overloaded, the current task is annotated as gray in the tree.
+	/// The Omega-Theta tree maintains the gray earliest completion time:
+	///   $\bar{ect}(Ω, Ѳ) = \max(\{ect_Ω\} \cup \{ect_{Ω \cup \{i\}} \mid i \in Ѳ\})$
+	/// If $\bar{ect}(Ω, Ѳ) > lct_j$, there exists a gray task $i$ such that
+	/// $ect_{LCut(T, j) \cup \{i\}} > lct_j$, and $est_i$ is updated accordingly.
+	/// As $est_i$ cannot be further updated, $i$ is removed from $Ѳ$ in the tree.
+	/// For more details of the algorithm, refer to the original paper by Vilim (2008).
+	fn propagate_edge_finding<P: PropagationActions>(
 		&mut self,
-		actions: &mut E,
-		task_no: usize,
-		earliest_start: i64,
-		latest_start: i64,
-	) -> Vec<BoolView> {
-		// Collect all tasks of which the earliest start time greater than `earliest_start`
-		let precedence_set = (0..self.start_times.len())
-			.filter(|&j| {
-				j != task_no
-					&& self.earliest_start_time(j, actions) >= earliest_start
-					&& self.latest_start_time(j, actions) < latest_start
-			})
-			.collect_vec();
+		actions: &mut P,
+		check_overload: bool,
+	) -> Result<bool, Conflict> {
+		let mut propagated = false;
+		// Add all tasks to the Omega-Theta tree
+		let earliest_start: Vec<_> = self
+			.start_times
+			.iter()
+			.map(|v| actions.get_int_lower_bound(*v))
+			.collect();
+		self.ot_tree
+			.fill(earliest_start.as_slice(), self.durations.as_slice());
 
-		trace!(
-			task_no,
-			window =? (earliest_start, latest_start),
-			precedence_set = ?precedence_set,
-			"Explain Detectable Precedence"
-		);
+		// Sort the tasks by non-increasing latest completion time
+		let latest_completion_times: Vec<_> = (0..self.start_times.len())
+			.map(|i| self.latest_completion_time(i, actions))
+			.collect();
+		self.tasks_sorted_by_latest_completion
+			.sort_by_key(|&i| -latest_completion_times[i]);
 
-		assert_ne!(precedence_set.len(), 0);
-		// Compute the latest start time of the tasks in precedence_set
-		let task_i_est = self.earliest_start_time(task_no, actions);
+		// Traverse all tasks ordered by latest completion time and check the edge finding propagation rule
+		// Invariant: (1) all non-gray tasks of `ot_tree` (Ω) forms LCut(j) = { i | lct_i ≤ lct_j }
+		//            (2) all gray tasks of `ot_tree` (Ѳ) are in the set T \setminus LCut(j)
+		for (j, &lct_task) in self.tasks_sorted_by_latest_completion.iter().enumerate() {
+			let lct = self.latest_completion_time(lct_task, actions);
+			// Assume that resource overload is not detected, i.e., ect(LCut(j)) <= lct_j
+			let ect_in_tree = self.ot_tree.root().earliest_completion;
+			if check_overload {
+				// Checking resource overload for LCut(j): ect(LCut(j)) > lct_j => conflict
+				if ect_in_tree > lct {
+					// Resource overload detected, eagerly build the reason clause for conflict
+					let expl = self.explain_overload_checking(lct + 1);
+					actions.set_int_lower_bound(
+						self.start_times[lct_task] + self.durations[lct_task],
+						ect_in_tree,
+						expl,
+					)?;
+				}
+			} else {
+				assert!(ect_in_tree <= lct);
+			}
 
-		// Explain the reason why task i must be scheduled after a certain time bound
-		let mut clause = Vec::new();
-		let (bv, _) = actions.get_int_lit_relaxed(
-			self.start_times[task_no],
-			IntLitMeaning::GreaterEq(task_i_est),
-		);
-		clause.push(bv);
-		for j in precedence_set {
-			let v = self.start_times[j];
-			// (1) explain the reason why all tasks in precedence_set will stay in precedence_set
-			let (bv, _) = actions.get_int_lit_relaxed(v, IntLitMeaning::GreaterEq(earliest_start));
-			clause.push(bv);
-			// (2) explain the reason why the earliest start time of task i is set to earliest completeion time of the precedence set
-			let (bv, _) = actions
-				.get_int_lit_relaxed(v, IntLitMeaning::Less(task_i_est + self.durations[task_no]));
-			clause.push(bv);
+			// Checking the edge finding propagation rule
+			while j > 0 && self.ot_tree.root().earliest_completion_gray > lct {
+				let ect_gray_in_tree = self.ot_tree.root().earliest_completion_gray;
+				let blocked_task = self.ot_tree.blocked_task(ect_gray_in_tree);
+				if actions.get_int_lower_bound(self.start_times[blocked_task]) < ect_in_tree {
+					let gray_est_task = self.ot_tree.blocking_task(ect_gray_in_tree);
+					let lb = actions.get_int_lower_bound(self.start_times[gray_est_task]);
+					// set trailed integer for lazy explanation
+					let _ =
+						actions.set_trailed_int(self.trailed_info[blocked_task].earliest_start, lb);
+					let _ = actions.set_trailed_int(
+						self.trailed_info[blocked_task].latest_completion,
+						ect_gray_in_tree - 1,
+					);
+					trace!(
+						ect_in_tree,
+						task = blocked_task,
+						window =? (lb, ect_gray_in_tree - 1),
+						"Propagate Edge Finding"
+					);
+					let data = self.data_for_explanation(
+						blocked_task,
+						DisjunctivePropagationRule::EdgeFinding,
+					);
+					actions.set_int_lower_bound(
+						self.start_times[blocked_task],
+						ect_in_tree,
+						actions.deferred_reason(data),
+					)?;
+					propagated = true;
+				}
+				// Remove the blocked task as the maximum propagation has been achieved by LCut(j) where lct_j is maximum
+				let _ = self.ot_tree.remove_task(blocked_task);
+			}
+			self.ot_tree.annotate_gray_task(lct_task);
 		}
-		clause
+		trace!(propagated, "Edge Finding propagation completed");
+		Ok(propagated)
 	}
 
 	/// Not-Last propagation rule checks if a task cannot be the last scheduled among a set.
@@ -712,267 +908,72 @@ impl DisjunctiveStrictPropagator {
 		Ok(propagated)
 	}
 
-	/// Explain Not-Last propagation for task `i` with the time window [`earliest_start`, `updated_lct_i`]
-	/// For details, refer to the CPAIOR paper by Vilim (2005).
-	fn explain_not_last<E: ExplanationActions>(
-		&mut self,
-		actions: &mut E,
-		task_no: usize,
-		earliest_start: i64,
-		updated_lct_i: i64,
-	) -> Vec<BoolView> {
-		// Collect the set of tasks in NLset(i) = { j | lst_j < lct_i && est_j + p_j ≥ earliest_start & j ≠ i }
-		let nlset = (0..self.start_times.len())
-			.filter(|j| {
-				{
-					*j != task_no
-						&& self.latest_start_time(*j, actions) <= updated_lct_i
-						&& self.earliest_start_time(*j, actions) >= earliest_start
-				}
-			})
-			.collect_vec();
-
-		trace!(
-			task_no,
-			window =? (earliest_start, updated_lct_i),
-			nlset = ? nlset.iter().map(|&j| (j, self.durations[j], self.earliest_start_time(j, actions), self.latest_start_time(j, actions))).collect_vec(),
-			"Explain Not Last"
-		);
-
-		assert_ne!(nlset.len(), 0);
-
-		// Explain the reason why task i cannot be the last task
-		let mut clause = Vec::new();
-		clause.push(actions.get_int_upper_bound_lit(self.start_times[task_no]));
-		for j in nlset {
-			// explain the reason why all tasks in NLset(i) will stay in NLset(i)
-			// (1) If for all j in NLset(i) [est_j ≥ earliest_start], then ect_Ω > lst_i, and NLset(i) \not\prec i
-			let (bv, _) = actions.get_int_lit_relaxed(
-				self.start_times[j],
-				IntLitMeaning::GreaterEq(earliest_start),
-			);
-			clause.push(bv);
-			// (2) explain the reason why the latest completion time of task i is set to latest_completion
-			// If for all j in NLset(i) [lst_j ≤ lct_i'], then max{lst_j, j \in Ω} ≤ lct_i', and lct_i' should be set
-			let (bv, _) = actions
-				.get_int_lit_relaxed(self.start_times[j], IntLitMeaning::Less(updated_lct_i + 1));
-			clause.push(bv);
-		}
-		clause
-	}
-
-	/// Edge finding propagation rule checks if a task must be scheduled after a set of tasks.
+	/// Overload checking detects if the total duration of any set of tasks
+	/// cannot fit within their available time window, indicating a resource overload.
 	///
-	/// For a set $Ω \subseteq T$ and a task $i \in (T \setminus Ω)$,
-	/// task $i$ must be scheduled after $Ω$ if:
-	///   $ect_{Ω \cup \{i\}} > lct_Ω$
-	/// In this case, update the earliest start time of $i$:
-	///   $est_i := \max(est_i, ect_Ω)$
+	/// For all subsets Ω of tasks:
+	///     est_Ω + p_Ω > lct_Ω ⇒ conflict (resource overload)
 	///
-	/// When the resource is not overloaded for $Ω \cup \{i\}$,
-	/// it suffices to consider the left cut $LCut(T, j) = \{k \in T \mid lct_k \leq lct_j\}$.
-	/// For all $i \in T \setminus LCut(T, j)$, if $ect_{LCut(T, j) \cup \{i\}} > lct_j$,
-	/// then $est_i := \max(est_i, ect_{LCut(T, j)})$.
+	/// It is sufficient to check the "left cut" for each task j:
+	///     LCut(T, j) = { k ∈ T | lct_k ≤ lct_j }
+	/// If est_{LCut(T, j)} + p_{LCut(T, j)} > lct_{LCut(T, j)}, then conflict.
 	///
-	/// The algorithm maintains $LCut(T, j)$ using the Omega-Theta tree,
-	/// iterating tasks in decreasing order of latest completion time.
-	/// At each step, resource overload is checked for the current set.
-	/// If not overloaded, the current task is annotated as gray in the tree.
-	/// The Omega-Theta tree maintains the gray earliest completion time:
-	///   $\bar{ect}(Ω, Ѳ) = \max(\{ect_Ω\} \cup \{ect_{Ω \cup \{i\}} \mid i \in Ѳ\})$
-	/// If $\bar{ect}(Ω, Ѳ) > lct_j$, there exists a gray task $i$ such that
-	/// $ect_{LCut(T, j) \cup \{i\}} > lct_j$, and $est_i$ is updated accordingly.
-	/// As $est_i$ cannot be further updated, $i$ is removed from $Ѳ$ in the tree.
-	/// For more details of the algorithm, refer to the original paper by Vilim (2008).
-	fn propagate_edge_finding<P: PropagationActions>(
+	/// The algorithm processes tasks in order of increasing latest completion time.
+	/// For each task, it adds the task to the Omega-Theta tree, which maintains the set
+	/// of tasks with latest completion times up to the current one (the left cut).
+	/// If the tree's earliest completion time exceeds the current task's latest completion time,
+	/// a resource overload is detected and a conflict is triggered.
+	fn propagate_overload_checking<P: PropagationActions>(
 		&mut self,
 		actions: &mut P,
-		check_overload: bool,
-	) -> Result<bool, Conflict> {
-		let mut propagated = false;
-		// Add all tasks to the Omega-Theta tree
-		let earliest_start: Vec<_> = self
-			.start_times
-			.iter()
-			.map(|v| actions.get_int_lower_bound(*v))
-			.collect();
-		self.ot_tree
-			.fill(earliest_start.as_slice(), self.durations.as_slice());
+	) -> Result<(), Conflict> {
+		// Clear the Omega-Theta tree before propagation
+		self.ot_tree.clear();
 
-		// Sort the tasks by non-increasing latest completion time
-		let latest_completion_times: Vec<_> = (0..self.start_times.len())
-			.map(|i| self.latest_completion_time(i, actions))
-			.collect();
-		self.tasks_sorted_by_latest_completion
-			.sort_by_key(|&i| -latest_completion_times[i]);
-
-		// Traverse all tasks ordered by latest completion time and check the edge finding propagation rule
-		// Invariant: (1) all non-gray tasks of `ot_tree` (Ω) forms LCut(j) = { i | lct_i ≤ lct_j }
-		//            (2) all gray tasks of `ot_tree` (Ѳ) are in the set T \setminus LCut(j)
-		for (j, &lct_task) in self.tasks_sorted_by_latest_completion.iter().enumerate() {
-			let lct = self.latest_completion_time(lct_task, actions);
-			// Assume that resource overload is not detected, i.e., ect(LCut(j)) <= lct_j
-			let ect_in_tree = self.ot_tree.root().earliest_completion;
-			if check_overload {
-				// Checking resource overload for LCut(j): ect(LCut(j)) > lct_j => conflict
-				if ect_in_tree > lct {
-					// Resource overload detected, eagerly build the reason clause for conflict
-					let expl = self.explain_overload_checking(lct + 1);
-					actions.set_int_lower_bound(
-						self.start_times[lct_task] + self.durations[lct_task],
-						ect_in_tree,
-						expl,
-					)?;
-				}
-			} else {
-				assert!(ect_in_tree <= lct);
-			}
-
-			// Checking the edge finding propagation rule
-			while j > 0 && self.ot_tree.root().earliest_completion_gray > lct {
-				let ect_gray_in_tree = self.ot_tree.root().earliest_completion_gray;
-				let blocked_task = self.ot_tree.blocked_task(ect_gray_in_tree);
-				if actions.get_int_lower_bound(self.start_times[blocked_task]) < ect_in_tree {
-					let gray_est_task = self.ot_tree.blocking_task(ect_gray_in_tree);
-					let lb = actions.get_int_lower_bound(self.start_times[gray_est_task]);
-					// set trailed integer for lazy explanation
-					let _ =
-						actions.set_trailed_int(self.trailed_info[blocked_task].earliest_start, lb);
-					let _ = actions.set_trailed_int(
-						self.trailed_info[blocked_task].latest_completion,
-						ect_gray_in_tree - 1,
-					);
-					trace!(
-						ect_in_tree,
-						task = blocked_task,
-						window =? (lb, ect_gray_in_tree - 1),
-						"Propagate Edge Finding"
-					);
-					let data = self.data_for_explanation(
-						blocked_task,
-						DisjunctivePropagationRule::EdgeFinding,
-					);
-					actions.set_int_lower_bound(
-						self.start_times[blocked_task],
-						ect_in_tree,
-						actions.deferred_reason(data),
-					)?;
-					propagated = true;
-				}
-				// Remove the blocked task as the maximum propagation has been achieved by LCut(j) where lct_j is maximum
-				let _ = self.ot_tree.remove_task(blocked_task);
-			}
-			self.ot_tree.annotate_gray_task(lct_task);
-		}
-		trace!(propagated, "Edge Finding propagation completed");
-		Ok(propagated)
-	}
-
-	/// Explain edge finding propagation for task `i` with the time window [`earliest_start`, `latest_completion`]
-	/// For details, refer to the CPAIOR paper by Vilim (2005).
-	fn explain_edge_finding<E: ExplanationActions>(
-		&mut self,
-		actions: &mut E,
-		task_no: usize,
-		earliest_start: i64,
-		latest_completion: i64,
-	) -> Vec<BoolView> {
-		// explain why the set of tasks LCut(j) ∪ {i} cannot be completed before lct_j
-		// since energy of the set of tasks (including i) within the time window [earliest_start, latest_completion] is overloaded
-		let latest_completion_times = (0..self.start_times.len())
-			.map(|i| self.latest_completion_time(i, actions))
+		// Sort the tasks by non-decreasing latest completion time
+		let tasks_sorted_by_lct = (0..self.start_times.len())
+			.map(|i| (i, self.latest_completion_time(i, actions)))
+			.sorted_by_key(|(_, lct)| *lct)
 			.collect_vec();
-		let earliest_start_times = (0..self.start_times.len())
-			.map(|i| self.earliest_start_time(i, actions))
-			.collect_vec();
-		trace!(
-			task_no,
-			left_cut_set =? (0..self.start_times.len())
-				.filter(|&j| {
-					j != task_no
-					&& earliest_start_times[j] >= earliest_start
-					&& latest_completion_times[j] <= latest_completion
-				})
-				.map(|j| {
-					(
-						j,
-						earliest_start_times[j],
-						latest_completion_times[j],
-					)
-				})
-				.collect_vec(),
-			window =? (earliest_start, latest_completion),
-			"Explain Edge Finding"
-		);
-		// collect at least latest_completion - earliest_start energy (including durations[task_no])
-		// from tasks bracketed in [earliest_start, latest_completion] and form a set O
-		// [start(t) >= latest_completion + 1] because
-		// [start(t) >= earliest_start] /\ forall (t' in O) [start(t') >= earliest_start] /\ forall (t' in O) [end(t') <= latest_completion]
-		let mut clause = Vec::new();
-		let (bv, _) = actions.get_int_lit_relaxed(
-			self.start_times[task_no],
-			IntLitMeaning::GreaterEq(earliest_start),
-		);
-		clause.push(bv);
-		let mut energy = latest_completion - earliest_start - self.durations[task_no];
-		for i in 0..self.start_times.len() {
-			if i != task_no
-				&& earliest_start_times[i] >= earliest_start
-				&& latest_completion_times[i] <= latest_completion
-			{
-				clause.push(actions.get_int_lower_bound_lit(self.start_times[i]));
-				let (bv, _) = actions.get_int_lit_relaxed(
-					self.start_times[i],
-					IntLitMeaning::Less(latest_completion - self.durations[i] + 1),
+
+		// Traverse all tasks ordered by latest completion time and check resource overload
+		for (i, lct_i) in tasks_sorted_by_lct.iter() {
+			let est_i = self.earliest_start_time(*i, actions);
+			self.ot_tree.add_task(*i, est_i, self.durations[*i]);
+			let ect = self.ot_tree.root().earliest_completion;
+			if ect > *lct_i {
+				let binding_task = self
+					.ot_tree
+					.binding_task(self.ot_tree.root().earliest_completion, 0);
+				let earliest_start = actions.get_int_lower_bound(self.start_times[binding_task]);
+				let expl = self.explain_overload_checking(lct_i + 1);
+				trace!(
+					time_window =? (earliest_start, lct_i),
+					"Resource overload"
 				);
-				clause.push(bv);
-				energy -= self.durations[i];
-				if energy < 0 {
-					break;
-				}
+				actions.set_int_lower_bound(
+					self.start_times[*i] + self.durations[*i],
+					ect,
+					expl,
+				)?;
 			}
 		}
-		clause
+		Ok(())
 	}
 
-	/// Create a new [`DisjunctiveStrict`] propagator and post it in the solver.
-	pub fn new_in<P>(
-		solver: &mut P,
-		start_times: Vec<IntView>,
-		durations: Vec<IntVal>,
-		edge_finding_enabled: bool,
-		not_last_enabled: bool,
-		detectable_precedence_enabled: bool,
-	) where
-		P: PropagatorInitActions + ?Sized,
-	{
-		let n = start_times.len();
-		let trailed_info = (0..n)
-			.map(|_| TaskInfo {
-				earliest_start: solver.new_trailed_int(0),
-				latest_completion: solver.new_trailed_int(0),
-			})
-			.collect();
-		let prop = solver.add_propagator(
-			Box::new(Self {
-				start_times: start_times.clone(),
-				durations,
-				ot_tree: OmegaThetaTree::new(n),
-				trailed_info,
-				edge_finding_enabled,
-				not_last_enabled,
-				detectable_precedence_enabled,
-				tasks_sorted_by_earliest_start: (0..n).collect_vec(),
-				tasks_sorted_by_latest_start: (0..n).collect_vec(),
-				tasks_sorted_by_earliest_completion: (0..n).collect_vec(),
-				tasks_sorted_by_latest_completion: (0..n).collect_vec(),
-			}),
-			PriorityLevel::Low,
-		);
-
-		for v in start_times {
-			solver.enqueue_on_int_change(prop, v, IntPropCond::Bounds);
+	/// Return the propagation rule from the data stored for explanation.
+	fn propagation_rule_from_data(&self, data: u64) -> DisjunctivePropagationRule {
+		match data >> 62 {
+			0 => DisjunctivePropagationRule::EdgeFinding,
+			1 => DisjunctivePropagationRule::NotLast,
+			2 => DisjunctivePropagationRule::Precedence,
+			_ => unreachable!("Invalid propagation rule in data"),
 		}
+	}
+
+	/// Return the task number from the data stored for explanation.
+	fn task_no_from_data(&self, data: u64) -> usize {
+		((data << 2) >> 2) as usize
 	}
 }
 
