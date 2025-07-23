@@ -295,6 +295,9 @@ pub fn disjunctive_strict(
 	DisjunctiveStrict {
 		start_times,
 		durations,
+		edge_finding_prop: None,
+		not_last_prop: None,
+		detectable_precedence_prop: None,
 	}
 }
 
