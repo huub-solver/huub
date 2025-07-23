@@ -1209,7 +1209,6 @@ impl OmegaThetaTree {
 		}
 	}
 
-	#[inline]
 	/// Calculate the index of the left child of a node `i`
 	fn left_child(i: usize) -> usize {
 		(i << 1) + 1
@@ -1234,14 +1233,12 @@ impl OmegaThetaTree {
 		}
 	}
 
-	#[inline]
 	/// Get the node index of a task with number `i` in the tree.
 	fn node_index(&self, i: usize) -> usize {
 		assert!(i < self.task_no.len());
 		self.leaves_start_idx + self.node_index_offset[i]
 	}
 
-	#[inline]
 	/// Calculate the index of the parent of a node with index `i`
 	fn parent(i: usize) -> usize {
 		debug_assert_ne!(i, 0);
@@ -1276,13 +1273,11 @@ impl OmegaThetaTree {
 		}
 	}
 
-	#[inline]
 	/// Calculate the index of the right child of a node `i`
 	fn right_child(i: usize) -> usize {
 		(i << 1) + 2
 	}
 
-	#[inline]
 	/// Return the root node of the tree.
 	fn root(&self) -> &OmegaThetaTreeNode {
 		&self.nodes[0]
