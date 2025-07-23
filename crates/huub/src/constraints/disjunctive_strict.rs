@@ -317,7 +317,7 @@ impl DisjunctiveStrictPropagator {
 				})
 				.collect_vec(),
 			window =? (earliest_start, latest_completion),
-			"Explain Edge Finding"
+			"explain edge finding"
 		);
 
 		// collect at least latest_completion - earliest_start energy (including durations[task_no])
@@ -375,7 +375,7 @@ impl DisjunctiveStrictPropagator {
 			task_no,
 			window =? (earliest_start, updated_lct_i),
 			nlset = ? nlset.iter().map(|&j| (j, self.durations[j], self.earliest_start_time(j, actions), self.latest_start_time(j, actions))).collect_vec(),
-			"Explain Not Last"
+			"explain not last"
 		);
 
 		assert_ne!(nlset.len(), 0);
@@ -414,7 +414,7 @@ impl DisjunctiveStrictPropagator {
 
 			trace!(
 				window =? (earliest_start, time_bound),
-				"Explain Resource Overload"
+				"explain resource overload"
 			);
 			// collect sufficient energy within the window [lb, time_bound)
 			for i in 0..self.tasks_sorted_by_earliest_start.len() {
@@ -465,7 +465,7 @@ impl DisjunctiveStrictPropagator {
 			task_no,
 			window =? (earliest_start, latest_start),
 			precedence_set = ?precedence_set,
-			"Explain Detectable Precedence"
+			"explain detectable precedence"
 		);
 
 		assert_ne!(precedence_set.len(), 0);
@@ -604,7 +604,7 @@ impl DisjunctiveStrictPropagator {
 				trace!(
 					successor = ect_task,
 					predecessor = front_task,
-					"Detected precedence",
+					"precedence detected",
 				);
 				lst_front_idx += 1;
 			}
@@ -632,7 +632,7 @@ impl DisjunctiveStrictPropagator {
 						})
 						.collect_vec(),
 					tasks_in_tree_ect,
-					"Detectable precedence propagate"
+					"propagate detected precedence"
 				);
 			}
 			// add task `ect_task` back to the tree
@@ -667,7 +667,7 @@ impl DisjunctiveStrictPropagator {
 				}
 			}
 		}
-		trace!(propagated, "Detectable precedence propagation completed");
+		trace!(propagated, "detectable precedence propagation completed");
 		Ok(propagated)
 	}
 
@@ -756,7 +756,7 @@ impl DisjunctiveStrictPropagator {
 						ect_in_tree,
 						task = blocked_task,
 						window =? (lb, ect_gray_in_tree - 1),
-						"Propagate Edge Finding"
+						"propagate edge finding"
 					);
 					let data = self.data_for_explanation(
 						blocked_task,
@@ -774,7 +774,7 @@ impl DisjunctiveStrictPropagator {
 			}
 			self.ot_tree.annotate_gray_task(lct_task);
 		}
-		trace!(propagated, "Edge Finding propagation completed");
+		trace!(propagated, "edge finding propagation completed");
 		Ok(propagated)
 	}
 
@@ -868,7 +868,7 @@ impl DisjunctiveStrictPropagator {
 						})
 						.collect_vec(),
 					tasks_in_tree_ect,
-					"Not Last propagate"
+					"propagate not last"
 				);
 			}
 			// add task `ect_task` back to the tree
@@ -889,7 +889,7 @@ impl DisjunctiveStrictPropagator {
 					trace!(
 						task = i,
 						window =? (lb, updated_lct[i]),
-						"Not Last propagation"
+						"not last propagation"
 					);
 					let _ = actions.set_trailed_int(self.trailed_info[i].earliest_start, lb);
 					let _ = actions
@@ -904,7 +904,7 @@ impl DisjunctiveStrictPropagator {
 				}
 			}
 		}
-		trace!(propagated, "Not Last propagation completed");
+		trace!(propagated, "not last propagation completed");
 		Ok(propagated)
 	}
 
