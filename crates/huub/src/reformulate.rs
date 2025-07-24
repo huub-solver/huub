@@ -37,7 +37,7 @@ use crate::{
 	helpers::linear_transform::LinearTransform,
 	solver::{
 		activation_list::IntPropCond,
-		engine::{Engine, PropRef},
+		engine::PropRef,
 		int_var::{EncodingType, IntVar, IntVarRef},
 		queue::PriorityLevel,
 		trail::TrailedInt,
@@ -251,7 +251,7 @@ impl<S: SimplificationActions> Constraint<S> for BoolFormula {
 impl ConstraintStore {
 	/// Map the constraint into propagators and clauses to be added to the given
 	/// solver, using the variable mapping provided.
-	pub(crate) fn to_solver<Oracle: PropagatingSolver<Engine>>(
+	pub(crate) fn to_solver<Oracle: PropagatingSolver>(
 		&self,
 		slv: &mut Solver<Oracle>,
 		map: &ReformulationMap,
@@ -511,7 +511,7 @@ impl From<Unsatisfiable> for ReformulationError {
 
 impl ReformulationMap {
 	/// Lookup the [`SolverView`] to which the given model [`ModelView`] maps.
-	pub fn get<Oracle: PropagatingSolver<Engine>>(
+	pub fn get<Oracle: PropagatingSolver>(
 		&self,
 		slv: &mut Solver<Oracle>,
 		index: &Decision,
@@ -598,7 +598,7 @@ impl ReformulationMapBuilder {
 	///
 	/// Note that this method will function recursively (toghether with
 	/// [`Self::get_or_create_bool`]) to resolve aliased variables.
-	pub(crate) fn get_or_create_bool<Oracle: PropagatingSolver<Engine>>(
+	pub(crate) fn get_or_create_bool<Oracle: PropagatingSolver>(
 		&mut self,
 		model: &Model,
 		slv: &mut Solver<Oracle>,
@@ -647,7 +647,7 @@ impl ReformulationMapBuilder {
 	///
 	/// Note that this method will function recursively (toghether with
 	/// [`Self::get_or_create_bool`]) to resolve aliased variables.
-	pub(crate) fn get_or_create_int<Oracle: PropagatingSolver<Engine>>(
+	pub(crate) fn get_or_create_int<Oracle: PropagatingSolver>(
 		&mut self,
 		model: &Model,
 		slv: &mut Solver<Oracle>,

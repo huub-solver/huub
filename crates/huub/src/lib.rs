@@ -68,7 +68,7 @@ use crate::{
 		IntDecisionIndex, IntDecisionInner, ReformulationError, ReformulationMap,
 		ReformulationMapBuilder,
 	},
-	solver::{engine::Engine, IntLitMeaning, Solver},
+	solver::{IntLitMeaning, Solver},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -505,7 +505,7 @@ impl From<BoolDecision> for BoolFormula {
 impl Branching {
 	/// Add a [`Brancher`] implementation to the solver that matches the branching
 	/// strategy of the [`Branching`].
-	pub(crate) fn to_solver<Oracle: PropagatingSolver<Engine>>(
+	pub(crate) fn to_solver<Oracle: PropagatingSolver>(
 		&self,
 		slv: &mut Solver<Oracle>,
 		map: &ReformulationMap,
@@ -1134,17 +1134,16 @@ impl Model {
 	/// to [`crate::SolverView`]. If an error occurs during the reformulation
 	/// process, or if it is found to be trivially unsatisfiable, then an error
 	/// will be returned.
-	pub fn to_solver<Oracle: PropagatingSolver<Engine>>(
+	pub fn to_solver<Oracle: PropagatingSolver>(
 		&mut self,
 		config: &InitConfig,
 	) -> Result<(Solver<Oracle>, ReformulationMap), ReformulationError>
 	where
-		Solver<Oracle>: for<'a> From<&'a Cnf>,
-		Oracle::Slv: 'static,
+		Solver<Oracle>: for<'a> From<&'a Cnf> + 'static,
 	{
 		// TODO: run SAT simplification
 		let mut slv = Solver::<Oracle>::from(&self.cnf);
-		let any_slv: &mut dyn Any = slv.oracle.solver_mut();
+		let any_slv: &mut dyn Any = &mut slv.oracle;
 		if let Some(r) = any_slv.downcast_mut::<Cadical>() {
 			// Set the solver options for preprocessing/inprocessing
 			r.set_option("condition", config.conditioning() as i32);

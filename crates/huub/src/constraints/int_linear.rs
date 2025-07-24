@@ -799,7 +799,7 @@ where
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
+	use pindakaas::Cnf;
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
@@ -816,7 +816,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_linear_ge_sat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
@@ -868,7 +868,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_linear_le_sat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
@@ -916,7 +916,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_linear_ne_sat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),

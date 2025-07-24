@@ -1384,7 +1384,7 @@ impl OmegaThetaTree {
 mod tests {
 	use expect_test::expect;
 	use flatzinc_serde::RangeList;
-	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
+	use pindakaas::Cnf;
 	use tracing_test::traced_test;
 
 	use crate::{
@@ -1399,7 +1399,7 @@ mod tests {
 		for (edge_finding, not_last, detectable_precedence) in
 			itertools::iproduct!([true, false], [true, false], [true, false])
 		{
-			let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+			let mut slv = Solver::from(&Cnf::default());
 			let a = IntVar::new_in(
 				&mut slv,
 				RangeList::from_iter([0..=4]),

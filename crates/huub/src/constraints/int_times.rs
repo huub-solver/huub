@@ -243,7 +243,7 @@ where
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
+	use pindakaas::Cnf;
 	use tracing_test::traced_test;
 
 	use crate::{
@@ -257,7 +257,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_int_times_sat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			(-2..=1).into(),

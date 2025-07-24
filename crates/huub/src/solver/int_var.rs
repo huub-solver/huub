@@ -16,10 +16,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
 	actions::TrailingActions,
-	solver::{
-		engine::Engine, trail::TrailedInt, BoolView, BoolViewInner, IntLitMeaning, IntView,
-		IntViewInner,
-	},
+	solver::{trail::TrailedInt, BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner},
 	IntSetVal, IntVal, LinearTransform, NonZeroIntVal, Solver,
 };
 
@@ -623,7 +620,7 @@ impl IntVar {
 	/// domain. The `order_encoding` and `direct_encoding` parameters determine
 	/// whether literals to reason about the integer variables are created eagerly
 	/// or lazily.
-	pub(crate) fn new_in<Oracle: PropagatingSolver<Engine>>(
+	pub(crate) fn new_in<Oracle: PropagatingSolver>(
 		slv: &mut Solver<Oracle>,
 		domain: IntSetVal,
 		order_encoding: EncodingType,
@@ -653,17 +650,18 @@ impl IntVar {
 			direct_encoding != EncodingType::Eager || order_encoding == EncodingType::Eager
 		);
 
-		let upper_bound = slv.engine_mut().state.trail.track_int(ub);
+		let mut engine = slv.engine.borrow_mut();
+		let upper_bound = engine.state.trail.track_int(ub);
 		let order_encoding = match order_encoding {
 			EncodingType::Eager => OrderStorage::Eager {
-				lower_bound: slv.engine_mut().state.trail.track_int(lb),
+				lower_bound: engine.state.trail.track_int(lb),
 				storage: slv.oracle.new_var_range(orig_domain_len - 1),
 			},
 			EncodingType::Lazy => OrderStorage::Lazy(LazyOrderStorage {
 				min_index: 0,
 				max_index: 0,
-				lb_index: slv.engine_mut().state.trail.track_int(-1),
-				ub_index: slv.engine_mut().state.trail.track_int(-1),
+				lb_index: engine.state.trail.track_int(-1),
+				ub_index: engine.state.trail.track_int(-1),
 				storage: Vec::default(),
 			}),
 		};
@@ -698,30 +696,25 @@ impl IntVar {
 		}
 
 		// Create the resulting integer variable
-		let iv = slv.engine_mut().state.int_vars.push(Self {
+		let iv = engine.state.int_vars.push(Self {
 			direct_encoding,
 			domain,
 			order_encoding,
 			upper_bound,
 		});
 		// Create propagator activation list
-		let r = slv
-			.engine_mut()
-			.state
-			.int_activation
-			.push(Default::default());
+		let r = engine.state.int_activation.push(Default::default());
 		debug_assert_eq!(iv, r);
 
 		// Setup the boolean to integer mapping
-		if let OrderStorage::Eager { storage, .. } = slv.engine().state.int_vars[iv].order_encoding
-		{
+		if let OrderStorage::Eager { storage, .. } = engine.state.int_vars[iv].order_encoding {
 			let mut vars = storage;
-			if let DirectStorage::Eager(vars2) = &slv.engine().state.int_vars[iv].direct_encoding {
+			if let DirectStorage::Eager(vars2) = &engine.state.int_vars[iv].direct_encoding {
 				debug_assert_eq!(Into::<i32>::into(vars.end()) + 1, vars2.start().into());
 				vars = VarRange::new(vars.start(), vars2.end());
 			}
-			slv.engine_mut().state.bool_to_int.insert_eager(vars, iv);
-			slv.engine_mut()
+			engine.state.bool_to_int.insert_eager(vars, iv);
+			engine
 				.state
 				.trail
 				.grow_to_boolvar(vars.clone().next_back().unwrap());
@@ -1196,7 +1189,7 @@ index_vec::define_index_type! {
 
 #[cfg(test)]
 mod tests {
-	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
+	use pindakaas::Cnf;
 	use rangelist::RangeList;
 
 	use crate::{
@@ -1216,7 +1209,7 @@ mod tests {
 				unreachable!()
 			}
 		};
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv: Solver = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from(1..=4),
@@ -1226,7 +1219,7 @@ mod tests {
 		let IntView(IntViewInner::VarRef(a)) = a else {
 			unreachable!()
 		};
-		let a = &mut slv.engine_mut().state.int_vars[a];
+		let a = &mut slv.engine.borrow_mut().state.int_vars[a];
 		let lit = a.get_bool_lit(IntLitMeaning::Less(2)).unwrap();
 		assert_eq!(get_lit(lit), 1);
 		let lit = a.get_bool_lit(IntLitMeaning::GreaterEq(2)).unwrap();
@@ -1246,7 +1239,7 @@ mod tests {
 		let lit = a.get_bool_lit(IntLitMeaning::Eq(4)).unwrap();
 		assert_eq!(get_lit(lit), -3);
 
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv: Solver = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=3, 8..=10]),
@@ -1256,7 +1249,7 @@ mod tests {
 		let IntView(IntViewInner::VarRef(a)) = a else {
 			unreachable!()
 		};
-		let a = &mut slv.engine_mut().state.int_vars[a];
+		let a = &mut slv.engine.borrow_mut().state.int_vars[a];
 		let lit = a.get_bool_lit(IntLitMeaning::Less(2)).unwrap();
 		assert_eq!(get_lit(lit), 1);
 		let lit = a.get_bool_lit(IntLitMeaning::Less(3)).unwrap();

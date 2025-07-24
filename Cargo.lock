@@ -171,7 +171,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea51dd8add7eba774cc24b4a98324252ac3ec092ccb5f07e52bbe1cb72a6d373"
 dependencies = [
  "divan-macros",
- "itertools 0.14.0",
+ "itertools",
  "proc-macro-crate",
  "proc-macro2",
  "quote",
@@ -217,41 +217,6 @@ checksum = "46f93780a459b7d656ef7f071fe699c4d3d2cb201c4b24d085b6ddc505276e73"
 dependencies = [
  "nix 0.30.1",
  "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "darling"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a79c4acb1fd5fa3d9304be4c76e031c54d2e92d172a393e24b19a14fe8532fe9"
-dependencies = [
- "darling_core",
- "darling_macro",
-]
-
-[[package]]
-name = "darling_core"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74875de90daf30eb59609910b84d4d368103aaec4c924824c6799b28f77d6a1d"
-dependencies = [
- "fnv",
- "ident_case",
- "proc-macro2",
- "quote",
- "strsim",
- "syn",
-]
-
-[[package]]
-name = "darling_macro"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e79f8e61677d5df9167cd85265f8e5f64b215cdea3fb55eebc3e622e44c7a146"
-dependencies = [
- "darling_core",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -325,12 +290,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fnv"
-version = "1.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
-
-[[package]]
 name = "getrandom"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -368,7 +327,7 @@ dependencies = [
  "expect-test",
  "flatzinc-serde",
  "index_vec",
- "itertools 0.14.0",
+ "itertools",
  "pindakaas",
  "rangelist",
  "rustc-hash",
@@ -397,12 +356,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ident_case"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
-
-[[package]]
 name = "index_vec"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -423,15 +376,6 @@ name = "iset"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0a096b38f6994f43c7d21a2e9ef90eb188d2f9fbba13202a3c9d23f7b550738"
-
-[[package]]
-name = "itertools"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
-dependencies = [
- "either",
-]
 
 [[package]]
 name = "itertools"
@@ -693,31 +637,20 @@ checksum = "3b3cff922bd51709b605d9ead9aa71031d81447142d828eb4a6eba76fe619f9b"
 [[package]]
 name = "pindakaas"
 version = "0.1.0"
-source = "git+https://github.com/pindakaashq/pindakaas.git#ec27d00f49fd70f956c34ab698fce0c90cac74f2"
+source = "git+https://github.com/pindakaashq/pindakaas.git#9c94add6b272cd8ac98e406c714228523ce259ff"
 dependencies = [
  "iset",
- "itertools 0.13.0",
+ "itertools",
  "pindakaas-cadical",
- "pindakaas-derive",
  "rustc-hash",
 ]
 
 [[package]]
 name = "pindakaas-cadical"
 version = "0.1.0"
-source = "git+https://github.com/pindakaashq/pindakaas.git#ec27d00f49fd70f956c34ab698fce0c90cac74f2"
+source = "git+https://github.com/pindakaashq/pindakaas.git#9c94add6b272cd8ac98e406c714228523ce259ff"
 dependencies = [
  "cc",
-]
-
-[[package]]
-name = "pindakaas-derive"
-version = "0.1.0"
-source = "git+https://github.com/pindakaashq/pindakaas.git#ec27d00f49fd70f956c34ab698fce0c90cac74f2"
-dependencies = [
- "darling",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -921,12 +854,6 @@ dependencies = [
  "approx",
  "num-traits",
 ]
-
-[[package]]
-name = "strsim"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "syn"

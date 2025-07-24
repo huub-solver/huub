@@ -195,7 +195,7 @@ impl DecisionActions for SolvingContext<'_> {
 		let var = &mut self.state.int_vars[iv];
 		let new_var = |def: LazyLitDef| {
 			// Create new variable
-			let v = self.slv.new_var();
+			let v = self.slv.new_observed_var();
 			self.state.trail.grow_to_boolvar(v);
 			trace_new_lit!(iv, def, v);
 			self.state

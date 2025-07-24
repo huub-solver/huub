@@ -24,7 +24,8 @@ use delegate::delegate;
 use index_vec::IndexVec;
 use pindakaas::{
 	solver::propagation::{
-		ClausePersistence, Propagator as PropagatorExtension, SearchDecision, SolvingActions,
+		ClausePersistence, Propagator as PropagatorExtension,
+		PropagatorDefinition as PropagatorExtensionDefinition, SearchDecision, SolvingActions,
 	},
 	Lit as RawLit, Var as RawVar,
 };
@@ -64,7 +65,7 @@ pub(crate) struct AdvisorDef {
 
 #[derive(Debug, Default, Clone)]
 /// A propagation engine implementing the [`Propagator`] trait.
-pub struct Engine {
+pub(crate) struct Engine {
 	/// Storage of the propagators.
 	pub(crate) propagators: IndexVec<PropRef, BoxedPropagator>,
 	/// List of propagators to advise of backtracking
@@ -148,6 +149,44 @@ pub struct State {
 	/// List of integer variables that have been notified as fixed, but should be
 	/// checked that the bounds match before propagation.
 	pub(crate) check_int_fixed: Vec<(IntVarRef, IntVal)>,
+}
+
+impl Engine {
+	#[cfg(debug_assertions)]
+	/// (DEBUG ONLY) Check that the reason of a propagated literal contains only
+	/// known true literals
+	fn debug_check_reason(&mut self, lit: RawLit) {
+		if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
+			// Reason is in the form (a /\ b /\ ...), which then forms the
+			// implication (a /\ b /\ ...) -> lit
+			let clause: Clause = reason.explain(&mut self.propagators, &mut self.state, Some(lit));
+			// This is converted into a clause (¬a \/ ¬b \/ ... \/ lit)
+			for &l in &clause {
+				if l == lit {
+					continue;
+				}
+				// Get the value of the original reason lit by negating again: ¬¬a
+				// gives a
+				let val = self.state.trail.get_sat_value(!l);
+				if !val.unwrap_or(false) {
+					tracing::error!(lit_prop = i32::from(lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
+				}
+				debug_assert!(
+					val.unwrap_or(false),
+					"Literal {} in Reason for {} is {:?}, but should be known true",
+					!l,
+					lit,
+					val
+				);
+			}
+		} else {
+			debug_assert_eq!(
+				self.state.decision_level(),
+				0,
+				"Literal {lit} propagated without reason at non-zero decision level",
+			);
+		}
+	}
 }
 
 impl PropagatorExtension for Engine {
@@ -556,48 +595,12 @@ impl PropagatorExtension for Engine {
 			None
 		}
 	}
-
-	fn reason_persistence(&self) -> ClausePersistence {
-		ClausePersistence::Forgettable
-	}
 }
 
-impl Engine {
-	#[cfg(debug_assertions)]
-	/// (DEBUG ONLY) Check that the reason of a propagated literal contains only
-	/// known true literals
-	fn debug_check_reason(&mut self, lit: RawLit) {
-		if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
-			// Reason is in the form (a /\ b /\ ...), which then forms the
-			// implication (a /\ b /\ ...) -> lit
-			let clause: Clause = reason.explain(&mut self.propagators, &mut self.state, Some(lit));
-			// This is converted into a clause (¬a \/ ¬b \/ ... \/ lit)
-			for &l in &clause {
-				if l == lit {
-					continue;
-				}
-				// Get the value of the original reason lit by negating again: ¬¬a
-				// gives a
-				let val = self.state.trail.get_sat_value(!l);
-				if !val.unwrap_or(false) {
-					tracing::error!(lit_prop = i32::from(lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
-				}
-				debug_assert!(
-					val.unwrap_or(false),
-					"Literal {} in Reason for {} is {:?}, but should be known true",
-					!l,
-					lit,
-					val
-				);
-			}
-		} else {
-			debug_assert_eq!(
-				self.state.decision_level(),
-				0,
-				"Literal {lit} propagated without reason at non-zero decision level",
-			);
-		}
-	}
+impl PropagatorExtensionDefinition for Engine {
+	const CHECK_ONLY: bool = false;
+	const PERSISTENT_ASSIGNMENTS: bool = false;
+	const REASON_PERSISTENCE: ClausePersistence = ClausePersistence::Forgettable;
 }
 
 impl State {
