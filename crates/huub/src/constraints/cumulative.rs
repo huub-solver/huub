@@ -1,8 +1,8 @@
 //! Structures and algorithms for the `cumulative` constraint.
 //! This constraint ensures that the sum of resource usages of all tasks
 //! running at any time does not exceed the resource capacity.
-//! It uses a time-table propagation approach to efficiently manage the scheduling of tasks.
-//!
+//! It uses a time-table propagation approach to efficiently manage the
+//! scheduling of tasks.
 
 use itertools::Itertools;
 use tracing::trace;
@@ -58,7 +58,8 @@ pub struct CumulativeTimeTable {
 	// Time Table Profile
 	/// Bounds of the time intervals where tasks are active.
 	bounds: Vec<i64>,
-	/// Heights of the time intervals, representing the total resource usage at that time.
+	/// Heights of the time intervals, representing the total resource usage at
+	/// that time.
 	heights: Vec<IntVal>,
 }
 
@@ -176,8 +177,10 @@ impl CumulativeTimeTable {
 			+ actions.get_int_upper_bound(self.durations[i])
 	}
 
-	/// Build the time-table profile as a set of (time, height) rectangles to represent the compulsory parts of tasks.
-	/// The result is a tuple (bounds, heights), where bounds[i]..bounds[i+1] is the interval with height heights[i].
+	/// Build the time-table profile as a set of (time, height) rectangles to
+	/// represent the compulsory parts of tasks. The result is a tuple (bounds,
+	/// heights), where bounds[i]..bounds[i+1] is the interval with height
+	/// heights[i].
 	fn build_profile<I: InspectionActions>(&mut self, actions: &mut I) {
 		self.bounds.clear();
 		self.heights.clear();
@@ -231,7 +234,8 @@ impl CumulativeTimeTable {
 		}
 	}
 
-	/// Forward sweep: for a given task, check if the profile forces its start time to be increased.
+	/// Forward sweep: for a given task, check if the profile forces its start
+	/// time to be increased.
 	fn sweep_forward(
 		&self,
 		task: usize,
@@ -261,7 +265,8 @@ impl CumulativeTimeTable {
 			if b_start >= lst.min(updated_est + dur_lb) {
 				break;
 			}
-			// if `est` can be push forward (to ≥ `b_end`) and the resource usage is over the capacity
+			// if `est` can be push forward (to ≥ `b_end`) and the resource usage is over
+			// the capacity
 			if updated_est < b_end && usage_lb + height > max_capacity {
 				if lst < updated_est + dur_lb && lst <= b_start && b_end <= updated_est + dur_lb {
 					// Skip if the task has a compulsory part in this
@@ -310,7 +315,8 @@ impl CumulativeTimeTable {
 		Ok(())
 	}
 
-	/// Backward sweep: for a given task, check if the profile forces its latest start time to be decreased.
+	/// Backward sweep: for a given task, check if the profile forces its latest
+	/// start time to be decreased.
 	fn sweep_backward(
 		&self,
 		task: usize,
@@ -342,7 +348,8 @@ impl CumulativeTimeTable {
 			if b_end <= ect.max(updated_lct - dur_lb) {
 				break;
 			}
-			// if `lct` can be push backward (to ≤ `b_end`) and the resource usage is over the capacity
+			// if `lct` can be push backward (to ≤ `b_end`) and the resource usage is over
+			// the capacity
 			if updated_lct > b_start && usage_lb + height > max_capacity {
 				if updated_lct - dur_lb < ect && updated_lct - dur_lb <= b_start && ect >= b_end {
 					// Skip if the task has a compulsory part in this interval
@@ -392,7 +399,8 @@ impl CumulativeTimeTable {
 		Ok(())
 	}
 
-	/// Propagate usage: for a given task, check if the profile limits its resource usage at its compulsory part.
+	/// Propagate usage: for a given task, check if the profile limits its
+	/// resource usage at its compulsory part.
 	fn limit_usage(
 		&self,
 		task: usize,
@@ -464,7 +472,8 @@ impl CumulativeTimeTable {
 		Ok(())
 	}
 
-	/// Explain why the resource usage is at least `to_cover` at time `timepoint`.
+	/// Explain why the resource usage is at least `to_cover` at time
+	/// `timepoint`.
 	fn collect_compulsory_tasks<A: PropagationActions>(
 		&self,
 		to_cover: i64,
@@ -477,7 +486,8 @@ impl CumulativeTimeTable {
 			return Vec::new();
 		}
 
-		// Collect a sufficient set of tasks with compulsory parts at `timepoint` that cover `to_cover` energy
+		// Collect a sufficient set of tasks with compulsory parts at `timepoint` that
+		// cover `to_cover` energy
 		let mut relevant_tasks = Vec::new();
 		let mut collected_energy = 0;
 		for i in 0..self.start_times.len() {
@@ -525,7 +535,8 @@ impl CumulativeTimeTable {
 		minimal_relevant_tasks
 	}
 
-	/// Explain why the current set of tasks overloads the resource at time `timepoint`.
+	/// Explain why the current set of tasks overloads the resource at time
+	/// `timepoint`.
 	fn explain_overload_timepoint<A: PropagationActions>(
 		&self,
 		to_cover: i64,
@@ -547,7 +558,8 @@ impl CumulativeTimeTable {
 
 			let mut conflict = Conjunction::new();
 
-			// Explanation: relevant tasks have the required compulsory part at time `timepoint`
+			// Explanation: relevant tasks have the required compulsory part at time
+			// `timepoint`
 			relevant_tasks.iter().for_each(|&i| {
 				conflict.push(
 					actions.get_int_lit(self.start_times[i], IntLitMeaning::Less(timepoint + 1)),
@@ -560,7 +572,8 @@ impl CumulativeTimeTable {
 				conflict.push(actions.get_int_lower_bound_lit(self.usages[i]));
 			});
 
-			// Explanation: the resource usage at `timepoint` exceeds the upper bound of capacity
+			// Explanation: the resource usage at `timepoint` exceeds the upper bound of
+			// capacity
 			conflict.push(actions.get_int_upper_bound_lit(self.capacity));
 
 			conflict
@@ -596,7 +609,8 @@ impl CumulativeTimeTable {
 			// Construct the reason for the propagation
 			let mut reason = Conjunction::new();
 
-			// Explanation: (1) relevant tasks have the required compulsory part at time `timepoint`
+			// Explanation: (1) relevant tasks have the required compulsory part at time
+			// `timepoint`
 			relevant_tasks.iter().for_each(|&i| {
 				reason.push(
 					actions.get_int_lit(self.start_times[i], IntLitMeaning::Less(timepoint + 1)),
@@ -709,7 +723,8 @@ where
 			// Check if the resource usage exceeds capacity at any point
 			self.check_overload(actions)?;
 
-			// Sweeping time: update the earliest start times and the latest completion times
+			// Sweeping time: update the earliest start times and the latest completion
+			// times
 			for i in 0..self.start_times.len() {
 				let (lb, ub) = actions.get_int_bounds(self.start_times[i]);
 				if lb < ub {
