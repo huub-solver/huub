@@ -20,7 +20,7 @@ Huub can be used either as a [MiniZinc](https://www.minizinc.org/) solver or as 
 
 ### Installing Huub as a MiniZinc solver
 
-1. Download the latest release of Huub from the [releases page](https://github.com/Dekker1/huub/releases) and download the `huub` archive that matches your system.
+1. Download the latest release of Huub from the [releases page](https://github.com/huub-solver/huub/releases) and download the `huub` archive that matches your system.
 2. Extract (and install) the downloaded archive to a sensible location on your system.
 3. Add the `share/solvers` directory from the extracted archive to the [`MZN_SOLVER_PATH`](https://docs.minizinc.dev/en/stable/fzn-spec.html#solver-configuration-files) environment variable.
 4. `Huub` should now show up in the list of solvers when running `minizinc --solvers` and in the MiniZinc IDE.
