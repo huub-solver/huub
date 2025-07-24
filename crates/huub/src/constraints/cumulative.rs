@@ -737,29 +737,28 @@ where
 mod tests {
 	use expect_test::expect;
 	use flatzinc_serde::RangeList;
-	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
+	use pindakaas::Cnf;
 	use tracing_test::traced_test;
 
 	use crate::{
 		constraints::cumulative::CumulativeTimeTable,
 		solver::{
-			engine::Engine,
 			int_var::{EncodingType, IntVar},
 			IntView,
 		},
 		Solver,
 	};
 
-	fn to_int_var(slv: &mut Solver<PropagatingCadical<Engine>>, range: RangeList<i64>) -> IntView {
+	fn to_int_var(slv: &mut Solver, range: RangeList<i64>) -> IntView {
 		IntVar::new_in(slv, range, EncodingType::Eager, EncodingType::Lazy)
 	}
 
-	fn const_to_int_var(slv: &mut Solver<PropagatingCadical<Engine>>, value: i64) -> IntView {
+	fn const_to_int_var(slv: &mut Solver, value: i64) -> IntView {
 		to_int_var(slv, RangeList::from_iter([value..=value]))
 	}
 
 	fn create_task(
-		slv: &mut Solver<PropagatingCadical<Engine>>,
+		slv: &mut Solver,
 		start_time: RangeList<i64>,
 		duration: RangeList<i64>,
 		usage: RangeList<i64>,
@@ -773,7 +772,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_val_sat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = to_int_var(&mut slv, RangeList::from_iter([0..=4]));
 		let b = to_int_var(&mut slv, RangeList::from_iter([0..=4]));
 		let c = to_int_var(&mut slv, RangeList::from_iter([0..=4]));
@@ -826,7 +825,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_val_unsat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = to_int_var(&mut slv, RangeList::from_iter([0..=3]));
 		let b = to_int_var(&mut slv, RangeList::from_iter([0..=3]));
 		let c = to_int_var(&mut slv, RangeList::from_iter([0..=3]));
@@ -866,7 +865,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_dur_sat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
 			RangeList::from_iter([0..=2]),
@@ -924,7 +923,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_dur_unsat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
 			RangeList::from_iter([0..=2]),
@@ -961,7 +960,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_usage_sat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
 			RangeList::from_iter([0..=2]),
@@ -1007,7 +1006,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_usage_unsat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
 			RangeList::from_iter([0..=2]),
