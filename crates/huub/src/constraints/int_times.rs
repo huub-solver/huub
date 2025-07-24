@@ -156,7 +156,8 @@ where
 		let pr_lb_lit = actions.get_int_lower_bound_lit(self.product);
 		let pr_ub_lit = actions.get_int_upper_bound_lit(self.product);
 
-		// TODO: Filter possibilities based on whether variables can be both positive and negative.
+		// TODO: Filter possibilities based on whether variables can be both positive
+		// and negative.
 
 		// Calculate possible bounds for the product
 		let bounds = [f1_lb * f2_lb, f1_lb * f2_ub, f1_ub * f2_lb, f1_ub * f2_ub];

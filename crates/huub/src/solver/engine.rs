@@ -110,7 +110,8 @@ pub struct State {
 	/// Mapping from boolean variables to integer variables
 	pub(crate) bool_to_int: BoolToIntMap,
 	/// Trailed Storage
-	/// Includes lower and upper bounds for integer variables and Boolean variable assignments
+	/// Includes lower and upper bounds for integer variables and Boolean
+	/// variable assignments
 	pub(crate) trail: Trail,
 	/// Literals to be propagated by the oracle
 	pub(crate) propagation_queue: VecDeque<RawLit>,
@@ -121,9 +122,9 @@ pub struct State {
 	/// Whether the solver is in a failure state.
 	///
 	/// Triggered when a conflict is detected during propagation, the solver
-	/// should backtrack. Debug assertions will be triggered if other actions are
-	/// taken instead. Some mechanisms, such as propagator queueing, might be
-	/// disabled to optimize the execution of the solver.
+	/// should backtrack. Debug assertions will be triggered if other actions
+	/// are taken instead. Some mechanisms, such as propagator queueing, might
+	/// be disabled to optimize the execution of the solver.
 	pub(crate) failed: bool,
 
 	// ---- Non-Trailed Infrastructure ----
@@ -146,8 +147,8 @@ pub struct State {
 
 	// ---- Debugging Helpers ----
 	#[cfg(debug_assertions)]
-	/// List of integer variables that have been notified as fixed, but should be
-	/// checked that the bounds match before propagation.
+	/// List of integer variables that have been notified as fixed, but should
+	/// be checked that the bounds match before propagation.
 	pub(crate) check_int_fixed: Vec<(IntVarRef, IntVal)>,
 }
 
@@ -609,14 +610,14 @@ impl State {
 		self.trail.decision_level()
 	}
 
-	/// Internal method called to process the backtracking to an earlier decision
-	/// level.
+	/// Internal method called to process the backtracking to an earlier
+	/// decision level.
 	///
 	/// The generic artugment `ARTIFICIAL` is used to signal when the solver is
 	/// backtracking from an artificial decision level. An example of the use of
-	/// artificial decision levels is found in the [`Engine::check_model`] method,
-	/// where it is used to artificially fix any integer variables using lazy
-	/// encodings.
+	/// artificial decision levels is found in the [`Engine::check_model`]
+	/// method, where it is used to artificially fix any integer variables
+	/// using lazy encodings.
 	fn notify_backtrack<const ARTIFICIAL: bool>(&mut self, level: usize, restart: bool) {
 		debug_assert!(!ARTIFICIAL || level as u32 == self.trail.decision_level() - 1);
 		debug_assert!(!ARTIFICIAL || !restart);
@@ -697,7 +698,8 @@ impl State {
 	pub(crate) fn register_reason(&mut self, lit: RawLit, built_reason: Result<Reason, bool>) {
 		match built_reason {
 			Ok(reason) => {
-				// Insert new reason, possibly overwriting old one (from previous search attempt)
+				// Insert new reason, possibly overwriting old one (from previous search
+				// attempt)
 				let _ = self.reason_map.insert(lit, reason);
 			}
 			Err(true) => {
@@ -711,13 +713,14 @@ impl State {
 	/// Set whether the solver should toggle between VSIDS and a user defined
 	/// search strategy after every restart.
 	///
-	/// Note that this setting is ignored if the solver is set to use VSIDS only.
+	/// Note that this setting is ignored if the solver is set to use VSIDS
+	/// only.
 	pub(crate) fn set_toggle_vsids(&mut self, enabled: bool) {
 		self.config.toggle_vsids = enabled;
 	}
 
-	/// Set the number of conflicts after which the solver should switch to using
-	/// VSIDS to make search decisions.
+	/// Set the number of conflicts after which the solver should switch to
+	/// using VSIDS to make search decisions.
 	pub(crate) fn set_vsids_after_conflict(&mut self, conflicts: Option<u32>) {
 		self.config.vsids_after_conflict = conflicts;
 	}
@@ -727,8 +730,8 @@ impl State {
 		self.config.vsids_after_restart = enable;
 	}
 
-	/// Set wether the solver should make all search decisions based on the VSIDS
-	/// only.
+	/// Set wether the solver should make all search decisions based on the
+	/// VSIDS only.
 	pub(crate) fn set_vsids_only(&mut self, enable: bool) {
 		self.config.vsids_only = enable;
 		self.vsids = enable;
@@ -853,7 +856,8 @@ impl ExplanationActions for State {
 			}
 		};
 
-		// Transform the meaning back to fit the original view if it was linearly transformed
+		// Transform the meaning back to fit the original view if it was linearly
+		// transformed
 		let meaning = if let IntViewInner::Linear { transformer, .. }
 		| IntViewInner::Bool { transformer, .. } = var.0
 		{

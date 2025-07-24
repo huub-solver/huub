@@ -185,8 +185,9 @@ where
 {
 	#[tracing::instrument(name = "array_int_element", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		// ensure bounds of result and self.vars[self.index] are consistent when self.index is fixed
-		// only trigger when self.index is fixed and (1) y is updated or (2) self.vars[self.index] is updated
+		// ensure bounds of result and self.vars[self.index] are consistent when
+		// self.index is fixed only trigger when self.index is fixed and (1) y is
+		// updated or (2) self.vars[self.index] is updated
 		if let Some(fixed_index) = actions.get_int_val(self.index) {
 			let index_val_lit = actions.get_int_val_lit(self.index).unwrap();
 			let fixed_var = self.vars[fixed_index as usize];
@@ -264,27 +265,35 @@ where
 				})?;
 			}
 
-			// update min_support if i is in the domain of self.index and the lower bound of v is less than the current min
+			// update min_support if i is in the domain of self.index and the lower bound of
+			// v is less than the current min
 			if need_min_support && v_lb < new_min {
 				new_min_support = i as IntVal;
 				new_min = v_lb;
-				need_min_support = new_min > result_lb; // stop finding min_support if new_min ≤ y_lb
+				need_min_support = new_min > result_lb; // stop finding min_support if
+				                            // new_min ≤ y_lb
 			}
 
-			// update max_support if i is in the domain of self.index and the upper bound of v is greater than the current max
+			// update max_support if i is in the domain of self.index and the upper bound of
+			// v is greater than the current max
 			if need_max_support && v_ub > new_max {
 				new_max_support = i as IntVal;
 				new_max = v_ub;
-				need_max_support = new_max < result_ub; // stop finding max_support if new_max ≥ y_ub
+				need_max_support = new_max < result_ub; // stop finding max_support if
+				                            // new_max ≥ y_ub
 			}
 		}
 
 		let _ = actions.set_trailed_int(self.min_support, new_min_support);
 		let _ = actions.set_trailed_int(self.max_support, new_max_support);
 
-		// propagate the lower bound of the selected variable y if min_support is not valid anymore
-		// result.lower_bound >= min(i in domain(x))(self.vars[i].lower_bound)
-		// only trigger when self.vars[min_support] is changed or self.vars[min_support] is out of domain
+		// propagate the lower bound of the selected variable y if min_support is not
+		// valid anymore:
+		//
+		//   result.lower_bound >= min(i in domain(x))(self.vars[i].lower_bound)
+		//
+		// only trigger when self.vars[min_support] is changed or self.vars[min_support]
+		// is out of domain
 		if new_min > result_lb {
 			actions.set_int_lower_bound(self.result, new_min, |a: &mut P| {
 				self.vars
@@ -301,9 +310,13 @@ where
 			})?;
 		}
 
-		// propagate the upper bound of the selected variable y if max_support is not valid anymore
-		// result.upper_bound <= max(i in domain(x))(self.vars[i].upper_bound)
-		// only trigger when self.vars[max_support] is changed or self.vars[max_support] is out of domain
+		// propagate the upper bound of the selected variable y if max_support is not
+		// valid anymore:
+		//
+		//   result.upper_bound <= max(i in domain(x))(self.vars[i].upper_bound)
+		//
+		// only trigger when self.vars[max_support] is changed or self.vars[max_support]
+		// is out of domain
 		if new_max < result_ub {
 			actions.set_int_upper_bound(self.result, new_max, |a: &mut P| {
 				self.vars

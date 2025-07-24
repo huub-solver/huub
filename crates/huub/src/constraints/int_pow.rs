@@ -201,8 +201,8 @@ impl IntPowBounds {
 		Ok(())
 	}
 
-	/// Filter the bounds of the exponent based on the bounds of the base and the
-	/// result.
+	/// Filter the bounds of the exponent based on the bounds of the base and
+	/// the result.
 	fn propagate_exponent<P: PropagationActions>(
 		&mut self,
 		actions: &mut P,
@@ -211,7 +211,8 @@ impl IntPowBounds {
 		let (res_lb, res_ub) = actions.get_int_bounds(self.result);
 
 		if base_lb <= 1 || res_lb <= 1 {
-			// TODO: It seems there should be propagation possible, but log2() certainly won't work.
+			// TODO: It seems there should be propagation possible, but log2() certainly
+			// won't work.
 			return Ok(());
 		}
 

@@ -51,11 +51,12 @@ use crate::{
 
 /// Trait implemented by the object given to the callback on detecting failure
 pub trait AssumptionChecker {
-	/// Check if the given assumption literal was used to prove the unsatisfiability
-	/// of the formula under the assumptions used for the last SAT search.
+	/// Check if the given assumption literal was used to prove the
+	/// unsatisfiability of the formula under the assumptions used for the last
+	/// SAT search.
 	///
-	/// Note that for literals 'bv' which are not assumption literals, the behavior
-	/// of is not specified.
+	/// Note that for literals 'bv' which are not assumption literals, the
+	/// behavior of is not specified.
 	fn fail(&self, bv: BoolView) -> bool;
 }
 
@@ -136,8 +137,8 @@ pub(crate) enum IntViewInner {
 	Bool {
 		/// Linear transformation on the integer value of the Boolean literal.
 		transformer: LinearTransform,
-		/// The Boolean literal that is being treated as an integer (`false` -> `0`
-		/// and `true` -> `1`).
+		/// The Boolean literal that is being treated as an integer (`false` ->
+		/// `0` and `true` -> `1`).
 		lit: RawLit,
 	},
 }
@@ -192,19 +193,24 @@ pub struct Solver<Oracle = Cadical> {
 /// Structure holding the options using to configure the solver during its
 /// initialization.
 pub(crate) struct SolverConfiguration {
-	/// Switch between the activity-based search heuristic and the user-specific search heuristic after each restart.
+	/// Switch between the activity-based search heuristic and the user-specific
+	/// search heuristic after each restart.
 	///
 	/// This option is ignored if [`vsids_only`] is set to `true`.
 	toggle_vsids: bool,
-	/// Switch to the activity-based search heuristic after the given number of conflicts.
+	/// Switch to the activity-based search heuristic after the given number of
+	/// conflicts.
 	///
-	/// This option is ignored if [`toggle_vsids`] or [`vsids_only`] is set to `true`.
+	/// This option is ignored if [`toggle_vsids`] or [`vsids_only`] is set to
+	/// `true`.
 	vsids_after_conflict: Option<u32>,
 	/// Switch to the activity-based search heuristic after restart.
 	///
-	/// This option is ignored if [`toggle_vsids`] or [`vsids_only`] is set to `true`.
+	/// This option is ignored if [`toggle_vsids`] or [`vsids_only`] is set to
+	/// `true`.
 	vsids_after_restart: bool,
-	/// Only use the activity-based search heuristic provided by the SAT solver. Ignore the user-specific search heuristic.
+	/// Only use the activity-based search heuristic provided by the SAT solver.
+	/// Ignore the user-specific search heuristic.
 	vsids_only: bool,
 }
 
@@ -256,7 +262,8 @@ impl From<BoolView> for BoolVal {
 }
 
 impl BoolView {
-	/// Return an integers that can used to identify the literal, if there is one.
+	/// Return an integers that can used to identify the literal, if there is
+	/// one.
 	pub fn reverse_map_info(&self) -> Option<NonZeroI32> {
 		match self.0 {
 			BoolViewInner::Lit(v) => Some(v.into()),
@@ -325,11 +332,11 @@ impl InitStatistics {
 }
 
 impl IntLitMeaning {
-	/// Returns the clauses that can be used to define the given literal according
-	/// to the meaning `self`.
+	/// Returns the clauses that can be used to define the given literal
+	/// according to the meaning `self`.
 	///
-	/// Note this method is only intended to be used to define positive literals,
-	/// and it is thus assumed to be unreachable to be called on
+	/// Note this method is only intended to be used to define positive
+	/// literals, and it is thus assumed to be unreachable to be called on
 	/// [`LitMeaning::NotEq`] or [`LitMeaning::GreaterEq`].
 	pub(crate) fn defining_clauses(
 		&self,
@@ -387,8 +394,8 @@ impl IntView {
 			_ => (None, true),
 		}
 	}
-	/// Return a list of integers that can used to identify the literals that are
-	/// associated to an integer view, and the meaning of those literals.
+	/// Return a list of integers that can used to identify the literals that
+	/// are associated to an integer view, and the meaning of those literals.
 	pub fn lit_reverse_map_info<Oracle: PropagatingSolver>(
 		&self,
 		slv: &Solver<Oracle>,
@@ -543,7 +550,8 @@ impl SearchStatistics {
 	pub fn conflicts(&self) -> u64 {
 		self.conflicts
 	}
-	/// Return the number of search decisions that was left to the oracle solver.
+	/// Return the number of search decisions that was left to the oracle
+	/// solver.
 	pub fn oracle_decisions(&self) -> u64 {
 		self.oracle_decisions
 	}
@@ -551,12 +559,13 @@ impl SearchStatistics {
 	pub fn peak_depth(&self) -> u32 {
 		self.peak_depth
 	}
-	/// Returns the number of propagations performed by the constraint programming
-	/// engine during the search.
+	/// Returns the number of propagations performed by the constraint
+	/// programming engine during the search.
 	pub fn cp_propagations(&self) -> u64 {
 		self.propagations
 	}
-	/// Returns the number of times the search was restarted by the oracle solver.
+	/// Returns the number of times the search was restarted by the oracle
+	/// solver.
 	pub fn restarts(&self) -> u32 {
 		self.restarts
 	}
@@ -651,7 +660,8 @@ impl<Oracle: PropagatingSolver> Solver<Oracle> {
 	/// used to ensure that the same solution is not found again.
 	///
 	/// ## Warning
-	/// This method will panic if the number of variables and values do not match.
+	/// This method will panic if the number of variables and values do not
+	/// match.
 	pub fn add_no_good(&mut self, vars: &[View], vals: &[Value]) -> Result<(), ReformulationError> {
 		let clause = vars
 			.iter()
@@ -674,8 +684,8 @@ impl<Oracle: PropagatingSolver> Solver<Oracle> {
 		self.add_clause(clause)
 	}
 
-	/// Internal method used to add an advisor that is triggered when a [`RawLit`]
-	/// changes.
+	/// Internal method used to add an advisor that is triggered when a
+	/// [`RawLit`] changes.
 	///
 	/// Used by [`Solver::advise_on_bool_change`] and
 	/// [`Solver::advise_on_int_change`].
@@ -699,9 +709,10 @@ impl<Oracle: PropagatingSolver> Solver<Oracle> {
 	/// Find all solutions with regard to a list of given variables.
 	/// The given closure will be called for each solution found.
 	///
-	/// WARNING: This method will add additional clauses into the solver to prevent the same solution
-	/// from being generated twice. This will make repeated use of the Solver object impossible. Note
-	/// that you can clone the Solver object before calling this method to work around this
+	/// WARNING: This method will add additional clauses into the solver to
+	/// prevent the same solution from being generated twice. This will make
+	/// repeated use of the Solver object impossible. Note that you can clone
+	/// the Solver object before calling this method to work around this
 	/// limitation.
 	pub fn all_solutions(
 		mut self,
@@ -749,8 +760,9 @@ impl<Oracle: PropagatingSolver> Solver<Oracle> {
 
 	/// Find an optimal solution with regards to the given objective and goal.
 	///
-	/// Note that this method uses assumptions iteratively increase the lower bound of the objective.
-	/// This does not impact the state of the solver for continued use.
+	/// Note that this method uses assumptions iteratively increase the lower
+	/// bound of the objective. This does not impact the state of the solver
+	/// for continued use.
 	pub fn branch_and_bound(
 		mut self,
 		objective: IntView,
@@ -842,12 +854,13 @@ impl<Oracle: PropagatingSolver> Solver<Oracle> {
 		Ok((slv, map, fzn_stats))
 	}
 
-	/// Wrapper function for `all_solutions` that collects all solutions and returns them in a vector
-	/// of solution values.
+	/// Wrapper function for `all_solutions` that collects all solutions and
+	/// returns them in a vector of solution values.
 	///
-	/// WARNING: This method will add additional clauses into the solver to prevent the same solution
-	/// from being generated twice. This will make repeated use of the Solver object impossible. Note
-	/// that you can clone the Solver object before calling this method to work around this
+	/// WARNING: This method will add additional clauses into the solver to
+	/// prevent the same solution from being generated twice. This will make
+	/// repeated use of the Solver object impossible. Note that you can clone
+	/// the Solver object before calling this method to work around this
 	/// limitation.
 	pub fn get_all_solutions(
 		self,
@@ -918,8 +931,8 @@ impl<Oracle: PropagatingSolver> Solver<Oracle> {
 		}
 	}
 
-	/// Wraps a [`SatValuation`] into a [`Valuation`] instance using the provided
-	/// [`Engine`] instance as context.
+	/// Wraps a [`SatValuation`] into a [`Valuation`] instance using the
+	/// provided [`Engine`] instance as context.
 	fn wrap_valuation<'a>(
 		engine: Ref<'a, Engine>,
 		sol: impl SatValuation + 'a,
@@ -1005,8 +1018,8 @@ impl<Oracle: PropagatingSolver> BrancherInitActions for Solver<Oracle> {
 				self.oracle.add_observed_var(lit.var());
 			}
 			_ => {
-				// Nothing has to happend for constants and all literals for integer
-				// variables are already marked as observed.
+				// Nothing has to happend for constants and all literals for
+				// integer variables are already marked as observed.
 			}
 		}
 	}
@@ -1255,7 +1268,8 @@ impl<Oracle: PropagatingSolver> TrailingActions for Solver<Oracle> {
 }
 
 impl Value {
-	/// If the `Value` is a Boolean, represent it as bool. Returns None otherwise.
+	/// If the `Value` is a Boolean, represent it as bool. Returns None
+	/// otherwise.
 	pub fn as_bool(&self) -> Option<bool> {
 		match self {
 			Value::Bool(b) => Some(*b),

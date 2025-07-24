@@ -151,7 +151,8 @@ impl<'a> SolvingContext<'a> {
 	}
 
 	/// Run the propagators in the queue until a propagator detects a conflict,
-	/// returns literals to be propagated by the SAT oracle, or the queue is empty.
+	/// returns literals to be propagated by the SAT oracle, or the queue is
+	/// empty.
 	pub(crate) fn run_propagators(&mut self, propagators: &mut IndexVec<PropRef, BoxedPropagator>) {
 		while let Some(p) = self.state.propagator_queue.pop() {
 			debug_assert!(!self.state.failed);

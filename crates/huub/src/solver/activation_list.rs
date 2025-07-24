@@ -24,17 +24,17 @@ pub(crate) struct ActivationList {
 	/// The list of propagators that are to be enqueue based on different
 	/// propagation conditions.
 	activations: Vec<ActivationActionS>,
-	/// The index for the first propagator to be activated when an event triggers
-	/// [`IntPropCond::LowerBound`].
+	/// The index for the first propagator to be activated when an event
+	/// triggers [`IntPropCond::LowerBound`].
 	lower_bound_idx: u32,
-	/// The index for the first propagator to be activated when an event triggers
-	/// [`IntPropCond::UpperBound`].
+	/// The index for the first propagator to be activated when an event
+	/// triggers [`IntPropCond::UpperBound`].
 	upper_bound_idx: u32,
-	/// The first index for the propagators to be activated when an event triggers
-	/// [`IntPropCond::Bounds`].
+	/// The first index for the propagators to be activated when an event
+	/// triggers [`IntPropCond::Bounds`].
 	bounds_idx: u32,
-	/// The index for the first propagator to be activated when an event triggers
-	/// [`IntPropCond::Domain`].
+	/// The index for the first propagator to be activated when an event
+	/// triggers [`IntPropCond::Domain`].
 	domain_idx: u32,
 }
 
@@ -42,11 +42,11 @@ pub(crate) struct ActivationList {
 /// Possible actions to be triggered by the activation list.
 pub(crate) enum ActivationAction {
 	/// When activated, advise the propagator with the given [`PropRef`] of the
-	/// event that triggered the activation. If the advisal method returns `true`,
-	/// then enqueue the propagator if it is not already in the queue.
+	/// event that triggered the activation. If the advisal method returns
+	/// `true`, then enqueue the propagator if it is not already in the queue.
 	Advise(Advisor),
-	/// When activated, simply add the propagator with the given [`PropRef`] to the
-	/// propagator queue if it is not already in the queue.
+	/// When activated, simply add the propagator with the given [`PropRef`] to
+	/// the propagator queue if it is not already in the queue.
 	Enqueue(PropRef),
 }
 
@@ -65,8 +65,8 @@ pub enum IntEvent {
 	LowerBound,
 	/// The upper bound of the variable has changed.
 	UpperBound,
-	/// One or more values (exluding the bounds) have been removed from the domain
-	/// of the variable.
+	/// One or more values (exluding the bounds) have been removed from the
+	/// domain of the variable.
 	Domain,
 }
 
@@ -84,7 +84,8 @@ pub enum IntPropCond {
 	///
 	/// This includes the case where the variable is fixed.
 	UpperBound,
-	/// Condition that triggers when either of the bounds of the variable change.
+	/// Condition that triggers when either of the bounds of the variable
+	/// change.
 	///
 	/// This includes the case where the variable is fixed.
 	Bounds,

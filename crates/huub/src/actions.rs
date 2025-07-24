@@ -45,7 +45,8 @@ pub trait ConstraintInitActions {
 /// Actions that can be performed by a [`crate::branchers::Brancher`] when
 /// making search decisions.
 pub trait DecisionActions: InspectionActions {
-	/// Get (or create) a literal for the given integer view with the given meaning.
+	/// Get (or create) a literal for the given integer view with the given
+	/// meaning.
 	fn get_int_lit(&mut self, var: IntView, mut meaning: IntLitMeaning) -> BoolView {
 		{
 			if let IntViewInner::Linear { transformer, .. }
@@ -93,7 +94,8 @@ pub trait DecisionActions: InspectionActions {
 		}
 	}
 
-	/// Get (or create) a literal for the given referenced integer variable with the given meaning.
+	/// Get (or create) a literal for the given referenced integer variable with
+	/// the given meaning.
 	fn get_intref_lit(&mut self, var: IntVarRef, meaning: IntLitMeaning) -> BoolView;
 
 	/// Returns the number of conflicts up to this point in the search process.
@@ -116,8 +118,8 @@ pub trait ExplanationActions: InspectionActions {
 		meaning: IntLitMeaning,
 	) -> (BoolView, IntLitMeaning);
 
-	/// Get the Boolean view that represents the current assignment of the integer
-	/// view, or `None` if the integer view is not assigned.
+	/// Get the Boolean view that represents the current assignment of the
+	/// integer view, or `None` if the integer view is not assigned.
 	fn get_int_val_lit(&mut self, var: IntView) -> Option<BoolView>;
 
 	/// Get the Boolean view that represents that the integer view will take a
@@ -234,9 +236,9 @@ pub trait PropagatorInitActions: AsDynClauseDatabase + ClauseDatabase + Decision
 	/// This will call [`Propagator::advise_of_bool_change`] on the propagator.
 	fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView, data: u64);
 
-	/// Advise a propagator when an [`IntView`] is changed according to the given
-	/// propagation condition, allowing the propagator to decide whether to
-	/// enqueue itself.
+	/// Advise a propagator when an [`IntView`] is changed according to the
+	/// given propagation condition, allowing the propagator to decide whether
+	/// to enqueue itself.
 	///
 	/// Different from enqueueing, the propagator is always advised of the
 	/// integer change, not just when it is not yet enqueued.

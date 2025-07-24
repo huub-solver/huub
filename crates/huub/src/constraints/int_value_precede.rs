@@ -24,8 +24,8 @@ use crate::{
 /// This constraint enforces that the first occurrences of all i>0 are ordered
 /// in the given list.
 pub struct IntSeqPrecedeChain {
-	/// List of integer decision variables where first occurrences of all i>0 must
-	/// be ordered.
+	/// List of integer decision variables where first occurrences of all i>0
+	/// must be ordered.
 	pub(crate) vars: Vec<IntDecision>,
 }
 
@@ -67,8 +67,8 @@ pub struct IntValuePrecedeChain {
 pub struct IntValuePrecedeChainValue {
 	/// List of integers that need to occur in order
 	values: Vec<IntVal>,
-	/// List of integer variables where first occurrences of specified values must
-	/// be ordered.
+	/// List of integer variables where first occurrences of specified values
+	/// must be ordered.
 	vars: Vec<IntView>,
 	/// True if initial pass is completed.
 	initialized: bool,
@@ -85,8 +85,8 @@ pub struct IntValuePrecedeChainValue {
 	min_val: IntVal,
 	/// Maximum value in values.
 	max_val: IntVal,
-	/// Minimum value with `min_val<min_hole<max_val` such that min_hole is not an
-	/// element of values.
+	/// Minimum value with `min_val<min_hole<max_val` such that min_hole is not
+	/// an element of values.
 	min_hole: IntVal,
 	/// Used to iterate through the holes in values.
 	next_hole: Vec<IntVal>,
@@ -172,8 +172,8 @@ impl IntSeqPrecedeChainBounds {
 			.collect()
 	}
 
-	/// Get the latest occurrence of k, or the maximum variable index if there is
-	/// no latest.
+	/// Get the latest occurrence of k, or the maximum variable index if there
+	/// is no latest.
 	fn get_upper_limit<P: PropagationActions>(&self, actions: &mut P, k: usize) -> IntVal {
 		min(
 			actions.get_trailed_int(self.last[k]),
@@ -195,7 +195,8 @@ impl IntSeqPrecedeChainBounds {
 		// Forward pass to set upper bounds and capture the highest lower bound.
 		for (i, &v) in self.vars.iter().enumerate() {
 			let mut ub_v = actions.get_int_upper_bound(v);
-			// Upper bound can only increase by 1, set new bound if larger values are in the domain.
+			// Upper bound can only increase by 1, set new bound if larger values are in the
+			// domain.
 			if ub_v > up + 1 {
 				if actions.check_int_in_domain(v, up + 1) {
 					ub_v = up + 1;
@@ -288,8 +289,8 @@ impl IntSeqPrecedeChainBounds {
 		solver.enqueue_now(prop);
 	}
 
-	/// Iteratively repairs the lower bounds starting with k, only iterates as far
-	/// as necessary.
+	/// Iteratively repairs the lower bounds starting with k, only iterates as
+	/// far as necessary.
 	fn repair_lower<P: PropagationActions>(
 		&self,
 		actions: &mut P,
@@ -326,8 +327,8 @@ impl IntSeqPrecedeChainBounds {
 		Ok((i, 0))
 	}
 
-	/// Iteratively repair the upper bounds starting with k, only iterates as far
-	/// as necessary.
+	/// Iteratively repair the upper bounds starting with k, only iterates as
+	/// far as necessary.
 	fn repair_upper<P: PropagationActions>(
 		&self,
 		actions: &mut P,
@@ -466,7 +467,8 @@ impl<S: SimplificationActions> Constraint<S> for IntValuePrecedeChain {
 
 impl IntValuePrecedeChainValue {
 	/// Lower bound explanation: Could not have this index earlier (=upper bound
-	/// explanation) and some later index requires the lower bound (recursive lower bound).
+	/// explanation) and some later index requires the lower bound (recursive
+	/// lower bound).
 	fn explain_lower<P: PropagationActions>(
 		&self,
 		actions: &mut P,
@@ -482,7 +484,8 @@ impl IntValuePrecedeChainValue {
 
 	/// Recursively explain a lower bound via 3 cases:
 	/// - Current lower bound index is above k - This is the value that required
-	///   the earlier lower bound that is currently explained (end of recursion).
+	///   the earlier lower bound that is currently explained (end of
+	///   recursion).
 	/// - Index k is in the domain of var i - Go one step up and to the next
 	///   variable.
 	/// - Index k is not in the domain of var i - i can be anything else, go to
@@ -494,7 +497,8 @@ impl IntValuePrecedeChainValue {
 		j: usize,
 	) -> Vec<BoolView> {
 		// A lower bound is explained by stating that all untracked values are excluded
-		// (< min value, > max value, all holes), as well as all values with smaller indices.
+		// (< min value, > max value, all holes), as well as all values with smaller
+		// indices.
 		if let Some(lb) = self.get_lowest_index(actions, i) {
 			if lb > j {
 				let mut v = vec![
@@ -526,8 +530,8 @@ impl IntValuePrecedeChainValue {
 		v
 	}
 
-	/// Upper bound explanation: All previous indices are smaller (exclude values
-	/// with larger index).
+	/// Upper bound explanation: All previous indices are smaller (exclude
+	/// values with larger index).
 	fn explain_upper<P: PropagationActions>(
 		&self,
 		actions: &mut P,
@@ -542,8 +546,8 @@ impl IntValuePrecedeChainValue {
 	}
 
 	/// Get the lower bound for the index in values, None if any options outside
-	/// values are still in the domain. Has to exclude values below and above the
-	/// range of values, then all holes, finally values with lower index.
+	/// values are still in the domain. Has to exclude values below and above
+	/// the range of values, then all holes, finally values with lower index.
 	fn get_lowest_index<I: InspectionActions>(&self, actions: &mut I, i: usize) -> Option<usize> {
 		let lb = actions.get_int_lower_bound(self.vars[i]);
 		let ub = actions.get_int_upper_bound(self.vars[i]);
@@ -576,8 +580,8 @@ impl IntValuePrecedeChainValue {
 		Some(self.values.len() + 1)
 	}
 
-	/// Get the latest occurrence of value index k, or the maximum variable index
-	/// if there is no latest.
+	/// Get the latest occurrence of value index k, or the maximum variable
+	/// index if there is no latest.
 	fn get_upper_limit<P: PropagationActions>(&self, actions: &mut P, k: usize) -> IntVal {
 		min(
 			actions.get_trailed_int(self.last[k]),
@@ -598,7 +602,8 @@ impl IntValuePrecedeChainValue {
 
 		// Forward pass to set upper bounds and capture the highest lower bound.
 		for (i, &v) in self.vars.iter().enumerate() {
-			// Upper bound can only increase by 1, set new bound if larger values are in the domain.
+			// Upper bound can only increase by 1, set new bound if larger values are in the
+			// domain.
 			self.propagate_upper_bound(actions, i, up + 1)?;
 			// The current var is the first possibility to reach index up + 1.
 			if up < self.values.len() && actions.check_int_in_domain(v, self.values[up]) {
@@ -774,8 +779,8 @@ impl IntValuePrecedeChainValue {
 		Ok(())
 	}
 
-	/// Iteratively repairs the lower bounds starting with k, only iterates as far
-	/// as necessary.
+	/// Iteratively repairs the lower bounds starting with k, only iterates as
+	/// far as necessary.
 	fn repair_lower<P: PropagationActions>(
 		&self,
 		actions: &mut P,
@@ -814,8 +819,8 @@ impl IntValuePrecedeChainValue {
 		Ok((i as usize, 0))
 	}
 
-	/// Iteratively repair the upper bounds starting with k, only iterates as far
-	/// as necessary.
+	/// Iteratively repair the upper bounds starting with k, only iterates as
+	/// far as necessary.
 	fn repair_upper<P: PropagationActions>(
 		&self,
 		actions: &mut P,

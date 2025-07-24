@@ -35,7 +35,8 @@ use crate::{
 /// or [`Solver`] object.
 pub enum FlatZincError {
 	#[error("{0:?} type variables are not supported by huub")]
-	/// FlatZinc instance contained a decision variable with an unsupported type.
+	/// FlatZinc instance contained a decision variable with an unsupported
+	/// type.
 	UnsupportedType(Type),
 	#[error("constraint cannot be constructed using unknown identifier `{0}'")]
 	/// FlatZinc instance contained a constraint with an unknown identifier.
@@ -63,8 +64,8 @@ pub enum FlatZincError {
 		found: String,
 	},
 	#[error("error reformulating generated model `{0}'")]
-	/// Error that occorred when converting a generated [`Model`] to a [`Solver`]
-	/// object.
+	/// Error that occorred when converting a generated [`Model`] to a
+	/// [`Solver`] object.
 	ReformulationError(#[from] ReformulationError),
 }
 
@@ -96,8 +97,8 @@ impl FlatZincStatistics {
 	/// Returns the number of views extracted from the FlatZinc instance
 	///
 	/// Views currently creates the following types of views:
-	/// - literal views (i.e., direct use of literals used to as part of variable
-	///   representation instead of reified constraints)
+	/// - literal views (i.e., direct use of literals used to as part of
+	///   variable representation instead of reified constraints)
 	/// - linear views (i.e., scaled and offset views of integer variables)
 	/// - Boolean linear views (i.e., scaled and offset views of Boolean
 	///   variables, able to represent any integer value with two values)
@@ -284,8 +285,8 @@ where
 	}
 
 	/// Extract an [`ValueSelection`] from an [`AnnotationArgument`] in a
-	/// [`FlatZinc`] instance, or return a [`FlatZincError::InvalidArgumentType`]
-	/// if an invalid type.
+	/// [`FlatZinc`] instance, or return a
+	/// [`FlatZincError::InvalidArgumentType`] if an invalid type.
 	fn ann_val_sel(arg: &AnnotationArgument<S>) -> Result<ValueSelection, FlatZincError> {
 		match arg {
 			AnnotationArgument::Literal(AnnotationLiteral::BaseLiteral(Literal::Identifier(s))) => {
@@ -315,8 +316,8 @@ where
 	}
 
 	/// Extract an [`VariableSelection`] from an [`AnnotationArgument`] in a
-	/// [`FlatZinc`] instance, or return a [`FlatZincError::InvalidArgumentType`]
-	/// if an invalid type.
+	/// [`FlatZinc`] instance, or return a
+	/// [`FlatZincError::InvalidArgumentType`] if an invalid type.
 	fn ann_var_sel(arg: &AnnotationArgument<S>) -> Result<VariableSelection, FlatZincError> {
 		match arg {
 			AnnotationArgument::Literal(AnnotationLiteral::BaseLiteral(Literal::Identifier(s))) => {
@@ -512,7 +513,8 @@ where
 		table_constraints
 	}
 
-	/// Create branchers according to the search annotations in the FlatZinc instance
+	/// Create branchers according to the search annotations in the FlatZinc
+	/// instance
 	pub(crate) fn create_branchers(&mut self) -> Result<(), FlatZincError> {
 		let mut branchings = Vec::new();
 		let mut warm_start = Vec::new();
@@ -700,8 +702,8 @@ where
 		Ok(())
 	}
 
-	/// Preprocess the [`FlatZinc`] instance to find variables that can be seen as
-	/// views of other variables.
+	/// Preprocess the [`FlatZinc`] instance to find variables that can be seen
+	/// as views of other variables.
 	pub(crate) fn extract_views(&mut self) -> Result<(), FlatZincError> {
 		// Create a mapping from identifiers to the constraint that defines them
 		let defined_by: FxHashMap<&S, usize> = self
@@ -746,8 +748,8 @@ where
 	}
 
 	/// Extract a integer decision variable from a [`Literal`] in a [`FlatZinc`]
-	/// instance. A [`FlatZincError::InvalidArgumentType`] will be returned if the
-	/// argument was not a integer decision variable.
+	/// instance. A [`FlatZincError::InvalidArgumentType`] will be returned if
+	/// the argument was not a integer decision variable.
 	fn lit_int(&mut self, lit: &Literal<S>) -> Result<IntDecision, FlatZincError> {
 		match lit {
 			Literal::Identifier(ident) => self.lookup_or_create_var(ident).map(|mv| match mv {
@@ -763,8 +765,8 @@ where
 		}
 	}
 
-	/// Find the decision variable, i.e. [`ModelView`], associated with the given
-	/// identifier, or create a new one if it doesn't yet exist.
+	/// Find the decision variable, i.e. [`ModelView`], associated with the
+	/// given identifier, or create a new one if it doesn't yet exist.
 	fn lookup_or_create_var(&mut self, ident: &S) -> Result<Decision, FlatZincError> {
 		match self.map.entry(ident.clone()) {
 			Entry::Vacant(e) => {
@@ -800,8 +802,8 @@ where
 	}
 
 	/// Extract a Boolean parameter from the a [`Literal`] in a [`FlatZinc`]
-	/// instance. A [`FlatZincError::InvalidArgumentType`] will be returned if the
-	/// argument was not a Boolean parameter.
+	/// instance. A [`FlatZincError::InvalidArgumentType`] will be returned if
+	/// the argument was not a Boolean parameter.
 	fn par_bool(&self, lit: &Literal<S>) -> Result<bool, FlatZincError> {
 		match lit {
 			Literal::Identifier(ident) => {
@@ -823,9 +825,9 @@ where
 		}
 	}
 
-	/// Extract a parameter integer value from the a [`Literal`] in a [`FlatZinc`]
-	/// instance. A [`FlatZincError::InvalidArgumentType`] will be returned if the
-	/// argument was not an integer parameter.
+	/// Extract a parameter integer value from the a [`Literal`] in a
+	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
+	/// returned if the argument was not an integer parameter.
 	fn par_int(&self, lit: &Literal<S>) -> Result<IntVal, FlatZincError> {
 		match lit {
 			Literal::Identifier(ident) => {
@@ -1269,7 +1271,8 @@ where
 						let f = self.arg_par_set(f)?;
 						let f: FxHashSet<IntVal> = f.iter().flat_map(|r| r.into_iter()).collect();
 
-						// Convert regular constraint in to table constraints and add them to the model
+						// Convert regular constraint in to table constraints and add them to the
+						// model
 						let tables = self.convert_regular_to_tables(x, d, q0, f);
 						for table in tables {
 							self.prb += table;

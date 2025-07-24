@@ -26,7 +26,8 @@ pub struct IntAbs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Bounds propagator for one integer variable being the absolute value of another
+/// Bounds propagator for one integer variable being the absolute value of
+/// another
 pub struct IntAbsBounds {
 	/// The integer variable whose absolute value is being taken
 	origin: IntView,

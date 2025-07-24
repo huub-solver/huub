@@ -52,8 +52,8 @@ pub(crate) enum LitName {
 	BoolVar(Ustr, bool),
 	/// The literal represents a condition of an integer variable.
 	///
-	/// The tuple contains the index of the variable in the FlatZinc model (which
-	/// is used as the key in [`FmtLitFields::int_reverse_map`]), and
+	/// The tuple contains the index of the variable in the FlatZinc model
+	/// (which is used as the key in [`FmtLitFields::int_reverse_map`]), and
 	/// [`LitMeaning`] of the literal.
 	IntLit(usize, IntLitMeaning),
 }
@@ -124,7 +124,8 @@ where
 			FmtLitFields::new(fmt, Arc::clone(&lit_reverse_map), int_reverse_map)
 		});
 
-	// Create final subscriber and add the layer that will register new lazily created literals
+	// Create final subscriber and add the layer that will register new lazily
+	// created literals
 	builder
 		.finish()
 		.with(RegisterLazyLits::new(lit_reverse_map))

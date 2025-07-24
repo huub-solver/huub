@@ -87,7 +87,8 @@ impl IntDivBounds {
 		solver.enqueue_on_int_change(prop, denominator, IntPropCond::Bounds);
 		solver.enqueue_on_int_change(prop, result, IntPropCond::Bounds);
 
-		// Ensure the consistency of the signs of the three variables using the following clauses.
+		// Ensure the consistency of the signs of the three variables using the
+		// following clauses.
 		if solver.get_int_lower_bound(numerator) < 0
 			|| solver.get_int_lower_bound(denominator) < 0
 			|| solver.get_int_lower_bound(result) < 0
