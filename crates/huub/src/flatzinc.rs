@@ -31,7 +31,6 @@ use crate::{
 };
 use crate::constraints::difference_logic::{DifferenceLogic, DifferenceLogicConstraint};
 use crate::reformulate::InitConfig;
-use crate::solver::queue::PriorityLevel;
 
 #[derive(Error, Debug)]
 /// Errors that can occur when converting a [`FlatZinc`] instance to a [`Model`]
@@ -908,14 +907,7 @@ where
 	/// to the [`Model`] to enforce the constraints.
 	pub(crate) fn post_constraints(&mut self, config: &InitConfig) -> Result<(), FlatZincError> {
 		// Global propagators dealing with multiple constraints
-		let mut diff_logic = DifferenceLogic::new(match config.diff_logic_prio { 
-			0 => PriorityLevel::Lowest,
-			1 => PriorityLevel::Low,
-			2 => PriorityLevel::Medium,
-			3 => PriorityLevel::High,
-			4 => PriorityLevel::Highest,
-			_ => PriorityLevel::Immediate,
-		});
+		let mut diff_logic = DifferenceLogic::new(config.diff_logic_prio_bounds, config.diff_logic_prio_bools, config.diff_logic_inc_imp);
 		// Traditional relational constraints
 		for (i, c) in self.fzn.constraints.iter().enumerate() {
 			if self.processed[i] {

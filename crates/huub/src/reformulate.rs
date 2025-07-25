@@ -147,10 +147,14 @@ pub struct InitConfig {
 	variable_elimination: bool,
 	/// Whether to enable the vivification in the oracle solver.
 	vivification: bool,
-	/// Difference logic mode
+	/// Difference logic mode.
 	pub(crate) diff_logic: u32,
-	/// Difference logic priority
-	pub(crate) diff_logic_prio: u8,
+	/// Difference logic priority for bound propagation.
+	pub(crate) diff_logic_prio_bounds: u8,
+	/// Difference logic priority for boolean propagation.
+	pub(crate) diff_logic_prio_bools: u8,
+	/// Whether to use inc_imp to check implied booleans proactively.
+	pub(crate) diff_logic_inc_imp: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -435,16 +439,17 @@ impl InitConfig {
 	}
 
 	/// Change the difference logic mode in the oracle solver.
-	pub fn with_diff_logic(mut self, diff_logic: u32) -> Self {
-		self.diff_logic = diff_logic;
+	pub fn with_diff_logic(mut self, diff_logic: Option<u32>,
+						   diff_logic_prio_bounds: Option<u8>,
+						   diff_logic_prio_bools: Option<u8>,
+						   diff_logic_inc_imp: bool) -> Self {
+		self.diff_logic = diff_logic.unwrap_or(0);
+		self.diff_logic_prio_bounds = diff_logic_prio_bounds.unwrap_or(1);
+		self.diff_logic_prio_bools = diff_logic_prio_bools.unwrap_or(1);
+		self.diff_logic_inc_imp = diff_logic_inc_imp;
 		self
 	}
 
-	/// Change the difference logic priority in the oracle solver.
-	pub fn with_diff_logic_prio(mut self, diff_logic_prio: Option<u8>) -> Self {
-		self.diff_logic_prio = diff_logic_prio.unwrap_or(1);
-		self
-	}
 }
 
 impl IntDecisionDef {

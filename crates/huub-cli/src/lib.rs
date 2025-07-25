@@ -117,10 +117,14 @@ pub struct Cli<Stdout, Stderr> {
 	/// Whether the vivification heuristic is enabled
 	vivification: bool,
 	
-	/// Difference logic mode
+	/// Difference logic mode.
 	diff_logic: Option<u32>,
-	/// Difference logic priority
-	diff_logic_prio: Option<u8>,
+	/// Difference logic priority for bound propagation.
+	diff_logic_prio_bounds: Option<u8>,
+	/// Difference logic priority for boolean propagation.
+	diff_logic_prio_bools: Option<u8>,
+	/// Whether to use inc_imp to check implied booleans proactively.
+	diff_logic_inc_imp: bool,
 
 	// --- Output configuration ---
 	/// Output stream for (intermediate) solutions and statistics
@@ -187,10 +191,10 @@ where
 			.with_subsumption(self.subsumption)
 			.with_variable_elimination(self.variable_elimination)
 			.with_vivification(self.vivification);
-		if let Some(diff_logic) = self.diff_logic {
-			config = config.with_diff_logic(diff_logic);
-		}
-		config = config.with_diff_logic_prio(self.diff_logic_prio);
+		config = config.with_diff_logic(self.diff_logic,
+										self.diff_logic_prio_bounds,
+										self.diff_logic_prio_bools,
+										self.diff_logic_inc_imp);
 		config
 	}
 
@@ -583,7 +587,9 @@ where
 			vsids_after_restart: self.vsids_after_restart,
 			vsids_only: self.vsids_only,
 			diff_logic: self.diff_logic,
-			diff_logic_prio: self.diff_logic_prio,
+			diff_logic_prio_bounds: self.diff_logic_prio_bounds,
+			diff_logic_prio_bools: self.diff_logic_prio_bools,
+			diff_logic_inc_imp: self.diff_logic_inc_imp,
 			stdout: self.stdout,
 		}
 	}
@@ -615,7 +621,9 @@ where
 			vsids_after_restart: self.vsids_after_restart,
 			vsids_only: self.vsids_only,
 			diff_logic: self.diff_logic,
-			diff_logic_prio: self.diff_logic_prio,
+			diff_logic_prio_bounds: self.diff_logic_prio_bounds,
+			diff_logic_prio_bools: self.diff_logic_prio_bools,
+			diff_logic_inc_imp: self.diff_logic_inc_imp,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
 		}
@@ -694,8 +702,15 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			diff_logic: args
 				.opt_value_from_str("--diff-logic")
 				.map_err(|e| e.to_string())?,
-			diff_logic_prio: args
-				.opt_value_from_str("--diff-logic-prio")
+			diff_logic_prio_bounds: args
+				.opt_value_from_str("--diff-logic-prio-bounds")
+				.map_err(|e| e.to_string())?,
+			diff_logic_prio_bools: args
+				.opt_value_from_str("--diff-logic-prio-bools")
+				.map_err(|e| e.to_string())?,
+			diff_logic_inc_imp: args
+				.opt_value_from_fn("--diff-logic-inc-imp", parse_bool_arg)
+				.map(|x| x.unwrap_or(true))
 				.map_err(|e| e.to_string())?,
 
 			verbose,

@@ -75,7 +75,9 @@ FLAGS
   								  imp_eq+(imp)_neq+native_(imp)_neq (61), imp_eq+(imp)_neq+native (63),
   								  all (85), all+native_reif_eq (213), all+native_reif_eq+imp_neq (245),
   								  all+native_reif_eq+(imp)_neq (253), all+native (255)
-  --diff-logic-prio				  Priority for difference logic (default: 1, range: 0-5)
+  --diff-logic-prio-bounds		  Priority for difference logic bound propagation (default: 1, range: 0-5)
+  --diff-logic-prio-bools		  Priority for difference logic boolean propagation (default: 1, range: 0-5)
+  --diff-logic-inc-imp <on|off>	  Use incremental check of implied constraints (default: on)
   
 
                       === BEHAVIOUR OPTIONS ===

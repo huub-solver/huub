@@ -55,8 +55,12 @@ pub enum DifferenceLogicConstraint {
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Representation of set of potential difference constraints within a model.
 pub struct DifferenceLogic {
-	/// Priority of the difference logic propagator
-	priority_level: PriorityLevel,
+	/// Priority of difference logic bound propagation.
+	priority_level_bounds: PriorityLevel,
+    /// Priority of difference logic bool propagation.
+    priority_level_bools: PriorityLevel,
+    /// Whether to use inc_imp for checking implied constraints.
+    use_inc_imp: bool,
 	/// List of raw potential difference constraints.
 	raw_constraints: Vec<DifferenceLogicConstraint>,
 	/// List of global difference constraints to post to the solver.
@@ -78,8 +82,6 @@ struct DifferenceLogicInitial {
 	initial_trail: InitialTrail,
 	/// Constraint graph.
 	graph: DifferenceLogicGraph,
-	/// Propagator state data.
-	state: DifferenceLogicState,
 	/// Integer decision variables.
 	int_vars: Vec<IntDecision>,
 	/// Boolean decision variables.
@@ -101,11 +103,25 @@ fn add_implied_not_equals(imp_constraints: &mut Vec<(BoolDecision, IntDecision, 
 	imp_constraints.push((decision2, y, x, -d - 1));
 }
 
+fn parse_priority_level(level: u8) -> PriorityLevel {
+	match level {
+		0 => PriorityLevel::Lowest,
+		1 => PriorityLevel::Low,
+		2 => PriorityLevel::Medium,
+		3 => PriorityLevel::High,
+		4 => PriorityLevel::Highest,
+		5 => PriorityLevel::Immediate,
+		_ => panic!("Priority level need to be within [0,...,5], given level {level} is invalid"),
+	}
+}
+
 impl DifferenceLogic {
 	
-	pub(crate) fn new(priority_level: PriorityLevel) -> Self {
+	pub(crate) fn new(priority_level_bounds: u8, priority_level_bools: u8, use_inc_imp: bool) -> Self {
 		Self {
-			priority_level,
+			priority_level_bounds: parse_priority_level(priority_level_bounds),
+            priority_level_bools: parse_priority_level(priority_level_bools),
+			use_inc_imp,
 			raw_constraints: Vec::new(),
 			global_constraints: Vec::new(),
 			imp_constraints: Vec::new(),
@@ -367,7 +383,6 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 				trace!("{v:?}: lb {:?}, ub: {:?}", actions.get_int_lower_bound(v), actions.get_int_upper_bound(v));
 			}
 			let bool_vars = bool_var_index.iter().map(|&v| v).collect_vec();
-			let mut state = DifferenceLogicState::new(int_vars.len());
 
 			// Add global constraints
 			for (x, y, d) in trimmed_constraints.into_iter() {
@@ -398,14 +413,13 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
             }*/
 
 			graph.bellman_ford_init_pi(model_adapter.get_trailing_actions())?;
-			graph.propagate_bounds(&mut model_adapter, &mut state)?;
+			let initial_lb_updates = (0..num_nodes).into_iter().collect();
+			let initial_ub_updates = (0..num_nodes).into_iter().collect();
+			graph.propagate_bounds(&mut model_adapter, &initial_lb_updates, &initial_ub_updates)?;
 			update_bounds(&mut self.int_var_state, &mut model_adapter);
-			for i in 0..bool_vars.len() {
-				if model_adapter.get_bool_val(i).is_some() && graph.bool_implications[i].is_some() {
-					let _ = state.fixed_bools.insert(i);
-				}
-			}
-			graph.propagate_booleans(&mut model_adapter, &mut state, false)?;
+			let fixed_bools = (0..bool_vars.len()).into_iter()
+				.filter(|&i| model_adapter.get_bool_val(i).is_some() && graph.bool_implications[i].is_some()).collect();
+			graph.propagate_booleans(&mut model_adapter, &fixed_bools, false)?;
 			// Already do removals before Johnson's to reduce complexity of the graph
 			graph.check_remove_fixed_nodes(&mut model_adapter);
 			graph.check_remove_isolated_nodes(&mut model_adapter);
@@ -417,17 +431,17 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 			let mut distances = vec![vec![IntVal::MAX; num_nodes]; num_nodes];
 			let mut direct_edge = vec![HashSet::default(); num_nodes];
 			graph.johnson_full(&mut model_adapter, &mut distances, &mut direct_edge)?;
-			self.initial_graph = Some(DifferenceLogicInitial { initial_trail, graph, state, int_vars, bool_vars, distances, direct_edge });
+			self.initial_graph = Some(DifferenceLogicInitial { initial_trail, graph, int_vars, bool_vars, distances, direct_edge });
 			
 		} else {
 			
 			let initial_graph = self.initial_graph.as_mut().unwrap();
 			
 			trace!("Repeated call to simplify");
-			initial_graph.state.reset_bound_changes();
-			initial_graph.state.reset_bool_changes();
 			let mut model_adapter = SimplificationModelAdapter::new(actions, &mut initial_graph.initial_trail, &mut initial_graph.int_vars, &initial_graph.bool_vars);
 			let mut has_change = false;
+			let mut lb_updates = Vec::new();
+			let mut ub_updates = Vec::new();
 			for (i, state) in self.int_var_state.iter_mut().enumerate() {
 				if initial_graph.graph.nodes[i].is_some() {
 					let alias = model_adapter.get_simplification_actions().resolve_alias(state.var);
@@ -435,7 +449,7 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 						trace!("Var alias is different (was {:?}, is {:?})", state.var, alias);
 						let (v_trans, vd) = update_transform(alias);
 						if let Some(new) = self.int_var_index.get_index_of(&v_trans) {
-							initial_graph.graph.unify_nodes(&mut model_adapter, &mut initial_graph.state, i, new, vd, &mut initial_graph.distances, &mut initial_graph.direct_edge)?;
+							initial_graph.graph.unify_nodes(&mut model_adapter, &mut lb_updates, &mut ub_updates, i, new, vd, &mut initial_graph.distances, &mut initial_graph.direct_edge)?;
 						} else if !matches!(alias.0, IntDecisionInner::Const(_)) {
 							state.var = v_trans;
 							state.lower_bound -= vd;
@@ -447,22 +461,26 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 					}
 				}
 			}
+			initial_graph.graph.reset_bounds(lb_updates, ub_updates);
+			let mut lower_bound_changes = IndexSet::default();
+			let mut upper_bound_changes = IndexSet::default();
 			for (i, state) in self.int_var_state.iter_mut().enumerate() {
 				if initial_graph.graph.nodes[i].is_none() {
 					continue;
 				}
 				if state.lower_bound != model_adapter.get_int_lower_bound(i) {
-					let _ = initial_graph.state.lower_bound_changes.insert(i);
+					let _ = lower_bound_changes.insert(i);
 					has_change = true;
 				}
 				if state.upper_bound != model_adapter.get_int_upper_bound(i) {
-					let _ = initial_graph.state.upper_bound_changes.insert(i);
+					let _ = upper_bound_changes.insert(i);
 					has_change = true;
 				}
 			}
+			let mut fixed_bools = IndexSet::default();
 			for i in 0..initial_graph.bool_vars.len() {
 				if model_adapter.get_bool_val(i).is_some() && initial_graph.graph.bool_implications[i].is_some() {
-					let _ = initial_graph.state.fixed_bools.insert(i);
+					let _ = fixed_bools.insert(i);
 					has_change = true;
 				}
 			}
@@ -470,9 +488,10 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 				trace!("No more changes for now, exit");
 				return Ok(SimplificationStatus::Fixpoint);
 			}
-			initial_graph.graph.propagate_bounds(&mut model_adapter, &mut initial_graph.state)?;
+			initial_graph.graph.propagate_bounds(&mut model_adapter, &lower_bound_changes, &upper_bound_changes)?;
 			update_bounds(&mut self.int_var_state, &mut model_adapter);
-			initial_graph.graph.propagate_booleans(&mut model_adapter, &mut initial_graph.state, true)?;
+			initial_graph.graph.propagate_booleans(&mut model_adapter, &fixed_bools, true)?;
+
 		}
 
 		// Common postprocessing: Reduce graph
@@ -511,9 +530,9 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogic {
 			}
 		}
 		let bool_vars = initial_graph.bool_vars.iter().map(|&v| slv.get_solver_bool(v)).collect_vec();
-		DifferenceLogicBounds::new_in(slv, self.priority_level, int_vars, bool_vars,
-									  initial_graph.graph,
-									  initial_graph.state);
+		let graph_cell = Rc::new(RefCell::new(initial_graph.graph));
+		DifferenceLogicBounds::new_in(slv, &int_vars, &bool_vars, self.priority_level_bounds, graph_cell.clone());
+		DifferenceLogicBooleans::new_in(slv, &int_vars, &bool_vars, self.priority_level_bools, self.use_inc_imp, graph_cell);
 		Ok(())
 	}
 }
@@ -912,16 +931,6 @@ impl DifferenceLogicGraph {
 		lb_updates.push(node);
 	}
 
-	/// Reset stored lower bounds of all nodes.
-	fn reset_lb_updates(&self, lb_updates: &mut Vec<usize>) {
-		for &node in lb_updates.iter() {
-			if let Some(node) = &self.nodes[node] {
-				node.borrow_mut().lower_bound = None;
-			}
-		}
-		lb_updates.clear();
-	}
-
 	/// Get the current upper bound for the node, either stored or from the search.
 	fn get_cur_upper_bound<E, A: ModelAdapter<E>>(&self, adapter: &A, v: usize) -> IntVal {
 		match self.borrow_node(v).upper_bound {
@@ -934,16 +943,6 @@ impl DifferenceLogicGraph {
 	fn update_ub(&self, node: usize, val: IntVal, ub_updates: &mut Vec<usize>) {
 		self.borrow_node_mut(node).upper_bound = Some(val);
 		ub_updates.push(node);
-	}
-
-	/// Reset stored upper bounds of all nodes.
-	fn reset_ub_updates(&mut self, ub_updates: &mut Vec<usize>) {
-		for &node in ub_updates.iter() {
-			if let Some(node) = &self.nodes[node] {
-				node.borrow_mut().upper_bound = None;
-			}
-		}
-		ub_updates.clear();
 	}
 
 	/// Compute initial pi values by assuming an additional vertex with a 0-cost path to every other
@@ -1151,7 +1150,7 @@ impl DifferenceLogicGraph {
 	}
 
 	/// Moves all edges from the old node to the new node, adapted by the given offset.
-	fn unify_nodes<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, state: &mut DifferenceLogicState, old: usize, new: usize, offset: IntVal, distances: &mut Vec<Vec<IntVal>>, direct_edge: &mut Vec<HashSet<usize>>) -> Result<(), E> {
+	fn unify_nodes<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, lb_updates: &mut Vec<usize>, ub_updates: &mut Vec<usize>, old: usize, new: usize, offset: IntVal, distances: &mut Vec<Vec<IntVal>>, direct_edge: &mut Vec<HashSet<usize>>) -> Result<(), E> {
 
 		trace!("Moving all edges from node {old} to node {new} with offset {offset}");
 		let temp_node_old = self.get_node_clone(old);
@@ -1216,7 +1215,7 @@ impl DifferenceLogicGraph {
 		self.open_nodes -= 1;
 		// Check consequences of all modified active edges
 		for e in mod_edges {
-			let addition_success = self.propagate_edge_addition(adapter, &mut state.lb_updates, &mut state.ub_updates, e, true)?;
+			let addition_success = self.propagate_edge_addition(adapter, lb_updates, ub_updates, e, true)?;
 			debug_assert!(addition_success, "Failures should trigger a reformulation error");
 		}
 		Ok(())
@@ -1584,26 +1583,39 @@ impl DifferenceLogicGraph {
 		Ok(())
 	}
 
+	fn reset_bounds(&mut self, lb_updates: Vec<usize>, ub_updates: Vec<usize>) {
+		for &node in lb_updates.iter() {
+			if let Some(node) = &self.nodes[node] {
+				node.borrow_mut().lower_bound = None;
+			}
+		}
+		for &node in ub_updates.iter() {
+			if let Some(node) = &self.nodes[node] {
+				node.borrow_mut().upper_bound = None;
+			}
+		}
+	}
+
 
 	/// Propagate new bounds.
-	fn propagate_bounds<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, state: &mut DifferenceLogicState) -> Result<(), E> {
+	fn propagate_bounds<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, lower_bound_changes: &IndexSet<usize>, upper_bound_changes: &IndexSet<usize>) -> Result<(), E> {
 		
-		trace!("Propagating bounds on lb changes {:?}, ub changes {:?}.", state.lower_bound_changes, state.upper_bound_changes);
-		self.reset_lb_updates(&mut state.lb_updates);
-		self.reset_ub_updates(&mut state.ub_updates);
+		trace!("Propagating bounds on lb changes {:?}, ub changes {:?}.", lower_bound_changes, upper_bound_changes);
+		let mut lb_updates = Vec::new();  // TODO store outside / differently?
+		let mut ub_updates = Vec::new();
 
 		// Lower bound updates
-		if !state.lower_bound_changes.is_empty() {
-			self.inc_lb(adapter, &state.lower_bound_changes, &mut state.lb_updates)?;
+		if !lower_bound_changes.is_empty() {
+			self.inc_lb(adapter, lower_bound_changes, &mut lb_updates)?;
 		}
 
 		// Upper bound updates
-		if !state.upper_bound_changes.is_empty() {
-			self.inc_ub(adapter, &state.upper_bound_changes, &mut state.ub_updates)?;
+		if !upper_bound_changes.is_empty() {
+			self.inc_ub(adapter, &upper_bound_changes, &mut ub_updates)?;
 		}
 
 		// Consequences of lower bound updates on open implied constraints
-		for &n in state.lb_updates.iter() {
+		for &n in lb_updates.iter() {
 			let node_ref = self.get_node_clone(n);
 			let mut node = node_ref.borrow_mut();
 			let lb = node.lower_bound.unwrap();
@@ -1615,7 +1627,7 @@ impl DifferenceLogicGraph {
 				if lb - target_ub > edge.val {
 					// Constraint is falsified by bounds.
 					trace!("Constraint {:?} is falsified by bounds.", edge);
-					adapter.set_bool_false(edge.bool_var, n, lb, edge.to, target_ub)?;  // TODO directly reenqueue these?
+					adapter.set_bool_false(edge.bool_var, n, lb, edge.to, target_ub)?;
 					self.close_imp_edge_forward(adapter, &mut open, index);
 				}
 			}
@@ -1632,7 +1644,7 @@ impl DifferenceLogicGraph {
 		}
 
 		// Consequences of upper bound updates on open implied constraints
-		for &n in state.ub_updates.iter() {
+		for &n in ub_updates.iter() {
 			let node_ref = self.get_node_clone(n);
 			let mut node = node_ref.borrow_mut();
 			let ub = node.upper_bound.unwrap();
@@ -1660,7 +1672,7 @@ impl DifferenceLogicGraph {
 			}
 		}
 
-		state.reset_bound_changes();
+		self.reset_bounds(lb_updates, ub_updates);
 		Ok(())
 		
 	}
@@ -1692,11 +1704,13 @@ impl DifferenceLogicGraph {
 	}
 
 	/// Propagate fixed booleans.
-	fn propagate_booleans<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, state: &mut DifferenceLogicState, check_implied: bool) -> Result<(), E> {
+	fn propagate_booleans<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, fixed_bools: &IndexSet<usize>, check_implied: bool) -> Result<(), E> {
 		
-		trace!("Propagating fixed booleans {:?}.", state.fixed_bools);
+		trace!("Propagating fixed booleans {:?}.", fixed_bools);
+		let mut lb_updates = Vec::new();
+		let mut ub_updates = Vec::new();
 		// Handle fixed booleans
-		for &b in state.fixed_bools.iter() {
+		for &b in fixed_bools.iter() {
 			let val = adapter.get_bool_val(b).unwrap();
 			trace!("Boolean b{b:?} fixed to {val}");
 			if val {
@@ -1711,8 +1725,8 @@ impl DifferenceLogicGraph {
 						continue;
 					}
 					self.activate_imp_edge(adapter, index);
-					let addition_success = self.propagate_edge_addition(adapter, &mut state.lb_updates, &mut state.ub_updates, index, check_implied)?;  // TODO can we combine adding multiple edges?
-					debug_assert!(addition_success, "Failure should have propagated earlier!");
+					let addition_success = self.propagate_edge_addition(adapter, &mut lb_updates, &mut ub_updates, index, check_implied)?;  // TODO can we combine adding multiple edges?
+					debug_assert!(addition_success, "Failure should have propagated earlier!");  // TODO not if we skip inc_imp!
 				}
 			} else {
 				// Consequences of setting the boolean to false -> close all implied edges.
@@ -1726,7 +1740,7 @@ impl DifferenceLogicGraph {
 			}
 		}
 
-		state.reset_bool_changes();
+		self.reset_bounds(lb_updates, ub_updates);
 		Ok(())
 
 	}
@@ -1880,76 +1894,41 @@ impl<P: PropagationActions> ModelAdapter<Conflict> for SolverModelAdapter<'_, P>
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-/// Propagator state data.
-pub struct DifferenceLogicState {
-	/// List of variables with updated lower bounds.
-	lb_updates: Vec<usize>,
-	/// List of variables with updated upper bounds.
-	ub_updates: Vec<usize>,
-	/// List of integer variable indices with reported lower bound changes.
-	lower_bound_changes: IndexSet<usize>,
-	/// List of integer variable indices with reported upper bound changes.
-	upper_bound_changes: IndexSet<usize>,
-	/// List of boolean variable indices that have recently been reported as fixed to true.
-	fixed_bools: IndexSet<usize>,
-}
-
-impl DifferenceLogicState {
-	
-	fn new(int_vars: usize) -> Self {
-		Self {
-			lb_updates: Vec::new(),
-			ub_updates: Vec::new(),
-			lower_bound_changes: (0..int_vars).into_iter().collect(),
-			upper_bound_changes: (0..int_vars).into_iter().collect(),
-			fixed_bools: IndexSet::default(),
-		}
-	}
-
-	fn reset_bound_changes(&mut self) {
-		self.lower_bound_changes.clear();
-		self.upper_bound_changes.clear();
-	}
-
-	fn reset_bool_changes(&mut self) {
-		self.fixed_bools.clear();
-	}	
-	
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]  // todo do we need Hash here?
 /// Bounds consistent global difference constraint propagator.
 pub struct DifferenceLogicBounds {
 	/// Integer variables.
 	int_vars: Vec<IntView>,
 	/// Boolean variables.
 	bool_vars: Vec<BoolView>,
-	/// Constraint graph.
-	graph: DifferenceLogicGraph,
-	/// Propagator state data.
-	state: DifferenceLogicState,
+	/// Shared reference to difference logic graph
+	graph: Rc<RefCell<DifferenceLogicGraph>>,
+	/// List of integer variable indices with reported lower bound changes.
+	lower_bound_changes: IndexSet<usize>,
+	/// List of integer variable indices with reported upper bound changes.
+	upper_bound_changes: IndexSet<usize>,
 }
 
 impl DifferenceLogicBounds {
 
 	/// Create a new [`DifferenceLogicBounds`] propagator and post it in the solver.
 	pub fn new_in<I: PropagatorInitActions + ?Sized>(solver: &mut I,
+													 int_vars: &Vec<IntView>,
+													 bool_vars: &Vec<BoolView>,
 													 priority_level: PriorityLevel,
-													 int_vars: Vec<IntView>,
-													 bool_vars: Vec<BoolView>,
-													 graph: DifferenceLogicGraph,
-													 state: DifferenceLogicState) {
+													 graph: Rc<RefCell<DifferenceLogicGraph>>) {
 
-		let node_active = (0..graph.nodes.len()).into_iter().filter(|&i| graph.nodes[i].is_some()).collect_vec();
-		let bool_active = (0..graph.bool_implications.len()).into_iter().filter(|&i| graph.bool_implications[i].is_some()).collect_vec();
-		trace!("Creating propagator for {} int and {} bool vars", node_active.len(), bool_active.len());
-		
+		let graph_ref = graph.borrow();
+		let node_active = (0..graph_ref.nodes.len()).into_iter().filter(|&i| graph_ref.nodes[i].is_some()).collect_vec();
+		let bool_active = (0..graph_ref.bool_implications.len()).into_iter().filter(|&i| graph_ref.bool_implications[i].is_some()).collect_vec();
+		trace!("Creating bounds propagator for {} int and {} bool vars", node_active.len(), bool_active.len());
+
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				int_vars: int_vars.clone(),
 				bool_vars: bool_vars.clone(),
-				graph,
-				state,
+				graph: graph.clone(),
+				lower_bound_changes: IndexSet::default(),
+				upper_bound_changes: IndexSet::default(),
 			}),
 			priority_level,
 		);
@@ -1957,9 +1936,6 @@ impl DifferenceLogicBounds {
 		for i in node_active.into_iter() {
 			solver.advise_on_int_change(prop, int_vars[i], IntPropCond::LowerBound, i as u64);
 			solver.advise_on_int_change(prop, int_vars[i], IntPropCond::UpperBound, i as u64);
-		}
-		for i in bool_active.into_iter() {
-			solver.advise_on_bool_change(prop, bool_vars[i], i as u64);
 		}
 		solver.advise_on_backtrack(prop);
 
@@ -1975,39 +1951,112 @@ where
 
 	fn advise_of_backtrack(&mut self, _actions: &mut E) {
 		trace!("Backtrack advise");
-		self.state.reset_bound_changes();
-		self.state.reset_bool_changes();
-	}
-
-	fn advise_of_bool_change(&mut self, _actions: &mut E, _view: BoolView, data: u64) -> bool {
-		trace!("Boolean b{data} fixed.");
-		self.state.fixed_bools.insert(data as usize)
+		self.lower_bound_changes.clear();
+		self.upper_bound_changes.clear();
 	}
 
 	fn advise_of_int_change(&mut self, _actions: &mut E, _view: IntView, event: IntEvent, data: u64) -> bool {
 		trace!("Integer i{data} changed on event {event:?}.");
 		match event {
-			IntEvent::LowerBound => self.state.lower_bound_changes.insert(data as usize),
-			IntEvent::UpperBound => self.state.upper_bound_changes.insert(data as usize),
+			IntEvent::LowerBound => self.lower_bound_changes.insert(data as usize),
+			IntEvent::UpperBound => self.upper_bound_changes.insert(data as usize),
 			IntEvent::Fixed => {  // TODO can we find out which one changed?
-				self.state.lower_bound_changes.insert(data as usize) |
-				self.state.upper_bound_changes.insert(data as usize)
+				self.lower_bound_changes.insert(data as usize) |
+				self.upper_bound_changes.insert(data as usize)
 			},
 			_ => unreachable!("Event was never enqueued."),
 		}
 	}
 
+	#[tracing::instrument(name = "difference_logic_bounds", level = "trace", skip(self, actions))]
+	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
+		let mut model_adapter = SolverModelAdapter::new(actions, &self.int_vars, &self.bool_vars);
+		if let Err(e) = self.graph.borrow_mut().propagate_bounds(&mut model_adapter, &self.lower_bound_changes, &self.upper_bound_changes) {
+			self.lower_bound_changes.clear();
+			self.upper_bound_changes.clear();
+			return Err(e);
+		}
+		self.lower_bound_changes.clear();
+		self.upper_bound_changes.clear();
+		Ok(())
+	}
+
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// Difference constraint boolean propagator.
+pub struct DifferenceLogicBooleans {
+	/// Integer variables.
+	int_vars: Vec<IntView>,
+	/// Boolean variables.
+	bool_vars: Vec<BoolView>,
+	/// Shared reference to difference logic graph
+	graph: Rc<RefCell<DifferenceLogicGraph>>,
+	/// List of boolean variable indices that have recently been reported as fixed to true.
+	fixed_bools: IndexSet<usize>,
+	/// Whether to proactively check implied constraints.
+	use_inc_imp: bool,
+}
+
+impl DifferenceLogicBooleans {
+
+	/// Create a new [`DifferenceLogicBooleans`] propagator and post it in the solver.
+	pub fn new_in<I: PropagatorInitActions + ?Sized>(solver: &mut I,
+													 int_vars: &Vec<IntView>,
+													 bool_vars: &Vec<BoolView>,
+													 priority_level: PriorityLevel,
+													 use_inc_imp: bool,
+													 graph: Rc<RefCell<DifferenceLogicGraph>>) {
+
+		let graph_ref = graph.borrow();
+		let node_active = (0..graph_ref.nodes.len()).into_iter().filter(|&i| graph_ref.nodes[i].is_some()).collect_vec();
+		let bool_active = (0..graph_ref.bool_implications.len()).into_iter().filter(|&i| graph_ref.bool_implications[i].is_some()).collect_vec();
+		trace!("Creating boolean propagator for {} int and {} bool vars", node_active.len(), bool_active.len());
+
+		let prop = solver.add_propagator(
+			Box::new(Self {
+				int_vars: int_vars.clone(),
+				bool_vars: bool_vars.clone(),
+				graph: graph.clone(),
+				fixed_bools: IndexSet::default(),
+				use_inc_imp,
+			}),
+			priority_level,
+		);
+
+		for i in bool_active.into_iter() {
+			solver.advise_on_bool_change(prop, bool_vars[i], i as u64);
+		}
+		solver.advise_on_backtrack(prop);
+
+	}
+
+}
+
+impl<P, E> Propagator<P, E> for DifferenceLogicBooleans
+where
+	P: PropagationActions,
+	E: ExplanationActions,
+{
+
+	fn advise_of_backtrack(&mut self, _actions: &mut E) {
+		trace!("Backtrack advise");
+		self.fixed_bools.clear();
+	}
+
+	fn advise_of_bool_change(&mut self, _actions: &mut E, _view: BoolView, data: u64) -> bool {
+		trace!("Boolean b{data} fixed.");
+		self.fixed_bools.insert(data as usize)
+	}
+
 	#[tracing::instrument(name = "difference_logic", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		let mut model_adapter = SolverModelAdapter::new(actions, &self.int_vars, &self.bool_vars);
-		if let Err(e) = self.graph.propagate_bounds(&mut model_adapter, &mut self.state) {
-			self.state.reset_bound_changes();
+		if let Err(e) = self.graph.borrow_mut().propagate_booleans(&mut model_adapter, &self.fixed_bools, self.use_inc_imp) {
+			self.fixed_bools.clear();
 			return Err(e);
 		}
-		if let Err(e) = self.graph.propagate_booleans(&mut model_adapter, &mut self.state, true) { // TODO might want to experiment with no implied checks!
-			self.state.reset_bool_changes();
-			return Err(e);
-		}
+		self.fixed_bools.clear();
 		Ok(())
 	}
 
@@ -2034,7 +2083,6 @@ mod tests {
 	use crate::helpers::linear_transform::LinearTransform;
 	use crate::reformulate::{InitConfig, IntDecisionInner, ReformulationContext};
 	use crate::solver::IntView;
-	use crate::solver::queue::PriorityLevel;
 	use crate::solver::solving_context::SolvingContext;
 	use crate::solver::Value::Int;
 
@@ -2155,7 +2203,7 @@ mod tests {
 		let mut prb = Model::default();
 		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=5]));
 		let b = prb.new_bool_var();
-		let mut diff_logic = DifferenceLogic::new(PriorityLevel::Low);
+		let mut diff_logic = DifferenceLogic::new(2, 1, true);
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[0], int_vars[1], -2));
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[1], int_vars[2], 3));
 		diff_logic.add(DifferenceLogicConstraint::Implied(b, int_vars[1], int_vars[2], 4));
@@ -2189,7 +2237,7 @@ mod tests {
 		let int_vars4 = prb.new_int_vars(2, RangeList::from_iter([1..=4]));
 		let b = prb.new_bool_var();
 		let c = prb.new_bool_var();
-		let mut diff_logic = DifferenceLogic::new(PriorityLevel::Low);
+		let mut diff_logic = DifferenceLogic::new(2, 1, true);
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars5[0], int_vars5[1], -2));
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars5[1], int_vars5[2], 3));
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars5[2], int_vars4[0], -1));
@@ -2233,7 +2281,7 @@ mod tests {
 	fn test_conflict() {
 		let mut prb = Model::default();
 		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
-		let mut diff_logic = DifferenceLogic::new(PriorityLevel::Low);
+		let mut diff_logic = DifferenceLogic::new(2, 1, true);
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[0], int_vars[1], 3));
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[1], int_vars[2], -2));
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[2], int_vars[0], -2));
@@ -2246,7 +2294,7 @@ mod tests {
 	fn test_equal() {
 		let mut prb = Model::default();
 		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
-		let mut diff_logic = DifferenceLogic::new(PriorityLevel::Low);
+		let mut diff_logic = DifferenceLogic::new(2, 1, true);
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[0], int_vars[1], 3));
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[1], int_vars[2], -2));
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[2], int_vars[0], -1));
@@ -2277,7 +2325,7 @@ mod tests {
 		let int_vars = prb.new_int_vars(4, RangeList::from_iter([1..=10]));
 		let b = prb.new_bool_var();
 		let c = prb.new_bool_var();
-		let mut diff_logic = DifferenceLogic::new(PriorityLevel::Low);
+		let mut diff_logic = DifferenceLogic::new(2, 1, true);
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[0], int_vars[1], -2));
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[2], int_vars[0], 3));
 		diff_logic.add(DifferenceLogicConstraint::Implied(b, int_vars[0], int_vars[2], 2));
@@ -2320,7 +2368,7 @@ mod tests {
 		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
 		let b = prb.new_bool_var();
 		let c = prb.new_bool_var();
-		let mut diff_logic = DifferenceLogic::new(PriorityLevel::Low);
+		let mut diff_logic = DifferenceLogic::new(2, 1, true);
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[0], int_vars[1], -2));
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[2], int_vars[0], 3));
 		diff_logic.add(DifferenceLogicConstraint::Implied(b, int_vars[0], int_vars[2], 2));
@@ -2360,7 +2408,7 @@ mod tests {
 	fn test_constants() {
 		let mut prb = Model::default();
 		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
-		let mut diff_logic = DifferenceLogic::new(PriorityLevel::Low);
+		let mut diff_logic = DifferenceLogic::new(2, 1, true);
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[0], int_vars[1], 3));
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[1], int_vars[2], -2));
 		diff_logic.add(DifferenceLogicConstraint::Global(int_vars[2], int_vars[0], 5));
