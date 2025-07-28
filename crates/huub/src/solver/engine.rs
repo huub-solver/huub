@@ -18,7 +18,7 @@ macro_rules! trace_new_lit {
 	};
 }
 
-use std::collections::VecDeque;
+use std::{collections::VecDeque, mem};
 
 use delegate::delegate;
 use index_vec::IndexVec;

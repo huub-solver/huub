@@ -2066,7 +2066,6 @@ where
 mod tests {
 	use std::num::NonZero;
 	use itertools::Itertools;
-	use pindakaas::solver::propagation::PropagatingSolver;
 	use pindakaas::Lit as RawLit;
 	use rangelist::RangeList;
 	use tracing::trace;
@@ -2103,8 +2102,8 @@ mod tests {
 		let mut graph = DifferenceLogicGraph::new(&mut initial_trail, int_vars.len(), bool_vars.len());
 		initial_trail.init_trail(&mut slv);
 		graph.init_trail(&mut initial_trail);
-		let (solver, engine) = slv.oracle.access_solving();
-		let mut ctx = SolvingContext::new(solver, &mut engine.state);
+		let mut engine = slv.engine.borrow_mut();
+		let mut ctx = SolvingContext::new(&mut slv.oracle, &mut engine.state);
   		let mut model_adapter = SolverModelAdapter::new(&mut ctx, &int_vars, &bool_vars);
 		for (x, y, d) in vec![(0, 1, 1), (0, 2, 1), (0, 4, 1),
 							  (1, 4, 1), (1, 5, 1), (2, 4, 1), (3, 4, 1), (3, 5, 1),
@@ -2144,8 +2143,8 @@ mod tests {
 		let mut graph = DifferenceLogicGraph::new(&mut initial_trail, int_vars.len(), bool_vars.len());
 		initial_trail.init_trail(&mut slv);
 		graph.init_trail(&mut initial_trail);
-		let (solver, engine) = slv.oracle.access_solving();
-		let mut ctx = SolvingContext::new(solver, &mut engine.state);
+		let mut engine = slv.engine.borrow_mut();
+		let mut ctx = SolvingContext::new(&mut slv.oracle, &mut engine.state);
 		let mut model_adapter = SolverModelAdapter::new(&mut ctx, &int_vars, &bool_vars);
 		let _  = graph.new_edge(model_adapter.get_trailing_actions(), DiffEdge::new(0, 1, 2, None));
 		let new_index = graph.new_edge(model_adapter.get_trailing_actions(), DiffEdge::new(2, 0, 1, None));
@@ -2178,8 +2177,8 @@ mod tests {
 		let mut graph = DifferenceLogicGraph::new(&mut initial_trail, int_vars.len(), bool_vars.len());
 		initial_trail.init_trail(&mut slv);
 		graph.init_trail(&mut initial_trail);
-		let (solver, engine) = slv.oracle.access_solving();
-		let mut ctx = SolvingContext::new(solver, &mut engine.state);
+		let mut engine = slv.engine.borrow_mut();
+		let mut ctx = SolvingContext::new(&mut slv.oracle, &mut engine.state);
 		let mut model_adapter = SolverModelAdapter::new(&mut ctx, &int_vars, &bool_vars);
 		let _  = graph.new_edge(model_adapter.get_trailing_actions(), DiffEdge::new(0, 1, 2, None));
 		let new_index = graph.new_edge(model_adapter.get_trailing_actions(), DiffEdge::new(1, 2, 1, None));
