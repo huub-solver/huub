@@ -69,14 +69,14 @@ pub struct IntAllDifferentBounds {
 	/// predecessor of i in the `bounds` list.
 	predecessor: Vec<usize>,
 	/// The diﬀerences between critical capacities; that is `diff[i]` is the
-	/// diﬀerence of capacities between `bounds[i]` and its predecessor element in
-	/// the list `bounds[predecessor[i]]`
+	/// diﬀerence of capacities between `bounds[i]` and its predecessor element
+	/// in the list `bounds[predecessor[i]]`
 	diff: Vec<IntVal>,
 	/// The Hall interval pointers; that is, if `hall_interval[i] < i` then the
-	/// half-open interval [`bounds[hall_interval[i]]`, `bounds[i]`) is contained
-	/// in a Hall interval, and otherwise holds a pointer to the Hall interval it
-	/// belongs to. This Hall interval is represented by a tree, with the root
-	/// containing the value of its right end.
+	/// half-open interval [`bounds[hall_interval[i]]`, `bounds[i]`) is
+	/// contained in a Hall interval, and otherwise holds a pointer to the Hall
+	/// interval it belongs to. This Hall interval is represented by a tree,
+	/// with the root containing the value of its right end.
 	hall_interval: Vec<usize>,
 	/// Hall interval bucket transitions
 	bucket: Vec<usize>,
@@ -98,8 +98,8 @@ impl IntAllDifferent {
 		self.bounds_prop.unwrap_or(true)
 	}
 
-	/// Ensure the use of the bounds consistent propagator when this constraint is
-	/// posted to a [`Solver`] object.
+	/// Ensure the use of the bounds consistent propagator when this constraint
+	/// is posted to a [`Solver`] object.
 	///
 	/// Note that this method does not affect whether a value consistent
 	/// propagator will be used or not.
@@ -107,8 +107,8 @@ impl IntAllDifferent {
 		self.bounds_prop = Some(enable);
 	}
 
-	/// Ensure the use of the value consistent propagator when this constraint is
-	/// posted to a [`Solver`] object.
+	/// Ensure the use of the value consistent propagator when this constraint
+	/// is posted to a [`Solver`] object.
 	///
 	/// Note that this method does not affect whether a bounds consistent
 	/// propagator will be used or not.
@@ -305,7 +305,8 @@ impl IntAllDifferentBounds {
 		Ok(())
 	}
 
-	/// Create a new [`AllDifferentBounds`] propagator and post it in the solver.
+	/// Create a new [`AllDifferentBounds`] propagator and post it in the
+	/// solver.
 	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, vars: Vec<IntView>) {
 		let interval = vec![
 			AllDiffVarMeta {
@@ -356,7 +357,8 @@ impl IntAllDifferentBounds {
 		start
 	}
 
-	/// Sets everything in the `transition` slice, between `start` and `end` to `to`
+	/// Sets everything in the `transition` slice, between `start` and `end` to
+	/// `to`
 	///
 	/// # Example
 	///
@@ -366,7 +368,6 @@ impl IntAllDifferentBounds {
 	/// IntAllDifferentBounds::path_set(&mut transition, 2, 3, 5);
 	/// assert_eq!(transition, vec![5, 2, 5, 1, 5, 0]); // now gives // 0 -> 5 -> 0
 	/// ```
-	///
 	fn path_set(transition: &mut [usize], start: usize, end: usize, to: usize) {
 		let mut last;
 		let mut cur = start;
@@ -529,7 +530,7 @@ where
 #[cfg(test)]
 mod tests {
 	use itertools::Itertools;
-	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
+	use pindakaas::Cnf;
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
@@ -548,7 +549,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_all_different_bounds_sat_1() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=3]),
@@ -573,7 +574,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_all_different_bounds_sat_2() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([3..=4]),
@@ -618,7 +619,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_all_different_bounds_sat_3() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([3..=6]),
@@ -691,7 +692,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_all_different_value_sat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=4]),
@@ -719,7 +720,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_all_different_value_unsat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
@@ -745,7 +746,7 @@ mod tests {
 	}
 
 	fn test_sudoku(grid: &[&str], expected: SolveResult) {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv: Solver = Solver::from(&Cnf::default());
 		let mut all_vars = vec![];
 		// create variables and add all different propagator for each row
 		grid.iter().for_each(|row| {

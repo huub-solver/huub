@@ -10,7 +10,8 @@ use crate::{solver::int_var::IntVarRef, IntLitMeaning};
 /// A mapping of Boolean variables to integer variables of which they represent
 /// conditions.
 pub(crate) struct BoolToIntMap {
-	/// The mapping of eagerly created Boolean variables to the integer variables.
+	/// The mapping of eagerly created Boolean variables to the integer
+	/// variables.
 	eager: Vec<(VarRange, IntVarRef)>,
 	/// The mapping of lazily created Boolean variables to the integer variables
 	/// and their meanings.

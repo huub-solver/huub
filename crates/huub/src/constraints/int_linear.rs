@@ -211,7 +211,8 @@ impl IntLinear {
 
 impl<S: SimplificationActions> Constraint<S> for IntLinear {
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		// If the reification of the constriant is known, simplify to non-reified version
+		// If the reification of the constriant is known, simplify to non-reified
+		// version
 		if let Some(Reification::ImpliedBy(r) | Reification::ReifiedBy(r)) = self.reif {
 			match actions.get_bool_val(r) {
 				Some(true) => {
@@ -567,14 +568,16 @@ where
 			}
 		}
 
-		// get the difference between the right-hand-side value and the sum of variable lower bounds
+		// get the difference between the right-hand-side value and the sum of variable
+		// lower bounds
 		let sum = self
 			.terms
 			.iter()
 			.map(|v| actions.get_int_lower_bound(*v))
 			.fold(self.max, |sum, val| sum - val);
 
-		// propagate the reified variable if the sum of lower bounds is greater than the right-hand-side value
+		// propagate the reified variable if the sum of lower bounds is greater than the
+		// right-hand-side value
 		if let Some(&r) = self.reification.get() {
 			let r = BoolView(BoolViewInner::Lit(r));
 			if sum < 0 {
@@ -585,7 +588,8 @@ where
 						.collect_vec()
 				})?;
 			}
-			// skip the remaining propagation if the reified variable is not assigned to true
+			// skip the remaining propagation if the reified variable is not assigned to
+			// true
 			if !actions.get_bool_val(r).unwrap_or(false) {
 				return Ok(());
 			}
@@ -727,9 +731,9 @@ impl IntLinearNotEqValue {
 }
 
 impl<const R: usize> IntLinearNotEqValueImpl<R> {
-	/// Helper function to construct the reason for propagation given the index of
-	/// the variable in the list of variables to sum or the length of the list, if
-	/// explaining the reification.
+	/// Helper function to construct the reason for propagation given the index
+	/// of the variable in the list of variables to sum or the length of the
+	/// list, if explaining the reification.
 	fn reason<A: ExplanationActions>(&self, data: usize) -> impl ReasonBuilder<A> + '_ {
 		move |actions: &mut A| {
 			let mut conj: Vec<_> = self
@@ -799,7 +803,7 @@ where
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
+	use pindakaas::Cnf;
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
@@ -816,7 +820,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_linear_ge_sat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
@@ -868,7 +872,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_linear_le_sat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
@@ -916,7 +920,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_linear_ne_sat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),

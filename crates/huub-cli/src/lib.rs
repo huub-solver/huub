@@ -44,6 +44,7 @@ use huub::{
 	solver::{Goal, IntLitMeaning, SolveResult, Solver, Valuation, Value, View},
 	SlvTermSignal,
 };
+use mimalloc::MiMalloc;
 use pico_args::Arguments;
 use rustc_hash::FxHashMap;
 use tracing::{subscriber::set_default, warn};
@@ -51,6 +52,10 @@ use tracing_subscriber::fmt::MakeWriter;
 use ustr::{ustr, Ustr, UstrMap};
 
 use crate::trace::LitName;
+
+/// Use [`MiMalloc`] as the global allocator.
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 /// Status message to output when it is proven that no more/better solutions can
 /// be found.

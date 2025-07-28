@@ -16,10 +16,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
 	actions::TrailingActions,
-	solver::{
-		engine::Engine, trail::TrailedInt, BoolView, BoolViewInner, IntLitMeaning, IntView,
-		IntViewInner,
-	},
+	solver::{trail::TrailedInt, BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner},
 	IntSetVal, IntVal, LinearTransform, NonZeroIntVal, Solver,
 };
 
@@ -38,9 +35,11 @@ enum DirectEntry<'a> {
 /// either be eagerly crated, and stored as a range of variables, or lazily
 /// created and stored in a [`HashMap`] once created.
 pub(crate) enum DirectStorage {
-	/// Variables for all equality conditions are eagerly created and stored in order
+	/// Variables for all equality conditions are eagerly created and stored in
+	/// order
 	Eager(VarRange),
-	/// Variables for equality conditions are lazily created and stored in a hashmap
+	/// Variables for equality conditions are lazily created and stored in a
+	/// hashmap
 	Lazy(FxHashMap<IntVal, RawVar>),
 }
 
@@ -82,13 +81,13 @@ pub(crate) struct LazyLitDef {
 	/// The meaning that the literal is meant to represent.
 	pub(crate) meaning: IntLitMeaning,
 	/// The variable that represent:
-	/// - if `meaning` is `LitMeaning::Less(j)`, then `prev` contains the literal
-	///   `< i` where `i` is the value right before `j` in the storage.
+	/// - if `meaning` is `LitMeaning::Less(j)`, then `prev` contains the
+	///   literal `< i` where `i` is the value right before `j` in the storage.
 	/// - if `meaning` is `LitMeaning::Eq(k)`, then `prev` contains the literal
 	///   `<j`.
 	pub(crate) prev: Option<RawVar>,
-	/// The variable that represent the literal `< k` where `k` is the value right
-	/// after the value represented by the literal.
+	/// The variable that represent the literal `< k` where `k` is the value
+	/// right after the value represented by the literal.
 	pub(crate) next: Option<RawVar>,
 }
 
@@ -124,19 +123,19 @@ enum OrderEntry<'a> {
 		storage: &'a mut LazyOrderStorage,
 		/// The index of the node in the storage that the entry points to.
 		index: u32,
-		/// An iterator pointing at the range in the domain in which the value of
-		/// which the value of the entry is part.
+		/// An iterator pointing at the range in the domain in which the value
+		/// of which the value of the entry is part.
 		range_iter: RangeIter<'a>,
 	},
 	/// Entry does not exist and can be lazily created.
 	Vacant {
 		/// Reference to the storage where the new entry will be created.
 		storage: &'a mut LazyOrderStorage,
-		/// The index of the node that contains the value right before the new entry
-		/// that will be created.
+		/// The index of the node that contains the value right before the new
+		/// entry that will be created.
 		prev_index: IntVal,
-		/// An iterator pointing at the range in the domain in which the value of
-		/// which the value of the new entry is part.
+		/// An iterator pointing at the range in the domain in which the value
+		/// of which the value of the new entry is part.
 		range_iter: RangeIter<'a>,
 		/// The value for which the entry will be created.
 		val: IntVal,
@@ -167,13 +166,14 @@ pub(crate) struct OrderNode {
 )]
 /// The storage used to store the variables for the inequality conditions.
 pub(crate) enum OrderStorage {
-	/// Variables for all inequality conditions are eagerly created and stored in
-	/// order.
+	/// Variables for all inequality conditions are eagerly created and stored
+	/// in order.
 	Eager {
 		/// A trailed integer that represents the currently lower bound of the
 		/// variable.
 		lower_bound: TrailedInt,
-		/// The range of Boolean variables that represent the inequality conditions.
+		/// The range of Boolean variables that represent the inequality
+		/// conditions.
 		storage: VarRange,
 	},
 	/// Variables for inequality conditions are lazily created and specialized
@@ -376,7 +376,8 @@ impl IntVar {
 		}
 	}
 
-	/// Try and find an (already) existing Boolean literal with the given meaning
+	/// Try and find an (already) existing Boolean literal with the given
+	/// meaning
 	pub(crate) fn get_bool_lit(&self, bv: IntLitMeaning) -> Option<BoolView> {
 		let lb = *self.domain.lower_bound().unwrap();
 		let ub = *self.domain.upper_bound().unwrap();
@@ -396,7 +397,8 @@ impl IntVar {
 		if negate { !bv } else { bv }.into()
 	}
 
-	/// Returns the lower and upper bounds of the current state of the integer variable.
+	/// Returns the lower and upper bounds of the current state of the integer
+	/// variable.
 	pub(crate) fn get_bounds(&self, trail: &impl TrailingActions) -> (IntVal, IntVal) {
 		let lb = match &self.order_encoding {
 			OrderStorage::Eager { lower_bound, .. } => trail.get_trailed_int(*lower_bound),
@@ -412,7 +414,8 @@ impl IntVar {
 		(lb, trail.get_trailed_int(self.upper_bound))
 	}
 
-	/// Returns the boolean view associated with `≥ v` if it exists or weaker version otherwise.
+	/// Returns the boolean view associated with `≥ v` if it exists or weaker
+	/// version otherwise.
 	///
 	/// ## Warning
 	/// This function assumes that `v <= lb`.
@@ -456,7 +459,8 @@ impl IntVar {
 		}
 	}
 
-	/// Returns the boolean view associated with `< v` if it exists or weaker version otherwise.
+	/// Returns the boolean view associated with `< v` if it exists or weaker
+	/// version otherwise.
 	///
 	/// ## Warning
 	/// This function assumes that `v >= ub`.
@@ -518,7 +522,8 @@ impl IntVar {
 		}
 	}
 
-	/// Returns the boolean view associated with the lower bound of the variable being this value.
+	/// Returns the boolean view associated with the lower bound of the variable
+	/// being this value.
 	pub(crate) fn get_lower_bound_lit(&self, trail: &impl TrailingActions) -> BoolView {
 		match &self.order_encoding {
 			OrderStorage::Eager {
@@ -550,7 +555,8 @@ impl IntVar {
 		trail.get_trailed_int(self.upper_bound)
 	}
 
-	/// Returns the boolean view associated with the upper bound of the variable being this value.
+	/// Returns the boolean view associated with the upper bound of the variable
+	/// being this value.
 	pub(crate) fn get_upper_bound_lit(&self, trail: &impl TrailingActions) -> BoolView {
 		match &self.order_encoding {
 			OrderStorage::Eager { storage, .. } => {
@@ -573,7 +579,8 @@ impl IntVar {
 		}
 	}
 
-	/// Returns the meaning of a literal in the context of this integer variable.
+	/// Returns the meaning of a literal in the context of this integer
+	/// variable.
 	///
 	/// # Warning
 	///
@@ -621,9 +628,9 @@ impl IntVar {
 
 	/// Create a new integer variable within the given solver, which the given
 	/// domain. The `order_encoding` and `direct_encoding` parameters determine
-	/// whether literals to reason about the integer variables are created eagerly
-	/// or lazily.
-	pub(crate) fn new_in<Oracle: PropagatingSolver<Engine>>(
+	/// whether literals to reason about the integer variables are created
+	/// eagerly or lazily.
+	pub(crate) fn new_in<Oracle: PropagatingSolver>(
 		slv: &mut Solver<Oracle>,
 		domain: IntSetVal,
 		order_encoding: EncodingType,
@@ -653,17 +660,18 @@ impl IntVar {
 			direct_encoding != EncodingType::Eager || order_encoding == EncodingType::Eager
 		);
 
-		let upper_bound = slv.engine_mut().state.trail.track_int(ub);
+		let mut engine = slv.engine.borrow_mut();
+		let upper_bound = engine.state.trail.track_int(ub);
 		let order_encoding = match order_encoding {
 			EncodingType::Eager => OrderStorage::Eager {
-				lower_bound: slv.engine_mut().state.trail.track_int(lb),
+				lower_bound: engine.state.trail.track_int(lb),
 				storage: slv.oracle.new_var_range(orig_domain_len - 1),
 			},
 			EncodingType::Lazy => OrderStorage::Lazy(LazyOrderStorage {
 				min_index: 0,
 				max_index: 0,
-				lb_index: slv.engine_mut().state.trail.track_int(-1),
-				ub_index: slv.engine_mut().state.trail.track_int(-1),
+				lb_index: engine.state.trail.track_int(-1),
+				ub_index: engine.state.trail.track_int(-1),
 				storage: Vec::default(),
 			}),
 		};
@@ -691,37 +699,33 @@ impl IntVar {
 					let eq_i: RawLit = direct_enc_iter.next().unwrap().into();
 					slv.oracle.add_clause([!eq_i, !ord_i]).unwrap(); // x=i -> x≥i
 					slv.oracle.add_clause([!eq_i, ord_j]).unwrap(); // x=i -> x<(i+n)
-					slv.oracle.add_clause([eq_i, ord_i, !ord_j]).unwrap(); // x≠i -> (x<i \/ x≥(i+n))
+					slv.oracle.add_clause([eq_i, ord_i, !ord_j]).unwrap(); // x≠i -> (x<i \/
+					                                        // x≥(i+n))
 				}
 			}
 			debug_assert!(direct_enc_iter.next().is_none());
 		}
 
 		// Create the resulting integer variable
-		let iv = slv.engine_mut().state.int_vars.push(Self {
+		let iv = engine.state.int_vars.push(Self {
 			direct_encoding,
 			domain,
 			order_encoding,
 			upper_bound,
 		});
 		// Create propagator activation list
-		let r = slv
-			.engine_mut()
-			.state
-			.int_activation
-			.push(Default::default());
+		let r = engine.state.int_activation.push(Default::default());
 		debug_assert_eq!(iv, r);
 
 		// Setup the boolean to integer mapping
-		if let OrderStorage::Eager { storage, .. } = slv.engine().state.int_vars[iv].order_encoding
-		{
+		if let OrderStorage::Eager { storage, .. } = engine.state.int_vars[iv].order_encoding {
 			let mut vars = storage;
-			if let DirectStorage::Eager(vars2) = &slv.engine().state.int_vars[iv].direct_encoding {
+			if let DirectStorage::Eager(vars2) = &engine.state.int_vars[iv].direct_encoding {
 				debug_assert_eq!(Into::<i32>::into(vars.end()) + 1, vars2.start().into());
 				vars = VarRange::new(vars.start(), vars2.end());
 			}
-			slv.engine_mut().state.bool_to_int.insert_eager(vars, iv);
-			slv.engine_mut()
+			engine.state.bool_to_int.insert_eager(vars, iv);
+			engine
 				.state
 				.trail
 				.grow_to_boolvar(vars.clone().next_back().unwrap());
@@ -806,7 +810,8 @@ impl IntVar {
 	///
 	/// # Warning
 	///
-	/// This method assumes the literal for the new upper bound has been created (and propagated).
+	/// This method assumes the literal for the new upper bound has been created
+	/// (and propagated).
 	pub(crate) fn notify_upper_bound(&mut self, trail: &mut impl TrailingActions, val: IntVal) {
 		debug_assert!(val < self.get_upper_bound(trail));
 		let _ = trail.set_trailed_int(self.upper_bound, val);
@@ -1089,8 +1094,8 @@ impl OrderStorage {
 	/// Locate the position in the [`OrderStorage`] that would be used to store
 	/// the representation of the condition `< i`. The method will return a
 	/// [`OrderEntry`] object that can be used to access the condition as a
-	/// [`RawVar`] if it already exists, or insert a new literal to represent the
-	/// condition otherwise.
+	/// [`RawVar`] if it already exists, or insert a new literal to represent
+	/// the condition otherwise.
 	///
 	/// The given `domain` is (in the case of eager creation) used to determine
 	/// the offset of the variable in the `VarRange`.
@@ -1163,11 +1168,11 @@ impl OrderStorage {
 			}
 		}
 	}
-	/// Returns the lowest integer value `j`, for which `< i` is equivalent to `<
-	/// j` in the given `domain. In addition it returns the index of the range in
-	/// `domain` in which `j` is located, and calculate the offset of the
-	/// representation `< j` in a VarRange when the order literals are eagerly
-	/// created.
+	/// Returns the lowest integer value `j`, for which `< i` is equivalent to
+	/// `< j` in the given `domain. In addition it returns the index of the
+	/// range in `domain` in which `j` is located, and calculate the offset of
+	/// the representation `< j` in a VarRange when the order literals are
+	/// eagerly created.
 	fn resolve_val(domain: &RangeList<IntVal>, val: IntVal) -> (IntVal, usize, RangeIter) {
 		let mut offset = -1; // -1 to account for the lower bound
 		let mut it = domain.iter().peekable();
@@ -1196,7 +1201,7 @@ index_vec::define_index_type! {
 
 #[cfg(test)]
 mod tests {
-	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
+	use pindakaas::Cnf;
 	use rangelist::RangeList;
 
 	use crate::{
@@ -1216,7 +1221,7 @@ mod tests {
 				unreachable!()
 			}
 		};
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv: Solver = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from(1..=4),
@@ -1226,7 +1231,7 @@ mod tests {
 		let IntView(IntViewInner::VarRef(a)) = a else {
 			unreachable!()
 		};
-		let a = &mut slv.engine_mut().state.int_vars[a];
+		let a = &mut slv.engine.borrow_mut().state.int_vars[a];
 		let lit = a.get_bool_lit(IntLitMeaning::Less(2)).unwrap();
 		assert_eq!(get_lit(lit), 1);
 		let lit = a.get_bool_lit(IntLitMeaning::GreaterEq(2)).unwrap();
@@ -1246,7 +1251,7 @@ mod tests {
 		let lit = a.get_bool_lit(IntLitMeaning::Eq(4)).unwrap();
 		assert_eq!(get_lit(lit), -3);
 
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv: Solver = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=3, 8..=10]),
@@ -1256,7 +1261,7 @@ mod tests {
 		let IntView(IntViewInner::VarRef(a)) = a else {
 			unreachable!()
 		};
-		let a = &mut slv.engine_mut().state.int_vars[a];
+		let a = &mut slv.engine.borrow_mut().state.int_vars[a];
 		let lit = a.get_bool_lit(IntLitMeaning::Less(2)).unwrap();
 		assert_eq!(get_lit(lit), 1);
 		let lit = a.get_bool_lit(IntLitMeaning::Less(3)).unwrap();

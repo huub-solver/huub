@@ -44,8 +44,8 @@ pub trait Brancher<D: DecisionActions>: DynBrancherClone + Debug {
 pub enum Decision {
 	/// Make the decision to branch on the given literal.
 	Select(RawLit),
-	/// The brancher has exhausted all possible decisions, but can be backtracked
-	/// to a previous state.
+	/// The brancher has exhausted all possible decisions, but can be
+	/// backtracked to a previous state.
 	Exhausted,
 	/// The brancher has exhausted all possible decisions and cannot be
 	/// backtracked to a previous state.
@@ -94,8 +94,8 @@ impl<B: for<'a> Brancher<SolvingContext<'a>> + Clone + 'static> DynBrancherClone
 }
 
 impl BoolBrancher {
-	/// Create a new [`BoolBrancher`] brancher and add to the end of the branching
-	/// queue in the solver.
+	/// Create a new [`BoolBrancher`] brancher and add to the end of the
+	/// branching queue in the solver.
 	pub fn new_in(
 		solver: &mut impl BrancherInitActions,
 		vars: Vec<BoolView>,
@@ -177,8 +177,8 @@ impl Clone for BoxedBrancher {
 }
 
 impl IntBrancher {
-	/// Create a new [`IntBrancher`] brancher and add to the end of the branching
-	/// queue in the solver.
+	/// Create a new [`IntBrancher`] brancher and add to the end of the
+	/// branching queue in the solver.
 	pub fn new_in(
 		solver: &mut impl BrancherInitActions,
 		vars: Vec<IntView>,
@@ -292,8 +292,8 @@ impl<D: DecisionActions> Brancher<D> for IntBrancher {
 }
 
 impl WarmStartBrancher {
-	/// Create a new [`BoolBrancher`] brancher and add to the end of the branching
-	/// queue in the solver.
+	/// Create a new [`BoolBrancher`] brancher and add to the end of the
+	/// branching queue in the solver.
 	pub fn new_in(solver: &mut impl BrancherInitActions, decisions: Vec<BoolView>) {
 		// Filter out the decisions that are already satisfied or are known to cause
 		// a conflict

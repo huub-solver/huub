@@ -36,12 +36,14 @@ impl LinearTransform {
 		}
 	}
 
-	/// Return whether the scale applied by the linear transformation is positive.
+	/// Return whether the scale applied by the linear transformation is
+	/// positive.
 	pub(crate) fn positive_scale(&self) -> bool {
 		self.scale.get() > 0
 	}
 
-	/// Returns whether a value remains an integer after reversing the transformation.
+	/// Returns whether a value remains an integer after reversing the
+	/// transformation.
 	pub(crate) fn rev_remains_integer(&self, val: IntVal) -> bool {
 		(val - self.offset) % self.scale.get() == 0
 	}
@@ -56,8 +58,9 @@ impl LinearTransform {
 	/// Note that this performs the correct rounding to maintain the meaning of
 	/// the literal.
 	///
-	/// If equality literals are requested that cannot be correctly rounded, then
-	/// a boolean `Err` is returned with wether the `LitMeaning` implicitly holds.
+	/// If equality literals are requested that cannot be correctly rounded,
+	/// then a boolean `Err` is returned with wether the `LitMeaning`
+	/// implicitly holds.
 	pub(crate) fn rev_transform_lit(&self, mut lit: IntLitMeaning) -> Result<IntLitMeaning, bool> {
 		let mut transformer = *self;
 		if !self.positive_scale() {

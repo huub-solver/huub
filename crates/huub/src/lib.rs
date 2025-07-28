@@ -68,7 +68,7 @@ use crate::{
 		IntDecisionIndex, IntDecisionInner, ReformulationError, ReformulationMap,
 		ReformulationMapBuilder,
 	},
-	solver::{engine::Engine, IntLitMeaning, Solver},
+	solver::{IntLitMeaning, Solver},
 };
 use crate::constraints::difference_logic::DifferenceLogic;
 
@@ -102,8 +102,8 @@ pub enum Branching {
 	Int(Vec<IntDecision>, VariableSelection, ValueSelection),
 	/// Search by sequentially applying the given branching strategies.
 	Seq(Vec<Branching>),
-	/// Search by enforcing the given Boolean expressions, but abandon the search
-	/// when finding a conflict.
+	/// Search by enforcing the given Boolean expressions, but abandon the
+	/// search when finding a conflict.
 	WarmStart(Vec<BoolDecision>),
 }
 
@@ -218,8 +218,8 @@ pub enum VariableSelection {
 	/// Select the unfixed decision variable with the largest upper bound, using
 	/// the order of the variables in case of a tie.
 	Largest,
-	/// Select the unfixed decision variable with the smallest lower bound, using
-	/// the order of the variables in case of a tie.
+	/// Select the unfixed decision variable with the smallest lower bound,
+	/// using the order of the variables in case of a tie.
 	Smallest,
 }
 
@@ -296,6 +296,9 @@ pub fn disjunctive_strict(
 	DisjunctiveStrict {
 		start_times,
 		durations,
+		edge_finding_prop: None,
+		not_last_prop: None,
+		detectable_precedence_prop: None,
 	}
 }
 
@@ -501,9 +504,9 @@ impl From<BoolDecision> for BoolFormula {
 }
 
 impl Branching {
-	/// Add a [`Brancher`] implementation to the solver that matches the branching
-	/// strategy of the [`Branching`].
-	pub(crate) fn to_solver<Oracle: PropagatingSolver<Engine>>(
+	/// Add a [`Brancher`] implementation to the solver that matches the
+	/// branching strategy of the [`Branching`].
+	pub(crate) fn to_solver<Oracle: PropagatingSolver>(
 		&self,
 		slv: &mut Solver<Oracle>,
 		map: &ReformulationMap,
@@ -543,8 +546,8 @@ impl From<IntDecision> for Decision {
 }
 
 impl IntDecision {
-	/// Get a Boolean view that represent whether the integer view is equal to the
-	/// given value.
+	/// Get a Boolean view that represent whether the integer view is equal to
+	/// the given value.
 	pub fn eq(&self, v: IntVal) -> BoolDecision {
 		use IntDecisionInner::*;
 
@@ -574,20 +577,20 @@ impl IntDecision {
 		}
 	}
 
-	/// Get a Boolean view that represent whether the integer view is greater than
-	/// or equal to the given value.
+	/// Get a Boolean view that represent whether the integer view is greater
+	/// than or equal to the given value.
 	pub fn geq(&self, v: IntVal) -> BoolDecision {
 		!self.lt(v)
 	}
 
-	/// Get a Boolean view that represent whether the integer view is greater than
-	/// the given value.
+	/// Get a Boolean view that represent whether the integer view is greater
+	/// than the given value.
 	pub fn gt(&self, v: IntVal) -> BoolDecision {
 		self.geq(v + 1)
 	}
 
-	/// Get a Boolean view that represent whether the integer view is less than or
-	/// equal to the given value.
+	/// Get a Boolean view that represent whether the integer view is less than
+	/// or equal to the given value.
 	pub fn leq(&self, v: IntVal) -> BoolDecision {
 		self.lt(v + 1)
 	}
@@ -619,8 +622,8 @@ impl IntDecision {
 		}
 	}
 
-	/// Get a Boolean view that represent whether the integer view is not equal to
-	/// the given value.
+	/// Get a Boolean view that represent whether the integer view is not equal
+	/// to the given value.
 	pub fn ne(&self, v: IntVal) -> BoolDecision {
 		!self.eq(v)
 	}
@@ -1032,7 +1035,8 @@ impl Model {
 	/// Subscribe the constraint located at index `con` to changes in the
 	/// variables it depends on.
 	pub(crate) fn subscribe(&mut self, con: usize) {
-		/// Wrapper around [`Model`] that knows the constraint being initialized.
+		/// Wrapper around [`Model`] that knows the constraint being
+		/// initialized.
 		struct ConstraintInitContext<'a> {
 			/// Index of the constraint being initialized.
 			con: usize,
@@ -1137,17 +1141,16 @@ impl Model {
 	/// to [`crate::SolverView`]. If an error occurs during the reformulation
 	/// process, or if it is found to be trivially unsatisfiable, then an error
 	/// will be returned.
-	pub fn to_solver<Oracle: PropagatingSolver<Engine>>(
+	pub fn to_solver<Oracle: PropagatingSolver>(
 		&mut self,
 		config: &InitConfig,
 	) -> Result<(Solver<Oracle>, ReformulationMap), ReformulationError>
 	where
-		Solver<Oracle>: for<'a> From<&'a Cnf>,
-		Oracle::Slv: 'static,
+		Solver<Oracle>: for<'a> From<&'a Cnf> + 'static,
 	{
 		// TODO: run SAT simplification
 		let mut slv = Solver::<Oracle>::from(&self.cnf);
-		let any_slv: &mut dyn Any = slv.oracle.solver_mut();
+		let any_slv: &mut dyn Any = &mut slv.oracle;
 		if let Some(r) = any_slv.downcast_mut::<Cadical>() {
 			// Set the solver options for preprocessing/inprocessing
 			r.set_option("condition", config.conditioning() as i32);

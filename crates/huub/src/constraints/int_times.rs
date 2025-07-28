@@ -156,7 +156,8 @@ where
 		let pr_lb_lit = actions.get_int_lower_bound_lit(self.product);
 		let pr_ub_lit = actions.get_int_upper_bound_lit(self.product);
 
-		// TODO: Filter possibilities based on whether variables can be both positive and negative.
+		// TODO: Filter possibilities based on whether variables can be both positive
+		// and negative.
 
 		// Calculate possible bounds for the product
 		let bounds = [f1_lb * f2_lb, f1_lb * f2_ub, f1_ub * f2_lb, f1_ub * f2_ub];
@@ -243,7 +244,7 @@ where
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
+	use pindakaas::Cnf;
 	use tracing_test::traced_test;
 
 	use crate::{
@@ -257,7 +258,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_int_times_sat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			(-2..=1).into(),

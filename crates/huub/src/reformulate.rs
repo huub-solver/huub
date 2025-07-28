@@ -37,7 +37,7 @@ use crate::{
 	helpers::linear_transform::LinearTransform,
 	solver::{
 		activation_list::IntPropCond,
-		engine::{Engine, PropRef},
+		engine::PropRef,
 		int_var::{EncodingType, IntVar, IntVarRef},
 		queue::PriorityLevel,
 		trail::TrailedInt,
@@ -198,8 +198,8 @@ pub(crate) struct ReformulationContext<'a> {
 /// e.g. when creating a [`Solver`] from a [`crate::Model`].
 pub enum ReformulationError {
 	#[error("The problem is trivially unsatisfiable")]
-	/// Error used when the problem is found to be unsatisfiable without requiring
-	/// any search.
+	/// Error used when the problem is found to be unsatisfiable without
+	/// requiring any search.
 	TrivialUnsatisfiable,
 }
 
@@ -261,7 +261,7 @@ impl<S: SimplificationActions> Constraint<S> for BoolFormula {
 impl ConstraintStore {
 	/// Map the constraint into propagators and clauses to be added to the given
 	/// solver, using the variable mapping provided.
-	pub(crate) fn to_solver<Oracle: PropagatingSolver<Engine>>(
+	pub(crate) fn to_solver<Oracle: PropagatingSolver>(
 		&mut self,
 		slv: &mut Solver<Oracle>,
 		map: &ReformulationMap,
@@ -335,7 +335,8 @@ impl InitConfig {
 	/// Get the default number of preprocessing rounds in the oracle solver.
 	pub const DEFAULT_PREPROCESSING: usize = 0;
 
-	/// Get whether to enable the globally blocked clause elimination (conditioning) in the oracle solver.
+	/// Get whether to enable the globally blocked clause elimination
+	/// (conditioning) in the oracle solver.
 	pub fn conditioning(&self) -> bool {
 		self.conditioning
 	}
@@ -367,12 +368,14 @@ impl InitConfig {
 		self.restart
 	}
 
-	/// Get whether to enable the global forward subsumption in the oracle solver.
+	/// Get whether to enable the global forward subsumption in the oracle
+	/// solver.
 	pub fn subsumption(&self) -> bool {
 		self.subsumption
 	}
 
-	/// Get whether to enable the bounded variable elimination in the oracle solver.
+	/// Get whether to enable the bounded variable elimination in the oracle
+	/// solver.
 	pub fn variable_elimination(&self) -> bool {
 		self.variable_elimination
 	}
@@ -382,8 +385,8 @@ impl InitConfig {
 		self.vivification
 	}
 
-	/// Change whether to enable the globally blocked clause elimination (conditioning)
-	/// in the oracle solver.
+	/// Change whether to enable the globally blocked clause elimination
+	/// (conditioning) in the oracle solver.
 	pub fn with_conditioning(mut self, conditioning: bool) -> Self {
 		self.conditioning = conditioning;
 		self
@@ -395,8 +398,8 @@ impl InitConfig {
 		self
 	}
 
-	/// Change the maximum cardinality of the domain of an integer variable before
-	/// its order encoding is created lazily.
+	/// Change the maximum cardinality of the domain of an integer variable
+	/// before its order encoding is created lazily.
 	pub fn with_int_eager_limit(mut self, limit: usize) -> Self {
 		self.int_eager_limit = Some(limit);
 		self
@@ -408,7 +411,8 @@ impl InitConfig {
 		self
 	}
 
-	/// Change whether to enable the failed literal probing in the oracle solver.
+	/// Change whether to enable the failed literal probing in the oracle
+	/// solver.
 	pub fn with_probing(mut self, probing: bool) -> Self {
 		self.probing = probing;
 		self
@@ -420,13 +424,15 @@ impl InitConfig {
 		self
 	}
 
-	/// Change whether to enable the global forward subsumption in the oracle solver.
+	/// Change whether to enable the global forward subsumption in the oracle
+	/// solver.
 	pub fn with_subsumption(mut self, subsumption: bool) -> Self {
 		self.subsumption = subsumption;
 		self
 	}
 
-	/// Change whether to enable the bounded variable elimination in the oracle solver.
+	/// Change whether to enable the bounded variable elimination in the oracle
+	/// solver.
 	pub fn with_variable_elimination(mut self, variable_elimination: bool) -> Self {
 		self.variable_elimination = variable_elimination;
 		self
@@ -537,7 +543,7 @@ impl From<Unsatisfiable> for ReformulationError {
 
 impl ReformulationMap {
 	/// Lookup the [`SolverView`] to which the given model [`ModelView`] maps.
-	pub fn get<Oracle: PropagatingSolver<Engine>>(
+	pub fn get<Oracle: PropagatingSolver>(
 		&self,
 		slv: &mut Solver<Oracle>,
 		index: &Decision,
@@ -548,8 +554,8 @@ impl ReformulationMap {
 		}
 	}
 
-	/// Lookup the solver [`BoolView`] to which the given model [`bool::BoolView`]
-	/// maps.
+	/// Lookup the solver [`BoolView`] to which the given model
+	/// [`bool::BoolView`] maps.
 	pub fn get_bool(&self, slv: &mut dyn PropagatorInitActions, bv: BoolDecision) -> BoolView {
 		use BoolDecisionInner::*;
 
@@ -602,8 +608,8 @@ impl ReformulationMap {
 }
 
 impl ReformulationMapBuilder {
-	/// Create the [`ReformulationMap`] object ensuring that all variables have a
-	/// representation in the [`Solver`].
+	/// Create the [`ReformulationMap`] object ensuring that all variables have
+	/// a representation in the [`Solver`].
 	pub(crate) fn finalize(self) -> ReformulationMap {
 		ReformulationMap {
 			bool_map: self
@@ -619,12 +625,12 @@ impl ReformulationMapBuilder {
 		}
 	}
 
-	/// Get the representation of a Boolean decision variable in the [`Solver`] or
-	/// create it if it does not yet exist.
+	/// Get the representation of a Boolean decision variable in the [`Solver`]
+	/// or create it if it does not yet exist.
 	///
 	/// Note that this method will function recursively (toghether with
 	/// [`Self::get_or_create_bool`]) to resolve aliased variables.
-	pub(crate) fn get_or_create_bool<Oracle: PropagatingSolver<Engine>>(
+	pub(crate) fn get_or_create_bool<Oracle: PropagatingSolver>(
 		&mut self,
 		model: &Model,
 		slv: &mut Solver<Oracle>,
@@ -668,12 +674,12 @@ impl ReformulationMapBuilder {
 		}
 	}
 
-	/// Get the representation of a Integer decision variable in the [`Solver`] or
-	/// create it if it does not yet exist.
+	/// Get the representation of a Integer decision variable in the [`Solver`]
+	/// or create it if it does not yet exist.
 	///
 	/// Note that this method will function recursively (toghether with
 	/// [`Self::get_or_create_bool`]) to resolve aliased variables.
-	pub(crate) fn get_or_create_int<Oracle: PropagatingSolver<Engine>>(
+	pub(crate) fn get_or_create_int<Oracle: PropagatingSolver>(
 		&mut self,
 		model: &Model,
 		slv: &mut Solver<Oracle>,
