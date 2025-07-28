@@ -24,6 +24,6 @@
     ["--diff-logic", "Mode to use for diff logic: 0 for off, otherwise bitwise interpretation", "int", "0"],
     ["--diff-logic-prio-bounds", "Priority for diff logic bounds: 0 (Lowest) to 5 (Immediate)", "int", "1"],
     ["--diff-logic-prio-bools", "Priority for diff logic booleans: 0 (Lowest) to 5 (Immediate)", "int", "1"],
-    ["--diff-logic-inc-imp", "Use incremental check of implied constraints (default: on)", bool:true:false", "true"]
+    ["--diff-logic-inc-imp", "Use incremental check of implied constraints (default: on)", "bool:true:false", "true"]
   ]
 }
