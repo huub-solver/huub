@@ -24,6 +24,7 @@ use std::{
 
 use index_vec::IndexVec;
 use pindakaas::Lit as RawLit;
+use tracing::warn;
 
 use crate::{
 	actions::{
@@ -303,16 +304,19 @@ impl Conflict {
 	) -> Self {
 		match reason.build_reason(actions) {
 			Ok(reason) => Self { subject, reason },
-			Err(true) => {
-				if let Some(subject) = subject {
+			Err(true) => match subject {
+				Some(subject) => Self {
+					subject: None,
+					reason: Reason::Simple(!subject),
+				},
+				None => {
+					warn!("Empty conflict detected. This suggests additional reasoning might be possible during Model simplification.");
 					Self {
 						subject: None,
-						reason: Reason::Simple(!subject),
+						reason: Reason::Eager(Box::new([])),
 					}
-				} else {
-					panic!("constructing empty conflict")
 				}
-			}
+			},
 			Err(false) => unreachable!("invalid reason"),
 		}
 	}
