@@ -1,0 +1,96 @@
+name: package
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [develop]
+  release:
+    types: [published]
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: 1
+  RUSTUP_MAX_RETRIES: 10
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  upload-assets:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    if: github.repository_owner == 'huub-solver' && (startsWith(github.event.release.name, 'huub-cli-v') || github.event_name == 'push' )
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-22.04
+          - target: aarch64-apple-darwin
+            os: macos-13
+          # TODO: Possibly add support (requires work on CaDiCaL compilation)
+          # - target: aarch64-pc-windows-msvc
+          #   os: windows-2022
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-22.04
+          - target: x86_64-apple-darwin
+            os: macos-13
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+          - target: x86_64-unknown-freebsd
+            os: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/setup-cross-toolchain-action@v1
+        with:
+          target: ${{ matrix.target }}
+        if: startsWith(matrix.os, 'ubuntu') && !contains(matrix.target, '-musl')
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+        if: contains(matrix.target, '-musl')
+      - run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "${GITHUB_ENV}"
+        if: endsWith(matrix.target, 'windows-msvc')
+      - uses: taiki-e/upload-rust-binary-action@v1
+        if: github.event_name == 'release'
+        with:
+          bin: huub
+          package: huub-cli
+          target: ${{ matrix.target }}
+          include: LICENSE,share/
+          tar: all
+          zip: windows
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: taiki-e/upload-rust-binary-action@v1
+        if: github.event_name == 'push'
+        with:
+          bin: huub
+          package: huub-cli
+          target: ${{ matrix.target }}
+          bin-leading-dir: bin
+          include: LICENSE,share
+          tar: all
+          zip: windows
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: refs/tags/continuous_deployment
+  update_tag:
+    needs: upload-assets
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'huub-solver' && github.event_name == 'push'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Update tag
+        run: |
+          git tag -f continuous_deployment
+          git push -f origin continuous_deployment -o ci.skip
