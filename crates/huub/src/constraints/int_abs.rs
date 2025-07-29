@@ -5,7 +5,8 @@ use std::iter::once;
 
 use crate::{
 	actions::{
-		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+		ConstraintInitActions, ExplanationActions, PropagatorInitActions, ReformulationActions,
+		SimplificationActions,
 	},
 	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
@@ -36,6 +37,11 @@ pub struct IntAbsBounds {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntAbs {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		actions.simplify_on_change_int(self.origin);
+		actions.simplify_on_change_int(self.abs);
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		let (lb, ub) = actions.get_int_bounds(self.origin);
 		if ub < 0 {
