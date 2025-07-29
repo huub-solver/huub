@@ -181,11 +181,15 @@ impl CumulativeTimeTable {
 	/// represent the compulsory parts of tasks. The result is a tuple (bounds,
 	/// heights), where bounds[i]..bounds[i+1] is the interval with height
 	/// heights[i].
-	fn build_profile<I: InspectionActions>(&mut self, actions: &mut I) {
+	fn build_profile_and_check_overload<P: PropagationActions>(
+		&mut self,
+		actions: &mut P,
+	) -> Result<bool, Conflict> {
 		self.bounds.clear();
 		self.heights.clear();
 		let n = self.start_times.len();
 		let mut events = Vec::with_capacity(2 * n);
+		let mut capacity_lb = actions.get_int_lower_bound(self.capacity);
 		// Collect all start and end events of composlary tasks
 		for i in 0..n {
 			let lst = self.latest_start_time(i, actions);
@@ -206,7 +210,8 @@ impl CumulativeTimeTable {
 			);
 		}
 
-		// Build bounds and heights
+		// Build bounds and heights from the events
+		// Check if the resource usage exceeds the capacity lower bound
 		let mut cur_height = 0;
 		let mut last_time = None;
 		for (t, delta) in events {
@@ -214,6 +219,21 @@ impl CumulativeTimeTable {
 				if let Some(lt) = last_time {
 					self.bounds.push(lt);
 					self.heights.push(cur_height);
+				}
+				if cur_height > capacity_lb {
+					trace!(
+						timepoint = t,
+						capacity_lb,
+						cur_height,
+						"Push capacity lower bound"
+					);
+					let mid_point = last_time.map_or(t, |lt| (lt + t) / 2);
+					actions.set_int_lower_bound(
+						self.capacity,
+						cur_height,
+						self.explain_overload_timepoint(cur_height, mid_point),
+					)?;
+					capacity_lb = cur_height;
 				}
 				last_time = Some(t);
 			}
@@ -232,6 +252,7 @@ impl CumulativeTimeTable {
 				"Cumulative time table profile"
 			);
 		}
+		Ok(self.bounds.is_empty())
 	}
 
 	/// Forward sweep: for a given task, check if the profile forces its start
@@ -445,29 +466,6 @@ impl CumulativeTimeTable {
 				limit,
 				self.explain_limit_usage(task, self.bounds[max_period], limit),
 			)?;
-		}
-		Ok(())
-	}
-
-	/// Check if the resource usage exceeds capacity at any point in time.
-	fn check_overload<P: PropagationActions>(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		let mut capacity_lb = actions.get_int_lower_bound(self.capacity);
-		for i in 0..self.bounds.len() - 1 {
-			let mid_point = (self.bounds[i] + self.bounds[i + 1]) / 2;
-			if capacity_lb < self.heights[i] {
-				trace!(
-					timepoint = mid_point,
-					capacity_lb,
-					heights = ?self.heights[i],
-					"Push capacity lower bound"
-				);
-				actions.set_int_lower_bound(
-					self.capacity,
-					self.heights[i],
-					self.explain_overload_timepoint(self.heights[i], mid_point),
-				)?;
-				capacity_lb = self.heights[i];
-			}
 		}
 		Ok(())
 	}
@@ -716,32 +714,37 @@ where
 {
 	#[tracing::instrument(name = "cumulative_timetable", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		// Build the time-table profile
-		self.build_profile(actions);
-
-		if !self.bounds.is_empty() {
-			// Check if the resource usage exceeds capacity at any point
-			self.check_overload(actions)?;
-
-			// Sweeping time: update the earliest start times and the latest completion
-			// times
-			for i in 0..self.start_times.len() {
-				let (lb, ub) = actions.get_int_bounds(self.start_times[i]);
-				if lb < ub {
-					self.sweep_forward(i, actions)?;
-					self.sweep_backward(i, actions)?;
-				}
+		// Build the time-table profile and check resource overload
+		match self.build_profile_and_check_overload(actions) {
+			Ok(true) => {
+				// If the profile is empty, no tasks are active, so we can skip further
+				// propagation
+				return Ok(());
 			}
+			Err(conflict) => {
+				// If there is a conflict, return it
+				return Err(conflict);
+			}
+			_ => {}
+		}
 
-			// Limit usage: update the upper bounds of the resource usage
-			for i in 0..self.start_times.len() {
-				let (req_lb, req_ub) = actions.get_int_bounds(self.usages[i]);
-				if req_lb < req_ub
-					&& self.latest_start_time(i, actions)
-						< self.earliest_completion_time(i, actions)
-				{
-					self.limit_usage(i, actions)?;
-				}
+		// Sweeping time: update the earliest start times and the latest completion
+		// times
+		for i in 0..self.start_times.len() {
+			let (lb, ub) = actions.get_int_bounds(self.start_times[i]);
+			if lb < ub {
+				self.sweep_forward(i, actions)?;
+				self.sweep_backward(i, actions)?;
+			}
+		}
+
+		// Limit usage: update the upper bounds of the resource usage
+		for i in 0..self.start_times.len() {
+			let (req_lb, req_ub) = actions.get_int_bounds(self.usages[i]);
+			if req_lb < req_ub
+				&& self.latest_start_time(i, actions) < self.earliest_completion_time(i, actions)
+			{
+				self.limit_usage(i, actions)?;
 			}
 		}
 		Ok(())
