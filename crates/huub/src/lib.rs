@@ -33,10 +33,10 @@ use std::{
 use flatzinc_serde::FlatZinc;
 use index_vec::{index_vec, IndexVec};
 use itertools::Itertools;
-pub use pindakaas::solver::SlvTermSignal;
+pub use pindakaas::solver::TermSignal;
 use pindakaas::{
 	propositional_logic::Formula,
-	solver::{cadical::Cadical, propagation::PropagatingSolver},
+	solver::{cadical::Cadical, propagation::ExternalPropagation},
 	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit as RawLit, Unsatisfiable,
 };
 use rangelist::{IntervalIterator, RangeList};
@@ -505,7 +505,7 @@ impl From<BoolDecision> for BoolFormula {
 impl Branching {
 	/// Add a [`Brancher`] implementation to the solver that matches the
 	/// branching strategy of the [`Branching`].
-	pub(crate) fn to_solver<Oracle: PropagatingSolver>(
+	pub(crate) fn to_solver<Oracle: ExternalPropagation>(
 		&self,
 		slv: &mut Solver<Oracle>,
 		map: &ReformulationMap,
@@ -1135,7 +1135,7 @@ impl Model {
 	/// to [`crate::SolverView`]. If an error occurs during the reformulation
 	/// process, or if it is found to be trivially unsatisfiable, then an error
 	/// will be returned.
-	pub fn to_solver<Oracle: PropagatingSolver>(
+	pub fn to_solver<Oracle: ExternalPropagation>(
 		&mut self,
 		config: &InitConfig,
 	) -> Result<(Solver<Oracle>, ReformulationMap), ReformulationError>

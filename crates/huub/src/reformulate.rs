@@ -7,7 +7,7 @@ use delegate::delegate;
 use index_vec::{define_index_type, IndexVec};
 use pindakaas::{
 	propositional_logic::{Formula, TseitinEncoder},
-	solver::propagation::PropagatingSolver,
+	solver::propagation::ExternalPropagation,
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit as RawLit, Unsatisfiable,
 };
 use rangelist::IntervalIterator;
@@ -251,7 +251,7 @@ impl<S: SimplificationActions> Constraint<S> for BoolFormula {
 impl ConstraintStore {
 	/// Map the constraint into propagators and clauses to be added to the given
 	/// solver, using the variable mapping provided.
-	pub(crate) fn to_solver<Oracle: PropagatingSolver>(
+	pub(crate) fn to_solver<Oracle: ExternalPropagation>(
 		&self,
 		slv: &mut Solver<Oracle>,
 		map: &ReformulationMap,
@@ -517,7 +517,7 @@ impl From<Unsatisfiable> for ReformulationError {
 
 impl ReformulationMap {
 	/// Lookup the [`SolverView`] to which the given model [`ModelView`] maps.
-	pub fn get<Oracle: PropagatingSolver>(
+	pub fn get<Oracle: ExternalPropagation>(
 		&self,
 		slv: &mut Solver<Oracle>,
 		index: &Decision,
@@ -604,7 +604,7 @@ impl ReformulationMapBuilder {
 	///
 	/// Note that this method will function recursively (toghether with
 	/// [`Self::get_or_create_bool`]) to resolve aliased variables.
-	pub(crate) fn get_or_create_bool<Oracle: PropagatingSolver>(
+	pub(crate) fn get_or_create_bool<Oracle: ExternalPropagation>(
 		&mut self,
 		model: &Model,
 		slv: &mut Solver<Oracle>,
@@ -653,7 +653,7 @@ impl ReformulationMapBuilder {
 	///
 	/// Note that this method will function recursively (toghether with
 	/// [`Self::get_or_create_bool`]) to resolve aliased variables.
-	pub(crate) fn get_or_create_int<Oracle: PropagatingSolver>(
+	pub(crate) fn get_or_create_int<Oracle: ExternalPropagation>(
 		&mut self,
 		model: &Model,
 		slv: &mut Solver<Oracle>,

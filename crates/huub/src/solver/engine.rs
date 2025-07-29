@@ -600,7 +600,6 @@ impl PropagatorExtension for Engine {
 
 impl PropagatorExtensionDefinition for Engine {
 	const CHECK_ONLY: bool = false;
-	const PERSISTENT_ASSIGNMENTS: bool = false;
 	const REASON_PERSISTENCE: ClausePersistence = ClausePersistence::Forgettable;
 }
 

@@ -42,7 +42,7 @@ use huub::{
 	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::{InitConfig, ReformulationError},
 	solver::{Goal, IntLitMeaning, SolveResult, Solver, Valuation, Value, View},
-	SlvTermSignal,
+	TermSignal,
 };
 use mimalloc::MiMalloc;
 use pico_args::Arguments;
@@ -344,9 +344,9 @@ where
 				let interrupted = Arc::clone(&interrupted);
 				slv.set_terminate_callback(Some(move || {
 					if interrupted.load(Ordering::SeqCst) || Instant::now() >= deadline {
-						SlvTermSignal::Terminate
+						TermSignal::Terminate
 					} else {
-						SlvTermSignal::Continue
+						TermSignal::Continue
 					}
 				}));
 			}
@@ -354,18 +354,18 @@ where
 				let interrupted = Arc::clone(&interrupted);
 				slv.set_terminate_callback(Some(move || {
 					if interrupted.load(Ordering::SeqCst) {
-						SlvTermSignal::Terminate
+						TermSignal::Terminate
 					} else {
-						SlvTermSignal::Continue
+						TermSignal::Continue
 					}
 				}));
 			}
 			(false, Some(deadline)) => {
 				slv.set_terminate_callback(Some(move || {
 					if Instant::now() >= deadline {
-						SlvTermSignal::Terminate
+						TermSignal::Terminate
 					} else {
-						SlvTermSignal::Continue
+						TermSignal::Continue
 					}
 				}));
 			}
