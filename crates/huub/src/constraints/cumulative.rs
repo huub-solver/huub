@@ -1062,15 +1062,15 @@ mod tests {
 	#[traced_test]
 	fn test_cumulative_var_capacity_sat() {
 		let mut slv = Solver::from(&Cnf::default());
-		let start = vec![0, 3, 4, 6, 8, 8]
+		let start = [0, 3, 4, 6, 8, 8]
 			.iter()
 			.map(|i| const_to_int_var(&mut slv, *i))
 			.collect::<Vec<_>>();
-		let duration = vec![3, 2, 5, 2, 1, 4]
+		let duration = [3, 2, 5, 2, 1, 4]
 			.iter()
 			.map(|i| const_to_int_var(&mut slv, *i))
 			.collect::<Vec<_>>();
-		let usage = vec![2, 3, 1, 4, 3, 2]
+		let usage = [2, 3, 1, 4, 3, 2]
 			.iter()
 			.map(|i| const_to_int_var(&mut slv, *i))
 			.collect::<Vec<_>>();
@@ -1084,15 +1084,15 @@ mod tests {
 	#[traced_test]
 	fn test_cumulative_var_capacity_unsat() {
 		let mut slv = Solver::from(&Cnf::default());
-		let start = vec![0, 3, 4, 6, 8, 8]
+		let start = [0, 3, 4, 6, 8, 8]
 			.iter()
 			.map(|i| const_to_int_var(&mut slv, *i))
 			.collect::<Vec<_>>();
-		let duration = vec![3, 2, 5, 2, 1, 4]
+		let duration = [3, 2, 5, 2, 1, 4]
 			.iter()
 			.map(|i| const_to_int_var(&mut slv, *i))
 			.collect::<Vec<_>>();
-		let usage = vec![2, 3, 1, 4, 3, 2]
+		let usage = [2, 3, 1, 4, 3, 2]
 			.iter()
 			.map(|i| const_to_int_var(&mut slv, *i))
 			.collect::<Vec<_>>();
