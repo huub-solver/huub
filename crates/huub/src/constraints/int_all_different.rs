@@ -305,7 +305,7 @@ impl IntAllDifferentBounds {
 		Ok(())
 	}
 
-	/// Create a new [`AllDifferentBounds`] propagator and post it in the
+	/// Create a new [`IntAllDifferentBounds`] propagator and post it in the
 	/// solver.
 	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, vars: Vec<IntView>) {
 		let interval = vec![
@@ -440,7 +440,7 @@ where
 }
 
 impl IntAllDifferentValue {
-	/// Create a new [`AllDifferentIntValue`] propagator and post it in the
+	/// Create a new [`IntAllDifferentValue`] propagator and post it in the
 	/// solver.
 	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, vars: Vec<IntView>) {
 		// Initialize a list of indices of decisions that already have a fixed

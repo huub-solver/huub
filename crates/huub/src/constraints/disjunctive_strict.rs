@@ -118,7 +118,7 @@ pub struct DisjunctiveStrictPropagator {
 ///
 /// For a set of tasks Ω, the ECT at an internal node is computed recursively:
 ///
-///     ect_v = max(ect_right, ect_left + total_duration_right)
+/// ect_v = max(ect_right, ect_left + total_duration_right)
 ///
 /// where ect_right and ect_left are the ECTs of the right and left children,
 /// and total_duration_right is the sum of durations in the right subtree. The
@@ -128,7 +128,7 @@ pub struct DisjunctiveStrictPropagator {
 /// edge-finding propagation. Gray tasks (Ѳ) are tasks temporarily excluded from
 /// Ω. The gray ECT is:
 ///
-///     ect_gray(Ω, Ѳ) = max({ect_Ω} ∪ {ect_{Ω ∪ {i}} | i ∈ Ѳ})
+/// ect_gray(Ω, Ѳ) = max({ect_Ω} ∪ {ect_{Ω ∪ {i}} | i ∈ Ѳ})
 ///
 /// where ect_{Ω ∪ {i}} is the ECT if gray task i is added back to Ω.
 ///
@@ -583,15 +583,15 @@ impl DisjunctiveStrictPropagator {
 	///
 	/// For each task `i`, define the set of detectable predecessors:
 	///
-	///   DPrec(T, i) = { j ∈ T | est_i + p_i > lct_j - p_j, j ≠ i }
+	/// DPrec(T, i) = { j ∈ T | est_i + p_i > lct_j - p_j, j ≠ i }
 	///
 	/// The earliest start time of `i` is updated as:
 	///
-	///   est_i := max(est_i, ect_{DPrec(T, i)})
+	/// est_i := max(est_i, ect_{DPrec(T, i)})
 	///
 	/// The algorithm processes tasks in order of increasing earliest completion
-	/// time. For each task, it incrementally builds
-	///   DPrec'(T, i) = { j ∈ T | est_i + p_i > lct_j - p_j }.
+	/// time. For each task, it incrementally builds a set
+	/// DPrec'(T, i) = { j ∈ T | est_i + p_i > lct_j - p_j }.
 	/// All tasks with earliest completion time less than the current task's
 	/// latest start time are added to the Omega-Theta tree. To update est_i,
 	/// the algorithm temporarily removes `i` from the tree, then sets est_i to
@@ -717,11 +717,11 @@ impl DisjunctiveStrictPropagator {
 	/// For a set $Ω \subseteq T$ and a task $i \in (T \setminus Ω)$, task $i$
 	/// must be scheduled after $Ω$ if:
 	///
-	///   $ect_{Ω \cup \{i\}} > lct_Ω$
+	/// $ect_{Ω \cup \{i\}} > lct_Ω$
 	///
 	/// In this case, update the earliest start time of $i$:
 	///
-	///   $est_i := \max(est_i, ect_Ω)$
+	/// $est_i := \max(est_i, ect_Ω)$
 	///
 	/// When the resource is not overloaded for $Ω \cup \{i\}$, it suffices to
 	/// consider the left cut $LCut(T, j) = \{k \in T \mid lct_k \leq lct_j\}$.
@@ -734,7 +734,7 @@ impl DisjunctiveStrictPropagator {
 	/// If not overloaded, the current task is annotated as gray in the tree.
 	/// The Omega-Theta tree maintains the gray earliest completion time:
 	///
-	///   $\bar{ect}(Ω, Ѳ) = \max(\{ect_Ω\} \cup \{ect_{Ω \cup \{i\}} \mid i \in
+	/// $\bar{ect}(Ω, Ѳ) = \max(\{ect_Ω\} \cup \{ect_{Ω \cup \{i\}} \mid i \in
 	/// Ѳ\})$
 	///
 	/// If $\bar{ect}(Ω, Ѳ) > lct_j$, there exists a gray task $i$ such that
@@ -841,16 +841,16 @@ impl DisjunctiveStrictPropagator {
 	/// For a set $Ω \subseteq T$ and a task $i \in (T \setminus Ω)$, task $i$
 	/// cannot be the last if:
 	///
-	///   $est_Ω + p_Ω > lst_i - p_i$
+	/// $est_Ω + p_Ω > lst_i - p_i$
 	///
 	/// In this case, at least one $j \in Ω$ must be scheduled after $i$, so
 	/// update:
 	///
-	///   $lct_i := \min \{ lct_i, \max \{ lst_j \mid j \in Ω \} \}$
+	/// $lct_i := \min \{ lct_i, \max \{ lst_j \mid j \in Ω \} \}$
 	///
 	/// For each $i$, it suffices to check the set:
 	///
-	///   $NLset(T, i) = \{ j \in T \mid lst_j < lct_i,\, j \neq i \}$
+	/// $NLset(T, i) = \{ j \in T \mid lst_j < lct_i,\, j \neq i \}$
 	///
 	/// The algorithm iterates tasks in order of increasing latest completion
 	/// time, incrementally building
@@ -980,11 +980,11 @@ impl DisjunctiveStrictPropagator {
 	///
 	/// For all subsets Ω of tasks:
 	///
-	///     est_Ω + p_Ω > lct_Ω ⇒ conflict (resource overload)
+	/// est_Ω + p_Ω > lct_Ω ⇒ conflict (resource overload)
 	///
 	/// It is sufficient to check the "left cut" for each task j:
 	///
-	///     LCut(T, j) = { k ∈ T | lct_k ≤ lct_j }
+	/// LCut(T, j) = { k ∈ T | lct_k ≤ lct_j }
 	///
 	/// If est_{LCut(T, j)} + p_{LCut(T, j)} > lct_{LCut(T, j)}, then conflict.
 	///
