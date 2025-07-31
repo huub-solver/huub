@@ -68,7 +68,7 @@ impl<S: SimplificationActions> Constraint<S> for Cumulative {
 		// Check if the cumulative constraint is trivially unsatisfiable
 		let mut earliest_start = IntVal::MAX;
 		let mut latest_completion = IntVal::MIN;
-		let capacity = actions.get_int_lower_bound(self.capacity);
+		let capacity = actions.get_int_upper_bound(self.capacity);
 		let mut total_energy = 0;
 		for i in 0..self.start_times.len() {
 			let duration = actions.get_int_lower_bound(self.durations[i]);
@@ -1054,6 +1054,50 @@ mod tests {
 			vec![u_a, u_b, u_c],
 			capacity,
 		);
+
+		slv.assert_unsatisfiable();
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_cumulative_var_capacity_sat() {
+		let mut slv = Solver::from(&Cnf::default());
+		let start = vec![0, 3, 4, 6, 8, 8]
+			.iter()
+			.map(|i| const_to_int_var(&mut slv, *i))
+			.collect::<Vec<_>>();
+		let duration = vec![3, 2, 5, 2, 1, 4]
+			.iter()
+			.map(|i| const_to_int_var(&mut slv, *i))
+			.collect::<Vec<_>>();
+		let usage = vec![2, 3, 1, 4, 3, 2]
+			.iter()
+			.map(|i| const_to_int_var(&mut slv, *i))
+			.collect::<Vec<_>>();
+		let capacity = to_int_var(&mut slv, RangeList::from_iter([1..=6]));
+		CumulativeTimeTable::new_in(&mut slv, start, duration, usage, capacity);
+
+		slv.expect_solutions(&[capacity], expect![[r#"6"#]]);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_cumulative_var_capacity_unsat() {
+		let mut slv = Solver::from(&Cnf::default());
+		let start = vec![0, 3, 4, 6, 8, 8]
+			.iter()
+			.map(|i| const_to_int_var(&mut slv, *i))
+			.collect::<Vec<_>>();
+		let duration = vec![3, 2, 5, 2, 1, 4]
+			.iter()
+			.map(|i| const_to_int_var(&mut slv, *i))
+			.collect::<Vec<_>>();
+		let usage = vec![2, 3, 1, 4, 3, 2]
+			.iter()
+			.map(|i| const_to_int_var(&mut slv, *i))
+			.collect::<Vec<_>>();
+		let capacity = to_int_var(&mut slv, RangeList::from_iter([1..=4]));
+		CumulativeTimeTable::new_in(&mut slv, start, duration, usage, capacity);
 
 		slv.assert_unsatisfiable();
 	}
