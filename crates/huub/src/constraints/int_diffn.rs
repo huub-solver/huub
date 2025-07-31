@@ -1,7 +1,5 @@
 //! Structure and algorithms for the integer diffn constraint, which
 //! enforces that a number of k-dimensional hyperrectangles do not overlap.
-use std::cmp;
-
 use itertools::Itertools;
 use smallvec::SmallVec;
 use tracing::trace;
@@ -35,7 +33,7 @@ pub struct IntDiffn {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Sweep based propagator for the `diffn_int` constraint.
-pub struct IntDiffnSweep {
+pub struct IntDiffnSweep<const NON_STRICT: bool> {
 	/// The origin positions of all objects in all dimensions
 	box_posn: Vec<Vec<IntView>>,
 	/// The sizes of all objects in all dimensions
@@ -43,7 +41,7 @@ pub struct IntDiffnSweep {
 	/// Number of dimensions
 	dimensions: usize,
 	/// Trail which tracks the target property, target[i] = 1 if is has been lost,
-	/// and will make let us skip some iterations since it at that point has been
+	/// and will let us skip some iterations since it at that point has been
 	/// checked to be at a feasible position and fixed.
 	target: Vec<TrailedInt>,
 	/// Trail which tracks the source property, target[i] = 1 if is has been lost,
@@ -58,8 +56,9 @@ pub struct IntDiffnSweep {
 	lb_tracker: Vec<Vec<IntVal>>,
 	/// Tracks the lower bound of the sizes
 	lb_sizes: Vec<Vec<IntVal>>,
-	/// True if non_strict diffn is used, i.e ignore all rectangles with a size of 0
-	non_strict: bool,
+    ///
+    all_fr: Vec<Option<ForbiddenRegion>>,
+    all_fr_no_combine: Vec<Option<ForbiddenRegion>>,
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntDiffn {
@@ -75,7 +74,11 @@ impl<S: SimplificationActions> Constraint<S> for IntDiffn {
 			.iter()
 			.map(|row| row.iter().map(|v| slv.get_solver_int(*v)).collect())
 			.collect();
-		IntDiffnSweep::new_in(slv, box_pos, box_size, self.non_strict);
+        if self.non_strict {
+            IntDiffnSweep::<true>::new_in(slv, box_pos, box_size);
+        } else {
+            IntDiffnSweep::<false>::new_in(slv, box_pos, box_size);
+        }
 		Ok(())
 	}
 }
@@ -89,14 +92,13 @@ struct ForbiddenRegion {
 	ub: SmallVec<[IntVal; 3]>,
 }
 
-impl IntDiffnSweep {
+impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 	/// Prepare a new [`IntDiffnSweep`] propagator to be posted to the
 	/// solver.
 	pub fn new_in<P: PropagatorInitActions + ?Sized>(
 		solver: &mut P,
 		box_posn: Vec<Vec<IntView>>,
 		box_size: Vec<Vec<IntView>>,
-		non_strict: bool,
 	) {
 		// Make sure all sizes are fixed before enqueueing
 		let fixed = box_size
@@ -108,7 +110,7 @@ impl IntDiffnSweep {
 		let box_size_prop: Vec<Vec<IntView>> = box_size.clone();
 
 		// Do not consider objects that are fixed and have a size of 0 when non_strict
-		if non_strict && fixed {
+		if NON_STRICT && fixed {
 			let mut box_size_fixed: Vec<_> = box_size
 				.iter()
 				.map(|row| {
@@ -153,6 +155,9 @@ impl IntDiffnSweep {
 		let ub_tracker_prop = vec![vec![0; box_posn[0].len()]; box_posn.len()];
 		let lb_tracker_prop = vec![vec![0; box_posn[0].len()]; box_posn.len()];
 
+        let all_fr_prop = vec![None; box_posn.len()];
+        let all_fr_no_combine_prop = vec![None; box_posn.len()];
+
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				box_posn: box_posn_prop,
@@ -164,7 +169,9 @@ impl IntDiffnSweep {
 				ub_tracker: ub_tracker_prop,
 				lb_tracker: lb_tracker_prop,
 				lb_sizes: lb_sizes_prop,
-				non_strict,
+                all_fr: all_fr_prop,
+                all_fr_no_combine: all_fr_no_combine_prop,
+
 			}),
 			PriorityLevel::Lowest,
 		);
@@ -185,7 +192,6 @@ impl IntDiffnSweep {
 		all_fr: &[ForbiddenRegion],
 		all_fr_explain: &[ForbiddenRegion],
 	) -> Result<(), Conflict> {
-		trace!("PRUNE MIN");
 		let mut sweep = vec![];
 		let mut jump = vec![];
 		let mut b = true;
@@ -197,7 +203,7 @@ impl IntDiffnSweep {
 		let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
 		while b && infeasible_fr.is_some() {
 			for j in 0..self.dimensions {
-				jump[j] = cmp::min(jump[j], infeasible_fr.unwrap().ub[j] + 1);
+				jump[j] = jump[j].min(infeasible_fr.unwrap().ub[j] + 1);
 			}
 			// Contains side-effects to change sweep
 			b = Self::adjust_sweep_min(
@@ -262,7 +268,7 @@ impl IntDiffnSweep {
 		let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
 		while b && infeasible_fr.is_some() {
 			for j in 0..self.dimensions {
-				jump[j] = cmp::max(jump[j], infeasible_fr.unwrap().lb[j] - 1);
+				jump[j] = jump[j].max(infeasible_fr.unwrap().lb[j] - 1);
 			}
 			// Contains side-effects to change sweep
 			b = Self::adjust_sweep_max(
@@ -377,8 +383,6 @@ impl IntDiffnSweep {
 		o_idx: usize,
 		dimensions: usize,
 	) -> Option<(Vec<ForbiddenRegion>, Vec<ForbiddenRegion>)> {
-		// TODO: To avoid uneccesary allocations, this could be moved to self
-		let mut all_fr: Vec<ForbiddenRegion> = Vec::new();
 		// All forbidden regions but excluding the combine optimization from coalesce
 		let mut all_fr_no_combine: Vec<ForbiddenRegion> = Vec::new();
 		for i in 0..self.box_posn.len() {
@@ -386,14 +390,16 @@ impl IntDiffnSweep {
 			if actions.get_trailed_int(self.source[i]) == 1 {
 				continue;
 			}
+
+			if i == o_idx {
+				continue;
+			};
+
 			let mut fr = ForbiddenRegion {
 				lb: SmallVec::<[IntVal; 3]>::new(),
 				ub: SmallVec::<[IntVal; 3]>::new(),
 			};
 
-			if i == o_idx {
-				continue;
-			};
 			let mut exists = true;
 			for d in 0..self.dimensions {
 				let pos_ub: IntVal = self.ub_tracker[i][d];
@@ -437,8 +443,8 @@ impl IntDiffnSweep {
 						}
 						// they overlap whilst none is a subset of another combine them
 						(3, Some(e)) => {
-							f.lb[e] = cmp::min(f.lb[e], fr.lb[e]);
-							f.ub[e] = cmp::max(f.ub[e], fr.ub[e]);
+							f.lb[e] = f.lb[e].min(fr.lb[e]);
+							f.ub[e] = f.ub[e].max(fr.ub[e]);
 							// exists = false;
 							break;
 						}
@@ -450,8 +456,6 @@ impl IntDiffnSweep {
 				}
 
 				for (c, o) in regions_to_remove.iter().rev() {
-					assert!(fr_support[*c] == *o, "wrong fr support");
-					//println!("WOHOOO IGNORED WSHIT");
 					let _ = all_fr.remove(*c);
 					let _ = all_fr_no_combine.remove(*c);
 					fr_support.retain(|&x| x != *o);
@@ -701,7 +705,7 @@ impl IntDiffnSweep {
 	}
 }
 
-impl<P, E> Propagator<P, E> for IntDiffnSweep
+impl<const NON_STRICT: bool, P, E> Propagator<P, E> for IntDiffnSweep<NON_STRICT>
 where
 	P: PropagationActions,
 	E: ExplanationActions,
@@ -722,7 +726,7 @@ where
 				continue;
 			}
 
-			if self.non_strict
+			if NON_STRICT
 				&& (0..self.dimensions)
 					.any(|d| actions.get_int_val(self.box_size[o_idx][d]) == Some(0))
 			{
@@ -734,10 +738,8 @@ where
 				self.generate_fr::<P>(actions, &mut fr_support, o_idx, self.dimensions)
 			{
 				if self.fixed_in_all_dimensions(o_idx) {
-                    trace!("CONFLICT");
 					// Conflict will occur here since there exists forbidden regions for a fixed
 					// object
-					// TODO: Conflict occurs in all dimensions but we only reason about it in one
 					let reason =
 						self.explain_propagation(actions, &all_fr, &fr_support, o_idx, 0, false);
 					actions.set_int_lower_bound(
@@ -778,11 +780,8 @@ where
 				continue;
 			}
 			for i in 0..self.dimensions {
-				active_b.lb[i] = cmp::min(active_b.lb[i], self.lb_tracker[o_idx][i]);
-				active_b.ub[i] = cmp::max(
-					active_b.ub[i],
-					self.ub_tracker[o_idx][i] + self.lb_sizes[o_idx][i] - 1,
-				);
+				active_b.lb[i] = active_b.lb[i].min(self.lb_tracker[o_idx][i]);
+				active_b.ub[i] = active_b.ub[i].max(self.ub_tracker[o_idx][i] + self.lb_sizes[o_idx][i] - 1);
 			}
 		}
 
