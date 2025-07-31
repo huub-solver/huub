@@ -26,8 +26,8 @@ use crate::{
 	array_minimum_int, constraints::int_table::IntTable, disjunctive_strict, div_int,
 	int_in_set_reif, pow_int, reformulate::ReformulationError, seq_precede_chain_int, table_int,
 	times_int, value_precede_chain_int, BoolDecision, BoolDecisionInner, Branching, Decision,
-	IntDecision, IntDecisionInner, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal,
-	ValueSelection, VariableSelection,
+	IntDecision, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal, ValueSelection,
+	VariableSelection,
 };
 
 #[derive(Error, Debug)]
@@ -1618,7 +1618,7 @@ where
 	/// Unify variables in the [`Model`] that are know to be equivalent.
 	///
 	/// This can happen because of `bool_eq` and `int_eq` constraints in the
-	/// [`FlatZinc`] instance.
+	/// [`FlatZinc`] instance, or because of the `rhs` property of a variable.
 	pub(crate) fn unify_variables(&mut self) -> Result<(), FlatZincError> {
 		let mut unify_map = FxHashMap::<S, Rc<RefCell<Vec<Literal<S>>>>>::default();
 		let unify_map_find = |map: &FxHashMap<S, Rc<RefCell<Vec<Literal<S>>>>>, a: &Literal<S>| {
@@ -1629,7 +1629,9 @@ where
 			}
 		};
 
-		let record_unify = |map: &mut FxHashMap<S, Rc<RefCell<Vec<Literal<S>>>>>, a, b| {
+		let record_unify = |map: &mut FxHashMap<S, Rc<RefCell<Vec<Literal<S>>>>>,
+		                    a: &Literal<S>,
+		                    b: &Literal<S>| {
 			let a_set = unify_map_find(map, a);
 			let b_set = unify_map_find(map, b);
 			match (a_set, b_set) {
@@ -1668,6 +1670,15 @@ where
 			};
 		};
 
+		// Unify variables with their `rhs` value
+		for (s, v) in self.fzn.variables.iter() {
+			if let Some(l) = &v.value {
+				let s_lit = Literal::Identifier(s.clone());
+				record_unify(&mut unify_map, &s_lit, l);
+			}
+		}
+
+		// Unify variables based on constraints
 		for (i, c) in self.fzn.constraints.iter().enumerate() {
 			if self.processed[i] {
 				continue;
@@ -1689,9 +1700,8 @@ where
 				"array_bool_element" | "array_int_element" => {
 					if let [idx, arr, Argument::Literal(b)] = c.args.as_slice() {
 						let arr = self.arg_array(arr)?;
-						let idx = self.arg_int(idx)?;
-						// unify if the index is constant
-						if let IntDecisionInner::Const(idx) = idx.0 {
+						// unify if the index is constants
+						if let Argument::Literal(Literal::Int(idx)) = idx {
 							let a = &arr[(idx - 1) as usize];
 							record_unify(&mut unify_map, a, b);
 							mark_processed(self);
