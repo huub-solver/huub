@@ -42,7 +42,7 @@ use huub::{
 	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::{InitConfig, ReformulationError},
 	solver::{Goal, IntLitMeaning, SolveResult, Solver, Valuation, Value, View},
-	SlvTermSignal,
+	TermSignal,
 };
 use mimalloc::MiMalloc;
 use pico_args::Arguments;
@@ -270,8 +270,10 @@ where
 
 		// Create reverse map for solver variables if required
 		if self.verbose > 0 {
-			let mut lit_map = FxHashMap::default();
-			let mut int_map = vec![ustr(""); slv.init_statistics().int_vars()];
+			let mut lit_map = lit_reverse_map.lock().unwrap();
+			let mut int_map = int_reverse_map.lock().unwrap();
+			debug_assert!(int_map.is_empty());
+			*int_map = vec![ustr(""); slv.init_statistics().int_vars()];
 			let mut keys: Vec<_> = var_map.keys().collect();
 			keys.sort();
 			for name in keys {
@@ -314,8 +316,6 @@ where
 					}
 				}
 			}
-			*lit_reverse_map.lock().unwrap() = lit_map;
-			*int_reverse_map.lock().unwrap() = int_map;
 		}
 
 		// Set Solver Configuration
@@ -360,9 +360,9 @@ where
 				let interrupted = Arc::clone(&interrupted);
 				slv.set_terminate_callback(Some(move || {
 					if interrupted.load(Ordering::SeqCst) || Instant::now() >= deadline {
-						SlvTermSignal::Terminate
+						TermSignal::Terminate
 					} else {
-						SlvTermSignal::Continue
+						TermSignal::Continue
 					}
 				}));
 			}
@@ -370,18 +370,18 @@ where
 				let interrupted = Arc::clone(&interrupted);
 				slv.set_terminate_callback(Some(move || {
 					if interrupted.load(Ordering::SeqCst) {
-						SlvTermSignal::Terminate
+						TermSignal::Terminate
 					} else {
-						SlvTermSignal::Continue
+						TermSignal::Continue
 					}
 				}));
 			}
 			(false, Some(deadline)) => {
 				slv.set_terminate_callback(Some(move || {
 					if Instant::now() >= deadline {
-						SlvTermSignal::Terminate
+						TermSignal::Terminate
 					} else {
-						SlvTermSignal::Continue
+						TermSignal::Continue
 					}
 				}));
 			}

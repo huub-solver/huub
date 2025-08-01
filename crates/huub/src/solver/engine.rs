@@ -36,7 +36,7 @@ use tracing::{debug, trace};
 use crate::{
 	actions::{DecisionActions, ExplanationActions, InspectionActions, TrailingActions},
 	branchers::{BoxedBrancher, Decision},
-	constraints::{BoxedPropagator, Conflict, Reason},
+	constraints::{BoxedPropagator, Conflict, LazyReason, Reason},
 	solver::{
 		activation_list::{ActivationAction, ActivationActionS, ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
@@ -315,7 +315,18 @@ impl PropagatorExtension for Engine {
 		debug_assert!(self.state.propagation_queue.is_empty());
 
 		// Process propagation results, and accept model if no conflict is detected
-		let conflict = self.state.conflict.take();
+		let conflict = self.state.conflict.take().map(|c| {
+			// Convert Lazy reasons into an eager ones
+			if let Reason::Lazy(LazyReason(prop, data)) = c.reason {
+				let reason = self.propagators[prop].explain(&mut self.state, c.subject, data);
+				Conflict {
+					subject: c.subject,
+					reason: Reason::Eager(reason.into()),
+				}
+			} else {
+				c
+			}
+		});
 
 		// Revert to real decision level
 		self.state.notify_backtrack::<true>(level as usize, false);
@@ -600,7 +611,6 @@ impl PropagatorExtension for Engine {
 
 impl PropagatorExtensionDefinition for Engine {
 	const CHECK_ONLY: bool = false;
-	const PERSISTENT_ASSIGNMENTS: bool = false;
 	const REASON_PERSISTENCE: ClausePersistence = ClausePersistence::Forgettable;
 }
 

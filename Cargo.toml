@@ -5,12 +5,12 @@ members = ["crates/huub", "crates/huub-cli"]
 resolver = "2"
 
 [workspace.package]
-repository = "https://github.com/Dekker1/huub"
+repository = "https://github.com/huub-solver/huub"
 version = "0.1.0"
 authors = ["Jip J. Dekker <jip@dekker.one>"]
 edition = "2021"
 license = "MPL-2.0"
-homepage = "https://github.com/Dekker1/huub"
+homepage = "https://huub.solutions"
 categories = ["algorithms", "mathematics", "science"]
 keywords = ["sat", "lcg", "flatzinc", "minizinc", "optimization"]
 

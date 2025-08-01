@@ -8,7 +8,7 @@ use std::{
 
 use itertools::Itertools;
 use pindakaas::{
-	solver::propagation::PropagatingSolver, ClauseDatabaseTools, Lit as RawLit, Var as RawVar,
+	solver::propagation::ExternalPropagation, ClauseDatabaseTools, Lit as RawLit, Var as RawVar,
 	VarRange,
 };
 use rangelist::{IntervalIterator, RangeList};
@@ -630,7 +630,7 @@ impl IntVar {
 	/// domain. The `order_encoding` and `direct_encoding` parameters determine
 	/// whether literals to reason about the integer variables are created
 	/// eagerly or lazily.
-	pub(crate) fn new_in<Oracle: PropagatingSolver>(
+	pub(crate) fn new_in<Oracle: ExternalPropagation>(
 		slv: &mut Solver<Oracle>,
 		domain: IntSetVal,
 		order_encoding: EncodingType,
