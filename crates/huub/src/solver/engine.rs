@@ -572,7 +572,7 @@ impl PropagatorExtension for Engine {
 			{
 				// (DEBUG ONLY) Check that all integers that where fixed by equality
 				// literals had their bound literals set to match.
-				for (iv, i) in std::mem::take(&mut self.state.check_int_fixed) {
+				for (iv, i) in mem::take(&mut self.state.check_int_fixed) {
 					let iv = IntView(IntViewInner::VarRef(iv));
 					debug_assert_eq!(self.state.get_int_val(iv), Some(i));
 					let lb_lit = self

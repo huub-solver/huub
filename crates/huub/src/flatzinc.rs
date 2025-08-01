@@ -30,7 +30,7 @@ use crate::{
 	VariableSelection,
 };
 use crate::constraints::difference_logic::{DifferenceLogic, DifferenceLogicConstraint};
-use crate::reformulate::InitConfig;
+use crate::reformulate::{InitConfig, IntDecisionInner};
 
 #[derive(Error, Debug)]
 /// Errors that can occur when converting a [`FlatZinc`] instance to a [`Model`]
