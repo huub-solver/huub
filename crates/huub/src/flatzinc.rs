@@ -23,10 +23,10 @@ use tracing::warn;
 
 use crate::{
 	abs_int, actions::SimplificationActions, all_different_int, array_element, array_maximum_int,
-	array_minimum_int, constraints::int_table::IntTable, cumulative, disjunctive_strict, div_int,
-	int_in_set_reif, pow_int, reformulate::ReformulationError, seq_precede_chain_int, table_int,
-	times_int, value_precede_chain_int, BoolDecision, BoolDecisionInner, Branching, Decision,
-	IntDecision, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal, ValueSelection,
+	array_minimum_int, circuit, constraints::int_table::IntTable, cumulative, disjunctive_strict,
+	div_int, int_in_set_reif, pow_int, reformulate::ReformulationError, seq_precede_chain_int,
+	table_int, times_int, value_precede_chain_int, BoolDecision, BoolDecisionInner, Branching,
+	Decision, IntDecision, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal, ValueSelection,
 	VariableSelection,
 };
 
@@ -1236,6 +1236,23 @@ where
 							name: "bool_clause_reif",
 							found: c.args.len(),
 							expected: 3,
+						});
+					}
+				}
+				"huub_circuit" => {
+					if let [next] = c.args.as_slice() {
+						let next: Vec<IntDecision> = self
+							.arg_array(next)?
+							.iter()
+							.map(|l| self.lit_int(l))
+							.try_collect()?;
+						let next = next.into_iter().map(|x| x - 1);
+						self.prb += circuit(next);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "huub_circuit",
+							found: c.args.len(),
+							expected: 1,
 						});
 					}
 				}
