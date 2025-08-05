@@ -778,7 +778,9 @@ where
 								Decision::Int(self.prb.new_int_var(r.iter().collect()))
 							}
 							Some(_) => unreachable!(),
-							None => todo!("Variables without a domain are not yet supported"),
+							None => Decision::Int(
+								self.prb.new_int_var((i64::MIN..=(i64::MAX - 1)).into()),
+							),
 						},
 						_ => todo!("Variables of {:?} are not yet supported", var.ty),
 					})
