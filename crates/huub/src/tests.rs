@@ -1,11 +1,18 @@
-use expect_test::Expect;
+use expect_test::{expect, Expect};
 use itertools::Itertools;
-use pindakaas::propositional_logic::Formula;
+use pindakaas::{propositional_logic::Formula, Cnf};
 use rangelist::RangeList;
 
 use crate::{
-	solver::{SolveResult, Value, View},
-	InitConfig, Model, ReformulationError, Solver,
+	actions::SimplificationActions,
+	branchers::IntBrancher,
+	constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
+	solver::{
+		int_var::{EncodingType, IntVar},
+		SolveResult, Value, View,
+	},
+	InitConfig, Model, NonZeroIntVal, ReformulationError, Solver, ValueSelection,
+	VariableSelection,
 };
 
 #[test]
@@ -26,6 +33,47 @@ fn it_works() {
 			assert_ne!(value(a.into()), value(b.into()));
 		}),
 		SolveResult::Satisfied
+	);
+}
+
+#[test]
+/// Tests for when a propagator propagates the same literal twice within the
+/// same call.
+fn test_duplicate_propagation() {
+	let mut slv = Solver::from(&Cnf::default());
+	let a = IntVar::new_in(
+		&mut slv,
+		RangeList::from(0..=1),
+		EncodingType::Eager,
+		EncodingType::Lazy,
+	);
+	let b = IntVar::new_in(
+		&mut slv,
+		RangeList::from(0..=1),
+		EncodingType::Eager,
+		EncodingType::Lazy,
+	);
+	IntLinearLessEqBounds::new_in(
+		&mut slv,
+		[
+			a * NonZeroIntVal::new(3).unwrap(),
+			b,
+			b * NonZeroIntVal::new(2).unwrap(),
+		],
+		3,
+	);
+	IntLinearNotEqValue::new_in(&mut slv, [a * NonZeroIntVal::new(3).unwrap(), b], 3);
+	IntBrancher::new_in(
+		&mut slv,
+		vec![a, b],
+		VariableSelection::InputOrder,
+		ValueSelection::IndomainMax,
+	);
+	slv.expect_solutions(
+		&[a, b],
+		expect![[r#"
+    0, 0
+    0, 1"#]],
 	);
 }
 
@@ -67,6 +115,22 @@ fn test_unify_int_lin_view_domains() {
 	let (res, _, solns) = slv.get_all_solutions(&[a.into(), b.into()]);
 	assert_eq!(res, SolveResult::Complete);
 	assert_eq!(solns, vec![vec![Value::Int(1), Value::Int(3)]]);
+}
+
+#[test]
+/// Test case to check if resolving a multistep linear alias works properly.
+fn lin_multi_alias() {
+	let mut prb = Model::default();
+	let x = prb.new_int_var(RangeList::from_iter([1..=10]));
+	let y = prb.new_int_var(RangeList::from_iter([1..=10]));
+	let z = prb.new_int_var(RangeList::from_iter([1..=10]));
+	let x_trans = x * -1 - 1;
+	let y_trans = y + 1;
+	let z_trans = z + 1;
+	assert!(prb.unify_int(x, y_trans).is_ok());
+	assert!(prb.unify_int(y, z_trans).is_ok());
+	assert_eq!(prb.get_int_lower_bound(x_trans), -11);
+	assert_eq!(prb.get_int_upper_bound(x_trans), -4);
 }
 
 impl Model {
@@ -111,8 +175,8 @@ impl Solver {
 				f(&format_args!(
 					"{}",
 					sol.iter().format_with(", ", |elt, g| match elt {
-						Value::Bool(b) => g(&format_args!("{}", b)),
-						Value::Int(i) => g(&format_args!("{}", i)),
+						Value::Bool(b) => g(&format_args!("{b}")),
+						Value::Int(i) => g(&format_args!("{i}")),
 					})
 				))
 			})

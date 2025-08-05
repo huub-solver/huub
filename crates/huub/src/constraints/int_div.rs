@@ -87,7 +87,8 @@ impl IntDivBounds {
 		solver.enqueue_on_int_change(prop, denominator, IntPropCond::Bounds);
 		solver.enqueue_on_int_change(prop, result, IntPropCond::Bounds);
 
-		// Ensure the consistency of the signs of the three variables using the following clauses.
+		// Ensure the consistency of the signs of the three variables using the
+		// following clauses.
 		if solver.get_int_lower_bound(numerator) < 0
 			|| solver.get_int_lower_bound(denominator) < 0
 			|| solver.get_int_lower_bound(result) < 0
@@ -274,7 +275,7 @@ where
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
+	use pindakaas::Cnf;
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
@@ -289,7 +290,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_int_div_sat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			(-7..=7).into(),

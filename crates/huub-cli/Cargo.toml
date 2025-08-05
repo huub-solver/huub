@@ -1,5 +1,5 @@
 [package]
-name = "fzn-huub"
+name = "huub-cli"
 
 authors.workspace = true
 version.workspace = true
@@ -10,23 +10,29 @@ categories.workspace = true
 keywords.workspace = true
 repository.workspace = true
 
+[[bin]]
+name = "huub"
+path = "src/main.rs"
+
 [[bench]]
-name = "fzn_huub_benchmarks"
+name = "flatzinc_bench"
 harness = false
 
 [dependencies]
-ctrlc = "3.4.4"
+ctrlc = "3.4"
 flatzinc-serde = { workspace = true }
 humantime = "2.1.0"
 huub = { path = "../huub" }
+mimalloc = "0.1.47"
 pico-args = { version = "0.5.0", features = ["combined-flags"] }
+rustc-hash = { workspace = true }
 serde_json = "1.0"
 tracing = { workspace = true }
 tracing-subscriber = "0.3.18"
 ustr = { version = "1.0", features = ["serde"] }
 
 [dev-dependencies]
-divan = { package = "codspeed-divan-compat", version = "2.10.1" }
+divan = { package = "codspeed-divan-compat", version = "3.0" }
 expect-test = { workspace = true }
 
 [lints]

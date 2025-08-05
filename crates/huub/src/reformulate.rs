@@ -7,7 +7,7 @@ use delegate::delegate;
 use index_vec::{define_index_type, IndexVec};
 use pindakaas::{
 	propositional_logic::{Formula, TseitinEncoder},
-	solver::propagation::PropagatingSolver,
+	solver::propagation::ExternalPropagation,
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit as RawLit, Unsatisfiable,
 };
 use rangelist::IntervalIterator;
@@ -31,12 +31,13 @@ use crate::{
 		int_pow::IntPow,
 		int_table::IntTable,
 		int_times::IntTimes,
+		int_value_precede::{IntSeqPrecedeChain, IntValuePrecedeChain},
 		BoxedConstraint, BoxedPropagator, Constraint, SimplificationStatus,
 	},
 	helpers::linear_transform::LinearTransform,
 	solver::{
 		activation_list::IntPropCond,
-		engine::{Engine, PropRef},
+		engine::PropRef,
 		int_var::{EncodingType, IntVar, IntVarRef},
 		queue::PriorityLevel,
 		trail::TrailedInt,
@@ -103,9 +104,11 @@ pub(crate) enum ConstraintStore {
 	IntInSetReif(IntInSetReif),
 	IntLinear(IntLinear),
 	IntPow(IntPow),
+	IntSeqPrecedeChain(IntSeqPrecedeChain),
 	IntTable(IntTable),
 	IntTimes(IntTimes),
 	IntValArrayElement(IntValArrayElement),
+	IntValuePrecedeChain(IntValuePrecedeChain),
 	Other(BoxedConstraint),
 }
 
@@ -123,11 +126,23 @@ pub(crate) enum Domain<E, Alias> {
 /// Configuration object for the reformulation process of creating a [`Solver`]
 /// object from a [`crate::Model`].
 pub struct InitConfig {
+	/// Whether to enable the globally blocked clause elimination (conditioning)
+	conditioning: bool,
+	/// Whether to enable inprocessing in the oracle solver.
+	inprocessing: bool,
 	/// The maximum cardinality of the domain of an integer variable before its
 	/// order encoding is created lazily.
 	int_eager_limit: Option<usize>,
+	/// The number of preprocessing rounds in the oracle solver
+	preprocessing: Option<usize>,
+	/// Whether to enable the failed literal probing in the oracle solver.
+	probing: bool,
 	/// Whether to enable restarts in the oracle solver.
 	restart: bool,
+	/// Whether to enable the global forward subsumption in the oracle solver.
+	subsumption: bool,
+	/// Whether to enable the bounded variable elimination in the oracle solver.
+	variable_elimination: bool,
 	/// Whether to enable the vivification in the oracle solver.
 	vivification: bool,
 }
@@ -173,8 +188,8 @@ pub(crate) struct ReformulationContext<'a> {
 /// e.g. when creating a [`Solver`] from a [`crate::Model`].
 pub enum ReformulationError {
 	#[error("The problem is trivially unsatisfiable")]
-	/// Error used when the problem is found to be unsatisfiable without requiring
-	/// any search.
+	/// Error used when the problem is found to be unsatisfiable without
+	/// requiring any search.
 	TrivialUnsatisfiable,
 }
 
@@ -236,7 +251,7 @@ impl<S: SimplificationActions> Constraint<S> for BoolFormula {
 impl ConstraintStore {
 	/// Map the constraint into propagators and clauses to be added to the given
 	/// solver, using the variable mapping provided.
-	pub(crate) fn to_solver<Oracle: PropagatingSolver<Engine>>(
+	pub(crate) fn to_solver<Oracle: ExternalPropagation>(
 		&self,
 		slv: &mut Solver<Oracle>,
 		map: &ReformulationMap,
@@ -279,6 +294,9 @@ impl ConstraintStore {
 			ConstraintStore::IntPow(con) => {
 				<IntPow as Constraint<Model>>::to_solver(con, &mut actions)
 			}
+			ConstraintStore::IntSeqPrecedeChain(con) => {
+				<IntSeqPrecedeChain as Constraint<Model>>::to_solver(con, &mut actions)
+			}
 			ConstraintStore::IntTable(con) => {
 				<IntTable as Constraint<Model>>::to_solver(con, &mut actions)
 			}
@@ -287,6 +305,9 @@ impl ConstraintStore {
 			}
 			ConstraintStore::IntValArrayElement(con) => {
 				<IntValArrayElement as Constraint<Model>>::to_solver(con, &mut actions)
+			}
+			ConstraintStore::IntValuePrecedeChain(con) => {
+				<IntValuePrecedeChain as Constraint<Model>>::to_solver(con, &mut actions)
 			}
 			ConstraintStore::Other(con) => con.to_solver(&mut actions),
 		}
@@ -298,6 +319,20 @@ impl InitConfig {
 	/// before its order encoding is created lazily.
 	pub const DEFAULT_INT_EAGER_LIMIT: usize = 255;
 
+	/// Get the default number of preprocessing rounds in the oracle solver.
+	pub const DEFAULT_PREPROCESSING: usize = 0;
+
+	/// Get whether to enable the globally blocked clause elimination
+	/// (conditioning) in the oracle solver.
+	pub fn conditioning(&self) -> bool {
+		self.conditioning
+	}
+
+	/// Get whether to enable inprocessing in the oracle solver.
+	pub fn inprocessing(&self) -> bool {
+		self.inprocessing
+	}
+
 	/// Get the maximum cardinality of the domain of an integer variable before
 	/// its order encoding is created lazily.
 	pub fn int_eager_limit(&self) -> usize {
@@ -305,9 +340,31 @@ impl InitConfig {
 			.unwrap_or(Self::DEFAULT_INT_EAGER_LIMIT)
 	}
 
+	/// Get whether to enable preprocessing in the oracle solver.
+	pub fn preprocessing(&self) -> usize {
+		self.preprocessing.unwrap_or(Self::DEFAULT_PREPROCESSING)
+	}
+
+	/// Get whether to enable the failed literal probing in the oracle solver.
+	pub fn probing(&self) -> bool {
+		self.probing
+	}
+
 	/// Get whether to enable restarts in the oracle solver.
 	pub fn restart(&self) -> bool {
 		self.restart
+	}
+
+	/// Get whether to enable the global forward subsumption in the oracle
+	/// solver.
+	pub fn subsumption(&self) -> bool {
+		self.subsumption
+	}
+
+	/// Get whether to enable the bounded variable elimination in the oracle
+	/// solver.
+	pub fn variable_elimination(&self) -> bool {
+		self.variable_elimination
 	}
 
 	/// Get whether to enable the vivification in the oracle solver.
@@ -315,16 +372,56 @@ impl InitConfig {
 		self.vivification
 	}
 
-	/// Change the maximum cardinality of the domain of an integer variable before
-	/// its order encoding is created lazily.
+	/// Change whether to enable the globally blocked clause elimination
+	/// (conditioning) in the oracle solver.
+	pub fn with_conditioning(mut self, conditioning: bool) -> Self {
+		self.conditioning = conditioning;
+		self
+	}
+
+	/// Change whether to enable inprocessing in the oracle solver.
+	pub fn with_inprocessing(mut self, inprocessing: bool) -> Self {
+		self.inprocessing = inprocessing;
+		self
+	}
+
+	/// Change the maximum cardinality of the domain of an integer variable
+	/// before its order encoding is created lazily.
 	pub fn with_int_eager_limit(mut self, limit: usize) -> Self {
 		self.int_eager_limit = Some(limit);
+		self
+	}
+
+	/// Change the number of preprocessing rounds in the oracle solver.
+	pub fn with_preprocessing(mut self, preprocessing: usize) -> Self {
+		self.preprocessing = Some(preprocessing);
+		self
+	}
+
+	/// Change whether to enable the failed literal probing in the oracle
+	/// solver.
+	pub fn with_probing(mut self, probing: bool) -> Self {
+		self.probing = probing;
 		self
 	}
 
 	/// Change whether to enable restarts in the oracle solver.
 	pub fn with_restart(mut self, restart: bool) -> Self {
 		self.restart = restart;
+		self
+	}
+
+	/// Change whether to enable the global forward subsumption in the oracle
+	/// solver.
+	pub fn with_subsumption(mut self, subsumption: bool) -> Self {
+		self.subsumption = subsumption;
+		self
+	}
+
+	/// Change whether to enable the bounded variable elimination in the oracle
+	/// solver.
+	pub fn with_variable_elimination(mut self, variable_elimination: bool) -> Self {
+		self.variable_elimination = variable_elimination;
 		self
 	}
 
@@ -377,6 +474,9 @@ impl PropagatorInitActions for ReformulationContext<'_> {
 	delegate! {
 		to self.slv {
 			fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef;
+			fn advise_on_backtrack(&mut self, prop: PropRef);
+			fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView, data: u64);
+			fn advise_on_int_change(&mut self, prop: PropRef, var: IntView, condition: IntPropCond, data: u64);
 			fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt;
 			fn enqueue_now(&mut self, prop: PropRef);
 			fn enqueue_on_bool_change(&mut self, prop: PropRef, var: BoolView);
@@ -417,7 +517,7 @@ impl From<Unsatisfiable> for ReformulationError {
 
 impl ReformulationMap {
 	/// Lookup the [`SolverView`] to which the given model [`ModelView`] maps.
-	pub fn get<Oracle: PropagatingSolver<Engine>>(
+	pub fn get<Oracle: ExternalPropagation>(
 		&self,
 		slv: &mut Solver<Oracle>,
 		index: &Decision,
@@ -428,8 +528,8 @@ impl ReformulationMap {
 		}
 	}
 
-	/// Lookup the solver [`BoolView`] to which the given model [`bool::BoolView`]
-	/// maps.
+	/// Lookup the solver [`BoolView`] to which the given model
+	/// [`bool::BoolView`] maps.
 	pub fn get_bool(&self, slv: &mut dyn PropagatorInitActions, bv: BoolDecision) -> BoolView {
 		use BoolDecisionInner::*;
 
@@ -482,12 +582,78 @@ impl ReformulationMap {
 }
 
 impl ReformulationMapBuilder {
-	/// Get the representation of a Integer decision variable in the [`Solver`] or
-	/// create it if it does not yet exist.
+	/// Create the [`ReformulationMap`] object ensuring that all variables have
+	/// a representation in the [`Solver`].
+	pub(crate) fn finalize(self) -> ReformulationMap {
+		ReformulationMap {
+			bool_map: self
+				.bool_map
+				.into_iter()
+				.map(|v| v.expect("variable should be resolved before finalize()"))
+				.collect(),
+			int_map: self
+				.int_map
+				.into_iter()
+				.map(|v| v.expect("variable should be resolved before finalize()"))
+				.collect(),
+		}
+	}
+
+	/// Get the representation of a Boolean decision variable in the [`Solver`]
+	/// or create it if it does not yet exist.
 	///
 	/// Note that this method will function recursively (toghether with
 	/// [`Self::get_or_create_bool`]) to resolve aliased variables.
-	pub(crate) fn get_or_create_int<Oracle: PropagatingSolver<Engine>>(
+	pub(crate) fn get_or_create_bool<Oracle: ExternalPropagation>(
+		&mut self,
+		model: &Model,
+		slv: &mut Solver<Oracle>,
+		bv: BoolDecision,
+	) -> BoolView {
+		use BoolDecisionInner::*;
+		match bv.0 {
+			Lit(lit) => {
+				let idx = Into::<i32>::into(lit.var()) as usize - 1;
+				if let Some(v) = self.bool_map[idx] {
+					return if lit.is_negated() { !v } else { v };
+				}
+				let def = &model.bool_vars[idx];
+				let view = match def.alias {
+					Some(alias) => self.get_or_create_bool(model, slv, alias),
+					None => {
+						let v = slv.new_lit();
+						BoolView(BoolViewInner::Lit(v))
+					}
+				};
+				self.bool_map[idx] = Some(view);
+				view
+			}
+			Const(b) => b.into(),
+			IntEq(idx, val) => {
+				let iv = self.get_or_create_int(model, slv, idx);
+				slv.get_int_lit(iv, IntLitMeaning::Eq(val))
+			}
+			IntGreaterEq(idx, val) => {
+				let iv = self.get_or_create_int(model, slv, idx);
+				slv.get_int_lit(iv, IntLitMeaning::GreaterEq(val))
+			}
+			IntLess(idx, val) => {
+				let iv = self.get_or_create_int(model, slv, idx);
+				slv.get_int_lit(iv, IntLitMeaning::Less(val))
+			}
+			IntNotEq(idx, val) => {
+				let iv = self.get_or_create_int(model, slv, idx);
+				slv.get_int_lit(iv, IntLitMeaning::NotEq(val))
+			}
+		}
+	}
+
+	/// Get the representation of a Integer decision variable in the [`Solver`]
+	/// or create it if it does not yet exist.
+	///
+	/// Note that this method will function recursively (toghether with
+	/// [`Self::get_or_create_bool`]) to resolve aliased variables.
+	pub(crate) fn get_or_create_int<Oracle: ExternalPropagation>(
 		&mut self,
 		model: &Model,
 		slv: &mut Solver<Oracle>,
@@ -533,72 +699,6 @@ impl ReformulationMapBuilder {
 
 		self.int_map[iv] = Some(view);
 		view
-	}
-
-	/// Get the representation of a Boolean decision variable in the [`Solver`] or
-	/// create it if it does not yet exist.
-	///
-	/// Note that this method will function recursively (toghether with
-	/// [`Self::get_or_create_bool`]) to resolve aliased variables.
-	pub(crate) fn get_or_create_bool<Oracle: PropagatingSolver<Engine>>(
-		&mut self,
-		model: &Model,
-		slv: &mut Solver<Oracle>,
-		bv: BoolDecision,
-	) -> BoolView {
-		use BoolDecisionInner::*;
-		match bv.0 {
-			Lit(lit) => {
-				let idx = Into::<i32>::into(lit.var()) as usize - 1;
-				if let Some(v) = self.bool_map[idx] {
-					return if lit.is_negated() { !v } else { v };
-				}
-				let def = &model.bool_vars[idx];
-				let view = match def.alias {
-					Some(alias) => self.get_or_create_bool(model, slv, alias),
-					None => {
-						let v = slv.new_lit();
-						BoolView(BoolViewInner::Lit(v))
-					}
-				};
-				self.bool_map[idx] = Some(view);
-				view
-			}
-			Const(b) => b.into(),
-			IntEq(idx, val) => {
-				let iv = self.get_or_create_int(model, slv, idx);
-				slv.get_int_lit(iv, IntLitMeaning::Eq(val))
-			}
-			IntGreaterEq(idx, val) => {
-				let iv = self.get_or_create_int(model, slv, idx);
-				slv.get_int_lit(iv, IntLitMeaning::GreaterEq(val))
-			}
-			IntLess(idx, val) => {
-				let iv = self.get_or_create_int(model, slv, idx);
-				slv.get_int_lit(iv, IntLitMeaning::Less(val))
-			}
-			IntNotEq(idx, val) => {
-				let iv = self.get_or_create_int(model, slv, idx);
-				slv.get_int_lit(iv, IntLitMeaning::NotEq(val))
-			}
-		}
-	}
-
-	/// Create the [`ReformulationMap`] object ensuring that all variables have a
-	/// representation in the [`Solver`].
-	pub(crate) fn finalize(self) -> ReformulationMap {
-		ReformulationMap {
-			bool_map: self
-				.bool_map
-				.into_iter()
-				.map(|v| v.expect("variable should be resolved before finalize()"))
-				.collect(),
-			int_map: self
-				.int_map
-				.into_iter()
-				.map(|v| v.expect("variable should be resolved before finalize()"))
-				.collect(),
-		}
 	}
 }
 

@@ -4,15 +4,22 @@
   "id": "solutions.huub",
   "tags": ["int", "bool", "sat", "lcg"],
   "inputType": "JSON",
-  "executable": "../../fzn-huub",
+  "executable": "../../../bin/huub",
   "mznlib": "../huub",
   "stdFlags": ["-a", "-i", "-f", "-s", "-t", "-v"],
   "extraFlags": [
-    ["--restart","whether to enable restarts during search","bool:false:true","false"],
+    ["--conditioning","Whether to enable the globally blocked clause elimination","bool:false:true","false"],
+    ["--inprocessing","Whether to enable inprocessing techniques","bool:false:true","false"],
     ["--int-eager-limit", "Set the maximum cardinality for which all order literals to represent an integer variable are created eagerly", "int", 255],
+    ["--preprocessing","The number of preprocessing rounds of the SAT solver","int","0"],
+    ["--probing","Whether to enable the failed literal probing","bool:false:true","false"],
+    ["--restart","Whether to enable restarts during search","bool:false:true","false"],
+    ["--subsumption","Whether to enable the global forward subsumption","bool:false:true","false"],
     ["--toggle-vsids", "Alternate between the activity-based search heuristic and the user-specific search heuristic after every restart.", "bool", "false"],
-    ["--vivify","whether to enable vivification","bool:false:true","false"],
-    ["--vsids-after", "Switch to activity-based search heuristic provided by the SAT solver after the given number of conflicts.", "int", "0"],
+    ["--variable-elimination","Whether to enable the bounded variable elimination ","bool:false:true","false"],
+    ["--vivify","Whether to enable vivification","bool:false:true","false"],
+    ["--vsids-after-conflict", "Switch to activity-based search heuristic provided by the SAT solver after the given number of conflicts.", "int", "None"],
+    ["--vsids-after-restart", "Switch to activity-based search heuristic provided by the SAT solver after restart.", "bool", "false"],
     ["--vsids-only", "Only use the activity-based search provided by the SAT solver", "bool", "false"]
   ]
 }

@@ -13,14 +13,14 @@ use crate::{
 	actions::{
 		DecisionActions, ExplanationActions, InspectionActions, PropagationActions, TrailingActions,
 	},
-	constraints::{Conflict, LazyReason, ReasonBuilder},
+	constraints::{Conflict, LazyReason, Reason, ReasonBuilder},
 	solver::{
 		engine::{trace_new_lit, PropRef, State},
 		int_var::{IntVarRef, LazyLitDef},
 		trail::TrailedInt,
 		BoolView, BoolViewInner, BoxedPropagator, IntView, IntViewInner,
 	},
-	Clause, IntLitMeaning, IntVal,
+	IntLitMeaning, IntVal,
 };
 
 /// Type used to communicate whether a change is redundant, conflicting, or new.
@@ -32,6 +32,10 @@ enum ChangeType {
 	/// Change is conflicting, and a conflict should be raised.
 	Conflicting,
 }
+
+/// Helper struct that temporarily captures a built reason to print it for
+/// `tracing`.
+struct ReasonTracePrint<'a>(&'a Result<Reason, bool>);
 
 /// Structure to hold the internal [`State`] of the propagation engine and the
 /// [`SolvingActions`] exposed by the SAT oracle.
@@ -49,6 +53,18 @@ pub struct SolvingContext<'a> {
 	pub(crate) state: &'a mut State,
 	/// Current propagator being executed
 	pub(crate) current_prop: PropRef,
+}
+
+impl Debug for ReasonTracePrint<'_> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		match self.0 {
+			Err(false) => write!(f, "false"),
+			Err(true) => write!(f, "[]"),
+			Ok(Reason::Eager(conj)) => conj.iter().map(|&l| l.into()).collect::<Vec<i32>>().fmt(f),
+			Ok(Reason::Lazy(_)) => write!(f, "lazy"),
+			&Ok(Reason::Simple(l)) => vec![i32::from(l)].fmt(f),
+		}
+	}
 }
 
 impl<'a> SolvingContext<'a> {
@@ -75,7 +91,7 @@ impl<'a> SolvingContext<'a> {
 		Self {
 			slv,
 			state,
-			current_prop: PropRef::new(u32::MAX as usize),
+			current_prop: PropRef::new(i32::MAX as usize),
 		}
 	}
 
@@ -135,7 +151,8 @@ impl<'a> SolvingContext<'a> {
 	}
 
 	/// Run the propagators in the queue until a propagator detects a conflict,
-	/// returns literals to be propagated by the SAT oracle, or the queue is empty.
+	/// returns literals to be propagated by the SAT oracle, or the queue is
+	/// empty.
 	pub(crate) fn run_propagators(&mut self, propagators: &mut IndexVec<PropRef, BoxedPropagator>) {
 		while let Some(p) = self.state.propagator_queue.pop() {
 			debug_assert!(!self.state.failed);
@@ -144,14 +161,19 @@ impl<'a> SolvingContext<'a> {
 			let prop = propagators[p].as_mut();
 			let res = prop.propagate(self);
 			self.state.statistics.propagations += 1;
-			self.current_prop = PropRef::new(u32::MAX as usize);
-			if let Err(Conflict { subject, reason }) = res {
-				let clause: Clause = reason.explain(propagators, self.state, subject);
-				trace!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "conflict detected");
-				debug_assert!(!clause.is_empty());
+			self.current_prop = PropRef::new(i32::MAX as usize);
+			if let Err(conflict) = res {
+				trace!(
+					lit = conflict
+						.subject
+						.map(i32::from)
+						.unwrap_or_default(),
+					reason = ?ReasonTracePrint(&Ok(conflict.reason.clone())),
+					"conflict detected"
+				);
 				debug_assert!(self.state.conflict.is_none());
 				self.state.failed = true;
-				self.state.conflict = Some(clause);
+				self.state.conflict = Some(conflict);
 			}
 			if self.state.conflict.is_some() || !self.state.propagation_queue.is_empty() {
 				return;
@@ -174,7 +196,7 @@ impl DecisionActions for SolvingContext<'_> {
 		let var = &mut self.state.int_vars[iv];
 		let new_var = |def: LazyLitDef| {
 			// Create new variable
-			let v = self.slv.new_var();
+			let v = self.slv.new_observed_var();
 			self.state.trail.grow_to_boolvar(v);
 			trace_new_lit!(iv, def, v);
 			self.state
@@ -238,7 +260,11 @@ impl PropagationActions for SolvingContext<'_> {
 				Some(false) => Err(Conflict::new(self, Some(lit), reason)),
 				None => {
 					let reason = reason.build_reason(self);
-					trace!(lit = i32::from(lit), reason = ?reason, "propagate bool");
+					trace!(
+						lit = i32::from(lit),
+						reason = ?ReasonTracePrint(&reason),
+						"propagate bool"
+					);
 					self.state.register_reason(lit, reason);
 					self.state.propagation_queue.push_back(lit);
 					Ok(())

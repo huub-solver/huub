@@ -9,10 +9,12 @@ pub(crate) mod solving_context;
 pub(crate) mod trail;
 
 use std::{
+	cell::{Ref, RefCell},
 	fmt::{self, Debug, Display, Formatter},
 	hash::Hash,
 	num::NonZeroI32,
 	ops::{Add, AddAssign, Deref, Mul, Neg, Not},
+	rc::Rc,
 };
 
 use delegate::delegate;
@@ -20,12 +22,11 @@ use flatzinc_serde::FlatZinc;
 use itertools::Itertools;
 use pindakaas::{
 	solver::{
-		cadical::PropagatingCadical,
-		propagation::{PropagatingSolver, WithPropagator},
-		FailedAssumtions, LearnCallback, SlvTermSignal, SolveResult as SatSolveResult,
-		TermCallback,
+		cadical::Cadical, propagation::ExternalPropagation, Assumptions, FailedAssumptions,
+		LearnCallback, SolveResult as SatSolveResult, TermSignal, TerminateCallback,
 	},
-	BoolVal, ClauseDatabase, Cnf, Lit as RawLit, Unsatisfiable, Valuation as SatValuation,
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Lit as RawLit, Unsatisfiable,
+	Valuation as SatValuation,
 };
 use tracing::{debug, trace};
 
@@ -39,8 +40,8 @@ use crate::{
 	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::InitConfig,
 	solver::{
-		activation_list::IntPropCond,
-		engine::{trace_new_lit, Engine, PropRef},
+		activation_list::{ActivationAction, IntPropCond},
+		engine::{trace_new_lit, AdvisorDef, Engine, PropRef},
 		int_var::{DirectStorage, IntVarRef, LazyLitDef, OrderStorage},
 		queue::{PriorityLevel, PropagatorInfo},
 		trail::TrailedInt,
@@ -50,11 +51,12 @@ use crate::{
 
 /// Trait implemented by the object given to the callback on detecting failure
 pub trait AssumptionChecker {
-	/// Check if the given assumption literal was used to prove the unsatisfiability
-	/// of the formula under the assumptions used for the last SAT search.
+	/// Check if the given assumption literal was used to prove the
+	/// unsatisfiability of the formula under the assumptions used for the last
+	/// SAT search.
 	///
-	/// Note that for literals 'bv' which are not assumption literals, the behavior
-	/// of is not specified.
+	/// Note that for literals 'bv' which are not assumption literals, the
+	/// behavior of is not specified.
 	fn fail(&self, bv: BoolView) -> bool;
 }
 
@@ -135,8 +137,8 @@ pub(crate) enum IntViewInner {
 	Bool {
 		/// Linear transformation on the integer value of the Boolean literal.
 		transformer: LinearTransform,
-		/// The Boolean literal that is being treated as an integer (`false` -> `0`
-		/// and `true` -> `1`).
+		/// The Boolean literal that is being treated as an integer (`false` ->
+		/// `0` and `true` -> `1`).
 		lit: RawLit,
 	},
 }
@@ -176,28 +178,39 @@ pub enum SolveResult {
 	/// The solver was interrupted before a result could be reached.
 	Unknown,
 }
-
-#[derive(Clone)]
+#[derive(Debug)]
 /// The main solver object that is used to interact with the LCG solver.
-pub struct Solver<Oracle = PropagatingCadical<Engine>> {
-	/// The inner solver that has been extended with the propagation [`Engine`]
-	/// object.
+pub struct Solver<Oracle = Cadical> {
+	/// The oracle solver that has been connected to [`Self::engine`] to perform
+	/// external propagation.
 	pub(crate) oracle: Oracle,
+	/// A reference to the [`Engine`] instance that is connected to
+	/// [`Self::oracle`].
+	pub(crate) engine: Rc<RefCell<Engine>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 /// Structure holding the options using to configure the solver during its
 /// initialization.
 pub(crate) struct SolverConfiguration {
-	/// Switch between the activity-based search heuristic and the user-specific search heuristic after each restart.
+	/// Switch between the activity-based search heuristic and the user-specific
+	/// search heuristic after each restart.
 	///
 	/// This option is ignored if [`vsids_only`] is set to `true`.
 	toggle_vsids: bool,
-	/// Switch to the activity-based search heuristic after the given number of conflicts.
+	/// Switch to the activity-based search heuristic after the given number of
+	/// conflicts.
 	///
-	/// This option is ignored if [`toggle_vsids`] or [`vsids_only`] is set to `true`.
-	vsids_after: Option<u32>,
-	/// Only use the activity-based search heuristic provided by the SAT solver. Ignore the user-specific search heuristic.
+	/// This option is ignored if [`toggle_vsids`] or [`vsids_only`] is set to
+	/// `true`.
+	vsids_after_conflict: Option<u32>,
+	/// Switch to the activity-based search heuristic after restart.
+	///
+	/// This option is ignored if [`toggle_vsids`] or [`vsids_only`] is set to
+	/// `true`.
+	vsids_after_restart: bool,
+	/// Only use the activity-based search heuristic provided by the SAT solver.
+	/// Ignore the user-specific search heuristic.
 	vsids_only: bool,
 }
 
@@ -229,7 +242,7 @@ fn trace_learned_clause(clause: &mut dyn Iterator<Item = RawLit>) {
 	debug!(clause = ?clause.map(i32::from).collect::<Vec<i32>>(), "learn clause");
 }
 
-impl<A: FailedAssumtions> AssumptionChecker for A {
+impl<A: FailedAssumptions> AssumptionChecker for A {
 	fn fail(&self, bv: BoolView) -> bool {
 		match bv {
 			BoolView(BoolViewInner::Lit(lit)) => self.fail(lit),
@@ -249,7 +262,8 @@ impl From<BoolView> for BoolVal {
 }
 
 impl BoolView {
-	/// Return an integers that can used to identify the literal, if there is one.
+	/// Return an integers that can used to identify the literal, if there is
+	/// one.
 	pub fn reverse_map_info(&self) -> Option<NonZeroI32> {
 		match self.0 {
 			BoolViewInner::Lit(v) => Some(v.into()),
@@ -318,11 +332,11 @@ impl InitStatistics {
 }
 
 impl IntLitMeaning {
-	/// Returns the clauses that can be used to define the given literal according
-	/// to the meaning `self`.
+	/// Returns the clauses that can be used to define the given literal
+	/// according to the meaning `self`.
 	///
-	/// Note this method is only intended to be used to define positive literals,
-	/// and it is thus assumed to be unreachable to be called on
+	/// Note this method is only intended to be used to define positive
+	/// literals, and it is thus assumed to be unreachable to be called on
 	/// [`LitMeaning::NotEq`] or [`LitMeaning::GreaterEq`].
 	pub(crate) fn defining_clauses(
 		&self,
@@ -380,9 +394,9 @@ impl IntView {
 			_ => (None, true),
 		}
 	}
-	/// Return a list of integers that can used to identify the literals that are
-	/// associated to an integer view, and the meaning of those literals.
-	pub fn lit_reverse_map_info<Oracle: PropagatingSolver<Engine>>(
+	/// Return a list of integers that can used to identify the literals that
+	/// are associated to an integer view, and the meaning of those literals.
+	pub fn lit_reverse_map_info<Oracle: Assumptions>(
 		&self,
 		slv: &Solver<Oracle>,
 	) -> Vec<(NonZeroI32, IntLitMeaning)> {
@@ -394,7 +408,7 @@ impl IntView {
 		};
 		match self.0 {
 			IntViewInner::VarRef(v) | IntViewInner::Linear { var: v, .. } => {
-				let var = &slv.engine().state.int_vars[v];
+				let var = &slv.engine.borrow().state.int_vars[v];
 				let mut lits = Vec::new();
 
 				if let OrderStorage::Eager { storage, .. } = &var.order_encoding {
@@ -536,23 +550,30 @@ impl SearchStatistics {
 	pub fn conflicts(&self) -> u64 {
 		self.conflicts
 	}
-	/// Return the number of search decisions that was left to the oracle solver.
+
+	/// Returns the number of propagations performed by the constraint
+	/// programming engine during the search.
+	pub fn cp_propagations(&self) -> u64 {
+		self.propagations
+	}
+
+	/// Return the number of search decisions that was left to the oracle
+	/// solver.
 	pub fn oracle_decisions(&self) -> u64 {
 		self.oracle_decisions
 	}
+
 	/// Returns the peak depth of the search tree.
 	pub fn peak_depth(&self) -> u32 {
 		self.peak_depth
 	}
-	/// Returns the number of propagations performed by the constraint programming
-	/// engine during the search.
-	pub fn cp_propagations(&self) -> u64 {
-		self.propagations
-	}
-	/// Returns the number of times the search was restarted by the oracle solver.
+
+	/// Returns the number of times the search was restarted by the oracle
+	/// solver.
 	pub fn restarts(&self) -> u32 {
 		self.restarts
 	}
+
 	/// Returns the number of search decisions that followed the user specified
 	/// search heuristic.
 	pub fn user_decisions(&self) -> u64 {
@@ -580,11 +601,21 @@ impl AddAssign for SearchStatistics {
 	}
 }
 
-impl<Oracle> Solver<Oracle>
-where
-	Oracle: PropagatingSolver<Engine>,
-	Oracle::Slv: LearnCallback,
-{
+impl<Oracle: ClauseDatabase> Solver<Oracle> {
+	/// Add a clause to the solver
+	pub fn add_clause<Iter>(&mut self, clause: Iter) -> Result<(), ReformulationError>
+	where
+		Iter: IntoIterator,
+		Iter::Item: Into<BoolView>,
+	{
+		Ok(ClauseDatabaseTools::add_clause(
+			self,
+			clause.into_iter().map(Into::into),
+		)?)
+	}
+}
+
+impl<Oracle: LearnCallback> Solver<Oracle> {
 	/// Set a callback function used to extract learned clauses up to a given
 	/// length from the solver.
 	///
@@ -597,27 +628,21 @@ where
 		cb: Option<F>,
 	) {
 		if let Some(mut f) = cb {
-			self.oracle.solver_mut().set_learn_callback(Some(
+			self.oracle.set_learn_callback(Some(
 				move |clause: &mut dyn Iterator<Item = RawLit>| {
 					trace_learned_clause(clause);
 					f(clause);
 				},
 			));
 		} else {
-			self.oracle
-				.solver_mut()
-				.set_learn_callback(Some(trace_learned_clause));
+			self.oracle.set_learn_callback(Some(trace_learned_clause));
 		}
 	}
 }
 
-impl<Oracle> Solver<Oracle>
-where
-	Oracle: PropagatingSolver<Engine>,
-	Oracle::Slv: TermCallback,
-{
+impl<Oracle: TerminateCallback> Solver<Oracle> {
 	delegate! {
-		to self.oracle.solver_mut() {
+		to self.oracle {
 			/// Set a callback function used to indicate a termination requirement to the
 			/// solver.
 			///
@@ -629,30 +654,19 @@ where
 			///
 			/// Subsequent calls to this method override the previously set
 			/// callback function.
-			pub fn set_terminate_callback<F: FnMut() -> SlvTermSignal + 'static>(&mut self, cb: Option<F>);
+			pub fn set_terminate_callback<F: FnMut() -> TermSignal + 'static>(&mut self, cb: Option<F>);
 		}
 	}
 }
 
-impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
-	/// Add a clause to the solver
-	pub fn add_clause<Iter>(&mut self, clause: Iter) -> Result<(), ReformulationError>
-	where
-		Iter: IntoIterator,
-		Iter::Item: Into<BoolView>,
-	{
-		Ok(pindakaas::ClauseDatabaseTools::add_clause(
-			self,
-			clause.into_iter().map(Into::into),
-		)?)
-	}
-
+impl<Oracle: ExternalPropagation> Solver<Oracle> {
 	#[doc(hidden)]
 	/// Method used to add a no-good clause from a solution. This clause can be
 	/// used to ensure that the same solution is not found again.
 	///
 	/// ## Warning
-	/// This method will panic if the number of variables and values do not match.
+	/// This method will panic if the number of variables and values do not
+	/// match.
 	pub fn add_no_good(&mut self, vars: &[View], vals: &[Value]) -> Result<(), ReformulationError> {
 		let clause = vars
 			.iter()
@@ -675,12 +689,35 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 		self.add_clause(clause)
 	}
 
+	/// Internal method used to add an advisor that is triggered when a
+	/// [`RawLit`] changes.
+	///
+	/// Used by [`Solver::advise_on_bool_change`] and
+	/// [`Solver::advise_on_int_change`].
+	fn advise_on_lit_change(&mut self, prop: PropRef, lit: RawLit, data: u64, bool2int: bool) {
+		self.oracle.add_observed_var(lit.var());
+		let state = &mut self.engine.borrow_mut().state;
+		state.trail.grow_to_boolvar(lit.var());
+		let adv = state.advisors.push(AdvisorDef {
+			bool2int,
+			data,
+			negated: false,
+			propagator: prop,
+		});
+		state
+			.bool_activation
+			.entry(lit.var())
+			.or_default()
+			.push(ActivationAction::Advise(adv).into());
+	}
+
 	/// Find all solutions with regard to a list of given variables.
 	/// The given closure will be called for each solution found.
 	///
-	/// WARNING: This method will add additional clauses into the solver to prevent the same solution
-	/// from being generated twice. This will make repeated use of the Solver object impossible. Note
-	/// that you can clone the Solver object before calling this method to work around this
+	/// WARNING: This method will add additional clauses into the solver to
+	/// prevent the same solution from being generated twice. This will make
+	/// repeated use of the Solver object impossible. Note that you can clone
+	/// the Solver object before calling this method to work around this
 	/// limitation.
 	pub fn all_solutions(
 		mut self,
@@ -728,8 +765,9 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 
 	/// Find an optimal solution with regards to the given objective and goal.
 	///
-	/// Note that this method uses assumptions iteratively increase the lower bound of the objective.
-	/// This does not impact the state of the solver for continued use.
+	/// Note that this method uses assumptions iteratively increase the lower
+	/// bound of the objective. This does not impact the state of the solver
+	/// for continued use.
 	pub fn branch_and_bound(
 		mut self,
 		objective: IntView,
@@ -802,16 +840,6 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 		}
 	}
 
-	/// Access the inner [`Engine`] object.
-	pub(crate) fn engine(&self) -> &Engine {
-		self.oracle.propagator()
-	}
-
-	/// Mutably access the inner [`Engine`] object.
-	pub(crate) fn engine_mut(&mut self) -> &mut Engine {
-		self.oracle.propagator_mut()
-	}
-
 	/// Create a new [`Solver`] instance from a [`FlatZinc`] instance.
 	pub fn from_fzn<S, MapTy: FromIterator<(S, View)>>(
 		fzn: &FlatZinc<S>,
@@ -820,7 +848,7 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 	where
 		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
 		Solver<Oracle>: for<'a> From<&'a Cnf>,
-		Oracle::Slv: 'static,
+		Oracle: 'static,
 	{
 		let (mut prb, map, fzn_stats) = Model::from_fzn::<S, Vec<_>>(fzn)?;
 		let (mut slv, remap) = prb.to_solver(config)?;
@@ -831,12 +859,13 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 		Ok((slv, map, fzn_stats))
 	}
 
-	/// Wrapper function for `all_solutions` that collects all solutions and returns them in a vector
-	/// of solution values.
+	/// Wrapper function for `all_solutions` that collects all solutions and
+	/// returns them in a vector of solution values.
 	///
-	/// WARNING: This method will add additional clauses into the solver to prevent the same solution
-	/// from being generated twice. This will make repeated use of the Solver object impossible. Note
-	/// that you can clone the Solver object before calling this method to work around this
+	/// WARNING: This method will add additional clauses into the solver to
+	/// prevent the same solution from being generated twice. This will make
+	/// repeated use of the Solver object impossible. Note that you can clone
+	/// the Solver object before calling this method to work around this
 	/// limitation.
 	pub fn get_all_solutions(
 		self,
@@ -856,19 +885,14 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 	/// Access the initilization statistics of the [`Solver`] object.
 	pub fn init_statistics(&self) -> InitStatistics {
 		InitStatistics {
-			int_vars: self.engine().state.int_vars.len(),
-			propagators: self.engine().propagators.len(),
+			int_vars: self.engine.borrow().state.int_vars.len(),
+			propagators: self.engine.borrow().propagators.len(),
 		}
-	}
-
-	/// Deconstruct the Solver object and return the Oracle object.
-	pub fn into_oracle(self) -> Oracle::Slv {
-		self.oracle.into_parts().0
 	}
 
 	/// Access the search statistics for the search process up to this point.
 	pub fn search_statistics(&self) -> SearchStatistics {
-		let cp_stats = &self.engine().state.statistics;
+		let cp_stats = &self.engine.borrow().state.statistics;
 		SearchStatistics {
 			conflicts: cp_stats.conflicts,
 			oracle_decisions: cp_stats.oracle_decisions,
@@ -881,10 +905,73 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 
 	/// Try and find a solution to the problem for which the Solver was
 	/// initialized.
-	pub fn solve(&mut self, on_sol: impl FnMut(&dyn Valuation)) -> SolveResult {
-		self.solve_assuming([], on_sol, |_| {})
+	pub fn solve(&mut self, mut on_sol: impl FnMut(&dyn Valuation)) -> SolveResult {
+		let result = self.oracle.solve();
+		match result {
+			SatSolveResult::Satisfied(sol) => {
+				let wrapped_valuation = Self::wrap_valuation(self.engine.borrow(), sol);
+				on_sol(&wrapped_valuation);
+				SolveResult::Satisfied
+			}
+			SatSolveResult::Unsatisfiable(_) => SolveResult::Unsatisfiable,
+			SatSolveResult::Unknown => SolveResult::Unknown,
+		}
 	}
 
+	/// Wraps a [`SatValuation`] into a [`Valuation`] instance using the
+	/// provided [`Engine`] instance as context.
+	fn wrap_valuation<'a>(
+		engine: Ref<'a, Engine>,
+		sol: impl SatValuation + 'a,
+	) -> impl Valuation + 'a {
+		let get_int_val = |engine: Ref<Engine>, iv: IntVarRef| {
+			let var_def = &engine.state.int_vars[iv];
+			let val = var_def.get_lower_bound(&engine.state.trail);
+			debug_assert!(
+				matches!(var_def.order_encoding, OrderStorage::Lazy(_))
+					|| val == var_def.get_upper_bound(&engine.state.trail)
+			);
+			val
+		};
+		move |x| match x {
+			View::Bool(lit) => Value::Bool(match lit.0 {
+				BoolViewInner::Lit(lit) => sol.value(lit),
+				BoolViewInner::Const(b) => b,
+			}),
+			View::Int(var) => Value::Int(match var.0 {
+				IntViewInner::VarRef(iv) => get_int_val(Ref::clone(&engine), iv),
+				IntViewInner::Const(i) => i,
+				IntViewInner::Linear {
+					transformer: transform,
+					var,
+				} => transform.transform(get_int_val(Ref::clone(&engine), var)),
+				IntViewInner::Bool { transformer, lit } => {
+					transformer.transform(sol.value(lit) as IntVal)
+				}
+			}),
+		}
+	}
+
+	delegate! {
+		to self.engine.borrow_mut().state {
+			/// Set whether the solver should toggle between VSIDS and a user defined
+			/// search strategy after every restart.
+			///
+			/// Note that this setting is ignored if the solver is set to use VSIDS only.
+			pub fn set_toggle_vsids(&mut self, enable: bool);
+			/// Set the number of conflicts after which the solver should switch to using
+			/// VSIDS to make search decisions.
+			pub fn set_vsids_after_conflict(&mut self, conflicts: Option<u32>);
+			/// Set whether the solver should switch to VSIDS after restart to make search.
+			pub fn set_vsids_after_restart(&mut self, enable: bool);
+			/// Set whether the solver should make all search decisions based on the VSIDS
+			/// only.
+			pub fn set_vsids_only(&mut self, enable: bool);
+		}
+	}
+}
+
+impl<Oracle: ExternalPropagation + Assumptions> Solver<Oracle> {
 	/// Try and find a solution to the problem for which the Solver was
 	/// initialized, given a list of Boolean assumptions.
 	pub fn solve_assuming(
@@ -907,36 +994,11 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 			return SolveResult::Unsatisfiable;
 		};
 
-		let (engine, result) = self.oracle.solve_assuming(assumptions);
-		let get_int_val = |engine: &Engine, iv: IntVarRef| {
-			let var_def = &engine.state.int_vars[iv];
-			let val = var_def.get_lower_bound(&engine.state.trail);
-			debug_assert!(
-				matches!(var_def.order_encoding, OrderStorage::Lazy(_))
-					|| val == var_def.get_upper_bound(&engine.state.trail)
-			);
-			val
-		};
+		let result = self.oracle.solve_assuming(assumptions);
 		match result {
 			SatSolveResult::Satisfied(sol) => {
-				let wrapper: &dyn Valuation = &|x| match x {
-					View::Bool(lit) => Value::Bool(match lit.0 {
-						BoolViewInner::Lit(lit) => sol.value(lit),
-						BoolViewInner::Const(b) => b,
-					}),
-					View::Int(var) => Value::Int(match var.0 {
-						IntViewInner::VarRef(iv) => get_int_val(engine, iv),
-						IntViewInner::Const(i) => i,
-						IntViewInner::Linear {
-							transformer: transform,
-							var,
-						} => transform.transform(get_int_val(engine, var)),
-						IntViewInner::Bool { transformer, lit } => {
-							transformer.transform(sol.value(lit) as IntVal)
-						}
-					}),
-				};
-				on_sol(wrapper);
+				let wrapped_valuation = Self::wrap_valuation(self.engine.borrow(), sol);
+				on_sol(&wrapped_valuation);
 				SolveResult::Satisfied
 			}
 			SatSolveResult::Unsatisfiable(fail) => {
@@ -946,35 +1008,23 @@ impl<Oracle: PropagatingSolver<Engine>> Solver<Oracle> {
 			SatSolveResult::Unknown => SolveResult::Unknown,
 		}
 	}
-
-	delegate! {
-		to self.engine_mut().state {
-			/// Set whether the solver should toggle between VSIDS and a user defined
-			/// search strategy after every restart.
-			///
-			/// Note that this setting is ignored if the solver is set to use VSIDS only.
-			pub fn set_toggle_vsids(&mut self, enable: bool);
-			/// Set the number of conflicts after which the solver should switch to using
-			/// VSIDS to make search decisions.
-			pub fn set_vsids_after(&mut self, conflicts: Option<u32>);
-			/// Set wether the solver should make all search decisions based on the VSIDS
-			/// only.
-			pub fn set_vsids_only(&mut self, enable: bool);
-		}
-	}
 }
 
-impl<Oracle: PropagatingSolver<Engine>> BrancherInitActions for Solver<Oracle> {
+impl<Oracle: ExternalPropagation> BrancherInitActions for Solver<Oracle> {
 	fn ensure_decidable(&mut self, view: View) {
 		match view {
 			View::Bool(BoolView(BoolViewInner::Lit(lit)))
 			| View::Int(IntView(IntViewInner::Bool { lit, .. })) => {
-				self.engine_mut().state.trail.grow_to_boolvar(lit.var());
+				self.engine
+					.borrow_mut()
+					.state
+					.trail
+					.grow_to_boolvar(lit.var());
 				self.oracle.add_observed_var(lit.var());
 			}
 			_ => {
-				// Nothing has to happend for constants and all literals for integer
-				// variables are already marked as observed.
+				// Nothing has to happend for constants and all literals for
+				// integer variables are already marked as observed.
 			}
 		}
 	}
@@ -984,7 +1034,7 @@ impl<Oracle: PropagatingSolver<Engine>> BrancherInitActions for Solver<Oracle> {
 	}
 
 	fn push_brancher(&mut self, brancher: BoxedBrancher) {
-		self.engine_mut().branchers.push(brancher);
+		self.engine.borrow_mut().branchers.push(brancher);
 	}
 }
 
@@ -997,41 +1047,48 @@ impl<Oracle: ClauseDatabase> ClauseDatabase for Solver<Oracle> {
 	}
 }
 
-impl<Oracle: Debug + PropagatingSolver<Engine>> Debug for Solver<Oracle> {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		f.debug_struct("Solver")
-			.field("oracle", &self.oracle)
-			.field("engine", self.engine())
-			.finish()
+impl Clone for Solver<Cadical> {
+	fn clone(&self) -> Self {
+		let mut oracle = self.oracle.shallow_clone();
+		let engine: Engine = self.engine.borrow().clone();
+		let engine = Rc::new(RefCell::new(engine));
+		oracle.connect_propagator(Rc::clone(&engine));
+		for var in oracle.emitted_vars() {
+			if self.oracle.is_observed(var.into()) {
+				oracle.add_observed_var(var);
+			}
+		}
+		Solver { oracle, engine }
 	}
 }
 
-impl<Oracle: PropagatingSolver<Engine>> DecisionActions for Solver<Oracle> {
+impl<Oracle: ExternalPropagation> DecisionActions for Solver<Oracle> {
 	fn get_intref_lit(&mut self, iv: IntVarRef, meaning: IntLitMeaning) -> BoolView {
 		let mut clauses = Vec::new();
-		let (oracle, engine) = self.oracle.access_solving();
-		let var = &mut engine.state.int_vars[iv];
-		let new_var = |def: LazyLitDef| {
-			// Create new variable
-			let v = oracle.new_var();
-			trace_new_lit!(iv, def, v);
-			engine.state.trail.grow_to_boolvar(v);
-			engine
-				.state
-				.bool_to_int
-				.insert_lazy(v, iv, def.meaning.clone());
-			// Add clauses to define the new variable
-			for cl in def.meaning.defining_clauses(
-				v.into(),
-				def.prev.map(Into::into),
-				def.next.map(Into::into),
-			) {
-				trace!(clause = ?cl.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add clause");
-				clauses.push(cl);
-			}
-			v
+		let bv = {
+			let mut engine = self.engine.borrow_mut();
+			let state = &mut engine.state;
+			let var = &mut state.int_vars[iv];
+			let new_var = |def: LazyLitDef| {
+				// Create new variable
+				let v = self.oracle.new_var();
+				self.oracle.add_observed_var(v);
+				trace_new_lit!(iv, def, v);
+				state.trail.grow_to_boolvar(v);
+				state.bool_to_int.insert_lazy(v, iv, def.meaning.clone());
+				// Add clauses to define the new variable
+				for cl in def.meaning.defining_clauses(
+					v.into(),
+					def.prev.map(Into::into),
+					def.next.map(Into::into),
+				) {
+					trace!(clause = ?cl.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add clause");
+					clauses.push(cl);
+				}
+				v
+			};
+			var.bool_lit(meaning, new_var)
 		};
-		let bv = var.bool_lit(meaning, new_var);
 		for cl in clauses {
 			self.oracle
 				.add_clause_from_slice(&cl)
@@ -1041,22 +1098,22 @@ impl<Oracle: PropagatingSolver<Engine>> DecisionActions for Solver<Oracle> {
 	}
 
 	fn get_num_conflicts(&self) -> u64 {
-		self.engine().state.statistics.conflicts
+		self.engine.borrow().state.statistics.conflicts
 	}
 }
 
-impl<Oracle: PropagatingSolver<Engine>> ExplanationActions for Solver<Oracle> {
+impl<Oracle: ExternalPropagation> ExplanationActions for Solver<Oracle> {
 	fn get_int_val_lit(&mut self, var: IntView) -> Option<BoolView> {
 		let val = self.get_int_val(var)?;
 		Some(self.get_int_lit(var, IntLitMeaning::Eq(val)))
 	}
 
 	delegate! {
-		to self.engine().state {
+		to self.engine.borrow().state {
 			fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning>;
 			fn try_int_lit(&self, var: IntView, meaning: IntLitMeaning) -> Option<BoolView>;
 		}
-		to self.engine_mut().state {
+		to self.engine.borrow_mut().state {
 			fn get_int_lit_relaxed(&mut self, var: IntView, meaning: IntLitMeaning) -> (BoolView, IntLitMeaning);
 			fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView;
 			fn get_int_upper_bound_lit(&mut self, var: IntView) -> BoolView;
@@ -1064,22 +1121,22 @@ impl<Oracle: PropagatingSolver<Engine>> ExplanationActions for Solver<Oracle> {
 	}
 }
 
-impl<Base, Oracle> From<&Cnf> for Solver<Oracle>
+impl<Oracle> From<&Cnf> for Solver<Oracle>
 where
-	Base: for<'a> From<&'a Cnf> + WithPropagator<Engine, PropSlv = Oracle> + LearnCallback,
-	Oracle: PropagatingSolver<Engine, Slv = Base>,
+	Oracle: ExternalPropagation + for<'a> From<&'a Cnf> + LearnCallback,
 {
 	fn from(value: &Cnf) -> Self {
-		let mut slv: Base = value.into();
-		slv.set_learn_callback(Some(trace_learned_clause));
-		let oracle = slv.with_propagator(Engine::default());
-		Self { oracle }
+		let mut oracle: Oracle = value.into();
+		let engine = Rc::default();
+		oracle.set_learn_callback(Some(trace_learned_clause));
+		oracle.connect_propagator(Rc::clone(&engine));
+		Self { oracle, engine }
 	}
 }
 
-impl<Oracle: PropagatingSolver<Engine>> InspectionActions for Solver<Oracle> {
+impl<Oracle: ExternalPropagation> InspectionActions for Solver<Oracle> {
 	delegate! {
-		to self.engine().state {
+		to self.engine.borrow().state {
 			fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool;
 			fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal);
 			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
@@ -1089,9 +1146,9 @@ impl<Oracle: PropagatingSolver<Engine>> InspectionActions for Solver<Oracle> {
 	}
 }
 
-impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle> {
+impl<Oracle: ExternalPropagation> PropagatorInitActions for Solver<Oracle> {
 	fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef {
-		let engine = self.engine_mut();
+		let mut engine = self.engine.borrow_mut();
 		let prop_ref = engine.propagators.push(propagator);
 		let p = engine.state.propagator_queue.info.push(PropagatorInfo {
 			enqueued: false,
@@ -1101,22 +1158,74 @@ impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle>
 		p
 	}
 
+	fn advise_on_backtrack(&mut self, prop: PropRef) {
+		self.engine.borrow_mut().notify_of_backtrack.push(prop);
+	}
+
+	fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView, data: u64) {
+		match var.0 {
+			BoolViewInner::Lit(lit) => {
+				self.advise_on_lit_change(prop, lit, data, false);
+			}
+			BoolViewInner::Const(_) => {}
+		}
+	}
+
+	fn advise_on_int_change(
+		&mut self,
+		prop: PropRef,
+		var: IntView,
+		condition: IntPropCond,
+		data: u64,
+	) {
+		let (var, cond, negated) = match var.0 {
+			IntViewInner::VarRef(var) => (var, condition, false),
+			IntViewInner::Linear { transformer, var } => {
+				let condition = match condition {
+					IntPropCond::LowerBound if !transformer.positive_scale() => {
+						IntPropCond::UpperBound
+					}
+					IntPropCond::UpperBound if !transformer.positive_scale() => {
+						IntPropCond::LowerBound
+					}
+					_ => condition,
+				};
+				(var, condition, !transformer.positive_scale())
+			}
+			IntViewInner::Const(_) => return, // ignore
+			IntViewInner::Bool { lit, .. } => {
+				return self.advise_on_lit_change(prop, lit, data, true);
+			}
+		};
+
+		let state = &mut self.engine.borrow_mut().state;
+		let adv = state.advisors.push(AdvisorDef {
+			bool2int: false,
+			data,
+			negated,
+			propagator: prop,
+		});
+		state.int_activation[var].add(ActivationAction::Advise(adv), cond);
+	}
+
 	fn enqueue_now(&mut self, prop: PropRef) {
-		let state = &mut self.engine_mut().state;
+		let state = &mut self.engine.borrow_mut().state;
 		state.propagator_queue.enqueue_propagator(prop);
 	}
 
 	fn enqueue_on_bool_change(&mut self, prop: PropRef, var: BoolView) {
 		match var.0 {
 			BoolViewInner::Lit(lit) => {
-				self.engine_mut().state.trail.grow_to_boolvar(lit.var());
+				{
+					let state = &mut self.engine.borrow_mut().state;
+					state.trail.grow_to_boolvar(lit.var());
+					state
+						.bool_activation
+						.entry(lit.var())
+						.or_default()
+						.push(ActivationAction::Enqueue(prop).into());
+				}
 				self.oracle.add_observed_var(lit.var());
-				self.engine_mut()
-					.state
-					.bool_activation
-					.entry(lit.var())
-					.or_default()
-					.push(prop);
 			}
 			BoolViewInner::Const(_) => {}
 		}
@@ -1142,28 +1251,30 @@ impl<Oracle: PropagatingSolver<Engine>> PropagatorInitActions for Solver<Oracle>
 				return self.enqueue_on_bool_change(prop, BoolView(BoolViewInner::Lit(lit)))
 			}
 		};
-		self.engine_mut().state.int_activation[var].add(prop, cond);
+		self.engine.borrow_mut().state.int_activation[var]
+			.add(ActivationAction::Enqueue(prop), cond);
 	}
 
 	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
-		self.engine_mut().state.trail.track_int(init)
+		self.engine.borrow_mut().state.trail.track_int(init)
 	}
 }
 
-impl<Oracle: PropagatingSolver<Engine>> TrailingActions for Solver<Oracle> {
+impl<Oracle: ExternalPropagation> TrailingActions for Solver<Oracle> {
 	delegate! {
-		to self.engine().state {
+		to self.engine.borrow().state {
 			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
 			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
 		}
-		to self.engine_mut().state {
+		to self.engine.borrow_mut().state {
 			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal;
 		}
 	}
 }
 
 impl Value {
-	/// If the `Value` is a Boolean, represent it as bool. Returns None otherwise.
+	/// If the `Value` is a Boolean, represent it as bool. Returns None
+	/// otherwise.
 	pub fn as_bool(&self) -> Option<bool> {
 		match self {
 			Value::Bool(b) => Some(*b),

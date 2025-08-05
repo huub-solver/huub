@@ -16,8 +16,8 @@ pub enum PriorityLevel {
 	/// A low level of priority, all apart from one priority level are more
 	/// important
 	Low,
-	/// A medium level of priority, there are just as many normal priority levels
-	/// more as less important than this one.
+	/// A medium level of priority, there are just as many normal priority
+	/// levels more as less important than this one.
 	Medium,
 	/// A high level of priority, all apart from one normal priority level are
 	/// less important.
@@ -55,7 +55,8 @@ pub(crate) struct PropagatorQueue {
 }
 
 impl<E> PriorityQueue<E> {
-	/// Inserts an element into the queue at the end of the given priority level.
+	/// Inserts an element into the queue at the end of the given priority
+	/// level.
 	pub(crate) fn insert(&mut self, priority: PriorityLevel, elem: E) {
 		let i = priority as usize;
 		debug_assert!((0..=5).contains(&i));
@@ -87,13 +88,6 @@ impl PropagatorQueue {
 		if !self.info[prop].enqueued {
 			self.queue.insert(self.info[prop].priority, prop);
 			self.info[prop].enqueued = true;
-		}
-	}
-
-	/// Enqueue all propagators from a given iterator.
-	pub(crate) fn enqueue_propagators(&mut self, props: impl IntoIterator<Item = PropRef>) {
-		for prop in props.into_iter() {
-			self.enqueue_propagator(prop);
 		}
 	}
 

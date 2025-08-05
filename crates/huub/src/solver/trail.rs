@@ -43,8 +43,8 @@ pub(crate) struct Trail {
 
 	/// Stores the current value of trailed integer values.
 	int_value: IndexVec<TrailedInt, IntVal>,
-	/// Stores the current assigned values of Boolean variables, and "redo" values
-	/// when untrailing.
+	/// Stores the current assigned values of Boolean variables, and "redo"
+	/// values when untrailing.
 	sat_store: Vec<BoolStore>,
 }
 
@@ -53,7 +53,8 @@ pub(crate) struct Trail {
 pub(crate) enum TrailEvent {
 	/// The assignment of a Boolean variable.
 	SatAssignment(RawVar),
-	/// The assignment of a trailed integer value, and the previous value it had.
+	/// The assignment of a trailed integer value, and the previous value it
+	/// had.
 	IntAssignment(TrailedInt, IntVal),
 }
 
@@ -64,17 +65,17 @@ impl Trail {
 	/// Record the assignment of a literal in the Trail
 	///
 	/// # Warning
-	/// This method expects that `self.sat_store` has already been extended to the
-	/// correct length (using [`Self::grow_to_boolvar`]).
+	/// This method expects that `self.sat_store` has already been extended to
+	/// the correct length (using [`Self::grow_to_boolvar`]).
 	pub(crate) fn assign_lit(&mut self, lit: RawLit) -> Option<bool> {
 		let var = lit.var();
 		let val = !lit.is_negated();
 
-		let x = mem::replace(&mut self.sat_store[Self::sat_index(var)].value, Some(val));
-		if x.is_none() && !self.prev_len.is_empty() {
+		let prev = self.sat_store[Self::sat_index(var)].value.replace(val);
+		if prev.is_none() && !self.prev_len.is_empty() {
 			self.push_trail(TrailEvent::SatAssignment(var));
 		}
-		x
+		prev
 	}
 
 	/// Return the current decision level
@@ -96,7 +97,8 @@ impl Trail {
 	/// Method used to restore the state of all value to the point at which a
 	/// literal was assigned.
 	///
-	/// This method is used when creating lazy explanations, as the oracle doesn not allow the usage of literals that are not
+	/// This method is used when creating lazy explanations, as the oracle doesn
+	/// not allow the usage of literals that are not
 	pub(crate) fn goto_assign_lit(&mut self, lit: RawLit) {
 		let var = lit.var();
 		if self.sat_store[Self::sat_index(var)].value.is_none() {
@@ -170,7 +172,8 @@ impl Trail {
 		self.trail.truncate(len);
 	}
 
-	/// Notify the Trail of a new decision level to which the trail can be restored.
+	/// Notify the Trail of a new decision level to which the trail can be
+	/// restored.
 	pub(crate) fn notify_new_decision_level(&mut self) {
 		self.prev_len.push(self.trail.len());
 	}
@@ -246,8 +249,8 @@ impl Trail {
 	///
 	/// Note that his method will return `None` if the trail is empty.
 	///
-	/// When the generic `RESTORE` is set to true, then the changes that have been
-	/// undone can be redone. See [`Self::redo`] for more details.
+	/// When the generic `RESTORE` is set to true, then the changes that have
+	/// been undone can be redone. See [`Self::redo`] for more details.
 	fn undo<const RESTORE: bool>(&mut self) -> Option<TrailEvent> {
 		debug_assert!(self.pos <= self.trail.len());
 		if self.pos == 0 {
@@ -342,8 +345,8 @@ impl TrailEvent {
 	}
 
 	#[inline]
-	/// Internal method to write a [`TailEvent`] in reverse order to `trail` so it
-	/// can be redone later.
+	/// Internal method to write a [`TailEvent`] in reverse order to `trail` so
+	/// it can be redone later.
 	fn write_rev_trail(&self, trail: &mut [u32]) {
 		match self {
 			TrailEvent::SatAssignment(var) => trail[0] = i32::from(*var) as u32,

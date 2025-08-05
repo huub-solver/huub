@@ -1,6 +1,6 @@
 <p align="center">
   <img
-    src="https://dekker.one/_next/static/media/huub.8da5f34e.svg"
+    src="https://huub.solutions/logo.svg"
     alt="Huub logo"
     height="350px">
 </p>
@@ -20,9 +20,9 @@ Huub can be used either as a [MiniZinc](https://www.minizinc.org/) solver or as 
 
 ### Installing Huub as a MiniZinc solver
 
-1. Download the latest release of Huub from the [releases page](https://github.com/Dekker1/huub/releases) and download the `fzn-huub` archive that matches your system.
+1. Download the latest release of Huub from the [releases page](https://github.com/huub-solver/huub/releases) and download the `huub` archive that matches your system.
 2. Extract (and install) the downloaded archive to a sensible location on your system.
-3. Add the `share/solvers` directory from the extracted archive to the [`MZN_SOLVER_PATH`](https://docs.minizinc.dev/en/stable/fzn-spec.html#solver-configuration-files) environment variable.
+3. Add the `share/minizinc/solvers` directory from the extracted archive to the [`MZN_SOLVER_PATH`](https://docs.minizinc.dev/en/stable/fzn-spec.html#solver-configuration-files) environment variable.
 4. `Huub` should now show up in the list of solvers when running `minizinc --solvers` and in the MiniZinc IDE.
 
 ### Installing Huub as a Rust library
@@ -70,7 +70,7 @@ Huub is inspired by the following LCG solvers, among others.
 
 ## Development
 
-When working on the integration of Huub with MiniZinc, you would likely want to compile a MiniZinc instance and run it using a current build of `fzn-huub`.
+When working on the integration of Huub with MiniZinc, you would likely want to compile a MiniZinc instance and run it using a current build of `huub`.
 This process can be split into two steps.
 First, the required `.fzn.json` and `.ozn` files can be produced using the following command.
 
@@ -78,15 +78,15 @@ First, the required `.fzn.json` and `.ozn` files can be produced using the follo
 minizinc --solver share/minizinc/solvers/huub.msc --compile [OTHER FLAGS AND INSTANCE FILES]
 ```
 
-Then, you can run the current version of `fzn-huub` using `cargo` and pipe the result back into MiniZinc to evaluate the output using the following command.
+Then, you can run the current version of `huub` using `cargo` and pipe the result back into MiniZinc to evaluate the output using the following command.
 
 ```sh
 cargo run [BUILD FLAGS] -- [HUUB FLAGS AND FZNJSON FILE] | minizinc --ozn-file [OZN FILE]
 ```
 
-Note that if you are intending to use a debugger on `fzn-huub`, then you would find the latest build in `./target/debug` or `./target/release-with-debug` (created using `cargo build` or `cargo build --profile release-with-debug`) to give to the debugger in combination with the `[HUUB FLAGS AND FZNJSON FILE]`.
-For example, the following command can be used to run `fzn-huub` with the `lldb` debugger.
+Note that if you are intending to use a debugger on `huub`, then you would find the latest build in `./target/debug` or `./target/release-with-debug` (created using `cargo build` or `cargo build --profile release-with-debug`) to give to the debugger in combination with the `[HUUB FLAGS AND FZNJSON FILE]`.
+For example, the following command can be used to run `huub` with the `lldb` debugger.
 
 ```sh
-lldb -- ./target/debug/fzn-huub [HUUB FLAGS AND FZNJSON FILE]
+lldb -- ./target/debug/huub [HUUB FLAGS AND FZNJSON FILE]
 ```

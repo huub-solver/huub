@@ -33,10 +33,10 @@ use std::{
 use flatzinc_serde::FlatZinc;
 use index_vec::{index_vec, IndexVec};
 use itertools::Itertools;
-pub use pindakaas::solver::SlvTermSignal;
+pub use pindakaas::solver::TermSignal;
 use pindakaas::{
 	propositional_logic::Formula,
-	solver::{cadical::Cadical, propagation::PropagatingSolver},
+	solver::{cadical::Cadical, propagation::ExternalPropagation},
 	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit as RawLit, Unsatisfiable,
 };
 use rangelist::{IntervalIterator, RangeList};
@@ -58,6 +58,7 @@ use crate::{
 		int_pow::IntPow,
 		int_table::IntTable,
 		int_times::IntTimes,
+		int_value_precede::{IntSeqPrecedeChain, IntValuePrecedeChain},
 		BoxedConstraint, Constraint, SimplificationStatus,
 	},
 	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
@@ -67,7 +68,7 @@ use crate::{
 		IntDecisionIndex, IntDecisionInner, ReformulationError, ReformulationMap,
 		ReformulationMapBuilder,
 	},
-	solver::{engine::Engine, IntLitMeaning, Solver},
+	solver::{IntLitMeaning, Solver},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -100,8 +101,8 @@ pub enum Branching {
 	Int(Vec<IntDecision>, VariableSelection, ValueSelection),
 	/// Search by sequentially applying the given branching strategies.
 	Seq(Vec<Branching>),
-	/// Search by enforcing the given Boolean expressions, but abandon the search
-	/// when finding a conflict.
+	/// Search by enforcing the given Boolean expressions, but abandon the
+	/// search when finding a conflict.
 	WarmStart(Vec<BoolDecision>),
 }
 
@@ -216,8 +217,8 @@ pub enum VariableSelection {
 	/// Select the unfixed decision variable with the largest upper bound, using
 	/// the order of the variables in case of a tie.
 	Largest,
-	/// Select the unfixed decision variable with the smallest lower bound, using
-	/// the order of the variables in case of a tie.
+	/// Select the unfixed decision variable with the smallest lower bound,
+	/// using the order of the variables in case of a tie.
 	Smallest,
 }
 
@@ -294,6 +295,9 @@ pub fn disjunctive_strict(
 	DisjunctiveStrict {
 		start_times,
 		durations,
+		edge_finding_prop: None,
+		not_last_prop: None,
+		detectable_precedence_prop: None,
 	}
 }
 
@@ -325,6 +329,18 @@ pub fn pow_int(base: IntDecision, exponent: IntDecision, result: IntDecision) ->
 	}
 }
 
+/// Create a sequential precede chain constraint that enforces that any integer
+/// value `i`, larger than one, will only occur in a position after the first
+/// occurrence of `i-1`.
+pub fn seq_precede_chain_int<It>(vars: impl IntoIterator<Item = It>) -> IntSeqPrecedeChain
+where
+	It: Into<IntDecision>,
+{
+	IntSeqPrecedeChain {
+		vars: vars.into_iter().map_into().collect(),
+	}
+}
+
 /// Create a `table_int` constraint that enforces that given list of integer
 /// views take their values according to one of the given lists of integer
 /// values.
@@ -343,20 +359,23 @@ pub fn times_int(factor1: IntDecision, factor2: IntDecision, product: IntDecisio
 	}
 }
 
-impl ElementConstraint for BoolDecision {
-	type Constraint = BoolDecisionArrayElement;
-	type Result = BoolDecision;
-
-	fn element_constraint(
-		array: Vec<Self>,
-		index: IntDecision,
-		result: Self::Result,
-	) -> Self::Constraint {
-		Self::Constraint {
-			index,
-			array,
-			result,
-		}
+/// Create a value precede chain constraint that enforces that the first
+/// occurence of each value in `values` among the decisions `vars` happens in
+/// the order of `values.
+///
+/// Note that `seq_precede_chain_int` is a special case of this constraint where
+/// the values are consecutive integers starting from 1.
+pub fn value_precede_chain_int<D, V>(
+	vars: impl IntoIterator<Item = D>,
+	values: impl IntoIterator<Item = V>,
+) -> IntValuePrecedeChain
+where
+	D: Into<IntDecision>,
+	V: Into<IntVal>,
+{
+	IntValuePrecedeChain {
+		values: values.into_iter().map_into().collect(),
+		vars: vars.into_iter().map_into().collect(),
 	}
 }
 
@@ -420,6 +439,23 @@ impl Add<IntVal> for BoolDecision {
 	}
 }
 
+impl ElementConstraint for BoolDecision {
+	type Constraint = BoolDecisionArrayElement;
+	type Result = BoolDecision;
+
+	fn element_constraint(
+		array: Vec<Self>,
+		index: IntDecision,
+		result: Self::Result,
+	) -> Self::Constraint {
+		Self::Constraint {
+			index,
+			array,
+			result,
+		}
+	}
+}
+
 impl From<bool> for BoolDecision {
 	fn from(v: bool) -> Self {
 		BoolDecision(BoolDecisionInner::Const(v))
@@ -467,9 +503,9 @@ impl From<BoolDecision> for BoolFormula {
 }
 
 impl Branching {
-	/// Add a [`Brancher`] implementation to the solver that matches the branching
-	/// strategy of the [`Branching`].
-	pub(crate) fn to_solver<Oracle: PropagatingSolver<Engine>>(
+	/// Add a [`Brancher`] implementation to the solver that matches the
+	/// branching strategy of the [`Branching`].
+	pub(crate) fn to_solver<Oracle: ExternalPropagation>(
 		&self,
 		slv: &mut Solver<Oracle>,
 		map: &ReformulationMap,
@@ -509,8 +545,8 @@ impl From<IntDecision> for Decision {
 }
 
 impl IntDecision {
-	/// Get a Boolean view that represent whether the integer view is equal to the
-	/// given value.
+	/// Get a Boolean view that represent whether the integer view is equal to
+	/// the given value.
 	pub fn eq(&self, v: IntVal) -> BoolDecision {
 		use IntDecisionInner::*;
 
@@ -540,20 +576,20 @@ impl IntDecision {
 		}
 	}
 
-	/// Get a Boolean view that represent whether the integer view is greater than
-	/// or equal to the given value.
+	/// Get a Boolean view that represent whether the integer view is greater
+	/// than or equal to the given value.
 	pub fn geq(&self, v: IntVal) -> BoolDecision {
 		!self.lt(v)
 	}
 
-	/// Get a Boolean view that represent whether the integer view is greater than
-	/// the given value.
+	/// Get a Boolean view that represent whether the integer view is greater
+	/// than the given value.
 	pub fn gt(&self, v: IntVal) -> BoolDecision {
 		self.geq(v + 1)
 	}
 
-	/// Get a Boolean view that represent whether the integer view is less than or
-	/// equal to the given value.
+	/// Get a Boolean view that represent whether the integer view is less than
+	/// or equal to the given value.
 	pub fn leq(&self, v: IntVal) -> BoolDecision {
 		self.lt(v + 1)
 	}
@@ -585,8 +621,8 @@ impl IntDecision {
 		}
 	}
 
-	/// Get a Boolean view that represent whether the integer view is not equal to
-	/// the given value.
+	/// Get a Boolean view that represent whether the integer view is not equal
+	/// to the given value.
 	pub fn ne(&self, v: IntVal) -> BoolDecision {
 		!self.eq(v)
 	}
@@ -612,9 +648,8 @@ impl IntDecision {
 				Linear(t, x) => {
 					if let Domain::Alias(alias) = model.int_vars[x].domain {
 						result = alias;
+						offset += scale * t.offset;
 						scale *= t.scale.get();
-						offset *= t.scale.get();
-						offset += t.offset;
 					} else {
 						return IntDecision(Linear(t, x)) * scale + offset;
 					}
@@ -975,10 +1010,12 @@ impl Model {
 			ConstraintStore::IntEq(c) => c.simplify(self),
 			ConstraintStore::IntLinear(c) => c.simplify(self),
 			ConstraintStore::IntPow(c) => c.simplify(self),
+			ConstraintStore::IntSeqPrecedeChain(con) => con.simplify(self),
 			ConstraintStore::IntTimes(c) => c.simplify(self),
 			ConstraintStore::BoolFormula(exp) => exp.simplify(self),
 			ConstraintStore::IntInSetReif(c) => c.simplify(self),
 			ConstraintStore::IntTable(con) => con.simplify(self),
+			ConstraintStore::IntValuePrecedeChain(con) => con.simplify(self),
 			ConstraintStore::Other(con) => con.simplify(self),
 		}?;
 		match status {
@@ -995,7 +1032,8 @@ impl Model {
 	/// Subscribe the constraint located at index `con` to changes in the
 	/// variables it depends on.
 	pub(crate) fn subscribe(&mut self, con: usize) {
-		/// Wrapper around [`Model`] that knows the constraint being initialized.
+		/// Wrapper around [`Model`] that knows the constraint being
+		/// initialized.
 		struct ConstraintInitContext<'a> {
 			/// Index of the constraint being initialized.
 			con: usize,
@@ -1066,6 +1104,9 @@ impl Model {
 			ConstraintStore::IntPow(con) => {
 				<IntPow as Constraint<Model>>::initialize(con, &mut ctx);
 			}
+			ConstraintStore::IntSeqPrecedeChain(con) => {
+				<IntSeqPrecedeChain as Constraint<Model>>::initialize(con, &mut ctx);
+			}
 			ConstraintStore::IntTimes(con) => {
 				<IntTimes as Constraint<Model>>::initialize(con, &mut ctx);
 			}
@@ -1077,6 +1118,9 @@ impl Model {
 			}
 			ConstraintStore::IntTable(con) => {
 				<IntTable as Constraint<Model>>::initialize(con, &mut ctx);
+			}
+			ConstraintStore::IntValuePrecedeChain(con) => {
+				<IntValuePrecedeChain as Constraint<Model>>::initialize(con, &mut ctx);
 			}
 			ConstraintStore::Other(con) => con.initialize(&mut ctx),
 		}
@@ -1091,20 +1135,33 @@ impl Model {
 	/// to [`crate::SolverView`]. If an error occurs during the reformulation
 	/// process, or if it is found to be trivially unsatisfiable, then an error
 	/// will be returned.
-	pub fn to_solver<Oracle: PropagatingSolver<Engine>>(
+	pub fn to_solver<Oracle: ExternalPropagation>(
 		&mut self,
 		config: &InitConfig,
 	) -> Result<(Solver<Oracle>, ReformulationMap), ReformulationError>
 	where
-		Solver<Oracle>: for<'a> From<&'a Cnf>,
-		Oracle::Slv: 'static,
+		Solver<Oracle>: for<'a> From<&'a Cnf> + 'static,
 	{
 		// TODO: run SAT simplification
 		let mut slv = Solver::<Oracle>::from(&self.cnf);
-		let any_slv: &mut dyn Any = slv.oracle.solver_mut();
+		let any_slv: &mut dyn Any = &mut slv.oracle;
 		if let Some(r) = any_slv.downcast_mut::<Cadical>() {
-			r.set_option("restart", config.restart() as i32);
+			// Set the solver options for preprocessing/inprocessing
+			r.set_option("condition", config.conditioning() as i32);
+			r.set_option("elim", config.variable_elimination() as i32);
+			r.set_option("inprocessing", config.inprocessing() as i32);
+			r.set_limit("preprocessing", config.preprocessing() as i32);
+			r.set_option("probe", config.probing() as i32);
+			r.set_option("subsume", config.subsumption() as i32);
 			r.set_option("vivify", config.vivification() as i32);
+
+			// Set the solver options for search configurations
+			// Enable restart if the config is set to true or if there are no
+			// user search heuristics are provided
+			r.set_option(
+				"restart",
+				(config.restart() || self.branchings.is_empty()) as i32,
+			);
 		} else {
 			warn!("unknown solver: vivification and restart options are ignored");
 		}
@@ -1285,6 +1342,12 @@ impl AddAssign<IntPow> for Model {
 	}
 }
 
+impl AddAssign<IntSeqPrecedeChain> for Model {
+	fn add_assign(&mut self, constraint: IntSeqPrecedeChain) {
+		self.add_constraint(ConstraintStore::IntSeqPrecedeChain(constraint));
+	}
+}
+
 impl AddAssign<IntTable> for Model {
 	fn add_assign(&mut self, constraint: IntTable) {
 		self.add_constraint(ConstraintStore::IntTable(constraint));
@@ -1300,6 +1363,12 @@ impl AddAssign<IntTimes> for Model {
 impl AddAssign<IntValArrayElement> for Model {
 	fn add_assign(&mut self, constraint: IntValArrayElement) {
 		self.add_constraint(ConstraintStore::IntValArrayElement(constraint));
+	}
+}
+
+impl AddAssign<IntValuePrecedeChain> for Model {
+	fn add_assign(&mut self, constraint: IntValuePrecedeChain) {
+		self.add_constraint(ConstraintStore::IntValuePrecedeChain(constraint));
 	}
 }
 

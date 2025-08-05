@@ -22,8 +22,8 @@ pub struct IntInSetReif {
 	pub(crate) var: IntDecision,
 	/// The set of considered values for the integer decision variable.
 	pub(crate) set: IntSetVal,
-	/// The Boolean variable that indicates if the integer decision variable is in
-	/// the set.
+	/// The Boolean variable that indicates if the integer decision variable is
+	/// in the set.
 	pub(crate) reif: BoolDecision,
 }
 

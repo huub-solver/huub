@@ -18,28 +18,27 @@ macro_rules! trace_new_lit {
 	};
 }
 
-use std::{
-	collections::{HashMap, VecDeque},
-	mem,
-};
+use std::{collections::VecDeque, mem};
 
 use delegate::delegate;
 use index_vec::IndexVec;
 use pindakaas::{
 	solver::propagation::{
-		ClausePersistence, Propagator as PropagatorExtension, SearchDecision, SolvingActions,
+		ClausePersistence, Propagator as PropagatorExtension,
+		PropagatorDefinition as PropagatorExtensionDefinition, SearchDecision, SolvingActions,
 	},
 	Lit as RawLit, Var as RawVar,
 };
+use rustc_hash::FxHashMap;
 pub(crate) use trace_new_lit;
 use tracing::{debug, trace};
 
 use crate::{
 	actions::{DecisionActions, ExplanationActions, InspectionActions, TrailingActions},
 	branchers::{BoxedBrancher, Decision},
-	constraints::{BoxedPropagator, Reason},
+	constraints::{BoxedPropagator, Conflict, LazyReason, Reason},
 	solver::{
-		activation_list::{ActivationList, IntEvent},
+		activation_list::{ActivationAction, ActivationActionS, ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
 		int_var::{IntVar, IntVarRef, OrderStorage},
 		queue::PropagatorQueue,
@@ -50,11 +49,27 @@ use crate::{
 	Clause, IntVal,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Definition of an [`Advisor`] giving the information about the [`View`]
+/// subscribed to and the way in which to advise the propagator.
+pub(crate) struct AdvisorDef {
+	/// Whether the advise is on a [`BoolView`] being used as an [`IntView`]
+	pub(crate) bool2int: bool,
+	/// 64 bits of data communicated when advising propagator.
+	pub(crate) data: u64,
+	/// Whether the advise is on a [`IntView`] with a negative coefficient.
+	pub(crate) negated: bool,
+	/// The propagator being advised.
+	pub(crate) propagator: PropRef,
+}
+
 #[derive(Debug, Default, Clone)]
 /// A propagation engine implementing the [`Propagator`] trait.
-pub struct Engine {
+pub(crate) struct Engine {
 	/// Storage of the propagators.
 	pub(crate) propagators: IndexVec<PropRef, BoxedPropagator>,
+	/// List of propagators to advise of backtracking
+	pub(crate) notify_of_backtrack: Vec<PropRef>,
 	/// Storage of the branchers.
 	pub(crate) branchers: Vec<BoxedBrancher>,
 	/// Internal State representation of the propagation engine.
@@ -95,20 +110,21 @@ pub struct State {
 	/// Mapping from boolean variables to integer variables
 	pub(crate) bool_to_int: BoolToIntMap,
 	/// Trailed Storage
-	/// Includes lower and upper bounds for integer variables and Boolean variable assignments
+	/// Includes lower and upper bounds for integer variables and Boolean
+	/// variable assignments
 	pub(crate) trail: Trail,
 	/// Literals to be propagated by the oracle
 	pub(crate) propagation_queue: VecDeque<RawLit>,
 	/// Reasons for setting values
-	pub(crate) reason_map: HashMap<RawLit, Reason>,
+	pub(crate) reason_map: FxHashMap<RawLit, Reason>,
 	/// Whether conflict has (already) been detected
-	pub(crate) conflict: Option<Clause>,
+	pub(crate) conflict: Option<Conflict>,
 	/// Whether the solver is in a failure state.
 	///
 	/// Triggered when a conflict is detected during propagation, the solver
-	/// should backtrack. Debug assertions will be triggered if other actions are
-	/// taken instead. Some mechanisms, such as propagator queueing, might be
-	/// disabled to optimize the execution of the solver.
+	/// should backtrack. Debug assertions will be triggered if other actions
+	/// are taken instead. Some mechanisms, such as propagator queueing, might
+	/// be disabled to optimize the execution of the solver.
 	pub(crate) failed: bool,
 
 	// ---- Non-Trailed Infrastructure ----
@@ -120,8 +136,10 @@ pub struct State {
 	pub(crate) vsids: bool,
 
 	// ---- Queueing Infrastructure ----
+	/// Advisor data storage
+	pub(crate) advisors: IndexVec<Advisor, AdvisorDef>,
 	/// Boolean variable enqueueing information
-	pub(crate) bool_activation: HashMap<RawVar, Vec<PropRef>>,
+	pub(crate) bool_activation: FxHashMap<RawVar, Vec<ActivationActionS>>,
 	/// Integer variable enqueueing information
 	pub(crate) int_activation: IndexVec<IntVarRef, ActivationList>,
 	/// Queue of propagators awaiting action
@@ -129,20 +147,53 @@ pub struct State {
 
 	// ---- Debugging Helpers ----
 	#[cfg(debug_assertions)]
-	/// This literal was last emited by the [`PropagatorExtension::propagate`]
-	/// method. It will have its reasons checked when it is seen again in
-	/// [`PropagatorExtension::notify_assignments`].
-	pub(crate) last_propagated: Option<RawLit>,
-	#[cfg(debug_assertions)]
-	/// List of integer variables that have been notified as fixed, but should be
-	/// checked that the bounds match before propagation.
+	/// List of integer variables that have been notified as fixed, but should
+	/// be checked that the bounds match before propagation.
 	pub(crate) check_int_fixed: Vec<(IntVarRef, IntVal)>,
+}
+
+impl Engine {
+	#[cfg(debug_assertions)]
+	/// (DEBUG ONLY) Check that the reason of a propagated literal contains only
+	/// known true literals
+	fn debug_check_reason(&mut self, lit: RawLit) {
+		if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
+			// Reason is in the form (a /\ b /\ ...), which then forms the
+			// implication (a /\ b /\ ...) -> lit
+			let clause: Clause = reason.explain(&mut self.propagators, &mut self.state, Some(lit));
+			// This is converted into a clause (¬a \/ ¬b \/ ... \/ lit)
+			for &l in &clause {
+				if l == lit {
+					continue;
+				}
+				// Get the value of the original reason lit by negating again: ¬¬a
+				// gives a
+				let val = self.state.trail.get_sat_value(!l);
+				if !val.unwrap_or(false) {
+					tracing::error!(lit_prop = i32::from(lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
+				}
+				debug_assert!(
+					val.unwrap_or(false),
+					"Literal {} in Reason for {} is {:?}, but should be known true",
+					!l,
+					lit,
+					val
+				);
+			}
+		} else {
+			debug_assert_eq!(
+				self.state.decision_level(),
+				0,
+				"Literal {lit} propagated without reason at non-zero decision level",
+			);
+		}
+	}
 }
 
 impl PropagatorExtension for Engine {
 	fn add_external_clause(
 		&mut self,
-		_slv: &mut dyn SolvingActions,
+		slv: &mut dyn SolvingActions,
 	) -> Option<(Clause, ClausePersistence)> {
 		if !self.state.clauses.is_empty() {
 			let clause = self.state.clauses.pop_front(); // Known to be `Some`
@@ -151,22 +202,38 @@ impl PropagatorExtension for Engine {
 		} else if !self.state.propagation_queue.is_empty() {
 			None // Require that the solver first applies the remaining propagation
 		} else if let Some(conflict) = self.state.conflict.take() {
-			debug!(clause = ?conflict.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add conflict clause");
-			Some((conflict, ClausePersistence::Forgettable))
+			let ctx = SolvingContext::new(slv, &mut self.state);
+			let clause: Clause =
+				conflict
+					.reason
+					.explain(&mut self.propagators, ctx.state, conflict.subject);
+			debug!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add conflict clause");
+			Some((clause, ClausePersistence::Forgettable))
 		} else {
 			None
 		}
 	}
 
 	fn add_reason_clause(&mut self, propagated_lit: RawLit) -> Clause {
-		// Find reason
+		// Find reason in storage
 		let reason = self.state.reason_map.remove(&propagated_lit);
-		// Restore the current state to the state when the propagation happened if explaining lazily
-		if matches!(reason, Some(Reason::Lazy(_))) {
-			self.state.trail.goto_assign_lit(propagated_lit);
-		}
-		// Create a clause from the reason
+		// Create an explanation clause from the reason
 		let clause = if let Some(reason) = reason {
+			// If the reason is lazy, restore the current state to the state when the
+			// propagation happened before explaining.
+			//
+			// An exception is made when the literal is assigned to false (and thus
+			// the source of a conflict), then we are already in the right state.
+			if matches!(reason, Reason::Lazy(_))
+				&& self
+					.state
+					.trail
+					.get_sat_value(propagated_lit)
+					.unwrap_or(true)
+			{
+				self.state.trail.goto_assign_lit(propagated_lit);
+			}
+
 			reason.explain(&mut self.propagators, &mut self.state, Some(propagated_lit))
 		} else {
 			vec![propagated_lit]
@@ -216,9 +283,28 @@ impl PropagatorExtension for Engine {
 				}
 				ctx.state.int_vars[r].notify_upper_bound(&mut ctx.state.trail, lb);
 
-				for prop in ctx.state.int_activation[r].activated_by(IntEvent::Fixed) {
+				let activation = mem::take(&mut ctx.state.int_activation[r]);
+				for action in activation.activated_by(IntEvent::Fixed) {
+					let prop = match action {
+						ActivationAction::Advise(adv) => {
+							let &AdvisorDef {
+								data, propagator, ..
+							} = &ctx.state.advisors[adv];
+							if !self.propagators[propagator].advise_of_int_change(
+								ctx.state,
+								IntView(IntViewInner::VarRef(r)),
+								IntEvent::Fixed,
+								data,
+							) {
+								continue;
+							}
+							propagator
+						}
+						ActivationAction::Enqueue(prop) => prop,
+					};
 					ctx.state.propagator_queue.enqueue_propagator(prop);
 				}
+				ctx.state.int_activation[r] = activation;
 			}
 		}
 
@@ -229,7 +315,18 @@ impl PropagatorExtension for Engine {
 		debug_assert!(self.state.propagation_queue.is_empty());
 
 		// Process propagation results, and accept model if no conflict is detected
-		let conflict = self.state.conflict.take();
+		let conflict = self.state.conflict.take().map(|c| {
+			// Convert Lazy reasons into an eager ones
+			if let Reason::Lazy(LazyReason(prop, data)) = c.reason {
+				let reason = self.propagators[prop].explain(&mut self.state, c.subject, data);
+				Conflict {
+					subject: c.subject,
+					reason: Reason::Eager(reason.into()),
+				}
+			} else {
+				c
+			}
+		});
 
 		// Revert to real decision level
 		self.state.notify_backtrack::<true>(level as usize, false);
@@ -277,38 +374,59 @@ impl PropagatorExtension for Engine {
 
 	fn notify_assignments(&mut self, lits: &[RawLit]) {
 		debug!(lits = ?lits.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "assignments");
-		// Avoid doing more work if we are already in a failed state, but continue
-		// in debug mode to check all reasons
-		if self.state.failed && !cfg!(debug_assertions) {
-			return;
-		}
 
 		// Enqueue propagators
 		for &lit in lits {
-			#[cfg(debug_assertions)]
-			{
-				// (DEBUG ONLY) if we propagated this literal, ensure its explanation is
-				// valid in its trail position.
-				if self.state.last_propagated == Some(lit) {
-					self.debug_check_reason(lit);
-					self.state.last_propagated = None;
-				}
-			}
-
 			if self.state.trail.assign_lit(lit).is_some() {
 				continue;
 			}
 
 			// Enqueue based on direct literal
 			if !self.state.failed {
-				self.state.propagator_queue.enqueue_propagators(
-					self.state
-						.bool_activation
-						.get(&lit.var())
-						.into_iter()
-						.flatten()
-						.copied(),
-				);
+				if let Some(activations) = self
+					.state
+					.bool_activation
+					.get_mut(&lit.var())
+					.map(mem::take)
+				{
+					for &action in &activations {
+						let prop = match action.into() {
+							ActivationAction::Advise(adv) => {
+								let &AdvisorDef {
+									bool2int,
+									data,
+									propagator,
+									..
+								} = &self.state.advisors[adv];
+								let enqueue = if bool2int {
+									self.propagators[propagator].advise_of_int_change(
+										&mut self.state,
+										IntView(IntViewInner::Bool {
+											transformer: Default::default(),
+											lit,
+										}),
+										IntEvent::Fixed,
+										data,
+									)
+								} else {
+									self.propagators[propagator].advise_of_bool_change(
+										&mut self.state,
+										BoolView(BoolViewInner::Lit(lit)),
+										data,
+									)
+								};
+								if !enqueue {
+									continue;
+								}
+								propagator
+							}
+							ActivationAction::Enqueue(prop) => prop,
+						};
+						self.state.propagator_queue.enqueue_propagator(prop);
+					}
+
+					*self.state.bool_activation.get_mut(&lit.var()).unwrap() = activations;
+				}
 			}
 
 			// Enqueue based on literal meaning in complex type
@@ -329,12 +447,18 @@ impl PropagatorExtension for Engine {
 						trace!(lit = i32::from(lit), lb, ub, "invalid eq notification");
 						None
 					}
-					IntLitMeaning::Eq(_val) => {
+					IntLitMeaning::Eq(val) => {
 						#[cfg(debug_assertions)]
 						{
 							// (DEBUG ONLY) Push the integer variable and its value to check
 							// that its bounds were updated before propagation occurs.
-							self.state.check_int_fixed.push((iv, _val));
+							self.state.check_int_fixed.push((iv, val));
+						}
+						if val > lb {
+							self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, val);
+						}
+						if val < ub {
+							self.state.int_vars[iv].notify_upper_bound(&mut self.state.trail, val);
 						}
 						Some(IntEvent::Fixed)
 					}
@@ -368,9 +492,36 @@ impl PropagatorExtension for Engine {
 				};
 				if !self.state.failed {
 					if let Some(event) = event {
-						self.state
-							.propagator_queue
-							.enqueue_propagators(self.state.int_activation[iv].activated_by(event));
+						let activations = mem::take(&mut self.state.int_activation[iv]);
+						for action in activations.activated_by(event) {
+							let prop = match action {
+								ActivationAction::Advise(adv) => {
+									let &AdvisorDef {
+										negated,
+										data,
+										propagator,
+										..
+									} = &self.state.advisors[adv];
+									let event = match event {
+										IntEvent::LowerBound if negated => IntEvent::UpperBound,
+										IntEvent::UpperBound if negated => IntEvent::LowerBound,
+										e => e,
+									};
+									if !self.propagators[propagator].advise_of_int_change(
+										&mut self.state,
+										IntView(IntViewInner::VarRef(iv)),
+										event,
+										data,
+									) {
+										continue;
+									}
+									propagator
+								}
+								ActivationAction::Enqueue(prop) => prop,
+							};
+							self.state.propagator_queue.enqueue_propagator(prop);
+						}
+						self.state.int_activation[iv] = activations;
 					}
 				}
 			}
@@ -381,6 +532,11 @@ impl PropagatorExtension for Engine {
 		debug!(new_level, restart, "backtrack");
 		// Revert value changes to previous decision level
 		self.state.notify_backtrack::<false>(new_level, restart);
+
+		// Notify subscribed propagators of backtracking
+		for &p in self.notify_of_backtrack.iter() {
+			self.propagators[p].advise_of_backtrack(&mut self.state);
+		}
 	}
 
 	fn notify_new_decision_level(&mut self) {
@@ -415,14 +571,21 @@ impl PropagatorExtension for Engine {
 			#[cfg(debug_assertions)]
 			{
 				// (DEBUG ONLY) Check that all integers that where fixed by equality
-				// literals had their bounds updated to match.
+				// literals had their bound literals set to match.
 				for (iv, i) in mem::take(&mut self.state.check_int_fixed) {
 					let iv = IntView(IntViewInner::VarRef(iv));
 					debug_assert_eq!(self.state.get_int_val(iv), Some(i));
+					let lb_lit = self
+						.state
+						.try_int_lit(iv, IntLitMeaning::GreaterEq(i))
+						.unwrap();
+					let ub_lit = self
+						.state
+						.try_int_lit(iv, IntLitMeaning::Less(i + 1))
+						.unwrap();
+					debug_assert_eq!(self.state.get_bool_val(lb_lit), Some(true));
+					debug_assert_eq!(self.state.get_bool_val(ub_lit), Some(true));
 				}
-				// We've been notified of the previous propagated literal (and its
-				// reason was checked).
-				debug_assert!(self.state.last_propagated.is_none());
 			}
 			// If there are no previous changes, run propagators
 			SolvingContext::new(slv, &mut self.state).run_propagators(&mut self.propagators);
@@ -435,58 +598,20 @@ impl PropagatorExtension for Engine {
 			debug!(lit = i32::from(lit), "propagate");
 			#[cfg(debug_assertions)]
 			{
-				// (DEBUG ONLY) Store the propagated literal, so we know when to check
-				// the explanation.
-				self.state.last_propagated = Some(lit);
+				// (DEBUG ONLY) Ensure the literal's explanation is valid in its trail
+				// position.
+				self.debug_check_reason(lit);
 			}
 			Some(lit)
 		} else {
 			None
 		}
 	}
-
-	fn reason_persistence(&self) -> ClausePersistence {
-		ClausePersistence::Forgettable
-	}
 }
 
-impl Engine {
-	#[cfg(debug_assertions)]
-	/// (DEBUG ONLY) Check that the reason of a propagated literal contains only
-	/// known true literals
-	fn debug_check_reason(&mut self, lit: RawLit) {
-		if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
-			// Reason is in the form (a /\ b /\ ...), which then forms the
-			// implication (a /\ b /\ ...) -> lit
-			let clause: Clause = reason.explain(&mut self.propagators, &mut self.state, Some(lit));
-			// This is converted into a clause (¬a \/ ¬b \/ ... \/ lit)
-			for &l in &clause {
-				if l == lit {
-					continue;
-				}
-				// Get the value of the original reason lit by negating again: ¬¬a
-				// gives a
-				let val = self.state.trail.get_sat_value(!l);
-				if !val.unwrap_or(false) {
-					tracing::error!(lit_prop = i32::from(lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
-				}
-				debug_assert!(
-					val.unwrap_or(false),
-					"Literal {} in Reason for {} is {:?}, but should be known true",
-					!l,
-					lit,
-					val
-				);
-			}
-		} else {
-			debug_assert_eq!(
-				self.state.decision_level(),
-				0,
-				"Literal {} propagated without reason at non-zero decision level",
-				lit
-			);
-		}
-	}
+impl PropagatorExtensionDefinition for Engine {
+	const CHECK_ONLY: bool = false;
+	const REASON_PERSISTENCE: ClausePersistence = ClausePersistence::Forgettable;
 }
 
 impl State {
@@ -495,14 +620,14 @@ impl State {
 		self.trail.decision_level()
 	}
 
-	/// Internal method called to process the backtracking to an earlier decision
-	/// level.
+	/// Internal method called to process the backtracking to an earlier
+	/// decision level.
 	///
 	/// The generic artugment `ARTIFICIAL` is used to signal when the solver is
 	/// backtracking from an artificial decision level. An example of the use of
-	/// artificial decision levels is found in the [`Engine::check_model`] method,
-	/// where it is used to artificially fix any integer variables using lazy
-	/// encodings.
+	/// artificial decision levels is found in the [`Engine::check_model`]
+	/// method, where it is used to artificially fix any integer variables
+	/// using lazy encodings.
 	fn notify_backtrack<const ARTIFICIAL: bool>(&mut self, level: usize, restart: bool) {
 		debug_assert!(!ARTIFICIAL || level as u32 == self.trail.decision_level() - 1);
 		debug_assert!(!ARTIFICIAL || !restart);
@@ -514,7 +639,6 @@ impl State {
 		#[cfg(debug_assertions)]
 		{
 			// (DEBUG ONLY) Clear the debug checking queues.
-			self.last_propagated = None;
 			self.check_int_fixed.clear();
 		}
 		// Backtrack trail
@@ -529,7 +653,7 @@ impl State {
 		self.statistics.conflicts += 1;
 
 		// Switch to VSIDS if the number of conflicts exceeds the threshold
-		if let Some(conflicts) = self.config.vsids_after {
+		if let Some(conflicts) = self.config.vsids_after_conflict {
 			if !self.config.vsids_only
 				&& !self.config.toggle_vsids
 				&& self.statistics.conflicts > conflicts as u64
@@ -554,6 +678,13 @@ impl State {
 					restart = self.statistics.restarts,
 					"toggling vsids"
 				);
+			} else if self.config.vsids_after_restart {
+				self.vsids = true;
+				debug!(
+					vsids = self.vsids,
+					restart = self.statistics.restarts,
+					"enable vsids after restart"
+				);
 			}
 			if level == 0 {
 				// Memory cleanup (Reasons are known to no longer be relevant)
@@ -577,7 +708,8 @@ impl State {
 	pub(crate) fn register_reason(&mut self, lit: RawLit, built_reason: Result<Reason, bool>) {
 		match built_reason {
 			Ok(reason) => {
-				// Insert new reason, possibly overwriting old one (from previous search attempt)
+				// Insert new reason, possibly overwriting old one (from previous search
+				// attempt)
 				let _ = self.reason_map.insert(lit, reason);
 			}
 			Err(true) => {
@@ -591,19 +723,25 @@ impl State {
 	/// Set whether the solver should toggle between VSIDS and a user defined
 	/// search strategy after every restart.
 	///
-	/// Note that this setting is ignored if the solver is set to use VSIDS only.
+	/// Note that this setting is ignored if the solver is set to use VSIDS
+	/// only.
 	pub(crate) fn set_toggle_vsids(&mut self, enabled: bool) {
 		self.config.toggle_vsids = enabled;
 	}
 
-	/// Set the number of conflicts after which the solver should switch to using
-	/// VSIDS to make search decisions.
-	pub(crate) fn set_vsids_after(&mut self, conflicts: Option<u32>) {
-		self.config.vsids_after = conflicts;
+	/// Set the number of conflicts after which the solver should switch to
+	/// using VSIDS to make search decisions.
+	pub(crate) fn set_vsids_after_conflict(&mut self, conflicts: Option<u32>) {
+		self.config.vsids_after_conflict = conflicts;
 	}
 
-	/// Set wether the solver should make all search decisions based on the VSIDS
-	/// only.
+	/// Set whether the solver should switch to using VSIDS after a restart.
+	pub(crate) fn set_vsids_after_restart(&mut self, enable: bool) {
+		self.config.vsids_after_restart = enable;
+	}
+
+	/// Set wether the solver should make all search decisions based on the
+	/// VSIDS only.
 	pub(crate) fn set_vsids_only(&mut self, enable: bool) {
 		self.config.vsids_only = enable;
 		self.vsids = enable;
@@ -728,7 +866,8 @@ impl ExplanationActions for State {
 			}
 		};
 
-		// Transform the meaning back to fit the original view if it was linearly transformed
+		// Transform the meaning back to fit the original view if it was linearly
+		// transformed
 		let meaning = if let IntViewInner::Linear { transformer, .. }
 		| IntViewInner::Bool { transformer, .. } = var.0
 		{
@@ -934,4 +1073,13 @@ impl TrailingActions for State {
 index_vec::define_index_type! {
 	/// Identifies an propagator in a [`Solver`]
 	pub struct PropRef = u32;
+	// Allow storing as i32 in [`ActivationActionS`]
+	MAX_INDEX = i32::MAX as usize;
+}
+
+index_vec::define_index_type! {
+	/// Identifies an advisor in the [`State`]
+	pub struct Advisor = u32;
+	// Allow storing as i32 in [`ActivationActionS`]
+	MAX_INDEX = i32::MAX as usize;
 }

@@ -5,7 +5,8 @@ use std::iter::once;
 
 use crate::{
 	actions::{
-		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+		ConstraintInitActions, ExplanationActions, PropagatorInitActions, ReformulationActions,
+		SimplificationActions,
 	},
 	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
@@ -26,7 +27,8 @@ pub struct IntAbs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Bounds propagator for one integer variable being the absolute value of another
+/// Bounds propagator for one integer variable being the absolute value of
+/// another
 pub struct IntAbsBounds {
 	/// The integer variable whose absolute value is being taken
 	origin: IntView,
@@ -35,6 +37,11 @@ pub struct IntAbsBounds {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntAbs {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		actions.simplify_on_change_int(self.origin);
+		actions.simplify_on_change_int(self.abs);
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		let (lb, ub) = actions.get_int_bounds(self.origin);
 		if ub < 0 {
@@ -138,7 +145,7 @@ where
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use pindakaas::{solver::cadical::PropagatingCadical, Cnf};
+	use pindakaas::Cnf;
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
@@ -151,7 +158,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_int_abs_sat() {
-		let mut slv = Solver::<PropagatingCadical<_>>::from(&Cnf::default());
+		let mut slv = Solver::from(&Cnf::default());
 		let a = IntVar::new_in(
 			&mut slv,
 			(-3..=3).into(),
