@@ -297,7 +297,7 @@ impl CumulativeTimeTablePropagator {
 	/// Constructs a reason for limiting the usage of a task at a specific
 	/// timepoint. The explanation includes:
 	/// (1) relevant tasks (including the target task) that have compulsory
-	/// parts at the given timepoint, 	which are used to cover the required
+	/// parts at the given timepoint, which are used to cover the required
 	/// resource usage, (2) and the resource capacity at its upper bound.
 	fn explain_limit_usage<A: PropagationActions>(
 		&self,
