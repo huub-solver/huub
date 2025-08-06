@@ -923,7 +923,7 @@ impl DifferenceLogicGraph {
 
 	/// Get the current lower bound for the node, either stored or from the search.
 	fn get_cur_lower_bound<E, A: ModelAdapter<E>>(&self, adapter: &A, v: usize) -> IntVal {
-		match self.borrow_node(v).lower_bound {
+		match self.borrow_node(v).lower_bound { // TODO update and store?
 			Some(lb) => lb,
 			None => adapter.get_int_lower_bound(v),
 		}
@@ -1496,7 +1496,7 @@ impl DifferenceLogicGraph {
 		}
 
 		for index in fail_indices {  // todo check if we want this here or immediately inside the loops?
-			let _ = self.inc_sat(adapter, index)?;  // TODO could also try these ones lazy?
+			let _ = self.inc_sat(adapter, index)?;  // TODO could also try these ones lazy? Or keep track of path in dijkstra relevant?
 		}
 
 		Ok(())
@@ -1620,7 +1620,7 @@ impl DifferenceLogicGraph {
 		}
 
 		// Consequences of lower bound updates on open implied constraints
-		for i in 0..self.lb_updates.len() {
+		for i in 0..self.lb_updates.len() { // TODO here we do not need to iterate all of them - a lot are not actual updates!!!
 			let n = self.lb_updates[i];
 			let node_ref = self.get_node_clone(n);
 			let mut node = node_ref.borrow_mut();
@@ -1633,7 +1633,8 @@ impl DifferenceLogicGraph {
 				if lb - target_ub > edge.val {
 					// Constraint is falsified by bounds.
 					trace!("Constraint {:?} is falsified by bounds.", edge);
-					adapter.set_bool_false(edge.bool_var, n, lb, edge.to, target_ub)?;
+					// Lower bound is lifted
+					adapter.set_bool_false(edge.bool_var, n, target_ub + edge.val + 1, edge.to, target_ub)?;
 					self.close_imp_edge_forward(adapter, &mut open, index);
 				}
 			}
@@ -1673,7 +1674,8 @@ impl DifferenceLogicGraph {
 				if source_lb - ub > edge.val {
 					// Constraint is falsified by bounds.
 					trace!("Constraint {:?} is falsified by bounds.", edge);
-					adapter.set_bool_false(edge.bool_var, edge.from, source_lb, n, ub)?;
+					// Upper bound is lifted
+					adapter.set_bool_false(edge.bool_var, edge.from, source_lb, n, source_lb - edge.val - 1)?;
 					self.close_imp_edge_backward(adapter, &mut rev_open, index);
 				}
 			}
@@ -1813,7 +1815,7 @@ trait ModelAdapter<E> {
 		panic!("Trail removal operations are not supported by this adapter!");
 	}
 
-	/// Remove the trailing infrastructure for the given node. Note that the default is to fail.
+	/// Remove the trailing infrastructure for the given list. Note that the default is to fail.
 	fn trail_remove_open_list<T>(&mut self, _l: &mut TrailedOpenList<T>) {
 		panic!("Trail removal operations are not supported by this adapter!");
 	}
