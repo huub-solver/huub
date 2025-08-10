@@ -1142,7 +1142,7 @@ where
 							.map(|(a, b)| vec![a, b])
 							.map(|x| x.iter().map(|l| self.lit_int(l)).collect())
 							.try_collect()?;
-                        self.prb += diffn_int(box_posn, box_size, is_nonstrict);
+						self.prb += diffn_int(box_posn, box_size, is_nonstrict);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: if is_nonstrict {
@@ -1173,7 +1173,7 @@ where
 							.chunks(dimensions.try_into().unwrap())
 							.map(|c| c.to_vec())
 							.collect();
-                        self.prb += diffn_int(start_pos, sizes, is_nonstrict);
+						self.prb += diffn_int(start_pos, sizes, is_nonstrict);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: if is_nonstrict {
