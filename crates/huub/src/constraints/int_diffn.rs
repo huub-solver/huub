@@ -180,7 +180,6 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		curr_obj_idx: usize,
 		curr_dimension: usize,
 		all_fr: &[ForbiddenRegion],
-		all_fr_explain: &[ForbiddenRegion],
 	) -> Result<(), Conflict> {
 		let mut sweep = vec![];
 		let mut jump = vec![];
@@ -219,7 +218,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			);
 			let reason = self.explain_propagation(
 				actions,
-				all_fr_explain,
+				all_fr,
 				fr_support,
 				curr_obj_idx,
 				curr_dimension,
@@ -244,7 +243,6 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		curr_obj_idx: usize,
 		curr_dimension: usize,
 		all_fr: &[ForbiddenRegion],
-		all_fr_explain: &[ForbiddenRegion],
 	) -> Result<(), Conflict> {
 		trace!("PRUNE MIN");
 		let mut sweep = vec![];
@@ -283,7 +281,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			);
 			let reason = self.explain_propagation(
 				actions,
-				all_fr_explain,
+				all_fr,
 				fr_support,
 				curr_obj_idx,
 				curr_dimension,
@@ -372,11 +370,9 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		fr_support: &mut Vec<usize>,
 		o_idx: usize,
 		dimensions: usize,
-	) -> Option<(Vec<ForbiddenRegion>, Vec<ForbiddenRegion>)> {
+	) -> Option<Vec<ForbiddenRegion>> {
 		// TODO: To avoid uneccesary allocations, this could be moved to self
 		let mut all_fr: Vec<ForbiddenRegion> = Vec::new();
-		// All forbidden regions but excluding the combine optimization from coalesce
-		let mut all_fr_no_combine: Vec<ForbiddenRegion> = Vec::new();
 		for i in 0..self.box_posn.len() {
 			// Check if the current object can be ignored if it has lost its source property
 			if actions.get_trailed_int(self.source[i]) == 1 {
@@ -415,33 +411,27 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 					&fr,
 					dimensions,
 				) {
-				let fr_copy = fr.clone();
 				let mut c = 0;
 				for f in &mut all_fr {
 					let fr_object = fr_support[c];
-					let (v, e) = Self::coalesce(f, &fr, self.dimensions);
+					let v = Self::coalesce(f, &fr, self.dimensions);
 
-					match (v, e) {
+					match v {
 						// fr is a subset of f
-						(0 | 1, _) => {
+						0 | 1 => {
 							//Do not add f vector of forbidden regions and do not track
 							exists = false;
 							break;
 						}
 						// f is a subset of fr
-						(2, _) => {
+						2 => {
 							// remove that forbidden region from all_fr and remove it from tracking
 							regions_to_remove.push((c, fr_object));
 						}
-						// They overlap whilst none is a subset of another combine them
-						(3, Some(e)) => {
-							f.lb[e] = f.lb[e].min(fr.lb[e]);
-							f.ub[e] = f.ub[e].max(fr.ub[e]);
-							// exists = false;
-							break;
-						}
+						// They overlap whilst none is a subset of another, they could be combined
+						3 => continue,
 						// No overlap possible
-						(4, _) => continue,
+						4 => continue,
 						_ => panic!("should not be possible"),
 					}
 					c += 1;
@@ -449,21 +439,20 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 
 				for (c, o) in regions_to_remove.iter().rev() {
 					let _ = all_fr.remove(*c);
-					let _ = all_fr_no_combine.remove(*c);
 					fr_support.retain(|&x| x != *o);
 				}
 
 				if exists {
 					fr_support.push(i);
 					all_fr.push(fr);
-					all_fr_no_combine.push(fr_copy);
 				}
 			}
 		}
+
 		if all_fr.is_empty() {
 			None
 		} else {
-			Some((all_fr, all_fr_no_combine))
+			Some(all_fr)
 		}
 	}
 
@@ -503,13 +492,12 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		fr1: &mut ForbiddenRegion,
 		fr2: &ForbiddenRegion,
 		dimensions: usize,
-	) -> (usize, Option<usize>) {
+	) -> usize {
 		let mut trend = 0;
-		let mut e = None;
 		for d in 0..dimensions {
 			// No overlapping possible
 			if fr1.ub[d] + 1 < fr2.lb[d] || fr1.lb[d] > fr2.ub[d] + 1 {
-				return (4, None);
+				return 4;
 			// The regions are equal
 			} else if fr1.lb[d] == fr2.lb[d] && fr1.ub[d] == fr2.ub[d] {
 				continue;
@@ -517,25 +505,24 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			} else if fr1.lb[d] <= fr2.lb[d] && fr1.ub[d] >= fr2.ub[d] {
 				match trend {
 					0 | 1 => trend = 1,
-					_ => return (4, None),
+					_ => return 4,
 				}
 			// fr1 is a subset of fr2
 			} else if fr1.lb[d] >= fr2.lb[d] && fr1.ub[d] <= fr2.ub[d] {
 				match trend {
 					0 | 2 => trend = 2,
-					_ => return (4, None),
+					_ => return 4,
 				}
 			// They overlap, but not such one is a subset of another
 			// only allow this trend in one dimensions
 			} else {
-				e = Some(d);
 				match trend {
 					0 => trend = 3,
-					_ => return (4, None),
+					_ => return 4,
 				}
 			}
 		}
-		(trend, e)
+		trend
 	}
 
 	/// Returns true if the given object and bounding_box are completely disjoint
@@ -735,7 +722,7 @@ where
 			}
 			let mut fr_support: Vec<usize> = Vec::new();
 
-			if let Some((all_fr, all_fr_explain)) =
+			if let Some(all_fr) =
 				self.gen_forbidden_regions::<P>(actions, &mut fr_support, o_idx, self.dimensions)
 			{
 				if self.fixed_in_all_dimensions(o_idx) {
@@ -751,9 +738,9 @@ where
 				}
 				let mut all_fixed = true;
 				for d in 0..self.dimensions {
-					self.prune_min(actions, &fr_support, o_idx, d, &all_fr, &all_fr_explain)?;
+					self.prune_min(actions, &fr_support, o_idx, d, &all_fr)?;
 
-					self.prune_max(actions, &fr_support, o_idx, d, &all_fr, &all_fr_explain)?;
+					self.prune_max(actions, &fr_support, o_idx, d, &all_fr)?;
 
 					if self.lb_tracker[o_idx][d] != self.ub_tracker[o_idx][d] {
 						all_fixed = false;
