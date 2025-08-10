@@ -19,7 +19,6 @@ pindakaas = { git = "https://github.com/pindakaashq/pindakaas.git", features = [
 	"external-propagation",
 ] }
 rangelist = "0.2"
-smallvec = "1.15.0"
 thiserror = "2.0"
 tracing = { workspace = true }
 

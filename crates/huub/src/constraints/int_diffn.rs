@@ -1,7 +1,6 @@
 //! Structure and algorithms for the integer diffn constraint, which
 //! enforces that a number of k-dimensional hyperrectangles do not overlap.
 use itertools::Itertools;
-use smallvec::SmallVec;
 use tracing::trace;
 
 use crate::{
@@ -84,9 +83,9 @@ impl<S: SimplificationActions> Constraint<S> for IntDiffn {
 /// Active forbidden regions
 struct ForbiddenRegion {
 	/// lower bound of each dimension
-	lb: SmallVec<[IntVal; 3]>,
+	lb: Vec<IntVal>,
 	/// upper bound of each dimension
-	ub: SmallVec<[IntVal; 3]>,
+	ub: Vec<IntVal>,
 }
 
 impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
@@ -389,8 +388,8 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			};
 
 			let mut fr = ForbiddenRegion {
-				lb: SmallVec::<[IntVal; 3]>::new(),
-				ub: SmallVec::<[IntVal; 3]>::new(),
+				lb: Vec::new(),
+				ub: Vec::new(),
 			};
 
 			let mut exists = true;
@@ -434,7 +433,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 							// remove that forbidden region from all_fr and remove it from tracking
 							regions_to_remove.push((c, fr_object));
 						}
-						// they overlap whilst none is a subset of another combine them
+						// They overlap whilst none is a subset of another combine them
 						(3, Some(e)) => {
 							f.lb[e] = f.lb[e].min(fr.lb[e]);
 							f.ub[e] = f.ub[e].max(fr.ub[e]);
@@ -768,8 +767,8 @@ where
 
 		// Source optimisations
 		let mut active_b = ForbiddenRegion {
-			lb: SmallVec::<[IntVal; 3]>::new(),
-			ub: SmallVec::<[IntVal; 3]>::new(),
+			lb: Vec::new(),
+			ub: Vec::new(),
 		};
 
 		for _ in 0..self.dimensions {
