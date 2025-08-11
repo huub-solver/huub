@@ -18,7 +18,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Representation of the `diffn_int` constraint within a model.
 ///
-/// This constraint enforces that all k-dimensional rectangles does no overlap
+/// This constraint enforces that all k-dimensional rectangles do not overlap
 /// given their starting position `box_posn` and their sizes `box_sizes`.
 pub struct IntDiffn {
 	/// The origin positions of all objects in all dimensions
