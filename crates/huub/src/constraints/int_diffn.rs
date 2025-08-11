@@ -55,6 +55,11 @@ pub struct IntDiffnSweep<const NON_STRICT: bool> {
 	lb_tracker: Vec<Vec<IntVal>>,
 	/// Tracks the lower bound of the sizes
 	lb_sizes: Vec<Vec<IntVal>>,
+	/// Used to see if any rectangle has lost its source property, that is; it
+	/// is completely disjoint from all the others and therefore can be
+	/// removed completely when reasoning in the rest of the algorithm since
+	/// it will not effect any other triangle
+	bounding_box: ForbiddenRegion,
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntDiffn {
@@ -151,6 +156,11 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		let ub_tracker_prop = vec![vec![0; box_posn[0].len()]; box_posn.len()];
 		let lb_tracker_prop = vec![vec![0; box_posn[0].len()]; box_posn.len()];
 
+		let bounding_box_prop = ForbiddenRegion {
+			lb: vec![i64::MAX; box_posn[0].len()],
+			ub: vec![i64::MIN; box_posn[0].len()],
+		};
+
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				box_posn: box_posn_prop,
@@ -162,6 +172,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 				ub_tracker: ub_tracker_prop,
 				lb_tracker: lb_tracker_prop,
 				lb_sizes: lb_sizes_prop,
+				bounding_box: bounding_box_prop,
 			}),
 			PriorityLevel::Lowest,
 		);
@@ -488,11 +499,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 	/// 3 - The regions are overlapping such that
 	///     they are equal in all dimensions except 1
 	/// 4 - The forbidden regions are equal
-	fn coalesce(
-		fr1: &mut ForbiddenRegion,
-		fr2: &ForbiddenRegion,
-		dimensions: usize,
-	) -> usize {
+	fn coalesce(fr1: &mut ForbiddenRegion, fr2: &ForbiddenRegion, dimensions: usize) -> usize {
 		let mut trend = 0;
 		for d in 0..dimensions {
 			// No overlapping possible
@@ -746,36 +753,33 @@ where
 						all_fixed = false;
 					}
 				}
+				// Since it is fixed in all dimensions and it is at a feasible position by not
+				// causing any conflicts, remove its target property
 				if all_fixed {
 					let _ = actions.set_trailed_int(self.target[o_idx], 1);
 				}
 			}
 		}
 
-		// Source optimisations
-		let mut active_b = ForbiddenRegion {
-			lb: Vec::new(),
-			ub: Vec::new(),
-		};
-
-		for _ in 0..self.dimensions {
-			active_b.lb.push(i64::MAX);
-			active_b.ub.push(i64::MIN);
-		}
-
+		// Source optimisations, create the largest possible bounding box
 		for o_idx in 0..self.box_posn.len() {
 			if actions.get_trailed_int(self.target[o_idx]) == 1 {
 				continue;
 			}
 			for i in 0..self.dimensions {
-				active_b.lb[i] = active_b.lb[i].min(self.lb_tracker[o_idx][i]);
-				active_b.ub[i] =
-					active_b.ub[i].max(self.ub_tracker[o_idx][i] + self.lb_sizes[o_idx][i] - 1);
+				self.bounding_box.lb[i] = self.bounding_box.lb[i].min(self.lb_tracker[o_idx][i]);
+				self.bounding_box.ub[i] = self.bounding_box.ub[i]
+					.max(self.ub_tracker[o_idx][i] + self.lb_sizes[o_idx][i] - 1);
 			}
 		}
 
+		// If the current rectangle has lost its target property (is fixed in a feasible position)
+        // and is completely disjoint from the bounding box, remove its source property
+		// (disregard it in the rest of the algorhtm)
 		for o_idx in 0..self.box_posn.len() {
-			if actions.get_trailed_int(self.target[o_idx]) == 1 && self.disjoint(&active_b, o_idx) {
+			if actions.get_trailed_int(self.target[o_idx]) == 1
+				&& self.disjoint(&self.bounding_box, o_idx)
+			{
 				let _ = actions.set_trailed_int(self.source[o_idx], 1);
 			}
 		}
