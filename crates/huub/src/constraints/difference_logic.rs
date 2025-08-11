@@ -13,12 +13,12 @@ use pindakaas::propositional_logic::Formula;
 use rustc_hash::FxBuildHasher;
 use tracing::trace;
 use crate::solver::activation_list::{IntEvent, IntPropCond};
-use crate::solver::{BoolView, IntLitMeaning};
+use crate::solver::{BoolView, BoolViewInner, IntLitMeaning};
 use crate::{actions::{
 	ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
 }, constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus}, reformulate::ReformulationError, solver::{
 	queue::PriorityLevel, IntView,
-}, BoolDecision, BoolFormula, IntDecision, IntVal, Model};
+}, BoolDecision, BoolFormula, Conjunction, IntDecision, IntVal, Model};
 use crate::actions::{ConstraintInitActions, TrailingActions};
 use crate::helpers::initial_trail::InitialTrail;
 use crate::helpers::linear_transform::LinearTransform;
@@ -601,7 +601,7 @@ impl<S: SimplificationActions> ModelAdapter<ReformulationError> for Simplificati
 		Ok(())
 	}
 
-	fn set_bool_false(&mut self, bool_var: Option<usize>, _lb_var: usize, _lb_val: IntVal, _ub_var: usize, _ub_val: IntVal) -> Result<(), ReformulationError> {
+	fn set_bool_false(&mut self, bool_var: Option<usize>, _edge: usize, _lb_fixed: bool) -> Result<(), ReformulationError> {
 		let var = bool_var.map_or(BoolDecision::from(true), |i| self.bool_vars[i]);
 		self.actions.set_bool(!var)?;
 		Ok(())
@@ -637,13 +637,7 @@ impl<S: SimplificationActions> ModelAdapter<ReformulationError> for Simplificati
 	}
 
 	fn unify_variables(&mut self, x: usize, y: usize, d: IntVal) -> Result<(), ReformulationError> {
-		let y_trans = IntDecision(match self.int_vars[y].0 {
-			IntDecisionInner::Var(i) => IntDecisionInner::Linear(LinearTransform::offset(d), i),
-			IntDecisionInner::Const(c) => IntDecisionInner::Const(c + d),
-			IntDecisionInner::Linear(transform, i) => IntDecisionInner::Linear(transform + d, i),
-			IntDecisionInner::Bool(transform, b) => IntDecisionInner::Bool(transform + d, b),
-		});
-		self.actions.unify_int(self.int_vars[x], y_trans)
+		self.actions.unify_int(self.int_vars[x], self.int_vars[y] + d)
 	}
 
 }
@@ -1069,7 +1063,7 @@ impl DifferenceLogicGraph {
 				let edge = &self.edges[index];
 				if distances[i][edge.from] < -edge.val {
 					trace!("Implied edge {edge:?} is falsified, opposite shortest path of length {} found", distances[i][edge.from]);
-					adapter.set_bool_false(edge.bool_var, edge.from, 0, i, 0)?;  // TODO invalid reason, but also not needed at this point -> different method?
+					adapter.set_bool_false(edge.bool_var, index, true)?;  // TODO invalid reason, but also not needed at this point -> different method?
 					self.close_imp_edge_backward(adapter, &mut rev_open, index);
 				}
 			}
@@ -1634,7 +1628,7 @@ impl DifferenceLogicGraph {
 					// Constraint is falsified by bounds.
 					trace!("Constraint {:?} is falsified by bounds.", edge);
 					// Lower bound is lifted
-					adapter.set_bool_false(edge.bool_var, n, target_ub + edge.val + 1, edge.to, target_ub)?;
+					adapter.set_bool_false(edge.bool_var, index, false)?;
 					self.close_imp_edge_forward(adapter, &mut open, index);
 				}
 			}
@@ -1675,7 +1669,7 @@ impl DifferenceLogicGraph {
 					// Constraint is falsified by bounds.
 					trace!("Constraint {:?} is falsified by bounds.", edge);
 					// Upper bound is lifted
-					adapter.set_bool_false(edge.bool_var, edge.from, source_lb, n, source_lb - edge.val - 1)?;
+					adapter.set_bool_false(edge.bool_var, index, true)?;
 					self.close_imp_edge_backward(adapter, &mut rev_open, index);
 				}
 			}
@@ -1802,7 +1796,7 @@ trait ModelAdapter<E> {
 
 	/// Enforce the negation of the boolean variable identified by index with a reason given by a 
 	/// lower and upper bound.
-	fn set_bool_false(&mut self, bool_var: Option<usize>, lb_var: usize, lb_val: IntVal, ub_var: usize, ub_val: IntVal) -> Result<(), E>;
+	fn set_bool_false(&mut self, bool_var: Option<usize>, edge: usize, lb_fixed: bool) -> Result<(), E>;
 
 	/// Check if the integer variables v1 and v2 are based on different underlying variables,
 	/// if not reemit them as separate constraints.
@@ -1890,10 +1884,14 @@ impl<P: PropagationActions> ModelAdapter<Conflict> for SolverModelAdapter<'_, P>
 		Ok(())
 	}
 
-	fn set_bool_false(&mut self, bool_var: Option<usize>, lb_var: usize, lb_val: IntVal, ub_var: usize, ub_val: IntVal) -> Result<(), Conflict> {
+	fn set_bool_false(&mut self, bool_var: Option<usize>, edge: usize, lb_fixed: bool) -> Result<(), Conflict> {
 		let var = bool_var.map_or(BoolView::from(true), |i| self.bool_vars[i]);
-		self.actions.set_bool(!var, |a: &mut P| vec![a.get_int_lit(self.int_vars[lb_var], IntLitMeaning::GreaterEq(lb_val)),
-													 a.get_int_lit(self.int_vars[ub_var], IntLitMeaning::Less(ub_val + 1))])?;
+		let data = if lb_fixed {
+			edge as u64
+		} else {
+			-(edge as i64) as u64
+		};
+		self.actions.set_bool(!var, self.actions.deferred_reason(data))?;
 		Ok(())
 	}
 	
@@ -1985,6 +1983,33 @@ where
 		self.lower_bound_changes.clear();
 		self.upper_bound_changes.clear();
 		Ok(())
+	}
+
+	fn explain(&mut self, actions: &mut E, _lit: Option<RawLit>, data: u64) -> Conjunction {
+		let signed_data = data as i64;
+		let views = if signed_data < 0 {
+			let edge = &self.graph.borrow().edges[-signed_data as usize];
+			let target_ub = actions.get_int_upper_bound(self.int_vars[edge.to]);
+			vec![actions.get_int_lit_relaxed(self.int_vars[edge.from], IntLitMeaning::GreaterEq(target_ub + edge.val + 1)).0,
+				 actions.get_int_upper_bound_lit(self.int_vars[edge.to])]
+		} else {
+			let edge = &self.graph.borrow().edges[signed_data as usize];
+			let source_lb = actions.get_int_lower_bound(self.int_vars[edge.from]);
+			vec![actions.get_int_lower_bound_lit(self.int_vars[edge.from]),
+				 actions.get_int_lit_relaxed(self.int_vars[edge.to], IntLitMeaning::Less(source_lb - edge.val)).0,]
+		};
+		trace!("Explaining {data} with {views:?}");
+		views.iter()
+			.filter_map(|bv| match bv.0 {
+				BoolViewInner::Lit(l) => Some(l),
+				BoolViewInner::Const(true) => None,
+				BoolViewInner::Const(false) => {
+					unreachable!(
+						"Unexpected false literal in the explanation of an edge falsified by bounds."
+					)
+				}
+			})
+			.collect()  // TODO should this be global? (same as in other propagator)
 	}
 
 }
