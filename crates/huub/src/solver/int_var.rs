@@ -1173,7 +1173,7 @@ impl OrderStorage {
 	/// range in `domain` in which `j` is located, and calculate the offset of
 	/// the representation `< j` in a VarRange when the order literals are
 	/// eagerly created.
-	fn resolve_val(domain: &RangeList<IntVal>, val: IntVal) -> (IntVal, usize, RangeIter) {
+	fn resolve_val(domain: &RangeList<IntVal>, val: IntVal) -> (IntVal, usize, RangeIter<'_>) {
 		let mut offset = -1; // -1 to account for the lower bound
 		let mut it = domain.iter().peekable();
 		let mut real_val = val;
