@@ -16,7 +16,7 @@ keywords = ["sat", "lcg", "flatzinc", "minizinc", "optimization"]
 
 [workspace.dependencies]
 expect-test = "1.5"
-flatzinc-serde = "0.4"
+flatzinc-serde = "=0.4.0"
 tracing = "0.1.40"
 rustc-hash = "2.1.1"
 
