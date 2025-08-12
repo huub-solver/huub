@@ -46,7 +46,7 @@ use crate::{
 	BoolDecision, BoolFormula, Decision, IntDecision, IntEq, IntLitMeaning, IntSetVal, IntVal,
 	Model, Solver,
 };
-use crate::constraints::difference_logic::DifferenceLogic;
+use crate::constraints::difference_logic::DifferenceLogicModel;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// Definition of an Boolean decision variable in a [`Model`].
@@ -110,7 +110,7 @@ pub(crate) enum ConstraintStore {
 	IntTimes(IntTimes),
 	IntValArrayElement(IntValArrayElement),
 	IntValuePrecedeChain(IntValuePrecedeChain),
-	DifferenceLogic(DifferenceLogic),
+	DifferenceLogic(DifferenceLogicModel),
 	Other(BoxedConstraint),
 }
 
@@ -320,7 +320,7 @@ impl ConstraintStore {
 				<IntValuePrecedeChain as Constraint<Model>>::to_solver(con, &mut actions)
 			}
 			ConstraintStore::DifferenceLogic(con) => {
-				<DifferenceLogic as Constraint<Model>>::to_solver(con, &mut actions)
+				<DifferenceLogicModel as Constraint<Model>>::to_solver(con, &mut actions)
 			}
 			ConstraintStore::Other(con) => con.to_solver(&mut actions),
 		}

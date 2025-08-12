@@ -70,7 +70,7 @@ use crate::{
 	},
 	solver::{IntLitMeaning, Solver},
 };
-use crate::constraints::difference_logic::DifferenceLogic;
+use crate::constraints::difference_logic::DifferenceLogicModel;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[allow(
@@ -1126,7 +1126,7 @@ impl Model {
 				<IntValuePrecedeChain as Constraint<Model>>::initialize(con, &mut ctx);
 			}
 			ConstraintStore::DifferenceLogic(con) => {
-				<DifferenceLogic as Constraint<Model>>::initialize(con, &mut ctx);
+				<DifferenceLogicModel as Constraint<Model>>::initialize(con, &mut ctx);
 			}
 			ConstraintStore::Other(con) => con.initialize(&mut ctx),
 		}
@@ -1378,8 +1378,8 @@ impl AddAssign<IntValuePrecedeChain> for Model {
 	}
 }
 
-impl AddAssign<DifferenceLogic> for Model {
-	fn add_assign(&mut self, constraint: DifferenceLogic) {
+impl AddAssign<DifferenceLogicModel> for Model {
+	fn add_assign(&mut self, constraint: DifferenceLogicModel) {
 		self.add_constraint(ConstraintStore::DifferenceLogic(constraint));
 	}
 }

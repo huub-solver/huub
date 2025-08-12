@@ -29,7 +29,7 @@ use crate::{
 	IntDecision, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal, ValueSelection,
 	VariableSelection,
 };
-use crate::constraints::difference_logic::{DifferenceLogic, DifferenceLogicConstraint};
+use crate::constraints::difference_logic::{DifferenceLogicCollection, DifferenceLogicConstraint};
 use crate::reformulate::{InitConfig, IntDecisionInner};
 
 #[derive(Error, Debug)]
@@ -909,7 +909,7 @@ where
 	/// to the [`Model`] to enforce the constraints.
 	pub(crate) fn post_constraints(&mut self, config: &InitConfig) -> Result<(), FlatZincError> {
 		// Global propagators dealing with multiple constraints
-		let mut diff_logic = DifferenceLogic::new(config.diff_logic_prio_bounds, config.diff_logic_prio_bools, config.diff_logic_inc_imp);
+		let mut diff_logic = DifferenceLogicCollection::new(config.diff_logic_prio_bounds, config.diff_logic_prio_bools, config.diff_logic_inc_imp);
 		// Traditional relational constraints
 		for (i, c) in self.fzn.constraints.iter().enumerate() {
 			if self.processed[i] {
@@ -1716,11 +1716,12 @@ where
 		}
 		
 		// Add global propagators
+		let diff_logic_model = diff_logic.process(&mut self.prb, config.diff_logic);
 		(self.stats.diff_logic_int_vars, 
 		 self.stats.diff_logic_bool_vars, 
 		 self.stats.diff_logic_global_constraints, 
-		 self.stats.diff_logic_implied_constraints) = diff_logic.process(&mut self.prb, config.diff_logic);
-		self.prb += diff_logic;
+		 self.stats.diff_logic_implied_constraints) = diff_logic_model.output_statistics();
+		self.prb += diff_logic_model;
 
 		Ok(())
 	}
