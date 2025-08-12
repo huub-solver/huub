@@ -5,6 +5,8 @@
     height="350px">
 </p>
 
+NO REAL CHANGE
+
 Huub is a Lazy Clause Generation (LCG) solver with a focus on modularity and maintainability in addition to speed.
 LCG solvers are a class of solvers that can be used to solve decision and optimization problems.
 They are characterized by their ability to dynamically add new Boolean variables and clauses to a Boolean Satisfiability (SAT) solver during the search process.
