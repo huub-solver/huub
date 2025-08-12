@@ -57,6 +57,10 @@ pub struct IntAllDifferentBounds {
 	var: Vec<IntView>,
 	/// Struct to store information about variable
 	var_info: Vec<AllDiffVarMeta>,
+	/// Cached lower bounds
+	lb_cache: Vec<IntVal>,
+	/// Cached upper bounds
+	ub_cache: Vec<IntVal>,
 	/// Index (from vars) of all variables sorted by min bound
 	min_sorted: Vec<usize>,
 	/// Index (from vars) of all variables sorted by max bound
@@ -221,6 +225,8 @@ impl IntAllDifferentBounds {
 				}
 
 				actions.set_int_lower_bound(self.var[self.max_sorted[i]], hall_max, reason)?;
+				self.lb_cache[self.max_sorted[i]] = hall_max;
+
 				Self::path_set(&mut self.hall_interval, min_rank, w, w);
 			}
 			if self.diff[z] == self.bounds[z] - self.bounds[max_rank] {
@@ -266,7 +272,7 @@ impl IntAllDifferentBounds {
 				while self.bounds[k] < hall_max {
 					let mut l = self.bucket[k];
 					while l != usize::MAX {
-						hall_max = cmp::max(hall_max, actions.get_int_upper_bound(self.var[l]) + 1);
+						hall_max = cmp::max(hall_max, self.ub_cache[l] + 1);
 						l = self.var_info[l].next;
 					}
 					k += 1;
@@ -291,6 +297,7 @@ impl IntAllDifferentBounds {
 					k += 1;
 				}
 				actions.set_int_upper_bound(self.var[self.min_sorted[i]], hall_min - 1, reason)?;
+				self.ub_cache[self.min_sorted[i]] = hall_min - 1;
 
 				Self::path_set(&mut self.hall_interval, max_rank, w, w);
 			}
@@ -324,6 +331,8 @@ impl IntAllDifferentBounds {
 			Box::new(Self {
 				var: vars.clone(),
 				var_info: interval,
+				lb_cache: vec![0; n],
+				ub_cache: vec![0; n],
 				min_sorted,
 				max_sorted,
 				num_bounds: 0,
@@ -382,13 +391,15 @@ impl IntAllDifferentBounds {
 	fn sort<P: PropagationActions>(&mut self, actions: &mut P) {
 		let size: usize = self.var.len();
 
-		self.min_sorted
-			.sort_by_key(|&i| actions.get_int_lower_bound(self.var[i]));
-		self.max_sorted
-			.sort_by_key(|&i| actions.get_int_upper_bound(self.var[i]) + 1);
+		for (i, &v) in self.var.iter().enumerate() {
+			(self.lb_cache[i], self.ub_cache[i]) = actions.get_int_bounds(v);
+		}
 
-		let mut min: IntVal = actions.get_int_lower_bound(self.var[self.min_sorted[0]]);
-		let mut max: IntVal = actions.get_int_upper_bound(self.var[self.max_sorted[0]]) + 1;
+		self.min_sorted.sort_by_key(|&i| self.lb_cache[i]);
+		self.max_sorted.sort_by_key(|&i| self.ub_cache[i] + 1);
+
+		let mut min: IntVal = self.lb_cache[self.min_sorted[0]];
+		let mut max: IntVal = self.ub_cache[self.max_sorted[0]] + 1;
 		let mut last: IntVal = min - 2;
 		self.bounds[0] = last; // Dummy
 
@@ -405,7 +416,7 @@ impl IntAllDifferentBounds {
 				self.var_info[self.min_sorted[i]].min_rank = self.num_bounds;
 				i += 1;
 				if i < size {
-					min = actions.get_int_lower_bound(self.var[self.min_sorted[i]]);
+					min = self.lb_cache[self.min_sorted[i]];
 				}
 			} else {
 				if max != last {
@@ -418,7 +429,7 @@ impl IntAllDifferentBounds {
 				if j == size {
 					break;
 				}
-				max = actions.get_int_upper_bound(self.var[self.max_sorted[j]]) + 1;
+				max = self.ub_cache[self.max_sorted[j]] + 1;
 			}
 		}
 		self.bounds[self.num_bounds + 1] = self.bounds[self.num_bounds] + 2; // Dummy
