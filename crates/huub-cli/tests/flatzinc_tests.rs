@@ -33,6 +33,8 @@ mod tests {
 	assert_first_solution!(warm_start_in_seq_search);
 	assert_first_solution!(warm_start_success);
 
+	assert_optimal!(unbounded);
+
 	assert_search_order!(bool_indomain_max);
 	assert_search_order!(bool_indomain_min);
 	assert_search_order!(int_indomain_max_1);

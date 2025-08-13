@@ -6,7 +6,7 @@ use std::{
 	fmt::{Debug, Display},
 	hash::Hash,
 	iter::once,
-	ops::{Deref, Not},
+	ops::{Deref, Not, RangeInclusive},
 	rc::Rc,
 };
 
@@ -29,6 +29,10 @@ use crate::{
 	IntDecision, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal, ValueSelection,
 	VariableSelection,
 };
+
+/// Domain assumed for integer decision variables that do not have a domain
+/// definition.
+const FULL_INT_DOMAIN: RangeInclusive<IntVal> = IntVal::MIN..=IntVal::MAX;
 
 #[derive(Error, Debug)]
 /// Errors that can occur when converting a [`FlatZinc`] instance to a [`Model`]
@@ -773,13 +777,21 @@ where
 				if let Some(var) = self.fzn.variables.get(ident) {
 					Ok(e.insert(match var.ty {
 						Type::Bool => Decision::Bool(self.prb.new_bool_var()),
-						Type::Int => match &var.domain {
-							Some(Domain::Int(r)) => {
-								Decision::Int(self.prb.new_int_var(r.iter().collect()))
+						Type::Int => {
+							match &var.domain {
+								Some(Domain::Int(r)) => Decision::Int(
+									self.prb.new_int_var(r.iter().collect::<IntSetVal>()),
+								),
+								Some(_) => unreachable!(),
+								None => {
+									warn!(
+										"decision variable `{}' was unbounded, assuming domain {}..{}",
+										ident, FULL_INT_DOMAIN.start(), FULL_INT_DOMAIN.end()
+									);
+									self.prb.new_int_var(FULL_INT_DOMAIN.into()).into()
+								}
 							}
-							Some(_) => unreachable!(),
-							None => todo!("Variables without a domain are not yet supported"),
-						},
+						}
 						_ => todo!("Variables of {:?} are not yet supported", var.ty),
 					})
 					.clone())
@@ -1788,7 +1800,25 @@ where
 					Some(_) => unreachable!(),
 					None => match ty {
 						Type::Bool => self.prb.new_bool_var().into(),
-						Type::Int => panic!("unbounded integer variables are not supported yet"),
+						Type::Int => {
+							let id = li
+								.iter()
+								.find_map(|lit| {
+									if let Literal::Identifier(id) = lit {
+										Some(id)
+									} else {
+										None
+									}
+								})
+								.unwrap();
+							warn!(
+								"decision variable `{}' was unbounded, assuming domain {}..{}",
+								id,
+								FULL_INT_DOMAIN.start(),
+								FULL_INT_DOMAIN.end()
+							);
+							self.prb.new_int_var(FULL_INT_DOMAIN.into()).into()
+						}
 						_ => unreachable!(),
 					},
 				});
