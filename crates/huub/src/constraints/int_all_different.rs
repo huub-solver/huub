@@ -138,7 +138,7 @@ impl<S: SimplificationActions> Constraint<S> for IntAllDifferent {
 		});
 		self.vars = vars;
 		let neg_dom = RangeList::from_iter(vals.iter().map(|&i| i..=i));
-		if neg_dom.card() != vals.len() {
+		if neg_dom.card() != Some(vals.len()) {
 			return Err(ReformulationError::TrivialUnsatisfiable);
 		}
 		if self.vars.is_empty() {

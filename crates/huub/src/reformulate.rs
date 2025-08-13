@@ -673,9 +673,10 @@ impl ReformulationMapBuilder {
 				} else {
 					EncodingType::Lazy
 				};
+				let card = dom.card();
 				let order_enc = if self.int_eager_order.contains(&iv)
 					|| self.int_eager_direct.contains(&iv)
-					|| dom.card() <= self.int_eager_limit
+					|| card.is_some() && card.unwrap() <= self.int_eager_limit
 				{
 					EncodingType::Eager
 				} else {

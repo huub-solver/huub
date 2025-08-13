@@ -976,8 +976,10 @@ impl Model {
 	/// Create a new integer variable with the given domain.
 	pub fn new_int_var(&mut self, domain: IntSetVal) -> IntDecision {
 		match domain.card() {
-			0 => unimplemented!("integer decision must have at least 1 value in their domain"),
-			1 => (*domain.lower_bound().unwrap()).into(),
+			Some(0) => {
+				unimplemented!("integer decision must have at least 1 value in their domain")
+			}
+			Some(1) => (*domain.lower_bound().unwrap()).into(),
 			_ => IntDecision(IntDecisionInner::Var(
 				self.int_vars.push(IntDecisionDef::with_domain(domain)),
 			)),
@@ -1186,7 +1188,7 @@ impl Model {
 							let Domain::Domain(dom) = &self.int_vars[iv].domain else {
 								unreachable!()
 							};
-							if dom.card() <= (c.vars.len() * 100 / 80) {
+							if dom.card() <= Some(c.vars.len() * 100 / 80) {
 								let _ = int_eager_direct.insert(iv);
 							}
 						}
@@ -1553,7 +1555,7 @@ impl SimplificationActions for Model {
 				} else if *dom == intersect {
 					return Ok(());
 				}
-				if intersect.card() == 1 {
+				if intersect.card() == Some(1) {
 					self.int_vars[v].domain =
 						Domain::Alias((*intersect.lower_bound().unwrap()).into());
 				} else {
@@ -1679,7 +1681,7 @@ impl SimplificationActions for Model {
 				if *dom == diff {
 					return Ok(());
 				}
-				if diff.card() == 1 {
+				if diff.card() == Some(1) {
 					self.int_vars[v].domain = Domain::Alias((*diff.lower_bound().unwrap()).into());
 				} else {
 					self.int_vars[v].domain = Domain::Domain(diff);

@@ -637,16 +637,17 @@ impl IntVar {
 		direct_encoding: EncodingType,
 	) -> IntView {
 		let orig_domain_len = domain.card();
-		assert!(
-			orig_domain_len != 0,
+		assert_ne!(
+			orig_domain_len,
+			Some(0),
 			"Unable to create integer variable empty domain"
 		);
-		if orig_domain_len == 1 {
+		if orig_domain_len == Some(1) {
 			return IntView(IntViewInner::Const(*domain.lower_bound().unwrap()));
 		}
 		let lb = *domain.lower_bound().unwrap();
 		let ub = *domain.upper_bound().unwrap();
-		if orig_domain_len == 2 {
+		if orig_domain_len == Some(2) {
 			let lit = slv.oracle.new_lit();
 			return IntView(IntViewInner::Bool {
 				transformer: LinearTransform {
@@ -665,7 +666,11 @@ impl IntVar {
 		let order_encoding = match order_encoding {
 			EncodingType::Eager => OrderStorage::Eager {
 				lower_bound: engine.state.trail.track_int(lb),
-				storage: slv.oracle.new_var_range(orig_domain_len - 1),
+				storage: slv.oracle.new_var_range(
+					orig_domain_len.expect(
+						"unable to create literals eagerly for domains that exceed usize::MAX",
+					) - 1,
+				),
 			},
 			EncodingType::Lazy => OrderStorage::Lazy(LazyOrderStorage {
 				min_index: 0,
@@ -675,12 +680,15 @@ impl IntVar {
 				storage: Vec::default(),
 			}),
 		};
-		let direct_encoding = match direct_encoding {
-			EncodingType::Eager => {
-				DirectStorage::Eager(slv.oracle.new_var_range(orig_domain_len - 2))
-			}
-			EncodingType::Lazy => DirectStorage::Lazy(FxHashMap::default()),
-		};
+		let direct_encoding =
+			match direct_encoding {
+				EncodingType::Eager => DirectStorage::Eager(slv.oracle.new_var_range(
+					orig_domain_len.expect(
+						"unable to create literals eagerly for domains that exceed usize::MAX",
+					) - 2,
+				)),
+				EncodingType::Lazy => DirectStorage::Lazy(FxHashMap::default()),
+			};
 
 		// Enforce consistency constraints for eager literals
 		if let OrderStorage::Eager { storage, .. } = &order_encoding {

@@ -18,7 +18,7 @@ itertools = "0.14.0"
 pindakaas = { git = "https://github.com/pindakaashq/pindakaas.git", features = [
 	"external-propagation",
 ] }
-rangelist = "0.2"
+rangelist = "0.3.1"
 rustc-hash = { workspace = true }
 thiserror = "2.0"
 tracing = { workspace = true }
