@@ -496,7 +496,7 @@ where
 
 		let state_vars = self
 			.prb
-			.new_int_vars(vars.len() - 1, (1..=transitions.len() as IntVal).into())
+			.new_int_vars(vars.len() - 1, 1..=transitions.len() as IntVal)
 			.into_iter()
 			.collect_vec();
 
@@ -788,7 +788,7 @@ where
 										"decision variable `{}' was unbounded, assuming domain {}..{}",
 										ident, FULL_INT_DOMAIN.start(), FULL_INT_DOMAIN.end()
 									);
-									self.prb.new_int_var(FULL_INT_DOMAIN.into()).into()
+									self.prb.new_int_var(FULL_INT_DOMAIN).into()
 								}
 							}
 						}
@@ -1817,7 +1817,7 @@ where
 								FULL_INT_DOMAIN.start(),
 								FULL_INT_DOMAIN.end()
 							);
-							self.prb.new_int_var(FULL_INT_DOMAIN.into()).into()
+							self.prb.new_int_var(FULL_INT_DOMAIN).into()
 						}
 						_ => unreachable!(),
 					},

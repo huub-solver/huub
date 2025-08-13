@@ -974,7 +974,8 @@ impl Model {
 	}
 
 	/// Create a new integer variable with the given domain.
-	pub fn new_int_var(&mut self, domain: IntSetVal) -> IntDecision {
+	pub fn new_int_var(&mut self, domain: impl Into<IntSetVal>) -> IntDecision {
+		let domain = domain.into();
 		match domain.card() {
 			Some(0) => {
 				unimplemented!("integer decision must have at least 1 value in their domain")
@@ -987,7 +988,8 @@ impl Model {
 	}
 
 	/// Create `len` new integer variables with the given domain.
-	pub fn new_int_vars(&mut self, len: usize, domain: IntSetVal) -> Vec<IntDecision> {
+	pub fn new_int_vars(&mut self, len: usize, domain: impl Into<IntSetVal>) -> Vec<IntDecision> {
+		let domain = domain.into();
 		repeat_n(IntDecisionDef::with_domain(domain), len)
 			.map(|v| IntDecision(IntDecisionInner::Var(self.int_vars.push(v))))
 			.collect()
