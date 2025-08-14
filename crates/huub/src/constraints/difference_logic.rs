@@ -394,8 +394,6 @@ impl DifferenceLogicSimplifier {
 	fn johnson_full<A: SimplificationActions>(&mut self, adapter: &mut SimplificationModelAdapter<A>) -> Result<(), ReformulationError> {
 
 		trace!("Starting Johnson's");
-		self.distances = vec![vec![IntVal::MAX; self.graph.num_nodes()]; self.graph.num_nodes()];
-		self.direct_edge = vec![HashSet::default(); self.graph.num_nodes()];
 		let mut pred = vec![vec![usize::MAX; self.graph.num_nodes()]; self.graph.num_nodes()];
 		let mut queue = PriorityQueue::default();
 
@@ -1166,7 +1164,7 @@ impl DifferenceLogicGraph {
 		let _ = actions.set_trailed_int(self.num_open_edges, actions.get_trailed_int(self.num_open_edges) - 1);
 	}
 
-	/// Mark the given node as visited. TODO keep or replace?
+	/// Mark the given node as visited.
 	fn visit(&mut self, n: usize) {
 		self.visited[n] = true;
 		self.visited_updates.push(n);
@@ -1182,7 +1180,7 @@ impl DifferenceLogicGraph {
 
 	/// Get the current lower bound for the node, either stored or from the search.
 	fn get_cur_lower_bound<E, A: ModelAdapter<E>>(&self, adapter: &A, n: usize) -> IntVal {
-		match self.lower_bound[n] { // TODO update and store?
+		match self.lower_bound[n] {
 			Some(lb) => lb,
 			None => adapter.get_int_lower_bound(n),
 		}
@@ -1503,7 +1501,7 @@ impl DifferenceLogicGraph {
 		}
 
 		// Consequences of lower bound updates on open implied constraints
-		for i in 0..self.lb_updates.len() { // TODO here we do not need to iterate all of them - a lot are not actual updates!!!
+		for i in 0..self.lb_updates.len() {
 			let n = self.lb_updates[i];
 			let lb = self.lower_bound[n].unwrap();
 
@@ -1573,17 +1571,19 @@ impl DifferenceLogicGraph {
 				self.inc_imp(adapter, e)?;
 			}
 			let edge = &self.edges[e];
-			let lb_y = -edge.val + self.get_cur_lower_bound(adapter, edge.from);
+			let source_lb = self.get_cur_lower_bound(adapter, edge.from);
+			let lb_y = source_lb - edge.val;
 			if lb_y > self.get_cur_lower_bound(adapter, edge.to) {
 				// New edge caused lower bound change.
-				adapter.set_int_lower_bound(edge.to, lb_y, edge.bool_var, edge.from, self.get_cur_lower_bound(adapter, edge.from))?;
+				adapter.set_int_lower_bound(edge.to, lb_y, edge.bool_var, edge.from, source_lb)?;
 				self.update_lb(edge.to, lb_y);
 			}
 			let edge = &self.edges[e];
-			let ub_x = edge.val + self.get_cur_upper_bound(adapter, edge.to);
+			let target_ub = self.get_cur_upper_bound(adapter, edge.to);
+			let ub_x = target_ub + edge.val;
 			if ub_x < self.get_cur_upper_bound(adapter, edge.from) {
 				// New edge caused upper bound change.
-				adapter.set_int_upper_bound(edge.from, ub_x, edge.bool_var, edge.to, self.get_cur_upper_bound(adapter, edge.to))?;
+				adapter.set_int_upper_bound(edge.from, ub_x, edge.bool_var, edge.to, target_ub)?;
 				self.update_ub(edge.from, ub_x);
 			}
 			return Ok(true);
@@ -1788,7 +1788,7 @@ where
 	fn advise_of_int_change(&mut self, _actions: &mut E, _view: IntView, event: IntEvent, data: u64) -> bool {
 		trace!("Integer i{data} changed on event {event:?}.");
 		match event {
-			IntEvent::LowerBound => self.lower_bound_changes.insert(data as usize),
+			IntEvent::LowerBound => self.lower_bound_changes.insert(data as usize),  // TODO there might not actually be a change, but we still have to do a costly reevaluation of open edges!
 			IntEvent::UpperBound => self.upper_bound_changes.insert(data as usize),
 			IntEvent::Fixed => {  // TODO can we find out which one changed?
 				self.lower_bound_changes.insert(data as usize) |
@@ -1801,11 +1801,7 @@ where
 	#[tracing::instrument(name = "difference_logic_bounds", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		let mut model_adapter = SolverModelAdapter::new(actions, &self.int_vars, &self.bool_vars);
-		if let Err(e) = self.graph.borrow_mut().propagate_bounds(&mut model_adapter, &self.lower_bound_changes, &self.upper_bound_changes) {
-			self.lower_bound_changes.clear();
-			self.upper_bound_changes.clear();
-			return Err(e);
-		}
+		self.graph.borrow_mut().propagate_bounds(&mut model_adapter, &self.lower_bound_changes, &self.upper_bound_changes)?;
 		self.lower_bound_changes.clear();
 		self.upper_bound_changes.clear();
 		Ok(())
@@ -1909,10 +1905,7 @@ where
 	#[tracing::instrument(name = "difference_logic_booleans", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		let mut model_adapter = SolverModelAdapter::new(actions, &self.int_vars, &self.bool_vars);
-		if let Err(e) = self.graph.borrow_mut().propagate_booleans(&mut model_adapter, &self.fixed_bools, self.use_inc_imp) {
-			self.fixed_bools.clear();
-			return Err(e);
-		}
+		self.graph.borrow_mut().propagate_booleans(&mut model_adapter, &self.fixed_bools, self.use_inc_imp)?;
 		self.fixed_bools.clear();
 		Ok(())
 	}
