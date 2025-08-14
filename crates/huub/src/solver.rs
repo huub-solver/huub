@@ -17,7 +17,6 @@ use std::{
 	rc::Rc,
 };
 
-use delegate::delegate;
 use flatzinc_serde::FlatZinc;
 use itertools::Itertools;
 use pindakaas::{
@@ -641,21 +640,19 @@ impl<Oracle: LearnCallback> Solver<Oracle> {
 }
 
 impl<Oracle: TerminateCallback> Solver<Oracle> {
-	delegate! {
-		to self.oracle {
-			/// Set a callback function used to indicate a termination requirement to the
-			/// solver.
-			///
-			/// The solver will periodically call this function and check its return value
-			/// during the search. Subsequent calls to this method override the previously
-			/// set callback function.
-			///
-			/// # Warning
-			///
-			/// Subsequent calls to this method override the previously set
-			/// callback function.
-			pub fn set_terminate_callback<F: FnMut() -> TermSignal + 'static>(&mut self, cb: Option<F>);
-		}
+	/// Set a callback function used to indicate a termination requirement to
+	/// the solver.
+	///
+	/// The solver will periodically call this function and check its return
+	/// value during the search. Subsequent calls to this method override the
+	/// previously set callback function.
+	///
+	/// # Warning
+	///
+	/// Subsequent calls to this method override the previously set
+	/// callback function.
+	pub fn set_terminate_callback<F: FnMut() -> TermSignal + 'static>(&mut self, cb: Option<F>) {
+		self.oracle.set_terminate_callback(cb);
 	}
 }
 
@@ -903,6 +900,39 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 		}
 	}
 
+	/// Set whether the solver should toggle between VSIDS and a user defined
+	/// search strategy after every restart.
+	///
+	/// Note that this setting is ignored if the solver is set to use VSIDS
+	/// only.
+	pub fn set_toggle_vsids(&mut self, enable: bool) {
+		self.engine.borrow_mut().state.set_toggle_vsids(enable);
+	}
+
+	/// Set the number of conflicts after which the solver should switch to
+	/// using VSIDS to make search decisions.
+	pub fn set_vsids_after_conflict(&mut self, conflicts: Option<u32>) {
+		self.engine
+			.borrow_mut()
+			.state
+			.set_vsids_after_conflict(conflicts);
+	}
+
+	/// Set whether the solver should switch to VSIDS after restart to make
+	/// search.
+	pub fn set_vsids_after_restart(&mut self, enable: bool) {
+		self.engine
+			.borrow_mut()
+			.state
+			.set_vsids_after_restart(enable);
+	}
+
+	/// Set whether the solver should make all search decisions based on the
+	/// VSIDS only.
+	pub fn set_vsids_only(&mut self, enable: bool) {
+		self.engine.borrow_mut().state.set_vsids_only(enable);
+	}
+
 	/// Try and find a solution to the problem for which the Solver was
 	/// initialized.
 	pub fn solve(&mut self, mut on_sol: impl FnMut(&dyn Valuation)) -> SolveResult {
@@ -949,24 +979,6 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 					transformer.transform(sol.value(lit) as IntVal)
 				}
 			}),
-		}
-	}
-
-	delegate! {
-		to self.engine.borrow_mut().state {
-			/// Set whether the solver should toggle between VSIDS and a user defined
-			/// search strategy after every restart.
-			///
-			/// Note that this setting is ignored if the solver is set to use VSIDS only.
-			pub fn set_toggle_vsids(&mut self, enable: bool);
-			/// Set the number of conflicts after which the solver should switch to using
-			/// VSIDS to make search decisions.
-			pub fn set_vsids_after_conflict(&mut self, conflicts: Option<u32>);
-			/// Set whether the solver should switch to VSIDS after restart to make search.
-			pub fn set_vsids_after_restart(&mut self, enable: bool);
-			/// Set whether the solver should make all search decisions based on the VSIDS
-			/// only.
-			pub fn set_vsids_only(&mut self, enable: bool);
 		}
 	}
 }
@@ -1039,11 +1051,12 @@ impl<Oracle: ExternalPropagation> BrancherInitActions for Solver<Oracle> {
 }
 
 impl<Oracle: ClauseDatabase> ClauseDatabase for Solver<Oracle> {
-	delegate! {
-		to self.oracle {
-			fn add_clause_from_slice(&mut self, clause: &[RawLit]) -> Result<(), Unsatisfiable>;
-			fn new_var_range(&mut self, len: usize) -> pindakaas::VarRange;
-		}
+	fn add_clause_from_slice(&mut self, clause: &[RawLit]) -> Result<(), Unsatisfiable> {
+		self.oracle.add_clause_from_slice(clause)
+	}
+
+	fn new_var_range(&mut self, len: usize) -> pindakaas::VarRange {
+		self.oracle.new_var_range(len)
 	}
 }
 
@@ -1103,21 +1116,35 @@ impl<Oracle: ExternalPropagation> DecisionActions for Solver<Oracle> {
 }
 
 impl<Oracle: ExternalPropagation> ExplanationActions for Solver<Oracle> {
+	fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning> {
+		self.engine.borrow().state.get_int_lit_meaning(var, lit)
+	}
+
+	fn get_int_lit_relaxed(
+		&mut self,
+		var: IntView,
+		meaning: IntLitMeaning,
+	) -> (BoolView, IntLitMeaning) {
+		self.engine
+			.borrow_mut()
+			.state
+			.get_int_lit_relaxed(var, meaning)
+	}
+
+	fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView {
+		self.engine.borrow_mut().state.get_int_lower_bound_lit(var)
+	}
+
+	fn get_int_upper_bound_lit(&mut self, var: IntView) -> BoolView {
+		self.engine.borrow_mut().state.get_int_upper_bound_lit(var)
+	}
 	fn get_int_val_lit(&mut self, var: IntView) -> Option<BoolView> {
 		let val = self.get_int_val(var)?;
 		Some(self.get_int_lit(var, IntLitMeaning::Eq(val)))
 	}
 
-	delegate! {
-		to self.engine.borrow().state {
-			fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning>;
-			fn try_int_lit(&self, var: IntView, meaning: IntLitMeaning) -> Option<BoolView>;
-		}
-		to self.engine.borrow_mut().state {
-			fn get_int_lit_relaxed(&mut self, var: IntView, meaning: IntLitMeaning) -> (BoolView, IntLitMeaning);
-			fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView;
-			fn get_int_upper_bound_lit(&mut self, var: IntView) -> BoolView;
-		}
+	fn try_int_lit(&self, var: IntView, meaning: IntLitMeaning) -> Option<BoolView> {
+		self.engine.borrow().state.try_int_lit(var, meaning)
 	}
 }
 
@@ -1135,14 +1162,24 @@ where
 }
 
 impl<Oracle: ExternalPropagation> InspectionActions for Solver<Oracle> {
-	delegate! {
-		to self.engine.borrow().state {
-			fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool;
-			fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal);
-			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
-			fn get_int_upper_bound(&self, var: IntView) -> IntVal;
-			fn get_int_val(&self, var: IntView) -> Option<IntVal>;
-		}
+	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool {
+		self.engine.borrow().state.check_int_in_domain(var, val)
+	}
+
+	fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal) {
+		self.engine.borrow().state.get_int_bounds(var)
+	}
+
+	fn get_int_lower_bound(&self, var: IntView) -> IntVal {
+		self.engine.borrow().state.get_int_lower_bound(var)
+	}
+
+	fn get_int_upper_bound(&self, var: IntView) -> IntVal {
+		self.engine.borrow().state.get_int_upper_bound(var)
+	}
+
+	fn get_int_val(&self, var: IntView) -> Option<IntVal> {
+		self.engine.borrow().state.get_int_val(var)
 	}
 }
 
@@ -1261,14 +1298,16 @@ impl<Oracle: ExternalPropagation> PropagatorInitActions for Solver<Oracle> {
 }
 
 impl<Oracle: ExternalPropagation> TrailingActions for Solver<Oracle> {
-	delegate! {
-		to self.engine.borrow().state {
-			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
-			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
-		}
-		to self.engine.borrow_mut().state {
-			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal;
-		}
+	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
+		self.engine.borrow().state.get_bool_val(bv)
+	}
+
+	fn get_trailed_int(&self, x: TrailedInt) -> IntVal {
+		self.engine.borrow().state.get_trailed_int(x)
+	}
+
+	fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal {
+		self.engine.borrow_mut().state.set_trailed_int(x, v)
 	}
 }
 
