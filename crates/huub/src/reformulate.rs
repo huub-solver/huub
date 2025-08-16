@@ -1,7 +1,11 @@
 //! Data structures to store [`Model`] parts for analyses and for the
 //! reformulation process of creating a [`Solver`] object from a [`Model`].
 
-use std::collections::HashSet;
+use std::{
+	collections::HashSet,
+	error::Error,
+	fmt::{self, Display},
+};
 
 use delegate::delegate;
 use index_vec::{define_index_type, IndexVec};
@@ -11,7 +15,6 @@ use pindakaas::{
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit as RawLit, Unsatisfiable,
 };
 use rangelist::IntervalIterator;
-use thiserror::Error;
 
 use crate::{
 	actions::{
@@ -183,11 +186,10 @@ pub(crate) struct ReformulationContext<'a> {
 	pub(crate) map: &'a ReformulationMap,
 }
 
-#[derive(Error, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 /// Error type used during the reformulation process of creating a [`Solver`],
 /// e.g. when creating a [`Solver`] from a [`crate::Model`].
 pub enum ReformulationError {
-	#[error("The problem is trivially unsatisfiable")]
 	/// Error used when the problem is found to be unsatisfiable without
 	/// requiring any search.
 	TrivialUnsatisfiable,
@@ -508,6 +510,16 @@ impl TrailingActions for ReformulationContext<'_> {
 		}
 	}
 }
+
+impl Display for ReformulationError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::TrivialUnsatisfiable => write!(f, "The problem is trivially unsatisfiable"),
+		}
+	}
+}
+
+impl Error for ReformulationError {}
 
 impl From<Unsatisfiable> for ReformulationError {
 	fn from(_: Unsatisfiable) -> Self {
