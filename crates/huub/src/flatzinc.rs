@@ -15,6 +15,7 @@ use flatzinc_serde::{
 	Literal, Type,
 };
 use itertools::Itertools;
+use itertools::multiunzip;
 use pindakaas::propositional_logic::Formula;
 use rangelist::IntervalIterator;
 use thiserror::Error;
@@ -1129,19 +1130,16 @@ where
 						let y = self.arg_array(y)?;
 						let dx = self.arg_array(dx)?;
 						let dy = self.arg_array(dy)?;
-						let box_posn: Vec<Vec<_>> = x
-							.iter()
-							.zip(y.iter())
-							.map(|(a, b)| vec![a, b])
-							.map(|x| x.iter().map(|l| self.lit_int(l)).collect())
-							.try_collect()?;
+						let box_posn: Vec<Vec<_>> = vec![
+                            x.iter().map(|l| self.lit_int(l)).try_collect()?,
+                            y.iter().map(|l| self.lit_int(l)).try_collect()?
+                        ];
 
-						let box_size: Vec<Vec<_>> = dx
-							.iter()
-							.zip(dy.iter())
-							.map(|(a, b)| vec![a, b])
-							.map(|x| x.iter().map(|l| self.lit_int(l)).collect())
-							.try_collect()?;
+
+						let box_size: Vec<Vec<_>> = vec![
+                            dx.iter().map(|l| self.lit_int(l)).try_collect()?,
+                            dy.iter().map(|l| self.lit_int(l)).try_collect()?
+                        ];
 						self.prb += diffn_int(box_posn, box_size, is_nonstrict);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
@@ -1159,20 +1157,20 @@ where
 					let is_nonstrict = c.id.deref() == "huub_diffn_nonstrict_k_int";
 					if let [box_posn, box_size, d] = c.args.as_slice() {
 						let dimensions = self.arg_par_int(d)?;
-						let start_pos = self.arg_array(box_posn)?;
-						let start_pos: Vec<_> =
-							start_pos.iter().map(|l| self.lit_int(l)).try_collect()?;
-						let start_pos: Vec<Vec<_>> = start_pos
-							.chunks(dimensions.try_into().unwrap())
-							.map(|c| c.to_vec())
-							.collect();
+						let flat_start_pos = self.arg_array(box_posn)?;
+						let flat_start_pos: Vec<_> =
+							flat_start_pos.iter().map(|l| self.lit_int(l)).try_collect()?;
+						let flat_sizes = self.arg_array(box_size)?;
+						let flat_sizes: Vec<_> = flat_sizes.iter().map(|l| self.lit_int(l)).try_collect()?;
 
-						let sizes = self.arg_array(box_size)?;
-						let sizes: Vec<_> = sizes.iter().map(|l| self.lit_int(l)).try_collect()?;
-						let sizes: Vec<Vec<_>> = sizes
-							.chunks(dimensions.try_into().unwrap())
-							.map(|c| c.to_vec())
-							.collect();
+                        let mut start_pos: Vec<Vec<_>> = vec![Vec::new(); dimensions as usize];
+                        let mut sizes: Vec<Vec<_>> = vec![Vec::new(); dimensions as usize];
+
+                        for (i, (pos, size)) in flat_start_pos.iter().zip(flat_sizes).enumerate() {
+                                start_pos[i % dimensions as usize].push(*pos);
+                                sizes[i % dimensions as usize].push(size);
+                        }
+
 						self.prb += diffn_int(start_pos, sizes, is_nonstrict);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {

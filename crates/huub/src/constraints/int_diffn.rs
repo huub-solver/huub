@@ -34,9 +34,9 @@ pub struct IntDiffn {
 /// Sweep based propagator for the `diffn_int` constraint.
 pub struct IntDiffnSweep<const NON_STRICT: bool> {
 	/// The origin positions of all objects in all dimensions
-	box_posn: Vec<Vec<IntView>>,
+	box_posn: Vec<DimStore<IntView>>,
 	/// The sizes of all objects in all dimensions
-	box_size: Vec<Vec<IntView>>,
+	box_size: Vec<DimStore<IntView>>,
 	/// Number of dimensions
 	dimensions: usize,
 	/// Trail which tracks the target property, target[i] = 1 if is has been lost,
@@ -50,11 +50,11 @@ pub struct IntDiffnSweep<const NON_STRICT: bool> {
 	/// Are all sizes fixed
 	fixed_sizes: bool,
 	/// Tracks the upper bound of the positions
-	ub_tracker: Vec<Vec<IntVal>>,
+	ub_tracker: Vec<DimStore<IntVal>>,
 	/// Tracks the lower bound of the positions
-	lb_tracker: Vec<Vec<IntVal>>,
+	lb_tracker: Vec<DimStore<IntVal>>,
 	/// Tracks the lower bound of the sizes
-	lb_sizes: Vec<Vec<IntVal>>,
+	lb_sizes: Vec<DimStore<IntVal>>,
 	/// Used to see if any rectangle has lost its source property, that is; it
 	/// is completely disjoint from all the others and therefore can be
 	/// removed completely when reasoning in the rest of the algorithm since
@@ -87,10 +87,16 @@ impl<S: SimplificationActions> Constraint<S> for IntDiffn {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Active forbidden regions
 struct ForbiddenRegion {
-	/// lower bound of each dimension
+	/// lower bound in each dimension
 	lb: Vec<IntVal>,
-	/// upper bound of each dimension
+	/// upper bound in each dimension
 	ub: Vec<IntVal>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Stores the all values for specific dimension
+struct DimStore<T> {
+	values: Vec<T>,
 }
 
 impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
@@ -107,8 +113,13 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			.flatten()
 			.all(|&v| solver.get_int_val(v).is_some());
 
-		let mut box_posn_prop: Vec<Vec<IntView>> = box_posn.clone();
-		let box_size_prop: Vec<Vec<IntView>> = box_size.clone();
+        let mut box_posn_prop = Vec::new();
+		let mut box_size_prop = Vec::new();
+
+        for i in 1..box_posn.len() {
+            box_posn_prop.push(DimStore { values: box_posn[i].clone()});
+            box_size_prop.push(DimStore { values: box_size[i].clone()});
+        }
 
 		// Do not consider objects that are fixed and have a size of 0 when non_strict
 		if NON_STRICT && fixed {
@@ -152,9 +163,9 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		let remove_trail = (0..box_size.len())
 			.map(|_| solver.new_trailed_int(0))
 			.collect();
-		let lb_sizes_prop = vec![vec![0; box_posn[0].len()]; box_posn.len()];
-		let ub_tracker_prop = vec![vec![0; box_posn[0].len()]; box_posn.len()];
-		let lb_tracker_prop = vec![vec![0; box_posn[0].len()]; box_posn.len()];
+		let lb_sizes_prop = vec![DimStore { values: vec![0; box_posn.len()] }; box_posn[0].len()];
+		let ub_tracker_prop = vec![DimStore { values: vec![0; box_posn.len()] }; box_posn[0].len()];
+		let lb_tracker_prop = vec![DimStore { values: vec![0; box_posn.len()] }; box_posn[0].len()];
 
 		let bounding_box_prop = ForbiddenRegion {
 			lb: vec![i64::MAX; box_posn[0].len()],
@@ -165,7 +176,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			Box::new(Self {
 				box_posn: box_posn_prop,
 				box_size: box_size_prop,
-				dimensions: box_posn[0].len(),
+				dimensions: box_posn.len(),
 				target: fixed_trail,
 				source: remove_trail,
 				fixed_sizes: fixed,
@@ -197,20 +208,30 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		let mut b = true;
 
 		for d in 0..self.dimensions {
-			sweep.push(self.lb_tracker[curr_obj_idx][d]);
-			jump.push(self.ub_tracker[curr_obj_idx][d] + 1);
+			sweep.push(self.lb_tracker[d].values[curr_obj_idx]);
+			jump.push(self.ub_tracker[d].values[curr_obj_idx] + 1);
 		}
 		let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
 		while b && infeasible_fr.is_some() {
 			for j in 0..self.dimensions {
 				jump[j] = jump[j].min(infeasible_fr.unwrap().ub[j] + 1);
 			}
+
+            let lb: Vec<_> = self.lb_tracker
+                .iter()
+                .map(|d| d.values[curr_obj_idx])
+                .collect();
+
+            let ub: Vec<_> = self.ub_tracker
+                .iter()
+                .map(|d| d.values[curr_obj_idx])
+                .collect();
 			// Contains side-effects to change sweep
 			b = Self::adjust_sweep_min(
 				&mut sweep,
 				&mut jump,
-				&self.lb_tracker[curr_obj_idx],
-				&self.ub_tracker[curr_obj_idx],
+				&lb,
+				&ub,
 				curr_dimension,
 				self.dimensions,
 			);
@@ -218,13 +239,13 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
 		}
 		// Start pruning here
-		if sweep[curr_dimension] != self.lb_tracker[curr_obj_idx][curr_dimension] {
+		if sweep[curr_dimension] != self.lb_tracker[curr_dimension].values[curr_obj_idx] {
 			trace!(
 				"SET obj {:?} in dimension {} [{:?}..{:?}] >= {}",
 				curr_obj_idx,
 				curr_dimension,
-				self.lb_tracker[curr_obj_idx][curr_dimension],
-				self.ub_tracker[curr_obj_idx][curr_dimension],
+				self.lb_tracker[curr_dimension].values[curr_obj_idx],
+				self.ub_tracker[curr_dimension].values[curr_obj_idx],
 				sweep[curr_dimension]
 			);
 			let reason = self.explain_propagation(
@@ -236,12 +257,12 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 				false,
 			);
 			actions.set_int_lower_bound(
-				self.box_posn[curr_obj_idx][curr_dimension],
+				self.box_posn[curr_dimension].values[curr_obj_idx],
 				sweep[curr_dimension],
 				reason,
 			)?;
 
-			self.lb_tracker[curr_obj_idx][curr_dimension] = sweep[curr_dimension];
+			self.lb_tracker[curr_dimension].values[curr_obj_idx] = sweep[curr_dimension];
 		}
 		Ok(())
 	}
@@ -261,33 +282,42 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		let mut b = true;
 
 		for i in 0..self.dimensions {
-			sweep.push(self.ub_tracker[curr_obj_idx][i]);
-			jump.push(self.lb_tracker[curr_obj_idx][i] - 1);
+			sweep.push(self.ub_tracker[i].values[curr_obj_idx]);
+			jump.push(self.lb_tracker[i].values[curr_obj_idx] - 1);
 		}
 		let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
 		while b && infeasible_fr.is_some() {
 			for j in 0..self.dimensions {
 				jump[j] = jump[j].max(infeasible_fr.unwrap().lb[j] - 1);
 			}
+            let lb: Vec<_> = self.lb_tracker
+                .iter()
+                .map(|d| d.values[curr_obj_idx])
+                .collect();
+
+            let ub: Vec<_> = self.ub_tracker
+                .iter()
+                .map(|d| d.values[curr_obj_idx])
+                .collect();
 			// Contains side-effects to change sweep
 			b = Self::adjust_sweep_max(
 				&mut sweep,
 				&mut jump,
-				&self.lb_tracker[curr_obj_idx],
-				&self.ub_tracker[curr_obj_idx],
+                &lb,
+                &ub,
 				curr_dimension,
 				self.dimensions,
 			);
 
 			infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
 		}
-		if sweep[curr_dimension] != self.ub_tracker[curr_obj_idx][curr_dimension] {
+		if sweep[curr_dimension] != self.ub_tracker[curr_dimension].values[curr_obj_idx] {
 			trace!(
 				"SET obj {:?} in dimension {} [{:?}..{:?}] < {}",
 				curr_obj_idx,
 				curr_dimension,
-				self.lb_tracker[curr_obj_idx][curr_dimension],
-				self.ub_tracker[curr_obj_idx][curr_dimension],
+				self.lb_tracker[curr_dimension].values[curr_obj_idx],
+				self.ub_tracker[curr_dimension].values[curr_obj_idx],
 				sweep[curr_dimension]
 			);
 			let reason = self.explain_propagation(
@@ -300,12 +330,12 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			);
 
 			actions.set_int_upper_bound(
-				self.box_posn[curr_obj_idx][curr_dimension],
+				self.box_posn[curr_dimension].values[curr_obj_idx],
 				sweep[curr_dimension],
 				reason,
 			)?;
 
-			self.ub_tracker[curr_obj_idx][curr_dimension] = sweep[curr_dimension];
+			self.ub_tracker[curr_dimension].values[curr_obj_idx] = sweep[curr_dimension];
 		}
 		Ok(())
 	}
@@ -384,7 +414,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 	) -> Option<Vec<ForbiddenRegion>> {
 		// TODO: To avoid uneccesary allocations, this could be moved to self
 		let mut all_fr: Vec<ForbiddenRegion> = Vec::new();
-		for i in 0..self.box_posn.len() {
+		for i in 0..self.box_posn[0].values.len() {
 			// Check if the current object can be ignored if it has lost its source property
 			if actions.get_trailed_int(self.source[i]) == 1 {
 				continue;
@@ -401,10 +431,10 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 
 			let mut exists = true;
 			for d in 0..self.dimensions {
-				let pos_ub: IntVal = self.ub_tracker[i][d];
-				let pos_lb: IntVal = self.lb_tracker[i][d];
-				let curr_size = self.lb_sizes[o_idx][d];
-				let size = self.lb_sizes[i][d];
+				let pos_ub: IntVal = self.ub_tracker[d].values[i];
+				let pos_lb: IntVal = self.lb_tracker[d].values[i];
+				let curr_size = self.lb_sizes[d].values[o_idx];
+				let size = self.lb_sizes[d].values[i];
 				let fr_lb = pos_ub - curr_size + 1;
 				let fr_ub = pos_lb + size - 1;
 				if fr_lb <= fr_ub {
@@ -415,10 +445,20 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 				}
 			}
 			let mut regions_to_remove: Vec<(usize, usize)> = Vec::new();
+
+            let lb: Vec<_> = self.lb_tracker
+                .iter()
+                .map(|d| d.values[o_idx])
+                .collect();
+
+            let ub: Vec<_> = self.ub_tracker
+                .iter()
+                .map(|d| d.values[o_idx])
+                .collect();
 			if exists
 				&& Self::overlaps(
-					&self.lb_tracker[o_idx],
-					&self.ub_tracker[o_idx],
+					&lb,
+					&ub,
 					&fr,
 					dimensions,
 				) {
@@ -483,7 +523,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 	fn fixed_in_all_dimensions(&self, curr_obj_idx: usize) -> bool {
 		let mut is_assigned = true;
 		for d in 0..self.dimensions {
-			let fixed = self.lb_tracker[curr_obj_idx][d] == self.ub_tracker[curr_obj_idx][d];
+			let fixed = self.lb_tracker[d].values[curr_obj_idx] == self.ub_tracker[d].values[curr_obj_idx];
 			if !fixed {
 				is_assigned = false;
 			}
@@ -536,9 +576,9 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 	/// in any dimension
 	fn disjoint(&self, bounding_box: &ForbiddenRegion, curr_obj_idx: usize) -> bool {
 		for d in 0..self.dimensions {
-			if self.ub_tracker[curr_obj_idx][d] + self.lb_sizes[curr_obj_idx][d] - 1
+			if self.ub_tracker[d].values[curr_obj_idx] + self.lb_sizes[d].values[curr_obj_idx] - 1
 				< bounding_box.lb[d]
-				|| self.lb_tracker[curr_obj_idx][d] > bounding_box.ub[d]
+				|| self.lb_tracker[d].values[curr_obj_idx] > bounding_box.ub[d]
 			{
 				return true;
 			}
@@ -562,34 +602,34 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 				// If sizes are not fixed, the lower bounds are assumed throughout the algorithm and
 				// thus have to be added to the explanation
 				if !self.fixed_sizes {
-					reason.push(actions.get_int_lower_bound_lit(self.box_size[o_idx][d]));
+					reason.push(actions.get_int_lower_bound_lit(self.box_size[d].values[o_idx]));
 				}
-				let mut possible_ub = self.ub_tracker[o_idx][d];
-				let origin_ub = self.ub_tracker[curr_obj_idx][d];
+				let mut possible_ub = self.ub_tracker[d].values[o_idx];
+				let origin_ub = self.ub_tracker[d].values[curr_obj_idx];
 
-				let mut possible_lb = self.lb_tracker[o_idx][d];
-				let origin_lb = self.lb_tracker[curr_obj_idx][d];
+				let mut possible_lb = self.lb_tracker[d].values[o_idx];
+				let origin_lb = self.lb_tracker[d].values[curr_obj_idx];
 
 				// If a forbidden region is overhanging the currently active obejct, it can be
 				// assumed to be smaller when explaining which
 				if all_fr[fr].ub[d] > origin_ub {
-					possible_lb = origin_ub - self.lb_sizes[o_idx][d] + 1;
+					possible_lb = origin_ub - self.lb_sizes[d].values[o_idx] + 1;
 				}
 
 				if all_fr[fr].lb[d] < origin_lb {
-					possible_ub = origin_lb + self.lb_sizes[curr_obj_idx][d] - 1;
+					possible_ub = origin_lb + self.lb_sizes[d].values[curr_obj_idx] - 1;
 				}
 
 				trace!(
 					"reason of obj {:?} in dimension {} [{:?}..{:?}] < {}",
 					o_idx,
 					d,
-					self.lb_tracker[o_idx][d],
-					self.ub_tracker[o_idx][d],
+					self.lb_tracker[d].values[o_idx],
+					self.ub_tracker[d].values[o_idx],
 					possible_ub + 1
 				);
 				reason.push(actions.get_int_lit(
-					self.box_posn[o_idx][d],
+					self.box_posn[d].values[o_idx],
 					IntLitMeaning::Less(possible_ub + 1),
 				));
 
@@ -597,12 +637,12 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 					"reason of obj {:?} in dimension {} [{:?}..{:?}] >= {}",
 					o_idx,
 					d,
-					self.lb_tracker[o_idx][d],
-					self.ub_tracker[o_idx][d],
+					self.lb_tracker[d].values[o_idx],
+					self.ub_tracker[d].values[o_idx],
 					possible_lb
 				);
 				reason.push(actions.get_int_lit(
-					self.box_posn[o_idx][d],
+					self.box_posn[d].values[o_idx],
 					IntLitMeaning::GreaterEq(possible_lb),
 				));
 			}
@@ -631,11 +671,11 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 					"reason size of obj {:?} in dimension {} [{:?}..{:?}] >= {}",
 					curr_obj_idx,
 					d,
-					actions.get_int_lower_bound(self.box_size[curr_obj_idx][d]),
-					actions.get_int_upper_bound(self.box_size[curr_obj_idx][d]),
-					actions.get_int_lower_bound(self.box_size[curr_obj_idx][d])
+					actions.get_int_lower_bound(self.box_size[d].values[curr_obj_idx]),
+					actions.get_int_upper_bound(self.box_size[d].values[curr_obj_idx]),
+					actions.get_int_lower_bound(self.box_size[d].values[curr_obj_idx])
 				);
-				reason.push(actions.get_int_lower_bound_lit(self.box_size[curr_obj_idx][d]));
+				reason.push(actions.get_int_lower_bound_lit(self.box_size[d].values[curr_obj_idx]));
 			}
 
 			// The literal describing the opposite bound in the same dimension and object we are
@@ -646,26 +686,26 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 						"reason of obj {:?} in dimension {} [{:?}..{:?}] < {}",
 						curr_obj_idx,
 						d,
-						self.lb_tracker[curr_obj_idx][d],
-						self.ub_tracker[curr_obj_idx][d],
-						self.ub_tracker[curr_obj_idx][d] + 1
+						self.lb_tracker[d].values[curr_obj_idx],
+						self.ub_tracker[d].values[curr_obj_idx],
+						self.ub_tracker[d].values[curr_obj_idx] + 1
 					);
 					reason.push(actions.get_int_lit(
-						self.box_posn[curr_obj_idx][d],
-						IntLitMeaning::Less(self.ub_tracker[curr_obj_idx][d] + 1),
+						self.box_posn[d].values[curr_obj_idx],
+						IntLitMeaning::Less(self.ub_tracker[d].values[curr_obj_idx] + 1),
 					));
 				} else {
 					trace!(
 						"reason of obj {:?} in dimension {} [{:?}..{:?}] >= {}",
 						curr_obj_idx,
 						d,
-						self.lb_tracker[curr_obj_idx][d],
-						self.ub_tracker[curr_obj_idx][d],
-						self.lb_tracker[curr_obj_idx][d]
+						self.lb_tracker[d].values[curr_obj_idx],
+						self.ub_tracker[d].values[curr_obj_idx],
+						self.lb_tracker[d].values[curr_obj_idx]
 					);
 					reason.push(actions.get_int_lit(
-						self.box_posn[curr_obj_idx][d],
-						IntLitMeaning::GreaterEq(self.lb_tracker[curr_obj_idx][d]),
+						self.box_posn[d].values[curr_obj_idx],
+						IntLitMeaning::GreaterEq(self.lb_tracker[d].values[curr_obj_idx]),
 					));
 				}
 			} else {
@@ -673,25 +713,25 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 					"reason of obj {:?} in dimension {} [{:?}..{:?}] < {}",
 					curr_obj_idx,
 					d,
-					self.lb_tracker[curr_obj_idx][d],
-					self.ub_tracker[curr_obj_idx][d],
-					self.ub_tracker[curr_obj_idx][d] + 1
+					self.lb_tracker[d].values[curr_obj_idx],
+					self.ub_tracker[d].values[curr_obj_idx],
+					self.ub_tracker[d].values[curr_obj_idx] + 1
 				);
 				reason.push(actions.get_int_lit(
-					self.box_posn[curr_obj_idx][d],
-					IntLitMeaning::Less(self.ub_tracker[curr_obj_idx][d] + 1),
+					self.box_posn[d].values[curr_obj_idx],
+					IntLitMeaning::Less(self.ub_tracker[d].values[curr_obj_idx] + 1),
 				));
 				trace!(
 					"reason of obj {:?} in dimension {} [{:?}..{:?}] >= {}",
 					curr_obj_idx,
 					d,
-					self.lb_tracker[curr_obj_idx][d],
-					self.ub_tracker[curr_obj_idx][d],
-					self.lb_tracker[curr_obj_idx][d]
+					self.lb_tracker[d].values[curr_obj_idx],
+					self.ub_tracker[d].values[curr_obj_idx],
+					self.lb_tracker[d].values[curr_obj_idx]
 				);
 				reason.push(actions.get_int_lit(
-					self.box_posn[curr_obj_idx][d],
-					IntLitMeaning::GreaterEq(self.lb_tracker[curr_obj_idx][d]),
+					self.box_posn[d].values[curr_obj_idx],
+					IntLitMeaning::GreaterEq(self.lb_tracker[d].values[curr_obj_idx]),
 				));
 			}
 		}
@@ -707,15 +747,16 @@ where
 {
 	#[tracing::instrument(name = "diffn", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		for o in 0..self.box_posn.len() {
+        println!("{}", self.box_posn.len());
+		for o in 0..self.box_posn[0].values.len() {
 			for d in 0..self.dimensions {
-				self.ub_tracker[o][d] = actions.get_int_upper_bound(self.box_posn[o][d]);
-				self.lb_tracker[o][d] = actions.get_int_lower_bound(self.box_posn[o][d]);
-				self.lb_sizes[o][d] = actions.get_int_lower_bound(self.box_size[o][d]);
+				self.ub_tracker[d].values[o] = actions.get_int_upper_bound(self.box_posn[d].values[o]);
+				self.lb_tracker[d].values[o] = actions.get_int_lower_bound(self.box_posn[d].values[o]);
+				self.lb_sizes[d].values[o] = actions.get_int_lower_bound(self.box_size[d].values[o]);
 			}
 		}
 
-		for o_idx in 0..self.box_posn.len() {
+		for o_idx in 0..self.box_posn[0].values.len() {
 			// Skip if target property has been lost
 			if actions.get_trailed_int(self.target[o_idx]) == 1 {
 				continue;
@@ -723,7 +764,7 @@ where
 
 			if NON_STRICT
 				&& (0..self.dimensions)
-					.any(|d| actions.get_int_val(self.box_size[o_idx][d]) == Some(0))
+					.any(|d| actions.get_int_val(self.box_size[d].values[o_idx]) == Some(0))
 			{
 				continue;
 			}
@@ -738,8 +779,8 @@ where
 					let reason =
 						self.explain_propagation(actions, &all_fr, &fr_support, o_idx, 0, false);
 					actions.set_int_lower_bound(
-						self.box_posn[o_idx][0],
-						self.ub_tracker[o_idx][0] + 1,
+						self.box_posn[0].values[o_idx],
+						self.ub_tracker[0].values[o_idx] + 1,
 						reason,
 					)?;
 				}
@@ -749,7 +790,7 @@ where
 
 					self.prune_max(actions, &fr_support, o_idx, d, &all_fr)?;
 
-					if self.lb_tracker[o_idx][d] != self.ub_tracker[o_idx][d] {
+					if self.lb_tracker[d].values[o_idx] != self.ub_tracker[d].values[o_idx] {
 						all_fixed = false;
 					}
 				}
@@ -762,21 +803,21 @@ where
 		}
 
 		// Source optimisations, create the largest possible bounding box
-		for o_idx in 0..self.box_posn.len() {
+		for o_idx in 0..self.box_posn[0].values.len() {
 			if actions.get_trailed_int(self.target[o_idx]) == 1 {
 				continue;
 			}
 			for i in 0..self.dimensions {
-				self.bounding_box.lb[i] = self.bounding_box.lb[i].min(self.lb_tracker[o_idx][i]);
+				self.bounding_box.lb[i] = self.bounding_box.lb[i].min(self.lb_tracker[i].values[o_idx]);
 				self.bounding_box.ub[i] = self.bounding_box.ub[i]
-					.max(self.ub_tracker[o_idx][i] + self.lb_sizes[o_idx][i] - 1);
+					.max(self.ub_tracker[i].values[o_idx] + self.lb_sizes[i].values[o_idx] - 1);
 			}
 		}
 
 		// If the current rectangle has lost its target property (is fixed in a feasible position)
         // and is completely disjoint from the bounding box, remove its source property
 		// (disregard it in the rest of the algorhtm)
-		for o_idx in 0..self.box_posn.len() {
+		for o_idx in 0..self.box_posn[0].values.len() {
 			if actions.get_trailed_int(self.target[o_idx]) == 1
 				&& self.disjoint(&self.bounding_box, o_idx)
 			{
