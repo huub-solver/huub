@@ -3,7 +3,9 @@
 
 use std::{
 	fmt::{self, Display},
+	fs,
 	num::NonZeroI32,
+	path::PathBuf,
 	sync::{Arc, Mutex},
 };
 
@@ -11,17 +13,21 @@ use huub::{solver::IntLitMeaning, IntVal};
 use rustc_hash::FxHashMap;
 use tracing::{
 	field::{Field, Visit},
-	Event, Level, Subscriber,
+	level_filters::LevelFilter,
+	Event, Subscriber,
 };
+
 use tracing_subscriber::{
 	field::{MakeVisitor, RecordFields, VisitOutput},
+	filter::Targets,
 	fmt::{
 		format::{DefaultFields, Writer},
 		time::uptime,
-		FormatFields, MakeWriter,
+		FmtContext, FormatEvent, FormatFields, MakeWriter,
 	},
 	layer::{Context, SubscriberExt},
-	Layer,
+	registry::LookupSpan,
+	Layer, Registry,
 };
 use ustr::Ustr;
 
@@ -96,7 +102,12 @@ struct RegisterLazyLits {
 	lit_reverse_map: Arc<Mutex<FxHashMap<LitInt, LitName>>>,
 }
 
-/// Create a [`tracing_subscriber::Subscriber`] specialized for `huub`.
+/// An implementation of [`tracing_subscriber::fmt::FormatEvent`] for proof events:
+/// write the fields according to the VeriPB proof format.
+struct VeriPBEventFormatter;
+
+struct VeriPBFieldsFormatter {}
+/// Create a [`tracing_subscriber::Registry`] specialized for `huub`.
 ///
 /// The given subscriber additionally formats literals and integer variables
 /// using the name mapping provided by `lit_reverse_map` and `int_reverse_map`.
@@ -106,29 +117,56 @@ pub(crate) fn create_subscriber<W>(
 	ansi: bool,
 	lit_reverse_map: Arc<Mutex<FxHashMap<LitInt, LitName>>>,
 	int_reverse_map: Arc<Mutex<Vec<Ustr>>>,
+	prove: &Option<PathBuf>,
 ) -> impl Subscriber
 where
 	W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
 {
-	// Builder for the formatting subscriber
-	let builder = tracing_subscriber::fmt()
-		.with_max_level(match verbose {
-			0 => Level::INFO,
-			1 => Level::DEBUG,
-			_ => Level::TRACE, // 2 or more
-		})
+	let debug_log_filter = Targets::new()
+		// Ensure no proof tracing ends up in the debug log
+		.with_target("proof", LevelFilter::OFF)
+		// Otherwise, filter to the desired log level
+		.with_default(match verbose {
+			0 => LevelFilter::INFO,
+			1 => LevelFilter::DEBUG,
+			_ => LevelFilter::TRACE,
+		});
+
+	let proof_log_filter = Targets::new()
+		.with_target("proof", LevelFilter::TRACE)
+		.with_default(LevelFilter::OFF);
+
+	// Formatting layer for debug logging.
+	let fmt_layer = tracing_subscriber::fmt::layer()
 		.with_writer(make_writer)
 		.with_ansi(ansi)
 		.with_timer(uptime())
-		.map_fmt_fields(|fmt| {
-			FmtLitFields::new(fmt, Arc::clone(&lit_reverse_map), int_reverse_map)
-		});
+		.map_fmt_fields(|fmt| FmtLitFields::new(fmt, Arc::clone(&lit_reverse_map), int_reverse_map))
+		.with_filter(debug_log_filter);
 
-	// Create final subscriber and add the layer that will register new lazily
-	// created literals
-	builder
-		.finish()
+	// Create proof logging layer
+	let pb_layer = if let Some(proof_path) = prove {
+		let proof_file = fs::OpenOptions::new()
+			.write(true)
+			.create(true)
+			.truncate(true)
+			.open(proof_path.as_path())
+			.expect("Failed to open proof file.");
+		Some(
+			tracing_subscriber::fmt::layer()
+				.with_writer(proof_file)
+				.event_format(VeriPBEventFormatter {})
+				.with_ansi(false)
+				.with_filter(proof_log_filter),
+		)
+	} else {
+		None
+	};
+
+	Registry::default()
 		.with(RegisterLazyLits::new(lit_reverse_map))
+		.with(fmt_layer)
+		.with(pb_layer)
 }
 
 impl FmtLitFields {
@@ -419,5 +457,23 @@ impl<S: Subscriber> Layer<S> for RegisterLazyLits {
 		let mut rec = RecordLazyLits::default();
 		event.record(&mut rec);
 		!rec.finish(&self.lit_reverse_map)
+	}
+}
+
+impl<S, N> FormatEvent<S, N> for VeriPBEventFormatter
+where
+	S: Subscriber + for<'a> LookupSpan<'a>,
+	N: for<'a> FormatFields<'a> + 'static,
+{
+	fn format_event(
+		&self,
+		context: &FmtContext<'_, S, N>,
+		mut writer: Writer<'_>,
+		event: &Event<'_>,
+	) -> fmt::Result {
+		context
+			.field_format()
+			.format_fields(writer.by_ref(), event)?;
+		writeln!(writer)
 	}
 }

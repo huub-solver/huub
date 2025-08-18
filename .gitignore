@@ -8,3 +8,15 @@ target/
 
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
+
+# Proof logs
+*.opb
+*.pbp
+*.veripb
+
+# MacOS folder attributes
+*.DS_Store
+
+# vscode
+*.vscode
+*.code-workspace

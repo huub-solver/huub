@@ -24,6 +24,7 @@ macro_rules! outputln {
 mod trace;
 
 use std::{
+	convert::Infallible,
 	fmt::{self, Debug, Display},
 	fs::File,
 	io::{self, BufReader},
@@ -47,7 +48,7 @@ use huub::{
 use mimalloc::MiMalloc;
 use pico_args::Arguments;
 use rustc_hash::FxHashMap;
-use tracing::{subscriber::set_default, warn};
+use tracing::{event, subscriber::set_default, trace, warn, Level};
 use tracing_subscriber::fmt::MakeWriter;
 use ustr::{ustr, Ustr, UstrMap};
 
@@ -131,6 +132,8 @@ pub struct Cli<Stdout, Stderr> {
 	stderr: Stderr,
 	/// Whether to use ANSI color codes in the output (only for stderr)
 	ansi_color: bool,
+	/// Optional proof logging output file.
+	prove: Option<PathBuf>,
 }
 
 /// Solution struct to display the results of the solver
@@ -576,6 +579,7 @@ where
 			vsids_after_restart: self.vsids_after_restart,
 			vsids_only: self.vsids_only,
 			stdout: self.stdout,
+			prove: self.prove,
 		}
 	}
 
@@ -607,6 +611,7 @@ where
 			vsids_only: self.vsids_only,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
+			prove: self.prove,
 		}
 	}
 }
@@ -628,7 +633,7 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			)),
 		};
 
-		let cli = Cli {
+		let mut cli = Cli {
 			all_solutions: args.contains(["-a", "--all-solutions"]),
 			all_optimal: args.contains("--all-optimal"),
 			intermediate_solutions: args.contains(["-i", "--intermediate-solutions"]),
@@ -690,7 +695,25 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			#[expect(trivial_casts, reason = "doesn't compile without the case")]
 			stderr: io::stderr as fn() -> io::Stderr,
 			ansi_color: true,
+			prove: args
+				.opt_value_from_os_str("--prove", |s| -> Result<PathBuf, Infallible> {
+					Ok(s.into())
+				})
+				.unwrap(),
 		};
+
+		// If no path is provided with --prove, use the name of the fzn file and output
+		// to current working directory.
+		if cli
+			.prove
+			.as_ref()
+			.and_then(|p| p.to_str())
+			.filter(|s| *s == "default")
+			.is_some()
+		{
+			cli.prove =
+				Some(PathBuf::from(cli.path.clone().file_stem().unwrap()).with_extension("pbp"));
+		}
 
 		let remaining = args.finish();
 		match remaining.len() {

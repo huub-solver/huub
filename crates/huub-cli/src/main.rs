@@ -71,7 +71,8 @@ FLAGS
 
                       === BEHAVIOUR OPTIONS ===
   --log-file <FILE>               Output log messages from the solver to a file, instead of stderr.
-
+  --prove <FILE>                  (Experimental) Write a proof log to the specified file.
+  
 DESCRIPTION
   Create a Huub Solver instance tailored to a given FlatZinc JSON input file and solve the problem.
 
@@ -112,6 +113,7 @@ fn main() -> ExitCode {
 			Ok(s.into())
 		})
 		.unwrap();
+
 	let mut cli: Cli<_, _> = match args.try_into() {
 		Ok(cli) => cli,
 		Err(e) => {
@@ -119,6 +121,7 @@ fn main() -> ExitCode {
 			return ExitCode::FAILURE;
 		}
 	};
+
 	let result = match log_file {
 		Some(log_file) => {
 			let mut cli = cli.with_stderr(
