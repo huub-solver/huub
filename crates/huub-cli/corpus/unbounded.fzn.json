@@ -1,0 +1,14 @@
+{
+  "variables": {
+    "x" : { "type" : "int" }
+  },
+  "arrays": {
+
+  },
+  "constraints": [
+
+  ],
+  "output": ["x"],
+  "solve": { "method" : "minimize", "objective" : "x" },
+  "version": "1.0"
+}

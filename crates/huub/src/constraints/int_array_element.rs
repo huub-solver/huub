@@ -504,11 +504,11 @@ mod tests {
 	#[traced_test]
 	fn test_element_unsat() {
 		let mut prb = Model::default();
-		let a = prb.new_int_var((3..=5).into());
-		let b = prb.new_int_var((4..=5).into());
-		let c = prb.new_int_var((4..=10).into());
-		let result = prb.new_int_var((1..=2).into());
-		let index = prb.new_int_var((0..=2).into());
+		let a = prb.new_int_var(3..=5);
+		let b = prb.new_int_var(4..=5);
+		let c = prb.new_int_var(4..=10);
+		let result = prb.new_int_var(1..=2);
+		let index = prb.new_int_var(0..=2);
 
 		prb += array_element(vec![a, b, c], index, result);
 		prb.assert_unsatisfiable();

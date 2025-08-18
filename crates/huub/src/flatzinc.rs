@@ -3,10 +3,11 @@
 use std::{
 	cell::RefCell,
 	collections::hash_map::Entry,
-	fmt::{Debug, Display},
+	error::Error,
+	fmt::{self, Debug, Display},
 	hash::Hash,
 	iter::once,
-	ops::{Deref, Not},
+	ops::{Deref, Not, RangeInclusive},
 	rc::Rc,
 };
 
@@ -18,7 +19,6 @@ use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;
 use rangelist::IntervalIterator;
 use rustc_hash::{FxHashMap, FxHashSet};
-use thiserror::Error;
 use tracing::warn;
 
 use crate::{
@@ -30,18 +30,19 @@ use crate::{
 	VariableSelection,
 };
 
-#[derive(Error, Debug)]
+/// Domain assumed for integer decision variables that do not have a domain
+/// definition.
+const FULL_INT_DOMAIN: RangeInclusive<IntVal> = IntVal::MIN..=IntVal::MAX;
+
+#[derive(Debug)]
 /// Errors that can occur when converting a [`FlatZinc`] instance to a [`Model`]
 /// or [`Solver`] object.
 pub enum FlatZincError {
-	#[error("{0:?} type variables are not supported by huub")]
 	/// FlatZinc instance contained a decision variable with an unsupported
 	/// type.
 	UnsupportedType(Type),
-	#[error("constraint cannot be constructed using unknown identifier `{0}'")]
 	/// FlatZinc instance contained a constraint with an unknown identifier.
 	UnknownConstraint(String),
-	#[error("constraints with identifiers `{name}' must have {expected} arguments, found {found}")]
 	/// FlatZinc instance contained a constraint with an invalid number of
 	/// arguments.
 	InvalidNumArgs {
@@ -52,10 +53,8 @@ pub enum FlatZincError {
 		/// Number of arguments expected.
 		expected: usize,
 	},
-	#[error("could not find identifier `{0}'")]
 	/// FlatZinc instance used an identifier that was not defined.
 	UnknownIdentifier(String),
-	#[error("argument found of type `{found}', expected `{expected}'")]
 	/// FlatZinc constraint or annotation used an argument of the wrong type.
 	InvalidArgumentType {
 		/// Expected type of the argument.
@@ -63,10 +62,9 @@ pub enum FlatZincError {
 		/// Type of the argument found.
 		found: String,
 	},
-	#[error("error reformulating generated model `{0}'")]
 	/// Error that occorred when converting a generated [`Model`] to a
 	/// [`Solver`] object.
-	ReformulationError(#[from] ReformulationError),
+	ReformulationError(ReformulationError),
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -91,6 +89,41 @@ pub(crate) struct FznModelBuilder<'a, S: Eq + Hash + Ord> {
 	processed: Vec<bool>,
 	/// Statistics about the extraction process
 	stats: FlatZincStatistics,
+}
+
+impl Display for FlatZincError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::UnsupportedType(t) => write!(f, "{t:?} type variables are not supported by huub"),
+			Self::UnknownConstraint(c) => write!(
+				f,
+				"constraint cannot be constructed using unknown identifier `{c}'"
+			),
+			Self::InvalidNumArgs {
+				name,
+				found,
+				expected,
+			} => write!(
+				f,
+				"constraints with identifiers `{name}' must have {expected} arguments, found {found}"
+			),
+			Self::UnknownIdentifier(ident) => write!(f, "could not find identifier `{ident}'"),
+			Self::InvalidArgumentType { expected, found } => {
+				write!(f, "argument found of type `{found}', expected `{expected}'")
+			}
+			Self::ReformulationError(err) => {
+				write!(f, "error reformulating generated model `{err}'")
+			}
+		}
+	}
+}
+
+impl Error for FlatZincError {}
+
+impl From<ReformulationError> for FlatZincError {
+	fn from(reformulation_error: ReformulationError) -> Self {
+		Self::ReformulationError(reformulation_error)
+	}
 }
 
 impl FlatZincStatistics {
@@ -492,7 +525,7 @@ where
 
 		let state_vars = self
 			.prb
-			.new_int_vars(vars.len() - 1, (1..=transitions.len() as IntVal).into())
+			.new_int_vars(vars.len() - 1, 1..=transitions.len() as IntVal)
 			.into_iter()
 			.collect_vec();
 
@@ -773,13 +806,21 @@ where
 				if let Some(var) = self.fzn.variables.get(ident) {
 					Ok(e.insert(match var.ty {
 						Type::Bool => Decision::Bool(self.prb.new_bool_var()),
-						Type::Int => match &var.domain {
-							Some(Domain::Int(r)) => {
-								Decision::Int(self.prb.new_int_var(r.iter().collect()))
+						Type::Int => {
+							match &var.domain {
+								Some(Domain::Int(r)) => Decision::Int(
+									self.prb.new_int_var(r.iter().collect::<IntSetVal>()),
+								),
+								Some(_) => unreachable!(),
+								None => {
+									warn!(
+										"decision variable `{}' was unbounded, assuming domain {}..{}",
+										ident, FULL_INT_DOMAIN.start(), FULL_INT_DOMAIN.end()
+									);
+									self.prb.new_int_var(FULL_INT_DOMAIN).into()
+								}
 							}
-							Some(_) => unreachable!(),
-							None => todo!("Variables without a domain are not yet supported"),
-						},
+						}
 						_ => todo!("Variables of {:?} are not yet supported", var.ty),
 					})
 					.clone())
@@ -1788,7 +1829,25 @@ where
 					Some(_) => unreachable!(),
 					None => match ty {
 						Type::Bool => self.prb.new_bool_var().into(),
-						Type::Int => panic!("unbounded integer variables are not supported yet"),
+						Type::Int => {
+							let id = li
+								.iter()
+								.find_map(|lit| {
+									if let Literal::Identifier(id) = lit {
+										Some(id)
+									} else {
+										None
+									}
+								})
+								.unwrap();
+							warn!(
+								"decision variable `{}' was unbounded, assuming domain {}..{}",
+								id,
+								FULL_INT_DOMAIN.start(),
+								FULL_INT_DOMAIN.end()
+							);
+							self.prb.new_int_var(FULL_INT_DOMAIN).into()
+						}
 						_ => unreachable!(),
 					},
 				});

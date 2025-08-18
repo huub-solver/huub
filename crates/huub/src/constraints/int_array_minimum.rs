@@ -156,10 +156,10 @@ mod tests {
 	#[traced_test]
 	fn test_maximum_sat() {
 		let mut prb = Model::default();
-		let a = prb.new_int_var((1..=6).into());
-		let b = prb.new_int_var((3..=5).into());
-		let c = prb.new_int_var((2..=5).into());
-		let y = prb.new_int_var((1..=3).into());
+		let a = prb.new_int_var(1..=6);
+		let b = prb.new_int_var(3..=5);
+		let c = prb.new_int_var(2..=5);
+		let y = prb.new_int_var(1..=3);
 
 		prb += array_maximum_int(vec![a, b, c], y);
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
@@ -184,10 +184,10 @@ mod tests {
 	#[traced_test]
 	fn test_maximum_unsat() {
 		let mut prb = Model::default();
-		let a = prb.new_int_var((3..=5).into());
-		let b = prb.new_int_var((4..=5).into());
-		let c = prb.new_int_var((4..=10).into());
-		let y = prb.new_int_var((13..=20).into());
+		let a = prb.new_int_var(3..=5);
+		let b = prb.new_int_var(4..=5);
+		let c = prb.new_int_var(4..=10);
+		let y = prb.new_int_var(13..=20);
 
 		prb += array_maximum_int(vec![a, b, c], y);
 		prb.assert_unsatisfiable();
@@ -197,10 +197,10 @@ mod tests {
 	#[traced_test]
 	fn test_minimum_sat() {
 		let mut prb = Model::default();
-		let a = prb.new_int_var((3..=4).into());
-		let b = prb.new_int_var((2..=3).into());
-		let c = prb.new_int_var((2..=3).into());
-		let y = prb.new_int_var((3..=4).into());
+		let a = prb.new_int_var(3..=4);
+		let b = prb.new_int_var(2..=3);
+		let c = prb.new_int_var(2..=3);
+		let y = prb.new_int_var(3..=4);
 
 		prb += array_minimum_int(vec![a, b, c], y);
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
@@ -220,10 +220,10 @@ mod tests {
 	#[traced_test]
 	fn test_minimum_unsat() {
 		let mut prb = Model::default();
-		let a = prb.new_int_var((3..=5).into());
-		let b = prb.new_int_var((4..=5).into());
-		let c = prb.new_int_var((4..=10).into());
-		let y = prb.new_int_var((1..=2).into());
+		let a = prb.new_int_var(3..=5);
+		let b = prb.new_int_var(4..=5);
+		let c = prb.new_int_var(4..=10);
+		let y = prb.new_int_var(1..=2);
 
 		prb += array_minimum_int(vec![a, b, c], y);
 		prb.assert_unsatisfiable();

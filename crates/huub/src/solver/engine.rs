@@ -20,7 +20,6 @@ macro_rules! trace_new_lit {
 
 use std::{collections::VecDeque, mem};
 
-use delegate::delegate;
 use index_vec::IndexVec;
 use pindakaas::{
 	solver::{
@@ -1085,12 +1084,16 @@ impl InspectionActions for State {
 }
 
 impl TrailingActions for State {
-	delegate! {
-		to self.trail {
-			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
-			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
-			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal;
-		}
+	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
+		self.trail.get_bool_val(bv)
+	}
+
+	fn get_trailed_int(&self, x: TrailedInt) -> IntVal {
+		self.trail.get_trailed_int(x)
+	}
+
+	fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal {
+		self.trail.set_trailed_int(x, v)
 	}
 }
 

@@ -861,9 +861,9 @@ mod tests {
 	#[traced_test]
 	fn test_linear_ge_unsat() {
 		let mut prb = Model::default();
-		let a = prb.new_int_var((1..=2).into());
-		let b = prb.new_int_var((1..=2).into());
-		let c = prb.new_int_var((1..=2).into());
+		let a = prb.new_int_var(1..=2);
+		let b = prb.new_int_var(1..=2);
+		let c = prb.new_int_var(1..=2);
 
 		prb += (a * 2 + b + c).geq(10);
 		prb.assert_unsatisfiable();
@@ -909,9 +909,9 @@ mod tests {
 	#[traced_test]
 	fn test_linear_le_unsat() {
 		let mut prb = Model::default();
-		let a = prb.new_int_var((1..=4).into());
-		let b = prb.new_int_var((1..=4).into());
-		let c = prb.new_int_var((1..=4).into());
+		let a = prb.new_int_var(1..=4);
+		let b = prb.new_int_var(1..=4);
+		let c = prb.new_int_var(1..=4);
 
 		prb += (a * 2 + b + c).leq(3);
 		prb.assert_unsatisfiable();
@@ -959,9 +959,9 @@ mod tests {
 	fn test_reified_linear_ge_sat() {
 		let mut prb = Model::default();
 		let r = prb.new_bool_var();
-		let a = prb.new_int_var((1..=2).into());
-		let b = prb.new_int_var((1..=2).into());
-		let c = prb.new_int_var((1..=2).into());
+		let a = prb.new_int_var(1..=2);
+		let b = prb.new_int_var(1..=2);
+		let c = prb.new_int_var(1..=2);
 
 		prb += (a * 2 + b + c).geq(7).implied_by(r);
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
@@ -991,9 +991,9 @@ mod tests {
 	fn test_reified_linear_le_sat() {
 		let mut prb = Model::default();
 		let r = prb.new_bool_var();
-		let a = prb.new_int_var((1..=2).into());
-		let b = prb.new_int_var((1..=2).into());
-		let c = prb.new_int_var((1..=2).into());
+		let a = prb.new_int_var(1..=2);
+		let b = prb.new_int_var(1..=2);
+		let c = prb.new_int_var(1..=2);
 
 		prb += (a * 2 + b + c).leq(5).implied_by(r);
 
@@ -1024,9 +1024,9 @@ mod tests {
 	fn test_reified_linear_ne_sat() {
 		let mut prb = Model::default();
 		let r = prb.new_bool_var();
-		let a = prb.new_int_var((1..=2).into());
-		let b = prb.new_int_var((1..=2).into());
-		let c = prb.new_int_var((1..=2).into());
+		let a = prb.new_int_var(1..=2);
+		let b = prb.new_int_var(1..=2);
+		let c = prb.new_int_var(1..=2);
 
 		prb += (a * 2 + b + c).ne(6).implied_by(r);
 
