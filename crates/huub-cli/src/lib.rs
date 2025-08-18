@@ -21,6 +21,7 @@ macro_rules! outputln {
 	};
 }
 
+mod interned_str;
 mod trace;
 
 use std::{
@@ -49,9 +50,8 @@ use pico_args::Arguments;
 use rustc_hash::FxHashMap;
 use tracing::{subscriber::set_default, warn};
 use tracing_subscriber::fmt::MakeWriter;
-use ustr::{ustr, Ustr, UstrMap};
 
-use crate::trace::LitName;
+use crate::{interned_str::InternedStr, trace::LitName};
 
 /// Status message to output when it is proven that no more/better solutions can
 /// be found.
@@ -139,11 +139,11 @@ pub struct Cli<Stdout, Stderr> {
 /// Solution struct to display the results of the solver
 struct Solution<'a> {
 	/// FlatZinc instance
-	fzn: &'a FlatZinc<Ustr>,
+	fzn: &'a FlatZinc<InternedStr>,
 	/// Mapping from solver views to solution values
 	value: &'a dyn Valuation,
 	/// Mapping from FlatZinc identifiers to solver views
-	var_map: &'a UstrMap<View>,
+	var_map: &'a FxHashMap<InternedStr, View>,
 }
 
 /// Parse time duration for the time limit flag
@@ -199,7 +199,7 @@ where
 	pub fn run(&mut self) -> Result<(), String> {
 		// Enable tracing functionality
 		let lit_reverse_map: Arc<Mutex<FxHashMap<NonZeroI32, LitName>>> = Arc::default();
-		let int_reverse_map: Arc<Mutex<Vec<Ustr>>> = Arc::default();
+		let int_reverse_map: Arc<Mutex<Vec<InternedStr>>> = Arc::default();
 		let subscriber = trace::create_subscriber(
 			self.verbose,
 			self.stderr.clone(),
@@ -217,7 +217,7 @@ where
 			File::open(&self.path)
 				.map_err(|_| format!("Unable to open file “{}”", self.path.display()))?,
 		);
-		let fzn: FlatZinc<Ustr> = serde_json::from_reader(rdr).map_err(|_| {
+		let fzn: FlatZinc<InternedStr> = serde_json::from_reader(rdr).map_err(|_| {
 			format!(
 				"Unable to parse file “{}” as FlatZinc JSON",
 				self.path.display()
@@ -225,9 +225,16 @@ where
 		})?;
 
 		// Convert FlatZinc model to internal Solver representation
-		let res = Solver::from_fzn::<Ustr, UstrMap<View>>(&fzn, &self.init_config());
+		let res = Solver::from_fzn::<InternedStr, FxHashMap<InternedStr, View>>(
+			&fzn,
+			&self.init_config(),
+		);
 		// Resolve any errors that may have occurred during the conversion
-		let (mut slv, var_map, fzn_stats): (Solver, UstrMap<View>, FlatZincStatistics) = match res {
+		let (mut slv, var_map, fzn_stats): (
+			Solver,
+			FxHashMap<InternedStr, View>,
+			FlatZincStatistics,
+		) = match res {
 			Err(FlatZincError::ReformulationError(
 				ReformulationError::SimplificationConflict(_)
 				| ReformulationError::TranslationConflict(_),
@@ -264,7 +271,7 @@ where
 			let mut lit_map = lit_reverse_map.lock().unwrap();
 			let mut int_map = int_reverse_map.lock().unwrap();
 			debug_assert!(int_map.is_empty());
-			*int_map = vec![ustr(""); slv.init_statistics().int_vars()];
+			*int_map = vec![InternedStr::default(); slv.init_statistics().int_vars()];
 			for (name, v) in &var_map {
 				match v {
 					View::Bool(bv) => {
@@ -724,7 +731,7 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 
 impl Solution<'_> {
 	/// Method used to print a literal that is part of a solution.
-	fn print_lit(&self, lit: &Literal<Ustr>) -> String {
+	fn print_lit(&self, lit: &Literal<InternedStr>) -> String {
 		match lit {
 			Literal::Int(i) => format!("{i}"),
 			Literal::Float(f) => format!("{f}"),
