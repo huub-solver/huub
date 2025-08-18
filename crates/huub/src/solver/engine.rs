@@ -23,9 +23,12 @@ use std::{collections::VecDeque, mem};
 use delegate::delegate;
 use index_vec::IndexVec;
 use pindakaas::{
-	solver::propagation::{
-		ClausePersistence, Propagator as PropagatorExtension,
-		PropagatorDefinition as PropagatorExtensionDefinition, SearchDecision, SolvingActions,
+	solver::{
+		cadical::{ProofTracer, ProofTracerDefinition},
+		propagation::{
+			ClausePersistence, Propagator as PropagatorExtension,
+			PropagatorDefinition as PropagatorExtensionDefinition, SearchDecision, SolvingActions,
+		},
 	},
 	Lit as RawLit, Var as RawVar,
 };
@@ -612,6 +615,27 @@ impl PropagatorExtension for Engine {
 impl PropagatorExtensionDefinition for Engine {
 	const CHECK_ONLY: bool = false;
 	const REASON_PERSISTENCE: ClausePersistence = ClausePersistence::Forgettable;
+}
+
+impl ProofTracer for Engine {
+	fn add_original_clause(&mut self, id: u64, redundant: bool, clause: &[RawLit], restored: bool) {
+		trace!(target = "proof", "add_original_clause")
+	}
+	fn add_derived_clause(
+		&mut self,
+		id: u64,
+		redundant: bool,
+		clause: &[RawLit],
+		antecedents: &[u64],
+	) {
+		trace!(target = "proof", "add_derived_clause")
+	}
+}
+
+impl ProofTracerDefinition for Engine {
+	const ANTECEDENTS: bool = false;
+
+	const FINALIZE_CLAUSES: bool = false;
 }
 
 impl State {

@@ -28,6 +28,7 @@ use std::{
 	mem,
 	num::NonZeroI64,
 	ops::{Add, AddAssign, Deref, Mul, Neg, Not, Sub},
+	rc::Rc,
 };
 
 use flatzinc_serde::FlatZinc;
@@ -163,6 +164,9 @@ pub type IntSetVal = RangeList<IntVal>;
 /// Type alias for an parameter integer value.
 pub type IntVal = i64;
 
+/// Type alias for a constraint identifier in the proof log
+pub type ConstraintProofID = usize;
+
 #[derive(Clone, Debug, Default)]
 /// A formulation of a problem instance in terms of decisions and constraints.
 pub struct Model {
@@ -172,7 +176,7 @@ pub struct Model {
 	/// instances to be used in order to make search decisions.
 	branchings: Vec<Branching>,
 	/// A list of constraints that have been added to the model.
-	constraints: Vec<Option<ConstraintStore>>,
+	constraints: Vec<Option<(ConstraintStore, Option<ConstraintProofID>)>>,
 	/// The definitions of the Boolean variables that have been created.
 	bool_vars: Vec<BoolDecisionDef>,
 	/// The definitions of the integer variables that have been created.
@@ -181,6 +185,9 @@ pub struct Model {
 	prop_queue: VecDeque<usize>,
 	/// A flag for each constraint whether it has been enqueued for propagation.
 	enqueued: Vec<bool>,
+	/// An optional identifier for the next constraint/clause to be added to the model
+	/// (for proof logging)
+	next_proof_id: Option<ConstraintProofID>,
 }
 
 /// Type alias for a non-zero parameter integer value.
@@ -920,7 +927,8 @@ impl Model {
 	/// Note that users will use either the `+=` operator or the
 	/// [`Self::add_custom_constraint`] method.
 	fn add_constraint(&mut self, constraint: ConstraintStore) {
-		self.constraints.push(Some(constraint));
+		self.constraints
+			.push(Some((constraint, self.next_proof_id)));
 		self.enqueued.push(false);
 		self.enqueue(self.constraints.len() - 1);
 		self.subscribe(self.constraints.len() - 1);
@@ -994,7 +1002,7 @@ impl Model {
 	/// Propagate the constraint at index `con`, updating the domains of the
 	/// variables and rewriting the constraint if necessary.
 	pub(crate) fn propagate(&mut self, con: usize) -> Result<(), ReformulationError> {
-		let Some(mut con_obj) = self.constraints[con].take() else {
+		let Some((mut con_obj, proof_id)) = self.constraints[con].take() else {
 			return Ok(());
 		};
 
@@ -1023,7 +1031,7 @@ impl Model {
 				// Constraint is known to be satisfied, no need to place back.
 			}
 			SimplificationStatus::Fixpoint => {
-				self.constraints[con] = Some(con_obj);
+				self.constraints[con] = Some((con_obj, proof_id));
 			}
 		}
 		Ok(())
@@ -1068,7 +1076,7 @@ impl Model {
 			}
 		}
 
-		let con_store = self.constraints[con].take().unwrap();
+		let (con_store, proof_id) = self.constraints[con].take().unwrap();
 		let mut ctx = ConstraintInitContext { con, model: self };
 		match &con_store {
 			ConstraintStore::IntAllDifferent(con) => {
@@ -1124,7 +1132,7 @@ impl Model {
 			}
 			ConstraintStore::Other(con) => con.initialize(&mut ctx),
 		}
-		self.constraints[con] = Some(con_store);
+		self.constraints[con] = Some((con_store, proof_id));
 	}
 
 	/// Process the model to create a [`Solver`] instance that can be used to
@@ -1162,6 +1170,8 @@ impl Model {
 				"restart",
 				(config.restart() || self.branchings.is_empty()) as i32,
 			);
+
+			r.connect_proof_tracer(Rc::clone(&slv.engine));
 		} else {
 			warn!("unknown solver: vivification and restart options are ignored");
 		}
@@ -1177,7 +1187,7 @@ impl Model {
 		let mut int_eager_direct = HashSet::<IntDecisionIndex>::new();
 		let int_eager_order = HashSet::<IntDecisionIndex>::new();
 
-		for c in self.constraints.iter().flatten() {
+		for (c, proof_id) in self.constraints.iter().flatten() {
 			match c {
 				ConstraintStore::IntAllDifferent(c) if c.value_consistent_propagator_enabled() => {
 					for v in &c.vars {
@@ -1246,7 +1256,7 @@ impl Model {
 		let map = map_builder.finalize();
 
 		// Create constraint data structures within the solver
-		for c in self.constraints.iter().flatten() {
+		for (c, proof_id) in self.constraints.iter().flatten() {
 			c.to_solver(&mut slv, &map)?;
 		}
 		// Add branching data structures to the solver
@@ -1255,6 +1265,11 @@ impl Model {
 		}
 
 		Ok((slv, map))
+	}
+
+	/// The next constraint added to the model will get this id in the proof.
+	fn set_next_proof_id(&mut self, id: Option<ConstraintProofID>) {
+		self.next_proof_id = id;
 	}
 }
 

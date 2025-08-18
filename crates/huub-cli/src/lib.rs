@@ -205,7 +205,9 @@ where
 			self.ansi_color,
 			Arc::clone(&lit_reverse_map),
 			Arc::clone(&int_reverse_map),
+			&self.prove,
 		);
+
 		let _guard = set_default(subscriber);
 
 		let start = Instant::now();
