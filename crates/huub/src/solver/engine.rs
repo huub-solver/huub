@@ -48,7 +48,7 @@ use crate::{
 		trail::{Trail, TrailedInt},
 		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, SolverConfiguration,
 	},
-	Clause, IntVal,
+	Clause, ConstraintProofID, IntVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -152,8 +152,18 @@ pub struct State {
 	/// List of integer variables that have been notified as fixed, but should
 	/// be checked that the bounds match before propagation.
 	pub(crate) check_int_fixed: Vec<(IntVarRef, IntVal)>,
+
+	// ---- Proof Logging ----
+	/// The proof hint information for the next clause to be logged to the proof.
+	pub(crate) next_proof_hint: Option<ProofHint>,
 }
 
+/// A store of information that can be logged to the proof along with each clause.
+#[derive(Clone, Debug, Default)]
+pub struct ProofHint {
+	pub constraint_ids: Vec<ConstraintProofID>,
+	pub name: &'static str,
+}
 impl Engine {
 	#[cfg(debug_assertions)]
 	/// (DEBUG ONLY) Check that the reason of a propagated literal contains only
