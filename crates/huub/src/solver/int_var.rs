@@ -689,6 +689,8 @@ impl IntVar {
 				)),
 				EncodingType::Lazy => DirectStorage::Lazy(FxHashMap::default()),
 			};
+		// Drop engine to allow oracle interaction
+		drop(engine);
 
 		// Enforce consistency constraints for eager literals
 		if let OrderStorage::Eager { storage, .. } = &order_encoding {
@@ -715,6 +717,7 @@ impl IntVar {
 		}
 
 		// Create the resulting integer variable
+		let mut engine = slv.engine.borrow_mut();
 		let iv = engine.state.int_vars.push(Self {
 			direct_encoding,
 			domain,
