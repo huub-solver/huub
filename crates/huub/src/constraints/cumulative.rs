@@ -138,9 +138,9 @@ impl CumulativeTimeTablePropagator {
 	/// completion time (i.e. the addition of its latest start time and its
 	/// duration lower bound).
 	/// The result is a tuple (bounds, heights), where bounds[i]..bounds[i+1]
-	/// is the interval in which the cumulative compusolary part is heights[i].
+	/// is the interval in which the cumulative compulsory part is heights[i].
 	///
-	/// When the profile is built, it checks if the cumulative compusolary part
+	/// When the profile is built, it checks if the cumulative compulsory part
 	/// exceeds the capacity lower bound. If it does, it sets the lower bound
 	/// of the capacity variable to the height of the profile at the time point.
 	fn build_profile_and_check_overload<P: PropagationActions>(
@@ -152,7 +152,7 @@ impl CumulativeTimeTablePropagator {
 		let n = self.start_times.len();
 		let mut events = Vec::with_capacity(2 * n);
 		let mut capacity_lb = actions.get_int_lower_bound(self.capacity);
-		// Collect all start and end events of composlary tasks
+		// Collect all start and end events of compulsory tasks
 		for i in 0..n {
 			let lst = self.latest_start_time(i, actions);
 			let ect = self.earliest_completion_time(i, actions);
@@ -168,7 +168,7 @@ impl CumulativeTimeTablePropagator {
 		if !events.is_empty() {
 			trace!(
 				events =? events,
-				"Events for compulosary parts from tasks"
+				"events for compulsory parts from tasks"
 			);
 		}
 
@@ -187,13 +187,13 @@ impl CumulativeTimeTablePropagator {
 						timepoint = t,
 						capacity_lb,
 						cur_height,
-						"Push capacity lower bound"
+						"push capacity lower bound"
 					);
 					let mid_point = last_time.map_or(t, |lt| (lt + t) / 2);
 					actions.set_int_lower_bound(
 						self.capacity,
 						cur_height,
-						self.explain_overload_timepoint(cur_height, mid_point),
+						self.explain_overload_time_point(cur_height, mid_point),
 					)?;
 					capacity_lb = cur_height;
 				}
@@ -211,19 +211,19 @@ impl CumulativeTimeTablePropagator {
 				bounds = ?self.bounds,
 				heights = ?self.heights,
 				capacity_ub =? actions.get_int_upper_bound(self.capacity),
-				"Cumulative time table profile"
+				"cumulative time table profile"
 			);
 		}
 		Ok(self.bounds.is_empty())
 	}
 
 	/// A helper function to collect the compulsory tasks that cover a given
-	/// amount of energy at a specific timepoint. This function is used for
-	/// explaintion.
+	/// amount of energy at a specific time point. This function is used for
+	/// explanation.
 	fn collect_compulsory_tasks<A: PropagationActions>(
 		&self,
 		to_cover: i64,
-		timepoint: i64,
+		time_point: i64,
 		actions: &mut A,
 		skip_task: Option<usize>,
 	) -> Vec<usize> {
@@ -232,7 +232,7 @@ impl CumulativeTimeTablePropagator {
 			return Vec::new();
 		}
 
-		// Collect a sufficient set of tasks with compulsory parts at `timepoint` that
+		// Collect a sufficient set of tasks with compulsory parts at `time_point` that
 		// cover `to_cover` energy
 		let mut relevant_tasks = Vec::new();
 		let mut collected_energy = 0;
@@ -240,8 +240,8 @@ impl CumulativeTimeTablePropagator {
 			if Some(i) == skip_task {
 				continue; // Skip the task itself
 			}
-			if self.latest_start_time(i, actions) <= timepoint
-				&& self.earliest_completion_time(i, actions) > timepoint
+			if self.latest_start_time(i, actions) <= time_point
+				&& self.earliest_completion_time(i, actions) > time_point
 			{
 				let usage_lb = actions.get_int_lower_bound(self.usages[i]);
 				if usage_lb > 0 {
@@ -268,14 +268,14 @@ impl CumulativeTimeTablePropagator {
 		}
 
 		trace!(
-			timepoint,
+			time_point,
 			relevant_tasks = ?minimal_relevant_tasks.iter().map(|&i| (
 				i,
 				self.latest_start_time(i, actions),
 				self.earliest_completion_time(i, actions),
 				self.durations[i]
 			)).collect_vec(),
-			"Explain resource usage"
+			"explain resource usage"
 		);
 
 		minimal_relevant_tasks
@@ -295,30 +295,30 @@ impl CumulativeTimeTablePropagator {
 	}
 
 	/// Constructs a reason for limiting the usage of a task at a specific
-	/// timepoint. The explanation includes:
+	/// time point. The explanation includes:
 	/// (1) relevant tasks (including the target task) that have compulsory
-	/// parts at the given timepoint, which are used to cover the required
+	/// parts at the given time point, which are used to cover the required
 	/// resource usage, (2) and the resource capacity at its upper bound.
 	fn explain_limit_usage<A: PropagationActions>(
 		&self,
 		task_no: usize,
-		timepoint: i64,
+		time_point: i64,
 		usage_limit: i64,
 	) -> impl ReasonBuilder<A> + '_ {
 		move |actions: &mut A| {
 			trace!(
 				task_no,
-				timepoint =? timepoint,
+				timepoint =? time_point,
 				usage_limit,
 				"Explain task usage limit"
 			);
 			let capacity_ub = actions.get_int_upper_bound(self.capacity);
 			let to_cover = capacity_ub - usage_limit;
 			let relevant_tasks =
-				self.collect_compulsory_tasks(to_cover, timepoint, actions, Some(task_no));
+				self.collect_compulsory_tasks(to_cover, time_point, actions, Some(task_no));
 
 			trace!(
-				timepoint,
+				time_point,
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
 					actions.get_int_lower_bound(self.durations[i]),
@@ -332,18 +332,18 @@ impl CumulativeTimeTablePropagator {
 			let mut reason = Conjunction::new();
 
 			// Explanation: (1) relevant tasks (together with task `task_no`) have
-			// the required compulsory part at time `timepoint`
+			// the required compulsory part at time `time_point`
 			relevant_tasks
 				.iter()
 				.chain(std::iter::once(&task_no))
 				.for_each(|&i| {
 					reason.push(
 						actions
-							.get_int_lit(self.start_times[i], IntLitMeaning::Less(timepoint + 1)),
+							.get_int_lit(self.start_times[i], IntLitMeaning::Less(time_point + 1)),
 					);
 					reason.push(actions.get_int_lit(
 						self.start_times[i] + actions.get_int_lower_bound(self.durations[i]),
-						IntLitMeaning::GreaterEq(timepoint + 1),
+						IntLitMeaning::GreaterEq(time_point + 1),
 					));
 					reason.push(actions.get_int_lower_bound_lit(self.durations[i]));
 					reason.push(actions.get_int_lower_bound_lit(self.usages[i]));
@@ -357,18 +357,18 @@ impl CumulativeTimeTablePropagator {
 	}
 
 	/// Construct a reason for why the resource usage is over `to_cover` at a
-	/// specific `timepoint`. Refer to Shutt et al. (2011) for details on the
+	/// specific `time_point`. Refer to Schutt et al. (2011) for details on the
 	/// explanation construction.
-	fn explain_overload_timepoint<A: PropagationActions>(
+	fn explain_overload_time_point<A: PropagationActions>(
 		&self,
 		to_cover: i64,
-		timepoint: i64,
+		time_point: i64,
 	) -> impl ReasonBuilder<A> + '_ {
 		move |actions: &mut A| {
-			let relevant_tasks = self.collect_compulsory_tasks(to_cover, timepoint, actions, None);
+			let relevant_tasks = self.collect_compulsory_tasks(to_cover, time_point, actions, None);
 
 			trace!(
-				timepoint,
+				time_point,
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
 					self.latest_start_time(i, actions),
@@ -381,20 +381,20 @@ impl CumulativeTimeTablePropagator {
 			let mut conflict = Conjunction::new();
 
 			// Explanation: relevant tasks have the required compulsory part at time
-			// `timepoint`
+			// `time_point`
 			relevant_tasks.iter().for_each(|&i| {
 				conflict.push(
-					actions.get_int_lit(self.start_times[i], IntLitMeaning::Less(timepoint + 1)),
+					actions.get_int_lit(self.start_times[i], IntLitMeaning::Less(time_point + 1)),
 				);
 				conflict.push(actions.get_int_lit(
 					self.start_times[i] + actions.get_int_lower_bound(self.durations[i]),
-					IntLitMeaning::GreaterEq(timepoint + 1),
+					IntLitMeaning::GreaterEq(time_point + 1),
 				));
 				conflict.push(actions.get_int_lower_bound_lit(self.durations[i]));
 				conflict.push(actions.get_int_lower_bound_lit(self.usages[i]));
 			});
 
-			// Explanation: the resource usage at `timepoint` exceeds the upper bound of
+			// Explanation: the resource usage at `time_point` exceeds the upper bound of
 			// capacity
 			conflict.push(actions.get_int_upper_bound_lit(self.capacity));
 
@@ -409,17 +409,17 @@ impl CumulativeTimeTablePropagator {
 		&self,
 		task_no: usize,
 		propagation_rule: CumulativePropagationRule,
-		timepoint: i64,
+		time_point: i64,
 	) -> impl ReasonBuilder<A> + '_ {
 		move |actions: &mut A| {
 			let capacity_ub = actions.get_int_upper_bound(self.capacity);
 			let min_usage = actions.get_int_lower_bound(self.usages[task_no]);
 			let to_cover = capacity_ub - min_usage + 1;
 			let relevant_tasks =
-				self.collect_compulsory_tasks(to_cover, timepoint, actions, Some(task_no));
+				self.collect_compulsory_tasks(to_cover, time_point, actions, Some(task_no));
 
 			trace!(
-				timepoint,
+				time_point,
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
 					actions.get_int_lower_bound(self.durations[i]),
@@ -434,33 +434,33 @@ impl CumulativeTimeTablePropagator {
 			let mut reason = Conjunction::new();
 
 			// Explanation: (1) relevant tasks have the required compulsory part at time
-			// `timepoint`
+			// `time_point`
 			relevant_tasks.iter().for_each(|&i| {
 				reason.push(
-					actions.get_int_lit(self.start_times[i], IntLitMeaning::Less(timepoint + 1)),
+					actions.get_int_lit(self.start_times[i], IntLitMeaning::Less(time_point + 1)),
 				);
 				reason.push(actions.get_int_lit(
 					self.start_times[i] + actions.get_int_lower_bound(self.durations[i]),
-					IntLitMeaning::GreaterEq(timepoint + 1),
+					IntLitMeaning::GreaterEq(time_point + 1),
 				));
 				reason.push(actions.get_int_lower_bound_lit(self.durations[i]));
 				reason.push(actions.get_int_lower_bound_lit(self.usages[i]));
 			});
 
 			// Explanation: (2) the task itself is either left-conflict or right-conflict
-			// with the timepoint, depending on the propagation rule
+			// with the time point, depending on the propagation rule
 			match propagation_rule {
 				CumulativePropagationRule::ForwardShift => {
 					reason.push(actions.get_int_lit(
 						self.start_times[task_no]
 							+ actions.get_int_lower_bound(self.durations[task_no]),
-						IntLitMeaning::GreaterEq(timepoint + 1),
+						IntLitMeaning::GreaterEq(time_point + 1),
 					));
 				}
 				CumulativePropagationRule::BackwardShift => {
 					reason.push(actions.get_int_lit(
 						self.start_times[task_no],
-						IntLitMeaning::Less(timepoint + 1),
+						IntLitMeaning::Less(time_point + 1),
 					));
 				}
 			}
@@ -595,7 +595,7 @@ impl CumulativeTimeTablePropagator {
 	///
 	/// When possible updates on upper bound occur, the method uses a
 	/// step-by-step update with the step size being the task's duration lower
-	/// bound. This facilitates the generation of pointwise explanations as
+	/// bound. This facilitates the generation of point-wise explanations as
 	/// described in the original paper by Schutt et al. (2011).
 	fn sweep_backward(
 		&self,
@@ -644,8 +644,8 @@ impl CumulativeTimeTablePropagator {
 				} else {
 					b_start
 				};
-				// timepoints for latest completion time
-				let timepoints = (expl_start..=expl_end)
+				// time points for latest completion time
+				let time_points = (expl_start..=expl_end)
 					.rev()
 					.step_by(dur_lb as usize)
 					.map(|t| (b_start).max(t))
@@ -655,11 +655,11 @@ impl CumulativeTimeTablePropagator {
 					updated_lct,
 					b_start,
 					remainder,
-					time_points =? timepoints,
-					"Propagate backward shifting"
+					time_points =? time_points,
+					"propagate backward shifting"
 				);
 
-				for t in timepoints {
+				for t in time_points {
 					if t < updated_lct {
 						// Set new upper bound for the task's start time
 						actions.set_int_upper_bound(
@@ -694,7 +694,7 @@ impl CumulativeTimeTablePropagator {
 	///
 	/// When possible updates on lower bound occur, the method use a
 	/// step-by-step update with the step size being the task's duration lower
-	/// bound. This facilitates the generation of pointwise explanations as
+	/// bound. This facilitates the generation of point-wise explanations as
 	/// described in the original paper by Schutt et al. (2011).
 	fn sweep_forward(
 		&self,
@@ -741,8 +741,8 @@ impl CumulativeTimeTablePropagator {
 				} else {
 					b_end
 				};
-				// timepoints for earliest start time updates
-				let timepoints = (expl_start..=expl_end)
+				// time points for earliest start time updates
+				let time_points = (expl_start..=expl_end)
 					.step_by(dur_lb as usize)
 					.map(|t| (b_end).min(t))
 					.skip(1)
@@ -751,11 +751,11 @@ impl CumulativeTimeTablePropagator {
 					updated_est,
 					b_end,
 					remainder,
-					time_points =? timepoints,
-					"Propagate forward shifting"
+					time_points =? time_points,
+					"propagate forward shifting"
 				);
 
-				for t in timepoints {
+				for t in time_points {
 					if t > updated_est {
 						// Set new lower bound for the task's start time
 						actions.set_int_lower_bound(
