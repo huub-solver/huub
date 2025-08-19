@@ -154,8 +154,8 @@ impl CumulativeTimeTablePropagator {
 		let mut capacity_lb = actions.get_int_lower_bound(self.capacity);
 		// Collect all start and end events of compulsory tasks
 		for i in 0..n {
-			let lst = self.latest_start_time(i, actions);
-			let ect = self.earliest_completion_time(i, actions);
+			let lst = self.latest_start_time(actions, i);
+			let ect = self.earliest_completion_time(actions, i);
 			let min_usage = actions.get_int_lower_bound(self.usages[i]);
 			if lst < ect {
 				events.push((lst, min_usage));
@@ -240,8 +240,8 @@ impl CumulativeTimeTablePropagator {
 			if Some(i) == skip_task {
 				continue; // Skip the task itself
 			}
-			if self.latest_start_time(i, actions) <= time_point
-				&& self.earliest_completion_time(i, actions) > time_point
+			if self.latest_start_time(actions, i) <= time_point
+				&& self.earliest_completion_time(actions, i) > time_point
 			{
 				let usage_lb = actions.get_int_lower_bound(self.usages[i]);
 				if usage_lb > 0 {
@@ -271,8 +271,8 @@ impl CumulativeTimeTablePropagator {
 			time_point,
 			relevant_tasks = ?minimal_relevant_tasks.iter().map(|&i| (
 				i,
-				self.latest_start_time(i, actions),
-				self.earliest_completion_time(i, actions),
+				self.latest_start_time(actions, i),
+				self.earliest_completion_time(actions, i),
 				self.durations[i]
 			)).collect_vec(),
 			"explain resource usage"
@@ -283,14 +283,14 @@ impl CumulativeTimeTablePropagator {
 
 	#[inline]
 	/// Get the earliest completion time of the task `i`.
-	fn earliest_completion_time<I: InspectionActions>(&self, i: usize, actions: &mut I) -> i64 {
+	fn earliest_completion_time<I: InspectionActions>(&self, actions: &mut I, i: usize) -> i64 {
 		actions.get_int_lower_bound(self.start_times[i])
 			+ actions.get_int_lower_bound(self.durations[i])
 	}
 
 	#[inline]
 	/// Get the earliest start time of the task `i`.
-	fn earliest_start_time<I: InspectionActions>(&self, i: usize, actions: &mut I) -> i64 {
+	fn earliest_start_time<I: InspectionActions>(&self, actions: &mut I, i: usize) -> i64 {
 		actions.get_int_lower_bound(self.start_times[i])
 	}
 
@@ -322,8 +322,8 @@ impl CumulativeTimeTablePropagator {
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
 					actions.get_int_lower_bound(self.durations[i]),
-					self.latest_start_time(i, actions),
-					self.earliest_completion_time(i, actions),
+					self.latest_start_time(actions, i),
+					self.earliest_completion_time(actions, i),
 				)).collect_vec(),
 				capacity_ub,
 				"Explain task usage limit"
@@ -371,8 +371,8 @@ impl CumulativeTimeTablePropagator {
 				time_point,
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
-					self.latest_start_time(i, actions),
-					self.earliest_completion_time(i, actions),
+					self.latest_start_time(actions, i),
+					self.earliest_completion_time(actions, i),
 					self.durations[i]
 				)).collect_vec(),
 				"Explain resource overload"
@@ -423,8 +423,8 @@ impl CumulativeTimeTablePropagator {
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
 					actions.get_int_lower_bound(self.durations[i]),
-					self.latest_start_time(i, actions),
-					self.earliest_completion_time(i, actions),
+					self.latest_start_time(actions, i),
+					self.earliest_completion_time(actions, i),
 				)).collect_vec(),
 				rule =? propagation_rule,
 				"Explain task sweeping"
@@ -476,14 +476,14 @@ impl CumulativeTimeTablePropagator {
 
 	#[inline]
 	/// Get the latest completion time of the task `i`.
-	fn latest_completion_time<I: InspectionActions>(&self, i: usize, actions: &mut I) -> i64 {
+	fn latest_completion_time<I: InspectionActions>(&self, actions: &mut I, i: usize) -> i64 {
 		actions.get_int_upper_bound(self.start_times[i])
 			+ actions.get_int_upper_bound(self.durations[i])
 	}
 
 	#[inline]
 	/// Get the latest start time of the task `i`.
-	fn latest_start_time<I: InspectionActions>(&self, i: usize, actions: &mut I) -> i64 {
+	fn latest_start_time<I: InspectionActions>(&self, actions: &mut I, i: usize) -> i64 {
 		actions.get_int_upper_bound(self.start_times[i])
 	}
 
@@ -503,8 +503,8 @@ impl CumulativeTimeTablePropagator {
 		task: usize,
 		actions: &mut impl PropagationActions,
 	) -> Result<(), Conflict> {
-		let lst = self.latest_start_time(task, actions);
-		let ect = self.earliest_completion_time(task, actions);
+		let lst = self.latest_start_time(actions, task);
+		let ect = self.earliest_completion_time(actions, task);
 		let dur_lb = actions.get_int_lower_bound(self.durations[task]);
 		let usage_lb = actions.get_int_lower_bound(self.usages[task]);
 
@@ -602,13 +602,13 @@ impl CumulativeTimeTablePropagator {
 		task: usize,
 		actions: &mut impl PropagationActions,
 	) -> Result<(), Conflict> {
-		let est = self.earliest_start_time(task, actions);
-		let lst = self.latest_start_time(task, actions);
-		let ect = self.earliest_completion_time(task, actions);
+		let est = self.earliest_start_time(actions, task);
+		let lst = self.latest_start_time(actions, task);
+		let ect = self.earliest_completion_time(actions, task);
 		let dur_lb = actions.get_int_lower_bound(self.durations[task]);
 		let usage_lb = actions.get_int_lower_bound(self.usages[task]);
 
-		if !(dur_lb > 0 && usage_lb > 0) {
+		if dur_lb <= 0 || usage_lb <= 0 {
 			// If the task has no duration or usage, no need to sweep
 			return Ok(());
 		}
@@ -616,7 +616,7 @@ impl CumulativeTimeTablePropagator {
 		// Find the partition point where b < lst + dur
 		let last = self.bounds.partition_point(|&b| b < lst + dur_lb);
 		trace!(task, dur_lb, est, lst, usage_lb, "Task sweep backward");
-		let mut updated_lct = self.latest_completion_time(task, actions);
+		let mut updated_lct = self.latest_completion_time(actions, task);
 		let max_capacity = actions.get_int_upper_bound(self.capacity);
 		for i in (1..last).rev() {
 			let b_start = self.bounds[i - 1];
@@ -701,12 +701,12 @@ impl CumulativeTimeTablePropagator {
 		task: usize,
 		actions: &mut impl PropagationActions,
 	) -> Result<(), Conflict> {
-		let est = self.earliest_start_time(task, actions);
-		let lst = self.latest_start_time(task, actions);
+		let est = self.earliest_start_time(actions, task);
+		let lst = self.latest_start_time(actions, task);
 		let dur_lb = actions.get_int_lower_bound(self.durations[task]);
 		let usage_lb = actions.get_int_lower_bound(self.usages[task]);
 
-		if !(dur_lb > 0 && usage_lb > 0) {
+		if dur_lb <= 0 || usage_lb <= 0 {
 			// If the task has no duration or usage, no need to sweep
 			return Ok(());
 		}
@@ -785,15 +785,11 @@ where
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		// Build the time-table profile and check resource overload
 		match self.build_profile_and_check_overload(actions) {
-			Ok(true) => {
-				// If the profile is empty, no tasks are active, so we can skip further
-				// propagation
-				return Ok(());
-			}
-			Err(conflict) => {
-				// If there is a conflict, return it
-				return Err(conflict);
-			}
+			// If the profile is empty, no tasks are active, so we can skip further
+			// propagation
+			Ok(true) => return Ok(()),
+			// If there is a conflict, return it
+			Err(conflict) => return Err(conflict),
 			_ => {}
 		}
 
@@ -811,7 +807,7 @@ where
 		for i in 0..self.start_times.len() {
 			let (req_lb, req_ub) = actions.get_int_bounds(self.usages[i]);
 			if req_lb < req_ub
-				&& self.latest_start_time(i, actions) < self.earliest_completion_time(i, actions)
+				&& self.latest_start_time(actions, i) < self.earliest_completion_time(actions, i)
 			{
 				self.limit_usage(i, actions)?;
 			}
@@ -824,6 +820,7 @@ where
 mod tests {
 	use expect_test::expect;
 	use flatzinc_serde::RangeList;
+	use itertools::Itertools;
 	use pindakaas::Cnf;
 	use tracing_test::traced_test;
 
@@ -836,11 +833,6 @@ mod tests {
 		Solver,
 	};
 
-	/// Helper function to create a constant integer variable in the solver.
-	fn const_to_int_var(slv: &mut Solver, value: i64) -> IntView {
-		to_int_var(slv, RangeList::from_iter([value..=value]))
-	}
-
 	/// Helper function to create a task with given start time, duration, and
 	/// usage.
 	fn create_task(
@@ -849,40 +841,40 @@ mod tests {
 		duration: RangeList<i64>,
 		usage: RangeList<i64>,
 	) -> (IntView, IntView, IntView) {
-		let start = to_int_var(slv, start_time);
-		let dur = to_int_var(slv, duration);
-		let usage = to_int_var(slv, usage);
+		let start = IntVar::new_in(slv, start_time, EncodingType::Eager, EncodingType::Lazy);
+		let dur = IntVar::new_in(slv, duration, EncodingType::Eager, EncodingType::Lazy);
+		let usage = IntVar::new_in(slv, usage, EncodingType::Eager, EncodingType::Lazy);
 		(start, dur, usage)
-	}
-
-	/// Helper function to create an integer variable in the solver with a given
-	/// range.
-	fn to_int_var(slv: &mut Solver, range: RangeList<i64>) -> IntView {
-		IntVar::new_in(slv, range, EncodingType::Eager, EncodingType::Lazy)
 	}
 
 	#[test]
 	#[traced_test]
 	fn test_cumulative_val_sat() {
 		let mut slv = Solver::from(&Cnf::default());
-		let a = to_int_var(&mut slv, RangeList::from_iter([0..=4]));
-		let b = to_int_var(&mut slv, RangeList::from_iter([0..=4]));
-		let c = to_int_var(&mut slv, RangeList::from_iter([0..=4]));
+		let a = IntVar::new_in(
+			&mut slv,
+			(0..=4).into(),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			(0..=4).into(),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let c = IntVar::new_in(
+			&mut slv,
+			(0..=4).into(),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
 
-		let durations: Vec<IntView> = [2, 3, 1]
-			.iter()
-			.map(|&d| const_to_int_var(&mut slv, d))
-			.collect();
-		let resources_profile_1 = [1, 2, 3]
-			.iter()
-			.map(|&r| const_to_int_var(&mut slv, r))
-			.collect();
-		let resources_profile_2 = [2, 2, 1]
-			.iter()
-			.map(|&r| const_to_int_var(&mut slv, r))
-			.collect();
-		let capacity_1 = const_to_int_var(&mut slv, 3);
-		let capacity_2 = const_to_int_var(&mut slv, 2);
+		let durations: Vec<IntView> = [2, 3, 1].into_iter().map_into().collect();
+		let resources_profile_1 = [1, 2, 3].into_iter().map_into().collect();
+		let resources_profile_2 = [2, 2, 1].into_iter().map_into().collect();
+		let capacity_1 = 3.into();
+		let capacity_2 = 2.into();
 		CumulativeTimeTablePropagator::new_in(
 			&mut slv,
 			vec![a, b, c],
@@ -918,23 +910,29 @@ mod tests {
 	#[traced_test]
 	fn test_cumulative_val_unsat() {
 		let mut slv = Solver::from(&Cnf::default());
-		let a = to_int_var(&mut slv, RangeList::from_iter([0..=3]));
-		let b = to_int_var(&mut slv, RangeList::from_iter([0..=3]));
-		let c = to_int_var(&mut slv, RangeList::from_iter([0..=3]));
+		let a = IntVar::new_in(
+			&mut slv,
+			(0..=3).into(),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			(0..=3).into(),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let c = IntVar::new_in(
+			&mut slv,
+			(0..=3).into(),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
 
-		let durations: Vec<IntView> = [2, 3, 2]
-			.iter()
-			.map(|&d| const_to_int_var(&mut slv, d))
-			.collect();
-		let resources_profile_1: Vec<IntView> = [2, 2, 3]
-			.iter()
-			.map(|&r| const_to_int_var(&mut slv, r))
-			.collect();
-		let resources_profile_2: Vec<IntView> = [2, 2, 2]
-			.iter()
-			.map(|&r| const_to_int_var(&mut slv, r))
-			.collect();
-		let capacity = const_to_int_var(&mut slv, 3);
+		let durations: Vec<IntView> = [2, 3, 2].into_iter().map_into().collect();
+		let resources_profile_1: Vec<IntView> = [2, 2, 3].into_iter().map_into().collect();
+		let resources_profile_2: Vec<IntView> = [2, 2, 2].into_iter().map_into().collect();
+		let capacity = 3.into();
 
 		CumulativeTimeTablePropagator::new_in(
 			&mut slv,
@@ -958,19 +956,15 @@ mod tests {
 	#[traced_test]
 	fn test_cumulative_var_capacity_sat() {
 		let mut slv = Solver::from(&Cnf::default());
-		let start = [0, 3, 4, 6, 8, 8]
-			.iter()
-			.map(|i| const_to_int_var(&mut slv, *i))
-			.collect::<Vec<_>>();
-		let duration = [3, 2, 5, 2, 1, 4]
-			.iter()
-			.map(|i| const_to_int_var(&mut slv, *i))
-			.collect::<Vec<_>>();
-		let usage = [2, 3, 1, 4, 3, 2]
-			.iter()
-			.map(|i| const_to_int_var(&mut slv, *i))
-			.collect::<Vec<_>>();
-		let capacity = to_int_var(&mut slv, RangeList::from_iter([1..=6]));
+		let start = [0, 3, 4, 6, 8, 8].into_iter().map_into().collect();
+		let duration = [3, 2, 5, 2, 1, 4].into_iter().map_into().collect();
+		let usage = [2, 3, 1, 4, 3, 2].into_iter().map_into().collect();
+		let capacity = IntVar::new_in(
+			&mut slv,
+			(1..=6).into(),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
 		CumulativeTimeTablePropagator::new_in(&mut slv, start, duration, usage, capacity);
 
 		slv.expect_solutions(&[capacity], expect![[r#"6"#]]);
@@ -980,19 +974,15 @@ mod tests {
 	#[traced_test]
 	fn test_cumulative_var_capacity_unsat() {
 		let mut slv = Solver::from(&Cnf::default());
-		let start = [0, 3, 4, 6, 8, 8]
-			.iter()
-			.map(|i| const_to_int_var(&mut slv, *i))
-			.collect::<Vec<_>>();
-		let duration = [3, 2, 5, 2, 1, 4]
-			.iter()
-			.map(|i| const_to_int_var(&mut slv, *i))
-			.collect::<Vec<_>>();
-		let usage = [2, 3, 1, 4, 3, 2]
-			.iter()
-			.map(|i| const_to_int_var(&mut slv, *i))
-			.collect::<Vec<_>>();
-		let capacity = to_int_var(&mut slv, RangeList::from_iter([1..=4]));
+		let start = [0, 3, 4, 6, 8, 8].into_iter().map_into().collect();
+		let duration = [3, 2, 5, 2, 1, 4].into_iter().map_into().collect();
+		let usage = [2, 3, 1, 4, 3, 2].into_iter().map_into().collect();
+		let capacity = IntVar::new_in(
+			&mut slv,
+			(1..=4).into(),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
 		CumulativeTimeTablePropagator::new_in(&mut slv, start, duration, usage, capacity);
 
 		slv.assert_unsatisfiable();
@@ -1022,7 +1012,7 @@ mod tests {
 			RangeList::from_iter([1..=3]),
 			RangeList::from_iter([2..=2]),
 		);
-		let capacity = const_to_int_var(&mut slv, 2);
+		let capacity = 2.into();
 
 		CumulativeTimeTablePropagator::new_in(
 			&mut slv,
@@ -1080,7 +1070,7 @@ mod tests {
 			RangeList::from_iter([2..=3]),
 			RangeList::from_iter([2..=2]),
 		);
-		let capacity = const_to_int_var(&mut slv, 2);
+		let capacity = 2.into();
 
 		CumulativeTimeTablePropagator::new_in(
 			&mut slv,
@@ -1117,7 +1107,7 @@ mod tests {
 			RangeList::from_iter([2..=2]),
 			RangeList::from_iter([2..=3]),
 		);
-		let capacity = const_to_int_var(&mut slv, 3);
+		let capacity = 3.into();
 
 		CumulativeTimeTablePropagator::new_in(
 			&mut slv,
@@ -1163,7 +1153,7 @@ mod tests {
 			RangeList::from_iter([2..=2]),
 			RangeList::from_iter([2..=3]),
 		);
-		let capacity = const_to_int_var(&mut slv, 2);
+		let capacity = 2.into();
 
 		CumulativeTimeTablePropagator::new_in(
 			&mut slv,
