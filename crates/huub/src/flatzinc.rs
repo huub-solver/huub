@@ -23,7 +23,7 @@ use tracing::warn;
 
 use crate::{
 	abs_int, actions::SimplificationActions, all_different_int, array_element, array_maximum_int,
-	array_minimum_int, constraints::int_table::IntTable, disjunctive_strict, div_int,
+	array_minimum_int, constraints::int_table::IntTable, cumulative, disjunctive_strict, div_int,
 	int_in_set_reif, pow_int, reformulate::ReformulationError, seq_precede_chain_int, table_int,
 	times_int, value_precede_chain_int, BoolDecision, BoolDecisionInner, Branching, Decision,
 	IntDecision, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal, ValueSelection,
@@ -1236,6 +1236,33 @@ where
 							name: "bool_clause_reif",
 							found: c.args.len(),
 							expected: 3,
+						});
+					}
+				}
+				"huub_cumulative" => {
+					if let [starts, durations, heights, r] = c.args.as_slice() {
+						let starts = self
+							.arg_array(starts)?
+							.iter()
+							.map(|l| self.lit_int(l))
+							.try_collect()?;
+						let durations = self
+							.arg_array(durations)?
+							.iter()
+							.map(|l| self.lit_int(l))
+							.try_collect()?;
+						let heights = self
+							.arg_array(heights)?
+							.iter()
+							.map(|l| self.lit_int(l))
+							.try_collect()?;
+						let r = self.arg_int(r)?;
+						self.prb += cumulative(starts, durations, heights, r);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: "huub_cumulative",
+							found: c.args.len(),
+							expected: 4,
 						});
 					}
 				}

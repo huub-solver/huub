@@ -17,10 +17,25 @@ INSTANCES = [
             "amaze3_2012_03_19.fzn.json": "https://raw.githubusercontent.com/MiniZinc/mzn-challenge/refs/heads/develop/2019/amaze/2012-03-19.dzn"
         },
     },
+    {  # RCPSP
+        "model": "https://raw.githubusercontent.com/MiniZinc/minizinc-benchmarks/refs/heads/master/rcpsp/rcpsp.mzn",
+        "instances": {
+            "rcpsp_01.fzn.json": "https://raw.githubusercontent.com/MiniZinc/minizinc-benchmarks/refs/heads/master/rcpsp/01.dzn",
+            "rcpsp_02.fzn.json": "https://raw.githubusercontent.com/MiniZinc/minizinc-benchmarks/refs/heads/master/rcpsp/02.dzn",
+            "rcpsp_03.fzn.json": "https://raw.githubusercontent.com/MiniZinc/minizinc-benchmarks/refs/heads/master/rcpsp/03.dzn",
+        },
+    },
+    {  # MRCPSP
+        "model": "https://raw.githubusercontent.com/MiniZinc/minizinc-benchmarks/refs/heads/master/mrcpsp/mrcpsp.mzn",
+        "instances": {
+            "mrcpsp_j10_10_1.fzn.json": "https://raw.githubusercontent.com/MiniZinc/minizinc-benchmarks/refs/heads/master/mrcpsp/mm_j10/j10_10_1.dzn",
+            "mrcpsp_j10_10_2.fzn.json": "https://raw.githubusercontent.com/MiniZinc/minizinc-benchmarks/refs/heads/master/mrcpsp/mm_j10/j10_10_2.dzn",
+            "mrcpsp_j10_10_3.fzn.json": "https://raw.githubusercontent.com/MiniZinc/minizinc-benchmarks/refs/heads/master/mrcpsp/mm_j10/j10_10_3.dzn",
+        },
+    },
     {  # Jobshop
         "model": "https://gist.githubusercontent.com/Dekker1/6662819320b5741b57913813dfcc0afa/raw/11e882546aed599a33a7c9426a445b8d0ac986c7/jobshop_disj",
         "instances": {
-            "jobshop_la01.fzn.json": "https://raw.githubusercontent.com/MiniZinc/minizinc-benchmarks/refs/heads/master/jobshop/jobshop_la01.dzn",
             "jobshop_la02.fzn.json": "https://raw.githubusercontent.com/MiniZinc/minizinc-benchmarks/refs/heads/master/jobshop/jobshop_la02.dzn",
             "jobshop_la03.fzn.json": "https://raw.githubusercontent.com/MiniZinc/minizinc-benchmarks/refs/heads/master/jobshop/jobshop_la03.dzn",
             "jobshop_la04.fzn.json": "https://raw.githubusercontent.com/MiniZinc/minizinc-benchmarks/refs/heads/master/jobshop/jobshop_la04.dzn",
@@ -28,24 +43,22 @@ INSTANCES = [
             "jobshop_newspaper.fzn.json": "https://gist.githubusercontent.com/Dekker1/6662819320b5741b57913813dfcc0afa/raw/11e882546aed599a33a7c9426a445b8d0ac986c7/jobshop_newspaper.dzn",
         },
     },
-    {   # Kidney Exchange
+    {  # Kidney Exchange
         "model": "https://raw.githubusercontent.com/MiniZinc/mzn-challenge/refs/heads/develop/2023/kidney-exchange/ccmcp.mzn",
         "instances": {
             "ccmcp_3_20_0.fzn.json": "https://raw.githubusercontent.com/MiniZinc/mzn-challenge/refs/heads/develop/2023/kidney-exchange/3_20_0.15_3.dzn"
         },
     },
-    {   # (Generalized) Peacable Queens
+    {  # (Generalized) Peacable Queens
         "model": "https://raw.githubusercontent.com/MiniZinc/mzn-challenge/refs/heads/develop/2022/generalized-peacable-queens/peaceable_queens.mzn",
-        "instances": {
-            "peaceable_queens_n5_q3.fzn.json": "peaceable_queens_n5_q3.json"
-        }
+        "instances": {"peaceable_queens_n5_q3.fzn.json": "peaceable_queens_n5_q3.json"},
     },
     {
         # Portal
         "model": "https://raw.githubusercontent.com/MiniZinc/mzn-challenge/refs/heads/develop/2024/portal/portal.mzn",
         "instances": {
             "portal_10_9_10.fzn.json": "https://raw.githubusercontent.com/MiniZinc/mzn-challenge/refs/heads/develop/2024/portal/random_10_9_10.json"
-        }
+        },
     },
     {  # Radiation
         "model": "https://raw.githubusercontent.com/MiniZinc/mzn-challenge/refs/heads/develop/2020/radiation/radiation.mzn",
