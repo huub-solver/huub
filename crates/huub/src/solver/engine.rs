@@ -618,7 +618,7 @@ impl PropagatorExtensionDefinition for Engine {
 
 impl ProofTracer for Engine {
 	fn add_original_clause(&mut self, id: u64, redundant: bool, clause: &[RawLit], restored: bool) {
-		trace!(target = "proof", "add_original_clause")
+		trace!(target : "proof", id = id, redundant = redundant, restored = restored, clause = ?clause.iter().map(|&lit| i32::from(lit)).collect::<Vec<i32>>(), "add_original_clause");
 	}
 	fn add_derived_clause(
 		&mut self,
@@ -627,12 +627,15 @@ impl ProofTracer for Engine {
 		clause: &[RawLit],
 		antecedents: &[u64],
 	) {
-		trace!(target = "proof", "add_derived_clause")
+		trace!(target : "proof", id = id, redundant = redundant, clause = ?clause.iter().map(|&lit| i32::from(lit)).collect::<Vec<i32>>(), antecedents = ?antecedents.to_vec(), "add_derived_clause");
+	}
+	fn delete_clause(&mut self, id: u64, redundant: bool, clause: &[RawLit]) {
+		trace!(target: "proof", id = id, redundant = redundant, clause = ?clause.iter().map(|&lit| i32::from(lit)).collect::<Vec<i32>>(), "delete_clause");
 	}
 }
 
 impl ProofTracerDefinition for Engine {
-	const ANTECEDENTS: bool = false;
+	const ANTECEDENTS: bool = true;
 
 	const FINALIZE_CLAUSES: bool = false;
 }
