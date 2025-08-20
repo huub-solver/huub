@@ -35,7 +35,7 @@ use crate::{
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::IntEvent,
-		engine::{PropRef, State},
+		engine::{ProofHint, PropRef, State},
 		solving_context::SolvingContext,
 		BoolView, BoolViewInner, IntView,
 	},
@@ -367,13 +367,13 @@ impl Reason {
 	/// When the `lit` argument is `None`, the reason is explaining `false`.
 	pub(crate) fn explain<Clause: FromIterator<RawLit>>(
 		&self,
-		props: &mut IndexVec<PropRef, BoxedPropagator>,
+		props: &mut IndexVec<PropRef, (BoxedPropagator, Option<ProofHint>)>,
 		actions: &mut State,
 		lit: Option<RawLit>,
 	) -> Clause {
 		match self {
 			Reason::Lazy(LazyReason(prop, data)) => {
-				let reason = props[*prop].explain(actions, lit, *data);
+				let reason = props[*prop].0.explain(actions, lit, *data);
 				reason.into_iter().map(|l| !l).chain(lit).collect()
 			}
 			Reason::Eager(v) => v.iter().map(|&l| !l).chain(lit).collect(),

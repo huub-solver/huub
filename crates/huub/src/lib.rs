@@ -44,7 +44,7 @@ use rangelist::{IntervalIterator, RangeList};
 use tracing::warn;
 
 use crate::{
-	actions::{ConstraintInitActions, SimplificationActions},
+	actions::{ConstraintInitActions, ProofActions, SimplificationActions},
 	branchers::{BoolBrancher, IntBrancher, WarmStartBrancher},
 	constraints::{
 		bool_array_element::BoolDecisionArrayElement,
@@ -70,7 +70,7 @@ use crate::{
 		IntDecisionIndex, IntDecisionInner, ReformulationError, ReformulationMap,
 		ReformulationMapBuilder,
 	},
-	solver::{IntLitMeaning, Solver},
+	solver::{engine::ProofHint, IntLitMeaning, Solver},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1280,6 +1280,11 @@ impl Model {
 			int_map: index_vec![None; self.int_vars.len()],
 		};
 
+		let proof_hint = ProofHint {
+			name: "LitDef",
+			constraint_ids: vec![],
+		};
+		slv.set_next_proof_hint(Some(proof_hint));
 		// Ensure the creation of all Boolean variables.
 		for var in 1..=self.bool_vars.len() as u32 {
 			let var = BoolDecision(BoolDecisionInner::Lit(var_from_u32(var).into()));
@@ -1296,8 +1301,17 @@ impl Model {
 
 		// Create constraint data structures within the solver
 		for (c, proof_id) in self.constraints.iter().flatten() {
+			let proof_hint = proof_id.map(|con_id| ProofHint {
+				name: c.get_name(),
+				constraint_ids: vec![con_id],
+			});
+			slv.set_next_proof_hint(proof_hint);
 			c.to_solver(&mut slv, &map)?;
 		}
+		slv.set_next_proof_hint(Some(ProofHint {
+			constraint_ids: vec![],
+			name: "further_hints",
+		}));
 		// Add branching data structures to the solver
 		for b in self.branchings.iter() {
 			b.to_solver(&mut slv, &map);

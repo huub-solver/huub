@@ -20,3 +20,5 @@ target/
 # vscode
 *.vscode
 *.code-workspace
+
+*.json

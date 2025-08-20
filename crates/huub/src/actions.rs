@@ -10,8 +10,12 @@ use crate::{
 	constraints::{BoxedPropagator, Conflict, LazyReason, ReasonBuilder},
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, engine::PropRef, int_var::IntVarRef, queue::PriorityLevel,
-		trail::TrailedInt, BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, View,
+		activation_list::IntPropCond,
+		engine::{ProofHint, PropRef},
+		int_var::IntVarRef,
+		queue::PriorityLevel,
+		trail::TrailedInt,
+		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, View,
 	},
 	BoolDecision, IntDecision, IntSetVal, IntVal, Model,
 };
@@ -217,8 +221,19 @@ pub trait PropagationActions: ExplanationActions + DecisionActions {
 	fn deferred_reason(&self, data: u64) -> LazyReason;
 }
 
+/// Actions relating to proof logging
+pub trait ProofActions {
+	/// The next clause to be logged to the proof will use this hint information.
+	/// Any propagators queued will also get this hint as the default.
+	fn set_next_proof_hint(&mut self, proof_hint: Option<ProofHint>);
+	/// Get the current proof hint
+	fn get_current_proof_hint(&self) -> Option<ProofHint>;
+}
+
 /// Actions that can be performed during the initialization of propagators.
-pub trait PropagatorInitActions: AsDynClauseDatabase + ClauseDatabase + DecisionActions {
+pub trait PropagatorInitActions:
+	AsDynClauseDatabase + ClauseDatabase + DecisionActions + ProofActions
+{
 	/// Add a propagator to the solver.
 	fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef;
 

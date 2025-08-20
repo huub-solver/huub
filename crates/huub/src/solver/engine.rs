@@ -36,7 +36,9 @@ pub(crate) use trace_new_lit;
 use tracing::{debug, trace};
 
 use crate::{
-	actions::{DecisionActions, ExplanationActions, InspectionActions, TrailingActions},
+	actions::{
+		DecisionActions, ExplanationActions, InspectionActions, ProofActions, TrailingActions,
+	},
 	branchers::{BoxedBrancher, Decision},
 	constraints::{BoxedPropagator, Conflict, LazyReason, Reason},
 	solver::{
@@ -69,7 +71,7 @@ pub(crate) struct AdvisorDef {
 /// A propagation engine implementing the [`Propagator`] trait.
 pub(crate) struct Engine {
 	/// Storage of the propagators.
-	pub(crate) propagators: IndexVec<PropRef, BoxedPropagator>,
+	pub(crate) propagators: IndexVec<PropRef, (BoxedPropagator, Option<ProofHint>)>,
 	/// List of propagators to advise of backtracking
 	pub(crate) notify_of_backtrack: Vec<PropRef>,
 	/// Storage of the branchers.
@@ -118,9 +120,9 @@ pub struct State {
 	/// Literals to be propagated by the oracle
 	pub(crate) propagation_queue: VecDeque<RawLit>,
 	/// Reasons for setting values
-	pub(crate) reason_map: FxHashMap<RawLit, Reason>,
+	pub(crate) reason_map: FxHashMap<RawLit, (Reason, Option<ProofHint>)>,
 	/// Whether conflict has (already) been detected
-	pub(crate) conflict: Option<Conflict>,
+	pub(crate) conflict: Option<(Conflict, Option<ProofHint>)>,
 	/// Whether the solver is in a failure state.
 	///
 	/// Triggered when a conflict is detected during propagation, the solver
@@ -131,7 +133,7 @@ pub struct State {
 
 	// ---- Non-Trailed Infrastructure ----
 	/// Storage for clauses to be communicated to the solver
-	pub(crate) clauses: VecDeque<Clause>,
+	pub(crate) clauses: VecDeque<(Clause, Option<ProofHint>)>,
 	/// Solving statistics
 	pub(crate) statistics: EngineStatistics,
 	/// Whether VSIDS is currently enabled
@@ -154,6 +156,8 @@ pub struct State {
 	pub(crate) check_int_fixed: Vec<(IntVarRef, IntVal)>,
 
 	// ---- Proof Logging ----
+	/// Whether proof logging is enabled.
+	pub(crate) prove: bool,
 	/// The proof hint information for the next clause to be logged to the proof.
 	pub(crate) next_proof_hint: Option<ProofHint>,
 }
@@ -169,7 +173,7 @@ impl Engine {
 	/// (DEBUG ONLY) Check that the reason of a propagated literal contains only
 	/// known true literals
 	fn debug_check_reason(&mut self, lit: RawLit) {
-		if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
+		if let Some((reason, _proof_hint)) = self.state.reason_map.get(&lit).cloned() {
 			// Reason is in the form (a /\ b /\ ...), which then forms the
 			// implication (a /\ b /\ ...) -> lit
 			let clause: Clause = reason.explain(&mut self.propagators, &mut self.state, Some(lit));
@@ -202,6 +206,15 @@ impl Engine {
 	}
 }
 
+impl ProofActions for Engine {
+	fn set_next_proof_hint(&mut self, proof_hint: Option<ProofHint>) {
+		self.state.next_proof_hint = proof_hint;
+	}
+
+	fn get_current_proof_hint(&self) -> Option<ProofHint> {
+		self.state.next_proof_hint.clone()
+	}
+}
 impl PropagatorExtension for Engine {
 	fn add_external_clause(
 		&mut self,
@@ -209,16 +222,17 @@ impl PropagatorExtension for Engine {
 	) -> Option<(Clause, ClausePersistence)> {
 		if !self.state.clauses.is_empty() {
 			let clause = self.state.clauses.pop_front(); // Known to be `Some`
-			trace!(clause = ?clause.as_ref().unwrap().iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add external clause");
-			clause.map(|c| (c, ClausePersistence::Irreduntant))
+			trace!(clause = ?clause.as_ref().unwrap().0.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add external clause");
+			clause.map(|c| (c.0, ClausePersistence::Irreduntant))
 		} else if !self.state.propagation_queue.is_empty() {
 			None // Require that the solver first applies the remaining propagation
 		} else if let Some(conflict) = self.state.conflict.take() {
 			let ctx = SolvingContext::new(slv, &mut self.state);
 			let clause: Clause =
 				conflict
+					.0
 					.reason
-					.explain(&mut self.propagators, ctx.state, conflict.subject);
+					.explain(&mut self.propagators, ctx.state, conflict.0.subject);
 			debug!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add conflict clause");
 			Some((clause, ClausePersistence::Forgettable))
 		} else {
@@ -230,7 +244,7 @@ impl PropagatorExtension for Engine {
 		// Find reason in storage
 		let reason = self.state.reason_map.remove(&propagated_lit);
 		// Create an explanation clause from the reason
-		let clause = if let Some(reason) = reason {
+		let clause = if let Some((reason, proof_hint)) = reason {
 			// If the reason is lazy, restore the current state to the state when the
 			// propagation happened before explaining.
 			//
@@ -302,7 +316,7 @@ impl PropagatorExtension for Engine {
 							let &AdvisorDef {
 								data, propagator, ..
 							} = &ctx.state.advisors[adv];
-							if !self.propagators[propagator].advise_of_int_change(
+							if !self.propagators[propagator].0.advise_of_int_change(
 								ctx.state,
 								IntView(IntViewInner::VarRef(r)),
 								IntEvent::Fixed,
@@ -329,21 +343,23 @@ impl PropagatorExtension for Engine {
 		// Process propagation results, and accept model if no conflict is detected
 		let conflict = self.state.conflict.take().map(|c| {
 			// Convert Lazy reasons into an eager ones
-			if let Reason::Lazy(LazyReason(prop, data)) = c.reason {
-				let reason = self.propagators[prop].explain(&mut self.state, c.subject, data);
+			if let Reason::Lazy(LazyReason(prop, data)) = c.0.reason {
+				let reason = self.propagators[prop]
+					.0
+					.explain(&mut self.state, c.0.subject, data);
 				Conflict {
-					subject: c.subject,
+					subject: c.0.subject,
 					reason: Reason::Eager(reason.into()),
 				}
 			} else {
-				c
+				c.0
 			}
 		});
 
 		// Revert to real decision level
 		self.state.notify_backtrack::<true>(level as usize, false);
 		debug_assert!(self.state.conflict.is_none());
-		self.state.conflict = conflict;
+		self.state.conflict = conflict.map(|c| (c, self.state.get_current_proof_hint()));
 
 		let accept = self.state.conflict.is_none();
 		debug!(accept, "check model");
@@ -411,7 +427,7 @@ impl PropagatorExtension for Engine {
 									..
 								} = &self.state.advisors[adv];
 								let enqueue = if bool2int {
-									self.propagators[propagator].advise_of_int_change(
+									self.propagators[propagator].0.advise_of_int_change(
 										&mut self.state,
 										IntView(IntViewInner::Bool {
 											transformer: Default::default(),
@@ -421,7 +437,7 @@ impl PropagatorExtension for Engine {
 										data,
 									)
 								} else {
-									self.propagators[propagator].advise_of_bool_change(
+									self.propagators[propagator].0.advise_of_bool_change(
 										&mut self.state,
 										BoolView(BoolViewInner::Lit(lit)),
 										data,
@@ -519,7 +535,7 @@ impl PropagatorExtension for Engine {
 										IntEvent::UpperBound if negated => IntEvent::LowerBound,
 										e => e,
 									};
-									if !self.propagators[propagator].advise_of_int_change(
+									if !self.propagators[propagator].0.advise_of_int_change(
 										&mut self.state,
 										IntView(IntViewInner::VarRef(iv)),
 										event,
@@ -547,7 +563,7 @@ impl PropagatorExtension for Engine {
 
 		// Notify subscribed propagators of backtracking
 		for &p in self.notify_of_backtrack.iter() {
-			self.propagators[p].advise_of_backtrack(&mut self.state);
+			self.propagators[p].0.advise_of_backtrack(&mut self.state);
 		}
 	}
 
@@ -628,7 +644,11 @@ impl PropagatorExtensionDefinition for Engine {
 
 impl ProofTracer for Engine {
 	fn add_original_clause(&mut self, id: u64, redundant: bool, clause: &[RawLit], restored: bool) {
-		trace!(target : "proof", id = id, redundant = redundant, restored = restored, clause = ?clause.iter().map(|&lit| i32::from(lit)).collect::<Vec<i32>>(), "add_original_clause");
+		if let Some(proof_hint) = self.get_current_proof_hint() {
+			trace!(target : "proof", id = id, redundant = redundant, restored = restored, clause = ?clause.iter().map(|&lit| i32::from(lit)).collect::<Vec<i32>>(), constraint_ids = ?proof_hint.constraint_ids, hint_name = proof_hint.name, "add_original_clause");
+		} else {
+			trace!(target : "proof", id = id, redundant = redundant, restored = restored, clause = ?clause.iter().map(|&lit| i32::from(lit)).collect::<Vec<i32>>(),  "add_original_clause");
+		}
 	}
 	fn add_derived_clause(
 		&mut self,
@@ -746,7 +766,9 @@ impl State {
 			Ok(reason) => {
 				// Insert new reason, possibly overwriting old one (from previous search
 				// attempt)
-				let _ = self.reason_map.insert(lit, reason);
+				let _ = self
+					.reason_map
+					.insert(lit, (reason, self.get_current_proof_hint()));
 			}
 			Err(true) => {
 				// No (previous) reason required
@@ -1096,6 +1118,15 @@ impl InspectionActions for State {
 	}
 }
 
+impl ProofActions for State {
+	fn set_next_proof_hint(&mut self, proof_hint: Option<ProofHint>) {
+		self.next_proof_hint = proof_hint;
+	}
+
+	fn get_current_proof_hint(&self) -> Option<ProofHint> {
+		self.next_proof_hint.clone()
+	}
+}
 impl TrailingActions for State {
 	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
 		self.trail.get_bool_val(bv)

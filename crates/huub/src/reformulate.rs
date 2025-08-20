@@ -17,8 +17,8 @@ use rangelist::IntervalIterator;
 
 use crate::{
 	actions::{
-		DecisionActions, InspectionActions, PropagatorInitActions, ReformulationActions,
-		SimplificationActions, TrailingActions,
+		DecisionActions, InspectionActions, ProofActions, PropagatorInitActions,
+		ReformulationActions, SimplificationActions, TrailingActions,
 	},
 	constraints::{
 		bool_array_element::BoolDecisionArrayElement,
@@ -40,7 +40,7 @@ use crate::{
 	helpers::linear_transform::LinearTransform,
 	solver::{
 		activation_list::IntPropCond,
-		engine::PropRef,
+		engine::{ProofHint, PropRef},
 		int_var::{EncodingType, IntVar, IntVarRef},
 		queue::PriorityLevel,
 		trail::TrailedInt,
@@ -252,6 +252,30 @@ impl<S: SimplificationActions> Constraint<S> for BoolFormula {
 }
 
 impl ConstraintStore {
+	/// Get the name of the constraint (for proof hint purposes)
+	pub(crate) fn get_name(&self) -> &'static str {
+		match self {
+			ConstraintStore::BoolDecisionArrayElement(_) => "BoolDecisionArrayElement",
+			ConstraintStore::BoolFormula(_) => "BoolFormula",
+			ConstraintStore::Cumulative(_) => "Cumulative",
+			ConstraintStore::DisjunctiveStrict(_) => "DisjunctiveStrict",
+			ConstraintStore::IntAbs(_) => "IntAbs",
+			ConstraintStore::IntAllDifferent(_) => "IntAllDifferent",
+			ConstraintStore::IntArrayMinimum(_) => "IntArrayMinimum",
+			ConstraintStore::IntDecisionArrayElement(_) => "IntDecisionArrayElement",
+			ConstraintStore::IntDiv(_) => "IntDiv",
+			ConstraintStore::IntEq(_) => "IntEq",
+			ConstraintStore::IntInSetReif(_) => "IntInSetReif",
+			ConstraintStore::IntLinear(_) => "IntLinear",
+			ConstraintStore::IntPow(_) => "IntPow",
+			ConstraintStore::IntSeqPrecedeChain(_) => "IntSeqPrecedeChain",
+			ConstraintStore::IntTable(_) => "IntTable",
+			ConstraintStore::IntTimes(_) => "IntTimes",
+			ConstraintStore::IntValArrayElement(_) => "IntValArrayElement",
+			ConstraintStore::IntValuePrecedeChain(_) => "IntValuePrecedeChain",
+			ConstraintStore::Other(_) => "Other",
+		}
+	}
 	/// Map the constraint into propagators and clauses to be added to the given
 	/// solver, using the variable mapping provided.
 	pub(crate) fn to_solver<Oracle: ExternalPropagation>(
@@ -482,6 +506,15 @@ impl InspectionActions for ReformulationContext<'_> {
 	}
 }
 
+impl ProofActions for ReformulationContext<'_> {
+	fn set_next_proof_hint(&mut self, proof_hint: Option<ProofHint>) {
+		self.slv.set_next_proof_hint(proof_hint);
+	}
+
+	fn get_current_proof_hint(&self) -> Option<ProofHint> {
+		self.slv.get_current_proof_hint()
+	}
+}
 impl PropagatorInitActions for ReformulationContext<'_> {
 	fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef {
 		self.slv.add_propagator(propagator, priority)

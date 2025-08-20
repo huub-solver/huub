@@ -31,7 +31,7 @@ use tracing::{debug, trace};
 
 use crate::{
 	actions::{
-		BrancherInitActions, DecisionActions, ExplanationActions, InspectionActions,
+		BrancherInitActions, DecisionActions, ExplanationActions, InspectionActions, ProofActions,
 		PropagatorInitActions, TrailingActions,
 	},
 	branchers::BoxedBrancher,
@@ -40,7 +40,7 @@ use crate::{
 	reformulate::InitConfig,
 	solver::{
 		activation_list::{ActivationAction, IntPropCond},
-		engine::{trace_new_lit, AdvisorDef, Engine, PropRef},
+		engine::{trace_new_lit, AdvisorDef, Engine, ProofHint, PropRef},
 		int_var::{DirectStorage, IntVarRef, LazyLitDef, OrderStorage},
 		queue::{PriorityLevel, PropagatorInfo},
 		trail::TrailedInt,
@@ -1183,10 +1183,20 @@ impl<Oracle: ExternalPropagation> InspectionActions for Solver<Oracle> {
 	}
 }
 
+impl<Oracle> ProofActions for Solver<Oracle> {
+	fn set_next_proof_hint(&mut self, proof_hint: Option<ProofHint>) {
+		self.engine.borrow_mut().set_next_proof_hint(proof_hint);
+	}
+	fn get_current_proof_hint(&self) -> Option<ProofHint> {
+		self.engine.borrow().get_current_proof_hint()
+	}
+}
 impl<Oracle: ExternalPropagation> PropagatorInitActions for Solver<Oracle> {
 	fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef {
 		let mut engine = self.engine.borrow_mut();
-		let prop_ref = engine.propagators.push(propagator);
+		let proof_hint = engine.get_current_proof_hint();
+		let prop_ref = engine.propagators.push((propagator, proof_hint));
+
 		let p = engine.state.propagator_queue.info.push(PropagatorInfo {
 			enqueued: false,
 			priority,

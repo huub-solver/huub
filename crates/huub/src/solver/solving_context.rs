@@ -10,11 +10,12 @@ use tracing::trace;
 
 use crate::{
 	actions::{
-		DecisionActions, ExplanationActions, InspectionActions, PropagationActions, TrailingActions,
+		DecisionActions, ExplanationActions, InspectionActions, ProofActions, PropagationActions,
+		TrailingActions,
 	},
 	constraints::{Conflict, LazyReason, Reason, ReasonBuilder},
 	solver::{
-		engine::{trace_new_lit, PropRef, State},
+		engine::{trace_new_lit, ProofHint, PropRef, State},
 		int_var::{IntVarRef, LazyLitDef},
 		trail::TrailedInt,
 		BoolView, BoolViewInner, BoxedPropagator, IntView, IntViewInner,
@@ -152,12 +153,16 @@ impl<'a> SolvingContext<'a> {
 	/// Run the propagators in the queue until a propagator detects a conflict,
 	/// returns literals to be propagated by the SAT oracle, or the queue is
 	/// empty.
-	pub(crate) fn run_propagators(&mut self, propagators: &mut IndexVec<PropRef, BoxedPropagator>) {
+	pub(crate) fn run_propagators(
+		&mut self,
+		propagators: &mut IndexVec<PropRef, (BoxedPropagator, Option<ProofHint>)>,
+	) {
 		while let Some(p) = self.state.propagator_queue.pop() {
 			debug_assert!(!self.state.failed);
 			debug_assert!(self.state.conflict.is_none());
 			self.current_prop = p;
-			let prop = propagators[p].as_mut();
+			self.set_next_proof_hint(propagators[p].1.clone());
+			let prop = propagators[p].0.as_mut();
 			let res = prop.propagate(self);
 			self.state.statistics.propagations += 1;
 			self.current_prop = PropRef::new(i32::MAX as usize);
@@ -172,7 +177,7 @@ impl<'a> SolvingContext<'a> {
 				);
 				debug_assert!(self.state.conflict.is_none());
 				self.state.failed = true;
-				self.state.conflict = Some(conflict);
+				self.state.conflict = Some((conflict, self.get_current_proof_hint()));
 			}
 			if self.state.conflict.is_some() || !self.state.propagation_queue.is_empty() {
 				return;
@@ -207,7 +212,13 @@ impl DecisionActions for SolvingContext<'_> {
 				def.prev.map(Into::into),
 				def.next.map(Into::into),
 			) {
-				self.state.clauses.push_back(cl);
+				self.state.clauses.push_back((
+					cl,
+					Some(ProofHint {
+						name: "LitDef",
+						constraint_ids: vec![],
+					}),
+				));
 			}
 			v
 		};
@@ -270,6 +281,15 @@ impl InspectionActions for SolvingContext<'_> {
 	}
 }
 
+impl ProofActions for SolvingContext<'_> {
+	fn set_next_proof_hint(&mut self, proof_hint: Option<ProofHint>) {
+		self.state.set_next_proof_hint(proof_hint);
+	}
+
+	fn get_current_proof_hint(&self) -> Option<ProofHint> {
+		self.state.get_current_proof_hint()
+	}
+}
 impl PropagationActions for SolvingContext<'_> {
 	fn deferred_reason(&self, data: u64) -> LazyReason {
 		LazyReason(self.current_prop, data)
