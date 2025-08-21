@@ -116,7 +116,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
         let mut box_posn_prop = Vec::new();
 		let mut box_size_prop = Vec::new();
 
-        for i in 1..box_posn.len() {
+        for i in 0..box_posn.len() {
             box_posn_prop.push(DimStore { values: box_posn[i].clone()});
             box_size_prop.push(DimStore { values: box_size[i].clone()});
         }
@@ -157,15 +157,15 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		}
 
 		// Tracks whether an rectangles posn domains are fixed
-		let fixed_trail = (0..box_size.len())
+		let fixed_trail = (0..box_size[0].len())
 			.map(|_| solver.new_trailed_int(0))
 			.collect();
-		let remove_trail = (0..box_size.len())
+		let remove_trail = (0..box_size[0].len())
 			.map(|_| solver.new_trailed_int(0))
 			.collect();
-		let lb_sizes_prop = vec![DimStore { values: vec![0; box_posn.len()] }; box_posn[0].len()];
-		let ub_tracker_prop = vec![DimStore { values: vec![0; box_posn.len()] }; box_posn[0].len()];
-		let lb_tracker_prop = vec![DimStore { values: vec![0; box_posn.len()] }; box_posn[0].len()];
+		let lb_sizes_prop = vec![DimStore { values: vec![0; box_posn[0].len()] }; box_posn.len()];
+		let ub_tracker_prop = vec![DimStore { values: vec![0; box_posn[0].len()] }; box_posn.len()];
+		let lb_tracker_prop = vec![DimStore { values: vec![0; box_posn[0].len()] }; box_posn.len()];
 
 		let bounding_box_prop = ForbiddenRegion {
 			lb: vec![i64::MAX; box_posn[0].len()],
@@ -747,9 +747,8 @@ where
 {
 	#[tracing::instrument(name = "diffn", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-        println!("{}", self.box_posn.len());
-		for o in 0..self.box_posn[0].values.len() {
-			for d in 0..self.dimensions {
+        for d in 0..self.dimensions {
+            for o in 0..self.box_posn[0].values.len() {
 				self.ub_tracker[d].values[o] = actions.get_int_upper_bound(self.box_posn[d].values[o]);
 				self.lb_tracker[d].values[o] = actions.get_int_lower_bound(self.box_posn[d].values[o]);
 				self.lb_sizes[d].values[o] = actions.get_int_lower_bound(self.box_size[d].values[o]);

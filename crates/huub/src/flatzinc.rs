@@ -15,7 +15,6 @@ use flatzinc_serde::{
 	Literal, Type,
 };
 use itertools::Itertools;
-use itertools::multiunzip;
 use pindakaas::propositional_logic::Formula;
 use rangelist::IntervalIterator;
 use thiserror::Error;
