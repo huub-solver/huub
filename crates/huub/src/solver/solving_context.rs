@@ -161,6 +161,8 @@ impl<'a> SolvingContext<'a> {
 			debug_assert!(!self.state.failed);
 			debug_assert!(self.state.conflict.is_none());
 			self.current_prop = p;
+			// Set the proof hint stored with propagator to be the default
+			// current proof hint.
 			self.set_next_proof_hint(propagators[p].1.clone());
 			let prop = propagators[p].0.as_mut();
 			let res = prop.propagate(self);

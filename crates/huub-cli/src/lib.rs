@@ -39,16 +39,16 @@ use std::{
 
 use flatzinc_serde::{FlatZinc, Literal, Method};
 use huub::{
-	actions::DecisionActions,
+	actions::{DecisionActions, ProofActions},
 	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::{InitConfig, ReformulationError},
 	solver::{Goal, IntLitMeaning, SolveResult, Solver, Valuation, Value, View},
-	TermSignal,
+	ProofHint, TermSignal,
 };
 use mimalloc::MiMalloc;
 use pico_args::Arguments;
 use rustc_hash::FxHashMap;
-use tracing::{event, subscriber::set_default, trace, warn, Level};
+use tracing::{subscriber::set_default, trace, warn};
 use tracing_subscriber::fmt::MakeWriter;
 use ustr::{ustr, Ustr, UstrMap};
 
@@ -212,7 +212,7 @@ where
 
 		let start = Instant::now();
 		let deadline = self.time_limit.map(|t| start + t);
-
+		trace!(target: "proof", "begin_proof");
 		// Parse FlatZinc JSON file
 		let rdr = BufReader::new(
 			File::open(&self.path)
@@ -468,6 +468,8 @@ where
 						unreachable!()
 					};
 					let obj_lit = slv.get_int_lit(obj, IntLitMeaning::Eq(obj_val));
+					// Log this in the proof with "ObjectiveEqual" hint
+					slv.set_next_proof_hint(Some(ProofHint::name_only("ObjectiveEqual")));
 					slv.add_clause([obj_lit]).unwrap();
 					// Ensure all following solutions are different from the first optimal
 					// solution
@@ -534,6 +536,7 @@ where
 				],
 			);
 		}
+		trace!(target: "proof", "end_proof");
 		match res {
 			SolveResult::Satisfied => {}
 			SolveResult::Unsatisfiable => {

@@ -157,7 +157,7 @@ pub struct State {
 
 	// ---- Proof Logging ----
 	/// Whether proof logging is enabled.
-	pub(crate) prove: bool,
+	pub(crate) _prove: bool,
 	/// The proof hint information for the next clause to be logged to the proof.
 	pub(crate) next_proof_hint: Option<ProofHint>,
 }
@@ -165,8 +165,12 @@ pub struct State {
 /// A store of information that can be logged to the proof along with each clause.
 #[derive(Clone, Debug, Default)]
 pub struct ProofHint {
+	/// Identifiers for original user constraints
 	pub constraint_ids: Vec<ConstraintProofID>,
+	/// A name for the hint:
+	/// either a solver constraint or a solver function e.g. AllDiff, LitDef etc.
 	pub name: &'static str,
+	// There will probably need to be more fields in future.
 }
 impl Engine {
 	#[cfg(debug_assertions)]
@@ -260,8 +264,11 @@ impl PropagatorExtension for Engine {
 				self.state.trail.goto_assign_lit(propagated_lit);
 			}
 
+			// Ensure the tracer logs the hint associated with this clause
+			self.set_next_proof_hint(proof_hint);
 			reason.explain(&mut self.propagators, &mut self.state, Some(propagated_lit))
 		} else {
+			self.set_next_proof_hint(None);
 			vec![propagated_lit]
 		};
 
@@ -1141,6 +1148,15 @@ impl TrailingActions for State {
 	}
 }
 
+impl ProofHint {
+	/// Helper function to make a proof hint with with just a string name
+	pub fn name_only(name: &'static str) -> Self {
+		ProofHint {
+			constraint_ids: vec![],
+			name: name,
+		}
+	}
+}
 index_vec::define_index_type! {
 	/// Identifies an propagator in a [`Solver`]
 	pub struct PropRef = u32;

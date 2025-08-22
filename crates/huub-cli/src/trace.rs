@@ -106,7 +106,18 @@ struct RegisterLazyLits {
 /// write the fields according to the VeriPB proof format.
 struct VeriPBEventFormatter;
 
-struct VeriPBFieldsFormatter {}
+/// A visitor that collects proof tracing fields relevant to VeriPB and formats
+/// them as needed.
+#[derive(Default)]
+struct VeriPBFieldsFormatter {
+	message: String,
+	clause: String,
+	id: String,
+	constraint_ids: String,
+	hint_name: String,
+	antecedents: String,
+}
+
 /// Create a [`tracing_subscriber::Registry`] specialized for `huub`.
 ///
 /// The given subscriber additionally formats literals and integer variables
@@ -467,13 +478,104 @@ where
 {
 	fn format_event(
 		&self,
-		context: &FmtContext<'_, S, N>,
+		_context: &FmtContext<'_, S, N>,
 		mut writer: Writer<'_>,
 		event: &Event<'_>,
 	) -> fmt::Result {
-		context
-			.field_format()
-			.format_fields(writer.by_ref(), event)?;
-		writeln!(writer)
+		let mut veripb_fields = VeriPBFieldsFormatter::default();
+
+		event.record(&mut veripb_fields);
+
+		match veripb_fields.message.as_str() {
+			"begin_proof" => {
+				writeln!(writer, "pseudo-Boolean proof version 3.1")?;
+				writeln!(writer, "f 0 ;")?;
+				Ok(())
+			}
+			"add_original_clause" => {
+				writeln!(
+					writer,
+					"{} a {} :: {};",
+					veripb_fields.id, veripb_fields.clause, veripb_fields.hint_name
+				)?;
+				Ok(())
+			}
+			"add_derived_clause" => {
+				writeln!(
+					writer,
+					"{} pol {};",
+					veripb_fields.id, veripb_fields.antecedents
+				)
+			}
+			"end_proof" => {
+				writeln!(writer, "output NONE ;")?;
+				writeln!(writer, "conclusion NONE ;")?;
+				writeln!(writer, "end pseudo-Boolean proof ;")
+			}
+			_ => Ok(()),
+		}
+	}
+}
+
+impl Visit for VeriPBFieldsFormatter {
+	fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+		match field.name() {
+			"message" => self.message = format!("{:?}", value),
+			"clause" => {
+				self.clause = {
+					let res: Result<Vec<i32>, _> = serde_json::from_str(&format!("{value:?}"));
+					if let Ok(clause) = res {
+						let mut pb_clause = String::new();
+						for i in clause {
+							if i >= 0 {
+								pb_clause.push_str(format!("1 x{} ", i).as_str());
+							} else {
+								pb_clause.push_str(format!("1 ~x{} ", -i).as_str());
+							}
+						}
+						pb_clause.push_str(">= 1");
+						pb_clause
+					} else {
+						String::new()
+					}
+				}
+			}
+			"antecedents" => {
+				self.antecedents = {
+					let res: Result<Vec<i32>, _> = serde_json::from_str(&format!("{value:?}"));
+					if let Ok(ids) = res {
+						let mut pol_line = String::new();
+						let mut first = true;
+						for i in ids {
+							if first {
+								pol_line.push_str(&format!("@c{i} "));
+								first = false
+							} else {
+								pol_line.push_str(&format!("@c{i} + s "));
+							}
+						}
+						pol_line
+					} else {
+						String::new()
+					}
+				}
+			}
+			"constraint_ids" => self.constraint_ids = format!("{:?}", value),
+			_ => (),
+		}
+	}
+
+	fn record_str(&mut self, field: &Field, value: &str) {
+		match field.name() {
+			"hint_name" => self.hint_name = value.to_owned(),
+			_ => (),
+		}
+	}
+
+	fn record_u64(&mut self, field: &Field, value: u64) {
+		match field.name() {
+			"id" => self.id = format!("@c{value}"),
+			_ => (),
+		}
 	}
 }

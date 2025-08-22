@@ -923,7 +923,7 @@ where
 			if self.processed[i] {
 				continue;
 			}
-			self.prb.set_next_proof_id(Some(i));
+			self.prb.set_next_proof_id(Some(vec![i]));
 			let mut ann_used = vec![false; c.ann.len()];
 			match c.id.deref() {
 				"array_bool_and" => {

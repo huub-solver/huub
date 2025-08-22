@@ -683,6 +683,8 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 			})
 			.collect_vec();
 		debug!(clause = ?clause.iter().filter_map(|&x| if let BoolView(BoolViewInner::Lit(x)) = x { Some(i32::from(x)) } else { None }).collect::<Vec<i32>>(), "add solution nogood");
+		// Ensure this clause is in the proof hint with "solution" hint
+		self.set_next_proof_hint(Some(ProofHint::name_only("solution")));
 		self.add_clause(clause)
 	}
 
@@ -815,6 +817,8 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 							}),
 							"add objective bound"
 						);
+						// Ensure this clauses is logged in the proof with "ObjectiveImprove" hint
+						self.set_next_proof_hint(Some(ProofHint::name_only("ObjectiveImprove")));
 						self.add_clause([bound_lit.unwrap()]).unwrap();
 					}
 				}
@@ -1102,6 +1106,8 @@ impl<Oracle: ExternalPropagation> DecisionActions for Solver<Oracle> {
 			};
 			var.bool_lit(meaning, new_var)
 		};
+		// Ensure these added clauses are hinted in the proof as "LitDef"
+		self.set_next_proof_hint(Some(ProofHint::name_only("LitDef")));
 		for cl in clauses {
 			self.oracle
 				.add_clause_from_slice(&cl)
@@ -1194,6 +1200,8 @@ impl<Oracle> ProofActions for Solver<Oracle> {
 impl<Oracle: ExternalPropagation> PropagatorInitActions for Solver<Oracle> {
 	fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef {
 		let mut engine = self.engine.borrow_mut();
+		// The proof hint active when the propagator is added becomes the default
+		// hint for that propagator
 		let proof_hint = engine.get_current_proof_hint();
 		let prop_ref = engine.propagators.push((propagator, proof_hint));
 

@@ -41,6 +41,7 @@ use pindakaas::{
 	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit as RawLit, Unsatisfiable,
 };
 use rangelist::{IntervalIterator, RangeList};
+pub use solver::engine::ProofHint;
 use tracing::warn;
 
 use crate::{
@@ -70,7 +71,7 @@ use crate::{
 		IntDecisionIndex, IntDecisionInner, ReformulationError, ReformulationMap,
 		ReformulationMapBuilder,
 	},
-	solver::{engine::ProofHint, IntLitMeaning, Solver},
+	solver::{IntLitMeaning, Solver},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -177,7 +178,7 @@ pub struct Model {
 	/// instances to be used in order to make search decisions.
 	branchings: Vec<Branching>,
 	/// A list of constraints that have been added to the model.
-	constraints: Vec<Option<(ConstraintStore, Option<ConstraintProofID>)>>,
+	constraints: Vec<Option<(ConstraintStore, Option<Vec<ConstraintProofID>>)>>,
 	/// The definitions of the Boolean variables that have been created.
 	bool_vars: Vec<BoolDecisionDef>,
 	/// The definitions of the integer variables that have been created.
@@ -188,7 +189,7 @@ pub struct Model {
 	enqueued: Vec<bool>,
 	/// An optional identifier for the next constraint/clause to be added to the model
 	/// (for proof logging)
-	next_proof_id: Option<ConstraintProofID>,
+	next_proof_id: Option<Vec<ConstraintProofID>>,
 }
 
 /// Type alias for a non-zero parameter integer value.
@@ -959,7 +960,7 @@ impl Model {
 	/// [`Self::add_custom_constraint`] method.
 	fn add_constraint(&mut self, constraint: ConstraintStore) {
 		self.constraints
-			.push(Some((constraint, self.next_proof_id)));
+			.push(Some((constraint, self.next_proof_id.clone())));
 		self.enqueued.push(false);
 		self.enqueue(self.constraints.len() - 1);
 		self.subscribe(self.constraints.len() - 1);
@@ -1226,7 +1227,7 @@ impl Model {
 		let mut int_eager_direct = HashSet::<IntDecisionIndex>::new();
 		let int_eager_order = HashSet::<IntDecisionIndex>::new();
 
-		for (c, proof_id) in self.constraints.iter().flatten() {
+		for (c, _proof_id) in self.constraints.iter().flatten() {
 			match c {
 				ConstraintStore::IntAllDifferent(c) if c.value_consistent_propagator_enabled() => {
 					for v in &c.vars {
@@ -1280,10 +1281,8 @@ impl Model {
 			int_map: index_vec![None; self.int_vars.len()],
 		};
 
-		let proof_hint = ProofHint {
-			name: "LitDef",
-			constraint_ids: vec![],
-		};
+		// Any clauses added at this point should be defining literals only.
+		let proof_hint = ProofHint::name_only("LitDef");
 		slv.set_next_proof_hint(Some(proof_hint));
 		// Ensure the creation of all Boolean variables.
 		for var in 1..=self.bool_vars.len() as u32 {
@@ -1301,17 +1300,15 @@ impl Model {
 
 		// Create constraint data structures within the solver
 		for (c, proof_id) in self.constraints.iter().flatten() {
-			let proof_hint = proof_id.map(|con_id| ProofHint {
+			// All constraints get this proof hint by default inside their to_solver function.
+			let proof_hint = proof_id.as_ref().map(|con_id| ProofHint {
 				name: c.get_name(),
-				constraint_ids: vec![con_id],
+				constraint_ids: con_id.to_owned(),
 			});
 			slv.set_next_proof_hint(proof_hint);
 			c.to_solver(&mut slv, &map)?;
 		}
-		slv.set_next_proof_hint(Some(ProofHint {
-			constraint_ids: vec![],
-			name: "further_hints",
-		}));
+		slv.set_next_proof_hint(None);
 		// Add branching data structures to the solver
 		for b in self.branchings.iter() {
 			b.to_solver(&mut slv, &map);
@@ -1321,7 +1318,7 @@ impl Model {
 	}
 
 	/// The next constraint added to the model will get this id in the proof.
-	fn set_next_proof_id(&mut self, id: Option<ConstraintProofID>) {
+	fn set_next_proof_id(&mut self, id: Option<Vec<ConstraintProofID>>) {
 		self.next_proof_id = id;
 	}
 }
