@@ -32,6 +32,18 @@ pub struct IntDiffn {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Sweep based propagator for the `diffn_int` constraint.
+///
+/// This propagator was first proposed in "Sweep as a Generic Pruning Technique Applied to the
+/// Non-overlapping Rectangles Constraint" by Beldinau, Nicolas and Carlsson, Mats. Then it was
+/// implemented within Gecode in https://urn.kb.se/resolve?urn=urn:nbn:se:uu:diva-325845 and then
+/// extended to lazy clause generation within this solver in
+/// https://urn.kb.se/resolve?urn=urn:nbn:se:uu:diva-562628.
+///
+/// The core idea is that we reason about forbidden regions of each rectangle, that is, regions we
+/// are not allowed to place the lower-left corner of a rectangle due to the domains of the other
+/// rectangles. These regions are forbidden in the sense that if we would put our rectangle at that
+/// place, it would guarantee that atleast two rectangles are overlapping, which violates the
+/// constraint.
 pub struct IntDiffnSweep<const NON_STRICT: bool> {
 	/// The origin positions of all objects in all dimensions
 	box_posn: Vec<DimStore<IntView>>,
