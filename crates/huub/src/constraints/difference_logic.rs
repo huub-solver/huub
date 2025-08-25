@@ -1,7 +1,7 @@
 //! Structure and algorithms for a global difference logic propagator.
 
 use std::cell::RefCell;
-use std::cmp::Reverse;
+use std::cmp::{max, min, Reverse};
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::mem;
@@ -1812,13 +1812,17 @@ where
 		let views = if signed_data < 0 {
 			let edge = &self.graph.borrow().edges[-signed_data as usize];
 			let target_ub = actions.get_int_upper_bound(self.int_vars[edge.to]);
-			vec![actions.get_int_lit_relaxed(self.int_vars[edge.from], IntLitMeaning::GreaterEq(target_ub + edge.val + 1)).0,
-				 actions.get_int_upper_bound_lit(self.int_vars[edge.to])]
+			let (lit_lb, IntLitMeaning::GreaterEq(meaning_lb)) = actions.get_int_lit_relaxed(self.int_vars[edge.from], IntLitMeaning::GreaterEq(target_ub + edge.val + 1)) else {
+				unreachable!("IntLitMeaning should always be GreaterEq");
+			};
+			vec![lit_lb, actions.get_int_lit_relaxed(self.int_vars[edge.to], IntLitMeaning::Less(max(target_ub + 1, meaning_lb - edge.val))).0]
 		} else {
 			let edge = &self.graph.borrow().edges[signed_data as usize];
 			let source_lb = actions.get_int_lower_bound(self.int_vars[edge.from]);
-			vec![actions.get_int_lower_bound_lit(self.int_vars[edge.from]),
-				 actions.get_int_lit_relaxed(self.int_vars[edge.to], IntLitMeaning::Less(source_lb - edge.val)).0,]
+			let (lit_ub, IntLitMeaning::Less(meaning_ub)) = actions.get_int_lit_relaxed(self.int_vars[edge.to], IntLitMeaning::Less(source_lb - edge.val)) else {
+				unreachable!("IntLitMeaning should always be Less");
+			};
+			vec![actions.get_int_lit_relaxed(self.int_vars[edge.from], IntLitMeaning::GreaterEq(min(source_lb, meaning_ub + edge.val))).0, lit_ub]
 		};
 		trace!("Explaining {data} with {views:?}");
 		views.iter()
