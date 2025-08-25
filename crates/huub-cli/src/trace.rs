@@ -546,7 +546,7 @@ impl Visit for VeriPBFieldsFormatter {
 					if let Ok(ids) = res {
 						let mut pol_line = String::new();
 						let mut first = true;
-						for i in ids {
+						for i in ids.into_iter().rev() {
 							if first {
 								pol_line.push_str(&format!("@c{i} "));
 								first = false
