@@ -121,48 +121,14 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
             box_size_prop.push(DimStore { values: box_size[i].clone()});
         }
 
-		// Do not consider objects that are fixed and have a size of 0 when non_strict
-		if NON_STRICT && fixed {
-			let mut box_size_fixed: Vec<_> = box_size
-				.iter()
-				.map(|row| {
-					row.iter().map(|&v| {
-						if solver.get_int_val(v) == Some(0) {
-							1
-						} else {
-							0
-						}
-					})
-				})
-				.collect();
-
-			let contains_zero: Vec<usize> = box_size_fixed
-				.iter_mut()
-				.map(|row| if row.contains(&1) { 1 } else { 0 })
-				.collect();
-
-			box_posn_prop = box_posn_prop
-				.into_iter()
-				.enumerate()
-				.filter(|(i, _)| contains_zero[*i] == 0)
-				.map(|(_, row)| row)
-				.collect();
-
-			box_posn_prop = box_posn_prop
-				.into_iter()
-				.enumerate()
-				.filter(|(i, _)| contains_zero[*i] == 0)
-				.map(|(_, row)| row)
-				.collect();
-		}
-
 		// Tracks whether an rectangles posn domains are fixed
-		let fixed_trail = (0..box_size[0].len())
+		let target_trail = (0..box_size[0].len())
 			.map(|_| solver.new_trailed_int(0))
 			.collect();
-		let remove_trail = (0..box_size[0].len())
+		let source_trail = (0..box_size[0].len())
 			.map(|_| solver.new_trailed_int(0))
 			.collect();
+
 		let lb_sizes_prop = vec![DimStore { values: vec![0; box_posn[0].len()] }; box_posn.len()];
 		let ub_tracker_prop = vec![DimStore { values: vec![0; box_posn[0].len()] }; box_posn.len()];
 		let lb_tracker_prop = vec![DimStore { values: vec![0; box_posn[0].len()] }; box_posn.len()];
@@ -177,8 +143,8 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 				box_posn: box_posn_prop,
 				box_size: box_size_prop,
 				dimensions: box_posn.len(),
-				target: fixed_trail,
-				source: remove_trail,
+				target: target_trail,
+				source: source_trail,
 				fixed_sizes: fixed,
 				ub_tracker: ub_tracker_prop,
 				lb_tracker: lb_tracker_prop,
