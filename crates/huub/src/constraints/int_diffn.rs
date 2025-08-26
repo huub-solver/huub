@@ -125,13 +125,17 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			.flatten()
 			.all(|&v| solver.get_int_val(v).is_some());
 
-        let mut box_posn_prop = Vec::new();
+		let mut box_posn_prop = Vec::new();
 		let mut box_size_prop = Vec::new();
 
-        for i in 0..box_posn.len() {
-            box_posn_prop.push(DimStore { values: box_posn[i].clone()});
-            box_size_prop.push(DimStore { values: box_size[i].clone()});
-        }
+		for i in 0..box_posn.len() {
+			box_posn_prop.push(DimStore {
+				values: box_posn[i].clone(),
+			});
+			box_size_prop.push(DimStore {
+				values: box_size[i].clone(),
+			});
+		}
 
 		// Tracks whether an rectangles posn domains are fixed
 		let target_trail = (0..box_size[0].len())
@@ -141,9 +145,24 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			.map(|_| solver.new_trailed_int(0))
 			.collect();
 
-		let lb_sizes_prop = vec![DimStore { values: vec![0; box_posn[0].len()] }; box_posn.len()];
-		let ub_tracker_prop = vec![DimStore { values: vec![0; box_posn[0].len()] }; box_posn.len()];
-		let lb_tracker_prop = vec![DimStore { values: vec![0; box_posn[0].len()] }; box_posn.len()];
+		let lb_sizes_prop = vec![
+			DimStore {
+				values: vec![0; box_posn[0].len()]
+			};
+			box_posn.len()
+		];
+		let ub_tracker_prop = vec![
+			DimStore {
+				values: vec![0; box_posn[0].len()]
+			};
+			box_posn.len()
+		];
+		let lb_tracker_prop = vec![
+			DimStore {
+				values: vec![0; box_posn[0].len()]
+			};
+			box_posn.len()
+		];
 
 		let bounding_box_prop = ForbiddenRegion {
 			lb: vec![i64::MAX; box_posn[0].len()],
@@ -172,7 +191,10 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		solver.enqueue_now(prop);
 	}
 
-	/// Prune the lower bounds of the domain
+	/// Prunes the lower bound of a given rectangle by searching for a feasible origin by using a
+	/// sweep point which tracks the search and a jump point which tracks the actions to be taken
+	/// by the sweep point. If a feasible origin is found, set the lower-bound of the rectangle to
+	/// the position of the sweep, if no feasible origin is found, a conflict is reported.
 	fn prune_min<P: PropagationActions>(
 		&mut self,
 		actions: &mut P,
@@ -189,22 +211,27 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			sweep.push(self.lb_tracker[d].values[curr_obj_idx]);
 			jump.push(self.ub_tracker[d].values[curr_obj_idx] + 1);
 		}
+		// Get the forbidden region our current sweep point is overlapping with
 		let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
 		while b && infeasible_fr.is_some() {
+			// The jump is always pointed toward upper bounds of forbiddens as this is where we will
+			// find feasible origins
 			for j in 0..self.dimensions {
 				jump[j] = jump[j].min(infeasible_fr.unwrap().ub[j] + 1);
 			}
 
-            let lb: Vec<_> = self.lb_tracker
-                .iter()
-                .map(|d| d.values[curr_obj_idx])
-                .collect();
+			let lb: Vec<_> = self
+				.lb_tracker
+				.iter()
+				.map(|d| d.values[curr_obj_idx])
+				.collect();
 
-            let ub: Vec<_> = self.ub_tracker
-                .iter()
-                .map(|d| d.values[curr_obj_idx])
-                .collect();
-			// Contains side-effects to change sweep
+			let ub: Vec<_> = self
+				.ub_tracker
+				.iter()
+				.map(|d| d.values[curr_obj_idx])
+				.collect();
+
 			b = Self::adjust_sweep_min(
 				&mut sweep,
 				&mut jump,
@@ -216,7 +243,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 
 			infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
 		}
-		// Start pruning here
+		// Don't bother to do any propagation if the sweep point is at the same place it started
 		if sweep[curr_dimension] != self.lb_tracker[curr_dimension].values[curr_obj_idx] {
 			trace!(
 				"SET obj {:?} in dimension {} [{:?}..{:?}] >= {}",
@@ -245,7 +272,10 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		Ok(())
 	}
 
-	/// Prune the upper bounds of the domain
+	/// Prunes the upper bound of a given rectangle by searching for a feasible origin by using a
+	/// sweep point which tracks the search and a jump point which tracks the actions to be taken
+	/// by the sweep point. If a feasible origin is found, set the upper-bound of the rectangle to
+	/// the position of the sweep, if no feasible origin is found, a conflict is reported.
 	fn prune_max<P: PropagationActions>(
 		&mut self,
 		actions: &mut P,
@@ -254,7 +284,6 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		curr_dimension: usize,
 		all_fr: &[ForbiddenRegion],
 	) -> Result<(), Conflict> {
-		trace!("PRUNE MIN");
 		let mut sweep = vec![];
 		let mut jump = vec![];
 		let mut b = true;
@@ -263,32 +292,39 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			sweep.push(self.ub_tracker[i].values[curr_obj_idx]);
 			jump.push(self.lb_tracker[i].values[curr_obj_idx] - 1);
 		}
+		// Get the forbidden region our current sweep point is overlapping with
 		let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
 		while b && infeasible_fr.is_some() {
+			// The jump is always pointed toward upper bounds of forbiddens as this is where we will
+			// find feasible origins
 			for j in 0..self.dimensions {
 				jump[j] = jump[j].max(infeasible_fr.unwrap().lb[j] - 1);
 			}
-            let lb: Vec<_> = self.lb_tracker
-                .iter()
-                .map(|d| d.values[curr_obj_idx])
-                .collect();
+			let lb: Vec<_> = self
+				.lb_tracker
+				.iter()
+				.map(|d| d.values[curr_obj_idx])
+				.collect();
 
-            let ub: Vec<_> = self.ub_tracker
-                .iter()
-                .map(|d| d.values[curr_obj_idx])
-                .collect();
-			// Contains side-effects to change sweep
+			let ub: Vec<_> = self
+				.ub_tracker
+				.iter()
+				.map(|d| d.values[curr_obj_idx])
+				.collect();
+
 			b = Self::adjust_sweep_max(
 				&mut sweep,
 				&mut jump,
-                &lb,
-                &ub,
+				&lb,
+				&ub,
 				curr_dimension,
 				self.dimensions,
 			);
 
 			infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
 		}
+
+		// Don't bother to do any propagation if the sweep point is at the same place it started
 		if sweep[curr_dimension] != self.ub_tracker[curr_dimension].values[curr_obj_idx] {
 			trace!(
 				"SET obj {:?} in dimension {} [{:?}..{:?}] < {}",
@@ -318,7 +354,10 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		Ok(())
 	}
 
-	/// Adjusts the sweep and jump point when pruning the lower bound
+	/// Given the position of the jump point acquired from the forbidden region the sweep point
+	/// overlapped, check if the jump point is contained within the bounds of the rectangle we are
+	/// pruning, if it is in a dimension, we can continue searching in that direction and check if
+	/// it is a feasible origin
 	fn adjust_sweep_min(
 		sweep: &mut [IntVal],
 		jump: &mut [IntVal],
@@ -328,21 +367,28 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		dimensions: usize,
 	) -> bool {
 		for i in (0..dimensions).rev() {
+			// Ensures that we check the dimension we are pruning last
 			let rotation = (i + curr_dimension) % dimensions;
 			sweep[rotation] = jump[rotation];
 			jump[rotation] = curr_obj_ub[rotation] + 1;
+			// If the current position of the sweep is still within the bounds of our domains we can
+			// continue searching in this direction (dimension), otherwise reset it
 			if sweep[rotation] <= curr_obj_ub[rotation] {
 				return true;
 			} else {
-				// Reset sweep-point
 				sweep[rotation] = curr_obj_lb[rotation];
 			}
 		}
+		// No feasible origin for the rectangle exists, adjust the sweep point to guarantee a
+		// conflict
 		sweep[curr_dimension] = curr_obj_ub[curr_dimension] + 1;
 		false
 	}
 
-	/// Adjusts the sweep and jump point when pruning the upper bound
+	/// Given the position of the jump point acquired from the forbidden region the sweep point
+	/// overlapped, check if the jump point is contained within the bounds of the rectangle we are
+	/// pruning, if it is in a dimension, we can continue searching in that direction and check if
+	/// it is a feasible origin
 	fn adjust_sweep_max(
 		sweep: &mut [IntVal],
 		jump: &mut [IntVal],
@@ -352,6 +398,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		dimensions: usize,
 	) -> bool {
 		for i in (0..dimensions).rev() {
+			// Ensures that we check the dimension we are pruning last
 			let rotation = (i + curr_dimension) % dimensions;
 			sweep[rotation] = jump[rotation];
 			jump[rotation] = curr_obj_lb[rotation] - 1;
@@ -424,22 +471,10 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			}
 			let mut regions_to_remove: Vec<(usize, usize)> = Vec::new();
 
-            let lb: Vec<_> = self.lb_tracker
-                .iter()
-                .map(|d| d.values[o_idx])
-                .collect();
+			let lb: Vec<_> = self.lb_tracker.iter().map(|d| d.values[o_idx]).collect();
 
-            let ub: Vec<_> = self.ub_tracker
-                .iter()
-                .map(|d| d.values[o_idx])
-                .collect();
-			if exists
-				&& Self::overlaps(
-					&lb,
-					&ub,
-					&fr,
-					dimensions,
-				) {
+			let ub: Vec<_> = self.ub_tracker.iter().map(|d| d.values[o_idx]).collect();
+			if exists && Self::overlaps(&lb, &ub, &fr, dimensions) {
 				let mut c = 0;
 				for f in &mut all_fr {
 					let fr_object = fr_support[c];
@@ -501,7 +536,8 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 	fn fixed_in_all_dimensions(&self, curr_obj_idx: usize) -> bool {
 		let mut is_assigned = true;
 		for d in 0..self.dimensions {
-			let fixed = self.lb_tracker[d].values[curr_obj_idx] == self.ub_tracker[d].values[curr_obj_idx];
+			let fixed =
+				self.lb_tracker[d].values[curr_obj_idx] == self.ub_tracker[d].values[curr_obj_idx];
 			if !fixed {
 				is_assigned = false;
 			}
@@ -725,11 +761,14 @@ where
 {
 	#[tracing::instrument(name = "diffn", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-        for d in 0..self.dimensions {
-            for o in 0..self.box_posn[0].values.len() {
-				self.ub_tracker[d].values[o] = actions.get_int_upper_bound(self.box_posn[d].values[o]);
-				self.lb_tracker[d].values[o] = actions.get_int_lower_bound(self.box_posn[d].values[o]);
-				self.lb_sizes[d].values[o] = actions.get_int_lower_bound(self.box_size[d].values[o]);
+		for d in 0..self.dimensions {
+			for o in 0..self.box_posn[0].values.len() {
+				self.ub_tracker[d].values[o] =
+					actions.get_int_upper_bound(self.box_posn[d].values[o]);
+				self.lb_tracker[d].values[o] =
+					actions.get_int_lower_bound(self.box_posn[d].values[o]);
+				self.lb_sizes[d].values[o] =
+					actions.get_int_lower_bound(self.box_size[d].values[o]);
 			}
 		}
 
@@ -785,14 +824,15 @@ where
 				continue;
 			}
 			for i in 0..self.dimensions {
-				self.bounding_box.lb[i] = self.bounding_box.lb[i].min(self.lb_tracker[i].values[o_idx]);
+				self.bounding_box.lb[i] =
+					self.bounding_box.lb[i].min(self.lb_tracker[i].values[o_idx]);
 				self.bounding_box.ub[i] = self.bounding_box.ub[i]
 					.max(self.ub_tracker[i].values[o_idx] + self.lb_sizes[i].values[o_idx] - 1);
 			}
 		}
 
 		// If the current rectangle has lost its target property (is fixed in a feasible position)
-        // and is completely disjoint from the bounding box, remove its source property
+		// and is completely disjoint from the bounding box, remove its source property
 		// (disregard it in the rest of the algorhtm)
 		for o_idx in 0..self.box_posn[0].values.len() {
 			if actions.get_trailed_int(self.target[o_idx]) == 1
