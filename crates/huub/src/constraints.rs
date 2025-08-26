@@ -1,6 +1,7 @@
 //! Module containing the definitions for propagators and their implementations.
 
 pub mod bool_array_element;
+pub mod cumulative;
 pub mod disjunctive_strict;
 pub mod int_abs;
 pub mod int_all_different;

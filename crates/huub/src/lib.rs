@@ -47,6 +47,7 @@ use crate::{
 	branchers::{BoolBrancher, IntBrancher, WarmStartBrancher},
 	constraints::{
 		bool_array_element::BoolDecisionArrayElement,
+		cumulative::Cumulative,
 		disjunctive_strict::DisjunctiveStrict,
 		int_abs::IntAbs,
 		int_all_different::IntAllDifferent,
@@ -274,6 +275,36 @@ where
 	IntArrayMinimum {
 		vars: vars.into_iter().map_into().collect(),
 		min,
+	}
+}
+
+/// Create a constraint that enforces that the given a list of integer decision
+/// variables representing the start times of tasks, a list of integer values
+/// representing the durations of tasks, a list of integer values representing
+/// the resource usages of tasks, and a resource capacity, the sum of the
+/// resource usages of all tasks running at any time does not exceed the
+/// resource capacity.
+pub fn cumulative(
+	start_times: Vec<IntDecision>,
+	durations: Vec<IntDecision>,
+	usages: Vec<IntDecision>,
+	capacity: IntDecision,
+) -> Cumulative {
+	assert_eq!(
+		start_times.len(),
+		durations.len(),
+		"cumulative must be given the same number of start times and durations."
+	);
+	assert_eq!(
+		start_times.len(),
+		usages.len(),
+		"cumulative must be given the same number of start times and usages."
+	);
+	Cumulative {
+		start_times,
+		durations,
+		usages,
+		capacity,
 	}
 }
 
@@ -976,10 +1007,13 @@ impl Model {
 	}
 
 	/// Create a new integer variable with the given domain.
-	pub fn new_int_var(&mut self, domain: IntSetVal) -> IntDecision {
+	pub fn new_int_var(&mut self, domain: impl Into<IntSetVal>) -> IntDecision {
+		let domain = domain.into();
 		match domain.card() {
-			0 => unimplemented!("integer decision must have at least 1 value in their domain"),
-			1 => (*domain.lower_bound().unwrap()).into(),
+			Some(0) => {
+				unimplemented!("integer decision must have at least 1 value in their domain")
+			}
+			Some(1) => (*domain.lower_bound().unwrap()).into(),
 			_ => IntDecision(IntDecisionInner::Var(
 				self.int_vars.push(IntDecisionDef::with_domain(domain)),
 			)),
@@ -987,7 +1021,8 @@ impl Model {
 	}
 
 	/// Create `len` new integer variables with the given domain.
-	pub fn new_int_vars(&mut self, len: usize, domain: IntSetVal) -> Vec<IntDecision> {
+	pub fn new_int_vars(&mut self, len: usize, domain: impl Into<IntSetVal>) -> Vec<IntDecision> {
+		let domain = domain.into();
 		repeat_n(IntDecisionDef::with_domain(domain), len)
 			.map(|v| IntDecision(IntDecisionInner::Var(self.int_vars.push(v))))
 			.collect()
@@ -1006,6 +1041,7 @@ impl Model {
 			ConstraintStore::IntArrayMinimum(c) => c.simplify(self),
 			ConstraintStore::BoolDecisionArrayElement(c) => c.simplify(self),
 			ConstraintStore::IntDecisionArrayElement(c) => c.simplify(self),
+			ConstraintStore::Cumulative(c) => c.simplify(self),
 			ConstraintStore::DisjunctiveStrict(c) => c.simplify(self),
 			ConstraintStore::IntAbs(c) => c.simplify(self),
 			ConstraintStore::IntDiv(c) => c.simplify(self),
@@ -1088,6 +1124,9 @@ impl Model {
 			}
 			ConstraintStore::IntDecisionArrayElement(con) => {
 				<IntDecisionArrayElement as Constraint<Model>>::initialize(con, &mut ctx);
+			}
+			ConstraintStore::Cumulative(con) => {
+				<Cumulative as Constraint<Model>>::initialize(con, &mut ctx);
 			}
 			ConstraintStore::DisjunctiveStrict(con) => {
 				<DisjunctiveStrict as Constraint<Model>>::initialize(con, &mut ctx);
@@ -1192,7 +1231,7 @@ impl Model {
 							let Domain::Domain(dom) = &self.int_vars[iv].domain else {
 								unreachable!()
 							};
-							if dom.card() <= (c.vars.len() * 100 / 80) {
+							if dom.card() <= Some(c.vars.len() * 100 / 80) {
 								let _ = int_eager_direct.insert(iv);
 							}
 						}
@@ -1279,6 +1318,12 @@ impl AddAssign<BoxedConstraint> for Model {
 impl AddAssign<Branching> for Model {
 	fn add_assign(&mut self, rhs: Branching) {
 		self.branchings.push(rhs);
+	}
+}
+
+impl AddAssign<Cumulative> for Model {
+	fn add_assign(&mut self, constraint: Cumulative) {
+		self.add_constraint(ConstraintStore::Cumulative(constraint));
 	}
 }
 
@@ -1565,7 +1610,7 @@ impl SimplificationActions for Model {
 				} else if *dom == intersect {
 					return Ok(());
 				}
-				if intersect.card() == 1 {
+				if intersect.card() == Some(1) {
 					self.int_vars[v].domain =
 						Domain::Alias((*intersect.lower_bound().unwrap()).into());
 				} else {
@@ -1691,7 +1736,7 @@ impl SimplificationActions for Model {
 				if *dom == diff {
 					return Ok(());
 				}
-				if diff.card() == 1 {
+				if diff.card() == Some(1) {
 					self.int_vars[v].domain = Domain::Alias((*diff.lower_bound().unwrap()).into());
 				} else {
 					self.int_vars[v].domain = Domain::Domain(diff);

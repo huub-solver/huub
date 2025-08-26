@@ -1,9 +1,12 @@
 //! Data structures to store [`Model`] parts for analyses and for the
 //! reformulation process of creating a [`Solver`] object from a [`Model`].
 
-use std::collections::HashSet;
+use std::{
+	collections::HashSet,
+	error::Error,
+	fmt::{self, Display},
+};
 
-use delegate::delegate;
 use index_vec::{define_index_type, IndexVec};
 use pindakaas::{
 	propositional_logic::{Formula, TseitinEncoder},
@@ -11,7 +14,6 @@ use pindakaas::{
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit as RawLit, Unsatisfiable,
 };
 use rangelist::IntervalIterator;
-use thiserror::Error;
 
 use crate::{
 	actions::{
@@ -20,6 +22,7 @@ use crate::{
 	},
 	constraints::{
 		bool_array_element::BoolDecisionArrayElement,
+		cumulative::Cumulative,
 		disjunctive_strict::DisjunctiveStrict,
 		int_abs::IntAbs,
 		int_all_different::IntAllDifferent,
@@ -95,6 +98,7 @@ pub(crate) enum BoolDecisionInner {
 pub(crate) enum ConstraintStore {
 	BoolDecisionArrayElement(BoolDecisionArrayElement),
 	BoolFormula(BoolFormula),
+	Cumulative(Cumulative),
 	DisjunctiveStrict(DisjunctiveStrict),
 	IntAbs(IntAbs),
 	IntAllDifferent(IntAllDifferent),
@@ -193,11 +197,10 @@ pub(crate) struct ReformulationContext<'a> {
 	pub(crate) map: &'a ReformulationMap,
 }
 
-#[derive(Error, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 /// Error type used during the reformulation process of creating a [`Solver`],
 /// e.g. when creating a [`Solver`] from a [`crate::Model`].
 pub enum ReformulationError {
-	#[error("The problem is trivially unsatisfiable")]
 	/// Error used when the problem is found to be unsatisfiable without
 	/// requiring any search.
 	TrivialUnsatisfiable,
@@ -273,6 +276,9 @@ impl ConstraintStore {
 			}
 			ConstraintStore::BoolFormula(exp) => {
 				<Formula<BoolDecision> as Constraint<Model>>::to_solver(exp, &mut actions)
+			}
+			ConstraintStore::Cumulative(con) => {
+				<Cumulative as Constraint<Model>>::to_solver(con, &mut actions)
 			}
 			ConstraintStore::DisjunctiveStrict(con) => {
 				<DisjunctiveStrict as Constraint<Model>>::to_solver(con, &mut actions)
@@ -469,45 +475,76 @@ impl IntDecisionDef {
 }
 
 impl ClauseDatabase for ReformulationContext<'_> {
-	delegate! {
-		to self.slv {
-			fn add_clause_from_slice(&mut self, clause: &[RawLit])  -> Result<(), Unsatisfiable>;
-			fn new_var_range(&mut self, len: usize) -> pindakaas::VarRange;
-		}
+	fn add_clause_from_slice(&mut self, clause: &[RawLit]) -> Result<(), Unsatisfiable> {
+		self.slv.add_clause_from_slice(clause)
+	}
+
+	fn new_var_range(&mut self, len: usize) -> pindakaas::VarRange {
+		self.slv.new_var_range(len)
 	}
 }
 
 impl DecisionActions for ReformulationContext<'_> {
-	delegate! {
-		to self.slv {
-			fn get_intref_lit(&mut self, var: IntVarRef, meaning: IntLitMeaning) -> BoolView;
-			fn get_num_conflicts(&self) -> u64;
-		}
+	fn get_intref_lit(&mut self, var: IntVarRef, meaning: IntLitMeaning) -> BoolView {
+		self.slv.get_intref_lit(var, meaning)
+	}
+
+	fn get_num_conflicts(&self) -> u64 {
+		self.slv.get_num_conflicts()
 	}
 }
 
 impl InspectionActions for ReformulationContext<'_> {
-	delegate! {
-		to self.slv {
-			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
-			fn get_int_upper_bound(&self, var: IntView) -> IntVal;
-			fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool;
-		}
+	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool {
+		self.slv.check_int_in_domain(var, val)
+	}
+
+	fn get_int_lower_bound(&self, var: IntView) -> IntVal {
+		self.slv.get_int_lower_bound(var)
+	}
+
+	fn get_int_upper_bound(&self, var: IntView) -> IntVal {
+		self.slv.get_int_upper_bound(var)
 	}
 }
 
 impl PropagatorInitActions for ReformulationContext<'_> {
-	delegate! {
-		to self.slv {
-			fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef;
-			fn advise_on_backtrack(&mut self, prop: PropRef);
-			fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView, data: u64);
-			fn advise_on_int_change(&mut self, prop: PropRef, var: IntView, condition: IntPropCond, data: u64);
-			fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt;
-			fn enqueue_now(&mut self, prop: PropRef);
-			fn enqueue_on_bool_change(&mut self, prop: PropRef, var: BoolView);
-			fn enqueue_on_int_change(&mut self, prop: PropRef, var: IntView, condition: IntPropCond);
-		}
+	fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef {
+		self.slv.add_propagator(propagator, priority)
+	}
+
+	fn advise_on_backtrack(&mut self, prop: PropRef) {
+		self.slv.advise_on_backtrack(prop);
+	}
+
+	fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView, data: u64) {
+		self.slv.advise_on_bool_change(prop, var, data);
+	}
+
+	fn advise_on_int_change(
+		&mut self,
+		prop: PropRef,
+		var: IntView,
+		condition: IntPropCond,
+		data: u64,
+	) {
+		self.slv.advise_on_int_change(prop, var, condition, data);
+	}
+
+	fn enqueue_now(&mut self, prop: PropRef) {
+		self.slv.enqueue_now(prop);
+	}
+
+	fn enqueue_on_bool_change(&mut self, prop: PropRef, var: BoolView) {
+		self.slv.enqueue_on_bool_change(prop, var);
+	}
+
+	fn enqueue_on_int_change(&mut self, prop: PropRef, var: IntView, condition: IntPropCond) {
+		self.slv.enqueue_on_int_change(prop, var, condition);
+	}
+
+	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
+		self.slv.new_trailed_int(init)
 	}
 }
 
@@ -526,14 +563,28 @@ impl ReformulationActions for ReformulationContext<'_> {
 }
 
 impl TrailingActions for ReformulationContext<'_> {
-	delegate! {
-		to self.slv {
-			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
-			fn get_trailed_int(&self, i: TrailedInt) -> IntVal;
-			fn set_trailed_int(&mut self, i: TrailedInt, v: IntVal) -> IntVal;
+	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
+		self.slv.get_bool_val(bv)
+	}
+
+	fn get_trailed_int(&self, i: TrailedInt) -> IntVal {
+		self.slv.get_trailed_int(i)
+	}
+
+	fn set_trailed_int(&mut self, i: TrailedInt, v: IntVal) -> IntVal {
+		self.slv.set_trailed_int(i, v)
+	}
+}
+
+impl Display for ReformulationError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::TrivialUnsatisfiable => write!(f, "The problem is trivially unsatisfiable"),
 		}
 	}
 }
+
+impl Error for ReformulationError {}
 
 impl From<Unsatisfiable> for ReformulationError {
 	fn from(_: Unsatisfiable) -> Self {
@@ -699,9 +750,10 @@ impl ReformulationMapBuilder {
 				} else {
 					EncodingType::Lazy
 				};
+				let card = dom.card();
 				let order_enc = if self.int_eager_order.contains(&iv)
 					|| self.int_eager_direct.contains(&iv)
-					|| dom.card() <= self.int_eager_limit
+					|| card.is_some() && card.unwrap() <= self.int_eager_limit
 				{
 					EncodingType::Eager
 				} else {

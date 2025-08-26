@@ -4,7 +4,6 @@
 
 use std::fmt::{self, Debug, Formatter};
 
-use delegate::delegate;
 use index_vec::IndexVec;
 use pindakaas::{solver::propagation::SolvingActions, Lit as RawLit};
 use tracing::trace;
@@ -221,31 +220,53 @@ impl DecisionActions for SolvingContext<'_> {
 }
 
 impl ExplanationActions for SolvingContext<'_> {
+	fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning> {
+		self.state.get_int_lit_meaning(var, lit)
+	}
+
+	fn get_int_lit_relaxed(
+		&mut self,
+		var: IntView,
+		meaning: IntLitMeaning,
+	) -> (BoolView, IntLitMeaning) {
+		self.state.get_int_lit_relaxed(var, meaning)
+	}
+
+	fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView {
+		self.state.get_int_lower_bound_lit(var)
+	}
+
+	fn get_int_upper_bound_lit(&mut self, var: IntView) -> BoolView {
+		self.state.get_int_upper_bound_lit(var)
+	}
 	fn get_int_val_lit(&mut self, var: IntView) -> Option<BoolView> {
 		let val = self.get_int_val(var)?;
 		Some(self.get_int_lit(var, IntLitMeaning::Eq(val)))
 	}
 
-	delegate! {
-		to self.state {
-			fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning>;
-			fn try_int_lit(&self, var: IntView, meaning: IntLitMeaning) -> Option<BoolView>;
-			fn get_int_lit_relaxed(&mut self, var: IntView, meaning: IntLitMeaning) -> (BoolView, IntLitMeaning);
-			fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView;
-			fn get_int_upper_bound_lit(&mut self, var: IntView) -> BoolView;
-		}
+	fn try_int_lit(&self, var: IntView, meaning: IntLitMeaning) -> Option<BoolView> {
+		self.state.try_int_lit(var, meaning)
 	}
 }
 
 impl InspectionActions for SolvingContext<'_> {
-	delegate! {
-		to self.state {
-			fn get_int_lower_bound(&self, var: IntView) -> IntVal;
-			fn get_int_upper_bound(&self, var: IntView) -> IntVal;
-			fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal);
-			fn get_int_val(&self, var: IntView) -> Option<IntVal>;
-			fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool;
-		}
+	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool {
+		self.state.check_int_in_domain(var, val)
+	}
+
+	fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal) {
+		self.state.get_int_bounds(var)
+	}
+	fn get_int_lower_bound(&self, var: IntView) -> IntVal {
+		self.state.get_int_lower_bound(var)
+	}
+
+	fn get_int_upper_bound(&self, var: IntView) -> IntVal {
+		self.state.get_int_upper_bound(var)
+	}
+
+	fn get_int_val(&self, var: IntView) -> Option<IntVal> {
+		self.state.get_int_val(var)
 	}
 }
 
@@ -398,11 +419,15 @@ impl PropagationActions for SolvingContext<'_> {
 }
 
 impl TrailingActions for SolvingContext<'_> {
-	delegate! {
-		to self.state {
-			fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
-			fn get_trailed_int(&self, x: TrailedInt) -> IntVal;
-			fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal;
-		}
+	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
+		self.state.get_bool_val(bv)
+	}
+
+	fn get_trailed_int(&self, x: TrailedInt) -> IntVal {
+		self.state.get_trailed_int(x)
+	}
+
+	fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal {
+		self.state.set_trailed_int(x, v)
 	}
 }

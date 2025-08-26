@@ -145,7 +145,7 @@ mod tests {
 	#[test]
 	fn test_binary_table_sat() {
 		let mut prb = Model::default();
-		let vars = prb.new_int_vars(3, (1..=5).into());
+		let vars = prb.new_int_vars(3, 1..=5);
 		let table = vec![
 			vec![1, 3],
 			vec![1, 4],
@@ -195,7 +195,7 @@ mod tests {
 	#[test]
 	fn test_tertiary_table_sat() {
 		let mut prb = Model::default();
-		let vars = prb.new_int_vars(5, (1..=5).into());
+		let vars = prb.new_int_vars(5, 1..=5);
 		let table = vec![
 			vec![1, 3, 1],
 			vec![1, 3, 5],

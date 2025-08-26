@@ -33,6 +33,8 @@ mod tests {
 	assert_first_solution!(warm_start_in_seq_search);
 	assert_first_solution!(warm_start_success);
 
+	assert_optimal!(unbounded);
+
 	assert_search_order!(bool_indomain_max);
 	assert_search_order!(bool_indomain_min);
 	assert_search_order!(int_indomain_max_1);
@@ -55,7 +57,12 @@ mod tests {
 	assert_first_solution!(sudoku_p48);
 
 	assert_optimal!(ccmcp_3_20_0);
-	assert_optimal!(jobshop_la01);
+	assert_optimal!(rcpsp_01);
+	assert_optimal!(rcpsp_02);
+	assert_optimal!(rcpsp_03);
+	assert_optimal!(mrcpsp_j10_10_1);
+	assert_optimal!(mrcpsp_j10_10_2);
+	assert_optimal!(mrcpsp_j10_10_3);
 	assert_optimal!(jobshop_la02);
 	assert_optimal!(jobshop_la03);
 	assert_optimal!(jobshop_la04);

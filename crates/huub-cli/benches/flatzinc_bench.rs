@@ -20,7 +20,12 @@ use crate::helpers::check_final;
 
 const OPTIMIZATION_INSTANCES: &[&str] = &[
 	"ccmcp_3_20_0",
-	"jobshop_la01",
+	"rcpsp_01",
+	"rcpsp_02",
+	"rcpsp_03",
+	"mrcpsp_j10_10_1",
+	"mrcpsp_j10_10_2",
+	"mrcpsp_j10_10_3",
 	"jobshop_la02",
 	"jobshop_la03",
 	"jobshop_la04",
