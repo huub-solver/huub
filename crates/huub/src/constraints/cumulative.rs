@@ -109,7 +109,7 @@ impl<S: SimplificationActions> Constraint<S> for Cumulative {
 		Ok(SimplificationStatus::Fixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let start_times = self
 			.start_times
 			.iter()
