@@ -618,8 +618,7 @@ impl DifferenceLogicSimplifier {
 		self.trail_remove_node(adapter.initial_trail, old);
 		// Check consequences of all modified active edges
 		for e in mod_edges {
-			let addition_success = self.graph.propagate_edge_addition(adapter, e, true)?;
-			debug_assert!(addition_success, "Failures should trigger a reformulation error");
+			self.graph.propagate_edge_addition(adapter, e, true)?;
 		}
 		Ok(())
 
@@ -1330,63 +1329,59 @@ impl DifferenceLogicGraph {
 		trace!("incoming_u is {incoming_u:?}");
 		// Outgoing paths from relevant nodes ending at v via uv.
 		let outgoing_v = self.dijkstra_relevant(adapter, new_index, true);
-		let actions = adapter.get_trailing_actions();
 		trace!("outgoing_v is {outgoing_v:?}"); // todo check how to include pi change check at this point?
-		let indegree_u: usize = incoming_u.iter().map(|(&n, _)| self.open_in[n].num_open(actions)).sum();
-		let outdegree_v: usize = outgoing_v.iter().map(|(&n, _)| self.open_out[n].num_open(actions)).sum();
+		let indegree_u: usize = incoming_u.iter().map(|(&n, _)| self.open_in[n].num_open(adapter.get_trailing_actions())).sum();
+		let outdegree_v: usize = outgoing_v.iter().map(|(&n, _)| self.open_out[n].num_open(adapter.get_trailing_actions())).sum();
 		trace!("indegree: {indegree_u:?}, outdegree: {outdegree_v:?}");
 		
 		let new_edge_val = self.edges[new_index].val;
-		let mut fail_indices = Vec::new();
 		
 		if indegree_u < outdegree_v {
 			for &n in incoming_u.keys() {
-				for i in self.open_in[n].open_iter(actions) {
-					let &e = self.open_in[n].index(actions, i);
+				for i in self.open_in[n].open_iter(adapter.get_trailing_actions()) {
+					let &e = self.open_in[n].index(adapter.get_trailing_actions(), i);
 					let edge = &self.edges[e];
 					//trace!("Dealing with {edge:?} (incoming to {temp_node:?}, implied)");
 					if outgoing_v.contains_key(&edge.from) && outgoing_v[&edge.from] + incoming_u[&edge.to] - new_edge_val <= edge.val {
 						trace!("Constraint {edge:?} is implied");
-						self.close_imp_edge(actions, e);
+						self.close_imp_edge(adapter.get_trailing_actions(), e);
 					}
 				}
-				for i in self.open_out[n].open_iter(actions) {
-					let &e = self.open_out[n].index(actions, i);
+				for i in self.open_out[n].open_iter(adapter.get_trailing_actions()) {
+					let &e = self.open_out[n].index(adapter.get_trailing_actions(), i);
 					let edge = &self.edges[e];
 					//trace!("Dealing with {edge:?} (outgoing from {temp_node:?}, reverse)");
 					if outgoing_v.contains_key(&edge.to) && outgoing_v[&edge.to] + incoming_u[&edge.from] - new_edge_val <= -edge.val - 1 {
 						trace!("Constraint {edge:?} is falsified since inverse is implied");
-						fail_indices.push(e);
-						self.close_imp_edge(actions, e);
+						self.close_imp_edge(adapter.get_trailing_actions(), e);
+						let result = self.inc_sat(adapter, e)?;  // TODO could also try these ones lazy? Or keep track of path in dijkstra relevant?
+						debug_assert!(!result, "Adding {e} should not be possible");
 					}
 				}
 			}
 		} else {
 			for &n in outgoing_v.keys() {
-				for i in self.open_out[n].open_iter(actions) {
-					let &e = self.open_out[n].index(actions, i);
+				for i in self.open_out[n].open_iter(adapter.get_trailing_actions()) {
+					let &e = self.open_out[n].index(adapter.get_trailing_actions(), i);
 					let edge = &self.edges[e];
 					//trace!("Dealing with {edge:?} (outgoing from {temp_node:?}, implied)");
 					if incoming_u.contains_key(&edge.to) && outgoing_v[&edge.from] + incoming_u[&edge.to] - new_edge_val <= edge.val {
 						trace!("Constraint {:?} is implied", edge);
-						self.close_imp_edge(actions, e);
+						self.close_imp_edge(adapter.get_trailing_actions(), e);
 					}
 				}
-				for i in self.open_in[n].open_iter(actions) {
-					let &e = self.open_in[n].index(actions, i);
+				for i in self.open_in[n].open_iter(adapter.get_trailing_actions()) {
+					let &e = self.open_in[n].index(adapter.get_trailing_actions(), i);
 					let edge = &self.edges[e];
 					//trace!("Dealing with {edge:?} (incoming to {temp_node:?}, reverse)");
 					if incoming_u.contains_key(&edge.from) && outgoing_v[&edge.to] + incoming_u[&edge.from] - new_edge_val <= -edge.val - 1 {
 						trace!("Constraint {:?} is falsified since inverse is implied", edge);
-						fail_indices.push(e);
-						self.close_imp_edge(actions, e);
+						self.close_imp_edge(adapter.get_trailing_actions(), e);
+						let result = self.inc_sat(adapter, e)?;
+						debug_assert!(!result, "Adding {e} should not be possible");
 					}
 				}
 			}
-		}
-
-		for index in fail_indices {  // todo check if we want this here or immediately inside the loops?
-			let _ = self.inc_sat(adapter, index)?;  // TODO could also try these ones lazy? Or keep track of path in dijkstra relevant?
 		}
 
 		Ok(())
@@ -1563,32 +1558,31 @@ impl DifferenceLogicGraph {
 	}
 
 	/// Propagate the addition of an edge, checking for conflicts and implications.
-	fn propagate_edge_addition<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, e: usize, check_implied: bool) -> Result<bool, E> {
+	fn propagate_edge_addition<E, A: ModelAdapter<E>>(&mut self, adapter: &mut A, e: usize, check_implied: bool) -> Result<(), E> {
 		// If the edge can't be added, a conflict will be generated
-		if self.inc_sat(adapter, e)? {
-			if check_implied {
-				// If the edge was added, check the status of open edges.
-				self.inc_imp(adapter, e)?;
-			}
-			let edge = &self.edges[e];
-			let source_lb = self.get_cur_lower_bound(adapter, edge.from);
-			let lb_y = source_lb - edge.val;
-			if lb_y > self.get_cur_lower_bound(adapter, edge.to) {
-				// New edge caused lower bound change.
-				adapter.set_int_lower_bound(edge.to, lb_y, edge.bool_var, edge.from, source_lb)?;
-				self.update_lb(edge.to, lb_y);
-			}
-			let edge = &self.edges[e];
-			let target_ub = self.get_cur_upper_bound(adapter, edge.to);
-			let ub_x = target_ub + edge.val;
-			if ub_x < self.get_cur_upper_bound(adapter, edge.from) {
-				// New edge caused upper bound change.
-				adapter.set_int_upper_bound(edge.from, ub_x, edge.bool_var, edge.to, target_ub)?;
-				self.update_ub(edge.from, ub_x);
-			}
-			return Ok(true);
+		let result = self.inc_sat(adapter, e)?;
+		debug_assert!(result, "Adding {e} should be possible or cause a conflict!");
+		if check_implied {
+			// If the edge was added, check the status of open edges.
+			self.inc_imp(adapter, e)?;
 		}
-		Ok(false)
+		let edge = &self.edges[e];
+		let source_lb = self.get_cur_lower_bound(adapter, edge.from);
+		let lb_y = source_lb - edge.val;
+		if lb_y > self.get_cur_lower_bound(adapter, edge.to) {
+			// New edge caused lower bound change.
+			adapter.set_int_lower_bound(edge.to, lb_y, edge.bool_var, edge.from, source_lb)?;
+			self.update_lb(edge.to, lb_y);
+		}
+		let edge = &self.edges[e];
+		let target_ub = self.get_cur_upper_bound(adapter, edge.to);
+		let ub_x = target_ub + edge.val;
+		if ub_x < self.get_cur_upper_bound(adapter, edge.from) {
+			// New edge caused upper bound change.
+			adapter.set_int_upper_bound(edge.from, ub_x, edge.bool_var, edge.to, target_ub)?;
+			self.update_ub(edge.from, ub_x);
+		}
+		Ok(())
 	}
 
 	/// Propagate fixed booleans.
@@ -1607,7 +1601,7 @@ impl DifferenceLogicGraph {
 							trace!("Processing adding edge {:?}", self.edges[e]);
 							self.close_imp_edge(adapter.get_trailing_actions(), e);
 							self.activate_imp_edge(adapter.get_trailing_actions(), e);
-							let _ = self.propagate_edge_addition(adapter, e, check_implied)?;
+							self.propagate_edge_addition(adapter, e, check_implied)?;
 						}
 					}
 				}
