@@ -186,6 +186,7 @@ where
 			.with_conditioning(self.conditioning)
 			.with_inprocessing(self.inprocessing)
 			.with_probing(self.probing)
+			.with_prove(self.prove.is_some())
 			.with_restart(self.free_search || self.restart)
 			.with_subsumption(self.subsumption)
 			.with_variable_elimination(self.variable_elimination)
@@ -316,6 +317,7 @@ where
 			slv.set_vsids_after_conflict(self.vsids_after_conflict);
 			slv.set_vsids_after_restart(self.vsids_after_restart);
 		}
+		slv.set_prove(self.prove.is_some());
 
 		// Determine Goal and Objective
 		let start_solve = Instant::now();

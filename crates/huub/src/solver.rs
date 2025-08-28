@@ -683,8 +683,10 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 			})
 			.collect_vec();
 		debug!(clause = ?clause.iter().filter_map(|&x| if let BoolView(BoolViewInner::Lit(x)) = x { Some(i32::from(x)) } else { None }).collect::<Vec<i32>>(), "add solution nogood");
-		// Ensure this clause is in the proof hint with "solution" hint
-		self.set_next_proof_hint(Some(ProofHint::name_only("solution")));
+		if self.prove() {
+			// Ensure this clause is in the proof hint with "solution" hint
+			self.set_next_proof_hint(Some(ProofHint::name_only("solution")));
+		}
 		self.add_clause(clause)
 	}
 
@@ -851,7 +853,7 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 		Solver<Oracle>: for<'a> From<&'a Cnf>,
 		Oracle: 'static,
 	{
-		let (mut prb, map, fzn_stats) = Model::from_fzn::<S, Vec<_>>(fzn)?;
+		let (mut prb, map, fzn_stats) = Model::from_fzn::<S, Vec<_>>(fzn, config.prove())?;
 		let (mut slv, remap) = prb.to_solver(config)?;
 		let map = map
 			.into_iter()
@@ -902,6 +904,13 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 			restarts: cp_stats.restarts,
 			user_decisions: cp_stats.user_decisions,
 		}
+	}
+
+	/// Set whether proof logging functionality should be enabled.
+	///
+	/// Enabling this option will slow down the solver.
+	pub fn set_prove(&mut self, enable: bool) {
+		self.engine.borrow_mut().state.set_prove(enable);
 	}
 
 	/// Set whether the solver should toggle between VSIDS and a user defined
@@ -1190,6 +1199,9 @@ impl<Oracle: ExternalPropagation> InspectionActions for Solver<Oracle> {
 }
 
 impl<Oracle> ProofActions for Solver<Oracle> {
+	fn prove(&self) -> bool {
+		self.engine.borrow().prove()
+	}
 	fn set_next_proof_hint(&mut self, proof_hint: Option<ProofHint>) {
 		self.engine.borrow_mut().set_next_proof_hint(proof_hint);
 	}

@@ -89,6 +89,8 @@ pub(crate) struct FznModelBuilder<'a, S: Eq + Hash + Ord> {
 	processed: Vec<bool>,
 	/// Statistics about the extraction process
 	stats: FlatZincStatistics,
+	/// Whether proof logging is enabled
+	prove: bool,
 }
 
 impl Display for FlatZincError {
@@ -839,7 +841,14 @@ where
 			prb: Model::default(),
 			processed: vec![false; fzn.constraints.len()],
 			stats: FlatZincStatistics::default(),
+			prove: false,
 		}
+	}
+
+	pub(crate) fn with_prove(mut self, enabled: bool) -> Self {
+		self.prove = enabled;
+		self.prb.prove = enabled;
+		self
 	}
 
 	/// Extract a Boolean parameter from the a [`Literal`] in a [`FlatZinc`]
@@ -923,7 +932,11 @@ where
 			if self.processed[i] {
 				continue;
 			}
-			self.prb.set_next_proof_id(Some(vec![i]));
+
+			if self.prove {
+				self.prb.set_next_proof_id(Some(vec![i]));
+			}
+
 			let mut ann_used = vec![false; c.ann.len()];
 			match c.id.deref() {
 				"array_bool_and" => {

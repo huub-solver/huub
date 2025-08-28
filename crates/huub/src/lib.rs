@@ -187,6 +187,8 @@ pub struct Model {
 	prop_queue: VecDeque<usize>,
 	/// A flag for each constraint whether it has been enqueued for propagation.
 	enqueued: Vec<bool>,
+	/// Whether proof logging is enabled
+	prove: bool,
 	/// An optional identifier for the next constraint/clause to be added to the model
 	/// (for proof logging)
 	next_proof_id: Option<Vec<ConstraintProofID>>,
@@ -982,11 +984,12 @@ impl Model {
 	/// Create a new [`Model`] instance from a [`FlatZinc`] instance.
 	pub fn from_fzn<S, MapTy: FromIterator<(S, Decision)>>(
 		fzn: &FlatZinc<S>,
+		prove: bool,
 	) -> Result<(Self, MapTy, FlatZincStatistics), FlatZincError>
 	where
 		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
 	{
-		let mut builder = FznModelBuilder::new(fzn);
+		let mut builder = FznModelBuilder::new(fzn).with_prove(prove);
 		builder.unify_variables()?;
 		builder.extract_views()?;
 		builder.post_constraints()?;
@@ -1211,7 +1214,11 @@ impl Model {
 				(config.restart() || self.branchings.is_empty()) as i32,
 			);
 
-			r.connect_proof_tracer(Rc::clone(&slv.engine));
+			// If proof logging,
+			// connect the Engine's proof tracer to CaDiCaL's tracer interface.
+			if config.prove() {
+				r.connect_proof_tracer(Rc::clone(&slv.engine));
+			}
 		} else {
 			warn!("unknown solver: vivification and restart options are ignored");
 		}
@@ -1282,8 +1289,10 @@ impl Model {
 		};
 
 		// Any clauses added at this point should be defining literals only.
-		let proof_hint = ProofHint::name_only("LitDef");
-		slv.set_next_proof_hint(Some(proof_hint));
+		if slv.prove() {
+			let proof_hint = ProofHint::name_only("LitDef");
+			slv.set_next_proof_hint(Some(proof_hint));
+		}
 		// Ensure the creation of all Boolean variables.
 		for var in 1..=self.bool_vars.len() as u32 {
 			let var = BoolDecision(BoolDecisionInner::Lit(var_from_u32(var).into()));
@@ -1300,12 +1309,14 @@ impl Model {
 
 		// Create constraint data structures within the solver
 		for (c, proof_id) in self.constraints.iter().flatten() {
-			// All constraints get this proof hint by default inside their to_solver function.
-			let proof_hint = proof_id.as_ref().map(|con_id| ProofHint {
-				name: c.get_name(),
-				constraint_ids: con_id.to_owned(),
-			});
-			slv.set_next_proof_hint(proof_hint);
+			if self.prove {
+				// All constraints get this proof hint by default inside their to_solver function.
+				let proof_hint = proof_id.as_ref().map(|con_id| ProofHint {
+					name: c.get_name(),
+					constraint_ids: con_id.to_owned(),
+				});
+				slv.set_next_proof_hint(proof_hint);
+			}
 			c.to_solver(&mut slv, &map)?;
 		}
 		slv.set_next_proof_hint(None);

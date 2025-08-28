@@ -141,6 +141,8 @@ pub struct InitConfig {
 	preprocessing: Option<usize>,
 	/// Whether to enable the failed literal probing in the oracle solver.
 	probing: bool,
+	/// Whether to enable proof logging.
+	prove: bool,
 	/// Whether to enable restarts in the oracle solver.
 	restart: bool,
 	/// Whether to enable the global forward subsumption in the oracle solver.
@@ -375,6 +377,11 @@ impl InitConfig {
 		self.preprocessing.unwrap_or(Self::DEFAULT_PREPROCESSING)
 	}
 
+	/// Get whether to enable proof logging.
+	pub fn prove(&self) -> bool {
+		self.prove
+	}
+
 	/// Get whether to enable the failed literal probing in the oracle solver.
 	pub fn probing(&self) -> bool {
 		self.probing
@@ -425,6 +432,12 @@ impl InitConfig {
 	/// Change the number of preprocessing rounds in the oracle solver.
 	pub fn with_preprocessing(mut self, preprocessing: usize) -> Self {
 		self.preprocessing = Some(preprocessing);
+		self
+	}
+
+	/// Change whether to enable proof logging.
+	pub fn with_prove(mut self, prove: bool) -> Self {
+		self.prove = prove;
 		self
 	}
 
@@ -507,6 +520,9 @@ impl InspectionActions for ReformulationContext<'_> {
 }
 
 impl ProofActions for ReformulationContext<'_> {
+	fn prove(&self) -> bool {
+		self.slv.prove()
+	}
 	fn set_next_proof_hint(&mut self, proof_hint: Option<ProofHint>) {
 		self.slv.set_next_proof_hint(proof_hint);
 	}

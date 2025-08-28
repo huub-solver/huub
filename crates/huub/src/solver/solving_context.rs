@@ -284,6 +284,9 @@ impl InspectionActions for SolvingContext<'_> {
 }
 
 impl ProofActions for SolvingContext<'_> {
+	fn prove(&self) -> bool {
+		self.state.prove
+	}
 	fn set_next_proof_hint(&mut self, proof_hint: Option<ProofHint>) {
 		self.state.set_next_proof_hint(proof_hint);
 	}

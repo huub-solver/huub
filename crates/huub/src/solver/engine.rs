@@ -157,7 +157,7 @@ pub struct State {
 
 	// ---- Proof Logging ----
 	/// Whether proof logging is enabled.
-	pub(crate) _prove: bool,
+	pub(crate) prove: bool,
 	/// The proof hint information for the next clause to be logged to the proof.
 	pub(crate) next_proof_hint: Option<ProofHint>,
 }
@@ -211,6 +211,9 @@ impl Engine {
 }
 
 impl ProofActions for Engine {
+	fn prove(&self) -> bool {
+		self.state.prove
+	}
 	fn set_next_proof_hint(&mut self, proof_hint: Option<ProofHint>) {
 		self.state.next_proof_hint = proof_hint;
 	}
@@ -785,6 +788,10 @@ impl State {
 		}
 	}
 
+	/// Enable proof logging functionality.
+	pub(crate) fn set_prove(&mut self, enabled: bool) {
+		self.prove = enabled;
+	}
 	/// Set whether the solver should toggle between VSIDS and a user defined
 	/// search strategy after every restart.
 	///
@@ -805,7 +812,7 @@ impl State {
 		self.config.vsids_after_restart = enable;
 	}
 
-	/// Set wether the solver should make all search decisions based on the
+	/// Set whether the solver should make all search decisions based on the
 	/// VSIDS only.
 	pub(crate) fn set_vsids_only(&mut self, enable: bool) {
 		self.config.vsids_only = enable;
@@ -1126,6 +1133,9 @@ impl InspectionActions for State {
 }
 
 impl ProofActions for State {
+	fn prove(&self) -> bool {
+		self.prove
+	}
 	fn set_next_proof_hint(&mut self, proof_hint: Option<ProofHint>) {
 		self.next_proof_hint = proof_hint;
 	}
