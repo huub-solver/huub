@@ -158,8 +158,9 @@ where
 		.with_writer(make_writer)
 		.with_ansi(ansi)
 		.with_timer(uptime())
-		.map_fmt_fields(|fmt| FmtLitFields::new(fmt, Arc::clone(&lit_reverse_map), int_reverse_map))
-		.with_filter(debug_log_filter);
+		.map_fmt_fields(|fmt| {
+			FmtLitFields::new(fmt, Arc::clone(&lit_reverse_map), int_reverse_map)
+		});
 
 	// Create proof logging layer
 	let pb_layer = if let Some(proof_path) = prove {
@@ -181,8 +182,8 @@ where
 	};
 
 	Registry::default()
-		.with(RegisterLazyLits::new(lit_reverse_map))
-		.with(fmt_layer)
+		.with(RegisterLazyLits::new(lit_reverse_map).with_filter(debug_log_filter.clone()))
+		.with(fmt_layer.with_filter(debug_log_filter))
 		.with(pb_layer)
 }
 
