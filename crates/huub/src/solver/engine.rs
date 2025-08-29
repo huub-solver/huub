@@ -1163,7 +1163,7 @@ impl ProofHint {
 	pub fn name_only(name: &'static str) -> Self {
 		ProofHint {
 			constraint_ids: vec![],
-			name: name,
+			name,
 		}
 	}
 }

@@ -110,11 +110,17 @@ struct VeriPBEventFormatter;
 /// them as needed.
 #[derive(Default)]
 struct VeriPBFieldsFormatter {
+	/// The tracing message describing what kind of proof event this is
 	message: String,
+	/// A clause to be derived in the proof
 	clause: String,
+	/// The ID of the clause (according to the SAT solver)
 	id: String,
+	/// The user constraint IDs responsible for this clause
 	constraint_ids: String,
+	/// The main hint describing how this clause was derived
 	hint_name: String,
+	/// Antecedent IDs within the proof system (for resolution / LRAT -style derivations)
 	antecedents: String,
 }
 
@@ -549,7 +555,7 @@ impl Visit for VeriPBFieldsFormatter {
 						for i in ids.into_iter().rev() {
 							if first {
 								pol_line.push_str(&format!("@c{i} "));
-								first = false
+								first = false;
 							} else {
 								pol_line.push_str(&format!("@c{i} + s "));
 							}
@@ -566,16 +572,14 @@ impl Visit for VeriPBFieldsFormatter {
 	}
 
 	fn record_str(&mut self, field: &Field, value: &str) {
-		match field.name() {
-			"hint_name" => self.hint_name = value.to_owned(),
-			_ => (),
+		if field.name() == "hint_name" {
+			self.hint_name = value.to_owned();
 		}
 	}
 
 	fn record_u64(&mut self, field: &Field, value: u64) {
-		match field.name() {
-			"id" => self.id = format!("@c{value}"),
-			_ => (),
+		if field.name() == "id" {
+			self.id = format!("@c{value}");
 		}
 	}
 }

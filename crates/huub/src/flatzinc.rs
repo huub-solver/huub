@@ -845,6 +845,7 @@ where
 		}
 	}
 
+	/// Set whether to enable proof logging at this stage.
 	pub(crate) fn with_prove(mut self, enabled: bool) -> Self {
 		self.prove = enabled;
 		self.prb.prove = enabled;
