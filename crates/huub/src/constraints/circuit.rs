@@ -204,10 +204,10 @@ mod tests {
 	#[traced_test]
 	fn test_circuit_sat_1() {
 		let mut prb = Model::default();
-		let a = prb.new_int_var((0..=6).into());
-		let b = prb.new_int_var((0..=0).into());
-		let c = prb.new_int_var((0..=6).into());
-		let d = prb.new_int_var((0..=6).into());
+		let a = prb.new_int_var(0..=6);
+		let b = prb.new_int_var(0..=0);
+		let c = prb.new_int_var(0..=6);
+		let d = prb.new_int_var(0..=6);
 
 		prb += circuit(vec![a, b, c, d]);
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
@@ -228,10 +228,10 @@ mod tests {
 	#[traced_test]
 	fn test_circuit_sat_2() {
 		let mut prb = Model::default();
-		let a = prb.new_int_var((0..=5).into());
-		let b = prb.new_int_var((0..=4).into());
-		let c = prb.new_int_var((0..=9).into());
-		let d = prb.new_int_var((0..=7).into());
+		let a = prb.new_int_var(0..=5);
+		let b = prb.new_int_var(0..=4);
+		let c = prb.new_int_var(0..=9);
+		let d = prb.new_int_var(0..=7);
 
 		prb += circuit(vec![a, b, c, d]);
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
@@ -269,10 +269,10 @@ mod tests {
 	#[traced_test]
 	fn test_circuit_disconnected_2() {
 		let mut prb = Model::default();
-		let a = prb.new_int_var((0..=1).into());
-		let b = prb.new_int_var((1..=2).into());
-		let c = prb.new_int_var((0..=2).into());
-		let d = prb.new_int_var((3..=3).into());
+		let a = prb.new_int_var(0..=1);
+		let b = prb.new_int_var(1..=2);
+		let c = prb.new_int_var(0..=2);
+		let d = prb.new_int_var(3..=3);
 
 		prb += circuit(vec![a, b, c, d]);
 		prb.assert_unsatisfiable();
