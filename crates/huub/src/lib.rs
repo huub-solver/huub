@@ -47,6 +47,7 @@ use crate::{
 	branchers::{BoolBrancher, IntBrancher, WarmStartBrancher},
 	constraints::{
 		bool_array_element::BoolDecisionArrayElement,
+		circuit::Circuit,
 		cumulative::Cumulative,
 		disjunctive_strict::DisjunctiveStrict,
 		int_abs::IntAbs,
@@ -274,6 +275,18 @@ where
 	IntArrayMinimum {
 		vars: vars.into_iter().map_into().collect(),
 		min,
+	}
+}
+
+/// Create a constraint that enforces that a Hamiltonian cycle in an array of integer decision
+/// variables that each specifies the next node in the cycle.
+pub fn circuit<Iter>(vars: Iter) -> Circuit
+where
+	Iter: IntoIterator,
+	Iter::Item: Into<IntDecision>,
+{
+	Circuit {
+		next: vars.into_iter().map_into().collect(),
 	}
 }
 
@@ -1039,6 +1052,7 @@ impl Model {
 			ConstraintStore::IntArrayMinimum(c) => c.simplify(self),
 			ConstraintStore::BoolDecisionArrayElement(c) => c.simplify(self),
 			ConstraintStore::IntDecisionArrayElement(c) => c.simplify(self),
+			ConstraintStore::Circuit(c) => c.simplify(self),
 			ConstraintStore::Cumulative(c) => c.simplify(self),
 			ConstraintStore::DisjunctiveStrict(c) => c.simplify(self),
 			ConstraintStore::IntAbs(c) => c.simplify(self),
@@ -1121,6 +1135,9 @@ impl Model {
 			}
 			ConstraintStore::IntDecisionArrayElement(con) => {
 				<IntDecisionArrayElement as Constraint<Model>>::initialize(con, &mut ctx);
+			}
+			ConstraintStore::Circuit(con) => {
+				<Circuit as Constraint<Model>>::initialize(con, &mut ctx);
 			}
 			ConstraintStore::Cumulative(con) => {
 				<Cumulative as Constraint<Model>>::initialize(con, &mut ctx);
@@ -1312,6 +1329,12 @@ impl AddAssign<BoxedConstraint> for Model {
 impl AddAssign<Branching> for Model {
 	fn add_assign(&mut self, rhs: Branching) {
 		self.branchings.push(rhs);
+	}
+}
+
+impl AddAssign<Circuit> for Model {
+	fn add_assign(&mut self, constraint: Circuit) {
+		self.add_constraint(ConstraintStore::Circuit(constraint));
 	}
 }
 
