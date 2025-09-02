@@ -1,7 +1,5 @@
 //! Structure and algorithms for the integer diffn constraint, which
 //! enforces that a number of k-dimensional hyperrectangles do not overlap.
-use tracing::trace;
-
 use crate::{
 	actions::{
 		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
@@ -250,14 +248,6 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		// Don't bother to do any propagation if the sweep point is at the same place it
 		// started
 		if sweep[curr_dimension] != self.lb_tracker[curr_dimension].values[curr_obj_idx] {
-			trace!(
-				"SET obj {:?} in dimension {} [{:?}..{:?}] >= {}",
-				curr_obj_idx,
-				curr_dimension,
-				self.lb_tracker[curr_dimension].values[curr_obj_idx],
-				self.ub_tracker[curr_dimension].values[curr_obj_idx],
-				sweep[curr_dimension]
-			);
 			let reason =
 				self.explain_propagation(actions, fr_support, curr_obj_idx, curr_dimension, false);
 			actions.set_int_lower_bound(
@@ -326,14 +316,6 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		// Don't bother to do any propagation if the sweep point is at the same place it
 		// started
 		if sweep[curr_dimension] != self.ub_tracker[curr_dimension].values[curr_obj_idx] {
-			trace!(
-				"SET obj {:?} in dimension {} [{:?}..{:?}] < {}",
-				curr_obj_idx,
-				curr_dimension,
-				self.lb_tracker[curr_dimension].values[curr_obj_idx],
-				self.ub_tracker[curr_dimension].values[curr_obj_idx],
-				sweep[curr_dimension]
-			);
 			let reason =
 				self.explain_propagation(actions, fr_support, curr_obj_idx, curr_dimension, true);
 
@@ -632,27 +614,11 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 					possible_ub = origin_lb + self.lb_sizes[d].values[curr_obj_idx] - 1;
 				}
 
-				trace!(
-					"reason of obj {:?} in dimension {} [{:?}..{:?}] < {}",
-					o_idx,
-					d,
-					self.lb_tracker[d].values[o_idx],
-					self.ub_tracker[d].values[o_idx],
-					possible_ub + 1
-				);
 				reason.push(actions.get_int_lit(
 					self.box_posn[d].values[o_idx],
 					IntLitMeaning::Less(possible_ub + 1),
 				));
 
-				trace!(
-					"reason of obj {:?} in dimension {} [{:?}..{:?}] >= {}",
-					o_idx,
-					d,
-					self.lb_tracker[d].values[o_idx],
-					self.ub_tracker[d].values[o_idx],
-					possible_lb
-				);
 				reason.push(actions.get_int_lit(
 					self.box_posn[d].values[o_idx],
 					IntLitMeaning::GreaterEq(possible_lb),
@@ -678,14 +644,6 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			// If sizes are not fixed, the lower bounds are assumed throughout the algorithm
 			// and thus have to be added to the explanation
 			if !self.fixed_sizes {
-				trace!(
-					"reason size of obj {:?} in dimension {} [{:?}..{:?}] >= {}",
-					curr_obj_idx,
-					d,
-					actions.get_int_lower_bound(self.box_size[d].values[curr_obj_idx]),
-					actions.get_int_upper_bound(self.box_size[d].values[curr_obj_idx]),
-					actions.get_int_lower_bound(self.box_size[d].values[curr_obj_idx])
-				);
 				reason.push(actions.get_int_lower_bound_lit(self.box_size[d].values[curr_obj_idx]));
 			}
 
@@ -694,53 +652,21 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			// explained.
 			if d == curr_dimension {
 				if prune_upper {
-					trace!(
-						"reason of obj {:?} in dimension {} [{:?}..{:?}] < {}",
-						curr_obj_idx,
-						d,
-						self.lb_tracker[d].values[curr_obj_idx],
-						self.ub_tracker[d].values[curr_obj_idx],
-						self.ub_tracker[d].values[curr_obj_idx] + 1
-					);
 					reason.push(actions.get_int_lit(
 						self.box_posn[d].values[curr_obj_idx],
 						IntLitMeaning::Less(self.ub_tracker[d].values[curr_obj_idx] + 1),
 					));
 				} else {
-					trace!(
-						"reason of obj {:?} in dimension {} [{:?}..{:?}] >= {}",
-						curr_obj_idx,
-						d,
-						self.lb_tracker[d].values[curr_obj_idx],
-						self.ub_tracker[d].values[curr_obj_idx],
-						self.lb_tracker[d].values[curr_obj_idx]
-					);
 					reason.push(actions.get_int_lit(
 						self.box_posn[d].values[curr_obj_idx],
 						IntLitMeaning::GreaterEq(self.lb_tracker[d].values[curr_obj_idx]),
 					));
 				}
 			} else {
-				trace!(
-					"reason of obj {:?} in dimension {} [{:?}..{:?}] < {}",
-					curr_obj_idx,
-					d,
-					self.lb_tracker[d].values[curr_obj_idx],
-					self.ub_tracker[d].values[curr_obj_idx],
-					self.ub_tracker[d].values[curr_obj_idx] + 1
-				);
 				reason.push(actions.get_int_lit(
 					self.box_posn[d].values[curr_obj_idx],
 					IntLitMeaning::Less(self.ub_tracker[d].values[curr_obj_idx] + 1),
 				));
-				trace!(
-					"reason of obj {:?} in dimension {} [{:?}..{:?}] >= {}",
-					curr_obj_idx,
-					d,
-					self.lb_tracker[d].values[curr_obj_idx],
-					self.ub_tracker[d].values[curr_obj_idx],
-					self.lb_tracker[d].values[curr_obj_idx]
-				);
 				reason.push(actions.get_int_lit(
 					self.box_posn[d].values[curr_obj_idx],
 					IntLitMeaning::GreaterEq(self.lb_tracker[d].values[curr_obj_idx]),
@@ -855,21 +781,17 @@ mod tests {
 	#[traced_test]
 	fn test_diffn_unsat() {
 		let mut prb = Model::default();
-		let x_pos_1 = prb.new_int_var((1..=2).into());
-		let x_pos_2 = prb.new_int_var((1..=2).into());
+		let x1 = prb.new_int_var(1..=2);
+		let x2 = prb.new_int_var(1..=2);
 
-		let x_size_1 = prb.new_int_var((4..=4).into());
-		let x_size_2 = prb.new_int_var((4..=4).into());
+		let y1 = prb.new_int_var(1..=2);
+		let y2 = prb.new_int_var(1..=2);
 
-		let y_pos_1 = prb.new_int_var((1..=2).into());
-		let y_pos_2 = prb.new_int_var((1..=2).into());
-
-		let y_size_1 = prb.new_int_var((4..=4).into());
-		let y_size_2 = prb.new_int_var((4..=4).into());
+		let size = prb.new_int_var(4..=4);
 
 		prb += diffn_int(
-			vec![vec![x_pos_1, x_pos_2], vec![y_pos_1, y_pos_2]],
-			vec![vec![x_size_1, x_size_2], vec![y_size_1, y_size_2]],
+			vec![vec![x1, x2], vec![y1, y2]],
+			vec![vec![size, size], vec![size, size]],
 			false,
 		);
 
@@ -883,13 +805,13 @@ mod tests {
 	fn test_diffn_sat_2d() {
 		let mut prb = Model::default();
 
-		let x1 = prb.new_int_var((1..=3).into());
-		let x2 = prb.new_int_var((1..=1).into());
+		let x1 = prb.new_int_var(1..=3);
+		let x2 = prb.new_int_var(1..=1);
 
-		let y1 = prb.new_int_var((1..=3).into());
-		let y2 = prb.new_int_var((1..=1).into());
+		let y1 = prb.new_int_var(1..=3);
+		let y2 = prb.new_int_var(1..=1);
 
-		let size = prb.new_int_var((2..=2).into());
+		let size = prb.new_int_var(2..=2);
 
 		prb += diffn_int(
 			vec![vec![x1, x2], vec![y1, y2]],
@@ -919,16 +841,16 @@ mod tests {
 	fn test_diffn_sat_3d() {
 		let mut prb = Model::default();
 
-		let x1 = prb.new_int_var((2..=3).into());
-		let x2 = prb.new_int_var((1..=3).into());
+		let x1 = prb.new_int_var(2..=3);
+		let x2 = prb.new_int_var(1..=3);
 
-		let y1 = prb.new_int_var((5..=5).into());
-		let y2 = prb.new_int_var((4..=4).into());
+		let y1 = prb.new_int_var(5..=5);
+		let y2 = prb.new_int_var(4..=4);
 
-		let z1 = prb.new_int_var((2..=3).into());
-		let z2 = prb.new_int_var((2..=7).into());
+		let z1 = prb.new_int_var(2..=3);
+		let z2 = prb.new_int_var(2..=7);
 
-		let size = prb.new_int_var((5..=5).into());
+		let size = prb.new_int_var(5..=5);
 
 		prb += diffn_int(
 			vec![vec![x1, x2], vec![y1, y2], vec![z1, z2]],
