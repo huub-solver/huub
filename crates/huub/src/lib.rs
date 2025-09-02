@@ -242,8 +242,9 @@ where
 		value_prop: None,
 	}
 }
-/// Create a constraint that enforces that given decision variables of starting positions and sizes
-/// of k-dimensional hyperrectangles, none of the rectangles overlap.
+/// Create a constraint that enforces that given decision variables of starting
+/// positions and sizes of k-dimensional hyperrectangles, none of the rectangles
+/// overlap.
 pub fn diffn_int(
 	box_posn: Vec<Vec<IntDecision>>,
 	box_size: Vec<Vec<IntDecision>>,
