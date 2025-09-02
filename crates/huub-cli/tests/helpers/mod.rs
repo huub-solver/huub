@@ -104,7 +104,7 @@ pub(crate) use assert_optimal;
 pub(crate) use assert_search_order;
 pub(crate) use assert_unsat;
 use expect_test::ExpectFile;
-use fzn_huub::Cli;
+use huub_cli::Cli;
 use pico_args::Arguments;
 
 const FZN_COMPLETE: &str = "==========\n";

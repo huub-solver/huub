@@ -24,7 +24,6 @@ macro_rules! outputln {
 mod trace;
 
 use std::{
-	collections::HashMap,
 	fmt::{self, Debug, Display},
 	fs::File,
 	io::{self, BufReader},
@@ -43,14 +42,20 @@ use huub::{
 	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::{InitConfig, ReformulationError},
 	solver::{Goal, IntLitMeaning, SolveResult, Solver, Valuation, Value, View},
-	SlvTermSignal,
+	TermSignal,
 };
+use mimalloc::MiMalloc;
 use pico_args::Arguments;
+use rustc_hash::FxHashMap;
 use tracing::{subscriber::set_default, warn};
 use tracing_subscriber::fmt::MakeWriter;
 use ustr::{ustr, Ustr, UstrMap};
 
 use crate::trace::LitName;
+
+/// Use [`MiMalloc`] as the global allocator.
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 /// Status message to output when it is proven that no more/better solutions can
 /// be found.
@@ -89,17 +94,33 @@ pub struct Cli<Stdout, Stderr> {
 	/// Cardinatility cutoff for eager order literals
 	int_eager_limit: Option<usize>,
 
-	// --- Solving configuration ---
+	// --- Search configuration ---
 	/// Whether solver is allowed to restart
 	restart: bool,
 	/// Alternate between the SAT and VSIDS heuristic after every restart
 	toggle_vsids: bool,
-	/// Whether the vivification heuristic is enabled
-	vivification: bool,
 	/// Switch to the VSIDS heuristic after a certain number of conflicts
-	vsids_after: Option<u32>,
+	vsids_after_conflict: Option<u32>,
+	/// Whether to switch to the VSIDS heuristic after a restart
+	vsids_after_restart: bool,
 	/// Only use the SAT VSIDS heuristic for search
 	vsids_only: bool,
+
+	// -- Preprocessing/Inprocessing configuration ---
+	/// Whether to enable the globally blocked clause elimination (conditioning)
+	conditioning: bool,
+	/// Whether to enable inprocessing during search in the oracle solver
+	inprocessing: bool,
+	/// The number of preprocessing rounds in the oracle solver
+	preprocessing: Option<usize>,
+	/// Whether to enable the failed literal probing in the oracle solver.
+	probing: bool,
+	/// Whether to enable the global forward subsumption in the oracle solver.
+	subsumption: bool,
+	/// Whether to enable the bounded variable elimination in the oracle solver.
+	variable_elimination: bool,
+	/// Whether the vivification heuristic is enabled
+	vivification: bool,
 
 	// --- Output configuration ---
 	/// Output stream for (intermediate) solutions and statistics
@@ -155,16 +176,25 @@ where
 		if let Some(eager_limit) = self.int_eager_limit {
 			config = config.with_int_eager_limit(eager_limit);
 		}
+		if let Some(preprocessing) = self.preprocessing {
+			config = config.with_preprocessing(preprocessing);
+		}
 		config = config
+			.with_conditioning(self.conditioning)
+			.with_inprocessing(self.inprocessing)
+			.with_probing(self.probing)
 			.with_restart(self.free_search || self.restart)
+			.with_subsumption(self.subsumption)
+			.with_variable_elimination(self.variable_elimination)
 			.with_vivification(self.vivification);
+
 		config
 	}
 
 	/// Run the Huub solver in accordance to the given command line arguments.
 	pub fn run(&mut self) -> Result<(), String> {
 		// Enable tracing functionality
-		let lit_reverse_map: Arc<Mutex<HashMap<NonZeroI32, LitName>>> = Arc::default();
+		let lit_reverse_map: Arc<Mutex<FxHashMap<NonZeroI32, LitName>>> = Arc::default();
 		let int_reverse_map: Arc<Mutex<Vec<Ustr>>> = Arc::default();
 		let subscriber = trace::create_subscriber(
 			self.verbose,
@@ -224,8 +254,10 @@ where
 
 		// Create reverse map for solver variables if required
 		if self.verbose > 0 {
-			let mut lit_map = HashMap::new();
-			let mut int_map = vec![ustr(""); slv.init_statistics().int_vars()];
+			let mut lit_map = lit_reverse_map.lock().unwrap();
+			let mut int_map = int_reverse_map.lock().unwrap();
+			debug_assert!(int_map.is_empty());
+			*int_map = vec![ustr(""); slv.init_statistics().int_vars()];
 			let mut keys: Vec<_> = var_map.keys().collect();
 			keys.sort();
 			for name in keys {
@@ -268,17 +300,16 @@ where
 					}
 				}
 			}
-			*lit_reverse_map.lock().unwrap() = lit_map;
-			*int_reverse_map.lock().unwrap() = int_map;
 		}
 
 		// Set Solver Configuration
 		if self.free_search {
-			slv.set_toggle_vsids(true);
+			slv.set_vsids_after_conflict(Some(1000));
 		} else {
 			slv.set_vsids_only(self.vsids_only);
 			slv.set_toggle_vsids(self.toggle_vsids);
-			slv.set_vsids_after(self.vsids_after);
+			slv.set_vsids_after_conflict(self.vsids_after_conflict);
+			slv.set_vsids_after_restart(self.vsids_after_restart);
 		}
 
 		// Determine Goal and Objective
@@ -313,9 +344,9 @@ where
 				let interrupted = Arc::clone(&interrupted);
 				slv.set_terminate_callback(Some(move || {
 					if interrupted.load(Ordering::SeqCst) || Instant::now() >= deadline {
-						SlvTermSignal::Terminate
+						TermSignal::Terminate
 					} else {
-						SlvTermSignal::Continue
+						TermSignal::Continue
 					}
 				}));
 			}
@@ -323,18 +354,18 @@ where
 				let interrupted = Arc::clone(&interrupted);
 				slv.set_terminate_callback(Some(move || {
 					if interrupted.load(Ordering::SeqCst) {
-						SlvTermSignal::Terminate
+						TermSignal::Terminate
 					} else {
-						SlvTermSignal::Continue
+						TermSignal::Continue
 					}
 				}));
 			}
 			(false, Some(deadline)) => {
 				slv.set_terminate_callback(Some(move || {
 					if Instant::now() >= deadline {
-						SlvTermSignal::Terminate
+						TermSignal::Terminate
 					} else {
-						SlvTermSignal::Continue
+						TermSignal::Continue
 					}
 				}));
 			}
@@ -534,8 +565,15 @@ where
 			int_eager_limit: self.int_eager_limit,
 			restart: self.restart,
 			toggle_vsids: self.toggle_vsids,
+			preprocessing: self.preprocessing,
+			inprocessing: self.inprocessing,
 			vivification: self.vivification,
-			vsids_after: self.vsids_after,
+			subsumption: self.subsumption,
+			variable_elimination: self.variable_elimination,
+			probing: self.probing,
+			conditioning: self.conditioning,
+			vsids_after_conflict: self.vsids_after_conflict,
+			vsids_after_restart: self.vsids_after_restart,
 			vsids_only: self.vsids_only,
 			stdout: self.stdout,
 		}
@@ -557,8 +595,15 @@ where
 			int_eager_limit: self.int_eager_limit,
 			restart: self.restart,
 			toggle_vsids: self.toggle_vsids,
+			preprocessing: self.preprocessing,
+			inprocessing: self.inprocessing,
 			vivification: self.vivification,
-			vsids_after: self.vsids_after,
+			subsumption: self.subsumption,
+			variable_elimination: self.variable_elimination,
+			probing: self.probing,
+			conditioning: self.conditioning,
+			vsids_after_conflict: self.vsids_after_conflict,
+			vsids_after_restart: self.vsids_after_restart,
 			vsids_only: self.vsids_only,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
@@ -579,8 +624,7 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			"true" | "on" | "1" => Ok(true),
 			"false" | "off" | "0" => Ok(false),
 			_ => Err(format!(
-				"expected 'true','false','on','off','0', or '1', found '{}'",
-				s
+				"expected 'true','false','on','off','0', or '1', found '{s}'"
 			)),
 		};
 
@@ -603,13 +647,38 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 				.map(|x| x.unwrap_or(false))
 				.map_err(|e| e.to_string())?,
 			toggle_vsids: args.contains("--toggle-vsids"),
+			vsids_after_conflict: args
+				.opt_value_from_str("--vsids-after-conflict")
+				.map_err(|e| e.to_string())?,
+			vsids_after_restart: args.contains("--vsids-after-restart"),
+			vsids_only: args.contains("--vsids-only"),
+
+			conditioning: args
+				.opt_value_from_fn("--conditioning", parse_bool_arg)
+				.map(|x| x.unwrap_or(false))
+				.map_err(|e| e.to_string())?,
+			inprocessing: args
+				.opt_value_from_fn("--inprocessing", parse_bool_arg)
+				.map(|x| x.unwrap_or(false))
+				.map_err(|e| e.to_string())?,
+			preprocessing: args
+				.opt_value_from_str("--preprocessing")
+				.map_err(|e| e.to_string())?,
+			probing: args
+				.opt_value_from_fn("--probing", parse_bool_arg)
+				.map(|x| x.unwrap_or(false))
+				.map_err(|e| e.to_string())?,
+			variable_elimination: args
+				.opt_value_from_fn("--variable-elimination", parse_bool_arg)
+				.map(|x| x.unwrap_or(false))
+				.map_err(|e| e.to_string())?,
 			vivification: args
 				.opt_value_from_fn("--vivify", parse_bool_arg)
 				.map(|x| x.unwrap_or(false)) // TODO: investigate whether this can be re-enabled
 				.map_err(|e| e.to_string())?,
-			vsids_only: args.contains("--vsids-only"),
-			vsids_after: args
-				.opt_value_from_str("--vsids-after")
+			subsumption: args
+				.opt_value_from_fn("--subsumption", parse_bool_arg)
+				.map(|x| x.unwrap_or(false))
 				.map_err(|e| e.to_string())?,
 
 			verbose,
@@ -685,7 +754,7 @@ impl Display for Solution<'_> {
 				writeln!(f, "{ident} = {};", (self.value)(self.var_map[ident]))?;
 			}
 		}
-		writeln!(f, "{}", FZN_SEPERATOR)
+		writeln!(f, "{FZN_SEPERATOR}")
 	}
 }
 

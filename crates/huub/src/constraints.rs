@@ -13,6 +13,7 @@ pub mod int_linear;
 pub mod int_pow;
 pub mod int_table;
 pub mod int_times;
+pub mod int_value_precede;
 
 use std::{
 	error::Error,
@@ -24,6 +25,7 @@ use std::{
 
 use index_vec::IndexVec;
 use pindakaas::Lit as RawLit;
+use tracing::warn;
 
 use crate::{
 	actions::{
@@ -32,9 +34,10 @@ use crate::{
 	},
 	reformulate::ReformulationError,
 	solver::{
+		activation_list::IntEvent,
 		engine::{PropRef, State},
 		solving_context::SolvingContext,
-		BoolView, BoolViewInner,
+		BoolView, BoolViewInner, IntView,
 	},
 	Conjunction, Model,
 };
@@ -61,7 +64,8 @@ pub(crate) enum CachedReason<A: ExplanationActions, R: ReasonBuilder<A>> {
 /// inconsistent values.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Conflict {
-	/// The subject of the conflict (i.e., the literal that couldn't be propagated).
+	/// The subject of the conflict (i.e., the literal that couldn't be
+	/// propagated).
 	///
 	/// If `None`, the conflict is a root conflict.
 	pub(crate) subject: Option<RawLit>,
@@ -87,8 +91,8 @@ pub trait Constraint<S: SimplificationActions>: Debug + DynConstraintClone {
 	/// Simplify the [`Model`] given the current constraint.
 	///
 	/// This method is expected to reduce the domains of decision variables,
-	/// rewrite the constraint to a simpler form, or detect when the constraint is
-	/// already subsumed by the current state of the model.
+	/// rewrite the constraint to a simpler form, or detect when the constraint
+	/// is already subsumed by the current state of the model.
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		let _ = actions;
 		Ok(SimplificationStatus::Fixpoint)
@@ -137,6 +141,39 @@ where
 	P: PropagationActions,
 	E: ExplanationActions,
 {
+	/// Advises the propagator that the solver is backtracking.
+	fn advise_of_backtrack(&mut self, actions: &mut E) {
+		let _ = actions;
+		unreachable!("propagator did not provide a backtrack advisor implementation")
+	}
+
+	/// Advises the propagator that a [`BoolView`] is assigned with the
+	/// associated data given when registering the advisor. If the advisor
+	/// returns `true`, then the propagator will be enqueued.
+	fn advise_of_bool_change(&mut self, actions: &mut E, view: BoolView, data: u64) -> bool {
+		let _ = actions;
+		let _ = view;
+		let _ = data;
+		unreachable!("propagator did not provide a Boolean advisor implementation")
+	}
+
+	/// Advises the propagator that a [`IntView`] has changed with the
+	/// associated data given when registering the advisor. If the advisor
+	/// returns `true`, then the propagator will be enqueued.
+	fn advise_of_int_change(
+		&mut self,
+		actions: &mut E,
+		view: IntView,
+		event: IntEvent,
+		data: u64,
+	) -> bool {
+		let _ = actions;
+		let _ = view;
+		let _ = event;
+		let _ = data;
+		unreachable!("propagator did not provide an integer advisor implementation")
+	}
+
 	/// The propagate method is called during the search process to allow the
 	/// propagator to enforce
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
@@ -156,8 +193,8 @@ where
 	/// propagated. If the `lit` argument is `None`, then the reason was used to
 	/// explain `false`.
 	///
-	/// The state of the solver is reverted to the state before the propagation of
-	/// the `lit` to be explained.
+	/// The state of the solver is reverted to the state before the propagation
+	/// of the `lit` to be explained.
 	fn explain(&mut self, actions: &mut E, lit: Option<RawLit>, data: u64) -> Conjunction {
 		let _ = actions;
 		let _ = lit;
@@ -191,14 +228,14 @@ pub trait ReasonBuilder<A: ExplanationActions + ?Sized> {
 /// indicating whether the constraint has been subsumed (such that it can be
 /// removed from the [`Model`]) or not.
 pub enum SimplificationStatus {
-	/// The constraint has been simplified as much as possible, but should be kept
-	/// in the [`Model`].
+	/// The constraint has been simplified as much as possible, but should be
+	/// kept in the [`Model`].
 	///
-	/// Simplification can be triggered again if any of the decision variables the
-	/// constraint depends on change.
+	/// Simplification can be triggered again if any of the decision variables
+	/// the constraint depends on change.
 	Fixpoint,
-	/// The constraint has been simplified to the point where it is subsumed. The
-	/// constraint can be removed from the [`Model`].
+	/// The constraint has been simplified to the point where it is subsumed.
+	/// The constraint can be removed from the [`Model`].
 	Subsumed,
 }
 
@@ -268,16 +305,19 @@ impl Conflict {
 	) -> Self {
 		match reason.build_reason(actions) {
 			Ok(reason) => Self { subject, reason },
-			Err(true) => {
-				if let Some(subject) = subject {
+			Err(true) => match subject {
+				Some(subject) => Self {
+					subject: None,
+					reason: Reason::Simple(!subject),
+				},
+				None => {
+					warn!("Empty conflict detected. This suggests additional reasoning might be possible during Model simplification.");
 					Self {
 						subject: None,
-						reason: Reason::Simple(!subject),
+						reason: Reason::Eager(Box::new([])),
 					}
-				} else {
-					panic!("constructing empty conflict")
 				}
-			}
+			},
 			Err(false) => unreachable!("invalid reason"),
 		}
 	}
