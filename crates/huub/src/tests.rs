@@ -80,8 +80,8 @@ fn test_duplicate_propagation() {
 #[test]
 fn test_unify_int_impossible() {
 	let mut prb = Model::default();
-	let a = prb.new_int_var((1..=5).into());
-	let b = prb.new_int_var((1..=2).into());
+	let a = prb.new_int_var(1..=5);
+	let b = prb.new_int_var(1..=2);
 
 	let lin = (a * 2 - b * 5).eq(0);
 	prb += lin;
