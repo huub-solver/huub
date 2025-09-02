@@ -1,6 +1,5 @@
 //! Structure and algorithms for the integer diffn constraint, which
 //! enforces that a number of k-dimensional hyperrectangles do not overlap.
-use itertools::Itertools;
 use tracing::trace;
 
 use crate::{
@@ -72,6 +71,8 @@ pub struct IntDiffnSweep<const NON_STRICT: bool> {
 	/// removed completely when reasoning in the rest of the algorithm since
 	/// it will not effect any other triangle
 	bounding_box: ForbiddenRegion,
+	/// Stores all forbidden regions for a given object
+	all_fr: Vec<ForbiddenRegion>,
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntDiffn {
@@ -137,7 +138,6 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			});
 		}
 
-		// Tracks whether an rectangles posn domains are fixed
 		let target_trail = (0..box_size[0].len())
 			.map(|_| solver.new_trailed_int(0))
 			.collect();
@@ -169,6 +169,8 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			ub: vec![i64::MIN; box_posn[0].len()],
 		};
 
+		let all_fr_prop = Vec::new();
+
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				box_posn: box_posn_prop,
@@ -181,6 +183,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 				lb_tracker: lb_tracker_prop,
 				lb_sizes: lb_sizes_prop,
 				bounding_box: bounding_box_prop,
+				all_fr: all_fr_prop,
 			}),
 			PriorityLevel::Lowest,
 		);
@@ -201,7 +204,6 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		fr_support: &[usize],
 		curr_obj_idx: usize,
 		curr_dimension: usize,
-		all_fr: &[ForbiddenRegion],
 	) -> Result<(), Conflict> {
 		let mut sweep = vec![];
 		let mut jump = vec![];
@@ -212,7 +214,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			jump.push(self.ub_tracker[d].values[curr_obj_idx] + 1);
 		}
 		// Get the forbidden region our current sweep point is overlapping with
-		let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
+		let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, &self.all_fr);
 		while b && infeasible_fr.is_some() {
 			// The jump is always pointed toward upper bounds of forbiddens as this is where we will
 			// find feasible origins
@@ -241,7 +243,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 				self.dimensions,
 			);
 
-			infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
+			infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, &self.all_fr);
 		}
 		// Don't bother to do any propagation if the sweep point is at the same place it started
 		if sweep[curr_dimension] != self.lb_tracker[curr_dimension].values[curr_obj_idx] {
@@ -253,14 +255,8 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 				self.ub_tracker[curr_dimension].values[curr_obj_idx],
 				sweep[curr_dimension]
 			);
-			let reason = self.explain_propagation(
-				actions,
-				all_fr,
-				fr_support,
-				curr_obj_idx,
-				curr_dimension,
-				false,
-			);
+			let reason =
+				self.explain_propagation(actions, fr_support, curr_obj_idx, curr_dimension, false);
 			actions.set_int_lower_bound(
 				self.box_posn[curr_dimension].values[curr_obj_idx],
 				sweep[curr_dimension],
@@ -282,7 +278,6 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		fr_support: &[usize],
 		curr_obj_idx: usize,
 		curr_dimension: usize,
-		all_fr: &[ForbiddenRegion],
 	) -> Result<(), Conflict> {
 		let mut sweep = vec![];
 		let mut jump = vec![];
@@ -293,7 +288,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			jump.push(self.lb_tracker[i].values[curr_obj_idx] - 1);
 		}
 		// Get the forbidden region our current sweep point is overlapping with
-		let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
+		let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, &self.all_fr);
 		while b && infeasible_fr.is_some() {
 			// The jump is always pointed toward upper bounds of forbiddens as this is where we will
 			// find feasible origins
@@ -321,7 +316,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 				self.dimensions,
 			);
 
-			infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, all_fr);
+			infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, &self.all_fr);
 		}
 
 		// Don't bother to do any propagation if the sweep point is at the same place it started
@@ -334,14 +329,8 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 				self.ub_tracker[curr_dimension].values[curr_obj_idx],
 				sweep[curr_dimension]
 			);
-			let reason = self.explain_propagation(
-				actions,
-				all_fr,
-				fr_support,
-				curr_obj_idx,
-				curr_dimension,
-				true,
-			);
+			let reason =
+				self.explain_propagation(actions, fr_support, curr_obj_idx, curr_dimension, true);
 
 			actions.set_int_upper_bound(
 				self.box_posn[curr_dimension].values[curr_obj_idx],
@@ -402,10 +391,11 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			let rotation = (i + curr_dimension) % dimensions;
 			sweep[rotation] = jump[rotation];
 			jump[rotation] = curr_obj_lb[rotation] - 1;
+			// If the current position of the sweep is still within the bounds of our domains we can
+			// continue searching in this direction (dimension), otherwise reset it
 			if sweep[rotation] >= curr_obj_lb[rotation] {
 				return true;
 			} else {
-				// Reset sweep-point
 				sweep[rotation] = curr_obj_ub[rotation];
 			}
 		}
@@ -413,7 +403,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		false
 	}
 
-	/// Checks if a forbidden overlaps with the starting domain
+	/// Checks if a forbidden overlaps with the given domain of lower and upper-bounds
 	fn overlaps(
 		curr_obj_lb: &[IntVal],
 		curr_obj_ub: &[IntVal],
@@ -429,16 +419,16 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 	}
 
 	/// Generates forbidden regions given object o, forbidden regions that do not overlap with
-	/// the starting domain of o are not included
+	/// the starting domain of o are not included. Forbidden regions that are a subset of another
+	/// are also not considered.
 	fn gen_forbidden_regions<P: PropagationActions>(
-		&self,
+		&mut self,
 		actions: &mut P,
 		fr_support: &mut Vec<usize>,
 		o_idx: usize,
 		dimensions: usize,
-	) -> Option<Vec<ForbiddenRegion>> {
-		// TODO: To avoid uneccesary allocations, this could be moved to self
-		let mut all_fr: Vec<ForbiddenRegion> = Vec::new();
+	) -> Option<()> {
+		self.all_fr.clear();
 		for i in 0..self.box_posn[0].values.len() {
 			// Check if the current object can be ignored if it has lost its source property
 			if actions.get_trailed_int(self.source[i]) == 1 {
@@ -456,12 +446,8 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 
 			let mut exists = true;
 			for d in 0..self.dimensions {
-				let pos_ub: IntVal = self.ub_tracker[d].values[i];
-				let pos_lb: IntVal = self.lb_tracker[d].values[i];
-				let curr_size = self.lb_sizes[d].values[o_idx];
-				let size = self.lb_sizes[d].values[i];
-				let fr_lb = pos_ub - curr_size + 1;
-				let fr_ub = pos_lb + size - 1;
+				let fr_lb = self.ub_tracker[d].values[i] - self.lb_sizes[d].values[o_idx] + 1;
+				let fr_ub = self.lb_tracker[d].values[i] + self.lb_sizes[d].values[i] - 1;
 				if fr_lb <= fr_ub {
 					fr.lb.push(fr_lb);
 					fr.ub.push(fr_ub);
@@ -474,9 +460,11 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			let lb: Vec<_> = self.lb_tracker.iter().map(|d| d.values[o_idx]).collect();
 
 			let ub: Vec<_> = self.ub_tracker.iter().map(|d| d.values[o_idx]).collect();
+
+			// Look for forbidden regions that are a subset of another such that they can be merged
 			if exists && Self::overlaps(&lb, &ub, &fr, dimensions) {
 				let mut c = 0;
-				for f in &mut all_fr {
+				for f in &mut self.all_fr {
 					let fr_object = fr_support[c];
 					let v = Self::coalesce(f, &fr, self.dimensions);
 
@@ -496,27 +484,27 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 						3 => continue,
 						// No overlap possible
 						4 => continue,
-						_ => panic!("should not be possible"),
+						_ => unreachable!("should not be possible"),
 					}
 					c += 1;
 				}
 
 				for (c, o) in regions_to_remove.iter().rev() {
-					let _ = all_fr.remove(*c);
+					let _ = self.all_fr.remove(*c);
 					fr_support.retain(|&x| x != *o);
 				}
 
 				if exists {
 					fr_support.push(i);
-					all_fr.push(fr);
+					self.all_fr.push(fr);
 				}
 			}
 		}
 
-		if all_fr.is_empty() {
+		if self.all_fr.is_empty() {
 			None
 		} else {
-			Some(all_fr)
+			Some(())
 		}
 	}
 
@@ -606,7 +594,6 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 	fn explain_forbidden_regions<P: PropagationActions>(
 		&mut self,
 		actions: &mut P,
-		all_fr: &[ForbiddenRegion],
 		fr_support: &[usize],
 		curr_obj_idx: usize,
 	) -> Vec<BoolView> {
@@ -626,11 +613,11 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 
 				// If a forbidden region is overhanging the currently active obejct, it can be
 				// assumed to be smaller when explaining which
-				if all_fr[fr].ub[d] > origin_ub {
+				if self.all_fr[fr].ub[d] > origin_ub {
 					possible_lb = origin_ub - self.lb_sizes[d].values[o_idx] + 1;
 				}
 
-				if all_fr[fr].lb[d] < origin_lb {
+				if self.all_fr[fr].lb[d] < origin_lb {
 					possible_ub = origin_lb + self.lb_sizes[d].values[curr_obj_idx] - 1;
 				}
 
@@ -670,7 +657,6 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 	fn explain_propagation<P: PropagationActions>(
 		&mut self,
 		actions: &mut P,
-		all_fr: &[ForbiddenRegion],
 		fr_support: &[usize],
 		curr_obj_idx: usize,
 		curr_dimension: usize,
@@ -749,7 +735,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 				));
 			}
 		}
-		reason.extend(self.explain_forbidden_regions(actions, all_fr, fr_support, curr_obj_idx));
+		reason.extend(self.explain_forbidden_regions(actions, fr_support, curr_obj_idx));
 		reason
 	}
 }
@@ -786,14 +772,13 @@ where
 			}
 			let mut fr_support: Vec<usize> = Vec::new();
 
-			if let Some(all_fr) =
+			if let Some(()) =
 				self.gen_forbidden_regions::<P>(actions, &mut fr_support, o_idx, self.dimensions)
 			{
 				if self.fixed_in_all_dimensions(o_idx) {
 					// Conflict will occur here since there exists forbidden regions for a fixed
 					// object
-					let reason =
-						self.explain_propagation(actions, &all_fr, &fr_support, o_idx, 0, false);
+					let reason = self.explain_propagation(actions, &fr_support, o_idx, 0, false);
 					actions.set_int_lower_bound(
 						self.box_posn[0].values[o_idx],
 						self.ub_tracker[0].values[o_idx] + 1,
@@ -802,9 +787,9 @@ where
 				}
 				let mut all_fixed = true;
 				for d in 0..self.dimensions {
-					self.prune_min(actions, &fr_support, o_idx, d, &all_fr)?;
+					self.prune_min(actions, &fr_support, o_idx, d)?;
 
-					self.prune_max(actions, &fr_support, o_idx, d, &all_fr)?;
+					self.prune_max(actions, &fr_support, o_idx, d)?;
 
 					if self.lb_tracker[d].values[o_idx] != self.ub_tracker[d].values[o_idx] {
 						all_fixed = false;
@@ -855,7 +840,7 @@ mod tests {
 	use crate::{diffn_int, reformulate::InitConfig, Decision, Model};
 	#[test]
 	#[traced_test]
-	fn test_diffn_unsat_1() {
+	fn test_diffn_unsat() {
 		let mut prb = Model::default();
 		let x_pos_1 = prb.new_int_var((1..=2).into());
 		let x_pos_2 = prb.new_int_var((1..=2).into());
