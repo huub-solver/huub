@@ -99,15 +99,16 @@ impl<S: SimplificationActions> Constraint<S> for IntDiffn {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Active forbidden regions
 struct ForbiddenRegion {
-	/// lower bound in each dimension
+	/// Lower bound in each dimension
 	lb: Vec<IntVal>,
-	/// upper bound in each dimension
+	/// Upper bound in each dimension
 	ub: Vec<IntVal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Stores the all values for specific dimension
 struct DimStore<T> {
+    /// All values in a given dimension
 	values: Vec<T>,
 }
 
@@ -797,7 +798,7 @@ mod tests {
 
 		let (mut slv, _) = prb.to_solver(&InitConfig::default()).unwrap();
 
-		slv.assert_unsatisfiable()
+		slv.assert_unsatisfiable();
 	}
 
 	#[test]
