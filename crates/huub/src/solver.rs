@@ -13,7 +13,7 @@ use std::{
 	fmt::{self, Debug, Display, Formatter},
 	hash::Hash,
 	num::NonZeroI32,
-	ops::{Add, AddAssign, Deref, Mul, Neg, Not},
+	ops::{Add, AddAssign, Deref, DerefMut, Mul, Neg, Not},
 	rc::Rc,
 };
 
@@ -39,7 +39,7 @@ use crate::{
 	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::InitConfig,
 	solver::{
-		activation_list::{ActivationAction, IntPropCond},
+		activation_list::{ActivationAction, IntEvent, IntPropCond},
 		engine::{trace_new_lit, AdvisorDef, Engine, PropRef},
 		int_var::{DirectStorage, IntVarRef, LazyLitDef, OrderStorage},
 		queue::{PriorityLevel, PropagatorInfo},
@@ -692,20 +692,39 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 	/// Used by [`Solver::advise_on_bool_change`] and
 	/// [`Solver::advise_on_int_change`].
 	fn advise_on_lit_change(&mut self, prop: PropRef, lit: RawLit, data: u64, bool2int: bool) {
+		{
+			// Ensure the trail has allocated a space to track the variable
+			self.engine
+				.borrow_mut()
+				.state
+				.trail
+				.grow_to_boolvar(lit.var());
+		}
+		// Ensure that the variable is marked as observed
 		self.oracle.add_observed_var(lit.var());
-		let state = &mut self.engine.borrow_mut().state;
-		state.trail.grow_to_boolvar(lit.var());
-		let adv = state.advisors.push(AdvisorDef {
-			bool2int,
-			data,
-			negated: false,
-			propagator: prop,
-		});
-		state
-			.bool_activation
-			.entry(lit.var())
-			.or_default()
-			.push(ActivationAction::Advise(adv).into());
+		// Add the advisor to the engine
+		let mut engine = self.engine.borrow_mut();
+		// If the variable is already assigned, notify the advisor immediately
+		if engine.state.trail.get_sat_value(lit).is_some() {
+			if engine.notify_lit_advisor(prop, lit, data, bool2int) {
+				drop(engine);
+				self.enqueue_now(prop);
+			}
+		} else {
+			// Otherwise, add the advisor to the engine
+			let adv = engine.state.advisors.push(AdvisorDef {
+				bool2int,
+				data,
+				negated: false,
+				propagator: prop,
+			});
+			engine
+				.state
+				.bool_activation
+				.entry(lit.var())
+				.or_default()
+				.push(ActivationAction::Advise(adv).into());
+		}
 	}
 
 	/// Find all solutions with regard to a list of given variables.
@@ -1201,10 +1220,18 @@ impl<Oracle: ExternalPropagation> PropagatorInitActions for Solver<Oracle> {
 
 	fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView, data: u64) {
 		match var.0 {
-			BoolViewInner::Lit(lit) => {
-				self.advise_on_lit_change(prop, lit, data, false);
+			BoolViewInner::Lit(lit) => self.advise_on_lit_change(prop, lit, data, false),
+			BoolViewInner::Const(_) => {
+				// Immediate notify the propagator, and enqueue if necessary
+				let mut engine_ref = self.engine.borrow_mut();
+				let engine: &mut Engine = engine_ref.deref_mut();
+				let enqueue =
+					engine.propagators[prop].advise_of_bool_change(&mut engine.state, var, data);
+				drop(engine_ref);
+				if enqueue {
+					self.enqueue_now(prop);
+				}
 			}
-			BoolViewInner::Const(_) => {}
 		}
 	}
 
@@ -1229,7 +1256,20 @@ impl<Oracle: ExternalPropagation> PropagatorInitActions for Solver<Oracle> {
 				};
 				(var, condition, !transformer.positive_scale())
 			}
-			IntViewInner::Const(_) => return, // ignore
+			IntViewInner::Const(_) => {
+				// Immediately notify the propagator, and enqueue the propagator if it is
+				// required.
+				if self.engine.borrow_mut().notify_int_advisor(
+					prop,
+					var,
+					IntEvent::Fixed,
+					data,
+					false,
+				) {
+					self.enqueue_now(prop);
+				}
+				return;
+			}
 			IntViewInner::Bool { lit, .. } => {
 				return self.advise_on_lit_change(prop, lit, data, true);
 			}
@@ -1253,18 +1293,30 @@ impl<Oracle: ExternalPropagation> PropagatorInitActions for Solver<Oracle> {
 	fn enqueue_on_bool_change(&mut self, prop: PropRef, var: BoolView) {
 		match var.0 {
 			BoolViewInner::Lit(lit) => {
+				// Ensure that the trail has a space to track the literal
 				{
 					let state = &mut self.engine.borrow_mut().state;
 					state.trail.grow_to_boolvar(lit.var());
-					state
+				}
+				// Ensure the oracle knows the literal is observed.
+				self.oracle.add_observed_var(lit.var());
+
+				let mut engine = self.engine.borrow_mut();
+				// If the literal is already assigned, enqueue the propagator immediately.
+				if engine.state.trail.get_sat_value(lit).is_some() {
+					drop(engine);
+					self.enqueue_now(prop);
+				} else {
+					// Otherwise, add propagator to the activation list.
+					engine
+						.state
 						.bool_activation
 						.entry(lit.var())
 						.or_default()
 						.push(ActivationAction::Enqueue(prop).into());
-				}
-				self.oracle.add_observed_var(lit.var());
+				};
 			}
-			BoolViewInner::Const(_) => {}
+			BoolViewInner::Const(_) => self.enqueue_now(prop),
 		}
 	}
 
@@ -1283,7 +1335,11 @@ impl<Oracle: ExternalPropagation> PropagatorInitActions for Solver<Oracle> {
 				};
 				(var, condition)
 			}
-			IntViewInner::Const(_) => return, // ignore
+			IntViewInner::Const(_) => {
+				// Immediately enqueue, and no further action is required
+				self.enqueue_now(prop);
+				return;
+			}
 			IntViewInner::Bool { lit, .. } => {
 				return self.enqueue_on_bool_change(prop, BoolView(BoolViewInner::Lit(lit)))
 			}

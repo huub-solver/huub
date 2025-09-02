@@ -187,6 +187,57 @@ impl Engine {
 			);
 		}
 	}
+
+	/// Notify the given propagator about the integer change, providing the
+	/// given data.
+	///
+	/// If `negated` is true, then the event is negated.
+	pub(crate) fn notify_int_advisor(
+		&mut self,
+		prop: PropRef,
+		iv: IntView,
+		event: IntEvent,
+		data: u64,
+		negated: bool,
+	) -> bool {
+		let event = match event {
+			IntEvent::LowerBound if negated => IntEvent::UpperBound,
+			IntEvent::UpperBound if negated => IntEvent::LowerBound,
+			e => e,
+		};
+		self.propagators[prop].advise_of_int_change(&mut self.state, iv, event, data)
+	}
+
+	/// Notify the given propagator about the literal change, providing the
+	/// given data.
+	///
+	/// If `bool2int` is true, then the literal is transformed into an integer
+	/// view.
+	pub(crate) fn notify_lit_advisor(
+		&mut self,
+		prop: PropRef,
+		lit: RawLit,
+		data: u64,
+		bool2int: bool,
+	) -> bool {
+		if bool2int {
+			self.propagators[prop].advise_of_int_change(
+				&mut self.state,
+				IntView(IntViewInner::Bool {
+					transformer: Default::default(),
+					lit,
+				}),
+				IntEvent::Fixed,
+				data,
+			)
+		} else {
+			self.propagators[prop].advise_of_bool_change(
+				&mut self.state,
+				BoolView(BoolViewInner::Lit(lit)),
+				data,
+			)
+		}
+	}
 }
 
 impl PropagatorExtension for Engine {
@@ -397,23 +448,8 @@ impl PropagatorExtension for Engine {
 									propagator,
 									..
 								} = &self.state.advisors[adv];
-								let enqueue = if bool2int {
-									self.propagators[propagator].advise_of_int_change(
-										&mut self.state,
-										IntView(IntViewInner::Bool {
-											transformer: Default::default(),
-											lit,
-										}),
-										IntEvent::Fixed,
-										data,
-									)
-								} else {
-									self.propagators[propagator].advise_of_bool_change(
-										&mut self.state,
-										BoolView(BoolViewInner::Lit(lit)),
-										data,
-									)
-								};
+								let enqueue =
+									self.notify_lit_advisor(propagator, lit, data, bool2int);
 								if !enqueue {
 									continue;
 								}
@@ -501,17 +537,14 @@ impl PropagatorExtension for Engine {
 										propagator,
 										..
 									} = &self.state.advisors[adv];
-									let event = match event {
-										IntEvent::LowerBound if negated => IntEvent::UpperBound,
-										IntEvent::UpperBound if negated => IntEvent::LowerBound,
-										e => e,
-									};
-									if !self.propagators[propagator].advise_of_int_change(
-										&mut self.state,
+									let enqueue = self.notify_int_advisor(
+										propagator,
 										IntView(IntViewInner::VarRef(iv)),
 										event,
 										data,
-									) {
+										negated,
+									);
+									if !enqueue {
 										continue;
 									}
 									propagator

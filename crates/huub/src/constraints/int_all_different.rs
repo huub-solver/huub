@@ -15,7 +15,7 @@ use crate::{
 	solver::{
 		activation_list::{IntEvent, IntPropCond},
 		queue::PriorityLevel,
-		IntLitMeaning, IntView, IntViewInner,
+		IntLitMeaning, IntView,
 	},
 	IntDecision, IntVal,
 };
@@ -454,27 +454,11 @@ impl IntAllDifferentValue {
 	/// Create a new [`IntAllDifferentValue`] propagator and post it in the
 	/// solver.
 	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, vars: Vec<IntView>) {
-		// Initialize a list of indices of decisions that already have a fixed
-		// value.
-		let action_list: Vec<usize> = vars
-			.iter()
-			.enumerate()
-			.flat_map(|(i, v)| {
-				if let IntView(IntViewInner::Const(_)) = v {
-					Some(i)
-				} else {
-					None
-				}
-			})
-			.collect();
-		// If the list is not empty, then the propagator should be enqueued at the
-		// root level.
-		let enqueue = !action_list.is_empty();
 		// Post the propagator to the solver
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				vars: vars.clone(),
-				action_list,
+				action_list: Vec::new(),
 			}),
 			PriorityLevel::Low,
 		);
@@ -486,9 +470,6 @@ impl IntAllDifferentValue {
 		// Advise the propagator of backtracking to clear the list of fixed decision
 		// (indices).
 		solver.advise_on_backtrack(prop);
-		if enqueue {
-			solver.enqueue_now(prop);
-		}
 	}
 }
 
