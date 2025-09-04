@@ -1914,7 +1914,8 @@ where
 mod tests {
 	use std::num::NonZero;
 	use itertools::Itertools;
-	use pindakaas::Lit as RawLit;
+	use pindakaas::{Lit as RawLit, Var};
+	use pindakaas::solver::propagation::SolvingActions;
 	use rangelist::RangeList;
 	use tracing::trace;
 	use tracing_test::traced_test;
@@ -1938,6 +1939,27 @@ mod tests {
 	const PRIO_BOOLS: u8 = 1;
 	const LEVEL: u32 = 2;
 
+	struct DummyActions;
+
+	// Dummy implementation of [`SolvingActions`] to allow creating a [`SolvingContext`]
+	impl SolvingActions for DummyActions {
+		fn is_decision(&mut self, _lit: RawLit) -> bool {
+			panic!("not implemented")
+		}
+
+		fn new_observed_var(&mut self) -> Var {
+			panic!("not implemented")
+		}
+
+		fn phase(&mut self, _lit: RawLit) {
+			panic!("not implemented")
+		}
+
+		fn unphase(&mut self, _lit: RawLit) {
+			panic!("not implemented")
+		}
+	}
+
 	#[test]
 	#[traced_test]
 	fn test_relevant_dijkstra() {
@@ -1955,8 +1977,9 @@ mod tests {
 		let mut graph = DifferenceLogicGraph::new(&mut initial_trail, int_vars.len(), bool_vars.len());
 		initial_trail.init_trail(&mut slv);
 		graph.init_trail(&mut initial_trail);
+		let mut dummy_actions = DummyActions;
 		let mut engine = slv.engine.borrow_mut();
-		let mut ctx = SolvingContext::new(&mut slv.oracle, &mut engine.state);
+		let mut ctx = SolvingContext::new(&mut dummy_actions, &mut engine.state);
   		let mut model_adapter = SolverModelAdapter::new(&mut ctx, &int_vars, &bool_vars);
 		for (x, y, d) in vec![(0, 1, 1), (0, 2, 1), (0, 4, 1),
 							  (1, 4, 1), (1, 5, 1), (2, 4, 1), (3, 4, 1), (3, 5, 1),
@@ -1996,8 +2019,9 @@ mod tests {
 		let mut graph = DifferenceLogicGraph::new(&mut initial_trail, int_vars.len(), bool_vars.len());
 		initial_trail.init_trail(&mut slv);
 		graph.init_trail(&mut initial_trail);
+		let mut dummy_actions = DummyActions;
 		let mut engine = slv.engine.borrow_mut();
-		let mut ctx = SolvingContext::new(&mut slv.oracle, &mut engine.state);
+		let mut ctx = SolvingContext::new(&mut dummy_actions, &mut engine.state);
 		let mut model_adapter = SolverModelAdapter::new(&mut ctx, &int_vars, &bool_vars);
 		let _  = graph.new_edge(model_adapter.get_trailing_actions(), DiffEdge::new(0, 1, 2, None));
 		let new_index = graph.new_edge(model_adapter.get_trailing_actions(), DiffEdge::new(2, 0, 1, None));
@@ -2030,8 +2054,9 @@ mod tests {
 		let mut graph = DifferenceLogicGraph::new(&mut initial_trail, int_vars.len(), bool_vars.len());
 		initial_trail.init_trail(&mut slv);
 		graph.init_trail(&mut initial_trail);
+		let mut dummy_actions = DummyActions;
 		let mut engine = slv.engine.borrow_mut();
-		let mut ctx = SolvingContext::new(&mut slv.oracle, &mut engine.state);
+		let mut ctx = SolvingContext::new(&mut dummy_actions, &mut engine.state);
 		let mut model_adapter = SolverModelAdapter::new(&mut ctx, &int_vars, &bool_vars);
 		let _  = graph.new_edge(model_adapter.get_trailing_actions(), DiffEdge::new(0, 1, 2, None));
 		let new_index = graph.new_edge(model_adapter.get_trailing_actions(), DiffEdge::new(1, 2, 1, None));
