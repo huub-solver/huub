@@ -96,7 +96,7 @@ pub(crate) struct EngineStatistics {
 /// the storage of the propagators and branchers.
 ///
 /// Note that this structure is public to the user to allow the user to
-/// construct [`BoxedPropgator`], but it is not intended to be constructed by
+/// construct [`BoxedPropagator`], but it is not intended to be constructed by
 /// the user. It should merely be seen as the implementation of the
 /// [`ExplanationActions`] trait.
 pub struct State {
@@ -122,7 +122,7 @@ pub struct State {
 	///
 	/// Triggered when a conflict is detected during propagation, the solver
 	/// should backtrack. Debug assertions will be triggered if other actions
-	/// are taken instead. Some mechanisms, such as propagator queueing, might
+	/// are taken instead. Some mechanisms, such as propagator queuing, might
 	/// be disabled to optimize the execution of the solver.
 	pub(crate) failed: bool,
 
@@ -134,7 +134,7 @@ pub struct State {
 	/// Whether VSIDS is currently enabled
 	pub(crate) vsids: bool,
 
-	// ---- Queueing Infrastructure ----
+	// ---- Queuing Infrastructure ----
 	/// Advisor data storage
 	pub(crate) advisors: IndexVec<Advisor, AdvisorDef>,
 	/// Boolean variable enqueueing information
@@ -185,6 +185,70 @@ impl Engine {
 				0,
 				"Literal {lit} propagated without reason at non-zero decision level",
 			);
+		}
+	}
+
+	/// [`PropagatorExtension::notify_backtrack`] implementation with additional
+	/// `ARTIFICIAL` const generic parameter, used to signal when the solver is
+	/// backtracking from an artificial decision level
+	fn notify_backtrack<const ARTIFICIAL: bool>(&mut self, new_level: usize, restart: bool) {
+		// Revert value changes to previous decision level
+		self.state.notify_backtrack::<false>(new_level, restart);
+
+		// Notify subscribed propagators of backtracking
+		for &p in self.notify_of_backtrack.iter() {
+			self.propagators[p].advise_of_backtrack(&mut self.state);
+		}
+	}
+
+	/// Notify the given propagator about the integer change, providing the
+	/// given data.
+	///
+	/// If `negated` is true, then the event is negated.
+	pub(crate) fn notify_int_advisor(
+		&mut self,
+		prop: PropRef,
+		iv: IntView,
+		event: IntEvent,
+		data: u64,
+		negated: bool,
+	) -> bool {
+		let event = match event {
+			IntEvent::LowerBound if negated => IntEvent::UpperBound,
+			IntEvent::UpperBound if negated => IntEvent::LowerBound,
+			e => e,
+		};
+		self.propagators[prop].advise_of_int_change(&mut self.state, iv, event, data)
+	}
+
+	/// Notify the given propagator about the literal change, providing the
+	/// given data.
+	///
+	/// If `bool2int` is true, then the literal is transformed into an integer
+	/// view.
+	pub(crate) fn notify_lit_advisor(
+		&mut self,
+		prop: PropRef,
+		lit: RawLit,
+		data: u64,
+		bool2int: bool,
+	) -> bool {
+		if bool2int {
+			self.propagators[prop].advise_of_int_change(
+				&mut self.state,
+				IntView(IntViewInner::Bool {
+					transformer: Default::default(),
+					lit,
+				}),
+				IntEvent::Fixed,
+				data,
+			)
+		} else {
+			self.propagators[prop].advise_of_bool_change(
+				&mut self.state,
+				BoolView(BoolViewInner::Lit(lit)),
+				data,
+			)
 		}
 	}
 }
@@ -265,7 +329,7 @@ impl PropagatorExtension for Engine {
 		// Create a propagation context
 		let mut ctx = SolvingContext::new(slv, &mut self.state);
 
-		// Calculate values of each integer and notify popgators
+		// Calculate values of each integer and notify propagators
 		for r in (0..ctx.state.int_vars.len()).map(IntVarRef::new) {
 			let (lb, ub) = ctx.state.int_vars[r].get_bounds(&ctx.state.trail);
 			if lb != ub {
@@ -307,7 +371,7 @@ impl PropagatorExtension for Engine {
 			}
 		}
 
-		// Run propgagators to find any conflicts
+		// Run propagators to find any conflicts
 		ctx.run_propagators(&mut self.propagators);
 		// No propagation can be triggered (all variables are fixed, so only
 		// conflicts are possible)
@@ -328,7 +392,7 @@ impl PropagatorExtension for Engine {
 		});
 
 		// Revert to real decision level
-		self.state.notify_backtrack::<true>(level as usize, false);
+		self.notify_backtrack::<true>(level as usize, false);
 		debug_assert!(self.state.conflict.is_none());
 		self.state.conflict = conflict;
 
@@ -397,23 +461,8 @@ impl PropagatorExtension for Engine {
 									propagator,
 									..
 								} = &self.state.advisors[adv];
-								let enqueue = if bool2int {
-									self.propagators[propagator].advise_of_int_change(
-										&mut self.state,
-										IntView(IntViewInner::Bool {
-											transformer: Default::default(),
-											lit,
-										}),
-										IntEvent::Fixed,
-										data,
-									)
-								} else {
-									self.propagators[propagator].advise_of_bool_change(
-										&mut self.state,
-										BoolView(BoolViewInner::Lit(lit)),
-										data,
-									)
-								};
+								let enqueue =
+									self.notify_lit_advisor(propagator, lit, data, bool2int);
 								if !enqueue {
 									continue;
 								}
@@ -440,7 +489,7 @@ impl PropagatorExtension for Engine {
 					IntLitMeaning::Eq(val) if val < lb || val > ub => {
 						// Notified of invalid assignment, do nothing.
 						//
-						// Although we do not expect this to happen, it seems that Cadical
+						// Although we do not expect this to happen, it seems that CaDiCaL
 						// chronological backtracking might send notifications before
 						// additional propagation.
 						trace!(lit = i32::from(lit), lb, ub, "invalid eq notification");
@@ -501,17 +550,14 @@ impl PropagatorExtension for Engine {
 										propagator,
 										..
 									} = &self.state.advisors[adv];
-									let event = match event {
-										IntEvent::LowerBound if negated => IntEvent::UpperBound,
-										IntEvent::UpperBound if negated => IntEvent::LowerBound,
-										e => e,
-									};
-									if !self.propagators[propagator].advise_of_int_change(
-										&mut self.state,
+									let enqueue = self.notify_int_advisor(
+										propagator,
 										IntView(IntViewInner::VarRef(iv)),
 										event,
 										data,
-									) {
+										negated,
+									);
+									if !enqueue {
 										continue;
 									}
 									propagator
@@ -529,13 +575,7 @@ impl PropagatorExtension for Engine {
 
 	fn notify_backtrack(&mut self, new_level: usize, restart: bool) {
 		debug!(new_level, restart, "backtrack");
-		// Revert value changes to previous decision level
-		self.state.notify_backtrack::<false>(new_level, restart);
-
-		// Notify subscribed propagators of backtracking
-		for &p in self.notify_of_backtrack.iter() {
-			self.propagators[p].advise_of_backtrack(&mut self.state);
-		}
+		self.notify_backtrack::<false>(new_level, restart);
 	}
 
 	fn notify_new_decision_level(&mut self) {
@@ -545,7 +585,7 @@ impl PropagatorExtension for Engine {
 		debug_assert!(self.state.conflict.is_none());
 		// All propagation should have been communicated to the SAT oracle.
 		debug_assert!(self.state.propagation_queue.is_empty());
-		// Note that `self.state.clauses` may not be empty becuase [`Self::decide`]
+		// Note that `self.state.clauses` may not be empty because [`Self::decide`]
 		// might have introduced a new literal, which would in turn add its defining
 		// clauses to `self.state.clauses`.
 
@@ -622,11 +662,11 @@ impl State {
 	/// Internal method called to process the backtracking to an earlier
 	/// decision level.
 	///
-	/// The generic artugment `ARTIFICIAL` is used to signal when the solver is
+	/// The generic argument `ARTIFICIAL` is used to signal when the solver is
 	/// backtracking from an artificial decision level. An example of the use of
 	/// artificial decision levels is found in the [`Engine::check_model`]
 	/// method, where it is used to artificially fix any integer variables
-	/// using lazy encodings.
+	/// using lazy encoding.
 	fn notify_backtrack<const ARTIFICIAL: bool>(&mut self, level: usize, restart: bool) {
 		debug_assert!(!ARTIFICIAL || level as u32 == self.trail.decision_level() - 1);
 		debug_assert!(!ARTIFICIAL || !restart);
