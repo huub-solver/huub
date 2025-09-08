@@ -156,12 +156,31 @@ impl Engine {
 	/// (DEBUG ONLY) Check that the reason of a propagated literal contains only
 	/// known true literals
 	fn debug_check_reason(&mut self, lit: RawLit) {
+		use rustc_hash::FxHashSet;
+
 		if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
 			// Reason is in the form (a /\ b /\ ...), which then forms the
 			// implication (a /\ b /\ ...) -> lit
 			let clause: Clause = reason.explain(&mut self.propagators, &mut self.state, Some(lit));
 			// This is converted into a clause (¬a \/ ¬b \/ ... \/ lit)
+			let mut seen = FxHashSet::default();
 			for &l in &clause {
+				// Ensure that the same literal is not negated in the reason
+				if seen.contains(&!l) {
+					tracing::error!(
+						clause = ?clause.iter().map(|&l| i32::from(l)).collect::<Vec<_>>(),
+						lit_explained = i32::from(lit),
+						lit_pos = i32::from(!l),
+						lit_neg = i32::from(l),
+						"invalid reason: literal and its negation in clause"
+					);
+					debug_assert!(
+						false,
+						"Both {l} and {} are found in the Reason for {lit}",
+						!l
+					);
+				}
+				let _ = seen.insert(l);
 				if l == lit {
 					continue;
 				}
@@ -169,14 +188,18 @@ impl Engine {
 				// gives a
 				let val = self.state.trail.get_sat_value(!l);
 				if !val.unwrap_or(false) {
-					tracing::error!(lit_prop = i32::from(lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
+					tracing::error!(
+						clause = ?clause.iter().map(|&l| i32::from(l)).collect::<Vec<_>>(),
+						lit_explained = i32::from(lit),
+						lit_invalid = i32::from(!l),
+						invalid_val = ?val,
+						"invalid reason: not all antecedents are known true"
+					);
 				}
 				debug_assert!(
 					val.unwrap_or(false),
-					"Literal {} in Reason for {} is {:?}, but should be known true",
+					"Literal {} in Reason for {lit} is {val:?}, but should be known true",
 					!l,
-					lit,
-					val
 				);
 			}
 		} else {
