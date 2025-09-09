@@ -66,6 +66,7 @@ impl<const B: usize, T: PartialEq> PartialEq for OptField<B, T> {
 		self.value == other.value
 	}
 }
+
 #[cfg(test)]
 mod tests {
 	use std::hash::{DefaultHasher, Hash, Hasher};

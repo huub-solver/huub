@@ -18,8 +18,10 @@ use crate::{
 	helpers::opt_field::OptField,
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, BoolView, BoolViewInner, IntView,
-		IntViewInner,
+		activation_list::{IntEvent, IntPropCond},
+		queue::PriorityLevel,
+		trail::TrailedInt,
+		BoolView, BoolViewInner, IntView, IntViewInner,
 	},
 	BoolDecision, BoolFormula, Conjunction, IntDecision, IntVal, LinearTransform, NonZeroIntVal,
 };
@@ -85,12 +87,14 @@ pub type IntLinearNotEqValue = IntLinearNotEqValueImpl<0>;
 /// Value consistent propagator for the `int_lin_ne` or `int_lin_ne_imp`
 /// constraint.
 ///
-/// `R` should be `0` if the propagator is not refied, or `1` if it is. Other
+/// `R` should be `0` if the propagator is not reified, or `1` if it is. Other
 /// values are invalid.
 pub struct IntLinearNotEqValueImpl<const R: usize> {
-	/// Variables in the sumation
+	/// Decision variables in the summation
 	terms: Vec<IntView>,
-	/// The value the sumation should not equal
+	/// Number of decision variables that have been fixed to a single value
+	num_fixed: TrailedInt,
+	/// The value the summation should not equal
 	violation: IntVal,
 	/// Reified variable, if any
 	reification: OptField<R, RawLit>,
@@ -325,7 +329,7 @@ impl<S: SimplificationActions> Constraint<S> for IntLinear {
 				None => Ok(SimplificationStatus::Subsumed),
 			};
 		} else if self.operator == LinOperator::NotEqual {
-			// No futher bounds propagation possible
+			// No further bounds propagation possible
 			return Ok(SimplificationStatus::Fixpoint);
 		}
 
@@ -346,7 +350,7 @@ impl<S: SimplificationActions> Constraint<S> for IntLinear {
 			}
 		}
 
-		// For equality constriants, propagate the lower bounds of the variables
+		// For equality constraints, propagate the lower bounds of the variables
 		if self.operator == LinOperator::Equal {
 			if lb_sum == ub_sum {
 				assert_eq!(lb_sum, self.rhs);
@@ -670,8 +674,8 @@ impl IntLinearNotEqImpValue {
 
 		let vars: Vec<IntView> = vars
 			.into_iter()
-			.filter(|v| {
-				if let IntViewInner::Const(c) = v.0 {
+			.filter(|&v| {
+				if let Some(c) = solver.get_int_val(v) {
 					violation -= c;
 					false
 				} else {
@@ -679,20 +683,26 @@ impl IntLinearNotEqImpValue {
 				}
 			})
 			.collect();
+		let num_fixed = solver.new_trailed_int(0);
 
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				terms: vars.clone(),
 				violation,
+				num_fixed,
 				reification: OptField::new(reification),
 			}),
 			PriorityLevel::Low,
 		);
 
-		for &v in vars.iter() {
-			solver.enqueue_on_int_change(prop, v, IntPropCond::Fixed);
+		for (i, &v) in vars.iter().enumerate() {
+			solver.advise_on_int_change(prop, v, IntPropCond::Fixed, i as u64);
 		}
-		solver.enqueue_on_bool_change(prop, BoolView(BoolViewInner::Lit(reification)));
+		solver.advise_on_bool_change(
+			prop,
+			BoolView(BoolViewInner::Lit(reification)),
+			vars.len() as u64,
+		);
 	}
 }
 
@@ -705,8 +715,8 @@ impl IntLinearNotEqValue {
 	{
 		let vars: Vec<IntView> = vars
 			.into_iter()
-			.filter(|v| {
-				if let IntViewInner::Const(c) = v.0 {
+			.filter(|&v| {
+				if let Some(c) = solver.get_int_val(v) {
 					violation -= c;
 					false
 				} else {
@@ -714,23 +724,33 @@ impl IntLinearNotEqValue {
 				}
 			})
 			.collect();
+		let num_fixed = solver.new_trailed_int(0);
 
 		let prop = solver.add_propagator(
 			Box::new(Self {
 				terms: vars.clone(),
 				violation,
+				num_fixed,
 				reification: Default::default(),
 			}),
 			PriorityLevel::Low,
 		);
 
-		for &v in vars.iter() {
-			solver.enqueue_on_int_change(prop, v, IntPropCond::Fixed);
+		for (i, &v) in vars.iter().enumerate() {
+			solver.advise_on_int_change(prop, v, IntPropCond::Fixed, i as u64);
 		}
 	}
 }
 
 impl<const R: usize> IntLinearNotEqValueImpl<R> {
+	/// Increment the number of decision variables that are fixed, returning
+	/// whether the propagator should now be enqueued.
+	fn increment_num_fixed(&self, actions: &mut impl ExplanationActions) -> bool {
+		let num_fixed = actions.get_trailed_int(self.num_fixed) + 1;
+		let _ = actions.set_trailed_int(self.num_fixed, num_fixed);
+		num_fixed == (self.terms.len() + R - 1) as i64
+	}
+
 	/// Helper function to construct the reason for propagation given the index
 	/// of the variable in the list of variables to sum or the length of the
 	/// list, if explaining the reification.
@@ -763,6 +783,30 @@ where
 	P: PropagationActions,
 	E: ExplanationActions,
 {
+	fn advise_of_bool_change(&mut self, actions: &mut E, _view: BoolView, _data: u64) -> bool {
+		debug_assert!(self.reification.get().is_some());
+		debug_assert_eq!(_data, self.terms.len() as u64);
+		debug_assert!(actions
+			.get_bool_val(BoolView(BoolViewInner::Lit(
+				*self.reification.get().unwrap()
+			)))
+			.is_some());
+
+		self.increment_num_fixed(actions)
+	}
+
+	fn advise_of_int_change(
+		&mut self,
+		actions: &mut E,
+		_view: IntView,
+		_event: IntEvent,
+		_data: u64,
+	) -> bool {
+		debug_assert!(actions.get_int_val(self.terms[_data as usize]).is_some());
+
+		self.increment_num_fixed(actions)
+	}
+
 	#[tracing::instrument(name = "int_lin_ne", level = "trace", skip(self, actions))]
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		let (r, r_fixed) = if let Some(&r) = self.reification.get() {
@@ -781,6 +825,7 @@ where
 			if let Some(val) = actions.get_int_val(*v) {
 				sum += val;
 			} else if unfixed.is_some() {
+				debug_assert!(false, "propagator shouldn't have been scheduled");
 				return Ok(());
 			} else {
 				unfixed = Some((i, v));
@@ -788,6 +833,7 @@ where
 		}
 		if let Some((i, v)) = unfixed {
 			if !r_fixed {
+				debug_assert!(false, "propagator shouldn't have been scheduled");
 				return Ok(());
 			}
 			let val = self.violation - sum;
