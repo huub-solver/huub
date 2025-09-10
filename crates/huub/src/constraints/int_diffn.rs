@@ -108,7 +108,7 @@ struct ForbiddenRegion {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Stores the all values for specific dimension
 struct DimStore<T> {
-    /// All values in a given dimension
+	/// All values in a given dimension
 	values: Vec<T>,
 }
 
