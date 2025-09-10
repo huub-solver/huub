@@ -258,10 +258,7 @@ where
 			let mut int_map = int_reverse_map.lock().unwrap();
 			debug_assert!(int_map.is_empty());
 			*int_map = vec![ustr(""); slv.init_statistics().int_vars()];
-			let mut keys: Vec<_> = var_map.keys().collect();
-			keys.sort();
-			for name in keys {
-				let v = var_map[name];
+			for (name, v) in &var_map {
 				match v {
 					View::Bool(bv) => {
 						if let Some(info) = bv.reverse_map_info() {

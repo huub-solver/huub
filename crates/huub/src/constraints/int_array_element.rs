@@ -6,6 +6,7 @@ use std::iter::once;
 
 use itertools::Itertools;
 use pindakaas::ClauseDatabaseTools;
+use rustc_hash::FxHashMap;
 
 use crate::{
 	actions::{
@@ -355,18 +356,17 @@ impl<S: SimplificationActions> Constraint<S> for IntValArrayElement {
 		let result = slv.get_solver_int(self.result);
 
 		// Make a map from the values of the array to the indexes at which they
-		// occur
-		let idx_map = self
-			.array
-			.iter()
-			.enumerate()
-			.map(|(i, v)| (*v, i as IntVal))
-			.into_group_map();
-		// Sort keys to ensure deterministic order
-		let keys = idx_map.keys().sorted();
+		// occur (follows [`Itertools::into_group_map`])
+		let mut idx_map = FxHashMap::default();
+		self.array.iter().enumerate().for_each(|(idx, &val)| {
+			idx_map
+				.entry(val)
+				.or_insert_with(Vec::new)
+				.push(idx as IntVal);
+		});
 
-		for &val in keys {
-			let idxs = &idx_map[&val];
+		#[expect(clippy::iter_over_hash_type, reason = "FxHashMap::iter is stable")]
+		for (val, idxs) in idx_map {
 			let val_eq = slv.get_int_lit(result, IntLitMeaning::Eq(val));
 			let idxs: Vec<_> = idxs
 				.iter()
