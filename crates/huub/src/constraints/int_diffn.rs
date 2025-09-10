@@ -219,9 +219,11 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		while b && infeasible_fr.is_some() {
 			// The jump is always pointed toward upper bounds of forbiddens as this is where
 			// we will find feasible origins
-			for j in 0..self.dimensions {
-				jump[j] = jump[j].min(infeasible_fr.unwrap().ub[j] + 1);
-			}
+			jump = jump
+				.iter_mut()
+				.enumerate()
+				.map(|(i, &mut j)| j.min(infeasible_fr.unwrap().ub[i] + 1))
+				.collect();
 
 			let lb: Vec<_> = self
 				.lb_tracker
@@ -287,9 +289,12 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		while b && infeasible_fr.is_some() {
 			// The jump is always pointed toward upper bounds of forbiddens as this is where
 			// we will find feasible origins
-			for j in 0..self.dimensions {
-				jump[j] = jump[j].max(infeasible_fr.unwrap().lb[j] - 1);
-			}
+			jump = jump
+				.iter_mut()
+				.enumerate()
+				.map(|(i, &mut j)| j.max(infeasible_fr.unwrap().lb[i] - 1))
+				.collect();
+
 			let lb: Vec<_> = self
 				.lb_tracker
 				.iter()
