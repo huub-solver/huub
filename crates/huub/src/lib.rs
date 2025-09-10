@@ -26,7 +26,7 @@ use std::{
 	hash::Hash,
 	iter::{repeat_n, repeat_with, Sum},
 	mem,
-	num::NonZeroI64,
+	num::{NonZeroI32, NonZeroI64},
 	ops::{Add, AddAssign, Deref, Mul, Neg, Not, Sub},
 };
 
@@ -64,7 +64,7 @@ use crate::{
 		BoxedConstraint, Constraint, SimplificationStatus,
 	},
 	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
-	helpers::{linear_transform::LinearTransform, var_from_u32},
+	helpers::linear_transform::LinearTransform,
 	reformulate::{
 		BoolDecisionDef, BoolDecisionInner, ConstraintStore, Domain, InitConfig, IntDecisionDef,
 		IntDecisionIndex, IntDecisionInner, ReformulationError, ReformulationMap,
@@ -1273,7 +1273,9 @@ impl Model {
 
 		// Ensure the creation of all Boolean variables.
 		for var in 1..=self.bool_vars.len() as u32 {
-			let var = BoolDecision(BoolDecisionInner::Lit(var_from_u32(var).into()));
+			let var = BoolDecision(BoolDecisionInner::Lit(RawLit::from_raw(
+				NonZeroI32::new(var as i32).unwrap(),
+			)));
 			let _ = map_builder.get_or_create_bool(self, &mut slv, var);
 		}
 

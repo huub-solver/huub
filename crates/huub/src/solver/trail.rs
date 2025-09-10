@@ -3,7 +3,7 @@
 //! [`Trail`] structure, if the search process needs to backtrack, then these
 //! values can be restored to their previous state.
 
-use std::mem;
+use std::{mem, num::NonZeroI32};
 
 use index_vec::IndexVec;
 use pindakaas::{Lit as RawLit, Var as RawVar};
@@ -11,7 +11,6 @@ use tracing::trace;
 
 use crate::{
 	actions::TrailingActions,
-	helpers::var_from_u32,
 	solver::{BoolView, BoolViewInner},
 	IntVal,
 };
@@ -208,7 +207,9 @@ impl Trail {
 		// Find event at current position
 		let event = if (self.trail[self.pos] as i32).is_positive() {
 			self.pos += 1;
-			TrailEvent::SatAssignment(var_from_u32(self.trail[self.pos - 1]))
+			TrailEvent::SatAssignment(
+				RawLit::from_raw(NonZeroI32::new(self.trail[self.pos - 1] as i32).unwrap()).var(),
+			)
 		} else {
 			self.pos += 3;
 			TrailEvent::int_from_rev_trail(self.trail[self.pos - 3..self.pos].try_into().unwrap())
@@ -259,7 +260,9 @@ impl Trail {
 		// Find event before current position
 		let event = if (self.trail[self.pos - 1] as i32).is_positive() {
 			self.pos -= 1;
-			TrailEvent::SatAssignment(var_from_u32(self.trail[self.pos]))
+			TrailEvent::SatAssignment(
+				RawLit::from_raw(NonZeroI32::new(self.trail[self.pos] as i32).unwrap()).var(),
+			)
 		} else {
 			self.pos -= 3;
 			TrailEvent::int_from_trail(self.trail[self.pos..=self.pos + 2].try_into().unwrap())
