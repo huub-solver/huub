@@ -211,7 +211,7 @@ impl DecisionActions for SolvingContext<'_> {
 			}
 			v
 		};
-		var.bool_lit(meaning, new_var)
+		var.bool_lit(meaning, new_var).0
 	}
 
 	fn get_num_conflicts(&self) -> u64 {

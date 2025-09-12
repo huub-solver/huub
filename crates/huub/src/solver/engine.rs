@@ -501,10 +501,7 @@ impl PropagatorExtension for Engine {
 			}
 
 			// Enqueue based on literal meaning in complex type
-			if let Some((iv, meaning)) = self.state.bool_to_int.get(lit.var()) {
-				let meaning = meaning
-					.map(|l| if lit.is_negated() { !l } else { l })
-					.unwrap_or_else(|| self.state.int_vars[iv].lit_meaning(lit));
+			if let Some((iv, meaning)) = self.state.get_int_lit_meaning(lit) {
 				// Enact domain changes and determine change event
 				let (lb, ub) = self.state.int_vars[iv].get_bounds(&self.state);
 				let event = match meaning {
@@ -546,7 +543,7 @@ impl PropagatorExtension for Engine {
 						})
 					}
 					IntLitMeaning::Less(i) => {
-						let new_ub = self.state.int_vars[iv].tighten_upper_bound(i - 1);
+						let new_ub = i - 1;
 						if new_ub < ub {
 							trace!(lit = i32::from(lit), ub = new_ub, "new ub");
 							self.state.int_vars[iv]
@@ -766,6 +763,24 @@ impl State {
 		}
 	}
 
+	/// Internal method to get the [`IntVarRef`] and strongest [`IntLitMeaning`]
+	/// for a given literal, if it is an integer literal.
+	fn get_int_lit_meaning(&self, lit: RawLit) -> Option<(IntVarRef, IntLitMeaning)> {
+		let (iv, meaning) = self.bool_to_int.get(lit.var())?;
+		let meaning = match meaning {
+			// Eager literal, request meaning from variable itself.
+			None => self.int_vars[iv].lit_meaning(lit),
+			// Lazy literal, transform negated meanings dealing with gaps in domain when necessary.
+			Some(IntLitMeaning::Less(i)) if !lit.is_negated() => {
+				let i = self.int_vars[iv].tighten_less_lit(i);
+				IntLitMeaning::Less(i)
+			}
+			Some(m) if lit.is_negated() => !m,
+			Some(m) => m,
+		};
+		Some((iv, meaning))
+	}
+
 	/// Register the [`Reason`] to explain why `lit` has been assigned.
 	pub(crate) fn register_reason(&mut self, lit: RawLit, built_reason: Result<Reason, bool>) {
 		match built_reason {
@@ -814,13 +829,10 @@ impl ExplanationActions for State {
 	fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning> {
 		match var.0 {
 			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				let (iv2, meaning) = self.bool_to_int.get(lit.var())?;
+				let (iv2, mut meaning) = self.get_int_lit_meaning(lit)?;
 				if iv != iv2 {
 					return None;
 				}
-				let mut meaning = meaning
-					.map(|l| if lit.is_negated() { !l } else { l })
-					.unwrap_or_else(|| self.int_vars[iv].lit_meaning(lit));
 				if let IntViewInner::Linear { transformer, .. } = var.0 {
 					meaning = transformer.transform_lit(meaning);
 				}
@@ -1000,7 +1012,7 @@ impl ExplanationActions for State {
 
 		match var.0 {
 			IntViewInner::VarRef(var) | IntViewInner::Linear { var, .. } => {
-				self.int_vars[var].get_bool_lit(meaning)
+				self.int_vars[var].get_bool_lit(meaning).map(|t| t.0)
 			}
 			IntViewInner::Const(c) => Some(BoolView(BoolViewInner::Const(match meaning {
 				IntLitMeaning::Eq(i) => c == i,

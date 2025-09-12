@@ -65,7 +65,10 @@ pub trait AssumptionChecker {
 pub struct BoolView(pub(crate) BoolViewInner);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-#[allow(variant_size_differences, reason = "`Lit` cannot be as smal as `bool`")]
+#[allow(
+	variant_size_differences,
+	reason = "`Lit` cannot be as small as `bool`"
+)]
 /// The internal representation of a [`BoolView`].
 ///
 /// Note that this representation is not meant to be exposed to the user.
@@ -148,8 +151,8 @@ pub(crate) enum IntViewInner {
 pub(crate) struct NoAssumptions;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-/// Structure capturing statitical information about the search performed by the
-/// solver instance.
+/// Structure capturing statistical information about the search performed by
+/// the solver instance.
 pub struct SearchStatistics {
 	/// Number of conflicts encountered
 	pub(crate) conflicts: u64,
@@ -218,7 +221,10 @@ pub(crate) struct SolverConfiguration {
 pub trait Valuation: Fn(View) -> Value {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[allow(variant_size_differences, reason = "`Int` cannot be as smal as `Bool`")]
+#[allow(
+	variant_size_differences,
+	reason = "`Int` cannot be as small as `Bool`"
+)]
 /// The general representation of a solution value in the solver.
 pub enum Value {
 	/// A Boolean value.
@@ -310,10 +316,18 @@ impl Not for BoolView {
 	type Output = Self;
 
 	fn not(self) -> Self::Output {
-		BoolView(match self.0 {
+		BoolView(!self.0)
+	}
+}
+
+impl Not for BoolViewInner {
+	type Output = Self;
+
+	fn not(self) -> Self::Output {
+		match self {
 			BoolViewInner::Lit(l) => BoolViewInner::Lit(!l),
 			BoolViewInner::Const(b) => BoolViewInner::Const(!b),
-		})
+		}
 	}
 }
 
@@ -898,7 +912,7 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 		(status, stats, solutions)
 	}
 
-	/// Access the initilization statistics of the [`Solver`] object.
+	/// Access the initialization statistics of the [`Solver`] object.
 	pub fn init_statistics(&self) -> InitStatistics {
 		InitStatistics {
 			int_vars: self.engine.borrow().state.int_vars.len(),
@@ -1054,7 +1068,7 @@ impl<Oracle: ExternalPropagation> BrancherInitActions for Solver<Oracle> {
 				self.oracle.add_observed_var(lit.var());
 			}
 			_ => {
-				// Nothing has to happend for constants and all literals for
+				// Nothing has to happened for constants and all literals for
 				// integer variables are already marked as observed.
 			}
 		}
@@ -1126,7 +1140,7 @@ impl<Oracle: ExternalPropagation> DecisionActions for Solver<Oracle> {
 				.add_clause_from_slice(&cl)
 				.expect("functional definition cannot make the problem unsatisfiable");
 		}
-		bv
+		bv.0
 	}
 
 	fn get_num_conflicts(&self) -> u64 {
