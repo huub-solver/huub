@@ -19,8 +19,8 @@ pindakaas = { git = "https://github.com/pindakaashq/pindakaas.git", features = [
 ] }
 rangelist = "0.3.1"
 rustc-hash = { workspace = true }
-indexmap = "2.9.0"
-priority-queue = "2.3.1"
+indexmap = "2.11.3"
+priority-queue = "2.6.0"
 tracing = { workspace = true }
 
 [dev-dependencies]

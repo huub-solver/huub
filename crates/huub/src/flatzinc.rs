@@ -11,10 +11,7 @@ use std::{
 	rc::Rc,
 };
 
-use flatzinc_serde::{
-	Annotation, AnnotationArgument, AnnotationCall, AnnotationLiteral, Argument, Domain, FlatZinc,
-	Literal, Type,
-};
+use flatzinc_serde::{Annotation, AnnotationArgument, AnnotationCall, AnnotationLiteral, Argument, Domain, FlatZinc, Literal, Method, Type};
 use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;
 use rangelist::IntervalIterator;
@@ -31,6 +28,7 @@ use crate::{
 };
 use crate::constraints::difference_logic::{DifferenceLogicCollection, DifferenceLogicConstraint};
 use crate::reformulate::{InitConfig, IntDecisionInner};
+use crate::solver::Goal;
 
 /// Domain assumed for integer decision variables that do not have a domain
 /// definition.
@@ -950,7 +948,17 @@ where
 	/// to the [`Model`] to enforce the constraints.
 	pub(crate) fn post_constraints(&mut self, config: &InitConfig) -> Result<(), FlatZincError> {
 		// Global propagators dealing with multiple constraints
-		let mut diff_logic = DifferenceLogicCollection::new(config.diff_logic_prio_bounds, config.diff_logic_prio_bools, config.diff_logic_inc_imp);
+		let obj_ref = self.fzn.solve.objective.as_ref();
+		let obj = match obj_ref {
+			Some(l) => Some((self.lit_int(l)?,
+							 if self.fzn.solve.method == Method::Minimize {
+								 Goal::Minimize
+							 } else {
+								 Goal::Maximize
+							 })),
+			None => None,
+		};
+		let mut diff_logic = DifferenceLogicCollection::new(config.diff_logic_prio_bounds, config.diff_logic_prio_bools, config.diff_logic_inc_imp, obj);
 		// Traditional relational constraints
 		for (i, c) in self.fzn.constraints.iter().enumerate() {
 			if self.processed[i] {
@@ -1134,6 +1142,9 @@ where
 							}
 						}
 						if !satisfied {
+							if pos.len() == 2 && neg.len() == 0 {
+								diff_logic.add_bool_or(lits[0], lits[1]);
+							}
 							match lits.len() {
 								0 => {
 									return Err(FlatZincError::ReformulationError(
@@ -1573,24 +1584,20 @@ where
 							.try_collect()?;
 						let rhs = self.arg_par_int(rhs)?;
 
-						// diff logic only if there are exactly 2 coefficients todo can I expect that none of them are constant?
+						// diff logic only if there are exactly 2 coefficients
 						if config.diff_logic > 0 && coeffs.len() == 2 && c.id.deref() != "int_lin_eq" {
-							// Coefficients need to be (1, -1) or (-1, 1), reorder variables if pattern found todo what about f, -f with rhs div f integer?
-							let diff_vars = if coeffs[0] == 1 && coeffs[1] == -1 {
-								Some((vars[0], vars[1]))
-							} else if coeffs[0] == -1 && coeffs[1] == 1 {
-								Some((vars[1], vars[0]))
+							// Order variables (larger coeff first), create views if necessary
+							let (x, y) = if coeffs[0] > coeffs[1] {
+								(vars[0] * coeffs[0], vars[1] * -coeffs[1])
 							} else {
-								None
+								(vars[1] * coeffs[1], vars[0] * -coeffs[0])
 							};
-							if let Some((x, y)) = diff_vars {
-								match c.id.deref() {
-									"int_lin_le" => diff_logic.add(DifferenceLogicConstraint::Global(x, y, rhs)),
-									"int_lin_ne" => diff_logic.add(DifferenceLogicConstraint::NotEquals(x, y, rhs)),
-									_ => unreachable!(),
-								}
-								continue;
+							match c.id.deref() {
+								"int_lin_le" => diff_logic.add(DifferenceLogicConstraint::Global(x, y, rhs)),
+								"int_lin_ne" => diff_logic.add(DifferenceLogicConstraint::NotEquals(x, y, rhs)),
+								_ => unreachable!(),
 							}
+							continue;
 						}
 						
 						let lin_exp: IntLinExpr = vars
@@ -1636,26 +1643,22 @@ where
 
 						// diff logic only if there are exactly 2 coefficients
 						if config.diff_logic > 0 && coeffs.len() == 2 {
-							// Coefficients need to be (1, -1) or (-1, 1), reorder variables if pattern found todo what about f, -f with rhs div f integer?
-							let diff_vars = if coeffs[0] == 1 && coeffs[1] == -1 {
-								Some((vars[0], vars[1]))
-							} else if coeffs[0] == -1 && coeffs[1] == 1 {
-								Some((vars[1], vars[0]))
+							// Order variables (larger coeff first), create views if necessary
+							let (x, y) = if coeffs[0] > coeffs[1] {
+								(vars[0] * coeffs[0], vars[1] * -coeffs[1])
 							} else {
-								None
+								(vars[1] * coeffs[1], vars[0] * -coeffs[0])
 							};
-							if let Some((x, y)) = diff_vars {
-								match c.id.deref() {
-									"int_lin_eq_imp" => diff_logic.add(DifferenceLogicConstraint::ImpliedEquals(reified, x, y, rhs)),
-									"int_lin_eq_reif" => diff_logic.add(DifferenceLogicConstraint::ReifiedEquals(reified, x, y, rhs)),
-									"int_lin_le_imp" => diff_logic.add(DifferenceLogicConstraint::Implied(reified, x, y, rhs)),
-									"int_lin_le_reif" => diff_logic.add(DifferenceLogicConstraint::Reified(reified, x, y, rhs)),
-									"int_lin_ne_imp" => diff_logic.add(DifferenceLogicConstraint::ImpliedNotEquals(reified, x, y, rhs)),
-									"int_lin_ne_reif" => diff_logic.add(DifferenceLogicConstraint::ReifiedEquals(!reified, x, y, rhs)),
-									_ => unreachable!(),
-								}
-								continue;
+							match c.id.deref() {
+								"int_lin_eq_imp" => diff_logic.add(DifferenceLogicConstraint::ImpliedEquals(reified, x, y, rhs)),
+								"int_lin_eq_reif" => diff_logic.add(DifferenceLogicConstraint::ReifiedEquals(reified, x, y, rhs)),
+								"int_lin_le_imp" => diff_logic.add(DifferenceLogicConstraint::Implied(reified, x, y, rhs)),
+								"int_lin_le_reif" => diff_logic.add(DifferenceLogicConstraint::Reified(reified, x, y, rhs)),
+								"int_lin_ne_imp" => diff_logic.add(DifferenceLogicConstraint::ImpliedNotEquals(reified, x, y, rhs)),
+								"int_lin_ne_reif" => diff_logic.add(DifferenceLogicConstraint::ReifiedEquals(!reified, x, y, rhs)),
+								_ => unreachable!(),
 							}
+							continue;
 						}
 						
 						let lin_exp: IntLinExpr = vars
