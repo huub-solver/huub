@@ -49,6 +49,9 @@ FLAGS
                                   (default: 0)
   --probing <on|off>              Whether to enable failed literal probing of the SAT solver.
                                   (default: off)
+  --reason-eager <on|off>         Whether to add explanation clauses for all literals propagated on
+                                  the level of a conflict.
+                                  (default: off)
   --subsumption <on|off>          Whether to enable global forward subsumption of the SAT solver.
                                   (default: off)
   --variable-elimination <on|off> Whether to enable bounded variable elimination of the SAT solver.

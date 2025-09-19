@@ -1189,6 +1189,7 @@ impl Model {
 			// Set the solver options for preprocessing/inprocessing
 			r.set_option("condition", config.conditioning() as i32);
 			r.set_option("elim", config.variable_elimination() as i32);
+			r.set_option("exteagerreasons", config.reason_eager() as i32);
 			r.set_option("inprocessing", config.inprocessing() as i32);
 			r.set_limit("preprocessing", config.preprocessing() as i32);
 			r.set_option("probe", config.probing() as i32);

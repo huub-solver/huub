@@ -145,6 +145,8 @@ pub struct InitConfig {
 	restart: bool,
 	/// Whether to enable the global forward subsumption in the oracle solver.
 	subsumption: bool,
+	/// Whether to enable asking reason eagerly in the oracle solver.
+	reason_eager: bool,
 	/// Whether to enable the bounded variable elimination in the oracle solver.
 	variable_elimination: bool,
 	/// Whether to enable the vivification in the oracle solver.
@@ -356,6 +358,12 @@ impl InitConfig {
 		self.probing
 	}
 
+	/// Get whether to enable asking for explanation clauses for all literals
+	/// propagated on the level of a conflict.
+	pub fn reason_eager(&self) -> bool {
+		self.reason_eager
+	}
+
 	/// Get whether to enable restarts in the oracle solver.
 	pub fn restart(&self) -> bool {
 		self.restart
@@ -408,6 +416,12 @@ impl InitConfig {
 	/// solver.
 	pub fn with_probing(mut self, probing: bool) -> Self {
 		self.probing = probing;
+		self
+	}
+
+	/// Change whether to enable asking reason eagerly in the oracle solver.
+	pub fn with_reason_eager(mut self, reason_eager: bool) -> Self {
+		self.reason_eager = reason_eager;
 		self
 	}
 

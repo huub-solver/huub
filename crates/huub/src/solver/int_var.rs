@@ -1316,9 +1316,9 @@ mod tests {
 	) {
 		for (req, expected) in input.into_iter().zip_eq(lits.into_iter().zip_eq(output)) {
 			let out = iv.get_bool_lit(req).expect("lit must be present");
-			assert_eq!(out, expected, "given {:?}", req);
+			assert_eq!(out, expected, "given {req:?}");
 			let out = iv.bool_lit(req, |_| panic!("all literals should be eagerly created"));
-			assert_eq!(out, expected, "given {:?}", req);
+			assert_eq!(out, expected, "given {req:?}");
 			if let BoolViewInner::Lit(l) = out.0 .0 {
 				assert_eq!(iv.lit_meaning(l), expected.1);
 			}
@@ -1340,7 +1340,7 @@ mod tests {
 			} else {
 				req
 			};
-			assert_eq!((bv, m), expected, "given {:?}", req);
+			assert_eq!((bv, m), expected, "given {req:?}");
 
 			let v = &mut slv.engine.borrow_mut().state.int_vars[iv];
 			let out = v.get_bool_lit(req).expect("lit must be present");
