@@ -49,6 +49,8 @@ use crate::{
 	BoolDecision, BoolFormula, Decision, IntDecision, IntEq, IntLitMeaning, IntSetVal, IntVal,
 	Model, Solver,
 };
+use crate::actions::BrancherInitActions;
+use crate::branchers::BoxedBrancher;
 use crate::constraints::difference_logic::DifferenceLogicModel;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -508,6 +510,20 @@ impl InspectionActions for ReformulationContext<'_> {
 	}
 }
 
+impl BrancherInitActions for ReformulationContext<'_> {
+	fn ensure_decidable(&mut self, view: View) {
+		self.slv.ensure_decidable(view);
+	}
+
+	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
+		self.slv.new_trailed_int(init)
+	}
+
+	fn push_brancher(&mut self, brancher: BoxedBrancher) {
+		self.slv.push_brancher(brancher);
+	}
+}
+
 impl PropagatorInitActions for ReformulationContext<'_> {
 	fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef {
 		self.slv.add_propagator(propagator, priority)
@@ -541,10 +557,6 @@ impl PropagatorInitActions for ReformulationContext<'_> {
 
 	fn enqueue_on_int_change(&mut self, prop: PropRef, var: IntView, condition: IntPropCond) {
 		self.slv.enqueue_on_int_change(prop, var, condition);
-	}
-
-	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
-		self.slv.new_trailed_int(init)
 	}
 }
 

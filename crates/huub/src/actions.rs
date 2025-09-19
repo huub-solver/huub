@@ -218,7 +218,7 @@ pub trait PropagationActions: ExplanationActions + DecisionActions {
 }
 
 /// Actions that can be performed during the initialization of propagators.
-pub trait PropagatorInitActions: AsDynClauseDatabase + ClauseDatabase + DecisionActions {
+pub trait PropagatorInitActions: AsDynClauseDatabase + ClauseDatabase + BrancherInitActions {
 	/// Add a propagator to the solver.
 	fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef;
 
@@ -251,9 +251,6 @@ pub trait PropagatorInitActions: AsDynClauseDatabase + ClauseDatabase + Decision
 		condition: IntPropCond,
 		data: u64,
 	);
-
-	/// Create a new trailed integer value with the given initial value.
-	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt;
 
 	/// Enqueue a propagator to be activated at the root node.
 	fn enqueue_now(&mut self, prop: PropRef);

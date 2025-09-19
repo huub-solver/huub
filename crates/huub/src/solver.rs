@@ -1061,7 +1061,7 @@ impl<Oracle: ExternalPropagation> BrancherInitActions for Solver<Oracle> {
 	}
 
 	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
-		<Self as PropagatorInitActions>::new_trailed_int(self, init)
+		self.engine.borrow_mut().state.trail.track_int(init)
 	}
 
 	fn push_brancher(&mut self, brancher: BoxedBrancher) {
@@ -1346,10 +1346,6 @@ impl<Oracle: ExternalPropagation> PropagatorInitActions for Solver<Oracle> {
 		};
 		self.engine.borrow_mut().state.int_activation[var]
 			.add(ActivationAction::Enqueue(prop), cond);
-	}
-
-	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
-		self.engine.borrow_mut().state.trail.track_int(init)
 	}
 }
 
