@@ -264,7 +264,7 @@ impl Engine {
 
 		// Notify subscribed propagators of backtracking
 		for &p in self.notify_of_backtrack.iter() {
-			self.propagators[p].advise_of_backtrack(&mut self.state);
+			self.propagators[p].0.advise_of_backtrack(&mut self.state);
 		}
 	}
 
@@ -285,7 +285,7 @@ impl Engine {
 			IntEvent::UpperBound if negated => IntEvent::LowerBound,
 			e => e,
 		};
-		self.propagators[prop].advise_of_int_change(&mut self.state, iv, event, data)
+		self.propagators[prop].0.advise_of_int_change(&mut self.state, iv, event, data)
 	}
 
 	/// Notify the given propagator about the literal change, providing the
@@ -301,7 +301,7 @@ impl Engine {
 		bool2int: bool,
 	) -> bool {
 		if bool2int {
-			self.propagators[prop].advise_of_int_change(
+			self.propagators[prop].0.advise_of_int_change(
 				&mut self.state,
 				IntView(IntViewInner::Bool {
 					transformer: Default::default(),
@@ -311,7 +311,7 @@ impl Engine {
 				data,
 			)
 		} else {
-			self.propagators[prop].advise_of_bool_change(
+			self.propagators[prop].0.advise_of_bool_change(
 				&mut self.state,
 				BoolView(BoolViewInner::Lit(lit)),
 				data,
@@ -556,7 +556,7 @@ impl PropagatorExtension for Engine {
 									..
 								} = &self.state.advisors[adv];
 								let enqueue =
-									self.notify_lit_advisor(propagator.0, lit, data, bool2int);
+									self.notify_lit_advisor(propagator, lit, data, bool2int);
 								if !enqueue {
 									continue;
 								}

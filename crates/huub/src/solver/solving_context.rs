@@ -176,7 +176,7 @@ impl<'a> SolvingContext<'a> {
 				def.prev.map(Into::into),
 				def.next.map(Into::into),
 			) {
-				self.state.clauses.push_back(cl);
+				self.state.clauses.push_back((cl, Some(ProofHint::name_only("LitDef"))));
 			}
 			v
 		};
