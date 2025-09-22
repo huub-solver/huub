@@ -225,8 +225,9 @@ pub trait PropagationActions: ExplanationActions + DecisionActions {
 pub trait ProofActions {
 	/// Whether proof logging is enabled.
 	fn prove(&self) -> bool;
-	/// The next clause to be logged to the proof will use this hint information.
-	/// Any propagators queued will also get this hint as the default.
+	/// The next clause to be logged to the proof will use this hint
+	/// information. Any propagators queued will also get this hint as the
+	/// default.
 	fn set_next_proof_hint(&mut self, proof_hint: Option<ProofHint>);
 	/// Get the current proof hint
 	fn get_current_proof_hint(&self) -> Option<ProofHint>;

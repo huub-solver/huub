@@ -16,7 +16,6 @@ use tracing::{
 	level_filters::LevelFilter,
 	Event, Subscriber,
 };
-
 use tracing_subscriber::{
 	field::{MakeVisitor, RecordFields, VisitOutput},
 	filter::Targets,
@@ -102,8 +101,8 @@ struct RegisterLazyLits {
 	lit_reverse_map: Arc<Mutex<FxHashMap<LitInt, LitName>>>,
 }
 
-/// An implementation of [`tracing_subscriber::fmt::FormatEvent`] for proof events:
-/// write the fields according to the VeriPB proof format.
+/// An implementation of [`tracing_subscriber::fmt::FormatEvent`] for proof
+/// events: write the fields according to the VeriPB proof format.
 struct VeriPBEventFormatter;
 
 /// A visitor that collects proof tracing fields relevant to VeriPB and formats
@@ -120,7 +119,8 @@ struct VeriPBFieldsFormatter {
 	constraint_ids: String,
 	/// The main hint describing how this clause was derived
 	hint_name: String,
-	/// Antecedent IDs within the proof system (for resolution / LRAT -style derivations)
+	/// Antecedent IDs within the proof system (for resolution / LRAT -style
+	/// derivations)
 	antecedents: String,
 }
 

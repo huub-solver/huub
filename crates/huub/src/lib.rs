@@ -190,8 +190,8 @@ pub struct Model {
 	enqueued: Vec<bool>,
 	/// Whether proof logging is enabled
 	prove: bool,
-	/// An optional identifier for the next constraint/clause to be added to the model
-	/// (for proof logging)
+	/// An optional identifier for the next constraint/clause to be added to the
+	/// model (for proof logging)
 	next_proof_id: Option<Vec<ConstraintProofID>>,
 }
 
@@ -1313,7 +1313,8 @@ impl Model {
 		// Create constraint data structures within the solver
 		for (c, proof_id) in self.constraints.iter().flatten() {
 			if self.prove {
-				// All constraints get this proof hint by default inside their to_solver function.
+				// All constraints get this proof hint by default inside their to_solver
+				// function.
 				let proof_hint = proof_id.as_ref().map(|con_id| ProofHint {
 					name: c.get_name(),
 					constraint_ids: con_id.to_owned(),

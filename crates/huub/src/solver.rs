@@ -1270,7 +1270,9 @@ impl<Oracle: ExternalPropagation> PropagatorInitActions for Solver<Oracle> {
 				let mut engine_ref = self.engine.borrow_mut();
 				let engine: &mut Engine = engine_ref.deref_mut();
 				let enqueue =
-					engine.propagators[prop].0.advise_of_bool_change(&mut engine.state, var, data);
+					engine.propagators[prop]
+						.0
+						.advise_of_bool_change(&mut engine.state, var, data);
 				drop(engine_ref);
 				if enqueue {
 					self.enqueue_now(prop);

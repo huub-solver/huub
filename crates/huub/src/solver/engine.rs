@@ -173,17 +173,20 @@ pub struct State {
 	// ---- Proof Logging ----
 	/// Whether proof logging is enabled.
 	pub(crate) prove: bool,
-	/// The proof hint information for the next clause to be logged to the proof.
+	/// The proof hint information for the next clause to be logged to the
+	/// proof.
 	pub(crate) next_proof_hint: Option<ProofHint>,
 }
 
-/// A store of information that can be logged to the proof along with each clause.
+/// A store of information that can be logged to the proof along with each
+/// clause.
 #[derive(Clone, Debug, Default)]
 pub struct ProofHint {
 	/// Identifiers for original user constraints
 	pub constraint_ids: Vec<ConstraintProofID>,
 	/// A name for the hint:
-	/// either a solver constraint or a solver function e.g. AllDiff, LitDef etc.
+	/// either a solver constraint or a solver function e.g. AllDiff, LitDef
+	/// etc.
 	pub name: &'static str,
 	// There will probably need to be more fields in future.
 }
@@ -285,7 +288,9 @@ impl Engine {
 			IntEvent::UpperBound if negated => IntEvent::LowerBound,
 			e => e,
 		};
-		self.propagators[prop].0.advise_of_int_change(&mut self.state, iv, event, data)
+		self.propagators[prop]
+			.0
+			.advise_of_int_change(&mut self.state, iv, event, data)
 	}
 
 	/// Notify the given propagator about the literal change, providing the
