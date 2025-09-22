@@ -100,7 +100,7 @@ pub struct InitStatistics {
 	propagators: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// The meaning of a literal in the context of a integer decision variable `x`.
 pub enum IntLitMeaning {
 	/// Literal representing the condition `x = i`.
@@ -431,7 +431,7 @@ impl IntView {
 						let i: NonZeroI32 = lit.into();
 						let orig = IntLitMeaning::Less(val);
 						let lt = transformer.transform_lit(orig);
-						let geq = !lt.clone();
+						let geq = !lt;
 						lits.extend([(i, lt), (-i, geq)]);
 					}
 				}
@@ -444,7 +444,7 @@ impl IntView {
 						let i: NonZeroI32 = lit.into();
 						let orig = IntLitMeaning::Eq(val);
 						let eq = transformer.transform_lit(orig);
-						let ne = !eq.clone();
+						let ne = !eq;
 						lits.extend([(i, eq), (-i, ne)]);
 					}
 				}
@@ -1121,7 +1121,7 @@ impl<Oracle: ExternalPropagation> DecisionActions for Solver<Oracle> {
 				self.oracle.add_observed_var(v);
 				trace_new_lit!(iv, def, v);
 				state.trail.grow_to_boolvar(v);
-				state.bool_to_int.insert_lazy(v, iv, def.meaning.clone());
+				state.bool_to_int.insert_lazy(v, iv, def.meaning);
 				// Add clauses to define the new variable
 				for cl in def.meaning.defining_clauses(
 					v.into(),

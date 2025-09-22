@@ -168,9 +168,7 @@ impl<'a> SolvingContext<'a> {
 			let v = self.slv.new_observed_var();
 			self.state.trail.grow_to_boolvar(v);
 			trace_new_lit!(iv, def, v);
-			self.state
-				.bool_to_int
-				.insert_lazy(v, iv, def.meaning.clone());
+			self.state.bool_to_int.insert_lazy(v, iv, def.meaning);
 			// Add clauses to define the new variable
 			for cl in def.meaning.defining_clauses(
 				v.into(),
@@ -276,9 +274,7 @@ impl DecisionActions for SolvingContext<'_> {
 			let v = self.slv.new_observed_var();
 			self.state.trail.grow_to_boolvar(v);
 			trace_new_lit!(iv, def, v);
-			self.state
-				.bool_to_int
-				.insert_lazy(v, iv, def.meaning.clone());
+			self.state.bool_to_int.insert_lazy(v, iv, def.meaning);
 			// Add clauses to define the new variable
 			for cl in def.meaning.defining_clauses(
 				v.into(),

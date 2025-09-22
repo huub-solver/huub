@@ -901,7 +901,7 @@ impl ExplanationActions for State {
 		// Transform literal meaning if view is a linear transformation
 		let meaning = match var.0 {
 			IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } => {
-				match transformer.rev_transform_lit(meaning.clone()) {
+				match transformer.rev_transform_lit(meaning) {
 					Ok(m) => m,
 					Err(v) => return (BoolView(BoolViewInner::Const(v)), meaning),
 				}
@@ -958,9 +958,9 @@ impl ExplanationActions for State {
 			IntViewInner::Bool { lit, .. } => {
 				let (b_meaning, negated) =
 					if matches!(meaning, IntLitMeaning::NotEq(_) | IntLitMeaning::Less(_)) {
-						(!meaning.clone(), true)
+						(!meaning, true)
 					} else {
-						(meaning.clone(), false)
+						(meaning, false)
 					};
 				let bv = BoolView(match b_meaning {
 					IntLitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),

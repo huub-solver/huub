@@ -1315,11 +1315,9 @@ mod tests {
 		output: impl IntoIterator<Item = IntLitMeaning>,
 	) {
 		for (req, expected) in input.into_iter().zip_eq(lits.into_iter().zip_eq(output)) {
-			let out = iv.get_bool_lit(req.clone()).expect("lit must be present");
+			let out = iv.get_bool_lit(req).expect("lit must be present");
 			assert_eq!(out, expected, "given {:?}", req);
-			let out = iv.bool_lit(req.clone(), |_| {
-				panic!("all literals should be eagerly created")
-			});
+			let out = iv.bool_lit(req, |_| panic!("all literals should be eagerly created"));
 			assert_eq!(out, expected, "given {:?}", req);
 			if let BoolViewInner::Lit(l) = out.0 .0 {
 				assert_eq!(iv.lit_meaning(l), expected.1);
@@ -1336,16 +1334,16 @@ mod tests {
 	) {
 		let view = IntView(IntViewInner::VarRef(iv));
 		for (req, expected) in input.into_iter().zip_eq(lits.into_iter().zip_eq(output)) {
-			let bv = slv.get_int_lit(view, req.clone());
+			let bv = slv.get_int_lit(view, req);
 			let m = if let BoolViewInner::Lit(lit) = bv.0 {
 				slv.get_int_lit_meaning(view, lit).unwrap()
 			} else {
-				req.clone()
+				req
 			};
 			assert_eq!((bv, m), expected, "given {:?}", req);
 
 			let v = &mut slv.engine.borrow_mut().state.int_vars[iv];
-			let out = v.get_bool_lit(req.clone()).expect("lit must be present");
+			let out = v.get_bool_lit(req).expect("lit must be present");
 			assert_eq!(out, expected, "given {:?}", req);
 		}
 	}
