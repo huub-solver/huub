@@ -2,6 +2,7 @@ use expect_test::{expect, Expect};
 use itertools::Itertools;
 use pindakaas::{propositional_logic::Formula, Cnf};
 use rangelist::RangeList;
+use tracing_test::traced_test;
 
 use crate::{
 	actions::SimplificationActions,
@@ -77,6 +78,7 @@ fn test_duplicate_propagation() {
 	);
 }
 
+#[traced_test]
 #[test]
 fn test_unify_int_impossible() {
 	let mut prb = Model::default();

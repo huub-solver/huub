@@ -1,6 +1,7 @@
 //! Module containing the [`SolvingContext`] structure used to take actions
-//! during the progation and solution checking process. This structure contains
-//! the implementation of the actions that are exposed to the propagators.
+//! during the propagation and solution checking process. This structure
+//! contains the implementation of the actions that are exposed to the
+//! propagators.
 
 use std::fmt::{self, Debug, Formatter};
 
@@ -15,7 +16,8 @@ use crate::{
 	},
 	constraints::{Conflict, LazyReason, Reason, ReasonBuilder},
 	solver::{
-		engine::{trace_new_lit, ProofHint, PropRef, State},
+		activation_list::IntEvent,
+		engine::{trace_new_lit, LitPropagation, ProofHint, PropRef, State},
 		int_var::{IntVarRef, LazyLitDef},
 		trail::TrailedInt,
 		BoolView, BoolViewInner, BoxedPropagator, IntView, IntViewInner,
@@ -23,6 +25,7 @@ use crate::{
 	IntLitMeaning, IntVal,
 };
 
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 /// Type used to communicate whether a change is redundant, conflicting, or new.
 enum ChangeType {
 	/// Change is redundant, no action needs to be taken.
@@ -43,7 +46,7 @@ struct ReasonTracePrint<'a>(&'a Result<Reason, bool>);
 /// This structure is used to run the propagators that have been scheduled.
 ///
 /// Note that this structure is public to the user to allow the user to
-/// construct [`BoxedPropgator`] and [`BoxedBrancher`], but it is not intended
+/// construct [`BoxedPropagator`] and [`BoxedBrancher`], but it is not intended
 /// to be constructed by the user. It should merely be seen as the
 /// implementation of the [`PropagationActions`] trait.
 pub struct SolvingContext<'a> {
@@ -68,23 +71,6 @@ impl Debug for ReasonTracePrint<'_> {
 }
 
 impl<'a> SolvingContext<'a> {
-	#[inline]
-	/// Check whether a change is redundant, conflicting, or new with respect to
-	/// the bounds of an integer variable
-	fn check_change(&self, var: IntVarRef, change: &IntLitMeaning) -> ChangeType {
-		let (lb, ub) = self.state.int_vars[var].get_bounds(self);
-		match change {
-			IntLitMeaning::Eq(i) if lb == *i && ub == *i => ChangeType::Redundant,
-			IntLitMeaning::Eq(i) if *i < lb || *i > ub => ChangeType::Conflicting,
-			IntLitMeaning::NotEq(i) if *i < lb || *i > ub => ChangeType::Redundant,
-			IntLitMeaning::GreaterEq(i) if *i <= lb => ChangeType::Redundant,
-			IntLitMeaning::GreaterEq(i) if *i > ub => ChangeType::Conflicting,
-			IntLitMeaning::Less(i) if *i > ub => ChangeType::Redundant,
-			IntLitMeaning::Less(i) if *i <= lb => ChangeType::Conflicting,
-			_ => ChangeType::New,
-		}
-	}
-
 	/// Create a new SolvingContext given the solver actions exposed by the SAT
 	/// oracle and the engine state.
 	pub(crate) fn new(slv: &'a mut dyn SolvingActions, state: &'a mut State) -> Self {
@@ -122,6 +108,33 @@ impl<'a> SolvingContext<'a> {
 	}
 
 	#[inline]
+	/// Internal method used to propagate a Boolean literal.
+	///
+	/// ## Warning
+	///
+	/// This method assumes that the literal has not already been assigned, not
+	/// even to the same value.
+	fn propagate_lit(
+		&mut self,
+		lit: RawLit,
+		reason: impl ReasonBuilder<Self>,
+		event: Option<(IntVarRef, IntEvent)>,
+	) {
+		let reason = reason.build_reason(self);
+		trace!(
+			lit = i32::from(lit),
+			reason = ?ReasonTracePrint(&reason),
+			prop = usize::from(self.current_prop),
+			"propagate"
+		);
+		self.state
+			.propagation_queue
+			.push_back(LitPropagation { lit, reason, event });
+		let _prev = self.state.trail.assign_lit(lit);
+		debug_assert_eq!(_prev, None);
+	}
+
+	#[inline]
 	/// Internal method used to propagate an integer variable given a literal
 	/// description to be enforced.
 	fn propagate_int(
@@ -130,24 +143,87 @@ impl<'a> SolvingContext<'a> {
 		lit_req: IntLitMeaning,
 		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict> {
-		match self.check_change(iv, &lit_req) {
-			ChangeType::Redundant => Ok(()),
-			ChangeType::Conflicting => {
-				let bv = self.get_intref_lit(iv, lit_req.clone());
-				let lit = match bv.0 {
-					BoolViewInner::Lit(l) => Some(l),
-					BoolViewInner::Const(b) => {
-						debug_assert!(!b);
-						None
-					}
-				};
-				Err(Conflict::new(self, lit, reason))
-			}
-			ChangeType::New => {
-				let bv = self.get_intref_lit(iv, lit_req.clone());
-				self.set_bool(bv, reason)
-			}
+		let (lb, ub) = self.state.int_vars[iv].get_bounds(self);
+		// Check whether a change is redundant, conflicting, or new with respect to
+		// the bounds of an integer variable
+		let check = match lit_req {
+			IntLitMeaning::Eq(i) if lb == i && ub == i => ChangeType::Redundant,
+			IntLitMeaning::Eq(i) if i < lb || i > ub => ChangeType::Conflicting,
+			IntLitMeaning::NotEq(i) if i < lb || i > ub => ChangeType::Redundant,
+			IntLitMeaning::GreaterEq(i) if i <= lb => ChangeType::Redundant,
+			IntLitMeaning::GreaterEq(i) if i > ub => ChangeType::Conflicting,
+			IntLitMeaning::Less(i) if i > ub => ChangeType::Redundant,
+			IntLitMeaning::Less(i) if i <= lb => ChangeType::Conflicting,
+			_ => ChangeType::New,
+		};
+
+		// Immediate return if there are no further changes
+		if check == ChangeType::Redundant {
+			return Ok(());
 		}
+
+		// Find the right literal, required whether we want to propagate, or raise a
+		// conflict
+		let new_var = |def: LazyLitDef| {
+			// Create new variable
+			let v = self.slv.new_observed_var();
+			self.state.trail.grow_to_boolvar(v);
+			trace_new_lit!(iv, def, v);
+			self.state.bool_to_int.insert_lazy(v, iv, def.meaning);
+			// Add clauses to define the new variable
+			for cl in def.meaning.defining_clauses(
+				v.into(),
+				def.prev.map(Into::into),
+				def.next.map(Into::into),
+			) {
+				self.state.clauses.push_back(cl);
+			}
+			v
+		};
+		let (bv, lit_req) = self.state.int_vars[iv].bool_lit(lit_req, new_var);
+
+		// Detect propagation conflicts:
+		// 1. Always false (and immediate return if always true).
+		let lit = match bv.0 {
+			BoolViewInner::Const(true) => return Ok(()),
+			BoolViewInner::Const(false) => return Err(Conflict::new(self, None, reason)),
+			BoolViewInner::Lit(lit) => lit,
+		};
+		// 2. Bounds check is known to be false.
+		if check == ChangeType::Conflicting {
+			return Err(Conflict::new(self, Some(lit), reason));
+		}
+		// 3. Literal is assigned false (and immediate return if assigned true).
+		match self.state.trail.get_sat_value(lit) {
+			Some(true) => return Ok(()),
+			Some(false) => return Err(Conflict::new(self, Some(lit), reason)),
+			None => {}
+		}
+
+		// Normal case:
+		// Propagate the literal.
+		let event = match lit_req {
+			IntLitMeaning::Eq(_) => IntEvent::Fixed,
+			IntLitMeaning::NotEq(_) => IntEvent::Domain,
+			IntLitMeaning::GreaterEq(_) => IntEvent::LowerBound,
+			IntLitMeaning::Less(_) => IntEvent::UpperBound,
+		};
+		self.propagate_lit(lit, reason, Some((iv, event)));
+		// Make the domains match.
+		match lit_req {
+			IntLitMeaning::Eq(val) => {
+				self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, val);
+				self.state.int_vars[iv].notify_upper_bound(&mut self.state.trail, val);
+			}
+			IntLitMeaning::NotEq(_) => {}
+			IntLitMeaning::GreaterEq(lb) => {
+				self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, lb);
+			}
+			IntLitMeaning::Less(ub) => {
+				self.state.int_vars[iv].notify_upper_bound(&mut self.state.trail, ub - 1);
+			}
+		};
+		Ok(())
 	}
 
 	/// Run the propagators in the queue until a propagator detects a conflict,
@@ -205,9 +281,7 @@ impl DecisionActions for SolvingContext<'_> {
 			let v = self.slv.new_observed_var();
 			self.state.trail.grow_to_boolvar(v);
 			trace_new_lit!(iv, def, v);
-			self.state
-				.bool_to_int
-				.insert_lazy(v, iv, def.meaning.clone());
+			self.state.bool_to_int.insert_lazy(v, iv, def.meaning);
 			// Add clauses to define the new variable
 			for cl in def.meaning.defining_clauses(
 				v.into(),
@@ -224,7 +298,7 @@ impl DecisionActions for SolvingContext<'_> {
 			}
 			v
 		};
-		var.bool_lit(meaning, new_var)
+		var.bool_lit(meaning, new_var).0
 	}
 
 	fn get_num_conflicts(&self) -> u64 {
@@ -305,14 +379,7 @@ impl PropagationActions for SolvingContext<'_> {
 				Some(true) => Ok(()),
 				Some(false) => Err(Conflict::new(self, Some(lit), reason)),
 				None => {
-					let reason = reason.build_reason(self);
-					trace!(
-						lit = i32::from(lit),
-						reason = ?ReasonTracePrint(&reason),
-						"propagate bool"
-					);
-					self.state.register_reason(lit, reason);
-					self.state.propagation_queue.push_back(lit);
+					self.propagate_lit(lit, reason, None);
 					Ok(())
 				}
 			},

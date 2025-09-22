@@ -216,9 +216,8 @@ impl Add<IntEvent> for IntEvent {
 
 #[cfg(test)]
 mod tests {
-	use std::collections::HashSet;
-
 	use itertools::Itertools;
+	use rustc_hash::FxHashSet;
 
 	use crate::solver::{
 		activation_list::{ActivationAction, ActivationList, IntEvent, IntPropCond},
@@ -240,10 +239,10 @@ mod tests {
 			for (prop, cond) in list.iter() {
 				activation_list.add(ActivationAction::Enqueue(*prop), *cond);
 			}
-			let fixed: HashSet<_> = activation_list.activated_by(IntEvent::Fixed).collect();
+			let fixed: FxHashSet<_> = activation_list.activated_by(IntEvent::Fixed).collect();
 			assert_eq!(
 				fixed,
-				HashSet::from_iter([
+				FxHashSet::from_iter([
 					ActivationAction::Enqueue(PropRef::from(0)),
 					ActivationAction::Enqueue(PropRef::from(1)),
 					ActivationAction::Enqueue(PropRef::from(2)),
@@ -251,40 +250,40 @@ mod tests {
 					ActivationAction::Enqueue(PropRef::from(4))
 				])
 			);
-			let bounds: HashSet<_> = activation_list.activated_by(IntEvent::Bounds).collect();
+			let bounds: FxHashSet<_> = activation_list.activated_by(IntEvent::Bounds).collect();
 			assert_eq!(
 				bounds,
-				HashSet::from_iter([
+				FxHashSet::from_iter([
 					ActivationAction::Enqueue(PropRef::from(1)),
 					ActivationAction::Enqueue(PropRef::from(2)),
 					ActivationAction::Enqueue(PropRef::from(3)),
 					ActivationAction::Enqueue(PropRef::from(4))
 				])
 			);
-			let lower_bound: HashSet<_> =
+			let lower_bound: FxHashSet<_> =
 				activation_list.activated_by(IntEvent::LowerBound).collect();
 			assert_eq!(
 				lower_bound,
-				HashSet::from_iter([
+				FxHashSet::from_iter([
 					ActivationAction::Enqueue(PropRef::from(1)),
 					ActivationAction::Enqueue(PropRef::from(3)),
 					ActivationAction::Enqueue(PropRef::from(4))
 				])
 			);
-			let upper_bound: HashSet<_> =
+			let upper_bound: FxHashSet<_> =
 				activation_list.activated_by(IntEvent::UpperBound).collect();
 			assert_eq!(
 				upper_bound,
-				HashSet::from_iter([
+				FxHashSet::from_iter([
 					ActivationAction::Enqueue(PropRef::from(2)),
 					ActivationAction::Enqueue(PropRef::from(3)),
 					ActivationAction::Enqueue(PropRef::from(4))
 				])
 			);
-			let domain: HashSet<_> = activation_list.activated_by(IntEvent::Domain).collect();
+			let domain: FxHashSet<_> = activation_list.activated_by(IntEvent::Domain).collect();
 			assert_eq!(
 				domain,
-				HashSet::from_iter([ActivationAction::Enqueue(PropRef::from(4))])
+				FxHashSet::from_iter([ActivationAction::Enqueue(PropRef::from(4))])
 			);
 		}
 	}

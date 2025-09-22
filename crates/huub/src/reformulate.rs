@@ -2,7 +2,6 @@
 //! reformulation process of creating a [`Solver`] object from a [`Model`].
 
 use std::{
-	collections::HashSet,
 	error::Error,
 	fmt::{self, Display},
 };
@@ -14,6 +13,7 @@ use pindakaas::{
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit as RawLit, Unsatisfiable,
 };
 use rangelist::IntervalIterator;
+use rustc_hash::FxHashSet;
 
 use crate::{
 	actions::{
@@ -217,13 +217,13 @@ pub(crate) struct ReformulationMapBuilder {
 	pub(crate) bool_map: Vec<Option<BoolView>>,
 	/// Set of integer decision for which the direct encoding should be created
 	/// eagerly.
-	pub(crate) int_eager_direct: HashSet<IntDecisionIndex>,
+	pub(crate) int_eager_direct: FxHashSet<IntDecisionIndex>,
 	/// The (default) maximum cardinality of the domain of an integer variable
 	/// before its order encoding is created lazily.
 	pub(crate) int_eager_limit: usize,
 	/// Set of integer decision for which the order encoding should be created
 	/// eagerly.
-	pub(crate) int_eager_order: HashSet<IntDecisionIndex>,
+	pub(crate) int_eager_order: FxHashSet<IntDecisionIndex>,
 	/// Map of integer decisions to integer views.
 	pub(crate) int_map: IndexVec<IntDecisionIndex, Option<IntView>>,
 }

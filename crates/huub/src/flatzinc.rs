@@ -1800,9 +1800,9 @@ where
 			}
 		}
 
-		let keys = unify_map.keys().sorted();
-		for k in keys {
-			let li = unify_map[k].borrow();
+		#[expect(clippy::iter_over_hash_type, reason = "FxHashMap::iter is stable")]
+		for (k, li) in unify_map.iter() {
+			let li = li.borrow();
 			if self.map.contains_key(k) {
 				continue;
 			}

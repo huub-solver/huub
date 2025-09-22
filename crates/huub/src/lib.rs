@@ -21,12 +21,12 @@ pub(crate) mod tests;
 
 use std::{
 	any::Any,
-	collections::{HashSet, VecDeque},
+	collections::VecDeque,
 	fmt::{Debug, Display},
 	hash::Hash,
 	iter::{repeat_n, repeat_with, Sum},
 	mem,
-	num::NonZeroI64,
+	num::{NonZeroI32, NonZeroI64},
 	ops::{Add, AddAssign, Deref, Mul, Neg, Not, Sub},
 	rc::Rc,
 };
@@ -41,6 +41,7 @@ use pindakaas::{
 	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit as RawLit, Unsatisfiable,
 };
 use rangelist::{IntervalIterator, RangeList};
+use rustc_hash::FxHashSet;
 pub use solver::engine::ProofHint;
 use tracing::warn;
 
@@ -65,7 +66,7 @@ use crate::{
 		BoxedConstraint, Constraint, SimplificationStatus,
 	},
 	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
-	helpers::{linear_transform::LinearTransform, var_from_u32},
+	helpers::linear_transform::LinearTransform,
 	reformulate::{
 		BoolDecisionDef, BoolDecisionInner, ConstraintStore, Domain, InitConfig, IntDecisionDef,
 		IntDecisionIndex, IntDecisionInner, ReformulationError, ReformulationMap,
@@ -1231,8 +1232,8 @@ impl Model {
 		// TODO: Detect Views From Model
 
 		// Determine encoding types for integer variables
-		let mut int_eager_direct = HashSet::<IntDecisionIndex>::new();
-		let int_eager_order = HashSet::<IntDecisionIndex>::new();
+		let mut int_eager_direct = FxHashSet::<IntDecisionIndex>::default();
+		let int_eager_order = FxHashSet::<IntDecisionIndex>::default();
 
 		for (c, _proof_id) in self.constraints.iter().flatten() {
 			match c {
@@ -1295,7 +1296,9 @@ impl Model {
 		}
 		// Ensure the creation of all Boolean variables.
 		for var in 1..=self.bool_vars.len() as u32 {
-			let var = BoolDecision(BoolDecisionInner::Lit(var_from_u32(var).into()));
+			let var = BoolDecision(BoolDecisionInner::Lit(RawLit::from_raw(
+				NonZeroI32::new(var as i32).unwrap(),
+			)));
 			let _ = map_builder.get_or_create_bool(self, &mut slv, var);
 		}
 
