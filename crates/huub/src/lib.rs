@@ -1263,6 +1263,11 @@ impl Model {
 						}
 					}
 				}
+				ConstraintStore::DifferenceLogic(_) => {
+					if config.diff_logic_branching == 2 {
+						self.branchings.clear();
+					}
+				}
 				_ => {}
 			}
 		}

@@ -130,6 +130,8 @@ pub struct Cli<Stdout, Stderr> {
 	diff_logic_prio_bools: Option<u8>,
 	/// Whether to use inc_imp to check implied booleans proactively.
 	diff_logic_inc_imp: bool,
+	/// Difference logic branching option.
+	diff_logic_branching: Option<u8>,
 
 	// --- Output configuration ---
 	/// Output stream for (intermediate) solutions and statistics
@@ -199,7 +201,8 @@ where
 		config = config.with_diff_logic(self.diff_logic,
 										self.diff_logic_prio_bounds,
 										self.diff_logic_prio_bools,
-										self.diff_logic_inc_imp);
+										self.diff_logic_inc_imp, 
+										self.diff_logic_branching);
 		config
 	}
 
@@ -595,6 +598,7 @@ where
 			diff_logic_prio_bounds: self.diff_logic_prio_bounds,
 			diff_logic_prio_bools: self.diff_logic_prio_bools,
 			diff_logic_inc_imp: self.diff_logic_inc_imp,
+			diff_logic_branching: self.diff_logic_branching,
 			stdout: self.stdout,
 		}
 	}
@@ -629,6 +633,7 @@ where
 			diff_logic_prio_bounds: self.diff_logic_prio_bounds,
 			diff_logic_prio_bools: self.diff_logic_prio_bools,
 			diff_logic_inc_imp: self.diff_logic_inc_imp,
+			diff_logic_branching: self.diff_logic_branching,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
 		}
@@ -716,6 +721,9 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			diff_logic_inc_imp: args
 				.opt_value_from_fn("--diff-logic-inc-imp", parse_bool_arg)
 				.map(|x| x.unwrap_or(true))
+				.map_err(|e| e.to_string())?,
+			diff_logic_branching: args
+				.opt_value_from_str("--diff-logic-branching")
 				.map_err(|e| e.to_string())?,
 
 			verbose,

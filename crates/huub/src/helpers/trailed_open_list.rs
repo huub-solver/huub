@@ -40,6 +40,25 @@ impl<T> TrailedOpenList<T> {
 		initial_trail.remove(self.closed);
 	}
 
+	/// Return the first open element.
+	pub(crate) fn peek<A: TrailingActions + ?Sized>(&self, actions: &A) -> Option<&T> {
+		let cur = actions.get_trailed_int(self.closed) as usize;
+		if cur >= self.list.len() {
+			return None;
+		}
+		Some(&self.list[cur])
+	}
+
+	/// Return the first open element and close it.
+	pub(crate) fn pop<A: TrailingActions + ?Sized>(&mut self, actions: &mut A) -> Option<&T> {
+		let cur = actions.get_trailed_int(self.closed) as usize;
+		if cur >= self.list.len() {
+			return None;
+		}
+		let _ = self.close(actions, cur, |_, _| {});
+		Some(&self.list[cur])
+	}
+
 	/// Return the element at the given index, fail if it is in the closed section.
 	pub(crate) fn index<A: TrailingActions + ?Sized>(&self, actions: &A, index: usize) -> &T {
 		let closed = actions.get_trailed_int(self.closed) as usize;

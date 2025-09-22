@@ -18,7 +18,8 @@ use crate::{actions::{
 }, constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus}, reformulate::ReformulationError, solver::{
 	queue::PriorityLevel, IntView,
 }, BoolDecision, BoolFormula, Conjunction, IntDecision, IntVal, Model};
-use crate::actions::{ConstraintInitActions, TrailingActions};
+use crate::actions::{BrancherInitActions, ConstraintInitActions, DecisionActions, TrailingActions};
+use crate::branchers::{Brancher, Decision};
 use crate::helpers::initial_trail::InitialTrail;
 use crate::helpers::linear_transform::LinearTransform;
 use crate::helpers::trailed_list::TrailedList;
@@ -783,6 +784,7 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogicModel {
 				let _ = graph.new_edge(&mut self.initial_trail, DiffEdge::new(x, y, d, None));
 			}
 
+			let mut decision_bool_cache = vec![Vec::new(); self.int_vars.len()];
 			// Add implied constraints
 			for (b, x, y, d) in trimmed_imp_constraints.into_iter() {
 				let _ = graph.new_edge(&mut self.initial_trail, DiffEdge::new(x, y, d, Some(b)));
@@ -792,7 +794,8 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogicModel {
 					if edge.from == y && edge.val + d < 0 && self.boolean_or.contains(&(self.bool_vars[b], self.bool_vars[edge.bool_var.unwrap()])) {
 						trace!("Found pair of implied edges in XOR configuration between {x} and {y} (lengths {d}, {})", edge.val);
 						actions.unify_bool(self.bool_vars[b], !self.bool_vars[edge.bool_var.unwrap()])?;
-						let _ = graph.decision_bools.push(b, Reverse(max(d, edge.val)));
+						decision_bool_cache[x].push((d, b));
+						decision_bool_cache[y].push((edge.val, edge.bool_var.unwrap()));
 					}
 				}
 			}
@@ -805,10 +808,18 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogicModel {
 							let &e2 = graph.bool_implications[i2].index(&self.initial_trail, ei2);
 							if e1 < e2 {
 								trace!("Found pair of implied edges (by boolean) in OR configuration ({e1}, {e2})");
-								let _ = graph.decision_bools.push_increase(i1, Reverse(max(graph.edges[e1].val, graph.edges[e2].val)));
+								let edge1 = &graph.edges[e1];
+								decision_bool_cache[edge1.from].push((edge1.val, i1));
+								let edge2 = &graph.edges[e2];
+								decision_bool_cache[edge2.from].push((edge2.val, i2));
 							}
 						}
 					}
+				}
+			}
+			for (n, v) in decision_bool_cache.into_iter().enumerate() {
+				for (val, b) in v.into_iter().sorted() {
+					graph.decision_bools[n].push((b, val));
 				}
 			}
 
@@ -928,7 +939,8 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogicModel {
 		let bool_vars = self.bool_vars.iter().map(|&v| slv.get_solver_bool(v)).collect_vec();
 		let graph_cell = Rc::new(RefCell::new(initial_graph.graph));
 		DifferenceLogicBounds::new_in(slv, &int_vars, &bool_vars, self.parameters.priority_level_bounds, graph_cell.clone());
-		DifferenceLogicBooleans::new_in(slv, &int_vars, &bool_vars, self.parameters.priority_level_bools, self.parameters.use_inc_imp, graph_cell);
+		DifferenceLogicBooleans::new_in(slv, &int_vars, &bool_vars, self.parameters.priority_level_bools, self.parameters.use_inc_imp, graph_cell.clone());
+		DiffLogicBrancher::new_in(slv, &int_vars, &bool_vars, graph_cell, self.objective.map_or(true, |(_, o)| o == Goal::Minimize));
 		Ok(())
 	}
 }
@@ -1109,8 +1121,8 @@ pub struct DifferenceLogicGraph {
 	lb_updates: Vec<usize>,
 	/// Current upper bound updates.
 	ub_updates: Vec<usize>,
-	/// Booleans that cause an addition of edges
-	decision_bools: PriorityQueue<usize, Reverse<IntVal>>,
+	/// Ordered list of decision booleans for each node.
+	decision_bools: Vec<TrailedOpenList<(usize, IntVal)>>,
 }
 
 impl DifferenceLogicGraph {
@@ -1135,7 +1147,7 @@ impl DifferenceLogicGraph {
 			visited_updates: Vec::new(),
 			lb_updates: Vec::new(),
 			ub_updates: Vec::new(),
-			decision_bools: PriorityQueue::default(),
+			decision_bools: (0..int_vars).into_iter().map(|_| TrailedOpenList::new(initial_trail)).collect(),
 		}
 	}
 
@@ -1151,6 +1163,7 @@ impl DifferenceLogicGraph {
 			self.active_in[n].init_trail(initial_trail);
 			self.open_out[n].init_trail(initial_trail);
 			self.open_in[n].init_trail(initial_trail);
+			self.decision_bools[n].init_trail(initial_trail);
 		}
 		for b in 0..self.bool_implications.len() {
 			if self.bool_active[b] {
@@ -1957,6 +1970,122 @@ where
 		Ok(())
 	}
 
+}
+
+/**********************************************
+* Branching strategies using difference logic *
+**********************************************/
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// Brancher that uses the current state of the difference logic graph to make branching decisions.
+pub struct DiffLogicBrancher {
+	/// Integer variables.
+	int_vars: Vec<IntView>,
+	/// Integer variable index in the graph.
+	int_var_index: Vec<usize>,
+	/// Boolean variables.
+	bool_vars: Vec<BoolView>,
+	/// Shared reference to difference logic graph
+	graph: Rc<RefCell<DifferenceLogicGraph>>,
+	/// The start of the unfixed variables in `int_vars`.
+	next: TrailedInt,
+	/// Whether to minimize or maximize
+	minimize: bool,
+}
+
+impl DiffLogicBrancher {
+
+	/// Create a new [`DiffLogicBrancher`]  and add to the end of the branching queue in the solver.
+	pub fn new_in<I: BrancherInitActions + ?Sized>(solver: &mut I,
+												   int_vars: &Vec<IntView>,
+												   bool_vars: &Vec<BoolView>,
+												   graph: Rc<RefCell<DifferenceLogicGraph>>,
+												   minimize: bool) {
+
+		trace!("Creating diff logic brancher");
+
+		let next = solver.new_trailed_int(-1);
+		solver.push_brancher(Box::new(DiffLogicBrancher {
+			int_vars: int_vars.clone(),
+			int_var_index: (0..int_vars.len()).into_iter().collect_vec(),
+			bool_vars: bool_vars.clone(),
+			graph: graph.clone(),
+			next,
+			minimize,
+		}));
+
+	}
+
+}
+
+impl<D: DecisionActions> Brancher<D> for DiffLogicBrancher {
+	fn decide(&mut self, actions: &mut D) -> Decision {
+		let state = actions.get_trailed_int(self.next);
+		let not_init = state < 0;
+		let mut begin = max(state, 0) as usize;
+
+		// return if all variables have been assigned
+		if begin == self.int_var_index.len() {
+			return Decision::Exhausted;
+		}
+
+		let mut graph = self.graph.borrow_mut();
+		if not_init || actions.get_int_lower_bound(self.int_vars[self.int_var_index[begin]]) == actions.get_int_upper_bound(self.int_vars[self.int_var_index[begin]]) {
+			let mut selection = None;
+			for i in begin..self.int_var_index.len() {
+				let index = self.int_var_index[i];
+				if actions.get_int_lower_bound(self.int_vars[index]) == actions.get_int_upper_bound(self.int_vars[index]) {
+					// move the fixed variable to the front
+					self.int_var_index.swap(i, begin);
+					begin += 1;
+				} else {
+					let new_score = if self.minimize {
+						(actions.get_int_lower_bound(self.int_vars[index]), graph.decision_bools[index].peek(actions).map_or(IntVal::MIN, |(_, val)| *val))
+					} else {
+						(-actions.get_int_upper_bound(self.int_vars[index]), -graph.decision_bools[index].peek(actions).map_or(IntVal::MAX, |(_, val)| *val))
+					};
+					if selection.map_or(true, |(_, sel_score)| new_score < sel_score) {
+						selection = Some((i, new_score));
+						trace!("{i} is better with score {new_score:?}");
+					}
+				}
+			}
+			// return if all variables have been assigned
+			let Some((next_i, _)) = selection else {
+				return Decision::Exhausted;
+			};
+			self.int_var_index.swap(next_i, begin);
+			// update the next variable to the index of the first unfixed variable
+			let _ = actions.set_trailed_int(self.next, begin as IntVal);
+		}
+
+		let index = self.int_var_index[begin];
+		let var = self.int_vars[index];
+
+		// If there are unfixed booleans, fix the next one
+		let mut candidate = graph.decision_bools[index].pop(actions);
+		while let Some((b, _)) = candidate {
+			if actions.get_bool_val(self.bool_vars[*b]).is_some() {
+				candidate = graph.decision_bools[index].pop(actions);
+			} else {
+				break;
+			}
+		}
+
+		let view = if let Some((b, _)) = candidate {
+			self.bool_vars[*b]
+		} else if self.minimize {
+			// Else fix the integer
+			actions.get_int_lit(var, IntLitMeaning::Less(actions.get_int_lower_bound(var) + 1))
+		} else {
+			actions.get_int_lit(var, IntLitMeaning::GreaterEq(actions.get_int_upper_bound(var)))
+		};
+
+		match view.0 {
+			BoolViewInner::Lit(lit) => Decision::Select(lit),
+			_ => unreachable!(),
+		}
+	}
 }
 
 #[cfg(test)]

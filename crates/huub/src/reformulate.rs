@@ -161,6 +161,8 @@ pub struct InitConfig {
 	pub(crate) diff_logic_prio_bools: u8,
 	/// Whether to use inc_imp to check implied booleans proactively.
 	pub(crate) diff_logic_inc_imp: bool,
+	/// Difference logic priority for boolean propagation.
+	pub(crate) diff_logic_branching: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -456,11 +458,13 @@ impl InitConfig {
 	pub fn with_diff_logic(mut self, diff_logic: Option<u32>,
 						   diff_logic_prio_bounds: Option<u8>,
 						   diff_logic_prio_bools: Option<u8>,
-						   diff_logic_inc_imp: bool) -> Self {
+						   diff_logic_inc_imp: bool, 
+						   diff_logic_branching: Option<u8>) -> Self {
 		self.diff_logic = diff_logic.unwrap_or(0);
 		self.diff_logic_prio_bounds = diff_logic_prio_bounds.unwrap_or(1);
 		self.diff_logic_prio_bools = diff_logic_prio_bools.unwrap_or(1);
 		self.diff_logic_inc_imp = diff_logic_inc_imp;
+		self.diff_logic_branching = diff_logic_branching.unwrap_or(0);
 		self
 	}
 

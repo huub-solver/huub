@@ -78,6 +78,8 @@ FLAGS
   --diff-logic-prio-bounds		  Priority for difference logic bound propagation (default: 1, range: 0-5)
   --diff-logic-prio-bools		  Priority for difference logic boolean propagation (default: 1, range: 0-5)
   --diff-logic-inc-imp <on|off>	  Use incremental check of implied constraints (default: on)
+  --diff-logic-branching          Branching on diff logic booleans: 0 (off, default), 1 (add),
+                                  2 (override) 
   
 
                       === BEHAVIOUR OPTIONS ===
