@@ -132,8 +132,10 @@ pub struct Cli<Stdout, Stderr> {
 	stderr: Stderr,
 	/// Whether to use ANSI color codes in the output (only for stderr)
 	ansi_color: bool,
+	/// Whether proof logging should be enabled
+	prove: bool,
 	/// Optional proof logging output file.
-	prove: Option<PathBuf>,
+	proof_path: Option<PathBuf>,
 }
 
 /// Solution struct to display the results of the solver
@@ -186,7 +188,7 @@ where
 			.with_conditioning(self.conditioning)
 			.with_inprocessing(self.inprocessing)
 			.with_probing(self.probing)
-			.with_prove(self.prove.is_some())
+			.with_prove(self.prove)
 			.with_restart(self.free_search || self.restart)
 			.with_subsumption(self.subsumption)
 			.with_variable_elimination(self.variable_elimination)
@@ -206,7 +208,7 @@ where
 			self.ansi_color,
 			Arc::clone(&lit_reverse_map),
 			Arc::clone(&int_reverse_map),
-			&self.prove,
+			&self.proof_path,
 		);
 
 		let _guard = set_default(subscriber);
@@ -314,7 +316,7 @@ where
 			slv.set_vsids_after_conflict(self.vsids_after_conflict);
 			slv.set_vsids_after_restart(self.vsids_after_restart);
 		}
-		slv.set_prove(self.prove.is_some());
+		slv.set_prove(self.prove);
 
 		// Determine Goal and Objective
 		let start_solve = Instant::now();
@@ -584,6 +586,7 @@ where
 			vsids_only: self.vsids_only,
 			stdout: self.stdout,
 			prove: self.prove,
+			proof_path: self.proof_path,
 		}
 	}
 
@@ -616,6 +619,7 @@ where
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
 			prove: self.prove,
+			proof_path: self.proof_path,
 		}
 	}
 }
@@ -699,8 +703,9 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			#[expect(trivial_casts, reason = "doesn't compile without the case")]
 			stderr: io::stderr as fn() -> io::Stderr,
 			ansi_color: true,
-			prove: args
-				.opt_value_from_os_str("--prove", |s| -> Result<PathBuf, Infallible> {
+			prove: args.contains("--prove"),
+			proof_path: args
+				.opt_value_from_os_str("--proof_path", |s| -> Result<PathBuf, Infallible> {
 					Ok(s.into())
 				})
 				.unwrap(),
@@ -708,15 +713,14 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 
 		// If no path is provided with --prove, use the name of the fzn file and output
 		// to current working directory.
-		if cli
-			.prove
-			.as_ref()
-			.and_then(|p| p.to_str())
-			.filter(|s| *s == "default")
-			.is_some()
-		{
-			cli.prove =
+		if cli.prove && cli.proof_path.is_none() {
+			cli.proof_path =
 				Some(PathBuf::from(cli.path.clone().file_stem().unwrap()).with_extension("pbp"));
+			}
+
+		// Enforce that --prove must be set for a proof log to be produced.
+		if !cli.prove && cli.proof_path.is_some() {
+			cli.proof_path = None;
 		}
 
 		let remaining = args.finish();

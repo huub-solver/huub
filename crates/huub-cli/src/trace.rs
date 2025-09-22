@@ -134,7 +134,7 @@ pub(crate) fn create_subscriber<W>(
 	ansi: bool,
 	lit_reverse_map: Arc<Mutex<FxHashMap<LitInt, LitName>>>,
 	int_reverse_map: Arc<Mutex<Vec<Ustr>>>,
-	prove: &Option<PathBuf>,
+	proof_file: &Option<PathBuf>,
 ) -> impl Subscriber
 where
 	W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
@@ -163,7 +163,7 @@ where
 		});
 
 	// Create proof logging layer
-	let pb_layer = if let Some(proof_path) = prove {
+	let pb_layer = if let Some(proof_path) = proof_file {
 		let proof_file = fs::OpenOptions::new()
 			.write(true)
 			.create(true)

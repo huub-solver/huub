@@ -71,7 +71,8 @@ FLAGS
 
                       === BEHAVIOUR OPTIONS ===
   --log-file <FILE>               Output log messages from the solver to a file, instead of stderr.
-  --prove <FILE>                  (Experimental) Write a proof log to the specified file.
+  --prove                         (Experimental) enable proof logging.
+  --proof-path <FILE>             Specify an explicit path and name for proof file,
   
 DESCRIPTION
   Create a Huub Solver instance tailored to a given FlatZinc JSON input file and solve the problem.
