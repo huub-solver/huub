@@ -958,7 +958,7 @@ where
 							 })),
 			None => None,
 		};
-		let mut diff_logic = DifferenceLogicCollection::new(config.diff_logic_prio_bounds, config.diff_logic_prio_bools, config.diff_logic_inc_imp, obj);
+		let mut diff_logic = DifferenceLogicCollection::new(config.diff_logic_prio_bounds, config.diff_logic_prio_bools, config.diff_logic_inc_imp, config.diff_logic_branching, obj);
 		// Traditional relational constraints
 		for (i, c) in self.fzn.constraints.iter().enumerate() {
 			if self.processed[i] {
