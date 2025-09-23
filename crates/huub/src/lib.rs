@@ -1059,7 +1059,7 @@ impl Model {
 			SimplificationStatus::Subsumed => {
 				// Constraint is known to be satisfied, no need to place back.
 			}
-			SimplificationStatus::Fixpoint => {
+			SimplificationStatus::NoFixpoint => {
 				self.constraints[con] = Some(con_obj);
 			}
 		}
@@ -1208,8 +1208,8 @@ impl Model {
 		}
 
 		while let Some(con) = self.prop_queue.pop_front() {
-			self.propagate(con)?;
 			self.enqueued[con] = false;
+			self.propagate(con)?;
 		}
 
 		// TODO: Detect Views From Model

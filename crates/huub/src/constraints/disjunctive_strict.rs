@@ -249,7 +249,7 @@ impl<S: SimplificationActions> Constraint<S> for DisjunctiveStrict {
 		if earliest_start + total_duration > latest_completion {
 			return Err(ReformulationError::TrivialUnsatisfiable);
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {

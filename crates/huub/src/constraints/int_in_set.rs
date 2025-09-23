@@ -42,7 +42,7 @@ impl<S: SimplificationActions> Constraint<S> for IntInSetReif {
 				actions.set_int_not_in_set(self.var, &self.set)?;
 				Ok(SimplificationStatus::Subsumed)
 			}
-			None => Ok(SimplificationStatus::Fixpoint),
+			None => Ok(SimplificationStatus::NoFixpoint),
 		}
 	}
 

@@ -63,7 +63,7 @@ impl<S: SimplificationActions> Constraint<S> for IntAbs {
 			return Ok(SimplificationStatus::Subsumed);
 		}
 
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {

@@ -153,7 +153,7 @@ impl<S: SimplificationActions> Constraint<S> for IntEq {
 		if ub_1 <= ub_0 {
 			actions.set_int_upper_bound(self.vars[0], ub_1)?;
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, actions: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -347,7 +347,7 @@ impl<S: SimplificationActions> Constraint<S> for IntLinear {
 			};
 		} else if self.operator == LinOperator::NotEqual {
 			// No further bounds propagation possible
-			return Ok(SimplificationStatus::Fixpoint);
+			return Ok(SimplificationStatus::NoFixpoint);
 		}
 
 		// The difference between the right-hand-side value and the sum of the lower
@@ -389,7 +389,7 @@ impl<S: SimplificationActions> Constraint<S> for IntLinear {
 				}
 			}
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {

@@ -151,12 +151,12 @@ impl<S: SimplificationActions> Constraint<S> for IntAllDifferent {
 			return Ok(SimplificationStatus::Subsumed);
 		}
 		if vals.is_empty() {
-			return Ok(SimplificationStatus::Fixpoint);
+			return Ok(SimplificationStatus::NoFixpoint);
 		}
 		for &v in &self.vars {
 			actions.set_int_not_in_set(v, &neg_dom)?;
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {

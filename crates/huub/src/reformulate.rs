@@ -230,7 +230,7 @@ pub(crate) struct ReformulationMapBuilder {
 
 impl<S: SimplificationActions> Constraint<S> for BoolFormula {
 	fn simplify(&mut self, _: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {

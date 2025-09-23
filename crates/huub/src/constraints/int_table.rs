@@ -75,7 +75,7 @@ impl<S: SimplificationActions> Constraint<S> for IntTable {
 				.collect();
 			actions.set_int_in_set(var, &dom)?;
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {

@@ -48,7 +48,7 @@ impl<S: SimplificationActions> Constraint<S> for BoolDecisionArrayElement {
 			actions.unify_bool(self.array[i as usize], self.result)?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {

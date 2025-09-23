@@ -117,7 +117,7 @@ impl<S: SimplificationActions> Constraint<S> for IntSeqPrecedeChain {
 		if self.vars.is_empty() {
 			return Ok(SimplificationStatus::Subsumed);
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -467,7 +467,7 @@ impl<S: SimplificationActions> Constraint<S> for IntValuePrecedeChain {
 		if self.vars.is_empty() {
 			return Ok(SimplificationStatus::Subsumed);
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {

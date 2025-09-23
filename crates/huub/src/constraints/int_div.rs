@@ -59,7 +59,7 @@ impl<S: SimplificationActions> Constraint<S> for IntDiv {
 
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		actions.set_int_not_eq(self.denominator, 0)?;
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {

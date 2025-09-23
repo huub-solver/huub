@@ -104,7 +104,7 @@ impl<S: SimplificationActions> Constraint<S> for IntDecisionArrayElement {
 		if max_ub < actions.get_int_upper_bound(self.result) {
 			actions.set_int_upper_bound(self.result, max_ub)?;
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -353,7 +353,7 @@ impl<S: SimplificationActions> Constraint<S> for IntValArrayElement {
 			actions.set_int_val(self.result, self.array[idx as usize])?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {

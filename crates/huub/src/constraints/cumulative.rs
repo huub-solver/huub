@@ -118,7 +118,7 @@ impl<S: SimplificationActions> Constraint<S> for Cumulative {
 			return Err(ReformulationError::TrivialUnsatisfiable);
 		}
 		// Reformulate the cumulative constraint into a propagator
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {

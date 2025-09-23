@@ -112,7 +112,7 @@ impl<S: SimplificationActions> Constraint<S> for IntTimes {
 				.unwrap();
 			actions.set_int_upper_bound(self.factor2, max)?;
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
