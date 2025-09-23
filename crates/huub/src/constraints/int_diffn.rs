@@ -30,7 +30,7 @@ pub struct IntDiffn {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Sweep based propagator for the `diffn_int` constraint.
 ///
-/// This propagator was first proposed in "Sweep as a Generic Pruning Technique
+/// This propagator was originally proposed in "Sweep as a Generic Pruning Technique
 /// Applied to the Non-overlapping Rectangles Constraint" by Beldinau, Nicolas
 /// and Carlsson, Mats. Then it was implemented within Gecode in https://urn.kb.se/resolve?urn=urn:nbn:se:uu:diva-325845 and then
 /// extended to lazy clause generation within this solver in
