@@ -1478,6 +1478,43 @@ impl SimplificationActions for Model {
 		}
 	}
 
+	fn get_int_domain(&self, var: IntDecision) -> IntSetVal {
+		use IntDecisionInner::*;
+
+		let var = var.resolve_alias(self);
+		match var.0 {
+			Var(v) => {
+				let Domain::Domain(dom) = &self.int_vars[v].domain else {
+					unreachable!()
+				};
+				dom.clone()
+			}
+			Const(v) => (v..=v).into(),
+			Linear(t, v) => {
+				let Domain::Domain(dom) = &self.int_vars[v].domain else {
+					unreachable!()
+				};
+				dom.iter()
+					.flatten()
+					.map(|v| {
+						let v = t.transform(v);
+						v..=v
+					})
+					.collect()
+			}
+			Bool(t, bv) => {
+				if let Some(v) = self.get_bool_val(bv) {
+					let v = t.transform(v as IntVal);
+					(v..=v).into()
+				} else {
+					let v0 = t.transform(0);
+					let v1 = t.transform(1);
+					if t.positive_scale() { v0..=v1 } else { v1..=v0 }.into()
+				}
+			}
+		}
+	}
+
 	fn get_int_lower_bound(&self, var: IntDecision) -> IntVal {
 		use IntDecisionInner::*;
 
