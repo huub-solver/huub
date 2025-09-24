@@ -821,7 +821,6 @@ mod tests {
 	use expect_test::expect;
 	use flatzinc_serde::RangeList;
 	use itertools::Itertools;
-	use pindakaas::Cnf;
 	use tracing_test::traced_test;
 
 	use crate::{
@@ -850,7 +849,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_val_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			(0..=4).into(),
@@ -909,7 +908,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_val_unsat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			(0..=3).into(),
@@ -955,7 +954,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_capacity_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let start = [0, 3, 4, 6, 8, 8].into_iter().map_into().collect();
 		let duration = [3, 2, 5, 2, 1, 4].into_iter().map_into().collect();
 		let usage = [2, 3, 1, 4, 3, 2].into_iter().map_into().collect();
@@ -973,7 +972,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_capacity_unsat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let start = [0, 3, 4, 6, 8, 8].into_iter().map_into().collect();
 		let duration = [3, 2, 5, 2, 1, 4].into_iter().map_into().collect();
 		let usage = [2, 3, 1, 4, 3, 2].into_iter().map_into().collect();
@@ -991,7 +990,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_dur_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
 			RangeList::from_iter([0..=2]),
@@ -1049,7 +1048,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_dur_unsat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
 			RangeList::from_iter([0..=2]),
@@ -1086,7 +1085,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_usage_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
 			RangeList::from_iter([0..=2]),
@@ -1132,7 +1131,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_usage_unsat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
 			RangeList::from_iter([0..=2]),

@@ -387,7 +387,6 @@ impl<S: SimplificationActions> Constraint<S> for IntValArrayElement {
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use pindakaas::Cnf;
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
@@ -404,7 +403,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_element_bounds_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([3..=4]),
@@ -463,7 +462,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_element_holes() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=3]),

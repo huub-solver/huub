@@ -920,7 +920,6 @@ where
 mod tests {
 	use std::cmp::max;
 
-	use pindakaas::Cnf;
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
@@ -937,7 +936,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_seq_precede_chain_paper() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let x1 = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=1]),
@@ -1003,7 +1002,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_seq_precede_chain_unrestricted() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let x1 = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=4]),
@@ -1036,7 +1035,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_value_precede_chain_complex() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let x0 = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=0, 2..=2]),
@@ -1106,7 +1105,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_value_precede_chain_out_of_bounds() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let x0 = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=1]),
@@ -1133,7 +1132,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_value_precede_chain_simple() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let x0 = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=3]),
@@ -1160,7 +1159,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_value_precede_chain_unrestricted() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let x0 = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([-2..=3]),

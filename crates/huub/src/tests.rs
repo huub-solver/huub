@@ -1,6 +1,6 @@
 use expect_test::{expect, Expect};
 use itertools::Itertools;
-use pindakaas::{propositional_logic::Formula, Cnf};
+use pindakaas::propositional_logic::Formula;
 use rangelist::RangeList;
 use tracing_test::traced_test;
 
@@ -41,7 +41,7 @@ fn it_works() {
 /// Tests for when a propagator propagates the same literal twice within the
 /// same call.
 fn test_duplicate_propagation() {
-	let mut slv = Solver::from(&Cnf::default());
+	let mut slv = Solver::default();
 	let a = IntVar::new_in(
 		&mut slv,
 		RangeList::from(0..=1),

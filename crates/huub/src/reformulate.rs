@@ -653,7 +653,7 @@ impl ReformulationMapBuilder {
 	/// Get the representation of a Boolean decision variable in the [`Solver`]
 	/// or create it if it does not yet exist.
 	///
-	/// Note that this method will function recursively (toghether with
+	/// Note that this method will function recursively (together with
 	/// [`Self::get_or_create_bool`]) to resolve aliased variables.
 	pub(crate) fn get_or_create_bool<Oracle: ExternalPropagation>(
 		&mut self,

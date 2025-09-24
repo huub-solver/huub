@@ -1296,7 +1296,7 @@ mod tests {
 	use std::{iter::once, num::NonZeroI32};
 
 	use itertools::Itertools;
-	use pindakaas::{Cnf, Lit as RawLit};
+	use pindakaas::Lit as RawLit;
 	use rangelist::RangeList;
 
 	use crate::{
@@ -1352,7 +1352,7 @@ mod tests {
 	fn eager_continuous_lits() {
 		use IntLitMeaning::*;
 
-		let mut slv: Solver = Solver::from(&Cnf::default());
+		let mut slv: Solver = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from(1..=4),
@@ -1411,7 +1411,7 @@ mod tests {
 	fn eager_gaps_lits() {
 		use IntLitMeaning::*;
 
-		let mut slv: Solver = Solver::from(&Cnf::default());
+		let mut slv: Solver = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=3, 8..=10]),
@@ -1492,7 +1492,7 @@ mod tests {
 	fn lazy_gaps_lits() {
 		use IntLitMeaning::*;
 
-		let mut slv: Solver = Solver::from(&Cnf::default());
+		let mut slv: Solver = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=3, 8..=10]),

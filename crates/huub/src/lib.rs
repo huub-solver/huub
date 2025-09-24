@@ -1175,15 +1175,15 @@ impl Model {
 	/// to [`crate::SolverView`]. If an error occurs during the reformulation
 	/// process, or if it is found to be trivially unsatisfiable, then an error
 	/// will be returned.
-	pub fn to_solver<Oracle: ExternalPropagation>(
+	pub fn to_solver<Oracle>(
 		&mut self,
 		config: &InitConfig,
 	) -> Result<(Solver<Oracle>, ReformulationMap), ReformulationError>
 	where
-		Solver<Oracle>: for<'a> From<&'a Cnf> + 'static,
+		Solver<Oracle>: Default,
+		Oracle: ExternalPropagation + 'static,
 	{
-		// TODO: run SAT simplification
-		let mut slv = Solver::<Oracle>::from(&self.cnf);
+		let mut slv = Solver::<Oracle>::default();
 		let any_slv: &mut dyn Any = &mut slv.oracle;
 		if let Some(r) = any_slv.downcast_mut::<Cadical>() {
 			// Set the solver options for preprocessing/inprocessing
@@ -1271,17 +1271,17 @@ impl Model {
 			int_map: index_vec![None; self.int_vars.len()],
 		};
 
+		// Ensure the creation of all integer variables.
+		for (idx, _) in self.int_vars.iter_enumerated() {
+			let _ = map_builder.get_or_create_int(self, &mut slv, idx);
+		}
+
 		// Ensure the creation of all Boolean variables.
 		for var in 1..=self.bool_vars.len() as u32 {
 			let var = BoolDecision(BoolDecisionInner::Lit(RawLit::from_raw(
 				NonZeroI32::new(var as i32).unwrap(),
 			)));
 			let _ = map_builder.get_or_create_bool(self, &mut slv, var);
-		}
-
-		// Ensure the creation of all integer variables.
-		for (idx, _) in self.int_vars.iter_enumerated() {
-			let _ = map_builder.get_or_create_int(self, &mut slv, idx);
 		}
 
 		// Finalize the reformulation map (all variables must be created by now)
