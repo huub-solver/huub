@@ -9,8 +9,8 @@ use tracing::trace;
 
 use crate::{
 	actions::{
-		ExplanationActions, InspectionActions, PropagatorInitActions, ReformulationActions,
-		SimplificationActions,
+		ConstraintInitActions, ExplanationActions, InspectionActions, PropagatorInitActions,
+		ReformulationActions, SimplificationActions,
 	},
 	constraints::{
 		Conflict, Constraint, PropagationActions, Propagator, ReasonBuilder, SimplificationStatus,
@@ -79,6 +79,18 @@ pub struct CumulativeTimeTablePropagator {
 }
 
 impl<S: SimplificationActions> Constraint<S> for Cumulative {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		for &i in self
+			.start_times
+			.iter()
+			.chain(&self.durations)
+			.chain(&self.usages)
+		{
+			actions.simplify_on_change_int(i);
+		}
+		actions.simplify_on_change_int(self.capacity);
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		// Check if the cumulative constraint is trivially unsatisfiable
 		let mut earliest_start = IntVal::MAX;

@@ -4,7 +4,8 @@
 
 use crate::{
 	actions::{
-		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+		ConstraintInitActions, ExplanationActions, PropagatorInitActions, ReformulationActions,
+		SimplificationActions,
 	},
 	constraints::{
 		CachedReason, Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus,
@@ -41,6 +42,12 @@ pub struct IntTimesBounds {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntTimes {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		actions.simplify_on_change_int(self.factor1);
+		actions.simplify_on_change_int(self.factor2);
+		actions.simplify_on_change_int(self.product);
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		let (f1_lb, f1_ub) = actions.get_int_bounds(self.factor1);
 		let (f2_lb, f2_ub) = actions.get_int_bounds(self.factor2);

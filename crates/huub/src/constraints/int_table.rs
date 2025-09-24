@@ -6,7 +6,7 @@ use itertools::Itertools;
 use pindakaas::ClauseDatabaseTools;
 
 use crate::{
-	actions::{ReformulationActions, SimplificationActions},
+	actions::{ConstraintInitActions, ReformulationActions, SimplificationActions},
 	constraints::{Constraint, SimplificationStatus},
 	reformulate::ReformulationError,
 	solver::{BoolView, IntLitMeaning},
@@ -26,6 +26,12 @@ pub struct IntTable {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntTable {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		for var in &self.vars {
+			actions.simplify_on_change_int(*var);
+		}
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		match self.vars.len() {
 			0 => return Ok(SimplificationStatus::Subsumed),

@@ -128,6 +128,12 @@ impl IntAllDifferent {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntAllDifferent {
+	fn initialize(&self, actions: &mut dyn crate::actions::ConstraintInitActions) {
+		for &var in &self.vars {
+			actions.simplify_on_change_int(var);
+		}
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		let (vals, vars): (Vec<_>, Vec<_>) = self.vars.iter().partition_map(|&var| {
 			if let Some(val) = actions.get_int_val(var) {

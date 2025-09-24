@@ -6,8 +6,8 @@ use std::cmp::{max, min};
 
 use crate::{
 	actions::{
-		ExplanationActions, InspectionActions, PropagatorInitActions, ReformulationActions,
-		SimplificationActions,
+		ConstraintInitActions, ExplanationActions, InspectionActions, PropagatorInitActions,
+		ReformulationActions, SimplificationActions,
 	},
 	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
@@ -97,6 +97,12 @@ pub struct IntValuePrecedeChainValue {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntSeqPrecedeChain {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		for &v in self.vars.iter() {
+			actions.simplify_on_change_int(v);
+		}
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		let mut ub = 0;
 		for &v in self.vars.iter() {
@@ -431,6 +437,12 @@ where
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntValuePrecedeChain {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		for &v in self.vars.iter() {
+			actions.simplify_on_change_int(v);
+		}
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		if self.values.len() <= 1 {
 			return Ok(SimplificationStatus::Subsumed);

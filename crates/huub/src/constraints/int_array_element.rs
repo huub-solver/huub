@@ -339,6 +339,11 @@ where
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntValArrayElement {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		actions.simplify_on_change_int(self.result);
+		actions.simplify_on_change_int(self.index);
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		// Fix the bounds of the index is to the length of the array
 		actions.set_int_lower_bound(self.index, 0)?;

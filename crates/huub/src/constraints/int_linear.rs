@@ -10,7 +10,9 @@ use pindakaas::{
 };
 
 use crate::{
-	actions::{PropagatorInitActions, ReformulationActions, SimplificationActions},
+	actions::{
+		ConstraintInitActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+	},
 	constraints::{
 		Conflict, Constraint, ExplanationActions, PropagationActions, Propagator, ReasonBuilder,
 		SimplificationStatus,
@@ -121,6 +123,12 @@ pub(crate) enum Reification {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntEq {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		for &var in &self.vars {
+			actions.simplify_on_change_int(var);
+		}
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		let (lb_0, ub_0) = actions.get_int_bounds(self.vars[0]);
 		let (lb_1, ub_1) = actions.get_int_bounds(self.vars[1]);
@@ -214,8 +222,17 @@ impl IntLinear {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntLinear {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		for &v in &self.terms {
+			actions.simplify_on_change_int(v);
+		}
+		if let Some(Reification::ImpliedBy(r) | Reification::ReifiedBy(r)) = self.reif {
+			actions.simplify_on_change_bool(r);
+		}
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		// If the reification of the constriant is known, simplify to non-reified
+		// If the reification of the constraint is known, simplify to non-reified
 		// version
 		if let Some(Reification::ImpliedBy(r) | Reification::ReifiedBy(r)) = self.reif {
 			match actions.get_bool_val(r) {

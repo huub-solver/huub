@@ -8,7 +8,8 @@ use pindakaas::ClauseDatabaseTools;
 
 use crate::{
 	actions::{
-		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+		ConstraintInitActions, ExplanationActions, PropagatorInitActions, ReformulationActions,
+		SimplificationActions,
 	},
 	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
 	helpers::div_ceil,
@@ -50,6 +51,12 @@ pub struct IntDivBounds {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntDiv {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		actions.simplify_on_change_int(self.numerator);
+		actions.simplify_on_change_int(self.denominator);
+		actions.simplify_on_change_int(self.result);
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		actions.set_int_not_eq(self.denominator, 0)?;
 		Ok(SimplificationStatus::Fixpoint)

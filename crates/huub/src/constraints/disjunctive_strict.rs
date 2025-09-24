@@ -7,8 +7,8 @@ use tracing::trace;
 
 use crate::{
 	actions::{
-		ExplanationActions, InspectionActions, PropagatorInitActions, ReformulationActions,
-		SimplificationActions,
+		ConstraintInitActions, ExplanationActions, InspectionActions, PropagatorInitActions,
+		ReformulationActions, SimplificationActions,
 	},
 	constraints::{
 		Conflict, Constraint, PropagationActions, Propagator, ReasonBuilder, SimplificationStatus,
@@ -221,6 +221,12 @@ impl DisjunctiveStrict {
 }
 
 impl<S: SimplificationActions> Constraint<S> for DisjunctiveStrict {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		for &i in &self.start_times {
+			actions.simplify_on_change_int(i);
+		}
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		// return TrivialUnsatisfiable if overload is detected
 		let (earliest_start, latest_completion) =
