@@ -2009,7 +2009,7 @@ impl DiffLogicBrancher {
 
 		trace!("Creating diff logic brancher");
 
-		let next = solver.new_trailed_int(-1);
+		let next = solver.new_trailed_int(0);
 		solver.push_brancher(Box::new(DiffLogicBrancher {
 			int_vars: int_vars.clone(),
 			int_var_index: (0..int_vars.len()).into_iter().collect_vec(),
@@ -2025,9 +2025,7 @@ impl DiffLogicBrancher {
 
 impl<D: DecisionActions> Brancher<D> for DiffLogicBrancher {
 	fn decide(&mut self, actions: &mut D) -> Decision {
-		let state = actions.get_trailed_int(self.next);
-		let mut not_init = state < 0;
-		let mut begin = max(state, 0) as usize;
+		let mut begin = actions.get_trailed_int(self.next) as usize;
 
 		// return if all variables have been assigned
 		if begin == self.int_var_index.len() {
@@ -2037,38 +2035,38 @@ impl<D: DecisionActions> Brancher<D> for DiffLogicBrancher {
 		// loop until decision found or exhausted
 		loop {
 			let mut graph = self.graph.borrow_mut();
-			let begin_index = self.int_var_index[begin];
-			if not_init || actions.get_int_lower_bound(self.int_vars[begin_index]) == actions.get_int_upper_bound(self.int_vars[begin_index]) || graph.decision_bools[begin_index].peek(actions).is_none() {
-				not_init = false;
-				let mut selection = None;
-				for i in begin..self.int_var_index.len() {
-					let index = self.int_var_index[i];
-					if actions.get_int_lower_bound(self.int_vars[index]) == actions.get_int_upper_bound(self.int_vars[index]) || graph.decision_bools[index].peek(actions).is_none() {
-						// move the exhausted variable to the front
-						self.int_var_index.swap(i, begin);
-						begin += 1;
-					} else {
-						let new_score = if self.minimize {
-							(actions.get_int_lower_bound(self.int_vars[index]), graph.decision_bools[index].peek(actions).map_or(IntVal::MIN, |(_, val)| *val))
-						} else {
-							(-actions.get_int_upper_bound(self.int_vars[index]), -graph.decision_bools[index].peek(actions).map_or(IntVal::MAX, |(_, val)| *val))
-						};
-						if selection.map_or(true, |(_, sel_score)| new_score < sel_score) {
-							selection = Some((i, new_score));
-							trace!("{i} is better with score {new_score:?}");
+			let mut selection = None;
+			for i in begin..self.int_var_index.len() {
+				let index = self.int_var_index[i];
+				if actions.get_int_lower_bound(self.int_vars[index]) == actions.get_int_upper_bound(self.int_vars[index]) || graph.decision_bools[index].peek(actions).is_none() {
+					// move the exhausted variable to the front
+					self.int_var_index.swap(i, begin);
+					if let Some((next_i, score)) = selection {
+						if next_i == begin {
+							selection = Some((i, score));
 						}
 					}
+					begin += 1;
+				} else {
+					let new_score = if self.minimize {
+						(actions.get_int_lower_bound(self.int_vars[index]), -graph.decision_bools[index].peek(actions).map_or(IntVal::MAX, |(_, val)| *val))
+					} else {
+						(-actions.get_int_upper_bound(self.int_vars[index]), graph.decision_bools[index].peek(actions).map_or(IntVal::MIN, |(_, val)| *val))
+					};
+					if selection.map_or(true, |(_, sel_score)| new_score < sel_score) {
+						selection = Some((i, new_score));
+						trace!("{i} is better with score {new_score:?}");
+					}
 				}
-				// return if all variables have been assigned
-				let Some((next_i, _)) = selection else {
-					return Decision::Exhausted;
-				};
-				self.int_var_index.swap(next_i, begin);
-				// update the next variable to the index of the first unfixed variable
-				let _ = actions.set_trailed_int(self.next, begin as IntVal);
 			}
+			// return if all variables have been assigned
+			let Some((next_i, _)) = selection else {
+				return Decision::Exhausted;
+			};
+			// update the next variable to the index of the first unfixed variable
+			let _ = actions.set_trailed_int(self.next, begin as IntVal);
 
-			let index = self.int_var_index[begin];
+			let index = self.int_var_index[next_i];
 			// If there are unfixed booleans, fix the next one
 			let mut candidate = graph.decision_bools[index].pop(actions);
 			while let Some((b, _)) = candidate {
