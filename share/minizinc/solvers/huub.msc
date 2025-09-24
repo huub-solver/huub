@@ -13,6 +13,7 @@
     ["--int-eager-limit", "Set the maximum cardinality for which all order literals to represent an integer variable are created eagerly", "int", 255],
     ["--preprocessing","The number of preprocessing rounds of the SAT solver","int","0"],
     ["--probing","Whether to enable the failed literal probing","bool:false:true","false"],
+    ["--reason-eager", "Whether to add explanation clauses for all literals propagated on the level of a conflict","bool:false:true","false"],
     ["--restart","Whether to enable restarts during search","bool:false:true","false"],
     ["--subsumption","Whether to enable the global forward subsumption","bool:false:true","false"],
     ["--toggle-vsids", "Alternate between the activity-based search heuristic and the user-specific search heuristic after every restart.", "bool", "false"],

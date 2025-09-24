@@ -115,6 +115,9 @@ pub struct Cli<Stdout, Stderr> {
 	preprocessing: Option<usize>,
 	/// Whether to enable the failed literal probing in the oracle solver.
 	probing: bool,
+	/// Whether to enable asking for explanation clauses for all literals
+	/// propagated on the level of a conflict.
+	reason_eager: bool,
 	/// Whether to enable the global forward subsumption in the oracle solver.
 	subsumption: bool,
 	/// Whether to enable the bounded variable elimination in the oracle solver.
@@ -194,6 +197,7 @@ where
 			.with_conditioning(self.conditioning)
 			.with_inprocessing(self.inprocessing)
 			.with_probing(self.probing)
+			.with_reason_eager(self.reason_eager)
 			.with_restart(self.free_search || self.restart)
 			.with_subsumption(self.subsumption)
 			.with_variable_elimination(self.variable_elimination)
@@ -277,10 +281,7 @@ where
 			let mut int_map = int_reverse_map.lock().unwrap();
 			debug_assert!(int_map.is_empty());
 			*int_map = vec![ustr(""); slv.init_statistics().int_vars()];
-			let mut keys: Vec<_> = var_map.keys().collect();
-			keys.sort();
-			for name in keys {
-				let v = var_map[name];
+			for (name, v) in &var_map {
 				match v {
 					View::Bool(bv) => {
 						if let Some(info) = bv.reverse_map_info() {
@@ -582,6 +583,7 @@ where
 			time_limit: self.time_limit,
 			verbose: self.verbose,
 			int_eager_limit: self.int_eager_limit,
+			reason_eager: self.reason_eager,
 			restart: self.restart,
 			toggle_vsids: self.toggle_vsids,
 			preprocessing: self.preprocessing,
@@ -617,6 +619,7 @@ where
 			time_limit: self.time_limit,
 			verbose: self.verbose,
 			int_eager_limit: self.int_eager_limit,
+			reason_eager: self.reason_eager,
 			restart: self.restart,
 			toggle_vsids: self.toggle_vsids,
 			preprocessing: self.preprocessing,
@@ -682,6 +685,10 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			vsids_after_restart: args.contains("--vsids-after-restart"),
 			vsids_only: args.contains("--vsids-only"),
 
+			reason_eager: args
+				.opt_value_from_fn("--reason-eager", parse_bool_arg)
+				.map(|x| x.unwrap_or(false))
+				.map_err(|e| e.to_string())?,
 			conditioning: args
 				.opt_value_from_fn("--conditioning", parse_bool_arg)
 				.map(|x| x.unwrap_or(false))

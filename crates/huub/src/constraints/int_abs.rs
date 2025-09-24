@@ -63,7 +63,7 @@ impl<S: SimplificationActions> Constraint<S> for IntAbs {
 			return Ok(SimplificationStatus::Subsumed);
 		}
 
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -145,7 +145,6 @@ where
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use pindakaas::Cnf;
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
@@ -158,7 +157,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_int_abs_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			(-3..=3).into(),

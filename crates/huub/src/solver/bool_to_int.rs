@@ -44,7 +44,7 @@ impl BoolToIntMap {
 		} else {
 			self.lazy
 				.get(&var)
-				.map(|(int_var, meaning)| (*int_var, Some(meaning.clone())))
+				.map(|(int_var, meaning)| (*int_var, Some(*meaning)))
 		}
 	}
 	/// Insert a range of Boolean variables to map them to the integer variable

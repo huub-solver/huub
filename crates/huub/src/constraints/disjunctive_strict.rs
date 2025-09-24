@@ -7,8 +7,8 @@ use tracing::trace;
 
 use crate::{
 	actions::{
-		ExplanationActions, InspectionActions, PropagatorInitActions, ReformulationActions,
-		SimplificationActions,
+		ConstraintInitActions, ExplanationActions, InspectionActions, PropagatorInitActions,
+		ReformulationActions, SimplificationActions,
 	},
 	constraints::{
 		Conflict, Constraint, PropagationActions, Propagator, ReasonBuilder, SimplificationStatus,
@@ -221,6 +221,12 @@ impl DisjunctiveStrict {
 }
 
 impl<S: SimplificationActions> Constraint<S> for DisjunctiveStrict {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		for &i in &self.start_times {
+			actions.simplify_on_change_int(i);
+		}
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		// return TrivialUnsatisfiable if overload is detected
 		let (earliest_start, latest_completion) =
@@ -243,7 +249,7 @@ impl<S: SimplificationActions> Constraint<S> for DisjunctiveStrict {
 		if earliest_start + total_duration > latest_completion {
 			return Err(ReformulationError::TrivialUnsatisfiable);
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -1389,7 +1395,6 @@ impl OmegaThetaTree {
 mod tests {
 	use expect_test::expect;
 	use flatzinc_serde::RangeList;
-	use pindakaas::Cnf;
 	use tracing_test::traced_test;
 
 	use crate::{
@@ -1404,7 +1409,7 @@ mod tests {
 		for (edge_finding, not_last, detectable_precedence) in
 			itertools::iproduct!([true, false], [true, false], [true, false])
 		{
-			let mut slv = Solver::from(&Cnf::default());
+			let mut slv = Solver::default();
 			let a = IntVar::new_in(
 				&mut slv,
 				RangeList::from_iter([0..=4]),

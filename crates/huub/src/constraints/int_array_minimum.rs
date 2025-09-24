@@ -64,7 +64,7 @@ impl<S: SimplificationActions> Constraint<S> for IntArrayMinimum {
 		for &v in &self.vars {
 			actions.set_int_lower_bound(v, lb)?;
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {

@@ -128,6 +128,12 @@ impl IntAllDifferent {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntAllDifferent {
+	fn initialize(&self, actions: &mut dyn crate::actions::ConstraintInitActions) {
+		for &var in &self.vars {
+			actions.simplify_on_change_int(var);
+		}
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		let (vals, vars): (Vec<_>, Vec<_>) = self.vars.iter().partition_map(|&var| {
 			if let Some(val) = actions.get_int_val(var) {
@@ -145,12 +151,12 @@ impl<S: SimplificationActions> Constraint<S> for IntAllDifferent {
 			return Ok(SimplificationStatus::Subsumed);
 		}
 		if vals.is_empty() {
-			return Ok(SimplificationStatus::Fixpoint);
+			return Ok(SimplificationStatus::NoFixpoint);
 		}
 		for &v in &self.vars {
 			actions.set_int_not_in_set(v, &neg_dom)?;
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -522,7 +528,6 @@ where
 #[cfg(test)]
 mod tests {
 	use itertools::Itertools;
-	use pindakaas::Cnf;
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
@@ -541,7 +546,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_all_different_bounds_sat_1() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=3]),
@@ -566,7 +571,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_all_different_bounds_sat_2() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([3..=4]),
@@ -611,7 +616,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_all_different_bounds_sat_3() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([3..=6]),
@@ -656,7 +661,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_all_different_bounds_unsat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from(1..=3),
@@ -684,7 +689,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_all_different_value_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=4]),
@@ -712,7 +717,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_all_different_value_unsat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
@@ -738,7 +743,7 @@ mod tests {
 	}
 
 	fn test_sudoku(grid: &[&str], expected: SolveResult) {
-		let mut slv: Solver = Solver::from(&Cnf::default());
+		let mut slv: Solver = Solver::default();
 		let mut all_vars = vec![];
 		// create variables and add all different propagator for each row
 		grid.iter().for_each(|row| {

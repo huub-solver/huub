@@ -24,7 +24,7 @@ use pindakaas::{
 		cadical::Cadical, propagation::ExternalPropagation, Assumptions, FailedAssumptions,
 		LearnCallback, SolveResult as SatSolveResult, TermSignal, TerminateCallback,
 	},
-	BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Lit as RawLit, Unsatisfiable,
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
 	Valuation as SatValuation,
 };
 use tracing::{debug, trace};
@@ -65,7 +65,10 @@ pub trait AssumptionChecker {
 pub struct BoolView(pub(crate) BoolViewInner);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-#[allow(variant_size_differences, reason = "`Lit` cannot be as smal as `bool`")]
+#[allow(
+	variant_size_differences,
+	reason = "`Lit` cannot be as small as `bool`"
+)]
 /// The internal representation of a [`BoolView`].
 ///
 /// Note that this representation is not meant to be exposed to the user.
@@ -97,7 +100,7 @@ pub struct InitStatistics {
 	propagators: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// The meaning of a literal in the context of a integer decision variable `x`.
 pub enum IntLitMeaning {
 	/// Literal representing the condition `x = i`.
@@ -148,8 +151,8 @@ pub(crate) enum IntViewInner {
 pub(crate) struct NoAssumptions;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-/// Structure capturing statitical information about the search performed by the
-/// solver instance.
+/// Structure capturing statistical information about the search performed by
+/// the solver instance.
 pub struct SearchStatistics {
 	/// Number of conflicts encountered
 	pub(crate) conflicts: u64,
@@ -177,6 +180,7 @@ pub enum SolveResult {
 	/// The solver was interrupted before a result could be reached.
 	Unknown,
 }
+
 #[derive(Debug)]
 /// The main solver object that is used to interact with the LCG solver.
 pub struct Solver<Oracle = Cadical> {
@@ -218,7 +222,10 @@ pub(crate) struct SolverConfiguration {
 pub trait Valuation: Fn(View) -> Value {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[allow(variant_size_differences, reason = "`Int` cannot be as smal as `Bool`")]
+#[allow(
+	variant_size_differences,
+	reason = "`Int` cannot be as small as `Bool`"
+)]
 /// The general representation of a solution value in the solver.
 pub enum Value {
 	/// A Boolean value.
@@ -310,10 +317,18 @@ impl Not for BoolView {
 	type Output = Self;
 
 	fn not(self) -> Self::Output {
-		BoolView(match self.0 {
+		BoolView(!self.0)
+	}
+}
+
+impl Not for BoolViewInner {
+	type Output = Self;
+
+	fn not(self) -> Self::Output {
+		match self {
 			BoolViewInner::Lit(l) => BoolViewInner::Lit(!l),
 			BoolViewInner::Const(b) => BoolViewInner::Const(!b),
-		})
+		}
 	}
 }
 
@@ -417,7 +432,7 @@ impl IntView {
 						let i: NonZeroI32 = lit.into();
 						let orig = IntLitMeaning::Less(val);
 						let lt = transformer.transform_lit(orig);
-						let geq = !lt.clone();
+						let geq = !lt;
 						lits.extend([(i, lt), (-i, geq)]);
 					}
 				}
@@ -430,7 +445,7 @@ impl IntView {
 						let i: NonZeroI32 = lit.into();
 						let orig = IntLitMeaning::Eq(val);
 						let eq = transformer.transform_lit(orig);
-						let ne = !eq.clone();
+						let ne = !eq;
 						lits.extend([(i, eq), (-i, ne)]);
 					}
 				}
@@ -863,7 +878,7 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 	) -> Result<(Self, MapTy, FlatZincStatistics), FlatZincError>
 	where
 		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
-		Solver<Oracle>: for<'a> From<&'a Cnf>,
+		Solver<Oracle>: Default,
 		Oracle: 'static,
 	{
 		let (mut prb, map, fzn_stats) = Model::from_fzn::<S, Vec<_>>(fzn, config)?;
@@ -898,7 +913,7 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 		(status, stats, solutions)
 	}
 
-	/// Access the initilization statistics of the [`Solver`] object.
+	/// Access the initialization statistics of the [`Solver`] object.
 	pub fn init_statistics(&self) -> InitStatistics {
 		InitStatistics {
 			int_vars: self.engine.borrow().state.int_vars.len(),
@@ -1054,7 +1069,7 @@ impl<Oracle: ExternalPropagation> BrancherInitActions for Solver<Oracle> {
 				self.oracle.add_observed_var(lit.var());
 			}
 			_ => {
-				// Nothing has to happend for constants and all literals for
+				// Nothing has to happened for constants and all literals for
 				// integer variables are already marked as observed.
 			}
 		}
@@ -1107,7 +1122,7 @@ impl<Oracle: ExternalPropagation> DecisionActions for Solver<Oracle> {
 				self.oracle.add_observed_var(v);
 				trace_new_lit!(iv, def, v);
 				state.trail.grow_to_boolvar(v);
-				state.bool_to_int.insert_lazy(v, iv, def.meaning.clone());
+				state.bool_to_int.insert_lazy(v, iv, def.meaning);
 				// Add clauses to define the new variable
 				for cl in def.meaning.defining_clauses(
 					v.into(),
@@ -1126,11 +1141,21 @@ impl<Oracle: ExternalPropagation> DecisionActions for Solver<Oracle> {
 				.add_clause_from_slice(&cl)
 				.expect("functional definition cannot make the problem unsatisfiable");
 		}
-		bv
+		bv.0
 	}
 
 	fn get_num_conflicts(&self) -> u64 {
 		self.engine.borrow().state.statistics.conflicts
+	}
+}
+
+impl<Oracle: Default + ExternalPropagation + LearnCallback> Default for Solver<Oracle> {
+	fn default() -> Self {
+		let mut oracle = Oracle::default();
+		let engine = Rc::default();
+		oracle.set_learn_callback(Some(trace_learned_clause));
+		oracle.connect_propagator(Rc::clone(&engine));
+		Self { oracle, engine }
 	}
 }
 
@@ -1164,19 +1189,6 @@ impl<Oracle: ExternalPropagation> ExplanationActions for Solver<Oracle> {
 
 	fn try_int_lit(&self, var: IntView, meaning: IntLitMeaning) -> Option<BoolView> {
 		self.engine.borrow().state.try_int_lit(var, meaning)
-	}
-}
-
-impl<Oracle> From<&Cnf> for Solver<Oracle>
-where
-	Oracle: ExternalPropagation + for<'a> From<&'a Cnf> + LearnCallback,
-{
-	fn from(value: &Cnf) -> Self {
-		let mut oracle: Oracle = value.into();
-		let engine = Rc::default();
-		oracle.set_learn_callback(Some(trace_learned_clause));
-		oracle.connect_propagator(Rc::clone(&engine));
-		Self { oracle, engine }
 	}
 }
 

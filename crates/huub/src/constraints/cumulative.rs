@@ -9,8 +9,8 @@ use tracing::trace;
 
 use crate::{
 	actions::{
-		ExplanationActions, InspectionActions, PropagatorInitActions, ReformulationActions,
-		SimplificationActions,
+		ConstraintInitActions, ExplanationActions, InspectionActions, PropagatorInitActions,
+		ReformulationActions, SimplificationActions,
 	},
 	constraints::{
 		Conflict, Constraint, PropagationActions, Propagator, ReasonBuilder, SimplificationStatus,
@@ -79,6 +79,18 @@ pub struct CumulativeTimeTablePropagator {
 }
 
 impl<S: SimplificationActions> Constraint<S> for Cumulative {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		for &i in self
+			.start_times
+			.iter()
+			.chain(&self.durations)
+			.chain(&self.usages)
+		{
+			actions.simplify_on_change_int(i);
+		}
+		actions.simplify_on_change_int(self.capacity);
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		// Check if the cumulative constraint is trivially unsatisfiable
 		let mut earliest_start = IntVal::MAX;
@@ -106,7 +118,7 @@ impl<S: SimplificationActions> Constraint<S> for Cumulative {
 			return Err(ReformulationError::TrivialUnsatisfiable);
 		}
 		// Reformulate the cumulative constraint into a propagator
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -821,7 +833,6 @@ mod tests {
 	use expect_test::expect;
 	use flatzinc_serde::RangeList;
 	use itertools::Itertools;
-	use pindakaas::Cnf;
 	use tracing_test::traced_test;
 
 	use crate::{
@@ -850,7 +861,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_val_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			(0..=4).into(),
@@ -909,7 +920,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_val_unsat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			(0..=3).into(),
@@ -955,7 +966,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_capacity_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let start = [0, 3, 4, 6, 8, 8].into_iter().map_into().collect();
 		let duration = [3, 2, 5, 2, 1, 4].into_iter().map_into().collect();
 		let usage = [2, 3, 1, 4, 3, 2].into_iter().map_into().collect();
@@ -973,7 +984,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_capacity_unsat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let start = [0, 3, 4, 6, 8, 8].into_iter().map_into().collect();
 		let duration = [3, 2, 5, 2, 1, 4].into_iter().map_into().collect();
 		let usage = [2, 3, 1, 4, 3, 2].into_iter().map_into().collect();
@@ -991,7 +1002,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_dur_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
 			RangeList::from_iter([0..=2]),
@@ -1049,7 +1060,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_dur_unsat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
 			RangeList::from_iter([0..=2]),
@@ -1086,7 +1097,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_usage_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
 			RangeList::from_iter([0..=2]),
@@ -1132,7 +1143,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_usage_unsat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
 			RangeList::from_iter([0..=2]),

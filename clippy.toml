@@ -1,3 +1,9 @@
+disallowed-types = [
+	{ path = "std::collections::HashMap", reason = "prefer faster & deterministic hash alternative", replacement = "rustc_hash::FxHashMap" },
+	{ path = "std::collections::HashSet", reason = "prefer faster & deterministic hash alternative", replacement = "rustc_hash::FxHashSet" },
+	{ path = "std::hash::DefaultHasher", reason = "prefer faster & deterministic hash alternative", replacement = "rustc_hash::FxHasher" },
+	{ path = "std::hash::RandomState", reason = "prefer faster & deterministic hash alternative", replacement = "rustc_hash::FxBuildHasher" },
+]
 enforced-import-renames = [
   { path = "pindakaas::Lit", rename = "RawLit" },
   { path = "pindakaas::Var", rename = "RawVar" },

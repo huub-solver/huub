@@ -6,7 +6,8 @@ use pindakaas::ClauseDatabaseTools;
 
 use crate::{
 	actions::{
-		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+		ConstraintInitActions, ExplanationActions, PropagatorInitActions, ReformulationActions,
+		SimplificationActions,
 	},
 	constraints::{CachedReason, Conflict, Constraint, PropagationActions, Propagator},
 	reformulate::ReformulationError,
@@ -68,6 +69,12 @@ fn pow(base: IntVal, exponent: IntVal) -> Option<IntVal> {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntPow {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		actions.simplify_on_change_int(self.base);
+		actions.simplify_on_change_int(self.exponent);
+		actions.simplify_on_change_int(self.result);
+	}
+
 	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let base = slv.get_solver_int(self.base);
 		let exponent = slv.get_solver_int(self.exponent);
@@ -347,7 +354,6 @@ where
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use pindakaas::Cnf;
 	use tracing_test::traced_test;
 
 	use crate::{
@@ -361,7 +367,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_int_pow_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			(-2..=3).into(),

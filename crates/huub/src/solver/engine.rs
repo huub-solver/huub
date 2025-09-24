@@ -91,6 +91,19 @@ pub(crate) struct EngineStatistics {
 	pub(crate) user_decisions: u64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// Description of a literal propagation event in the propagation queue.
+pub(crate) struct LitPropagation {
+	/// The literal that was propagated.
+	pub(crate) lit: RawLit,
+	/// The reason for which the literal was propagated.
+	pub(crate) reason: Result<Reason, bool>,
+	/// The underlying event on complex types that triggered the propagation.
+	///
+	/// This event should be used to schedule further propagators.
+	pub(crate) event: Option<(IntVarRef, IntEvent)>,
+}
+
 #[derive(Clone, Debug, Default)]
 /// Internal state representation of the propagation engine disconnected from
 /// the storage of the propagators and branchers.
@@ -113,7 +126,7 @@ pub struct State {
 	/// variable assignments
 	pub(crate) trail: Trail,
 	/// Literals to be propagated by the oracle
-	pub(crate) propagation_queue: VecDeque<RawLit>,
+	pub(crate) propagation_queue: VecDeque<LitPropagation>,
 	/// Reasons for setting values
 	pub(crate) reason_map: FxHashMap<RawLit, Reason>,
 	/// Whether conflict has (already) been detected
@@ -143,6 +156,8 @@ pub struct State {
 	pub(crate) int_activation: IndexVec<IntVarRef, ActivationList>,
 	/// Queue of propagators awaiting action
 	pub(crate) propagator_queue: PropagatorQueue,
+	/// Last literal propagated by the Engine.
+	last_propagated: Option<(RawLit, Option<(IntVarRef, IntEvent)>)>,
 
 	// ---- Debugging Helpers ----
 	#[cfg(debug_assertions)]
@@ -156,12 +171,35 @@ impl Engine {
 	/// (DEBUG ONLY) Check that the reason of a propagated literal contains only
 	/// known true literals
 	fn debug_check_reason(&mut self, lit: RawLit) {
+		use rustc_hash::FxHashSet;
+
 		if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
+			// If reason is lazy, go to the assignment level of the literal.
+			if let Reason::Lazy(_) = reason {
+				self.state.trail.goto_assign_lit(lit);
+			}
 			// Reason is in the form (a /\ b /\ ...), which then forms the
 			// implication (a /\ b /\ ...) -> lit
 			let clause: Clause = reason.explain(&mut self.propagators, &mut self.state, Some(lit));
 			// This is converted into a clause (¬a \/ ¬b \/ ... \/ lit)
+			let mut seen = FxHashSet::default();
 			for &l in &clause {
+				// Ensure that the same literal is not negated in the reason
+				if seen.contains(&!l) {
+					tracing::error!(
+						clause = ?clause.iter().map(|&l| i32::from(l)).collect::<Vec<_>>(),
+						lit_explained = i32::from(lit),
+						lit_pos = i32::from(!l),
+						lit_neg = i32::from(l),
+						"invalid reason: literal and its negation in clause"
+					);
+					debug_assert!(
+						false,
+						"Both {l} and {} are found in the Reason for {lit}",
+						!l
+					);
+				}
+				let _ = seen.insert(l);
 				if l == lit {
 					continue;
 				}
@@ -169,15 +207,23 @@ impl Engine {
 				// gives a
 				let val = self.state.trail.get_sat_value(!l);
 				if !val.unwrap_or(false) {
-					tracing::error!(lit_prop = i32::from(lit), lit_reason= i32::from(!l), reason_val = ?val, "invalid reason");
+					tracing::error!(
+						clause = ?clause.iter().map(|&l| i32::from(l)).collect::<Vec<_>>(),
+						lit_explained = i32::from(lit),
+						lit_invalid = i32::from(!l),
+						invalid_val = ?val,
+						"invalid reason: not all antecedents are known true"
+					);
 				}
 				debug_assert!(
 					val.unwrap_or(false),
-					"Literal {} in Reason for {} is {:?}, but should be known true",
+					"Literal {} in Reason for {lit} is {val:?}, but should be known true",
 					!l,
-					lit,
-					val
 				);
+			}
+			// If reason is lazy, return to current level
+			if let Reason::Lazy(_) = reason {
+				self.state.trail.reset_to_trail_head();
 			}
 		} else {
 			debug_assert_eq!(
@@ -284,16 +330,7 @@ impl PropagatorExtension for Engine {
 		let clause = if let Some(reason) = reason {
 			// If the reason is lazy, restore the current state to the state when the
 			// propagation happened before explaining.
-			//
-			// An exception is made when the literal is assigned to false (and thus
-			// the source of a conflict), then we are already in the right state.
-			if matches!(reason, Reason::Lazy(_))
-				&& self
-					.state
-					.trail
-					.get_sat_value(propagated_lit)
-					.unwrap_or(true)
-			{
+			if matches!(reason, Reason::Lazy(_)) {
 				self.state.trail.goto_assign_lit(propagated_lit);
 			}
 
@@ -438,11 +475,29 @@ impl PropagatorExtension for Engine {
 	fn notify_assignments(&mut self, lits: &[RawLit]) {
 		debug!(lits = ?lits.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "assignments");
 
+		self.state.trail.reset_to_trail_head();
+
 		// Enqueue propagators
 		for &lit in lits {
-			if self.state.trail.assign_lit(lit).is_some() {
-				continue;
-			}
+			let iv_event = match self.state.trail.assign_lit(lit) {
+				Some(false) => {
+					self.state.failed = true;
+					continue;
+				}
+				Some(true) => match self.state.last_propagated {
+					Some((prev, event)) if lit == prev => {
+						self.state.last_propagated = None;
+						event
+					}
+					_ => {
+						self.state
+							.propagation_queue
+							.retain(|event| event.lit != lit);
+						None
+					}
+				},
+				None => None,
+			};
 
 			// Enqueue based on direct literal
 			if !self.state.failed {
@@ -478,10 +533,8 @@ impl PropagatorExtension for Engine {
 			}
 
 			// Enqueue based on literal meaning in complex type
-			if let Some((iv, meaning)) = self.state.bool_to_int.get(lit.var()) {
-				let meaning = meaning
-					.map(|l| if lit.is_negated() { !l } else { l })
-					.unwrap_or_else(|| self.state.int_vars[iv].lit_meaning(lit));
+			let iv_event = iv_event.or_else(|| {
+				let (iv, meaning) = self.state.get_int_lit_meaning(lit)?;
 				// Enact domain changes and determine change event
 				let (lb, ub) = self.state.int_vars[iv].get_bounds(&self.state);
 				let event = match meaning {
@@ -523,7 +576,7 @@ impl PropagatorExtension for Engine {
 						})
 					}
 					IntLitMeaning::Less(i) => {
-						let new_ub = self.state.int_vars[iv].tighten_upper_bound(i - 1);
+						let new_ub = i - 1;
 						if new_ub < ub {
 							trace!(lit = i32::from(lit), ub = new_ub, "new ub");
 							self.state.int_vars[iv]
@@ -537,37 +590,39 @@ impl PropagatorExtension for Engine {
 							None
 						}
 					}
-				};
-				if !self.state.failed {
-					if let Some(event) = event {
-						let activations = mem::take(&mut self.state.int_activation[iv]);
-						for action in activations.activated_by(event) {
-							let prop = match action {
-								ActivationAction::Advise(adv) => {
-									let &AdvisorDef {
-										negated,
-										data,
-										propagator,
-										..
-									} = &self.state.advisors[adv];
-									let enqueue = self.notify_int_advisor(
-										propagator,
-										IntView(IntViewInner::VarRef(iv)),
-										event,
-										data,
-										negated,
-									);
-									if !enqueue {
-										continue;
-									}
-									propagator
+				}?;
+				Some((iv, event))
+			});
+
+			if !self.state.failed {
+				if let Some((iv, event)) = iv_event {
+					let activations = mem::take(&mut self.state.int_activation[iv]);
+					for action in activations.activated_by(event) {
+						let prop = match action {
+							ActivationAction::Advise(adv) => {
+								let &AdvisorDef {
+									negated,
+									data,
+									propagator,
+									..
+								} = &self.state.advisors[adv];
+								let enqueue = self.notify_int_advisor(
+									propagator,
+									IntView(IntViewInner::VarRef(iv)),
+									event,
+									data,
+									negated,
+								);
+								if !enqueue {
+									continue;
 								}
-								ActivationAction::Enqueue(prop) => prop,
-							};
-							self.state.propagator_queue.enqueue_propagator(prop);
-						}
-						self.state.int_activation[iv] = activations;
+								propagator
+							}
+							ActivationAction::Enqueue(prop) => prop,
+						};
+						self.state.propagator_queue.enqueue_propagator(prop);
 					}
+					self.state.int_activation[iv] = activations;
 				}
 			}
 		}
@@ -595,16 +650,10 @@ impl PropagatorExtension for Engine {
 
 	#[tracing::instrument(level = "debug", skip(self, slv), fields(level = self.state.decision_level()))]
 	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Option<RawLit> {
+		debug_assert!(self.state.last_propagated.is_none());
 		// Check whether there are previous clauses to be communicated
 		if !self.state.clauses.is_empty() {
 			return None;
-		}
-		while let Some(&lit) = self.state.propagation_queue.front() {
-			if self.state.trail.get_sat_value(lit) == Some(true) {
-				let _ = self.state.propagation_queue.pop_front();
-			} else {
-				break;
-			}
 		}
 		if self.state.propagation_queue.is_empty() && self.state.conflict.is_none() {
 			#[cfg(debug_assertions)]
@@ -633,14 +682,19 @@ impl PropagatorExtension for Engine {
 		if !self.state.clauses.is_empty() {
 			return None;
 		}
-		if let Some(lit) = self.state.propagation_queue.pop_front() {
-			debug!(lit = i32::from(lit), "propagate");
+		if let Some(LitPropagation { lit, reason, event }) =
+			self.state.propagation_queue.pop_front()
+		{
+			debug!(lit = i32::from(lit), "notify oracle");
+			debug_assert!(self.state.trail.get_sat_value(lit).is_some());
+			self.state.register_reason(lit, reason);
 			#[cfg(debug_assertions)]
 			{
 				// (DEBUG ONLY) Ensure the literal's explanation is valid in its trail
 				// position.
 				self.debug_check_reason(lit);
 			}
+			self.state.last_propagated = Some((lit, event));
 			Some(lit)
 		} else {
 			None
@@ -674,6 +728,7 @@ impl State {
 		self.failed = false;
 		self.conflict = None;
 		// Remove (now invalid) propagations (but leave clauses in place)
+		self.last_propagated = None;
 		self.propagation_queue.clear();
 		#[cfg(debug_assertions)]
 		{
@@ -743,6 +798,24 @@ impl State {
 		}
 	}
 
+	/// Internal method to get the [`IntVarRef`] and strongest [`IntLitMeaning`]
+	/// for a given literal, if it is an integer literal.
+	fn get_int_lit_meaning(&self, lit: RawLit) -> Option<(IntVarRef, IntLitMeaning)> {
+		let (iv, meaning) = self.bool_to_int.get(lit.var())?;
+		let meaning = match meaning {
+			// Eager literal, request meaning from variable itself.
+			None => self.int_vars[iv].lit_meaning(lit),
+			// Lazy literal, transform negated meanings dealing with gaps in domain when necessary.
+			Some(IntLitMeaning::Less(i)) if !lit.is_negated() => {
+				let i = self.int_vars[iv].tighten_less_lit(i);
+				IntLitMeaning::Less(i)
+			}
+			Some(m) if lit.is_negated() => !m,
+			Some(m) => m,
+		};
+		Some((iv, meaning))
+	}
+
 	/// Register the [`Reason`] to explain why `lit` has been assigned.
 	pub(crate) fn register_reason(&mut self, lit: RawLit, built_reason: Result<Reason, bool>) {
 		match built_reason {
@@ -791,13 +864,10 @@ impl ExplanationActions for State {
 	fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning> {
 		match var.0 {
 			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				let (iv2, meaning) = self.bool_to_int.get(lit.var())?;
+				let (iv2, mut meaning) = self.get_int_lit_meaning(lit)?;
 				if iv != iv2 {
 					return None;
 				}
-				let mut meaning = meaning
-					.map(|l| if lit.is_negated() { !l } else { l })
-					.unwrap_or_else(|| self.int_vars[iv].lit_meaning(lit));
 				if let IntViewInner::Linear { transformer, .. } = var.0 {
 					meaning = transformer.transform_lit(meaning);
 				}
@@ -831,7 +901,7 @@ impl ExplanationActions for State {
 		// Transform literal meaning if view is a linear transformation
 		let meaning = match var.0 {
 			IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } => {
-				match transformer.rev_transform_lit(meaning.clone()) {
+				match transformer.rev_transform_lit(meaning) {
 					Ok(m) => m,
 					Err(v) => return (BoolView(BoolViewInner::Const(v)), meaning),
 				}
@@ -888,9 +958,9 @@ impl ExplanationActions for State {
 			IntViewInner::Bool { lit, .. } => {
 				let (b_meaning, negated) =
 					if matches!(meaning, IntLitMeaning::NotEq(_) | IntLitMeaning::Less(_)) {
-						(!meaning.clone(), true)
+						(!meaning, true)
 					} else {
-						(meaning.clone(), false)
+						(meaning, false)
 					};
 				let bv = BoolView(match b_meaning {
 					IntLitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
@@ -977,7 +1047,7 @@ impl ExplanationActions for State {
 
 		match var.0 {
 			IntViewInner::VarRef(var) | IntViewInner::Linear { var, .. } => {
-				self.int_vars[var].get_bool_lit(meaning)
+				self.int_vars[var].get_bool_lit(meaning).map(|t| t.0)
 			}
 			IntViewInner::Const(c) => Some(BoolView(BoolViewInner::Const(match meaning {
 				IntLitMeaning::Eq(i) => c == i,

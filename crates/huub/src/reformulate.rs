@@ -2,7 +2,6 @@
 //! reformulation process of creating a [`Solver`] object from a [`Model`].
 
 use std::{
-	collections::HashSet,
 	error::Error,
 	fmt::{self, Display},
 };
@@ -14,6 +13,7 @@ use pindakaas::{
 	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit as RawLit, Unsatisfiable,
 };
 use rangelist::IntervalIterator;
+use rustc_hash::FxHashSet;
 
 use crate::{
 	actions::{
@@ -149,6 +149,8 @@ pub struct InitConfig {
 	restart: bool,
 	/// Whether to enable the global forward subsumption in the oracle solver.
 	subsumption: bool,
+	/// Whether to enable asking reason eagerly in the oracle solver.
+	reason_eager: bool,
 	/// Whether to enable the bounded variable elimination in the oracle solver.
 	variable_elimination: bool,
 	/// Whether to enable the vivification in the oracle solver.
@@ -229,20 +231,20 @@ pub(crate) struct ReformulationMapBuilder {
 	pub(crate) bool_map: Vec<Option<BoolView>>,
 	/// Set of integer decision for which the direct encoding should be created
 	/// eagerly.
-	pub(crate) int_eager_direct: HashSet<IntDecisionIndex>,
+	pub(crate) int_eager_direct: FxHashSet<IntDecisionIndex>,
 	/// The (default) maximum cardinality of the domain of an integer variable
 	/// before its order encoding is created lazily.
 	pub(crate) int_eager_limit: usize,
 	/// Set of integer decision for which the order encoding should be created
 	/// eagerly.
-	pub(crate) int_eager_order: HashSet<IntDecisionIndex>,
+	pub(crate) int_eager_order: FxHashSet<IntDecisionIndex>,
 	/// Map of integer decisions to integer views.
 	pub(crate) int_map: IndexVec<IntDecisionIndex, Option<IntView>>,
 }
 
 impl<S: SimplificationActions> Constraint<S> for BoolFormula {
 	fn simplify(&mut self, _: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -373,6 +375,12 @@ impl InitConfig {
 		self.probing
 	}
 
+	/// Get whether to enable asking for explanation clauses for all literals
+	/// propagated on the level of a conflict.
+	pub fn reason_eager(&self) -> bool {
+		self.reason_eager
+	}
+
 	/// Get whether to enable restarts in the oracle solver.
 	pub fn restart(&self) -> bool {
 		self.restart
@@ -425,6 +433,12 @@ impl InitConfig {
 	/// solver.
 	pub fn with_probing(mut self, probing: bool) -> Self {
 		self.probing = probing;
+		self
+	}
+
+	/// Change whether to enable asking reason eagerly in the oracle solver.
+	pub fn with_reason_eager(mut self, reason_eager: bool) -> Self {
+		self.reason_eager = reason_eager;
 		self
 	}
 
@@ -695,7 +709,7 @@ impl ReformulationMapBuilder {
 	/// Get the representation of a Boolean decision variable in the [`Solver`]
 	/// or create it if it does not yet exist.
 	///
-	/// Note that this method will function recursively (toghether with
+	/// Note that this method will function recursively (together with
 	/// [`Self::get_or_create_bool`]) to resolve aliased variables.
 	pub(crate) fn get_or_create_bool<Oracle: ExternalPropagation>(
 		&mut self,

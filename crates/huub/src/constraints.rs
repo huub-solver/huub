@@ -96,7 +96,7 @@ pub trait Constraint<S: SimplificationActions>: Debug + DynConstraintClone {
 	/// is already subsumed by the current state of the model.
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		let _ = actions;
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	/// Encode the constraint using [`Propagator`] objects or clauses for a
@@ -231,11 +231,10 @@ pub trait ReasonBuilder<A: ExplanationActions + ?Sized> {
 /// removed from the [`Model`]) or not.
 pub enum SimplificationStatus {
 	/// The constraint has been simplified as much as possible, but should be
-	/// kept in the [`Model`].
-	///
-	/// Simplification can be triggered again if any of the decision variables
-	/// the constraint depends on change.
-	Fixpoint,
+	/// kept in the [`Model`]. Simplification can be triggered again if any of
+	/// the decision variables the constraint depends on change (even by its
+	/// own changes).
+	NoFixpoint,
 	/// The constraint has been simplified to the point where it is subsumed.
 	/// The constraint can be removed from the [`Model`].
 	Subsumed,

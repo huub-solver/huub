@@ -66,9 +66,12 @@ impl<const B: usize, T: PartialEq> PartialEq for OptField<B, T> {
 		self.value == other.value
 	}
 }
+
 #[cfg(test)]
 mod tests {
-	use std::hash::{DefaultHasher, Hash, Hasher};
+	use std::hash::{Hash, Hasher};
+
+	use rustc_hash::FxHasher;
 
 	use super::OptField;
 
@@ -114,12 +117,12 @@ mod tests {
 	#[test]
 	fn test_optfield_hash() {
 		let opt_field = OptField::new(42);
-		let mut hasher = DefaultHasher::new();
+		let mut hasher = FxHasher::default();
 		opt_field.hash(&mut hasher);
 		let hash1 = hasher.finish();
 
 		let opt_field2 = OptField::new(42);
-		let mut hasher2 = DefaultHasher::new();
+		let mut hasher2 = FxHasher::default();
 		opt_field2.hash(&mut hasher2);
 		let hash2 = hasher2.finish();
 
