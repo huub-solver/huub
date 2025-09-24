@@ -896,7 +896,7 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogicModel {
 			}
 			if !has_change {
 				trace!("No more changes for now, exit");
-				return Ok(SimplificationStatus::Fixpoint);
+				return Ok(SimplificationStatus::NoFixpoint);
 			}
 			initial_graph.graph.propagate_bounds(&mut adapter, &mut lower_bound_changes, &mut upper_bound_changes)?;
 			initial_graph.graph.propagate_booleans(&mut adapter, &fixed_bools, true, true)?;
@@ -915,7 +915,7 @@ impl<S: SimplificationActions> Constraint<S> for DifferenceLogicModel {
 		}
 		initial_graph.check_remove_isolated_booleans(adapter.initial_trail);
 		trace!("Graph at the end of simplify: {}", initial_graph.graph.to_dot(&mut adapter));
-		// Repeat simplification until fixpoint
+		// Repeat simplification until (local) fixpoint
 		self.simplify(actions)
 
 	}
@@ -2026,7 +2026,7 @@ impl DiffLogicBrancher {
 impl<D: DecisionActions> Brancher<D> for DiffLogicBrancher {
 	fn decide(&mut self, actions: &mut D) -> Decision {
 		let state = actions.get_trailed_int(self.next);
-		let not_init = state < 0;
+		let mut not_init = state < 0;
 		let mut begin = max(state, 0) as usize;
 
 		// return if all variables have been assigned
@@ -2037,12 +2037,14 @@ impl<D: DecisionActions> Brancher<D> for DiffLogicBrancher {
 		// loop until decision found or exhausted
 		loop {
 			let mut graph = self.graph.borrow_mut();
-			if not_init || actions.get_int_lower_bound(self.int_vars[self.int_var_index[begin]]) == actions.get_int_upper_bound(self.int_vars[self.int_var_index[begin]]) {
+			let begin_index = self.int_var_index[begin];
+			if not_init || actions.get_int_lower_bound(self.int_vars[begin_index]) == actions.get_int_upper_bound(self.int_vars[begin_index]) || graph.decision_bools[begin_index].peek(actions).is_none() {
+				not_init = false;
 				let mut selection = None;
 				for i in begin..self.int_var_index.len() {
 					let index = self.int_var_index[i];
-					if actions.get_int_lower_bound(self.int_vars[index]) == actions.get_int_upper_bound(self.int_vars[index]) {
-						// move the fixed variable to the front
+					if actions.get_int_lower_bound(self.int_vars[index]) == actions.get_int_upper_bound(self.int_vars[index]) || graph.decision_bools[index].peek(actions).is_none() {
+						// move the exhausted variable to the front
 						self.int_var_index.swap(i, begin);
 						begin += 1;
 					} else {
@@ -2067,8 +2069,6 @@ impl<D: DecisionActions> Brancher<D> for DiffLogicBrancher {
 			}
 
 			let index = self.int_var_index[begin];
-			let var = self.int_vars[index];
-
 			// If there are unfixed booleans, fix the next one
 			let mut candidate = graph.decision_bools[index].pop(actions);
 			while let Some((b, _)) = candidate {
@@ -2079,21 +2079,10 @@ impl<D: DecisionActions> Brancher<D> for DiffLogicBrancher {
 				}
 			}
 
-			let view = if let Some((b, _)) = candidate {
-				trace!("Branching on bool");
-				self.bool_vars[*b]
-			} else if self.minimize {
-				trace!("Branching on lower bound");
-				// Else fix the integer
-				actions.get_int_lit(var, IntLitMeaning::Less(actions.get_int_lower_bound(var) + 1))
-			} else {
-				trace!("Branching on upper bound");
-				actions.get_int_lit(var, IntLitMeaning::GreaterEq(actions.get_int_upper_bound(var)))
-			};
-
-			trace!("Decided to branch on {view:?}");
-			if let BoolViewInner::Lit(lit) = view.0 {
-				return Decision::Select(lit);
+			if let Some((b, _)) = candidate {
+				if let BoolViewInner::Lit(lit) = self.bool_vars[*b].0 {
+					return Decision::Select(lit);
+				}
 			}
 		}
 	}
@@ -2218,7 +2207,7 @@ mod tests {
 		let _ = graph.new_edge(model_adapter.get_trailing_actions(), DiffEdge::new(2, 1, 3, Some(1)));
 		let _ = graph.new_edge(model_adapter.get_trailing_actions(), DiffEdge::new(2, 1, 2, Some(2)));
 		let _ = graph.inc_imp(&mut model_adapter, new_index);
-		assert_eq!(ctx.state.propagation_queue.pop_front().unwrap(),
+		assert_eq!(ctx.state.propagation_queue.pop_front().unwrap().lit,
 				   RawLit::from_raw(-bool_vars[0].reverse_map_info().unwrap()));
 		assert!(ctx.get_bool_val(bool_vars[1]).is_none());
 		assert!(ctx.get_bool_val(bool_vars[2]).is_none());
@@ -2254,7 +2243,7 @@ mod tests {
 		let _ = graph.new_edge(model_adapter.get_trailing_actions(), DiffEdge::new(0, 2, 2, Some(2)));
 		let _ = graph.new_edge(model_adapter.get_trailing_actions(), DiffEdge::new(0, 3, 2, Some(3)));
 		let _ = graph.inc_imp(&mut model_adapter, new_index);
-		assert_eq!(ctx.state.propagation_queue.pop_front().unwrap(),
+		assert_eq!(ctx.state.propagation_queue.pop_front().unwrap().lit,
 				   RawLit::from_raw(-bool_vars[0].reverse_map_info().unwrap()));
 		assert!(ctx.get_bool_val(bool_vars[1]).is_none());
 		assert!(ctx.get_bool_val(bool_vars[2]).is_none());
