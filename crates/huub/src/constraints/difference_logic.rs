@@ -2008,11 +2008,13 @@ impl DiffLogicBrancher {
 												   minimize: bool) {
 
 		trace!("Creating diff logic brancher");
+		let graph_ref = graph.borrow();
+		let int_var_index = (0..graph_ref.num_nodes()).into_iter().filter(|&n| graph_ref.active[n]).collect_vec();
 
 		let next = solver.new_trailed_int(0);
 		solver.push_brancher(Box::new(DiffLogicBrancher {
 			int_vars: int_vars.clone(),
-			int_var_index: (0..int_vars.len()).into_iter().collect_vec(),
+			int_var_index,
 			bool_vars: bool_vars.clone(),
 			graph: graph.clone(),
 			next,
