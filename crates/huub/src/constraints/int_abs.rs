@@ -1,7 +1,9 @@
 //! Structures and algorithms for the integer absolute value constraint, which
 //! enforces that one variable is takes absolute value of another.
 
-use std::iter::once;
+use std::cmp;
+
+use pindakaas::Lit as RawLit;
 
 use crate::{
 	actions::{
@@ -10,7 +12,9 @@ use crate::{
 	},
 	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
-	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView},
+	solver::{
+		activation_list::IntPropCond, queue::PriorityLevel, BoolViewInner, IntLitMeaning, IntView,
+	},
 	IntDecision,
 };
 
@@ -34,6 +38,9 @@ pub struct IntAbsBounds {
 	origin: IntView,
 	/// The integer variable representing the absolute value
 	abs: IntView,
+	/// Literal that will be true if the origin is zero or positive, and false
+	/// otherwise.
+	origin_positive: RawLit,
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntAbs {
@@ -43,26 +50,24 @@ impl<S: SimplificationActions> Constraint<S> for IntAbs {
 	}
 
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+		// Propagate information from the absolute value to the origin.
+		let ub = actions.get_int_upper_bound(self.abs);
+		actions.set_int_lower_bound(self.origin, -ub)?;
+		actions.set_int_upper_bound(self.abs, ub)?;
+
+		// Propagate information from the origin to the absolute value.
 		let (lb, ub) = actions.get_int_bounds(self.origin);
 		if ub < 0 {
-			actions.set_int_lower_bound(self.abs, -ub)?;
-			actions.set_int_upper_bound(self.abs, -lb)?;
-		} else if lb >= 0 {
-			actions.set_int_lower_bound(self.abs, lb)?;
-			actions.set_int_upper_bound(self.abs, ub)?;
-		} else {
-			actions.set_int_lower_bound(self.abs, 0)?;
-			let abs_max = ub.max(-lb);
-			actions.set_int_upper_bound(self.abs, abs_max)?;
+			actions.unify_int(self.abs, -self.origin)?;
+			return Ok(SimplificationStatus::Subsumed);
 		}
-		let abs_ub = actions.get_int_upper_bound(self.abs);
-		actions.set_int_lower_bound(self.origin, -abs_ub)?;
-		actions.set_int_upper_bound(self.abs, abs_ub)?;
 		if lb >= 0 {
 			actions.unify_int(self.origin, self.abs)?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
-
+		actions.set_int_lower_bound(self.abs, 0)?;
+		let abs_max = cmp::max(ub, -lb);
+		actions.set_int_upper_bound(self.abs, abs_max)?;
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
@@ -80,11 +85,22 @@ impl IntAbsBounds {
 	where
 		P: PropagatorInitActions + ?Sized,
 	{
-		let prop = solver.add_propagator(Box::new(Self { origin, abs }), PriorityLevel::Highest);
-		// Subscribe to both bounds of the origin variable
+		let BoolViewInner::Lit(origin_positive) =
+			solver.get_int_lit(origin, IntLitMeaning::GreaterEq(0)).0
+		else {
+			panic!("int_abs constraint cannot be placed on a variable that is known positive or negative");
+		};
+		let prop = solver.add_propagator(
+			Box::new(Self {
+				origin,
+				abs,
+				origin_positive,
+			}),
+			PriorityLevel::Highest,
+		);
+		// Subscribe to the bounds of the both variables
 		solver.enqueue_on_int_change(prop, origin, IntPropCond::Bounds);
-		// Subscribe only to the upper bound of the absolute value variable
-		solver.enqueue_on_int_change(prop, abs, IntPropCond::UpperBound);
+		solver.enqueue_on_int_change(prop, abs, IntPropCond::Bounds);
 	}
 }
 
@@ -97,46 +113,72 @@ where
 	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
 		let (lb, ub) = actions.get_int_bounds(self.origin);
 
-		// If we know that the origin is negative, then just negate the bounds
-		if ub < 0 {
-			actions.set_int_upper_bound(self.abs, -lb, |a: &mut P| {
-				vec![
-					a.get_int_lower_bound_lit(self.origin),
-					a.get_int_lit(self.origin, IntLitMeaning::Less(0)),
-				]
-			})?;
-			actions.set_int_lower_bound(self.abs, -ub, |a: &mut P| {
-				once(a.get_int_upper_bound_lit(self.origin))
-			})?;
-		} else if lb >= 0 {
-			// If we know that the origin is positive, then the bounds are the same
-			actions.set_int_lower_bound(self.abs, lb, |a: &mut P| {
-				once(a.get_int_lower_bound_lit(self.origin))
-			})?;
-			actions.set_int_upper_bound(self.abs, ub, |a: &mut P| {
-				vec![
-					a.get_int_upper_bound_lit(self.origin),
-					a.get_int_lit(self.origin, IntLitMeaning::GreaterEq(0)),
-				]
-			})?;
-		} else {
-			// If the origin can be either positive or negative, then the bounds are
-			// the maximum of the absolute values
-			let abs_max = ub.max(-lb);
-			actions.set_int_upper_bound(self.abs, abs_max, |a: &mut P| {
-				vec![
-					a.get_int_lit(self.origin, IntLitMeaning::GreaterEq(-abs_max)),
-					a.get_int_lit(self.origin, IntLitMeaning::Less(abs_max + 1)),
-				]
-			})?;
-		}
+		match actions.get_bool_val(self.origin_positive.into()) {
+			Some(false) => {
+				// If we know that the origin is negative, then just negate the bounds
+				actions.set_int_lower_bound(self.abs, -ub, |a: &mut P| {
+					[a.get_int_upper_bound_lit(self.origin)]
+				})?;
+				actions.set_int_upper_bound(self.abs, -lb, |a: &mut P| {
+					[
+						a.get_int_lower_bound_lit(self.origin),
+						(!self.origin_positive).into(),
+					]
+				})?;
 
-		// If the upper bound of the absolute value variable have changed, we
-		// propagate bounds of the origin variable
-		let ub = actions.get_int_upper_bound(self.abs);
-		let ub_lit = actions.get_int_upper_bound_lit(self.abs);
-		actions.set_int_lower_bound(self.origin, -ub, ub_lit)?;
-		actions.set_int_upper_bound(self.origin, ub, ub_lit)?;
+				let (lb, ub) = actions.get_int_bounds(self.abs);
+				actions.set_int_lower_bound(self.origin, -ub, |a: &mut P| {
+					[a.get_int_upper_bound_lit(self.abs)]
+				})?;
+				actions.set_int_upper_bound(self.origin, -lb, |a: &mut P| {
+					[
+						a.get_int_lower_bound_lit(self.abs),
+						(!self.origin_positive).into(),
+					]
+				})?;
+			}
+			Some(true) => {
+				// If we know that the origin is positive, then the bounds are the same
+				actions.set_int_lower_bound(self.abs, lb, |a: &mut P| {
+					[a.get_int_lower_bound_lit(self.origin)]
+				})?;
+				actions.set_int_upper_bound(self.abs, ub, |a: &mut P| {
+					[
+						a.get_int_upper_bound_lit(self.origin),
+						self.origin_positive.into(),
+					]
+				})?;
+
+				let (lb, ub) = actions.get_int_bounds(self.abs);
+				actions.set_int_upper_bound(self.origin, ub, |a: &mut P| {
+					[a.get_int_upper_bound_lit(self.abs)]
+				})?;
+				actions.set_int_lower_bound(self.origin, lb, |a: &mut P| {
+					[
+						a.get_int_lower_bound_lit(self.abs),
+						self.origin_positive.into(),
+					]
+				})?;
+			}
+			None => {
+				// If the origin can be either positive or negative, then the bounds are
+				// the maximum of the absolute values
+				let abs_max = cmp::max(ub, -lb);
+				actions.set_int_upper_bound(self.abs, abs_max, |a: &mut P| {
+					[
+						a.get_int_lit(self.origin, IntLitMeaning::GreaterEq(-abs_max)),
+						a.get_int_lit(self.origin, IntLitMeaning::Less(abs_max + 1)),
+					]
+				})?;
+
+				// If the upper bound of the absolute value variable have changed, we
+				// propagate bounds of the origin variable
+				let abs_ub = actions.get_int_upper_bound(self.abs);
+				let ub_lit = actions.get_int_upper_bound_lit(self.abs);
+				actions.set_int_lower_bound(self.origin, -abs_ub, ub_lit)?;
+				actions.set_int_upper_bound(self.origin, abs_ub, ub_lit)?;
+			}
+		}
 
 		Ok(())
 	}
