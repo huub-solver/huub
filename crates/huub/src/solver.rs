@@ -298,6 +298,12 @@ impl From<bool> for BoolView {
 	}
 }
 
+impl From<RawLit> for BoolView {
+	fn from(value: RawLit) -> Self {
+		BoolView(BoolViewInner::Lit(value))
+	}
+}
+
 impl Mul<IntVal> for BoolView {
 	type Output = IntView;
 
