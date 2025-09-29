@@ -12,7 +12,7 @@ use crate::{
 		int_var::{EncodingType, IntVar},
 		SolveResult, Value, View,
 	},
-	InitConfig, Model, NonZeroIntVal, ReformulationError, Solver, ValueSelection,
+	Decision, InitConfig, Model, NonZeroIntVal, ReformulationError, Solver, ValueSelection,
 	VariableSelection,
 };
 
@@ -142,6 +142,19 @@ impl Model {
 			matches!(err, Err(ReformulationError::TrivialUnsatisfiable)),
 			"expected unsatisfiable"
 		);
+	}
+
+	pub(crate) fn expect_solutions<V: Into<Decision> + Clone>(
+		mut self,
+		vars: &[V],
+		expected: Expect,
+	) {
+		let (mut slv, map) = self.to_solver(&InitConfig::default()).unwrap();
+		let vars = vars
+			.iter()
+			.map(|v| map.get(&mut slv, &v.clone().into()))
+			.collect_vec();
+		slv.expect_solutions(&vars, expected);
 	}
 }
 
