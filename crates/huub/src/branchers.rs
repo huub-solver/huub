@@ -152,13 +152,12 @@ impl<D: DecisionActions> Brancher<D> for BoolBrancher {
 				break;
 			}
 		}
-		let var = if let Some(i) = loc {
+		let var = if let Some(first_unfixed) = loc {
 			// Update position for next iteration
-			let _ = actions.set_trailed_int(self.next, (i + 1) as i64);
-			self.vars[i]
+			let _ = actions.set_trailed_int(self.next, first_unfixed as i64);
+			self.vars[first_unfixed]
 		} else {
-			// Return if everything has already been assigned
-			let _ = actions.set_trailed_int(self.next, self.vars.len() as i64);
+			// Return that everything has already been assigned
 			return Decision::Exhausted;
 		};
 
@@ -257,13 +256,15 @@ impl<D: DecisionActions> Brancher<D> for IntBrancher {
 				}
 			}
 		}
-		// update the next variable to the index of the first unfixed variable
-		let _ = actions.set_trailed_int(self.next, first_unfixed as i64);
 
 		// return if all variables have been assigned
 		let Some((next_var, _)) = selection else {
 			return Decision::Exhausted;
 		};
+
+		// update the next variable to the index of the first unfixed variable
+		let _ = actions.set_trailed_int(self.next, first_unfixed as i64);
+
 		// select the next value to branch on based on the value selection strategy
 		let view = match self.val_sel {
 			ValueSelection::IndomainMin => actions.get_int_lit(
