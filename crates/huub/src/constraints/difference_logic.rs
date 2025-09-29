@@ -1336,27 +1336,27 @@ impl DifferenceLogicGraph {
 		let mut distances = IndexMap::default();
 		let _ = distances.insert(relevant_target, new_edge.val);
 		let mut queue = PriorityQueue::default();
-		let _ = queue.push(origin, Reverse(0));
-		let _ = queue.push(relevant_target, Reverse(new_edge.val + if reverse { self.pi[relevant_target] - self.pi[origin] } else { self.pi[origin] - self.pi[relevant_target] }));
+		let _ = queue.push(origin, Reverse((0, false)));
+		let _ = queue.push(relevant_target, Reverse((new_edge.val + if reverse { self.pi[relevant_target] - self.pi[origin] } else { self.pi[origin] - self.pi[relevant_target] }, true)));
 		let mut relevant_count = 1;
 		while !queue.is_empty() && relevant_count > 0 {
-			let (s, Reverse(dist)) = queue.pop().unwrap();
+			let (s, Reverse((dist, relevant))) = queue.pop().unwrap();
 			self.visit(s);
-			let s_relevant = distances.contains_key(&s);
-			//trace!("dijkstra on current node {s:?} with dist {dist}");
+			//trace!("dijkstra on current node {s:?} with dist {dist} and relevancy {relevant}");
 			for &e in if reverse {self.active_in[s].iter(adapter.get_trailing_actions())} else {self.active_out[s].iter(adapter.get_trailing_actions())} {
 				let edge = &self.edges[e];
 				let target = if reverse {edge.from} else {edge.to};
 				let new_dist = dist + edge.val + if reverse {self.pi[target] - self.pi[s]} else {self.pi[s] - self.pi[target]};
 				if !self.visited[target] {
-					let prev = queue.push_increase(target, Reverse(new_dist));
-					// Cases where we want to propagate the relevancy of s to t:
-					// - First path to t (equal to previous distance of infinity)
+					// Cases where we want to propagate the relevancy of s to t (equals lexicographic order of (new_dist, relevant)):
 					// - Path to t with lower distance than before
 					// - Path to t with same distance as before and s is not relevant (prefer irrelevancy in ties)
-					if prev.map_or(true, |Reverse(old_dist)| new_dist < old_dist || (new_dist == old_dist && !s_relevant)) {
-						if s_relevant || target == relevant_target {
-							// Add new distance to the map, if key was not present before increase relevant count.
+					let new_relevant = relevant || (s == origin && target == relevant_target);
+					let new_prio = Reverse((new_dist, new_relevant));
+					let prev = queue.push_increase(target, new_prio);
+					if prev.map_or(true, |old_prio| old_prio != new_prio) {
+						if new_relevant {
+							// A new shortest distance has been found, add new distance to the map, if key was not present before increase relevant count.
 							//trace!("Target {target:?} set to relevant");
 							if distances.insert(target, new_dist + if reverse { self.pi[origin] - self.pi[target] } else { self.pi[target] - self.pi[origin] }).is_none() {
 								relevant_count += 1;
@@ -1369,10 +1369,10 @@ impl DifferenceLogicGraph {
 							}
 						}
 					}
-					//trace!("dijkstra adding node {:?} with dist {new_dist}", target.var);
+					//trace!("dijkstra adding node {:?} with dist {new_dist} and relevancy {relevant}", target);
 				}
 			}
-			if s_relevant {
+			if relevant {
 				relevant_count -= 1;
 			}
 		}
@@ -1655,6 +1655,7 @@ impl DifferenceLogicGraph {
 			let val = adapter.get_bool_val(b).unwrap();
 			trace!("Boolean b{b:?} fixed to {val}");
 			if val {
+				//trace!("Graph before adding edges: {}", self.to_dot(adapter));
 				// Consequences of setting the boolean to true -> add all implied edges.
 				if self.bool_active[b] {
 					for i in self.bool_implications[b].open_iter(adapter.get_trailing_actions()) {
