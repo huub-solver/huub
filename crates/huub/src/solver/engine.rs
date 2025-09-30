@@ -892,28 +892,44 @@ impl ExplanationActions for State {
 	fn get_int_lit_relaxed(
 		&mut self,
 		var: IntView,
-		meaning: IntLitMeaning,
+		mut meaning: IntLitMeaning,
 	) -> (BoolView, IntLitMeaning) {
 		debug_assert!(
 			!matches!(meaning, IntLitMeaning::Eq(_)),
 			"relaxed integer literals are not yet supported for IntLitMeaning::Eq(_)"
 		);
 		// Transform literal meaning if view is a linear transformation
-		let meaning = match var.0 {
-			IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } => {
-				match transformer.rev_transform_lit(meaning) {
-					Ok(m) => m,
-					Err(v) => return (BoolView(BoolViewInner::Const(v)), meaning),
-				}
+		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
+			var.0
+		{
+			match transformer.rev_transform_lit(meaning) {
+				Ok(m) => meaning = m,
+				Err(v) => return (BoolView(BoolViewInner::Const(v)), meaning),
 			}
-			_ => meaning,
-		};
+		}
 
-		// Get the (relaxed) boolean view representing the meaning and the actual
-		// (relaxed) meaning
+		// Get the boolean view that is currently `true` and implies the requested
+		// `meaning`, as well as the actual (possibly relaxed) meaning that is
+		// represented.
 		let (bv, meaning) = match var.0 {
 			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
 				let var_def = &mut self.int_vars[iv];
+				// If we are looking for a not-equal literal, try and find it. Return it if we
+				// find it, otherwise defer to an order literal.
+				if let IntLitMeaning::NotEq(v) = meaning {
+					if let Some((bv, _)) = var_def.get_bool_lit(meaning) {
+						return (bv, IntLitMeaning::NotEq(v));
+					}
+
+					let lb = var_def.get_lower_bound(&self.trail);
+					if v < lb {
+						meaning = IntLitMeaning::GreaterEq(v + 1);
+					} else {
+						debug_assert!(v > var_def.get_upper_bound(&self.trail));
+						meaning = IntLitMeaning::Less(v);
+					}
+				}
+				// Find the strongest order literal that fits the given meaning.
 				match meaning {
 					IntLitMeaning::GreaterEq(v) => {
 						let (bv, v) = var_def.get_greater_eq_lit_or_weaker(&self.trail, v);
@@ -922,26 +938,6 @@ impl ExplanationActions for State {
 					IntLitMeaning::Less(v) => {
 						let (bv, v) = var_def.get_less_lit_or_weaker(&self.trail, v);
 						(bv, IntLitMeaning::Less(v))
-					}
-					IntLitMeaning::NotEq(v) => {
-						if let Some(bv) = self.try_int_lit(var, meaning) {
-							(bv, IntLitMeaning::NotEq(v))
-						} else {
-							let lb = self.get_int_lower_bound(var);
-							if lb > v {
-								(
-									self.get_int_lower_bound_lit(var),
-									IntLitMeaning::GreaterEq(lb),
-								)
-							} else {
-								let ub = self.get_int_upper_bound(var);
-								debug_assert!(ub < v);
-								(
-									self.get_int_upper_bound_lit(var),
-									IntLitMeaning::Less(ub + 1),
-								)
-							}
-						}
 					}
 					_ => unreachable!(),
 				}
