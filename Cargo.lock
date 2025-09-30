@@ -551,9 +551,9 @@ checksum = "3b3cff922bd51709b605d9ead9aa71031d81447142d828eb4a6eba76fe619f9b"
 
 [[package]]
 name = "pindakaas"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202c2d9b16350c4a8f3d13b73e1dc1fe3e542b03bbb8b1539ca7e67f488916fb"
+checksum = "797cf3a7d2102fc5b36267dcf24200a4d5415628c41eb586527944eab4efe8a9"
 dependencies = [
  "itertools",
  "pindakaas-cadical",
@@ -563,9 +563,9 @@ dependencies = [
 
 [[package]]
 name = "pindakaas-cadical"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe4ef4f137bf48a3ed80c756e78a287aa73e64f82b09286505cf5bc40716516f"
+checksum = "35b5953b3a39fb76295a071893cfec5031c35b37cdd744dae3ad7f6395e8cfc4"
 dependencies = [
  "cc",
 ]
