@@ -1686,7 +1686,7 @@ impl SimplificationActions for Model {
 		match var.0 {
 			Var(v) => {
 				let def = &mut self.int_vars[v];
-				let Domain::Domain(dom) = &def.domain else {
+				let Domain::Domain(dom) = &mut def.domain else {
 					unreachable!()
 				};
 				if lb <= *dom.lower_bound().unwrap() {
@@ -1695,16 +1695,7 @@ impl SimplificationActions for Model {
 					return Err(ReformulationError::TrivialUnsatisfiable);
 				}
 				if lb != *dom.upper_bound().unwrap() {
-					let ndom = RangeList::from_iter(dom.iter().filter_map(|r| {
-						if *r.end() < lb {
-							None
-						} else if *r.start() < lb {
-							Some(lb..=*r.end())
-						} else {
-							Some(r)
-						}
-					}));
-					def.domain = Domain::Domain(ndom);
+					dom.set_lower_bound(lb);
 				} else {
 					def.domain = Domain::Alias(lb.into());
 				}
@@ -1811,7 +1802,7 @@ impl SimplificationActions for Model {
 		match var.0 {
 			Var(v) => {
 				let def = &mut self.int_vars[v];
-				let Domain::Domain(dom) = &def.domain else {
+				let Domain::Domain(dom) = &mut def.domain else {
 					unreachable!()
 				};
 				if ub >= *dom.upper_bound().unwrap() {
@@ -1820,16 +1811,7 @@ impl SimplificationActions for Model {
 					return Err(ReformulationError::TrivialUnsatisfiable);
 				}
 				if ub != *dom.lower_bound().unwrap() {
-					let ndom = RangeList::from_iter(dom.iter().filter_map(|r| {
-						if ub < *r.start() {
-							None
-						} else if ub < *r.end() {
-							Some(*r.start()..=ub)
-						} else {
-							Some(r)
-						}
-					}));
-					def.domain = Domain::Domain(ndom);
+					dom.set_upper_bound(ub);
 				} else {
 					def.domain = Domain::Alias(ub.into());
 				}
