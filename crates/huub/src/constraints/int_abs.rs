@@ -1,21 +1,17 @@
 //! Structures and algorithms for the integer absolute value constraint, which
 //! enforces that one variable is takes absolute value of another.
 
-use std::cmp;
-
-use pindakaas::Lit as RawLit;
+use std::{cmp, ops::AddAssign};
 
 use crate::{
 	actions::{
-		ConstraintInitActions, ExplanationActions, PropagatorInitActions, ReformulationActions,
-		SimplificationActions,
+		BoolInspectionActions, InitializationActions, IntPostingActions, IntPropagationActions,
+		IntSimplificationActions, ReasoningEngine, ReformulationActions,
 	},
-	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
+	constraints::{BoxedPropagator, Constraint, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
-	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, BoolViewInner, IntLitMeaning, IntView,
-	},
-	IntDecision,
+	solver::{activation_list::IntPropCond, BoolView, IntLitMeaning, IntView},
+	BoolDecision, IntDecision,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -23,160 +19,161 @@ use crate::{
 ///
 /// This constraint enforces that the second integer decision variable takes the
 /// absolute value of the first integer decision variable.
-pub struct IntAbs {
+pub struct IntAbsBounds<I1, I2, B> {
 	/// The integer decision variable whose absolute value is being taken
-	pub(crate) origin: IntDecision,
+	pub(crate) origin: I1,
 	/// The integer decision variable representing the absolute value
-	pub(crate) abs: IntDecision,
+	pub(crate) abs: I2,
+	/// Boolean condition that is true if the origin is zero or positive, and
+	/// false otherwise.
+	pub(crate) origin_positive: B,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Bounds propagator for one integer variable being the absolute value of
-/// another
-pub struct IntAbsBounds {
-	/// The integer variable whose absolute value is being taken
-	origin: IntView,
-	/// The integer variable representing the absolute value
-	abs: IntView,
-	/// Literal that will be true if the origin is zero or positive, and false
-	/// otherwise.
-	origin_positive: RawLit,
-}
-
-impl<S: SimplificationActions> Constraint<S> for IntAbs {
-	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
-		actions.simplify_on_change_int(self.origin);
-		actions.simplify_on_change_int(self.abs);
+impl IntAbsBounds<IntView, IntView, BoolView> {
+	/// Create a new [`IntAbsBounds`] propagator and post it in the solver.
+	pub(crate) fn new_in<E: ?Sized>(engine: &mut E, origin: IntView, abs: IntView)
+	where
+		E: AddAssign<BoxedPropagator> + InitializationActions,
+	{
+		let origin_positive = engine.get_int_lit(origin, IntLitMeaning::GreaterEq(0));
+		*engine += Box::new(Self {
+			origin: origin,
+			abs: abs,
+			origin_positive,
+		})
 	}
+}
 
-	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		// Propagate information from the absolute value to the origin.
-		let ub = actions.get_int_upper_bound(self.abs);
-		actions.set_int_lower_bound(self.origin, -ub)?;
-		actions.set_int_upper_bound(self.abs, ub)?;
-
-		// Propagate information from the origin to the absolute value.
-		let (lb, ub) = actions.get_int_bounds(self.origin);
-		if ub < 0 {
-			actions.unify_int(self.abs, -self.origin)?;
-			return Ok(SimplificationStatus::Subsumed);
+impl<E> Constraint<E> for IntAbsBounds<IntDecision, IntDecision, BoolDecision>
+where
+	E: ReasoningEngine,
+	IntDecision: for<'a> IntSimplificationActions<
+			E::PropagationCtx<'a>,
+			Conflict = E::Conflict,
+			Atom = BoolDecision,
+		> + for<'a> IntPostingActions<E::PostingCtx<'a>>,
+	BoolDecision: for<'a> BoolInspectionActions<E::PropagationCtx<'a>>,
+{
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
+		match self.origin_positive.get_val(ctx) {
+			Some(true) => {
+				self.origin.unify(ctx, self.abs)?;
+				Ok(SimplificationStatus::Subsumed)
+			}
+			Some(false) => {
+				self.origin.unify(ctx, -self.abs)?;
+				Ok(SimplificationStatus::Subsumed)
+			}
+			None => {
+				<Self as Propagator<E>>::propagate(self, ctx)?;
+				Ok(SimplificationStatus::NoFixpoint)
+			}
 		}
-		if lb >= 0 {
-			actions.unify_int(self.origin, self.abs)?;
-			return Ok(SimplificationStatus::Subsumed);
-		}
-		actions.set_int_lower_bound(self.abs, 0)?;
-		let abs_max = cmp::max(ub, -lb);
-		actions.set_int_upper_bound(self.abs, abs_max)?;
-		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let origin = slv.get_solver_int(self.origin);
-		let abs = slv.get_solver_int(self.abs);
+		let origin = slv.get_solver_int(self.origin.clone().into());
+		let abs = slv.get_solver_int(self.abs.clone().into());
 		IntAbsBounds::new_in(slv, origin, abs);
 		Ok(())
 	}
 }
 
-impl IntAbsBounds {
-	/// Create a new [`IntAbsBounds`] propagator and post it in the solver.
-	pub fn new_in<P>(solver: &mut P, origin: IntView, abs: IntView)
-	where
-		P: PropagatorInitActions + ?Sized,
-	{
-		let BoolViewInner::Lit(origin_positive) =
-			solver.get_int_lit(origin, IntLitMeaning::GreaterEq(0)).0
-		else {
-			panic!("int_abs constraint cannot be placed on a variable that is known positive or negative");
-		};
-		let prop = solver.add_propagator(
-			Box::new(Self {
-				origin,
-				abs,
-				origin_positive,
-			}),
-			PriorityLevel::Highest,
-		);
-		// Subscribe to the bounds of the both variables
-		solver.enqueue_on_int_change(prop, origin, IntPropCond::Bounds);
-		solver.enqueue_on_int_change(prop, abs, IntPropCond::Bounds);
-	}
-}
-
-impl<P, E> Propagator<P, E> for IntAbsBounds
+impl<I1, I2, B, E: ReasoningEngine> Propagator<E> for IntAbsBounds<I1, I2, B>
 where
-	P: PropagationActions,
-	E: ExplanationActions,
+	I1: for<'a> IntPropagationActions<E::PropagationCtx<'a>, Conflict = E::Conflict, Atom = B>
+		+ for<'a> IntPostingActions<E::PostingCtx<'a>>,
+	I2: for<'a> IntPropagationActions<E::PropagationCtx<'a>, Conflict = E::Conflict, Atom = B>
+		+ for<'a> IntPostingActions<E::PostingCtx<'a>>,
+	B: for<'a> BoolInspectionActions<E::PropagationCtx<'a>>,
 {
-	#[tracing::instrument(name = "int_abs", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		let (lb, ub) = actions.get_int_bounds(self.origin);
+	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+		self.origin.enqueue_when(ctx, IntPropCond::Bounds);
+		self.abs.enqueue_when(ctx, IntPropCond::Bounds);
+	}
 
-		match actions.get_bool_val(self.origin_positive.into()) {
+	#[tracing::instrument(name = "int_abs", level = "trace", skip(self, ctx))]
+	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+		let (lb, ub) = self.origin.get_bounds(ctx);
+
+		match self.origin_positive.get_val(ctx) {
 			Some(false) => {
 				// If we know that the origin is negative, then just negate the bounds
-				actions.set_int_lower_bound(self.abs, -ub, |a: &mut P| {
-					[a.get_int_upper_bound_lit(self.origin)]
-				})?;
-				actions.set_int_upper_bound(self.abs, -lb, |a: &mut P| {
-					[
-						a.get_int_lower_bound_lit(self.origin),
-						(!self.origin_positive).into(),
-					]
-				})?;
+				self.abs
+					.set_lower_bound(ctx, -ub, |ctx: &mut E::PropagationCtx<'_>| {
+						[self.origin.get_upper_bound_lit(ctx)]
+					})?;
+				self.abs
+					.set_upper_bound(ctx, -lb, |ctx: &mut E::PropagationCtx<'_>| {
+						[
+							self.origin.get_lower_bound_lit(ctx),
+							(!self.origin_positive.clone()).into(),
+						]
+					})?;
 
-				let (lb, ub) = actions.get_int_bounds(self.abs);
-				actions.set_int_lower_bound(self.origin, -ub, |a: &mut P| {
-					[a.get_int_upper_bound_lit(self.abs)]
-				})?;
-				actions.set_int_upper_bound(self.origin, -lb, |a: &mut P| {
-					[
-						a.get_int_lower_bound_lit(self.abs),
-						(!self.origin_positive).into(),
-					]
-				})?;
+				let (lb, ub) = self.abs.get_bounds(ctx);
+				self.origin
+					.set_lower_bound(ctx, -ub, |ctx: &mut E::PropagationCtx<'_>| {
+						[self.abs.get_upper_bound_lit(ctx)]
+					})?;
+				self.origin
+					.set_upper_bound(ctx, -lb, |ctx: &mut E::PropagationCtx<'_>| {
+						[
+							self.abs.get_lower_bound_lit(ctx),
+							(!self.origin_positive.clone()).into(),
+						]
+					})?;
 			}
 			Some(true) => {
-				// If we know that the origin is positive, then the bounds are the same
-				actions.set_int_lower_bound(self.abs, lb, |a: &mut P| {
-					[a.get_int_lower_bound_lit(self.origin)]
-				})?;
-				actions.set_int_upper_bound(self.abs, ub, |a: &mut P| {
-					[
-						a.get_int_upper_bound_lit(self.origin),
-						self.origin_positive.into(),
-					]
-				})?;
+				// If we know that the origin is positive, then the bounds
+				// are the same.
+				self.abs
+					.set_lower_bound(ctx, lb, |ctx: &mut E::PropagationCtx<'_>| {
+						[self.origin.get_lower_bound_lit(ctx)]
+					})?;
+				self.abs
+					.set_upper_bound(ctx, ub, |ctx: &mut E::PropagationCtx<'_>| {
+						[
+							self.origin.get_upper_bound_lit(ctx),
+							self.origin_positive.clone().into(),
+						]
+					})?;
 
-				let (lb, ub) = actions.get_int_bounds(self.abs);
-				actions.set_int_upper_bound(self.origin, ub, |a: &mut P| {
-					[a.get_int_upper_bound_lit(self.abs)]
-				})?;
-				actions.set_int_lower_bound(self.origin, lb, |a: &mut P| {
-					[
-						a.get_int_lower_bound_lit(self.abs),
-						self.origin_positive.into(),
-					]
-				})?;
+				let (lb, ub) = self.abs.get_bounds(ctx);
+				self.origin
+					.set_lower_bound(ctx, lb, |ctx: &mut E::PropagationCtx<'_>| {
+						[
+							self.abs.get_lower_bound_lit(ctx),
+							self.origin_positive.clone().into(),
+						]
+					})?;
+				self.origin
+					.set_upper_bound(ctx, ub, |ctx: &mut E::PropagationCtx<'_>| {
+						[self.abs.get_upper_bound_lit(ctx)]
+					})?;
 			}
 			None => {
 				// If the origin can be either positive or negative, then the bounds are
 				// the maximum of the absolute values
 				let abs_max = cmp::max(ub, -lb);
-				actions.set_int_upper_bound(self.abs, abs_max, |a: &mut P| {
-					[
-						a.get_int_lit(self.origin, IntLitMeaning::GreaterEq(-abs_max)),
-						a.get_int_lit(self.origin, IntLitMeaning::Less(abs_max + 1)),
-					]
-				})?;
+				self.abs
+					.set_upper_bound(ctx, abs_max, |ctx: &mut E::PropagationCtx<'_>| {
+						[
+							self.origin.get_lit(ctx, IntLitMeaning::GreaterEq(-abs_max)),
+							self.origin.get_lit(ctx, IntLitMeaning::Less(abs_max + 1)),
+						]
+					})?;
 
 				// If the upper bound of the absolute value variable have changed, we
 				// propagate bounds of the origin variable
-				let abs_ub = actions.get_int_upper_bound(self.abs);
-				let ub_lit = actions.get_int_upper_bound_lit(self.abs);
-				actions.set_int_lower_bound(self.origin, -abs_ub, ub_lit)?;
-				actions.set_int_upper_bound(self.origin, abs_ub, ub_lit)?;
+				let abs_ub = self.abs.get_upper_bound(ctx);
+				let ub_lit = self.abs.get_upper_bound_lit(ctx);
+				self.origin
+					.set_lower_bound(ctx, -abs_ub, [ub_lit.clone()])?;
+				self.origin.set_upper_bound(ctx, abs_ub, [ub_lit])?;
 			}
 		}
 

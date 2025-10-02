@@ -4,14 +4,16 @@ pub(crate) mod activation_list;
 pub(crate) mod bool_to_int;
 pub(crate) mod engine;
 pub(crate) mod int_var;
+pub(crate) mod posting_context;
 pub(crate) mod queue;
 pub(crate) mod solving_context;
 pub(crate) mod trail;
 
 use std::{
-	cell::{Ref, RefCell},
+	cell::{Ref, RefCell, RefMut},
 	fmt::{self, Debug, Display, Formatter},
 	hash::Hash,
+	mem,
 	num::NonZeroI32,
 	ops::{Add, AddAssign, Deref, DerefMut, Mul, Neg, Not},
 	rc::Rc,
@@ -21,31 +23,36 @@ use flatzinc_serde::FlatZinc;
 use itertools::Itertools;
 use pindakaas::{
 	solver::{
-		cadical::Cadical, propagation::ExternalPropagation, Assumptions, FailedAssumptions,
-		LearnCallback, SolveResult as SatSolveResult, TermSignal, TerminateCallback,
+		cadical::Cadical,
+		propagation::{ExternalPropagation, SolvingActions},
+		Assumptions, FailedAssumptions, LearnCallback, SolveResult as SatSolveResult, TermSignal,
+		TerminateCallback,
 	},
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
 	Valuation as SatValuation,
 };
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use crate::{
 	actions::{
-		BrancherInitActions, DecisionActions, ExplanationActions, InspectionActions,
-		PropagatorInitActions, TrailingActions,
+		BoolPostingActions, BrancherInitActions, DecisionActions, InitializationActions,
+		IntDecisionActions, IntExplanationActions, IntInspectionActions, IntPostingActions,
+		PostingActions, ReasoningEngine, TrailingActions,
 	},
-	branchers::BoxedBrancher,
-	constraints::BoxedPropagator,
+	branchers::{BoxedBrancher, Brancher},
+	constraints::{BoxedPropagator, Conflict, Propagator, Reason},
 	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::InitConfig,
 	solver::{
 		activation_list::{ActivationAction, IntEvent, IntPropCond},
-		engine::{trace_new_lit, AdvisorDef, Engine, PropRef},
+		engine::{trace_new_lit, AdvisorDef, Engine, PropRef, State},
 		int_var::{DirectStorage, IntVarRef, LazyLitDef, OrderStorage},
+		posting_context::PostingContext,
 		queue::{PriorityLevel, PropagatorInfo},
+		solving_context::SolvingContext,
 		trail::TrailedInt,
 	},
-	Clause, IntVal, LinearTransform, Model, NonZeroIntVal, ReformulationError,
+	Clause, IntDecision, IntVal, LinearTransform, Model, NonZeroIntVal, ReformulationError,
 };
 
 /// Trait implemented by the object given to the callback on detecting failure
@@ -623,15 +630,12 @@ impl AddAssign for SearchStatistics {
 
 impl<Oracle: ClauseDatabase> Solver<Oracle> {
 	/// Add a clause to the solver
-	pub fn add_clause<Iter>(&mut self, clause: Iter) -> Result<(), ReformulationError>
+	pub fn add_clause<Iter>(&mut self, clause: Iter) -> Result<(), Unsatisfiable>
 	where
 		Iter: IntoIterator,
 		Iter::Item: Into<BoolView>,
 	{
-		Ok(ClauseDatabaseTools::add_clause(
-			self,
-			clause.into_iter().map(Into::into),
-		)?)
+		ClauseDatabaseTools::add_clause(self, clause.into_iter().map(Into::into))
 	}
 }
 
@@ -678,6 +682,78 @@ impl<Oracle: TerminateCallback> Solver<Oracle> {
 }
 
 impl<Oracle: ExternalPropagation> Solver<Oracle> {
+	fn add_propagator(&mut self, propagator: BoxedPropagator, from_model: bool) {
+		let mut handle = self.engine.borrow_mut();
+		let engine = &mut *handle;
+		let prop_ref = engine.propagators.push(propagator);
+		let mut ctx = PostingContext::new(&mut engine.state, prop_ref);
+		engine.propagators[prop_ref].post(&mut ctx);
+		let priority = ctx.priority();
+		let enqueue = ctx.enqueue(from_model);
+		let new_observed = mem::take(&mut ctx.observed_variables);
+		let p = engine.state.propagator_queue.info.push(PropagatorInfo {
+			enqueued: false,
+			priority,
+		});
+		if enqueue {
+			engine.state.propagator_queue.enqueue_propagator(prop_ref);
+		}
+		drop(handle);
+		for v in new_observed {
+			// Ensure that the trail has a space to track the literal
+			{
+				self.engine.borrow_mut().state.trail.grow_to_boolvar(v);
+			}
+			// Ensure the oracle knows the literal is observed.
+			self.oracle.add_observed_var(v);
+		}
+		debug_assert_eq!(prop_ref, p);
+	}
+
+	/// Split the solver into an solving actions objects (limiting the
+	/// interaction with the oracle) and the dynamic engine reference.
+	fn as_parts(&self) -> (impl SolvingActions + '_, RefMut<'_, Engine>) {
+		struct SA;
+		impl SolvingActions for SA {
+			fn is_decision(&mut self, _: RawLit) -> bool {
+				false
+			}
+			fn new_observed_var(&mut self) -> pindakaas::Var {
+				unreachable!()
+			}
+			fn phase(&mut self, _: RawLit) {
+				unreachable!()
+			}
+			fn unphase(&mut self, _: RawLit) {
+				unreachable!()
+			}
+		}
+
+		(SA, self.engine.borrow_mut())
+	}
+
+	/// Split the solver into an solving actions objects (limiting the
+	/// interaction with the oracle) and the dynamic engine reference.
+	fn as_parts_mut(&mut self) -> (impl SolvingActions + '_, RefMut<'_, Engine>) {
+		struct SA<'a, O>(&'a mut O);
+		impl<O: ExternalPropagation> SolvingActions for SA<'_, O> {
+			fn is_decision(&mut self, _: RawLit) -> bool {
+				false
+			}
+			fn new_observed_var(&mut self) -> pindakaas::Var {
+				self.0.new_observed_var()
+			}
+			fn phase(&mut self, lit: RawLit) {
+				self.0.phase(lit);
+			}
+			fn unphase(&mut self, lit: RawLit) {
+				self.0.unphase(lit);
+			}
+		}
+
+		(SA(&mut self.oracle), self.engine.borrow_mut())
+	}
+
 	#[doc(hidden)]
 	/// Method used to add a no-good clause from a solution. This clause can be
 	/// used to ensure that the same solution is not found again.
@@ -685,7 +761,7 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 	/// ## Warning
 	/// This method will panic if the number of variables and values do not
 	/// match.
-	pub fn add_no_good(&mut self, vars: &[View], vals: &[Value]) -> Result<(), ReformulationError> {
+	pub fn add_no_good(&mut self, vars: &[View], vals: &[Value]) -> Result<(), Unsatisfiable> {
 		let clause = vars
 			.iter()
 			.zip_eq(vals)
@@ -699,7 +775,7 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 					let Value::Int(val) = val.clone() else {
 						unreachable!()
 					};
-					self.get_int_lit(iv, IntLitMeaning::NotEq(val))
+					iv.get_lit(self, IntLitMeaning::NotEq(val))
 				}
 			})
 			.collect_vec();
@@ -729,7 +805,8 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 		if engine.state.trail.get_sat_value(lit).is_some() {
 			if engine.notify_lit_advisor(prop, lit, data, bool2int) {
 				drop(engine);
-				self.enqueue_now(prop);
+				// self.enqueue_now(prop);
+				todo!()
 			}
 		} else {
 			// Otherwise, add the advisor to the engine
@@ -818,8 +895,8 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 
 		let mut obj_curr = None;
 		let obj_bound = match goal {
-			Goal::Minimize => self.get_int_lower_bound(objective),
-			Goal::Maximize => self.get_int_upper_bound(objective),
+			Goal::Minimize => objective.get_lower_bound(&self),
+			Goal::Maximize => objective.get_upper_bound(&self),
 		};
 		debug!(obj_bound, "start branch and bound");
 		loop {
@@ -839,10 +916,11 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 					} else {
 						let bound_lit = match goal {
 							Goal::Minimize => Some(
-								self.get_int_lit(objective, IntLitMeaning::Less(obj_curr.unwrap())),
+								objective
+									.get_lit(&mut self, IntLitMeaning::Less(obj_curr.unwrap())),
 							),
-							Goal::Maximize => Some(self.get_int_lit(
-								objective,
+							Goal::Maximize => Some(objective.get_lit(
+								&mut self,
 								IntLitMeaning::GreaterEq(obj_curr.unwrap() + 1),
 							)),
 						};
@@ -877,7 +955,7 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 		}
 	}
 
-	/// Create a new [`Solver`] instance from a [`FlatZinc`] instance.
+	// /// Create a new [`Solver`] instance from a [`FlatZinc`] instance.
 	pub fn from_fzn<S, MapTy: FromIterator<(S, View)>>(
 		fzn: &FlatZinc<S>,
 		config: &InitConfig,
@@ -1038,7 +1116,7 @@ impl<Oracle: ExternalPropagation + Assumptions> Solver<Oracle> {
 			.filter_map(|bv| match bv.0 {
 				BoolViewInner::Lit(lit) => Some(Ok(lit)),
 				BoolViewInner::Const(true) => None,
-				BoolViewInner::Const(false) => Some(Err(ReformulationError::TrivialUnsatisfiable)),
+				BoolViewInner::Const(false) => Some(Err(())),
 			})
 			.collect()
 		else {
@@ -1062,6 +1140,12 @@ impl<Oracle: ExternalPropagation + Assumptions> Solver<Oracle> {
 	}
 }
 
+impl<Oracle: ExternalPropagation> AddAssign<BoxedPropagator> for Solver<Oracle> {
+	fn add_assign(&mut self, propagator: BoxedPropagator) {
+		self.add_propagator(propagator, false);
+	}
+}
+
 impl<Oracle: ExternalPropagation> BrancherInitActions for Solver<Oracle> {
 	fn ensure_decidable(&mut self, view: View) {
 		match view {
@@ -1082,7 +1166,7 @@ impl<Oracle: ExternalPropagation> BrancherInitActions for Solver<Oracle> {
 	}
 
 	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
-		<Self as PropagatorInitActions>::new_trailed_int(self, init)
+		self.engine.borrow_mut().state.trail.track_int(init)
 	}
 
 	fn push_brancher(&mut self, brancher: BoxedBrancher) {
@@ -1116,40 +1200,6 @@ impl Clone for Solver<Cadical> {
 }
 
 impl<Oracle: ExternalPropagation> DecisionActions for Solver<Oracle> {
-	fn get_intref_lit(&mut self, iv: IntVarRef, meaning: IntLitMeaning) -> BoolView {
-		let mut clauses = Vec::new();
-		let bv = {
-			let mut engine = self.engine.borrow_mut();
-			let state = &mut engine.state;
-			let var = &mut state.int_vars[iv];
-			let new_var = |def: LazyLitDef| {
-				// Create new variable
-				let v = self.oracle.new_var();
-				self.oracle.add_observed_var(v);
-				trace_new_lit!(iv, def, v);
-				state.trail.grow_to_boolvar(v);
-				state.bool_to_int.insert_lazy(v, iv, def.meaning);
-				// Add clauses to define the new variable
-				for cl in def.meaning.defining_clauses(
-					v.into(),
-					def.prev.map(Into::into),
-					def.next.map(Into::into),
-				) {
-					trace!(clause = ?cl.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add clause");
-					clauses.push(cl);
-				}
-				v
-			};
-			var.bool_lit(meaning, new_var)
-		};
-		for cl in clauses {
-			self.oracle
-				.add_clause_from_slice(&cl)
-				.expect("functional definition cannot make the problem unsatisfiable");
-		}
-		bv.0
-	}
-
 	fn get_num_conflicts(&self) -> u64 {
 		self.engine.borrow().state.statistics.conflicts
 	}
@@ -1165,213 +1215,7 @@ impl<Oracle: Default + ExternalPropagation + LearnCallback> Default for Solver<O
 	}
 }
 
-impl<Oracle: ExternalPropagation> ExplanationActions for Solver<Oracle> {
-	fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning> {
-		self.engine.borrow().state.get_int_lit_meaning(var, lit)
-	}
-
-	fn get_int_lit_relaxed(
-		&mut self,
-		var: IntView,
-		meaning: IntLitMeaning,
-	) -> (BoolView, IntLitMeaning) {
-		self.engine
-			.borrow_mut()
-			.state
-			.get_int_lit_relaxed(var, meaning)
-	}
-
-	fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView {
-		self.engine.borrow_mut().state.get_int_lower_bound_lit(var)
-	}
-
-	fn get_int_upper_bound_lit(&mut self, var: IntView) -> BoolView {
-		self.engine.borrow_mut().state.get_int_upper_bound_lit(var)
-	}
-	fn get_int_val_lit(&mut self, var: IntView) -> Option<BoolView> {
-		let val = self.get_int_val(var)?;
-		Some(self.get_int_lit(var, IntLitMeaning::Eq(val)))
-	}
-
-	fn try_int_lit(&self, var: IntView, meaning: IntLitMeaning) -> Option<BoolView> {
-		self.engine.borrow().state.try_int_lit(var, meaning)
-	}
-}
-
-impl<Oracle: ExternalPropagation> InspectionActions for Solver<Oracle> {
-	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool {
-		self.engine.borrow().state.check_int_in_domain(var, val)
-	}
-
-	fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal) {
-		self.engine.borrow().state.get_int_bounds(var)
-	}
-
-	fn get_int_lower_bound(&self, var: IntView) -> IntVal {
-		self.engine.borrow().state.get_int_lower_bound(var)
-	}
-
-	fn get_int_upper_bound(&self, var: IntView) -> IntVal {
-		self.engine.borrow().state.get_int_upper_bound(var)
-	}
-
-	fn get_int_val(&self, var: IntView) -> Option<IntVal> {
-		self.engine.borrow().state.get_int_val(var)
-	}
-}
-
-impl<Oracle: ExternalPropagation> PropagatorInitActions for Solver<Oracle> {
-	fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef {
-		let mut engine = self.engine.borrow_mut();
-		let prop_ref = engine.propagators.push(propagator);
-		let p = engine.state.propagator_queue.info.push(PropagatorInfo {
-			enqueued: false,
-			priority,
-		});
-		debug_assert_eq!(prop_ref, p);
-		p
-	}
-
-	fn advise_on_backtrack(&mut self, prop: PropRef) {
-		self.engine.borrow_mut().notify_of_backtrack.push(prop);
-	}
-
-	fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView, data: u64) {
-		match var.0 {
-			BoolViewInner::Lit(lit) => self.advise_on_lit_change(prop, lit, data, false),
-			BoolViewInner::Const(_) => {
-				// Immediate notify the propagator, and enqueue if necessary
-				let mut engine_ref = self.engine.borrow_mut();
-				let engine: &mut Engine = engine_ref.deref_mut();
-				let enqueue =
-					engine.propagators[prop].advise_of_bool_change(&mut engine.state, var, data);
-				drop(engine_ref);
-				if enqueue {
-					self.enqueue_now(prop);
-				}
-			}
-		}
-	}
-
-	fn advise_on_int_change(
-		&mut self,
-		prop: PropRef,
-		var: IntView,
-		condition: IntPropCond,
-		data: u64,
-	) {
-		let (var, cond, negated) = match var.0 {
-			IntViewInner::VarRef(var) => (var, condition, false),
-			IntViewInner::Linear { transformer, var } => {
-				let condition = match condition {
-					IntPropCond::LowerBound if !transformer.positive_scale() => {
-						IntPropCond::UpperBound
-					}
-					IntPropCond::UpperBound if !transformer.positive_scale() => {
-						IntPropCond::LowerBound
-					}
-					_ => condition,
-				};
-				(var, condition, !transformer.positive_scale())
-			}
-			IntViewInner::Const(_) => {
-				// Immediately notify the propagator, and enqueue the propagator if it is
-				// required.
-				if self.engine.borrow_mut().notify_int_advisor(
-					prop,
-					var,
-					IntEvent::Fixed,
-					data,
-					false,
-				) {
-					self.enqueue_now(prop);
-				}
-				return;
-			}
-			IntViewInner::Bool { lit, .. } => {
-				return self.advise_on_lit_change(prop, lit, data, true);
-			}
-		};
-
-		let state = &mut self.engine.borrow_mut().state;
-		let adv = state.advisors.push(AdvisorDef {
-			bool2int: false,
-			data,
-			negated,
-			propagator: prop,
-		});
-		state.int_activation[var].add(ActivationAction::Advise(adv), cond);
-	}
-
-	fn enqueue_now(&mut self, prop: PropRef) {
-		let state = &mut self.engine.borrow_mut().state;
-		state.propagator_queue.enqueue_propagator(prop);
-	}
-
-	fn enqueue_on_bool_change(&mut self, prop: PropRef, var: BoolView) {
-		match var.0 {
-			BoolViewInner::Lit(lit) => {
-				// Ensure that the trail has a space to track the literal
-				{
-					let state = &mut self.engine.borrow_mut().state;
-					state.trail.grow_to_boolvar(lit.var());
-				}
-				// Ensure the oracle knows the literal is observed.
-				self.oracle.add_observed_var(lit.var());
-
-				let mut engine = self.engine.borrow_mut();
-				// If the literal is already assigned, enqueue the propagator immediately.
-				if engine.state.trail.get_sat_value(lit).is_some() {
-					drop(engine);
-					self.enqueue_now(prop);
-				} else {
-					// Otherwise, add propagator to the activation list.
-					engine
-						.state
-						.bool_activation
-						.entry(lit.var())
-						.or_default()
-						.push(ActivationAction::Enqueue(prop).into());
-				};
-			}
-			BoolViewInner::Const(_) => self.enqueue_now(prop),
-		}
-	}
-
-	fn enqueue_on_int_change(&mut self, prop: PropRef, var: IntView, condition: IntPropCond) {
-		let (var, cond) = match var.0 {
-			IntViewInner::VarRef(var) => (var, condition),
-			IntViewInner::Linear { transformer, var } => {
-				let condition = if transformer.positive_scale() {
-					condition
-				} else {
-					match condition {
-						IntPropCond::LowerBound => IntPropCond::UpperBound,
-						IntPropCond::UpperBound => IntPropCond::LowerBound,
-						_ => condition,
-					}
-				};
-				(var, condition)
-			}
-			IntViewInner::Const(_) => {
-				// Immediately enqueue, and no further action is required
-				self.enqueue_now(prop);
-				return;
-			}
-			IntViewInner::Bool { lit, .. } => {
-				return self.enqueue_on_bool_change(prop, BoolView(BoolViewInner::Lit(lit)))
-			}
-		};
-		self.engine.borrow_mut().state.int_activation[var]
-			.add(ActivationAction::Enqueue(prop), cond);
-	}
-
-	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
-		self.engine.borrow_mut().state.trail.track_int(init)
-	}
-}
-
-impl<Oracle: ExternalPropagation> TrailingActions for Solver<Oracle> {
+impl<Oracle> TrailingActions for Solver<Oracle> {
 	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
 		self.engine.borrow().state.get_bool_val(bv)
 	}
@@ -1382,6 +1226,99 @@ impl<Oracle: ExternalPropagation> TrailingActions for Solver<Oracle> {
 
 	fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal {
 		self.engine.borrow_mut().state.set_trailed_int(x, v)
+	}
+}
+
+impl<Oracle, I> IntInspectionActions<Solver<Oracle>> for I
+where
+	I: IntInspectionActions<State>,
+{
+	fn get_lower_bound(&self, ctx: &Solver<Oracle>) -> IntVal {
+		self.get_lower_bound(&ctx.engine.borrow().state)
+	}
+
+	fn get_upper_bound(&self, ctx: &Solver<Oracle>) -> IntVal {
+		self.get_upper_bound(&ctx.engine.borrow().state)
+	}
+
+	fn check_int_in_domain(&self, ctx: &Solver<Oracle>, val: IntVal) -> bool {
+		self.check_int_in_domain(&ctx.engine.borrow().state, val)
+	}
+}
+
+impl<Oracle, I> IntExplanationActions<Solver<Oracle>> for I
+where
+	I: IntExplanationActions<State>,
+{
+	type Atom = <I as IntExplanationActions<State>>::Atom;
+
+	fn get_lit_meaning(&self, ctx: &Solver<Oracle>, lit: RawLit) -> Option<IntLitMeaning> {
+		self.get_lit_meaning(&ctx.engine.borrow().state, lit)
+	}
+
+	fn get_lit_relaxed(
+		&self,
+		ctx: &Solver<Oracle>,
+		meaning: IntLitMeaning,
+	) -> (Self::Atom, IntLitMeaning) {
+		self.get_lit_relaxed(&ctx.engine.borrow().state, meaning)
+	}
+
+	fn get_val_lit(&self, ctx: &Solver<Oracle>) -> Option<Self::Atom> {
+		self.get_val_lit(&ctx.engine.borrow().state)
+	}
+
+	fn get_lower_bound_lit(&self, ctx: &Solver<Oracle>) -> Self::Atom {
+		self.get_lower_bound_lit(&ctx.engine.borrow().state)
+	}
+
+	fn get_upper_bound_lit(&self, ctx: &Solver<Oracle>) -> Self::Atom {
+		self.get_upper_bound_lit(&ctx.engine.borrow().state)
+	}
+
+	fn try_lit(&self, ctx: &Solver<Oracle>, meaning: IntLitMeaning) -> Option<Self::Atom> {
+		self.try_lit(&ctx.engine.borrow().state, meaning)
+	}
+}
+
+impl<Oracle: ExternalPropagation, I, B> IntDecisionActions<Solver<Oracle>> for I
+where
+	I: for<'a> IntDecisionActions<SolvingContext<'a>, Atom = B> + IntInspectionActions<State>,
+{
+	type Atom = B;
+
+	fn get_lit(&self, ctx: &mut Solver<Oracle>, meaning: IntLitMeaning) -> Self::Atom {
+		let (mut actions, mut engine) = ctx.as_parts_mut();
+		let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
+		self.get_lit(&mut ctx, meaning)
+	}
+
+	fn get_val_lit(&self, ctx: &mut Solver<Oracle>) -> Option<Self::Atom> {
+		let (mut actions, mut engine) = ctx.as_parts_mut();
+		let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
+		self.get_val_lit(&mut ctx)
+	}
+
+	fn get_lower_bound_lit(&self, ctx: &Solver<Oracle>) -> Self::Atom {
+		let (mut actions, mut engine) = ctx.as_parts();
+		let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
+		self.get_lower_bound_lit(&mut ctx)
+	}
+
+	fn get_upper_bound_lit(&self, ctx: &Solver<Oracle>) -> Self::Atom {
+		let (mut actions, mut engine) = ctx.as_parts();
+		let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
+		self.get_upper_bound_lit(&mut ctx)
+	}
+}
+
+impl<Oracle: ExternalPropagation> InitializationActions for Solver<Oracle> {
+	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
+		BrancherInitActions::new_trailed_int(self, init)
+	}
+
+	fn get_int_lit(&mut self, int: IntView, lit: IntLitMeaning) -> BoolView {
+		int.get_lit(self, lit)
 	}
 }
 

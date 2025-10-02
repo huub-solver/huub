@@ -1300,7 +1300,7 @@ mod tests {
 	use rangelist::RangeList;
 
 	use crate::{
-		actions::{DecisionActions, ExplanationActions},
+		actions::{IntDecisionActions, IntExplanationActions},
 		solver::{
 			int_var::{EncodingType, IntVar, IntVarRef},
 			BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner,
@@ -1334,9 +1334,9 @@ mod tests {
 	) {
 		let view = IntView(IntViewInner::VarRef(iv));
 		for (req, expected) in input.into_iter().zip_eq(lits.into_iter().zip_eq(output)) {
-			let bv = slv.get_int_lit(view, req);
+			let bv = view.get_lit(slv, req);
 			let m = if let BoolViewInner::Lit(lit) = bv.0 {
-				slv.get_int_lit_meaning(view, lit).unwrap()
+				view.get_lit_meaning(slv, lit).unwrap()
 			} else {
 				req
 			};

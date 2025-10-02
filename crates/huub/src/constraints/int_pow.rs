@@ -336,20 +336,20 @@ impl IntPowBounds {
 	}
 }
 
-impl<P, E> Propagator<P, E> for IntPowBounds
-where
-	P: PropagationActions,
-	E: ExplanationActions,
-{
-	#[tracing::instrument(name = "int_pow", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		self.propagate_result(actions)?;
-		self.propagate_base(actions)?;
-		self.propagate_exponent(actions)?;
+// impl<P, E> Propagator<P, E> for IntPowBounds
+// where
+// 	P: PropagationActions,
+// 	E: ExplanationActions,
+// {
+// 	#[tracing::instrument(name = "int_pow", level = "trace", skip(self,
+// actions))] 	fn propagate(&mut self, actions: &mut P) -> Result<(),
+// P::Conflict> { 		self.propagate_result(actions)?;
+// 		self.propagate_base(actions)?;
+// 		self.propagate_exponent(actions)?;
 
-		Ok(())
-	}
-}
+// 		Ok(())
+// 	}
+// }
 
 #[cfg(test)]
 mod tests {

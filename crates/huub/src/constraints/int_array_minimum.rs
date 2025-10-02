@@ -9,7 +9,7 @@ use crate::{
 		ConstraintInitActions, ExplanationActions, PropagatorInitActions, ReformulationActions,
 		SimplificationActions,
 	},
-	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
+	constraints::{Constraint, PropagationActions, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
 	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView},
 	IntDecision, IntVal,
@@ -97,52 +97,52 @@ impl IntArrayMinimumBounds {
 	}
 }
 
-impl<P, E> Propagator<P, E> for IntArrayMinimumBounds
-where
-	P: PropagationActions,
-	E: ExplanationActions,
-{
-	#[tracing::instrument(name = "array_int_minimum", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		let min_lb = self
-			.vars
-			.iter()
-			.map(|&x| actions.get_int_lower_bound(x))
-			.min()
-			.unwrap();
-		let (min_ub, min_ub_var) =
-			self.vars
-				.iter()
-				.fold((IntVal::MAX, self.min), |(ub, var), &e| {
-					let e_ub = actions.get_int_upper_bound(e);
-					if e_ub < ub {
-						(e_ub, e)
-					} else {
-						(ub, var)
-					}
-				});
-		// set y to be less than or equal to the minimum of upper bounds of x_i
-		let reason = actions.get_int_upper_bound_lit(min_ub_var);
-		actions.set_int_upper_bound(self.min, min_ub, reason)?;
+// impl<P, E> Propagator<P, E> for IntArrayMinimumBounds
+// where
+// 	P: PropagationActions,
+// 	E: ExplanationActions,
+// {
+// 	#[tracing::instrument(name = "array_int_minimum", level = "trace",
+// skip(self, actions))] 	fn propagate(&mut self, actions: &mut P) -> Result<(),
+// P::Conflict> { 		let min_lb = self
+// 			.vars
+// 			.iter()
+// 			.map(|&x| actions.get_int_lower_bound(x))
+// 			.min()
+// 			.unwrap();
+// 		let (min_ub, min_ub_var) =
+// 			self.vars
+// 				.iter()
+// 				.fold((IntVal::MAX, self.min), |(ub, var), &e| {
+// 					let e_ub = actions.get_int_upper_bound(e);
+// 					if e_ub < ub {
+// 						(e_ub, e)
+// 					} else {
+// 						(ub, var)
+// 					}
+// 				});
+// 		// set y to be less than or equal to the minimum of upper bounds of x_i
+// 		let reason = actions.get_int_upper_bound_lit(min_ub_var);
+// 		actions.set_int_upper_bound(self.min, min_ub, reason)?;
 
-		// set y to be greater than or equal to the minimum of lower bounds of x_i
-		actions.set_int_lower_bound(self.min, min_lb, |a: &mut P| {
-			self.vars
-				.iter()
-				.map(|&x| a.get_int_lit(x, IntLitMeaning::GreaterEq(min_lb)))
-				.collect_vec()
-		})?;
+// 		// set y to be greater than or equal to the minimum of lower bounds of x_i
+// 		actions.set_int_lower_bound(self.min, min_lb, |a: &mut P| {
+// 			self.vars
+// 				.iter()
+// 				.map(|&x| a.get_int_lit(x, IntLitMeaning::GreaterEq(min_lb)))
+// 				.collect_vec()
+// 		})?;
 
-		// set x_i to be greater than or equal to y.lowerbound
-		let reason = actions.get_int_lower_bound_lit(self.min);
-		let y_lb = actions.get_int_lower_bound(self.min);
-		for &x in self.vars.iter() {
-			actions.set_int_lower_bound(x, y_lb, reason)?;
-		}
+// 		// set x_i to be greater than or equal to y.lowerbound
+// 		let reason = actions.get_int_lower_bound_lit(self.min);
+// 		let y_lb = actions.get_int_lower_bound(self.min);
+// 		for &x in self.vars.iter() {
+// 			actions.set_int_lower_bound(x, y_lb, reason)?;
+// 		}
 
-		Ok(())
-	}
-}
+// 		Ok(())
+// 	}
+// }
 
 #[cfg(test)]
 mod tests {

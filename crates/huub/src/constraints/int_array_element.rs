@@ -13,7 +13,7 @@ use crate::{
 		ConstraintInitActions, ExplanationActions, PropagationActions, PropagatorInitActions,
 		ReformulationActions, SimplificationActions,
 	},
-	constraints::{Conflict, Constraint, Propagator, SimplificationStatus},
+	constraints::{Constraint, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, IntLitMeaning,
@@ -179,215 +179,215 @@ impl IntDecisionArrayElementBounds {
 	}
 }
 
-impl<P, E> Propagator<P, E> for IntDecisionArrayElementBounds
-where
-	P: PropagationActions,
-	E: ExplanationActions,
-{
-	#[tracing::instrument(name = "array_int_element", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		// ensure bounds of result and self.vars[self.index] are consistent when
-		// self.index is fixed only trigger when self.index is fixed and (1) y is
-		// updated or (2) self.vars[self.index] is updated
-		if let Some(fixed_index) = actions.get_int_val(self.index) {
-			let index_val_lit = actions.get_int_val_lit(self.index).unwrap();
-			let fixed_var = self.vars[fixed_index as usize];
-			actions.set_int_lower_bound(
-				self.result,
-				actions.get_int_lower_bound(fixed_var),
-				|a: &mut P| [index_val_lit, a.get_int_lower_bound_lit(fixed_var)],
-			)?;
-			actions.set_int_lower_bound(
-				fixed_var,
-				actions.get_int_lower_bound(self.result),
-				|a: &mut P| [index_val_lit, a.get_int_lower_bound_lit(self.result)],
-			)?;
-			actions.set_int_upper_bound(
-				self.result,
-				actions.get_int_upper_bound(fixed_var),
-				|a: &mut P| [index_val_lit, a.get_int_upper_bound_lit(fixed_var)],
-			)?;
-			actions.set_int_upper_bound(
-				fixed_var,
-				actions.get_int_upper_bound(self.result),
-				|a: &mut P| [index_val_lit, a.get_int_upper_bound_lit(self.result)],
-			)?;
-			return Ok(());
-		}
+// impl<P, E> Propagator<P, E> for IntDecisionArrayElementBounds
+// where
+// 	P: PropagationActions,
+// 	E: ExplanationActions,
+// {
+// 	#[tracing::instrument(name = "array_int_element", level = "trace",
+// skip(self, actions))] 	fn propagate(&mut self, actions: &mut P) -> Result<(),
+// P::Conflict> { 		// ensure bounds of result and self.vars[self.index] are
+// consistent when 		// self.index is fixed only trigger when self.index is
+// fixed and (1) y is 		// updated or (2) self.vars[self.index] is updated
+// 		if let Some(fixed_index) = actions.get_int_val(self.index) {
+// 			let index_val_lit = actions.get_int_val_lit(self.index).unwrap();
+// 			let fixed_var = self.vars[fixed_index as usize];
+// 			actions.set_int_lower_bound(
+// 				self.result,
+// 				actions.get_int_lower_bound(fixed_var),
+// 				|a: &mut P| [index_val_lit, a.get_int_lower_bound_lit(fixed_var)],
+// 			)?;
+// 			actions.set_int_lower_bound(
+// 				fixed_var,
+// 				actions.get_int_lower_bound(self.result),
+// 				|a: &mut P| [index_val_lit, a.get_int_lower_bound_lit(self.result)],
+// 			)?;
+// 			actions.set_int_upper_bound(
+// 				self.result,
+// 				actions.get_int_upper_bound(fixed_var),
+// 				|a: &mut P| [index_val_lit, a.get_int_upper_bound_lit(fixed_var)],
+// 			)?;
+// 			actions.set_int_upper_bound(
+// 				fixed_var,
+// 				actions.get_int_upper_bound(self.result),
+// 				|a: &mut P| [index_val_lit, a.get_int_upper_bound_lit(self.result)],
+// 			)?;
+// 			return Ok(());
+// 		}
 
-		let result_lb = actions.get_int_lower_bound(self.result);
-		let result_ub = actions.get_int_upper_bound(self.result);
-		let min_support = actions.get_trailed_int(self.min_support);
-		let max_support = actions.get_trailed_int(self.max_support);
-		let old_min = actions.get_int_lower_bound(self.vars[min_support as usize]);
-		let old_max = actions.get_int_upper_bound(self.vars[max_support as usize]);
-		let mut need_min_support = old_min > result_lb;
-		let mut need_max_support = old_max < result_ub;
-		let mut new_min_support = min_support;
-		let mut new_max_support = max_support;
-		let mut new_min = if need_min_support {
-			IntVal::MAX
-		} else {
-			old_min
-		};
-		let mut new_max = if need_max_support {
-			IntVal::MIN
-		} else {
-			old_max
-		};
+// 		let result_lb = actions.get_int_lower_bound(self.result);
+// 		let result_ub = actions.get_int_upper_bound(self.result);
+// 		let min_support = actions.get_trailed_int(self.min_support);
+// 		let max_support = actions.get_trailed_int(self.max_support);
+// 		let old_min = actions.get_int_lower_bound(self.vars[min_support as usize]);
+// 		let old_max = actions.get_int_upper_bound(self.vars[max_support as usize]);
+// 		let mut need_min_support = old_min > result_lb;
+// 		let mut need_max_support = old_max < result_ub;
+// 		let mut new_min_support = min_support;
+// 		let mut new_max_support = max_support;
+// 		let mut new_min = if need_min_support {
+// 			IntVal::MAX
+// 		} else {
+// 			old_min
+// 		};
+// 		let mut new_max = if need_max_support {
+// 			IntVal::MIN
+// 		} else {
+// 			old_max
+// 		};
 
-		// Iterate through all variables:
-		// 1. remove values from the index variable when:
-		// 	(1) result.upper_bound < self.vars[i].lower_bound -> index != i
-		//  (2) result.lower_bound > self.vars[i].upper_bound -> index != i
-		// 2. update min_support and max_support if necessary
-		// only trigger when result variable is updated or self.vars[i] is updated
-		for (i, v) in self.vars.iter().enumerate() {
-			let (v_lb, v_ub) = actions.get_int_bounds(*v);
-			if !actions.check_int_in_domain(self.index, i as IntVal) {
-				continue;
-			}
+// 		// Iterate through all variables:
+// 		// 1. remove values from the index variable when:
+// 		// 	(1) result.upper_bound < self.vars[i].lower_bound -> index != i
+// 		//  (2) result.lower_bound > self.vars[i].upper_bound -> index != i
+// 		// 2. update min_support and max_support if necessary
+// 		// only trigger when result variable is updated or self.vars[i] is updated
+// 		for (i, v) in self.vars.iter().enumerate() {
+// 			let (v_lb, v_ub) = actions.get_int_bounds(*v);
+// 			if !actions.check_int_in_domain(self.index, i as IntVal) {
+// 				continue;
+// 			}
 
-			if result_ub < v_lb {
-				actions.set_int_not_eq(self.index, i as IntVal, |a: &mut P| {
-					[
-						a.get_int_lit(self.result, IntLitMeaning::Less(v_lb)),
-						a.get_int_lower_bound_lit(*v),
-					]
-				})?;
-			}
+// 			if result_ub < v_lb {
+// 				actions.set_int_not_eq(self.index, i as IntVal, |a: &mut P| {
+// 					[
+// 						a.get_int_lit(self.result, IntLitMeaning::Less(v_lb)),
+// 						a.get_int_lower_bound_lit(*v),
+// 					]
+// 				})?;
+// 			}
 
-			if v_ub < result_lb {
-				actions.set_int_not_eq(self.index, i as IntVal, |a: &mut P| {
-					[
-						a.get_int_lit(self.result, IntLitMeaning::GreaterEq(v_ub + 1)),
-						a.get_int_upper_bound_lit(*v),
-					]
-				})?;
-			}
+// 			if v_ub < result_lb {
+// 				actions.set_int_not_eq(self.index, i as IntVal, |a: &mut P| {
+// 					[
+// 						a.get_int_lit(self.result, IntLitMeaning::GreaterEq(v_ub + 1)),
+// 						a.get_int_upper_bound_lit(*v),
+// 					]
+// 				})?;
+// 			}
 
-			// update min_support if i is in the domain of self.index and the lower bound of
-			// v is less than the current min
-			if need_min_support && v_lb < new_min {
-				new_min_support = i as IntVal;
-				new_min = v_lb;
-				need_min_support = new_min > result_lb; // stop finding min_support if
-				                            // new_min ≤ y_lb
-			}
+// 			// update min_support if i is in the domain of self.index and the lower
+// bound of 			// v is less than the current min
+// 			if need_min_support && v_lb < new_min {
+// 				new_min_support = i as IntVal;
+// 				new_min = v_lb;
+// 				need_min_support = new_min > result_lb; // stop finding min_support if
+// 				                            // new_min ≤ y_lb
+// 			}
 
-			// update max_support if i is in the domain of self.index and the upper bound of
-			// v is greater than the current max
-			if need_max_support && v_ub > new_max {
-				new_max_support = i as IntVal;
-				new_max = v_ub;
-				need_max_support = new_max < result_ub; // stop finding max_support if
-				                            // new_max ≥ y_ub
-			}
-		}
+// 			// update max_support if i is in the domain of self.index and the upper
+// bound of 			// v is greater than the current max
+// 			if need_max_support && v_ub > new_max {
+// 				new_max_support = i as IntVal;
+// 				new_max = v_ub;
+// 				need_max_support = new_max < result_ub; // stop finding max_support if
+// 				                            // new_max ≥ y_ub
+// 			}
+// 		}
 
-		let _ = actions.set_trailed_int(self.min_support, new_min_support);
-		let _ = actions.set_trailed_int(self.max_support, new_max_support);
+// 		let _ = actions.set_trailed_int(self.min_support, new_min_support);
+// 		let _ = actions.set_trailed_int(self.max_support, new_max_support);
 
-		// propagate the lower bound of the selected variable y if min_support is not
-		// valid anymore:
-		//
-		//   result.lower_bound >= min(i in domain(x))(self.vars[i].lower_bound)
-		//
-		// only trigger when self.vars[min_support] is changed or self.vars[min_support]
-		// is out of domain
-		if new_min > result_lb {
-			actions.set_int_lower_bound(self.result, new_min, |a: &mut P| {
-				self.vars
-					.iter()
-					.enumerate()
-					.map(|(i, &v)| {
-						if a.check_int_in_domain(self.index, i as IntVal) {
-							a.get_int_lit(v, IntLitMeaning::GreaterEq(new_min))
-						} else {
-							a.get_int_lit(self.index, IntLitMeaning::NotEq(i as IntVal))
-						}
-					})
-					.collect_vec()
-			})?;
-		}
+// 		// propagate the lower bound of the selected variable y if min_support is
+// not 		// valid anymore:
+// 		//
+// 		//   result.lower_bound >= min(i in domain(x))(self.vars[i].lower_bound)
+// 		//
+// 		// only trigger when self.vars[min_support] is changed or
+// self.vars[min_support] 		// is out of domain
+// 		if new_min > result_lb {
+// 			actions.set_int_lower_bound(self.result, new_min, |a: &mut P| {
+// 				self.vars
+// 					.iter()
+// 					.enumerate()
+// 					.map(|(i, &v)| {
+// 						if a.check_int_in_domain(self.index, i as IntVal) {
+// 							a.get_int_lit(v, IntLitMeaning::GreaterEq(new_min))
+// 						} else {
+// 							a.get_int_lit(self.index, IntLitMeaning::NotEq(i as IntVal))
+// 						}
+// 					})
+// 					.collect_vec()
+// 			})?;
+// 		}
 
-		// propagate the upper bound of the selected variable y if max_support is not
-		// valid anymore:
-		//
-		//   result.upper_bound <= max(i in domain(x))(self.vars[i].upper_bound)
-		//
-		// only trigger when self.vars[max_support] is changed or self.vars[max_support]
-		// is out of domain
-		if new_max < result_ub {
-			actions.set_int_upper_bound(self.result, new_max, |a: &mut P| {
-				self.vars
-					.iter()
-					.enumerate()
-					.map(|(i, &v)| {
-						if a.check_int_in_domain(self.index, i as IntVal) {
-							a.get_int_lit(v, IntLitMeaning::Less(new_max + 1))
-						} else {
-							a.get_int_lit(self.index, IntLitMeaning::NotEq(i as IntVal))
-						}
-					})
-					.collect_vec()
-			})?;
-		}
+// 		// propagate the upper bound of the selected variable y if max_support is
+// not 		// valid anymore:
+// 		//
+// 		//   result.upper_bound <= max(i in domain(x))(self.vars[i].upper_bound)
+// 		//
+// 		// only trigger when self.vars[max_support] is changed or
+// self.vars[max_support] 		// is out of domain
+// 		if new_max < result_ub {
+// 			actions.set_int_upper_bound(self.result, new_max, |a: &mut P| {
+// 				self.vars
+// 					.iter()
+// 					.enumerate()
+// 					.map(|(i, &v)| {
+// 						if a.check_int_in_domain(self.index, i as IntVal) {
+// 							a.get_int_lit(v, IntLitMeaning::Less(new_max + 1))
+// 						} else {
+// 							a.get_int_lit(self.index, IntLitMeaning::NotEq(i as IntVal))
+// 						}
+// 					})
+// 					.collect_vec()
+// 			})?;
+// 		}
 
-		Ok(())
-	}
-}
+// 		Ok(())
+// 	}
+// }
 
-impl<S: SimplificationActions> Constraint<S> for IntValArrayElement {
-	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
-		actions.simplify_on_change_int(self.result);
-		actions.simplify_on_change_int(self.index);
-	}
+// impl<S: SimplificationActions> Constraint<S> for IntValArrayElement {
+// 	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+// 		actions.simplify_on_change_int(self.result);
+// 		actions.simplify_on_change_int(self.index);
+// 	}
 
-	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		// Fix the bounds of the index is to the length of the array
-		actions.set_int_lower_bound(self.index, 0)?;
-		actions.set_int_upper_bound(self.index, self.array.len() as IntVal - 1)?;
-		// Unify if the index is already fixed
-		if let Some(idx) = actions.get_int_val(self.index) {
-			actions.set_int_val(self.result, self.array[idx as usize])?;
-			return Ok(SimplificationStatus::Subsumed);
-		}
-		Ok(SimplificationStatus::NoFixpoint)
-	}
+// 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus,
+// ReformulationError> { 		// Fix the bounds of the index is to the length of
+// the array 		actions.set_int_lower_bound(self.index, 0)?;
+// 		actions.set_int_upper_bound(self.index, self.array.len() as IntVal - 1)?;
+// 		// Unify if the index is already fixed
+// 		if let Some(idx) = actions.get_int_val(self.index) {
+// 			actions.set_int_val(self.result, self.array[idx as usize])?;
+// 			return Ok(SimplificationStatus::Subsumed);
+// 		}
+// 		Ok(SimplificationStatus::NoFixpoint)
+// 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let index = slv.get_solver_int(self.index);
-		let result = slv.get_solver_int(self.result);
+// 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(),
+// ReformulationError> { 		let index = slv.get_solver_int(self.index);
+// 		let result = slv.get_solver_int(self.result);
 
-		// Make a map from the values of the array to the indexes at which they
-		// occur (follows [`Itertools::into_group_map`])
-		let mut idx_map = FxHashMap::default();
-		self.array.iter().enumerate().for_each(|(idx, &val)| {
-			idx_map
-				.entry(val)
-				.or_insert_with(Vec::new)
-				.push(idx as IntVal);
-		});
+// 		// Make a map from the values of the array to the indexes at which they
+// 		// occur (follows [`Itertools::into_group_map`])
+// 		let mut idx_map = FxHashMap::default();
+// 		self.array.iter().enumerate().for_each(|(idx, &val)| {
+// 			idx_map
+// 				.entry(val)
+// 				.or_insert_with(Vec::new)
+// 				.push(idx as IntVal);
+// 		});
 
-		#[expect(clippy::iter_over_hash_type, reason = "FxHashMap::iter is stable")]
-		for (val, idxs) in idx_map {
-			let val_eq = slv.get_int_lit(result, IntLitMeaning::Eq(val));
-			let idxs: Vec<_> = idxs
-				.iter()
-				.map(|&i| slv.get_int_lit(index, IntLitMeaning::Eq(i)))
-				.collect();
+// 		#[expect(clippy::iter_over_hash_type, reason = "FxHashMap::iter is
+// stable")] 		for (val, idxs) in idx_map {
+// 			let val_eq = slv.get_int_lit(result, IntLitMeaning::Eq(val));
+// 			let idxs: Vec<_> = idxs
+// 				.iter()
+// 				.map(|&i| slv.get_int_lit(index, IntLitMeaning::Eq(i)))
+// 				.collect();
 
-			for &i in idxs.iter() {
-				// (idx = i) -> (val = arr[i])
-				slv.add_clause([!i, val_eq])?;
-			}
-			// (idx not in idxs) -> (val != arr[i])
-			slv.add_clause(idxs.into_iter().chain(once(!val_eq)))?;
-		}
-		Ok(())
-	}
-}
+// 			for &i in idxs.iter() {
+// 				// (idx = i) -> (val = arr[i])
+// 				slv.add_clause([!i, val_eq])?;
+// 			}
+// 			// (idx not in idxs) -> (val != arr[i])
+// 			slv.add_clause(idxs.into_iter().chain(once(!val_eq)))?;
+// 		}
+// 		Ok(())
+// 	}
+// }
 
 #[cfg(test)]
 mod tests {

@@ -11,10 +11,11 @@ use pindakaas::{
 
 use crate::{
 	actions::{
-		ConstraintInitActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+		ConstraintInitActions, DecisionActions, PropagatorInitActions, ReformulationActions,
+		SimplificationActions,
 	},
 	constraints::{
-		Conflict, Constraint, ExplanationActions, PropagationActions, Propagator, ReasonBuilder,
+		Constraint, ExplanationActions, PropagationActions, Propagator, ReasonBuilder,
 		SimplificationStatus,
 	},
 	helpers::opt_field::OptField,
@@ -549,82 +550,82 @@ impl IntLinearLessEqBounds {
 	}
 }
 
-impl<const R: usize, P, E> Propagator<P, E> for IntLinearLessEqBoundsImpl<R>
-where
-	P: PropagationActions,
-	E: ExplanationActions,
-{
-	fn explain(&mut self, actions: &mut E, _: Option<RawLit>, data: u64) -> Conjunction {
-		let i = data as usize;
-		let mut var_lits: Vec<RawLit> = self
-			.terms
-			.iter()
-			.enumerate()
-			.filter_map(|(j, v)| {
-				if j == i {
-					return None;
-				}
-				if let BoolView(BoolViewInner::Lit(lit)) = actions.get_int_lower_bound_lit(*v) {
-					Some(lit)
-				} else {
-					None
-				}
-			})
-			.collect();
-		if let Some(r) = self.reification.get() {
-			var_lits.push(*r);
-		}
-		var_lits
-	}
-	// propagation rule: x[i] <= rhs - sum_{j != i} x[j].lower_bound
-	#[tracing::instrument(name = "int_lin_le", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		// If the reified variable is false, skip propagation
-		if let Some(&r) = self.reification.get() {
-			if !actions
-				.get_bool_val(BoolView(BoolViewInner::Lit(r)))
-				.unwrap_or(true)
-			{
-				return Ok(());
-			}
-		}
+// impl<const R: usize, P, E> Propagator<P, E> for IntLinearLessEqBoundsImpl<R>
+// where
+// 	P: PropagationActions,
+// 	E: ExplanationActions,
+// {
+// 	fn explain(&mut self, actions: &mut E, _: Option<RawLit>, data: u64) ->
+// Conjunction { 		let i = data as usize;
+// 		let mut var_lits: Vec<RawLit> = self
+// 			.terms
+// 			.iter()
+// 			.enumerate()
+// 			.filter_map(|(j, v)| {
+// 				if j == i {
+// 					return None;
+// 				}
+// 				if let BoolView(BoolViewInner::Lit(lit)) =
+// actions.get_int_lower_bound_lit(*v) { 					Some(lit)
+// 				} else {
+// 					None
+// 				}
+// 			})
+// 			.collect();
+// 		if let Some(r) = self.reification.get() {
+// 			var_lits.push(*r);
+// 		}
+// 		var_lits
+// 	}
+// 	// propagation rule: x[i] <= rhs - sum_{j != i} x[j].lower_bound
+// 	#[tracing::instrument(name = "int_lin_le", level = "trace", skip(self,
+// actions))] 	fn propagate(&mut self, actions: &mut P) -> Result<(),
+// P::Conflict> { 		// If the reified variable is false, skip propagation
+// 		if let Some(&r) = self.reification.get() {
+// 			if !actions
+// 				.get_bool_val(BoolView(BoolViewInner::Lit(r)))
+// 				.unwrap_or(true)
+// 			{
+// 				return Ok(());
+// 			}
+// 		}
 
-		// get the difference between the right-hand-side value and the sum of variable
-		// lower bounds
-		let sum = self
-			.terms
-			.iter()
-			.map(|v| actions.get_int_lower_bound(*v))
-			.fold(self.max, |sum, val| sum - val);
+// 		// get the difference between the right-hand-side value and the sum of
+// variable 		// lower bounds
+// 		let sum = self
+// 			.terms
+// 			.iter()
+// 			.map(|v| actions.get_int_lower_bound(*v))
+// 			.fold(self.max, |sum, val| sum - val);
 
-		// propagate the reified variable if the sum of lower bounds is greater than the
-		// right-hand-side value
-		if let Some(&r) = self.reification.get() {
-			let r = BoolView(BoolViewInner::Lit(r));
-			if sum < 0 {
-				actions.set_bool(!r, |a: &mut P| {
-					self.terms
-						.iter()
-						.map(|v| a.get_int_lower_bound_lit(*v))
-						.collect_vec()
-				})?;
-			}
-			// skip the remaining propagation if the reified variable is not assigned to
-			// true
-			if !actions.get_bool_val(r).unwrap_or(false) {
-				return Ok(());
-			}
-		}
+// 		// propagate the reified variable if the sum of lower bounds is greater
+// than the 		// right-hand-side value
+// 		if let Some(&r) = self.reification.get() {
+// 			let r = BoolView(BoolViewInner::Lit(r));
+// 			if sum < 0 {
+// 				actions.set_bool(!r, |a: &mut P| {
+// 					self.terms
+// 						.iter()
+// 						.map(|v| a.get_int_lower_bound_lit(*v))
+// 						.collect_vec()
+// 				})?;
+// 			}
+// 			// skip the remaining propagation if the reified variable is not assigned
+// to 			// true
+// 			if !actions.get_bool_val(r).unwrap_or(false) {
+// 				return Ok(());
+// 			}
+// 		}
 
-		// propagate the upper bound of the variables
-		for (j, &v) in self.terms.iter().enumerate() {
-			let reason = actions.deferred_reason(j as u64);
-			let ub = sum + actions.get_int_lower_bound(v);
-			actions.set_int_upper_bound(v, ub, reason)?;
-		}
-		Ok(())
-	}
-}
+// 		// propagate the upper bound of the variables
+// 		for (j, &v) in self.terms.iter().enumerate() {
+// 			let reason = actions.deferred_reason(j as u64);
+// 			let ub = sum + actions.get_int_lower_bound(v);
+// 			actions.set_int_upper_bound(v, ub, reason)?;
+// 		}
+// 		Ok(())
+// 	}
+// }
 
 impl IntLinearLessEqImpBounds {
 	/// Create a new [`IntLinearLessEqImpBounds`] propagator and post it in the
@@ -771,7 +772,7 @@ impl<const R: usize> IntLinearNotEqValueImpl<R> {
 	/// Helper function to construct the reason for propagation given the index
 	/// of the variable in the list of variables to sum or the length of the
 	/// list, if explaining the reification.
-	fn reason<A: ExplanationActions>(&self, data: usize) -> impl ReasonBuilder<A> + '_ {
+	fn reason<A: DecisionActions>(&self, data: usize) -> impl ReasonBuilder<A> + '_ {
 		move |actions: &mut A| {
 			let mut conj: Vec<_> = self
 				.terms
@@ -795,73 +796,73 @@ impl<const R: usize> IntLinearNotEqValueImpl<R> {
 	}
 }
 
-impl<const R: usize, P, E> Propagator<P, E> for IntLinearNotEqValueImpl<R>
-where
-	P: PropagationActions,
-	E: ExplanationActions,
-{
-	fn advise_of_bool_change(&mut self, actions: &mut E, _view: BoolView, _data: u64) -> bool {
-		debug_assert!(self.reification.get().is_some());
-		debug_assert_eq!(_data, self.terms.len() as u64);
-		debug_assert!(actions
-			.get_bool_val(BoolView(BoolViewInner::Lit(
-				*self.reification.get().unwrap()
-			)))
-			.is_some());
+// impl<const R: usize, P, E> Propagator<P, E> for IntLinearNotEqValueImpl<R>
+// where
+// 	P: PropagationActions,
+// 	E: ExplanationActions,
+// {
+// 	fn advise_of_bool_change(&mut self, actions: &mut E, _view: BoolView, _data:
+// u64) -> bool { 		debug_assert!(self.reification.get().is_some());
+// 		debug_assert_eq!(_data, self.terms.len() as u64);
+// 		debug_assert!(actions
+// 			.get_bool_val(BoolView(BoolViewInner::Lit(
+// 				*self.reification.get().unwrap()
+// 			)))
+// 			.is_some());
 
-		self.increment_num_fixed(actions)
-	}
+// 		self.increment_num_fixed(actions)
+// 	}
 
-	fn advise_of_int_change(
-		&mut self,
-		actions: &mut E,
-		_view: IntView,
-		_event: IntEvent,
-		_data: u64,
-	) -> bool {
-		debug_assert!(actions.get_int_val(self.terms[_data as usize]).is_some());
+// 	fn advise_of_int_change(
+// 		&mut self,
+// 		actions: &mut E,
+// 		_view: IntView,
+// 		_event: IntEvent,
+// 		_data: u64,
+// 	) -> bool {
+// 		debug_assert!(actions.get_int_val(self.terms[_data as usize]).is_some());
 
-		self.increment_num_fixed(actions)
-	}
+// 		self.increment_num_fixed(actions)
+// 	}
 
-	#[tracing::instrument(name = "int_lin_ne", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		let (r, r_fixed) = if let Some(&r) = self.reification.get() {
-			let r = BoolView(BoolViewInner::Lit(r));
-			match actions.get_bool_val(r) {
-				Some(false) => return Ok(()),
-				Some(true) => (r, true),
-				None => (r, false),
-			}
-		} else {
-			(true.into(), true)
-		};
-		let mut sum = 0;
-		let mut unfixed = None;
-		for (i, v) in self.terms.iter().enumerate() {
-			if let Some(val) = actions.get_int_val(*v) {
-				sum += val;
-			} else if unfixed.is_some() {
-				debug_assert!(false, "propagator shouldn't have been scheduled");
-				return Ok(());
-			} else {
-				unfixed = Some((i, v));
-			}
-		}
-		if let Some((i, v)) = unfixed {
-			if !r_fixed {
-				debug_assert!(false, "propagator shouldn't have been scheduled");
-				return Ok(());
-			}
-			let val = self.violation - sum;
-			actions.set_int_not_eq(*v, val, self.reason(i))
-		} else if sum == self.violation {
-			actions.set_bool(!r, self.reason(self.terms.len()))
-		} else {
-			Ok(())
-		}
-	}
-}
+// 	#[tracing::instrument(name = "int_lin_ne", level = "trace", skip(self,
+// actions))] 	fn propagate(&mut self, actions: &mut P) -> Result<(),
+// P::Conflict> { 		let (r, r_fixed) = if let Some(&r) = self.reification.get()
+// { 			let r = BoolView(BoolViewInner::Lit(r));
+// 			match actions.get_bool_val(r) {
+// 				Some(false) => return Ok(()),
+// 				Some(true) => (r, true),
+// 				None => (r, false),
+// 			}
+// 		} else {
+// 			(true.into(), true)
+// 		};
+// 		let mut sum = 0;
+// 		let mut unfixed = None;
+// 		for (i, v) in self.terms.iter().enumerate() {
+// 			if let Some(val) = actions.get_int_val(*v) {
+// 				sum += val;
+// 			} else if unfixed.is_some() {
+// 				debug_assert!(false, "propagator shouldn't have been scheduled");
+// 				return Ok(());
+// 			} else {
+// 				unfixed = Some((i, v));
+// 			}
+// 		}
+// 		if let Some((i, v)) = unfixed {
+// 			if !r_fixed {
+// 				debug_assert!(false, "propagator shouldn't have been scheduled");
+// 				return Ok(());
+// 			}
+// 			let val = self.violation - sum;
+// 			actions.set_int_not_eq(*v, val, self.reason(i))
+// 		} else if sum == self.violation {
+// 			actions.set_bool(!r, self.reason(self.terms.len()))
+// 		} else {
+// 			Ok(())
+// 		}
+// 	}
+// }
 
 #[cfg(test)]
 mod tests {

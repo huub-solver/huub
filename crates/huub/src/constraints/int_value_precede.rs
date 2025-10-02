@@ -384,57 +384,57 @@ impl IntSeqPrecedeChainBounds {
 	}
 }
 
-impl<P, E> Propagator<P, E> for IntSeqPrecedeChainBounds
-where
-	P: PropagationActions,
-	E: ExplanationActions,
-{
-	#[tracing::instrument(name = "seq_precede_chain", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		if !self.initialized {
-			return self.initial_propagation(actions);
-		}
+// impl<P, E> Propagator<P, E> for IntSeqPrecedeChainBounds
+// where
+// 	P: PropagationActions,
+// 	E: ExplanationActions,
+// {
+// 	#[tracing::instrument(name = "seq_precede_chain", level = "trace",
+// skip(self, actions))] 	fn propagate(&mut self, actions: &mut P) -> Result<(),
+// P::Conflict> { 		if !self.initialized {
+// 			return self.initial_propagation(actions);
+// 		}
 
-		// Check upper bound updates, only necessary for all elements in first,
-		// not all variables.
-		for (k, &t) in self.first.iter().enumerate() {
-			let i = actions.get_trailed_int(t);
-			if actions.get_trailed_int(self.first_val[i as usize]) == k as IntVal
-				&& actions.get_int_upper_bound(self.vars[i as usize]) < k as IntVal
-			{
-				self.repair_upper(actions, k as IntVal)?;
-			}
-		}
-		// Lower bound requires full pass to catch all potential propagations.
-		let mut i = self.vars.len() as IntVal;
-		let mut k = actions.get_trailed_int(self.max_last);
-		while i > 0 {
-			i -= 1;
-			if k > 0 && actions.get_trailed_int(self.last[k as usize - 1]) == i {
-				k -= 1;
-			}
-			let lb = actions.get_int_lower_bound(self.vars[i as usize]);
-			// Deal with increase of lower bound.
-			if lb > k {
-				let _ = actions.set_trailed_int(self.last[lb as usize], i);
-				// Update highest lower bound if necessary.
-				if lb > actions.get_trailed_int(self.max_last) {
-					let _ = actions.set_trailed_int(self.max_last, lb);
-				}
-				// If a repair is necessary, continue check where the repair ended.
-				(i, k) = self.repair_lower(actions, lb)?;
-				continue;
-			}
-			// Deal with moving the last possibility to have value k for the first.
-			if actions.get_trailed_int(self.last[k as usize]) == i
-				&& !actions.check_int_in_domain(self.vars[i as usize], k)
-			{
-				(i, k) = self.repair_lower(actions, k)?;
-			}
-		}
-		Ok(())
-	}
-}
+// 		// Check upper bound updates, only necessary for all elements in first,
+// 		// not all variables.
+// 		for (k, &t) in self.first.iter().enumerate() {
+// 			let i = actions.get_trailed_int(t);
+// 			if actions.get_trailed_int(self.first_val[i as usize]) == k as IntVal
+// 				&& actions.get_int_upper_bound(self.vars[i as usize]) < k as IntVal
+// 			{
+// 				self.repair_upper(actions, k as IntVal)?;
+// 			}
+// 		}
+// 		// Lower bound requires full pass to catch all potential propagations.
+// 		let mut i = self.vars.len() as IntVal;
+// 		let mut k = actions.get_trailed_int(self.max_last);
+// 		while i > 0 {
+// 			i -= 1;
+// 			if k > 0 && actions.get_trailed_int(self.last[k as usize - 1]) == i {
+// 				k -= 1;
+// 			}
+// 			let lb = actions.get_int_lower_bound(self.vars[i as usize]);
+// 			// Deal with increase of lower bound.
+// 			if lb > k {
+// 				let _ = actions.set_trailed_int(self.last[lb as usize], i);
+// 				// Update highest lower bound if necessary.
+// 				if lb > actions.get_trailed_int(self.max_last) {
+// 					let _ = actions.set_trailed_int(self.max_last, lb);
+// 				}
+// 				// If a repair is necessary, continue check where the repair ended.
+// 				(i, k) = self.repair_lower(actions, lb)?;
+// 				continue;
+// 			}
+// 			// Deal with moving the last possibility to have value k for the first.
+// 			if actions.get_trailed_int(self.last[k as usize]) == i
+// 				&& !actions.check_int_in_domain(self.vars[i as usize], k)
+// 			{
+// 				(i, k) = self.repair_lower(actions, k)?;
+// 			}
+// 		}
+// 		Ok(())
+// 	}
+// }
 
 impl<S: SimplificationActions> Constraint<S> for IntValuePrecedeChain {
 	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
@@ -875,58 +875,58 @@ impl IntValuePrecedeChainValue {
 	}
 }
 
-impl<P, E> Propagator<P, E> for IntValuePrecedeChainValue
-where
-	P: PropagationActions,
-	E: ExplanationActions,
-{
-	#[tracing::instrument(name = "value_precede_chain", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		if !self.initialized {
-			return self.initial_propagation(actions);
-		}
+// impl<P, E> Propagator<P, E> for IntValuePrecedeChainValue
+// where
+// 	P: PropagationActions,
+// 	E: ExplanationActions,
+// {
+// 	#[tracing::instrument(name = "value_precede_chain", level = "trace",
+// skip(self, actions))] 	fn propagate(&mut self, actions: &mut P) -> Result<(),
+// P::Conflict> { 		if !self.initialized {
+// 			return self.initial_propagation(actions);
+// 		}
 
-		// Check upper bound updates, only necessary for all elements in first,
-		// not all variables.
-		for (k, &t) in self.first.iter().enumerate().skip(1) {
-			let i = actions.get_trailed_int(t);
-			if actions.get_trailed_int(self.first_val[i as usize]) == k as IntVal
-				&& !actions.check_int_in_domain(self.vars[i as usize], self.values[k - 1])
-			{
-				self.repair_upper(actions, k)?;
-			}
-		}
-		// Lower bound requires full pass to catch all potential propagations.
-		let mut i = self.vars.len();
-		let mut k = actions.get_trailed_int(self.max_last) as usize;
-		while i > 0 {
-			i -= 1;
-			if k > 0 && actions.get_trailed_int(self.last[k - 1]) == i as IntVal {
-				k -= 1;
-			}
-			if let Some(lb) = self.get_lowest_index(actions, i) {
-				// Deal with increase of lower bound.
-				if lb > k {
-					let _ = actions.set_trailed_int(self.last[lb], i as IntVal);
-					// Update highest lower bound if necessary.
-					if lb as IntVal > actions.get_trailed_int(self.max_last) {
-						let _ = actions.set_trailed_int(self.max_last, lb as IntVal);
-					}
-					// If a repair is necessary, continue check where the repair ended.
-					(i, k) = self.repair_lower(actions, lb)?;
-					continue;
-				}
-			}
-			// Deal with moving the last possibility to have value k for the first.
-			if actions.get_trailed_int(self.last[k]) == i as IntVal
-				&& !actions.check_int_in_domain(self.vars[i], self.values[k - 1])
-			{
-				(i, k) = self.repair_lower(actions, k)?;
-			}
-		}
-		Ok(())
-	}
-}
+// 		// Check upper bound updates, only necessary for all elements in first,
+// 		// not all variables.
+// 		for (k, &t) in self.first.iter().enumerate().skip(1) {
+// 			let i = actions.get_trailed_int(t);
+// 			if actions.get_trailed_int(self.first_val[i as usize]) == k as IntVal
+// 				&& !actions.check_int_in_domain(self.vars[i as usize], self.values[k -
+// 1]) 			{
+// 				self.repair_upper(actions, k)?;
+// 			}
+// 		}
+// 		// Lower bound requires full pass to catch all potential propagations.
+// 		let mut i = self.vars.len();
+// 		let mut k = actions.get_trailed_int(self.max_last) as usize;
+// 		while i > 0 {
+// 			i -= 1;
+// 			if k > 0 && actions.get_trailed_int(self.last[k - 1]) == i as IntVal {
+// 				k -= 1;
+// 			}
+// 			if let Some(lb) = self.get_lowest_index(actions, i) {
+// 				// Deal with increase of lower bound.
+// 				if lb > k {
+// 					let _ = actions.set_trailed_int(self.last[lb], i as IntVal);
+// 					// Update highest lower bound if necessary.
+// 					if lb as IntVal > actions.get_trailed_int(self.max_last) {
+// 						let _ = actions.set_trailed_int(self.max_last, lb as IntVal);
+// 					}
+// 					// If a repair is necessary, continue check where the repair ended.
+// 					(i, k) = self.repair_lower(actions, lb)?;
+// 					continue;
+// 				}
+// 			}
+// 			// Deal with moving the last possibility to have value k for the first.
+// 			if actions.get_trailed_int(self.last[k]) == i as IntVal
+// 				&& !actions.check_int_in_domain(self.vars[i], self.values[k - 1])
+// 			{
+// 				(i, k) = self.repair_lower(actions, k)?;
+// 			}
+// 		}
+// 		Ok(())
+// 	}
+// }
 
 #[cfg(test)]
 mod tests {

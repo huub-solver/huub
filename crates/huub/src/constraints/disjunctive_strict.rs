@@ -7,8 +7,8 @@ use tracing::trace;
 
 use crate::{
 	actions::{
-		ConstraintInitActions, ExplanationActions, InspectionActions, PropagatorInitActions,
-		ReformulationActions, SimplificationActions,
+		ConstraintInitActions, DecisionActions, ExplanationActions, InspectionActions,
+		PropagatorInitActions, ReformulationActions, SimplificationActions,
 	},
 	constraints::{
 		Conflict, Constraint, PropagationActions, Propagator, ReasonBuilder, SimplificationStatus,
@@ -439,7 +439,7 @@ impl DisjunctiveStrictPropagator {
 	/// Explain resource overload within the time window
 	/// [`earliest_start`,`time_bound`]. For details, refer to the CPAIOR paper
 	/// by Vilim (2005).
-	fn explain_overload_checking<A: ExplanationActions>(
+	fn explain_overload_checking<A: DecisionActions>(
 		&self,
 		time_bound: i64,
 	) -> impl ReasonBuilder<A> + '_ {
@@ -467,16 +467,18 @@ impl DisjunctiveStrictPropagator {
 				}
 			}
 
-			e_tasks
-				.iter()
-				.flat_map(|&i| {
-					let (bv, _) = actions.get_int_lit_relaxed(
-						self.start_times[i],
-						IntLitMeaning::Less((time_bound - slack) - self.durations[i]),
-					);
-					[actions.get_int_lower_bound_lit(self.start_times[i]), bv]
-				})
-				.collect_vec()
+			// e_tasks
+			// 	.iter()
+			// 	.flat_map(|&i| {
+			// 		let (bv, _) = actions.get_int_lit_relaxed(
+			// 			self.start_times[i],
+			// 			IntLitMeaning::Less((time_bound - slack) - self.durations[i]),
+			// 		);
+			// 		[actions.get_int_lower_bound_lit(self.start_times[i]), bv]
+			// 	})
+			// 	.collect_vec()
+			let ret: Vec<BoolView> = vec![todo!()];
+			ret
 		}
 	}
 
@@ -1055,81 +1057,82 @@ impl DisjunctiveStrictPropagator {
 	}
 }
 
-impl<P, E> Propagator<P, E> for DisjunctiveStrictPropagator
-where
-	P: PropagationActions,
-	E: ExplanationActions,
-{
-	/// Explain the propagation of the disjunctive propagator.
-	#[tracing::instrument(name = "disjunctive_strict", level = "trace", skip(self, actions))]
-	fn explain(&mut self, actions: &mut E, _: Option<RawLit>, data: u64) -> Conjunction {
-		// Extract the task number and propagation rule from the data
-		let task_no = self.task_no_from_data(data);
-		let earliest_start = actions.get_trailed_int(self.trailed_info[task_no].earliest_start);
-		let latest_completion =
-			actions.get_trailed_int(self.trailed_info[task_no].latest_completion);
+// impl<P, E> Propagator<P, E> for DisjunctiveStrictPropagator
+// where
+// 	P: PropagationActions,
+// 	E: ExplanationActions,
+// {
+// 	/// Explain the propagation of the disjunctive propagator.
+// 	#[tracing::instrument(name = "disjunctive_strict", level = "trace",
+// skip(self, actions))] 	fn explain(&mut self, actions: &mut E, _:
+// Option<RawLit>, data: u64) -> Conjunction { 		// Extract the task number and
+// propagation rule from the data 		let task_no = self.task_no_from_data(data);
+// 		let earliest_start =
+// actions.get_trailed_int(self.trailed_info[task_no].earliest_start);
+// 		let latest_completion =
+// 			actions.get_trailed_int(self.trailed_info[task_no].latest_completion);
 
-		// Explain the reason based on the propagation rule of disjunctive.
-		let clause = match self.propagation_rule_from_data(data) {
-			DisjunctivePropagationRule::EdgeFinding => {
-				self.explain_edge_finding(actions, task_no, earliest_start, latest_completion)
-			}
-			DisjunctivePropagationRule::NotLast => {
-				self.explain_not_last(actions, task_no, earliest_start, latest_completion)
-			}
-			DisjunctivePropagationRule::Precedence => {
-				self.explain_precedence(actions, task_no, earliest_start, latest_completion)
-			}
-		};
-		clause
-			.iter()
-			.filter_map(|bv| match bv.0 {
-				BoolViewInner::Lit(l) => Some(l),
-				BoolViewInner::Const(true) => None,
-				BoolViewInner::Const(false) => {
-					unreachable!(
-						"Unexpected false literal in the explanation of disjunctive edge finding"
-					)
-				}
-			})
-			.collect()
-	}
+// 		// Explain the reason based on the propagation rule of disjunctive.
+// 		let clause = match self.propagation_rule_from_data(data) {
+// 			DisjunctivePropagationRule::EdgeFinding => {
+// 				self.explain_edge_finding(actions, task_no, earliest_start,
+// latest_completion) 			}
+// 			DisjunctivePropagationRule::NotLast => {
+// 				self.explain_not_last(actions, task_no, earliest_start,
+// latest_completion) 			}
+// 			DisjunctivePropagationRule::Precedence => {
+// 				self.explain_precedence(actions, task_no, earliest_start,
+// latest_completion) 			}
+// 		};
+// 		clause
+// 			.iter()
+// 			.filter_map(|bv| match bv.0 {
+// 				BoolViewInner::Lit(l) => Some(l),
+// 				BoolViewInner::Const(true) => None,
+// 				BoolViewInner::Const(false) => {
+// 					unreachable!(
+// 						"Unexpected false literal in the explanation of disjunctive edge
+// finding" 					)
+// 				}
+// 			})
+// 			.collect()
+// 	}
 
-	/// Propagate the disjunctive propagator.
-	#[tracing::instrument(name = "disjunctive_strict", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		// Sort the tasks by earliest start time and initialize the Omega-Theta tree
-		// accroding to the property of the Omega-Theta tree.
-		let earliest_start: Vec<_> = self
-			.start_times
-			.iter()
-			.map(|v| actions.get_int_lower_bound(*v))
-			.collect();
-		self.tasks_sorted_by_earliest_start
-			.sort_by_key(|&i| earliest_start[i]);
-		self.ot_tree
-			.initialize(self.tasks_sorted_by_earliest_start.as_slice());
+// 	/// Propagate the disjunctive propagator.
+// 	#[tracing::instrument(name = "disjunctive_strict", level = "trace",
+// skip(self, actions))] 	fn propagate(&mut self, actions: &mut P) -> Result<(),
+// P::Conflict> { 		// Sort the tasks by earliest start time and initialize the
+// Omega-Theta tree 		// accroding to the property of the Omega-Theta tree.
+// 		let earliest_start: Vec<_> = self
+// 			.start_times
+// 			.iter()
+// 			.map(|v| actions.get_int_lower_bound(*v))
+// 			.collect();
+// 		self.tasks_sorted_by_earliest_start
+// 			.sort_by_key(|&i| earliest_start[i]);
+// 		self.ot_tree
+// 			.initialize(self.tasks_sorted_by_earliest_start.as_slice());
 
-		// Propagate edge finding propagation rule with overload checking or perform
-		// overload checking only
-		if self.edge_finding_enabled {
-			if self.propagate_edge_finding(actions, true)? {
-				return Ok(());
-			}
-		} else {
-			self.propagate_overload_checking(actions)?;
-		}
-		// Propagate detectable precedence propagation rule
-		if self.detectable_precedence_enabled && self.propagate_detectable_precedence(actions)? {
-			return Ok(());
-		}
-		// Propagate not-last propagation rule
-		if self.not_last_enabled && self.propagate_not_last(actions)? {
-			return Ok(());
-		}
-		Ok(())
-	}
-}
+// 		// Propagate edge finding propagation rule with overload checking or
+// perform 		// overload checking only
+// 		if self.edge_finding_enabled {
+// 			if self.propagate_edge_finding(actions, true)? {
+// 				return Ok(());
+// 			}
+// 		} else {
+// 			self.propagate_overload_checking(actions)?;
+// 		}
+// 		// Propagate detectable precedence propagation rule
+// 		if self.detectable_precedence_enabled &&
+// self.propagate_detectable_precedence(actions)? { 			return Ok(());
+// 		}
+// 		// Propagate not-last propagation rule
+// 		if self.not_last_enabled && self.propagate_not_last(actions)? {
+// 			return Ok(());
+// 		}
+// 		Ok(())
+// 	}
+// }
 
 impl OmegaThetaTree {
 	/// Add a task with number `task_no` to the tree.

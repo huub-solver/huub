@@ -22,12 +22,18 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::warn;
 
 use crate::{
-	abs_int, actions::SimplificationActions, all_different_int, array_element, array_maximum_int,
-	array_minimum_int, constraints::int_table::IntTable, cumulative, disjunctive_strict, div_int,
-	int_in_set_reif, pow_int, reformulate::ReformulationError, seq_precede_chain_int, table_int,
-	times_int, value_precede_chain_int, BoolDecision, BoolDecisionInner, Branching, Decision,
-	IntDecision, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal, ValueSelection,
-	VariableSelection,
+	abs_int,
+	actions::{
+		BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions,
+		SimplificationActions,
+	},
+	all_different_int, array_element, array_maximum_int, array_minimum_int,
+	constraints::BoxedConstraint,
+	cumulative, disjunctive_strict, div_int, int_in_set_reif, pow_int,
+	reformulate::ReformulationError,
+	seq_precede_chain_int, table_int, times_int, value_precede_chain_int, BoolDecision,
+	BoolDecisionInner, Branching, Decision, IntDecision, IntLinExpr, IntSetVal, IntVal, Model,
+	NonZeroIntVal, ValueSelection, VariableSelection,
 };
 
 /// Domain assumed for integer decision variables that do not have a domain
@@ -62,8 +68,6 @@ pub enum FlatZincError {
 		/// Type of the argument found.
 		found: String,
 	},
-	/// Error that occorred when converting a generated [`Model`] to a
-	/// [`Solver`] object.
 	ReformulationError(ReformulationError),
 }
 
@@ -490,7 +494,7 @@ where
 		transitions: Vec<Vec<IntVal>>,
 		init_state: IntVal,
 		accept_states: FxHashSet<IntVal>,
-	) -> Vec<IntTable> {
+	) -> Vec<BoxedConstraint> {
 		// TODO: Add the regular checking
 
 		let mut table_constraints = Vec::new();
@@ -608,13 +612,15 @@ where
 						let Decision::Bool(view) = view else {
 							unreachable!()
 						};
-						me.prb.unify_bool(bv, view)?;
+						bv.unify(&mut me.prb, view)
+							.map_err(ReformulationError::from)?;
 					}
 					Decision::Int(iv) => {
 						let Decision::Int(view) = view else {
 							unreachable!()
 						};
-						me.prb.unify_int(iv, view)?;
+						iv.unify(&mut me.prb, view)
+							.map_err(ReformulationError::from)?;
 					}
 				},
 				Entry::Vacant(e) => {
@@ -627,7 +633,8 @@ where
 						let Decision::Int(view) = view else {
 							unreachable!()
 						};
-						me.prb.set_int_in_set(view, dom)?;
+						view.set_domain(&mut me.prb, dom, vec![])
+							.map_err(ReformulationError::from)?;
 					}
 					// Insert the view to use instead of a new variable for the name
 					let _ = e.insert(view);
@@ -1049,7 +1056,8 @@ where
 					if let [b, i] = c.args.as_slice() {
 						let b = self.arg_bool(b)?;
 						let i = self.arg_int(i)?;
-						self.prb.unify_int(b.into(), i)?;
+						i.unify(&mut self.prb, b)
+							.map_err(ReformulationError::from)?;
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool2int",
@@ -1116,10 +1124,12 @@ where
 							match lits.len() {
 								0 => {
 									return Err(FlatZincError::ReformulationError(
-										ReformulationError::TrivialUnsatisfiable,
+										ReformulationError::Conflict(vec![]),
 									))
 								}
-								1 => self.prb.set_bool(lits[0])?,
+								1 => lits[0]
+									.set(&mut self.prb, vec![])
+									.map_err(ReformulationError::from)?,
 								_ => self.prb += Formula::Or(lits.into_iter().map_into().collect()),
 							}
 						}
@@ -1152,7 +1162,8 @@ where
 					if let [a, b] = c.args.as_slice() {
 						let a = self.arg_bool(a)?;
 						let b = self.arg_bool(b)?;
-						self.prb.unify_bool(a, !b)?;
+						a.unify(&mut self.prb, !b)
+							.map_err(ReformulationError::from)?;
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_not",
@@ -1191,8 +1202,9 @@ where
 						match (force_bounds, force_value) {
 							(false, false) => {} // No
 							(bounds, value) => {
-								all_diff.use_bounds_consistent_propagator(bounds);
-								all_diff.use_value_consistent_propagator(value);
+								todo!()
+								// all_diff.use_bounds_consistent_propagator(bounds);
+								// all_diff.use_value_consistent_propagator(value);
 							}
 						}
 						self.prb += all_diff;
@@ -1304,9 +1316,14 @@ where
 						) {
 							(false, false, false) => {} // Use default configuration
 							(ef_prop, nl_prop, dp_prop) => {
-								disj_strict.use_edge_finding_propagation(ef_prop);
-								disj_strict.use_not_last_propagation(nl_prop);
-								disj_strict.use_detectable_precedence_propagation(dp_prop);
+								todo!()
+								// disj_strict.
+								// use_edge_finding_propagation(ef_prop);
+								// disj_strict.
+								// use_not_last_propagation(nl_prop);
+								// disj_strict.
+								// use_detectable_precedence_propagation(dp_prop);
+								//
 							}
 						}
 						self.prb += disj_strict;
@@ -1378,7 +1395,7 @@ where
 							});
 						}
 						if table.is_empty() {
-							return Err(ReformulationError::TrivialUnsatisfiable.into());
+							return Err(ReformulationError::Conflict(vec![]).into());
 						}
 						let table: Vec<Vec<_>> = table
 							.into_iter()
@@ -1493,11 +1510,13 @@ where
 							"int_ne_imp" | "int_ne_reif" => lin_exp.ne(0),
 							_ => unreachable!(),
 						};
-						self.prb += match c.id.deref() {
-							"int_eq_imp" | "int_le_imp" | "int_ne_imp" => lin.implied_by(r),
-							"int_eq_reif" | "int_le_reif" | "int_ne_reif" => lin.reified_by(r),
-							_ => unreachable!(),
-						};
+						todo!()
+						// self.prb += match c.id.deref() {
+						// 	"int_eq_imp" | "int_le_imp" | "int_ne_imp" =>
+						// lin.implied_by(r), 	"int_eq_reif" |
+						// "int_le_reif" | "int_ne_reif" => lin.reified_by(r),
+						// 	_ => unreachable!(),
+						// };
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: match c.id.deref() {
@@ -1579,15 +1598,17 @@ where
 							"int_lin_ne_imp" | "int_lin_ne_reif" => lin_exp.ne(rhs),
 							_ => unreachable!(),
 						};
-						self.prb += match c.id.deref() {
-							"int_lin_eq_imp" | "int_lin_le_imp" | "int_lin_ne_imp" => {
-								lin.implied_by(reified)
-							}
-							"int_lin_eq_reif" | "int_lin_le_reif" | "int_lin_ne_reif" => {
-								lin.reified_by(reified)
-							}
-							_ => unreachable!(),
-						};
+						todo!()
+						// self.prb += match c.id.deref() {
+						// 	"int_lin_eq_imp" | "int_lin_le_imp" |
+						// "int_lin_ne_imp" => { 		lin.implied_by(reified)
+						// 	}
+						// 	"int_lin_eq_reif" | "int_lin_le_reif" |
+						// "int_lin_ne_reif" => {
+						// 		lin.reified_by(reified)
+						// 	}
+						// 	_ => unreachable!(),
+						// };
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: match c.id.deref() {
@@ -1656,7 +1677,8 @@ where
 						let x = self.arg_int(x)?;
 						let s = self.arg_par_set(s)?;
 
-						self.prb.set_int_in_set(x, &s)?;
+						x.set_domain(&mut self.prb, &s, vec![])
+							.map_err(ReformulationError::from)?;
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "set_in",
@@ -1812,7 +1834,7 @@ where
 						match lit {
 							Literal::Bool(b) => {
 								if domain == Some(!b) {
-									return Err(ReformulationError::TrivialUnsatisfiable.into());
+									return Err(ReformulationError::Conflict(Vec::new()).into());
 								} else {
 									domain = Some(*b);
 								}

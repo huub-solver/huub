@@ -222,62 +222,64 @@ impl IntDivBounds {
 	}
 }
 
-impl<P, E> Propagator<P, E> for IntDivBounds
-where
-	P: PropagationActions,
-	E: ExplanationActions,
-{
-	#[tracing::instrument(name = "int_div", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		let mut denominator = self.denominator;
-		let (denom_lb, denom_ub) = actions.get_int_bounds(denominator);
-		if denom_lb < 0 && denom_ub > 0 {
-			// Wait until the sign of the denominator is known
-			return Ok(());
-		}
+// impl<P, E> Propagator<P, E> for IntDivBounds
+// where
+// 	P: PropagationActions,
+// 	E: ExplanationActions,
+// {
+// 	#[tracing::instrument(name = "int_div", level = "trace", skip(self,
+// actions))] 	fn propagate(&mut self, actions: &mut P) -> Result<(),
+// P::Conflict> { 		let mut denominator = self.denominator;
+// 		let (denom_lb, denom_ub) = actions.get_int_bounds(denominator);
+// 		if denom_lb < 0 && denom_ub > 0 {
+// 			// Wait until the sign of the denominator is known
+// 			return Ok(());
+// 		}
 
-		let mut neg_denom = denominator * NonZeroIntVal::new(-1).unwrap();
-		let mut numerator = self.numerator;
-		let mut neg_num = numerator * NonZeroIntVal::new(-1).unwrap();
-		let neg_res = self.result * NonZeroIntVal::new(-1).unwrap();
+// 		let mut neg_denom = denominator * NonZeroIntVal::new(-1).unwrap();
+// 		let mut numerator = self.numerator;
+// 		let mut neg_num = numerator * NonZeroIntVal::new(-1).unwrap();
+// 		let neg_res = self.result * NonZeroIntVal::new(-1).unwrap();
 
-		// If the denominator is known negative, then we swap it and the numerator
-		// with their negations.
-		if denom_ub <= 0 {
-			mem::swap(&mut denominator, &mut neg_denom);
-			mem::swap(&mut numerator, &mut neg_num);
-		}
+// 		// If the denominator is known negative, then we swap it and the numerator
+// 		// with their negations.
+// 		if denom_ub <= 0 {
+// 			mem::swap(&mut denominator, &mut neg_denom);
+// 			mem::swap(&mut numerator, &mut neg_num);
+// 		}
 
-		// If both the upper bound of the numerator and the upper bound of the
-		// right-hand side are positive, then propagate their upper bounds directly.
-		if actions.get_int_upper_bound(numerator) >= 0
-			&& actions.get_int_upper_bound(self.result) >= 0
-		{
-			Self::propagate_upper_bounds(actions, numerator, denominator, self.result)?;
-		}
-		// If their upper bounds are negative, then propagate the upper bounds of
-		// the negated versions.
-		if actions.get_int_upper_bound(neg_num) >= 0 && actions.get_int_upper_bound(neg_res) >= 0 {
-			Self::propagate_upper_bounds(actions, neg_num, denominator, neg_res)?;
-		}
+// 		// If both the upper bound of the numerator and the upper bound of the
+// 		// right-hand side are positive, then propagate their upper bounds
+// directly. 		if actions.get_int_upper_bound(numerator) >= 0
+// 			&& actions.get_int_upper_bound(self.result) >= 0
+// 		{
+// 			Self::propagate_upper_bounds(actions, numerator, denominator,
+// self.result)?; 		}
+// 		// If their upper bounds are negative, then propagate the upper bounds of
+// 		// the negated versions.
+// 		if actions.get_int_upper_bound(neg_num) >= 0 &&
+// actions.get_int_upper_bound(neg_res) >= 0 {
+// 			Self::propagate_upper_bounds(actions, neg_num, denominator, neg_res)?;
+// 		}
 
-		// If the numerator and the results are known positive, then we can
-		// propagate the remainder of the bounds under the assumption all values
-		// must be positive.
-		if actions.get_int_lower_bound(numerator) >= 0
-			&& actions.get_int_lower_bound(self.result) >= 0
-		{
-			Self::propagate_positive_domains(actions, numerator, denominator, self.result)?;
-		}
-		// If the domain of the numerator and the result are known negative, then
-		// propagate their using their negations.
-		if actions.get_int_lower_bound(neg_num) >= 0 && actions.get_int_lower_bound(neg_res) >= 0 {
-			Self::propagate_positive_domains(actions, neg_num, denominator, neg_res)?;
-		}
+// 		// If the numerator and the results are known positive, then we can
+// 		// propagate the remainder of the bounds under the assumption all values
+// 		// must be positive.
+// 		if actions.get_int_lower_bound(numerator) >= 0
+// 			&& actions.get_int_lower_bound(self.result) >= 0
+// 		{
+// 			Self::propagate_positive_domains(actions, numerator, denominator,
+// self.result)?; 		}
+// 		// If the domain of the numerator and the result are known negative, then
+// 		// propagate their using their negations.
+// 		if actions.get_int_lower_bound(neg_num) >= 0 &&
+// actions.get_int_lower_bound(neg_res) >= 0 {
+// 			Self::propagate_positive_domains(actions, neg_num, denominator, neg_res)?;
+// 		}
 
-		Ok(())
-	}
-}
+// 		Ok(())
+// 	}
+// }
 
 #[cfg(test)]
 mod tests {

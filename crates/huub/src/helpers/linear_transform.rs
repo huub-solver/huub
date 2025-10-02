@@ -53,7 +53,7 @@ impl LinearTransform {
 		mask.iter().map(|r| self.rev_transform_range(r)).collect()
 	}
 
-	/// Perform the reverse linear tranformation for a `LitMeaning`.
+	/// Perform the reverse linear transformation for a `LitMeaning`.
 	///
 	/// Note that this performs the correct rounding to maintain the meaning of
 	/// the literal.

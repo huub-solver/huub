@@ -15,9 +15,9 @@ use crate::solver::engine::{Advisor, PropRef};
 /// Fixed, LowerBound, UpperBound, Bound, Domain.
 ///
 /// Unless the condition is LowerBound, enqueueing can start from the index
-/// of the most specific condition and enqueue all propagators untill the end
+/// of the most specific condition and enqueue all propagators until the end
 /// of the list. If the condition is LowerBound, enqueueing can start from the
-/// index of the LowerBound condition, enqueue all propagators untill the
+/// index of the LowerBound condition, enqueue all propagators until the
 /// beginning of the UpperBound condition, and then continue from the beginning
 /// of the Bound condition to the end of the list.
 pub(crate) struct ActivationList {
@@ -40,14 +40,14 @@ pub(crate) struct ActivationList {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// Possible actions to be triggered by the activation list.
-pub(crate) enum ActivationAction {
+pub(crate) enum ActivationAction<A, P> {
 	/// When activated, advise the propagator with the given [`PropRef`] of the
-	/// event that triggered the activation. If the advisal method returns
+	/// event that triggered the activation. If the adviser method returns
 	/// `true`, then enqueue the propagator if it is not already in the queue.
-	Advise(Advisor),
+	Advise(A),
 	/// When activated, simply add the propagator with the given [`PropRef`] to
 	/// the propagator queue if it is not already in the queue.
-	Enqueue(PropRef),
+	Enqueue(P),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -65,7 +65,7 @@ pub enum IntEvent {
 	LowerBound,
 	/// The upper bound of the variable has changed.
 	UpperBound,
-	/// One or more values (exluding the bounds) have been removed from the
+	/// One or more values (excluding the bounds) have been removed from the
 	/// domain of the variable.
 	Domain,
 }
@@ -93,7 +93,7 @@ pub enum IntPropCond {
 	Domain,
 }
 
-impl From<ActivationActionS> for ActivationAction {
+impl From<ActivationActionS> for ActivationAction<Advisor, PropRef> {
 	fn from(value: ActivationActionS) -> Self {
 		if (value.0 & 0b1) == 1 {
 			Self::Advise(Advisor::from_raw(value.0 >> 1))
@@ -103,8 +103,8 @@ impl From<ActivationActionS> for ActivationAction {
 	}
 }
 
-impl From<ActivationAction> for ActivationActionS {
-	fn from(value: ActivationAction) -> Self {
+impl From<ActivationAction<Advisor, PropRef>> for ActivationActionS {
+	fn from(value: ActivationAction<Advisor, PropRef>) -> Self {
 		Self(match value {
 			ActivationAction::Advise(advisor) => (advisor.raw() << 1) | 0b1,
 			ActivationAction::Enqueue(prop) => prop.raw() << 1,
@@ -114,10 +114,15 @@ impl From<ActivationAction> for ActivationActionS {
 
 impl ActivationList {
 	/// Get an iterator over the list of propagators to be enqueued.
-	pub(crate) fn activated_by(
-		&self,
+	pub(crate) fn activated_by<'a, A, P>(
+		&'a self,
 		event: IntEvent,
-	) -> impl Iterator<Item = ActivationAction> + '_ {
+	) -> impl Iterator<Item = ActivationAction<A, P>> + 'a
+	where
+		ActivationAction<A, P>: From<ActivationActionS>,
+		A: 'a,
+		P: 'a,
+	{
 		let r1 = if event == IntEvent::LowerBound {
 			self.lower_bound_idx as usize..self.upper_bound_idx as usize
 		} else {
@@ -139,7 +144,10 @@ impl ActivationList {
 	}
 	/// Add a propagator to the list of propagators to be enqueued based on the
 	/// given condition.
-	pub(crate) fn add(&mut self, action: ActivationAction, condition: IntPropCond) {
+	pub(crate) fn add<A, P>(&mut self, action: ActivationAction<A, P>, condition: IntPropCond)
+	where
+		ActivationAction<A, P>: Into<ActivationActionS>,
+	{
 		assert!(self.activations.len() < u32::MAX as usize, "Unable to add more than u32::MAX propagators to the activation list of a single variable.");
 		let mut action = action.into();
 		let mut cond_swap = |idx: u32| {

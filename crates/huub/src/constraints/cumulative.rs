@@ -510,10 +510,10 @@ impl CumulativeTimeTablePropagator {
 	/// task's usage upper bound to `capacity - max_usage + usage_lb`, where
 	/// `max_usage` is the maximum compulsory usage in that interval and
 	/// `usage_lb` is the lower bound of the task's usage.
-	fn limit_usage(
+	fn limit_usage<P: PropagationActions>(
 		&self,
 		task: usize,
-		actions: &mut impl PropagationActions,
+		actions: &mut P,
 	) -> Result<(), Conflict> {
 		let lst = self.latest_start_time(actions, task);
 		let ect = self.earliest_completion_time(actions, task);
@@ -609,10 +609,10 @@ impl CumulativeTimeTablePropagator {
 	/// step-by-step update with the step size being the task's duration lower
 	/// bound. This facilitates the generation of point-wise explanations as
 	/// described in the original paper by Schutt et al. (2011).
-	fn sweep_backward(
+	fn sweep_backward<P: PropagationActions>(
 		&self,
 		task: usize,
-		actions: &mut impl PropagationActions,
+		actions: &mut P,
 	) -> Result<(), Conflict> {
 		let est = self.earliest_start_time(actions, task);
 		let lst = self.latest_start_time(actions, task);
@@ -708,10 +708,10 @@ impl CumulativeTimeTablePropagator {
 	/// step-by-step update with the step size being the task's duration lower
 	/// bound. This facilitates the generation of point-wise explanations as
 	/// described in the original paper by Schutt et al. (2011).
-	fn sweep_forward(
+	fn sweep_forward<P: PropagationActions>(
 		&self,
 		task: usize,
-		actions: &mut impl PropagationActions,
+		actions: &mut P,
 	) -> Result<(), Conflict> {
 		let est = self.earliest_start_time(actions, task);
 		let lst = self.latest_start_time(actions, task);
@@ -788,45 +788,45 @@ impl CumulativeTimeTablePropagator {
 	}
 }
 
-impl<P, E> Propagator<P, E> for CumulativeTimeTablePropagator
-where
-	P: PropagationActions,
-	E: ExplanationActions,
-{
-	#[tracing::instrument(name = "cumulative_timetable", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
-		// Build the time-table profile and check resource overload
-		match self.build_profile_and_check_overload(actions) {
-			// If the profile is empty, no tasks are active, so we can skip further
-			// propagation
-			Ok(true) => return Ok(()),
-			// If there is a conflict, return it
-			Err(conflict) => return Err(conflict),
-			_ => {}
-		}
+// impl<P, E> Propagator<P, E> for CumulativeTimeTablePropagator
+// where
+// 	P: PropagationActions,
+// 	E: ExplanationActions,
+// {
+// 	#[tracing::instrument(name = "cumulative_timetable", level = "trace",
+// skip(self, actions))] 	fn propagate(&mut self, actions: &mut P) -> Result<(),
+// P::Conflict> { 		// Build the time-table profile and check resource overload
+// 		match self.build_profile_and_check_overload(actions) {
+// 			// If the profile is empty, no tasks are active, so we can skip further
+// 			// propagation
+// 			Ok(true) => return Ok(()),
+// 			// If there is a conflict, return it
+// 			Err(conflict) => return Err(conflict),
+// 			_ => {}
+// 		}
 
-		// Sweeping time: update the earliest start times and the latest completion
-		// times
-		for i in 0..self.start_times.len() {
-			let (lb, ub) = actions.get_int_bounds(self.start_times[i]);
-			if lb < ub {
-				self.sweep_forward(i, actions)?;
-				self.sweep_backward(i, actions)?;
-			}
-		}
+// 		// Sweeping time: update the earliest start times and the latest completion
+// 		// times
+// 		for i in 0..self.start_times.len() {
+// 			let (lb, ub) = actions.get_int_bounds(self.start_times[i]);
+// 			if lb < ub {
+// 				self.sweep_forward(i, actions)?;
+// 				self.sweep_backward(i, actions)?;
+// 			}
+// 		}
 
-		// Limit usage: update the upper bounds of the resource usage
-		for i in 0..self.start_times.len() {
-			let (req_lb, req_ub) = actions.get_int_bounds(self.usages[i]);
-			if req_lb < req_ub
-				&& self.latest_start_time(actions, i) < self.earliest_completion_time(actions, i)
-			{
-				self.limit_usage(i, actions)?;
-			}
-		}
-		Ok(())
-	}
-}
+// 		// Limit usage: update the upper bounds of the resource usage
+// 		for i in 0..self.start_times.len() {
+// 			let (req_lb, req_ub) = actions.get_int_bounds(self.usages[i]);
+// 			if req_lb < req_ub
+// 				&& self.latest_start_time(actions, i) <
+// self.earliest_completion_time(actions, i) 			{
+// 				self.limit_usage(i, actions)?;
+// 			}
+// 		}
+// 		Ok(())
+// 	}
+// }
 
 #[cfg(test)]
 mod tests {

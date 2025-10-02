@@ -38,7 +38,7 @@ use std::{
 
 use flatzinc_serde::{FlatZinc, Literal, Method};
 use huub::{
-	actions::DecisionActions,
+	actions::{DecisionActions, IntDecisionActions},
 	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::{InitConfig, ReformulationError},
 	solver::{Goal, IntLitMeaning, SolveResult, Solver, Valuation, Value, View},
@@ -228,7 +228,7 @@ where
 		let res = Solver::from_fzn::<Ustr, UstrMap<View>>(&fzn, &self.init_config());
 		// Resolve any errors that may have occurred during the conversion
 		let (mut slv, var_map, fzn_stats): (Solver, UstrMap<View>, FlatZincStatistics) = match res {
-			Err(FlatZincError::ReformulationError(ReformulationError::TrivialUnsatisfiable)) => {
+			Err(FlatZincError::ReformulationError(ReformulationError::Conflict(_))) => {
 				outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
 				return Ok(());
 			}
@@ -463,7 +463,7 @@ where
 					let Some(obj_val) = obj_val else {
 						unreachable!()
 					};
-					let obj_lit = slv.get_int_lit(obj, IntLitMeaning::Eq(obj_val));
+					let obj_lit = obj.get_lit(&mut slv, IntLitMeaning::Eq(obj_val));
 					slv.add_clause([obj_lit]).unwrap();
 					// Ensure all following solutions are different from the first optimal
 					// solution

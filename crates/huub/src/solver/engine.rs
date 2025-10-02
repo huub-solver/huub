@@ -30,16 +30,20 @@ use pindakaas::{
 };
 use rustc_hash::FxHashMap;
 pub(crate) use trace_new_lit;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use crate::{
-	actions::{DecisionActions, ExplanationActions, InspectionActions, TrailingActions},
+	actions::{
+		BoolInspectionActions, IntExplanationActions, IntInspectionActions, ReasoningEngine,
+		TrailingActions,
+	},
 	branchers::{BoxedBrancher, Decision},
 	constraints::{BoxedPropagator, Conflict, LazyReason, Reason},
 	solver::{
 		activation_list::{ActivationAction, ActivationActionS, ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
 		int_var::{IntVar, IntVarRef, OrderStorage},
+		posting_context::PostingContext,
 		queue::PropagatorQueue,
 		solving_context::SolvingContext,
 		trail::{Trail, TrailedInt},
@@ -155,7 +159,7 @@ pub struct State {
 	/// Integer variable enqueueing information
 	pub(crate) int_activation: IndexVec<IntVarRef, ActivationList>,
 	/// Queue of propagators awaiting action
-	pub(crate) propagator_queue: PropagatorQueue,
+	pub(crate) propagator_queue: PropagatorQueue<PropRef>,
 	/// Last literal propagated by the Engine.
 	last_propagated: Option<(RawLit, Option<(IntVarRef, IntEvent)>)>,
 
@@ -180,7 +184,7 @@ impl Engine {
 			}
 			// Reason is in the form (a /\ b /\ ...), which then forms the
 			// implication (a /\ b /\ ...) -> lit
-			let clause: Clause = reason.explain(&mut self.propagators, &mut self.state, Some(lit));
+			let clause: Clause = reason.explain(&mut self.propagators, &mut self.state, lit.into());
 			// This is converted into a clause (¬a \/ ¬b \/ ... \/ lit)
 			let mut seen = FxHashSet::default();
 			for &l in &clause {
@@ -349,6 +353,8 @@ impl PropagatorExtension for Engine {
 		slv: &mut dyn SolvingActions,
 		_sol: &dyn pindakaas::Valuation,
 	) -> bool {
+		use crate::actions::IntDecisionActions;
+
 		// Solver should not be in a failed state (no propagator conflict should
 		// exist), and any conflict should have been communicated to the SAT oracle.
 		debug_assert!(!self.state.failed);
@@ -376,7 +382,7 @@ impl PropagatorExtension for Engine {
 				));
 
 				// Ensure the lazy literal for the upper bound exists
-				let ub_lit = ctx.get_intref_lit(r, IntLitMeaning::Less(lb + 1));
+				let ub_lit = r.get_lit(&mut ctx, IntLitMeaning::Less(lb + 1));
 				if let BoolViewInner::Lit(ub_lit) = ub_lit.0 {
 					let prev = ctx.state.trail.assign_lit(ub_lit);
 					debug_assert_eq!(prev, None);
@@ -418,10 +424,20 @@ impl PropagatorExtension for Engine {
 		let conflict = self.state.conflict.take().map(|c| {
 			// Convert Lazy reasons into an eager ones
 			if let Reason::Lazy(LazyReason(prop, data)) = c.reason {
-				let reason = self.propagators[prop].explain(&mut self.state, c.subject, data);
+				let reason = self.propagators[prop].explain(
+					&mut self.state,
+					c.subject
+						.map(|lit| BoolView(BoolViewInner::Lit(lit)))
+						.unwrap_or(true.into()),
+					data,
+				);
 				Conflict {
 					subject: c.subject,
-					reason: Reason::Eager(reason.into()),
+					reason: match Reason::from_iter(reason) {
+						Err(false) => panic!("invalid lazy reason"), // TODO: Improve message
+						Err(true) => Reason::Eager(Vec::new().into_boxed_slice()),
+						Ok(r) => r,
+					},
 				}
 			} else {
 				c
@@ -675,15 +691,11 @@ impl PropagatorExtension for Engine {
 				// literals had their bound literals set to match.
 				for (iv, i) in mem::take(&mut self.state.check_int_fixed) {
 					let iv = IntView(IntViewInner::VarRef(iv));
-					debug_assert_eq!(self.state.get_int_val(iv), Some(i));
-					let lb_lit = self
-						.state
-						.try_int_lit(iv, IntLitMeaning::GreaterEq(i))
+					debug_assert_eq!(iv.get_val(&self.state), Some(i));
+					let lb_lit = iv
+						.try_lit(&self.state, IntLitMeaning::GreaterEq(i))
 						.unwrap();
-					let ub_lit = self
-						.state
-						.try_int_lit(iv, IntLitMeaning::Less(i + 1))
-						.unwrap();
+					let ub_lit = iv.try_lit(&self.state, IntLitMeaning::Less(i + 1)).unwrap();
 					debug_assert_eq!(self.state.get_bool_val(lb_lit), Some(true));
 					debug_assert_eq!(self.state.get_bool_val(ub_lit), Some(true));
 				}
@@ -867,15 +879,119 @@ impl State {
 	}
 }
 
-impl ExplanationActions for State {
-	fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning> {
-		match var.0 {
+impl TrailingActions for State {
+	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
+		self.trail.get_bool_val(bv)
+	}
+
+	fn get_trailed_int(&self, x: TrailedInt) -> IntVal {
+		self.trail.get_trailed_int(x)
+	}
+
+	fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal {
+		self.trail.set_trailed_int(x, v)
+	}
+}
+
+impl IntExplanationActions<State> for IntVarRef {
+	type Atom = BoolView;
+
+	fn get_lit_meaning(&self, ctx: &State, lit: RawLit) -> Option<IntLitMeaning> {
+		let (iv, meaning) = ctx.get_int_lit_meaning(lit)?;
+		if *self != iv {
+			return None;
+		}
+		Some(meaning)
+	}
+
+	fn get_lit_relaxed(
+		&self,
+		ctx: &State,
+		mut meaning: IntLitMeaning,
+	) -> (BoolView, IntLitMeaning) {
+		debug_assert!(
+			!matches!(meaning, IntLitMeaning::Eq(_)),
+			"relaxed integer literals are not yet supported for IntLitMeaning::Eq(_)"
+		);
+
+		let var_def = &ctx.int_vars[*self];
+		// If we are looking for a not-equal literal, try and find it. Return it if we
+		// find it, otherwise defer to an order literal.
+		if let IntLitMeaning::NotEq(v) = meaning {
+			if let Some((bv, _)) = var_def.get_bool_lit(meaning) {
+				return (bv, IntLitMeaning::NotEq(v));
+			}
+
+			let lb = var_def.get_lower_bound(&ctx.trail);
+			if v < lb {
+				meaning = IntLitMeaning::GreaterEq(v + 1);
+			} else {
+				debug_assert!(v > var_def.get_upper_bound(&ctx.trail));
+				meaning = IntLitMeaning::Less(v);
+			}
+		}
+		// Find the strongest order literal that fits the given meaning.
+		match meaning {
+			IntLitMeaning::GreaterEq(v) => {
+				let (bv, v) = var_def.get_greater_eq_lit_or_weaker(&ctx.trail, v);
+				(bv, IntLitMeaning::GreaterEq(v))
+			}
+			IntLitMeaning::Less(v) => {
+				let (bv, v) = var_def.get_less_lit_or_weaker(&ctx.trail, v);
+				(bv, IntLitMeaning::Less(v))
+			}
+			_ => unreachable!(),
+		}
+	}
+
+	fn get_lower_bound_lit(&self, ctx: &State) -> BoolView {
+		ctx.int_vars[*self].get_lower_bound_lit(&ctx.trail)
+	}
+
+	fn get_upper_bound_lit(&self, ctx: &State) -> BoolView {
+		ctx.int_vars[*self].get_upper_bound_lit(&ctx.trail)
+	}
+
+	fn try_lit(&self, ctx: &State, meaning: IntLitMeaning) -> Option<BoolView> {
+		ctx.int_vars[*self].get_bool_lit(meaning).map(|t| t.0)
+	}
+}
+
+impl IntInspectionActions<State> for IntVarRef {
+	fn get_lower_bound(&self, ctx: &State) -> IntVal {
+		ctx.int_vars[*self].get_lower_bound(&ctx.trail)
+	}
+
+	fn get_upper_bound(&self, ctx: &State) -> IntVal {
+		ctx.int_vars[*self].get_upper_bound(&ctx.trail)
+	}
+
+	fn check_int_in_domain(&self, ctx: &State, val: IntVal) -> bool {
+		let (lb, ub) = self.get_bounds(ctx);
+		if lb <= val && val <= ub {
+			let eq_lit = self.try_lit(ctx, IntLitMeaning::Eq(val));
+			if let Some(eq_lit) = eq_lit {
+				eq_lit.get_val(ctx).unwrap_or(true)
+			} else {
+				true
+			}
+		} else {
+			false
+		}
+	}
+}
+
+impl IntExplanationActions<State> for IntView {
+	type Atom = BoolView;
+
+	fn get_lit_meaning(&self, ctx: &State, lit: RawLit) -> Option<IntLitMeaning> {
+		match self.0 {
 			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				let (iv2, mut meaning) = self.get_int_lit_meaning(lit)?;
+				let (iv2, mut meaning) = ctx.get_int_lit_meaning(lit)?;
 				if iv != iv2 {
 					return None;
 				}
-				if let IntViewInner::Linear { transformer, .. } = var.0 {
+				if let IntViewInner::Linear { transformer, .. } = self.0 {
 					meaning = transformer.transform_lit(meaning);
 				}
 				Some(meaning)
@@ -896,9 +1012,9 @@ impl ExplanationActions for State {
 		}
 	}
 
-	fn get_int_lit_relaxed(
-		&mut self,
-		var: IntView,
+	fn get_lit_relaxed(
+		&self,
+		ctx: &State,
 		mut meaning: IntLitMeaning,
 	) -> (BoolView, IntLitMeaning) {
 		debug_assert!(
@@ -907,7 +1023,7 @@ impl ExplanationActions for State {
 		);
 		// Transform literal meaning if view is a linear transformation
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
-			var.0
+			self.0
 		{
 			match transformer.rev_transform_lit(meaning) {
 				Ok(m) => meaning = m,
@@ -918,36 +1034,9 @@ impl ExplanationActions for State {
 		// Get the boolean view that is currently `true` and implies the requested
 		// `meaning`, as well as the actual (possibly relaxed) meaning that is
 		// represented.
-		let (bv, meaning) = match var.0 {
+		let (bv, meaning) = match self.0 {
 			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				let var_def = &mut self.int_vars[iv];
-				// If we are looking for a not-equal literal, try and find it. Return it if we
-				// find it, otherwise defer to an order literal.
-				if let IntLitMeaning::NotEq(v) = meaning {
-					if let Some((bv, _)) = var_def.get_bool_lit(meaning) {
-						return (bv, IntLitMeaning::NotEq(v));
-					}
-
-					let lb = var_def.get_lower_bound(&self.trail);
-					if v < lb {
-						meaning = IntLitMeaning::GreaterEq(v + 1);
-					} else {
-						debug_assert!(v > var_def.get_upper_bound(&self.trail));
-						meaning = IntLitMeaning::Less(v);
-					}
-				}
-				// Find the strongest order literal that fits the given meaning.
-				match meaning {
-					IntLitMeaning::GreaterEq(v) => {
-						let (bv, v) = var_def.get_greater_eq_lit_or_weaker(&self.trail, v);
-						(bv, IntLitMeaning::GreaterEq(v))
-					}
-					IntLitMeaning::Less(v) => {
-						let (bv, v) = var_def.get_less_lit_or_weaker(&self.trail, v);
-						(bv, IntLitMeaning::Less(v))
-					}
-					_ => unreachable!(),
-				}
+				iv.get_lit_relaxed(ctx, meaning)
 			}
 			IntViewInner::Const(c) => (
 				BoolView(BoolViewInner::Const(match meaning {
@@ -981,7 +1070,7 @@ impl ExplanationActions for State {
 		// Transform the meaning back to fit the original view if it was linearly
 		// transformed
 		let meaning = if let IntViewInner::Linear { transformer, .. }
-		| IntViewInner::Bool { transformer, .. } = var.0
+		| IntViewInner::Bool { transformer, .. } = self.0
 		{
 			transformer.transform_lit(meaning)
 		} else {
@@ -990,57 +1079,51 @@ impl ExplanationActions for State {
 		(bv, meaning)
 	}
 
-	fn get_int_lower_bound_lit(&mut self, var: IntView) -> BoolView {
-		match var.0 {
-			IntViewInner::VarRef(var) => self.int_vars[var].get_lower_bound_lit(self),
+	fn get_lower_bound_lit(&self, ctx: &State) -> BoolView {
+		match self.0 {
+			IntViewInner::VarRef(var) => var.get_lower_bound_lit(ctx),
 			IntViewInner::Linear { transformer, var } => {
 				if transformer.positive_scale() {
-					self.int_vars[var].get_lower_bound_lit(self)
+					var.get_lower_bound_lit(ctx)
 				} else {
-					self.int_vars[var].get_upper_bound_lit(self)
+					var.get_upper_bound_lit(ctx)
 				}
 			}
 			IntViewInner::Const(_) => BoolView(BoolViewInner::Const(true)),
-			IntViewInner::Bool { lit, transformer } => BoolView(
-				match (self.trail.get_sat_value(lit), transformer.positive_scale()) {
+			IntViewInner::Bool { lit, transformer } => {
+				BoolView(match (lit.get_val(ctx), transformer.positive_scale()) {
 					(Some(true), true) => BoolViewInner::Lit(lit),
 					(Some(false), false) => BoolViewInner::Lit(!lit),
 					_ => BoolViewInner::Const(true),
-				},
-			),
+				})
+			}
 		}
 	}
 
-	fn get_int_upper_bound_lit(&mut self, var: IntView) -> BoolView {
-		match var.0 {
-			IntViewInner::VarRef(var) => self.int_vars[var].get_upper_bound_lit(self),
+	fn get_upper_bound_lit(&self, ctx: &State) -> BoolView {
+		match self.0 {
+			IntViewInner::VarRef(var) => var.get_upper_bound_lit(ctx),
 			IntViewInner::Linear { transformer, var } => {
 				if transformer.positive_scale() {
-					self.int_vars[var].get_upper_bound_lit(self)
+					var.get_upper_bound_lit(ctx)
 				} else {
-					self.int_vars[var].get_lower_bound_lit(self)
+					var.get_lower_bound_lit(ctx)
 				}
 			}
 			IntViewInner::Const(_) => BoolView(BoolViewInner::Const(true)),
-			IntViewInner::Bool { lit, transformer } => BoolView(
-				match (self.trail.get_sat_value(lit), transformer.positive_scale()) {
+			IntViewInner::Bool { lit, transformer } => {
+				BoolView(match (lit.get_val(ctx), transformer.positive_scale()) {
 					(Some(false), true) => BoolViewInner::Lit(!lit),
 					(Some(true), false) => BoolViewInner::Lit(lit),
 					_ => BoolViewInner::Const(true),
-				},
-			),
+				})
+			}
 		}
 	}
 
-	fn get_int_val_lit(&mut self, var: IntView) -> Option<BoolView> {
-		self.get_int_val(var).map(|v| {
-			self.try_int_lit(var, IntLitMeaning::Eq(v))
-				.expect("value literals cannot be created during explanation")
-		})
-	}
-	fn try_int_lit(&self, var: IntView, mut meaning: IntLitMeaning) -> Option<BoolView> {
+	fn try_lit(&self, ctx: &State, mut meaning: IntLitMeaning) -> Option<BoolView> {
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
-			var.0
+			self.0
 		{
 			match transformer.rev_transform_lit(meaning) {
 				Ok(m) => meaning = m,
@@ -1048,9 +1131,9 @@ impl ExplanationActions for State {
 			}
 		}
 
-		match var.0 {
+		match self.0 {
 			IntViewInner::VarRef(var) | IntViewInner::Linear { var, .. } => {
-				self.int_vars[var].get_bool_lit(meaning).map(|t| t.0)
+				var.try_lit(ctx, meaning)
 			}
 			IntViewInner::Const(c) => Some(BoolView(BoolViewInner::Const(match meaning {
 				IntLitMeaning::Eq(i) => c == i,
@@ -1080,13 +1163,60 @@ impl ExplanationActions for State {
 	}
 }
 
-impl InspectionActions for State {
-	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool {
-		let (lb, ub) = self.get_int_bounds(var);
+impl BoolInspectionActions<State> for BoolView {
+	fn get_val(&self, ctx: &State) -> Option<bool> {
+		match self.0 {
+			BoolViewInner::Lit(lit) => lit.get_val(ctx),
+			BoolViewInner::Const(c) => Some(c),
+		}
+	}
+}
+
+impl BoolInspectionActions<State> for RawLit {
+	fn get_val(&self, ctx: &State) -> Option<bool> {
+		ctx.trail.get_sat_value(*self)
+	}
+}
+
+impl IntInspectionActions<State> for IntView {
+	fn get_lower_bound(&self, ctx: &State) -> IntVal {
+		match self.0 {
+			IntViewInner::VarRef(var) => var.get_lower_bound(ctx),
+			IntViewInner::Const(c) => c,
+			IntViewInner::Linear { transformer, var } => {
+				transformer.transform(if transformer.positive_scale() {
+					var.get_lower_bound(ctx)
+				} else {
+					var.get_upper_bound(ctx)
+				})
+			}
+			IntViewInner::Bool { transformer, lit } => transformer
+				.transform(lit.get_val(ctx).unwrap_or(!transformer.positive_scale()) as IntVal),
+		}
+	}
+
+	fn get_upper_bound(&self, ctx: &State) -> IntVal {
+		match self.0 {
+			IntViewInner::VarRef(var) => var.get_upper_bound(ctx),
+			IntViewInner::Const(c) => c,
+			IntViewInner::Linear { transformer, var } => {
+				transformer.transform(if transformer.positive_scale() {
+					var.get_upper_bound(ctx)
+				} else {
+					var.get_lower_bound(ctx)
+				})
+			}
+			IntViewInner::Bool { transformer, lit } => transformer
+				.transform(lit.get_val(ctx).unwrap_or(transformer.positive_scale()) as IntVal),
+		}
+	}
+
+	fn check_int_in_domain(&self, ctx: &State, val: IntVal) -> bool {
+		let (lb, ub) = self.get_bounds(ctx);
 		if lb <= val && val <= ub {
-			let eq_lit = self.try_int_lit(var, IntLitMeaning::Eq(val));
+			let eq_lit = self.try_lit(ctx, IntLitMeaning::Eq(val));
 			if let Some(eq_lit) = eq_lit {
-				self.get_bool_val(eq_lit).unwrap_or(true)
+				eq_lit.get_val(ctx).unwrap_or(true)
 			} else {
 				true
 			}
@@ -1094,96 +1224,16 @@ impl InspectionActions for State {
 			false
 		}
 	}
-	fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal) {
-		match var.0 {
-			IntViewInner::VarRef(iv) => self.int_vars[iv].get_bounds(self),
-			IntViewInner::Const(i) => (i, i),
-			IntViewInner::Linear { transformer, var } => {
-				let (lb, ub) = self.int_vars[var].get_bounds(self);
-				let lb = transformer.transform(lb);
-				let ub = transformer.transform(ub);
-				if lb <= ub {
-					(lb, ub)
-				} else {
-					(ub, lb)
-				}
-			}
-			IntViewInner::Bool { transformer, lit } => {
-				let val = self.trail.get_sat_value(lit).map(Into::into);
-				let lb = transformer.transform(val.unwrap_or(0));
-				let ub = transformer.transform(val.unwrap_or(1));
-				if lb <= ub {
-					(lb, ub)
-				} else {
-					(ub, lb)
-				}
-			}
-		}
-	}
-	fn get_int_lower_bound(&self, var: IntView) -> IntVal {
-		match var.0 {
-			IntViewInner::VarRef(iv) => self.int_vars[iv].get_lower_bound(self),
-			IntViewInner::Const(i) => i,
-			IntViewInner::Linear { transformer, var } => {
-				if transformer.positive_scale() {
-					let lb = self.int_vars[var].get_lower_bound(self);
-					transformer.transform(lb)
-				} else {
-					let ub = self.int_vars[var].get_upper_bound(self);
-					transformer.transform(ub)
-				}
-			}
-			IntViewInner::Bool { transformer, lit } => {
-				let val = self.trail.get_sat_value(lit).map(IntVal::from);
-				let lb = val.unwrap_or(0);
-				let ub = val.unwrap_or(1);
-				if transformer.positive_scale() {
-					transformer.transform(lb)
-				} else {
-					transformer.transform(ub)
-				}
-			}
-		}
-	}
-	fn get_int_upper_bound(&self, var: IntView) -> IntVal {
-		match var.0 {
-			IntViewInner::VarRef(iv) => self.int_vars[iv].get_upper_bound(self),
-			IntViewInner::Const(i) => i,
-			IntViewInner::Linear { transformer, var } => {
-				if transformer.positive_scale() {
-					let ub = self.int_vars[var].get_upper_bound(self);
-					transformer.transform(ub)
-				} else {
-					let lb = self.int_vars[var].get_lower_bound(self);
-					transformer.transform(lb)
-				}
-			}
-			IntViewInner::Bool { transformer, lit } => {
-				let val = self.trail.get_sat_value(lit).map(Into::into);
-				let lb = val.unwrap_or(0);
-				let ub = val.unwrap_or(1);
-				if transformer.positive_scale() {
-					transformer.transform(ub)
-				} else {
-					transformer.transform(lb)
-				}
-			}
-		}
-	}
 }
 
-impl TrailingActions for State {
-	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
-		self.trail.get_bool_val(bv)
-	}
+impl ReasoningEngine for Engine {
+	type PostingCtx<'a> = PostingContext<'a>;
+	type NotificationCtx<'a> = State;
+	type PropagationCtx<'a> = SolvingContext<'a>;
+	type ExplanationCtx<'a> = State;
 
-	fn get_trailed_int(&self, x: TrailedInt) -> IntVal {
-		self.trail.get_trailed_int(x)
-	}
-
-	fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal {
-		self.trail.set_trailed_int(x, v)
-	}
+	type Conflict = Conflict;
+	type Atom = BoolView;
 }
 
 index_vec::define_index_type! {

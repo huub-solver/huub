@@ -2,8 +2,10 @@
 //! reformulation process of creating a [`Solver`] object from a [`Model`].
 
 use std::{
+	cell::RefMut,
 	error::Error,
 	fmt::{self, Display},
+	ops::AddAssign,
 };
 
 use index_vec::{define_index_type, IndexVec};
@@ -17,36 +19,41 @@ use rustc_hash::FxHashSet;
 
 use crate::{
 	actions::{
-		DecisionActions, InspectionActions, PropagatorInitActions, ReformulationActions,
+		BoolInspectionActions, BrancherInitActions, DecisionActions, InitializationActions,
+		IntDecisionActions, IntInspectionActions, ReasoningEngine, ReformulationActions,
 		SimplificationActions, TrailingActions,
 	},
 	constraints::{
-		bool_array_element::BoolDecisionArrayElement,
-		cumulative::Cumulative,
-		disjunctive_strict::DisjunctiveStrict,
-		int_abs::IntAbs,
-		int_all_different::IntAllDifferent,
-		int_array_element::{IntDecisionArrayElement, IntValArrayElement},
-		int_array_minimum::IntArrayMinimum,
-		int_div::IntDiv,
-		int_in_set::IntInSetReif,
-		int_linear::IntLinear,
-		int_pow::IntPow,
-		int_table::IntTable,
-		int_times::IntTimes,
-		int_value_precede::{IntSeqPrecedeChain, IntValuePrecedeChain},
-		BoxedConstraint, BoxedPropagator, Constraint, SimplificationStatus,
+		// bool_array_element::BoolDecisionArrayElement,
+		// cumulative::Cumulative,
+		// disjunctive_strict::DisjunctiveStrict,
+		// int_abs::IntAbs,
+		// int_all_different::IntAllDifferent,
+		// int_array_element::{IntDecisionArrayElement, IntValArrayElement},
+		// int_array_minimum::IntArrayMinimum,
+		// int_div::IntDiv,
+		// int_in_set::IntInSetReif,
+		// int_linear::IntLinear,
+		// int_pow::IntPow,
+		// int_table::IntTable,
+		// int_times::IntTimes,
+		// int_value_precede::{IntSeqPrecedeChain, IntValuePrecedeChain},
+		BoxedConstraint,
+		BoxedPropagator,
+		Constraint,
+		Propagator,
+		SimplificationStatus,
 	},
 	helpers::linear_transform::LinearTransform,
 	solver::{
 		activation_list::IntPropCond,
-		engine::PropRef,
+		engine::{Engine, PropRef},
 		int_var::{EncodingType, IntVar, IntVarRef},
 		queue::PriorityLevel,
 		trail::TrailedInt,
 		BoolView, BoolViewInner, IntView, IntViewInner, View,
 	},
-	BoolDecision, BoolFormula, Decision, IntDecision, IntEq, IntLitMeaning, IntSetVal, IntVal,
+	BoolDecision, BoolFormula, ConRef, Decision, IntDecision, IntLitMeaning, IntSetVal, IntVal,
 	Model, Solver,
 };
 
@@ -60,7 +67,7 @@ pub(crate) struct BoolDecisionDef {
 	///
 	/// This list is used to enqueue the constraints for propagation when the
 	/// domain of the variable changes.
-	pub(crate) constraints: Vec<usize>,
+	pub(crate) constraints: Vec<ConRef>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -83,37 +90,6 @@ pub(crate) enum BoolDecisionInner {
 	IntLess(IntDecisionIndex, IntVal),
 	/// Whether an integer is not equal to a constant.
 	IntNotEq(IntDecisionIndex, IntVal),
-}
-
-#[allow(
-	clippy::missing_docs_in_private_items,
-	reason = "constraints are generally documented on their own types"
-)]
-#[derive(Clone, Debug)]
-/// An disambiguation of the different constraints objects that can be used in a
-/// [`Model`] object.
-///
-/// This enum type is used to store and analyze the constraints in a [`Model`].
-pub(crate) enum ConstraintStore {
-	BoolDecisionArrayElement(BoolDecisionArrayElement),
-	BoolFormula(BoolFormula),
-	Cumulative(Cumulative),
-	DisjunctiveStrict(DisjunctiveStrict),
-	IntAbs(IntAbs),
-	IntAllDifferent(IntAllDifferent),
-	IntArrayMinimum(IntArrayMinimum),
-	IntDecisionArrayElement(IntDecisionArrayElement),
-	IntDiv(IntDiv),
-	IntEq(IntEq),
-	IntInSetReif(IntInSetReif),
-	IntLinear(IntLinear),
-	IntPow(IntPow),
-	IntSeqPrecedeChain(IntSeqPrecedeChain),
-	IntTable(IntTable),
-	IntTimes(IntTimes),
-	IntValArrayElement(IntValArrayElement),
-	IntValuePrecedeChain(IntValuePrecedeChain),
-	Other(BoxedConstraint),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -162,7 +138,7 @@ pub(crate) struct IntDecisionDef {
 	///
 	/// This list is used to enqueue the constraints for propagation when the
 	/// domain of the variable changes.
-	pub(crate) constraints: Vec<usize>,
+	pub(crate) constraints: Vec<ConRef>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -181,9 +157,9 @@ pub(crate) enum IntDecisionInner {
 
 /// Context object used during the reformulation process that creates a
 /// [`Solver`] object from a [`crate::Model`].
-pub(crate) struct ReformulationContext<'a> {
+pub(crate) struct ReformulationContext<'a, Oracle> {
 	/// The resulting [`Solver`] object.
-	pub(crate) slv: &'a mut dyn PropagatorInitActions,
+	pub(crate) slv: &'a mut Solver<Oracle>,
 	/// The mapping from variable in the [`crate::Model`] to the corresponding
 	/// view in the [`Solver`].
 	pub(crate) map: &'a ReformulationMap,
@@ -195,7 +171,7 @@ pub(crate) struct ReformulationContext<'a> {
 pub enum ReformulationError {
 	/// Error used when the problem is found to be unsatisfiable without
 	/// requiring any search.
-	TrivialUnsatisfiable,
+	Conflict(<Model as ReasoningEngine>::Conflict),
 }
 
 /// A reformulation helper that maps decisions in a [`Model`] objects to the
@@ -210,7 +186,7 @@ pub struct ReformulationMap {
 
 /// Helper type to create a [`ReformulationMap`] object.
 ///
-/// This type is primiraly meant to resolve the order of creation issue when
+/// This type is primarily meant to resolve the order of creation issue when
 /// dealing with aliased variables.
 pub(crate) struct ReformulationMapBuilder {
 	/// Map of Boolean decisions to Boolean views.
@@ -228,11 +204,7 @@ pub(crate) struct ReformulationMapBuilder {
 	pub(crate) int_map: IndexVec<IntDecisionIndex, Option<IntView>>,
 }
 
-impl<S: SimplificationActions> Constraint<S> for BoolFormula {
-	fn simplify(&mut self, _: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		Ok(SimplificationStatus::NoFixpoint)
-	}
-
+impl<E: ReasoningEngine> Constraint<E> for BoolFormula {
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let mut resolver = |bv: BoolDecision| {
 			let inner = slv.get_solver_bool(bv);
@@ -243,84 +215,19 @@ impl<S: SimplificationActions> Constraint<S> for BoolFormula {
 		};
 		let result: Result<Formula<RawLit>, _> = self.clone().simplify_with(&mut resolver);
 		match result {
-			Err(false) => Err(ReformulationError::TrivialUnsatisfiable),
+			Err(false) => Err(todo!()),
 			Err(true) => Ok(()),
 			Ok(f) => {
 				let mut wrapper = slv.with_conditions(vec![]);
-				Ok(TseitinEncoder.encode(&mut wrapper, &f)?)
+				Ok(TseitinEncoder
+					.encode(&mut wrapper, &f)
+					.map_err(|_| -> ReformulationError { todo!() })?)
 			}
 		}
 	}
 }
 
-impl ConstraintStore {
-	/// Map the constraint into propagators and clauses to be added to the given
-	/// solver, using the variable mapping provided.
-	pub(crate) fn to_solver<Oracle: ExternalPropagation>(
-		&self,
-		slv: &mut Solver<Oracle>,
-		map: &ReformulationMap,
-	) -> Result<(), ReformulationError> {
-		let mut actions = ReformulationContext { slv, map };
-		match self {
-			ConstraintStore::BoolDecisionArrayElement(con) => {
-				<BoolDecisionArrayElement as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::BoolFormula(exp) => {
-				<Formula<BoolDecision> as Constraint<Model>>::to_solver(exp, &mut actions)
-			}
-			ConstraintStore::Cumulative(con) => {
-				<Cumulative as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::DisjunctiveStrict(con) => {
-				<DisjunctiveStrict as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::IntAbs(con) => {
-				<IntAbs as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::IntAllDifferent(con) => {
-				<IntAllDifferent as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::IntArrayMinimum(con) => {
-				<IntArrayMinimum as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::IntDecisionArrayElement(con) => {
-				<IntDecisionArrayElement as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::IntDiv(con) => {
-				<IntDiv as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::IntEq(con) => {
-				<IntEq as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::IntInSetReif(con) => {
-				<IntInSetReif as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::IntLinear(con) => {
-				<IntLinear as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::IntPow(con) => {
-				<IntPow as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::IntSeqPrecedeChain(con) => {
-				<IntSeqPrecedeChain as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::IntTable(con) => {
-				<IntTable as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::IntTimes(con) => {
-				<IntTimes as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::IntValArrayElement(con) => {
-				<IntValArrayElement as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::IntValuePrecedeChain(con) => {
-				<IntValuePrecedeChain as Constraint<Model>>::to_solver(con, &mut actions)
-			}
-			ConstraintStore::Other(con) => con.to_solver(&mut actions),
-		}
-	}
-}
+impl<E: ReasoningEngine> Propagator<E> for BoolFormula {}
 
 impl InitConfig {
 	/// The default maximum cardinality of the domain of an integer variable
@@ -462,7 +369,7 @@ impl IntDecisionDef {
 	}
 }
 
-impl ClauseDatabase for ReformulationContext<'_> {
+impl<Oracle: ClauseDatabase> ClauseDatabase for ReformulationContext<'_, Oracle> {
 	fn add_clause_from_slice(&mut self, clause: &[RawLit]) -> Result<(), Unsatisfiable> {
 		self.slv.add_clause_from_slice(clause)
 	}
@@ -472,71 +379,86 @@ impl ClauseDatabase for ReformulationContext<'_> {
 	}
 }
 
-impl DecisionActions for ReformulationContext<'_> {
-	fn get_intref_lit(&mut self, var: IntVarRef, meaning: IntLitMeaning) -> BoolView {
-		self.slv.get_intref_lit(var, meaning)
-	}
+impl<Oracle> DecisionActions for ReformulationContext<'_, Oracle> {
+	// fn get_intref_lit(&mut self, var: IntVarRef, meaning: IntLitMeaning) ->
+	// BoolView { 	self.slv.get_intref_lit(var, meaning)
+	// }
 
 	fn get_num_conflicts(&self) -> u64 {
-		self.slv.get_num_conflicts()
+		self.slv.engine.borrow().state.statistics.conflicts
 	}
+
+	// fn get_int_val_lit(&mut self, var: IntView) -> Option<BoolView> {
+	// 	self.slv.get_int_val_lit(var)
+	// }
+
+	// fn get_int_lower_bound_lit(&self, var: IntView) -> BoolView {
+	// 	self.slv.get_int_lower_bound_lit(var)
+	// }
+
+	// fn get_int_upper_bound_lit(&self, var: IntView) -> BoolView {
+	// 	self.slv.get_int_upper_bound_lit(var)
+	// }
 }
 
-impl InspectionActions for ReformulationContext<'_> {
-	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool {
-		self.slv.check_int_in_domain(var, val)
-	}
+// impl InspectionActions for ReformulationContext<'_> {
+// 	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool {
+// 		self.slv.check_int_in_domain(var, val)
+// 	}
 
-	fn get_int_lower_bound(&self, var: IntView) -> IntVal {
-		self.slv.get_int_lower_bound(var)
-	}
+// 	fn get_int_lower_bound(&self, var: IntView) -> IntVal {
+// 		self.slv.get_int_lower_bound(var)
+// 	}
 
-	fn get_int_upper_bound(&self, var: IntView) -> IntVal {
-		self.slv.get_int_upper_bound(var)
-	}
-}
+// 	fn get_int_upper_bound(&self, var: IntView) -> IntVal {
+// 		self.slv.get_int_upper_bound(var)
+// 	}
+// }
 
-impl PropagatorInitActions for ReformulationContext<'_> {
-	fn add_propagator(&mut self, propagator: BoxedPropagator, priority: PriorityLevel) -> PropRef {
-		self.slv.add_propagator(propagator, priority)
-	}
+// impl PropagatorInitActions for ReformulationContext<'_> {
+// 	fn add_propagator(&mut self, propagator: BoxedPropagator, priority:
+// PriorityLevel) -> PropRef { 		self.slv.add_propagator(propagator, priority)
+// 	}
 
-	fn advise_on_backtrack(&mut self, prop: PropRef) {
-		self.slv.advise_on_backtrack(prop);
-	}
+// 	fn advise_on_backtrack(&mut self, prop: PropRef) {
+// 		self.slv.advise_on_backtrack(prop);
+// 	}
 
-	fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView, data: u64) {
-		self.slv.advise_on_bool_change(prop, var, data);
-	}
+// 	fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView, data: u64)
+// { 		self.slv.advise_on_bool_change(prop, var, data);
+// 	}
 
-	fn advise_on_int_change(
-		&mut self,
-		prop: PropRef,
-		var: IntView,
-		condition: IntPropCond,
-		data: u64,
-	) {
-		self.slv.advise_on_int_change(prop, var, condition, data);
-	}
+// 	fn advise_on_int_change(
+// 		&mut self,
+// 		prop: PropRef,
+// 		var: IntView,
+// 		condition: IntPropCond,
+// 		data: u64,
+// 	) {
+// 		self.slv.advise_on_int_change(prop, var, condition, data);
+// 	}
 
-	fn enqueue_now(&mut self, prop: PropRef) {
-		self.slv.enqueue_now(prop);
-	}
+// 	fn enqueue_now(&mut self, prop: PropRef) {
+// 		self.slv.enqueue_now(prop);
+// 	}
 
-	fn enqueue_on_bool_change(&mut self, prop: PropRef, var: BoolView) {
-		self.slv.enqueue_on_bool_change(prop, var);
-	}
+// 	fn enqueue_on_bool_change(&mut self, prop: PropRef, var: BoolView) {
+// 		self.slv.enqueue_on_bool_change(prop, var);
+// 	}
 
-	fn enqueue_on_int_change(&mut self, prop: PropRef, var: IntView, condition: IntPropCond) {
-		self.slv.enqueue_on_int_change(prop, var, condition);
-	}
+// 	fn enqueue_on_int_change(&mut self, prop: PropRef, var: IntView, condition:
+// IntPropCond) { 		self.slv.enqueue_on_int_change(prop, var, condition);
+// 	}
 
-	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
-		self.slv.new_trailed_int(init)
-	}
-}
+// 	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
+// 		self.slv.new_trailed_int(init)
+// 	}
+// }
+//
 
-impl ReformulationActions for ReformulationContext<'_> {
+impl<Oracle: ClauseDatabase + ExternalPropagation> ReformulationActions
+	for ReformulationContext<'_, Oracle>
+{
 	fn get_solver_bool(&mut self, bv: BoolDecision) -> BoolView {
 		self.map.get_bool(self.slv, bv)
 	}
@@ -550,7 +472,23 @@ impl ReformulationActions for ReformulationContext<'_> {
 	}
 }
 
-impl TrailingActions for ReformulationContext<'_> {
+impl<Oracle: ExternalPropagation> InitializationActions for ReformulationContext<'_, Oracle> {
+	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
+		InitializationActions::new_trailed_int(self.slv, init)
+	}
+
+	fn get_int_lit(&mut self, int: IntView, lit: IntLitMeaning) -> BoolView {
+		InitializationActions::get_int_lit(self.slv, int, lit)
+	}
+}
+
+impl<Oracle: ExternalPropagation> AddAssign<BoxedPropagator> for ReformulationContext<'_, Oracle> {
+	fn add_assign(&mut self, propagator: BoxedPropagator) {
+		*self.slv += propagator;
+	}
+}
+
+impl<Oracle> TrailingActions for ReformulationContext<'_, Oracle> {
 	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
 		self.slv.get_bool_val(bv)
 	}
@@ -567,16 +505,16 @@ impl TrailingActions for ReformulationContext<'_> {
 impl Display for ReformulationError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			Self::TrivialUnsatisfiable => write!(f, "The problem is trivially unsatisfiable"),
+			Self::Conflict(c) => write!(f, "The problem is trivially unsatisfiable: {c:?}"),
 		}
 	}
 }
 
 impl Error for ReformulationError {}
 
-impl From<Unsatisfiable> for ReformulationError {
-	fn from(_: Unsatisfiable) -> Self {
-		Self::TrivialUnsatisfiable
+impl From<<Model as ReasoningEngine>::Conflict> for ReformulationError {
+	fn from(value: <Model as ReasoningEngine>::Conflict) -> Self {
+		Self::Conflict(value)
 	}
 }
 
@@ -595,15 +533,18 @@ impl ReformulationMap {
 
 	/// Lookup the solver [`BoolView`] to which the given model
 	/// [`bool::BoolView`] maps.
-	pub fn get_bool(&self, slv: &mut dyn PropagatorInitActions, bv: BoolDecision) -> BoolView {
+	pub fn get_bool<Oracle: ExternalPropagation>(
+		&self,
+		slv: &mut Solver<Oracle>,
+		bv: BoolDecision,
+	) -> BoolView {
 		use BoolDecisionInner::*;
 
-		let get_int_lit = |slv: &mut dyn PropagatorInitActions,
-		                   iv: IntDecisionIndex,
-		                   lit_meaning: IntLitMeaning| {
-			let iv = self.get_int(slv, IntDecision(IntDecisionInner::Var(iv)));
-			slv.get_int_lit(iv, lit_meaning)
-		};
+		let get_int_lit =
+			|slv: &mut Solver<Oracle>, iv: IntDecisionIndex, lit_meaning: IntLitMeaning| {
+				let iv = self.get_int(slv, IntDecision(IntDecisionInner::Var(iv)));
+				iv.get_lit(slv, lit_meaning)
+			};
 
 		match bv.0 {
 			Lit(l) => {
@@ -625,7 +566,11 @@ impl ReformulationMap {
 
 	/// Lookup the solver [`IntView`] to which the given model [`int::IntView`]
 	/// maps.
-	pub fn get_int(&self, slv: &mut dyn PropagatorInitActions, iv: IntDecision) -> IntView {
+	pub fn get_int<Oracle: ExternalPropagation>(
+		&self,
+		slv: &mut Solver<Oracle>,
+		iv: IntDecision,
+	) -> IntView {
 		use IntDecisionInner::*;
 
 		match iv.0 {
@@ -696,19 +641,19 @@ impl ReformulationMapBuilder {
 			Const(b) => b.into(),
 			IntEq(idx, val) => {
 				let iv = self.get_or_create_int(model, slv, idx);
-				slv.get_int_lit(iv, IntLitMeaning::Eq(val))
+				iv.get_lit(slv, IntLitMeaning::Eq(val))
 			}
 			IntGreaterEq(idx, val) => {
 				let iv = self.get_or_create_int(model, slv, idx);
-				slv.get_int_lit(iv, IntLitMeaning::GreaterEq(val))
+				iv.get_lit(slv, IntLitMeaning::GreaterEq(val))
 			}
 			IntLess(idx, val) => {
 				let iv = self.get_or_create_int(model, slv, idx);
-				slv.get_int_lit(iv, IntLitMeaning::Less(val))
+				iv.get_lit(slv, IntLitMeaning::Less(val))
 			}
 			IntNotEq(idx, val) => {
 				let iv = self.get_or_create_int(model, slv, idx);
-				slv.get_int_lit(iv, IntLitMeaning::NotEq(val))
+				iv.get_lit(slv, IntLitMeaning::NotEq(val))
 			}
 		}
 	}
@@ -716,7 +661,7 @@ impl ReformulationMapBuilder {
 	/// Get the representation of a Integer decision variable in the [`Solver`]
 	/// or create it if it does not yet exist.
 	///
-	/// Note that this method will function recursively (toghether with
+	/// Note that this method will function recursively (together with
 	/// [`Self::get_or_create_bool`]) to resolve aliased variables.
 	pub(crate) fn get_or_create_int<Oracle: ExternalPropagation>(
 		&mut self,

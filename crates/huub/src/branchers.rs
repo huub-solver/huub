@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use pindakaas::Lit as RawLit;
 
 use crate::{
-	actions::{BrancherInitActions, DecisionActions},
+	actions::{BrancherInitActions, DecisionActions, IntDecisionActions, IntInspectionActions},
 	solver::{
 		solving_context::SolvingContext, trail::TrailedInt, BoolView, BoolViewInner, IntLitMeaning,
 		IntView, IntViewInner, View,
@@ -203,7 +203,10 @@ impl IntBrancher {
 	}
 }
 
-impl<D: DecisionActions> Brancher<D> for IntBrancher {
+impl<D: DecisionActions> Brancher<D> for IntBrancher
+where
+	IntView: IntDecisionActions<D, Atom = BoolView>,
+{
 	fn decide(&mut self, actions: &mut D) -> Decision {
 		let begin = actions.get_trailed_int(self.next) as usize;
 
@@ -212,14 +215,14 @@ impl<D: DecisionActions> Brancher<D> for IntBrancher {
 			return Decision::Exhausted;
 		}
 
-		let score = |var| match self.var_sel {
+		let score = |var: IntView| match self.var_sel {
 			VariableSelection::AntiFirstFail | VariableSelection::FirstFail => {
-				let (lb, ub) = actions.get_int_bounds(var);
+				let (lb, ub) = var.get_bounds(actions);
 				ub - lb
 			}
 			VariableSelection::InputOrder => 0,
-			VariableSelection::Largest => actions.get_int_upper_bound(var),
-			VariableSelection::Smallest => actions.get_int_lower_bound(var),
+			VariableSelection::Largest => var.get_upper_bound(actions),
+			VariableSelection::Smallest => var.get_lower_bound(actions),
 		};
 
 		let is_better = |incumbent_score, new_score| match self.var_sel {
@@ -235,9 +238,7 @@ impl<D: DecisionActions> Brancher<D> for IntBrancher {
 		let mut first_unfixed = begin;
 		let mut selection = None;
 		for i in begin..self.vars.len() {
-			if actions.get_int_lower_bound(self.vars[i])
-				== actions.get_int_upper_bound(self.vars[i])
-			{
+			if self.vars[i].get_lower_bound(actions) == self.vars[i].get_upper_bound(actions) {
 				// move the unfixed variable to the front
 				let unfixed_var = self.vars[first_unfixed];
 				let fixed_var = self.vars[i];
@@ -266,24 +267,23 @@ impl<D: DecisionActions> Brancher<D> for IntBrancher {
 		let _ = actions.set_trailed_int(self.next, first_unfixed as i64);
 
 		// select the next value to branch on based on the value selection strategy
-		let view = match self.val_sel {
-			ValueSelection::IndomainMin => actions.get_int_lit(
-				next_var,
-				IntLitMeaning::Less(actions.get_int_lower_bound(next_var) + 1),
-			),
-			ValueSelection::IndomainMax => actions.get_int_lit(
-				next_var,
-				IntLitMeaning::GreaterEq(actions.get_int_upper_bound(next_var)),
-			),
-			ValueSelection::OutdomainMin => actions.get_int_lit(
-				next_var,
-				IntLitMeaning::GreaterEq(actions.get_int_lower_bound(next_var) + 1),
-			),
-			ValueSelection::OutdomainMax => actions.get_int_lit(
-				next_var,
-				IntLitMeaning::Less(actions.get_int_upper_bound(next_var)),
-			),
-		};
+		let view = next_var.get_lit(
+			actions,
+			match self.val_sel {
+				ValueSelection::IndomainMin => {
+					IntLitMeaning::Less(next_var.get_lower_bound(actions) + 1)
+				}
+				ValueSelection::IndomainMax => {
+					IntLitMeaning::GreaterEq(next_var.get_upper_bound(actions))
+				}
+				ValueSelection::OutdomainMin => {
+					IntLitMeaning::GreaterEq(next_var.get_lower_bound(actions) + 1)
+				}
+				ValueSelection::OutdomainMax => {
+					IntLitMeaning::Less(next_var.get_upper_bound(actions))
+				}
+			},
+		);
 
 		match view.0 {
 			BoolViewInner::Lit(lit) => Decision::Select(lit),
