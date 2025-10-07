@@ -479,10 +479,8 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 							// remove that forbidden region from all_fr and remove it from tracking
 							regions_to_remove.push((c, fr_object));
 						}
-						// They overlap whilst none is a subset of another, they could be combined
-						3 => continue,
 						// No overlap possible
-						4 => continue,
+						3 => continue,
 						_ => unreachable!("should not be possible"),
 					}
 					c += 1;
@@ -537,15 +535,13 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 	/// 0 - Coalescing not possbile
 	/// 1 - fr2 is a subset of fr1
 	/// 2 - fr1 is a subset of fr2
-	/// 3 - The regions are overlapping such that
-	///     they are equal in all dimensions except 1
-	/// 4 - The forbidden regions are equal
+	/// 3 - The forbidden regions are equal
 	fn coalesce(fr1: &mut ForbiddenRegion, fr2: &ForbiddenRegion, dimensions: usize) -> usize {
 		let mut trend = 0;
 		for d in 0..dimensions {
 			// No overlapping possible
 			if fr1.ub[d] + 1 < fr2.lb[d] || fr1.lb[d] > fr2.ub[d] + 1 {
-				return 4;
+				return 3;
 			// The regions are equal
 			} else if fr1.lb[d] == fr2.lb[d] && fr1.ub[d] == fr2.ub[d] {
 				continue;
@@ -553,21 +549,17 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			} else if fr1.lb[d] <= fr2.lb[d] && fr1.ub[d] >= fr2.ub[d] {
 				match trend {
 					0 | 1 => trend = 1,
-					_ => return 4,
+					_ => return 3,
 				}
 			// fr1 is a subset of fr2
 			} else if fr1.lb[d] >= fr2.lb[d] && fr1.ub[d] <= fr2.ub[d] {
 				match trend {
 					0 | 2 => trend = 2,
-					_ => return 4,
+					_ => return 3,
 				}
 			// They overlap, but not such one is a subset of another
-			// only allow this trend in one dimensions
 			} else {
-				match trend {
-					0 => trend = 3,
-					_ => return 4,
-				}
+				return 3;
 			}
 		}
 		trend
@@ -879,6 +871,44 @@ mod tests {
                 3, 5, 2, 1, 4, 7
                 3, 5, 2, 2, 4, 7
                 3, 5, 2, 3, 4, 7"#]],
+		);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_diffn_sat_2d_nonstrict() {
+		let mut prb = Model::default();
+
+		let x1 = prb.new_int_var(1..=3);
+		let x2 = prb.new_int_var(2..=3);
+
+		let y1 = prb.new_int_var(1..=1);
+		let y2 = prb.new_int_var(1..=1);
+
+		let size1 = prb.new_int_var(2..=2);
+		let size2 = prb.new_int_var(0..=0);
+
+		prb += diffn_int(
+			vec![vec![x1, x2], vec![y1, y2]],
+			vec![vec![size1, size2], vec![size1, size2]],
+			true,
+		);
+
+		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
+		let vars = vec![x1, y1, x2, y2]
+			.into_iter()
+			.map(|x| map.get(&mut slv, &Decision::from(x)))
+			.collect_vec();
+
+		slv.expect_solutions(
+			&vars,
+			expect![[r#"
+    1, 1, 2, 1
+    1, 1, 3, 1
+    2, 1, 2, 1
+    2, 1, 3, 1
+    3, 1, 2, 1
+    3, 1, 3, 1"#]],
 		);
 	}
 }
