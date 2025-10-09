@@ -222,6 +222,21 @@ impl<'a> SolvingContext<'a> {
 				self.state.int_vars[iv].notify_upper_bound(&mut self.state.trail, ub - 1);
 			}
 		};
+
+		#[cfg(debug_assertions)]
+		{
+			// (DEBUG ONLY) Ensure lower bound and upper bound values is in the domain.
+			let (lb, ub) = self.state.int_vars[iv].get_bounds(self);
+			let lb_in_domain = self
+				.state
+				.try_int_lit(IntView(IntViewInner::VarRef(iv)), IntLitMeaning::Eq(lb))
+				.map_or(true, |bv| self.get_bool_val(bv).unwrap_or(true));
+			let ub_in_domain = self
+				.state
+				.try_int_lit(IntView(IntViewInner::VarRef(iv)), IntLitMeaning::Eq(ub))
+				.map_or(true, |bv| self.get_bool_val(bv).unwrap_or(true));
+			debug_assert!(lb_in_domain && ub_in_domain);
+		}
 		Ok(())
 	}
 
