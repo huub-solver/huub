@@ -440,25 +440,32 @@ impl PropagatorExtension for Engine {
 
 	fn decide(&mut self, slv: &mut dyn SolvingActions) -> SearchDecision {
 		if !self.state.vsids {
+			// Find the current position in the brancher queue, and return
+			// immediately if all branchers have been exhausted.
 			let mut current = self.state.trail.get_trailed_int(Trail::CURRENT_BRANCHER) as usize;
 			if current == self.branchers.len() {
 				self.state.statistics.oracle_decisions += 1;
 				return SearchDecision::Free;
 			}
+
+			// Create actions object and run current brancher
 			let mut ctx = SolvingContext::new(slv, &mut self.state);
 			while current < self.branchers.len() {
 				match self.branchers[current].decide(&mut ctx) {
 					Decision::Select(lit) => {
+						// The current brancher has selected a literal, return it as our decision
 						debug!(lit = i32::from(lit), "decide");
 						self.state.statistics.user_decisions += 1;
 						return SearchDecision::Assign(lit);
 					}
 					Decision::Exhausted => {
+						// The current brancher exhausted, move to next
 						current += 1;
 						let _ = ctx.set_trailed_int(Trail::CURRENT_BRANCHER, current as i64);
 					}
 					Decision::Consumed => {
-						// Remove the brancher
+						// The current brancher has signaled to never yield decisions again. Remove
+						// the brancher from the queue permanently.
 						//
 						// Note that this shifts all subsequent branchers (so we don't need to
 						// increment current), but has bad complexity. However, due to the low
@@ -646,6 +653,12 @@ impl PropagatorExtension for Engine {
 
 		trace!("new decision level");
 		self.state.notify_new_decision_level();
+
+		// Update peak decision level
+		let new_level = self.state.decision_level();
+		if new_level > self.state.statistics.peak_depth {
+			self.state.statistics.peak_depth = new_level;
+		}
 	}
 
 	#[tracing::instrument(level = "debug", skip(self, slv), fields(level = self.state.decision_level()))]
@@ -790,12 +803,6 @@ impl State {
 	/// Internal method called to trigger a new decision level.
 	fn notify_new_decision_level(&mut self) {
 		self.trail.notify_new_decision_level();
-
-		// Update peak decision level
-		let new_level = self.decision_level();
-		if new_level > self.statistics.peak_depth {
-			self.statistics.peak_depth = new_level;
-		}
 	}
 
 	/// Internal method to get the [`IntVarRef`] and strongest [`IntLitMeaning`]
