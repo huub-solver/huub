@@ -143,17 +143,61 @@ impl<'a> SolvingContext<'a> {
 		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict> {
 		let (lb, ub) = self.state.int_vars[iv].get_bounds(self);
+		let var = IntView(IntViewInner::VarRef(iv));
 		// Check whether a change is redundant, conflicting, or new with respect to
 		// the bounds of an integer variable
-		let check = match lit_req {
-			IntLitMeaning::Eq(i) if lb == i && ub == i => ChangeType::Redundant,
-			IntLitMeaning::Eq(i) if i < lb || i > ub => ChangeType::Conflicting,
-			IntLitMeaning::NotEq(i) if i < lb || i > ub => ChangeType::Redundant,
-			IntLitMeaning::GreaterEq(i) if i <= lb => ChangeType::Redundant,
-			IntLitMeaning::GreaterEq(i) if i > ub => ChangeType::Conflicting,
-			IntLitMeaning::Less(i) if i > ub => ChangeType::Redundant,
-			IntLitMeaning::Less(i) if i <= lb => ChangeType::Conflicting,
-			_ => ChangeType::New,
+		// Helper to find the next valid lower bound in the domain
+		let next_valid_lb = |ctx: &SolvingContext, start: IntVal, ub: IntVal| {
+			let mut lb = start;
+			while lb <= ub && !ctx.state.check_int_in_domain(var, lb) {
+				lb += 1;
+			}
+			if lb > ub {
+				None
+			} else {
+				Some(lb)
+			}
+		};
+
+		// Helper to find the next valid upper bound in the domain
+		let next_valid_ub = |ctx: &SolvingContext, lb: IntVal, start: IntVal| {
+			let mut ub = start;
+			while ub >= lb && !ctx.state.check_int_in_domain(var, ub) {
+				ub -= 1;
+			}
+			if ub < lb {
+				None
+			} else {
+				Some(ub)
+			}
+		};
+
+		let (check, new_lb, new_ub) = match lit_req {
+			IntLitMeaning::Eq(i) if lb == i && ub == i => (ChangeType::Redundant, lb, ub),
+			IntLitMeaning::Eq(i) if i < lb || i > ub => (ChangeType::Conflicting, i, i),
+			IntLitMeaning::Eq(i) => (ChangeType::New, i, i),
+			IntLitMeaning::NotEq(i) if i < lb || i > ub => (ChangeType::Redundant, lb, ub),
+			IntLitMeaning::NotEq(i) if i == lb => match next_valid_lb(self, lb + 1, ub) {
+				Some(nlb) => (ChangeType::New, nlb, ub),
+				None => (ChangeType::Conflicting, lb + 1, ub),
+			},
+			IntLitMeaning::NotEq(i) if i == ub => match next_valid_ub(self, lb, ub - 1) {
+				Some(nub) => (ChangeType::New, lb, nub),
+				None => (ChangeType::Conflicting, lb, ub - 1),
+			},
+			IntLitMeaning::NotEq(_) => (ChangeType::New, lb, ub),
+			IntLitMeaning::GreaterEq(i) if i <= lb => (ChangeType::Redundant, lb, ub),
+			IntLitMeaning::GreaterEq(i) if i > ub => (ChangeType::Conflicting, i, ub),
+			IntLitMeaning::GreaterEq(i) => match next_valid_lb(self, i, ub) {
+				Some(nlb) => (ChangeType::New, nlb, ub),
+				None => (ChangeType::Conflicting, i, ub),
+			},
+			IntLitMeaning::Less(i) if i > ub => (ChangeType::Redundant, lb, ub),
+			IntLitMeaning::Less(i) if i <= lb => (ChangeType::Conflicting, lb, i - 1),
+			IntLitMeaning::Less(i) => match next_valid_ub(self, lb, i - 1) {
+				Some(nub) => (ChangeType::New, lb, nub),
+				None => (ChangeType::Conflicting, lb, i - 1),
+			},
 		};
 
 		// Immediate return if there are no further changes
@@ -202,6 +246,7 @@ impl<'a> SolvingContext<'a> {
 		// Normal case:
 		// Propagate the literal.
 		let event = match lit_req {
+			_ if new_lb == new_ub => IntEvent::Fixed,
 			IntLitMeaning::Eq(_) => IntEvent::Fixed,
 			IntLitMeaning::NotEq(_) => IntEvent::Domain,
 			IntLitMeaning::GreaterEq(_) => IntEvent::LowerBound,
@@ -209,33 +254,69 @@ impl<'a> SolvingContext<'a> {
 		};
 		self.propagate_lit(lit, reason, Some((iv, event)));
 		// Make the domains match.
-		match lit_req {
-			IntLitMeaning::Eq(val) => {
-				self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, val);
-				self.state.int_vars[iv].notify_upper_bound(&mut self.state.trail, val);
+		if new_lb == new_ub {
+			if let Some(bv) = self.state.try_int_lit(var, IntLitMeaning::Eq(new_lb)) {
+				self.set_bool(bv, Reason::Simple(lit))?;
 			}
-			IntLitMeaning::NotEq(_) => {}
-			IntLitMeaning::GreaterEq(lb) => {
-				self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, lb);
+		}
+		if new_lb > lb {
+			let mut removed_lb = lb;
+			while removed_lb < new_lb {
+				if let Some(bv) = self
+					.state
+					.try_int_lit(var, IntLitMeaning::GreaterEq(removed_lb))
+				{
+					self.set_bool(bv, Reason::Simple(lit))?;
+				}
+				if let Some(bv) = self
+					.state
+					.try_int_lit(var, IntLitMeaning::NotEq(removed_lb))
+				{
+					self.set_bool(bv, Reason::Simple(lit))?;
+				}
+				removed_lb += 1;
 			}
-			IntLitMeaning::Less(ub) => {
-				self.state.int_vars[iv].notify_upper_bound(&mut self.state.trail, ub - 1);
+			self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, new_lb);
+		}
+		if new_ub < ub {
+			let mut removed_ub = ub;
+			while removed_ub > new_ub {
+				if let Some(bv) = self
+					.state
+					.try_int_lit(var, IntLitMeaning::Less(removed_ub + 1))
+				{
+					self.set_bool(bv, Reason::Simple(lit))?;
+				}
+				if let Some(bv) = self
+					.state
+					.try_int_lit(var, IntLitMeaning::NotEq(removed_ub))
+				{
+					self.set_bool(bv, Reason::Simple(lit))?;
+				}
+				removed_ub -= 1;
 			}
-		};
-
+			self.state.int_vars[iv].notify_upper_bound(&mut self.state.trail, new_ub);
+		}
 		#[cfg(debug_assertions)]
 		{
-			// (DEBUG ONLY) Ensure lower bound and upper bound values is in the domain.
+			// (DEBUG ONLY) Ensure lower bound and upper bound values are in the domain.
 			let (lb, ub) = self.state.int_vars[iv].get_bounds(self);
 			let lb_in_domain = self
 				.state
 				.try_int_lit(IntView(IntViewInner::VarRef(iv)), IntLitMeaning::Eq(lb))
-				.map_or(true, |bv| self.get_bool_val(bv).unwrap_or(true));
+				.is_none_or(|bv| self.get_bool_val(bv).unwrap_or(true));
+			debug_assert!(
+				lb_in_domain,
+				"lower bound {lb} not in domain of int var {iv:?}",
+			);
 			let ub_in_domain = self
 				.state
 				.try_int_lit(IntView(IntViewInner::VarRef(iv)), IntLitMeaning::Eq(ub))
-				.map_or(true, |bv| self.get_bool_val(bv).unwrap_or(true));
-			debug_assert!(lb_in_domain && ub_in_domain);
+				.is_none_or(|bv| self.get_bool_val(bv).unwrap_or(true));
+			debug_assert!(
+				ub_in_domain,
+				"upper bound {ub} not in domain of int var {iv:?}",
+			);
 		}
 		Ok(())
 	}
@@ -346,6 +427,7 @@ impl InspectionActions for SolvingContext<'_> {
 	fn get_int_bounds(&self, var: IntView) -> (IntVal, IntVal) {
 		self.state.get_int_bounds(var)
 	}
+
 	fn get_int_lower_bound(&self, var: IntView) -> IntVal {
 		self.state.get_int_lower_bound(var)
 	}
