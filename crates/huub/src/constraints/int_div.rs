@@ -8,7 +8,8 @@ use pindakaas::ClauseDatabaseTools;
 
 use crate::{
 	actions::{
-		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+		ConstraintInitActions, ExplanationActions, PropagatorInitActions, ReformulationActions,
+		SimplificationActions,
 	},
 	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
 	helpers::div_ceil,
@@ -50,9 +51,15 @@ pub struct IntDivBounds {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntDiv {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		actions.simplify_on_change_int(self.numerator);
+		actions.simplify_on_change_int(self.denominator);
+		actions.simplify_on_change_int(self.result);
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		actions.set_int_not_eq(self.denominator, 0)?;
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -275,7 +282,6 @@ where
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use pindakaas::Cnf;
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
@@ -290,7 +296,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_int_div_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			(-7..=7).into(),

@@ -1,6 +1,6 @@
 use expect_test::{expect, Expect};
 use itertools::Itertools;
-use pindakaas::{propositional_logic::Formula, Cnf};
+use pindakaas::propositional_logic::Formula;
 use rangelist::RangeList;
 use tracing_test::traced_test;
 
@@ -12,7 +12,7 @@ use crate::{
 		int_var::{EncodingType, IntVar},
 		SolveResult, Value, View,
 	},
-	InitConfig, Model, NonZeroIntVal, ReformulationError, Solver, ValueSelection,
+	Decision, InitConfig, Model, NonZeroIntVal, ReformulationError, Solver, ValueSelection,
 	VariableSelection,
 };
 
@@ -41,7 +41,7 @@ fn it_works() {
 /// Tests for when a propagator propagates the same literal twice within the
 /// same call.
 fn test_duplicate_propagation() {
-	let mut slv = Solver::from(&Cnf::default());
+	let mut slv = Solver::default();
 	let a = IntVar::new_in(
 		&mut slv,
 		RangeList::from(0..=1),
@@ -142,6 +142,19 @@ impl Model {
 			matches!(err, Err(ReformulationError::TrivialUnsatisfiable)),
 			"expected unsatisfiable"
 		);
+	}
+
+	pub(crate) fn expect_solutions<V: Into<Decision> + Clone>(
+		mut self,
+		vars: &[V],
+		expected: Expect,
+	) {
+		let (mut slv, map) = self.to_solver(&InitConfig::default()).unwrap();
+		let vars = vars
+			.iter()
+			.map(|v| map.get(&mut slv, &v.clone().into()))
+			.collect_vec();
+		slv.expect_solutions(&vars, expected);
 	}
 }
 

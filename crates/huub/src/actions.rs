@@ -313,6 +313,9 @@ pub trait SimplificationActions {
 	/// Get the current value of a [`BoolView`], if it has been assigned.
 	fn get_bool_val(&self, bv: BoolDecision) -> Option<bool>;
 
+	/// Get the domain from which an integer view is guaranteed to take a value.
+	fn get_int_domain(&self, var: IntDecision) -> IntSetVal;
+
 	/// Get the minimum value that an integer view is guaranteed to take.
 	fn get_int_lower_bound(&self, var: IntDecision) -> IntVal;
 

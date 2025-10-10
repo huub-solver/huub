@@ -1,6 +1,5 @@
-var bool: x;
-var bool: y;
+array[1..5] of var bool: x; 
 
-constraint x != y;
+constraint sum(x) = 3;
 
-solve :: bool_search([x, y], input_order, indomain_max, complete) satisfy;
+solve :: bool_search(x, input_order, indomain_max, complete) satisfy;

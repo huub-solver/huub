@@ -104,7 +104,7 @@ impl<S: SimplificationActions> Constraint<S> for IntDecisionArrayElement {
 		if max_ub < actions.get_int_upper_bound(self.result) {
 			actions.set_int_upper_bound(self.result, max_ub)?;
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -339,6 +339,11 @@ where
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntValArrayElement {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		actions.simplify_on_change_int(self.result);
+		actions.simplify_on_change_int(self.index);
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		// Fix the bounds of the index is to the length of the array
 		actions.set_int_lower_bound(self.index, 0)?;
@@ -348,7 +353,7 @@ impl<S: SimplificationActions> Constraint<S> for IntValArrayElement {
 			actions.set_int_val(self.result, self.array[idx as usize])?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -387,7 +392,6 @@ impl<S: SimplificationActions> Constraint<S> for IntValArrayElement {
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use pindakaas::Cnf;
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
@@ -404,7 +408,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_element_bounds_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([3..=4]),
@@ -463,7 +467,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_element_holes() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=3]),

@@ -1071,7 +1071,7 @@ impl Model {
 			SimplificationStatus::Subsumed => {
 				// Constraint is known to be satisfied, no need to place back.
 			}
-			SimplificationStatus::Fixpoint => {
+			SimplificationStatus::NoFixpoint => {
 				self.constraints[con] = Some((con_obj, proof_id));
 			}
 		}
@@ -1187,20 +1187,21 @@ impl Model {
 	/// to [`crate::SolverView`]. If an error occurs during the reformulation
 	/// process, or if it is found to be trivially unsatisfiable, then an error
 	/// will be returned.
-	pub fn to_solver<Oracle: ExternalPropagation>(
+	pub fn to_solver<Oracle>(
 		&mut self,
 		config: &InitConfig,
 	) -> Result<(Solver<Oracle>, ReformulationMap), ReformulationError>
 	where
-		Solver<Oracle>: for<'a> From<&'a Cnf> + 'static,
+		Solver<Oracle>: Default,
+		Oracle: ExternalPropagation + 'static,
 	{
-		// TODO: run SAT simplification
-		let mut slv = Solver::<Oracle>::from(&self.cnf);
+		let mut slv = Solver::<Oracle>::default();
 		let any_slv: &mut dyn Any = &mut slv.oracle;
 		if let Some(r) = any_slv.downcast_mut::<Cadical>() {
 			// Set the solver options for preprocessing/inprocessing
 			r.set_option("condition", config.conditioning() as i32);
 			r.set_option("elim", config.variable_elimination() as i32);
+			r.set_option("exteagerreasons", config.reason_eager() as i32);
 			r.set_option("inprocessing", config.inprocessing() as i32);
 			r.set_limit("preprocessing", config.preprocessing() as i32);
 			r.set_option("probe", config.probing() as i32);
@@ -1225,8 +1226,8 @@ impl Model {
 		}
 
 		while let Some(con) = self.prop_queue.pop_front() {
-			self.propagate(con)?;
 			self.enqueued[con] = false;
+			self.propagate(con)?;
 		}
 
 		// TODO: Detect Views From Model
@@ -1289,6 +1290,11 @@ impl Model {
 			int_map: index_vec![None; self.int_vars.len()],
 		};
 
+		// Ensure the creation of all integer variables.
+		for (idx, _) in self.int_vars.iter_enumerated() {
+			let _ = map_builder.get_or_create_int(self, &mut slv, idx);
+		}
+
 		// Any clauses added at this point should be defining literals only.
 		if slv.prove() {
 			let proof_hint = ProofHint::name_only("LitDef");
@@ -1300,11 +1306,6 @@ impl Model {
 				NonZeroI32::new(var as i32).unwrap(),
 			)));
 			let _ = map_builder.get_or_create_bool(self, &mut slv, var);
-		}
-
-		// Ensure the creation of all integer variables.
-		for (idx, _) in self.int_vars.iter_enumerated() {
-			let _ = map_builder.get_or_create_int(self, &mut slv, idx);
 		}
 
 		// Finalize the reformulation map (all variables must be created by now)
@@ -1515,6 +1516,43 @@ impl SimplificationActions for Model {
 		}
 	}
 
+	fn get_int_domain(&self, var: IntDecision) -> IntSetVal {
+		use IntDecisionInner::*;
+
+		let var = var.resolve_alias(self);
+		match var.0 {
+			Var(v) => {
+				let Domain::Domain(dom) = &self.int_vars[v].domain else {
+					unreachable!()
+				};
+				dom.clone()
+			}
+			Const(v) => (v..=v).into(),
+			Linear(t, v) => {
+				let Domain::Domain(dom) = &self.int_vars[v].domain else {
+					unreachable!()
+				};
+				dom.iter()
+					.flatten()
+					.map(|v| {
+						let v = t.transform(v);
+						v..=v
+					})
+					.collect()
+			}
+			Bool(t, bv) => {
+				if let Some(v) = self.get_bool_val(bv) {
+					let v = t.transform(v as IntVal);
+					(v..=v).into()
+				} else {
+					let v0 = t.transform(0);
+					let v1 = t.transform(1);
+					if t.positive_scale() { v0..=v1 } else { v1..=v0 }.into()
+				}
+			}
+		}
+	}
+
 	fn get_int_lower_bound(&self, var: IntDecision) -> IntVal {
 		use IntDecisionInner::*;
 
@@ -1686,7 +1724,7 @@ impl SimplificationActions for Model {
 		match var.0 {
 			Var(v) => {
 				let def = &mut self.int_vars[v];
-				let Domain::Domain(dom) = &def.domain else {
+				let Domain::Domain(dom) = &mut def.domain else {
 					unreachable!()
 				};
 				if lb <= *dom.lower_bound().unwrap() {
@@ -1695,16 +1733,7 @@ impl SimplificationActions for Model {
 					return Err(ReformulationError::TrivialUnsatisfiable);
 				}
 				if lb != *dom.upper_bound().unwrap() {
-					let ndom = RangeList::from_iter(dom.iter().filter_map(|r| {
-						if *r.end() < lb {
-							None
-						} else if *r.start() < lb {
-							Some(lb..=*r.end())
-						} else {
-							Some(r)
-						}
-					}));
-					def.domain = Domain::Domain(ndom);
+					dom.set_lower_bound(lb);
 				} else {
 					def.domain = Domain::Alias(lb.into());
 				}
@@ -1811,7 +1840,7 @@ impl SimplificationActions for Model {
 		match var.0 {
 			Var(v) => {
 				let def = &mut self.int_vars[v];
-				let Domain::Domain(dom) = &def.domain else {
+				let Domain::Domain(dom) = &mut def.domain else {
 					unreachable!()
 				};
 				if ub >= *dom.upper_bound().unwrap() {
@@ -1820,16 +1849,7 @@ impl SimplificationActions for Model {
 					return Err(ReformulationError::TrivialUnsatisfiable);
 				}
 				if ub != *dom.lower_bound().unwrap() {
-					let ndom = RangeList::from_iter(dom.iter().filter_map(|r| {
-						if ub < *r.start() {
-							None
-						} else if ub < *r.end() {
-							Some(*r.start()..=ub)
-						} else {
-							Some(r)
-						}
-					}));
-					def.domain = Domain::Domain(ndom);
+					dom.set_upper_bound(ub);
 				} else {
 					def.domain = Domain::Alias(ub.into());
 				}

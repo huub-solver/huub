@@ -6,8 +6,8 @@ use std::cmp::{max, min};
 
 use crate::{
 	actions::{
-		ExplanationActions, InspectionActions, PropagatorInitActions, ReformulationActions,
-		SimplificationActions,
+		ConstraintInitActions, ExplanationActions, InspectionActions, PropagatorInitActions,
+		ReformulationActions, SimplificationActions,
 	},
 	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
@@ -97,6 +97,12 @@ pub struct IntValuePrecedeChainValue {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntSeqPrecedeChain {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		for &v in self.vars.iter() {
+			actions.simplify_on_change_int(v);
+		}
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		let mut ub = 0;
 		for &v in self.vars.iter() {
@@ -111,7 +117,7 @@ impl<S: SimplificationActions> Constraint<S> for IntSeqPrecedeChain {
 		if self.vars.is_empty() {
 			return Ok(SimplificationStatus::Subsumed);
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -431,6 +437,12 @@ where
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntValuePrecedeChain {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		for &v in self.vars.iter() {
+			actions.simplify_on_change_int(v);
+		}
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		if self.values.len() <= 1 {
 			return Ok(SimplificationStatus::Subsumed);
@@ -455,7 +467,7 @@ impl<S: SimplificationActions> Constraint<S> for IntValuePrecedeChain {
 		if self.vars.is_empty() {
 			return Ok(SimplificationStatus::Subsumed);
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -920,7 +932,6 @@ where
 mod tests {
 	use std::cmp::max;
 
-	use pindakaas::Cnf;
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
@@ -937,7 +948,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_seq_precede_chain_paper() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let x1 = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=1]),
@@ -1003,7 +1014,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_seq_precede_chain_unrestricted() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let x1 = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=4]),
@@ -1036,7 +1047,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_value_precede_chain_complex() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let x0 = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=0, 2..=2]),
@@ -1106,7 +1117,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_value_precede_chain_out_of_bounds() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let x0 = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=1]),
@@ -1133,7 +1144,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_value_precede_chain_simple() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let x0 = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=3]),
@@ -1160,7 +1171,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_value_precede_chain_unrestricted() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let x0 = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([-2..=3]),

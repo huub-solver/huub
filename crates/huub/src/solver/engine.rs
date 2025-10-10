@@ -484,25 +484,32 @@ impl PropagatorExtension for Engine {
 
 	fn decide(&mut self, slv: &mut dyn SolvingActions) -> SearchDecision {
 		if !self.state.vsids {
+			// Find the current position in the brancher queue, and return
+			// immediately if all branchers have been exhausted.
 			let mut current = self.state.trail.get_trailed_int(Trail::CURRENT_BRANCHER) as usize;
 			if current == self.branchers.len() {
 				self.state.statistics.oracle_decisions += 1;
 				return SearchDecision::Free;
 			}
+
+			// Create actions object and run current brancher
 			let mut ctx = SolvingContext::new(slv, &mut self.state);
 			while current < self.branchers.len() {
 				match self.branchers[current].decide(&mut ctx) {
 					Decision::Select(lit) => {
+						// The current brancher has selected a literal, return it as our decision
 						debug!(lit = i32::from(lit), "decide");
 						self.state.statistics.user_decisions += 1;
 						return SearchDecision::Assign(lit);
 					}
 					Decision::Exhausted => {
+						// The current brancher exhausted, move to next
 						current += 1;
 						let _ = ctx.set_trailed_int(Trail::CURRENT_BRANCHER, current as i64);
 					}
 					Decision::Consumed => {
-						// Remove the brancher
+						// The current brancher has signaled to never yield decisions again. Remove
+						// the brancher from the queue permanently.
 						//
 						// Note that this shifts all subsequent branchers (so we don't need to
 						// increment current), but has bad complexity. However, due to the low
@@ -690,6 +697,12 @@ impl PropagatorExtension for Engine {
 
 		trace!("new decision level");
 		self.state.notify_new_decision_level();
+
+		// Update peak decision level
+		let new_level = self.state.decision_level();
+		if new_level > self.state.statistics.peak_depth {
+			self.state.statistics.peak_depth = new_level;
+		}
 	}
 
 	#[tracing::instrument(level = "debug", skip(self, slv), fields(level = self.state.decision_level()))]
@@ -862,12 +875,6 @@ impl State {
 	/// Internal method called to trigger a new decision level.
 	fn notify_new_decision_level(&mut self) {
 		self.trail.notify_new_decision_level();
-
-		// Update peak decision level
-		let new_level = self.decision_level();
-		if new_level > self.statistics.peak_depth {
-			self.statistics.peak_depth = new_level;
-		}
 	}
 
 	/// Internal method to get the [`IntVarRef`] and strongest [`IntLitMeaning`]
@@ -970,28 +977,44 @@ impl ExplanationActions for State {
 	fn get_int_lit_relaxed(
 		&mut self,
 		var: IntView,
-		meaning: IntLitMeaning,
+		mut meaning: IntLitMeaning,
 	) -> (BoolView, IntLitMeaning) {
 		debug_assert!(
 			!matches!(meaning, IntLitMeaning::Eq(_)),
 			"relaxed integer literals are not yet supported for IntLitMeaning::Eq(_)"
 		);
 		// Transform literal meaning if view is a linear transformation
-		let meaning = match var.0 {
-			IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } => {
-				match transformer.rev_transform_lit(meaning) {
-					Ok(m) => m,
-					Err(v) => return (BoolView(BoolViewInner::Const(v)), meaning),
-				}
+		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
+			var.0
+		{
+			match transformer.rev_transform_lit(meaning) {
+				Ok(m) => meaning = m,
+				Err(v) => return (BoolView(BoolViewInner::Const(v)), meaning),
 			}
-			_ => meaning,
-		};
+		}
 
-		// Get the (relaxed) boolean view representing the meaning and the actual
-		// (relaxed) meaning
+		// Get the boolean view that is currently `true` and implies the requested
+		// `meaning`, as well as the actual (possibly relaxed) meaning that is
+		// represented.
 		let (bv, meaning) = match var.0 {
 			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
 				let var_def = &mut self.int_vars[iv];
+				// If we are looking for a not-equal literal, try and find it. Return it if we
+				// find it, otherwise defer to an order literal.
+				if let IntLitMeaning::NotEq(v) = meaning {
+					if let Some((bv, _)) = var_def.get_bool_lit(meaning) {
+						return (bv, IntLitMeaning::NotEq(v));
+					}
+
+					let lb = var_def.get_lower_bound(&self.trail);
+					if v < lb {
+						meaning = IntLitMeaning::GreaterEq(v + 1);
+					} else {
+						debug_assert!(v > var_def.get_upper_bound(&self.trail));
+						meaning = IntLitMeaning::Less(v);
+					}
+				}
+				// Find the strongest order literal that fits the given meaning.
 				match meaning {
 					IntLitMeaning::GreaterEq(v) => {
 						let (bv, v) = var_def.get_greater_eq_lit_or_weaker(&self.trail, v);
@@ -1000,26 +1023,6 @@ impl ExplanationActions for State {
 					IntLitMeaning::Less(v) => {
 						let (bv, v) = var_def.get_less_lit_or_weaker(&self.trail, v);
 						(bv, IntLitMeaning::Less(v))
-					}
-					IntLitMeaning::NotEq(v) => {
-						if let Some(bv) = self.try_int_lit(var, meaning) {
-							(bv, IntLitMeaning::NotEq(v))
-						} else {
-							let lb = self.get_int_lower_bound(var);
-							if lb > v {
-								(
-									self.get_int_lower_bound_lit(var),
-									IntLitMeaning::GreaterEq(lb),
-								)
-							} else {
-								let ub = self.get_int_upper_bound(var);
-								debug_assert!(ub < v);
-								(
-									self.get_int_upper_bound_lit(var),
-									IntLitMeaning::Less(ub + 1),
-								)
-							}
-						}
 					}
 					_ => unreachable!(),
 				}

@@ -4,7 +4,8 @@
 
 use crate::{
 	actions::{
-		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+		ConstraintInitActions, ExplanationActions, PropagatorInitActions, ReformulationActions,
+		SimplificationActions,
 	},
 	constraints::{
 		CachedReason, Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus,
@@ -41,6 +42,12 @@ pub struct IntTimesBounds {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntTimes {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		actions.simplify_on_change_int(self.factor1);
+		actions.simplify_on_change_int(self.factor2);
+		actions.simplify_on_change_int(self.product);
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		let (f1_lb, f1_ub) = actions.get_int_bounds(self.factor1);
 		let (f2_lb, f2_ub) = actions.get_int_bounds(self.factor2);
@@ -105,7 +112,7 @@ impl<S: SimplificationActions> Constraint<S> for IntTimes {
 				.unwrap();
 			actions.set_int_upper_bound(self.factor2, max)?;
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -244,7 +251,6 @@ where
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use pindakaas::Cnf;
 	use tracing_test::traced_test;
 
 	use crate::{
@@ -258,7 +264,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_int_times_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			(-2..=1).into(),

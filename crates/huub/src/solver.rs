@@ -24,7 +24,7 @@ use pindakaas::{
 		cadical::Cadical, propagation::ExternalPropagation, Assumptions, FailedAssumptions,
 		LearnCallback, SolveResult as SatSolveResult, TermSignal, TerminateCallback,
 	},
-	BoolVal, ClauseDatabase, ClauseDatabaseTools, Cnf, Lit as RawLit, Unsatisfiable,
+	BoolVal, ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
 	Valuation as SatValuation,
 };
 use tracing::{debug, trace};
@@ -180,6 +180,7 @@ pub enum SolveResult {
 	/// The solver was interrupted before a result could be reached.
 	Unknown,
 }
+
 #[derive(Debug)]
 /// The main solver object that is used to interact with the LCG solver.
 pub struct Solver<Oracle = Cadical> {
@@ -294,6 +295,12 @@ impl Add<IntVal> for BoolView {
 impl From<bool> for BoolView {
 	fn from(value: bool) -> Self {
 		BoolView(BoolViewInner::Const(value))
+	}
+}
+
+impl From<RawLit> for BoolView {
+	fn from(value: RawLit) -> Self {
+		BoolView(BoolViewInner::Lit(value))
 	}
 }
 
@@ -883,7 +890,7 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 	) -> Result<(Self, MapTy, FlatZincStatistics), FlatZincError>
 	where
 		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
-		Solver<Oracle>: for<'a> From<&'a Cnf>,
+		Solver<Oracle>: Default,
 		Oracle: 'static,
 	{
 		let (mut prb, map, fzn_stats) = Model::from_fzn::<S, Vec<_>>(fzn, config.prove())?;
@@ -1163,6 +1170,16 @@ impl<Oracle: ExternalPropagation> DecisionActions for Solver<Oracle> {
 	}
 }
 
+impl<Oracle: Default + ExternalPropagation + LearnCallback> Default for Solver<Oracle> {
+	fn default() -> Self {
+		let mut oracle = Oracle::default();
+		let engine = Rc::default();
+		oracle.set_learn_callback(Some(trace_learned_clause));
+		oracle.connect_propagator(Rc::clone(&engine));
+		Self { oracle, engine }
+	}
+}
+
 impl<Oracle: ExternalPropagation> ExplanationActions for Solver<Oracle> {
 	fn get_int_lit_meaning(&self, var: IntView, lit: RawLit) -> Option<IntLitMeaning> {
 		self.engine.borrow().state.get_int_lit_meaning(var, lit)
@@ -1193,19 +1210,6 @@ impl<Oracle: ExternalPropagation> ExplanationActions for Solver<Oracle> {
 
 	fn try_int_lit(&self, var: IntView, meaning: IntLitMeaning) -> Option<BoolView> {
 		self.engine.borrow().state.try_int_lit(var, meaning)
-	}
-}
-
-impl<Oracle> From<&Cnf> for Solver<Oracle>
-where
-	Oracle: ExternalPropagation + for<'a> From<&'a Cnf> + LearnCallback,
-{
-	fn from(value: &Cnf) -> Self {
-		let mut oracle: Oracle = value.into();
-		let engine = Rc::default();
-		oracle.set_learn_callback(Some(trace_learned_clause));
-		oracle.connect_propagator(Rc::clone(&engine));
-		Self { oracle, engine }
 	}
 }
 

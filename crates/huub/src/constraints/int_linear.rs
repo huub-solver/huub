@@ -10,7 +10,9 @@ use pindakaas::{
 };
 
 use crate::{
-	actions::{PropagatorInitActions, ReformulationActions, SimplificationActions},
+	actions::{
+		ConstraintInitActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
+	},
 	constraints::{
 		Conflict, Constraint, ExplanationActions, PropagationActions, Propagator, ReasonBuilder,
 		SimplificationStatus,
@@ -121,6 +123,12 @@ pub(crate) enum Reification {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntEq {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		for &var in &self.vars {
+			actions.simplify_on_change_int(var);
+		}
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		let (lb_0, ub_0) = actions.get_int_bounds(self.vars[0]);
 		let (lb_1, ub_1) = actions.get_int_bounds(self.vars[1]);
@@ -145,7 +153,7 @@ impl<S: SimplificationActions> Constraint<S> for IntEq {
 		if ub_1 <= ub_0 {
 			actions.set_int_upper_bound(self.vars[0], ub_1)?;
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, actions: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -186,7 +194,7 @@ impl IntLinear {
 			},
 			LinOperator::LessEq => Self {
 				terms: self.terms.into_iter().map(|v| -v).collect(),
-				rhs: -self.rhs,
+				rhs: -self.rhs - 1,
 				..self
 			},
 			LinOperator::NotEqual => Self {
@@ -214,8 +222,17 @@ impl IntLinear {
 }
 
 impl<S: SimplificationActions> Constraint<S> for IntLinear {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		for &v in &self.terms {
+			actions.simplify_on_change_int(v);
+		}
+		if let Some(Reification::ImpliedBy(r) | Reification::ReifiedBy(r)) = self.reif {
+			actions.simplify_on_change_bool(r);
+		}
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		// If the reification of the constriant is known, simplify to non-reified
+		// If the reification of the constraint is known, simplify to non-reified
 		// version
 		if let Some(Reification::ImpliedBy(r) | Reification::ReifiedBy(r)) = self.reif {
 			match actions.get_bool_val(r) {
@@ -330,7 +347,7 @@ impl<S: SimplificationActions> Constraint<S> for IntLinear {
 			};
 		} else if self.operator == LinOperator::NotEqual {
 			// No further bounds propagation possible
-			return Ok(SimplificationStatus::Fixpoint);
+			return Ok(SimplificationStatus::NoFixpoint);
 		}
 
 		// The difference between the right-hand-side value and the sum of the lower
@@ -372,7 +389,7 @@ impl<S: SimplificationActions> Constraint<S> for IntLinear {
 				}
 			}
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -849,12 +866,13 @@ where
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use pindakaas::Cnf;
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
 	use crate::{
-		constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
+		constraints::int_linear::{
+			IntLinear, IntLinearLessEqBounds, IntLinearNotEqValue, LinOperator, Reification,
+		},
 		reformulate::InitConfig,
 		solver::{
 			int_var::{EncodingType, IntVar},
@@ -866,7 +884,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_linear_ge_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
@@ -918,7 +936,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_linear_le_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
@@ -966,7 +984,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_linear_ne_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
@@ -1099,5 +1117,20 @@ mod tests {
 		true, 2, 2, 1
 		true, 2, 2, 2"#]],
 		);
+	}
+
+	#[test]
+	fn test_constraint_rewriting() {
+		// Regression test for GitHub issue 233, where a `int_lin_le_reif` known to be
+		// false was rewritten incorrectly. It allowed `a` to be 2.
+		let mut prb = Model::default();
+		let a = prb.new_int_var(1..=2);
+		prb += IntLinear {
+			terms: vec![-a],
+			operator: LinOperator::LessEq,
+			rhs: -2,
+			reif: Some(Reification::ReifiedBy(false.into())),
+		};
+		prb.expect_solutions(&[a], expect![[r#"1"#]]);
 	}
 }

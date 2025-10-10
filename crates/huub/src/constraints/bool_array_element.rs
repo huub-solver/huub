@@ -7,7 +7,7 @@ use std::iter::once;
 use pindakaas::ClauseDatabaseTools;
 
 use crate::{
-	actions::{ReformulationActions, SimplificationActions},
+	actions::{ConstraintInitActions, ReformulationActions, SimplificationActions},
 	constraints::{Constraint, SimplificationStatus},
 	reformulate::ReformulationError,
 	solver::IntLitMeaning,
@@ -31,6 +31,14 @@ pub struct BoolDecisionArrayElement {
 }
 
 impl<S: SimplificationActions> Constraint<S> for BoolDecisionArrayElement {
+	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
+		for &b in &self.array {
+			actions.simplify_on_change_bool(b);
+		}
+		actions.simplify_on_change_int(self.index);
+		actions.simplify_on_change_bool(self.result);
+	}
+
 	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
 		// Fix the bounds of the index is to the length of the array
 		actions.set_int_lower_bound(self.index, 0)?;
@@ -40,7 +48,7 @@ impl<S: SimplificationActions> Constraint<S> for BoolDecisionArrayElement {
 			actions.unify_bool(self.array[i as usize], self.result)?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
-		Ok(SimplificationStatus::Fixpoint)
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
