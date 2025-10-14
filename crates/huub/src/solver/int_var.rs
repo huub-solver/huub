@@ -1344,7 +1344,7 @@ mod tests {
 
 			let v = &mut slv.engine.borrow_mut().state.int_vars[iv];
 			let out = v.get_bool_lit(req).expect("lit must be present");
-			assert_eq!(out, expected, "given {:?}", req);
+			assert_eq!(out, expected, "given {req:?}");
 		}
 	}
 

@@ -2063,25 +2063,34 @@ impl SimplificationActions for Model {
 				}
 			}
 			(x @ Bool(x_t, x_i), y @ Bool(y_t, y_i)) => {
+				// x and y can only take two values each, given by their bounds.
 				let (x_lb, x_ub) = self.get_int_bounds(IntDecision(x));
 				let (y_lb, y_ub) = self.get_int_bounds(IntDecision(y));
+				// Negate the literals if it is multiplied with a negative number. (This will
+				// ensure that `!b` represents the lower bound, and `b` represents the upper
+				// bound).
+				let x_i = if x_t.positive_scale() { x_i } else { !x_i };
+				let y_i = if y_t.positive_scale() { y_i } else { !y_i };
 
-				return if x_lb == y_lb && x_ub == y_ub {
-					self.unify_bool(x_i, if x_t == y_t { y_i } else { !y_i })
-				} else if x_lb == y_lb {
-					self.set_bool(!x_i)?;
-					self.set_bool(!y_i)
-				} else if x_lb == y_ub {
-					self.set_bool(!x_i)?;
-					self.set_bool(y_i)
-				} else if x_ub == y_lb {
-					self.set_bool(x_i)?;
-					self.set_bool(!y_i)
-				} else if x_ub == y_ub {
-					self.set_bool(x_i)?;
-					self.set_bool(y_i)
-				} else {
-					Err(ReformulationError::TrivialUnsatisfiable)
+				return match (x_lb == y_lb, x_ub == y_ub) {
+					(true, true) => self.unify_bool(x_i, y_i),
+					(true, false) => {
+						self.set_bool(!x_i)?;
+						self.set_bool(!y_i)
+					}
+					(false, true) => {
+						self.set_bool(x_i)?;
+						self.set_bool(y_i)
+					}
+					(false, false) if x_lb == y_ub => {
+						self.set_bool(!x_i)?;
+						self.set_bool(y_i)
+					}
+					(false, false) if x_ub == y_lb => {
+						self.set_bool(x_i)?;
+						self.set_bool(!y_i)
+					}
+					(false, false) => Err(ReformulationError::TrivialUnsatisfiable),
 				};
 			}
 		};

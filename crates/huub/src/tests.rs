@@ -38,6 +38,22 @@ fn it_works() {
 }
 
 #[test]
+/// Test case to check if resolving a multistep linear alias works properly.
+fn lin_multi_alias() {
+	let mut prb = Model::default();
+	let x = prb.new_int_var(RangeList::from_iter([1..=10]));
+	let y = prb.new_int_var(RangeList::from_iter([1..=10]));
+	let z = prb.new_int_var(RangeList::from_iter([1..=10]));
+	let x_trans = x * -1 - 1;
+	let y_trans = y + 1;
+	let z_trans = z + 1;
+	assert!(prb.unify_int(x, y_trans).is_ok());
+	assert!(prb.unify_int(y, z_trans).is_ok());
+	assert_eq!(prb.get_int_lower_bound(x_trans), -11);
+	assert_eq!(prb.get_int_upper_bound(x_trans), -4);
+}
+
+#[test]
 /// Tests for when a propagator propagates the same literal twice within the
 /// same call.
 fn test_duplicate_propagation() {
@@ -120,19 +136,78 @@ fn test_unify_int_lin_view_domains() {
 }
 
 #[test]
-/// Test case to check if resolving a multistep linear alias works properly.
-fn lin_multi_alias() {
+fn test_unify_int_view_for_bool_1() {
 	let mut prb = Model::default();
-	let x = prb.new_int_var(RangeList::from_iter([1..=10]));
-	let y = prb.new_int_var(RangeList::from_iter([1..=10]));
-	let z = prb.new_int_var(RangeList::from_iter([1..=10]));
-	let x_trans = x * -1 - 1;
-	let y_trans = y + 1;
-	let z_trans = z + 1;
-	assert!(prb.unify_int(x, y_trans).is_ok());
-	assert!(prb.unify_int(y, z_trans).is_ok());
-	assert_eq!(prb.get_int_lower_bound(x_trans), -11);
-	assert_eq!(prb.get_int_upper_bound(x_trans), -4);
+	let a = prb.new_bool_var();
+	let b = prb.new_bool_var();
+	prb += (a * 2 + b * -2).eq(0);
+	prb.expect_solutions(
+		&[a, b],
+		expect![[r#"
+		false, false
+		true, true"#]],
+	);
+}
+
+#[test]
+fn test_unify_int_view_for_bool_2() {
+	let mut prb = Model::default();
+	let a = prb.new_bool_var();
+	let b = prb.new_bool_var();
+	prb += (a * -2 + b * 3).eq(0);
+	prb.expect_solutions(
+		&[a, b],
+		expect![[r#"
+		false, false"#]],
+	);
+}
+
+#[test]
+fn test_unify_int_view_for_bool_3() {
+	let mut prb = Model::default();
+	let a = prb.new_bool_var();
+	let b = prb.new_bool_var();
+	prb += (a * -2 + b * -3).eq(0);
+	prb.expect_solutions(
+		&[a, b],
+		expect![[r#"
+		false, false"#]],
+	);
+}
+
+#[test]
+fn test_unify_int_view_for_bool_4() {
+	let mut prb = Model::default();
+	let a = prb.new_bool_var();
+	let b = prb.new_bool_var();
+	prb += (a * 2 + b * 3).eq(0);
+	prb.expect_solutions(
+		&[a, b],
+		expect![[r#"
+		false, false"#]],
+	);
+}
+
+#[test]
+fn test_unify_int_view_for_bool_5() {
+	let mut prb = Model::default();
+	let a = prb.new_bool_var();
+	let b = prb.new_bool_var();
+	prb += (a * 2 + b * -3).eq(0);
+	prb.expect_solutions(
+		&[a, b],
+		expect![[r#"
+		false, false"#]],
+	);
+}
+
+#[test]
+fn test_unify_int_view_for_bool_6() {
+	let mut prb = Model::default();
+	let a = prb.new_bool_var();
+	let b = prb.new_bool_var();
+	prb += (((a * 2) + 2) + b * -3).eq(0);
+	prb.assert_unsatisfiable();
 }
 
 impl Model {
