@@ -194,7 +194,7 @@ impl IntLinear {
 			},
 			LinOperator::LessEq => Self {
 				terms: self.terms.into_iter().map(|v| -v).collect(),
-				rhs: -self.rhs,
+				rhs: -self.rhs - 1,
 				..self
 			},
 			LinOperator::NotEqual => Self {
@@ -870,7 +870,9 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
+		constraints::int_linear::{
+			IntLinear, IntLinearLessEqBounds, IntLinearNotEqValue, LinOperator, Reification,
+		},
 		reformulate::InitConfig,
 		solver::{
 			int_var::{EncodingType, IntVar},
@@ -1115,5 +1117,20 @@ mod tests {
 		true, 2, 2, 1
 		true, 2, 2, 2"#]],
 		);
+	}
+
+	#[test]
+	fn test_constraint_rewriting() {
+		// Regression test for GitHub issue 233, where a `int_lin_le_reif` known to be
+		// false was rewritten incorrectly. It allowed `a` to be 2.
+		let mut prb = Model::default();
+		let a = prb.new_int_var(1..=2);
+		prb += IntLinear {
+			terms: vec![-a],
+			operator: LinOperator::LessEq,
+			rhs: -2,
+			reif: Some(Reification::ReifiedBy(false.into())),
+		};
+		prb.expect_solutions(&[a], expect![[r#"1"#]]);
 	}
 }

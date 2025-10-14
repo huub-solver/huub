@@ -631,7 +631,7 @@ where
 		let c = &self.fzn.constraints[con];
 
 		let add_view = |me: &mut Self, name: S, view: Decision| -> Result<(), FlatZincError> {
-			match me.map.entry(name) {
+			match me.map.entry(name.clone()) {
 				Entry::Occupied(e) => match *e.get() {
 					Decision::Bool(bv) => {
 						let Decision::Bool(view) = view else {
@@ -647,6 +647,18 @@ where
 					}
 				},
 				Entry::Vacant(e) => {
+					// Enforce the domain of the named (uncreated) variable on the view
+					let def = me.fzn.variables.get(&name).unwrap();
+					if let Some(dom) = &def.domain {
+						let Domain::Int(dom) = dom else {
+							unreachable!()
+						};
+						let Decision::Int(view) = view else {
+							unreachable!()
+						};
+						me.prb.set_int_in_set(view, dom)?;
+					}
+					// Insert the view to use instead of a new variable for the name
 					let _ = e.insert(view);
 				}
 			}
