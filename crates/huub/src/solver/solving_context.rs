@@ -214,6 +214,14 @@ impl<'a> SolvingContext<'a> {
 				self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, val);
 				self.state.int_vars[iv].notify_upper_bound(&mut self.state.trail, val);
 			}
+			IntLitMeaning::NotEq(val) if val == lb => {
+				let val = self.state.int_vars[iv].tighten_greater_eq_lit(val + 1);
+				self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, val);
+			}
+			IntLitMeaning::NotEq(val) if val == ub => {
+				let val = self.state.int_vars[iv].tighten_less_lit(val);
+				self.state.int_vars[iv].notify_upper_bound(&mut self.state.trail, val - 1);
+			}
 			IntLitMeaning::NotEq(_) => {}
 			IntLitMeaning::GreaterEq(lb) => {
 				self.state.int_vars[iv].notify_lower_bound(&mut self.state.trail, lb);

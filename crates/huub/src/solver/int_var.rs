@@ -896,6 +896,22 @@ impl IntVar {
 		}
 	}
 
+	/// Method used to strengthen the meaning of a [`LitMeaning::GreaterEq`]
+	/// literal when possible through gaps in the domain.
+	pub(crate) fn tighten_greater_eq_lit(&self, val: IntVal) -> IntVal {
+		let mut ranges = self.domain.iter();
+		if ranges.len() == 1 {
+			debug_assert!(self.domain.contains(&(val - 1)));
+			return val;
+		}
+		let range = ranges.find(|r| val <= *r.end()).unwrap();
+		if val < *range.start() {
+			*range.start()
+		} else {
+			val
+		}
+	}
+
 	/// Method used to strengthen the meaning of a [`LitMeaning::Less`] literal
 	/// when possible through gaps in the domain.
 	pub(crate) fn tighten_less_lit(&self, val: IntVal) -> IntVal {

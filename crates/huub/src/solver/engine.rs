@@ -205,19 +205,37 @@ impl Engine {
 				}
 				// Get the value of the original reason lit by negating again: ¬¬a
 				// gives a
-				let val = self.state.trail.get_sat_value(!l);
-				if !val.unwrap_or(false) {
+				let trail_val = self.state.trail.get_sat_value(!l);
+				let val = trail_val.unwrap_or_else(|| match self.state.get_int_lit_meaning(!l) {
+					Some((iv, IntLitMeaning::Eq(v))) => {
+						let (lb, ub) = self.state.int_vars[iv].get_bounds(&self.state.trail);
+						v == lb && v == ub
+					}
+					Some((iv, IntLitMeaning::NotEq(v))) => {
+						let (lb, ub) = self.state.int_vars[iv].get_bounds(&self.state.trail);
+						v < lb || v > ub
+					}
+					Some((iv, IntLitMeaning::GreaterEq(v))) => {
+						self.state.int_vars[iv].get_lower_bound(&self.state.trail) >= v
+					}
+					Some((iv, IntLitMeaning::Less(v))) => {
+						self.state.int_vars[iv].get_upper_bound(&self.state.trail) < v
+					}
+					_ => false,
+				});
+				if !val {
 					tracing::error!(
 						clause = ?clause.iter().map(|&l| i32::from(l)).collect::<Vec<_>>(),
 						lit_explained = i32::from(lit),
 						lit_invalid = i32::from(!l),
-						invalid_val = ?val,
+						invalid_val = val,
+						trail_val = ?trail_val,
 						"invalid reason: not all antecedents are known true"
 					);
 				}
 				debug_assert!(
-					val.unwrap_or(false),
-					"Literal {} in Reason for {lit} is {val:?}, but should be known true",
+					val,
+					"Literal {} in Reason for {lit} is {val} ({trail_val:?} on trail), but should be known true",
 					!l,
 				);
 			}
