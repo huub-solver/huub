@@ -1,6 +1,6 @@
 [workspace]
 
-members = ["crates/huub", "crates/huub-cli", "xtask"]
+members = ["crates/examples/*", "crates/huub", "crates/huub-cli", "xtask"]
 default-members = ["crates/huub", "crates/huub-cli"]
 
 resolver = "2"

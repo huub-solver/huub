@@ -1,0 +1,12 @@
+[package]
+name = "jssp"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+ctrlc = "3.5.0"
+humantime = "2.3.0"
+huub = { path = "../../huub" }
+pico-args = "0.5.0"
+rangelist = "0.3.2"
