@@ -64,7 +64,7 @@ struct Options {
 	statistics: bool,
 	reason_eager: bool,
 	time_limit: Option<Duration>,
-	int_eager_limit: Option<usize>,
+	int_eager_limit: usize,
 	restart: bool,
 	vsids_after_conflict: Option<u32>,
 	vsids_after_restart: bool,
@@ -72,6 +72,37 @@ struct Options {
 	vsids_only: bool,
 	verbose: bool,
 	objective_type: ObjectiveType,
+}
+
+impl Options {
+	fn format_option<T: ToString>(&self, opt: &Option<T>) -> String {
+		opt.as_ref()
+			.map(ToString::to_string)
+			.unwrap_or_else(|| "N/A".to_string())
+	}
+}
+
+impl fmt::Display for Options {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		writeln!(f, "  Objective type: {:?}", self.objective_type)?;
+		writeln!(f, "  Reason eager: {}", self.reason_eager)?;
+		writeln!(f, "  Integer eager limit: {}", self.int_eager_limit)?;
+		writeln!(
+			f,
+			"  Time limit: {}",
+			self.format_option(&self.time_limit.map(|tl| tl.as_secs_f32()))
+		)?;
+		writeln!(f, "  Restart: {}", self.restart)?;
+		writeln!(
+			f,
+			"  VSIDS after conflict: {}",
+			self.format_option(&self.vsids_after_conflict)
+		)?;
+		writeln!(f, "  VSIDS after restart: {}", self.vsids_after_restart)?;
+		writeln!(f, "  Toggle VSIDS: {}", self.toggle_vsids)?;
+		writeln!(f, "  VSIDS only: {}", self.vsids_only)?;
+		Ok(())
+	}
 }
 
 #[derive(Debug, Default)]
@@ -201,9 +232,7 @@ impl Instance {
 			time_limit: pargs
 				.opt_value_from_fn(["-t", "--time-limit"], parse_time_limit)
 				.map_err(|e| e.to_string())?,
-			int_eager_limit: pargs
-				.opt_value_from_str("--int-eager-limit")
-				.unwrap_or(Some(256)),
+			int_eager_limit: pargs.value_from_str("--int-eager-limit").unwrap_or(256),
 			restart: pargs.contains("--restart"),
 			vsids_after_conflict: pargs
 				.opt_value_from_str("--vsids-after-conflict")
@@ -407,11 +436,14 @@ fn main() {
 		ValueSelection::IndomainMin,
 	);
 
+	println!("Solver configurations:");
+	println!("{0}", instance.options);
+
 	// Configure solver initialization options
 	let init_config = InitConfig::default();
 	init_config
 		.with_restart(instance.options.restart)
-		.with_int_eager_limit(instance.options.int_eager_limit.unwrap_or(256))
+		.with_int_eager_limit(instance.options.int_eager_limit)
 		.with_reason_eager(instance.options.reason_eager);
 	let (mut slv, map): (Solver, _) = model.to_solver(&InitConfig::default()).unwrap();
 
@@ -456,10 +488,18 @@ fn main() {
 		}
 		if instance.options.verbose {
 			println!("Found new solution with objective: {last_obj}");
-			println!("{solution}",);
+			println!("{solution}");
 			println!("-------------------------");
 		}
 	});
+
+	if !instance.options.verbose {
+		println!(
+			"Best solution found with objective: {}",
+			obj_val.unwrap_or(last_obj)
+		);
+		println!("{solution}");
+	}
 
 	// Print statistics if requested
 	if instance.options.statistics {
