@@ -31,9 +31,11 @@ use std::{
 
 use huub::{
 	Branching, IntDecision, IntLinExpr, Model, TermSignal, ValueSelection, VariableSelection,
+	actions::{BrancherInitActions, DecisionActions},
+	branchers::{Brancher, Decision},
 	disjunctive_strict,
 	reformulate::{InitConfig, ReformulationMap},
-	solver::{Goal, IntView, Solver, Valuation, Value, View},
+	solver::{Goal, IntLitMeaning, IntView, Solver, Valuation, Value, View},
 };
 use pico_args::Arguments;
 use rangelist::RangeList;
@@ -72,6 +74,7 @@ struct Options {
 	vsids_only: bool,
 	verbose: bool,
 	objective_type: ObjectiveType,
+	strategy: BranchingStrategy,
 }
 
 impl Options {
@@ -210,6 +213,8 @@ impl Instance {
 	/// - `--objective-type <TYPE>`: Objective type: `makespan` (minimize max
 	///   completion time) or `total_completion_time` (minimize sum of
 	///   completion times).
+	/// - `--branching-strategy <STRATEGY>`: Branching strategy: `job-fifo`,
+	///   `job-lwf`, `job-mwf`, `job-sjf`, `job-ljf`, `op-fifo`, `op-lpt`.
 	/// - `<data_file>`: Path to the JSP instance file (required).
 	///
 	/// # Errors
@@ -223,6 +228,21 @@ impl Instance {
 			"makespan" => Ok(ObjectiveType::Makespan),
 			"total_completion_time" => Ok(ObjectiveType::TotalCompletionTime),
 			_ => Err(format!("Invalid objective type: {s}")),
+		};
+
+		let parse_branching_strategy = |s: &str| match s {
+			"job-fifo" => Ok(BranchingStrategy::Static(StaticBranching::JobFifo)),
+			"job-lwf" => Ok(BranchingStrategy::Static(StaticBranching::JobLwf)),
+			"job-mwf" => Ok(BranchingStrategy::Static(StaticBranching::JobMwf)),
+			"job-sjf" => Ok(BranchingStrategy::Static(StaticBranching::JobSjf)),
+			"job-ljf" => Ok(BranchingStrategy::Static(StaticBranching::JobLjf)),
+			"op-fifo" => Ok(BranchingStrategy::Static(StaticBranching::OpFifo)),
+			"op-lpt" => Ok(BranchingStrategy::Static(StaticBranching::OpLpt)),
+			"op-lwr" => Ok(BranchingStrategy::Dynamic(DynamicBranching::OpLwr)),
+			"op-mwr" => Ok(BranchingStrategy::Dynamic(DynamicBranching::OpMwr)),
+			"op-lor" => Ok(BranchingStrategy::Dynamic(DynamicBranching::OpLor)),
+			"op-mor" => Ok(BranchingStrategy::Dynamic(DynamicBranching::OpMor)),
+			_ => Err(format!("Invalid branching strategy: {s}")),
 		};
 
 		instance.options = Options {
@@ -243,6 +263,9 @@ impl Instance {
 			objective_type: pargs
 				.value_from_fn("--objective-type", parse_objective_type)
 				.unwrap_or_default(),
+			strategy: pargs
+				.value_from_fn("--branching-strategy", parse_branching_strategy)
+				.unwrap_or(BranchingStrategy::Static(StaticBranching::JobFifo)),
 		};
 
 		let data_file: String = pargs.free_from_str().expect("Missing data file argument");
@@ -340,6 +363,225 @@ impl fmt::Display for Solution {
 	}
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+enum StaticBranching {
+	#[default]
+	/// Select jobs in their input order and schedule all operations of a job
+	/// before moving to the next job.
+	JobFifo,
+	/// Select jobs with the least total processing time first and schedule all
+	/// operations of a job before moving to the next job.
+	JobLwf,
+	/// Select jobs with the most total processing time first and schedule all
+	/// operations of a job before moving to the next job.
+	JobMwf,
+	/// Select jobs with the fewest operations first and schedule all
+	/// operations of a job before moving to the next job.
+	JobSjf,
+	/// Select jobs with the most operations first and schedule all
+	/// operations of a job before moving to the next job.
+	JobLjf,
+	/// Select operations in their input order.
+	OpFifo,
+	/// Select operations with the longest processing time first.
+	OpLpt,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum DynamicBranching {
+	#[default]
+	/// Select the first available operation of the job with the least total
+	/// processing time remaining across all jobs
+	OpLwr,
+	/// Select the first available operation of the job with the most total
+	/// processing time remaining across all jobs
+	OpMwr,
+	/// Select the first available operation of the job with the least number of
+	/// operations remaining across all jobs
+	OpLor,
+	/// Select the first available operation of the job with the most number of
+	/// operations remaining across all jobs
+	OpMor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+/// Branching strategies for variable selection in the job shop scheduling
+/// problem.
+enum BranchingStrategy {
+	Static(StaticBranching),
+	Dynamic(DynamicBranching),
+}
+
+impl Default for BranchingStrategy {
+	fn default() -> Self {
+		BranchingStrategy::Static(StaticBranching::JobFifo)
+	}
+}
+
+/// Creates a static branching strategy for the job shop scheduling problem.
+fn create_static_branching(
+	strategy: StaticBranching,
+	start_time: &[Vec<IntDecision>],
+	instance: &Instance,
+) -> Branching {
+	let mut vars = Vec::new();
+	match strategy {
+		StaticBranching::JobFifo | StaticBranching::OpFifo => {
+			// Job-level / Operation-level first in first out priority dispatching rule
+			// Order jobs/operations by their original order in the input
+			for job_idx in 0..instance.n {
+				for op in &start_time[job_idx] {
+					vars.push(*op);
+				}
+			}
+		}
+		StaticBranching::JobLwf | StaticBranching::JobMwf => {
+			// Job-level least/most work first priority dispatching rule
+			// Order jobs by total processing time ascendingly/descendingly
+			let mut job_work: Vec<(usize, i64)> = (0..instance.n)
+				.map(|j| {
+					let work = instance.jobs[j]
+						.operations
+						.iter()
+						.map(|op| op.processing_time as i64)
+						.sum();
+					(j, work)
+				})
+				.collect();
+			if strategy == StaticBranching::JobMwf {
+				job_work
+					.iter_mut()
+					.for_each(|&mut (_, ref mut work)| *work = -*work);
+			}
+			job_work.sort_by_key(|&(_, work)| work);
+			for (job_idx, _) in job_work {
+				for op in &start_time[job_idx] {
+					vars.push(*op);
+				}
+			}
+		}
+		StaticBranching::JobLjf | StaticBranching::JobSjf => {
+			// Job-level shortest/longest job first priority dispatching rule
+			// Order jobs by number of operations ascendingly/descendingly
+			let mut job_lengths: Vec<(usize, i64)> = (0..instance.n)
+				.map(|j| (j, instance.jobs[j].operations.len() as i64))
+				.collect();
+			if strategy == StaticBranching::JobSjf {
+				job_lengths
+					.iter_mut()
+					.for_each(|&mut (_, ref mut len)| *len = -*len);
+			}
+			for (job_idx, _) in job_lengths {
+				for op in &start_time[job_idx] {
+					vars.push(*op);
+				}
+			}
+		}
+		StaticBranching::OpLpt => {
+			// Operation-level longest processing time priority dispatching rule
+			// Order all operations by processing time descendingly
+			let mut ops: Vec<(usize, usize, i64)> = Vec::new(); // (job_idx, op_idx, processing_time)
+			for (job_idx, job) in instance.jobs.iter().enumerate() {
+				for (op_idx, op) in job.operations.iter().enumerate() {
+					ops.push((job_idx, op_idx, op.processing_time as i64));
+				}
+			}
+			ops.sort_by_key(|&(_, _, pt)| -pt);
+			for (job_idx, op_idx, _) in ops {
+				vars.push(start_time[job_idx][op_idx]);
+			}
+		}
+	};
+	Branching::Int(
+		vars,
+		VariableSelection::InputOrder,
+		ValueSelection::IndomainMin,
+	)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct DynamicBrancher {
+	strategy: DynamicBranching,
+	/// The start time variables for each operation in each job
+	/// (job_index, operation_index, start_time_view)
+	start_time: Vec<Vec<IntView>>,
+	/// The processing times for each operation in each job
+	processing_times: Vec<Vec<usize>>,
+}
+
+impl DynamicBrancher {
+	pub fn new_in(
+		solver: &mut impl BrancherInitActions,
+		strategy: DynamicBranching,
+		start_time: Vec<Vec<IntView>>,
+		processing_times: Vec<Vec<usize>>,
+	) {
+		for job_start_times in start_time.iter() {
+			for &op_start_time in job_start_times.iter() {
+				solver.ensure_decidable(View::Int(op_start_time));
+			}
+		}
+
+		solver.push_brancher(Box::new(DynamicBrancher {
+			strategy,
+			start_time,
+			processing_times,
+		}));
+	}
+}
+
+impl<D: DecisionActions> Brancher<D> for DynamicBrancher {
+	fn decide(&mut self, actions: &mut D) -> Decision {
+		let mut job_scores: Vec<(usize, i64)> = Vec::new();
+		for (job_idx, job_ops) in self.start_time.iter().enumerate() {
+			let mut score = 0;
+			for (op_idx, &op_start) in job_ops.iter().enumerate() {
+				let (lb, ub) = actions.get_int_bounds(op_start);
+				if lb != ub {
+					match self.strategy {
+						DynamicBranching::OpLor => score += 1,
+						DynamicBranching::OpMor => score -= 1,
+						DynamicBranching::OpLwr => {
+							score += self.processing_times[job_idx][op_idx] as i64
+						}
+						DynamicBranching::OpMwr => {
+							score -= self.processing_times[job_idx][op_idx] as i64
+						}
+					}
+				}
+			}
+			// Only consider jobs with non-zero remaining operations or remaining work
+			if score == 0 {
+				continue;
+			}
+			job_scores.push((job_idx, score));
+		}
+		if job_scores.is_empty() {
+			return Decision::Exhausted;
+		}
+
+		// Sort jobs by their scores according to the selected scores
+		job_scores.sort_by_key(|&(_, score)| score);
+
+		// Select the first unfixed operation of the highest-priority job
+		let mut next_dec = None;
+		let first_job = job_scores[0].0;
+		for (_, &op_start) in self.start_time[first_job].iter().enumerate() {
+			let (lb, ub) = actions.get_int_bounds(op_start);
+			if lb != ub {
+				next_dec = Some(actions.get_int_lit(op_start, IntLitMeaning::Less(lb + 1)));
+				break;
+			}
+		}
+
+		if let Some(bv) = next_dec {
+			Decision::Select(bv)
+		} else {
+			Decision::Exhausted
+		}
+	}
+}
+
 fn main() {
 	let instance = Instance::from_args().expect("Failed to parse arguments");
 
@@ -427,14 +669,9 @@ fn main() {
 	};
 
 	// Add branching strategy for start times
-	model += Branching::Int(
-		start_time
-			.iter()
-			.flat_map(|ops| ops.iter().cloned())
-			.collect(),
-		VariableSelection::Smallest,
-		ValueSelection::IndomainMin,
-	);
+	if let BranchingStrategy::Static(strategy) = instance.options.strategy {
+		model += create_static_branching(strategy, &start_time, &instance);
+	}
 
 	println!("Solver configurations:");
 	println!("{0}", instance.options);
@@ -446,6 +683,20 @@ fn main() {
 		.with_int_eager_limit(instance.options.int_eager_limit)
 		.with_reason_eager(instance.options.reason_eager);
 	let (mut slv, map): (Solver, _) = model.to_solver(&InitConfig::default()).unwrap();
+
+	// Set up dynamic branching if specified
+	if let BranchingStrategy::Dynamic(strategy) = instance.options.strategy {
+		let processing_times: Vec<Vec<usize>> = instance
+			.jobs
+			.iter()
+			.map(|job| job.operations.iter().map(|op| op.processing_time).collect())
+			.collect();
+		let start_time: Vec<Vec<IntView>> = start_time
+			.iter()
+			.map(|ops| ops.iter().map(|&v| map.get_int(&mut slv, v)).collect())
+			.collect();
+		DynamicBrancher::new_in(&mut slv, strategy, start_time, processing_times);
+	}
 
 	// Set solver options from command-line flags
 	slv.set_toggle_vsids(instance.options.toggle_vsids);
