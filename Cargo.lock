@@ -458,10 +458,13 @@ name = "huub"
 version = "0.1.0"
 dependencies = [
  "bon",
+ "ctrlc",
  "dyn-clone",
  "expect-test",
  "flatzinc-serde",
+ "humantime",
  "itertools",
+ "pico-args",
  "pindakaas",
  "rangelist 0.4.0",
  "rustc-hash",
@@ -534,17 +537,6 @@ checksum = "9afb3de4395d6b3e67a780b6de64b51c978ecf11cb9a462c66be7d4ca9039d33"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
-]
-
-[[package]]
-name = "jssp"
-version = "0.1.0"
-dependencies = [
- "ctrlc",
- "humantime",
- "huub",
- "pico-args",
- "rangelist 0.3.2",
 ]
 
 [[package]]
