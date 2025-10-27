@@ -23,10 +23,7 @@ use tracing::warn;
 
 use crate::{
 	abs_int,
-	actions::{
-		BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions,
-		SimplificationActions,
-	},
+	actions::{BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions},
 	all_different_int, array_element, array_maximum_int, array_minimum_int,
 	constraints::BoxedConstraint,
 	cumulative, disjunctive_strict, div_int, int_in_set_reif, pow_int,

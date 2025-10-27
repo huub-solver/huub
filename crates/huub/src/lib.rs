@@ -21,11 +21,9 @@ pub(crate) mod tests;
 
 use std::{
 	any::Any,
-	collections::VecDeque,
 	fmt::{Debug, Display},
 	hash::Hash,
 	iter::{repeat_n, repeat_with, Sum},
-	mem,
 	num::{NonZeroI32, NonZeroI64},
 	ops::{Add, AddAssign, Deref, Mul, Neg, Not, Sub},
 };
@@ -46,13 +44,13 @@ use tracing::warn;
 use crate::{
 	actions::{
 		BoolInspectionActions, BoolPostingActions, BoolPropagationActions,
-		BoolSimplificationActions, IntDecisionActions, IntInspectionActions, IntPostingActions,
-		IntPropagationActions, IntSimplificationActions, PostingActions, ReasoningEngine,
-		SimplificationActions,
+		BoolSimplificationActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
+		IntPostingActions, IntPropagationActions, IntSimplificationActions, PostingActions,
+		ReasoningEngine, SimplificationActions,
 	},
 	branchers::{BoolBrancher, IntBrancher, WarmStartBrancher},
 	constraints::{
-		// bool_array_element::BoolDecisionArrayElement,
+		bool_array_element::BoolDecisionArrayElement,
 		// cumulative::Cumulative,
 		// disjunctive_strict::DisjunctiveStrict,
 		// int_abs::IntAbs,
@@ -519,7 +517,7 @@ impl Add<IntVal> for BoolDecision {
 }
 
 impl ElementConstraint for BoolDecision {
-	type Constraint = BoxedConstraint;
+	type Constraint = BoolDecisionArrayElement;
 	type Result = BoolDecision;
 
 	fn element_constraint(
@@ -527,12 +525,11 @@ impl ElementConstraint for BoolDecision {
 		index: IntDecision,
 		result: Self::Result,
 	) -> Self::Constraint {
-		todo!()
-		// Self::Constraint {
-		// 	index,
-		// 	array,
-		// 	result,
-		// }
+		Self::Constraint {
+			index,
+			array,
+			result,
+		}
 	}
 }
 
@@ -1145,10 +1142,11 @@ impl Model {
 
 		for c in self.constraints.iter().flatten() {
 			let c: &dyn Any = &*c;
-			if let Some(abs) =
-				c.downcast_ref::<IntAbsBounds<IntDecision, IntDecision, BoolDecision>>()
-			{
-				println!("IntAbsN {abs:?}");
+			if let Some(c) = c.downcast_ref::<BoolDecisionArrayElement>() {
+				let index = c.index.resolve_alias(self);
+				if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {
+					let _ = int_eager_direct.insert(iv);
+				}
 			}
 			match c {
 				// ConstraintStore::IntAllDifferent(c) if c.value_consistent_propagator_enabled() =>
@@ -1165,12 +1163,6 @@ impl Model {
 				// 	}
 				// }
 				// ConstraintStore::IntValArrayElement(c) => {
-				// 	let index = c.index.resolve_alias(self);
-				// 	if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {
-				// 		let _ = int_eager_direct.insert(iv);
-				// 	}
-				// }
-				// ConstraintStore::BoolDecisionArrayElement(c) => {
 				// 	let index = c.index.resolve_alias(self);
 				// 	if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {
 				// 		let _ = int_eager_direct.insert(iv);
@@ -1379,6 +1371,8 @@ impl BoolPropagationActions<Model> for BoolDecision {
 }
 
 impl IntInspectionActions<Model> for IntDecision {
+	type Atom = <Model as ReasoningEngine>::Atom;
+
 	fn get_lower_bound(&self, ctx: &Model) -> IntVal {
 		use IntDecisionInner::*;
 
@@ -1474,24 +1468,6 @@ impl IntInspectionActions<Model> for IntDecision {
 			},
 		}
 	}
-}
-
-impl IntDecisionActions<Model> for IntDecision {
-	type Atom = BoolDecision;
-
-	fn get_lit(&self, _: &mut Model, meaning: IntLitMeaning) -> Self::Atom {
-		match meaning {
-			IntLitMeaning::Eq(v) => self.eq(v),
-			IntLitMeaning::NotEq(v) => self.ne(v),
-			IntLitMeaning::GreaterEq(v) => self.geq(v),
-			IntLitMeaning::Less(v) => self.lt(v),
-		}
-	}
-
-	fn get_val_lit(&self, ctx: &mut Model) -> Option<Self::Atom> {
-		let val = self.get_val(ctx)?;
-		Some(Self::eq(self, val))
-	}
 
 	fn get_lower_bound_lit(&self, ctx: &Model) -> Self::Atom {
 		let lb = self.get_lower_bound(ctx);
@@ -1501,6 +1477,88 @@ impl IntDecisionActions<Model> for IntDecision {
 	fn get_upper_bound_lit(&self, ctx: &Model) -> Self::Atom {
 		let ub = self.get_upper_bound(ctx);
 		self.leq(ub)
+	}
+
+	fn get_lit_meaning(&self, ctx: &Model, lit: Self::Atom) -> Option<IntLitMeaning> {
+		const BOOL_DEF_MEANING: IntLitMeaning = IntLitMeaning::GreaterEq(1);
+
+		match self.0 {
+			IntDecisionInner::Var(i) => match lit.0 {
+				BoolDecisionInner::IntEq(j, val) if i == j => Some(IntLitMeaning::Eq(val)),
+				BoolDecisionInner::IntGreaterEq(j, val) if i == j => {
+					Some(IntLitMeaning::GreaterEq(val))
+				}
+				BoolDecisionInner::IntLess(j, val) if i == j => Some(IntLitMeaning::Less(val)),
+				BoolDecisionInner::IntNotEq(j, val) if i == j => Some(IntLitMeaning::NotEq(val)),
+				_ => None,
+			},
+			IntDecisionInner::Const(_) => return None,
+			IntDecisionInner::Linear(trans, iv) => {
+				let m = IntDecision(IntDecisionInner::Var(iv)).get_lit_meaning(ctx, lit)?;
+				Some(trans.transform_lit(m))
+			}
+			IntDecisionInner::Bool(trans, b) => {
+				let equiv = match b.0 {
+					BoolDecisionInner::Lit(b) => match lit.0 {
+						BoolDecisionInner::Lit(c) if b == c => Some(true),
+						BoolDecisionInner::Lit(c) if b == !c => Some(false),
+						_ => None,
+					},
+					BoolDecisionInner::IntEq(i, v) => match lit.0 {
+						BoolDecisionInner::IntEq(j, w) if i == j && v == w => Some(true),
+						BoolDecisionInner::IntNotEq(j, w) if i == j && v == w => Some(false),
+						_ => None,
+					},
+					BoolDecisionInner::IntGreaterEq(i, v) => match lit.0 {
+						BoolDecisionInner::IntGreaterEq(j, w) if i == j && v == w => Some(true),
+						BoolDecisionInner::IntLess(j, w) if i == j && v == w => Some(false),
+						_ => None,
+					},
+					BoolDecisionInner::IntLess(i, v) => match lit.0 {
+						BoolDecisionInner::IntLess(j, w) if i == j && v == w => Some(true),
+						BoolDecisionInner::IntGreaterEq(j, w) if i == j && v == w => Some(false),
+						_ => None,
+					},
+					BoolDecisionInner::IntNotEq(i, v) => match lit.0 {
+						BoolDecisionInner::IntEq(j, w) if i == j && v == w => Some(true),
+						BoolDecisionInner::IntNotEq(j, w) if i == j && v == w => Some(false),
+						_ => None,
+					},
+					_ => None,
+				}?;
+				Some(trans.transform_lit(if equiv {
+					BOOL_DEF_MEANING
+				} else {
+					!BOOL_DEF_MEANING
+				}))
+			}
+		}
+	}
+
+	fn try_lit(&self, _: &Model, meaning: IntLitMeaning) -> Option<Self::Atom> {
+		Some(match meaning {
+			IntLitMeaning::Eq(v) => self.eq(v),
+			IntLitMeaning::NotEq(v) => self.ne(v),
+			IntLitMeaning::GreaterEq(v) => self.geq(v),
+			IntLitMeaning::Less(v) => self.lt(v),
+		})
+	}
+}
+
+impl IntDecisionActions<Model> for IntDecision {
+	fn get_lit(&self, ctx: &mut Model, meaning: IntLitMeaning) -> Self::Atom {
+		IntInspectionActions::try_lit(self, ctx, meaning).unwrap()
+	}
+
+	fn get_val_lit(&self, ctx: &mut Model) -> Option<Self::Atom> {
+		let val = self.get_val(ctx)?;
+		Some(Self::eq(self, val))
+	}
+}
+
+impl IntExplanationActions<Model> for IntDecision {
+	fn get_lit_relaxed(&self, ctx: &Model, meaning: IntLitMeaning) -> (Self::Atom, IntLitMeaning) {
+		(self.try_lit(ctx, meaning).unwrap(), meaning)
 	}
 }
 

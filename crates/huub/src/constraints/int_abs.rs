@@ -1,14 +1,20 @@
 //! Structures and algorithms for the integer absolute value constraint, which
 //! enforces that one variable is takes absolute value of another.
 
-use std::{cmp, ops::AddAssign};
+use std::{
+	cmp,
+	ops::{AddAssign, Neg},
+};
 
 use crate::{
 	actions::{
-		BoolInspectionActions, InitializationActions, IntPostingActions, IntPropagationActions,
-		IntSimplificationActions, ReasoningEngine, ReformulationActions,
+		BoolInspectionActions, BoolOperations, InitializationActions, IntPostingActions,
+		IntPropagationActions, IntSimplificationActions, ReasoningEngine, ReformulationActions,
 	},
-	constraints::{BoxedPropagator, Constraint, Propagator, SimplificationStatus},
+	constraints::{
+		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus,
+		SolverBoolView, SolverIntView,
+	},
 	reformulate::ReformulationError,
 	solver::{activation_list::IntPropCond, BoolView, IntLitMeaning, IntView},
 	BoolDecision, IntDecision,
@@ -44,15 +50,13 @@ impl IntAbsBounds<IntView, IntView, BoolView> {
 	}
 }
 
-impl<E> Constraint<E> for IntAbsBounds<IntDecision, IntDecision, BoolDecision>
+impl<B, E, I1, I2, I2Neg> Constraint<E> for IntAbsBounds<I1, I2, B>
 where
 	E: ReasoningEngine,
-	IntDecision: for<'a> IntSimplificationActions<
-			E::PropagationCtx<'a>,
-			Conflict = E::Conflict,
-			Atom = BoolDecision,
-		> + for<'a> IntPostingActions<E::PostingCtx<'a>>,
-	BoolDecision: for<'a> BoolInspectionActions<E::PropagationCtx<'a>>,
+	I1: ModelIntView<E>,
+	I2: ModelIntView<E> + Neg<Output = I2Neg> + Into<I1>,
+	I2Neg: Into<I1>,
+	B: ModelBoolView<E>,
 {
 	fn simplify(
 		&mut self,
@@ -60,11 +64,11 @@ where
 	) -> Result<SimplificationStatus, E::Conflict> {
 		match self.origin_positive.get_val(ctx) {
 			Some(true) => {
-				self.origin.unify(ctx, self.abs)?;
+				self.origin.unify(ctx, self.abs.clone())?;
 				Ok(SimplificationStatus::Subsumed)
 			}
 			Some(false) => {
-				self.origin.unify(ctx, -self.abs)?;
+				self.origin.unify(ctx, -self.abs.clone())?;
 				Ok(SimplificationStatus::Subsumed)
 			}
 			None => {
@@ -82,13 +86,12 @@ where
 	}
 }
 
-impl<I1, I2, B, E: ReasoningEngine> Propagator<E> for IntAbsBounds<I1, I2, B>
+impl<B, E, I1, I2> Propagator<E> for IntAbsBounds<I1, I2, B>
 where
-	I1: for<'a> IntPropagationActions<E::PropagationCtx<'a>, Conflict = E::Conflict, Atom = B>
-		+ for<'a> IntPostingActions<E::PostingCtx<'a>>,
-	I2: for<'a> IntPropagationActions<E::PropagationCtx<'a>, Conflict = E::Conflict, Atom = B>
-		+ for<'a> IntPostingActions<E::PostingCtx<'a>>,
-	B: for<'a> BoolInspectionActions<E::PropagationCtx<'a>>,
+	B: SolverBoolView<E>,
+	E: ReasoningEngine,
+	I1: SolverIntView<E>,
+	I2: SolverIntView<E>,
 {
 	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
 		self.origin.enqueue_when(ctx, IntPropCond::Bounds);

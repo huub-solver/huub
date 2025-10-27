@@ -8,19 +8,15 @@ use std::{
 	ops::{AddAssign, Not},
 };
 
-use pindakaas::{AsDynClauseDatabase, ClauseDatabase, Lit as RawLit};
+use pindakaas::{AsDynClauseDatabase, ClauseDatabase};
 
 use crate::{
 	branchers::BoxedBrancher,
-	constraints::{BoxedPropagator, Conflict, LazyReason, Propagator, ReasonBuilder},
+	constraints::{BoxedPropagator, LazyReason, ReasonBuilder},
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond,
-		engine::{Engine, PropRef},
-		int_var::IntVarRef,
-		queue::PriorityLevel,
-		trail::TrailedInt,
-		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, View,
+		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, BoolView,
+		IntLitMeaning, IntView, View,
 	},
 	BoolDecision, IntDecision, IntSetVal, IntVal, Model,
 };
@@ -56,9 +52,7 @@ pub trait BoolInspectionActions<Context: ?Sized>: BoolOperations {
 
 pub trait BoolPropagationActions<Context>: BoolInspectionActions<Context> {
 	type Conflict;
-	type Atom;
-	// where
-	// 	Self: Into<Self::Atom>;
+	type Atom: BoolOperations + From<Self>;
 
 	fn set(
 		&self,
@@ -109,6 +103,8 @@ pub trait IntOperations: Clone + fmt::Debug + Eq + Hash + 'static {}
 /// Actions that can generally be performed when the solver is (partially)
 /// initialized.
 pub trait IntInspectionActions<Context: ?Sized>: IntOperations {
+	type Atom: BoolOperations;
+
 	/// Get the minimum value that an integer view is guaranteed to take (given
 	/// the current search decisions).
 	fn get_lower_bound(&self, ctx: &Context) -> IntVal;
@@ -136,11 +132,25 @@ pub trait IntInspectionActions<Context: ?Sized>: IntOperations {
 	/// Check whether a given integer view can take a given value (given the
 	/// current search decisions).
 	fn check_int_in_domain(&self, ctx: &Context, val: IntVal) -> bool;
+
+	/// Get the meaning of the given literal with respect to the given integer
+	/// view, or `None` it has no direct meaning.
+	fn get_lit_meaning(&self, ctx: &Context, lit: Self::Atom) -> Option<IntLitMeaning>;
+
+	/// Get the Boolean view that represents that the integer view will take a
+	/// value greater or equal to its current lower bound.
+	fn get_lower_bound_lit(&self, ctx: &Context) -> Self::Atom;
+
+	/// Get the Boolean view that represents that the integer view will take a
+	/// value less or equal to its current upper bound.
+	fn get_upper_bound_lit(&self, ctx: &Context) -> Self::Atom;
+
+	/// Get a Boolean view that represents the given meaning (that is currently
+	/// `true`) on the integer view, if it already exists.
+	fn try_lit(&self, ctx: &Context, meaning: IntLitMeaning) -> Option<Self::Atom>;
 }
 
 pub trait IntDecisionActions<Context: ?Sized>: IntInspectionActions<Context> {
-	type Atom;
-
 	/// Get (or create) a literal for the given referenced integer variable with
 	/// the given meaning.
 	fn get_lit(&self, ctx: &mut Context, meaning: IntLitMeaning) -> Self::Atom;
@@ -151,23 +161,9 @@ pub trait IntDecisionActions<Context: ?Sized>: IntInspectionActions<Context> {
 		let val = self.get_val(ctx)?;
 		Some(self.get_lit(ctx, IntLitMeaning::Eq(val)))
 	}
-
-	/// Get the Boolean view that represents that the integer view will take a
-	/// value greater or equal to its current lower bound.
-	fn get_lower_bound_lit(&self, ctx: &Context) -> Self::Atom;
-
-	/// Get the Boolean view that represents that the integer view will take a
-	/// value less or equal to its current upper bound.
-	fn get_upper_bound_lit(&self, ctx: &Context) -> Self::Atom;
 }
 
 pub trait IntExplanationActions<Context>: IntInspectionActions<Context> {
-	type Atom;
-
-	/// Get the meaning of the given literal with respect to the given integer
-	/// view, or `None` it has no direct meaning.
-	fn get_lit_meaning(&self, ctx: &Context, lit: RawLit) -> Option<IntLitMeaning>;
-
 	/// Get a Boolean view that represents the given meaning (that is currently
 	/// `true`) on the integer view, or a relaxation if the literal does not yet
 	/// exist.
@@ -183,18 +179,6 @@ pub trait IntExplanationActions<Context>: IntInspectionActions<Context> {
 				.expect("value literals cannot be created during explanation"),
 		)
 	}
-
-	/// Get the Boolean view that represents that the integer view will take a
-	/// value greater or equal to its current lower bound.
-	fn get_lower_bound_lit(&self, ctx: &Context) -> Self::Atom;
-
-	/// Get the Boolean view that represents that the integer view will take a
-	/// value less or equal to its current upper bound.
-	fn get_upper_bound_lit(&self, ctx: &Context) -> Self::Atom;
-
-	/// Get a Boolean view that represents the given meaning (that is currently
-	/// `true`) on the integer view, if it already exists.
-	fn try_lit(&self, ctx: &Context, meaning: IntLitMeaning) -> Option<Self::Atom>;
 }
 
 pub trait IntPropagationActions<Context: ?Sized>: IntDecisionActions<Context> {
@@ -308,7 +292,7 @@ pub trait ReasoningEngine {
 	type ExplanationCtx<'a>;
 
 	type Conflict;
-	type Atom;
+	type Atom: BoolOperations;
 }
 
 /// Actions that can be performed when reformulating a [`Model`] object into a

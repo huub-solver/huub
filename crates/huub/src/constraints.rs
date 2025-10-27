@@ -1,6 +1,6 @@
 //! Module containing the definitions for propagators and their implementations.
 
-// pub mod bool_array_element;
+pub mod bool_array_element;
 // pub mod cumulative;
 // pub mod disjunctive_strict;
 pub mod int_abs;
@@ -29,14 +29,19 @@ use pindakaas::Lit as RawLit;
 use tracing::warn;
 
 use crate::{
-	actions::{DecisionActions, ReasoningEngine, ReformulationActions},
+	actions::{
+		BoolInspectionActions, BoolOperations, BoolPostingActions, BoolPropagationActions,
+		BoolSimplificationActions, DecisionActions, IntDecisionActions, IntExplanationActions,
+		IntInspectionActions, IntOperations, IntPostingActions, IntPropagationActions,
+		IntSimplificationActions, ReasoningEngine, ReformulationActions,
+	},
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::IntEvent,
 		engine::{Engine, PropRef, State},
 		BoolView, BoolViewInner, IntView,
 	},
-	Conjunction, Model,
+	BoolDecision, Conjunction, IntDecision, Model,
 };
 
 /// Type alias to represent a user [`Constraint`], stored in a [`Box`], that is
@@ -190,6 +195,106 @@ pub trait Propagator<E: ReasoningEngine>: Debug + DynClone + 'static {
 		let _ = context;
 		Ok(())
 	}
+}
+
+/// Helper trait to simplify trait bounds for [`Propagator`] implementations.
+pub trait SolverBoolView<E>
+where
+	E: ReasoningEngine,
+	Self: for<'a> BoolPostingActions<E::PostingCtx<'a>>
+		+ for<'a> BoolInspectionActions<E::ExplanationCtx<'a>>
+		+ for<'a> BoolInspectionActions<E::NotificationCtx<'a>>
+		+ for<'a> BoolPropagationActions<
+			E::PropagationCtx<'a>,
+			Atom = E::Atom,
+			Conflict = E::Conflict,
+		> + Into<E::Atom>,
+{
+}
+
+impl<E, I> SolverBoolView<E> for I
+where
+	E: ReasoningEngine,
+	Self: for<'a> BoolPostingActions<E::PostingCtx<'a>>
+		+ for<'a> BoolInspectionActions<E::ExplanationCtx<'a>>
+		+ for<'a> BoolInspectionActions<E::NotificationCtx<'a>>
+		+ for<'a> BoolPropagationActions<
+			E::PropagationCtx<'a>,
+			Atom = E::Atom,
+			Conflict = E::Conflict,
+		> + Into<E::Atom>,
+{
+}
+
+/// Helper trait to simplify trait bounds for [`Propagator`] implementations.
+pub trait SolverIntView<E>
+where
+	E: ReasoningEngine,
+	Self: for<'a> IntPostingActions<E::PostingCtx<'a>>
+		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>, Atom = E::Atom>
+		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>, Atom = E::Atom>
+		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>, Atom = E::Atom, Conflict = E::Conflict>,
+{
+}
+
+impl<E, I> SolverIntView<E> for I
+where
+	E: ReasoningEngine,
+	I: for<'a> IntPostingActions<E::PostingCtx<'a>>
+		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>, Atom = E::Atom>
+		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>, Atom = E::Atom>
+		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>, Atom = E::Atom, Conflict = E::Conflict>,
+{
+}
+
+/// Helper trait to simplify trait bounds for [`Constraint`] implementations.
+pub trait ModelBoolView<E>
+where
+	E: ReasoningEngine,
+	Self: SolverBoolView<E>
+		+ for<'a> BoolSimplificationActions<
+			E::PropagationCtx<'a>,
+			Atom = E::Atom,
+			Conflict = E::Conflict,
+		> + Into<BoolDecision>,
+{
+}
+
+impl<E, I> ModelBoolView<E> for I
+where
+	E: ReasoningEngine,
+	I: SolverBoolView<E>
+		+ for<'a> BoolSimplificationActions<
+			E::PropagationCtx<'a>,
+			Atom = E::Atom,
+			Conflict = E::Conflict,
+		> + Into<BoolDecision>,
+{
+}
+
+/// Helper trait to simplify trait bounds for [`Constraint`] implementations.
+pub trait ModelIntView<E>
+where
+	E: ReasoningEngine,
+	Self: SolverIntView<E>
+		+ for<'a> IntSimplificationActions<
+			E::PropagationCtx<'a>,
+			Atom = E::Atom,
+			Conflict = E::Conflict,
+		> + Into<IntDecision>,
+{
+}
+
+impl<E, I> ModelIntView<E> for I
+where
+	E: ReasoningEngine,
+	I: SolverIntView<E>
+		+ for<'a> IntSimplificationActions<
+			E::PropagationCtx<'a>,
+			Atom = E::Atom,
+			Conflict = E::Conflict,
+		> + Into<IntDecision>,
+{
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

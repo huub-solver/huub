@@ -38,7 +38,7 @@ use std::{
 
 use flatzinc_serde::{FlatZinc, Literal, Method};
 use huub::{
-	actions::{DecisionActions, IntDecisionActions},
+	actions::IntDecisionActions,
 	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::{InitConfig, ReformulationError},
 	solver::{Goal, IntLitMeaning, SolveResult, Solver, Valuation, Value, View},

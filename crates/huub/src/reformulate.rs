@@ -2,7 +2,6 @@
 //! reformulation process of creating a [`Solver`] object from a [`Model`].
 
 use std::{
-	cell::RefMut,
 	error::Error,
 	fmt::{self, Display},
 	ops::AddAssign,
@@ -19,37 +18,13 @@ use rustc_hash::FxHashSet;
 
 use crate::{
 	actions::{
-		BoolInspectionActions, BrancherInitActions, DecisionActions, InitializationActions,
-		IntDecisionActions, IntInspectionActions, ReasoningEngine, ReformulationActions,
-		SimplificationActions, TrailingActions,
+		DecisionActions, InitializationActions, IntDecisionActions, ReasoningEngine,
+		ReformulationActions, TrailingActions,
 	},
-	constraints::{
-		// bool_array_element::BoolDecisionArrayElement,
-		// cumulative::Cumulative,
-		// disjunctive_strict::DisjunctiveStrict,
-		// int_abs::IntAbs,
-		// int_all_different::IntAllDifferent,
-		// int_array_element::{IntDecisionArrayElement, IntValArrayElement},
-		// int_array_minimum::IntArrayMinimum,
-		// int_div::IntDiv,
-		// int_in_set::IntInSetReif,
-		// int_linear::IntLinear,
-		// int_pow::IntPow,
-		// int_table::IntTable,
-		// int_times::IntTimes,
-		// int_value_precede::{IntSeqPrecedeChain, IntValuePrecedeChain},
-		BoxedConstraint,
-		BoxedPropagator,
-		Constraint,
-		Propagator,
-		SimplificationStatus,
-	},
+	constraints::{BoxedPropagator, Constraint, Propagator},
 	helpers::linear_transform::LinearTransform,
 	solver::{
-		activation_list::IntPropCond,
-		engine::{Engine, PropRef},
-		int_var::{EncodingType, IntVar, IntVarRef},
-		queue::PriorityLevel,
+		int_var::{EncodingType, IntVar},
 		trail::TrailedInt,
 		BoolView, BoolViewInner, IntView, IntViewInner, View,
 	},

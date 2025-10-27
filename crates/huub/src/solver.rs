@@ -1233,6 +1233,12 @@ impl<Oracle, I> IntInspectionActions<Solver<Oracle>> for I
 where
 	I: IntInspectionActions<State>,
 {
+	type Atom = <I as IntInspectionActions<State>>::Atom;
+
+	fn get_lit_meaning(&self, ctx: &Solver<Oracle>, lit: Self::Atom) -> Option<IntLitMeaning> {
+		self.get_lit_meaning(&ctx.engine.borrow().state, lit)
+	}
+
 	fn get_lower_bound(&self, ctx: &Solver<Oracle>) -> IntVal {
 		self.get_lower_bound(&ctx.engine.borrow().state)
 	}
@@ -1243,29 +1249,6 @@ where
 
 	fn check_int_in_domain(&self, ctx: &Solver<Oracle>, val: IntVal) -> bool {
 		self.check_int_in_domain(&ctx.engine.borrow().state, val)
-	}
-}
-
-impl<Oracle, I> IntExplanationActions<Solver<Oracle>> for I
-where
-	I: IntExplanationActions<State>,
-{
-	type Atom = <I as IntExplanationActions<State>>::Atom;
-
-	fn get_lit_meaning(&self, ctx: &Solver<Oracle>, lit: RawLit) -> Option<IntLitMeaning> {
-		self.get_lit_meaning(&ctx.engine.borrow().state, lit)
-	}
-
-	fn get_lit_relaxed(
-		&self,
-		ctx: &Solver<Oracle>,
-		meaning: IntLitMeaning,
-	) -> (Self::Atom, IntLitMeaning) {
-		self.get_lit_relaxed(&ctx.engine.borrow().state, meaning)
-	}
-
-	fn get_val_lit(&self, ctx: &Solver<Oracle>) -> Option<Self::Atom> {
-		self.get_val_lit(&ctx.engine.borrow().state)
 	}
 
 	fn get_lower_bound_lit(&self, ctx: &Solver<Oracle>) -> Self::Atom {
@@ -1283,10 +1266,9 @@ where
 
 impl<Oracle: ExternalPropagation, I, B> IntDecisionActions<Solver<Oracle>> for I
 where
-	I: for<'a> IntDecisionActions<SolvingContext<'a>, Atom = B> + IntInspectionActions<State>,
+	I: for<'a> IntDecisionActions<SolvingContext<'a>, Atom = B>
+		+ IntInspectionActions<State, Atom = B>,
 {
-	type Atom = B;
-
 	fn get_lit(&self, ctx: &mut Solver<Oracle>, meaning: IntLitMeaning) -> Self::Atom {
 		let (mut actions, mut engine) = ctx.as_parts_mut();
 		let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
@@ -1297,18 +1279,6 @@ where
 		let (mut actions, mut engine) = ctx.as_parts_mut();
 		let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
 		self.get_val_lit(&mut ctx)
-	}
-
-	fn get_lower_bound_lit(&self, ctx: &Solver<Oracle>) -> Self::Atom {
-		let (mut actions, mut engine) = ctx.as_parts();
-		let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
-		self.get_lower_bound_lit(&mut ctx)
-	}
-
-	fn get_upper_bound_lit(&self, ctx: &Solver<Oracle>) -> Self::Atom {
-		let (mut actions, mut engine) = ctx.as_parts();
-		let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
-		self.get_upper_bound_lit(&mut ctx)
 	}
 }
 

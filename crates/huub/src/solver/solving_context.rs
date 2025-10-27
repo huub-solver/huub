@@ -339,8 +339,6 @@ impl<'a> BoolPropagationActions<SolvingContext<'a>> for BoolView {
 }
 
 impl IntDecisionActions<SolvingContext<'_>> for IntVarRef {
-	type Atom = BoolView;
-
 	fn get_lit(&self, ctx: &mut SolvingContext<'_>, meaning: IntLitMeaning) -> BoolView {
 		let var = &mut ctx.state.int_vars[*self];
 		let new_var = |def: LazyLitDef| {
@@ -361,19 +359,9 @@ impl IntDecisionActions<SolvingContext<'_>> for IntVarRef {
 		};
 		var.bool_lit(meaning, new_var).0
 	}
-
-	fn get_lower_bound_lit(&self, ctx: &SolvingContext<'_>) -> BoolView {
-		<Self as IntExplanationActions<State>>::get_lower_bound_lit(self, ctx.state)
-	}
-
-	fn get_upper_bound_lit(&self, ctx: &SolvingContext<'_>) -> BoolView {
-		<Self as IntExplanationActions<State>>::get_upper_bound_lit(self, ctx.state)
-	}
 }
 
 impl IntDecisionActions<SolvingContext<'_>> for IntView {
-	type Atom = BoolView;
-
 	fn get_lit(&self, ctx: &mut SolvingContext<'_>, mut meaning: IntLitMeaning) -> BoolView {
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
 			self.0
@@ -418,20 +406,14 @@ impl IntDecisionActions<SolvingContext<'_>> for IntView {
 			}
 		}
 	}
-
-	fn get_lower_bound_lit(&self, ctx: &SolvingContext<'_>) -> BoolView {
-		<Self as IntExplanationActions<State>>::get_lower_bound_lit(self, ctx.state)
-	}
-
-	fn get_upper_bound_lit(&self, ctx: &SolvingContext<'_>) -> BoolView {
-		<Self as IntExplanationActions<State>>::get_upper_bound_lit(self, ctx.state)
-	}
 }
 
 impl<I> IntInspectionActions<SolvingContext<'_>> for I
 where
 	I: IntInspectionActions<State>,
 {
+	type Atom = <I as IntInspectionActions<State>>::Atom;
+
 	fn get_lower_bound(&self, ctx: &SolvingContext<'_>) -> IntVal {
 		self.get_lower_bound(ctx.state)
 	}
@@ -442,6 +424,22 @@ where
 
 	fn check_int_in_domain(&self, ctx: &SolvingContext<'_>, val: IntVal) -> bool {
 		self.check_int_in_domain(ctx.state, val)
+	}
+
+	fn get_lit_meaning(&self, ctx: &SolvingContext<'_>, lit: Self::Atom) -> Option<IntLitMeaning> {
+		self.get_lit_meaning(ctx.state, lit)
+	}
+
+	fn get_lower_bound_lit(&self, ctx: &SolvingContext<'_>) -> Self::Atom {
+		self.get_lower_bound_lit(ctx.state)
+	}
+
+	fn get_upper_bound_lit(&self, ctx: &SolvingContext<'_>) -> Self::Atom {
+		self.get_upper_bound_lit(ctx.state)
+	}
+
+	fn try_lit(&self, ctx: &SolvingContext<'_>, meaning: IntLitMeaning) -> Option<Self::Atom> {
+		self.try_lit(ctx.state, meaning)
 	}
 }
 

@@ -7,10 +7,13 @@ use std::iter::once;
 use pindakaas::ClauseDatabaseTools;
 
 use crate::{
-	actions::{ConstraintInitActions, ReformulationActions, SimplificationActions},
-	constraints::{Constraint, SimplificationStatus},
+	actions::{
+		BoolPostingActions, BoolSimplificationActions, IntInspectionActions, IntPostingActions,
+		IntPropagationActions, ReasoningEngine, ReformulationActions,
+	},
+	constraints::{Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
-	solver::IntLitMeaning,
+	solver::{activation_list::IntPropCond, IntLitMeaning},
 	BoolDecision, IntDecision, IntVal,
 };
 
@@ -19,7 +22,7 @@ use crate::{
 /// decision variables within a model.
 ///
 /// This constraint enforces that a result Boolean decision variable takes the
-/// value equal the element of the given array of Boolean decision varaibles at
+/// value equal the element of the given array of Boolean decision variables at
 /// the index given by the index integer decision variable.
 pub struct BoolDecisionArrayElement {
 	/// The array of Boolean decision variables
@@ -30,22 +33,20 @@ pub struct BoolDecisionArrayElement {
 	pub(crate) result: BoolDecision,
 }
 
-impl<S: SimplificationActions> Constraint<S> for BoolDecisionArrayElement {
-	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
-		for &b in &self.array {
-			actions.simplify_on_change_bool(b);
-		}
-		actions.simplify_on_change_int(self.index);
-		actions.simplify_on_change_bool(self.result);
-	}
-
-	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		// Fix the bounds of the index is to the length of the array
-		actions.set_int_lower_bound(self.index, 0)?;
-		actions.set_int_upper_bound(self.index, self.array.len() as IntVal - 1)?;
+impl<E> Constraint<E> for BoolDecisionArrayElement
+where
+	E: ReasoningEngine,
+	IntDecision: ModelIntView<E>,
+	BoolDecision: ModelBoolView<E>,
+{
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
+		Self::propagate(self, ctx)?;
 		// Unify if the index is already fixed
-		if let Some(i) = actions.get_int_val(self.index) {
-			actions.unify_bool(self.array[i as usize], self.result)?;
+		if let Some(i) = self.index.get_val(ctx) {
+			self.array[i as usize].unify(ctx, self.result)?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
 		Ok(SimplificationStatus::NoFixpoint)
@@ -62,15 +63,44 @@ impl<S: SimplificationActions> Constraint<S> for BoolDecisionArrayElement {
 			// Evaluate array literal
 			let idx_eq = slv.get_int_lit(index, IntLitMeaning::Eq(i as IntVal));
 			// add clause (idx = i + 1 /\ arr[i]) => val
-			slv.add_clause([!idx_eq, !l, result])?;
+			slv.add_clause([!idx_eq, !l, result])
+				.map_err(|_| -> ReformulationError { todo!() })?;
 			// add clause (idx = i + 1 /\ !arr[i]) => !val
-			slv.add_clause([!idx_eq, l, !result])?;
+			slv.add_clause([!idx_eq, l, !result])
+				.map_err(|_| -> ReformulationError { todo!() })?;
 		}
 
 		// add clause (arr[1] /\ arr[2] /\ ... /\ arr[n]) => val
-		slv.add_clause(arr.iter().map(|&l| !l).chain(once(result)))?;
+		slv.add_clause(arr.iter().map(|&l| !l).chain(once(result)))
+			.map_err(|_| -> ReformulationError { todo!() })?;
 		// add clause (!arr[1] /\ !arr[2] /\ ... /\ !arr[n]) => !val
-		slv.add_clause(arr.into_iter().chain(once(!result)))?;
+		slv.add_clause(arr.into_iter().chain(once(!result)))
+			.map_err(|_| -> ReformulationError { todo!() })?;
+		Ok(())
+	}
+}
+
+impl<E> Propagator<E> for BoolDecisionArrayElement
+where
+	E: ReasoningEngine,
+	IntDecision: ModelIntView<E>,
+	BoolDecision: ModelBoolView<E>,
+{
+	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+		for &b in &self.array {
+			b.enqueue_when_fixed(ctx);
+		}
+		self.index.enqueue_when(ctx, IntPropCond::Fixed);
+		self.result.enqueue_when_fixed(ctx);
+	}
+
+	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+		// Fix the bounds of the index is to the length of the array
+		self.index.set_lower_bound(ctx, 0, vec![])?;
+		self.index
+			.set_upper_bound(ctx, self.array.len() as IntVal - 1, vec![])?;
+
+		// TODO: Do more propagation
 		Ok(())
 	}
 }
