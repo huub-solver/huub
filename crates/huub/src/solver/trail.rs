@@ -10,7 +10,7 @@ use pindakaas::{Lit as RawLit, Var as RawVar};
 use tracing::trace;
 
 use crate::{
-	actions::TrailingActions,
+	actions::{BoolInspectionActions, TrailingActions},
 	solver::{BoolView, BoolViewInner},
 	IntVal,
 };
@@ -310,13 +310,6 @@ impl Default for Trail {
 }
 
 impl TrailingActions for Trail {
-	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
-		match bv.0 {
-			BoolViewInner::Lit(lit) => self.get_sat_value(lit),
-			BoolViewInner::Const(b) => Some(b),
-		}
-	}
-
 	fn get_trailed_int(&self, i: TrailedInt) -> IntVal {
 		self.int_value[i]
 	}
@@ -328,6 +321,12 @@ impl TrailingActions for Trail {
 		let old = mem::replace(&mut self.int_value[i], v);
 		self.push_trail(TrailEvent::IntAssignment(i, old));
 		old
+	}
+}
+
+impl BoolInspectionActions<Trail> for RawLit {
+	fn get_val(&self, ctx: &Trail) -> Option<bool> {
+		ctx.get_sat_value(*self)
 	}
 }
 

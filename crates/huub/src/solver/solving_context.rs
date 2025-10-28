@@ -282,10 +282,6 @@ impl PropagationActions for SolvingContext<'_> {
 }
 
 impl TrailingActions for SolvingContext<'_> {
-	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
-		self.state.get_bool_val(bv)
-	}
-
 	fn get_trailed_int(&self, x: TrailedInt) -> IntVal {
 		self.state.get_trailed_int(x)
 	}
@@ -295,12 +291,38 @@ impl TrailingActions for SolvingContext<'_> {
 	}
 }
 
-impl<B> BoolInspectionActions<SolvingContext<'_>> for B
-where
-	B: BoolInspectionActions<State>,
-{
+impl BoolInspectionActions<SolvingContext<'_>> for RawLit {
 	fn get_val(&self, ctx: &SolvingContext<'_>) -> Option<bool> {
 		self.get_val(ctx.state)
+	}
+}
+
+impl<'a> BoolPropagationActions<SolvingContext<'a>> for RawLit {
+	type Conflict = Conflict;
+	type Atom = BoolView;
+
+	fn set_val(
+		&self,
+		ctx: &mut SolvingContext<'a>,
+		val: bool,
+		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
+	) -> Result<(), Self::Conflict> {
+		if val { *self } else { !(*self) }.set(ctx, reason)
+	}
+
+	fn set(
+		&self,
+		ctx: &mut SolvingContext<'a>,
+		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
+	) -> Result<(), Self::Conflict> {
+		match ctx.state.trail.get_sat_value(*self) {
+			Some(true) => Ok(()),
+			Some(false) => Err(Conflict::new(ctx, Some(*self), reason)),
+			None => {
+				ctx.propagate_lit(*self, reason, None);
+				Ok(())
+			}
+		}
 	}
 }
 
@@ -324,14 +346,7 @@ impl<'a> BoolPropagationActions<SolvingContext<'a>> for BoolView {
 	) -> Result<(), Self::Conflict> {
 		let reason: Vec<BoolView> = reason.build_reason(ctx).into_iter().collect();
 		match self.0 {
-			BoolViewInner::Lit(lit) => match ctx.state.trail.get_sat_value(lit) {
-				Some(true) => Ok(()),
-				Some(false) => Err(Conflict::new(ctx, lit.into(), reason)),
-				None => {
-					ctx.propagate_lit(lit, reason, None);
-					Ok(())
-				}
-			},
+			BoolViewInner::Lit(lit) => lit.set(ctx, reason),
 			BoolViewInner::Const(false) => Err(Conflict::new(ctx, None, reason)),
 			BoolViewInner::Const(true) => Ok(()),
 		}

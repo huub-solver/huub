@@ -9,7 +9,7 @@ pub mod int_abs;
 // pub mod int_array_minimum;
 // pub mod int_div;
 // pub mod int_in_set;
-// pub mod int_linear;
+pub mod int_linear;
 // pub mod int_pow;
 // pub mod int_table;
 // pub mod int_times;
@@ -19,7 +19,6 @@ use std::{
 	error::Error,
 	fmt::{self, Debug},
 	iter::once,
-	marker::PhantomData,
 	mem,
 };
 
@@ -30,10 +29,9 @@ use tracing::warn;
 
 use crate::{
 	actions::{
-		BoolInspectionActions, BoolOperations, BoolPostingActions, BoolPropagationActions,
-		BoolSimplificationActions, DecisionActions, IntDecisionActions, IntExplanationActions,
-		IntInspectionActions, IntOperations, IntPostingActions, IntPropagationActions,
-		IntSimplificationActions, ReasoningEngine, ReformulationActions,
+		BoolInspectionActions, BoolPostingActions, BoolPropagationActions,
+		BoolSimplificationActions, IntExplanationActions, IntInspectionActions, IntPostingActions,
+		IntPropagationActions, IntSimplificationActions, ReasoningEngine, ReformulationActions,
 	},
 	reformulate::ReformulationError,
 	solver::{
@@ -127,14 +125,8 @@ pub trait Propagator<E: ReasoningEngine>: Debug + DynClone + 'static {
 	/// Advises the propagator that a [`BoolView`] is assigned with the
 	/// associated data given when registering the advisor. If the advisor
 	/// returns `true`, then the propagator will be enqueued.
-	fn advise_of_bool_change(
-		&mut self,
-		context: &mut E::NotificationCtx<'_>,
-		view: BoolView,
-		data: u64,
-	) -> bool {
+	fn advise_of_bool_change(&mut self, context: &mut E::NotificationCtx<'_>, data: u64) -> bool {
 		let _ = context;
-		let _ = view;
 		let _ = data;
 		unreachable!("propagator did not provide a Boolean advisor implementation")
 	}
@@ -145,12 +137,10 @@ pub trait Propagator<E: ReasoningEngine>: Debug + DynClone + 'static {
 	fn advise_of_int_change(
 		&mut self,
 		context: &mut E::NotificationCtx<'_>,
-		view: IntView,
-		event: IntEvent,
 		data: u64,
+		event: IntEvent,
 	) -> bool {
 		let _ = context;
-		let _ = view;
 		let _ = event;
 		let _ = data;
 		unreachable!("propagator did not provide an integer advisor implementation")
@@ -200,7 +190,7 @@ pub trait Propagator<E: ReasoningEngine>: Debug + DynClone + 'static {
 /// Helper trait to simplify trait bounds for [`Propagator`] implementations.
 pub trait SolverBoolView<E>
 where
-	E: ReasoningEngine,
+	E: ReasoningEngine + ?Sized,
 	Self: for<'a> BoolPostingActions<E::PostingCtx<'a>>
 		+ for<'a> BoolInspectionActions<E::ExplanationCtx<'a>>
 		+ for<'a> BoolInspectionActions<E::NotificationCtx<'a>>
@@ -214,7 +204,7 @@ where
 
 impl<E, I> SolverBoolView<E> for I
 where
-	E: ReasoningEngine,
+	E: ReasoningEngine + ?Sized,
 	Self: for<'a> BoolPostingActions<E::PostingCtx<'a>>
 		+ for<'a> BoolInspectionActions<E::ExplanationCtx<'a>>
 		+ for<'a> BoolInspectionActions<E::NotificationCtx<'a>>
@@ -229,7 +219,7 @@ where
 /// Helper trait to simplify trait bounds for [`Propagator`] implementations.
 pub trait SolverIntView<E>
 where
-	E: ReasoningEngine,
+	E: ReasoningEngine + ?Sized,
 	Self: for<'a> IntPostingActions<E::PostingCtx<'a>>
 		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>, Atom = E::Atom>
 		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>, Atom = E::Atom>
@@ -239,7 +229,7 @@ where
 
 impl<E, I> SolverIntView<E> for I
 where
-	E: ReasoningEngine,
+	E: ReasoningEngine + ?Sized,
 	I: for<'a> IntPostingActions<E::PostingCtx<'a>>
 		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>, Atom = E::Atom>
 		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>, Atom = E::Atom>

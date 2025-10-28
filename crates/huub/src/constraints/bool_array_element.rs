@@ -4,8 +4,6 @@
 
 use std::iter::once;
 
-use pindakaas::ClauseDatabaseTools;
-
 use crate::{
 	actions::{
 		BoolPostingActions, BoolSimplificationActions, IntInspectionActions, IntPostingActions,
@@ -63,19 +61,15 @@ where
 			// Evaluate array literal
 			let idx_eq = slv.get_int_lit(index, IntLitMeaning::Eq(i as IntVal));
 			// add clause (idx = i + 1 /\ arr[i]) => val
-			slv.add_clause([!idx_eq, !l, result])
-				.map_err(|_| -> ReformulationError { todo!() })?;
+			slv.add_clause([!idx_eq, !l, result])?;
 			// add clause (idx = i + 1 /\ !arr[i]) => !val
-			slv.add_clause([!idx_eq, l, !result])
-				.map_err(|_| -> ReformulationError { todo!() })?;
+			slv.add_clause([!idx_eq, l, !result])?;
 		}
 
 		// add clause (arr[1] /\ arr[2] /\ ... /\ arr[n]) => val
-		slv.add_clause(arr.iter().map(|&l| !l).chain(once(result)))
-			.map_err(|_| -> ReformulationError { todo!() })?;
+		slv.add_clause(arr.iter().map(|&l| !l).chain(once(result)))?;
 		// add clause (!arr[1] /\ !arr[2] /\ ... /\ !arr[n]) => !val
-		slv.add_clause(arr.into_iter().chain(once(!result)))
-			.map_err(|_| -> ReformulationError { todo!() })?;
+		slv.add_clause(arr.into_iter().chain(once(!result)))?;
 		Ok(())
 	}
 }

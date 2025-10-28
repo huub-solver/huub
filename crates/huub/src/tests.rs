@@ -231,7 +231,7 @@ impl Model {
 	pub(crate) fn assert_unsatisfiable(&mut self) {
 		let err: Result<(Solver, _), _> = self.to_solver(&InitConfig::default());
 		assert!(
-			matches!(err, Err(ReformulationError::Conflict(_))),
+			matches!(err, Err(ReformulationError::SimplificationConflict(_))),
 			"expected unsatisfiable"
 		);
 	}

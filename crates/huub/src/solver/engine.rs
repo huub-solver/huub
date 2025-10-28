@@ -268,7 +268,7 @@ impl Engine {
 			IntEvent::UpperBound if negated => IntEvent::LowerBound,
 			e => e,
 		};
-		self.propagators[prop].advise_of_int_change(&mut self.state, iv, event, data)
+		self.propagators[prop].advise_of_int_change(&mut self.state, data, event)
 	}
 
 	/// Notify the given propagator about the literal change, providing the
@@ -284,21 +284,9 @@ impl Engine {
 		bool2int: bool,
 	) -> bool {
 		if bool2int {
-			self.propagators[prop].advise_of_int_change(
-				&mut self.state,
-				IntView(IntViewInner::Bool {
-					transformer: Default::default(),
-					lit,
-				}),
-				IntEvent::Fixed,
-				data,
-			)
+			self.propagators[prop].advise_of_int_change(&mut self.state, data, IntEvent::Fixed)
 		} else {
-			self.propagators[prop].advise_of_bool_change(
-				&mut self.state,
-				BoolView(BoolViewInner::Lit(lit)),
-				data,
-			)
+			self.propagators[prop].advise_of_bool_change(&mut self.state, data)
 		}
 	}
 }
@@ -398,9 +386,8 @@ impl PropagatorExtension for Engine {
 							} = &ctx.state.advisors[adv];
 							if !self.propagators[propagator].advise_of_int_change(
 								ctx.state,
-								IntView(IntViewInner::VarRef(r)),
-								IntEvent::Fixed,
 								data,
+								IntEvent::Fixed,
 							) {
 								continue;
 							}
@@ -696,8 +683,8 @@ impl PropagatorExtension for Engine {
 						.try_lit(&self.state, IntLitMeaning::GreaterEq(i))
 						.unwrap();
 					let ub_lit = iv.try_lit(&self.state, IntLitMeaning::Less(i + 1)).unwrap();
-					debug_assert_eq!(self.state.get_bool_val(lb_lit), Some(true));
-					debug_assert_eq!(self.state.get_bool_val(ub_lit), Some(true));
+					debug_assert_eq!(lb_lit.get_val(&self.state), Some(true));
+					debug_assert_eq!(ub_lit.get_val(&self.state), Some(true));
 				}
 			}
 			// If there are no previous changes, run propagators
@@ -880,10 +867,6 @@ impl State {
 }
 
 impl TrailingActions for State {
-	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
-		self.trail.get_bool_val(bv)
-	}
-
 	fn get_trailed_int(&self, x: TrailedInt) -> IntVal {
 		self.trail.get_trailed_int(x)
 	}
@@ -1050,15 +1033,6 @@ impl IntExplanationActions<State> for IntView {
 			meaning
 		};
 		(bv, meaning)
-	}
-}
-
-impl BoolInspectionActions<State> for BoolView {
-	fn get_val(&self, ctx: &State) -> Option<bool> {
-		match self.0 {
-			BoolViewInner::Lit(lit) => lit.get_val(ctx),
-			BoolViewInner::Const(c) => Some(c),
-		}
 	}
 }
 

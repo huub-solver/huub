@@ -8,16 +8,17 @@ use std::{
 
 use crate::{
 	actions::{
-		BoolInspectionActions, BoolOperations, InitializationActions, IntPostingActions,
-		IntPropagationActions, IntSimplificationActions, ReasoningEngine, ReformulationActions,
+		BoolInspectionActions, InitializationActions, IntPostingActions, IntPropagationActions,
+		IntSimplificationActions, PostingActions, ReasoningEngine, ReformulationActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus,
 		SolverBoolView, SolverIntView,
 	},
 	reformulate::ReformulationError,
-	solver::{activation_list::IntPropCond, BoolView, IntLitMeaning, IntView},
-	BoolDecision, IntDecision,
+	solver::{
+		activation_list::IntPropCond, queue::PriorityLevel, BoolView, IntLitMeaning, IntView,
+	},
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -37,9 +38,9 @@ pub struct IntAbsBounds<I1, I2, B> {
 
 impl IntAbsBounds<IntView, IntView, BoolView> {
 	/// Create a new [`IntAbsBounds`] propagator and post it in the solver.
-	pub(crate) fn new_in<E: ?Sized>(engine: &mut E, origin: IntView, abs: IntView)
+	pub(crate) fn new_in<E>(engine: &mut E, origin: IntView, abs: IntView)
 	where
-		E: AddAssign<BoxedPropagator> + InitializationActions,
+		E: AddAssign<BoxedPropagator> + InitializationActions + ?Sized,
 	{
 		let origin_positive = engine.get_int_lit(origin, IntLitMeaning::GreaterEq(0));
 		*engine += Box::new(Self {
@@ -94,6 +95,7 @@ where
 	I2: SolverIntView<E>,
 {
 	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+		ctx.set_priority(PriorityLevel::Highest);
 		self.origin.enqueue_when(ctx, IntPropCond::Bounds);
 		self.abs.enqueue_when(ctx, IntPropCond::Bounds);
 	}

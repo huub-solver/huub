@@ -2,13 +2,15 @@
 //! different phases and by different objects in the solving process.
 
 use std::{
-	cell::RefMut,
 	fmt,
 	hash::Hash,
 	ops::{AddAssign, Not},
 };
 
-use pindakaas::{AsDynClauseDatabase, ClauseDatabase};
+use itertools::Itertools;
+use pindakaas::{
+	AsDynClauseDatabase, ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
+};
 
 use crate::{
 	branchers::BoxedBrancher,
@@ -246,7 +248,7 @@ pub trait IntSimplificationActions<Context: ?Sized>: IntPropagationActions<Conte
 }
 
 /// Actions that can be performed during propagation.
-pub trait PropagationActions {
+pub trait PropagationActions: DecisionActions {
 	/// Create a placeholder reason that will cause the solver to call the
 	/// propagator's [`crate::constraints::Propagator::explain`] method when the
 	/// reason is needed.
@@ -286,10 +288,10 @@ pub trait InitializationActions: AddAssign<BoxedPropagator> {
 }
 
 pub trait ReasoningEngine {
-	type PostingCtx<'a>;
-	type NotificationCtx<'a>;
-	type PropagationCtx<'a>;
-	type ExplanationCtx<'a>;
+	type PostingCtx<'a>: PostingActions;
+	type NotificationCtx<'a>: TrailingActions;
+	type PropagationCtx<'a>: PropagationActions;
+	type ExplanationCtx<'a>: TrailingActions;
 
 	type Conflict;
 	type Atom: BoolOperations;
@@ -324,8 +326,6 @@ pub trait SimplificationActions {
 /// Basic actions that can be performed when the trailing infrastructure is
 /// available.
 pub trait TrailingActions {
-	/// Get the current value of a [`BoolView`], if it has been assigned.
-	fn get_bool_val(&self, bv: BoolView) -> Option<bool>;
 	/// Get the current value of a [`TrailedInt`].
 	fn get_trailed_int(&self, i: TrailedInt) -> IntVal;
 	/// Change the value of a [`TrailedInt`] in a way that can be undone if the
@@ -335,3 +335,70 @@ pub trait TrailingActions {
 
 impl<T> BoolOperations for T where T: Clone + fmt::Debug + Eq + Hash + Not<Output = Self> + 'static {}
 impl<T> IntOperations for T where T: Clone + fmt::Debug + Eq + Hash + 'static {}
+
+impl dyn ReformulationActions + '_ {
+	pub fn add_clause(
+		&mut self,
+		clause: impl IntoIterator<Item = impl Into<BoolView>>,
+	) -> Result<(), ReformulationError> {
+		let clause: Vec<_> = clause.into_iter().map_into().collect();
+		match ClauseDatabaseTools::add_clause(self, clause.clone()) {
+			Err(Unsatisfiable) => Err(ReformulationError::TranslationConflict(clause)),
+			Ok(()) => Ok(()),
+		}
+	}
+
+	fn cnf_encode<C, E>(&mut self, constraint: &C, encoder: &E) -> Result<(), ReformulationError>
+	where
+		C: ?Sized,
+		E: pindakaas::Encoder<Self, C> + ?Sized,
+	{
+		todo!()
+	}
+}
+
+impl BoolInspectionActions<dyn ReformulationActions + '_> for RawLit {
+	fn get_val(&self, ctx: &dyn ReformulationActions) -> Option<bool> {
+		todo!()
+	}
+}
+
+impl IntInspectionActions<dyn ReformulationActions + '_> for IntView {
+	type Atom = BoolView;
+
+	fn get_lower_bound(&self, ctx: &dyn ReformulationActions) -> IntVal {
+		todo!()
+	}
+
+	fn get_upper_bound(&self, ctx: &dyn ReformulationActions) -> IntVal {
+		todo!()
+	}
+
+	fn check_int_in_domain(&self, ctx: &dyn ReformulationActions, val: IntVal) -> bool {
+		todo!()
+	}
+
+	fn get_lit_meaning(
+		&self,
+		ctx: &dyn ReformulationActions,
+		lit: Self::Atom,
+	) -> Option<IntLitMeaning> {
+		todo!()
+	}
+
+	fn get_lower_bound_lit(&self, ctx: &dyn ReformulationActions) -> Self::Atom {
+		todo!()
+	}
+
+	fn get_upper_bound_lit(&self, ctx: &dyn ReformulationActions) -> Self::Atom {
+		todo!()
+	}
+
+	fn try_lit(
+		&self,
+		ctx: &dyn ReformulationActions,
+		meaning: IntLitMeaning,
+	) -> Option<Self::Atom> {
+		todo!()
+	}
+}

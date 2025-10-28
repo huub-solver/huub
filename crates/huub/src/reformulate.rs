@@ -28,8 +28,8 @@ use crate::{
 		trail::TrailedInt,
 		BoolView, BoolViewInner, IntView, IntViewInner, View,
 	},
-	BoolDecision, BoolFormula, ConRef, Decision, IntDecision, IntLitMeaning, IntSetVal, IntVal,
-	Model, Solver,
+	BoolDecision, BoolFormula, Clause, ConRef, Decision, IntDecision, IntLitMeaning, IntSetVal,
+	IntVal, Model, Solver,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -144,9 +144,12 @@ pub(crate) struct ReformulationContext<'a, Oracle> {
 /// Error type used during the reformulation process of creating a [`Solver`],
 /// e.g. when creating a [`Solver`] from a [`crate::Model`].
 pub enum ReformulationError {
-	/// Error used when the problem is found to be unsatisfiable without
-	/// requiring any search.
-	Conflict(<Model as ReasoningEngine>::Conflict),
+	/// Error used when a conflict is found during the simplification process of
+	/// the model.
+	SimplificationConflict(<Model as ReasoningEngine>::Conflict),
+	/// Error used when a conflict is found by the SAT oracle when translating
+	/// the problem.
+	TranslationConflict(Clause<BoolView>),
 }
 
 /// A reformulation helper that maps decisions in a [`Model`] objects to the
@@ -464,10 +467,6 @@ impl<Oracle: ExternalPropagation> AddAssign<BoxedPropagator> for ReformulationCo
 }
 
 impl<Oracle> TrailingActions for ReformulationContext<'_, Oracle> {
-	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
-		self.slv.get_bool_val(bv)
-	}
-
 	fn get_trailed_int(&self, i: TrailedInt) -> IntVal {
 		self.slv.get_trailed_int(i)
 	}
@@ -480,7 +479,12 @@ impl<Oracle> TrailingActions for ReformulationContext<'_, Oracle> {
 impl Display for ReformulationError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			Self::Conflict(c) => write!(f, "The problem is trivially unsatisfiable: {c:?}"),
+			Self::SimplificationConflict(c) => {
+				write!(f, "A conflict occurred during simplification: {c:?}")
+			}
+			Self::TranslationConflict(e) => {
+				write!(f, "An error occurred during solver conversion: {e:?}")
+			}
 		}
 	}
 }
@@ -489,7 +493,7 @@ impl Error for ReformulationError {}
 
 impl From<<Model as ReasoningEngine>::Conflict> for ReformulationError {
 	fn from(value: <Model as ReasoningEngine>::Conflict) -> Self {
-		Self::Conflict(value)
+		Self::SimplificationConflict(value)
 	}
 }
 

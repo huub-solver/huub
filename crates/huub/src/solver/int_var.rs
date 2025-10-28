@@ -15,7 +15,7 @@ use rangelist::{IntervalIterator, RangeList};
 use rustc_hash::FxHashMap;
 
 use crate::{
-	actions::TrailingActions,
+	actions::{BoolInspectionActions, TrailingActions},
 	solver::{trail::TrailedInt, BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner},
 	IntSetVal, IntVal, LinearTransform, NonZeroIntVal, Solver,
 };
@@ -494,11 +494,11 @@ impl IntVar {
 	///
 	/// ## Warning
 	/// This function assumes that `v <= lb`.
-	pub(crate) fn get_greater_eq_lit_or_weaker(
-		&self,
-		trail: &impl TrailingActions,
-		v: IntVal,
-	) -> (BoolView, IntVal) {
+	pub(crate) fn get_greater_eq_lit_or_weaker<T>(&self, trail: &T, v: IntVal) -> (BoolView, IntVal)
+	where
+		T: TrailingActions,
+		RawLit: BoolInspectionActions<T>,
+	{
 		debug_assert!(v <= self.get_lower_bound(trail));
 		if v <= *self.domain.lower_bound().unwrap() {
 			return (BoolView(BoolViewInner::Const(true)), v);
@@ -520,7 +520,7 @@ impl IntVar {
 				while storage.storage[index].val >= v {
 					let node = &storage.storage[index];
 					let lit = BoolView(BoolViewInner::Lit(!node.var));
-					if let Some(v) = trail.get_bool_val(lit) {
+					if let Some(v) = lit.get_val(trail) {
 						debug_assert!(v);
 						ret = (lit, node.val);
 					}
@@ -539,11 +539,11 @@ impl IntVar {
 	///
 	/// ## Warning
 	/// This function assumes that `v >= ub`.
-	pub(crate) fn get_less_lit_or_weaker(
-		&self,
-		trail: &impl TrailingActions,
-		v: IntVal,
-	) -> (BoolView, IntVal) {
+	pub(crate) fn get_less_lit_or_weaker<T>(&self, trail: &T, v: IntVal) -> (BoolView, IntVal)
+	where
+		T: TrailingActions,
+		RawLit: BoolInspectionActions<T>,
+	{
 		debug_assert!(v >= self.get_upper_bound(trail));
 		if v > *self.domain.upper_bound().unwrap() {
 			return (BoolView(BoolViewInner::Const(true)), v);
@@ -566,7 +566,7 @@ impl IntVar {
 				while storage.storage[index].val <= v {
 					let node = &storage.storage[index];
 					let lit = BoolView(BoolViewInner::Lit(node.var.into()));
-					if let Some(v) = trail.get_bool_val(lit) {
+					if let Some(v) = lit.get_val(trail) {
 						debug_assert!(v);
 						ret = (lit, node.val);
 					}
@@ -581,7 +581,11 @@ impl IntVar {
 	}
 
 	/// Returns the lower bound of the current state of the integer variable.
-	pub(crate) fn get_lower_bound(&self, trail: &impl TrailingActions) -> IntVal {
+	pub(crate) fn get_lower_bound<T>(&self, trail: &T) -> IntVal
+	where
+		T: TrailingActions,
+		RawLit: BoolInspectionActions<T>,
+	{
 		match &self.order_encoding {
 			OrderStorage::Eager { lower_bound, .. } => trail.get_trailed_int(*lower_bound),
 			OrderStorage::Lazy(storage) => {
@@ -831,7 +835,11 @@ impl IntVar {
 	///
 	/// This method assumes the literal for the new lower bound has been created
 	/// (and propagated).
-	pub(crate) fn notify_lower_bound(&mut self, trail: &mut impl TrailingActions, val: IntVal) {
+	pub(crate) fn notify_lower_bound<T>(&mut self, trail: &mut T, val: IntVal)
+	where
+		T: TrailingActions,
+		RawLit: BoolInspectionActions<T>,
+	{
 		debug_assert!(self.domain.contains(&val));
 		debug_assert!(val > self.get_lower_bound(trail));
 		match &self.order_encoding {

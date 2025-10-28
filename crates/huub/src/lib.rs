@@ -24,6 +24,7 @@ use std::{
 	fmt::{Debug, Display},
 	hash::Hash,
 	iter::{repeat_n, repeat_with, Sum},
+	mem,
 	num::{NonZeroI32, NonZeroI64},
 	ops::{Add, AddAssign, Deref, Mul, Neg, Not, Sub},
 };
@@ -44,32 +45,17 @@ use tracing::warn;
 use crate::{
 	actions::{
 		BoolInspectionActions, BoolPostingActions, BoolPropagationActions,
-		BoolSimplificationActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
-		IntPostingActions, IntPropagationActions, IntSimplificationActions, PostingActions,
-		ReasoningEngine, SimplificationActions,
+		BoolSimplificationActions, DecisionActions, IntDecisionActions, IntExplanationActions,
+		IntInspectionActions, IntPostingActions, IntPropagationActions, IntSimplificationActions,
+		PostingActions, PropagationActions, ReasoningEngine, SimplificationActions,
+		TrailingActions,
 	},
 	branchers::{BoolBrancher, IntBrancher, WarmStartBrancher},
 	constraints::{
 		bool_array_element::BoolDecisionArrayElement,
-		// cumulative::Cumulative,
-		// disjunctive_strict::DisjunctiveStrict,
-		// int_abs::IntAbs,
-		// int_all_different::IntAllDifferent,
-		// int_array_element::{IntDecisionArrayElement, IntValArrayElement},
-		// int_array_minimum::IntArrayMinimum,
-		// int_div::IntDiv,
-		// int_in_set::IntInSetReif,
-		// int_linear::{IntEq, IntLinear, LinOperator},
-		// int_pow::IntPow,
-		// int_table::IntTable,
-		// int_times::IntTimes,
-		// int_value_precede::{IntSeqPrecedeChain, IntValuePrecedeChain},
 		int_abs::IntAbsBounds,
-		BoxedConstraint,
-		Conflict,
-		Constraint,
-		ReasonBuilder,
-		SimplificationStatus,
+		int_linear::{IntLinear, LinOperator},
+		BoxedConstraint, Conflict, Constraint, LazyReason, ReasonBuilder, SimplificationStatus,
 	},
 	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
 	helpers::linear_transform::LinearTransform,
@@ -81,6 +67,7 @@ use crate::{
 	solver::{
 		activation_list::IntPropCond,
 		queue::{PriorityLevel, PriorityQueue, PropagatorInfo, PropagatorQueue},
+		trail::TrailedInt,
 		IntLitMeaning, Solver,
 	},
 };
@@ -193,6 +180,8 @@ pub struct Model {
 	int_vars: IndexVec<IntDecisionIndex, IntDecisionDef>,
 	/// A queue of constraints that need to be propagated.
 	propagator_queue: PropagatorQueue<ConRef>,
+	/// Fake trailed storage
+	trail: IndexVec<TrailedInt, IntVal>,
 }
 
 /// Type alias for a non-zero parameter integer value.
@@ -874,55 +863,52 @@ impl Sub<IntVal> for IntDecision {
 impl IntLinExpr {
 	/// Create a new integer linear constraint that enforces that the sum of the
 	/// expressions in the object is equal to the given value.
-	pub fn eq(self, rhs: IntVal) -> BoxedConstraint {
-		todo!()
-		// IntLinear {
-		// 	terms: self.terms,
-		// 	operator: LinOperator::Equal,
-		// 	rhs,
-		// 	reif: None,
-		// }
+	pub fn eq(self, rhs: IntVal) -> IntLinear {
+		IntLinear {
+			terms: self.terms,
+			operator: LinOperator::Equal,
+			rhs,
+			reif: None,
+		}
 	}
 
 	/// Create a new integer linear constraint that enforces that the sum of the
 	/// expressions in the object is greater than or equal to the given value.
-	pub fn geq(mut self, rhs: IntVal) -> BoxedConstraint {
+	pub fn geq(mut self, rhs: IntVal) -> IntLinear {
 		self.terms = self.terms.into_iter().map(|x| -x).collect();
 		self.leq(-rhs)
 	}
 
 	/// Create a new integer linear constraint that enforces that the sum of the
 	/// expressions in the object is greater than the given value.
-	pub fn gt(self, rhs: IntVal) -> BoxedConstraint {
+	pub fn gt(self, rhs: IntVal) -> IntLinear {
 		self.geq(rhs + 1)
 	}
 
 	/// Create a new integer linear constraint that enforces that the sum of the
 	/// expressions in the object is less than the given value.
-	pub fn leq(self, rhs: IntVal) -> BoxedConstraint {
-		todo!()
-		// IntLinear {
-		// 	terms: self.terms,
-		// 	operator: LinOperator::LessEq,
-		// 	rhs,
-		// 	reif: None,
-		// }
+	pub fn leq(self, rhs: IntVal) -> IntLinear {
+		IntLinear {
+			terms: self.terms,
+			operator: LinOperator::LessEq,
+			rhs,
+			reif: None,
+		}
 	}
 	/// Create a new integer linear constraint that enforces that the sum of the
 	/// expressions in the object is less than or equal to the given value.
-	pub fn lt(self, rhs: IntVal) -> BoxedConstraint {
+	pub fn lt(self, rhs: IntVal) -> IntLinear {
 		self.leq(rhs - 1)
 	}
 	/// Create a new integer linear constraint that enforces that the sum of the
 	/// expressions in the object is not equal to the given value.
-	pub fn ne(self, rhs: IntVal) -> BoxedConstraint {
-		todo!()
-		// IntLinear {
-		// 	terms: self.terms,
-		// 	operator: LinOperator::NotEqual,
-		// 	rhs,
-		// 	reif: None,
-		// }
+	pub fn ne(self, rhs: IntVal) -> IntLinear {
+		IntLinear {
+			terms: self.terms,
+			operator: LinOperator::NotEqual,
+			rhs,
+			reif: None,
+		}
 	}
 }
 
@@ -1009,10 +995,11 @@ impl Model {
 		let priority = ctx.priority;
 		let r = self.constraints.push(Some(constraint));
 		debug_assert_eq!(r, con);
-		self.propagator_queue.info.push(PropagatorInfo {
+		let r = self.propagator_queue.info.push(PropagatorInfo {
 			enqueued: false,
 			priority,
 		});
+		debug_assert_eq!(r, con);
 		self.propagator_queue.enqueue_propagator(con);
 	}
 
@@ -1852,6 +1839,28 @@ impl IntSimplificationActions<Model> for IntDecision {
 
 impl BoolSimplificationActions<Model> for BoolDecision {
 	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Self::Conflict> {
+		todo!()
+	}
+}
+
+impl TrailingActions for Model {
+	fn get_trailed_int(&self, i: TrailedInt) -> IntVal {
+		self.trail[i]
+	}
+
+	fn set_trailed_int(&mut self, i: TrailedInt, v: IntVal) -> IntVal {
+		mem::replace(&mut self.trail[i], v)
+	}
+}
+
+impl DecisionActions for Model {
+	fn get_num_conflicts(&self) -> u64 {
+		0
+	}
+}
+
+impl PropagationActions for Model {
+	fn deferred_reason(&self, data: u64) -> LazyReason {
 		todo!()
 	}
 }

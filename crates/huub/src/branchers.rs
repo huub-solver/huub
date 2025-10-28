@@ -5,7 +5,10 @@ use std::fmt::Debug;
 use pindakaas::Lit as RawLit;
 
 use crate::{
-	actions::{BrancherInitActions, DecisionActions, IntDecisionActions, IntInspectionActions},
+	actions::{
+		BoolInspectionActions, BrancherInitActions, DecisionActions, IntDecisionActions,
+		IntInspectionActions,
+	},
 	solver::{
 		solving_context::SolvingContext, trail::TrailedInt, BoolView, BoolViewInner, IntLitMeaning,
 		IntView, IntViewInner, View,
@@ -123,9 +126,13 @@ impl BoolBrancher {
 	}
 }
 
-impl<D: DecisionActions> Brancher<D> for BoolBrancher {
-	fn decide(&mut self, actions: &mut D) -> Decision {
-		let begin = actions.get_trailed_int(self.next) as usize;
+impl<E> Brancher<E> for BoolBrancher
+where
+	E: DecisionActions,
+	RawLit: BoolInspectionActions<E>,
+{
+	fn decide(&mut self, ctx: &mut E) -> Decision {
+		let begin = ctx.get_trailed_int(self.next) as usize;
 
 		// return if all variables have been assigned
 		if begin == self.vars.len() {
@@ -144,17 +151,14 @@ impl<D: DecisionActions> Brancher<D> for BoolBrancher {
 
 		let mut loc = None;
 		for (i, &var) in self.vars.iter().enumerate().skip(begin) {
-			if actions
-				.get_bool_val(BoolView(BoolViewInner::Lit(var)))
-				.is_none()
-			{
+			if var.get_val(ctx).is_none() {
 				loc = Some(i);
 				break;
 			}
 		}
 		let var = if let Some(first_unfixed) = loc {
 			// Update position for next iteration
-			let _ = actions.set_trailed_int(self.next, first_unfixed as i64);
+			let _ = ctx.set_trailed_int(self.next, first_unfixed as i64);
 			self.vars[first_unfixed]
 		} else {
 			// Return that everything has already been assigned
@@ -323,13 +327,17 @@ impl WarmStartBrancher {
 	}
 }
 
-impl<D: DecisionActions> Brancher<D> for WarmStartBrancher {
-	fn decide(&mut self, actions: &mut D) -> Decision {
-		if actions.get_num_conflicts() > self.conflicts {
+impl<Context> Brancher<Context> for WarmStartBrancher
+where
+	Context: DecisionActions,
+	RawLit: BoolInspectionActions<Context>,
+{
+	fn decide(&mut self, ctx: &mut Context) -> Decision {
+		if ctx.get_num_conflicts() > self.conflicts {
 			return Decision::Consumed;
 		}
 		while let Some(lit) = self.decisions.pop() {
-			match actions.get_bool_val(BoolView(BoolViewInner::Lit(lit))) {
+			match lit.get_val(ctx) {
 				Some(true) => {}
 				Some(false) => return Decision::Consumed,
 				None => return Decision::Select(lit),

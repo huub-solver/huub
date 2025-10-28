@@ -1121,7 +1121,7 @@ where
 							match lits.len() {
 								0 => {
 									return Err(FlatZincError::ReformulationError(
-										ReformulationError::Conflict(vec![]),
+										ReformulationError::SimplificationConflict(vec![]),
 									))
 								}
 								1 => lits[0]
@@ -1392,7 +1392,7 @@ where
 							});
 						}
 						if table.is_empty() {
-							return Err(ReformulationError::Conflict(vec![]).into());
+							return Err(ReformulationError::SimplificationConflict(vec![]).into());
 						}
 						let table: Vec<Vec<_>> = table
 							.into_iter()
@@ -1831,7 +1831,10 @@ where
 						match lit {
 							Literal::Bool(b) => {
 								if domain == Some(!b) {
-									return Err(ReformulationError::Conflict(Vec::new()).into());
+									return Err(ReformulationError::SimplificationConflict(
+										Vec::new(),
+									)
+									.into());
 								} else {
 									domain = Some(*b);
 								}

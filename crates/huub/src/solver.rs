@@ -35,9 +35,9 @@ use tracing::{debug, trace, warn};
 
 use crate::{
 	actions::{
-		BoolPostingActions, BrancherInitActions, DecisionActions, InitializationActions,
-		IntDecisionActions, IntExplanationActions, IntInspectionActions, IntPostingActions,
-		PostingActions, ReasoningEngine, TrailingActions,
+		BoolInspectionActions, BoolPostingActions, BrancherInitActions, DecisionActions,
+		InitializationActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
+		IntPostingActions, PostingActions, ReasoningEngine, TrailingActions,
 	},
 	branchers::{BoxedBrancher, Brancher},
 	constraints::{BoxedPropagator, Conflict, Propagator, Reason},
@@ -295,6 +295,18 @@ impl Add<IntVal> for BoolView {
 				lit,
 			}),
 			BoolViewInner::Const(b) => (b as IntVal + rhs).into(),
+		}
+	}
+}
+
+impl<E> BoolInspectionActions<E> for BoolView
+where
+	RawLit: BoolInspectionActions<E>,
+{
+	fn get_val(&self, ctx: &E) -> Option<bool> {
+		match self.0 {
+			BoolViewInner::Lit(lit) => lit.get_val(ctx),
+			BoolViewInner::Const(b) => Some(b),
 		}
 	}
 }
@@ -1216,10 +1228,6 @@ impl<Oracle: Default + ExternalPropagation + LearnCallback> Default for Solver<O
 }
 
 impl<Oracle> TrailingActions for Solver<Oracle> {
-	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
-		self.engine.borrow().state.get_bool_val(bv)
-	}
-
 	fn get_trailed_int(&self, x: TrailedInt) -> IntVal {
 		self.engine.borrow().state.get_trailed_int(x)
 	}

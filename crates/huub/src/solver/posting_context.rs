@@ -162,8 +162,8 @@ impl IntPostingActions<PostingContext<'_>> for IntVarRef {
 	}
 }
 
-impl IntPostingActions<PostingContext<'_>> for IntView {
-	fn enqueue_when(&self, ctx: &mut PostingContext<'_>, condition: IntPropCond) {
+impl<'a> IntPostingActions<PostingContext<'a>> for IntView {
+	fn enqueue_when(&self, ctx: &mut PostingContext<'a>, condition: IntPropCond) {
 		match self.0 {
 			IntViewInner::VarRef(iv) => iv.enqueue_when(ctx, condition),
 			IntViewInner::Const(_) => {
@@ -192,7 +192,7 @@ impl IntPostingActions<PostingContext<'_>> for IntView {
 		}
 	}
 
-	fn advise_when(&self, ctx: &mut PostingContext<'_>, condition: IntPropCond, data: u64) {
+	fn advise_when(&self, ctx: &mut PostingContext<'a>, condition: IntPropCond, data: u64) {
 		let (var, cond, negated) = match self.0 {
 			IntViewInner::VarRef(var) => (var, condition, false),
 			IntViewInner::Linear { transformer, var } => {
