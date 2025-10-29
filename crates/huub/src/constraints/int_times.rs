@@ -2,249 +2,190 @@
 //! that the product of two integer variables is equal to a third integer
 //! variable.
 
+use std::ops::{AddAssign, Mul};
+
 use crate::{
-	actions::{
-		ConstraintInitActions, ExplanationActions, PropagatorInitActions, ReformulationActions,
-		SimplificationActions,
+	actions::{IntSimplificationActions, PostingActions, ReasoningEngine, ReformulationActions},
+	constraints::{
+		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
 	},
-	constraints::{CachedReason, Constraint, PropagationActions, Propagator, SimplificationStatus},
 	helpers::{div_ceil, div_floor},
 	reformulate::ReformulationError,
 	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntView},
-	IntDecision, NonZeroIntVal,
+	IntDecision, IntVal, NonZeroIntVal,
 };
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// Representation of the `times_int` constraint within a model.
-///
-/// This constraint enforces that the product of the two integer decision
-/// variables is equal to a third.
-pub struct IntTimes {
-	/// First factor variable
-	pub(crate) factor1: IntDecision,
-	/// Second factor variable
-	pub(crate) factor2: IntDecision,
-	/// Product variable
-	pub(crate) product: IntDecision,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Bounds propagator for the constraint `z = x * y`.
-pub struct IntTimesBounds {
+/// This propagator enforces that the product of the two integer decision
+/// variables is equal to a third, i.e.`x * y = z`.
+pub struct IntTimesBounds<I1, I2, I3> {
 	/// First factor variable
-	factor1: IntView,
+	pub(crate) factor1: I1,
 	/// Second factor variable
-	factor2: IntView,
+	pub(crate) factor2: I2,
 	/// Product variable
-	product: IntView,
+	pub(crate) product: I3,
 }
 
-impl<S: SimplificationActions> Constraint<S> for IntTimes {
-	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
-		actions.simplify_on_change_int(self.factor1);
-		actions.simplify_on_change_int(self.factor2);
-		actions.simplify_on_change_int(self.product);
+impl IntTimesBounds<IntView, IntView, IntView> {
+	/// Create a new [`IntTimesBounds`] propagator and post it in the solver.
+	pub fn new_in<E>(engine: &mut E, factor1: IntView, factor2: IntView, product: IntView)
+	where
+		E: AddAssign<BoxedPropagator> + ?Sized,
+	{
+		let b: BoxedPropagator = Box::new(Self {
+			factor1,
+			factor2,
+			product,
+		});
+		*engine += b;
+	}
+}
+
+impl<E, I1, I2, I3> Propagator<E> for IntTimesBounds<I1, I2, I3>
+where
+	E: ReasoningEngine,
+	I1: SolverIntView<E>,
+	I2: SolverIntView<E>,
+	I3: SolverIntView<E>,
+{
+	fn post(&mut self, ctx: &mut <E as ReasoningEngine>::PostingCtx<'_>) {
+		ctx.set_priority(PriorityLevel::Highest);
+		self.factor1.enqueue_when(ctx, IntPropCond::Bounds);
+		self.factor2.enqueue_when(ctx, IntPropCond::Bounds);
+		self.product.enqueue_when(ctx, IntPropCond::Bounds);
 	}
 
-	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		let (f1_lb, f1_ub) = actions.get_int_bounds(self.factor1);
-		let (f2_lb, f2_ub) = actions.get_int_bounds(self.factor2);
-		let (prd_lb, prd_ub) = actions.get_int_bounds(self.product);
+	#[tracing::instrument(name = "int_times", level = "trace", skip(self, ctx))]
+	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+		let (f1_lb, f1_ub) = self.factor1.get_bounds(ctx);
+		let f1_lb_lit = self.factor1.get_lower_bound_lit(ctx);
+		let f1_ub_lit = self.factor1.get_upper_bound_lit(ctx);
+		let (f2_lb, f2_ub) = self.factor2.get_bounds(ctx);
+		let f2_lb_lit = self.factor2.get_lower_bound_lit(ctx);
+		let f2_ub_lit = self.factor2.get_upper_bound_lit(ctx);
+		let (pr_lb, pr_ub) = self.product.get_bounds(ctx);
+		let pr_lb_lit = self.product.get_lower_bound_lit(ctx);
+		let pr_ub_lit = self.product.get_upper_bound_lit(ctx);
 
+		// TODO: Filter possibilities based on whether variables can be both positive
+		// and negative.
+
+		// Calculate possible bounds for the product
 		let bounds = [f1_lb * f2_lb, f1_lb * f2_ub, f1_ub * f2_lb, f1_ub * f2_ub];
-		actions.set_int_lower_bound(self.product, *bounds.iter().min().unwrap())?;
-		actions.set_int_upper_bound(self.product, *bounds.iter().max().unwrap())?;
+		let reason = &[
+			f1_lb_lit.clone(),
+			f1_ub_lit.clone(),
+			f2_lb_lit.clone(),
+			f2_ub_lit.clone(),
+		];
+		// z >= x * y
+		let min = bounds.iter().min().unwrap();
+		self.product.set_lower_bound(ctx, *min, reason)?;
+		// z <= x * y
+		let max = bounds.iter().max().unwrap();
+		self.product.set_upper_bound(ctx, *max, reason)?;
 
+		// Propagate the bounds of the first factor if the second factor is known
+		// positive or known negative.
 		if f2_lb > 0 || f2_ub < 0 {
+			// Calculate possible bounds for the first factor
 			let bounds = [
-				(prd_lb, f2_lb),
-				(prd_lb, f2_ub),
-				(prd_ub, f2_lb),
-				(prd_ub, f2_ub),
+				(pr_lb, f2_lb),
+				(pr_lb, f2_ub),
+				(pr_ub, f2_lb),
+				(pr_ub, f2_ub),
 			];
+			let reason = &[pr_lb_lit.clone(), pr_ub_lit.clone(), f2_lb_lit, f2_ub_lit];
+			// factor1 >= product / factor2
 			let min = bounds
 				.iter()
-				.filter_map(|(z, y)| {
-					let y = NonZeroIntVal::new(*y)?;
-					Some(div_ceil(*z, y))
+				.map(|(z, y)| {
+					let y = NonZeroIntVal::new(*y).unwrap();
+					div_ceil(*z, y)
 				})
 				.min()
 				.unwrap();
-			actions.set_int_lower_bound(self.factor1, min)?;
-
+			self.factor1.set_lower_bound(ctx, min, reason)?;
+			// factor1 <= product / factor2
 			let max = bounds
 				.iter()
-				.filter_map(|(z, y)| {
-					let y = NonZeroIntVal::new(*y)?;
-					Some(div_floor(*z, y))
+				.map(|(z, y)| {
+					let y = NonZeroIntVal::new(*y).unwrap();
+					div_floor(*z, y)
 				})
 				.max()
 				.unwrap();
-			actions.set_int_upper_bound(self.factor1, max)?;
+			self.factor1.set_upper_bound(ctx, max, reason)?;
 		}
 
+		// Propagate the bounds of the second factor if the first factor is known
+		// positive or known negative.
 		if f1_lb > 0 || f1_ub < 0 {
+			// Calculate possible bounds for the first factor `y`
 			let bounds = [
-				(prd_lb, f1_lb),
-				(prd_lb, f1_ub),
-				(prd_ub, f1_lb),
-				(prd_ub, f1_ub),
+				(pr_lb, f1_lb),
+				(pr_lb, f1_ub),
+				(pr_ub, f1_lb),
+				(pr_ub, f1_ub),
 			];
+			let reason = &[pr_lb_lit, pr_ub_lit, f1_lb_lit, f1_ub_lit];
+			// factor2 >= product / factor1
 			let min = bounds
 				.iter()
-				.filter_map(|(z, x)| {
-					let x = NonZeroIntVal::new(*x)?;
-					Some(div_ceil(*z, x))
+				.map(|(z, x)| {
+					let y = NonZeroIntVal::new(*x).unwrap();
+					div_ceil(*z, y)
 				})
 				.min()
 				.unwrap();
-			actions.set_int_lower_bound(self.factor2, min)?;
-
+			self.factor2.set_lower_bound(ctx, min, reason)?;
+			// factor2 <= product / factor1
 			let max = bounds
 				.iter()
-				.filter_map(|(z, x)| {
-					let x = NonZeroIntVal::new(*x)?;
-					Some(div_floor(*z, x))
+				.map(|(z, x)| {
+					let y = NonZeroIntVal::new(*x).unwrap();
+					div_floor(*z, y)
 				})
 				.max()
 				.unwrap();
-			actions.set_int_upper_bound(self.factor2, max)?;
+			self.factor2.set_upper_bound(ctx, max, reason)?;
 		}
-		Ok(SimplificationStatus::NoFixpoint)
-	}
-
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let factor1 = slv.get_solver_int(self.factor1);
-		let factor2 = slv.get_solver_int(self.factor2);
-		let product = slv.get_solver_int(self.product);
-		IntTimesBounds::new_in(slv, factor1, factor2, product);
 		Ok(())
 	}
 }
 
-impl IntTimesBounds {
-	/// Create a new [`IntTimesBounds`] propagator and post it in the solver.
-	pub fn new_in<P>(solver: &mut P, factor1: IntView, factor2: IntView, product: IntView)
-	where
-		P: PropagatorInitActions + ?Sized,
-	{
-		let prop = solver.add_propagator(
-			Box::new(Self {
-				factor1,
-				factor2,
-				product,
-			}),
-			PriorityLevel::Highest,
-		);
+impl<E, I1, I2, I3> Constraint<E> for IntTimesBounds<I1, I2, I3>
+where
+	E: ReasoningEngine,
+	I1: ModelIntView<E> + Mul<IntVal, Output = IntDecision>,
+	I2: ModelIntView<E> + Mul<IntVal, Output = IntDecision>,
+	I3: ModelIntView<E>,
+	IntDecision: ModelIntView<E>,
+{
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
+		self.propagate(ctx)?;
+		if let Some(f1) = self.factor1.get_val(ctx) {
+			(self.factor2.clone() * f1).unify(ctx, self.product.clone())?;
+			return Ok(SimplificationStatus::Subsumed);
+		} else if let Some(f2) = self.factor2.get_val(ctx) {
+			(self.factor1.clone() * f2).unify(ctx, self.product.clone())?;
+			return Ok(SimplificationStatus::Subsumed);
+		}
+		return Ok(SimplificationStatus::NoFixpoint);
+	}
 
-		// Subscribe to bounds changes for each of the variables
-		solver.enqueue_on_int_change(prop, factor1, IntPropCond::Bounds);
-		solver.enqueue_on_int_change(prop, factor2, IntPropCond::Bounds);
-		solver.enqueue_on_int_change(prop, product, IntPropCond::Bounds);
+	fn to_solver(&self, ctx: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let f1 = ctx.get_solver_int(self.factor1.clone().into());
+		let f2 = ctx.get_solver_int(self.factor2.clone().into());
+		let p = ctx.get_solver_int(self.product.clone().into());
+		IntTimesBounds::new_in(ctx, f1, f2, p);
+		Ok(())
 	}
 }
-
-// impl<P, E> Propagator<P, E> for IntTimesBounds
-// where
-// 	P: PropagationActions,
-// 	E: ExplanationActions,
-// {
-// 	#[tracing::instrument(name = "int_times", level = "trace", skip(self,
-// actions))] 	fn propagate(&mut self, actions: &mut P) -> Result<(),
-// P::Conflict> { 		let (f1_lb, f1_ub) = actions.get_int_bounds(self.factor1);
-// 		let f1_lb_lit = actions.get_int_lower_bound_lit(self.factor1);
-// 		let f1_ub_lit = actions.get_int_upper_bound_lit(self.factor1);
-// 		let (f2_lb, f2_ub) = actions.get_int_bounds(self.factor2);
-// 		let f2_lb_lit = actions.get_int_lower_bound_lit(self.factor2);
-// 		let f2_ub_lit = actions.get_int_upper_bound_lit(self.factor2);
-// 		let (pr_lb, pr_ub) = actions.get_int_bounds(self.product);
-// 		let pr_lb_lit = actions.get_int_lower_bound_lit(self.product);
-// 		let pr_ub_lit = actions.get_int_upper_bound_lit(self.product);
-
-// 		// TODO: Filter possibilities based on whether variables can be both
-// positive 		// and negative.
-
-// 		// Calculate possible bounds for the product
-// 		let bounds = [f1_lb * f2_lb, f1_lb * f2_ub, f1_ub * f2_lb, f1_ub * f2_ub];
-// 		let reason_storage = [f1_lb_lit, f1_ub_lit, f2_lb_lit, f2_ub_lit];
-// 		let mut reason = CachedReason::new(&reason_storage[..]);
-// 		// z >= x * y
-// 		let min = bounds.iter().min().unwrap();
-// 		actions.set_int_lower_bound(self.product, *min, &mut reason)?;
-// 		// z <= x * y
-// 		let max = bounds.iter().max().unwrap();
-// 		actions.set_int_upper_bound(self.product, *max, &mut reason)?;
-
-// 		// Propagate the bounds of the first factor if the second factor is known
-// 		// positive or known negative.
-// 		if f2_lb > 0 || f2_ub < 0 {
-// 			// Calculate possible bounds for the first factor
-// 			let bounds = [
-// 				(pr_lb, f2_lb),
-// 				(pr_lb, f2_ub),
-// 				(pr_ub, f2_lb),
-// 				(pr_ub, f2_ub),
-// 			];
-// 			let reason_storage = [pr_lb_lit, pr_ub_lit, f2_lb_lit, f2_ub_lit];
-// 			let mut reason = CachedReason::new(&reason_storage[..]);
-// 			// factor1 >= product / factor2
-// 			let min = bounds
-// 				.iter()
-// 				.map(|(z, y)| {
-// 					let y = NonZeroIntVal::new(*y).unwrap();
-// 					div_ceil(*z, y)
-// 				})
-// 				.min()
-// 				.unwrap();
-// 			actions.set_int_lower_bound(self.factor1, min, &mut reason)?;
-// 			// factor1 <= product / factor2
-// 			let max = bounds
-// 				.iter()
-// 				.map(|(z, y)| {
-// 					let y = NonZeroIntVal::new(*y).unwrap();
-// 					div_floor(*z, y)
-// 				})
-// 				.max()
-// 				.unwrap();
-// 			actions.set_int_upper_bound(self.factor1, max, &mut reason)?;
-// 		}
-
-// 		// Propagate the bounds of the second factor if the first factor is known
-// 		// positive or known negative.
-// 		if f1_lb > 0 || f1_ub < 0 {
-// 			// Calculate possible bounds for the first factor `y`
-// 			let bounds = [
-// 				(pr_lb, f1_lb),
-// 				(pr_lb, f1_ub),
-// 				(pr_ub, f1_lb),
-// 				(pr_ub, f1_ub),
-// 			];
-// 			let reason_storage = [pr_lb_lit, pr_ub_lit, f1_lb_lit, f1_ub_lit];
-// 			let mut reason = CachedReason::new(&reason_storage[..]);
-// 			// factor2 >= product / factor1
-// 			let min = bounds
-// 				.iter()
-// 				.map(|(z, x)| {
-// 					let y = NonZeroIntVal::new(*x).unwrap();
-// 					div_ceil(*z, y)
-// 				})
-// 				.min()
-// 				.unwrap();
-// 			actions.set_int_lower_bound(self.factor2, min, &mut reason)?;
-// 			// factor2 <= product / factor1
-// 			let max = bounds
-// 				.iter()
-// 				.map(|(z, x)| {
-// 					let y = NonZeroIntVal::new(*x).unwrap();
-// 					div_floor(*z, y)
-// 				})
-// 				.max()
-// 				.unwrap();
-// 			actions.set_int_upper_bound(self.factor2, max, &mut reason)?;
-// 		}
-// 		Ok(())
-// 	}
-// }
 
 #[cfg(test)]
 mod tests {

@@ -167,6 +167,8 @@ where
 	IntDecision: SolverIntView<E>,
 {
 	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+		ctx.set_priority(PriorityLevel::Highest);
+
 		for iv in self.vars {
 			iv.enqueue_when(ctx, IntPropCond::Bounds);
 		}
@@ -892,7 +894,7 @@ where
 	BV: SolverBoolView<E>,
 {
 	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
-		ctx.set_priority(PriorityLevel::Low);
+		ctx.set_priority(PriorityLevel::High);
 		for (i, v) in self.terms.iter().enumerate() {
 			v.advise_when(ctx, IntPropCond::Fixed, i as u64);
 		}

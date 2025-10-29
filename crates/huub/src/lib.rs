@@ -56,6 +56,7 @@ use crate::{
 		int_abs::IntAbsBounds,
 		int_linear::{IntEq, IntLinear, LinOperator},
 		int_table::IntTable,
+		int_times::IntTimesBounds,
 		BoxedConstraint, Conflict, Constraint, LazyReason, Reason, ReasonBuilder,
 		SimplificationStatus,
 	},
@@ -410,13 +411,12 @@ pub fn times_int(
 	factor1: IntDecision,
 	factor2: IntDecision,
 	product: IntDecision,
-) -> BoxedConstraint {
-	todo!()
-	// IntTimes {
-	// 	factor1,
-	// 	factor2,
-	// 	product,
-	// }
+) -> IntTimesBounds<IntDecision, IntDecision, IntDecision> {
+	IntTimesBounds {
+		factor1,
+		factor2,
+		product,
+	}
 }
 
 /// Create a value precede chain constraint that enforces that the first

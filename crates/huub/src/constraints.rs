@@ -12,7 +12,7 @@ pub mod int_in_set;
 pub mod int_linear;
 // pub mod int_pow;
 pub mod int_table;
-// pub mod int_times;
+pub mod int_times;
 // pub mod int_value_precede;
 
 use std::{
@@ -330,6 +330,13 @@ impl Clone for BoxedPropagator {
 	}
 }
 
+impl<A, B> CachedReason<B, A> {
+	/// Create a new [`CachedReason`] from a [`ReasonBuilder`].
+	pub(crate) fn new(builder: B) -> Self {
+		CachedReason::Builder(builder)
+	}
+}
+
 impl Conflict {
 	/// Create a new conflict with the given reason
 	pub(crate) fn new<Context>(
@@ -469,6 +476,24 @@ impl<C, A> ReasonBuilder<C, A> for Vec<A> {
 impl<C, A, const N: usize> ReasonBuilder<C, A> for [A; N] {
 	fn build_reason(self, _: &mut C) -> Result<Reason<A>, bool> {
 		Reason::from_iter(self)
+	}
+}
+
+impl<C, A> ReasonBuilder<C, A> for &[A]
+where
+	A: Clone,
+{
+	fn build_reason(self, _: &mut C) -> Result<Reason<A>, bool> {
+		Reason::from_iter(self.iter().cloned())
+	}
+}
+
+impl<C, A, const N: usize> ReasonBuilder<C, A> for &[A; N]
+where
+	A: Clone,
+{
+	fn build_reason(self, ctx: &mut C) -> Result<Reason<A>, bool> {
+		self[..].build_reason(ctx)
 	}
 }
 
