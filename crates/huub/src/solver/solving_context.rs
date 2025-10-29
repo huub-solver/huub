@@ -82,32 +82,6 @@ impl<'a> SolvingContext<'a> {
 	}
 
 	#[inline]
-	/// Internal method used to propagate a boolean variable used as a integer
-	/// given a literal description to be enforced.
-	fn propagate_bool_lin(
-		&mut self,
-		lit: RawLit,
-		lit_req: IntLitMeaning,
-		reason: impl ReasonBuilder<Self, BoolView>,
-	) -> Result<(), Conflict> {
-		let bv = BoolView(BoolViewInner::Lit(lit));
-		match lit_req {
-			IntLitMeaning::Eq(0) | IntLitMeaning::Less(1) | IntLitMeaning::NotEq(1) => {
-				bv.set_val(self, false, reason)
-			}
-			IntLitMeaning::Eq(1) | IntLitMeaning::GreaterEq(1) | IntLitMeaning::NotEq(0) => {
-				bv.set(self, reason)
-			}
-			IntLitMeaning::Eq(_) => Err(Conflict::new(self, None, reason)),
-			IntLitMeaning::GreaterEq(i) if i > 1 => Err(Conflict::new(self, None, reason)),
-			IntLitMeaning::Less(i) if i <= 0 => Err(Conflict::new(self, None, reason)),
-			IntLitMeaning::NotEq(_) | IntLitMeaning::GreaterEq(_) | IntLitMeaning::Less(_) => {
-				Ok(())
-			}
-		}
-	}
-
-	#[inline]
 	/// Internal method used to propagate a Boolean literal.
 	///
 	/// ## Warning
@@ -383,58 +357,8 @@ impl IntDecisionActions<SolvingContext<'_>> for IntVarRef {
 	}
 }
 
-impl IntDecisionActions<SolvingContext<'_>> for IntView {
-	fn get_lit(&self, ctx: &mut SolvingContext<'_>, mut meaning: IntLitMeaning) -> BoolView {
-		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
-			self.0
-		{
-			match transformer.rev_transform_lit(meaning) {
-				Ok(m) => meaning = m,
-				Err(v) => return BoolView(BoolViewInner::Const(v)),
-			}
-		}
-
-		match self.0 {
-			IntViewInner::VarRef(var) | IntViewInner::Linear { var, .. } => {
-				var.get_lit(ctx, meaning)
-			}
-			IntViewInner::Const(c) => BoolView(BoolViewInner::Const(match meaning {
-				IntLitMeaning::Eq(i) => c == i,
-				IntLitMeaning::NotEq(i) => c != i,
-				IntLitMeaning::GreaterEq(i) => c >= i,
-				IntLitMeaning::Less(i) => c < i,
-			})),
-			IntViewInner::Bool { lit, .. } => {
-				let (meaning, negated) =
-					if matches!(meaning, IntLitMeaning::NotEq(_) | IntLitMeaning::Less(_)) {
-						(!meaning, true)
-					} else {
-						(meaning, false)
-					};
-				let bv = BoolView(match meaning {
-					IntLitMeaning::Eq(0) => BoolViewInner::Lit(!lit),
-					IntLitMeaning::Eq(1) => BoolViewInner::Lit(lit),
-					IntLitMeaning::Eq(_) => BoolViewInner::Const(false),
-					IntLitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
-					IntLitMeaning::GreaterEq(i) if i > 1 => BoolViewInner::Const(false),
-					IntLitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
-					_ => unreachable!(),
-				});
-				if negated {
-					!bv
-				} else {
-					bv
-				}
-			}
-		}
-	}
-}
-
-impl<I> IntInspectionActions<SolvingContext<'_>> for I
-where
-	I: IntInspectionActions<State>,
-{
-	type Atom = <I as IntInspectionActions<State>>::Atom;
+impl IntInspectionActions<SolvingContext<'_>> for IntVarRef {
+	type Atom = <IntVarRef as IntInspectionActions<State>>::Atom;
 
 	fn get_lower_bound(&self, ctx: &SolvingContext<'_>) -> IntVal {
 		self.get_lower_bound(ctx.state)
@@ -444,8 +368,8 @@ where
 		self.get_upper_bound(ctx.state)
 	}
 
-	fn check_int_in_domain(&self, ctx: &SolvingContext<'_>, val: IntVal) -> bool {
-		self.check_int_in_domain(ctx.state, val)
+	fn check_in_domain(&self, ctx: &SolvingContext<'_>, val: IntVal) -> bool {
+		self.check_in_domain(ctx.state, val)
 	}
 
 	fn get_lit_meaning(&self, ctx: &SolvingContext<'_>, lit: Self::Atom) -> Option<IntLitMeaning> {
@@ -502,149 +426,5 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
 		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
 	) -> Result<(), Self::Conflict> {
 		ctx.propagate_int(*self, IntLitMeaning::NotEq(val), reason)
-	}
-}
-
-impl<'a> IntPropagationActions<SolvingContext<'a>> for IntView {
-	type Conflict = Conflict;
-
-	fn set_lower_bound(
-		&self,
-		ctx: &mut SolvingContext<'a>,
-		val: IntVal,
-		reason: impl ReasonBuilder<SolvingContext<'a>, BoolView>,
-	) -> Result<(), Conflict> {
-		match self.0 {
-			IntViewInner::VarRef(var) => var.set_lower_bound(ctx, val, reason),
-			IntViewInner::Linear { var, transformer } => match transformer
-				.rev_transform_lit(IntLitMeaning::GreaterEq(val))
-				.unwrap()
-			{
-				IntLitMeaning::Less(v) => var.set_upper_bound(ctx, v - 1, reason),
-				IntLitMeaning::GreaterEq(v) => var.set_lower_bound(ctx, v, reason),
-				_ => unreachable!(),
-			},
-			IntViewInner::Bool { lit, transformer } => ctx.propagate_bool_lin(
-				lit,
-				transformer
-					.rev_transform_lit(IntLitMeaning::GreaterEq(val))
-					.unwrap(),
-				reason,
-			),
-			IntViewInner::Const(i) => {
-				if i < val {
-					Err(Conflict::new(ctx, None, reason))
-				} else {
-					Ok(())
-				}
-			}
-		}
-	}
-
-	fn set_upper_bound(
-		&self,
-		ctx: &mut SolvingContext<'a>,
-		val: IntVal,
-		reason: impl ReasonBuilder<SolvingContext<'a>, BoolView>,
-	) -> Result<(), Conflict> {
-		match self.0 {
-			IntViewInner::VarRef(var) => var.set_upper_bound(ctx, val, reason),
-			IntViewInner::Linear { var, transformer } => {
-				match transformer
-					.rev_transform_lit(IntLitMeaning::Less(val + 1))
-					.unwrap()
-				{
-					IntLitMeaning::Less(v) => var.set_upper_bound(ctx, v - 1, reason),
-					IntLitMeaning::GreaterEq(v) => var.set_lower_bound(ctx, v, reason),
-					_ => unreachable!(),
-				}
-			}
-			IntViewInner::Bool { lit, transformer } => ctx.propagate_bool_lin(
-				lit,
-				transformer
-					.rev_transform_lit(IntLitMeaning::Less(val + 1))
-					.unwrap(),
-				reason,
-			),
-			IntViewInner::Const(i) => {
-				if i > val {
-					Err(Conflict::new(ctx, None, reason))
-				} else {
-					Ok(())
-				}
-			}
-		}
-	}
-
-	fn set_val(
-		&self,
-		ctx: &mut SolvingContext<'a>,
-		mut val: IntVal,
-		reason: impl ReasonBuilder<SolvingContext<'a>, BoolView>,
-	) -> Result<(), Conflict> {
-		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
-			self.0
-		{
-			match transformer.rev_transform_lit(IntLitMeaning::Eq(val)) {
-				Ok(IntLitMeaning::Eq(v)) => val = v,
-				Err(v) => {
-					debug_assert!(!v);
-					return Err(Conflict::new(ctx, None, reason));
-				}
-				_ => unreachable!(),
-			}
-		}
-
-		match self.0 {
-			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				iv.set_val(ctx, val, reason)
-			}
-			IntViewInner::Bool { lit, .. } => {
-				ctx.propagate_bool_lin(lit, IntLitMeaning::Eq(val), reason)
-			}
-			IntViewInner::Const(i) => {
-				if i != val {
-					Err(Conflict::new(ctx, None, reason))
-				} else {
-					Ok(())
-				}
-			}
-		}
-	}
-
-	fn set_not_eq(
-		&self,
-		ctx: &mut SolvingContext<'a>,
-		mut val: IntVal,
-		reason: impl ReasonBuilder<SolvingContext<'a>, BoolView>,
-	) -> Result<(), Conflict> {
-		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
-			self.0
-		{
-			match transformer.rev_transform_lit(IntLitMeaning::NotEq(val)) {
-				Ok(IntLitMeaning::NotEq(v)) => val = v,
-				Err(v) => {
-					debug_assert!(v);
-					return Ok(());
-				}
-				_ => unreachable!(),
-			}
-		}
-
-		match self.0 {
-			IntViewInner::VarRef(var) | IntViewInner::Linear { var, .. } => {
-				var.set_not_eq(ctx, val, reason)
-			}
-			IntViewInner::Bool { lit, .. } => {
-				ctx.propagate_bool_lin(lit, IntLitMeaning::NotEq(val), reason)
-			}
-			IntViewInner::Const(i) => {
-				if i == val {
-					Err(Conflict::new(ctx, None, reason))
-				} else {
-					Ok(())
-				}
-			}
-		}
 	}
 }

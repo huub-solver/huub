@@ -6,8 +6,8 @@ use std::iter::once;
 
 use crate::{
 	actions::{
-		BoolPostingActions, BoolSimplificationActions, IntInspectionActions, IntPostingActions,
-		IntPropagationActions, ReasoningEngine, ReformulationActions,
+		BoolPostingActions, BoolSimplificationActions, IntDecisionActions, IntInspectionActions,
+		IntPostingActions, IntPropagationActions, ReasoningEngine, ReformulationActions,
 	},
 	constraints::{Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
@@ -59,7 +59,7 @@ where
 
 		for (i, &l) in arr.iter().enumerate() {
 			// Evaluate array literal
-			let idx_eq = slv.get_int_lit(index, IntLitMeaning::Eq(i as IntVal));
+			let idx_eq = index.get_lit(slv, IntLitMeaning::Eq(i as IntVal));
 			// add clause (idx = i + 1 /\ arr[i]) => val
 			slv.add_clause([!idx_eq, !l, result])?;
 			// add clause (idx = i + 1 /\ !arr[i]) => !val

@@ -1427,7 +1427,7 @@ impl IntInspectionActions<Model> for IntDecision {
 		}
 	}
 
-	fn check_int_in_domain(&self, ctx: &Model, val: IntVal) -> bool {
+	fn check_in_domain(&self, ctx: &Model, val: IntVal) -> bool {
 		use IntDecisionInner::*;
 
 		let var = self.resolve_alias(ctx);

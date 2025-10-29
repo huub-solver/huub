@@ -18,13 +18,13 @@ use rustc_hash::FxHashSet;
 
 use crate::{
 	actions::{
-		DecisionActions, InitializationActions, IntDecisionActions, ReasoningEngine,
-		ReformulationActions, TrailingActions,
+		BoolInspectionActions, DecisionActions, InitializationActions, IntDecisionActions,
+		IntInspectionActions, ReasoningEngine, ReformulationActions, TrailingActions,
 	},
 	constraints::{BoxedPropagator, Constraint, Propagator},
 	helpers::linear_transform::LinearTransform,
 	solver::{
-		int_var::{EncodingType, IntVar},
+		int_var::{EncodingType, IntVar, IntVarRef},
 		trail::TrailedInt,
 		BoolView, BoolViewInner, IntView, IntViewInner, View,
 	},
@@ -358,81 +358,10 @@ impl<Oracle: ClauseDatabase> ClauseDatabase for ReformulationContext<'_, Oracle>
 }
 
 impl<Oracle> DecisionActions for ReformulationContext<'_, Oracle> {
-	// fn get_intref_lit(&mut self, var: IntVarRef, meaning: IntLitMeaning) ->
-	// BoolView { 	self.slv.get_intref_lit(var, meaning)
-	// }
-
 	fn get_num_conflicts(&self) -> u64 {
 		self.slv.engine.borrow().state.statistics.conflicts
 	}
-
-	// fn get_int_val_lit(&mut self, var: IntView) -> Option<BoolView> {
-	// 	self.slv.get_int_val_lit(var)
-	// }
-
-	// fn get_int_lower_bound_lit(&self, var: IntView) -> BoolView {
-	// 	self.slv.get_int_lower_bound_lit(var)
-	// }
-
-	// fn get_int_upper_bound_lit(&self, var: IntView) -> BoolView {
-	// 	self.slv.get_int_upper_bound_lit(var)
-	// }
 }
-
-// impl InspectionActions for ReformulationContext<'_> {
-// 	fn check_int_in_domain(&self, var: IntView, val: IntVal) -> bool {
-// 		self.slv.check_int_in_domain(var, val)
-// 	}
-
-// 	fn get_int_lower_bound(&self, var: IntView) -> IntVal {
-// 		self.slv.get_int_lower_bound(var)
-// 	}
-
-// 	fn get_int_upper_bound(&self, var: IntView) -> IntVal {
-// 		self.slv.get_int_upper_bound(var)
-// 	}
-// }
-
-// impl PropagatorInitActions for ReformulationContext<'_> {
-// 	fn add_propagator(&mut self, propagator: BoxedPropagator, priority:
-// PriorityLevel) -> PropRef { 		self.slv.add_propagator(propagator, priority)
-// 	}
-
-// 	fn advise_on_backtrack(&mut self, prop: PropRef) {
-// 		self.slv.advise_on_backtrack(prop);
-// 	}
-
-// 	fn advise_on_bool_change(&mut self, prop: PropRef, var: BoolView, data: u64)
-// { 		self.slv.advise_on_bool_change(prop, var, data);
-// 	}
-
-// 	fn advise_on_int_change(
-// 		&mut self,
-// 		prop: PropRef,
-// 		var: IntView,
-// 		condition: IntPropCond,
-// 		data: u64,
-// 	) {
-// 		self.slv.advise_on_int_change(prop, var, condition, data);
-// 	}
-
-// 	fn enqueue_now(&mut self, prop: PropRef) {
-// 		self.slv.enqueue_now(prop);
-// 	}
-
-// 	fn enqueue_on_bool_change(&mut self, prop: PropRef, var: BoolView) {
-// 		self.slv.enqueue_on_bool_change(prop, var);
-// 	}
-
-// 	fn enqueue_on_int_change(&mut self, prop: PropRef, var: IntView, condition:
-// IntPropCond) { 		self.slv.enqueue_on_int_change(prop, var, condition);
-// 	}
-
-// 	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
-// 		self.slv.new_trailed_int(init)
-// 	}
-// }
-//
 
 impl<Oracle: ClauseDatabase + ExternalPropagation> ReformulationActions
 	for ReformulationContext<'_, Oracle>
@@ -448,15 +377,47 @@ impl<Oracle: ClauseDatabase + ExternalPropagation> ReformulationActions
 	fn new_bool_var(&mut self) -> BoolView {
 		BoolView(BoolViewInner::Lit(self.slv.new_lit()))
 	}
+
+	fn get_bool_val(&self, bv: RawLit) -> Option<bool> {
+		bv.get_val(self.slv)
+	}
+
+	fn get_int_lower_bound(&self, var: IntVarRef) -> IntVal {
+		var.get_lower_bound(self.slv)
+	}
+
+	fn get_int_upper_bound(&self, var: IntVarRef) -> IntVal {
+		var.get_upper_bound(self.slv)
+	}
+
+	fn check_int_in_domain(&self, var: IntVarRef, val: IntVal) -> bool {
+		var.check_in_domain(self.slv, val)
+	}
+
+	fn get_int_lit_meaning(&self, var: IntVarRef, lit: BoolView) -> Option<IntLitMeaning> {
+		var.get_lit_meaning(self.slv, lit)
+	}
+
+	fn get_int_lower_bound_lit(&self, var: IntVarRef) -> BoolView {
+		var.get_lower_bound_lit(self.slv)
+	}
+
+	fn get_int_upper_bound_lit(&self, var: IntVarRef) -> BoolView {
+		var.get_upper_bound_lit(self.slv)
+	}
+
+	fn try_int_lit(&self, var: IntVarRef, meaning: IntLitMeaning) -> Option<BoolView> {
+		var.try_lit(self.slv, meaning)
+	}
+
+	fn get_int_lit(&mut self, var: IntVarRef, meaning: IntLitMeaning) -> BoolView {
+		var.get_lit(self.slv, meaning)
+	}
 }
 
 impl<Oracle: ExternalPropagation> InitializationActions for ReformulationContext<'_, Oracle> {
 	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
 		InitializationActions::new_trailed_int(self.slv, init)
-	}
-
-	fn get_int_lit(&mut self, int: IntView, lit: IntLitMeaning) -> BoolView {
-		InitializationActions::get_int_lit(self.slv, int, lit)
 	}
 }
 

@@ -6,10 +6,13 @@ use std::{
 	ops::{AddAssign, Neg},
 };
 
+use pindakaas::Lit as RawLit;
+
 use crate::{
 	actions::{
-		BoolInspectionActions, InitializationActions, IntPostingActions, IntPropagationActions,
-		IntSimplificationActions, PostingActions, ReasoningEngine, ReformulationActions,
+		BoolInspectionActions, InitializationActions, IntDecisionActions, IntPostingActions,
+		IntPropagationActions, IntSimplificationActions, PostingActions, ReasoningEngine,
+		ReformulationActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus,
@@ -17,7 +20,8 @@ use crate::{
 	},
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, BoolView, IntLitMeaning, IntView,
+		activation_list::IntPropCond, queue::PriorityLevel, BoolView, BoolViewInner, IntLitMeaning,
+		IntView,
 	},
 };
 
@@ -36,13 +40,18 @@ pub struct IntAbsBounds<I1, I2, B> {
 	pub(crate) origin_positive: B,
 }
 
-impl IntAbsBounds<IntView, IntView, BoolView> {
+impl IntAbsBounds<IntView, IntView, RawLit> {
 	/// Create a new [`IntAbsBounds`] propagator and post it in the solver.
 	pub(crate) fn new_in<E>(engine: &mut E, origin: IntView, abs: IntView)
 	where
 		E: AddAssign<BoxedPropagator> + InitializationActions + ?Sized,
+		IntView: IntDecisionActions<E, Atom = BoolView>,
 	{
-		let origin_positive = engine.get_int_lit(origin, IntLitMeaning::GreaterEq(0));
+		let BoolViewInner::Lit(origin_positive) =
+			origin.get_lit(engine, IntLitMeaning::GreaterEq(0)).0
+		else {
+			panic!("origin variable in absolute value constraint is known positive or negative");
+		};
 		*engine += Box::new(Self {
 			origin: origin,
 			abs: abs,
