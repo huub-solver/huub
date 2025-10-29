@@ -92,13 +92,12 @@ impl<'a> SolvingContext<'a> {
 		reason: impl ReasonBuilder<Self, BoolView>,
 	) -> Result<(), Conflict> {
 		let bv = BoolView(BoolViewInner::Lit(lit));
-		let todo_reason: Vec<BoolView> = vec![];
 		match lit_req {
 			IntLitMeaning::Eq(0) | IntLitMeaning::Less(1) | IntLitMeaning::NotEq(1) => {
-				bv.set_val(self, false, todo_reason)
+				bv.set_val(self, false, reason)
 			}
 			IntLitMeaning::Eq(1) | IntLitMeaning::GreaterEq(1) | IntLitMeaning::NotEq(0) => {
-				bv.set(self, todo_reason)
+				bv.set(self, reason)
 			}
 			IntLitMeaning::Eq(_) => Err(Conflict::new(self, None, reason)),
 			IntLitMeaning::GreaterEq(i) if i > 1 => Err(Conflict::new(self, None, reason)),
@@ -467,7 +466,6 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
 		val: IntVal,
 		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
 	) -> Result<(), Self::Conflict> {
-		let reason: Vec<BoolView> = reason.build_reason(ctx).into_iter().collect(); // TODO
 		ctx.propagate_int(*self, IntLitMeaning::GreaterEq(val), reason)
 	}
 
@@ -477,7 +475,6 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
 		val: IntVal,
 		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
 	) -> Result<(), Self::Conflict> {
-		let reason: Vec<BoolView> = reason.build_reason(ctx).into_iter().collect(); // TODO
 		ctx.propagate_int(*self, IntLitMeaning::Less(val + 1), reason)
 	}
 
@@ -487,7 +484,6 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
 		val: IntVal,
 		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
 	) -> Result<(), Self::Conflict> {
-		let reason: Vec<BoolView> = reason.build_reason(ctx).into_iter().collect(); // TODO
 		ctx.propagate_int(*self, IntLitMeaning::Eq(val), reason)
 	}
 
@@ -497,7 +493,6 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
 		val: IntVal,
 		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
 	) -> Result<(), Self::Conflict> {
-		let reason: Vec<BoolView> = reason.build_reason(ctx).into_iter().collect(); // TODO
 		ctx.propagate_int(*self, IntLitMeaning::NotEq(val), reason)
 	}
 }
@@ -521,19 +516,15 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntView {
 				IntLitMeaning::GreaterEq(v) => var.set_lower_bound(ctx, v, reason),
 				_ => unreachable!(),
 			},
-			IntViewInner::Bool { lit, transformer } => {
-				let reason: Vec<BoolView> = reason.build_reason(ctx).into_iter().collect(); // TODO
-				ctx.propagate_bool_lin(
-					lit,
-					transformer
-						.rev_transform_lit(IntLitMeaning::GreaterEq(val))
-						.unwrap(),
-					reason,
-				)
-			}
+			IntViewInner::Bool { lit, transformer } => ctx.propagate_bool_lin(
+				lit,
+				transformer
+					.rev_transform_lit(IntLitMeaning::GreaterEq(val))
+					.unwrap(),
+				reason,
+			),
 			IntViewInner::Const(i) => {
 				if i < val {
-					let reason: Vec<BoolView> = reason.build_reason(ctx).into_iter().collect(); // TODO
 					Err(Conflict::new(ctx, None, reason))
 				} else {
 					Ok(())
@@ -560,19 +551,15 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntView {
 					_ => unreachable!(),
 				}
 			}
-			IntViewInner::Bool { lit, transformer } => {
-				let reason: Vec<BoolView> = reason.build_reason(ctx).into_iter().collect(); // TODO
-				ctx.propagate_bool_lin(
-					lit,
-					transformer
-						.rev_transform_lit(IntLitMeaning::Less(val + 1))
-						.unwrap(),
-					reason,
-				)
-			}
+			IntViewInner::Bool { lit, transformer } => ctx.propagate_bool_lin(
+				lit,
+				transformer
+					.rev_transform_lit(IntLitMeaning::Less(val + 1))
+					.unwrap(),
+				reason,
+			),
 			IntViewInner::Const(i) => {
 				if i > val {
-					let reason: Vec<BoolView> = reason.build_reason(ctx).into_iter().collect(); // TODO
 					Err(Conflict::new(ctx, None, reason))
 				} else {
 					Ok(())
@@ -594,7 +581,6 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntView {
 				Ok(IntLitMeaning::Eq(v)) => val = v,
 				Err(v) => {
 					debug_assert!(!v);
-					let reason: Vec<BoolView> = reason.build_reason(ctx).into_iter().collect(); // TODO
 					return Err(Conflict::new(ctx, None, reason));
 				}
 				_ => unreachable!(),
@@ -606,12 +592,10 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntView {
 				iv.set_val(ctx, val, reason)
 			}
 			IntViewInner::Bool { lit, .. } => {
-				let reason: Vec<BoolView> = reason.build_reason(ctx).into_iter().collect(); // TODO
 				ctx.propagate_bool_lin(lit, IntLitMeaning::Eq(val), reason)
 			}
 			IntViewInner::Const(i) => {
 				if i != val {
-					let reason: Vec<BoolView> = reason.build_reason(ctx).into_iter().collect(); // TODO
 					Err(Conflict::new(ctx, None, reason))
 				} else {
 					Ok(())
@@ -644,12 +628,10 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntView {
 				var.set_not_eq(ctx, val, reason)
 			}
 			IntViewInner::Bool { lit, .. } => {
-				let reason: Vec<BoolView> = reason.build_reason(ctx).into_iter().collect(); // TODO
 				ctx.propagate_bool_lin(lit, IntLitMeaning::NotEq(val), reason)
 			}
 			IntViewInner::Const(i) => {
 				if i == val {
-					let reason: Vec<BoolView> = reason.build_reason(ctx).into_iter().collect(); // TODO
 					Err(Conflict::new(ctx, None, reason))
 				} else {
 					Ok(())
