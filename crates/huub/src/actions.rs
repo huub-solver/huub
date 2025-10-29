@@ -14,7 +14,7 @@ use pindakaas::{
 
 use crate::{
 	branchers::BoxedBrancher,
-	constraints::{BoxedPropagator, LazyReason, Reason, ReasonBuilder},
+	constraints::{BoxedPropagator, LazyReason, ReasonBuilder},
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::IntPropCond, int_var::IntVarRef, queue::PriorityLevel, trail::TrailedInt,
@@ -224,6 +224,9 @@ pub trait IntPropagationActions<Context: ?Sized>: IntDecisionActions<Context> {
 }
 
 pub trait IntSimplificationActions<Context: ?Sized>: IntPropagationActions<Context> {
+	/// Get the domain from which an integer view is guaranteed to take a value.
+	fn get_domain(&self, ctx: &Context) -> IntSetVal;
+
 	/// Enforce that a given integer expression cannot take any of the values in
 	/// the given set.
 	fn set_not_in_set(

@@ -55,6 +55,7 @@ use crate::{
 		bool_array_element::BoolDecisionArrayElement,
 		int_abs::IntAbsBounds,
 		int_linear::{IntLinear, LinOperator},
+		int_table::IntTable,
 		BoxedConstraint, Conflict, Constraint, LazyReason, Reason, ReasonBuilder,
 		SimplificationStatus,
 	},
@@ -393,15 +394,14 @@ where
 /// Create a `table_int` constraint that enforces that given list of integer
 /// views take their values according to one of the given lists of integer
 /// values.
-pub fn table_int(vars: Vec<IntDecision>, table: Vec<Vec<IntVal>>) -> BoxedConstraint {
+pub fn table_int(vars: Vec<IntDecision>, table: Vec<Vec<IntVal>>) -> IntTable {
 	assert!(
 		table.iter().all(|tup| tup.len() == vars.len()),
 		"The number of
 values in each row of the table must be equal to the number of decision
 variables."
 	);
-	todo!()
-	// IntTable { vars, table }
+	IntTable { vars, table }
 }
 
 /// Create a constraint that enforces that the product of the two integer
@@ -1723,6 +1723,37 @@ impl IntPropagationActions<Model> for IntDecision {
 }
 
 impl IntSimplificationActions<Model> for IntDecision {
+	fn get_domain(&self, ctx: &Model) -> IntSetVal {
+		let var = self.resolve_alias(ctx);
+		match var.0 {
+			IntDecisionInner::Var(v) => {
+				let Domain::Domain(dom) = &ctx.int_vars[v].domain else {
+					unreachable!()
+				};
+				dom.clone()
+			}
+			IntDecisionInner::Const(c) => (c..=c).into(),
+			IntDecisionInner::Linear(t, v) => {
+				let Domain::Domain(dom) = &ctx.int_vars[v].domain else {
+					unreachable!()
+				};
+				dom.iter()
+					.map(|r| {
+						if t.positive_scale() {
+							t.transform(*r.start())..=t.transform(*r.end())
+						} else {
+							t.transform(*r.end())..=t.transform(*r.start())
+						}
+					})
+					.collect()
+			}
+			IntDecisionInner::Bool(t, _) => [t.offset, t.offset + t.scale.get()]
+				.into_iter()
+				.map(|v| v..=v)
+				.collect(),
+		}
+	}
+
 	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Self::Conflict> {
 		todo!()
 	}

@@ -25,7 +25,7 @@ use crate::{
 	abs_int,
 	actions::{BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions},
 	all_different_int, array_element, array_maximum_int, array_minimum_int,
-	constraints::BoxedConstraint,
+	constraints::int_table::IntTable,
 	cumulative, disjunctive_strict, div_int, int_in_set_reif, pow_int,
 	reformulate::ReformulationError,
 	seq_precede_chain_int, table_int, times_int, value_precede_chain_int, BoolDecision,
@@ -491,7 +491,7 @@ where
 		transitions: Vec<Vec<IntVal>>,
 		init_state: IntVal,
 		accept_states: FxHashSet<IntVal>,
-	) -> Vec<BoxedConstraint> {
+	) -> Vec<IntTable> {
 		// TODO: Add the regular checking
 
 		let mut table_constraints = Vec::new();
@@ -1507,13 +1507,11 @@ where
 							"int_ne_imp" | "int_ne_reif" => lin_exp.ne(0),
 							_ => unreachable!(),
 						};
-						todo!()
-						// self.prb += match c.id.deref() {
-						// 	"int_eq_imp" | "int_le_imp" | "int_ne_imp" =>
-						// lin.implied_by(r), 	"int_eq_reif" |
-						// "int_le_reif" | "int_ne_reif" => lin.reified_by(r),
-						// 	_ => unreachable!(),
-						// };
+						self.prb += match c.id.deref() {
+							"int_eq_imp" | "int_le_imp" | "int_ne_imp" => lin.implied_by(r),
+							"int_eq_reif" | "int_le_reif" | "int_ne_reif" => lin.reified_by(r),
+							_ => unreachable!(),
+						};
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: match c.id.deref() {
@@ -1595,17 +1593,15 @@ where
 							"int_lin_ne_imp" | "int_lin_ne_reif" => lin_exp.ne(rhs),
 							_ => unreachable!(),
 						};
-						todo!()
-						// self.prb += match c.id.deref() {
-						// 	"int_lin_eq_imp" | "int_lin_le_imp" |
-						// "int_lin_ne_imp" => { 		lin.implied_by(reified)
-						// 	}
-						// 	"int_lin_eq_reif" | "int_lin_le_reif" |
-						// "int_lin_ne_reif" => {
-						// 		lin.reified_by(reified)
-						// 	}
-						// 	_ => unreachable!(),
-						// };
+						self.prb += match c.id.deref() {
+							"int_lin_eq_imp" | "int_lin_le_imp" | "int_lin_ne_imp" => {
+								lin.implied_by(reified)
+							}
+							"int_lin_eq_reif" | "int_lin_le_reif" | "int_lin_ne_reif" => {
+								lin.reified_by(reified)
+							}
+							_ => unreachable!(),
+						};
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: match c.id.deref() {

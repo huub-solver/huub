@@ -10,8 +10,7 @@ use pindakaas::Lit as RawLit;
 
 use crate::{
 	actions::{
-		BoolInspectionActions, InitializationActions, IntDecisionActions, IntPostingActions,
-		IntPropagationActions, IntSimplificationActions, PostingActions, ReasoningEngine,
+		InitializationActions, IntDecisionActions, PostingActions, ReasoningEngine,
 		ReformulationActions,
 	},
 	constraints::{

@@ -3,13 +3,21 @@
 //! given set if-and-only-if a given Boolean decision variable is assigned to
 //! `true`.
 
+use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;
 use rangelist::IntervalIterator;
 
 use crate::{
-	actions::{ConstraintInitActions, ReformulationActions, SimplificationActions},
-	constraints::{Constraint, SimplificationStatus},
+	actions::{
+		BoolInspectionActions, BoolPostingActions, BoolPropagationActions,
+		BoolSimplificationActions, IntSimplificationActions, PostingActions, ReasoningEngine,
+		ReformulationActions,
+	},
+	constraints::{
+		Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus, SolverBoolView,
+	},
 	reformulate::ReformulationError,
+	solver::queue::PriorityLevel,
 	BoolDecision, IntDecision, IntSetVal,
 };
 
@@ -28,37 +36,48 @@ pub struct IntInSetReif {
 	pub(crate) reif: BoolDecision,
 }
 
-impl<S: SimplificationActions> Constraint<S> for IntInSetReif {
-	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
-		actions.simplify_on_change_int(self.var);
-		actions.simplify_on_change_bool(self.reif);
-	}
-
-	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+impl<E> Constraint<E> for IntInSetReif
+where
+	E: ReasoningEngine,
+	IntDecision: ModelIntView<E>,
+	BoolDecision: ModelBoolView<E>,
+{
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
 		// Check whether `reif` is set, then just enforce the domain.
-		match actions.get_bool_val(self.reif) {
+		match self.reif.get_val(ctx) {
 			Some(true) => {
-				actions.set_int_in_set(self.var, &self.set)?;
+				self.var.set_domain(ctx, &self.set, [self.reif.into()])?;
 				return Ok(SimplificationStatus::Subsumed);
 			}
 			Some(false) => {
-				actions.set_int_not_in_set(self.var, &self.set)?;
+				self.var
+					.set_not_in_set(ctx, &self.set, [(!self.reif).into()])?;
 				return Ok(SimplificationStatus::Subsumed);
 			}
 			None => {}
 		}
 		// Compute the overlap between the set and the domain of `var`.
-		let domain = actions.get_int_domain(self.var);
+		let domain = self.var.get_domain(ctx);
 		self.set = self.set.intersect(&domain);
 		// If the intersection is empty, then `reif` must be false.
 		if self.set.is_empty() {
-			actions.set_bool(!self.reif)?;
+			self.reif
+				.set_val(ctx, false, |_: &mut E::PropagationCtx<'_>| {
+					self.set
+						.iter()
+						.flatten()
+						.map(|v| self.var.ne(v).into())
+						.collect_vec()
+				})?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
 		// If `set` is a superset of domain, then it is known that `reif` is true.
 		// (After intersection, we can just check equality)
 		if domain == self.set {
-			actions.set_bool(self.reif)?;
+			self.reif.set(ctx, [])?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
 		// Otherwise, we check whether we can rewrite the constraint into a simpler
@@ -67,15 +86,15 @@ impl<S: SimplificationActions> Constraint<S> for IntInSetReif {
 			let lb = self.set.lower_bound().unwrap();
 			let ub = self.set.upper_bound().unwrap();
 			if lb == ub {
-				actions.unify_bool(self.reif, self.var.eq(*lb))?;
+				self.reif.unify(ctx, self.var.eq(*lb))?;
 				return Ok(SimplificationStatus::Subsumed);
 			}
 			if lb == domain.lower_bound().unwrap() {
-				actions.unify_bool(self.reif, self.var.leq(*ub))?;
+				self.reif.unify(ctx, self.var.leq(*ub))?;
 				return Ok(SimplificationStatus::Subsumed);
 			}
 			if ub == domain.upper_bound().unwrap() {
-				actions.unify_bool(self.reif, self.var.geq(*lb))?;
+				self.reif.unify(ctx, self.var.geq(*lb))?;
 				return Ok(SimplificationStatus::Subsumed);
 			}
 		}
@@ -86,7 +105,7 @@ impl<S: SimplificationActions> Constraint<S> for IntInSetReif {
 		if self.set.iter().len() == 1 {
 			let lb = *self.set.lower_bound().unwrap();
 			let ub = *self.set.upper_bound().unwrap();
-			<Formula<BoolDecision> as Constraint<S>>::to_solver(
+			<Formula<BoolDecision> as Constraint<E>>::to_solver(
 				&Formula::Equiv(vec![
 					Formula::And(vec![self.var.geq(lb).into(), self.var.leq(ub).into()]),
 					self.reif.into(),
@@ -100,10 +119,24 @@ impl<S: SimplificationActions> Constraint<S> for IntInSetReif {
 				.flatten()
 				.map(|v| self.var.eq(v).into())
 				.collect();
-			<Formula<BoolDecision> as Constraint<S>>::to_solver(
+			<Formula<BoolDecision> as Constraint<E>>::to_solver(
 				&Formula::Equiv(vec![self.reif.into(), Formula::Or(eq_lits)]),
 				slv,
 			)
 		}
+	}
+}
+
+impl<E> Propagator<E> for IntInSetReif
+where
+	E: ReasoningEngine,
+	BoolDecision: SolverBoolView<E>,
+{
+	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+		ctx.set_priority(PriorityLevel::Highest);
+		// Enqueue once to check the domain of the integer decision variable,
+		// then only if the reification variable is fixed.
+		ctx.enqueue_now(true);
+		self.reif.enqueue_when_fixed(ctx);
 	}
 }
