@@ -24,6 +24,7 @@ use std::{
 
 use dyn_clone::DynClone;
 use index_vec::IndexVec;
+use itertools::Itertools;
 use pindakaas::Lit as RawLit;
 use tracing::warn;
 
@@ -55,7 +56,7 @@ pub(crate) type BoxedPropagator = Box<dyn Propagator<Engine>>;
 /// and is only evaluated once used.
 pub(crate) enum CachedReason<B, Atom> {
 	/// A evaluated reason that can be reused
-	Cached(Vec<Atom>),
+	Cached(Result<Reason<Atom>, bool>),
 	/// A reason that has not yet been evaluated
 	Builder(B),
 }
@@ -71,7 +72,7 @@ pub struct Conflict {
 	pub(crate) subject: Option<RawLit>,
 	/// The reason for the conflict
 	/// This reason must result a conjunction that implies false
-	pub(crate) reason: Reason,
+	pub(crate) reason: Reason<RawLit>,
 }
 
 /// A trait for constraints that can be placed in a [`Model`] object.
@@ -103,7 +104,10 @@ pub trait Constraint<E: ReasoningEngine>: Debug + DynClone + Propagator<E> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// A note that the mentioned propagator will compute the `Reason` if requested.
-pub struct LazyReason(pub(crate) PropRef, pub(crate) u64);
+pub struct LazyReason {
+	pub(crate) propagator: u32,
+	pub(crate) data: u64,
+}
 
 /// A trait for a propagator that is called during the search process to filter
 /// the domains of decision variables, and detect inconsistencies.
@@ -289,14 +293,14 @@ where
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A conjunction of literals that implies a change in the state
-pub enum Reason {
+pub enum Reason<Atom> {
 	/// A promise that a given propagator will compute a causation of the change
 	/// when given the attached data.
 	Lazy(LazyReason),
 	/// A conjunction of literals forming the causation of the change.
-	Eager(Box<[RawLit]>),
+	Eager(Box<[Atom]>),
 	/// A single literal that is the causation of the change.
-	Simple(RawLit),
+	Simple(Atom),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -333,7 +337,7 @@ impl Conflict {
 		subject: Option<RawLit>,
 		reason: impl ReasonBuilder<Context, BoolView>,
 	) -> Self {
-		match Reason::from_iter(reason.build_reason(actions)) {
+		match Reason::from_view(reason.build_reason(actions)) {
 			Ok(reason) => Self { subject, reason },
 			Err(true) => match subject {
 				Some(subject) => Self {
@@ -361,7 +365,7 @@ impl fmt::Display for Conflict {
 	}
 }
 
-impl Reason {
+impl Reason<RawLit> {
 	/// Make the reason produce an explanation of the `lit`.
 	///
 	/// Explanation is in terms of a clause that can be added to the solver.
@@ -373,8 +377,11 @@ impl Reason {
 		lit: Option<RawLit>,
 	) -> Clause {
 		match self {
-			Reason::Lazy(LazyReason(prop, data)) => {
-				let reason = props[*prop].explain(
+			Reason::Lazy(LazyReason {
+				propagator: prop,
+				data,
+			}) => {
+				let reason = props[PropRef::from_raw(*prop)].explain(
 					actions,
 					lit.map(|lit| BoolView(BoolViewInner::Lit(lit)))
 						.unwrap_or(true.into()),
@@ -405,19 +412,42 @@ impl Reason {
 		}))
 	}
 
+	pub(crate) fn from_view(reason: Result<Reason<BoolView>, bool>) -> Result<Self, bool> {
+		let v = match reason? {
+			Reason::Lazy(lazy) => return Ok(Self::Lazy(lazy)),
+			Reason::Eager(items) => items.into_vec(),
+			Reason::Simple(lit) => vec![lit],
+		};
+		let mut v: Vec<_> = v
+			.into_iter()
+			.filter_map(|v| match v.0 {
+				BoolViewInner::Lit(lit) => Some(Ok(lit)),
+				BoolViewInner::Const(false) => Some(Err(false)),
+				BoolViewInner::Const(true) => None,
+			})
+			.try_collect()?;
+		match v.len() {
+			0 => Err(true),
+			1 => Ok(Reason::Simple(v.remove(0))),
+			_ => Ok(Reason::Eager(v.into_boxed_slice())),
+		}
+	}
+}
+
+impl<A> Reason<A> {
 	/// Collect a conjunction of `BoolView` from an iterator into a `Reason`.
-	pub(crate) fn from_iter<I: IntoIterator<Item = BoolView>>(iter: I) -> Result<Self, bool> {
-		let lits = Self::collect_vec(iter)?;
+	pub(crate) fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Result<Self, bool> {
+		let mut lits: Vec<_> = iter.into_iter().collect();
 		match lits.len() {
 			0 => Err(true),
-			1 => Ok(Reason::Simple(lits[0])),
+			1 => Ok(Reason::Simple(lits.remove(0))),
 			_ => Ok(Reason::Eager(lits.into_boxed_slice())),
 		}
 	}
 }
 
 pub trait ReasonBuilder<Context: ?Sized, Atom> {
-	fn build_reason(self, ctx: &mut Context) -> impl IntoIterator<Item = Atom>;
+	fn build_reason(self, ctx: &mut Context) -> Result<Reason<Atom>, bool>;
 }
 
 impl<C, A, F, I> ReasonBuilder<C, A> for F
@@ -425,20 +455,20 @@ where
 	F: FnOnce(&mut C) -> I,
 	I: IntoIterator<Item = A>,
 {
-	fn build_reason(self, ctx: &mut C) -> impl IntoIterator<Item = A> {
-		self(ctx)
+	fn build_reason(self, ctx: &mut C) -> Result<Reason<A>, bool> {
+		Reason::from_iter(self(ctx))
 	}
 }
 
 impl<C, A> ReasonBuilder<C, A> for Vec<A> {
-	fn build_reason(self, _: &mut C) -> impl IntoIterator<Item = A> {
-		self
+	fn build_reason(self, _: &mut C) -> Result<Reason<A>, bool> {
+		Reason::from_iter(self)
 	}
 }
 
 impl<C, A, const N: usize> ReasonBuilder<C, A> for [A; N] {
-	fn build_reason(self, _: &mut C) -> impl IntoIterator<Item = A> {
-		self
+	fn build_reason(self, _: &mut C) -> Result<Reason<A>, bool> {
+		Reason::from_iter(self)
 	}
 }
 
@@ -447,19 +477,25 @@ where
 	A: Clone,
 	B: ReasonBuilder<C, A>,
 {
-	fn build_reason(self, ctx: &mut C) -> impl IntoIterator<Item = A> {
+	fn build_reason(self, ctx: &mut C) -> Result<Reason<A>, bool> {
 		match self {
 			CachedReason::Cached(items) => items.clone(),
 			CachedReason::Builder(_) => {
 				let CachedReason::Builder(builder) =
-					mem::replace(self, CachedReason::Cached(Vec::new()))
+					mem::replace(self, CachedReason::Cached(Err(false)))
 				else {
 					unreachable!()
 				};
-				let reason: Vec<A> = builder.build_reason(ctx).into_iter().collect();
+				let reason = builder.build_reason(ctx);
 				*self = CachedReason::Cached(reason.clone());
 				reason
 			}
 		}
+	}
+}
+
+impl<A, C> ReasonBuilder<C, A> for LazyReason {
+	fn build_reason(self, _: &mut C) -> Result<Reason<A>, bool> {
+		Ok(Reason::Lazy(self))
 	}
 }

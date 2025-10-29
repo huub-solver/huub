@@ -55,7 +55,8 @@ use crate::{
 		bool_array_element::BoolDecisionArrayElement,
 		int_abs::IntAbsBounds,
 		int_linear::{IntLinear, LinOperator},
-		BoxedConstraint, Conflict, Constraint, LazyReason, ReasonBuilder, SimplificationStatus,
+		BoxedConstraint, Conflict, Constraint, LazyReason, Reason, ReasonBuilder,
+		SimplificationStatus,
 	},
 	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
 	helpers::linear_transform::LinearTransform,
@@ -1860,8 +1861,23 @@ impl DecisionActions for Model {
 }
 
 impl PropagationActions for Model {
+	type Atom = BoolDecision;
+	type Conflict = Vec<BoolDecision>;
+
 	fn deferred_reason(&self, data: u64) -> LazyReason {
 		todo!()
+	}
+
+	fn declare_conflict(&mut self, reason: impl ReasonBuilder<Self, Self::Atom>) -> Self::Conflict {
+		match reason.build_reason(self) {
+			Ok(reason) => match reason {
+				Reason::Lazy(_) => todo!(),
+				Reason::Eager(items) => items.into_vec(),
+				Reason::Simple(b) => vec![b],
+			},
+			Err(false) => panic!("invalid reason"),
+			Err(true) => vec![],
+		}
 	}
 }
 

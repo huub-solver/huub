@@ -101,7 +101,7 @@ pub(crate) struct LitPropagation {
 	/// The literal that was propagated.
 	pub(crate) lit: RawLit,
 	/// The reason for which the literal was propagated.
-	pub(crate) reason: Result<Reason, bool>,
+	pub(crate) reason: Result<Reason<RawLit>, bool>,
 	/// The underlying event on complex types that triggered the propagation.
 	///
 	/// This event should be used to schedule further propagators.
@@ -132,7 +132,7 @@ pub struct State {
 	/// Literals to be propagated by the oracle
 	pub(crate) propagation_queue: VecDeque<LitPropagation>,
 	/// Reasons for setting values
-	pub(crate) reason_map: FxHashMap<RawLit, Reason>,
+	pub(crate) reason_map: FxHashMap<RawLit, Reason<RawLit>>,
 	/// Whether conflict has (already) been detected
 	pub(crate) conflict: Option<Conflict>,
 	/// Whether the solver is in a failure state.
@@ -410,8 +410,12 @@ impl PropagatorExtension for Engine {
 		// Process propagation results, and accept model if no conflict is detected
 		let conflict = self.state.conflict.take().map(|c| {
 			// Convert Lazy reasons into an eager ones
-			if let Reason::Lazy(LazyReason(prop, data)) = c.reason {
-				let reason = self.propagators[prop].explain(
+			if let Reason::Lazy(LazyReason {
+				propagator: prop,
+				data,
+			}) = c.reason
+			{
+				let reason = self.propagators[PropRef::from_raw(prop)].explain(
 					&mut self.state,
 					c.subject
 						.map(|lit| BoolView(BoolViewInner::Lit(lit)))
@@ -420,7 +424,7 @@ impl PropagatorExtension for Engine {
 				);
 				Conflict {
 					subject: c.subject,
-					reason: match Reason::from_iter(reason) {
+					reason: match Reason::from_view(Reason::from_iter(reason)) {
 						Err(false) => panic!("invalid lazy reason"), // TODO: Improve message
 						Err(true) => Reason::Eager(Vec::new().into_boxed_slice()),
 						Ok(r) => r,
@@ -823,7 +827,11 @@ impl State {
 	}
 
 	/// Register the [`Reason`] to explain why `lit` has been assigned.
-	pub(crate) fn register_reason(&mut self, lit: RawLit, built_reason: Result<Reason, bool>) {
+	pub(crate) fn register_reason(
+		&mut self,
+		lit: RawLit,
+		built_reason: Result<Reason<RawLit>, bool>,
+	) {
 		match built_reason {
 			Ok(reason) => {
 				// Insert new reason, possibly overwriting old one (from previous search

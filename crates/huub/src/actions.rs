@@ -14,7 +14,7 @@ use pindakaas::{
 
 use crate::{
 	branchers::BoxedBrancher,
-	constraints::{BoxedPropagator, LazyReason, ReasonBuilder},
+	constraints::{BoxedPropagator, LazyReason, Reason, ReasonBuilder},
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, BoolView,
@@ -249,10 +249,15 @@ pub trait IntSimplificationActions<Context: ?Sized>: IntPropagationActions<Conte
 
 /// Actions that can be performed during propagation.
 pub trait PropagationActions: DecisionActions {
+	type Atom;
+	type Conflict;
+
 	/// Create a placeholder reason that will cause the solver to call the
 	/// propagator's [`crate::constraints::Propagator::explain`] method when the
 	/// reason is needed.
 	fn deferred_reason(&self, data: u64) -> LazyReason;
+
+	fn declare_conflict(&mut self, reason: impl ReasonBuilder<Self, Self::Atom>) -> Self::Conflict;
 }
 
 pub trait IntPostingActions<Context>: IntOperations {
@@ -290,7 +295,7 @@ pub trait InitializationActions: AddAssign<BoxedPropagator> {
 pub trait ReasoningEngine {
 	type PostingCtx<'a>: PostingActions;
 	type NotificationCtx<'a>: TrailingActions;
-	type PropagationCtx<'a>: PropagationActions;
+	type PropagationCtx<'a>: PropagationActions<Atom = Self::Atom, Conflict = Self::Conflict>;
 	type ExplanationCtx<'a>: TrailingActions;
 
 	type Conflict;

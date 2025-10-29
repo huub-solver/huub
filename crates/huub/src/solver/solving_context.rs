@@ -12,8 +12,7 @@ use tracing::trace;
 use crate::{
 	actions::{
 		BoolInspectionActions, BoolPropagationActions, DecisionActions, IntDecisionActions,
-		IntExplanationActions, IntInspectionActions, IntPropagationActions, PropagationActions,
-		TrailingActions,
+		IntInspectionActions, IntPropagationActions, PropagationActions, TrailingActions,
 	},
 	constraints::{Conflict, LazyReason, Reason, ReasonBuilder},
 	solver::{
@@ -39,7 +38,7 @@ enum ChangeType {
 
 /// Helper struct that temporarily captures a built reason to print it for
 /// `tracing`.
-struct ReasonTracePrint<'a>(&'a Result<Reason, bool>);
+struct ReasonTracePrint<'a>(&'a Result<Reason<RawLit>, bool>);
 
 /// Structure to hold the internal [`State`] of the propagation engine and the
 /// [`SolvingActions`] exposed by the SAT oracle.
@@ -121,7 +120,7 @@ impl<'a> SolvingContext<'a> {
 		reason: impl ReasonBuilder<Self, BoolView>,
 		event: Option<(IntVarRef, IntEvent)>,
 	) {
-		let reason = Reason::from_iter(reason.build_reason(self));
+		let reason = Reason::from_view(reason.build_reason(self));
 		trace!(
 			lit = i32::from(lit),
 			reason = ?ReasonTracePrint(&reason),
@@ -275,8 +274,18 @@ impl DecisionActions for SolvingContext<'_> {
 }
 
 impl PropagationActions for SolvingContext<'_> {
+	type Atom = BoolView;
+	type Conflict = Conflict;
+
 	fn deferred_reason(&self, data: u64) -> LazyReason {
-		LazyReason(self.current_prop, data)
+		LazyReason {
+			propagator: self.current_prop.raw(),
+			data,
+		}
+	}
+
+	fn declare_conflict(&mut self, reason: impl ReasonBuilder<Self, Self::Atom>) -> Self::Conflict {
+		Conflict::new(self, None, reason)
 	}
 }
 
@@ -343,7 +352,6 @@ impl<'a> BoolPropagationActions<SolvingContext<'a>> for BoolView {
 		ctx: &mut SolvingContext<'a>,
 		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
 	) -> Result<(), Self::Conflict> {
-		let reason: Vec<BoolView> = reason.build_reason(ctx).into_iter().collect();
 		match self.0 {
 			BoolViewInner::Lit(lit) => lit.set(ctx, reason),
 			BoolViewInner::Const(false) => Err(Conflict::new(ctx, None, reason)),

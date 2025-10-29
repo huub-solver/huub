@@ -301,9 +301,7 @@ where
 			[var] if self.reif.is_none() => {
 				match self.operator {
 					LinOperator::Equal => var.set_val(ctx, self.rhs, [])?,
-					LinOperator::LessEq => {
-						var.set_upper_bound(ctx, self.rhs, []);
-					}
+					LinOperator::LessEq => var.set_upper_bound(ctx, self.rhs, [])?,
 					LinOperator::NotEqual => var.set_not_eq(ctx, self.rhs, [])?,
 				}
 				return Ok(SimplificationStatus::Subsumed);
@@ -408,7 +406,7 @@ where
 					r.set_val(ctx, false, fail_reason)?;
 					Ok(SimplificationStatus::Subsumed)
 				}
-				None if !satisfied => Err(todo!()),
+				None if !satisfied => Err(ctx.declare_conflict(fail_reason)),
 				None => Ok(SimplificationStatus::Subsumed),
 			};
 		} else if self.operator == LinOperator::NotEqual {
@@ -723,7 +721,7 @@ where
 		for (j, v) in self.terms.iter().enumerate() {
 			let reason = ctx.deferred_reason(j as u64);
 			let ub = sum + v.get_lower_bound(ctx);
-			v.set_upper_bound(ctx, ub, [todo!()])?;
+			v.set_upper_bound(ctx, ub, reason)?;
 		}
 		Ok(())
 	}
