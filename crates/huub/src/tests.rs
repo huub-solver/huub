@@ -5,20 +5,14 @@ use rangelist::RangeList;
 use tracing_test::traced_test;
 
 use crate::{
-	actions::{IntInspectionActions, IntSimplificationActions, SimplificationActions},
+	actions::{IntInspectionActions, IntSimplificationActions},
 	branchers::IntBrancher,
-	// constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
+	constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
 	solver::{
 		int_var::{EncodingType, IntVar},
 		SolveResult, Value, View,
 	},
-	Decision,
-	InitConfig,
-	Model,
-	NonZeroIntVal,
-	ReformulationError,
-	Solver,
-	ValueSelection,
+	Decision, InitConfig, Model, NonZeroIntVal, ReformulationError, Solver, ValueSelection,
 	VariableSelection,
 };
 
@@ -76,18 +70,16 @@ fn test_duplicate_propagation() {
 		EncodingType::Eager,
 		EncodingType::Lazy,
 	);
-	todo!();
-	// IntLinearLessEqBounds::new_in(
-	// 	&mut slv,
-	// 	[
-	// 		a * NonZeroIntVal::new(3).unwrap(),
-	// 		b,
-	// 		b * NonZeroIntVal::new(2).unwrap(),
-	// 	],
-	// 	3,
-	// );
-	// IntLinearNotEqValue::new_in(&mut slv, [a * NonZeroIntVal::new(3).unwrap(),
-	// b], 3);
+	IntLinearLessEqBounds::new_in(
+		&mut slv,
+		[
+			a * NonZeroIntVal::new(3).unwrap(),
+			b,
+			b * NonZeroIntVal::new(2).unwrap(),
+		],
+		3,
+	);
+	IntLinearNotEqValue::new_in(&mut slv, [a * NonZeroIntVal::new(3).unwrap(), b], 3);
 	IntBrancher::new_in(
 		&mut slv,
 		vec![a, b],
@@ -109,9 +101,7 @@ fn test_unify_int_impossible() {
 	let a = prb.new_int_var(1..=5);
 	let b = prb.new_int_var(1..=2);
 
-	todo!();
-	// let lin = (a * 2 - b * 5).eq(0);
-	// prb += lin;
+	prb += (a * 2 - b * 5).eq(0);
 
 	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 	let a = map.get_int(&mut slv, a);
@@ -132,10 +122,7 @@ fn test_unify_int_lin_view_domains() {
 	let a = prb.new_int_var(RangeList::from_iter([1..=1, 3..=3, 5..=5]));
 	let b = prb.new_int_var(RangeList::from_iter([1..=3]));
 
-	todo!();
-
-	// let lin = (a * 6 - b * 2).eq(0);
-	// prb += lin;
+	prb += (a * 6 - b * 2).eq(0);
 
 	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 	let a = map.get_int(&mut slv, a);
@@ -151,8 +138,7 @@ fn test_unify_int_view_for_bool_1() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	todo!();
-	// prb += (a * 2 + b * -2).eq(0);
+	prb += (a * 2 + b * -2).eq(0);
 	prb.expect_solutions(
 		&[a, b],
 		expect![[r#"
@@ -166,8 +152,7 @@ fn test_unify_int_view_for_bool_2() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	todo!();
-	// prb += (a * -2 + b * 3).eq(0);
+	prb += (a * -2 + b * 3).eq(0);
 	prb.expect_solutions(
 		&[a, b],
 		expect![[r#"
@@ -180,8 +165,7 @@ fn test_unify_int_view_for_bool_3() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	todo!();
-	// prb += (a * -2 + b * -3).eq(0);
+	prb += (a * -2 + b * -3).eq(0);
 	prb.expect_solutions(
 		&[a, b],
 		expect![[r#"
@@ -194,8 +178,7 @@ fn test_unify_int_view_for_bool_4() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	todo!();
-	// prb += (a * 2 + b * 3).eq(0);
+	prb += (a * 2 + b * 3).eq(0);
 	prb.expect_solutions(
 		&[a, b],
 		expect![[r#"
@@ -208,8 +191,7 @@ fn test_unify_int_view_for_bool_5() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	todo!();
-	// prb += (a * 2 + b * -3).eq(0);
+	prb += (a * 2 + b * -3).eq(0);
 	prb.expect_solutions(
 		&[a, b],
 		expect![[r#"
@@ -222,8 +204,7 @@ fn test_unify_int_view_for_bool_6() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	todo!();
-	// prb += (((a * 2) + 2) + b * -3).eq(0);
+	prb += (((a * 2) + 2) + b * -3).eq(0);
 	prb.assert_unsatisfiable();
 }
 

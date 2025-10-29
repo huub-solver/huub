@@ -54,7 +54,7 @@ use crate::{
 	constraints::{
 		bool_array_element::BoolDecisionArrayElement,
 		int_abs::IntAbsBounds,
-		int_linear::{IntLinear, LinOperator},
+		int_linear::{IntEq, IntLinear, LinOperator},
 		int_table::IntTable,
 		BoxedConstraint, Conflict, Constraint, LazyReason, Reason, ReasonBuilder,
 		SimplificationStatus,
@@ -1755,7 +1755,179 @@ impl IntSimplificationActions<Model> for IntDecision {
 	}
 
 	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Self::Conflict> {
-		todo!()
+		use IntDecisionInner::*;
+
+		let x = self.resolve_alias(ctx);
+		let y = other.into().resolve_alias(ctx);
+
+		let (idx, target, dom_con) = match (x.0, y.0) {
+			(x, y) if x == y => return Ok(()),
+			(Const(x), Const(y)) if x != y => return Err(ctx.declare_conflict([])),
+			(Const(y), x) | (x, Const(y)) => {
+				let x = IntDecision(x);
+				return x.set_val(ctx, y, []);
+			}
+			(Var(x), y) | (y, Var(x)) => {
+				let (x, y) = if let Var(y) = y {
+					if x > y {
+						(x, IntDecision(Var(y)))
+					} else {
+						(y, IntDecision(Var(x)))
+					}
+				} else {
+					(x, IntDecision(y))
+				};
+				let Domain::Domain(x_dom) = mem::replace(
+					&mut ctx.int_vars[x].domain,
+					Domain::Domain(RangeList::default()),
+				) else {
+					unreachable!()
+				};
+				(x, y, Some(x_dom))
+			}
+			(Linear(x_t, x_i), Linear(y_t, y_i)) => {
+				// Decide which variable to redefine based on the other.
+				let can_define_x = (y_t - x_t.offset).can_divide_by(x_t.scale.get());
+				let can_define_y = (x_t - y_t.offset).can_divide_by(y_t.scale.get());
+				let ((x_t, x_i), (y_t, y_i)) = if can_define_x && can_define_y && x_i > y_i {
+					((x_t, x_i), (y_t, y_i))
+				} else if can_define_y {
+					((y_t, y_i), (x_t, x_i))
+				} else if can_define_x {
+					((x_t, x_i), (y_t, y_i))
+				} else {
+					*ctx += IntEq { vars: [x, y] };
+					return Ok(());
+				};
+
+				// Perform the transformation and add the aliasing domain to x:
+				// x_scale * x + x_scale = y_scale * y + y_offset
+				// === x = (y_scale / x_scale) * y + ((y_offset - x_offset) / x_scale)
+				let trans_y = LinearTransform::scaled(
+					NonZeroIntVal::new(y_t.scale.get() / x_t.scale.get()).unwrap(),
+				) + (y_t.offset - x_t.offset) / x_t.scale.get();
+				let target = IntDecision(Var(y_i)) * trans_y.scale + trans_y.offset;
+
+				// Domain of target must be equivalent to the domain of x
+				let Domain::Domain(x_dom) = mem::replace(
+					&mut ctx.int_vars[x_i].domain,
+					Domain::Domain(RangeList::default()),
+				) else {
+					unreachable!()
+				};
+				(x_i, target, Some(x_dom))
+			}
+			(iv @ Linear(i_t, i_i), Bool(b_t, b_d)) | (Bool(b_t, b_d), iv @ Linear(i_t, i_i)) => {
+				let iv = IntDecision(iv);
+				let lb = b_t.transform(0);
+				let ub = b_t.transform(1);
+
+				let contains_lb = iv.check_in_domain(ctx, lb);
+				let contains_ub = iv.check_in_domain(ctx, ub);
+
+				if contains_lb && contains_ub {
+					let Ok(IntLitMeaning::Eq(i_lb)) = i_t.rev_transform_lit(IntLitMeaning::Eq(lb))
+					else {
+						unreachable!()
+					};
+					let Ok(IntLitMeaning::Eq(i_ub)) = i_t.rev_transform_lit(IntLitMeaning::Eq(ub))
+					else {
+						unreachable!()
+					};
+
+					debug_assert!(matches!(ctx.int_vars[i_i].domain, Domain::Domain(_)));
+					(
+						i_i,
+						IntDecision(Bool(
+							LinearTransform {
+								scale: NonZeroI64::new(i_ub - i_lb).unwrap(),
+								offset: i_lb,
+							},
+							b_d,
+						)),
+						None,
+					)
+				} else if contains_lb {
+					iv.set_val(ctx, lb, [])?;
+					return b_d.set_val(ctx, false, [iv.ne(ub)]);
+				} else if contains_ub {
+					iv.set_val(ctx, ub, [])?;
+					return b_d.set(ctx, [iv.ne(lb)]);
+				} else {
+					return Err(ctx.declare_conflict([iv.ne(lb), iv.ne(ub)]));
+				}
+			}
+			(x @ Bool(x_t, x_i), y @ Bool(y_t, y_i)) => {
+				// x and y can only take two values each, given by their bounds.
+				let (x_lb, x_ub) = IntDecision(x).get_bounds(ctx);
+				let (y_lb, y_ub) = IntDecision(y).get_bounds(ctx);
+				// Negate the literals if it is multiplied with a negative number. (This will
+				// ensure that `!b` represents the lower bound, and `b` represents the upper
+				// bound).
+				let x_i = if x_t.positive_scale() { x_i } else { !x_i };
+				let y_i = if y_t.positive_scale() { y_i } else { !y_i };
+
+				return match (x_lb == y_lb, x_ub == y_ub) {
+					(true, true) => x_i.unify(ctx, y_i),
+					(true, false) => {
+						x_i.set_val(ctx, false, [])?;
+						y_i.set_val(ctx, false, [])
+					}
+					(false, true) => {
+						x_i.set_val(ctx, true, [])?;
+						y_i.set_val(ctx, true, [])
+					}
+					(false, false) if x_lb == y_ub => {
+						x_i.set_val(ctx, false, [])?;
+						y_i.set_val(ctx, true, [])
+					}
+					(false, false) if x_ub == y_lb => {
+						x_i.set_val(ctx, true, [])?;
+						y_i.set_val(ctx, false, [])
+					}
+					(false, false) => Err(ctx.declare_conflict([])),
+				};
+			}
+		};
+
+		ctx.int_vars[idx].domain = Domain::Alias(target);
+		// Transfer any constraints from the aliased variable to the target variable
+		let constraints = mem::take(&mut ctx.int_vars[idx].constraints);
+		let notify = match target.0 {
+			// Move subscriptions to other integer decision
+			Var(j)
+			| Linear(_, j)
+			| Bool(
+				_,
+				BoolDecision(
+					BoolDecisionInner::IntEq(j, _)
+					| BoolDecisionInner::IntNotEq(j, _)
+					| BoolDecisionInner::IntGreaterEq(j, _)
+					| BoolDecisionInner::IntLess(j, _),
+				),
+			) => {
+				ctx.int_vars[j].constraints.extend(constraints);
+				&ctx.int_vars[j].constraints
+			}
+			// Move subscription to Boolean decision
+			Bool(_, BoolDecision(BoolDecisionInner::Lit(l))) => {
+				let jdx = i32::from(l.var()) as usize - 1;
+				ctx.bool_vars[jdx].constraints.extend(constraints);
+				&ctx.bool_vars[jdx].constraints
+			}
+			// Notify current subscriptions one more time, then forget about them.
+			Const(_) | Bool(_, BoolDecision(BoolDecisionInner::Const(_))) => &constraints,
+		};
+		// Notify constraints listening to either variable of update
+		for c in notify.clone() {
+			ctx.propagator_queue.enqueue_propagator(c);
+		}
+		// Restrict the domain of the target variable using the variable domain
+		// being aliased.
+		if let Some(dom) = dom_con {
+			target.set_domain(ctx, &dom, [])?;
+		}
+		Ok(())
 	}
 
 	fn set_not_in_set(
@@ -1871,7 +2043,61 @@ impl IntSimplificationActions<Model> for IntDecision {
 
 impl BoolSimplificationActions<Model> for BoolDecision {
 	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Self::Conflict> {
-		todo!()
+		use BoolDecisionInner::*;
+
+		let x = self.resolve_alias(ctx);
+		let y = other.into().resolve_alias(ctx);
+
+		match (x.0, y.0) {
+			(x, y) if x == y => Ok(()),
+			(Lit(xl), Lit(yl)) if xl.var() == yl.var() => Err(ctx.declare_conflict([x, y])),
+			(Const(x), Const(y)) if x != y => Err(ctx.declare_conflict([])),
+			(x, Const(b)) | (Const(b), x) => BoolDecision(x).set_val(ctx, b, []),
+			(Lit(x), y) | (y, Lit(x)) => {
+				let (x, y) = if let Lit(y) = y {
+					if x.var() > y.var() {
+						(x, BoolDecision(Lit(y)))
+					} else {
+						(y, BoolDecision(Lit(x)))
+					}
+				} else {
+					(x, BoolDecision(y))
+				};
+				let store = &mut ctx.bool_vars[i32::from(x.var()) as usize - 1];
+				debug_assert_eq!(store.alias, None);
+				let idx = i32::from(x.var()) as usize - 1;
+				ctx.bool_vars[idx].alias = Some(if x.is_negated() { !y } else { y });
+
+				// Move subscriptions from aliased variable to the new primary variable
+				let constraints = mem::take(&mut ctx.bool_vars[idx].constraints);
+				let notify = match y.0 {
+					// Move subscriptions to another Boolean decision
+					Lit(lit) => {
+						let jdx = i32::from(lit.var()) as usize - 1;
+						ctx.bool_vars[jdx].constraints.extend(constraints);
+						&ctx.bool_vars[jdx].constraints
+					}
+					// Move subscriptions to an integer decision
+					IntEq(j, _) | IntGreaterEq(j, _) | IntLess(j, _) | IntNotEq(j, _) => {
+						ctx.int_vars[j].constraints.extend(constraints);
+						&ctx.int_vars[j].constraints
+					}
+					Const(_) => unreachable!(),
+				};
+				// Notify constraints subscribed to either variable about the change
+				for c in notify.clone() {
+					ctx.propagator_queue.enqueue_propagator(c);
+				}
+				Ok(())
+			}
+			(x, y) => {
+				let x = BoolFormula::Atom(BoolDecision(x));
+				let y = BoolFormula::Atom(BoolDecision(y));
+
+				*ctx += BoolFormula::Equiv(vec![x, y]);
+				Ok(())
+			}
+		}
 	}
 }
 

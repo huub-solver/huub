@@ -140,11 +140,12 @@ where
 		ctx: &mut E::PropagationCtx<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
-		if self.vars[0].get_val(ctx).is_some() {
-			debug_assert!(self.vars[1].get_val(ctx).is_some());
+		// Note that one variable might be fixed and not the other one. Gaps in domains
+		// or linear view might require multiple rounds of propagation to reach a
+		// fixpoint.
+		if self.vars.iter().all(|v| v.get_val(ctx).is_some()) {
 			Ok(SimplificationStatus::Subsumed)
 		} else {
-			debug_assert!(self.vars[1].get_val(ctx).is_none());
 			Ok(SimplificationStatus::NoFixpoint)
 		}
 	}
@@ -172,7 +173,7 @@ where
 	}
 
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
-		// Channel bounds of self.vars[0] t0 self.vars[1]
+		// Channel bounds of self.vars[0] to self.vars[1]
 		self.vars[0].set_lower_bound(
 			ctx,
 			self.vars[1].get_lower_bound(ctx),
@@ -194,7 +195,8 @@ where
 			ctx,
 			self.vars[0].get_upper_bound(ctx),
 			[self.vars[0].get_upper_bound_lit(ctx)],
-		)
+		)?;
+		Ok(())
 	}
 }
 
