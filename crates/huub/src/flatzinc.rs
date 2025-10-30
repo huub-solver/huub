@@ -1199,9 +1199,8 @@ where
 						match (force_bounds, force_value) {
 							(false, false) => {} // No
 							(bounds, value) => {
-								todo!()
-								// all_diff.use_bounds_consistent_propagator(bounds);
-								// all_diff.use_value_consistent_propagator(value);
+								all_diff.use_bounds_consistent_propagator(bounds);
+								all_diff.use_value_consistent_propagator(value);
 							}
 						}
 						self.prb += all_diff;

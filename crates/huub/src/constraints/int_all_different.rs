@@ -1,16 +1,13 @@
 //! Structure and algorithms for the integer all different constraint, which
 //! enforces that a list of integer variables each take a different value.
 
-use std::cmp;
+use std::{cmp, ops::AddAssign};
 
 use itertools::{Either, Itertools};
-use rangelist::{IntervalIterator, RangeList};
 
 use crate::{
-	actions::{
-		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
-	},
-	constraints::{Conflict, Constraint, PropagationActions, Propagator, SimplificationStatus},
+	actions::{IntInspectionActions, PostingActions, ReasoningEngine, ReformulationActions},
+	constraints::{BoxedPropagator, Constraint, ModelIntView, Propagator, SolverIntView},
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::{IntEvent, IntPropCond},
@@ -39,7 +36,7 @@ struct AllDiffVarMeta {
 /// values.
 pub struct IntAllDifferent {
 	/// List of integer decision variables that must take different values.
-	pub(crate) vars: Vec<IntDecision>,
+	pub(crate) prop: IntAllDifferentBounds<IntDecision>,
 	/// Whether to enable the bounds consistent propagator.
 	///
 	/// Defaults to `true`.
@@ -52,9 +49,9 @@ pub struct IntAllDifferent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds consistent propagator for the `all_different_int` constraint.
-pub struct IntAllDifferentBounds {
+pub struct IntAllDifferentBounds<I> {
 	/// List of integer variables that must take different values.
-	var: Vec<IntView>,
+	var: Vec<I>,
 	/// Struct to store information about variable
 	var_info: Vec<AllDiffVarMeta>,
 	/// Cached lower bounds
@@ -88,9 +85,9 @@ pub struct IntAllDifferentBounds {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Value consistent propagator for the `all_different_int` constraint.
-pub struct IntAllDifferentValue {
+pub struct IntAllDifferentValue<I> {
 	/// List of integer variables that must take different values.
-	vars: Vec<IntView>,
+	vars: Vec<I>,
 	/// List of (indexes of) variable signaled to be fixed.
 	action_list: Vec<usize>,
 }
@@ -127,40 +124,32 @@ impl IntAllDifferent {
 	}
 }
 
-impl<S: SimplificationActions> Constraint<S> for IntAllDifferent {
-	fn initialize(&self, actions: &mut dyn crate::actions::ConstraintInitActions) {
-		for &var in &self.vars {
-			actions.simplify_on_change_int(var);
-		}
-	}
-
-	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		let (vals, vars): (Vec<_>, Vec<_>) = self.vars.iter().partition_map(|&var| {
-			if let Some(val) = actions.get_int_val(var) {
+impl<E> Constraint<E> for IntAllDifferent
+where
+	E: ReasoningEngine,
+	IntDecision: ModelIntView<E>,
+{
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let vars: Vec<_> = self
+			.prop
+			.var
+			.iter()
+			.map(|v| slv.get_solver_int(*v))
+			.collect();
+		let (vals, vars): (Vec<_>, Vec<_>) = vars.iter().partition_map(|&var| {
+			if let Some(val) = var.get_val(slv) {
 				Either::Left(val)
 			} else {
 				Either::Right(var)
 			}
 		});
-		self.vars = vars;
-		let neg_dom = RangeList::from_iter(vals.iter().map(|&i| i..=i));
-		if neg_dom.card() != Some(vals.len()) {
-			return Err(ReformulationError::TrivialUnsatisfiable);
-		}
-		if self.vars.is_empty() {
-			return Ok(SimplificationStatus::Subsumed);
-		}
-		if vals.is_empty() {
-			return Ok(SimplificationStatus::NoFixpoint);
-		}
-		for &v in &self.vars {
-			actions.set_int_not_in_set(v, &neg_dom)?;
-		}
-		Ok(SimplificationStatus::NoFixpoint)
-	}
-
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let vars: Vec<_> = self.vars.iter().map(|v| slv.get_solver_int(*v)).collect();
+		// propagation should have failed if any values are duplicated
+		debug_assert!(vals.iter().all_unique());
+		// propagation should have removed all known values from the domains of the
+		// variables
+		debug_assert!(vars
+			.iter()
+			.all(|var| vals.iter().all(|val| !var.check_in_domain(slv, *val))));
 		if self.value_consistent_propagator_enabled() {
 			IntAllDifferentValue::new_in(slv, vars.clone());
 		}
@@ -171,9 +160,27 @@ impl<S: SimplificationActions> Constraint<S> for IntAllDifferent {
 	}
 }
 
-impl IntAllDifferentBounds {
+impl<E> Propagator<E> for IntAllDifferent
+where
+	E: ReasoningEngine,
+	IntDecision: SolverIntView<E>,
+{
+	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+		self.prop.post(ctx);
+	}
+
+	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+		self.prop.propagate(ctx)
+	}
+}
+
+impl<I> IntAllDifferentBounds<I> {
 	/// Filter the lower bounds of the considered variables
-	fn filter_lower<P: PropagationActions>(&mut self, actions: &mut P) -> Result<(), Conflict> {
+	fn filter_lower<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
+	where
+		E: ReasoningEngine,
+		I: SolverIntView<E>,
+	{
 		for i in 1..=self.num_bounds + 1 {
 			self.hall_interval[i] = i - 1;
 			self.predecessor[i] = i - 1;
@@ -205,7 +212,7 @@ impl IntAllDifferentBounds {
 				while self.bounds[k] > hall_min {
 					let mut l = self.bucket[k];
 					while l != usize::MAX {
-						hall_min = cmp::min(hall_min, actions.get_int_lower_bound(self.var[l]));
+						hall_min = cmp::min(hall_min, self.lb_cache[l]);
 						l = self.var_info[l].next;
 					}
 					k -= 1;
@@ -213,24 +220,20 @@ impl IntAllDifferentBounds {
 
 				let mut k = w;
 				let mut reason = Vec::new();
-				reason.push(actions.get_int_lit(
-					self.var[self.max_sorted[i]],
-					IntLitMeaning::GreaterEq(hall_min),
-				));
+				reason.push(
+					self.var[self.max_sorted[i]].get_lit(ctx, IntLitMeaning::GreaterEq(hall_min)),
+				);
 				while self.bounds[k] > hall_min {
 					let mut l = self.bucket[k];
 					while l != usize::MAX {
-						reason.push(
-							actions.get_int_lit(self.var[l], IntLitMeaning::GreaterEq(hall_min)),
-						);
-						reason
-							.push(actions.get_int_lit(self.var[l], IntLitMeaning::Less(hall_max)));
+						reason.push(self.var[l].get_lit(ctx, IntLitMeaning::GreaterEq(hall_min)));
+						reason.push(self.var[l].get_lit(ctx, IntLitMeaning::Less(hall_max)));
 						l = self.var_info[l].next;
 					}
 					k -= 1;
 				}
 
-				actions.set_int_lower_bound(self.var[self.max_sorted[i]], hall_max, reason)?;
+				self.var[self.max_sorted[i]].set_lower_bound(ctx, hall_max, reason)?;
 				self.lb_cache[self.max_sorted[i]] = hall_max;
 
 				Self::path_set(&mut self.hall_interval, min_rank, w, w);
@@ -246,7 +249,11 @@ impl IntAllDifferentBounds {
 	}
 
 	/// Filter the upper bounds of the considered variables
-	fn filter_upper<P: PropagationActions>(&mut self, actions: &mut P) -> Result<(), Conflict> {
+	fn filter_upper<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
+	where
+		E: ReasoningEngine,
+		I: SolverIntView<E>,
+	{
 		for i in 0..=self.num_bounds {
 			self.hall_interval[i] = i + 1;
 			self.predecessor[i] = i + 1;
@@ -286,23 +293,19 @@ impl IntAllDifferentBounds {
 
 				let mut k = w;
 				let mut reason = Vec::new();
-				reason.push(
-					actions
-						.get_int_lit(self.var[self.min_sorted[i]], IntLitMeaning::Less(hall_max)),
-				);
+				reason
+					.push(self.var[self.min_sorted[i]].get_lit(ctx, IntLitMeaning::Less(hall_max)));
 				while self.bounds[k] < hall_max {
 					let mut l = self.bucket[k];
 					while l != usize::MAX {
-						reason.push(
-							actions.get_int_lit(self.var[l], IntLitMeaning::GreaterEq(hall_min)),
-						);
-						reason
-							.push(actions.get_int_lit(self.var[l], IntLitMeaning::Less(hall_max)));
+						reason.push(self.var[l].get_lit(ctx, IntLitMeaning::GreaterEq(hall_min)));
+						reason.push(self.var[l].get_lit(ctx, IntLitMeaning::Less(hall_max)));
 						l = self.var_info[l].next;
 					}
 					k += 1;
 				}
-				actions.set_int_upper_bound(self.var[self.min_sorted[i]], hall_min - 1, reason)?;
+
+				self.var[self.min_sorted[i]].set_upper_bound(ctx, hall_min - 1, reason)?;
 				self.ub_cache[self.min_sorted[i]] = hall_min - 1;
 
 				Self::path_set(&mut self.hall_interval, max_rank, w, w);
@@ -318,9 +321,7 @@ impl IntAllDifferentBounds {
 		Ok(())
 	}
 
-	/// Create a new [`IntAllDifferentBounds`] propagator and post it in the
-	/// solver.
-	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, vars: Vec<IntView>) {
+	pub(crate) fn new(vars: Vec<I>) -> Self {
 		let interval = vec![
 			AllDiffVarMeta {
 				next: 0,
@@ -333,27 +334,20 @@ impl IntAllDifferentBounds {
 		let max_sorted: Vec<_> = (0..vars.len()).collect();
 
 		let n = 2 * vars.len() + 2;
-		let prop = solver.add_propagator(
-			Box::new(Self {
-				var: vars.clone(),
-				var_info: interval,
-				lb_cache: vec![0; n],
-				ub_cache: vec![0; n],
-				min_sorted,
-				max_sorted,
-				num_bounds: 0,
-				bounds: vec![0; n],
-				predecessor: vec![0; n],
-				diff: vec![0; n],
-				hall_interval: vec![0; n],
-				bucket: vec![0; n],
-			}),
-			PriorityLevel::Low,
-		);
-		for v in vars {
-			solver.enqueue_on_int_change(prop, v, IntPropCond::Bounds);
+		Self {
+			var: vars,
+			var_info: interval,
+			lb_cache: vec![0; n],
+			ub_cache: vec![0; n],
+			min_sorted,
+			max_sorted,
+			num_bounds: 0,
+			bounds: vec![0; n],
+			predecessor: vec![0; n],
+			diff: vec![0; n],
+			hall_interval: vec![0; n],
+			bucket: vec![0; n],
 		}
-		solver.enqueue_now(prop);
 	}
 
 	/// Follows path given by `transition` from `start` until we stop increasing
@@ -394,11 +388,15 @@ impl IntAllDifferentBounds {
 	}
 
 	/// Sorts max_sorted and min_sorted and sets the bounds vector
-	fn sort<P: PropagationActions>(&mut self, actions: &mut P) {
+	fn sort<E>(&mut self, ctx: &mut E::PropagationCtx<'_>)
+	where
+		E: ReasoningEngine,
+		I: SolverIntView<E>,
+	{
 		let size: usize = self.var.len();
 
-		for (i, &v) in self.var.iter().enumerate() {
-			(self.lb_cache[i], self.ub_cache[i]) = actions.get_int_bounds(v);
+		for (i, v) in self.var.iter().enumerate() {
+			(self.lb_cache[i], self.ub_cache[i]) = v.get_bounds(ctx)
 		}
 
 		self.min_sorted.sort_by_key(|&i| self.lb_cache[i]);
@@ -442,88 +440,107 @@ impl IntAllDifferentBounds {
 	}
 }
 
-// impl<P, E> Propagator<P, E> for IntAllDifferentBounds
-// where
-// 	P: PropagationActions,
-// 	E: ExplanationActions,
-// {
-// 	#[tracing::instrument(name = "all_different", level = "trace", skip(self,
-// actions))] 	fn propagate(&mut self, actions: &mut P) -> Result<(),
-// P::Conflict> { 		self.sort(actions);
-// 		self.filter_lower(actions)?;
-// 		self.filter_upper(actions)?;
-// 		Ok(())
-// 	}
-// }
+impl IntAllDifferentBounds<IntView> {
+	/// Create a new [`IntAllDifferentBounds`] propagator and post it in the
+	/// solver.
+	pub fn new_in<E>(engine: &mut E, vars: Vec<IntView>)
+	where
+		E: AddAssign<BoxedPropagator> + ?Sized,
+	{
+		*engine += Box::new(Self::new(vars));
+	}
+}
 
-// impl IntAllDifferentValue {
-// 	/// Create a new [`IntAllDifferentValue`] propagator and post it in the
-// 	/// solver.
-// 	pub fn new_in<P: PropagatorInitActions + ?Sized>(solver: &mut P, vars:
-// Vec<IntView>) { 		// Post the propagator to the solver
-// 		let prop = solver.add_propagator(
-// 			Box::new(Self {
-// 				vars: vars.clone(),
-// 				action_list: Vec::new(),
-// 			}),
-// 			PriorityLevel::Low,
-// 		);
-// 		// Let the propagator be advised when each specific decision is fixed to a
-// 		// value, with the index of the decision.
-// 		for (i, &v) in vars.iter().enumerate() {
-// 			solver.advise_on_int_change(prop, v, IntPropCond::Fixed, i as u64);
-// 		}
-// 		// Advise the propagator of backtracking to clear the list of fixed
-// decision 		// (indices).
-// 		solver.advise_on_backtrack(prop);
-// 	}
-// }
+impl<E, I> Propagator<E> for IntAllDifferentBounds<I>
+where
+	E: ReasoningEngine,
+	I: SolverIntView<E>,
+{
+	fn post(&mut self, ctx: &mut <E as ReasoningEngine>::PostingCtx<'_>) {
+		ctx.set_priority(PriorityLevel::Low);
+		for v in &self.var {
+			v.enqueue_when(ctx, IntPropCond::Bounds);
+		}
+	}
 
-// impl<P, E> Propagator<P, E> for IntAllDifferentValue
-// where
-// 	P: PropagationActions,
-// 	E: ExplanationActions,
-// {
-// 	fn advise_of_backtrack(&mut self, _actions: &mut E) {
-// 		// We forget any previously remembered fixed decisions.
-// 		self.action_list.clear();
-// 	}
+	#[tracing::instrument(name = "all_different", level = "trace", skip(self, ctx))]
+	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+		self.sort(ctx);
+		self.filter_lower(ctx)?;
+		self.filter_upper(ctx)?;
+		Ok(())
+	}
+}
 
-// 	fn advise_of_int_change(
-// 		&mut self,
-// 		_actions: &mut E,
-// 		_view: IntView,
-// 		event: IntEvent,
-// 		data: u64,
-// 	) -> bool {
-// 		// We remember that the decision at index `data` has been fixed to a value.
-// 		debug_assert_eq!(event, IntEvent::Fixed);
-// 		self.action_list.push(data as usize);
-// 		true
-// 	}
+impl IntAllDifferentValue<IntView> {
+	/// Create a new [`IntAllDifferentValue`] propagator and post it in the
+	/// solver.
+	pub fn new_in<E>(engine: &mut E, vars: Vec<IntView>)
+	where
+		E: AddAssign<BoxedPropagator> + ?Sized,
+	{
+		*engine += Box::new(Self {
+			vars: vars.clone(),
+			action_list: Vec::new(),
+		});
+	}
+}
 
-// 	#[tracing::instrument(name = "all_different", level = "trace", skip(self,
-// actions))] 	fn propagate(&mut self, actions: &mut P) -> Result<(),
-// P::Conflict> { 		debug_assert!(!self.action_list.is_empty() &&
-// self.action_list.iter().all_unique()); 		// We walk through all fixed
-// decisions (indices). 		for &i in &self.action_list {
-// 			// Retrieve the value and value literal for the fixed decision.
-// 			let val = actions.get_int_val(self.vars[i]).unwrap();
-// 			let reason = actions.get_int_val_lit(self.vars[i]).unwrap();
+impl<E, I> Propagator<E> for IntAllDifferentValue<I>
+where
+	E: ReasoningEngine,
+	I: SolverIntView<E>,
+{
+	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+		// Let the propagator be advised when each specific decision is fixed to a
+		// value, with the index of the decision.
+		for (i, v) in self.vars.iter().enumerate() {
+			v.advise_when(ctx, IntPropCond::Fixed, i as u64);
+		}
+		// Advise the propagator of backtracking to clear the list of fixed decision
+		// (indices).
+		ctx.advise_on_backtrack();
+	}
 
-// 			// We now enforce that all other decisions (at different indices) are not
-// 			// equal to the fixed value.
-// 			for (j, &v) in self.vars.iter().enumerate() {
-// 				if j != i {
-// 					actions.set_int_not_eq(v, val, reason)?;
-// 				}
-// 			}
-// 		}
-// 		// We clear the list of indices of fixed decisions.
-// 		self.action_list.clear();
-// 		Ok(())
-// 	}
-// }
+	fn advise_of_backtrack(&mut self, _: &mut E::NotificationCtx<'_>) {
+		// We forget any previously remembered fixed decisions.
+		self.action_list.clear();
+	}
+
+	fn advise_of_int_change(
+		&mut self,
+		_: &mut E::NotificationCtx<'_>,
+		data: u64,
+		event: IntEvent,
+	) -> bool {
+		// We remember that the decision at index `data` has been fixed to a value.
+		debug_assert_eq!(event, IntEvent::Fixed);
+		self.action_list.push(data as usize);
+		true
+	}
+
+	#[tracing::instrument(name = "all_different", level = "trace", skip(self, ctx))]
+	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+		debug_assert!(!self.action_list.is_empty() && self.action_list.iter().all_unique());
+		// We walk through all fixed decisions (indices).
+		for &i in &self.action_list {
+			// Retrieve the value and value literal for the fixed decision.
+			let val = self.vars[i].get_val(ctx).unwrap();
+			let reason = &[self.vars[i].get_val_lit(ctx).unwrap()];
+
+			// We now enforce that all other decisions (at different indices) are not
+			// equal to the fixed value.
+			for (j, v) in self.vars.iter().enumerate() {
+				if j != i {
+					v.set_not_eq(ctx, val, reason)?;
+				}
+			}
+		}
+		// We clear the list of indices of fixed decisions.
+		self.action_list.clear();
+		Ok(())
+	}
+}
 
 #[cfg(test)]
 mod tests {

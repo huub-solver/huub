@@ -171,13 +171,11 @@ pub trait IntExplanationActions<Context: ?Sized>: IntInspectionActions<Context> 
 		-> (Self::Atom, IntLitMeaning);
 
 	/// Get the Boolean view that represents the current assignment of the
-	/// integer view, or `None` if the integer view is not assigned.
-	fn get_val_lit(&self, ctx: &Context) -> Option<Self::Atom> {
+	/// integer view, or `None` if the integer view is not assigned or if the
+	/// equality literal does not exist.
+	fn try_val_lit(&self, ctx: &Context) -> Option<Self::Atom> {
 		let val = self.get_val(ctx)?;
-		Some(
-			self.try_lit(ctx, IntLitMeaning::Eq(val))
-				.expect("value literals cannot be created during explanation"),
-		)
+		self.try_lit(ctx, IntLitMeaning::Eq(val))
 	}
 }
 
@@ -279,6 +277,11 @@ pub trait IntPostingActions<Context>: IntOperations {
 
 /// Actions that can be performed when the propagator is posted.
 pub trait PostingActions {
+	/// Advise a propagator when the solver backtracks.
+	///
+	/// This will call [`Propagator::advise_of_backtrack`] on the propagator.
+	fn advise_on_backtrack(&mut self);
+
 	/// Explicitly set whether the propagator should be enqueued immediately.
 	fn enqueue_now(&mut self, option: bool);
 

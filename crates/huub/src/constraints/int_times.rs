@@ -33,12 +33,11 @@ impl IntTimesBounds<IntView, IntView, IntView> {
 	where
 		E: AddAssign<BoxedPropagator> + ?Sized,
 	{
-		let b: BoxedPropagator = Box::new(Self {
+		*engine += Box::new(Self {
 			factor1,
 			factor2,
 			product,
 		});
-		*engine += b;
 	}
 }
 

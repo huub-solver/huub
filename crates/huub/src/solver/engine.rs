@@ -71,8 +71,6 @@ pub(crate) struct AdvisorDef {
 pub(crate) struct Engine {
 	/// Storage of the propagators.
 	pub(crate) propagators: IndexVec<PropRef, BoxedPropagator>,
-	/// List of propagators to advise of backtracking
-	pub(crate) notify_of_backtrack: Vec<PropRef>,
 	/// Storage of the branchers.
 	pub(crate) branchers: Vec<BoxedBrancher>,
 	/// Internal State representation of the propagation engine.
@@ -154,6 +152,8 @@ pub struct State {
 	// ---- Queuing Infrastructure ----
 	/// Advisor data storage
 	pub(crate) advisors: IndexVec<Advisor, AdvisorDef>,
+	/// List of propagators to advise of backtracking
+	pub(crate) notify_of_backtrack: Vec<PropRef>,
 	/// Boolean variable enqueueing information
 	pub(crate) bool_activation: FxHashMap<RawVar, Vec<ActivationActionS>>,
 	/// Integer variable enqueueing information
@@ -246,9 +246,11 @@ impl Engine {
 		self.state.notify_backtrack::<false>(new_level, restart);
 
 		// Notify subscribed propagators of backtracking
-		for &p in self.notify_of_backtrack.iter() {
+		let notify = mem::take(&mut self.state.notify_of_backtrack);
+		for &p in &notify {
 			self.propagators[p].advise_of_backtrack(&mut self.state);
 		}
+		self.state.notify_of_backtrack = notify;
 	}
 
 	/// Notify the given propagator about the integer change, providing the

@@ -85,6 +85,10 @@ impl PostingContext<'_> {
 }
 
 impl PostingActions for PostingContext<'_> {
+	fn advise_on_backtrack(&mut self) {
+		self.state.notify_of_backtrack.push(self.prop);
+	}
+
 	fn enqueue_now(&mut self, option: bool) {
 		self.decision_enqueue = Some(option);
 	}

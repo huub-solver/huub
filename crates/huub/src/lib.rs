@@ -54,6 +54,7 @@ use crate::{
 	constraints::{
 		bool_array_element::BoolDecisionArrayElement,
 		int_abs::IntAbsBounds,
+		int_all_different::{IntAllDifferent, IntAllDifferentBounds},
 		int_linear::{IntEq, IntLinear, LinOperator},
 		int_table::IntTable,
 		int_times::IntTimesBounds,
@@ -238,17 +239,16 @@ pub fn abs_int(origin: IntDecision, abs: IntDecision) -> BoxedConstraint {
 
 /// Create a constraint that enforces that all the given integer decisions take
 /// different values.
-pub fn all_different_int<Iter>(vars: Iter) -> BoxedConstraint
+pub fn all_different_int<Iter>(vars: Iter) -> IntAllDifferent
 where
 	Iter: IntoIterator,
 	Iter::Item: Into<IntDecision>,
 {
-	todo!()
-	// IntAllDifferent {
-	// 	vars: vars.into_iter().map_into().collect(),
-	// 	bounds_prop: None,
-	// 	value_prop: None,
-	// }
+	IntAllDifferent {
+		prop: IntAllDifferentBounds::new(vars.into_iter().map_into().collect()),
+		bounds_prop: None,
+		value_prop: None,
+	}
 }
 
 /// Create a constraint that enforces that a result decision variable takes the
@@ -2181,6 +2181,10 @@ impl<'a> ModelPostingContext<'a> {
 }
 
 impl PostingActions for ModelPostingContext<'_> {
+	fn advise_on_backtrack(&mut self) {
+		todo!()
+	}
+
 	fn enqueue_now(&mut self, option: bool) {
 		todo!()
 	}

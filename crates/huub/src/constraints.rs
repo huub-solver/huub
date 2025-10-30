@@ -4,7 +4,7 @@ pub mod bool_array_element;
 // pub mod cumulative;
 // pub mod disjunctive_strict;
 pub mod int_abs;
-// pub mod int_all_different;
+pub mod int_all_different;
 // pub mod int_array_element;
 // pub mod int_array_minimum;
 // pub mod int_div;

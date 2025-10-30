@@ -834,13 +834,12 @@ impl IntLinearNotEqValue<IntView> {
 			.collect();
 		let num_fixed = engine.new_trailed_int(0);
 
-		let b: BoxedPropagator = Box::new(Self {
+		*engine += Box::new(Self {
 			terms: vars.clone(),
 			violation,
 			num_fixed,
 			reification: Default::default(),
 		});
-		*engine += b;
 	}
 }
 
