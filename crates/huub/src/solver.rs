@@ -31,29 +31,28 @@ use pindakaas::{
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
 	Valuation as SatValuation,
 };
-use tracing::{debug, trace, warn};
+use tracing::debug;
 
 use crate::{
 	actions::{
-		BoolInspectionActions, BoolPostingActions, BoolPropagationActions, BrancherInitActions,
-		DecisionActions, InitializationActions, IntDecisionActions, IntExplanationActions,
-		IntInspectionActions, IntPostingActions, IntPropagationActions, PostingActions,
-		ReasoningEngine, TrailingActions,
+		BoolInspectionActions, BoolPropagationActions, BrancherInitActions, DecisionActions,
+		InitializationActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
+		IntPropagationActions, TrailingActions,
 	},
-	branchers::{BoxedBrancher, Brancher},
-	constraints::{BoxedPropagator, Conflict, Propagator, Reason, ReasonBuilder},
+	branchers::BoxedBrancher,
+	constraints::{BoxedPropagator, Conflict, ReasonBuilder},
 	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::InitConfig,
 	solver::{
-		activation_list::{ActivationAction, IntEvent, IntPropCond},
-		engine::{trace_new_lit, AdvisorDef, Engine, PropRef, State},
-		int_var::{DirectStorage, IntVarRef, LazyLitDef, OrderStorage},
+		activation_list::ActivationAction,
+		engine::{AdvisorDef, Engine, PropRef, State},
+		int_var::{DirectStorage, IntVarRef, OrderStorage},
 		posting_context::PostingContext,
-		queue::{PriorityLevel, PropagatorInfo},
+		queue::PropagatorInfo,
 		solving_context::SolvingContext,
 		trail::TrailedInt,
 	},
-	Clause, IntDecision, IntVal, LinearTransform, Model, NonZeroIntVal, ReformulationError,
+	Clause, IntVal, LinearTransform, Model, NonZeroIntVal,
 };
 
 /// Trait implemented by the object given to the callback on detecting failure

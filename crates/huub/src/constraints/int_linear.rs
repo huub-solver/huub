@@ -523,8 +523,9 @@ where
 				pindakaas::bool_linear::Comparator::GreaterEq => unreachable!(),
 			};
 
-			let (op, lin) = match BoolLinAggregator::default().aggregate(slv, &bool_lin) {
-				Err(Unsatisfiable) => return Err(todo!()),
+			let mut wrapper = slv.clause_database_wrapper();
+			let (op, lin) = match BoolLinAggregator::default().aggregate(&mut wrapper, &bool_lin) {
+				Err(Unsatisfiable) => return Err(wrapper.error.unwrap()),
 				Ok(BoolLinVariant::Cardinality(card)) => (map_cmp(card.comparator()), card.into()),
 				Ok(BoolLinVariant::CardinalityOne(card))
 					if card.comparator() == pindakaas::bool_linear::Comparator::Equal =>

@@ -8,9 +8,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use pindakaas::{
-	AsDynClauseDatabase, ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
-};
+use pindakaas::{AsDynClauseDatabase, ClauseDatabase, Lit as RawLit, Unsatisfiable};
 
 use crate::{
 	branchers::BoxedBrancher,
@@ -382,6 +380,8 @@ impl dyn ReformulationActions + '_ {
 		&mut self,
 		clause: impl IntoIterator<Item = impl Into<BoolView>>,
 	) -> Result<(), ReformulationError> {
+		use pindakaas::ClauseDatabaseTools;
+
 		let clause: Vec<_> = clause.into_iter().map_into().collect();
 		match ClauseDatabaseTools::add_clause(self, clause.clone()) {
 			Err(Unsatisfiable) => Err(ReformulationError::TranslationConflict(clause)),
@@ -389,13 +389,55 @@ impl dyn ReformulationActions + '_ {
 		}
 	}
 
-	fn cnf_encode<C, E>(&mut self, constraint: &C, encoder: &E) -> Result<(), ReformulationError>
+	pub fn cnf_encode<C, E>(
+		&mut self,
+		constraint: &C,
+		encoder: &E,
+	) -> Result<(), ReformulationError>
 	where
 		C: ?Sized,
-		E: pindakaas::Encoder<Self, C> + ?Sized,
+		E: for<'a> pindakaas::Encoder<dyn ClauseDatabase + 'a, C> + ?Sized,
 	{
-		todo!()
+		let mut wrapper = self.clause_database_wrapper();
+		let res = pindakaas::Encoder::encode(encoder, &mut wrapper, constraint);
+		match res {
+			Ok(()) => Ok(()),
+			Err(Unsatisfiable) => Err(wrapper.error.unwrap()),
+		}
 	}
+
+	pub(crate) fn clause_database_wrapper(&mut self) -> ReformulationClauseDatabaseWrapper<'_> {
+		ReformulationClauseDatabaseWrapper {
+			db: self,
+			error: None,
+		}
+	}
+}
+
+pub(crate) struct ReformulationClauseDatabaseWrapper<'a> {
+	db: &'a mut (dyn ReformulationActions + 'a),
+	pub(crate) error: Option<ReformulationError>,
+}
+
+impl ClauseDatabase for ReformulationClauseDatabaseWrapper<'_> {
+	fn add_clause_from_slice(&mut self, clause: &[RawLit]) -> Result<(), Unsatisfiable> {
+		match self.db.add_clause(clause.into_iter().cloned()) {
+			Ok(()) => Ok(()),
+			Err(err) => {
+				self.error = Some(err);
+				Err(Unsatisfiable)
+			}
+		}
+	}
+	fn new_var_range(&mut self, len: usize) -> pindakaas::VarRange {
+		self.db.new_var_range(len)
+	}
+}
+
+/// Encoder is the central trait implemented for all the encoding algorithms
+pub trait MyEncoder<Db: ClauseDatabase + ?Sized, Constraint: ?Sized> {
+	/// Encode the constraint into the given clausal database.
+	fn encode(&self, db: &mut Db, con: &Constraint) -> Result<(), Unsatisfiable>;
 }
 
 impl BoolInspectionActions<dyn ReformulationActions + '_> for RawLit {
