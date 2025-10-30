@@ -1304,7 +1304,7 @@ where
 						let force_not_last = self.anns_contains(&c.ann, &mut ann_used, "not_last");
 						let force_detectable_precedence =
 							self.anns_contains(&c.ann, &mut ann_used, "detectable_precedence");
-						let mut disj_strict = disjunctive_strict(start_times, durations);
+						let disj_strict = disjunctive_strict(&mut self.prb, start_times, durations);
 						match (
 							force_edge_finding,
 							force_not_last,
@@ -1312,17 +1312,11 @@ where
 						) {
 							(false, false, false) => {} // Use default configuration
 							(ef_prop, nl_prop, dp_prop) => {
-								todo!()
-								// disj_strict.
-								// use_edge_finding_propagation(ef_prop);
-								// disj_strict.
-								// use_not_last_propagation(nl_prop);
-								// disj_strict.
-								// use_detectable_precedence_propagation(dp_prop);
-								//
+								disj_strict.use_edge_finding_propagation(ef_prop);
+								disj_strict.use_not_last_propagation(nl_prop);
+								disj_strict.use_detectable_precedence_propagation(dp_prop);
 							}
 						}
-						self.prb += disj_strict;
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_disjunctive_strict",

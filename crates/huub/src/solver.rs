@@ -15,7 +15,7 @@ use std::{
 	hash::Hash,
 	mem,
 	num::NonZeroI32,
-	ops::{Add, AddAssign, Deref, DerefMut, Mul, Neg, Not},
+	ops::{Add, AddAssign, Deref, Mul, Neg, Not},
 	rc::Rc,
 };
 

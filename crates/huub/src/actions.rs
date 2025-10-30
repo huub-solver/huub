@@ -289,7 +289,7 @@ pub trait PostingActions {
 	fn set_priority(&mut self, priority: PriorityLevel);
 }
 
-pub trait InitializationActions: AddAssign<BoxedPropagator> {
+pub trait InitializationActions {
 	/// Create a new trailed integer value with the given initial value.
 	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt;
 }
@@ -307,7 +307,7 @@ pub trait ReasoningEngine {
 /// Actions that can be performed when reformulating a [`Model`] object into a
 /// [`Solver`] object.
 pub trait ReformulationActions:
-	AsDynClauseDatabase + ClauseDatabase + InitializationActions
+	AddAssign<BoxedPropagator> + AsDynClauseDatabase + ClauseDatabase + InitializationActions
 {
 	/// Lookup the solver [`BoolView`] to which the given model
 	/// [`model::bool::BoolView`] maps.

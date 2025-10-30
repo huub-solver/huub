@@ -45,16 +45,18 @@ use tracing::warn;
 use crate::{
 	actions::{
 		BoolInspectionActions, BoolPostingActions, BoolPropagationActions,
-		BoolSimplificationActions, DecisionActions, IntDecisionActions, IntExplanationActions,
-		IntInspectionActions, IntPostingActions, IntPropagationActions, IntSimplificationActions,
-		PostingActions, PropagationActions, ReasoningEngine, SimplificationActions,
-		TrailingActions,
+		BoolSimplificationActions, DecisionActions, InitializationActions, IntDecisionActions,
+		IntExplanationActions, IntInspectionActions, IntPostingActions, IntPropagationActions,
+		IntSimplificationActions, PostingActions, PropagationActions, ReasoningEngine,
+		SimplificationActions, TrailingActions,
 	},
 	branchers::{BoolBrancher, IntBrancher, WarmStartBrancher},
 	constraints::{
 		bool_array_element::BoolDecisionArrayElement,
+		disjunctive_strict::{DisjunctiveStrict, DisjunctiveStrictPropagator},
 		int_abs::IntAbsBounds,
 		int_all_different::{IntAllDifferent, IntAllDifferentBounds},
+		int_in_set::IntInSetReif,
 		int_linear::{IntEq, IntLinear, LinOperator},
 		int_table::IntTable,
 		int_times::IntTimesBounds,
@@ -321,27 +323,29 @@ pub fn cumulative(
 /// variables representing the start times of tasks and a list of integer values
 /// representing the durations of tasks, the tasks do not overlap in time.
 pub fn disjunctive_strict(
+	prb: &mut Model,
 	start_times: Vec<IntDecision>,
 	durations: Vec<IntVal>,
-) -> BoxedConstraint {
+) -> &mut DisjunctiveStrict {
 	assert_eq!(
 		start_times.len(),
 		durations.len(),
-		"disjunctive_strict must be given the same number of start times and
-durations."
+		"disjunctive_strict must be given the same number of start times and durations."
 	);
 	assert!(
 		durations.iter().all(|&dur| dur >= 0),
 		"disjunctive_strict cannot be given any negative durations."
 	);
-	todo!()
-	// DisjunctiveStrict {
-	// 	start_times,
-	// 	durations,
-	// 	edge_finding_prop: None,
-	// 	not_last_prop: None,
-	// 	detectable_precedence_prop: None,
-	// }
+	let propagator =
+		DisjunctiveStrictPropagator::new(prb, start_times, durations, true, true, true);
+	*prb += DisjunctiveStrict {
+		propagator,
+		edge_finding_prop: None,
+		not_last_prop: None,
+		detectable_precedence_prop: None,
+	};
+	let b: &mut dyn Any = &mut *(prb.constraints.last_mut().unwrap());
+	b.downcast_mut().unwrap()
 }
 
 /// Create a constraint that enforces that a numerator decision integer variable
@@ -362,9 +366,8 @@ pub fn div_int(
 
 /// Create constraint that enforces that the given Boolean variable takes the
 /// value `true` if-and-only-if an integer variable is in a given set.
-pub fn int_in_set_reif(var: IntDecision, set: IntSetVal, reif: BoolDecision) -> BoxedConstraint {
-	todo!()
-	// IntInSetReif { var, set, reif }
+pub fn int_in_set_reif(var: IntDecision, set: IntSetVal, reif: BoolDecision) -> IntInSetReif {
+	IntInSetReif { var, set, reif }
 }
 
 /// Create a constraint that enforces that a base integer decision variable
@@ -2236,4 +2239,10 @@ impl IntPostingActions<ModelPostingContext<'_>> for IntDecision {
 index_vec::define_index_type! {
 	/// Identifies an constraint in a [`Model`]
 	pub(crate) struct ConRef = usize;
+}
+
+impl InitializationActions for Model {
+	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
+		self.trail.push(init)
+	}
 }
