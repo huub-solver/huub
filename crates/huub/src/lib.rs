@@ -56,6 +56,7 @@ use crate::{
 		disjunctive_strict::{DisjunctiveStrict, DisjunctiveStrictPropagator},
 		int_abs::IntAbsBounds,
 		int_all_different::{IntAllDifferent, IntAllDifferentBounds},
+		int_array_minimum::IntArrayMinimumBounds,
 		int_in_set::IntInSetReif,
 		int_linear::{IntEq, IntLinear, LinOperator},
 		int_table::IntTable,
@@ -283,11 +284,10 @@ where
 	Iter: IntoIterator,
 	Iter::Item: Into<IntDecision>,
 {
-	todo!()
-	// IntArrayMinimum {
-	// 	vars: vars.into_iter().map_into().collect(),
-	// 	min,
-	// }
+	prb.add_constraint(IntArrayMinimumBounds {
+		vars: vars.into_iter().map_into().collect(),
+		min,
+	});
 }
 
 /// Create a constraint that enforces that the given a list of integer decision
@@ -1013,10 +1013,15 @@ impl Model {
 		self.propagator_queue.enqueue_propagator(con);
 
 		// Retrieve the reference for the last constraint
-		let constraint: &mut BoxedConstraint =
-			self.constraints.last_mut().unwrap().as_mut().unwrap();
-		let any: &mut dyn Any = constraint;
-		any.downcast_mut().unwrap()
+		self.constraints
+			.last_mut()
+			.unwrap()
+			.as_mut()
+			.unwrap()
+			.as_mut()
+			.as_any_mut()
+			.downcast_mut::<C>()
+			.unwrap()
 	}
 
 	/// Create a new [`Model`] instance from a [`FlatZinc`] instance.
@@ -1144,7 +1149,7 @@ impl Model {
 		let int_eager_order = FxHashSet::<IntDecisionIndex>::default();
 
 		for c in self.constraints.iter().flatten() {
-			let c: &dyn Any = &*c;
+			let c: &dyn Any = c.as_any();
 			if let Some(c) = c.downcast_ref::<BoolDecisionArrayElement>() {
 				let index = c.index.resolve_alias(self);
 				if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {

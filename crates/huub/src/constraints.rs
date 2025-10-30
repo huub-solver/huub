@@ -6,7 +6,7 @@ pub mod disjunctive_strict;
 pub mod int_abs;
 pub mod int_all_different;
 // pub mod int_array_element;
-// pub mod int_array_minimum;
+pub mod int_array_minimum;
 // pub mod int_div;
 pub mod int_in_set;
 pub mod int_linear;
@@ -34,6 +34,7 @@ use crate::{
 		BoolSimplificationActions, IntExplanationActions, IntInspectionActions, IntPostingActions,
 		IntPropagationActions, IntSimplificationActions, ReasoningEngine, ReformulationActions,
 	},
+	helpers::as_any::AsAny,
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::IntEvent,
@@ -80,7 +81,9 @@ pub struct Conflict {
 /// Constraints specified in the library implement this trait, but are using
 /// their explicit type in an enumerated type to allow for global model
 /// analysis.
-pub trait Constraint<E: ReasoningEngine + ?Sized>: Debug + DynClone + Propagator<E> {
+pub trait Constraint<E: ReasoningEngine + ?Sized>:
+	AsAny + Debug + DynClone + Propagator<E>
+{
 	/// Simplify the [`Model`] given the current constraint.
 	///
 	/// This method is expected to reduce the domains of decision variables,
