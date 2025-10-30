@@ -80,7 +80,7 @@ pub struct Conflict {
 /// Constraints specified in the library implement this trait, but are using
 /// their explicit type in an enumerated type to allow for global model
 /// analysis.
-pub trait Constraint<E: ReasoningEngine>: Debug + DynClone + Propagator<E> {
+pub trait Constraint<E: ReasoningEngine + ?Sized>: Debug + DynClone + Propagator<E> {
 	/// Simplify the [`Model`] given the current constraint.
 	///
 	/// This method is expected to reduce the domains of decision variables,
@@ -119,7 +119,7 @@ pub struct LazyReason {
 /// [`PropagationActions::deferred_reason`]. If the explanation is needed, then
 /// the propagation engine will revert the state of the solver and call
 /// [`Propagator::explain`] to receive the explanation.
-pub trait Propagator<E: ReasoningEngine>: Debug + DynClone + 'static {
+pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 	/// Advises the propagator that the solver is backtracking.
 	fn advise_of_backtrack(&mut self, context: &mut E::NotificationCtx<'_>) {
 		let _ = context;

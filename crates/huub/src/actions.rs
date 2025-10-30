@@ -12,7 +12,7 @@ use pindakaas::{AsDynClauseDatabase, ClauseDatabase, Lit as RawLit, Unsatisfiabl
 
 use crate::{
 	branchers::BoxedBrancher,
-	constraints::{BoxedPropagator, LazyReason, ReasonBuilder},
+	constraints::{BoxedPropagator, Constraint, LazyReason, ReasonBuilder},
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::IntPropCond, int_var::IntVarRef, queue::PriorityLevel, trail::TrailedInt,
@@ -360,9 +360,7 @@ pub trait ReformulationActions:
 /// constraint.
 pub trait SimplificationActions {
 	/// Add a constraint to the model (to replace the current constraint).
-	fn add_constraint<C>(&mut self, constraint: C)
-	where
-		Model: AddAssign<C>;
+	fn add_constraint<C: Constraint<Model>>(&mut self, constraint: C);
 }
 
 /// Basic actions that can be performed when the trailing infrastructure is

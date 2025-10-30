@@ -184,8 +184,8 @@ mod tests {
 			vec![5, 2],
 			vec![5, 3],
 		];
-		prb += table_int(vec![vars[0], vars[1]], table.clone());
-		prb += table_int(vec![vars[1], vars[2]], table.clone());
+		table_int(&mut prb, vec![vars[0], vars[1]], table.clone());
+		table_int(&mut prb, vec![vars[1], vars[2]], table.clone());
 
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
 		let vars = vars
@@ -232,11 +232,13 @@ mod tests {
 			vec![5, 3, 1],
 			vec![5, 3, 5],
 		];
-		prb += table_int(
+		table_int(
+			&mut prb,
 			vars[0..3].iter().cloned().map_into().collect(),
 			table.clone(),
 		);
-		prb += table_int(
+		table_int(
+			&mut prb,
 			vars[2..5].iter().cloned().map_into().collect(),
 			table.clone(),
 		);

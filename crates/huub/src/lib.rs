@@ -141,10 +141,11 @@ pub trait ElementConstraint: Sized {
 	/// Create a constraint that enforces that the `result` decision variables
 	/// takes the same value as `array[index]`.
 	fn element_constraint(
+		prb: &mut Model,
 		array: Vec<Self>,
 		index: IntDecision,
 		result: Self::Result,
-	) -> Self::Constraint;
+	) -> &mut Self::Constraint;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -231,52 +232,53 @@ pub enum VariableSelection {
 
 /// Create a constraint that enforces that the second integer decision variable
 /// takes the absolute value of the first integer decision variable.
-pub fn abs_int(origin: IntDecision, abs: IntDecision) -> BoxedConstraint {
-	Box::new(IntAbsBounds {
+pub fn abs_int(prb: &mut Model, origin: IntDecision, abs: IntDecision) {
+	*prb += IntAbsBounds {
 		origin,
 		abs,
 		origin_positive: origin.geq(0),
-	})
+	};
 }
 
 /// Create a constraint that enforces that all the given integer decisions take
 /// different values.
-pub fn all_different_int<Iter>(vars: Iter) -> IntAllDifferent
+pub fn all_different_int<Iter>(prb: &mut Model, vars: Iter) -> &mut IntAllDifferent
 where
 	Iter: IntoIterator,
 	Iter::Item: Into<IntDecision>,
 {
-	IntAllDifferent {
+	prb.add_constraint(IntAllDifferent {
 		prop: IntAllDifferentBounds::new(vars.into_iter().map_into().collect()),
 		bounds_prop: None,
 		value_prop: None,
-	}
+	})
 }
 
 /// Create a constraint that enforces that a result decision variable takes the
 /// value equal the element of the given array at the given index decision
 /// variable.
 pub fn array_element<E: ElementConstraint>(
+	prb: &mut Model,
 	array: Vec<E>,
 	index: IntDecision,
 	result: <E as ElementConstraint>::Result,
-) -> <E as ElementConstraint>::Constraint {
-	<E as ElementConstraint>::element_constraint(array, index, result)
+) -> &mut <E as ElementConstraint>::Constraint {
+	<E as ElementConstraint>::element_constraint(prb, array, index, result)
 }
 
 /// Create a constraint that enforces that an integer decision variable takes
 /// the minimum value of an array of integer decision variables.
-pub fn array_maximum_int<Iter>(vars: Iter, max: IntDecision) -> BoxedConstraint
+pub fn array_maximum_int<Iter>(prb: &mut Model, vars: Iter, max: IntDecision)
 where
 	Iter: IntoIterator,
 	Iter::Item: Into<IntDecision>,
 {
-	array_minimum_int(vars.into_iter().map(|v| -v.into()), -max)
+	array_minimum_int(prb, vars.into_iter().map(|v| -v.into()), -max)
 }
 
 /// Create a constraint that enforces that an integer decision variable takes
 /// the minimum value of an array of integer decision variables.
-pub fn array_minimum_int<Iter>(vars: Iter, min: IntDecision) -> BoxedConstraint
+pub fn array_minimum_int<Iter>(prb: &mut Model, vars: Iter, min: IntDecision)
 where
 	Iter: IntoIterator,
 	Iter::Item: Into<IntDecision>,
@@ -295,11 +297,12 @@ where
 /// resource usages of all tasks running at any time does not exceed the
 /// resource capacity.
 pub fn cumulative(
+	prb: &mut Model,
 	start_times: Vec<IntDecision>,
 	durations: Vec<IntDecision>,
 	usages: Vec<IntDecision>,
 	capacity: IntDecision,
-) -> BoxedConstraint {
+) {
 	assert_eq!(
 		start_times.len(),
 		durations.len(),
@@ -338,24 +341,23 @@ pub fn disjunctive_strict(
 	);
 	let propagator =
 		DisjunctiveStrictPropagator::new(prb, start_times, durations, true, true, true);
-	*prb += DisjunctiveStrict {
+	prb.add_constraint(DisjunctiveStrict {
 		propagator,
 		edge_finding_prop: None,
 		not_last_prop: None,
 		detectable_precedence_prop: None,
-	};
-	let b: &mut dyn Any = &mut *(prb.constraints.last_mut().unwrap());
-	b.downcast_mut().unwrap()
+	})
 }
 
 /// Create a constraint that enforces that a numerator decision integer variable
 /// divided by a denominator integer decision variable is equal to a result
 /// integer decision variable.
 pub fn div_int(
+	prb: &mut Model,
 	numerator: IntDecision,
 	denominator: IntDecision,
 	result: IntDecision,
-) -> BoxedConstraint {
+) {
 	todo!()
 	// IntDiv {
 	// 	numerator,
@@ -366,14 +368,14 @@ pub fn div_int(
 
 /// Create constraint that enforces that the given Boolean variable takes the
 /// value `true` if-and-only-if an integer variable is in a given set.
-pub fn int_in_set_reif(var: IntDecision, set: IntSetVal, reif: BoolDecision) -> IntInSetReif {
-	IntInSetReif { var, set, reif }
+pub fn int_in_set_reif(prb: &mut Model, var: IntDecision, set: IntSetVal, reif: BoolDecision) {
+	prb.add_constraint(IntInSetReif { var, set, reif });
 }
 
 /// Create a constraint that enforces that a base integer decision variable
 /// exponentiation by an exponent integer decision variable is equal to a result
 /// integer decision variable.
-pub fn pow_int(base: IntDecision, exponent: IntDecision, result: IntDecision) -> BoxedConstraint {
+pub fn pow_int(prb: &mut Model, base: IntDecision, exponent: IntDecision, result: IntDecision) {
 	todo!()
 	// IntPow {
 	// 	base,
@@ -385,7 +387,7 @@ pub fn pow_int(base: IntDecision, exponent: IntDecision, result: IntDecision) ->
 /// Create a sequential precede chain constraint that enforces that any integer
 /// value `i`, larger than one, will only occur in a position after the first
 /// occurrence of `i-1`.
-pub fn seq_precede_chain_int<It>(vars: impl IntoIterator<Item = It>) -> BoxedConstraint
+pub fn seq_precede_chain_int<It>(prb: &mut Model, vars: impl IntoIterator<Item = It>)
 where
 	It: Into<IntDecision>,
 {
@@ -398,28 +400,29 @@ where
 /// Create a `table_int` constraint that enforces that given list of integer
 /// views take their values according to one of the given lists of integer
 /// values.
-pub fn table_int(vars: Vec<IntDecision>, table: Vec<Vec<IntVal>>) -> IntTable {
+pub fn table_int(prb: &mut Model, vars: Vec<IntDecision>, table: Vec<Vec<IntVal>>) {
 	assert!(
 		table.iter().all(|tup| tup.len() == vars.len()),
 		"The number of
 values in each row of the table must be equal to the number of decision
 variables."
 	);
-	IntTable { vars, table }
+	prb.add_constraint(IntTable { vars, table });
 }
 
 /// Create a constraint that enforces that the product of the two integer
 /// decision variables is equal to a third.
 pub fn times_int(
+	prb: &mut Model,
 	factor1: IntDecision,
 	factor2: IntDecision,
 	product: IntDecision,
-) -> IntTimesBounds<IntDecision, IntDecision, IntDecision> {
-	IntTimesBounds {
+) {
+	prb.add_constraint(IntTimesBounds {
 		factor1,
 		factor2,
 		product,
-	}
+	});
 }
 
 /// Create a value precede chain constraint that enforces that the first
@@ -429,10 +432,10 @@ pub fn times_int(
 /// Note that `seq_precede_chain_int` is a special case of this constraint where
 /// the values are consecutive integers starting from 1.
 pub fn value_precede_chain_int<D, V>(
+	prb: &mut Model,
 	vars: impl IntoIterator<Item = D>,
 	values: impl IntoIterator<Item = V>,
-) -> BoxedConstraint
-where
+) where
 	D: Into<IntDecision>,
 	V: Into<IntVal>,
 {
@@ -514,15 +517,16 @@ impl ElementConstraint for BoolDecision {
 	type Result = BoolDecision;
 
 	fn element_constraint(
+		prb: &mut Model,
 		array: Vec<Self>,
 		index: IntDecision,
 		result: Self::Result,
-	) -> Self::Constraint {
-		Self::Constraint {
+	) -> &mut Self::Constraint {
+		prb.add_constraint(Self::Constraint {
 			index,
 			array,
 			result,
-		}
+		})
 	}
 }
 
@@ -777,10 +781,11 @@ impl ElementConstraint for IntDecision {
 	type Result = IntDecision;
 
 	fn element_constraint(
+		prb: &mut Model,
 		array: Vec<Self>,
 		index: IntDecision,
 		result: Self::Result,
-	) -> Self::Constraint {
+	) -> &mut Self::Constraint {
 		todo!()
 		// Self::Constraint {
 		// 	index,
@@ -974,10 +979,11 @@ impl ElementConstraint for IntVal {
 	type Result = IntDecision;
 
 	fn element_constraint(
+		prb: &mut Model,
 		array: Vec<Self>,
 		index: IntDecision,
 		result: Self::Result,
-	) -> Self::Constraint {
+	) -> &mut Self::Constraint {
 		todo!()
 		// Self::Constraint {
 		// 	index,
@@ -992,12 +998,12 @@ impl Model {
 	///
 	/// Note that users will use either the `+=` operator or the
 	/// [`Self::add_custom_constraint`] method.
-	fn add_constraint(&mut self, mut constraint: BoxedConstraint) {
+	pub fn add_constraint<C: Constraint<Self>>(&mut self, mut constraint: C) -> &mut C {
 		let con = ConRef::new(self.constraints.len());
 		let mut ctx = ModelPostingContext::new(self, con);
 		constraint.post(&mut ctx);
 		let priority = ctx.priority;
-		let r = self.constraints.push(Some(constraint));
+		let r = self.constraints.push(Some(Box::new(constraint)));
 		debug_assert_eq!(r, con);
 		let r = self.propagator_queue.info.push(PropagatorInfo {
 			enqueued: false,
@@ -1005,6 +1011,12 @@ impl Model {
 		});
 		debug_assert_eq!(r, con);
 		self.propagator_queue.enqueue_propagator(con);
+
+		// Retrieve the reference for the last constraint
+		let constraint: &mut BoxedConstraint =
+			self.constraints.last_mut().unwrap().as_mut().unwrap();
+		let any: &mut dyn Any = constraint;
+		any.downcast_mut().unwrap()
 	}
 
 	/// Create a new [`Model`] instance from a [`FlatZinc`] instance.
@@ -1218,25 +1230,11 @@ impl Model {
 	}
 }
 
-impl AddAssign<BoxedConstraint> for Model {
-	fn add_assign(&mut self, rhs: BoxedConstraint) {
+impl<C: Constraint<Self>> AddAssign<C> for Model {
+	fn add_assign(&mut self, rhs: C) {
 		self.add_constraint(rhs);
 	}
 }
-
-impl<C: Constraint<Model>> AddAssign<C> for Model {
-	fn add_assign(&mut self, rhs: C) {
-		let b: BoxedConstraint = Box::new(rhs);
-		*self += b;
-	}
-}
-
-// impl<C: Constraint<Model>> AddAssign<Box<C>> for Model {
-// 	fn add_assign(&mut self, rhs: Box<C>) {
-// 		let rhs: BoxedConstraint = rhs;
-// 		self.add_constraint(rhs);
-// 	}
-// }
 
 impl AddAssign<Branching> for Model {
 	fn add_assign(&mut self, rhs: Branching) {
@@ -1254,23 +1252,21 @@ impl ClauseDatabase for Model {
 }
 
 impl SimplificationActions for Model {
-	fn add_constraint<C>(&mut self, constraint: C)
-	where
-		Model: AddAssign<C>,
-	{
-		*self += constraint;
+	fn add_constraint<C: Constraint<Model>>(&mut self, constraint: C) {
+		self.add_constraint(constraint);
 	}
 }
 
 impl ElementConstraint for bool {
-	type Constraint = BoxedConstraint;
+	type Constraint = IntInSetReif;
 	type Result = BoolDecision;
 
 	fn element_constraint(
+		prb: &mut Model,
 		array: Vec<Self>,
 		index: IntDecision,
 		result: Self::Result,
-	) -> Self::Constraint {
+	) -> &mut Self::Constraint {
 		// Convert array of boolean values to a set literals of the indices where
 		// the value is true
 		let mut ranges = Vec::new();
@@ -1290,12 +1286,11 @@ impl ElementConstraint for bool {
 		}
 		assert_ne!(ranges.len(), 0, "unexpected empty range list");
 
-		todo!()
-		// Self::Constraint {
-		// 	var: index,
-		// 	set: RangeList::from_iter(ranges),
-		// 	reif: result,
-		// }
+		prb.add_constraint(Self::Constraint {
+			var: index,
+			set: RangeList::from_iter(ranges),
+			reif: result,
+		})
 	}
 }
 

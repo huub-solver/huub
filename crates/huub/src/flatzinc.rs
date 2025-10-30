@@ -383,7 +383,7 @@ where
 
 	/// Check whether an annotation atom is present in the given list of
 	/// annotations, marking it as used if found.
-	fn anns_contains(&self, ann: &[Annotation<S>], ann_used: &mut [bool], ident: &str) -> bool {
+	fn anns_contains(ann: &[Annotation<S>], ann_used: &mut [bool], ident: &str) -> bool {
 		for (i, a) in ann.iter().enumerate() {
 			if let Annotation::Atom(x) = a {
 				if x.deref() == ident {
@@ -491,10 +491,9 @@ where
 		transitions: Vec<Vec<IntVal>>,
 		init_state: IntVal,
 		accept_states: FxHashSet<IntVal>,
-	) -> Vec<IntTable> {
+	) {
 		// TODO: Add the regular checking
 
-		let mut table_constraints = Vec::new();
 		let mut start: Vec<Vec<IntVal>> = Vec::new();
 		let mut middle: Vec<Vec<IntVal>> = Vec::new();
 		let mut end: Vec<Vec<IntVal>> = Vec::new();
@@ -532,19 +531,18 @@ where
 
 		// Add table constraint to force a transition for the starting state
 		let sx: Vec<IntDecision> = vec![vars[0], state_vars[0]];
-		table_constraints.push(table_int(sx, start));
+		table_int(&mut self.prb, sx, start);
 
 		// Add table constraint to force valid transition for the intermediate
 		// states
 		for i in 1..vars.len() - 1 {
 			let mx: Vec<IntDecision> = vec![state_vars[i - 1], vars[i], state_vars[i]];
-			table_constraints.push(table_int(mx, middle.clone()));
+			table_int(&mut self.prb, mx, middle.clone());
 		}
 
 		// Add table constraint to force ending in an accepting state
 		let ex: Vec<IntDecision> = vec![*state_vars.last().unwrap(), *vars.last().unwrap()];
-		table_constraints.push(table_int(ex, end));
-		table_constraints
+		table_int(&mut self.prb, ex, end);
 	}
 
 	/// Create branchers according to the search annotations in the FlatZinc
@@ -984,7 +982,7 @@ where
 						let idx = self.arg_int(idx)?;
 						let val = self.arg_bool(val)?;
 
-						self.prb += array_element(arr, idx - 1, val);
+						array_element(&mut self.prb, arr, idx - 1, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_bool_element",
@@ -1002,7 +1000,7 @@ where
 							.try_collect()?;
 						let idx = self.arg_int(idx)?;
 						let val = self.arg_int(val)?;
-						self.prb += array_element(arr, idx - 1, val);
+						array_element(&mut self.prb, arr, idx - 1, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_int_element",
@@ -1021,7 +1019,7 @@ where
 						let idx = self.arg_int(idx)?;
 						let val = self.arg_bool(val)?;
 
-						self.prb += array_element(arr, idx - 1, val);
+						array_element(&mut self.prb, arr, idx - 1, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_var_bool_element",
@@ -1040,7 +1038,7 @@ where
 						let idx = self.arg_int(idx)?;
 						let val = self.arg_int(val)?;
 
-						self.prb += array_element(arr, idx - 1, val);
+						array_element(&mut self.prb, arr, idx - 1, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_var_int_element",
@@ -1192,10 +1190,10 @@ where
 						let args = self.arg_array(args)?;
 						let args: Result<Vec<_>, _> =
 							args.iter().map(|l| self.lit_int(l)).collect();
-						let mut all_diff = all_different_int(args?);
-						let force_bounds = self.anns_contains(&c.ann, &mut ann_used, "bounds");
+						let all_diff = all_different_int(&mut self.prb, args?);
+						let force_bounds = Self::anns_contains(&c.ann, &mut ann_used, "bounds");
 						let force_value =
-							self.anns_contains(&c.ann, &mut ann_used, "value_propagation");
+							Self::anns_contains(&c.ann, &mut ann_used, "value_propagation");
 						match (force_bounds, force_value) {
 							(false, false) => {} // No
 							(bounds, value) => {
@@ -1203,7 +1201,6 @@ where
 								all_diff.use_value_consistent_propagator(value);
 							}
 						}
-						self.prb += all_diff;
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_all_different",
@@ -1220,9 +1217,9 @@ where
 							args.iter().map(|l| self.lit_int(l)).collect();
 						let m = self.arg_int(m)?;
 						if is_maximum {
-							self.prb += array_maximum_int(args?, m);
+							array_maximum_int(&mut self.prb, args?, m);
 						} else {
-							self.prb += array_minimum_int(args?, m);
+							array_minimum_int(&mut self.prb, args?, m);
 						}
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
@@ -1277,7 +1274,7 @@ where
 							.map(|l| self.lit_int(l))
 							.try_collect()?;
 						let r = self.arg_int(r)?;
-						self.prb += cumulative(starts, durations, heights, r);
+						cumulative(&mut self.prb, starts, durations, heights, r);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_cumulative",
@@ -1300,10 +1297,10 @@ where
 							.try_collect()?;
 
 						let force_edge_finding =
-							self.anns_contains(&c.ann, &mut ann_used, "edge_finding");
-						let force_not_last = self.anns_contains(&c.ann, &mut ann_used, "not_last");
+							Self::anns_contains(&c.ann, &mut ann_used, "edge_finding");
+						let force_not_last = Self::anns_contains(&c.ann, &mut ann_used, "not_last");
 						let force_detectable_precedence =
-							self.anns_contains(&c.ann, &mut ann_used, "detectable_precedence");
+							Self::anns_contains(&c.ann, &mut ann_used, "detectable_precedence");
 						let disj_strict = disjunctive_strict(&mut self.prb, start_times, durations);
 						match (
 							force_edge_finding,
@@ -1360,10 +1357,7 @@ where
 
 						// Convert regular constraint in to table constraints and add them to the
 						// model
-						let tables = self.convert_regular_to_tables(x, d, q0, f);
-						for table in tables {
-							self.prb += table;
-						}
+						self.convert_regular_to_tables(x, d, q0, f);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_regular",
@@ -1393,7 +1387,7 @@ where
 							.into_iter()
 							.map(|c| c.collect())
 							.collect();
-						self.prb += table_int(args, table);
+						table_int(&mut self.prb, args, table);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_table_int",
@@ -1407,7 +1401,7 @@ where
 						let args = self.arg_array(args)?;
 						let args: Result<Vec<_>, _> =
 							args.iter().map(|l| self.lit_int(l)).collect();
-						self.prb += seq_precede_chain_int(args?);
+						seq_precede_chain_int(&mut self.prb, args?);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_seq_precede_chain",
@@ -1428,7 +1422,7 @@ where
 							.iter()
 							.map(|l| self.lit_int(l))
 							.try_collect()?;
-						self.prb += value_precede_chain_int(variables, values);
+						value_precede_chain_int(&mut self.prb, variables, values);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_value_precede_chain",
@@ -1441,7 +1435,7 @@ where
 					if let [origin, abs] = c.args.as_slice() {
 						let origin = self.arg_int(origin)?;
 						let abs = self.arg_int(abs)?;
-						self.prb += abs_int(origin, abs);
+						abs_int(&mut self.prb, origin, abs);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "int_abs",
@@ -1455,7 +1449,7 @@ where
 						let num = self.arg_int(num)?;
 						let denom = self.arg_int(denom)?;
 						let res = self.arg_int(res)?;
-						self.prb += div_int(num, denom, res);
+						div_int(&mut self.prb, num, denom, res);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "int_div",
@@ -1618,9 +1612,9 @@ where
 						let b = self.arg_int(b)?;
 						let m = self.arg_int(m)?;
 						if is_maximum {
-							self.prb += array_maximum_int(vec![a, b], m);
+							array_maximum_int(&mut self.prb, vec![a, b], m);
 						} else {
-							self.prb += array_minimum_int(vec![a, b], m);
+							array_minimum_int(&mut self.prb, vec![a, b], m);
 						}
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
@@ -1635,7 +1629,7 @@ where
 						let base = self.arg_int(base)?;
 						let exponent = self.arg_int(exponent)?;
 						let res = self.arg_int(res)?;
-						self.prb += pow_int(base, exponent, res);
+						pow_int(&mut self.prb, base, exponent, res);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "int_pow",
@@ -1649,7 +1643,7 @@ where
 						let a = self.arg_int(x)?;
 						let b = self.arg_int(y)?;
 						let m = self.arg_int(z)?;
-						self.prb += times_int(a, b, m);
+						times_int(&mut self.prb, a, b, m);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "int_times",
@@ -1679,7 +1673,7 @@ where
 						let s = self.arg_par_set(s)?;
 						let r = self.arg_bool(r)?;
 
-						self.prb += int_in_set_reif(x, s, r);
+						int_in_set_reif(&mut self.prb, x, s, r);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "set_in_reif",
