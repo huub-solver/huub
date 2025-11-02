@@ -11,7 +11,6 @@ use crate::{
 	constraints::{BoxedPropagator, Constraint, ModelIntView, Propagator, SolverIntView},
 	reformulate::ReformulationError,
 	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView},
-	IntVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

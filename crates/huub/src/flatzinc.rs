@@ -24,9 +24,8 @@ use tracing::warn;
 use crate::{
 	abs_int,
 	actions::{BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions},
-	all_different_int, array_element, array_maximum_int, array_minimum_int,
-	constraints::int_table::IntTable,
-	cumulative, disjunctive_strict, div_int, int_in_set_reif, pow_int,
+	all_different_int, array_element, array_maximum_int, array_minimum_int, cumulative,
+	disjunctive_strict, div_int, int_in_set_reif, pow_int,
 	reformulate::ReformulationError,
 	seq_precede_chain_int, table_int, times_int, value_precede_chain_int, BoolDecision,
 	BoolDecisionInner, Branching, Decision, IntDecision, IntLinExpr, IntSetVal, IntVal, Model,

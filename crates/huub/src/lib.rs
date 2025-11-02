@@ -57,12 +57,12 @@ use crate::{
 		int_abs::IntAbsBounds,
 		int_all_different::{IntAllDifferent, IntAllDifferentBounds},
 		int_array_minimum::IntArrayMinimumBounds,
+		int_div::{IntDiv, IntDivBounds},
 		int_in_set::IntInSetReif,
 		int_linear::{IntEq, IntLinear, LinOperator},
 		int_table::IntTable,
 		int_times::IntTimesBounds,
-		BoxedConstraint, Conflict, Constraint, LazyReason, Reason, ReasonBuilder,
-		SimplificationStatus,
+		BoxedConstraint, Constraint, LazyReason, Reason, ReasonBuilder, SimplificationStatus,
 	},
 	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
 	helpers::linear_transform::LinearTransform,
@@ -73,7 +73,7 @@ use crate::{
 	},
 	solver::{
 		activation_list::IntPropCond,
-		queue::{PriorityLevel, PriorityQueue, PropagatorInfo, PropagatorQueue},
+		queue::{PriorityLevel, PropagatorInfo, PropagatorQueue},
 		trail::TrailedInt,
 		IntLitMeaning, Solver,
 	},
@@ -358,12 +358,11 @@ pub fn div_int(
 	denominator: IntDecision,
 	result: IntDecision,
 ) {
-	todo!()
-	// IntDiv {
-	// 	numerator,
-	// 	denominator,
-	// 	result,
-	// }
+	prb.add_constraint(IntDivBounds {
+		numerator,
+		denominator,
+		result,
+	});
 }
 
 /// Create constraint that enforces that the given Boolean variable takes the
