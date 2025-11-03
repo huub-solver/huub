@@ -995,6 +995,7 @@ impl Model {
 		let mut ctx = ModelPostingContext::new(self, con);
 		constraint.post(&mut ctx);
 		let priority = ctx.priority;
+		let enqueue = ctx.enqueue();
 		let r = self.constraints.push(Some(Box::new(constraint)));
 		debug_assert_eq!(r, con);
 		let r = self.propagator_queue.info.push(PropagatorInfo {
@@ -1002,7 +1003,9 @@ impl Model {
 			priority,
 		});
 		debug_assert_eq!(r, con);
-		self.propagator_queue.enqueue_propagator(con);
+		if enqueue {
+			self.propagator_queue.enqueue_propagator(con);
+		}
 
 		// Retrieve the reference for the last constraint
 		self.constraints
@@ -2324,6 +2327,12 @@ pub struct ModelPostingContext<'a> {
 	model: &'a mut Model,
 	/// The priority level at which the constraint will be enqueued.
 	priority: PriorityLevel,
+	/// Whether the subscriptions of the propagator would suggest the propagator
+	/// should be enqueued.
+	semantic_enqueue: bool,
+	/// Whether the propagator explicitly requested to be enqueued or not
+	/// enqueued.
+	decision_enqueue: Option<bool>,
 }
 
 impl<'a> ModelPostingContext<'a> {
@@ -2332,17 +2341,27 @@ impl<'a> ModelPostingContext<'a> {
 			con,
 			model,
 			priority: PriorityLevel::Medium,
+			semantic_enqueue: false,
+			decision_enqueue: None,
+		}
+	}
+
+	pub(crate) fn enqueue(&self) -> bool {
+		if let Some(enqueue) = self.decision_enqueue {
+			enqueue
+		} else {
+			self.semantic_enqueue
 		}
 	}
 }
 
 impl PostingActions for ModelPostingContext<'_> {
 	fn advise_on_backtrack(&mut self) {
-		todo!()
+		// Model does not backtrack, so no advisor is required.
 	}
 
 	fn enqueue_now(&mut self, option: bool) {
-		todo!()
+		self.decision_enqueue = Some(option)
 	}
 
 	fn set_priority(&mut self, priority: PriorityLevel) {
@@ -2358,11 +2377,12 @@ impl BoolInspectionActions<ModelPostingContext<'_>> for BoolDecision {
 
 impl BoolPostingActions<ModelPostingContext<'_>> for BoolDecision {
 	fn enqueue_when_fixed(&self, ctx: &mut ModelPostingContext<'_>) {
-		match self.0 {
+		let var = self.resolve_alias(ctx.model);
+		match var.0 {
 			BoolDecisionInner::Lit(lit) => ctx.model.bool_vars[i32::from(lit.var()) as usize - 1]
 				.constraints
 				.push(ctx.con),
-			BoolDecisionInner::Const(_) => {}
+			BoolDecisionInner::Const(_) => ctx.semantic_enqueue = true,
 			// TODO: These definitions might enqueue when the boolean is not fixed. Use advisors
 			// instead?
 			BoolDecisionInner::IntEq(iv, _) | BoolDecisionInner::IntNotEq(iv, _) => {
@@ -2380,9 +2400,13 @@ impl BoolPostingActions<ModelPostingContext<'_>> for BoolDecision {
 }
 
 impl BoolPostingActions<ModelPostingContext<'_>> for bool {
-	fn enqueue_when_fixed(&self, ctx: &mut ModelPostingContext<'_>) {}
+	fn enqueue_when_fixed(&self, ctx: &mut ModelPostingContext<'_>) {
+		ctx.semantic_enqueue = true;
+	}
 
-	fn advise_when_fixed(&self, _: &mut ModelPostingContext<'_>, _: u64) {}
+	fn advise_when_fixed(&self, _: &mut ModelPostingContext<'_>, _: u64) {
+		// Value does not change, so no advisor will ever be called
+	}
 }
 
 impl IntInspectionActions<ModelPostingContext<'_>> for IntDecision {
@@ -2427,20 +2451,34 @@ impl IntPostingActions<ModelPostingContext<'_>> for IntDecision {
 	}
 
 	fn enqueue_when(&self, ctx: &mut ModelPostingContext<'_>, condition: IntPropCond) {
-		match self.0 {
+		let var = self.resolve_alias(&ctx.model);
+
+		match var.0 {
 			IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) => {
+				if condition != IntPropCond::Fixed {
+					ctx.semantic_enqueue = true;
+				}
 				ctx.model.int_vars[iv].constraints.push(ctx.con)
 			}
-			IntDecisionInner::Const(_) => {}
-			IntDecisionInner::Bool(_, bv) => bv.enqueue_when_fixed(ctx),
+			IntDecisionInner::Const(_) => ctx.semantic_enqueue = true,
+			IntDecisionInner::Bool(_, bv) => {
+				if condition != IntPropCond::Fixed {
+					ctx.semantic_enqueue = true;
+				}
+				bv.enqueue_when_fixed(ctx)
+			}
 		}
 	}
 }
 
 impl IntPostingActions<ModelPostingContext<'_>> for IntVal {
-	fn advise_when(&self, _: &mut ModelPostingContext<'_>, _: IntPropCond, _: u64) {}
+	fn advise_when(&self, _: &mut ModelPostingContext<'_>, _: IntPropCond, _: u64) {
+		// Value will never change, so no advisor will ever be called
+	}
 
-	fn enqueue_when(&self, ctx: &mut ModelPostingContext<'_>, condition: IntPropCond) {}
+	fn enqueue_when(&self, ctx: &mut ModelPostingContext<'_>, _: IntPropCond) {
+		ctx.semantic_enqueue = true;
+	}
 }
 
 impl IntInspectionActions<ModelPostingContext<'_>> for IntVal {
