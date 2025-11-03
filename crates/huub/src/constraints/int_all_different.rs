@@ -6,8 +6,13 @@ use std::{cmp, ops::AddAssign};
 use itertools::{Either, Itertools};
 
 use crate::{
-	actions::{IntInspectionActions, PostingActions, ReasoningEngine, ReformulationActions},
-	constraints::{BoxedPropagator, Constraint, ModelIntView, Propagator, SolverIntView},
+	actions::{
+		IntDecisionActions, IntInspectionActions, IntPropagationActions, PostingActions,
+		ReasoningEngine, ReformulationActions,
+	},
+	constraints::{
+		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
+	},
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::{IntEvent, IntPropCond},
@@ -129,6 +134,49 @@ where
 	E: ReasoningEngine,
 	IntDecision: ModelIntView<E>,
 {
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
+		self.propagate(ctx)?;
+
+		// TODO: Should this just use the value consistent propagator, or should this
+		// not be done by the bounds consistent propagator?
+		let (vals, vars): (Vec<_>, Vec<_>) =
+			self.prop.var.iter().enumerate().partition_map(|(i, &var)| {
+				if let Some(val) = var.get_val(ctx) {
+					Either::Left((i, val))
+				} else {
+					Either::Right(var)
+				}
+			});
+		if !vals.is_empty() {
+			for (i, val) in vals {
+				let reason = &[self.prop.var[i].get_val_lit(ctx).unwrap()];
+				for var in &vars {
+					var.set_not_eq(ctx, val, reason)?;
+				}
+			}
+			// Shrink variable array (and related caches)
+			let n = 2 * vars.len() + 2;
+			self.prop.lb_cache.shrink_to(n);
+			self.prop.ub_cache.shrink_to(n);
+			self.prop.min_sorted = (0..vars.len()).collect();
+			self.prop.max_sorted = (0..vars.len()).collect();
+			self.prop.bounds.shrink_to(n);
+			self.prop.predecessor.shrink_to(n);
+			self.prop.diff.shrink_to(n);
+			self.prop.hall_interval.shrink_to(n);
+			self.prop.bucket.shrink_to(n);
+			self.prop.var = vars;
+		}
+
+		if self.prop.var.iter().all(|v| v.get_val(ctx).is_some()) {
+			return Ok(SimplificationStatus::Subsumed);
+		}
+		Ok(SimplificationStatus::NoFixpoint)
+	}
+
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let vars: Vec<_> = self
 			.prop
@@ -136,20 +184,8 @@ where
 			.iter()
 			.map(|v| slv.get_solver_int(*v))
 			.collect();
-		let (vals, vars): (Vec<_>, Vec<_>) = vars.iter().partition_map(|&var| {
-			if let Some(val) = var.get_val(slv) {
-				Either::Left(val)
-			} else {
-				Either::Right(var)
-			}
-		});
-		// propagation should have failed if any values are duplicated
-		debug_assert!(vals.iter().all_unique());
-		// propagation should have removed all known values from the domains of the
-		// variables
-		debug_assert!(vars
-			.iter()
-			.all(|var| vals.iter().all(|val| !var.check_in_domain(slv, *val))));
+		// propagation should have removed any fixed values
+		debug_assert!(vars.iter().all(|v| v.get_val(slv).is_none()));
 		if self.value_consistent_propagator_enabled() {
 			IntAllDifferentValue::new_in(slv, vars.clone());
 		}
