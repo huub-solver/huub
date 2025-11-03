@@ -168,7 +168,7 @@ where
 			.collect();
 		let result = ctx.get_solver_int(self.result.clone().into());
 		let index = ctx.get_solver_int(self.index.clone().into());
-		IntArrayElementBounds::new_in(ctx, array, result, index).unwrap();
+		IntArrayElementBounds::new_in(ctx, array, index, result).unwrap();
 		Ok(())
 	}
 }
