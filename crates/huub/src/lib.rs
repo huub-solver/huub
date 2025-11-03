@@ -61,6 +61,7 @@ use crate::{
 		int_div::{IntDiv, IntDivBounds},
 		int_in_set::IntInSetReif,
 		int_linear::{IntEq, IntLinear, LinOperator},
+		int_pow::IntPowBounds,
 		int_table::IntTable,
 		int_times::IntTimesBounds,
 		BoxedConstraint, Constraint, LazyReason, Reason, ReasonBuilder, SimplificationStatus,
@@ -376,12 +377,11 @@ pub fn int_in_set_reif(prb: &mut Model, var: IntDecision, set: IntSetVal, reif: 
 /// exponentiation by an exponent integer decision variable is equal to a result
 /// integer decision variable.
 pub fn pow_int(prb: &mut Model, base: IntDecision, exponent: IntDecision, result: IntDecision) {
-	todo!()
-	// IntPow {
-	// 	base,
-	// 	exponent,
-	// 	result,
-	// }
+	prb.add_constraint(IntPowBounds {
+		base,
+		exponent,
+		result,
+	});
 }
 
 /// Create a sequential precede chain constraint that enforces that any integer
