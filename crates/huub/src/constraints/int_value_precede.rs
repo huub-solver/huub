@@ -121,36 +121,33 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 		I: IntDecisionActions<Ctx, Atom = Atom>,
 	{
 		move |ctx: &mut Ctx| {
-			let mut v = self.explain_lower_recursive(i + 1, k)(ctx);
-			v.extend(self.explain_upper(i, k)(ctx));
-			v
-		}
-	}
+			let mut reason = Vec::new();
+			// Explain a lower bound via 3 cases:
+			// - Lower bound of var i is above k - This is the value that required the
+			//   earlier lower bound that is currently explained (end of recursion).
+			// - k is in the domain of var i - Go one step up and to the next variable.
+			// - k is not in the domain of var i - i can be anything else, go to next
+			//   variable.
+			{
+				let mut i = i + 1;
+				let mut k = k;
+				loop {
+					if self.vars[i].get_lower_bound(ctx) > k {
+						reason.push(self.vars[i].get_lit(ctx, IntLitMeaning::GreaterEq(k + 1)));
+						break;
+					}
+					if self.vars[i].check_in_domain(ctx, k) {
+						i += 1;
+						k += 1;
+					} else {
+						reason.push(self.vars[i].get_lit(ctx, IntLitMeaning::NotEq(k)));
+						i += 1;
+					}
+				}
+			}
 
-	/// Recursively explain a lower bound via 3 cases:
-	/// - Lower bound of var i is above k - This is the value that required the
-	///   earlier lower bound that is currently explained (end of recursion).
-	/// - k is in the domain of var i - Go one step up and to the next variable.
-	/// - k is not in the domain of var i - i can be anything else, go to next
-	///   variable.
-	fn explain_lower_recursive<Ctx, Atom>(
-		&self,
-		i: usize,
-		k: IntVal,
-	) -> impl FnOnce(&mut Ctx) -> Conjunction<Atom> + '_
-	where
-		I: IntDecisionActions<Ctx, Atom = Atom>,
-	{
-		move |ctx: &mut Ctx| {
-			if self.vars[i].get_lower_bound(ctx) > k {
-				return vec![self.vars[i].get_lit(ctx, IntLitMeaning::GreaterEq(k + 1))];
-			}
-			if self.vars[i].check_in_domain(ctx, k) {
-				return self.explain_lower_recursive(i + 1, k + 1)(ctx);
-			}
-			let mut v = self.explain_lower_recursive(i + 1, k)(ctx);
-			v.push(self.vars[i].get_lit(ctx, IntLitMeaning::NotEq(k)));
-			v
+			reason.extend(self.explain_upper(i, k)(ctx));
+			reason
 		}
 	}
 
@@ -504,58 +501,58 @@ impl<I> IntValuePrecedeChainValue<I> {
 		I: IntDecisionActions<Ctx, Atom = Atom>,
 	{
 		move |ctx: &mut Ctx| {
-			let mut v = self.explain_lower_recursive(i + 1, j)(ctx);
-			if j > 0 {
-				v.extend(self.explain_upper(i, j)(ctx));
-			}
-			v
-		}
-	}
+			let mut reason = Vec::new();
 
-	/// Recursively explain a lower bound via 3 cases:
-	/// - Current lower bound index is above k - This is the value that required
-	///   the earlier lower bound that is currently explained (end of
-	///   recursion).
-	/// - Index k is in the domain of var i - Go one step up and to the next
-	///   variable.
-	/// - Index k is not in the domain of var i - i can be anything else, go to
-	///   next variable.
-	fn explain_lower_recursive<Ctx, Atom>(
-		&self,
-		i: usize,
-		j: usize,
-	) -> impl FnOnce(&mut Ctx) -> Conjunction<Atom> + '_
-	where
-		I: IntDecisionActions<Ctx, Atom = Atom>,
-	{
-		move |ctx: &mut Ctx| {
-			// A lower bound is explained by stating that all untracked values are excluded
-			// (< min value, > max value, all holes), as well as all values with smaller
-			// indices.
-			if let Some(lb) = self.get_lowest_index(ctx, i) {
-				if lb > j {
-					let mut reason = Vec::with_capacity(2 + self.holes.len() + j);
-					reason.push(self.vars[i].get_lit(ctx, IntLitMeaning::GreaterEq(self.min_val)));
-					reason.push(self.vars[i].get_lit(ctx, IntLitMeaning::Less(self.max_val + 1)));
-					reason.extend(
-						self.holes
-							.iter()
-							.map(|&h| self.vars[i].get_lit(ctx, IntLitMeaning::NotEq(h))),
-					);
-					reason.extend(
-						(0..j).map(|k| {
-							self.vars[i].get_lit(ctx, IntLitMeaning::NotEq(self.values[k]))
-						}),
-					);
-					return reason;
+			// Explain a lower bound via 3 cases:
+			// - Current lower bound index is above k - This is the value that required the
+			//   earlier lower bound that is currently explained (end of recursion).
+			// - Index k is in the domain of var i - Go one step up and to the next
+			//   variable.
+			// - Index k is not in the domain of var i - i can be anything else, go to next
+			//   variable.
+			{
+				let mut i = i + 1;
+				let mut j = j;
+
+				loop {
+					// A lower bound is explained by stating that all untracked values are excluded
+					// (< min value, > max value, all holes), as well as all values with smaller
+					// indices.
+					if let Some(lb) = self.get_lowest_index(ctx, i) {
+						if lb > j {
+							reason.push(
+								self.vars[i].get_lit(ctx, IntLitMeaning::GreaterEq(self.min_val)),
+							);
+							reason.push(
+								self.vars[i].get_lit(ctx, IntLitMeaning::Less(self.max_val + 1)),
+							);
+							reason.extend(
+								self.holes
+									.iter()
+									.map(|&h| self.vars[i].get_lit(ctx, IntLitMeaning::NotEq(h))),
+							);
+							reason.extend((0..j).map(|k| {
+								self.vars[i].get_lit(ctx, IntLitMeaning::NotEq(self.values[k]))
+							}));
+							break;
+						}
+					}
+					if self.vars[i].check_in_domain(ctx, self.values[j - 1]) {
+						i += 1;
+						j += 1;
+					} else {
+						reason.push(
+							self.vars[i].get_lit(ctx, IntLitMeaning::NotEq(self.values[j - 1])),
+						);
+						i += 1;
+					}
 				}
 			}
-			if self.vars[i].check_in_domain(ctx, self.values[j - 1]) {
-				return self.explain_lower_recursive(i + 1, j + 1)(ctx);
+
+			if j > 0 {
+				reason.extend(self.explain_upper(i, j)(ctx));
 			}
-			let mut v = self.explain_lower_recursive(i + 1, j)(ctx);
-			v.push(self.vars[i].get_lit(ctx, IntLitMeaning::NotEq(self.values[j - 1])));
-			v
+			reason
 		}
 	}
 
