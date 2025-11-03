@@ -82,7 +82,7 @@ pub trait BoolSimplificationActions<Context>:
 	) -> Result<(), Self::Conflict>;
 }
 
-pub trait BoolPostingActions<Context> {
+pub trait BoolPostingActions<Context>: BoolInspectionActions<Context> {
 	/// Enqueue a propagator to be enqueued when a [`BoolView`] is assigned.
 	fn enqueue_when_fixed(&self, ctx: &mut Context);
 
@@ -259,7 +259,7 @@ pub trait PropagationActions: DecisionActions {
 	fn declare_conflict(&mut self, reason: impl ReasonBuilder<Self, Self::Atom>) -> Self::Conflict;
 }
 
-pub trait IntPostingActions<Context>: IntOperations {
+pub trait IntPostingActions<Context>: IntInspectionActions<Context> {
 	/// Advise a propagator when an [`IntView`] is changed according to the
 	/// given propagation condition, allowing the propagator to decide whether
 	/// to enqueue itself.
@@ -494,5 +494,11 @@ impl IntDecisionActions<dyn ReformulationActions + '_> for IntVarRef {
 		meaning: IntLitMeaning,
 	) -> Self::Atom {
 		ctx.get_int_lit(*self, meaning)
+	}
+}
+
+impl<C> BoolInspectionActions<C> for bool {
+	fn get_val(&self, _: &C) -> Option<bool> {
+		Some(*self)
 	}
 }

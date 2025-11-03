@@ -56,6 +56,7 @@ use crate::{
 		disjunctive_strict::{DisjunctiveStrict, DisjunctiveStrictPropagator},
 		int_abs::IntAbsBounds,
 		int_all_different::{IntAllDifferent, IntAllDifferentBounds},
+		int_array_element::{IntArrayElementBounds, IntValArrayElement},
 		int_array_minimum::IntArrayMinimumBounds,
 		int_div::{IntDiv, IntDivBounds},
 		int_in_set::IntInSetReif,
@@ -776,7 +777,7 @@ impl Add<IntVal> for IntDecision {
 }
 
 impl ElementConstraint for IntDecision {
-	type Constraint = BoxedConstraint;
+	type Constraint = IntArrayElementBounds<IntDecision, IntDecision, IntDecision>;
 	type Result = IntDecision;
 
 	fn element_constraint(
@@ -785,12 +786,8 @@ impl ElementConstraint for IntDecision {
 		index: IntDecision,
 		result: Self::Result,
 	) -> &mut Self::Constraint {
-		todo!()
-		// Self::Constraint {
-		// 	index,
-		// 	array,
-		// 	result,
-		// }
+		let con = IntArrayElementBounds::new(prb, array, index, result);
+		prb.add_constraint(con)
 	}
 }
 
@@ -974,7 +971,7 @@ impl Sum<IntDecision> for IntLinExpr {
 }
 
 impl ElementConstraint for IntVal {
-	type Constraint = BoxedConstraint;
+	type Constraint = IntValArrayElement<IntDecision, IntDecision>;
 	type Result = IntDecision;
 
 	fn element_constraint(
@@ -983,12 +980,8 @@ impl ElementConstraint for IntVal {
 		index: IntDecision,
 		result: Self::Result,
 	) -> &mut Self::Constraint {
-		todo!()
-		// Self::Constraint {
-		// 	index,
-		// 	array,
-		// 	result,
-		// }
+		let con = IntValArrayElement(IntArrayElementBounds::new(prb, array, index, result));
+		prb.add_constraint(con)
 	}
 }
 
@@ -1310,6 +1303,23 @@ impl BoolInspectionActions<Model> for BoolDecision {
 	}
 }
 
+impl BoolPropagationActions<Model> for bool {
+	type Conflict = <Model as ReasoningEngine>::Conflict;
+	type Atom = BoolDecision;
+
+	fn set_val(
+		&self,
+		ctx: &mut Model,
+		val: bool,
+		reason: impl ReasonBuilder<Model, Self::Atom>,
+	) -> Result<(), Self::Conflict> {
+		if *self != val {
+			return Err(ctx.declare_conflict(reason));
+		}
+		Ok(())
+	}
+}
+
 impl BoolPropagationActions<Model> for BoolDecision {
 	type Atom = BoolDecision;
 	type Conflict = <Model as ReasoningEngine>::Conflict;
@@ -1344,8 +1354,7 @@ impl BoolPropagationActions<Model> for BoolDecision {
 				}
 				Ok(())
 			}
-			Const(true) => Ok(()),
-			Const(false) => Err(todo!()),
+			Const(c) => c.set(ctx, reason),
 			IntEq(iv, val) => IntDecision(IntDecisionInner::Var(iv)).set_val(ctx, val, reason),
 			IntGreaterEq(iv, val) => {
 				IntDecision(IntDecisionInner::Var(iv)).set_lower_bound(ctx, val, reason)
@@ -1356,6 +1365,154 @@ impl BoolPropagationActions<Model> for BoolDecision {
 			IntNotEq(iv, val) => {
 				IntDecision(IntDecisionInner::Var(iv)).set_not_eq(ctx, val, reason)
 			}
+		}
+	}
+}
+
+impl IntExplanationActions<Model> for IntVal {
+	fn get_lit_relaxed(&self, ctx: &Model, meaning: IntLitMeaning) -> (Self::Atom, IntLitMeaning) {
+		(self.try_lit(ctx, meaning).unwrap(), meaning)
+	}
+}
+
+impl IntInspectionActions<Model> for IntVal {
+	type Atom = BoolDecision;
+
+	fn get_lower_bound(&self, _: &Model) -> IntVal {
+		*self
+	}
+
+	fn get_upper_bound(&self, _: &Model) -> IntVal {
+		*self
+	}
+
+	fn check_in_domain(&self, _: &Model, val: IntVal) -> bool {
+		*self == val
+	}
+
+	fn get_lit_meaning(&self, _: &Model, _: Self::Atom) -> Option<IntLitMeaning> {
+		None
+	}
+
+	fn get_lower_bound_lit(&self, _: &Model) -> Self::Atom {
+		true.into()
+	}
+
+	fn get_upper_bound_lit(&self, _: &Model) -> Self::Atom {
+		true.into()
+	}
+
+	fn try_lit(&self, _: &Model, meaning: IntLitMeaning) -> Option<Self::Atom> {
+		Some(
+			match meaning {
+				IntLitMeaning::Eq(v) => *self == v,
+				IntLitMeaning::NotEq(v) => *self != v,
+				IntLitMeaning::GreaterEq(v) => *self >= v,
+				IntLitMeaning::Less(v) => *self < v,
+			}
+			.into(),
+		)
+	}
+}
+
+impl IntSimplificationActions<Model> for IntVal {
+	fn get_domain(&self, _: &Model) -> IntSetVal {
+		(*self..=*self).into()
+	}
+
+	fn set_not_in_set(
+		&self,
+		ctx: &mut Model,
+		values: &IntSetVal,
+		reason: impl ReasonBuilder<Model, Self::Atom>,
+	) -> Result<(), Self::Conflict> {
+		if values.contains(self) {
+			Err(ctx.declare_conflict(reason))
+		} else {
+			Ok(())
+		}
+	}
+
+	fn set_domain(
+		&self,
+		ctx: &mut Model,
+		domain: &IntSetVal,
+		reason: impl ReasonBuilder<Model, Self::Atom>,
+	) -> Result<(), Self::Conflict> {
+		if !domain.contains(self) {
+			Err(ctx.declare_conflict(reason))
+		} else {
+			Ok(())
+		}
+	}
+
+	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Self::Conflict> {
+		if *self != other.into() {
+			Err(ctx.declare_conflict([]))
+		} else {
+			Ok(())
+		}
+	}
+}
+
+impl IntDecisionActions<Model> for IntVal {
+	fn get_lit(&self, ctx: &mut Model, meaning: IntLitMeaning) -> Self::Atom {
+		self.try_lit(ctx, meaning).unwrap()
+	}
+}
+
+impl IntPropagationActions<Model> for IntVal {
+	type Conflict = <Model as ReasoningEngine>::Conflict;
+
+	fn set_lower_bound(
+		&self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model, Self::Atom>,
+	) -> Result<(), Self::Conflict> {
+		if val > *self {
+			Err(ctx.declare_conflict(reason))
+		} else {
+			Ok(())
+		}
+	}
+
+	fn set_upper_bound(
+		&self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model, Self::Atom>,
+	) -> Result<(), Self::Conflict> {
+		if val < *self {
+			Err(ctx.declare_conflict(reason))
+		} else {
+			Ok(())
+		}
+	}
+
+	fn set_val(
+		&self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model, Self::Atom>,
+	) -> Result<(), Self::Conflict> {
+		if val != *self {
+			Err(ctx.declare_conflict(reason))
+		} else {
+			Ok(())
+		}
+	}
+
+	fn set_not_eq(
+		&self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model, Self::Atom>,
+	) -> Result<(), Self::Conflict> {
+		if val == *self {
+			Err(ctx.declare_conflict(reason))
+		} else {
+			Ok(())
 		}
 	}
 }
@@ -1586,8 +1743,7 @@ impl IntPropagationActions<Model> for IntDecision {
 				}
 				Ok(())
 			}
-			Const(v) if v < lb => Err(todo!()),
-			Const(_) => Ok(()),
+			Const(v) => v.set_lower_bound(ctx, lb, reason),
 			Linear(trans, iv) => match trans.rev_transform_lit(IntLitMeaning::GreaterEq(lb)) {
 				Ok(IntLitMeaning::GreaterEq(val)) => {
 					IntDecision(Var(iv)).set_lower_bound(ctx, val, reason)
@@ -1599,10 +1755,10 @@ impl IntPropagationActions<Model> for IntDecision {
 			},
 			Bool(trans, b) => match trans.rev_transform_lit(IntLitMeaning::GreaterEq(lb)) {
 				Ok(IntLitMeaning::GreaterEq(1)) => b.set(ctx, reason),
-				Ok(IntLitMeaning::GreaterEq(val)) if val >= 2 => Err(todo!()),
+				Ok(IntLitMeaning::GreaterEq(val)) if val >= 2 => Err(ctx.declare_conflict(reason)),
 				Ok(IntLitMeaning::GreaterEq(_)) => Ok(()),
 				Ok(IntLitMeaning::Less(1)) => b.set_val(ctx, false, reason),
-				Ok(IntLitMeaning::Less(val)) if val <= 0 => Err(todo!()),
+				Ok(IntLitMeaning::Less(val)) if val <= 0 => Err(ctx.declare_conflict(reason)),
 				Ok(IntLitMeaning::Less(_)) => Ok(()),
 				_ => unreachable!(),
 			},
@@ -1640,8 +1796,7 @@ impl IntPropagationActions<Model> for IntDecision {
 				}
 				Ok(())
 			}
-			Const(v) if v > ub => Err(todo!()),
-			Const(_) => Ok(()),
+			Const(v) => v.set_upper_bound(ctx, ub, reason),
 			Linear(trans, iv) => match trans.rev_transform_lit(IntLitMeaning::Less(ub + 1)) {
 				Ok(IntLitMeaning::GreaterEq(val)) => {
 					IntDecision(Var(iv)).set_lower_bound(ctx, val, reason)
@@ -1653,10 +1808,10 @@ impl IntPropagationActions<Model> for IntDecision {
 			},
 			Bool(trans, b) => match trans.rev_transform_lit(IntLitMeaning::Less(ub + 1)) {
 				Ok(IntLitMeaning::GreaterEq(1)) => b.set(ctx, reason),
-				Ok(IntLitMeaning::GreaterEq(val)) if val >= 2 => Err(todo!()),
+				Ok(IntLitMeaning::GreaterEq(val)) if val >= 2 => Err(ctx.declare_conflict(reason)),
 				Ok(IntLitMeaning::GreaterEq(_)) => Ok(()),
 				Ok(IntLitMeaning::Less(1)) => b.set_val(ctx, false, reason),
-				Ok(IntLitMeaning::Less(val)) if val <= 0 => Err(todo!()),
+				Ok(IntLitMeaning::Less(val)) if val <= 0 => Err(ctx.declare_conflict(reason)),
 				Ok(IntLitMeaning::Less(_)) => Ok(()),
 				_ => unreachable!(),
 			},
@@ -1686,16 +1841,15 @@ impl IntPropagationActions<Model> for IntDecision {
 					}
 					Ok(())
 				} else {
-					Err(todo!())
+					Err(ctx.create_conflict(IntDecision(Var(v)).eq(val), reason))
 				}
 			}
-			Const(i) if i == val => Ok(()),
-			Const(_) => Err(todo!()),
+			Const(v) => v.set_val(ctx, val, reason),
 			Linear(trans, iv) => match trans.rev_transform_lit(IntLitMeaning::Eq(val)) {
 				Ok(IntLitMeaning::Eq(val)) => IntDecision(Var(iv)).set_val(ctx, val, reason),
 				Err(b) => {
 					debug_assert!(!b);
-					Err(todo!())
+					Err(ctx.declare_conflict(reason))
 				}
 				_ => unreachable!(),
 			},
@@ -1703,11 +1857,11 @@ impl IntPropagationActions<Model> for IntDecision {
 				Ok(IntLitMeaning::Eq(val)) => match val {
 					0 => b.set_val(ctx, false, reason),
 					1 => b.set(ctx, reason),
-					_ => Err(todo!()),
+					_ => Err(ctx.declare_conflict(reason)),
 				},
 				Err(b) => {
 					debug_assert!(!b);
-					Err(todo!())
+					Err(ctx.declare_conflict(reason))
 				}
 				_ => unreachable!(),
 			},
@@ -1964,13 +2118,7 @@ impl IntSimplificationActions<Model> for IntDecision {
 				}
 				Ok(())
 			}
-			Const(v) => {
-				if values.contains(&v) {
-					Err(todo!())
-				} else {
-					Ok(())
-				}
-			}
+			Const(v) => v.set_not_in_set(ctx, values, reason),
 			Linear(trans, iv) => {
 				let mask = trans.rev_transform_int_set(values);
 				IntDecision(Var(iv)).set_not_in_set(ctx, &mask, reason)
@@ -1978,7 +2126,7 @@ impl IntSimplificationActions<Model> for IntDecision {
 			Bool(trans, b) => {
 				let values = trans.rev_transform_int_set(values);
 				match (values.contains(&0), values.contains(&1)) {
-					(true, true) => Err(todo!()),
+					(true, true) => Err(ctx.declare_conflict(reason)),
 					(true, false) => b.set(ctx, reason),
 					(false, true) => b.set_val(ctx, false, reason),
 					(false, false) => Ok(()),
@@ -2019,13 +2167,7 @@ impl IntSimplificationActions<Model> for IntDecision {
 				}
 				Ok(())
 			}
-			Const(v) => {
-				if !values.contains(&v) {
-					Err(todo!())
-				} else {
-					Ok(())
-				}
-			}
+			Const(v) => v.set_domain(ctx, values, reason),
 			Linear(trans, iv) => {
 				let values = trans.rev_transform_int_set(values);
 				IntDecision(Var(iv)).set_domain(ctx, &values, reason)
@@ -2036,7 +2178,7 @@ impl IntSimplificationActions<Model> for IntDecision {
 					(true, true) => Ok(()),
 					(true, false) => b.set_val(ctx, false, reason),
 					(false, true) => b.set(ctx, reason),
-					(false, false) => Err(todo!()),
+					(false, false) => Err(ctx.declare_conflict(reason)),
 				}
 			}
 		}
@@ -2196,6 +2338,12 @@ impl PostingActions for ModelPostingContext<'_> {
 	}
 }
 
+impl BoolInspectionActions<ModelPostingContext<'_>> for BoolDecision {
+	fn get_val(&self, ctx: &ModelPostingContext<'_>) -> Option<bool> {
+		self.get_val(ctx.model)
+	}
+}
+
 impl BoolPostingActions<ModelPostingContext<'_>> for BoolDecision {
 	fn enqueue_when_fixed(&self, ctx: &mut ModelPostingContext<'_>) {
 		match self.0 {
@@ -2219,6 +2367,48 @@ impl BoolPostingActions<ModelPostingContext<'_>> for BoolDecision {
 	}
 }
 
+impl BoolPostingActions<ModelPostingContext<'_>> for bool {
+	fn enqueue_when_fixed(&self, ctx: &mut ModelPostingContext<'_>) {}
+
+	fn advise_when_fixed(&self, _: &mut ModelPostingContext<'_>, _: u64) {}
+}
+
+impl IntInspectionActions<ModelPostingContext<'_>> for IntDecision {
+	type Atom = <Self as IntInspectionActions<Model>>::Atom;
+
+	fn get_lower_bound(&self, ctx: &ModelPostingContext<'_>) -> IntVal {
+		self.get_lower_bound(ctx.model)
+	}
+
+	fn get_upper_bound(&self, ctx: &ModelPostingContext<'_>) -> IntVal {
+		self.get_upper_bound(ctx.model)
+	}
+
+	fn check_in_domain(&self, ctx: &ModelPostingContext<'_>, val: IntVal) -> bool {
+		self.check_in_domain(ctx.model, val)
+	}
+
+	fn get_lit_meaning(
+		&self,
+		ctx: &ModelPostingContext<'_>,
+		lit: Self::Atom,
+	) -> Option<IntLitMeaning> {
+		self.get_lit_meaning(ctx.model, lit)
+	}
+
+	fn get_lower_bound_lit(&self, ctx: &ModelPostingContext<'_>) -> Self::Atom {
+		self.get_lower_bound_lit(ctx.model)
+	}
+
+	fn get_upper_bound_lit(&self, ctx: &ModelPostingContext<'_>) -> Self::Atom {
+		self.get_upper_bound_lit(ctx.model)
+	}
+
+	fn try_lit(&self, ctx: &ModelPostingContext<'_>, meaning: IntLitMeaning) -> Option<Self::Atom> {
+		self.try_lit(ctx.model, meaning)
+	}
+}
+
 impl IntPostingActions<ModelPostingContext<'_>> for IntDecision {
 	fn advise_when(&self, ctx: &mut ModelPostingContext<'_>, condition: IntPropCond, data: u64) {
 		todo!()
@@ -2232,6 +2422,52 @@ impl IntPostingActions<ModelPostingContext<'_>> for IntDecision {
 			IntDecisionInner::Const(_) => {}
 			IntDecisionInner::Bool(_, bv) => bv.enqueue_when_fixed(ctx),
 		}
+	}
+}
+
+impl IntPostingActions<ModelPostingContext<'_>> for IntVal {
+	fn advise_when(&self, _: &mut ModelPostingContext<'_>, _: IntPropCond, _: u64) {}
+
+	fn enqueue_when(&self, ctx: &mut ModelPostingContext<'_>, condition: IntPropCond) {}
+}
+
+impl IntInspectionActions<ModelPostingContext<'_>> for IntVal {
+	type Atom = BoolDecision;
+
+	fn get_lower_bound(&self, _: &ModelPostingContext<'_>) -> IntVal {
+		*self
+	}
+
+	fn get_upper_bound(&self, _: &ModelPostingContext<'_>) -> IntVal {
+		*self
+	}
+
+	fn check_in_domain(&self, _: &ModelPostingContext<'_>, val: IntVal) -> bool {
+		*self == val
+	}
+
+	fn get_lit_meaning(&self, _: &ModelPostingContext<'_>, _: Self::Atom) -> Option<IntLitMeaning> {
+		None
+	}
+
+	fn get_lower_bound_lit(&self, _: &ModelPostingContext<'_>) -> Self::Atom {
+		true.into()
+	}
+
+	fn get_upper_bound_lit(&self, _: &ModelPostingContext<'_>) -> Self::Atom {
+		true.into()
+	}
+
+	fn try_lit(&self, _: &ModelPostingContext<'_>, meaning: IntLitMeaning) -> Option<Self::Atom> {
+		Some(
+			match meaning {
+				IntLitMeaning::Eq(v) => *self == v,
+				IntLitMeaning::NotEq(v) => *self != v,
+				IntLitMeaning::GreaterEq(v) => *self >= v,
+				IntLitMeaning::Less(v) => *self < v,
+			}
+			.into(),
+		)
 	}
 }
 

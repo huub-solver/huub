@@ -928,6 +928,46 @@ impl IntExplanationActions<State> for IntVarRef {
 	}
 }
 
+impl IntInspectionActions<State> for IntVal {
+	type Atom = BoolView;
+
+	fn get_lower_bound(&self, _: &State) -> IntVal {
+		*self
+	}
+
+	fn get_upper_bound(&self, _: &State) -> IntVal {
+		*self
+	}
+
+	fn check_in_domain(&self, _: &State, val: IntVal) -> bool {
+		*self == val
+	}
+
+	fn get_lit_meaning(&self, _: &State, _: Self::Atom) -> Option<IntLitMeaning> {
+		None
+	}
+
+	fn get_lower_bound_lit(&self, _: &State) -> Self::Atom {
+		true.into()
+	}
+
+	fn get_upper_bound_lit(&self, _: &State) -> Self::Atom {
+		true.into()
+	}
+
+	fn try_lit(&self, _: &State, meaning: IntLitMeaning) -> Option<Self::Atom> {
+		Some(
+			match meaning {
+				IntLitMeaning::Eq(v) => *self == v,
+				IntLitMeaning::NotEq(v) => *self != v,
+				IntLitMeaning::GreaterEq(v) => *self >= v,
+				IntLitMeaning::Less(v) => *self < v,
+			}
+			.into(),
+		)
+	}
+}
+
 impl IntInspectionActions<State> for IntVarRef {
 	type Atom = BoolView;
 
