@@ -572,11 +572,11 @@ where
 	pub(crate) fn ensure_output(&mut self) -> Result<(), FlatZincError> {
 		for ident in self.fzn.output.iter() {
 			if self.fzn.variables.contains_key(ident) {
-				let _ = self.lookup_or_create_var(ident)?;
+				self.lookup_or_create_var(ident)?;
 			} else if let Some(arr) = self.fzn.arrays.get(ident) {
 				for x in &arr.contents {
 					if let Literal::Identifier(ident) = x {
-						let _ = self.lookup_or_create_var(ident)?;
+						self.lookup_or_create_var(ident)?;
 					}
 				}
 			} else {
@@ -631,7 +631,7 @@ where
 							.map_err(ReformulationError::from)?;
 					}
 					// Insert the view to use instead of a new variable for the name
-					let _ = e.insert(view);
+					e.insert(view);
 				}
 			}
 			me.stats.extracted_views += 1;
@@ -1721,7 +1721,7 @@ where
 					members.extend(b_set.take());
 					for b in members.iter() {
 						if let Literal::Identifier(b) = b {
-							let _ = map.insert(b.clone(), Rc::clone(&a_set));
+							map.insert(b.clone(), Rc::clone(&a_set));
 						}
 					}
 				}
@@ -1729,23 +1729,23 @@ where
 					let mut members = (*a_set).borrow_mut();
 					members.push(b.clone());
 					if let Literal::Identifier(b) = b {
-						let _ = map.insert(b.clone(), Rc::clone(&a_set));
+						map.insert(b.clone(), Rc::clone(&a_set));
 					}
 				}
 				(None, Some(b_set)) => {
 					let mut members = (*b_set).borrow_mut();
 					members.push(a.clone());
 					if let Literal::Identifier(a) = a {
-						let _ = map.insert(a.clone(), Rc::clone(&b_set));
+						map.insert(a.clone(), Rc::clone(&b_set));
 					}
 				}
 				(None, None) => {
 					let n_set = Rc::new(RefCell::new(vec![a.clone(), b.clone()]));
 					if let Literal::Identifier(a) = a {
-						let _ = map.insert(a.clone(), Rc::clone(&n_set));
+						map.insert(a.clone(), Rc::clone(&n_set));
 					}
 					if let Literal::Identifier(b) = b {
-						let _ = map.insert(b.clone(), n_set);
+						map.insert(b.clone(), n_set);
 					}
 				}
 			};

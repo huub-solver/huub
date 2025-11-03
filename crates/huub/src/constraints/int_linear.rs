@@ -851,7 +851,7 @@ impl<const R: usize, IV, BV> IntLinearNotEqValueImpl<R, IV, BV> {
 		Ctx: TrailingActions,
 	{
 		let num_fixed = ctx.get_trailed_int(self.num_fixed) + 1;
-		let _ = ctx.set_trailed_int(self.num_fixed, num_fixed);
+		ctx.set_trailed_int(self.num_fixed, num_fixed);
 		num_fixed == (self.terms.len() + R - 1) as i64
 	}
 

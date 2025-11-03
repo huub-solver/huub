@@ -361,8 +361,8 @@ impl RecordLazyLits {
 				IntLitMeaning::Less
 			}(val);
 			let mut guard = lit_reverse_map.lock().unwrap();
-			let _ = guard.insert(lit, LitName::IntLit(iv, meaning));
-			let _ = guard.insert(-lit, LitName::IntLit(iv, !meaning));
+			guard.insert(lit, LitName::IntLit(iv, meaning));
+			guard.insert(-lit, LitName::IntLit(iv, !meaning));
 			true
 		} else {
 			false

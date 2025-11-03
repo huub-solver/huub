@@ -207,18 +207,18 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 			// The current var is the first possibility to reach value up + 1.
 			if ub_v == up + 1 {
 				up += 1;
-				let _ = ctx.set_trailed_int(self.first[up as usize], i as IntVal);
-				let _ = ctx.set_trailed_int(self.first_val[i], up);
+				ctx.set_trailed_int(self.first[up as usize], i as IntVal);
+				ctx.set_trailed_int(self.first_val[i], up);
 			}
 			let lb_v = v.get_lower_bound(ctx);
 			// The lower bound will be needed for the backward pass.
 			if low < lb_v {
-				let _ = ctx.set_trailed_int(self.last[lb_v as usize], i as IntVal);
+				ctx.set_trailed_int(self.last[lb_v as usize], i as IntVal);
 				low = lb_v;
 			}
 		}
 		// The highest lower bound is stored.
-		let _ = ctx.set_trailed_int(self.max_last, low);
+		ctx.set_trailed_int(self.max_last, low);
 
 		// Backward pass to set lower bounds.
 		for (i, v) in self.vars.iter().enumerate().rev() {
@@ -230,7 +230,7 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 			if i as IntVal <= ctx.get_trailed_int(self.last[low as usize])
 				&& v.check_in_domain(ctx, low)
 			{
-				let _ = ctx.set_trailed_int(self.last[low as usize], i as IntVal);
+				ctx.set_trailed_int(self.last[low as usize], i as IntVal);
 				low -= 1;
 			}
 			// Stop early if no more lower bounds can be propagated.
@@ -259,7 +259,7 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 		// If k == 0, no more lower bounds can be propagated.
 		while k > 0 {
 			if self.vars[i as usize].check_in_domain(ctx, k) {
-				let _ = ctx.set_trailed_int(self.last[k as usize], i);
+				ctx.set_trailed_int(self.last[k as usize], i);
 				// Enforce lower bound if lower and upper bound coincide.
 				if ctx.get_trailed_int(self.first[k as usize]) == i {
 					self.vars[i as usize].set_lower_bound(
@@ -306,8 +306,8 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 			}
 			// If var i is the first possibility to reach value k
 			if self.vars[i as usize].check_in_domain(ctx, k) {
-				let _ = ctx.set_trailed_int(self.first[k as usize], i);
-				let _ = ctx.set_trailed_int(self.first_val[i as usize], k);
+				ctx.set_trailed_int(self.first[k as usize], i);
+				ctx.set_trailed_int(self.first_val[i as usize], k);
 				// Enforce lower bound if lower and upper bound coincide.
 				if ctx.get_trailed_int(self.last[k as usize]) == i {
 					self.vars[i as usize].set_lower_bound(
@@ -337,7 +337,7 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 			)?;
 		}
 
-		let _ = ctx.set_trailed_int(self.first[k as usize], 0);
+		ctx.set_trailed_int(self.first[k as usize], 0);
 		Ok(())
 	}
 
@@ -441,10 +441,10 @@ where
 			let lb = self.vars[i as usize].get_lower_bound(ctx);
 			// Deal with increase of lower bound.
 			if lb > k {
-				let _ = ctx.set_trailed_int(self.last[lb as usize], i);
+				ctx.set_trailed_int(self.last[lb as usize], i);
 				// Update highest lower bound if necessary.
 				if lb > ctx.get_trailed_int(self.max_last) {
-					let _ = ctx.set_trailed_int(self.max_last, lb);
+					ctx.set_trailed_int(self.max_last, lb);
 				}
 				// If a repair is necessary, continue check where the repair ended.
 				(i, k) = self.repair_lower(ctx, lb)?;
@@ -647,13 +647,13 @@ impl<I> IntValuePrecedeChainValue<I> {
 			// The current var is the first possibility to reach index up + 1.
 			if up < self.values.len() && v.check_in_domain(ctx, self.values[up]) {
 				up += 1;
-				let _ = ctx.set_trailed_int(self.first[up], i as IntVal);
-				let _ = ctx.set_trailed_int(self.first_val[i], up as IntVal);
+				ctx.set_trailed_int(self.first[up], i as IntVal);
+				ctx.set_trailed_int(self.first_val[i], up as IntVal);
 			}
 			// The lower bound will be needed for the backward pass.
 			if let Some(lb) = self.get_lowest_index(ctx, i) {
 				if low < lb {
-					let _ = ctx.set_trailed_int(self.last[lb], i as IntVal);
+					ctx.set_trailed_int(self.last[lb], i as IntVal);
 					low = lb;
 				}
 			}
@@ -669,7 +669,7 @@ impl<I> IntValuePrecedeChainValue<I> {
 			if i as IntVal <= ctx.get_trailed_int(self.last[low])
 				&& v.check_in_domain(ctx, self.values[low - 1])
 			{
-				let _ = ctx.set_trailed_int(self.last[low], i as IntVal);
+				ctx.set_trailed_int(self.last[low], i as IntVal);
 				low -= 1;
 			}
 			// Stop early if no more lower bounds can be propagated.
@@ -759,7 +759,7 @@ impl<I> IntValuePrecedeChainValue<I> {
 		// If k == 0, no more lower bounds can be propagated.
 		while k > 0 {
 			if self.vars[i as usize].check_in_domain(ctx, self.values[k - 1]) {
-				let _ = ctx.set_trailed_int(self.last[k], i);
+				ctx.set_trailed_int(self.last[k], i);
 				// Enforce lower bound if lower and upper bound coincide.
 				if ctx.get_trailed_int(self.first[k]) == i {
 					self.propagate_lower_bound(ctx, i as usize, k)?;
@@ -806,8 +806,8 @@ impl<I> IntValuePrecedeChainValue<I> {
 			self.propagate_upper_bound(ctx, i as usize, k)?;
 			// If var i is the first possibility to reach value k
 			if self.vars[i as usize].check_in_domain(ctx, self.values[k - 1]) {
-				let _ = ctx.set_trailed_int(self.first[k], i);
-				let _ = ctx.set_trailed_int(self.first_val[i as usize], k as IntVal);
+				ctx.set_trailed_int(self.first[k], i);
+				ctx.set_trailed_int(self.first_val[i as usize], k as IntVal);
 				// Enforce lower bound if lower and upper bound coincide.
 				if ctx.get_trailed_int(self.last[k]) == i {
 					self.propagate_lower_bound(ctx, i as usize, k)?;
@@ -830,7 +830,7 @@ impl<I> IntValuePrecedeChainValue<I> {
 			return Ok(());
 		}
 
-		let _ = ctx.set_trailed_int(self.first[k], 0);
+		ctx.set_trailed_int(self.first[k], 0);
 		Ok(())
 	}
 
@@ -1011,10 +1011,10 @@ where
 			if let Some(lb) = self.get_lowest_index(ctx, i) {
 				// Deal with increase of lower bound.
 				if lb > k {
-					let _ = ctx.set_trailed_int(self.last[lb], i as IntVal);
+					ctx.set_trailed_int(self.last[lb], i as IntVal);
 					// Update highest lower bound if necessary.
 					if lb as IntVal > ctx.get_trailed_int(self.max_last) {
-						let _ = ctx.set_trailed_int(self.max_last, lb as IntVal);
+						ctx.set_trailed_int(self.max_last, lb as IntVal);
 					}
 					// If a repair is necessary, continue check where the repair ended.
 					(i, k) = self.repair_lower(ctx, lb)?;

@@ -158,7 +158,7 @@ where
 		}
 		let var = if let Some(first_unfixed) = loc {
 			// Update position for next iteration
-			let _ = ctx.set_trailed_int(self.next, first_unfixed as i64);
+			ctx.set_trailed_int(self.next, first_unfixed as i64);
 			self.vars[first_unfixed]
 		} else {
 			// Return that everything has already been assigned
@@ -268,7 +268,7 @@ where
 		};
 
 		// update the next variable to the index of the first unfixed variable
-		let _ = actions.set_trailed_int(self.next, first_unfixed as i64);
+		actions.set_trailed_int(self.next, first_unfixed as i64);
 
 		// select the next value to branch on based on the value selection strategy
 		let view = next_var.get_lit(

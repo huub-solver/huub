@@ -715,8 +715,8 @@ impl<I> DisjunctiveStrictPropagator<I> {
 				let earliest_completion_time = self.earliest_completion_time(i, ctx);
 				if updated_est[i] > earliest_start_time {
 					let lb = self.start_times[binding_task].get_lower_bound(ctx);
-					let _ = ctx.set_trailed_int(self.trailed_info[i].earliest_start, lb);
-					let _ = ctx.set_trailed_int(
+					ctx.set_trailed_int(self.trailed_info[i].earliest_start, lb);
+					ctx.set_trailed_int(
 						self.trailed_info[i].latest_completion,
 						earliest_completion_time,
 					);
@@ -825,8 +825,8 @@ impl<I> DisjunctiveStrictPropagator<I> {
 					let gray_est_task = self.ot_tree.blocking_task(ect_gray_in_tree);
 					let lb = self.start_times[gray_est_task].get_lower_bound(ctx);
 					// set trailed integer for lazy explanation
-					let _ = ctx.set_trailed_int(self.trailed_info[blocked_task].earliest_start, lb);
-					let _ = ctx.set_trailed_int(
+					ctx.set_trailed_int(self.trailed_info[blocked_task].earliest_start, lb);
+					ctx.set_trailed_int(
 						self.trailed_info[blocked_task].latest_completion,
 						ect_gray_in_tree - 1,
 					);
@@ -849,7 +849,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 				}
 				// Remove the blocked task as the maximum propagation has been achieved
 				// by LCut(j) where lct_j is maximum
-				let _ = self.ot_tree.remove_task(blocked_task);
+				self.ot_tree.remove_task(blocked_task);
 			}
 			self.ot_tree.annotate_gray_task(lct_task);
 		}
@@ -983,9 +983,9 @@ impl<I> DisjunctiveStrictPropagator<I> {
 						window =? (lb, updated_lct[i]),
 						"not last propagation"
 					);
-					let _ = ctx.set_trailed_int(self.trailed_info[i].earliest_start, lb);
-					let _ =
-						ctx.set_trailed_int(self.trailed_info[i].latest_completion, updated_lct[i]);
+					ctx.set_trailed_int(self.trailed_info[i].earliest_start, lb);
+
+					ctx.set_trailed_int(self.trailed_info[i].latest_completion, updated_lct[i]);
 					let data = self.data_for_explanation(i, DisjunctivePropagationRule::NotLast);
 					v.set_upper_bound(
 						ctx,

@@ -232,7 +232,7 @@ impl DirectEntry<'_> {
 			DirectEntry::Occupied(bv) => bv,
 			DirectEntry::Vacant(no_entry) => {
 				let v = f();
-				let _ = no_entry.insert(v);
+				no_entry.insert(v);
 				BoolViewInner::Lit(v.into())
 			}
 		}
@@ -844,7 +844,7 @@ impl IntVar {
 		debug_assert!(val > self.get_lower_bound(trail));
 		match &self.order_encoding {
 			OrderStorage::Eager { lower_bound, .. } => {
-				let _ = trail.set_trailed_int(*lower_bound, val);
+				trail.set_trailed_int(*lower_bound, val);
 			}
 			OrderStorage::Lazy(
 				storage @ LazyOrderStorage {
@@ -878,7 +878,7 @@ impl IntVar {
 	pub(crate) fn notify_upper_bound(&mut self, trail: &mut impl TrailingActions, val: IntVal) {
 		debug_assert!(self.domain.contains(&val));
 		debug_assert!(val < self.get_upper_bound(trail));
-		let _ = trail.set_trailed_int(self.upper_bound, val);
+		trail.set_trailed_int(self.upper_bound, val);
 		if let OrderStorage::Lazy(
 			storage @ LazyOrderStorage {
 				max_index,
@@ -998,7 +998,7 @@ impl OrderEntry<'_> {
 				let next = if range_iter.peek().unwrap().contains(&next) {
 					next
 				} else {
-					let _ = range_iter.next().unwrap();
+					range_iter.next().unwrap();
 					*range_iter.peek().unwrap().start()
 				};
 				let next_index = storage[index].next;
@@ -1027,7 +1027,7 @@ impl OrderEntry<'_> {
 				let next = if range_iter.peek().unwrap().contains(&next) {
 					next
 				} else {
-					let _ = range_iter.next().unwrap();
+					range_iter.next().unwrap();
 					*range_iter.peek().unwrap().start()
 				};
 				if prev_index >= 0

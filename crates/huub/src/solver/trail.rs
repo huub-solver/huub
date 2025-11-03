@@ -161,11 +161,11 @@ impl Trail {
 		);
 		if len <= self.pos {
 			while self.pos > len {
-				let _ = self.undo::<false>();
+				self.undo::<false>();
 			}
 		} else {
 			while self.pos < len {
-				let _ = self.redo();
+				self.redo();
 			}
 		}
 		debug_assert_eq!(self.pos, len);
@@ -424,12 +424,12 @@ mod tests {
 		.collect();
 
 		for (l, &(i, v)) in lits.zip(int_events.iter()) {
-			let _ = trail.assign_lit(if usize::from(i) % 2 == 0 {
+			trail.assign_lit(if usize::from(i) % 2 == 0 {
 				l.into()
 			} else {
 				!l
 			});
-			let _ = trail.set_trailed_int(i, v);
+			trail.set_trailed_int(i, v);
 		}
 
 		for (l, &(i, v)) in lits.rev().zip(int_events.iter().rev()) {

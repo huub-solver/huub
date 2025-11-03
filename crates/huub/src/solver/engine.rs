@@ -203,7 +203,7 @@ impl Engine {
 						!l
 					);
 				}
-				let _ = seen.insert(l);
+				seen.insert(l);
 				if l == lit {
 					continue;
 				}
@@ -470,7 +470,7 @@ impl PropagatorExtension for Engine {
 					Decision::Exhausted => {
 						// The current brancher exhausted, move to next
 						current += 1;
-						let _ = ctx.set_trailed_int(Trail::CURRENT_BRANCHER, current as i64);
+						ctx.set_trailed_int(Trail::CURRENT_BRANCHER, current as i64);
 					}
 					Decision::Consumed => {
 						// The current brancher has signaled to never yield decisions again. Remove
@@ -479,7 +479,7 @@ impl PropagatorExtension for Engine {
 						// Note that this shifts all subsequent branchers (so we don't need to
 						// increment current), but has bad complexity. However, due to the low
 						// number of branchers, this is (likely) acceptable.
-						let _ = self.branchers.remove(current);
+						self.branchers.remove(current);
 					}
 				}
 			}
@@ -838,11 +838,11 @@ impl State {
 			Ok(reason) => {
 				// Insert new reason, possibly overwriting old one (from previous search
 				// attempt)
-				let _ = self.reason_map.insert(lit, reason);
+				self.reason_map.insert(lit, reason);
 			}
 			Err(true) => {
 				// No (previous) reason required
-				let _ = self.reason_map.remove(&lit);
+				self.reason_map.remove(&lit);
 			}
 			Err(false) => unreachable!("invalid reason"),
 		}

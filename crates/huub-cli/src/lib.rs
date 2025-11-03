@@ -268,8 +268,8 @@ where
 				match v {
 					View::Bool(bv) => {
 						if let Some(info) = bv.reverse_map_info() {
-							let _ = lit_map.insert(info, LitName::BoolVar(*name, true));
-							let _ = lit_map.insert(-info, LitName::BoolVar(*name, false));
+							lit_map.insert(info, LitName::BoolVar(*name, true));
+							lit_map.insert(-info, LitName::BoolVar(*name, false));
 						}
 					}
 					View::Int(iv) => {
@@ -278,7 +278,7 @@ where
 							if !is_view || int_map[i].is_empty() {
 								int_map[i] = *name;
 								for (lit, meaning) in iv.lit_reverse_map_info(&slv) {
-									let _ = lit_map.insert(lit, LitName::IntLit(i, meaning));
+									lit_map.insert(lit, LitName::IntLit(i, meaning));
 								}
 							} else {
 								debug_assert!(iv
@@ -289,7 +289,7 @@ where
 						} else {
 							debug_assert!(is_view);
 							for (lit, meaning) in iv.lit_reverse_map_info(&slv) {
-								let _ = lit_map.entry(lit).or_insert_with(|| {
+								lit_map.entry(lit).or_insert_with(|| {
 									let (op, val) = match meaning {
 										IntLitMeaning::Eq(v) => ("=", v),
 										IntLitMeaning::NotEq(v) => ("!=", v),

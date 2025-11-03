@@ -302,8 +302,8 @@ where
 			}
 		}
 
-		let _ = ctx.set_trailed_int(self.min_support, new_min_support);
-		let _ = ctx.set_trailed_int(self.max_support, new_max_support);
+		ctx.set_trailed_int(self.min_support, new_min_support);
+		ctx.set_trailed_int(self.max_support, new_max_support);
 
 		// propagate the lower bound of the selected variable y if min_support is not
 		// valid anymore:

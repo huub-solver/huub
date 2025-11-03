@@ -18,7 +18,7 @@ use crate::{
 		activation_list::IntPropCond, int_var::IntVarRef, queue::PriorityLevel, trail::TrailedInt,
 		BoolView, IntLitMeaning, IntView, View,
 	},
-	BoolDecision, IntDecision, IntSetVal, IntVal, Model,
+	BoolDecision, IntDecision, IntSetVal, IntVal,
 };
 
 /// Actions that can be performed during the initialization of branchers.

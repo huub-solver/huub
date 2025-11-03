@@ -78,7 +78,7 @@ where
 		// If the base is negative, then the exponent cannot be zero
 		if self.base.get_upper_bound(ctx) < 0 {
 			self.base
-				.set_not_eq(ctx, 0, [self.base.get_upper_bound_lit(ctx)]);
+				.set_not_eq(ctx, 0, [self.base.get_upper_bound_lit(ctx)])?;
 		}
 		// If the exponent is zero, then the result is one
 		if self.exponent.get_val(ctx) == Some(0) {

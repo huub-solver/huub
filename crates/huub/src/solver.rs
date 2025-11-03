@@ -479,7 +479,7 @@ impl IntView {
 
 				if let OrderStorage::Eager { storage, .. } = &var.order_encoding {
 					let mut val_iter = var.domain.clone().into_iter().flatten();
-					let _ = val_iter.next();
+					val_iter.next();
 					for (lit, val) in (*storage).zip(val_iter) {
 						let i: NonZeroI32 = lit.into();
 						let orig = IntLitMeaning::Less(val);
@@ -491,8 +491,8 @@ impl IntView {
 
 				if let DirectStorage::Eager(vars) = &var.direct_encoding {
 					let mut val_iter = var.domain.clone().into_iter().flatten();
-					let _ = val_iter.next();
-					let _ = val_iter.next_back();
+					val_iter.next();
+					val_iter.next_back();
 					for (lit, val) in (*vars).zip(val_iter) {
 						let i: NonZeroI32 = lit.into();
 						let orig = IntLitMeaning::Eq(val);

@@ -288,7 +288,7 @@ where
 	Iter: IntoIterator,
 	Iter::Item: Into<IntDecision>,
 {
-	let _ = prb.add_constraint(IntArrayMinimumBounds {
+	prb.add_constraint(IntArrayMinimumBounds {
 		vars: vars.into_iter().map_into().collect(),
 		min,
 	});
@@ -317,7 +317,7 @@ pub fn cumulative(
 		usages.len(),
 		"cumulative must be given the same number of start times and usages."
 	);
-	let _ = prb.add_constraint(CumulativeTimeTable::new(
+	prb.add_constraint(CumulativeTimeTable::new(
 		start_times,
 		durations,
 		usages,
@@ -361,7 +361,7 @@ pub fn div_int(
 	denominator: IntDecision,
 	result: IntDecision,
 ) {
-	let _ = prb.add_constraint(IntDivBounds {
+	prb.add_constraint(IntDivBounds {
 		numerator,
 		denominator,
 		result,
@@ -371,14 +371,14 @@ pub fn div_int(
 /// Create constraint that enforces that the given Boolean variable takes the
 /// value `true` if-and-only-if an integer variable is in a given set.
 pub fn int_in_set_reif(prb: &mut Model, var: IntDecision, set: IntSetVal, reif: BoolDecision) {
-	let _ = prb.add_constraint(IntInSetReif { var, set, reif });
+	prb.add_constraint(IntInSetReif { var, set, reif });
 }
 
 /// Create a constraint that enforces that a base integer decision variable
 /// exponentiation by an exponent integer decision variable is equal to a result
 /// integer decision variable.
 pub fn pow_int(prb: &mut Model, base: IntDecision, exponent: IntDecision, result: IntDecision) {
-	let _ = prb.add_constraint(IntPowBounds {
+	prb.add_constraint(IntPowBounds {
 		base,
 		exponent,
 		result,
@@ -393,7 +393,7 @@ where
 	It: Into<IntDecision>,
 {
 	let con = IntSeqPrecedeChainBounds::new(prb, vars.into_iter().map_into().collect());
-	let _ = prb.add_constraint(con);
+	prb.add_constraint(con);
 }
 
 /// Create a `table_int` constraint that enforces that given list of integer
@@ -406,7 +406,7 @@ pub fn table_int(prb: &mut Model, vars: Vec<IntDecision>, table: Vec<Vec<IntVal>
 values in each row of the table must be equal to the number of decision
 variables."
 	);
-	let _ = prb.add_constraint(IntTable { vars, table });
+	prb.add_constraint(IntTable { vars, table });
 }
 
 /// Create a constraint that enforces that the product of the two integer
@@ -417,7 +417,7 @@ pub fn times_int(
 	factor2: IntDecision,
 	product: IntDecision,
 ) {
-	let _ = prb.add_constraint(IntTimesBounds {
+	prb.add_constraint(IntTimesBounds {
 		factor1,
 		factor2,
 		product,
@@ -443,7 +443,7 @@ pub fn value_precede_chain_int<D, V>(
 		values.into_iter().map_into().collect(),
 		vars.into_iter().map_into().collect(),
 	);
-	let _ = prb.add_constraint(con);
+	prb.add_constraint(con);
 }
 
 impl BoolDecision {
@@ -1166,7 +1166,7 @@ impl Model {
 			if let Some(c) = c.downcast_ref::<BoolDecisionArrayElement>() {
 				let index = c.index.resolve_alias(self);
 				if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {
-					let _ = int_eager_direct.insert(iv);
+					int_eager_direct.insert(iv);
 				}
 			} else if let Some(c) = c.downcast_ref::<IntAllDifferent>() {
 				for v in &c.prop.var {
@@ -1176,7 +1176,7 @@ impl Model {
 							unreachable!()
 						};
 						if dom.card() <= Some(c.prop.var.len() * 100 / 80) {
-							let _ = int_eager_direct.insert(iv);
+							int_eager_direct.insert(iv);
 						}
 					}
 				}
@@ -1185,20 +1185,20 @@ impl Model {
 			{
 				let index = c.index.resolve_alias(self);
 				if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {
-					let _ = int_eager_direct.insert(iv);
+					int_eager_direct.insert(iv);
 				}
 			} else if let Some(c) = c.downcast_ref::<IntTable>() {
 				for &v in &c.vars {
 					let v = v.resolve_alias(self);
 					if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = v.0 {
-						let _ = int_eager_direct.insert(iv);
+						int_eager_direct.insert(iv);
 					}
 				}
 			} else if let Some(c) = c.downcast_ref::<IntValArrayElement<IntDecision, IntDecision>>()
 			{
 				let index = c.0.index.resolve_alias(self);
 				if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {
-					let _ = int_eager_direct.insert(iv);
+					int_eager_direct.insert(iv);
 				}
 			}
 		}
@@ -1214,7 +1214,7 @@ impl Model {
 
 		// Ensure the creation of all integer variables.
 		for (idx, _) in self.int_vars.iter_enumerated() {
-			let _ = map_builder.get_or_create_int(self, &mut slv, idx);
+			map_builder.get_or_create_int(self, &mut slv, idx);
 		}
 
 		// Ensure the creation of all Boolean variables.
@@ -1222,7 +1222,7 @@ impl Model {
 			let var = BoolDecision(BoolDecisionInner::Lit(RawLit::from_raw(
 				NonZeroI32::new(var as i32).unwrap(),
 			)));
-			let _ = map_builder.get_or_create_bool(self, &mut slv, var);
+			map_builder.get_or_create_bool(self, &mut slv, var);
 		}
 
 		// Finalize the reformulation map (all variables must be created by now)
