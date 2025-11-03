@@ -11,7 +11,8 @@ use rustc_hash::FxHashMap;
 use crate::{
 	actions::{
 		InitializationActions, IntDecisionActions, IntInspectionActions, IntSimplificationActions,
-		PostingActions, ReasoningEngine, ReformulationActions, TrailingActions,
+		PostingActions, ReasoningEngine, ReformulationActions, SimplificationActions,
+		TrailingActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
@@ -21,7 +22,7 @@ use crate::{
 		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, BoolView,
 		IntLitMeaning, IntView,
 	},
-	IntDecision, IntVal,
+	BoolDecision, IntDecision, IntVal, Model,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -118,10 +119,12 @@ impl IntArrayElementBounds<IntView, IntView, IntView> {
 impl<E, I1, I2, I3> Constraint<E> for IntArrayElementBounds<I1, I2, I3>
 where
 	E: ReasoningEngine,
+	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
 	I1: ModelIntView<E>,
 	I2: ModelIntView<E>,
 	I3: ModelIntView<E>,
 	IntDecision: ModelIntView<E>,
+	IntVal: ModelIntView<E>,
 {
 	fn simplify(
 		&mut self,
@@ -138,8 +141,21 @@ where
 				.clone()
 				.into()
 				.unify(ctx, self.result.clone())?;
+			return Ok(SimplificationStatus::Subsumed);
 		} else if self.vars.iter().all(|v| v.get_val(ctx).is_some()) {
-			let vars = self.vars.iter().map(|v| v.get_val(ctx).unwrap());
+			let vars = self
+				.vars
+				.iter()
+				.map(|v| v.get_val(ctx).unwrap())
+				.collect_vec();
+			let rewrite = IntValArrayElement(IntArrayElementBounds {
+				vars,
+				index: self.index.clone(),
+				result: self.result.clone(),
+				min_support: self.min_support,
+				max_support: self.max_support,
+			});
+			ctx.add_constraint(rewrite);
 		}
 		Ok(SimplificationStatus::NoFixpoint)
 	}
@@ -152,7 +168,7 @@ where
 			.collect();
 		let result = ctx.get_solver_int(self.result.clone().into());
 		let index = ctx.get_solver_int(self.index.clone().into());
-		IntArrayElementBounds::new_in(ctx, array, result, index);
+		IntArrayElementBounds::new_in(ctx, array, result, index).unwrap();
 		Ok(())
 	}
 }
@@ -344,6 +360,7 @@ where
 impl<E, I1, I2> Constraint<E> for IntValArrayElement<I1, I2>
 where
 	E: ReasoningEngine,
+	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
 	I1: ModelIntView<E>,
 	I2: ModelIntView<E>,
 	IntVal: ModelIntView<E>,
@@ -353,7 +370,22 @@ where
 		&mut self,
 		ctx: &mut E::PropagationCtx<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
-		self.0.simplify(ctx)
+		// Constrain the index to be within the bounds of the array
+		self.0.index.set_lower_bound(ctx, 0, [])?;
+		self.0
+			.index
+			.set_upper_bound(ctx, self.0.vars.len() as IntVal - 1, [])?;
+
+		self.0.propagate(ctx)?;
+		if let Some(i) = self.0.index.get_val(ctx) {
+			self.0
+				.result
+				.clone()
+				.into()
+				.unify(ctx, self.0.vars[i as usize])?;
+			return Ok(SimplificationStatus::Subsumed);
+		}
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -400,8 +432,8 @@ where
 		self.0.post(ctx);
 	}
 
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
-		self.0.propagate(ctx)
+	fn propagate(&mut self, _: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+		unreachable!()
 	}
 }
 

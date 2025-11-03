@@ -359,8 +359,10 @@ pub trait ReformulationActions:
 /// Actions that can be performed to simplify a Model considering a given
 /// constraint.
 pub trait SimplificationActions {
+	type Target: ReasoningEngine;
+
 	/// Add a constraint to the model (to replace the current constraint).
-	fn add_constraint<C: Constraint<Model>>(&mut self, constraint: C);
+	fn add_constraint<C: Constraint<Self::Target>>(&mut self, constraint: C);
 }
 
 /// Basic actions that can be performed when the trailing infrastructure is

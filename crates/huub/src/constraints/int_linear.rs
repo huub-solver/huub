@@ -131,7 +131,7 @@ pub(crate) enum Reification {
 impl<E> Constraint<E> for IntEq
 where
 	E: ReasoningEngine,
-	for<'a> E::PropagationCtx<'a>: SimplificationActions,
+	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
 	IntDecision: ModelIntView<E>,
 	BoolDecision: ModelBoolView<E>,
 {
@@ -259,7 +259,7 @@ impl IntLinear {
 impl<E> Constraint<E> for IntLinear
 where
 	E: ReasoningEngine,
-	for<'a> E::PropagationCtx<'a>: SimplificationActions,
+	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
 	IntDecision: ModelIntView<E>,
 	BoolDecision: ModelBoolView<E>,
 {

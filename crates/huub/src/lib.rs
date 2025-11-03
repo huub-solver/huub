@@ -286,7 +286,7 @@ where
 	Iter: IntoIterator,
 	Iter::Item: Into<IntDecision>,
 {
-	prb.add_constraint(IntArrayMinimumBounds {
+	let _ = prb.add_constraint(IntArrayMinimumBounds {
 		vars: vars.into_iter().map_into().collect(),
 		min,
 	});
@@ -360,7 +360,7 @@ pub fn div_int(
 	denominator: IntDecision,
 	result: IntDecision,
 ) {
-	prb.add_constraint(IntDivBounds {
+	let _ = prb.add_constraint(IntDivBounds {
 		numerator,
 		denominator,
 		result,
@@ -370,14 +370,14 @@ pub fn div_int(
 /// Create constraint that enforces that the given Boolean variable takes the
 /// value `true` if-and-only-if an integer variable is in a given set.
 pub fn int_in_set_reif(prb: &mut Model, var: IntDecision, set: IntSetVal, reif: BoolDecision) {
-	prb.add_constraint(IntInSetReif { var, set, reif });
+	let _ = prb.add_constraint(IntInSetReif { var, set, reif });
 }
 
 /// Create a constraint that enforces that a base integer decision variable
 /// exponentiation by an exponent integer decision variable is equal to a result
 /// integer decision variable.
 pub fn pow_int(prb: &mut Model, base: IntDecision, exponent: IntDecision, result: IntDecision) {
-	prb.add_constraint(IntPowBounds {
+	let _ = prb.add_constraint(IntPowBounds {
 		base,
 		exponent,
 		result,
@@ -407,7 +407,7 @@ pub fn table_int(prb: &mut Model, vars: Vec<IntDecision>, table: Vec<Vec<IntVal>
 values in each row of the table must be equal to the number of decision
 variables."
 	);
-	prb.add_constraint(IntTable { vars, table });
+	let _ = prb.add_constraint(IntTable { vars, table });
 }
 
 /// Create a constraint that enforces that the product of the two integer
@@ -418,7 +418,7 @@ pub fn times_int(
 	factor2: IntDecision,
 	product: IntDecision,
 ) {
-	prb.add_constraint(IntTimesBounds {
+	let _ = prb.add_constraint(IntTimesBounds {
 		factor1,
 		factor2,
 		product,
@@ -1249,6 +1249,8 @@ impl ClauseDatabase for Model {
 }
 
 impl SimplificationActions for Model {
+	type Target = Model;
+
 	fn add_constraint<C: Constraint<Model>>(&mut self, constraint: C) {
 		self.add_constraint(constraint);
 	}
