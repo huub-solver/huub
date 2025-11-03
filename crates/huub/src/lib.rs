@@ -23,7 +23,7 @@ use std::{
 	any::Any,
 	fmt::{Debug, Display},
 	hash::Hash,
-	iter::{repeat_n, repeat_with, Sum},
+	iter::{once, repeat_n, repeat_with, Sum},
 	mem,
 	num::{NonZeroI32, NonZeroI64},
 	ops::{Add, AddAssign, Deref, Mul, Neg, Not, Sub},
@@ -65,6 +65,7 @@ use crate::{
 		int_pow::IntPowBounds,
 		int_table::IntTable,
 		int_times::IntTimesBounds,
+		int_value_precede::{IntSeqPrecedeChainBounds, IntValuePrecedeChainValue},
 		BoxedConstraint, Constraint, LazyReason, Reason, ReasonBuilder, SimplificationStatus,
 	},
 	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
@@ -391,10 +392,8 @@ pub fn seq_precede_chain_int<It>(prb: &mut Model, vars: impl IntoIterator<Item =
 where
 	It: Into<IntDecision>,
 {
-	todo!()
-	// IntSeqPrecedeChain {
-	// 	vars: vars.into_iter().map_into().collect(),
-	// }
+	let con = IntSeqPrecedeChainBounds::new(prb, vars.into_iter().map_into().collect());
+	let _ = prb.add_constraint(con);
 }
 
 /// Create a `table_int` constraint that enforces that given list of integer
@@ -439,11 +438,12 @@ pub fn value_precede_chain_int<D, V>(
 	D: Into<IntDecision>,
 	V: Into<IntVal>,
 {
-	todo!()
-	// IntValuePrecedeChain {
-	// 	values: values.into_iter().map_into().collect(),
-	// 	vars: vars.into_iter().map_into().collect(),
-	// }
+	let con = IntValuePrecedeChainValue::new(
+		prb,
+		values.into_iter().map_into().collect(),
+		vars.into_iter().map_into().collect(),
+	);
+	let _ = prb.add_constraint(con);
 }
 
 impl BoolDecision {
@@ -1014,6 +1014,26 @@ impl Model {
 			.as_any_mut()
 			.downcast_mut::<C>()
 			.unwrap()
+	}
+
+	fn create_conflict(
+		&mut self,
+		subject: BoolDecision,
+		reason: impl ReasonBuilder<Self, BoolDecision>,
+	) -> <Self as ReasoningEngine>::Conflict {
+		match reason.build_reason(self) {
+			Ok(v) => match v {
+				Reason::Lazy(_) => todo!(),
+				Reason::Eager(items) => items.into_vec(),
+				Reason::Simple(v) => vec![v],
+			},
+			Err(true) => vec![],
+			Err(false) => panic!("invalid reason"),
+		}
+		.into_iter()
+		.map(|v| !v)
+		.chain(once(subject))
+		.collect()
 	}
 
 	/// Create a new [`Model`] instance from a [`FlatZinc`] instance.
@@ -2098,7 +2118,10 @@ impl IntSimplificationActions<Model> for IntDecision {
 				};
 				let diff: RangeList<_> = dom.diff(values);
 				if diff.is_empty() {
-					return Err(todo!());
+					return Err(ctx.create_conflict(
+						IntDecision(Var(v)).ne(*values.lower_bound().unwrap()),
+						reason,
+					));
 				}
 				if *dom == diff {
 					return Ok(());
@@ -2147,7 +2170,10 @@ impl IntSimplificationActions<Model> for IntDecision {
 				};
 				let intersect: RangeList<_> = dom.intersect(values);
 				if intersect.is_empty() {
-					return Err(todo!());
+					return Err(ctx.create_conflict(
+						IntDecision(Var(v)).ne(*dom.lower_bound().unwrap()),
+						reason,
+					));
 				} else if *dom == intersect {
 					return Ok(());
 				}
@@ -2286,16 +2312,6 @@ impl ReasoningEngine for Model {
 
 	type Conflict = Vec<BoolDecision>;
 	type Atom = BoolDecision;
-}
-
-impl Model {
-	fn create_conflict(
-		&mut self,
-		_subject: BoolDecision,
-		_reason: impl ReasonBuilder<Self, BoolDecision>,
-	) -> <Self as ReasoningEngine>::Conflict {
-		vec![]
-	}
 }
 
 #[derive(Debug)]
