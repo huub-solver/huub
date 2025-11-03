@@ -53,6 +53,7 @@ use crate::{
 	branchers::{BoolBrancher, IntBrancher, WarmStartBrancher},
 	constraints::{
 		bool_array_element::BoolDecisionArrayElement,
+		cumulative::CumulativeTimeTable,
 		disjunctive_strict::{DisjunctiveStrict, DisjunctiveStrictPropagator},
 		int_abs::IntAbsBounds,
 		int_all_different::{IntAllDifferent, IntAllDifferentBounds},
@@ -315,13 +316,12 @@ pub fn cumulative(
 		usages.len(),
 		"cumulative must be given the same number of start times and usages."
 	);
-	todo!()
-	// Cumulative {
-	// 	start_times,
-	// 	durations,
-	// 	usages,
-	// 	capacity,
-	// }
+	let _ = prb.add_constraint(CumulativeTimeTable::new(
+		start_times,
+		durations,
+		usages,
+		capacity,
+	));
 }
 
 /// Create a constraint that enforces that the given a list of integer decision
@@ -1134,8 +1134,6 @@ impl Model {
 			self.propagate(con)?;
 		}
 
-		// TODO: Detect Views From Model
-
 		// Determine encoding types for integer variables
 		let mut int_eager_direct = FxHashSet::<IntDecisionIndex>::default();
 		let int_eager_order = FxHashSet::<IntDecisionIndex>::default();
@@ -1147,42 +1145,38 @@ impl Model {
 				if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {
 					let _ = int_eager_direct.insert(iv);
 				}
-			}
-			match c {
-				// ConstraintStore::IntAllDifferent(c) if c.value_consistent_propagator_enabled() =>
-				// { 	for v in &c.vars {
-				// 		let v = v.resolve_alias(self);
-				// 		if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = v.0 {
-				// 			let Domain::Domain(dom) = &self.int_vars[iv].domain else {
-				// 				unreachable!()
-				// 			};
-				// 			if dom.card() <= Some(c.vars.len() * 100 / 80) {
-				// 				let _ = int_eager_direct.insert(iv);
-				// 			}
-				// 		}
-				// 	}
-				// }
-				// ConstraintStore::IntValArrayElement(c) => {
-				// 	let index = c.index.resolve_alias(self);
-				// 	if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {
-				// 		let _ = int_eager_direct.insert(iv);
-				// 	}
-				// }
-				// ConstraintStore::IntDecisionArrayElement(c) => {
-				// 	let index = c.index.resolve_alias(self);
-				// 	if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {
-				// 		let _ = int_eager_direct.insert(iv);
-				// 	}
-				// }
-				// ConstraintStore::IntTable(con) => {
-				// 	for &v in &con.vars {
-				// 		let v = v.resolve_alias(self);
-				// 		if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = v.0 {
-				// 			let _ = int_eager_direct.insert(iv);
-				// 		}
-				// 	}
-				// }
-				_ => {}
+			} else if let Some(c) = c.downcast_ref::<IntAllDifferent>() {
+				for v in &c.prop.var {
+					let v = v.resolve_alias(self);
+					if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = v.0 {
+						let Domain::Domain(dom) = &self.int_vars[iv].domain else {
+							unreachable!()
+						};
+						if dom.card() <= Some(c.prop.var.len() * 100 / 80) {
+							let _ = int_eager_direct.insert(iv);
+						}
+					}
+				}
+			} else if let Some(c) =
+				c.downcast_ref::<IntArrayElementBounds<IntDecision, IntDecision, IntDecision>>()
+			{
+				let index = c.index.resolve_alias(self);
+				if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {
+					let _ = int_eager_direct.insert(iv);
+				}
+			} else if let Some(c) = c.downcast_ref::<IntTable>() {
+				for &v in &c.vars {
+					let v = v.resolve_alias(self);
+					if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = v.0 {
+						let _ = int_eager_direct.insert(iv);
+					}
+				}
+			} else if let Some(c) = c.downcast_ref::<IntValArrayElement<IntDecision, IntDecision>>()
+			{
+				let index = c.0.index.resolve_alias(self);
+				if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {
+					let _ = int_eager_direct.insert(iv);
+				}
 			}
 		}
 

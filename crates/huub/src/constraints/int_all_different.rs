@@ -51,7 +51,7 @@ pub struct IntAllDifferent {
 /// Bounds consistent propagator for the `all_different_int` constraint.
 pub struct IntAllDifferentBounds<I> {
 	/// List of integer variables that must take different values.
-	var: Vec<I>,
+	pub(crate) var: Vec<I>,
 	/// Struct to store information about variable
 	var_info: Vec<AllDiffVarMeta>,
 	/// Cached lower bounds

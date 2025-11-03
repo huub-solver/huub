@@ -22,7 +22,7 @@ use crate::{
 		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, BoolView,
 		IntLitMeaning, IntView,
 	},
-	BoolDecision, IntDecision, IntVal, Model,
+	IntDecision, IntVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -32,7 +32,7 @@ pub struct IntArrayElementBounds<I1, I2, I3> {
 	/// Array of variables from which the element is selected
 	vars: Vec<I1>,
 	/// Variable that represent the index of the selected variable
-	index: I2,
+	pub(crate) index: I2,
 	/// Variable that represent the result of the selection
 	result: I3,
 	/// The index of the variable that supports the lower bound of the result
