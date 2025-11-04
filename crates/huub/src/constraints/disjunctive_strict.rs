@@ -297,15 +297,15 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	}
 
 	/// Return the (current) earliest completion time of task `i`.
-	fn earliest_completion_time<Ctx>(&self, i: usize, ctx: &mut Ctx) -> IntVal
+	fn earliest_completion_time<Ctx>(&self, ctx: &mut Ctx, i: usize) -> IntVal
 	where
 		I: IntInspectionActions<Ctx>,
 	{
-		self.earliest_start_time(i, ctx) + self.durations[i]
+		self.earliest_start_time(ctx, i) + self.durations[i]
 	}
 
 	/// Return the (current) earliest start time of task `i`.
-	fn earliest_start_time<Ctx>(&self, i: usize, ctx: &mut Ctx) -> IntVal
+	fn earliest_start_time<Ctx>(&self, ctx: &mut Ctx, i: usize) -> IntVal
 	where
 		I: IntInspectionActions<Ctx>,
 	{
@@ -330,10 +330,10 @@ impl<I> DisjunctiveStrictPropagator<I> {
 		// lct_j since energy of the set of tasks (including i) within the time
 		// window [earliest_start, latest_completion] is overloaded
 		let latest_completion_times = (0..self.start_times.len())
-			.map(|i| self.latest_completion_time(i, ctx))
+			.map(|i| self.latest_completion_time(ctx, i))
 			.collect_vec();
 		let earliest_start_times = (0..self.start_times.len())
-			.map(|i| self.earliest_start_time(i, ctx))
+			.map(|i| self.earliest_start_time(ctx, i))
 			.collect_vec();
 		trace!(
 			task_no,
@@ -406,8 +406,8 @@ impl<I> DisjunctiveStrictPropagator<I> {
 			.filter(|j| {
 				{
 					*j != task_no
-						&& self.latest_start_time(*j, ctx) <= updated_lct_i
-						&& self.earliest_start_time(*j, ctx) >= earliest_start
+						&& self.latest_start_time(ctx, *j) <= updated_lct_i
+						&& self.earliest_start_time(ctx, *j) >= earliest_start
 				}
 			})
 			.collect_vec();
@@ -415,7 +415,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 		trace!(
 			task_no,
 			window =? (earliest_start, updated_lct_i),
-			nlset = ? nlset.iter().map(|&j| (j, self.durations[j], self.earliest_start_time(j, ctx), self.latest_start_time(j, ctx))).collect_vec(),
+			nlset = ? nlset.iter().map(|&j| (j, self.durations[j], self.earliest_start_time(ctx,j, ), self.latest_start_time( ctx,j,))).collect_vec(),
 			"explain not last"
 		);
 
@@ -465,8 +465,8 @@ impl<I> DisjunctiveStrictPropagator<I> {
 			// collect sufficient energy within the window [lb, time_bound)
 			for i in 0..self.tasks_sorted_by_earliest_start.len() {
 				let task_no = self.tasks_sorted_by_earliest_start[i];
-				if self.earliest_start_time(task_no, ctx) >= earliest_start
-					&& self.latest_completion_time(task_no, ctx) < time_bound
+				if self.earliest_start_time(ctx, task_no) >= earliest_start
+					&& self.latest_completion_time(ctx, task_no) < time_bound
 				{
 					e_tasks.push(task_no);
 					slack -= self.durations[task_no];
@@ -507,8 +507,8 @@ impl<I> DisjunctiveStrictPropagator<I> {
 		let precedence_set = (0..self.start_times.len())
 			.filter(|&j| {
 				j != task_no
-					&& self.earliest_start_time(j, ctx) >= earliest_start
-					&& self.latest_start_time(j, ctx) < latest_start
+					&& self.earliest_start_time(ctx, j) >= earliest_start
+					&& self.latest_start_time(ctx, j) < latest_start
 			})
 			.collect_vec();
 
@@ -521,7 +521,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 
 		assert_ne!(precedence_set.len(), 0);
 		// Compute the latest start time of the tasks in precedence_set
-		let task_i_est = self.earliest_start_time(task_no, ctx);
+		let task_i_est = self.earliest_start_time(ctx, task_no);
 
 		// Explain the reason why task i must be scheduled after a certain time
 		// bound
@@ -547,15 +547,15 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	}
 
 	/// Return the (current) latest completion time of task `i`.
-	fn latest_completion_time<Ctx>(&self, i: usize, ctx: &mut Ctx) -> IntVal
+	fn latest_completion_time<Ctx>(&self, ctx: &mut Ctx, i: usize) -> IntVal
 	where
 		I: IntInspectionActions<Ctx>,
 	{
-		self.latest_start_time(i, ctx) + self.durations[i]
+		self.latest_start_time(ctx, i) + self.durations[i]
 	}
 
 	/// Return the (current) latest start time of task `i`.
-	fn latest_start_time<Ctx>(&self, i: usize, ctx: &mut Ctx) -> IntVal
+	fn latest_start_time<Ctx>(&self, ctx: &mut Ctx, i: usize) -> IntVal
 	where
 		I: IntInspectionActions<Ctx>,
 	{
@@ -630,17 +630,17 @@ impl<I> DisjunctiveStrictPropagator<I> {
 		self.ot_tree.clear();
 		// Store the updated earliest start time of each task
 		let mut updated_est = (0..self.start_times.len())
-			.map(|i| self.earliest_start_time(i, ctx))
+			.map(|i| self.earliest_start_time(ctx, i))
 			.collect_vec();
 		// Store the task which push the earliest start time in the tree
 		let mut binding_tasks = vec![None; self.start_times.len()];
 
 		// Initialize a queue of all tasks sorted by their latest start time
 		let latest_start_times = (0..self.start_times.len())
-			.map(|i| self.latest_start_time(i, ctx))
+			.map(|i| self.latest_start_time(ctx, i))
 			.collect_vec();
 		let earliest_completion_times = (0..self.start_times.len())
-			.map(|i| self.earliest_completion_time(i, ctx))
+			.map(|i| self.earliest_completion_time(ctx, i))
 			.collect_vec();
 
 		self.tasks_sorted_by_latest_start
@@ -661,7 +661,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 				// completion of the current task, `front_task` << `ect_task` detected
 				self.ot_tree.add_task(
 					front_task,
-					self.earliest_start_time(front_task, ctx),
+					self.earliest_start_time(ctx, front_task),
 					self.durations[front_task],
 				);
 				trace!(
@@ -678,7 +678,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 			// Check if the earliest completion time of tasks in the tree is greater
 			// than the earliest completion time of task `ect_task`
 			let tasks_in_tree_ect = self.ot_tree.root().earliest_completion;
-			if tasks_in_tree_ect > self.earliest_start_time(ect_task, ctx) {
+			if tasks_in_tree_ect > self.earliest_start_time(ctx, ect_task) {
 				binding_tasks[ect_task] = Some(self.ot_tree.binding_task(tasks_in_tree_ect, 0));
 				updated_est[ect_task] = updated_est[ect_task].max(tasks_in_tree_ect);
 				trace!(
@@ -702,7 +702,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 			if task_exists {
 				self.ot_tree.add_task(
 					ect_task,
-					self.earliest_start_time(ect_task, ctx),
+					self.earliest_start_time(ctx, ect_task),
 					self.durations[ect_task],
 				);
 			}
@@ -711,8 +711,8 @@ impl<I> DisjunctiveStrictPropagator<I> {
 		// Update the earliest start time for each task
 		for (i, v) in self.start_times.iter().enumerate() {
 			if let Some(binding_task) = binding_tasks[i] {
-				let earliest_start_time = self.earliest_start_time(i, ctx);
-				let earliest_completion_time = self.earliest_completion_time(i, ctx);
+				let earliest_start_time = self.earliest_start_time(ctx, i);
+				let earliest_completion_time = self.earliest_completion_time(ctx, i);
 				if updated_est[i] > earliest_start_time {
 					let lb = self.start_times[binding_task].get_lower_bound(ctx);
 					ctx.set_trailed_int(self.trailed_info[i].earliest_start, lb);
@@ -782,7 +782,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 
 		// Sort the tasks by non-increasing latest completion time
 		let latest_completion_times: Vec<_> = (0..self.start_times.len())
-			.map(|i| self.latest_completion_time(i, ctx))
+			.map(|i| self.latest_completion_time(ctx, i))
 			.collect();
 		self.tasks_sorted_by_latest_completion
 			.sort_by_key(|&i| -latest_completion_times[i]);
@@ -796,7 +796,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 		//      }
 		//   2. all gray tasks of `ot_tree` (Ѳ) are in the set T \setminus LCut(j)
 		for (j, &lct_task) in self.tasks_sorted_by_latest_completion.iter().enumerate() {
-			let lct = self.latest_completion_time(lct_task, ctx);
+			let lct = self.latest_completion_time(ctx, lct_task);
 			// Assume that resource overload is not detected, i.e., ect(LCut(j)) <=
 			// lct_j
 			let ect_in_tree = self.ot_tree.root().earliest_completion;
@@ -898,17 +898,17 @@ impl<I> DisjunctiveStrictPropagator<I> {
 
 		// Store the updated latest completion time of each task
 		let mut updated_lct = (0..self.start_times.len())
-			.map(|i| self.latest_completion_time(i, ctx))
+			.map(|i| self.latest_completion_time(ctx, i))
 			.collect_vec();
 		// Store the task which push the earliest start time in the tree
 		let mut binding_tasks = vec![None; self.start_times.len()];
 
 		// Initialize a queue of all tasks sorted by their latest start time
 		let latest_start_times = (0..self.start_times.len())
-			.map(|i| self.latest_start_time(i, ctx))
+			.map(|i| self.latest_start_time(ctx, i))
 			.collect_vec();
 		let latest_completion_times = (0..self.start_times.len())
-			.map(|i| self.latest_completion_time(i, ctx))
+			.map(|i| self.latest_completion_time(ctx, i))
 			.collect_vec();
 		self.tasks_sorted_by_latest_start
 			.sort_by_key(|&i| latest_start_times[i]);
@@ -928,7 +928,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 				let lst_task = self.tasks_sorted_by_latest_start[lst_front_idx];
 				self.ot_tree.add_task(
 					lst_task,
-					self.earliest_start_time(lst_task, ctx),
+					self.earliest_start_time(ctx, lst_task),
 					self.durations[lst_task],
 				);
 				lst_front_idx += 1;
@@ -967,7 +967,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 			if task_exists {
 				self.ot_tree.add_task(
 					lct_task,
-					self.earliest_start_time(lct_task, ctx),
+					self.earliest_start_time(ctx, lct_task),
 					self.durations[lct_task],
 				);
 			}
@@ -976,8 +976,8 @@ impl<I> DisjunctiveStrictPropagator<I> {
 		// Update the latest completion time for each task
 		for (i, v) in self.start_times.iter().enumerate() {
 			if let Some(binding_task) = binding_tasks[i] {
-				if updated_lct[i] < self.latest_completion_time(i, ctx) {
-					let lb = self.earliest_start_time(binding_task, ctx);
+				if updated_lct[i] < self.latest_completion_time(ctx, i) {
+					let lb = self.earliest_start_time(ctx, binding_task);
 					trace!(
 						task = i,
 						window =? (lb, updated_lct[i]),
@@ -1033,14 +1033,14 @@ impl<I> DisjunctiveStrictPropagator<I> {
 
 		// Sort the tasks by non-decreasing latest completion time
 		let tasks_sorted_by_lct = (0..self.start_times.len())
-			.map(|i| (i, self.latest_completion_time(i, ctx)))
+			.map(|i| (i, self.latest_completion_time(ctx, i)))
 			.sorted_by_key(|(_, lct)| *lct)
 			.collect_vec();
 
 		// Traverse all tasks ordered by latest completion time and check resource
 		// overload
 		for (i, lct_i) in tasks_sorted_by_lct.iter() {
-			let est_i = self.earliest_start_time(*i, ctx);
+			let est_i = self.earliest_start_time(ctx, *i);
 			self.ot_tree.add_task(*i, est_i, self.durations[*i]);
 			let ect = self.ot_tree.root().earliest_completion;
 			if ect > *lct_i {

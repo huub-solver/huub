@@ -192,9 +192,9 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// explanation.
 	fn collect_compulsory_tasks<Ctx>(
 		&self,
+		ctx: &mut Ctx,
 		to_cover: i64,
 		time_point: i64,
-		ctx: &mut Ctx,
 		skip_task: Option<usize>,
 	) -> Vec<usize>
 	where
@@ -303,7 +303,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 			let capacity_ub = self.capacity.get_upper_bound(ctx);
 			let to_cover = capacity_ub - usage_limit;
 			let relevant_tasks =
-				self.collect_compulsory_tasks(to_cover, time_point, ctx, Some(task_no));
+				self.collect_compulsory_tasks(ctx, to_cover, time_point, Some(task_no));
 
 			trace!(
 				time_point,
@@ -358,7 +358,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		I4: IntDecisionActions<Ctx, Atom = Atom>,
 	{
 		move |ctx: &mut Ctx| {
-			let relevant_tasks = self.collect_compulsory_tasks(to_cover, time_point, ctx, None);
+			let relevant_tasks = self.collect_compulsory_tasks(ctx, to_cover, time_point, None);
 
 			trace!(
 				time_point,
@@ -415,7 +415,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 			let min_usage = self.usages[task_no].get_lower_bound(ctx);
 			let to_cover = capacity_ub - min_usage + 1;
 			let relevant_tasks =
-				self.collect_compulsory_tasks(to_cover, time_point, ctx, Some(task_no));
+				self.collect_compulsory_tasks(ctx, to_cover, time_point, Some(task_no));
 
 			trace!(
 				time_point,
@@ -507,8 +507,8 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// `usage_lb` is the lower bound of the task's usage.
 	fn limit_usage<E>(
 		&self,
-		task: usize,
 		ctx: &mut E::PropagationCtx<'_>,
+		task: usize,
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
@@ -597,8 +597,8 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// described in the original paper by Schutt et al. (2011).
 	fn sweep_backward<E>(
 		&self,
-		task: usize,
 		ctx: &mut E::PropagationCtx<'_>,
+		task: usize,
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
@@ -703,8 +703,8 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// described in the original paper by Schutt et al. (2011).
 	fn sweep_forward<E>(
 		&self,
-		task: usize,
 		ctx: &mut E::PropagationCtx<'_>,
+		task: usize,
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
@@ -847,8 +847,8 @@ where
 		for i in 0..self.start_times.len() {
 			let (lb, ub) = self.start_times[i].get_bounds(ctx);
 			if lb < ub {
-				self.sweep_forward(i, ctx)?;
-				self.sweep_backward(i, ctx)?;
+				self.sweep_forward(ctx, i)?;
+				self.sweep_backward(ctx, i)?;
 			}
 		}
 
@@ -858,7 +858,7 @@ where
 			if req_lb < req_ub
 				&& self.latest_start_time(ctx, i) < self.earliest_completion_time(ctx, i)
 			{
-				self.limit_usage(i, ctx)?;
+				self.limit_usage(ctx, i)?;
 			}
 		}
 		Ok(())

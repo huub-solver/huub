@@ -25,24 +25,6 @@ use crate::{
 	BoolDecision, BoolFormula, IntDecision, NonZeroIntVal,
 };
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// Representation of the `div_int` constraint within a model.
-///
-/// This constraint enforces that a numerator decision integer variable divided
-/// by a denominator integer decision variable is equal to a result integer
-/// decision variable.
-///
-/// Note that the division is integer division, i.e. the result is rounded
-/// towards zero.
-pub struct IntDiv {
-	/// The numerator of the division
-	pub(crate) numerator: IntDecision,
-	/// The denominator of the division
-	pub(crate) denominator: IntDecision,
-	/// Result of the division
-	pub(crate) result: IntDecision,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds propagator for the division of two integer variables.
 ///

@@ -59,7 +59,7 @@ use crate::{
 		int_all_different::{IntAllDifferent, IntAllDifferentBounds},
 		int_array_element::{IntArrayElementBounds, IntValArrayElement},
 		int_array_minimum::IntArrayMinimumBounds,
-		int_div::{IntDiv, IntDivBounds},
+		int_div::IntDivBounds,
 		int_in_set::IntInSetReif,
 		int_linear::{IntEq, IntLinear, LinOperator},
 		int_pow::IntPowBounds,
