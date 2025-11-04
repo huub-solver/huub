@@ -8,8 +8,8 @@ use rangelist::RangeList;
 
 use crate::{
 	actions::{
-		IntDecisionActions, IntInspectionActions, IntPropagationActions, IntSimplificationActions,
-		PostingActions, ReasoningEngine, ReformulationActions,
+		IntDecisionActions, IntInspectionActions, IntSimplificationActions, PostingActions,
+		ReasoningEngine, ReformulationActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
