@@ -10,7 +10,7 @@ use itertools::Itertools;
 
 use crate::{
 	solver::engine::{Advisor, PropRef},
-	ConRef,
+	ConRef, ModAdvisor,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -118,18 +118,18 @@ impl From<ActivationAction<Advisor, PropRef>> for ActivationActionS {
 	}
 }
 
-impl From<ActivationActionS> for ActivationAction<Advisor, ConRef> {
+impl From<ActivationActionS> for ActivationAction<ModAdvisor, ConRef> {
 	fn from(value: ActivationActionS) -> Self {
 		if (value.0 & 0b1) == 1 {
-			Self::Advise(Advisor::from_raw(value.0 >> 1))
+			Self::Advise(ModAdvisor::from_raw(value.0 >> 1))
 		} else {
 			Self::Enqueue(ConRef::from_raw(value.0 >> 1))
 		}
 	}
 }
 
-impl From<ActivationAction<Advisor, ConRef>> for ActivationActionS {
-	fn from(value: ActivationAction<Advisor, ConRef>) -> Self {
+impl From<ActivationAction<ModAdvisor, ConRef>> for ActivationActionS {
+	fn from(value: ActivationAction<ModAdvisor, ConRef>) -> Self {
 		Self(match value {
 			ActivationAction::Advise(advisor) => (advisor.raw() << 1) | 0b1,
 			ActivationAction::Enqueue(prop) => prop.raw() << 1,
@@ -230,6 +230,7 @@ impl ActivationList {
 		};
 	}
 
+	/// Extend the activation list with another activation list, consuming it.
 	pub(crate) fn extend(&mut self, other: Self) {
 		for (i, act) in other.activations.into_iter().enumerate() {
 			let i = i as u32;

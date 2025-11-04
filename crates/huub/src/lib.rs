@@ -77,7 +77,6 @@ use crate::{
 	},
 	solver::{
 		activation_list::{ActivationAction, ActivationActionS, IntEvent, IntPropCond},
-		engine::Advisor,
 		queue::{PriorityLevel, PropagatorInfo, PropagatorQueue},
 		trail::TrailedInt,
 		IntLitMeaning, Solver,
@@ -177,6 +176,23 @@ pub type IntSetVal = RangeList<IntVal>;
 /// Type alias for an parameter integer value.
 pub type IntVal = i64;
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Definition of how a constraint has requested to be advised at the model
+/// level.
+struct ModAdvisorDef {
+	/// Reference to the constraint that has requested to be advised.
+	con: ConRef,
+	/// The data associated by the constraint with the advisor.
+	data: u64,
+	/// Whether lower and upper bound events must be swapped.
+	negated: bool,
+	/// Whether the advise on a Boolean must be advised as an integer event.
+	bool2int: bool,
+	/// The condition on the integer decision variable that must be decided
+	/// before the constraint is advised.
+	condition: Option<IntLitMeaning>,
+}
+
 #[derive(Clone, Debug, Default)]
 /// A formulation of a problem instance in terms of decisions and constraints.
 pub struct Model {
@@ -203,6 +219,9 @@ pub struct Model {
 	/// Boolean variable changes that occurred during the execution of the
 	/// current propagator.
 	bool_events: Vec<RawVar>,
+
+	/// Definitions of the advisors that are listening to the certain changes.
+	advisors: IndexVec<ModAdvisor, ModAdvisorDef>,
 }
 
 /// Type alias for a non-zero parameter integer value.
@@ -1124,25 +1143,104 @@ impl Model {
 			}
 		}
 		// Notify propagators about all events that occurred
-		for (iv, event) in self.int_events.drain() {
-			for act in self.int_vars[iv].constraints.activated_by(event) {
+		let advise_of_int_change = |model: &mut Model, con: ConRef, data: u64, event| {
+			if let Some(mut c) = model.constraints[con].take() {
+				let ret = c.advise_of_int_change(model, data, event);
+				model.constraints[con] = Some(c);
+				ret
+			} else {
+				false
+			}
+		};
+		let advise_of_bool_change = |model: &mut Model, con: ConRef, data: u64| {
+			if let Some(mut c) = model.constraints[con].take() {
+				let ret = c.advise_of_bool_change(model, data);
+				model.constraints[con] = Some(c);
+				ret
+			} else {
+				false
+			}
+		};
+		let mut int_events = mem::take(&mut self.int_events);
+		for (iv, event) in int_events.drain() {
+			let v: Vec<_> = self.int_vars[iv].constraints.activated_by(event).collect();
+			for act in v {
 				match act {
-					ActivationAction::Advise(_) => todo!(),
+					ActivationAction::Advise(adv) => {
+						let x: &ModAdvisorDef = &self.advisors[adv];
+						let ModAdvisorDef {
+							con,
+							data,
+							negated,
+							bool2int,
+							condition,
+						} = x.clone();
+						let event = match event {
+							IntEvent::LowerBound if negated => IntEvent::UpperBound,
+							IntEvent::UpperBound if negated => IntEvent::LowerBound,
+							_ => event,
+						};
+						let enqueue = if let Some(cond) = condition {
+							let iv = IntDecision(IntDecisionInner::Var(iv));
+							let triggered = match cond {
+								IntLitMeaning::Eq(v) | IntLitMeaning::NotEq(v) => {
+									iv.eq(v).get_val(self).is_some()
+								}
+								IntLitMeaning::GreaterEq(v) | IntLitMeaning::Less(v) => {
+									iv.geq(v).get_val(self).is_some()
+								}
+							};
+							if triggered {
+								if bool2int {
+									advise_of_int_change(self, con, data, IntEvent::Fixed)
+								} else {
+									advise_of_bool_change(self, con, data)
+								}
+							} else {
+								false
+							}
+						} else {
+							advise_of_int_change(self, con, data, event)
+						};
+						if enqueue {
+							self.propagator_queue.enqueue_propagator(con);
+						}
+					}
 					ActivationAction::Enqueue(c) => self.propagator_queue.enqueue_propagator(c),
 				}
 			}
 		}
-		for bv in self.bool_events.drain(..) {
+		self.int_events = int_events;
+		let mut bool_events = mem::take(&mut self.bool_events);
+		for bv in bool_events.drain(..) {
 			for &act in self.bool_vars[i32::from(bv) as usize - 1]
 				.constraints
+				.clone()
 				.iter()
 			{
 				match act.into() {
-					ActivationAction::Advise(_) => todo!(),
+					ActivationAction::Advise(adv) => {
+						let x: &ModAdvisorDef = &self.advisors[adv];
+						let ModAdvisorDef {
+							con,
+							data,
+							bool2int,
+							..
+						} = x.clone();
+						let enqueue = if bool2int {
+							advise_of_int_change(self, con, data, IntEvent::Fixed)
+						} else {
+							advise_of_bool_change(self, con, data)
+						};
+						if enqueue {
+							self.propagator_queue.enqueue_propagator(con);
+						}
+					}
 					ActivationAction::Enqueue(c) => self.propagator_queue.enqueue_propagator(c),
 				}
 			}
 		}
+		self.bool_events = bool_events;
 		Ok(())
 	}
 
@@ -2095,26 +2193,56 @@ impl IntSimplificationActions<Model> for IntDecision {
 		let constraints = mem::take(&mut ctx.int_vars[idx].constraints);
 		// Move subscriptions to target decision variable
 		match target.0 {
-			Var(j)
-			| Linear(_, j)
-			| Bool(
-				_,
-				BoolDecision(
+			Var(j) | Linear(_, j) => {
+				ctx.int_vars[j].constraints.extend(constraints);
+			}
+			Bool(
+				lt,
+				inner @ BoolDecision(
 					BoolDecisionInner::IntEq(j, _)
 					| BoolDecisionInner::IntNotEq(j, _)
 					| BoolDecisionInner::IntGreaterEq(j, _)
 					| BoolDecisionInner::IntLess(j, _),
 				),
 			) => {
-				ctx.int_vars[j].constraints.extend(constraints);
+				for act in constraints.activated_by::<ModAdvisor, ConRef>(IntEvent::Fixed) {
+					if let ActivationAction::Advise(adv) = act {
+						let def = &mut ctx.advisors[adv];
+						def.bool2int = true;
+						def.condition = Some(match inner.0 {
+							BoolDecisionInner::IntEq(_, v) => IntLitMeaning::Eq(v),
+							BoolDecisionInner::IntGreaterEq(_, v) => IntLitMeaning::GreaterEq(v),
+							BoolDecisionInner::IntLess(_, v) => IntLitMeaning::Less(v),
+							BoolDecisionInner::IntNotEq(_, v) => IntLitMeaning::NotEq(v),
+							_ => unreachable!(),
+						});
+						def.negated = !lt.positive_scale();
+					}
+					let cond = if matches!(
+						inner.0,
+						BoolDecisionInner::IntEq(_, _) | BoolDecisionInner::IntNotEq(_, _)
+					) {
+						IntPropCond::Domain
+					} else {
+						IntPropCond::Bounds
+					};
+					ctx.int_vars[j].constraints.add(act, cond);
+				}
 			}
 			// Move subscription to Boolean decision
-			Bool(_, BoolDecision(BoolDecisionInner::Lit(l))) => {
+			Bool(lt, BoolDecision(BoolDecisionInner::Lit(l))) => {
 				let jdx = i32::from(l.var()) as usize - 1;
 				ctx.bool_vars[jdx].constraints.extend(
-					constraints
-						.activated_by::<Advisor, ConRef>(IntEvent::Fixed)
-						.map(ActivationActionS::from),
+					constraints.activated_by(IntEvent::Fixed).map(
+						|act: ActivationAction<ModAdvisor, ConRef>| -> ActivationActionS {
+							if let ActivationAction::Advise(adv) = act {
+								let def = &mut ctx.advisors[adv];
+								def.bool2int = true;
+								def.negated = !lt.positive_scale();
+							}
+							act.into()
+						},
+					),
 				);
 			}
 			// Notify current subscriptions one more time, then forget about them.
@@ -2277,12 +2405,31 @@ impl BoolSimplificationActions<Model> for BoolDecision {
 					// Move subscriptions to an integer decision
 					IntEq(j, _) | IntGreaterEq(j, _) | IntLess(j, _) | IntNotEq(j, _) => {
 						for act in constraints {
-							// TODO: This triggers even when the Boolean Condition does not change
-							// value
-							ctx.int_vars[j].constraints.add(
-								ActivationAction::<Advisor, ConRef>::from(act),
-								IntPropCond::Domain,
-							);
+							let event = if matches!(y.0, IntEq(_, _) | IntNotEq(_, _)) {
+								IntPropCond::Domain
+							} else {
+								IntPropCond::Bounds
+							};
+							match ActivationAction::<ModAdvisor, ConRef>::from(act) {
+								ActivationAction::Advise(adv) => {
+									let def: &mut ModAdvisorDef = &mut ctx.advisors[adv];
+									def.condition = Some(match y.0 {
+										IntEq(_, v) => IntLitMeaning::Eq(v),
+										IntGreaterEq(_, v) => IntLitMeaning::GreaterEq(v),
+										IntLess(_, v) => IntLitMeaning::Less(v),
+										IntNotEq(_, v) => IntLitMeaning::NotEq(v),
+										_ => unreachable!(),
+									});
+									ctx.int_vars[j]
+										.constraints
+										.add(ActivationAction::Advise(adv), event);
+								}
+								me @ ActivationAction::Enqueue(_) => {
+									// TODO: This triggers even when the Boolean Condition does not
+									// change value
+									ctx.int_vars[j].constraints.add(me, event);
+								}
+							}
 						}
 					}
 					Const(_) => unreachable!(),
@@ -2431,8 +2578,45 @@ impl BoolPostingActions<ModelPostingContext<'_>> for BoolDecision {
 		}
 	}
 
-	fn advise_when_fixed(&self, _ctx: &mut ModelPostingContext<'_>, _data: u64) {
-		todo!()
+	fn advise_when_fixed(&self, ctx: &mut ModelPostingContext<'_>, data: u64) {
+		let var = self.resolve_alias(ctx.model);
+		let (iv, cond, event) = match var.0 {
+			BoolDecisionInner::Lit(lit) => {
+				let adv = ctx.model.advisors.push(ModAdvisorDef {
+					con: ctx.con,
+					data,
+					negated: false,
+					bool2int: false,
+					condition: None,
+				});
+				ctx.model.bool_vars[i32::from(lit.var()) as usize - 1]
+					.constraints
+					.push(ActivationAction::Advise(adv).into());
+				return;
+			}
+			BoolDecisionInner::Const(_) => {
+				// Value does not change, so no advisor will ever be called
+				return;
+			}
+			BoolDecisionInner::IntEq(iv, v) => (iv, IntLitMeaning::Eq(v), IntPropCond::Domain),
+			BoolDecisionInner::IntGreaterEq(iv, v) => {
+				(iv, IntLitMeaning::GreaterEq(v), IntPropCond::Bounds)
+			}
+			BoolDecisionInner::IntLess(iv, v) => (iv, IntLitMeaning::Less(v), IntPropCond::Bounds),
+			BoolDecisionInner::IntNotEq(iv, v) => {
+				(iv, IntLitMeaning::NotEq(v), IntPropCond::Domain)
+			}
+		};
+		let adv = ctx.model.advisors.push(ModAdvisorDef {
+			con: ctx.con,
+			data,
+			negated: false,
+			bool2int: false,
+			condition: Some(cond),
+		});
+		ctx.model.int_vars[iv]
+			.constraints
+			.add(ActivationAction::Advise(adv), event);
 	}
 }
 
@@ -2483,8 +2667,73 @@ impl IntInspectionActions<ModelPostingContext<'_>> for IntDecision {
 }
 
 impl IntPostingActions<ModelPostingContext<'_>> for IntDecision {
-	fn advise_when(&self, _ctx: &mut ModelPostingContext<'_>, _condition: IntPropCond, _data: u64) {
-		todo!()
+	fn advise_when(&self, ctx: &mut ModelPostingContext<'_>, cond: IntPropCond, data: u64) {
+		let var = self.resolve_alias(ctx.model);
+
+		match var.0 {
+			IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) => {
+				let negated = if let IntDecisionInner::Linear(lt, _) = var.0 {
+					!lt.positive_scale()
+				} else {
+					false
+				};
+				let adv = ctx.model.advisors.push(ModAdvisorDef {
+					con: ctx.con,
+					data,
+					negated,
+					bool2int: false,
+					condition: None,
+				});
+				ctx.model.int_vars[iv]
+					.constraints
+					.add(ActivationAction::Advise(adv), cond);
+			}
+			IntDecisionInner::Const(_) => ctx.semantic_enqueue = true,
+			IntDecisionInner::Bool(lt, bv) => {
+				let var = bv.resolve_alias(ctx.model);
+				let (iv, cond, event) = match var.0 {
+					BoolDecisionInner::Lit(lit) => {
+						let adv = ctx.model.advisors.push(ModAdvisorDef {
+							con: ctx.con,
+							data,
+							negated: !lt.positive_scale(),
+							bool2int: true,
+							condition: None,
+						});
+						ctx.model.bool_vars[i32::from(lit.var()) as usize - 1]
+							.constraints
+							.push(ActivationAction::Advise(adv).into());
+						return;
+					}
+					BoolDecisionInner::Const(_) => {
+						// Value does not change, so no advisor will ever be called
+						return;
+					}
+					BoolDecisionInner::IntEq(iv, v) => {
+						(iv, IntLitMeaning::Eq(v), IntPropCond::Domain)
+					}
+					BoolDecisionInner::IntGreaterEq(iv, v) => {
+						(iv, IntLitMeaning::GreaterEq(v), IntPropCond::Bounds)
+					}
+					BoolDecisionInner::IntLess(iv, v) => {
+						(iv, IntLitMeaning::Less(v), IntPropCond::Bounds)
+					}
+					BoolDecisionInner::IntNotEq(iv, v) => {
+						(iv, IntLitMeaning::NotEq(v), IntPropCond::Domain)
+					}
+				};
+				let adv = ctx.model.advisors.push(ModAdvisorDef {
+					con: ctx.con,
+					data,
+					negated: !lt.positive_scale(),
+					bool2int: true,
+					condition: Some(cond),
+				});
+				ctx.model.int_vars[iv]
+					.constraints
+					.add(ActivationAction::Advise(adv), event);
+			}
+		}
 	}
 
 	fn enqueue_when(&self, ctx: &mut ModelPostingContext<'_>, condition: IntPropCond) {
@@ -2563,6 +2812,15 @@ impl IntInspectionActions<ModelPostingContext<'_>> for IntVal {
 index_vec::define_index_type! {
 	/// Identifies an constraint in a [`Model`]
 	pub(crate) struct ConRef = u32;
+	// Allow storing as i32 in [`ActivationActionS`]
+	MAX_INDEX = i32::MAX as usize;
+}
+
+index_vec::define_index_type! {
+	/// Identifies an constraint in a [`Model`]
+	pub(crate) struct ModAdvisor = u32;
+	// Allow storing as i32 in [`ActivationActionS`]
+	MAX_INDEX = i32::MAX as usize;
 }
 
 impl InitializationActions for Model {
