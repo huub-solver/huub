@@ -4,11 +4,12 @@
 use std::{cmp, ops::AddAssign};
 
 use itertools::{Either, Itertools};
+use rangelist::RangeList;
 
 use crate::{
 	actions::{
-		IntDecisionActions, IntInspectionActions, IntPropagationActions, PostingActions,
-		ReasoningEngine, ReformulationActions,
+		IntDecisionActions, IntInspectionActions, IntPropagationActions, IntSimplificationActions,
+		PostingActions, ReasoningEngine, ReformulationActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
@@ -151,11 +152,13 @@ where
 				}
 			});
 		if !vals.is_empty() {
-			for (i, val) in vals {
-				let reason = &[self.prop.var[i].get_val_lit(ctx).unwrap()];
-				for var in &vars {
-					var.set_not_eq(ctx, val, reason)?;
-				}
+			let neg: RangeList<_> = vals.iter().map(|&(_, v)| v..=v).collect();
+			for var in &vars {
+				var.set_not_in_set(ctx, &neg, |ctx: &mut E::PropagationCtx<'_>| {
+					vals.iter()
+						.map(|&(i, _)| self.prop.var[i].get_val_lit(ctx).unwrap())
+						.collect_vec()
+				})?;
 			}
 			// Shrink variable array (and related caches)
 			let n = 2 * vars.len() + 2;
