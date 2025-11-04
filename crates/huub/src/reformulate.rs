@@ -25,12 +25,13 @@ use crate::{
 	constraints::{BoxedPropagator, Constraint, ModelBoolView, Propagator, SimplificationStatus},
 	helpers::linear_transform::LinearTransform,
 	solver::{
+		activation_list::{ActivationActionS, ActivationList},
 		int_var::{EncodingType, IntVar, IntVarRef},
 		trail::TrailedInt,
 		BoolView, BoolViewInner, IntView, IntViewInner, View,
 	},
-	BoolDecision, BoolFormula, Clause, ConRef, Decision, IntDecision, IntLitMeaning, IntSetVal,
-	IntVal, Model, Solver,
+	BoolDecision, BoolFormula, Clause, Decision, IntDecision, IntLitMeaning, IntSetVal, IntVal,
+	Model, Solver,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -43,7 +44,7 @@ pub(crate) struct BoolDecisionDef {
 	///
 	/// This list is used to enqueue the constraints for propagation when the
 	/// domain of the variable changes.
-	pub(crate) constraints: Vec<ConRef>,
+	pub(crate) constraints: Vec<ActivationActionS>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -105,7 +106,7 @@ pub struct InitConfig {
 	vivification: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 /// Definition of an integer decision variable in a [`Model`].
 pub(crate) struct IntDecisionDef {
 	/// The set of possible values that the variable can take.
@@ -114,7 +115,7 @@ pub(crate) struct IntDecisionDef {
 	///
 	/// This list is used to enqueue the constraints for propagation when the
 	/// domain of the variable changes.
-	pub(crate) constraints: Vec<ConRef>,
+	pub(crate) constraints: ActivationList,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -363,7 +364,7 @@ impl IntDecisionDef {
 	pub(crate) fn with_domain(dom: IntSetVal) -> Self {
 		Self {
 			domain: Domain::Domain(dom),
-			constraints: Vec::new(),
+			constraints: Default::default(),
 		}
 	}
 }

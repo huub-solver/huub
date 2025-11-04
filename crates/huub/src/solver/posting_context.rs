@@ -97,7 +97,7 @@ impl PostingContext<'_> {
 				self.observed_variables.push(lit.var());
 				Vec::new()
 			})
-			.push(ActivationAction::Advise(adv).into());
+			.push(ActivationAction::<_, PropRef>::Advise(adv).into());
 	}
 }
 
@@ -262,7 +262,7 @@ impl<'a> IntPostingActions<PostingContext<'a>> for IntView {
 			negated,
 			propagator: ctx.prop,
 		});
-		ctx.state.int_activation[var].add(ActivationAction::Advise(adv), cond);
+		ctx.state.int_activation[var].add(ActivationAction::<_, PropRef>::Advise(adv), cond);
 	}
 }
 

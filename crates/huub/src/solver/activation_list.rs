@@ -1,11 +1,17 @@
 //! Module containing data structures for the activation of propagators based on
 //! changes to decision variables.
 
-use std::{mem, ops::Add};
+use std::{
+	mem,
+	ops::{Add, AddAssign},
+};
 
 use itertools::Itertools;
 
-use crate::solver::engine::{Advisor, PropRef};
+use crate::{
+	solver::engine::{Advisor, PropRef},
+	ConRef,
+};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 /// A data structure that store a list of propagators to be enqueued based on
@@ -112,6 +118,25 @@ impl From<ActivationAction<Advisor, PropRef>> for ActivationActionS {
 	}
 }
 
+impl From<ActivationActionS> for ActivationAction<Advisor, ConRef> {
+	fn from(value: ActivationActionS) -> Self {
+		if (value.0 & 0b1) == 1 {
+			Self::Advise(Advisor::from_raw(value.0 >> 1))
+		} else {
+			Self::Enqueue(ConRef::from_raw(value.0 >> 1))
+		}
+	}
+}
+
+impl From<ActivationAction<Advisor, ConRef>> for ActivationActionS {
+	fn from(value: ActivationAction<Advisor, ConRef>) -> Self {
+		Self(match value {
+			ActivationAction::Advise(advisor) => (advisor.raw() << 1) | 0b1,
+			ActivationAction::Enqueue(prop) => prop.raw() << 1,
+		})
+	}
+}
+
 impl ActivationList {
 	/// Get an iterator over the list of propagators to be enqueued.
 	pub(crate) fn activated_by<'a, A, P>(
@@ -204,6 +229,27 @@ impl ActivationList {
 			IntPropCond::Domain => self.activations.push(action),
 		};
 	}
+
+	pub(crate) fn extend(&mut self, other: Self) {
+		for (i, act) in other.activations.into_iter().enumerate() {
+			let i = i as u32;
+			let act: ActivationAction<Advisor, PropRef> = act.into();
+			self.add(
+				act,
+				if i < other.lower_bound_idx {
+					IntPropCond::Fixed
+				} else if i < other.upper_bound_idx {
+					IntPropCond::LowerBound
+				} else if i < other.bounds_idx {
+					IntPropCond::UpperBound
+				} else if i < other.domain_idx {
+					IntPropCond::Bounds
+				} else {
+					IntPropCond::Domain
+				},
+			);
+		}
+	}
 }
 
 impl Add<IntEvent> for IntEvent {
@@ -219,6 +265,12 @@ impl Add<IntEvent> for IntEvent {
 			(UpperBound, _) | (_, UpperBound) => UpperBound,
 			(Domain, Domain) => Domain,
 		}
+	}
+}
+
+impl AddAssign<IntEvent> for IntEvent {
+	fn add_assign(&mut self, rhs: IntEvent) {
+		*self = *self + rhs;
 	}
 }
 

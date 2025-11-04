@@ -36,10 +36,10 @@ pub use pindakaas::solver::TermSignal;
 use pindakaas::{
 	propositional_logic::Formula,
 	solver::{cadical::Cadical, propagation::ExternalPropagation},
-	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit as RawLit, Unsatisfiable,
+	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit as RawLit, Unsatisfiable, Var as RawVar,
 };
 use rangelist::{IntervalIterator, RangeList};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::warn;
 
 use crate::{
@@ -76,7 +76,8 @@ use crate::{
 		ReformulationMapBuilder,
 	},
 	solver::{
-		activation_list::IntPropCond,
+		activation_list::{ActivationAction, ActivationActionS, IntEvent, IntPropCond},
+		engine::Advisor,
 		queue::{PriorityLevel, PropagatorInfo, PropagatorQueue},
 		trail::TrailedInt,
 		IntLitMeaning, Solver,
@@ -196,6 +197,12 @@ pub struct Model {
 	trail: IndexVec<TrailedInt, IntVal>,
 	/// Reference for the current propagator being executed.
 	cur_prop: Option<ConRef>,
+	/// Integer variable changes that occurred during the execution of the
+	/// current propagator.
+	int_events: FxHashMap<IntDecisionIndex, IntEvent>,
+	/// Boolean variable changes that occurred during the execution of the
+	/// current propagator.
+	bool_events: Vec<RawVar>,
 }
 
 /// Type alias for a non-zero parameter integer value.
@@ -1116,6 +1123,26 @@ impl Model {
 				self.constraints[con] = Some(con_obj);
 			}
 		}
+		// Notify propagators about all events that occurred
+		for (iv, event) in self.int_events.drain() {
+			for act in self.int_vars[iv].constraints.activated_by(event) {
+				match act {
+					ActivationAction::Advise(_) => todo!(),
+					ActivationAction::Enqueue(c) => self.propagator_queue.enqueue_propagator(c),
+				}
+			}
+		}
+		for bv in self.bool_events.drain(..) {
+			for &act in self.bool_vars[i32::from(bv) as usize - 1]
+				.constraints
+				.iter()
+			{
+				match act.into() {
+					ActivationAction::Advise(_) => todo!(),
+					ActivationAction::Enqueue(c) => self.propagator_queue.enqueue_propagator(c),
+				}
+			}
+		}
 		Ok(())
 	}
 
@@ -1374,10 +1401,7 @@ impl BoolPropagationActions<Model> for BoolDecision {
 				let def = &mut ctx.bool_vars[var];
 				debug_assert!(def.alias.is_none());
 				def.alias = Some(BoolDecision(Const(!l.is_negated())));
-				let constraints = def.constraints.clone();
-				for c in constraints {
-					ctx.propagator_queue.enqueue_propagator(c);
-				}
+				ctx.bool_events.push(l.var());
 				Ok(())
 			}
 			Const(c) => c.set(ctx, reason),
@@ -1760,13 +1784,14 @@ impl IntPropagationActions<Model> for IntDecision {
 				}
 				if lb != *dom.upper_bound().unwrap() {
 					dom.set_lower_bound(lb);
+					ctx.int_events
+						.entry(v)
+						.and_modify(|e| *e += IntEvent::LowerBound)
+						.or_insert(IntEvent::LowerBound);
 				} else {
 					def.domain = Domain::Alias(lb.into());
-				}
-				let constraints = def.constraints.clone();
-				for c in constraints {
-					ctx.propagator_queue.enqueue_propagator(c);
-				}
+					ctx.int_events.insert(v, IntEvent::Fixed);
+				};
 				Ok(())
 			}
 			Const(v) => v.set_lower_bound(ctx, lb, reason),
@@ -1813,13 +1838,14 @@ impl IntPropagationActions<Model> for IntDecision {
 				}
 				if ub != *dom.lower_bound().unwrap() {
 					dom.set_upper_bound(ub);
+					ctx.int_events
+						.entry(v)
+						.and_modify(|v| *v += IntEvent::UpperBound)
+						.or_insert(IntEvent::UpperBound);
 				} else {
 					def.domain = Domain::Alias(ub.into());
-				}
-				let constraints = def.constraints.clone();
-				for c in constraints {
-					ctx.propagator_queue.enqueue_propagator(c);
-				}
+					ctx.int_events.insert(v, IntEvent::Fixed);
+				};
 				Ok(())
 			}
 			Const(v) => v.set_upper_bound(ctx, ub, reason),
@@ -1861,10 +1887,7 @@ impl IntPropagationActions<Model> for IntDecision {
 				};
 				if dom.contains(&val) {
 					def.domain = Domain::Alias(val.into());
-					let constraints = def.constraints.clone();
-					for c in constraints {
-						ctx.propagator_queue.enqueue_propagator(c);
-					}
+					ctx.int_events.insert(v, IntEvent::Fixed);
 					Ok(())
 				} else {
 					Err(ctx.create_conflict(IntDecision(Var(v)).eq(val), reason))
@@ -1942,7 +1965,7 @@ impl IntSimplificationActions<Model> for IntDecision {
 		let x = self.resolve_alias(ctx);
 		let y = other.into().resolve_alias(ctx);
 
-		let (idx, target, dom_con) = match (x.0, y.0) {
+		let (idx, target) = match (x.0, y.0) {
 			(x, y) if x == y => return Ok(()),
 			(Const(x), Const(y)) if x != y => return Err(ctx.declare_conflict([])),
 			(Const(y), x) | (x, Const(y)) => {
@@ -1959,13 +1982,7 @@ impl IntSimplificationActions<Model> for IntDecision {
 				} else {
 					(x, IntDecision(y))
 				};
-				let Domain::Domain(x_dom) = mem::replace(
-					&mut ctx.int_vars[x].domain,
-					Domain::Domain(RangeList::default()),
-				) else {
-					unreachable!()
-				};
-				(x, y, Some(x_dom))
+				(x, y)
 			}
 			(Linear(x_t, x_i), Linear(y_t, y_i)) => {
 				// Decide which variable to redefine based on the other.
@@ -1989,15 +2006,7 @@ impl IntSimplificationActions<Model> for IntDecision {
 					NonZeroIntVal::new(y_t.scale.get() / x_t.scale.get()).unwrap(),
 				) + (y_t.offset - x_t.offset) / x_t.scale.get();
 				let target = IntDecision(Var(y_i)) * trans_y.scale + trans_y.offset;
-
-				// Domain of target must be equivalent to the domain of x
-				let Domain::Domain(x_dom) = mem::replace(
-					&mut ctx.int_vars[x_i].domain,
-					Domain::Domain(RangeList::default()),
-				) else {
-					unreachable!()
-				};
-				(x_i, target, Some(x_dom))
+				(x_i, target)
 			}
 			(iv @ Linear(i_t, i_i), Bool(b_t, b_d)) | (Bool(b_t, b_d), iv @ Linear(i_t, i_i)) => {
 				let iv = IntDecision(iv);
@@ -2027,7 +2036,6 @@ impl IntSimplificationActions<Model> for IntDecision {
 							},
 							b_d,
 						)),
-						None,
 					)
 				} else if contains_lb {
 					iv.set_val(ctx, lb, [])?;
@@ -2072,11 +2080,21 @@ impl IntSimplificationActions<Model> for IntDecision {
 			}
 		};
 
-		ctx.int_vars[idx].domain = Domain::Alias(target);
+		// Set the domain on the variable to be aliased to trigger subscription
+		// events.
+		IntDecision(Var(idx)).set_domain(ctx, &target.get_domain(ctx), [])?;
+		// Change variable to point to the target
+		match mem::replace(&mut ctx.int_vars[idx].domain, Domain::Alias(target)) {
+			// Restrict the domain of the target variable using the variable domain
+			// being aliased.
+			Domain::Domain(d) => target.set_domain(ctx, &d, [])?,
+			Domain::Alias(IntDecision(Const(v))) => target.set_val(ctx, v, [])?,
+			_ => unreachable!(),
+		};
 		// Transfer any constraints from the aliased variable to the target variable
 		let constraints = mem::take(&mut ctx.int_vars[idx].constraints);
-		let notify = match target.0 {
-			// Move subscriptions to other integer decision
+		// Move subscriptions to target decision variable
+		match target.0 {
 			Var(j)
 			| Linear(_, j)
 			| Bool(
@@ -2089,26 +2107,19 @@ impl IntSimplificationActions<Model> for IntDecision {
 				),
 			) => {
 				ctx.int_vars[j].constraints.extend(constraints);
-				&ctx.int_vars[j].constraints
 			}
 			// Move subscription to Boolean decision
 			Bool(_, BoolDecision(BoolDecisionInner::Lit(l))) => {
 				let jdx = i32::from(l.var()) as usize - 1;
-				ctx.bool_vars[jdx].constraints.extend(constraints);
-				&ctx.bool_vars[jdx].constraints
+				ctx.bool_vars[jdx].constraints.extend(
+					constraints
+						.activated_by::<Advisor, ConRef>(IntEvent::Fixed)
+						.map(ActivationActionS::from),
+				);
 			}
 			// Notify current subscriptions one more time, then forget about them.
-			Const(_) | Bool(_, BoolDecision(BoolDecisionInner::Const(_))) => &constraints,
+			Const(_) | Bool(_, BoolDecision(BoolDecisionInner::Const(_))) => {}
 		};
-		// Notify constraints listening to either variable of update
-		for c in notify.clone() {
-			ctx.propagator_queue.enqueue_propagator(c);
-		}
-		// Restrict the domain of the target variable using the variable domain
-		// being aliased.
-		if let Some(dom) = dom_con {
-			target.set_domain(ctx, &dom, [])?;
-		}
 		Ok(())
 	}
 
@@ -2137,14 +2148,20 @@ impl IntSimplificationActions<Model> for IntDecision {
 					return Ok(());
 				}
 				if diff.card() == Some(1) {
-					ctx.int_vars[v].domain = Domain::Alias((*diff.lower_bound().unwrap()).into());
+					let val = *diff.lower_bound().unwrap();
+					ctx.int_vars[v].domain = Domain::Alias(val.into());
+					ctx.int_events.insert(v, IntEvent::Fixed);
 				} else {
+					let entry = ctx.int_events.entry(v).or_insert(IntEvent::Domain);
+					if dom.lower_bound().unwrap() == diff.lower_bound().unwrap() {
+						*entry += IntEvent::LowerBound;
+					}
+					if dom.upper_bound().unwrap() == diff.upper_bound().unwrap() {
+						*entry += IntEvent::UpperBound;
+					}
+
 					ctx.int_vars[v].domain = Domain::Domain(diff);
-				}
-				let constraints = ctx.int_vars[v].constraints.clone();
-				for c in constraints {
-					ctx.propagator_queue.enqueue_propagator(c);
-				}
+				};
 				Ok(())
 			}
 			Const(v) => v.set_not_in_set(ctx, values, reason),
@@ -2188,14 +2205,19 @@ impl IntSimplificationActions<Model> for IntDecision {
 					return Ok(());
 				}
 				if intersect.card() == Some(1) {
-					ctx.int_vars[v].domain =
-						Domain::Alias((*intersect.lower_bound().unwrap()).into());
+					let val = *intersect.lower_bound().unwrap();
+					ctx.int_vars[v].domain = Domain::Alias(val.into());
+					ctx.int_events.insert(v, IntEvent::Fixed);
 				} else {
+					let entry = ctx.int_events.entry(v).or_insert(IntEvent::Domain);
+					if dom.lower_bound().unwrap() == intersect.lower_bound().unwrap() {
+						*entry += IntEvent::LowerBound;
+					}
+					if dom.upper_bound().unwrap() == intersect.upper_bound().unwrap() {
+						*entry += IntEvent::UpperBound;
+					}
+
 					ctx.int_vars[v].domain = Domain::Domain(intersect);
-				}
-				let constraints = ctx.int_vars[v].constraints.clone();
-				for c in constraints {
-					ctx.propagator_queue.enqueue_propagator(c);
 				}
 				Ok(())
 			}
@@ -2246,24 +2268,25 @@ impl BoolSimplificationActions<Model> for BoolDecision {
 
 				// Move subscriptions from aliased variable to the new primary variable
 				let constraints = mem::take(&mut ctx.bool_vars[idx].constraints);
-				let notify = match y.0 {
+				match y.0 {
 					// Move subscriptions to another Boolean decision
 					Lit(lit) => {
 						let jdx = i32::from(lit.var()) as usize - 1;
 						ctx.bool_vars[jdx].constraints.extend(constraints);
-						&ctx.bool_vars[jdx].constraints
 					}
 					// Move subscriptions to an integer decision
 					IntEq(j, _) | IntGreaterEq(j, _) | IntLess(j, _) | IntNotEq(j, _) => {
-						ctx.int_vars[j].constraints.extend(constraints);
-						&ctx.int_vars[j].constraints
+						for act in constraints {
+							// TODO: This triggers even when the Boolean Condition does not change
+							// value
+							ctx.int_vars[j].constraints.add(
+								ActivationAction::<Advisor, ConRef>::from(act),
+								IntPropCond::Domain,
+							);
+						}
 					}
 					Const(_) => unreachable!(),
 				};
-				// Notify constraints subscribed to either variable about the change
-				for c in notify.clone() {
-					ctx.propagator_queue.enqueue_propagator(c);
-				}
 				Ok(())
 			}
 			(x, y) => {
@@ -2395,7 +2418,7 @@ impl BoolPostingActions<ModelPostingContext<'_>> for BoolDecision {
 		match var.0 {
 			BoolDecisionInner::Lit(lit) => ctx.model.bool_vars[i32::from(lit.var()) as usize - 1]
 				.constraints
-				.push(ctx.con),
+				.push(ActivationAction::Enqueue(ctx.con).into()),
 			BoolDecisionInner::Const(_) => ctx.semantic_enqueue = true,
 			// TODO: These definitions might enqueue when the boolean is not fixed. Use advisors
 			// instead?
@@ -2472,7 +2495,9 @@ impl IntPostingActions<ModelPostingContext<'_>> for IntDecision {
 				if condition != IntPropCond::Fixed {
 					ctx.semantic_enqueue = true;
 				}
-				ctx.model.int_vars[iv].constraints.push(ctx.con);
+				ctx.model.int_vars[iv]
+					.constraints
+					.add(ActivationAction::Enqueue(ctx.con), condition);
 			}
 			IntDecisionInner::Const(_) => ctx.semantic_enqueue = true,
 			IntDecisionInner::Bool(_, bv) => {
