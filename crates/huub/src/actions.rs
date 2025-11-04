@@ -482,14 +482,19 @@ impl dyn ReformulationActions + '_ {
 	}
 }
 
+/// Internal wrapper for the [`ClauseDatabase`] implementation to provide a
+/// [`ReformulationError`] if the solver returns [`Unsatisfiable`].
 pub(crate) struct ReformulationClauseDatabaseWrapper<'a> {
+	/// The wrapped dynamic [`ReformulationActions`] implementation.
 	db: &'a mut (dyn ReformulationActions + 'a),
+	/// Error that captures the clause that caused methods to return
+	/// [`Unsatisfiable`].
 	pub(crate) error: Option<ReformulationError>,
 }
 
 impl ClauseDatabase for ReformulationClauseDatabaseWrapper<'_> {
 	fn add_clause_from_slice(&mut self, clause: &[RawLit]) -> Result<(), Unsatisfiable> {
-		match self.db.add_clause(clause.into_iter().cloned()) {
+		match self.db.add_clause(clause.iter().cloned()) {
 			Ok(()) => Ok(()),
 			Err(err) => {
 				self.error = Some(err);

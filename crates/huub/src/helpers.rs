@@ -1,7 +1,6 @@
 //! Module containing general, e.g. purely numeric, structures or used in
 //! multiple places in the library and are not exposed to the user.
 
-pub(crate) mod as_any;
 pub(crate) mod linear_transform;
 pub(crate) mod opt_field;
 

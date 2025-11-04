@@ -1163,7 +1163,8 @@ impl<Oracle: TerminateCallback> Solver<Oracle> {
 }
 
 impl<Oracle: ExternalPropagation> Solver<Oracle> {
-	fn add_propagator(&mut self, propagator: BoxedPropagator, from_model: bool) {
+	/// Add a constraint propagator to the solver to enforce a constraint.
+	pub fn add_propagator(&mut self, propagator: BoxedPropagator, from_model: bool) {
 		let mut handle = self.engine.borrow_mut();
 		let engine = &mut *handle;
 		let prop_ref = engine.propagators.push(propagator);

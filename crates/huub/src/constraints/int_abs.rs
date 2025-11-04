@@ -52,10 +52,10 @@ impl IntAbsBounds<IntView, IntView, RawLit> {
 			panic!("origin variable in absolute value constraint is known positive or negative");
 		};
 		*solver += Box::new(Self {
-			origin: origin,
-			abs: abs,
+			origin,
+			abs,
 			origin_positive,
-		})
+		});
 	}
 }
 

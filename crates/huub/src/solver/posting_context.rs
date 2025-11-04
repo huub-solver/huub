@@ -1,3 +1,7 @@
+//! This module contains the [`PostingContext`] struct, which is used to provide
+//! [`ReasoningEngine::PostingCtx`] to [`Propagator`] implementations when they
+//! are posted to a [`Solver`].
+
 use pindakaas::{Lit as RawLit, Var as RawVar};
 
 use crate::{
@@ -37,6 +41,8 @@ pub struct PostingContext<'a> {
 }
 
 impl<'a> PostingContext<'a> {
+	/// Create a new posting context for a [`Solver`] to post a [`Propagator`]
+	/// that will be referred to using [`PropRef`].
 	pub(crate) fn new(state: &'a mut State, prop: PropRef) -> Self {
 		Self {
 			state,
@@ -48,10 +54,17 @@ impl<'a> PostingContext<'a> {
 		}
 	}
 
+	/// Returns the propagation priority of the propagator.
 	pub(crate) fn priority(&self) -> PriorityLevel {
 		self.priority
 	}
 
+	/// Returns whether the propagator should be enqueued based on explicit
+	/// propagator requests and the semantics of the subscriptions of the
+	/// propagator.
+	///
+	/// Note that when `from_model` is set, the semantic enqueue is ignored, as
+	/// it is assumed that the propagator is already at fix-point.
 	pub(crate) fn enqueue(&self, from_model: bool) -> bool {
 		if let Some(enqueue) = self.decision_enqueue {
 			enqueue

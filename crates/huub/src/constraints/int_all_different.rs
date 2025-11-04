@@ -357,6 +357,7 @@ impl<I> IntAllDifferentBounds<I> {
 		Ok(())
 	}
 
+	/// Create a new [`IntAllDifferentBounds`] propagator.
 	pub(crate) fn new(vars: Vec<I>) -> Self {
 		let interval = vec![
 			AllDiffVarMeta {
@@ -432,7 +433,7 @@ impl<I> IntAllDifferentBounds<I> {
 		let size: usize = self.var.len();
 
 		for (i, v) in self.var.iter().enumerate() {
-			(self.lb_cache[i], self.ub_cache[i]) = v.get_bounds(ctx)
+			(self.lb_cache[i], self.ub_cache[i]) = v.get_bounds(ctx);
 		}
 
 		self.min_sorted.sort_by_key(|&i| self.lb_cache[i]);

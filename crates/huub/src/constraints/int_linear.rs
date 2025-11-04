@@ -429,7 +429,8 @@ where
 				self.terms
 					.iter()
 					.enumerate()
-					.filter_map(|(j, w)| (j != i).then(|| w.get_lower_bound_lit(ctx)))
+					.filter(|&(j, _)| j != i)
+					.map(|(_, w)| w.get_lower_bound_lit(ctx))
 					.collect_vec()
 			};
 			if let Some(Reification::ReifiedBy(r) | Reification::ImpliedBy(r)) = self.reif {
@@ -458,7 +459,8 @@ where
 					self.terms
 						.iter()
 						.enumerate()
-						.filter_map(|(j, &w)| (j != i).then(|| w.get_upper_bound_lit(ctx)))
+						.filter(|&(j, _)| j != i)
+						.map(|(_, &w)| w.get_upper_bound_lit(ctx))
 						.collect_vec()
 				};
 				if let Some(Reification::ReifiedBy(r) | Reification::ImpliedBy(r)) = self.reif {

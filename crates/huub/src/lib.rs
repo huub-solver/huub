@@ -280,7 +280,7 @@ where
 	Iter: IntoIterator,
 	Iter::Item: Into<IntDecision>,
 {
-	array_minimum_int(prb, vars.into_iter().map(|v| -v.into()), -max)
+	array_minimum_int(prb, vars.into_iter().map(|v| -v.into()), -max);
 }
 
 /// Create a constraint that enforces that an integer decision variable takes
@@ -1010,17 +1010,19 @@ impl Model {
 		}
 
 		// Retrieve the reference for the last constraint
-		self.constraints
+		let c: &mut dyn Constraint<Model> = self
+			.constraints
 			.last_mut()
 			.unwrap()
 			.as_mut()
 			.unwrap()
-			.as_mut()
-			.as_any_mut()
-			.downcast_mut::<C>()
-			.unwrap()
+			.as_mut();
+		let c: &mut dyn Any = c;
+		c.downcast_mut::<C>().unwrap()
 	}
 
+	/// Create a [`ReasoningEngine::Conflict`] instance based on the failure to
+	/// set `subject`, that must be set because of `reason`.
 	fn create_conflict(
 		&mut self,
 		subject: BoolDecision,
@@ -1166,7 +1168,8 @@ impl Model {
 		let int_eager_order = FxHashSet::<IntDecisionIndex>::default();
 
 		for c in self.constraints.iter().flatten() {
-			let c: &dyn Any = c.as_any();
+			let c: &dyn Constraint<Model> = c.as_ref();
+			let c: &dyn Any = c;
 			if let Some(c) = c.downcast_ref::<BoolDecisionArrayElement>() {
 				let index = c.index.resolve_alias(self);
 				if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {
@@ -1649,7 +1652,7 @@ impl IntInspectionActions<Model> for IntDecision {
 		self.leq(ub)
 	}
 
-	fn get_lit_meaning(&self, ctx: &Model, lit: Self::Atom) -> Option<IntLitMeaning> {
+	fn get_lit_meaning(&self, _ctx: &Model, lit: Self::Atom) -> Option<IntLitMeaning> {
 		const BOOL_DEF_MEANING: IntLitMeaning = IntLitMeaning::GreaterEq(1);
 
 		match self.0 {
@@ -1662,9 +1665,9 @@ impl IntInspectionActions<Model> for IntDecision {
 				BoolDecisionInner::IntNotEq(j, val) if i == j => Some(IntLitMeaning::NotEq(val)),
 				_ => None,
 			},
-			IntDecisionInner::Const(_) => return None,
+			IntDecisionInner::Const(_) => None,
 			IntDecisionInner::Linear(trans, iv) => {
-				let m = IntDecision(IntDecisionInner::Var(iv)).get_lit_meaning(ctx, lit)?;
+				let m = IntDecision(IntDecisionInner::Var(iv)).get_lit_meaning(_ctx, lit)?;
 				Some(trans.transform_lit(m))
 			}
 			IntDecisionInner::Bool(trans, b) => {
@@ -2343,6 +2346,8 @@ pub struct ModelPostingContext<'a> {
 }
 
 impl<'a> ModelPostingContext<'a> {
+	/// Creates a new [`ModelPostingContext`] for the given constraint
+	/// reference.
 	pub(crate) fn new(model: &'a mut Model, con: ConRef) -> Self {
 		ModelPostingContext {
 			con,
@@ -2353,6 +2358,8 @@ impl<'a> ModelPostingContext<'a> {
 		}
 	}
 
+	/// Returns whether to enqueue the propagator based on its explicit requests
+	/// or otherwise the semantics of its subscriptions.
 	pub(crate) fn enqueue(&self) -> bool {
 		if let Some(enqueue) = self.decision_enqueue {
 			enqueue
@@ -2368,7 +2375,7 @@ impl PostingActions for ModelPostingContext<'_> {
 	}
 
 	fn enqueue_now(&mut self, option: bool) {
-		self.decision_enqueue = Some(option)
+		self.decision_enqueue = Some(option);
 	}
 
 	fn set_priority(&mut self, priority: PriorityLevel) {
@@ -2393,10 +2400,10 @@ impl BoolPostingActions<ModelPostingContext<'_>> for BoolDecision {
 			// TODO: These definitions might enqueue when the boolean is not fixed. Use advisors
 			// instead?
 			BoolDecisionInner::IntEq(iv, _) | BoolDecisionInner::IntNotEq(iv, _) => {
-				IntDecision(IntDecisionInner::Var(iv)).enqueue_when(ctx, IntPropCond::Domain)
+				IntDecision(IntDecisionInner::Var(iv)).enqueue_when(ctx, IntPropCond::Domain);
 			}
 			BoolDecisionInner::IntGreaterEq(iv, _) | BoolDecisionInner::IntLess(iv, _) => {
-				IntDecision(IntDecisionInner::Var(iv)).enqueue_when(ctx, IntPropCond::Bounds)
+				IntDecision(IntDecisionInner::Var(iv)).enqueue_when(ctx, IntPropCond::Bounds);
 			}
 		}
 	}
@@ -2458,21 +2465,21 @@ impl IntPostingActions<ModelPostingContext<'_>> for IntDecision {
 	}
 
 	fn enqueue_when(&self, ctx: &mut ModelPostingContext<'_>, condition: IntPropCond) {
-		let var = self.resolve_alias(&ctx.model);
+		let var = self.resolve_alias(ctx.model);
 
 		match var.0 {
 			IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) => {
 				if condition != IntPropCond::Fixed {
 					ctx.semantic_enqueue = true;
 				}
-				ctx.model.int_vars[iv].constraints.push(ctx.con)
+				ctx.model.int_vars[iv].constraints.push(ctx.con);
 			}
 			IntDecisionInner::Const(_) => ctx.semantic_enqueue = true,
 			IntDecisionInner::Bool(_, bv) => {
 				if condition != IntPropCond::Fixed {
 					ctx.semantic_enqueue = true;
 				}
-				bv.enqueue_when_fixed(ctx)
+				bv.enqueue_when_fixed(ctx);
 			}
 		}
 	}

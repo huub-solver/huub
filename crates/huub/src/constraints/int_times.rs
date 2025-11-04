@@ -170,11 +170,12 @@ where
 		if let Some(f1) = self.factor1.get_val(ctx) {
 			(self.factor2.clone() * f1).unify(ctx, self.product.clone())?;
 			return Ok(SimplificationStatus::Subsumed);
-		} else if let Some(f2) = self.factor2.get_val(ctx) {
+		}
+		if let Some(f2) = self.factor2.get_val(ctx) {
 			(self.factor1.clone() * f2).unify(ctx, self.product.clone())?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
-		return Ok(SimplificationStatus::NoFixpoint);
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, ctx: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {

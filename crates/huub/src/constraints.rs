@@ -16,6 +16,7 @@ pub mod int_times;
 pub mod int_value_precede;
 
 use std::{
+	any::Any,
 	error::Error,
 	fmt::{self, Debug},
 	iter::once,
@@ -34,7 +35,6 @@ use crate::{
 		BoolSimplificationActions, IntExplanationActions, IntInspectionActions, IntPostingActions,
 		IntPropagationActions, IntSimplificationActions, ReasoningEngine, ReformulationActions,
 	},
-	helpers::as_any::AsAny,
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::IntEvent,
@@ -81,9 +81,7 @@ pub struct Conflict {
 /// Constraints specified in the library implement this trait, but are using
 /// their explicit type in an enumerated type to allow for global model
 /// analysis.
-pub trait Constraint<E: ReasoningEngine + ?Sized>:
-	AsAny + Debug + DynClone + Propagator<E>
-{
+pub trait Constraint<E: ReasoningEngine + ?Sized>: Any + Debug + DynClone + Propagator<E> {
 	/// Simplify the [`Model`] given the current constraint.
 	///
 	/// This method is expected to reduce the domains of decision variables,
@@ -108,7 +106,9 @@ pub trait Constraint<E: ReasoningEngine + ?Sized>:
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// A note that the mentioned propagator will compute the `Reason` if requested.
 pub struct LazyReason {
+	/// Reference to the propagator that will compute the reason.
 	pub(crate) propagator: u32,
+	/// Data to be given to the propagator to compute the reason.
 	pub(crate) data: u64,
 }
 
@@ -397,7 +397,15 @@ impl Reason<RawLit> {
 						.unwrap_or(true.into()),
 					*data,
 				);
-				match Reason::collect_vec(reason) {
+				let v: Result<Vec<_>, _> = reason
+					.into_iter()
+					.filter_map(|v| match v.0 {
+						BoolViewInner::Lit(lit) => Some(Ok(lit)),
+						BoolViewInner::Const(false) => Some(Err(false)),
+						BoolViewInner::Const(true) => None,
+					})
+					.collect();
+				match v {
 					Ok(v) => v,
 					Err(false) => panic!("invalid lazy reason"), // TODO: Better message,
 					Err(true) => Vec::new(),
@@ -412,16 +420,8 @@ impl Reason<RawLit> {
 		}
 	}
 
-	pub(crate) fn collect_vec(
-		iter: impl IntoIterator<Item = BoolView>,
-	) -> Result<Vec<RawLit>, bool> {
-		Result::<Vec<_>, _>::from_iter(iter.into_iter().filter_map(|v| match v.0 {
-			BoolViewInner::Lit(lit) => Some(Ok(lit)),
-			BoolViewInner::Const(false) => Some(Err(false)),
-			BoolViewInner::Const(true) => None,
-		}))
-	}
-
+	/// Internal function used to tighten a [`Reason`] with [`BoolView`] atoms
+	/// to a [`Reason`] with [`RawLit`] atoms.
 	pub(crate) fn from_view(reason: Result<Reason<BoolView>, bool>) -> Result<Self, bool> {
 		let v = match reason? {
 			Reason::Lazy(lazy) => return Ok(Self::Lazy(lazy)),
