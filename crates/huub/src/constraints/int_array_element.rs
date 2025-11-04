@@ -94,7 +94,7 @@ impl IntArrayElementBounds<IntView, IntView, IntView> {
 	/// Create a new [`ArrayVarIntElementBounds`] propagator and post it in the
 	/// solver.
 	pub fn new_in<E>(
-		engine: &mut E,
+		solver: &mut E,
 		collection: Vec<IntView>,
 		index: IntView,
 		result: IntView,
@@ -104,13 +104,13 @@ impl IntArrayElementBounds<IntView, IntView, IntView> {
 		IntView: IntDecisionActions<E, Atom = BoolView>,
 	{
 		// Remove out-of-bound values from the index variables
-		let index_ub = index.get_lit(engine, IntLitMeaning::Less(collection.len() as IntVal));
-		let index_lb = index.get_lit(engine, IntLitMeaning::GreaterEq(0));
-		engine.add_clause([index_ub])?;
-		engine.add_clause([index_lb])?;
+		let index_ub = index.get_lit(solver, IntLitMeaning::Less(collection.len() as IntVal));
+		let index_lb = index.get_lit(solver, IntLitMeaning::GreaterEq(0));
+		solver.add_clause([index_ub])?;
+		solver.add_clause([index_lb])?;
 
-		let me = Self::new(engine, collection, index, result);
-		*engine += Box::new(me);
+		let me = Self::new(solver, collection, index, result);
+		*solver += Box::new(me);
 
 		Ok(())
 	}

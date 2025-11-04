@@ -43,11 +43,11 @@ where
 impl IntArrayMinimumBounds<IntView, IntView> {
 	/// Create a new [`ArrayIntMinimumBounds`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(engine: &mut E, vars: Vec<IntView>, min: IntView)
+	pub fn new_in<E>(solver: &mut E, vars: Vec<IntView>, min: IntView)
 	where
 		E: AddAssign<BoxedPropagator> + ?Sized,
 	{
-		*engine += Box::new(Self {
+		*solver += Box::new(Self {
 			vars: vars.clone(),
 			min,
 		});

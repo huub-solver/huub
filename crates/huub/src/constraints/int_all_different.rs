@@ -479,11 +479,11 @@ impl<I> IntAllDifferentBounds<I> {
 impl IntAllDifferentBounds<IntView> {
 	/// Create a new [`IntAllDifferentBounds`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(engine: &mut E, vars: Vec<IntView>)
+	pub fn new_in<E>(solver: &mut E, vars: Vec<IntView>)
 	where
 		E: AddAssign<BoxedPropagator> + ?Sized,
 	{
-		*engine += Box::new(Self::new(vars));
+		*solver += Box::new(Self::new(vars));
 	}
 }
 
@@ -511,11 +511,11 @@ where
 impl IntAllDifferentValue<IntView> {
 	/// Create a new [`IntAllDifferentValue`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(engine: &mut E, vars: Vec<IntView>)
+	pub fn new_in<E>(solver: &mut E, vars: Vec<IntView>)
 	where
 		E: AddAssign<BoxedPropagator> + ?Sized,
 	{
-		*engine += Box::new(Self {
+		*solver += Box::new(Self {
 			vars: vars.clone(),
 			action_list: Vec::new(),
 		});

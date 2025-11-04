@@ -11,7 +11,7 @@ use index_vec::{define_index_type, IndexVec};
 use pindakaas::{
 	propositional_logic::{Formula, TseitinEncoder},
 	solver::propagation::ExternalPropagation,
-	ClauseDatabase, ClauseDatabaseTools, Encoder, Lit as RawLit, Unsatisfiable,
+	ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
 };
 use rangelist::IntervalIterator;
 use rustc_hash::FxHashSet;
@@ -19,9 +19,10 @@ use rustc_hash::FxHashSet;
 use crate::{
 	actions::{
 		BoolInspectionActions, DecisionActions, InitializationActions, IntDecisionActions,
-		IntInspectionActions, ReasoningEngine, ReformulationActions, TrailingActions,
+		IntInspectionActions, PropagationActions, ReasoningEngine, ReformulationActions,
+		TrailingActions,
 	},
-	constraints::{BoxedPropagator, Constraint, Propagator},
+	constraints::{BoxedPropagator, Constraint, ModelBoolView, Propagator, SimplificationStatus},
 	helpers::linear_transform::LinearTransform,
 	solver::{
 		int_var::{EncodingType, IntVar, IntVarRef},
@@ -182,7 +183,32 @@ pub(crate) struct ReformulationMapBuilder {
 	pub(crate) int_map: IndexVec<IntDecisionIndex, Option<IntView>>,
 }
 
-impl<E: ReasoningEngine> Constraint<E> for BoolFormula {
+impl<E> Constraint<E> for BoolFormula
+where
+	E: ReasoningEngine,
+	BoolDecision: ModelBoolView<E>,
+{
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
+		let mut resolver = |bv: BoolDecision| {
+			if let Some(b) = bv.get_val(ctx) {
+				return Err(b);
+			};
+			Ok(bv)
+		};
+		let result: Result<Formula<BoolDecision>, _> = self.clone().simplify_with(&mut resolver);
+		match result {
+			Ok(f) => {
+				*self = f;
+				Ok(SimplificationStatus::NoFixpoint)
+			}
+			Err(true) => Ok(SimplificationStatus::Subsumed),
+			Err(false) => Err(ctx.declare_conflict([])),
+		}
+	}
+
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let mut resolver = |bv: BoolDecision| {
 			let inner = slv.get_solver_bool(bv);
@@ -193,14 +219,9 @@ impl<E: ReasoningEngine> Constraint<E> for BoolFormula {
 		};
 		let result: Result<Formula<RawLit>, _> = self.clone().simplify_with(&mut resolver);
 		match result {
-			Err(false) => Err(todo!()),
+			Err(false) => Err(ReformulationError::TranslationConflict(vec![])),
 			Err(true) => Ok(()),
-			Ok(f) => {
-				let mut wrapper = slv.with_conditions(vec![]);
-				Ok(TseitinEncoder
-					.encode(&mut wrapper, &f)
-					.map_err(|_| -> ReformulationError { todo!() })?)
-			}
+			Ok(f) => slv.cnf_encode(&f, &TseitinEncoder),
 		}
 	}
 }

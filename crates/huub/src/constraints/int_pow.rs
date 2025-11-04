@@ -113,7 +113,7 @@ where
 impl IntPowBounds<IntView, IntView, IntView> {
 	/// Create a new [`IntPowBounds`] propagator and post it in the solver.
 	pub fn new_in<E>(
-		engine: &mut E,
+		solver: &mut E,
 		base: IntView,
 		exponent: IntView,
 		result: IntView,
@@ -123,28 +123,28 @@ impl IntPowBounds<IntView, IntView, IntView> {
 		IntView: IntDecisionActions<E, Atom = BoolView>,
 	{
 		// Ensure that if the base is negative, then the exponent cannot be zero
-		let (exp_lb, exp_ub) = exponent.get_bounds(engine);
-		let (base_lb, base_ub) = base.get_bounds(engine);
+		let (exp_lb, exp_ub) = exponent.get_bounds(solver);
+		let (base_lb, base_ub) = base.get_bounds(solver);
 		if exp_lb < 0 || (base_lb..=base_ub).contains(&0) {
 			// (exp < 0) -> (base != 0)
 			let clause = [
-				exponent.get_lit(engine, IntLitMeaning::GreaterEq(0)),
-				base.get_lit(engine, IntLitMeaning::NotEq(0)),
+				exponent.get_lit(solver, IntLitMeaning::GreaterEq(0)),
+				base.get_lit(solver, IntLitMeaning::NotEq(0)),
 			];
-			engine.add_clause(clause)?;
+			solver.add_clause(clause)?;
 		}
 
 		// Ensure that if the exponent is zero, then the result is one
 		if (exp_lb..=exp_ub).contains(&0) {
 			// (exp == 0) -> (res == 1)
 			let clause = [
-				exponent.get_lit(engine, IntLitMeaning::NotEq(0)),
-				result.get_lit(engine, IntLitMeaning::Eq(1)),
+				exponent.get_lit(solver, IntLitMeaning::NotEq(0)),
+				result.get_lit(solver, IntLitMeaning::Eq(1)),
 			];
-			engine.add_clause(clause)?;
+			solver.add_clause(clause)?;
 		}
 
-		*engine += Box::new(Self {
+		*solver += Box::new(Self {
 			base,
 			exponent,
 			result,

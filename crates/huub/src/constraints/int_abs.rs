@@ -41,17 +41,17 @@ pub struct IntAbsBounds<I1, I2, B> {
 
 impl IntAbsBounds<IntView, IntView, RawLit> {
 	/// Create a new [`IntAbsBounds`] propagator and post it in the solver.
-	pub(crate) fn new_in<E>(engine: &mut E, origin: IntView, abs: IntView)
+	pub(crate) fn new_in<E>(solver: &mut E, origin: IntView, abs: IntView)
 	where
 		E: AddAssign<BoxedPropagator> + InitializationActions + ?Sized,
 		IntView: IntDecisionActions<E, Atom = BoolView>,
 	{
 		let BoolViewInner::Lit(origin_positive) =
-			origin.get_lit(engine, IntLitMeaning::GreaterEq(0)).0
+			origin.get_lit(solver, IntLitMeaning::GreaterEq(0)).0
 		else {
 			panic!("origin variable in absolute value constraint is known positive or negative");
 		};
-		*engine += Box::new(Self {
+		*solver += Box::new(Self {
 			origin: origin,
 			abs: abs,
 			origin_positive,

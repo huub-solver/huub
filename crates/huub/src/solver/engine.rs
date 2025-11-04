@@ -68,7 +68,7 @@ pub(crate) struct AdvisorDef {
 
 #[derive(Debug, Default, Clone)]
 /// A propagation engine implementing the [`Propagator`] trait.
-pub(crate) struct Engine {
+pub struct Engine {
 	/// Storage of the propagators.
 	pub(crate) propagators: IndexVec<PropRef, BoxedPropagator>,
 	/// Storage of the branchers.
@@ -260,7 +260,6 @@ impl Engine {
 	pub(crate) fn notify_int_advisor(
 		&mut self,
 		prop: PropRef,
-		iv: IntView,
 		event: IntEvent,
 		data: u64,
 		negated: bool,
@@ -278,13 +277,7 @@ impl Engine {
 	///
 	/// If `bool2int` is true, then the literal is transformed into an integer
 	/// view.
-	pub(crate) fn notify_lit_advisor(
-		&mut self,
-		prop: PropRef,
-		lit: RawLit,
-		data: u64,
-		bool2int: bool,
-	) -> bool {
+	pub(crate) fn notify_lit_advisor(&mut self, prop: PropRef, data: u64, bool2int: bool) -> bool {
 		if bool2int {
 			self.propagators[prop].advise_of_int_change(&mut self.state, data, IntEvent::Fixed)
 		} else {
@@ -532,8 +525,7 @@ impl PropagatorExtension for Engine {
 									propagator,
 									..
 								} = &self.state.advisors[adv];
-								let enqueue =
-									self.notify_lit_advisor(propagator, lit, data, bool2int);
+								let enqueue = self.notify_lit_advisor(propagator, data, bool2int);
 								if !enqueue {
 									continue;
 								}
@@ -622,13 +614,8 @@ impl PropagatorExtension for Engine {
 									propagator,
 									..
 								} = &self.state.advisors[adv];
-								let enqueue = self.notify_int_advisor(
-									propagator,
-									IntView(IntViewInner::VarRef(iv)),
-									event,
-									data,
-									negated,
-								);
+								let enqueue =
+									self.notify_int_advisor(propagator, event, data, negated);
 								if !enqueue {
 									continue;
 								}

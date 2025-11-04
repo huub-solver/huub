@@ -789,8 +789,10 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 }
 
 impl CumulativeTimeTable<IntView, IntView, IntView, IntView> {
+	/// Creates a new `CumulativeTimeTablePropagator` propagator and post it in
+	/// the solver.
 	pub fn new_in<E>(
-		engine: &mut E,
+		solver: &mut E,
 		start_times: Vec<IntView>,
 		durations: Vec<IntView>,
 		usages: Vec<IntView>,
@@ -798,7 +800,7 @@ impl CumulativeTimeTable<IntView, IntView, IntView, IntView> {
 	) where
 		E: AddAssign<BoxedPropagator> + ?Sized,
 	{
-		*engine += Box::new(CumulativeTimeTable::new(
+		*solver += Box::new(CumulativeTimeTable::new(
 			start_times,
 			durations,
 			usages,

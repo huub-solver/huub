@@ -98,7 +98,7 @@ where
 impl IntDivBounds<IntView, IntView, IntView> {
 	/// Create a new [`IntDivBounds`] propagator and post it in the solver.
 	pub fn new_in<E>(
-		engine: &mut E,
+		solver: &mut E,
 		numerator: IntView,
 		denominator: IntView,
 		result: IntView,
@@ -109,28 +109,28 @@ impl IntDivBounds<IntView, IntView, IntView> {
 	{
 		// Ensure the consistency of the signs of the three variables using the
 		// following clauses.
-		if numerator.get_lower_bound(engine) < 0
-			|| denominator.get_lower_bound(engine) < 0
-			|| result.get_lower_bound(engine) < 0
+		if numerator.get_lower_bound(solver) < 0
+			|| denominator.get_lower_bound(solver) < 0
+			|| result.get_lower_bound(solver) < 0
 		{
-			let num_pos = numerator.get_lit(engine, IntLitMeaning::GreaterEq(0));
-			let num_neg = numerator.get_lit(engine, IntLitMeaning::Less(1));
-			let denom_pos = denominator.get_lit(engine, IntLitMeaning::GreaterEq(0));
+			let num_pos = numerator.get_lit(solver, IntLitMeaning::GreaterEq(0));
+			let num_neg = numerator.get_lit(solver, IntLitMeaning::Less(1));
+			let denom_pos = denominator.get_lit(solver, IntLitMeaning::GreaterEq(0));
 			let denom_neg = !denom_pos;
-			let res_pos = result.get_lit(engine, IntLitMeaning::GreaterEq(0));
-			let res_neg = result.get_lit(engine, IntLitMeaning::Less(1));
+			let res_pos = result.get_lit(solver, IntLitMeaning::GreaterEq(0));
+			let res_neg = result.get_lit(solver, IntLitMeaning::Less(1));
 
 			// num >= 0 /\ denom > 0 => res >= 0
-			engine.add_clause([!num_pos, !denom_pos, res_pos])?;
+			solver.add_clause([!num_pos, !denom_pos, res_pos])?;
 			// num <= 0 /\ denom < 0 => res >= 0
-			engine.add_clause([!num_neg, !denom_neg, res_pos])?;
+			solver.add_clause([!num_neg, !denom_neg, res_pos])?;
 			// num >= 0 /\ denom < 0 => res < 0
-			engine.add_clause([!num_pos, !denom_neg, res_neg])?;
+			solver.add_clause([!num_pos, !denom_neg, res_neg])?;
 			// num < 0 /\ denom >= 0 => res < 0
-			engine.add_clause([!num_neg, !denom_pos, res_neg])?;
+			solver.add_clause([!num_neg, !denom_pos, res_neg])?;
 		}
 
-		*engine += Box::new(Self {
+		*solver += Box::new(Self {
 			numerator,
 			denominator,
 			result,

@@ -564,7 +564,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 
 	/// Create a new [`DisjunctiveStrict`] propagator and post it in the solver.
 	pub(crate) fn new<E>(
-		engine: &mut E,
+		solver: &mut E,
 		start_times: Vec<I>,
 		durations: Vec<IntVal>,
 		edge_finding_enabled: bool,
@@ -577,8 +577,8 @@ impl<I> DisjunctiveStrictPropagator<I> {
 		let n = start_times.len();
 		let trailed_info = (0..n)
 			.map(|_| TaskInfo {
-				earliest_start: engine.new_trailed_int(0),
-				latest_completion: engine.new_trailed_int(0),
+				earliest_start: solver.new_trailed_int(0),
+				latest_completion: solver.new_trailed_int(0),
 			})
 			.collect();
 		Self {
@@ -1078,7 +1078,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 impl DisjunctiveStrictPropagator<IntView> {
 	/// Create a new [`DisjunctiveStrict`] propagator and post it in the solver.
 	pub fn new_in<E>(
-		engine: &mut E,
+		solver: &mut E,
 		start_times: Vec<IntView>,
 		durations: Vec<IntVal>,
 		edge_finding_enabled: bool,
@@ -1088,14 +1088,14 @@ impl DisjunctiveStrictPropagator<IntView> {
 		E: AddAssign<BoxedPropagator> + InitializationActions + ?Sized,
 	{
 		let b = Box::new(Self::new(
-			engine,
+			solver,
 			start_times,
 			durations,
 			edge_finding_enabled,
 			not_last_enabled,
 			detectable_precedence_enabled,
 		));
-		*engine += b;
+		*solver += b;
 	}
 }
 

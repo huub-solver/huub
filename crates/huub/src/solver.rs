@@ -44,8 +44,7 @@ use crate::{
 	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::InitConfig,
 	solver::{
-		activation_list::ActivationAction,
-		engine::{AdvisorDef, Engine, PropRef, State},
+		engine::{Engine, State},
 		int_var::{DirectStorage, IntVarRef, OrderStorage},
 		posting_context::PostingContext,
 		queue::PropagatorInfo,
@@ -1194,28 +1193,6 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 
 	/// Split the solver into an solving actions objects (limiting the
 	/// interaction with the oracle) and the dynamic engine reference.
-	fn as_parts(&self) -> (impl SolvingActions + '_, RefMut<'_, Engine>) {
-		struct SA;
-		impl SolvingActions for SA {
-			fn is_decision(&mut self, _: RawLit) -> bool {
-				false
-			}
-			fn new_observed_var(&mut self) -> pindakaas::Var {
-				unreachable!()
-			}
-			fn phase(&mut self, _: RawLit) {
-				unreachable!()
-			}
-			fn unphase(&mut self, _: RawLit) {
-				unreachable!()
-			}
-		}
-
-		(SA, self.engine.borrow_mut())
-	}
-
-	/// Split the solver into an solving actions objects (limiting the
-	/// interaction with the oracle) and the dynamic engine reference.
 	fn as_parts_mut(&mut self) -> (impl SolvingActions + '_, RefMut<'_, Engine>) {
 		struct SA<'a, O>(&'a mut O);
 		impl<O: ExternalPropagation> SolvingActions for SA<'_, O> {
@@ -1263,48 +1240,6 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 			.collect_vec();
 		debug!(clause = ?clause.iter().filter_map(|&x| if let BoolView(BoolViewInner::Lit(x)) = x { Some(i32::from(x)) } else { None }).collect::<Vec<i32>>(), "add solution nogood");
 		self.add_clause(clause)
-	}
-
-	/// Internal method used to add an advisor that is triggered when a
-	/// [`RawLit`] changes.
-	///
-	/// Used by [`Solver::advise_on_bool_change`] and
-	/// [`Solver::advise_on_int_change`].
-	fn advise_on_lit_change(&mut self, prop: PropRef, lit: RawLit, data: u64, bool2int: bool) {
-		{
-			// Ensure the trail has allocated a space to track the variable
-			self.engine
-				.borrow_mut()
-				.state
-				.trail
-				.grow_to_boolvar(lit.var());
-		}
-		// Ensure that the variable is marked as observed
-		self.oracle.add_observed_var(lit.var());
-		// Add the advisor to the engine
-		let mut engine = self.engine.borrow_mut();
-		// If the variable is already assigned, notify the advisor immediately
-		if engine.state.trail.get_sat_value(lit).is_some() {
-			if engine.notify_lit_advisor(prop, lit, data, bool2int) {
-				drop(engine);
-				// self.enqueue_now(prop);
-				todo!()
-			}
-		} else {
-			// Otherwise, add the advisor to the engine
-			let adv = engine.state.advisors.push(AdvisorDef {
-				bool2int,
-				data,
-				negated: false,
-				propagator: prop,
-			});
-			engine
-				.state
-				.bool_activation
-				.entry(lit.var())
-				.or_default()
-				.push(ActivationAction::Advise(adv).into());
-		}
 	}
 
 	/// Find all solutions with regard to a list of given variables.
@@ -1437,7 +1372,7 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 		}
 	}
 
-	// /// Create a new [`Solver`] instance from a [`FlatZinc`] instance.
+	/// Create a new [`Solver`] instance from a [`FlatZinc`] instance.
 	pub fn from_fzn<S, MapTy: FromIterator<(S, View)>>(
 		fzn: &FlatZinc<S>,
 		config: &InitConfig,

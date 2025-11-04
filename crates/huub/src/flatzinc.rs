@@ -64,6 +64,8 @@ pub enum FlatZincError {
 		/// Type of the argument found.
 		found: String,
 	},
+	/// Error that occurred when constructing the [`Model`] object or
+	/// translating it to a [`Solver`] object.
 	ReformulationError(ReformulationError),
 }
 

@@ -20,7 +20,7 @@ use crate::{
 		engine::{trace_new_lit, LitPropagation, PropRef, State},
 		int_var::{IntVarRef, LazyLitDef},
 		trail::TrailedInt,
-		BoolView, BoolViewInner, BoxedPropagator, IntView, IntViewInner,
+		BoolView, BoolViewInner, BoxedPropagator,
 	},
 	IntLitMeaning, IntVal,
 };

@@ -11,7 +11,6 @@ use tracing::trace;
 
 use crate::{
 	actions::{BoolInspectionActions, TrailingActions},
-	solver::{BoolView, BoolViewInner},
 	IntVal,
 };
 

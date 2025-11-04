@@ -15,7 +15,10 @@ use crate::{
 	IntVal,
 };
 
-pub(crate) struct PostingContext<'a> {
+#[derive(Debug)]
+/// The context given to [`Propagator`] implementations (during
+/// [`Propagators::post`]) when added to [`Solver`].
+pub struct PostingContext<'a> {
 	/// State object of the solver.
 	state: &'a mut State,
 	/// Internal propagator reference used to add propagator to activations

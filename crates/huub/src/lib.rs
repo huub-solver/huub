@@ -194,6 +194,8 @@ pub struct Model {
 	propagator_queue: PropagatorQueue<ConRef>,
 	/// Fake trailed storage
 	trail: IndexVec<TrailedInt, IntVal>,
+	/// Reference for the current propagator being executed.
+	cur_prop: Option<ConRef>,
 }
 
 /// Type alias for a non-zero parameter integer value.
@@ -1101,8 +1103,10 @@ impl Model {
 		let Some(mut con_obj) = self.constraints[con].take() else {
 			return Ok(());
 		};
-		let status = con_obj.simplify(self)?;
-		match status {
+		self.cur_prop = Some(con);
+		let status = con_obj.simplify(self);
+		self.cur_prop = None;
+		match status? {
 			SimplificationStatus::Subsumed => {
 				// Constraint is known to be satisfied, no need to place back.
 			}
@@ -2291,7 +2295,10 @@ impl PropagationActions for Model {
 	type Conflict = Vec<BoolDecision>;
 
 	fn deferred_reason(&self, data: u64) -> LazyReason {
-		todo!()
+		LazyReason {
+			propagator: self.cur_prop.unwrap().raw(),
+			data,
+		}
 	}
 
 	fn declare_conflict(&mut self, reason: impl ReasonBuilder<Self, Self::Atom>) -> Self::Conflict {
@@ -2394,7 +2401,7 @@ impl BoolPostingActions<ModelPostingContext<'_>> for BoolDecision {
 		}
 	}
 
-	fn advise_when_fixed(&self, ctx: &mut ModelPostingContext<'_>, data: u64) {
+	fn advise_when_fixed(&self, _ctx: &mut ModelPostingContext<'_>, _data: u64) {
 		todo!()
 	}
 }
@@ -2446,7 +2453,7 @@ impl IntInspectionActions<ModelPostingContext<'_>> for IntDecision {
 }
 
 impl IntPostingActions<ModelPostingContext<'_>> for IntDecision {
-	fn advise_when(&self, ctx: &mut ModelPostingContext<'_>, condition: IntPropCond, data: u64) {
+	fn advise_when(&self, _ctx: &mut ModelPostingContext<'_>, _condition: IntPropCond, _data: u64) {
 		todo!()
 	}
 
@@ -2523,7 +2530,7 @@ impl IntInspectionActions<ModelPostingContext<'_>> for IntVal {
 
 index_vec::define_index_type! {
 	/// Identifies an constraint in a [`Model`]
-	pub(crate) struct ConRef = usize;
+	pub(crate) struct ConRef = u32;
 }
 
 impl InitializationActions for Model {

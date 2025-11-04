@@ -621,7 +621,7 @@ where
 impl IntLinearLessEqBounds<IntView> {
 	/// Create a new [`IntLinearLessEqBounds`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(engine: &mut E, vars: impl IntoIterator<Item = IntView>, mut max: IntVal)
+	pub fn new_in<E>(solver: &mut E, vars: impl IntoIterator<Item = IntView>, mut max: IntVal)
 	where
 		E: AddAssign<BoxedPropagator> + InitializationActions + ?Sized,
 		IntView: IntInspectionActions<E>,
@@ -629,7 +629,7 @@ impl IntLinearLessEqBounds<IntView> {
 		let vars: Vec<IntView> = vars
 			.into_iter()
 			.filter(|v| {
-				if let Some(c) = v.get_val(engine) {
+				if let Some(c) = v.get_val(solver) {
 					max -= c;
 					false
 				} else {
@@ -638,7 +638,7 @@ impl IntLinearLessEqBounds<IntView> {
 			})
 			.collect();
 
-		*engine += Box::new(Self {
+		*solver += Box::new(Self {
 			terms: vars.clone(),
 			max,
 			reification: Default::default(),
@@ -736,7 +736,7 @@ impl IntLinearLessEqImpBounds<IntView, RawLit> {
 	/// Create a new [`IntLinearLessEqImpBounds`] propagator and post it in the
 	/// solver.
 	pub fn new_in<E>(
-		engine: &mut E,
+		solver: &mut E,
 		vars: impl IntoIterator<Item = IntView>,
 		mut max: IntVal,
 		reification: BoolView,
@@ -747,14 +747,14 @@ impl IntLinearLessEqImpBounds<IntView, RawLit> {
 		let reification = match reification.0 {
 			BoolViewInner::Lit(r) => r,
 			BoolViewInner::Const(true) => {
-				return IntLinearLessEqBounds::<IntView>::new_in(engine, vars, max)
+				return IntLinearLessEqBounds::<IntView>::new_in(solver, vars, max)
 			}
 			BoolViewInner::Const(false) => return,
 		};
 		let vars: Vec<IntView> = vars
 			.into_iter()
 			.filter(|v| {
-				if let Some(c) = v.get_val(engine) {
+				if let Some(c) = v.get_val(solver) {
 					max -= c;
 					false
 				} else {
@@ -763,7 +763,7 @@ impl IntLinearLessEqImpBounds<IntView, RawLit> {
 			})
 			.collect();
 
-		*engine += Box::new(Self {
+		*solver += Box::new(Self {
 			terms: vars.clone(),
 			max,
 			reification: OptField::new(reification),
@@ -775,7 +775,7 @@ impl IntLinearNotEqImpValue<IntView, RawLit> {
 	/// Create a new [`IntLinearNotEqImpValue`] propagator and post it in the
 	/// solver.
 	pub fn new_in<E>(
-		engine: &mut E,
+		solver: &mut E,
 		vars: impl IntoIterator<Item = IntView>,
 		mut violation: IntVal,
 		reification: BoolView,
@@ -786,7 +786,7 @@ impl IntLinearNotEqImpValue<IntView, RawLit> {
 		let reification = match reification.0 {
 			BoolViewInner::Lit(r) => r,
 			BoolViewInner::Const(true) => {
-				return IntLinearNotEqValue::new_in(engine, vars, violation)
+				return IntLinearNotEqValue::new_in(solver, vars, violation)
 			}
 			BoolViewInner::Const(false) => return,
 		};
@@ -794,7 +794,7 @@ impl IntLinearNotEqImpValue<IntView, RawLit> {
 		let vars: Vec<IntView> = vars
 			.into_iter()
 			.filter(|&v| {
-				if let Some(c) = v.get_val(engine) {
+				if let Some(c) = v.get_val(solver) {
 					violation -= c;
 					false
 				} else {
@@ -802,9 +802,9 @@ impl IntLinearNotEqImpValue<IntView, RawLit> {
 				}
 			})
 			.collect();
-		let num_fixed = engine.new_trailed_int(0);
+		let num_fixed = solver.new_trailed_int(0);
 
-		*engine += Box::new(Self {
+		*solver += Box::new(Self {
 			terms: vars.clone(),
 			violation,
 			num_fixed,
@@ -816,7 +816,7 @@ impl IntLinearNotEqImpValue<IntView, RawLit> {
 impl IntLinearNotEqValue<IntView> {
 	/// Create a new [`IntLinearNotEqImpValue`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(engine: &mut E, vars: impl IntoIterator<Item = IntView>, mut violation: IntVal)
+	pub fn new_in<E>(solver: &mut E, vars: impl IntoIterator<Item = IntView>, mut violation: IntVal)
 	where
 		E: AddAssign<BoxedPropagator> + InitializationActions + ?Sized,
 		IntView: IntInspectionActions<E>,
@@ -824,7 +824,7 @@ impl IntLinearNotEqValue<IntView> {
 		let vars: Vec<IntView> = vars
 			.into_iter()
 			.filter(|&v| {
-				if let Some(c) = v.get_val(engine) {
+				if let Some(c) = v.get_val(solver) {
 					violation -= c;
 					false
 				} else {
@@ -832,9 +832,9 @@ impl IntLinearNotEqValue<IntView> {
 				}
 			})
 			.collect();
-		let num_fixed = engine.new_trailed_int(0);
+		let num_fixed = solver.new_trailed_int(0);
 
-		*engine += Box::new(Self {
+		*solver += Box::new(Self {
 			terms: vars.clone(),
 			violation,
 			num_fixed,

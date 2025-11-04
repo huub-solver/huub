@@ -1308,7 +1308,7 @@ mod tests {
 	use rangelist::RangeList;
 
 	use crate::{
-		actions::{IntDecisionActions, IntExplanationActions, IntInspectionActions},
+		actions::{IntDecisionActions, IntInspectionActions},
 		solver::{
 			int_var::{EncodingType, IntVar, IntVarRef},
 			BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner,

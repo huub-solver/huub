@@ -381,20 +381,20 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 impl IntSeqPrecedeChainBounds<IntView> {
 	/// Create a new [`IntSeqPrecedeChainBounds`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(engine: &mut E, mut vars: Vec<IntView>)
+	pub fn new_in<E>(solver: &mut E, mut vars: Vec<IntView>)
 	where
 		E: AddAssign<BoxedPropagator> + InitializationActions + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
 		// Variables that do not allow positive values are irrelevant.
-		vars.retain(|&v| v.get_upper_bound(engine) > 0);
+		vars.retain(|&v| v.get_upper_bound(solver) > 0);
 		if vars.is_empty() {
 			return;
 		}
 		vars.shrink_to_fit();
 
-		let con = IntSeqPrecedeChainBounds::new(engine, vars);
-		*engine += Box::new(con);
+		let con = IntSeqPrecedeChainBounds::new(solver, vars);
+		*solver += Box::new(con);
 	}
 }
 
@@ -897,13 +897,13 @@ impl<I> IntValuePrecedeChainValue<I> {
 impl IntValuePrecedeChainValue<IntView> {
 	/// Create a new [`ValuePrecedeChainValue`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(engine: &mut E, values: Vec<IntVal>, mut vars: Vec<IntView>)
+	pub fn new_in<E>(solver: &mut E, values: Vec<IntVal>, mut vars: Vec<IntView>)
 	where
 		E: AddAssign<BoxedPropagator> + InitializationActions + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
 		// Variables that do not any tracked values are irrelevant.
-		vars.retain(|&var| values.iter().any(|&val| var.check_in_domain(engine, val)));
+		vars.retain(|&var| values.iter().any(|&val| var.check_in_domain(solver, val)));
 		if vars.is_empty() {
 			return;
 		}
@@ -913,23 +913,23 @@ impl IntValuePrecedeChainValue<IntView> {
 		let first = (0..=values.len())
 			.map(|i| {
 				if i == 0 {
-					engine.new_trailed_int(0)
+					solver.new_trailed_int(0)
 				} else {
-					engine.new_trailed_int(vars.len() as IntVal - 1)
+					solver.new_trailed_int(vars.len() as IntVal - 1)
 				}
 			})
 			.collect();
 		let last = (0..=values.len())
 			.map(|i| {
 				if i == 0 {
-					engine.new_trailed_int(IntVal::MIN)
+					solver.new_trailed_int(IntVal::MIN)
 				} else {
-					engine.new_trailed_int(IntVal::MAX)
+					solver.new_trailed_int(IntVal::MAX)
 				}
 			})
 			.collect();
-		let first_val = (0..n).map(|_| engine.new_trailed_int(0)).collect();
-		let max_last = engine.new_trailed_int(0);
+		let first_val = (0..n).map(|_| solver.new_trailed_int(0)).collect();
+		let max_last = solver.new_trailed_int(0);
 		// Set up some data structures to deal with holes in values more efficiently.
 		let min_val = *values.iter().min().unwrap_or(&IntVal::MAX);
 		let max_val = *values.iter().max().unwrap_or(&IntVal::MIN);
@@ -950,7 +950,7 @@ impl IntValuePrecedeChainValue<IntView> {
 			mapping[(val - min_val) as usize] = Some(i + 1);
 		}
 
-		*engine += Box::new(Self {
+		*solver += Box::new(Self {
 			values,
 			vars: vars.clone(),
 			initialized: false,

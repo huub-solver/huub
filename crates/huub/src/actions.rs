@@ -46,14 +46,24 @@ pub trait DecisionActions: TrailingActions {
 /// boolean decision variables.
 pub trait BoolOperations: Clone + fmt::Debug + Eq + Hash + Not<Output = Self> + 'static {}
 
+/// Actions available to [`Propagator`] and [`Constraint`] implementations in
+/// all contexts for Boolean decision variables.
 pub trait BoolInspectionActions<Context: ?Sized>: BoolOperations {
+	/// Get the current value of a Boolean decision variable, if it has been
+	/// assigned.
 	fn get_val(&self, ctx: &Context) -> Option<bool>;
 }
 
+/// Actions available to [`Propagator`] and [`Constraint`] implementations in
+/// [`ReasoningEngine::PropagationCtx`] for Boolean decision variables.
 pub trait BoolPropagationActions<Context>: BoolInspectionActions<Context> {
+	/// Type used to represent a conflict that occurs during propagation.
 	type Conflict;
+	/// Type used to represent an atom in an reason for propagation.
 	type Atom: BoolOperations + From<Self>;
 
+	/// Enforce that the value of a Boolean decision variable is to be `true`,
+	/// because of the given reason.
 	fn set(
 		&self,
 		ctx: &mut Context,
@@ -62,6 +72,8 @@ pub trait BoolPropagationActions<Context>: BoolInspectionActions<Context> {
 		self.set_val(ctx, true, reason)
 	}
 
+	/// Enforce that the value of a Boolean decision variable is to be `val`,
+	/// because of the given reason.
 	fn set_val(
 		&self,
 		ctx: &mut Context,
@@ -70,11 +82,15 @@ pub trait BoolPropagationActions<Context>: BoolInspectionActions<Context> {
 	) -> Result<(), Self::Conflict>;
 }
 
+/// Actions available to [`Constraint`] implementations in
+/// [`ReasoningEngine::PropagationCtx`] for Boolean decision variables.
+///
+/// Generally these actions are used in [`Constraint::simplify`].
 pub trait BoolSimplificationActions<Context>:
 	BoolPropagationActions<Context> + Into<BoolDecision>
 {
-	/// Mark two Boolean decisions as being equivalent, ensuring the two use the
-	/// same internal representation.
+	/// Mark `self` as being equivalent to `other`, instructing the reasoning
+	/// engine to use the same representation.
 	fn unify(
 		&self,
 		ctx: &mut Context,
@@ -82,6 +98,8 @@ pub trait BoolSimplificationActions<Context>:
 	) -> Result<(), Self::Conflict>;
 }
 
+/// Actions available to [`Propagator`] implementations in
+/// [`ReasoningEngine::PostingCtx`] for Boolean decision variables.
 pub trait BoolPostingActions<Context>: BoolInspectionActions<Context> {
 	/// Enqueue a propagator to be enqueued when a [`BoolView`] is assigned.
 	fn enqueue_when_fixed(&self, ctx: &mut Context);
@@ -100,9 +118,10 @@ pub trait BoolPostingActions<Context>: BoolInspectionActions<Context> {
 /// integer decision variables.
 pub trait IntOperations: Clone + fmt::Debug + Eq + Hash + 'static {}
 
-/// Actions that can generally be performed when the solver is (partially)
-/// initialized.
+/// Actions available to [`Propagator`] and [`Constraint`] implementations in
+/// all contexts for integer decision variables.
 pub trait IntInspectionActions<Context: ?Sized>: IntOperations {
+	/// Type used to represent an atom in an reason for propagation.
 	type Atom: BoolOperations;
 
 	/// Get the minimum value that an integer view is guaranteed to take (given
@@ -150,6 +169,11 @@ pub trait IntInspectionActions<Context: ?Sized>: IntOperations {
 	fn try_lit(&self, ctx: &Context, meaning: IntLitMeaning) -> Option<Self::Atom>;
 }
 
+/// Actions available to [`Brancher`] implementations for integer decision
+/// variables.
+///
+/// These actions are also available to [`Propagator`] and [`Constraint`]
+/// implementations in [`Reasoning::PropagationCtx`]
 pub trait IntDecisionActions<Context: ?Sized>: IntInspectionActions<Context> {
 	/// Get (or create) a literal for the given referenced integer variable with
 	/// the given meaning.
@@ -163,6 +187,8 @@ pub trait IntDecisionActions<Context: ?Sized>: IntInspectionActions<Context> {
 	}
 }
 
+/// Actions available to [`Propagator`] implementations in
+/// [`Reasoning::ExplanationCtx`] for integer decision variables.
 pub trait IntExplanationActions<Context: ?Sized>: IntInspectionActions<Context> {
 	/// Get a Boolean view that represents the given meaning (that is currently
 	/// `true`) on the integer view, or a relaxation if the literal does not yet
@@ -179,7 +205,10 @@ pub trait IntExplanationActions<Context: ?Sized>: IntInspectionActions<Context> 
 	}
 }
 
+/// Actions available to [`Propagator`] and [`Constraint`] implementations in
+/// [`ReasoningEngine::PropagationCtx`] for integer decision variables.
 pub trait IntPropagationActions<Context: ?Sized>: IntDecisionActions<Context> {
+	/// Type used to represent a conflict that occurs during propagation.
 	type Conflict;
 
 	/// Enforce that a an integer view takes a value that is greater or equal to
@@ -219,6 +248,10 @@ pub trait IntPropagationActions<Context: ?Sized>: IntDecisionActions<Context> {
 	) -> Result<(), Self::Conflict>;
 }
 
+/// Actions available to [`Constraint`] implementations in
+/// [`ReasoningEngine::PropagationCtx`] for integer decision variables.
+///
+/// Generally these actions are used in [`Constraint::simplify`].
 pub trait IntSimplificationActions<Context: ?Sized>: IntPropagationActions<Context> {
 	/// Get the domain from which an integer view is guaranteed to take a value.
 	fn get_domain(&self, ctx: &Context) -> IntSetVal;
@@ -246,9 +279,11 @@ pub trait IntSimplificationActions<Context: ?Sized>: IntPropagationActions<Conte
 	fn unify(&self, ctx: &mut Context, other: impl Into<Self>) -> Result<(), Self::Conflict>;
 }
 
-/// Actions that can be performed during propagation.
+/// General actions that can be performed in [`ReasoningEngine::PropagationCtx`]
 pub trait PropagationActions: DecisionActions {
-	type Atom;
+	/// Type used to represent an atom in an reason for propagation.
+	type Atom: BoolOperations;
+	/// Type used to represent a conflict that occurs during propagation.
 	type Conflict;
 
 	/// Create a placeholder reason that will cause the solver to call the
@@ -256,9 +291,16 @@ pub trait PropagationActions: DecisionActions {
 	/// reason is needed.
 	fn deferred_reason(&self, data: u64) -> LazyReason;
 
+	/// Declare that given reason (seen as a conjunction of atoms) is represents
+	/// a conflict in the current state (requiring backtracking).
+	///
+	/// Note that it is generally recommended to use this method only when
+	/// integer or Boolean propagation methods do not seem relevant.
 	fn declare_conflict(&mut self, reason: impl ReasonBuilder<Self, Self::Atom>) -> Self::Conflict;
 }
 
+/// Actions available to [`Propagator`] implementations in
+/// [`ReasoningEngine::PostingCtx`] for Boolean decision variables.
 pub trait IntPostingActions<Context>: IntInspectionActions<Context> {
 	/// Advise a propagator when an [`IntView`] is changed according to the
 	/// given propagation condition, allowing the propagator to decide whether
@@ -289,19 +331,34 @@ pub trait PostingActions {
 	fn set_priority(&mut self, priority: PriorityLevel);
 }
 
+/// Actions that can be performed during the initialization of [`Propagator] and
+/// [`Constraint`] implementations
 pub trait InitializationActions {
 	/// Create a new trailed integer value with the given initial value.
 	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt;
 }
 
+/// Trait for environments that support constraint propagation and decision
+/// variable pruning to simplify the current problem state.
 pub trait ReasoningEngine {
+	/// The context given to constraint propagators to attach themselves to
+	/// changes in the state of the reasoning engine or decision variables.
 	type PostingCtx<'a>: PostingActions;
+	/// The context given to constraint propagators when they are advised of a
+	/// change in the state of the reasoning engine or decision variables.
 	type NotificationCtx<'a>: TrailingActions;
+	/// The context given to constraint propagators when they are asked to
+	/// propagate changes based on the constraint they enforce.
 	type PropagationCtx<'a>: PropagationActions<Atom = Self::Atom, Conflict = Self::Conflict>;
+	/// The context given to the constraint propagator when they are asked to
+	/// explain a reason for a change they made using
+	/// [`PropagationActions::deferred_reason`].
 	type ExplanationCtx<'a>: TrailingActions;
 
-	type Conflict;
+	/// Type used to represent an atom in an reason for propagation.
 	type Atom: BoolOperations;
+	/// Type used to represent a conflict that occurs during propagation.
+	type Conflict;
 }
 
 /// Actions that can be performed when reformulating a [`Model`] object into a
@@ -359,6 +416,8 @@ pub trait ReformulationActions:
 /// Actions that can be performed to simplify a Model considering a given
 /// constraint.
 pub trait SimplificationActions {
+	/// The type of the reasoning engine that is used when adding new
+	/// constraints.
 	type Target: ReasoningEngine;
 
 	/// Add a constraint to the model (to replace the current constraint).
@@ -379,6 +438,7 @@ impl<T> BoolOperations for T where T: Clone + fmt::Debug + Eq + Hash + Not<Outpu
 impl<T> IntOperations for T where T: Clone + fmt::Debug + Eq + Hash + 'static {}
 
 impl dyn ReformulationActions + '_ {
+	/// Add a new clause to the resulting [`Solver`].
 	pub fn add_clause(
 		&mut self,
 		clause: impl IntoIterator<Item = impl Into<BoolView>>,
@@ -392,6 +452,8 @@ impl dyn ReformulationActions + '_ {
 		}
 	}
 
+	/// Encode the given constraint into conjunctive normal form (CNF) using the
+	/// given encoder, and add it to the resulting [`Solver`].
 	pub fn cnf_encode<C, E>(
 		&mut self,
 		constraint: &C,
@@ -409,6 +471,9 @@ impl dyn ReformulationActions + '_ {
 		}
 	}
 
+	/// Internal method used to wrap the [`ClauseDatabase`] implementation to
+	/// provide a [`ReformulationError`] if the solver returns
+	/// [`Unsatisfiable`].
 	pub(crate) fn clause_database_wrapper(&mut self) -> ReformulationClauseDatabaseWrapper<'_> {
 		ReformulationClauseDatabaseWrapper {
 			db: self,

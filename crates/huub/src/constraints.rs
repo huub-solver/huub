@@ -456,7 +456,11 @@ impl<A> Reason<A> {
 	}
 }
 
+/// A trait for types that can be used to construct a reason for the propagation
+/// in the `Context` from `Atom`s.
 pub trait ReasonBuilder<Context: ?Sized, Atom> {
+	/// Construct a `Reason`, or return a Boolean indicating that the reason is
+	/// trivial.
 	fn build_reason(self, ctx: &mut Context) -> Result<Reason<Atom>, bool>;
 }
 

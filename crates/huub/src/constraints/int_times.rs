@@ -29,11 +29,11 @@ pub struct IntTimesBounds<I1, I2, I3> {
 
 impl IntTimesBounds<IntView, IntView, IntView> {
 	/// Create a new [`IntTimesBounds`] propagator and post it in the solver.
-	pub fn new_in<E>(engine: &mut E, factor1: IntView, factor2: IntView, product: IntView)
+	pub fn new_in<E>(solver: &mut E, factor1: IntView, factor2: IntView, product: IntView)
 	where
 		E: AddAssign<BoxedPropagator> + ?Sized,
 	{
-		*engine += Box::new(Self {
+		*solver += Box::new(Self {
 			factor1,
 			factor2,
 			product,
