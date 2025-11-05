@@ -538,7 +538,7 @@ mod tests {
 		},
 		solver::{
 			int_var::{EncodingType, IntVar},
-			IntView, SolveResult, Solver,
+			SolveResult, Solver,
 		},
 		IntVal,
 	};
@@ -743,39 +743,50 @@ mod tests {
 	}
 
 	fn test_sudoku(grid: &[&str], expected: SolveResult) {
+		debug_assert_eq!(grid.len(), 9);
+		debug_assert!(grid.iter().all(|row| row.len() == 9));
+
 		let mut slv: Solver = Solver::default();
-		let mut all_vars = vec![];
 		// create variables and add all different propagator for each row
-		grid.iter().for_each(|row| {
-			let mut vars = Vec::with_capacity(row.len());
-			for c in row.chars() {
-				if c.is_ascii_digit() {
-					let num = IntVal::from(c.to_digit(10).unwrap());
-					vars.push(num.into());
-				} else {
-					vars.push(IntVar::new_in(
-						&mut slv,
-						RangeList::from_iter([1..=9]),
-						EncodingType::Eager,
-						EncodingType::Eager,
-					));
-				}
-			}
+		let all_vars: Vec<_> = grid
+			.iter()
+			.map(|row| {
+				let vars: Vec<_> = row
+					.chars()
+					.map(|c| {
+						if c.is_ascii_digit() {
+							let num = IntVal::from(c.to_digit(10).unwrap());
+							num.into()
+						} else {
+							IntVar::new_in(
+								&mut slv,
+								RangeList::from_iter([1..=9]),
+								EncodingType::Eager,
+								EncodingType::Eager,
+							)
+						}
+					})
+					.collect();
 
-			IntAllDifferentValue::new_in(&mut slv, vars.clone());
+				IntAllDifferentValue::new_in(&mut slv, vars.clone());
+				vars
+			})
+			.collect();
 
-			all_vars.push(vars);
-		});
 		// add all different propagator for each column
-		for i in 0..9 {
-			let col_vars: Vec<IntView> = (0..9).map(|j| all_vars[j][i]).collect();
+		for (i, _) in grid.iter().enumerate() {
+			let col_vars: Vec<_> = grid
+				.iter()
+				.enumerate()
+				.map(|(j, _)| all_vars[j][i])
+				.collect();
 
 			IntAllDifferentValue::new_in(&mut slv, col_vars);
 		}
 		// add all different propagator for each 3 by 3 grid
 		for i in 0..3 {
 			for j in 0..3 {
-				let mut block_vars: Vec<IntView> = Vec::with_capacity(9);
+				let mut block_vars: Vec<_> = Vec::with_capacity(grid.len());
 				for x in 0..3 {
 					for y in 0..3 {
 						block_vars.push(all_vars[3 * i + x][3 * j + y]);
