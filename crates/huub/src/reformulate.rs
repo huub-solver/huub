@@ -151,7 +151,7 @@ pub enum ReformulationError {
 	SimplificationConflict(<Model as ReasoningEngine>::Conflict),
 	/// Error used when a conflict is found by the SAT oracle when translating
 	/// the problem.
-	TranslationConflict(Clause<BoolView>),
+	TranslationConflict(Clause<RawLit>),
 }
 
 /// A reformulation helper that maps decisions in a [`Model`] objects to the

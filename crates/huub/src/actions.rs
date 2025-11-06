@@ -7,7 +7,6 @@ use std::{
 	ops::{AddAssign, Not},
 };
 
-use itertools::Itertools;
 use pindakaas::{AsDynClauseDatabase, ClauseDatabase, Lit as RawLit, Unsatisfiable};
 
 use crate::{
@@ -16,7 +15,7 @@ use crate::{
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::IntPropCond, int_var::IntVarRef, queue::PriorityLevel, trail::TrailedInt,
-		BoolView, IntLitMeaning, IntView, View,
+		BoolView, BoolViewInner, IntLitMeaning, IntView, View,
 	},
 	BoolDecision, IntDecision, IntSetVal, IntVal,
 };
@@ -445,10 +444,23 @@ impl dyn ReformulationActions + '_ {
 		&mut self,
 		clause: impl IntoIterator<Item = impl Into<BoolView>>,
 	) -> Result<(), ReformulationError> {
-		use pindakaas::ClauseDatabaseTools;
-
-		let clause: Vec<_> = clause.into_iter().map_into().collect();
-		match ClauseDatabaseTools::add_clause(self, clause.clone()) {
+		let clause: Result<Vec<_>, bool> = clause
+			.into_iter()
+			.filter_map(|lit| match lit.into().0 {
+				BoolViewInner::Lit(lit) => Some(Ok(lit)),
+				BoolViewInner::Const(true) => Some(Err(true)),
+				BoolViewInner::Const(false) => None,
+			})
+			.collect();
+		let clause = match clause {
+			Err(false) => unreachable!(),
+			Err(true) => return Ok(()),
+			Ok(clause) if clause.is_empty() => {
+				return Err(ReformulationError::TranslationConflict(vec![]));
+			}
+			Ok(clause) => clause,
+		};
+		match self.add_clause_from_slice(&clause) {
 			Err(Unsatisfiable) => Err(ReformulationError::TranslationConflict(clause)),
 			Ok(()) => Ok(()),
 		}
@@ -496,10 +508,10 @@ pub(crate) struct ReformulationClauseDatabaseWrapper<'a> {
 
 impl ClauseDatabase for ReformulationClauseDatabaseWrapper<'_> {
 	fn add_clause_from_slice(&mut self, clause: &[RawLit]) -> Result<(), Unsatisfiable> {
-		match self.db.add_clause(clause.iter().cloned()) {
+		match self.db.add_clause_from_slice(clause) {
 			Ok(()) => Ok(()),
-			Err(err) => {
-				self.error = Some(err);
+			Err(Unsatisfiable) => {
+				self.error = Some(ReformulationError::TranslationConflict(clause.to_vec()));
 				Err(Unsatisfiable)
 			}
 		}
