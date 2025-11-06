@@ -23,7 +23,10 @@ use tracing::warn;
 
 use crate::{
 	abs_int,
-	actions::{BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions},
+	actions::{
+		BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions,
+		PropagationActions,
+	},
 	all_different_int, array_element, array_maximum_int, array_minimum_int, cumulative,
 	disjunctive_strict, div_int, int_in_set_reif, pow_int,
 	reformulate::ReformulationError,
@@ -1120,8 +1123,10 @@ where
 							match lits.len() {
 								0 => {
 									return Err(FlatZincError::ReformulationError(
-										ReformulationError::SimplificationConflict(vec![]),
-									))
+										ReformulationError::SimplificationConflict(
+											self.prb.declare_conflict([]),
+										),
+									));
 								}
 								1 => lits[0]
 									.set(&mut self.prb, vec![])
@@ -1380,7 +1385,11 @@ where
 							});
 						}
 						if table.is_empty() {
-							return Err(ReformulationError::SimplificationConflict(vec![]).into());
+							return Err(FlatZincError::ReformulationError(
+								ReformulationError::SimplificationConflict(
+									self.prb.declare_conflict([]),
+								),
+							));
 						}
 						let table: Vec<Vec<_>> = table
 							.into_iter()
@@ -1815,10 +1824,11 @@ where
 						match lit {
 							Literal::Bool(b) => {
 								if domain == Some(!b) {
-									return Err(ReformulationError::SimplificationConflict(
-										Vec::new(),
-									)
-									.into());
+									return Err(FlatZincError::ReformulationError(
+										ReformulationError::SimplificationConflict(
+											self.prb.declare_conflict([]),
+										),
+									));
 								} else {
 									domain = Some(*b);
 								}

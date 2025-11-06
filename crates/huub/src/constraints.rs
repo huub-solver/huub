@@ -65,15 +65,15 @@ pub(crate) enum CachedReason<B, Atom> {
 /// Conflict is an error type returned when a variable is assigned two
 /// inconsistent values.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Conflict {
+pub struct Conflict<Atom> {
 	/// The subject of the conflict (i.e., the literal that couldn't be
 	/// propagated).
 	///
 	/// If `None`, the conflict is a root conflict.
-	pub(crate) subject: Option<RawLit>,
+	pub(crate) subject: Option<Atom>,
 	/// The reason for the conflict
 	/// This reason must result a conjunction that implies false
-	pub(crate) reason: Reason<RawLit>,
+	pub(crate) reason: Reason<Atom>,
 }
 
 /// A trait for constraints that can be placed in a [`Model`] object.
@@ -340,14 +340,14 @@ impl<A, B> CachedReason<B, A> {
 	}
 }
 
-impl Conflict {
+impl Conflict<RawLit> {
 	/// Create a new conflict with the given reason
 	pub(crate) fn new<Context>(
-		actions: &mut Context,
+		ctx: &mut Context,
 		subject: Option<RawLit>,
 		reason: impl ReasonBuilder<Context, BoolView>,
 	) -> Self {
-		match Reason::from_view(reason.build_reason(actions)) {
+		match Reason::from_view(reason.build_reason(ctx)) {
 			Ok(reason) => Self { subject, reason },
 			Err(true) => match subject {
 				Some(subject) => Self {
@@ -367,9 +367,9 @@ impl Conflict {
 	}
 }
 
-impl Error for Conflict {}
+impl<Atom: Debug> Error for Conflict<Atom> {}
 
-impl fmt::Display for Conflict {
+impl<Atom: Debug> fmt::Display for Conflict<Atom> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "Conflict detected: nogood {:?}", self.reason)
 	}

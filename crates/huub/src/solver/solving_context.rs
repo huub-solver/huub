@@ -116,7 +116,7 @@ impl<'a> SolvingContext<'a> {
 		iv: IntVarRef,
 		lit_req: IntLitMeaning,
 		reason: impl ReasonBuilder<Self, BoolView>,
-	) -> Result<(), Conflict> {
+	) -> Result<(), Conflict<RawLit>> {
 		let (lb, ub) = self.state.int_vars[iv].get_bounds(self);
 		// Check whether a change is redundant, conflicting, or new with respect to
 		// the bounds of an integer variable
@@ -249,7 +249,7 @@ impl DecisionActions for SolvingContext<'_> {
 
 impl PropagationActions for SolvingContext<'_> {
 	type Atom = BoolView;
-	type Conflict = Conflict;
+	type Conflict = Conflict<RawLit>;
 
 	fn deferred_reason(&self, data: u64) -> LazyReason {
 		LazyReason {
@@ -280,7 +280,7 @@ impl BoolInspectionActions<SolvingContext<'_>> for RawLit {
 }
 
 impl<'a> BoolPropagationActions<SolvingContext<'a>> for RawLit {
-	type Conflict = Conflict;
+	type Conflict = Conflict<RawLit>;
 	type Atom = BoolView;
 
 	fn set_val(
@@ -310,14 +310,14 @@ impl<'a> BoolPropagationActions<SolvingContext<'a>> for RawLit {
 
 impl<'a> BoolPropagationActions<SolvingContext<'a>> for BoolView {
 	type Atom = BoolView;
-	type Conflict = Conflict;
+	type Conflict = Conflict<RawLit>;
 
 	fn set_val(
 		&self,
 		ctx: &mut SolvingContext<'a>,
 		val: bool,
 		reason: impl ReasonBuilder<SolvingContext<'a>, BoolView>,
-	) -> Result<(), Conflict> {
+	) -> Result<(), Self::Conflict> {
 		if val { *self } else { !(*self) }.set(ctx, reason)
 	}
 
@@ -394,7 +394,7 @@ impl IntInspectionActions<SolvingContext<'_>> for IntVarRef {
 }
 
 impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
-	type Conflict = Conflict;
+	type Conflict = Conflict<RawLit>;
 
 	fn set_lower_bound(
 		&self,

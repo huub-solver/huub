@@ -263,9 +263,9 @@ fn propagate_bool_lin<Ctx>(
 	lit: RawLit,
 	lit_req: IntLitMeaning,
 	reason: impl ReasonBuilder<Ctx, BoolView>,
-) -> Result<(), Conflict>
+) -> Result<(), Conflict<RawLit>>
 where
-	RawLit: BoolPropagationActions<Ctx, Atom = BoolView, Conflict = Conflict>,
+	RawLit: BoolPropagationActions<Ctx, Atom = BoolView, Conflict = Conflict<RawLit>>,
 {
 	match lit_req {
 		IntLitMeaning::Eq(0) | IntLitMeaning::Less(1) | IntLitMeaning::NotEq(1) => {
@@ -881,17 +881,17 @@ where
 
 impl<Ctx> IntPropagationActions<Ctx> for IntView
 where
-	IntVarRef: IntPropagationActions<Ctx, Atom = BoolView, Conflict = Conflict>,
-	RawLit: BoolPropagationActions<Ctx, Atom = BoolView, Conflict = Conflict>,
+	IntVarRef: IntPropagationActions<Ctx, Atom = BoolView, Conflict = Conflict<RawLit>>,
+	RawLit: BoolPropagationActions<Ctx, Atom = BoolView, Conflict = Conflict<RawLit>>,
 {
-	type Conflict = Conflict;
+	type Conflict = Conflict<RawLit>;
 
 	fn set_lower_bound(
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
 		reason: impl ReasonBuilder<Ctx, BoolView>,
-	) -> Result<(), Conflict> {
+	) -> Result<(), Self::Conflict> {
 		match self.0 {
 			IntViewInner::VarRef(var) => var.set_lower_bound(ctx, val, reason),
 			IntViewInner::Linear { var, transformer } => match transformer
@@ -925,7 +925,7 @@ where
 		ctx: &mut Ctx,
 		val: IntVal,
 		reason: impl ReasonBuilder<Ctx, BoolView>,
-	) -> Result<(), Conflict> {
+	) -> Result<(), Self::Conflict> {
 		match self.0 {
 			IntViewInner::VarRef(var) => var.set_upper_bound(ctx, val, reason),
 			IntViewInner::Linear { var, transformer } => {
@@ -961,7 +961,7 @@ where
 		ctx: &mut Ctx,
 		mut val: IntVal,
 		reason: impl ReasonBuilder<Ctx, BoolView>,
-	) -> Result<(), Conflict> {
+	) -> Result<(), Self::Conflict> {
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
 			self.0
 		{
@@ -997,7 +997,7 @@ where
 		ctx: &mut Ctx,
 		mut val: IntVal,
 		reason: impl ReasonBuilder<Ctx, BoolView>,
-	) -> Result<(), Conflict> {
+	) -> Result<(), Self::Conflict> {
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
 			self.0
 		{

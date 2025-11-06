@@ -23,7 +23,7 @@ use std::{
 	any::Any,
 	fmt::{Debug, Display},
 	hash::Hash,
-	iter::{once, repeat_n, repeat_with, Sum},
+	iter::{repeat_n, repeat_with, Sum},
 	mem,
 	num::{NonZeroI32, NonZeroI64},
 	ops::{Add, AddAssign, Deref, Mul, Neg, Not, Sub},
@@ -66,7 +66,8 @@ use crate::{
 		int_table::IntTable,
 		int_times::IntTimesBounds,
 		int_value_precede::{IntSeqPrecedeChainBounds, IntValuePrecedeChainValue},
-		BoxedConstraint, Constraint, LazyReason, Reason, ReasonBuilder, SimplificationStatus,
+		BoxedConstraint, Conflict, Constraint, LazyReason, Reason, ReasonBuilder,
+		SimplificationStatus,
 	},
 	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
 	helpers::linear_transform::LinearTransform,
@@ -1055,18 +1056,16 @@ impl Model {
 		reason: impl ReasonBuilder<Self, BoolDecision>,
 	) -> <Self as ReasoningEngine>::Conflict {
 		match reason.build_reason(self) {
-			Ok(v) => match v {
-				Reason::Lazy(_) => todo!(),
-				Reason::Eager(items) => items.into_vec(),
-				Reason::Simple(v) => vec![v],
+			Ok(reason) => Conflict {
+				subject: Some(subject),
+				reason,
 			},
-			Err(true) => vec![],
-			Err(false) => panic!("invalid reason"),
+			Err(true) => Conflict {
+				subject: None,
+				reason: Reason::Simple(!subject),
+			},
+			Err(false) => unreachable!("invalid reason"),
 		}
-		.into_iter()
-		.map(|v| !v)
-		.chain(once(subject))
-		.collect()
 	}
 
 	/// Create a new [`Model`] instance from a [`FlatZinc`] instance.
@@ -2470,7 +2469,7 @@ impl DecisionActions for Model {
 
 impl PropagationActions for Model {
 	type Atom = BoolDecision;
-	type Conflict = Vec<BoolDecision>;
+	type Conflict = <Model as ReasoningEngine>::Conflict;
 
 	fn deferred_reason(&self, data: u64) -> LazyReason {
 		LazyReason {
@@ -2481,13 +2480,15 @@ impl PropagationActions for Model {
 
 	fn declare_conflict(&mut self, reason: impl ReasonBuilder<Self, Self::Atom>) -> Self::Conflict {
 		match reason.build_reason(self) {
-			Ok(reason) => match reason {
-				Reason::Lazy(_) => todo!(),
-				Reason::Eager(items) => items.into_vec(),
-				Reason::Simple(b) => vec![b],
+			Ok(reason) => Conflict {
+				subject: None,
+				reason,
 			},
 			Err(false) => panic!("invalid reason"),
-			Err(true) => vec![],
+			Err(true) => Conflict {
+				subject: None,
+				reason: Reason::Eager(Box::new([])),
+			},
 		}
 	}
 }
@@ -2498,7 +2499,7 @@ impl ReasoningEngine for Model {
 	type PropagationCtx<'a> = Self;
 	type ExplanationCtx<'a> = Self;
 
-	type Conflict = Vec<BoolDecision>;
+	type Conflict = Conflict<BoolDecision>;
 	type Atom = BoolDecision;
 }
 

@@ -132,7 +132,7 @@ pub struct State {
 	/// Reasons for setting values
 	pub(crate) reason_map: FxHashMap<RawLit, Reason<RawLit>>,
 	/// Whether conflict has (already) been detected
-	pub(crate) conflict: Option<Conflict>,
+	pub(crate) conflict: Option<Conflict<RawLit>>,
 	/// Whether the solver is in a failure state.
 	///
 	/// Triggered when a conflict is detected during propagation, the solver
@@ -1024,7 +1024,7 @@ impl ReasoningEngine for Engine {
 	type PropagationCtx<'a> = SolvingContext<'a>;
 	type ExplanationCtx<'a> = State;
 
-	type Conflict = Conflict;
+	type Conflict = Conflict<RawLit>;
 	type Atom = BoolView;
 }
 
