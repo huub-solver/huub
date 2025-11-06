@@ -1131,8 +1131,27 @@ impl Model {
 			return Ok(());
 		};
 		self.cur_prop = Some(con);
-		let status = con_obj.simplify(self);
+		let mut status = con_obj.simplify(self);
 		self.cur_prop = None;
+
+		// Resolve lazy explanation if it is required.
+		if let Err(Conflict {
+			subject,
+			reason: Reason::Lazy(r),
+		}) = status
+		{
+			debug_assert_eq!(ConRef::from_raw(r.propagator), con);
+			let conj = con_obj.explain(
+				self,
+				subject.unwrap_or(BoolDecision(BoolDecisionInner::Const(false))),
+				r.data,
+			);
+			status = Err(Conflict {
+				subject,
+				reason: Reason::Eager(conj.into_boxed_slice()),
+			});
+		};
+
 		match status? {
 			SimplificationStatus::Subsumed => {
 				// Constraint is known to be satisfied, no need to place back.
