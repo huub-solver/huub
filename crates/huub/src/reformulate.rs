@@ -445,6 +445,12 @@ impl IntDecisionDef {
 	}
 }
 
+impl<Oracle: ExternalPropagation> AddAssign<BoxedPropagator> for ReformulationContext<'_, Oracle> {
+	fn add_assign(&mut self, propagator: BoxedPropagator) {
+		*self.slv += propagator;
+	}
+}
+
 impl<Oracle: ClauseDatabase> ClauseDatabase for ReformulationContext<'_, Oracle> {
 	fn add_clause_from_slice(&mut self, clause: &[RawLit]) -> Result<(), Unsatisfiable> {
 		self.slv.add_clause_from_slice(clause)
@@ -461,9 +467,50 @@ impl<Oracle> DecisionActions for ReformulationContext<'_, Oracle> {
 	}
 }
 
+impl<Oracle: ExternalPropagation> InitializationActions for ReformulationContext<'_, Oracle> {
+	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
+		InitializationActions::new_trailed_int(self.slv, init)
+	}
+}
+
 impl<Oracle: ClauseDatabase + ExternalPropagation> ReformulationActions
 	for ReformulationContext<'_, Oracle>
 {
+	fn check_int_in_domain(&self, var: IntVarRef, val: IntVal) -> bool {
+		var.check_in_domain(self.slv, val)
+	}
+
+	fn get_bool_val(&self, bv: RawLit) -> Option<bool> {
+		bv.get_val(self.slv)
+	}
+
+	fn get_int_domain(&self, var: IntVarRef) -> IntSetVal {
+		var.get_domain(self.slv)
+	}
+
+	fn get_int_lit(&mut self, var: IntVarRef, meaning: IntLitMeaning) -> BoolView {
+		var.get_lit(self.slv, meaning)
+	}
+
+	fn get_int_lit_meaning(&self, var: IntVarRef, lit: BoolView) -> Option<IntLitMeaning> {
+		var.get_lit_meaning(self.slv, lit)
+	}
+
+	fn get_int_lower_bound(&self, var: IntVarRef) -> IntVal {
+		var.get_lower_bound(self.slv)
+	}
+
+	fn get_int_lower_bound_lit(&self, var: IntVarRef) -> BoolView {
+		var.get_lower_bound_lit(self.slv)
+	}
+
+	fn get_int_upper_bound(&self, var: IntVarRef) -> IntVal {
+		var.get_upper_bound(self.slv)
+	}
+
+	fn get_int_upper_bound_lit(&self, var: IntVarRef) -> BoolView {
+		var.get_upper_bound_lit(self.slv)
+	}
 	fn get_solver_bool(&mut self, bv: BoolDecision) -> BoolView {
 		self.map.get_bool(self.slv, bv)
 	}
@@ -476,56 +523,8 @@ impl<Oracle: ClauseDatabase + ExternalPropagation> ReformulationActions
 		BoolView(BoolViewInner::Lit(self.slv.new_lit()))
 	}
 
-	fn get_bool_val(&self, bv: RawLit) -> Option<bool> {
-		bv.get_val(self.slv)
-	}
-
-	fn get_int_lower_bound(&self, var: IntVarRef) -> IntVal {
-		var.get_lower_bound(self.slv)
-	}
-
-	fn get_int_upper_bound(&self, var: IntVarRef) -> IntVal {
-		var.get_upper_bound(self.slv)
-	}
-
-	fn get_int_domain(&self, var: IntVarRef) -> IntSetVal {
-		var.get_domain(self.slv)
-	}
-
-	fn check_int_in_domain(&self, var: IntVarRef, val: IntVal) -> bool {
-		var.check_in_domain(self.slv, val)
-	}
-
-	fn get_int_lit_meaning(&self, var: IntVarRef, lit: BoolView) -> Option<IntLitMeaning> {
-		var.get_lit_meaning(self.slv, lit)
-	}
-
-	fn get_int_lower_bound_lit(&self, var: IntVarRef) -> BoolView {
-		var.get_lower_bound_lit(self.slv)
-	}
-
-	fn get_int_upper_bound_lit(&self, var: IntVarRef) -> BoolView {
-		var.get_upper_bound_lit(self.slv)
-	}
-
 	fn try_int_lit(&self, var: IntVarRef, meaning: IntLitMeaning) -> Option<BoolView> {
 		var.try_lit(self.slv, meaning)
-	}
-
-	fn get_int_lit(&mut self, var: IntVarRef, meaning: IntLitMeaning) -> BoolView {
-		var.get_lit(self.slv, meaning)
-	}
-}
-
-impl<Oracle: ExternalPropagation> InitializationActions for ReformulationContext<'_, Oracle> {
-	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
-		InitializationActions::new_trailed_int(self.slv, init)
-	}
-}
-
-impl<Oracle: ExternalPropagation> AddAssign<BoxedPropagator> for ReformulationContext<'_, Oracle> {
-	fn add_assign(&mut self, propagator: BoxedPropagator) {
-		*self.slv += propagator;
 	}
 }
 

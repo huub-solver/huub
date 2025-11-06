@@ -1,7 +1,7 @@
-//! Module containing the [`SolvingContext`] structure used to take actions
 //! during the propagation and solution checking process. This structure
 //! contains the implementation of the actions that are exposed to the
 //! propagators.
+//! Module containing the [`SolvingContext`] structure used to take actions
 
 use std::fmt::{self, Debug, Formatter};
 
@@ -58,6 +58,166 @@ pub struct SolvingContext<'a> {
 	pub(crate) current_prop: PropRef,
 }
 
+impl<'a> BoolPropagationActions<SolvingContext<'a>> for BoolView {
+	type Atom = BoolView;
+	type Conflict = Conflict<RawLit>;
+
+	fn set(
+		&self,
+		ctx: &mut SolvingContext<'a>,
+		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
+	) -> Result<(), Self::Conflict> {
+		match self.0 {
+			BoolViewInner::Lit(lit) => lit.set(ctx, reason),
+			BoolViewInner::Const(false) => Err(Conflict::new(ctx, None, reason)),
+			BoolViewInner::Const(true) => Ok(()),
+		}
+	}
+
+	fn set_val(
+		&self,
+		ctx: &mut SolvingContext<'a>,
+		val: bool,
+		reason: impl ReasonBuilder<SolvingContext<'a>, BoolView>,
+	) -> Result<(), Self::Conflict> {
+		if val { *self } else { !(*self) }.set(ctx, reason)
+	}
+}
+
+impl IntDecisionActions<SolvingContext<'_>> for IntVarRef {
+	fn get_lit(&self, ctx: &mut SolvingContext<'_>, meaning: IntLitMeaning) -> BoolView {
+		let var = &mut ctx.state.int_vars[*self];
+		let new_var = |def: LazyLitDef| {
+			// Create new variable
+			let v = ctx.slv.new_observed_var();
+			ctx.state.trail.grow_to_boolvar(v);
+			trace_new_lit!(*self, def, v);
+			ctx.state.bool_to_int.insert_lazy(v, *self, def.meaning);
+			// Add clauses to define the new variable
+			for cl in def.meaning.defining_clauses(
+				v.into(),
+				def.prev.map(Into::into),
+				def.next.map(Into::into),
+			) {
+				ctx.state.clauses.push_back(cl);
+			}
+			v
+		};
+		var.bool_lit(meaning, new_var).0
+	}
+}
+
+impl IntInspectionActions<SolvingContext<'_>> for IntVarRef {
+	type Atom = <IntVarRef as IntInspectionActions<State>>::Atom;
+
+	fn check_in_domain(&self, ctx: &SolvingContext<'_>, val: IntVal) -> bool {
+		self.check_in_domain(ctx.state, val)
+	}
+
+	fn get_domain(&self, ctx: &SolvingContext<'_>) -> crate::IntSetVal {
+		self.get_domain(ctx.state)
+	}
+
+	fn get_lit_meaning(&self, ctx: &SolvingContext<'_>, lit: Self::Atom) -> Option<IntLitMeaning> {
+		self.get_lit_meaning(ctx.state, lit)
+	}
+
+	fn get_lower_bound(&self, ctx: &SolvingContext<'_>) -> IntVal {
+		self.get_lower_bound(ctx.state)
+	}
+
+	fn get_lower_bound_lit(&self, ctx: &SolvingContext<'_>) -> Self::Atom {
+		self.get_lower_bound_lit(ctx.state)
+	}
+
+	fn get_upper_bound(&self, ctx: &SolvingContext<'_>) -> IntVal {
+		self.get_upper_bound(ctx.state)
+	}
+
+	fn get_upper_bound_lit(&self, ctx: &SolvingContext<'_>) -> Self::Atom {
+		self.get_upper_bound_lit(ctx.state)
+	}
+
+	fn try_lit(&self, ctx: &SolvingContext<'_>, meaning: IntLitMeaning) -> Option<Self::Atom> {
+		self.try_lit(ctx.state, meaning)
+	}
+}
+
+impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
+	type Conflict = Conflict<RawLit>;
+
+	fn set_lower_bound(
+		&self,
+		ctx: &mut SolvingContext<'a>,
+		val: IntVal,
+		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
+	) -> Result<(), Self::Conflict> {
+		ctx.propagate_int(*self, IntLitMeaning::GreaterEq(val), reason)
+	}
+
+	fn set_not_eq(
+		&self,
+		ctx: &mut SolvingContext<'a>,
+		val: IntVal,
+		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
+	) -> Result<(), Self::Conflict> {
+		ctx.propagate_int(*self, IntLitMeaning::NotEq(val), reason)
+	}
+
+	fn set_upper_bound(
+		&self,
+		ctx: &mut SolvingContext<'a>,
+		val: IntVal,
+		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
+	) -> Result<(), Self::Conflict> {
+		ctx.propagate_int(*self, IntLitMeaning::Less(val + 1), reason)
+	}
+
+	fn set_val(
+		&self,
+		ctx: &mut SolvingContext<'a>,
+		val: IntVal,
+		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
+	) -> Result<(), Self::Conflict> {
+		ctx.propagate_int(*self, IntLitMeaning::Eq(val), reason)
+	}
+}
+
+impl BoolInspectionActions<SolvingContext<'_>> for RawLit {
+	fn get_val(&self, ctx: &SolvingContext<'_>) -> Option<bool> {
+		self.get_val(ctx.state)
+	}
+}
+
+impl<'a> BoolPropagationActions<SolvingContext<'a>> for RawLit {
+	type Atom = BoolView;
+	type Conflict = Conflict<RawLit>;
+
+	fn set(
+		&self,
+		ctx: &mut SolvingContext<'a>,
+		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
+	) -> Result<(), Self::Conflict> {
+		match ctx.state.trail.get_sat_value(*self) {
+			Some(true) => Ok(()),
+			Some(false) => Err(Conflict::new(ctx, Some(*self), reason)),
+			None => {
+				ctx.propagate_lit(*self, reason, None);
+				Ok(())
+			}
+		}
+	}
+
+	fn set_val(
+		&self,
+		ctx: &mut SolvingContext<'a>,
+		val: bool,
+		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
+	) -> Result<(), Self::Conflict> {
+		if val { *self } else { !(*self) }.set(ctx, reason)
+	}
+}
+
 impl Debug for ReasonTracePrint<'_> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self.0 {
@@ -79,33 +239,6 @@ impl<'a> SolvingContext<'a> {
 			state,
 			current_prop: PropRef::new(i32::MAX as usize),
 		}
-	}
-
-	#[inline]
-	/// Internal method used to propagate a Boolean literal.
-	///
-	/// ## Warning
-	///
-	/// This method assumes that the literal has not already been assigned, not
-	/// even to the same value.
-	fn propagate_lit(
-		&mut self,
-		lit: RawLit,
-		reason: impl ReasonBuilder<Self, BoolView>,
-		event: Option<(IntVarRef, IntEvent)>,
-	) {
-		let reason = Reason::from_view(reason.build_reason(self));
-		trace!(
-			lit = i32::from(lit),
-			reason = ?ReasonTracePrint(&reason),
-			prop = usize::from(self.current_prop),
-			"propagate"
-		);
-		self.state
-			.propagation_queue
-			.push_back(LitPropagation { lit, reason, event });
-		let _prev = self.state.trail.assign_lit(lit);
-		debug_assert_eq!(_prev, None);
 	}
 
 	#[inline]
@@ -200,6 +333,33 @@ impl<'a> SolvingContext<'a> {
 		Ok(())
 	}
 
+	#[inline]
+	/// Internal method used to propagate a Boolean literal.
+	///
+	/// ## Warning
+	///
+	/// This method assumes that the literal has not already been assigned, not
+	/// even to the same value.
+	fn propagate_lit(
+		&mut self,
+		lit: RawLit,
+		reason: impl ReasonBuilder<Self, BoolView>,
+		event: Option<(IntVarRef, IntEvent)>,
+	) {
+		let reason = Reason::from_view(reason.build_reason(self));
+		trace!(
+			lit = i32::from(lit),
+			reason = ?ReasonTracePrint(&reason),
+			prop = usize::from(self.current_prop),
+			"propagate"
+		);
+		self.state
+			.propagation_queue
+			.push_back(LitPropagation { lit, reason, event });
+		let _prev = self.state.trail.assign_lit(lit);
+		debug_assert_eq!(_prev, None);
+	}
+
 	/// Run the propagators in the queue until a propagator detects a conflict,
 	/// returns literals to be propagated by the SAT oracle, or the queue is
 	/// empty.
@@ -251,15 +411,15 @@ impl PropagationActions for SolvingContext<'_> {
 	type Atom = BoolView;
 	type Conflict = Conflict<RawLit>;
 
+	fn declare_conflict(&mut self, reason: impl ReasonBuilder<Self, Self::Atom>) -> Self::Conflict {
+		Conflict::new(self, None, reason)
+	}
+
 	fn deferred_reason(&self, data: u64) -> LazyReason {
 		LazyReason {
 			propagator: self.current_prop.raw(),
 			data,
 		}
-	}
-
-	fn declare_conflict(&mut self, reason: impl ReasonBuilder<Self, Self::Atom>) -> Self::Conflict {
-		Conflict::new(self, None, reason)
 	}
 }
 
@@ -270,165 +430,5 @@ impl TrailingActions for SolvingContext<'_> {
 
 	fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal {
 		self.state.set_trailed_int(x, v)
-	}
-}
-
-impl BoolInspectionActions<SolvingContext<'_>> for RawLit {
-	fn get_val(&self, ctx: &SolvingContext<'_>) -> Option<bool> {
-		self.get_val(ctx.state)
-	}
-}
-
-impl<'a> BoolPropagationActions<SolvingContext<'a>> for RawLit {
-	type Conflict = Conflict<RawLit>;
-	type Atom = BoolView;
-
-	fn set_val(
-		&self,
-		ctx: &mut SolvingContext<'a>,
-		val: bool,
-		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
-		if val { *self } else { !(*self) }.set(ctx, reason)
-	}
-
-	fn set(
-		&self,
-		ctx: &mut SolvingContext<'a>,
-		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
-		match ctx.state.trail.get_sat_value(*self) {
-			Some(true) => Ok(()),
-			Some(false) => Err(Conflict::new(ctx, Some(*self), reason)),
-			None => {
-				ctx.propagate_lit(*self, reason, None);
-				Ok(())
-			}
-		}
-	}
-}
-
-impl<'a> BoolPropagationActions<SolvingContext<'a>> for BoolView {
-	type Atom = BoolView;
-	type Conflict = Conflict<RawLit>;
-
-	fn set_val(
-		&self,
-		ctx: &mut SolvingContext<'a>,
-		val: bool,
-		reason: impl ReasonBuilder<SolvingContext<'a>, BoolView>,
-	) -> Result<(), Self::Conflict> {
-		if val { *self } else { !(*self) }.set(ctx, reason)
-	}
-
-	fn set(
-		&self,
-		ctx: &mut SolvingContext<'a>,
-		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
-		match self.0 {
-			BoolViewInner::Lit(lit) => lit.set(ctx, reason),
-			BoolViewInner::Const(false) => Err(Conflict::new(ctx, None, reason)),
-			BoolViewInner::Const(true) => Ok(()),
-		}
-	}
-}
-
-impl IntDecisionActions<SolvingContext<'_>> for IntVarRef {
-	fn get_lit(&self, ctx: &mut SolvingContext<'_>, meaning: IntLitMeaning) -> BoolView {
-		let var = &mut ctx.state.int_vars[*self];
-		let new_var = |def: LazyLitDef| {
-			// Create new variable
-			let v = ctx.slv.new_observed_var();
-			ctx.state.trail.grow_to_boolvar(v);
-			trace_new_lit!(*self, def, v);
-			ctx.state.bool_to_int.insert_lazy(v, *self, def.meaning);
-			// Add clauses to define the new variable
-			for cl in def.meaning.defining_clauses(
-				v.into(),
-				def.prev.map(Into::into),
-				def.next.map(Into::into),
-			) {
-				ctx.state.clauses.push_back(cl);
-			}
-			v
-		};
-		var.bool_lit(meaning, new_var).0
-	}
-}
-
-impl IntInspectionActions<SolvingContext<'_>> for IntVarRef {
-	type Atom = <IntVarRef as IntInspectionActions<State>>::Atom;
-
-	fn get_lower_bound(&self, ctx: &SolvingContext<'_>) -> IntVal {
-		self.get_lower_bound(ctx.state)
-	}
-
-	fn get_upper_bound(&self, ctx: &SolvingContext<'_>) -> IntVal {
-		self.get_upper_bound(ctx.state)
-	}
-
-	fn get_domain(&self, ctx: &SolvingContext<'_>) -> crate::IntSetVal {
-		self.get_domain(ctx.state)
-	}
-
-	fn check_in_domain(&self, ctx: &SolvingContext<'_>, val: IntVal) -> bool {
-		self.check_in_domain(ctx.state, val)
-	}
-
-	fn get_lit_meaning(&self, ctx: &SolvingContext<'_>, lit: Self::Atom) -> Option<IntLitMeaning> {
-		self.get_lit_meaning(ctx.state, lit)
-	}
-
-	fn get_lower_bound_lit(&self, ctx: &SolvingContext<'_>) -> Self::Atom {
-		self.get_lower_bound_lit(ctx.state)
-	}
-
-	fn get_upper_bound_lit(&self, ctx: &SolvingContext<'_>) -> Self::Atom {
-		self.get_upper_bound_lit(ctx.state)
-	}
-
-	fn try_lit(&self, ctx: &SolvingContext<'_>, meaning: IntLitMeaning) -> Option<Self::Atom> {
-		self.try_lit(ctx.state, meaning)
-	}
-}
-
-impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
-	type Conflict = Conflict<RawLit>;
-
-	fn set_lower_bound(
-		&self,
-		ctx: &mut SolvingContext<'a>,
-		val: IntVal,
-		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
-		ctx.propagate_int(*self, IntLitMeaning::GreaterEq(val), reason)
-	}
-
-	fn set_upper_bound(
-		&self,
-		ctx: &mut SolvingContext<'a>,
-		val: IntVal,
-		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
-		ctx.propagate_int(*self, IntLitMeaning::Less(val + 1), reason)
-	}
-
-	fn set_val(
-		&self,
-		ctx: &mut SolvingContext<'a>,
-		val: IntVal,
-		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
-		ctx.propagate_int(*self, IntLitMeaning::Eq(val), reason)
-	}
-
-	fn set_not_eq(
-		&self,
-		ctx: &mut SolvingContext<'a>,
-		val: IntVal,
-		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
-		ctx.propagate_int(*self, IntLitMeaning::NotEq(val), reason)
 	}
 }

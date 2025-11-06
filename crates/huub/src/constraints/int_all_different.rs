@@ -531,17 +531,6 @@ where
 	E: ReasoningEngine,
 	I: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
-		// Let the propagator be advised when each specific decision is fixed to a
-		// value, with the index of the decision.
-		for (i, v) in self.vars.iter().enumerate() {
-			v.advise_when(ctx, IntPropCond::Fixed, i as u64);
-		}
-		// Advise the propagator of backtracking to clear the list of fixed decision
-		// (indices).
-		ctx.advise_on_backtrack();
-	}
-
 	fn advise_of_backtrack(&mut self, _: &mut E::NotificationCtx<'_>) {
 		// We forget any previously remembered fixed decisions.
 		self.action_list.clear();
@@ -557,6 +546,17 @@ where
 		debug_assert_eq!(event, IntEvent::Fixed);
 		self.action_list.push(data as usize);
 		true
+	}
+
+	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+		// Let the propagator be advised when each specific decision is fixed to a
+		// value, with the index of the decision.
+		for (i, v) in self.vars.iter().enumerate() {
+			v.advise_when(ctx, IntPropCond::Fixed, i as u64);
+		}
+		// Advise the propagator of backtracking to clear the list of fixed decision
+		// (indices).
+		ctx.advise_on_backtrack();
 	}
 
 	#[tracing::instrument(name = "all_different", level = "trace", skip(self, ctx))]

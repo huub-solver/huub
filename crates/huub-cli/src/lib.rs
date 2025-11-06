@@ -53,10 +53,6 @@ use ustr::{ustr, Ustr, UstrMap};
 
 use crate::trace::LitName;
 
-/// Use [`MiMalloc`] as the global allocator.
-#[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
-
 /// Status message to output when it is proven that no more/better solutions can
 /// be found.
 const FZN_COMPLETE: &str = "==========";
@@ -67,6 +63,10 @@ const FZN_SEPERATOR: &str = "----------";
 const FZN_UNKNOWN: &str = "=====UNKNOWN=====";
 /// Status message to output when a problem is proven to be unsatisfiable.
 const FZN_UNSATISFIABLE: &str = "=====UNSATISFIABLE=====";
+
+/// Use [`MiMalloc`] as the global allocator.
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 /// FlatZinc command line interface for the Huub solver
 ///

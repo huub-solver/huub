@@ -65,53 +65,6 @@ pub struct CumulativeTimeTable<I1, I2, I3, I4> {
 	heights: Vec<IntVal>,
 }
 
-impl<E, I1, I2, I3, I4> Constraint<E> for CumulativeTimeTable<I1, I2, I3, I4>
-where
-	E: ReasoningEngine,
-	I1: ModelIntView<E>,
-	I2: ModelIntView<E>,
-	I3: ModelIntView<E>,
-	I4: ModelIntView<E>,
-{
-	fn simplify(
-		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
-	) -> Result<SimplificationStatus, E::Conflict> {
-		self.propagate(ctx)?;
-
-		if self.capacity.get_val(ctx).is_some()
-			&& self.start_times.iter().all(|v| v.get_val(ctx).is_some())
-			&& self.durations.iter().all(|v| v.get_val(ctx).is_some())
-			&& self.usages.iter().all(|v| v.get_val(ctx).is_some())
-		{
-			return Ok(SimplificationStatus::Subsumed);
-		}
-
-		Ok(SimplificationStatus::NoFixpoint)
-	}
-
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let start_times = self
-			.start_times
-			.iter()
-			.map(|v| slv.get_solver_int(v.clone().into()))
-			.collect_vec();
-		let durations = self
-			.durations
-			.iter()
-			.map(|v| slv.get_solver_int(v.clone().into()))
-			.collect_vec();
-		let usages = self
-			.usages
-			.iter()
-			.map(|v| slv.get_solver_int(v.clone().into()))
-			.collect_vec();
-		let capacity = { slv.get_solver_int(self.capacity.clone().into()) };
-		CumulativeTimeTable::new_in(slv, start_times, durations, usages, capacity);
-		Ok(())
-	}
-}
-
 impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// Build the time-table profile as a set of (time, height) rectangles to
 	/// represent the compulsory parts of tasks. The compulsory part of a task
@@ -824,6 +777,53 @@ impl CumulativeTimeTable<IntView, IntView, IntView, IntView> {
 			usages,
 			capacity,
 		));
+	}
+}
+
+impl<E, I1, I2, I3, I4> Constraint<E> for CumulativeTimeTable<I1, I2, I3, I4>
+where
+	E: ReasoningEngine,
+	I1: ModelIntView<E>,
+	I2: ModelIntView<E>,
+	I3: ModelIntView<E>,
+	I4: ModelIntView<E>,
+{
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
+		self.propagate(ctx)?;
+
+		if self.capacity.get_val(ctx).is_some()
+			&& self.start_times.iter().all(|v| v.get_val(ctx).is_some())
+			&& self.durations.iter().all(|v| v.get_val(ctx).is_some())
+			&& self.usages.iter().all(|v| v.get_val(ctx).is_some())
+		{
+			return Ok(SimplificationStatus::Subsumed);
+		}
+
+		Ok(SimplificationStatus::NoFixpoint)
+	}
+
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let start_times = self
+			.start_times
+			.iter()
+			.map(|v| slv.get_solver_int(v.clone().into()))
+			.collect_vec();
+		let durations = self
+			.durations
+			.iter()
+			.map(|v| slv.get_solver_int(v.clone().into()))
+			.collect_vec();
+		let usages = self
+			.usages
+			.iter()
+			.map(|v| slv.get_solver_int(v.clone().into()))
+			.collect_vec();
+		let capacity = { slv.get_solver_int(self.capacity.clone().into()) };
+		CumulativeTimeTable::new_in(slv, start_times, durations, usages, capacity);
+		Ok(())
 	}
 }
 

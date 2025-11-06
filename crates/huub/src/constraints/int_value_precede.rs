@@ -76,38 +76,6 @@ pub struct IntValuePrecedeChainValue<I> {
 	mapping: Vec<Option<usize>>,
 }
 
-impl<E, I> Constraint<E> for IntSeqPrecedeChainBounds<I>
-where
-	E: ReasoningEngine,
-	I: ModelIntView<E>,
-{
-	fn simplify(
-		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
-	) -> Result<SimplificationStatus, E::Conflict> {
-		self.propagate(ctx)?;
-
-		// TODO: Can we remove negative values here?
-
-		if self.vars.iter().all(|v| v.get_val(ctx).is_some()) {
-			return Ok(SimplificationStatus::Subsumed);
-		}
-
-		Ok(SimplificationStatus::NoFixpoint)
-	}
-
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let vars: Vec<_> = self
-			.vars
-			.iter()
-			.map(|v| slv.get_solver_int(v.clone().into()))
-			.collect();
-
-		IntSeqPrecedeChainBounds::new_in(slv, vars);
-		Ok(())
-	}
-}
-
 impl<I> IntSeqPrecedeChainBounds<I> {
 	/// Lower bound explanation: Could not have this value earlier (=upper bound
 	/// explanation) and some later value requires the lower bound (recursive
@@ -240,6 +208,45 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 		Ok(())
 	}
 
+	/// Create a new [`IntSeqPrecedeChainBounds`] propagator and post it in the
+	/// solver.
+	pub fn new<E>(engine: &mut E, vars: Vec<I>) -> Self
+	where
+		E: InitializationActions + ?Sized,
+		I: IntInspectionActions<E>,
+	{
+		let n = vars.len();
+		let ub = vars.iter().fold(0, |u, item| {
+			if item.get_upper_bound(engine) > u {
+				u + 1
+			} else {
+				u
+			}
+		});
+
+		let first = (0..=ub).map(|_| engine.new_trailed_int(0)).collect();
+		let last = (0..=ub)
+			.map(|i| {
+				if i == 0 {
+					engine.new_trailed_int(IntVal::MIN)
+				} else {
+					engine.new_trailed_int(IntVal::MAX)
+				}
+			})
+			.collect();
+		let first_val = (0..n).map(|_| engine.new_trailed_int(0)).collect();
+		let max_last = engine.new_trailed_int(0);
+
+		Self {
+			vars: vars.clone(),
+			initialized: false,
+			first,
+			last,
+			first_val,
+			max_last,
+		}
+	}
+
 	/// Iteratively repairs the lower bounds starting with k, only iterates as
 	/// far as necessary.
 	fn repair_lower<E>(
@@ -337,45 +344,6 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 		ctx.set_trailed_int(self.first[k as usize], 0);
 		Ok(())
 	}
-
-	/// Create a new [`IntSeqPrecedeChainBounds`] propagator and post it in the
-	/// solver.
-	pub fn new<E>(engine: &mut E, vars: Vec<I>) -> Self
-	where
-		E: InitializationActions + ?Sized,
-		I: IntInspectionActions<E>,
-	{
-		let n = vars.len();
-		let ub = vars.iter().fold(0, |u, item| {
-			if item.get_upper_bound(engine) > u {
-				u + 1
-			} else {
-				u
-			}
-		});
-
-		let first = (0..=ub).map(|_| engine.new_trailed_int(0)).collect();
-		let last = (0..=ub)
-			.map(|i| {
-				if i == 0 {
-					engine.new_trailed_int(IntVal::MIN)
-				} else {
-					engine.new_trailed_int(IntVal::MAX)
-				}
-			})
-			.collect();
-		let first_val = (0..n).map(|_| engine.new_trailed_int(0)).collect();
-		let max_last = engine.new_trailed_int(0);
-
-		Self {
-			vars: vars.clone(),
-			initialized: false,
-			first,
-			last,
-			first_val,
-			max_last,
-		}
-	}
 }
 
 impl IntSeqPrecedeChainBounds<IntView> {
@@ -395,6 +363,38 @@ impl IntSeqPrecedeChainBounds<IntView> {
 
 		let con = IntSeqPrecedeChainBounds::new(solver, vars);
 		*solver += Box::new(con);
+	}
+}
+
+impl<E, I> Constraint<E> for IntSeqPrecedeChainBounds<I>
+where
+	E: ReasoningEngine,
+	I: ModelIntView<E>,
+{
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
+		self.propagate(ctx)?;
+
+		// TODO: Can we remove negative values here?
+
+		if self.vars.iter().all(|v| v.get_val(ctx).is_some()) {
+			return Ok(SimplificationStatus::Subsumed);
+		}
+
+		Ok(SimplificationStatus::NoFixpoint)
+	}
+
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let vars: Vec<_> = self
+			.vars
+			.iter()
+			.map(|v| slv.get_solver_int(v.clone().into()))
+			.collect();
+
+		IntSeqPrecedeChainBounds::new_in(slv, vars);
+		Ok(())
 	}
 }
 
@@ -454,37 +454,6 @@ where
 				(i, k) = self.repair_lower(ctx, k)?;
 			}
 		}
-		Ok(())
-	}
-}
-
-impl<E, I> Constraint<E> for IntValuePrecedeChainValue<I>
-where
-	E: ReasoningEngine,
-	I: ModelIntView<E>,
-{
-	fn simplify(
-		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
-	) -> Result<SimplificationStatus, E::Conflict> {
-		self.propagate(ctx)?;
-
-		// TODO: Can we eliminate variables without tracked values here?
-
-		if self.vars.iter().all(|v| v.get_val(ctx).is_some()) {
-			return Ok(SimplificationStatus::Subsumed);
-		}
-
-		Ok(SimplificationStatus::NoFixpoint)
-	}
-
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let vars: Vec<_> = self
-			.vars
-			.iter()
-			.map(|v| slv.get_solver_int(v.clone().into()))
-			.collect();
-		IntValuePrecedeChainValue::new_in(slv, self.values.clone(), vars);
 		Ok(())
 	}
 }
@@ -680,6 +649,68 @@ impl<I> IntValuePrecedeChainValue<I> {
 		Ok(())
 	}
 
+	/// Create a new [`ValuePrecedeChainValue`] propagator
+	pub fn new<E>(engine: &mut E, values: Vec<IntVal>, vars: Vec<I>) -> Self
+	where
+		E: InitializationActions + ?Sized,
+	{
+		let first = (0..=values.len())
+			.map(|i| {
+				if i == 0 {
+					engine.new_trailed_int(0)
+				} else {
+					engine.new_trailed_int(vars.len() as IntVal - 1)
+				}
+			})
+			.collect();
+		let last = (0..=values.len())
+			.map(|i| {
+				if i == 0 {
+					engine.new_trailed_int(IntVal::MIN)
+				} else {
+					engine.new_trailed_int(IntVal::MAX)
+				}
+			})
+			.collect();
+		let first_val = (0..vars.len()).map(|_| engine.new_trailed_int(0)).collect();
+		let max_last = engine.new_trailed_int(0);
+		// Set up some data structures to deal with holes in values more efficiently.
+		let min_val = *values.iter().min().unwrap_or(&IntVal::MAX);
+		let max_val = *values.iter().max().unwrap_or(&IntVal::MIN);
+		let holes = (min_val..=max_val)
+			.filter(|&i| values.iter().all(|&v| v != i))
+			.collect::<Vec<_>>();
+		let min_hole = *holes.iter().min().unwrap_or(&0);
+		let mut next_hole = vec![0; (*holes.iter().max().unwrap_or(&-1) - min_hole + 1) as usize];
+		let mut cur_hole = 0;
+		for (i, h) in next_hole.iter_mut().enumerate() {
+			if i as IntVal + min_hole > holes[cur_hole] {
+				cur_hole += 1;
+			}
+			*h = holes[cur_hole];
+		}
+		let mut mapping = vec![None; (max_val - min_val + 1) as usize];
+		for (i, &val) in values.iter().enumerate() {
+			mapping[(val - min_val) as usize] = Some(i + 1);
+		}
+
+		Self {
+			values,
+			vars,
+			initialized: false,
+			first,
+			last,
+			first_val,
+			max_last,
+			min_val,
+			max_val,
+			holes,
+			min_hole,
+			next_hole,
+			mapping,
+		}
+	}
+
 	/// Propagate a lower bound by excluding all elements outside values, and
 	/// values with lower index.
 	fn propagate_lower_bound<E>(
@@ -831,68 +862,6 @@ impl<I> IntValuePrecedeChainValue<I> {
 		ctx.set_trailed_int(self.first[k], 0);
 		Ok(())
 	}
-
-	/// Create a new [`ValuePrecedeChainValue`] propagator
-	pub fn new<E>(engine: &mut E, values: Vec<IntVal>, vars: Vec<I>) -> Self
-	where
-		E: InitializationActions + ?Sized,
-	{
-		let first = (0..=values.len())
-			.map(|i| {
-				if i == 0 {
-					engine.new_trailed_int(0)
-				} else {
-					engine.new_trailed_int(vars.len() as IntVal - 1)
-				}
-			})
-			.collect();
-		let last = (0..=values.len())
-			.map(|i| {
-				if i == 0 {
-					engine.new_trailed_int(IntVal::MIN)
-				} else {
-					engine.new_trailed_int(IntVal::MAX)
-				}
-			})
-			.collect();
-		let first_val = (0..vars.len()).map(|_| engine.new_trailed_int(0)).collect();
-		let max_last = engine.new_trailed_int(0);
-		// Set up some data structures to deal with holes in values more efficiently.
-		let min_val = *values.iter().min().unwrap_or(&IntVal::MAX);
-		let max_val = *values.iter().max().unwrap_or(&IntVal::MIN);
-		let holes = (min_val..=max_val)
-			.filter(|&i| values.iter().all(|&v| v != i))
-			.collect::<Vec<_>>();
-		let min_hole = *holes.iter().min().unwrap_or(&0);
-		let mut next_hole = vec![0; (*holes.iter().max().unwrap_or(&-1) - min_hole + 1) as usize];
-		let mut cur_hole = 0;
-		for (i, h) in next_hole.iter_mut().enumerate() {
-			if i as IntVal + min_hole > holes[cur_hole] {
-				cur_hole += 1;
-			}
-			*h = holes[cur_hole];
-		}
-		let mut mapping = vec![None; (max_val - min_val + 1) as usize];
-		for (i, &val) in values.iter().enumerate() {
-			mapping[(val - min_val) as usize] = Some(i + 1);
-		}
-
-		Self {
-			values,
-			vars,
-			initialized: false,
-			first,
-			last,
-			first_val,
-			max_last,
-			min_val,
-			max_val,
-			holes,
-			min_hole,
-			next_hole,
-			mapping,
-		}
-	}
 }
 
 impl IntValuePrecedeChainValue<IntView> {
@@ -966,6 +935,37 @@ impl IntValuePrecedeChainValue<IntView> {
 			next_hole,
 			mapping,
 		});
+	}
+}
+
+impl<E, I> Constraint<E> for IntValuePrecedeChainValue<I>
+where
+	E: ReasoningEngine,
+	I: ModelIntView<E>,
+{
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
+		self.propagate(ctx)?;
+
+		// TODO: Can we eliminate variables without tracked values here?
+
+		if self.vars.iter().all(|v| v.get_val(ctx).is_some()) {
+			return Ok(SimplificationStatus::Subsumed);
+		}
+
+		Ok(SimplificationStatus::NoFixpoint)
+	}
+
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let vars: Vec<_> = self
+			.vars
+			.iter()
+			.map(|v| slv.get_solver_int(v.clone().into()))
+			.collect();
+		IntValuePrecedeChainValue::new_in(slv, self.values.clone(), vars);
+		Ok(())
 	}
 }
 

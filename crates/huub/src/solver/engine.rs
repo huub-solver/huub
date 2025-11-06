@@ -712,10 +712,183 @@ impl PropagatorExtensionDefinition for Engine {
 	const REASON_PERSISTENCE: ClausePersistence = ClausePersistence::Forgettable;
 }
 
+impl ReasoningEngine for Engine {
+	type Atom = BoolView;
+
+	type Conflict = Conflict<RawLit>;
+	type ExplanationCtx<'a> = State;
+	type NotificationCtx<'a> = State;
+	type PostingCtx<'a> = PostingContext<'a>;
+	type PropagationCtx<'a> = SolvingContext<'a>;
+}
+
+impl IntInspectionActions<State> for IntVal {
+	type Atom = BoolView;
+
+	fn check_in_domain(&self, _: &State, val: IntVal) -> bool {
+		*self == val
+	}
+
+	fn get_domain(&self, _: &State) -> crate::IntSetVal {
+		(*self..=*self).into()
+	}
+
+	fn get_lit_meaning(&self, _: &State, _: Self::Atom) -> Option<IntLitMeaning> {
+		None
+	}
+
+	fn get_lower_bound(&self, _: &State) -> IntVal {
+		*self
+	}
+
+	fn get_lower_bound_lit(&self, _: &State) -> Self::Atom {
+		true.into()
+	}
+
+	fn get_upper_bound(&self, _: &State) -> IntVal {
+		*self
+	}
+
+	fn get_upper_bound_lit(&self, _: &State) -> Self::Atom {
+		true.into()
+	}
+
+	fn try_lit(&self, _: &State, meaning: IntLitMeaning) -> Option<Self::Atom> {
+		Some(
+			match meaning {
+				IntLitMeaning::Eq(v) => *self == v,
+				IntLitMeaning::NotEq(v) => *self != v,
+				IntLitMeaning::GreaterEq(v) => *self >= v,
+				IntLitMeaning::Less(v) => *self < v,
+			}
+			.into(),
+		)
+	}
+}
+
+impl IntExplanationActions<State> for IntVarRef {
+	fn get_lit_relaxed(
+		&self,
+		ctx: &State,
+		mut meaning: IntLitMeaning,
+	) -> (BoolView, IntLitMeaning) {
+		debug_assert!(
+			!matches!(meaning, IntLitMeaning::Eq(_)),
+			"relaxed integer literals are not yet supported for IntLitMeaning::Eq(_)"
+		);
+
+		let var_def = &ctx.int_vars[*self];
+		// If we are looking for a not-equal literal, try and find it. Return it if we
+		// find it, otherwise defer to an order literal.
+		if let IntLitMeaning::NotEq(v) = meaning {
+			if let Some((bv, _)) = var_def.get_bool_lit(meaning) {
+				return (bv, IntLitMeaning::NotEq(v));
+			}
+
+			let lb = var_def.get_lower_bound(&ctx.trail);
+			if v < lb {
+				meaning = IntLitMeaning::GreaterEq(v + 1);
+			} else {
+				debug_assert!(v > var_def.get_upper_bound(&ctx.trail));
+				meaning = IntLitMeaning::Less(v);
+			}
+		}
+		// Find the strongest order literal that fits the given meaning.
+		match meaning {
+			IntLitMeaning::GreaterEq(v) => {
+				let (bv, v) = var_def.get_greater_eq_lit_or_weaker(&ctx.trail, v);
+				(bv, IntLitMeaning::GreaterEq(v))
+			}
+			IntLitMeaning::Less(v) => {
+				let (bv, v) = var_def.get_less_lit_or_weaker(&ctx.trail, v);
+				(bv, IntLitMeaning::Less(v))
+			}
+			_ => unreachable!(),
+		}
+	}
+}
+
+impl IntInspectionActions<State> for IntVarRef {
+	type Atom = BoolView;
+
+	fn check_in_domain(&self, ctx: &State, val: IntVal) -> bool {
+		let (lb, ub) = self.get_bounds(ctx);
+		if lb <= val && val <= ub {
+			let eq_lit = self.try_lit(ctx, IntLitMeaning::Eq(val));
+			if let Some(eq_lit) = eq_lit {
+				eq_lit.get_val(ctx).unwrap_or(true)
+			} else {
+				true
+			}
+		} else {
+			false
+		}
+	}
+
+	fn get_domain(&self, ctx: &State) -> crate::IntSetVal {
+		ctx.int_vars[*self].get_domain(&ctx.trail)
+	}
+
+	fn get_lit_meaning(&self, ctx: &State, lit: Self::Atom) -> Option<IntLitMeaning> {
+		let BoolViewInner::Lit(lit) = lit.0 else {
+			return None;
+		};
+		let (iv, meaning) = ctx.get_int_lit_meaning(lit)?;
+		if *self != iv {
+			return None;
+		}
+		Some(meaning)
+	}
+
+	fn get_lower_bound(&self, ctx: &State) -> IntVal {
+		ctx.int_vars[*self].get_lower_bound(&ctx.trail)
+	}
+
+	fn get_lower_bound_lit(&self, ctx: &State) -> BoolView {
+		ctx.int_vars[*self].get_lower_bound_lit(&ctx.trail)
+	}
+
+	fn get_upper_bound(&self, ctx: &State) -> IntVal {
+		ctx.int_vars[*self].get_upper_bound(&ctx.trail)
+	}
+
+	fn get_upper_bound_lit(&self, ctx: &State) -> BoolView {
+		ctx.int_vars[*self].get_upper_bound_lit(&ctx.trail)
+	}
+
+	fn try_lit(&self, ctx: &State, meaning: IntLitMeaning) -> Option<BoolView> {
+		ctx.int_vars[*self].get_bool_lit(meaning).map(|t| t.0)
+	}
+}
+
+impl BoolInspectionActions<State> for RawLit {
+	fn get_val(&self, ctx: &State) -> Option<bool> {
+		ctx.trail.get_sat_value(*self)
+	}
+}
+
 impl State {
 	/// Returns the current decision level of the solver.
 	fn decision_level(&self) -> u32 {
 		self.trail.decision_level()
+	}
+
+	/// Internal method to get the [`IntVarRef`] and strongest [`IntLitMeaning`]
+	/// for a given literal, if it is an integer literal.
+	fn get_int_lit_meaning(&self, lit: RawLit) -> Option<(IntVarRef, IntLitMeaning)> {
+		let (iv, meaning) = self.bool_to_int.get(lit.var())?;
+		let meaning = match meaning {
+			// Eager literal, request meaning from variable itself.
+			None => self.int_vars[iv].lit_meaning(lit),
+			// Lazy literal, transform negated meanings dealing with gaps in domain when necessary.
+			Some(IntLitMeaning::Less(i)) if !lit.is_negated() => {
+				let i = self.int_vars[iv].tighten_less_lit(i);
+				IntLitMeaning::Less(i)
+			}
+			Some(m) if lit.is_negated() => !m,
+			Some(m) => m,
+		};
+		Some((iv, meaning))
 	}
 
 	/// Internal method called to process the backtracking to an earlier
@@ -797,24 +970,6 @@ impl State {
 		self.trail.notify_new_decision_level();
 	}
 
-	/// Internal method to get the [`IntVarRef`] and strongest [`IntLitMeaning`]
-	/// for a given literal, if it is an integer literal.
-	fn get_int_lit_meaning(&self, lit: RawLit) -> Option<(IntVarRef, IntLitMeaning)> {
-		let (iv, meaning) = self.bool_to_int.get(lit.var())?;
-		let meaning = match meaning {
-			// Eager literal, request meaning from variable itself.
-			None => self.int_vars[iv].lit_meaning(lit),
-			// Lazy literal, transform negated meanings dealing with gaps in domain when necessary.
-			Some(IntLitMeaning::Less(i)) if !lit.is_negated() => {
-				let i = self.int_vars[iv].tighten_less_lit(i);
-				IntLitMeaning::Less(i)
-			}
-			Some(m) if lit.is_negated() => !m,
-			Some(m) => m,
-		};
-		Some((iv, meaning))
-	}
-
 	/// Register the [`Reason`] to explain why `lit` has been assigned.
 	pub(crate) fn register_reason(
 		&mut self,
@@ -871,161 +1026,6 @@ impl TrailingActions for State {
 	fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal {
 		self.trail.set_trailed_int(x, v)
 	}
-}
-
-impl IntExplanationActions<State> for IntVarRef {
-	fn get_lit_relaxed(
-		&self,
-		ctx: &State,
-		mut meaning: IntLitMeaning,
-	) -> (BoolView, IntLitMeaning) {
-		debug_assert!(
-			!matches!(meaning, IntLitMeaning::Eq(_)),
-			"relaxed integer literals are not yet supported for IntLitMeaning::Eq(_)"
-		);
-
-		let var_def = &ctx.int_vars[*self];
-		// If we are looking for a not-equal literal, try and find it. Return it if we
-		// find it, otherwise defer to an order literal.
-		if let IntLitMeaning::NotEq(v) = meaning {
-			if let Some((bv, _)) = var_def.get_bool_lit(meaning) {
-				return (bv, IntLitMeaning::NotEq(v));
-			}
-
-			let lb = var_def.get_lower_bound(&ctx.trail);
-			if v < lb {
-				meaning = IntLitMeaning::GreaterEq(v + 1);
-			} else {
-				debug_assert!(v > var_def.get_upper_bound(&ctx.trail));
-				meaning = IntLitMeaning::Less(v);
-			}
-		}
-		// Find the strongest order literal that fits the given meaning.
-		match meaning {
-			IntLitMeaning::GreaterEq(v) => {
-				let (bv, v) = var_def.get_greater_eq_lit_or_weaker(&ctx.trail, v);
-				(bv, IntLitMeaning::GreaterEq(v))
-			}
-			IntLitMeaning::Less(v) => {
-				let (bv, v) = var_def.get_less_lit_or_weaker(&ctx.trail, v);
-				(bv, IntLitMeaning::Less(v))
-			}
-			_ => unreachable!(),
-		}
-	}
-}
-
-impl IntInspectionActions<State> for IntVal {
-	type Atom = BoolView;
-
-	fn get_lower_bound(&self, _: &State) -> IntVal {
-		*self
-	}
-
-	fn get_upper_bound(&self, _: &State) -> IntVal {
-		*self
-	}
-
-	fn get_domain(&self, _: &State) -> crate::IntSetVal {
-		(*self..=*self).into()
-	}
-
-	fn check_in_domain(&self, _: &State, val: IntVal) -> bool {
-		*self == val
-	}
-
-	fn get_lit_meaning(&self, _: &State, _: Self::Atom) -> Option<IntLitMeaning> {
-		None
-	}
-
-	fn get_lower_bound_lit(&self, _: &State) -> Self::Atom {
-		true.into()
-	}
-
-	fn get_upper_bound_lit(&self, _: &State) -> Self::Atom {
-		true.into()
-	}
-
-	fn try_lit(&self, _: &State, meaning: IntLitMeaning) -> Option<Self::Atom> {
-		Some(
-			match meaning {
-				IntLitMeaning::Eq(v) => *self == v,
-				IntLitMeaning::NotEq(v) => *self != v,
-				IntLitMeaning::GreaterEq(v) => *self >= v,
-				IntLitMeaning::Less(v) => *self < v,
-			}
-			.into(),
-		)
-	}
-}
-
-impl IntInspectionActions<State> for IntVarRef {
-	type Atom = BoolView;
-
-	fn get_lower_bound(&self, ctx: &State) -> IntVal {
-		ctx.int_vars[*self].get_lower_bound(&ctx.trail)
-	}
-
-	fn get_upper_bound(&self, ctx: &State) -> IntVal {
-		ctx.int_vars[*self].get_upper_bound(&ctx.trail)
-	}
-
-	fn get_domain(&self, ctx: &State) -> crate::IntSetVal {
-		ctx.int_vars[*self].get_domain(&ctx.trail)
-	}
-
-	fn check_in_domain(&self, ctx: &State, val: IntVal) -> bool {
-		let (lb, ub) = self.get_bounds(ctx);
-		if lb <= val && val <= ub {
-			let eq_lit = self.try_lit(ctx, IntLitMeaning::Eq(val));
-			if let Some(eq_lit) = eq_lit {
-				eq_lit.get_val(ctx).unwrap_or(true)
-			} else {
-				true
-			}
-		} else {
-			false
-		}
-	}
-
-	fn get_lit_meaning(&self, ctx: &State, lit: Self::Atom) -> Option<IntLitMeaning> {
-		let BoolViewInner::Lit(lit) = lit.0 else {
-			return None;
-		};
-		let (iv, meaning) = ctx.get_int_lit_meaning(lit)?;
-		if *self != iv {
-			return None;
-		}
-		Some(meaning)
-	}
-
-	fn get_lower_bound_lit(&self, ctx: &State) -> BoolView {
-		ctx.int_vars[*self].get_lower_bound_lit(&ctx.trail)
-	}
-
-	fn get_upper_bound_lit(&self, ctx: &State) -> BoolView {
-		ctx.int_vars[*self].get_upper_bound_lit(&ctx.trail)
-	}
-
-	fn try_lit(&self, ctx: &State, meaning: IntLitMeaning) -> Option<BoolView> {
-		ctx.int_vars[*self].get_bool_lit(meaning).map(|t| t.0)
-	}
-}
-
-impl BoolInspectionActions<State> for RawLit {
-	fn get_val(&self, ctx: &State) -> Option<bool> {
-		ctx.trail.get_sat_value(*self)
-	}
-}
-
-impl ReasoningEngine for Engine {
-	type PostingCtx<'a> = PostingContext<'a>;
-	type NotificationCtx<'a> = State;
-	type PropagationCtx<'a> = SolvingContext<'a>;
-	type ExplanationCtx<'a> = State;
-
-	type Conflict = Conflict<RawLit>;
-	type Atom = BoolView;
 }
 
 index_vec::define_index_type! {

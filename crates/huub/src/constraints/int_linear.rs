@@ -654,16 +654,6 @@ where
 	BV: SolverBoolView<E>,
 	IV: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
-		ctx.set_priority(PriorityLevel::Low);
-		for v in self.terms.iter() {
-			v.enqueue_when(ctx, IntPropCond::LowerBound);
-		}
-		if let Some(r) = self.reification.get() {
-			r.enqueue_when_fixed(ctx);
-		}
-	}
-
 	fn explain(
 		&mut self,
 		ctx: &mut E::ExplanationCtx<'_>,
@@ -686,6 +676,16 @@ where
 			var_lits.push(r.clone().into());
 		}
 		var_lits
+	}
+
+	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+		ctx.set_priority(PriorityLevel::Low);
+		for v in self.terms.iter() {
+			v.enqueue_when(ctx, IntPropCond::LowerBound);
+		}
+		if let Some(r) = self.reification.get() {
+			r.enqueue_when_fixed(ctx);
+		}
 	}
 
 	// propagation rule: x[i] <= rhs - sum_{j != i} x[j].lower_bound
@@ -895,16 +895,6 @@ where
 	IV: SolverIntView<E>,
 	BV: SolverBoolView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
-		ctx.set_priority(PriorityLevel::High);
-		for (i, v) in self.terms.iter().enumerate() {
-			v.advise_when(ctx, IntPropCond::Fixed, i as u64);
-		}
-		if let Some(r) = self.reification.get() {
-			r.advise_when_fixed(ctx, self.terms.len() as u64);
-		}
-	}
-
 	fn advise_of_bool_change(&mut self, ctx: &mut E::NotificationCtx<'_>, _data: u64) -> bool {
 		debug_assert!(self.reification.get().is_some());
 		debug_assert_eq!(_data, self.terms.len() as u64);
@@ -922,6 +912,15 @@ where
 		debug_assert!(self.terms[_data as usize].get_val(ctx).is_some());
 		debug_assert_eq!(_event, IntEvent::Fixed);
 		self.increment_num_fixed(ctx)
+	}
+	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+		ctx.set_priority(PriorityLevel::High);
+		for (i, v) in self.terms.iter().enumerate() {
+			v.advise_when(ctx, IntPropCond::Fixed, i as u64);
+		}
+		if let Some(r) = self.reification.get() {
+			r.advise_when_fixed(ctx, self.terms.len() as u64);
+		}
 	}
 
 	#[tracing::instrument(name = "int_lin_ne", level = "trace", skip(self, ctx))]
@@ -979,6 +978,21 @@ mod tests {
 		},
 		Model, NonZeroIntVal,
 	};
+
+	#[test]
+	fn test_constraint_rewriting() {
+		// Regression test for GitHub issue 233, where a `int_lin_le_reif` known to be
+		// false was rewritten incorrectly. It allowed `a` to be 2.
+		let mut prb = Model::default();
+		let a = prb.new_int_var(1..=2);
+		prb += IntLinear {
+			terms: vec![-a],
+			operator: LinOperator::LessEq,
+			rhs: -2,
+			reif: Some(Reification::ReifiedBy(false.into())),
+		};
+		prb.expect_solutions(&[a], expect![[r#"1"#]]);
+	}
 
 	#[test]
 	#[traced_test]
@@ -1216,20 +1230,5 @@ mod tests {
 		true, 2, 2, 1
 		true, 2, 2, 2"#]],
 		);
-	}
-
-	#[test]
-	fn test_constraint_rewriting() {
-		// Regression test for GitHub issue 233, where a `int_lin_le_reif` known to be
-		// false was rewritten incorrectly. It allowed `a` to be 2.
-		let mut prb = Model::default();
-		let a = prb.new_int_var(1..=2);
-		prb += IntLinear {
-			terms: vec![-a],
-			operator: LinOperator::LessEq,
-			rhs: -2,
-			reif: Some(Reification::ReifiedBy(false.into())),
-		};
-		prb.expect_solutions(&[a], expect![[r#"1"#]]);
 	}
 }

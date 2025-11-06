@@ -40,116 +40,6 @@ pub struct IntDivBounds<I1, I2, I3> {
 	pub(crate) result: I3,
 }
 
-impl<E> Constraint<E> for IntDivBounds<IntDecision, IntDecision, IntDecision>
-where
-	E: ReasoningEngine<Atom = BoolDecision>,
-	IntDecision: ModelIntView<E>,
-	BoolDecision: ModelBoolView<E>,
-{
-	fn simplify(
-		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
-	) -> Result<SimplificationStatus, E::Conflict> {
-		use pindakaas::propositional_logic::Formula::*;
-
-		// Always exclude zero from the domain.
-		self.denominator.set_not_eq(ctx, 0, [])?;
-
-		// Channel the signs of the decision variables
-		let num_pos = self.numerator.get_lit(ctx, IntLitMeaning::GreaterEq(0));
-		let num_neg = self.numerator.get_lit(ctx, IntLitMeaning::Less(1));
-		let denom_pos = self.denominator.get_lit(ctx, IntLitMeaning::GreaterEq(0));
-		let denom_neg = !denom_pos;
-		let res_pos = self.result.get_lit(ctx, IntLitMeaning::GreaterEq(0));
-		let res_neg = self.result.get_lit(ctx, IntLitMeaning::Less(1));
-
-		// num >= 0 /\ denom > 0 => res >= 0
-		<BoolFormula as Propagator<E>>::propagate(
-			&mut Or(vec![!Atom(num_pos), !Atom(denom_pos), Atom(res_pos)]),
-			ctx,
-		)?;
-		// num <= 0 /\ denom < 0 => res >= 0
-		<BoolFormula as Propagator<E>>::propagate(
-			&mut Or(vec![!Atom(num_neg), !Atom(denom_neg), Atom(res_pos)]),
-			ctx,
-		)?;
-		// num >= 0 /\ denom < 0 => res >= 0
-		<BoolFormula as Propagator<E>>::propagate(
-			&mut Or(vec![!Atom(num_pos), !Atom(denom_neg), Atom(res_neg)]),
-			ctx,
-		)?;
-		// num <= 0 /\ denom > 0 => res <= 0
-		<BoolFormula as Propagator<E>>::propagate(
-			&mut Or(vec![!Atom(num_neg), !Atom(denom_pos), Atom(res_neg)]),
-			ctx,
-		)?;
-
-		self.propagate(ctx)?;
-
-		if self.numerator.get_val(ctx).is_some()
-			&& self.denominator.get_val(ctx).is_some()
-			&& self.result.get_val(ctx).is_some()
-		{
-			return Ok(SimplificationStatus::Subsumed);
-		}
-
-		Ok(SimplificationStatus::NoFixpoint)
-	}
-
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let numerator = slv.get_solver_int(self.numerator);
-		let denominator = slv.get_solver_int(self.denominator);
-		let result = slv.get_solver_int(self.result);
-		IntDivBounds::new_in(slv, numerator, denominator, result).unwrap();
-		Ok(())
-	}
-}
-
-impl IntDivBounds<IntView, IntView, IntView> {
-	/// Create a new [`IntDivBounds`] propagator and post it in the solver.
-	pub fn new_in<E>(
-		solver: &mut E,
-		numerator: IntView,
-		denominator: IntView,
-		result: IntView,
-	) -> Result<(), Unsatisfiable>
-	where
-		E: AddAssign<BoxedPropagator> + ClauseDatabase + ?Sized,
-		IntView: IntDecisionActions<E, Atom = BoolView>,
-	{
-		// Ensure the consistency of the signs of the three variables using the
-		// following clauses.
-		if numerator.get_lower_bound(solver) < 0
-			|| denominator.get_lower_bound(solver) < 0
-			|| result.get_lower_bound(solver) < 0
-		{
-			let num_pos = numerator.get_lit(solver, IntLitMeaning::GreaterEq(0));
-			let num_neg = numerator.get_lit(solver, IntLitMeaning::Less(1));
-			let denom_pos = denominator.get_lit(solver, IntLitMeaning::GreaterEq(0));
-			let denom_neg = !denom_pos;
-			let res_pos = result.get_lit(solver, IntLitMeaning::GreaterEq(0));
-			let res_neg = result.get_lit(solver, IntLitMeaning::Less(1));
-
-			// num >= 0 /\ denom > 0 => res >= 0
-			solver.add_clause([!num_pos, !denom_pos, res_pos])?;
-			// num <= 0 /\ denom < 0 => res >= 0
-			solver.add_clause([!num_neg, !denom_neg, res_pos])?;
-			// num >= 0 /\ denom < 0 => res < 0
-			solver.add_clause([!num_pos, !denom_neg, res_neg])?;
-			// num < 0 /\ denom >= 0 => res < 0
-			solver.add_clause([!num_neg, !denom_pos, res_neg])?;
-		}
-
-		*solver += Box::new(Self {
-			numerator,
-			denominator,
-			result,
-		});
-
-		Ok(())
-	}
-}
-
 impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 	/// Propagate the result and numerator lower bounds, and the denominator
 	/// bounds, assuming all lower bounds are positive.
@@ -269,6 +159,116 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 				]
 			})?;
 		}
+		Ok(())
+	}
+}
+
+impl IntDivBounds<IntView, IntView, IntView> {
+	/// Create a new [`IntDivBounds`] propagator and post it in the solver.
+	pub fn new_in<E>(
+		solver: &mut E,
+		numerator: IntView,
+		denominator: IntView,
+		result: IntView,
+	) -> Result<(), Unsatisfiable>
+	where
+		E: AddAssign<BoxedPropagator> + ClauseDatabase + ?Sized,
+		IntView: IntDecisionActions<E, Atom = BoolView>,
+	{
+		// Ensure the consistency of the signs of the three variables using the
+		// following clauses.
+		if numerator.get_lower_bound(solver) < 0
+			|| denominator.get_lower_bound(solver) < 0
+			|| result.get_lower_bound(solver) < 0
+		{
+			let num_pos = numerator.get_lit(solver, IntLitMeaning::GreaterEq(0));
+			let num_neg = numerator.get_lit(solver, IntLitMeaning::Less(1));
+			let denom_pos = denominator.get_lit(solver, IntLitMeaning::GreaterEq(0));
+			let denom_neg = !denom_pos;
+			let res_pos = result.get_lit(solver, IntLitMeaning::GreaterEq(0));
+			let res_neg = result.get_lit(solver, IntLitMeaning::Less(1));
+
+			// num >= 0 /\ denom > 0 => res >= 0
+			solver.add_clause([!num_pos, !denom_pos, res_pos])?;
+			// num <= 0 /\ denom < 0 => res >= 0
+			solver.add_clause([!num_neg, !denom_neg, res_pos])?;
+			// num >= 0 /\ denom < 0 => res < 0
+			solver.add_clause([!num_pos, !denom_neg, res_neg])?;
+			// num < 0 /\ denom >= 0 => res < 0
+			solver.add_clause([!num_neg, !denom_pos, res_neg])?;
+		}
+
+		*solver += Box::new(Self {
+			numerator,
+			denominator,
+			result,
+		});
+
+		Ok(())
+	}
+}
+
+impl<E> Constraint<E> for IntDivBounds<IntDecision, IntDecision, IntDecision>
+where
+	E: ReasoningEngine<Atom = BoolDecision>,
+	IntDecision: ModelIntView<E>,
+	BoolDecision: ModelBoolView<E>,
+{
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
+		use pindakaas::propositional_logic::Formula::*;
+
+		// Always exclude zero from the domain.
+		self.denominator.set_not_eq(ctx, 0, [])?;
+
+		// Channel the signs of the decision variables
+		let num_pos = self.numerator.get_lit(ctx, IntLitMeaning::GreaterEq(0));
+		let num_neg = self.numerator.get_lit(ctx, IntLitMeaning::Less(1));
+		let denom_pos = self.denominator.get_lit(ctx, IntLitMeaning::GreaterEq(0));
+		let denom_neg = !denom_pos;
+		let res_pos = self.result.get_lit(ctx, IntLitMeaning::GreaterEq(0));
+		let res_neg = self.result.get_lit(ctx, IntLitMeaning::Less(1));
+
+		// num >= 0 /\ denom > 0 => res >= 0
+		<BoolFormula as Propagator<E>>::propagate(
+			&mut Or(vec![!Atom(num_pos), !Atom(denom_pos), Atom(res_pos)]),
+			ctx,
+		)?;
+		// num <= 0 /\ denom < 0 => res >= 0
+		<BoolFormula as Propagator<E>>::propagate(
+			&mut Or(vec![!Atom(num_neg), !Atom(denom_neg), Atom(res_pos)]),
+			ctx,
+		)?;
+		// num >= 0 /\ denom < 0 => res >= 0
+		<BoolFormula as Propagator<E>>::propagate(
+			&mut Or(vec![!Atom(num_pos), !Atom(denom_neg), Atom(res_neg)]),
+			ctx,
+		)?;
+		// num <= 0 /\ denom > 0 => res <= 0
+		<BoolFormula as Propagator<E>>::propagate(
+			&mut Or(vec![!Atom(num_neg), !Atom(denom_pos), Atom(res_neg)]),
+			ctx,
+		)?;
+
+		self.propagate(ctx)?;
+
+		if self.numerator.get_val(ctx).is_some()
+			&& self.denominator.get_val(ctx).is_some()
+			&& self.result.get_val(ctx).is_some()
+		{
+			return Ok(SimplificationStatus::Subsumed);
+		}
+
+		Ok(SimplificationStatus::NoFixpoint)
+	}
+
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let numerator = slv.get_solver_int(self.numerator);
+		let denominator = slv.get_solver_int(self.denominator);
+		let result = slv.get_solver_int(self.result);
+		IntDivBounds::new_in(slv, numerator, denominator, result).unwrap();
 		Ok(())
 	}
 }

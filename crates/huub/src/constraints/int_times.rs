@@ -41,6 +41,39 @@ impl IntTimesBounds<IntView, IntView, IntView> {
 	}
 }
 
+impl<E, I1, I2, I3> Constraint<E> for IntTimesBounds<I1, I2, I3>
+where
+	E: ReasoningEngine,
+	I1: ModelIntView<E> + Mul<IntVal, Output = IntDecision>,
+	I2: ModelIntView<E> + Mul<IntVal, Output = IntDecision>,
+	I3: ModelIntView<E>,
+	IntDecision: ModelIntView<E>,
+{
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
+		self.propagate(ctx)?;
+		if let Some(f1) = self.factor1.get_val(ctx) {
+			(self.factor2.clone() * f1).unify(ctx, self.product.clone())?;
+			return Ok(SimplificationStatus::Subsumed);
+		}
+		if let Some(f2) = self.factor2.get_val(ctx) {
+			(self.factor1.clone() * f2).unify(ctx, self.product.clone())?;
+			return Ok(SimplificationStatus::Subsumed);
+		}
+		Ok(SimplificationStatus::NoFixpoint)
+	}
+
+	fn to_solver(&self, ctx: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let f1 = ctx.get_solver_int(self.factor1.clone().into());
+		let f2 = ctx.get_solver_int(self.factor2.clone().into());
+		let p = ctx.get_solver_int(self.product.clone().into());
+		IntTimesBounds::new_in(ctx, f1, f2, p);
+		Ok(())
+	}
+}
+
 impl<E, I1, I2, I3> Propagator<E> for IntTimesBounds<I1, I2, I3>
 where
 	E: ReasoningEngine,
@@ -150,39 +183,6 @@ where
 				.unwrap();
 			self.factor2.set_upper_bound(ctx, max, reason)?;
 		}
-		Ok(())
-	}
-}
-
-impl<E, I1, I2, I3> Constraint<E> for IntTimesBounds<I1, I2, I3>
-where
-	E: ReasoningEngine,
-	I1: ModelIntView<E> + Mul<IntVal, Output = IntDecision>,
-	I2: ModelIntView<E> + Mul<IntVal, Output = IntDecision>,
-	I3: ModelIntView<E>,
-	IntDecision: ModelIntView<E>,
-{
-	fn simplify(
-		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
-	) -> Result<SimplificationStatus, E::Conflict> {
-		self.propagate(ctx)?;
-		if let Some(f1) = self.factor1.get_val(ctx) {
-			(self.factor2.clone() * f1).unify(ctx, self.product.clone())?;
-			return Ok(SimplificationStatus::Subsumed);
-		}
-		if let Some(f2) = self.factor2.get_val(ctx) {
-			(self.factor1.clone() * f2).unify(ctx, self.product.clone())?;
-			return Ok(SimplificationStatus::Subsumed);
-		}
-		Ok(SimplificationStatus::NoFixpoint)
-	}
-
-	fn to_solver(&self, ctx: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let f1 = ctx.get_solver_int(self.factor1.clone().into());
-		let f2 = ctx.get_solver_int(self.factor2.clone().into());
-		let p = ctx.get_solver_int(self.product.clone().into());
-		IntTimesBounds::new_in(ctx, f1, f2, p);
 		Ok(())
 	}
 }

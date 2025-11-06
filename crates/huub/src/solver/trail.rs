@@ -56,6 +56,12 @@ pub(crate) enum TrailEvent {
 	IntAssignment(TrailedInt, IntVal),
 }
 
+impl BoolInspectionActions<Trail> for RawLit {
+	fn get_val(&self, ctx: &Trail) -> Option<bool> {
+		ctx.get_sat_value(*self)
+	}
+}
+
 impl Trail {
 	/// A trailed integer that is used to track the currently active brancher.
 	pub(crate) const CURRENT_BRANCHER: TrailedInt = TrailedInt { _raw: 0 };
@@ -320,12 +326,6 @@ impl TrailingActions for Trail {
 		let old = mem::replace(&mut self.int_value[i], v);
 		self.push_trail(TrailEvent::IntAssignment(i, old));
 		old
-	}
-}
-
-impl BoolInspectionActions<Trail> for RawLit {
-	fn get_val(&self, ctx: &Trail) -> Option<bool> {
-		ctx.get_sat_value(*self)
 	}
 }
 

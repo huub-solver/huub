@@ -24,6 +24,20 @@ pub struct IntArrayMinimumBounds<I1, I2> {
 	pub(crate) min: I2,
 }
 
+impl IntArrayMinimumBounds<IntView, IntView> {
+	/// Create a new [`ArrayIntMinimumBounds`] propagator and post it in the
+	/// solver.
+	pub fn new_in<E>(solver: &mut E, vars: Vec<IntView>, min: IntView)
+	where
+		E: AddAssign<BoxedPropagator> + ?Sized,
+	{
+		*solver += Box::new(Self {
+			vars: vars.clone(),
+			min,
+		});
+	}
+}
+
 impl<E, I1, I2> Constraint<E> for IntArrayMinimumBounds<I1, I2>
 where
 	E: ReasoningEngine,
@@ -52,20 +66,6 @@ where
 		let min = slv.get_solver_int(self.min.clone().into());
 		IntArrayMinimumBounds::new_in(slv, vars, min);
 		Ok(())
-	}
-}
-
-impl IntArrayMinimumBounds<IntView, IntView> {
-	/// Create a new [`ArrayIntMinimumBounds`] propagator and post it in the
-	/// solver.
-	pub fn new_in<E>(solver: &mut E, vars: Vec<IntView>, min: IntView)
-	where
-		E: AddAssign<BoxedPropagator> + ?Sized,
-	{
-		*solver += Box::new(Self {
-			vars: vars.clone(),
-			min,
-		});
 	}
 }
 

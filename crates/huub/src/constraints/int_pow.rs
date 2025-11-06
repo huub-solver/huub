@@ -64,95 +64,6 @@ fn pow(base: IntVal, exponent: IntVal) -> Option<IntVal> {
 	})
 }
 
-impl<E, I1, I2, I3> Constraint<E> for IntPowBounds<I1, I2, I3>
-where
-	E: ReasoningEngine,
-	I1: ModelIntView<E>,
-	I2: ModelIntView<E>,
-	I3: ModelIntView<E>,
-{
-	fn simplify(
-		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
-	) -> Result<SimplificationStatus, E::Conflict> {
-		// If the base is negative, then the exponent cannot be zero
-		if self.base.get_upper_bound(ctx) < 0 {
-			self.base
-				.set_not_eq(ctx, 0, [self.base.get_upper_bound_lit(ctx)])?;
-		}
-		// If the exponent is zero, then the result is one
-		if self.exponent.get_val(ctx) == Some(0) {
-			self.result
-				.set_val(ctx, 1, |ctx: &mut E::PropagationCtx<'_>| {
-					[self.exponent.get_val_lit(ctx).unwrap()]
-				})?;
-		}
-
-		self.propagate(ctx)?;
-
-		// Subsume if all variables are fixed.
-		if self.base.get_val(ctx).is_some()
-			&& self.exponent.get_val(ctx).is_some()
-			&& self.result.get_val(ctx).is_some()
-		{
-			return Ok(SimplificationStatus::Subsumed);
-		}
-
-		Ok(SimplificationStatus::NoFixpoint)
-	}
-
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let base = slv.get_solver_int(self.base.clone().into());
-		let exponent = slv.get_solver_int(self.exponent.clone().into());
-		let result = slv.get_solver_int(self.result.clone().into());
-		IntPowBounds::new_in(slv, base, exponent, result).unwrap();
-		Ok(())
-	}
-}
-
-impl IntPowBounds<IntView, IntView, IntView> {
-	/// Create a new [`IntPowBounds`] propagator and post it in the solver.
-	pub fn new_in<E>(
-		solver: &mut E,
-		base: IntView,
-		exponent: IntView,
-		result: IntView,
-	) -> Result<(), Unsatisfiable>
-	where
-		E: AddAssign<BoxedPropagator> + ClauseDatabase + ?Sized,
-		IntView: IntDecisionActions<E, Atom = BoolView>,
-	{
-		// Ensure that if the base is negative, then the exponent cannot be zero
-		let (exp_lb, exp_ub) = exponent.get_bounds(solver);
-		let (base_lb, base_ub) = base.get_bounds(solver);
-		if exp_lb < 0 || (base_lb..=base_ub).contains(&0) {
-			// (exp < 0) -> (base != 0)
-			let clause = [
-				exponent.get_lit(solver, IntLitMeaning::GreaterEq(0)),
-				base.get_lit(solver, IntLitMeaning::NotEq(0)),
-			];
-			solver.add_clause(clause)?;
-		}
-
-		// Ensure that if the exponent is zero, then the result is one
-		if (exp_lb..=exp_ub).contains(&0) {
-			// (exp == 0) -> (res == 1)
-			let clause = [
-				exponent.get_lit(solver, IntLitMeaning::NotEq(0)),
-				result.get_lit(solver, IntLitMeaning::Eq(1)),
-			];
-			solver.add_clause(clause)?;
-		}
-
-		*solver += Box::new(Self {
-			base,
-			exponent,
-			result,
-		});
-		Ok(())
-	}
-}
-
 impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 	/// Propagates the bounds of the base and exponent to the result.
 	fn propagate_base<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
@@ -369,6 +280,95 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 		.unwrap();
 
 		self.result.set_upper_bound(ctx, max, &mut reason)?;
+		Ok(())
+	}
+}
+
+impl IntPowBounds<IntView, IntView, IntView> {
+	/// Create a new [`IntPowBounds`] propagator and post it in the solver.
+	pub fn new_in<E>(
+		solver: &mut E,
+		base: IntView,
+		exponent: IntView,
+		result: IntView,
+	) -> Result<(), Unsatisfiable>
+	where
+		E: AddAssign<BoxedPropagator> + ClauseDatabase + ?Sized,
+		IntView: IntDecisionActions<E, Atom = BoolView>,
+	{
+		// Ensure that if the base is negative, then the exponent cannot be zero
+		let (exp_lb, exp_ub) = exponent.get_bounds(solver);
+		let (base_lb, base_ub) = base.get_bounds(solver);
+		if exp_lb < 0 || (base_lb..=base_ub).contains(&0) {
+			// (exp < 0) -> (base != 0)
+			let clause = [
+				exponent.get_lit(solver, IntLitMeaning::GreaterEq(0)),
+				base.get_lit(solver, IntLitMeaning::NotEq(0)),
+			];
+			solver.add_clause(clause)?;
+		}
+
+		// Ensure that if the exponent is zero, then the result is one
+		if (exp_lb..=exp_ub).contains(&0) {
+			// (exp == 0) -> (res == 1)
+			let clause = [
+				exponent.get_lit(solver, IntLitMeaning::NotEq(0)),
+				result.get_lit(solver, IntLitMeaning::Eq(1)),
+			];
+			solver.add_clause(clause)?;
+		}
+
+		*solver += Box::new(Self {
+			base,
+			exponent,
+			result,
+		});
+		Ok(())
+	}
+}
+
+impl<E, I1, I2, I3> Constraint<E> for IntPowBounds<I1, I2, I3>
+where
+	E: ReasoningEngine,
+	I1: ModelIntView<E>,
+	I2: ModelIntView<E>,
+	I3: ModelIntView<E>,
+{
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
+		// If the base is negative, then the exponent cannot be zero
+		if self.base.get_upper_bound(ctx) < 0 {
+			self.base
+				.set_not_eq(ctx, 0, [self.base.get_upper_bound_lit(ctx)])?;
+		}
+		// If the exponent is zero, then the result is one
+		if self.exponent.get_val(ctx) == Some(0) {
+			self.result
+				.set_val(ctx, 1, |ctx: &mut E::PropagationCtx<'_>| {
+					[self.exponent.get_val_lit(ctx).unwrap()]
+				})?;
+		}
+
+		self.propagate(ctx)?;
+
+		// Subsume if all variables are fixed.
+		if self.base.get_val(ctx).is_some()
+			&& self.exponent.get_val(ctx).is_some()
+			&& self.result.get_val(ctx).is_some()
+		{
+			return Ok(SimplificationStatus::Subsumed);
+		}
+
+		Ok(SimplificationStatus::NoFixpoint)
+	}
+
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let base = slv.get_solver_int(self.base.clone().into());
+		let exponent = slv.get_solver_int(self.exponent.clone().into());
+		let result = slv.get_solver_int(self.result.clone().into());
+		IntPowBounds::new_in(slv, base, exponent, result).unwrap();
 		Ok(())
 	}
 }

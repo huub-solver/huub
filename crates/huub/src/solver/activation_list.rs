@@ -13,6 +13,22 @@ use crate::{
 	ConRef, ModAdvisor,
 };
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Possible actions to be triggered by the activation list.
+pub(crate) enum ActivationAction<A, P> {
+	/// When activated, advise the propagator with the given [`PropRef`] of the
+	/// event that triggered the activation. If the adviser method returns
+	/// `true`, then enqueue the propagator if it is not already in the queue.
+	Advise(A),
+	/// When activated, simply add the propagator with the given [`PropRef`] to
+	/// the propagator queue if it is not already in the queue.
+	Enqueue(P),
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+/// Object used to efficiently store an [`ActivationAction`].
+pub(crate) struct ActivationActionS(u32);
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 /// A data structure that store a list of propagators to be enqueued based on
 /// different propagation conditions.
@@ -43,22 +59,6 @@ pub(crate) struct ActivationList {
 	/// triggers [`IntPropCond::Domain`].
 	domain_idx: u32,
 }
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// Possible actions to be triggered by the activation list.
-pub(crate) enum ActivationAction<A, P> {
-	/// When activated, advise the propagator with the given [`PropRef`] of the
-	/// event that triggered the activation. If the adviser method returns
-	/// `true`, then enqueue the propagator if it is not already in the queue.
-	Advise(A),
-	/// When activated, simply add the propagator with the given [`PropRef`] to
-	/// the propagator queue if it is not already in the queue.
-	Enqueue(P),
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-/// Object used to efficiently store an [`ActivationAction`].
-pub(crate) struct ActivationActionS(u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Change that has occurred in the domain of an integer variable.
@@ -109,15 +109,6 @@ impl From<ActivationActionS> for ActivationAction<Advisor, PropRef> {
 	}
 }
 
-impl From<ActivationAction<Advisor, PropRef>> for ActivationActionS {
-	fn from(value: ActivationAction<Advisor, PropRef>) -> Self {
-		Self(match value {
-			ActivationAction::Advise(advisor) => (advisor.raw() << 1) | 0b1,
-			ActivationAction::Enqueue(prop) => prop.raw() << 1,
-		})
-	}
-}
-
 impl From<ActivationActionS> for ActivationAction<ModAdvisor, ConRef> {
 	fn from(value: ActivationActionS) -> Self {
 		if (value.0 & 0b1) == 1 {
@@ -125,6 +116,15 @@ impl From<ActivationActionS> for ActivationAction<ModAdvisor, ConRef> {
 		} else {
 			Self::Enqueue(ConRef::from_raw(value.0 >> 1))
 		}
+	}
+}
+
+impl From<ActivationAction<Advisor, PropRef>> for ActivationActionS {
+	fn from(value: ActivationAction<Advisor, PropRef>) -> Self {
+		Self(match value {
+			ActivationAction::Advise(advisor) => (advisor.raw() << 1) | 0b1,
+			ActivationAction::Enqueue(prop) => prop.raw() << 1,
+		})
 	}
 }
 

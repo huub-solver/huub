@@ -1123,13 +1123,6 @@ where
 	E: ReasoningEngine,
 	I: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
-		ctx.set_priority(PriorityLevel::Low);
-		for v in &self.start_times {
-			v.enqueue_when(ctx, IntPropCond::Bounds);
-		}
-	}
-
 	/// Explain the propagation of the disjunctive propagator.
 	#[tracing::instrument(name = "disjunctive_strict", level = "trace", skip(self, ctx))]
 	fn explain(
@@ -1154,6 +1147,13 @@ where
 			DisjunctivePropagationRule::Precedence => {
 				self.explain_precedence(ctx, task_no, earliest_start, latest_completion)
 			}
+		}
+	}
+
+	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+		ctx.set_priority(PriorityLevel::Low);
+		for v in &self.start_times {
+			v.enqueue_when(ctx, IntPropCond::Bounds);
 		}
 	}
 
