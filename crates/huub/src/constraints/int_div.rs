@@ -15,7 +15,8 @@ use crate::{
 		ReasoningEngine, ReformulationActions,
 	},
 	constraints::{
-		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
+		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus,
+		SolverIntView,
 	},
 	helpers::div_ceil,
 	reformulate::ReformulationError,
@@ -43,6 +44,7 @@ impl<E> Constraint<E> for IntDivBounds<IntDecision, IntDecision, IntDecision>
 where
 	E: ReasoningEngine<Atom = BoolDecision>,
 	IntDecision: ModelIntView<E>,
+	BoolDecision: ModelBoolView<E>,
 {
 	fn simplify(
 		&mut self,

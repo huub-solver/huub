@@ -18,11 +18,15 @@ use rustc_hash::FxHashSet;
 
 use crate::{
 	actions::{
-		BoolInspectionActions, DecisionActions, InitializationActions, IntDecisionActions,
-		IntInspectionActions, PropagationActions, ReasoningEngine, ReformulationActions,
+		BoolInspectionActions, BoolPostingActions, BoolPropagationActions, DecisionActions,
+		InitializationActions, IntDecisionActions, IntInspectionActions, PostingActions,
+		PropagationActions, ReasoningEngine, ReformulationActions, SimplificationActions,
 		TrailingActions,
 	},
-	constraints::{BoxedPropagator, Constraint, ModelBoolView, Propagator, SimplificationStatus},
+	constraints::{
+		BoxedPropagator, Constraint, ModelBoolView, Propagator, SimplificationStatus,
+		SolverBoolView,
+	},
 	helpers::linear_transform::LinearTransform,
 	solver::{
 		activation_list::{ActivationActionS, ActivationList},
@@ -187,6 +191,7 @@ pub(crate) struct ReformulationMapBuilder {
 impl<E> Constraint<E> for BoolFormula
 where
 	E: ReasoningEngine,
+	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
 	BoolDecision: ModelBoolView<E>,
 {
 	fn simplify(
@@ -202,7 +207,46 @@ where
 		let result: Result<Formula<BoolDecision>, _> = self.clone().simplify_with(&mut resolver);
 		match result {
 			Ok(f) => {
-				*self = f;
+				*self = match f {
+					Formula::And(v) => {
+						for f in v {
+							ctx.add_constraint(f);
+						}
+						return Ok(SimplificationStatus::Subsumed);
+					}
+					Formula::Atom(b) => {
+						b.set(ctx, [])?;
+						return Ok(SimplificationStatus::Subsumed);
+					}
+					// Formula::Equiv(formulas) => todo!(),
+					Formula::Not(f) => match *f {
+						Formula::And(v) => Formula::Or(v.into_iter().map(|f| !f).collect()),
+						Formula::Atom(x) => {
+							x.set_val(ctx, false, [])?;
+							return Ok(SimplificationStatus::Subsumed);
+						}
+						Formula::IfThenElse { cond, then, els } => Formula::IfThenElse {
+							cond,
+							then: Box::new(!*then),
+							els: Box::new(!*els),
+						},
+						Formula::Implies(x, y) => {
+							// ¬(x → y) ≡ ¬(¬x v y) ≡ x ∧ ¬y
+							ctx.add_constraint(*x);
+							ctx.add_constraint(!*y);
+							return Ok(SimplificationStatus::Subsumed);
+						}
+						Formula::Not(f) => *f,
+						Formula::Or(v) => {
+							for f in v {
+								ctx.add_constraint(!f);
+							}
+							return Ok(SimplificationStatus::Subsumed);
+						}
+						f => f,
+					},
+					f => f,
+				};
 				Ok(SimplificationStatus::NoFixpoint)
 			}
 			Err(true) => Ok(SimplificationStatus::Subsumed),
@@ -227,7 +271,39 @@ where
 	}
 }
 
-impl<E: ReasoningEngine> Propagator<E> for BoolFormula {}
+impl<E> Propagator<E> for BoolFormula
+where
+	E: ReasoningEngine,
+	BoolDecision: SolverBoolView<E>,
+{
+	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+		ctx.enqueue_now(true);
+		match self {
+			Formula::And(v) => v.iter_mut().for_each(|f| f.post(ctx)),
+			Formula::Atom(a) => a.enqueue_when_fixed(ctx),
+			Formula::Equiv(v) => v.iter_mut().for_each(|f| f.post(ctx)),
+			Formula::IfThenElse { cond, then, els } => {
+				cond.post(ctx);
+				then.post(ctx);
+				els.post(ctx);
+			}
+			Formula::Implies(f1, f2) => {
+				f1.post(ctx);
+				f2.post(ctx);
+			}
+			Formula::Not(f) => f.post(ctx),
+			Formula::Or(v) => v.iter_mut().for_each(|f| f.post(ctx)),
+			Formula::Xor(v) => v.iter_mut().for_each(|f| f.post(ctx)),
+		}
+	}
+
+	fn propagate(
+		&mut self,
+		_: &mut <E as ReasoningEngine>::PropagationCtx<'_>,
+	) -> Result<(), <E as ReasoningEngine>::Conflict> {
+		unreachable!()
+	}
+}
 
 impl InitConfig {
 	/// The default maximum cardinality of the domain of an integer variable

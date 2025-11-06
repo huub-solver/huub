@@ -11,7 +11,7 @@ use crate::{
 	actions::{
 		BoolInspectionActions, BoolPostingActions, BoolPropagationActions,
 		BoolSimplificationActions, IntInspectionActions, IntSimplificationActions, PostingActions,
-		ReasoningEngine, ReformulationActions,
+		ReasoningEngine, ReformulationActions, SimplificationActions,
 	},
 	constraints::{
 		Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus, SolverBoolView,
@@ -39,6 +39,7 @@ pub struct IntInSetReif {
 impl<E> Constraint<E> for IntInSetReif
 where
 	E: ReasoningEngine,
+	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
 	IntDecision: ModelIntView<E>,
 	BoolDecision: ModelBoolView<E>,
 {
@@ -138,5 +139,9 @@ where
 		// then only if the reification variable is fixed.
 		ctx.enqueue_now(true);
 		self.reif.enqueue_when_fixed(ctx);
+	}
+
+	fn propagate(&mut self, _: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+		unreachable!()
 	}
 }

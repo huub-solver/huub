@@ -179,16 +179,11 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 
 	/// This method is called when the propagator is posted to the solver to
 	/// allow the propagator to subscribe to events.œ
-	fn post(&mut self, context: &mut E::PostingCtx<'_>) {
-		let _ = context;
-	}
+	fn post(&mut self, context: &mut E::PostingCtx<'_>);
 
 	/// The propagate method is called during the search process to allow the
 	/// propagator to enforce
-	fn propagate(&mut self, context: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
-		let _ = context;
-		Ok(())
-	}
+	fn propagate(&mut self, context: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>;
 }
 
 /// Helper trait to simplify trait bounds for [`Propagator`] implementations.
