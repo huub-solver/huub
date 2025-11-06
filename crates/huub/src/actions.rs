@@ -521,12 +521,6 @@ impl ClauseDatabase for ReformulationClauseDatabaseWrapper<'_> {
 	}
 }
 
-/// Encoder is the central trait implemented for all the encoding algorithms
-pub trait MyEncoder<Db: ClauseDatabase + ?Sized, Constraint: ?Sized> {
-	/// Encode the constraint into the given clausal database.
-	fn encode(&self, db: &mut Db, con: &Constraint) -> Result<(), Unsatisfiable>;
-}
-
 impl BoolInspectionActions<dyn ReformulationActions + '_> for RawLit {
 	fn get_val(&self, ctx: &dyn ReformulationActions) -> Option<bool> {
 		ctx.get_bool_val(*self)
