@@ -368,6 +368,10 @@ impl IntInspectionActions<SolvingContext<'_>> for IntVarRef {
 		self.get_upper_bound(ctx.state)
 	}
 
+	fn get_domain(&self, ctx: &SolvingContext<'_>) -> crate::IntSetVal {
+		self.get_domain(ctx.state)
+	}
+
 	fn check_in_domain(&self, ctx: &SolvingContext<'_>, val: IntVal) -> bool {
 		self.check_in_domain(ctx.state, val)
 	}

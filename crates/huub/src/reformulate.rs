@@ -412,6 +412,10 @@ impl<Oracle: ClauseDatabase + ExternalPropagation> ReformulationActions
 		var.get_upper_bound(self.slv)
 	}
 
+	fn get_int_domain(&self, var: IntVarRef) -> IntSetVal {
+		var.get_domain(self.slv)
+	}
+
 	fn check_int_in_domain(&self, var: IntVarRef, val: IntVal) -> bool {
 		var.check_in_domain(self.slv, val)
 	}

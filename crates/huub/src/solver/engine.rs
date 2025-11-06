@@ -926,6 +926,10 @@ impl IntInspectionActions<State> for IntVal {
 		*self
 	}
 
+	fn get_domain(&self, _: &State) -> crate::IntSetVal {
+		(*self..=*self).into()
+	}
+
 	fn check_in_domain(&self, _: &State, val: IntVal) -> bool {
 		*self == val
 	}
@@ -964,6 +968,10 @@ impl IntInspectionActions<State> for IntVarRef {
 
 	fn get_upper_bound(&self, ctx: &State) -> IntVal {
 		ctx.int_vars[*self].get_upper_bound(&ctx.trail)
+	}
+
+	fn get_domain(&self, ctx: &State) -> crate::IntSetVal {
+		ctx.int_vars[*self].get_domain(&ctx.trail)
 	}
 
 	fn check_in_domain(&self, ctx: &State, val: IntVal) -> bool {

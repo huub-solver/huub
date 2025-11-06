@@ -31,6 +31,7 @@ use pindakaas::{
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
 	Valuation as SatValuation,
 };
+use rangelist::RangeList;
 use tracing::debug;
 
 use crate::{
@@ -51,7 +52,7 @@ use crate::{
 		solving_context::SolvingContext,
 		trail::TrailedInt,
 	},
-	Clause, IntVal, LinearTransform, Model, NonZeroIntVal,
+	Clause, IntSetVal, IntVal, LinearTransform, Model, NonZeroIntVal,
 };
 
 /// Trait implemented by the object given to the callback on detecting failure
@@ -748,6 +749,35 @@ where
 			}
 			IntViewInner::Bool { transformer, lit } => transformer
 				.transform(lit.get_val(ctx).unwrap_or(transformer.positive_scale()) as IntVal),
+		}
+	}
+
+	fn get_domain(&self, ctx: &Ctx) -> IntSetVal {
+		match self.0 {
+			IntViewInner::VarRef(iv) => iv.get_domain(ctx),
+			IntViewInner::Const(c) => (c..=c).into(),
+			IntViewInner::Linear { transformer, var } if transformer.positive_scale() => {
+				RangeList::from_sorted_ranges(
+					var.get_domain(ctx).iter().map(|r| {
+						transformer.transform(*r.start())..=transformer.transform(*r.end())
+					}),
+				)
+			}
+			IntViewInner::Linear { transformer, var } => RangeList::from_sorted_ranges(
+				var.get_domain(ctx)
+					.iter()
+					.rev()
+					.map(|r| transformer.transform(*r.end())..=transformer.transform(*r.start())),
+			),
+			IntViewInner::Bool { transformer, lit } => if let Some(v) = lit.get_val(ctx) {
+				let v = transformer.transform(v as IntVal);
+				v..=v
+			} else if transformer.positive_scale() {
+				transformer.transform(0)..=transformer.transform(1)
+			} else {
+				transformer.transform(1)..=transformer.transform(0)
+			}
+			.into(),
 		}
 	}
 
@@ -1662,6 +1692,10 @@ impl<Oracle> IntInspectionActions<Solver<Oracle>> for IntVarRef {
 
 	fn get_upper_bound(&self, ctx: &Solver<Oracle>) -> IntVal {
 		self.get_upper_bound(&ctx.engine.borrow().state)
+	}
+
+	fn get_domain(&self, ctx: &Solver<Oracle>) -> IntSetVal {
+		self.get_domain(&ctx.engine.borrow().state)
 	}
 
 	fn check_in_domain(&self, ctx: &Solver<Oracle>, val: IntVal) -> bool {

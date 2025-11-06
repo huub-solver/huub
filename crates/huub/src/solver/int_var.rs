@@ -489,6 +489,74 @@ impl IntVar {
 		(lb, trail.get_trailed_int(self.upper_bound))
 	}
 
+	/// Returns the current domain of the integer variable.
+	pub(crate) fn get_domain<T>(&self, trail: &T) -> RangeList<IntVal>
+	where
+		T: TrailingActions,
+		RawLit: BoolInspectionActions<T>,
+	{
+		let (lb, ub) = self.get_bounds(trail);
+		let domain = &self.domain;
+		let orig_lb = *domain.lower_bound().unwrap();
+		let get_lb_var = || self.order_encoding.find(domain, orig_lb + 1).map(|v| v.0);
+		let orig_ub = *domain.upper_bound().unwrap();
+		let get_ub_var = || self.order_encoding.find(domain, orig_ub).map(|v| v.0);
+
+		match &self.direct_encoding {
+			DirectStorage::Eager(direct_range) => {
+				let pos = domain.position(&lb).unwrap();
+				RangeList::from_sorted_elements(
+					domain
+						.iter()
+						.skip_while(|range| *range.end() < lb)
+						.flatten()
+						.skip_while(|&v| v < lb)
+						.enumerate()
+						.map(|(i, v)| {
+							(
+								v,
+								if v == orig_lb {
+									get_lb_var().unwrap()
+								} else if v == orig_ub {
+									get_ub_var().unwrap()
+								} else {
+									direct_range.index(pos + i - 1)
+								},
+							)
+						})
+						.take_while(|(v, _)| *v <= ub)
+						.filter(|&(_, lit)| RawLit::from(lit).get_val(trail) != Some(false))
+						.map(|(v, _)| v),
+				)
+			}
+			DirectStorage::Lazy(hash_map) => RangeList::from_sorted_elements(
+				domain
+					.iter()
+					.skip_while(|range| *range.end() < lb)
+					.flatten()
+					.skip_while(|&v| v < lb)
+					.map(|v| {
+						(
+							v,
+							if v == orig_lb {
+								get_lb_var()
+							} else if v == orig_ub {
+								get_ub_var()
+							} else {
+								hash_map.get(&v).copied()
+							},
+						)
+					})
+					.take_while(|(v, _)| *v <= ub)
+					.filter(|&(_, lit)| {
+						lit.map(|lit| RawLit::from(lit).get_val(trail) != Some(false))
+							.unwrap_or(true)
+					})
+					.map(|(v, _)| v),
+			),
+		}
+	}
+
 	/// Returns the boolean view associated with `≥ v` if it exists or weaker
 	/// version otherwise.
 	///

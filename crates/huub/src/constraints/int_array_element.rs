@@ -22,7 +22,7 @@ use crate::{
 		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, BoolView,
 		IntLitMeaning, IntView,
 	},
-	IntDecision, IntVal,
+	IntDecision, IntSetVal, IntVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -60,25 +60,28 @@ impl<I1, I2, I3> IntArrayElementBounds<I1, I2, I3> {
 		I2: IntInspectionActions<E>,
 	{
 		// Initialize the min_support and max_support variables
-		let mut min_support = -1;
-		let mut max_support = -1;
+		let mut min_support = None;
+		let mut max_support = None;
 		let mut min_lb = IntVal::MAX;
 		let mut max_ub = IntVal::MIN;
-		for (i, v) in collection.iter().enumerate() {
-			if index.check_in_domain(engine, i as IntVal) {
-				let (lb, ub) = v.get_bounds(engine);
-				if min_support == -1 || lb < min_lb {
-					min_support = i as IntVal;
-					min_lb = lb;
-				}
-				if max_support == -1 || ub > max_ub {
-					max_support = i as IntVal;
-					max_ub = ub;
-				}
+		for i in index
+			.get_domain(engine)
+			.iter()
+			.flatten()
+			.filter(|&v| v >= 0 && v < collection.len() as IntVal)
+		{
+			let (lb, ub) = collection[i as usize].get_bounds(engine);
+			if min_support.is_none() || lb < min_lb {
+				min_support = Some(i);
+				min_lb = lb;
+			}
+			if max_support.is_none() || ub > max_ub {
+				max_support = Some(i);
+				max_ub = ub;
 			}
 		}
-		let min_support = engine.new_trailed_int(min_support);
-		let max_support = engine.new_trailed_int(max_support);
+		let min_support = engine.new_trailed_int(min_support.unwrap());
+		let max_support = engine.new_trailed_int(max_support.unwrap());
 
 		Self {
 			vars: collection.clone(),
@@ -185,10 +188,14 @@ where
 
 		self.result.enqueue_when(ctx, IntPropCond::Bounds);
 		self.index.enqueue_when(ctx, IntPropCond::Domain);
-		for (i, v) in self.vars.iter().enumerate() {
-			if self.index.check_in_domain(ctx, i as IntVal) {
-				v.enqueue_when(ctx, IntPropCond::Bounds);
-			}
+		for i in self
+			.index
+			.get_domain(ctx)
+			.iter()
+			.flatten()
+			.filter(|&v| v >= 0 && v < self.vars.len() as IntVal)
+		{
+			self.vars[i as usize].enqueue_when(ctx, IntPropCond::Bounds);
 		}
 	}
 
@@ -257,15 +264,15 @@ where
 		//  (2) result.lower_bound > self.vars[i].upper_bound -> index != i
 		// 2. update min_support and max_support if necessary
 		// only trigger when result variable is updated or self.vars[i] is updated
-		for (i, v) in self.vars.iter().enumerate() {
-			if !self.index.check_in_domain(ctx, i as IntVal) {
-				continue;
-			}
+		let idx_dom: IntSetVal = self.index.get_domain(ctx);
+		for i in idx_dom.iter().flatten() {
+			debug_assert!(i >= 0 && i <= self.vars.len() as IntVal);
+			let v = &self.vars[i as usize];
 
 			let (v_lb, v_ub) = v.get_bounds(ctx);
 			if result_ub < v_lb {
 				self.index
-					.set_not_eq(ctx, i as IntVal, |ctx: &mut E::PropagationCtx<'_>| {
+					.set_not_eq(ctx, i, |ctx: &mut E::PropagationCtx<'_>| {
 						[
 							self.result.get_lit(ctx, IntLitMeaning::Less(v_lb)),
 							v.get_lower_bound_lit(ctx),
@@ -275,7 +282,7 @@ where
 
 			if v_ub < result_lb {
 				self.index
-					.set_not_eq(ctx, i as IntVal, |ctx: &mut E::PropagationCtx<'_>| {
+					.set_not_eq(ctx, i, |ctx: &mut E::PropagationCtx<'_>| {
 						[
 							self.result.get_lit(ctx, IntLitMeaning::GreaterEq(v_ub + 1)),
 							v.get_upper_bound_lit(ctx),
@@ -286,7 +293,7 @@ where
 			// update min_support if i is in the domain of self.index and the lower bound of
 			// // v is less than the current min
 			if need_min_support && v_lb < new_min {
-				new_min_support = i as IntVal;
+				new_min_support = i;
 				new_min = v_lb;
 				// stop finding min_support if new_min ≤ y_lb
 				need_min_support = new_min > result_lb;
@@ -295,7 +302,7 @@ where
 			// update max_support if i is in the domain of self.index and the upper bound of
 			// v is greater than the current max
 			if need_max_support && v_ub > new_max {
-				new_max_support = i as IntVal;
+				new_max_support = i;
 				new_max = v_ub;
 				// stop finding max_support if new_max ≥ y_ub
 				need_max_support = new_max < result_ub;
@@ -315,17 +322,19 @@ where
 		if new_min > result_lb {
 			self.result
 				.set_lower_bound(ctx, new_min, |ctx: &mut E::PropagationCtx<'_>| {
-					self.vars
-						.iter()
-						.enumerate()
-						.map(|(i, v)| {
-							if self.index.check_in_domain(ctx, i as IntVal) {
-								v.get_lit(ctx, IntLitMeaning::GreaterEq(new_min))
-							} else {
-								self.index.get_lit(ctx, IntLitMeaning::NotEq(i as IntVal))
-							}
-						})
-						.collect_vec()
+					let mut reason = Vec::with_capacity(self.vars.len());
+					let dom = self.index.get_domain(ctx);
+					let mut dom = dom.iter().flatten().peekable();
+					for (i, v) in self.vars.iter().enumerate() {
+						debug_assert!(dom.peek().is_none() || *dom.peek().unwrap() >= i as IntVal);
+						if dom.peek() == Some(&(i as IntVal)) {
+							reason.push(v.get_lit(ctx, IntLitMeaning::GreaterEq(new_min)));
+							dom.next();
+						} else {
+							reason.push(self.index.get_lit(ctx, IntLitMeaning::NotEq(i as IntVal)));
+						}
+					}
+					reason
 				})?;
 		}
 
@@ -339,17 +348,19 @@ where
 		if new_max < result_ub {
 			self.result
 				.set_upper_bound(ctx, new_max, |ctx: &mut E::PropagationCtx<'_>| {
-					self.vars
-						.iter()
-						.enumerate()
-						.map(|(i, v)| {
-							if self.index.check_in_domain(ctx, i as IntVal) {
-								v.get_lit(ctx, IntLitMeaning::Less(new_max + 1))
-							} else {
-								self.index.get_lit(ctx, IntLitMeaning::NotEq(i as IntVal))
-							}
-						})
-						.collect_vec()
+					let mut reason = Vec::with_capacity(self.vars.len());
+					let dom = self.index.get_domain(ctx);
+					let mut dom = dom.iter().flatten().peekable();
+					for (i, v) in self.vars.iter().enumerate() {
+						debug_assert!(dom.peek().is_none() || *dom.peek().unwrap() >= i as IntVal);
+						if dom.peek() == Some(&(i as IntVal)) {
+							reason.push(v.get_lit(ctx, IntLitMeaning::Less(new_max + 1)));
+							dom.next();
+						} else {
+							reason.push(self.index.get_lit(ctx, IntLitMeaning::NotEq(i as IntVal)));
+						}
+					}
+					reason
 				})?;
 		}
 

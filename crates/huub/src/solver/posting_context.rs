@@ -277,6 +277,10 @@ impl IntInspectionActions<PostingContext<'_>> for IntVal {
 		self.get_upper_bound(ctx.state)
 	}
 
+	fn get_domain(&self, _: &PostingContext<'_>) -> crate::IntSetVal {
+		(*self..=*self).into()
+	}
+
 	fn check_in_domain(&self, ctx: &PostingContext<'_>, val: IntVal) -> bool {
 		self.check_in_domain(ctx.state, val)
 	}
@@ -315,6 +319,10 @@ impl IntInspectionActions<PostingContext<'_>> for IntVarRef {
 
 	fn get_upper_bound(&self, ctx: &PostingContext<'_>) -> IntVal {
 		self.get_upper_bound(ctx.state)
+	}
+
+	fn get_domain(&self, ctx: &PostingContext<'_>) -> crate::IntSetVal {
+		self.get_domain(ctx.state)
 	}
 
 	fn check_in_domain(&self, ctx: &PostingContext<'_>, val: IntVal) -> bool {

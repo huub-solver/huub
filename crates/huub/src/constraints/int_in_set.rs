@@ -10,8 +10,8 @@ use rangelist::IntervalIterator;
 use crate::{
 	actions::{
 		BoolInspectionActions, BoolPostingActions, BoolPropagationActions,
-		BoolSimplificationActions, IntSimplificationActions, PostingActions, ReasoningEngine,
-		ReformulationActions,
+		BoolSimplificationActions, IntInspectionActions, IntSimplificationActions, PostingActions,
+		ReasoningEngine, ReformulationActions,
 	},
 	constraints::{
 		Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus, SolverBoolView,

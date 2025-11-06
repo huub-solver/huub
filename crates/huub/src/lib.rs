@@ -1534,6 +1534,10 @@ impl IntInspectionActions<Model> for IntVal {
 		*self
 	}
 
+	fn get_domain(&self, _: &Model) -> IntSetVal {
+		(*self..=*self).into()
+	}
+
 	fn check_in_domain(&self, _: &Model, val: IntVal) -> bool {
 		*self == val
 	}
@@ -1564,10 +1568,6 @@ impl IntInspectionActions<Model> for IntVal {
 }
 
 impl IntSimplificationActions<Model> for IntVal {
-	fn get_domain(&self, _: &Model) -> IntSetVal {
-		(*self..=*self).into()
-	}
-
 	fn set_not_in_set(
 		&self,
 		ctx: &mut Model,
@@ -1730,6 +1730,42 @@ impl IntInspectionActions<Model> for IntDecision {
 				} else {
 					t.transform(1 - val)
 				}
+			}
+		}
+	}
+
+	fn get_domain(&self, ctx: &Model) -> IntSetVal {
+		let var = self.resolve_alias(ctx);
+		match var.0 {
+			IntDecisionInner::Var(v) => {
+				let Domain::Domain(dom) = &ctx.int_vars[v].domain else {
+					unreachable!()
+				};
+				dom.clone()
+			}
+			IntDecisionInner::Const(c) => (c..=c).into(),
+			IntDecisionInner::Linear(t, v) => {
+				let Domain::Domain(dom) = &ctx.int_vars[v].domain else {
+					unreachable!()
+				};
+				if t.positive_scale() {
+					RangeList::from_sorted_ranges(
+						dom.iter()
+							.map(|r| t.transform(*r.start())..=t.transform(*r.end())),
+					)
+				} else {
+					RangeList::from_sorted_ranges(
+						dom.iter()
+							.rev()
+							.map(|r| t.transform(*r.end())..=t.transform(*r.start())),
+					)
+				}
+			}
+			IntDecisionInner::Bool(t, _) if t.positive_scale() => {
+				RangeList::from_sorted_elements([t.offset, t.offset + t.scale.get()])
+			}
+			IntDecisionInner::Bool(t, _) => {
+				RangeList::from_sorted_elements([t.offset + t.scale.get(), t.offset])
 			}
 		}
 	}
@@ -2026,37 +2062,6 @@ impl IntPropagationActions<Model> for IntDecision {
 }
 
 impl IntSimplificationActions<Model> for IntDecision {
-	fn get_domain(&self, ctx: &Model) -> IntSetVal {
-		let var = self.resolve_alias(ctx);
-		match var.0 {
-			IntDecisionInner::Var(v) => {
-				let Domain::Domain(dom) = &ctx.int_vars[v].domain else {
-					unreachable!()
-				};
-				dom.clone()
-			}
-			IntDecisionInner::Const(c) => (c..=c).into(),
-			IntDecisionInner::Linear(t, v) => {
-				let Domain::Domain(dom) = &ctx.int_vars[v].domain else {
-					unreachable!()
-				};
-				dom.iter()
-					.map(|r| {
-						if t.positive_scale() {
-							t.transform(*r.start())..=t.transform(*r.end())
-						} else {
-							t.transform(*r.end())..=t.transform(*r.start())
-						}
-					})
-					.collect()
-			}
-			IntDecisionInner::Bool(t, _) => [t.offset, t.offset + t.scale.get()]
-				.into_iter()
-				.map(|v| v..=v)
-				.collect(),
-		}
-	}
-
 	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Self::Conflict> {
 		use IntDecisionInner::*;
 
@@ -2641,6 +2646,10 @@ impl IntInspectionActions<ModelPostingContext<'_>> for IntDecision {
 		self.get_upper_bound(ctx.model)
 	}
 
+	fn get_domain(&self, ctx: &ModelPostingContext<'_>) -> IntSetVal {
+		self.get_domain(ctx.model)
+	}
+
 	fn check_in_domain(&self, ctx: &ModelPostingContext<'_>, val: IntVal) -> bool {
 		self.check_in_domain(ctx.model, val)
 	}
@@ -2778,6 +2787,10 @@ impl IntInspectionActions<ModelPostingContext<'_>> for IntVal {
 
 	fn get_upper_bound(&self, _: &ModelPostingContext<'_>) -> IntVal {
 		*self
+	}
+
+	fn get_domain(&self, _: &ModelPostingContext<'_>) -> IntSetVal {
+		(*self..=*self).into()
 	}
 
 	fn check_in_domain(&self, _: &ModelPostingContext<'_>, val: IntVal) -> bool {

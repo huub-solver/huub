@@ -124,21 +124,41 @@ pub trait IntInspectionActions<Context: ?Sized>: IntOperations {
 	/// Type used to represent an atom in an reason for propagation.
 	type Atom: BoolOperations;
 
-	/// Get the minimum value that an integer view is guaranteed to take (given
-	/// the current search decisions).
-	fn get_lower_bound(&self, ctx: &Context) -> IntVal;
-
-	/// Get the maximum value that an integer view is guaranteed to take (given
-	/// the current search decisions).
-	fn get_upper_bound(&self, ctx: &Context) -> IntVal;
+	/// Check whether a given integer view can take a given value (given the
+	/// current search decisions).
+	fn check_in_domain(&self, ctx: &Context, val: IntVal) -> bool;
 
 	/// Convenience method to get both the lower and upper bounds of an integer
 	/// view.
 	fn get_bounds(&self, ctx: &Context) -> (IntVal, IntVal) {
 		(self.get_lower_bound(ctx), self.get_upper_bound(ctx))
 	}
+	/// Get the set of values from which the integer view is guaranteed to take
+	/// a value (given the current search decisions).
+	fn get_domain(&self, ctx: &Context) -> IntSetVal;
 
-	/// Get the current value of an integer view, if it has been assigned.
+	/// Get the meaning of the given literal with respect to the given integer
+	/// view, or `None` it has no direct meaning.
+	fn get_lit_meaning(&self, ctx: &Context, lit: Self::Atom) -> Option<IntLitMeaning>;
+
+	/// Get the minimum value that an integer view is guaranteed to take (given
+	/// the current search decisions).
+	fn get_lower_bound(&self, ctx: &Context) -> IntVal;
+
+	/// Get the Boolean view that represents that the integer view will take a
+	/// value greater or equal to its current lower bound.
+	fn get_lower_bound_lit(&self, ctx: &Context) -> Self::Atom;
+
+	/// Get the maximum value that an integer view is guaranteed to take (given
+	/// the current search decisions).
+	fn get_upper_bound(&self, ctx: &Context) -> IntVal;
+
+	/// Get the Boolean view that represents that the integer view will take a
+	/// value less or equal to its current upper bound.
+	fn get_upper_bound_lit(&self, ctx: &Context) -> Self::Atom;
+
+	/// Get the current value of an integer view, if it has been assigned (given
+	/// the current search decisions).
 	fn get_val(&self, ctx: &Context) -> Option<IntVal> {
 		let (lb, ub) = self.get_bounds(ctx);
 		if lb == ub {
@@ -148,24 +168,8 @@ pub trait IntInspectionActions<Context: ?Sized>: IntOperations {
 		}
 	}
 
-	/// Check whether a given integer view can take a given value (given the
-	/// current search decisions).
-	fn check_in_domain(&self, ctx: &Context, val: IntVal) -> bool;
-
-	/// Get the meaning of the given literal with respect to the given integer
-	/// view, or `None` it has no direct meaning.
-	fn get_lit_meaning(&self, ctx: &Context, lit: Self::Atom) -> Option<IntLitMeaning>;
-
-	/// Get the Boolean view that represents that the integer view will take a
-	/// value greater or equal to its current lower bound.
-	fn get_lower_bound_lit(&self, ctx: &Context) -> Self::Atom;
-
-	/// Get the Boolean view that represents that the integer view will take a
-	/// value less or equal to its current upper bound.
-	fn get_upper_bound_lit(&self, ctx: &Context) -> Self::Atom;
-
-	/// Get a Boolean view that represents the given meaning (that is currently
-	/// `true`) on the integer view, if it already exists.
+	/// Get a Boolean view that represents the given meaning on the integer
+	/// view, if it already exists.
 	fn try_lit(&self, ctx: &Context, meaning: IntLitMeaning) -> Option<Self::Atom>;
 }
 
@@ -253,9 +257,6 @@ pub trait IntPropagationActions<Context: ?Sized>: IntDecisionActions<Context> {
 ///
 /// Generally these actions are used in [`Constraint::simplify`].
 pub trait IntSimplificationActions<Context: ?Sized>: IntPropagationActions<Context> {
-	/// Get the domain from which an integer view is guaranteed to take a value.
-	fn get_domain(&self, ctx: &Context) -> IntSetVal;
-
 	/// Enforce that a given integer expression cannot take any of the values in
 	/// the given set.
 	fn set_not_in_set(
@@ -380,16 +381,17 @@ pub trait ReformulationActions:
 	/// Get the current value of a [`BoolView`], if it has been assigned.
 	fn get_bool_val(&self, bv: RawLit) -> Option<bool>;
 
-	/// Get the minimum value that an integer view is guaranteed to take (given
-	/// the current search decisions).
+	/// Get the minimum value that an integer view is guaranteed to take.
 	fn get_int_lower_bound(&self, var: IntVarRef) -> IntVal;
 
-	/// Get the maximum value that an integer view is guaranteed to take (given
-	/// the current search decisions).
+	/// Get the maximum value that an integer view is guaranteed to take.
 	fn get_int_upper_bound(&self, var: IntVarRef) -> IntVal;
 
-	/// Check whether a given integer view can take a given value (given the
-	/// current search decisions).
+	/// Get the set of values from which the integer view is guaranteed to take
+	/// a value.
+	fn get_int_domain(&self, var: IntVarRef) -> IntSetVal;
+
+	/// Check whether a given integer view can take a given value
 	fn check_int_in_domain(&self, var: IntVarRef, val: IntVal) -> bool;
 
 	/// Get the meaning of the given literal with respect to the given integer
@@ -528,6 +530,10 @@ impl IntInspectionActions<dyn ReformulationActions + '_> for IntVarRef {
 
 	fn get_upper_bound(&self, ctx: &dyn ReformulationActions) -> IntVal {
 		ctx.get_int_upper_bound(*self)
+	}
+
+	fn get_domain(&self, ctx: &dyn ReformulationActions) -> IntSetVal {
+		ctx.get_int_domain(*self)
 	}
 
 	fn check_in_domain(&self, ctx: &dyn ReformulationActions, val: IntVal) -> bool {
