@@ -228,9 +228,10 @@ where
 		let res = Solver::from_fzn::<Ustr, UstrMap<View>>(&fzn, &self.init_config());
 		// Resolve any errors that may have occurred during the conversion
 		let (mut slv, var_map, fzn_stats): (Solver, UstrMap<View>, FlatZincStatistics) = match res {
-			Err(FlatZincError::ReformulationError(ReformulationError::SimplificationConflict(
-				_,
-			))) => {
+			Err(FlatZincError::ReformulationError(
+				ReformulationError::SimplificationConflict(_)
+				| ReformulationError::TranslationConflict(_),
+			)) => {
 				outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
 				return Ok(());
 			}
