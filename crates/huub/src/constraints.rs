@@ -90,10 +90,7 @@ pub trait Constraint<E: ReasoningEngine + ?Sized>: Any + Debug + DynClone + Prop
 	fn simplify(
 		&mut self,
 		context: &mut E::PropagationCtx<'_>,
-	) -> Result<SimplificationStatus, E::Conflict> {
-		self.propagate(context)?;
-		Ok(SimplificationStatus::NoFixpoint)
-	}
+	) -> Result<SimplificationStatus, E::Conflict>;
 
 	/// Encode the constraint using [`Propagator`] objects or clauses for a
 	/// [`Solver`] object.

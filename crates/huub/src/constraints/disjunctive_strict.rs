@@ -12,7 +12,8 @@ use crate::{
 		PropagationActions, ReasoningEngine, ReformulationActions, TrailingActions,
 	},
 	constraints::{
-		BoxedPropagator, Constraint, ModelIntView, Propagator, ReasonBuilder, SolverIntView,
+		BoxedPropagator, Constraint, ModelIntView, Propagator, ReasonBuilder, SimplificationStatus,
+		SolverIntView,
 	},
 	reformulate::ReformulationError,
 	solver::{
@@ -224,6 +225,24 @@ where
 	E: ReasoningEngine,
 	IntDecision: ModelIntView<E>,
 {
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
+		self.propagate(ctx)?;
+
+		if self
+			.propagator
+			.start_times
+			.iter()
+			.all(|v| v.get_val(ctx).is_some())
+		{
+			return Ok(SimplificationStatus::Subsumed);
+		}
+
+		Ok(SimplificationStatus::NoFixpoint)
+	}
+
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let start_times = self
 			.propagator

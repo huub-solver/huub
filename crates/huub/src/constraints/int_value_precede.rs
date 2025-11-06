@@ -474,6 +474,7 @@ where
 		if self.vars.iter().all(|v| v.get_val(ctx).is_some()) {
 			return Ok(SimplificationStatus::Subsumed);
 		}
+
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 

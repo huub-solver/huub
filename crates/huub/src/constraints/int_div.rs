@@ -83,6 +83,14 @@ where
 		)?;
 
 		self.propagate(ctx)?;
+
+		if self.numerator.get_val(ctx).is_some()
+			&& self.denominator.get_val(ctx).is_some()
+			&& self.result.get_val(ctx).is_some()
+		{
+			return Ok(SimplificationStatus::Subsumed);
+		}
+
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 

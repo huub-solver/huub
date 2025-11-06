@@ -139,6 +139,7 @@ where
 			.set_upper_bound(ctx, self.vars.len() as IntVal - 1, [])?;
 
 		self.propagate(ctx)?;
+
 		if let Some(i) = self.index.get_val(ctx) {
 			self.vars[i as usize]
 				.clone()
@@ -159,7 +160,9 @@ where
 				max_support: self.max_support,
 			});
 			ctx.add_constraint(rewrite);
+			return Ok(SimplificationStatus::Subsumed);
 		}
+
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
@@ -388,6 +391,7 @@ where
 			.set_upper_bound(ctx, self.0.vars.len() as IntVal - 1, [])?;
 
 		self.0.propagate(ctx)?;
+
 		if let Some(i) = self.0.index.get_val(ctx) {
 			self.0
 				.result
@@ -396,6 +400,7 @@ where
 				.unify(ctx, self.0.vars[i as usize])?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
+
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
