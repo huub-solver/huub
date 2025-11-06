@@ -283,11 +283,11 @@ checksum = "52051878f80a721bb68ebfbc930e07b65ba72f2da88968ea5c06fd6ca3d3a127"
 
 [[package]]
 name = "flatzinc-serde"
-version = "0.4.3"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d60e0557082260cb437f0e692a3b9bfd76f90c39ec9da6cc279e4b3ec5b8db02"
+checksum = "a6326022851a9eb73445a7839835c8dfc45dbfda3b2bda0dcd07073401b1b072"
 dependencies = [
- "rangelist",
+ "rangelist 0.4.0",
  "serde",
 ]
 
@@ -330,7 +330,7 @@ dependencies = [
  "index_vec",
  "itertools",
  "pindakaas",
- "rangelist",
+ "rangelist 0.4.0",
  "rustc-hash",
  "tracing",
  "tracing-test",
@@ -567,7 +567,7 @@ checksum = "a97e70d3616dfd92944fc9a6a073c2d71d7acb053d15c2810bdaf09722c4e66e"
 dependencies = [
  "itertools",
  "pindakaas-cadical",
- "rangelist",
+ "rangelist 0.3.2",
  "rustc-hash",
 ]
 
@@ -618,6 +618,12 @@ name = "rangelist"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "066eb6d0fb14509e98a1a3d1be63693ed51f4eb39669ce8728f24ea6fb369dda"
+
+[[package]]
+name = "rangelist"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2005c11e700bd122d87a5294e6753b4a4e85b99b8d6b97334ca2d8ecfd0e049"
 
 [[package]]
 name = "redox_syscall"
@@ -776,9 +782,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.108"
+version = "2.0.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da58917d35242480a05c2897064da0a80589a2a0476c9a3f2fdc83b53502e917"
+checksum = "2f17c7e013e88258aa9543dcbe81aca68a667a9ac37cd69c9fbc07858bfe0e2f"
 dependencies = [
  "proc-macro2",
  "quote",
