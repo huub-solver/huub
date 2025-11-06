@@ -50,8 +50,13 @@ where
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
 
-		if self.min.get_val(ctx).is_some() && self.vars.iter().all(|v| v.get_val(ctx).is_some()) {
-			return Ok(SimplificationStatus::Subsumed);
+		if let Some(c) = self.min.get_val(ctx) {
+			if self.vars.iter().any(|v| v.get_val(ctx) == Some(c)) {
+				for v in &self.vars {
+					v.set_lower_bound(ctx, c, [self.min.get_lower_bound_lit(ctx)])?;
+				}
+				return Ok(SimplificationStatus::Subsumed);
+			}
 		}
 
 		Ok(SimplificationStatus::NoFixpoint)

@@ -277,6 +277,9 @@ where
 	}
 }
 
+/// Helper function that calls [`tracing::debug!`] on learned clauses.
+///
+/// This function is used as part of the callback given to the SAT oracle.
 fn trace_learned_clause(clause: &mut dyn Iterator<Item = RawLit>) {
 	debug!(clause = ?clause.map(i32::from).collect::<Vec<i32>>(), "learn clause");
 }
