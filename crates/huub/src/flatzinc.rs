@@ -30,7 +30,7 @@ use crate::{
 	all_different_int, array_element, array_maximum_int, array_minimum_int, cumulative,
 	disjunctive_strict, div_int, int_in_set_reif, pow_int,
 	reformulate::ReformulationError,
-	seq_precede_chain_int, table_int, times_int, value_precede_chain_int, BoolDecision,
+	rel, seq_precede_chain_int, table_int, times_int, value_precede_chain_int, BoolDecision,
 	BoolDecisionInner, Branching, Decision, IntDecision, IntLinExpr, IntSetVal, IntVal, Model,
 	NonZeroIntVal, ValueSelection, VariableSelection,
 };
@@ -951,7 +951,8 @@ where
 							.iter()
 							.map(|l| self.lit_bool(l).map(Into::into))
 							.collect();
-						self.prb += Formula::Equiv(vec![r.into(), Formula::And(es?)]);
+						self.prb
+							.add_constraint(Formula::Equiv(vec![r.into(), Formula::And(es?)]));
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_bool_and",
@@ -967,7 +968,7 @@ where
 							.iter()
 							.map(|l| self.lit_bool(l).map(Into::into))
 							.try_collect()?;
-						self.prb += Formula::Xor(es);
+						self.prb.add_constraint(Formula::Xor(es));
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_bool_xor",
@@ -1088,7 +1089,7 @@ where
 							.chain(once(-sum))
 							.sum();
 
-						self.prb += lin_exp.eq(0);
+						rel!(&mut self.prb, 0 == lin_exp);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_lin_eq",
@@ -1131,7 +1132,11 @@ where
 								1 => lits[0]
 									.set(&mut self.prb, vec![])
 									.map_err(ReformulationError::from)?,
-								_ => self.prb += Formula::Or(lits.into_iter().map_into().collect()),
+								_ => {
+									self.prb.add_constraint(Formula::Or(
+										lits.into_iter().map_into().collect(),
+									));
+								}
 							}
 						}
 					} else {
@@ -1147,10 +1152,10 @@ where
 						let a = self.arg_bool(a)?;
 						let b = self.arg_bool(b)?;
 						let r = self.arg_bool(r)?;
-						self.prb += Formula::Equiv(vec![
+						self.prb.add_constraint(Formula::Equiv(vec![
 							r.into(),
 							Formula::Equiv(vec![a.into(), b.into()]),
-						]);
+						]));
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_eq_reif",
@@ -1182,7 +1187,7 @@ where
 							let r = self.arg_bool(&c.args[2])?;
 							f = Formula::Equiv(vec![r.into(), f]);
 						}
-						self.prb += f;
+						self.prb.add_constraint(f);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_xor",
@@ -1253,7 +1258,8 @@ where
 							let e = self.lit_bool(l)?;
 							lits.push((!e).into());
 						}
-						self.prb += Formula::Equiv(vec![r.into(), Formula::Or(lits)]);
+						self.prb
+							.add_constraint(Formula::Equiv(vec![r.into(), Formula::Or(lits)]));
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_clause_reif",
@@ -1472,10 +1478,9 @@ where
 					if let [a, b] = c.args.as_slice() {
 						let a = self.arg_int(a)?;
 						let b = self.arg_int(b)?;
-						let lin_exp = a - b;
-						self.prb += match c.id.deref() {
-							"int_le" => lin_exp.leq(0),
-							"int_ne" => lin_exp.ne(0),
+						match c.id.deref() {
+							"int_le" => rel!(&mut self.prb, 0 >= a - b),
+							"int_ne" => rel!(&mut self.prb, 0 != a - b),
 							_ => unreachable!(),
 						};
 					} else {
@@ -1504,11 +1509,11 @@ where
 							"int_ne_imp" | "int_ne_reif" => lin_exp.ne(0),
 							_ => unreachable!(),
 						};
-						self.prb += match c.id.deref() {
+						self.prb.add_constraint(match c.id.deref() {
 							"int_eq_imp" | "int_le_imp" | "int_ne_imp" => lin.implied_by(r),
 							"int_eq_reif" | "int_le_reif" | "int_ne_reif" => lin.reified_by(r),
 							_ => unreachable!(),
-						};
+						});
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: match c.id.deref() {
@@ -1544,12 +1549,12 @@ where
 							.filter_map(|(x, c)| NonZeroIntVal::new(c).map(|c| x * c))
 							.sum();
 
-						self.prb += match c.id.deref() {
+						self.prb.add_constraint(match c.id.deref() {
 							"int_lin_eq" => lin_exp.eq(rhs),
 							"int_lin_le" => lin_exp.leq(rhs),
 							"int_lin_ne" => lin_exp.ne(rhs),
 							_ => unreachable!(),
-						};
+						});
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: match c.id.deref() {
@@ -1590,7 +1595,7 @@ where
 							"int_lin_ne_imp" | "int_lin_ne_reif" => lin_exp.ne(rhs),
 							_ => unreachable!(),
 						};
-						self.prb += match c.id.deref() {
+						self.prb.add_constraint(match c.id.deref() {
 							"int_lin_eq_imp" | "int_lin_le_imp" | "int_lin_ne_imp" => {
 								lin.implied_by(reified)
 							}
@@ -1598,7 +1603,7 @@ where
 								lin.reified_by(reified)
 							}
 							_ => unreachable!(),
-						};
+						});
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: match c.id.deref() {

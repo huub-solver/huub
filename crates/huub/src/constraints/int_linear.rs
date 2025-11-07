@@ -954,15 +954,14 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		constraints::int_linear::{
-			IntLinear, IntLinearLessEqBounds, IntLinearNotEqValue, LinOperator, Reification,
-		},
+		constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
 		reformulate::InitConfig,
+		rel,
 		solver::{
 			int_var::{EncodingType, IntVar},
 			Solver,
 		},
-		Model, NonZeroIntVal,
+		BoolDecision, Model, NonZeroIntVal,
 	};
 
 	#[test]
@@ -971,12 +970,10 @@ mod tests {
 		// false was rewritten incorrectly. It allowed `a` to be 2.
 		let mut prb = Model::default();
 		let a = prb.new_int_var(1..=2);
-		prb += IntLinear {
-			terms: vec![-a],
-			operator: LinOperator::LessEq,
-			rhs: -2,
-			reif: Some(Reification::ReifiedBy(false.into())),
-		};
+		let r: BoolDecision = false.into();
+
+		rel!(&mut prb, r <-> -2 >= -a);
+
 		prb.expect_solutions(&[a], expect![[r#"1"#]]);
 	}
 
@@ -1028,7 +1025,7 @@ mod tests {
 		let b = prb.new_int_var(1..=2);
 		let c = prb.new_int_var(1..=2);
 
-		prb += (a * 2 + b + c).geq(10);
+		rel!(&mut prb, 10 <= a * 2 + b + c);
 		prb.assert_unsatisfiable();
 	}
 
@@ -1076,7 +1073,8 @@ mod tests {
 		let b = prb.new_int_var(1..=4);
 		let c = prb.new_int_var(1..=4);
 
-		prb += (a * 2 + b + c).leq(3);
+		rel!(&mut prb, 3 >= a * 2 + b + c);
+
 		prb.assert_unsatisfiable();
 	}
 
@@ -1126,7 +1124,8 @@ mod tests {
 		let b = prb.new_int_var(1..=2);
 		let c = prb.new_int_var(1..=2);
 
-		prb += (a * 2 + b + c).geq(7).implied_by(r);
+		rel!(&mut prb, r -> 7 <= a * 2 + b + c);
+
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let a = map.get(&mut slv, &a.into());
 		let b = map.get(&mut slv, &b.into());
@@ -1158,7 +1157,7 @@ mod tests {
 		let b = prb.new_int_var(1..=2);
 		let c = prb.new_int_var(1..=2);
 
-		prb += (a * 2 + b + c).leq(5).implied_by(r);
+		rel!(&mut prb, r -> 5 >= a * 2 + b + c);
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let a = map.get(&mut slv, &a.into());
@@ -1191,7 +1190,7 @@ mod tests {
 		let b = prb.new_int_var(1..=2);
 		let c = prb.new_int_var(1..=2);
 
-		prb += (a * 2 + b + c).ne(6).implied_by(r);
+		rel!(&mut prb, r -> 6 != a * 2 + b + c);
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let a = map.get(&mut slv, &a.into());

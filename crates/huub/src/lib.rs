@@ -9,6 +9,63 @@
 //! during the search process, without having to encode the full problem into
 //! Boolean variables and clauses.
 
+#[macro_export]
+/// General purpose helper for adding "relation" constraints to a Model.
+///
+/// Supported forms:
+/// - `rel!(prb, const OP expr)` Use a constant left-hand side and an expression
+///   right-hand side to build an integer linear comparison (e.g. `rel!(prb, 5
+///   <= x + y)`).
+/// - `rel!(prb, r -> ...)` or `rel!(prb, !r -> ...)` Post an integer linear
+///   expression implied by (possibly negated) `r`.
+/// - `rel!(prb, r <-> ...)` or `rel!(prb, !r <-> ...)` Post an integer linear
+///   expression reified by (possibly negated) `r`.
+macro_rules! rel {
+	// Case for comparison operators where the left-hand side is a literal
+	// and the right-hand side is an expression. Example:
+	//   rel!(prb, 3 < x);
+	($prb:expr, $lhs:literal $op:tt $rhs:expr) => {
+		$prb.add_constraint(rel!(@make_lin $lhs $op $rhs))
+	};
+	// Implication: "r -> (lhs <op> rhs)".
+	($prb:expr, $r:ident -> $lhs:literal $op:tt $rhs:expr) => {
+		$prb.add_constraint(rel!(@make_lin $lhs $op $rhs).implied_by($r))
+	};
+	// Implication posting with a negated Boolean variable.
+	($prb:expr, !$r:ident -> $lhs:literal $op:tt $rhs:expr) => {
+		let neg = !($r);
+		rel!($prb, neg -> $lhs $op $rhs);
+	};
+	// Fully reification: "r <-> (lhs <op> rhs)".
+	($prb:expr, $r:ident <-> $lhs:literal $op:tt $rhs:expr) => {
+		$prb.add_constraint(rel!(@make_lin $lhs $op $rhs).reified_by($r))
+	};
+	// Fully reification with a negated Boolean variable.
+	($prb:expr, !$r:ident <-> $lhs:literal $op:tt $rhs:expr) => {
+		let neg = !($r);
+		rel!($prb, neg <-> $lhs $op $rhs);
+	};
+	// Internal helpers: dispatch to the appropriate comparison method.
+	(@make_lin $lhs:literal < $rhs:expr) => {
+		$crate::IntLinExpr::from($rhs).gt($lhs)
+	};
+	(@make_lin $lhs:literal <= $rhs:expr) => {
+		$crate::IntLinExpr::from($rhs).geq($lhs)
+	};
+	(@make_lin $lhs:literal == $rhs:expr) => {
+		$crate::IntLinExpr::from($rhs).eq($lhs)
+	};
+	(@make_lin $lhs:literal != $rhs:expr) => {
+		$crate::IntLinExpr::from($rhs).ne($lhs)
+	};
+	(@make_lin $lhs:literal >= $rhs:expr) => {
+		$crate::IntLinExpr::from($rhs).leq($lhs)
+	};
+	(@make_lin $lhs:literal > $rhs:expr) => {
+		$crate::IntLinExpr::from($rhs).lt($lhs)
+	};
+}
+
 pub mod actions;
 pub mod branchers;
 pub mod constraints;
@@ -285,11 +342,11 @@ pub enum VariableSelection {
 /// Create a constraint that enforces that the second integer decision variable
 /// takes the absolute value of the first integer decision variable.
 pub fn abs_int(prb: &mut Model, origin: IntDecision, abs: IntDecision) {
-	*prb += IntAbsBounds {
+	prb.add_constraint(IntAbsBounds {
 		origin,
 		abs,
 		origin_positive: origin.geq(0),
-	};
+	});
 }
 
 /// Create a constraint that enforces that all the given integer decisions take
@@ -756,7 +813,7 @@ impl BoolSimplificationActions<Model> for BoolDecision {
 				let x = BoolFormula::Atom(BoolDecision(x));
 				let y = BoolFormula::Atom(BoolDecision(y));
 
-				*ctx += BoolFormula::Equiv(vec![x, y]);
+				ctx.add_constraint(BoolFormula::Equiv(vec![x, y]));
 				Ok(())
 			}
 		}
@@ -1733,7 +1790,7 @@ impl IntSimplificationActions<Model> for IntDecision {
 				} else if can_define_x {
 					((x_t, x_i), (y_t, y_i))
 				} else {
-					*ctx += IntEq { vars: [x, y] };
+					ctx.add_constraint(IntEq { vars: [x, y] });
 					return Ok(());
 				};
 
@@ -2019,6 +2076,22 @@ impl Add<IntVal> for IntLinExpr {
 	fn add(mut self, rhs: IntVal) -> Self::Output {
 		self.terms[0] = self.terms[0] + rhs;
 		self
+	}
+}
+
+impl From<IntDecision> for IntLinExpr {
+	fn from(decision: IntDecision) -> Self {
+		IntLinExpr {
+			terms: vec![decision],
+		}
+	}
+}
+
+impl From<IntVal> for IntLinExpr {
+	fn from(v: IntVal) -> Self {
+		IntLinExpr {
+			terms: vec![v.into()],
+		}
 	}
 }
 
@@ -2655,12 +2728,6 @@ impl Model {
 impl AddAssign<Branching> for Model {
 	fn add_assign(&mut self, rhs: Branching) {
 		self.branchings.push(rhs);
-	}
-}
-
-impl<C: Constraint<Self>> AddAssign<C> for Model {
-	fn add_assign(&mut self, rhs: C) {
-		self.add_constraint(rhs);
 	}
 }
 

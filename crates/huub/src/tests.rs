@@ -8,6 +8,7 @@ use crate::{
 	actions::{IntInspectionActions, IntSimplificationActions},
 	branchers::IntBrancher,
 	constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
+	rel,
 	solver::{
 		int_var::{EncodingType, IntVar},
 		SolveResult, Value, View,
@@ -22,8 +23,8 @@ fn it_works() {
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
 
-	prb += Formula::Or(vec![(!a).into(), (!b).into()]);
-	prb += Formula::Or(vec![a.into(), b.into()]);
+	prb.add_constraint(Formula::Or(vec![(!a).into(), (!b).into()]));
+	prb.add_constraint(Formula::Or(vec![a.into(), b.into()]));
 
 	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 	let a = map.get_bool(&mut slv, a);
@@ -101,7 +102,7 @@ fn test_unify_int_impossible() {
 	let a = prb.new_int_var(1..=5);
 	let b = prb.new_int_var(1..=2);
 
-	prb += (a * 2 - b * 5).eq(0);
+	rel!(&mut prb, 0 == a * 2 - b * 5);
 
 	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 	let a = map.get_int(&mut slv, a);
@@ -122,7 +123,7 @@ fn test_unify_int_lin_view_domains() {
 	let a = prb.new_int_var(RangeList::from_iter([1..=1, 3..=3, 5..=5]));
 	let b = prb.new_int_var(RangeList::from_iter([1..=3]));
 
-	prb += (a * 6 - b * 2).eq(0);
+	rel!(&mut prb, 0 == a * 6 - b * 2);
 
 	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 	let a = map.get_int(&mut slv, a);
@@ -138,7 +139,9 @@ fn test_unify_int_view_for_bool_1() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	prb += (a * 2 + b * -2).eq(0);
+
+	rel!(&mut prb, 0 == a * 2 + b * -2);
+
 	prb.expect_solutions(
 		&[a, b],
 		expect![[r#"
@@ -152,7 +155,9 @@ fn test_unify_int_view_for_bool_2() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	prb += (a * -2 + b * 3).eq(0);
+
+	rel!(&mut prb, 0 == a * -2 + b * 3);
+
 	prb.expect_solutions(
 		&[a, b],
 		expect![[r#"
@@ -165,7 +170,9 @@ fn test_unify_int_view_for_bool_3() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	prb += (a * -2 + b * -3).eq(0);
+
+	rel!(&mut prb, 0 == a * -2 + b * -3);
+
 	prb.expect_solutions(
 		&[a, b],
 		expect![[r#"
@@ -178,7 +185,9 @@ fn test_unify_int_view_for_bool_4() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	prb += (a * 2 + b * 3).eq(0);
+
+	rel!(&mut prb, 0 == a * 2 + b * 3);
+
 	prb.expect_solutions(
 		&[a, b],
 		expect![[r#"
@@ -191,7 +200,9 @@ fn test_unify_int_view_for_bool_5() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	prb += (a * 2 + b * -3).eq(0);
+
+	rel!(&mut prb, 0 == a * 2 + b * -3);
+
 	prb.expect_solutions(
 		&[a, b],
 		expect![[r#"
@@ -204,7 +215,9 @@ fn test_unify_int_view_for_bool_6() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	prb += (((a * 2) + 2) + b * -3).eq(0);
+
+	rel!(&mut prb, 0 == ((a * 2) + 2) + b * -3);
+
 	prb.assert_unsatisfiable();
 }
 
