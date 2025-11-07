@@ -466,7 +466,7 @@ where
 					let Some(obj_val) = obj_val else {
 						unreachable!()
 					};
-					let obj_lit = obj.get_lit(&mut slv, IntLitMeaning::Eq(obj_val));
+					let obj_lit = obj.lit(&mut slv, IntLitMeaning::Eq(obj_val));
 					slv.add_clause([obj_lit]).unwrap();
 					// Ensure all following solutions are different from the first optimal
 					// solution

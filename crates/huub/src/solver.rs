@@ -333,9 +333,9 @@ where
 	Ctx: ?Sized,
 	RawLit: BoolInspectionActions<Ctx>,
 {
-	fn get_val(&self, ctx: &Ctx) -> Option<bool> {
+	fn val(&self, ctx: &Ctx) -> Option<bool> {
 		match self.0 {
-			BoolViewInner::Lit(lit) => lit.get_val(ctx),
+			BoolViewInner::Lit(lit) => lit.val(ctx),
 			BoolViewInner::Const(b) => Some(b),
 		}
 	}
@@ -452,52 +452,52 @@ impl Not for IntLitMeaning {
 }
 
 impl<Oracle: ExternalPropagation> IntDecisionActions<Solver<Oracle>> for IntVarRef {
-	fn get_lit(&self, ctx: &mut Solver<Oracle>, meaning: IntLitMeaning) -> Self::Atom {
+	fn lit(&self, ctx: &mut Solver<Oracle>, meaning: IntLitMeaning) -> Self::Atom {
 		let (mut actions, mut engine) = ctx.as_parts_mut();
 		let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
-		self.get_lit(&mut ctx, meaning)
+		self.lit(&mut ctx, meaning)
 	}
 
-	fn get_val_lit(&self, ctx: &mut Solver<Oracle>) -> Option<Self::Atom> {
+	fn val_lit(&self, ctx: &mut Solver<Oracle>) -> Option<Self::Atom> {
 		let (mut actions, mut engine) = ctx.as_parts_mut();
 		let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
-		IntDecisionActions::get_val_lit(self, &mut ctx)
+		IntDecisionActions::val_lit(self, &mut ctx)
 	}
 }
 
 impl<Oracle> IntInspectionActions<Solver<Oracle>> for IntVarRef {
 	type Atom = <IntVarRef as IntInspectionActions<State>>::Atom;
 
-	fn check_in_domain(&self, ctx: &Solver<Oracle>, val: IntVal) -> bool {
-		self.check_in_domain(&ctx.engine.borrow().state, val)
+	fn domain(&self, ctx: &Solver<Oracle>) -> IntSetVal {
+		self.domain(&ctx.engine.borrow().state)
 	}
 
-	fn get_domain(&self, ctx: &Solver<Oracle>) -> IntSetVal {
-		self.get_domain(&ctx.engine.borrow().state)
+	fn in_domain(&self, ctx: &Solver<Oracle>, val: IntVal) -> bool {
+		self.in_domain(&ctx.engine.borrow().state, val)
 	}
 
-	fn get_lit_meaning(&self, ctx: &Solver<Oracle>, lit: Self::Atom) -> Option<IntLitMeaning> {
-		self.get_lit_meaning(&ctx.engine.borrow().state, lit)
+	fn lit_meaning(&self, ctx: &Solver<Oracle>, lit: Self::Atom) -> Option<IntLitMeaning> {
+		self.lit_meaning(&ctx.engine.borrow().state, lit)
 	}
 
-	fn get_lower_bound(&self, ctx: &Solver<Oracle>) -> IntVal {
-		self.get_lower_bound(&ctx.engine.borrow().state)
+	fn lower_bound(&self, ctx: &Solver<Oracle>) -> IntVal {
+		self.lower_bound(&ctx.engine.borrow().state)
 	}
 
-	fn get_lower_bound_lit(&self, ctx: &Solver<Oracle>) -> Self::Atom {
-		self.get_lower_bound_lit(&ctx.engine.borrow().state)
-	}
-
-	fn get_upper_bound(&self, ctx: &Solver<Oracle>) -> IntVal {
-		self.get_upper_bound(&ctx.engine.borrow().state)
-	}
-
-	fn get_upper_bound_lit(&self, ctx: &Solver<Oracle>) -> Self::Atom {
-		self.get_upper_bound_lit(&ctx.engine.borrow().state)
+	fn lower_bound_lit(&self, ctx: &Solver<Oracle>) -> Self::Atom {
+		self.lower_bound_lit(&ctx.engine.borrow().state)
 	}
 
 	fn try_lit(&self, ctx: &Solver<Oracle>, meaning: IntLitMeaning) -> Option<Self::Atom> {
 		self.try_lit(&ctx.engine.borrow().state, meaning)
+	}
+
+	fn upper_bound(&self, ctx: &Solver<Oracle>) -> IntVal {
+		self.upper_bound(&ctx.engine.borrow().state)
+	}
+
+	fn upper_bound_lit(&self, ctx: &Solver<Oracle>) -> Self::Atom {
+		self.upper_bound_lit(&ctx.engine.borrow().state)
 	}
 }
 
@@ -617,7 +617,7 @@ where
 	RawLit: BoolInspectionActions<Ctx>,
 	BoolView: BoolInspectionActions<Ctx>,
 {
-	fn get_lit(&self, ctx: &mut Ctx, mut meaning: IntLitMeaning) -> Self::Atom {
+	fn lit(&self, ctx: &mut Ctx, mut meaning: IntLitMeaning) -> Self::Atom {
 		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
 			self.0
 		{
@@ -628,9 +628,7 @@ where
 		}
 
 		match self.0 {
-			IntViewInner::VarRef(var) | IntViewInner::Linear { var, .. } => {
-				var.get_lit(ctx, meaning)
-			}
+			IntViewInner::VarRef(var) | IntViewInner::Linear { var, .. } => var.lit(ctx, meaning),
 			IntViewInner::Const(c) => BoolView(BoolViewInner::Const(match meaning {
 				IntLitMeaning::Eq(i) => c == i,
 				IntLitMeaning::NotEq(i) => c != i,
@@ -670,7 +668,7 @@ where
 	RawLit: BoolInspectionActions<Ctx>,
 	BoolView: BoolInspectionActions<Ctx>,
 {
-	fn get_lit_relaxed(&self, ctx: &Ctx, mut meaning: IntLitMeaning) -> (BoolView, IntLitMeaning) {
+	fn lit_relaxed(&self, ctx: &Ctx, mut meaning: IntLitMeaning) -> (BoolView, IntLitMeaning) {
 		debug_assert!(
 			!matches!(meaning, IntLitMeaning::Eq(_)),
 			"relaxed integer literals are not yet supported for IntLitMeaning::Eq(_)"
@@ -690,7 +688,7 @@ where
 		// represented.
 		let (bv, meaning) = match self.0 {
 			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				iv.get_lit_relaxed(ctx, meaning)
+				iv.lit_relaxed(ctx, meaning)
 			}
 			IntViewInner::Const(c) => (
 				BoolView(BoolViewInner::Const(match meaning {
@@ -743,38 +741,24 @@ where
 {
 	type Atom = BoolView;
 
-	fn check_in_domain(&self, ctx: &Ctx, val: IntVal) -> bool {
-		let (lb, ub) = self.get_bounds(ctx);
-		if lb <= val && val <= ub {
-			let eq_lit = self.try_lit(ctx, IntLitMeaning::Eq(val));
-			if let Some(eq_lit) = eq_lit {
-				eq_lit.get_val(ctx).unwrap_or(true)
-			} else {
-				true
-			}
-		} else {
-			false
-		}
-	}
-
-	fn get_domain(&self, ctx: &Ctx) -> IntSetVal {
+	fn domain(&self, ctx: &Ctx) -> IntSetVal {
 		match self.0 {
-			IntViewInner::VarRef(iv) => iv.get_domain(ctx),
+			IntViewInner::VarRef(iv) => iv.domain(ctx),
 			IntViewInner::Const(c) => (c..=c).into(),
 			IntViewInner::Linear { transformer, var } if transformer.positive_scale() => {
 				RangeList::from_sorted_ranges(
-					var.get_domain(ctx).iter().map(|r| {
+					var.domain(ctx).iter().map(|r| {
 						transformer.transform(*r.start())..=transformer.transform(*r.end())
 					}),
 				)
 			}
 			IntViewInner::Linear { transformer, var } => RangeList::from_sorted_ranges(
-				var.get_domain(ctx)
+				var.domain(ctx)
 					.iter()
 					.rev()
 					.map(|r| transformer.transform(*r.end())..=transformer.transform(*r.start())),
 			),
-			IntViewInner::Bool { transformer, lit } => if let Some(v) = lit.get_val(ctx) {
+			IntViewInner::Bool { transformer, lit } => if let Some(v) = lit.val(ctx) {
 				let v = transformer.transform(v as IntVal);
 				v..=v
 			} else if transformer.positive_scale() {
@@ -786,10 +770,24 @@ where
 		}
 	}
 
-	fn get_lit_meaning(&self, ctx: &Ctx, lit: Self::Atom) -> Option<IntLitMeaning> {
+	fn in_domain(&self, ctx: &Ctx, val: IntVal) -> bool {
+		let (lb, ub) = self.bounds(ctx);
+		if lb <= val && val <= ub {
+			let eq_lit = self.try_lit(ctx, IntLitMeaning::Eq(val));
+			if let Some(eq_lit) = eq_lit {
+				eq_lit.val(ctx).unwrap_or(true)
+			} else {
+				true
+			}
+		} else {
+			false
+		}
+	}
+
+	fn lit_meaning(&self, ctx: &Ctx, lit: Self::Atom) -> Option<IntLitMeaning> {
 		match self.0 {
 			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				let mut meaning = iv.get_lit_meaning(ctx, lit)?;
+				let mut meaning = iv.lit_meaning(ctx, lit)?;
 				if let IntViewInner::Linear { transformer, .. } = self.0 {
 					meaning = transformer.transform_lit(meaning);
 				}
@@ -816,74 +814,37 @@ where
 		}
 	}
 
-	fn get_lower_bound(&self, ctx: &Ctx) -> IntVal {
+	fn lower_bound(&self, ctx: &Ctx) -> IntVal {
 		match self.0 {
-			IntViewInner::VarRef(var) => var.get_lower_bound(ctx),
+			IntViewInner::VarRef(var) => var.lower_bound(ctx),
 			IntViewInner::Const(c) => c,
 			IntViewInner::Linear { transformer, var } => {
 				transformer.transform(if transformer.positive_scale() {
-					var.get_lower_bound(ctx)
+					var.lower_bound(ctx)
 				} else {
-					var.get_upper_bound(ctx)
+					var.upper_bound(ctx)
 				})
 			}
 			IntViewInner::Bool { transformer, lit } => transformer
-				.transform(lit.get_val(ctx).unwrap_or(!transformer.positive_scale()) as IntVal),
+				.transform(lit.val(ctx).unwrap_or(!transformer.positive_scale()) as IntVal),
 		}
 	}
 
-	fn get_lower_bound_lit(&self, ctx: &Ctx) -> BoolView {
+	fn lower_bound_lit(&self, ctx: &Ctx) -> BoolView {
 		match self.0 {
-			IntViewInner::VarRef(var) => var.get_lower_bound_lit(ctx),
+			IntViewInner::VarRef(var) => var.lower_bound_lit(ctx),
 			IntViewInner::Linear { transformer, var } => {
 				if transformer.positive_scale() {
-					var.get_lower_bound_lit(ctx)
+					var.lower_bound_lit(ctx)
 				} else {
-					var.get_upper_bound_lit(ctx)
+					var.upper_bound_lit(ctx)
 				}
 			}
 			IntViewInner::Const(_) => BoolView(BoolViewInner::Const(true)),
 			IntViewInner::Bool { lit, transformer } => {
-				BoolView(match (lit.get_val(ctx), transformer.positive_scale()) {
+				BoolView(match (lit.val(ctx), transformer.positive_scale()) {
 					(Some(true), true) => BoolViewInner::Lit(lit),
 					(Some(false), false) => BoolViewInner::Lit(!lit),
-					_ => BoolViewInner::Const(true),
-				})
-			}
-		}
-	}
-
-	fn get_upper_bound(&self, ctx: &Ctx) -> IntVal {
-		match self.0 {
-			IntViewInner::VarRef(var) => var.get_upper_bound(ctx),
-			IntViewInner::Const(c) => c,
-			IntViewInner::Linear { transformer, var } => {
-				transformer.transform(if transformer.positive_scale() {
-					var.get_upper_bound(ctx)
-				} else {
-					var.get_lower_bound(ctx)
-				})
-			}
-			IntViewInner::Bool { transformer, lit } => transformer
-				.transform(lit.get_val(ctx).unwrap_or(transformer.positive_scale()) as IntVal),
-		}
-	}
-
-	fn get_upper_bound_lit(&self, ctx: &Ctx) -> BoolView {
-		match self.0 {
-			IntViewInner::VarRef(var) => var.get_upper_bound_lit(ctx),
-			IntViewInner::Linear { transformer, var } => {
-				if transformer.positive_scale() {
-					var.get_upper_bound_lit(ctx)
-				} else {
-					var.get_lower_bound_lit(ctx)
-				}
-			}
-			IntViewInner::Const(_) => BoolView(BoolViewInner::Const(true)),
-			IntViewInner::Bool { lit, transformer } => {
-				BoolView(match (lit.get_val(ctx), transformer.positive_scale()) {
-					(Some(false), true) => BoolViewInner::Lit(!lit),
-					(Some(true), false) => BoolViewInner::Lit(lit),
 					_ => BoolViewInner::Const(true),
 				})
 			}
@@ -927,6 +888,43 @@ where
 					_ => unreachable!(),
 				});
 				Some(if negated { !bv } else { bv })
+			}
+		}
+	}
+
+	fn upper_bound(&self, ctx: &Ctx) -> IntVal {
+		match self.0 {
+			IntViewInner::VarRef(var) => var.upper_bound(ctx),
+			IntViewInner::Const(c) => c,
+			IntViewInner::Linear { transformer, var } => {
+				transformer.transform(if transformer.positive_scale() {
+					var.upper_bound(ctx)
+				} else {
+					var.lower_bound(ctx)
+				})
+			}
+			IntViewInner::Bool { transformer, lit } => transformer
+				.transform(lit.val(ctx).unwrap_or(transformer.positive_scale()) as IntVal),
+		}
+	}
+
+	fn upper_bound_lit(&self, ctx: &Ctx) -> BoolView {
+		match self.0 {
+			IntViewInner::VarRef(var) => var.upper_bound_lit(ctx),
+			IntViewInner::Linear { transformer, var } => {
+				if transformer.positive_scale() {
+					var.upper_bound_lit(ctx)
+				} else {
+					var.lower_bound_lit(ctx)
+				}
+			}
+			IntViewInner::Const(_) => BoolView(BoolViewInner::Const(true)),
+			IntViewInner::Bool { lit, transformer } => {
+				BoolView(match (lit.val(ctx), transformer.positive_scale()) {
+					(Some(false), true) => BoolViewInner::Lit(!lit),
+					(Some(true), false) => BoolViewInner::Lit(lit),
+					_ => BoolViewInner::Const(true),
+				})
 			}
 		}
 	}
@@ -1137,8 +1135,8 @@ impl AssumptionChecker for NoAssumptions {
 }
 
 impl<Oracle> BoolInspectionActions<Solver<Oracle>> for RawLit {
-	fn get_val(&self, ctx: &Solver<Oracle>) -> Option<bool> {
-		self.get_val(&ctx.engine.borrow().state)
+	fn val(&self, ctx: &Solver<Oracle>) -> Option<bool> {
+		self.val(&ctx.engine.borrow().state)
 	}
 }
 
@@ -1259,7 +1257,7 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 					let Value::Int(val) = val.clone() else {
 						unreachable!()
 					};
-					iv.get_lit(self, IntLitMeaning::NotEq(val))
+					iv.lit(self, IntLitMeaning::NotEq(val))
 				}
 			})
 			.collect_vec();
@@ -1387,8 +1385,8 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 
 		let mut obj_curr = None;
 		let obj_bound = match goal {
-			Goal::Minimize => objective.get_lower_bound(&self),
-			Goal::Maximize => objective.get_upper_bound(&self),
+			Goal::Minimize => objective.lower_bound(&self),
+			Goal::Maximize => objective.upper_bound(&self),
 		};
 		debug!(obj_bound, "start branch and bound");
 		loop {
@@ -1408,13 +1406,14 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 					} else {
 						let bound_lit = match goal {
 							Goal::Minimize => Some(
-								objective
-									.get_lit(&mut self, IntLitMeaning::Less(obj_curr.unwrap())),
+								objective.lit(&mut self, IntLitMeaning::Less(obj_curr.unwrap())),
 							),
-							Goal::Maximize => Some(objective.get_lit(
-								&mut self,
-								IntLitMeaning::GreaterEq(obj_curr.unwrap() + 1),
-							)),
+							Goal::Maximize => {
+								Some(objective.lit(
+									&mut self,
+									IntLitMeaning::GreaterEq(obj_curr.unwrap() + 1),
+								))
+							}
 						};
 						debug!(
 							lit = i32::from({
@@ -1447,6 +1446,29 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 		}
 	}
 
+	/// Wrapper function for `all_solutions` that collects all solutions and
+	/// returns them in a vector of solution values.
+	///
+	/// WARNING: This method will add additional clauses into the solver to
+	/// prevent the same solution from being generated twice. This will make
+	/// repeated use of the Solver object impossible. Note that you can clone
+	/// the Solver object before calling this method to work around this
+	/// limitation.
+	pub fn collect_all_solutions(
+		self,
+		vars: &[View],
+	) -> (SolveResult, SearchStatistics, Vec<Vec<Value>>) {
+		let mut solutions = Vec::new();
+		let (status, stats) = self.all_solutions(vars, |sol| {
+			let mut sol_vec = Vec::with_capacity(vars.len());
+			for v in vars {
+				sol_vec.push(sol(*v));
+			}
+			solutions.push(sol_vec);
+		});
+		(status, stats, solutions)
+	}
+
 	/// Create a new [`Solver`] instance from a [`FlatZinc`] instance.
 	pub fn from_fzn<S, MapTy: FromIterator<(S, View)>>(
 		fzn: &FlatZinc<S>,
@@ -1464,29 +1486,6 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 			.map(|(k, v)| (k, remap.get(&mut slv, &v)))
 			.collect();
 		Ok((slv, map, fzn_stats))
-	}
-
-	/// Wrapper function for `all_solutions` that collects all solutions and
-	/// returns them in a vector of solution values.
-	///
-	/// WARNING: This method will add additional clauses into the solver to
-	/// prevent the same solution from being generated twice. This will make
-	/// repeated use of the Solver object impossible. Note that you can clone
-	/// the Solver object before calling this method to work around this
-	/// limitation.
-	pub fn get_all_solutions(
-		self,
-		vars: &[View],
-	) -> (SolveResult, SearchStatistics, Vec<Vec<Value>>) {
-		let mut solutions = Vec::new();
-		let (status, stats) = self.all_solutions(vars, |sol| {
-			let mut sol_vec = Vec::with_capacity(vars.len());
-			for v in vars {
-				sol_vec.push(sol(*v));
-			}
-			solutions.push(sol_vec);
-		});
-		(status, stats, solutions)
 	}
 
 	/// Access the initialization statistics of the [`Solver`] object.
@@ -1564,12 +1563,12 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 		engine: Ref<'a, Engine>,
 		sol: impl SatValuation + 'a,
 	) -> impl Valuation + 'a {
-		let get_int_val = |engine: Ref<Engine>, iv: IntVarRef| {
+		let int_val = |engine: Ref<Engine>, iv: IntVarRef| {
 			let var_def = &engine.state.int_vars[iv];
-			let val = var_def.get_lower_bound(&engine.state.trail);
+			let val = var_def.lower_bound(&engine.state.trail);
 			debug_assert!(
 				matches!(var_def.order_encoding, OrderStorage::Lazy(_))
-					|| val == var_def.get_upper_bound(&engine.state.trail)
+					|| val == var_def.upper_bound(&engine.state.trail)
 			);
 			val
 		};
@@ -1579,12 +1578,12 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 				BoolViewInner::Const(b) => b,
 			}),
 			View::Int(var) => Value::Int(match var.0 {
-				IntViewInner::VarRef(iv) => get_int_val(Ref::clone(&engine), iv),
+				IntViewInner::VarRef(iv) => int_val(Ref::clone(&engine), iv),
 				IntViewInner::Const(i) => i,
 				IntViewInner::Linear {
 					transformer: transform,
 					var,
-				} => transform.transform(get_int_val(Ref::clone(&engine), var)),
+				} => transform.transform(int_val(Ref::clone(&engine), var)),
 				IntViewInner::Bool { transformer, lit } => {
 					transformer.transform(sol.value(lit) as IntVal)
 				}
@@ -1706,7 +1705,7 @@ impl Clone for Solver<Cadical> {
 }
 
 impl<Oracle: ExternalPropagation> DecisionActions for Solver<Oracle> {
-	fn get_num_conflicts(&self) -> u64 {
+	fn num_conflicts(&self) -> u64 {
 		self.engine.borrow().state.statistics.conflicts
 	}
 }
@@ -1728,12 +1727,12 @@ impl<Oracle: ExternalPropagation> InitializationActions for Solver<Oracle> {
 }
 
 impl<Oracle> TrailingActions for Solver<Oracle> {
-	fn get_trailed_int(&self, x: TrailedInt) -> IntVal {
-		self.engine.borrow().state.get_trailed_int(x)
-	}
-
 	fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal {
 		self.engine.borrow_mut().state.set_trailed_int(x, v)
+	}
+
+	fn trailed_int(&self, x: TrailedInt) -> IntVal {
+		self.engine.borrow().state.trailed_int(x)
 	}
 }
 

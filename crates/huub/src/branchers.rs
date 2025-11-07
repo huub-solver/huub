@@ -132,7 +132,7 @@ where
 	RawLit: BoolInspectionActions<E>,
 {
 	fn decide(&mut self, ctx: &mut E) -> Decision {
-		let begin = ctx.get_trailed_int(self.next) as usize;
+		let begin = ctx.trailed_int(self.next) as usize;
 
 		// return if all variables have been assigned
 		if begin == self.vars.len() {
@@ -151,7 +151,7 @@ where
 
 		let mut loc = None;
 		for (i, &var) in self.vars.iter().enumerate().skip(begin) {
-			if var.get_val(ctx).is_none() {
+			if var.val(ctx).is_none() {
 				loc = Some(i);
 				break;
 			}
@@ -212,7 +212,7 @@ where
 	IntView: IntDecisionActions<D, Atom = BoolView>,
 {
 	fn decide(&mut self, actions: &mut D) -> Decision {
-		let begin = actions.get_trailed_int(self.next) as usize;
+		let begin = actions.trailed_int(self.next) as usize;
 
 		// return if all variables have been assigned
 		if begin == self.vars.len() {
@@ -221,12 +221,12 @@ where
 
 		let score = |var: IntView| match self.var_sel {
 			VariableSelection::AntiFirstFail | VariableSelection::FirstFail => {
-				let (lb, ub) = var.get_bounds(actions);
+				let (lb, ub) = var.bounds(actions);
 				ub - lb
 			}
 			VariableSelection::InputOrder => 0,
-			VariableSelection::Largest => var.get_upper_bound(actions),
-			VariableSelection::Smallest => var.get_lower_bound(actions),
+			VariableSelection::Largest => var.upper_bound(actions),
+			VariableSelection::Smallest => var.lower_bound(actions),
 		};
 
 		let is_better = |incumbent_score, new_score| match self.var_sel {
@@ -242,7 +242,7 @@ where
 		let mut first_unfixed = begin;
 		let mut selection = None;
 		for i in begin..self.vars.len() {
-			if self.vars[i].get_lower_bound(actions) == self.vars[i].get_upper_bound(actions) {
+			if self.vars[i].lower_bound(actions) == self.vars[i].upper_bound(actions) {
 				// move the unfixed variable to the front
 				let unfixed_var = self.vars[first_unfixed];
 				let fixed_var = self.vars[i];
@@ -271,21 +271,19 @@ where
 		actions.set_trailed_int(self.next, first_unfixed as i64);
 
 		// select the next value to branch on based on the value selection strategy
-		let view = next_var.get_lit(
+		let view = next_var.lit(
 			actions,
 			match self.val_sel {
 				ValueSelection::IndomainMin => {
-					IntLitMeaning::Less(next_var.get_lower_bound(actions) + 1)
+					IntLitMeaning::Less(next_var.lower_bound(actions) + 1)
 				}
 				ValueSelection::IndomainMax => {
-					IntLitMeaning::GreaterEq(next_var.get_upper_bound(actions))
+					IntLitMeaning::GreaterEq(next_var.upper_bound(actions))
 				}
 				ValueSelection::OutdomainMin => {
-					IntLitMeaning::GreaterEq(next_var.get_lower_bound(actions) + 1)
+					IntLitMeaning::GreaterEq(next_var.lower_bound(actions) + 1)
 				}
-				ValueSelection::OutdomainMax => {
-					IntLitMeaning::Less(next_var.get_upper_bound(actions))
-				}
+				ValueSelection::OutdomainMax => IntLitMeaning::Less(next_var.upper_bound(actions)),
 			},
 		);
 
@@ -321,7 +319,7 @@ impl WarmStartBrancher {
 			filtered_decision.reverse();
 			solver.push_brancher(Box::new(WarmStartBrancher {
 				decisions: filtered_decision,
-				conflicts: solver.get_num_conflicts(),
+				conflicts: solver.num_conflicts(),
 			}));
 		}
 	}
@@ -333,11 +331,11 @@ where
 	RawLit: BoolInspectionActions<Context>,
 {
 	fn decide(&mut self, ctx: &mut Context) -> Decision {
-		if ctx.get_num_conflicts() > self.conflicts {
+		if ctx.num_conflicts() > self.conflicts {
 			return Decision::Consumed;
 		}
 		while let Some(lit) = self.decisions.pop() {
-			match lit.get_val(ctx) {
+			match lit.val(ctx) {
 				Some(true) => {}
 				Some(false) => return Decision::Consumed,
 				None => return Decision::Select(lit),

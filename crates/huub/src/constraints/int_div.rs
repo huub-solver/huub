@@ -55,17 +55,17 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 		I5: SolverIntView<E>,
 		I6: SolverIntView<E>,
 	{
-		let (num_lb, num_ub) = numerator.get_bounds(ctx);
-		let (denom_lb, denom_ub) = denominator.get_bounds(ctx);
-		let (res_lb, res_ub) = result.get_bounds(ctx);
+		let (num_lb, num_ub) = numerator.bounds(ctx);
+		let (denom_lb, denom_ub) = denominator.bounds(ctx);
+		let (res_lb, res_ub) = result.bounds(ctx);
 
 		let new_res_lb = num_lb / denom_ub;
 		if new_res_lb > res_lb {
 			result.set_lower_bound(ctx, new_res_lb, |ctx: &mut E::PropagationCtx<'_>| {
 				[
-					numerator.get_lower_bound_lit(ctx),
-					denominator.get_lit(ctx, IntLitMeaning::GreaterEq(1)),
-					denominator.get_upper_bound_lit(ctx),
+					numerator.lower_bound_lit(ctx),
+					denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
+					denominator.upper_bound_lit(ctx),
 				]
 			})?;
 		}
@@ -74,8 +74,8 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 		if new_num_lb > num_lb {
 			numerator.set_lower_bound(ctx, new_num_lb, |ctx: &mut E::PropagationCtx<'_>| {
 				[
-					denominator.get_lower_bound_lit(ctx),
-					result.get_lower_bound_lit(ctx),
+					denominator.lower_bound_lit(ctx),
+					result.lower_bound_lit(ctx),
 				]
 			})?;
 		}
@@ -88,10 +88,10 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 					new_denom_ub,
 					|ctx: &mut E::PropagationCtx<'_>| {
 						[
-							numerator.get_upper_bound_lit(ctx),
-							numerator.get_lit(ctx, IntLitMeaning::GreaterEq(0)),
-							result.get_lower_bound_lit(ctx),
-							denominator.get_lit(ctx, IntLitMeaning::GreaterEq(1)),
+							numerator.upper_bound_lit(ctx),
+							numerator.lit(ctx, IntLitMeaning::GreaterEq(0)),
+							result.lower_bound_lit(ctx),
+							denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
 						]
 					},
 				)?;
@@ -106,10 +106,10 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 					new_denom_lb,
 					|ctx: &mut E::PropagationCtx<'_>| {
 						[
-							numerator.get_lower_bound_lit(ctx),
-							result.get_upper_bound_lit(ctx),
-							result.get_lit(ctx, IntLitMeaning::GreaterEq(0)),
-							denominator.get_lit(ctx, IntLitMeaning::GreaterEq(1)),
+							numerator.lower_bound_lit(ctx),
+							result.upper_bound_lit(ctx),
+							result.lit(ctx, IntLitMeaning::GreaterEq(0)),
+							denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
 						]
 					},
 				)?;
@@ -133,17 +133,17 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 		I5: SolverIntView<E>,
 		I6: SolverIntView<E>,
 	{
-		let num_ub = numerator.get_upper_bound(ctx);
-		let (denom_lb, denom_ub) = denominator.get_bounds(ctx);
-		let res_ub = result.get_upper_bound(ctx);
+		let num_ub = numerator.upper_bound(ctx);
+		let (denom_lb, denom_ub) = denominator.bounds(ctx);
+		let res_ub = result.upper_bound(ctx);
 
 		if denom_lb != 0 {
 			let new_res_ub = num_ub / denom_lb;
 			if new_res_ub < res_ub {
 				result.set_upper_bound(ctx, new_res_ub, |ctx: &mut E::PropagationCtx<'_>| {
 					[
-						numerator.get_upper_bound_lit(ctx),
-						denominator.get_lower_bound_lit(ctx),
+						numerator.upper_bound_lit(ctx),
+						denominator.lower_bound_lit(ctx),
 					]
 				})?;
 			}
@@ -153,9 +153,9 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 		if new_num_ub < num_ub {
 			numerator.set_upper_bound(ctx, new_num_ub, |ctx: &mut E::PropagationCtx<'_>| {
 				[
-					denominator.get_lit(ctx, IntLitMeaning::GreaterEq(1)),
-					denominator.get_upper_bound_lit(ctx),
-					result.get_upper_bound_lit(ctx),
+					denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
+					denominator.upper_bound_lit(ctx),
+					result.upper_bound_lit(ctx),
 				]
 			})?;
 		}
@@ -177,16 +177,16 @@ impl IntDivBounds<IntView, IntView, IntView> {
 	{
 		// Ensure the consistency of the signs of the three variables using the
 		// following clauses.
-		if numerator.get_lower_bound(solver) < 0
-			|| denominator.get_lower_bound(solver) < 0
-			|| result.get_lower_bound(solver) < 0
+		if numerator.lower_bound(solver) < 0
+			|| denominator.lower_bound(solver) < 0
+			|| result.lower_bound(solver) < 0
 		{
-			let num_pos = numerator.get_lit(solver, IntLitMeaning::GreaterEq(0));
-			let num_neg = numerator.get_lit(solver, IntLitMeaning::Less(1));
-			let denom_pos = denominator.get_lit(solver, IntLitMeaning::GreaterEq(0));
+			let num_pos = numerator.lit(solver, IntLitMeaning::GreaterEq(0));
+			let num_neg = numerator.lit(solver, IntLitMeaning::Less(1));
+			let denom_pos = denominator.lit(solver, IntLitMeaning::GreaterEq(0));
 			let denom_neg = !denom_pos;
-			let res_pos = result.get_lit(solver, IntLitMeaning::GreaterEq(0));
-			let res_neg = result.get_lit(solver, IntLitMeaning::Less(1));
+			let res_pos = result.lit(solver, IntLitMeaning::GreaterEq(0));
+			let res_neg = result.lit(solver, IntLitMeaning::Less(1));
 
 			// num >= 0 /\ denom > 0 => res >= 0
 			solver.add_clause([!num_pos, !denom_pos, res_pos])?;
@@ -224,12 +224,12 @@ where
 		self.denominator.set_not_eq(ctx, 0, [])?;
 
 		// Channel the signs of the decision variables
-		let num_pos = self.numerator.get_lit(ctx, IntLitMeaning::GreaterEq(0));
-		let num_neg = self.numerator.get_lit(ctx, IntLitMeaning::Less(1));
-		let denom_pos = self.denominator.get_lit(ctx, IntLitMeaning::GreaterEq(0));
+		let num_pos = self.numerator.lit(ctx, IntLitMeaning::GreaterEq(0));
+		let num_neg = self.numerator.lit(ctx, IntLitMeaning::Less(1));
+		let denom_pos = self.denominator.lit(ctx, IntLitMeaning::GreaterEq(0));
 		let denom_neg = !denom_pos;
-		let res_pos = self.result.get_lit(ctx, IntLitMeaning::GreaterEq(0));
-		let res_neg = self.result.get_lit(ctx, IntLitMeaning::Less(1));
+		let res_pos = self.result.lit(ctx, IntLitMeaning::GreaterEq(0));
+		let res_neg = self.result.lit(ctx, IntLitMeaning::Less(1));
 
 		// num >= 0 /\ denom > 0 => res >= 0
 		<BoolFormula as Propagator<E>>::propagate(
@@ -254,9 +254,9 @@ where
 
 		self.propagate(ctx)?;
 
-		if self.numerator.get_val(ctx).is_some()
-			&& self.denominator.get_val(ctx).is_some()
-			&& self.result.get_val(ctx).is_some()
+		if self.numerator.val(ctx).is_some()
+			&& self.denominator.val(ctx).is_some()
+			&& self.result.val(ctx).is_some()
 		{
 			return Ok(SimplificationStatus::Subsumed);
 		}
@@ -265,9 +265,9 @@ where
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let numerator = slv.get_solver_int(self.numerator);
-		let denominator = slv.get_solver_int(self.denominator);
-		let result = slv.get_solver_int(self.result);
+		let numerator = slv.solver_int(self.numerator);
+		let denominator = slv.solver_int(self.denominator);
+		let result = slv.solver_int(self.result);
 		IntDivBounds::new_in(slv, numerator, denominator, result).unwrap();
 		Ok(())
 	}
@@ -293,7 +293,7 @@ where
 
 	#[tracing::instrument(name = "int_div", level = "trace", skip(self, ctx))]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
-		let (denom_lb, denom_ub) = self.denominator.get_bounds(ctx);
+		let (denom_lb, denom_ub) = self.denominator.bounds(ctx);
 		if denom_lb < 0 && denom_ub > 0 {
 			// Wait until the sign of the denominator is known
 			return Ok(());
@@ -313,24 +313,24 @@ where
 
 		// If both the upper bound of the numerator and the upper bound of the
 		// right-hand side are positive, then propagate their upper bounds directly.
-		if numerator.get_upper_bound(ctx) >= 0 && self.result.get_upper_bound(ctx) >= 0 {
+		if numerator.upper_bound(ctx) >= 0 && self.result.upper_bound(ctx) >= 0 {
 			Self::propagate_upper_bounds(ctx, &numerator, &denominator, &self.result)?;
 		}
 		// If their upper bounds are negative, then propagate the upper bounds of
 		// the negated versions.
-		if neg_num.get_upper_bound(ctx) >= 0 && neg_res.get_upper_bound(ctx) >= 0 {
+		if neg_num.upper_bound(ctx) >= 0 && neg_res.upper_bound(ctx) >= 0 {
 			Self::propagate_upper_bounds(ctx, &neg_num, &denominator, &neg_res)?;
 		}
 
 		// If the numerator and the results are known positive, then we can
 		// propagate the remainder of the bounds under the assumption all values
 		// must be positive.
-		if numerator.get_lower_bound(ctx) >= 0 && self.result.get_lower_bound(ctx) >= 0 {
+		if numerator.lower_bound(ctx) >= 0 && self.result.lower_bound(ctx) >= 0 {
 			Self::propagate_positive_domains(ctx, &numerator, &denominator, &self.result)?;
 		}
 		// If the domain of the numerator and the result are known negative, then
 		// propagate their using their negations.
-		if neg_num.get_lower_bound(ctx) >= 0 && neg_res.get_lower_bound(ctx) >= 0 {
+		if neg_num.lower_bound(ctx) >= 0 && neg_res.lower_bound(ctx) >= 0 {
 			Self::propagate_positive_domains(ctx, &neg_num, &denominator, &neg_res)?;
 		}
 

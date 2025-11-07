@@ -143,7 +143,7 @@ where
 		// Note that one variable might be fixed and not the other one. Gaps in domains
 		// or linear view might require multiple rounds of propagation to reach a
 		// fixpoint.
-		if self.vars.iter().all(|v| v.get_val(ctx).is_some()) {
+		if self.vars.iter().all(|v| v.val(ctx).is_some()) {
 			Ok(SimplificationStatus::Subsumed)
 		} else {
 			Ok(SimplificationStatus::NoFixpoint)
@@ -178,25 +178,25 @@ where
 		// Channel bounds of self.vars[0] to self.vars[1]
 		self.vars[0].set_lower_bound(
 			ctx,
-			self.vars[1].get_lower_bound(ctx),
-			[self.vars[1].get_lower_bound_lit(ctx)],
+			self.vars[1].lower_bound(ctx),
+			[self.vars[1].lower_bound_lit(ctx)],
 		)?;
 		self.vars[0].set_upper_bound(
 			ctx,
-			self.vars[1].get_upper_bound(ctx),
-			[self.vars[1].get_upper_bound_lit(ctx)],
+			self.vars[1].upper_bound(ctx),
+			[self.vars[1].upper_bound_lit(ctx)],
 		)?;
 
 		// Channel bounds of self.vars[1] to self.vars[0]
 		self.vars[1].set_lower_bound(
 			ctx,
-			self.vars[0].get_lower_bound(ctx),
-			[self.vars[0].get_lower_bound_lit(ctx)],
+			self.vars[0].lower_bound(ctx),
+			[self.vars[0].lower_bound_lit(ctx)],
 		)?;
 		self.vars[1].set_upper_bound(
 			ctx,
-			self.vars[0].get_upper_bound(ctx),
-			[self.vars[0].get_upper_bound_lit(ctx)],
+			self.vars[0].upper_bound(ctx),
+			[self.vars[0].upper_bound_lit(ctx)],
 		)?;
 		Ok(())
 	}
@@ -270,7 +270,7 @@ where
 		// If the reification of the constraint is known, simplify to non-reified
 		// version
 		if let Some(Reification::ImpliedBy(r) | Reification::ReifiedBy(r)) = self.reif {
-			match r.get_val(ctx) {
+			match r.val(ctx) {
 				Some(true) => {
 					let mut lin = self.clone();
 					lin.reif = None;
@@ -291,12 +291,10 @@ where
 
 		// Filter known values from the terms
 		let (vals, terms): (Vec<_>, _) =
-			self.terms
-				.iter()
-				.partition_map(|&var| match var.get_val(ctx) {
-					Some(val) => Either::Left(val),
-					None => Either::Right(var),
-				});
+			self.terms.iter().partition_map(|&var| match var.val(ctx) {
+				Some(val) => Either::Left(val),
+				None => Either::Right(var),
+			});
 		self.terms = terms;
 		self.rhs -= vals.iter().sum::<IntVal>();
 
@@ -333,16 +331,8 @@ where
 		}
 
 		// Collect variable bounds and create their sums
-		let lb = self
-			.terms
-			.iter()
-			.map(|v| v.get_lower_bound(ctx))
-			.collect_vec();
-		let ub = self
-			.terms
-			.iter()
-			.map(|v| v.get_upper_bound(ctx))
-			.collect_vec();
+		let lb = self.terms.iter().map(|v| v.lower_bound(ctx)).collect_vec();
+		let ub = self.terms.iter().map(|v| v.upper_bound(ctx)).collect_vec();
 
 		let lb_sum: IntVal = lb.iter().sum();
 		let ub_sum: IntVal = ub.iter().sum();
@@ -367,10 +357,10 @@ where
 			self.terms
 				.iter()
 				.map(|v| match self.operator {
-					LinOperator::Equal if lb_sum > self.rhs => v.get_lower_bound_lit(ctx),
-					LinOperator::Equal if ub_sum < self.rhs => v.get_upper_bound_lit(ctx),
-					LinOperator::LessEq => v.get_lower_bound_lit(ctx),
-					LinOperator::NotEqual => v.get_val_lit(ctx).unwrap(),
+					LinOperator::Equal if lb_sum > self.rhs => v.lower_bound_lit(ctx),
+					LinOperator::Equal if ub_sum < self.rhs => v.upper_bound_lit(ctx),
+					LinOperator::LessEq => v.lower_bound_lit(ctx),
+					LinOperator::NotEqual => v.val_lit(ctx).unwrap(),
 					_ => unreachable!(),
 				})
 				.collect_vec()
@@ -390,14 +380,14 @@ where
 							.iter()
 							.flat_map(|v| match self.operator {
 								LinOperator::NotEqual if lb_sum > self.rhs => {
-									vec![v.get_lower_bound_lit(ctx)]
+									vec![v.lower_bound_lit(ctx)]
 								}
 								LinOperator::NotEqual if ub_sum < self.rhs => {
-									vec![v.get_upper_bound_lit(ctx)]
+									vec![v.upper_bound_lit(ctx)]
 								}
-								LinOperator::LessEq => vec![v.get_upper_bound_lit(ctx)],
+								LinOperator::LessEq => vec![v.upper_bound_lit(ctx)],
 								LinOperator::NotEqual => {
-									vec![v.get_lower_bound_lit(ctx), v.get_upper_bound_lit(ctx)]
+									vec![v.lower_bound_lit(ctx), v.upper_bound_lit(ctx)]
 								}
 								_ => unreachable!(),
 							})
@@ -430,7 +420,7 @@ where
 					.iter()
 					.enumerate()
 					.filter(|&(j, _)| j != i)
-					.map(|(_, w)| w.get_lower_bound_lit(ctx))
+					.map(|(_, w)| w.lower_bound_lit(ctx))
 					.collect_vec()
 			};
 			if let Some(Reification::ReifiedBy(r) | Reification::ImpliedBy(r)) = self.reif {
@@ -460,7 +450,7 @@ where
 						.iter()
 						.enumerate()
 						.filter(|&(j, _)| j != i)
-						.map(|(_, &w)| w.get_upper_bound_lit(ctx))
+						.map(|(_, &w)| w.upper_bound_lit(ctx))
 						.collect_vec()
 				};
 				if let Some(Reification::ReifiedBy(r) | Reification::ImpliedBy(r)) = self.reif {
@@ -479,13 +469,9 @@ where
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		use Reification::*;
 
-		let terms = self
-			.terms
-			.iter()
-			.map(|&v| slv.get_solver_int(v))
-			.collect_vec();
+		let terms = self.terms.iter().map(|&v| slv.solver_int(v)).collect_vec();
 		let r = self.reif.as_ref().map(|&r| {
-			slv.get_solver_bool(match r {
+			slv.solver_bool(match r {
 				ImpliedBy(r) | ReifiedBy(r) => r,
 			})
 		});
@@ -631,7 +617,7 @@ impl IntLinearLessEqBounds<IntView> {
 		let vars: Vec<IntView> = vars
 			.into_iter()
 			.filter(|v| {
-				if let Some(c) = v.get_val(solver) {
+				if let Some(c) = v.val(solver) {
 					max -= c;
 					false
 				} else {
@@ -669,7 +655,7 @@ where
 				if j == i {
 					return None;
 				}
-				Some(v.get_lower_bound_lit(ctx))
+				Some(v.lower_bound_lit(ctx))
 			})
 			.collect();
 		if let Some(r) = self.reification.get() {
@@ -693,7 +679,7 @@ where
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// If the reified variable is false, skip propagation
 		if let Some(r) = self.reification.get() {
-			if !r.get_val(ctx).unwrap_or(true) {
+			if !r.val(ctx).unwrap_or(true) {
 				return Ok(());
 			}
 		}
@@ -703,7 +689,7 @@ where
 		let sum = self
 			.terms
 			.iter()
-			.map(|v| v.get_lower_bound(ctx))
+			.map(|v| v.lower_bound(ctx))
 			.fold(self.max, |sum, val| sum - val);
 
 		// propagate the reified variable if the sum of lower bounds is greater than the
@@ -713,13 +699,13 @@ where
 				r.set_val(ctx, false, |ctx: &mut E::PropagationCtx<'_>| {
 					self.terms
 						.iter()
-						.map(|v| v.get_lower_bound_lit(ctx))
+						.map(|v| v.lower_bound_lit(ctx))
 						.collect_vec()
 				})?;
 			}
 			// skip the remaining propagation if the reified variable is not assigned to
 			// true
-			if !r.get_val(ctx).unwrap_or(false) {
+			if !r.val(ctx).unwrap_or(false) {
 				return Ok(());
 			}
 		}
@@ -727,7 +713,7 @@ where
 		// propagate the upper bound of the variables
 		for (j, v) in self.terms.iter().enumerate() {
 			let reason = ctx.deferred_reason(j as u64);
-			let ub = sum + v.get_lower_bound(ctx);
+			let ub = sum + v.lower_bound(ctx);
 			v.set_upper_bound(ctx, ub, reason)?;
 		}
 		Ok(())
@@ -756,7 +742,7 @@ impl IntLinearLessEqImpBounds<IntView, RawLit> {
 		let vars: Vec<IntView> = vars
 			.into_iter()
 			.filter(|v| {
-				if let Some(c) = v.get_val(solver) {
+				if let Some(c) = v.val(solver) {
 					max -= c;
 					false
 				} else {
@@ -796,7 +782,7 @@ impl IntLinearNotEqImpValue<IntView, RawLit> {
 		let vars: Vec<IntView> = vars
 			.into_iter()
 			.filter(|&v| {
-				if let Some(c) = v.get_val(solver) {
+				if let Some(c) = v.val(solver) {
 					violation -= c;
 					false
 				} else {
@@ -826,7 +812,7 @@ impl IntLinearNotEqValue<IntView> {
 		let vars: Vec<IntView> = vars
 			.into_iter()
 			.filter(|&v| {
-				if let Some(c) = v.get_val(solver) {
+				if let Some(c) = v.val(solver) {
 					violation -= c;
 					false
 				} else {
@@ -852,7 +838,7 @@ impl<const R: usize, IV, BV> IntLinearNotEqValueImpl<R, IV, BV> {
 	where
 		Ctx: TrailingActions,
 	{
-		let num_fixed = ctx.get_trailed_int(self.num_fixed) + 1;
+		let num_fixed = ctx.trailed_int(self.num_fixed) + 1;
 		ctx.set_trailed_int(self.num_fixed, num_fixed);
 		num_fixed == (self.terms.len() + R - 1) as i64
 	}
@@ -872,7 +858,7 @@ impl<const R: usize, IV, BV> IntLinearNotEqValueImpl<R, IV, BV> {
 				.enumerate()
 				.filter_map(|(i, v)| {
 					if data != i {
-						Some(v.get_val_lit(ctx).unwrap())
+						Some(v.val_lit(ctx).unwrap())
 					} else {
 						None
 					}
@@ -898,7 +884,7 @@ where
 	fn advise_of_bool_change(&mut self, ctx: &mut E::NotificationCtx<'_>, _data: u64) -> bool {
 		debug_assert!(self.reification.get().is_some());
 		debug_assert_eq!(_data, self.terms.len() as u64);
-		debug_assert!(self.reification.get().unwrap().get_val(ctx).is_some());
+		debug_assert!(self.reification.get().unwrap().val(ctx).is_some());
 
 		self.increment_num_fixed(ctx)
 	}
@@ -909,7 +895,7 @@ where
 		_data: u64,
 		_event: IntEvent,
 	) -> bool {
-		debug_assert!(self.terms[_data as usize].get_val(ctx).is_some());
+		debug_assert!(self.terms[_data as usize].val(ctx).is_some());
 		debug_assert_eq!(_event, IntEvent::Fixed);
 		self.increment_num_fixed(ctx)
 	}
@@ -926,7 +912,7 @@ where
 	#[tracing::instrument(name = "int_lin_ne", level = "trace", skip(self, ctx))]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		let (r, r_fixed): (E::Atom, _) = if let Some(r) = self.reification.get() {
-			match r.get_val(ctx) {
+			match r.val(ctx) {
 				Some(false) => return Ok(()),
 				Some(true) => (r.clone().into(), true),
 				None => (r.clone().into(), false),
@@ -937,7 +923,7 @@ where
 		let mut sum = 0;
 		let mut unfixed = None;
 		for (i, v) in self.terms.iter().enumerate() {
-			if let Some(val) = v.get_val(ctx) {
+			if let Some(val) = v.val(ctx) {
 				sum += val;
 			} else if unfixed.is_some() {
 				debug_assert!(false, "propagator shouldn't have been scheduled");

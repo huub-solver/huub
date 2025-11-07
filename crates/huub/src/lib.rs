@@ -513,7 +513,7 @@ impl BoolDecision {
 		// If the current Lit is a integer view, check whether it is already fixed.
 		match result.0 {
 			IntEq(iv, val) => {
-				let (lb, ub) = IntDecision(IntDecisionInner::Var(iv)).get_bounds(model);
+				let (lb, ub) = IntDecision(IntDecisionInner::Var(iv)).bounds(model);
 				if val < lb || val > ub {
 					return BoolDecision(Const(false));
 				} else if val == lb && val == ub {
@@ -521,7 +521,7 @@ impl BoolDecision {
 				}
 			}
 			IntGreaterEq(iv, val) => {
-				let (lb, ub) = IntDecision(IntDecisionInner::Var(iv)).get_bounds(model);
+				let (lb, ub) = IntDecision(IntDecisionInner::Var(iv)).bounds(model);
 				if lb >= val {
 					return BoolDecision(Const(true));
 				} else if ub < val {
@@ -529,7 +529,7 @@ impl BoolDecision {
 				}
 			}
 			IntLess(iv, val) => {
-				let (lb, ub) = IntDecision(IntDecisionInner::Var(iv)).get_bounds(model);
+				let (lb, ub) = IntDecision(IntDecisionInner::Var(iv)).bounds(model);
 				if ub < val {
 					return BoolDecision(Const(true));
 				} else if lb >= val {
@@ -537,7 +537,7 @@ impl BoolDecision {
 				}
 			}
 			IntNotEq(iv, val) => {
-				let (lb, ub) = IntDecision(IntDecisionInner::Var(iv)).get_bounds(model);
+				let (lb, ub) = IntDecision(IntDecisionInner::Var(iv)).bounds(model);
 				if val < lb || val > ub {
 					return BoolDecision(Const(true));
 				} else if val == lb && val == ub {
@@ -560,7 +560,7 @@ impl Add<IntVal> for BoolDecision {
 }
 
 impl BoolInspectionActions<Model> for BoolDecision {
-	fn get_val(&self, ctx: &Model) -> Option<bool> {
+	fn val(&self, ctx: &Model) -> Option<bool> {
 		use BoolDecisionInner::*;
 
 		let b = self.resolve_alias(ctx);
@@ -572,8 +572,8 @@ impl BoolInspectionActions<Model> for BoolDecision {
 }
 
 impl BoolInspectionActions<ModelPostingContext<'_>> for BoolDecision {
-	fn get_val(&self, ctx: &ModelPostingContext<'_>) -> Option<bool> {
-		self.get_val(ctx.model)
+	fn val(&self, ctx: &ModelPostingContext<'_>) -> Option<bool> {
+		self.val(ctx.model)
 	}
 }
 
@@ -1058,18 +1058,18 @@ impl From<i64> for IntDecision {
 }
 
 impl IntDecisionActions<Model> for IntDecision {
-	fn get_lit(&self, ctx: &mut Model, meaning: IntLitMeaning) -> Self::Atom {
+	fn lit(&self, ctx: &mut Model, meaning: IntLitMeaning) -> Self::Atom {
 		IntInspectionActions::try_lit(self, ctx, meaning).unwrap()
 	}
 
-	fn get_val_lit(&self, ctx: &mut Model) -> Option<Self::Atom> {
-		let val = self.get_val(ctx)?;
+	fn val_lit(&self, ctx: &mut Model) -> Option<Self::Atom> {
+		let val = self.val(ctx)?;
 		Some(Self::eq(self, val))
 	}
 }
 
 impl IntExplanationActions<Model> for IntDecision {
-	fn get_lit_relaxed(&self, ctx: &Model, meaning: IntLitMeaning) -> (Self::Atom, IntLitMeaning) {
+	fn lit_relaxed(&self, ctx: &Model, meaning: IntLitMeaning) -> (Self::Atom, IntLitMeaning) {
 		(self.try_lit(ctx, meaning).unwrap(), meaning)
 	}
 }
@@ -1077,37 +1077,7 @@ impl IntExplanationActions<Model> for IntDecision {
 impl IntInspectionActions<Model> for IntDecision {
 	type Atom = <Model as ReasoningEngine>::Atom;
 
-	fn check_in_domain(&self, ctx: &Model, val: IntVal) -> bool {
-		use IntDecisionInner::*;
-
-		let var = self.resolve_alias(ctx);
-		match var.0 {
-			Var(v) => {
-				let Domain::Domain(dom) = &ctx.int_vars[v].domain else {
-					unreachable!()
-				};
-				dom.contains(&val)
-			}
-			Const(v) => v == val,
-			Linear(t, v) => match t.rev_transform_lit(IntLitMeaning::Eq(val)) {
-				Ok(IntLitMeaning::Eq(val)) => {
-					let Domain::Domain(dom) = &ctx.int_vars[v].domain else {
-						unreachable!()
-					};
-					dom.contains(&val)
-				}
-				Err(false) => false,
-				_ => unreachable!(),
-			},
-			Bool(t, _) => match t.rev_transform_lit(IntLitMeaning::Eq(val)) {
-				Ok(IntLitMeaning::Eq(val)) => val == 0 || val == 1,
-				Err(false) => false,
-				_ => unreachable!(),
-			},
-		}
-	}
-
-	fn get_domain(&self, ctx: &Model) -> IntSetVal {
+	fn domain(&self, ctx: &Model) -> IntSetVal {
 		let var = self.resolve_alias(ctx);
 		match var.0 {
 			IntDecisionInner::Var(v) => {
@@ -1143,7 +1113,37 @@ impl IntInspectionActions<Model> for IntDecision {
 		}
 	}
 
-	fn get_lit_meaning(&self, _ctx: &Model, lit: Self::Atom) -> Option<IntLitMeaning> {
+	fn in_domain(&self, ctx: &Model, val: IntVal) -> bool {
+		use IntDecisionInner::*;
+
+		let var = self.resolve_alias(ctx);
+		match var.0 {
+			Var(v) => {
+				let Domain::Domain(dom) = &ctx.int_vars[v].domain else {
+					unreachable!()
+				};
+				dom.contains(&val)
+			}
+			Const(v) => v == val,
+			Linear(t, v) => match t.rev_transform_lit(IntLitMeaning::Eq(val)) {
+				Ok(IntLitMeaning::Eq(val)) => {
+					let Domain::Domain(dom) = &ctx.int_vars[v].domain else {
+						unreachable!()
+					};
+					dom.contains(&val)
+				}
+				Err(false) => false,
+				_ => unreachable!(),
+			},
+			Bool(t, _) => match t.rev_transform_lit(IntLitMeaning::Eq(val)) {
+				Ok(IntLitMeaning::Eq(val)) => val == 0 || val == 1,
+				Err(false) => false,
+				_ => unreachable!(),
+			},
+		}
+	}
+
+	fn lit_meaning(&self, _ctx: &Model, lit: Self::Atom) -> Option<IntLitMeaning> {
 		const BOOL_DEF_MEANING: IntLitMeaning = IntLitMeaning::GreaterEq(1);
 
 		match self.0 {
@@ -1158,7 +1158,7 @@ impl IntInspectionActions<Model> for IntDecision {
 			},
 			IntDecisionInner::Const(_) => None,
 			IntDecisionInner::Linear(trans, iv) => {
-				let m = IntDecision(IntDecisionInner::Var(iv)).get_lit_meaning(_ctx, lit)?;
+				let m = IntDecision(IntDecisionInner::Var(iv)).lit_meaning(_ctx, lit)?;
 				Some(trans.transform_lit(m))
 			}
 			IntDecisionInner::Bool(trans, b) => {
@@ -1199,7 +1199,7 @@ impl IntInspectionActions<Model> for IntDecision {
 		}
 	}
 
-	fn get_lower_bound(&self, ctx: &Model) -> IntVal {
+	fn lower_bound(&self, ctx: &Model) -> IntVal {
 		use IntDecisionInner::*;
 
 		let var = self.resolve_alias(ctx);
@@ -1222,7 +1222,7 @@ impl IntInspectionActions<Model> for IntDecision {
 				}
 			}
 			Bool(t, bv) => {
-				let val = bv.get_val(ctx).unwrap_or(false) as IntVal;
+				let val = bv.val(ctx).unwrap_or(false) as IntVal;
 				if t.positive_scale() {
 					t.transform(val)
 				} else {
@@ -1232,12 +1232,21 @@ impl IntInspectionActions<Model> for IntDecision {
 		}
 	}
 
-	fn get_lower_bound_lit(&self, ctx: &Model) -> Self::Atom {
-		let lb = self.get_lower_bound(ctx);
+	fn lower_bound_lit(&self, ctx: &Model) -> Self::Atom {
+		let lb = self.lower_bound(ctx);
 		self.geq(lb)
 	}
 
-	fn get_upper_bound(&self, ctx: &Model) -> IntVal {
+	fn try_lit(&self, _: &Model, meaning: IntLitMeaning) -> Option<Self::Atom> {
+		Some(match meaning {
+			IntLitMeaning::Eq(v) => self.eq(v),
+			IntLitMeaning::NotEq(v) => self.ne(v),
+			IntLitMeaning::GreaterEq(v) => self.geq(v),
+			IntLitMeaning::Less(v) => self.lt(v),
+		})
+	}
+
+	fn upper_bound(&self, ctx: &Model) -> IntVal {
 		use IntDecisionInner::*;
 
 		let var = self.resolve_alias(ctx);
@@ -1260,7 +1269,7 @@ impl IntInspectionActions<Model> for IntDecision {
 				}
 			}
 			Bool(t, bv) => {
-				let val = bv.get_val(ctx).unwrap_or(true) as IntVal;
+				let val = bv.val(ctx).unwrap_or(true) as IntVal;
 				if t.positive_scale() {
 					t.transform(val)
 				} else {
@@ -1270,58 +1279,45 @@ impl IntInspectionActions<Model> for IntDecision {
 		}
 	}
 
-	fn get_upper_bound_lit(&self, ctx: &Model) -> Self::Atom {
-		let ub = self.get_upper_bound(ctx);
+	fn upper_bound_lit(&self, ctx: &Model) -> Self::Atom {
+		let ub = self.upper_bound(ctx);
 		self.leq(ub)
-	}
-
-	fn try_lit(&self, _: &Model, meaning: IntLitMeaning) -> Option<Self::Atom> {
-		Some(match meaning {
-			IntLitMeaning::Eq(v) => self.eq(v),
-			IntLitMeaning::NotEq(v) => self.ne(v),
-			IntLitMeaning::GreaterEq(v) => self.geq(v),
-			IntLitMeaning::Less(v) => self.lt(v),
-		})
 	}
 }
 
 impl IntInspectionActions<ModelPostingContext<'_>> for IntDecision {
 	type Atom = <Self as IntInspectionActions<Model>>::Atom;
 
-	fn check_in_domain(&self, ctx: &ModelPostingContext<'_>, val: IntVal) -> bool {
-		self.check_in_domain(ctx.model, val)
+	fn domain(&self, ctx: &ModelPostingContext<'_>) -> IntSetVal {
+		self.domain(ctx.model)
 	}
 
-	fn get_domain(&self, ctx: &ModelPostingContext<'_>) -> IntSetVal {
-		self.get_domain(ctx.model)
+	fn in_domain(&self, ctx: &ModelPostingContext<'_>, val: IntVal) -> bool {
+		self.in_domain(ctx.model, val)
 	}
 
-	fn get_lit_meaning(
-		&self,
-		ctx: &ModelPostingContext<'_>,
-		lit: Self::Atom,
-	) -> Option<IntLitMeaning> {
-		self.get_lit_meaning(ctx.model, lit)
+	fn lit_meaning(&self, ctx: &ModelPostingContext<'_>, lit: Self::Atom) -> Option<IntLitMeaning> {
+		self.lit_meaning(ctx.model, lit)
 	}
 
-	fn get_lower_bound(&self, ctx: &ModelPostingContext<'_>) -> IntVal {
-		self.get_lower_bound(ctx.model)
+	fn lower_bound(&self, ctx: &ModelPostingContext<'_>) -> IntVal {
+		self.lower_bound(ctx.model)
 	}
 
-	fn get_lower_bound_lit(&self, ctx: &ModelPostingContext<'_>) -> Self::Atom {
-		self.get_lower_bound_lit(ctx.model)
-	}
-
-	fn get_upper_bound(&self, ctx: &ModelPostingContext<'_>) -> IntVal {
-		self.get_upper_bound(ctx.model)
-	}
-
-	fn get_upper_bound_lit(&self, ctx: &ModelPostingContext<'_>) -> Self::Atom {
-		self.get_upper_bound_lit(ctx.model)
+	fn lower_bound_lit(&self, ctx: &ModelPostingContext<'_>) -> Self::Atom {
+		self.lower_bound_lit(ctx.model)
 	}
 
 	fn try_lit(&self, ctx: &ModelPostingContext<'_>, meaning: IntLitMeaning) -> Option<Self::Atom> {
 		self.try_lit(ctx.model, meaning)
+	}
+
+	fn upper_bound(&self, ctx: &ModelPostingContext<'_>) -> IntVal {
+		self.upper_bound(ctx.model)
+	}
+
+	fn upper_bound_lit(&self, ctx: &ModelPostingContext<'_>) -> Self::Atom {
+		self.upper_bound_lit(ctx.model)
 	}
 }
 
@@ -1755,8 +1751,8 @@ impl IntSimplificationActions<Model> for IntDecision {
 				let lb = b_t.transform(0);
 				let ub = b_t.transform(1);
 
-				let contains_lb = iv.check_in_domain(ctx, lb);
-				let contains_ub = iv.check_in_domain(ctx, ub);
+				let contains_lb = iv.in_domain(ctx, lb);
+				let contains_ub = iv.in_domain(ctx, ub);
 
 				if contains_lb && contains_ub {
 					let Ok(IntLitMeaning::Eq(i_lb)) = i_t.rev_transform_lit(IntLitMeaning::Eq(lb))
@@ -1791,8 +1787,8 @@ impl IntSimplificationActions<Model> for IntDecision {
 			}
 			(x @ Bool(x_t, x_i), y @ Bool(y_t, y_i)) => {
 				// x and y can only take two values each, given by their bounds.
-				let (x_lb, x_ub) = IntDecision(x).get_bounds(ctx);
-				let (y_lb, y_ub) = IntDecision(y).get_bounds(ctx);
+				let (x_lb, x_ub) = IntDecision(x).bounds(ctx);
+				let (y_lb, y_ub) = IntDecision(y).bounds(ctx);
 				// Negate the literals if it is multiplied with a negative number. (This will
 				// ensure that `!b` represents the lower bound, and `b` represents the upper
 				// bound).
@@ -1824,7 +1820,7 @@ impl IntSimplificationActions<Model> for IntDecision {
 
 		// Set the domain on the variable to be aliased to trigger subscription
 		// events.
-		IntDecision(Var(idx)).set_domain(ctx, &target.get_domain(ctx), [])?;
+		IntDecision(Var(idx)).set_domain(ctx, &target.domain(ctx), [])?;
 		// Change variable to point to the target
 		match mem::replace(&mut ctx.int_vars[idx].domain, Domain::Alias(target)) {
 			// Restrict the domain of the target variable using the variable domain
@@ -2076,13 +2072,13 @@ impl ElementConstraint for IntVal {
 }
 
 impl IntDecisionActions<Model> for IntVal {
-	fn get_lit(&self, ctx: &mut Model, meaning: IntLitMeaning) -> Self::Atom {
+	fn lit(&self, ctx: &mut Model, meaning: IntLitMeaning) -> Self::Atom {
 		self.try_lit(ctx, meaning).unwrap()
 	}
 }
 
 impl IntExplanationActions<Model> for IntVal {
-	fn get_lit_relaxed(&self, ctx: &Model, meaning: IntLitMeaning) -> (Self::Atom, IntLitMeaning) {
+	fn lit_relaxed(&self, ctx: &Model, meaning: IntLitMeaning) -> (Self::Atom, IntLitMeaning) {
 		(self.try_lit(ctx, meaning).unwrap(), meaning)
 	}
 }
@@ -2090,31 +2086,23 @@ impl IntExplanationActions<Model> for IntVal {
 impl IntInspectionActions<Model> for IntVal {
 	type Atom = BoolDecision;
 
-	fn check_in_domain(&self, _: &Model, val: IntVal) -> bool {
-		*self == val
-	}
-
-	fn get_domain(&self, _: &Model) -> IntSetVal {
+	fn domain(&self, _: &Model) -> IntSetVal {
 		(*self..=*self).into()
 	}
 
-	fn get_lit_meaning(&self, _: &Model, _: Self::Atom) -> Option<IntLitMeaning> {
+	fn in_domain(&self, _: &Model, val: IntVal) -> bool {
+		*self == val
+	}
+
+	fn lit_meaning(&self, _: &Model, _: Self::Atom) -> Option<IntLitMeaning> {
 		None
 	}
 
-	fn get_lower_bound(&self, _: &Model) -> IntVal {
+	fn lower_bound(&self, _: &Model) -> IntVal {
 		*self
 	}
 
-	fn get_lower_bound_lit(&self, _: &Model) -> Self::Atom {
-		true.into()
-	}
-
-	fn get_upper_bound(&self, _: &Model) -> IntVal {
-		*self
-	}
-
-	fn get_upper_bound_lit(&self, _: &Model) -> Self::Atom {
+	fn lower_bound_lit(&self, _: &Model) -> Self::Atom {
 		true.into()
 	}
 
@@ -2129,36 +2117,36 @@ impl IntInspectionActions<Model> for IntVal {
 			.into(),
 		)
 	}
+
+	fn upper_bound(&self, _: &Model) -> IntVal {
+		*self
+	}
+
+	fn upper_bound_lit(&self, _: &Model) -> Self::Atom {
+		true.into()
+	}
 }
 
 impl IntInspectionActions<ModelPostingContext<'_>> for IntVal {
 	type Atom = BoolDecision;
 
-	fn check_in_domain(&self, _: &ModelPostingContext<'_>, val: IntVal) -> bool {
-		*self == val
-	}
-
-	fn get_domain(&self, _: &ModelPostingContext<'_>) -> IntSetVal {
+	fn domain(&self, _: &ModelPostingContext<'_>) -> IntSetVal {
 		(*self..=*self).into()
 	}
 
-	fn get_lit_meaning(&self, _: &ModelPostingContext<'_>, _: Self::Atom) -> Option<IntLitMeaning> {
+	fn in_domain(&self, _: &ModelPostingContext<'_>, val: IntVal) -> bool {
+		*self == val
+	}
+
+	fn lit_meaning(&self, _: &ModelPostingContext<'_>, _: Self::Atom) -> Option<IntLitMeaning> {
 		None
 	}
 
-	fn get_lower_bound(&self, _: &ModelPostingContext<'_>) -> IntVal {
+	fn lower_bound(&self, _: &ModelPostingContext<'_>) -> IntVal {
 		*self
 	}
 
-	fn get_lower_bound_lit(&self, _: &ModelPostingContext<'_>) -> Self::Atom {
-		true.into()
-	}
-
-	fn get_upper_bound(&self, _: &ModelPostingContext<'_>) -> IntVal {
-		*self
-	}
-
-	fn get_upper_bound_lit(&self, _: &ModelPostingContext<'_>) -> Self::Atom {
+	fn lower_bound_lit(&self, _: &ModelPostingContext<'_>) -> Self::Atom {
 		true.into()
 	}
 
@@ -2172,6 +2160,14 @@ impl IntInspectionActions<ModelPostingContext<'_>> for IntVal {
 			}
 			.into(),
 		)
+	}
+
+	fn upper_bound(&self, _: &ModelPostingContext<'_>) -> IntVal {
+		*self
+	}
+
+	fn upper_bound_lit(&self, _: &ModelPostingContext<'_>) -> Self::Atom {
+		true.into()
 	}
 }
 
@@ -2464,10 +2460,10 @@ impl Model {
 							let iv = IntDecision(IntDecisionInner::Var(iv));
 							let triggered = match cond {
 								IntLitMeaning::Eq(v) | IntLitMeaning::NotEq(v) => {
-									iv.eq(v).get_val(self).is_some()
+									iv.eq(v).val(self).is_some()
 								}
 								IntLitMeaning::GreaterEq(v) | IntLitMeaning::Less(v) => {
-									iv.geq(v).get_val(self).is_some()
+									iv.geq(v).val(self).is_some()
 								}
 							};
 							if triggered {
@@ -2678,7 +2674,7 @@ impl ClauseDatabase for Model {
 }
 
 impl DecisionActions for Model {
-	fn get_num_conflicts(&self) -> u64 {
+	fn num_conflicts(&self) -> u64 {
 		0
 	}
 }
@@ -2734,12 +2730,12 @@ impl SimplificationActions for Model {
 }
 
 impl TrailingActions for Model {
-	fn get_trailed_int(&self, i: TrailedInt) -> IntVal {
-		self.trail[i]
-	}
-
 	fn set_trailed_int(&mut self, i: TrailedInt, v: IntVal) -> IntVal {
 		mem::replace(&mut self.trail[i], v)
+	}
+
+	fn trailed_int(&self, i: TrailedInt) -> IntVal {
+		self.trail[i]
 	}
 }
 

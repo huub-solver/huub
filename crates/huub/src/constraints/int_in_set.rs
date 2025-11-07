@@ -48,7 +48,7 @@ where
 		ctx: &mut E::PropagationCtx<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		// Check whether `reif` is set, then just enforce the domain.
-		match self.reif.get_val(ctx) {
+		match self.reif.val(ctx) {
 			Some(true) => {
 				self.var.set_domain(ctx, &self.set, [self.reif.into()])?;
 				return Ok(SimplificationStatus::Subsumed);
@@ -61,7 +61,7 @@ where
 			None => {}
 		}
 		// Compute the overlap between the set and the domain of `var`.
-		let domain = self.var.get_domain(ctx);
+		let domain = self.var.domain(ctx);
 		self.set = self.set.intersect(&domain);
 		// If the intersection is empty, then `reif` must be false.
 		if self.set.is_empty() {

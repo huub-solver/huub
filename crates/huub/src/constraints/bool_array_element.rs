@@ -43,7 +43,7 @@ where
 	) -> Result<SimplificationStatus, E::Conflict> {
 		Self::propagate(self, ctx)?;
 		// Unify if the index is already fixed
-		if let Some(i) = self.index.get_val(ctx) {
+		if let Some(i) = self.index.val(ctx) {
 			self.array[i as usize].unify(ctx, self.result)?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
@@ -51,15 +51,15 @@ where
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let result = slv.get_solver_bool(self.result);
-		let index = slv.get_solver_int(self.index);
+		let result = slv.solver_bool(self.result);
+		let index = slv.solver_int(self.index);
 
 		// Evaluate result literal
-		let arr: Vec<_> = self.array.iter().map(|&v| slv.get_solver_bool(v)).collect();
+		let arr: Vec<_> = self.array.iter().map(|&v| slv.solver_bool(v)).collect();
 
 		for (i, &l) in arr.iter().enumerate() {
 			// Evaluate array literal
-			let idx_eq = index.get_lit(slv, IntLitMeaning::Eq(i as IntVal));
+			let idx_eq = index.lit(slv, IntLitMeaning::Eq(i as IntVal));
 			// add clause (idx = i + 1 /\ arr[i]) => val
 			slv.add_clause([!idx_eq, !l, result])?;
 			// add clause (idx = i + 1 /\ !arr[i]) => !val

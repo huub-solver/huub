@@ -63,36 +63,28 @@ impl BoolPostingActions<PostingContext<'_>> for BoolView {
 impl IntInspectionActions<PostingContext<'_>> for IntVal {
 	type Atom = <Self as IntInspectionActions<State>>::Atom;
 
-	fn check_in_domain(&self, ctx: &PostingContext<'_>, val: IntVal) -> bool {
-		self.check_in_domain(ctx.state, val)
-	}
-
-	fn get_domain(&self, _: &PostingContext<'_>) -> crate::IntSetVal {
+	fn domain(&self, _: &PostingContext<'_>) -> crate::IntSetVal {
 		(*self..=*self).into()
 	}
 
-	fn get_lit_meaning(
+	fn in_domain(&self, ctx: &PostingContext<'_>, val: IntVal) -> bool {
+		self.in_domain(ctx.state, val)
+	}
+
+	fn lit_meaning(
 		&self,
 		ctx: &PostingContext<'_>,
 		lit: Self::Atom,
 	) -> Option<super::IntLitMeaning> {
-		self.get_lit_meaning(ctx.state, lit)
+		self.lit_meaning(ctx.state, lit)
 	}
 
-	fn get_lower_bound(&self, ctx: &PostingContext<'_>) -> IntVal {
-		self.get_lower_bound(ctx.state)
+	fn lower_bound(&self, ctx: &PostingContext<'_>) -> IntVal {
+		self.lower_bound(ctx.state)
 	}
 
-	fn get_lower_bound_lit(&self, ctx: &PostingContext<'_>) -> Self::Atom {
-		self.get_lower_bound_lit(ctx.state)
-	}
-
-	fn get_upper_bound(&self, ctx: &PostingContext<'_>) -> IntVal {
-		self.get_upper_bound(ctx.state)
-	}
-
-	fn get_upper_bound_lit(&self, ctx: &PostingContext<'_>) -> Self::Atom {
-		self.get_upper_bound_lit(ctx.state)
+	fn lower_bound_lit(&self, ctx: &PostingContext<'_>) -> Self::Atom {
+		self.lower_bound_lit(ctx.state)
 	}
 
 	fn try_lit(
@@ -101,6 +93,14 @@ impl IntInspectionActions<PostingContext<'_>> for IntVal {
 		meaning: super::IntLitMeaning,
 	) -> Option<Self::Atom> {
 		self.try_lit(ctx.state, meaning)
+	}
+
+	fn upper_bound(&self, ctx: &PostingContext<'_>) -> IntVal {
+		self.upper_bound(ctx.state)
+	}
+
+	fn upper_bound_lit(&self, ctx: &PostingContext<'_>) -> Self::Atom {
+		self.upper_bound_lit(ctx.state)
 	}
 }
 
@@ -117,36 +117,28 @@ impl IntPostingActions<PostingContext<'_>> for IntVal {
 impl IntInspectionActions<PostingContext<'_>> for IntVarRef {
 	type Atom = <Self as IntInspectionActions<State>>::Atom;
 
-	fn check_in_domain(&self, ctx: &PostingContext<'_>, val: IntVal) -> bool {
-		self.check_in_domain(ctx.state, val)
+	fn domain(&self, ctx: &PostingContext<'_>) -> crate::IntSetVal {
+		self.domain(ctx.state)
 	}
 
-	fn get_domain(&self, ctx: &PostingContext<'_>) -> crate::IntSetVal {
-		self.get_domain(ctx.state)
+	fn in_domain(&self, ctx: &PostingContext<'_>, val: IntVal) -> bool {
+		self.in_domain(ctx.state, val)
 	}
 
-	fn get_lit_meaning(
+	fn lit_meaning(
 		&self,
 		ctx: &PostingContext<'_>,
 		lit: Self::Atom,
 	) -> Option<super::IntLitMeaning> {
-		self.get_lit_meaning(ctx.state, lit)
+		self.lit_meaning(ctx.state, lit)
 	}
 
-	fn get_lower_bound(&self, ctx: &PostingContext<'_>) -> IntVal {
-		self.get_lower_bound(ctx.state)
+	fn lower_bound(&self, ctx: &PostingContext<'_>) -> IntVal {
+		self.lower_bound(ctx.state)
 	}
 
-	fn get_lower_bound_lit(&self, ctx: &PostingContext<'_>) -> Self::Atom {
-		self.get_lower_bound_lit(ctx.state)
-	}
-
-	fn get_upper_bound(&self, ctx: &PostingContext<'_>) -> IntVal {
-		self.get_upper_bound(ctx.state)
-	}
-
-	fn get_upper_bound_lit(&self, ctx: &PostingContext<'_>) -> Self::Atom {
-		self.get_upper_bound_lit(ctx.state)
+	fn lower_bound_lit(&self, ctx: &PostingContext<'_>) -> Self::Atom {
+		self.lower_bound_lit(ctx.state)
 	}
 
 	fn try_lit(
@@ -156,6 +148,14 @@ impl IntInspectionActions<PostingContext<'_>> for IntVarRef {
 	) -> Option<Self::Atom> {
 		self.try_lit(ctx.state, meaning)
 	}
+
+	fn upper_bound(&self, ctx: &PostingContext<'_>) -> IntVal {
+		self.upper_bound(ctx.state)
+	}
+
+	fn upper_bound_lit(&self, ctx: &PostingContext<'_>) -> Self::Atom {
+		self.upper_bound_lit(ctx.state)
+	}
 }
 
 impl IntPostingActions<PostingContext<'_>> for IntVarRef {
@@ -163,7 +163,7 @@ impl IntPostingActions<PostingContext<'_>> for IntVarRef {
 		IntView(IntViewInner::VarRef(*self)).advise_when(ctx, condition, data);
 	}
 	fn enqueue_when(&self, ctx: &mut PostingContext<'_>, condition: IntPropCond) {
-		if self.get_val(ctx.state).is_some() {
+		if self.val(ctx.state).is_some() {
 			ctx.semantic_enqueue = true;
 			// No further change will happen, so we don't need to the propagator to any
 			// activation lists.
@@ -314,14 +314,14 @@ impl PostingActions for PostingContext<'_> {
 }
 
 impl BoolInspectionActions<PostingContext<'_>> for RawLit {
-	fn get_val(&self, ctx: &PostingContext<'_>) -> Option<bool> {
-		self.get_val(ctx.state)
+	fn val(&self, ctx: &PostingContext<'_>) -> Option<bool> {
+		self.val(ctx.state)
 	}
 }
 
 impl BoolPostingActions<PostingContext<'_>> for RawLit {
 	fn advise_when_fixed(&self, ctx: &mut PostingContext<'_>, data: u64) {
-		if self.get_val(ctx.state).is_some() {
+		if self.val(ctx.state).is_some() {
 			// The literal will never change, so we don't need to add an advisor.
 			return;
 		}
@@ -329,7 +329,7 @@ impl BoolPostingActions<PostingContext<'_>> for RawLit {
 		ctx.add_lit_advisor(*self, data, false);
 	}
 	fn enqueue_when_fixed(&self, ctx: &mut PostingContext<'_>) {
-		if self.get_val(ctx.state).is_some() {
+		if self.val(ctx.state).is_some() {
 			ctx.semantic_enqueue = true;
 		} else {
 			ctx.state

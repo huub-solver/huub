@@ -25,7 +25,7 @@ use crate::{
 pub trait BoolInspectionActions<Context: ?Sized>: BoolOperations {
 	/// Get the current value of a Boolean decision variable, if it has been
 	/// assigned.
-	fn get_val(&self, ctx: &Context) -> Option<bool>;
+	fn val(&self, ctx: &Context) -> Option<bool>;
 }
 
 /// Operations that are required to be possible to perform on types acting as
@@ -111,7 +111,7 @@ pub trait BrancherInitActions: DecisionActions {
 /// making search decisions.
 pub trait DecisionActions: TrailingActions {
 	/// Returns the number of conflicts up to this point in the search process.
-	fn get_num_conflicts(&self) -> u64;
+	fn num_conflicts(&self) -> u64;
 }
 
 /// Actions that can be performed during the initialization of [`Propagator] and
@@ -129,13 +129,13 @@ pub trait InitializationActions {
 pub trait IntDecisionActions<Context: ?Sized>: IntInspectionActions<Context> {
 	/// Get (or create) a literal for the given referenced integer variable with
 	/// the given meaning.
-	fn get_lit(&self, ctx: &mut Context, meaning: IntLitMeaning) -> Self::Atom;
+	fn lit(&self, ctx: &mut Context, meaning: IntLitMeaning) -> Self::Atom;
 
 	/// Get the Boolean view that represents the current assignment of the
 	/// integer view, or `None` if the integer view is not assigned.
-	fn get_val_lit(&self, ctx: &mut Context) -> Option<Self::Atom> {
-		let val = self.get_val(ctx)?;
-		Some(self.get_lit(ctx, IntLitMeaning::Eq(val)))
+	fn val_lit(&self, ctx: &mut Context) -> Option<Self::Atom> {
+		let val = self.val(ctx)?;
+		Some(self.lit(ctx, IntLitMeaning::Eq(val)))
 	}
 }
 
@@ -145,14 +145,13 @@ pub trait IntExplanationActions<Context: ?Sized>: IntInspectionActions<Context> 
 	/// Get a Boolean view that represents the given meaning (that is currently
 	/// `true`) on the integer view, or a relaxation if the literal does not yet
 	/// exist.
-	fn get_lit_relaxed(&self, ctx: &Context, meaning: IntLitMeaning)
-		-> (Self::Atom, IntLitMeaning);
+	fn lit_relaxed(&self, ctx: &Context, meaning: IntLitMeaning) -> (Self::Atom, IntLitMeaning);
 
 	/// Get the Boolean view that represents the current assignment of the
 	/// integer view, or `None` if the integer view is not assigned or if the
 	/// equality literal does not exist.
 	fn try_val_lit(&self, ctx: &Context) -> Option<Self::Atom> {
-		let val = self.get_val(ctx)?;
+		let val = self.val(ctx)?;
 		self.try_lit(ctx, IntLitMeaning::Eq(val))
 	}
 }
@@ -163,53 +162,53 @@ pub trait IntInspectionActions<Context: ?Sized>: IntOperations {
 	/// Type used to represent an atom in an reason for propagation.
 	type Atom: BoolOperations;
 
-	/// Check whether a given integer view can take a given value (given the
-	/// current search decisions).
-	fn check_in_domain(&self, ctx: &Context, val: IntVal) -> bool;
-
 	/// Convenience method to get both the lower and upper bounds of an integer
 	/// view.
-	fn get_bounds(&self, ctx: &Context) -> (IntVal, IntVal) {
-		(self.get_lower_bound(ctx), self.get_upper_bound(ctx))
+	fn bounds(&self, ctx: &Context) -> (IntVal, IntVal) {
+		(self.lower_bound(ctx), self.upper_bound(ctx))
 	}
 	/// Get the set of values from which the integer view is guaranteed to take
 	/// a value (given the current search decisions).
-	fn get_domain(&self, ctx: &Context) -> IntSetVal;
+	fn domain(&self, ctx: &Context) -> IntSetVal;
+
+	/// Check whether a given integer view can take a given value (given the
+	/// current search decisions).
+	fn in_domain(&self, ctx: &Context, val: IntVal) -> bool;
 
 	/// Get the meaning of the given literal with respect to the given integer
 	/// view, or `None` it has no direct meaning.
-	fn get_lit_meaning(&self, ctx: &Context, lit: Self::Atom) -> Option<IntLitMeaning>;
+	fn lit_meaning(&self, ctx: &Context, lit: Self::Atom) -> Option<IntLitMeaning>;
 
 	/// Get the minimum value that an integer view is guaranteed to take (given
 	/// the current search decisions).
-	fn get_lower_bound(&self, ctx: &Context) -> IntVal;
+	fn lower_bound(&self, ctx: &Context) -> IntVal;
 
 	/// Get the Boolean view that represents that the integer view will take a
 	/// value greater or equal to its current lower bound.
-	fn get_lower_bound_lit(&self, ctx: &Context) -> Self::Atom;
+	fn lower_bound_lit(&self, ctx: &Context) -> Self::Atom;
+
+	/// Get a Boolean view that represents the given meaning on the integer
+	/// view, if it already exists.
+	fn try_lit(&self, ctx: &Context, meaning: IntLitMeaning) -> Option<Self::Atom>;
 
 	/// Get the maximum value that an integer view is guaranteed to take (given
 	/// the current search decisions).
-	fn get_upper_bound(&self, ctx: &Context) -> IntVal;
+	fn upper_bound(&self, ctx: &Context) -> IntVal;
 
 	/// Get the Boolean view that represents that the integer view will take a
 	/// value less or equal to its current upper bound.
-	fn get_upper_bound_lit(&self, ctx: &Context) -> Self::Atom;
+	fn upper_bound_lit(&self, ctx: &Context) -> Self::Atom;
 
 	/// Get the current value of an integer view, if it has been assigned (given
 	/// the current search decisions).
-	fn get_val(&self, ctx: &Context) -> Option<IntVal> {
-		let (lb, ub) = self.get_bounds(ctx);
+	fn val(&self, ctx: &Context) -> Option<IntVal> {
+		let (lb, ub) = self.bounds(ctx);
 		if lb == ub {
 			Some(lb)
 		} else {
 			None
 		}
 	}
-
-	/// Get a Boolean view that represents the given meaning on the integer
-	/// view, if it already exists.
-	fn try_lit(&self, ctx: &Context, meaning: IntLitMeaning) -> Option<Self::Atom>;
 }
 
 /// Operations that are required to be possible to perform on types acting as
@@ -367,48 +366,48 @@ pub trait ReasoningEngine {
 pub trait ReformulationActions:
 	AddAssign<BoxedPropagator> + AsDynClauseDatabase + ClauseDatabase + InitializationActions
 {
+	/// Get the current value of a [`BoolView`], if it has been assigned.
+	fn bool_val(&self, bv: RawLit) -> Option<bool>;
+
 	/// Check whether a given integer view can take a given value
 	fn check_int_in_domain(&self, var: IntVarRef, val: IntVal) -> bool;
 
-	/// Get the current value of a [`BoolView`], if it has been assigned.
-	fn get_bool_val(&self, bv: RawLit) -> Option<bool>;
-
 	/// Get the set of values from which the integer view is guaranteed to take
 	/// a value.
-	fn get_int_domain(&self, var: IntVarRef) -> IntSetVal;
+	fn int_domain(&self, var: IntVarRef) -> IntSetVal;
 
 	/// Get (or create) a literal for the given integer view with the given
 	/// meaning.
-	fn get_int_lit(&mut self, var: IntVarRef, meaning: IntLitMeaning) -> BoolView;
+	fn int_lit(&mut self, var: IntVarRef, meaning: IntLitMeaning) -> BoolView;
 
 	/// Get the meaning of the given literal with respect to the given integer
 	/// view, or `None` it has no direct meaning.
-	fn get_int_lit_meaning(&self, var: IntVarRef, lit: BoolView) -> Option<IntLitMeaning>;
+	fn int_lit_meaning(&self, var: IntVarRef, lit: BoolView) -> Option<IntLitMeaning>;
 
 	/// Get the minimum value that an integer view is guaranteed to take.
-	fn get_int_lower_bound(&self, var: IntVarRef) -> IntVal;
+	fn int_lower_bound(&self, var: IntVarRef) -> IntVal;
 
 	/// Get the Boolean view that represents that the integer view will take a
 	/// value greater or equal to its current lower bound.
-	fn get_int_lower_bound_lit(&self, var: IntVarRef) -> BoolView;
+	fn int_lower_bound_lit(&self, var: IntVarRef) -> BoolView;
 
 	/// Get the maximum value that an integer view is guaranteed to take.
-	fn get_int_upper_bound(&self, var: IntVarRef) -> IntVal;
+	fn int_upper_bound(&self, var: IntVarRef) -> IntVal;
 
 	/// Get the Boolean view that represents that the integer view will take a
 	/// value less or equal to its current upper bound.
-	fn get_int_upper_bound_lit(&self, var: IntVarRef) -> BoolView;
-
-	/// Lookup the solver [`BoolView`] to which the given model
-	/// [`model::bool::BoolView`] maps.
-	fn get_solver_bool(&mut self, bv: BoolDecision) -> BoolView;
-
-	/// Lookup the solver [`IntExpr`] to which the given model
-	/// [`model::int::IntView`] maps.
-	fn get_solver_int(&mut self, iv: IntDecision) -> IntView;
+	fn int_upper_bound_lit(&self, var: IntVarRef) -> BoolView;
 
 	/// Create a new Boolean decision variable to use in the encoding.
 	fn new_bool_var(&mut self) -> BoolView;
+
+	/// Lookup the solver [`BoolView`] to which the given model
+	/// [`model::bool::BoolView`] maps.
+	fn solver_bool(&mut self, bv: BoolDecision) -> BoolView;
+
+	/// Lookup the solver [`IntExpr`] to which the given model
+	/// [`model::int::IntView`] maps.
+	fn solver_int(&mut self, iv: IntDecision) -> IntView;
 
 	/// Get a Boolean view that represents the given meaning (that is currently
 	/// `true`) on the integer view, if it already exists.
@@ -439,56 +438,45 @@ pub trait SimplificationActions {
 /// Basic actions that can be performed when the trailing infrastructure is
 /// available.
 pub trait TrailingActions {
-	/// Get the current value of a [`TrailedInt`].
-	fn get_trailed_int(&self, i: TrailedInt) -> IntVal;
 	/// Change the value of a [`TrailedInt`] in a way that can be undone if the
 	/// solver backtracks to a previous state.
 	fn set_trailed_int(&mut self, i: TrailedInt, v: IntVal) -> IntVal;
+
+	/// Get the current value of a [`TrailedInt`].
+	fn trailed_int(&self, i: TrailedInt) -> IntVal;
 }
 
 impl IntDecisionActions<dyn ReformulationActions + '_> for IntVarRef {
-	fn get_lit(
-		&self,
-		ctx: &mut (dyn ReformulationActions + '_),
-		meaning: IntLitMeaning,
-	) -> Self::Atom {
-		ctx.get_int_lit(*self, meaning)
+	fn lit(&self, ctx: &mut (dyn ReformulationActions + '_), meaning: IntLitMeaning) -> Self::Atom {
+		ctx.int_lit(*self, meaning)
 	}
 }
 
 impl IntInspectionActions<dyn ReformulationActions + '_> for IntVarRef {
 	type Atom = BoolView;
 
-	fn check_in_domain(&self, ctx: &dyn ReformulationActions, val: IntVal) -> bool {
+	fn domain(&self, ctx: &dyn ReformulationActions) -> IntSetVal {
+		ctx.int_domain(*self)
+	}
+
+	fn in_domain(&self, ctx: &dyn ReformulationActions, val: IntVal) -> bool {
 		ctx.check_int_in_domain(*self, val)
 	}
 
-	fn get_domain(&self, ctx: &dyn ReformulationActions) -> IntSetVal {
-		ctx.get_int_domain(*self)
-	}
-
-	fn get_lit_meaning(
+	fn lit_meaning(
 		&self,
 		ctx: &dyn ReformulationActions,
 		lit: Self::Atom,
 	) -> Option<IntLitMeaning> {
-		ctx.get_int_lit_meaning(*self, lit)
+		ctx.int_lit_meaning(*self, lit)
 	}
 
-	fn get_lower_bound(&self, ctx: &dyn ReformulationActions) -> IntVal {
-		ctx.get_int_lower_bound(*self)
+	fn lower_bound(&self, ctx: &dyn ReformulationActions) -> IntVal {
+		ctx.int_lower_bound(*self)
 	}
 
-	fn get_lower_bound_lit(&self, ctx: &dyn ReformulationActions) -> Self::Atom {
-		ctx.get_int_lower_bound_lit(*self)
-	}
-
-	fn get_upper_bound(&self, ctx: &dyn ReformulationActions) -> IntVal {
-		ctx.get_int_upper_bound(*self)
-	}
-
-	fn get_upper_bound_lit(&self, ctx: &dyn ReformulationActions) -> Self::Atom {
-		ctx.get_int_upper_bound_lit(*self)
+	fn lower_bound_lit(&self, ctx: &dyn ReformulationActions) -> Self::Atom {
+		ctx.int_lower_bound_lit(*self)
 	}
 
 	fn try_lit(
@@ -498,11 +486,19 @@ impl IntInspectionActions<dyn ReformulationActions + '_> for IntVarRef {
 	) -> Option<Self::Atom> {
 		ctx.try_int_lit(*self, meaning)
 	}
+
+	fn upper_bound(&self, ctx: &dyn ReformulationActions) -> IntVal {
+		ctx.int_upper_bound(*self)
+	}
+
+	fn upper_bound_lit(&self, ctx: &dyn ReformulationActions) -> Self::Atom {
+		ctx.int_upper_bound_lit(*self)
+	}
 }
 
 impl BoolInspectionActions<dyn ReformulationActions + '_> for RawLit {
-	fn get_val(&self, ctx: &dyn ReformulationActions) -> Option<bool> {
-		ctx.get_bool_val(*self)
+	fn val(&self, ctx: &dyn ReformulationActions) -> Option<bool> {
+		ctx.bool_val(*self)
 	}
 }
 
@@ -525,7 +521,7 @@ impl<T> BoolOperations for T where T: Clone + fmt::Debug + Eq + Hash + Not<Outpu
 impl<T> IntOperations for T where T: Clone + fmt::Debug + Eq + Hash + 'static {}
 
 impl<C> BoolInspectionActions<C> for bool {
-	fn get_val(&self, _: &C) -> Option<bool> {
+	fn val(&self, _: &C) -> Option<bool> {
 		Some(*self)
 	}
 }

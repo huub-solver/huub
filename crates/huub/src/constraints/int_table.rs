@@ -56,7 +56,7 @@ where
 			.filter(|tup| {
 				tup.iter()
 					.enumerate()
-					.all(|(j, val)| self.vars[j].check_in_domain(ctx, *val))
+					.all(|(j, val)| self.vars[j].in_domain(ctx, *val))
 			})
 			.collect_vec();
 
@@ -92,11 +92,7 @@ where
 		} else {
 			Vec::new()
 		};
-		let vars = self
-			.vars
-			.iter()
-			.map(|&iv| slv.get_solver_int(iv))
-			.collect_vec();
+		let vars = self.vars.iter().map(|&iv| slv.solver_int(iv)).collect_vec();
 
 		// Create clauses that say foreach tuple i, if `selector[i]` is true, then the
 		// variable `j` equals `vals[i][j]`.
@@ -104,7 +100,7 @@ where
 			for (i, tup) in self.table.iter().enumerate() {
 				assert!(tup.len() == vars.len());
 				for (j, var) in vars.iter().enumerate() {
-					let clause = [!selector[i], var.get_lit(slv, IntLitMeaning::Eq(tup[j]))];
+					let clause = [!selector[i], var.lit(slv, IntLitMeaning::Eq(tup[j]))];
 					slv.add_clause(clause)?;
 				}
 			}
@@ -113,7 +109,7 @@ where
 		// Create clauses that map from the value taken by the variables back to the
 		// possible selectors that can be active.
 		for (j, var) in vars.iter().enumerate() {
-			let (lb, ub) = var.get_bounds(slv);
+			let (lb, ub) = var.bounds(slv);
 			let mut support_clauses: Vec<Vec<BoolView>> = vec![Vec::new(); (ub - lb + 1) as usize];
 			for (i, tup) in self.table.iter().enumerate() {
 				let k = tup[j] - lb;
@@ -127,14 +123,14 @@ where
 					// Special case where we can use the values of the other variables as
 					// the selection variables directly.
 					support_clauses[k as usize]
-						.push(vars[1 - j].get_lit(slv, IntLitMeaning::Eq(tup[1 - j])));
+						.push(vars[1 - j].lit(slv, IntLitMeaning::Eq(tup[1 - j])));
 				} else {
 					support_clauses[k as usize].push(selector[i]);
 				}
 			}
 			for (i, mut clause) in support_clauses.into_iter().enumerate() {
-				if var.check_in_domain(slv, lb + i as IntVal) {
-					clause.push(vars[j].get_lit(slv, IntLitMeaning::NotEq(lb + i as IntVal)));
+				if var.in_domain(slv, lb + i as IntVal) {
+					clause.push(vars[j].lit(slv, IntLitMeaning::NotEq(lb + i as IntVal)));
 					slv.add_clause(clause)?;
 				}
 			}

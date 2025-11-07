@@ -145,7 +145,7 @@ where
 		// not be done by the bounds consistent propagator?
 		let (vals, vars): (Vec<_>, Vec<_>) =
 			self.prop.var.iter().enumerate().partition_map(|(i, &var)| {
-				if let Some(val) = var.get_val(ctx) {
+				if let Some(val) = var.val(ctx) {
 					Either::Left((i, val))
 				} else {
 					Either::Right(var)
@@ -156,7 +156,7 @@ where
 			for var in &vars {
 				var.set_not_in_set(ctx, &neg, |ctx: &mut E::PropagationCtx<'_>| {
 					vals.iter()
-						.map(|&(i, _)| self.prop.var[i].get_val_lit(ctx).unwrap())
+						.map(|&(i, _)| self.prop.var[i].val_lit(ctx).unwrap())
 						.collect_vec()
 				})?;
 			}
@@ -174,21 +174,16 @@ where
 			self.prop.var = vars;
 		}
 
-		if self.prop.var.iter().all(|v| v.get_val(ctx).is_some()) {
+		if self.prop.var.iter().all(|v| v.val(ctx).is_some()) {
 			return Ok(SimplificationStatus::Subsumed);
 		}
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let vars: Vec<_> = self
-			.prop
-			.var
-			.iter()
-			.map(|v| slv.get_solver_int(*v))
-			.collect();
+		let vars: Vec<_> = self.prop.var.iter().map(|v| slv.solver_int(*v)).collect();
 		// propagation should have removed any fixed values
-		debug_assert!(vars.iter().all(|v| v.get_val(slv).is_none()));
+		debug_assert!(vars.iter().all(|v| v.val(slv).is_none()));
 		if self.value_consistent_propagator_enabled() {
 			IntAllDifferentValue::new_in(slv, vars.clone());
 		}
@@ -260,13 +255,13 @@ impl<I> IntAllDifferentBounds<I> {
 				let mut k = w;
 				let mut reason = Vec::new();
 				reason.push(
-					self.var[self.max_sorted[i]].get_lit(ctx, IntLitMeaning::GreaterEq(hall_min)),
+					self.var[self.max_sorted[i]].lit(ctx, IntLitMeaning::GreaterEq(hall_min)),
 				);
 				while self.bounds[k] > hall_min {
 					let mut l = self.bucket[k];
 					while l != usize::MAX {
-						reason.push(self.var[l].get_lit(ctx, IntLitMeaning::GreaterEq(hall_min)));
-						reason.push(self.var[l].get_lit(ctx, IntLitMeaning::Less(hall_max)));
+						reason.push(self.var[l].lit(ctx, IntLitMeaning::GreaterEq(hall_min)));
+						reason.push(self.var[l].lit(ctx, IntLitMeaning::Less(hall_max)));
 						l = self.var_info[l].next;
 					}
 					k -= 1;
@@ -332,13 +327,12 @@ impl<I> IntAllDifferentBounds<I> {
 
 				let mut k = w;
 				let mut reason = Vec::new();
-				reason
-					.push(self.var[self.min_sorted[i]].get_lit(ctx, IntLitMeaning::Less(hall_max)));
+				reason.push(self.var[self.min_sorted[i]].lit(ctx, IntLitMeaning::Less(hall_max)));
 				while self.bounds[k] < hall_max {
 					let mut l = self.bucket[k];
 					while l != usize::MAX {
-						reason.push(self.var[l].get_lit(ctx, IntLitMeaning::GreaterEq(hall_min)));
-						reason.push(self.var[l].get_lit(ctx, IntLitMeaning::Less(hall_max)));
+						reason.push(self.var[l].lit(ctx, IntLitMeaning::GreaterEq(hall_min)));
+						reason.push(self.var[l].lit(ctx, IntLitMeaning::Less(hall_max)));
 						l = self.var_info[l].next;
 					}
 					k += 1;
@@ -436,7 +430,7 @@ impl<I> IntAllDifferentBounds<I> {
 		let size: usize = self.var.len();
 
 		for (i, v) in self.var.iter().enumerate() {
-			(self.lb_cache[i], self.ub_cache[i]) = v.get_bounds(ctx);
+			(self.lb_cache[i], self.ub_cache[i]) = v.bounds(ctx);
 		}
 
 		self.min_sorted.sort_by_key(|&i| self.lb_cache[i]);
@@ -565,8 +559,8 @@ where
 		// We walk through all fixed decisions (indices).
 		for &i in &self.action_list {
 			// Retrieve the value and value literal for the fixed decision.
-			let val = self.vars[i].get_val(ctx).unwrap();
-			let reason = &[self.vars[i].get_val_lit(ctx).unwrap()];
+			let val = self.vars[i].val(ctx).unwrap();
+			let reason = &[self.vars[i].val_lit(ctx).unwrap()];
 
 			// We now enforce that all other decisions (at different indices) are not
 			// equal to the fixed value.

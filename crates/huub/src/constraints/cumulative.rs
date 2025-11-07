@@ -92,12 +92,12 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		self.heights.clear();
 		let n = self.start_times.len();
 		let mut events = Vec::with_capacity(2 * n);
-		let mut capacity_lb = self.capacity.get_lower_bound(ctx);
+		let mut capacity_lb = self.capacity.lower_bound(ctx);
 		// Collect all start and end events of compulsory tasks
 		for i in 0..n {
 			let lst = self.latest_start_time(ctx, i);
 			let ect = self.earliest_completion_time(ctx, i);
-			let min_usage = self.usages[i].get_lower_bound(ctx);
+			let min_usage = self.usages[i].lower_bound(ctx);
 			if lst < ect {
 				events.push((lst, min_usage));
 				events.push((ect, -min_usage));
@@ -151,7 +151,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 			trace!(
 				bounds = ?self.bounds,
 				heights = ?self.heights,
-				capacity_ub =? self.capacity.get_upper_bound(ctx),
+				capacity_ub =? self.capacity.upper_bound(ctx),
 				"cumulative time table profile"
 			);
 		}
@@ -190,7 +190,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 			if self.latest_start_time(ctx, i) <= time_point
 				&& self.earliest_completion_time(ctx, i) > time_point
 			{
-				let usage_lb = self.usages[i].get_lower_bound(ctx);
+				let usage_lb = self.usages[i].lower_bound(ctx);
 				if usage_lb > 0 {
 					relevant_tasks.push(i);
 					collected_energy += usage_lb;
@@ -205,7 +205,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		let mut remaining_slack = collected_energy - to_cover;
 		let mut minimal_relevant_tasks = Vec::new();
 		for &i in relevant_tasks.iter() {
-			let usage = self.usages[i].get_lower_bound(ctx);
+			let usage = self.usages[i].lower_bound(ctx);
 			if remaining_slack > usage {
 				remaining_slack -= usage;
 				continue;
@@ -235,7 +235,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		I1: IntInspectionActions<C>,
 		I2: IntInspectionActions<C>,
 	{
-		self.start_times[i].get_lower_bound(ctx) + self.durations[i].get_lower_bound(ctx)
+		self.start_times[i].lower_bound(ctx) + self.durations[i].lower_bound(ctx)
 	}
 
 	#[inline]
@@ -244,7 +244,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	where
 		I1: IntInspectionActions<C>,
 	{
-		self.start_times[i].get_lower_bound(ctx)
+		self.start_times[i].lower_bound(ctx)
 	}
 
 	/// Constructs a reason for limiting the usage of a task at a specific
@@ -271,7 +271,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				usage_limit,
 				"Explain task usage limit"
 			);
-			let capacity_ub = self.capacity.get_upper_bound(ctx);
+			let capacity_ub = self.capacity.upper_bound(ctx);
 			let to_cover = capacity_ub - usage_limit;
 			let relevant_tasks =
 				self.collect_compulsory_tasks(ctx, to_cover, time_point, Some(task_no));
@@ -280,7 +280,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				time_point,
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
-					self.durations[i].get_lower_bound(ctx),
+					self.durations[i].lower_bound(ctx),
 					self.latest_start_time(ctx, i),
 					self.earliest_completion_time(ctx, i),
 				)).collect_vec(),
@@ -288,7 +288,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				"Explain task usage limit"
 			);
 
-			let cap_lit = self.capacity.get_upper_bound_lit(ctx);
+			let cap_lit = self.capacity.upper_bound_lit(ctx);
 
 			// Explanation: (1) relevant tasks (together with task `task_no`) have
 			// the required compulsory part at time `time_point`
@@ -297,15 +297,15 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				.chain(once(&task_no))
 				.flat_map(|&i| {
 					[
-						self.start_times[i].get_lit(ctx, IntLitMeaning::Less(time_point + 1)),
-						self.start_times[i].get_lit(
+						self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
+						self.start_times[i].lit(
 							ctx,
 							IntLitMeaning::GreaterEq(
-								time_point + 1 - self.durations[i].get_lower_bound(ctx),
+								time_point + 1 - self.durations[i].lower_bound(ctx),
 							),
 						),
-						self.durations[i].get_lower_bound_lit(ctx),
-						self.usages[i].get_lower_bound_lit(ctx),
+						self.durations[i].lower_bound_lit(ctx),
+						self.usages[i].lower_bound_lit(ctx),
 					]
 				})
 				// Explanation: (2) the resource capacity is at a given level
@@ -342,7 +342,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				"Explain resource overload"
 			);
 
-			let cap_lit = self.capacity.get_upper_bound_lit(ctx);
+			let cap_lit = self.capacity.upper_bound_lit(ctx);
 
 			// Explanation: relevant tasks have the required compulsory part at time
 			// `time_point`
@@ -350,15 +350,15 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				.iter()
 				.flat_map(|&i| {
 					[
-						self.start_times[i].get_lit(ctx, IntLitMeaning::Less(time_point + 1)),
-						self.start_times[i].get_lit(
+						self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
+						self.start_times[i].lit(
 							ctx,
 							IntLitMeaning::GreaterEq(
-								time_point - self.durations[i].get_lower_bound(ctx) + 1,
+								time_point - self.durations[i].lower_bound(ctx) + 1,
 							),
 						),
-						self.durations[i].get_lower_bound_lit(ctx),
-						self.usages[i].get_lower_bound_lit(ctx),
+						self.durations[i].lower_bound_lit(ctx),
+						self.usages[i].lower_bound_lit(ctx),
 					]
 				})
 				.chain(once(cap_lit))
@@ -382,8 +382,8 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		I4: IntDecisionActions<Ctx, Atom = Atom>,
 	{
 		move |ctx: &mut Ctx| {
-			let capacity_ub = self.capacity.get_upper_bound(ctx);
-			let min_usage = self.usages[task_no].get_lower_bound(ctx);
+			let capacity_ub = self.capacity.upper_bound(ctx);
+			let min_usage = self.usages[task_no].lower_bound(ctx);
 			let to_cover = capacity_ub - min_usage + 1;
 			let relevant_tasks =
 				self.collect_compulsory_tasks(ctx, to_cover, time_point, Some(task_no));
@@ -392,7 +392,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				time_point,
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
-					self.durations[i].get_lower_bound(ctx),
+					self.durations[i].lower_bound(ctx),
 					self.latest_start_time(ctx, i),
 					self.earliest_completion_time(ctx, i),
 				)).collect_vec(),
@@ -407,15 +407,15 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 			// `time_point`
 			reason.extend(relevant_tasks.iter().flat_map(|&i| {
 				[
-					self.start_times[i].get_lit(ctx, IntLitMeaning::Less(time_point + 1)),
-					self.start_times[i].get_lit(
+					self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
+					self.start_times[i].lit(
 						ctx,
 						IntLitMeaning::GreaterEq(
-							time_point - self.durations[i].get_lower_bound(ctx) + 1,
+							time_point - self.durations[i].lower_bound(ctx) + 1,
 						),
 					),
-					self.durations[i].get_lower_bound_lit(ctx),
-					self.usages[i].get_lower_bound_lit(ctx),
+					self.durations[i].lower_bound_lit(ctx),
+					self.usages[i].lower_bound_lit(ctx),
 				]
 			}));
 
@@ -423,24 +423,24 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 			// with the time point, depending on the propagation rule
 			match propagation_rule {
 				CumulativePropagationRule::ForwardShift => {
-					reason.push(self.start_times[task_no].get_lit(
+					reason.push(self.start_times[task_no].lit(
 						ctx,
 						IntLitMeaning::GreaterEq(
-							time_point - self.durations[task_no].get_lower_bound(ctx) + 1,
+							time_point - self.durations[task_no].lower_bound(ctx) + 1,
 						),
 					));
 				}
 				CumulativePropagationRule::BackwardShift => {
 					reason.push(
-						self.start_times[task_no].get_lit(ctx, IntLitMeaning::Less(time_point + 1)),
+						self.start_times[task_no].lit(ctx, IntLitMeaning::Less(time_point + 1)),
 					);
 				}
 			}
-			reason.push(self.durations[task_no].get_lower_bound_lit(ctx));
-			reason.push(self.usages[task_no].get_lower_bound_lit(ctx));
+			reason.push(self.durations[task_no].lower_bound_lit(ctx));
+			reason.push(self.usages[task_no].lower_bound_lit(ctx));
 
 			// Explanation: (3) the resource capacity is at a given level
-			reason.push(self.capacity.get_upper_bound_lit(ctx));
+			reason.push(self.capacity.upper_bound_lit(ctx));
 
 			reason
 		}
@@ -453,7 +453,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		I1: IntInspectionActions<C>,
 		I2: IntInspectionActions<C>,
 	{
-		self.start_times[i].get_upper_bound(ctx) + self.durations[i].get_upper_bound(ctx)
+		self.start_times[i].upper_bound(ctx) + self.durations[i].upper_bound(ctx)
 	}
 
 	#[inline]
@@ -462,7 +462,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	where
 		I1: IntInspectionActions<C>,
 	{
-		self.start_times[i].get_upper_bound(ctx)
+		self.start_times[i].upper_bound(ctx)
 	}
 
 	/// Propagates the upper bound of a task's resource usage to ensure that,
@@ -490,8 +490,8 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	{
 		let lst = self.latest_start_time(ctx, task);
 		let ect = self.earliest_completion_time(ctx, task);
-		let dur_lb = self.durations[task].get_lower_bound(ctx);
-		let usage_lb = self.usages[task].get_lower_bound(ctx);
+		let dur_lb = self.durations[task].lower_bound(ctx);
+		let usage_lb = self.usages[task].lower_bound(ctx);
 
 		if !(dur_lb > 0 && usage_lb > 0) {
 			// If the task has no duration or usage, no need to sweep
@@ -512,8 +512,8 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 			}
 		}
 
-		let limit = self.capacity.get_upper_bound(ctx) - max_usage + usage_lb;
-		if limit < self.usages[task].get_upper_bound(ctx) {
+		let limit = self.capacity.upper_bound(ctx) - max_usage + usage_lb;
+		if limit < self.usages[task].upper_bound(ctx) {
 			trace!(
 				task,
 				compulosary_part =? (lst, ect),
@@ -581,8 +581,8 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		let est = self.earliest_start_time(ctx, task);
 		let lst = self.latest_start_time(ctx, task);
 		let ect = self.earliest_completion_time(ctx, task);
-		let dur_lb = self.durations[task].get_lower_bound(ctx);
-		let usage_lb = self.usages[task].get_lower_bound(ctx);
+		let dur_lb = self.durations[task].lower_bound(ctx);
+		let usage_lb = self.usages[task].lower_bound(ctx);
 
 		if dur_lb <= 0 || usage_lb <= 0 {
 			// If the task has no duration or usage, no need to sweep
@@ -593,7 +593,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		let last = self.bounds.partition_point(|&b| b < lst + dur_lb);
 		trace!(task, dur_lb, est, lst, usage_lb, "Task sweep backward");
 		let mut updated_lct = self.latest_completion_time(ctx, task);
-		let max_capacity = self.capacity.get_upper_bound(ctx);
+		let max_capacity = self.capacity.upper_bound(ctx);
 		for i in (1..last).rev() {
 			let b_start = self.bounds[i - 1];
 			let b_end = self.bounds[i];
@@ -686,8 +686,8 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	{
 		let est = self.earliest_start_time(ctx, task);
 		let lst = self.latest_start_time(ctx, task);
-		let dur_lb = self.durations[task].get_lower_bound(ctx);
-		let usage_lb = self.usages[task].get_lower_bound(ctx);
+		let dur_lb = self.durations[task].lower_bound(ctx);
+		let usage_lb = self.usages[task].lower_bound(ctx);
 
 		if dur_lb <= 0 || usage_lb <= 0 {
 			// If the task has no duration or usage, no need to sweep
@@ -698,7 +698,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		let first = self.bounds.partition_point(|&b| b < est);
 		trace!(task, dur_lb, est, lst, usage_lb, "Task sweep forward");
 		let mut updated_est = est;
-		let max_capacity = self.capacity.get_upper_bound(ctx);
+		let max_capacity = self.capacity.upper_bound(ctx);
 		for i in first..self.bounds.len() - 1 {
 			let b_start = self.bounds[i];
 			let b_end = self.bounds[i + 1];
@@ -794,10 +794,10 @@ where
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
 
-		if self.capacity.get_val(ctx).is_some()
-			&& self.start_times.iter().all(|v| v.get_val(ctx).is_some())
-			&& self.durations.iter().all(|v| v.get_val(ctx).is_some())
-			&& self.usages.iter().all(|v| v.get_val(ctx).is_some())
+		if self.capacity.val(ctx).is_some()
+			&& self.start_times.iter().all(|v| v.val(ctx).is_some())
+			&& self.durations.iter().all(|v| v.val(ctx).is_some())
+			&& self.usages.iter().all(|v| v.val(ctx).is_some())
 		{
 			return Ok(SimplificationStatus::Subsumed);
 		}
@@ -809,19 +809,19 @@ where
 		let start_times = self
 			.start_times
 			.iter()
-			.map(|v| slv.get_solver_int(v.clone().into()))
+			.map(|v| slv.solver_int(v.clone().into()))
 			.collect_vec();
 		let durations = self
 			.durations
 			.iter()
-			.map(|v| slv.get_solver_int(v.clone().into()))
+			.map(|v| slv.solver_int(v.clone().into()))
 			.collect_vec();
 		let usages = self
 			.usages
 			.iter()
-			.map(|v| slv.get_solver_int(v.clone().into()))
+			.map(|v| slv.solver_int(v.clone().into()))
 			.collect_vec();
-		let capacity = { slv.get_solver_int(self.capacity.clone().into()) };
+		let capacity = { slv.solver_int(self.capacity.clone().into()) };
 		CumulativeTimeTable::new_in(slv, start_times, durations, usages, capacity);
 		Ok(())
 	}
@@ -865,7 +865,7 @@ where
 		// Sweeping time: update the earliest start times and the latest completion
 		// times
 		for i in 0..self.start_times.len() {
-			let (lb, ub) = self.start_times[i].get_bounds(ctx);
+			let (lb, ub) = self.start_times[i].bounds(ctx);
 			if lb < ub {
 				self.sweep_forward(ctx, i)?;
 				self.sweep_backward(ctx, i)?;
@@ -874,7 +874,7 @@ where
 
 		// Limit usage: update the upper bounds of the resource usage
 		for i in 0..self.start_times.len() {
-			let (req_lb, req_ub) = self.usages[i].get_bounds(ctx);
+			let (req_lb, req_ub) = self.usages[i].bounds(ctx);
 			if req_lb < req_ub
 				&& self.latest_start_time(ctx, i) < self.earliest_completion_time(ctx, i)
 			{

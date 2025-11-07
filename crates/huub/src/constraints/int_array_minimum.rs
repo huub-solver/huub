@@ -50,10 +50,10 @@ where
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
 
-		if let Some(c) = self.min.get_val(ctx) {
-			if self.vars.iter().any(|v| v.get_val(ctx) == Some(c)) {
+		if let Some(c) = self.min.val(ctx) {
+			if self.vars.iter().any(|v| v.val(ctx) == Some(c)) {
 				for v in &self.vars {
-					v.set_lower_bound(ctx, c, [self.min.get_lower_bound_lit(ctx)])?;
+					v.set_lower_bound(ctx, c, [self.min.lower_bound_lit(ctx)])?;
 				}
 				return Ok(SimplificationStatus::Subsumed);
 			}
@@ -66,9 +66,9 @@ where
 		let vars: Vec<_> = self
 			.vars
 			.iter()
-			.map(|v| slv.get_solver_int(v.clone().into()))
+			.map(|v| slv.solver_int(v.clone().into()))
 			.collect();
-		let min = slv.get_solver_int(self.min.clone().into());
+		let min = slv.solver_int(self.min.clone().into());
 		IntArrayMinimumBounds::new_in(slv, vars, min);
 		Ok(())
 	}
@@ -95,30 +95,25 @@ where
 		let (min_ub, min_ub_var) = self
 			.vars
 			.iter()
-			.map(|x| (x.get_upper_bound(ctx), x))
+			.map(|x| (x.upper_bound(ctx), x))
 			.min_by_key(|(ub, _)| *ub)
 			.unwrap();
-		let reason = min_ub_var.get_upper_bound_lit(ctx);
+		let reason = min_ub_var.upper_bound_lit(ctx);
 		self.min.set_upper_bound(ctx, min_ub, [reason])?;
 
 		// set y to be greater than or equal to the minimum of lower bounds of x_i
-		let min_lb = self
-			.vars
-			.iter()
-			.map(|x| x.get_lower_bound(ctx))
-			.min()
-			.unwrap();
+		let min_lb = self.vars.iter().map(|x| x.lower_bound(ctx)).min().unwrap();
 		self.min
 			.set_lower_bound(ctx, min_lb, |ctx: &mut E::PropagationCtx<'_>| {
 				self.vars
 					.iter()
-					.map(|x| x.get_lit(ctx, IntLitMeaning::GreaterEq(min_lb)))
+					.map(|x| x.lit(ctx, IntLitMeaning::GreaterEq(min_lb)))
 					.collect_vec()
 			})?;
 
 		// set x_i to be greater than or equal to y.lowerbound
-		let reason = &[self.min.get_lower_bound_lit(ctx)];
-		let y_lb = self.min.get_lower_bound(ctx);
+		let reason = &[self.min.lower_bound_lit(ctx)];
+		let y_lb = self.min.lower_bound(ctx);
 		for x in self.vars.iter() {
 			x.set_lower_bound(ctx, y_lb, reason)?;
 		}

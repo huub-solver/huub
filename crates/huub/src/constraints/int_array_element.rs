@@ -65,12 +65,12 @@ impl<I1, I2, I3> IntArrayElementBounds<I1, I2, I3> {
 		let mut min_lb = IntVal::MAX;
 		let mut max_ub = IntVal::MIN;
 		for i in index
-			.get_domain(engine)
+			.domain(engine)
 			.iter()
 			.flatten()
 			.filter(|&v| v >= 0 && v < collection.len() as IntVal)
 		{
-			let (lb, ub) = collection[i as usize].get_bounds(engine);
+			let (lb, ub) = collection[i as usize].bounds(engine);
 			if min_support.is_none() || lb < min_lb {
 				min_support = Some(i);
 				min_lb = lb;
@@ -107,8 +107,8 @@ impl IntArrayElementBounds<IntView, IntView, IntView> {
 		IntView: IntDecisionActions<E, Atom = BoolView>,
 	{
 		// Remove out-of-bound values from the index variables
-		let index_ub = index.get_lit(solver, IntLitMeaning::Less(collection.len() as IntVal));
-		let index_lb = index.get_lit(solver, IntLitMeaning::GreaterEq(0));
+		let index_ub = index.lit(solver, IntLitMeaning::Less(collection.len() as IntVal));
+		let index_lb = index.lit(solver, IntLitMeaning::GreaterEq(0));
 		solver.add_clause([index_ub])?;
 		solver.add_clause([index_lb])?;
 
@@ -140,18 +140,14 @@ where
 
 		self.propagate(ctx)?;
 
-		if let Some(i) = self.index.get_val(ctx) {
+		if let Some(i) = self.index.val(ctx) {
 			self.vars[i as usize]
 				.clone()
 				.into()
 				.unify(ctx, self.result.clone())?;
 			return Ok(SimplificationStatus::Subsumed);
-		} else if self.vars.iter().all(|v| v.get_val(ctx).is_some()) {
-			let vars = self
-				.vars
-				.iter()
-				.map(|v| v.get_val(ctx).unwrap())
-				.collect_vec();
+		} else if self.vars.iter().all(|v| v.val(ctx).is_some()) {
+			let vars = self.vars.iter().map(|v| v.val(ctx).unwrap()).collect_vec();
 			let rewrite = IntValArrayElement(IntArrayElementBounds {
 				vars,
 				index: self.index.clone(),
@@ -170,10 +166,10 @@ where
 		let array = self
 			.vars
 			.iter()
-			.map(|v| ctx.get_solver_int(v.clone().into()))
+			.map(|v| ctx.solver_int(v.clone().into()))
 			.collect();
-		let result = ctx.get_solver_int(self.result.clone().into());
-		let index = ctx.get_solver_int(self.index.clone().into());
+		let result = ctx.solver_int(self.result.clone().into());
+		let index = ctx.solver_int(self.index.clone().into());
 		IntArrayElementBounds::new_in(ctx, array, index, result).unwrap();
 		Ok(())
 	}
@@ -193,7 +189,7 @@ where
 		self.index.enqueue_when(ctx, IntPropCond::Domain);
 		for i in self
 			.index
-			.get_domain(ctx)
+			.domain(ctx)
 			.iter()
 			.flatten()
 			.filter(|&v| v >= 0 && v < self.vars.len() as IntVal)
@@ -207,45 +203,45 @@ where
 		// ensure bounds of result and self.vars[self.index] are consistent when
 		// self.index is fixed only trigger when self.index is fixed and (1) y is
 		// updated or (2) self.vars[self.index] is updated
-		if let Some(fixed_index) = self.index.get_val(ctx) {
-			let index_val_lit = self.index.get_val_lit(ctx).unwrap();
+		if let Some(fixed_index) = self.index.val(ctx) {
+			let index_val_lit = self.index.val_lit(ctx).unwrap();
 			let fixed_var = &self.vars[fixed_index as usize];
 			self.result.set_lower_bound(
 				ctx,
-				fixed_var.get_lower_bound(ctx),
+				fixed_var.lower_bound(ctx),
 				|ctx: &mut E::PropagationCtx<'_>| {
-					[index_val_lit.clone(), fixed_var.get_lower_bound_lit(ctx)]
+					[index_val_lit.clone(), fixed_var.lower_bound_lit(ctx)]
 				},
 			)?;
 			fixed_var.set_lower_bound(
 				ctx,
-				self.result.get_lower_bound(ctx),
+				self.result.lower_bound(ctx),
 				|ctx: &mut E::PropagationCtx<'_>| {
-					[index_val_lit.clone(), self.result.get_lower_bound_lit(ctx)]
+					[index_val_lit.clone(), self.result.lower_bound_lit(ctx)]
 				},
 			)?;
 			self.result.set_upper_bound(
 				ctx,
-				fixed_var.get_upper_bound(ctx),
+				fixed_var.upper_bound(ctx),
 				|ctx: &mut E::PropagationCtx<'_>| {
-					[index_val_lit.clone(), fixed_var.get_upper_bound_lit(ctx)]
+					[index_val_lit.clone(), fixed_var.upper_bound_lit(ctx)]
 				},
 			)?;
 			fixed_var.set_upper_bound(
 				ctx,
-				self.result.get_upper_bound(ctx),
+				self.result.upper_bound(ctx),
 				|ctx: &mut E::PropagationCtx<'_>| {
-					[index_val_lit.clone(), self.result.get_upper_bound_lit(ctx)]
+					[index_val_lit.clone(), self.result.upper_bound_lit(ctx)]
 				},
 			)?;
 			return Ok(());
 		}
 
-		let (result_lb, result_ub) = self.result.get_bounds(ctx);
-		let min_support = ctx.get_trailed_int(self.min_support);
-		let max_support = ctx.get_trailed_int(self.max_support);
-		let old_min = self.vars[min_support as usize].get_lower_bound(ctx);
-		let old_max = self.vars[max_support as usize].get_upper_bound(ctx);
+		let (result_lb, result_ub) = self.result.bounds(ctx);
+		let min_support = ctx.trailed_int(self.min_support);
+		let max_support = ctx.trailed_int(self.max_support);
+		let old_min = self.vars[min_support as usize].lower_bound(ctx);
+		let old_max = self.vars[max_support as usize].upper_bound(ctx);
 		let mut need_min_support = old_min > result_lb;
 		let mut need_max_support = old_max < result_ub;
 		let mut new_min_support = min_support;
@@ -267,18 +263,18 @@ where
 		//  (2) result.lower_bound > self.vars[i].upper_bound -> index != i
 		// 2. update min_support and max_support if necessary
 		// only trigger when result variable is updated or self.vars[i] is updated
-		let idx_dom: IntSetVal = self.index.get_domain(ctx);
+		let idx_dom: IntSetVal = self.index.domain(ctx);
 		for i in idx_dom.iter().flatten() {
 			debug_assert!(i >= 0 && i <= self.vars.len() as IntVal);
 			let v = &self.vars[i as usize];
 
-			let (v_lb, v_ub) = v.get_bounds(ctx);
+			let (v_lb, v_ub) = v.bounds(ctx);
 			if result_ub < v_lb {
 				self.index
 					.set_not_eq(ctx, i, |ctx: &mut E::PropagationCtx<'_>| {
 						[
-							self.result.get_lit(ctx, IntLitMeaning::Less(v_lb)),
-							v.get_lower_bound_lit(ctx),
+							self.result.lit(ctx, IntLitMeaning::Less(v_lb)),
+							v.lower_bound_lit(ctx),
 						]
 					})?;
 			}
@@ -287,8 +283,8 @@ where
 				self.index
 					.set_not_eq(ctx, i, |ctx: &mut E::PropagationCtx<'_>| {
 						[
-							self.result.get_lit(ctx, IntLitMeaning::GreaterEq(v_ub + 1)),
-							v.get_upper_bound_lit(ctx),
+							self.result.lit(ctx, IntLitMeaning::GreaterEq(v_ub + 1)),
+							v.upper_bound_lit(ctx),
 						]
 					})?;
 			}
@@ -326,15 +322,15 @@ where
 			self.result
 				.set_lower_bound(ctx, new_min, |ctx: &mut E::PropagationCtx<'_>| {
 					let mut reason = Vec::with_capacity(self.vars.len());
-					let dom = self.index.get_domain(ctx);
+					let dom = self.index.domain(ctx);
 					let mut dom = dom.iter().flatten().peekable();
 					for (i, v) in self.vars.iter().enumerate() {
 						debug_assert!(dom.peek().is_none() || *dom.peek().unwrap() >= i as IntVal);
 						if dom.peek() == Some(&(i as IntVal)) {
-							reason.push(v.get_lit(ctx, IntLitMeaning::GreaterEq(new_min)));
+							reason.push(v.lit(ctx, IntLitMeaning::GreaterEq(new_min)));
 							dom.next();
 						} else {
-							reason.push(self.index.get_lit(ctx, IntLitMeaning::NotEq(i as IntVal)));
+							reason.push(self.index.lit(ctx, IntLitMeaning::NotEq(i as IntVal)));
 						}
 					}
 					reason
@@ -352,15 +348,15 @@ where
 			self.result
 				.set_upper_bound(ctx, new_max, |ctx: &mut E::PropagationCtx<'_>| {
 					let mut reason = Vec::with_capacity(self.vars.len());
-					let dom = self.index.get_domain(ctx);
+					let dom = self.index.domain(ctx);
 					let mut dom = dom.iter().flatten().peekable();
 					for (i, v) in self.vars.iter().enumerate() {
 						debug_assert!(dom.peek().is_none() || *dom.peek().unwrap() >= i as IntVal);
 						if dom.peek() == Some(&(i as IntVal)) {
-							reason.push(v.get_lit(ctx, IntLitMeaning::Less(new_max + 1)));
+							reason.push(v.lit(ctx, IntLitMeaning::Less(new_max + 1)));
 							dom.next();
 						} else {
-							reason.push(self.index.get_lit(ctx, IntLitMeaning::NotEq(i as IntVal)));
+							reason.push(self.index.lit(ctx, IntLitMeaning::NotEq(i as IntVal)));
 						}
 					}
 					reason
@@ -392,7 +388,7 @@ where
 
 		self.0.propagate(ctx)?;
 
-		if let Some(i) = self.0.index.get_val(ctx) {
+		if let Some(i) = self.0.index.val(ctx) {
 			self.0
 				.result
 				.clone()
@@ -405,8 +401,8 @@ where
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let index = slv.get_solver_int(self.0.index.clone().into());
-		let result = slv.get_solver_int(self.0.result.clone().into());
+		let index = slv.solver_int(self.0.index.clone().into());
+		let result = slv.solver_int(self.0.result.clone().into());
 
 		// Make a map from the values of the array to the indexes at which they
 		// occur (follows [`Itertools::into_group_map`])
@@ -420,10 +416,10 @@ where
 
 		#[expect(clippy::iter_over_hash_type, reason = "FxHashMap::iter is stable")]
 		for (val, idxs) in idx_map {
-			let val_eq = result.get_lit(slv, IntLitMeaning::Eq(val));
+			let val_eq = result.lit(slv, IntLitMeaning::Eq(val));
 			let idxs: Vec<_> = idxs
 				.iter()
-				.map(|&i| index.get_lit(slv, IntLitMeaning::Eq(i)))
+				.map(|&i| index.lit(slv, IntLitMeaning::Eq(i)))
 				.collect();
 
 			for &i in idxs.iter() {

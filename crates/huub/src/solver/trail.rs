@@ -57,8 +57,8 @@ pub(crate) enum TrailEvent {
 }
 
 impl BoolInspectionActions<Trail> for RawLit {
-	fn get_val(&self, ctx: &Trail) -> Option<bool> {
-		ctx.get_sat_value(*self)
+	fn val(&self, ctx: &Trail) -> Option<bool> {
+		ctx.sat_value(*self)
 	}
 }
 
@@ -86,17 +86,6 @@ impl Trail {
 	/// Return the current decision level
 	pub(crate) fn decision_level(&self) -> u32 {
 		self.prev_len.len() as u32
-	}
-
-	/// Get the current assigned value for a literal (if any).
-	pub(crate) fn get_sat_value(&self, lit: impl Into<RawLit>) -> Option<bool> {
-		let lit = lit.into();
-		// Note that this doesn't use direct indexing as some operations might check
-		// the value of the variable before it is observed by the solver
-		self.sat_store
-			.get(Self::sat_index(lit.var()))
-			.and_then(|store| store.value)
-			.map(|x| if lit.is_negated() { !x } else { x })
 	}
 
 	/// Method used to restore the state of all value to the point at which a
@@ -252,6 +241,17 @@ impl Trail {
 		i32::from(var) as usize
 	}
 
+	/// Get the current assigned value for a literal (if any).
+	pub(crate) fn sat_value(&self, lit: impl Into<RawLit>) -> Option<bool> {
+		let lit = lit.into();
+		// Note that this doesn't use direct indexing as some operations might check
+		// the value of the variable before it is observed by the solver
+		self.sat_store
+			.get(Self::sat_index(lit.var()))
+			.and_then(|store| store.value)
+			.map(|x| if lit.is_negated() { !x } else { x })
+	}
+
 	/// Create a new trailed integer with initial value `val`
 	pub(crate) fn track_int(&mut self, val: IntVal) -> TrailedInt {
 		self.int_value.push(val)
@@ -315,10 +315,6 @@ impl Default for Trail {
 }
 
 impl TrailingActions for Trail {
-	fn get_trailed_int(&self, i: TrailedInt) -> IntVal {
-		self.int_value[i]
-	}
-
 	fn set_trailed_int(&mut self, i: TrailedInt, v: IntVal) -> IntVal {
 		if self.int_value[i] == v {
 			return v;
@@ -326,6 +322,10 @@ impl TrailingActions for Trail {
 		let old = mem::replace(&mut self.int_value[i], v);
 		self.push_trail(TrailEvent::IntAssignment(i, old));
 		old
+	}
+
+	fn trailed_int(&self, i: TrailedInt) -> IntVal {
+		self.int_value[i]
 	}
 }
 
@@ -432,20 +432,20 @@ mod tests {
 		}
 
 		for (l, &(i, v)) in lits.rev().zip(int_events.iter().rev()) {
-			assert_eq!(trail.get_trailed_int(i), v);
+			assert_eq!(trail.trailed_int(i), v);
 			if v != 0 {
 				let e = trail.undo::<true>().unwrap();
 				let TrailEvent::IntAssignment(event_i, event_v) = e else {
 					panic!("unexpected trail event type {e:?}");
 				};
 				assert_eq!(i, event_i);
-				assert_eq!(trail.get_trailed_int(i), event_v);
+				assert_eq!(trail.trailed_int(i), event_v);
 			}
 
-			assert_eq!(trail.get_sat_value(l), Some(usize::from(i) % 2 == 0));
+			assert_eq!(trail.sat_value(l), Some(usize::from(i) % 2 == 0));
 			let e = trail.undo::<true>().unwrap();
 			assert_eq!(e, TrailEvent::SatAssignment(l));
-			assert_eq!(trail.get_sat_value(l), None);
+			assert_eq!(trail.sat_value(l), None);
 		}
 	}
 }

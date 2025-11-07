@@ -73,9 +73,9 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 		I2: SolverIntView<E>,
 		I3: SolverIntView<E>,
 	{
-		let (base_lb, base_ub) = self.base.get_bounds(ctx);
-		let (res_lb, res_ub) = self.result.get_bounds(ctx);
-		let (exp_lb, exp_ub) = self.exponent.get_bounds(ctx);
+		let (base_lb, base_ub) = self.base.bounds(ctx);
+		let (res_lb, res_ub) = self.result.bounds(ctx);
+		let (exp_lb, exp_ub) = self.exponent.bounds(ctx);
 		let exp_pos_even = match exp_lb {
 			_ if exp_lb % 2 == 1 && exp_lb > 0 => exp_lb + 1,
 			_ if exp_lb < 0 && exp_ub >= 2 => 2,
@@ -97,10 +97,10 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 
 		let mut reason = CachedReason::new(|ctx: &mut E::PropagationCtx<'_>| {
 			vec![
-				self.result.get_lower_bound_lit(ctx),
-				self.result.get_upper_bound_lit(ctx),
-				self.exponent.get_lower_bound_lit(ctx),
-				self.exponent.get_upper_bound_lit(ctx),
+				self.result.lower_bound_lit(ctx),
+				self.result.upper_bound_lit(ctx),
+				self.exponent.lower_bound_lit(ctx),
+				self.exponent.upper_bound_lit(ctx),
 			]
 		});
 
@@ -156,8 +156,8 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 		I2: SolverIntView<E>,
 		I3: SolverIntView<E>,
 	{
-		let (base_lb, base_ub) = self.base.get_bounds(ctx);
-		let (res_lb, res_ub) = self.result.get_bounds(ctx);
+		let (base_lb, base_ub) = self.base.bounds(ctx);
+		let (res_lb, res_ub) = self.result.bounds(ctx);
 
 		if base_lb <= 1 || res_lb <= 1 {
 			// TODO: It seems there should be propagation possible, but log2() certainly
@@ -165,13 +165,13 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 			return Ok(());
 		}
 
-		let (exp_lb, exp_ub) = self.exponent.get_bounds(ctx);
+		let (exp_lb, exp_ub) = self.exponent.bounds(ctx);
 		let mut reason = CachedReason::new(|ctx: &mut E::PropagationCtx<'_>| {
 			vec![
-				self.result.get_lower_bound_lit(ctx),
-				self.result.get_upper_bound_lit(ctx),
-				self.base.get_lower_bound_lit(ctx),
-				self.base.get_upper_bound_lit(ctx),
+				self.result.lower_bound_lit(ctx),
+				self.result.upper_bound_lit(ctx),
+				self.base.lower_bound_lit(ctx),
+				self.base.upper_bound_lit(ctx),
 			]
 		});
 
@@ -207,8 +207,8 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 		I2: SolverIntView<E>,
 		I3: SolverIntView<E>,
 	{
-		let (base_lb, base_ub) = self.base.get_bounds(ctx);
-		let (exp_lb, exp_ub) = self.exponent.get_bounds(ctx);
+		let (base_lb, base_ub) = self.base.bounds(ctx);
+		let (exp_lb, exp_ub) = self.exponent.bounds(ctx);
 		let exp_largest_even = if exp_ub % 2 == 0 || exp_lb == exp_ub {
 			exp_ub
 		} else {
@@ -232,10 +232,10 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 
 		let mut reason = CachedReason::new(|ctx: &mut E::PropagationCtx<'_>| {
 			vec![
-				self.base.get_lower_bound_lit(ctx),
-				self.base.get_upper_bound_lit(ctx),
-				self.exponent.get_lower_bound_lit(ctx),
-				self.exponent.get_upper_bound_lit(ctx),
+				self.base.lower_bound_lit(ctx),
+				self.base.upper_bound_lit(ctx),
+				self.exponent.lower_bound_lit(ctx),
+				self.exponent.upper_bound_lit(ctx),
 			]
 		});
 
@@ -297,13 +297,13 @@ impl IntPowBounds<IntView, IntView, IntView> {
 		IntView: IntDecisionActions<E, Atom = BoolView>,
 	{
 		// Ensure that if the base is negative, then the exponent cannot be zero
-		let (exp_lb, exp_ub) = exponent.get_bounds(solver);
-		let (base_lb, base_ub) = base.get_bounds(solver);
+		let (exp_lb, exp_ub) = exponent.bounds(solver);
+		let (base_lb, base_ub) = base.bounds(solver);
 		if exp_lb < 0 || (base_lb..=base_ub).contains(&0) {
 			// (exp < 0) -> (base != 0)
 			let clause = [
-				exponent.get_lit(solver, IntLitMeaning::GreaterEq(0)),
-				base.get_lit(solver, IntLitMeaning::NotEq(0)),
+				exponent.lit(solver, IntLitMeaning::GreaterEq(0)),
+				base.lit(solver, IntLitMeaning::NotEq(0)),
 			];
 			solver.add_clause(clause)?;
 		}
@@ -312,8 +312,8 @@ impl IntPowBounds<IntView, IntView, IntView> {
 		if (exp_lb..=exp_ub).contains(&0) {
 			// (exp == 0) -> (res == 1)
 			let clause = [
-				exponent.get_lit(solver, IntLitMeaning::NotEq(0)),
-				result.get_lit(solver, IntLitMeaning::Eq(1)),
+				exponent.lit(solver, IntLitMeaning::NotEq(0)),
+				result.lit(solver, IntLitMeaning::Eq(1)),
 			];
 			solver.add_clause(clause)?;
 		}
@@ -339,24 +339,24 @@ where
 		ctx: &mut E::PropagationCtx<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		// If the base is negative, then the exponent cannot be zero
-		if self.base.get_upper_bound(ctx) < 0 {
+		if self.base.upper_bound(ctx) < 0 {
 			self.base
-				.set_not_eq(ctx, 0, [self.base.get_upper_bound_lit(ctx)])?;
+				.set_not_eq(ctx, 0, [self.base.upper_bound_lit(ctx)])?;
 		}
 		// If the exponent is zero, then the result is one
-		if self.exponent.get_val(ctx) == Some(0) {
+		if self.exponent.val(ctx) == Some(0) {
 			self.result
 				.set_val(ctx, 1, |ctx: &mut E::PropagationCtx<'_>| {
-					[self.exponent.get_val_lit(ctx).unwrap()]
+					[self.exponent.val_lit(ctx).unwrap()]
 				})?;
 		}
 
 		self.propagate(ctx)?;
 
 		// Subsume if all variables are fixed.
-		if self.base.get_val(ctx).is_some()
-			&& self.exponent.get_val(ctx).is_some()
-			&& self.result.get_val(ctx).is_some()
+		if self.base.val(ctx).is_some()
+			&& self.exponent.val(ctx).is_some()
+			&& self.result.val(ctx).is_some()
 		{
 			return Ok(SimplificationStatus::Subsumed);
 		}
@@ -365,9 +365,9 @@ where
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let base = slv.get_solver_int(self.base.clone().into());
-		let exponent = slv.get_solver_int(self.exponent.clone().into());
-		let result = slv.get_solver_int(self.result.clone().into());
+		let base = slv.solver_int(self.base.clone().into());
+		let exponent = slv.solver_int(self.exponent.clone().into());
+		let result = slv.solver_int(self.result.clone().into());
 		IntPowBounds::new_in(slv, base, exponent, result).unwrap();
 		Ok(())
 	}

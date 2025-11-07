@@ -235,7 +235,7 @@ where
 			.propagator
 			.start_times
 			.iter()
-			.all(|v| v.get_val(ctx).is_some())
+			.all(|v| v.val(ctx).is_some())
 		{
 			return Ok(SimplificationStatus::Subsumed);
 		}
@@ -248,13 +248,13 @@ where
 			.propagator
 			.start_times
 			.iter()
-			.map(|&v| slv.get_solver_int(v))
+			.map(|&v| slv.solver_int(v))
 			.collect_vec();
 		// Add symmetric version of start time for upper bound propagation
 		let iter = start_times.iter().zip(self.propagator.durations.iter());
 		let horizon = iter
 			.clone()
-			.map(|(v, d)| v.get_upper_bound(slv) + d)
+			.map(|(v, d)| v.upper_bound(slv) + d)
 			.max()
 			.unwrap();
 		let symmetric_vars: Vec<IntView> = iter.map(|(v, d)| -*v + (horizon - d)).collect();
@@ -328,7 +328,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	where
 		I: IntInspectionActions<Ctx>,
 	{
-		self.start_times[i].get_lower_bound(ctx)
+		self.start_times[i].lower_bound(ctx)
 	}
 
 	/// Explain edge finding propagation for task `i` with the time window
@@ -381,8 +381,8 @@ impl<I> DisjunctiveStrictPropagator<I> {
 		// in O) [start(t') >= earliest_start] /\ forall (t' in O) [end(t') <=
 		// latest_completion]
 		let mut clause = Vec::new();
-		let (bv, _) = self.start_times[task_no]
-			.get_lit_relaxed(ctx, IntLitMeaning::GreaterEq(earliest_start));
+		let (bv, _) =
+			self.start_times[task_no].lit_relaxed(ctx, IntLitMeaning::GreaterEq(earliest_start));
 		clause.push(bv);
 		let mut energy = latest_completion - earliest_start - self.durations[task_no];
 		for i in 0..self.start_times.len() {
@@ -390,8 +390,8 @@ impl<I> DisjunctiveStrictPropagator<I> {
 				&& earliest_start_times[i] >= earliest_start
 				&& latest_completion_times[i] <= latest_completion
 			{
-				clause.push(self.start_times[i].get_lower_bound_lit(ctx));
-				let (bv, _) = self.start_times[i].get_lit_relaxed(
+				clause.push(self.start_times[i].lower_bound_lit(ctx));
+				let (bv, _) = self.start_times[i].lit_relaxed(
 					ctx,
 					IntLitMeaning::Less(latest_completion - self.durations[i] + 1),
 				);
@@ -442,20 +442,20 @@ impl<I> DisjunctiveStrictPropagator<I> {
 
 		// Explain the reason why task i cannot be the last task
 		let mut clause = Vec::new();
-		clause.push(self.start_times[task_no].get_upper_bound_lit(ctx));
+		clause.push(self.start_times[task_no].upper_bound_lit(ctx));
 		for j in nlset {
 			// explain the reason why all tasks in NLset(i) will stay in NLset(i)
 			//
 			// (1) If for all j in NLset(i) [est_j ≥ earliest_start], then ect_Ω >
 			// lst_i, and NLset(i) \not\prec i
 			let (bv, _) =
-				self.start_times[j].get_lit_relaxed(ctx, IntLitMeaning::GreaterEq(earliest_start));
+				self.start_times[j].lit_relaxed(ctx, IntLitMeaning::GreaterEq(earliest_start));
 			clause.push(bv);
 			// (2) explain the reason why the latest completion time of task i is set
 			// to latest_completion If for all j in NLset(i) [lst_j ≤ lct_i'], then
 			// max{lst_j, j \in Ω} ≤ lct_i', and lct_i' should be set
 			let (bv, _) =
-				self.start_times[j].get_lit_relaxed(ctx, IntLitMeaning::Less(updated_lct_i + 1));
+				self.start_times[j].lit_relaxed(ctx, IntLitMeaning::Less(updated_lct_i + 1));
 			clause.push(bv);
 		}
 		clause
@@ -473,7 +473,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	{
 		move |ctx: &mut Ctx| {
 			let binding_task = self.ot_tree.binding_task(time_bound, 0);
-			let earliest_start = self.start_times[binding_task].get_lower_bound(ctx);
+			let earliest_start = self.start_times[binding_task].lower_bound(ctx);
 			let mut slack = time_bound - earliest_start;
 			let mut e_tasks = Vec::new();
 
@@ -498,11 +498,11 @@ impl<I> DisjunctiveStrictPropagator<I> {
 			e_tasks
 				.iter()
 				.flat_map(|&i| {
-					let bv = self.start_times[i].get_lit(
+					let bv = self.start_times[i].lit(
 						ctx,
 						IntLitMeaning::Less((time_bound - slack) - self.durations[i]),
 					);
-					[self.start_times[i].get_lower_bound_lit(ctx), bv]
+					[self.start_times[i].lower_bound_lit(ctx), bv]
 				})
 				.collect_vec()
 		}
@@ -546,17 +546,17 @@ impl<I> DisjunctiveStrictPropagator<I> {
 		// bound
 		let mut clause = Vec::new();
 		let (bv, _) =
-			self.start_times[task_no].get_lit_relaxed(ctx, IntLitMeaning::GreaterEq(task_i_est));
+			self.start_times[task_no].lit_relaxed(ctx, IntLitMeaning::GreaterEq(task_i_est));
 		clause.push(bv);
 		for j in precedence_set {
 			let v = self.start_times[j].clone();
 			// (1) explain the reason why all tasks in precedence_set will stay in
 			// precedence_set
-			let (bv, _) = v.get_lit_relaxed(ctx, IntLitMeaning::GreaterEq(earliest_start));
+			let (bv, _) = v.lit_relaxed(ctx, IntLitMeaning::GreaterEq(earliest_start));
 			clause.push(bv);
 			// (2) explain the reason why the earliest start time of task i is set to
 			// earliest completeion time of the precedence set
-			let (bv, _) = v.get_lit_relaxed(
+			let (bv, _) = v.lit_relaxed(
 				ctx,
 				IntLitMeaning::Less(task_i_est + self.durations[task_no]),
 			);
@@ -578,7 +578,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	where
 		I: IntInspectionActions<Ctx>,
 	{
-		self.start_times[i].get_upper_bound(ctx)
+		self.start_times[i].upper_bound(ctx)
 	}
 
 	/// Create a new [`DisjunctiveStrict`] propagator and post it in the solver.
@@ -733,7 +733,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 				let earliest_start_time = self.earliest_start_time(ctx, i);
 				let earliest_completion_time = self.earliest_completion_time(ctx, i);
 				if updated_est[i] > earliest_start_time {
-					let lb = self.start_times[binding_task].get_lower_bound(ctx);
+					let lb = self.start_times[binding_task].lower_bound(ctx);
 					ctx.set_trailed_int(self.trailed_info[i].earliest_start, lb);
 					ctx.set_trailed_int(
 						self.trailed_info[i].latest_completion,
@@ -794,7 +794,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 		let earliest_start: Vec<_> = self
 			.start_times
 			.iter()
-			.map(|v| v.get_lower_bound(ctx))
+			.map(|v| v.lower_bound(ctx))
 			.collect();
 		self.ot_tree
 			.fill(earliest_start.as_slice(), self.durations.as_slice());
@@ -840,9 +840,9 @@ impl<I> DisjunctiveStrictPropagator<I> {
 			while j > 0 && self.ot_tree.root().earliest_completion_gray > lct {
 				let ect_gray_in_tree = self.ot_tree.root().earliest_completion_gray;
 				let blocked_task = self.ot_tree.blocked_task(ect_gray_in_tree);
-				if self.start_times[blocked_task].get_lower_bound(ctx) < ect_in_tree {
+				if self.start_times[blocked_task].lower_bound(ctx) < ect_in_tree {
 					let gray_est_task = self.ot_tree.blocking_task(ect_gray_in_tree);
-					let lb = self.start_times[gray_est_task].get_lower_bound(ctx);
+					let lb = self.start_times[gray_est_task].lower_bound(ctx);
 					// set trailed integer for lazy explanation
 					ctx.set_trailed_int(self.trailed_info[blocked_task].earliest_start, lb);
 					ctx.set_trailed_int(
@@ -1066,7 +1066,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 				let binding_task = self
 					.ot_tree
 					.binding_task(self.ot_tree.root().earliest_completion, 0);
-				let earliest_start = self.start_times[binding_task].get_lower_bound(ctx);
+				let earliest_start = self.start_times[binding_task].lower_bound(ctx);
 				let expl = self.explain_overload_checking(lct_i + 1);
 				trace!(
 					time_window =? (earliest_start, lct_i),
@@ -1133,8 +1133,8 @@ where
 	) -> Conjunction<E::Atom> {
 		// Extract the task number and propagation rule from the data
 		let task_no = self.task_no_from_data(data);
-		let earliest_start = ctx.get_trailed_int(self.trailed_info[task_no].earliest_start);
-		let latest_completion = ctx.get_trailed_int(self.trailed_info[task_no].latest_completion);
+		let earliest_start = ctx.trailed_int(self.trailed_info[task_no].earliest_start);
+		let latest_completion = ctx.trailed_int(self.trailed_info[task_no].latest_completion);
 
 		// Explain the reason based on the propagation rule of disjunctive.
 		match self.propagation_rule_from_data(data) {
@@ -1165,7 +1165,7 @@ where
 		let earliest_start: Vec<_> = self
 			.start_times
 			.iter()
-			.map(|v| v.get_lower_bound(ctx))
+			.map(|v| v.lower_bound(ctx))
 			.collect();
 		self.tasks_sorted_by_earliest_start
 			.sort_by_key(|&i| earliest_start[i]);

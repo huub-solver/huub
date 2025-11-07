@@ -199,7 +199,7 @@ where
 		ctx: &mut E::PropagationCtx<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		let mut resolver = |bv: BoolDecision| {
-			if let Some(b) = bv.get_val(ctx) {
+			if let Some(b) = bv.val(ctx) {
 				return Err(b);
 			};
 			Ok(bv)
@@ -256,7 +256,7 @@ where
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let mut resolver = |bv: BoolDecision| {
-			let inner = slv.get_solver_bool(bv);
+			let inner = slv.solver_bool(bv);
 			match inner.0 {
 				BoolViewInner::Const(b) => Err(b),
 				BoolViewInner::Lit(l) => Ok(l),
@@ -462,7 +462,7 @@ impl<Oracle: ClauseDatabase> ClauseDatabase for ReformulationContext<'_, Oracle>
 }
 
 impl<Oracle> DecisionActions for ReformulationContext<'_, Oracle> {
-	fn get_num_conflicts(&self) -> u64 {
+	fn num_conflicts(&self) -> u64 {
 		self.slv.engine.borrow().state.statistics.conflicts
 	}
 }
@@ -476,51 +476,51 @@ impl<Oracle: ExternalPropagation> InitializationActions for ReformulationContext
 impl<Oracle: ClauseDatabase + ExternalPropagation> ReformulationActions
 	for ReformulationContext<'_, Oracle>
 {
+	fn bool_val(&self, bv: RawLit) -> Option<bool> {
+		bv.val(self.slv)
+	}
+
 	fn check_int_in_domain(&self, var: IntVarRef, val: IntVal) -> bool {
-		var.check_in_domain(self.slv, val)
+		var.in_domain(self.slv, val)
 	}
 
-	fn get_bool_val(&self, bv: RawLit) -> Option<bool> {
-		bv.get_val(self.slv)
+	fn int_domain(&self, var: IntVarRef) -> IntSetVal {
+		var.domain(self.slv)
 	}
 
-	fn get_int_domain(&self, var: IntVarRef) -> IntSetVal {
-		var.get_domain(self.slv)
+	fn int_lit(&mut self, var: IntVarRef, meaning: IntLitMeaning) -> BoolView {
+		var.lit(self.slv, meaning)
 	}
 
-	fn get_int_lit(&mut self, var: IntVarRef, meaning: IntLitMeaning) -> BoolView {
-		var.get_lit(self.slv, meaning)
+	fn int_lit_meaning(&self, var: IntVarRef, lit: BoolView) -> Option<IntLitMeaning> {
+		var.lit_meaning(self.slv, lit)
 	}
 
-	fn get_int_lit_meaning(&self, var: IntVarRef, lit: BoolView) -> Option<IntLitMeaning> {
-		var.get_lit_meaning(self.slv, lit)
+	fn int_lower_bound(&self, var: IntVarRef) -> IntVal {
+		var.lower_bound(self.slv)
 	}
 
-	fn get_int_lower_bound(&self, var: IntVarRef) -> IntVal {
-		var.get_lower_bound(self.slv)
+	fn int_lower_bound_lit(&self, var: IntVarRef) -> BoolView {
+		var.lower_bound_lit(self.slv)
 	}
 
-	fn get_int_lower_bound_lit(&self, var: IntVarRef) -> BoolView {
-		var.get_lower_bound_lit(self.slv)
+	fn int_upper_bound(&self, var: IntVarRef) -> IntVal {
+		var.upper_bound(self.slv)
 	}
 
-	fn get_int_upper_bound(&self, var: IntVarRef) -> IntVal {
-		var.get_upper_bound(self.slv)
-	}
-
-	fn get_int_upper_bound_lit(&self, var: IntVarRef) -> BoolView {
-		var.get_upper_bound_lit(self.slv)
-	}
-	fn get_solver_bool(&mut self, bv: BoolDecision) -> BoolView {
-		self.map.get_bool(self.slv, bv)
-	}
-
-	fn get_solver_int(&mut self, iv: IntDecision) -> IntView {
-		self.map.get_int(self.slv, iv)
+	fn int_upper_bound_lit(&self, var: IntVarRef) -> BoolView {
+		var.upper_bound_lit(self.slv)
 	}
 
 	fn new_bool_var(&mut self) -> BoolView {
 		BoolView(BoolViewInner::Lit(self.slv.new_lit()))
+	}
+	fn solver_bool(&mut self, bv: BoolDecision) -> BoolView {
+		self.map.get_bool(self.slv, bv)
+	}
+
+	fn solver_int(&mut self, iv: IntDecision) -> IntView {
+		self.map.get_int(self.slv, iv)
 	}
 
 	fn try_int_lit(&self, var: IntVarRef, meaning: IntLitMeaning) -> Option<BoolView> {
@@ -529,12 +529,12 @@ impl<Oracle: ClauseDatabase + ExternalPropagation> ReformulationActions
 }
 
 impl<Oracle> TrailingActions for ReformulationContext<'_, Oracle> {
-	fn get_trailed_int(&self, i: TrailedInt) -> IntVal {
-		self.slv.get_trailed_int(i)
-	}
-
 	fn set_trailed_int(&mut self, i: TrailedInt, v: IntVal) -> IntVal {
 		self.slv.set_trailed_int(i, v)
+	}
+
+	fn trailed_int(&self, i: TrailedInt) -> IntVal {
+		self.slv.trailed_int(i)
 	}
 }
 
@@ -581,10 +581,10 @@ impl ReformulationMap {
 	) -> BoolView {
 		use BoolDecisionInner::*;
 
-		let get_int_lit =
+		let int_lit =
 			|slv: &mut Solver<Oracle>, iv: IntDecisionIndex, lit_meaning: IntLitMeaning| {
 				let iv = self.get_int(slv, IntDecision(IntDecisionInner::Var(iv)));
-				iv.get_lit(slv, lit_meaning)
+				iv.lit(slv, lit_meaning)
 			};
 
 		match bv.0 {
@@ -598,10 +598,10 @@ impl ReformulationMap {
 				}
 			}
 			Const(c) => c.into(),
-			IntEq(v, i) => get_int_lit(slv, v, IntLitMeaning::Eq(i)),
-			IntGreaterEq(v, i) => get_int_lit(slv, v, IntLitMeaning::GreaterEq(i)),
-			IntLess(v, i) => get_int_lit(slv, v, IntLitMeaning::Less(i)),
-			IntNotEq(v, i) => get_int_lit(slv, v, IntLitMeaning::NotEq(i)),
+			IntEq(v, i) => int_lit(slv, v, IntLitMeaning::Eq(i)),
+			IntGreaterEq(v, i) => int_lit(slv, v, IntLitMeaning::GreaterEq(i)),
+			IntLess(v, i) => int_lit(slv, v, IntLitMeaning::Less(i)),
+			IntNotEq(v, i) => int_lit(slv, v, IntLitMeaning::NotEq(i)),
 		}
 	}
 
@@ -682,19 +682,19 @@ impl ReformulationMapBuilder {
 			Const(b) => b.into(),
 			IntEq(idx, val) => {
 				let iv = self.get_or_create_int(model, slv, idx);
-				iv.get_lit(slv, IntLitMeaning::Eq(val))
+				iv.lit(slv, IntLitMeaning::Eq(val))
 			}
 			IntGreaterEq(idx, val) => {
 				let iv = self.get_or_create_int(model, slv, idx);
-				iv.get_lit(slv, IntLitMeaning::GreaterEq(val))
+				iv.lit(slv, IntLitMeaning::GreaterEq(val))
 			}
 			IntLess(idx, val) => {
 				let iv = self.get_or_create_int(model, slv, idx);
-				iv.get_lit(slv, IntLitMeaning::Less(val))
+				iv.lit(slv, IntLitMeaning::Less(val))
 			}
 			IntNotEq(idx, val) => {
 				let iv = self.get_or_create_int(model, slv, idx);
-				iv.get_lit(slv, IntLitMeaning::NotEq(val))
+				iv.lit(slv, IntLitMeaning::NotEq(val))
 			}
 		}
 	}

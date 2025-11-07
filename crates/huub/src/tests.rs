@@ -49,8 +49,8 @@ fn lin_multi_alias() {
 	let z_trans = z + 1;
 	assert!(x.unify(&mut prb, y_trans).is_ok());
 	assert!(y.unify(&mut prb, z_trans).is_ok());
-	assert_eq!(x_trans.get_lower_bound(&prb), -11);
-	assert_eq!(x_trans.get_upper_bound(&prb), -4);
+	assert_eq!(x_trans.lower_bound(&prb), -11);
+	assert_eq!(x_trans.upper_bound(&prb), -4);
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn test_unify_int_lin_view_domains() {
 	let a = map.get_int(&mut slv, a);
 	let b = map.get_int(&mut slv, b);
 
-	let (res, _, solns) = slv.get_all_solutions(&[a.into(), b.into()]);
+	let (res, _, solns) = slv.collect_all_solutions(&[a.into(), b.into()]);
 	assert_eq!(res, SolveResult::Complete);
 	assert_eq!(solns, vec![vec![Value::Int(1), Value::Int(3)]]);
 }
@@ -254,7 +254,7 @@ impl Solver {
 
 	pub(crate) fn expect_solutions<V: Into<View> + Clone>(self, vars: &[V], expected: Expect) {
 		let vars: Vec<_> = vars.iter().map(|v| v.clone().into()).collect();
-		let (status, _, mut solns) = self.get_all_solutions(&vars);
+		let (status, _, mut solns) = self.collect_all_solutions(&vars);
 		assert_eq!(status, SolveResult::Complete);
 		solns.sort();
 		let solns = format!(

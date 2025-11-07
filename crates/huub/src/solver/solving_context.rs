@@ -85,7 +85,7 @@ impl<'a> BoolPropagationActions<SolvingContext<'a>> for BoolView {
 }
 
 impl IntDecisionActions<SolvingContext<'_>> for IntVarRef {
-	fn get_lit(&self, ctx: &mut SolvingContext<'_>, meaning: IntLitMeaning) -> BoolView {
+	fn lit(&self, ctx: &mut SolvingContext<'_>, meaning: IntLitMeaning) -> BoolView {
 		let var = &mut ctx.state.int_vars[*self];
 		let new_var = |def: LazyLitDef| {
 			// Create new variable
@@ -103,43 +103,43 @@ impl IntDecisionActions<SolvingContext<'_>> for IntVarRef {
 			}
 			v
 		};
-		var.bool_lit(meaning, new_var).0
+		var.lit(meaning, new_var).0
 	}
 }
 
 impl IntInspectionActions<SolvingContext<'_>> for IntVarRef {
 	type Atom = <IntVarRef as IntInspectionActions<State>>::Atom;
 
-	fn check_in_domain(&self, ctx: &SolvingContext<'_>, val: IntVal) -> bool {
-		self.check_in_domain(ctx.state, val)
+	fn domain(&self, ctx: &SolvingContext<'_>) -> crate::IntSetVal {
+		self.domain(ctx.state)
 	}
 
-	fn get_domain(&self, ctx: &SolvingContext<'_>) -> crate::IntSetVal {
-		self.get_domain(ctx.state)
+	fn in_domain(&self, ctx: &SolvingContext<'_>, val: IntVal) -> bool {
+		self.in_domain(ctx.state, val)
 	}
 
-	fn get_lit_meaning(&self, ctx: &SolvingContext<'_>, lit: Self::Atom) -> Option<IntLitMeaning> {
-		self.get_lit_meaning(ctx.state, lit)
+	fn lit_meaning(&self, ctx: &SolvingContext<'_>, lit: Self::Atom) -> Option<IntLitMeaning> {
+		self.lit_meaning(ctx.state, lit)
 	}
 
-	fn get_lower_bound(&self, ctx: &SolvingContext<'_>) -> IntVal {
-		self.get_lower_bound(ctx.state)
+	fn lower_bound(&self, ctx: &SolvingContext<'_>) -> IntVal {
+		self.lower_bound(ctx.state)
 	}
 
-	fn get_lower_bound_lit(&self, ctx: &SolvingContext<'_>) -> Self::Atom {
-		self.get_lower_bound_lit(ctx.state)
-	}
-
-	fn get_upper_bound(&self, ctx: &SolvingContext<'_>) -> IntVal {
-		self.get_upper_bound(ctx.state)
-	}
-
-	fn get_upper_bound_lit(&self, ctx: &SolvingContext<'_>) -> Self::Atom {
-		self.get_upper_bound_lit(ctx.state)
+	fn lower_bound_lit(&self, ctx: &SolvingContext<'_>) -> Self::Atom {
+		self.lower_bound_lit(ctx.state)
 	}
 
 	fn try_lit(&self, ctx: &SolvingContext<'_>, meaning: IntLitMeaning) -> Option<Self::Atom> {
 		self.try_lit(ctx.state, meaning)
+	}
+
+	fn upper_bound(&self, ctx: &SolvingContext<'_>) -> IntVal {
+		self.upper_bound(ctx.state)
+	}
+
+	fn upper_bound_lit(&self, ctx: &SolvingContext<'_>) -> Self::Atom {
+		self.upper_bound_lit(ctx.state)
 	}
 }
 
@@ -184,8 +184,8 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
 }
 
 impl BoolInspectionActions<SolvingContext<'_>> for RawLit {
-	fn get_val(&self, ctx: &SolvingContext<'_>) -> Option<bool> {
-		self.get_val(ctx.state)
+	fn val(&self, ctx: &SolvingContext<'_>) -> Option<bool> {
+		self.val(ctx.state)
 	}
 }
 
@@ -198,7 +198,7 @@ impl<'a> BoolPropagationActions<SolvingContext<'a>> for RawLit {
 		ctx: &mut SolvingContext<'a>,
 		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
 	) -> Result<(), Self::Conflict> {
-		match ctx.state.trail.get_sat_value(*self) {
+		match ctx.state.trail.sat_value(*self) {
 			Some(true) => Ok(()),
 			Some(false) => Err(Conflict::new(ctx, Some(*self), reason)),
 			None => {
@@ -250,7 +250,7 @@ impl<'a> SolvingContext<'a> {
 		lit_req: IntLitMeaning,
 		reason: impl ReasonBuilder<Self, BoolView>,
 	) -> Result<(), Conflict<RawLit>> {
-		let (lb, ub) = self.state.int_vars[iv].get_bounds(self);
+		let (lb, ub) = self.state.int_vars[iv].bounds(self);
 		// Check whether a change is redundant, conflicting, or new with respect to
 		// the bounds of an integer variable
 		let check = match lit_req {
@@ -287,7 +287,7 @@ impl<'a> SolvingContext<'a> {
 			}
 			v
 		};
-		let (bv, lit_req) = self.state.int_vars[iv].bool_lit(lit_req, new_var);
+		let (bv, lit_req) = self.state.int_vars[iv].lit(lit_req, new_var);
 
 		// Detect propagation conflicts:
 		// 1. Always false (and immediate return if always true).
@@ -301,7 +301,7 @@ impl<'a> SolvingContext<'a> {
 			return Err(Conflict::new(self, lit.into(), reason));
 		}
 		// 3. Literal is assigned false (and immediate return if assigned true).
-		match self.state.trail.get_sat_value(lit) {
+		match self.state.trail.sat_value(lit) {
 			Some(true) => return Ok(()),
 			Some(false) => return Err(Conflict::new(self, lit.into(), reason)),
 			None => {}
@@ -402,7 +402,7 @@ impl Debug for SolvingContext<'_> {
 }
 
 impl DecisionActions for SolvingContext<'_> {
-	fn get_num_conflicts(&self) -> u64 {
+	fn num_conflicts(&self) -> u64 {
 		self.state.statistics.conflicts
 	}
 }
@@ -424,11 +424,11 @@ impl PropagationActions for SolvingContext<'_> {
 }
 
 impl TrailingActions for SolvingContext<'_> {
-	fn get_trailed_int(&self, x: TrailedInt) -> IntVal {
-		self.state.get_trailed_int(x)
-	}
-
 	fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal {
 		self.state.set_trailed_int(x, v)
+	}
+
+	fn trailed_int(&self, x: TrailedInt) -> IntVal {
+		self.state.trailed_int(x)
 	}
 }

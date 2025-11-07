@@ -46,8 +46,7 @@ impl IntAbsBounds<IntView, IntView, RawLit> {
 		E: AddAssign<BoxedPropagator> + InitializationActions + ?Sized,
 		IntView: IntDecisionActions<E, Atom = BoolView>,
 	{
-		let BoolViewInner::Lit(origin_positive) =
-			origin.get_lit(solver, IntLitMeaning::GreaterEq(0)).0
+		let BoolViewInner::Lit(origin_positive) = origin.lit(solver, IntLitMeaning::GreaterEq(0)).0
 		else {
 			panic!("origin variable in absolute value constraint is known positive or negative");
 		};
@@ -71,7 +70,7 @@ where
 		&mut self,
 		ctx: &mut E::PropagationCtx<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
-		match self.origin_positive.get_val(ctx) {
+		match self.origin_positive.val(ctx) {
 			Some(true) => {
 				self.origin.unify(ctx, self.abs.clone())?;
 				Ok(SimplificationStatus::Subsumed)
@@ -88,8 +87,8 @@ where
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let origin = slv.get_solver_int(self.origin.clone().into());
-		let abs = slv.get_solver_int(self.abs.clone().into());
+		let origin = slv.solver_int(self.origin.clone().into());
+		let abs = slv.solver_int(self.abs.clone().into());
 		IntAbsBounds::new_in(slv, origin, abs);
 		Ok(())
 	}
@@ -110,32 +109,32 @@ where
 
 	#[tracing::instrument(name = "int_abs", level = "trace", skip(self, ctx))]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
-		let (lb, ub) = self.origin.get_bounds(ctx);
+		let (lb, ub) = self.origin.bounds(ctx);
 
-		match self.origin_positive.get_val(ctx) {
+		match self.origin_positive.val(ctx) {
 			Some(false) => {
 				// If we know that the origin is negative, then just negate the bounds
 				self.abs
 					.set_lower_bound(ctx, -ub, |ctx: &mut E::PropagationCtx<'_>| {
-						[self.origin.get_upper_bound_lit(ctx)]
+						[self.origin.upper_bound_lit(ctx)]
 					})?;
 				self.abs
 					.set_upper_bound(ctx, -lb, |ctx: &mut E::PropagationCtx<'_>| {
 						[
-							self.origin.get_lower_bound_lit(ctx),
+							self.origin.lower_bound_lit(ctx),
 							(!self.origin_positive.clone()).into(),
 						]
 					})?;
 
-				let (lb, ub) = self.abs.get_bounds(ctx);
+				let (lb, ub) = self.abs.bounds(ctx);
 				self.origin
 					.set_lower_bound(ctx, -ub, |ctx: &mut E::PropagationCtx<'_>| {
-						[self.abs.get_upper_bound_lit(ctx)]
+						[self.abs.upper_bound_lit(ctx)]
 					})?;
 				self.origin
 					.set_upper_bound(ctx, -lb, |ctx: &mut E::PropagationCtx<'_>| {
 						[
-							self.abs.get_lower_bound_lit(ctx),
+							self.abs.lower_bound_lit(ctx),
 							(!self.origin_positive.clone()).into(),
 						]
 					})?;
@@ -145,27 +144,27 @@ where
 				// are the same.
 				self.abs
 					.set_lower_bound(ctx, lb, |ctx: &mut E::PropagationCtx<'_>| {
-						[self.origin.get_lower_bound_lit(ctx)]
+						[self.origin.lower_bound_lit(ctx)]
 					})?;
 				self.abs
 					.set_upper_bound(ctx, ub, |ctx: &mut E::PropagationCtx<'_>| {
 						[
-							self.origin.get_upper_bound_lit(ctx),
+							self.origin.upper_bound_lit(ctx),
 							self.origin_positive.clone().into(),
 						]
 					})?;
 
-				let (lb, ub) = self.abs.get_bounds(ctx);
+				let (lb, ub) = self.abs.bounds(ctx);
 				self.origin
 					.set_lower_bound(ctx, lb, |ctx: &mut E::PropagationCtx<'_>| {
 						[
-							self.abs.get_lower_bound_lit(ctx),
+							self.abs.lower_bound_lit(ctx),
 							self.origin_positive.clone().into(),
 						]
 					})?;
 				self.origin
 					.set_upper_bound(ctx, ub, |ctx: &mut E::PropagationCtx<'_>| {
-						[self.abs.get_upper_bound_lit(ctx)]
+						[self.abs.upper_bound_lit(ctx)]
 					})?;
 			}
 			None => {
@@ -175,15 +174,15 @@ where
 				self.abs
 					.set_upper_bound(ctx, abs_max, |ctx: &mut E::PropagationCtx<'_>| {
 						[
-							self.origin.get_lit(ctx, IntLitMeaning::GreaterEq(-abs_max)),
-							self.origin.get_lit(ctx, IntLitMeaning::Less(abs_max + 1)),
+							self.origin.lit(ctx, IntLitMeaning::GreaterEq(-abs_max)),
+							self.origin.lit(ctx, IntLitMeaning::Less(abs_max + 1)),
 						]
 					})?;
 
 				// If the upper bound of the absolute value variable have changed, we
 				// propagate bounds of the origin variable
-				let abs_ub = self.abs.get_upper_bound(ctx);
-				let ub_lit = self.abs.get_upper_bound_lit(ctx);
+				let abs_ub = self.abs.upper_bound(ctx);
+				let ub_lit = self.abs.upper_bound_lit(ctx);
 				self.origin
 					.set_lower_bound(ctx, -abs_ub, [ub_lit.clone()])?;
 				self.origin.set_upper_bound(ctx, abs_ub, [ub_lit])?;

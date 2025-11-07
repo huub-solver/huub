@@ -54,11 +54,11 @@ where
 		ctx: &mut E::PropagationCtx<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
-		if let Some(f1) = self.factor1.get_val(ctx) {
+		if let Some(f1) = self.factor1.val(ctx) {
 			(self.factor2.clone() * f1).unify(ctx, self.product.clone())?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
-		if let Some(f2) = self.factor2.get_val(ctx) {
+		if let Some(f2) = self.factor2.val(ctx) {
 			(self.factor1.clone() * f2).unify(ctx, self.product.clone())?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
@@ -66,9 +66,9 @@ where
 	}
 
 	fn to_solver(&self, ctx: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let f1 = ctx.get_solver_int(self.factor1.clone().into());
-		let f2 = ctx.get_solver_int(self.factor2.clone().into());
-		let p = ctx.get_solver_int(self.product.clone().into());
+		let f1 = ctx.solver_int(self.factor1.clone().into());
+		let f2 = ctx.solver_int(self.factor2.clone().into());
+		let p = ctx.solver_int(self.product.clone().into());
 		IntTimesBounds::new_in(ctx, f1, f2, p);
 		Ok(())
 	}
@@ -90,15 +90,15 @@ where
 
 	#[tracing::instrument(name = "int_times", level = "trace", skip(self, ctx))]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
-		let (f1_lb, f1_ub) = self.factor1.get_bounds(ctx);
-		let f1_lb_lit = self.factor1.get_lower_bound_lit(ctx);
-		let f1_ub_lit = self.factor1.get_upper_bound_lit(ctx);
-		let (f2_lb, f2_ub) = self.factor2.get_bounds(ctx);
-		let f2_lb_lit = self.factor2.get_lower_bound_lit(ctx);
-		let f2_ub_lit = self.factor2.get_upper_bound_lit(ctx);
-		let (pr_lb, pr_ub) = self.product.get_bounds(ctx);
-		let pr_lb_lit = self.product.get_lower_bound_lit(ctx);
-		let pr_ub_lit = self.product.get_upper_bound_lit(ctx);
+		let (f1_lb, f1_ub) = self.factor1.bounds(ctx);
+		let f1_lb_lit = self.factor1.lower_bound_lit(ctx);
+		let f1_ub_lit = self.factor1.upper_bound_lit(ctx);
+		let (f2_lb, f2_ub) = self.factor2.bounds(ctx);
+		let f2_lb_lit = self.factor2.lower_bound_lit(ctx);
+		let f2_ub_lit = self.factor2.upper_bound_lit(ctx);
+		let (pr_lb, pr_ub) = self.product.bounds(ctx);
+		let pr_lb_lit = self.product.lower_bound_lit(ctx);
+		let pr_ub_lit = self.product.upper_bound_lit(ctx);
 
 		// TODO: Filter possibilities based on whether variables can be both positive
 		// and negative.
