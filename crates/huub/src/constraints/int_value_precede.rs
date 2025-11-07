@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
 	actions::{
-		InitializationActions, IntDecisionActions, IntInspectionActions, PostingActions,
+		ConstructionActions, IntDecisionActions, IntInspectionActions, PostingActions,
 		ReasoningEngine, ReformulationActions, TrailingActions,
 	},
 	constraints::{
@@ -201,7 +201,7 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 	/// solver.
 	pub fn new<E>(engine: &mut E, vars: Vec<I>) -> Self
 	where
-		E: InitializationActions + ?Sized,
+		E: ConstructionActions + ?Sized,
 		I: IntInspectionActions<E>,
 	{
 		let n = vars.len();
@@ -344,7 +344,7 @@ impl IntSeqPrecedeChainBounds<IntView> {
 	/// solver.
 	pub fn new_in<E>(solver: &mut E, mut vars: Vec<IntView>)
 	where
-		E: AddAssign<BoxedPropagator> + InitializationActions + ?Sized,
+		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
 		// Variables that do not allow positive values are irrelevant.
@@ -631,7 +631,7 @@ impl<I> IntValuePrecedeChainValue<I> {
 	/// Create a new [`ValuePrecedeChainValue`] propagator
 	pub fn new<E>(engine: &mut E, values: Vec<IntVal>, vars: Vec<I>) -> Self
 	where
-		E: InitializationActions + ?Sized,
+		E: ConstructionActions + ?Sized,
 	{
 		let first = (0..=values.len())
 			.map(|i| {
@@ -857,7 +857,7 @@ impl IntValuePrecedeChainValue<IntView> {
 	/// solver.
 	pub fn new_in<E>(solver: &mut E, values: Vec<IntVal>, mut vars: Vec<IntView>)
 	where
-		E: AddAssign<BoxedPropagator> + InitializationActions + ?Sized,
+		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
 		// Variables that do not any tracked values are irrelevant.

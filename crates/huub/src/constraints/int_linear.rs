@@ -14,7 +14,7 @@ use pindakaas::{
 use crate::{
 	actions::{
 		BoolInspectionActions, BoolPostingActions, BoolPropagationActions,
-		BoolSimplificationActions, InitializationActions, IntDecisionActions, IntInspectionActions,
+		BoolSimplificationActions, ConstructionActions, IntDecisionActions, IntInspectionActions,
 		IntPostingActions, IntPropagationActions, IntSimplificationActions, PostingActions,
 		PropagationActions, ReasoningEngine, ReformulationActions, SimplificationActions,
 		TrailingActions,
@@ -611,7 +611,7 @@ impl IntLinearLessEqBounds<IntView> {
 	/// solver.
 	pub fn new_in<E>(solver: &mut E, vars: impl IntoIterator<Item = IntView>, mut max: IntVal)
 	where
-		E: AddAssign<BoxedPropagator> + InitializationActions + ?Sized,
+		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
 		let vars: Vec<IntView> = vars
@@ -729,7 +729,7 @@ impl IntLinearLessEqImpBounds<IntView, RawLit> {
 		mut max: IntVal,
 		reification: BoolView,
 	) where
-		E: AddAssign<BoxedPropagator> + InitializationActions + ?Sized,
+		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
 		let reification = match reification.0 {
@@ -768,7 +768,7 @@ impl IntLinearNotEqImpValue<IntView, RawLit> {
 		mut violation: IntVal,
 		reification: BoolView,
 	) where
-		E: AddAssign<BoxedPropagator> + InitializationActions + ?Sized,
+		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
 		let reification = match reification.0 {
@@ -806,7 +806,7 @@ impl IntLinearNotEqValue<IntView> {
 	/// solver.
 	pub fn new_in<E>(solver: &mut E, vars: impl IntoIterator<Item = IntView>, mut violation: IntVal)
 	where
-		E: AddAssign<BoxedPropagator> + InitializationActions + ?Sized,
+		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
 		let vars: Vec<IntView> = vars

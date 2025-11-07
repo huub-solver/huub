@@ -102,7 +102,7 @@ use tracing::warn;
 use crate::{
 	actions::{
 		BoolInspectionActions, BoolPostingActions, BoolPropagationActions,
-		BoolSimplificationActions, DecisionActions, InitializationActions, IntDecisionActions,
+		BoolSimplificationActions, ConstructionActions, DecisionActions, IntDecisionActions,
 		IntExplanationActions, IntInspectionActions, IntPostingActions, IntPropagationActions,
 		IntSimplificationActions, PostingActions, PropagationActions, ReasoningEngine,
 		SimplificationActions, TrailingActions,
@@ -2740,15 +2740,15 @@ impl ClauseDatabase for Model {
 	}
 }
 
-impl DecisionActions for Model {
-	fn num_conflicts(&self) -> u64 {
-		0
+impl ConstructionActions for Model {
+	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
+		self.trail.push(init)
 	}
 }
 
-impl InitializationActions for Model {
-	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
-		self.trail.push(init)
+impl DecisionActions for Model {
+	fn num_conflicts(&self) -> u64 {
+		0
 	}
 }
 

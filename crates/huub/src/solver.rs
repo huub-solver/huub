@@ -36,8 +36,8 @@ use tracing::debug;
 
 use crate::{
 	actions::{
-		BoolInspectionActions, BoolPropagationActions, BrancherInitActions, DecisionActions,
-		InitializationActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
+		BoolInspectionActions, BoolPropagationActions, BrancherInitActions, ConstructionActions,
+		DecisionActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
 		IntPropagationActions, TrailingActions,
 	},
 	branchers::BoxedBrancher,
@@ -1704,6 +1704,12 @@ impl Clone for Solver<Cadical> {
 	}
 }
 
+impl<Oracle: ExternalPropagation> ConstructionActions for Solver<Oracle> {
+	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
+		BrancherInitActions::new_trailed_int(self, init)
+	}
+}
+
 impl<Oracle: ExternalPropagation> DecisionActions for Solver<Oracle> {
 	fn num_conflicts(&self) -> u64 {
 		self.engine.borrow().state.statistics.conflicts
@@ -1717,12 +1723,6 @@ impl<Oracle: Default + ExternalPropagation + LearnCallback> Default for Solver<O
 		oracle.set_learn_callback(Some(trace_learned_clause));
 		oracle.connect_propagator(Rc::clone(&engine));
 		Self { oracle, engine }
-	}
-}
-
-impl<Oracle: ExternalPropagation> InitializationActions for Solver<Oracle> {
-	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
-		BrancherInitActions::new_trailed_int(self, init)
 	}
 }
 

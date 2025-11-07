@@ -107,18 +107,18 @@ pub trait BrancherInitActions: DecisionActions {
 	fn push_brancher(&mut self, brancher: BoxedBrancher);
 }
 
+/// Actions that can be performed during the construction of [`Propagator]s and
+/// [`Constraint`]s.
+pub trait ConstructionActions {
+	/// Create a new trailed integer value with the given initial value.
+	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt;
+}
+
 /// Actions that can be performed by a [`crate::branchers::Brancher`] when
 /// making search decisions.
 pub trait DecisionActions: TrailingActions {
 	/// Returns the number of conflicts up to this point in the search process.
 	fn num_conflicts(&self) -> u64;
-}
-
-/// Actions that can be performed during the initialization of [`Propagator] and
-/// [`Constraint`] implementations
-pub trait InitializationActions {
-	/// Create a new trailed integer value with the given initial value.
-	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt;
 }
 
 /// Actions available to [`Brancher`] implementations for integer decision
@@ -364,7 +364,7 @@ pub trait ReasoningEngine {
 /// Actions that can be performed when reformulating a [`Model`] object into a
 /// [`Solver`] object.
 pub trait ReformulationActions:
-	AddAssign<BoxedPropagator> + AsDynClauseDatabase + ClauseDatabase + InitializationActions
+	AddAssign<BoxedPropagator> + AsDynClauseDatabase + ClauseDatabase + ConstructionActions
 {
 	/// Get the current value of a [`BoolView`], if it has been assigned.
 	fn bool_val(&self, bv: RawLit) -> Option<bool>;

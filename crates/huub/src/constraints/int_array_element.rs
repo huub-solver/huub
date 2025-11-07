@@ -10,7 +10,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
 	actions::{
-		InitializationActions, IntDecisionActions, IntInspectionActions, IntSimplificationActions,
+		ConstructionActions, IntDecisionActions, IntInspectionActions, IntSimplificationActions,
 		PostingActions, ReasoningEngine, ReformulationActions, SimplificationActions,
 		TrailingActions,
 	},
@@ -55,7 +55,7 @@ impl<I1, I2, I3> IntArrayElementBounds<I1, I2, I3> {
 	/// solver.
 	pub(crate) fn new<E>(engine: &mut E, collection: Vec<I1>, index: I2, result: I3) -> Self
 	where
-		E: InitializationActions + ?Sized,
+		E: ConstructionActions + ?Sized,
 		I1: IntInspectionActions<E>,
 		I2: IntInspectionActions<E>,
 	{
@@ -103,7 +103,7 @@ impl IntArrayElementBounds<IntView, IntView, IntView> {
 		result: IntView,
 	) -> Result<(), Unsatisfiable>
 	where
-		E: AddAssign<BoxedPropagator> + ClauseDatabase + InitializationActions + ?Sized,
+		E: AddAssign<BoxedPropagator> + ClauseDatabase + ConstructionActions + ?Sized,
 		IntView: IntDecisionActions<E, Atom = BoolView>,
 	{
 		// Remove out-of-bound values from the index variables

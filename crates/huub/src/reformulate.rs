@@ -18,8 +18,8 @@ use rustc_hash::FxHashSet;
 
 use crate::{
 	actions::{
-		BoolInspectionActions, BoolPostingActions, BoolPropagationActions, DecisionActions,
-		InitializationActions, IntDecisionActions, IntInspectionActions, PostingActions,
+		BoolInspectionActions, BoolPostingActions, BoolPropagationActions, ConstructionActions,
+		DecisionActions, IntDecisionActions, IntInspectionActions, PostingActions,
 		PropagationActions, ReasoningEngine, ReformulationActions, SimplificationActions,
 		TrailingActions,
 	},
@@ -461,15 +461,15 @@ impl<Oracle: ClauseDatabase> ClauseDatabase for ReformulationContext<'_, Oracle>
 	}
 }
 
-impl<Oracle> DecisionActions for ReformulationContext<'_, Oracle> {
-	fn num_conflicts(&self) -> u64 {
-		self.slv.engine.borrow().state.statistics.conflicts
+impl<Oracle: ExternalPropagation> ConstructionActions for ReformulationContext<'_, Oracle> {
+	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
+		ConstructionActions::new_trailed_int(self.slv, init)
 	}
 }
 
-impl<Oracle: ExternalPropagation> InitializationActions for ReformulationContext<'_, Oracle> {
-	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
-		InitializationActions::new_trailed_int(self.slv, init)
+impl<Oracle> DecisionActions for ReformulationContext<'_, Oracle> {
+	fn num_conflicts(&self) -> u64 {
+		self.slv.engine.borrow().state.statistics.conflicts
 	}
 }
 

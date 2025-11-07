@@ -8,7 +8,7 @@ use tracing::trace;
 
 use crate::{
 	actions::{
-		InitializationActions, IntDecisionActions, IntInspectionActions, PostingActions,
+		ConstructionActions, IntDecisionActions, IntInspectionActions, PostingActions,
 		PropagationActions, ReasoningEngine, ReformulationActions, TrailingActions,
 	},
 	constraints::{
@@ -591,7 +591,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 		detectable_precedence_enabled: bool,
 	) -> Self
 	where
-		E: InitializationActions + ?Sized,
+		E: ConstructionActions + ?Sized,
 	{
 		let n = start_times.len();
 		let trailed_info = (0..n)
@@ -1104,7 +1104,7 @@ impl DisjunctiveStrictPropagator<IntView> {
 		not_last_enabled: bool,
 		detectable_precedence_enabled: bool,
 	) where
-		E: AddAssign<BoxedPropagator> + InitializationActions + ?Sized,
+		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
 	{
 		let b = Box::new(Self::new(
 			solver,
