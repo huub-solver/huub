@@ -53,7 +53,7 @@ impl LinearTransform {
 		mask.iter().map(|r| self.rev_transform_range(r)).collect()
 	}
 
-	/// Perform the reverse linear tranformation for a `LitMeaning`.
+	/// Perform the reverse linear transformation for a `LitMeaning`.
 	///
 	/// Note that this performs the correct rounding to maintain the meaning of
 	/// the literal.
@@ -214,6 +214,17 @@ mod tests {
 	use crate::{IntLitMeaning, IntSetVal, LinearTransform, NonZeroIntVal};
 
 	#[test]
+	fn test_add() {
+		let lt = LinearTransform {
+			scale: NonZeroIntVal::new(3).unwrap(),
+			offset: 6,
+		};
+		let result = lt + 2;
+		assert_eq!(result.scale.get(), 3);
+		assert_eq!(result.offset, 8);
+	}
+
+	#[test]
 	fn test_can_divide_by() {
 		let lt = LinearTransform {
 			scale: NonZeroIntVal::new(6).unwrap(),
@@ -221,6 +232,14 @@ mod tests {
 		};
 		assert!(lt.can_divide_by(3));
 		assert!(!lt.can_divide_by(5));
+	}
+
+	#[test]
+	fn test_default() {
+		let lt = LinearTransform::default();
+		assert_eq!(lt.scale.get(), 1);
+		assert_eq!(lt.offset, 0);
+		assert!(lt.is_identity());
 	}
 
 	#[test]
@@ -236,6 +255,28 @@ mod tests {
 			offset: 0,
 		};
 		assert!(!lt.is_identity());
+	}
+
+	#[test]
+	fn test_mul() {
+		let lt = LinearTransform {
+			scale: NonZeroIntVal::new(3).unwrap(),
+			offset: 6,
+		};
+		let result = lt * NonZeroIntVal::new(2).unwrap();
+		assert_eq!(result.scale.get(), 6);
+		assert_eq!(result.offset, 12);
+	}
+
+	#[test]
+	fn test_neg() {
+		let lt = LinearTransform {
+			scale: NonZeroIntVal::new(3).unwrap(),
+			offset: 6,
+		};
+		let result = -lt;
+		assert_eq!(result.scale.get(), -3);
+		assert_eq!(result.offset, -6);
 	}
 
 	#[test]
@@ -313,6 +354,17 @@ mod tests {
 	}
 
 	#[test]
+	fn test_sub() {
+		let lt = LinearTransform {
+			scale: NonZeroIntVal::new(3).unwrap(),
+			offset: 6,
+		};
+		let result = lt - 2;
+		assert_eq!(result.scale.get(), 3);
+		assert_eq!(result.offset, 4);
+	}
+
+	#[test]
 	fn test_transform() {
 		let lt = LinearTransform {
 			scale: NonZeroIntVal::new(3).unwrap(),
@@ -340,57 +392,5 @@ mod tests {
 			lt.transform_lit(IntLitMeaning::Less(1)),
 			IntLitMeaning::Less(6)
 		);
-	}
-
-	#[test]
-	fn test_add() {
-		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(3).unwrap(),
-			offset: 6,
-		};
-		let result = lt + 2;
-		assert_eq!(result.scale.get(), 3);
-		assert_eq!(result.offset, 8);
-	}
-
-	#[test]
-	fn test_default() {
-		let lt = LinearTransform::default();
-		assert_eq!(lt.scale.get(), 1);
-		assert_eq!(lt.offset, 0);
-		assert!(lt.is_identity());
-	}
-
-	#[test]
-	fn test_mul() {
-		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(3).unwrap(),
-			offset: 6,
-		};
-		let result = lt * NonZeroIntVal::new(2).unwrap();
-		assert_eq!(result.scale.get(), 6);
-		assert_eq!(result.offset, 12);
-	}
-
-	#[test]
-	fn test_neg() {
-		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(3).unwrap(),
-			offset: 6,
-		};
-		let result = -lt;
-		assert_eq!(result.scale.get(), -3);
-		assert_eq!(result.offset, -6);
-	}
-
-	#[test]
-	fn test_sub() {
-		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(3).unwrap(),
-			offset: 6,
-		};
-		let result = lt - 2;
-		assert_eq!(result.scale.get(), 3);
-		assert_eq!(result.offset, 4);
 	}
 }

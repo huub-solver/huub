@@ -2,14 +2,19 @@
 //! constraints a sequence of integer decision variable to be assigned to a set
 //! of possible sequences of integer values.
 
+use std::mem;
+
 use itertools::Itertools;
-use pindakaas::ClauseDatabaseTools;
 
 use crate::{
-	actions::{ConstraintInitActions, ReformulationActions, SimplificationActions},
-	constraints::{Constraint, SimplificationStatus},
+	actions::{
+		InitActions, IntDecisionActions, IntInitActions, IntInspectionActions,
+		IntPropagationActions, IntSimplificationActions, PropagationActions, ReasoningEngine,
+		ReformulationActions,
+	},
+	constraints::{Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView},
 	reformulate::ReformulationError,
-	solver::{BoolView, IntLitMeaning},
+	solver::{activation_list::IntPropCond, queue::PriorityLevel, BoolView, IntLitMeaning},
 	IntDecision, IntVal,
 };
 
@@ -25,19 +30,20 @@ pub struct IntTable {
 	pub(crate) table: Vec<Vec<IntVal>>,
 }
 
-impl<S: SimplificationActions> Constraint<S> for IntTable {
-	fn initialize(&self, actions: &mut dyn ConstraintInitActions) {
-		for var in &self.vars {
-			actions.simplify_on_change_int(*var);
-		}
-	}
-
-	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
+impl<E> Constraint<E> for IntTable
+where
+	E: ReasoningEngine,
+	IntDecision: ModelIntView<E>,
+{
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
 		match self.vars.len() {
 			0 => return Ok(SimplificationStatus::Subsumed),
 			1 => {
 				let dom = self.table.iter().map(|v| v[0]..=v[0]).collect();
-				actions.set_int_in_set(self.vars[0], &dom)?;
+				self.vars[0].set_domain(ctx, &dom, [])?;
 				return Ok(SimplificationStatus::Subsumed);
 			}
 			_ => {}
@@ -45,36 +51,36 @@ impl<S: SimplificationActions> Constraint<S> for IntTable {
 
 		// Remove any tuples that contain values outside of the domain of the
 		// variables.
-		let table = self
-			.table
-			.iter()
+		self.table = mem::take(&mut self.table)
+			.into_iter()
 			.filter(|tup| {
 				tup.iter()
 					.enumerate()
-					.all(|(j, val)| actions.check_int_in_domain(self.vars[j], *val))
+					.all(|(j, val)| self.vars[j].in_domain(ctx, *val))
 			})
 			.collect_vec();
 
 		// If no tuples remain, then the problem is trivially unsatisfiable.
-		if table.is_empty() {
-			return Err(ReformulationError::TrivialUnsatisfiable);
+		if self.table.is_empty() {
+			return Err(ctx.declare_conflict([]));
 		}
 
 		// Restrict the domain of the variables to the values it can take in the
 		// tuple.
-		if table.len() == 1 {
+		if self.table.len() == 1 {
 			for (j, &var) in self.vars.iter().enumerate() {
-				actions.set_int_val(var, table[0][j])?;
+				var.set_val(ctx, self.table[0][j], [])?;
 			}
 			return Ok(SimplificationStatus::Subsumed);
 		}
 
 		for (j, &var) in self.vars.iter().enumerate() {
-			let dom = (0..table.len())
-				.map(|i| table[i][j]..=table[i][j])
+			let dom = (0..self.table.len())
+				.map(|i| self.table[i][j]..=self.table[i][j])
 				.collect();
-			actions.set_int_in_set(var, &dom)?;
+			var.set_domain(ctx, &dom, [])?;
 		}
+
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
@@ -86,11 +92,7 @@ impl<S: SimplificationActions> Constraint<S> for IntTable {
 		} else {
 			Vec::new()
 		};
-		let vars = self
-			.vars
-			.iter()
-			.map(|&iv| slv.get_solver_int(iv))
-			.collect_vec();
+		let vars = self.vars.iter().map(|&iv| slv.solver_int(iv)).collect_vec();
 
 		// Create clauses that say foreach tuple i, if `selector[i]` is true, then the
 		// variable `j` equals `vals[i][j]`.
@@ -98,10 +100,7 @@ impl<S: SimplificationActions> Constraint<S> for IntTable {
 			for (i, tup) in self.table.iter().enumerate() {
 				assert!(tup.len() == vars.len());
 				for (j, var) in vars.iter().enumerate() {
-					let clause = [
-						!selector[i],
-						slv.get_int_lit(*var, IntLitMeaning::Eq(tup[j])),
-					];
+					let clause = [!selector[i], var.lit(slv, IntLitMeaning::Eq(tup[j]))];
 					slv.add_clause(clause)?;
 				}
 			}
@@ -110,7 +109,7 @@ impl<S: SimplificationActions> Constraint<S> for IntTable {
 		// Create clauses that map from the value taken by the variables back to the
 		// possible selectors that can be active.
 		for (j, var) in vars.iter().enumerate() {
-			let (lb, ub) = slv.get_int_bounds(*var);
+			let (lb, ub) = var.bounds(slv);
 			let mut support_clauses: Vec<Vec<BoolView>> = vec![Vec::new(); (ub - lb + 1) as usize];
 			for (i, tup) in self.table.iter().enumerate() {
 				let k = tup[j] - lb;
@@ -124,20 +123,37 @@ impl<S: SimplificationActions> Constraint<S> for IntTable {
 					// Special case where we can use the values of the other variables as
 					// the selection variables directly.
 					support_clauses[k as usize]
-						.push(slv.get_int_lit(vars[1 - j], IntLitMeaning::Eq(tup[1 - j])));
+						.push(vars[1 - j].lit(slv, IntLitMeaning::Eq(tup[1 - j])));
 				} else {
 					support_clauses[k as usize].push(selector[i]);
 				}
 			}
 			for (i, mut clause) in support_clauses.into_iter().enumerate() {
-				if slv.check_int_in_domain(*var, lb + i as IntVal) {
-					clause.push(slv.get_int_lit(vars[j], IntLitMeaning::NotEq(lb + i as IntVal)));
+				if var.in_domain(slv, lb + i as IntVal) {
+					clause.push(vars[j].lit(slv, IntLitMeaning::NotEq(lb + i as IntVal)));
 					slv.add_clause(clause)?;
 				}
 			}
 		}
 
 		Ok(())
+	}
+}
+
+impl<E> Propagator<E> for IntTable
+where
+	E: ReasoningEngine,
+	IntDecision: SolverIntView<E>,
+{
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+		ctx.set_priority(PriorityLevel::Low);
+		for var in &self.vars {
+			var.enqueue_when(ctx, IntPropCond::Domain);
+		}
+	}
+
+	fn propagate(&mut self, _: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+		unreachable!()
 	}
 }
 
@@ -164,8 +180,8 @@ mod tests {
 			vec![5, 2],
 			vec![5, 3],
 		];
-		prb += table_int(vec![vars[0], vars[1]], table.clone());
-		prb += table_int(vec![vars[1], vars[2]], table.clone());
+		table_int(&mut prb, vec![vars[0], vars[1]], table.clone());
+		table_int(&mut prb, vec![vars[1], vars[2]], table.clone());
 
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
 		let vars = vars
@@ -212,11 +228,13 @@ mod tests {
 			vec![5, 3, 1],
 			vec![5, 3, 5],
 		];
-		prb += table_int(
+		table_int(
+			&mut prb,
 			vars[0..3].iter().cloned().map_into().collect(),
 			table.clone(),
 		);
-		prb += table_int(
+		table_int(
+			&mut prb,
 			vars[2..5].iter().cloned().map_into().collect(),
 			table.clone(),
 		);

@@ -5,9 +5,10 @@ use rangelist::RangeList;
 use tracing_test::traced_test;
 
 use crate::{
-	actions::SimplificationActions,
+	actions::{IntInspectionActions, IntSimplificationActions},
 	branchers::IntBrancher,
 	constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
+	rel,
 	solver::{
 		int_var::{EncodingType, IntVar},
 		SolveResult, Value, View,
@@ -22,8 +23,8 @@ fn it_works() {
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
 
-	prb += Formula::Or(vec![(!a).into(), (!b).into()]);
-	prb += Formula::Or(vec![a.into(), b.into()]);
+	prb.add_constraint(Formula::Or(vec![(!a).into(), (!b).into()]));
+	prb.add_constraint(Formula::Or(vec![a.into(), b.into()]));
 
 	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 	let a = map.get_bool(&mut slv, a);
@@ -38,7 +39,7 @@ fn it_works() {
 }
 
 #[test]
-/// Test case to check if resolving a multistep linear alias works properly.
+/// Test case to check if resolving a multi-step linear alias works properly.
 fn lin_multi_alias() {
 	let mut prb = Model::default();
 	let x = prb.new_int_var(RangeList::from_iter([1..=10]));
@@ -47,10 +48,10 @@ fn lin_multi_alias() {
 	let x_trans = x * -1 - 1;
 	let y_trans = y + 1;
 	let z_trans = z + 1;
-	assert!(prb.unify_int(x, y_trans).is_ok());
-	assert!(prb.unify_int(y, z_trans).is_ok());
-	assert_eq!(prb.get_int_lower_bound(x_trans), -11);
-	assert_eq!(prb.get_int_upper_bound(x_trans), -4);
+	assert!(x.unify(&mut prb, y_trans).is_ok());
+	assert!(y.unify(&mut prb, z_trans).is_ok());
+	assert_eq!(x_trans.lower_bound(&prb), -11);
+	assert_eq!(x_trans.upper_bound(&prb), -4);
 }
 
 #[test]
@@ -70,7 +71,7 @@ fn test_duplicate_propagation() {
 		EncodingType::Eager,
 		EncodingType::Lazy,
 	);
-	IntLinearLessEqBounds::new_in(
+	IntLinearLessEqBounds::post(
 		&mut slv,
 		[
 			a * NonZeroIntVal::new(3).unwrap(),
@@ -79,7 +80,7 @@ fn test_duplicate_propagation() {
 		],
 		3,
 	);
-	IntLinearNotEqValue::new_in(&mut slv, [a * NonZeroIntVal::new(3).unwrap(), b], 3);
+	IntLinearNotEqValue::post(&mut slv, [a * NonZeroIntVal::new(3).unwrap(), b], 3);
 	IntBrancher::new_in(
 		&mut slv,
 		vec![a, b],
@@ -101,8 +102,7 @@ fn test_unify_int_impossible() {
 	let a = prb.new_int_var(1..=5);
 	let b = prb.new_int_var(1..=2);
 
-	let lin = (a * 2 - b * 5).eq(0);
-	prb += lin;
+	rel!(&mut prb, 0 == a * 2 - b * 5);
 
 	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 	let a = map.get_int(&mut slv, a);
@@ -123,14 +123,13 @@ fn test_unify_int_lin_view_domains() {
 	let a = prb.new_int_var(RangeList::from_iter([1..=1, 3..=3, 5..=5]));
 	let b = prb.new_int_var(RangeList::from_iter([1..=3]));
 
-	let lin = (a * 6 - b * 2).eq(0);
-	prb += lin;
+	rel!(&mut prb, 0 == a * 6 - b * 2);
 
 	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 	let a = map.get_int(&mut slv, a);
 	let b = map.get_int(&mut slv, b);
 
-	let (res, _, solns) = slv.get_all_solutions(&[a.into(), b.into()]);
+	let (res, _, solns) = slv.collect_all_solutions(&[a.into(), b.into()]);
 	assert_eq!(res, SolveResult::Complete);
 	assert_eq!(solns, vec![vec![Value::Int(1), Value::Int(3)]]);
 }
@@ -140,7 +139,9 @@ fn test_unify_int_view_for_bool_1() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	prb += (a * 2 + b * -2).eq(0);
+
+	rel!(&mut prb, 0 == a * 2 + b * -2);
+
 	prb.expect_solutions(
 		&[a, b],
 		expect![[r#"
@@ -154,7 +155,9 @@ fn test_unify_int_view_for_bool_2() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	prb += (a * -2 + b * 3).eq(0);
+
+	rel!(&mut prb, 0 == a * -2 + b * 3);
+
 	prb.expect_solutions(
 		&[a, b],
 		expect![[r#"
@@ -167,7 +170,9 @@ fn test_unify_int_view_for_bool_3() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	prb += (a * -2 + b * -3).eq(0);
+
+	rel!(&mut prb, 0 == a * -2 + b * -3);
+
 	prb.expect_solutions(
 		&[a, b],
 		expect![[r#"
@@ -180,7 +185,9 @@ fn test_unify_int_view_for_bool_4() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	prb += (a * 2 + b * 3).eq(0);
+
+	rel!(&mut prb, 0 == a * 2 + b * 3);
+
 	prb.expect_solutions(
 		&[a, b],
 		expect![[r#"
@@ -193,7 +200,9 @@ fn test_unify_int_view_for_bool_5() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	prb += (a * 2 + b * -3).eq(0);
+
+	rel!(&mut prb, 0 == a * 2 + b * -3);
+
 	prb.expect_solutions(
 		&[a, b],
 		expect![[r#"
@@ -206,7 +215,9 @@ fn test_unify_int_view_for_bool_6() {
 	let mut prb = Model::default();
 	let a = prb.new_bool_var();
 	let b = prb.new_bool_var();
-	prb += (((a * 2) + 2) + b * -3).eq(0);
+
+	rel!(&mut prb, 0 == ((a * 2) + 2) + b * -3);
+
 	prb.assert_unsatisfiable();
 }
 
@@ -214,7 +225,7 @@ impl Model {
 	pub(crate) fn assert_unsatisfiable(&mut self) {
 		let err: Result<(Solver, _), _> = self.to_solver(&InitConfig::default());
 		assert!(
-			matches!(err, Err(ReformulationError::TrivialUnsatisfiable)),
+			matches!(err, Err(ReformulationError::SimplificationConflict(_))),
 			"expected unsatisfiable"
 		);
 	}
@@ -256,7 +267,7 @@ impl Solver {
 
 	pub(crate) fn expect_solutions<V: Into<View> + Clone>(self, vars: &[V], expected: Expect) {
 		let vars: Vec<_> = vars.iter().map(|v| v.clone().into()).collect();
-		let (status, _, mut solns) = self.get_all_solutions(&vars);
+		let (status, _, mut solns) = self.collect_all_solutions(&vars);
 		assert_eq!(status, SolveResult::Complete);
 		solns.sort();
 		let solns = format!(

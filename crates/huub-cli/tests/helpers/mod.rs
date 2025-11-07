@@ -1,14 +1,14 @@
 #![allow(
 	dead_code,
-	reason = "module is shared between benchmarks and integeration tests"
+	reason = "module is shared between benchmarks and integration tests"
 )]
 #![allow(
 	unused_imports,
-	reason = "module is shared between benchmarks and integeration tests"
+	reason = "module is shared between benchmarks and integration tests"
 )]
 #![allow(
 	unused_macros,
-	reason = "module is shared between benchmarks and integeration tests"
+	reason = "module is shared between benchmarks and integration tests"
 )]
 
 macro_rules! assert_all_optimal {

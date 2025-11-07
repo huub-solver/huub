@@ -38,7 +38,7 @@ use std::{
 
 use flatzinc_serde::{FlatZinc, Literal, Method};
 use huub::{
-	actions::DecisionActions,
+	actions::IntDecisionActions,
 	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::{InitConfig, ReformulationError},
 	solver::{Goal, IntLitMeaning, SolveResult, Solver, Valuation, Value, View},
@@ -53,10 +53,6 @@ use ustr::{ustr, Ustr, UstrMap};
 
 use crate::trace::LitName;
 
-/// Use [`MiMalloc`] as the global allocator.
-#[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
-
 /// Status message to output when it is proven that no more/better solutions can
 /// be found.
 const FZN_COMPLETE: &str = "==========";
@@ -67,6 +63,10 @@ const FZN_SEPERATOR: &str = "----------";
 const FZN_UNKNOWN: &str = "=====UNKNOWN=====";
 /// Status message to output when a problem is proven to be unsatisfiable.
 const FZN_UNSATISFIABLE: &str = "=====UNSATISFIABLE=====";
+
+/// Use [`MiMalloc`] as the global allocator.
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 /// FlatZinc command line interface for the Huub solver
 ///
@@ -228,7 +228,10 @@ where
 		let res = Solver::from_fzn::<Ustr, UstrMap<View>>(&fzn, &self.init_config());
 		// Resolve any errors that may have occurred during the conversion
 		let (mut slv, var_map, fzn_stats): (Solver, UstrMap<View>, FlatZincStatistics) = match res {
-			Err(FlatZincError::ReformulationError(ReformulationError::TrivialUnsatisfiable)) => {
+			Err(FlatZincError::ReformulationError(
+				ReformulationError::SimplificationConflict(_)
+				| ReformulationError::TranslationConflict(_),
+			)) => {
 				outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
 				return Ok(());
 			}
@@ -266,8 +269,8 @@ where
 				match v {
 					View::Bool(bv) => {
 						if let Some(info) = bv.reverse_map_info() {
-							let _ = lit_map.insert(info, LitName::BoolVar(*name, true));
-							let _ = lit_map.insert(-info, LitName::BoolVar(*name, false));
+							lit_map.insert(info, LitName::BoolVar(*name, true));
+							lit_map.insert(-info, LitName::BoolVar(*name, false));
 						}
 					}
 					View::Int(iv) => {
@@ -276,7 +279,7 @@ where
 							if !is_view || int_map[i].is_empty() {
 								int_map[i] = *name;
 								for (lit, meaning) in iv.lit_reverse_map_info(&slv) {
-									let _ = lit_map.insert(lit, LitName::IntLit(i, meaning));
+									lit_map.insert(lit, LitName::IntLit(i, meaning));
 								}
 							} else {
 								debug_assert!(iv
@@ -287,7 +290,7 @@ where
 						} else {
 							debug_assert!(is_view);
 							for (lit, meaning) in iv.lit_reverse_map_info(&slv) {
-								let _ = lit_map.entry(lit).or_insert_with(|| {
+								lit_map.entry(lit).or_insert_with(|| {
 									let (op, val) = match meaning {
 										IntLitMeaning::Eq(v) => ("=", v),
 										IntLitMeaning::NotEq(v) => ("!=", v),
@@ -463,7 +466,7 @@ where
 					let Some(obj_val) = obj_val else {
 						unreachable!()
 					};
-					let obj_lit = slv.get_int_lit(obj, IntLitMeaning::Eq(obj_val));
+					let obj_lit = obj.lit(&mut slv, IntLitMeaning::Eq(obj_val));
 					slv.add_clause([obj_lit]).unwrap();
 					// Ensure all following solutions are different from the first optimal
 					// solution

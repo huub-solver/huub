@@ -182,25 +182,6 @@ impl LitName {
 	}
 }
 
-impl<'a, V> LitNames<'a, V> {
-	/// Returns a new [`MakeVisitor`] implementation that will wrap `inner` so
-	/// that any fields containing literals are renamed to use their FlatZinc
-	/// names.
-	///
-	/// [`MakeVisitor`]: tracing_subscriber::field::MakeVisitor
-	fn new(
-		inner: V,
-		lit_reverse_map: &'a FxHashMap<LitInt, LitName>,
-		int_reverse_map: &'a Vec<Ustr>,
-	) -> Self {
-		LitNames {
-			inner,
-			lit_reverse_map,
-			int_reverse_map,
-		}
-	}
-}
-
 impl<V: Visit> LitNames<'_, V> {
 	#[inline]
 	/// Check if the field should and can be formatted as a clause or a list of
@@ -291,6 +272,25 @@ impl<V: Visit> LitNames<'_, V> {
 	}
 }
 
+impl<'a, V> LitNames<'a, V> {
+	/// Returns a new [`MakeVisitor`] implementation that will wrap `inner` so
+	/// that any fields containing literals are renamed to use their FlatZinc
+	/// names.
+	///
+	/// [`MakeVisitor`]: tracing_subscriber::field::MakeVisitor
+	fn new(
+		inner: V,
+		lit_reverse_map: &'a FxHashMap<LitInt, LitName>,
+		int_reverse_map: &'a Vec<Ustr>,
+	) -> Self {
+		LitNames {
+			inner,
+			lit_reverse_map,
+			int_reverse_map,
+		}
+	}
+}
+
 impl<V: Visit> Visit for LitNames<'_, V> {
 	#[inline]
 	fn record_bool(&mut self, field: &Field, value: bool) {
@@ -361,8 +361,8 @@ impl RecordLazyLits {
 				IntLitMeaning::Less
 			}(val);
 			let mut guard = lit_reverse_map.lock().unwrap();
-			let _ = guard.insert(lit, LitName::IntLit(iv, meaning));
-			let _ = guard.insert(-lit, LitName::IntLit(iv, !meaning));
+			guard.insert(lit, LitName::IntLit(iv, meaning));
+			guard.insert(-lit, LitName::IntLit(iv, !meaning));
 			true
 		} else {
 			false
