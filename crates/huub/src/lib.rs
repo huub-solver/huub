@@ -1,5 +1,5 @@
 //! # Huub - A Modular and Maintainable Lazy Clause Generation Solver
-//!
+//! Boolean variables and clauses.
 //! Huub is a Lazy Clause Generation (LCG) solver with a focus on modularity and
 //! maintainability in addition to speed. LCG solvers are a class of solvers
 //! that can be used to solve decision and optimization problems. They are
@@ -7,7 +7,6 @@
 //! clauses to a Boolean Satisfiability (SAT) solver during the search process.
 //! This allows the solver exploit SAT solver's ability to learn from failures
 //! during the search process, without having to encode the full problem into
-//! Boolean variables and clauses.
 
 #[macro_export]
 /// General purpose helper for adding "relation" constraints to a Model.
@@ -101,11 +100,11 @@ use tracing::warn;
 
 use crate::{
 	actions::{
-		BoolInspectionActions, BoolPostingActions, BoolPropagationActions,
-		BoolSimplificationActions, ConstructionActions, DecisionActions, IntDecisionActions,
-		IntExplanationActions, IntInspectionActions, IntPostingActions, IntPropagationActions,
-		IntSimplificationActions, PostingActions, PropagationActions, ReasoningEngine,
-		SimplificationActions, TrailingActions,
+		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
+		ConstructionActions, DecisionActions, InitActions, IntDecisionActions,
+		IntExplanationActions, IntInitActions, IntInspectionActions, IntPropagationActions,
+		IntSimplificationActions, PropagationActions, ReasoningEngine, SimplificationActions,
+		TrailingActions,
 	},
 	branchers::{BoolBrancher, IntBrancher, WarmStartBrancher},
 	constraints::{
@@ -284,8 +283,8 @@ pub struct Model {
 
 #[derive(Debug)]
 /// Wrapper around [`Model`] that knows the constraint being
-/// posted.
-pub struct ModelPostingContext<'a> {
+/// initialized.
+pub struct ModelInitContext<'a> {
 	/// Index of the constraint being initialized.
 	con: ConRef,
 	/// Reference to the Model in which the constraint exists.
@@ -616,26 +615,8 @@ impl Add<IntVal> for BoolDecision {
 	}
 }
 
-impl BoolInspectionActions<Model> for BoolDecision {
-	fn val(&self, ctx: &Model) -> Option<bool> {
-		use BoolDecisionInner::*;
-
-		let b = self.resolve_alias(ctx);
-		match b.0 {
-			Const(b) => Some(b),
-			_ => None,
-		}
-	}
-}
-
-impl BoolInspectionActions<ModelPostingContext<'_>> for BoolDecision {
-	fn val(&self, ctx: &ModelPostingContext<'_>) -> Option<bool> {
-		self.val(ctx.model)
-	}
-}
-
-impl BoolPostingActions<ModelPostingContext<'_>> for BoolDecision {
-	fn advise_when_fixed(&self, ctx: &mut ModelPostingContext<'_>, data: u64) {
+impl BoolInitActions<ModelInitContext<'_>> for BoolDecision {
+	fn advise_when_fixed(&self, ctx: &mut ModelInitContext<'_>, data: u64) {
 		let var = self.resolve_alias(ctx.model);
 		let (iv, cond, event) = match var.0 {
 			BoolDecisionInner::Lit(lit) => {
@@ -675,7 +656,7 @@ impl BoolPostingActions<ModelPostingContext<'_>> for BoolDecision {
 			.constraints
 			.add(ActivationAction::Advise(adv), event);
 	}
-	fn enqueue_when_fixed(&self, ctx: &mut ModelPostingContext<'_>) {
+	fn enqueue_when_fixed(&self, ctx: &mut ModelInitContext<'_>) {
 		let var = self.resolve_alias(ctx.model);
 		match var.0 {
 			BoolDecisionInner::Lit(lit) => ctx.model.bool_vars[i32::from(lit.var()) as usize - 1]
@@ -691,6 +672,24 @@ impl BoolPostingActions<ModelPostingContext<'_>> for BoolDecision {
 				IntDecision(IntDecisionInner::Var(iv)).enqueue_when(ctx, IntPropCond::Bounds);
 			}
 		}
+	}
+}
+
+impl BoolInspectionActions<Model> for BoolDecision {
+	fn val(&self, ctx: &Model) -> Option<bool> {
+		use BoolDecisionInner::*;
+
+		let b = self.resolve_alias(ctx);
+		match b.0 {
+			Const(b) => Some(b),
+			_ => None,
+		}
+	}
+}
+
+impl BoolInspectionActions<ModelInitContext<'_>> for BoolDecision {
+	fn val(&self, ctx: &ModelInitContext<'_>) -> Option<bool> {
+		self.val(ctx.model)
 	}
 }
 
@@ -1131,6 +1130,99 @@ impl IntExplanationActions<Model> for IntDecision {
 	}
 }
 
+impl IntInitActions<ModelInitContext<'_>> for IntDecision {
+	fn advise_when(&self, ctx: &mut ModelInitContext<'_>, cond: IntPropCond, data: u64) {
+		let var = self.resolve_alias(ctx.model);
+
+		match var.0 {
+			IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) => {
+				let negated = if let IntDecisionInner::Linear(lt, _) = var.0 {
+					!lt.positive_scale()
+				} else {
+					false
+				};
+				let adv = ctx.model.advisors.push(ModAdvisorDef {
+					con: ctx.con,
+					data,
+					negated,
+					bool2int: false,
+					condition: None,
+				});
+				ctx.model.int_vars[iv]
+					.constraints
+					.add(ActivationAction::Advise(adv), cond);
+			}
+			IntDecisionInner::Const(_) => ctx.semantic_enqueue = true,
+			IntDecisionInner::Bool(lt, bv) => {
+				let var = bv.resolve_alias(ctx.model);
+				let (iv, cond, event) = match var.0 {
+					BoolDecisionInner::Lit(lit) => {
+						let adv = ctx.model.advisors.push(ModAdvisorDef {
+							con: ctx.con,
+							data,
+							negated: !lt.positive_scale(),
+							bool2int: true,
+							condition: None,
+						});
+						ctx.model.bool_vars[i32::from(lit.var()) as usize - 1]
+							.constraints
+							.push(ActivationAction::Advise(adv).into());
+						return;
+					}
+					BoolDecisionInner::Const(_) => {
+						// Value does not change, so no advisor will ever be called
+						return;
+					}
+					BoolDecisionInner::IntEq(iv, v) => {
+						(iv, IntLitMeaning::Eq(v), IntPropCond::Domain)
+					}
+					BoolDecisionInner::IntGreaterEq(iv, v) => {
+						(iv, IntLitMeaning::GreaterEq(v), IntPropCond::Bounds)
+					}
+					BoolDecisionInner::IntLess(iv, v) => {
+						(iv, IntLitMeaning::Less(v), IntPropCond::Bounds)
+					}
+					BoolDecisionInner::IntNotEq(iv, v) => {
+						(iv, IntLitMeaning::NotEq(v), IntPropCond::Domain)
+					}
+				};
+				let adv = ctx.model.advisors.push(ModAdvisorDef {
+					con: ctx.con,
+					data,
+					negated: !lt.positive_scale(),
+					bool2int: true,
+					condition: Some(cond),
+				});
+				ctx.model.int_vars[iv]
+					.constraints
+					.add(ActivationAction::Advise(adv), event);
+			}
+		}
+	}
+
+	fn enqueue_when(&self, ctx: &mut ModelInitContext<'_>, condition: IntPropCond) {
+		let var = self.resolve_alias(ctx.model);
+
+		match var.0 {
+			IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) => {
+				if condition != IntPropCond::Fixed {
+					ctx.semantic_enqueue = true;
+				}
+				ctx.model.int_vars[iv]
+					.constraints
+					.add(ActivationAction::Enqueue(ctx.con), condition);
+			}
+			IntDecisionInner::Const(_) => ctx.semantic_enqueue = true,
+			IntDecisionInner::Bool(_, bv) => {
+				if condition != IntPropCond::Fixed {
+					ctx.semantic_enqueue = true;
+				}
+				bv.enqueue_when_fixed(ctx);
+			}
+		}
+	}
+}
+
 impl IntInspectionActions<Model> for IntDecision {
 	type Atom = <Model as ReasoningEngine>::Atom;
 
@@ -1342,132 +1434,39 @@ impl IntInspectionActions<Model> for IntDecision {
 	}
 }
 
-impl IntInspectionActions<ModelPostingContext<'_>> for IntDecision {
+impl IntInspectionActions<ModelInitContext<'_>> for IntDecision {
 	type Atom = <Self as IntInspectionActions<Model>>::Atom;
 
-	fn domain(&self, ctx: &ModelPostingContext<'_>) -> IntSetVal {
+	fn domain(&self, ctx: &ModelInitContext<'_>) -> IntSetVal {
 		self.domain(ctx.model)
 	}
 
-	fn in_domain(&self, ctx: &ModelPostingContext<'_>, val: IntVal) -> bool {
+	fn in_domain(&self, ctx: &ModelInitContext<'_>, val: IntVal) -> bool {
 		self.in_domain(ctx.model, val)
 	}
 
-	fn lit_meaning(&self, ctx: &ModelPostingContext<'_>, lit: Self::Atom) -> Option<IntLitMeaning> {
+	fn lit_meaning(&self, ctx: &ModelInitContext<'_>, lit: Self::Atom) -> Option<IntLitMeaning> {
 		self.lit_meaning(ctx.model, lit)
 	}
 
-	fn lower_bound(&self, ctx: &ModelPostingContext<'_>) -> IntVal {
+	fn lower_bound(&self, ctx: &ModelInitContext<'_>) -> IntVal {
 		self.lower_bound(ctx.model)
 	}
 
-	fn lower_bound_lit(&self, ctx: &ModelPostingContext<'_>) -> Self::Atom {
+	fn lower_bound_lit(&self, ctx: &ModelInitContext<'_>) -> Self::Atom {
 		self.lower_bound_lit(ctx.model)
 	}
 
-	fn try_lit(&self, ctx: &ModelPostingContext<'_>, meaning: IntLitMeaning) -> Option<Self::Atom> {
+	fn try_lit(&self, ctx: &ModelInitContext<'_>, meaning: IntLitMeaning) -> Option<Self::Atom> {
 		self.try_lit(ctx.model, meaning)
 	}
 
-	fn upper_bound(&self, ctx: &ModelPostingContext<'_>) -> IntVal {
+	fn upper_bound(&self, ctx: &ModelInitContext<'_>) -> IntVal {
 		self.upper_bound(ctx.model)
 	}
 
-	fn upper_bound_lit(&self, ctx: &ModelPostingContext<'_>) -> Self::Atom {
+	fn upper_bound_lit(&self, ctx: &ModelInitContext<'_>) -> Self::Atom {
 		self.upper_bound_lit(ctx.model)
-	}
-}
-
-impl IntPostingActions<ModelPostingContext<'_>> for IntDecision {
-	fn advise_when(&self, ctx: &mut ModelPostingContext<'_>, cond: IntPropCond, data: u64) {
-		let var = self.resolve_alias(ctx.model);
-
-		match var.0 {
-			IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) => {
-				let negated = if let IntDecisionInner::Linear(lt, _) = var.0 {
-					!lt.positive_scale()
-				} else {
-					false
-				};
-				let adv = ctx.model.advisors.push(ModAdvisorDef {
-					con: ctx.con,
-					data,
-					negated,
-					bool2int: false,
-					condition: None,
-				});
-				ctx.model.int_vars[iv]
-					.constraints
-					.add(ActivationAction::Advise(adv), cond);
-			}
-			IntDecisionInner::Const(_) => ctx.semantic_enqueue = true,
-			IntDecisionInner::Bool(lt, bv) => {
-				let var = bv.resolve_alias(ctx.model);
-				let (iv, cond, event) = match var.0 {
-					BoolDecisionInner::Lit(lit) => {
-						let adv = ctx.model.advisors.push(ModAdvisorDef {
-							con: ctx.con,
-							data,
-							negated: !lt.positive_scale(),
-							bool2int: true,
-							condition: None,
-						});
-						ctx.model.bool_vars[i32::from(lit.var()) as usize - 1]
-							.constraints
-							.push(ActivationAction::Advise(adv).into());
-						return;
-					}
-					BoolDecisionInner::Const(_) => {
-						// Value does not change, so no advisor will ever be called
-						return;
-					}
-					BoolDecisionInner::IntEq(iv, v) => {
-						(iv, IntLitMeaning::Eq(v), IntPropCond::Domain)
-					}
-					BoolDecisionInner::IntGreaterEq(iv, v) => {
-						(iv, IntLitMeaning::GreaterEq(v), IntPropCond::Bounds)
-					}
-					BoolDecisionInner::IntLess(iv, v) => {
-						(iv, IntLitMeaning::Less(v), IntPropCond::Bounds)
-					}
-					BoolDecisionInner::IntNotEq(iv, v) => {
-						(iv, IntLitMeaning::NotEq(v), IntPropCond::Domain)
-					}
-				};
-				let adv = ctx.model.advisors.push(ModAdvisorDef {
-					con: ctx.con,
-					data,
-					negated: !lt.positive_scale(),
-					bool2int: true,
-					condition: Some(cond),
-				});
-				ctx.model.int_vars[iv]
-					.constraints
-					.add(ActivationAction::Advise(adv), event);
-			}
-		}
-	}
-
-	fn enqueue_when(&self, ctx: &mut ModelPostingContext<'_>, condition: IntPropCond) {
-		let var = self.resolve_alias(ctx.model);
-
-		match var.0 {
-			IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) => {
-				if condition != IntPropCond::Fixed {
-					ctx.semantic_enqueue = true;
-				}
-				ctx.model.int_vars[iv]
-					.constraints
-					.add(ActivationAction::Enqueue(ctx.con), condition);
-			}
-			IntDecisionInner::Const(_) => ctx.semantic_enqueue = true,
-			IntDecisionInner::Bool(_, bv) => {
-				if condition != IntPropCond::Fixed {
-					ctx.semantic_enqueue = true;
-				}
-				bv.enqueue_when_fixed(ctx);
-			}
-		}
 	}
 }
 
@@ -2156,6 +2155,16 @@ impl IntExplanationActions<Model> for IntVal {
 	}
 }
 
+impl IntInitActions<ModelInitContext<'_>> for IntVal {
+	fn advise_when(&self, _: &mut ModelInitContext<'_>, _: IntPropCond, _: u64) {
+		// Value will never change, so no advisor will ever be called
+	}
+
+	fn enqueue_when(&self, ctx: &mut ModelInitContext<'_>, _: IntPropCond) {
+		ctx.semantic_enqueue = true;
+	}
+}
+
 impl IntInspectionActions<Model> for IntVal {
 	type Atom = BoolDecision;
 
@@ -2200,30 +2209,30 @@ impl IntInspectionActions<Model> for IntVal {
 	}
 }
 
-impl IntInspectionActions<ModelPostingContext<'_>> for IntVal {
+impl IntInspectionActions<ModelInitContext<'_>> for IntVal {
 	type Atom = BoolDecision;
 
-	fn domain(&self, _: &ModelPostingContext<'_>) -> IntSetVal {
+	fn domain(&self, _: &ModelInitContext<'_>) -> IntSetVal {
 		(*self..=*self).into()
 	}
 
-	fn in_domain(&self, _: &ModelPostingContext<'_>, val: IntVal) -> bool {
+	fn in_domain(&self, _: &ModelInitContext<'_>, val: IntVal) -> bool {
 		*self == val
 	}
 
-	fn lit_meaning(&self, _: &ModelPostingContext<'_>, _: Self::Atom) -> Option<IntLitMeaning> {
+	fn lit_meaning(&self, _: &ModelInitContext<'_>, _: Self::Atom) -> Option<IntLitMeaning> {
 		None
 	}
 
-	fn lower_bound(&self, _: &ModelPostingContext<'_>) -> IntVal {
+	fn lower_bound(&self, _: &ModelInitContext<'_>) -> IntVal {
 		*self
 	}
 
-	fn lower_bound_lit(&self, _: &ModelPostingContext<'_>) -> Self::Atom {
+	fn lower_bound_lit(&self, _: &ModelInitContext<'_>) -> Self::Atom {
 		true.into()
 	}
 
-	fn try_lit(&self, _: &ModelPostingContext<'_>, meaning: IntLitMeaning) -> Option<Self::Atom> {
+	fn try_lit(&self, _: &ModelInitContext<'_>, meaning: IntLitMeaning) -> Option<Self::Atom> {
 		Some(
 			match meaning {
 				IntLitMeaning::Eq(v) => *self == v,
@@ -2235,22 +2244,12 @@ impl IntInspectionActions<ModelPostingContext<'_>> for IntVal {
 		)
 	}
 
-	fn upper_bound(&self, _: &ModelPostingContext<'_>) -> IntVal {
+	fn upper_bound(&self, _: &ModelInitContext<'_>) -> IntVal {
 		*self
 	}
 
-	fn upper_bound_lit(&self, _: &ModelPostingContext<'_>) -> Self::Atom {
+	fn upper_bound_lit(&self, _: &ModelInitContext<'_>) -> Self::Atom {
 		true.into()
-	}
-}
-
-impl IntPostingActions<ModelPostingContext<'_>> for IntVal {
-	fn advise_when(&self, _: &mut ModelPostingContext<'_>, _: IntPropCond, _: u64) {
-		// Value will never change, so no advisor will ever be called
-	}
-
-	fn enqueue_when(&self, ctx: &mut ModelPostingContext<'_>, _: IntPropCond) {
-		ctx.semantic_enqueue = true;
 	}
 }
 
@@ -2352,8 +2351,8 @@ impl Model {
 	/// [`Self::add_custom_constraint`] method.
 	pub fn add_constraint<C: Constraint<Self>>(&mut self, mut constraint: C) -> &mut C {
 		let con = ConRef::new(self.constraints.len());
-		let mut ctx = ModelPostingContext::new(self, con);
-		constraint.post(&mut ctx);
+		let mut ctx = ModelInitContext::new(self, con);
+		constraint.initialize(&mut ctx);
 		let priority = ctx.priority;
 		let enqueue = ctx.enqueue();
 		let r = self.constraints.push(Some(Box::new(constraint)));
@@ -2783,8 +2782,8 @@ impl ReasoningEngine for Model {
 
 	type Conflict = Conflict<BoolDecision>;
 	type ExplanationCtx<'a> = Self;
+	type InitializationCtx<'a> = ModelInitContext<'a>;
 	type NotificationCtx<'a> = Self;
-	type PostingCtx<'a> = ModelPostingContext<'a>;
 	type PropagationCtx<'a> = Self;
 }
 
@@ -2806,7 +2805,7 @@ impl TrailingActions for Model {
 	}
 }
 
-impl<'a> ModelPostingContext<'a> {
+impl<'a> ModelInitContext<'a> {
 	/// Returns whether to enqueue the propagator based on its explicit requests
 	/// or otherwise the semantics of its subscriptions.
 	pub(crate) fn enqueue(&self) -> bool {
@@ -2819,7 +2818,7 @@ impl<'a> ModelPostingContext<'a> {
 	/// Creates a new [`ModelPostingContext`] for the given constraint
 	/// reference.
 	pub(crate) fn new(model: &'a mut Model, con: ConRef) -> Self {
-		ModelPostingContext {
+		ModelInitContext {
 			con,
 			model,
 			priority: PriorityLevel::Medium,
@@ -2829,7 +2828,7 @@ impl<'a> ModelPostingContext<'a> {
 	}
 }
 
-impl PostingActions for ModelPostingContext<'_> {
+impl InitActions for ModelInitContext<'_> {
 	fn advise_on_backtrack(&mut self) {
 		// Model does not backtrack, so no advisor is required.
 	}
@@ -2843,11 +2842,11 @@ impl PostingActions for ModelPostingContext<'_> {
 	}
 }
 
-impl BoolPostingActions<ModelPostingContext<'_>> for bool {
-	fn advise_when_fixed(&self, _: &mut ModelPostingContext<'_>, _: u64) {
+impl BoolInitActions<ModelInitContext<'_>> for bool {
+	fn advise_when_fixed(&self, _: &mut ModelInitContext<'_>, _: u64) {
 		// Value does not change, so no advisor will ever be called
 	}
-	fn enqueue_when_fixed(&self, ctx: &mut ModelPostingContext<'_>) {
+	fn enqueue_when_fixed(&self, ctx: &mut ModelInitContext<'_>) {
 		ctx.semantic_enqueue = true;
 	}
 }

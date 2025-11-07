@@ -71,7 +71,7 @@ fn test_duplicate_propagation() {
 		EncodingType::Eager,
 		EncodingType::Lazy,
 	);
-	IntLinearLessEqBounds::new_in(
+	IntLinearLessEqBounds::post(
 		&mut slv,
 		[
 			a * NonZeroIntVal::new(3).unwrap(),
@@ -80,7 +80,7 @@ fn test_duplicate_propagation() {
 		],
 		3,
 	);
-	IntLinearNotEqValue::new_in(&mut slv, [a * NonZeroIntVal::new(3).unwrap(), b], 3);
+	IntLinearNotEqValue::post(&mut slv, [a * NonZeroIntVal::new(3).unwrap(), b], 3);
 	IntBrancher::new_in(
 		&mut slv,
 		vec![a, b],

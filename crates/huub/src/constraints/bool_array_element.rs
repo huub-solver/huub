@@ -6,8 +6,8 @@ use std::iter::once;
 
 use crate::{
 	actions::{
-		BoolPostingActions, BoolSimplificationActions, IntDecisionActions, IntInspectionActions,
-		IntPostingActions, IntPropagationActions, ReasoningEngine, ReformulationActions,
+		BoolInitActions, BoolSimplificationActions, IntDecisionActions, IntInitActions,
+		IntInspectionActions, IntPropagationActions, ReasoningEngine, ReformulationActions,
 	},
 	constraints::{Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
@@ -80,7 +80,7 @@ where
 	IntDecision: ModelIntView<E>,
 	BoolDecision: ModelBoolView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		for &b in &self.array {
 			b.enqueue_when_fixed(ctx);
 		}

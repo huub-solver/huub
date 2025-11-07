@@ -11,7 +11,7 @@ use tracing::trace;
 
 use crate::{
 	actions::{
-		IntDecisionActions, IntInspectionActions, PostingActions, ReasoningEngine,
+		InitActions, IntDecisionActions, IntInspectionActions, ReasoningEngine,
 		ReformulationActions,
 	},
 	constraints::{
@@ -762,7 +762,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 impl CumulativeTimeTable<IntView, IntView, IntView, IntView> {
 	/// Creates a new `CumulativeTimeTablePropagator` propagator and post it in
 	/// the solver.
-	pub fn new_in<E>(
+	pub fn post<E>(
 		solver: &mut E,
 		start_times: Vec<IntView>,
 		durations: Vec<IntView>,
@@ -822,7 +822,7 @@ where
 			.map(|v| slv.solver_int(v.clone().into()))
 			.collect_vec();
 		let capacity = { slv.solver_int(self.capacity.clone().into()) };
-		CumulativeTimeTable::new_in(slv, start_times, durations, usages, capacity);
+		CumulativeTimeTable::post(slv, start_times, durations, usages, capacity);
 		Ok(())
 	}
 }
@@ -835,7 +835,7 @@ where
 	I3: SolverIntView<E>,
 	I4: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 
 		for v in &self.start_times {
@@ -943,14 +943,14 @@ mod tests {
 		let resources_profile_2 = [2, 2, 1].into_iter().map_into().collect();
 		let capacity_1 = 3.into();
 		let capacity_2 = 2.into();
-		CumulativeTimeTable::new_in(
+		CumulativeTimeTable::post(
 			&mut slv,
 			vec![a, b, c],
 			durations.clone(),
 			resources_profile_1,
 			capacity_1,
 		);
-		CumulativeTimeTable::new_in(
+		CumulativeTimeTable::post(
 			&mut slv,
 			vec![a, b, c],
 			durations,
@@ -1002,14 +1002,14 @@ mod tests {
 		let resources_profile_2: Vec<IntView> = [2, 2, 2].into_iter().map_into().collect();
 		let capacity = 3.into();
 
-		CumulativeTimeTable::new_in(
+		CumulativeTimeTable::post(
 			&mut slv,
 			vec![a, b, c],
 			durations.clone(),
 			resources_profile_1,
 			capacity,
 		);
-		CumulativeTimeTable::new_in(
+		CumulativeTimeTable::post(
 			&mut slv,
 			vec![a, b, c],
 			durations,
@@ -1033,7 +1033,7 @@ mod tests {
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
-		CumulativeTimeTable::new_in(&mut slv, start, duration, usage, capacity);
+		CumulativeTimeTable::post(&mut slv, start, duration, usage, capacity);
 
 		slv.expect_solutions(&[capacity], expect![[r#"6"#]]);
 	}
@@ -1051,7 +1051,7 @@ mod tests {
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
-		CumulativeTimeTable::new_in(&mut slv, start, duration, usage, capacity);
+		CumulativeTimeTable::post(&mut slv, start, duration, usage, capacity);
 
 		slv.assert_unsatisfiable();
 	}
@@ -1082,7 +1082,7 @@ mod tests {
 		);
 		let capacity = 2.into();
 
-		CumulativeTimeTable::new_in(
+		CumulativeTimeTable::post(
 			&mut slv,
 			vec![s_a, s_b, s_c],
 			vec![d_a, d_b, d_c],
@@ -1140,7 +1140,7 @@ mod tests {
 		);
 		let capacity = 2.into();
 
-		CumulativeTimeTable::new_in(
+		CumulativeTimeTable::post(
 			&mut slv,
 			vec![s_a, s_b, s_c],
 			vec![d_a, d_b, d_c],
@@ -1177,7 +1177,7 @@ mod tests {
 		);
 		let capacity = 3.into();
 
-		CumulativeTimeTable::new_in(
+		CumulativeTimeTable::post(
 			&mut slv,
 			vec![s_a, s_b, s_c],
 			vec![d_a, d_b, d_c],
@@ -1223,7 +1223,7 @@ mod tests {
 		);
 		let capacity = 2.into();
 
-		CumulativeTimeTable::new_in(
+		CumulativeTimeTable::post(
 			&mut slv,
 			vec![s_a, s_b, s_c],
 			vec![d_a, d_b, d_c],

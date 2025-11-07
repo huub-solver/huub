@@ -7,7 +7,7 @@ use std::ops::AddAssign;
 use itertools::Itertools;
 
 use crate::{
-	actions::{PostingActions, ReasoningEngine, ReformulationActions},
+	actions::{InitActions, ReasoningEngine, ReformulationActions},
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
 	},
@@ -27,7 +27,7 @@ pub struct IntArrayMinimumBounds<I1, I2> {
 impl IntArrayMinimumBounds<IntView, IntView> {
 	/// Create a new [`ArrayIntMinimumBounds`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(solver: &mut E, vars: Vec<IntView>, min: IntView)
+	pub fn post<E>(solver: &mut E, vars: Vec<IntView>, min: IntView)
 	where
 		E: AddAssign<BoxedPropagator> + ?Sized,
 	{
@@ -69,7 +69,7 @@ where
 			.map(|v| slv.solver_int(v.clone().into()))
 			.collect();
 		let min = slv.solver_int(self.min.clone().into());
-		IntArrayMinimumBounds::new_in(slv, vars, min);
+		IntArrayMinimumBounds::post(slv, vars, min);
 		Ok(())
 	}
 }
@@ -80,7 +80,7 @@ where
 	I1: SolverIntView<E>,
 	I2: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 
 		for v in &self.vars {

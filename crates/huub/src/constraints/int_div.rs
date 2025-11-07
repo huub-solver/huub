@@ -11,7 +11,7 @@ use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Unsatisfiable};
 
 use crate::{
 	actions::{
-		IntDecisionActions, IntInspectionActions, IntPropagationActions, PostingActions,
+		InitActions, IntDecisionActions, IntInspectionActions, IntPropagationActions,
 		ReasoningEngine, ReformulationActions,
 	},
 	constraints::{
@@ -165,7 +165,7 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 
 impl IntDivBounds<IntView, IntView, IntView> {
 	/// Create a new [`IntDivBounds`] propagator and post it in the solver.
-	pub fn new_in<E>(
+	pub fn post<E>(
 		solver: &mut E,
 		numerator: IntView,
 		denominator: IntView,
@@ -268,7 +268,7 @@ where
 		let numerator = slv.solver_int(self.numerator);
 		let denominator = slv.solver_int(self.denominator);
 		let result = slv.solver_int(self.result);
-		IntDivBounds::new_in(slv, numerator, denominator, result).unwrap();
+		IntDivBounds::post(slv, numerator, denominator, result).unwrap();
 		Ok(())
 	}
 }
@@ -283,7 +283,7 @@ where
 	I3: SolverIntView<E> + Neg + Into<<I3 as Neg>::Output>,
 	<I3 as Neg>::Output: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Highest);
 
 		self.numerator.enqueue_when(ctx, IntPropCond::Bounds);
@@ -375,7 +375,7 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		IntDivBounds::new_in(&mut slv, a, b, c).unwrap();
+		IntDivBounds::post(&mut slv, a, b, c).unwrap();
 
 		slv.expect_solutions(
 			&[a, b, c],

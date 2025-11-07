@@ -10,8 +10,7 @@ use pindakaas::Lit as RawLit;
 
 use crate::{
 	actions::{
-		ConstructionActions, IntDecisionActions, PostingActions, ReasoningEngine,
-		ReformulationActions,
+		ConstructionActions, InitActions, IntDecisionActions, ReasoningEngine, ReformulationActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus,
@@ -41,7 +40,7 @@ pub struct IntAbsBounds<I1, I2, B> {
 
 impl IntAbsBounds<IntView, IntView, RawLit> {
 	/// Create a new [`IntAbsBounds`] propagator and post it in the solver.
-	pub(crate) fn new_in<E>(solver: &mut E, origin: IntView, abs: IntView)
+	pub(crate) fn post<E>(solver: &mut E, origin: IntView, abs: IntView)
 	where
 		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
 		IntView: IntDecisionActions<E, Atom = BoolView>,
@@ -89,7 +88,7 @@ where
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let origin = slv.solver_int(self.origin.clone().into());
 		let abs = slv.solver_int(self.abs.clone().into());
-		IntAbsBounds::new_in(slv, origin, abs);
+		IntAbsBounds::post(slv, origin, abs);
 		Ok(())
 	}
 }
@@ -101,7 +100,7 @@ where
 	I1: SolverIntView<E>,
 	I2: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Highest);
 		self.origin.enqueue_when(ctx, IntPropCond::Bounds);
 		self.abs.enqueue_when(ctx, IntPropCond::Bounds);
@@ -222,7 +221,7 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		IntAbsBounds::new_in(&mut slv, a, b);
+		IntAbsBounds::post(&mut slv, a, b);
 
 		slv.expect_solutions(
 			&[a, b],

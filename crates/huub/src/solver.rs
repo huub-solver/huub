@@ -3,8 +3,8 @@
 pub(crate) mod activation_list;
 pub(crate) mod bool_to_int;
 pub(crate) mod engine;
+pub(crate) mod initialization_context;
 pub(crate) mod int_var;
-pub(crate) mod posting_context;
 pub(crate) mod queue;
 pub(crate) mod solving_context;
 pub(crate) mod trail;
@@ -46,8 +46,8 @@ use crate::{
 	reformulate::InitConfig,
 	solver::{
 		engine::{Engine, State},
+		initialization_context::InitializationContext,
 		int_var::{DirectStorage, IntVarRef, OrderStorage},
-		posting_context::PostingContext,
 		queue::PropagatorInfo,
 		solving_context::SolvingContext,
 		trail::TrailedInt,
@@ -1269,8 +1269,8 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 		let mut handle = self.engine.borrow_mut();
 		let engine = &mut *handle;
 		let prop_ref = engine.propagators.push(propagator);
-		let mut ctx = PostingContext::new(&mut engine.state, prop_ref);
-		engine.propagators[prop_ref].post(&mut ctx);
+		let mut ctx = InitializationContext::new(&mut engine.state, prop_ref);
+		engine.propagators[prop_ref].initialize(&mut ctx);
 		let priority = ctx.priority();
 		let enqueue = ctx.enqueue(from_model);
 		let new_observed = mem::take(&mut ctx.observed_variables);

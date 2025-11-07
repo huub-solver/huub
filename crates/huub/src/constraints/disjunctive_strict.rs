@@ -8,7 +8,7 @@ use tracing::trace;
 
 use crate::{
 	actions::{
-		ConstructionActions, IntDecisionActions, IntInspectionActions, PostingActions,
+		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions,
 		PropagationActions, ReasoningEngine, ReformulationActions, TrailingActions,
 	},
 	constraints::{
@@ -260,7 +260,7 @@ where
 		let symmetric_vars: Vec<IntView> = iter.map(|(v, d)| -*v + (horizon - d)).collect();
 
 		// Add detectable precedence propagators
-		DisjunctiveStrictPropagator::new_in(
+		DisjunctiveStrictPropagator::post(
 			slv,
 			start_times,
 			self.propagator.durations.clone(),
@@ -268,7 +268,7 @@ where
 			self.not_last_propagation_enabled(),
 			self.detectable_precedence_propagation_enabled(),
 		);
-		DisjunctiveStrictPropagator::new_in(
+		DisjunctiveStrictPropagator::post(
 			slv,
 			symmetric_vars,
 			self.propagator.durations.clone(),
@@ -295,8 +295,8 @@ where
 		self.propagator.explain(ctx, lit, data)
 	}
 
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
-		self.propagator.post(ctx);
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+		self.propagator.initialize(ctx);
 	}
 
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
@@ -1096,7 +1096,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 
 impl DisjunctiveStrictPropagator<IntView> {
 	/// Create a new [`DisjunctiveStrict`] propagator and post it in the solver.
-	pub fn new_in<E>(
+	pub fn post<E>(
 		solver: &mut E,
 		start_times: Vec<IntView>,
 		durations: Vec<IntVal>,
@@ -1150,7 +1150,7 @@ where
 		}
 	}
 
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 		for v in &self.start_times {
 			v.enqueue_when(ctx, IntPropCond::Bounds);
@@ -1492,7 +1492,7 @@ mod tests {
 			);
 
 			let durations = vec![2, 3, 1];
-			DisjunctiveStrictPropagator::new_in(
+			DisjunctiveStrictPropagator::post(
 				&mut slv,
 				vec![a, b, c],
 				durations.clone(),
@@ -1500,7 +1500,7 @@ mod tests {
 				not_last,
 				detectable_precedence,
 			);
-			DisjunctiveStrictPropagator::new_in(
+			DisjunctiveStrictPropagator::post(
 				&mut slv,
 				[a, b, c]
 					.iter()

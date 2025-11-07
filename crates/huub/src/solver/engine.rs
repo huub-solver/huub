@@ -42,8 +42,8 @@ use crate::{
 	solver::{
 		activation_list::{ActivationAction, ActivationActionS, ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
+		initialization_context::InitializationContext,
 		int_var::{IntVar, IntVarRef, OrderStorage},
-		posting_context::PostingContext,
 		queue::PropagatorQueue,
 		solving_context::SolvingContext,
 		trail::{Trail, TrailedInt},
@@ -717,8 +717,8 @@ impl ReasoningEngine for Engine {
 
 	type Conflict = Conflict<RawLit>;
 	type ExplanationCtx<'a> = State;
+	type InitializationCtx<'a> = InitializationContext<'a>;
 	type NotificationCtx<'a> = State;
-	type PostingCtx<'a> = PostingContext<'a>;
 	type PropagationCtx<'a> = SolvingContext<'a>;
 }
 

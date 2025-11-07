@@ -8,8 +8,8 @@ use itertools::Itertools;
 
 use crate::{
 	actions::{
-		IntDecisionActions, IntInspectionActions, IntPostingActions, IntPropagationActions,
-		IntSimplificationActions, PostingActions, PropagationActions, ReasoningEngine,
+		InitActions, IntDecisionActions, IntInitActions, IntInspectionActions,
+		IntPropagationActions, IntSimplificationActions, PropagationActions, ReasoningEngine,
 		ReformulationActions,
 	},
 	constraints::{Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView},
@@ -145,7 +145,7 @@ where
 	E: ReasoningEngine,
 	IntDecision: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 		for var in &self.vars {
 			var.enqueue_when(ctx, IntPropCond::Domain);

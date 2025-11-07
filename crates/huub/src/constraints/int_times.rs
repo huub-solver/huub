@@ -5,7 +5,7 @@
 use std::ops::{AddAssign, Mul};
 
 use crate::{
-	actions::{IntSimplificationActions, PostingActions, ReasoningEngine, ReformulationActions},
+	actions::{InitActions, IntSimplificationActions, ReasoningEngine, ReformulationActions},
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
 	},
@@ -29,7 +29,7 @@ pub struct IntTimesBounds<I1, I2, I3> {
 
 impl IntTimesBounds<IntView, IntView, IntView> {
 	/// Create a new [`IntTimesBounds`] propagator and post it in the solver.
-	pub fn new_in<E>(solver: &mut E, factor1: IntView, factor2: IntView, product: IntView)
+	pub fn post<E>(solver: &mut E, factor1: IntView, factor2: IntView, product: IntView)
 	where
 		E: AddAssign<BoxedPropagator> + ?Sized,
 	{
@@ -69,7 +69,7 @@ where
 		let f1 = ctx.solver_int(self.factor1.clone().into());
 		let f2 = ctx.solver_int(self.factor2.clone().into());
 		let p = ctx.solver_int(self.product.clone().into());
-		IntTimesBounds::new_in(ctx, f1, f2, p);
+		IntTimesBounds::post(ctx, f1, f2, p);
 		Ok(())
 	}
 }
@@ -81,7 +81,7 @@ where
 	I2: SolverIntView<E>,
 	I3: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut <E as ReasoningEngine>::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut <E as ReasoningEngine>::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Highest);
 		self.factor1.enqueue_when(ctx, IntPropCond::Bounds);
 		self.factor2.enqueue_when(ctx, IntPropCond::Bounds);
@@ -223,7 +223,7 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		IntTimesBounds::new_in(&mut slv, a, b, c);
+		IntTimesBounds::post(&mut slv, a, b, c);
 		slv.expect_solutions(
 			&[a, b, c],
 			expect![[r#"

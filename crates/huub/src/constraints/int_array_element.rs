@@ -10,8 +10,8 @@ use rustc_hash::FxHashMap;
 
 use crate::{
 	actions::{
-		ConstructionActions, IntDecisionActions, IntInspectionActions, IntSimplificationActions,
-		PostingActions, ReasoningEngine, ReformulationActions, SimplificationActions,
+		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions,
+		IntSimplificationActions, ReasoningEngine, ReformulationActions, SimplificationActions,
 		TrailingActions,
 	},
 	constraints::{
@@ -96,7 +96,7 @@ impl<I1, I2, I3> IntArrayElementBounds<I1, I2, I3> {
 impl IntArrayElementBounds<IntView, IntView, IntView> {
 	/// Create a new [`ArrayVarIntElementBounds`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(
+	pub fn post<E>(
 		solver: &mut E,
 		collection: Vec<IntView>,
 		index: IntView,
@@ -170,7 +170,7 @@ where
 			.collect();
 		let result = ctx.solver_int(self.result.clone().into());
 		let index = ctx.solver_int(self.index.clone().into());
-		IntArrayElementBounds::new_in(ctx, array, index, result).unwrap();
+		IntArrayElementBounds::post(ctx, array, index, result).unwrap();
 		Ok(())
 	}
 }
@@ -182,7 +182,7 @@ where
 	I2: SolverIntView<E>,
 	I3: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 
 		self.result.enqueue_when(ctx, IntPropCond::Bounds);
@@ -440,8 +440,8 @@ where
 	I2: SolverIntView<E>,
 	IntVal: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
-		self.0.post(ctx);
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+		self.0.initialize(ctx);
 	}
 
 	fn propagate(&mut self, _: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
@@ -500,7 +500,7 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		IntArrayElementBounds::new_in(&mut slv, vec![a, b, c], index, y).unwrap();
+		IntArrayElementBounds::post(&mut slv, vec![a, b, c], index, y).unwrap();
 
 		slv.expect_solutions(
 			&[index, y, a, b, c],
@@ -553,7 +553,7 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		IntArrayElementBounds::new_in(&mut slv, vec![a, b], index, y).unwrap();
+		IntArrayElementBounds::post(&mut slv, vec![a, b], index, y).unwrap();
 
 		slv.expect_solutions(
 			&[index, y, a, b],

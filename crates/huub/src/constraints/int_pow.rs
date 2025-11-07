@@ -8,7 +8,7 @@ use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Unsatisfiable};
 
 use crate::{
 	actions::{
-		IntDecisionActions, IntInspectionActions, PostingActions, ReasoningEngine,
+		InitActions, IntDecisionActions, IntInspectionActions, ReasoningEngine,
 		ReformulationActions,
 	},
 	constraints::{
@@ -286,7 +286,7 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 
 impl IntPowBounds<IntView, IntView, IntView> {
 	/// Create a new [`IntPowBounds`] propagator and post it in the solver.
-	pub fn new_in<E>(
+	pub fn post<E>(
 		solver: &mut E,
 		base: IntView,
 		exponent: IntView,
@@ -368,7 +368,7 @@ where
 		let base = slv.solver_int(self.base.clone().into());
 		let exponent = slv.solver_int(self.exponent.clone().into());
 		let result = slv.solver_int(self.result.clone().into());
-		IntPowBounds::new_in(slv, base, exponent, result).unwrap();
+		IntPowBounds::post(slv, base, exponent, result).unwrap();
 		Ok(())
 	}
 }
@@ -380,7 +380,7 @@ where
 	I2: SolverIntView<E>,
 	I3: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Highest);
 
 		self.base.enqueue_when(ctx, IntPropCond::Bounds);
@@ -434,7 +434,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		IntPowBounds::new_in(&mut slv, a, b, c)
+		IntPowBounds::post(&mut slv, a, b, c)
 			.expect("int_pow(a,b,c) was found to be unsatisfiable");
 		slv.expect_solutions(
 			&[a, b, c],

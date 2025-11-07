@@ -31,9 +31,9 @@ use tracing::warn;
 
 use crate::{
 	actions::{
-		BoolInspectionActions, BoolPostingActions, BoolPropagationActions,
-		BoolSimplificationActions, IntExplanationActions, IntInspectionActions, IntPostingActions,
-		IntPropagationActions, IntSimplificationActions, ReasoningEngine, ReformulationActions,
+		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
+		IntExplanationActions, IntInitActions, IntInspectionActions, IntPropagationActions,
+		IntSimplificationActions, ReasoningEngine, ReformulationActions,
 	},
 	reformulate::ReformulationError,
 	solver::{
@@ -205,7 +205,7 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 
 	/// This method is called when the propagator is posted to the solver to
 	/// allow the propagator to subscribe to events.œ
-	fn post(&mut self, context: &mut E::PostingCtx<'_>);
+	fn initialize(&mut self, context: &mut E::InitializationCtx<'_>);
 
 	/// The propagate method is called during the search process to allow the
 	/// propagator to enforce
@@ -251,7 +251,7 @@ pub enum SimplificationStatus {
 pub trait SolverBoolView<E>
 where
 	E: ReasoningEngine + ?Sized,
-	Self: for<'a> BoolPostingActions<E::PostingCtx<'a>>
+	Self: for<'a> BoolInitActions<E::InitializationCtx<'a>>
 		+ for<'a> BoolInspectionActions<E::ExplanationCtx<'a>>
 		+ for<'a> BoolInspectionActions<E::NotificationCtx<'a>>
 		+ for<'a> BoolPropagationActions<
@@ -266,7 +266,7 @@ where
 pub trait SolverIntView<E>
 where
 	E: ReasoningEngine + ?Sized,
-	Self: for<'a> IntPostingActions<E::PostingCtx<'a>>
+	Self: for<'a> IntInitActions<E::InitializationCtx<'a>>
 		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>, Atom = E::Atom>
 		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>, Atom = E::Atom>
 		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>, Atom = E::Atom, Conflict = E::Conflict>,
@@ -312,7 +312,7 @@ where
 impl<E, B> SolverBoolView<E> for B
 where
 	E: ReasoningEngine + ?Sized,
-	Self: for<'a> BoolPostingActions<E::PostingCtx<'a>>
+	Self: for<'a> BoolInitActions<E::InitializationCtx<'a>>
 		+ for<'a> BoolInspectionActions<E::ExplanationCtx<'a>>
 		+ for<'a> BoolInspectionActions<E::NotificationCtx<'a>>
 		+ for<'a> BoolPropagationActions<
@@ -424,7 +424,7 @@ where
 impl<E, I> SolverIntView<E> for I
 where
 	E: ReasoningEngine + ?Sized,
-	I: for<'a> IntPostingActions<E::PostingCtx<'a>>
+	I: for<'a> IntInitActions<E::InitializationCtx<'a>>
 		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>, Atom = E::Atom>
 		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>, Atom = E::Atom>
 		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>, Atom = E::Atom, Conflict = E::Conflict>,

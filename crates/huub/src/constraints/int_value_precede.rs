@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
 	actions::{
-		ConstructionActions, IntDecisionActions, IntInspectionActions, PostingActions,
+		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions,
 		ReasoningEngine, ReformulationActions, TrailingActions,
 	},
 	constraints::{
@@ -342,7 +342,7 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 impl IntSeqPrecedeChainBounds<IntView> {
 	/// Create a new [`IntSeqPrecedeChainBounds`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(solver: &mut E, mut vars: Vec<IntView>)
+	pub fn post<E>(solver: &mut E, mut vars: Vec<IntView>)
 	where
 		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
 		IntView: IntInspectionActions<E>,
@@ -386,7 +386,7 @@ where
 			.map(|v| slv.solver_int(v.clone().into()))
 			.collect();
 
-		IntSeqPrecedeChainBounds::new_in(slv, vars);
+		IntSeqPrecedeChainBounds::post(slv, vars);
 		Ok(())
 	}
 }
@@ -396,7 +396,7 @@ where
 	E: ReasoningEngine,
 	I: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 
 		for v in &self.vars {
@@ -855,7 +855,7 @@ impl<I> IntValuePrecedeChainValue<I> {
 impl IntValuePrecedeChainValue<IntView> {
 	/// Create a new [`ValuePrecedeChainValue`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(solver: &mut E, values: Vec<IntVal>, mut vars: Vec<IntView>)
+	pub fn post<E>(solver: &mut E, values: Vec<IntVal>, mut vars: Vec<IntView>)
 	where
 		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
 		IntView: IntInspectionActions<E>,
@@ -952,7 +952,7 @@ where
 			.iter()
 			.map(|v| slv.solver_int(v.clone().into()))
 			.collect();
-		IntValuePrecedeChainValue::new_in(slv, self.values.clone(), vars);
+		IntValuePrecedeChainValue::post(slv, self.values.clone(), vars);
 		Ok(())
 	}
 }
@@ -962,7 +962,7 @@ where
 	E: ReasoningEngine,
 	I: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 
 		for v in &self.vars {
@@ -1094,7 +1094,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		IntSeqPrecedeChainBounds::new_in(&mut slv, vec![x1, x2, x3, x4, x5, x6, x7, x8, x9]);
+		IntSeqPrecedeChainBounds::post(&mut slv, vec![x1, x2, x3, x4, x5, x6, x7, x8, x9]);
 		slv.assert_all_solutions(
 			&[x1, x2, x3, x4, x5, x6, x7, x8, x9],
 			valid_sequence_precede,
@@ -1130,7 +1130,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		IntSeqPrecedeChainBounds::new_in(&mut slv, vec![x1, x2, x3, x4]);
+		IntSeqPrecedeChainBounds::post(&mut slv, vec![x1, x2, x3, x4]);
 		slv.assert_all_solutions(&[x1, x2, x3, x4], valid_sequence_precede);
 	}
 
@@ -1193,7 +1193,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		IntValuePrecedeChainValue::new_in(
+		IntValuePrecedeChainValue::post(
 			&mut slv,
 			vec![2, -2, 1, -1],
 			vec![x0, x1, x2, x3, x4, x5, x6, x7, x8],
@@ -1227,7 +1227,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		IntValuePrecedeChainValue::new_in(&mut slv, vec![1, 3], vec![x0, x1, x2]);
+		IntValuePrecedeChainValue::post(&mut slv, vec![1, 3], vec![x0, x1, x2]);
 		slv.assert_all_solutions(&[x0, x1, x2], valid_value_precede(vec![1, 3]));
 	}
 
@@ -1254,7 +1254,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		IntValuePrecedeChainValue::new_in(&mut slv, vec![1, 2], vec![x0, x1, x2]);
+		IntValuePrecedeChainValue::post(&mut slv, vec![1, 2], vec![x0, x1, x2]);
 		slv.assert_all_solutions(&[x0, x1, x2], valid_value_precede(vec![1, 2]));
 	}
 
@@ -1287,7 +1287,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		IntValuePrecedeChainValue::new_in(&mut slv, vec![2, -2, 1, -1], vec![x0, x1, x2, x3]);
+		IntValuePrecedeChainValue::post(&mut slv, vec![2, -2, 1, -1], vec![x0, x1, x2, x3]);
 		slv.assert_all_solutions(&[x0, x1, x2, x3], valid_value_precede(vec![2, -2, 1, -1]));
 	}
 

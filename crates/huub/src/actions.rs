@@ -20,21 +20,9 @@ use crate::{
 	BoolDecision, IntDecision, IntSetVal, IntVal,
 };
 
-/// Actions available to [`Propagator`] and [`Constraint`] implementations in
-/// all contexts for Boolean decision variables.
-pub trait BoolInspectionActions<Context: ?Sized>: BoolOperations {
-	/// Get the current value of a Boolean decision variable, if it has been
-	/// assigned.
-	fn val(&self, ctx: &Context) -> Option<bool>;
-}
-
-/// Operations that are required to be possible to perform on types acting as
-/// boolean decision variables.
-pub trait BoolOperations: Clone + fmt::Debug + Eq + Hash + Not<Output = Self> + 'static {}
-
 /// Actions available to [`Propagator`] implementations in
 /// [`ReasoningEngine::PostingCtx`] for Boolean decision variables.
-pub trait BoolPostingActions<Context>: BoolInspectionActions<Context> {
+pub trait BoolInitActions<Context>: BoolInspectionActions<Context> {
 	/// Advise the propagator when [`self`] is assigned, allowing the
 	/// propagator to decide whether to enqueue itself.
 	///
@@ -47,6 +35,18 @@ pub trait BoolPostingActions<Context>: BoolInspectionActions<Context> {
 	/// Enqueue the propagator when [`self`] is assigned.
 	fn enqueue_when_fixed(&self, ctx: &mut Context);
 }
+
+/// Actions available to [`Propagator`] and [`Constraint`] implementations in
+/// all contexts for Boolean decision variables.
+pub trait BoolInspectionActions<Context: ?Sized>: BoolOperations {
+	/// Get the current value of a Boolean decision variable, if it has been
+	/// assigned.
+	fn val(&self, ctx: &Context) -> Option<bool>;
+}
+
+/// Operations that are required to be possible to perform on types acting as
+/// boolean decision variables.
+pub trait BoolOperations: Clone + fmt::Debug + Eq + Hash + Not<Output = Self> + 'static {}
 
 /// Actions available to [`Propagator`] and [`Constraint`] implementations in
 /// [`ReasoningEngine::PropagationCtx`] for Boolean decision variables.
@@ -121,6 +121,20 @@ pub trait DecisionActions: TrailingActions {
 	fn num_conflicts(&self) -> u64;
 }
 
+/// Actions that can be performed when the propagator is posted.
+pub trait InitActions {
+	/// Advise a propagator when the solver backtracks.
+	///
+	/// This will call [`Propagator::advise_of_backtrack`] on the propagator.
+	fn advise_on_backtrack(&mut self);
+
+	/// Explicitly set whether the propagator should be enqueued immediately.
+	fn enqueue_now(&mut self, option: bool);
+
+	/// Set the priority level at which the propagator will be enqueued.
+	fn set_priority(&mut self, priority: PriorityLevel);
+}
+
 /// Actions available to [`Brancher`] implementations for integer decision
 /// variables.
 ///
@@ -154,6 +168,24 @@ pub trait IntExplanationActions<Context: ?Sized>: IntInspectionActions<Context> 
 		let val = self.val(ctx)?;
 		self.try_lit(ctx, IntLitMeaning::Eq(val))
 	}
+}
+
+/// Actions available to [`Propagator`] implementations in
+/// [`ReasoningEngine::PostingCtx`] for Boolean decision variables.
+pub trait IntInitActions<Context>: IntInspectionActions<Context> {
+	/// Advise the propagator when [`self`] is changed according to the given
+	/// propagation condition, allowing the propagator to decide whether to
+	/// enqueue itself.
+	///
+	/// Different from enqueueing, the propagator is always advised of the
+	/// integer change, not just when it is not yet enqueued.
+	///
+	/// This will call [`Propagator::advise_of_int_change`] on the propagator.
+	fn advise_when(&self, ctx: &mut Context, condition: IntPropCond, data: u64);
+
+	/// Enqueue the propagator when [`self`] is changed according to the given
+	/// propagation condition.
+	fn enqueue_when(&self, ctx: &mut Context, condition: IntPropCond);
 }
 
 /// Actions available to [`Propagator`] and [`Constraint`] implementations in
@@ -214,24 +246,6 @@ pub trait IntInspectionActions<Context: ?Sized>: IntOperations {
 /// Operations that are required to be possible to perform on types acting as
 /// integer decision variables.
 pub trait IntOperations: Clone + fmt::Debug + Eq + Hash + 'static {}
-
-/// Actions available to [`Propagator`] implementations in
-/// [`ReasoningEngine::PostingCtx`] for Boolean decision variables.
-pub trait IntPostingActions<Context>: IntInspectionActions<Context> {
-	/// Advise the propagator when [`self`] is changed according to the given
-	/// propagation condition, allowing the propagator to decide whether to
-	/// enqueue itself.
-	///
-	/// Different from enqueueing, the propagator is always advised of the
-	/// integer change, not just when it is not yet enqueued.
-	///
-	/// This will call [`Propagator::advise_of_int_change`] on the propagator.
-	fn advise_when(&self, ctx: &mut Context, condition: IntPropCond, data: u64);
-
-	/// Enqueue the propagator when [`self`] is changed according to the given
-	/// propagation condition.
-	fn enqueue_when(&self, ctx: &mut Context, condition: IntPropCond);
-}
 
 /// Actions available to [`Propagator`] and [`Constraint`] implementations in
 /// [`ReasoningEngine::PropagationCtx`] for integer decision variables.
@@ -304,20 +318,6 @@ pub trait IntSimplificationActions<Context: ?Sized>: IntPropagationActions<Conte
 	fn unify(&self, ctx: &mut Context, other: impl Into<Self>) -> Result<(), Self::Conflict>;
 }
 
-/// Actions that can be performed when the propagator is posted.
-pub trait PostingActions {
-	/// Advise a propagator when the solver backtracks.
-	///
-	/// This will call [`Propagator::advise_of_backtrack`] on the propagator.
-	fn advise_on_backtrack(&mut self);
-
-	/// Explicitly set whether the propagator should be enqueued immediately.
-	fn enqueue_now(&mut self, option: bool);
-
-	/// Set the priority level at which the propagator will be enqueued.
-	fn set_priority(&mut self, priority: PriorityLevel);
-}
-
 /// General actions that can be performed in [`ReasoningEngine::PropagationCtx`]
 pub trait PropagationActions: DecisionActions {
 	/// Type used to represent an atom in an reason for propagation.
@@ -350,12 +350,12 @@ pub trait ReasoningEngine {
 	/// explain a reason for a change they made using
 	/// [`PropagationActions::deferred_reason`].
 	type ExplanationCtx<'a>: TrailingActions;
+	/// The context given to constraint propagators to attach themselves to
+	/// changes in the state of the reasoning engine or decision variables.
+	type InitializationCtx<'a>: InitActions;
 	/// The context given to constraint propagators when they are advised of a
 	/// change in the state of the reasoning engine or decision variables.
 	type NotificationCtx<'a>: TrailingActions;
-	/// The context given to constraint propagators to attach themselves to
-	/// changes in the state of the reasoning engine or decision variables.
-	type PostingCtx<'a>: PostingActions;
 	/// The context given to constraint propagators when they are asked to
 	/// propagate changes based on the constraint they enforce.
 	type PropagationCtx<'a>: PropagationActions<Atom = Self::Atom, Conflict = Self::Conflict>;

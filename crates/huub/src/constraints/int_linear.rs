@@ -13,11 +13,10 @@ use pindakaas::{
 
 use crate::{
 	actions::{
-		BoolInspectionActions, BoolPostingActions, BoolPropagationActions,
-		BoolSimplificationActions, ConstructionActions, IntDecisionActions, IntInspectionActions,
-		IntPostingActions, IntPropagationActions, IntSimplificationActions, PostingActions,
-		PropagationActions, ReasoningEngine, ReformulationActions, SimplificationActions,
-		TrailingActions,
+		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
+		ConstructionActions, InitActions, IntDecisionActions, IntInitActions, IntInspectionActions,
+		IntPropagationActions, IntSimplificationActions, PropagationActions, ReasoningEngine,
+		ReformulationActions, SimplificationActions, TrailingActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, ReasonBuilder,
@@ -166,7 +165,7 @@ where
 	E: ReasoningEngine,
 	IntDecision: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Highest);
 
 		for iv in self.vars {
@@ -546,40 +545,35 @@ where
 		match (operator, r) {
 			(LinOperator::Equal, None) => {
 				// coeffs * vars >= c <=> -coeffs * vars <= -c
-				IntLinearLessEqBounds::new_in(slv, terms.iter().map(|&v| -v), -rhs);
+				IntLinearLessEqBounds::post(slv, terms.iter().map(|&v| -v), -rhs);
 				// coeffs * vars <= c
-				IntLinearLessEqBounds::new_in(slv, terms.clone(), rhs);
+				IntLinearLessEqBounds::post(slv, terms.clone(), rhs);
 			}
 			(LinOperator::Equal, Some(r)) => {
 				if full_reif {
-					IntLinearNotEqImpValue::new_in(slv, terms.clone(), rhs, !r);
+					IntLinearNotEqImpValue::post(slv, terms.clone(), rhs, !r);
 				}
-				IntLinearLessEqImpBounds::new_in(slv, terms.iter().map(|&v| -v), -rhs, r);
-				IntLinearLessEqImpBounds::new_in(slv, terms, rhs, r);
+				IntLinearLessEqImpBounds::post(slv, terms.iter().map(|&v| -v), -rhs, r);
+				IntLinearLessEqImpBounds::post(slv, terms, rhs, r);
 			}
 			(LinOperator::LessEq, None) => {
-				IntLinearLessEqBounds::new_in(slv, terms, rhs);
+				IntLinearLessEqBounds::post(slv, terms, rhs);
 			}
 			(LinOperator::LessEq, Some(r)) => {
 				if full_reif {
-					IntLinearLessEqImpBounds::new_in(
-						slv,
-						terms.iter().map(|&v| -v),
-						-(rhs + 1),
-						!r,
-					);
+					IntLinearLessEqImpBounds::post(slv, terms.iter().map(|&v| -v), -(rhs + 1), !r);
 				}
-				IntLinearLessEqImpBounds::new_in(slv, terms, rhs, r);
+				IntLinearLessEqImpBounds::post(slv, terms, rhs, r);
 			}
 			(LinOperator::NotEqual, None) => {
-				IntLinearNotEqValue::new_in(slv, terms, rhs);
+				IntLinearNotEqValue::post(slv, terms, rhs);
 			}
 			(LinOperator::NotEqual, Some(r)) => {
 				if full_reif {
-					IntLinearLessEqImpBounds::new_in(slv, terms.clone(), rhs, !r);
-					IntLinearLessEqImpBounds::new_in(slv, terms.iter().map(|&v| -v), -rhs, !r);
+					IntLinearLessEqImpBounds::post(slv, terms.clone(), rhs, !r);
+					IntLinearLessEqImpBounds::post(slv, terms.iter().map(|&v| -v), -rhs, !r);
 				}
-				IntLinearNotEqImpValue::new_in(slv, terms, rhs, r);
+				IntLinearNotEqImpValue::post(slv, terms, rhs, r);
 			}
 		}
 		Ok(())
@@ -592,7 +586,7 @@ where
 	IntDecision: SolverIntView<E>,
 	BoolDecision: SolverBoolView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		for &iv in &self.terms {
 			iv.enqueue_when(ctx, IntPropCond::Bounds);
 		}
@@ -609,7 +603,7 @@ where
 impl IntLinearLessEqBounds<IntView> {
 	/// Create a new [`IntLinearLessEqBounds`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(solver: &mut E, vars: impl IntoIterator<Item = IntView>, mut max: IntVal)
+	pub fn post<E>(solver: &mut E, vars: impl IntoIterator<Item = IntView>, mut max: IntVal)
 	where
 		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
 		IntView: IntInspectionActions<E>,
@@ -664,7 +658,7 @@ where
 		var_lits
 	}
 
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 		for v in self.terms.iter() {
 			v.enqueue_when(ctx, IntPropCond::LowerBound);
@@ -723,7 +717,7 @@ where
 impl IntLinearLessEqImpBounds<IntView, RawLit> {
 	/// Create a new [`IntLinearLessEqImpBounds`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(
+	pub fn post<E>(
 		solver: &mut E,
 		vars: impl IntoIterator<Item = IntView>,
 		mut max: IntVal,
@@ -735,7 +729,7 @@ impl IntLinearLessEqImpBounds<IntView, RawLit> {
 		let reification = match reification.0 {
 			BoolViewInner::Lit(r) => r,
 			BoolViewInner::Const(true) => {
-				return IntLinearLessEqBounds::<IntView>::new_in(solver, vars, max)
+				return IntLinearLessEqBounds::<IntView>::post(solver, vars, max)
 			}
 			BoolViewInner::Const(false) => return,
 		};
@@ -762,7 +756,7 @@ impl IntLinearLessEqImpBounds<IntView, RawLit> {
 impl IntLinearNotEqImpValue<IntView, RawLit> {
 	/// Create a new [`IntLinearNotEqImpValue`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(
+	pub fn post<E>(
 		solver: &mut E,
 		vars: impl IntoIterator<Item = IntView>,
 		mut violation: IntVal,
@@ -774,7 +768,7 @@ impl IntLinearNotEqImpValue<IntView, RawLit> {
 		let reification = match reification.0 {
 			BoolViewInner::Lit(r) => r,
 			BoolViewInner::Const(true) => {
-				return IntLinearNotEqValue::new_in(solver, vars, violation)
+				return IntLinearNotEqValue::post(solver, vars, violation)
 			}
 			BoolViewInner::Const(false) => return,
 		};
@@ -804,7 +798,7 @@ impl IntLinearNotEqImpValue<IntView, RawLit> {
 impl IntLinearNotEqValue<IntView> {
 	/// Create a new [`IntLinearNotEqImpValue`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(solver: &mut E, vars: impl IntoIterator<Item = IntView>, mut violation: IntVal)
+	pub fn post<E>(solver: &mut E, vars: impl IntoIterator<Item = IntView>, mut violation: IntVal)
 	where
 		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
 		IntView: IntInspectionActions<E>,
@@ -899,7 +893,7 @@ where
 		debug_assert_eq!(_event, IntEvent::Fixed);
 		self.increment_num_fixed(ctx)
 	}
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::High);
 		for (i, v) in self.terms.iter().enumerate() {
 			v.advise_when(ctx, IntPropCond::Fixed, i as u64);
@@ -1000,7 +994,7 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		IntLinearLessEqBounds::new_in(
+		IntLinearLessEqBounds::post(
 			&mut slv,
 			vec![a * NonZeroIntVal::new(-2).unwrap(), -b, -c],
 			-6,
@@ -1052,7 +1046,7 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		IntLinearLessEqBounds::new_in(&mut slv, vec![a * NonZeroIntVal::new(2).unwrap(), b, c], 6);
+		IntLinearLessEqBounds::post(&mut slv, vec![a * NonZeroIntVal::new(2).unwrap(), b, c], 6);
 
 		slv.expect_solutions(
 			&[a, b, c],
@@ -1101,7 +1095,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		IntLinearNotEqValue::new_in(&mut slv, vec![a * NonZeroIntVal::new(2).unwrap(), b, c], 6);
+		IntLinearNotEqValue::post(&mut slv, vec![a * NonZeroIntVal::new(2).unwrap(), b, c], 6);
 
 		slv.expect_solutions(
 			&[a, b, c],

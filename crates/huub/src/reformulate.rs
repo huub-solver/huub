@@ -18,10 +18,9 @@ use rustc_hash::FxHashSet;
 
 use crate::{
 	actions::{
-		BoolInspectionActions, BoolPostingActions, BoolPropagationActions, ConstructionActions,
-		DecisionActions, IntDecisionActions, IntInspectionActions, PostingActions,
-		PropagationActions, ReasoningEngine, ReformulationActions, SimplificationActions,
-		TrailingActions,
+		BoolInitActions, BoolInspectionActions, BoolPropagationActions, ConstructionActions,
+		DecisionActions, InitActions, IntDecisionActions, IntInspectionActions, PropagationActions,
+		ReasoningEngine, ReformulationActions, SimplificationActions, TrailingActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelBoolView, Propagator, SimplificationStatus,
@@ -276,24 +275,24 @@ where
 	E: ReasoningEngine,
 	BoolDecision: SolverBoolView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.enqueue_now(true);
 		match self {
-			Formula::And(v) => v.iter_mut().for_each(|f| f.post(ctx)),
+			Formula::And(v) => v.iter_mut().for_each(|f| f.initialize(ctx)),
 			Formula::Atom(a) => a.enqueue_when_fixed(ctx),
-			Formula::Equiv(v) => v.iter_mut().for_each(|f| f.post(ctx)),
+			Formula::Equiv(v) => v.iter_mut().for_each(|f| f.initialize(ctx)),
 			Formula::IfThenElse { cond, then, els } => {
-				cond.post(ctx);
-				then.post(ctx);
-				els.post(ctx);
+				cond.initialize(ctx);
+				then.initialize(ctx);
+				els.initialize(ctx);
 			}
 			Formula::Implies(f1, f2) => {
-				f1.post(ctx);
-				f2.post(ctx);
+				f1.initialize(ctx);
+				f2.initialize(ctx);
 			}
-			Formula::Not(f) => f.post(ctx),
-			Formula::Or(v) => v.iter_mut().for_each(|f| f.post(ctx)),
-			Formula::Xor(v) => v.iter_mut().for_each(|f| f.post(ctx)),
+			Formula::Not(f) => f.initialize(ctx),
+			Formula::Or(v) => v.iter_mut().for_each(|f| f.initialize(ctx)),
+			Formula::Xor(v) => v.iter_mut().for_each(|f| f.initialize(ctx)),
 		}
 	}
 

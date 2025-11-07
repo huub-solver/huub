@@ -8,7 +8,7 @@ use rangelist::RangeList;
 
 use crate::{
 	actions::{
-		IntDecisionActions, IntInspectionActions, IntSimplificationActions, PostingActions,
+		InitActions, IntDecisionActions, IntInspectionActions, IntSimplificationActions,
 		ReasoningEngine, ReformulationActions,
 	},
 	constraints::{
@@ -185,10 +185,10 @@ where
 		// propagation should have removed any fixed values
 		debug_assert!(vars.iter().all(|v| v.val(slv).is_none()));
 		if self.value_consistent_propagator_enabled() {
-			IntAllDifferentValue::new_in(slv, vars.clone());
+			IntAllDifferentValue::post(slv, vars.clone());
 		}
 		if self.bounds_consistent_propagator_enabled() {
-			IntAllDifferentBounds::new_in(slv, vars);
+			IntAllDifferentBounds::post(slv, vars);
 		}
 		Ok(())
 	}
@@ -199,8 +199,8 @@ where
 	E: ReasoningEngine,
 	IntDecision: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
-		self.prop.post(ctx);
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+		self.prop.initialize(ctx);
 	}
 
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
@@ -477,7 +477,7 @@ impl<I> IntAllDifferentBounds<I> {
 impl IntAllDifferentBounds<IntView> {
 	/// Create a new [`IntAllDifferentBounds`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(solver: &mut E, vars: Vec<IntView>)
+	pub fn post<E>(solver: &mut E, vars: Vec<IntView>)
 	where
 		E: AddAssign<BoxedPropagator> + ?Sized,
 	{
@@ -490,7 +490,7 @@ where
 	E: ReasoningEngine,
 	I: SolverIntView<E>,
 {
-	fn post(&mut self, ctx: &mut <E as ReasoningEngine>::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut <E as ReasoningEngine>::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 		for v in &self.var {
 			v.enqueue_when(ctx, IntPropCond::Bounds);
@@ -509,7 +509,7 @@ where
 impl IntAllDifferentValue<IntView> {
 	/// Create a new [`IntAllDifferentValue`] propagator and post it in the
 	/// solver.
-	pub fn new_in<E>(solver: &mut E, vars: Vec<IntView>)
+	pub fn post<E>(solver: &mut E, vars: Vec<IntView>)
 	where
 		E: AddAssign<BoxedPropagator> + ?Sized,
 	{
@@ -542,7 +542,7 @@ where
 		true
 	}
 
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		// Let the propagator be advised when each specific decision is fixed to a
 		// value, with the index of the decision.
 		for (i, v) in self.vars.iter().enumerate() {
@@ -616,7 +616,7 @@ mod tests {
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		IntAllDifferentBounds::new_in(&mut slv, vec![a, b, c]);
+		IntAllDifferentBounds::post(&mut slv, vec![a, b, c]);
 		slv.assert_all_solutions(&[a, b, c], |sol| sol.iter().all_unique());
 	}
 	#[test]
@@ -660,7 +660,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		IntAllDifferentBounds::new_in(&mut slv, vec![a, b, c, d, e, f]);
+		IntAllDifferentBounds::post(&mut slv, vec![a, b, c, d, e, f]);
 		slv.assert_all_solutions(&[a, b, c, d, e, f], |sol| sol.iter().all_unique());
 	}
 
@@ -705,7 +705,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		IntAllDifferentBounds::new_in(&mut slv, vec![a, b, c, d, e, f]);
+		IntAllDifferentBounds::post(&mut slv, vec![a, b, c, d, e, f]);
 		slv.assert_all_solutions(&[a, b, c, d, e, f], |sol| sol.iter().all_unique());
 	}
 
@@ -732,8 +732,8 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		IntAllDifferentBounds::new_in(&mut slv, vec![a, b, c]);
-		IntLinearLessEqBounds::new_in(&mut slv, vec![-a, -b, -c], -8);
+		IntAllDifferentBounds::post(&mut slv, vec![a, b, c]);
+		IntLinearLessEqBounds::post(&mut slv, vec![-a, -b, -c], -8);
 		slv.assert_unsatisfiable();
 	}
 
@@ -760,7 +760,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		IntAllDifferentValue::new_in(&mut slv, vec![a, b, c]);
+		IntAllDifferentValue::post(&mut slv, vec![a, b, c]);
 
 		slv.assert_all_solutions(&[a, b, c], |sol| sol.iter().all_unique());
 	}
@@ -788,7 +788,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		IntAllDifferentValue::new_in(&mut slv, vec![a, b, c]);
+		IntAllDifferentValue::post(&mut slv, vec![a, b, c]);
 
 		slv.assert_unsatisfiable();
 	}
@@ -819,7 +819,7 @@ mod tests {
 					})
 					.collect();
 
-				IntAllDifferentValue::new_in(&mut slv, vars.clone());
+				IntAllDifferentValue::post(&mut slv, vars.clone());
 				vars
 			})
 			.collect();
@@ -832,7 +832,7 @@ mod tests {
 				.map(|(j, _)| all_vars[j][i])
 				.collect();
 
-			IntAllDifferentValue::new_in(&mut slv, col_vars);
+			IntAllDifferentValue::post(&mut slv, col_vars);
 		}
 		// add all different propagator for each 3 by 3 grid
 		for i in 0..3 {
@@ -844,7 +844,7 @@ mod tests {
 					}
 				}
 
-				IntAllDifferentValue::new_in(&mut slv, block_vars);
+				IntAllDifferentValue::post(&mut slv, block_vars);
 			}
 		}
 		assert_eq!(

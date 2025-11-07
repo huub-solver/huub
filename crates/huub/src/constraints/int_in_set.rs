@@ -9,9 +9,9 @@ use rangelist::IntervalIterator;
 
 use crate::{
 	actions::{
-		BoolInspectionActions, BoolPostingActions, BoolPropagationActions,
-		BoolSimplificationActions, IntInspectionActions, IntSimplificationActions, PostingActions,
-		ReasoningEngine, ReformulationActions, SimplificationActions,
+		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
+		InitActions, IntInspectionActions, IntSimplificationActions, ReasoningEngine,
+		ReformulationActions, SimplificationActions,
 	},
 	constraints::{
 		Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus, SolverBoolView,
@@ -133,7 +133,7 @@ where
 	E: ReasoningEngine,
 	BoolDecision: SolverBoolView<E>,
 {
-	fn post(&mut self, ctx: &mut E::PostingCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Highest);
 		// Enqueue once to check the domain of the integer decision variable,
 		// then only if the reification variable is fixed.
