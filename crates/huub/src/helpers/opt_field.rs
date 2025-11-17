@@ -76,9 +76,13 @@ mod tests {
 	use super::OptField;
 
 	#[test]
-	fn test_optfield_new() {
+	fn test_optfield_clone() {
 		let opt_field = OptField::new(42);
-		assert_eq!(opt_field.get(), Some(&42));
+		let cloned = opt_field.clone();
+		assert_eq!(opt_field.get(), cloned.get());
+		let opt_field: OptField<0, bool> = OptField::default();
+		let cloned = opt_field.clone();
+		assert_eq!(opt_field.get(), cloned.get());
 	}
 
 	#[test]
@@ -88,16 +92,6 @@ mod tests {
 
 		let opt_field: OptField<1, i32> = OptField::default();
 		assert_eq!(opt_field.get(), Some(&0));
-	}
-
-	#[test]
-	fn test_optfield_clone() {
-		let opt_field = OptField::new(42);
-		let cloned = opt_field.clone();
-		assert_eq!(opt_field.get(), cloned.get());
-		let opt_field: OptField<0, bool> = OptField::default();
-		let cloned = opt_field.clone();
-		assert_eq!(opt_field.get(), cloned.get());
 	}
 
 	#[test]
@@ -127,5 +121,11 @@ mod tests {
 		let hash2 = hasher2.finish();
 
 		assert_eq!(hash1, hash2);
+	}
+
+	#[test]
+	fn test_optfield_new() {
+		let opt_field = OptField::new(42);
+		assert_eq!(opt_field.get(), Some(&42));
 	}
 }

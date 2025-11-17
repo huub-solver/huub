@@ -32,7 +32,7 @@ tracing-subscriber = "0.3.18"
 ustr = { version = "1.0", features = ["serde"] }
 
 [dev-dependencies]
-divan = { package = "codspeed-divan-compat", version = "3.0" }
+divan = { package = "codspeed-divan-compat", version = "4.0" }
 expect-test = { workspace = true }
 
 [lints]
