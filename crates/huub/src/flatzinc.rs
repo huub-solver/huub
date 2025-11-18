@@ -7,6 +7,7 @@ use std::{
 	fmt::{self, Debug, Display},
 	hash::Hash,
 	iter::once,
+	num::NonZero,
 	ops::{Deref, Not, RangeInclusive},
 	rc::Rc,
 };
@@ -32,7 +33,7 @@ use crate::{
 	reformulate::ReformulationError,
 	rel, seq_precede_chain_int, table_int, times_int, value_precede_chain_int, BoolDecision,
 	BoolDecisionInner, Branching, Decision, IntDecision, IntLinExpr, IntSetVal, IntVal, Model,
-	NonZeroIntVal, ValueSelection, VariableSelection,
+	ValueSelection, VariableSelection,
 };
 
 /// Domain assumed for integer decision variables that do not have a domain
@@ -740,7 +741,7 @@ where
 					break 'int_lin_eq;
 				}
 				let offset = sum / c;
-				let view = if let Some(scale) = NonZeroIntVal::new(-cy / c) {
+				let view = if let Some(scale) = NonZero::new(-cy / c) {
 					let y = lit_int_view(self, vy)?;
 					y * scale + offset
 				} else {
@@ -1083,9 +1084,7 @@ where
 						let lin_exp: IntLinExpr = vars
 							.into_iter()
 							.zip(coeffs.into_iter())
-							.filter_map(|(x, c)| {
-								NonZeroIntVal::new(c).map(|c| IntDecision::from(x) * c)
-							})
+							.filter_map(|(x, c)| NonZero::new(c).map(|c| IntDecision::from(x) * c))
 							.chain(once(-sum))
 							.sum();
 
@@ -1546,7 +1545,7 @@ where
 						let lin_exp: IntLinExpr = vars
 							.into_iter()
 							.zip(coeffs.into_iter())
-							.filter_map(|(x, c)| NonZeroIntVal::new(c).map(|c| x * c))
+							.filter_map(|(x, c)| NonZero::new(c).map(|c| x * c))
 							.sum();
 
 						self.prb.add_constraint(match c.id.deref() {
@@ -1586,7 +1585,7 @@ where
 						let lin_exp: IntLinExpr = vars
 							.into_iter()
 							.zip(coeffs.into_iter())
-							.filter_map(|(x, c)| NonZeroIntVal::new(c).map(|c| x * c))
+							.filter_map(|(x, c)| NonZero::new(c).map(|c| x * c))
 							.sum();
 
 						let lin = match c.id.deref() {

@@ -8,10 +8,11 @@ use std::{
 };
 
 use pindakaas::{AsDynClauseDatabase, ClauseDatabase, Lit as RawLit, Unsatisfiable};
+use rangelist::IntervalIterator;
 
 use crate::{
 	branchers::BoxedBrancher,
-	constraints::{BoxedPropagator, Constraint, LazyReason, ReasonBuilder},
+	constraints::{BoxedPropagator, Conflict, Constraint, LazyReason, ReasonBuilder},
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::IntPropCond, int_var::IntVarRef, queue::PriorityLevel, trail::TrailedInt,
@@ -50,20 +51,17 @@ pub trait BoolOperations: Clone + fmt::Debug + Eq + Hash + Not<Output = Self> + 
 
 /// Actions available to [`Propagator`] and [`Constraint`] implementations in
 /// [`ReasoningEngine::PropagationCtx`] for Boolean decision variables.
-pub trait BoolPropagationActions<Context>: BoolInspectionActions<Context> {
-	/// Type used to represent an atom in an reason for propagation.
-	type Atom: BoolOperations + From<Self>;
-
-	/// Type used to represent a conflict that occurs during propagation.
-	type Conflict;
-
+pub trait BoolPropagationActions<Context>: BoolInspectionActions<Context>
+where
+	Context: ReasoningContext + ?Sized,
+{
 	/// Enforce that the value of a Boolean decision variable is to be `true`,
 	/// because of the given reason.
 	fn set(
 		&self,
 		ctx: &mut Context,
-		reason: impl ReasonBuilder<Context, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
+		reason: impl ReasonBuilder<Context, Context::Atom>,
+	) -> Result<(), Context::Conflict> {
 		self.set_val(ctx, true, reason)
 	}
 
@@ -73,8 +71,8 @@ pub trait BoolPropagationActions<Context>: BoolInspectionActions<Context> {
 		&self,
 		ctx: &mut Context,
 		val: bool,
-		reason: impl ReasonBuilder<Context, Self::Atom>,
-	) -> Result<(), Self::Conflict>;
+		reason: impl ReasonBuilder<Context, Context::Atom>,
+	) -> Result<(), Context::Conflict>;
 }
 
 /// Actions available to [`Constraint`] implementations in
@@ -83,6 +81,8 @@ pub trait BoolPropagationActions<Context>: BoolInspectionActions<Context> {
 /// Generally these actions are used in [`Constraint::simplify`].
 pub trait BoolSimplificationActions<Context>:
 	BoolPropagationActions<Context> + Into<BoolDecision>
+where
+	Context: ReasoningContext + ?Sized,
 {
 	/// Mark `self` as being equivalent to `other`, instructing the reasoning
 	/// engine to use the same representation.
@@ -90,7 +90,7 @@ pub trait BoolSimplificationActions<Context>:
 		&self,
 		ctx: &mut Context,
 		other: impl Into<BoolDecision>,
-	) -> Result<(), Self::Conflict>;
+	) -> Result<(), Context::Conflict>;
 }
 
 /// Actions that can be performed during the initialization of branchers.
@@ -140,14 +140,17 @@ pub trait InitActions {
 ///
 /// These actions are also available to [`Propagator`] and [`Constraint`]
 /// implementations in [`Reasoning::PropagationCtx`]
-pub trait IntDecisionActions<Context: ?Sized>: IntInspectionActions<Context> {
+pub trait IntDecisionActions<Context>: IntInspectionActions<Context>
+where
+	Context: ReasoningContext + ?Sized,
+{
 	/// Get (or create) a literal for the given referenced integer variable with
 	/// the given meaning.
-	fn lit(&self, ctx: &mut Context, meaning: IntLitMeaning) -> Self::Atom;
+	fn lit(&self, ctx: &mut Context, meaning: IntLitMeaning) -> Context::Atom;
 
 	/// Get the Boolean view that represents the current assignment of the
 	/// integer view, or `None` if the integer view is not assigned.
-	fn val_lit(&self, ctx: &mut Context) -> Option<Self::Atom> {
+	fn val_lit(&self, ctx: &mut Context) -> Option<Context::Atom> {
 		let val = self.val(ctx)?;
 		Some(self.lit(ctx, IntLitMeaning::Eq(val)))
 	}
@@ -155,16 +158,19 @@ pub trait IntDecisionActions<Context: ?Sized>: IntInspectionActions<Context> {
 
 /// Actions available to [`Propagator`] implementations in
 /// [`Reasoning::ExplanationCtx`] for integer decision variables.
-pub trait IntExplanationActions<Context: ?Sized>: IntInspectionActions<Context> {
+pub trait IntExplanationActions<Context>: IntInspectionActions<Context>
+where
+	Context: ReasoningContext + ?Sized,
+{
 	/// Get a Boolean view that represents the given meaning (that is currently
 	/// `true`) on the integer view, or a relaxation if the literal does not yet
 	/// exist.
-	fn lit_relaxed(&self, ctx: &Context, meaning: IntLitMeaning) -> (Self::Atom, IntLitMeaning);
+	fn lit_relaxed(&self, ctx: &Context, meaning: IntLitMeaning) -> (Context::Atom, IntLitMeaning);
 
 	/// Get the Boolean view that represents the current assignment of the
 	/// integer view, or `None` if the integer view is not assigned or if the
 	/// equality literal does not exist.
-	fn try_val_lit(&self, ctx: &Context) -> Option<Self::Atom> {
+	fn try_val_lit(&self, ctx: &Context) -> Option<Context::Atom> {
 		let val = self.val(ctx)?;
 		self.try_lit(ctx, IntLitMeaning::Eq(val))
 	}
@@ -172,7 +178,10 @@ pub trait IntExplanationActions<Context: ?Sized>: IntInspectionActions<Context> 
 
 /// Actions available to [`Propagator`] implementations in
 /// [`ReasoningEngine::PostingCtx`] for Boolean decision variables.
-pub trait IntInitActions<Context>: IntInspectionActions<Context> {
+pub trait IntInitActions<Context>: IntInspectionActions<Context>
+where
+	Context: ReasoningContext + ?Sized,
+{
 	/// Advise the propagator when [`self`] is changed according to the given
 	/// propagation condition, allowing the propagator to decide whether to
 	/// enqueue itself.
@@ -190,15 +199,13 @@ pub trait IntInitActions<Context>: IntInspectionActions<Context> {
 
 /// Actions available to [`Propagator`] and [`Constraint`] implementations in
 /// all contexts for integer decision variables.
-pub trait IntInspectionActions<Context: ?Sized>: IntOperations {
-	/// Type used to represent an atom in an reason for propagation.
-	type Atom: BoolOperations;
-
+pub trait IntInspectionActions<Context>: IntOperations
+where
+	Context: ReasoningContext + ?Sized,
+{
 	/// Convenience method to get both the lower and upper bounds of an integer
 	/// view.
-	fn bounds(&self, ctx: &Context) -> (IntVal, IntVal) {
-		(self.lower_bound(ctx), self.upper_bound(ctx))
-	}
+	fn bounds(&self, ctx: &Context) -> (IntVal, IntVal);
 	/// Get the set of values from which the integer view is guaranteed to take
 	/// a value (given the current search decisions).
 	fn domain(&self, ctx: &Context) -> IntSetVal;
@@ -209,7 +216,7 @@ pub trait IntInspectionActions<Context: ?Sized>: IntOperations {
 
 	/// Get the meaning of the given literal with respect to the given integer
 	/// view, or `None` it has no direct meaning.
-	fn lit_meaning(&self, ctx: &Context, lit: Self::Atom) -> Option<IntLitMeaning>;
+	fn lit_meaning(&self, ctx: &Context, lit: Context::Atom) -> Option<IntLitMeaning>;
 
 	/// Get the minimum value that an integer view is guaranteed to take (given
 	/// the current search decisions).
@@ -217,11 +224,11 @@ pub trait IntInspectionActions<Context: ?Sized>: IntOperations {
 
 	/// Get the Boolean view that represents that the integer view will take a
 	/// value greater or equal to its current lower bound.
-	fn lower_bound_lit(&self, ctx: &Context) -> Self::Atom;
+	fn lower_bound_lit(&self, ctx: &Context) -> Context::Atom;
 
 	/// Get a Boolean view that represents the given meaning on the integer
 	/// view, if it already exists.
-	fn try_lit(&self, ctx: &Context, meaning: IntLitMeaning) -> Option<Self::Atom>;
+	fn try_lit(&self, ctx: &Context, meaning: IntLitMeaning) -> Option<Context::Atom>;
 
 	/// Get the maximum value that an integer view is guaranteed to take (given
 	/// the current search decisions).
@@ -229,18 +236,11 @@ pub trait IntInspectionActions<Context: ?Sized>: IntOperations {
 
 	/// Get the Boolean view that represents that the integer view will take a
 	/// value less or equal to its current upper bound.
-	fn upper_bound_lit(&self, ctx: &Context) -> Self::Atom;
+	fn upper_bound_lit(&self, ctx: &Context) -> Context::Atom;
 
 	/// Get the current value of an integer view, if it has been assigned (given
 	/// the current search decisions).
-	fn val(&self, ctx: &Context) -> Option<IntVal> {
-		let (lb, ub) = self.bounds(ctx);
-		if lb == ub {
-			Some(lb)
-		} else {
-			None
-		}
-	}
+	fn val(&self, ctx: &Context) -> Option<IntVal>;
 }
 
 /// Operations that are required to be possible to perform on types acting as
@@ -249,18 +249,18 @@ pub trait IntOperations: Clone + fmt::Debug + Eq + Hash + 'static {}
 
 /// Actions available to [`Propagator`] and [`Constraint`] implementations in
 /// [`ReasoningEngine::PropagationCtx`] for integer decision variables.
-pub trait IntPropagationActions<Context: ?Sized>: IntDecisionActions<Context> {
-	/// Type used to represent a conflict that occurs during propagation.
-	type Conflict;
-
+pub trait IntPropagationActions<Context>: IntDecisionActions<Context>
+where
+	Context: ReasoningContext + ?Sized,
+{
 	/// Enforce that a an integer view takes a value that is greater or equal to
 	/// `val` because of the given `reason`.
 	fn set_lower_bound(
 		&self,
 		ctx: &mut Context,
 		val: IntVal,
-		reason: impl ReasonBuilder<Context, Self::Atom>,
-	) -> Result<(), Self::Conflict>;
+		reason: impl ReasonBuilder<Context, Context::Atom>,
+	) -> Result<(), Context::Conflict>;
 
 	/// Enforce that a an integer view cannot take a value `val` because of the
 	/// given `reason`.
@@ -268,8 +268,8 @@ pub trait IntPropagationActions<Context: ?Sized>: IntDecisionActions<Context> {
 		&self,
 		ctx: &mut Context,
 		val: IntVal,
-		reason: impl ReasonBuilder<Context, Self::Atom>,
-	) -> Result<(), Self::Conflict>;
+		reason: impl ReasonBuilder<Context, Context::Atom>,
+	) -> Result<(), Context::Conflict>;
 
 	/// Enforce that a an integer view takes a value that is less or equal to
 	/// `val` because of the given `reason`.
@@ -277,8 +277,8 @@ pub trait IntPropagationActions<Context: ?Sized>: IntDecisionActions<Context> {
 		&self,
 		ctx: &mut Context,
 		val: IntVal,
-		reason: impl ReasonBuilder<Context, Self::Atom>,
-	) -> Result<(), Self::Conflict>;
+		reason: impl ReasonBuilder<Context, Context::Atom>,
+	) -> Result<(), Context::Conflict>;
 
 	/// Enforce that a an integer view takes a value `val` because of the given
 	/// `reason`.
@@ -286,23 +286,26 @@ pub trait IntPropagationActions<Context: ?Sized>: IntDecisionActions<Context> {
 		&self,
 		ctx: &mut Context,
 		val: IntVal,
-		reason: impl ReasonBuilder<Context, Self::Atom>,
-	) -> Result<(), Self::Conflict>;
+		reason: impl ReasonBuilder<Context, Context::Atom>,
+	) -> Result<(), Context::Conflict>;
 }
 
 /// Actions available to [`Constraint`] implementations in
 /// [`ReasoningEngine::PropagationCtx`] for integer decision variables.
 ///
 /// Generally these actions are used in [`Constraint::simplify`].
-pub trait IntSimplificationActions<Context: ?Sized>: IntPropagationActions<Context> {
+pub trait IntSimplificationActions<Context>: IntPropagationActions<Context>
+where
+	Context: ReasoningContext + ?Sized,
+{
 	/// Enforce that the given integer expression takes a value in in the given
 	/// set.
 	fn set_domain(
 		&self,
 		ctx: &mut Context,
 		domain: &IntSetVal,
-		reason: impl ReasonBuilder<Context, Self::Atom>,
-	) -> Result<(), Self::Conflict>;
+		reason: impl ReasonBuilder<Context, Context::Atom>,
+	) -> Result<(), Context::Conflict>;
 
 	/// Enforce that a given integer expression cannot take any of the values in
 	/// the given set.
@@ -310,21 +313,16 @@ pub trait IntSimplificationActions<Context: ?Sized>: IntPropagationActions<Conte
 		&self,
 		ctx: &mut Context,
 		values: &IntSetVal,
-		reason: impl ReasonBuilder<Context, Self::Atom>,
-	) -> Result<(), Self::Conflict>;
+		reason: impl ReasonBuilder<Context, Context::Atom>,
+	) -> Result<(), Context::Conflict>;
 
 	/// Mark two integer decisions as being equivalent, ensuring the two use the
 	/// same internal representation.
-	fn unify(&self, ctx: &mut Context, other: impl Into<Self>) -> Result<(), Self::Conflict>;
+	fn unify(&self, ctx: &mut Context, other: impl Into<Self>) -> Result<(), Context::Conflict>;
 }
 
 /// General actions that can be performed in [`ReasoningEngine::PropagationCtx`]
-pub trait PropagationActions: DecisionActions {
-	/// Type used to represent an atom in an reason for propagation.
-	type Atom: BoolOperations;
-	/// Type used to represent a conflict that occurs during propagation.
-	type Conflict;
-
+pub trait PropagationActions: DecisionActions + ReasoningContext {
 	/// Declare that given reason (seen as a conjunction of atoms) is represents
 	/// a conflict in the current state (requiring backtracking).
 	///
@@ -338,6 +336,13 @@ pub trait PropagationActions: DecisionActions {
 	fn deferred_reason(&self, data: u64) -> LazyReason;
 }
 
+pub trait ReasoningContext {
+	/// Type used to represent an atom in an reason for propagation.
+	type Atom: BoolOperations;
+	/// Type used to represent a conflict that occurs during propagation.
+	type Conflict;
+}
+
 /// Trait for environments that support constraint propagation and decision
 /// variable pruning to simplify the current problem state.
 pub trait ReasoningEngine {
@@ -349,16 +354,20 @@ pub trait ReasoningEngine {
 	/// The context given to the constraint propagator when they are asked to
 	/// explain a reason for a change they made using
 	/// [`PropagationActions::deferred_reason`].
-	type ExplanationCtx<'a>: TrailingActions;
+	type ExplanationCtx<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
+		+ TrailingActions;
 	/// The context given to constraint propagators to attach themselves to
 	/// changes in the state of the reasoning engine or decision variables.
-	type InitializationCtx<'a>: InitActions;
+	type InitializationCtx<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
+		+ InitActions;
 	/// The context given to constraint propagators when they are advised of a
 	/// change in the state of the reasoning engine or decision variables.
-	type NotificationCtx<'a>: TrailingActions;
+	type NotificationCtx<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
+		+ TrailingActions;
 	/// The context given to constraint propagators when they are asked to
 	/// propagate changes based on the constraint they enforce.
-	type PropagationCtx<'a>: PropagationActions<Atom = Self::Atom, Conflict = Self::Conflict>;
+	type PropagationCtx<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
+		+ PropagationActions<Atom = Self::Atom, Conflict = Self::Conflict>;
 }
 
 /// Actions that can be performed when reformulating a [`Model`] object into a
@@ -446,15 +455,18 @@ pub trait TrailingActions {
 	fn trailed_int(&self, i: TrailedInt) -> IntVal;
 }
 
+impl ReasoningContext for dyn ReformulationActions + '_ {
+	type Atom = BoolView;
+	type Conflict = Conflict<RawLit>;
+}
+
 impl IntDecisionActions<dyn ReformulationActions + '_> for IntVarRef {
-	fn lit(&self, ctx: &mut (dyn ReformulationActions + '_), meaning: IntLitMeaning) -> Self::Atom {
+	fn lit(&self, ctx: &mut (dyn ReformulationActions + '_), meaning: IntLitMeaning) -> BoolView {
 		ctx.int_lit(*self, meaning)
 	}
 }
 
 impl IntInspectionActions<dyn ReformulationActions + '_> for IntVarRef {
-	type Atom = BoolView;
-
 	fn domain(&self, ctx: &dyn ReformulationActions) -> IntSetVal {
 		ctx.int_domain(*self)
 	}
@@ -463,11 +475,7 @@ impl IntInspectionActions<dyn ReformulationActions + '_> for IntVarRef {
 		ctx.check_int_in_domain(*self, val)
 	}
 
-	fn lit_meaning(
-		&self,
-		ctx: &dyn ReformulationActions,
-		lit: Self::Atom,
-	) -> Option<IntLitMeaning> {
+	fn lit_meaning(&self, ctx: &dyn ReformulationActions, lit: BoolView) -> Option<IntLitMeaning> {
 		ctx.int_lit_meaning(*self, lit)
 	}
 
@@ -475,15 +483,11 @@ impl IntInspectionActions<dyn ReformulationActions + '_> for IntVarRef {
 		ctx.int_lower_bound(*self)
 	}
 
-	fn lower_bound_lit(&self, ctx: &dyn ReformulationActions) -> Self::Atom {
+	fn lower_bound_lit(&self, ctx: &dyn ReformulationActions) -> BoolView {
 		ctx.int_lower_bound_lit(*self)
 	}
 
-	fn try_lit(
-		&self,
-		ctx: &dyn ReformulationActions,
-		meaning: IntLitMeaning,
-	) -> Option<Self::Atom> {
+	fn try_lit(&self, ctx: &dyn ReformulationActions, meaning: IntLitMeaning) -> Option<BoolView> {
 		ctx.try_int_lit(*self, meaning)
 	}
 
@@ -491,8 +495,23 @@ impl IntInspectionActions<dyn ReformulationActions + '_> for IntVarRef {
 		ctx.int_upper_bound(*self)
 	}
 
-	fn upper_bound_lit(&self, ctx: &dyn ReformulationActions) -> Self::Atom {
+	fn upper_bound_lit(&self, ctx: &dyn ReformulationActions) -> BoolView {
 		ctx.int_upper_bound_lit(*self)
+	}
+
+	fn bounds(&self, ctx: &dyn ReformulationActions) -> (IntVal, IntVal) {
+		let lb = self.lower_bound(ctx);
+		let ub = self.upper_bound(ctx);
+		(lb, ub)
+	}
+
+	fn val(&self, ctx: &dyn ReformulationActions) -> Option<IntVal> {
+		let (lb, ub) = self.bounds(ctx);
+		if lb == ub {
+			Some(lb)
+		} else {
+			None
+		}
 	}
 }
 
@@ -520,9 +539,185 @@ impl ClauseDatabase for ReformulationClauseDatabaseWrapper<'_> {
 impl<T> BoolOperations for T where T: Clone + fmt::Debug + Eq + Hash + Not<Output = Self> + 'static {}
 impl<T> IntOperations for T where T: Clone + fmt::Debug + Eq + Hash + 'static {}
 
-impl<C> BoolInspectionActions<C> for bool {
-	fn val(&self, _: &C) -> Option<bool> {
+impl<Ctx> BoolInspectionActions<Ctx> for bool {
+	fn val(&self, _: &Ctx) -> Option<bool> {
 		Some(*self)
+	}
+}
+
+impl<Ctx> IntInspectionActions<Ctx> for IntVal
+where
+	Ctx: ReasoningContext + ?Sized,
+	Ctx::Atom: From<bool>,
+{
+	fn domain(&self, _: &Ctx) -> IntSetVal {
+		(*self..=*self).into()
+	}
+
+	fn in_domain(&self, _: &Ctx, val: IntVal) -> bool {
+		*self == val
+	}
+
+	fn lit_meaning(&self, _: &Ctx, _: Ctx::Atom) -> Option<IntLitMeaning> {
+		None
+	}
+
+	fn lower_bound(&self, _: &Ctx) -> IntVal {
+		*self
+	}
+
+	fn lower_bound_lit(&self, _: &Ctx) -> Ctx::Atom {
+		true.into()
+	}
+
+	fn try_lit(&self, _: &Ctx, meaning: IntLitMeaning) -> Option<Ctx::Atom> {
+		Some(
+			match meaning {
+				IntLitMeaning::Eq(v) => *self == v,
+				IntLitMeaning::NotEq(v) => *self != v,
+				IntLitMeaning::GreaterEq(v) => *self >= v,
+				IntLitMeaning::Less(v) => *self < v,
+			}
+			.into(),
+		)
+	}
+
+	fn upper_bound(&self, _: &Ctx) -> IntVal {
+		*self
+	}
+
+	fn upper_bound_lit(&self, _: &Ctx) -> Ctx::Atom {
+		true.into()
+	}
+
+	fn val(&self, _: &Ctx) -> Option<IntVal> {
+		Some(*self)
+	}
+
+	fn bounds(&self, _: &Ctx) -> (IntVal, IntVal) {
+		(*self, *self)
+	}
+}
+
+impl<Ctx> IntDecisionActions<Ctx> for IntVal
+where
+	Ctx: ReasoningContext + ?Sized,
+	Ctx::Atom: From<bool>,
+{
+	fn lit(&self, ctx: &mut Ctx, meaning: IntLitMeaning) -> Ctx::Atom {
+		self.try_lit(ctx, meaning).unwrap()
+	}
+}
+
+impl<Ctx> IntExplanationActions<Ctx> for IntVal
+where
+	Ctx: ReasoningContext + ?Sized,
+	Ctx::Atom: From<bool>,
+{
+	fn lit_relaxed(&self, ctx: &Ctx, meaning: IntLitMeaning) -> (Ctx::Atom, IntLitMeaning) {
+		(self.try_lit(ctx, meaning).unwrap(), meaning)
+	}
+}
+
+impl<Ctx> IntPropagationActions<Ctx> for IntVal
+where
+	Ctx: PropagationActions + ?Sized,
+	Ctx::Atom: From<bool>,
+{
+	fn set_lower_bound(
+		&self,
+		ctx: &mut Ctx,
+		val: IntVal,
+		reason: impl ReasonBuilder<Ctx, Ctx::Atom>,
+	) -> Result<(), Ctx::Conflict> {
+		if val > *self {
+			Err(ctx.declare_conflict(reason))
+		} else {
+			Ok(())
+		}
+	}
+
+	fn set_not_eq(
+		&self,
+		ctx: &mut Ctx,
+		val: IntVal,
+		reason: impl ReasonBuilder<Ctx, Ctx::Atom>,
+	) -> Result<(), Ctx::Conflict> {
+		if val == *self {
+			Err(ctx.declare_conflict(reason))
+		} else {
+			Ok(())
+		}
+	}
+
+	fn set_upper_bound(
+		&self,
+		ctx: &mut Ctx,
+		val: IntVal,
+		reason: impl ReasonBuilder<Ctx, Ctx::Atom>,
+	) -> Result<(), Ctx::Conflict> {
+		if val < *self {
+			Err(ctx.declare_conflict(reason))
+		} else {
+			Ok(())
+		}
+	}
+
+	fn set_val(
+		&self,
+		ctx: &mut Ctx,
+		val: IntVal,
+		reason: impl ReasonBuilder<Ctx, Ctx::Atom>,
+	) -> Result<(), Ctx::Conflict> {
+		if val != *self {
+			Err(ctx.declare_conflict(reason))
+		} else {
+			Ok(())
+		}
+	}
+}
+
+impl<Ctx> IntSimplificationActions<Ctx> for IntVal
+where
+	Ctx: PropagationActions + ?Sized,
+	Ctx::Atom: From<bool>,
+{
+	fn set_domain(
+		&self,
+		ctx: &mut Ctx,
+		domain: &IntSetVal,
+		reason: impl ReasonBuilder<Ctx, <Ctx as ReasoningContext>::Atom>,
+	) -> Result<(), <Ctx as ReasoningContext>::Conflict> {
+		if !domain.contains(self) {
+			Err(ctx.declare_conflict(reason))
+		} else {
+			Ok(())
+		}
+	}
+
+	fn set_not_in_set(
+		&self,
+		ctx: &mut Ctx,
+		values: &IntSetVal,
+		reason: impl ReasonBuilder<Ctx, <Ctx as ReasoningContext>::Atom>,
+	) -> Result<(), <Ctx as ReasoningContext>::Conflict> {
+		if values.contains(self) {
+			Err(ctx.declare_conflict(reason))
+		} else {
+			Ok(())
+		}
+	}
+
+	fn unify(
+		&self,
+		ctx: &mut Ctx,
+		other: impl Into<Self>,
+	) -> Result<(), <Ctx as ReasoningContext>::Conflict> {
+		if self == &other.into() {
+			Ok(())
+		} else {
+			Err(ctx.declare_conflict([]))
+		}
 	}
 }
 

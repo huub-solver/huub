@@ -11,6 +11,7 @@ use crate::{
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
 	},
+	helpers::static_dispatch::static_dispatch,
 	reformulate::ReformulationError,
 	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView},
 };
@@ -31,9 +32,8 @@ impl IntArrayMinimumBounds<IntView, IntView> {
 	where
 		E: AddAssign<BoxedPropagator> + ?Sized,
 	{
-		*solver += Box::new(Self {
-			vars: vars.clone(),
-			min,
+		static_dispatch!([VecIntView |> vars, IntView |> min], |vars, min| {
+			*solver += Box::new(IntArrayMinimumBounds { vars, min });
 		});
 	}
 }

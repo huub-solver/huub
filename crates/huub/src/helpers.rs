@@ -3,12 +3,15 @@
 
 pub(crate) mod linear_transform;
 pub(crate) mod opt_field;
+pub(crate) mod static_dispatch;
 
-use crate::{IntVal, NonZeroIntVal};
+use std::num::NonZero;
+
+use crate::IntVal;
 
 #[inline]
 /// Integer division that rounds towards positive infinity.
-pub(crate) fn div_ceil(a: IntVal, b: NonZeroIntVal) -> IntVal {
+pub(crate) fn div_ceil(a: IntVal, b: NonZero<IntVal>) -> IntVal {
 	let d = a / b.get();
 	let r = a % b.get();
 	if (r > 0 && b.get() > 0) || (r < 0 && b.get() < 0) {
@@ -19,7 +22,7 @@ pub(crate) fn div_ceil(a: IntVal, b: NonZeroIntVal) -> IntVal {
 }
 
 /// Integer division that rounds towards negative infinity.
-pub(crate) fn div_floor(a: IntVal, b: NonZeroIntVal) -> IntVal {
+pub(crate) fn div_floor(a: IntVal, b: NonZero<IntVal>) -> IntVal {
 	let d = a / b.get();
 	let r = a % b.get();
 	if (r > 0 && b.get() < 0) || (r < 0 && b.get() > 0) {
@@ -31,24 +34,23 @@ pub(crate) fn div_floor(a: IntVal, b: NonZeroIntVal) -> IntVal {
 
 #[cfg(test)]
 mod tests {
-	use crate::{
-		helpers::{div_ceil, div_floor},
-		NonZeroIntVal,
-	};
+	use std::num::NonZero;
+
+	use crate::helpers::{div_ceil, div_floor};
 
 	#[test]
 	fn test_div_ceil() {
-		assert_eq!(div_ceil(8, NonZeroIntVal::new(3).unwrap()), 3);
-		assert_eq!(div_ceil(-8, NonZeroIntVal::new(-3).unwrap()), 3);
-		assert_eq!(div_ceil(8, NonZeroIntVal::new(-3).unwrap()), -2);
-		assert_eq!(div_ceil(-8, NonZeroIntVal::new(3).unwrap()), -2);
+		assert_eq!(div_ceil(8, NonZero::new(3).unwrap()), 3);
+		assert_eq!(div_ceil(-8, NonZero::new(-3).unwrap()), 3);
+		assert_eq!(div_ceil(8, NonZero::new(-3).unwrap()), -2);
+		assert_eq!(div_ceil(-8, NonZero::new(3).unwrap()), -2);
 	}
 
 	#[test]
 	fn test_div_floor() {
-		assert_eq!(div_floor(8, NonZeroIntVal::new(3).unwrap()), 2);
-		assert_eq!(div_floor(-8, NonZeroIntVal::new(-3).unwrap()), 2);
-		assert_eq!(div_floor(8, NonZeroIntVal::new(-3).unwrap()), -3);
-		assert_eq!(div_floor(-8, NonZeroIntVal::new(3).unwrap()), -3);
+		assert_eq!(div_floor(8, NonZero::new(3).unwrap()), 2);
+		assert_eq!(div_floor(-8, NonZero::new(-3).unwrap()), 2);
+		assert_eq!(div_floor(8, NonZero::new(-3).unwrap()), -3);
+		assert_eq!(div_floor(-8, NonZero::new(3).unwrap()), -3);
 	}
 }

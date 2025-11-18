@@ -14,6 +14,7 @@ use crate::{
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
 	},
+	helpers::static_dispatch::static_dispatch,
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::{IntEvent, IntPropCond},
@@ -481,7 +482,9 @@ impl IntAllDifferentBounds<IntView> {
 	where
 		E: AddAssign<BoxedPropagator> + ?Sized,
 	{
-		*solver += Box::new(Self::new(vars));
+		static_dispatch!([VecIntView |> vars], |vars| {
+			*solver += Box::new(IntAllDifferentBounds::new(vars));
+		})
 	}
 }
 
@@ -513,10 +516,12 @@ impl IntAllDifferentValue<IntView> {
 	where
 		E: AddAssign<BoxedPropagator> + ?Sized,
 	{
-		*solver += Box::new(Self {
-			vars: vars.clone(),
-			action_list: Vec::new(),
-		});
+		static_dispatch!([VecIntView |> vars], |vars| {
+			*solver += Box::new(IntAllDifferentValue {
+				vars,
+				action_list: Vec::new(),
+			});
+		})
 	}
 }
 

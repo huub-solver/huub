@@ -33,6 +33,7 @@ use crate::{
 		trail::TrailedInt,
 		BoolView, BoolViewInner, IntView, IntViewInner, View,
 	},
+	views::linear_bool_view::LinearBoolView,
 	BoolDecision, BoolFormula, Clause, Decision, IntDecision, IntLitMeaning, IntSetVal, IntVal,
 	Model, Solver,
 };
@@ -620,10 +621,11 @@ impl ReformulationMap {
 			Bool(t, bv) => {
 				let bv = self.get_bool(slv, bv);
 				match bv.0 {
-					BoolViewInner::Lit(lit) => IntView(IntViewInner::Bool {
-						transformer: t,
-						lit,
-					}),
+					BoolViewInner::Lit(lit) => IntView(IntViewInner::Bool(if t.positive_scale() {
+						LinearBoolView::new(t.scale, t.offset, lit)
+					} else {
+						LinearBoolView::new(-t.scale, t.offset + t.scale.get(), !lit)
+					})),
 					BoolViewInner::Const(b) => t.transform(b as IntVal).into(),
 				}
 			}

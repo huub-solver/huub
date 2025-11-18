@@ -1,3 +1,5 @@
+use std::num::NonZero;
+
 use expect_test::{expect, Expect};
 use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;
@@ -13,8 +15,7 @@ use crate::{
 		int_var::{EncodingType, IntVar},
 		SolveResult, Value, View,
 	},
-	Decision, InitConfig, Model, NonZeroIntVal, ReformulationError, Solver, ValueSelection,
-	VariableSelection,
+	Decision, InitConfig, Model, ReformulationError, Solver, ValueSelection, VariableSelection,
 };
 
 #[test]
@@ -74,13 +75,13 @@ fn test_duplicate_propagation() {
 	IntLinearLessEqBounds::post(
 		&mut slv,
 		[
-			a * NonZeroIntVal::new(3).unwrap(),
+			a * NonZero::new(3).unwrap(),
 			b,
-			b * NonZeroIntVal::new(2).unwrap(),
+			b * NonZero::new(2).unwrap(),
 		],
 		3,
 	);
-	IntLinearNotEqValue::post(&mut slv, [a * NonZeroIntVal::new(3).unwrap(), b], 3);
+	IntLinearNotEqValue::post(&mut slv, [a * NonZero::new(3).unwrap(), b], 3);
 	IntBrancher::new_in(
 		&mut slv,
 		vec![a, b],

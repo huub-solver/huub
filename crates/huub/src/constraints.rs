@@ -114,11 +114,8 @@ pub trait ModelBoolView<E>
 where
 	E: ReasoningEngine,
 	Self: SolverBoolView<E>
-		+ for<'a> BoolSimplificationActions<
-			E::PropagationCtx<'a>,
-			Atom = E::Atom,
-			Conflict = E::Conflict,
-		> + Into<BoolDecision>,
+		+ for<'a> BoolSimplificationActions<E::PropagationCtx<'a>>
+		+ Into<BoolDecision>,
 {
 }
 
@@ -127,11 +124,8 @@ pub trait ModelIntView<E>
 where
 	E: ReasoningEngine,
 	Self: SolverIntView<E>
-		+ for<'a> IntSimplificationActions<
-			E::PropagationCtx<'a>,
-			Atom = E::Atom,
-			Conflict = E::Conflict,
-		> + Into<IntDecision>,
+		+ for<'a> IntSimplificationActions<E::PropagationCtx<'a>>
+		+ Into<IntDecision>,
 {
 }
 
@@ -254,11 +248,8 @@ where
 	Self: for<'a> BoolInitActions<E::InitializationCtx<'a>>
 		+ for<'a> BoolInspectionActions<E::ExplanationCtx<'a>>
 		+ for<'a> BoolInspectionActions<E::NotificationCtx<'a>>
-		+ for<'a> BoolPropagationActions<
-			E::PropagationCtx<'a>,
-			Atom = E::Atom,
-			Conflict = E::Conflict,
-		> + Into<E::Atom>,
+		+ for<'a> BoolPropagationActions<E::PropagationCtx<'a>>
+		+ Into<E::Atom>,
 {
 }
 
@@ -267,14 +258,15 @@ pub trait SolverIntView<E>
 where
 	E: ReasoningEngine + ?Sized,
 	Self: for<'a> IntInitActions<E::InitializationCtx<'a>>
-		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>, Atom = E::Atom>
-		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>, Atom = E::Atom>
-		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>, Atom = E::Atom, Conflict = E::Conflict>,
+		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>>
+		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>>
+		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>>,
 {
 }
 
 impl<C, A, const N: usize> ReasonBuilder<C, A> for &[A; N]
 where
+	C: ?Sized,
 	A: Clone,
 {
 	fn build_reason(self, ctx: &mut C) -> Result<Reason<A>, bool> {
@@ -284,6 +276,7 @@ where
 
 impl<C, A> ReasonBuilder<C, A> for &[A]
 where
+	C: ?Sized,
 	A: Clone,
 {
 	fn build_reason(self, _: &mut C) -> Result<Reason<A>, bool> {
@@ -291,7 +284,10 @@ where
 	}
 }
 
-impl<C, A, const N: usize> ReasonBuilder<C, A> for [A; N] {
+impl<C, A, const N: usize> ReasonBuilder<C, A> for [A; N]
+where
+	C: ?Sized,
+{
 	fn build_reason(self, _: &mut C) -> Result<Reason<A>, bool> {
 		Reason::from_iter(self)
 	}
@@ -301,11 +297,8 @@ impl<E, B> ModelBoolView<E> for B
 where
 	E: ReasoningEngine,
 	B: SolverBoolView<E>
-		+ for<'a> BoolSimplificationActions<
-			E::PropagationCtx<'a>,
-			Atom = E::Atom,
-			Conflict = E::Conflict,
-		> + Into<BoolDecision>,
+		+ for<'a> BoolSimplificationActions<E::PropagationCtx<'a>>
+		+ Into<BoolDecision>,
 {
 }
 
@@ -315,11 +308,8 @@ where
 	Self: for<'a> BoolInitActions<E::InitializationCtx<'a>>
 		+ for<'a> BoolInspectionActions<E::ExplanationCtx<'a>>
 		+ for<'a> BoolInspectionActions<E::NotificationCtx<'a>>
-		+ for<'a> BoolPropagationActions<
-			E::PropagationCtx<'a>,
-			Atom = E::Atom,
-			Conflict = E::Conflict,
-		> + Into<E::Atom>,
+		+ for<'a> BoolPropagationActions<E::PropagationCtx<'a>>
+		+ Into<E::Atom>,
 {
 }
 
@@ -401,6 +391,7 @@ impl<Atom: Debug> fmt::Display for Conflict<Atom> {
 
 impl<C, A, F, I> ReasonBuilder<C, A> for F
 where
+	C: ?Sized,
 	F: FnOnce(&mut C) -> I,
 	I: IntoIterator<Item = A>,
 {
@@ -413,11 +404,8 @@ impl<E, I> ModelIntView<E> for I
 where
 	E: ReasoningEngine,
 	I: SolverIntView<E>
-		+ for<'a> IntSimplificationActions<
-			E::PropagationCtx<'a>,
-			Atom = E::Atom,
-			Conflict = E::Conflict,
-		> + Into<IntDecision>,
+		+ for<'a> IntSimplificationActions<E::PropagationCtx<'a>>
+		+ Into<IntDecision>,
 {
 }
 
@@ -425,13 +413,16 @@ impl<E, I> SolverIntView<E> for I
 where
 	E: ReasoningEngine + ?Sized,
 	I: for<'a> IntInitActions<E::InitializationCtx<'a>>
-		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>, Atom = E::Atom>
-		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>, Atom = E::Atom>
-		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>, Atom = E::Atom, Conflict = E::Conflict>,
+		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>>
+		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>>
+		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>>,
 {
 }
 
-impl<A, C> ReasonBuilder<C, A> for LazyReason {
+impl<A, C> ReasonBuilder<C, A> for LazyReason
+where
+	C: ?Sized,
+{
 	fn build_reason(self, _: &mut C) -> Result<Reason<A>, bool> {
 		Ok(Reason::Lazy(self))
 	}

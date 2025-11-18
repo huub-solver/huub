@@ -34,8 +34,8 @@ use tracing::{debug, trace, warn};
 
 use crate::{
 	actions::{
-		BoolInspectionActions, IntExplanationActions, IntInspectionActions, ReasoningEngine,
-		TrailingActions,
+		BoolInspectionActions, IntExplanationActions, IntInspectionActions, ReasoningContext,
+		ReasoningEngine, TrailingActions,
 	},
 	branchers::{BoxedBrancher, Decision},
 	constraints::{BoxedPropagator, Conflict, LazyReason, Reason},
@@ -47,9 +47,9 @@ use crate::{
 		queue::PropagatorQueue,
 		solving_context::SolvingContext,
 		trail::{Trail, TrailedInt},
-		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, SolverConfiguration,
+		BoolView, BoolViewInner, IntLitMeaning, SolverConfiguration,
 	},
-	Clause, IntVal,
+	Clause, IntSetVal, IntVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -670,7 +670,6 @@ impl PropagatorExtension for Engine {
 				// (DEBUG ONLY) Check that all integers that where fixed by equality
 				// literals had their bound literals set to match.
 				for (iv, i) in mem::take(&mut self.state.check_int_fixed) {
-					let iv = IntView(IntViewInner::VarRef(iv));
 					debug_assert_eq!(iv.val(&self.state), Some(i));
 					let lb_lit = iv
 						.try_lit(&self.state, IntLitMeaning::GreaterEq(i))
@@ -722,50 +721,6 @@ impl ReasoningEngine for Engine {
 	type PropagationCtx<'a> = SolvingContext<'a>;
 }
 
-impl IntInspectionActions<State> for IntVal {
-	type Atom = BoolView;
-
-	fn domain(&self, _: &State) -> crate::IntSetVal {
-		(*self..=*self).into()
-	}
-
-	fn in_domain(&self, _: &State, val: IntVal) -> bool {
-		*self == val
-	}
-
-	fn lit_meaning(&self, _: &State, _: Self::Atom) -> Option<IntLitMeaning> {
-		None
-	}
-
-	fn lower_bound(&self, _: &State) -> IntVal {
-		*self
-	}
-
-	fn lower_bound_lit(&self, _: &State) -> Self::Atom {
-		true.into()
-	}
-
-	fn try_lit(&self, _: &State, meaning: IntLitMeaning) -> Option<Self::Atom> {
-		Some(
-			match meaning {
-				IntLitMeaning::Eq(v) => *self == v,
-				IntLitMeaning::NotEq(v) => *self != v,
-				IntLitMeaning::GreaterEq(v) => *self >= v,
-				IntLitMeaning::Less(v) => *self < v,
-			}
-			.into(),
-		)
-	}
-
-	fn upper_bound(&self, _: &State) -> IntVal {
-		*self
-	}
-
-	fn upper_bound_lit(&self, _: &State) -> Self::Atom {
-		true.into()
-	}
-}
-
 impl IntExplanationActions<State> for IntVarRef {
 	fn lit_relaxed(&self, ctx: &State, mut meaning: IntLitMeaning) -> (BoolView, IntLitMeaning) {
 		debug_assert!(
@@ -805,9 +760,7 @@ impl IntExplanationActions<State> for IntVarRef {
 }
 
 impl IntInspectionActions<State> for IntVarRef {
-	type Atom = BoolView;
-
-	fn domain(&self, ctx: &State) -> crate::IntSetVal {
+	fn domain(&self, ctx: &State) -> IntSetVal {
 		ctx.int_vars[*self].domain(&ctx.trail)
 	}
 
@@ -825,7 +778,7 @@ impl IntInspectionActions<State> for IntVarRef {
 		}
 	}
 
-	fn lit_meaning(&self, ctx: &State, lit: Self::Atom) -> Option<IntLitMeaning> {
+	fn lit_meaning(&self, ctx: &State, lit: BoolView) -> Option<IntLitMeaning> {
 		let BoolViewInner::Lit(lit) = lit.0 else {
 			return None;
 		};
@@ -854,6 +807,21 @@ impl IntInspectionActions<State> for IntVarRef {
 
 	fn upper_bound_lit(&self, ctx: &State) -> BoolView {
 		ctx.int_vars[*self].upper_bound_lit(&ctx.trail)
+	}
+
+	fn bounds(&self, ctx: &State) -> (IntVal, IntVal) {
+		let lb = self.lower_bound(ctx);
+		let ub = self.upper_bound(ctx);
+		(lb, ub)
+	}
+
+	fn val(&self, ctx: &State) -> Option<IntVal> {
+		let (lb, ub) = self.bounds(ctx);
+		if lb == ub {
+			Some(lb)
+		} else {
+			None
+		}
 	}
 }
 
@@ -1012,6 +980,11 @@ impl State {
 		self.config.vsids_only = enable;
 		self.vsids = enable;
 	}
+}
+
+impl ReasoningContext for State {
+	type Atom = <Engine as ReasoningEngine>::Atom;
+	type Conflict = <Engine as ReasoningEngine>::Conflict;
 }
 
 impl TrailingActions for State {

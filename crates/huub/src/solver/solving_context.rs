@@ -12,17 +12,18 @@ use tracing::trace;
 use crate::{
 	actions::{
 		BoolInspectionActions, BoolPropagationActions, DecisionActions, IntDecisionActions,
-		IntInspectionActions, IntPropagationActions, PropagationActions, TrailingActions,
+		IntInspectionActions, IntPropagationActions, PropagationActions, ReasoningContext,
+		ReasoningEngine, TrailingActions,
 	},
 	constraints::{Conflict, LazyReason, Reason, ReasonBuilder},
 	solver::{
 		activation_list::IntEvent,
-		engine::{trace_new_lit, LitPropagation, PropRef, State},
+		engine::{trace_new_lit, Engine, LitPropagation, PropRef, State},
 		int_var::{IntVarRef, LazyLitDef},
 		trail::TrailedInt,
 		BoolView, BoolViewInner, BoxedPropagator,
 	},
-	IntLitMeaning, IntVal,
+	IntLitMeaning, IntSetVal, IntVal,
 };
 
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
@@ -59,14 +60,11 @@ pub struct SolvingContext<'a> {
 }
 
 impl<'a> BoolPropagationActions<SolvingContext<'a>> for BoolView {
-	type Atom = BoolView;
-	type Conflict = Conflict<RawLit>;
-
 	fn set(
 		&self,
 		ctx: &mut SolvingContext<'a>,
-		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
+		reason: impl ReasonBuilder<SolvingContext<'a>, BoolView>,
+	) -> Result<(), Conflict<RawLit>> {
 		match self.0 {
 			BoolViewInner::Lit(lit) => lit.set(ctx, reason),
 			BoolViewInner::Const(false) => Err(Conflict::new(ctx, None, reason)),
@@ -79,7 +77,7 @@ impl<'a> BoolPropagationActions<SolvingContext<'a>> for BoolView {
 		ctx: &mut SolvingContext<'a>,
 		val: bool,
 		reason: impl ReasonBuilder<SolvingContext<'a>, BoolView>,
-	) -> Result<(), Self::Conflict> {
+	) -> Result<(), Conflict<RawLit>> {
 		if val { *self } else { !(*self) }.set(ctx, reason)
 	}
 }
@@ -108,9 +106,7 @@ impl IntDecisionActions<SolvingContext<'_>> for IntVarRef {
 }
 
 impl IntInspectionActions<SolvingContext<'_>> for IntVarRef {
-	type Atom = <IntVarRef as IntInspectionActions<State>>::Atom;
-
-	fn domain(&self, ctx: &SolvingContext<'_>) -> crate::IntSetVal {
+	fn domain(&self, ctx: &SolvingContext<'_>) -> IntSetVal {
 		self.domain(ctx.state)
 	}
 
@@ -118,7 +114,7 @@ impl IntInspectionActions<SolvingContext<'_>> for IntVarRef {
 		self.in_domain(ctx.state, val)
 	}
 
-	fn lit_meaning(&self, ctx: &SolvingContext<'_>, lit: Self::Atom) -> Option<IntLitMeaning> {
+	fn lit_meaning(&self, ctx: &SolvingContext<'_>, lit: BoolView) -> Option<IntLitMeaning> {
 		self.lit_meaning(ctx.state, lit)
 	}
 
@@ -126,11 +122,11 @@ impl IntInspectionActions<SolvingContext<'_>> for IntVarRef {
 		self.lower_bound(ctx.state)
 	}
 
-	fn lower_bound_lit(&self, ctx: &SolvingContext<'_>) -> Self::Atom {
+	fn lower_bound_lit(&self, ctx: &SolvingContext<'_>) -> BoolView {
 		self.lower_bound_lit(ctx.state)
 	}
 
-	fn try_lit(&self, ctx: &SolvingContext<'_>, meaning: IntLitMeaning) -> Option<Self::Atom> {
+	fn try_lit(&self, ctx: &SolvingContext<'_>, meaning: IntLitMeaning) -> Option<BoolView> {
 		self.try_lit(ctx.state, meaning)
 	}
 
@@ -138,20 +134,26 @@ impl IntInspectionActions<SolvingContext<'_>> for IntVarRef {
 		self.upper_bound(ctx.state)
 	}
 
-	fn upper_bound_lit(&self, ctx: &SolvingContext<'_>) -> Self::Atom {
+	fn upper_bound_lit(&self, ctx: &SolvingContext<'_>) -> BoolView {
 		self.upper_bound_lit(ctx.state)
+	}
+
+	fn bounds(&self, ctx: &SolvingContext<'_>) -> (IntVal, IntVal) {
+		self.bounds(ctx.state)
+	}
+
+	fn val(&self, ctx: &SolvingContext<'_>) -> Option<IntVal> {
+		self.val(ctx.state)
 	}
 }
 
 impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
-	type Conflict = Conflict<RawLit>;
-
 	fn set_lower_bound(
 		&self,
 		ctx: &mut SolvingContext<'a>,
 		val: IntVal,
-		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
+		reason: impl ReasonBuilder<SolvingContext<'a>, BoolView>,
+	) -> Result<(), Conflict<RawLit>> {
 		ctx.propagate_int(*self, IntLitMeaning::GreaterEq(val), reason)
 	}
 
@@ -159,8 +161,8 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
 		&self,
 		ctx: &mut SolvingContext<'a>,
 		val: IntVal,
-		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
+		reason: impl ReasonBuilder<SolvingContext<'a>, BoolView>,
+	) -> Result<(), Conflict<RawLit>> {
 		ctx.propagate_int(*self, IntLitMeaning::NotEq(val), reason)
 	}
 
@@ -168,8 +170,8 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
 		&self,
 		ctx: &mut SolvingContext<'a>,
 		val: IntVal,
-		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
+		reason: impl ReasonBuilder<SolvingContext<'a>, BoolView>,
+	) -> Result<(), Conflict<RawLit>> {
 		ctx.propagate_int(*self, IntLitMeaning::Less(val + 1), reason)
 	}
 
@@ -177,8 +179,8 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
 		&self,
 		ctx: &mut SolvingContext<'a>,
 		val: IntVal,
-		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
+		reason: impl ReasonBuilder<SolvingContext<'a>, BoolView>,
+	) -> Result<(), Conflict<RawLit>> {
 		ctx.propagate_int(*self, IntLitMeaning::Eq(val), reason)
 	}
 }
@@ -190,14 +192,11 @@ impl BoolInspectionActions<SolvingContext<'_>> for RawLit {
 }
 
 impl<'a> BoolPropagationActions<SolvingContext<'a>> for RawLit {
-	type Atom = BoolView;
-	type Conflict = Conflict<RawLit>;
-
 	fn set(
 		&self,
 		ctx: &mut SolvingContext<'a>,
-		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
+		reason: impl ReasonBuilder<SolvingContext<'a>, BoolView>,
+	) -> Result<(), Conflict<RawLit>> {
 		match ctx.state.trail.sat_value(*self) {
 			Some(true) => Ok(()),
 			Some(false) => Err(Conflict::new(ctx, Some(*self), reason)),
@@ -212,8 +211,8 @@ impl<'a> BoolPropagationActions<SolvingContext<'a>> for RawLit {
 		&self,
 		ctx: &mut SolvingContext<'a>,
 		val: bool,
-		reason: impl ReasonBuilder<SolvingContext<'a>, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
+		reason: impl ReasonBuilder<SolvingContext<'a>, BoolView>,
+	) -> Result<(), Conflict<RawLit>> {
 		if val { *self } else { !(*self) }.set(ctx, reason)
 	}
 }
@@ -408,10 +407,7 @@ impl DecisionActions for SolvingContext<'_> {
 }
 
 impl PropagationActions for SolvingContext<'_> {
-	type Atom = BoolView;
-	type Conflict = Conflict<RawLit>;
-
-	fn declare_conflict(&mut self, reason: impl ReasonBuilder<Self, Self::Atom>) -> Self::Conflict {
+	fn declare_conflict(&mut self, reason: impl ReasonBuilder<Self, BoolView>) -> Conflict<RawLit> {
 		Conflict::new(self, None, reason)
 	}
 
@@ -431,4 +427,9 @@ impl TrailingActions for SolvingContext<'_> {
 	fn trailed_int(&self, x: TrailedInt) -> IntVal {
 		self.state.trailed_int(x)
 	}
+}
+
+impl ReasoningContext for SolvingContext<'_> {
+	type Atom = <Engine as ReasoningEngine>::Atom;
+	type Conflict = <Engine as ReasoningEngine>::Conflict;
 }

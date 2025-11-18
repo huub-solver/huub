@@ -7,7 +7,7 @@ use pindakaas::Lit as RawLit;
 use crate::{
 	actions::{
 		BoolInspectionActions, BrancherInitActions, DecisionActions, IntDecisionActions,
-		IntInspectionActions,
+		IntInspectionActions, ReasoningContext,
 	},
 	solver::{
 		solving_context::SolvingContext, trail::TrailedInt, BoolView, BoolViewInner, IntLitMeaning,
@@ -207,9 +207,10 @@ impl IntBrancher {
 	}
 }
 
-impl<D: DecisionActions> Brancher<D> for IntBrancher
+impl<D> Brancher<D> for IntBrancher
 where
-	IntView: IntDecisionActions<D, Atom = BoolView>,
+	D: DecisionActions + ReasoningContext<Atom = BoolView>,
+	IntView: IntDecisionActions<D>,
 {
 	fn decide(&mut self, actions: &mut D) -> Decision {
 		let begin = actions.trailed_int(self.next) as usize;

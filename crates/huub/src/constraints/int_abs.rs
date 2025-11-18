@@ -10,12 +10,14 @@ use pindakaas::Lit as RawLit;
 
 use crate::{
 	actions::{
-		ConstructionActions, InitActions, IntDecisionActions, ReasoningEngine, ReformulationActions,
+		ConstructionActions, InitActions, IntDecisionActions, ReasoningContext, ReasoningEngine,
+		ReformulationActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus,
 		SolverBoolView, SolverIntView,
 	},
+	helpers::static_dispatch::static_dispatch,
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::IntPropCond, queue::PriorityLevel, BoolView, BoolViewInner, IntLitMeaning,
@@ -42,18 +44,26 @@ impl IntAbsBounds<IntView, IntView, RawLit> {
 	/// Create a new [`IntAbsBounds`] propagator and post it in the solver.
 	pub(crate) fn post<E>(solver: &mut E, origin: IntView, abs: IntView)
 	where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
-		IntView: IntDecisionActions<E, Atom = BoolView>,
+		E: AddAssign<BoxedPropagator>
+			+ ConstructionActions
+			+ ReasoningContext<Atom = BoolView>
+			+ ?Sized,
+		IntView: IntDecisionActions<E>,
 	{
 		let BoolViewInner::Lit(origin_positive) = origin.lit(solver, IntLitMeaning::GreaterEq(0)).0
 		else {
 			panic!("origin variable in absolute value constraint is known positive or negative");
 		};
-		*solver += Box::new(Self {
-			origin,
-			abs,
-			origin_positive,
-		});
+		static_dispatch!(
+			[IntView |> origin, IntView |> abs],
+			|origin, abs| {
+				*solver += Box::new(IntAbsBounds {
+					origin,
+					abs,
+					origin_positive,
+				});
+			}
+		);
 	}
 }
 

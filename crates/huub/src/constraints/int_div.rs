@@ -4,6 +4,7 @@
 
 use std::{
 	mem,
+	num::NonZero,
 	ops::{AddAssign, Neg},
 };
 
@@ -12,18 +13,18 @@ use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Unsatisfiable};
 use crate::{
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, IntPropagationActions,
-		ReasoningEngine, ReformulationActions,
+		ReasoningContext, ReasoningEngine, ReformulationActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus,
 		SolverIntView,
 	},
-	helpers::div_ceil,
+	helpers::{div_ceil, static_dispatch::static_dispatch},
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::IntPropCond, queue::PriorityLevel, BoolView, IntLitMeaning, IntView,
 	},
-	BoolDecision, BoolFormula, IntDecision, NonZeroIntVal,
+	BoolDecision, BoolFormula, IntDecision,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -98,7 +99,7 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 			}
 		}
 
-		if let Some(res_ub_inc) = NonZeroIntVal::new(res_ub + 1) {
+		if let Some(res_ub_inc) = NonZero::new(res_ub + 1) {
 			let new_denom_lb = div_ceil(num_lb + 1, res_ub_inc);
 			if new_denom_lb > denom_lb {
 				denominator.set_lower_bound(
@@ -172,8 +173,8 @@ impl IntDivBounds<IntView, IntView, IntView> {
 		result: IntView,
 	) -> Result<(), Unsatisfiable>
 	where
-		E: AddAssign<BoxedPropagator> + ClauseDatabase + ?Sized,
-		IntView: IntDecisionActions<E, Atom = BoolView>,
+		E: AddAssign<BoxedPropagator> + ClauseDatabase + ReasoningContext<Atom = BoolView> + ?Sized,
+		IntView: IntDecisionActions<E>,
 	{
 		// Ensure the consistency of the signs of the three variables using the
 		// following clauses.
@@ -198,12 +199,16 @@ impl IntDivBounds<IntView, IntView, IntView> {
 			solver.add_clause([!num_neg, !denom_pos, res_neg])?;
 		}
 
-		*solver += Box::new(Self {
-			numerator,
-			denominator,
-			result,
-		});
-
+		static_dispatch!(
+			[IntView |> numerator, IntView |> denominator, IntView |> result],
+			|numerator, denominator, result| {
+				*solver += Box::new(IntDivBounds {
+					numerator,
+					denominator,
+					result,
+				});
+			}
+		);
 		Ok(())
 	}
 }

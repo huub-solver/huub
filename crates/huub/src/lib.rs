@@ -74,6 +74,7 @@ pub mod reformulate;
 pub mod solver;
 #[cfg(test)]
 pub(crate) mod tests;
+pub(crate) mod views;
 
 use std::{
 	any::Any,
@@ -81,7 +82,7 @@ use std::{
 	hash::Hash,
 	iter::{repeat_n, repeat_with, Sum},
 	mem,
-	num::{NonZeroI32, NonZeroI64},
+	num::{NonZero, NonZeroI32, NonZeroI64},
 	ops::{Add, AddAssign, Deref, Mul, Neg, Not, Sub},
 };
 
@@ -103,8 +104,8 @@ use crate::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
 		ConstructionActions, DecisionActions, InitActions, IntDecisionActions,
 		IntExplanationActions, IntInitActions, IntInspectionActions, IntPropagationActions,
-		IntSimplificationActions, PropagationActions, ReasoningEngine, SimplificationActions,
-		TrailingActions,
+		IntSimplificationActions, PropagationActions, ReasoningContext, ReasoningEngine,
+		SimplificationActions, TrailingActions,
 	},
 	branchers::{BoolBrancher, IntBrancher, WarmStartBrancher},
 	constraints::{
@@ -298,9 +299,6 @@ pub struct ModelInitContext<'a> {
 	/// enqueued.
 	decision_enqueue: Option<bool>,
 }
-
-/// Type alias for a non-zero parameter integer value.
-pub type NonZeroIntVal = NonZeroI64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Strategy for limiting the domain of a selected decision variable as part of
@@ -694,14 +692,11 @@ impl BoolInspectionActions<ModelInitContext<'_>> for BoolDecision {
 }
 
 impl BoolPropagationActions<Model> for BoolDecision {
-	type Atom = BoolDecision;
-	type Conflict = <Model as ReasoningEngine>::Conflict;
-
 	fn set(
 		&self,
 		ctx: &mut Model,
-		reason: impl ReasonBuilder<Model, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
+		reason: impl ReasonBuilder<Model, BoolDecision>,
+	) -> Result<(), Conflict<BoolDecision>> {
 		use BoolDecisionInner::*;
 
 		let var = self.resolve_alias(ctx);
@@ -733,14 +728,14 @@ impl BoolPropagationActions<Model> for BoolDecision {
 		ctx: &mut Model,
 		val: bool,
 		reason: impl ReasonBuilder<Model, BoolDecision>,
-	) -> Result<(), Self::Conflict> {
+	) -> Result<(), Conflict<BoolDecision>> {
 		let lit = if val { *self } else { !*self };
 		lit.set(ctx, reason)
 	}
 }
 
 impl BoolSimplificationActions<Model> for BoolDecision {
-	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Self::Conflict> {
+	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Conflict<BoolDecision>> {
 		use BoolDecisionInner::*;
 
 		let x = self.resolve_alias(ctx);
@@ -1114,18 +1109,18 @@ impl From<i64> for IntDecision {
 }
 
 impl IntDecisionActions<Model> for IntDecision {
-	fn lit(&self, ctx: &mut Model, meaning: IntLitMeaning) -> Self::Atom {
+	fn lit(&self, ctx: &mut Model, meaning: IntLitMeaning) -> BoolDecision {
 		IntInspectionActions::try_lit(self, ctx, meaning).unwrap()
 	}
 
-	fn val_lit(&self, ctx: &mut Model) -> Option<Self::Atom> {
+	fn val_lit(&self, ctx: &mut Model) -> Option<BoolDecision> {
 		let val = self.val(ctx)?;
 		Some(Self::eq(self, val))
 	}
 }
 
 impl IntExplanationActions<Model> for IntDecision {
-	fn lit_relaxed(&self, ctx: &Model, meaning: IntLitMeaning) -> (Self::Atom, IntLitMeaning) {
+	fn lit_relaxed(&self, ctx: &Model, meaning: IntLitMeaning) -> (BoolDecision, IntLitMeaning) {
 		(self.try_lit(ctx, meaning).unwrap(), meaning)
 	}
 }
@@ -1224,8 +1219,6 @@ impl IntInitActions<ModelInitContext<'_>> for IntDecision {
 }
 
 impl IntInspectionActions<Model> for IntDecision {
-	type Atom = <Model as ReasoningEngine>::Atom;
-
 	fn domain(&self, ctx: &Model) -> IntSetVal {
 		let var = self.resolve_alias(ctx);
 		match var.0 {
@@ -1292,7 +1285,7 @@ impl IntInspectionActions<Model> for IntDecision {
 		}
 	}
 
-	fn lit_meaning(&self, _ctx: &Model, lit: Self::Atom) -> Option<IntLitMeaning> {
+	fn lit_meaning(&self, _ctx: &Model, lit: BoolDecision) -> Option<IntLitMeaning> {
 		const BOOL_DEF_MEANING: IntLitMeaning = IntLitMeaning::GreaterEq(1);
 
 		match self.0 {
@@ -1381,12 +1374,12 @@ impl IntInspectionActions<Model> for IntDecision {
 		}
 	}
 
-	fn lower_bound_lit(&self, ctx: &Model) -> Self::Atom {
+	fn lower_bound_lit(&self, ctx: &Model) -> BoolDecision {
 		let lb = self.lower_bound(ctx);
 		self.geq(lb)
 	}
 
-	fn try_lit(&self, _: &Model, meaning: IntLitMeaning) -> Option<Self::Atom> {
+	fn try_lit(&self, _: &Model, meaning: IntLitMeaning) -> Option<BoolDecision> {
 		Some(match meaning {
 			IntLitMeaning::Eq(v) => self.eq(v),
 			IntLitMeaning::NotEq(v) => self.ne(v),
@@ -1428,15 +1421,28 @@ impl IntInspectionActions<Model> for IntDecision {
 		}
 	}
 
-	fn upper_bound_lit(&self, ctx: &Model) -> Self::Atom {
+	fn upper_bound_lit(&self, ctx: &Model) -> BoolDecision {
 		let ub = self.upper_bound(ctx);
 		self.leq(ub)
+	}
+
+	fn bounds(&self, ctx: &Model) -> (IntVal, IntVal) {
+		let lb = self.lower_bound(ctx);
+		let ub = self.upper_bound(ctx);
+		(lb, ub)
+	}
+
+	fn val(&self, ctx: &Model) -> Option<IntVal> {
+		let (lb, ub) = self.bounds(ctx);
+		if lb == ub {
+			Some(lb)
+		} else {
+			None
+		}
 	}
 }
 
 impl IntInspectionActions<ModelInitContext<'_>> for IntDecision {
-	type Atom = <Self as IntInspectionActions<Model>>::Atom;
-
 	fn domain(&self, ctx: &ModelInitContext<'_>) -> IntSetVal {
 		self.domain(ctx.model)
 	}
@@ -1445,7 +1451,7 @@ impl IntInspectionActions<ModelInitContext<'_>> for IntDecision {
 		self.in_domain(ctx.model, val)
 	}
 
-	fn lit_meaning(&self, ctx: &ModelInitContext<'_>, lit: Self::Atom) -> Option<IntLitMeaning> {
+	fn lit_meaning(&self, ctx: &ModelInitContext<'_>, lit: BoolDecision) -> Option<IntLitMeaning> {
 		self.lit_meaning(ctx.model, lit)
 	}
 
@@ -1453,11 +1459,11 @@ impl IntInspectionActions<ModelInitContext<'_>> for IntDecision {
 		self.lower_bound(ctx.model)
 	}
 
-	fn lower_bound_lit(&self, ctx: &ModelInitContext<'_>) -> Self::Atom {
+	fn lower_bound_lit(&self, ctx: &ModelInitContext<'_>) -> BoolDecision {
 		self.lower_bound_lit(ctx.model)
 	}
 
-	fn try_lit(&self, ctx: &ModelInitContext<'_>, meaning: IntLitMeaning) -> Option<Self::Atom> {
+	fn try_lit(&self, ctx: &ModelInitContext<'_>, meaning: IntLitMeaning) -> Option<BoolDecision> {
 		self.try_lit(ctx.model, meaning)
 	}
 
@@ -1465,20 +1471,26 @@ impl IntInspectionActions<ModelInitContext<'_>> for IntDecision {
 		self.upper_bound(ctx.model)
 	}
 
-	fn upper_bound_lit(&self, ctx: &ModelInitContext<'_>) -> Self::Atom {
+	fn upper_bound_lit(&self, ctx: &ModelInitContext<'_>) -> BoolDecision {
 		self.upper_bound_lit(ctx.model)
+	}
+
+	fn bounds(&self, ctx: &ModelInitContext<'_>) -> (IntVal, IntVal) {
+		self.bounds(ctx.model)
+	}
+
+	fn val(&self, ctx: &ModelInitContext<'_>) -> Option<IntVal> {
+		self.val(ctx.model)
 	}
 }
 
 impl IntPropagationActions<Model> for IntDecision {
-	type Conflict = <Model as ReasoningEngine>::Conflict;
-
 	fn set_lower_bound(
 		&self,
 		ctx: &mut Model,
 		lb: IntVal,
 		reason: impl ReasonBuilder<Model, BoolDecision>,
-	) -> Result<(), Self::Conflict> {
+	) -> Result<(), Conflict<BoolDecision>> {
 		use IntDecisionInner::*;
 
 		let var = self.resolve_alias(ctx);
@@ -1532,7 +1544,7 @@ impl IntPropagationActions<Model> for IntDecision {
 		ctx: &mut Model,
 		val: IntVal,
 		reason: impl ReasonBuilder<Model, BoolDecision>,
-	) -> Result<(), Self::Conflict> {
+	) -> Result<(), Conflict<BoolDecision>> {
 		self.set_not_in_set(ctx, &(val..=val).into(), reason)
 	}
 
@@ -1541,7 +1553,7 @@ impl IntPropagationActions<Model> for IntDecision {
 		ctx: &mut Model,
 		ub: IntVal,
 		reason: impl ReasonBuilder<Model, BoolDecision>,
-	) -> Result<(), Self::Conflict> {
+	) -> Result<(), Conflict<BoolDecision>> {
 		use IntDecisionInner::*;
 
 		let var = self.resolve_alias(ctx);
@@ -1595,7 +1607,7 @@ impl IntPropagationActions<Model> for IntDecision {
 		ctx: &mut Model,
 		val: IntVal,
 		reason: impl ReasonBuilder<Model, BoolDecision>,
-	) -> Result<(), Self::Conflict> {
+	) -> Result<(), Conflict<BoolDecision>> {
 		use IntDecisionInner::*;
 
 		let var = self.resolve_alias(ctx);
@@ -1643,8 +1655,8 @@ impl IntSimplificationActions<Model> for IntDecision {
 		&self,
 		ctx: &mut Model,
 		values: &IntSetVal,
-		reason: impl ReasonBuilder<Model, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
+		reason: impl ReasonBuilder<Model, BoolDecision>,
+	) -> Result<(), Conflict<BoolDecision>> {
 		use IntDecisionInner::*;
 
 		let var = self.resolve_alias(ctx);
@@ -1701,7 +1713,7 @@ impl IntSimplificationActions<Model> for IntDecision {
 		ctx: &mut Model,
 		values: &IntSetVal,
 		reason: impl ReasonBuilder<Model, BoolDecision>,
-	) -> Result<(), Self::Conflict> {
+	) -> Result<(), Conflict<BoolDecision>> {
 		use IntDecisionInner::*;
 
 		let var = self.resolve_alias(ctx);
@@ -1753,7 +1765,7 @@ impl IntSimplificationActions<Model> for IntDecision {
 			}
 		}
 	}
-	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Self::Conflict> {
+	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Conflict<BoolDecision>> {
 		use IntDecisionInner::*;
 
 		let x = self.resolve_alias(ctx);
@@ -1797,7 +1809,7 @@ impl IntSimplificationActions<Model> for IntDecision {
 				// x_scale * x + x_scale = y_scale * y + y_offset
 				// === x = (y_scale / x_scale) * y + ((y_offset - x_offset) / x_scale)
 				let trans_y = LinearTransform::scaled(
-					NonZeroIntVal::new(y_t.scale.get() / x_t.scale.get()).unwrap(),
+					NonZero::new(y_t.scale.get() / x_t.scale.get()).unwrap(),
 				) + (y_t.offset - x_t.offset) / x_t.scale.get();
 				let target = IntDecision(Var(y_i)) * trans_y.scale + trans_y.offset;
 				(x_i, target)
@@ -1955,15 +1967,15 @@ impl Mul<IntVal> for IntDecision {
 		if rhs == 0 {
 			0.into()
 		} else {
-			self.mul(NonZeroIntVal::new(rhs).unwrap())
+			self.mul(NonZero::new(rhs).unwrap())
 		}
 	}
 }
 
-impl Mul<NonZeroIntVal> for IntDecision {
+impl Mul<NonZero<IntVal>> for IntDecision {
 	type Output = Self;
 
-	fn mul(self, rhs: NonZeroIntVal) -> Self::Output {
+	fn mul(self, rhs: NonZero<IntVal>) -> Self::Output {
 		use IntDecisionInner::*;
 
 		IntDecision(match self.0 {
@@ -1983,7 +1995,7 @@ impl Neg for IntDecision {
 		use IntDecisionInner::*;
 
 		IntDecision(match self.0 {
-			Var(x) => Linear(LinearTransform::scaled(NonZeroIntVal::new(-1).unwrap()), x),
+			Var(x) => Linear(LinearTransform::scaled(NonZero::new(-1).unwrap()), x),
 			Const(v) => Const(-v),
 			Linear(t, x) => Linear(-t, x),
 			Bool(t, x) => Bool(-t, x),
@@ -2143,18 +2155,6 @@ impl ElementConstraint for IntVal {
 	}
 }
 
-impl IntDecisionActions<Model> for IntVal {
-	fn lit(&self, ctx: &mut Model, meaning: IntLitMeaning) -> Self::Atom {
-		self.try_lit(ctx, meaning).unwrap()
-	}
-}
-
-impl IntExplanationActions<Model> for IntVal {
-	fn lit_relaxed(&self, ctx: &Model, meaning: IntLitMeaning) -> (Self::Atom, IntLitMeaning) {
-		(self.try_lit(ctx, meaning).unwrap(), meaning)
-	}
-}
-
 impl IntInitActions<ModelInitContext<'_>> for IntVal {
 	fn advise_when(&self, _: &mut ModelInitContext<'_>, _: IntPropCond, _: u64) {
 		// Value will never change, so no advisor will ever be called
@@ -2162,185 +2162,6 @@ impl IntInitActions<ModelInitContext<'_>> for IntVal {
 
 	fn enqueue_when(&self, ctx: &mut ModelInitContext<'_>, _: IntPropCond) {
 		ctx.semantic_enqueue = true;
-	}
-}
-
-impl IntInspectionActions<Model> for IntVal {
-	type Atom = BoolDecision;
-
-	fn domain(&self, _: &Model) -> IntSetVal {
-		(*self..=*self).into()
-	}
-
-	fn in_domain(&self, _: &Model, val: IntVal) -> bool {
-		*self == val
-	}
-
-	fn lit_meaning(&self, _: &Model, _: Self::Atom) -> Option<IntLitMeaning> {
-		None
-	}
-
-	fn lower_bound(&self, _: &Model) -> IntVal {
-		*self
-	}
-
-	fn lower_bound_lit(&self, _: &Model) -> Self::Atom {
-		true.into()
-	}
-
-	fn try_lit(&self, _: &Model, meaning: IntLitMeaning) -> Option<Self::Atom> {
-		Some(
-			match meaning {
-				IntLitMeaning::Eq(v) => *self == v,
-				IntLitMeaning::NotEq(v) => *self != v,
-				IntLitMeaning::GreaterEq(v) => *self >= v,
-				IntLitMeaning::Less(v) => *self < v,
-			}
-			.into(),
-		)
-	}
-
-	fn upper_bound(&self, _: &Model) -> IntVal {
-		*self
-	}
-
-	fn upper_bound_lit(&self, _: &Model) -> Self::Atom {
-		true.into()
-	}
-}
-
-impl IntInspectionActions<ModelInitContext<'_>> for IntVal {
-	type Atom = BoolDecision;
-
-	fn domain(&self, _: &ModelInitContext<'_>) -> IntSetVal {
-		(*self..=*self).into()
-	}
-
-	fn in_domain(&self, _: &ModelInitContext<'_>, val: IntVal) -> bool {
-		*self == val
-	}
-
-	fn lit_meaning(&self, _: &ModelInitContext<'_>, _: Self::Atom) -> Option<IntLitMeaning> {
-		None
-	}
-
-	fn lower_bound(&self, _: &ModelInitContext<'_>) -> IntVal {
-		*self
-	}
-
-	fn lower_bound_lit(&self, _: &ModelInitContext<'_>) -> Self::Atom {
-		true.into()
-	}
-
-	fn try_lit(&self, _: &ModelInitContext<'_>, meaning: IntLitMeaning) -> Option<Self::Atom> {
-		Some(
-			match meaning {
-				IntLitMeaning::Eq(v) => *self == v,
-				IntLitMeaning::NotEq(v) => *self != v,
-				IntLitMeaning::GreaterEq(v) => *self >= v,
-				IntLitMeaning::Less(v) => *self < v,
-			}
-			.into(),
-		)
-	}
-
-	fn upper_bound(&self, _: &ModelInitContext<'_>) -> IntVal {
-		*self
-	}
-
-	fn upper_bound_lit(&self, _: &ModelInitContext<'_>) -> Self::Atom {
-		true.into()
-	}
-}
-
-impl IntPropagationActions<Model> for IntVal {
-	type Conflict = <Model as ReasoningEngine>::Conflict;
-
-	fn set_lower_bound(
-		&self,
-		ctx: &mut Model,
-		val: IntVal,
-		reason: impl ReasonBuilder<Model, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
-		if val > *self {
-			Err(ctx.declare_conflict(reason))
-		} else {
-			Ok(())
-		}
-	}
-
-	fn set_not_eq(
-		&self,
-		ctx: &mut Model,
-		val: IntVal,
-		reason: impl ReasonBuilder<Model, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
-		if val == *self {
-			Err(ctx.declare_conflict(reason))
-		} else {
-			Ok(())
-		}
-	}
-
-	fn set_upper_bound(
-		&self,
-		ctx: &mut Model,
-		val: IntVal,
-		reason: impl ReasonBuilder<Model, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
-		if val < *self {
-			Err(ctx.declare_conflict(reason))
-		} else {
-			Ok(())
-		}
-	}
-
-	fn set_val(
-		&self,
-		ctx: &mut Model,
-		val: IntVal,
-		reason: impl ReasonBuilder<Model, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
-		if val != *self {
-			Err(ctx.declare_conflict(reason))
-		} else {
-			Ok(())
-		}
-	}
-}
-
-impl IntSimplificationActions<Model> for IntVal {
-	fn set_domain(
-		&self,
-		ctx: &mut Model,
-		domain: &IntSetVal,
-		reason: impl ReasonBuilder<Model, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
-		if !domain.contains(self) {
-			Err(ctx.declare_conflict(reason))
-		} else {
-			Ok(())
-		}
-	}
-	fn set_not_in_set(
-		&self,
-		ctx: &mut Model,
-		values: &IntSetVal,
-		reason: impl ReasonBuilder<Model, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
-		if values.contains(self) {
-			Err(ctx.declare_conflict(reason))
-		} else {
-			Ok(())
-		}
-	}
-
-	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Self::Conflict> {
-		if *self != other.into() {
-			Err(ctx.declare_conflict([]))
-		} else {
-			Ok(())
-		}
 	}
 }
 
@@ -2752,10 +2573,10 @@ impl DecisionActions for Model {
 }
 
 impl PropagationActions for Model {
-	type Atom = BoolDecision;
-	type Conflict = <Model as ReasoningEngine>::Conflict;
-
-	fn declare_conflict(&mut self, reason: impl ReasonBuilder<Self, Self::Atom>) -> Self::Conflict {
+	fn declare_conflict(
+		&mut self,
+		reason: impl ReasonBuilder<Self, BoolDecision>,
+	) -> Conflict<BoolDecision> {
 		match reason.build_reason(self) {
 			Ok(reason) => Conflict {
 				subject: None,
@@ -2775,6 +2596,11 @@ impl PropagationActions for Model {
 			data,
 		}
 	}
+}
+
+impl ReasoningContext for Model {
+	type Atom = <Self as ReasoningEngine>::Atom;
+	type Conflict = <Self as ReasoningEngine>::Conflict;
 }
 
 impl ReasoningEngine for Model {
@@ -2842,6 +2668,11 @@ impl InitActions for ModelInitContext<'_> {
 	}
 }
 
+impl ReasoningContext for ModelInitContext<'_> {
+	type Atom = <Model as ReasoningEngine>::Atom;
+	type Conflict = <Model as ReasoningEngine>::Conflict;
+}
+
 impl BoolInitActions<ModelInitContext<'_>> for bool {
 	fn advise_when_fixed(&self, _: &mut ModelInitContext<'_>, _: u64) {
 		// Value does not change, so no advisor will ever be called
@@ -2852,15 +2683,12 @@ impl BoolInitActions<ModelInitContext<'_>> for bool {
 }
 
 impl BoolPropagationActions<Model> for bool {
-	type Atom = BoolDecision;
-	type Conflict = <Model as ReasoningEngine>::Conflict;
-
 	fn set_val(
 		&self,
 		ctx: &mut Model,
 		val: bool,
-		reason: impl ReasonBuilder<Model, Self::Atom>,
-	) -> Result<(), Self::Conflict> {
+		reason: impl ReasonBuilder<Model, BoolDecision>,
+	) -> Result<(), Conflict<BoolDecision>> {
 		if *self != val {
 			return Err(ctx.declare_conflict(reason));
 		}

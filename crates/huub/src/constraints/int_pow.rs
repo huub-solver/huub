@@ -8,13 +8,14 @@ use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Unsatisfiable};
 
 use crate::{
 	actions::{
-		InitActions, IntDecisionActions, IntInspectionActions, ReasoningEngine,
+		InitActions, IntDecisionActions, IntInspectionActions, ReasoningContext, ReasoningEngine,
 		ReformulationActions,
 	},
 	constraints::{
 		BoxedPropagator, CachedReason, Constraint, ModelIntView, Propagator, SimplificationStatus,
 		SolverIntView,
 	},
+	helpers::static_dispatch::static_dispatch,
 	reformulate::ReformulationError,
 	solver::{
 		activation_list::IntPropCond, queue::PriorityLevel, BoolView, IntLitMeaning, IntView,
@@ -293,8 +294,8 @@ impl IntPowBounds<IntView, IntView, IntView> {
 		result: IntView,
 	) -> Result<(), Unsatisfiable>
 	where
-		E: AddAssign<BoxedPropagator> + ClauseDatabase + ?Sized,
-		IntView: IntDecisionActions<E, Atom = BoolView>,
+		E: AddAssign<BoxedPropagator> + ClauseDatabase + ReasoningContext<Atom = BoolView> + ?Sized,
+		IntView: IntDecisionActions<E>,
 	{
 		// Ensure that if the base is negative, then the exponent cannot be zero
 		let (exp_lb, exp_ub) = exponent.bounds(solver);
@@ -318,11 +319,16 @@ impl IntPowBounds<IntView, IntView, IntView> {
 			solver.add_clause(clause)?;
 		}
 
-		*solver += Box::new(Self {
-			base,
-			exponent,
-			result,
-		});
+		static_dispatch!(
+			[IntView |> base, IntView |> exponent, IntView |> result],
+			|base, exponent, result| {
+				*solver += Box::new(IntPowBounds {
+					base,
+					exponent,
+					result,
+				});
+			}
+		);
 		Ok(())
 	}
 }

@@ -1,8 +1,11 @@
 //! Methods to perform linear transformations.
 
-use std::ops::{Add, Mul, Neg, RangeInclusive, Sub};
+use std::{
+	num::NonZero,
+	ops::{Add, Mul, Neg, RangeInclusive, Sub},
+};
 
-use crate::{helpers::div_ceil, solver::IntLitMeaning, IntSetVal, IntVal, NonZeroIntVal};
+use crate::{helpers::div_ceil, solver::IntLitMeaning, IntSetVal, IntVal};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// An integer linear transformation of a discrete value.
@@ -11,7 +14,7 @@ use crate::{helpers::div_ceil, solver::IntLitMeaning, IntSetVal, IntVal, NonZero
 /// * x + offset`. The transformation can also be reversed.
 pub(crate) struct LinearTransform {
 	/// The multiplicative scale.
-	pub(crate) scale: NonZeroIntVal,
+	pub(crate) scale: NonZero<IntVal>,
 	/// The additive offset.
 	pub(crate) offset: IntVal,
 }
@@ -31,7 +34,7 @@ impl LinearTransform {
 	/// Creates a new linear transformation with the given offset and no scale.
 	pub(crate) fn offset(offset: IntVal) -> Self {
 		Self {
-			scale: NonZeroIntVal::new(1).unwrap(),
+			scale: NonZero::new(1).unwrap(),
 			offset,
 		}
 	}
@@ -127,7 +130,7 @@ impl LinearTransform {
 	}
 
 	/// Creates a new linear transformation with the given scale and no offset.
-	pub(crate) fn scaled(scale: NonZeroIntVal) -> Self {
+	pub(crate) fn scaled(scale: NonZero<IntVal>) -> Self {
 		Self { scale, offset: 0 }
 	}
 
@@ -173,18 +176,18 @@ impl Add<IntVal> for LinearTransform {
 impl Default for LinearTransform {
 	fn default() -> Self {
 		Self {
-			scale: NonZeroIntVal::new(1).unwrap(),
+			scale: NonZero::new(1).unwrap(),
 			offset: 0,
 		}
 	}
 }
 
-impl Mul<NonZeroIntVal> for LinearTransform {
+impl Mul<NonZero<IntVal>> for LinearTransform {
 	type Output = Self;
 
-	fn mul(self, rhs: NonZeroIntVal) -> Self::Output {
+	fn mul(self, rhs: NonZero<IntVal>) -> Self::Output {
 		LinearTransform {
-			scale: NonZeroIntVal::new(self.scale.get() * rhs.get()).unwrap(),
+			scale: NonZero::new(self.scale.get() * rhs.get()).unwrap(),
 			offset: self.offset * rhs.get(),
 		}
 	}
@@ -195,7 +198,7 @@ impl Neg for LinearTransform {
 
 	fn neg(self) -> Self::Output {
 		Self {
-			scale: NonZeroIntVal::new(-self.scale.get()).unwrap(),
+			scale: NonZero::new(-self.scale.get()).unwrap(),
 			offset: -self.offset,
 		}
 	}
@@ -211,12 +214,14 @@ impl Sub<IntVal> for LinearTransform {
 
 #[cfg(test)]
 mod tests {
-	use crate::{IntLitMeaning, IntSetVal, LinearTransform, NonZeroIntVal};
+	use std::num::NonZero;
+
+	use crate::{IntLitMeaning, IntSetVal, LinearTransform};
 
 	#[test]
 	fn test_add() {
 		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(3).unwrap(),
+			scale: NonZero::new(3).unwrap(),
 			offset: 6,
 		};
 		let result = lt + 2;
@@ -227,7 +232,7 @@ mod tests {
 	#[test]
 	fn test_can_divide_by() {
 		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(6).unwrap(),
+			scale: NonZero::new(6).unwrap(),
 			offset: 12,
 		};
 		assert!(lt.can_divide_by(3));
@@ -245,13 +250,13 @@ mod tests {
 	#[test]
 	fn test_is_identity() {
 		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(1).unwrap(),
+			scale: NonZero::new(1).unwrap(),
 			offset: 0,
 		};
 		assert!(lt.is_identity());
 
 		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(2).unwrap(),
+			scale: NonZero::new(2).unwrap(),
 			offset: 0,
 		};
 		assert!(!lt.is_identity());
@@ -260,10 +265,10 @@ mod tests {
 	#[test]
 	fn test_mul() {
 		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(3).unwrap(),
+			scale: NonZero::new(3).unwrap(),
 			offset: 6,
 		};
-		let result = lt * NonZeroIntVal::new(2).unwrap();
+		let result = lt * NonZero::new(2).unwrap();
 		assert_eq!(result.scale.get(), 6);
 		assert_eq!(result.offset, 12);
 	}
@@ -271,7 +276,7 @@ mod tests {
 	#[test]
 	fn test_neg() {
 		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(3).unwrap(),
+			scale: NonZero::new(3).unwrap(),
 			offset: 6,
 		};
 		let result = -lt;
@@ -289,13 +294,13 @@ mod tests {
 	#[test]
 	fn test_positive_scale() {
 		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(3).unwrap(),
+			scale: NonZero::new(3).unwrap(),
 			offset: 0,
 		};
 		assert!(lt.positive_scale());
 
 		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(-3).unwrap(),
+			scale: NonZero::new(-3).unwrap(),
 			offset: 0,
 		};
 		assert!(!lt.positive_scale());
@@ -304,7 +309,7 @@ mod tests {
 	#[test]
 	fn test_rev_remains_integer() {
 		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(3).unwrap(),
+			scale: NonZero::new(3).unwrap(),
 			offset: 6,
 		};
 		assert!(lt.rev_remains_integer(9));
@@ -314,7 +319,7 @@ mod tests {
 	#[test]
 	fn test_rev_transform_int_set() {
 		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(2).unwrap(),
+			scale: NonZero::new(2).unwrap(),
 			offset: 4,
 		};
 		let set = IntSetVal::from_iter([4..=8]);
@@ -325,7 +330,7 @@ mod tests {
 	#[test]
 	fn test_rev_transform_lit() {
 		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(2).unwrap(),
+			scale: NonZero::new(2).unwrap(),
 			offset: 4,
 		};
 		assert_eq!(
@@ -348,7 +353,7 @@ mod tests {
 
 	#[test]
 	fn test_scaled() {
-		let lt = LinearTransform::scaled(NonZeroIntVal::new(3).unwrap());
+		let lt = LinearTransform::scaled(NonZero::new(3).unwrap());
 		assert_eq!(lt.scale.get(), 3);
 		assert_eq!(lt.offset, 0);
 	}
@@ -356,7 +361,7 @@ mod tests {
 	#[test]
 	fn test_sub() {
 		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(3).unwrap(),
+			scale: NonZero::new(3).unwrap(),
 			offset: 6,
 		};
 		let result = lt - 2;
@@ -367,7 +372,7 @@ mod tests {
 	#[test]
 	fn test_transform() {
 		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(3).unwrap(),
+			scale: NonZero::new(3).unwrap(),
 			offset: 6,
 		};
 		assert_eq!(lt.transform(2), 12);
@@ -376,7 +381,7 @@ mod tests {
 	#[test]
 	fn test_transform_lit() {
 		let lt = LinearTransform {
-			scale: NonZeroIntVal::new(2).unwrap(),
+			scale: NonZero::new(2).unwrap(),
 			offset: 4,
 		};
 		assert_eq!(lt.transform_lit(IntLitMeaning::Eq(1)), IntLitMeaning::Eq(6));
