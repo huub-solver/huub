@@ -400,7 +400,7 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&mut self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let index = slv.solver_int(self.0.index.clone().into());
 		let result = slv.solver_int(self.0.result.clone().into());
 

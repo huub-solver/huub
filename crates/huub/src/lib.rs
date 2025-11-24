@@ -139,7 +139,6 @@ use crate::{
 		IntLitMeaning, Solver,
 	},
 };
-use crate::constraints::difference_logic::DifferenceLogicModel;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[allow(
@@ -1947,6 +1946,10 @@ impl IntSimplificationActions<Model> for IntDecision {
 		};
 		Ok(())
 	}
+
+	fn alias(&self, ctx: &mut Model) -> IntDecision {
+		self.resolve_alias(ctx)
+	}
 }
 
 impl Mul<IntVal> for IntDecision {
@@ -2343,6 +2346,10 @@ impl IntSimplificationActions<Model> for IntVal {
 			Ok(())
 		}
 	}
+
+	fn alias(&self, _ctx: &mut Model) -> IntDecision {
+		IntDecision(IntDecisionInner::Const(*self))
+	}
 }
 
 impl Model {
@@ -2485,7 +2492,6 @@ impl Model {
 		};
 
 		match status? {
-			ConstraintStore::DifferenceLogic(con) => con.simplify(self),
 			SimplificationStatus::Subsumed => {
 				// Constraint is known to be satisfied, no need to place back.
 			}
@@ -2590,9 +2596,6 @@ impl Model {
 					ActivationAction::Enqueue(c) => self.propagator_queue.enqueue_propagator(c),
 				}
 			}
-			ConstraintStore::DifferenceLogic(con) => {
-				<DifferenceLogicModel as Constraint<Model>>::initialize(con, &mut ctx);
-			}
 		}
 		self.bool_events = bool_events;
 		Ok(())
@@ -2686,11 +2689,6 @@ impl Model {
 				if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {
 					int_eager_direct.insert(iv);
 				}
-				ConstraintStore::DifferenceLogic(_) => {
-					if config.diff_logic_branching == 2 {
-						self.branchings.clear();
-					}
-				}
 			}
 		}
 
@@ -2738,12 +2736,6 @@ impl Model {
 impl AddAssign<Branching> for Model {
 	fn add_assign(&mut self, rhs: Branching) {
 		self.branchings.push(rhs);
-	}
-}
-
-impl AddAssign<DifferenceLogicModel> for Model {
-	fn add_assign(&mut self, constraint: DifferenceLogicModel) {
-		self.add_constraint(ConstraintStore::DifferenceLogic(constraint));
 	}
 }
 
@@ -2882,10 +2874,6 @@ impl BoolPropagationActions<Model> for bool {
 			return Err(ctx.declare_conflict(reason));
 		}
 		Ok(())
-	}
-
-	fn resolve_alias(&mut self, var: IntDecision) -> IntDecision {
-		var.resolve_alias(self)
 	}
 }
 

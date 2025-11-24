@@ -1815,13 +1815,14 @@ where
 			}
 		}
 		
-		// Add global propagators
-		let diff_logic_model = diff_logic.process(&mut self.prb, config.diff_logic);
-		(self.stats.diff_logic_int_vars, 
-		 self.stats.diff_logic_bool_vars, 
-		 self.stats.diff_logic_global_constraints, 
-		 self.stats.diff_logic_implied_constraints) = diff_logic_model.output_statistics();
-		self.prb += diff_logic_model;
+		// Add global diff logic propagator if there is anything to handle
+		if let Some(diff_logic_model) = diff_logic.process(&mut self.prb, config.diff_logic)? {
+			(self.stats.diff_logic_int_vars,
+			 self.stats.diff_logic_bool_vars,
+			 self.stats.diff_logic_global_constraints,
+			 self.stats.diff_logic_implied_constraints) = diff_logic_model.output_statistics(&mut self.prb);
+			self.prb.add_constraint(diff_logic_model);
+		}
 
 		Ok(())
 	}

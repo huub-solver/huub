@@ -316,6 +316,9 @@ pub trait IntSimplificationActions<Context: ?Sized>: IntPropagationActions<Conte
 	/// Mark two integer decisions as being equivalent, ensuring the two use the
 	/// same internal representation.
 	fn unify(&self, ctx: &mut Context, other: impl Into<Self>) -> Result<(), Self::Conflict>;
+
+	/// Return the underlying IntDecision.
+	fn alias(&self, ctx: &mut Context) -> IntDecision;
 }
 
 /// General actions that can be performed in [`ReasoningEngine::PropagationCtx`]

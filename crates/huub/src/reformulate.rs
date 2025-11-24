@@ -36,9 +36,6 @@ use crate::{
 	BoolDecision, BoolFormula, Clause, Decision, IntDecision, IntLitMeaning, IntSetVal, IntVal,
 	Model, Solver,
 };
-use crate::actions::BrancherInitActions;
-use crate::branchers::BoxedBrancher;
-use crate::constraints::difference_logic::DifferenceLogicModel;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// Definition of an Boolean decision variable in a [`Model`].
@@ -75,7 +72,6 @@ pub(crate) enum BoolDecisionInner {
 	IntNotEq(IntDecisionIndex, IntVal),
 }
 
-	DifferenceLogic(DifferenceLogicModel),
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Wrapper type to distinguish between a variable with a domain, and an alias
 /// to another variable.
@@ -308,9 +304,6 @@ where
 			Formula::Or(v) => v.iter_mut().for_each(|f| f.initialize(ctx)),
 			Formula::Xor(v) => v.iter_mut().for_each(|f| f.initialize(ctx)),
 		}
-			ConstraintStore::DifferenceLogic(con) => {
-				<DifferenceLogicModel as Constraint<Model>>::to_solver(con, &mut actions)
-			}
 	}
 
 	fn propagate(
@@ -502,20 +495,6 @@ impl<Oracle> DecisionActions for ReformulationContext<'_, Oracle> {
 	fn num_conflicts(&self) -> u64 {
 		self.slv.engine.borrow().state.statistics.conflicts
 	}
-impl BrancherInitActions for ReformulationContext<'_> {
-	fn ensure_decidable(&mut self, view: View) {
-		self.slv.ensure_decidable(view);
-	}
-
-	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
-		self.slv.new_trailed_int(init)
-	}
-
-	fn push_brancher(&mut self, brancher: BoxedBrancher) {
-		self.slv.push_brancher(brancher);
-	}
-}
-
 }
 
 impl<Oracle: ClauseDatabase + ExternalPropagation> ReformulationActions
