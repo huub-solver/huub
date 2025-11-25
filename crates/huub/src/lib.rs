@@ -2718,10 +2718,11 @@ impl Model {
 		let map = map_builder.finalize();
 
 		// Create constraint data structures within the solver
-		for c in self.constraints.iter_mut().flatten() {
+		for c in self.constraints.iter().flatten() {
 			c.to_solver(&mut ReformulationContext {
 				slv: &mut slv,
 				map: &map,
+				trail: &self.trail,
 			})?;
 		}
 		// Add branching data structures to the solver

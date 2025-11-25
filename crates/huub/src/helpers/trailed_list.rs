@@ -39,7 +39,7 @@ impl<T: PartialEq + Clone> TrailedList<T> {
 	}
 
 	/// Return an iterator over the active elements of the list.
-	pub(crate) fn iter<A: TrailingActions>(&self, actions: &A) -> Iter<'_, T> {
+	pub(crate) fn iter<A: TrailingActions + ?Sized>(&self, actions: &A) -> Iter<'_, T> {
 		let len = self.len(actions);
 		self.list[..len].iter()
 	}
@@ -52,7 +52,7 @@ impl<T: PartialEq + Clone> TrailedList<T> {
 	}
 
 	/// Return the length of the active elements in the list.
-	pub(crate) fn len<A: TrailingActions>(&self, actions: &A) -> usize {
+	pub(crate) fn len<A: TrailingActions + ?Sized>(&self, actions: &A) -> usize {
 		actions.trailed_int(self.size) as usize
 	}
 

@@ -52,7 +52,7 @@ impl<T: Clone> TrailedOpenList<T> {
 	}
 
 	/// Return the element at the given index, fail if it is in the closed section.
-	pub(crate) fn index<A: TrailingActions>(&self, actions: &A, index: usize) -> &T {
+	pub(crate) fn index<A: TrailingActions + ?Sized>(&self, actions: &A, index: usize) -> &T {
 		let closed = actions.trailed_int(self.closed) as usize;
 		assert!(index >= closed, "index out of bounds");
 		&self.list[index]
@@ -97,7 +97,7 @@ impl<T: Clone> TrailedOpenList<T> {
 	}
 
 	/// Return the number of open elements in the list.
-	pub(crate) fn open_iter<A: TrailingActions>(&self, actions: &A) -> Range<usize> {
+	pub(crate) fn open_iter<A: TrailingActions + ?Sized>(&self, actions: &A) -> Range<usize> {
 		actions.trailed_int(self.closed) as usize..self.len()
 	}
 

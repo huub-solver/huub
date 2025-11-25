@@ -153,6 +153,8 @@ pub(crate) struct ReformulationContext<'a, Oracle> {
 	/// The mapping from variable in the [`crate::Model`] to the corresponding
 	/// view in the [`Solver`].
 	pub(crate) map: &'a ReformulationMap,
+	/// The trail created in the [`crate::Model`].
+	pub(crate) trail: &'a IndexVec<TrailedInt, IntVal>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -557,7 +559,7 @@ impl<Oracle> TrailingActions for ReformulationContext<'_, Oracle> {
 	}
 
 	fn trailed_int(&self, i: TrailedInt) -> IntVal {
-		self.slv.trailed_int(i)
+		self.trail[i]
 	}
 }
 

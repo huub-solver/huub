@@ -862,7 +862,7 @@ where
 
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&self, ctx: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		trace!("Transforming DifferenceLogicGraph to solver");
 		trace!("Immediately before transformation:");
 		for (i, &v) in self.graph.int_vars.iter().enumerate() {
@@ -871,18 +871,18 @@ where
 			}
 		}
 		let int_vars = self.graph.int_vars.iter().enumerate()
-			.filter_map(|(i, &v)| if self.graph.active[i] { Some(slv.solver_int(v)) } else { None })
+			.filter_map(|(i, &v)| if self.graph.active[i] { Some(ctx.solver_int(v)) } else { None })
 			.collect_vec();
 		trace!("Transformed int vars:");
 		for &v in int_vars.iter() {
-			trace!("{v:?}: lb {:?}, ub: {:?}", v.lower_bound(slv), v.upper_bound(slv));
+			trace!("{v:?}: lb {:?}, ub: {:?}", v.lower_bound(ctx), v.upper_bound(ctx));
 		}
 		let bool_vars = self.graph.bool_vars.iter().enumerate()
-			.filter_map(|(i, &v)| if self.graph.bool_active[i] { Some(slv.solver_bool(v)) } else { None })
+			.filter_map(|(i, &v)| if self.graph.bool_active[i] { Some(ctx.solver_bool(v)) } else { None })
 			.collect_vec();
-		let graph_cell = Rc::new(RefCell::new(DifferenceLogicGraph::from(&self.graph, slv, slv, int_vars, bool_vars)));
-		DifferenceLogicBounds::post(slv, self.parameters.priority_level_bounds, graph_cell.clone());
-		DifferenceLogicBooleans::post(slv, self.parameters.priority_level_bools, self.parameters.use_inc_imp, graph_cell.clone());
+		let graph_cell = Rc::new(RefCell::new(DifferenceLogicGraph::from(&self.graph, ctx, int_vars, bool_vars)));
+		DifferenceLogicBounds::post(ctx, self.parameters.priority_level_bounds, graph_cell.clone());
+		DifferenceLogicBooleans::post(ctx, self.parameters.priority_level_bools, self.parameters.use_inc_imp, graph_cell.clone());
 		/*if self.parameters.branching > 0 { TODO experimental branching stuff
 			DiffLogicBrancher::new_in(slv, &int_vars, &bool_vars, graph_cell, self.objective.map_or(true, |(_, o)| o == Goal::Minimize));
 		}*/
@@ -1068,10 +1068,9 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		}
 	}
 
-	fn from<E, T, I1, B1>(from: &DifferenceLogicGraph<I1, B1>, solver: &mut E, trail: &mut T, int_vars: Vec<I>, bool_vars: Vec<B>) -> Self
+	fn from<A, I1, B1>(from: &DifferenceLogicGraph<I1, B1>, ctx: &mut A, int_vars: Vec<I>, bool_vars: Vec<B>) -> Self
 	where
-		E: ConstructionActions + ?Sized,
-		T: TrailingActions,
+		A: ReformulationActions + ?Sized,
 	{
 		let num_int = int_vars.len();
 		let num_bool = bool_vars.len();
@@ -1083,23 +1082,23 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			bool_vars,
 			active: vec![true; num_int],
 			active_out: (0..from.num_nodes()).into_iter()
-				.map(|n| TrailedList::from_data(solver, from.active_out[n].iter(trail)
+				.map(|n| TrailedList::from_data(ctx, from.active_out[n].iter(ctx)
 					.map(|&e| edge_map[e].unwrap())
 					.collect_vec(), false))
 				.collect_vec(),
 			active_in: (0..from.num_nodes()).into_iter()
-				.map(|n| TrailedList::from_data(solver, from.active_in[n].iter(trail)
+				.map(|n| TrailedList::from_data(ctx, from.active_in[n].iter(ctx)
 					.map(|&e| edge_map[e].unwrap())
 					.collect_vec(), false))
 				.collect_vec(),
 			open_out: (0..num_int).into_iter()
-				.map(|n| TrailedOpenList::from_data(solver, from.open_out[n].open_iter(trail)
-					.filter_map(|i| edge_map[*from.open_out[n].index(trail, i)])
+				.map(|n| TrailedOpenList::from_data(ctx, from.open_out[n].open_iter(ctx)
+					.filter_map(|i| edge_map[*from.open_out[n].index(ctx, i)])
 					.collect_vec()))
 				.collect_vec(),
 			open_in: (0..num_int).into_iter()
-				.map(|n| TrailedOpenList::from_data(solver, from.open_in[n].open_iter(trail)
-					.filter_map(|i| edge_map[*from.open_in[n].index(trail, i)])
+				.map(|n| TrailedOpenList::from_data(ctx, from.open_in[n].open_iter(ctx)
+					.filter_map(|i| edge_map[*from.open_in[n].index(ctx, i)])
 					.collect_vec()))
 				.collect_vec(),
 			lower_bound: vec![None; num_int],
@@ -1108,18 +1107,18 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			backtrace: vec![None; num_int],
 			visited: vec![false; num_int],
 			num_active_nodes: num_int,
-			num_open_edges: solver.new_trailed_int(trail.trailed_int(from.num_open_edges)),
+			num_open_edges: ctx.new_trailed_int(ctx.trailed_int(from.num_open_edges)),
 			edges: edge_map.iter().filter_map(|o| o.map(|e| from.edges[e].clone())).collect_vec(),
 			bool_implications: (0..num_bool).into_iter()
-				.map(|b| TrailedOpenList::from_data(solver, from.bool_implications[b].open_iter(trail)
-					.filter_map(|i| bool_map[*from.bool_implications[b].index(trail, i)])
+				.map(|b| TrailedOpenList::from_data(ctx, from.bool_implications[b].open_iter(ctx)
+					.filter_map(|i| bool_map[*from.bool_implications[b].index(ctx, i)])
 					.collect_vec()))
 				.collect_vec(),
 			bool_active: vec![true; num_bool],
 			visited_updates: Vec::new(),
 			lb_updates: Vec::new(),
 			ub_updates: Vec::new(),
-			decision_bools: (0..num_int).into_iter().map(|_| TrailedOpenList::new(solver)).collect(),  // TODO
+			decision_bools: (0..num_int).into_iter().map(|_| TrailedOpenList::new(ctx)).collect(),  // TODO
 		}
 	}
 
@@ -2207,6 +2206,7 @@ mod tests {
 		let mut actions = ReformulationContext {
 			slv: &mut slv,
 			map: &map,
+			trail: &prb.trail,
 		};
 		assert!(<DifferenceLogicModel as Constraint<Model>>::to_solver(&mut diff_logic_model, &mut actions).is_ok());
 		let int_views = int_vars.iter().map(|&v| map.get_int(&mut slv, v)).collect_vec();
@@ -2249,6 +2249,7 @@ mod tests {
 		let mut actions = ReformulationContext {
 			slv: &mut slv,
 			map: &map,
+			trail: &prb.trail,
 		};
 		assert!(<DifferenceLogicModel as Constraint<Model>>::to_solver(&mut diff_logic_model, &mut actions).is_ok());
 		let int_views5 = int_vars5.iter().map(|&v| map.get_int(&mut slv, v)).collect_vec();
@@ -2303,6 +2304,7 @@ mod tests {
 		let mut actions = ReformulationContext {
 			slv: &mut slv,
 			map: &map,
+			trail: &prb.trail,
 		};
 		assert!(<DifferenceLogicModel as Constraint<Model>>::to_solver(&mut diff_logic_model, &mut actions).is_ok());
 		let int_views = int_vars.iter().map(|&v| map.get_int(&mut slv, v)).collect_vec();
@@ -2344,6 +2346,7 @@ mod tests {
 		let mut actions = ReformulationContext {
 			slv: &mut slv,
 			map: &map,
+			trail: &prb.trail,
 		};
 		assert!(<DifferenceLogicModel as Constraint<Model>>::to_solver(&mut diff_logic_model, &mut actions).is_ok());
 		let int_views = int_vars.iter().map(|&v| map.get_int(&mut slv, v)).collect_vec();
@@ -2389,6 +2392,7 @@ mod tests {
 		let mut actions = ReformulationContext {
 			slv: &mut slv,
 			map: &map,
+			trail: &prb.trail,
 		};
 		assert!(<DifferenceLogicModel as Constraint<Model>>::to_solver(&mut diff_logic_model, &mut actions).is_ok());
 		let int_views = int_vars.iter().map(|&v| map.get_int(&mut slv, v)).collect_vec();
@@ -2426,6 +2430,7 @@ mod tests {
 		let mut actions = ReformulationContext {
 			slv: &mut slv,
 			map: &map,
+			trail: &prb.trail,
 		};
 		assert!(<DifferenceLogicModel as Constraint<Model>>::to_solver(&mut diff_logic_model, &mut actions).is_ok());
 		let int_views = int_vars.iter().map(|&v| map.get_int(&mut slv, v)).collect_vec();
