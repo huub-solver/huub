@@ -1,14 +1,14 @@
+use std::ops::Range;
+
 use crate::{
-	actions::TrailingActions,
+	actions::{ConstructionActions, TrailingActions},
 	solver::trail::TrailedInt,
 	IntVal,
 };
-use std::ops::Range;
-use crate::actions::ConstructionActions;
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-/// A **append only** list which allows iterating only open elements with backtracking of the open 
-/// state.
+/// A **append only** list which allows iterating only open elements with
+/// backtracking of the open state.
 pub(crate) struct TrailedOpenList<T> {
 	/// Underlying list.
 	list: Vec<T>,
@@ -17,17 +17,9 @@ pub(crate) struct TrailedOpenList<T> {
 }
 
 impl<T: Clone> TrailedOpenList<T> {
-	
 	pub(crate) fn new<A: ConstructionActions + ?Sized>(actions: &mut A) -> Self {
 		Self {
 			list: Vec::new(),
-			closed: actions.new_trailed_int(0),
-		}
-	}
-
-	pub(crate) fn from_data<A: ConstructionActions + ?Sized>(actions: &mut A, data: Vec<T>) -> Self {
-		Self {
-			list: data,
 			closed: actions.new_trailed_int(0),
 		}
 	}
@@ -51,7 +43,8 @@ impl<T: Clone> TrailedOpenList<T> {
 		Some(&self.list[cur])
 	}
 
-	/// Return the element at the given index, fail if it is in the closed section.
+	/// Return the element at the given index, fail if it is in the closed
+	/// section.
 	pub(crate) fn index<A: TrailingActions + ?Sized>(&self, actions: &A, index: usize) -> &T {
 		let closed = actions.trailed_int(self.closed) as usize;
 		assert!(index >= closed, "index out of bounds");
@@ -68,11 +61,14 @@ impl<T: Clone> TrailedOpenList<T> {
 		}
 	}
 
-	/// Close an element. This moves the closed elements to the start of the list to
-	/// allow further addition of elements at the end. Note that the order of elements is not
-	/// preserved.
+	/// Close an element. This moves the closed elements to the start of the
+	/// list to allow further addition of elements at the end. Note that the
+	/// order of elements is not preserved.
 	pub(crate) fn close<A, F>(&mut self, actions: &mut A, index: usize, mut idx_update: F) -> bool
-	where A: TrailingActions, F: FnMut(&T, usize) {
+	where
+		A: TrailingActions,
+		F: FnMut(&T, usize),
+	{
 		let cur = actions.trailed_int(self.closed) as usize;
 		if index < cur {
 			return false;
@@ -85,8 +81,9 @@ impl<T: Clone> TrailedOpenList<T> {
 		let _ = actions.set_trailed_int(self.closed, cur as IntVal + 1);
 		true
 	}
-	
-	/// Return the total length of the list (including elements closed in trailing state).
+
+	/// Return the total length of the list (including elements closed in
+	/// trailing state).
 	pub(crate) fn len(&self) -> usize {
 		self.list.len()
 	}

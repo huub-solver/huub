@@ -1,15 +1,15 @@
 use std::slice::Iter;
 
 use crate::{
-	actions::TrailingActions,
+	actions::{ConstructionActions, TrailingActions},
 	solver::trail::TrailedInt,
 	IntVal,
 };
-use crate::actions::ConstructionActions;
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 /// A **append only** list from which elements are automatically removed when
-/// the solver backtracks. Removals are only possible before trailing is initialized.
+/// the solver backtracks. Removals are only possible before trailing is
+/// initialized.
 pub(crate) struct TrailedList<T> {
 	/// Underlying list.
 	list: Vec<T>,
@@ -20,20 +20,13 @@ pub(crate) struct TrailedList<T> {
 }
 
 impl<T: PartialEq + Clone> TrailedList<T> {
-
-	pub(crate) fn new<A: ConstructionActions>(actions: &mut A, allow_removal: bool) -> Self {
+	pub(crate) fn new<A: ConstructionActions + ?Sized>(
+		actions: &mut A,
+		allow_removal: bool,
+	) -> Self {
 		Self {
 			list: Vec::new(),
 			size: actions.new_trailed_int(0),
-			allow_removal,
-		}
-	}
-
-	pub(crate) fn from_data<A: ConstructionActions + ?Sized>(actions: &mut A, data: Vec<T>, allow_removal: bool) -> Self {
-		let len = data.len();
-		Self {
-			list: data,
-			size: actions.new_trailed_int(len as IntVal),
 			allow_removal,
 		}
 	}
@@ -43,7 +36,7 @@ impl<T: PartialEq + Clone> TrailedList<T> {
 		let len = self.len(actions);
 		self.list[..len].iter()
 	}
-	
+
 	/// Return the index at the given position.
 	pub(crate) fn index<A: TrailingActions>(&self, actions: &A, index: usize) -> &T {
 		let len = self.len(actions);
@@ -57,7 +50,7 @@ impl<T: PartialEq + Clone> TrailedList<T> {
 	}
 
 	/// Add an element to the active list.
-	pub(crate) fn push<A: TrailingActions>(&mut self, actions: &mut A, value: T) {
+	pub(crate) fn push<A: TrailingActions + ?Sized>(&mut self, actions: &mut A, value: T) {
 		let len = self.len(actions);
 		if len < self.list.len() {
 			self.list[len] = value;
@@ -70,15 +63,25 @@ impl<T: PartialEq + Clone> TrailedList<T> {
 
 	/// Remove the given element by swapping it out of the active range.
 	/// Can only be called before trailing is initialized.
-	pub(crate) fn swap_remove_element<A: TrailingActions>(&mut self, actions: &mut A, element: &T) -> &T { // TODO check performance!
+	pub(crate) fn swap_remove_element<A: TrailingActions>(
+		&mut self,
+		actions: &mut A,
+		element: &T,
+	) -> &T {
+		// TODO check performance!
 		assert!(self.allow_removal, "removal is not allowed for this list");
 		let len = self.len(actions);
-		let index = self.list.iter().take(len).position(|x| *x == *element).unwrap();
+		let index = self
+			.list
+			.iter()
+			.take(len)
+			.position(|x| *x == *element)
+			.unwrap();
 		self.swap_remove(actions, index)
 	}
-	
-	/// Remove the element at the given index by swapping it out of the active range. 
-	/// Can only be called before trailing is initialized.
+
+	/// Remove the element at the given index by swapping it out of the active
+	/// range. Can only be called before trailing is initialized.
 	pub(crate) fn swap_remove<A: TrailingActions>(&mut self, actions: &mut A, index: usize) -> &T {
 		assert!(self.allow_removal, "removal is not allowed for this list");
 		let len = self.len(actions);
@@ -87,5 +90,4 @@ impl<T: PartialEq + Clone> TrailedList<T> {
 		let _ = actions.set_trailed_int(self.size, len as IntVal - 1);
 		&self.list[len - 1]
 	}
-
 }

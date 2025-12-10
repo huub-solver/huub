@@ -11,7 +11,10 @@ use std::{
 	rc::Rc,
 };
 
-use flatzinc_serde::{Annotation, AnnotationArgument, AnnotationCall, AnnotationLiteral, Argument, Domain, FlatZinc, Literal, Method, Type};
+use flatzinc_serde::{
+	Annotation, AnnotationArgument, AnnotationCall, AnnotationLiteral, Argument, Domain, FlatZinc,
+	Literal, Method, Type,
+};
 use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;
 use rangelist::IntervalIterator;
@@ -24,16 +27,16 @@ use crate::{
 		BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions,
 		PropagationActions,
 	},
-	all_different_int, array_element, array_maximum_int, array_minimum_int, cumulative,
-	disjunctive_strict, div_int, int_in_set_reif, pow_int,
-	reformulate::ReformulationError,
-	rel, seq_precede_chain_int, table_int, times_int, value_precede_chain_int, BoolDecision,
-	BoolDecisionInner, Branching, Decision, IntDecision, IntLinExpr, IntSetVal, IntVal, Model,
-	NonZeroIntVal, ValueSelection, VariableSelection,
+	all_different_int, array_element, array_maximum_int, array_minimum_int,
+	constraints::difference_logic::{DifferenceLogicCollection, DifferenceLogicConstraint},
+	cumulative, disjunctive_strict, div_int, int_in_set_reif, pow_int,
+	reformulate::{InitConfig, IntDecisionInner, ReformulationError},
+	rel, seq_precede_chain_int,
+	solver::Goal,
+	table_int, times_int, value_precede_chain_int, BoolDecision, BoolDecisionInner, Branching,
+	Decision, IntDecision, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal, ValueSelection,
+	VariableSelection,
 };
-use crate::constraints::difference_logic::{DifferenceLogicCollection, DifferenceLogicConstraint};
-use crate::reformulate::{InitConfig, IntDecisionInner};
-use crate::solver::Goal;
 
 /// Domain assumed for integer decision variables that do not have a domain
 /// definition.
@@ -167,7 +170,8 @@ impl FlatZincStatistics {
 		self.diff_logic_bool_vars
 	}
 
-	/// Returns the number of globally active constraints used by difference logic
+	/// Returns the number of globally active constraints used by difference
+	/// logic
 	pub fn diff_globals(&self) -> usize {
 		self.diff_logic_global_constraints
 	}
@@ -176,7 +180,6 @@ impl FlatZincStatistics {
 	pub fn diff_implied(&self) -> usize {
 		self.diff_logic_implied_constraints
 	}
-	
 }
 
 impl<'a, S> FznModelBuilder<'a, S>
@@ -968,15 +971,23 @@ where
 		// Global propagators dealing with multiple constraints
 		let obj_ref = self.fzn.solve.objective.as_ref();
 		let obj = match obj_ref {
-			Some(l) => Some((self.lit_int(l)?,
-							 if self.fzn.solve.method == Method::Minimize {
-								 Goal::Minimize
-							 } else {
-								 Goal::Maximize
-							 })),
+			Some(l) => Some((
+				self.lit_int(l)?,
+				if self.fzn.solve.method == Method::Minimize {
+					Goal::Minimize
+				} else {
+					Goal::Maximize
+				},
+			)),
 			None => None,
 		};
-		let mut diff_logic = DifferenceLogicCollection::new(config.diff_logic_prio_bounds, config.diff_logic_prio_bools, config.diff_logic_inc_imp, config.diff_logic_branching, obj);
+		let mut diff_logic = DifferenceLogicCollection::new(
+			config.diff_logic_prio_bounds,
+			config.diff_logic_prio_bools,
+			config.diff_logic_inc_imp,
+			config.diff_logic_branching,
+			obj,
+		);
 		// Traditional relational constraints
 		for (i, c) in self.fzn.constraints.iter().enumerate() {
 			if self.processed[i] {
@@ -1522,22 +1533,28 @@ where
 					if let [a, b] = c.args.as_slice() {
 						let a = self.arg_int(a)?;
 						let b = self.arg_int(b)?;
-						
-						if config.diff_logic > 0 && !matches!(a.0, IntDecisionInner::Const(_)) && !matches!(b.0, IntDecisionInner::Const(_)) {
-							match c.id.deref() { 
-								"int_le" => diff_logic.add(DifferenceLogicConstraint::Global(a, b, 0)),
-								"int_ne" => diff_logic.add(DifferenceLogicConstraint::NotEquals(a, b, 0)),
+
+						if config.diff_logic > 0
+							&& !matches!(a.0, IntDecisionInner::Const(_))
+							&& !matches!(b.0, IntDecisionInner::Const(_))
+						{
+							match c.id.deref() {
+								"int_le" => {
+									diff_logic.add(DifferenceLogicConstraint::Global(a, b, 0))
+								}
+								"int_ne" => {
+									diff_logic.add(DifferenceLogicConstraint::NotEquals(a, b, 0))
+								}
 								_ => unreachable!(),
 							}
 							continue;
 						}
-						
+
 						match c.id.deref() {
 							"int_le" => rel!(&mut self.prb, 0 >= a - b),
 							"int_ne" => rel!(&mut self.prb, 0 != a - b),
 							_ => unreachable!(),
 						};
-						
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: match c.id.deref() {
@@ -1556,15 +1573,26 @@ where
 						let a = self.arg_int(a)?;
 						let b = self.arg_int(b)?;
 						let r = self.arg_bool(r)?;
-						
-						if config.diff_logic > 0 && !matches!(a.0, IntDecisionInner::Const(_)) && !matches!(b.0, IntDecisionInner::Const(_)) {
+
+						if config.diff_logic > 0
+							&& !matches!(a.0, IntDecisionInner::Const(_))
+							&& !matches!(b.0, IntDecisionInner::Const(_))
+						{
 							match c.id.deref() {
-								"int_eq_imp" => diff_logic.add(DifferenceLogicConstraint::ImpliedEquals(r, a, b, 0)),
-								"int_eq_reif" => diff_logic.add(DifferenceLogicConstraint::ReifiedEquals(r, a, b, 0)),
-								"int_le_imp" => diff_logic.add(DifferenceLogicConstraint::Implied(r, a, b, 0)),
-								"int_le_reif" => diff_logic.add(DifferenceLogicConstraint::Reified(r, a, b, 0)),
-								"int_ne_imp" => diff_logic.add(DifferenceLogicConstraint::ImpliedNotEquals(r, a, b, 0)),
-								"int_ne_reif" => diff_logic.add(DifferenceLogicConstraint::ReifiedEquals(!r, a, b, 0)),
+								"int_eq_imp" => diff_logic
+									.add(DifferenceLogicConstraint::ImpliedEquals(r, a, b, 0)),
+								"int_eq_reif" => diff_logic
+									.add(DifferenceLogicConstraint::ReifiedEquals(r, a, b, 0)),
+								"int_le_imp" => {
+									diff_logic.add(DifferenceLogicConstraint::Implied(r, a, b, 0))
+								}
+								"int_le_reif" => {
+									diff_logic.add(DifferenceLogicConstraint::Reified(r, a, b, 0))
+								}
+								"int_ne_imp" => diff_logic
+									.add(DifferenceLogicConstraint::ImpliedNotEquals(r, a, b, 0)),
+								"int_ne_reif" => diff_logic
+									.add(DifferenceLogicConstraint::ReifiedEquals(!r, a, b, 0)),
 								_ => unreachable!(),
 							}
 							continue;
@@ -1613,7 +1641,9 @@ where
 						let rhs = self.arg_par_int(rhs)?;
 
 						// diff logic only if there are exactly 2 coefficients
-						if config.diff_logic > 0 && coeffs.len() == 2 && c.id.deref() != "int_lin_eq" {
+						if config.diff_logic > 0
+							&& coeffs.len() == 2 && c.id.deref() != "int_lin_eq"
+						{
 							// Order variables (larger coeff first), create views if necessary
 							let (x, y) = if coeffs[0] > coeffs[1] {
 								(vars[0] * coeffs[0], vars[1] * -coeffs[1])
@@ -1621,13 +1651,17 @@ where
 								(vars[1] * coeffs[1], vars[0] * -coeffs[0])
 							};
 							match c.id.deref() {
-								"int_lin_le" => diff_logic.add(DifferenceLogicConstraint::Global(x, y, rhs)),
-								"int_lin_ne" => diff_logic.add(DifferenceLogicConstraint::NotEquals(x, y, rhs)),
+								"int_lin_le" => {
+									diff_logic.add(DifferenceLogicConstraint::Global(x, y, rhs))
+								}
+								"int_lin_ne" => {
+									diff_logic.add(DifferenceLogicConstraint::NotEquals(x, y, rhs))
+								}
 								_ => unreachable!(),
 							}
 							continue;
 						}
-						
+
 						let lin_exp: IntLinExpr = vars
 							.into_iter()
 							.zip(coeffs.into_iter())
@@ -1678,17 +1712,27 @@ where
 								(vars[1] * coeffs[1], vars[0] * -coeffs[0])
 							};
 							match c.id.deref() {
-								"int_lin_eq_imp" => diff_logic.add(DifferenceLogicConstraint::ImpliedEquals(reified, x, y, rhs)),
-								"int_lin_eq_reif" => diff_logic.add(DifferenceLogicConstraint::ReifiedEquals(reified, x, y, rhs)),
-								"int_lin_le_imp" => diff_logic.add(DifferenceLogicConstraint::Implied(reified, x, y, rhs)),
-								"int_lin_le_reif" => diff_logic.add(DifferenceLogicConstraint::Reified(reified, x, y, rhs)),
-								"int_lin_ne_imp" => diff_logic.add(DifferenceLogicConstraint::ImpliedNotEquals(reified, x, y, rhs)),
-								"int_lin_ne_reif" => diff_logic.add(DifferenceLogicConstraint::ReifiedEquals(!reified, x, y, rhs)),
+								"int_lin_eq_imp" => diff_logic.add(
+									DifferenceLogicConstraint::ImpliedEquals(reified, x, y, rhs),
+								),
+								"int_lin_eq_reif" => diff_logic.add(
+									DifferenceLogicConstraint::ReifiedEquals(reified, x, y, rhs),
+								),
+								"int_lin_le_imp" => diff_logic
+									.add(DifferenceLogicConstraint::Implied(reified, x, y, rhs)),
+								"int_lin_le_reif" => diff_logic
+									.add(DifferenceLogicConstraint::Reified(reified, x, y, rhs)),
+								"int_lin_ne_imp" => diff_logic.add(
+									DifferenceLogicConstraint::ImpliedNotEquals(reified, x, y, rhs),
+								),
+								"int_lin_ne_reif" => diff_logic.add(
+									DifferenceLogicConstraint::ReifiedEquals(!reified, x, y, rhs),
+								),
 								_ => unreachable!(),
 							}
 							continue;
 						}
-						
+
 						let lin_exp: IntLinExpr = vars
 							.into_iter()
 							.zip(coeffs.into_iter())
@@ -1814,13 +1858,15 @@ where
 				}
 			}
 		}
-		
+
 		// Add global diff logic propagator if there is anything to handle
 		if let Some(diff_logic_model) = diff_logic.process(&mut self.prb, config.diff_logic)? {
-			(self.stats.diff_logic_int_vars,
-			 self.stats.diff_logic_bool_vars,
-			 self.stats.diff_logic_global_constraints,
-			 self.stats.diff_logic_implied_constraints) = diff_logic_model.output_statistics(&mut self.prb);
+			(
+				self.stats.diff_logic_int_vars,
+				self.stats.diff_logic_bool_vars,
+				self.stats.diff_logic_global_constraints,
+				self.stats.diff_logic_implied_constraints,
+			) = diff_logic_model.output_statistics(&mut self.prb);
 			self.prb.add_constraint(diff_logic_model);
 		}
 
