@@ -355,6 +355,7 @@ impl DifferenceLogicModel {
 			trace!("{v:?}: lb {:?}, ub: {:?}", v.lower_bound(prb), v.upper_bound(prb));
 		}
 		let bool_vars = bool_var_index.iter().map(|&v| v).collect_vec();
+		let num_bool = bool_vars.len();
 		let mut graph = DifferenceLogicGraph::new(prb, int_vars, bool_vars);
 
 		// Add global constraints
@@ -410,7 +411,7 @@ impl DifferenceLogicModel {
 			direct_edge: vec![HashSet::default(); num_int],
 			node_active: vec![true; num_int],
 			num_active_nodes: num_int,
-			bool_active: vec![true; num_int],
+			bool_active: vec![true; num_bool],
 		})
 
 	}
