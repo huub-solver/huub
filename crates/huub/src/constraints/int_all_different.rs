@@ -9,7 +9,7 @@ use rangelist::RangeList;
 use crate::{
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, IntSimplificationActions,
-		ReasoningEngine, ReformulationActions,
+		ReasoningEngine, ReformulationActions, TrailingActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
@@ -180,7 +180,11 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(
+		&self,
+		slv: &mut dyn ReformulationActions,
+		_model_trail: &dyn TrailingActions,
+	) -> Result<(), ReformulationError> {
 		let vars: Vec<_> = self.prop.var.iter().map(|v| slv.solver_int(*v)).collect();
 		// propagation should have removed any fixed values
 		debug_assert!(vars.iter().all(|v| v.val(slv).is_none()));

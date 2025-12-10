@@ -243,7 +243,11 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(
+		&self,
+		slv: &mut dyn ReformulationActions,
+		_model_trail: &dyn TrailingActions,
+	) -> Result<(), ReformulationError> {
 		let start_times = self
 			.propagator
 			.start_times

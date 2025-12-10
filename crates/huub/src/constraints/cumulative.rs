@@ -12,7 +12,7 @@ use tracing::trace;
 use crate::{
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, ReasoningEngine,
-		ReformulationActions,
+		ReformulationActions, TrailingActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, ReasonBuilder, SimplificationStatus,
@@ -805,7 +805,11 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(
+		&self,
+		slv: &mut dyn ReformulationActions,
+		_model_trail: &dyn TrailingActions,
+	) -> Result<(), ReformulationError> {
 		let start_times = self
 			.start_times
 			.iter()

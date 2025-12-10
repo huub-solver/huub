@@ -379,7 +379,11 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(
+		&self,
+		slv: &mut dyn ReformulationActions,
+		_model_trail: &dyn TrailingActions,
+	) -> Result<(), ReformulationError> {
 		let vars: Vec<_> = self
 			.vars
 			.iter()
@@ -946,7 +950,11 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(
+		&self,
+		slv: &mut dyn ReformulationActions,
+		_model_trail: &dyn TrailingActions,
+	) -> Result<(), ReformulationError> {
 		let vars: Vec<_> = self
 			.vars
 			.iter()

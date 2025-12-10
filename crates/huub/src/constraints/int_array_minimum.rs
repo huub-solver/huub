@@ -7,7 +7,7 @@ use std::ops::AddAssign;
 use itertools::Itertools;
 
 use crate::{
-	actions::{InitActions, ReasoningEngine, ReformulationActions},
+	actions::{InitActions, ReasoningEngine, ReformulationActions, TrailingActions},
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
 	},
@@ -62,7 +62,11 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(
+		&self,
+		slv: &mut dyn ReformulationActions,
+		_model_trail: &dyn TrailingActions,
+	) -> Result<(), ReformulationError> {
 		let vars: Vec<_> = self
 			.vars
 			.iter()

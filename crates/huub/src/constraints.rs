@@ -34,7 +34,7 @@ use crate::{
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
 		IntExplanationActions, IntInitActions, IntInspectionActions, IntPropagationActions,
-		IntSimplificationActions, ReasoningEngine, ReformulationActions,
+		IntSimplificationActions, ReasoningEngine, ReformulationActions, TrailingActions,
 	},
 	reformulate::ReformulationError,
 	solver::{
@@ -98,7 +98,11 @@ pub trait Constraint<E: ReasoningEngine + ?Sized>: Any + Debug + DynClone + Prop
 	///
 	/// This method should place all required propagators and/or clauses in a
 	/// [`Solver`] object to ensure the constraint will not be violated.
-	fn to_solver(&self, context: &mut dyn ReformulationActions) -> Result<(), ReformulationError>;
+	fn to_solver(
+		&self,
+		context: &mut dyn ReformulationActions,
+		model_trail: &dyn TrailingActions,
+	) -> Result<(), ReformulationError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

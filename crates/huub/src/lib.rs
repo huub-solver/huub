@@ -2719,11 +2719,13 @@ impl Model {
 
 		// Create constraint data structures within the solver
 		for c in self.constraints.iter().flatten() {
-			c.to_solver(&mut ReformulationContext {
-				slv: &mut slv,
-				map: &map,
-				trail: &self.trail,
-			})?;
+			c.to_solver(
+				&mut ReformulationContext {
+					slv: &mut slv,
+					map: &map,
+				},
+				self,
+			)?;
 		}
 		// Add branching data structures to the solver
 		for b in self.branchings.iter() {

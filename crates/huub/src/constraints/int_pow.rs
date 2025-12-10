@@ -9,7 +9,7 @@ use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Unsatisfiable};
 use crate::{
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, ReasoningEngine,
-		ReformulationActions,
+		ReformulationActions, TrailingActions,
 	},
 	constraints::{
 		BoxedPropagator, CachedReason, Constraint, ModelIntView, Propagator, SimplificationStatus,
@@ -364,7 +364,11 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(
+		&self,
+		slv: &mut dyn ReformulationActions,
+		_model_trail: &dyn TrailingActions,
+	) -> Result<(), ReformulationError> {
 		let base = slv.solver_int(self.base.clone().into());
 		let exponent = slv.solver_int(self.exponent.clone().into());
 		let result = slv.solver_int(self.result.clone().into());

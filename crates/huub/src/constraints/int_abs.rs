@@ -10,7 +10,8 @@ use pindakaas::Lit as RawLit;
 
 use crate::{
 	actions::{
-		ConstructionActions, InitActions, IntDecisionActions, ReasoningEngine, ReformulationActions,
+		ConstructionActions, InitActions, IntDecisionActions, ReasoningEngine,
+		ReformulationActions, TrailingActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus,
@@ -85,7 +86,11 @@ where
 		}
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(
+		&self,
+		slv: &mut dyn ReformulationActions,
+		_model_trail: &dyn TrailingActions,
+	) -> Result<(), ReformulationError> {
 		let origin = slv.solver_int(self.origin.clone().into());
 		let abs = slv.solver_int(self.abs.clone().into());
 		IntAbsBounds::post(slv, origin, abs);

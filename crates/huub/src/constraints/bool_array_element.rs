@@ -8,6 +8,7 @@ use crate::{
 	actions::{
 		BoolInitActions, BoolSimplificationActions, IntDecisionActions, IntInitActions,
 		IntInspectionActions, IntPropagationActions, ReasoningEngine, ReformulationActions,
+		TrailingActions,
 	},
 	constraints::{Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
@@ -50,7 +51,11 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(
+		&self,
+		slv: &mut dyn ReformulationActions,
+		_model_trail: &dyn TrailingActions,
+	) -> Result<(), ReformulationError> {
 		let result = slv.solver_bool(self.result);
 		let index = slv.solver_int(self.index);
 

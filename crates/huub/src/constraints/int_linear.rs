@@ -149,14 +149,18 @@ where
 		}
 	}
 
-	fn to_solver(&self, actions: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(
+		&self,
+		actions: &mut dyn ReformulationActions,
+		model_trail: &dyn TrailingActions,
+	) -> Result<(), ReformulationError> {
 		let lin = IntLinear {
 			terms: vec![self.vars[0], -self.vars[1]],
 			operator: LinOperator::Equal,
 			rhs: 0,
 			reif: None,
 		};
-		<IntLinear as Constraint<E>>::to_solver(&lin, actions)
+		<IntLinear as Constraint<E>>::to_solver(&lin, actions, model_trail)
 	}
 }
 
@@ -465,7 +469,11 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(
+		&self,
+		slv: &mut dyn ReformulationActions,
+		_model_trail: &dyn TrailingActions,
+	) -> Result<(), ReformulationError> {
 		use Reification::*;
 
 		let terms = self.terms.iter().map(|&v| slv.solver_int(v)).collect_vec();

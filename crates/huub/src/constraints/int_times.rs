@@ -5,7 +5,10 @@
 use std::ops::{AddAssign, Mul};
 
 use crate::{
-	actions::{InitActions, IntSimplificationActions, ReasoningEngine, ReformulationActions},
+	actions::{
+		InitActions, IntSimplificationActions, ReasoningEngine, ReformulationActions,
+		TrailingActions,
+	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
 	},
@@ -65,7 +68,11 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, ctx: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(
+		&self,
+		ctx: &mut dyn ReformulationActions,
+		_model_trail: &dyn TrailingActions,
+	) -> Result<(), ReformulationError> {
 		let f1 = ctx.solver_int(self.factor1.clone().into());
 		let f2 = ctx.solver_int(self.factor2.clone().into());
 		let p = ctx.solver_int(self.product.clone().into());

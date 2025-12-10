@@ -11,7 +11,7 @@ use crate::{
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
 		InitActions, IntInspectionActions, IntSimplificationActions, ReasoningEngine,
-		ReformulationActions, SimplificationActions,
+		ReformulationActions, SimplificationActions, TrailingActions,
 	},
 	constraints::{
 		Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus, SolverBoolView,
@@ -102,7 +102,11 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(
+		&self,
+		slv: &mut dyn ReformulationActions,
+		model_trail: &dyn TrailingActions,
+	) -> Result<(), ReformulationError> {
 		if self.set.iter().len() == 1 {
 			let lb = *self.set.lower_bound().unwrap();
 			let ub = *self.set.upper_bound().unwrap();
@@ -112,6 +116,7 @@ where
 					self.reif.into(),
 				]),
 				slv,
+				model_trail,
 			)
 		} else {
 			let eq_lits = self
@@ -123,6 +128,7 @@ where
 			<Formula<BoolDecision> as Constraint<E>>::to_solver(
 				&Formula::Equiv(vec![self.reif.into(), Formula::Or(eq_lits)]),
 				slv,
+				model_trail,
 			)
 		}
 	}

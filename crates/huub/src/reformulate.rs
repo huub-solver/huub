@@ -153,8 +153,6 @@ pub(crate) struct ReformulationContext<'a, Oracle> {
 	/// The mapping from variable in the [`crate::Model`] to the corresponding
 	/// view in the [`Solver`].
 	pub(crate) map: &'a ReformulationMap,
-	/// The trail created in the [`crate::Model`].
-	pub(crate) trail: &'a IndexVec<TrailedInt, IntVal>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -265,7 +263,11 @@ where
 		}
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(
+		&self,
+		slv: &mut dyn ReformulationActions,
+		_model_trail: &dyn TrailingActions,
+	) -> Result<(), ReformulationError> {
 		let mut resolver = |bv: BoolDecision| {
 			let inner = slv.solver_bool(bv);
 			match inner.0 {
@@ -446,11 +448,14 @@ impl InitConfig {
 	}
 
 	/// Change the difference logic mode in the oracle solver.
-	pub fn with_diff_logic(mut self, diff_logic: Option<u32>,
-						   diff_logic_prio_bounds: Option<u8>,
-						   diff_logic_prio_bools: Option<u8>,
-						   diff_logic_inc_imp: bool, 
-						   diff_logic_branching: Option<u8>) -> Self {
+	pub fn with_diff_logic(
+		mut self,
+		diff_logic: Option<u32>,
+		diff_logic_prio_bounds: Option<u8>,
+		diff_logic_prio_bools: Option<u8>,
+		diff_logic_inc_imp: bool,
+		diff_logic_branching: Option<u8>,
+	) -> Self {
 		self.diff_logic = diff_logic.unwrap_or(0);
 		self.diff_logic_prio_bounds = diff_logic_prio_bounds.unwrap_or(1);
 		self.diff_logic_prio_bools = diff_logic_prio_bools.unwrap_or(1);
@@ -458,7 +463,6 @@ impl InitConfig {
 		self.diff_logic_branching = diff_logic_branching.unwrap_or(0);
 		self
 	}
-
 }
 
 impl IntDecisionDef {
@@ -559,7 +563,7 @@ impl<Oracle> TrailingActions for ReformulationContext<'_, Oracle> {
 	}
 
 	fn trailed_int(&self, i: TrailedInt) -> IntVal {
-		self.trail[i]
+		self.slv.trailed_int(i)
 	}
 }
 

@@ -10,7 +10,7 @@ use crate::{
 	actions::{
 		InitActions, IntDecisionActions, IntInitActions, IntInspectionActions,
 		IntPropagationActions, IntSimplificationActions, PropagationActions, ReasoningEngine,
-		ReformulationActions,
+		ReformulationActions, TrailingActions,
 	},
 	constraints::{Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView},
 	reformulate::ReformulationError,
@@ -84,7 +84,11 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(
+		&self,
+		slv: &mut dyn ReformulationActions,
+		_model_trail: &dyn TrailingActions,
+	) -> Result<(), ReformulationError> {
 		assert!(self.vars.len() >= 2);
 
 		let selector = if self.vars.len() != 2 {
