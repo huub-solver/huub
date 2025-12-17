@@ -1,3 +1,5 @@
+//! Append-only list that allows to iterate open elements and trails their open status.
+
 use std::ops::Range;
 
 use crate::{
@@ -17,6 +19,7 @@ pub(crate) struct TrailedOpenList<T> {
 }
 
 impl<T: Clone> TrailedOpenList<T> {
+	/// Create a new empty list.
 	pub(crate) fn new<A: ConstructionActions + ?Sized>(actions: &mut A) -> Self {
 		Self {
 			list: Vec::new(),

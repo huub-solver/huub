@@ -1173,7 +1173,7 @@ where
 							}
 						}
 						if !satisfied {
-							if pos.len() == 2 && neg.len() == 0 {
+							if pos.len() == 2 && neg.is_empty() {
 								diff_logic.add_bool_or(lits[0], lits[1]);
 							}
 							match lits.len() {
@@ -1539,12 +1539,8 @@ where
 							&& !matches!(b.0, IntDecisionInner::Const(_))
 						{
 							match c.id.deref() {
-								"int_le" => {
-									diff_logic.add(DifferenceLogicConstraint::Global(a, b, 0))
-								}
-								"int_ne" => {
-									diff_logic.add(DifferenceLogicConstraint::NotEquals(a, b, 0))
-								}
+								"int_le" => diff_logic.add(DifferenceLogicConstraint::Global(a, b, 0)),
+								"int_ne" => diff_logic.add(DifferenceLogicConstraint::NotEquals(a, b, 0)),
 								_ => unreachable!(),
 							}
 							continue;
@@ -1583,12 +1579,8 @@ where
 									.add(DifferenceLogicConstraint::ImpliedEquals(r, a, b, 0)),
 								"int_eq_reif" => diff_logic
 									.add(DifferenceLogicConstraint::ReifiedEquals(r, a, b, 0)),
-								"int_le_imp" => {
-									diff_logic.add(DifferenceLogicConstraint::Implied(r, a, b, 0))
-								}
-								"int_le_reif" => {
-									diff_logic.add(DifferenceLogicConstraint::Reified(r, a, b, 0))
-								}
+								"int_le_imp" => diff_logic.add(DifferenceLogicConstraint::Implied(r, a, b, 0)),
+								"int_le_reif" => diff_logic.add(DifferenceLogicConstraint::Reified(r, a, b, 0)),
 								"int_ne_imp" => diff_logic
 									.add(DifferenceLogicConstraint::ImpliedNotEquals(r, a, b, 0)),
 								"int_ne_reif" => diff_logic
@@ -1651,12 +1643,8 @@ where
 								(vars[1] * coeffs[1], vars[0] * -coeffs[0])
 							};
 							match c.id.deref() {
-								"int_lin_le" => {
-									diff_logic.add(DifferenceLogicConstraint::Global(x, y, rhs))
-								}
-								"int_lin_ne" => {
-									diff_logic.add(DifferenceLogicConstraint::NotEquals(x, y, rhs))
-								}
+								"int_lin_le" => diff_logic.add(DifferenceLogicConstraint::Global(x, y, rhs)),
+								"int_lin_ne" => diff_logic.add(DifferenceLogicConstraint::NotEquals(x, y, rhs)),
 								_ => unreachable!(),
 							}
 							continue;

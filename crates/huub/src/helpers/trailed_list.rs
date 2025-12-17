@@ -1,3 +1,5 @@
+//! Append-only list that trails element additions.
+
 use std::slice::Iter;
 
 use crate::{
@@ -20,6 +22,7 @@ pub(crate) struct TrailedList<T> {
 }
 
 impl<T: PartialEq + Clone> TrailedList<T> {
+	/// Create a new empty list.
 	pub(crate) fn new<A: ConstructionActions + ?Sized>(
 		actions: &mut A,
 		allow_removal: bool,
