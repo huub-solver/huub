@@ -367,7 +367,11 @@ pub trait ReasoningEngine {
 /// Actions that can be performed when reformulating a [`Model`] object into a
 /// [`Solver`] object.
 pub trait ReformulationActions:
-	AddAssign<BoxedPropagator> + AsDynClauseDatabase + ClauseDatabase + ConstructionActions + TrailingActions
+	AddAssign<BoxedPropagator>
+	+ AsDynClauseDatabase
+	+ ClauseDatabase
+	+ ConstructionActions
+	+ TrailingActions
 {
 	/// Get the current value of a [`BoolView`], if it has been assigned.
 	fn bool_val(&self, bv: RawLit) -> Option<bool>;

@@ -105,7 +105,7 @@ pub struct Cli<Stdout, Stderr> {
 	vsids_after_restart: bool,
 	/// Only use the SAT VSIDS heuristic for search
 	vsids_only: bool,
-	
+
 	// -- Preprocessing/Inprocessing configuration ---
 	/// Whether to enable the globally blocked clause elimination (conditioning)
 	conditioning: bool,
@@ -124,7 +124,7 @@ pub struct Cli<Stdout, Stderr> {
 	variable_elimination: bool,
 	/// Whether the vivification heuristic is enabled
 	vivification: bool,
-	
+
 	/// Difference logic mode.
 	diff_logic: Option<u32>,
 	/// Difference logic priority for bound propagation.
@@ -202,11 +202,13 @@ where
 			.with_subsumption(self.subsumption)
 			.with_variable_elimination(self.variable_elimination)
 			.with_vivification(self.vivification);
-		config = config.with_diff_logic(self.diff_logic,
-										self.diff_logic_prio_bounds,
-										self.diff_logic_prio_bools,
-										self.diff_logic_inc_imp, 
-										self.diff_logic_branching);
+		config = config.with_diff_logic(
+			self.diff_logic,
+			self.diff_logic_prio_bounds,
+			self.diff_logic_prio_bools,
+			self.diff_logic_inc_imp,
+			self.diff_logic_branching,
+		);
 		config
 	}
 

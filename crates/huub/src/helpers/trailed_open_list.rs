@@ -1,4 +1,5 @@
-//! Append-only list that allows to iterate open elements and trails their open status.
+//! Append-only list that allows to iterate open elements and trails their open
+//! status.
 
 use std::ops::Range;
 

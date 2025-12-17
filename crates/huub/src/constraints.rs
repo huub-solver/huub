@@ -2,6 +2,7 @@
 
 pub mod bool_array_element;
 pub mod cumulative;
+pub mod difference_logic;
 pub mod disjunctive_strict;
 pub mod int_abs;
 pub mod int_all_different;
@@ -14,7 +15,6 @@ pub mod int_pow;
 pub mod int_table;
 pub mod int_times;
 pub mod int_value_precede;
-pub mod difference_logic;
 
 use std::{
 	any::Any,
@@ -180,7 +180,6 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 		let _ = data;
 		unreachable!("propagator did not provide an integer advisor implementation")
 	}
-
 
 	/// Explain a lazy reason that was emitted.
 	///
