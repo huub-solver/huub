@@ -674,20 +674,19 @@ impl DifferenceLogicModel {
 
 		for n in (0..self.graph.num_nodes()).filter(|&n| self.node_active[n]) {
 			if self.distances[n][n] == 0 {
-				// TODO count offset and always unify with start of loop to prevent long unification chains?
 				trace!("Found cycle of length 0");
+				let origin = n;
+				let mut offset = 0;
 				let mut cur = n;
 				loop {
 					let prev = pred[n][cur];
 					if prev == n {
 						break;
 					}
-					trace!(
-						"Unifying {prev} and {cur} with offset {:?}",
-						self.distances[prev][cur]
-					);
+					offset += self.distances[prev][cur];
+					trace!("Unifying {prev} and {origin} with offset {offset}");
 					self.graph.int_vars[prev]
-						.unify(ctx, self.graph.int_vars[cur] + self.distances[prev][cur])?;
+						.unify(ctx, self.graph.int_vars[origin] + offset)?;
 					cur = prev;
 					self.distances[cur][cur] = IntVal::MAX;
 				}
@@ -824,6 +823,7 @@ impl DifferenceLogicModel {
 				let _ = self.graph.active_in[to].swap_remove_element(ctx, &e);
 			}
 		}
+		self.graph.active_out[old].clear(ctx);
 		for i in 0..self.graph.active_in[old].len(ctx) {
 			let &e = self.graph.active_in[old].index(ctx, i);
 			let from = self.graph.edges[e].from;
@@ -848,6 +848,7 @@ impl DifferenceLogicModel {
 				let _ = self.graph.active_out[from].swap_remove_element(ctx, &e);
 			}
 		}
+		self.graph.active_in[old].clear(ctx);
 		for i in self.graph.open_out[old].open_iter(ctx) {
 			let &e = self.graph.open_out[old].index(ctx, i);
 			if check_vars_different(
@@ -868,6 +869,7 @@ impl DifferenceLogicModel {
 				self.graph.close_imp_edge(ctx, e);
 			}
 		}
+		self.graph.open_out[old].clear(ctx);
 		for i in self.graph.open_in[old].open_iter(ctx) {
 			let &e = self.graph.open_in[old].index(ctx, i);
 			if check_vars_different(
@@ -888,10 +890,13 @@ impl DifferenceLogicModel {
 				self.graph.close_imp_edge(ctx, e);
 			}
 		}
+		self.graph.open_in[old].clear(ctx);
 		// Check consequences of all modified active edges
 		for e in mod_edges {
 			self.graph.propagate_edge_addition(ctx, e, true, true)?;
 		}
+		self.node_active[old] = false;
+		self.num_active_nodes -= 1;
 		Ok(())
 	}
 
@@ -1033,15 +1038,8 @@ where
 				self.graph.to_dot(ctx)
 			);
 			self.bellman_ford_init_pi(ctx)?;
-			let mut initial_lb_changes = (0..self.graph.num_nodes()).collect();
-			let mut initial_ub_changes = (0..self.graph.num_nodes()).collect();
-			self.graph
-				.propagate_bounds(ctx, &mut initial_lb_changes, &mut initial_ub_changes)?;
-			let fixed_bools = (0..self.graph.bool_vars.len())
-				.filter(|&b| self.graph.bool_vars[b].val(ctx).is_some())
-				.collect();
-			self.graph
-				.propagate_booleans(ctx, &fixed_bools, false, true)?;
+			self.graph.propagate_bounds(ctx)?;
+			self.graph.propagate_booleans(ctx, false, true)?;
 			// Already do removals before Johnson's to reduce complexity of the graph
 			self.check_remove_fixed_nodes(ctx);
 			self.check_remove_isolated_nodes(ctx);
@@ -1061,6 +1059,8 @@ where
 						let (v_trans, vd) = update_transform(alias);
 						if let Some(new) = self.int_var_index.get_index_of(&v_trans) {
 							self.unify_nodes(ctx, n, new, vd)?;
+							self.graph.lower_bound_changes.insert(new);
+							self.graph.upper_bound_changes.insert(new);
 						} else if !matches!(alias.0, IntDecisionInner::Const(_)) {
 							*self.graph.lower_bound[n].as_mut().unwrap() -= vd;
 							*self.graph.upper_bound[n].as_mut().unwrap() -= vd;
@@ -1151,45 +1151,41 @@ where
 	IntDecision: ModelIntView<E>,
 	BoolDecision: ModelBoolView<E>,
 {
+	fn advise_of_bool_change(&mut self, _ctx: &mut E::NotificationCtx<'_>, data: u64) -> bool {
+		trace!("Boolean b{data} fixed.");
+		self.graph.fixed_bools.insert(data as usize)
+	}
+
+	fn advise_of_int_change(
+		&mut self,
+		ctx: &mut E::NotificationCtx<'_>,
+		data: u64,
+		event: IntEvent,
+	) -> bool {
+		let data = data as usize;
+		let mut enqueue = false;
+		if event == IntEvent::LowerBound || event == IntEvent::Fixed {
+			enqueue = self.graph.notify_lb_change(ctx, data);
+		}
+		if event == IntEvent::UpperBound || event == IntEvent::Fixed {
+			enqueue |= self.graph.notify_ub_change(ctx, data);
+		}
+		enqueue
+	}
+
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
-		for &x in self.graph.int_vars.iter() {
-			x.enqueue_when(ctx, IntPropCond::Bounds); // TODO check to change this to advisors!
+		for (i, &n) in self.graph.int_vars.iter().enumerate() {
+			n.advise_when(ctx, IntPropCond::Bounds, i as u64);
 		}
-		for &b in self.graph.bool_vars.iter() {
-			b.enqueue_when_fixed(ctx); // TODO check to change this to advisors!
+		for (i, &b) in self.graph.bool_vars.iter().enumerate() {
+			b.advise_when_fixed(ctx, i as u64);
 		}
+		ctx.enqueue_now(true);
 	}
 
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
-		let mut lower_bound_changes = IndexSet::default();
-		let mut upper_bound_changes = IndexSet::default();
-		for n in 0..self.graph.int_vars.len() {
-			if !self.node_active[n] {
-				continue;
-			}
-			if self.graph.lower_bound[n]
-				.is_none_or(|v| v != self.graph.int_vars[n].lower_bound(ctx))
-			{
-				let _ = lower_bound_changes.insert(n);
-			}
-			if self.graph.upper_bound[n]
-				.is_none_or(|v| v != self.graph.int_vars[n].upper_bound(ctx))
-			{
-				let _ = upper_bound_changes.insert(n);
-			}
-		}
-		let mut fixed_bools = IndexSet::default();
-		for b in 0..self.graph.bool_vars.len() {
-			if self.bool_active[b] && self.graph.bool_vars[b].val(ctx).is_some() {
-				let _ = fixed_bools.insert(b);
-			}
-		}
-
-		self.graph
-			.propagate_bounds(ctx, &mut lower_bound_changes, &mut upper_bound_changes)?;
-		self.graph
-			.propagate_booleans(ctx, &fixed_bools, true, true)?;
-
+		self.graph.propagate_bounds(ctx)?;
+		self.graph.propagate_booleans(ctx, true, true)?;
 		Ok(())
 	}
 }
@@ -1266,10 +1262,17 @@ pub struct DifferenceLogicGraph<I, B> {
 	bool_implications: Vec<TrailedOpenList<usize>>,
 	/// Storage for the visited state.
 	visited_updates: Vec<usize>,
+	/// List of integer variable indices with reported lower bound changes.
+	lower_bound_changes: IndexSet<usize>,
+	/// List of integer variable indices with reported upper bound changes.
+	upper_bound_changes: IndexSet<usize>,
 	/// Current lower bound updates.
 	lb_updates: Vec<usize>,
 	/// Current upper bound updates.
 	ub_updates: Vec<usize>,
+	/// List of boolean variable indices that have recently been reported as
+	/// fixed to true.
+	fixed_bools: IndexSet<usize>,
 	/// Ordered list of decision booleans for each node.
 	decision_bools: Vec<TrailedOpenList<(usize, IntVal)>>,
 }
@@ -1327,8 +1330,11 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 				.map(|_| TrailedOpenList::new(solver))
 				.collect_vec(),
 			visited_updates: Vec::new(),
+			lower_bound_changes: (0..num_int).collect(),
+			upper_bound_changes: (0..num_int).collect(),
 			lb_updates: Vec::new(),
 			ub_updates: Vec::new(),
+			fixed_bools: IndexSet::default(),
 			decision_bools: (0..num_int)
 				.map(|_| TrailedOpenList::new(solver))
 				.collect_vec(),
@@ -1353,6 +1359,8 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		T: TrailingActions + ?Sized,
 	{
 		let mut new_graph = DifferenceLogicGraph::new(ctx, int_vars, bool_vars);
+		new_graph.lower_bound_changes.clear();
+		new_graph.upper_bound_changes.clear();
 		// TODO map decision bools
 		new_graph.pi = from
 			.pi
@@ -1783,6 +1791,30 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		Ok(())
 	}
 
+	/// Evaluate and enqueue the lower bound change, return true if the change is new.
+	fn notify_lb_change<E>(&mut self, ctx: &mut E::NotificationCtx<'_>, n: usize) -> bool where
+		E: ReasoningEngine,
+		I: SolverIntView<E>,
+	{
+		if self.lower_bound[n].is_none_or(|v| v < self.int_vars[n].lower_bound(ctx)) {
+			trace!("Integer i{n} lower bound change.");
+			return self.lower_bound_changes.insert(n);
+		}
+		false
+	}
+
+	/// Evaluate and enqueue the upper bound change, return true if the change is new.
+	fn notify_ub_change<E>(&mut self, ctx: &mut E::NotificationCtx<'_>, n: usize) -> bool where
+		E: ReasoningEngine,
+		I: SolverIntView<E>,
+	{
+		if self.upper_bound[n].is_none_or(|v| v > self.int_vars[n].upper_bound(ctx)) {
+			trace!("Integer i{n} upper bound change.");
+			return self.upper_bound_changes.insert(n);
+		}
+		false
+	}
+
 	/// Set the lower bound int(n) >= value, with the reason bool(bool_var) /\
 	/// int(lb_var) >= lb_val.
 	fn set_int_lower_bound<E>(
@@ -1836,11 +1868,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	}
 
 	/// Perform incremental updates of lower bounds.
-	fn inc_lb<E>(
-		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
-		v_l: &mut IndexSet<usize>,
-	) -> Result<(), E::Conflict>
+	fn inc_lb<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
 		I: SolverIntView<E>,
@@ -1848,15 +1876,15 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	{
 		// TODO unit tests
 
-		trace!("Running inc_lb on int vars {v_l:?}");
+		trace!("Running inc_lb on int vars {:?}", self.lower_bound_changes);
 		self.reset_visit();
-		let pi0 = v_l
+		let pi0 = self.lower_bound_changes
 			.iter()
 			.map(|&n| self.int_vars[n].lower_bound(ctx) + self.pi[n])
 			.max()
 			.unwrap();
 		let mut queue = PriorityQueue::default();
-		for &n in v_l.iter() {
+		for &n in self.lower_bound_changes.iter() {
 			let _ = queue.push(
 				n,
 				Reverse(pi0 - self.int_vars[n].lower_bound(ctx) - self.pi[n]),
@@ -1866,14 +1894,14 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
 			self.visit(s);
 			let bound = pi0 - gamma_s - self.pi[s];
-			if bound > self.get_cur_lower_bound(ctx, s) || v_l.contains(&s) {
+			if bound > self.get_cur_lower_bound(ctx, s) || self.lower_bound_changes.contains(&s) {
 				self.update_lb(s, bound);
 				if bound > self.int_vars[s].lower_bound(ctx) {
 					trace!("Updating lower bound for i{:?} to {bound}", s);
 					let (prev, b) = self.backtrace[s].unwrap();
 					let lb = self.get_cur_lower_bound(ctx, prev);
 					self.set_int_lower_bound(ctx, s, bound, b, prev, lb)?;
-					let _ = v_l.insert(s);
+					let _ = self.lower_bound_changes.insert(s);
 				}
 				for &e in self.active_out[s].iter(ctx) {
 					let edge = &self.edges[e];
@@ -1891,11 +1919,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	}
 
 	/// Perform incremental updates of upper bounds.
-	fn inc_ub<E>(
-		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
-		v_u: &mut IndexSet<usize>,
-	) -> Result<(), E::Conflict>
+	fn inc_ub<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
 		I: SolverIntView<E>,
@@ -1903,15 +1927,15 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	{
 		// TODO unit tests
 
-		trace!("Running inc_ub on int vars {v_u:?}");
+		trace!("Running inc_ub on int vars {:?}", self.upper_bound_changes);
 		self.reset_visit();
-		let pi0 = v_u
+		let pi0 = self.upper_bound_changes
 			.iter()
 			.map(|&n| self.int_vars[n].upper_bound(ctx) + self.pi[n])
 			.min()
 			.unwrap();
 		let mut queue = PriorityQueue::default();
-		for &n in v_u.iter() {
+		for &n in self.upper_bound_changes.iter() {
 			let _ = queue.push(
 				n,
 				Reverse(self.pi[n] + self.int_vars[n].upper_bound(ctx) - pi0),
@@ -1921,14 +1945,14 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
 			self.visit(s);
 			let bound = pi0 + gamma_s - self.pi[s];
-			if bound < self.get_cur_upper_bound(ctx, s) || v_u.contains(&s) {
+			if bound < self.get_cur_upper_bound(ctx, s) || self.upper_bound_changes.contains(&s) {
 				self.update_ub(s, bound);
 				if bound < self.int_vars[s].upper_bound(ctx) {
 					trace!("Updating upper bound for i{:?} to {bound}", s);
 					let (prev, b) = self.backtrace[s].unwrap();
 					let ub = self.get_cur_upper_bound(ctx, prev);
 					self.set_int_upper_bound(ctx, s, bound, b, prev, ub)?;
-					let _ = v_u.insert(s);
+					let _ = self.upper_bound_changes.insert(s);
 				}
 				for &e in self.active_in[s].iter(ctx) {
 					let edge = &self.edges[e];
@@ -1945,8 +1969,10 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		Ok(())
 	}
 
-	/// Reset the store upper and lower bounds.
+	/// Reset the stored upper and lower bounds as well as queued bound changes.
 	fn reset_bounds(&mut self) {
+		self.lower_bound_changes.clear();
+		self.upper_bound_changes.clear();
 		for &n in self.lb_updates.iter() {
 			self.lower_bound[n] = None;
 		}
@@ -1984,12 +2010,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	}
 
 	/// Propagate new bounds.
-	fn propagate_bounds<E>(
-		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
-		lower_bound_changes: &mut IndexSet<usize>,
-		upper_bound_changes: &mut IndexSet<usize>,
-	) -> Result<(), E::Conflict>
+	fn propagate_bounds<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
 		I: SolverIntView<E>,
@@ -1997,22 +2018,23 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	{
 		trace!(
 			"Propagating bounds on lb changes {:?}, ub changes {:?}.",
-			lower_bound_changes,
-			upper_bound_changes
+			self.lower_bound_changes,
+			self.upper_bound_changes
 		);
 
 		// Lower bound updates
-		if !lower_bound_changes.is_empty() {
-			self.inc_lb(ctx, lower_bound_changes)?;
+		if !self.lower_bound_changes.is_empty() {
+			self.inc_lb(ctx)?;
 		}
 
 		// Upper bound updates
-		if !upper_bound_changes.is_empty() {
-			self.inc_ub(ctx, upper_bound_changes)?;
+		if !self.upper_bound_changes.is_empty() {
+			self.inc_ub(ctx)?;
 		}
 
 		// Consequences of lower bound updates on open implied constraints
-		for &n in lower_bound_changes.iter() {
+		for i in 0..self.lower_bound_changes.len() {
+			let n = self.lower_bound_changes[i];
 			let lb = self.lower_bound[n].unwrap();
 
 			for i in self.open_out[n].open_iter(ctx) {
@@ -2040,11 +2062,12 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		}
 
 		// Consequences of upper bound updates on open implied constraints
-		for &n in upper_bound_changes.iter() {
+		for i in 0..self.upper_bound_changes.len() {
+			let n = self.upper_bound_changes[i];
 			let ub = self.upper_bound[n].unwrap();
 
-			for i in self.open_out[n].open_iter(ctx) {
-				let &e = self.open_out[n].index(ctx, i);
+			for j in self.open_out[n].open_iter(ctx) {
+				let &e = self.open_out[n].index(ctx, j);
 				let edge = &self.edges[e];
 				if ub - self.get_cur_lower_bound(ctx, edge.to) <= edge.val {
 					// Constraint is implied by bounds.
@@ -2053,8 +2076,8 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 				}
 			}
 
-			for i in self.open_in[n].open_iter(ctx) {
-				let &e = self.open_in[n].index(ctx, i);
+			for j in self.open_in[n].open_iter(ctx) {
+				let &e = self.open_in[n].index(ctx, j);
 				let edge = &self.edges[e];
 				let source_lb = self.get_cur_lower_bound(ctx, edge.from);
 				if source_lb - ub > edge.val {
@@ -2067,6 +2090,8 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			}
 		}
 
+		self.lower_bound_changes.clear();
+		self.upper_bound_changes.clear();
 		Ok(())
 	}
 
@@ -2130,7 +2155,6 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	fn propagate_booleans<E>(
 		&mut self,
 		ctx: &mut E::PropagationCtx<'_>,
-		fixed_bools: &IndexSet<usize>,
 		check_implied: bool,
 		update_local_bounds: bool,
 	) -> Result<(), E::Conflict>
@@ -2139,15 +2163,16 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		I: SolverIntView<E>,
 		B: SolverBoolView<E>,
 	{
-		trace!("Propagating fixed booleans {:?}.", fixed_bools);
-		for &b in fixed_bools.iter() {
+		trace!("Propagating fixed booleans {:?}.", self.fixed_bools);
+		for i in 0..self.fixed_bools.len() {
+			let b = self.fixed_bools[i];
 			let val = self.bool_vars[b].val(ctx).unwrap();
 			trace!("Boolean b{b:?} fixed to {val}");
 			if val {
 				//trace!("Graph before adding edges: {}", self.to_dot(adapter));
 				// Consequences of setting the boolean to true -> add all implied edges.
-				for i in self.bool_implications[b].open_iter(ctx) {
-					if let Some(&e) = self.bool_implications[b].index_opt(ctx, i) {
+				for j in self.bool_implications[b].open_iter(ctx) {
+					if let Some(&e) = self.bool_implications[b].index_opt(ctx, j) {
 						trace!("Processing adding edge {:?}", self.edges[e]);
 						self.close_imp_edge(ctx, e);
 						self.activate_imp_edge(ctx, e);
@@ -2156,14 +2181,15 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 				}
 			} else {
 				// Consequences of setting the boolean to false -> close all implied edges.
-				for i in self.bool_implications[b].open_iter(ctx) {
-					let &e = self.bool_implications[b].index(ctx, i);
+				for j in self.bool_implications[b].open_iter(ctx) {
+					let &e = self.bool_implications[b].index(ctx, j);
 					trace!("Closing edge {:?})", self.edges[e]);
 					self.close_imp_edge(ctx, e);
 				}
 			}
 		}
 
+		self.fixed_bools.clear();
 		Ok(())
 	}
 
@@ -2214,10 +2240,6 @@ pub struct DifferenceLogicBounds {
 	priority_level: PriorityLevel,
 	/// Shared reference to the difference logic graph.
 	graph: Rc<RefCell<DifferenceLogicGraph<IntView, BoolView>>>,
-	/// List of integer variable indices with reported lower bound changes.
-	lower_bound_changes: IndexSet<usize>,
-	/// List of integer variable indices with reported upper bound changes.
-	upper_bound_changes: IndexSet<usize>,
 }
 
 impl DifferenceLogicBounds {
@@ -2233,8 +2255,6 @@ impl DifferenceLogicBounds {
 		*solver += Box::new(Self {
 			priority_level,
 			graph: Rc::clone(&graph),
-			lower_bound_changes: IndexSet::default(),
-			upper_bound_changes: IndexSet::default(),
 		});
 	}
 }
@@ -2247,8 +2267,6 @@ where
 {
 	fn advise_of_backtrack(&mut self, _ctx: &mut E::NotificationCtx<'_>) {
 		trace!("Backtrack advise");
-		self.lower_bound_changes.clear();
-		self.upper_bound_changes.clear();
 		self.graph.borrow_mut().reset_bounds();
 	}
 
@@ -2258,20 +2276,14 @@ where
 		data: u64,
 		event: IntEvent,
 	) -> bool {
-		let graph = self.graph.borrow_mut();
+		let mut graph = self.graph.borrow_mut();
 		let data = data as usize;
 		let mut enqueue = false;
-		if (event == IntEvent::LowerBound || event == IntEvent::Fixed)
-			&& graph.lower_bound[data].is_none_or(|e| e < graph.int_vars[data].lower_bound(ctx))
-		{
-			trace!("Integer i{data} lower bound change.");
-			enqueue = self.lower_bound_changes.insert(data);
+		if event == IntEvent::LowerBound || event == IntEvent::Fixed {
+			enqueue = graph.notify_lb_change(ctx, data);
 		}
-		if (event == IntEvent::UpperBound || event == IntEvent::Fixed)
-			&& graph.upper_bound[data].is_none_or(|e| e > graph.int_vars[data].upper_bound(ctx))
-		{
-			trace!("Integer i{data} upper bound change.");
-			enqueue |= self.upper_bound_changes.insert(data);
+		if event == IntEvent::UpperBound || event == IntEvent::Fixed {
+			enqueue |= graph.notify_ub_change(ctx, data);
 		}
 		enqueue
 	}
@@ -2333,13 +2345,7 @@ where
 
 	#[tracing::instrument(name = "difference_logic_bounds", level = "trace", skip(self, ctx))]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
-		self.graph.borrow_mut().propagate_bounds(
-			ctx,
-			&mut self.lower_bound_changes,
-			&mut self.upper_bound_changes,
-		)?;
-		self.lower_bound_changes.clear();
-		self.upper_bound_changes.clear();
+		self.graph.borrow_mut().propagate_bounds(ctx)?;
 		Ok(())
 	}
 }
@@ -2351,9 +2357,6 @@ pub struct DifferenceLogicBooleans {
 	priority_level: PriorityLevel,
 	/// Shared reference to the difference logic graph.
 	graph: Rc<RefCell<DifferenceLogicGraph<IntView, BoolView>>>,
-	/// List of boolean variable indices that have recently been reported as
-	/// fixed to true.
-	fixed_bools: IndexSet<usize>,
 	/// Whether to proactively check implied constraints.
 	use_inc_imp: bool,
 }
@@ -2372,7 +2375,6 @@ impl DifferenceLogicBooleans {
 		*solver += Box::new(Self {
 			priority_level,
 			graph: Rc::clone(&graph),
-			fixed_bools: IndexSet::default(),
 			use_inc_imp,
 		});
 	}
@@ -2386,12 +2388,12 @@ where
 {
 	fn advise_of_backtrack(&mut self, _ctx: &mut E::NotificationCtx<'_>) {
 		trace!("Backtrack advise");
-		self.fixed_bools.clear();
+		self.graph.borrow_mut().fixed_bools.clear();
 	}
 
 	fn advise_of_bool_change(&mut self, _ctx: &mut E::NotificationCtx<'_>, data: u64) -> bool {
 		trace!("Boolean b{data} fixed.");
-		self.fixed_bools.insert(data as usize)
+		self.graph.borrow_mut().fixed_bools.insert(data as usize)
 	}
 
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
@@ -2404,13 +2406,7 @@ where
 
 	#[tracing::instrument(name = "difference_logic_booleans", level = "trace", skip(self, ctx))]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
-		self.graph.borrow_mut().propagate_booleans(
-			ctx,
-			&self.fixed_bools,
-			self.use_inc_imp,
-			false,
-		)?;
-		self.fixed_bools.clear();
+		self.graph.borrow_mut().propagate_booleans(ctx, self.use_inc_imp,false)?;
 		Ok(())
 	}
 }
@@ -2562,7 +2558,7 @@ mod tests {
 			Constraint, SolverBoolView,
 		},
 		helpers::linear_transform::LinearTransform,
-		reformulate::{InitConfig, IntDecisionInner, ReformulationContext},
+		reformulate::{InitConfig, IntDecisionInner},
 		solver::{
 			engine::Engine,
 			int_var::{EncodingType, IntVar},
@@ -2680,7 +2676,7 @@ mod tests {
 			.into_iter()
 			.map(|b| map.get_bool(&mut slv, b))
 			.collect_vec();
-		let mut graph = DifferenceLogicGraph::new(&mut slv, int_vars, bool_vars.clone()); // TODO need to set pi here?
+		let mut graph = DifferenceLogicGraph::new(&mut slv, int_vars, bool_vars.clone());
 		let mut dummy_actions = DummyActions;
 		let mut engine = slv.engine.borrow_mut();
 		let mut ctx = SolvingContext::new(&mut dummy_actions, &mut engine.state);
@@ -2724,7 +2720,7 @@ mod tests {
 			.into_iter()
 			.map(|b| map.get_bool(&mut slv, b))
 			.collect_vec();
-		let mut graph = DifferenceLogicGraph::new(&mut slv, int_vars, bool_vars.clone()); // TODO need to set pi here?
+		let mut graph = DifferenceLogicGraph::new(&mut slv, int_vars, bool_vars.clone());
 		let mut dummy_actions = DummyActions;
 		let mut engine = slv.engine.borrow_mut();
 		let mut ctx = SolvingContext::new(&mut dummy_actions, &mut engine.state);
@@ -2775,34 +2771,21 @@ mod tests {
 			int_vars[2],
 			-2,
 		));
-		let mut diff_logic_model = diff_logic
+		let diff_logic_model = diff_logic
 			.process(&mut prb, LEVEL)
 			.expect("Creating model failed")
 			.expect("Model is empty");
-		assert!(<DifferenceLogicModel as Constraint<Model>>::simplify(
-			&mut diff_logic_model,
-			&mut prb
-		)
-		.is_ok());
+		prb.add_constraint(diff_logic_model);
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let mut actions = ReformulationContext {
-			slv: &mut slv,
-			map: &map,
-		};
-		assert!(<DifferenceLogicModel as Constraint<Model>>::to_solver(
-			&mut diff_logic_model,
-			&mut actions,
-			&prb
-		)
-		.is_ok());
 		let int_views = int_vars
 			.iter()
 			.map(|&v| map.get_int(&mut slv, v))
 			.collect_vec();
 		let b_view = IntView::from(map.get_bool(&mut slv, b));
-		slv.assert_all_solutions(
+		slv.assert_num_solutions(
 			&[int_views[0], int_views[1], int_views[2], b_view],
+			41,
 			move |sol| {
 				let Int(x) = sol[0] else { return false };
 				let Int(y) = sol[1] else { return false };
@@ -2877,27 +2860,13 @@ mod tests {
 			int_vars5[1],
 			-2,
 		));
-		let mut diff_logic_model = diff_logic
+		let diff_logic_model = diff_logic
 			.process(&mut prb, LEVEL)
 			.expect("Creating model failed")
 			.expect("Model is empty");
-		assert!(<DifferenceLogicModel as Constraint<Model>>::simplify(
-			&mut diff_logic_model,
-			&mut prb
-		)
-		.is_ok());
+		prb.add_constraint(diff_logic_model);
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let mut actions = ReformulationContext {
-			slv: &mut slv,
-			map: &map,
-		};
-		assert!(<DifferenceLogicModel as Constraint<Model>>::to_solver(
-			&mut diff_logic_model,
-			&mut actions,
-			&prb
-		)
-		.is_ok());
 		let int_views5 = int_vars5
 			.iter()
 			.map(|&v| map.get_int(&mut slv, v))
@@ -2908,7 +2877,7 @@ mod tests {
 			.collect_vec();
 		let b_view = IntView::from(map.get_bool(&mut slv, b));
 		let c_view = IntView::from(map.get_bool(&mut slv, c));
-		slv.assert_all_solutions(
+		slv.assert_num_solutions(
 			&[
 				int_views5[0],
 				int_views5[1],
@@ -2919,6 +2888,7 @@ mod tests {
 				b_view,
 				c_view,
 			],
+			86,
 			move |sol| {
 				let Int(x) = sol[0] else { return false };
 				let Int(y) = sol[1] else { return false };
@@ -2993,45 +2963,35 @@ mod tests {
 			int_vars[0],
 			-1,
 		));
-		let mut diff_logic_model = diff_logic
+		let diff_logic_model = diff_logic
 			.process(&mut prb, LEVEL)
 			.expect("Creating model failed")
 			.expect("Model is empty");
-		assert!(<DifferenceLogicModel as Constraint<Model>>::simplify(
-			&mut diff_logic_model,
-			&mut prb
-		)
-		.is_ok());
+		prb.add_constraint(diff_logic_model);
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let mut actions = ReformulationContext {
-			slv: &mut slv,
-			map: &map,
-		};
-		assert!(<DifferenceLogicModel as Constraint<Model>>::to_solver(
-			&mut diff_logic_model,
-			&mut actions,
-			&prb
-		)
-		.is_ok());
 		let int_views = int_vars
 			.iter()
 			.map(|&v| map.get_int(&mut slv, v))
 			.collect_vec();
-		slv.assert_all_solutions(&[int_views[0], int_views[1], int_views[2]], move |sol| {
-			let Int(x) = sol[0] else { return false };
-			let Int(y) = sol[1] else { return false };
-			let Int(z) = sol[2] else { return false };
-			trace!("Checking x = {x}, y = {y}, z = {z}");
-			x - y == 3 && y - z == -2 && z - x == -1
-		});
+		slv.assert_num_solutions(
+			&[int_views[0], int_views[1], int_views[2]],
+			7,
+			move |sol| {
+				let Int(x) = sol[0] else { return false };
+				let Int(y) = sol[1] else { return false };
+				let Int(z) = sol[2] else { return false };
+				trace!("Checking x = {x}, y = {y}, z = {z}");
+				x - y == 3 && y - z == -2 && z - x == -1
+			}
+		);
 	}
 
 	#[test]
 	#[traced_test]
 	fn test_replacement() {
 		let mut prb = Model::default();
-		let int_vars = prb.new_int_vars(4, RangeList::from_iter([1..=10]));
+		let int_vars = prb.new_int_vars(4, RangeList::from_iter([1..=5]));
 		let b = prb.new_bool_var();
 		let c = prb.new_bool_var();
 		let mut diff_logic = DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, true, 0, None);
@@ -3069,15 +3029,13 @@ mod tests {
 			int_vars[0],
 			-1,
 		));
-		let mut diff_logic_model = diff_logic
+		let diff_logic_model = diff_logic
 			.process(&mut prb, LEVEL)
 			.expect("Creating model failed")
 			.expect("Model is empty");
-		assert!(<DifferenceLogicModel as Constraint<Model>>::simplify(
-			&mut diff_logic_model,
-			&mut prb
-		)
-		.is_ok());
+		prb.add_constraint(diff_logic_model);
+		let con_ref = prb.propagator_queue.pop().expect("Diff logic was not enqueued");
+		assert!(prb.propagate(con_ref).is_ok());
 		let IntDecisionInner::Var(var_index) = int_vars[3].0 else {
 			panic!("Should not happen");
 		};
@@ -3093,30 +3051,15 @@ mod tests {
 				))
 			)
 			.is_ok());
-		assert!(<DifferenceLogicModel as Constraint<Model>>::simplify(
-			&mut diff_logic_model,
-			&mut prb
-		)
-		.is_ok());
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let mut actions = ReformulationContext {
-			slv: &mut slv,
-			map: &map,
-		};
-		assert!(<DifferenceLogicModel as Constraint<Model>>::to_solver(
-			&mut diff_logic_model,
-			&mut actions,
-			&prb
-		)
-		.is_ok());
 		let int_views = int_vars
 			.iter()
 			.map(|&v| map.get_int(&mut slv, v))
 			.collect_vec();
 		let b_view = IntView::from(map.get_bool(&mut slv, b));
 		let c_view = IntView::from(map.get_bool(&mut slv, c));
-		slv.assert_all_solutions(
+		slv.assert_num_solutions(
 			&[
 				int_views[0],
 				int_views[1],
@@ -3125,6 +3068,7 @@ mod tests {
 				b_view,
 				c_view,
 			],
+			14,
 			move |sol| {
 				let Int(x) = sol[0] else { return false };
 				let Int(y) = sol[1] else { return false };
@@ -3147,7 +3091,7 @@ mod tests {
 	#[traced_test]
 	fn test_unification() {
 		let mut prb = Model::default();
-		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
+		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=5]));
 		let b = prb.new_bool_var();
 		let c = prb.new_bool_var();
 		let mut diff_logic = DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, true, 0, None);
@@ -3185,15 +3129,13 @@ mod tests {
 			int_vars[0],
 			-1,
 		));
-		let mut diff_logic_model = diff_logic
+		let diff_logic_model = diff_logic
 			.process(&mut prb, LEVEL)
 			.expect("Creating model failed")
 			.expect("Model is empty");
-		assert!(<DifferenceLogicModel as Constraint<Model>>::simplify(
-			&mut diff_logic_model,
-			&mut prb
-		)
-		.is_ok());
+		prb.add_constraint(diff_logic_model);
+		let con_ref = prb.propagator_queue.pop().expect("Diff logic was not enqueued");
+		assert!(prb.propagate(con_ref).is_ok());
 		let IntDecisionInner::Var(var_index) = int_vars[2].0 else {
 			panic!("Should not happen");
 		};
@@ -3206,31 +3148,17 @@ mod tests {
 				))
 			)
 			.is_ok());
-		assert!(<DifferenceLogicModel as Constraint<Model>>::simplify(
-			&mut diff_logic_model,
-			&mut prb
-		)
-		.is_ok());
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let mut actions = ReformulationContext {
-			slv: &mut slv,
-			map: &map,
-		};
-		assert!(<DifferenceLogicModel as Constraint<Model>>::to_solver(
-			&mut diff_logic_model,
-			&mut actions,
-			&prb
-		)
-		.is_ok());
 		let int_views = int_vars
 			.iter()
 			.map(|&v| map.get_int(&mut slv, v))
 			.collect_vec();
 		let b_view = IntView::from(map.get_bool(&mut slv, b));
 		let c_view = IntView::from(map.get_bool(&mut slv, c));
-		slv.assert_all_solutions(
+		slv.assert_num_solutions(
 			&[int_views[0], int_views[1], int_views[2], b_view, c_view],
+			10,
 			move |sol| {
 				let Int(x) = sol[0] else { return false };
 				let Int(y) = sol[1] else { return false };
@@ -3269,44 +3197,31 @@ mod tests {
 			int_vars[0],
 			5,
 		));
-		let mut diff_logic_model = diff_logic
+		let diff_logic_model = diff_logic
 			.process(&mut prb, LEVEL)
 			.expect("Creating model failed")
 			.expect("Model is empty");
-		assert!(<DifferenceLogicModel as Constraint<Model>>::simplify(
-			&mut diff_logic_model,
-			&mut prb
-		)
-		.is_ok());
+		prb.add_constraint(diff_logic_model);
+		let con_ref = prb.propagator_queue.pop().expect("Diff logic was not enqueued");
+		assert!(prb.propagate(con_ref).is_ok());
 		assert!(int_vars[0].unify(&mut prb, IntDecision::from(5)).is_ok());
 		assert!(int_vars[2].unify(&mut prb, IntDecision::from(5)).is_ok());
-		assert!(<DifferenceLogicModel as Constraint<Model>>::simplify(
-			&mut diff_logic_model,
-			&mut prb
-		)
-		.is_ok());
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let mut actions = ReformulationContext {
-			slv: &mut slv,
-			map: &map,
-		};
-		assert!(<DifferenceLogicModel as Constraint<Model>>::to_solver(
-			&mut diff_logic_model,
-			&mut actions,
-			&prb
-		)
-		.is_ok());
 		let int_views = int_vars
 			.iter()
 			.map(|&v| map.get_int(&mut slv, v))
 			.collect_vec();
-		slv.assert_all_solutions(&[int_views[0], int_views[1], int_views[2]], move |sol| {
-			let Int(x) = sol[0] else { return false };
-			let Int(y) = sol[1] else { return false };
-			let Int(z) = sol[2] else { return false };
-			trace!("Checking x = {x}, y = {y}, z = {z}");
-			x - y <= 3 && y - z <= -2 && x == 5 && z == 5
-		});
+		slv.assert_num_solutions(
+			&[int_views[0], int_views[1], int_views[2]],
+			2,
+			move |sol| {
+				let Int(x) = sol[0] else { return false };
+				let Int(y) = sol[1] else { return false };
+				let Int(z) = sol[2] else { return false };
+				trace!("Checking x = {x}, y = {y}, z = {z}");
+				x - y <= 3 && y - z <= -2 && x == 5 && z == 5
+			}
+		);
 	}
 }

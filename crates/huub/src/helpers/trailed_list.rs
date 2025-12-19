@@ -64,6 +64,12 @@ impl<T: PartialEq + Clone> TrailedList<T> {
 		debug_assert_eq!(prev, len as IntVal);
 	}
 
+	/// Remove all elements from the list.
+	pub(crate) fn clear<A: TrailingActions + ?Sized>(&self, actions: &mut A) {
+		assert!(self.allow_removal, "removal is not allowed for this list");
+		let _ = actions.set_trailed_int(self.size, 0);
+	}
+
 	/// Remove the given element by swapping it out of the active range.
 	/// Can only be called before trailing is initialized.
 	pub(crate) fn swap_remove_element<A: TrailingActions>(

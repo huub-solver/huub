@@ -86,6 +86,11 @@ impl<T: Clone> TrailedOpenList<T> {
 		true
 	}
 
+	/// Close all elements in the list.
+	pub(crate) fn clear<A: TrailingActions>(&mut self, actions: &mut A) {
+		let _ = actions.set_trailed_int(self.closed, self.len() as IntVal);
+	}
+
 	/// Return the total length of the list (including elements closed in
 	/// trailing state).
 	pub(crate) fn len(&self) -> usize {
