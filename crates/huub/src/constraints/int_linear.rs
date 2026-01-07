@@ -950,7 +950,6 @@ mod tests {
 	use crate::{
 		constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
 		reformulate::InitConfig,
-		rel,
 		solver::{
 			int_var::{EncodingType, IntVar},
 			Solver,

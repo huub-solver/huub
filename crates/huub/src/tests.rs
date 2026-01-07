@@ -8,7 +8,6 @@ use crate::{
 	actions::{IntInspectionActions, IntSimplificationActions},
 	branchers::IntBrancher,
 	constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
-	rel,
 	solver::{
 		int_var::{EncodingType, IntVar},
 		SolveResult, Value, View,
