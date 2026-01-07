@@ -12,7 +12,7 @@ use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Unsatisfiable};
 use crate::{
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, IntPropagationActions,
-		ReasoningEngine, ReformulationActions,
+		ReasoningEngine, ReformulationActions, SimplificationActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus,
@@ -211,6 +211,7 @@ impl IntDivBounds<IntView, IntView, IntView> {
 impl<E> Constraint<E> for IntDivBounds<IntDecision, IntDecision, IntDecision>
 where
 	E: ReasoningEngine<Atom = BoolDecision>,
+	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
 	IntDecision: ModelIntView<E>,
 	BoolDecision: ModelBoolView<E>,
 {
@@ -232,22 +233,22 @@ where
 		let res_neg = self.result.lit(ctx, IntLitMeaning::Less(1));
 
 		// num >= 0 /\ denom > 0 => res >= 0
-		<BoolFormula as Propagator<E>>::propagate(
+		<BoolFormula as Constraint<E>>::simplify(
 			&mut Or(vec![!Atom(num_pos), !Atom(denom_pos), Atom(res_pos)]),
 			ctx,
 		)?;
 		// num <= 0 /\ denom < 0 => res >= 0
-		<BoolFormula as Propagator<E>>::propagate(
+		<BoolFormula as Constraint<E>>::simplify(
 			&mut Or(vec![!Atom(num_neg), !Atom(denom_neg), Atom(res_pos)]),
 			ctx,
 		)?;
 		// num >= 0 /\ denom < 0 => res >= 0
-		<BoolFormula as Propagator<E>>::propagate(
+		<BoolFormula as Constraint<E>>::simplify(
 			&mut Or(vec![!Atom(num_pos), !Atom(denom_neg), Atom(res_neg)]),
 			ctx,
 		)?;
 		// num <= 0 /\ denom > 0 => res <= 0
-		<BoolFormula as Propagator<E>>::propagate(
+		<BoolFormula as Constraint<E>>::simplify(
 			&mut Or(vec![!Atom(num_neg), !Atom(denom_pos), Atom(res_neg)]),
 			ctx,
 		)?;
@@ -346,10 +347,12 @@ mod tests {
 
 	use crate::{
 		constraints::int_div::IntDivBounds,
+		div_int,
 		solver::{
 			int_var::{EncodingType, IntVar},
 			Solver,
 		},
+		Model,
 	};
 
 	#[test]
@@ -470,6 +473,66 @@ mod tests {
     7, 1, 7
     7, 2, 3
     7, 3, 2"#]],
+		);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_int_div_simplify() {
+		let mut prb = Model::default();
+		let num = prb.new_int_var(-20..=-10);
+		let den = prb.new_int_var(0..=4);
+		let res = prb.new_int_var(-20..=20);
+
+		div_int(&mut prb, num, den, res);
+
+		prb.expect_solutions(
+			&[num, den, res],
+			expect![[r#"
+    -20, 1, -20
+    -20, 2, -10
+    -20, 3, -6
+    -20, 4, -5
+    -19, 1, -19
+    -19, 2, -9
+    -19, 3, -6
+    -19, 4, -4
+    -18, 1, -18
+    -18, 2, -9
+    -18, 3, -6
+    -18, 4, -4
+    -17, 1, -17
+    -17, 2, -8
+    -17, 3, -5
+    -17, 4, -4
+    -16, 1, -16
+    -16, 2, -8
+    -16, 3, -5
+    -16, 4, -4
+    -15, 1, -15
+    -15, 2, -7
+    -15, 3, -5
+    -15, 4, -3
+    -14, 1, -14
+    -14, 2, -7
+    -14, 3, -4
+    -14, 4, -3
+    -13, 1, -13
+    -13, 2, -6
+    -13, 3, -4
+    -13, 4, -3
+    -12, 1, -12
+    -12, 2, -6
+    -12, 3, -4
+    -12, 4, -3
+    -11, 1, -11
+    -11, 2, -5
+    -11, 3, -3
+    -11, 4, -2
+    -10, 1, -10
+    -10, 2, -5
+    -10, 3, -3
+    -10, 4, -2"#]],
 		);
 	}
 }
