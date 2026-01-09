@@ -134,7 +134,7 @@ use crate::{
 	},
 	solver::{
 		IntLitMeaning, Solver,
-		activation_list::{ActivationAction, ActivationActionS, IntEvent, IntPropCond},
+		activation_list::{ActivationAction, IntEvent, IntPropCond},
 		queue::{PriorityLevel, PropagatorInfo, PropagatorQueue},
 		trail::TrailedInt,
 	},
@@ -1901,44 +1901,48 @@ impl IntSimplificationActions<Model> for IntDecision {
 					| BoolDecisionInner::IntLess(j, _),
 				),
 			) => {
-				for act in constraints.activated_by::<ModAdvisor, ConRef>(IntEvent::Fixed) {
-					if let ActivationAction::Advise(adv) = act {
-						let def = &mut ctx.advisors[adv];
-						def.bool2int = true;
-						def.condition = Some(match inner.0 {
-							BoolDecisionInner::IntEq(_, v) => IntLitMeaning::Eq(v),
-							BoolDecisionInner::IntGreaterEq(_, v) => IntLitMeaning::GreaterEq(v),
-							BoolDecisionInner::IntLess(_, v) => IntLitMeaning::Less(v),
-							BoolDecisionInner::IntNotEq(_, v) => IntLitMeaning::NotEq(v),
-							_ => unreachable!(),
-						});
-						def.negated = !lt.positive_scale();
-					}
-					let cond = if matches!(
-						inner.0,
-						BoolDecisionInner::IntEq(_, _) | BoolDecisionInner::IntNotEq(_, _)
-					) {
-						IntPropCond::Domain
-					} else {
-						IntPropCond::Bounds
-					};
-					ctx.int_vars[j].constraints.add(act, cond);
-				}
+				constraints.for_each_activated_by(
+					IntEvent::Fixed,
+					|act: ActivationAction<ModAdvisor, ConRef>| {
+						if let ActivationAction::Advise(adv) = act {
+							let def = &mut ctx.advisors[adv];
+							def.bool2int = true;
+							def.condition = Some(match inner.0 {
+								BoolDecisionInner::IntEq(_, v) => IntLitMeaning::Eq(v),
+								BoolDecisionInner::IntGreaterEq(_, v) => {
+									IntLitMeaning::GreaterEq(v)
+								}
+								BoolDecisionInner::IntLess(_, v) => IntLitMeaning::Less(v),
+								BoolDecisionInner::IntNotEq(_, v) => IntLitMeaning::NotEq(v),
+								_ => unreachable!(),
+							});
+							def.negated = !lt.positive_scale();
+						}
+						let cond = if matches!(
+							inner.0,
+							BoolDecisionInner::IntEq(_, _) | BoolDecisionInner::IntNotEq(_, _)
+						) {
+							IntPropCond::Domain
+						} else {
+							IntPropCond::Bounds
+						};
+						ctx.int_vars[j].constraints.add(act, cond);
+					},
+				);
 			}
 			// Move subscription to Boolean decision
 			Bool(lt, BoolDecision(BoolDecisionInner::Lit(l))) => {
 				let jdx = i32::from(l.var()) as usize - 1;
-				ctx.bool_vars[jdx].constraints.extend(
-					constraints.activated_by(IntEvent::Fixed).map(
-						|act: ActivationAction<ModAdvisor, ConRef>| -> ActivationActionS {
-							if let ActivationAction::Advise(adv) = act {
-								let def = &mut ctx.advisors[adv];
-								def.bool2int = true;
-								def.negated = !lt.positive_scale();
-							}
-							act.into()
-						},
-					),
+				constraints.for_each_activated_by(
+					IntEvent::Fixed,
+					|act: ActivationAction<ModAdvisor, ConRef>| {
+						if let ActivationAction::Advise(adv) = act {
+							let def = &mut ctx.advisors[adv];
+							def.bool2int = true;
+							def.negated = !lt.positive_scale();
+						}
+						ctx.bool_vars[jdx].constraints.push(act.into());
+					},
 				);
 			}
 			// Notify current subscriptions one more time, then forget about them.
@@ -2511,52 +2515,51 @@ impl Model {
 		};
 		let mut int_events = mem::take(&mut self.int_events);
 		for (iv, event) in int_events.drain() {
-			let v: Vec<_> = self.int_vars[iv].constraints.activated_by(event).collect();
-			for act in v {
-				match act {
-					ActivationAction::Advise(adv) => {
-						let x: &ModAdvisorDef = &self.advisors[adv];
-						let ModAdvisorDef {
-							con,
-							data,
-							negated,
-							bool2int,
-							condition,
-						} = x.clone();
-						let event = match event {
-							IntEvent::LowerBound if negated => IntEvent::UpperBound,
-							IntEvent::UpperBound if negated => IntEvent::LowerBound,
-							_ => event,
+			let constraints = mem::take(&mut self.int_vars[iv].constraints);
+			constraints.for_each_activated_by(event, |act| match act {
+				ActivationAction::Advise(adv) => {
+					let x: &ModAdvisorDef = &self.advisors[adv];
+					let ModAdvisorDef {
+						con,
+						data,
+						negated,
+						bool2int,
+						condition,
+					} = x.clone();
+					let event = match event {
+						IntEvent::LowerBound if negated => IntEvent::UpperBound,
+						IntEvent::UpperBound if negated => IntEvent::LowerBound,
+						_ => event,
+					};
+					let enqueue = if let Some(cond) = condition {
+						let iv = IntDecision(IntDecisionInner::Var(iv));
+						let triggered = match cond {
+							IntLitMeaning::Eq(v) | IntLitMeaning::NotEq(v) => {
+								iv.eq(v).val(self).is_some()
+							}
+							IntLitMeaning::GreaterEq(v) | IntLitMeaning::Less(v) => {
+								iv.geq(v).val(self).is_some()
+							}
 						};
-						let enqueue = if let Some(cond) = condition {
-							let iv = IntDecision(IntDecisionInner::Var(iv));
-							let triggered = match cond {
-								IntLitMeaning::Eq(v) | IntLitMeaning::NotEq(v) => {
-									iv.eq(v).val(self).is_some()
-								}
-								IntLitMeaning::GreaterEq(v) | IntLitMeaning::Less(v) => {
-									iv.geq(v).val(self).is_some()
-								}
-							};
-							if triggered {
-								if bool2int {
-									advise_of_int_change(self, con, data, IntEvent::Fixed)
-								} else {
-									advise_of_bool_change(self, con, data)
-								}
+						if triggered {
+							if bool2int {
+								advise_of_int_change(self, con, data, IntEvent::Fixed)
 							} else {
-								false
+								advise_of_bool_change(self, con, data)
 							}
 						} else {
-							advise_of_int_change(self, con, data, event)
-						};
-						if enqueue {
-							self.propagator_queue.enqueue_propagator(con);
+							false
 						}
+					} else {
+						advise_of_int_change(self, con, data, event)
+					};
+					if enqueue {
+						self.propagator_queue.enqueue_propagator(con);
 					}
-					ActivationAction::Enqueue(c) => self.propagator_queue.enqueue_propagator(c),
 				}
-			}
+				ActivationAction::Enqueue(c) => self.propagator_queue.enqueue_propagator(c),
+			});
+			self.int_vars[iv].constraints = constraints;
 		}
 		self.int_events = int_events;
 		let mut bool_events = mem::take(&mut self.bool_events);

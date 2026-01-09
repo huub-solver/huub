@@ -373,7 +373,7 @@ impl PropagatorExtension for Engine {
 				ctx.state.int_vars[r].notify_upper_bound(&mut ctx.state.trail, lb);
 
 				let activation = mem::take(&mut ctx.state.int_activation[r]);
-				for action in activation.activated_by(IntEvent::Fixed) {
+				activation.for_each_activated_by(IntEvent::Fixed, |action| {
 					let prop = match action {
 						ActivationAction::Advise(adv) => {
 							let &AdvisorDef {
@@ -384,14 +384,14 @@ impl PropagatorExtension for Engine {
 								data,
 								IntEvent::Fixed,
 							) {
-								continue;
+								return;
 							}
 							propagator
 						}
 						ActivationAction::Enqueue(prop) => prop,
 					};
 					ctx.state.propagator_queue.enqueue_propagator(prop);
-				}
+				});
 				ctx.state.int_activation[r] = activation;
 			}
 		}
@@ -605,7 +605,7 @@ impl PropagatorExtension for Engine {
 				&& let Some((iv, event)) = iv_event
 			{
 				let activations = mem::take(&mut self.state.int_activation[iv]);
-				for action in activations.activated_by(event) {
+				activations.for_each_activated_by(event, |action| {
 					let prop = match action {
 						ActivationAction::Advise(adv) => {
 							let &AdvisorDef {
@@ -616,14 +616,14 @@ impl PropagatorExtension for Engine {
 							} = &self.state.advisors[adv];
 							let enqueue = self.notify_int_advisor(propagator, event, data, negated);
 							if !enqueue {
-								continue;
+								return;
 							}
 							propagator
 						}
 						ActivationAction::Enqueue(prop) => prop,
 					};
 					self.state.propagator_queue.enqueue_propagator(prop);
-				}
+				});
 				self.state.int_activation[iv] = activations;
 			}
 		}

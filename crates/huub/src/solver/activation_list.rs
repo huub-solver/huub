@@ -6,8 +6,6 @@ use std::{
 	ops::{Add, AddAssign},
 };
 
-use itertools::Itertools;
-
 use crate::{
 	ConRef, ModAdvisor,
 	solver::engine::{Advisor, PropRef},
@@ -138,35 +136,6 @@ impl From<ActivationAction<ModAdvisor, ConRef>> for ActivationActionS {
 }
 
 impl ActivationList {
-	/// Get an iterator over the list of propagators to be enqueued.
-	pub(crate) fn activated_by<'a, A, P>(
-		&'a self,
-		event: IntEvent,
-	) -> impl Iterator<Item = ActivationAction<A, P>> + 'a
-	where
-		ActivationAction<A, P>: From<ActivationActionS>,
-		A: 'a,
-		P: 'a,
-	{
-		let r1 = if event == IntEvent::LowerBound {
-			self.lower_bound_idx as usize..self.upper_bound_idx as usize
-		} else {
-			0..0
-		};
-		let r2 = match event {
-			IntEvent::Fixed => 0..,
-			// NOTE: Bounds (Event) should trigger both LowerBound and UpperBound conditions
-			IntEvent::Bounds => self.lower_bound_idx as usize..,
-			IntEvent::UpperBound => self.upper_bound_idx as usize..,
-			IntEvent::LowerBound => self.bounds_idx as usize..,
-			IntEvent::Domain => self.domain_idx as usize..,
-		};
-		self.activations[r1]
-			.iter()
-			.chain(self.activations[r2].iter())
-			.copied()
-			.map_into()
-	}
 	/// Add a propagator to the list of propagators to be enqueued based on the
 	/// given condition.
 	pub(crate) fn add<A, P>(&mut self, action: ActivationAction<A, P>, condition: IntPropCond)
@@ -254,6 +223,39 @@ impl ActivationList {
 			);
 		}
 	}
+
+	/// Iterate over the activation actions triggered by the given event and
+	/// execute the provided function for each of them.
+	///
+	/// This method does not enqueue or advise by itself; it simply delegates
+	/// handling to the provided function `f`.
+	pub(crate) fn for_each_activated_by<A, P, F>(&self, event: IntEvent, mut f: F)
+	where
+		ActivationAction<A, P>: From<ActivationActionS>,
+		F: FnMut(ActivationAction<A, P>),
+	{
+		if event == IntEvent::LowerBound {
+			for &act in
+				&self.activations[self.lower_bound_idx as usize..self.upper_bound_idx as usize]
+			{
+				f(act.into());
+			}
+			for &act in &self.activations[self.bounds_idx as usize..] {
+				f(act.into());
+			}
+		} else {
+			let start = match event {
+				IntEvent::Fixed => 0,
+				IntEvent::Bounds => self.lower_bound_idx as usize,
+				IntEvent::UpperBound => self.upper_bound_idx as usize,
+				IntEvent::LowerBound => unreachable!(),
+				IntEvent::Domain => self.domain_idx as usize,
+			};
+			for &act in &self.activations[start..] {
+				f(act.into());
+			}
+		}
+	}
 }
 
 impl Add<IntEvent> for IntEvent {
@@ -303,7 +305,10 @@ mod tests {
 			for (prop, cond) in list.iter() {
 				activation_list.add(ActivationAction::Enqueue(*prop), *cond);
 			}
-			let fixed: FxHashSet<_> = activation_list.activated_by(IntEvent::Fixed).collect();
+			let mut fixed = FxHashSet::default();
+			activation_list.for_each_activated_by(IntEvent::Fixed, |a: ActivationAction<_, _>| {
+				fixed.insert(a);
+			});
 			assert_eq!(
 				fixed,
 				FxHashSet::from_iter([
@@ -314,7 +319,10 @@ mod tests {
 					ActivationAction::Enqueue(PropRef::from(4))
 				])
 			);
-			let bounds: FxHashSet<_> = activation_list.activated_by(IntEvent::Bounds).collect();
+			let mut bounds = FxHashSet::default();
+			activation_list.for_each_activated_by(IntEvent::Bounds, |a: ActivationAction<_, _>| {
+				bounds.insert(a);
+			});
 			assert_eq!(
 				bounds,
 				FxHashSet::from_iter([
@@ -324,8 +332,13 @@ mod tests {
 					ActivationAction::Enqueue(PropRef::from(4))
 				])
 			);
-			let lower_bound: FxHashSet<_> =
-				activation_list.activated_by(IntEvent::LowerBound).collect();
+			let mut lower_bound = FxHashSet::default();
+			activation_list.for_each_activated_by(
+				IntEvent::LowerBound,
+				|a: ActivationAction<_, _>| {
+					lower_bound.insert(a);
+				},
+			);
 			assert_eq!(
 				lower_bound,
 				FxHashSet::from_iter([
@@ -334,8 +347,13 @@ mod tests {
 					ActivationAction::Enqueue(PropRef::from(4))
 				])
 			);
-			let upper_bound: FxHashSet<_> =
-				activation_list.activated_by(IntEvent::UpperBound).collect();
+			let mut upper_bound = FxHashSet::default();
+			activation_list.for_each_activated_by(
+				IntEvent::UpperBound,
+				|a: ActivationAction<_, _>| {
+					upper_bound.insert(a);
+				},
+			);
 			assert_eq!(
 				upper_bound,
 				FxHashSet::from_iter([
@@ -344,7 +362,10 @@ mod tests {
 					ActivationAction::Enqueue(PropRef::from(4))
 				])
 			);
-			let domain: FxHashSet<_> = activation_list.activated_by(IntEvent::Domain).collect();
+			let mut domain = FxHashSet::default();
+			activation_list.for_each_activated_by(IntEvent::Domain, |a: ActivationAction<_, _>| {
+				domain.insert(a);
+			});
 			assert_eq!(
 				domain,
 				FxHashSet::from_iter([ActivationAction::Enqueue(PropRef::from(4))])
