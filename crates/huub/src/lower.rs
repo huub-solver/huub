@@ -85,9 +85,20 @@ pub(crate) struct LowererComplete<Origin = ()> {
 	/// The number of preprocessing rounds in the SAT solver
 	#[builder(default = Lowerer::DEFAULT_PREPROCESSING)]
 	preprocessing: usize,
+	/// Whether to enable CaDiCaL's light preprocessing.
+	#[builder(default = Lowerer::DEFAULT_PREPROCESSING_LIGHT)]
+	preprocessing_light: bool,
 	/// Whether to enable the failed literal probing in the SAT solver.
 	#[builder(default = Lowerer::DEFAULT_PROBING)]
 	probing: bool,
+	/// The interval in terms of conflicts with the given `reduce_type` between
+	/// clause-database reductions in the SAT solver.
+	#[builder(default = Lowerer::DEFAULT_REDUCE_INTERVAL)]
+	reduce_interval: usize,
+	/// Type of method to compute the next size of the learned clause-database
+	/// to trigger reduction in the SAT solver.
+	#[builder(default = Lowerer::DEFAULT_REDUCE_TYPE)]
+	reduce_type: ReduceType,
 	/// Whether to enable restarts in the SAT solver.
 	#[builder(default = Lowerer::DEFAULT_RESTART)]
 	restart: bool,
@@ -234,6 +245,21 @@ pub(crate) struct LoweringMapBuilder {
 	pub(crate) int_map: Vec<Option<solver::View<IntVal>>>,
 }
 
+/// The function CaDiCaL uses to compute the target size of the learned clause
+/// database when it is reduced.
+///
+/// Each variant's discriminant is the integer value that is passed to CaDiCaL's
+/// `reduceopt` option.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReduceType {
+	/// Percentage-based reduction target (CaDiCaL `reduceopt` value `0`).
+	Percent = 0,
+	/// Square-root-based reduction target (CaDiCaL `reduceopt` value `1`).
+	Sqrt = 1,
+	/// Logarithmic reduction target (CaDiCaL `reduceopt` value `2`).
+	Log = 2,
+}
+
 impl Lowerer {
 	/// The default value when [`conditioning`](Lowerer::conditioning) is not
 	/// explicitly set.
@@ -247,12 +273,22 @@ impl Lowerer {
 	/// The default value when [`preprocessing`](Lowerer::preprocessing) is not
 	/// explicitly set.
 	pub const DEFAULT_PREPROCESSING: usize = 0;
+	/// The default value when
+	/// [`preprocessing_light`](Lowerer::preprocessing_light) is not explicitly
+	/// set.
+	pub const DEFAULT_PREPROCESSING_LIGHT: bool = false;
 	/// The default value when [`probing`](Lowerer::probing) is not explicitly
 	/// set.
 	pub const DEFAULT_PROBING: bool = false;
 	/// The default value when [`reason_eager`](Lowerer::reason_eager) is not
 	/// explicitly set.
 	pub const DEFAULT_REASON_EAGER: bool = false;
+	/// The default value when [`reduce_interval`](Lowerer::reduce_interval) is
+	/// not explicitly set.
+	pub const DEFAULT_REDUCE_INTERVAL: usize = 100;
+	/// The default value when [`reduce_type`](Lowerer::reduce_type) is not
+	/// explicitly set.
+	pub const DEFAULT_REDUCE_TYPE: ReduceType = ReduceType::Sqrt;
 	/// The default value when [`restart`](Lowerer::restart) is not explicitly
 	/// set.
 	pub const DEFAULT_RESTART: bool = false;
@@ -305,7 +341,10 @@ impl<State: lowerer::State> Lowerer<Result<FlatZincLowerData, FlatZincError>, St
 			inprocessing: complete.inprocessing,
 			int_eager_limit: complete.int_eager_limit,
 			preprocessing: complete.preprocessing,
+			preprocessing_light: complete.preprocessing_light,
 			probing: complete.probing,
+			reduce_interval: complete.reduce_interval,
+			reduce_type: complete.reduce_type,
 			restart: complete.restart,
 			subsumption: complete.subsumption,
 			reason_eager: complete.reason_eager,
@@ -358,7 +397,10 @@ impl LowererComplete<&mut Model> {
 			inprocessing,
 			int_eager_limit,
 			preprocessing,
+			preprocessing_light,
 			probing,
+			reduce_interval,
+			reduce_type,
 			restart,
 			subsumption,
 			reason_eager,
@@ -375,7 +417,10 @@ impl LowererComplete<&mut Model> {
 			r.set_option("exteagerreasons", reason_eager as i32);
 			r.set_option("inprocessing", inprocessing as i32);
 			r.set_limit("preprocessing", preprocessing as i32);
+			r.set_option("preprocesslight", preprocessing_light as i32);
 			r.set_option("probe", probing as i32);
+			r.set_option("reduceint", reduce_interval as i32);
+			r.set_option("reduceopt", reduce_type as i32);
 			r.set_option("subsume", subsumption as i32);
 			r.set_option("vivify", vivification as i32);
 

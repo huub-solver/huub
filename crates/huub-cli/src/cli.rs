@@ -12,10 +12,10 @@ use std::{
 
 use anstream::AutoStream;
 use clap::{
-	ArgAction, ColorChoice, Parser, ValueEnum,
+	ArgAction, Args, ColorChoice, Parser, ValueEnum,
 	builder::{BoolishValueParser, StyledStr, styling::Styles},
 };
-use huub::lower::Lowerer;
+use huub::lower::{Lowerer, ReduceType};
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
 
 /// Long description for the command-line interface.
@@ -34,6 +34,55 @@ const CLI_SECTION_INIT: &str = "Initialization Options";
 const CLI_SECTION_PROCESSING: &str = "Preprocessing/Inprocessing Options";
 /// Help heading used for search flags.
 const CLI_SECTION_SEARCH: &str = "Search Options";
+
+/// CaDiCaL-specific solver options.
+///
+/// These options configure preprocessing and inprocessing behaviour of the
+/// CaDiCaL SAT solver. They have no effect when a different SAT backend is
+/// used.
+#[derive(Args, Debug)]
+pub(crate) struct CadicalOptions {
+	/// Control globally blocked clause elimination (conditioning).
+	#[arg(long = "cadical-conditioning", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_CONDITIONING, help_heading = CLI_SECTION_PROCESSING)]
+	pub(crate) conditioning: bool,
+	/// Control SAT inprocessing during search.
+	#[arg(long = "cadical-inprocessing", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_INPROCESSING, help_heading = CLI_SECTION_PROCESSING)]
+	pub(crate) inprocessing: bool,
+	/// Run the given number of SAT preprocessing rounds before search.
+	#[arg(
+		long = "cadical-preprocessing",
+		value_name = "usize",
+		default_value_t = Lowerer::DEFAULT_PREPROCESSING,
+		help_heading = CLI_SECTION_PROCESSING
+	)]
+	pub(crate) preprocessing: usize,
+	/// Whether to enable CaDiCaL's light preprocessing.
+	#[arg(long = "cadical-preprocessing-light", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_PREPROCESSING_LIGHT, help_heading = CLI_SECTION_PROCESSING)]
+	pub(crate) preprocessing_light: bool,
+	/// Control failed-literal probing in the SAT solver.
+	#[arg(long = "cadical-probing", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_PROBING, help_heading = CLI_SECTION_PROCESSING)]
+	pub(crate) probing: bool,
+	/// Request explanation clauses for all literals propagated at the conflict
+	/// level.
+	#[arg(long = "cadical-reason-eager", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_REASON_EAGER, help_heading = CLI_SECTION_PROCESSING)]
+	pub(crate) reason_eager: bool,
+	/// Set the interval (in conflicts) between clause-database reductions.
+	#[arg(long = "cadical-reduce-interval", value_name = "usize", default_value_t = Lowerer::DEFAULT_REDUCE_INTERVAL, help_heading = CLI_SECTION_PROCESSING)]
+	pub(crate) reduce_interval: usize,
+	/// Set the function used to compute the target size of the learned clause
+	/// database when it is reduced.
+	#[arg(long = "cadical-reduce-type", value_enum, value_name = "type", default_value_t = CliReduceType::Sqrt, help_heading = CLI_SECTION_PROCESSING)]
+	pub(crate) reduce_type: CliReduceType,
+	/// Control global forward subsumption in the SAT solver.
+	#[arg(long = "cadical-subsumption", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_SUBSUMPTION, help_heading = CLI_SECTION_PROCESSING)]
+	pub(crate) subsumption: bool,
+	/// Control bounded variable elimination in the SAT solver.
+	#[arg(long = "cadical-variable-elimination", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_VARIABLE_ELIMINATION, help_heading = CLI_SECTION_PROCESSING)]
+	pub(crate) variable_elimination: bool,
+	/// Control clause vivification.
+	#[arg(long = "cadical-vivify", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_VIVIFICATION, help_heading = CLI_SECTION_PROCESSING)]
+	pub(crate) vivification: bool,
+}
 
 /// FlatZinc command line interface for the Huub solver
 ///
@@ -133,36 +182,9 @@ pub struct Cli<'a> {
 	#[arg(long, default_value_t = 1, value_name = "u64", hide_default_value = true, required_if_eq_any = [("search_strategy", "transition"), ("search_strategy", "interleaved")], help_heading = CLI_SECTION_SEARCH)]
 	pub(crate) search_interval: u64,
 
-	/// Control globally blocked clause elimination (conditioning).
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_CONDITIONING, help_heading = CLI_SECTION_PROCESSING)]
-	pub(crate) conditioning: bool,
-	/// Control SAT inprocessing during search.
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_INPROCESSING, help_heading = CLI_SECTION_PROCESSING)]
-	pub(crate) inprocessing: bool,
-	/// Run the given number of SAT preprocessing rounds before search.
-	#[arg(
-		long,
-		value_name = "usize",
-		default_value_t = Lowerer::DEFAULT_PREPROCESSING,
-		help_heading = CLI_SECTION_PROCESSING
-	)]
-	pub(crate) preprocessing: usize,
-	/// Control failed-literal probing in the SAT solver.
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_PROBING, help_heading = CLI_SECTION_PROCESSING)]
-	pub(crate) probing: bool,
-	/// Request explanation clauses for all literals propagated at the conflict
-	/// level.
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_REASON_EAGER, help_heading = CLI_SECTION_PROCESSING)]
-	pub(crate) reason_eager: bool,
-	/// Control global forward subsumption in the SAT solver.
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_SUBSUMPTION, help_heading = CLI_SECTION_PROCESSING)]
-	pub(crate) subsumption: bool,
-	/// Control bounded variable elimination in the SAT solver.
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_VARIABLE_ELIMINATION, help_heading = CLI_SECTION_PROCESSING)]
-	pub(crate) variable_elimination: bool,
-	/// Control clause vivification.
-	#[arg(long = "vivify", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_VIVIFICATION, help_heading = CLI_SECTION_PROCESSING)]
-	pub(crate) vivification: bool,
+	/// CaDiCaL-specific solver options.
+	#[command(flatten)]
+	pub(crate) cadical: CadicalOptions,
 
 	// --- API options, not set through CLI ---
 	/// Output stream for (intermediate) solutions and statistics.
@@ -176,6 +198,17 @@ pub struct Cli<'a> {
 	/// Print version information.
 	#[arg(short = 'V', long = "version", action = clap::ArgAction::Version, hide = true)]
 	pub(crate) version: Option<bool>,
+}
+
+/// Clause-database reduction target functions exposed through the CLI.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum CliReduceType {
+	/// Percentage-based reduction target.
+	Prct,
+	/// Square-root-based reduction target.
+	Sqrt,
+	/// Logarithmic reduction target.
+	Log,
 }
 
 /// Search strategy options exposed through the CLI.
@@ -299,14 +332,7 @@ impl<'a> Cli<'a> {
 			search_strategy: self.search_strategy,
 			search_trigger: self.search_trigger,
 			search_interval: self.search_interval,
-			conditioning: self.conditioning,
-			inprocessing: self.inprocessing,
-			preprocessing: self.preprocessing,
-			probing: self.probing,
-			reason_eager: self.reason_eager,
-			subsumption: self.subsumption,
-			variable_elimination: self.variable_elimination,
-			vivification: self.vivification,
+			cadical: self.cadical,
 			log_file: self.log_file,
 			color: self.color,
 			stdout: Box::new(stdout),
@@ -359,17 +385,20 @@ impl Debug for Cli<'_> {
 			.field("search_strategy", &self.search_strategy)
 			.field("search_trigger", &self.search_trigger)
 			.field("search_interval", &self.search_interval)
-			.field("conditioning", &self.conditioning)
-			.field("inprocessing", &self.inprocessing)
-			.field("preprocessing", &self.preprocessing)
-			.field("probing", &self.probing)
-			.field("reason_eager", &self.reason_eager)
-			.field("subsumption", &self.subsumption)
-			.field("variable_elimination", &self.variable_elimination)
-			.field("vivification", &self.vivification)
+			.field("cadical", &self.cadical)
 			.field("log_file", &self.log_file)
 			.field("color", &self.color)
 			.finish_non_exhaustive()
+	}
+}
+
+impl From<CliReduceType> for ReduceType {
+	fn from(value: CliReduceType) -> Self {
+		match value {
+			CliReduceType::Prct => ReduceType::Percent,
+			CliReduceType::Sqrt => ReduceType::Sqrt,
+			CliReduceType::Log => ReduceType::Log,
+		}
 	}
 }
 
@@ -378,9 +407,9 @@ mod tests {
 	use std::{path::PathBuf, time::Duration};
 
 	use clap::ColorChoice;
-	use huub::lower::Lowerer;
+	use huub::lower::{Lowerer, ReduceType};
 
-	use crate::cli::Cli;
+	use crate::cli::{Cli, CliReduceType};
 
 	#[test]
 	fn bool_args() {
@@ -388,32 +417,32 @@ mod tests {
 			"huub",
 			"--restart",
 			"on",
-			"--conditioning",
+			"--cadical-conditioning",
 			"1",
-			"--inprocessing",
+			"--cadical-inprocessing",
 			"false",
-			"--reason-eager",
+			"--cadical-reason-eager",
 			"true",
-			"--probing",
+			"--cadical-probing",
 			"off",
-			"--variable-elimination",
+			"--cadical-variable-elimination",
 			"0",
-			"--vivify",
+			"--cadical-vivify",
 			"1",
-			"--subsumption",
+			"--cadical-subsumption",
 			"on",
 			"instance.fzn.json",
 		])
 		.unwrap();
 
 		assert!(cli.restart);
-		assert!(cli.conditioning);
-		assert!(!cli.inprocessing);
-		assert!(cli.reason_eager);
-		assert!(!cli.probing);
-		assert!(!cli.variable_elimination);
-		assert!(cli.vivification);
-		assert!(cli.subsumption);
+		assert!(cli.cadical.conditioning);
+		assert!(!cli.cadical.inprocessing);
+		assert!(cli.cadical.reason_eager);
+		assert!(!cli.cadical.probing);
+		assert!(!cli.cadical.variable_elimination);
+		assert!(cli.cadical.vivification);
+		assert!(cli.cadical.subsumption);
 
 		let err =
 			Cli::try_parse_from(["huub", "--restart", "maybe", "instance.fzn.json"]).unwrap_err();
@@ -466,22 +495,74 @@ mod tests {
 	}
 
 	#[test]
+	fn reduce_args() {
+		let cli = Cli::try_parse_from([
+			"huub",
+			"--cadical-reduce-type",
+			"prct",
+			"--cadical-reduce-interval",
+			"250",
+			"instance.fzn.json",
+		])
+		.unwrap();
+
+		assert_eq!(cli.cadical.reduce_type, CliReduceType::Prct);
+		assert_eq!(
+			ReduceType::from(cli.cadical.reduce_type),
+			ReduceType::Percent
+		);
+		assert_eq!(cli.cadical.reduce_interval, 250);
+
+		for (input, expected) in [
+			("prct", CliReduceType::Prct),
+			("sqrt", CliReduceType::Sqrt),
+			("log", CliReduceType::Log),
+		] {
+			let cli =
+				Cli::try_parse_from(["huub", "--cadical-reduce-type", input, "instance.fzn.json"])
+					.unwrap();
+			assert_eq!(cli.cadical.reduce_type, expected);
+		}
+
+		let err = Cli::try_parse_from([
+			"huub",
+			"--cadical-reduce-type",
+			"bogus",
+			"instance.fzn.json",
+		])
+		.unwrap_err();
+		assert!(err.to_string().contains("invalid value 'bogus'"));
+	}
+
+	#[test]
 	fn solver_backed_defaults() {
 		let cli = Cli::try_parse_from(["huub", "instance.fzn.json"]).unwrap();
 
 		assert_eq!(cli.int_eager_limit, Lowerer::DEFAULT_INT_EAGER_LIMIT);
 		assert_eq!(cli.restart, Lowerer::DEFAULT_RESTART);
-		assert_eq!(cli.conditioning, Lowerer::DEFAULT_CONDITIONING);
-		assert_eq!(cli.inprocessing, Lowerer::DEFAULT_INPROCESSING);
-		assert_eq!(cli.preprocessing, Lowerer::DEFAULT_PREPROCESSING);
-		assert_eq!(cli.probing, Lowerer::DEFAULT_PROBING);
-		assert_eq!(cli.reason_eager, Lowerer::DEFAULT_REASON_EAGER);
-		assert_eq!(cli.subsumption, Lowerer::DEFAULT_SUBSUMPTION);
+		assert_eq!(cli.cadical.conditioning, Lowerer::DEFAULT_CONDITIONING);
+		assert_eq!(cli.cadical.inprocessing, Lowerer::DEFAULT_INPROCESSING);
+		assert_eq!(cli.cadical.preprocessing, Lowerer::DEFAULT_PREPROCESSING);
 		assert_eq!(
-			cli.variable_elimination,
+			cli.cadical.preprocessing_light,
+			Lowerer::DEFAULT_PREPROCESSING_LIGHT
+		);
+		assert_eq!(cli.cadical.probing, Lowerer::DEFAULT_PROBING);
+		assert_eq!(cli.cadical.reason_eager, Lowerer::DEFAULT_REASON_EAGER);
+		assert_eq!(
+			cli.cadical.reduce_interval,
+			Lowerer::DEFAULT_REDUCE_INTERVAL
+		);
+		assert_eq!(
+			ReduceType::from(cli.cadical.reduce_type),
+			Lowerer::DEFAULT_REDUCE_TYPE
+		);
+		assert_eq!(cli.cadical.subsumption, Lowerer::DEFAULT_SUBSUMPTION);
+		assert_eq!(
+			cli.cadical.variable_elimination,
 			Lowerer::DEFAULT_VARIABLE_ELIMINATION
 		);
-		assert_eq!(cli.vivification, Lowerer::DEFAULT_VIVIFICATION);
+		assert_eq!(cli.cadical.vivification, Lowerer::DEFAULT_VIVIFICATION);
 	}
 
 	#[test]
