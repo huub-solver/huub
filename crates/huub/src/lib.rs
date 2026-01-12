@@ -982,7 +982,7 @@ impl IntDecision {
 
 		match self.0 {
 			Var(x) => BoolDecision(BoolDecisionInner::IntLess(x, v)),
-			Const(c) => (c <= v).into(),
+			Const(c) => (c < v).into(),
 			Linear(t, x) => match t.rev_transform_lit(IntLitMeaning::Less(v)) {
 				Ok(IntLitMeaning::GreaterEq(val)) => {
 					BoolDecision(BoolDecisionInner::IntGreaterEq(x, val))
