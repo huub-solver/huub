@@ -8,6 +8,7 @@ use itertools::{Itertools, MinMaxResult};
 use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Unsatisfiable};
 
 use crate::{
+	IntVal,
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, ReasoningEngine,
 		ReformulationActions,
@@ -18,9 +19,8 @@ use crate::{
 	},
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, BoolView, IntLitMeaning, IntView,
+		BoolView, IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel,
 	},
-	IntVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -403,8 +403,8 @@ mod tests {
 	use crate::{
 		constraints::int_pow::IntPowBounds,
 		solver::{
-			int_var::{EncodingType, IntVar},
 			Solver,
+			int_var::{EncodingType, IntVar},
 		},
 	};
 

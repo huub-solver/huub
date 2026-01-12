@@ -7,16 +7,18 @@ use std::{
 	ops::AddAssign,
 };
 
-use index_vec::{define_index_type, IndexVec};
+use index_vec::{IndexVec, define_index_type};
 use pindakaas::{
+	ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
 	propositional_logic::{Formula, TseitinEncoder},
 	solver::propagation::ExternalPropagation,
-	ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
 };
 use rangelist::IntervalIterator;
 use rustc_hash::FxHashSet;
 
 use crate::{
+	BoolDecision, BoolFormula, Clause, Decision, IntDecision, IntLitMeaning, IntSetVal, IntVal,
+	Model, Solver,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, ConstructionActions,
 		DecisionActions, InitActions, IntDecisionActions, IntInspectionActions, PropagationActions,
@@ -28,13 +30,11 @@ use crate::{
 	},
 	helpers::linear_transform::LinearTransform,
 	solver::{
+		BoolView, BoolViewInner, IntView, IntViewInner, View,
 		activation_list::{ActivationActionS, ActivationList},
 		int_var::{EncodingType, IntVar, IntVarRef},
 		trail::TrailedInt,
-		BoolView, BoolViewInner, IntView, IntViewInner, View,
 	},
-	BoolDecision, BoolFormula, Clause, Decision, IntDecision, IntLitMeaning, IntSetVal, IntVal,
-	Model, Solver,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -590,11 +590,7 @@ impl ReformulationMap {
 			Lit(l) => {
 				let idx = Into::<i32>::into(l.var()) as usize - 1;
 				let bv: BoolView = self.bool_map[idx];
-				if l.is_negated() {
-					!bv
-				} else {
-					bv
-				}
+				if l.is_negated() { !bv } else { bv }
 			}
 			Const(c) => c.into(),
 			IntEq(v, i) => int_lit(slv, v, IntLitMeaning::Eq(i)),

@@ -32,8 +32,8 @@ pub(crate) fn div_floor(a: IntVal, b: NonZeroIntVal) -> IntVal {
 #[cfg(test)]
 mod tests {
 	use crate::{
-		helpers::{div_ceil, div_floor},
 		NonZeroIntVal,
+		helpers::{div_ceil, div_floor},
 	};
 
 	#[test]

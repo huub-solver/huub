@@ -10,14 +10,14 @@ use std::{
 use pindakaas::{AsDynClauseDatabase, ClauseDatabase, Lit as RawLit, Unsatisfiable};
 
 use crate::{
+	BoolDecision, IntDecision, IntSetVal, IntVal,
 	branchers::BoxedBrancher,
 	constraints::{BoxedPropagator, Constraint, LazyReason, ReasonBuilder},
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, int_var::IntVarRef, queue::PriorityLevel, trail::TrailedInt,
-		BoolView, BoolViewInner, IntLitMeaning, IntView, View,
+		BoolView, BoolViewInner, IntLitMeaning, IntView, View, activation_list::IntPropCond,
+		int_var::IntVarRef, queue::PriorityLevel, trail::TrailedInt,
 	},
-	BoolDecision, IntDecision, IntSetVal, IntVal,
 };
 
 /// Actions available to [`Propagator`] implementations in
@@ -235,11 +235,7 @@ pub trait IntInspectionActions<Context: ?Sized>: IntOperations {
 	/// the current search decisions).
 	fn val(&self, ctx: &Context) -> Option<IntVal> {
 		let (lb, ub) = self.bounds(ctx);
-		if lb == ub {
-			Some(lb)
-		} else {
-			None
-		}
+		if lb == ub { Some(lb) } else { None }
 	}
 }
 

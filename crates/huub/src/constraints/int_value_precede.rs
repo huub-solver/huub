@@ -8,6 +8,7 @@ use std::{
 };
 
 use crate::{
+	Conjunction, IntVal,
 	actions::{
 		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions,
 		ReasoningEngine, ReformulationActions, TrailingActions,
@@ -17,10 +18,9 @@ use crate::{
 	},
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, IntLitMeaning,
-		IntView,
+		IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel,
+		trail::TrailedInt,
 	},
-	Conjunction, IntVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -481,23 +481,22 @@ impl<I> IntValuePrecedeChainValue<I> {
 					// A lower bound is explained by stating that all untracked values are excluded
 					// (< min value, > max value, all holes), as well as all values with smaller
 					// indices.
-					if let Some(lb) = self.lowest_index(ctx, i) {
-						if lb > j {
-							reason.push(
-								self.vars[i].lit(ctx, IntLitMeaning::GreaterEq(self.min_val)),
-							);
-							reason
-								.push(self.vars[i].lit(ctx, IntLitMeaning::Less(self.max_val + 1)));
-							reason.extend(
-								self.holes
-									.iter()
-									.map(|&h| self.vars[i].lit(ctx, IntLitMeaning::NotEq(h))),
-							);
-							reason.extend((0..j).map(|k| {
+					if let Some(lb) = self.lowest_index(ctx, i)
+						&& lb > j
+					{
+						reason.push(self.vars[i].lit(ctx, IntLitMeaning::GreaterEq(self.min_val)));
+						reason.push(self.vars[i].lit(ctx, IntLitMeaning::Less(self.max_val + 1)));
+						reason.extend(
+							self.holes
+								.iter()
+								.map(|&h| self.vars[i].lit(ctx, IntLitMeaning::NotEq(h))),
+						);
+						reason.extend(
+							(0..j).map(|k| {
 								self.vars[i].lit(ctx, IntLitMeaning::NotEq(self.values[k]))
-							}));
-							break;
-						}
+							}),
+						);
+						break;
 					}
 					if self.vars[i].in_domain(ctx, self.values[j - 1]) {
 						i += 1;
@@ -560,11 +559,11 @@ impl<I> IntValuePrecedeChainValue<I> {
 				ctx.set_trailed_int(self.first_val[i], up as IntVal);
 			}
 			// The lower bound will be needed for the backward pass.
-			if let Some(lb) = self.lowest_index(ctx, i) {
-				if low < lb {
-					ctx.set_trailed_int(self.last[lb], i as IntVal);
-					low = lb;
-				}
+			if let Some(lb) = self.lowest_index(ctx, i)
+				&& low < lb
+			{
+				ctx.set_trailed_int(self.last[lb], i as IntVal);
+				low = lb;
 			}
 		}
 
@@ -1026,13 +1025,13 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
+		IntVal,
 		constraints::int_value_precede::{IntSeqPrecedeChainBounds, IntValuePrecedeChainValue},
 		solver::{
-			int_var::{EncodingType, IntVar},
 			Solver,
 			Value::{self, Int},
+			int_var::{EncodingType, IntVar},
 		},
-		IntVal,
 	};
 
 	#[test]

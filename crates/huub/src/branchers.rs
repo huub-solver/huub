@@ -5,15 +5,15 @@ use std::fmt::Debug;
 use pindakaas::Lit as RawLit;
 
 use crate::{
+	ValueSelection, VariableSelection,
 	actions::{
 		BoolInspectionActions, BrancherInitActions, DecisionActions, IntDecisionActions,
 		IntInspectionActions,
 	},
 	solver::{
-		solving_context::SolvingContext, trail::TrailedInt, BoolView, BoolViewInner, IntLitMeaning,
-		IntView, IntViewInner, View,
+		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, View,
+		solving_context::SolvingContext, trail::TrailedInt,
 	},
-	ValueSelection, VariableSelection,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]

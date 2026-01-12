@@ -8,16 +8,16 @@ use std::{
 
 use itertools::Itertools;
 use pindakaas::{
-	solver::propagation::ExternalPropagation, ClauseDatabaseTools, Lit as RawLit, Var as RawVar,
-	VarRange,
+	ClauseDatabaseTools, Lit as RawLit, Var as RawVar, VarRange,
+	solver::propagation::ExternalPropagation,
 };
 use rangelist::{IntervalIterator, RangeList};
 use rustc_hash::FxHashMap;
 
 use crate::{
-	actions::{BoolInspectionActions, TrailingActions},
-	solver::{trail::TrailedInt, BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner},
 	IntSetVal, IntVal, LinearTransform, NonZeroIntVal, Solver,
+	actions::{BoolInspectionActions, TrailingActions},
+	solver::{BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, trail::TrailedInt},
 };
 
 /// An entry in the [`DirectStorage`] that can be used to access the
@@ -620,11 +620,7 @@ impl IntVar {
 	pub(crate) fn lit_meaning(&self, lit: RawLit) -> IntLitMeaning {
 		let var = lit.var();
 		let ret = |l: IntLitMeaning| {
-			if lit.is_negated() {
-				!l
-			} else {
-				l
-			}
+			if lit.is_negated() { !l } else { l }
 		};
 
 		let OrderStorage::Eager { storage, .. } = &self.order_encoding else {
@@ -789,7 +785,7 @@ impl IntVar {
 					slv.oracle.add_clause([!eq_i, !ord_i]).unwrap(); // x=i -> x≥i
 					slv.oracle.add_clause([!eq_i, ord_j]).unwrap(); // x=i -> x<(i+n)
 					slv.oracle.add_clause([eq_i, ord_i, !ord_j]).unwrap(); // x≠i -> (x<i \/
-					                                        // x≥(i+n))
+					// x≥(i+n))
 				}
 			}
 			debug_assert!(direct_enc_iter.next().is_none());
@@ -1376,12 +1372,12 @@ mod tests {
 	use rangelist::RangeList;
 
 	use crate::{
+		Solver,
 		actions::{IntDecisionActions, IntInspectionActions},
 		solver::{
-			int_var::{EncodingType, IntVar, IntVarRef},
 			BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner,
+			int_var::{EncodingType, IntVar, IntVarRef},
 		},
-		Solver,
 	};
 
 	fn assert_eager_lits_eq(
@@ -1395,7 +1391,7 @@ mod tests {
 			assert_eq!(out, expected, "given {req:?}");
 			let out = iv.lit(req, |_| panic!("all literals should be eagerly created"));
 			assert_eq!(out, expected, "given {req:?}");
-			if let BoolViewInner::Lit(l) = out.0 .0 {
+			if let BoolViewInner::Lit(l) = out.0.0 {
 				assert_eq!(iv.lit_meaning(l), expected.1);
 			}
 		}

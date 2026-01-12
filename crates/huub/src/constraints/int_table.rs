@@ -7,6 +7,7 @@ use std::mem;
 use itertools::Itertools;
 
 use crate::{
+	IntDecision, IntVal,
 	actions::{
 		InitActions, IntDecisionActions, IntInitActions, IntInspectionActions,
 		IntPropagationActions, IntSimplificationActions, PropagationActions, ReasoningEngine,
@@ -14,8 +15,7 @@ use crate::{
 	},
 	constraints::{Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView},
 	reformulate::ReformulationError,
-	solver::{activation_list::IntPropCond, queue::PriorityLevel, BoolView, IntLitMeaning},
-	IntDecision, IntVal,
+	solver::{BoolView, IntLitMeaning, activation_list::IntPropCond, queue::PriorityLevel},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -162,7 +162,7 @@ mod tests {
 	use expect_test::expect;
 	use itertools::Itertools;
 
-	use crate::{reformulate::InitConfig, table_int, Decision, Model};
+	use crate::{Decision, Model, reformulate::InitConfig, table_int};
 
 	#[test]
 	fn test_binary_table_sat() {

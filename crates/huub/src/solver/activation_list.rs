@@ -9,8 +9,8 @@ use std::{
 use itertools::Itertools;
 
 use crate::{
-	solver::engine::{Advisor, PropRef},
 	ConRef, ModAdvisor,
+	solver::engine::{Advisor, PropRef},
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -173,7 +173,10 @@ impl ActivationList {
 	where
 		ActivationAction<A, P>: Into<ActivationActionS>,
 	{
-		assert!(self.activations.len() < u32::MAX as usize, "Unable to add more than u32::MAX propagators to the activation list of a single variable.");
+		assert!(
+			self.activations.len() < u32::MAX as usize,
+			"Unable to add more than u32::MAX propagators to the activation list of a single variable."
+		);
 		let mut action = action.into();
 		let mut cond_swap = |idx: u32| {
 			let idx = idx as usize;

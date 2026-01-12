@@ -7,11 +7,12 @@ use std::ops::AddAssign;
 
 use itertools::{Either, Itertools};
 use pindakaas::{
-	bool_linear::{BoolLinAggregator, BoolLinExp, BoolLinVariant, BoolLinear},
 	Lit as RawLit, Unsatisfiable,
+	bool_linear::{BoolLinAggregator, BoolLinExp, BoolLinVariant, BoolLinear},
 };
 
 use crate::{
+	BoolDecision, BoolFormula, Conjunction, IntDecision, IntVal, LinearTransform, NonZeroIntVal,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
 		ConstructionActions, InitActions, IntDecisionActions, IntInitActions, IntInspectionActions,
@@ -25,12 +26,11 @@ use crate::{
 	helpers::opt_field::OptField,
 	reformulate::ReformulationError,
 	solver::{
+		BoolView, BoolViewInner, IntView, IntViewInner,
 		activation_list::{IntEvent, IntPropCond},
 		queue::PriorityLevel,
 		trail::TrailedInt,
-		BoolView, BoolViewInner, IntView, IntViewInner,
 	},
-	BoolDecision, BoolFormula, Conjunction, IntDecision, IntVal, LinearTransform, NonZeroIntVal,
 };
 
 /// Representation of an integer equality constraint that cannot be unified.
@@ -672,10 +672,10 @@ where
 	#[tracing::instrument(name = "int_lin_le", level = "trace", skip(self, ctx))]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// If the reified variable is false, skip propagation
-		if let Some(r) = self.reification.get() {
-			if !r.val(ctx).unwrap_or(true) {
-				return Ok(());
-			}
+		if let Some(r) = self.reification.get()
+			&& !r.val(ctx).unwrap_or(true)
+		{
+			return Ok(());
 		}
 
 		// get the difference between the right-hand-side value and the sum of variable
@@ -729,7 +729,7 @@ impl IntLinearLessEqImpBounds<IntView, RawLit> {
 		let reification = match reification.0 {
 			BoolViewInner::Lit(r) => r,
 			BoolViewInner::Const(true) => {
-				return IntLinearLessEqBounds::<IntView>::post(solver, vars, max)
+				return IntLinearLessEqBounds::<IntView>::post(solver, vars, max);
 			}
 			BoolViewInner::Const(false) => return,
 		};
@@ -768,7 +768,7 @@ impl IntLinearNotEqImpValue<IntView, RawLit> {
 		let reification = match reification.0 {
 			BoolViewInner::Lit(r) => r,
 			BoolViewInner::Const(true) => {
-				return IntLinearNotEqValue::post(solver, vars, violation)
+				return IntLinearNotEqValue::post(solver, vars, violation);
 			}
 			BoolViewInner::Const(false) => return,
 		};
@@ -858,10 +858,10 @@ impl<const R: usize, IV, BV> IntLinearNotEqValueImpl<R, IV, BV> {
 					}
 				})
 				.collect();
-			if let Some(r) = self.reification.get() {
-				if data != self.terms.len() {
-					conj.push(r.clone().into());
-				}
+			if let Some(r) = self.reification.get()
+				&& data != self.terms.len()
+			{
+				conj.push(r.clone().into());
 			}
 			conj
 		}
@@ -948,13 +948,13 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
+		BoolDecision, Model, NonZeroIntVal,
 		constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
 		reformulate::InitConfig,
 		solver::{
-			int_var::{EncodingType, IntVar},
 			Solver,
+			int_var::{EncodingType, IntVar},
 		},
-		BoolDecision, Model, NonZeroIntVal,
 	};
 
 	#[test]

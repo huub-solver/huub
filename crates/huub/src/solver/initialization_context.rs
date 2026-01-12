@@ -5,17 +5,17 @@
 use pindakaas::{Lit as RawLit, Var as RawVar};
 
 use crate::{
+	IntVal,
 	actions::{
 		BoolInitActions, BoolInspectionActions, InitActions, IntInitActions, IntInspectionActions,
 	},
 	solver::{
+		BoolView, BoolViewInner, IntView, IntViewInner,
 		activation_list::{ActivationAction, IntPropCond},
 		engine::{AdvisorDef, PropRef, State},
 		int_var::IntVarRef,
 		queue::PriorityLevel,
-		BoolView, BoolViewInner, IntView, IntViewInner,
 	},
-	IntVal,
 };
 
 #[derive(Debug)]

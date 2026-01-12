@@ -22,19 +22,20 @@ use std::{
 use flatzinc_serde::FlatZinc;
 use itertools::Itertools;
 use pindakaas::{
-	solver::{
-		cadical::Cadical,
-		propagation::{ExternalPropagation, SolvingActions},
-		Assumptions, FailedAssumptions, LearnCallback, SolveResult as SatSolveResult, TermSignal,
-		TerminateCallback,
-	},
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
 	Valuation as SatValuation,
+	solver::{
+		Assumptions, FailedAssumptions, LearnCallback, SolveResult as SatSolveResult, TermSignal,
+		TerminateCallback,
+		cadical::Cadical,
+		propagation::{ExternalPropagation, SolvingActions},
+	},
 };
 use rangelist::RangeList;
 use tracing::debug;
 
 use crate::{
+	Clause, IntSetVal, IntVal, LinearTransform, Model, NonZeroIntVal,
 	actions::{
 		BoolInspectionActions, BoolPropagationActions, BrancherInitActions, ConstructionActions,
 		DecisionActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
@@ -52,7 +53,6 @@ use crate::{
 		solving_context::SolvingContext,
 		trail::TrailedInt,
 	},
-	Clause, IntSetVal, IntVal, LinearTransform, Model, NonZeroIntVal,
 };
 
 /// Trait implemented by the object given to the callback on detecting failure
@@ -651,11 +651,7 @@ where
 					IntLitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
 					_ => unreachable!(),
 				});
-				if negated {
-					!bv
-				} else {
-					bv
-				}
+				if negated { !bv } else { bv }
 			}
 		}
 	}
@@ -1439,7 +1435,7 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 						ret(self, Unknown, None)
 					} else {
 						ret(self, Satisfied, obj_curr)
-					}
+					};
 				}
 				Complete => unreachable!(),
 			}

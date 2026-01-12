@@ -15,8 +15,8 @@ use std::{
 
 use rustc_hash::FxHashSet;
 use serde::{
-	de::{Error, Visitor},
 	Deserialize, Deserializer, Serialize, Serializer,
+	de::{Error, Visitor},
 };
 
 /// Central [`Interner`] used in the entire application.
@@ -188,7 +188,7 @@ mod tests {
 
 	use rustc_hash::FxHasher;
 
-	use crate::interned_str::{InternedStr, INTERNER};
+	use crate::interned_str::{INTERNER, InternedStr};
 
 	#[test]
 	fn copy() {

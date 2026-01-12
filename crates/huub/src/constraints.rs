@@ -30,6 +30,7 @@ use pindakaas::Lit as RawLit;
 use tracing::warn;
 
 use crate::{
+	BoolDecision, Conjunction, IntDecision, Model,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
 		IntExplanationActions, IntInitActions, IntInspectionActions, IntPropagationActions,
@@ -37,11 +38,10 @@ use crate::{
 	},
 	reformulate::ReformulationError,
 	solver::{
+		BoolView, BoolViewInner,
 		activation_list::IntEvent,
 		engine::{Engine, PropRef, State},
-		BoolView, BoolViewInner,
 	},
-	BoolDecision, Conjunction, IntDecision, Model,
 };
 
 /// Type alias to represent a user [`Constraint`], stored in a [`Box`], that is
@@ -379,7 +379,9 @@ impl Conflict<RawLit> {
 					reason: Reason::Simple(!subject),
 				},
 				None => {
-					warn!("Empty conflict detected. This suggests additional reasoning might be possible during Model simplification.");
+					warn!(
+						"Empty conflict detected. This suggests additional reasoning might be possible during Model simplification."
+					);
 					Self {
 						subject: None,
 						reason: Reason::Eager(Box::new([])),

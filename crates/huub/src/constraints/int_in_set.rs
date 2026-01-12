@@ -8,6 +8,7 @@ use pindakaas::propositional_logic::Formula;
 use rangelist::IntervalIterator;
 
 use crate::{
+	BoolDecision, IntDecision, IntSetVal,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
 		InitActions, IntInspectionActions, IntSimplificationActions, ReasoningEngine,
@@ -18,7 +19,6 @@ use crate::{
 	},
 	reformulate::ReformulationError,
 	solver::queue::PriorityLevel,
-	BoolDecision, IntDecision, IntSetVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

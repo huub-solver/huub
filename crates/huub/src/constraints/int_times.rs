@@ -5,14 +5,14 @@
 use std::ops::{AddAssign, Mul};
 
 use crate::{
+	IntDecision, IntVal, NonZeroIntVal,
 	actions::{InitActions, IntSimplificationActions, ReasoningEngine, ReformulationActions},
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
 	},
 	helpers::{div_ceil, div_floor},
 	reformulate::ReformulationError,
-	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntView},
-	IntDecision, IntVal, NonZeroIntVal,
+	solver::{IntView, activation_list::IntPropCond, queue::PriorityLevel},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -195,8 +195,8 @@ mod tests {
 	use crate::{
 		constraints::int_times::IntTimesBounds,
 		solver::{
-			int_var::{EncodingType, IntVar},
 			Solver,
+			int_var::{EncodingType, IntVar},
 		},
 	};
 

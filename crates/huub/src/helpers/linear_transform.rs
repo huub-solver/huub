@@ -2,7 +2,7 @@
 
 use std::ops::{Add, Mul, Neg, RangeInclusive, Sub};
 
-use crate::{helpers::div_ceil, solver::IntLitMeaning, IntSetVal, IntVal, NonZeroIntVal};
+use crate::{IntSetVal, IntVal, NonZeroIntVal, helpers::div_ceil, solver::IntLitMeaning};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// An integer linear transformation of a discrete value.

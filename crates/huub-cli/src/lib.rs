@@ -31,19 +31,19 @@ use std::{
 	num::NonZeroI32,
 	path::PathBuf,
 	sync::{
-		atomic::{AtomicBool, Ordering},
 		Arc, Mutex,
+		atomic::{AtomicBool, Ordering},
 	},
 	time::{Duration, Instant},
 };
 
 use flatzinc_serde::{FlatZinc, Literal, Method};
 use huub::{
+	TermSignal,
 	actions::IntDecisionActions,
 	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::{InitConfig, ReformulationError},
 	solver::{Goal, IntLitMeaning, SolveResult, Solver, Valuation, Value, View},
-	TermSignal,
 };
 use mimalloc::MiMalloc;
 use pico_args::Arguments;
@@ -289,10 +289,11 @@ where
 									lit_map.insert(lit, LitName::IntLit(i, meaning));
 								}
 							} else {
-								debug_assert!(iv
-									.lit_reverse_map_info(&slv)
-									.iter()
-									.all(|(lit, _)| { lit_map.contains_key(lit) }));
+								debug_assert!(
+									iv.lit_reverse_map_info(&slv)
+										.iter()
+										.all(|(lit, _)| { lit_map.contains_key(lit) })
+								);
 							}
 						} else {
 							debug_assert!(is_view);
@@ -408,7 +409,9 @@ where
 		let (res, stats) = match goal {
 			Some((goal, obj)) => {
 				if self.all_solutions {
-					warn!("--all-solutions is ignored when optimizing, use --intermediate-solutions or --all-optimal instead");
+					warn!(
+						"--all-solutions is ignored when optimizing, use --intermediate-solutions or --all-optimal instead"
+					);
 				}
 				let mut no_good_vals = vec![
 					Value::Bool(false);

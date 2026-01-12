@@ -7,6 +7,7 @@ use itertools::Itertools;
 use tracing::trace;
 
 use crate::{
+	Conjunction, IntDecision, IntVal,
 	actions::{
 		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions,
 		PropagationActions, ReasoningEngine, ReformulationActions, TrailingActions,
@@ -17,10 +18,9 @@ use crate::{
 	},
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, IntLitMeaning,
-		IntView,
+		IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel,
+		trail::TrailedInt,
 	},
-	Conjunction, IntDecision, IntVal,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -994,25 +994,25 @@ impl<I> DisjunctiveStrictPropagator<I> {
 
 		// Update the latest completion time for each task
 		for (i, v) in self.start_times.iter().enumerate() {
-			if let Some(binding_task) = binding_tasks[i] {
-				if updated_lct[i] < self.latest_completion_time(ctx, i) {
-					let lb = self.earliest_start_time(ctx, binding_task);
-					trace!(
-						task = i,
-						window =? (lb, updated_lct[i]),
-						"not last propagation"
-					);
-					ctx.set_trailed_int(self.trailed_info[i].earliest_start, lb);
+			if let Some(binding_task) = binding_tasks[i]
+				&& updated_lct[i] < self.latest_completion_time(ctx, i)
+			{
+				let lb = self.earliest_start_time(ctx, binding_task);
+				trace!(
+					task = i,
+					window =? (lb, updated_lct[i]),
+					"not last propagation"
+				);
+				ctx.set_trailed_int(self.trailed_info[i].earliest_start, lb);
 
-					ctx.set_trailed_int(self.trailed_info[i].latest_completion, updated_lct[i]);
-					let data = self.data_for_explanation(i, DisjunctivePropagationRule::NotLast);
-					v.set_upper_bound(
-						ctx,
-						updated_lct[i] - self.durations[i],
-						ctx.deferred_reason(data),
-					)?;
-					propagated = true;
-				}
+				ctx.set_trailed_int(self.trailed_info[i].latest_completion, updated_lct[i]);
+				let data = self.data_for_explanation(i, DisjunctivePropagationRule::NotLast);
+				v.set_upper_bound(
+					ctx,
+					updated_lct[i] - self.durations[i],
+					ctx.deferred_reason(data),
+				)?;
+				propagated = true;
 			}
 		}
 		trace!(propagated, "not last propagation completed");
@@ -1460,9 +1460,9 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
+		Solver,
 		constraints::disjunctive_strict::DisjunctiveStrictPropagator,
 		solver::int_var::{EncodingType, IntVar},
-		Solver,
 	};
 
 	#[test]

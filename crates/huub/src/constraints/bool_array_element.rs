@@ -5,14 +5,14 @@
 use std::iter::once;
 
 use crate::{
+	BoolDecision, IntDecision, IntVal,
 	actions::{
 		BoolInitActions, BoolSimplificationActions, IntDecisionActions, IntInitActions,
 		IntInspectionActions, IntPropagationActions, ReasoningEngine, ReformulationActions,
 	},
 	constraints::{Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus},
 	reformulate::ReformulationError,
-	solver::{activation_list::IntPropCond, IntLitMeaning},
-	BoolDecision, IntDecision, IntVal,
+	solver::{IntLitMeaning, activation_list::IntPropCond},
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]

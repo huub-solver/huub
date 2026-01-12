@@ -10,6 +10,7 @@ use std::{
 use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Unsatisfiable};
 
 use crate::{
+	BoolDecision, BoolFormula, IntDecision, NonZeroIntVal,
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, IntPropagationActions,
 		ReasoningEngine, ReformulationActions, SimplificationActions,
@@ -21,9 +22,8 @@ use crate::{
 	helpers::div_ceil,
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, BoolView, IntLitMeaning, IntView,
+		BoolView, IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel,
 	},
-	BoolDecision, BoolFormula, IntDecision, NonZeroIntVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -346,13 +346,13 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
+		Model,
 		constraints::int_div::IntDivBounds,
 		div_int,
 		solver::{
-			int_var::{EncodingType, IntVar},
 			Solver,
+			int_var::{EncodingType, IntVar},
 		},
-		Model,
 	};
 
 	#[test]

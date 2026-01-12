@@ -79,20 +79,20 @@ use std::{
 	any::Any,
 	fmt::{Debug, Display},
 	hash::Hash,
-	iter::{repeat_n, repeat_with, Sum},
+	iter::{Sum, repeat_n, repeat_with},
 	mem,
 	num::{NonZeroI32, NonZeroI64},
 	ops::{Add, AddAssign, Deref, Mul, Neg, Not, Sub},
 };
 
 use flatzinc_serde::FlatZinc;
-use index_vec::{index_vec, IndexVec};
+use index_vec::{IndexVec, index_vec};
 use itertools::Itertools;
 pub use pindakaas::solver::TermSignal;
 use pindakaas::{
+	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit as RawLit, Unsatisfiable, Var as RawVar,
 	propositional_logic::Formula,
 	solver::{cadical::Cadical, propagation::ExternalPropagation},
-	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit as RawLit, Unsatisfiable, Var as RawVar,
 };
 use rangelist::{IntervalIterator, RangeList};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -108,6 +108,8 @@ use crate::{
 	},
 	branchers::{BoolBrancher, IntBrancher, WarmStartBrancher},
 	constraints::{
+		BoxedConstraint, Conflict, Constraint, LazyReason, Reason, ReasonBuilder,
+		SimplificationStatus,
 		bool_array_element::BoolDecisionArrayElement,
 		cumulative::CumulativeTimeTable,
 		disjunctive_strict::{DisjunctiveStrict, DisjunctiveStrictPropagator},
@@ -122,8 +124,6 @@ use crate::{
 		int_table::IntTable,
 		int_times::IntTimesBounds,
 		int_value_precede::{IntSeqPrecedeChainBounds, IntValuePrecedeChainValue},
-		BoxedConstraint, Conflict, Constraint, LazyReason, Reason, ReasonBuilder,
-		SimplificationStatus,
 	},
 	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
 	helpers::linear_transform::LinearTransform,
@@ -133,10 +133,10 @@ use crate::{
 		ReformulationMapBuilder,
 	},
 	solver::{
+		IntLitMeaning, Solver,
 		activation_list::{ActivationAction, ActivationActionS, IntEvent, IntPropCond},
 		queue::{PriorityLevel, PropagatorInfo, PropagatorQueue},
 		trail::TrailedInt,
-		IntLitMeaning, Solver,
 	},
 };
 

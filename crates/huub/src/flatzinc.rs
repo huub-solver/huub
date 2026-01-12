@@ -22,7 +22,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::warn;
 
 use crate::{
-	abs_int,
+	BoolDecision, BoolDecisionInner, Branching, Decision, IntDecision, IntLinExpr, IntSetVal,
+	IntVal, Model, NonZeroIntVal, ValueSelection, VariableSelection, abs_int,
 	actions::{
 		BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions,
 		PropagationActions,
@@ -30,9 +31,7 @@ use crate::{
 	all_different_int, array_element, array_maximum_int, array_minimum_int, cumulative,
 	disjunctive_strict, div_int, int_in_set_reif, pow_int,
 	reformulate::ReformulationError,
-	seq_precede_chain_int, table_int, times_int, value_precede_chain_int, BoolDecision,
-	BoolDecisionInner, Branching, Decision, IntDecision, IntLinExpr, IntSetVal, IntVal, Model,
-	NonZeroIntVal, ValueSelection, VariableSelection,
+	seq_precede_chain_int, table_int, times_int, value_precede_chain_int,
 };
 
 /// Domain assumed for integer decision variables that do not have a domain
@@ -389,11 +388,11 @@ where
 	/// annotations, marking it as used if found.
 	fn anns_contains(ann: &[Annotation<S>], ann_used: &mut [bool], ident: &str) -> bool {
 		for (i, a) in ann.iter().enumerate() {
-			if let Annotation::Atom(x) = a {
-				if x.deref() == ident {
-					ann_used[i] = true;
-					return true;
-				}
+			if let Annotation::Atom(x) = a
+				&& x.deref() == ident
+			{
+				ann_used[i] = true;
+				return true;
 			}
 		}
 		false
@@ -643,26 +642,28 @@ where
 			me.processed[con] = true;
 			Ok(())
 		};
-		let arg_bool_view = |me: &mut Self,
-		                     arg: &Argument<S>|
-		 -> Result<BoolDecision, FlatZincError> {
-			if let Argument::Literal(Literal::Identifier(x)) = arg {
-				if !me.map.contains_key(x) && defined_by.contains_key(x) && defined_by[x] != con {
+		let arg_bool_view =
+			|me: &mut Self, arg: &Argument<S>| -> Result<BoolDecision, FlatZincError> {
+				if let Argument::Literal(Literal::Identifier(x)) = arg
+					&& !me.map.contains_key(x)
+					&& defined_by.contains_key(x)
+					&& defined_by[x] != con
+				{
 					me.extract_view(defined_by, defined_by[x])?;
 				}
-			}
-			me.arg_bool(arg)
-		};
-		let lit_int_view = |me: &mut Self,
-		                    lit: &Literal<S>|
-		 -> Result<IntDecision, FlatZincError> {
-			if let Literal::Identifier(x) = lit {
-				if !me.map.contains_key(x) && defined_by.contains_key(x) && defined_by[x] != con {
+				me.arg_bool(arg)
+			};
+		let lit_int_view =
+			|me: &mut Self, lit: &Literal<S>| -> Result<IntDecision, FlatZincError> {
+				if let Literal::Identifier(x) = lit
+					&& !me.map.contains_key(x)
+					&& defined_by.contains_key(x)
+					&& defined_by[x] != con
+				{
 					me.extract_view(defined_by, defined_by[x])?;
 				}
-			}
-			me.lit_int(lit)
-		};
+				me.lit_int(lit)
+			};
 
 		match c.id.deref() {
 			"bool2int" => {
@@ -680,31 +681,51 @@ where
 				_ => {}
 			},
 			"int_eq_reif" => match c.args.as_slice() {
-				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
-				| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))] =>
-				{
+				[
+					Argument::Literal(Literal::Int(i)),
+					Argument::Literal(x),
+					Argument::Literal(Literal::Identifier(r)),
+				]
+				| [
+					Argument::Literal(x),
+					Argument::Literal(Literal::Int(i)),
+					Argument::Literal(Literal::Identifier(r)),
+				] => {
 					let x = lit_int_view(self, x)?;
 					add_view(self, r.clone(), x.eq(*i).into())?;
 				}
 				_ => {}
 			},
 			"int_le_reif" => match c.args.as_slice() {
-				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))] =>
-				{
+				[
+					Argument::Literal(Literal::Int(i)),
+					Argument::Literal(x),
+					Argument::Literal(Literal::Identifier(r)),
+				] => {
 					let x = lit_int_view(self, x)?;
 					add_view(self, r.clone(), x.geq(*i).into())?;
 				}
-				[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))] =>
-				{
+				[
+					Argument::Literal(x),
+					Argument::Literal(Literal::Int(i)),
+					Argument::Literal(Literal::Identifier(r)),
+				] => {
 					let x = lit_int_view(self, x)?;
 					add_view(self, r.clone(), x.leq(*i).into())?;
 				}
 				_ => {}
 			},
 			"int_ne_reif" => match c.args.as_slice() {
-				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
-				| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))] =>
-				{
+				[
+					Argument::Literal(Literal::Int(i)),
+					Argument::Literal(x),
+					Argument::Literal(Literal::Identifier(r)),
+				]
+				| [
+					Argument::Literal(x),
+					Argument::Literal(Literal::Int(i)),
+					Argument::Literal(Literal::Identifier(r)),
+				] => {
 					let x = lit_int_view(self, x)?;
 					add_view(self, r.clone(), x.ne(*i).into())?;
 				}
@@ -824,21 +845,21 @@ where
 				if let Some(var) = self.fzn.variables.get(ident) {
 					Ok(e.insert(match var.ty {
 						Type::Bool => Decision::Bool(self.prb.new_bool_var()),
-						Type::Int => {
-							match &var.domain {
-								Some(Domain::Int(r)) => Decision::Int(
-									self.prb.new_int_var(r.iter().collect::<IntSetVal>()),
-								),
-								Some(_) => unreachable!(),
-								None => {
-									warn!(
-										"decision variable `{}' was unbounded, assuming domain {}..{}",
-										ident, FULL_INT_DOMAIN.start(), FULL_INT_DOMAIN.end()
-									);
-									self.prb.new_int_var(FULL_INT_DOMAIN).into()
-								}
+						Type::Int => match &var.domain {
+							Some(Domain::Int(r)) => {
+								Decision::Int(self.prb.new_int_var(r.iter().collect::<IntSetVal>()))
 							}
-						}
+							Some(_) => unreachable!(),
+							None => {
+								warn!(
+									"decision variable `{}' was unbounded, assuming domain {}..{}",
+									ident,
+									FULL_INT_DOMAIN.start(),
+									FULL_INT_DOMAIN.end()
+								);
+								self.prb.new_int_var(FULL_INT_DOMAIN).into()
+							}
+						},
 						_ => todo!("Variables of {:?} are not yet supported", var.ty),
 					})
 					.clone())
@@ -1352,7 +1373,10 @@ where
 						if d.len() != (q * s) as usize {
 							return Err(FlatZincError::InvalidArgumentType {
 								expected: "array with an element for each combination of state and input value",
-								found: format!("array of size {}, for {q} states and {s} input values", d.len())
+								found: format!(
+									"array of size {}, for {q} states and {s} input values",
+									d.len()
+								),
 							});
 						}
 						let d: Vec<Vec<_>> = d
@@ -1387,7 +1411,11 @@ where
 						if args.is_empty() || (table.len() % args.len()) != 0 {
 							return Err(FlatZincError::InvalidArgumentType {
 								expected: "array of n integers, where n is divisible by the number of variables",
-								found: format!("array of {} integers, to give values to {} variables", table.len(), args.len()),
+								found: format!(
+									"array of {} integers, to give values to {} variables",
+									table.len(),
+									args.len()
+								),
 							});
 						}
 						if table.is_empty() {

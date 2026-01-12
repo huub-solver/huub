@@ -6,23 +6,23 @@
 use std::fmt::{self, Debug, Formatter};
 
 use index_vec::IndexVec;
-use pindakaas::{solver::propagation::SolvingActions, Lit as RawLit};
+use pindakaas::{Lit as RawLit, solver::propagation::SolvingActions};
 use tracing::trace;
 
 use crate::{
+	IntLitMeaning, IntVal,
 	actions::{
 		BoolInspectionActions, BoolPropagationActions, DecisionActions, IntDecisionActions,
 		IntInspectionActions, IntPropagationActions, PropagationActions, TrailingActions,
 	},
 	constraints::{Conflict, LazyReason, Reason, ReasonBuilder},
 	solver::{
+		BoolView, BoolViewInner, BoxedPropagator,
 		activation_list::IntEvent,
-		engine::{trace_new_lit, LitPropagation, PropRef, State},
+		engine::{LitPropagation, PropRef, State, trace_new_lit},
 		int_var::{IntVarRef, LazyLitDef},
 		trail::TrailedInt,
-		BoolView, BoolViewInner, BoxedPropagator,
 	},
-	IntLitMeaning, IntVal,
 };
 
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]

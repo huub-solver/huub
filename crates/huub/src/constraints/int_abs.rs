@@ -18,8 +18,8 @@ use crate::{
 	},
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, BoolView, BoolViewInner, IntLitMeaning,
-		IntView,
+		BoolView, BoolViewInner, IntLitMeaning, IntView, activation_list::IntPropCond,
+		queue::PriorityLevel,
 	},
 };
 
@@ -199,9 +199,9 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
+		Solver,
 		constraints::int_abs::IntAbsBounds,
 		solver::int_var::{EncodingType, IntVar},
-		Solver,
 	};
 
 	#[test]

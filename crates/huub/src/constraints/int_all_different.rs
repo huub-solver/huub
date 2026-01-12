@@ -7,6 +7,7 @@ use itertools::{Either, Itertools};
 use rangelist::RangeList;
 
 use crate::{
+	IntDecision, IntVal,
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, IntSimplificationActions,
 		ReasoningEngine, ReformulationActions,
@@ -16,11 +17,10 @@ use crate::{
 	},
 	reformulate::ReformulationError,
 	solver::{
+		IntLitMeaning, IntView,
 		activation_list::{IntEvent, IntPropCond},
 		queue::PriorityLevel,
-		IntLitMeaning, IntView,
 	},
-	IntDecision, IntVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -583,15 +583,15 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
+		IntVal,
 		constraints::{
 			int_all_different::{IntAllDifferentBounds, IntAllDifferentValue},
 			int_linear::IntLinearLessEqBounds,
 		},
 		solver::{
-			int_var::{EncodingType, IntVar},
 			SolveResult, Solver,
+			int_var::{EncodingType, IntVar},
 		},
-		IntVal,
 	};
 
 	#[test]

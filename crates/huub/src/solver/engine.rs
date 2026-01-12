@@ -22,17 +22,18 @@ use std::{collections::VecDeque, mem};
 
 use index_vec::IndexVec;
 use pindakaas::{
+	Lit as RawLit, Var as RawVar,
 	solver::propagation::{
 		ClausePersistence, Propagator as PropagatorExtension,
 		PropagatorDefinition as PropagatorExtensionDefinition, SearchDecision, SolvingActions,
 	},
-	Lit as RawLit, Var as RawVar,
 };
 use rustc_hash::FxHashMap;
 pub(crate) use trace_new_lit;
 use tracing::{debug, trace, warn};
 
 use crate::{
+	Clause, IntVal,
 	actions::{
 		BoolInspectionActions, IntExplanationActions, IntInspectionActions, ReasoningEngine,
 		TrailingActions,
@@ -40,6 +41,7 @@ use crate::{
 	branchers::{BoxedBrancher, Decision},
 	constraints::{BoxedPropagator, Conflict, LazyReason, Reason},
 	solver::{
+		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, SolverConfiguration,
 		activation_list::{ActivationAction, ActivationActionS, ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
 		initialization_context::InitializationContext,
@@ -47,9 +49,7 @@ use crate::{
 		queue::PropagatorQueue,
 		solving_context::SolvingContext,
 		trail::{Trail, TrailedInt},
-		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, SolverConfiguration,
 	},
-	Clause, IntVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -509,35 +509,34 @@ impl PropagatorExtension for Engine {
 			};
 
 			// Enqueue based on direct literal
-			if !self.state.failed {
-				if let Some(activations) = self
+			if !self.state.failed
+				&& let Some(activations) = self
 					.state
 					.bool_activation
 					.get_mut(&lit.var())
 					.map(mem::take)
-				{
-					for &action in &activations {
-						let prop = match action.into() {
-							ActivationAction::Advise(adv) => {
-								let &AdvisorDef {
-									bool2int,
-									data,
-									propagator,
-									..
-								} = &self.state.advisors[adv];
-								let enqueue = self.notify_lit_advisor(propagator, data, bool2int);
-								if !enqueue {
-									continue;
-								}
-								propagator
+			{
+				for &action in &activations {
+					let prop = match action.into() {
+						ActivationAction::Advise(adv) => {
+							let &AdvisorDef {
+								bool2int,
+								data,
+								propagator,
+								..
+							} = &self.state.advisors[adv];
+							let enqueue = self.notify_lit_advisor(propagator, data, bool2int);
+							if !enqueue {
+								continue;
 							}
-							ActivationAction::Enqueue(prop) => prop,
-						};
-						self.state.propagator_queue.enqueue_propagator(prop);
-					}
-
-					*self.state.bool_activation.get_mut(&lit.var()).unwrap() = activations;
+							propagator
+						}
+						ActivationAction::Enqueue(prop) => prop,
+					};
+					self.state.propagator_queue.enqueue_propagator(prop);
 				}
+
+				*self.state.bool_activation.get_mut(&lit.var()).unwrap() = activations;
 			}
 
 			// Enqueue based on literal meaning in complex type
@@ -602,31 +601,30 @@ impl PropagatorExtension for Engine {
 				Some((iv, event))
 			});
 
-			if !self.state.failed {
-				if let Some((iv, event)) = iv_event {
-					let activations = mem::take(&mut self.state.int_activation[iv]);
-					for action in activations.activated_by(event) {
-						let prop = match action {
-							ActivationAction::Advise(adv) => {
-								let &AdvisorDef {
-									negated,
-									data,
-									propagator,
-									..
-								} = &self.state.advisors[adv];
-								let enqueue =
-									self.notify_int_advisor(propagator, event, data, negated);
-								if !enqueue {
-									continue;
-								}
-								propagator
+			if !self.state.failed
+				&& let Some((iv, event)) = iv_event
+			{
+				let activations = mem::take(&mut self.state.int_activation[iv]);
+				for action in activations.activated_by(event) {
+					let prop = match action {
+						ActivationAction::Advise(adv) => {
+							let &AdvisorDef {
+								negated,
+								data,
+								propagator,
+								..
+							} = &self.state.advisors[adv];
+							let enqueue = self.notify_int_advisor(propagator, event, data, negated);
+							if !enqueue {
+								continue;
 							}
-							ActivationAction::Enqueue(prop) => prop,
-						};
-						self.state.propagator_queue.enqueue_propagator(prop);
-					}
-					self.state.int_activation[iv] = activations;
+							propagator
+						}
+						ActivationAction::Enqueue(prop) => prop,
+					};
+					self.state.propagator_queue.enqueue_propagator(prop);
 				}
+				self.state.int_activation[iv] = activations;
 			}
 		}
 	}
@@ -921,19 +919,18 @@ impl State {
 		self.statistics.conflicts += 1;
 
 		// Switch to VSIDS if the number of conflicts exceeds the threshold
-		if let Some(conflicts) = self.config.vsids_after_conflict {
-			if !self.config.vsids_only
-				&& !self.config.toggle_vsids
-				&& self.statistics.conflicts > conflicts as u64
-			{
-				debug_assert!(!self.vsids);
-				self.vsids = true;
-				debug!(
-					vsids = self.vsids,
-					conflicts = self.statistics.conflicts,
-					"enable vsids after N conflicts"
-				);
-			}
+		if let Some(conflicts) = self.config.vsids_after_conflict
+			&& !self.config.vsids_only
+			&& !self.config.toggle_vsids
+			&& self.statistics.conflicts > conflicts as u64
+		{
+			debug_assert!(!self.vsids);
+			self.vsids = true;
+			debug!(
+				vsids = self.vsids,
+				conflicts = self.statistics.conflicts,
+				"enable vsids after N conflicts"
+			);
 		}
 
 		if restart {

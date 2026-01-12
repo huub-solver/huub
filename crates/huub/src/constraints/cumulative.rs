@@ -10,6 +10,7 @@ use itertools::Itertools;
 use tracing::trace;
 
 use crate::{
+	Conjunction, IntVal,
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, ReasoningEngine,
 		ReformulationActions,
@@ -19,8 +20,7 @@ use crate::{
 		SolverIntView,
 	},
 	reformulate::ReformulationError,
-	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView},
-	Conjunction, IntVal,
+	solver::{IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel},
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -126,9 +126,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				if cur_height > capacity_lb {
 					trace!(
 						timepoint = t,
-						capacity_lb,
-						cur_height,
-						"push capacity lower bound"
+						capacity_lb, cur_height, "push capacity lower bound"
 					);
 					let mid_point = last_time.map_or(t, |lt| (lt + t) / 2);
 					self.capacity.set_lower_bound(
@@ -893,12 +891,12 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
+		Solver,
 		constraints::cumulative::CumulativeTimeTable,
 		solver::{
-			int_var::{EncodingType, IntVar},
 			IntView,
+			int_var::{EncodingType, IntVar},
 		},
-		Solver,
 	};
 
 	/// Helper function to create a task with given start time, duration, and

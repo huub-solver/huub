@@ -7,21 +7,21 @@ use std::{
 	sync::{Arc, Mutex},
 };
 
-use huub::{solver::IntLitMeaning, IntVal};
+use huub::{IntVal, solver::IntLitMeaning};
 use rustc_hash::FxHashMap;
 use tracing::{
-	field::{Field, Visit},
 	Event, Level, Subscriber,
+	field::{Field, Visit},
 };
 use tracing_subscriber::{
+	Layer,
 	field::{MakeVisitor, RecordFields, VisitOutput},
 	fmt::{
+		FormatFields, MakeWriter,
 		format::{DefaultFields, Writer},
 		time::uptime,
-		FormatFields, MakeWriter,
 	},
 	layer::{Context, SubscriberExt},
-	Layer,
 };
 
 use crate::interned_str::InternedStr;
@@ -223,11 +223,11 @@ impl<V: Visit> LitNames<'_, V> {
 	#[inline]
 	/// Check if the field should and can be formatted as an integer variable.
 	fn check_int_var(&mut self, field: &Field, value: u64) -> bool {
-		if field.name().starts_with("int_var") {
-			if let Some(name) = self.int_reverse_map.get(value as usize) {
-				self.inner.record_str(field, name);
-				return true;
-			}
+		if field.name().starts_with("int_var")
+			&& let Some(name) = self.int_reverse_map.get(value as usize)
+		{
+			self.inner.record_str(field, name);
+			return true;
 		}
 		false
 	}

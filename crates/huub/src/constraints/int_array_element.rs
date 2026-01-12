@@ -9,6 +9,7 @@ use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Unsatisfiable};
 use rustc_hash::FxHashMap;
 
 use crate::{
+	IntDecision, IntSetVal, IntVal,
 	actions::{
 		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions,
 		IntSimplificationActions, ReasoningEngine, ReformulationActions, SimplificationActions,
@@ -19,10 +20,9 @@ use crate::{
 	},
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, BoolView,
-		IntLitMeaning, IntView,
+		BoolView, IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel,
+		trail::TrailedInt,
 	},
-	IntDecision, IntSetVal, IntVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -456,13 +456,12 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		array_element,
+		Model, array_element,
 		constraints::int_array_element::IntArrayElementBounds,
 		solver::{
-			int_var::{EncodingType, IntVar},
 			Solver,
+			int_var::{EncodingType, IntVar},
 		},
-		Model,
 	};
 
 	#[test]
