@@ -926,6 +926,7 @@ impl State {
 		{
 			debug_assert!(!self.vsids);
 			self.vsids = true;
+			self.config.vsids_after_conflict = None; // Only switch once
 			debug!(
 				vsids = self.vsids,
 				conflicts = self.statistics.conflicts,
