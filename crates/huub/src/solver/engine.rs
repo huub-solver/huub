@@ -41,7 +41,7 @@ use crate::{
 	branchers::{BoxedBrancher, Decision},
 	constraints::{BoxedPropagator, Conflict, LazyReason, Reason},
 	solver::{
-		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, SolverConfiguration,
+		BoolView, BoolViewInner, IntLitMeaning, SolverConfiguration,
 		activation_list::{ActivationAction, ActivationActionS, ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
 		initialization_context::InitializationContext,
@@ -665,6 +665,8 @@ impl PropagatorExtension for Engine {
 		if self.state.propagation_queue.is_empty() && self.state.conflict.is_none() {
 			#[cfg(debug_assertions)]
 			{
+				use crate::solver::{IntView, IntViewInner};
+
 				// (DEBUG ONLY) Check that all integers that where fixed by equality
 				// literals had their bound literals set to match.
 				for (iv, i) in mem::take(&mut self.state.check_int_fixed) {
