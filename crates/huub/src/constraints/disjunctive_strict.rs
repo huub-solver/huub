@@ -10,7 +10,8 @@ use crate::{
 	Conjunction, IntDecision, IntVal,
 	actions::{
 		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions,
-		PropagationActions, ReasoningEngine, ReformulationActions, TrailingActions,
+		PropagationActions, ReasoningContext, ReasoningEngine, ReformulationActions,
+		TrailingActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, ReasonBuilder, SimplificationStatus,
@@ -318,6 +319,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	/// Return the (current) earliest completion time of task `i`.
 	fn earliest_completion_time<Ctx>(&self, ctx: &mut Ctx, i: usize) -> IntVal
 	where
+		Ctx: ReasoningContext + ?Sized,
 		I: IntInspectionActions<Ctx>,
 	{
 		self.earliest_start_time(ctx, i) + self.durations[i]
@@ -326,6 +328,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	/// Return the (current) earliest start time of task `i`.
 	fn earliest_start_time<Ctx>(&self, ctx: &mut Ctx, i: usize) -> IntVal
 	where
+		Ctx: ReasoningContext + ?Sized,
 		I: IntInspectionActions<Ctx>,
 	{
 		self.start_times[i].lower_bound(ctx)
@@ -464,12 +467,10 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	/// Explain resource overload within the time window
 	/// [`earliest_start`,`time_bound`]. For details, refer to the CPAIOR paper
 	/// by Vilim (2005).
-	fn explain_overload_checking<Ctx, Atom>(
-		&self,
-		time_bound: i64,
-	) -> impl ReasonBuilder<Ctx, Atom> + '_
+	fn explain_overload_checking<Ctx>(&self, time_bound: i64) -> impl ReasonBuilder<Ctx> + '_
 	where
-		I: IntDecisionActions<Ctx, Atom = Atom>,
+		Ctx: ReasoningContext + ?Sized,
+		I: IntDecisionActions<Ctx>,
 	{
 		move |ctx: &mut Ctx| {
 			let binding_task = self.ot_tree.binding_task(time_bound, 0);
@@ -568,6 +569,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	/// Return the (current) latest completion time of task `i`.
 	fn latest_completion_time<Ctx>(&self, ctx: &mut Ctx, i: usize) -> IntVal
 	where
+		Ctx: ReasoningContext + ?Sized,
 		I: IntInspectionActions<Ctx>,
 	{
 		self.latest_start_time(ctx, i) + self.durations[i]
@@ -576,6 +578,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	/// Return the (current) latest start time of task `i`.
 	fn latest_start_time<Ctx>(&self, ctx: &mut Ctx, i: usize) -> IntVal
 	where
+		Ctx: ReasoningContext + ?Sized,
 		I: IntInspectionActions<Ctx>,
 	{
 		self.start_times[i].upper_bound(ctx)

@@ -3,7 +3,8 @@
 use std::{
 	collections::hash_map::{self, VacantEntry},
 	iter::{Map, Peekable},
-	ops::{Index, IndexMut, RangeBounds, RangeInclusive},
+	num::NonZero,
+	ops::{Index, IndexMut, Neg, RangeBounds, RangeInclusive},
 };
 
 use itertools::Itertools;
@@ -15,9 +16,10 @@ use rangelist::{IntervalIterator, RangeList};
 use rustc_hash::FxHashMap;
 
 use crate::{
-	IntSetVal, IntVal, LinearTransform, NonZeroIntVal, Solver,
+	IntSetVal, IntVal, Solver,
 	actions::{BoolInspectionActions, TrailingActions},
 	solver::{BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, trail::TrailedInt},
+	views::{LinearBoolView, LinearView},
 };
 
 /// An entry in the [`DirectStorage`] that can be used to access the
@@ -481,6 +483,10 @@ impl IntVar {
 		T: TrailingActions,
 		RawLit: BoolInspectionActions<T>,
 	{
+		if v < self.upper_bound(trail) {
+			println!("{}", self.upper_bound(trail));
+			println!("What?!");
+		}
 		debug_assert!(v >= self.upper_bound(trail));
 		if v > *self.domain.upper_bound().unwrap() {
 			return (BoolView(BoolViewInner::Const(true)), v);
@@ -724,13 +730,12 @@ impl IntVar {
 		let ub = *domain.upper_bound().unwrap();
 		if orig_domain_len == Some(2) {
 			let lit = slv.oracle.new_lit();
-			return IntView(IntViewInner::Bool {
-				transformer: LinearTransform {
-					scale: NonZeroIntVal::new(ub - lb).unwrap(),
-					offset: lb,
-				},
+
+			return IntView(IntViewInner::Bool(LinearBoolView::new(
+				NonZero::new(ub - lb).unwrap(),
+				lb,
 				lit,
-			});
+			)));
 		}
 		debug_assert!(
 			direct_encoding != EncodingType::Eager || order_encoding == EncodingType::Eager
@@ -820,7 +825,7 @@ impl IntVar {
 			}
 		}
 
-		IntView(IntViewInner::VarRef(iv))
+		IntView(IntViewInner::Linear(iv.into()))
 	}
 
 	/// Notify that a new lower bound has been propagated for the variable,
@@ -982,6 +987,15 @@ impl IntVar {
 				})
 			}
 		}
+	}
+}
+
+impl Neg for IntVarRef {
+	type Output = LinearView<NonZero<IntVal>, IntVal, Self>;
+
+	fn neg(self) -> Self::Output {
+		let lin: LinearView<NonZero<IntVal>, IntVal, Self> = self.into();
+		-lin
 	}
 }
 
@@ -1378,6 +1392,7 @@ mod tests {
 			BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner,
 			int_var::{EncodingType, IntVar, IntVarRef},
 		},
+		views::LinearView,
 	};
 
 	fn assert_eager_lits_eq(
@@ -1404,10 +1419,9 @@ mod tests {
 		lits: impl IntoIterator<Item = BoolView>,
 		output: impl IntoIterator<Item = IntLitMeaning>,
 	) {
-		let view = IntView(IntViewInner::VarRef(iv));
 		for (req, expected) in input.into_iter().zip_eq(lits.into_iter().zip_eq(output)) {
-			let bv = view.lit(slv, req);
-			let m = view.lit_meaning(slv, bv).unwrap_or(req);
+			let bv = iv.lit(slv, req);
+			let m = iv.lit_meaning(slv, bv).unwrap_or(req);
 			assert_eq!((bv, m), expected, "given {req:?}");
 
 			let v = &mut slv.engine.borrow_mut().state.int_vars[iv];
@@ -1427,7 +1441,7 @@ mod tests {
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let IntView(IntViewInner::VarRef(a)) = a else {
+		let IntView(IntViewInner::Linear(LinearView { var: a, .. })) = a else {
 			unreachable!()
 		};
 		let a = &mut slv.engine.borrow_mut().state.int_vars[a];
@@ -1486,7 +1500,7 @@ mod tests {
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let IntView(IntViewInner::VarRef(a)) = a else {
+		let IntView(IntViewInner::Linear(LinearView { var: a, .. })) = a else {
 			unreachable!()
 		};
 		let a = &mut slv.engine.borrow_mut().state.int_vars[a];
@@ -1567,7 +1581,7 @@ mod tests {
 			EncodingType::Lazy,
 			EncodingType::Lazy,
 		);
-		let IntView(IntViewInner::VarRef(a)) = a else {
+		let IntView(IntViewInner::Linear(LinearView { var: a, .. })) = a else {
 			unreachable!()
 		};
 		assert_lazy_lits_eq(

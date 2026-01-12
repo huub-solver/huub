@@ -4,16 +4,17 @@
 
 use std::{
 	mem,
+	num::NonZero,
 	ops::{AddAssign, Neg},
 };
 
 use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Unsatisfiable};
 
 use crate::{
-	BoolDecision, BoolFormula, IntDecision, NonZeroIntVal,
+	BoolDecision, BoolFormula, IntDecision,
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, IntPropagationActions,
-		ReasoningEngine, ReformulationActions, SimplificationActions,
+		ReasoningContext, ReasoningEngine, ReformulationActions, SimplificationActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus,
@@ -98,7 +99,7 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 			}
 		}
 
-		if let Some(res_ub_inc) = NonZeroIntVal::new(res_ub + 1) {
+		if let Some(res_ub_inc) = NonZero::new(res_ub + 1) {
 			let new_denom_lb = div_ceil(num_lb + 1, res_ub_inc);
 			if new_denom_lb > denom_lb {
 				denominator.set_lower_bound(
@@ -172,8 +173,8 @@ impl IntDivBounds<IntView, IntView, IntView> {
 		result: IntView,
 	) -> Result<(), Unsatisfiable>
 	where
-		E: AddAssign<BoxedPropagator> + ClauseDatabase + ?Sized,
-		IntView: IntDecisionActions<E, Atom = BoolView>,
+		E: AddAssign<BoxedPropagator> + ClauseDatabase + ReasoningContext<Atom = BoolView> + ?Sized,
+		IntView: IntDecisionActions<E>,
 	{
 		// Ensure the consistency of the signs of the three variables using the
 		// following clauses.

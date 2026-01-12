@@ -10,7 +10,7 @@ use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Unsatisfiable};
 use crate::{
 	IntVal,
 	actions::{
-		InitActions, IntDecisionActions, IntInspectionActions, ReasoningEngine,
+		InitActions, IntDecisionActions, IntInspectionActions, ReasoningContext, ReasoningEngine,
 		ReformulationActions,
 	},
 	constraints::{
@@ -290,8 +290,8 @@ impl IntPowBounds<IntView, IntView, IntView> {
 		result: IntView,
 	) -> Result<(), Unsatisfiable>
 	where
-		E: AddAssign<BoxedPropagator> + ClauseDatabase + ?Sized,
-		IntView: IntDecisionActions<E, Atom = BoolView>,
+		E: AddAssign<BoxedPropagator> + ClauseDatabase + ReasoningContext<Atom = BoolView> + ?Sized,
+		IntView: IntDecisionActions<E>,
 	{
 		// Ensure that if the base is negative, then the exponent cannot be zero
 		let (exp_lb, exp_ub) = exponent.bounds(solver);

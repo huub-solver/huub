@@ -5,23 +5,23 @@
 use std::{iter::once, ops::AddAssign};
 
 use itertools::Itertools;
-use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Unsatisfiable};
+use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable};
 use rustc_hash::FxHashMap;
 
 use crate::{
 	IntDecision, IntSetVal, IntVal,
 	actions::{
-		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions,
-		IntSimplificationActions, ReasoningEngine, ReformulationActions, SimplificationActions,
-		TrailingActions,
+		BoolInspectionActions, ConstructionActions, InitActions, IntDecisionActions,
+		IntInspectionActions, IntSimplificationActions, ReasoningContext, ReasoningEngine,
+		ReformulationActions, SimplificationActions, TrailingActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
 	},
 	reformulate::ReformulationError,
 	solver::{
-		BoolView, IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel,
-		trail::TrailedInt,
+		BoolView, IntLitMeaning, IntView, activation_list::IntPropCond, int_var::IntVarRef,
+		queue::PriorityLevel, trail::TrailedInt,
 	},
 };
 
@@ -55,7 +55,7 @@ impl<I1, I2, I3> IntArrayElementBounds<I1, I2, I3> {
 	/// solver.
 	pub(crate) fn new<E>(engine: &mut E, collection: Vec<I1>, index: I2, result: I3) -> Self
 	where
-		E: ConstructionActions + ?Sized,
+		E: ConstructionActions + ReasoningContext + ?Sized,
 		I1: IntInspectionActions<E>,
 		I2: IntInspectionActions<E>,
 	{
@@ -103,8 +103,14 @@ impl IntArrayElementBounds<IntView, IntView, IntView> {
 		result: IntView,
 	) -> Result<(), Unsatisfiable>
 	where
-		E: AddAssign<BoxedPropagator> + ClauseDatabase + ConstructionActions + ?Sized,
-		IntView: IntDecisionActions<E, Atom = BoolView>,
+		E: AddAssign<BoxedPropagator>
+			+ ClauseDatabase
+			+ ConstructionActions
+			+ ReasoningContext<Atom = BoolView>
+			+ ?Sized,
+		IntView: IntDecisionActions<E>,
+		IntVarRef: IntInspectionActions<E>,
+		RawLit: BoolInspectionActions<E>,
 	{
 		// Remove out-of-bound values from the index variables
 		let index_ub = index.lit(solver, IntLitMeaning::Less(collection.len() as IntVal));

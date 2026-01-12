@@ -7,6 +7,7 @@ use std::{
 	fmt::{self, Debug, Display},
 	hash::Hash,
 	iter::once,
+	num::NonZero,
 	ops::{Deref, Not, RangeInclusive},
 	rc::Rc,
 };
@@ -23,7 +24,7 @@ use tracing::warn;
 
 use crate::{
 	BoolDecision, BoolDecisionInner, Branching, Decision, IntDecision, IntLinExpr, IntSetVal,
-	IntVal, Model, NonZeroIntVal, ValueSelection, VariableSelection, abs_int,
+	IntVal, Model, ValueSelection, VariableSelection, abs_int,
 	actions::{
 		BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions,
 		PropagationActions,
@@ -761,7 +762,7 @@ where
 					break 'int_lin_eq;
 				}
 				let offset = sum / c;
-				let view = if let Some(scale) = NonZeroIntVal::new(-cy / c) {
+				let view = if let Some(scale) = NonZero::new(-cy / c) {
 					let y = lit_int_view(self, vy)?;
 					y * scale + offset
 				} else {
@@ -1104,9 +1105,7 @@ where
 						let lin_exp: IntLinExpr = vars
 							.into_iter()
 							.zip(coeffs.into_iter())
-							.filter_map(|(x, c)| {
-								NonZeroIntVal::new(c).map(|c| IntDecision::from(x) * c)
-							})
+							.filter_map(|(x, c)| NonZero::new(c).map(|c| IntDecision::from(x) * c))
 							.chain(once(-sum))
 							.sum();
 
@@ -1574,7 +1573,7 @@ where
 						let lin_exp: IntLinExpr = vars
 							.into_iter()
 							.zip(coeffs.into_iter())
-							.filter_map(|(x, c)| NonZeroIntVal::new(c).map(|c| x * c))
+							.filter_map(|(x, c)| NonZero::new(c).map(|c| x * c))
 							.sum();
 
 						self.prb.add_constraint(match c.id.deref() {
@@ -1614,7 +1613,7 @@ where
 						let lin_exp: IntLinExpr = vars
 							.into_iter()
 							.zip(coeffs.into_iter())
-							.filter_map(|(x, c)| NonZeroIntVal::new(c).map(|c| x * c))
+							.filter_map(|(x, c)| NonZero::new(c).map(|c| x * c))
 							.sum();
 
 						let lin = match c.id.deref() {

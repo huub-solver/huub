@@ -2,20 +2,24 @@
 //! [`ReasoningEngine::PostingCtx`] to [`Propagator`] implementations when they
 //! are posted to a [`Solver`].
 
+use std::num::NonZero;
+
 use pindakaas::{Lit as RawLit, Var as RawVar};
 
 use crate::{
-	IntVal,
+	IntSetVal, IntVal,
 	actions::{
 		BoolInitActions, BoolInspectionActions, InitActions, IntInitActions, IntInspectionActions,
+		ReasoningContext, ReasoningEngine,
 	},
 	solver::{
-		BoolView, BoolViewInner, IntView, IntViewInner,
+		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner,
 		activation_list::{ActivationAction, IntPropCond},
-		engine::{AdvisorDef, PropRef, State},
+		engine::{AdvisorDef, Engine, PropRef, State},
 		int_var::IntVarRef,
 		queue::PriorityLevel,
 	},
+	views::{LinearBoolView, LinearView, OffsetView},
 };
 
 #[derive(Debug)]
@@ -143,54 +147,11 @@ impl IntInitActions<InitializationContext<'_>> for IntVal {
 	}
 }
 
-impl IntInspectionActions<InitializationContext<'_>> for IntVal {
-	type Atom = <Self as IntInspectionActions<State>>::Atom;
-
-	fn domain(&self, _: &InitializationContext<'_>) -> crate::IntSetVal {
-		(*self..=*self).into()
-	}
-
-	fn in_domain(&self, ctx: &InitializationContext<'_>, val: IntVal) -> bool {
-		self.in_domain(ctx.state, val)
-	}
-
-	fn lit_meaning(
-		&self,
-		ctx: &InitializationContext<'_>,
-		lit: Self::Atom,
-	) -> Option<super::IntLitMeaning> {
-		self.lit_meaning(ctx.state, lit)
-	}
-
-	fn lower_bound(&self, ctx: &InitializationContext<'_>) -> IntVal {
-		self.lower_bound(ctx.state)
-	}
-
-	fn lower_bound_lit(&self, ctx: &InitializationContext<'_>) -> Self::Atom {
-		self.lower_bound_lit(ctx.state)
-	}
-
-	fn try_lit(
-		&self,
-		ctx: &InitializationContext<'_>,
-		meaning: super::IntLitMeaning,
-	) -> Option<Self::Atom> {
-		self.try_lit(ctx.state, meaning)
-	}
-
-	fn upper_bound(&self, ctx: &InitializationContext<'_>) -> IntVal {
-		self.upper_bound(ctx.state)
-	}
-
-	fn upper_bound_lit(&self, ctx: &InitializationContext<'_>) -> Self::Atom {
-		self.upper_bound_lit(ctx.state)
-	}
-}
-
 impl IntInitActions<InitializationContext<'_>> for IntVarRef {
 	fn advise_when(&self, ctx: &mut InitializationContext<'_>, condition: IntPropCond, data: u64) {
-		IntView(IntViewInner::VarRef(*self)).advise_when(ctx, condition, data);
+		IntView(IntViewInner::Linear((*self).into())).advise_when(ctx, condition, data);
 	}
+
 	fn enqueue_when(&self, ctx: &mut InitializationContext<'_>, condition: IntPropCond) {
 		if self.val(ctx.state).is_some() {
 			ctx.semantic_enqueue = true;
@@ -206,9 +167,7 @@ impl IntInitActions<InitializationContext<'_>> for IntVarRef {
 }
 
 impl IntInspectionActions<InitializationContext<'_>> for IntVarRef {
-	type Atom = <Self as IntInspectionActions<State>>::Atom;
-
-	fn domain(&self, ctx: &InitializationContext<'_>) -> crate::IntSetVal {
+	fn domain(&self, ctx: &InitializationContext<'_>) -> IntSetVal {
 		self.domain(ctx.state)
 	}
 
@@ -216,11 +175,7 @@ impl IntInspectionActions<InitializationContext<'_>> for IntVarRef {
 		self.in_domain(ctx.state, val)
 	}
 
-	fn lit_meaning(
-		&self,
-		ctx: &InitializationContext<'_>,
-		lit: Self::Atom,
-	) -> Option<super::IntLitMeaning> {
+	fn lit_meaning(&self, ctx: &InitializationContext<'_>, lit: BoolView) -> Option<IntLitMeaning> {
 		self.lit_meaning(ctx.state, lit)
 	}
 
@@ -228,15 +183,11 @@ impl IntInspectionActions<InitializationContext<'_>> for IntVarRef {
 		self.lower_bound(ctx.state)
 	}
 
-	fn lower_bound_lit(&self, ctx: &InitializationContext<'_>) -> Self::Atom {
+	fn lower_bound_lit(&self, ctx: &InitializationContext<'_>) -> BoolView {
 		self.lower_bound_lit(ctx.state)
 	}
 
-	fn try_lit(
-		&self,
-		ctx: &InitializationContext<'_>,
-		meaning: super::IntLitMeaning,
-	) -> Option<Self::Atom> {
+	fn try_lit(&self, ctx: &InitializationContext<'_>, meaning: IntLitMeaning) -> Option<BoolView> {
 		self.try_lit(ctx.state, meaning)
 	}
 
@@ -244,35 +195,75 @@ impl IntInspectionActions<InitializationContext<'_>> for IntVarRef {
 		self.upper_bound(ctx.state)
 	}
 
-	fn upper_bound_lit(&self, ctx: &InitializationContext<'_>) -> Self::Atom {
+	fn upper_bound_lit(&self, ctx: &InitializationContext<'_>) -> BoolView {
 		self.upper_bound_lit(ctx.state)
+	}
+
+	fn bounds(&self, ctx: &InitializationContext<'_>) -> (IntVal, IntVal) {
+		self.bounds(ctx.state)
+	}
+
+	fn val(&self, ctx: &InitializationContext<'_>) -> Option<IntVal> {
+		self.val(ctx.state)
 	}
 }
 
 impl<'a> IntInitActions<InitializationContext<'a>> for IntView {
 	fn advise_when(&self, ctx: &mut InitializationContext<'a>, condition: IntPropCond, data: u64) {
-		let (var, cond, negated) = match self.0 {
-			IntViewInner::VarRef(var) => (var, condition, false),
-			IntViewInner::Linear { transformer, var } => {
-				let condition = match condition {
-					IntPropCond::LowerBound if !transformer.positive_scale() => {
-						IntPropCond::UpperBound
-					}
-					IntPropCond::UpperBound if !transformer.positive_scale() => {
-						IntPropCond::LowerBound
-					}
-					_ => condition,
-				};
-				(var, condition, !transformer.positive_scale())
+		match self.0 {
+			IntViewInner::Linear(lin) => {
+				lin.advise_when(ctx, condition, data);
 			}
 			IntViewInner::Const(_) => {
 				// The variable will never change, so we don't need to add an
 				// advisor.
-				return;
 			}
-			IntViewInner::Bool { lit, .. } => {
-				return ctx.add_lit_advisor(lit, data, true);
+			IntViewInner::Bool(lin) => {
+				lin.advise_when(ctx, condition, data);
 			}
+		}
+	}
+	fn enqueue_when(&self, ctx: &mut InitializationContext<'a>, condition: IntPropCond) {
+		match self.0 {
+			IntViewInner::Const(_) => {
+				ctx.semantic_enqueue = true;
+				// No further change will happen, so we don't need to add the
+				// propagator to any activation lists.
+			}
+			IntViewInner::Linear(lin) => {
+				lin.enqueue_when(ctx, condition);
+			}
+			IntViewInner::Bool(lin) => {
+				lin.enqueue_when(ctx, condition);
+			}
+		}
+	}
+}
+
+impl<'a> IntInitActions<InitializationContext<'a>>
+	for LinearBoolView<NonZero<IntVal>, IntVal, RawLit>
+{
+	fn advise_when(&self, ctx: &mut InitializationContext<'a>, _: IntPropCond, data: u64) {
+		ctx.add_lit_advisor(self.var, data, true);
+	}
+
+	fn enqueue_when(&self, ctx: &mut InitializationContext<'a>, condition: IntPropCond) {
+		if condition != IntPropCond::Fixed {
+			ctx.semantic_enqueue = true;
+		}
+		self.var.enqueue_when_fixed(ctx);
+	}
+}
+
+impl<'a> IntInitActions<InitializationContext<'a>>
+	for LinearView<NonZero<IntVal>, IntVal, IntVarRef>
+{
+	fn advise_when(&self, ctx: &mut InitializationContext<'a>, condition: IntPropCond, data: u64) {
+		let negated = self.scale.is_negative();
+		let cond = match condition {
+			IntPropCond::LowerBound if self.scale.is_negative() => IntPropCond::UpperBound,
+			IntPropCond::UpperBound if self.scale.is_negative() => IntPropCond::LowerBound,
+			_ => condition,
 		};
 		let adv = ctx.state.advisors.push(AdvisorDef {
 			bool2int: false,
@@ -280,35 +271,29 @@ impl<'a> IntInitActions<InitializationContext<'a>> for IntView {
 			negated,
 			propagator: ctx.prop,
 		});
-		ctx.state.int_activation[var].add(ActivationAction::<_, PropRef>::Advise(adv), cond);
+		ctx.state.int_activation[self.var].add(ActivationAction::<_, PropRef>::Advise(adv), cond);
 	}
+
 	fn enqueue_when(&self, ctx: &mut InitializationContext<'a>, condition: IntPropCond) {
-		match self.0 {
-			IntViewInner::VarRef(iv) => iv.enqueue_when(ctx, condition),
-			IntViewInner::Const(_) => {
-				ctx.semantic_enqueue = true;
-				// No further change will happen, so we don't need to add the
-				// propagator to any activation lists.
-			}
-			IntViewInner::Linear { transformer, var } => {
-				let condition = match condition {
-					IntPropCond::LowerBound if !transformer.positive_scale() => {
-						IntPropCond::UpperBound
-					}
-					IntPropCond::UpperBound if !transformer.positive_scale() => {
-						IntPropCond::LowerBound
-					}
-					_ => condition,
-				};
-				var.enqueue_when(ctx, condition);
-			}
-			IntViewInner::Bool { lit, .. } => {
-				if condition != IntPropCond::Fixed {
-					ctx.semantic_enqueue = true;
-				}
-				lit.enqueue_when_fixed(ctx);
-			}
-		}
+		let condition = match condition {
+			IntPropCond::LowerBound if self.scale.is_negative() => IntPropCond::UpperBound,
+			IntPropCond::UpperBound if self.scale.is_negative() => IntPropCond::LowerBound,
+			_ => condition,
+		};
+		self.var.enqueue_when(ctx, condition);
+	}
+}
+
+impl<'a, Var> IntInitActions<InitializationContext<'a>> for OffsetView<IntVal, Var>
+where
+	Var: IntInitActions<InitializationContext<'a>>,
+{
+	fn advise_when(&self, ctx: &mut InitializationContext<'a>, condition: IntPropCond, data: u64) {
+		self.var.advise_when(ctx, condition, data);
+	}
+
+	fn enqueue_when(&self, ctx: &mut InitializationContext<'a>, condition: IntPropCond) {
+		self.var.enqueue_when(ctx, condition);
 	}
 }
 
@@ -350,4 +335,9 @@ impl BoolInitActions<InitializationContext<'_>> for bool {
 	fn enqueue_when_fixed(&self, ctx: &mut InitializationContext<'_>) {
 		ctx.semantic_enqueue = true;
 	}
+}
+
+impl ReasoningContext for InitializationContext<'_> {
+	type Atom = <Engine as ReasoningEngine>::Atom;
+	type Conflict = <Engine as ReasoningEngine>::Conflict;
 }

@@ -2,10 +2,13 @@
 //! that the product of two integer variables is equal to a third integer
 //! variable.
 
-use std::ops::{AddAssign, Mul};
+use std::{
+	num::NonZero,
+	ops::{AddAssign, Mul},
+};
 
 use crate::{
-	IntDecision, IntVal, NonZeroIntVal,
+	IntDecision, IntVal,
 	actions::{InitActions, IntSimplificationActions, ReasoningEngine, ReformulationActions},
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
@@ -133,7 +136,7 @@ where
 			let min = bounds
 				.iter()
 				.map(|(z, y)| {
-					let y = NonZeroIntVal::new(*y).unwrap();
+					let y = NonZero::new(*y).unwrap();
 					div_ceil(*z, y)
 				})
 				.min()
@@ -143,7 +146,7 @@ where
 			let max = bounds
 				.iter()
 				.map(|(z, y)| {
-					let y = NonZeroIntVal::new(*y).unwrap();
+					let y = NonZero::new(*y).unwrap();
 					div_floor(*z, y)
 				})
 				.max()
@@ -166,7 +169,7 @@ where
 			let min = bounds
 				.iter()
 				.map(|(z, x)| {
-					let y = NonZeroIntVal::new(*x).unwrap();
+					let y = NonZero::new(*x).unwrap();
 					div_ceil(*z, y)
 				})
 				.min()
@@ -176,7 +179,7 @@ where
 			let max = bounds
 				.iter()
 				.map(|(z, x)| {
-					let y = NonZeroIntVal::new(*x).unwrap();
+					let y = NonZero::new(*x).unwrap();
 					div_floor(*z, y)
 				})
 				.max()

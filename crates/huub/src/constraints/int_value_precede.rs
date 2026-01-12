@@ -7,19 +7,22 @@ use std::{
 	ops::AddAssign,
 };
 
+use pindakaas::Lit as RawLit;
+
 use crate::{
 	Conjunction, IntVal,
 	actions::{
-		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions,
-		ReasoningEngine, ReformulationActions, TrailingActions,
+		BoolInspectionActions, ConstructionActions, InitActions, IntDecisionActions,
+		IntInspectionActions, ReasoningContext, ReasoningEngine, ReformulationActions,
+		TrailingActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
 	},
 	reformulate::ReformulationError,
 	solver::{
-		IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel,
-		trail::TrailedInt,
+		IntLitMeaning, IntView, activation_list::IntPropCond, int_var::IntVarRef,
+		queue::PriorityLevel, trail::TrailedInt,
 	},
 };
 
@@ -80,13 +83,14 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 	/// Lower bound explanation: Could not have this value earlier (=upper bound
 	/// explanation) and some later value requires the lower bound (recursive
 	/// lower bound).
-	fn explain_lower<Ctx, Atom>(
+	fn explain_lower<Ctx>(
 		&self,
 		i: usize,
 		k: IntVal,
-	) -> impl FnOnce(&mut Ctx) -> Conjunction<Atom> + '_
+	) -> impl FnOnce(&mut Ctx) -> Conjunction<Ctx::Atom> + '_
 	where
-		I: IntDecisionActions<Ctx, Atom = Atom>,
+		Ctx: ReasoningContext + ?Sized,
+		I: IntDecisionActions<Ctx>,
 	{
 		move |ctx: &mut Ctx| {
 			let mut reason = Vec::new();
@@ -120,13 +124,14 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 	}
 
 	/// Upper bound explanation: All previous elements are smaller.
-	fn explain_upper<Ctx, Atom>(
+	fn explain_upper<Ctx>(
 		&self,
 		i: usize,
 		k: IntVal,
-	) -> impl FnOnce(&mut Ctx) -> Conjunction<Atom> + '_
+	) -> impl FnOnce(&mut Ctx) -> Conjunction<Ctx::Atom> + '_
 	where
-		I: IntDecisionActions<Ctx, Atom = Atom>,
+		Ctx: ReasoningContext + ?Sized,
+		I: IntDecisionActions<Ctx>,
 	{
 		move |ctx: &mut Ctx| {
 			self.vars
@@ -201,7 +206,7 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 	/// solver.
 	pub fn new<E>(engine: &mut E, vars: Vec<I>) -> Self
 	where
-		E: ConstructionActions + ?Sized,
+		E: ConstructionActions + ReasoningContext + ?Sized,
 		I: IntInspectionActions<E>,
 	{
 		let n = vars.len();
@@ -344,8 +349,11 @@ impl IntSeqPrecedeChainBounds<IntView> {
 	/// solver.
 	pub fn post<E>(solver: &mut E, mut vars: Vec<IntView>)
 	where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
+		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
+		E::Atom: From<bool> + From<RawLit>,
 		IntView: IntInspectionActions<E>,
+		IntVarRef: IntInspectionActions<E>,
+		RawLit: BoolInspectionActions<E>,
 	{
 		// Variables that do not allow positive values are irrelevant.
 		vars.retain(|&v| v.upper_bound(solver) > 0);
@@ -455,13 +463,14 @@ impl<I> IntValuePrecedeChainValue<I> {
 	/// Lower bound explanation: Could not have this index earlier (=upper bound
 	/// explanation) and some later index requires the lower bound (recursive
 	/// lower bound).
-	fn explain_lower<Ctx, Atom>(
+	fn explain_lower<Ctx>(
 		&self,
 		i: usize,
 		j: usize,
-	) -> impl FnOnce(&mut Ctx) -> Conjunction<Atom> + '_
+	) -> impl FnOnce(&mut Ctx) -> Conjunction<Ctx::Atom> + '_
 	where
-		I: IntDecisionActions<Ctx, Atom = Atom>,
+		Ctx: ReasoningContext + ?Sized,
+		I: IntDecisionActions<Ctx>,
 	{
 		move |ctx: &mut Ctx| {
 			let mut reason = Vec::new();
@@ -518,13 +527,14 @@ impl<I> IntValuePrecedeChainValue<I> {
 
 	/// Upper bound explanation: All previous indices are smaller (exclude
 	/// values with larger index).
-	fn explain_upper<Ctx, Atom>(
+	fn explain_upper<Ctx>(
 		&self,
 		i: usize,
 		j: usize,
-	) -> impl FnOnce(&mut Ctx) -> Conjunction<Atom> + '_
+	) -> impl FnOnce(&mut Ctx) -> Conjunction<Ctx::Atom> + '_
 	where
-		I: IntDecisionActions<Ctx, Atom = Atom>,
+		Ctx: ReasoningContext + ?Sized,
+		I: IntDecisionActions<Ctx>,
 	{
 		move |ctx: &mut Ctx| {
 			self.vars
@@ -595,6 +605,7 @@ impl<I> IntValuePrecedeChainValue<I> {
 	/// the range of values, then all holes, finally values with lower index.
 	fn lowest_index<Ctx>(&self, ctx: &mut Ctx, i: usize) -> Option<usize>
 	where
+		Ctx: ReasoningContext + ?Sized,
 		I: IntInspectionActions<Ctx>,
 	{
 		let (lb, ub) = self.vars[i].bounds(ctx);
@@ -856,7 +867,7 @@ impl IntValuePrecedeChainValue<IntView> {
 	/// solver.
 	pub fn post<E>(solver: &mut E, values: Vec<IntVal>, mut vars: Vec<IntView>)
 	where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
+		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
 		// Variables that do not any tracked values are irrelevant.

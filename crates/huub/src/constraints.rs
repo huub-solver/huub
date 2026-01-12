@@ -34,7 +34,7 @@ use crate::{
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
 		IntExplanationActions, IntInitActions, IntInspectionActions, IntPropagationActions,
-		IntSimplificationActions, ReasoningEngine, ReformulationActions,
+		IntSimplificationActions, ReasoningContext, ReasoningEngine, ReformulationActions,
 	},
 	reformulate::ReformulationError,
 	solver::{
@@ -114,11 +114,8 @@ pub trait ModelBoolView<E>
 where
 	E: ReasoningEngine,
 	Self: SolverBoolView<E>
-		+ for<'a> BoolSimplificationActions<
-			E::PropagationCtx<'a>,
-			Atom = E::Atom,
-			Conflict = E::Conflict,
-		> + Into<BoolDecision>,
+		+ for<'a> BoolSimplificationActions<E::PropagationCtx<'a>>
+		+ Into<BoolDecision>,
 {
 }
 
@@ -127,11 +124,8 @@ pub trait ModelIntView<E>
 where
 	E: ReasoningEngine,
 	Self: SolverIntView<E>
-		+ for<'a> IntSimplificationActions<
-			E::PropagationCtx<'a>,
-			Atom = E::Atom,
-			Conflict = E::Conflict,
-		> + Into<IntDecision>,
+		+ for<'a> IntSimplificationActions<E::PropagationCtx<'a>>
+		+ Into<IntDecision>,
 {
 }
 
@@ -226,10 +220,10 @@ pub enum Reason<Atom> {
 
 /// A trait for types that can be used to construct a reason for the propagation
 /// in the `Context` from `Atom`s.
-pub trait ReasonBuilder<Context: ?Sized, Atom> {
+pub trait ReasonBuilder<Context: ReasoningContext + ?Sized> {
 	/// Construct a `Reason`, or return a Boolean indicating that the reason is
 	/// trivial.
-	fn build_reason(self, ctx: &mut Context) -> Result<Reason<Atom>, bool>;
+	fn build_reason(self, ctx: &mut Context) -> Result<Reason<Context::Atom>, bool>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -254,11 +248,8 @@ where
 	Self: for<'a> BoolInitActions<E::InitializationCtx<'a>>
 		+ for<'a> BoolInspectionActions<E::ExplanationCtx<'a>>
 		+ for<'a> BoolInspectionActions<E::NotificationCtx<'a>>
-		+ for<'a> BoolPropagationActions<
-			E::PropagationCtx<'a>,
-			Atom = E::Atom,
-			Conflict = E::Conflict,
-		> + Into<E::Atom>,
+		+ for<'a> BoolPropagationActions<E::PropagationCtx<'a>>
+		+ Into<E::Atom>,
 {
 }
 
@@ -267,32 +258,35 @@ pub trait SolverIntView<E>
 where
 	E: ReasoningEngine + ?Sized,
 	Self: for<'a> IntInitActions<E::InitializationCtx<'a>>
-		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>, Atom = E::Atom>
-		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>, Atom = E::Atom>
-		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>, Atom = E::Atom, Conflict = E::Conflict>,
+		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>>
+		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>>
+		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>>,
 {
 }
 
-impl<C, A, const N: usize> ReasonBuilder<C, A> for &[A; N]
+impl<C, const N: usize> ReasonBuilder<C> for &[C::Atom; N]
 where
-	A: Clone,
+	C: ReasoningContext + ?Sized,
 {
-	fn build_reason(self, ctx: &mut C) -> Result<Reason<A>, bool> {
+	fn build_reason(self, ctx: &mut C) -> Result<Reason<C::Atom>, bool> {
 		self[..].build_reason(ctx)
 	}
 }
 
-impl<C, A> ReasonBuilder<C, A> for &[A]
+impl<C> ReasonBuilder<C> for &[C::Atom]
 where
-	A: Clone,
+	C: ReasoningContext + ?Sized,
 {
-	fn build_reason(self, _: &mut C) -> Result<Reason<A>, bool> {
+	fn build_reason(self, _: &mut C) -> Result<Reason<C::Atom>, bool> {
 		Reason::from_iter(self.iter().cloned())
 	}
 }
 
-impl<C, A, const N: usize> ReasonBuilder<C, A> for [A; N] {
-	fn build_reason(self, _: &mut C) -> Result<Reason<A>, bool> {
+impl<C, const N: usize> ReasonBuilder<C> for [C::Atom; N]
+where
+	C: ReasoningContext + ?Sized,
+{
+	fn build_reason(self, _: &mut C) -> Result<Reason<C::Atom>, bool> {
 		Reason::from_iter(self)
 	}
 }
@@ -301,11 +295,8 @@ impl<E, B> ModelBoolView<E> for B
 where
 	E: ReasoningEngine,
 	B: SolverBoolView<E>
-		+ for<'a> BoolSimplificationActions<
-			E::PropagationCtx<'a>,
-			Atom = E::Atom,
-			Conflict = E::Conflict,
-		> + Into<BoolDecision>,
+		+ for<'a> BoolSimplificationActions<E::PropagationCtx<'a>>
+		+ Into<BoolDecision>,
 {
 }
 
@@ -315,11 +306,8 @@ where
 	Self: for<'a> BoolInitActions<E::InitializationCtx<'a>>
 		+ for<'a> BoolInspectionActions<E::ExplanationCtx<'a>>
 		+ for<'a> BoolInspectionActions<E::NotificationCtx<'a>>
-		+ for<'a> BoolPropagationActions<
-			E::PropagationCtx<'a>,
-			Atom = E::Atom,
-			Conflict = E::Conflict,
-		> + Into<E::Atom>,
+		+ for<'a> BoolPropagationActions<E::PropagationCtx<'a>>
+		+ Into<E::Atom>,
 {
 }
 
@@ -342,12 +330,12 @@ impl<A, B> CachedReason<B, A> {
 	}
 }
 
-impl<A, B, C> ReasonBuilder<C, A> for &'_ mut CachedReason<B, A>
+impl<B, C> ReasonBuilder<C> for &'_ mut CachedReason<B, C::Atom>
 where
-	A: Clone,
-	B: ReasonBuilder<C, A>,
+	C: ReasoningContext + ?Sized,
+	B: ReasonBuilder<C>,
 {
-	fn build_reason(self, ctx: &mut C) -> Result<Reason<A>, bool> {
+	fn build_reason(self, ctx: &mut C) -> Result<Reason<C::Atom>, bool> {
 		match self {
 			CachedReason::Cached(items) => items.clone(),
 			CachedReason::Builder(_) => {
@@ -366,10 +354,10 @@ where
 
 impl Conflict<RawLit> {
 	/// Create a new conflict with the given reason
-	pub(crate) fn new<Context>(
-		ctx: &mut Context,
+	pub(crate) fn new<Ctx: ReasoningContext<Atom = BoolView> + ?Sized>(
+		ctx: &mut Ctx,
 		subject: Option<RawLit>,
-		reason: impl ReasonBuilder<Context, BoolView>,
+		reason: impl ReasonBuilder<Ctx>,
 	) -> Self {
 		match Reason::from_view(reason.build_reason(ctx)) {
 			Ok(reason) => Self { subject, reason },
@@ -401,12 +389,13 @@ impl<Atom: Debug> fmt::Display for Conflict<Atom> {
 	}
 }
 
-impl<C, A, F, I> ReasonBuilder<C, A> for F
+impl<C, F, I> ReasonBuilder<C> for F
 where
+	C: ReasoningContext + ?Sized,
 	F: FnOnce(&mut C) -> I,
-	I: IntoIterator<Item = A>,
+	I: IntoIterator<Item = C::Atom>,
 {
-	fn build_reason(self, ctx: &mut C) -> Result<Reason<A>, bool> {
+	fn build_reason(self, ctx: &mut C) -> Result<Reason<C::Atom>, bool> {
 		Reason::from_iter(self(ctx))
 	}
 }
@@ -415,11 +404,8 @@ impl<E, I> ModelIntView<E> for I
 where
 	E: ReasoningEngine,
 	I: SolverIntView<E>
-		+ for<'a> IntSimplificationActions<
-			E::PropagationCtx<'a>,
-			Atom = E::Atom,
-			Conflict = E::Conflict,
-		> + Into<IntDecision>,
+		+ for<'a> IntSimplificationActions<E::PropagationCtx<'a>>
+		+ Into<IntDecision>,
 {
 }
 
@@ -427,14 +413,17 @@ impl<E, I> SolverIntView<E> for I
 where
 	E: ReasoningEngine + ?Sized,
 	I: for<'a> IntInitActions<E::InitializationCtx<'a>>
-		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>, Atom = E::Atom>
-		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>, Atom = E::Atom>
-		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>, Atom = E::Atom, Conflict = E::Conflict>,
+		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>>
+		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>>
+		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>>,
 {
 }
 
-impl<A, C> ReasonBuilder<C, A> for LazyReason {
-	fn build_reason(self, _: &mut C) -> Result<Reason<A>, bool> {
+impl<C> ReasonBuilder<C> for LazyReason
+where
+	C: ReasoningContext + ?Sized,
+{
+	fn build_reason(self, _: &mut C) -> Result<Reason<C::Atom>, bool> {
 		Ok(Reason::Lazy(self))
 	}
 }
@@ -520,8 +509,11 @@ impl Reason<RawLit> {
 	}
 }
 
-impl<C, A> ReasonBuilder<C, A> for Vec<A> {
-	fn build_reason(self, _: &mut C) -> Result<Reason<A>, bool> {
+impl<C> ReasonBuilder<C> for Vec<C::Atom>
+where
+	C: ReasoningContext + ?Sized,
+{
+	fn build_reason(self, _: &mut C) -> Result<Reason<C::Atom>, bool> {
 		Reason::from_iter(self)
 	}
 }

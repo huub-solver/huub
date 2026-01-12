@@ -10,7 +10,8 @@ use pindakaas::Lit as RawLit;
 
 use crate::{
 	actions::{
-		ConstructionActions, InitActions, IntDecisionActions, ReasoningEngine, ReformulationActions,
+		ConstructionActions, InitActions, IntDecisionActions, ReasoningContext, ReasoningEngine,
+		ReformulationActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus,
@@ -42,8 +43,11 @@ impl IntAbsBounds<IntView, IntView, RawLit> {
 	/// Create a new [`IntAbsBounds`] propagator and post it in the solver.
 	pub(crate) fn post<E>(solver: &mut E, origin: IntView, abs: IntView)
 	where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
-		IntView: IntDecisionActions<E, Atom = BoolView>,
+		E: AddAssign<BoxedPropagator>
+			+ ConstructionActions
+			+ ReasoningContext<Atom = BoolView>
+			+ ?Sized,
+		IntView: IntDecisionActions<E>,
 	{
 		let BoolViewInner::Lit(origin_positive) = origin.lit(solver, IntLitMeaning::GreaterEq(0)).0
 		else {

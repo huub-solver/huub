@@ -8,7 +8,7 @@ use crate::{
 	ValueSelection, VariableSelection,
 	actions::{
 		BoolInspectionActions, BrancherInitActions, DecisionActions, IntDecisionActions,
-		IntInspectionActions,
+		IntInspectionActions, ReasoningContext,
 	},
 	solver::{
 		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, View,
@@ -207,9 +207,10 @@ impl IntBrancher {
 	}
 }
 
-impl<D: DecisionActions> Brancher<D> for IntBrancher
+impl<D> Brancher<D> for IntBrancher
 where
-	IntView: IntDecisionActions<D, Atom = BoolView>,
+	D: DecisionActions + ReasoningContext<Atom = BoolView>,
+	IntView: IntDecisionActions<D>,
 {
 	fn decide(&mut self, actions: &mut D) -> Decision {
 		let begin = actions.trailed_int(self.next) as usize;
