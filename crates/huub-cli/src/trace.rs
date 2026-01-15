@@ -7,23 +7,24 @@ use std::{
 	sync::{Arc, Mutex},
 };
 
-use huub::{solver::IntLitMeaning, IntVal};
+use huub::{IntVal, solver::IntLitMeaning};
 use rustc_hash::FxHashMap;
 use tracing::{
-	field::{Field, Visit},
 	Event, Level, Subscriber,
+	field::{Field, Visit},
 };
 use tracing_subscriber::{
+	Layer,
 	field::{MakeVisitor, RecordFields, VisitOutput},
 	fmt::{
+		FormatFields, MakeWriter,
 		format::{DefaultFields, Writer},
 		time::uptime,
-		FormatFields, MakeWriter,
 	},
 	layer::{Context, SubscriberExt},
-	Layer,
 };
-use ustr::Ustr;
+
+use crate::interned_str::InternedStr;
 
 /// A [`tracing_subscriber::FormatFields`] implementation that attempts to
 /// format literals and integer variables according to their FlatZinc names,
@@ -36,7 +37,7 @@ struct FmtLitFields {
 	/// their names.
 	lit_reverse_map: Arc<Mutex<FxHashMap<LitInt, LitName>>>,
 	/// The mapping from indexes of integer variables to their names.
-	int_reverse_map: Arc<Mutex<Vec<Ustr>>>,
+	int_reverse_map: Arc<Mutex<Vec<InternedStr>>>,
 }
 
 /// Type alias of an integer type that can be used to represent literals.
@@ -49,7 +50,7 @@ pub(crate) enum LitName {
 	///
 	/// The tuple constrains the name of the variable and whether the literal is
 	/// the positive of negative version of the variable.
-	BoolVar(Ustr, bool),
+	BoolVar(InternedStr, bool),
 	/// The literal represents a condition of an integer variable.
 	///
 	/// The tuple contains the index of the variable in the FlatZinc model
@@ -68,7 +69,7 @@ struct LitNames<'a, V> {
 	/// their names.
 	lit_reverse_map: &'a FxHashMap<LitInt, LitName>,
 	/// The mapping from indexes of integer variables to their names.
-	int_reverse_map: &'a Vec<Ustr>,
+	int_reverse_map: &'a Vec<InternedStr>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -105,7 +106,7 @@ pub(crate) fn create_subscriber<W>(
 	make_writer: W,
 	ansi: bool,
 	lit_reverse_map: Arc<Mutex<FxHashMap<LitInt, LitName>>>,
-	int_reverse_map: Arc<Mutex<Vec<Ustr>>>,
+	int_reverse_map: Arc<Mutex<Vec<InternedStr>>>,
 ) -> impl Subscriber
 where
 	W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
@@ -138,7 +139,7 @@ impl FmtLitFields {
 	fn new(
 		fmt: DefaultFields,
 		lit_reverse_map: Arc<Mutex<FxHashMap<LitInt, LitName>>>,
-		int_reverse_map: Arc<Mutex<Vec<Ustr>>>,
+		int_reverse_map: Arc<Mutex<Vec<InternedStr>>>,
 	) -> Self {
 		Self {
 			fmt,
@@ -160,7 +161,7 @@ impl<'writer> FormatFields<'writer> for FmtLitFields {
 
 impl LitName {
 	/// Returns a string representation of the literal using the FlatZinc names.
-	fn to_string(&self, int_map: &[Ustr]) -> String {
+	fn to_string(&self, int_map: &[InternedStr]) -> String {
 		match self {
 			LitName::BoolVar(name, pos) => {
 				format!("{}{name}", if *pos { "" } else { "not " })
@@ -178,25 +179,6 @@ impl LitName {
 					IntLitMeaning::Less(val) => format!("{var}<{val}"),
 				}
 			}
-		}
-	}
-}
-
-impl<'a, V> LitNames<'a, V> {
-	/// Returns a new [`MakeVisitor`] implementation that will wrap `inner` so
-	/// that any fields containing literals are renamed to use their FlatZinc
-	/// names.
-	///
-	/// [`MakeVisitor`]: tracing_subscriber::field::MakeVisitor
-	fn new(
-		inner: V,
-		lit_reverse_map: &'a FxHashMap<LitInt, LitName>,
-		int_reverse_map: &'a Vec<Ustr>,
-	) -> Self {
-		LitNames {
-			inner,
-			lit_reverse_map,
-			int_reverse_map,
 		}
 	}
 }
@@ -241,11 +223,11 @@ impl<V: Visit> LitNames<'_, V> {
 	#[inline]
 	/// Check if the field should and can be formatted as an integer variable.
 	fn check_int_var(&mut self, field: &Field, value: u64) -> bool {
-		if field.name().starts_with("int_var") {
-			if let Some(name) = self.int_reverse_map.get(value as usize) {
-				self.inner.record_str(field, name);
-				return true;
-			}
+		if field.name().starts_with("int_var")
+			&& let Some(name) = self.int_reverse_map.get(value as usize)
+		{
+			self.inner.record_str(field, name);
+			return true;
 		}
 		false
 	}
@@ -288,6 +270,25 @@ impl<V: Visit> LitNames<'_, V> {
 			}
 		}
 		false
+	}
+}
+
+impl<'a, V> LitNames<'a, V> {
+	/// Returns a new [`MakeVisitor`] implementation that will wrap `inner` so
+	/// that any fields containing literals are renamed to use their FlatZinc
+	/// names.
+	///
+	/// [`MakeVisitor`]: tracing_subscriber::field::MakeVisitor
+	fn new(
+		inner: V,
+		lit_reverse_map: &'a FxHashMap<LitInt, LitName>,
+		int_reverse_map: &'a Vec<InternedStr>,
+	) -> Self {
+		LitNames {
+			inner,
+			lit_reverse_map,
+			int_reverse_map,
+		}
 	}
 }
 
@@ -361,8 +362,8 @@ impl RecordLazyLits {
 				IntLitMeaning::Less
 			}(val);
 			let mut guard = lit_reverse_map.lock().unwrap();
-			let _ = guard.insert(lit, LitName::IntLit(iv, meaning.clone()));
-			let _ = guard.insert(-lit, LitName::IntLit(iv, !meaning));
+			guard.insert(lit, LitName::IntLit(iv, meaning));
+			guard.insert(-lit, LitName::IntLit(iv, !meaning));
 			true
 		} else {
 			false

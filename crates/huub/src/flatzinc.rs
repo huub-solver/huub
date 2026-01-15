@@ -7,6 +7,7 @@ use std::{
 	fmt::{self, Debug, Display},
 	hash::Hash,
 	iter::once,
+	num::NonZero,
 	ops::{Deref, Not, RangeInclusive},
 	rc::Rc,
 };
@@ -22,12 +23,16 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::warn;
 
 use crate::{
-	abs_int, actions::SimplificationActions, all_different_int, array_element, array_maximum_int,
-	array_minimum_int, constraints::int_table::IntTable, cumulative, diffn_int, disjunctive_strict,
-	div_int, int_in_set_reif, pow_int, reformulate::ReformulationError, seq_precede_chain_int,
-	table_int, times_int, value_precede_chain_int, BoolDecision, BoolDecisionInner, Branching,
-	Decision, IntDecision, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal, ValueSelection,
-	VariableSelection,
+	BoolDecision, BoolDecisionInner, Branching, Decision, IntDecision, IntLinExpr, IntSetVal,
+	IntVal, Model, ValueSelection, VariableSelection, abs_int,
+	actions::{
+		BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions,
+		PropagationActions,
+	},
+	all_different_int, array_element, array_maximum_int, array_minimum_int, cumulative,
+	diffn_int, disjunctive_strict, div_int, int_in_set_reif, pow_int,
+	reformulate::ReformulationError,
+	seq_precede_chain_int, table_int, times_int, value_precede_chain_int,
 };
 
 /// Domain assumed for integer decision variables that do not have a domain
@@ -62,8 +67,8 @@ pub enum FlatZincError {
 		/// Type of the argument found.
 		found: String,
 	},
-	/// Error that occorred when converting a generated [`Model`] to a
-	/// [`Solver`] object.
+	/// Error that occurred when constructing the [`Model`] object or
+	/// translating it to a [`Solver`] object.
 	ReformulationError(ReformulationError),
 }
 
@@ -382,13 +387,13 @@ where
 
 	/// Check whether an annotation atom is present in the given list of
 	/// annotations, marking it as used if found.
-	fn anns_contains(&self, ann: &[Annotation<S>], ann_used: &mut [bool], ident: &str) -> bool {
+	fn anns_contains(ann: &[Annotation<S>], ann_used: &mut [bool], ident: &str) -> bool {
 		for (i, a) in ann.iter().enumerate() {
-			if let Annotation::Atom(x) = a {
-				if x.deref() == ident {
-					ann_used[i] = true;
-					return true;
-				}
+			if let Annotation::Atom(x) = a
+				&& x.deref() == ident
+			{
+				ann_used[i] = true;
+				return true;
 			}
 		}
 		false
@@ -490,10 +495,9 @@ where
 		transitions: Vec<Vec<IntVal>>,
 		init_state: IntVal,
 		accept_states: FxHashSet<IntVal>,
-	) -> Vec<IntTable> {
+	) {
 		// TODO: Add the regular checking
 
-		let mut table_constraints = Vec::new();
 		let mut start: Vec<Vec<IntVal>> = Vec::new();
 		let mut middle: Vec<Vec<IntVal>> = Vec::new();
 		let mut end: Vec<Vec<IntVal>> = Vec::new();
@@ -531,19 +535,18 @@ where
 
 		// Add table constraint to force a transition for the starting state
 		let sx: Vec<IntDecision> = vec![vars[0], state_vars[0]];
-		table_constraints.push(table_int(sx, start));
+		table_int(&mut self.prb, sx, start);
 
 		// Add table constraint to force valid transition for the intermediate
 		// states
 		for i in 1..vars.len() - 1 {
 			let mx: Vec<IntDecision> = vec![state_vars[i - 1], vars[i], state_vars[i]];
-			table_constraints.push(table_int(mx, middle.clone()));
+			table_int(&mut self.prb, mx, middle.clone());
 		}
 
 		// Add table constraint to force ending in an accepting state
 		let ex: Vec<IntDecision> = vec![*state_vars.last().unwrap(), *vars.last().unwrap()];
-		table_constraints.push(table_int(ex, end));
-		table_constraints
+		table_int(&mut self.prb, ex, end);
 	}
 
 	/// Create branchers according to the search annotations in the FlatZinc
@@ -574,11 +577,11 @@ where
 	pub(crate) fn ensure_output(&mut self) -> Result<(), FlatZincError> {
 		for ident in self.fzn.output.iter() {
 			if self.fzn.variables.contains_key(ident) {
-				let _ = self.lookup_or_create_var(ident)?;
+				self.lookup_or_create_var(ident)?;
 			} else if let Some(arr) = self.fzn.arrays.get(ident) {
 				for x in &arr.contents {
 					if let Literal::Identifier(ident) = x {
-						let _ = self.lookup_or_create_var(ident)?;
+						self.lookup_or_create_var(ident)?;
 					}
 				}
 			} else {
@@ -602,49 +605,66 @@ where
 		let c = &self.fzn.constraints[con];
 
 		let add_view = |me: &mut Self, name: S, view: Decision| -> Result<(), FlatZincError> {
-			match me.map.entry(name) {
+			match me.map.entry(name.clone()) {
 				Entry::Occupied(e) => match *e.get() {
 					Decision::Bool(bv) => {
 						let Decision::Bool(view) = view else {
 							unreachable!()
 						};
-						me.prb.unify_bool(bv, view)?;
+						bv.unify(&mut me.prb, view)
+							.map_err(ReformulationError::from)?;
 					}
 					Decision::Int(iv) => {
 						let Decision::Int(view) = view else {
 							unreachable!()
 						};
-						me.prb.unify_int(iv, view)?;
+						iv.unify(&mut me.prb, view)
+							.map_err(ReformulationError::from)?;
 					}
 				},
 				Entry::Vacant(e) => {
-					let _ = e.insert(view);
+					// Enforce the domain of the named (uncreated) variable on the view
+					let def = me.fzn.variables.get(&name).unwrap();
+					if let Some(dom) = &def.domain {
+						let Domain::Int(dom) = dom else {
+							unreachable!()
+						};
+						let Decision::Int(view) = view else {
+							unreachable!()
+						};
+						view.set_domain(&mut me.prb, dom, vec![])
+							.map_err(ReformulationError::from)?;
+					}
+					// Insert the view to use instead of a new variable for the name
+					e.insert(view);
 				}
 			}
 			me.stats.extracted_views += 1;
 			me.processed[con] = true;
 			Ok(())
 		};
-		let arg_bool_view = |me: &mut Self,
-		                     arg: &Argument<S>|
-		 -> Result<BoolDecision, FlatZincError> {
-			if let Argument::Literal(Literal::Identifier(x)) = arg {
-				if !me.map.contains_key(x) && defined_by.contains_key(x) && defined_by[x] != con {
+		let arg_bool_view =
+			|me: &mut Self, arg: &Argument<S>| -> Result<BoolDecision, FlatZincError> {
+				if let Argument::Literal(Literal::Identifier(x)) = arg
+					&& !me.map.contains_key(x)
+					&& defined_by.contains_key(x)
+					&& defined_by[x] != con
+				{
 					me.extract_view(defined_by, defined_by[x])?;
 				}
-			}
-			me.arg_bool(arg)
-		};
-		let lit_int_view = |me: &mut Self,
-		                    lit: &Literal<S>|
-		 -> Result<IntDecision, FlatZincError> {
-			if let Literal::Identifier(x) = lit {
-				if !me.map.contains_key(x) && defined_by.contains_key(x) && defined_by[x] != con {
+				me.arg_bool(arg)
+			};
+		let lit_int_view =
+			|me: &mut Self, lit: &Literal<S>| -> Result<IntDecision, FlatZincError> {
+				if let Literal::Identifier(x) = lit
+					&& !me.map.contains_key(x)
+					&& defined_by.contains_key(x)
+					&& defined_by[x] != con
+				{
 					me.extract_view(defined_by, defined_by[x])?;
 				}
-			}
-			me.lit_int(lit)
-		};
+				me.lit_int(lit)
+			};
 
 		match c.id.deref() {
 			"bool2int" => {
@@ -662,31 +682,51 @@ where
 				_ => {}
 			},
 			"int_eq_reif" => match c.args.as_slice() {
-				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
-				| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))] =>
-				{
+				[
+					Argument::Literal(Literal::Int(i)),
+					Argument::Literal(x),
+					Argument::Literal(Literal::Identifier(r)),
+				]
+				| [
+					Argument::Literal(x),
+					Argument::Literal(Literal::Int(i)),
+					Argument::Literal(Literal::Identifier(r)),
+				] => {
 					let x = lit_int_view(self, x)?;
 					add_view(self, r.clone(), x.eq(*i).into())?;
 				}
 				_ => {}
 			},
 			"int_le_reif" => match c.args.as_slice() {
-				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))] =>
-				{
+				[
+					Argument::Literal(Literal::Int(i)),
+					Argument::Literal(x),
+					Argument::Literal(Literal::Identifier(r)),
+				] => {
 					let x = lit_int_view(self, x)?;
 					add_view(self, r.clone(), x.geq(*i).into())?;
 				}
-				[Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))] =>
-				{
+				[
+					Argument::Literal(x),
+					Argument::Literal(Literal::Int(i)),
+					Argument::Literal(Literal::Identifier(r)),
+				] => {
 					let x = lit_int_view(self, x)?;
 					add_view(self, r.clone(), x.leq(*i).into())?;
 				}
 				_ => {}
 			},
 			"int_ne_reif" => match c.args.as_slice() {
-				[Argument::Literal(Literal::Int(i)), Argument::Literal(x), Argument::Literal(Literal::Identifier(r))]
-				| [Argument::Literal(x), Argument::Literal(Literal::Int(i)), Argument::Literal(Literal::Identifier(r))] =>
-				{
+				[
+					Argument::Literal(Literal::Int(i)),
+					Argument::Literal(x),
+					Argument::Literal(Literal::Identifier(r)),
+				]
+				| [
+					Argument::Literal(x),
+					Argument::Literal(Literal::Int(i)),
+					Argument::Literal(Literal::Identifier(r)),
+				] => {
 					let x = lit_int_view(self, x)?;
 					add_view(self, r.clone(), x.ne(*i).into())?;
 				}
@@ -722,7 +762,7 @@ where
 					break 'int_lin_eq;
 				}
 				let offset = sum / c;
-				let view = if let Some(scale) = NonZeroIntVal::new(-cy / c) {
+				let view = if let Some(scale) = NonZero::new(-cy / c) {
 					let y = lit_int_view(self, vy)?;
 					y * scale + offset
 				} else {
@@ -806,21 +846,21 @@ where
 				if let Some(var) = self.fzn.variables.get(ident) {
 					Ok(e.insert(match var.ty {
 						Type::Bool => Decision::Bool(self.prb.new_bool_var()),
-						Type::Int => {
-							match &var.domain {
-								Some(Domain::Int(r)) => Decision::Int(
-									self.prb.new_int_var(r.iter().collect::<IntSetVal>()),
-								),
-								Some(_) => unreachable!(),
-								None => {
-									warn!(
-										"decision variable `{}' was unbounded, assuming domain {}..{}",
-										ident, FULL_INT_DOMAIN.start(), FULL_INT_DOMAIN.end()
-									);
-									self.prb.new_int_var(FULL_INT_DOMAIN).into()
-								}
+						Type::Int => match &var.domain {
+							Some(Domain::Int(r)) => {
+								Decision::Int(self.prb.new_int_var(r.iter().collect::<IntSetVal>()))
 							}
-						}
+							Some(_) => unreachable!(),
+							None => {
+								warn!(
+									"decision variable `{}' was unbounded, assuming domain {}..{}",
+									ident,
+									FULL_INT_DOMAIN.start(),
+									FULL_INT_DOMAIN.end()
+								);
+								self.prb.new_int_var(FULL_INT_DOMAIN).into()
+							}
+						},
 						_ => todo!("Variables of {:?} are not yet supported", var.ty),
 					})
 					.clone())
@@ -933,7 +973,8 @@ where
 							.iter()
 							.map(|l| self.lit_bool(l).map(Into::into))
 							.collect();
-						self.prb += Formula::Equiv(vec![r.into(), Formula::And(es?)]);
+						self.prb
+							.add_constraint(Formula::Equiv(vec![r.into(), Formula::And(es?)]));
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_bool_and",
@@ -949,7 +990,7 @@ where
 							.iter()
 							.map(|l| self.lit_bool(l).map(Into::into))
 							.try_collect()?;
-						self.prb += Formula::Xor(es);
+						self.prb.add_constraint(Formula::Xor(es));
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_bool_xor",
@@ -968,7 +1009,7 @@ where
 						let idx = self.arg_int(idx)?;
 						let val = self.arg_bool(val)?;
 
-						self.prb += array_element(arr, idx - 1, val);
+						array_element(&mut self.prb, arr, idx - 1, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_bool_element",
@@ -986,7 +1027,7 @@ where
 							.try_collect()?;
 						let idx = self.arg_int(idx)?;
 						let val = self.arg_int(val)?;
-						self.prb += array_element(arr, idx - 1, val);
+						array_element(&mut self.prb, arr, idx - 1, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_int_element",
@@ -1005,7 +1046,7 @@ where
 						let idx = self.arg_int(idx)?;
 						let val = self.arg_bool(val)?;
 
-						self.prb += array_element(arr, idx - 1, val);
+						array_element(&mut self.prb, arr, idx - 1, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_var_bool_element",
@@ -1024,7 +1065,7 @@ where
 						let idx = self.arg_int(idx)?;
 						let val = self.arg_int(val)?;
 
-						self.prb += array_element(arr, idx - 1, val);
+						array_element(&mut self.prb, arr, idx - 1, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_var_int_element",
@@ -1037,7 +1078,8 @@ where
 					if let [b, i] = c.args.as_slice() {
 						let b = self.arg_bool(b)?;
 						let i = self.arg_int(i)?;
-						self.prb.unify_int(b.into(), i)?;
+						i.unify(&mut self.prb, b)
+							.map_err(ReformulationError::from)?;
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool2int",
@@ -1063,13 +1105,11 @@ where
 						let lin_exp: IntLinExpr = vars
 							.into_iter()
 							.zip(coeffs.into_iter())
-							.filter_map(|(x, c)| {
-								NonZeroIntVal::new(c).map(|c| IntDecision::from(x) * c)
-							})
+							.filter_map(|(x, c)| NonZero::new(c).map(|c| IntDecision::from(x) * c))
 							.chain(once(-sum))
 							.sum();
 
-						self.prb += lin_exp.eq(0);
+						rel!(&mut self.prb, 0 == lin_exp);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_lin_eq",
@@ -1104,11 +1144,19 @@ where
 							match lits.len() {
 								0 => {
 									return Err(FlatZincError::ReformulationError(
-										ReformulationError::TrivialUnsatisfiable,
-									))
+										ReformulationError::SimplificationConflict(
+											self.prb.declare_conflict([]),
+										),
+									));
 								}
-								1 => self.prb.set_bool(lits[0])?,
-								_ => self.prb += Formula::Or(lits.into_iter().map_into().collect()),
+								1 => lits[0]
+									.set(&mut self.prb, vec![])
+									.map_err(ReformulationError::from)?,
+								_ => {
+									self.prb.add_constraint(Formula::Or(
+										lits.into_iter().map_into().collect(),
+									));
+								}
 							}
 						}
 					} else {
@@ -1124,10 +1172,10 @@ where
 						let a = self.arg_bool(a)?;
 						let b = self.arg_bool(b)?;
 						let r = self.arg_bool(r)?;
-						self.prb += Formula::Equiv(vec![
+						self.prb.add_constraint(Formula::Equiv(vec![
 							r.into(),
 							Formula::Equiv(vec![a.into(), b.into()]),
-						]);
+						]));
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_eq_reif",
@@ -1140,7 +1188,8 @@ where
 					if let [a, b] = c.args.as_slice() {
 						let a = self.arg_bool(a)?;
 						let b = self.arg_bool(b)?;
-						self.prb.unify_bool(a, !b)?;
+						a.unify(&mut self.prb, !b)
+							.map_err(ReformulationError::from)?;
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_not",
@@ -1158,7 +1207,7 @@ where
 							let r = self.arg_bool(&c.args[2])?;
 							f = Formula::Equiv(vec![r.into(), f]);
 						}
-						self.prb += f;
+						self.prb.add_constraint(f);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_xor",
@@ -1235,10 +1284,10 @@ where
 						let args = self.arg_array(args)?;
 						let args: Result<Vec<_>, _> =
 							args.iter().map(|l| self.lit_int(l)).collect();
-						let mut all_diff = all_different_int(args?);
-						let force_bounds = self.anns_contains(&c.ann, &mut ann_used, "bounds");
+						let all_diff = all_different_int(&mut self.prb, args?);
+						let force_bounds = Self::anns_contains(&c.ann, &mut ann_used, "bounds");
 						let force_value =
-							self.anns_contains(&c.ann, &mut ann_used, "value_propagation");
+							Self::anns_contains(&c.ann, &mut ann_used, "value_propagation");
 						match (force_bounds, force_value) {
 							(false, false) => {} // No
 							(bounds, value) => {
@@ -1246,7 +1295,6 @@ where
 								all_diff.use_value_consistent_propagator(value);
 							}
 						}
-						self.prb += all_diff;
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_all_different",
@@ -1263,9 +1311,9 @@ where
 							args.iter().map(|l| self.lit_int(l)).collect();
 						let m = self.arg_int(m)?;
 						if is_maximum {
-							self.prb += array_maximum_int(args?, m);
+							array_maximum_int(&mut self.prb, args?, m);
 						} else {
-							self.prb += array_minimum_int(args?, m);
+							array_minimum_int(&mut self.prb, args?, m);
 						}
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
@@ -1293,7 +1341,8 @@ where
 							let e = self.lit_bool(l)?;
 							lits.push((!e).into());
 						}
-						self.prb += Formula::Equiv(vec![r.into(), Formula::Or(lits)]);
+						self.prb
+							.add_constraint(Formula::Equiv(vec![r.into(), Formula::Or(lits)]));
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "bool_clause_reif",
@@ -1320,7 +1369,7 @@ where
 							.map(|l| self.lit_int(l))
 							.try_collect()?;
 						let r = self.arg_int(r)?;
-						self.prb += cumulative(starts, durations, heights, r);
+						cumulative(&mut self.prb, starts, durations, heights, r);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_cumulative",
@@ -1343,11 +1392,11 @@ where
 							.try_collect()?;
 
 						let force_edge_finding =
-							self.anns_contains(&c.ann, &mut ann_used, "edge_finding");
-						let force_not_last = self.anns_contains(&c.ann, &mut ann_used, "not_last");
+							Self::anns_contains(&c.ann, &mut ann_used, "edge_finding");
+						let force_not_last = Self::anns_contains(&c.ann, &mut ann_used, "not_last");
 						let force_detectable_precedence =
-							self.anns_contains(&c.ann, &mut ann_used, "detectable_precedence");
-						let mut disj_strict = disjunctive_strict(start_times, durations);
+							Self::anns_contains(&c.ann, &mut ann_used, "detectable_precedence");
+						let disj_strict = disjunctive_strict(&mut self.prb, start_times, durations);
 						match (
 							force_edge_finding,
 							force_not_last,
@@ -1360,7 +1409,6 @@ where
 								disj_strict.use_detectable_precedence_propagation(dp_prop);
 							}
 						}
-						self.prb += disj_strict;
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_disjunctive_strict",
@@ -1387,7 +1435,10 @@ where
 						if d.len() != (q * s) as usize {
 							return Err(FlatZincError::InvalidArgumentType {
 								expected: "array with an element for each combination of state and input value",
-								found: format!("array of size {}, for {q} states and {s} input values", d.len())
+								found: format!(
+									"array of size {}, for {q} states and {s} input values",
+									d.len()
+								),
 							});
 						}
 						let d: Vec<Vec<_>> = d
@@ -1404,10 +1455,7 @@ where
 
 						// Convert regular constraint in to table constraints and add them to the
 						// model
-						let tables = self.convert_regular_to_tables(x, d, q0, f);
-						for table in tables {
-							self.prb += table;
-						}
+						self.convert_regular_to_tables(x, d, q0, f);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_regular",
@@ -1425,11 +1473,19 @@ where
 						if args.is_empty() || (table.len() % args.len()) != 0 {
 							return Err(FlatZincError::InvalidArgumentType {
 								expected: "array of n integers, where n is divisible by the number of variables",
-								found: format!("array of {} integers, to give values to {} variables", table.len(), args.len()),
+								found: format!(
+									"array of {} integers, to give values to {} variables",
+									table.len(),
+									args.len()
+								),
 							});
 						}
 						if table.is_empty() {
-							return Err(ReformulationError::TrivialUnsatisfiable.into());
+							return Err(FlatZincError::ReformulationError(
+								ReformulationError::SimplificationConflict(
+									self.prb.declare_conflict([]),
+								),
+							));
 						}
 						let table: Vec<Vec<_>> = table
 							.into_iter()
@@ -1437,7 +1493,7 @@ where
 							.into_iter()
 							.map(|c| c.collect())
 							.collect();
-						self.prb += table_int(args, table);
+						table_int(&mut self.prb, args, table);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_table_int",
@@ -1451,7 +1507,7 @@ where
 						let args = self.arg_array(args)?;
 						let args: Result<Vec<_>, _> =
 							args.iter().map(|l| self.lit_int(l)).collect();
-						self.prb += seq_precede_chain_int(args?);
+						seq_precede_chain_int(&mut self.prb, args?);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_seq_precede_chain",
@@ -1472,7 +1528,7 @@ where
 							.iter()
 							.map(|l| self.lit_int(l))
 							.try_collect()?;
-						self.prb += value_precede_chain_int(variables, values);
+						value_precede_chain_int(&mut self.prb, variables, values);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "huub_value_precede_chain",
@@ -1485,7 +1541,7 @@ where
 					if let [origin, abs] = c.args.as_slice() {
 						let origin = self.arg_int(origin)?;
 						let abs = self.arg_int(abs)?;
-						self.prb += abs_int(origin, abs);
+						abs_int(&mut self.prb, origin, abs);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "int_abs",
@@ -1499,7 +1555,7 @@ where
 						let num = self.arg_int(num)?;
 						let denom = self.arg_int(denom)?;
 						let res = self.arg_int(res)?;
-						self.prb += div_int(num, denom, res);
+						div_int(&mut self.prb, num, denom, res);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "int_div",
@@ -1512,10 +1568,9 @@ where
 					if let [a, b] = c.args.as_slice() {
 						let a = self.arg_int(a)?;
 						let b = self.arg_int(b)?;
-						let lin_exp = a - b;
-						self.prb += match c.id.deref() {
-							"int_le" => lin_exp.leq(0),
-							"int_ne" => lin_exp.ne(0),
+						match c.id.deref() {
+							"int_le" => rel!(&mut self.prb, 0 >= a - b),
+							"int_ne" => rel!(&mut self.prb, 0 != a - b),
 							_ => unreachable!(),
 						};
 					} else {
@@ -1544,11 +1599,11 @@ where
 							"int_ne_imp" | "int_ne_reif" => lin_exp.ne(0),
 							_ => unreachable!(),
 						};
-						self.prb += match c.id.deref() {
+						self.prb.add_constraint(match c.id.deref() {
 							"int_eq_imp" | "int_le_imp" | "int_ne_imp" => lin.implied_by(r),
 							"int_eq_reif" | "int_le_reif" | "int_ne_reif" => lin.reified_by(r),
 							_ => unreachable!(),
-						};
+						});
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: match c.id.deref() {
@@ -1581,15 +1636,15 @@ where
 						let lin_exp: IntLinExpr = vars
 							.into_iter()
 							.zip(coeffs.into_iter())
-							.filter_map(|(x, c)| NonZeroIntVal::new(c).map(|c| x * c))
+							.filter_map(|(x, c)| NonZero::new(c).map(|c| x * c))
 							.sum();
 
-						self.prb += match c.id.deref() {
+						self.prb.add_constraint(match c.id.deref() {
 							"int_lin_eq" => lin_exp.eq(rhs),
 							"int_lin_le" => lin_exp.leq(rhs),
 							"int_lin_ne" => lin_exp.ne(rhs),
 							_ => unreachable!(),
-						};
+						});
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: match c.id.deref() {
@@ -1621,7 +1676,7 @@ where
 						let lin_exp: IntLinExpr = vars
 							.into_iter()
 							.zip(coeffs.into_iter())
-							.filter_map(|(x, c)| NonZeroIntVal::new(c).map(|c| x * c))
+							.filter_map(|(x, c)| NonZero::new(c).map(|c| x * c))
 							.sum();
 
 						let lin = match c.id.deref() {
@@ -1630,7 +1685,7 @@ where
 							"int_lin_ne_imp" | "int_lin_ne_reif" => lin_exp.ne(rhs),
 							_ => unreachable!(),
 						};
-						self.prb += match c.id.deref() {
+						self.prb.add_constraint(match c.id.deref() {
 							"int_lin_eq_imp" | "int_lin_le_imp" | "int_lin_ne_imp" => {
 								lin.implied_by(reified)
 							}
@@ -1638,7 +1693,7 @@ where
 								lin.reified_by(reified)
 							}
 							_ => unreachable!(),
-						};
+						});
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: match c.id.deref() {
@@ -1662,9 +1717,9 @@ where
 						let b = self.arg_int(b)?;
 						let m = self.arg_int(m)?;
 						if is_maximum {
-							self.prb += array_maximum_int(vec![a, b], m);
+							array_maximum_int(&mut self.prb, vec![a, b], m);
 						} else {
-							self.prb += array_minimum_int(vec![a, b], m);
+							array_minimum_int(&mut self.prb, vec![a, b], m);
 						}
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
@@ -1679,7 +1734,7 @@ where
 						let base = self.arg_int(base)?;
 						let exponent = self.arg_int(exponent)?;
 						let res = self.arg_int(res)?;
-						self.prb += pow_int(base, exponent, res);
+						pow_int(&mut self.prb, base, exponent, res);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "int_pow",
@@ -1693,7 +1748,7 @@ where
 						let a = self.arg_int(x)?;
 						let b = self.arg_int(y)?;
 						let m = self.arg_int(z)?;
-						self.prb += times_int(a, b, m);
+						times_int(&mut self.prb, a, b, m);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "int_times",
@@ -1707,7 +1762,8 @@ where
 						let x = self.arg_int(x)?;
 						let s = self.arg_par_set(s)?;
 
-						self.prb.set_int_in_set(x, &s)?;
+						x.set_domain(&mut self.prb, &s, vec![])
+							.map_err(ReformulationError::from)?;
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "set_in",
@@ -1722,7 +1778,7 @@ where
 						let s = self.arg_par_set(s)?;
 						let r = self.arg_bool(r)?;
 
-						self.prb += int_in_set_reif(x, s, r);
+						int_in_set_reif(&mut self.prb, x, s, r);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "set_in_reif",
@@ -1771,7 +1827,7 @@ where
 					members.extend(b_set.take());
 					for b in members.iter() {
 						if let Literal::Identifier(b) = b {
-							let _ = map.insert(b.clone(), Rc::clone(&a_set));
+							map.insert(b.clone(), Rc::clone(&a_set));
 						}
 					}
 				}
@@ -1779,23 +1835,23 @@ where
 					let mut members = (*a_set).borrow_mut();
 					members.push(b.clone());
 					if let Literal::Identifier(b) = b {
-						let _ = map.insert(b.clone(), Rc::clone(&a_set));
+						map.insert(b.clone(), Rc::clone(&a_set));
 					}
 				}
 				(None, Some(b_set)) => {
 					let mut members = (*b_set).borrow_mut();
 					members.push(a.clone());
 					if let Literal::Identifier(a) = a {
-						let _ = map.insert(a.clone(), Rc::clone(&b_set));
+						map.insert(a.clone(), Rc::clone(&b_set));
 					}
 				}
 				(None, None) => {
 					let n_set = Rc::new(RefCell::new(vec![a.clone(), b.clone()]));
 					if let Literal::Identifier(a) = a {
-						let _ = map.insert(a.clone(), Rc::clone(&n_set));
+						map.insert(a.clone(), Rc::clone(&n_set));
 					}
 					if let Literal::Identifier(b) = b {
-						let _ = map.insert(b.clone(), n_set);
+						map.insert(b.clone(), n_set);
 					}
 				}
 			};
@@ -1848,9 +1904,9 @@ where
 			}
 		}
 
-		let keys = unify_map.keys().sorted();
-		for k in keys {
-			let li = unify_map[k].borrow();
+		#[expect(clippy::iter_over_hash_type, reason = "FxHashMap::iter is stable")]
+		for (k, li) in unify_map.iter() {
+			let li = li.borrow();
 			if self.map.contains_key(k) {
 				continue;
 			}
@@ -1863,7 +1919,11 @@ where
 						match lit {
 							Literal::Bool(b) => {
 								if domain == Some(!b) {
-									return Err(ReformulationError::TrivialUnsatisfiable.into());
+									return Err(FlatZincError::ReformulationError(
+										ReformulationError::SimplificationConflict(
+											self.prb.declare_conflict([]),
+										),
+									));
 								} else {
 									domain = Some(*b);
 								}

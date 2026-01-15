@@ -4,7 +4,7 @@
 use pindakaas::{Var as RawVar, VarRange};
 use rustc_hash::FxHashMap;
 
-use crate::{solver::int_var::IntVarRef, IntLitMeaning};
+use crate::{IntLitMeaning, solver::int_var::IntVarRef};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 /// A mapping of Boolean variables to integer variables of which they represent
@@ -44,7 +44,7 @@ impl BoolToIntMap {
 		} else {
 			self.lazy
 				.get(&var)
-				.map(|(int_var, meaning)| (*int_var, Some(meaning.clone())))
+				.map(|(int_var, meaning)| (*int_var, Some(*meaning)))
 		}
 	}
 	/// Insert a range of Boolean variables to map them to the integer variable

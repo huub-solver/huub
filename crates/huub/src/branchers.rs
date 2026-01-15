@@ -5,12 +5,15 @@ use std::fmt::Debug;
 use pindakaas::Lit as RawLit;
 
 use crate::{
-	actions::{BrancherInitActions, DecisionActions},
-	solver::{
-		solving_context::SolvingContext, trail::TrailedInt, BoolView, BoolViewInner, IntLitMeaning,
-		IntView, IntViewInner, View,
-	},
 	ValueSelection, VariableSelection,
+	actions::{
+		BoolInspectionActions, BrancherInitActions, DecisionActions, IntDecisionActions,
+		IntInspectionActions, ReasoningContext,
+	},
+	solver::{
+		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, View,
+		solving_context::SolvingContext, trail::TrailedInt,
+	},
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -123,9 +126,13 @@ impl BoolBrancher {
 	}
 }
 
-impl<D: DecisionActions> Brancher<D> for BoolBrancher {
-	fn decide(&mut self, actions: &mut D) -> Decision {
-		let begin = actions.get_trailed_int(self.next) as usize;
+impl<E> Brancher<E> for BoolBrancher
+where
+	E: DecisionActions,
+	RawLit: BoolInspectionActions<E>,
+{
+	fn decide(&mut self, ctx: &mut E) -> Decision {
+		let begin = ctx.trailed_int(self.next) as usize;
 
 		// return if all variables have been assigned
 		if begin == self.vars.len() {
@@ -144,21 +151,17 @@ impl<D: DecisionActions> Brancher<D> for BoolBrancher {
 
 		let mut loc = None;
 		for (i, &var) in self.vars.iter().enumerate().skip(begin) {
-			if actions
-				.get_bool_val(BoolView(BoolViewInner::Lit(var)))
-				.is_none()
-			{
+			if var.val(ctx).is_none() {
 				loc = Some(i);
 				break;
 			}
 		}
-		let var = if let Some(i) = loc {
+		let var = if let Some(first_unfixed) = loc {
 			// Update position for next iteration
-			let _ = actions.set_trailed_int(self.next, (i + 1) as i64);
-			self.vars[i]
+			ctx.set_trailed_int(self.next, first_unfixed as i64);
+			self.vars[first_unfixed]
 		} else {
-			// Return if everything has already been assigned
-			let _ = actions.set_trailed_int(self.next, self.vars.len() as i64);
+			// Return that everything has already been assigned
 			return Decision::Exhausted;
 		};
 
@@ -204,23 +207,27 @@ impl IntBrancher {
 	}
 }
 
-impl<D: DecisionActions> Brancher<D> for IntBrancher {
+impl<D> Brancher<D> for IntBrancher
+where
+	D: DecisionActions + ReasoningContext<Atom = BoolView>,
+	IntView: IntDecisionActions<D>,
+{
 	fn decide(&mut self, actions: &mut D) -> Decision {
-		let begin = actions.get_trailed_int(self.next) as usize;
+		let begin = actions.trailed_int(self.next) as usize;
 
 		// return if all variables have been assigned
 		if begin == self.vars.len() {
 			return Decision::Exhausted;
 		}
 
-		let score = |var| match self.var_sel {
+		let score = |var: IntView| match self.var_sel {
 			VariableSelection::AntiFirstFail | VariableSelection::FirstFail => {
-				let (lb, ub) = actions.get_int_bounds(var);
+				let (lb, ub) = var.bounds(actions);
 				ub - lb
 			}
 			VariableSelection::InputOrder => 0,
-			VariableSelection::Largest => actions.get_int_upper_bound(var),
-			VariableSelection::Smallest => actions.get_int_lower_bound(var),
+			VariableSelection::Largest => var.upper_bound(actions),
+			VariableSelection::Smallest => var.lower_bound(actions),
 		};
 
 		let is_better = |incumbent_score, new_score| match self.var_sel {
@@ -236,9 +243,7 @@ impl<D: DecisionActions> Brancher<D> for IntBrancher {
 		let mut first_unfixed = begin;
 		let mut selection = None;
 		for i in begin..self.vars.len() {
-			if actions.get_int_lower_bound(self.vars[i])
-				== actions.get_int_upper_bound(self.vars[i])
-			{
+			if self.vars[i].lower_bound(actions) == self.vars[i].upper_bound(actions) {
 				// move the unfixed variable to the front
 				let unfixed_var = self.vars[first_unfixed];
 				let fixed_var = self.vars[i];
@@ -257,32 +262,31 @@ impl<D: DecisionActions> Brancher<D> for IntBrancher {
 				}
 			}
 		}
-		// update the next variable to the index of the first unfixed variable
-		let _ = actions.set_trailed_int(self.next, first_unfixed as i64);
 
 		// return if all variables have been assigned
 		let Some((next_var, _)) = selection else {
 			return Decision::Exhausted;
 		};
+
+		// update the next variable to the index of the first unfixed variable
+		actions.set_trailed_int(self.next, first_unfixed as i64);
+
 		// select the next value to branch on based on the value selection strategy
-		let view = match self.val_sel {
-			ValueSelection::IndomainMin => actions.get_int_lit(
-				next_var,
-				IntLitMeaning::Less(actions.get_int_lower_bound(next_var) + 1),
-			),
-			ValueSelection::IndomainMax => actions.get_int_lit(
-				next_var,
-				IntLitMeaning::GreaterEq(actions.get_int_upper_bound(next_var)),
-			),
-			ValueSelection::OutdomainMin => actions.get_int_lit(
-				next_var,
-				IntLitMeaning::GreaterEq(actions.get_int_lower_bound(next_var) + 1),
-			),
-			ValueSelection::OutdomainMax => actions.get_int_lit(
-				next_var,
-				IntLitMeaning::Less(actions.get_int_upper_bound(next_var)),
-			),
-		};
+		let view = next_var.lit(
+			actions,
+			match self.val_sel {
+				ValueSelection::IndomainMin => {
+					IntLitMeaning::Less(next_var.lower_bound(actions) + 1)
+				}
+				ValueSelection::IndomainMax => {
+					IntLitMeaning::GreaterEq(next_var.upper_bound(actions))
+				}
+				ValueSelection::OutdomainMin => {
+					IntLitMeaning::GreaterEq(next_var.lower_bound(actions) + 1)
+				}
+				ValueSelection::OutdomainMax => IntLitMeaning::Less(next_var.upper_bound(actions)),
+			},
+		);
 
 		match view.0 {
 			BoolViewInner::Lit(lit) => Decision::Select(lit),
@@ -316,19 +320,23 @@ impl WarmStartBrancher {
 			filtered_decision.reverse();
 			solver.push_brancher(Box::new(WarmStartBrancher {
 				decisions: filtered_decision,
-				conflicts: solver.get_num_conflicts(),
+				conflicts: solver.num_conflicts(),
 			}));
 		}
 	}
 }
 
-impl<D: DecisionActions> Brancher<D> for WarmStartBrancher {
-	fn decide(&mut self, actions: &mut D) -> Decision {
-		if actions.get_num_conflicts() > self.conflicts {
+impl<Context> Brancher<Context> for WarmStartBrancher
+where
+	Context: DecisionActions,
+	RawLit: BoolInspectionActions<Context>,
+{
+	fn decide(&mut self, ctx: &mut Context) -> Decision {
+		if ctx.num_conflicts() > self.conflicts {
 			return Decision::Consumed;
 		}
 		while let Some(lit) = self.decisions.pop() {
-			match actions.get_bool_val(BoolView(BoolViewInner::Lit(lit))) {
+			match lit.val(ctx) {
 				Some(true) => {}
 				Some(false) => return Decision::Consumed,
 				None => return Decision::Select(lit),

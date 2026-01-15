@@ -3,17 +3,15 @@
 //! [`Trail`] structure, if the search process needs to backtrack, then these
 //! values can be restored to their previous state.
 
-use std::mem;
+use std::{mem, num::NonZeroI32};
 
 use index_vec::IndexVec;
 use pindakaas::{Lit as RawLit, Var as RawVar};
 use tracing::trace;
 
 use crate::{
-	actions::TrailingActions,
-	helpers::var_from_u32,
-	solver::{BoolView, BoolViewInner},
 	IntVal,
+	actions::{BoolInspectionActions, TrailingActions},
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -31,7 +29,7 @@ pub(crate) struct Trail {
 	/// The storage of event that have been trailed.
 	///
 	/// Note that the trail is contains a sequence of integers, but 1 or 3 of
-	/// these integers are inteded to be read as a [`TrailEvent`].
+	/// these integers are intended to be read as a [`TrailEvent`].
 	trail: Vec<u32>,
 	/// The current position in the trail.
 	///
@@ -58,6 +56,12 @@ pub(crate) enum TrailEvent {
 	IntAssignment(TrailedInt, IntVal),
 }
 
+impl BoolInspectionActions<Trail> for RawLit {
+	fn val(&self, ctx: &Trail) -> Option<bool> {
+		ctx.sat_value(*self)
+	}
+}
+
 impl Trail {
 	/// A trailed integer that is used to track the currently active brancher.
 	pub(crate) const CURRENT_BRANCHER: TrailedInt = TrailedInt { _raw: 0 };
@@ -69,29 +73,19 @@ impl Trail {
 	/// the correct length (using [`Self::grow_to_boolvar`]).
 	pub(crate) fn assign_lit(&mut self, lit: RawLit) -> Option<bool> {
 		let var = lit.var();
-		let val = !lit.is_negated();
-
-		let prev = self.sat_store[Self::sat_index(var)].value.replace(val);
-		if prev.is_none() && !self.prev_len.is_empty() {
+		let store = &mut self.sat_store[Self::sat_index(var)].value;
+		if let Some(val) = *store {
+			Some(if lit.is_negated() { !val } else { val })
+		} else {
+			*store = Some(!lit.is_negated());
 			self.push_trail(TrailEvent::SatAssignment(var));
+			None
 		}
-		prev
 	}
 
 	/// Return the current decision level
 	pub(crate) fn decision_level(&self) -> u32 {
 		self.prev_len.len() as u32
-	}
-
-	/// Get the current assigned value for a literal (if any).
-	pub(crate) fn get_sat_value(&self, lit: impl Into<RawLit>) -> Option<bool> {
-		let lit = lit.into();
-		// Note that this doesn't use direct indexing as some operations might check
-		// the value of the variable before it is observed by the solver
-		self.sat_store
-			.get(Self::sat_index(lit.var()))
-			.and_then(|store| store.value)
-			.map(|x| if lit.is_negated() { !x } else { x })
 	}
 
 	/// Method used to restore the state of all value to the point at which a
@@ -147,7 +141,7 @@ impl Trail {
 	///
 	/// The state of the trailed values is restored to the requested level.
 	pub(crate) fn notify_backtrack(&mut self, level: usize) {
-		// TODO: this is a fix for an issue in the Cadical implementation of the IPASIR UP interface: https://github.com/arminbiere/cadical/issues/92
+		// TODO: this is a fix for an issue in the CaDiCaL implementation of the IPASIR UP interface: https://github.com/arminbiere/cadical/issues/92
 		if level >= self.prev_len.len() {
 			return;
 		}
@@ -161,11 +155,11 @@ impl Trail {
 		);
 		if len <= self.pos {
 			while self.pos > len {
-				let _ = self.undo::<false>();
+				self.undo::<false>();
 			}
 		} else {
 			while self.pos < len {
-				let _ = self.redo();
+				self.redo();
 			}
 		}
 		debug_assert_eq!(self.pos, len);
@@ -208,7 +202,9 @@ impl Trail {
 		// Find event at current position
 		let event = if (self.trail[self.pos] as i32).is_positive() {
 			self.pos += 1;
-			TrailEvent::SatAssignment(var_from_u32(self.trail[self.pos - 1]))
+			TrailEvent::SatAssignment(
+				RawLit::from_raw(NonZeroI32::new(self.trail[self.pos - 1] as i32).unwrap()).var(),
+			)
 		} else {
 			self.pos += 3;
 			TrailEvent::int_from_rev_trail(self.trail[self.pos - 3..self.pos].try_into().unwrap())
@@ -232,12 +228,28 @@ impl Trail {
 		Some(event)
 	}
 
+	/// Ensure that the trail is in a position where it can record new changes.
+	pub(crate) fn reset_to_trail_head(&mut self) {
+		while self.redo().is_some() {}
+	}
+
 	#[inline]
 	/// Return the index for `sat_store` based on a [`RawVar`].
 	fn sat_index(var: RawVar) -> usize {
 		// TODO: Consider grounding (either always deduct 1 because there is no var
 		// 0, or at the least observed var)
 		i32::from(var) as usize
+	}
+
+	/// Get the current assigned value for a literal (if any).
+	pub(crate) fn sat_value(&self, lit: impl Into<RawLit>) -> Option<bool> {
+		let lit = lit.into();
+		// Note that this doesn't use direct indexing as some operations might check
+		// the value of the variable before it is observed by the solver
+		self.sat_store
+			.get(Self::sat_index(lit.var()))
+			.and_then(|store| store.value)
+			.map(|x| if lit.is_negated() { !x } else { x })
 	}
 
 	/// Create a new trailed integer with initial value `val`
@@ -259,7 +271,9 @@ impl Trail {
 		// Find event before current position
 		let event = if (self.trail[self.pos - 1] as i32).is_positive() {
 			self.pos -= 1;
-			TrailEvent::SatAssignment(var_from_u32(self.trail[self.pos]))
+			TrailEvent::SatAssignment(
+				RawLit::from_raw(NonZeroI32::new(self.trail[self.pos] as i32).unwrap()).var(),
+			)
 		} else {
 			self.pos -= 3;
 			TrailEvent::int_from_trail(self.trail[self.pos..=self.pos + 2].try_into().unwrap())
@@ -301,31 +315,23 @@ impl Default for Trail {
 }
 
 impl TrailingActions for Trail {
-	fn get_bool_val(&self, bv: BoolView) -> Option<bool> {
-		match bv.0 {
-			BoolViewInner::Lit(lit) => self.get_sat_value(lit),
-			BoolViewInner::Const(b) => Some(b),
-		}
-	}
-
-	fn get_trailed_int(&self, i: TrailedInt) -> IntVal {
-		self.int_value[i]
-	}
 	fn set_trailed_int(&mut self, i: TrailedInt, v: IntVal) -> IntVal {
 		if self.int_value[i] == v {
 			return v;
 		}
 		let old = mem::replace(&mut self.int_value[i], v);
-		if !self.prev_len.is_empty() {
-			self.push_trail(TrailEvent::IntAssignment(i, old));
-		}
+		self.push_trail(TrailEvent::IntAssignment(i, old));
 		old
+	}
+
+	fn trailed_int(&self, i: TrailedInt) -> IntVal {
+		self.int_value[i]
 	}
 }
 
 impl TrailEvent {
 	#[inline]
-	/// Internal method used to tranform a slice of the trail to a
+	/// Internal method used to transform a slice of the trail to a
 	/// [`TrailEvent::IntAssignment`] object for the [`Trail::redo`] method.
 	fn int_from_rev_trail(raw: [u32; 3]) -> Self {
 		let i = -(raw[0] as i32) as usize;
@@ -335,7 +341,7 @@ impl TrailEvent {
 	}
 
 	#[inline]
-	/// Internal method used to tranform a slice of the trail to a
+	/// Internal method used to transform a slice of the trail to a
 	/// [`TrailEvent::IntAssignment`] object for the [`Trail::undo`] method.
 	fn int_from_trail(raw: [u32; 3]) -> Self {
 		let i = -(raw[2] as i32) as usize;
@@ -386,11 +392,12 @@ index_vec::define_index_type! {
 
 #[cfg(test)]
 mod tests {
-	use pindakaas::{solver::cadical::Cadical, ClauseDatabase};
+	use pindakaas::{ClauseDatabase, solver::cadical::Cadical};
 
 	use crate::{
-		solver::trail::{Trail, TrailEvent},
 		IntVal,
+		actions::TrailingActions,
+		solver::trail::{Trail, TrailEvent},
 	};
 
 	#[test]
@@ -398,7 +405,7 @@ mod tests {
 		let mut slv = Cadical::default();
 		let mut trail = Trail::default();
 		let lits = slv.new_var_range(10);
-		trail.grow_to_boolvar(lits.clone().end());
+		trail.grow_to_boolvar(lits.end());
 		let int_events: Vec<_> = [
 			0,
 			1,
@@ -415,20 +422,30 @@ mod tests {
 		.map(|i| (trail.track_int(0), i))
 		.collect();
 
-		for (l, (i, v)) in lits.zip(int_events.iter()) {
-			trail.push_trail(TrailEvent::SatAssignment(l));
-			let _ = trail.assign_lit(if usize::from(*i) % 2 == 0 {
+		for (l, &(i, v)) in lits.zip(int_events.iter()) {
+			trail.assign_lit(if usize::from(i) % 2 == 0 {
 				l.into()
 			} else {
 				!l
 			});
-			trail.push_trail(TrailEvent::IntAssignment(*i, *v));
+			trail.set_trailed_int(i, v);
 		}
-		for (l, (i, v)) in lits.rev().zip(int_events.iter().rev()) {
-			let e = trail.undo::<true>().unwrap();
-			assert_eq!(e, TrailEvent::IntAssignment(*i, *v));
+
+		for (l, &(i, v)) in lits.rev().zip(int_events.iter().rev()) {
+			assert_eq!(trail.trailed_int(i), v);
+			if v != 0 {
+				let e = trail.undo::<true>().unwrap();
+				let TrailEvent::IntAssignment(event_i, event_v) = e else {
+					panic!("unexpected trail event type {e:?}");
+				};
+				assert_eq!(i, event_i);
+				assert_eq!(trail.trailed_int(i), event_v);
+			}
+
+			assert_eq!(trail.sat_value(l), Some(usize::from(i) % 2 == 0));
 			let e = trail.undo::<true>().unwrap();
 			assert_eq!(e, TrailEvent::SatAssignment(l));
+			assert_eq!(trail.sat_value(l), None);
 		}
 	}
 }

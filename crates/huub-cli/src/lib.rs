@@ -21,6 +21,7 @@ macro_rules! outputln {
 	};
 }
 
+mod interned_str;
 mod trace;
 
 use std::{
@@ -30,32 +31,27 @@ use std::{
 	num::NonZeroI32,
 	path::PathBuf,
 	sync::{
-		atomic::{AtomicBool, Ordering},
 		Arc, Mutex,
+		atomic::{AtomicBool, Ordering},
 	},
 	time::{Duration, Instant},
 };
 
 use flatzinc_serde::{FlatZinc, Literal, Method};
 use huub::{
-	actions::DecisionActions,
+	TermSignal,
+	actions::IntDecisionActions,
 	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::{InitConfig, ReformulationError},
 	solver::{Goal, IntLitMeaning, SolveResult, Solver, Valuation, Value, View},
-	TermSignal,
 };
 use mimalloc::MiMalloc;
 use pico_args::Arguments;
 use rustc_hash::FxHashMap;
 use tracing::{subscriber::set_default, warn};
 use tracing_subscriber::fmt::MakeWriter;
-use ustr::{ustr, Ustr, UstrMap};
 
-use crate::trace::LitName;
-
-/// Use [`MiMalloc`] as the global allocator.
-#[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
+use crate::{interned_str::InternedStr, trace::LitName};
 
 /// Status message to output when it is proven that no more/better solutions can
 /// be found.
@@ -67,6 +63,10 @@ const FZN_SEPERATOR: &str = "----------";
 const FZN_UNKNOWN: &str = "=====UNKNOWN=====";
 /// Status message to output when a problem is proven to be unsatisfiable.
 const FZN_UNSATISFIABLE: &str = "=====UNSATISFIABLE=====";
+
+/// Use [`MiMalloc`] as the global allocator.
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 /// FlatZinc command line interface for the Huub solver
 ///
@@ -115,6 +115,9 @@ pub struct Cli<Stdout, Stderr> {
 	preprocessing: Option<usize>,
 	/// Whether to enable the failed literal probing in the oracle solver.
 	probing: bool,
+	/// Whether to enable asking for explanation clauses for all literals
+	/// propagated on the level of a conflict.
+	reason_eager: bool,
 	/// Whether to enable the global forward subsumption in the oracle solver.
 	subsumption: bool,
 	/// Whether to enable the bounded variable elimination in the oracle solver.
@@ -136,11 +139,11 @@ pub struct Cli<Stdout, Stderr> {
 /// Solution struct to display the results of the solver
 struct Solution<'a> {
 	/// FlatZinc instance
-	fzn: &'a FlatZinc<Ustr>,
+	fzn: &'a FlatZinc<InternedStr>,
 	/// Mapping from solver views to solution values
 	value: &'a dyn Valuation,
 	/// Mapping from FlatZinc identifiers to solver views
-	var_map: &'a UstrMap<View>,
+	var_map: &'a FxHashMap<InternedStr, View>,
 }
 
 /// Parse time duration for the time limit flag
@@ -183,6 +186,7 @@ where
 			.with_conditioning(self.conditioning)
 			.with_inprocessing(self.inprocessing)
 			.with_probing(self.probing)
+			.with_reason_eager(self.reason_eager)
 			.with_restart(self.free_search || self.restart)
 			.with_subsumption(self.subsumption)
 			.with_variable_elimination(self.variable_elimination)
@@ -195,7 +199,7 @@ where
 	pub fn run(&mut self) -> Result<(), String> {
 		// Enable tracing functionality
 		let lit_reverse_map: Arc<Mutex<FxHashMap<NonZeroI32, LitName>>> = Arc::default();
-		let int_reverse_map: Arc<Mutex<Vec<Ustr>>> = Arc::default();
+		let int_reverse_map: Arc<Mutex<Vec<InternedStr>>> = Arc::default();
 		let subscriber = trace::create_subscriber(
 			self.verbose,
 			self.stderr.clone(),
@@ -213,7 +217,7 @@ where
 			File::open(&self.path)
 				.map_err(|_| format!("Unable to open file “{}”", self.path.display()))?,
 		);
-		let fzn: FlatZinc<Ustr> = serde_json::from_reader(rdr).map_err(|_| {
+		let fzn: FlatZinc<InternedStr> = serde_json::from_reader(rdr).map_err(|_| {
 			format!(
 				"Unable to parse file “{}” as FlatZinc JSON",
 				self.path.display()
@@ -221,10 +225,20 @@ where
 		})?;
 
 		// Convert FlatZinc model to internal Solver representation
-		let res = Solver::from_fzn::<Ustr, UstrMap<View>>(&fzn, &self.init_config());
+		let res = Solver::from_fzn::<InternedStr, FxHashMap<InternedStr, View>>(
+			&fzn,
+			&self.init_config(),
+		);
 		// Resolve any errors that may have occurred during the conversion
-		let (mut slv, var_map, fzn_stats): (Solver, UstrMap<View>, FlatZincStatistics) = match res {
-			Err(FlatZincError::ReformulationError(ReformulationError::TrivialUnsatisfiable)) => {
+		let (mut slv, var_map, fzn_stats): (
+			Solver,
+			FxHashMap<InternedStr, View>,
+			FlatZincStatistics,
+		) = match res {
+			Err(FlatZincError::ReformulationError(
+				ReformulationError::SimplificationConflict(_)
+				| ReformulationError::TranslationConflict(_),
+			)) => {
 				outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
 				return Ok(());
 			}
@@ -257,16 +271,13 @@ where
 			let mut lit_map = lit_reverse_map.lock().unwrap();
 			let mut int_map = int_reverse_map.lock().unwrap();
 			debug_assert!(int_map.is_empty());
-			*int_map = vec![ustr(""); slv.init_statistics().int_vars()];
-			let mut keys: Vec<_> = var_map.keys().collect();
-			keys.sort();
-			for name in keys {
-				let v = var_map[name];
+			*int_map = vec![InternedStr::default(); slv.init_statistics().int_vars()];
+			for (name, v) in &var_map {
 				match v {
 					View::Bool(bv) => {
 						if let Some(info) = bv.reverse_map_info() {
-							let _ = lit_map.insert(info, LitName::BoolVar(*name, true));
-							let _ = lit_map.insert(-info, LitName::BoolVar(*name, false));
+							lit_map.insert(info, LitName::BoolVar(*name, true));
+							lit_map.insert(-info, LitName::BoolVar(*name, false));
 						}
 					}
 					View::Int(iv) => {
@@ -275,18 +286,19 @@ where
 							if !is_view || int_map[i].is_empty() {
 								int_map[i] = *name;
 								for (lit, meaning) in iv.lit_reverse_map_info(&slv) {
-									let _ = lit_map.insert(lit, LitName::IntLit(i, meaning));
+									lit_map.insert(lit, LitName::IntLit(i, meaning));
 								}
 							} else {
-								debug_assert!(iv
-									.lit_reverse_map_info(&slv)
-									.iter()
-									.all(|(lit, _)| { lit_map.contains_key(lit) }));
+								debug_assert!(
+									iv.lit_reverse_map_info(&slv)
+										.iter()
+										.all(|(lit, _)| { lit_map.contains_key(lit) })
+								);
 							}
 						} else {
 							debug_assert!(is_view);
 							for (lit, meaning) in iv.lit_reverse_map_info(&slv) {
-								let _ = lit_map.entry(lit).or_insert_with(|| {
+								lit_map.entry(lit).or_insert_with(|| {
 									let (op, val) = match meaning {
 										IntLitMeaning::Eq(v) => ("=", v),
 										IntLitMeaning::NotEq(v) => ("!=", v),
@@ -397,7 +409,9 @@ where
 		let (res, stats) = match goal {
 			Some((goal, obj)) => {
 				if self.all_solutions {
-					warn!("--all-solutions is ignored when optimizing, use --intermediate-solutions or --all-optimal instead");
+					warn!(
+						"--all-solutions is ignored when optimizing, use --intermediate-solutions or --all-optimal instead"
+					);
 				}
 				let mut no_good_vals = vec![
 					Value::Bool(false);
@@ -462,7 +476,7 @@ where
 					let Some(obj_val) = obj_val else {
 						unreachable!()
 					};
-					let obj_lit = slv.get_int_lit(obj, IntLitMeaning::Eq(obj_val));
+					let obj_lit = obj.lit(&mut slv, IntLitMeaning::Eq(obj_val));
 					slv.add_clause([obj_lit]).unwrap();
 					// Ensure all following solutions are different from the first optimal
 					// solution
@@ -563,6 +577,7 @@ where
 			time_limit: self.time_limit,
 			verbose: self.verbose,
 			int_eager_limit: self.int_eager_limit,
+			reason_eager: self.reason_eager,
 			restart: self.restart,
 			toggle_vsids: self.toggle_vsids,
 			preprocessing: self.preprocessing,
@@ -593,6 +608,7 @@ where
 			time_limit: self.time_limit,
 			verbose: self.verbose,
 			int_eager_limit: self.int_eager_limit,
+			reason_eager: self.reason_eager,
 			restart: self.restart,
 			toggle_vsids: self.toggle_vsids,
 			preprocessing: self.preprocessing,
@@ -653,6 +669,10 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			vsids_after_restart: args.contains("--vsids-after-restart"),
 			vsids_only: args.contains("--vsids-only"),
 
+			reason_eager: args
+				.opt_value_from_fn("--reason-eager", parse_bool_arg)
+				.map(|x| x.unwrap_or(false))
+				.map_err(|e| e.to_string())?,
 			conditioning: args
 				.opt_value_from_fn("--conditioning", parse_bool_arg)
 				.map(|x| x.unwrap_or(false))
@@ -714,7 +734,7 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 
 impl Solution<'_> {
 	/// Method used to print a literal that is part of a solution.
-	fn print_lit(&self, lit: &Literal<Ustr>) -> String {
+	fn print_lit(&self, lit: &Literal<InternedStr>) -> String {
 		match lit {
 			Literal::Int(i) => format!("{i}"),
 			Literal::Float(f) => format!("{f}"),

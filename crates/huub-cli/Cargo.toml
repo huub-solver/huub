@@ -26,13 +26,13 @@ huub = { path = "../huub" }
 mimalloc = "0.1.47"
 pico-args = { version = "0.5.0", features = ["combined-flags"] }
 rustc-hash = { workspace = true }
+serde = "1.0"
 serde_json = "1.0"
 tracing = { workspace = true }
 tracing-subscriber = "0.3.18"
-ustr = { version = "1.0", features = ["serde"] }
 
 [dev-dependencies]
-divan = { package = "codspeed-divan-compat", version = "3.0" }
+divan = { package = "codspeed-divan-compat", version = "4.0" }
 expect-test = { workspace = true }
 
 [lints]

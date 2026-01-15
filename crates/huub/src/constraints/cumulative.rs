@@ -4,37 +4,24 @@
 //! It uses a time-table propagation approach to efficiently manage the
 //! scheduling of tasks.
 
+use std::{iter::once, ops::AddAssign};
+
 use itertools::Itertools;
 use tracing::trace;
 
 use crate::{
+	Conjunction, IntVal,
 	actions::{
-		ExplanationActions, InspectionActions, PropagatorInitActions, ReformulationActions,
-		SimplificationActions,
+		InitActions, IntDecisionActions, IntInspectionActions, ReasoningContext, ReasoningEngine,
+		ReformulationActions,
 	},
 	constraints::{
-		Conflict, Constraint, PropagationActions, Propagator, ReasonBuilder, SimplificationStatus,
+		BoxedPropagator, Constraint, ModelIntView, Propagator, ReasonBuilder, SimplificationStatus,
+		SolverIntView,
 	},
 	reformulate::ReformulationError,
-	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView},
-	Conjunction, IntDecision, IntVal,
+	solver::{IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel},
 };
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// Representation of the `cumulative` constraint within a model.
-///
-/// This constraint enforces that the sum of resource usages of all tasks
-/// running at any time does not exceed the resource capacity.
-pub struct Cumulative {
-	/// Start time variables of each task.
-	pub(crate) start_times: Vec<IntDecision>,
-	/// Durations of each task.
-	pub(crate) durations: Vec<IntDecision>,
-	/// Resource usages of each task.
-	pub(crate) usages: Vec<IntDecision>,
-	/// Resource capacity.
-	pub(crate) capacity: IntDecision,
-}
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// The propagation rules for the `cumulative` constraint. This enum is
@@ -60,78 +47,25 @@ enum CumulativePropagationRule {
 ///   cumulative propagator. Constraints, 16(3):173-194, 2011.
 /// - Gay, Steven, Renaud Hartert, and Pierre Schaus. "Simple and scalable
 ///   time-table filtering for the cumulative constraint." CP 2015.
-pub struct CumulativeTimeTablePropagator {
+pub struct CumulativeTimeTable<I1, I2, I3, I4> {
 	/// Start time variables of each task.
-	start_times: Vec<IntView>,
+	start_times: Vec<I1>,
 	/// Durations of each task.
-	durations: Vec<IntView>,
+	durations: Vec<I2>,
 	/// Resource usages of each task.
-	usages: Vec<IntView>,
+	usages: Vec<I3>,
 	/// Resource capacity.
-	capacity: IntView,
+	capacity: I4,
 
 	// Time Table Profile
 	/// Bounds of the time intervals where tasks are active.
-	bounds: Vec<i64>,
+	bounds: Vec<IntVal>,
 	/// Heights of the time intervals, representing the total resource usage at
 	/// that time.
 	heights: Vec<IntVal>,
 }
 
-impl<S: SimplificationActions> Constraint<S> for Cumulative {
-	fn simplify(&mut self, actions: &mut S) -> Result<SimplificationStatus, ReformulationError> {
-		// Check if the cumulative constraint is trivially unsatisfiable
-		let mut earliest_start = IntVal::MAX;
-		let mut latest_completion = IntVal::MIN;
-		let capacity = actions.get_int_upper_bound(self.capacity);
-		let mut total_energy = 0;
-		for i in 0..self.start_times.len() {
-			let duration = actions.get_int_lower_bound(self.durations[i]);
-			let usage = actions.get_int_lower_bound(self.usages[i]);
-			let est_i = actions.get_int_lower_bound(self.start_times[i]);
-			let lst_i = actions.get_int_upper_bound(self.start_times[i]);
-			earliest_start = i64::min(earliest_start, est_i);
-			latest_completion = i64::max(latest_completion, lst_i + duration);
-			if lst_i < est_i + duration {
-				total_energy += usage * (est_i + duration - lst_i);
-			}
-		}
-		if total_energy > capacity * (latest_completion - earliest_start) {
-			trace!(
-				"Unsatisfiable {} {} {}",
-				total_energy,
-				capacity,
-				(latest_completion - earliest_start)
-			);
-			return Err(ReformulationError::TrivialUnsatisfiable);
-		}
-		// Reformulate the cumulative constraint into a propagator
-		Ok(SimplificationStatus::Fixpoint)
-	}
-
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let start_times = self
-			.start_times
-			.iter()
-			.map(|&v| slv.get_solver_int(v))
-			.collect_vec();
-		let durations = self
-			.durations
-			.iter()
-			.map(|&v| slv.get_solver_int(v))
-			.collect_vec();
-		let usages = self
-			.usages
-			.iter()
-			.map(|&v| slv.get_solver_int(v))
-			.collect_vec();
-		let capacity = { slv.get_solver_int(self.capacity) };
-		CumulativeTimeTablePropagator::new_in(slv, start_times, durations, usages, capacity);
-		Ok(())
-	}
-}
-
-impl CumulativeTimeTablePropagator {
+impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// Build the time-table profile as a set of (time, height) rectangles to
 	/// represent the compulsory parts of tasks. The compulsory part of a task
 	/// is formed by the interval between its earliest start time and its latest
@@ -143,20 +77,27 @@ impl CumulativeTimeTablePropagator {
 	/// When the profile is built, it checks if the cumulative compulsory part
 	/// exceeds the capacity lower bound. If it does, it sets the lower bound
 	/// of the capacity variable to the height of the profile at the time point.
-	fn build_profile_and_check_overload<P: PropagationActions>(
+	fn build_profile_and_check_overload<E>(
 		&mut self,
-		actions: &mut P,
-	) -> Result<bool, Conflict> {
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<bool, E::Conflict>
+	where
+		E: ReasoningEngine,
+		I1: SolverIntView<E>,
+		I2: SolverIntView<E>,
+		I3: SolverIntView<E>,
+		I4: SolverIntView<E>,
+	{
 		self.bounds.clear();
 		self.heights.clear();
 		let n = self.start_times.len();
 		let mut events = Vec::with_capacity(2 * n);
-		let mut capacity_lb = actions.get_int_lower_bound(self.capacity);
+		let mut capacity_lb = self.capacity.lower_bound(ctx);
 		// Collect all start and end events of compulsory tasks
 		for i in 0..n {
-			let lst = self.latest_start_time(actions, i);
-			let ect = self.earliest_completion_time(actions, i);
-			let min_usage = actions.get_int_lower_bound(self.usages[i]);
+			let lst = self.latest_start_time(ctx, i);
+			let ect = self.earliest_completion_time(ctx, i);
+			let min_usage = self.usages[i].lower_bound(ctx);
 			if lst < ect {
 				events.push((lst, min_usage));
 				events.push((ect, -min_usage));
@@ -185,13 +126,11 @@ impl CumulativeTimeTablePropagator {
 				if cur_height > capacity_lb {
 					trace!(
 						timepoint = t,
-						capacity_lb,
-						cur_height,
-						"push capacity lower bound"
+						capacity_lb, cur_height, "push capacity lower bound"
 					);
 					let mid_point = last_time.map_or(t, |lt| (lt + t) / 2);
-					actions.set_int_lower_bound(
-						self.capacity,
+					self.capacity.set_lower_bound(
+						ctx,
 						cur_height,
 						self.explain_overload_time_point(cur_height, mid_point),
 					)?;
@@ -210,7 +149,7 @@ impl CumulativeTimeTablePropagator {
 			trace!(
 				bounds = ?self.bounds,
 				heights = ?self.heights,
-				capacity_ub =? actions.get_int_upper_bound(self.capacity),
+				capacity_ub =? self.capacity.upper_bound(ctx),
 				"cumulative time table profile"
 			);
 		}
@@ -220,13 +159,20 @@ impl CumulativeTimeTablePropagator {
 	/// A helper function to collect the compulsory tasks that cover a given
 	/// amount of energy at a specific time point. This function is used for
 	/// explanation.
-	fn collect_compulsory_tasks<A: PropagationActions>(
+	fn collect_compulsory_tasks<Ctx>(
 		&self,
+		ctx: &mut Ctx,
 		to_cover: i64,
 		time_point: i64,
-		actions: &mut A,
 		skip_task: Option<usize>,
-	) -> Vec<usize> {
+	) -> Vec<usize>
+	where
+		Ctx: ReasoningContext + ?Sized,
+		I1: IntInspectionActions<Ctx>,
+		I2: IntInspectionActions<Ctx>,
+		I3: IntInspectionActions<Ctx>,
+		I4: IntInspectionActions<Ctx>,
+	{
 		// No tasks needed to cover zero or negative energy
 		if to_cover <= 0 {
 			return Vec::new();
@@ -240,10 +186,10 @@ impl CumulativeTimeTablePropagator {
 			if Some(i) == skip_task {
 				continue; // Skip the task itself
 			}
-			if self.latest_start_time(actions, i) <= time_point
-				&& self.earliest_completion_time(actions, i) > time_point
+			if self.latest_start_time(ctx, i) <= time_point
+				&& self.earliest_completion_time(ctx, i) > time_point
 			{
-				let usage_lb = actions.get_int_lower_bound(self.usages[i]);
+				let usage_lb = self.usages[i].lower_bound(ctx);
 				if usage_lb > 0 {
 					relevant_tasks.push(i);
 					collected_energy += usage_lb;
@@ -258,7 +204,7 @@ impl CumulativeTimeTablePropagator {
 		let mut remaining_slack = collected_energy - to_cover;
 		let mut minimal_relevant_tasks = Vec::new();
 		for &i in relevant_tasks.iter() {
-			let usage = actions.get_int_lower_bound(self.usages[i]);
+			let usage = self.usages[i].lower_bound(ctx);
 			if remaining_slack > usage {
 				remaining_slack -= usage;
 				continue;
@@ -271,9 +217,9 @@ impl CumulativeTimeTablePropagator {
 			time_point,
 			relevant_tasks = ?minimal_relevant_tasks.iter().map(|&i| (
 				i,
-				self.latest_start_time(actions, i),
-				self.earliest_completion_time(actions, i),
-				self.durations[i]
+				self.latest_start_time(ctx, i),
+				self.earliest_completion_time(ctx, i),
+				&self.durations[i]
 			)).collect_vec(),
 			"explain resource usage"
 		);
@@ -283,15 +229,23 @@ impl CumulativeTimeTablePropagator {
 
 	#[inline]
 	/// Get the earliest completion time of the task `i`.
-	fn earliest_completion_time<I: InspectionActions>(&self, actions: &mut I, i: usize) -> i64 {
-		actions.get_int_lower_bound(self.start_times[i])
-			+ actions.get_int_lower_bound(self.durations[i])
+	fn earliest_completion_time<C>(&self, ctx: &mut C, i: usize) -> i64
+	where
+		C: ReasoningContext + ?Sized,
+		I1: IntInspectionActions<C>,
+		I2: IntInspectionActions<C>,
+	{
+		self.start_times[i].lower_bound(ctx) + self.durations[i].lower_bound(ctx)
 	}
 
 	#[inline]
 	/// Get the earliest start time of the task `i`.
-	fn earliest_start_time<I: InspectionActions>(&self, actions: &mut I, i: usize) -> i64 {
-		actions.get_int_lower_bound(self.start_times[i])
+	fn earliest_start_time<C>(&self, ctx: &mut C, i: usize) -> i64
+	where
+		C: ReasoningContext + ?Sized,
+		I1: IntInspectionActions<C>,
+	{
+		self.start_times[i].lower_bound(ctx)
 	}
 
 	/// Constructs a reason for limiting the usage of a task at a specific
@@ -299,176 +253,198 @@ impl CumulativeTimeTablePropagator {
 	/// (1) relevant tasks (including the target task) that have compulsory
 	/// parts at the given time point, which are used to cover the required
 	/// resource usage, (2) and the resource capacity at its upper bound.
-	fn explain_limit_usage<A: PropagationActions>(
+	fn explain_limit_usage<Ctx>(
 		&self,
 		task_no: usize,
 		time_point: i64,
 		usage_limit: i64,
-	) -> impl ReasonBuilder<A> + '_ {
-		move |actions: &mut A| {
+	) -> impl ReasonBuilder<Ctx> + '_
+	where
+		Ctx: ReasoningContext + ?Sized,
+		I1: IntDecisionActions<Ctx>,
+		I2: IntDecisionActions<Ctx>,
+		I3: IntDecisionActions<Ctx>,
+		I4: IntDecisionActions<Ctx>,
+	{
+		move |ctx: &mut Ctx| {
 			trace!(
 				task_no,
 				timepoint =? time_point,
 				usage_limit,
 				"Explain task usage limit"
 			);
-			let capacity_ub = actions.get_int_upper_bound(self.capacity);
+			let capacity_ub = self.capacity.upper_bound(ctx);
 			let to_cover = capacity_ub - usage_limit;
 			let relevant_tasks =
-				self.collect_compulsory_tasks(to_cover, time_point, actions, Some(task_no));
+				self.collect_compulsory_tasks(ctx, to_cover, time_point, Some(task_no));
 
 			trace!(
 				time_point,
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
-					actions.get_int_lower_bound(self.durations[i]),
-					self.latest_start_time(actions, i),
-					self.earliest_completion_time(actions, i),
+					self.durations[i].lower_bound(ctx),
+					self.latest_start_time(ctx, i),
+					self.earliest_completion_time(ctx, i),
 				)).collect_vec(),
 				capacity_ub,
 				"Explain task usage limit"
 			);
 
-			let mut reason = Conjunction::new();
+			let cap_lit = self.capacity.upper_bound_lit(ctx);
 
 			// Explanation: (1) relevant tasks (together with task `task_no`) have
 			// the required compulsory part at time `time_point`
 			relevant_tasks
 				.iter()
-				.chain(std::iter::once(&task_no))
-				.for_each(|&i| {
-					reason.push(
-						actions
-							.get_int_lit(self.start_times[i], IntLitMeaning::Less(time_point + 1)),
-					);
-					reason.push(actions.get_int_lit(
-						self.start_times[i] + actions.get_int_lower_bound(self.durations[i]),
-						IntLitMeaning::GreaterEq(time_point + 1),
-					));
-					reason.push(actions.get_int_lower_bound_lit(self.durations[i]));
-					reason.push(actions.get_int_lower_bound_lit(self.usages[i]));
-				});
-
-			// Explanation: (2) the resource capacity is at a given level
-			reason.push(actions.get_int_upper_bound_lit(self.capacity));
-
-			reason
+				.chain(once(&task_no))
+				.flat_map(|&i| {
+					[
+						self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
+						self.start_times[i].lit(
+							ctx,
+							IntLitMeaning::GreaterEq(
+								time_point + 1 - self.durations[i].lower_bound(ctx),
+							),
+						),
+						self.durations[i].lower_bound_lit(ctx),
+						self.usages[i].lower_bound_lit(ctx),
+					]
+				})
+				// Explanation: (2) the resource capacity is at a given level
+				.chain(once(cap_lit))
+				.collect_vec()
 		}
 	}
 
 	/// Construct a reason for why the resource usage is over `to_cover` at a
 	/// specific `time_point`. Refer to Schutt et al. (2011) for details on the
 	/// explanation construction.
-	fn explain_overload_time_point<A: PropagationActions>(
+	fn explain_overload_time_point<Ctx>(
 		&self,
 		to_cover: i64,
 		time_point: i64,
-	) -> impl ReasonBuilder<A> + '_ {
-		move |actions: &mut A| {
-			let relevant_tasks = self.collect_compulsory_tasks(to_cover, time_point, actions, None);
+	) -> impl ReasonBuilder<Ctx> + '_
+	where
+		Ctx: ReasoningContext + ?Sized,
+		I1: IntDecisionActions<Ctx>,
+		I2: IntDecisionActions<Ctx>,
+		I3: IntDecisionActions<Ctx>,
+		I4: IntDecisionActions<Ctx>,
+	{
+		move |ctx: &mut Ctx| {
+			let relevant_tasks = self.collect_compulsory_tasks(ctx, to_cover, time_point, None);
 
 			trace!(
 				time_point,
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
-					self.latest_start_time(actions, i),
-					self.earliest_completion_time(actions, i),
-					self.durations[i]
+					self.latest_start_time(ctx, i),
+					self.earliest_completion_time(ctx, i),
+					&self.durations[i]
 				)).collect_vec(),
 				"Explain resource overload"
 			);
 
-			let mut conflict = Conjunction::new();
+			let cap_lit = self.capacity.upper_bound_lit(ctx);
 
 			// Explanation: relevant tasks have the required compulsory part at time
 			// `time_point`
-			relevant_tasks.iter().for_each(|&i| {
-				conflict.push(
-					actions.get_int_lit(self.start_times[i], IntLitMeaning::Less(time_point + 1)),
-				);
-				conflict.push(actions.get_int_lit(
-					self.start_times[i] + actions.get_int_lower_bound(self.durations[i]),
-					IntLitMeaning::GreaterEq(time_point + 1),
-				));
-				conflict.push(actions.get_int_lower_bound_lit(self.durations[i]));
-				conflict.push(actions.get_int_lower_bound_lit(self.usages[i]));
-			});
-
-			// Explanation: the resource usage at `time_point` exceeds the upper bound of
-			// capacity
-			conflict.push(actions.get_int_upper_bound_lit(self.capacity));
-
-			conflict
+			relevant_tasks
+				.iter()
+				.flat_map(|&i| {
+					[
+						self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
+						self.start_times[i].lit(
+							ctx,
+							IntLitMeaning::GreaterEq(
+								time_point - self.durations[i].lower_bound(ctx) + 1,
+							),
+						),
+						self.durations[i].lower_bound_lit(ctx),
+						self.usages[i].lower_bound_lit(ctx),
+					]
+				})
+				.chain(once(cap_lit))
+				.collect_vec()
 		}
 	}
 
 	/// Construct a reason for the task sweeping explanation.
 	/// Refer to Schutt et al. (2011) for details on the explanation
 	/// construction.
-	fn explain_sweeping_time<A: PropagationActions>(
+	fn explain_sweeping_time<Ctx>(
 		&self,
 		task_no: usize,
 		propagation_rule: CumulativePropagationRule,
 		time_point: i64,
-	) -> impl ReasonBuilder<A> + '_ {
-		move |actions: &mut A| {
-			let capacity_ub = actions.get_int_upper_bound(self.capacity);
-			let min_usage = actions.get_int_lower_bound(self.usages[task_no]);
+	) -> impl ReasonBuilder<Ctx> + '_
+	where
+		Ctx: ReasoningContext + ?Sized,
+		I1: IntDecisionActions<Ctx>,
+		I2: IntDecisionActions<Ctx>,
+		I3: IntDecisionActions<Ctx>,
+		I4: IntDecisionActions<Ctx>,
+	{
+		move |ctx: &mut Ctx| {
+			let capacity_ub = self.capacity.upper_bound(ctx);
+			let min_usage = self.usages[task_no].lower_bound(ctx);
 			let to_cover = capacity_ub - min_usage + 1;
 			let relevant_tasks =
-				self.collect_compulsory_tasks(to_cover, time_point, actions, Some(task_no));
+				self.collect_compulsory_tasks(ctx, to_cover, time_point, Some(task_no));
 
 			trace!(
 				time_point,
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
-					actions.get_int_lower_bound(self.durations[i]),
-					self.latest_start_time(actions, i),
-					self.earliest_completion_time(actions, i),
+					self.durations[i].lower_bound(ctx),
+					self.latest_start_time(ctx, i),
+					self.earliest_completion_time(ctx, i),
 				)).collect_vec(),
 				rule =? propagation_rule,
 				"Explain task sweeping"
 			);
 
 			// Construct the reason for the propagation
-			let mut reason = Conjunction::new();
+			let mut reason = Conjunction::with_capacity(4 * relevant_tasks.len() + 4);
 
 			// Explanation: (1) relevant tasks have the required compulsory part at time
 			// `time_point`
-			relevant_tasks.iter().for_each(|&i| {
-				reason.push(
-					actions.get_int_lit(self.start_times[i], IntLitMeaning::Less(time_point + 1)),
-				);
-				reason.push(actions.get_int_lit(
-					self.start_times[i] + actions.get_int_lower_bound(self.durations[i]),
-					IntLitMeaning::GreaterEq(time_point + 1),
-				));
-				reason.push(actions.get_int_lower_bound_lit(self.durations[i]));
-				reason.push(actions.get_int_lower_bound_lit(self.usages[i]));
-			});
+			reason.extend(relevant_tasks.iter().flat_map(|&i| {
+				[
+					self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
+					self.start_times[i].lit(
+						ctx,
+						IntLitMeaning::GreaterEq(
+							time_point - self.durations[i].lower_bound(ctx) + 1,
+						),
+					),
+					self.durations[i].lower_bound_lit(ctx),
+					self.usages[i].lower_bound_lit(ctx),
+				]
+			}));
 
 			// Explanation: (2) the task itself is either left-conflict or right-conflict
 			// with the time point, depending on the propagation rule
 			match propagation_rule {
 				CumulativePropagationRule::ForwardShift => {
-					reason.push(actions.get_int_lit(
-						self.start_times[task_no]
-							+ actions.get_int_lower_bound(self.durations[task_no]),
-						IntLitMeaning::GreaterEq(time_point + 1),
+					reason.push(self.start_times[task_no].lit(
+						ctx,
+						IntLitMeaning::GreaterEq(
+							time_point - self.durations[task_no].lower_bound(ctx) + 1,
+						),
 					));
 				}
 				CumulativePropagationRule::BackwardShift => {
-					reason.push(actions.get_int_lit(
-						self.start_times[task_no],
-						IntLitMeaning::Less(time_point + 1),
-					));
+					reason.push(
+						self.start_times[task_no].lit(ctx, IntLitMeaning::Less(time_point + 1)),
+					);
 				}
 			}
-			reason.push(actions.get_int_lower_bound_lit(self.durations[task_no]));
-			reason.push(actions.get_int_lower_bound_lit(self.usages[task_no]));
+			reason.push(self.durations[task_no].lower_bound_lit(ctx));
+			reason.push(self.usages[task_no].lower_bound_lit(ctx));
 
 			// Explanation: (3) the resource capacity is at a given level
-			reason.push(actions.get_int_upper_bound_lit(self.capacity));
+			reason.push(self.capacity.upper_bound_lit(ctx));
 
 			reason
 		}
@@ -476,15 +452,23 @@ impl CumulativeTimeTablePropagator {
 
 	#[inline]
 	/// Get the latest completion time of the task `i`.
-	fn latest_completion_time<I: InspectionActions>(&self, actions: &mut I, i: usize) -> i64 {
-		actions.get_int_upper_bound(self.start_times[i])
-			+ actions.get_int_upper_bound(self.durations[i])
+	fn latest_completion_time<C>(&self, ctx: &mut C, i: usize) -> i64
+	where
+		C: ReasoningContext + ?Sized,
+		I1: IntInspectionActions<C>,
+		I2: IntInspectionActions<C>,
+	{
+		self.start_times[i].upper_bound(ctx) + self.durations[i].upper_bound(ctx)
 	}
 
 	#[inline]
 	/// Get the latest start time of the task `i`.
-	fn latest_start_time<I: InspectionActions>(&self, actions: &mut I, i: usize) -> i64 {
-		actions.get_int_upper_bound(self.start_times[i])
+	fn latest_start_time<C>(&self, ctx: &mut C, i: usize) -> i64
+	where
+		C: ReasoningContext + ?Sized,
+		I1: IntInspectionActions<C>,
+	{
+		self.start_times[i].upper_bound(ctx)
 	}
 
 	/// Propagates the upper bound of a task's resource usage to ensure that,
@@ -498,15 +482,22 @@ impl CumulativeTimeTablePropagator {
 	/// task's usage upper bound to `capacity - max_usage + usage_lb`, where
 	/// `max_usage` is the maximum compulsory usage in that interval and
 	/// `usage_lb` is the lower bound of the task's usage.
-	fn limit_usage(
+	fn limit_usage<E>(
 		&self,
+		ctx: &mut E::PropagationCtx<'_>,
 		task: usize,
-		actions: &mut impl PropagationActions,
-	) -> Result<(), Conflict> {
-		let lst = self.latest_start_time(actions, task);
-		let ect = self.earliest_completion_time(actions, task);
-		let dur_lb = actions.get_int_lower_bound(self.durations[task]);
-		let usage_lb = actions.get_int_lower_bound(self.usages[task]);
+	) -> Result<(), E::Conflict>
+	where
+		E: ReasoningEngine,
+		I1: SolverIntView<E>,
+		I2: SolverIntView<E>,
+		I3: SolverIntView<E>,
+		I4: SolverIntView<E>,
+	{
+		let lst = self.latest_start_time(ctx, task);
+		let ect = self.earliest_completion_time(ctx, task);
+		let dur_lb = self.durations[task].lower_bound(ctx);
+		let usage_lb = self.usages[task].lower_bound(ctx);
 
 		if !(dur_lb > 0 && usage_lb > 0) {
 			// If the task has no duration or usage, no need to sweep
@@ -516,19 +507,18 @@ impl CumulativeTimeTablePropagator {
 		// Find the maximum usage in the interval [lst, ect]
 		// where the task has a compulsory part
 		let begin = self.bounds.partition_point(|&b| b < lst);
-		let mut max_period = begin;
-		let mut max_usage = self.heights[begin];
-		for i in (begin + 1)..self.bounds.len() {
-			if self.bounds[i] >= ect {
-				break;
-			} else if self.heights[i] > max_usage {
-				max_usage = self.heights[i];
-				max_period = i;
-			}
-		}
+		let end = self.bounds.partition_point(|&b| b < ect);
+		let max_period = (begin + 1 < end).then(|| {
+			begin
+				+ 1 + self.heights[(begin + 1)..end]
+				.iter()
+				.position_max()
+				.unwrap()
+		});
 
-		let limit = actions.get_int_upper_bound(self.capacity) - max_usage + usage_lb;
-		if limit < actions.get_int_upper_bound(self.usages[task]) {
+		if let Some(max_period) = max_period {
+			let max_usage = self.heights[max_period];
+			let limit = self.capacity.upper_bound(ctx) - max_usage + usage_lb;
 			trace!(
 				task,
 				compulosary_part =? (lst, ect),
@@ -537,8 +527,8 @@ impl CumulativeTimeTablePropagator {
 				limit,
 				"Limit task usage"
 			);
-			actions.set_int_upper_bound(
-				self.usages[task],
+			self.usages[task].set_upper_bound(
+				ctx,
 				limit,
 				self.explain_limit_usage(task, self.bounds[max_period], limit),
 			)?;
@@ -548,36 +538,20 @@ impl CumulativeTimeTablePropagator {
 
 	/// Creates a new `CumulativeTimeTablePropagator` propagator and post it in
 	/// the solver.
-	pub fn new_in<P>(
-		solver: &mut P,
-		start_times: Vec<IntView>,
-		durations: Vec<IntView>,
-		usages: Vec<IntView>,
-		capacity: IntView,
-	) where
-		P: PropagatorInitActions + ?Sized,
-	{
-		let prop = solver.add_propagator(
-			Box::new(Self {
-				start_times: start_times.clone(),
-				durations: durations.clone(),
-				usages: usages.clone(),
-				capacity,
-				bounds: Vec::new(),
-				heights: Vec::new(),
-			}),
-			PriorityLevel::Low,
-		);
-		for v in start_times {
-			solver.enqueue_on_int_change(prop, v, IntPropCond::Bounds);
+	pub(crate) fn new(
+		start_times: Vec<I1>,
+		durations: Vec<I2>,
+		usages: Vec<I3>,
+		capacity: I4,
+	) -> Self {
+		Self {
+			start_times,
+			durations,
+			usages,
+			capacity,
+			bounds: Vec::new(),
+			heights: Vec::new(),
 		}
-		for d in durations {
-			solver.enqueue_on_int_change(prop, d, IntPropCond::LowerBound);
-		}
-		for u in usages {
-			solver.enqueue_on_int_change(prop, u, IntPropCond::LowerBound);
-		}
-		solver.enqueue_on_int_change(prop, capacity, IntPropCond::UpperBound);
 	}
 
 	/// Performs a backward sweep for a given task to propagate its latest
@@ -597,16 +571,23 @@ impl CumulativeTimeTablePropagator {
 	/// step-by-step update with the step size being the task's duration lower
 	/// bound. This facilitates the generation of point-wise explanations as
 	/// described in the original paper by Schutt et al. (2011).
-	fn sweep_backward(
+	fn sweep_backward<E>(
 		&self,
+		ctx: &mut E::PropagationCtx<'_>,
 		task: usize,
-		actions: &mut impl PropagationActions,
-	) -> Result<(), Conflict> {
-		let est = self.earliest_start_time(actions, task);
-		let lst = self.latest_start_time(actions, task);
-		let ect = self.earliest_completion_time(actions, task);
-		let dur_lb = actions.get_int_lower_bound(self.durations[task]);
-		let usage_lb = actions.get_int_lower_bound(self.usages[task]);
+	) -> Result<(), E::Conflict>
+	where
+		E: ReasoningEngine,
+		I1: SolverIntView<E>,
+		I2: SolverIntView<E>,
+		I3: SolverIntView<E>,
+		I4: SolverIntView<E>,
+	{
+		let est = self.earliest_start_time(ctx, task);
+		let lst = self.latest_start_time(ctx, task);
+		let ect = self.earliest_completion_time(ctx, task);
+		let dur_lb = self.durations[task].lower_bound(ctx);
+		let usage_lb = self.usages[task].lower_bound(ctx);
 
 		if dur_lb <= 0 || usage_lb <= 0 {
 			// If the task has no duration or usage, no need to sweep
@@ -616,8 +597,8 @@ impl CumulativeTimeTablePropagator {
 		// Find the partition point where b < lst + dur
 		let last = self.bounds.partition_point(|&b| b < lst + dur_lb);
 		trace!(task, dur_lb, est, lst, usage_lb, "Task sweep backward");
-		let mut updated_lct = self.latest_completion_time(actions, task);
-		let max_capacity = actions.get_int_upper_bound(self.capacity);
+		let mut updated_lct = self.latest_completion_time(ctx, task);
+		let max_capacity = self.capacity.upper_bound(ctx);
 		for i in (1..last).rev() {
 			let b_start = self.bounds[i - 1];
 			let b_end = self.bounds[i];
@@ -662,9 +643,9 @@ impl CumulativeTimeTablePropagator {
 				for t in time_points {
 					if t < updated_lct {
 						// Set new upper bound for the task's start time
-						actions.set_int_upper_bound(
-							self.start_times[task] + dur_lb,
-							t,
+						self.start_times[task].set_upper_bound(
+							ctx,
+							t - dur_lb,
 							self.explain_sweeping_time(
 								task,
 								CumulativePropagationRule::BackwardShift,
@@ -696,15 +677,22 @@ impl CumulativeTimeTablePropagator {
 	/// step-by-step update with the step size being the task's duration lower
 	/// bound. This facilitates the generation of point-wise explanations as
 	/// described in the original paper by Schutt et al. (2011).
-	fn sweep_forward(
+	fn sweep_forward<E>(
 		&self,
+		ctx: &mut E::PropagationCtx<'_>,
 		task: usize,
-		actions: &mut impl PropagationActions,
-	) -> Result<(), Conflict> {
-		let est = self.earliest_start_time(actions, task);
-		let lst = self.latest_start_time(actions, task);
-		let dur_lb = actions.get_int_lower_bound(self.durations[task]);
-		let usage_lb = actions.get_int_lower_bound(self.usages[task]);
+	) -> Result<(), E::Conflict>
+	where
+		E: ReasoningEngine,
+		I1: SolverIntView<E>,
+		I2: SolverIntView<E>,
+		I3: SolverIntView<E>,
+		I4: SolverIntView<E>,
+	{
+		let est = self.earliest_start_time(ctx, task);
+		let lst = self.latest_start_time(ctx, task);
+		let dur_lb = self.durations[task].lower_bound(ctx);
+		let usage_lb = self.usages[task].lower_bound(ctx);
 
 		if dur_lb <= 0 || usage_lb <= 0 {
 			// If the task has no duration or usage, no need to sweep
@@ -715,7 +703,7 @@ impl CumulativeTimeTablePropagator {
 		let first = self.bounds.partition_point(|&b| b < est);
 		trace!(task, dur_lb, est, lst, usage_lb, "Task sweep forward");
 		let mut updated_est = est;
-		let max_capacity = actions.get_int_upper_bound(self.capacity);
+		let max_capacity = self.capacity.upper_bound(ctx);
 		for i in first..self.bounds.len() - 1 {
 			let b_start = self.bounds[i];
 			let b_end = self.bounds[i + 1];
@@ -758,8 +746,8 @@ impl CumulativeTimeTablePropagator {
 				for t in time_points {
 					if t > updated_est {
 						// Set new lower bound for the task's start time
-						actions.set_int_lower_bound(
-							self.start_times[task],
+						self.start_times[task].set_lower_bound(
+							ctx,
 							t,
 							self.explain_sweeping_time(
 								task,
@@ -776,15 +764,101 @@ impl CumulativeTimeTablePropagator {
 	}
 }
 
-impl<P, E> Propagator<P, E> for CumulativeTimeTablePropagator
+impl CumulativeTimeTable<IntView, IntView, IntView, IntView> {
+	/// Creates a new `CumulativeTimeTablePropagator` propagator and post it in
+	/// the solver.
+	pub fn post<E>(
+		solver: &mut E,
+		start_times: Vec<IntView>,
+		durations: Vec<IntView>,
+		usages: Vec<IntView>,
+		capacity: IntView,
+	) where
+		E: AddAssign<BoxedPropagator> + ?Sized,
+	{
+		*solver += Box::new(CumulativeTimeTable::new(
+			start_times,
+			durations,
+			usages,
+			capacity,
+		));
+	}
+}
+
+impl<E, I1, I2, I3, I4> Constraint<E> for CumulativeTimeTable<I1, I2, I3, I4>
 where
-	P: PropagationActions,
-	E: ExplanationActions,
+	E: ReasoningEngine,
+	I1: ModelIntView<E>,
+	I2: ModelIntView<E>,
+	I3: ModelIntView<E>,
+	I4: ModelIntView<E>,
 {
-	#[tracing::instrument(name = "cumulative_timetable", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
+		self.propagate(ctx)?;
+
+		if self.capacity.val(ctx).is_some()
+			&& self.start_times.iter().all(|v| v.val(ctx).is_some())
+			&& self.durations.iter().all(|v| v.val(ctx).is_some())
+			&& self.usages.iter().all(|v| v.val(ctx).is_some())
+		{
+			return Ok(SimplificationStatus::Subsumed);
+		}
+
+		Ok(SimplificationStatus::NoFixpoint)
+	}
+
+	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+		let start_times = self
+			.start_times
+			.iter()
+			.map(|v| slv.solver_int(v.clone().into()))
+			.collect_vec();
+		let durations = self
+			.durations
+			.iter()
+			.map(|v| slv.solver_int(v.clone().into()))
+			.collect_vec();
+		let usages = self
+			.usages
+			.iter()
+			.map(|v| slv.solver_int(v.clone().into()))
+			.collect_vec();
+		let capacity = { slv.solver_int(self.capacity.clone().into()) };
+		CumulativeTimeTable::post(slv, start_times, durations, usages, capacity);
+		Ok(())
+	}
+}
+
+impl<E, I1, I2, I3, I4> Propagator<E> for CumulativeTimeTable<I1, I2, I3, I4>
+where
+	E: ReasoningEngine,
+	I1: SolverIntView<E>,
+	I2: SolverIntView<E>,
+	I3: SolverIntView<E>,
+	I4: SolverIntView<E>,
+{
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+		ctx.set_priority(PriorityLevel::Low);
+
+		for v in &self.start_times {
+			v.enqueue_when(ctx, IntPropCond::Bounds);
+		}
+		for d in &self.durations {
+			d.enqueue_when(ctx, IntPropCond::LowerBound);
+		}
+		for u in &self.usages {
+			u.enqueue_when(ctx, IntPropCond::LowerBound);
+		}
+		self.capacity.enqueue_when(ctx, IntPropCond::UpperBound);
+	}
+
+	#[tracing::instrument(name = "cumulative_timetable", level = "trace", skip(self, ctx))]
+	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// Build the time-table profile and check resource overload
-		match self.build_profile_and_check_overload(actions) {
+		match self.build_profile_and_check_overload(ctx) {
 			// If the profile is empty, no tasks are active, so we can skip further
 			// propagation
 			Ok(true) => return Ok(()),
@@ -796,20 +870,20 @@ where
 		// Sweeping time: update the earliest start times and the latest completion
 		// times
 		for i in 0..self.start_times.len() {
-			let (lb, ub) = actions.get_int_bounds(self.start_times[i]);
+			let (lb, ub) = self.start_times[i].bounds(ctx);
 			if lb < ub {
-				self.sweep_forward(i, actions)?;
-				self.sweep_backward(i, actions)?;
+				self.sweep_forward(ctx, i)?;
+				self.sweep_backward(ctx, i)?;
 			}
 		}
 
 		// Limit usage: update the upper bounds of the resource usage
 		for i in 0..self.start_times.len() {
-			let (req_lb, req_ub) = actions.get_int_bounds(self.usages[i]);
+			let (req_lb, req_ub) = self.usages[i].bounds(ctx);
 			if req_lb < req_ub
-				&& self.latest_start_time(actions, i) < self.earliest_completion_time(actions, i)
+				&& self.latest_start_time(ctx, i) < self.earliest_completion_time(ctx, i)
 			{
-				self.limit_usage(i, actions)?;
+				self.limit_usage(ctx, i)?;
 			}
 		}
 		Ok(())
@@ -821,16 +895,15 @@ mod tests {
 	use expect_test::expect;
 	use flatzinc_serde::RangeList;
 	use itertools::Itertools;
-	use pindakaas::Cnf;
 	use tracing_test::traced_test;
 
 	use crate::{
-		constraints::cumulative::CumulativeTimeTablePropagator,
-		solver::{
-			int_var::{EncodingType, IntVar},
-			IntView,
-		},
 		Solver,
+		constraints::cumulative::CumulativeTimeTable,
+		solver::{
+			IntView,
+			int_var::{EncodingType, IntVar},
+		},
 	};
 
 	/// Helper function to create a task with given start time, duration, and
@@ -850,7 +923,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_val_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			(0..=4).into(),
@@ -875,14 +948,14 @@ mod tests {
 		let resources_profile_2 = [2, 2, 1].into_iter().map_into().collect();
 		let capacity_1 = 3.into();
 		let capacity_2 = 2.into();
-		CumulativeTimeTablePropagator::new_in(
+		CumulativeTimeTable::post(
 			&mut slv,
 			vec![a, b, c],
 			durations.clone(),
 			resources_profile_1,
 			capacity_1,
 		);
-		CumulativeTimeTablePropagator::new_in(
+		CumulativeTimeTable::post(
 			&mut slv,
 			vec![a, b, c],
 			durations,
@@ -909,7 +982,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_val_unsat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
 			(0..=3).into(),
@@ -934,14 +1007,14 @@ mod tests {
 		let resources_profile_2: Vec<IntView> = [2, 2, 2].into_iter().map_into().collect();
 		let capacity = 3.into();
 
-		CumulativeTimeTablePropagator::new_in(
+		CumulativeTimeTable::post(
 			&mut slv,
 			vec![a, b, c],
 			durations.clone(),
 			resources_profile_1,
 			capacity,
 		);
-		CumulativeTimeTablePropagator::new_in(
+		CumulativeTimeTable::post(
 			&mut slv,
 			vec![a, b, c],
 			durations,
@@ -955,7 +1028,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_capacity_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let start = [0, 3, 4, 6, 8, 8].into_iter().map_into().collect();
 		let duration = [3, 2, 5, 2, 1, 4].into_iter().map_into().collect();
 		let usage = [2, 3, 1, 4, 3, 2].into_iter().map_into().collect();
@@ -965,7 +1038,7 @@ mod tests {
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
-		CumulativeTimeTablePropagator::new_in(&mut slv, start, duration, usage, capacity);
+		CumulativeTimeTable::post(&mut slv, start, duration, usage, capacity);
 
 		slv.expect_solutions(&[capacity], expect![[r#"6"#]]);
 	}
@@ -973,7 +1046,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_capacity_unsat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let start = [0, 3, 4, 6, 8, 8].into_iter().map_into().collect();
 		let duration = [3, 2, 5, 2, 1, 4].into_iter().map_into().collect();
 		let usage = [2, 3, 1, 4, 3, 2].into_iter().map_into().collect();
@@ -983,7 +1056,7 @@ mod tests {
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
-		CumulativeTimeTablePropagator::new_in(&mut slv, start, duration, usage, capacity);
+		CumulativeTimeTable::post(&mut slv, start, duration, usage, capacity);
 
 		slv.assert_unsatisfiable();
 	}
@@ -991,7 +1064,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_dur_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
 			RangeList::from_iter([0..=2]),
@@ -1014,7 +1087,7 @@ mod tests {
 		);
 		let capacity = 2.into();
 
-		CumulativeTimeTablePropagator::new_in(
+		CumulativeTimeTable::post(
 			&mut slv,
 			vec![s_a, s_b, s_c],
 			vec![d_a, d_b, d_c],
@@ -1049,7 +1122,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_dur_unsat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
 			RangeList::from_iter([0..=2]),
@@ -1072,7 +1145,7 @@ mod tests {
 		);
 		let capacity = 2.into();
 
-		CumulativeTimeTablePropagator::new_in(
+		CumulativeTimeTable::post(
 			&mut slv,
 			vec![s_a, s_b, s_c],
 			vec![d_a, d_b, d_c],
@@ -1086,7 +1159,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_usage_sat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
 			RangeList::from_iter([0..=2]),
@@ -1109,7 +1182,7 @@ mod tests {
 		);
 		let capacity = 3.into();
 
-		CumulativeTimeTablePropagator::new_in(
+		CumulativeTimeTable::post(
 			&mut slv,
 			vec![s_a, s_b, s_c],
 			vec![d_a, d_b, d_c],
@@ -1132,7 +1205,7 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_cumulative_var_usage_unsat() {
-		let mut slv = Solver::from(&Cnf::default());
+		let mut slv = Solver::default();
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
 			RangeList::from_iter([0..=2]),
@@ -1155,7 +1228,7 @@ mod tests {
 		);
 		let capacity = 2.into();
 
-		CumulativeTimeTablePropagator::new_in(
+		CumulativeTimeTable::post(
 			&mut slv,
 			vec![s_a, s_b, s_c],
 			vec![d_a, d_b, d_c],

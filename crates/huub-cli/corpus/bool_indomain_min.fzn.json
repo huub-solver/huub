@@ -1,15 +1,29 @@
 {
   "variables": {
-    "x" : { "type" : "bool" },
-    "y" : { "type" : "bool", "defined" : true }
+    "X_INTRODUCED_0_" : { "type" : "bool" },
+    "X_INTRODUCED_1_" : { "type" : "bool" },
+    "X_INTRODUCED_2_" : { "type" : "bool" },
+    "X_INTRODUCED_3_" : { "type" : "bool" },
+    "X_INTRODUCED_4_" : { "type" : "bool" },
+    "X_INTRODUCED_5_" : { "type" : "int", "domain" : [[0, 1]], "introduced": true, "defined" : true },
+    "X_INTRODUCED_6_" : { "type" : "int", "domain" : [[0, 1]], "introduced": true, "defined" : true },
+    "X_INTRODUCED_7_" : { "type" : "int", "domain" : [[0, 1]], "introduced": true, "defined" : true },
+    "X_INTRODUCED_8_" : { "type" : "int", "domain" : [[0, 1]], "introduced": true, "defined" : true },
+    "X_INTRODUCED_9_" : { "type" : "int", "domain" : [[0, 1]], "introduced": true, "defined" : true }
   },
   "arrays": {
-
+    "X_INTRODUCED_11_" : { "a": [1, 1, 1, 1, 1] },
+    "x" : { "a": ["X_INTRODUCED_0_", "X_INTRODUCED_1_", "X_INTRODUCED_2_", "X_INTRODUCED_3_", "X_INTRODUCED_4_"] }
   },
   "constraints": [
-    { "id" : "bool_not", "args" : ["x", "y"], "defines" : "y"}
+    { "id" : "int_lin_eq", "args" : ["X_INTRODUCED_11_", ["X_INTRODUCED_5_", "X_INTRODUCED_6_", "X_INTRODUCED_7_", "X_INTRODUCED_8_", "X_INTRODUCED_9_"], 3]},
+    { "id" : "bool2int", "args" : ["X_INTRODUCED_0_", "X_INTRODUCED_5_"], "defines" : "X_INTRODUCED_5_"},
+    { "id" : "bool2int", "args" : ["X_INTRODUCED_1_", "X_INTRODUCED_6_"], "defines" : "X_INTRODUCED_6_"},
+    { "id" : "bool2int", "args" : ["X_INTRODUCED_2_", "X_INTRODUCED_7_"], "defines" : "X_INTRODUCED_7_"},
+    { "id" : "bool2int", "args" : ["X_INTRODUCED_3_", "X_INTRODUCED_8_"], "defines" : "X_INTRODUCED_8_"},
+    { "id" : "bool2int", "args" : ["X_INTRODUCED_4_", "X_INTRODUCED_9_"], "defines" : "X_INTRODUCED_9_"}
   ],
-  "output": ["x", "y"],
-  "solve": { "method" : "satisfy", "ann" : [{ "id" : "bool_search", "args" : [["x", "y"], "input_order", "indomain_min", "complete"]}] },
+  "output": ["x"],
+  "solve": { "method" : "satisfy", "ann" : [{ "id" : "bool_search", "args" : ["x", "input_order", "indomain_min", "complete"]}] },
   "version": "1.0"
 }

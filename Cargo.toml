@@ -8,7 +8,7 @@ resolver = "2"
 repository = "https://github.com/huub-solver/huub"
 version = "0.1.0"
 authors = ["Jip J. Dekker <jip@dekker.one>"]
-edition = "2021"
+edition = "2024"
 license = "MPL-2.0"
 homepage = "https://huub.solutions"
 categories = ["algorithms", "mathematics", "science"]
@@ -16,7 +16,7 @@ keywords = ["sat", "lcg", "flatzinc", "minizinc", "optimization"]
 
 [workspace.dependencies]
 expect-test = "1.5"
-flatzinc-serde = "0.4.2"
+flatzinc-serde = "0.4.4"
 tracing = "0.1.40"
 rustc-hash = "2.1.1"
 
@@ -34,7 +34,6 @@ unused_import_braces = "warn"
 unused_lifetimes = "warn"
 unused_macro_rules = "warn"
 unused_qualifications = "warn"
-unused_results = "warn"
 variant_size_differences = "warn"
 
 [workspace.lints.clippy]
@@ -42,7 +41,7 @@ allow_attributes_without_reason = "deny"
 # cargo_common_metadata = "warn"
 clone_on_ref_ptr = "warn"
 default_union_representation = "deny"
-iter_over_hash_type = "warn"
+implicit_clone = "warn"
 missing_docs_in_private_items = "warn"
 mixed_read_write_in_expression = "deny"
 # multiple_crate_versions = "warn"
@@ -58,7 +57,6 @@ str_to_string = "warn"
 string_add = "warn"
 string_add_assign = "warn"
 string_lit_chars_any = "warn"
-string_to_string = "warn"
 tests_outside_test_module = "warn"
 try_err = "warn"
 undocumented_unsafe_blocks = "warn"

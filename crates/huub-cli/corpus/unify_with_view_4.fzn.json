@@ -1,0 +1,10 @@
+{
+	"variables": {
+		"x": { "type": "bool" },
+		"y": { "type": "int", "domain": [[0, 0]] }
+	},
+	"constraints": [{ "id": "bool2int", "args": ["x", "y"], "defines": "y" }],
+	"output": ["x", "y"],
+	"solve": { "method": "satisfy" },
+	"version": "1.0"
+}

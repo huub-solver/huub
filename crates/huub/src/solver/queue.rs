@@ -1,11 +1,9 @@
-//! This module contains the defitions for the priority queue used by [`Engine`]
-//! to schedule propagators.
+//! This module contains the definitions for the priority queue used by
+//! [`Engine`] to schedule propagators.
 
 use std::collections::VecDeque;
 
-use index_vec::IndexVec;
-
-use crate::solver::engine::PropRef;
+use index_vec::{Idx, IndexVec};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
@@ -45,16 +43,16 @@ pub(crate) struct PropagatorInfo {
 	pub(crate) priority: PriorityLevel,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 /// A priority queue for propagators.
-pub(crate) struct PropagatorQueue {
+pub(crate) struct PropagatorQueue<E: Idx> {
 	/// Priority queue of the propagators.
-	queue: PriorityQueue<PropRef>,
+	queue: PriorityQueue<E>,
 	/// General information about the propagators in the solver.
-	pub(crate) info: IndexVec<PropRef, PropagatorInfo>,
+	pub(crate) info: IndexVec<E, PropagatorInfo>,
 }
 
-impl<E> PriorityQueue<E> {
+impl<E: Idx> PriorityQueue<E> {
 	/// Inserts an element into the queue at the end of the given priority
 	/// level.
 	pub(crate) fn insert(&mut self, priority: PriorityLevel, elem: E) {
@@ -82,9 +80,9 @@ impl<E> Default for PriorityQueue<E> {
 	}
 }
 
-impl PropagatorQueue {
+impl<E: Idx> PropagatorQueue<E> {
 	/// Enqueue a given propagator when it is not already enqueued.
-	pub(crate) fn enqueue_propagator(&mut self, prop: PropRef) {
+	pub(crate) fn enqueue_propagator(&mut self, prop: E) {
 		if !self.info[prop].enqueued {
 			self.queue.insert(self.info[prop].priority, prop);
 			self.info[prop].enqueued = true;
@@ -92,8 +90,17 @@ impl PropagatorQueue {
 	}
 
 	/// Pop a propagator from the queue if there are any.
-	pub(crate) fn pop(&mut self) -> Option<PropRef> {
+	pub(crate) fn pop(&mut self) -> Option<E> {
 		self.queue.pop().inspect(|&p| self.info[p].enqueued = false)
+	}
+}
+
+impl<E: Idx> Default for PropagatorQueue<E> {
+	fn default() -> Self {
+		Self {
+			queue: Default::default(),
+			info: Default::default(),
+		}
 	}
 }
 

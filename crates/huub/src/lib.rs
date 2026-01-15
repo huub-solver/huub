@@ -1,5 +1,5 @@
 //! # Huub - A Modular and Maintainable Lazy Clause Generation Solver
-//!
+//! Boolean variables and clauses.
 //! Huub is a Lazy Clause Generation (LCG) solver with a focus on modularity and
 //! maintainability in addition to speed. LCG solvers are a class of solvers
 //! that can be used to solve decision and optimization problems. They are
@@ -7,7 +7,63 @@
 //! clauses to a Boolean Satisfiability (SAT) solver during the search process.
 //! This allows the solver exploit SAT solver's ability to learn from failures
 //! during the search process, without having to encode the full problem into
-//! Boolean variables and clauses.
+
+#[macro_export]
+/// General purpose helper for adding "relation" constraints to a Model.
+///
+/// Supported forms:
+/// - `rel!(prb, const OP expr)` Use a constant left-hand side and an expression
+///   right-hand side to build an integer linear comparison (e.g. `rel!(prb, 5
+///   <= x + y)`).
+/// - `rel!(prb, r -> ...)` or `rel!(prb, !r -> ...)` Post an integer linear
+///   expression implied by (possibly negated) `r`.
+/// - `rel!(prb, r <-> ...)` or `rel!(prb, !r <-> ...)` Post an integer linear
+///   expression reified by (possibly negated) `r`.
+macro_rules! rel {
+	// Case for comparison operators where the left-hand side is a literal
+	// and the right-hand side is an expression. Example:
+	//   rel!(prb, 3 < x);
+	($prb:expr, $lhs:literal $op:tt $rhs:expr) => {
+		$prb.add_constraint(rel!(@make_lin $lhs $op $rhs))
+	};
+	// Implication: "r -> (lhs <op> rhs)".
+	($prb:expr, $r:ident -> $lhs:literal $op:tt $rhs:expr) => {
+		$prb.add_constraint(rel!(@make_lin $lhs $op $rhs).implied_by($r))
+	};
+	// Implication posting with a negated Boolean variable.
+	($prb:expr, !$r:ident -> $lhs:literal $op:tt $rhs:expr) => {
+		let neg = !($r);
+		rel!($prb, neg -> $lhs $op $rhs);
+	};
+	// Fully reification: "r <-> (lhs <op> rhs)".
+	($prb:expr, $r:ident <-> $lhs:literal $op:tt $rhs:expr) => {
+		$prb.add_constraint(rel!(@make_lin $lhs $op $rhs).reified_by($r))
+	};
+	// Fully reification with a negated Boolean variable.
+	($prb:expr, !$r:ident <-> $lhs:literal $op:tt $rhs:expr) => {
+		let neg = !($r);
+		rel!($prb, neg <-> $lhs $op $rhs);
+	};
+	// Internal helpers: dispatch to the appropriate comparison method.
+	(@make_lin $lhs:literal < $rhs:expr) => {
+		$crate::IntLinExpr::from($rhs).gt($lhs)
+	};
+	(@make_lin $lhs:literal <= $rhs:expr) => {
+		$crate::IntLinExpr::from($rhs).geq($lhs)
+	};
+	(@make_lin $lhs:literal == $rhs:expr) => {
+		$crate::IntLinExpr::from($rhs).eq($lhs)
+	};
+	(@make_lin $lhs:literal != $rhs:expr) => {
+		$crate::IntLinExpr::from($rhs).ne($lhs)
+	};
+	(@make_lin $lhs:literal >= $rhs:expr) => {
+		$crate::IntLinExpr::from($rhs).leq($lhs)
+	};
+	(@make_lin $lhs:literal > $rhs:expr) => {
+		$crate::IntLinExpr::from($rhs).lt($lhs)
+	};
+}
 
 pub mod actions;
 pub mod branchers;
@@ -18,66 +74,75 @@ pub mod reformulate;
 pub mod solver;
 #[cfg(test)]
 pub(crate) mod tests;
+pub mod views;
 
 use std::{
 	any::Any,
-	collections::{HashSet, VecDeque},
 	fmt::{Debug, Display},
 	hash::Hash,
-	iter::{repeat_n, repeat_with, Sum},
+	iter::{Sum, repeat_n, repeat_with},
 	mem,
-	num::NonZeroI64,
+	num::{NonZero, NonZeroI32},
 	ops::{Add, AddAssign, Deref, Mul, Neg, Not, Sub},
 };
 
 use flatzinc_serde::FlatZinc;
-use index_vec::{index_vec, IndexVec};
+use index_vec::{IndexVec, index_vec};
 use itertools::Itertools;
 pub use pindakaas::solver::TermSignal;
 use pindakaas::{
+	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit as RawLit, Unsatisfiable, Var as RawVar,
 	propositional_logic::Formula,
 	solver::{cadical::Cadical, propagation::ExternalPropagation},
-	ClauseDatabase, ClauseDatabaseTools, Cnf, Lit as RawLit, Unsatisfiable,
 };
 use rangelist::{IntervalIterator, RangeList};
+use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::warn;
 
 use crate::{
-	actions::{ConstraintInitActions, SimplificationActions},
+	actions::{
+		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
+		ConstructionActions, DecisionActions, InitActions, IntDecisionActions,
+		IntExplanationActions, IntInitActions, IntInspectionActions, IntPropagationActions,
+		IntSimplificationActions, PropagationActions, ReasoningContext, ReasoningEngine,
+		SimplificationActions, TrailingActions,
+	},
 	branchers::{BoolBrancher, IntBrancher, WarmStartBrancher},
 	constraints::{
+		BoxedConstraint, Conflict, Constraint, LazyReason, Reason, ReasonBuilder,
+		SimplificationStatus,
 		bool_array_element::BoolDecisionArrayElement,
-		cumulative::Cumulative,
-		disjunctive_strict::DisjunctiveStrict,
-		int_abs::IntAbs,
-		int_all_different::IntAllDifferent,
-		int_array_element::{IntDecisionArrayElement, IntValArrayElement},
-		int_array_minimum::IntArrayMinimum,
+		cumulative::CumulativeTimeTable,
+		disjunctive_strict::{DisjunctiveStrict, DisjunctiveStrictPropagator},
+		int_abs::IntAbsBounds,
+		int_all_different::{IntAllDifferent, IntAllDifferentBounds},
+		int_array_element::{IntArrayElementBounds, IntValArrayElement},
+		int_array_minimum::IntArrayMinimumBounds,
 		int_diffn::IntDiffn,
-		int_div::IntDiv,
+		int_div::IntDivBounds,
 		int_in_set::IntInSetReif,
 		int_linear::{IntEq, IntLinear, LinOperator},
-		int_pow::IntPow,
+		int_pow::IntPowBounds,
 		int_table::IntTable,
-		int_times::IntTimes,
-		int_value_precede::{IntSeqPrecedeChain, IntValuePrecedeChain},
-		BoxedConstraint, Constraint, SimplificationStatus,
+		int_times::IntTimesBounds,
+		int_value_precede::{IntSeqPrecedeChainBounds, IntValuePrecedeChainValue},
 	},
 	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
-	helpers::{linear_transform::LinearTransform, var_from_u32},
 	reformulate::{
-		BoolDecisionDef, BoolDecisionInner, ConstraintStore, Domain, InitConfig, IntDecisionDef,
-		IntDecisionIndex, IntDecisionInner, ReformulationError, ReformulationMap,
+		BoolDecisionDef, BoolDecisionInner, Domain, InitConfig, IntDecisionDef, IntDecisionIndex,
+		IntDecisionInner, ReformulationContext, ReformulationError, ReformulationMap,
 		ReformulationMapBuilder,
 	},
-	solver::{IntLitMeaning, Solver},
+	solver::{
+		IntLitMeaning, Solver,
+		activation_list::{ActivationAction, IntEvent, IntPropCond},
+		queue::{PriorityLevel, PropagatorInfo, PropagatorQueue},
+		trail::TrailedInt,
+	},
+	views::{LinearBoolView, LinearView},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[allow(
-	variant_size_differences,
-	reason = "`bool` is smaller than all other variants"
-)]
 /// A reference to a Boolean decision in the [`Model`].
 ///
 /// Note that decisions only represent where the decision is kept
@@ -136,10 +201,11 @@ pub trait ElementConstraint: Sized {
 	/// Create a constraint that enforces that the `result` decision variables
 	/// takes the same value as `array[index]`.
 	fn element_constraint(
+		prb: &mut Model,
 		array: Vec<Self>,
 		index: IntDecision,
 		result: Self::Result,
-	) -> Self::Constraint;
+	) -> &mut Self::Constraint;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -165,6 +231,23 @@ pub type IntSetVal = RangeList<IntVal>;
 /// Type alias for an parameter integer value.
 pub type IntVal = i64;
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Definition of how a constraint has requested to be advised at the model
+/// level.
+struct ModAdvisorDef {
+	/// Reference to the constraint that has requested to be advised.
+	con: ConRef,
+	/// The data associated by the constraint with the advisor.
+	data: u64,
+	/// Whether lower and upper bound events must be swapped.
+	negated: bool,
+	/// Whether the advise on a Boolean must be advised as an integer event.
+	bool2int: bool,
+	/// The condition on the integer decision variable that must be decided
+	/// before the constraint is advised.
+	condition: Option<IntLitMeaning>,
+}
+
 #[derive(Clone, Debug, Default)]
 /// A formulation of a problem instance in terms of decisions and constraints.
 pub struct Model {
@@ -174,19 +257,45 @@ pub struct Model {
 	/// instances to be used in order to make search decisions.
 	branchings: Vec<Branching>,
 	/// A list of constraints that have been added to the model.
-	constraints: Vec<Option<ConstraintStore>>,
+	constraints: IndexVec<ConRef, Option<BoxedConstraint>>,
 	/// The definitions of the Boolean variables that have been created.
 	bool_vars: Vec<BoolDecisionDef>,
 	/// The definitions of the integer variables that have been created.
 	int_vars: IndexVec<IntDecisionIndex, IntDecisionDef>,
-	/// A queue of indexes of constraints that need to be propagated.
-	prop_queue: VecDeque<usize>,
-	/// A flag for each constraint whether it has been enqueued for propagation.
-	enqueued: Vec<bool>,
+	/// A queue of constraints that need to be propagated.
+	propagator_queue: PropagatorQueue<ConRef>,
+	/// Fake trailed storage
+	trail: IndexVec<TrailedInt, IntVal>,
+	/// Reference for the current propagator being executed.
+	cur_prop: Option<ConRef>,
+	/// Integer variable changes that occurred during the execution of the
+	/// current propagator.
+	int_events: FxHashMap<IntDecisionIndex, IntEvent>,
+	/// Boolean variable changes that occurred during the execution of the
+	/// current propagator.
+	bool_events: Vec<RawVar>,
+
+	/// Definitions of the advisors that are listening to the certain changes.
+	advisors: IndexVec<ModAdvisor, ModAdvisorDef>,
 }
 
-/// Type alias for a non-zero parameter integer value.
-pub type NonZeroIntVal = NonZeroI64;
+#[derive(Debug)]
+/// Wrapper around [`Model`] that knows the constraint being
+/// initialized.
+pub struct ModelInitContext<'a> {
+	/// Index of the constraint being initialized.
+	con: ConRef,
+	/// Reference to the Model in which the constraint exists.
+	model: &'a mut Model,
+	/// The priority level at which the constraint will be enqueued.
+	priority: PriorityLevel,
+	/// Whether the subscriptions of the propagator would suggest the propagator
+	/// should be enqueued.
+	semantic_enqueue: bool,
+	/// Whether the propagator explicitly requested to be enqueued or not
+	/// enqueued.
+	decision_enqueue: Option<bool>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Strategy for limiting the domain of a selected decision variable as part of
@@ -226,22 +335,26 @@ pub enum VariableSelection {
 
 /// Create a constraint that enforces that the second integer decision variable
 /// takes the absolute value of the first integer decision variable.
-pub fn abs_int(origin: IntDecision, abs: IntDecision) -> IntAbs {
-	IntAbs { origin, abs }
+pub fn abs_int(prb: &mut Model, origin: IntDecision, abs: IntDecision) {
+	prb.add_constraint(IntAbsBounds {
+		origin,
+		abs,
+		origin_positive: origin.geq(0),
+	});
 }
 
 /// Create a constraint that enforces that all the given integer decisions take
 /// different values.
-pub fn all_different_int<Iter>(vars: Iter) -> IntAllDifferent
+pub fn all_different_int<Iter>(prb: &mut Model, vars: Iter) -> &mut IntAllDifferent
 where
 	Iter: IntoIterator,
 	Iter::Item: Into<IntDecision>,
 {
-	IntAllDifferent {
-		vars: vars.into_iter().map_into().collect(),
+	prb.add_constraint(IntAllDifferent {
+		prop: IntAllDifferentBounds::new(vars.into_iter().map_into().collect()),
 		bounds_prop: None,
 		value_prop: None,
-	}
+	})
 }
 /// Create a constraint that enforces that given decision variables of starting
 /// positions and sizes of k-dimensional hyperrectangles, none of the rectangles
@@ -262,34 +375,35 @@ pub fn diffn_int(
 /// value equal the element of the given array at the given index decision
 /// variable.
 pub fn array_element<E: ElementConstraint>(
+	prb: &mut Model,
 	array: Vec<E>,
 	index: IntDecision,
 	result: <E as ElementConstraint>::Result,
-) -> <E as ElementConstraint>::Constraint {
-	<E as ElementConstraint>::element_constraint(array, index, result)
+) -> &mut <E as ElementConstraint>::Constraint {
+	<E as ElementConstraint>::element_constraint(prb, array, index, result)
 }
 
 /// Create a constraint that enforces that an integer decision variable takes
 /// the minimum value of an array of integer decision variables.
-pub fn array_maximum_int<Iter>(vars: Iter, max: IntDecision) -> IntArrayMinimum
+pub fn array_maximum_int<Iter>(prb: &mut Model, vars: Iter, max: IntDecision)
 where
 	Iter: IntoIterator,
 	Iter::Item: Into<IntDecision>,
 {
-	array_minimum_int(vars.into_iter().map(|v| -v.into()), -max)
+	array_minimum_int(prb, vars.into_iter().map(|v| -v.into()), -max);
 }
 
 /// Create a constraint that enforces that an integer decision variable takes
 /// the minimum value of an array of integer decision variables.
-pub fn array_minimum_int<Iter>(vars: Iter, min: IntDecision) -> IntArrayMinimum
+pub fn array_minimum_int<Iter>(prb: &mut Model, vars: Iter, min: IntDecision)
 where
 	Iter: IntoIterator,
 	Iter::Item: Into<IntDecision>,
 {
-	IntArrayMinimum {
+	prb.add_constraint(IntArrayMinimumBounds {
 		vars: vars.into_iter().map_into().collect(),
 		min,
-	}
+	});
 }
 
 /// Create a constraint that enforces that the given a list of integer decision
@@ -299,11 +413,12 @@ where
 /// resource usages of all tasks running at any time does not exceed the
 /// resource capacity.
 pub fn cumulative(
+	prb: &mut Model,
 	start_times: Vec<IntDecision>,
 	durations: Vec<IntDecision>,
 	usages: Vec<IntDecision>,
 	capacity: IntDecision,
-) -> Cumulative {
+) {
 	assert_eq!(
 		start_times.len(),
 		durations.len(),
@@ -314,21 +429,22 @@ pub fn cumulative(
 		usages.len(),
 		"cumulative must be given the same number of start times and usages."
 	);
-	Cumulative {
+	prb.add_constraint(CumulativeTimeTable::new(
 		start_times,
 		durations,
 		usages,
 		capacity,
-	}
+	));
 }
 
 /// Create a constraint that enforces that the given a list of integer decision
 /// variables representing the start times of tasks and a list of integer values
 /// representing the durations of tasks, the tasks do not overlap in time.
 pub fn disjunctive_strict(
+	prb: &mut Model,
 	start_times: Vec<IntDecision>,
 	durations: Vec<IntVal>,
-) -> DisjunctiveStrict {
+) -> &mut DisjunctiveStrict {
 	assert_eq!(
 		start_times.len(),
 		durations.len(),
@@ -338,91 +454,108 @@ pub fn disjunctive_strict(
 		durations.iter().all(|&dur| dur >= 0),
 		"disjunctive_strict cannot be given any negative durations."
 	);
-	DisjunctiveStrict {
-		start_times,
-		durations,
+	let propagator =
+		DisjunctiveStrictPropagator::new(prb, start_times, durations, true, true, true);
+	prb.add_constraint(DisjunctiveStrict {
+		propagator,
 		edge_finding_prop: None,
 		not_last_prop: None,
 		detectable_precedence_prop: None,
-	}
+	})
 }
 
 /// Create a constraint that enforces that a numerator decision integer variable
 /// divided by a denominator integer decision variable is equal to a result
 /// integer decision variable.
-pub fn div_int(numerator: IntDecision, denominator: IntDecision, result: IntDecision) -> IntDiv {
-	IntDiv {
+pub fn div_int(
+	prb: &mut Model,
+	numerator: IntDecision,
+	denominator: IntDecision,
+	result: IntDecision,
+) {
+	prb.add_constraint(IntDivBounds {
 		numerator,
 		denominator,
 		result,
-	}
+	});
 }
 
 /// Create constraint that enforces that the given Boolean variable takes the
 /// value `true` if-and-only-if an integer variable is in a given set.
-pub fn int_in_set_reif(var: IntDecision, set: IntSetVal, reif: BoolDecision) -> IntInSetReif {
-	IntInSetReif { var, set, reif }
+pub fn int_in_set_reif(prb: &mut Model, var: IntDecision, set: IntSetVal, reif: BoolDecision) {
+	prb.add_constraint(IntInSetReif { var, set, reif });
 }
 
 /// Create a constraint that enforces that a base integer decision variable
-/// exponentiated by an exponent integer decision variable is equal to a result
+/// exponentiation by an exponent integer decision variable is equal to a result
 /// integer decision variable.
-pub fn pow_int(base: IntDecision, exponent: IntDecision, result: IntDecision) -> IntPow {
-	IntPow {
+pub fn pow_int(prb: &mut Model, base: IntDecision, exponent: IntDecision, result: IntDecision) {
+	prb.add_constraint(IntPowBounds {
 		base,
 		exponent,
 		result,
-	}
+	});
 }
 
 /// Create a sequential precede chain constraint that enforces that any integer
 /// value `i`, larger than one, will only occur in a position after the first
 /// occurrence of `i-1`.
-pub fn seq_precede_chain_int<It>(vars: impl IntoIterator<Item = It>) -> IntSeqPrecedeChain
+pub fn seq_precede_chain_int<It>(prb: &mut Model, vars: impl IntoIterator<Item = It>)
 where
 	It: Into<IntDecision>,
 {
-	IntSeqPrecedeChain {
-		vars: vars.into_iter().map_into().collect(),
-	}
+	let con = IntSeqPrecedeChainBounds::new(prb, vars.into_iter().map_into().collect());
+	prb.add_constraint(con);
 }
 
 /// Create a `table_int` constraint that enforces that given list of integer
 /// views take their values according to one of the given lists of integer
 /// values.
-pub fn table_int(vars: Vec<IntDecision>, table: Vec<Vec<IntVal>>) -> IntTable {
-	assert!(table.iter().all(|tup| tup.len() == vars.len()), "The number of values in each row of the table must be equal to the number of decision variables.");
-	IntTable { vars, table }
+pub fn table_int(prb: &mut Model, vars: Vec<IntDecision>, table: Vec<Vec<IntVal>>) {
+	assert!(
+		table.iter().all(|tup| tup.len() == vars.len()),
+		"The number of
+values in each row of the table must be equal to the number of decision
+variables."
+	);
+	prb.add_constraint(IntTable { vars, table });
 }
 
 /// Create a constraint that enforces that the product of the two integer
 /// decision variables is equal to a third.
-pub fn times_int(factor1: IntDecision, factor2: IntDecision, product: IntDecision) -> IntTimes {
-	IntTimes {
+pub fn times_int(
+	prb: &mut Model,
+	factor1: IntDecision,
+	factor2: IntDecision,
+	product: IntDecision,
+) {
+	prb.add_constraint(IntTimesBounds {
 		factor1,
 		factor2,
 		product,
-	}
+	});
 }
 
 /// Create a value precede chain constraint that enforces that the first
-/// occurence of each value in `values` among the decisions `vars` happens in
+/// occurrence of each value in `values` among the decisions `vars` happens in
 /// the order of `values.
 ///
 /// Note that `seq_precede_chain_int` is a special case of this constraint where
 /// the values are consecutive integers starting from 1.
 pub fn value_precede_chain_int<D, V>(
+	prb: &mut Model,
 	vars: impl IntoIterator<Item = D>,
 	values: impl IntoIterator<Item = V>,
-) -> IntValuePrecedeChain
-where
+) where
 	D: Into<IntDecision>,
 	V: Into<IntVal>,
 {
-	IntValuePrecedeChain {
-		values: values.into_iter().map_into().collect(),
-		vars: vars.into_iter().map_into().collect(),
-	}
+	let con = IntValuePrecedeChainValue::new(
+		prb,
+		values.into_iter().map_into().collect(),
+		vars.into_iter().map_into().collect(),
+	);
+	prb.add_constraint(con);
 }
 
 impl BoolDecision {
@@ -445,12 +578,15 @@ impl BoolDecision {
 		// If the current Lit is a integer view, check whether it is already fixed.
 		match result.0 {
 			IntEq(iv, val) => {
-				if let Some(v) = model.get_int_val(IntDecision(IntDecisionInner::Var(iv))) {
-					return BoolDecision(Const(v == val));
+				let (lb, ub) = iv.bounds(model);
+				if val < lb || val > ub {
+					return BoolDecision(Const(false));
+				} else if val == lb && val == ub {
+					return BoolDecision(Const(true));
 				}
 			}
 			IntGreaterEq(iv, val) => {
-				let (lb, ub) = model.get_int_bounds(IntDecision(IntDecisionInner::Var(iv)));
+				let (lb, ub) = iv.bounds(model);
 				if lb >= val {
 					return BoolDecision(Const(true));
 				} else if ub < val {
@@ -458,7 +594,7 @@ impl BoolDecision {
 				}
 			}
 			IntLess(iv, val) => {
-				let (lb, ub) = model.get_int_bounds(IntDecision(IntDecisionInner::Var(iv)));
+				let (lb, ub) = iv.bounds(model);
 				if ub < val {
 					return BoolDecision(Const(true));
 				} else if lb >= val {
@@ -466,8 +602,11 @@ impl BoolDecision {
 				}
 			}
 			IntNotEq(iv, val) => {
-				if let Some(v) = model.get_int_val(IntDecision(IntDecisionInner::Var(iv))) {
-					return BoolDecision(Const(v != val));
+				let (lb, ub) = iv.bounds(model);
+				if val < lb || val > ub {
+					return BoolDecision(Const(true));
+				} else if val == lb && val == ub {
+					return BoolDecision(Const(false));
 				}
 			}
 			_ => {}
@@ -485,20 +624,226 @@ impl Add<IntVal> for BoolDecision {
 	}
 }
 
+impl BoolInitActions<ModelInitContext<'_>> for BoolDecision {
+	fn advise_when_fixed(&self, ctx: &mut ModelInitContext<'_>, data: u64) {
+		let var = self.resolve_alias(ctx.model);
+		let (iv, cond, event) = match var.0 {
+			BoolDecisionInner::Lit(lit) => {
+				let adv = ctx.model.advisors.push(ModAdvisorDef {
+					con: ctx.con,
+					data,
+					negated: false,
+					bool2int: false,
+					condition: None,
+				});
+				ctx.model.bool_vars[i32::from(lit.var()) as usize - 1]
+					.constraints
+					.push(ActivationAction::Advise(adv).into());
+				return;
+			}
+			BoolDecisionInner::Const(_) => {
+				// Value does not change, so no advisor will ever be called
+				return;
+			}
+			BoolDecisionInner::IntEq(iv, v) => (iv, IntLitMeaning::Eq(v), IntPropCond::Domain),
+			BoolDecisionInner::IntGreaterEq(iv, v) => {
+				(iv, IntLitMeaning::GreaterEq(v), IntPropCond::Bounds)
+			}
+			BoolDecisionInner::IntLess(iv, v) => (iv, IntLitMeaning::Less(v), IntPropCond::Bounds),
+			BoolDecisionInner::IntNotEq(iv, v) => {
+				(iv, IntLitMeaning::NotEq(v), IntPropCond::Domain)
+			}
+		};
+		let adv = ctx.model.advisors.push(ModAdvisorDef {
+			con: ctx.con,
+			data,
+			negated: false,
+			bool2int: false,
+			condition: Some(cond),
+		});
+		ctx.model.int_vars[iv]
+			.constraints
+			.add(ActivationAction::Advise(adv), event);
+	}
+	fn enqueue_when_fixed(&self, ctx: &mut ModelInitContext<'_>) {
+		let var = self.resolve_alias(ctx.model);
+		match var.0 {
+			BoolDecisionInner::Lit(lit) => ctx.model.bool_vars[i32::from(lit.var()) as usize - 1]
+				.constraints
+				.push(ActivationAction::Enqueue(ctx.con).into()),
+			BoolDecisionInner::Const(_) => ctx.semantic_enqueue = true,
+			// TODO: These definitions might enqueue when the boolean is not fixed. Use advisors
+			// instead?
+			BoolDecisionInner::IntEq(iv, _) | BoolDecisionInner::IntNotEq(iv, _) => {
+				iv.enqueue_when(ctx, IntPropCond::Domain);
+			}
+			BoolDecisionInner::IntGreaterEq(iv, _) | BoolDecisionInner::IntLess(iv, _) => {
+				iv.enqueue_when(ctx, IntPropCond::Bounds);
+			}
+		}
+	}
+}
+
+impl BoolInspectionActions<Model> for BoolDecision {
+	fn val(&self, ctx: &Model) -> Option<bool> {
+		use BoolDecisionInner::*;
+
+		let b = self.resolve_alias(ctx);
+		match b.0 {
+			Const(b) => Some(b),
+			_ => None,
+		}
+	}
+}
+
+impl BoolInspectionActions<ModelInitContext<'_>> for BoolDecision {
+	fn val(&self, ctx: &ModelInitContext<'_>) -> Option<bool> {
+		self.val(ctx.model)
+	}
+}
+
+impl BoolPropagationActions<Model> for BoolDecision {
+	fn set(
+		&self,
+		ctx: &mut Model,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<BoolDecision>> {
+		use BoolDecisionInner::*;
+
+		let var = self.resolve_alias(ctx);
+		match var.0 {
+			Lit(l) => {
+				let var = i32::from(l.var()) as usize - 1;
+				let def = &mut ctx.bool_vars[var];
+				debug_assert!(def.alias.is_none());
+				def.alias = Some(BoolDecision(Const(!l.is_negated())));
+				ctx.bool_events.push(l.var());
+				Ok(())
+			}
+			Const(c) => c.set(ctx, reason),
+			IntEq(iv, val) => {
+				IntDecision(IntDecisionInner::Linear(iv.into())).set_val(ctx, val, reason)
+			}
+			IntGreaterEq(iv, val) => {
+				IntDecision(IntDecisionInner::Linear(iv.into())).set_lower_bound(ctx, val, reason)
+			}
+			IntLess(iv, val) => IntDecision(IntDecisionInner::Linear(iv.into())).set_upper_bound(
+				ctx,
+				val - 1,
+				reason,
+			),
+			IntNotEq(iv, val) => {
+				IntDecision(IntDecisionInner::Linear(iv.into())).set_not_eq(ctx, val, reason)
+			}
+		}
+	}
+
+	fn set_val(
+		&self,
+		ctx: &mut Model,
+		val: bool,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<BoolDecision>> {
+		let lit = if val { *self } else { !*self };
+		lit.set(ctx, reason)
+	}
+}
+
+impl BoolSimplificationActions<Model> for BoolDecision {
+	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Conflict<BoolDecision>> {
+		use BoolDecisionInner::*;
+
+		let x = self.resolve_alias(ctx);
+		let y = other.into().resolve_alias(ctx);
+
+		match (x.0, y.0) {
+			(x, y) if x == y => Ok(()),
+			(Lit(xl), Lit(yl)) if xl.var() == yl.var() => Err(ctx.declare_conflict([x, y])),
+			(Const(x), Const(y)) if x != y => Err(ctx.declare_conflict([])),
+			(x, Const(b)) | (Const(b), x) => BoolDecision(x).set_val(ctx, b, []),
+			(Lit(x), y) | (y, Lit(x)) => {
+				let (x, y) = if let Lit(y) = y {
+					if x.var() > y.var() {
+						(x, BoolDecision(Lit(y)))
+					} else {
+						(y, BoolDecision(Lit(x)))
+					}
+				} else {
+					(x, BoolDecision(y))
+				};
+				let store = &mut ctx.bool_vars[i32::from(x.var()) as usize - 1];
+				debug_assert_eq!(store.alias, None);
+				let idx = i32::from(x.var()) as usize - 1;
+				ctx.bool_vars[idx].alias = Some(if x.is_negated() { !y } else { y });
+
+				// Move subscriptions from aliased variable to the new primary variable
+				let constraints = mem::take(&mut ctx.bool_vars[idx].constraints);
+				match y.0 {
+					// Move subscriptions to another Boolean decision
+					Lit(lit) => {
+						let jdx = i32::from(lit.var()) as usize - 1;
+						ctx.bool_vars[jdx].constraints.extend(constraints);
+					}
+					// Move subscriptions to an integer decision
+					IntEq(j, _) | IntGreaterEq(j, _) | IntLess(j, _) | IntNotEq(j, _) => {
+						for act in constraints {
+							let event = if matches!(y.0, IntEq(_, _) | IntNotEq(_, _)) {
+								IntPropCond::Domain
+							} else {
+								IntPropCond::Bounds
+							};
+							match ActivationAction::<ModAdvisor, ConRef>::from(act) {
+								ActivationAction::Advise(adv) => {
+									let def: &mut ModAdvisorDef = &mut ctx.advisors[adv];
+									def.condition = Some(match y.0 {
+										IntEq(_, v) => IntLitMeaning::Eq(v),
+										IntGreaterEq(_, v) => IntLitMeaning::GreaterEq(v),
+										IntLess(_, v) => IntLitMeaning::Less(v),
+										IntNotEq(_, v) => IntLitMeaning::NotEq(v),
+										_ => unreachable!(),
+									});
+									ctx.int_vars[j]
+										.constraints
+										.add(ActivationAction::Advise(adv), event);
+								}
+								me @ ActivationAction::Enqueue(_) => {
+									// TODO: This triggers even when the Boolean Condition does not
+									// change value
+									ctx.int_vars[j].constraints.add(me, event);
+								}
+							}
+						}
+					}
+					Const(_) => unreachable!(),
+				};
+				Ok(())
+			}
+			(x, y) => {
+				let x = BoolFormula::Atom(BoolDecision(x));
+				let y = BoolFormula::Atom(BoolDecision(y));
+
+				ctx.add_constraint(BoolFormula::Equiv(vec![x, y]));
+				Ok(())
+			}
+		}
+	}
+}
+
 impl ElementConstraint for BoolDecision {
 	type Constraint = BoolDecisionArrayElement;
 	type Result = BoolDecision;
 
 	fn element_constraint(
+		prb: &mut Model,
 		array: Vec<Self>,
 		index: IntDecision,
 		result: Self::Result,
-	) -> Self::Constraint {
-		Self::Constraint {
+	) -> &mut Self::Constraint {
+		prb.add_constraint(Self::Constraint {
 			index,
 			array,
 			result,
-		}
+		})
 	}
 }
 
@@ -512,6 +857,15 @@ impl Mul<IntVal> for BoolDecision {
 	type Output = IntDecision;
 
 	fn mul(self, rhs: IntVal) -> Self::Output {
+		let me: IntDecision = self.into();
+		me * rhs
+	}
+}
+
+impl Mul<NonZero<IntVal>> for BoolDecision {
+	type Output = IntDecision;
+
+	fn mul(self, rhs: NonZero<IntVal>) -> Self::Output {
 		let me: IntDecision = self.into();
 		me * rhs
 	}
@@ -597,10 +951,9 @@ impl IntDecision {
 		use IntDecisionInner::*;
 
 		match self.0 {
-			Var(x) => BoolDecision(BoolDecisionInner::IntEq(x, v)),
 			Const(c) => (c == v).into(),
-			Linear(t, x) => match t.rev_transform_lit(IntLitMeaning::Eq(v)) {
-				Ok(IntLitMeaning::Eq(val)) => BoolDecision(BoolDecisionInner::IntEq(x, val)),
+			Linear(lin) => match lin.reverse_meaning(IntLitMeaning::Eq(v)) {
+				Ok(IntLitMeaning::Eq(val)) => BoolDecision(BoolDecisionInner::IntEq(lin.var, val)),
 				Err(b) => {
 					// After the transformation, the value `v` does not remain an integer.
 					debug_assert!(!b);
@@ -608,9 +961,9 @@ impl IntDecision {
 				}
 				_ => unreachable!(),
 			},
-			Bool(t, x) => match t.rev_transform_lit(IntLitMeaning::Eq(v)) {
-				Ok(IntLitMeaning::Eq(1))  => x,
-				Ok(IntLitMeaning::Eq(0))  => !x,
+			Bool(lin) => match lin.reverse_meaning(IntLitMeaning::Eq(v)) {
+				Ok(IntLitMeaning::Eq(1))  => lin.var,
+				Ok(IntLitMeaning::Eq(0))  => !lin.var,
 				Ok(IntLitMeaning::Eq(_)) /* if val != 0 */ => false.into(),
 				Err(b) => {
 					// After the transformation, the value `v` does not remain an integer.
@@ -646,20 +999,21 @@ impl IntDecision {
 		use IntDecisionInner::*;
 
 		match self.0 {
-			Var(x) => BoolDecision(BoolDecisionInner::IntLess(x, v)),
-			Const(c) => (c <= v).into(),
-			Linear(t, x) => match t.rev_transform_lit(IntLitMeaning::Less(v)) {
+			Const(c) => (c < v).into(),
+			Linear(lin) => match lin.reverse_meaning(IntLitMeaning::Less(v)) {
 				Ok(IntLitMeaning::GreaterEq(val)) => {
-					BoolDecision(BoolDecisionInner::IntGreaterEq(x, val))
+					BoolDecision(BoolDecisionInner::IntGreaterEq(lin.var, val))
 				}
-				Ok(IntLitMeaning::Less(val)) => BoolDecision(BoolDecisionInner::IntLess(x, val)),
+				Ok(IntLitMeaning::Less(val)) => {
+					BoolDecision(BoolDecisionInner::IntLess(lin.var, val))
+				}
 				_ => unreachable!(),
 			},
-			Bool(t, x) => match t.rev_transform_lit(IntLitMeaning::Less(v)) {
-				Ok(IntLitMeaning::GreaterEq(1)) => x,
+			Bool(lin) => match lin.reverse_meaning(IntLitMeaning::Less(v)) {
+				Ok(IntLitMeaning::GreaterEq(1)) => lin.var,
 				Ok(IntLitMeaning::GreaterEq(val)) if val > 1 => false.into(),
 				Ok(IntLitMeaning::GreaterEq(_)) /* if val <= 0 */ => true.into(),
-				Ok(IntLitMeaning::Less(1)) => !x,
+				Ok(IntLitMeaning::Less(1)) => !lin.var,
 				Ok(IntLitMeaning::Less(val)) if val > 1 => true.into(),
 				Ok(IntLitMeaning::Less(_)) /* if val <= 0 */ => false.into(),
 				_ => unreachable!(),
@@ -679,37 +1033,125 @@ impl IntDecision {
 	fn resolve_alias(self, model: &Model) -> Self {
 		use IntDecisionInner::*;
 
-		let mut result = self;
+		let mut view = self;
 		let mut scale = 1;
 		let mut offset = 0;
 		loop {
-			match result.0 {
-				Var(v) => {
-					if let Domain::Alias(alias) = model.int_vars[v].domain {
-						result = alias;
-					} else {
-						return IntDecision(Var(v)) * scale + offset;
-					}
+			match view.0 {
+				Const(c) => {
+					return IntDecision(Const(c * scale + offset));
 				}
-				Linear(t, x) => {
-					if let Domain::Alias(alias) = model.int_vars[x].domain {
-						result = alias;
-						offset += scale * t.offset;
-						scale *= t.scale.get();
-					} else {
-						return IntDecision(Linear(t, x)) * scale + offset;
-					}
+				_ if scale == 0 => {
+					return IntDecision(Const(offset));
 				}
-				Bool(t, x) => {
-					let x = x.resolve_alias(model);
-					if let BoolDecisionInner::Const(b) = x.0 {
-						return IntDecision(Const(t.transform(b as IntVal) * scale + offset));
+				Linear(lin) => match model.int_vars[lin.var].domain {
+					Domain::Domain(_) => {
+						return IntDecision(Linear(lin * NonZero::new(scale).unwrap() + offset));
 					}
-					return IntDecision(Bool(t, x)) * scale + offset;
+					Domain::Alias(alias) => {
+						view = alias;
+						offset += scale * lin.offset;
+						scale *= lin.scale.get();
+					}
+				},
+				Bool(lin) => {
+					let var = lin.var.resolve_alias(model);
+					if let BoolDecisionInner::Const(b) = var.0 {
+						return IntDecision(Const(lin.transform_val(b as IntVal) * scale + offset));
+					}
+					return IntDecision(Bool(lin * NonZero::new(scale).unwrap() + offset));
 				}
-				x => return IntDecision(x) * scale + offset,
 			}
 		}
+	}
+}
+
+impl IntDecisionIndex {
+	/// Internal method performing unification under the assumption that the
+	/// receiver is an integer decision index that is not already aliased, and
+	/// that it can be aliased to directly point to `other`.
+	fn unify_internal(
+		&self,
+		ctx: &mut Model,
+		target: IntDecision,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		debug_assert!(matches!(
+			ctx.int_vars[*self].domain,
+			Domain::Domain(_) | Domain::Alias(IntDecision(IntDecisionInner::Const(_)))
+		));
+
+		// Set the domain on the variable to be aliased to trigger subscription
+		// events.
+		self.set_domain(ctx, &target.domain(ctx), [])?;
+		// Change variable to point to the target
+		match mem::replace(&mut ctx.int_vars[*self].domain, Domain::Alias(target)) {
+			// Restrict the domain of the target variable using the variable domain
+			// being aliased.
+			Domain::Domain(dom) => target.set_domain(ctx, &dom, [])?,
+			Domain::Alias(IntDecision(IntDecisionInner::Const(v))) => target.set_val(ctx, v, [])?,
+			_ => unreachable!(),
+		};
+		// Transfer any constraints from the aliased variable to the target variable
+		let constraints = mem::take(&mut ctx.int_vars[*self].constraints);
+		// Move subscriptions to target decision variable
+		match target.0 {
+			IntDecisionInner::Linear(lin) => {
+				ctx.int_vars[lin.var].constraints.extend(constraints);
+			}
+			IntDecisionInner::Bool(lin) => match lin.var.0 {
+				inner @ (BoolDecisionInner::IntEq(j, _)
+				| BoolDecisionInner::IntNotEq(j, _)
+				| BoolDecisionInner::IntGreaterEq(j, _)
+				| BoolDecisionInner::IntLess(j, _)) => {
+					constraints.for_each_activated_by(
+						IntEvent::Fixed,
+						|act: ActivationAction<ModAdvisor, ConRef>| {
+							if let ActivationAction::Advise(adv) = act {
+								let def = &mut ctx.advisors[adv];
+								def.bool2int = true;
+								def.condition = Some(match inner {
+									BoolDecisionInner::IntEq(_, v) => IntLitMeaning::Eq(v),
+									BoolDecisionInner::IntGreaterEq(_, v) => {
+										IntLitMeaning::GreaterEq(v)
+									}
+									BoolDecisionInner::IntLess(_, v) => IntLitMeaning::Less(v),
+									BoolDecisionInner::IntNotEq(_, v) => IntLitMeaning::NotEq(v),
+									_ => unreachable!(),
+								});
+								def.negated = false;
+							}
+							let cond = if matches!(
+								inner,
+								BoolDecisionInner::IntEq(_, _) | BoolDecisionInner::IntNotEq(_, _)
+							) {
+								IntPropCond::Domain
+							} else {
+								IntPropCond::Bounds
+							};
+							ctx.int_vars[j].constraints.add(act, cond);
+						},
+					);
+				}
+				// Move subscription to Boolean decision
+				BoolDecisionInner::Lit(l) => {
+					let jdx = i32::from(l.var()) as usize - 1;
+					constraints.for_each_activated_by(
+						IntEvent::Fixed,
+						|act: ActivationAction<ModAdvisor, ConRef>| {
+							if let ActivationAction::Advise(adv) = act {
+								let def = &mut ctx.advisors[adv];
+								def.bool2int = true;
+								def.negated = false;
+							}
+							ctx.bool_vars[jdx].constraints.push(act.into());
+						},
+					);
+				}
+				BoolDecisionInner::Const(_) => unreachable!(),
+			},
+			IntDecisionInner::Const(_) => unreachable!(),
+		};
+		Ok(())
 	}
 }
 
@@ -733,35 +1175,25 @@ impl Add<IntVal> for IntDecision {
 			return self;
 		}
 		IntDecision(match self.0 {
-			Var(x) => Linear(LinearTransform::offset(rhs), x),
 			Const(v) => Const(v + rhs),
-			Linear(t, x) => {
-				let t = t + rhs;
-				if t.is_identity() {
-					Var(x)
-				} else {
-					Linear(t, x)
-				}
-			}
-			Bool(t, x) => Bool(t + rhs, x),
+			Linear(lin) => Linear(lin + rhs),
+			Bool(lin) => Bool(lin + rhs),
 		})
 	}
 }
 
 impl ElementConstraint for IntDecision {
-	type Constraint = IntDecisionArrayElement;
+	type Constraint = IntArrayElementBounds<IntDecision, IntDecision, IntDecision>;
 	type Result = IntDecision;
 
 	fn element_constraint(
+		prb: &mut Model,
 		array: Vec<Self>,
 		index: IntDecision,
 		result: Self::Result,
-	) -> Self::Constraint {
-		Self::Constraint {
-			index,
-			array,
-			result,
-		}
+	) -> &mut Self::Constraint {
+		let con = IntArrayElementBounds::new(prb, array, index, result);
+		prb.add_constraint(con)
 	}
 }
 
@@ -769,7 +1201,7 @@ impl From<BoolDecision> for IntDecision {
 	fn from(value: BoolDecision) -> Self {
 		match value.0 {
 			BoolDecisionInner::Const(b) => (b as IntVal).into(),
-			_ => IntDecision(IntDecisionInner::Bool(LinearTransform::offset(0), value)),
+			_ => IntDecision(IntDecisionInner::Bool(value.into())),
 		}
 	}
 }
@@ -780,6 +1212,772 @@ impl From<i64> for IntDecision {
 	}
 }
 
+impl IntDecisionActions<Model> for IntDecisionIndex {
+	fn lit(&self, ctx: &mut Model, meaning: IntLitMeaning) -> BoolDecision {
+		IntInspectionActions::try_lit(self, ctx, meaning).unwrap()
+	}
+
+	fn val_lit(&self, ctx: &mut Model) -> Option<BoolDecision> {
+		let val = self.val(ctx)?;
+		Some(BoolDecision(BoolDecisionInner::IntEq(*self, val)))
+	}
+}
+
+impl IntDecisionActions<Model> for IntDecision {
+	fn lit(&self, ctx: &mut Model, meaning: IntLitMeaning) -> BoolDecision {
+		IntInspectionActions::try_lit(self, ctx, meaning).unwrap()
+	}
+
+	fn val_lit(&self, ctx: &mut Model) -> Option<BoolDecision> {
+		let val = self.val(ctx)?;
+		Some(Self::eq(self, val))
+	}
+}
+
+impl IntExplanationActions<Model> for IntDecision {
+	fn lit_relaxed(&self, ctx: &Model, meaning: IntLitMeaning) -> (BoolDecision, IntLitMeaning) {
+		(self.try_lit(ctx, meaning).unwrap(), meaning)
+	}
+}
+
+impl IntInitActions<ModelInitContext<'_>> for IntDecisionIndex {
+	fn advise_when(&self, ctx: &mut ModelInitContext<'_>, cond: IntPropCond, data: u64) {
+		let adv = ctx.model.advisors.push(ModAdvisorDef {
+			con: ctx.con,
+			data,
+			negated: false,
+			bool2int: false,
+			condition: None,
+		});
+		ctx.model.int_vars[*self]
+			.constraints
+			.add(ActivationAction::Advise(adv), cond);
+	}
+
+	fn enqueue_when(&self, ctx: &mut ModelInitContext<'_>, condition: IntPropCond) {
+		if condition != IntPropCond::Fixed {
+			ctx.semantic_enqueue = true;
+		}
+		ctx.model.int_vars[*self]
+			.constraints
+			.add(ActivationAction::Enqueue(ctx.con), condition);
+	}
+}
+
+impl IntInitActions<ModelInitContext<'_>> for IntDecision {
+	fn advise_when(&self, ctx: &mut ModelInitContext<'_>, cond: IntPropCond, data: u64) {
+		let var = self.resolve_alias(ctx.model);
+
+		match var.0 {
+			IntDecisionInner::Linear(lin) => {
+				let negated = lin.scale.is_negative();
+				let adv = ctx.model.advisors.push(ModAdvisorDef {
+					con: ctx.con,
+					data,
+					negated,
+					bool2int: false,
+					condition: None,
+				});
+				ctx.model.int_vars[lin.var]
+					.constraints
+					.add(ActivationAction::Advise(adv), cond);
+			}
+			IntDecisionInner::Const(_) => ctx.semantic_enqueue = true,
+			IntDecisionInner::Bool(lin) => {
+				let var = lin.var.resolve_alias(ctx.model);
+				let (iv, cond, event) = match var.0 {
+					BoolDecisionInner::Lit(lit) => {
+						let adv = ctx.model.advisors.push(ModAdvisorDef {
+							con: ctx.con,
+							data,
+							negated: false,
+							bool2int: true,
+							condition: None,
+						});
+						ctx.model.bool_vars[i32::from(lit.var()) as usize - 1]
+							.constraints
+							.push(ActivationAction::Advise(adv).into());
+						return;
+					}
+					BoolDecisionInner::Const(_) => {
+						// Value does not change, so no advisor will ever be called
+						return;
+					}
+					BoolDecisionInner::IntEq(iv, v) => {
+						(iv, IntLitMeaning::Eq(v), IntPropCond::Domain)
+					}
+					BoolDecisionInner::IntGreaterEq(iv, v) => {
+						(iv, IntLitMeaning::GreaterEq(v), IntPropCond::Bounds)
+					}
+					BoolDecisionInner::IntLess(iv, v) => {
+						(iv, IntLitMeaning::Less(v), IntPropCond::Bounds)
+					}
+					BoolDecisionInner::IntNotEq(iv, v) => {
+						(iv, IntLitMeaning::NotEq(v), IntPropCond::Domain)
+					}
+				};
+				let adv = ctx.model.advisors.push(ModAdvisorDef {
+					con: ctx.con,
+					data,
+					negated: false,
+					bool2int: true,
+					condition: Some(cond),
+				});
+				ctx.model.int_vars[iv]
+					.constraints
+					.add(ActivationAction::Advise(adv), event);
+			}
+		}
+	}
+
+	fn enqueue_when(&self, ctx: &mut ModelInitContext<'_>, condition: IntPropCond) {
+		let var = self.resolve_alias(ctx.model);
+
+		match var.0 {
+			IntDecisionInner::Linear(lin) => {
+				let condition = match condition {
+					IntPropCond::LowerBound if lin.scale.is_negative() => IntPropCond::UpperBound,
+					IntPropCond::UpperBound if lin.scale.is_negative() => IntPropCond::LowerBound,
+					_ => condition,
+				};
+				lin.var.enqueue_when(ctx, condition);
+			}
+			IntDecisionInner::Const(_) => ctx.semantic_enqueue = true,
+			IntDecisionInner::Bool(lin) => {
+				if condition != IntPropCond::Fixed {
+					ctx.semantic_enqueue = true;
+				}
+				lin.var.enqueue_when_fixed(ctx);
+			}
+		}
+	}
+}
+
+impl IntInspectionActions<Model> for IntDecisionIndex {
+	fn bounds(&self, ctx: &Model) -> (IntVal, IntVal) {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(d) => (*d.lower_bound().unwrap(), *d.upper_bound().unwrap()),
+			Domain::Alias(alias) => alias.bounds(ctx),
+		}
+	}
+
+	fn domain(&self, ctx: &Model) -> IntSetVal {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(d) => d.clone(),
+			Domain::Alias(alias) => alias.domain(ctx),
+		}
+	}
+
+	fn in_domain(&self, ctx: &Model, val: IntVal) -> bool {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(d) => d.contains(&val),
+			Domain::Alias(alias) => alias.in_domain(ctx, val),
+		}
+	}
+
+	fn lit_meaning(
+		&self,
+		_: &Model,
+		lit: <Model as ReasoningContext>::Atom,
+	) -> Option<IntLitMeaning> {
+		match lit.0 {
+			BoolDecisionInner::IntEq(idx, val) if idx == *self => Some(IntLitMeaning::Eq(val)),
+			BoolDecisionInner::IntGreaterEq(idx, val) if idx == *self => {
+				Some(IntLitMeaning::GreaterEq(val))
+			}
+			BoolDecisionInner::IntLess(idx, val) if idx == *self => Some(IntLitMeaning::Less(val)),
+			BoolDecisionInner::IntNotEq(idx, val) if idx == *self => {
+				Some(IntLitMeaning::NotEq(val))
+			}
+			_ => None,
+		}
+	}
+
+	fn lower_bound(&self, ctx: &Model) -> IntVal {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(d) => *d.lower_bound().unwrap(),
+			Domain::Alias(alias) => alias.lower_bound(ctx),
+		}
+	}
+
+	fn lower_bound_lit(&self, ctx: &Model) -> <Model as ReasoningContext>::Atom {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(d) => d
+				.lower_bound()
+				.map(|&val| BoolDecision(BoolDecisionInner::IntGreaterEq(*self, val)))
+				.unwrap(),
+			Domain::Alias(alias) => alias.lower_bound_lit(ctx),
+		}
+	}
+
+	fn try_lit(
+		&self,
+		ctx: &Model,
+		meaning: IntLitMeaning,
+	) -> Option<<Model as ReasoningContext>::Atom> {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(_) => Some(BoolDecision(match meaning {
+				IntLitMeaning::Eq(v) => BoolDecisionInner::IntEq(*self, v),
+				IntLitMeaning::NotEq(v) => BoolDecisionInner::IntNotEq(*self, v),
+				IntLitMeaning::GreaterEq(v) => BoolDecisionInner::IntGreaterEq(*self, v),
+				IntLitMeaning::Less(v) => BoolDecisionInner::IntLess(*self, v),
+			})),
+			Domain::Alias(alias) => alias.try_lit(ctx, meaning),
+		}
+	}
+
+	fn upper_bound(&self, ctx: &Model) -> IntVal {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(d) => *d.upper_bound().unwrap(),
+			Domain::Alias(alias) => alias.upper_bound(ctx),
+		}
+	}
+
+	fn upper_bound_lit(&self, ctx: &Model) -> <Model as ReasoningContext>::Atom {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(d) => d
+				.lower_bound()
+				.map(|&val| BoolDecision(BoolDecisionInner::IntLess(*self, val + 1)))
+				.unwrap(),
+			Domain::Alias(alias) => alias.upper_bound_lit(ctx),
+		}
+	}
+
+	fn val(&self, ctx: &Model) -> Option<IntVal> {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(d) => {
+				let (lb, ub) = (d.lower_bound().unwrap(), d.upper_bound().unwrap());
+				if lb == ub { Some(*lb) } else { None }
+			}
+			Domain::Alias(alias) => alias.val(ctx),
+		}
+	}
+}
+
+impl IntInspectionActions<Model> for IntDecision {
+	fn domain(&self, ctx: &Model) -> IntSetVal {
+		match self.resolve_alias(ctx).0 {
+			IntDecisionInner::Const(c) => (c..=c).into(),
+			IntDecisionInner::Linear(lin) => lin.domain(ctx),
+			IntDecisionInner::Bool(lin) => lin.domain(ctx),
+		}
+	}
+
+	fn in_domain(&self, ctx: &Model, val: IntVal) -> bool {
+		match self.resolve_alias(ctx).0 {
+			IntDecisionInner::Const(v) => v == val,
+			IntDecisionInner::Linear(lin) => lin.in_domain(ctx, val),
+			IntDecisionInner::Bool(lin) => lin.in_domain(ctx, val),
+		}
+	}
+
+	fn lit_meaning(&self, ctx: &Model, lit: BoolDecision) -> Option<IntLitMeaning> {
+		match self.0 {
+			IntDecisionInner::Const(_) => None,
+			IntDecisionInner::Linear(lin) => lin.lit_meaning(ctx, lit),
+			IntDecisionInner::Bool(lin) => lin.lit_meaning(ctx, lit),
+		}
+	}
+
+	fn lower_bound(&self, ctx: &Model) -> IntVal {
+		match self.resolve_alias(ctx).0 {
+			IntDecisionInner::Const(v) => v,
+			IntDecisionInner::Linear(lin) => lin.lower_bound(ctx),
+			IntDecisionInner::Bool(lin) => lin.lower_bound(ctx),
+		}
+	}
+
+	fn lower_bound_lit(&self, ctx: &Model) -> BoolDecision {
+		match self.resolve_alias(ctx).0 {
+			IntDecisionInner::Const(_) => true.into(),
+			IntDecisionInner::Linear(lin) => lin.lower_bound_lit(ctx),
+			IntDecisionInner::Bool(lin) => lin.lower_bound_lit(ctx),
+		}
+	}
+
+	fn try_lit(&self, _: &Model, meaning: IntLitMeaning) -> Option<BoolDecision> {
+		Some(match meaning {
+			IntLitMeaning::Eq(v) => self.eq(v),
+			IntLitMeaning::NotEq(v) => self.ne(v),
+			IntLitMeaning::GreaterEq(v) => self.geq(v),
+			IntLitMeaning::Less(v) => self.lt(v),
+		})
+	}
+
+	fn upper_bound(&self, ctx: &Model) -> IntVal {
+		match self.resolve_alias(ctx).0 {
+			IntDecisionInner::Const(v) => v,
+			IntDecisionInner::Linear(lin) => lin.upper_bound(ctx),
+			IntDecisionInner::Bool(lin) => lin.upper_bound(ctx),
+		}
+	}
+
+	fn upper_bound_lit(&self, ctx: &Model) -> BoolDecision {
+		match self.resolve_alias(ctx).0 {
+			IntDecisionInner::Const(_) => true.into(),
+			IntDecisionInner::Linear(lin) => lin.upper_bound_lit(ctx),
+			IntDecisionInner::Bool(lin) => lin.upper_bound_lit(ctx),
+		}
+	}
+
+	fn bounds(&self, ctx: &Model) -> (IntVal, IntVal) {
+		match self.resolve_alias(ctx).0 {
+			IntDecisionInner::Const(v) => (v, v),
+			IntDecisionInner::Linear(lin) => lin.bounds(ctx),
+			IntDecisionInner::Bool(lin) => lin.bounds(ctx),
+		}
+	}
+
+	fn val(&self, ctx: &Model) -> Option<IntVal> {
+		match self.resolve_alias(ctx).0 {
+			IntDecisionInner::Const(v) => Some(v),
+			IntDecisionInner::Linear(lin) => lin.val(ctx),
+			IntDecisionInner::Bool(lin) => lin.val(ctx),
+		}
+	}
+}
+
+impl IntInspectionActions<ModelInitContext<'_>> for IntDecision {
+	fn domain(&self, ctx: &ModelInitContext<'_>) -> IntSetVal {
+		self.domain(ctx.model)
+	}
+
+	fn in_domain(&self, ctx: &ModelInitContext<'_>, val: IntVal) -> bool {
+		self.in_domain(ctx.model, val)
+	}
+
+	fn lit_meaning(&self, ctx: &ModelInitContext<'_>, lit: BoolDecision) -> Option<IntLitMeaning> {
+		self.lit_meaning(ctx.model, lit)
+	}
+
+	fn lower_bound(&self, ctx: &ModelInitContext<'_>) -> IntVal {
+		self.lower_bound(ctx.model)
+	}
+
+	fn lower_bound_lit(&self, ctx: &ModelInitContext<'_>) -> BoolDecision {
+		self.lower_bound_lit(ctx.model)
+	}
+
+	fn try_lit(&self, ctx: &ModelInitContext<'_>, meaning: IntLitMeaning) -> Option<BoolDecision> {
+		self.try_lit(ctx.model, meaning)
+	}
+
+	fn upper_bound(&self, ctx: &ModelInitContext<'_>) -> IntVal {
+		self.upper_bound(ctx.model)
+	}
+
+	fn upper_bound_lit(&self, ctx: &ModelInitContext<'_>) -> BoolDecision {
+		self.upper_bound_lit(ctx.model)
+	}
+
+	fn bounds(&self, ctx: &ModelInitContext<'_>) -> (IntVal, IntVal) {
+		self.bounds(ctx.model)
+	}
+
+	fn val(&self, ctx: &ModelInitContext<'_>) -> Option<IntVal> {
+		self.val(ctx.model)
+	}
+}
+
+impl IntInspectionActions<ModelInitContext<'_>> for IntDecisionIndex {
+	fn domain(&self, ctx: &ModelInitContext<'_>) -> IntSetVal {
+		self.domain(ctx.model)
+	}
+
+	fn in_domain(&self, ctx: &ModelInitContext<'_>, val: IntVal) -> bool {
+		self.in_domain(ctx.model, val)
+	}
+
+	fn lit_meaning(&self, ctx: &ModelInitContext<'_>, lit: BoolDecision) -> Option<IntLitMeaning> {
+		self.lit_meaning(ctx.model, lit)
+	}
+
+	fn lower_bound(&self, ctx: &ModelInitContext<'_>) -> IntVal {
+		self.lower_bound(ctx.model)
+	}
+
+	fn lower_bound_lit(&self, ctx: &ModelInitContext<'_>) -> BoolDecision {
+		self.lower_bound_lit(ctx.model)
+	}
+
+	fn try_lit(&self, ctx: &ModelInitContext<'_>, meaning: IntLitMeaning) -> Option<BoolDecision> {
+		self.try_lit(ctx.model, meaning)
+	}
+
+	fn upper_bound(&self, ctx: &ModelInitContext<'_>) -> IntVal {
+		self.upper_bound(ctx.model)
+	}
+
+	fn upper_bound_lit(&self, ctx: &ModelInitContext<'_>) -> BoolDecision {
+		self.upper_bound_lit(ctx.model)
+	}
+
+	fn bounds(&self, ctx: &ModelInitContext<'_>) -> (IntVal, IntVal) {
+		self.bounds(ctx.model)
+	}
+
+	fn val(&self, ctx: &ModelInitContext<'_>) -> Option<IntVal> {
+		self.val(ctx.model)
+	}
+}
+
+impl IntPropagationActions<Model> for IntDecisionIndex {
+	fn set_lower_bound(
+		&self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		let def = &mut ctx.int_vars[*self];
+		let Domain::Domain(dom) = &mut def.domain else {
+			unreachable!()
+		};
+		if val <= *dom.lower_bound().unwrap() {
+			return Ok(());
+		} else if val > *dom.upper_bound().unwrap() {
+			return Err(ctx.create_conflict(
+				BoolDecision(BoolDecisionInner::IntGreaterEq(*self, val)),
+				reason,
+			));
+		}
+		if val != *dom.upper_bound().unwrap() {
+			dom.set_lower_bound(val);
+			ctx.int_events
+				.entry(*self)
+				.and_modify(|e| *e += IntEvent::LowerBound)
+				.or_insert(IntEvent::LowerBound);
+		} else {
+			def.domain = Domain::Alias(val.into());
+			ctx.int_events.insert(*self, IntEvent::Fixed);
+		};
+		Ok(())
+	}
+
+	fn set_not_eq(
+		&self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		self.set_not_in_set(ctx, &(val..=val).into(), reason)
+	}
+
+	fn set_upper_bound(
+		&self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		let def = &mut ctx.int_vars[*self];
+		let Domain::Domain(dom) = &mut def.domain else {
+			unreachable!()
+		};
+		if val >= *dom.upper_bound().unwrap() {
+			return Ok(());
+		} else if val < *dom.lower_bound().unwrap() {
+			return Err(ctx.create_conflict(
+				BoolDecision(BoolDecisionInner::IntLess(*self, val + 1)),
+				reason,
+			));
+		}
+		if val != *dom.lower_bound().unwrap() {
+			dom.set_upper_bound(val);
+			ctx.int_events
+				.entry(*self)
+				.and_modify(|v| *v += IntEvent::UpperBound)
+				.or_insert(IntEvent::UpperBound);
+		} else {
+			def.domain = Domain::Alias(val.into());
+			ctx.int_events.insert(*self, IntEvent::Fixed);
+		};
+		Ok(())
+	}
+
+	fn set_val(
+		&self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		let def = &mut ctx.int_vars[*self];
+		let Domain::Domain(dom) = &def.domain else {
+			unreachable!()
+		};
+		if dom.contains(&val) {
+			def.domain = Domain::Alias(val.into());
+			ctx.int_events.insert(*self, IntEvent::Fixed);
+			Ok(())
+		} else {
+			Err(ctx.create_conflict(BoolDecision(BoolDecisionInner::IntEq(*self, val)), reason))
+		}
+	}
+}
+
+impl IntPropagationActions<Model> for IntDecision {
+	fn set_lower_bound(
+		&self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<BoolDecision>> {
+		match self.resolve_alias(ctx).0 {
+			IntDecisionInner::Const(v) => v.set_lower_bound(ctx, val, reason),
+			IntDecisionInner::Linear(lin) => lin.set_lower_bound(ctx, val, reason),
+			IntDecisionInner::Bool(lin) => lin.set_lower_bound(ctx, val, reason),
+		}
+	}
+
+	fn set_not_eq(
+		&self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<BoolDecision>> {
+		match self.resolve_alias(ctx).0 {
+			IntDecisionInner::Const(v) => v.set_not_eq(ctx, val, reason),
+			IntDecisionInner::Linear(lin) => lin.set_not_eq(ctx, val, reason),
+			IntDecisionInner::Bool(lin) => lin.set_not_eq(ctx, val, reason),
+		}
+	}
+
+	fn set_upper_bound(
+		&self,
+		ctx: &mut Model,
+		ub: IntVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<BoolDecision>> {
+		match self.resolve_alias(ctx).0 {
+			IntDecisionInner::Const(v) => v.set_upper_bound(ctx, ub, reason),
+			IntDecisionInner::Linear(lin) => lin.set_upper_bound(ctx, ub, reason),
+			IntDecisionInner::Bool(lin) => lin.set_upper_bound(ctx, ub, reason),
+		}
+	}
+
+	fn set_val(
+		&self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<BoolDecision>> {
+		match self.resolve_alias(ctx).0 {
+			IntDecisionInner::Const(v) => v.set_val(ctx, val, reason),
+			IntDecisionInner::Linear(lin) => lin.set_val(ctx, val, reason),
+			IntDecisionInner::Bool(lin) => lin.set_val(ctx, val, reason),
+		}
+	}
+}
+
+impl IntSimplificationActions<Model> for IntDecisionIndex {
+	fn set_domain(
+		&self,
+		ctx: &mut Model,
+		domain: &IntSetVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		let Domain::Domain(dom) = &ctx.int_vars[*self].domain else {
+			unreachable!()
+		};
+		let intersect: RangeList<_> = dom.intersect(domain);
+		if intersect.is_empty() {
+			return Err(ctx.create_conflict(
+				BoolDecision(BoolDecisionInner::IntNotEq(
+					*self,
+					*dom.lower_bound().unwrap(),
+				)),
+				reason,
+			));
+		} else if *dom == intersect {
+			return Ok(());
+		}
+		if intersect.card() == Some(1) {
+			let val = *intersect.lower_bound().unwrap();
+			ctx.int_vars[*self].domain = Domain::Alias(val.into());
+			ctx.int_events.insert(*self, IntEvent::Fixed);
+		} else {
+			let entry = ctx.int_events.entry(*self).or_insert(IntEvent::Domain);
+			if dom.lower_bound().unwrap() == intersect.lower_bound().unwrap() {
+				*entry += IntEvent::LowerBound;
+			}
+			if dom.upper_bound().unwrap() == intersect.upper_bound().unwrap() {
+				*entry += IntEvent::UpperBound;
+			}
+
+			ctx.int_vars[*self].domain = Domain::Domain(intersect);
+		}
+		Ok(())
+	}
+
+	fn set_not_in_set(
+		&self,
+		ctx: &mut Model,
+		values: &IntSetVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		let Domain::Domain(dom) = &ctx.int_vars[*self].domain else {
+			unreachable!()
+		};
+		let diff: RangeList<_> = dom.diff(values);
+		if diff.is_empty() {
+			return Err(ctx.create_conflict(
+				BoolDecision(BoolDecisionInner::IntNotEq(
+					*self,
+					*values.lower_bound().unwrap(),
+				)),
+				reason,
+			));
+		}
+		if *dom == diff {
+			return Ok(());
+		}
+		if diff.card() == Some(1) {
+			let val = *diff.lower_bound().unwrap();
+			ctx.int_vars[*self].domain = Domain::Alias(val.into());
+			ctx.int_events.insert(*self, IntEvent::Fixed);
+		} else {
+			let entry = ctx.int_events.entry(*self).or_insert(IntEvent::Domain);
+			if dom.lower_bound().unwrap() == diff.lower_bound().unwrap() {
+				*entry += IntEvent::LowerBound;
+			}
+			if dom.upper_bound().unwrap() == diff.upper_bound().unwrap() {
+				*entry += IntEvent::UpperBound;
+			}
+
+			ctx.int_vars[*self].domain = Domain::Domain(diff);
+		};
+		Ok(())
+	}
+
+	fn unify(
+		&self,
+		ctx: &mut Model,
+		other: impl Into<Self>,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		let other: IntDecisionIndex = other.into();
+		IntDecision(IntDecisionInner::Linear((*self).into()))
+			.unify(ctx, IntDecision(IntDecisionInner::Linear(other.into())))
+	}
+}
+
+impl IntSimplificationActions<Model> for IntDecision {
+	fn set_domain(
+		&self,
+		ctx: &mut Model,
+		values: &IntSetVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<BoolDecision>> {
+		match self.resolve_alias(ctx).0 {
+			IntDecisionInner::Const(v) => v.set_domain(ctx, values, reason),
+			IntDecisionInner::Linear(lin) => lin.set_domain(ctx, values, reason),
+			IntDecisionInner::Bool(lin) => lin.set_domain(ctx, values, reason),
+		}
+	}
+
+	fn set_not_in_set(
+		&self,
+		ctx: &mut Model,
+		values: &IntSetVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<BoolDecision>> {
+		match self.resolve_alias(ctx).0 {
+			IntDecisionInner::Const(v) => v.set_not_in_set(ctx, values, reason),
+			IntDecisionInner::Linear(lin) => lin.set_not_in_set(ctx, values, reason),
+			IntDecisionInner::Bool(lin) => lin.set_not_in_set(ctx, values, reason),
+		}
+	}
+	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Conflict<BoolDecision>> {
+		use IntDecisionInner::*;
+
+		let x = self.resolve_alias(ctx);
+		let y = other.into().resolve_alias(ctx);
+
+		let (idx, target) = match (x.0, y.0) {
+			(x, y) if x == y => return Ok(()),
+			(Bool(x), Bool(y)) => return x.unify(ctx, y),
+			(Const(x), Const(y)) if x != y => return Err(ctx.declare_conflict([])),
+			(Const(y), x) | (x, Const(y)) => {
+				let x = IntDecision(x);
+				return x.set_val(ctx, y, []);
+			}
+			(Linear(lin_x), Linear(lin_y)) => {
+				// Decide which variable to redefine based on the other.
+				let can_define_x = lin_y.scale.get() % lin_x.scale.get() == 0
+					&& (lin_y.offset - lin_x.offset) % lin_x.scale.get() == 0;
+				let can_define_y = lin_x.scale.get() % lin_y.scale.get() == 0
+					&& (lin_x.offset - lin_y.offset) % lin_y.scale.get() == 0;
+				let (lin_x, lin_y) = if can_define_x && can_define_y && lin_x.var > lin_y.var {
+					(lin_x, lin_y)
+				} else if can_define_y {
+					(lin_y, lin_x)
+				} else if can_define_x {
+					(lin_x, lin_y)
+				} else {
+					ctx.add_constraint(IntEq { vars: [x, y] });
+					return Ok(());
+				};
+
+				// Perform the transformation and add the aliasing domain to x:
+				// x_scale * x + x_scale = y_scale * y + y_offset
+				// === x = (y_scale / x_scale) * y + ((y_offset - x_offset) / x_scale)
+				let scale = NonZero::new(lin_y.scale.get() / lin_x.scale.get()).unwrap();
+				let offset = (lin_y.offset - lin_x.offset) / lin_x.scale.get();
+				let target = IntDecision(Linear(LinearView::new(scale, offset, lin_y.var)));
+				(lin_x.var, target)
+			}
+			(Linear(lin), Bool(b)) | (Bool(b), Linear(lin)) => {
+				let lb = b.transform_val(0);
+				let ub = b.transform_val(1);
+
+				let contains_lb = lin.in_domain(ctx, lb);
+				let contains_ub = lin.in_domain(ctx, ub);
+
+				match (contains_lb, contains_ub) {
+					(false, false) => {
+						return Err(ctx.declare_conflict(|ctx: &mut Model| {
+							[
+								lin.lit(ctx, IntLitMeaning::NotEq(lb)),
+								lin.lit(ctx, IntLitMeaning::NotEq(ub)),
+							]
+						}));
+					}
+					(false, true) => {
+						lin.set_val(ctx, ub, [])?;
+						return b.var.set(ctx, |ctx: &mut Model| {
+							[lin.lit(ctx, IntLitMeaning::NotEq(lb))]
+						});
+					}
+					(true, false) => {
+						lin.set_val(ctx, lb, [])?;
+						return b.var.set_val(ctx, false, |ctx: &mut Model| {
+							[lin.lit(ctx, IntLitMeaning::NotEq(ub))]
+						});
+					}
+					(true, true) => {
+						let Ok(IntLitMeaning::Eq(i_lb)) =
+							lin.reverse_meaning(IntLitMeaning::Eq(lb))
+						else {
+							unreachable!()
+						};
+						let Ok(IntLitMeaning::Eq(i_ub)) =
+							lin.reverse_meaning(IntLitMeaning::Eq(ub))
+						else {
+							unreachable!()
+						};
+						let target = IntDecision(Bool(LinearBoolView::new(
+							NonZero::new(i_ub - i_lb).unwrap(),
+							i_lb,
+							b.var,
+						)));
+
+						(lin.var, target)
+					}
+				}
+			}
+		};
+
+		idx.unify_internal(ctx, target)
+	}
+}
+
 impl Mul<IntVal> for IntDecision {
 	type Output = Self;
 
@@ -787,23 +1985,21 @@ impl Mul<IntVal> for IntDecision {
 		if rhs == 0 {
 			0.into()
 		} else {
-			self.mul(NonZeroIntVal::new(rhs).unwrap())
+			self.mul(NonZero::new(rhs).unwrap())
 		}
 	}
 }
 
-impl Mul<NonZeroIntVal> for IntDecision {
+impl Mul<NonZero<IntVal>> for IntDecision {
 	type Output = Self;
 
-	fn mul(self, rhs: NonZeroIntVal) -> Self::Output {
+	fn mul(self, rhs: NonZero<IntVal>) -> Self::Output {
 		use IntDecisionInner::*;
 
 		IntDecision(match self.0 {
-			Var(x) if rhs.get() == 1 => Var(x),
-			Var(x) => Linear(LinearTransform::scaled(rhs), x),
 			Const(v) => Const(v * rhs.get()),
-			Linear(t, x) => Linear(t * rhs, x),
-			Bool(t, x) => Bool(t * rhs, x),
+			Linear(lin) => Linear(lin * rhs),
+			Bool(lin) => Bool(lin * rhs),
 		})
 	}
 }
@@ -815,10 +2011,9 @@ impl Neg for IntDecision {
 		use IntDecisionInner::*;
 
 		IntDecision(match self.0 {
-			Var(x) => Linear(LinearTransform::scaled(NonZeroIntVal::new(-1).unwrap()), x),
 			Const(v) => Const(-v),
-			Linear(t, x) => Linear(-t, x),
-			Bool(t, x) => Bool(-t, x),
+			Linear(lin) => Linear(-lin),
+			Bool(lin) => Bool(-lin),
 		})
 	}
 }
@@ -910,6 +2105,22 @@ impl Add<IntVal> for IntLinExpr {
 	}
 }
 
+impl From<IntDecision> for IntLinExpr {
+	fn from(decision: IntDecision) -> Self {
+		IntLinExpr {
+			terms: vec![decision],
+		}
+	}
+}
+
+impl From<IntVal> for IntLinExpr {
+	fn from(v: IntVal) -> Self {
+		IntLinExpr {
+			terms: vec![v.into()],
+		}
+	}
+}
+
 impl Mul<IntVal> for IntLinExpr {
 	type Output = IntLinExpr;
 
@@ -945,43 +2156,81 @@ impl Sum<IntDecision> for IntLinExpr {
 }
 
 impl ElementConstraint for IntVal {
-	type Constraint = IntValArrayElement;
+	type Constraint = IntValArrayElement<IntDecision, IntDecision>;
 	type Result = IntDecision;
 
 	fn element_constraint(
+		prb: &mut Model,
 		array: Vec<Self>,
 		index: IntDecision,
 		result: Self::Result,
-	) -> Self::Constraint {
-		Self::Constraint {
-			index,
-			array,
-			result,
-		}
+	) -> &mut Self::Constraint {
+		let con = IntValArrayElement(IntArrayElementBounds::new(prb, array, index, result));
+		prb.add_constraint(con)
 	}
 }
+
+impl IntInitActions<ModelInitContext<'_>> for IntVal {
+	fn advise_when(&self, _: &mut ModelInitContext<'_>, _: IntPropCond, _: u64) {
+		// Value will never change, so no advisor will ever be called
+	}
+
+	fn enqueue_when(&self, ctx: &mut ModelInitContext<'_>, _: IntPropCond) {
+		ctx.semantic_enqueue = true;
+	}
+}
+
 impl Model {
 	/// Internal method to add a constraint to the model.
 	///
 	/// Note that users will use either the `+=` operator or the
 	/// [`Self::add_custom_constraint`] method.
-	fn add_constraint(&mut self, constraint: ConstraintStore) {
-		self.constraints.push(Some(constraint));
-		self.enqueued.push(false);
-		self.enqueue(self.constraints.len() - 1);
-		self.subscribe(self.constraints.len() - 1);
+	pub fn add_constraint<C: Constraint<Self>>(&mut self, mut constraint: C) -> &mut C {
+		let con = ConRef::new(self.constraints.len());
+		let mut ctx = ModelInitContext::new(self, con);
+		constraint.initialize(&mut ctx);
+		let priority = ctx.priority;
+		let enqueue = ctx.enqueue();
+		let r = self.constraints.push(Some(Box::new(constraint)));
+		debug_assert_eq!(r, con);
+		let r = self.propagator_queue.info.push(PropagatorInfo {
+			enqueued: false,
+			priority,
+		});
+		debug_assert_eq!(r, con);
+		if enqueue {
+			self.propagator_queue.enqueue_propagator(con);
+		}
+
+		// Retrieve the reference for the last constraint
+		let c: &mut dyn Constraint<Model> = self
+			.constraints
+			.last_mut()
+			.unwrap()
+			.as_mut()
+			.unwrap()
+			.as_mut();
+		let c: &mut dyn Any = c;
+		c.downcast_mut::<C>().unwrap()
 	}
 
-	/// Add a custom constraint to the model.
-	pub fn add_custom_constraint(&mut self, _: IntVal) {
-		todo!()
-	}
-
-	/// Enqueue constraint that has index `constraint` to the propagation queue.
-	fn enqueue(&mut self, constraint: usize) {
-		if !self.enqueued[constraint] {
-			self.prop_queue.push_back(constraint);
-			self.enqueued[constraint] = true;
+	/// Create a [`ReasoningEngine::Conflict`] instance based on the failure to
+	/// set `subject`, that must be set because of `reason`.
+	fn create_conflict(
+		&mut self,
+		subject: BoolDecision,
+		reason: impl ReasonBuilder<Self>,
+	) -> <Self as ReasoningEngine>::Conflict {
+		match reason.build_reason(self) {
+			Ok(reason) => Conflict {
+				subject: Some(subject),
+				reason,
+			},
+			Err(true) => Conflict {
+				subject: None,
+				reason: Reason::Simple(!subject),
+			},
+			Err(false) => unreachable!("invalid reason"),
 		}
 	}
 
@@ -1027,8 +2276,10 @@ impl Model {
 				unimplemented!("integer decision must have at least 1 value in their domain")
 			}
 			Some(1) => (*domain.lower_bound().unwrap()).into(),
-			_ => IntDecision(IntDecisionInner::Var(
-				self.int_vars.push(IntDecisionDef::with_domain(domain)),
+			_ => IntDecision(IntDecisionInner::Linear(
+				self.int_vars
+					.push(IntDecisionDef::with_domain(domain))
+					.into(),
 			)),
 		}
 	}
@@ -1037,152 +2288,148 @@ impl Model {
 	pub fn new_int_vars(&mut self, len: usize, domain: impl Into<IntSetVal>) -> Vec<IntDecision> {
 		let domain = domain.into();
 		repeat_n(IntDecisionDef::with_domain(domain), len)
-			.map(|v| IntDecision(IntDecisionInner::Var(self.int_vars.push(v))))
+			.map(|v| IntDecision(IntDecisionInner::Linear(self.int_vars.push(v).into())))
 			.collect()
 	}
 
 	/// Propagate the constraint at index `con`, updating the domains of the
 	/// variables and rewriting the constraint if necessary.
-	pub(crate) fn propagate(&mut self, con: usize) -> Result<(), ReformulationError> {
+	pub(crate) fn propagate(&mut self, con: ConRef) -> Result<(), ReformulationError> {
 		let Some(mut con_obj) = self.constraints[con].take() else {
 			return Ok(());
 		};
+		self.cur_prop = Some(con);
+		let mut status = con_obj.simplify(self);
+		self.cur_prop = None;
 
-		let status = match &mut con_obj {
-			ConstraintStore::IntAllDifferent(c) => c.simplify(self),
-			ConstraintStore::IntDiffn(c) => c.simplify(self),
-			ConstraintStore::IntValArrayElement(c) => c.simplify(self),
-			ConstraintStore::IntArrayMinimum(c) => c.simplify(self),
-			ConstraintStore::BoolDecisionArrayElement(c) => c.simplify(self),
-			ConstraintStore::IntDecisionArrayElement(c) => c.simplify(self),
-			ConstraintStore::Cumulative(c) => c.simplify(self),
-			ConstraintStore::DisjunctiveStrict(c) => c.simplify(self),
-			ConstraintStore::IntAbs(c) => c.simplify(self),
-			ConstraintStore::IntDiv(c) => c.simplify(self),
-			ConstraintStore::IntEq(c) => c.simplify(self),
-			ConstraintStore::IntLinear(c) => c.simplify(self),
-			ConstraintStore::IntPow(c) => c.simplify(self),
-			ConstraintStore::IntSeqPrecedeChain(con) => con.simplify(self),
-			ConstraintStore::IntTimes(c) => c.simplify(self),
-			ConstraintStore::BoolFormula(exp) => exp.simplify(self),
-			ConstraintStore::IntInSetReif(c) => c.simplify(self),
-			ConstraintStore::IntTable(con) => con.simplify(self),
-			ConstraintStore::IntValuePrecedeChain(con) => con.simplify(self),
-			ConstraintStore::Other(con) => con.simplify(self),
-		}?;
-		match status {
+		// Resolve lazy explanation if it is required.
+		if let Err(Conflict {
+			subject,
+			reason: Reason::Lazy(r),
+		}) = status
+		{
+			debug_assert_eq!(ConRef::from_raw(r.propagator), con);
+			let conj = con_obj.explain(
+				self,
+				subject.unwrap_or(BoolDecision(BoolDecisionInner::Const(false))),
+				r.data,
+			);
+			status = Err(Conflict {
+				subject,
+				reason: Reason::Eager(conj.into_boxed_slice()),
+			});
+		};
+
+		match status? {
 			SimplificationStatus::Subsumed => {
 				// Constraint is known to be satisfied, no need to place back.
 			}
-			SimplificationStatus::Fixpoint => {
+			SimplificationStatus::NoFixpoint => {
 				self.constraints[con] = Some(con_obj);
 			}
 		}
+		// Notify propagators about all events that occurred
+		let advise_of_int_change = |model: &mut Model, con: ConRef, data: u64, event| {
+			if let Some(mut c) = model.constraints[con].take() {
+				let ret = c.advise_of_int_change(model, data, event);
+				model.constraints[con] = Some(c);
+				ret
+			} else {
+				false
+			}
+		};
+		let advise_of_bool_change = |model: &mut Model, con: ConRef, data: u64| {
+			if let Some(mut c) = model.constraints[con].take() {
+				let ret = c.advise_of_bool_change(model, data);
+				model.constraints[con] = Some(c);
+				ret
+			} else {
+				false
+			}
+		};
+		let mut int_events = mem::take(&mut self.int_events);
+		for (iv, event) in int_events.drain() {
+			let constraints = mem::take(&mut self.int_vars[iv].constraints);
+			constraints.for_each_activated_by(event, |act| match act {
+				ActivationAction::Advise(adv) => {
+					let x: &ModAdvisorDef = &self.advisors[adv];
+					let ModAdvisorDef {
+						con,
+						data,
+						negated,
+						bool2int,
+						condition,
+					} = x.clone();
+					let event = match event {
+						IntEvent::LowerBound if negated => IntEvent::UpperBound,
+						IntEvent::UpperBound if negated => IntEvent::LowerBound,
+						_ => event,
+					};
+					let enqueue = if let Some(cond) = condition {
+						let triggered = match cond {
+							IntLitMeaning::Eq(v) | IntLitMeaning::NotEq(v) => {
+								BoolDecision(BoolDecisionInner::IntEq(iv, v))
+									.val(self)
+									.is_some()
+							}
+							IntLitMeaning::GreaterEq(v) | IntLitMeaning::Less(v) => {
+								BoolDecision(BoolDecisionInner::IntGreaterEq(iv, v))
+									.val(self)
+									.is_some()
+							}
+						};
+						if triggered {
+							if bool2int {
+								advise_of_int_change(self, con, data, IntEvent::Fixed)
+							} else {
+								advise_of_bool_change(self, con, data)
+							}
+						} else {
+							false
+						}
+					} else {
+						advise_of_int_change(self, con, data, event)
+					};
+					if enqueue {
+						self.propagator_queue.enqueue_propagator(con);
+					}
+				}
+				ActivationAction::Enqueue(c) => self.propagator_queue.enqueue_propagator(c),
+			});
+			self.int_vars[iv].constraints = constraints;
+		}
+		self.int_events = int_events;
+		let mut bool_events = mem::take(&mut self.bool_events);
+		for bv in bool_events.drain(..) {
+			for &act in self.bool_vars[i32::from(bv) as usize - 1]
+				.constraints
+				.clone()
+				.iter()
+			{
+				match act.into() {
+					ActivationAction::Advise(adv) => {
+						let x: &ModAdvisorDef = &self.advisors[adv];
+						let ModAdvisorDef {
+							con,
+							data,
+							bool2int,
+							..
+						} = x.clone();
+						let enqueue = if bool2int {
+							advise_of_int_change(self, con, data, IntEvent::Fixed)
+						} else {
+							advise_of_bool_change(self, con, data)
+						};
+						if enqueue {
+							self.propagator_queue.enqueue_propagator(con);
+						}
+					}
+					ActivationAction::Enqueue(c) => self.propagator_queue.enqueue_propagator(c),
+				}
+			}
+		}
+		self.bool_events = bool_events;
 		Ok(())
-	}
-
-	/// Subscribe the constraint located at index `con` to changes in the
-	/// variables it depends on.
-	pub(crate) fn subscribe(&mut self, con: usize) {
-		/// Wrapper around [`Model`] that knows the constraint being
-		/// initialized.
-		struct ConstraintInitContext<'a> {
-			/// Index of the constraint being initialized.
-			con: usize,
-			/// Reference to the Model in which the constraint exists.
-			model: &'a mut Model,
-		}
-
-		impl ConstraintInitActions for ConstraintInitContext<'_> {
-			fn simplify_on_change_bool(&mut self, var: BoolDecision) {
-				use BoolDecisionInner::*;
-				match var.0 {
-					Const(_) => {}
-					Lit(l) => {
-						let idx = i32::from(l.var()) as usize - 1;
-						self.model.bool_vars[idx].constraints.push(self.con);
-					}
-					IntEq(idx, _) | IntGreaterEq(idx, _) | IntLess(idx, _) | IntNotEq(idx, _) => {
-						self.model.int_vars[idx].constraints.push(self.con);
-					}
-				}
-			}
-
-			fn simplify_on_change_int(&mut self, var: IntDecision) {
-				use IntDecisionInner::*;
-				match var.0 {
-					Bool(_, v) => self.simplify_on_change_bool(v),
-					Linear(_, v) | Var(v) => {
-						self.model.int_vars[v].constraints.push(self.con);
-					}
-					Const(_) => {}
-				}
-			}
-		}
-
-		let con_store = self.constraints[con].take().unwrap();
-		let mut ctx = ConstraintInitContext { con, model: self };
-		match &con_store {
-			ConstraintStore::IntAllDifferent(con) => {
-				<IntAllDifferent as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::IntDiffn(con) => {
-				<IntDiffn as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::IntValArrayElement(con) => {
-				<IntValArrayElement as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::IntArrayMinimum(con) => {
-				<IntArrayMinimum as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::BoolDecisionArrayElement(con) => {
-				<BoolDecisionArrayElement as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::IntDecisionArrayElement(con) => {
-				<IntDecisionArrayElement as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::Cumulative(con) => {
-				<Cumulative as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::DisjunctiveStrict(con) => {
-				<DisjunctiveStrict as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::IntAbs(con) => {
-				<IntAbs as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::IntDiv(con) => {
-				<IntDiv as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::IntEq(con) => {
-				<IntEq as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::IntLinear(con) => {
-				<IntLinear as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::IntPow(con) => {
-				<IntPow as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::IntSeqPrecedeChain(con) => {
-				<IntSeqPrecedeChain as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::IntTimes(con) => {
-				<IntTimes as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::BoolFormula(exp) => {
-				<Formula<BoolDecision> as Constraint<Model>>::initialize(exp, &mut ctx);
-			}
-			ConstraintStore::IntInSetReif(con) => {
-				<IntInSetReif as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::IntTable(con) => {
-				<IntTable as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::IntValuePrecedeChain(con) => {
-				<IntValuePrecedeChain as Constraint<Model>>::initialize(con, &mut ctx);
-			}
-			ConstraintStore::Other(con) => con.initialize(&mut ctx),
-		}
-		self.constraints[con] = Some(con_store);
 	}
 
 	/// Process the model to create a [`Solver`] instance that can be used to
@@ -1193,20 +2440,21 @@ impl Model {
 	/// to [`crate::SolverView`]. If an error occurs during the reformulation
 	/// process, or if it is found to be trivially unsatisfiable, then an error
 	/// will be returned.
-	pub fn to_solver<Oracle: ExternalPropagation>(
+	pub fn to_solver<Oracle>(
 		&mut self,
 		config: &InitConfig,
 	) -> Result<(Solver<Oracle>, ReformulationMap), ReformulationError>
 	where
-		Solver<Oracle>: for<'a> From<&'a Cnf> + 'static,
+		Solver<Oracle>: Default,
+		Oracle: ExternalPropagation + 'static,
 	{
-		// TODO: run SAT simplification
-		let mut slv = Solver::<Oracle>::from(&self.cnf);
+		let mut slv = Solver::<Oracle>::default();
 		let any_slv: &mut dyn Any = &mut slv.oracle;
 		if let Some(r) = any_slv.downcast_mut::<Cadical>() {
 			// Set the solver options for preprocessing/inprocessing
 			r.set_option("condition", config.conditioning() as i32);
 			r.set_option("elim", config.variable_elimination() as i32);
+			r.set_option("exteagerreasons", config.reason_eager() as i32);
 			r.set_option("inprocessing", config.inprocessing() as i32);
 			r.set_limit("preprocessing", config.preprocessing() as i32);
 			r.set_option("probe", config.probing() as i32);
@@ -1224,59 +2472,54 @@ impl Model {
 			warn!("unknown solver: vivification and restart options are ignored");
 		}
 
-		while let Some(con) = self.prop_queue.pop_front() {
+		while let Some(con) = self.propagator_queue.pop() {
 			self.propagate(con)?;
-			self.enqueued[con] = false;
 		}
 
-		// TODO: Detect Views From Model
-
 		// Determine encoding types for integer variables
-		let mut int_eager_direct = HashSet::<IntDecisionIndex>::new();
-		let int_eager_order = HashSet::<IntDecisionIndex>::new();
+		let mut int_eager_direct = FxHashSet::<IntDecisionIndex>::default();
+		let int_eager_order = FxHashSet::<IntDecisionIndex>::default();
 
 		for c in self.constraints.iter().flatten() {
-			match c {
-				ConstraintStore::IntAllDifferent(c) if c.value_consistent_propagator_enabled() => {
-					for v in &c.vars {
-						let v = v.resolve_alias(self);
-						if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = v.0 {
-							let Domain::Domain(dom) = &self.int_vars[iv].domain else {
-								unreachable!()
-							};
-							if dom.card() <= Some(c.vars.len() * 100 / 80) {
-								let _ = int_eager_direct.insert(iv);
-							}
+			let c: &dyn Constraint<Model> = c.as_ref();
+			let c: &dyn Any = c;
+			if let Some(c) = c.downcast_ref::<BoolDecisionArrayElement>() {
+				let index = c.index.resolve_alias(self);
+				if let IntDecisionInner::Linear(lin) = index.0 {
+					int_eager_direct.insert(lin.var);
+				}
+			} else if let Some(c) = c.downcast_ref::<IntAllDifferent>() {
+				for v in &c.prop.var {
+					let v = v.resolve_alias(self);
+					if let IntDecisionInner::Linear(lin) = v.0 {
+						let Domain::Domain(dom) = &self.int_vars[lin.var].domain else {
+							unreachable!()
+						};
+						if dom.card() <= Some(c.prop.var.len() * 100 / 80) {
+							int_eager_direct.insert(lin.var);
 						}
 					}
 				}
-				ConstraintStore::IntValArrayElement(c) => {
-					let index = c.index.resolve_alias(self);
-					if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {
-						let _ = int_eager_direct.insert(iv);
+			} else if let Some(c) =
+				c.downcast_ref::<IntArrayElementBounds<IntDecision, IntDecision, IntDecision>>()
+			{
+				let index = c.index.resolve_alias(self);
+				if let IntDecisionInner::Linear(lin) = index.0 {
+					int_eager_direct.insert(lin.var);
+				}
+			} else if let Some(c) = c.downcast_ref::<IntTable>() {
+				for &v in &c.vars {
+					let v = v.resolve_alias(self);
+					if let IntDecisionInner::Linear(lin) = v.0 {
+						int_eager_direct.insert(lin.var);
 					}
 				}
-				ConstraintStore::BoolDecisionArrayElement(c) => {
-					let index = c.index.resolve_alias(self);
-					if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {
-						let _ = int_eager_direct.insert(iv);
-					}
+			} else if let Some(c) = c.downcast_ref::<IntValArrayElement<IntDecision, IntDecision>>()
+			{
+				let index = c.0.index.resolve_alias(self);
+				if let IntDecisionInner::Linear(lin) = index.0 {
+					int_eager_direct.insert(lin.var);
 				}
-				ConstraintStore::IntDecisionArrayElement(c) => {
-					let index = c.index.resolve_alias(self);
-					if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = index.0 {
-						let _ = int_eager_direct.insert(iv);
-					}
-				}
-				ConstraintStore::IntTable(con) => {
-					for &v in &con.vars {
-						let v = v.resolve_alias(self);
-						if let IntDecisionInner::Var(iv) | IntDecisionInner::Linear(_, iv) = v.0 {
-							let _ = int_eager_direct.insert(iv);
-						}
-					}
-				}
-				_ => {}
 			}
 		}
 
@@ -1289,15 +2532,17 @@ impl Model {
 			int_map: index_vec![None; self.int_vars.len()],
 		};
 
-		// Ensure the creation of all Boolean variables.
-		for var in 1..=self.bool_vars.len() as u32 {
-			let var = BoolDecision(BoolDecisionInner::Lit(var_from_u32(var).into()));
-			let _ = map_builder.get_or_create_bool(self, &mut slv, var);
-		}
-
 		// Ensure the creation of all integer variables.
 		for (idx, _) in self.int_vars.iter_enumerated() {
-			let _ = map_builder.get_or_create_int(self, &mut slv, idx);
+			map_builder.get_or_create_int(self, &mut slv, idx);
+		}
+
+		// Ensure the creation of all Boolean variables.
+		for var in 1..=self.bool_vars.len() as u32 {
+			let var = BoolDecision(BoolDecisionInner::Lit(RawLit::from_raw(
+				NonZeroI32::new(var as i32).unwrap(),
+			)));
+			map_builder.get_or_create_bool(self, &mut slv, var);
 		}
 
 		// Finalize the reformulation map (all variables must be created by now)
@@ -1305,7 +2550,10 @@ impl Model {
 
 		// Create constraint data structures within the solver
 		for c in self.constraints.iter().flatten() {
-			c.to_solver(&mut slv, &map)?;
+			c.to_solver(&mut ReformulationContext {
+				slv: &mut slv,
+				map: &map,
+			})?;
 		}
 		// Add branching data structures to the solver
 		for b in self.branchings.iter() {
@@ -1316,129 +2564,9 @@ impl Model {
 	}
 }
 
-impl AddAssign<BoolDecisionArrayElement> for Model {
-	fn add_assign(&mut self, constraint: BoolDecisionArrayElement) {
-		self.add_constraint(ConstraintStore::BoolDecisionArrayElement(constraint));
-	}
-}
-
-impl AddAssign<BoxedConstraint> for Model {
-	fn add_assign(&mut self, constraint: BoxedConstraint) {
-		self.add_constraint(ConstraintStore::Other(constraint));
-	}
-}
-
 impl AddAssign<Branching> for Model {
 	fn add_assign(&mut self, rhs: Branching) {
 		self.branchings.push(rhs);
-	}
-}
-
-impl AddAssign<Cumulative> for Model {
-	fn add_assign(&mut self, constraint: Cumulative) {
-		self.add_constraint(ConstraintStore::Cumulative(constraint));
-	}
-}
-
-impl AddAssign<DisjunctiveStrict> for Model {
-	fn add_assign(&mut self, constraint: DisjunctiveStrict) {
-		self.add_constraint(ConstraintStore::DisjunctiveStrict(constraint));
-	}
-}
-
-impl AddAssign<Formula<BoolDecision>> for Model {
-	fn add_assign(&mut self, constraint: Formula<BoolDecision>) {
-		self.add_constraint(ConstraintStore::BoolFormula(constraint));
-	}
-}
-
-impl AddAssign<IntAbs> for Model {
-	fn add_assign(&mut self, constraint: IntAbs) {
-		self.add_constraint(ConstraintStore::IntAbs(constraint));
-	}
-}
-
-impl AddAssign<IntAllDifferent> for Model {
-	fn add_assign(&mut self, constraint: IntAllDifferent) {
-		self.add_constraint(ConstraintStore::IntAllDifferent(constraint));
-	}
-}
-
-impl AddAssign<IntDiffn> for Model {
-	fn add_assign(&mut self, constraint: IntDiffn) {
-		self.add_constraint(ConstraintStore::IntDiffn(constraint));
-	}
-}
-
-impl AddAssign<IntArrayMinimum> for Model {
-	fn add_assign(&mut self, constraint: IntArrayMinimum) {
-		self.add_constraint(ConstraintStore::IntArrayMinimum(constraint));
-	}
-}
-
-impl AddAssign<IntDecisionArrayElement> for Model {
-	fn add_assign(&mut self, constraint: IntDecisionArrayElement) {
-		self.add_constraint(ConstraintStore::IntDecisionArrayElement(constraint));
-	}
-}
-
-impl AddAssign<IntDiv> for Model {
-	fn add_assign(&mut self, constraint: IntDiv) {
-		self.add_constraint(ConstraintStore::IntDiv(constraint));
-	}
-}
-
-impl AddAssign<IntEq> for Model {
-	fn add_assign(&mut self, constraint: IntEq) {
-		self.add_constraint(ConstraintStore::IntEq(constraint));
-	}
-}
-
-impl AddAssign<IntInSetReif> for Model {
-	fn add_assign(&mut self, constraint: IntInSetReif) {
-		self.add_constraint(ConstraintStore::IntInSetReif(constraint));
-	}
-}
-
-impl AddAssign<IntLinear> for Model {
-	fn add_assign(&mut self, constraint: IntLinear) {
-		self.add_constraint(ConstraintStore::IntLinear(constraint));
-	}
-}
-
-impl AddAssign<IntPow> for Model {
-	fn add_assign(&mut self, constraint: IntPow) {
-		self.add_constraint(ConstraintStore::IntPow(constraint));
-	}
-}
-
-impl AddAssign<IntSeqPrecedeChain> for Model {
-	fn add_assign(&mut self, constraint: IntSeqPrecedeChain) {
-		self.add_constraint(ConstraintStore::IntSeqPrecedeChain(constraint));
-	}
-}
-
-impl AddAssign<IntTable> for Model {
-	fn add_assign(&mut self, constraint: IntTable) {
-		self.add_constraint(ConstraintStore::IntTable(constraint));
-	}
-}
-
-impl AddAssign<IntTimes> for Model {
-	fn add_assign(&mut self, constraint: IntTimes) {
-		self.add_constraint(ConstraintStore::IntTimes(constraint));
-	}
-}
-
-impl AddAssign<IntValArrayElement> for Model {
-	fn add_assign(&mut self, constraint: IntValArrayElement) {
-		self.add_constraint(ConstraintStore::IntValArrayElement(constraint));
-	}
-}
-
-impl AddAssign<IntValuePrecedeChain> for Model {
-	fn add_assign(&mut self, constraint: IntValuePrecedeChain) {
-		self.add_constraint(ConstraintStore::IntValuePrecedeChain(constraint));
 	}
 }
 
@@ -1451,679 +2579,134 @@ impl ClauseDatabase for Model {
 	}
 }
 
+impl ConstructionActions for Model {
+	fn new_trailed_int(&mut self, init: IntVal) -> TrailedInt {
+		self.trail.push(init)
+	}
+}
+
+impl DecisionActions for Model {
+	fn num_conflicts(&self) -> u64 {
+		0
+	}
+}
+
+impl PropagationActions for Model {
+	fn declare_conflict(&mut self, reason: impl ReasonBuilder<Self>) -> Conflict<BoolDecision> {
+		match reason.build_reason(self) {
+			Ok(reason) => Conflict {
+				subject: None,
+				reason,
+			},
+			Err(false) => panic!("invalid reason"),
+			Err(true) => Conflict {
+				subject: None,
+				reason: Reason::Eager(Box::new([])),
+			},
+		}
+	}
+
+	fn deferred_reason(&self, data: u64) -> LazyReason {
+		LazyReason {
+			propagator: self.cur_prop.unwrap().raw(),
+			data,
+		}
+	}
+}
+
+impl ReasoningContext for Model {
+	type Atom = <Self as ReasoningEngine>::Atom;
+	type Conflict = <Self as ReasoningEngine>::Conflict;
+}
+
+impl ReasoningEngine for Model {
+	type Atom = BoolDecision;
+
+	type Conflict = Conflict<BoolDecision>;
+	type ExplanationCtx<'a> = Self;
+	type InitializationCtx<'a> = ModelInitContext<'a>;
+	type NotificationCtx<'a> = Self;
+	type PropagationCtx<'a> = Self;
+}
+
 impl SimplificationActions for Model {
-	fn add_constraint<C>(&mut self, constraint: C)
-	where
-		Model: AddAssign<C>,
-	{
-		*self += constraint;
+	type Target = Model;
+
+	fn add_constraint<C: Constraint<Model>>(&mut self, constraint: C) {
+		self.add_constraint(constraint);
+	}
+}
+
+impl TrailingActions for Model {
+	fn set_trailed_int(&mut self, i: TrailedInt, v: IntVal) -> IntVal {
+		mem::replace(&mut self.trail[i], v)
 	}
 
-	fn check_int_in_domain(&self, var: IntDecision, val: IntVal) -> bool {
-		use IntDecisionInner::*;
+	fn trailed_int(&self, i: TrailedInt) -> IntVal {
+		self.trail[i]
+	}
+}
 
-		let var = var.resolve_alias(self);
-		match var.0 {
-			Var(v) => {
-				let Domain::Domain(dom) = &self.int_vars[v].domain else {
-					unreachable!()
-				};
-				dom.contains(&val)
-			}
-			Const(v) => v == val,
-			Linear(t, v) => match t.rev_transform_lit(IntLitMeaning::Eq(val)) {
-				Ok(IntLitMeaning::Eq(val)) => {
-					let Domain::Domain(dom) = &self.int_vars[v].domain else {
-						unreachable!()
-					};
-					dom.contains(&val)
-				}
-				Err(false) => false,
-				_ => unreachable!(),
-			},
-			Bool(t, _) => match t.rev_transform_lit(IntLitMeaning::Eq(val)) {
-				Ok(IntLitMeaning::Eq(val)) => val == 0 || val == 1,
-				Err(false) => false,
-				_ => unreachable!(),
-			},
+impl<'a> ModelInitContext<'a> {
+	/// Returns whether to enqueue the propagator based on its explicit requests
+	/// or otherwise the semantics of its subscriptions.
+	pub(crate) fn enqueue(&self) -> bool {
+		if let Some(enqueue) = self.decision_enqueue {
+			enqueue
+		} else {
+			self.semantic_enqueue
 		}
 	}
-
-	fn get_bool_val(&self, b: BoolDecision) -> Option<bool> {
-		use BoolDecisionInner::*;
-
-		let b = b.resolve_alias(self);
-		match b.0 {
-			Const(b) => Some(b),
-			_ => None,
+	/// Creates a new [`ModelPostingContext`] for the given constraint
+	/// reference.
+	pub(crate) fn new(model: &'a mut Model, con: ConRef) -> Self {
+		ModelInitContext {
+			con,
+			model,
+			priority: PriorityLevel::Medium,
+			semantic_enqueue: false,
+			decision_enqueue: None,
 		}
 	}
+}
 
-	fn get_int_lower_bound(&self, var: IntDecision) -> IntVal {
-		use IntDecisionInner::*;
-
-		let var = var.resolve_alias(self);
-		match var.0 {
-			Var(v) => {
-				let Domain::Domain(dom) = &self.int_vars[v].domain else {
-					unreachable!()
-				};
-				*dom.lower_bound().unwrap()
-			}
-			Const(v) => v,
-			Linear(t, v) => {
-				let Domain::Domain(dom) = &self.int_vars[v].domain else {
-					unreachable!()
-				};
-				if t.positive_scale() {
-					t.transform(*dom.lower_bound().unwrap())
-				} else {
-					t.transform(*dom.upper_bound().unwrap())
-				}
-			}
-			Bool(t, bv) => {
-				let val = self.get_bool_val(bv).unwrap_or(false) as IntVal;
-				if t.positive_scale() {
-					t.transform(val)
-				} else {
-					t.transform(1 - val)
-				}
-			}
-		}
+impl InitActions for ModelInitContext<'_> {
+	fn advise_on_backtrack(&mut self) {
+		// Model does not backtrack, so no advisor is required.
 	}
 
-	fn get_int_upper_bound(&self, var: IntDecision) -> IntVal {
-		use IntDecisionInner::*;
-
-		let var = var.resolve_alias(self);
-		match var.0 {
-			Var(v) => {
-				let Domain::Domain(dom) = &self.int_vars[v].domain else {
-					unreachable!()
-				};
-				*dom.upper_bound().unwrap()
-			}
-			Const(v) => v,
-			Linear(t, v) => {
-				let Domain::Domain(dom) = &self.int_vars[v].domain else {
-					unreachable!()
-				};
-				if t.positive_scale() {
-					t.transform(*dom.upper_bound().unwrap())
-				} else {
-					t.transform(*dom.lower_bound().unwrap())
-				}
-			}
-			Bool(t, bv) => {
-				let val = self.get_bool_val(bv).unwrap_or(true) as IntVal;
-				if t.positive_scale() {
-					t.transform(val)
-				} else {
-					t.transform(1 - val)
-				}
-			}
-		}
+	fn enqueue_now(&mut self, option: bool) {
+		self.decision_enqueue = Some(option);
 	}
 
-	fn get_int_val(&self, var: IntDecision) -> Option<IntVal> {
-		use IntDecisionInner::*;
-
-		let var = var.resolve_alias(self);
-		match var.0 {
-			Const(v) => Some(v),
-			_ => None,
-		}
+	fn set_priority(&mut self, priority: PriorityLevel) {
+		self.priority = priority;
 	}
+}
 
-	fn set_bool(&mut self, var: BoolDecision) -> Result<(), ReformulationError> {
-		use BoolDecisionInner::*;
+impl ReasoningContext for ModelInitContext<'_> {
+	type Atom = <Model as ReasoningEngine>::Atom;
+	type Conflict = <Model as ReasoningEngine>::Conflict;
+}
 
-		let var = var.resolve_alias(self);
-		match var.0 {
-			Lit(l) => {
-				let var = i32::from(l.var()) as usize - 1;
-				let def = &mut self.bool_vars[var];
-				debug_assert!(def.alias.is_none());
-				def.alias = Some(BoolDecision(Const(!l.is_negated())));
-				let constraints = def.constraints.clone();
-				for c in constraints {
-					self.enqueue(c);
-				}
-				Ok(())
-			}
-			Const(true) => Ok(()),
-			Const(false) => Err(ReformulationError::TrivialUnsatisfiable),
-			IntEq(iv, val) => self.set_int_val(IntDecision(IntDecisionInner::Var(iv)), val),
-			IntGreaterEq(iv, val) => {
-				self.set_int_lower_bound(IntDecision(IntDecisionInner::Var(iv)), val)
-			}
-			IntLess(iv, val) => {
-				self.set_int_upper_bound(IntDecision(IntDecisionInner::Var(iv)), val - 1)
-			}
-			IntNotEq(iv, val) => self.set_int_not_eq(IntDecision(IntDecisionInner::Var(iv)), val),
-		}
+impl BoolInitActions<ModelInitContext<'_>> for bool {
+	fn advise_when_fixed(&self, _: &mut ModelInitContext<'_>, _: u64) {
+		// Value does not change, so no advisor will ever be called
 	}
-
-	fn set_int_in_set(
-		&mut self,
-		var: IntDecision,
-		values: &IntSetVal,
-	) -> Result<(), ReformulationError> {
-		use IntDecisionInner::*;
-
-		let var = var.resolve_alias(self);
-		match var.0 {
-			Var(v) => {
-				let Domain::Domain(dom) = &self.int_vars[v].domain else {
-					unreachable!()
-				};
-				let intersect: RangeList<_> = dom.intersect(values);
-				if intersect.is_empty() {
-					return Err(ReformulationError::TrivialUnsatisfiable);
-				} else if *dom == intersect {
-					return Ok(());
-				}
-				if intersect.card() == Some(1) {
-					self.int_vars[v].domain =
-						Domain::Alias((*intersect.lower_bound().unwrap()).into());
-				} else {
-					self.int_vars[v].domain = Domain::Domain(intersect);
-				}
-				let constraints = self.int_vars[v].constraints.clone();
-				for c in constraints {
-					self.enqueue(c);
-				}
-				Ok(())
-			}
-			Const(v) => {
-				if !values.contains(&v) {
-					Err(ReformulationError::TrivialUnsatisfiable)
-				} else {
-					Ok(())
-				}
-			}
-			Linear(trans, iv) => {
-				let values = trans.rev_transform_int_set(values);
-				self.set_int_in_set(IntDecision(Var(iv)), &values)
-			}
-			Bool(trans, b) => {
-				let values = trans.rev_transform_int_set(values);
-				if !values.contains(&0) {
-					self.set_bool(b)?;
-				}
-				if !values.contains(&1) {
-					self.set_bool(!b)?;
-				}
-				Ok(())
-			}
-		}
+	fn enqueue_when_fixed(&self, ctx: &mut ModelInitContext<'_>) {
+		ctx.semantic_enqueue = true;
 	}
+}
 
-	fn set_int_lower_bound(
-		&mut self,
-		var: IntDecision,
-		lb: IntVal,
-	) -> Result<(), ReformulationError> {
-		use IntDecisionInner::*;
-
-		let var = var.resolve_alias(self);
-		match var.0 {
-			Var(v) => {
-				let def = &mut self.int_vars[v];
-				let Domain::Domain(dom) = &def.domain else {
-					unreachable!()
-				};
-				if lb <= *dom.lower_bound().unwrap() {
-					return Ok(());
-				} else if lb > *dom.upper_bound().unwrap() {
-					return Err(ReformulationError::TrivialUnsatisfiable);
-				}
-				if lb != *dom.upper_bound().unwrap() {
-					let ndom = RangeList::from_iter(dom.iter().filter_map(|r| {
-						if *r.end() < lb {
-							None
-						} else if *r.start() < lb {
-							Some(lb..=*r.end())
-						} else {
-							Some(r)
-						}
-					}));
-					def.domain = Domain::Domain(ndom);
-				} else {
-					def.domain = Domain::Alias(lb.into());
-				}
-				let constraints = def.constraints.clone();
-				for c in constraints {
-					self.enqueue(c);
-				}
-				Ok(())
-			}
-			Const(v) if v < lb => Err(ReformulationError::TrivialUnsatisfiable),
-			Const(_) => Ok(()),
-			Linear(trans, iv) => match trans.rev_transform_lit(IntLitMeaning::GreaterEq(lb)) {
-				Ok(IntLitMeaning::GreaterEq(val)) => {
-					self.set_int_lower_bound(IntDecision(Var(iv)), val)
-				}
-				Ok(IntLitMeaning::Less(val)) => {
-					self.set_int_upper_bound(IntDecision(Var(iv)), val - 1)
-				}
-				_ => unreachable!(),
-			},
-			Bool(trans, b) => match trans.rev_transform_lit(IntLitMeaning::GreaterEq(lb)) {
-				Ok(IntLitMeaning::GreaterEq(1)) => self.set_bool(b),
-				Ok(IntLitMeaning::GreaterEq(val)) if val >= 2 => {
-					Err(ReformulationError::TrivialUnsatisfiable)
-				}
-				Ok(IntLitMeaning::GreaterEq(_)) => Ok(()),
-				Ok(IntLitMeaning::Less(1)) => self.set_bool(!b),
-				Ok(IntLitMeaning::Less(val)) if val <= 0 => {
-					Err(ReformulationError::TrivialUnsatisfiable)
-				}
-				Ok(IntLitMeaning::Less(_)) => Ok(()),
-				_ => unreachable!(),
-			},
-		}
-	}
-
-	fn set_int_not_eq(&mut self, var: IntDecision, val: IntVal) -> Result<(), ReformulationError> {
-		self.set_int_not_in_set(var, &(val..=val).into())
-	}
-
-	fn set_int_not_in_set(
-		&mut self,
-		var: IntDecision,
-		values: &IntSetVal,
-	) -> Result<(), ReformulationError> {
-		use IntDecisionInner::*;
-
-		let var = var.resolve_alias(self);
-		match var.0 {
-			Var(v) => {
-				let Domain::Domain(dom) = &self.int_vars[v].domain else {
-					unreachable!()
-				};
-				let diff: RangeList<_> = dom.diff(values);
-				if diff.is_empty() {
-					return Err(ReformulationError::TrivialUnsatisfiable);
-				}
-				if *dom == diff {
-					return Ok(());
-				}
-				if diff.card() == Some(1) {
-					self.int_vars[v].domain = Domain::Alias((*diff.lower_bound().unwrap()).into());
-				} else {
-					self.int_vars[v].domain = Domain::Domain(diff);
-				}
-				let constraints = self.int_vars[v].constraints.clone();
-				for c in constraints {
-					self.enqueue(c);
-				}
-				Ok(())
-			}
-			Const(v) => {
-				if values.contains(&v) {
-					Err(ReformulationError::TrivialUnsatisfiable)
-				} else {
-					Ok(())
-				}
-			}
-			Linear(trans, iv) => {
-				let mask = trans.rev_transform_int_set(values);
-				self.set_int_not_in_set(IntDecision(Var(iv)), &mask)
-			}
-			Bool(trans, b) => {
-				let values = trans.rev_transform_int_set(values);
-				if values.contains(&0) {
-					self.set_bool(b)?;
-				}
-				if values.contains(&1) {
-					self.set_bool(!b)?;
-				}
-				Ok(())
-			}
-		}
-	}
-
-	fn set_int_upper_bound(
-		&mut self,
-		var: IntDecision,
-		ub: IntVal,
-	) -> Result<(), ReformulationError> {
-		use IntDecisionInner::*;
-
-		let var = var.resolve_alias(self);
-		match var.0 {
-			Var(v) => {
-				let def = &mut self.int_vars[v];
-				let Domain::Domain(dom) = &def.domain else {
-					unreachable!()
-				};
-				if ub >= *dom.upper_bound().unwrap() {
-					return Ok(());
-				} else if ub < *dom.lower_bound().unwrap() {
-					return Err(ReformulationError::TrivialUnsatisfiable);
-				}
-				if ub != *dom.lower_bound().unwrap() {
-					let ndom = RangeList::from_iter(dom.iter().filter_map(|r| {
-						if ub < *r.start() {
-							None
-						} else if ub < *r.end() {
-							Some(*r.start()..=ub)
-						} else {
-							Some(r)
-						}
-					}));
-					def.domain = Domain::Domain(ndom);
-				} else {
-					def.domain = Domain::Alias(ub.into());
-				}
-				let constraints = def.constraints.clone();
-				for c in constraints {
-					self.enqueue(c);
-				}
-				Ok(())
-			}
-			Const(v) if v > ub => Err(ReformulationError::TrivialUnsatisfiable),
-			Const(_) => Ok(()),
-			Linear(trans, iv) => match trans.rev_transform_lit(IntLitMeaning::Less(ub + 1)) {
-				Ok(IntLitMeaning::GreaterEq(val)) => {
-					self.set_int_lower_bound(IntDecision(Var(iv)), val)
-				}
-				Ok(IntLitMeaning::Less(val)) => {
-					self.set_int_upper_bound(IntDecision(Var(iv)), val - 1)
-				}
-				_ => unreachable!(),
-			},
-			Bool(trans, b) => match trans.rev_transform_lit(IntLitMeaning::Less(ub + 1)) {
-				Ok(IntLitMeaning::GreaterEq(1)) => self.set_bool(b),
-				Ok(IntLitMeaning::GreaterEq(val)) if val >= 2 => {
-					Err(ReformulationError::TrivialUnsatisfiable)
-				}
-				Ok(IntLitMeaning::GreaterEq(_)) => Ok(()),
-				Ok(IntLitMeaning::Less(1)) => self.set_bool(!b),
-				Ok(IntLitMeaning::Less(val)) if val <= 0 => {
-					Err(ReformulationError::TrivialUnsatisfiable)
-				}
-				Ok(IntLitMeaning::Less(_)) => Ok(()),
-				_ => unreachable!(),
-			},
-		}
-	}
-
-	fn set_int_val(&mut self, var: IntDecision, val: IntVal) -> Result<(), ReformulationError> {
-		use IntDecisionInner::*;
-
-		let var = var.resolve_alias(self);
-		match var.0 {
-			Var(v) => {
-				let def = &mut self.int_vars[v];
-				let Domain::Domain(dom) = &def.domain else {
-					unreachable!()
-				};
-				if dom.contains(&val) {
-					def.domain = Domain::Alias(val.into());
-					let constraints = def.constraints.clone();
-					for c in constraints {
-						self.enqueue(c);
-					}
-					Ok(())
-				} else {
-					Err(ReformulationError::TrivialUnsatisfiable)
-				}
-			}
-			Const(i) if i == val => Ok(()),
-			Const(_) => Err(ReformulationError::TrivialUnsatisfiable),
-			Linear(trans, iv) => match trans.rev_transform_lit(IntLitMeaning::Eq(val)) {
-				Ok(IntLitMeaning::Eq(val)) => self.set_int_val(IntDecision(Var(iv)), val),
-				Err(b) => {
-					debug_assert!(!b);
-					Err(ReformulationError::TrivialUnsatisfiable)
-				}
-				_ => unreachable!(),
-			},
-			Bool(trans, b) => match trans.rev_transform_lit(IntLitMeaning::Eq(val)) {
-				Ok(IntLitMeaning::Eq(val)) => match val {
-					0 => self.set_bool(!b),
-					1 => self.set_bool(b),
-					_ => Err(ReformulationError::TrivialUnsatisfiable),
-				},
-				Err(b) => {
-					debug_assert!(!b);
-					Err(ReformulationError::TrivialUnsatisfiable)
-				}
-				_ => unreachable!(),
-			},
-		}
-	}
-
-	/// Mark two Boolean decisions as being equivalent, ensuring the two use the
-	/// same internal representation.
-	fn unify_bool(&mut self, x: BoolDecision, y: BoolDecision) -> Result<(), ReformulationError> {
-		use BoolDecisionInner::*;
-
-		let x = x.resolve_alias(self);
-		let y = y.resolve_alias(self);
-
-		match (x.0, y.0) {
-			(x, y) if x == y => Ok(()),
-			(Lit(x), Lit(y)) if x.var() == y.var() => Err(ReformulationError::TrivialUnsatisfiable),
-			(Const(x), Const(y)) if x != y => Err(ReformulationError::TrivialUnsatisfiable),
-			(x, Const(b)) | (Const(b), x) => {
-				let x = BoolDecision(x);
-				self.set_bool(if b { x } else { !x })
-			}
-			(Lit(x), y) | (y, Lit(x)) => {
-				let (x, y) = if let Lit(y) = y {
-					if x.var() > y.var() {
-						(x, BoolDecision(Lit(y)))
-					} else {
-						(y, BoolDecision(Lit(x)))
-					}
-				} else {
-					(x, BoolDecision(y))
-				};
-				let store = &mut self.bool_vars[i32::from(x.var()) as usize - 1];
-				debug_assert_eq!(store.alias, None);
-				let idx = i32::from(x.var()) as usize - 1;
-				self.bool_vars[idx].alias = Some(if x.is_negated() { !y } else { y });
-
-				// Move subscriptions from aliased variable to the new primary variable
-				let constraints = mem::take(&mut self.bool_vars[idx].constraints);
-				let notify = match y.0 {
-					// Move subscriptions to another Boolean decision
-					Lit(lit) => {
-						let jdx = i32::from(lit.var()) as usize - 1;
-						self.bool_vars[jdx].constraints.extend(constraints);
-						&self.bool_vars[jdx].constraints
-					}
-					// Move subscriptions to an integer decision
-					IntEq(j, _) | IntGreaterEq(j, _) | IntLess(j, _) | IntNotEq(j, _) => {
-						self.int_vars[j].constraints.extend(constraints);
-						&self.int_vars[j].constraints
-					}
-					Const(_) => unreachable!(),
-				};
-				// Notify constraints subscribed to either variable about the change
-				for c in notify.clone() {
-					self.enqueue(c);
-				}
-				Ok(())
-			}
-			(x, y) => {
-				let x = BoolFormula::Atom(BoolDecision(x));
-				let y = BoolFormula::Atom(BoolDecision(y));
-
-				*self += BoolFormula::Equiv(vec![x, y]);
-				Ok(())
-			}
-		}
-	}
-
-	/// Mark two integer decisions as being equivalent, ensuring the two use the
-	/// same internal representation.
-	fn unify_int(&mut self, x: IntDecision, y: IntDecision) -> Result<(), ReformulationError> {
-		use IntDecisionInner::*;
-
-		let x = x.resolve_alias(self);
-		let y = y.resolve_alias(self);
-
-		let (idx, target, dom_con) = match (x.0, y.0) {
-			(x, y) if x == y => return Ok(()),
-			(Const(x), Const(y)) if x != y => return Err(ReformulationError::TrivialUnsatisfiable),
-			(Const(y), x) | (x, Const(y)) => {
-				let x = IntDecision(x);
-				return self.set_int_val(x, y);
-			}
-			(Var(x), y) | (y, Var(x)) => {
-				let (x, y) = if let Var(y) = y {
-					if x > y {
-						(x, IntDecision(Var(y)))
-					} else {
-						(y, IntDecision(Var(x)))
-					}
-				} else {
-					(x, IntDecision(y))
-				};
-				let Domain::Domain(x_dom) = mem::replace(
-					&mut self.int_vars[x].domain,
-					Domain::Domain(RangeList::default()),
-				) else {
-					unreachable!()
-				};
-				(x, y, Some(x_dom))
-			}
-			(Linear(x_t, x_i), Linear(y_t, y_i)) => {
-				// Decide which variable to redefine based on the other.
-				let can_define_x = (y_t - x_t.offset).can_divide_by(x_t.scale.get());
-				let can_define_y = (x_t - y_t.offset).can_divide_by(y_t.scale.get());
-				let ((x_t, x_i), (y_t, y_i)) = if can_define_x && can_define_y && x_i > y_i {
-					((x_t, x_i), (y_t, y_i))
-				} else if can_define_y {
-					((y_t, y_i), (x_t, x_i))
-				} else if can_define_x {
-					((x_t, x_i), (y_t, y_i))
-				} else {
-					*self += IntEq { vars: [x, y] };
-					return Ok(());
-				};
-
-				// Perform the transformation and add the aliasing domain to x:
-				// x_scale * x + x_scale = y_scale * y + y_offset
-				// === x = (y_scale / x_scale) * y + ((y_offset - x_offset) / x_scale)
-				let trans_y = LinearTransform::scaled(
-					NonZeroIntVal::new(y_t.scale.get() / x_t.scale.get()).unwrap(),
-				) + (y_t.offset - x_t.offset) / x_t.scale.get();
-				let target = IntDecision(Var(y_i)) * trans_y.scale + trans_y.offset;
-
-				// Domain of target must be equivalent to the domain of x
-				let Domain::Domain(x_dom) = mem::replace(
-					&mut self.int_vars[x_i].domain,
-					Domain::Domain(RangeList::default()),
-				) else {
-					unreachable!()
-				};
-				(x_i, target, Some(x_dom))
-			}
-			(iv @ Linear(i_t, i_i), Bool(b_t, b_d)) | (Bool(b_t, b_d), iv @ Linear(i_t, i_i)) => {
-				let iv = IntDecision(iv);
-				let lb = b_t.transform(0);
-				let ub = b_t.transform(1);
-
-				let contains_lb = self.check_int_in_domain(iv, lb);
-				let contains_ub = self.check_int_in_domain(iv, ub);
-
-				if contains_lb && contains_ub {
-					let Ok(IntLitMeaning::Eq(i_lb)) = i_t.rev_transform_lit(IntLitMeaning::Eq(lb))
-					else {
-						unreachable!()
-					};
-					let Ok(IntLitMeaning::Eq(i_ub)) = i_t.rev_transform_lit(IntLitMeaning::Eq(ub))
-					else {
-						unreachable!()
-					};
-
-					debug_assert!(matches!(self.int_vars[i_i].domain, Domain::Domain(_)));
-					(
-						i_i,
-						IntDecision(Bool(
-							LinearTransform {
-								scale: NonZeroI64::new(i_ub - i_lb).unwrap(),
-								offset: i_lb,
-							},
-							b_d,
-						)),
-						None,
-					)
-				} else if contains_lb {
-					self.set_int_val(iv, lb)?;
-					return self.set_bool(!b_d);
-				} else if contains_ub {
-					self.set_int_val(iv, ub)?;
-					return self.set_bool(b_d);
-				} else {
-					return Err(ReformulationError::TrivialUnsatisfiable);
-				}
-			}
-			(x @ Bool(x_t, x_i), y @ Bool(y_t, y_i)) => {
-				let (x_lb, x_ub) = self.get_int_bounds(IntDecision(x));
-				let (y_lb, y_ub) = self.get_int_bounds(IntDecision(y));
-
-				return if x_lb == y_lb && x_ub == y_ub {
-					self.unify_bool(x_i, if x_t == y_t { y_i } else { !y_i })
-				} else if x_lb == y_lb {
-					self.set_bool(!x_i)?;
-					self.set_bool(!y_i)
-				} else if x_lb == y_ub {
-					self.set_bool(!x_i)?;
-					self.set_bool(y_i)
-				} else if x_ub == y_lb {
-					self.set_bool(x_i)?;
-					self.set_bool(!y_i)
-				} else if x_ub == y_ub {
-					self.set_bool(x_i)?;
-					self.set_bool(y_i)
-				} else {
-					Err(ReformulationError::TrivialUnsatisfiable)
-				};
-			}
-		};
-
-		self.int_vars[idx].domain = Domain::Alias(target);
-		// Transfer any constraints from the aliased variable to the target variable
-		let constraints = mem::take(&mut self.int_vars[idx].constraints);
-		let notify = match target.0 {
-			// Move subscriptions to other integer decision
-			Var(j)
-			| Linear(_, j)
-			| Bool(
-				_,
-				BoolDecision(
-					BoolDecisionInner::IntEq(j, _)
-					| BoolDecisionInner::IntNotEq(j, _)
-					| BoolDecisionInner::IntGreaterEq(j, _)
-					| BoolDecisionInner::IntLess(j, _),
-				),
-			) => {
-				self.int_vars[j].constraints.extend(constraints);
-				&self.int_vars[j].constraints
-			}
-			// Move subscription to Boolean decision
-			Bool(_, BoolDecision(BoolDecisionInner::Lit(l))) => {
-				let jdx = i32::from(l.var()) as usize - 1;
-				self.bool_vars[jdx].constraints.extend(constraints);
-				&self.bool_vars[jdx].constraints
-			}
-			// Notify current subscriptions one more time, then forget about them.
-			Const(_) | Bool(_, BoolDecision(BoolDecisionInner::Const(_))) => &constraints,
-		};
-		// Notify constraints listening to either variable of update
-		for c in notify.clone() {
-			self.enqueue(c);
-		}
-		// Restrict the domain of the target variable using the variable domain
-		// being aliased.
-		if let Some(dom) = dom_con {
-			self.set_int_in_set(target, &dom)?;
+impl BoolPropagationActions<Model> for bool {
+	fn set_val(
+		&self,
+		ctx: &mut Model,
+		val: bool,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<BoolDecision>> {
+		if *self != val {
+			return Err(ctx.declare_conflict(reason));
 		}
 		Ok(())
 	}
@@ -2134,10 +2717,11 @@ impl ElementConstraint for bool {
 	type Result = BoolDecision;
 
 	fn element_constraint(
+		prb: &mut Model,
 		array: Vec<Self>,
 		index: IntDecision,
 		result: Self::Result,
-	) -> Self::Constraint {
+	) -> &mut Self::Constraint {
 		// Convert array of boolean values to a set literals of the indices where
 		// the value is true
 		let mut ranges = Vec::new();
@@ -2157,10 +2741,24 @@ impl ElementConstraint for bool {
 		}
 		assert_ne!(ranges.len(), 0, "unexpected empty range list");
 
-		Self::Constraint {
+		prb.add_constraint(Self::Constraint {
 			var: index,
 			set: RangeList::from_iter(ranges),
 			reif: result,
-		}
+		})
 	}
+}
+
+index_vec::define_index_type! {
+	/// Identifies an constraint in a [`Model`]
+	pub(crate) struct ConRef = u32;
+	// Allow storing as i32 in [`ActivationActionS`]
+	MAX_INDEX = i32::MAX as usize;
+}
+
+index_vec::define_index_type! {
+	/// Identifies an constraint in a [`Model`]
+	pub(crate) struct ModAdvisor = u32;
+	// Allow storing as i32 in [`ActivationActionS`]
+	MAX_INDEX = i32::MAX as usize;
 }
