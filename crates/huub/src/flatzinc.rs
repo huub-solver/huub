@@ -29,8 +29,8 @@ use crate::{
 		BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions,
 		PropagationActions,
 	},
-	all_different_int, array_element, array_maximum_int, array_minimum_int, cumulative,
-	diffn_int, disjunctive_strict, div_int, int_in_set_reif, pow_int,
+	all_different_int, array_element, array_maximum_int, array_minimum_int, cumulative, diffn_int,
+	disjunctive_strict, div_int, int_in_set_reif, pow_int,
 	reformulate::ReformulationError,
 	seq_precede_chain_int, table_int, times_int, value_precede_chain_int,
 };
@@ -1232,7 +1232,7 @@ where
 							dx.iter().map(|l| self.lit_int(l)).try_collect()?,
 							dy.iter().map(|l| self.lit_int(l)).try_collect()?,
 						];
-						self.prb += diffn_int(box_posn, box_size, is_nonstrict);
+						diffn_int(&mut self.prb, box_posn, box_size, is_nonstrict);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: if is_nonstrict {
@@ -1266,7 +1266,7 @@ where
 							sizes[i % dimensions as usize].push(size);
 						}
 
-						self.prb += diffn_int(start_pos, sizes, is_nonstrict);
+						diffn_int(&mut self.prb, start_pos, sizes, is_nonstrict);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: if is_nonstrict {

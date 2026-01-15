@@ -1,52 +1,39 @@
 //! Structure and algorithms for the integer diffn constraint, which
 //! enforces that a number of k-dimensional hyperrectangles do not overlap.
-use crate::{
-	actions::{
-		ExplanationActions, PropagatorInitActions, ReformulationActions, SimplificationActions,
-	},
-	constraints::{Conflict, Constraint, PropagationActions, Propagator},
-	reformulate::ReformulationError,
-	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, BoolView, IntView,
-	},
-	IntDecision, IntLitMeaning, IntVal,
-};
+use std::ops::AddAssign;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Representation of the `diffn_int` constraint within a model.
-///
-/// This constraint enforces that all k-dimensional rectangles do not overlap
-/// given their starting position `box_posn` and their sizes `box_sizes`.
-pub struct IntDiffn {
-	/// The origin positions of all objects in all dimensions
-	pub(crate) box_posn: Vec<Vec<IntDecision>>,
-	/// The sizes of all objects in all dimensions
-	pub(crate) box_size: Vec<Vec<IntDecision>>,
-	/// True if non_strict diffn is used, i.e ignore all rectangles
-	/// with a size of 0
-	pub(crate) non_strict: bool,
-}
+use crate::{
+	IntLitMeaning, IntVal,
+	actions::{
+		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions,
+		ReasoningContext, ReasoningEngine, ReformulationActions, TrailingActions,
+	},
+	constraints::{
+		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
+	},
+	reformulate::ReformulationError,
+	solver::{IntView, activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Sweep based propagator for the `diffn_int` constraint.
 ///
 /// This propagator was originally proposed in "Sweep as a Generic Pruning
 /// Technique Applied to the Non-overlapping Rectangles Constraint" by Beldinau,
-/// Nicolas and Carlsson, Mats. Then it was implemented within Gecode in https://urn.kb.se/resolve?urn=urn:nbn:se:uu:diva-325845 and then
-/// extended to lazy clause generation within this solver in
+/// Nicolas and Carlsson, Mats. Then it was implemented within Gecode in
+/// https://urn.kb.se/resolve?urn=urn:nbn:se:uu:diva-325845 and then extended to
+/// lazy clause generation within this solver in
 /// https://urn.kb.se/resolve?urn=urn:nbn:se:uu:diva-562628.
 ///
 /// The core idea is that we reason about forbidden regions of each rectangle,
 /// that is, regions we are not allowed to place the lower-left corner of a
 /// rectangle due to the domains of the other rectangles. These regions are
-/// forbidden in the sense that if we would put our rectangle at that
-/// place, it would guarantee that atleast two rectangles are overlapping, which
-/// violates the constraint.
-pub struct IntDiffnSweep<const NON_STRICT: bool> {
+/// forbidden in the sense that if we would put our rectangle at that place, it
+/// would guarantee that at least two rectangles are overlapping, which violates
+/// the constraint.
+pub struct IntDiffnSweep<const NON_STRICT: bool, I> {
 	/// The origin positions and sizes of all objects in all dimensions
-	boxes: Vec<DimStore<IntView>>,
-	/// The sizes of all objects in all dimensions
-	// box_size: Vec<DimStore<IntView>>,
+	boxes: Vec<DimStore<I>>,
 	/// Number of dimensions
 	dimensions: usize,
 	/// Trail which tracks the target property, target[i] = 1 if is has been
@@ -74,24 +61,52 @@ pub struct IntDiffnSweep<const NON_STRICT: bool> {
 	all_fr: Vec<ForbiddenRegion>,
 }
 
-impl<S: SimplificationActions> Constraint<S> for IntDiffn {
+impl<const NON_STRICT: bool, E, I> Constraint<E> for IntDiffnSweep<NON_STRICT, I>
+where
+	E: ReasoningEngine,
+	I: ModelIntView<E>,
+{
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationCtx<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
+		self.propagate(ctx)?;
+
+		if self.boxes.iter().all(|b| {
+			b.origins
+				.iter()
+				.chain(&b.sizes)
+				.all(|v| v.val(ctx).is_some())
+		}) {
+			return Ok(SimplificationStatus::Subsumed);
+		}
+		Ok(SimplificationStatus::NoFixpoint)
+	}
+
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
 		let box_pos: Vec<Vec<_>> = self
-			.box_posn
+			.boxes
 			.iter()
-			.map(|row| row.iter().map(|v| slv.get_solver_int(*v)).collect())
+			.map(|b| {
+				b.origins
+					.iter()
+					.map(|v| slv.solver_int(v.clone().into()))
+					.collect()
+			})
 			.collect();
 
 		let box_size: Vec<Vec<_>> = self
-			.box_size
+			.boxes
 			.iter()
-			.map(|row| row.iter().map(|v| slv.get_solver_int(*v)).collect())
+			.map(|b| {
+				b.sizes
+					.iter()
+					.map(|v| slv.solver_int(v.clone().into()))
+					.collect()
+			})
 			.collect();
-		if self.non_strict {
-			IntDiffnSweep::<true>::new_in(slv, box_pos, box_size);
-		} else {
-			IntDiffnSweep::<false>::new_in(slv, box_pos, box_size);
-		}
+
+		IntDiffnSweep::<NON_STRICT, _>::post(slv, box_pos, box_size);
 		Ok(())
 	}
 }
@@ -114,22 +129,18 @@ struct DimStore<T> {
 	sizes: Vec<T>,
 }
 
-impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
-	/// Prepare a new [`IntDiffnSweep`] propagator to be posted to the
-	/// solver.
-	pub fn new_in<P: PropagatorInitActions + ?Sized>(
-		solver: &mut P,
-		box_posn: Vec<Vec<IntView>>,
-		box_size: Vec<Vec<IntView>>,
-	) {
+impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
+	/// Create a new [`IntDiffnSweep`] propagator, to be used within the given
+	/// engine.
+	pub(crate) fn new<E>(engine: &mut E, box_posn: Vec<Vec<I>>, box_size: Vec<Vec<I>>) -> Self
+	where
+		E: ConstructionActions + ReasoningContext + ?Sized,
+		I: IntInspectionActions<E>,
+	{
 		// Make sure all sizes are fixed before enqueueing
-		let fixed = box_size
-			.iter()
-			.flatten()
-			.all(|&v| solver.get_int_val(v).is_some());
+		let fixed = box_size.iter().flatten().all(|v| v.val(engine).is_some());
 
 		let mut boxes_prop = Vec::new();
-		// let mut box_size_prop = Vec::new();
 
 		for i in 0..box_posn.len() {
 			boxes_prop.push(DimStore {
@@ -139,18 +150,11 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		}
 
 		let target_trail = (0..box_size[0].len())
-			.map(|_| solver.new_trailed_int(0))
+			.map(|_| engine.new_trailed_int(0))
 			.collect();
 		let source_trail = (0..box_size[0].len())
-			.map(|_| solver.new_trailed_int(0))
+			.map(|_| engine.new_trailed_int(0))
 			.collect();
-
-		// let lb_sizes_prop = vec![
-		// 	DimStore {
-		// 		origins: vec![0; box_posn[0].len()]
-		// 	};
-		// 	box_posn.len()
-		// ];
 
 		let ub_tracker_prop = vec![
 			DimStore {
@@ -174,27 +178,17 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 
 		let all_fr_prop = Vec::new();
 
-		let prop = solver.add_propagator(
-			Box::new(Self {
-				boxes: boxes_prop,
-				// box_size: box_size_prop,
-				dimensions: box_posn.len(),
-				target: target_trail,
-				source: source_trail,
-				fixed_sizes: fixed,
-				ub_tracker: ub_tracker_prop,
-				lb_tracker: lb_tracker_prop,
-				// lb_sizes: lb_sizes_prop,
-				bounding_box: bounding_box_prop,
-				all_fr: all_fr_prop,
-			}),
-			PriorityLevel::Lowest,
-		);
-
-		for v in box_posn.into_iter().flatten() {
-			solver.enqueue_on_int_change(prop, v, IntPropCond::Bounds);
+		Self {
+			boxes: boxes_prop,
+			dimensions: box_posn.len(),
+			target: target_trail,
+			source: source_trail,
+			fixed_sizes: fixed,
+			ub_tracker: ub_tracker_prop,
+			lb_tracker: lb_tracker_prop,
+			bounding_box: bounding_box_prop,
+			all_fr: all_fr_prop,
 		}
-		solver.enqueue_now(prop);
 	}
 
 	/// Prunes the lower bound of a given rectangle by searching for a feasible
@@ -202,13 +196,17 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 	/// which tracks the actions to be taken by the sweep point. If a feasible
 	/// origin is found, set the lower-bound of the rectangle to the position
 	/// of the sweep, if no feasible origin is found, a conflict is reported.
-	fn prune_min<P: PropagationActions>(
+	fn prune_min<E>(
 		&mut self,
-		actions: &mut P,
+		ctx: &mut E::PropagationCtx<'_>,
 		fr_support: &[usize],
 		curr_obj_idx: usize,
 		curr_dimension: usize,
-	) -> Result<(), Conflict> {
+	) -> Result<(), E::Conflict>
+	where
+		E: ReasoningEngine,
+		I: SolverIntView<E>,
+	{
 		let mut sweep = vec![];
 		let mut jump = vec![];
 		let mut b = true;
@@ -255,9 +253,9 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		// started
 		if sweep[curr_dimension] != self.lb_tracker[curr_dimension].origins[curr_obj_idx] {
 			let reason =
-				self.explain_propagation(actions, fr_support, curr_obj_idx, curr_dimension, false);
-			actions.set_int_lower_bound(
-				self.boxes[curr_dimension].origins[curr_obj_idx],
+				self.explain_propagation(ctx, fr_support, curr_obj_idx, curr_dimension, false);
+			self.boxes[curr_dimension].origins[curr_obj_idx].set_lower_bound(
+				ctx,
 				sweep[curr_dimension],
 				reason,
 			)?;
@@ -272,13 +270,17 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 	/// which tracks the actions to be taken by the sweep point. If a feasible
 	/// origin is found, set the upper-bound of the rectangle to the position
 	/// of the sweep, if no feasible origin is found, a conflict is reported.
-	fn prune_max<P: PropagationActions>(
+	fn prune_max<E>(
 		&mut self,
-		actions: &mut P,
+		ctx: &mut E::PropagationCtx<'_>,
 		fr_support: &[usize],
 		curr_obj_idx: usize,
 		curr_dimension: usize,
-	) -> Result<(), Conflict> {
+	) -> Result<(), E::Conflict>
+	where
+		E: ReasoningEngine,
+		I: SolverIntView<E>,
+	{
 		let mut sweep = vec![];
 		let mut jump = vec![];
 		let mut b = true;
@@ -326,10 +328,9 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 		// started
 		if sweep[curr_dimension] != self.ub_tracker[curr_dimension].origins[curr_obj_idx] {
 			let reason =
-				self.explain_propagation(actions, fr_support, curr_obj_idx, curr_dimension, true);
-
-			actions.set_int_upper_bound(
-				self.boxes[curr_dimension].origins[curr_obj_idx],
+				self.explain_propagation(ctx, fr_support, curr_obj_idx, curr_dimension, true);
+			self.boxes[curr_dimension].origins[curr_obj_idx].set_upper_bound(
+				ctx,
 				sweep[curr_dimension],
 				reason,
 			)?;
@@ -422,17 +423,20 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 	/// Generates forbidden regions given object o, forbidden regions that do
 	/// not overlap with the starting domain of o are not included. Forbidden
 	/// regions that are a subset of another are also not considered.
-	fn gen_forbidden_regions<P: PropagationActions>(
+	fn gen_forbidden_regions<Ctx>(
 		&mut self,
-		actions: &mut P,
+		ctx: &mut Ctx,
 		fr_support: &mut Vec<usize>,
 		o_idx: usize,
 		dimensions: usize,
-	) -> Option<()> {
+	) -> Option<()>
+	where
+		Ctx: ReasoningContext + TrailingActions,
+	{
 		self.all_fr.clear();
 		for i in 0..self.boxes[0].origins.len() {
 			// Check if the current object can be ignored if it has lost its source property
-			if actions.get_trailed_int(self.source[i]) == 1 {
+			if ctx.trailed_int(self.source[i]) == 1 {
 				continue;
 			}
 
@@ -585,19 +589,23 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 	/// Explains all forbidden regions by explaining all bounds of them and also
 	/// attempting to lift the explained bounds if any forbidden region is
 	/// overhanging the bounds of the object currently being propagated.
-	fn explain_forbidden_regions<P: PropagationActions>(
+	fn explain_forbidden_regions<Ctx>(
 		&mut self,
-		actions: &mut P,
+		ctx: &mut Ctx,
 		fr_support: &[usize],
 		curr_obj_idx: usize,
-	) -> Vec<BoolView> {
+	) -> Vec<Ctx::Atom>
+	where
+		Ctx: ReasoningContext + ?Sized,
+		I: IntDecisionActions<Ctx>,
+	{
 		let mut reason = Vec::new();
 		for (fr, &o_idx) in fr_support.iter().enumerate() {
 			for d in 0..self.dimensions {
 				// If sizes are not fixed, the lower bounds are assumed throughout the algorithm
 				// and thus have to be added to the explanation
 				if !self.fixed_sizes {
-					reason.push(actions.get_int_lower_bound_lit(self.boxes[d].sizes[o_idx]));
+					reason.push(self.boxes[d].sizes[o_idx].lower_bound_lit(ctx));
 				}
 				let mut possible_ub = self.ub_tracker[d].origins[o_idx];
 				let origin_ub = self.ub_tracker[d].origins[curr_obj_idx];
@@ -605,7 +613,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 				let mut possible_lb = self.lb_tracker[d].origins[o_idx];
 				let origin_lb = self.lb_tracker[d].origins[curr_obj_idx];
 
-				// If a forbidden region is overhanging the currently active obejct, it can be
+				// If a forbidden region is overhanging the currently active object, it can be
 				// assumed to be smaller when explaining which
 				if self.all_fr[fr].ub[d] > origin_ub {
 					possible_lb = origin_ub - self.lb_tracker[d].sizes[o_idx] + 1;
@@ -615,15 +623,12 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 					possible_ub = origin_lb + self.lb_tracker[d].sizes[curr_obj_idx] - 1;
 				}
 
-				reason.push(actions.get_int_lit(
-					self.boxes[d].origins[o_idx],
-					IntLitMeaning::Less(possible_ub + 1),
-				));
-
-				reason.push(actions.get_int_lit(
-					self.boxes[d].origins[o_idx],
-					IntLitMeaning::GreaterEq(possible_lb),
-				));
+				reason.push(
+					self.boxes[d].origins[o_idx].lit(ctx, IntLitMeaning::Less(possible_ub + 1)),
+				);
+				reason.push(
+					self.boxes[d].origins[o_idx].lit(ctx, IntLitMeaning::GreaterEq(possible_lb)),
+				);
 			}
 		}
 		reason
@@ -632,20 +637,24 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 	/// Explains the propagation, by first explaining the bounds of the object
 	/// that is currently being propagated and secondly, the bounds of the
 	/// forbidden regions connected to that object.
-	fn explain_propagation<P: PropagationActions>(
+	fn explain_propagation<Ctx>(
 		&mut self,
-		actions: &mut P,
+		ctx: &mut Ctx,
 		fr_support: &[usize],
 		curr_obj_idx: usize,
 		curr_dimension: usize,
 		prune_upper: bool,
-	) -> Vec<BoolView> {
+	) -> Vec<Ctx::Atom>
+	where
+		Ctx: ReasoningContext + ?Sized,
+		I: IntDecisionActions<Ctx>,
+	{
 		let mut reason: Vec<_> = Vec::new();
 		for d in 0..self.dimensions {
 			// If sizes are not fixed, the lower bounds are assumed throughout the algorithm
 			// and thus have to be added to the explanation
 			if !self.fixed_sizes {
-				reason.push(actions.get_int_lower_bound_lit(self.boxes[d].sizes[curr_obj_idx]));
+				reason.push(self.boxes[d].sizes[curr_obj_idx].lower_bound_lit(ctx));
 			}
 
 			// The literal describing the opposite bound in the same dimension and object we
@@ -653,81 +662,103 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT> {
 			// explained.
 			if d == curr_dimension {
 				if prune_upper {
-					reason.push(actions.get_int_lit(
-						self.boxes[d].origins[curr_obj_idx],
+					reason.push(self.boxes[d].origins[curr_obj_idx].lit(
+						ctx,
 						IntLitMeaning::Less(self.ub_tracker[d].origins[curr_obj_idx] + 1),
 					));
 				} else {
-					reason.push(actions.get_int_lit(
-						self.boxes[d].origins[curr_obj_idx],
+					reason.push(self.boxes[d].origins[curr_obj_idx].lit(
+						ctx,
 						IntLitMeaning::GreaterEq(self.lb_tracker[d].origins[curr_obj_idx]),
 					));
 				}
 			} else {
-				reason.push(actions.get_int_lit(
-					self.boxes[d].origins[curr_obj_idx],
+				reason.push(self.boxes[d].origins[curr_obj_idx].lit(
+					ctx,
 					IntLitMeaning::Less(self.ub_tracker[d].origins[curr_obj_idx] + 1),
 				));
-				reason.push(actions.get_int_lit(
-					self.boxes[d].origins[curr_obj_idx],
+				reason.push(self.boxes[d].origins[curr_obj_idx].lit(
+					ctx,
 					IntLitMeaning::GreaterEq(self.lb_tracker[d].origins[curr_obj_idx]),
 				));
 			}
 		}
-		reason.extend(self.explain_forbidden_regions(actions, fr_support, curr_obj_idx));
+		reason.extend(self.explain_forbidden_regions(ctx, fr_support, curr_obj_idx));
 		reason
 	}
 }
 
-impl<const NON_STRICT: bool, P, E> Propagator<P, E> for IntDiffnSweep<NON_STRICT>
+impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT, IntView> {
+	/// Create a new [`IntDiffnSweep`] propagator and post it in the solver.
+	pub fn post<E>(solver: &mut E, box_posn: Vec<Vec<IntView>>, box_size: Vec<Vec<IntView>>)
+	where
+		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
+		IntView: IntInspectionActions<E>,
+	{
+		let con: BoxedPropagator = Box::new(Self::new(solver, box_posn, box_size));
+		*solver += con;
+	}
+}
+
+impl<const NON_STRICT: bool, E, I> Propagator<E> for IntDiffnSweep<NON_STRICT, I>
 where
-	P: PropagationActions,
-	E: ExplanationActions,
+	E: ReasoningEngine,
+	I: SolverIntView<E>,
 {
-	#[tracing::instrument(name = "diffn", level = "trace", skip(self, actions))]
-	fn propagate(&mut self, actions: &mut P) -> Result<(), Conflict> {
+	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+		ctx.set_priority(PriorityLevel::Lowest);
+
+		for b in &self.boxes {
+			for v in &b.origins {
+				v.enqueue_when(ctx, IntPropCond::Bounds);
+			}
+			for v in &b.sizes {
+				v.enqueue_when(ctx, IntPropCond::Bounds);
+			}
+		}
+	}
+
+	#[tracing::instrument(name = "diffn", level = "trace", skip(self, ctx))]
+	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		for d in 0..self.dimensions {
 			for o in 0..self.boxes[0].origins.len() {
-				self.ub_tracker[d].origins[o] =
-					actions.get_int_upper_bound(self.boxes[d].origins[o]);
-				self.lb_tracker[d].origins[o] =
-					actions.get_int_lower_bound(self.boxes[d].origins[o]);
-				self.lb_tracker[d].sizes[o] = actions.get_int_lower_bound(self.boxes[d].sizes[o]);
+				self.ub_tracker[d].origins[o] = self.boxes[d].origins[o].upper_bound(ctx);
+				self.lb_tracker[d].origins[o] = self.boxes[d].origins[o].lower_bound(ctx);
+				self.lb_tracker[d].sizes[o] = self.boxes[d].sizes[o].lower_bound(ctx);
 			}
 		}
 
 		for o_idx in 0..self.boxes[0].origins.len() {
 			// Skip if target property has been lost
-			if actions.get_trailed_int(self.target[o_idx]) == 1 {
+			if ctx.trailed_int(self.target[o_idx]) == 1 {
 				continue;
 			}
 
 			if NON_STRICT
-				&& (0..self.dimensions)
-					.any(|d| actions.get_int_val(self.boxes[d].sizes[o_idx]) == Some(0))
+				&& (0..self.dimensions).any(|d| self.boxes[d].sizes[o_idx].val(ctx) == Some(0))
 			{
 				continue;
 			}
 			let mut fr_support: Vec<usize> = Vec::new();
 
 			if let Some(()) =
-				self.gen_forbidden_regions::<P>(actions, &mut fr_support, o_idx, self.dimensions)
+				self.gen_forbidden_regions(ctx, &mut fr_support, o_idx, self.dimensions)
 			{
 				if self.fixed_in_all_dimensions(o_idx) {
 					// Conflict will occur here since there exists forbidden regions for a fixed
 					// object
-					let reason = self.explain_propagation(actions, &fr_support, o_idx, 0, false);
-					actions.set_int_lower_bound(
-						self.boxes[0].origins[o_idx],
+					let reason = self.explain_propagation(ctx, &fr_support, o_idx, 0, false);
+					self.boxes[0].origins[o_idx].set_lower_bound(
+						ctx,
 						self.ub_tracker[0].origins[o_idx] + 1,
 						reason,
 					)?;
 				}
 				let mut all_fixed = true;
 				for d in 0..self.dimensions {
-					self.prune_min(actions, &fr_support, o_idx, d)?;
+					self.prune_min(ctx, &fr_support, o_idx, d)?;
 
-					self.prune_max(actions, &fr_support, o_idx, d)?;
+					self.prune_max(ctx, &fr_support, o_idx, d)?;
 
 					if self.lb_tracker[d].origins[o_idx] != self.ub_tracker[d].origins[o_idx] {
 						all_fixed = false;
@@ -736,14 +767,14 @@ where
 				// Since it is fixed in all dimensions and it is at a feasible position by not
 				// causing any conflicts, remove its target property
 				if all_fixed {
-					let _ = actions.set_trailed_int(self.target[o_idx], 1);
+					let _ = ctx.set_trailed_int(self.target[o_idx], 1);
 				}
 			}
 		}
 
-		// Source optimisations, create the largest possible bounding box
+		// Source optimizations, create the largest possible bounding box
 		for o_idx in 0..self.boxes[0].origins.len() {
-			if actions.get_trailed_int(self.target[o_idx]) == 1 {
+			if ctx.trailed_int(self.target[o_idx]) == 1 {
 				continue;
 			}
 			for i in 0..self.dimensions {
@@ -756,12 +787,11 @@ where
 
 		// If the current rectangle has lost its target property (is fixed in a feasible
 		// position) and is completely disjoint from the bounding box, remove its
-		// source property (disregard it in the rest of the algorhtm)
+		// source property (disregard it in the rest of the algorithm)
 		for o_idx in 0..self.boxes[0].origins.len() {
-			if actions.get_trailed_int(self.target[o_idx]) == 1
-				&& self.disjoint(&self.bounding_box, o_idx)
+			if ctx.trailed_int(self.target[o_idx]) == 1 && self.disjoint(&self.bounding_box, o_idx)
 			{
-				let _ = actions.set_trailed_int(self.source[o_idx], 1);
+				let _ = ctx.set_trailed_int(self.source[o_idx], 1);
 			}
 		}
 
@@ -775,7 +805,7 @@ mod tests {
 	use itertools::Itertools;
 	use tracing_test::traced_test;
 
-	use crate::{diffn_int, reformulate::InitConfig, Decision, Model};
+	use crate::{Decision, Model, diffn_int, reformulate::InitConfig};
 
 	#[test]
 	#[traced_test]
@@ -789,15 +819,14 @@ mod tests {
 
 		let size = prb.new_int_var(4..=4);
 
-		prb += diffn_int(
+		diffn_int(
+			&mut prb,
 			vec![vec![x1, x2], vec![y1, y2]],
 			vec![vec![size, size], vec![size, size]],
 			false,
 		);
 
-		let (mut slv, _) = prb.to_solver(&InitConfig::default()).unwrap();
-
-		slv.assert_unsatisfiable();
+		prb.assert_unsatisfiable();
 	}
 
 	#[test]
@@ -813,7 +842,8 @@ mod tests {
 
 		let size = prb.new_int_var(2..=2);
 
-		prb += diffn_int(
+		diffn_int(
+			&mut prb,
 			vec![vec![x1, x2], vec![y1, y2]],
 			vec![vec![size, size], vec![size, size]],
 			false,
@@ -852,7 +882,8 @@ mod tests {
 
 		let size = prb.new_int_var(5..=5);
 
-		prb += diffn_int(
+		diffn_int(
+			&mut prb,
 			vec![vec![x1, x2], vec![y1, y2], vec![z1, z2]],
 			vec![vec![size, size], vec![size, size], vec![size, size]],
 			false,
@@ -890,7 +921,8 @@ mod tests {
 		let size1 = prb.new_int_var(2..=2);
 		let size2 = prb.new_int_var(0..=0);
 
-		prb += diffn_int(
+		diffn_int(
+			&mut prb,
 			vec![vec![x1, x2], vec![y1, y2]],
 			vec![vec![size1, size2], vec![size1, size2]],
 			true,

@@ -118,7 +118,7 @@ use crate::{
 		int_all_different::{IntAllDifferent, IntAllDifferentBounds},
 		int_array_element::{IntArrayElementBounds, IntValArrayElement},
 		int_array_minimum::IntArrayMinimumBounds,
-		int_diffn::IntDiffn,
+		int_diffn::IntDiffnSweep,
 		int_div::IntDivBounds,
 		int_in_set::IntInSetReif,
 		int_linear::{IntEq, IntLinear, LinOperator},
@@ -356,18 +356,22 @@ where
 		value_prop: None,
 	})
 }
+
 /// Create a constraint that enforces that given decision variables of starting
 /// positions and sizes of k-dimensional hyperrectangles, none of the rectangles
 /// overlap.
 pub fn diffn_int(
+	prb: &mut Model,
 	box_posn: Vec<Vec<IntDecision>>,
 	box_size: Vec<Vec<IntDecision>>,
 	non_strict: bool,
-) -> IntDiffn {
-	IntDiffn {
-		box_posn,
-		box_size,
-		non_strict,
+) {
+	if non_strict {
+		let prop = IntDiffnSweep::<true, _>::new(prb, box_posn, box_size);
+		prb.add_constraint(prop);
+	} else {
+		let prop = IntDiffnSweep::<false, _>::new(prb, box_posn, box_size);
+		prb.add_constraint(prop);
 	}
 }
 
