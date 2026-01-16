@@ -1,23 +1,52 @@
+//! This module provides a `Matrix` struct, which is a basic, generic container
+//! for n-dimensional data. It is backed by a single, flat `Box<[T]>` array,
+//! storing elements in a row-major layout. This design makes it cache-friendly
+//! for row-wise access patterns.
+//!
+//! ## Use Cases
+//!
+//! This `Matrix` is most useful when the data you are working with is
+//! inherently multi-dimensional and you need a convenient way to access
+//! elements using multi-dimensional indices (e.g., `matrix[[x, y, z]]`).
+//! For example, it is used to represent collections of n-dimensional objects in
+//! geometric packing or scheduling constraints.
+//!
+//! ## Design Considerations
+//!
+//! It is important to note that this is a data container and not a library for
+//! numerical analysis or linear algebra. It does not provide operations like
+//! matrix multiplication or inversion. The primary goal of this implementation
+//! is to provide a simple, type-safe, and convenient abstraction for
+//! multi-dimensional data within this crate.
 use std::{
 	iter::repeat_with,
 	ops::{Index, IndexMut},
 };
 
+/// A generic n-dimensional matrix.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct Matrix<const DIMS: usize, T> {
-	/// The data stored in the matrix
+	/// The data stored in the matrix in a row-major layout.
 	data: Box<[T]>,
-	/// The length of each dimensions of the matrix
+	/// The length of each dimensions of the matrix.
 	dimensions: [usize; DIMS],
 }
 
 impl<const D: usize, T> Matrix<D, T> {
-	/// Creates a new matrix with the given dimensions and data
+	/// Creates a new matrix with the given dimensions and data read in
+	/// row-major layout.
+	///
+	/// # Panics
+	///
+	/// Panics if the number of elements in `data` does not equal the product of
+	/// the `dimensions`.
 	pub(crate) fn new(dimensions: [usize; D], data: Box<[T]>) -> Self {
 		assert_eq!(dimensions.iter().product::<usize>(), data.len());
 		Self { data, dimensions }
 	}
 
+	/// Creates a new matrix with the given dimensions and filled with default
+	/// values.
 	pub(crate) fn with_dimensions(dimensions: [usize; D]) -> Self
 	where
 		T: Default,
@@ -29,10 +58,13 @@ impl<const D: usize, T> Matrix<D, T> {
 		)
 	}
 
+	/// Returns the length of a given dimension.
 	pub(crate) fn len(&self, dim: usize) -> usize {
 		self.dimensions[dim]
 	}
 
+	/// Converts a multi-dimensional index into a 1D index for the underlying
+	/// data array.
 	fn internal_index(&self, index: [usize; D]) -> usize {
 		let mut idx = 0;
 		let mut mult = 1;
@@ -43,19 +75,21 @@ impl<const D: usize, T> Matrix<D, T> {
 		idx
 	}
 
-	/// Returns an iterator over the elements of the matrix
+	/// Returns an iterator over the elements of the matrix.
 	pub(crate) fn iter_elem(&self) -> impl Iterator<Item = &T> {
 		self.data.iter()
 	}
 }
 
 impl<T> Matrix<2, T> {
+	/// Returns a slice representing a row of the matrix.
 	pub(crate) fn row(&self, row: usize) -> &[T] {
 		let start = row * self.len(1);
 		let end = start + self.len(1);
 		&self.data[start..end]
 	}
 
+	/// Returns an iterator over the rows of the matrix.
 	pub(crate) fn row_iter(&self) -> impl Iterator<Item = &[T]> {
 		self.data.chunks_exact(self.len(1))
 	}

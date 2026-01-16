@@ -357,24 +357,25 @@ where
 	})
 }
 
-/// Create a constraint that enforces that given decision variables of starting
-/// positions and sizes of k-dimensional hyperrectangles, none of the rectangles
-/// overlap.
+/// Create a constraint that enforces that given decision variables of
+/// origin/starting positions and sizes of k-dimensional hyperrectangles, none
+/// of the rectangles overlap.
 ///
-/// `box_posn` and `box_size` the vectors must have the same length, which is
-/// the number of hyperrectangles. Then each inner vector must have the same
-/// length, which is the dimension of the hyperrectangles.
+/// `origin` and `size` the vectors must have the same length, which is the
+/// number of hyperrectangles. Then each inner vector must have the same length,
+/// which is the dimension of the hyperrectangles. Otherwise,
+/// the function will panic.
 pub fn diffn_int(
 	prb: &mut Model,
-	box_posn: Vec<Vec<IntDecision>>,
-	box_size: Vec<Vec<IntDecision>>,
+	origin: Vec<Vec<IntDecision>>,
+	size: Vec<Vec<IntDecision>>,
 	strict: bool,
 ) {
 	if strict {
-		let prop = IntDiffnSweep::<true, _>::new(prb, box_posn, box_size);
+		let prop = IntDiffnSweep::<true, _>::new(prb, origin, size);
 		prb.add_constraint(prop);
 	} else {
-		let prop = IntDiffnSweep::<false, _>::new(prb, box_posn, box_size);
+		let prop = IntDiffnSweep::<false, _>::new(prb, origin, size);
 		prb.add_constraint(prop);
 	}
 }

@@ -1,6 +1,12 @@
 //! Structure and algorithms for the integer diffn constraint, which
 //! enforces that a number of k-dimensional hyperrectangles do not overlap.
-use std::{cmp, iter::repeat_with, ops::AddAssign};
+use std::{
+	cmp::{self, Ordering},
+	iter::{repeat_with, zip},
+	ops::AddAssign,
+};
+
+use itertools::multizip;
 
 use crate::{
 	IntLitMeaning, IntVal,
@@ -17,7 +23,9 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Sweep based propagator for the `diffn_int` constraint.
+/// The [`IntDiffnSweep`] propagator ensures that a set of k-dimensional
+/// hyperrectangles do not overlap. It is a sweep-based propagator that reasons
+/// about forbidden regions for each rectangle.
 ///
 /// This propagator was originally proposed in "Sweep as a Generic Pruning
 /// Technique Applied to the Non-overlapping Rectangles Constraint" by Beldinau,
@@ -33,12 +41,12 @@ use crate::{
 /// would guarantee that at least two rectangles are overlapping, which violates
 /// the constraint.
 ///
-/// All [`Matrix`] attributes have two dimensions/indexes, the first is the
-/// object, the second is the dimension number.
+/// All [`Matrix`] attributes are 2-dimensional, with the first index
+/// representing the object and the second representing the dimension.
 pub struct IntDiffnSweep<const STRICT: bool, I> {
-	/// The origin position of each object in each dimension
+	/// The origin position of each object in each dimension.
 	origin: Matrix<2, I>,
-	/// The size of each object in each dimension
+	/// The size of each object in each dimension.
 	size: Matrix<2, I>,
 
 	/// Trail which tracks the target property, target[i] = 1 if is has been
@@ -50,23 +58,23 @@ pub struct IntDiffnSweep<const STRICT: bool, I> {
 	/// since it will not affect any other rectangle.
 	source: Box<[TrailedInt]>,
 
-	/// Whether all size variables where fixed when the propagator was posted.
+	/// A flag indicating whether all size variables were fixed at the time the
+	/// propagator was created. This allows for optimization, as fixed sizes
+	/// do not need to be considered for the reason.
 	size_fixed: bool,
 
-	/// Tracks the upper bound of the positions
+	/// A cache for the upper bounds of the origin variables.
 	origin_ub: Matrix<2, IntVal>,
-	/// Tracks the lower bound of the positions
+	/// A cache for the lower bounds of the origin variables.
 	origin_lb: Matrix<2, IntVal>,
-	/// Tracks the lower bound of the sizes
+	/// A cache for the lower bounds of the size variables.
 	size_lb: Matrix<2, IntVal>,
 
 	/// Used to see if any rectangle has lost its source property, that is; it
 	/// is completely disjoint from all the others and therefore can be removed
 	/// completely when reasoning in the rest of the algorithm since it will not
-	/// effect any other triangle
+	/// effect any other triangle.
 	bounding_box: Region,
-	/// Stores all forbidden regions for the current object
-	forbidden_regions: Vec<Region>,
 }
 
 impl<const STRICT: bool, E, I> Constraint<E> for IntDiffnSweep<STRICT, I>
@@ -113,51 +121,167 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// A region in a multi-dimensional space.
-struct Region {
-	/// Lower bound in each dimension
-	lb: Vec<IntVal>,
-	/// Upper bound in each dimension
-	ub: Vec<IntVal>,
+/// A region, or bounding box, in a multi-dimensional space.
+///
+/// It is represented by a vector of tuples, where each tuple contains the lower
+/// and upper bounds for a single dimension.
+struct Region(Vec<(IntVal, IntVal)>);
+
+impl Region {
+	/// Creates a new `Region` with the given number of dimensions, initialized
+	/// to default values.
+	fn with_dimensions(dimensions: usize) -> Self {
+		Self(vec![(IntVal::default(), IntVal::default()); dimensions])
+	}
+
+	/// Returns the lower bound of the region in the specified dimension.
+	fn lower_bound(&self, dim: usize) -> IntVal {
+		self.0[dim].0
+	}
+
+	/// Returns a mutable reference to the lower bound of the region in the
+	/// specified dimension.
+	fn lower_bound_mut(&mut self, dim: usize) -> &mut IntVal {
+		&mut self.0[dim].0
+	}
+
+	/// Returns the upper bound of the region in the specified dimension.
+	fn upper_bound(&self, dim: usize) -> IntVal {
+		self.0[dim].1
+	}
+
+	/// Returns a mutable reference to the upper bound of the region in the
+	/// specified dimension.
+	fn upper_bound_mut(&mut self, dim: usize) -> &mut IntVal {
+		&mut self.0[dim].1
+	}
+
+	/// Checks if this region overlaps with another region defined by the given
+	/// lower and upper bounds.
+	fn overlaps(&self, other_lb: &[IntVal], other_ub: &[IntVal]) -> bool {
+		debug_assert_eq!(self.0.len(), other_lb.len());
+		debug_assert_eq!(self.0.len(), other_ub.len());
+
+		self.0
+			.iter()
+			.zip(other_lb.iter().zip(other_ub))
+			.all(|(&(lb, ub), (&o_lb, &o_ub))| o_lb <= ub && o_ub >= lb)
+	}
+
+	/// Finds the first region in a collection that contains the given point.
+	fn find_collision<'a>(
+		regions: impl IntoIterator<Item = &'a Region>,
+		point: &[IntVal],
+	) -> Option<&'a Region> {
+		regions.into_iter().find(|r| {
+			debug_assert_eq!(r.0.len(), point.len());
+			r.0.iter()
+				.zip(point)
+				.all(|((lb, ub), p)| p >= lb && p <= ub)
+		})
+	}
+
+	/// Determines if two regions can be coalesced and their relationship.
+	///
+	/// This method checks if `self` and `other` can be merged. A merge is
+	/// only possible if, in every dimension, one region is a subset of the
+	/// other.
+	///
+	/// # Returns
+	///
+	/// - `Some(Ordering::Less)`: `other` is a subset of `self`.
+	/// - `Some(Ordering::Greater)`: `self` is a subset of `other`.
+	/// - `Some(Ordering::Equal)`: The regions are identical.
+	/// - `None`: The regions cannot be coalesced because they are disjoint,
+	///   partially overlapping, or touching in a way that doesn't form a subset
+	///   relationship across all dimensions.
+	fn coalensce(&self, other: &Self) -> Option<Ordering> {
+		debug_assert_eq!(self.0.len(), other.0.len());
+
+		let mut trend = Ordering::Equal;
+		for (&(self_lb, self_ub), &(other_lb, other_ub)) in zip(&self.0, &other.0) {
+			// No overlapping possible
+			if self_ub + 1 < other_lb || self_lb > other_ub + 1 {
+				return None;
+			// The regions are equal
+			} else if (self_lb, self_ub) == (other_lb, other_ub) {
+				continue;
+			// `other` is a subset of `self`
+			} else if self_lb <= other_lb && self_ub >= other_ub {
+				match trend {
+					Ordering::Equal | Ordering::Less => trend = Ordering::Less,
+					_ => return None,
+				}
+			// `self` is a subset of `other`
+			} else if self_lb >= other_lb && self_ub <= other_ub {
+				match trend {
+					Ordering::Equal | Ordering::Greater => trend = Ordering::Greater,
+					_ => return None,
+				}
+			// They overlap, but not such one is a subset of another
+			} else {
+				return None;
+			}
+		}
+		Some(trend)
+	}
 }
 
 impl<const STRICT: bool, I> IntDiffnSweep<STRICT, I> {
+	/// Returns the number of objects (hyperrectangles) being managed by this
+	/// propagator.
 	fn num_objects(&self) -> usize {
 		self.origin.len(0)
 	}
 
+	/// Returns the number of dimensions of the objects.
 	fn num_dimensions(&self) -> usize {
 		self.origin.len(1)
 	}
 
 	/// Create a new [`IntDiffnSweep`] propagator, to be used within the given
 	/// engine.
-	pub(crate) fn new<E>(engine: &mut E, box_posn: Vec<Vec<I>>, box_size: Vec<Vec<I>>) -> Self
+	///
+	/// # Parameters
+	///
+	/// - `engine`: The construction and reasoning context.
+	/// - `origin`: A matrix-like `Vec<Vec<I>>` where `origin[i][d]` is the
+	///   origin of object `i` in dimension `d`.
+	/// - `size`: A matrix-like `Vec<Vec<I>>` where `size[i][d]` is the size of
+	///   object `i` in dimension `d`.
+	///
+	/// # Panics
+	///
+	/// Panics if the dimensions of `origin` and `size` are inconsistent.
+	/// Specifically, the number of objects (outer `Vec` length) must be the
+	/// same, and the number of dimensions (inner `Vec` length) must be the
+	/// same for all objects.
+	pub(crate) fn new<E>(engine: &mut E, origin: Vec<Vec<I>>, size: Vec<Vec<I>>) -> Self
 	where
 		E: ConstructionActions + ReasoningContext + ?Sized,
 		I: IntInspectionActions<E>,
 	{
-		assert_eq!(box_posn.len(), box_size.len());
+		assert_eq!(origin.len(), size.len());
 		assert!(
-			box_posn.is_empty()
-				|| box_posn
+			origin.is_empty()
+				|| origin
 					.iter()
-					.chain(&box_size)
-					.all(|v| v.len() == box_posn[0].len())
+					.chain(&size)
+					.all(|v| v.len() == origin[0].len())
 		);
 		// Make sure all sizes are fixed before enqueueing
-		let fixed_sizes = box_size.iter().flatten().all(|v| v.val(engine).is_some());
+		let size_fixed = size.iter().flatten().all(|v| v.val(engine).is_some());
 
-		let num_objects = box_posn.len();
-		let num_dimensions = box_posn[0].len();
+		let num_objects = origin.len();
+		let num_dimensions = if num_objects > 0 { origin[0].len() } else { 0 };
 
-		let box_posn = Matrix::new(
+		let origin = Matrix::new(
 			[num_objects, num_dimensions],
-			box_posn.into_iter().flatten().collect(),
+			origin.into_iter().flatten().collect(),
 		);
-		let box_size = Matrix::new(
+		let size = Matrix::new(
 			[num_objects, num_dimensions],
-			box_size.into_iter().flatten().collect(),
+			size.into_iter().flatten().collect(),
 		);
 
 		let target = repeat_with(|| engine.new_trailed_int(0))
@@ -167,461 +291,370 @@ impl<const STRICT: bool, I> IntDiffnSweep<STRICT, I> {
 			.take(num_objects)
 			.collect();
 
-		let ub_tracker = Matrix::with_dimensions([num_objects, num_dimensions]);
-		let lb_tracker = Matrix::with_dimensions([num_objects, num_dimensions]);
-		let lb_sizes = Matrix::with_dimensions([num_objects, num_dimensions]);
+		let origin_ub = Matrix::with_dimensions([num_objects, num_dimensions]);
+		let origin_lb = Matrix::with_dimensions([num_objects, num_dimensions]);
+		let size_lb = Matrix::with_dimensions([num_objects, num_dimensions]);
 
-		let bounding_box = Region {
-			lb: vec![i64::MAX; num_dimensions],
-			ub: vec![i64::MIN; num_dimensions],
-		};
-
-		let all_fr = Vec::new();
+		let bounding_box = Region::with_dimensions(num_dimensions);
 
 		Self {
-			origin: box_posn,
-			size: box_size,
+			origin,
+			size,
 			target,
 			source,
-			size_fixed: fixed_sizes,
-			origin_ub: ub_tracker,
-			origin_lb: lb_tracker,
-			size_lb: lb_sizes,
+			size_fixed,
+			origin_ub,
+			origin_lb,
+			size_lb,
 			bounding_box,
-			forbidden_regions: all_fr,
 		}
 	}
 
-	/// Prunes the lower bound of a given rectangle by searching for a feasible
-	/// origin by using a sweep point which tracks the search and a jump point
-	/// which tracks the actions to be taken by the sweep point. If a feasible
-	/// origin is found, set the lower-bound of the rectangle to the position
-	/// of the sweep, if no feasible origin is found, a conflict is reported.
+	/// Prunes the lower bound of an object's origin in a specific dimension.
+	///
+	/// This method implements the core sweep-line algorithm to find the
+	/// earliest possible feasible position for the object's origin. It starts
+	/// a "sweep point" at the object's lower bound and moves it through the
+	/// multi-dimensional space, "jumping" over forbidden regions until a
+	/// feasible position is found.
+	///
+	/// If the first feasible position found is greater than the current lower
+	/// bound, the variable's domain is pruned. If no feasible position is
+	/// found within the object's domain, a conflict is triggered.
 	fn prune_min<E>(
 		&mut self,
 		ctx: &mut E::PropagationCtx<'_>,
-		fr_support: &[usize],
-		curr_obj_idx: usize,
-		curr_dimension: usize,
+		forbidden_regions: &[(Region, usize)],
+		obj: usize,
+		dim: usize,
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
 		I: SolverIntView<E>,
 	{
-		let mut sweep = self.origin_lb.row(curr_obj_idx).to_vec();
-		let mut jump: Vec<_> = self
-			.origin_ub
-			.row(curr_obj_idx)
-			.iter()
-			.map(|v| v + 1)
-			.collect();
+		// `sweep` is the current point being checked for feasibility.
+		let mut sweep = self.origin_lb.row(obj).to_vec();
+		// `jump` stores the earliest possible escape point from a forbidden region.
+		let mut jump: Vec<_> = self.origin_ub.row(obj).iter().map(|v| v + 1).collect();
 		let mut b = true;
 
-		// Get the forbidden region our current sweep point is overlapping with
-		let mut infeasible_fr =
-			Self::infeasible_sweep(&sweep, self.num_dimensions(), &self.forbidden_regions);
-		while b && infeasible_fr.is_some() {
-			// The jump is always pointed toward upper bounds of forbiddens as this is where
-			// we will find feasible origins
+		// Find the first forbidden region that the sweep point is inside.
+		let mut fr = Region::find_collision(forbidden_regions.iter().map(|(r, _)| r), &sweep);
+		while b && fr.is_some() {
+			// Update the jump point: to escape the current forbidden region `fr`,
+			// we must jump to at least its upper bound + 1 in some dimension.
+			// We take the minimum of all possible jump points.
 			for (i, j) in jump.iter_mut().enumerate() {
-				*j = cmp::min(*j, infeasible_fr.unwrap().ub[i] + 1);
+				*j = cmp::min(*j, fr.unwrap().upper_bound(i) + 1);
 			}
 
-			let lb = self.origin_lb.row(curr_obj_idx);
-			let ub = self.origin_ub.row(curr_obj_idx);
+			let lb = self.origin_lb.row(obj);
+			let ub = self.origin_ub.row(obj);
 
-			b = Self::adjust_sweep_min(
-				&mut sweep,
-				&mut jump,
-				&lb,
-				&ub,
-				curr_dimension,
-				self.num_dimensions(),
-			);
+			// Adjust the sweep point to the new jump location.
+			b = Self::adjust_sweep_min(&mut sweep, &mut jump, lb, ub, dim);
 
-			infeasible_fr =
-				Self::infeasible_sweep(&sweep, self.num_dimensions(), &self.forbidden_regions);
+			// Check if the new sweep point is in another forbidden region.
+			fr = Region::find_collision(forbidden_regions.iter().map(|(r, _)| r), &sweep);
 		}
-		// Don't bother to do any propagation if the sweep point is at the same place it
-		// started
-		if sweep[curr_dimension] != self.origin_lb[[curr_obj_idx, curr_dimension]] {
-			let reason =
-				self.explain_propagation(ctx, fr_support, curr_obj_idx, curr_dimension, false);
-			self.origin[[curr_obj_idx, curr_dimension]].set_lower_bound(
-				ctx,
-				sweep[curr_dimension],
-				reason,
-			)?;
+		// If the sweep found a new, higher feasible lower bound, propagate it.
+		if sweep[dim] != self.origin_lb[[obj, dim]] {
+			let reason = self.explain_propagation(ctx, forbidden_regions, obj, dim, false);
+			self.origin[[obj, dim]].set_lower_bound(ctx, sweep[dim], reason)?;
 
-			self.origin_lb[[curr_obj_idx, curr_dimension]] = sweep[curr_dimension];
+			self.origin_lb[[obj, dim]] = sweep[dim];
 		}
 		Ok(())
 	}
 
-	/// Prunes the upper bound of a given rectangle by searching for a feasible
-	/// origin by using a sweep point which tracks the search and a jump point
-	/// which tracks the actions to be taken by the sweep point. If a feasible
-	/// origin is found, set the upper-bound of the rectangle to the position
-	/// of the sweep, if no feasible origin is found, a conflict is reported.
+	/// Prunes the upper bound of an object's origin in a specific dimension.
+	///
+	/// This method is analogous to [`Self::prune_min`], but it sweeps backward
+	/// from the object's upper bound to find the latest possible feasible
+	/// position.
 	fn prune_max<E>(
 		&mut self,
 		ctx: &mut E::PropagationCtx<'_>,
-		fr_support: &[usize],
-		curr_obj_idx: usize,
-		curr_dimension: usize,
+		forbidden_regions: &[(Region, usize)],
+		obj: usize,
+		dim: usize,
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
 		I: SolverIntView<E>,
 	{
-		let mut sweep = self.origin_ub.row(curr_obj_idx).to_vec();
-		let mut jump: Vec<_> = self
-			.origin_lb
-			.row(curr_obj_idx)
-			.iter()
-			.map(|v| v - 1)
-			.collect();
+		// `sweep` is the current point being checked for feasibility.
+		let mut sweep = self.origin_ub.row(obj).to_vec();
+		// `jump` stores the latest possible escape point (lower bound - 1).
+		let mut jump: Vec<_> = self.origin_lb.row(obj).iter().map(|v| v - 1).collect();
 		let mut b = true;
 
-		// Get the forbidden region our current sweep point is overlapping with
-		let mut infeasible_fr =
-			Self::infeasible_sweep(&sweep, self.num_dimensions(), &self.forbidden_regions);
-		while b && infeasible_fr.is_some() {
-			// The jump is always pointed toward upper bounds of forbiddens as this is where
-			// we will find feasible origins
+		// Find the first forbidden region that the sweep point is inside.
+		let mut fr = Region::find_collision(forbidden_regions.iter().map(|(r, _)| r), &sweep);
+		while b && fr.is_some() {
+			// To escape `fr`, we must jump to at least its lower bound - 1.
+			// We take the maximum of all possible jump points.
 			for (i, j) in jump.iter_mut().enumerate() {
-				*j = cmp::max(*j, infeasible_fr.unwrap().lb[i] - 1);
+				*j = cmp::max(*j, fr.unwrap().lower_bound(i) - 1);
 			}
 
-			let lb = self.origin_lb.row(curr_obj_idx);
-			let ub = self.origin_ub.row(curr_obj_idx);
+			let lb = self.origin_lb.row(obj);
+			let ub = self.origin_ub.row(obj);
 
-			b = Self::adjust_sweep_max(
-				&mut sweep,
-				&mut jump,
-				&lb,
-				&ub,
-				curr_dimension,
-				self.num_dimensions(),
-			);
+			// Adjust the sweep point to the new jump location.
+			b = Self::adjust_sweep_max(&mut sweep, &mut jump, lb, ub, dim);
 
-			infeasible_fr =
-				Self::infeasible_sweep(&sweep, self.num_dimensions(), &self.forbidden_regions);
+			// Check if the new sweep point is in another forbidden region.
+			fr = Region::find_collision(forbidden_regions.iter().map(|(r, _)| r), &sweep);
 		}
 
-		// Don't bother to do any propagation if the sweep point is at the same place it
-		// started
-		if sweep[curr_dimension] != self.origin_ub[[curr_obj_idx, curr_dimension]] {
-			let reason =
-				self.explain_propagation(ctx, fr_support, curr_obj_idx, curr_dimension, true);
-			self.origin[[curr_obj_idx, curr_dimension]].set_upper_bound(
-				ctx,
-				sweep[curr_dimension],
-				reason,
-			)?;
+		// If the sweep found a new, lower feasible upper bound, propagate it.
+		if sweep[dim] != self.origin_ub[[obj, dim]] {
+			let reason = self.explain_propagation(ctx, forbidden_regions, obj, dim, true);
+			self.origin[[obj, dim]].set_upper_bound(ctx, sweep[dim], reason)?;
 
-			self.origin_ub[[curr_obj_idx, curr_dimension]] = sweep[curr_dimension];
+			self.origin_ub[[obj, dim]] = sweep[dim];
 		}
 		Ok(())
 	}
 
-	/// Given the position of the jump point acquired from the forbidden region
-	/// the sweep point overlapped, check if the jump point is contained within
-	/// the bounds of the rectangle we are pruning, if it is in a dimension, we
-	/// can continue searching in that direction and check if it is a feasible
-	/// origin
+	/// Adjusts the sweep point to find the next potential feasible location
+	/// when pruning lower bounds.
+	///
+	/// This function implements the "sweep" logic. It iterates through the
+	/// dimensions and moves the `sweep` point to the `jump` location in one
+	/// dimension at a time. If the new `sweep` coordinate is still within the
+	/// object's domain, a potential new location is found, and the function
+	/// returns `true`. If the sweep goes out of bounds in all dimensions, it
+	/// means no feasible point was found, and the function returns `false`,
+	/// setting the sweep point to a value that will cause a conflict.
 	fn adjust_sweep_min(
 		sweep: &mut [IntVal],
 		jump: &mut [IntVal],
-		curr_obj_lb: &[IntVal],
-		curr_obj_ub: &[IntVal],
-		curr_dimension: usize,
-		dimensions: usize,
+		obj_lb: &[IntVal],
+		obj_ub: &[IntVal],
+		dim: usize,
 	) -> bool {
+		let dimensions = sweep.len();
+		debug_assert_eq!(jump.len(), dimensions);
+		debug_assert_eq!(obj_lb.len(), dimensions);
+		debug_assert_eq!(obj_ub.len(), dimensions);
+
 		for i in (0..dimensions).rev() {
 			// Ensures that we check the dimension we are pruning last
-			let rotation = (i + curr_dimension) % dimensions;
+			let rotation = (i + dim) % dimensions;
 			sweep[rotation] = jump[rotation];
-			jump[rotation] = curr_obj_ub[rotation] + 1;
-			// If the current position of the sweep is still within the bounds of our
-			// domains we can continue searching in this direction (dimension), otherwise
-			// reset it
-			if sweep[rotation] <= curr_obj_ub[rotation] {
+			jump[rotation] = obj_ub[rotation] + 1;
+			// If the new sweep point is still within the object's domain,
+			// we have found a new candidate point to check.
+			if sweep[rotation] <= obj_ub[rotation] {
 				return true;
 			} else {
-				sweep[rotation] = curr_obj_lb[rotation];
+				// Otherwise, this dimension is exhausted. Reset sweep point to the
+				// lower bound and try the next dimension.
+				sweep[rotation] = obj_lb[rotation];
 			}
 		}
-		// No feasible origin for the rectangle exists, adjust the sweep point to
-		// guarantee a conflict
-		sweep[curr_dimension] = curr_obj_ub[curr_dimension] + 1;
+		// If all dimensions are exhausted, no feasible origin exists.
+		// Set the sweep point to a value that guarantees a conflict.
+		sweep[dim] = obj_ub[dim] + 1;
 		false
 	}
 
-	/// Given the position of the jump point acquired from the forbidden region
-	/// the sweep point overlapped, check if the jump point is contained within
-	/// the bounds of the rectangle we are pruning, if it is in a dimension, we
-	/// can continue searching in that direction and check if it is a feasible
-	/// origin
+	/// Adjusts the sweep point to find the next potential feasible location
+	/// when pruning upper bounds.
+	///
+	/// This is the analog of [`Self::adjust_sweep_min`], but for
+	/// [`Self::prune_max`], sweeping downwards.
 	fn adjust_sweep_max(
 		sweep: &mut [IntVal],
 		jump: &mut [IntVal],
 		curr_obj_lb: &[IntVal],
 		curr_obj_ub: &[IntVal],
 		curr_dimension: usize,
-		dimensions: usize,
 	) -> bool {
+		let dimensions = sweep.len();
+		debug_assert_eq!(jump.len(), dimensions);
+		debug_assert_eq!(curr_obj_lb.len(), dimensions);
+		debug_assert_eq!(curr_obj_ub.len(), dimensions);
+
 		for i in (0..dimensions).rev() {
 			// Ensures that we check the dimension we are pruning last
 			let rotation = (i + curr_dimension) % dimensions;
 			sweep[rotation] = jump[rotation];
 			jump[rotation] = curr_obj_lb[rotation] - 1;
-			// If the current position of the sweep is still within the bounds of our
-			// domains we can continue searching in this direction (dimension), otherwise
-			// reset it
+			// If the new sweep point is still within the object's domain,
+			// we have a new candidate.
 			if sweep[rotation] >= curr_obj_lb[rotation] {
 				return true;
 			} else {
+				// Otherwise, this dimension is exhausted. Reset and continue.
 				sweep[rotation] = curr_obj_ub[rotation];
 			}
 		}
+		// No feasible origin exists. Set sweep to cause a conflict.
 		sweep[curr_dimension] = curr_obj_lb[curr_dimension] - 1;
 		false
 	}
 
-	/// Checks if a forbidden overlaps with the given domain of lower and
-	/// upper-bounds
-	fn overlaps(
-		curr_obj_lb: &[IntVal],
-		curr_obj_ub: &[IntVal],
-		fr: &Region,
-		dimensions: usize,
-	) -> bool {
-		for d in 0..dimensions {
-			if curr_obj_lb[d] > fr.ub[d] || curr_obj_ub[d] < fr.lb[d] {
-				return false;
-			}
-		}
-		true
-	}
-
-	/// Generates forbidden regions given object o, forbidden regions that do
-	/// not overlap with the starting domain of o are not included. Forbidden
-	/// regions that are a subset of another are also not considered.
-	fn gen_forbidden_regions<Ctx>(
-		&mut self,
-		ctx: &mut Ctx,
-		fr_support: &mut Vec<usize>,
-		o_idx: usize,
-		dimensions: usize,
-	) -> Option<()>
+	/// Generates the set of "forbidden regions" for a given object `obj`.
+	///
+	/// A forbidden region is an area where the origin of `obj` cannot be placed
+	/// because it would guarantee an overlap with another object `i`. Such a
+	/// region is calculated based on the current domain of `i`'s origin and
+	/// the sizes of both `obj` and `i`.
+	///
+	/// This method performs two key optimizations:
+	/// 1. It filters out any generated forbidden region that does not overlap
+	///    with the current domain of `obj`.
+	/// 2. It merges regions where one is a subset of another to keep the set of
+	///    forbidden regions minimal.
+	///
+	/// # Returns
+	///
+	/// A vector of tuples, where each tuple contains a `Region` and the index
+	/// of the object that induced it.
+	fn forbidden_regions<Ctx>(&mut self, ctx: &mut Ctx, obj: usize) -> Vec<(Region, usize)>
 	where
 		Ctx: ReasoningContext + TrailingActions,
 	{
-		self.forbidden_regions.clear();
-		for i in 0..self.num_objects() {
-			// Check if the current object can be ignored if it has lost its source property
+		let mut forbidden_regions: Vec<Option<(Region, usize)>> = Vec::new();
+
+		'obj_iter: for i in 0..self.num_objects() {
+			// Ignore objects that have lost their "source" property.
 			if ctx.trailed_int(self.source[i]) == 1 {
 				continue;
 			}
 
-			if i == o_idx {
+			if i == obj {
 				continue;
 			};
 
-			let mut fr = Region {
-				lb: Vec::new(),
-				ub: Vec::new(),
-			};
+			let mut forbidden = Region::with_dimensions(self.num_dimensions());
 
-			let mut exists = true;
 			for d in 0..self.num_dimensions() {
-				let fr_lb = self.origin_ub[[i, d]] - self.size_lb[[o_idx, d]] + 1;
+				let fr_lb = self.origin_ub[[i, d]] - self.size_lb[[obj, d]] + 1;
 				let fr_ub = self.origin_lb[[i, d]] + self.size_lb[[i, d]] - 1;
 				if fr_lb <= fr_ub {
-					fr.lb.push(fr_lb);
-					fr.ub.push(fr_ub);
+					forbidden.0[d] = (fr_lb, fr_ub);
 				} else {
-					exists = false;
+					// If the interval is empty in any dimension, no forbidden region exists.
+					continue 'obj_iter;
 				}
 			}
-			let mut regions_to_remove: Vec<(usize, usize)> = Vec::new();
 
-			let lb = self.origin_lb.row(o_idx);
-			let ub = self.origin_ub.row(o_idx);
+			let lb = self.origin_lb.row(obj);
+			let ub = self.origin_ub.row(obj);
 
-			// Look for forbidden regions that are a subset of another such that they can be
-			// merged
-			if exists && Self::overlaps(&lb, &ub, &fr, dimensions) {
-				let mut c = 0;
-				let num_dimensions = self.num_dimensions();
-				for f in &mut self.forbidden_regions {
-					let fr_object = fr_support[c];
-					let v = Self::coalesce(f, &fr, num_dimensions);
-
-					match v {
-						// fr is a subset of f
-						0 | 1 => {
-							//Do not add f vector of forbidden regions and do not track
-							exists = false;
-							break;
+			// Check if the new forbidden region can be coalesced with an existing one.
+			if forbidden.overlaps(lb, ub) {
+				for tup in &mut forbidden_regions {
+					if let Some((f, _)) = tup {
+						match f.coalensce(&forbidden) {
+							// `forbidden` is a subset of an existing region `f`, so we can ignore
+							// it.
+							Some(Ordering::Equal) | Some(Ordering::Greater) => {
+								continue 'obj_iter;
+							}
+							// An existing region `f` is a subset of `forbidden`, so we remove `f`.
+							Some(Ordering::Less) => {
+								*tup = None;
+							}
+							// No subset relationship, so we keep both.
+							None => continue,
 						}
-						// f is a subset of fr
-						2 => {
-							// remove that forbidden region from all_fr and remove it from tracking
-							regions_to_remove.push((c, fr_object));
-						}
-						// No overlap possible
-						3 => continue,
-						_ => unreachable!("should not be possible"),
 					}
-					c += 1;
 				}
-
-				for (c, o) in regions_to_remove.iter().rev() {
-					let _ = self.forbidden_regions.remove(*c);
-					fr_support.retain(|&x| x != *o);
-				}
-
-				if exists {
-					fr_support.push(i);
-					self.forbidden_regions.push(fr);
-				}
+				forbidden_regions.push(Some((forbidden, i)));
 			}
 		}
 
-		if self.forbidden_regions.is_empty() {
-			None
-		} else {
-			Some(())
-		}
+		forbidden_regions.into_iter().flatten().collect()
 	}
 
-	/// Checks whether the sweep point is in a feasible position, if it is not,
-	/// return the forbidden region it collided with
-	fn infeasible_sweep<'a>(
-		sweep: &[IntVal],
-		dimensions: usize,
-		all_fr: &'a [Region],
-	) -> Option<&'a Region> {
-		all_fr
-			.iter()
-			.find(|fr| (0..dimensions).all(|i| sweep[i] >= fr.lb[i] && sweep[i] <= fr.ub[i]))
+	/// Checks if the origin of a given object is fixed in all dimensions.
+	fn fixed_object(&self, obj: usize) -> bool {
+		self.origin_lb.row(obj) == self.origin_ub.row(obj)
 	}
 
-	/// Checks if given rectangle has a fixed origin position in all dimensions
-	fn fixed_in_all_dimensions(&self, curr_obj_idx: usize) -> bool {
-		for d in 0..self.num_dimensions() {
-			if self.origin_lb[[curr_obj_idx, d]] != self.origin_ub[[curr_obj_idx, d]] {
-				return false;
-			}
-		}
-		true
+	/// Checks if a given object is completely outside the given `Region`
+	/// (bounding box) in at least one dimension.
+	fn disjoint(&self, region: &Region, obj: usize) -> bool {
+		let origin_lb = self.origin_lb.row(obj);
+		let origin_ub = self.origin_ub.row(obj);
+		let size_lb = self.size_lb.row(obj);
+
+		multizip((&region.0, origin_lb, origin_ub, size_lb))
+			.any(|(&(lb, ub), &o_lb, &o_ub, &size)| o_ub + size - 1 < lb || o_lb > ub)
 	}
 
-	/// Checks if tw forbidden regions can be coalesced into one
-	/// Returns:
-	/// 0 - Coalescing not possible
-	/// 1 - fr2 is a subset of fr1
-	/// 2 - fr1 is a subset of fr2
-	/// 3 - The forbidden regions are equal
-	fn coalesce(fr1: &mut Region, fr2: &Region, dimensions: usize) -> usize {
-		let mut trend = 0;
-		for d in 0..dimensions {
-			// No overlapping possible
-			if fr1.ub[d] + 1 < fr2.lb[d] || fr1.lb[d] > fr2.ub[d] + 1 {
-				return 3;
-			// The regions are equal
-			} else if fr1.lb[d] == fr2.lb[d] && fr1.ub[d] == fr2.ub[d] {
-				continue;
-			// fr2 is a subset of fr1
-			} else if fr1.lb[d] <= fr2.lb[d] && fr1.ub[d] >= fr2.ub[d] {
-				match trend {
-					0 | 1 => trend = 1,
-					_ => return 3,
-				}
-			// fr1 is a subset of fr2
-			} else if fr1.lb[d] >= fr2.lb[d] && fr1.ub[d] <= fr2.ub[d] {
-				match trend {
-					0 | 2 => trend = 2,
-					_ => return 3,
-				}
-			// They overlap, but not such one is a subset of another
-			} else {
-				return 3;
-			}
-		}
-		trend
-	}
-
-	/// Returns true if the given object and bounding_box are completely
-	/// disjoint in any dimension
-	fn disjoint(&self, bounding_box: &Region, curr_obj_idx: usize) -> bool {
-		for d in 0..self.num_dimensions() {
-			if self.origin_ub[[curr_obj_idx, d]] + self.size_lb[[curr_obj_idx, d]] - 1
-				< bounding_box.lb[d]
-				|| self.origin_lb[[curr_obj_idx, d]] > bounding_box.ub[d]
-			{
-				return true;
-			}
-		}
-		false
-	}
-
-	/// Explains all forbidden regions by explaining all bounds of them and also
-	/// attempting to lift the explained bounds if any forbidden region is
-	/// overhanging the bounds of the object currently being propagated.
+	/// Generates a set of literals that explain the existence of the given
+	/// forbidden regions.
+	///
+	/// For each forbidden region, this method identifies the literals (i.e.,
+	/// the bounds of the variables) that define it. This is essential for
+	/// generating conflict clauses when a domain becomes empty. It also "lifts"
+	/// the bounds if a forbidden region extends beyond the domain of the object
+	/// being pruned, which can lead to more general explanations.
 	fn explain_forbidden_regions<Ctx>(
 		&mut self,
 		ctx: &mut Ctx,
-		fr_support: &[usize],
-		curr_obj_idx: usize,
+		forbidden_regions: &[(Region, usize)],
+		obj: usize,
 	) -> Vec<Ctx::Atom>
 	where
 		Ctx: ReasoningContext + ?Sized,
 		I: IntDecisionActions<Ctx>,
 	{
 		let mut reason = Vec::new();
-		for (fr, &o_idx) in fr_support.iter().enumerate() {
+		for (region, support) in forbidden_regions.iter() {
 			for d in 0..self.num_dimensions() {
-				// If sizes are not fixed, the lower bounds are assumed throughout the algorithm
-				// and thus have to be added to the explanation
+				// If sizes are not fixed, their lower bounds contribute to the
+				// forbidden region and must be part of the explanation.
 				if !self.size_fixed {
-					reason.push(self.size[[o_idx, d]].lower_bound_lit(ctx));
+					reason.push(self.size[[*support, d]].lower_bound_lit(ctx));
 				}
-				let mut possible_ub = self.origin_ub[[o_idx, d]];
-				let origin_ub = self.origin_ub[[curr_obj_idx, d]];
+				let mut possible_ub = self.origin_ub[[*support, d]];
+				let origin_ub = self.origin_ub[[obj, d]];
 
-				let mut possible_lb = self.origin_lb[[o_idx, d]];
-				let origin_lb = self.origin_lb[[curr_obj_idx, d]];
+				let mut possible_lb = self.origin_lb[[*support, d]];
+				let origin_lb = self.origin_lb[[obj, d]];
 
-				// If a forbidden region is overhanging the currently active object, it can be
-				// assumed to be smaller when explaining which
-				if self.forbidden_regions[fr].ub[d] > origin_ub {
-					possible_lb = origin_ub - self.size_lb[[o_idx, d]] + 1;
-				}
-
-				if self.forbidden_regions[fr].lb[d] < origin_lb {
-					possible_ub = origin_lb + self.size_lb[[curr_obj_idx, d]] - 1;
+				// "Lifting": If a forbidden region overhangs the domain of the object
+				// being pruned, we can use the object's bounds to create a tighter,
+				// more general explanation.
+				if region.upper_bound(d) > origin_ub {
+					possible_lb = origin_ub - self.size_lb[[*support, d]] + 1;
 				}
 
-				reason.push(self.origin[[o_idx, d]].lit(ctx, IntLitMeaning::Less(possible_ub + 1)));
-				reason
-					.push(self.origin[[o_idx, d]].lit(ctx, IntLitMeaning::GreaterEq(possible_lb)));
+				if region.lower_bound(d) < origin_lb {
+					possible_ub = origin_lb + self.size_lb[[obj, d]] - 1;
+				}
+
+				reason.push(
+					self.origin[[*support, d]].lit(ctx, IntLitMeaning::Less(possible_ub + 1)),
+				);
+				reason.push(
+					self.origin[[*support, d]].lit(ctx, IntLitMeaning::GreaterEq(possible_lb)),
+				);
 			}
 		}
 		reason
 	}
 
-	/// Explains the propagation, by first explaining the bounds of the object
-	/// that is currently being propagated and secondly, the bounds of the
-	/// forbidden regions connected to that object.
+	/// Generates a complete explanation (a "reason") for a pruning operation.
+	///
+	/// The reason consists of two parts:
+	/// 1. The literals that define the other dimensions of the dimension being
+	///    pruned (`dim`) of the object being pruned (`obj`).
+	/// 2. The literals that explain the existence of the forbidden regions that
+	///    forced the pruning.
 	fn explain_propagation<Ctx>(
 		&mut self,
 		ctx: &mut Ctx,
-		fr_support: &[usize],
-		curr_obj_idx: usize,
-		curr_dimension: usize,
+		forbidden_regions: &[(Region, usize)],
+		obj: usize,
+		dim: usize,
 		prune_upper: bool,
 	) -> Vec<Ctx::Atom>
 	where
@@ -630,51 +663,67 @@ impl<const STRICT: bool, I> IntDiffnSweep<STRICT, I> {
 	{
 		let mut reason: Vec<_> = Vec::new();
 		for d in 0..self.num_dimensions() {
-			// If sizes are not fixed, the lower bounds are assumed throughout the algorithm
-			// and thus have to be added to the explanation
+			// If sizes are not fixed, their lower bounds are part of the reason.
 			if !self.size_fixed {
-				reason.push(self.size[[curr_obj_idx, d]].lower_bound_lit(ctx));
+				reason.push(self.size[[obj, d]].lower_bound_lit(ctx));
 			}
 
-			// The literal describing the opposite bound in the same dimension and object we
-			// are propagating can be removed. Make sure the correct literal is not
-			// explained.
-			if d == curr_dimension {
+			// The literal for the bound we are about to prune is implicitly part of the
+			// conclusion, so we only need to explain the *other* bounds of the object.
+			if d == dim {
 				if prune_upper {
-					reason.push(self.origin[[curr_obj_idx, d]].lit(
-						ctx,
-						IntLitMeaning::Less(self.origin_ub[[curr_obj_idx, d]] + 1),
-					));
+					reason.push(
+						self.origin[[obj, d]]
+							.lit(ctx, IntLitMeaning::Less(self.origin_ub[[obj, d]] + 1)),
+					);
 				} else {
-					reason.push(self.origin[[curr_obj_idx, d]].lit(
-						ctx,
-						IntLitMeaning::GreaterEq(self.origin_lb[[curr_obj_idx, d]]),
-					));
+					reason.push(
+						self.origin[[obj, d]]
+							.lit(ctx, IntLitMeaning::GreaterEq(self.origin_lb[[obj, d]])),
+					);
 				}
 			} else {
-				reason.push(self.origin[[curr_obj_idx, d]].lit(
-					ctx,
-					IntLitMeaning::Less(self.origin_ub[[curr_obj_idx, d]] + 1),
-				));
-				reason.push(self.origin[[curr_obj_idx, d]].lit(
-					ctx,
-					IntLitMeaning::GreaterEq(self.origin_lb[[curr_obj_idx, d]]),
-				));
+				reason.push(
+					self.origin[[obj, d]]
+						.lit(ctx, IntLitMeaning::Less(self.origin_ub[[obj, d]] + 1)),
+				);
+				reason.push(
+					self.origin[[obj, d]]
+						.lit(ctx, IntLitMeaning::GreaterEq(self.origin_lb[[obj, d]])),
+				);
 			}
 		}
-		reason.extend(self.explain_forbidden_regions(ctx, fr_support, curr_obj_idx));
+		reason.extend(self.explain_forbidden_regions(ctx, forbidden_regions, obj));
 		reason
 	}
 }
 
 impl<const STRICT: bool> IntDiffnSweep<STRICT, IntView> {
-	/// Create a new [`IntDiffnSweep`] propagator and post it in the solver.
-	pub fn post<E>(solver: &mut E, box_posn: Vec<Vec<IntView>>, box_size: Vec<Vec<IntView>>)
+	/// Posts the [`IntDiffnSweep`] propagator to the solver.
+	///
+	/// This is the public entry point for creating the constraint for a
+	/// [`Solver`] instance.
+	///
+	/// # Parameters
+	///
+	/// - `solver`: The solver instance.
+	/// - `origin`: A matrix-like `Vec<Vec<I>>` where `origin[i][d]` is the
+	///   origin of object `i` in dimension `d`.
+	/// - `size`: A matrix-like `Vec<Vec<I>>` where `size[i][d]` is the size of
+	///   object `i` in dimension `d`.
+	///
+	/// # Panics
+	///
+	/// Panics if the dimensions of `origin` and `size` are inconsistent.
+	/// Specifically, the number of objects (outer `Vec` length) must be the
+	/// same, and the number of dimensions (inner `Vec` length) must be the
+	/// same for all objects.
+	pub fn post<E>(solver: &mut E, origin: Vec<Vec<IntView>>, size: Vec<Vec<IntView>>)
 	where
 		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
-		let con: BoxedPropagator = Box::new(Self::new(solver, box_posn, box_size));
+		let con: BoxedPropagator = Box::new(Self::new(solver, origin, size));
 		*solver += con;
 	}
 }
@@ -687,6 +736,8 @@ where
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Lowest);
 
+		// The propagator needs to be re-run whenever the bounds of any origin or
+		// size variable change.
 		for v in self.origin.iter_elem().chain(self.size.iter_elem()) {
 			v.enqueue_when(ctx, IntPropCond::Bounds);
 		}
@@ -694,6 +745,7 @@ where
 
 	#[tracing::instrument(name = "diffn", level = "trace", skip(self, ctx))]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+		// Cache the current bounds of all variables.
 		for o in 0..self.num_objects() {
 			for d in 0..self.num_dimensions() {
 				self.origin_ub[[o, d]] = self.origin[[o, d]].upper_bound(ctx);
@@ -702,69 +754,72 @@ where
 			}
 		}
 
-		for o_idx in 0..self.num_objects() {
-			// Skip if target property has been lost
-			if ctx.trailed_int(self.target[o_idx]) == 1 {
+		// Main propagation loop: iterate through each object that is still a "target".
+		for obj in 0..self.num_objects() {
+			// Skip objects that are already fixed and verified.
+			if ctx.trailed_int(self.target[obj]) == 1 {
 				continue;
 			}
 
-			if !STRICT && self.size.row(o_idx).iter().any(|v| v.val(ctx) == Some(0)) {
+			// In non-strict mode, objects with size 0 do not need to be considered.
+			if !STRICT && self.size.row(obj).iter().any(|v| v.val(ctx) == Some(0)) {
 				continue;
 			}
-			let mut fr_support: Vec<usize> = Vec::new();
 
-			if let Some(()) =
-				self.gen_forbidden_regions(ctx, &mut fr_support, o_idx, self.num_dimensions())
-			{
-				if self.fixed_in_all_dimensions(o_idx) {
-					// Conflict will occur here since there exists forbidden regions for a fixed
-					// object
-					let reason = self.explain_propagation(ctx, &fr_support, o_idx, 0, false);
-					self.origin[[o_idx, 0]].set_lower_bound(
+			// Generate forbidden regions for the current object.
+			let forbidden_regions = self.forbidden_regions(ctx, obj);
+			if !forbidden_regions.is_empty() {
+				// Check for conflicts: if an object is fixed and is in a forbidden
+				// region, it's a conflict.
+				if self.fixed_object(obj) {
+					let reason = self.explain_propagation(ctx, &forbidden_regions, obj, 0, false);
+					// Trigger a conflict by increasing the lower bound.
+					self.origin[[obj, 0]].set_lower_bound(
 						ctx,
-						self.origin_ub[[o_idx, 0]] + 1,
+						self.origin_lb[[obj, 0]] + 1,
 						reason,
 					)?;
 				}
+
+				// Prune the domains of the origin variables for the current object.
 				let mut all_fixed = true;
 				for d in 0..self.num_dimensions() {
-					self.prune_min(ctx, &fr_support, o_idx, d)?;
-					self.prune_max(ctx, &fr_support, o_idx, d)?;
+					self.prune_min(ctx, &forbidden_regions, obj, d)?;
+					self.prune_max(ctx, &forbidden_regions, obj, d)?;
 
-					if self.origin_lb[[o_idx, d]] != self.origin_ub[[o_idx, d]] {
+					if self.origin_lb[[obj, d]] != self.origin_ub[[obj, d]] {
 						all_fixed = false;
 					}
 				}
-				// Since it is fixed in all dimensions and it is at a feasible position by not
-				// causing any conflicts, remove its target property
+				// Target optimization: If pruning has fixed the object at a feasible
+				// position, mark it as no longer being a target.
 				if all_fixed {
-					let _ = ctx.set_trailed_int(self.target[o_idx], 1);
+					let _ = ctx.set_trailed_int(self.target[obj], 1);
 				}
 			}
 		}
 
-		// Source optimizations, create the largest possible bounding box
-		for o_idx in 0..self.num_objects() {
-			if ctx.trailed_int(self.target[o_idx]) == 1 {
+		// Source optimization: Update the bounding box of all non-fixed objects.
+		for obj in 0..self.num_objects() {
+			if ctx.trailed_int(self.target[obj]) == 1 {
 				continue;
 			}
 			for i in 0..self.num_dimensions() {
-				self.bounding_box.lb[i] =
-					cmp::min(self.bounding_box.lb[i], self.origin_lb[[o_idx, i]]);
-				self.bounding_box.ub[i] = cmp::max(
-					self.bounding_box.ub[i],
-					self.origin_ub[[o_idx, i]] + self.size_lb[[o_idx, i]] - 1,
+				*self.bounding_box.lower_bound_mut(i) =
+					cmp::min(self.bounding_box.lower_bound(i), self.origin_lb[[obj, i]]);
+				*self.bounding_box.upper_bound_mut(i) = cmp::max(
+					self.bounding_box.upper_bound(i),
+					self.origin_ub[[obj, i]] + self.size_lb[[obj, i]] - 1,
 				);
 			}
 		}
 
-		// If the current rectangle has lost its target property (is fixed in a feasible
-		// position) and is completely disjoint from the bounding box, remove its
-		// source property (disregard it in the rest of the algorithm)
-		for o_idx in 0..self.num_objects() {
-			if ctx.trailed_int(self.target[o_idx]) == 1 && self.disjoint(&self.bounding_box, o_idx)
-			{
-				let _ = ctx.set_trailed_int(self.source[o_idx], 1);
+		// Identify objects that have lost their "source" property. If a fixed
+		// object is now completely disjoint from the bounding box of all other
+		// non-fixed objects, it can no longer create forbidden regions for them.
+		for obj in 0..self.num_objects() {
+			if ctx.trailed_int(self.target[obj]) == 1 && self.disjoint(&self.bounding_box, obj) {
+				let _ = ctx.set_trailed_int(self.source[obj], 1);
 			}
 		}
 

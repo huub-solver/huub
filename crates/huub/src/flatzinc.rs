@@ -1221,13 +1221,13 @@ where
 					if let [x, y, dx, dy] = c.args.as_slice() {
 						let posn: Result<_, FlatZincError> = self
 							.arg_array(x)?
-							.into_iter()
+							.iter()
 							.zip(self.arg_array(y)?)
 							.map(|(x, y)| Ok(vec![self.lit_int(x)?, self.lit_int(y)?]))
 							.try_collect();
 						let size: Result<_, FlatZincError> = self
 							.arg_array(dx)?
-							.into_iter()
+							.iter()
 							.zip(self.arg_array(dy)?)
 							.map(|(dx, dy)| Ok(vec![self.lit_int(dx)?, self.lit_int(dy)?]))
 							.try_collect();
