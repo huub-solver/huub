@@ -1,6 +1,7 @@
 //! Structure and algorithms for the integer diffn constraint, which
 //! enforces that a number of k-dimensional hyperrectangles do not overlap.
 use std::{
+	any::TypeId,
 	cmp::{self, Ordering},
 	iter::{repeat_with, zip},
 	ops::AddAssign,
@@ -43,11 +44,11 @@ use crate::{
 ///
 /// All [`Matrix`] attributes are 2-dimensional, with the first index
 /// representing the object and the second representing the dimension.
-pub struct IntDiffnSweep<const STRICT: bool, I> {
+pub struct IntDiffnSweep<const STRICT: bool, I1, I2> {
 	/// The origin position of each object in each dimension.
-	origin: Matrix<2, I>,
+	origin: Matrix<2, I1>,
 	/// The size of each object in each dimension.
-	size: Matrix<2, I>,
+	size: Matrix<2, I2>,
 
 	/// Trail which tracks the target property, target[i] = 1 if is has been
 	/// lost, and will let us skip some iterations since it at that point has
@@ -57,11 +58,6 @@ pub struct IntDiffnSweep<const STRICT: bool, I> {
 	/// lost, and will allow it to be disregarded through the entire algorithm
 	/// since it will not affect any other rectangle.
 	source: Box<[TrailedInt]>,
-
-	/// A flag indicating whether all size variables were fixed at the time the
-	/// propagator was created. This allows for optimization, as fixed sizes
-	/// do not need to be considered for the reason.
-	size_fixed: bool,
 
 	/// A cache for the upper bounds of the origin variables.
 	origin_ub: Matrix<2, IntVal>,
@@ -77,10 +73,11 @@ pub struct IntDiffnSweep<const STRICT: bool, I> {
 	bounding_box: Region,
 }
 
-impl<const STRICT: bool, E, I> Constraint<E> for IntDiffnSweep<STRICT, I>
+impl<const STRICT: bool, E, I1, I2> Constraint<E> for IntDiffnSweep<STRICT, I1, I2>
 where
 	E: ReasoningEngine,
-	I: ModelIntView<E>,
+	I1: ModelIntView<E>,
+	I2: ModelIntView<E>,
 {
 	fn simplify(
 		&mut self,
@@ -115,7 +112,7 @@ where
 					.collect()
 			})
 			.collect();
-		IntDiffnSweep::<STRICT, _>::post(slv, box_pos, box_size);
+		IntDiffnSweep::<STRICT, _, _>::post(slv, box_pos, box_size);
 		Ok(())
 	}
 }
@@ -227,7 +224,7 @@ impl Region {
 	}
 }
 
-impl<const STRICT: bool, I> IntDiffnSweep<STRICT, I> {
+impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
 	/// Returns the number of objects (hyperrectangles) being managed by this
 	/// propagator.
 	fn num_objects(&self) -> usize {
@@ -256,24 +253,16 @@ impl<const STRICT: bool, I> IntDiffnSweep<STRICT, I> {
 	/// Specifically, the number of objects (outer `Vec` length) must be the
 	/// same, and the number of dimensions (inner `Vec` length) must be the
 	/// same for all objects.
-	pub(crate) fn new<E>(engine: &mut E, origin: Vec<Vec<I>>, size: Vec<Vec<I>>) -> Self
+	pub(crate) fn new<E>(engine: &mut E, origin: Vec<Vec<I1>>, size: Vec<Vec<I2>>) -> Self
 	where
 		E: ConstructionActions + ReasoningContext + ?Sized,
-		I: IntInspectionActions<E>,
 	{
 		assert_eq!(origin.len(), size.len());
-		assert!(
-			origin.is_empty()
-				|| origin
-					.iter()
-					.chain(&size)
-					.all(|v| v.len() == origin[0].len())
-		);
-		// Make sure all sizes are fixed before enqueueing
-		let size_fixed = size.iter().flatten().all(|v| v.val(engine).is_some());
-
 		let num_objects = origin.len();
+
 		let num_dimensions = if num_objects > 0 { origin[0].len() } else { 0 };
+		assert!(origin.is_empty() || origin.iter().all(|v| v.len() == num_dimensions));
+		assert!(size.is_empty() || size.iter().all(|v| v.len() == num_dimensions));
 
 		let origin = Matrix::new(
 			[num_objects, num_dimensions],
@@ -302,7 +291,6 @@ impl<const STRICT: bool, I> IntDiffnSweep<STRICT, I> {
 			size,
 			target,
 			source,
-			size_fixed,
 			origin_ub,
 			origin_lb,
 			size_lb,
@@ -330,7 +318,8 @@ impl<const STRICT: bool, I> IntDiffnSweep<STRICT, I> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I1: SolverIntView<E>,
+		I2: SolverIntView<E>,
 	{
 		// `sweep` is the current point being checked for feasibility.
 		let mut sweep = self.origin_lb.row(obj).to_vec();
@@ -381,7 +370,8 @@ impl<const STRICT: bool, I> IntDiffnSweep<STRICT, I> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I1: SolverIntView<E>,
+		I2: SolverIntView<E>,
 	{
 		// `sweep` is the current point being checked for feasibility.
 		let mut sweep = self.origin_ub.row(obj).to_vec();
@@ -604,14 +594,15 @@ impl<const STRICT: bool, I> IntDiffnSweep<STRICT, I> {
 	) -> Vec<Ctx::Atom>
 	where
 		Ctx: ReasoningContext + ?Sized,
-		I: IntDecisionActions<Ctx>,
+		I1: IntDecisionActions<Ctx>,
+		I2: IntInspectionActions<Ctx>,
 	{
 		let mut reason = Vec::new();
 		for (region, support) in forbidden_regions.iter() {
 			for d in 0..self.num_dimensions() {
-				// If sizes are not fixed, their lower bounds contribute to the
+				// If sizes are not [`IntVal`], their lower bounds contribute to the
 				// forbidden region and must be part of the explanation.
-				if !self.size_fixed {
+				if TypeId::of::<I2>() != TypeId::of::<IntVal>() {
 					reason.push(self.size[[*support, d]].lower_bound_lit(ctx));
 				}
 				let mut possible_ub = self.origin_ub[[*support, d]];
@@ -659,12 +650,14 @@ impl<const STRICT: bool, I> IntDiffnSweep<STRICT, I> {
 	) -> Vec<Ctx::Atom>
 	where
 		Ctx: ReasoningContext + ?Sized,
-		I: IntDecisionActions<Ctx>,
+		I1: IntDecisionActions<Ctx>,
+		I2: IntInspectionActions<Ctx>,
 	{
 		let mut reason: Vec<_> = Vec::new();
 		for d in 0..self.num_dimensions() {
-			// If sizes are not fixed, their lower bounds are part of the reason.
-			if !self.size_fixed {
+			// If sizes are not [`IntVal`], their lower bounds contribute to the
+			// forbidden region and must be part of the explanation.
+			if TypeId::of::<I2>() != TypeId::of::<IntVal>() {
 				reason.push(self.size[[obj, d]].lower_bound_lit(ctx));
 			}
 
@@ -698,7 +691,7 @@ impl<const STRICT: bool, I> IntDiffnSweep<STRICT, I> {
 	}
 }
 
-impl<const STRICT: bool> IntDiffnSweep<STRICT, IntView> {
+impl<const STRICT: bool> IntDiffnSweep<STRICT, IntView, IntView> {
 	/// Posts the [`IntDiffnSweep`] propagator to the solver.
 	///
 	/// This is the public entry point for creating the constraint for a
@@ -723,22 +716,39 @@ impl<const STRICT: bool> IntDiffnSweep<STRICT, IntView> {
 		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
+		// Use specialized version if all sizes are constant
+		if size.iter().flatten().all(|v| v.val(solver).is_some()) {
+			let size: Vec<Vec<_>> = size
+				.iter()
+				.map(|v| v.iter().map(|v| v.val(solver).unwrap()).collect())
+				.collect();
+
+			let con: BoxedPropagator =
+				Box::new(IntDiffnSweep::<STRICT, _, _>::new(solver, origin, size));
+			*solver += con;
+			return;
+		}
+
 		let con: BoxedPropagator = Box::new(Self::new(solver, origin, size));
 		*solver += con;
 	}
 }
 
-impl<const STRICT: bool, E, I> Propagator<E> for IntDiffnSweep<STRICT, I>
+impl<const STRICT: bool, E, I1, I2> Propagator<E> for IntDiffnSweep<STRICT, I1, I2>
 where
 	E: ReasoningEngine,
-	I: SolverIntView<E>,
+	I1: SolverIntView<E>,
+	I2: SolverIntView<E>,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Lowest);
 
 		// The propagator needs to be re-run whenever the bounds of any origin or
 		// size variable change.
-		for v in self.origin.iter_elem().chain(self.size.iter_elem()) {
+		for v in self.origin.iter_elem() {
+			v.enqueue_when(ctx, IntPropCond::Bounds);
+		}
+		for v in self.size.iter_elem() {
 			v.enqueue_when(ctx, IntPropCond::Bounds);
 		}
 	}

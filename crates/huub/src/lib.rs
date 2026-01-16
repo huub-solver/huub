@@ -372,10 +372,10 @@ pub fn diffn_int(
 	strict: bool,
 ) {
 	if strict {
-		let prop = IntDiffnSweep::<true, _>::new(prb, origin, size);
+		let prop = IntDiffnSweep::<true, _, _>::new(prb, origin, size);
 		prb.add_constraint(prop);
 	} else {
-		let prop = IntDiffnSweep::<false, _>::new(prb, origin, size);
+		let prop = IntDiffnSweep::<false, _, _>::new(prb, origin, size);
 		prb.add_constraint(prop);
 	}
 }
