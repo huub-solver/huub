@@ -1051,95 +1051,6 @@ impl IntDecision {
 	}
 }
 
-impl IntDecisionIndex {
-	/// Internal method performing unification under the assumption that the
-	/// receiver is an integer decision index that is not already aliased, and
-	/// that it can be aliased to directly point to `other`.
-	fn unify_internal(
-		&self,
-		ctx: &mut Model,
-		target: IntDecision,
-	) -> Result<(), <Model as ReasoningContext>::Conflict> {
-		debug_assert!(matches!(
-			ctx.int_vars[*self].domain,
-			Domain::Domain(_) | Domain::Alias(IntDecision(IntDecisionInner::Const(_)))
-		));
-
-		// Set the domain on the variable to be aliased to trigger subscription
-		// events.
-		self.set_domain(ctx, &target.domain(ctx), [])?;
-		// Change variable to point to the target
-		match mem::replace(&mut ctx.int_vars[*self].domain, Domain::Alias(target)) {
-			// Restrict the domain of the target variable using the variable domain
-			// being aliased.
-			Domain::Domain(dom) => target.set_domain(ctx, &dom, [])?,
-			Domain::Alias(IntDecision(IntDecisionInner::Const(v))) => target.set_val(ctx, v, [])?,
-			_ => unreachable!(),
-		};
-		// Transfer any constraints from the aliased variable to the target variable
-		let constraints = mem::take(&mut ctx.int_vars[*self].constraints);
-		// Move subscriptions to target decision variable
-		match target.0 {
-			IntDecisionInner::Linear(lin) => {
-				ctx.int_vars[lin.var].constraints.extend(constraints);
-			}
-			IntDecisionInner::Bool(lin) => match lin.var.0 {
-				inner @ (BoolDecisionInner::IntEq(j, _)
-				| BoolDecisionInner::IntNotEq(j, _)
-				| BoolDecisionInner::IntGreaterEq(j, _)
-				| BoolDecisionInner::IntLess(j, _)) => {
-					constraints.for_each_activated_by(
-						IntEvent::Fixed,
-						|act: ActivationAction<ModAdvisor, ConRef>| {
-							if let ActivationAction::Advise(adv) = act {
-								let def = &mut ctx.advisors[adv];
-								def.bool2int = true;
-								def.condition = Some(match inner {
-									BoolDecisionInner::IntEq(_, v) => IntLitMeaning::Eq(v),
-									BoolDecisionInner::IntGreaterEq(_, v) => {
-										IntLitMeaning::GreaterEq(v)
-									}
-									BoolDecisionInner::IntLess(_, v) => IntLitMeaning::Less(v),
-									BoolDecisionInner::IntNotEq(_, v) => IntLitMeaning::NotEq(v),
-									_ => unreachable!(),
-								});
-								def.negated = false;
-							}
-							let cond = if matches!(
-								inner,
-								BoolDecisionInner::IntEq(_, _) | BoolDecisionInner::IntNotEq(_, _)
-							) {
-								IntPropCond::Domain
-							} else {
-								IntPropCond::Bounds
-							};
-							ctx.int_vars[j].constraints.add(act, cond);
-						},
-					);
-				}
-				// Move subscription to Boolean decision
-				BoolDecisionInner::Lit(l) => {
-					let jdx = i32::from(l.var()) as usize - 1;
-					constraints.for_each_activated_by(
-						IntEvent::Fixed,
-						|act: ActivationAction<ModAdvisor, ConRef>| {
-							if let ActivationAction::Advise(adv) = act {
-								let def = &mut ctx.advisors[adv];
-								def.bool2int = true;
-								def.negated = false;
-							}
-							ctx.bool_vars[jdx].constraints.push(act.into());
-						},
-					);
-				}
-				BoolDecisionInner::Const(_) => unreachable!(),
-			},
-			IntDecisionInner::Const(_) => unreachable!(),
-		};
-		Ok(())
-	}
-}
-
 impl Add<IntDecision> for IntDecision {
 	type Output = IntLinExpr;
 
@@ -1197,17 +1108,6 @@ impl From<i64> for IntDecision {
 	}
 }
 
-impl IntDecisionActions<Model> for IntDecisionIndex {
-	fn lit(&self, ctx: &mut Model, meaning: IntLitMeaning) -> BoolDecision {
-		IntInspectionActions::try_lit(self, ctx, meaning).unwrap()
-	}
-
-	fn val_lit(&self, ctx: &mut Model) -> Option<BoolDecision> {
-		let val = self.val(ctx)?;
-		Some(BoolDecision(BoolDecisionInner::IntEq(*self, val)))
-	}
-}
-
 impl IntDecisionActions<Model> for IntDecision {
 	fn lit(&self, ctx: &mut Model, meaning: IntLitMeaning) -> BoolDecision {
 		IntInspectionActions::try_lit(self, ctx, meaning).unwrap()
@@ -1222,30 +1122,6 @@ impl IntDecisionActions<Model> for IntDecision {
 impl IntExplanationActions<Model> for IntDecision {
 	fn lit_relaxed(&self, ctx: &Model, meaning: IntLitMeaning) -> (BoolDecision, IntLitMeaning) {
 		(self.try_lit(ctx, meaning).unwrap(), meaning)
-	}
-}
-
-impl IntInitActions<ModelInitContext<'_>> for IntDecisionIndex {
-	fn advise_when(&self, ctx: &mut ModelInitContext<'_>, cond: IntPropCond, data: u64) {
-		let adv = ctx.model.advisors.push(ModAdvisorDef {
-			con: ctx.con,
-			data,
-			negated: false,
-			bool2int: false,
-			condition: None,
-		});
-		ctx.model.int_vars[*self]
-			.constraints
-			.add(ActivationAction::Advise(adv), cond);
-	}
-
-	fn enqueue_when(&self, ctx: &mut ModelInitContext<'_>, condition: IntPropCond) {
-		if condition != IntPropCond::Fixed {
-			ctx.semantic_enqueue = true;
-		}
-		ctx.model.int_vars[*self]
-			.constraints
-			.add(ActivationAction::Enqueue(ctx.con), condition);
 	}
 }
 
@@ -1338,108 +1214,15 @@ impl IntInitActions<ModelInitContext<'_>> for IntDecision {
 	}
 }
 
-impl IntInspectionActions<Model> for IntDecisionIndex {
-	fn bounds(&self, ctx: &Model) -> (IntVal, IntVal) {
-		match &ctx.int_vars[*self].domain {
-			Domain::Domain(d) => (*d.lower_bound().unwrap(), *d.upper_bound().unwrap()),
-			Domain::Alias(alias) => alias.bounds(ctx),
-		}
-	}
-
-	fn domain(&self, ctx: &Model) -> IntSetVal {
-		match &ctx.int_vars[*self].domain {
-			Domain::Domain(d) => d.clone(),
-			Domain::Alias(alias) => alias.domain(ctx),
-		}
-	}
-
-	fn in_domain(&self, ctx: &Model, val: IntVal) -> bool {
-		match &ctx.int_vars[*self].domain {
-			Domain::Domain(d) => d.contains(&val),
-			Domain::Alias(alias) => alias.in_domain(ctx, val),
-		}
-	}
-
-	fn lit_meaning(
-		&self,
-		_: &Model,
-		lit: <Model as ReasoningContext>::Atom,
-	) -> Option<IntLitMeaning> {
-		match lit.0 {
-			BoolDecisionInner::IntEq(idx, val) if idx == *self => Some(IntLitMeaning::Eq(val)),
-			BoolDecisionInner::IntGreaterEq(idx, val) if idx == *self => {
-				Some(IntLitMeaning::GreaterEq(val))
-			}
-			BoolDecisionInner::IntLess(idx, val) if idx == *self => Some(IntLitMeaning::Less(val)),
-			BoolDecisionInner::IntNotEq(idx, val) if idx == *self => {
-				Some(IntLitMeaning::NotEq(val))
-			}
-			_ => None,
-		}
-	}
-
-	fn lower_bound(&self, ctx: &Model) -> IntVal {
-		match &ctx.int_vars[*self].domain {
-			Domain::Domain(d) => *d.lower_bound().unwrap(),
-			Domain::Alias(alias) => alias.lower_bound(ctx),
-		}
-	}
-
-	fn lower_bound_lit(&self, ctx: &Model) -> <Model as ReasoningContext>::Atom {
-		match &ctx.int_vars[*self].domain {
-			Domain::Domain(d) => d
-				.lower_bound()
-				.map(|&val| BoolDecision(BoolDecisionInner::IntGreaterEq(*self, val)))
-				.unwrap(),
-			Domain::Alias(alias) => alias.lower_bound_lit(ctx),
-		}
-	}
-
-	fn try_lit(
-		&self,
-		ctx: &Model,
-		meaning: IntLitMeaning,
-	) -> Option<<Model as ReasoningContext>::Atom> {
-		match &ctx.int_vars[*self].domain {
-			Domain::Domain(_) => Some(BoolDecision(match meaning {
-				IntLitMeaning::Eq(v) => BoolDecisionInner::IntEq(*self, v),
-				IntLitMeaning::NotEq(v) => BoolDecisionInner::IntNotEq(*self, v),
-				IntLitMeaning::GreaterEq(v) => BoolDecisionInner::IntGreaterEq(*self, v),
-				IntLitMeaning::Less(v) => BoolDecisionInner::IntLess(*self, v),
-			})),
-			Domain::Alias(alias) => alias.try_lit(ctx, meaning),
-		}
-	}
-
-	fn upper_bound(&self, ctx: &Model) -> IntVal {
-		match &ctx.int_vars[*self].domain {
-			Domain::Domain(d) => *d.upper_bound().unwrap(),
-			Domain::Alias(alias) => alias.upper_bound(ctx),
-		}
-	}
-
-	fn upper_bound_lit(&self, ctx: &Model) -> <Model as ReasoningContext>::Atom {
-		match &ctx.int_vars[*self].domain {
-			Domain::Domain(d) => d
-				.lower_bound()
-				.map(|&val| BoolDecision(BoolDecisionInner::IntLess(*self, val + 1)))
-				.unwrap(),
-			Domain::Alias(alias) => alias.upper_bound_lit(ctx),
-		}
-	}
-
-	fn val(&self, ctx: &Model) -> Option<IntVal> {
-		match &ctx.int_vars[*self].domain {
-			Domain::Domain(d) => {
-				let (lb, ub) = (d.lower_bound().unwrap(), d.upper_bound().unwrap());
-				if lb == ub { Some(*lb) } else { None }
-			}
-			Domain::Alias(alias) => alias.val(ctx),
-		}
-	}
-}
-
 impl IntInspectionActions<Model> for IntDecision {
+	fn bounds(&self, ctx: &Model) -> (IntVal, IntVal) {
+		match self.resolve_alias(ctx).0 {
+			IntDecisionInner::Const(v) => (v, v),
+			IntDecisionInner::Linear(lin) => lin.bounds(ctx),
+			IntDecisionInner::Bool(lin) => lin.bounds(ctx),
+		}
+	}
+
 	fn domain(&self, ctx: &Model) -> IntSetVal {
 		match self.resolve_alias(ctx).0 {
 			IntDecisionInner::Const(c) => (c..=c).into(),
@@ -1505,14 +1288,6 @@ impl IntInspectionActions<Model> for IntDecision {
 		}
 	}
 
-	fn bounds(&self, ctx: &Model) -> (IntVal, IntVal) {
-		match self.resolve_alias(ctx).0 {
-			IntDecisionInner::Const(v) => (v, v),
-			IntDecisionInner::Linear(lin) => lin.bounds(ctx),
-			IntDecisionInner::Bool(lin) => lin.bounds(ctx),
-		}
-	}
-
 	fn val(&self, ctx: &Model) -> Option<IntVal> {
 		match self.resolve_alias(ctx).0 {
 			IntDecisionInner::Const(v) => Some(v),
@@ -1523,6 +1298,10 @@ impl IntInspectionActions<Model> for IntDecision {
 }
 
 impl IntInspectionActions<ModelInitContext<'_>> for IntDecision {
+	fn bounds(&self, ctx: &ModelInitContext<'_>) -> (IntVal, IntVal) {
+		self.bounds(ctx.model)
+	}
+
 	fn domain(&self, ctx: &ModelInitContext<'_>) -> IntSetVal {
 		self.domain(ctx.model)
 	}
@@ -1555,146 +1334,8 @@ impl IntInspectionActions<ModelInitContext<'_>> for IntDecision {
 		self.upper_bound_lit(ctx.model)
 	}
 
-	fn bounds(&self, ctx: &ModelInitContext<'_>) -> (IntVal, IntVal) {
-		self.bounds(ctx.model)
-	}
-
 	fn val(&self, ctx: &ModelInitContext<'_>) -> Option<IntVal> {
 		self.val(ctx.model)
-	}
-}
-
-impl IntInspectionActions<ModelInitContext<'_>> for IntDecisionIndex {
-	fn domain(&self, ctx: &ModelInitContext<'_>) -> IntSetVal {
-		self.domain(ctx.model)
-	}
-
-	fn in_domain(&self, ctx: &ModelInitContext<'_>, val: IntVal) -> bool {
-		self.in_domain(ctx.model, val)
-	}
-
-	fn lit_meaning(&self, ctx: &ModelInitContext<'_>, lit: BoolDecision) -> Option<IntLitMeaning> {
-		self.lit_meaning(ctx.model, lit)
-	}
-
-	fn lower_bound(&self, ctx: &ModelInitContext<'_>) -> IntVal {
-		self.lower_bound(ctx.model)
-	}
-
-	fn lower_bound_lit(&self, ctx: &ModelInitContext<'_>) -> BoolDecision {
-		self.lower_bound_lit(ctx.model)
-	}
-
-	fn try_lit(&self, ctx: &ModelInitContext<'_>, meaning: IntLitMeaning) -> Option<BoolDecision> {
-		self.try_lit(ctx.model, meaning)
-	}
-
-	fn upper_bound(&self, ctx: &ModelInitContext<'_>) -> IntVal {
-		self.upper_bound(ctx.model)
-	}
-
-	fn upper_bound_lit(&self, ctx: &ModelInitContext<'_>) -> BoolDecision {
-		self.upper_bound_lit(ctx.model)
-	}
-
-	fn bounds(&self, ctx: &ModelInitContext<'_>) -> (IntVal, IntVal) {
-		self.bounds(ctx.model)
-	}
-
-	fn val(&self, ctx: &ModelInitContext<'_>) -> Option<IntVal> {
-		self.val(ctx.model)
-	}
-}
-
-impl IntPropagationActions<Model> for IntDecisionIndex {
-	fn set_lower_bound(
-		&self,
-		ctx: &mut Model,
-		val: IntVal,
-		reason: impl ReasonBuilder<Model>,
-	) -> Result<(), <Model as ReasoningContext>::Conflict> {
-		let def = &mut ctx.int_vars[*self];
-		let Domain::Domain(dom) = &mut def.domain else {
-			unreachable!()
-		};
-		if val <= *dom.lower_bound().unwrap() {
-			return Ok(());
-		} else if val > *dom.upper_bound().unwrap() {
-			return Err(ctx.create_conflict(
-				BoolDecision(BoolDecisionInner::IntGreaterEq(*self, val)),
-				reason,
-			));
-		}
-		if val != *dom.upper_bound().unwrap() {
-			dom.set_lower_bound(val);
-			ctx.int_events
-				.entry(*self)
-				.and_modify(|e| *e += IntEvent::LowerBound)
-				.or_insert(IntEvent::LowerBound);
-		} else {
-			def.domain = Domain::Alias(val.into());
-			ctx.int_events.insert(*self, IntEvent::Fixed);
-		};
-		Ok(())
-	}
-
-	fn set_not_eq(
-		&self,
-		ctx: &mut Model,
-		val: IntVal,
-		reason: impl ReasonBuilder<Model>,
-	) -> Result<(), <Model as ReasoningContext>::Conflict> {
-		self.set_not_in_set(ctx, &(val..=val).into(), reason)
-	}
-
-	fn set_upper_bound(
-		&self,
-		ctx: &mut Model,
-		val: IntVal,
-		reason: impl ReasonBuilder<Model>,
-	) -> Result<(), <Model as ReasoningContext>::Conflict> {
-		let def = &mut ctx.int_vars[*self];
-		let Domain::Domain(dom) = &mut def.domain else {
-			unreachable!()
-		};
-		if val >= *dom.upper_bound().unwrap() {
-			return Ok(());
-		} else if val < *dom.lower_bound().unwrap() {
-			return Err(ctx.create_conflict(
-				BoolDecision(BoolDecisionInner::IntLess(*self, val + 1)),
-				reason,
-			));
-		}
-		if val != *dom.lower_bound().unwrap() {
-			dom.set_upper_bound(val);
-			ctx.int_events
-				.entry(*self)
-				.and_modify(|v| *v += IntEvent::UpperBound)
-				.or_insert(IntEvent::UpperBound);
-		} else {
-			def.domain = Domain::Alias(val.into());
-			ctx.int_events.insert(*self, IntEvent::Fixed);
-		};
-		Ok(())
-	}
-
-	fn set_val(
-		&self,
-		ctx: &mut Model,
-		val: IntVal,
-		reason: impl ReasonBuilder<Model>,
-	) -> Result<(), <Model as ReasoningContext>::Conflict> {
-		let def = &mut ctx.int_vars[*self];
-		let Domain::Domain(dom) = &def.domain else {
-			unreachable!()
-		};
-		if dom.contains(&val) {
-			def.domain = Domain::Alias(val.into());
-			ctx.int_events.insert(*self, IntEvent::Fixed);
-			Ok(())
-		} else {
-			Err(ctx.create_conflict(BoolDecision(BoolDecisionInner::IntEq(*self, val)), reason))
-		}
 	}
 }
 
@@ -1749,97 +1390,6 @@ impl IntPropagationActions<Model> for IntDecision {
 			IntDecisionInner::Linear(lin) => lin.set_val(ctx, val, reason),
 			IntDecisionInner::Bool(lin) => lin.set_val(ctx, val, reason),
 		}
-	}
-}
-
-impl IntSimplificationActions<Model> for IntDecisionIndex {
-	fn set_domain(
-		&self,
-		ctx: &mut Model,
-		domain: &IntSetVal,
-		reason: impl ReasonBuilder<Model>,
-	) -> Result<(), <Model as ReasoningContext>::Conflict> {
-		let Domain::Domain(dom) = &ctx.int_vars[*self].domain else {
-			unreachable!()
-		};
-		let intersect: RangeList<_> = dom.intersect(domain);
-		if intersect.is_empty() {
-			return Err(ctx.create_conflict(
-				BoolDecision(BoolDecisionInner::IntNotEq(
-					*self,
-					*dom.lower_bound().unwrap(),
-				)),
-				reason,
-			));
-		} else if *dom == intersect {
-			return Ok(());
-		}
-		if intersect.card() == Some(1) {
-			let val = *intersect.lower_bound().unwrap();
-			ctx.int_vars[*self].domain = Domain::Alias(val.into());
-			ctx.int_events.insert(*self, IntEvent::Fixed);
-		} else {
-			let entry = ctx.int_events.entry(*self).or_insert(IntEvent::Domain);
-			if dom.lower_bound().unwrap() == intersect.lower_bound().unwrap() {
-				*entry += IntEvent::LowerBound;
-			}
-			if dom.upper_bound().unwrap() == intersect.upper_bound().unwrap() {
-				*entry += IntEvent::UpperBound;
-			}
-
-			ctx.int_vars[*self].domain = Domain::Domain(intersect);
-		}
-		Ok(())
-	}
-
-	fn set_not_in_set(
-		&self,
-		ctx: &mut Model,
-		values: &IntSetVal,
-		reason: impl ReasonBuilder<Model>,
-	) -> Result<(), <Model as ReasoningContext>::Conflict> {
-		let Domain::Domain(dom) = &ctx.int_vars[*self].domain else {
-			unreachable!()
-		};
-		let diff: RangeList<_> = dom.diff(values);
-		if diff.is_empty() {
-			return Err(ctx.create_conflict(
-				BoolDecision(BoolDecisionInner::IntNotEq(
-					*self,
-					*values.lower_bound().unwrap(),
-				)),
-				reason,
-			));
-		}
-		if *dom == diff {
-			return Ok(());
-		}
-		if diff.card() == Some(1) {
-			let val = *diff.lower_bound().unwrap();
-			ctx.int_vars[*self].domain = Domain::Alias(val.into());
-			ctx.int_events.insert(*self, IntEvent::Fixed);
-		} else {
-			let entry = ctx.int_events.entry(*self).or_insert(IntEvent::Domain);
-			if dom.lower_bound().unwrap() == diff.lower_bound().unwrap() {
-				*entry += IntEvent::LowerBound;
-			}
-			if dom.upper_bound().unwrap() == diff.upper_bound().unwrap() {
-				*entry += IntEvent::UpperBound;
-			}
-
-			ctx.int_vars[*self].domain = Domain::Domain(diff);
-		};
-		Ok(())
-	}
-
-	fn unify(
-		&self,
-		ctx: &mut Model,
-		other: impl Into<Self>,
-	) -> Result<(), <Model as ReasoningContext>::Conflict> {
-		let other: IntDecisionIndex = other.into();
-		IntDecision(IntDecisionInner::Linear((*self).into()))
-			.unify(ctx, IntDecision(IntDecisionInner::Linear(other.into())))
 	}
 }
 
@@ -2016,6 +1566,456 @@ impl Sub<IntVal> for IntDecision {
 
 	fn sub(self, rhs: IntVal) -> Self::Output {
 		self + -rhs
+	}
+}
+
+impl IntDecisionIndex {
+	/// Internal method performing unification under the assumption that the
+	/// receiver is an integer decision index that is not already aliased, and
+	/// that it can be aliased to directly point to `other`.
+	fn unify_internal(
+		&self,
+		ctx: &mut Model,
+		target: IntDecision,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		debug_assert!(matches!(
+			ctx.int_vars[*self].domain,
+			Domain::Domain(_) | Domain::Alias(IntDecision(IntDecisionInner::Const(_)))
+		));
+
+		// Set the domain on the variable to be aliased to trigger subscription
+		// events.
+		self.set_domain(ctx, &target.domain(ctx), [])?;
+		// Change variable to point to the target
+		match mem::replace(&mut ctx.int_vars[*self].domain, Domain::Alias(target)) {
+			// Restrict the domain of the target variable using the variable domain
+			// being aliased.
+			Domain::Domain(dom) => target.set_domain(ctx, &dom, [])?,
+			Domain::Alias(IntDecision(IntDecisionInner::Const(v))) => target.set_val(ctx, v, [])?,
+			_ => unreachable!(),
+		};
+		// Transfer any constraints from the aliased variable to the target variable
+		let constraints = mem::take(&mut ctx.int_vars[*self].constraints);
+		// Move subscriptions to target decision variable
+		match target.0 {
+			IntDecisionInner::Linear(lin) => {
+				ctx.int_vars[lin.var].constraints.extend(constraints);
+			}
+			IntDecisionInner::Bool(lin) => match lin.var.0 {
+				inner @ (BoolDecisionInner::IntEq(j, _)
+				| BoolDecisionInner::IntNotEq(j, _)
+				| BoolDecisionInner::IntGreaterEq(j, _)
+				| BoolDecisionInner::IntLess(j, _)) => {
+					constraints.for_each_activated_by(
+						IntEvent::Fixed,
+						|act: ActivationAction<ModAdvisor, ConRef>| {
+							if let ActivationAction::Advise(adv) = act {
+								let def = &mut ctx.advisors[adv];
+								def.bool2int = true;
+								def.condition = Some(match inner {
+									BoolDecisionInner::IntEq(_, v) => IntLitMeaning::Eq(v),
+									BoolDecisionInner::IntGreaterEq(_, v) => {
+										IntLitMeaning::GreaterEq(v)
+									}
+									BoolDecisionInner::IntLess(_, v) => IntLitMeaning::Less(v),
+									BoolDecisionInner::IntNotEq(_, v) => IntLitMeaning::NotEq(v),
+									_ => unreachable!(),
+								});
+								def.negated = false;
+							}
+							let cond = if matches!(
+								inner,
+								BoolDecisionInner::IntEq(_, _) | BoolDecisionInner::IntNotEq(_, _)
+							) {
+								IntPropCond::Domain
+							} else {
+								IntPropCond::Bounds
+							};
+							ctx.int_vars[j].constraints.add(act, cond);
+						},
+					);
+				}
+				// Move subscription to Boolean decision
+				BoolDecisionInner::Lit(l) => {
+					let jdx = i32::from(l.var()) as usize - 1;
+					constraints.for_each_activated_by(
+						IntEvent::Fixed,
+						|act: ActivationAction<ModAdvisor, ConRef>| {
+							if let ActivationAction::Advise(adv) = act {
+								let def = &mut ctx.advisors[adv];
+								def.bool2int = true;
+								def.negated = false;
+							}
+							ctx.bool_vars[jdx].constraints.push(act.into());
+						},
+					);
+				}
+				BoolDecisionInner::Const(_) => unreachable!(),
+			},
+			IntDecisionInner::Const(_) => unreachable!(),
+		};
+		Ok(())
+	}
+}
+
+impl IntDecisionActions<Model> for IntDecisionIndex {
+	fn lit(&self, ctx: &mut Model, meaning: IntLitMeaning) -> BoolDecision {
+		IntInspectionActions::try_lit(self, ctx, meaning).unwrap()
+	}
+
+	fn val_lit(&self, ctx: &mut Model) -> Option<BoolDecision> {
+		let val = self.val(ctx)?;
+		Some(BoolDecision(BoolDecisionInner::IntEq(*self, val)))
+	}
+}
+
+impl IntInitActions<ModelInitContext<'_>> for IntDecisionIndex {
+	fn advise_when(&self, ctx: &mut ModelInitContext<'_>, cond: IntPropCond, data: u64) {
+		let adv = ctx.model.advisors.push(ModAdvisorDef {
+			con: ctx.con,
+			data,
+			negated: false,
+			bool2int: false,
+			condition: None,
+		});
+		ctx.model.int_vars[*self]
+			.constraints
+			.add(ActivationAction::Advise(adv), cond);
+	}
+
+	fn enqueue_when(&self, ctx: &mut ModelInitContext<'_>, condition: IntPropCond) {
+		if condition != IntPropCond::Fixed {
+			ctx.semantic_enqueue = true;
+		}
+		ctx.model.int_vars[*self]
+			.constraints
+			.add(ActivationAction::Enqueue(ctx.con), condition);
+	}
+}
+
+impl IntInspectionActions<Model> for IntDecisionIndex {
+	fn bounds(&self, ctx: &Model) -> (IntVal, IntVal) {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(d) => (*d.lower_bound().unwrap(), *d.upper_bound().unwrap()),
+			Domain::Alias(alias) => alias.bounds(ctx),
+		}
+	}
+
+	fn domain(&self, ctx: &Model) -> IntSetVal {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(d) => d.clone(),
+			Domain::Alias(alias) => alias.domain(ctx),
+		}
+	}
+
+	fn in_domain(&self, ctx: &Model, val: IntVal) -> bool {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(d) => d.contains(&val),
+			Domain::Alias(alias) => alias.in_domain(ctx, val),
+		}
+	}
+
+	fn lit_meaning(
+		&self,
+		_: &Model,
+		lit: <Model as ReasoningContext>::Atom,
+	) -> Option<IntLitMeaning> {
+		match lit.0 {
+			BoolDecisionInner::IntEq(idx, val) if idx == *self => Some(IntLitMeaning::Eq(val)),
+			BoolDecisionInner::IntGreaterEq(idx, val) if idx == *self => {
+				Some(IntLitMeaning::GreaterEq(val))
+			}
+			BoolDecisionInner::IntLess(idx, val) if idx == *self => Some(IntLitMeaning::Less(val)),
+			BoolDecisionInner::IntNotEq(idx, val) if idx == *self => {
+				Some(IntLitMeaning::NotEq(val))
+			}
+			_ => None,
+		}
+	}
+
+	fn lower_bound(&self, ctx: &Model) -> IntVal {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(d) => *d.lower_bound().unwrap(),
+			Domain::Alias(alias) => alias.lower_bound(ctx),
+		}
+	}
+
+	fn lower_bound_lit(&self, ctx: &Model) -> <Model as ReasoningContext>::Atom {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(d) => d
+				.lower_bound()
+				.map(|&val| BoolDecision(BoolDecisionInner::IntGreaterEq(*self, val)))
+				.unwrap(),
+			Domain::Alias(alias) => alias.lower_bound_lit(ctx),
+		}
+	}
+
+	fn try_lit(
+		&self,
+		ctx: &Model,
+		meaning: IntLitMeaning,
+	) -> Option<<Model as ReasoningContext>::Atom> {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(_) => Some(BoolDecision(match meaning {
+				IntLitMeaning::Eq(v) => BoolDecisionInner::IntEq(*self, v),
+				IntLitMeaning::NotEq(v) => BoolDecisionInner::IntNotEq(*self, v),
+				IntLitMeaning::GreaterEq(v) => BoolDecisionInner::IntGreaterEq(*self, v),
+				IntLitMeaning::Less(v) => BoolDecisionInner::IntLess(*self, v),
+			})),
+			Domain::Alias(alias) => alias.try_lit(ctx, meaning),
+		}
+	}
+
+	fn upper_bound(&self, ctx: &Model) -> IntVal {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(d) => *d.upper_bound().unwrap(),
+			Domain::Alias(alias) => alias.upper_bound(ctx),
+		}
+	}
+
+	fn upper_bound_lit(&self, ctx: &Model) -> <Model as ReasoningContext>::Atom {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(d) => d
+				.lower_bound()
+				.map(|&val| BoolDecision(BoolDecisionInner::IntLess(*self, val + 1)))
+				.unwrap(),
+			Domain::Alias(alias) => alias.upper_bound_lit(ctx),
+		}
+	}
+
+	fn val(&self, ctx: &Model) -> Option<IntVal> {
+		match &ctx.int_vars[*self].domain {
+			Domain::Domain(d) => {
+				let (lb, ub) = (d.lower_bound().unwrap(), d.upper_bound().unwrap());
+				if lb == ub { Some(*lb) } else { None }
+			}
+			Domain::Alias(alias) => alias.val(ctx),
+		}
+	}
+}
+
+impl IntInspectionActions<ModelInitContext<'_>> for IntDecisionIndex {
+	fn bounds(&self, ctx: &ModelInitContext<'_>) -> (IntVal, IntVal) {
+		self.bounds(ctx.model)
+	}
+
+	fn domain(&self, ctx: &ModelInitContext<'_>) -> IntSetVal {
+		self.domain(ctx.model)
+	}
+
+	fn in_domain(&self, ctx: &ModelInitContext<'_>, val: IntVal) -> bool {
+		self.in_domain(ctx.model, val)
+	}
+
+	fn lit_meaning(&self, ctx: &ModelInitContext<'_>, lit: BoolDecision) -> Option<IntLitMeaning> {
+		self.lit_meaning(ctx.model, lit)
+	}
+
+	fn lower_bound(&self, ctx: &ModelInitContext<'_>) -> IntVal {
+		self.lower_bound(ctx.model)
+	}
+
+	fn lower_bound_lit(&self, ctx: &ModelInitContext<'_>) -> BoolDecision {
+		self.lower_bound_lit(ctx.model)
+	}
+
+	fn try_lit(&self, ctx: &ModelInitContext<'_>, meaning: IntLitMeaning) -> Option<BoolDecision> {
+		self.try_lit(ctx.model, meaning)
+	}
+
+	fn upper_bound(&self, ctx: &ModelInitContext<'_>) -> IntVal {
+		self.upper_bound(ctx.model)
+	}
+
+	fn upper_bound_lit(&self, ctx: &ModelInitContext<'_>) -> BoolDecision {
+		self.upper_bound_lit(ctx.model)
+	}
+
+	fn val(&self, ctx: &ModelInitContext<'_>) -> Option<IntVal> {
+		self.val(ctx.model)
+	}
+}
+
+impl IntPropagationActions<Model> for IntDecisionIndex {
+	fn set_lower_bound(
+		&self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		let def = &mut ctx.int_vars[*self];
+		let Domain::Domain(dom) = &mut def.domain else {
+			unreachable!()
+		};
+		if val <= *dom.lower_bound().unwrap() {
+			return Ok(());
+		} else if val > *dom.upper_bound().unwrap() {
+			return Err(ctx.create_conflict(
+				BoolDecision(BoolDecisionInner::IntGreaterEq(*self, val)),
+				reason,
+			));
+		}
+		if val != *dom.upper_bound().unwrap() {
+			dom.set_lower_bound(val);
+			ctx.int_events
+				.entry(*self)
+				.and_modify(|e| *e += IntEvent::LowerBound)
+				.or_insert(IntEvent::LowerBound);
+		} else {
+			def.domain = Domain::Alias(val.into());
+			ctx.int_events.insert(*self, IntEvent::Fixed);
+		};
+		Ok(())
+	}
+
+	fn set_not_eq(
+		&self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		self.set_not_in_set(ctx, &(val..=val).into(), reason)
+	}
+
+	fn set_upper_bound(
+		&self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		let def = &mut ctx.int_vars[*self];
+		let Domain::Domain(dom) = &mut def.domain else {
+			unreachable!()
+		};
+		if val >= *dom.upper_bound().unwrap() {
+			return Ok(());
+		} else if val < *dom.lower_bound().unwrap() {
+			return Err(ctx.create_conflict(
+				BoolDecision(BoolDecisionInner::IntLess(*self, val + 1)),
+				reason,
+			));
+		}
+		if val != *dom.lower_bound().unwrap() {
+			dom.set_upper_bound(val);
+			ctx.int_events
+				.entry(*self)
+				.and_modify(|v| *v += IntEvent::UpperBound)
+				.or_insert(IntEvent::UpperBound);
+		} else {
+			def.domain = Domain::Alias(val.into());
+			ctx.int_events.insert(*self, IntEvent::Fixed);
+		};
+		Ok(())
+	}
+
+	fn set_val(
+		&self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		let def = &mut ctx.int_vars[*self];
+		let Domain::Domain(dom) = &def.domain else {
+			unreachable!()
+		};
+		if dom.contains(&val) {
+			def.domain = Domain::Alias(val.into());
+			ctx.int_events.insert(*self, IntEvent::Fixed);
+			Ok(())
+		} else {
+			Err(ctx.create_conflict(BoolDecision(BoolDecisionInner::IntEq(*self, val)), reason))
+		}
+	}
+}
+
+impl IntSimplificationActions<Model> for IntDecisionIndex {
+	fn set_domain(
+		&self,
+		ctx: &mut Model,
+		domain: &IntSetVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		let Domain::Domain(dom) = &ctx.int_vars[*self].domain else {
+			unreachable!()
+		};
+		let intersect: RangeList<_> = dom.intersect(domain);
+		if intersect.is_empty() {
+			return Err(ctx.create_conflict(
+				BoolDecision(BoolDecisionInner::IntNotEq(
+					*self,
+					*dom.lower_bound().unwrap(),
+				)),
+				reason,
+			));
+		} else if *dom == intersect {
+			return Ok(());
+		}
+		if intersect.card() == Some(1) {
+			let val = *intersect.lower_bound().unwrap();
+			ctx.int_vars[*self].domain = Domain::Alias(val.into());
+			ctx.int_events.insert(*self, IntEvent::Fixed);
+		} else {
+			let entry = ctx.int_events.entry(*self).or_insert(IntEvent::Domain);
+			if dom.lower_bound().unwrap() == intersect.lower_bound().unwrap() {
+				*entry += IntEvent::LowerBound;
+			}
+			if dom.upper_bound().unwrap() == intersect.upper_bound().unwrap() {
+				*entry += IntEvent::UpperBound;
+			}
+
+			ctx.int_vars[*self].domain = Domain::Domain(intersect);
+		}
+		Ok(())
+	}
+
+	fn set_not_in_set(
+		&self,
+		ctx: &mut Model,
+		values: &IntSetVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		let Domain::Domain(dom) = &ctx.int_vars[*self].domain else {
+			unreachable!()
+		};
+		let diff: RangeList<_> = dom.diff(values);
+		if diff.is_empty() {
+			return Err(ctx.create_conflict(
+				BoolDecision(BoolDecisionInner::IntNotEq(
+					*self,
+					*values.lower_bound().unwrap(),
+				)),
+				reason,
+			));
+		}
+		if *dom == diff {
+			return Ok(());
+		}
+		if diff.card() == Some(1) {
+			let val = *diff.lower_bound().unwrap();
+			ctx.int_vars[*self].domain = Domain::Alias(val.into());
+			ctx.int_events.insert(*self, IntEvent::Fixed);
+		} else {
+			let entry = ctx.int_events.entry(*self).or_insert(IntEvent::Domain);
+			if dom.lower_bound().unwrap() == diff.lower_bound().unwrap() {
+				*entry += IntEvent::LowerBound;
+			}
+			if dom.upper_bound().unwrap() == diff.upper_bound().unwrap() {
+				*entry += IntEvent::UpperBound;
+			}
+
+			ctx.int_vars[*self].domain = Domain::Domain(diff);
+		};
+		Ok(())
+	}
+
+	fn unify(
+		&self,
+		ctx: &mut Model,
+		other: impl Into<Self>,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		let other: IntDecisionIndex = other.into();
+		IntDecision(IntDecisionInner::Linear((*self).into()))
+			.unify(ctx, IntDecision(IntDecisionInner::Linear(other.into())))
 	}
 }
 

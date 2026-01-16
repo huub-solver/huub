@@ -59,13 +59,6 @@ pub struct OffsetView<Offset, Var> {
 	pub(crate) var: Var,
 }
 
-impl<Offset, Var> OffsetView<Offset, Var> {
-	/// Creates a new offset view.
-	pub fn new(offset: Offset, var: Var) -> Self {
-		Self { offset, var }
-	}
-}
-
 impl<Var> OffsetView<IntVal, Var> {
 	/// Reverses the [`IntLitMeaning`] from its meaning on the view to the
 	/// meaning of the variable.
@@ -79,11 +72,73 @@ impl<Var> OffsetView<IntVal, Var> {
 	}
 }
 
+impl<Offset, Var> OffsetView<Offset, Var> {
+	/// Creates a new offset view.
+	pub fn new(offset: Offset, var: Var) -> Self {
+		Self { offset, var }
+	}
+}
+
+impl<Offset, Var> Add<Offset> for OffsetView<Offset, Var>
+where
+	Offset: AddAssign<Offset>,
+{
+	type Output = Self;
+
+	fn add(mut self, rhs: Offset) -> Self::Output {
+		self.offset += rhs;
+		self
+	}
+}
+
+impl<Offset, Var> AddAssign<Offset> for OffsetView<Offset, Var>
+where
+	Offset: AddAssign<Offset>,
+{
+	fn add_assign(&mut self, rhs: Offset) {
+		self.offset += rhs;
+	}
+}
+
+impl<Offset: Default, Var> From<Var> for OffsetView<Offset, Var> {
+	fn from(value: Var) -> Self {
+		Self {
+			offset: Offset::default(),
+			var: value,
+		}
+	}
+}
+
+impl<Ctx, Var> IntDecisionActions<Ctx> for OffsetView<IntVal, Var>
+where
+	Ctx: ReasoningContext + ?Sized,
+	Var: IntDecisionActions<Ctx>,
+{
+	fn lit(&self, ctx: &mut Ctx, meaning: IntLitMeaning) -> Ctx::Atom {
+		self.var.lit(ctx, self.reverse_meaning(meaning))
+	}
+}
+
+impl<Ctx, Var> IntExplanationActions<Ctx> for OffsetView<IntVal, Var>
+where
+	Ctx: ReasoningContext + ?Sized,
+	Var: IntExplanationActions<Ctx>,
+{
+	fn lit_relaxed(&self, ctx: &Ctx, meaning: IntLitMeaning) -> (Ctx::Atom, IntLitMeaning) {
+		self.var.lit_relaxed(ctx, self.reverse_meaning(meaning))
+	}
+}
+
 impl<Ctx, Var> IntInspectionActions<Ctx> for OffsetView<IntVal, Var>
 where
 	Ctx: ReasoningContext + ?Sized,
 	Var: IntInspectionActions<Ctx>,
 {
+	fn bounds(&self, ctx: &Ctx) -> (IntVal, IntVal) {
+		let (lb, ub) = self.var.bounds(ctx);
+		(lb + self.offset, ub + self.offset)
+	}
+
 	fn domain(&self, ctx: &Ctx) -> IntSetVal {
 		RangeList::from_sorted_ranges(
 			self.var
@@ -126,33 +181,8 @@ where
 		self.var.upper_bound_lit(ctx)
 	}
 
-	fn bounds(&self, ctx: &Ctx) -> (IntVal, IntVal) {
-		let (lb, ub) = self.var.bounds(ctx);
-		(lb + self.offset, ub + self.offset)
-	}
-
 	fn val(&self, ctx: &Ctx) -> Option<IntVal> {
 		self.var.val(ctx).map(|v| v + self.offset)
-	}
-}
-
-impl<Ctx, Var> IntExplanationActions<Ctx> for OffsetView<IntVal, Var>
-where
-	Ctx: ReasoningContext + ?Sized,
-	Var: IntExplanationActions<Ctx>,
-{
-	fn lit_relaxed(&self, ctx: &Ctx, meaning: IntLitMeaning) -> (Ctx::Atom, IntLitMeaning) {
-		self.var.lit_relaxed(ctx, self.reverse_meaning(meaning))
-	}
-}
-
-impl<Ctx, Var> IntDecisionActions<Ctx> for OffsetView<IntVal, Var>
-where
-	Ctx: ReasoningContext + ?Sized,
-	Var: IntDecisionActions<Ctx>,
-{
-	fn lit(&self, ctx: &mut Ctx, meaning: IntLitMeaning) -> Ctx::Atom {
-		self.var.lit(ctx, self.reverse_meaning(meaning))
 	}
 }
 
@@ -195,36 +225,6 @@ where
 		reason: impl ReasonBuilder<Ctx>,
 	) -> Result<(), Ctx::Conflict> {
 		self.var.set_val(ctx, val - self.offset, reason)
-	}
-}
-
-impl<Offset, Var> Add<Offset> for OffsetView<Offset, Var>
-where
-	Offset: AddAssign<Offset>,
-{
-	type Output = Self;
-
-	fn add(mut self, rhs: Offset) -> Self::Output {
-		self.offset += rhs;
-		self
-	}
-}
-
-impl<Offset, Var> AddAssign<Offset> for OffsetView<Offset, Var>
-where
-	Offset: AddAssign<Offset>,
-{
-	fn add_assign(&mut self, rhs: Offset) {
-		self.offset += rhs;
-	}
-}
-
-impl<Offset: Default, Var> From<Var> for OffsetView<Offset, Var> {
-	fn from(value: Var) -> Self {
-		Self {
-			offset: Offset::default(),
-			var: value,
-		}
 	}
 }
 

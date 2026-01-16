@@ -54,14 +54,24 @@ pub struct LinearView<Scale, Offset, Var> {
 	pub(crate) var: Var,
 }
 
-impl<Scale, Offset, Var> LinearView<Scale, Offset, Var> {
-	/// Create a new linear view with the given scale, offset, and variable.
-	pub fn new(scale: Scale, offset: Offset, var: Var) -> Self {
-		Self { scale, offset, var }
-	}
-}
-
 impl<Var> LinearView<NonZero<IntVal>, IntVal, Var> {
+	/// Reverses the transformation of an [`IntSetVal`].
+	pub(crate) fn reverse_intset(&self, set: &IntSetVal) -> IntSetVal {
+		if self.scale.is_positive() {
+			RangeList::from_sorted_ranges(set.iter().map(|range| {
+				let start = div_ceil(*range.start() - self.offset, self.scale);
+				let end = div_floor(*range.end() - self.offset, self.scale);
+				start..=end
+			}))
+		} else {
+			RangeList::from_sorted_ranges(set.iter().rev().map(|range| {
+				let start = div_ceil(range.end() - self.offset, self.scale);
+				let end = div_floor(range.start() - self.offset, self.scale);
+				start..=end
+			}))
+		}
+	}
+
 	/// Reverses the [`IntLitMeaning`] from its meaning on the view to the
 	/// meaning of the variable.
 	pub(crate) fn reverse_meaning(&self, meaning: IntLitMeaning) -> Result<IntLitMeaning, bool> {
@@ -99,38 +109,6 @@ impl<Var> LinearView<NonZero<IntVal>, IntVal, Var> {
 		div_floor(val - self.offset, self.scale)
 	}
 
-	/// Reverses the transformation of an [`IntSetVal`].
-	pub(crate) fn reverse_intset(&self, set: &IntSetVal) -> IntSetVal {
-		if self.scale.is_positive() {
-			RangeList::from_sorted_ranges(set.iter().map(|range| {
-				let start = div_ceil(*range.start() - self.offset, self.scale);
-				let end = div_floor(*range.end() - self.offset, self.scale);
-				start..=end
-			}))
-		} else {
-			RangeList::from_sorted_ranges(set.iter().rev().map(|range| {
-				let start = div_ceil(range.end() - self.offset, self.scale);
-				let end = div_floor(range.start() - self.offset, self.scale);
-				start..=end
-			}))
-		}
-	}
-
-	/// Try to reverse the transformation of an [`IntVal`] without rounding.
-	fn try_reverse_val(&self, val: IntVal) -> Option<IntVal> {
-		let val = val - self.offset;
-		if val % self.scale.get() == 0 {
-			Some(val / self.scale.get())
-		} else {
-			None
-		}
-	}
-
-	/// Transform a [`IntVal`] using the view's scale and offset.
-	pub(crate) fn transform_val(&self, val: IntVal) -> IntVal {
-		self.scale.get() * val + self.offset
-	}
-
 	/// Transform a [`IntLitMeaning`] from the variable given the view's scale
 	/// and offset.
 	pub(crate) fn transform_meaning(&self, meaning: IntLitMeaning) -> IntLitMeaning {
@@ -147,6 +125,55 @@ impl<Var> LinearView<NonZero<IntVal>, IntVal, Var> {
 			}
 			IntLitMeaning::Less(v) => IntLitMeaning::Less(self.transform_val(v)),
 		}
+	}
+
+	/// Transform a [`IntVal`] using the view's scale and offset.
+	pub(crate) fn transform_val(&self, val: IntVal) -> IntVal {
+		self.scale.get() * val + self.offset
+	}
+
+	/// Try to reverse the transformation of an [`IntVal`] without rounding.
+	fn try_reverse_val(&self, val: IntVal) -> Option<IntVal> {
+		let val = val - self.offset;
+		if val % self.scale.get() == 0 {
+			Some(val / self.scale.get())
+		} else {
+			None
+		}
+	}
+}
+
+impl<Scale, Offset, Var> LinearView<Scale, Offset, Var> {
+	/// Create a new linear view with the given scale, offset, and variable.
+	pub fn new(scale: Scale, offset: Offset, var: Var) -> Self {
+		Self { scale, offset, var }
+	}
+}
+
+impl<Var> Add<IntVal> for LinearView<NonZero<IntVal>, IntVal, Var> {
+	type Output = Self;
+
+	fn add(mut self, rhs: IntVal) -> Self::Output {
+		self += rhs;
+		self
+	}
+}
+
+impl<Var> AddAssign<IntVal> for LinearView<NonZero<IntVal>, IntVal, Var> {
+	fn add_assign(&mut self, rhs: IntVal) {
+		self.offset += rhs;
+	}
+}
+
+impl<Var> From<OffsetView<IntVal, Var>> for LinearView<NonZero<IntVal>, IntVal, Var> {
+	fn from(view: OffsetView<IntVal, Var>) -> Self {
+		Self::new(NonZero::new(1).unwrap(), view.offset, view.var)
+	}
+}
+
+impl<Var> From<Var> for LinearView<NonZero<IntVal>, IntVal, Var> {
+	fn from(var: Var) -> Self {
+		Self::new(NonZero::new(1).unwrap(), 0, var)
 	}
 }
 
@@ -187,6 +214,14 @@ where
 	Ctx::Atom: From<bool>,
 	Var: IntInspectionActions<Ctx>,
 {
+	fn bounds(&self, ctx: &Ctx) -> (IntVal, IntVal) {
+		let (mut lb, mut ub) = self.var.bounds(ctx);
+		if self.scale.is_negative() {
+			mem::swap(&mut lb, &mut ub);
+		}
+		(self.transform_val(lb), self.transform_val(ub))
+	}
+
 	fn domain(&self, ctx: &Ctx) -> IntSetVal {
 		let dom = self.var.domain(ctx);
 		if self.scale.get() == 1 {
@@ -266,14 +301,6 @@ where
 
 	fn val(&self, ctx: &Ctx) -> Option<IntVal> {
 		Some(self.transform_val(self.var.val(ctx)?))
-	}
-
-	fn bounds(&self, ctx: &Ctx) -> (IntVal, IntVal) {
-		let (mut lb, mut ub) = self.var.bounds(ctx);
-		if self.scale.is_negative() {
-			mem::swap(&mut lb, &mut ub);
-		}
-		(self.transform_val(lb), self.transform_val(ub))
 	}
 }
 
@@ -373,15 +400,19 @@ where
 	}
 }
 
-impl<Var> From<Var> for LinearView<NonZero<IntVal>, IntVal, Var> {
-	fn from(var: Var) -> Self {
-		Self::new(NonZero::new(1).unwrap(), 0, var)
+impl<Var> Mul<NonZero<IntVal>> for LinearView<NonZero<IntVal>, IntVal, Var> {
+	type Output = Self;
+
+	fn mul(mut self, rhs: NonZero<IntVal>) -> Self::Output {
+		self *= rhs;
+		self
 	}
 }
 
-impl<Var> From<OffsetView<IntVal, Var>> for LinearView<NonZero<IntVal>, IntVal, Var> {
-	fn from(view: OffsetView<IntVal, Var>) -> Self {
-		Self::new(NonZero::new(1).unwrap(), view.offset, view.var)
+impl<Var> MulAssign<NonZero<IntVal>> for LinearView<NonZero<IntVal>, IntVal, Var> {
+	fn mul_assign(&mut self, rhs: NonZero<IntVal>) {
+		self.scale = NonZero::new(self.scale.get() * rhs.get()).unwrap();
+		self.offset *= rhs.get();
 	}
 }
 
@@ -390,27 +421,6 @@ impl<Var> Neg for LinearView<NonZero<IntVal>, IntVal, Var> {
 
 	fn neg(self) -> Self::Output {
 		self * NonZero::new(-1).unwrap()
-	}
-}
-
-impl<Var> AddAssign<IntVal> for LinearView<NonZero<IntVal>, IntVal, Var> {
-	fn add_assign(&mut self, rhs: IntVal) {
-		self.offset += rhs;
-	}
-}
-
-impl<Var> Add<IntVal> for LinearView<NonZero<IntVal>, IntVal, Var> {
-	type Output = Self;
-
-	fn add(mut self, rhs: IntVal) -> Self::Output {
-		self += rhs;
-		self
-	}
-}
-
-impl<Var> SubAssign<IntVal> for LinearView<NonZero<IntVal>, IntVal, Var> {
-	fn sub_assign(&mut self, rhs: IntVal) {
-		self.offset -= rhs;
 	}
 }
 
@@ -423,18 +433,8 @@ impl<Var> Sub<IntVal> for LinearView<NonZero<IntVal>, IntVal, Var> {
 	}
 }
 
-impl<Var> MulAssign<NonZero<IntVal>> for LinearView<NonZero<IntVal>, IntVal, Var> {
-	fn mul_assign(&mut self, rhs: NonZero<IntVal>) {
-		self.scale = NonZero::new(self.scale.get() * rhs.get()).unwrap();
-		self.offset *= rhs.get();
-	}
-}
-
-impl<Var> Mul<NonZero<IntVal>> for LinearView<NonZero<IntVal>, IntVal, Var> {
-	type Output = Self;
-
-	fn mul(mut self, rhs: NonZero<IntVal>) -> Self::Output {
-		self *= rhs;
-		self
+impl<Var> SubAssign<IntVal> for LinearView<NonZero<IntVal>, IntVal, Var> {
+	fn sub_assign(&mut self, rhs: IntVal) {
+		self.offset -= rhs;
 	}
 }
