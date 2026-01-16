@@ -9,6 +9,7 @@ use std::{
 
 use crate::{
 	IntDecision, IntVal,
+	actions::{
 		InitActions, IntSimplificationActions, ReasoningEngine, ReformulationActions,
 		TrailingActions,
 	},

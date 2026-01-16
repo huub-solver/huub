@@ -121,12 +121,12 @@ pub enum IntLitMeaning {
 	Less(IntVal),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 /// A reference to a integer type value in the solver that can be expected as
 /// part of a solution.
 pub struct IntView(pub(crate) IntViewInner);
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 /// The internal representation of [`IntView`].
 ///
 /// Note that this representation is not meant to be exposed to the user.

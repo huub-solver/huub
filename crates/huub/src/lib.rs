@@ -1656,10 +1656,6 @@ impl IntDecisionIndex {
 		};
 		Ok(())
 	}
-
-	fn alias(&self, ctx: &mut Model) -> IntDecision {
-		self.resolve_alias(ctx)
-	}
 }
 
 impl IntDecisionActions<Model> for IntDecisionIndex {
@@ -2169,10 +2165,6 @@ impl IntInitActions<ModelInitContext<'_>> for IntVal {
 	}
 }
 
-
-	fn alias(&self, _ctx: &mut Model) -> IntDecision {
-		IntDecision(IntDecisionInner::Const(*self))
-	}
 impl Model {
 	/// Internal method to add a constraint to the model.
 	///
@@ -2638,6 +2630,10 @@ impl SimplificationActions for Model {
 
 	fn add_constraint<C: Constraint<Model>>(&mut self, constraint: C) {
 		self.add_constraint(constraint);
+	}
+
+	fn resolve_alias(&self, var: IntDecision) -> IntDecision {
+		var.resolve_alias(self)
 	}
 }
 

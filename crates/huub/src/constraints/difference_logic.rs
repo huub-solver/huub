@@ -28,7 +28,7 @@ use crate::{
 		SimplificationStatus, SolverBoolView, SolverIntView,
 	},
 	helpers::{
-		linear_transform::LinearTransform, trailed_list::TrailedList,
+		trailed_list::TrailedList,
 		trailed_open_list::TrailedOpenList,
 	},
 	reformulate::{BoolDecisionInner, IntDecisionIndex, IntDecisionInner, ReformulationError},
@@ -36,11 +36,12 @@ use crate::{
 		activation_list::{IntEvent, IntPropCond},
 		queue::PriorityLevel,
 		trail::TrailedInt,
-		BoolView, BoolViewInner, Goal, IntLitMeaning, IntView,
+		BoolView, BoolViewInner, IntLitMeaning, IntView,
 	},
 	BoolDecision, BoolFormula, Conjunction, IntDecision, IntVal, Model,
 };
-
+use crate::actions::ReasoningContext;
+use crate::views::{LinearBoolView, LinearView};
 // Redefine hash-based types using the fast FxBuildHasher.
 /*#[derive(Copy, Clone, Default, Debug)]
 /// Custom definition to derive Debug
@@ -106,8 +107,6 @@ pub struct DifferenceLogicCollection {
 	raw_constraints: Vec<DifferenceLogicConstraint>,
 	/// Collection of boolean OR clauses for detecting conflicting edges.
 	boolean_or: IndexSet<(BoolDecision, BoolDecision)>,
-	/// Objective (if it exists)
-	objective: Option<(IntDecision, Goal)>,
 }
 
 /// Parse a priority level from the given integer.
@@ -156,7 +155,6 @@ impl DifferenceLogicCollection {
 		priority_level_bools: u8,
 		use_inc_imp: bool,
 		branching: u8,
-		objective: Option<(IntDecision, Goal)>,
 	) -> Self {
 		Self {
 			parameters: DifferenceLogicParameters {
@@ -167,7 +165,6 @@ impl DifferenceLogicCollection {
 			},
 			raw_constraints: Vec::new(),
 			boolean_or: IndexSet::default(),
-			objective,
 		}
 	}
 
@@ -318,35 +315,22 @@ fn get_bool_var_index(b: BoolDecision) -> Option<VarIndex> {
 /// Get the underlying variable for an integer decision (None if constant).
 fn get_int_var_index(x: IntDecision) -> Option<VarIndex> {
 	match x.0 {
-		IntDecisionInner::Var(i) => Some(VarIndex::IntIndex(i)),
 		IntDecisionInner::Const(_) => None,
-		IntDecisionInner::Linear(_, i) => Some(VarIndex::IntIndex(i)),
-		IntDecisionInner::Bool(_, b) => get_bool_var_index(b),
+		IntDecisionInner::Linear(view) => Some(VarIndex::IntIndex(view.var)),
+		IntDecisionInner::Bool(view) => get_bool_var_index(view.var),
 	}
 }
 
 /// Get a transformation of the integer decision that has an offset of 0.
 fn update_transform(x: IntDecision) -> (IntDecision, IntVal) {
 	match x.0 {
-		IntDecisionInner::Linear(transform, i) => {
-			if transform.scale.get() == 1 {
-				(IntDecision(IntDecisionInner::Var(i)), transform.offset)
-			} else {
-				(
-					IntDecision(IntDecisionInner::Linear(
-						LinearTransform::scaled(transform.scale),
-						i,
-					)),
-					transform.offset,
-				)
-			}
-		}
-		IntDecisionInner::Bool(transform, b) => (
-			IntDecision(IntDecisionInner::Bool(
-				LinearTransform::scaled(transform.scale),
-				b,
-			)),
-			transform.offset,
+		IntDecisionInner::Linear(view) => (
+			IntDecision(IntDecisionInner::Linear(LinearView::new(view.scale, 0, view.var))),
+			view.offset
+		),
+		IntDecisionInner::Bool(view) => (
+			IntDecision(IntDecisionInner::Bool(LinearBoolView::new(view.scale, 0, view.var))),
+			view.offset
 		),
 		_ => (x, 0),
 	}
@@ -619,7 +603,7 @@ impl DifferenceLogicModel {
 				"{i}: {:?}",
 				row.iter()
 					.enumerate()
-					.filter(|(_, &val)| val < IntVal::MAX)
+					.filter(|&(_, &val)| val < IntVal::MAX)
 					.collect_vec()
 			);
 		}
@@ -1049,7 +1033,7 @@ where
 			for n in 0..self.graph.int_vars.len() {
 				if self.node_active[n] {
 					// Check if variables have been unified
-					let alias = self.graph.int_vars[n].alias(ctx);
+					let alias = ctx.resolve_alias(self.graph.int_vars[n]);
 					if self.graph.int_vars[n] != alias {
 						trace!(
 							"Var alias is different (was {:?}, is {:?})",
@@ -1482,6 +1466,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	/// search.
 	fn get_cur_lower_bound<Ctx>(&self, ctx: &mut Ctx, n: usize) -> IntVal
 	where
+		Ctx: ReasoningContext,
 		I: IntInspectionActions<Ctx>,
 	{
 		match self.lower_bound[n] {
@@ -1502,6 +1487,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	/// search.
 	fn get_cur_upper_bound<Ctx>(&self, ctx: &mut Ctx, n: usize) -> IntVal
 	where
+		Ctx: ReasoningContext,
 		I: IntInspectionActions<Ctx>,
 	{
 		match self.upper_bound[n] {
@@ -1520,9 +1506,10 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 
 	/// Get the reason for a cycle of negative lengths (all booleans along the
 	/// cycle).
-	fn get_cycle_reason<Ctx>(&self, node: usize) -> impl ReasonBuilder<Ctx, B::Atom> + '_
+	fn get_cycle_reason<Ctx>(&self, node: usize) -> impl ReasonBuilder<Ctx> + '_
 	where
-		B: BoolPropagationActions<Ctx>,
+		Ctx: ReasoningContext,
+		B: BoolPropagationActions<Ctx> + Into<Ctx::Atom>,
 	{
 		let mut reason = Vec::new();
 		let mut var = node;
@@ -2459,9 +2446,9 @@ impl DiffLogicBrancher {
 	}
 }
 
-impl<D: DecisionActions> Brancher<D> for DiffLogicBrancher
+impl<D: DecisionActions + ReasoningContext> Brancher<D> for DiffLogicBrancher
 where
-	IntView: IntDecisionActions<D, Atom = BoolView>,
+	IntView: IntDecisionActions<D>,
 	RawLit: BoolInspectionActions<D>,
 {
 	fn decide(&mut self, actions: &mut D) -> Decision {
@@ -2557,7 +2544,6 @@ mod tests {
 			},
 			Constraint, SolverBoolView,
 		},
-		helpers::linear_transform::LinearTransform,
 		reformulate::{InitConfig, IntDecisionInner},
 		solver::{
 			engine::Engine,
@@ -2568,6 +2554,7 @@ mod tests {
 		},
 		IntDecision, Model,
 	};
+	use crate::views::LinearView;
 
 	// TODO adapt level when definition changes
 	const PRIO_BOUNDS: u8 = 2;
@@ -2748,7 +2735,7 @@ mod tests {
 		let mut prb = Model::default();
 		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=5]));
 		let b = prb.new_bool_var();
-		let mut diff_logic = DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, true, 0, None);
+		let mut diff_logic = DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, true, 0);
 		diff_logic.add(DifferenceLogicConstraint::Global(
 			int_vars[0],
 			int_vars[1],
@@ -2805,7 +2792,7 @@ mod tests {
 		let int_vars4 = prb.new_int_vars(2, RangeList::from_iter([1..=4]));
 		let b = prb.new_bool_var();
 		let c = prb.new_bool_var();
-		let mut diff_logic = DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, true, 0, None);
+		let mut diff_logic = DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, true, 0);
 		diff_logic.add(DifferenceLogicConstraint::Global(
 			int_vars5[0],
 			int_vars5[1],
@@ -2915,7 +2902,7 @@ mod tests {
 	fn test_conflict() {
 		let mut prb = Model::default();
 		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
-		let mut diff_logic = DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, true, 0, None);
+		let mut diff_logic = DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, true, 0);
 		diff_logic.add(DifferenceLogicConstraint::Global(
 			int_vars[0],
 			int_vars[1],
@@ -2947,7 +2934,7 @@ mod tests {
 	fn test_equal() {
 		let mut prb = Model::default();
 		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
-		let mut diff_logic = DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, true, 0, None);
+		let mut diff_logic = DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, true, 0);
 		diff_logic.add(DifferenceLogicConstraint::Global(
 			int_vars[0],
 			int_vars[1],
@@ -2994,7 +2981,7 @@ mod tests {
 		let int_vars = prb.new_int_vars(4, RangeList::from_iter([1..=5]));
 		let b = prb.new_bool_var();
 		let c = prb.new_bool_var();
-		let mut diff_logic = DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, true, 0, None);
+		let mut diff_logic = DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, true, 0);
 		diff_logic.add(DifferenceLogicConstraint::Global(
 			int_vars[0],
 			int_vars[1],
@@ -3036,19 +3023,14 @@ mod tests {
 		prb.add_constraint(diff_logic_model);
 		let con_ref = prb.propagator_queue.pop().expect("Diff logic was not enqueued");
 		assert!(prb.propagate(con_ref).is_ok());
-		let IntDecisionInner::Var(var_index) = int_vars[3].0 else {
-			panic!("Should not happen");
+		let IntDecisionInner::Linear(view) = int_vars[3].0 else {
+			unreachable!();
 		};
+		let var_index = view.var;
 		assert!(int_vars[0]
 			.unify(
 				&mut prb,
-				IntDecision(IntDecisionInner::Linear(
-					LinearTransform {
-						scale: NonZero::new(2).unwrap(),
-						offset: 1
-					},
-					var_index
-				))
+				IntDecision(IntDecisionInner::Linear(LinearView::new(NonZero::new(2).unwrap(), 1, var_index)))
 			)
 			.is_ok());
 
@@ -3094,7 +3076,7 @@ mod tests {
 		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=5]));
 		let b = prb.new_bool_var();
 		let c = prb.new_bool_var();
-		let mut diff_logic = DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, true, 0, None);
+		let mut diff_logic = DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, true, 0);
 		diff_logic.add(DifferenceLogicConstraint::Global(
 			int_vars[0],
 			int_vars[1],
@@ -3136,16 +3118,14 @@ mod tests {
 		prb.add_constraint(diff_logic_model);
 		let con_ref = prb.propagator_queue.pop().expect("Diff logic was not enqueued");
 		assert!(prb.propagate(con_ref).is_ok());
-		let IntDecisionInner::Var(var_index) = int_vars[2].0 else {
-			panic!("Should not happen");
+		let IntDecisionInner::Linear(view) = int_vars[2].0 else {
+			unreachable!();
 		};
+		let var_index = view.var;
 		assert!(int_vars[0]
 			.unify(
 				&mut prb,
-				IntDecision(IntDecisionInner::Linear(
-					LinearTransform::offset(1),
-					var_index
-				))
+				IntDecision(IntDecisionInner::Linear(LinearView::new(NonZero::new(1).unwrap(), 1, var_index)))
 			)
 			.is_ok());
 
@@ -3181,7 +3161,7 @@ mod tests {
 	fn test_constants() {
 		let mut prb = Model::default();
 		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
-		let mut diff_logic = DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, true, 0, None);
+		let mut diff_logic = DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, true, 0);
 		diff_logic.add(DifferenceLogicConstraint::Global(
 			int_vars[0],
 			int_vars[1],

@@ -319,9 +319,6 @@ where
 	/// Mark two integer decisions as being equivalent, ensuring the two use the
 	/// same internal representation.
 	fn unify(&self, ctx: &mut Context, other: impl Into<Self>) -> Result<(), Context::Conflict>;
-
-	/// Return the underlying IntDecision.
-	fn alias(&self, ctx: &mut Context) -> IntDecision;
 }
 
 /// General actions that can be performed in [`ReasoningEngine::PropagationCtx`]
@@ -450,6 +447,9 @@ pub trait SimplificationActions {
 
 	/// Add a constraint to the model (to replace the current constraint).
 	fn add_constraint<C: Constraint<Self::Target>>(&mut self, constraint: C);
+	
+	/// Resolve the alias of the integer decision variable.
+	fn resolve_alias(&self, var: IntDecision) -> IntDecision;
 }
 
 /// Basic actions that can be performed when the trailing infrastructure is

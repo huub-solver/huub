@@ -14,7 +14,7 @@ use std::{
 
 use flatzinc_serde::{
 	Annotation, AnnotationArgument, AnnotationCall, AnnotationLiteral, Argument, Domain, FlatZinc,
-	Literal, Method, Type,
+	Literal, Type,
 };
 use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;
@@ -34,9 +34,6 @@ use crate::{
 	cumulative, disjunctive_strict, div_int, int_in_set_reif, pow_int,
 	reformulate::{InitConfig, IntDecisionInner, ReformulationError},
 	seq_precede_chain_int, table_int, times_int, value_precede_chain_int,
-	table_int, times_int, value_precede_chain_int, BoolDecision, BoolDecisionInner, Branching,
-	Decision, IntDecision, IntLinExpr, IntSetVal, IntVal, Model, NonZeroIntVal, ValueSelection,
-	VariableSelection,
 };
 
 /// Domain assumed for integer decision variables that do not have a domain
@@ -992,24 +989,11 @@ where
 	/// to the [`Model`] to enforce the constraints.
 	pub(crate) fn post_constraints(&mut self, config: &InitConfig) -> Result<(), FlatZincError> {
 		// Global propagators dealing with multiple constraints
-		let obj_ref = self.fzn.solve.objective.as_ref();
-		let obj = match obj_ref {
-			Some(l) => Some((
-				self.lit_int(l)?,
-				if self.fzn.solve.method == Method::Minimize {
-					Goal::Minimize
-				} else {
-					Goal::Maximize
-				},
-			)),
-			None => None,
-		};
 		let mut diff_logic = DifferenceLogicCollection::new(
 			config.diff_logic_prio_bounds,
 			config.diff_logic_prio_bools,
 			config.diff_logic_inc_imp,
 			config.diff_logic_branching,
-			obj,
 		);
 		// Traditional relational constraints
 		for (i, c) in self.fzn.constraints.iter().enumerate() {
