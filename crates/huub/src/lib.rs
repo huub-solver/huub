@@ -427,10 +427,22 @@ pub fn cumulative(
 /// origin/starting positions and sizes of k-dimensional hyperrectangles, none
 /// of the rectangles overlap.
 ///
-/// `origin` and `size` the vectors must have the same length, which is the
-/// number of hyperrectangles. Then each inner vector must have the same length,
-/// which is the dimension of the hyperrectangles. Otherwise,
-/// the function will panic.
+/// # Parameters
+///
+/// - `prb`: The [`Model`] instance.
+/// - `origin`: A matrix-like `Vec<Vec<I>>` where `origin[i][d]` is the origin
+///   of object `i` in dimension `d`.
+/// - `size`: A matrix-like `Vec<Vec<I>>` where `size[i][d]` is the size of
+///   object `i` in dimension `d`.
+/// - `strict`: If `true`, the constraint ensures that objects of with 0 size do
+///   not occur within other objects.
+///
+/// # Panics
+///
+/// Panics if the dimensions of `origin` and `size` are inconsistent.
+/// Specifically, the number of objects (outer `Vec` length) must be the
+/// same, and the number of dimensions (inner `Vec` length) must be the
+/// same for all objects.
 pub fn diffn_int(
 	prb: &mut Model,
 	origin: Vec<Vec<IntDecision>>,
