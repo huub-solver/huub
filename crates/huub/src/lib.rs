@@ -357,29 +357,6 @@ where
 	})
 }
 
-/// Create a constraint that enforces that given decision variables of
-/// origin/starting positions and sizes of k-dimensional hyperrectangles, none
-/// of the rectangles overlap.
-///
-/// `origin` and `size` the vectors must have the same length, which is the
-/// number of hyperrectangles. Then each inner vector must have the same length,
-/// which is the dimension of the hyperrectangles. Otherwise,
-/// the function will panic.
-pub fn diffn_int(
-	prb: &mut Model,
-	origin: Vec<Vec<IntDecision>>,
-	size: Vec<Vec<IntDecision>>,
-	strict: bool,
-) {
-	if strict {
-		let prop = IntDiffnSweep::<true, _, _>::new(prb, origin, size);
-		prb.add_constraint(prop);
-	} else {
-		let prop = IntDiffnSweep::<false, _, _>::new(prb, origin, size);
-		prb.add_constraint(prop);
-	}
-}
-
 /// Create a constraint that enforces that a result decision variable takes the
 /// value equal the element of the given array at the given index decision
 /// variable.
@@ -444,6 +421,29 @@ pub fn cumulative(
 		usages,
 		capacity,
 	));
+}
+
+/// Create a constraint that enforces that given decision variables of
+/// origin/starting positions and sizes of k-dimensional hyperrectangles, none
+/// of the rectangles overlap.
+///
+/// `origin` and `size` the vectors must have the same length, which is the
+/// number of hyperrectangles. Then each inner vector must have the same length,
+/// which is the dimension of the hyperrectangles. Otherwise,
+/// the function will panic.
+pub fn diffn_int(
+	prb: &mut Model,
+	origin: Vec<Vec<IntDecision>>,
+	size: Vec<Vec<IntDecision>>,
+	strict: bool,
+) {
+	if strict {
+		let prop = IntDiffnSweep::<true, _, _>::new(prb, origin, size);
+		prb.add_constraint(prop);
+	} else {
+		let prop = IntDiffnSweep::<false, _, _>::new(prb, origin, size);
+		prb.add_constraint(prop);
+	}
 }
 
 /// Create a constraint that enforces that the given a list of integer decision

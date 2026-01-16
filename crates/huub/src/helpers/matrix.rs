@@ -1,5 +1,5 @@
 //! This module provides a `Matrix` struct, which is a basic, generic container
-//! for n-dimensional data. It is backed by a single, flat `Box<[T]>` array,
+//! multi-dimensional data within this crate.
 //! storing elements in a row-major layout. This design makes it cache-friendly
 //! for row-wise access patterns.
 //!
@@ -17,7 +17,8 @@
 //! numerical analysis or linear algebra. It does not provide operations like
 //! matrix multiplication or inversion. The primary goal of this implementation
 //! is to provide a simple, type-safe, and convenient abstraction for
-//! multi-dimensional data within this crate.
+//! for n-dimensional data. It is backed by a single, flat `Box<[T]>` array,
+
 use std::{
 	iter::repeat_with,
 	ops::{Index, IndexMut},
@@ -32,7 +33,43 @@ pub(crate) struct Matrix<const DIMS: usize, T> {
 	dimensions: [usize; DIMS],
 }
 
+impl<T> Matrix<2, T> {
+	/// Returns a slice representing a row of the matrix.
+	pub(crate) fn row(&self, row: usize) -> &[T] {
+		let start = row * self.len(1);
+		let end = start + self.len(1);
+		&self.data[start..end]
+	}
+
+	/// Returns an iterator over the rows of the matrix.
+	pub(crate) fn row_iter(&self) -> impl Iterator<Item = &[T]> {
+		self.data.chunks_exact(self.len(1))
+	}
+}
+
 impl<const D: usize, T> Matrix<D, T> {
+	/// Converts a multi-dimensional index into a 1D index for the underlying
+	/// data array.
+	fn internal_index(&self, index: [usize; D]) -> usize {
+		let mut idx = 0;
+		let mut mult = 1;
+		for (i, &dim) in self.dimensions.iter().enumerate().rev() {
+			idx += index[i] * mult;
+			mult *= dim;
+		}
+		idx
+	}
+
+	/// Returns an iterator over the elements of the matrix.
+	pub(crate) fn iter_elem(&self) -> impl Iterator<Item = &T> {
+		self.data.iter()
+	}
+
+	/// Returns the length of a given dimension.
+	pub(crate) fn len(&self, dim: usize) -> usize {
+		self.dimensions[dim]
+	}
+
 	/// Creates a new matrix with the given dimensions and data read in
 	/// row-major layout.
 	///
@@ -56,42 +93,6 @@ impl<const D: usize, T> Matrix<D, T> {
 			dimensions,
 			repeat_with(|| T::default()).take(size).collect(),
 		)
-	}
-
-	/// Returns the length of a given dimension.
-	pub(crate) fn len(&self, dim: usize) -> usize {
-		self.dimensions[dim]
-	}
-
-	/// Converts a multi-dimensional index into a 1D index for the underlying
-	/// data array.
-	fn internal_index(&self, index: [usize; D]) -> usize {
-		let mut idx = 0;
-		let mut mult = 1;
-		for (i, &dim) in self.dimensions.iter().enumerate().rev() {
-			idx += index[i] * mult;
-			mult *= dim;
-		}
-		idx
-	}
-
-	/// Returns an iterator over the elements of the matrix.
-	pub(crate) fn iter_elem(&self) -> impl Iterator<Item = &T> {
-		self.data.iter()
-	}
-}
-
-impl<T> Matrix<2, T> {
-	/// Returns a slice representing a row of the matrix.
-	pub(crate) fn row(&self, row: usize) -> &[T] {
-		let start = row * self.len(1);
-		let end = start + self.len(1);
-		&self.data[start..end]
-	}
-
-	/// Returns an iterator over the rows of the matrix.
-	pub(crate) fn row_iter(&self) -> impl Iterator<Item = &[T]> {
-		self.data.chunks_exact(self.len(1))
 	}
 }
 
@@ -131,26 +132,6 @@ mod tests {
 	}
 
 	#[test]
-	fn test_index_mut_2d_with_dimensions() {
-		let dims = [3, 4];
-		let mut m: Matrix<2, i32> = Matrix::with_dimensions(dims);
-
-		// fill using index_mut
-		for r in 0..dims[0] {
-			for c in 0..dims[1] {
-				m[[r, c]] = (r as i32) * 100 + (c as i32);
-			}
-		}
-
-		// verify
-		for r in 0..dims[0] {
-			for c in 0..dims[1] {
-				assert_eq!(m[[r, c]], (r as i32) * 100 + (c as i32));
-			}
-		}
-	}
-
-	#[test]
 	fn test_index_3d_new_data() {
 		// 2x3x4 matrix, row-major with dims [i, j, k]
 		// idx = k + j * 4 + i * (3 * 4) = k + j*4 + i*12
@@ -172,6 +153,26 @@ mod tests {
 						k
 					);
 				}
+			}
+		}
+	}
+
+	#[test]
+	fn test_index_mut_2d_with_dimensions() {
+		let dims = [3, 4];
+		let mut m: Matrix<2, i32> = Matrix::with_dimensions(dims);
+
+		// fill using index_mut
+		for r in 0..dims[0] {
+			for c in 0..dims[1] {
+				m[[r, c]] = (r as i32) * 100 + (c as i32);
+			}
+		}
+
+		// verify
+		for r in 0..dims[0] {
+			for c in 0..dims[1] {
+				assert_eq!(m[[r, c]], (r as i32) * 100 + (c as i32));
 			}
 		}
 	}
