@@ -2,10 +2,13 @@
 //! that the product of two integer variables is equal to a third integer
 //! variable.
 
-use std::ops::{AddAssign, Mul};
+use std::{
+	num::NonZero,
+	ops::{AddAssign, Mul},
+};
 
 use crate::{
-	actions::{
+	IntDecision, IntVal,
 		InitActions, IntSimplificationActions, ReasoningEngine, ReformulationActions,
 		TrailingActions,
 	},
@@ -14,8 +17,7 @@ use crate::{
 	},
 	helpers::{div_ceil, div_floor},
 	reformulate::ReformulationError,
-	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntView},
-	IntDecision, IntVal, NonZeroIntVal,
+	solver::{IntView, activation_list::IntPropCond, queue::PriorityLevel},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -140,7 +142,7 @@ where
 			let min = bounds
 				.iter()
 				.map(|(z, y)| {
-					let y = NonZeroIntVal::new(*y).unwrap();
+					let y = NonZero::new(*y).unwrap();
 					div_ceil(*z, y)
 				})
 				.min()
@@ -150,7 +152,7 @@ where
 			let max = bounds
 				.iter()
 				.map(|(z, y)| {
-					let y = NonZeroIntVal::new(*y).unwrap();
+					let y = NonZero::new(*y).unwrap();
 					div_floor(*z, y)
 				})
 				.max()
@@ -173,7 +175,7 @@ where
 			let min = bounds
 				.iter()
 				.map(|(z, x)| {
-					let y = NonZeroIntVal::new(*x).unwrap();
+					let y = NonZero::new(*x).unwrap();
 					div_ceil(*z, y)
 				})
 				.min()
@@ -183,7 +185,7 @@ where
 			let max = bounds
 				.iter()
 				.map(|(z, x)| {
-					let y = NonZeroIntVal::new(*x).unwrap();
+					let y = NonZero::new(*x).unwrap();
 					div_floor(*z, y)
 				})
 				.max()
@@ -202,8 +204,8 @@ mod tests {
 	use crate::{
 		constraints::int_times::IntTimesBounds,
 		solver::{
-			int_var::{EncodingType, IntVar},
 			Solver,
+			int_var::{EncodingType, IntVar},
 		},
 	};
 

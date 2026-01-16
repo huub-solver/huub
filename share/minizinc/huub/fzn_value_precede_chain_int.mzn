@@ -1,3 +1,5 @@
+include "seq_precede_chain.mzn";
+
 predicate huub_value_precede_chain_int(array [int] of int: t, array [int] of var int: x);
 predicate fzn_value_precede_chain_int(array [int] of int: t, array [int] of var int: x) =
 	if length(t) = 0 then

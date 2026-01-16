@@ -10,8 +10,9 @@ use itertools::Itertools;
 use tracing::trace;
 
 use crate::{
+	Conjunction, IntVal,
 	actions::{
-		InitActions, IntDecisionActions, IntInspectionActions, ReasoningEngine,
+		InitActions, IntDecisionActions, IntInspectionActions, ReasoningContext, ReasoningEngine,
 		ReformulationActions, TrailingActions,
 	},
 	constraints::{
@@ -19,8 +20,7 @@ use crate::{
 		SolverIntView,
 	},
 	reformulate::ReformulationError,
-	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView},
-	Conjunction, IntVal,
+	solver::{IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel},
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -126,9 +126,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				if cur_height > capacity_lb {
 					trace!(
 						timepoint = t,
-						capacity_lb,
-						cur_height,
-						"push capacity lower bound"
+						capacity_lb, cur_height, "push capacity lower bound"
 					);
 					let mid_point = last_time.map_or(t, |lt| (lt + t) / 2);
 					self.capacity.set_lower_bound(
@@ -169,6 +167,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		skip_task: Option<usize>,
 	) -> Vec<usize>
 	where
+		Ctx: ReasoningContext + ?Sized,
 		I1: IntInspectionActions<Ctx>,
 		I2: IntInspectionActions<Ctx>,
 		I3: IntInspectionActions<Ctx>,
@@ -232,6 +231,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// Get the earliest completion time of the task `i`.
 	fn earliest_completion_time<C>(&self, ctx: &mut C, i: usize) -> i64
 	where
+		C: ReasoningContext + ?Sized,
 		I1: IntInspectionActions<C>,
 		I2: IntInspectionActions<C>,
 	{
@@ -242,6 +242,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// Get the earliest start time of the task `i`.
 	fn earliest_start_time<C>(&self, ctx: &mut C, i: usize) -> i64
 	where
+		C: ReasoningContext + ?Sized,
 		I1: IntInspectionActions<C>,
 	{
 		self.start_times[i].lower_bound(ctx)
@@ -252,17 +253,18 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// (1) relevant tasks (including the target task) that have compulsory
 	/// parts at the given time point, which are used to cover the required
 	/// resource usage, (2) and the resource capacity at its upper bound.
-	fn explain_limit_usage<Ctx, Atom>(
+	fn explain_limit_usage<Ctx>(
 		&self,
 		task_no: usize,
 		time_point: i64,
 		usage_limit: i64,
-	) -> impl ReasonBuilder<Ctx, Atom> + '_
+	) -> impl ReasonBuilder<Ctx> + '_
 	where
-		I1: IntDecisionActions<Ctx, Atom = Atom>,
-		I2: IntDecisionActions<Ctx, Atom = Atom>,
-		I3: IntDecisionActions<Ctx, Atom = Atom>,
-		I4: IntDecisionActions<Ctx, Atom = Atom>,
+		Ctx: ReasoningContext + ?Sized,
+		I1: IntDecisionActions<Ctx>,
+		I2: IntDecisionActions<Ctx>,
+		I3: IntDecisionActions<Ctx>,
+		I4: IntDecisionActions<Ctx>,
 	{
 		move |ctx: &mut Ctx| {
 			trace!(
@@ -317,16 +319,17 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// Construct a reason for why the resource usage is over `to_cover` at a
 	/// specific `time_point`. Refer to Schutt et al. (2011) for details on the
 	/// explanation construction.
-	fn explain_overload_time_point<Ctx, Atom>(
+	fn explain_overload_time_point<Ctx>(
 		&self,
 		to_cover: i64,
 		time_point: i64,
-	) -> impl ReasonBuilder<Ctx, Atom> + '_
+	) -> impl ReasonBuilder<Ctx> + '_
 	where
-		I1: IntDecisionActions<Ctx, Atom = Atom>,
-		I2: IntDecisionActions<Ctx, Atom = Atom>,
-		I3: IntDecisionActions<Ctx, Atom = Atom>,
-		I4: IntDecisionActions<Ctx, Atom = Atom>,
+		Ctx: ReasoningContext + ?Sized,
+		I1: IntDecisionActions<Ctx>,
+		I2: IntDecisionActions<Ctx>,
+		I3: IntDecisionActions<Ctx>,
+		I4: IntDecisionActions<Ctx>,
 	{
 		move |ctx: &mut Ctx| {
 			let relevant_tasks = self.collect_compulsory_tasks(ctx, to_cover, time_point, None);
@@ -369,17 +372,18 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// Construct a reason for the task sweeping explanation.
 	/// Refer to Schutt et al. (2011) for details on the explanation
 	/// construction.
-	fn explain_sweeping_time<Ctx, Atom>(
+	fn explain_sweeping_time<Ctx>(
 		&self,
 		task_no: usize,
 		propagation_rule: CumulativePropagationRule,
 		time_point: i64,
-	) -> impl ReasonBuilder<Ctx, Atom> + '_
+	) -> impl ReasonBuilder<Ctx> + '_
 	where
-		I1: IntDecisionActions<Ctx, Atom = Atom>,
-		I2: IntDecisionActions<Ctx, Atom = Atom>,
-		I3: IntDecisionActions<Ctx, Atom = Atom>,
-		I4: IntDecisionActions<Ctx, Atom = Atom>,
+		Ctx: ReasoningContext + ?Sized,
+		I1: IntDecisionActions<Ctx>,
+		I2: IntDecisionActions<Ctx>,
+		I3: IntDecisionActions<Ctx>,
+		I4: IntDecisionActions<Ctx>,
 	{
 		move |ctx: &mut Ctx| {
 			let capacity_ub = self.capacity.upper_bound(ctx);
@@ -450,6 +454,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// Get the latest completion time of the task `i`.
 	fn latest_completion_time<C>(&self, ctx: &mut C, i: usize) -> i64
 	where
+		C: ReasoningContext + ?Sized,
 		I1: IntInspectionActions<C>,
 		I2: IntInspectionActions<C>,
 	{
@@ -460,6 +465,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// Get the latest start time of the task `i`.
 	fn latest_start_time<C>(&self, ctx: &mut C, i: usize) -> i64
 	where
+		C: ReasoningContext + ?Sized,
 		I1: IntInspectionActions<C>,
 	{
 		self.start_times[i].upper_bound(ctx)
@@ -501,19 +507,18 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		// Find the maximum usage in the interval [lst, ect]
 		// where the task has a compulsory part
 		let begin = self.bounds.partition_point(|&b| b < lst);
-		let mut max_period = begin;
-		let mut max_usage = self.heights[begin];
-		for i in (begin + 1)..self.bounds.len() {
-			if self.bounds[i] >= ect {
-				break;
-			} else if self.heights[i] > max_usage {
-				max_usage = self.heights[i];
-				max_period = i;
-			}
-		}
+		let end = self.bounds.partition_point(|&b| b < ect);
+		let max_period = (begin + 1 < end).then(|| {
+			begin
+				+ 1 + self.heights[(begin + 1)..end]
+				.iter()
+				.position_max()
+				.unwrap()
+		});
 
-		let limit = self.capacity.upper_bound(ctx) - max_usage + usage_lb;
-		if limit < self.usages[task].upper_bound(ctx) {
+		if let Some(max_period) = max_period {
+			let max_usage = self.heights[max_period];
+			let limit = self.capacity.upper_bound(ctx) - max_usage + usage_lb;
 			trace!(
 				task,
 				compulosary_part =? (lst, ect),
@@ -897,12 +902,12 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
+		Solver,
 		constraints::cumulative::CumulativeTimeTable,
 		solver::{
-			int_var::{EncodingType, IntVar},
 			IntView,
+			int_var::{EncodingType, IntVar},
 		},
-		Solver,
 	};
 
 	/// Helper function to create a task with given start time, duration, and

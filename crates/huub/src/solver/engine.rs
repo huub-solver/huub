@@ -22,24 +22,26 @@ use std::{collections::VecDeque, mem};
 
 use index_vec::IndexVec;
 use pindakaas::{
+	Lit as RawLit, Var as RawVar,
 	solver::propagation::{
 		ClausePersistence, Propagator as PropagatorExtension,
 		PropagatorDefinition as PropagatorExtensionDefinition, SearchDecision, SolvingActions,
 	},
-	Lit as RawLit, Var as RawVar,
 };
 use rustc_hash::FxHashMap;
 pub(crate) use trace_new_lit;
 use tracing::{debug, trace, warn};
 
 use crate::{
+	Clause, IntSetVal, IntVal,
 	actions::{
-		BoolInspectionActions, IntExplanationActions, IntInspectionActions, ReasoningEngine,
-		TrailingActions,
+		BoolInspectionActions, IntExplanationActions, IntInspectionActions, ReasoningContext,
+		ReasoningEngine, TrailingActions,
 	},
 	branchers::{BoxedBrancher, Decision},
 	constraints::{BoxedPropagator, Conflict, LazyReason, Reason},
 	solver::{
+		BoolView, BoolViewInner, IntLitMeaning, SolverConfiguration,
 		activation_list::{ActivationAction, ActivationActionS, ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
 		initialization_context::InitializationContext,
@@ -47,9 +49,7 @@ use crate::{
 		queue::PropagatorQueue,
 		solving_context::SolvingContext,
 		trail::{Trail, TrailedInt},
-		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, SolverConfiguration,
 	},
-	Clause, IntVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -373,7 +373,7 @@ impl PropagatorExtension for Engine {
 				ctx.state.int_vars[r].notify_upper_bound(&mut ctx.state.trail, lb);
 
 				let activation = mem::take(&mut ctx.state.int_activation[r]);
-				for action in activation.activated_by(IntEvent::Fixed) {
+				activation.for_each_activated_by(IntEvent::Fixed, |action| {
 					let prop = match action {
 						ActivationAction::Advise(adv) => {
 							let &AdvisorDef {
@@ -384,14 +384,14 @@ impl PropagatorExtension for Engine {
 								data,
 								IntEvent::Fixed,
 							) {
-								continue;
+								return;
 							}
 							propagator
 						}
 						ActivationAction::Enqueue(prop) => prop,
 					};
 					ctx.state.propagator_queue.enqueue_propagator(prop);
-				}
+				});
 				ctx.state.int_activation[r] = activation;
 			}
 		}
@@ -509,35 +509,34 @@ impl PropagatorExtension for Engine {
 			};
 
 			// Enqueue based on direct literal
-			if !self.state.failed {
-				if let Some(activations) = self
+			if !self.state.failed
+				&& let Some(activations) = self
 					.state
 					.bool_activation
 					.get_mut(&lit.var())
 					.map(mem::take)
-				{
-					for &action in &activations {
-						let prop = match action.into() {
-							ActivationAction::Advise(adv) => {
-								let &AdvisorDef {
-									bool2int,
-									data,
-									propagator,
-									..
-								} = &self.state.advisors[adv];
-								let enqueue = self.notify_lit_advisor(propagator, data, bool2int);
-								if !enqueue {
-									continue;
-								}
-								propagator
+			{
+				for &action in &activations {
+					let prop = match action.into() {
+						ActivationAction::Advise(adv) => {
+							let &AdvisorDef {
+								bool2int,
+								data,
+								propagator,
+								..
+							} = &self.state.advisors[adv];
+							let enqueue = self.notify_lit_advisor(propagator, data, bool2int);
+							if !enqueue {
+								continue;
 							}
-							ActivationAction::Enqueue(prop) => prop,
-						};
-						self.state.propagator_queue.enqueue_propagator(prop);
-					}
-
-					*self.state.bool_activation.get_mut(&lit.var()).unwrap() = activations;
+							propagator
+						}
+						ActivationAction::Enqueue(prop) => prop,
+					};
+					self.state.propagator_queue.enqueue_propagator(prop);
 				}
+
+				*self.state.bool_activation.get_mut(&lit.var()).unwrap() = activations;
 			}
 
 			// Enqueue based on literal meaning in complex type
@@ -602,31 +601,30 @@ impl PropagatorExtension for Engine {
 				Some((iv, event))
 			});
 
-			if !self.state.failed {
-				if let Some((iv, event)) = iv_event {
-					let activations = mem::take(&mut self.state.int_activation[iv]);
-					for action in activations.activated_by(event) {
-						let prop = match action {
-							ActivationAction::Advise(adv) => {
-								let &AdvisorDef {
-									negated,
-									data,
-									propagator,
-									..
-								} = &self.state.advisors[adv];
-								let enqueue =
-									self.notify_int_advisor(propagator, event, data, negated);
-								if !enqueue {
-									continue;
-								}
-								propagator
+			if !self.state.failed
+				&& let Some((iv, event)) = iv_event
+			{
+				let activations = mem::take(&mut self.state.int_activation[iv]);
+				activations.for_each_activated_by(event, |action| {
+					let prop = match action {
+						ActivationAction::Advise(adv) => {
+							let &AdvisorDef {
+								negated,
+								data,
+								propagator,
+								..
+							} = &self.state.advisors[adv];
+							let enqueue = self.notify_int_advisor(propagator, event, data, negated);
+							if !enqueue {
+								return;
 							}
-							ActivationAction::Enqueue(prop) => prop,
-						};
-						self.state.propagator_queue.enqueue_propagator(prop);
-					}
-					self.state.int_activation[iv] = activations;
-				}
+							propagator
+						}
+						ActivationAction::Enqueue(prop) => prop,
+					};
+					self.state.propagator_queue.enqueue_propagator(prop);
+				});
+				self.state.int_activation[iv] = activations;
 			}
 		}
 	}
@@ -670,7 +668,6 @@ impl PropagatorExtension for Engine {
 				// (DEBUG ONLY) Check that all integers that where fixed by equality
 				// literals had their bound literals set to match.
 				for (iv, i) in mem::take(&mut self.state.check_int_fixed) {
-					let iv = IntView(IntViewInner::VarRef(iv));
 					debug_assert_eq!(iv.val(&self.state), Some(i));
 					let lb_lit = iv
 						.try_lit(&self.state, IntLitMeaning::GreaterEq(i))
@@ -722,50 +719,6 @@ impl ReasoningEngine for Engine {
 	type PropagationCtx<'a> = SolvingContext<'a>;
 }
 
-impl IntInspectionActions<State> for IntVal {
-	type Atom = BoolView;
-
-	fn domain(&self, _: &State) -> crate::IntSetVal {
-		(*self..=*self).into()
-	}
-
-	fn in_domain(&self, _: &State, val: IntVal) -> bool {
-		*self == val
-	}
-
-	fn lit_meaning(&self, _: &State, _: Self::Atom) -> Option<IntLitMeaning> {
-		None
-	}
-
-	fn lower_bound(&self, _: &State) -> IntVal {
-		*self
-	}
-
-	fn lower_bound_lit(&self, _: &State) -> Self::Atom {
-		true.into()
-	}
-
-	fn try_lit(&self, _: &State, meaning: IntLitMeaning) -> Option<Self::Atom> {
-		Some(
-			match meaning {
-				IntLitMeaning::Eq(v) => *self == v,
-				IntLitMeaning::NotEq(v) => *self != v,
-				IntLitMeaning::GreaterEq(v) => *self >= v,
-				IntLitMeaning::Less(v) => *self < v,
-			}
-			.into(),
-		)
-	}
-
-	fn upper_bound(&self, _: &State) -> IntVal {
-		*self
-	}
-
-	fn upper_bound_lit(&self, _: &State) -> Self::Atom {
-		true.into()
-	}
-}
-
 impl IntExplanationActions<State> for IntVarRef {
 	fn lit_relaxed(&self, ctx: &State, mut meaning: IntLitMeaning) -> (BoolView, IntLitMeaning) {
 		debug_assert!(
@@ -805,9 +758,13 @@ impl IntExplanationActions<State> for IntVarRef {
 }
 
 impl IntInspectionActions<State> for IntVarRef {
-	type Atom = BoolView;
+	fn bounds(&self, ctx: &State) -> (IntVal, IntVal) {
+		let lb = self.lower_bound(ctx);
+		let ub = self.upper_bound(ctx);
+		(lb, ub)
+	}
 
-	fn domain(&self, ctx: &State) -> crate::IntSetVal {
+	fn domain(&self, ctx: &State) -> IntSetVal {
 		ctx.int_vars[*self].domain(&ctx.trail)
 	}
 
@@ -825,7 +782,7 @@ impl IntInspectionActions<State> for IntVarRef {
 		}
 	}
 
-	fn lit_meaning(&self, ctx: &State, lit: Self::Atom) -> Option<IntLitMeaning> {
+	fn lit_meaning(&self, ctx: &State, lit: BoolView) -> Option<IntLitMeaning> {
 		let BoolViewInner::Lit(lit) = lit.0 else {
 			return None;
 		};
@@ -854,6 +811,11 @@ impl IntInspectionActions<State> for IntVarRef {
 
 	fn upper_bound_lit(&self, ctx: &State) -> BoolView {
 		ctx.int_vars[*self].upper_bound_lit(&ctx.trail)
+	}
+
+	fn val(&self, ctx: &State) -> Option<IntVal> {
+		let (lb, ub) = self.bounds(ctx);
+		if lb == ub { Some(lb) } else { None }
 	}
 }
 
@@ -921,19 +883,19 @@ impl State {
 		self.statistics.conflicts += 1;
 
 		// Switch to VSIDS if the number of conflicts exceeds the threshold
-		if let Some(conflicts) = self.config.vsids_after_conflict {
-			if !self.config.vsids_only
-				&& !self.config.toggle_vsids
-				&& self.statistics.conflicts > conflicts as u64
-			{
-				debug_assert!(!self.vsids);
-				self.vsids = true;
-				debug!(
-					vsids = self.vsids,
-					conflicts = self.statistics.conflicts,
-					"enable vsids after N conflicts"
-				);
-			}
+		if let Some(conflicts) = self.config.vsids_after_conflict
+			&& !self.config.vsids_only
+			&& !self.config.toggle_vsids
+			&& self.statistics.conflicts > conflicts as u64
+		{
+			debug_assert!(!self.vsids);
+			self.vsids = true;
+			self.config.vsids_after_conflict = None; // Only switch once
+			debug!(
+				vsids = self.vsids,
+				conflicts = self.statistics.conflicts,
+				"enable vsids after N conflicts"
+			);
 		}
 
 		if restart {
@@ -1012,6 +974,11 @@ impl State {
 		self.config.vsids_only = enable;
 		self.vsids = enable;
 	}
+}
+
+impl ReasoningContext for State {
+	type Atom = <Engine as ReasoningEngine>::Atom;
+	type Conflict = <Engine as ReasoningEngine>::Conflict;
 }
 
 impl TrailingActions for State {

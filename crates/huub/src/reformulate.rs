@@ -4,19 +4,22 @@
 use std::{
 	error::Error,
 	fmt::{self, Display},
+	num::NonZero,
 	ops::AddAssign,
 };
 
-use index_vec::{define_index_type, IndexVec};
+use index_vec::{IndexVec, define_index_type};
 use pindakaas::{
+	ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
 	propositional_logic::{Formula, TseitinEncoder},
 	solver::propagation::ExternalPropagation,
-	ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
 };
 use rangelist::IntervalIterator;
 use rustc_hash::FxHashSet;
 
 use crate::{
+	BoolDecision, BoolFormula, Clause, Decision, IntDecision, IntLitMeaning, IntSetVal, IntVal,
+	Model, Solver,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, ConstructionActions,
 		DecisionActions, InitActions, IntDecisionActions, IntInspectionActions, PropagationActions,
@@ -26,15 +29,13 @@ use crate::{
 		BoxedPropagator, Constraint, ModelBoolView, Propagator, SimplificationStatus,
 		SolverBoolView,
 	},
-	helpers::linear_transform::LinearTransform,
 	solver::{
+		BoolView, BoolViewInner, IntView, IntViewInner, View,
 		activation_list::{ActivationActionS, ActivationList},
 		int_var::{EncodingType, IntVar, IntVarRef},
 		trail::TrailedInt,
-		BoolView, BoolViewInner, IntView, IntViewInner, View,
 	},
-	BoolDecision, BoolFormula, Clause, Decision, IntDecision, IntLitMeaning, IntSetVal, IntVal,
-	Model, Solver,
+	views::{LinearBoolView, LinearView},
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -131,18 +132,17 @@ pub(crate) struct IntDecisionDef {
 	pub(crate) constraints: ActivationList,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-/// Inner storage for [`IntDecision`], kept private to prevent access from
-/// users.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+/// The internal representation of [`IntDecision`].
+///
+/// Note that this representation is not meant to be exposed to the user.
 pub(crate) enum IntDecisionInner {
-	/// Direct reference to an integer variable.
-	Var(IntDecisionIndex),
-	/// Constant integer value.
-	Const(i64),
-	/// Linear transformation of an integer variable.
-	Linear(LinearTransform, IntDecisionIndex),
-	/// Linear transformation of a Boolean variable.
-	Bool(LinearTransform, BoolDecision),
+	/// Constant Integer Value
+	Const(IntVal),
+	/// Linear View of an Integer Variable
+	Linear(LinearView<NonZero<IntVal>, IntVal, IntDecisionIndex>),
+	/// Linear View of an Boolean Literal.
+	Bool(LinearBoolView<NonZero<IntVal>, IntVal, BoolDecision>),
 }
 
 /// Context object used during the reformulation process that creates a
@@ -612,7 +612,7 @@ impl ReformulationMap {
 
 		let int_lit =
 			|slv: &mut Solver<Oracle>, iv: IntDecisionIndex, lit_meaning: IntLitMeaning| {
-				let iv = self.get_int(slv, IntDecision(IntDecisionInner::Var(iv)));
+				let iv = self.get_int(slv, IntDecision(IntDecisionInner::Linear(iv.into())));
 				iv.lit(slv, lit_meaning)
 			};
 
@@ -620,11 +620,7 @@ impl ReformulationMap {
 			Lit(l) => {
 				let idx = Into::<i32>::into(l.var()) as usize - 1;
 				let bv: BoolView = self.bool_map[idx];
-				if l.is_negated() {
-					!bv
-				} else {
-					bv
-				}
+				if l.is_negated() { !bv } else { bv }
 			}
 			Const(c) => c.into(),
 			IntEq(v, i) => int_lit(slv, v, IntLitMeaning::Eq(i)),
@@ -644,17 +640,15 @@ impl ReformulationMap {
 		use IntDecisionInner::*;
 
 		match iv.0 {
-			Var(i) => self.int_map[i],
 			Const(c) => (c).into(),
-			Linear(t, i) => self.int_map[i] * t.scale + t.offset,
-			Bool(t, bv) => {
-				let bv = self.get_bool(slv, bv);
+			Linear(lin) => self.int_map[lin.var] * lin.scale + lin.offset,
+			Bool(lin) => {
+				let bv = self.get_bool(slv, lin.var);
 				match bv.0 {
-					BoolViewInner::Lit(lit) => IntView(IntViewInner::Bool {
-						transformer: t,
-						lit,
-					}),
-					BoolViewInner::Const(b) => t.transform(b as IntVal).into(),
+					BoolViewInner::Lit(lit) => IntView(IntViewInner::Bool(LinearBoolView::new(
+						lin.scale, lin.offset, lit,
+					))),
+					BoolViewInner::Const(b) => lin.transform_val(b as IntVal).into(),
 				}
 			}
 		}
@@ -765,15 +759,14 @@ impl ReformulationMapBuilder {
 				IntVar::new_in(slv, dom.clone(), order_enc, direct_enc)
 			}
 			Domain::Alias(alias) => match alias.0 {
-				Var(idx) => self.get_or_create_int(model, slv, idx),
 				Const(c) => c.into(),
-				Linear(lt, idx) => {
-					let iv = self.get_or_create_int(model, slv, idx);
-					iv * lt.scale + lt.offset
+				Linear(lin) => {
+					let iv = self.get_or_create_int(model, slv, lin.var);
+					iv * lin.scale + lin.offset
 				}
-				Bool(lt, bv) => {
-					let bv = self.get_or_create_bool(model, slv, bv);
-					bv * lt.scale.get() + lt.offset
+				Bool(lin) => {
+					let bv = self.get_or_create_bool(model, slv, lin.var);
+					bv * lin.scale + lin.offset
 				}
 			},
 		};

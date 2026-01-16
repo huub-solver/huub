@@ -4,7 +4,7 @@
 use pindakaas::{Var as RawVar, VarRange};
 use rustc_hash::FxHashMap;
 
-use crate::{solver::int_var::IntVarRef, IntLitMeaning};
+use crate::{IntLitMeaning, solver::int_var::IntVarRef};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 /// A mapping of Boolean variables to integer variables of which they represent

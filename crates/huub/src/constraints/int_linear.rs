@@ -3,20 +3,21 @@
 //! constraint enforce a condition on the sum of (linear transformations of)
 //! integer decision variables.
 
-use std::ops::AddAssign;
+use std::{num::NonZero, ops::AddAssign};
 
 use itertools::{Either, Itertools};
 use pindakaas::{
-	bool_linear::{BoolLinAggregator, BoolLinExp, BoolLinVariant, BoolLinear},
 	Lit as RawLit, Unsatisfiable,
+	bool_linear::{BoolLinAggregator, BoolLinExp, BoolLinVariant, BoolLinear},
 };
 
 use crate::{
+	BoolDecision, BoolFormula, Conjunction, IntDecision, IntVal,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
 		ConstructionActions, InitActions, IntDecisionActions, IntInitActions, IntInspectionActions,
-		IntPropagationActions, IntSimplificationActions, PropagationActions, ReasoningEngine,
-		ReformulationActions, SimplificationActions, TrailingActions,
+		IntPropagationActions, IntSimplificationActions, PropagationActions, ReasoningContext,
+		ReasoningEngine, ReformulationActions, SimplificationActions, TrailingActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, ReasonBuilder,
@@ -25,12 +26,12 @@ use crate::{
 	helpers::opt_field::OptField,
 	reformulate::ReformulationError,
 	solver::{
+		BoolView, BoolViewInner, IntView, IntViewInner,
 		activation_list::{IntEvent, IntPropCond},
 		queue::PriorityLevel,
 		trail::TrailedInt,
-		BoolView, BoolViewInner, IntView, IntViewInner,
 	},
-	BoolDecision, BoolFormula, Conjunction, IntDecision, IntVal, LinearTransform, NonZeroIntVal,
+	views::LinearBoolView,
 };
 
 /// Representation of an integer equality constraint that cannot be unified.
@@ -495,11 +496,11 @@ where
 			let bool_terms: Vec<(RawLit, IntVal)> = terms
 				.iter()
 				.map(|&v| {
-					let IntViewInner::Bool { transformer, lit } = v.0 else {
+					let IntViewInner::Bool(lin) = v.0 else {
 						unreachable!()
 					};
-					offset += transformer.offset;
-					(lit, transformer.scale.into())
+					offset += lin.offset;
+					(lin.var, lin.scale.into())
 				})
 				.collect();
 			let bool_lin = BoolLinExp::from_terms(&bool_terms);
@@ -535,12 +536,11 @@ where
 			(
 				lin.iter_terms()
 					.map(|(lit, coeff)| {
-						IntView(IntViewInner::Bool {
-							transformer: LinearTransform::scaled(
-								NonZeroIntVal::new(coeff).unwrap(),
-							),
+						IntView(IntViewInner::Bool(LinearBoolView::new(
+							NonZero::new(coeff).unwrap(),
+							0,
 							lit,
-						})
+						)))
 					})
 					.collect_vec(),
 				op,
@@ -613,7 +613,7 @@ impl IntLinearLessEqBounds<IntView> {
 	/// solver.
 	pub fn post<E>(solver: &mut E, vars: impl IntoIterator<Item = IntView>, mut max: IntVal)
 	where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
+		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
 		let vars: Vec<IntView> = vars
@@ -680,10 +680,10 @@ where
 	#[tracing::instrument(name = "int_lin_le", level = "trace", skip(self, ctx))]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// If the reified variable is false, skip propagation
-		if let Some(r) = self.reification.get() {
-			if !r.val(ctx).unwrap_or(true) {
-				return Ok(());
-			}
+		if let Some(r) = self.reification.get()
+			&& !r.val(ctx).unwrap_or(true)
+		{
+			return Ok(());
 		}
 
 		// get the difference between the right-hand-side value and the sum of variable
@@ -731,13 +731,13 @@ impl IntLinearLessEqImpBounds<IntView, RawLit> {
 		mut max: IntVal,
 		reification: BoolView,
 	) where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
+		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
 		let reification = match reification.0 {
 			BoolViewInner::Lit(r) => r,
 			BoolViewInner::Const(true) => {
-				return IntLinearLessEqBounds::<IntView>::post(solver, vars, max)
+				return IntLinearLessEqBounds::<IntView>::post(solver, vars, max);
 			}
 			BoolViewInner::Const(false) => return,
 		};
@@ -770,13 +770,13 @@ impl IntLinearNotEqImpValue<IntView, RawLit> {
 		mut violation: IntVal,
 		reification: BoolView,
 	) where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
+		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
 		let reification = match reification.0 {
 			BoolViewInner::Lit(r) => r,
 			BoolViewInner::Const(true) => {
-				return IntLinearNotEqValue::post(solver, vars, violation)
+				return IntLinearNotEqValue::post(solver, vars, violation);
 			}
 			BoolViewInner::Const(false) => return,
 		};
@@ -808,7 +808,7 @@ impl IntLinearNotEqValue<IntView> {
 	/// solver.
 	pub fn post<E>(solver: &mut E, vars: impl IntoIterator<Item = IntView>, mut violation: IntVal)
 	where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
+		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
 		let vars: Vec<IntView> = vars
@@ -848,10 +848,11 @@ impl<const R: usize, IV, BV> IntLinearNotEqValueImpl<R, IV, BV> {
 	/// Helper function to construct the reason for propagation given the index
 	/// of the variable in the list of variables to sum or the length of the
 	/// list, if explaining the reification.
-	fn reason<Ctx, A>(&self, data: usize) -> impl ReasonBuilder<Ctx, A> + '_
+	fn reason<Ctx>(&self, data: usize) -> impl ReasonBuilder<Ctx> + '_
 	where
-		IV: IntDecisionActions<Ctx, Atom = A>,
-		BV: Clone + Into<A>,
+		Ctx: ReasoningContext + ?Sized,
+		IV: IntDecisionActions<Ctx>,
+		BV: Clone + Into<Ctx::Atom>,
 	{
 		move |ctx: &mut Ctx| {
 			let mut conj: Vec<_> = self
@@ -866,10 +867,10 @@ impl<const R: usize, IV, BV> IntLinearNotEqValueImpl<R, IV, BV> {
 					}
 				})
 				.collect();
-			if let Some(r) = self.reification.get() {
-				if data != self.terms.len() {
-					conj.push(r.clone().into());
-				}
+			if let Some(r) = self.reification.get()
+				&& data != self.terms.len()
+			{
+				conj.push(r.clone().into());
 			}
 			conj
 		}
@@ -951,19 +952,20 @@ where
 
 #[cfg(test)]
 mod tests {
+	use std::num::NonZero;
+
 	use expect_test::expect;
 	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
 	use crate::{
+		BoolDecision, Model,
 		constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
 		reformulate::InitConfig,
-		rel,
 		solver::{
-			int_var::{EncodingType, IntVar},
 			Solver,
+			int_var::{EncodingType, IntVar},
 		},
-		BoolDecision, Model, NonZeroIntVal,
 	};
 
 	#[test]
@@ -1002,11 +1004,7 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		IntLinearLessEqBounds::post(
-			&mut slv,
-			vec![a * NonZeroIntVal::new(-2).unwrap(), -b, -c],
-			-6,
-		);
+		IntLinearLessEqBounds::post(&mut slv, vec![a * NonZero::new(-2).unwrap(), -b, -c], -6);
 
 		slv.expect_solutions(
 			&[a, b, c],
@@ -1054,7 +1052,7 @@ mod tests {
 			EncodingType::Lazy,
 		);
 
-		IntLinearLessEqBounds::post(&mut slv, vec![a * NonZeroIntVal::new(2).unwrap(), b, c], 6);
+		IntLinearLessEqBounds::post(&mut slv, vec![a * NonZero::new(2).unwrap(), b, c], 6);
 
 		slv.expect_solutions(
 			&[a, b, c],
@@ -1103,7 +1101,7 @@ mod tests {
 			EncodingType::Eager,
 		);
 
-		IntLinearNotEqValue::post(&mut slv, vec![a * NonZeroIntVal::new(2).unwrap(), b, c], 6);
+		IntLinearNotEqValue::post(&mut slv, vec![a * NonZero::new(2).unwrap(), b, c], 6);
 
 		slv.expect_solutions(
 			&[a, b, c],

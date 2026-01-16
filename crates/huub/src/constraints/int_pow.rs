@@ -4,11 +4,13 @@
 
 use std::ops::AddAssign;
 
+use itertools::{Itertools, MinMaxResult};
 use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Unsatisfiable};
 
 use crate::{
+	IntVal,
 	actions::{
-		InitActions, IntDecisionActions, IntInspectionActions, ReasoningEngine,
+		InitActions, IntDecisionActions, IntInspectionActions, ReasoningContext, ReasoningEngine,
 		ReformulationActions, TrailingActions,
 	},
 	constraints::{
@@ -17,9 +19,8 @@ use crate::{
 	},
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, BoolView, IntLitMeaning, IntView,
+		BoolView, IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel,
 	},
-	IntVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -96,7 +97,7 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 		}
 
 		let mut reason = CachedReason::new(|ctx: &mut E::PropagationCtx<'_>| {
-			vec![
+			[
 				self.result.lower_bound_lit(ctx),
 				self.result.upper_bound_lit(ctx),
 				self.exponent.lower_bound_lit(ctx),
@@ -105,7 +106,7 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 		});
 
 		// Propagate lower bound
-		let mut min = vec![
+		let mut min = [
 			(res_lb as f64).powf(1_f64 / (exp_ub as f64)),
 			(res_ub as f64).powf(1_f64 / (exp_pos_uneven as f64)),
 			(res_lb as f64).powf(1_f64 / (exp_pos_uneven as f64)),
@@ -167,7 +168,7 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 
 		let (exp_lb, exp_ub) = self.exponent.bounds(ctx);
 		let mut reason = CachedReason::new(|ctx: &mut E::PropagationCtx<'_>| {
-			vec![
+			[
 				self.result.lower_bound_lit(ctx),
 				self.result.upper_bound_lit(ctx),
 				self.base.lower_bound_lit(ctx),
@@ -198,8 +199,29 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 		Ok(())
 	}
 
-	/// Propagate the bounds of result variable based on the bounds of base and
-	/// exponent variables.
+	/// Propagates bounds for integer power constraints (`x^y`) over integer
+	/// intervals.
+	///
+	/// This implementation analyzes the extrema of S = { x^y | x ∈ [a, b], y ∈
+	/// [c, d] }, where (a, b, c, d) are integer bounds. The main idea is that
+	/// the global min/max of S always occur at a small set of candidate (x, y)
+	/// pairs, constructed as follows:
+	/// - For the base: X = {a, b} ∪ ({0, 1, -1} ∩ [a, b])
+	/// - For the exponent: Y = {c, d} ∪ ({0} ∩ [c, d]) ∪ {one even y, one odd y
+	///   if both parities appear in [c, d]}
+	///
+	/// Case-by-case analysis:
+	/// 1. For fixed y, extrema of x ↦ x^y on [a, b] are at endpoints, 0 (if
+	///    present), ±1 (if present).
+	/// 2. For fixed x, extrema of y ↦ x^y on [c, d] are at endpoints, and for x
+	///    = ±1, at both an even and odd y (if both exist).
+	/// 3. Any global extremum must be an extremum in at least one direction, so
+	///    the product of these candidate sets suffices.
+	/// 4. Special care is taken for undefined cases (e.g., 0^0 or negative
+	///    exponents with base 0).
+	///
+	/// Thus, by evaluating x^y for all (x, y) in X × Y (excluding undefined
+	/// cases), we find the true min and max of S.
 	fn propagate_result<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
@@ -209,77 +231,52 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 	{
 		let (base_lb, base_ub) = self.base.bounds(ctx);
 		let (exp_lb, exp_ub) = self.exponent.bounds(ctx);
+
+		let bounds = base_lb..=base_ub;
+		let base_candidates = [
+			Some(base_lb),
+			Some(base_ub),
+			// Add 0, 1, -1 if they are within bounds
+			if bounds.contains(&0) { Some(0) } else { None },
+			if bounds.contains(&1) { Some(1) } else { None },
+			if bounds.contains(&-1) { Some(-1) } else { None },
+		];
+
 		let exp_largest_even = if exp_ub % 2 == 0 || exp_lb == exp_ub {
 			exp_ub
 		} else {
 			exp_ub - 1
 		};
-		let exp_smallest_even = if exp_lb % 2 == 0 || exp_lb == exp_ub {
-			exp_lb
-		} else {
-			exp_lb + 1
-		};
-		let exp_largest_uneven = if exp_ub % 2 == 1 || exp_lb == exp_ub {
+		let exp_largest_odd = if exp_ub % 2 == 1 || exp_lb == exp_ub {
 			exp_ub
 		} else {
 			exp_ub - 1
 		};
-		let exp_smallest_uneven = if exp_lb % 2 == 1 || exp_lb == exp_ub {
-			exp_lb
-		} else {
-			exp_lb + 1
+		let exp_candidates = [exp_lb, exp_ub, exp_largest_even, exp_largest_odd];
+
+		// Compute the extrema candidates from from `base_candidates` and
+		// `exp_candidates`
+		let (lb, ub) = match base_candidates
+			.iter()
+			.flatten()
+			.flat_map(|&b| exp_candidates.iter().filter_map(move |&e| pow(b, e)))
+			.minmax()
+		{
+			MinMaxResult::NoElements => unreachable!(),
+			MinMaxResult::OneElement(b) => (b, b),
+			MinMaxResult::MinMax(lb, ub) => (lb, ub),
 		};
 
 		let mut reason = CachedReason::new(|ctx: &mut E::PropagationCtx<'_>| {
-			vec![
+			[
 				self.base.lower_bound_lit(ctx),
 				self.base.upper_bound_lit(ctx),
 				self.exponent.lower_bound_lit(ctx),
 				self.exponent.upper_bound_lit(ctx),
 			]
 		});
-
-		let base_bnd = base_lb..=base_ub;
-		let min: IntVal = [
-			pow(base_lb, exp_lb),             // base and exp always both positive
-			pow(base_lb, exp_largest_uneven), // base maybe negative
-			pow(base_ub, exp_smallest_even),  // negative base, but forced even exponent
-			if base_bnd.contains(&-1) && exp_lb != exp_ub {
-				Some(-1)
-			} else if base_bnd.contains(&0)
-				|| (base_bnd != (1..=1) && base_bnd != (-1..=-1) && exp_lb < 0)
-			{
-				Some(0)
-			} else {
-				None
-			},
-		]
-		.into_iter()
-		.flatten()
-		.min()
-		.unwrap();
-		self.result.set_lower_bound(ctx, min, &mut reason)?;
-
-		let max: IntVal = vec![
-			pow(base_ub, exp_ub),              // base and exp have positive upper bounds
-			pow(base_lb, exp_largest_even),    // base maybe negative
-			pow(base_ub, exp_smallest_uneven), // negative base, but forced uneven exponent
-			if base_bnd.contains(&-1) && exp_lb != exp_ub {
-				Some(1)
-			} else if base_bnd.contains(&0)
-				|| (base_bnd != (1..=1) && base_bnd != (-1..=-1) && exp_lb < 0)
-			{
-				Some(0)
-			} else {
-				None
-			},
-		]
-		.into_iter()
-		.flatten()
-		.max()
-		.unwrap();
-
-		self.result.set_upper_bound(ctx, max, &mut reason)?;
+		self.result.set_lower_bound(ctx, lb, &mut reason)?;
+		self.result.set_upper_bound(ctx, ub, &mut reason)?;
 		Ok(())
 	}
 }
@@ -293,8 +290,8 @@ impl IntPowBounds<IntView, IntView, IntView> {
 		result: IntView,
 	) -> Result<(), Unsatisfiable>
 	where
-		E: AddAssign<BoxedPropagator> + ClauseDatabase + ?Sized,
-		IntView: IntDecisionActions<E, Atom = BoolView>,
+		E: AddAssign<BoxedPropagator> + ClauseDatabase + ReasoningContext<Atom = BoolView> + ?Sized,
+		IntView: IntDecisionActions<E>,
 	{
 		// Ensure that if the base is negative, then the exponent cannot be zero
 		let (exp_lb, exp_ub) = exponent.bounds(solver);
@@ -410,8 +407,8 @@ mod tests {
 	use crate::{
 		constraints::int_pow::IntPowBounds,
 		solver::{
-			int_var::{EncodingType, IntVar},
 			Solver,
+			int_var::{EncodingType, IntVar},
 		},
 	};
 

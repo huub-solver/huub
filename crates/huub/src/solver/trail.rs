@@ -10,8 +10,8 @@ use pindakaas::{Lit as RawLit, Var as RawVar};
 use tracing::trace;
 
 use crate::{
-	actions::{BoolInspectionActions, TrailingActions},
 	IntVal,
+	actions::{BoolInspectionActions, TrailingActions},
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -392,12 +392,12 @@ index_vec::define_index_type! {
 
 #[cfg(test)]
 mod tests {
-	use pindakaas::{solver::cadical::Cadical, ClauseDatabase};
+	use pindakaas::{ClauseDatabase, solver::cadical::Cadical};
 
 	use crate::{
+		IntVal,
 		actions::TrailingActions,
 		solver::trail::{Trail, TrailEvent},
-		IntVal,
 	};
 
 	#[test]

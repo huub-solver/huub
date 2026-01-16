@@ -12,7 +12,7 @@ use crate::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
 	},
 	reformulate::ReformulationError,
-	solver::{activation_list::IntPropCond, queue::PriorityLevel, IntLitMeaning, IntView},
+	solver::{IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -50,13 +50,13 @@ where
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
 
-		if let Some(c) = self.min.val(ctx) {
-			if self.vars.iter().any(|v| v.val(ctx) == Some(c)) {
-				for v in &self.vars {
-					v.set_lower_bound(ctx, c, [self.min.lower_bound_lit(ctx)])?;
-				}
-				return Ok(SimplificationStatus::Subsumed);
+		if let Some(c) = self.min.val(ctx)
+			&& self.vars.iter().any(|v| v.val(ctx) == Some(c))
+		{
+			for v in &self.vars {
+				v.set_lower_bound(ctx, c, [self.min.lower_bound_lit(ctx)])?;
 			}
+			return Ok(SimplificationStatus::Subsumed);
 		}
 
 		Ok(SimplificationStatus::NoFixpoint)
@@ -132,7 +132,7 @@ mod tests {
 	use itertools::Itertools;
 	use tracing_test::traced_test;
 
-	use crate::{array_maximum_int, array_minimum_int, reformulate::InitConfig, Decision, Model};
+	use crate::{Decision, Model, array_maximum_int, array_minimum_int, reformulate::InitConfig};
 
 	#[test]
 	#[traced_test]

@@ -7,20 +7,23 @@ use std::{
 	ops::AddAssign,
 };
 
+use pindakaas::Lit as RawLit;
+
 use crate::{
+	Conjunction, IntVal,
 	actions::{
-		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions,
-		ReasoningEngine, ReformulationActions, TrailingActions,
+		BoolInspectionActions, ConstructionActions, InitActions, IntDecisionActions,
+		IntInspectionActions, ReasoningContext, ReasoningEngine, ReformulationActions,
+		TrailingActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
 	},
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt, IntLitMeaning,
-		IntView,
+		IntLitMeaning, IntView, activation_list::IntPropCond, int_var::IntVarRef,
+		queue::PriorityLevel, trail::TrailedInt,
 	},
-	Conjunction, IntVal,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -80,13 +83,14 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 	/// Lower bound explanation: Could not have this value earlier (=upper bound
 	/// explanation) and some later value requires the lower bound (recursive
 	/// lower bound).
-	fn explain_lower<Ctx, Atom>(
+	fn explain_lower<Ctx>(
 		&self,
 		i: usize,
 		k: IntVal,
-	) -> impl FnOnce(&mut Ctx) -> Conjunction<Atom> + '_
+	) -> impl FnOnce(&mut Ctx) -> Conjunction<Ctx::Atom> + '_
 	where
-		I: IntDecisionActions<Ctx, Atom = Atom>,
+		Ctx: ReasoningContext + ?Sized,
+		I: IntDecisionActions<Ctx>,
 	{
 		move |ctx: &mut Ctx| {
 			let mut reason = Vec::new();
@@ -120,13 +124,14 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 	}
 
 	/// Upper bound explanation: All previous elements are smaller.
-	fn explain_upper<Ctx, Atom>(
+	fn explain_upper<Ctx>(
 		&self,
 		i: usize,
 		k: IntVal,
-	) -> impl FnOnce(&mut Ctx) -> Conjunction<Atom> + '_
+	) -> impl FnOnce(&mut Ctx) -> Conjunction<Ctx::Atom> + '_
 	where
-		I: IntDecisionActions<Ctx, Atom = Atom>,
+		Ctx: ReasoningContext + ?Sized,
+		I: IntDecisionActions<Ctx>,
 	{
 		move |ctx: &mut Ctx| {
 			self.vars
@@ -201,7 +206,7 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 	/// solver.
 	pub fn new<E>(engine: &mut E, vars: Vec<I>) -> Self
 	where
-		E: ConstructionActions + ?Sized,
+		E: ConstructionActions + ReasoningContext + ?Sized,
 		I: IntInspectionActions<E>,
 	{
 		let n = vars.len();
@@ -344,8 +349,11 @@ impl IntSeqPrecedeChainBounds<IntView> {
 	/// solver.
 	pub fn post<E>(solver: &mut E, mut vars: Vec<IntView>)
 	where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
+		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
+		E::Atom: From<bool> + From<RawLit>,
 		IntView: IntInspectionActions<E>,
+		IntVarRef: IntInspectionActions<E>,
+		RawLit: BoolInspectionActions<E>,
 	{
 		// Variables that do not allow positive values are irrelevant.
 		vars.retain(|&v| v.upper_bound(solver) > 0);
@@ -368,10 +376,13 @@ where
 		&mut self,
 		ctx: &mut E::PropagationCtx<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
+		if !self.initialized {
+			// Variables that do not allow positive values are irrelevant.
+			self.vars.retain(|v| v.upper_bound(ctx) > 0);
+			self.vars.shrink_to_fit();
+		}
+
 		self.propagate(ctx)?;
-
-		// TODO: Can we remove negative values here?
-
 		if self.vars.iter().all(|v| v.val(ctx).is_some()) {
 			return Ok(SimplificationStatus::Subsumed);
 		}
@@ -459,13 +470,14 @@ impl<I> IntValuePrecedeChainValue<I> {
 	/// Lower bound explanation: Could not have this index earlier (=upper bound
 	/// explanation) and some later index requires the lower bound (recursive
 	/// lower bound).
-	fn explain_lower<Ctx, Atom>(
+	fn explain_lower<Ctx>(
 		&self,
 		i: usize,
 		j: usize,
-	) -> impl FnOnce(&mut Ctx) -> Conjunction<Atom> + '_
+	) -> impl FnOnce(&mut Ctx) -> Conjunction<Ctx::Atom> + '_
 	where
-		I: IntDecisionActions<Ctx, Atom = Atom>,
+		Ctx: ReasoningContext + ?Sized,
+		I: IntDecisionActions<Ctx>,
 	{
 		move |ctx: &mut Ctx| {
 			let mut reason = Vec::new();
@@ -481,27 +493,26 @@ impl<I> IntValuePrecedeChainValue<I> {
 				let mut i = i + 1;
 				let mut j = j;
 
-				loop {
+				while j < self.values.len() {
 					// A lower bound is explained by stating that all untracked values are excluded
 					// (< min value, > max value, all holes), as well as all values with smaller
 					// indices.
-					if let Some(lb) = self.lowest_index(ctx, i) {
-						if lb > j {
-							reason.push(
-								self.vars[i].lit(ctx, IntLitMeaning::GreaterEq(self.min_val)),
-							);
-							reason
-								.push(self.vars[i].lit(ctx, IntLitMeaning::Less(self.max_val + 1)));
-							reason.extend(
-								self.holes
-									.iter()
-									.map(|&h| self.vars[i].lit(ctx, IntLitMeaning::NotEq(h))),
-							);
-							reason.extend((0..j).map(|k| {
+					if let Some(lb) = self.lowest_index(ctx, i).unwrap_or(Some(j + 1))
+						&& lb > j
+					{
+						reason.push(self.vars[i].lit(ctx, IntLitMeaning::GreaterEq(self.min_val)));
+						reason.push(self.vars[i].lit(ctx, IntLitMeaning::Less(self.max_val + 1)));
+						reason.extend(
+							self.holes
+								.iter()
+								.map(|&h| self.vars[i].lit(ctx, IntLitMeaning::NotEq(h))),
+						);
+						reason.extend(
+							(0..j).map(|k| {
 								self.vars[i].lit(ctx, IntLitMeaning::NotEq(self.values[k]))
-							}));
-							break;
-						}
+							}),
+						);
+						break;
 					}
 					if self.vars[i].in_domain(ctx, self.values[j - 1]) {
 						i += 1;
@@ -523,13 +534,14 @@ impl<I> IntValuePrecedeChainValue<I> {
 
 	/// Upper bound explanation: All previous indices are smaller (exclude
 	/// values with larger index).
-	fn explain_upper<Ctx, Atom>(
+	fn explain_upper<Ctx>(
 		&self,
 		i: usize,
 		j: usize,
-	) -> impl FnOnce(&mut Ctx) -> Conjunction<Atom> + '_
+	) -> impl FnOnce(&mut Ctx) -> Conjunction<Ctx::Atom> + '_
 	where
-		I: IntDecisionActions<Ctx, Atom = Atom>,
+		Ctx: ReasoningContext + ?Sized,
+		I: IntDecisionActions<Ctx>,
 	{
 		move |ctx: &mut Ctx| {
 			self.vars
@@ -564,11 +576,11 @@ impl<I> IntValuePrecedeChainValue<I> {
 				ctx.set_trailed_int(self.first_val[i], up as IntVal);
 			}
 			// The lower bound will be needed for the backward pass.
-			if let Some(lb) = self.lowest_index(ctx, i) {
-				if low < lb {
-					ctx.set_trailed_int(self.last[lb], i as IntVal);
-					low = lb;
-				}
+			if let Ok(Some(lb)) = self.lowest_index(ctx, i)
+				&& low < lb
+			{
+				ctx.set_trailed_int(self.last[lb], i as IntVal);
+				low = lb;
 			}
 		}
 
@@ -598,20 +610,21 @@ impl<I> IntValuePrecedeChainValue<I> {
 	/// Get the lower bound for the index in values, None if any options outside
 	/// values are still in the domain. Has to exclude values below and above
 	/// the range of values, then all holes, finally values with lower index.
-	fn lowest_index<Ctx>(&self, ctx: &mut Ctx, i: usize) -> Option<usize>
+	fn lowest_index<Ctx>(&self, ctx: &mut Ctx, i: usize) -> Result<Option<usize>, ()>
 	where
+		Ctx: ReasoningContext + ?Sized,
 		I: IntInspectionActions<Ctx>,
 	{
 		let (lb, ub) = self.vars[i].bounds(ctx);
 		// Easy case with no lower index bound.
 		if lb < self.min_val || ub > self.max_val {
-			return None;
+			return Ok(None);
 		}
 		// Shortcut for fixed variables.
 		if lb == ub {
-			return self.mapping[(lb - self.min_val) as usize];
+			return Ok(self.mapping[(lb - self.min_val) as usize]);
 		}
-		// Iteration over holes (via nex_hole for efficiency).
+		// Iteration over holes (via next_hole for efficiency).
 		let mut h = max(lb, self.min_hole);
 		while ((h - self.min_hole) as usize) < self.next_hole.len() {
 			h = self.next_hole[(h - self.min_hole) as usize];
@@ -619,17 +632,18 @@ impl<I> IntValuePrecedeChainValue<I> {
 				break;
 			}
 			if self.vars[i].in_domain(ctx, h) {
-				return None;
+				return Ok(None);
 			}
 			h += 1;
 		}
 		// Find the first possible index in values.
 		for (j, &val) in self.values.iter().enumerate() {
 			if self.vars[i].in_domain(ctx, val) {
-				return Some(j + 1);
+				return Ok(Some(j + 1));
 			}
 		}
-		Some(self.values.len() + 1)
+		// Domain is empty - already in a failure state
+		Err(())
 	}
 
 	/// Create a new [`ValuePrecedeChainValue`] propagator
@@ -861,7 +875,7 @@ impl IntValuePrecedeChainValue<IntView> {
 	/// solver.
 	pub fn post<E>(solver: &mut E, values: Vec<IntVal>, mut vars: Vec<IntView>)
 	where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
+		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
 		// Variables that do not any tracked values are irrelevant.
@@ -870,63 +884,8 @@ impl IntValuePrecedeChainValue<IntView> {
 			return;
 		}
 		vars.shrink_to_fit();
-		let n = vars.len();
-
-		let first = (0..=values.len())
-			.map(|i| {
-				if i == 0 {
-					solver.new_trailed_int(0)
-				} else {
-					solver.new_trailed_int(vars.len() as IntVal - 1)
-				}
-			})
-			.collect();
-		let last = (0..=values.len())
-			.map(|i| {
-				if i == 0 {
-					solver.new_trailed_int(IntVal::MIN)
-				} else {
-					solver.new_trailed_int(IntVal::MAX)
-				}
-			})
-			.collect();
-		let first_val = (0..n).map(|_| solver.new_trailed_int(0)).collect();
-		let max_last = solver.new_trailed_int(0);
-		// Set up some data structures to deal with holes in values more efficiently.
-		let min_val = *values.iter().min().unwrap_or(&IntVal::MAX);
-		let max_val = *values.iter().max().unwrap_or(&IntVal::MIN);
-		let holes = (min_val..=max_val)
-			.filter(|&i| values.iter().all(|&v| v != i))
-			.collect::<Vec<_>>();
-		let min_hole = *holes.iter().min().unwrap_or(&0);
-		let mut next_hole = vec![0; (*holes.iter().max().unwrap_or(&-1) - min_hole + 1) as usize];
-		let mut cur_hole = 0;
-		for (i, h) in next_hole.iter_mut().enumerate() {
-			if i as IntVal + min_hole > holes[cur_hole] {
-				cur_hole += 1;
-			}
-			*h = holes[cur_hole];
-		}
-		let mut mapping = vec![None; (max_val - min_val + 1) as usize];
-		for (i, &val) in values.iter().enumerate() {
-			mapping[(val - min_val) as usize] = Some(i + 1);
-		}
-
-		*solver += Box::new(Self {
-			values,
-			vars: vars.clone(),
-			initialized: false,
-			first,
-			last,
-			first_val,
-			max_last,
-			min_val,
-			max_val,
-			holes,
-			min_hole,
-			next_hole,
-			mapping,
-		});
+		let con = IntValuePrecedeChainValue::new(solver, values, vars);
+		*solver += Box::new(con);
 	}
 }
 
@@ -939,10 +898,18 @@ where
 		&mut self,
 		ctx: &mut E::PropagationCtx<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
+		if self.values.len() < 2 {
+			return Ok(SimplificationStatus::Subsumed);
+		}
+
+		if !self.initialized {
+			// Variables that do not allow any tracked values are irrelevant.
+			self.vars
+				.retain(|var| self.values.iter().any(|&val| var.in_domain(ctx, val)));
+			self.vars.shrink_to_fit();
+		}
+
 		self.propagate(ctx)?;
-
-		// TODO: Can we eliminate variables without tracked values here?
-
 		if self.vars.iter().all(|v| v.val(ctx).is_some()) {
 			return Ok(SimplificationStatus::Subsumed);
 		}
@@ -1002,7 +969,13 @@ where
 			if k > 0 && ctx.trailed_int(self.last[k - 1]) == i as IntVal {
 				k -= 1;
 			};
-			if let Some(lb) = self.lowest_index(ctx, i) {
+			let li = self.lowest_index(ctx, i);
+			if li.is_err() {
+				// There is already a conflict waiting to propagate, no need for further
+				// propagation
+				return Ok(());
+			}
+			if let Ok(Some(lb)) = li {
 				// Deal with increase of lower bound.
 				if lb > k {
 					ctx.set_trailed_int(self.last[lb], i as IntVal);
@@ -1015,7 +988,7 @@ where
 					continue;
 				}
 			}
-			// Deal with moving the last possibility to have value k for the first.
+			// Deal with moving the last possibility to have value k for the first time.
 			if ctx.trailed_int(self.last[k]) == i as IntVal
 				&& !self.vars[i].in_domain(ctx, self.values[k - 1])
 			{
@@ -1034,13 +1007,13 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
+		IntVal,
 		constraints::int_value_precede::{IntSeqPrecedeChainBounds, IntValuePrecedeChainValue},
 		solver::{
-			int_var::{EncodingType, IntVar},
 			Solver,
 			Value::{self, Int},
+			int_var::{EncodingType, IntVar},
 		},
-		IntVal,
 	};
 
 	#[test]

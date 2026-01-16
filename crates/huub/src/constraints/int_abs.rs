@@ -10,7 +10,7 @@ use pindakaas::Lit as RawLit;
 
 use crate::{
 	actions::{
-		ConstructionActions, InitActions, IntDecisionActions, ReasoningEngine,
+		ConstructionActions, InitActions, IntDecisionActions, ReasoningContext, ReasoningEngine,
 		ReformulationActions, TrailingActions,
 	},
 	constraints::{
@@ -19,8 +19,8 @@ use crate::{
 	},
 	reformulate::ReformulationError,
 	solver::{
-		activation_list::IntPropCond, queue::PriorityLevel, BoolView, BoolViewInner, IntLitMeaning,
-		IntView,
+		BoolView, BoolViewInner, IntLitMeaning, IntView, activation_list::IntPropCond,
+		queue::PriorityLevel,
 	},
 };
 
@@ -43,8 +43,11 @@ impl IntAbsBounds<IntView, IntView, RawLit> {
 	/// Create a new [`IntAbsBounds`] propagator and post it in the solver.
 	pub(crate) fn post<E>(solver: &mut E, origin: IntView, abs: IntView)
 	where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
-		IntView: IntDecisionActions<E, Atom = BoolView>,
+		E: AddAssign<BoxedPropagator>
+			+ ConstructionActions
+			+ ReasoningContext<Atom = BoolView>
+			+ ?Sized,
+		IntView: IntDecisionActions<E>,
 	{
 		let BoolViewInner::Lit(origin_positive) = origin.lit(solver, IntLitMeaning::GreaterEq(0)).0
 		else {
@@ -204,9 +207,9 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
+		Solver,
 		constraints::int_abs::IntAbsBounds,
 		solver::int_var::{EncodingType, IntVar},
-		Solver,
 	};
 
 	#[test]

@@ -14,7 +14,7 @@ use std::{
 	fmt::{self, Debug, Display, Formatter},
 	hash::Hash,
 	mem,
-	num::NonZeroI32,
+	num::{NonZero, NonZeroI32},
 	ops::{Add, AddAssign, Deref, Mul, Neg, Not},
 	rc::Rc,
 };
@@ -22,37 +22,38 @@ use std::{
 use flatzinc_serde::FlatZinc;
 use itertools::Itertools;
 use pindakaas::{
-	solver::{
-		cadical::Cadical,
-		propagation::{ExternalPropagation, SolvingActions},
-		Assumptions, FailedAssumptions, LearnCallback, SolveResult as SatSolveResult, TermSignal,
-		TerminateCallback,
-	},
 	BoolVal, ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
 	Valuation as SatValuation,
+	solver::{
+		Assumptions, FailedAssumptions, LearnCallback, SolveResult as SatSolveResult, TermSignal,
+		TerminateCallback,
+		cadical::Cadical,
+		propagation::{ExternalPropagation, SolvingActions},
+	},
 };
-use rangelist::RangeList;
 use tracing::debug;
 
 use crate::{
+	Clause, IntSetVal, IntVal, Model,
 	actions::{
 		BoolInspectionActions, BoolPropagationActions, BrancherInitActions, ConstructionActions,
 		DecisionActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
-		IntPropagationActions, TrailingActions,
+		IntPropagationActions, PropagationActions, ReasoningContext, ReasoningEngine,
+		TrailingActions,
 	},
 	branchers::BoxedBrancher,
-	constraints::{BoxedPropagator, Conflict, ReasonBuilder},
+	constraints::{BoxedPropagator, ReasonBuilder},
 	flatzinc::{FlatZincError, FlatZincStatistics},
 	reformulate::InitConfig,
 	solver::{
-		engine::{Engine, State},
+		engine::Engine,
 		initialization_context::InitializationContext,
 		int_var::{DirectStorage, IntVarRef, OrderStorage},
 		queue::PropagatorInfo,
 		solving_context::SolvingContext,
 		trail::TrailedInt,
 	},
-	Clause, IntSetVal, IntVal, LinearTransform, Model, NonZeroIntVal,
+	views::{LinearBoolView, LinearView},
 };
 
 /// Trait implemented by the object given to the callback on detecting failure
@@ -130,26 +131,12 @@ pub struct IntView(pub(crate) IntViewInner);
 ///
 /// Note that this representation is not meant to be exposed to the user.
 pub(crate) enum IntViewInner {
-	/// (Raw) Integer Variable
-	/// Reference to location in the Engine's State
-	VarRef(IntVarRef),
 	/// Constant Integer Value
 	Const(IntVal),
 	/// Linear View of an Integer Variable
-	Linear {
-		/// Linear transformation on the integer value of the variable.
-		transformer: LinearTransform,
-		/// Reference to an integer variable.
-		var: IntVarRef,
-	},
+	Linear(LinearView<NonZero<IntVal>, IntVal, IntVarRef>),
 	/// Linear View of an Boolean Literal.
-	Bool {
-		/// Linear transformation on the integer value of the Boolean literal.
-		transformer: LinearTransform,
-		/// The Boolean literal that is being treated as an integer (`false` ->
-		/// `0` and `true` -> `1`).
-		lit: RawLit,
-	},
+	Bool(LinearBoolView<NonZero<IntVal>, IntVal, RawLit>),
 }
 
 /// An assumption checker that can be used when no assumptions are used.
@@ -251,32 +238,6 @@ pub enum View {
 	Int(IntView),
 }
 
-#[inline]
-/// Internal method used to propagate a boolean variable used as a integer
-/// given a literal description to be enforced.
-fn propagate_bool_lin<Ctx>(
-	ctx: &mut Ctx,
-	lit: RawLit,
-	lit_req: IntLitMeaning,
-	reason: impl ReasonBuilder<Ctx, BoolView>,
-) -> Result<(), Conflict<RawLit>>
-where
-	RawLit: BoolPropagationActions<Ctx, Atom = BoolView, Conflict = Conflict<RawLit>>,
-{
-	match lit_req {
-		IntLitMeaning::Eq(0) | IntLitMeaning::Less(1) | IntLitMeaning::NotEq(1) => {
-			lit.set_val(ctx, false, reason)
-		}
-		IntLitMeaning::Eq(1) | IntLitMeaning::GreaterEq(1) | IntLitMeaning::NotEq(0) => {
-			lit.set(ctx, reason)
-		}
-		IntLitMeaning::Eq(_) => Err(Conflict::new(ctx, None, reason)),
-		IntLitMeaning::GreaterEq(i) if i > 1 => Err(Conflict::new(ctx, None, reason)),
-		IntLitMeaning::Less(i) if i <= 0 => Err(Conflict::new(ctx, None, reason)),
-		IntLitMeaning::NotEq(_) | IntLitMeaning::GreaterEq(_) | IntLitMeaning::Less(_) => Ok(()),
-	}
-}
-
 /// Helper function that calls [`tracing::debug!`] on learned clauses.
 ///
 /// This function is used as part of the callback given to the SAT oracle.
@@ -319,10 +280,7 @@ impl Add<IntVal> for BoolView {
 
 	fn add(self, rhs: IntVal) -> Self::Output {
 		match self.0 {
-			BoolViewInner::Lit(lit) => IntView(IntViewInner::Bool {
-				transformer: LinearTransform::offset(rhs),
-				lit,
-			}),
+			BoolViewInner::Lit(lit) => IntView(IntViewInner::Bool(LinearBoolView::from(lit) + rhs)),
 			BoolViewInner::Const(b) => (b as IntVal + rhs).into(),
 		}
 	}
@@ -357,13 +315,21 @@ impl Mul<IntVal> for BoolView {
 	type Output = IntView;
 
 	fn mul(self, rhs: IntVal) -> Self::Output {
+		if rhs == 0 {
+			IntView(IntViewInner::Const(0))
+		} else {
+			self.mul(NonZero::new(rhs).unwrap())
+		}
+	}
+}
+
+impl Mul<NonZero<IntVal>> for BoolView {
+	type Output = IntView;
+
+	fn mul(self, rhs: NonZero<IntVal>) -> Self::Output {
 		match self.0 {
-			_ if rhs == 0 => IntView(IntViewInner::Const(0)),
-			BoolViewInner::Lit(lit) => IntView(IntViewInner::Bool {
-				transformer: LinearTransform::scaled(NonZeroIntVal::new(rhs).unwrap()),
-				lit,
-			}),
-			BoolViewInner::Const(b) => (b as IntVal * rhs).into(),
+			BoolViewInner::Lit(lit) => IntView(IntViewInner::Bool(LinearBoolView::from(lit) * rhs)),
+			BoolViewInner::Const(b) => (b as IntVal * rhs.get()).into(),
 		}
 	}
 }
@@ -452,13 +418,13 @@ impl Not for IntLitMeaning {
 }
 
 impl<Oracle: ExternalPropagation> IntDecisionActions<Solver<Oracle>> for IntVarRef {
-	fn lit(&self, ctx: &mut Solver<Oracle>, meaning: IntLitMeaning) -> Self::Atom {
+	fn lit(&self, ctx: &mut Solver<Oracle>, meaning: IntLitMeaning) -> BoolView {
 		let (mut actions, mut engine) = ctx.as_parts_mut();
 		let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
 		self.lit(&mut ctx, meaning)
 	}
 
-	fn val_lit(&self, ctx: &mut Solver<Oracle>) -> Option<Self::Atom> {
+	fn val_lit(&self, ctx: &mut Solver<Oracle>) -> Option<BoolView> {
 		let (mut actions, mut engine) = ctx.as_parts_mut();
 		let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
 		IntDecisionActions::val_lit(self, &mut ctx)
@@ -466,7 +432,11 @@ impl<Oracle: ExternalPropagation> IntDecisionActions<Solver<Oracle>> for IntVarR
 }
 
 impl<Oracle> IntInspectionActions<Solver<Oracle>> for IntVarRef {
-	type Atom = <IntVarRef as IntInspectionActions<State>>::Atom;
+	fn bounds(&self, ctx: &Solver<Oracle>) -> (IntVal, IntVal) {
+		let lb = self.lower_bound(ctx);
+		let ub = self.upper_bound(ctx);
+		(lb, ub)
+	}
 
 	fn domain(&self, ctx: &Solver<Oracle>) -> IntSetVal {
 		self.domain(&ctx.engine.borrow().state)
@@ -476,7 +446,7 @@ impl<Oracle> IntInspectionActions<Solver<Oracle>> for IntVarRef {
 		self.in_domain(&ctx.engine.borrow().state, val)
 	}
 
-	fn lit_meaning(&self, ctx: &Solver<Oracle>, lit: Self::Atom) -> Option<IntLitMeaning> {
+	fn lit_meaning(&self, ctx: &Solver<Oracle>, lit: BoolView) -> Option<IntLitMeaning> {
 		self.lit_meaning(&ctx.engine.borrow().state, lit)
 	}
 
@@ -484,11 +454,11 @@ impl<Oracle> IntInspectionActions<Solver<Oracle>> for IntVarRef {
 		self.lower_bound(&ctx.engine.borrow().state)
 	}
 
-	fn lower_bound_lit(&self, ctx: &Solver<Oracle>) -> Self::Atom {
+	fn lower_bound_lit(&self, ctx: &Solver<Oracle>) -> BoolView {
 		self.lower_bound_lit(&ctx.engine.borrow().state)
 	}
 
-	fn try_lit(&self, ctx: &Solver<Oracle>, meaning: IntLitMeaning) -> Option<Self::Atom> {
+	fn try_lit(&self, ctx: &Solver<Oracle>, meaning: IntLitMeaning) -> Option<BoolView> {
 		self.try_lit(&ctx.engine.borrow().state, meaning)
 	}
 
@@ -496,8 +466,13 @@ impl<Oracle> IntInspectionActions<Solver<Oracle>> for IntVarRef {
 		self.upper_bound(&ctx.engine.borrow().state)
 	}
 
-	fn upper_bound_lit(&self, ctx: &Solver<Oracle>) -> Self::Atom {
+	fn upper_bound_lit(&self, ctx: &Solver<Oracle>) -> BoolView {
 		self.upper_bound_lit(&ctx.engine.borrow().state)
+	}
+
+	fn val(&self, ctx: &Solver<Oracle>) -> Option<IntVal> {
+		let (lb, ub) = self.bounds(ctx);
+		if lb == ub { Some(lb) } else { None }
 	}
 }
 
@@ -507,9 +482,8 @@ impl IntView {
 	/// variable.
 	pub fn int_reverse_map_info(&self) -> (Option<usize>, bool) {
 		match self.0 {
-			IntViewInner::VarRef(v) => (Some(v.into()), false),
 			IntViewInner::Bool { .. } => (None, true),
-			IntViewInner::Linear { var, .. } => (Some(var.into()), true),
+			IntViewInner::Linear(lin) => (Some(lin.var.into()), true),
 			_ => (None, true),
 		}
 	}
@@ -519,15 +493,9 @@ impl IntView {
 		&self,
 		slv: &Solver<Oracle>,
 	) -> Vec<(NonZeroI32, IntLitMeaning)> {
-		let transformer = match self.0 {
-			IntViewInner::Bool { transformer, .. } | IntViewInner::Linear { transformer, .. } => {
-				transformer
-			}
-			_ => LinearTransform::default(),
-		};
 		match self.0 {
-			IntViewInner::VarRef(v) | IntViewInner::Linear { var: v, .. } => {
-				let var = &slv.engine.borrow().state.int_vars[v];
+			IntViewInner::Linear(lin) => {
+				let var = &slv.engine.borrow().state.int_vars[lin.var];
 				let mut lits = Vec::new();
 
 				if let OrderStorage::Eager { storage, .. } = &var.order_encoding {
@@ -536,7 +504,7 @@ impl IntView {
 					for (lit, val) in (*storage).zip(val_iter) {
 						let i: NonZeroI32 = lit.into();
 						let orig = IntLitMeaning::Less(val);
-						let lt = transformer.transform_lit(orig);
+						let lt = lin.transform_meaning(orig);
 						let geq = !lt;
 						lits.extend([(i, lt), (-i, geq)]);
 					}
@@ -549,17 +517,17 @@ impl IntView {
 					for (lit, val) in (*vars).zip(val_iter) {
 						let i: NonZeroI32 = lit.into();
 						let orig = IntLitMeaning::Eq(val);
-						let eq = transformer.transform_lit(orig);
+						let eq = lin.transform_meaning(orig);
 						let ne = !eq;
 						lits.extend([(i, eq), (-i, ne)]);
 					}
 				}
 				lits
 			}
-			IntViewInner::Bool { lit, .. } => {
-				let i: NonZeroI32 = lit.into();
-				let lb = IntLitMeaning::Eq(transformer.transform(0));
-				let ub = IntLitMeaning::Eq(transformer.transform(1));
+			IntViewInner::Bool(lin) => {
+				let i: NonZeroI32 = lin.var.into();
+				let lb = lin.transform_meaning(IntLitMeaning::Eq(0));
+				let ub = lin.transform_meaning(IntLitMeaning::Eq(1));
 				vec![(i, ub), (-i, lb)]
 			}
 			_ => Vec::new(),
@@ -572,22 +540,9 @@ impl Add<IntVal> for IntView {
 
 	fn add(self, rhs: IntVal) -> Self::Output {
 		Self(match self.0 {
-			IntViewInner::VarRef(var) => IntViewInner::Linear {
-				transformer: LinearTransform::offset(rhs),
-				var,
-			},
 			IntViewInner::Const(i) => IntViewInner::Const(i + rhs),
-			IntViewInner::Linear {
-				transformer: transform,
-				var,
-			} => IntViewInner::Linear {
-				transformer: transform + rhs,
-				var,
-			},
-			IntViewInner::Bool { transformer, lit } => IntViewInner::Bool {
-				transformer: transformer + rhs,
-				lit,
-			},
+			IntViewInner::Linear(lin) => IntViewInner::Linear(lin + rhs),
+			IntViewInner::Bool(lin) => IntViewInner::Bool(lin + rhs),
 		})
 	}
 }
@@ -595,10 +550,7 @@ impl Add<IntVal> for IntView {
 impl From<BoolView> for IntView {
 	fn from(value: BoolView) -> Self {
 		Self(match value.0 {
-			BoolViewInner::Lit(l) => IntViewInner::Bool {
-				transformer: LinearTransform::offset(0),
-				lit: l,
-			},
+			BoolViewInner::Lit(l) => IntViewInner::Bool(l.into()),
 			BoolViewInner::Const(c) => IntViewInner::Const(c as IntVal),
 		})
 	}
@@ -610,400 +562,161 @@ impl From<IntVal> for IntView {
 	}
 }
 
+impl From<IntVarRef> for IntView {
+	fn from(value: IntVarRef) -> Self {
+		Self(IntViewInner::Linear(value.into()))
+	}
+}
+
 impl<Ctx> IntDecisionActions<Ctx> for IntView
 where
-	Ctx: ?Sized,
-	IntVarRef: IntDecisionActions<Ctx, Atom = BoolView>,
+	Ctx: ReasoningContext<Atom = BoolView> + ?Sized,
+	IntVarRef: IntDecisionActions<Ctx>,
 	RawLit: BoolInspectionActions<Ctx>,
 	BoolView: BoolInspectionActions<Ctx>,
 {
-	fn lit(&self, ctx: &mut Ctx, mut meaning: IntLitMeaning) -> Self::Atom {
-		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
-			self.0
-		{
-			match transformer.rev_transform_lit(meaning) {
-				Ok(m) => meaning = m,
-				Err(v) => return BoolView(BoolViewInner::Const(v)),
-			}
-		}
-
+	fn lit(&self, ctx: &mut Ctx, meaning: IntLitMeaning) -> Ctx::Atom {
 		match self.0 {
-			IntViewInner::VarRef(var) | IntViewInner::Linear { var, .. } => var.lit(ctx, meaning),
-			IntViewInner::Const(c) => BoolView(BoolViewInner::Const(match meaning {
-				IntLitMeaning::Eq(i) => c == i,
-				IntLitMeaning::NotEq(i) => c != i,
-				IntLitMeaning::GreaterEq(i) => c >= i,
-				IntLitMeaning::Less(i) => c < i,
-			})),
-			IntViewInner::Bool { lit, .. } => {
-				let (meaning, negated) =
-					if matches!(meaning, IntLitMeaning::NotEq(_) | IntLitMeaning::Less(_)) {
-						(!meaning, true)
-					} else {
-						(meaning, false)
-					};
-				let bv = BoolView(match meaning {
-					IntLitMeaning::Eq(0) => BoolViewInner::Lit(!lit),
-					IntLitMeaning::Eq(1) => BoolViewInner::Lit(lit),
-					IntLitMeaning::Eq(_) => BoolViewInner::Const(false),
-					IntLitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
-					IntLitMeaning::GreaterEq(i) if i > 1 => BoolViewInner::Const(false),
-					IntLitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
-					_ => unreachable!(),
-				});
-				if negated {
-					!bv
-				} else {
-					bv
-				}
-			}
+			IntViewInner::Linear(lin) => lin.lit(ctx, meaning),
+			IntViewInner::Const(c) => c.lit(ctx, meaning),
+			IntViewInner::Bool(lin) => lin.lit(ctx, meaning),
 		}
 	}
 }
 
 impl<Ctx> IntExplanationActions<Ctx> for IntView
 where
-	Ctx: ?Sized,
-	IntVarRef: IntExplanationActions<Ctx, Atom = BoolView>,
+	Ctx: ReasoningContext<Atom = BoolView> + ?Sized,
+	IntVarRef: IntExplanationActions<Ctx>,
 	RawLit: BoolInspectionActions<Ctx>,
 	BoolView: BoolInspectionActions<Ctx>,
 {
-	fn lit_relaxed(&self, ctx: &Ctx, mut meaning: IntLitMeaning) -> (BoolView, IntLitMeaning) {
-		debug_assert!(
-			!matches!(meaning, IntLitMeaning::Eq(_)),
-			"relaxed integer literals are not yet supported for IntLitMeaning::Eq(_)"
-		);
-		// Transform literal meaning if view is a linear transformation
-		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
-			self.0
-		{
-			match transformer.rev_transform_lit(meaning) {
-				Ok(m) => meaning = m,
-				Err(v) => return (BoolView(BoolViewInner::Const(v)), meaning),
-			}
+	fn lit_relaxed(&self, ctx: &Ctx, meaning: IntLitMeaning) -> (BoolView, IntLitMeaning) {
+		match self.0 {
+			IntViewInner::Linear(lin) => lin.lit_relaxed(ctx, meaning),
+			IntViewInner::Const(c) => c.lit_relaxed(ctx, meaning),
+			IntViewInner::Bool(lin) => lin.lit_relaxed(ctx, meaning),
 		}
-
-		// Get the boolean view that is currently `true` and implies the requested
-		// `meaning`, as well as the actual (possibly relaxed) meaning that is
-		// represented.
-		let (bv, meaning) = match self.0 {
-			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				iv.lit_relaxed(ctx, meaning)
-			}
-			IntViewInner::Const(c) => (
-				BoolView(BoolViewInner::Const(match meaning {
-					IntLitMeaning::GreaterEq(i) => c >= i,
-					IntLitMeaning::Less(i) => c < i,
-					IntLitMeaning::Eq(i) => c == i,
-					IntLitMeaning::NotEq(i) => c != i,
-				})),
-				meaning,
-			),
-			IntViewInner::Bool { lit, .. } => {
-				let (b_meaning, negated) =
-					if matches!(meaning, IntLitMeaning::NotEq(_) | IntLitMeaning::Less(_)) {
-						(!meaning, true)
-					} else {
-						(meaning, false)
-					};
-				let bv = BoolView(match b_meaning {
-					IntLitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
-					IntLitMeaning::GreaterEq(i) if i > 1 => BoolViewInner::Const(false),
-					IntLitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
-					IntLitMeaning::Eq(0) => BoolViewInner::Lit(!lit),
-					IntLitMeaning::Eq(1) => BoolViewInner::Lit(lit),
-					IntLitMeaning::Eq(_) => BoolViewInner::Const(false),
-					_ => unreachable!(),
-				});
-				(if negated { !bv } else { bv }, meaning)
-			}
-		};
-
-		// Transform the meaning back to fit the original view if it was linearly
-		// transformed
-		let meaning = if let IntViewInner::Linear { transformer, .. }
-		| IntViewInner::Bool { transformer, .. } = self.0
-		{
-			transformer.transform_lit(meaning)
-		} else {
-			meaning
-		};
-		(bv, meaning)
 	}
 }
 
 impl<Ctx> IntInspectionActions<Ctx> for IntView
 where
-	Ctx: ?Sized,
-	IntVarRef: IntInspectionActions<Ctx, Atom = BoolView>,
+	Ctx: ReasoningContext<Atom = BoolView> + ?Sized,
+	IntVarRef: IntInspectionActions<Ctx>,
 	RawLit: BoolInspectionActions<Ctx>,
 	BoolView: BoolInspectionActions<Ctx>,
 {
-	type Atom = BoolView;
+	fn bounds(&self, ctx: &Ctx) -> (IntVal, IntVal) {
+		match self.0 {
+			IntViewInner::Const(c) => c.bounds(ctx),
+			IntViewInner::Linear(lin) => lin.bounds(ctx),
+			IntViewInner::Bool(lin) => lin.bounds(ctx),
+		}
+	}
 
 	fn domain(&self, ctx: &Ctx) -> IntSetVal {
 		match self.0 {
-			IntViewInner::VarRef(iv) => iv.domain(ctx),
-			IntViewInner::Const(c) => (c..=c).into(),
-			IntViewInner::Linear { transformer, var } if transformer.positive_scale() => {
-				RangeList::from_sorted_ranges(
-					var.domain(ctx).iter().map(|r| {
-						transformer.transform(*r.start())..=transformer.transform(*r.end())
-					}),
-				)
-			}
-			IntViewInner::Linear { transformer, var } => RangeList::from_sorted_ranges(
-				var.domain(ctx)
-					.iter()
-					.rev()
-					.map(|r| transformer.transform(*r.end())..=transformer.transform(*r.start())),
-			),
-			IntViewInner::Bool { transformer, lit } => if let Some(v) = lit.val(ctx) {
-				let v = transformer.transform(v as IntVal);
-				v..=v
-			} else if transformer.positive_scale() {
-				transformer.transform(0)..=transformer.transform(1)
-			} else {
-				transformer.transform(1)..=transformer.transform(0)
-			}
-			.into(),
+			IntViewInner::Const(c) => c.domain(ctx),
+			IntViewInner::Linear(lin) => lin.domain(ctx),
+			IntViewInner::Bool(lin) => lin.domain(ctx),
 		}
 	}
 
 	fn in_domain(&self, ctx: &Ctx, val: IntVal) -> bool {
-		let (lb, ub) = self.bounds(ctx);
-		if lb <= val && val <= ub {
-			let eq_lit = self.try_lit(ctx, IntLitMeaning::Eq(val));
-			if let Some(eq_lit) = eq_lit {
-				eq_lit.val(ctx).unwrap_or(true)
-			} else {
-				true
-			}
-		} else {
-			false
+		match self.0 {
+			IntViewInner::Const(c) => c.in_domain(ctx, val),
+			IntViewInner::Linear(lin) => lin.in_domain(ctx, val),
+			IntViewInner::Bool(lin) => lin.in_domain(ctx, val),
 		}
 	}
 
-	fn lit_meaning(&self, ctx: &Ctx, lit: Self::Atom) -> Option<IntLitMeaning> {
+	fn lit_meaning(&self, ctx: &Ctx, lit: BoolView) -> Option<IntLitMeaning> {
 		match self.0 {
-			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				let mut meaning = iv.lit_meaning(ctx, lit)?;
-				if let IntViewInner::Linear { transformer, .. } = self.0 {
-					meaning = transformer.transform_lit(meaning);
-				}
-				Some(meaning)
-			}
-			IntViewInner::Const(_) => None,
-			IntViewInner::Bool {
-				lit: var_lit,
-				transformer,
-			} => {
-				let BoolViewInner::Lit(lit) = lit.0 else {
-					return None;
-				};
-				if lit.var() != var_lit.var() {
-					return None;
-				}
-				let mut meaning = IntLitMeaning::GreaterEq(1);
-				if var_lit != lit {
-					meaning = !meaning;
-				}
-				meaning = transformer.transform_lit(meaning);
-				Some(meaning)
-			}
+			IntViewInner::Linear(lin) => lin.lit_meaning(ctx, lit),
+			IntViewInner::Const(c) => c.lit_meaning(ctx, lit),
+			IntViewInner::Bool(lin) => lin.lit_meaning(ctx, lit),
 		}
 	}
 
 	fn lower_bound(&self, ctx: &Ctx) -> IntVal {
 		match self.0 {
-			IntViewInner::VarRef(var) => var.lower_bound(ctx),
-			IntViewInner::Const(c) => c,
-			IntViewInner::Linear { transformer, var } => {
-				transformer.transform(if transformer.positive_scale() {
-					var.lower_bound(ctx)
-				} else {
-					var.upper_bound(ctx)
-				})
-			}
-			IntViewInner::Bool { transformer, lit } => transformer
-				.transform(lit.val(ctx).unwrap_or(!transformer.positive_scale()) as IntVal),
+			IntViewInner::Const(c) => c.lower_bound(ctx),
+			IntViewInner::Linear(lin) => lin.lower_bound(ctx),
+			IntViewInner::Bool(lin) => lin.lower_bound(ctx),
 		}
 	}
 
 	fn lower_bound_lit(&self, ctx: &Ctx) -> BoolView {
 		match self.0 {
-			IntViewInner::VarRef(var) => var.lower_bound_lit(ctx),
-			IntViewInner::Linear { transformer, var } => {
-				if transformer.positive_scale() {
-					var.lower_bound_lit(ctx)
-				} else {
-					var.upper_bound_lit(ctx)
-				}
-			}
-			IntViewInner::Const(_) => BoolView(BoolViewInner::Const(true)),
-			IntViewInner::Bool { lit, transformer } => {
-				BoolView(match (lit.val(ctx), transformer.positive_scale()) {
-					(Some(true), true) => BoolViewInner::Lit(lit),
-					(Some(false), false) => BoolViewInner::Lit(!lit),
-					_ => BoolViewInner::Const(true),
-				})
-			}
+			IntViewInner::Linear(lin) => lin.lower_bound_lit(ctx),
+			IntViewInner::Const(c) => c.lower_bound_lit(ctx),
+			IntViewInner::Bool(lin) => lin.lower_bound_lit(ctx),
 		}
 	}
 
-	fn try_lit(&self, ctx: &Ctx, mut meaning: IntLitMeaning) -> Option<BoolView> {
-		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
-			self.0
-		{
-			match transformer.rev_transform_lit(meaning) {
-				Ok(m) => meaning = m,
-				Err(v) => return Some(BoolView(BoolViewInner::Const(v))),
-			}
-		}
-
+	fn try_lit(&self, ctx: &Ctx, meaning: IntLitMeaning) -> Option<BoolView> {
 		match self.0 {
-			IntViewInner::VarRef(var) | IntViewInner::Linear { var, .. } => {
-				var.try_lit(ctx, meaning)
-			}
-			IntViewInner::Const(c) => Some(BoolView(BoolViewInner::Const(match meaning {
-				IntLitMeaning::Eq(i) => c == i,
-				IntLitMeaning::NotEq(i) => c != i,
-				IntLitMeaning::GreaterEq(i) => c >= i,
-				IntLitMeaning::Less(i) => c < i,
-			}))),
-			IntViewInner::Bool { lit, .. } => {
-				let (meaning, negated) =
-					if matches!(meaning, IntLitMeaning::NotEq(_) | IntLitMeaning::Less(_)) {
-						(!meaning, true)
-					} else {
-						(meaning, false)
-					};
-				let bv = BoolView(match meaning {
-					IntLitMeaning::Eq(0) => BoolViewInner::Lit(!lit),
-					IntLitMeaning::Eq(1) => BoolViewInner::Lit(lit),
-					IntLitMeaning::Eq(_) => BoolViewInner::Const(false),
-					IntLitMeaning::GreaterEq(1) => BoolViewInner::Lit(lit),
-					IntLitMeaning::GreaterEq(i) if i > 1 => BoolViewInner::Const(false),
-					IntLitMeaning::GreaterEq(_) => BoolViewInner::Const(true),
-					_ => unreachable!(),
-				});
-				Some(if negated { !bv } else { bv })
-			}
+			IntViewInner::Linear(lin) => lin.try_lit(ctx, meaning),
+			IntViewInner::Const(c) => c.try_lit(ctx, meaning),
+			IntViewInner::Bool(lin) => lin.try_lit(ctx, meaning),
 		}
 	}
 
 	fn upper_bound(&self, ctx: &Ctx) -> IntVal {
 		match self.0 {
-			IntViewInner::VarRef(var) => var.upper_bound(ctx),
-			IntViewInner::Const(c) => c,
-			IntViewInner::Linear { transformer, var } => {
-				transformer.transform(if transformer.positive_scale() {
-					var.upper_bound(ctx)
-				} else {
-					var.lower_bound(ctx)
-				})
-			}
-			IntViewInner::Bool { transformer, lit } => transformer
-				.transform(lit.val(ctx).unwrap_or(transformer.positive_scale()) as IntVal),
+			IntViewInner::Const(c) => c.upper_bound(ctx),
+			IntViewInner::Linear(lin) => lin.upper_bound(ctx),
+			IntViewInner::Bool(lin) => lin.upper_bound(ctx),
 		}
 	}
 
 	fn upper_bound_lit(&self, ctx: &Ctx) -> BoolView {
 		match self.0 {
-			IntViewInner::VarRef(var) => var.upper_bound_lit(ctx),
-			IntViewInner::Linear { transformer, var } => {
-				if transformer.positive_scale() {
-					var.upper_bound_lit(ctx)
-				} else {
-					var.lower_bound_lit(ctx)
-				}
-			}
-			IntViewInner::Const(_) => BoolView(BoolViewInner::Const(true)),
-			IntViewInner::Bool { lit, transformer } => {
-				BoolView(match (lit.val(ctx), transformer.positive_scale()) {
-					(Some(false), true) => BoolViewInner::Lit(!lit),
-					(Some(true), false) => BoolViewInner::Lit(lit),
-					_ => BoolViewInner::Const(true),
-				})
-			}
+			IntViewInner::Linear(lin) => lin.upper_bound_lit(ctx),
+			IntViewInner::Const(c) => c.upper_bound_lit(ctx),
+			IntViewInner::Bool(lin) => lin.upper_bound_lit(ctx),
+		}
+	}
+
+	fn val(&self, ctx: &Ctx) -> Option<IntVal> {
+		match self.0 {
+			IntViewInner::Const(c) => c.val(ctx),
+			IntViewInner::Linear(lin) => lin.val(ctx),
+			IntViewInner::Bool(lin) => lin.val(ctx),
 		}
 	}
 }
 
 impl<Ctx> IntPropagationActions<Ctx> for IntView
 where
-	IntVarRef: IntPropagationActions<Ctx, Atom = BoolView, Conflict = Conflict<RawLit>>,
-	RawLit: BoolPropagationActions<Ctx, Atom = BoolView, Conflict = Conflict<RawLit>>,
+	Ctx: PropagationActions<Atom = BoolView> + ?Sized,
+	IntVarRef: IntPropagationActions<Ctx>,
+	RawLit: BoolPropagationActions<Ctx>,
 {
-	type Conflict = Conflict<RawLit>;
-
 	fn set_lower_bound(
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx, BoolView>,
-	) -> Result<(), Self::Conflict> {
+		reason: impl ReasonBuilder<Ctx>,
+	) -> Result<(), Ctx::Conflict> {
 		match self.0 {
-			IntViewInner::VarRef(var) => var.set_lower_bound(ctx, val, reason),
-			IntViewInner::Linear { var, transformer } => match transformer
-				.rev_transform_lit(IntLitMeaning::GreaterEq(val))
-				.unwrap()
-			{
-				IntLitMeaning::Less(v) => var.set_upper_bound(ctx, v - 1, reason),
-				IntLitMeaning::GreaterEq(v) => var.set_lower_bound(ctx, v, reason),
-				_ => unreachable!(),
-			},
-			IntViewInner::Bool { lit, transformer } => propagate_bool_lin(
-				ctx,
-				lit,
-				transformer
-					.rev_transform_lit(IntLitMeaning::GreaterEq(val))
-					.unwrap(),
-				reason,
-			),
-			IntViewInner::Const(i) => {
-				if i < val {
-					Err(Conflict::new(ctx, None, reason))
-				} else {
-					Ok(())
-				}
-			}
+			IntViewInner::Linear(lin) => lin.set_lower_bound(ctx, val, reason),
+			IntViewInner::Bool(lin) => lin.set_lower_bound(ctx, val, reason),
+			IntViewInner::Const(c) => c.set_lower_bound(ctx, val, reason),
 		}
 	}
 
 	fn set_not_eq(
 		&self,
 		ctx: &mut Ctx,
-		mut val: IntVal,
-		reason: impl ReasonBuilder<Ctx, BoolView>,
-	) -> Result<(), Self::Conflict> {
-		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
-			self.0
-		{
-			match transformer.rev_transform_lit(IntLitMeaning::NotEq(val)) {
-				Ok(IntLitMeaning::NotEq(v)) => val = v,
-				Err(v) => {
-					debug_assert!(v);
-					return Ok(());
-				}
-				_ => unreachable!(),
-			}
-		}
-
+		val: IntVal,
+		reason: impl ReasonBuilder<Ctx>,
+	) -> Result<(), Ctx::Conflict> {
 		match self.0 {
-			IntViewInner::VarRef(var) | IntViewInner::Linear { var, .. } => {
-				var.set_not_eq(ctx, val, reason)
-			}
-			IntViewInner::Bool { lit, .. } => {
-				propagate_bool_lin(ctx, lit, IntLitMeaning::NotEq(val), reason)
-			}
-			IntViewInner::Const(i) => {
-				if i == val {
-					Err(Conflict::new(ctx, None, reason))
-				} else {
-					Ok(())
-				}
-			}
+			IntViewInner::Linear(lin) => lin.set_not_eq(ctx, val, reason),
+			IntViewInner::Bool(lin) => lin.set_not_eq(ctx, val, reason),
+			IntViewInner::Const(c) => c.set_not_eq(ctx, val, reason),
 		}
 	}
 
@@ -1011,94 +724,37 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx, BoolView>,
-	) -> Result<(), Self::Conflict> {
+		reason: impl ReasonBuilder<Ctx>,
+	) -> Result<(), Ctx::Conflict> {
 		match self.0 {
-			IntViewInner::VarRef(var) => var.set_upper_bound(ctx, val, reason),
-			IntViewInner::Linear { var, transformer } => {
-				match transformer
-					.rev_transform_lit(IntLitMeaning::Less(val + 1))
-					.unwrap()
-				{
-					IntLitMeaning::Less(v) => var.set_upper_bound(ctx, v - 1, reason),
-					IntLitMeaning::GreaterEq(v) => var.set_lower_bound(ctx, v, reason),
-					_ => unreachable!(),
-				}
-			}
-			IntViewInner::Bool { lit, transformer } => propagate_bool_lin(
-				ctx,
-				lit,
-				transformer
-					.rev_transform_lit(IntLitMeaning::Less(val + 1))
-					.unwrap(),
-				reason,
-			),
-			IntViewInner::Const(i) => {
-				if i > val {
-					Err(Conflict::new(ctx, None, reason))
-				} else {
-					Ok(())
-				}
-			}
+			IntViewInner::Linear(lin) => lin.set_upper_bound(ctx, val, reason),
+			IntViewInner::Bool(lin) => lin.set_upper_bound(ctx, val, reason),
+			IntViewInner::Const(c) => c.set_upper_bound(ctx, val, reason),
 		}
 	}
 
 	fn set_val(
 		&self,
 		ctx: &mut Ctx,
-		mut val: IntVal,
-		reason: impl ReasonBuilder<Ctx, BoolView>,
-	) -> Result<(), Self::Conflict> {
-		if let IntViewInner::Linear { transformer, .. } | IntViewInner::Bool { transformer, .. } =
-			self.0
-		{
-			match transformer.rev_transform_lit(IntLitMeaning::Eq(val)) {
-				Ok(IntLitMeaning::Eq(v)) => val = v,
-				Err(v) => {
-					debug_assert!(!v);
-					return Err(Conflict::new(ctx, None, reason));
-				}
-				_ => unreachable!(),
-			}
-		}
-
+		val: IntVal,
+		reason: impl ReasonBuilder<Ctx>,
+	) -> Result<(), Ctx::Conflict> {
 		match self.0 {
-			IntViewInner::VarRef(iv) | IntViewInner::Linear { var: iv, .. } => {
-				iv.set_val(ctx, val, reason)
-			}
-			IntViewInner::Bool { lit, .. } => {
-				propagate_bool_lin(ctx, lit, IntLitMeaning::Eq(val), reason)
-			}
-			IntViewInner::Const(i) => {
-				if i != val {
-					Err(Conflict::new(ctx, None, reason))
-				} else {
-					Ok(())
-				}
-			}
+			IntViewInner::Linear(lin) => lin.set_val(ctx, val, reason),
+			IntViewInner::Bool(lin) => lin.set_val(ctx, val, reason),
+			IntViewInner::Const(c) => c.set_val(ctx, val, reason),
 		}
 	}
 }
 
-impl Mul<NonZeroIntVal> for IntView {
+impl Mul<NonZero<IntVal>> for IntView {
 	type Output = Self;
 
-	fn mul(self, rhs: NonZeroIntVal) -> Self::Output {
+	fn mul(self, rhs: NonZero<IntVal>) -> Self::Output {
 		Self(match self.0 {
-			x if rhs.get() == 1 => x,
-			IntViewInner::VarRef(iv) => IntViewInner::Linear {
-				transformer: LinearTransform::scaled(rhs),
-				var: iv,
-			},
 			IntViewInner::Const(c) => IntViewInner::Const(c * rhs.get()),
-			IntViewInner::Linear { transformer, var } => IntViewInner::Linear {
-				transformer: transformer * rhs,
-				var,
-			},
-			IntViewInner::Bool { transformer, lit } => IntViewInner::Bool {
-				transformer: transformer * rhs,
-				lit,
-			},
+			IntViewInner::Linear(lin) => IntViewInner::Linear(lin * rhs),
+			IntViewInner::Bool(lin) => IntViewInner::Bool(lin * rhs),
 		})
 	}
 }
@@ -1108,22 +764,9 @@ impl Neg for IntView {
 
 	fn neg(self) -> Self::Output {
 		Self(match self.0 {
-			IntViewInner::VarRef(var) => IntViewInner::Linear {
-				transformer: LinearTransform::scaled(NonZeroIntVal::new(-1).unwrap()),
-				var,
-			},
 			IntViewInner::Const(i) => IntViewInner::Const(-i),
-			IntViewInner::Linear {
-				transformer: transform,
-				var,
-			} => IntViewInner::Linear {
-				transformer: -transform,
-				var,
-			},
-			IntViewInner::Bool { transformer, lit } => IntViewInner::Bool {
-				transformer: -transformer,
-				lit,
-			},
+			IntViewInner::Linear(lin) => IntViewInner::Linear(-lin),
+			IntViewInner::Bool(lin) => IntViewInner::Bool(-lin),
 		})
 	}
 }
@@ -1439,7 +1082,7 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 						ret(self, Unknown, None)
 					} else {
 						ret(self, Satisfied, obj_curr)
-					}
+					};
 				}
 				Complete => unreachable!(),
 			}
@@ -1578,15 +1221,11 @@ impl<Oracle: ExternalPropagation> Solver<Oracle> {
 				BoolViewInner::Const(b) => b,
 			}),
 			View::Int(var) => Value::Int(match var.0 {
-				IntViewInner::VarRef(iv) => int_val(Ref::clone(&engine), iv),
 				IntViewInner::Const(i) => i,
-				IntViewInner::Linear {
-					transformer: transform,
-					var,
-				} => transform.transform(int_val(Ref::clone(&engine), var)),
-				IntViewInner::Bool { transformer, lit } => {
-					transformer.transform(sol.value(lit) as IntVal)
+				IntViewInner::Linear(lin) => {
+					lin.transform_val(int_val(Ref::clone(&engine), lin.var))
 				}
+				IntViewInner::Bool(lin) => lin.transform_val(sol.value(lin.var) as IntVal),
 			}),
 		}
 	}
@@ -1655,7 +1294,7 @@ impl<Oracle: ExternalPropagation> BrancherInitActions for Solver<Oracle> {
 	fn ensure_decidable(&mut self, view: View) {
 		match view {
 			View::Bool(BoolView(BoolViewInner::Lit(lit)))
-			| View::Int(IntView(IntViewInner::Bool { lit, .. })) => {
+			| View::Int(IntView(IntViewInner::Bool(LinearBoolView { var: lit, .. }))) => {
 				self.engine
 					.borrow_mut()
 					.state
@@ -1724,6 +1363,11 @@ impl<Oracle: Default + ExternalPropagation + LearnCallback> Default for Solver<O
 		oracle.connect_propagator(Rc::clone(&engine));
 		Self { oracle, engine }
 	}
+}
+
+impl<Oracle> ReasoningContext for Solver<Oracle> {
+	type Atom = <Engine as ReasoningEngine>::Atom;
+	type Conflict = <Engine as ReasoningEngine>::Conflict;
 }
 
 impl<Oracle> TrailingActions for Solver<Oracle> {
