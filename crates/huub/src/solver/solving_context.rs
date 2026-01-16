@@ -106,6 +106,10 @@ impl IntDecisionActions<SolvingContext<'_>> for IntVarRef {
 }
 
 impl IntInspectionActions<SolvingContext<'_>> for IntVarRef {
+	fn bounds(&self, ctx: &SolvingContext<'_>) -> (IntVal, IntVal) {
+		self.bounds(ctx.state)
+	}
+
 	fn domain(&self, ctx: &SolvingContext<'_>) -> IntSetVal {
 		self.domain(ctx.state)
 	}
@@ -136,10 +140,6 @@ impl IntInspectionActions<SolvingContext<'_>> for IntVarRef {
 
 	fn upper_bound_lit(&self, ctx: &SolvingContext<'_>) -> BoolView {
 		self.upper_bound_lit(ctx.state)
-	}
-
-	fn bounds(&self, ctx: &SolvingContext<'_>) -> (IntVal, IntVal) {
-		self.bounds(ctx.state)
 	}
 
 	fn val(&self, ctx: &SolvingContext<'_>) -> Option<IntVal> {
@@ -419,6 +419,11 @@ impl PropagationActions for SolvingContext<'_> {
 	}
 }
 
+impl ReasoningContext for SolvingContext<'_> {
+	type Atom = <Engine as ReasoningEngine>::Atom;
+	type Conflict = <Engine as ReasoningEngine>::Conflict;
+}
+
 impl TrailingActions for SolvingContext<'_> {
 	fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal {
 		self.state.set_trailed_int(x, v)
@@ -427,9 +432,4 @@ impl TrailingActions for SolvingContext<'_> {
 	fn trailed_int(&self, x: TrailedInt) -> IntVal {
 		self.state.trailed_int(x)
 	}
-}
-
-impl ReasoningContext for SolvingContext<'_> {
-	type Atom = <Engine as ReasoningEngine>::Atom;
-	type Conflict = <Engine as ReasoningEngine>::Conflict;
 }

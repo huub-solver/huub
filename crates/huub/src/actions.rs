@@ -457,89 +457,23 @@ pub trait TrailingActions {
 	fn trailed_int(&self, i: TrailedInt) -> IntVal;
 }
 
-impl ReasoningContext for dyn ReformulationActions + '_ {
-	type Atom = BoolView;
-	type Conflict = Conflict<RawLit>;
-}
-
-impl IntDecisionActions<dyn ReformulationActions + '_> for IntVarRef {
-	fn lit(&self, ctx: &mut (dyn ReformulationActions + '_), meaning: IntLitMeaning) -> BoolView {
-		ctx.int_lit(*self, meaning)
+impl<Ctx> IntDecisionActions<Ctx> for IntVal
+where
+	Ctx: ReasoningContext + ?Sized,
+	Ctx::Atom: From<bool>,
+{
+	fn lit(&self, ctx: &mut Ctx, meaning: IntLitMeaning) -> Ctx::Atom {
+		self.try_lit(ctx, meaning).unwrap()
 	}
 }
 
-impl IntInspectionActions<dyn ReformulationActions + '_> for IntVarRef {
-	fn domain(&self, ctx: &dyn ReformulationActions) -> IntSetVal {
-		ctx.int_domain(*self)
-	}
-
-	fn in_domain(&self, ctx: &dyn ReformulationActions, val: IntVal) -> bool {
-		ctx.check_int_in_domain(*self, val)
-	}
-
-	fn lit_meaning(&self, ctx: &dyn ReformulationActions, lit: BoolView) -> Option<IntLitMeaning> {
-		ctx.int_lit_meaning(*self, lit)
-	}
-
-	fn lower_bound(&self, ctx: &dyn ReformulationActions) -> IntVal {
-		ctx.int_lower_bound(*self)
-	}
-
-	fn lower_bound_lit(&self, ctx: &dyn ReformulationActions) -> BoolView {
-		ctx.int_lower_bound_lit(*self)
-	}
-
-	fn try_lit(&self, ctx: &dyn ReformulationActions, meaning: IntLitMeaning) -> Option<BoolView> {
-		ctx.try_int_lit(*self, meaning)
-	}
-
-	fn upper_bound(&self, ctx: &dyn ReformulationActions) -> IntVal {
-		ctx.int_upper_bound(*self)
-	}
-
-	fn upper_bound_lit(&self, ctx: &dyn ReformulationActions) -> BoolView {
-		ctx.int_upper_bound_lit(*self)
-	}
-
-	fn bounds(&self, ctx: &dyn ReformulationActions) -> (IntVal, IntVal) {
-		let lb = self.lower_bound(ctx);
-		let ub = self.upper_bound(ctx);
-		(lb, ub)
-	}
-
-	fn val(&self, ctx: &dyn ReformulationActions) -> Option<IntVal> {
-		let (lb, ub) = self.bounds(ctx);
-		if lb == ub { Some(lb) } else { None }
-	}
-}
-
-impl BoolInspectionActions<dyn ReformulationActions + '_> for RawLit {
-	fn val(&self, ctx: &dyn ReformulationActions) -> Option<bool> {
-		ctx.bool_val(*self)
-	}
-}
-
-impl ClauseDatabase for ReformulationClauseDatabaseWrapper<'_> {
-	fn add_clause_from_slice(&mut self, clause: &[RawLit]) -> Result<(), Unsatisfiable> {
-		match self.db.add_clause_from_slice(clause) {
-			Ok(()) => Ok(()),
-			Err(Unsatisfiable) => {
-				self.error = Some(ReformulationError::TranslationConflict(clause.to_vec()));
-				Err(Unsatisfiable)
-			}
-		}
-	}
-	fn new_var_range(&mut self, len: usize) -> pindakaas::VarRange {
-		self.db.new_var_range(len)
-	}
-}
-
-impl<T> BoolOperations for T where T: Clone + fmt::Debug + Eq + Hash + Not<Output = Self> + 'static {}
-impl<T> IntOperations for T where T: Clone + fmt::Debug + Eq + Hash + 'static {}
-
-impl<Ctx> BoolInspectionActions<Ctx> for bool {
-	fn val(&self, _: &Ctx) -> Option<bool> {
-		Some(*self)
+impl<Ctx> IntExplanationActions<Ctx> for IntVal
+where
+	Ctx: ReasoningContext + ?Sized,
+	Ctx::Atom: From<bool>,
+{
+	fn lit_relaxed(&self, ctx: &Ctx, meaning: IntLitMeaning) -> (Ctx::Atom, IntLitMeaning) {
+		(self.try_lit(ctx, meaning).unwrap(), meaning)
 	}
 }
 
@@ -548,6 +482,10 @@ where
 	Ctx: ReasoningContext + ?Sized,
 	Ctx::Atom: From<bool>,
 {
+	fn bounds(&self, _: &Ctx) -> (IntVal, IntVal) {
+		(*self, *self)
+	}
+
 	fn domain(&self, _: &Ctx) -> IntSetVal {
 		(*self..=*self).into()
 	}
@@ -590,30 +528,6 @@ where
 
 	fn val(&self, _: &Ctx) -> Option<IntVal> {
 		Some(*self)
-	}
-
-	fn bounds(&self, _: &Ctx) -> (IntVal, IntVal) {
-		(*self, *self)
-	}
-}
-
-impl<Ctx> IntDecisionActions<Ctx> for IntVal
-where
-	Ctx: ReasoningContext + ?Sized,
-	Ctx::Atom: From<bool>,
-{
-	fn lit(&self, ctx: &mut Ctx, meaning: IntLitMeaning) -> Ctx::Atom {
-		self.try_lit(ctx, meaning).unwrap()
-	}
-}
-
-impl<Ctx> IntExplanationActions<Ctx> for IntVal
-where
-	Ctx: ReasoningContext + ?Sized,
-	Ctx::Atom: From<bool>,
-{
-	fn lit_relaxed(&self, ctx: &Ctx, meaning: IntLitMeaning) -> (Ctx::Atom, IntLitMeaning) {
-		(self.try_lit(ctx, meaning).unwrap(), meaning)
 	}
 }
 
@@ -715,6 +629,87 @@ where
 	}
 }
 
+impl IntDecisionActions<dyn ReformulationActions + '_> for IntVarRef {
+	fn lit(&self, ctx: &mut (dyn ReformulationActions + '_), meaning: IntLitMeaning) -> BoolView {
+		ctx.int_lit(*self, meaning)
+	}
+}
+
+impl IntInspectionActions<dyn ReformulationActions + '_> for IntVarRef {
+	fn bounds(&self, ctx: &dyn ReformulationActions) -> (IntVal, IntVal) {
+		let lb = self.lower_bound(ctx);
+		let ub = self.upper_bound(ctx);
+		(lb, ub)
+	}
+
+	fn domain(&self, ctx: &dyn ReformulationActions) -> IntSetVal {
+		ctx.int_domain(*self)
+	}
+
+	fn in_domain(&self, ctx: &dyn ReformulationActions, val: IntVal) -> bool {
+		ctx.check_int_in_domain(*self, val)
+	}
+
+	fn lit_meaning(&self, ctx: &dyn ReformulationActions, lit: BoolView) -> Option<IntLitMeaning> {
+		ctx.int_lit_meaning(*self, lit)
+	}
+
+	fn lower_bound(&self, ctx: &dyn ReformulationActions) -> IntVal {
+		ctx.int_lower_bound(*self)
+	}
+
+	fn lower_bound_lit(&self, ctx: &dyn ReformulationActions) -> BoolView {
+		ctx.int_lower_bound_lit(*self)
+	}
+
+	fn try_lit(&self, ctx: &dyn ReformulationActions, meaning: IntLitMeaning) -> Option<BoolView> {
+		ctx.try_int_lit(*self, meaning)
+	}
+
+	fn upper_bound(&self, ctx: &dyn ReformulationActions) -> IntVal {
+		ctx.int_upper_bound(*self)
+	}
+
+	fn upper_bound_lit(&self, ctx: &dyn ReformulationActions) -> BoolView {
+		ctx.int_upper_bound_lit(*self)
+	}
+
+	fn val(&self, ctx: &dyn ReformulationActions) -> Option<IntVal> {
+		let (lb, ub) = self.bounds(ctx);
+		if lb == ub { Some(lb) } else { None }
+	}
+}
+
+impl BoolInspectionActions<dyn ReformulationActions + '_> for RawLit {
+	fn val(&self, ctx: &dyn ReformulationActions) -> Option<bool> {
+		ctx.bool_val(*self)
+	}
+}
+
+impl ClauseDatabase for ReformulationClauseDatabaseWrapper<'_> {
+	fn add_clause_from_slice(&mut self, clause: &[RawLit]) -> Result<(), Unsatisfiable> {
+		match self.db.add_clause_from_slice(clause) {
+			Ok(()) => Ok(()),
+			Err(Unsatisfiable) => {
+				self.error = Some(ReformulationError::TranslationConflict(clause.to_vec()));
+				Err(Unsatisfiable)
+			}
+		}
+	}
+	fn new_var_range(&mut self, len: usize) -> pindakaas::VarRange {
+		self.db.new_var_range(len)
+	}
+}
+
+impl<T> BoolOperations for T where T: Clone + fmt::Debug + Eq + Hash + Not<Output = Self> + 'static {}
+impl<T> IntOperations for T where T: Clone + fmt::Debug + Eq + Hash + 'static {}
+
+impl<Ctx> BoolInspectionActions<Ctx> for bool {
+	fn val(&self, _: &Ctx) -> Option<bool> {
+		Some(*self)
+	}
+}
+
 impl dyn ReformulationActions + '_ {
 	/// Add a new clause to the resulting [`Solver`].
 	pub fn add_clause(
@@ -771,4 +766,9 @@ impl dyn ReformulationActions + '_ {
 			Err(Unsatisfiable) => Err(wrapper.error.unwrap()),
 		}
 	}
+}
+
+impl ReasoningContext for dyn ReformulationActions + '_ {
+	type Atom = BoolView;
+	type Conflict = Conflict<RawLit>;
 }

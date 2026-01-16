@@ -265,33 +265,6 @@ where
 {
 }
 
-impl<C, const N: usize> ReasonBuilder<C> for &[C::Atom; N]
-where
-	C: ReasoningContext + ?Sized,
-{
-	fn build_reason(self, ctx: &mut C) -> Result<Reason<C::Atom>, bool> {
-		self[..].build_reason(ctx)
-	}
-}
-
-impl<C> ReasonBuilder<C> for &[C::Atom]
-where
-	C: ReasoningContext + ?Sized,
-{
-	fn build_reason(self, _: &mut C) -> Result<Reason<C::Atom>, bool> {
-		Reason::from_iter(self.iter().cloned())
-	}
-}
-
-impl<C, const N: usize> ReasonBuilder<C> for [C::Atom; N]
-where
-	C: ReasoningContext + ?Sized,
-{
-	fn build_reason(self, _: &mut C) -> Result<Reason<C::Atom>, bool> {
-		Reason::from_iter(self)
-	}
-}
-
 impl<E, B> ModelBoolView<E> for B
 where
 	E: ReasoningEngine,
@@ -321,6 +294,33 @@ impl Clone for BoxedConstraint {
 impl Clone for BoxedPropagator {
 	fn clone(&self) -> BoxedPropagator {
 		dyn_clone::clone_box(&**self)
+	}
+}
+
+impl<C> ReasonBuilder<C> for &[C::Atom]
+where
+	C: ReasoningContext + ?Sized,
+{
+	fn build_reason(self, _: &mut C) -> Result<Reason<C::Atom>, bool> {
+		Reason::from_iter(self.iter().cloned())
+	}
+}
+
+impl<C, const N: usize> ReasonBuilder<C> for &[C::Atom; N]
+where
+	C: ReasoningContext + ?Sized,
+{
+	fn build_reason(self, ctx: &mut C) -> Result<Reason<C::Atom>, bool> {
+		self[..].build_reason(ctx)
+	}
+}
+
+impl<C, const N: usize> ReasonBuilder<C> for [C::Atom; N]
+where
+	C: ReasoningContext + ?Sized,
+{
+	fn build_reason(self, _: &mut C) -> Result<Reason<C::Atom>, bool> {
+		Reason::from_iter(self)
 	}
 }
 

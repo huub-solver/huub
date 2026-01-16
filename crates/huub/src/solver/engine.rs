@@ -758,6 +758,12 @@ impl IntExplanationActions<State> for IntVarRef {
 }
 
 impl IntInspectionActions<State> for IntVarRef {
+	fn bounds(&self, ctx: &State) -> (IntVal, IntVal) {
+		let lb = self.lower_bound(ctx);
+		let ub = self.upper_bound(ctx);
+		(lb, ub)
+	}
+
 	fn domain(&self, ctx: &State) -> IntSetVal {
 		ctx.int_vars[*self].domain(&ctx.trail)
 	}
@@ -805,12 +811,6 @@ impl IntInspectionActions<State> for IntVarRef {
 
 	fn upper_bound_lit(&self, ctx: &State) -> BoolView {
 		ctx.int_vars[*self].upper_bound_lit(&ctx.trail)
-	}
-
-	fn bounds(&self, ctx: &State) -> (IntVal, IntVal) {
-		let lb = self.lower_bound(ctx);
-		let ub = self.upper_bound(ctx);
-		(lb, ub)
 	}
 
 	fn val(&self, ctx: &State) -> Option<IntVal> {

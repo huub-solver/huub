@@ -1,7 +1,8 @@
-//! This module defines `LinearBoolView`, an integer view of a Boolean variable
 //! with an affine transformation:
 //!     value = scale * b + offset
 //! where `b ∈ {0, 1}` corresponds to `{false, true}` respectively.
+
+//! This module defines `LinearBoolView`, an integer view of a Boolean variable
 
 use std::{
 	fmt::Debug,
@@ -108,6 +109,22 @@ impl<Var> LinearBoolView<NonZero<IntVal>, IntVal, Var> {
 		div_floor(val - self.offset, self.scale)
 	}
 
+	/// Transform a [`IntLitMeaning`] from the variable given the view's scale
+	/// and offset.
+	pub(crate) fn transform_meaning(&self, meaning: IntLitMeaning) -> IntLitMeaning {
+		match meaning {
+			IntLitMeaning::Eq(v) => IntLitMeaning::Eq(self.transform_val(v)),
+			IntLitMeaning::NotEq(v) => IntLitMeaning::NotEq(self.transform_val(v)),
+			IntLitMeaning::GreaterEq(v) => IntLitMeaning::GreaterEq(self.transform_val(v)),
+			IntLitMeaning::Less(v) => IntLitMeaning::Less(self.transform_val(v)),
+		}
+	}
+
+	/// Transform a [`IntVal`] using the view's scale and offset.
+	pub(crate) fn transform_val(&self, val: IntVal) -> IntVal {
+		self.scale.get() * val + self.offset
+	}
+
 	/// Try to reverse the transformation of an [`IntVal`] without rounding.
 	fn try_reverse_val(&self, val: IntVal) -> Option<IntVal> {
 		let val = val - self.offset;
@@ -117,20 +134,39 @@ impl<Var> LinearBoolView<NonZero<IntVal>, IntVal, Var> {
 			None
 		}
 	}
+}
 
-	/// Transform a [`IntVal`] using the view's scale and offset.
-	pub(crate) fn transform_val(&self, val: IntVal) -> IntVal {
-		self.scale.get() * val + self.offset
+impl<Var> Add<IntVal> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
+	type Output = Self;
+
+	fn add(mut self, rhs: IntVal) -> Self::Output {
+		self += rhs;
+		self
 	}
+}
 
-	/// Transform a [`IntLitMeaning`] from the variable given the view's scale
-	/// and offset.
-	pub(crate) fn transform_meaning(&self, meaning: IntLitMeaning) -> IntLitMeaning {
-		match meaning {
-			IntLitMeaning::Eq(v) => IntLitMeaning::Eq(self.transform_val(v)),
-			IntLitMeaning::NotEq(v) => IntLitMeaning::NotEq(self.transform_val(v)),
-			IntLitMeaning::GreaterEq(v) => IntLitMeaning::GreaterEq(self.transform_val(v)),
-			IntLitMeaning::Less(v) => IntLitMeaning::Less(self.transform_val(v)),
+impl<Var> AddAssign<IntVal> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
+	fn add_assign(&mut self, rhs: IntVal) {
+		self.offset += rhs;
+	}
+}
+
+impl<Var> From<OffsetView<IntVal, Var>> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
+	fn from(view: OffsetView<IntVal, Var>) -> Self {
+		Self {
+			scale: NonZero::new(1).unwrap(),
+			offset: view.offset,
+			var: view.var,
+		}
+	}
+}
+
+impl<Var> From<Var> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
+	fn from(var: Var) -> Self {
+		Self {
+			scale: NonZero::new(1).unwrap(),
+			offset: 0,
+			var,
 		}
 	}
 }
@@ -163,6 +199,15 @@ where
 	Ctx::Atom: BoolOperations + From<bool> + From<Var>,
 	Var: BoolInspectionActions<Ctx>,
 {
+	fn bounds(&self, ctx: &Ctx) -> (IntVal, IntVal) {
+		let (lb, ub) = if let Some(val) = self.var.val(ctx) {
+			(val as IntVal, val as IntVal)
+		} else {
+			(0, 1)
+		};
+		(self.transform_val(lb), self.transform_val(ub))
+	}
+
 	fn domain(&self, ctx: &Ctx) -> IntSetVal {
 		if let Some(v) = self.var.val(ctx) {
 			RangeList::from_sorted_elements([self.transform_val(v as IntVal)])
@@ -239,15 +284,6 @@ where
 
 	fn val(&self, ctx: &Ctx) -> Option<IntVal> {
 		Some(self.transform_val(self.var.val(ctx)? as IntVal))
-	}
-
-	fn bounds(&self, ctx: &Ctx) -> (IntVal, IntVal) {
-		let (lb, ub) = if let Some(val) = self.var.val(ctx) {
-			(val as IntVal, val as IntVal)
-		} else {
-			(0, 1)
-		};
-		(self.transform_val(lb), self.transform_val(ub))
 	}
 }
 
@@ -398,61 +434,12 @@ where
 	}
 }
 
-impl<Var> From<Var> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
-	fn from(var: Var) -> Self {
-		Self {
-			scale: NonZero::new(1).unwrap(),
-			offset: 0,
-			var,
-		}
-	}
-}
-
-impl<Var> From<OffsetView<IntVal, Var>> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
-	fn from(view: OffsetView<IntVal, Var>) -> Self {
-		Self {
-			scale: NonZero::new(1).unwrap(),
-			offset: view.offset,
-			var: view.var,
-		}
-	}
-}
-
-impl<Var> AddAssign<IntVal> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
-	fn add_assign(&mut self, rhs: IntVal) {
-		self.offset += rhs;
-	}
-}
-
-impl<Var> Add<IntVal> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
+impl<Var: BoolOperations> Mul<NonZero<IntVal>> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
 	type Output = Self;
 
-	fn add(mut self, rhs: IntVal) -> Self::Output {
-		self += rhs;
+	fn mul(mut self, rhs: NonZero<IntVal>) -> Self::Output {
+		self *= rhs;
 		self
-	}
-}
-
-impl<Var> SubAssign<IntVal> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
-	fn sub_assign(&mut self, rhs: IntVal) {
-		self.offset -= rhs;
-	}
-}
-
-impl<Var> Sub<IntVal> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
-	type Output = Self;
-
-	fn sub(mut self, rhs: IntVal) -> Self::Output {
-		self -= rhs;
-		self
-	}
-}
-
-impl<Var: BoolOperations> Neg for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
-	type Output = Self;
-
-	fn neg(self) -> Self::Output {
-		self * NonZero::new(-1).unwrap()
 	}
 }
 
@@ -470,11 +457,25 @@ impl<Var: BoolOperations> MulAssign<NonZero<IntVal>>
 	}
 }
 
-impl<Var: BoolOperations> Mul<NonZero<IntVal>> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
+impl<Var: BoolOperations> Neg for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
 	type Output = Self;
 
-	fn mul(mut self, rhs: NonZero<IntVal>) -> Self::Output {
-		self *= rhs;
+	fn neg(self) -> Self::Output {
+		self * NonZero::new(-1).unwrap()
+	}
+}
+
+impl<Var> Sub<IntVal> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
+	type Output = Self;
+
+	fn sub(mut self, rhs: IntVal) -> Self::Output {
+		self -= rhs;
 		self
+	}
+}
+
+impl<Var> SubAssign<IntVal> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
+	fn sub_assign(&mut self, rhs: IntVal) {
+		self.offset -= rhs;
 	}
 }

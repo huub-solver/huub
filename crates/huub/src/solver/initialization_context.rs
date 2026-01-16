@@ -137,6 +137,11 @@ impl InitActions for InitializationContext<'_> {
 	}
 }
 
+impl ReasoningContext for InitializationContext<'_> {
+	type Atom = <Engine as ReasoningEngine>::Atom;
+	type Conflict = <Engine as ReasoningEngine>::Conflict;
+}
+
 impl IntInitActions<InitializationContext<'_>> for IntVal {
 	fn advise_when(&self, _: &mut InitializationContext<'_>, _: IntPropCond, _: u64) {
 		// constant will never change, so we don't need to add an
@@ -167,6 +172,10 @@ impl IntInitActions<InitializationContext<'_>> for IntVarRef {
 }
 
 impl IntInspectionActions<InitializationContext<'_>> for IntVarRef {
+	fn bounds(&self, ctx: &InitializationContext<'_>) -> (IntVal, IntVal) {
+		self.bounds(ctx.state)
+	}
+
 	fn domain(&self, ctx: &InitializationContext<'_>) -> IntSetVal {
 		self.domain(ctx.state)
 	}
@@ -197,10 +206,6 @@ impl IntInspectionActions<InitializationContext<'_>> for IntVarRef {
 
 	fn upper_bound_lit(&self, ctx: &InitializationContext<'_>) -> BoolView {
 		self.upper_bound_lit(ctx.state)
-	}
-
-	fn bounds(&self, ctx: &InitializationContext<'_>) -> (IntVal, IntVal) {
-		self.bounds(ctx.state)
 	}
 
 	fn val(&self, ctx: &InitializationContext<'_>) -> Option<IntVal> {
@@ -335,9 +340,4 @@ impl BoolInitActions<InitializationContext<'_>> for bool {
 	fn enqueue_when_fixed(&self, ctx: &mut InitializationContext<'_>) {
 		ctx.semantic_enqueue = true;
 	}
-}
-
-impl ReasoningContext for InitializationContext<'_> {
-	type Atom = <Engine as ReasoningEngine>::Atom;
-	type Conflict = <Engine as ReasoningEngine>::Conflict;
 }

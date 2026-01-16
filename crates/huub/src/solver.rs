@@ -432,6 +432,12 @@ impl<Oracle: ExternalPropagation> IntDecisionActions<Solver<Oracle>> for IntVarR
 }
 
 impl<Oracle> IntInspectionActions<Solver<Oracle>> for IntVarRef {
+	fn bounds(&self, ctx: &Solver<Oracle>) -> (IntVal, IntVal) {
+		let lb = self.lower_bound(ctx);
+		let ub = self.upper_bound(ctx);
+		(lb, ub)
+	}
+
 	fn domain(&self, ctx: &Solver<Oracle>) -> IntSetVal {
 		self.domain(&ctx.engine.borrow().state)
 	}
@@ -462,12 +468,6 @@ impl<Oracle> IntInspectionActions<Solver<Oracle>> for IntVarRef {
 
 	fn upper_bound_lit(&self, ctx: &Solver<Oracle>) -> BoolView {
 		self.upper_bound_lit(&ctx.engine.borrow().state)
-	}
-
-	fn bounds(&self, ctx: &Solver<Oracle>) -> (IntVal, IntVal) {
-		let lb = self.lower_bound(ctx);
-		let ub = self.upper_bound(ctx);
-		(lb, ub)
 	}
 
 	fn val(&self, ctx: &Solver<Oracle>) -> Option<IntVal> {
@@ -607,6 +607,14 @@ where
 	RawLit: BoolInspectionActions<Ctx>,
 	BoolView: BoolInspectionActions<Ctx>,
 {
+	fn bounds(&self, ctx: &Ctx) -> (IntVal, IntVal) {
+		match self.0 {
+			IntViewInner::Const(c) => c.bounds(ctx),
+			IntViewInner::Linear(lin) => lin.bounds(ctx),
+			IntViewInner::Bool(lin) => lin.bounds(ctx),
+		}
+	}
+
 	fn domain(&self, ctx: &Ctx) -> IntSetVal {
 		match self.0 {
 			IntViewInner::Const(c) => c.domain(ctx),
@@ -668,14 +676,6 @@ where
 			IntViewInner::Linear(lin) => lin.upper_bound_lit(ctx),
 			IntViewInner::Const(c) => c.upper_bound_lit(ctx),
 			IntViewInner::Bool(lin) => lin.upper_bound_lit(ctx),
-		}
-	}
-
-	fn bounds(&self, ctx: &Ctx) -> (IntVal, IntVal) {
-		match self.0 {
-			IntViewInner::Const(c) => c.bounds(ctx),
-			IntViewInner::Linear(lin) => lin.bounds(ctx),
-			IntViewInner::Bool(lin) => lin.bounds(ctx),
 		}
 	}
 
@@ -1365,6 +1365,11 @@ impl<Oracle: Default + ExternalPropagation + LearnCallback> Default for Solver<O
 	}
 }
 
+impl<Oracle> ReasoningContext for Solver<Oracle> {
+	type Atom = <Engine as ReasoningEngine>::Atom;
+	type Conflict = <Engine as ReasoningEngine>::Conflict;
+}
+
 impl<Oracle> TrailingActions for Solver<Oracle> {
 	fn set_trailed_int(&mut self, x: TrailedInt, v: IntVal) -> IntVal {
 		self.engine.borrow_mut().state.set_trailed_int(x, v)
@@ -1373,11 +1378,6 @@ impl<Oracle> TrailingActions for Solver<Oracle> {
 	fn trailed_int(&self, x: TrailedInt) -> IntVal {
 		self.engine.borrow().state.trailed_int(x)
 	}
-}
-
-impl<Oracle> ReasoningContext for Solver<Oracle> {
-	type Atom = <Engine as ReasoningEngine>::Atom;
-	type Conflict = <Engine as ReasoningEngine>::Conflict;
 }
 
 impl Value {
