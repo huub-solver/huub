@@ -1217,28 +1217,27 @@ where
 					}
 				}
 				"huub_diffn_int" | "huub_diffn_nonstrict_int" => {
-					let is_nonstrict = c.id.deref() == "huub_diffn_nonstrict_int";
+					let strict = c.id.deref() == "huub_diffn_int";
 					if let [x, y, dx, dy] = c.args.as_slice() {
-						let x = self.arg_array(x)?;
-						let y = self.arg_array(y)?;
-						let dx = self.arg_array(dx)?;
-						let dy = self.arg_array(dy)?;
-						let box_posn: Vec<Vec<_>> = vec![
-							x.iter().map(|l| self.lit_int(l)).try_collect()?,
-							y.iter().map(|l| self.lit_int(l)).try_collect()?,
-						];
-
-						let box_size: Vec<Vec<_>> = vec![
-							dx.iter().map(|l| self.lit_int(l)).try_collect()?,
-							dy.iter().map(|l| self.lit_int(l)).try_collect()?,
-						];
-						diffn_int(&mut self.prb, box_posn, box_size, is_nonstrict);
+						let posn: Result<_, FlatZincError> = self
+							.arg_array(x)?
+							.into_iter()
+							.zip(self.arg_array(y)?)
+							.map(|(x, y)| Ok(vec![self.lit_int(x)?, self.lit_int(y)?]))
+							.try_collect();
+						let size: Result<_, FlatZincError> = self
+							.arg_array(dx)?
+							.into_iter()
+							.zip(self.arg_array(dy)?)
+							.map(|(dx, dy)| Ok(vec![self.lit_int(dx)?, self.lit_int(dy)?]))
+							.try_collect();
+						diffn_int(&mut self.prb, posn?, size?, strict);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
-							name: if is_nonstrict {
-								"huub_diffn_nonstrict"
-							} else {
+							name: if strict {
 								"huub_diffn"
+							} else {
+								"huub_diffn_nonstrict"
 							},
 							found: c.args.len(),
 							expected: 4,
@@ -1246,7 +1245,7 @@ where
 					}
 				}
 				"huub_diffn_k_int" | "huub_diffn_nonstrict_k_int" => {
-					let is_nonstrict = c.id.deref() == "huub_diffn_nonstrict_k_int";
+					let strict = c.id.deref() == "huub_diffn_k_int";
 					if let [box_posn, box_size, d] = c.args.as_slice() {
 						let dimensions = self.arg_par_int(d)?;
 						let flat_start_pos = self.arg_array(box_posn)?;
@@ -1266,13 +1265,13 @@ where
 							sizes[i % dimensions as usize].push(size);
 						}
 
-						diffn_int(&mut self.prb, start_pos, sizes, is_nonstrict);
+						diffn_int(&mut self.prb, start_pos, sizes, strict);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
-							name: if is_nonstrict {
-								"huub_diffn_k_nonstrict"
+							name: if strict {
+								"huub_diffn_k_int"
 							} else {
-								"huub_diffn_k"
+								"huub_diffn_nonstrict_k_int"
 							},
 							found: c.args.len(),
 							expected: 3,

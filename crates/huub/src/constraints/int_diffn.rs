@@ -1,6 +1,6 @@
 //! Structure and algorithms for the integer diffn constraint, which
 //! enforces that a number of k-dimensional hyperrectangles do not overlap.
-use std::ops::AddAssign;
+use std::{cmp, iter::repeat_with, ops::AddAssign};
 
 use crate::{
 	IntLitMeaning, IntVal,
@@ -11,6 +11,7 @@ use crate::{
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
 	},
+	helpers::matrix::Matrix,
 	reformulate::ReformulationError,
 	solver::{IntView, activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt},
 };
@@ -31,37 +32,44 @@ use crate::{
 /// forbidden in the sense that if we would put our rectangle at that place, it
 /// would guarantee that at least two rectangles are overlapping, which violates
 /// the constraint.
-pub struct IntDiffnSweep<const NON_STRICT: bool, I> {
-	/// The origin positions and sizes of all objects in all dimensions
-	boxes: Vec<DimStore<I>>,
-	/// Number of dimensions
-	dimensions: usize,
+///
+/// All [`Matrix`] attributes have two dimensions/indexes, the first is the
+/// object, the second is the dimension number.
+pub struct IntDiffnSweep<const STRICT: bool, I> {
+	/// The origin position of each object in each dimension
+	origin: Matrix<2, I>,
+	/// The size of each object in each dimension
+	size: Matrix<2, I>,
+
 	/// Trail which tracks the target property, target[i] = 1 if is has been
 	/// lost, and will let us skip some iterations since it at that point has
 	/// been checked to be at a feasible position and fixed.
-	target: Vec<TrailedInt>,
+	target: Box<[TrailedInt]>,
 	/// Trail which tracks the source property, target[i] = 1 if is has been
 	/// lost, and will allow it to be disregarded through the entire algorithm
 	/// since it will not affect any other rectangle.
-	source: Vec<TrailedInt>,
-	/// Are all sizes fixed
-	fixed_sizes: bool,
+	source: Box<[TrailedInt]>,
+
+	/// Whether all size variables where fixed when the propagator was posted.
+	size_fixed: bool,
+
 	/// Tracks the upper bound of the positions
-	ub_tracker: Vec<DimStore<IntVal>>,
+	origin_ub: Matrix<2, IntVal>,
 	/// Tracks the lower bound of the positions
-	lb_tracker: Vec<DimStore<IntVal>>,
+	origin_lb: Matrix<2, IntVal>,
 	/// Tracks the lower bound of the sizes
-	// lb_sizes: Vec<DimStore<IntVal>>,
+	size_lb: Matrix<2, IntVal>,
+
 	/// Used to see if any rectangle has lost its source property, that is; it
-	/// is completely disjoint from all the others and therefore can be
-	/// removed completely when reasoning in the rest of the algorithm since
-	/// it will not effect any other triangle
-	bounding_box: ForbiddenRegion,
-	/// Stores all forbidden regions for a given object
-	all_fr: Vec<ForbiddenRegion>,
+	/// is completely disjoint from all the others and therefore can be removed
+	/// completely when reasoning in the rest of the algorithm since it will not
+	/// effect any other triangle
+	bounding_box: Region,
+	/// Stores all forbidden regions for the current object
+	forbidden_regions: Vec<Region>,
 }
 
-impl<const NON_STRICT: bool, E, I> Constraint<E> for IntDiffnSweep<NON_STRICT, I>
+impl<const STRICT: bool, E, I> Constraint<E> for IntDiffnSweep<STRICT, I>
 where
 	E: ReasoningEngine,
 	I: ModelIntView<E>,
@@ -72,64 +80,56 @@ where
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
 
-		if self.boxes.iter().all(|b| {
-			b.origins
-				.iter()
-				.chain(&b.sizes)
-				.all(|v| v.val(ctx).is_some())
-		}) {
+		if self.origin.iter_elem().all(|v| v.val(ctx).is_some())
+			&& self.origin.iter_elem().all(|v| v.val(ctx).is_some())
+		{
 			return Ok(SimplificationStatus::Subsumed);
 		}
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let box_pos: Vec<Vec<_>> = self
-			.boxes
-			.iter()
-			.map(|b| {
-				b.origins
-					.iter()
+		let box_pos = self
+			.origin
+			.row_iter()
+			.map(|row| {
+				row.iter()
 					.map(|v| slv.solver_int(v.clone().into()))
 					.collect()
 			})
 			.collect();
-
-		let box_size: Vec<Vec<_>> = self
-			.boxes
-			.iter()
-			.map(|b| {
-				b.sizes
-					.iter()
+		let box_size = self
+			.size
+			.row_iter()
+			.map(|row| {
+				row.iter()
 					.map(|v| slv.solver_int(v.clone().into()))
 					.collect()
 			})
 			.collect();
-
-		IntDiffnSweep::<NON_STRICT, _>::post(slv, box_pos, box_size);
+		IntDiffnSweep::<STRICT, _>::post(slv, box_pos, box_size);
 		Ok(())
 	}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Active forbidden regions
-struct ForbiddenRegion {
+/// A region in a multi-dimensional space.
+struct Region {
 	/// Lower bound in each dimension
 	lb: Vec<IntVal>,
 	/// Upper bound in each dimension
 	ub: Vec<IntVal>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Stores the all origins and sizes for specific dimension
-struct DimStore<T> {
-	/// All origins in a given dimension
-	origins: Vec<T>,
-	/// All sizes in a given dimension
-	sizes: Vec<T>,
-}
+impl<const STRICT: bool, I> IntDiffnSweep<STRICT, I> {
+	fn num_objects(&self) -> usize {
+		self.origin.len(0)
+	}
 
-impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
+	fn num_dimensions(&self) -> usize {
+		self.origin.len(1)
+	}
+
 	/// Create a new [`IntDiffnSweep`] propagator, to be used within the given
 	/// engine.
 	pub(crate) fn new<E>(engine: &mut E, box_posn: Vec<Vec<I>>, box_size: Vec<Vec<I>>) -> Self
@@ -137,57 +137,58 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 		E: ConstructionActions + ReasoningContext + ?Sized,
 		I: IntInspectionActions<E>,
 	{
+		assert_eq!(box_posn.len(), box_size.len());
+		assert!(
+			box_posn.is_empty()
+				|| box_posn
+					.iter()
+					.chain(&box_size)
+					.all(|v| v.len() == box_posn[0].len())
+		);
 		// Make sure all sizes are fixed before enqueueing
-		let fixed = box_size.iter().flatten().all(|v| v.val(engine).is_some());
+		let fixed_sizes = box_size.iter().flatten().all(|v| v.val(engine).is_some());
 
-		let mut boxes_prop = Vec::new();
+		let num_objects = box_posn.len();
+		let num_dimensions = box_posn[0].len();
 
-		for i in 0..box_posn.len() {
-			boxes_prop.push(DimStore {
-				origins: box_posn[i].clone(),
-				sizes: box_size[i].clone(),
-			});
-		}
+		let box_posn = Matrix::new(
+			[num_objects, num_dimensions],
+			box_posn.into_iter().flatten().collect(),
+		);
+		let box_size = Matrix::new(
+			[num_objects, num_dimensions],
+			box_size.into_iter().flatten().collect(),
+		);
 
-		let target_trail = (0..box_size[0].len())
-			.map(|_| engine.new_trailed_int(0))
+		let target = repeat_with(|| engine.new_trailed_int(0))
+			.take(num_objects)
 			.collect();
-		let source_trail = (0..box_size[0].len())
-			.map(|_| engine.new_trailed_int(0))
+		let source = repeat_with(|| engine.new_trailed_int(0))
+			.take(num_objects)
 			.collect();
 
-		let ub_tracker_prop = vec![
-			DimStore {
-				origins: vec![0; box_posn[0].len()],
-				sizes: vec![0; box_posn[0].len()]
-			};
-			box_posn.len()
-		];
-		let lb_tracker_prop = vec![
-			DimStore {
-				origins: vec![0; box_posn[0].len()],
-				sizes: vec![0; box_posn[0].len()]
-			};
-			box_posn.len()
-		];
+		let ub_tracker = Matrix::with_dimensions([num_objects, num_dimensions]);
+		let lb_tracker = Matrix::with_dimensions([num_objects, num_dimensions]);
+		let lb_sizes = Matrix::with_dimensions([num_objects, num_dimensions]);
 
-		let bounding_box_prop = ForbiddenRegion {
-			lb: vec![i64::MAX; box_posn.len()],
-			ub: vec![i64::MIN; box_posn.len()],
+		let bounding_box = Region {
+			lb: vec![i64::MAX; num_dimensions],
+			ub: vec![i64::MIN; num_dimensions],
 		};
 
-		let all_fr_prop = Vec::new();
+		let all_fr = Vec::new();
 
 		Self {
-			boxes: boxes_prop,
-			dimensions: box_posn.len(),
-			target: target_trail,
-			source: source_trail,
-			fixed_sizes: fixed,
-			ub_tracker: ub_tracker_prop,
-			lb_tracker: lb_tracker_prop,
-			bounding_box: bounding_box_prop,
-			all_fr: all_fr_prop,
+			origin: box_posn,
+			size: box_size,
+			target,
+			source,
+			size_fixed: fixed_sizes,
+			origin_ub: ub_tracker,
+			origin_lb: lb_tracker,
+			size_lb: lb_sizes,
+			bounding_box,
+			forbidden_regions: all_fr,
 		}
 	}
 
@@ -207,36 +208,27 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 		E: ReasoningEngine,
 		I: SolverIntView<E>,
 	{
-		let mut sweep = vec![];
-		let mut jump = vec![];
+		let mut sweep = self.origin_lb.row(curr_obj_idx).to_vec();
+		let mut jump: Vec<_> = self
+			.origin_ub
+			.row(curr_obj_idx)
+			.iter()
+			.map(|v| v + 1)
+			.collect();
 		let mut b = true;
 
-		for d in 0..self.dimensions {
-			sweep.push(self.lb_tracker[d].origins[curr_obj_idx]);
-			jump.push(self.ub_tracker[d].origins[curr_obj_idx] + 1);
-		}
 		// Get the forbidden region our current sweep point is overlapping with
-		let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, &self.all_fr);
+		let mut infeasible_fr =
+			Self::infeasible_sweep(&sweep, self.num_dimensions(), &self.forbidden_regions);
 		while b && infeasible_fr.is_some() {
 			// The jump is always pointed toward upper bounds of forbiddens as this is where
 			// we will find feasible origins
-			jump = jump
-				.iter_mut()
-				.enumerate()
-				.map(|(i, &mut j)| j.min(infeasible_fr.unwrap().ub[i] + 1))
-				.collect();
+			for (i, j) in jump.iter_mut().enumerate() {
+				*j = cmp::min(*j, infeasible_fr.unwrap().ub[i] + 1);
+			}
 
-			let lb: Vec<_> = self
-				.lb_tracker
-				.iter()
-				.map(|d| d.origins[curr_obj_idx])
-				.collect();
-
-			let ub: Vec<_> = self
-				.ub_tracker
-				.iter()
-				.map(|d| d.origins[curr_obj_idx])
-				.collect();
+			let lb = self.origin_lb.row(curr_obj_idx);
+			let ub = self.origin_ub.row(curr_obj_idx);
 
 			b = Self::adjust_sweep_min(
 				&mut sweep,
@@ -244,23 +236,24 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 				&lb,
 				&ub,
 				curr_dimension,
-				self.dimensions,
+				self.num_dimensions(),
 			);
 
-			infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, &self.all_fr);
+			infeasible_fr =
+				Self::infeasible_sweep(&sweep, self.num_dimensions(), &self.forbidden_regions);
 		}
 		// Don't bother to do any propagation if the sweep point is at the same place it
 		// started
-		if sweep[curr_dimension] != self.lb_tracker[curr_dimension].origins[curr_obj_idx] {
+		if sweep[curr_dimension] != self.origin_lb[[curr_obj_idx, curr_dimension]] {
 			let reason =
 				self.explain_propagation(ctx, fr_support, curr_obj_idx, curr_dimension, false);
-			self.boxes[curr_dimension].origins[curr_obj_idx].set_lower_bound(
+			self.origin[[curr_obj_idx, curr_dimension]].set_lower_bound(
 				ctx,
 				sweep[curr_dimension],
 				reason,
 			)?;
 
-			self.lb_tracker[curr_dimension].origins[curr_obj_idx] = sweep[curr_dimension];
+			self.origin_lb[[curr_obj_idx, curr_dimension]] = sweep[curr_dimension];
 		}
 		Ok(())
 	}
@@ -281,36 +274,27 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 		E: ReasoningEngine,
 		I: SolverIntView<E>,
 	{
-		let mut sweep = vec![];
-		let mut jump = vec![];
+		let mut sweep = self.origin_ub.row(curr_obj_idx).to_vec();
+		let mut jump: Vec<_> = self
+			.origin_lb
+			.row(curr_obj_idx)
+			.iter()
+			.map(|v| v - 1)
+			.collect();
 		let mut b = true;
 
-		for i in 0..self.dimensions {
-			sweep.push(self.ub_tracker[i].origins[curr_obj_idx]);
-			jump.push(self.lb_tracker[i].origins[curr_obj_idx] - 1);
-		}
 		// Get the forbidden region our current sweep point is overlapping with
-		let mut infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, &self.all_fr);
+		let mut infeasible_fr =
+			Self::infeasible_sweep(&sweep, self.num_dimensions(), &self.forbidden_regions);
 		while b && infeasible_fr.is_some() {
 			// The jump is always pointed toward upper bounds of forbiddens as this is where
 			// we will find feasible origins
-			jump = jump
-				.iter_mut()
-				.enumerate()
-				.map(|(i, &mut j)| j.max(infeasible_fr.unwrap().lb[i] - 1))
-				.collect();
+			for (i, j) in jump.iter_mut().enumerate() {
+				*j = cmp::max(*j, infeasible_fr.unwrap().lb[i] - 1);
+			}
 
-			let lb: Vec<_> = self
-				.lb_tracker
-				.iter()
-				.map(|d| d.origins[curr_obj_idx])
-				.collect();
-
-			let ub: Vec<_> = self
-				.ub_tracker
-				.iter()
-				.map(|d| d.origins[curr_obj_idx])
-				.collect();
+			let lb = self.origin_lb.row(curr_obj_idx);
+			let ub = self.origin_ub.row(curr_obj_idx);
 
 			b = Self::adjust_sweep_max(
 				&mut sweep,
@@ -318,24 +302,25 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 				&lb,
 				&ub,
 				curr_dimension,
-				self.dimensions,
+				self.num_dimensions(),
 			);
 
-			infeasible_fr = Self::infeasible_sweep(&sweep, self.dimensions, &self.all_fr);
+			infeasible_fr =
+				Self::infeasible_sweep(&sweep, self.num_dimensions(), &self.forbidden_regions);
 		}
 
 		// Don't bother to do any propagation if the sweep point is at the same place it
 		// started
-		if sweep[curr_dimension] != self.ub_tracker[curr_dimension].origins[curr_obj_idx] {
+		if sweep[curr_dimension] != self.origin_ub[[curr_obj_idx, curr_dimension]] {
 			let reason =
 				self.explain_propagation(ctx, fr_support, curr_obj_idx, curr_dimension, true);
-			self.boxes[curr_dimension].origins[curr_obj_idx].set_upper_bound(
+			self.origin[[curr_obj_idx, curr_dimension]].set_upper_bound(
 				ctx,
 				sweep[curr_dimension],
 				reason,
 			)?;
 
-			self.ub_tracker[curr_dimension].origins[curr_obj_idx] = sweep[curr_dimension];
+			self.origin_ub[[curr_obj_idx, curr_dimension]] = sweep[curr_dimension];
 		}
 		Ok(())
 	}
@@ -409,7 +394,7 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 	fn overlaps(
 		curr_obj_lb: &[IntVal],
 		curr_obj_ub: &[IntVal],
-		fr: &ForbiddenRegion,
+		fr: &Region,
 		dimensions: usize,
 	) -> bool {
 		for d in 0..dimensions {
@@ -433,8 +418,8 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 	where
 		Ctx: ReasoningContext + TrailingActions,
 	{
-		self.all_fr.clear();
-		for i in 0..self.boxes[0].origins.len() {
+		self.forbidden_regions.clear();
+		for i in 0..self.num_objects() {
 			// Check if the current object can be ignored if it has lost its source property
 			if ctx.trailed_int(self.source[i]) == 1 {
 				continue;
@@ -444,15 +429,15 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 				continue;
 			};
 
-			let mut fr = ForbiddenRegion {
+			let mut fr = Region {
 				lb: Vec::new(),
 				ub: Vec::new(),
 			};
 
 			let mut exists = true;
-			for d in 0..self.dimensions {
-				let fr_lb = self.ub_tracker[d].origins[i] - self.lb_tracker[d].sizes[o_idx] + 1;
-				let fr_ub = self.lb_tracker[d].origins[i] + self.lb_tracker[d].sizes[i] - 1;
+			for d in 0..self.num_dimensions() {
+				let fr_lb = self.origin_ub[[i, d]] - self.size_lb[[o_idx, d]] + 1;
+				let fr_ub = self.origin_lb[[i, d]] + self.size_lb[[i, d]] - 1;
 				if fr_lb <= fr_ub {
 					fr.lb.push(fr_lb);
 					fr.ub.push(fr_ub);
@@ -462,17 +447,17 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 			}
 			let mut regions_to_remove: Vec<(usize, usize)> = Vec::new();
 
-			let lb: Vec<_> = self.lb_tracker.iter().map(|d| d.origins[o_idx]).collect();
-
-			let ub: Vec<_> = self.ub_tracker.iter().map(|d| d.origins[o_idx]).collect();
+			let lb = self.origin_lb.row(o_idx);
+			let ub = self.origin_ub.row(o_idx);
 
 			// Look for forbidden regions that are a subset of another such that they can be
 			// merged
 			if exists && Self::overlaps(&lb, &ub, &fr, dimensions) {
 				let mut c = 0;
-				for f in &mut self.all_fr {
+				let num_dimensions = self.num_dimensions();
+				for f in &mut self.forbidden_regions {
 					let fr_object = fr_support[c];
-					let v = Self::coalesce(f, &fr, self.dimensions);
+					let v = Self::coalesce(f, &fr, num_dimensions);
 
 					match v {
 						// fr is a subset of f
@@ -494,18 +479,18 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 				}
 
 				for (c, o) in regions_to_remove.iter().rev() {
-					let _ = self.all_fr.remove(*c);
+					let _ = self.forbidden_regions.remove(*c);
 					fr_support.retain(|&x| x != *o);
 				}
 
 				if exists {
 					fr_support.push(i);
-					self.all_fr.push(fr);
+					self.forbidden_regions.push(fr);
 				}
 			}
 		}
 
-		if self.all_fr.is_empty() {
+		if self.forbidden_regions.is_empty() {
 			None
 		} else {
 			Some(())
@@ -517,8 +502,8 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 	fn infeasible_sweep<'a>(
 		sweep: &[IntVal],
 		dimensions: usize,
-		all_fr: &'a [ForbiddenRegion],
-	) -> Option<&'a ForbiddenRegion> {
+		all_fr: &'a [Region],
+	) -> Option<&'a Region> {
 		all_fr
 			.iter()
 			.find(|fr| (0..dimensions).all(|i| sweep[i] >= fr.lb[i] && sweep[i] <= fr.ub[i]))
@@ -526,24 +511,21 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 
 	/// Checks if given rectangle has a fixed origin position in all dimensions
 	fn fixed_in_all_dimensions(&self, curr_obj_idx: usize) -> bool {
-		let mut is_assigned = true;
-		for d in 0..self.dimensions {
-			let fixed = self.lb_tracker[d].origins[curr_obj_idx]
-				== self.ub_tracker[d].origins[curr_obj_idx];
-			if !fixed {
-				is_assigned = false;
+		for d in 0..self.num_dimensions() {
+			if self.origin_lb[[curr_obj_idx, d]] != self.origin_ub[[curr_obj_idx, d]] {
+				return false;
 			}
 		}
-		is_assigned
+		true
 	}
 
 	/// Checks if tw forbidden regions can be coalesced into one
 	/// Returns:
-	/// 0 - Coalescing not possbile
+	/// 0 - Coalescing not possible
 	/// 1 - fr2 is a subset of fr1
 	/// 2 - fr1 is a subset of fr2
 	/// 3 - The forbidden regions are equal
-	fn coalesce(fr1: &mut ForbiddenRegion, fr2: &ForbiddenRegion, dimensions: usize) -> usize {
+	fn coalesce(fr1: &mut Region, fr2: &Region, dimensions: usize) -> usize {
 		let mut trend = 0;
 		for d in 0..dimensions {
 			// No overlapping possible
@@ -574,11 +556,11 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 
 	/// Returns true if the given object and bounding_box are completely
 	/// disjoint in any dimension
-	fn disjoint(&self, bounding_box: &ForbiddenRegion, curr_obj_idx: usize) -> bool {
-		for d in 0..self.dimensions {
-			if self.ub_tracker[d].origins[curr_obj_idx] + self.lb_tracker[d].sizes[curr_obj_idx] - 1
+	fn disjoint(&self, bounding_box: &Region, curr_obj_idx: usize) -> bool {
+		for d in 0..self.num_dimensions() {
+			if self.origin_ub[[curr_obj_idx, d]] + self.size_lb[[curr_obj_idx, d]] - 1
 				< bounding_box.lb[d]
-				|| self.lb_tracker[d].origins[curr_obj_idx] > bounding_box.ub[d]
+				|| self.origin_lb[[curr_obj_idx, d]] > bounding_box.ub[d]
 			{
 				return true;
 			}
@@ -601,34 +583,31 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 	{
 		let mut reason = Vec::new();
 		for (fr, &o_idx) in fr_support.iter().enumerate() {
-			for d in 0..self.dimensions {
+			for d in 0..self.num_dimensions() {
 				// If sizes are not fixed, the lower bounds are assumed throughout the algorithm
 				// and thus have to be added to the explanation
-				if !self.fixed_sizes {
-					reason.push(self.boxes[d].sizes[o_idx].lower_bound_lit(ctx));
+				if !self.size_fixed {
+					reason.push(self.size[[o_idx, d]].lower_bound_lit(ctx));
 				}
-				let mut possible_ub = self.ub_tracker[d].origins[o_idx];
-				let origin_ub = self.ub_tracker[d].origins[curr_obj_idx];
+				let mut possible_ub = self.origin_ub[[o_idx, d]];
+				let origin_ub = self.origin_ub[[curr_obj_idx, d]];
 
-				let mut possible_lb = self.lb_tracker[d].origins[o_idx];
-				let origin_lb = self.lb_tracker[d].origins[curr_obj_idx];
+				let mut possible_lb = self.origin_lb[[o_idx, d]];
+				let origin_lb = self.origin_lb[[curr_obj_idx, d]];
 
 				// If a forbidden region is overhanging the currently active object, it can be
 				// assumed to be smaller when explaining which
-				if self.all_fr[fr].ub[d] > origin_ub {
-					possible_lb = origin_ub - self.lb_tracker[d].sizes[o_idx] + 1;
+				if self.forbidden_regions[fr].ub[d] > origin_ub {
+					possible_lb = origin_ub - self.size_lb[[o_idx, d]] + 1;
 				}
 
-				if self.all_fr[fr].lb[d] < origin_lb {
-					possible_ub = origin_lb + self.lb_tracker[d].sizes[curr_obj_idx] - 1;
+				if self.forbidden_regions[fr].lb[d] < origin_lb {
+					possible_ub = origin_lb + self.size_lb[[curr_obj_idx, d]] - 1;
 				}
 
-				reason.push(
-					self.boxes[d].origins[o_idx].lit(ctx, IntLitMeaning::Less(possible_ub + 1)),
-				);
-				reason.push(
-					self.boxes[d].origins[o_idx].lit(ctx, IntLitMeaning::GreaterEq(possible_lb)),
-				);
+				reason.push(self.origin[[o_idx, d]].lit(ctx, IntLitMeaning::Less(possible_ub + 1)));
+				reason
+					.push(self.origin[[o_idx, d]].lit(ctx, IntLitMeaning::GreaterEq(possible_lb)));
 			}
 		}
 		reason
@@ -650,11 +629,11 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 		I: IntDecisionActions<Ctx>,
 	{
 		let mut reason: Vec<_> = Vec::new();
-		for d in 0..self.dimensions {
+		for d in 0..self.num_dimensions() {
 			// If sizes are not fixed, the lower bounds are assumed throughout the algorithm
 			// and thus have to be added to the explanation
-			if !self.fixed_sizes {
-				reason.push(self.boxes[d].sizes[curr_obj_idx].lower_bound_lit(ctx));
+			if !self.size_fixed {
+				reason.push(self.size[[curr_obj_idx, d]].lower_bound_lit(ctx));
 			}
 
 			// The literal describing the opposite bound in the same dimension and object we
@@ -662,24 +641,24 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 			// explained.
 			if d == curr_dimension {
 				if prune_upper {
-					reason.push(self.boxes[d].origins[curr_obj_idx].lit(
+					reason.push(self.origin[[curr_obj_idx, d]].lit(
 						ctx,
-						IntLitMeaning::Less(self.ub_tracker[d].origins[curr_obj_idx] + 1),
+						IntLitMeaning::Less(self.origin_ub[[curr_obj_idx, d]] + 1),
 					));
 				} else {
-					reason.push(self.boxes[d].origins[curr_obj_idx].lit(
+					reason.push(self.origin[[curr_obj_idx, d]].lit(
 						ctx,
-						IntLitMeaning::GreaterEq(self.lb_tracker[d].origins[curr_obj_idx]),
+						IntLitMeaning::GreaterEq(self.origin_lb[[curr_obj_idx, d]]),
 					));
 				}
 			} else {
-				reason.push(self.boxes[d].origins[curr_obj_idx].lit(
+				reason.push(self.origin[[curr_obj_idx, d]].lit(
 					ctx,
-					IntLitMeaning::Less(self.ub_tracker[d].origins[curr_obj_idx] + 1),
+					IntLitMeaning::Less(self.origin_ub[[curr_obj_idx, d]] + 1),
 				));
-				reason.push(self.boxes[d].origins[curr_obj_idx].lit(
+				reason.push(self.origin[[curr_obj_idx, d]].lit(
 					ctx,
-					IntLitMeaning::GreaterEq(self.lb_tracker[d].origins[curr_obj_idx]),
+					IntLitMeaning::GreaterEq(self.origin_lb[[curr_obj_idx, d]]),
 				));
 			}
 		}
@@ -688,7 +667,7 @@ impl<const NON_STRICT: bool, I> IntDiffnSweep<NON_STRICT, I> {
 	}
 }
 
-impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT, IntView> {
+impl<const STRICT: bool> IntDiffnSweep<STRICT, IntView> {
 	/// Create a new [`IntDiffnSweep`] propagator and post it in the solver.
 	pub fn post<E>(solver: &mut E, box_posn: Vec<Vec<IntView>>, box_size: Vec<Vec<IntView>>)
 	where
@@ -700,7 +679,7 @@ impl<const NON_STRICT: bool> IntDiffnSweep<NON_STRICT, IntView> {
 	}
 }
 
-impl<const NON_STRICT: bool, E, I> Propagator<E> for IntDiffnSweep<NON_STRICT, I>
+impl<const STRICT: bool, E, I> Propagator<E> for IntDiffnSweep<STRICT, I>
 where
 	E: ReasoningEngine,
 	I: SolverIntView<E>,
@@ -708,59 +687,51 @@ where
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Lowest);
 
-		for b in &self.boxes {
-			for v in &b.origins {
-				v.enqueue_when(ctx, IntPropCond::Bounds);
-			}
-			for v in &b.sizes {
-				v.enqueue_when(ctx, IntPropCond::Bounds);
-			}
+		for v in self.origin.iter_elem().chain(self.size.iter_elem()) {
+			v.enqueue_when(ctx, IntPropCond::Bounds);
 		}
 	}
 
 	#[tracing::instrument(name = "diffn", level = "trace", skip(self, ctx))]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
-		for d in 0..self.dimensions {
-			for o in 0..self.boxes[0].origins.len() {
-				self.ub_tracker[d].origins[o] = self.boxes[d].origins[o].upper_bound(ctx);
-				self.lb_tracker[d].origins[o] = self.boxes[d].origins[o].lower_bound(ctx);
-				self.lb_tracker[d].sizes[o] = self.boxes[d].sizes[o].lower_bound(ctx);
+		for o in 0..self.num_objects() {
+			for d in 0..self.num_dimensions() {
+				self.origin_ub[[o, d]] = self.origin[[o, d]].upper_bound(ctx);
+				self.origin_lb[[o, d]] = self.origin[[o, d]].lower_bound(ctx);
+				self.size_lb[[o, d]] = self.size[[o, d]].lower_bound(ctx);
 			}
 		}
 
-		for o_idx in 0..self.boxes[0].origins.len() {
+		for o_idx in 0..self.num_objects() {
 			// Skip if target property has been lost
 			if ctx.trailed_int(self.target[o_idx]) == 1 {
 				continue;
 			}
 
-			if NON_STRICT
-				&& (0..self.dimensions).any(|d| self.boxes[d].sizes[o_idx].val(ctx) == Some(0))
-			{
+			if !STRICT && self.size.row(o_idx).iter().any(|v| v.val(ctx) == Some(0)) {
 				continue;
 			}
 			let mut fr_support: Vec<usize> = Vec::new();
 
 			if let Some(()) =
-				self.gen_forbidden_regions(ctx, &mut fr_support, o_idx, self.dimensions)
+				self.gen_forbidden_regions(ctx, &mut fr_support, o_idx, self.num_dimensions())
 			{
 				if self.fixed_in_all_dimensions(o_idx) {
 					// Conflict will occur here since there exists forbidden regions for a fixed
 					// object
 					let reason = self.explain_propagation(ctx, &fr_support, o_idx, 0, false);
-					self.boxes[0].origins[o_idx].set_lower_bound(
+					self.origin[[o_idx, 0]].set_lower_bound(
 						ctx,
-						self.ub_tracker[0].origins[o_idx] + 1,
+						self.origin_ub[[o_idx, 0]] + 1,
 						reason,
 					)?;
 				}
 				let mut all_fixed = true;
-				for d in 0..self.dimensions {
+				for d in 0..self.num_dimensions() {
 					self.prune_min(ctx, &fr_support, o_idx, d)?;
-
 					self.prune_max(ctx, &fr_support, o_idx, d)?;
 
-					if self.lb_tracker[d].origins[o_idx] != self.ub_tracker[d].origins[o_idx] {
+					if self.origin_lb[[o_idx, d]] != self.origin_ub[[o_idx, d]] {
 						all_fixed = false;
 					}
 				}
@@ -773,22 +744,24 @@ where
 		}
 
 		// Source optimizations, create the largest possible bounding box
-		for o_idx in 0..self.boxes[0].origins.len() {
+		for o_idx in 0..self.num_objects() {
 			if ctx.trailed_int(self.target[o_idx]) == 1 {
 				continue;
 			}
-			for i in 0..self.dimensions {
+			for i in 0..self.num_dimensions() {
 				self.bounding_box.lb[i] =
-					self.bounding_box.lb[i].min(self.lb_tracker[i].origins[o_idx]);
-				self.bounding_box.ub[i] = self.bounding_box.ub[i]
-					.max(self.ub_tracker[i].origins[o_idx] + self.lb_tracker[i].sizes[o_idx] - 1);
+					cmp::min(self.bounding_box.lb[i], self.origin_lb[[o_idx, i]]);
+				self.bounding_box.ub[i] = cmp::max(
+					self.bounding_box.ub[i],
+					self.origin_ub[[o_idx, i]] + self.size_lb[[o_idx, i]] - 1,
+				);
 			}
 		}
 
 		// If the current rectangle has lost its target property (is fixed in a feasible
 		// position) and is completely disjoint from the bounding box, remove its
 		// source property (disregard it in the rest of the algorithm)
-		for o_idx in 0..self.boxes[0].origins.len() {
+		for o_idx in 0..self.num_objects() {
 			if ctx.trailed_int(self.target[o_idx]) == 1 && self.disjoint(&self.bounding_box, o_idx)
 			{
 				let _ = ctx.set_trailed_int(self.source[o_idx], 1);
@@ -812,16 +785,16 @@ mod tests {
 	fn test_diffn_unsat() {
 		let mut prb = Model::default();
 		let x1 = prb.new_int_var(1..=2);
-		let x2 = prb.new_int_var(1..=2);
-
 		let y1 = prb.new_int_var(1..=2);
+
+		let x2 = prb.new_int_var(1..=2);
 		let y2 = prb.new_int_var(1..=2);
 
 		let size = prb.new_int_var(4..=4);
 
 		diffn_int(
 			&mut prb,
-			vec![vec![x1, x2], vec![y1, y2]],
+			vec![vec![x1, y1], vec![x2, y2]],
 			vec![vec![size, size], vec![size, size]],
 			false,
 		);
@@ -835,16 +808,16 @@ mod tests {
 		let mut prb = Model::default();
 
 		let x1 = prb.new_int_var(1..=3);
-		let x2 = prb.new_int_var(1..=1);
-
 		let y1 = prb.new_int_var(1..=3);
+
+		let x2 = prb.new_int_var(1..=1);
 		let y2 = prb.new_int_var(1..=1);
 
 		let size = prb.new_int_var(2..=2);
 
 		diffn_int(
 			&mut prb,
-			vec![vec![x1, x2], vec![y1, y2]],
+			vec![vec![x1, y1], vec![x2, y2]],
 			vec![vec![size, size], vec![size, size]],
 			false,
 		);
@@ -858,11 +831,11 @@ mod tests {
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
-                1, 3, 1, 1
-                2, 3, 1, 1
-                3, 1, 1, 1
-                3, 2, 1, 1
-                3, 3, 1, 1"#]],
+			1, 3, 1, 1
+			2, 3, 1, 1
+			3, 1, 1, 1
+			3, 2, 1, 1
+			3, 3, 1, 1"#]],
 		);
 	}
 
@@ -872,20 +845,19 @@ mod tests {
 		let mut prb = Model::default();
 
 		let x1 = prb.new_int_var(2..=3);
-		let x2 = prb.new_int_var(1..=3);
-
 		let y1 = prb.new_int_var(5..=5);
-		let y2 = prb.new_int_var(4..=4);
-
 		let z1 = prb.new_int_var(2..=3);
+
+		let x2 = prb.new_int_var(1..=3);
+		let y2 = prb.new_int_var(4..=4);
 		let z2 = prb.new_int_var(2..=7);
 
 		let size = prb.new_int_var(5..=5);
 
 		diffn_int(
 			&mut prb,
-			vec![vec![x1, x2], vec![y1, y2], vec![z1, z2]],
-			vec![vec![size, size], vec![size, size], vec![size, size]],
+			vec![vec![x1, y1, z1], vec![x2, y2, z2]],
+			vec![vec![size, size, size], vec![size, size, size]],
 			false,
 		);
 
@@ -898,12 +870,12 @@ mod tests {
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
-                2, 5, 2, 1, 4, 7
-                2, 5, 2, 2, 4, 7
-                2, 5, 2, 3, 4, 7
-                3, 5, 2, 1, 4, 7
-                3, 5, 2, 2, 4, 7
-                3, 5, 2, 3, 4, 7"#]],
+			2, 5, 2, 1, 4, 7
+			2, 5, 2, 2, 4, 7
+			2, 5, 2, 3, 4, 7
+			3, 5, 2, 1, 4, 7
+			3, 5, 2, 2, 4, 7
+			3, 5, 2, 3, 4, 7"#]],
 		);
 	}
 
@@ -913,9 +885,9 @@ mod tests {
 		let mut prb = Model::default();
 
 		let x1 = prb.new_int_var(1..=3);
-		let x2 = prb.new_int_var(2..=3);
-
 		let y1 = prb.new_int_var(1..=1);
+
+		let x2 = prb.new_int_var(2..=3);
 		let y2 = prb.new_int_var(1..=1);
 
 		let size1 = prb.new_int_var(2..=2);
@@ -923,8 +895,8 @@ mod tests {
 
 		diffn_int(
 			&mut prb,
-			vec![vec![x1, x2], vec![y1, y2]],
-			vec![vec![size1, size2], vec![size1, size2]],
+			vec![vec![x1, y1], vec![x2, y2]],
+			vec![vec![size1, size1], vec![size2, size2]],
 			true,
 		);
 
@@ -937,12 +909,12 @@ mod tests {
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
-    1, 1, 2, 1
-    1, 1, 3, 1
-    2, 1, 2, 1
-    2, 1, 3, 1
-    3, 1, 2, 1
-    3, 1, 3, 1"#]],
+			1, 1, 2, 1
+			1, 1, 3, 1
+			2, 1, 2, 1
+			2, 1, 3, 1
+			3, 1, 2, 1
+			3, 1, 3, 1"#]],
 		);
 	}
 }

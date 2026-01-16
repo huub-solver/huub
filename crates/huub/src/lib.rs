@@ -360,13 +360,17 @@ where
 /// Create a constraint that enforces that given decision variables of starting
 /// positions and sizes of k-dimensional hyperrectangles, none of the rectangles
 /// overlap.
+///
+/// `box_posn` and `box_size` the vectors must have the same length, which is
+/// the number of hyperrectangles. Then each inner vector must have the same
+/// length, which is the dimension of the hyperrectangles.
 pub fn diffn_int(
 	prb: &mut Model,
 	box_posn: Vec<Vec<IntDecision>>,
 	box_size: Vec<Vec<IntDecision>>,
-	non_strict: bool,
+	strict: bool,
 ) {
-	if non_strict {
+	if strict {
 		let prop = IntDiffnSweep::<true, _>::new(prb, box_posn, box_size);
 		prb.add_constraint(prop);
 	} else {

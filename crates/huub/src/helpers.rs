@@ -1,6 +1,7 @@
 //! Module containing general, e.g. purely numeric, structures or used in
 //! multiple places in the library and are not exposed to the user.
 
+pub(crate) mod matrix;
 pub(crate) mod opt_field;
 
 use std::num::NonZero;
