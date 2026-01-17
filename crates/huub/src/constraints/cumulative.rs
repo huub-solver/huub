@@ -227,6 +227,19 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		minimal_relevant_tasks
 	}
 
+	/// A helper function to find the index of the maximum usage in the
+	/// time-table profile within a specified period [start, end].
+	fn max_period_within(&self, _task: usize, start: i64, end: i64) -> Option<usize> {
+		let begin = self.bounds.partition_point(|&b| b <= start);
+		if begin >= self.bounds.len() {
+			return None;
+		}
+		// Adjust begin to point to the interval containing `start`
+		let begin = if begin == 0 { 0 } else { begin - 1 };
+		let end = self.bounds[begin..].partition_point(|&b| b < end) + begin;
+		(begin < end).then(|| begin + self.heights[(begin)..end].iter().position_max().unwrap())
+	}
+
 	#[inline]
 	/// Get the earliest completion time of the task `i`.
 	fn earliest_completion_time<C>(&self, ctx: &mut C, i: usize) -> i64
@@ -498,6 +511,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		let ect = self.earliest_completion_time(ctx, task);
 		let dur_lb = self.durations[task].lower_bound(ctx);
 		let usage_lb = self.usages[task].lower_bound(ctx);
+		debug_assert!(lst < ect, "Task must have compulsory part");
 
 		if !(dur_lb > 0 && usage_lb > 0) {
 			// If the task has no duration or usage, no need to sweep
@@ -506,16 +520,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 
 		// Find the maximum usage in the interval [lst, ect]
 		// where the task has a compulsory part
-		let begin = self.bounds.partition_point(|&b| b < lst);
-		let end = self.bounds.partition_point(|&b| b < ect);
-		let max_period = (begin + 1 < end).then(|| {
-			begin
-				+ 1 + self.heights[(begin + 1)..end]
-				.iter()
-				.position_max()
-				.unwrap()
-		});
-
+		let max_period = self.max_period_within(task, lst, ect);
 		if let Some(max_period) = max_period {
 			let max_usage = self.heights[max_period];
 			let limit = self.capacity.upper_bound(ctx) - max_usage + usage_lb;
