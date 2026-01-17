@@ -37,7 +37,7 @@ use crate::{
 
 /// Domain assumed for integer decision variables that do not have a domain
 /// definition.
-const FULL_INT_DOMAIN: RangeInclusive<IntVal> = IntVal::MIN..=IntVal::MAX;
+const FULL_INT_DOMAIN: RangeInclusive<IntVal> = (i32::MIN as i64)..=(i32::MAX as i64);
 
 #[derive(Debug)]
 /// Errors that can occur when converting a [`FlatZinc`] instance to a [`Model`]
