@@ -28,25 +28,6 @@ impl<T: Clone> TrailedOpenList<T> {
 		}
 	}
 
-	/// Return the first open element.
-	pub(crate) fn peek<A: TrailingActions>(&self, actions: &A) -> Option<&T> {
-		let cur = actions.trailed_int(self.closed) as usize;
-		if cur >= self.list.len() {
-			return None;
-		}
-		Some(&self.list[cur])
-	}
-
-	/// Return the first open element and close it.
-	pub(crate) fn pop<A: TrailingActions>(&mut self, actions: &mut A) -> Option<&T> {
-		let cur = actions.trailed_int(self.closed) as usize;
-		if cur >= self.list.len() {
-			return None;
-		}
-		let _ = self.close(actions, cur, |_, _| {});
-		Some(&self.list[cur])
-	}
-
 	/// Return the element at the given index, fail if it is in the closed
 	/// section.
 	pub(crate) fn index<A: TrailingActions + ?Sized>(&self, actions: &A, index: usize) -> &T {

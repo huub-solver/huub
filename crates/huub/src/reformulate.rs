@@ -109,15 +109,15 @@ pub struct InitConfig {
 	/// Whether to enable the vivification in the oracle solver.
 	vivification: bool,
 	/// Difference logic mode.
-	pub(crate) diff_logic: u32,
+	pub(crate) diff_logic: u8,
 	/// Difference logic priority for bound propagation.
 	pub(crate) diff_logic_prio_bounds: u8,
 	/// Difference logic priority for boolean propagation.
 	pub(crate) diff_logic_prio_bools: u8,
 	/// Whether to use inc_imp to check implied booleans proactively.
 	pub(crate) diff_logic_inc_imp: bool,
-	/// Difference logic priority for boolean propagation.
-	pub(crate) diff_logic_branching: u8,
+	/// Difference logic mode for explaining boolean changes.
+	pub(crate) diff_logic_bool_reasons: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -450,17 +450,17 @@ impl InitConfig {
 	/// Change the difference logic mode in the oracle solver.
 	pub fn with_diff_logic(
 		mut self,
-		diff_logic: Option<u32>,
+		diff_logic: Option<u8>,
 		diff_logic_prio_bounds: Option<u8>,
 		diff_logic_prio_bools: Option<u8>,
 		diff_logic_inc_imp: bool,
-		diff_logic_branching: Option<u8>,
+		diff_logic_bool_reasons: Option<u8>,
 	) -> Self {
-		self.diff_logic = diff_logic.unwrap_or(0);
+		self.diff_logic = diff_logic.unwrap_or(1);
 		self.diff_logic_prio_bounds = diff_logic_prio_bounds.unwrap_or(1);
 		self.diff_logic_prio_bools = diff_logic_prio_bools.unwrap_or(1);
 		self.diff_logic_inc_imp = diff_logic_inc_imp;
-		self.diff_logic_branching = diff_logic_branching.unwrap_or(0);
+		self.diff_logic_bool_reasons = diff_logic_bool_reasons.unwrap_or(0);
 		self
 	}
 }

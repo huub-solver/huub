@@ -71,18 +71,14 @@ FLAGS
                                   (overwritten by --vsids-only)
   --vsids-only                    Only use the activity-based search heuristic provided by the SAT
                                   solver. Ignore the user-specific search heuristic.
-  --diff-logic                    Mode to use for diff logic: 0 for off, otherwise bitwise 
-  								  interpretation: only difference (2), imp_eq (1), imp_eq+native (3), 
-  								  imp_eq+neq (5), imp_eq+neq+native_neq (13), imp_eq+neq+native (15),
-  								  imp_eq+(imp)_neq (21), imp_eq+(imp)_neq+native_imp_neq (53),
-  								  imp_eq+(imp)_neq+native_(imp)_neq (61), imp_eq+(imp)_neq+native (63),
-  								  all (85), all+native_reif_eq (213), all+native_reif_eq+imp_neq (245),
-  								  all+native_reif_eq+(imp)_neq (253), all+native (255)
+  --diff-logic                    Mode to use for diff logic: 0 for off, 1 (default) for global,
+  								  implied and reified difference constraints, 2 to include implied 
+  								  equalities, 3 to include not-equal constraints
   --diff-logic-prio-bounds		  Priority for difference logic bound propagation (default: 1, range: 0-5)
   --diff-logic-prio-bools		  Priority for difference logic boolean propagation (default: 1, range: 0-5)
   --diff-logic-inc-imp <on|off>	  Use incremental check of implied constraints (default: on)
-  --diff-logic-branching          Branching on diff logic booleans: 0 (off, default), 1 (add),
-                                  2 (override) 
+  --diff-logic-bool-reasons       Mode for difference logic boolean reasons: 0 (lazy + lifted, default), 
+  								  1 (eager + lifted), 2 (eager, not lifted) 
   
 
                       === BEHAVIOUR OPTIONS ===

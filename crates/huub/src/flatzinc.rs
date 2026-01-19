@@ -993,7 +993,7 @@ where
 			config.diff_logic_prio_bounds,
 			config.diff_logic_prio_bools,
 			config.diff_logic_inc_imp,
-			config.diff_logic_branching,
+			config.diff_logic_bool_reasons,
 		);
 		// Traditional relational constraints
 		for (i, c) in self.fzn.constraints.iter().enumerate() {
@@ -1178,9 +1178,6 @@ where
 							}
 						}
 						if !satisfied {
-							if pos.len() == 2 && neg.is_empty() {
-								diff_logic.add_bool_or(lits[0], lits[1]);
-							}
 							match lits.len() {
 								0 => {
 									return Err(FlatZincError::ReformulationError(

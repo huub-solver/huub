@@ -126,15 +126,15 @@ pub struct Cli<Stdout, Stderr> {
 	vivification: bool,
 
 	/// Difference logic mode.
-	diff_logic: Option<u32>,
+	diff_logic: Option<u8>,
 	/// Difference logic priority for bound propagation.
 	diff_logic_prio_bounds: Option<u8>,
 	/// Difference logic priority for boolean propagation.
 	diff_logic_prio_bools: Option<u8>,
 	/// Whether to use inc_imp to check implied booleans proactively.
 	diff_logic_inc_imp: bool,
-	/// Difference logic branching option.
-	diff_logic_branching: Option<u8>,
+	/// Difference logic mode for explaining boolean changes.
+	diff_logic_bool_reasons: Option<u8>,
 
 	// --- Output configuration ---
 	/// Output stream for (intermediate) solutions and statistics
@@ -207,7 +207,7 @@ where
 			self.diff_logic_prio_bounds,
 			self.diff_logic_prio_bools,
 			self.diff_logic_inc_imp,
-			self.diff_logic_branching,
+			self.diff_logic_bool_reasons,
 		);
 		config
 	}
@@ -615,7 +615,7 @@ where
 			diff_logic_prio_bounds: self.diff_logic_prio_bounds,
 			diff_logic_prio_bools: self.diff_logic_prio_bools,
 			diff_logic_inc_imp: self.diff_logic_inc_imp,
-			diff_logic_branching: self.diff_logic_branching,
+			diff_logic_bool_reasons: self.diff_logic_bool_reasons,
 			stdout: self.stdout,
 		}
 	}
@@ -651,7 +651,7 @@ where
 			diff_logic_prio_bounds: self.diff_logic_prio_bounds,
 			diff_logic_prio_bools: self.diff_logic_prio_bools,
 			diff_logic_inc_imp: self.diff_logic_inc_imp,
-			diff_logic_branching: self.diff_logic_branching,
+			diff_logic_bool_reasons: self.diff_logic_bool_reasons,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
 		}
@@ -744,8 +744,8 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 				.opt_value_from_fn("--diff-logic-inc-imp", parse_bool_arg)
 				.map(|x| x.unwrap_or(true))
 				.map_err(|e| e.to_string())?,
-			diff_logic_branching: args
-				.opt_value_from_str("--diff-logic-branching")
+			diff_logic_bool_reasons: args
+				.opt_value_from_str("--diff-logic-bool-reasons")
 				.map_err(|e| e.to_string())?,
 
 			verbose,
