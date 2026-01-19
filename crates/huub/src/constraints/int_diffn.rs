@@ -747,8 +747,8 @@ impl Region {
 	///
 	/// # Returns
 	///
-	/// - `Some(Ordering::Less)`: `other` is a subset of `self`.
-	/// - `Some(Ordering::Greater)`: `self` is a subset of `other`.
+	/// - `Some(Ordering::Less)`: `self` is a subset of `other`.
+	/// - `Some(Ordering::Greater)`: `other` is a subset of `self`.
 	/// - `Some(Ordering::Equal)`: The regions are identical.
 	/// - `None`: The regions cannot be coalesced because they are disjoint,
 	///   partially overlapping, or touching in a way that doesn't form a subset
@@ -767,13 +767,13 @@ impl Region {
 			// `other` is a subset of `self`
 			} else if self_lb <= other_lb && self_ub >= other_ub {
 				match trend {
-					Ordering::Equal | Ordering::Less => trend = Ordering::Less,
+					Ordering::Equal | Ordering::Greater => trend = Ordering::Greater,
 					_ => return None,
 				}
 			// `self` is a subset of `other`
 			} else if self_lb >= other_lb && self_ub <= other_ub {
 				match trend {
-					Ordering::Equal | Ordering::Greater => trend = Ordering::Greater,
+					Ordering::Equal | Ordering::Less => trend = Ordering::Less,
 					_ => return None,
 				}
 			// They overlap, but not such one is a subset of another
