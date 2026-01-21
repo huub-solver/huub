@@ -3,9 +3,9 @@
 use std::slice::Iter;
 
 use crate::{
+	IntVal,
 	actions::{ConstructionActions, TrailingActions},
 	solver::trail::TrailedInt,
-	IntVal,
 };
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

@@ -2290,9 +2290,9 @@ impl Model {
 
 		// Resolve lazy explanation if it is required.
 		if let Err(Conflict {
-					   subject,
-					   reason: Reason::Lazy(r),
-				   }) = status
+			subject,
+			reason: Reason::Lazy(r),
+		}) = status
 		{
 			debug_assert_eq!(ConRef::from_raw(r.propagator), con);
 			let conj = con_obj.explain(

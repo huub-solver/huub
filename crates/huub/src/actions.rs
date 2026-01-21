@@ -447,7 +447,7 @@ pub trait SimplificationActions {
 
 	/// Add a constraint to the model (to replace the current constraint).
 	fn add_constraint<C: Constraint<Self::Target>>(&mut self, constraint: C);
-	
+
 	/// Resolve the alias of the integer decision variable.
 	fn resolve_alias(&self, var: IntDecision) -> IntDecision;
 }

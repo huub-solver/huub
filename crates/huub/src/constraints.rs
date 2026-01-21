@@ -36,7 +36,7 @@ use crate::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
 		IntExplanationActions, IntInitActions, IntInspectionActions, IntPropagationActions,
 		IntSimplificationActions, ReasoningContext, ReasoningEngine, ReformulationActions,
-		TrailingActions
+		TrailingActions,
 	},
 	reformulate::ReformulationError,
 	solver::{
