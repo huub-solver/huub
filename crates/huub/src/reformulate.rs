@@ -203,54 +203,80 @@ where
 			};
 			Ok(bv)
 		};
-		let result: Result<Formula<BoolDecision>, _> = self.clone().simplify_with(&mut resolver);
-		match result {
-			Ok(f) => {
-				*self = match f {
-					Formula::And(v) => {
-						for f in v {
+		let result = self.clone().simplify_with(&mut resolver);
+		let mut f = match result {
+			Ok(f) => f,
+			Err(true) => return Ok(SimplificationStatus::Subsumed),
+			Err(false) => return Err(ctx.declare_conflict([])),
+		};
+
+		let negate = |f: BoolFormula| match f {
+			Formula::Atom(x) => Formula::Atom(!x),
+			Formula::Not(x) if matches!(*x, Formula::Atom(_)) => {
+				let Formula::Atom(x) = *x else { unreachable!() };
+				Formula::Atom(x)
+			}
+			f => Formula::Not(Box::new(f)),
+		};
+
+		while let Formula::Not(neg_f) = f {
+			f = match *neg_f {
+				// Demorgan's Law transformation
+				Formula::And(v) => Formula::Or(v.into_iter().map(negate).collect()),
+				Formula::Atom(x) => Formula::Atom(!x),
+				Formula::IfThenElse { cond, then, els } => Formula::IfThenElse {
+					cond,
+					then: Box::new(!*then),
+					els: Box::new(!*els),
+				},
+				Formula::Implies(x, y) => {
+					// Demorgan's Law transformation
+					// ¬(x → y) ≡ ¬(¬x v y) ≡ x ∧ ¬y
+					Formula::And(vec![*x, !*y])
+				}
+				// Double not elimination
+				Formula::Not(f) => *f,
+				// Demorgan's Law transformation
+				Formula::Or(v) => Formula::And(v.into_iter().map(negate).collect()),
+				Formula::Equiv(f) => Formula::And(vec![
+					Formula::Or(f.iter().map(|f| !(f.clone())).collect()),
+					Formula::Or(f),
+				]),
+				Formula::Xor(f) if f.len() < 2 => unreachable!(),
+				Formula::Xor(f) if f.len() == 2 => Formula::Equiv(f),
+				Formula::Xor(mut f) => {
+					f[0] = negate(f[0].clone());
+					Formula::Xor(f)
+				}
+			};
+		}
+
+		*self = match f {
+			Formula::And(v) => {
+				for f in v {
+					match f {
+						Formula::Atom(x) => {
+							x.set(ctx, [])?;
+						}
+						Formula::Not(x) if matches!(*x, Formula::Atom(_)) => {
+							let Formula::Atom(x) = *x else { unreachable!() };
+							x.set_val(ctx, false, [])?;
+						}
+						f => {
 							ctx.add_constraint(f);
 						}
-						return Ok(SimplificationStatus::Subsumed);
 					}
-					Formula::Atom(b) => {
-						b.set(ctx, [])?;
-						return Ok(SimplificationStatus::Subsumed);
-					}
-					// Formula::Equiv(formulas) => todo!(),
-					Formula::Not(f) => match *f {
-						Formula::And(v) => Formula::Or(v.into_iter().map(|f| !f).collect()),
-						Formula::Atom(x) => {
-							x.set_val(ctx, false, [])?;
-							return Ok(SimplificationStatus::Subsumed);
-						}
-						Formula::IfThenElse { cond, then, els } => Formula::IfThenElse {
-							cond,
-							then: Box::new(!*then),
-							els: Box::new(!*els),
-						},
-						Formula::Implies(x, y) => {
-							// ¬(x → y) ≡ ¬(¬x v y) ≡ x ∧ ¬y
-							ctx.add_constraint(*x);
-							ctx.add_constraint(!*y);
-							return Ok(SimplificationStatus::Subsumed);
-						}
-						Formula::Not(f) => *f,
-						Formula::Or(v) => {
-							for f in v {
-								ctx.add_constraint(!f);
-							}
-							return Ok(SimplificationStatus::Subsumed);
-						}
-						f => f,
-					},
-					f => f,
-				};
-				Ok(SimplificationStatus::NoFixpoint)
+				}
+				return Ok(SimplificationStatus::Subsumed);
 			}
-			Err(true) => Ok(SimplificationStatus::Subsumed),
-			Err(false) => Err(ctx.declare_conflict([])),
-		}
+			Formula::Atom(b) => {
+				b.set(ctx, [])?;
+				return Ok(SimplificationStatus::Subsumed);
+			}
+			Formula::Not(_) => unreachable!(),
+			f => f,
+		};
+		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
@@ -749,4 +775,281 @@ impl ReformulationMapBuilder {
 define_index_type! {
 	/// Reference type for integer decision variables in a [`Model`].
 	pub(crate) struct IntDecisionIndex = u32;
+}
+
+#[cfg(test)]
+mod tests {
+	use pindakaas::propositional_logic::Formula;
+
+	use crate::{
+		BoolFormula, Model,
+		actions::BoolInspectionActions,
+		constraints::{Constraint, SimplificationStatus},
+	};
+
+	#[test]
+	fn simplify_and_formula() {
+		use Formula::*;
+
+		// Test case for And with a true literal
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let mut f: BoolFormula = And(vec![Atom(x), Atom(true.into())]);
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(x.val(&prb), Some(true));
+
+		// Test case for And with a false literal
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let mut f: BoolFormula = And(vec![Atom(x), Atom(false.into())]);
+		assert!(<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb).is_err());
+	}
+
+	#[test]
+	fn simplify_or_formula() {
+		use Formula::*;
+
+		// Test case for Or with a true literal
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let mut f: BoolFormula = Or(vec![Atom(x), Atom(true.into())]);
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(x.val(&prb), None);
+
+		// Test case for Or with a false literal
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let mut f: BoolFormula = Or(vec![Atom(x), Atom(false.into())]);
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(x.val(&prb), Some(true));
+	}
+
+	#[test]
+	fn simplify_not_formula() {
+		use Formula::*;
+
+		// Test case for Not(Not(x))
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let mut f: BoolFormula = Not(Box::new(Not(Box::new(Atom(x)))));
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(x.val(&prb), Some(true));
+
+		// Test case for De Morgan's law with And
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let y = prb.new_bool_var();
+		let mut f: BoolFormula = Not(Box::new(And(vec![Atom(x), Atom(y)])));
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::NoFixpoint)
+		);
+		assert_eq!(f, Or(vec![Atom(!x), Atom(!y)]));
+
+		// Test case for De Morgan's law with Or
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let y = prb.new_bool_var();
+		let mut f: BoolFormula = Not(Box::new(Or(vec![Atom(x), Atom(y)])));
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(x.val(&prb), Some(false));
+		assert_eq!(y.val(&prb), Some(false));
+
+		// Test case for Not(Implies)
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let y = prb.new_bool_var();
+		let mut f: BoolFormula = Not(Box::new(Implies(Box::new(Atom(x)), Box::new(Atom(y)))));
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(x.val(&prb), Some(true));
+		assert_eq!(y.val(&prb), Some(false));
+
+		// Test case for Not(IfThenElse)
+		let mut prb = Model::default();
+		let c = prb.new_bool_var();
+		let t = prb.new_bool_var();
+		let e = prb.new_bool_var();
+		let mut f: BoolFormula = Not(Box::new(IfThenElse {
+			cond: Box::new(Atom(c)),
+			then: Box::new(Atom(t)),
+			els: Box::new(Atom(e)),
+		}));
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::NoFixpoint)
+		);
+		assert_eq!(
+			f,
+			IfThenElse {
+				cond: Box::new(Atom(c)),
+				then: Box::new(Not(Box::new(Atom(t)))),
+				els: Box::new(Not(Box::new(Atom(e)))),
+			}
+		);
+
+		// Test case for Not(Equiv(x,y))
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let y = prb.new_bool_var();
+		let mut f: BoolFormula = Not(Box::new(Equiv(vec![Atom(x), Atom(y)])));
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed) // rewritten to two clauses
+		);
+		assert_eq!(x.val(&prb), None);
+		assert_eq!(y.val(&prb), None);
+
+		// Test case for Not(Xor(x, y))
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let y = prb.new_bool_var();
+		let mut f: BoolFormula = Not(Box::new(Xor(vec![Atom(x), Atom(y)])));
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::NoFixpoint)
+		);
+		assert_eq!(f, Equiv(vec![Atom(x), Atom(y)]));
+
+		// Test case for Not(Xor(x, y, z))
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let y = prb.new_bool_var();
+		let z = prb.new_bool_var();
+		let mut f: BoolFormula = Not(Box::new(Xor(vec![Atom(x), Atom(y), Atom(z)])));
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::NoFixpoint)
+		);
+		assert_eq!(f, Xor(vec![Atom(!x), Atom(y), Atom(z)]));
+	}
+
+	#[test]
+	fn simplify_implies_formula() {
+		use Formula::*;
+
+		// Test case for Implies(true, y) -> y
+		let mut prb = Model::default();
+		let y = prb.new_bool_var();
+		let mut f: BoolFormula = Implies(Box::new(Atom(true.into())), Box::new(Atom(y)));
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(y.val(&prb), Some(true));
+
+		// Test case for Implies(x, false) -> !x
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let mut f: BoolFormula = Implies(Box::new(Atom(x)), Box::new(Atom(false.into())));
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(x.val(&prb), Some(false));
+	}
+
+	#[test]
+	fn simplify_ifthenelse_formula() {
+		use Formula::*;
+
+		// Test case for IfThenElse(true, t, e) -> t
+		let mut prb = Model::default();
+		let t = prb.new_bool_var();
+		let e = prb.new_bool_var();
+		let mut f: BoolFormula = IfThenElse {
+			cond: Box::new(Atom(true.into())),
+			then: Box::new(Atom(t)),
+			els: Box::new(Atom(e)),
+		};
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(t.val(&prb), Some(true));
+		assert_eq!(e.val(&prb), None);
+
+		// Test case for IfThenElse(false, t, e) -> e
+		let mut prb = Model::default();
+		let t = prb.new_bool_var();
+		let e = prb.new_bool_var();
+		let mut f: BoolFormula = IfThenElse {
+			cond: Box::new(Atom(false.into())),
+			then: Box::new(Atom(t)),
+			els: Box::new(Atom(e)),
+		};
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(t.val(&prb), None);
+		assert_eq!(e.val(&prb), Some(true));
+	}
+
+	#[test]
+	fn simplify_equiv_formula() {
+		use Formula::*;
+
+		// Test case for Equiv(x, true) -> x
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let mut f: BoolFormula = Equiv(vec![Atom(x), Atom(true.into())]);
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(x.val(&prb), Some(true));
+
+		// Test case for Equiv(x, false) -> !x
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let mut f: BoolFormula = Equiv(vec![Atom(x), Atom(false.into())]);
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(x.val(&prb), Some(false));
+	}
+
+	#[test]
+	fn simplify_xor_formula() {
+		use Formula::*;
+
+		// Test case for Xor(x, false) -> x
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let mut f: BoolFormula = Xor(vec![Atom(x), Atom(false.into())]);
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(x.val(&prb), Some(true));
+
+		// Test case for Xor(x, true) -> !x
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let mut f: BoolFormula = Xor(vec![Atom(x), Atom(true.into())]);
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(x.val(&prb), Some(false));
+	}
 }
