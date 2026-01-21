@@ -202,9 +202,9 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 		Ok(())
 	}
 
-	/// Create a new [`IntSeqPrecedeChainBounds`] propagator and post it in the
-	/// solver.
-	pub fn new<E>(engine: &mut E, vars: Vec<I>) -> Self
+	/// Create a new [`IntSeqPrecedeChainBounds`] propagator, to be used within
+	/// the given engine.
+	pub(crate) fn new<E>(engine: &mut E, vars: Vec<I>) -> Self
 	where
 		E: ConstructionActions + ReasoningContext + ?Sized,
 		I: IntInspectionActions<E>,
@@ -642,8 +642,9 @@ impl<I> IntValuePrecedeChainValue<I> {
 		Err(())
 	}
 
-	/// Create a new [`ValuePrecedeChainValue`] propagator
-	pub fn new<E>(engine: &mut E, values: Vec<IntVal>, vars: Vec<I>) -> Self
+	/// Create a new [`ValuePrecedeChainValue`] propagator, to be used within
+	/// the given engine.
+	pub(crate) fn new<E>(engine: &mut E, values: Vec<IntVal>, vars: Vec<I>) -> Self
 	where
 		E: ConstructionActions + ?Sized,
 	{

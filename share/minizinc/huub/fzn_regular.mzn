@@ -5,8 +5,7 @@ predicate fzn_regular(
 	array[int,int] of int: d,
 	int: q0,
 	set of int: F
-) =
-	huub_regular(x, Q, S, array1d(d), q0, F);
+) = huub_regular(x, Q, S, array1d(d), q0, F);
 
 predicate huub_regular(
 	array[int] of var int: x,

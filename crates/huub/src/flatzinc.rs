@@ -29,7 +29,7 @@ use crate::{
 		BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions,
 		PropagationActions,
 	},
-	all_different_int, array_element, array_maximum_int, array_minimum_int, cumulative,
+	all_different_int, array_element, array_maximum_int, array_minimum_int, cumulative, diffn_int,
 	disjunctive_strict, div_int, int_in_set_reif, pow_int,
 	reformulate::ReformulationError,
 	seq_precede_chain_int, table_int, times_int, value_precede_chain_int,
@@ -1213,6 +1213,68 @@ where
 							name: "bool_xor",
 							found: c.args.len(),
 							expected: 2,
+						});
+					}
+				}
+				"huub_diffn_int" | "huub_diffn_nonstrict_int" => {
+					let strict = c.id.deref() == "huub_diffn_int";
+					if let [x, y, dx, dy] = c.args.as_slice() {
+						let posn: Result<_, FlatZincError> = self
+							.arg_array(x)?
+							.iter()
+							.zip(self.arg_array(y)?)
+							.map(|(x, y)| Ok(vec![self.lit_int(x)?, self.lit_int(y)?]))
+							.try_collect();
+						let size: Result<_, FlatZincError> = self
+							.arg_array(dx)?
+							.iter()
+							.zip(self.arg_array(dy)?)
+							.map(|(dx, dy)| Ok(vec![self.lit_int(dx)?, self.lit_int(dy)?]))
+							.try_collect();
+						diffn_int(&mut self.prb, posn?, size?, strict);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: if strict {
+								"huub_diffn"
+							} else {
+								"huub_diffn_nonstrict"
+							},
+							found: c.args.len(),
+							expected: 4,
+						});
+					}
+				}
+				"huub_diffn_k_int" | "huub_diffn_nonstrict_k_int" => {
+					let strict = c.id.deref() == "huub_diffn_k_int";
+					if let [box_posn, box_size, d] = c.args.as_slice() {
+						let dimensions = self.arg_par_int(d)?;
+						let flat_start_pos = self.arg_array(box_posn)?;
+						let flat_start_pos: Vec<_> = flat_start_pos
+							.iter()
+							.map(|l| self.lit_int(l))
+							.try_collect()?;
+						let flat_sizes = self.arg_array(box_size)?;
+						let flat_sizes: Vec<_> =
+							flat_sizes.iter().map(|l| self.lit_int(l)).try_collect()?;
+
+						let mut start_pos: Vec<Vec<_>> = vec![Vec::new(); dimensions as usize];
+						let mut sizes: Vec<Vec<_>> = vec![Vec::new(); dimensions as usize];
+
+						for (i, (pos, size)) in flat_start_pos.iter().zip(flat_sizes).enumerate() {
+							start_pos[i % dimensions as usize].push(*pos);
+							sizes[i % dimensions as usize].push(size);
+						}
+
+						diffn_int(&mut self.prb, start_pos, sizes, strict);
+					} else {
+						return Err(FlatZincError::InvalidNumArgs {
+							name: if strict {
+								"huub_diffn_k_int"
+							} else {
+								"huub_diffn_nonstrict_k_int"
+							},
+							found: c.args.len(),
+							expected: 3,
 						});
 					}
 				}
