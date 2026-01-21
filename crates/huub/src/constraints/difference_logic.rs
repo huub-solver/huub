@@ -584,8 +584,8 @@ impl DifferenceLogicModel {
 				let edge = &self.graph.edges[e];
 				if self.distances[n][edge.from] < -edge.val {
 					trace!("Implied edge {edge:?} is falsified, opposite shortest path of length {} found", self.distances[n][edge.from]);
-					self.graph.set_bool_false(ctx, edge.bool_var, e, false)?; // TODO is this correct?
-					//adapter.actions.set_bool(!edge.bool_var.map_or(BoolDecision::from(true), |b| adapter.bool_vars[b]))?;  // TODO no reason recorded here (not needed at the moment)
+					// TODO output cycle (not needed at the moment)?
+					self.graph.bool_vars[edge.bool_var.unwrap()].set_val(ctx, false, [])?;
 					self.graph.close_imp_edge(ctx, e);
 				}
 			}
