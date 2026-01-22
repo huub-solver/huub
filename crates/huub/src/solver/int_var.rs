@@ -18,6 +18,7 @@ use rustc_hash::FxHashMap;
 use crate::{
 	IntSetVal, IntVal, Solver,
 	actions::{BoolInspectionActions, TrailingActions},
+	helpers::opt_field::OptField,
 	solver::{BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, trail::TrailedInt},
 	views::{LinearBoolView, LinearView},
 };
@@ -50,13 +51,13 @@ pub(crate) enum DirectStorage {
 /// their tightest literal meaning.
 ///
 /// Used as the return type of [`OrderStorage::resolve_val`].
-struct DomainLocation<'a> {
+struct DomainLocation<'a, const OFFSET: usize> {
 	/// Tightest value for the less-than literal
 	less_val: IntVal,
 	/// Tightest value for the greater-than or equal-to literal
 	greater_eq_val: IntVal,
 	/// Offset of the literal in the variable range.
-	offset: usize,
+	offset: OptField<OFFSET, usize>,
 	/// Iterator in the domain that point to the range in which the value is
 	/// located.
 	range_iter: RangeIter<'a>,
@@ -445,8 +446,11 @@ impl IntVar {
 
 		match &self.order_encoding {
 			OrderStorage::Eager { storage, .. } => {
-				let DomainLocation { offset, .. } = OrderStorage::resolve_val(&self.domain, v);
-				(BoolView(BoolViewInner::Lit(!storage.index(offset))), v)
+				let DomainLocation { offset, .. } = OrderStorage::resolve_val::<1>(&self.domain, v);
+				(
+					BoolView(BoolViewInner::Lit(!storage.index(*offset.as_ref()))),
+					v,
+				)
 			}
 			OrderStorage::Lazy(storage) => {
 				let mut ret = (BoolView(BoolViewInner::Const(true)), v);
@@ -494,8 +498,8 @@ impl IntVar {
 
 		match &self.order_encoding {
 			OrderStorage::Eager { storage, .. } => {
-				let DomainLocation { offset, .. } = OrderStorage::resolve_val(&self.domain, v);
-				let bv = BoolView(BoolViewInner::Lit(storage.index(offset).into()));
+				let DomainLocation { offset, .. } = OrderStorage::resolve_val::<1>(&self.domain, v);
+				let bv = BoolView(BoolViewInner::Lit(storage.index(*offset.as_ref()).into()));
 				(bv, v)
 			}
 			OrderStorage::Lazy(storage) => {
@@ -692,8 +696,9 @@ impl IntVar {
 				BoolView(if lb == *self.domain.lower_bound().unwrap() {
 					BoolViewInner::Const(true)
 				} else {
-					let DomainLocation { offset, .. } = OrderStorage::resolve_val(&self.domain, lb);
-					BoolViewInner::Lit(!storage.index(offset))
+					let DomainLocation { offset, .. } =
+						OrderStorage::resolve_val::<1>(&self.domain, lb);
+					BoolViewInner::Lit(!storage.index(*offset.as_ref()))
 				})
 			}
 			OrderStorage::Lazy(storage) => {
@@ -890,7 +895,7 @@ impl IntVar {
 			let DomainLocation {
 				greater_eq_val: val,
 				..
-			} = OrderStorage::resolve_val(&self.domain, val + 1);
+			} = OrderStorage::resolve_val::<0>(&self.domain, val + 1);
 			let cur_index = trail.trailed_int(*ub_index);
 			let cur_index = if cur_index < 0 {
 				*max_index
@@ -974,8 +979,8 @@ impl IntVar {
 					BoolViewInner::Const(true)
 				} else {
 					let DomainLocation { offset, .. } =
-						OrderStorage::resolve_val(&self.domain, ub + 1);
-					BoolViewInner::Lit(storage.index(offset).into())
+						OrderStorage::resolve_val::<1>(&self.domain, ub + 1);
+					BoolViewInner::Lit(storage.index(*offset.as_ref()).into())
 				})
 			}
 			OrderStorage::Lazy(storage) => {
@@ -1253,17 +1258,25 @@ impl OrderStorage {
 		domain: &'a RangeList<IntVal>,
 		val: IntVal,
 	) -> (OrderEntry<'a>, IntVal, IntVal) {
-		let DomainLocation {
-			less_val,
-			greater_eq_val: val,
-			offset,
-			range_iter,
-		} = Self::resolve_val(domain, val);
-
-		let entry = match self {
-			OrderStorage::Eager { storage, .. } => OrderEntry::Eager(storage, offset),
+		match self {
+			OrderStorage::Eager { storage, .. } => {
+				let DomainLocation {
+					less_val,
+					greater_eq_val: val,
+					offset,
+					..
+				} = Self::resolve_val::<1>(domain, val);
+				let entry = OrderEntry::Eager(storage, *offset.as_ref());
+				(entry, less_val, val)
+			}
 			OrderStorage::Lazy(storage) => {
-				if storage.is_empty() || storage.min().unwrap().val > val {
+				let DomainLocation {
+					less_val,
+					greater_eq_val: val,
+					range_iter,
+					..
+				} = Self::resolve_val::<0>(domain, val);
+				let entry = if storage.is_empty() || storage.min().unwrap().val > val {
 					OrderEntry::Vacant {
 						storage,
 						prev_index: -1,
@@ -1294,10 +1307,10 @@ impl OrderStorage {
 							val,
 						}
 					}
-				}
+				};
+				(entry, less_val, val)
 			}
-		};
-		(entry, less_val, val)
+		}
 	}
 
 	/// Return the [`RawVar`] that represent the condition `< val`, or `≥ val`
@@ -1309,32 +1322,34 @@ impl OrderStorage {
 	/// The given `domain` is (in the case of eager creation) used to determine
 	/// the offset of the variable in the `VarRange`.
 	fn find(&self, domain: &RangeList<IntVal>, val: IntVal) -> Option<(RawVar, IntVal, IntVal)> {
-		let DomainLocation {
-			less_val,
-			greater_eq_val: val,
-			offset,
-			..
-		} = Self::resolve_val(domain, val);
-
-		let var = match self {
-			OrderStorage::Eager { storage, .. } => Some(storage.index(offset)),
+		match self {
+			OrderStorage::Eager { storage, .. } => {
+				let DomainLocation {
+					less_val,
+					greater_eq_val: val,
+					offset,
+					..
+				} = Self::resolve_val::<1>(domain, val);
+				Some((storage.index(*offset.as_ref()), less_val, val))
+			}
 			OrderStorage::Lazy(storage) => {
+				let DomainLocation {
+					less_val,
+					greater_eq_val: val,
+					..
+				} = Self::resolve_val::<0>(domain, val);
 				if storage.is_empty()
 					|| storage.min().unwrap().val > val
 					|| storage.max().unwrap().val < val
 				{
 					return None;
-				}
+				};
 
 				let i = storage.find_index(storage.min_index, SearchDirection::Increasing, val);
-				if storage[i].val == val {
-					Some(storage[i].var)
-				} else {
-					None
-				}
+				let var = (storage[i].val == val).then(|| storage[i].var)?;
+				Some((var, less_val, val))
 			}
-		}?;
-		Some((var, less_val, val))
+		}
 	}
 
 	#[inline]
@@ -1343,7 +1358,10 @@ impl OrderStorage {
 	/// range in `domain` in which `j` is located, and calculate the offset of
 	/// the representation `< j` in a VarRange when the order literals are
 	/// eagerly created.
-	fn resolve_val(domain: &RangeList<IntVal>, val: IntVal) -> DomainLocation<'_> {
+	fn resolve_val<const OFFSET: usize>(
+		domain: &RangeList<IntVal>,
+		val: IntVal,
+	) -> DomainLocation<'_, OFFSET> {
 		let mut offset = -1; // -1 to account for the lower bound
 		let mut it = domain.iter().peekable();
 		let mut last_val = IntVal::MIN;
@@ -1353,18 +1371,20 @@ impl OrderStorage {
 				return DomainLocation {
 					less_val: last_val + 1,
 					greater_eq_val: *r.start(),
-					offset: offset as usize,
+					offset: OptField::with_value(if OFFSET >= 1 { offset as usize } else { 0 }),
 					range_iter: it,
 				};
 			} else if val <= *r.end() {
-				offset += val - r.start();
+				if OFFSET >= 1 {
+					offset += val - r.start();
+				}
 				return DomainLocation {
 					less_val: if val == *r.start() { last_val + 1 } else { val },
 					greater_eq_val: val,
-					offset: offset as usize,
+					offset: OptField::with_value(if OFFSET >= 1 { offset as usize } else { 0 }),
 					range_iter: it,
 				};
-			} else {
+			} else if OFFSET >= 1 {
 				offset += r.end() - r.start() + 1;
 			}
 			last_val = *it.next().unwrap().end();

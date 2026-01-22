@@ -558,11 +558,19 @@ pub fn times_int(
 	factor2: IntDecision,
 	product: IntDecision,
 ) {
-	prb.add_constraint(IntTimesBounds {
-		factor1,
-		factor2,
-		product,
-	});
+	if IntTimesBounds::<_, _, _, IntDecision>::can_overflow(prb, &factor1, &factor2) {
+		prb.add_constraint(IntTimesBounds::<true, _, _, _> {
+			factor1,
+			factor2,
+			product,
+		});
+	} else {
+		prb.add_constraint(IntTimesBounds::<false, _, _, _> {
+			factor1,
+			factor2,
+			product,
+		});
+	}
 }
 
 /// Create a value precede chain constraint that enforces that the first

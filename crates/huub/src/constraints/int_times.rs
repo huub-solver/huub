@@ -7,21 +7,26 @@ use std::{
 	ops::{AddAssign, Mul},
 };
 
+use itertools::{Itertools, MinMaxResult, iproduct};
+
 use crate::{
 	IntDecision, IntVal,
-	actions::{InitActions, IntSimplificationActions, ReasoningEngine, ReformulationActions},
+	actions::{
+		InitActions, IntInspectionActions, IntSimplificationActions, ReasoningContext,
+		ReasoningEngine, ReformulationActions,
+	},
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
 	},
 	helpers::{div_ceil, div_floor},
 	reformulate::ReformulationError,
-	solver::{IntView, activation_list::IntPropCond, queue::PriorityLevel},
+	solver::{activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// This propagator enforces that the product of the two integer decision
 /// variables is equal to a third, i.e.`x * y = z`.
-pub struct IntTimesBounds<I1, I2, I3> {
+pub struct IntTimesBounds<const OVERFLOW: bool, I1, I2, I3> {
 	/// First factor variable
 	pub(crate) factor1: I1,
 	/// Second factor variable
@@ -30,21 +35,56 @@ pub struct IntTimesBounds<I1, I2, I3> {
 	pub(crate) product: I3,
 }
 
-impl IntTimesBounds<IntView, IntView, IntView> {
-	/// Create a new [`IntTimesBounds`] propagator and post it in the solver.
-	pub fn post<E>(solver: &mut E, factor1: IntView, factor2: IntView, product: IntView)
+impl<I1, I2, I3> IntTimesBounds<true, I1, I2, I3> {
+	/// Returns whether given the bounds of the factors, the result can
+	/// overflow.
+	///
+	/// If this method returns `true`, then the propagator used should have
+	/// `OVERFLOW` set to `true`.
+	pub(crate) fn can_overflow<E>(ctx: &E, f1: &I1, f2: &I2) -> bool
 	where
-		E: AddAssign<BoxedPropagator> + ?Sized,
+		E: ReasoningContext + ?Sized,
+		I1: IntInspectionActions<E>,
+		I2: IntInspectionActions<E>,
 	{
-		*solver += Box::new(Self {
-			factor1,
-			factor2,
-			product,
-		});
+		let (f1_lb, f1_ub) = f1.bounds(ctx);
+		let (f2_lb, f2_ub) = f2.bounds(ctx);
+		iproduct!([f1_lb, f1_ub], [f2_lb, f2_ub]).any(|(f1, f2)| f1.checked_mul(f2).is_none())
+	}
+
+	/// Create a new [`IntTimesBounds`] propagator and post it in the solver.
+	pub fn post<E>(solver: &mut E, factor1: I1, factor2: I2, product: I3)
+	where
+		E: AddAssign<BoxedPropagator> + ReasoningContext + ?Sized,
+		I1: IntInspectionActions<E> + SolverIntView<Engine>,
+		I2: IntInspectionActions<E> + SolverIntView<Engine>,
+		I3: SolverIntView<Engine>,
+	{
+		if Self::can_overflow(solver, &factor1, &factor2) {
+			*solver += Box::new(IntTimesBounds::<true, _, _, _> {
+				factor1,
+				factor2,
+				product,
+			});
+		} else {
+			*solver += Box::new(IntTimesBounds::<false, _, _, _> {
+				factor1,
+				factor2,
+				product,
+			});
+		}
 	}
 }
 
-impl<E, I1, I2, I3> Constraint<E> for IntTimesBounds<I1, I2, I3>
+impl<const OVERFLOW: bool, I1, I2, I3> IntTimesBounds<OVERFLOW, I1, I2, I3> {
+	/// Internal multiplication function that if `OVERFLOW` is `true`, it will
+	/// saturate the result when it overflows.
+	fn mul(x: IntVal, y: IntVal) -> IntVal {
+		if OVERFLOW { x.saturating_mul(y) } else { x * y }
+	}
+}
+
+impl<const OVERFLOW: bool, E, I1, I2, I3> Constraint<E> for IntTimesBounds<OVERFLOW, I1, I2, I3>
 where
 	E: ReasoningEngine,
 	I1: ModelIntView<E> + Mul<IntVal, Output = IntDecision>,
@@ -77,7 +117,7 @@ where
 	}
 }
 
-impl<E, I1, I2, I3> Propagator<E> for IntTimesBounds<I1, I2, I3>
+impl<const OVERFLOW: bool, E, I1, I2, I3> Propagator<E> for IntTimesBounds<OVERFLOW, I1, I2, I3>
 where
 	E: ReasoningEngine,
 	I1: SolverIntView<E>,
@@ -107,7 +147,14 @@ where
 		// and negative.
 
 		// Calculate possible bounds for the product
-		let bounds = [f1_lb * f2_lb, f1_lb * f2_ub, f1_ub * f2_lb, f1_ub * f2_ub];
+		let minmax = iproduct!([f1_lb, f1_ub], [f2_lb, f2_ub])
+			.map(|(a, b)| Self::mul(a, b))
+			.minmax();
+		let (min, max) = match minmax {
+			MinMaxResult::NoElements => unreachable!(),
+			MinMaxResult::OneElement(b) => (b, b),
+			MinMaxResult::MinMax(min, max) => (min, max),
+		};
 		let reason = &[
 			f1_lb_lit.clone(),
 			f1_ub_lit.clone(),
@@ -115,40 +162,23 @@ where
 			f2_ub_lit.clone(),
 		];
 		// z >= x * y
-		let min = bounds.iter().min().unwrap();
-		self.product.set_lower_bound(ctx, *min, reason)?;
+		self.product.set_lower_bound(ctx, min, reason)?;
 		// z <= x * y
-		let max = bounds.iter().max().unwrap();
-		self.product.set_upper_bound(ctx, *max, reason)?;
+		self.product.set_upper_bound(ctx, max, reason)?;
 
 		// Propagate the bounds of the first factor if the second factor is known
 		// positive or known negative.
 		if f2_lb > 0 || f2_ub < 0 {
-			// Calculate possible bounds for the first factor
-			let bounds = [
-				(pr_lb, f2_lb),
-				(pr_lb, f2_ub),
-				(pr_ub, f2_lb),
-				(pr_ub, f2_ub),
-			];
 			let reason = &[pr_lb_lit.clone(), pr_ub_lit.clone(), f2_lb_lit, f2_ub_lit];
 			// factor1 >= product / factor2
-			let min = bounds
-				.iter()
-				.map(|(z, y)| {
-					let y = NonZero::new(*y).unwrap();
-					div_ceil(*z, y)
-				})
+			let min = iproduct!([pr_lb, pr_ub], [f2_lb, f2_ub])
+				.map(|(pr, f2)| div_ceil(pr, NonZero::new(f2).unwrap()))
 				.min()
 				.unwrap();
 			self.factor1.set_lower_bound(ctx, min, reason)?;
 			// factor1 <= product / factor2
-			let max = bounds
-				.iter()
-				.map(|(z, y)| {
-					let y = NonZero::new(*y).unwrap();
-					div_floor(*z, y)
-				})
+			let max = iproduct!([pr_lb, pr_ub], [f2_lb, f2_ub])
+				.map(|(pr, f2)| div_floor(pr, NonZero::new(f2).unwrap()))
 				.max()
 				.unwrap();
 			self.factor1.set_upper_bound(ctx, max, reason)?;
@@ -157,31 +187,16 @@ where
 		// Propagate the bounds of the second factor if the first factor is known
 		// positive or known negative.
 		if f1_lb > 0 || f1_ub < 0 {
-			// Calculate possible bounds for the first factor `y`
-			let bounds = [
-				(pr_lb, f1_lb),
-				(pr_lb, f1_ub),
-				(pr_ub, f1_lb),
-				(pr_ub, f1_ub),
-			];
 			let reason = &[pr_lb_lit, pr_ub_lit, f1_lb_lit, f1_ub_lit];
 			// factor2 >= product / factor1
-			let min = bounds
-				.iter()
-				.map(|(z, x)| {
-					let y = NonZero::new(*x).unwrap();
-					div_ceil(*z, y)
-				})
+			let min = iproduct!([pr_lb, pr_ub], [f1_lb, f1_ub])
+				.map(|(pr, f1)| div_ceil(pr, NonZero::new(f1).unwrap()))
 				.min()
 				.unwrap();
 			self.factor2.set_lower_bound(ctx, min, reason)?;
 			// factor2 <= product / factor1
-			let max = bounds
-				.iter()
-				.map(|(z, x)| {
-					let y = NonZero::new(*x).unwrap();
-					div_floor(*z, y)
-				})
+			let max = iproduct!([pr_lb, pr_ub], [f1_lb, f1_ub])
+				.map(|(pr, f1)| div_floor(pr, NonZero::new(f1).unwrap()))
 				.max()
 				.unwrap();
 			self.factor2.set_upper_bound(ctx, max, reason)?;
@@ -196,6 +211,7 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
+		IntVal,
 		constraints::int_times::IntTimesBounds,
 		solver::{
 			Solver,
@@ -205,7 +221,7 @@ mod tests {
 
 	#[test]
 	#[traced_test]
-	fn test_int_times_sat() {
+	fn simple_sat() {
 		let mut slv = Solver::default();
 		let a = IntVar::new_in(
 			&mut slv,
@@ -247,5 +263,75 @@ mod tests {
 		1, 1, 1
 		1, 2, 2"#]],
 		);
+	}
+
+	#[test]
+	#[traced_test]
+	fn overflow_intermediate_sat() {
+		let mut slv = Solver::default();
+		let a = IntVar::new_in(
+			&mut slv,
+			(IntVal::MIN..=IntVal::MAX).into(),
+			EncodingType::Lazy,
+			EncodingType::Lazy,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			(IntVal::MIN..=IntVal::MAX).into(),
+			EncodingType::Lazy,
+			EncodingType::Lazy,
+		);
+
+		IntTimesBounds::post(&mut slv, a, b, 2);
+		slv.expect_solutions(
+			&[a, b],
+			expect![[r#"
+		-2, -1
+		-1, -2
+		1, 2
+		2, 1"#]],
+		);
+	}
+
+	#[test]
+	#[traced_test]
+	fn overflow_unsat() {
+		let mut slv = Solver::default();
+		let a = IntVar::new_in(
+			&mut slv,
+			(2..=IntVal::MAX).into(),
+			EncodingType::Lazy,
+			EncodingType::Lazy,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			(IntVal::MIN..=IntVal::MAX).into(),
+			EncodingType::Lazy,
+			EncodingType::Lazy,
+		);
+
+		IntTimesBounds::post(&mut slv, IntVal::MAX, a, b);
+		slv.assert_unsatisfiable();
+	}
+
+	#[test]
+	#[traced_test]
+	fn underflow_unsat() {
+		let mut slv = Solver::default();
+		let a = IntVar::new_in(
+			&mut slv,
+			(2..=IntVal::MAX).into(),
+			EncodingType::Lazy,
+			EncodingType::Lazy,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			(IntVal::MIN..=IntVal::MAX).into(),
+			EncodingType::Lazy,
+			EncodingType::Lazy,
+		);
+
+		IntTimesBounds::post(&mut slv, IntVal::MIN, a, b);
+		slv.assert_unsatisfiable();
 	}
 }

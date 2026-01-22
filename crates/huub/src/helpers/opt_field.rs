@@ -1,6 +1,9 @@
 //! Compile time optional field implementation.
 
-use std::hash::{Hash, Hasher};
+use std::{
+	array,
+	hash::{Hash, Hasher},
+};
 
 #[derive(Debug)]
 /// Compile time optional field.
@@ -21,6 +24,11 @@ impl<T> OptField<1, T> {
 	pub(crate) fn new(value: T) -> Self {
 		Self { value: [value] }
 	}
+
+	/// Returns a reference to the value of the `OptField`.
+	pub(crate) fn as_ref(&self) -> &T {
+		&self.value[0]
+	}
 }
 
 impl<const B: usize, T> OptField<B, T> {
@@ -28,6 +36,18 @@ impl<const B: usize, T> OptField<B, T> {
 	/// Return the value of the `OptField`, if it exists.
 	pub(crate) fn get(&self) -> Option<&T> {
 		self.value.first()
+	}
+
+	/// Create a new `OptField` with the given value, if it exists.
+	pub(crate) fn with_value(v: T) -> Self
+	where
+		T: Default + Copy,
+	{
+		let mut value = array::from_fn(|_| T::default());
+		if B >= 1 {
+			value[0] = v;
+		}
+		Self { value }
 	}
 }
 
