@@ -7,7 +7,8 @@ use rangelist::RangeList;
 use tracing_test::traced_test;
 
 use crate::{
-	Decision, InitConfig, Model, ReformulationError, Solver, ValueSelection, VariableSelection,
+	Decision, InitConfig, IntVal, Model, ReformulationError, Solver, ValueSelection,
+	VariableSelection,
 	actions::{IntInspectionActions, IntSimplificationActions},
 	branchers::IntBrancher,
 	constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
@@ -52,6 +53,59 @@ fn lin_multi_alias() {
 	assert!(y.unify(&mut prb, z_trans).is_ok());
 	assert_eq!(x_trans.lower_bound(&prb), -11);
 	assert_eq!(x_trans.upper_bound(&prb), -4);
+}
+
+#[test]
+fn test_bounding_add() {
+	let mut prb = Model::default();
+	let x = prb.new_int_var(IntVal::MIN..=IntVal::MAX);
+
+	let y = x.bounding_add(&mut prb, 100).unwrap();
+
+	// Check underlying domain
+	assert_eq!(x.bounds(&prb), (IntVal::MIN, IntVal::MAX - 100));
+	// Check view domain
+	assert_eq!(y.bounds(&prb), (IntVal::MIN + 100, IntVal::MAX));
+}
+
+#[test]
+fn test_bounding_mul() {
+	let mut prb = Model::default();
+	let x = prb.new_int_var(IntVal::MIN..=IntVal::MAX);
+
+	let y = x.bounding_mul(&mut prb, 2).unwrap();
+
+	// Check underlying domain
+	assert_eq!(x.bounds(&prb), (IntVal::MIN / 2, IntVal::MAX / 2));
+	// Check view domain
+	assert_eq!(y.bounds(&prb), (IntVal::MIN, IntVal::MAX - 1));
+}
+
+#[test]
+fn test_bounding_neg() {
+	let mut prb = Model::default();
+	let x = prb.new_int_var(IntVal::MIN..=IntVal::MAX);
+
+	let y = x.bounding_neg(&mut prb).unwrap();
+
+	// Check underlying domain
+	assert_eq!(x.bounds(&prb), (IntVal::MIN + 1, IntVal::MAX));
+	// Check view domain
+	assert_eq!(y.bounds(&prb), (IntVal::MIN + 1, IntVal::MAX));
+}
+
+#[test]
+fn test_bounding_sub() {
+	let mut prb = Model::default();
+	let x = prb.new_int_var(IntVal::MIN..=IntVal::MAX);
+
+	let y = x.bounding_sub(&mut prb, 255).unwrap();
+
+	// Check underlying domain
+	assert_eq!(x.bounds(&prb), (IntVal::MIN + 255, IntVal::MAX));
+
+	// Check view domain
+	assert_eq!(y.bounds(&prb), (IntVal::MIN, IntVal::MAX - 255));
 }
 
 #[test]

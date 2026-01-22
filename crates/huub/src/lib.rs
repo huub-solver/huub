@@ -966,6 +966,90 @@ impl From<IntDecision> for Decision {
 }
 
 impl IntDecision {
+	/// Create a view that represents the addition of a constant value to the
+	/// integer decision, while ensuring that the domain of the resulting view
+	/// does not overflow.
+	pub fn bounding_add(
+		self,
+		ctx: &mut Model,
+		rhs: IntVal,
+	) -> Result<IntDecision, Conflict<BoolDecision>> {
+		if rhs.is_positive() {
+			let ub = self.upper_bound(ctx);
+			if ub.checked_add(rhs).is_none() {
+				if let Some(ub) = ub.checked_sub(rhs) {
+					self.set_upper_bound(ctx, ub, [])?;
+				} else {
+					return Err(ctx.create_conflict(self.lt(IntVal::MIN), []));
+				}
+			}
+		} else {
+			let lb = self.lower_bound(ctx);
+			if lb.checked_add(rhs).is_none() {
+				if let Some(lb) = lb.checked_sub(rhs) {
+					self.set_lower_bound(ctx, lb, [])?;
+				} else {
+					// Real conflict subject cannot be represented.
+					return Err(ctx.create_conflict(false.into(), []));
+				}
+			}
+		}
+		Ok(self + rhs)
+	}
+
+	/// Create a view that represents the multiplication between a constant
+	/// value and an integer decision, while ensuring that the domain of the
+	/// resulting view does not overflow.
+	pub fn bounding_mul(
+		self,
+		ctx: &mut Model,
+		rhs: IntVal,
+	) -> Result<IntDecision, Conflict<BoolDecision>> {
+		let (lb, ub) = self.bounds(ctx);
+		let (min, max) = if rhs.is_positive() {
+			(IntVal::MIN, IntVal::MAX)
+		} else {
+			(IntVal::MAX, IntVal::MIN)
+		};
+		if lb.checked_mul(rhs).is_none() {
+			if let Some(lb) = min.checked_div(rhs) {
+				self.set_lower_bound(ctx, lb, [])?;
+			} else {
+				// Real conflict subject cannot be represented.
+				return Err(ctx.create_conflict(false.into(), []));
+			}
+		}
+		if ub.checked_mul(rhs).is_none() {
+			if let Some(ub) = max.checked_div(rhs) {
+				self.set_upper_bound(ctx, ub, [])?;
+			} else {
+				return Err(ctx.create_conflict(self.lt(IntVal::MIN), []));
+			}
+		}
+
+		Ok(self * rhs)
+	}
+
+	/// Create a view that represents the negation of an integer decision, while
+	/// ensuring that the domain of the resulting view does not overflow.
+	pub fn bounding_neg(self, ctx: &mut Model) -> Result<IntDecision, Conflict<BoolDecision>> {
+		if self.lower_bound(ctx) == IntVal::MIN {
+			self.set_lower_bound(ctx, -IntVal::MAX, [])?;
+		}
+		Ok(-self)
+	}
+
+	/// Create a view that represents the subtraction of a constant value from
+	/// the integer decision, while ensuring that the domain of the resulting
+	/// view does not overflow.
+	pub fn bounding_sub(
+		self,
+		model: &mut Model,
+		rhs: IntVal,
+	) -> Result<IntDecision, Conflict<BoolDecision>> {
+		self.bounding_add(model, rhs.saturating_neg())
+	}
+
 	/// Get a Boolean view that represent whether the integer view is equal to
 	/// the given value.
 	pub fn eq(&self, v: IntVal) -> BoolDecision {

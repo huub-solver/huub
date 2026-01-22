@@ -6,7 +6,6 @@ use std::{
 	error::Error,
 	fmt::{self, Debug, Display},
 	hash::Hash,
-	iter::once,
 	num::NonZero,
 	ops::{Deref, Not, RangeInclusive},
 	rc::Rc,
@@ -764,7 +763,10 @@ where
 				let offset = sum / c;
 				let view = if let Some(scale) = NonZero::new(-cy / c) {
 					let y = lit_int_view(self, vy)?;
-					y * scale + offset
+					y.bounding_mul(&mut self.prb, scale.get())
+						.map_err(ReformulationError::from)?
+						.bounding_add(&mut self.prb, offset)
+						.map_err(ReformulationError::from)?
 				} else {
 					offset.into()
 				};
@@ -1102,12 +1104,18 @@ where
 							.try_collect()?;
 						let sum = self.arg_int(sum)?;
 
-						let lin_exp: IntLinExpr = vars
-							.into_iter()
-							.zip(coeffs.into_iter())
-							.filter_map(|(x, c)| NonZero::new(c).map(|c| IntDecision::from(x) * c))
-							.chain(once(-sum))
-							.sum();
+						let mut terms = Vec::with_capacity(vars.len() + 1);
+						for (x, c) in vars.into_iter().zip(coeffs.into_iter()) {
+							if let Some(c) = NonZero::new(c) {
+								terms.push(
+									IntDecision::from(x)
+										.bounding_mul(&mut self.prb, c.get())
+										.map_err(ReformulationError::from)?,
+								);
+							}
+						}
+						terms.push(-sum);
+						let lin_exp: IntLinExpr = terms.into_iter().sum();
 
 						rel!(&mut self.prb, 0 == lin_exp);
 					} else {
@@ -1566,10 +1574,17 @@ where
 				"int_le" | "int_ne" => {
 					if let [a, b] = c.args.as_slice() {
 						let a = self.arg_int(a)?;
-						let b = self.arg_int(b)?;
+						let b = self
+							.arg_int(b)?
+							.bounding_neg(&mut self.prb)
+							.map_err(ReformulationError::from)?;
 						match c.id.deref() {
-							"int_le" => rel!(&mut self.prb, 0 >= a - b),
-							"int_ne" => rel!(&mut self.prb, 0 != a - b),
+							"int_le" => {
+								rel!(&mut self.prb, 0 >= a + b)
+							}
+							"int_ne" => {
+								rel!(&mut self.prb, 0 != a + b)
+							}
 							_ => unreachable!(),
 						};
 					} else {
@@ -1591,7 +1606,9 @@ where
 						let b = self.arg_int(b)?;
 						let r = self.arg_bool(r)?;
 
-						let lin_exp = a - b;
+						let lin_exp = a + b
+							.bounding_neg(&mut self.prb)
+							.map_err(ReformulationError::from)?;
 						let lin = match c.id.deref() {
 							"int_eq_imp" | "int_eq_reif" => lin_exp.eq(0),
 							"int_le_imp" | "int_le_reif" => lin_exp.leq(0),
@@ -1632,11 +1649,14 @@ where
 							.map(|l| self.lit_int(l))
 							.try_collect()?;
 						let rhs = self.arg_par_int(rhs)?;
-						let lin_exp: IntLinExpr = vars
-							.into_iter()
-							.zip(coeffs.into_iter())
-							.filter_map(|(x, c)| NonZero::new(c).map(|c| x * c))
-							.sum();
+						let mut terms = Vec::with_capacity(vars.len());
+						for (x, c) in vars.into_iter().zip(coeffs.into_iter()) {
+							terms.push(
+								x.bounding_mul(&mut self.prb, c)
+									.map_err(ReformulationError::from)?,
+							);
+						}
+						let lin_exp: IntLinExpr = terms.into_iter().sum();
 
 						self.prb.add_constraint(match c.id.deref() {
 							"int_lin_eq" => lin_exp.eq(rhs),
@@ -1672,11 +1692,14 @@ where
 							.try_collect()?;
 						let rhs = self.arg_par_int(rhs)?;
 						let reified = self.arg_bool(reified)?;
-						let lin_exp: IntLinExpr = vars
-							.into_iter()
-							.zip(coeffs.into_iter())
-							.filter_map(|(x, c)| NonZero::new(c).map(|c| x * c))
-							.sum();
+						let mut terms = Vec::with_capacity(vars.len());
+						for (x, c) in vars.into_iter().zip(coeffs.into_iter()) {
+							terms.push(
+								x.bounding_mul(&mut self.prb, c)
+									.map_err(ReformulationError::from)?,
+							);
+						}
+						let lin_exp: IntLinExpr = terms.into_iter().sum();
 
 						let lin = match c.id.deref() {
 							"int_lin_eq_imp" | "int_lin_eq_reif" => lin_exp.eq(rhs),
