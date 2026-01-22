@@ -37,6 +37,24 @@ enum ChangeType {
 	Conflicting,
 }
 
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+/// Argument type for [`SolvingContext::propagate_int`] to communicate what
+/// change to make to the integer decision variable.
+///
+/// Note that this enum is slightly different from [`IntLitMeaning`] in that it
+/// represents the the actual upper bound (less-eq), rather than
+/// [`IntLitMeaning::Less`], which has to add `1` potentially causing overflow.
+enum ChangeRequest {
+	/// Set the lower bound of the integer decision variable to the given value.
+	SetLowerBound(IntVal),
+	/// Set the upper bound of the integer decision variable to the given value.
+	SetUpperBound(IntVal),
+	/// Set the value of the integer decision variable to the given value.
+	SetValue(IntVal),
+	/// Remove the given value from the domain of the integer decision variable.
+	RemoveValue(IntVal),
+}
+
 /// Helper struct that temporarily captures a built reason to print it for
 /// `tracing`.
 struct ReasonTracePrint<'a>(&'a Result<Reason<RawLit>, bool>);
@@ -154,7 +172,7 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
 		val: IntVal,
 		reason: impl ReasonBuilder<SolvingContext<'a>>,
 	) -> Result<(), Conflict<RawLit>> {
-		ctx.propagate_int(*self, IntLitMeaning::GreaterEq(val), reason)
+		ctx.propagate_int(*self, ChangeRequest::SetLowerBound(val), reason)
 	}
 
 	fn set_not_eq(
@@ -163,7 +181,7 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
 		val: IntVal,
 		reason: impl ReasonBuilder<SolvingContext<'a>>,
 	) -> Result<(), Conflict<RawLit>> {
-		ctx.propagate_int(*self, IntLitMeaning::NotEq(val), reason)
+		ctx.propagate_int(*self, ChangeRequest::RemoveValue(val), reason)
 	}
 
 	fn set_upper_bound(
@@ -172,7 +190,7 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
 		val: IntVal,
 		reason: impl ReasonBuilder<SolvingContext<'a>>,
 	) -> Result<(), Conflict<RawLit>> {
-		ctx.propagate_int(*self, IntLitMeaning::Less(val + 1), reason)
+		ctx.propagate_int(*self, ChangeRequest::SetUpperBound(val), reason)
 	}
 
 	fn set_val(
@@ -181,7 +199,7 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for IntVarRef {
 		val: IntVal,
 		reason: impl ReasonBuilder<SolvingContext<'a>>,
 	) -> Result<(), Conflict<RawLit>> {
-		ctx.propagate_int(*self, IntLitMeaning::Eq(val), reason)
+		ctx.propagate_int(*self, ChangeRequest::SetValue(val), reason)
 	}
 }
 
@@ -246,20 +264,20 @@ impl<'a> SolvingContext<'a> {
 	fn propagate_int(
 		&mut self,
 		iv: IntVarRef,
-		lit_req: IntLitMeaning,
+		change_req: ChangeRequest,
 		reason: impl ReasonBuilder<Self>,
 	) -> Result<(), Conflict<RawLit>> {
 		let (lb, ub) = self.state.int_vars[iv].bounds(self);
 		// Check whether a change is redundant, conflicting, or new with respect to
 		// the bounds of an integer variable
-		let check = match lit_req {
-			IntLitMeaning::Eq(i) if lb == i && ub == i => ChangeType::Redundant,
-			IntLitMeaning::Eq(i) if i < lb || i > ub => ChangeType::Conflicting,
-			IntLitMeaning::NotEq(i) if i < lb || i > ub => ChangeType::Redundant,
-			IntLitMeaning::GreaterEq(i) if i <= lb => ChangeType::Redundant,
-			IntLitMeaning::GreaterEq(i) if i > ub => ChangeType::Conflicting,
-			IntLitMeaning::Less(i) if i > ub => ChangeType::Redundant,
-			IntLitMeaning::Less(i) if i <= lb => ChangeType::Conflicting,
+		let check = match change_req {
+			ChangeRequest::SetValue(i) if lb == i && ub == i => ChangeType::Redundant,
+			ChangeRequest::SetValue(i) if i < lb || i > ub => ChangeType::Conflicting,
+			ChangeRequest::RemoveValue(i) if i < lb || i > ub => ChangeType::Redundant,
+			ChangeRequest::SetLowerBound(i) if i <= lb => ChangeType::Redundant,
+			ChangeRequest::SetLowerBound(i) if i > ub => ChangeType::Conflicting,
+			ChangeRequest::SetUpperBound(i) if i >= ub => ChangeType::Redundant,
+			ChangeRequest::SetUpperBound(i) if i < lb => ChangeType::Conflicting,
 			_ => ChangeType::New,
 		};
 
@@ -286,7 +304,15 @@ impl<'a> SolvingContext<'a> {
 			}
 			v
 		};
-		let (bv, lit_req) = self.state.int_vars[iv].lit(lit_req, new_var);
+		let (bv, lit_req) = self.state.int_vars[iv].lit(
+			match change_req {
+				ChangeRequest::SetLowerBound(i) => IntLitMeaning::GreaterEq(i),
+				ChangeRequest::SetUpperBound(i) => IntLitMeaning::Less(i + 1),
+				ChangeRequest::SetValue(i) => IntLitMeaning::Eq(i),
+				ChangeRequest::RemoveValue(i) => IntLitMeaning::NotEq(i),
+			},
+			new_var,
+		);
 
 		// Detect propagation conflicts:
 		// 1. Always false (and immediate return if always true).

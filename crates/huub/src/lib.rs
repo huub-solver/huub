@@ -511,11 +511,19 @@ pub fn int_in_set_reif(prb: &mut Model, var: IntDecision, set: IntSetVal, reif: 
 /// exponentiation by an exponent integer decision variable is equal to a result
 /// integer decision variable.
 pub fn pow_int(prb: &mut Model, base: IntDecision, exponent: IntDecision, result: IntDecision) {
-	prb.add_constraint(IntPowBounds {
-		base,
-		exponent,
-		result,
-	});
+	if IntPowBounds::<true, _, _, IntDecision>::can_overflow(prb, &base, &exponent) {
+		prb.add_constraint(IntPowBounds::<true, _, _, _> {
+			base,
+			exponent,
+			result,
+		});
+	} else {
+		prb.add_constraint(IntPowBounds::<false, _, _, _> {
+			base,
+			exponent,
+			result,
+		});
+	}
 }
 
 /// Create a sequential precede chain constraint that enforces that any integer
