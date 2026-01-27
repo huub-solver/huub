@@ -25,6 +25,7 @@ struct BoolStore {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Storage structure that allows restoring tracked values to an earlier state.
 pub(crate) struct Trail {
 	/// The storage of event that have been trailed.
 	///

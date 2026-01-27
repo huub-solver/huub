@@ -36,6 +36,7 @@ pub(crate) struct PriorityQueue<E> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+/// Information about a propagator in the propagation engine.
 pub(crate) struct PropagatorInfo {
 	/// Whether the propagator is currently enqueued.
 	pub(crate) enqueued: bool,

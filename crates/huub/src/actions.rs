@@ -47,7 +47,7 @@ pub trait BoolInspectionActions<Context: ?Sized>: BoolOperations {
 
 /// Operations that are required to be possible to perform on types acting as
 /// boolean decision variables.
-pub trait BoolOperations: Clone + fmt::Debug + Eq + Hash + Not<Output = Self> + 'static {}
+pub trait BoolOperations: Clone + fmt::Debug + Eq + Hash + Not + 'static {}
 
 /// Actions available to [`Propagator`] and [`Constraint`] implementations in
 /// [`ReasoningEngine::PropagationCtx`] for Boolean decision variables.
@@ -340,7 +340,7 @@ pub trait PropagationActions: DecisionActions + ReasoningContext {
 /// context objects used by the various Action traits.
 pub trait ReasoningContext {
 	/// Type used to represent an atom in an reason for propagation.
-	type Atom: BoolOperations;
+	type Atom: BoolOperations + Not<Output = Self::Atom>;
 	/// Type used to represent a conflict that occurs during propagation.
 	type Conflict;
 }
@@ -701,12 +701,29 @@ impl ClauseDatabase for ReformulationClauseDatabaseWrapper<'_> {
 	}
 }
 
-impl<T> BoolOperations for T where T: Clone + fmt::Debug + Eq + Hash + Not<Output = Self> + 'static {}
+impl<T> BoolOperations for T where T: Clone + fmt::Debug + Eq + Hash + Not + 'static {}
 impl<T> IntOperations for T where T: Clone + fmt::Debug + Eq + Hash + 'static {}
 
 impl<Ctx> BoolInspectionActions<Ctx> for bool {
 	fn val(&self, _: &Ctx) -> Option<bool> {
 		Some(*self)
+	}
+}
+
+impl<Ctx> BoolPropagationActions<Ctx> for bool
+where
+	Ctx: ReasoningContext + PropagationActions,
+{
+	fn set_val(
+		&self,
+		ctx: &mut Ctx,
+		val: bool,
+		reason: impl ReasonBuilder<Ctx>,
+	) -> Result<(), <Ctx as ReasoningContext>::Conflict> {
+		if *self != val {
+			return Err(ctx.declare_conflict(reason));
+		}
+		Ok(())
 	}
 }
 

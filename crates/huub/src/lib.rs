@@ -69,7 +69,7 @@ pub mod actions;
 pub mod branchers;
 pub mod constraints;
 pub mod flatzinc;
-pub(crate) mod helpers;
+pub mod helpers;
 pub mod reformulate;
 pub mod solver;
 #[cfg(test)]
@@ -81,6 +81,7 @@ use std::{
 	fmt::{Debug, Display},
 	hash::Hash,
 	iter::{Sum, repeat_n, repeat_with},
+	marker::PhantomData,
 	mem,
 	num::{NonZero, NonZeroI32},
 	ops::{Add, AddAssign, Deref, Mul, Neg, Not, Sub},
@@ -128,6 +129,7 @@ use crate::{
 		int_value_precede::{IntSeqPrecedeChainBounds, IntValuePrecedeChainValue},
 	},
 	flatzinc::{FlatZincError, FlatZincStatistics, FznModelBuilder},
+	helpers::overflow::{OverflowImpossible, OverflowPossible},
 	reformulate::{
 		BoolDecisionDef, BoolDecisionInner, Domain, InitConfig, IntDecisionDef, IntDecisionIndex,
 		IntDecisionInner, ReformulationContext, ReformulationError, ReformulationMap,
@@ -511,17 +513,19 @@ pub fn int_in_set_reif(prb: &mut Model, var: IntDecision, set: IntSetVal, reif: 
 /// exponentiation by an exponent integer decision variable is equal to a result
 /// integer decision variable.
 pub fn pow_int(prb: &mut Model, base: IntDecision, exponent: IntDecision, result: IntDecision) {
-	if IntPowBounds::<true, _, _, IntDecision>::can_overflow(prb, &base, &exponent) {
-		prb.add_constraint(IntPowBounds::<true, _, _, _> {
+	if IntPowBounds::<_, _, _, IntDecision>::can_overflow(prb, &base, &exponent) {
+		prb.add_constraint(IntPowBounds::<OverflowPossible, _, _, _> {
 			base,
 			exponent,
 			result,
+			overflow_mode: PhantomData,
 		});
 	} else {
-		prb.add_constraint(IntPowBounds::<false, _, _, _> {
+		prb.add_constraint(IntPowBounds::<OverflowImpossible, _, _, _> {
 			base,
 			exponent,
 			result,
+			overflow_mode: PhantomData,
 		});
 	}
 }
@@ -559,16 +563,18 @@ pub fn times_int(
 	product: IntDecision,
 ) {
 	if IntTimesBounds::<_, _, _, IntDecision>::can_overflow(prb, &factor1, &factor2) {
-		prb.add_constraint(IntTimesBounds::<true, _, _, _> {
+		prb.add_constraint(IntTimesBounds::<OverflowPossible, _, _, _> {
 			factor1,
 			factor2,
 			product,
+			overflow_mode: PhantomData,
 		});
 	} else {
-		prb.add_constraint(IntTimesBounds::<false, _, _, _> {
+		prb.add_constraint(IntTimesBounds::<OverflowImpossible, _, _, _> {
 			factor1,
 			factor2,
 			product,
+			overflow_mode: PhantomData,
 		});
 	}
 }
@@ -985,18 +991,20 @@ impl IntDecision {
 	/// Create a view that represents the addition of a constant value to the
 	/// integer decision, while ensuring that the domain of the resulting view
 	/// does not overflow.
-	pub fn bounding_add(
-		self,
-		ctx: &mut Model,
-		rhs: IntVal,
-	) -> Result<IntDecision, Conflict<BoolDecision>> {
+	pub fn bounding_add<Ctx>(self, ctx: &mut Ctx, rhs: IntVal) -> Result<IntDecision, Ctx::Conflict>
+	where
+		Ctx: PropagationActions + ReasoningContext + ?Sized,
+		IntDecision: IntPropagationActions<Ctx>,
+	{
 		if rhs.is_positive() {
 			let ub = self.upper_bound(ctx);
 			if ub.checked_add(rhs).is_none() {
 				if let Some(ub) = ub.checked_sub(rhs) {
 					self.set_upper_bound(ctx, ub, [])?;
 				} else {
-					return Err(ctx.create_conflict(self.lt(IntVal::MIN), []));
+					return Err(ctx.declare_conflict(|ctx: &mut Ctx| {
+						[self.lit(ctx, IntLitMeaning::Less(IntVal::MIN))]
+					}));
 				}
 			}
 		} else {
@@ -1006,7 +1014,7 @@ impl IntDecision {
 					self.set_lower_bound(ctx, lb, [])?;
 				} else {
 					// Real conflict subject cannot be represented.
-					return Err(ctx.create_conflict(false.into(), []));
+					return Err(ctx.declare_conflict([]));
 				}
 			}
 		}
@@ -1016,11 +1024,11 @@ impl IntDecision {
 	/// Create a view that represents the multiplication between a constant
 	/// value and an integer decision, while ensuring that the domain of the
 	/// resulting view does not overflow.
-	pub fn bounding_mul(
-		self,
-		ctx: &mut Model,
-		rhs: IntVal,
-	) -> Result<IntDecision, Conflict<BoolDecision>> {
+	pub fn bounding_mul<Ctx>(self, ctx: &mut Ctx, rhs: IntVal) -> Result<IntDecision, Ctx::Conflict>
+	where
+		Ctx: PropagationActions + ReasoningContext + ?Sized,
+		IntDecision: IntPropagationActions<Ctx>,
+	{
 		let (lb, ub) = self.bounds(ctx);
 		let (min, max) = if rhs.is_positive() {
 			(IntVal::MIN, IntVal::MAX)
@@ -1032,14 +1040,16 @@ impl IntDecision {
 				self.set_lower_bound(ctx, lb, [])?;
 			} else {
 				// Real conflict subject cannot be represented.
-				return Err(ctx.create_conflict(false.into(), []));
+				return Err(ctx.declare_conflict([]));
 			}
 		}
 		if ub.checked_mul(rhs).is_none() {
 			if let Some(ub) = max.checked_div(rhs) {
 				self.set_upper_bound(ctx, ub, [])?;
 			} else {
-				return Err(ctx.create_conflict(self.lt(IntVal::MIN), []));
+				return Err(ctx.declare_conflict(|ctx: &mut Ctx| {
+					[self.lit(ctx, IntLitMeaning::Less(IntVal::MIN))]
+				}));
 			}
 		}
 
@@ -1048,7 +1058,11 @@ impl IntDecision {
 
 	/// Create a view that represents the negation of an integer decision, while
 	/// ensuring that the domain of the resulting view does not overflow.
-	pub fn bounding_neg(self, ctx: &mut Model) -> Result<IntDecision, Conflict<BoolDecision>> {
+	pub fn bounding_neg<Ctx>(self, ctx: &mut Ctx) -> Result<IntDecision, Ctx::Conflict>
+	where
+		Ctx: ReasoningContext + ?Sized,
+		IntDecision: IntPropagationActions<Ctx>,
+	{
 		if self.lower_bound(ctx) == IntVal::MIN {
 			self.set_lower_bound(ctx, -IntVal::MAX, [])?;
 		}
@@ -1058,12 +1072,12 @@ impl IntDecision {
 	/// Create a view that represents the subtraction of a constant value from
 	/// the integer decision, while ensuring that the domain of the resulting
 	/// view does not overflow.
-	pub fn bounding_sub(
-		self,
-		model: &mut Model,
-		rhs: IntVal,
-	) -> Result<IntDecision, Conflict<BoolDecision>> {
-		self.bounding_add(model, rhs.saturating_neg())
+	pub fn bounding_sub<Ctx>(self, ctx: &mut Ctx, rhs: IntVal) -> Result<IntDecision, Ctx::Conflict>
+	where
+		Ctx: PropagationActions + ReasoningContext + ?Sized,
+		IntDecision: IntPropagationActions<Ctx>,
+	{
+		self.bounding_add(ctx, rhs.saturating_neg())
 	}
 
 	/// Get a Boolean view that represent whether the integer view is equal to
@@ -2158,50 +2172,50 @@ impl IntSimplificationActions<Model> for IntDecisionIndex {
 impl IntLinExpr {
 	/// Create a new integer linear constraint that enforces that the sum of the
 	/// expressions in the object is equal to the given value.
-	pub fn eq(self, rhs: IntVal) -> IntLinear {
+	pub fn eq(self, rhs: IntVal) -> IntLinear<OverflowPossible> {
 		IntLinear {
 			terms: self.terms,
 			operator: LinOperator::Equal,
-			rhs,
+			rhs: rhs.into(),
 			reif: None,
 		}
 	}
 
 	/// Create a new integer linear constraint that enforces that the sum of the
 	/// expressions in the object is greater than or equal to the given value.
-	pub fn geq(mut self, rhs: IntVal) -> IntLinear {
+	pub fn geq(mut self, rhs: IntVal) -> IntLinear<OverflowPossible> {
 		self.terms = self.terms.into_iter().map(|x| -x).collect();
 		self.leq(-rhs)
 	}
 
 	/// Create a new integer linear constraint that enforces that the sum of the
 	/// expressions in the object is greater than the given value.
-	pub fn gt(self, rhs: IntVal) -> IntLinear {
+	pub fn gt(self, rhs: IntVal) -> IntLinear<OverflowPossible> {
 		self.geq(rhs + 1)
 	}
 
 	/// Create a new integer linear constraint that enforces that the sum of the
 	/// expressions in the object is less than the given value.
-	pub fn leq(self, rhs: IntVal) -> IntLinear {
+	pub fn leq(self, rhs: IntVal) -> IntLinear<OverflowPossible> {
 		IntLinear {
 			terms: self.terms,
 			operator: LinOperator::LessEq,
-			rhs,
+			rhs: rhs.into(),
 			reif: None,
 		}
 	}
 	/// Create a new integer linear constraint that enforces that the sum of the
 	/// expressions in the object is less than or equal to the given value.
-	pub fn lt(self, rhs: IntVal) -> IntLinear {
+	pub fn lt(self, rhs: IntVal) -> IntLinear<OverflowPossible> {
 		self.leq(rhs - 1)
 	}
 	/// Create a new integer linear constraint that enforces that the sum of the
 	/// expressions in the object is not equal to the given value.
-	pub fn ne(self, rhs: IntVal) -> IntLinear {
+	pub fn ne(self, rhs: IntVal) -> IntLinear<OverflowPossible> {
 		IntLinear {
 			terms: self.terms,
 			operator: LinOperator::NotEqual,
-			rhs,
+			rhs: rhs.into(),
 			reif: None,
 		}
 	}
@@ -2816,20 +2830,6 @@ impl BoolInitActions<ModelInitContext<'_>> for bool {
 	}
 	fn enqueue_when_fixed(&self, ctx: &mut ModelInitContext<'_>) {
 		ctx.semantic_enqueue = true;
-	}
-}
-
-impl BoolPropagationActions<Model> for bool {
-	fn set_val(
-		&self,
-		ctx: &mut Model,
-		val: bool,
-		reason: impl ReasonBuilder<Model>,
-	) -> Result<(), Conflict<BoolDecision>> {
-		if *self != val {
-			return Err(ctx.declare_conflict(reason));
-		}
-		Ok(())
 	}
 }
 

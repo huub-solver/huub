@@ -3,7 +3,7 @@
 
 use std::{
 	cmp,
-	ops::{AddAssign, Neg},
+	ops::{AddAssign, Neg, Not},
 };
 
 use pindakaas::Lit as RawLit;
@@ -67,7 +67,7 @@ where
 	I1: ModelIntView<E>,
 	I2: ModelIntView<E> + Neg<Output = I2Neg> + Into<I1>,
 	I2Neg: Into<I1>,
-	B: ModelBoolView<E>,
+	B: ModelBoolView<E> + Not<Output = B>,
 {
 	fn simplify(
 		&mut self,
@@ -99,7 +99,7 @@ where
 
 impl<B, E, I1, I2> Propagator<E> for IntAbsBounds<I1, I2, B>
 where
-	B: SolverBoolView<E>,
+	B: SolverBoolView<E> + Not<Output = B>,
 	E: ReasoningEngine,
 	I1: SolverIntView<E>,
 	I2: SolverIntView<E>,

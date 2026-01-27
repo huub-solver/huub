@@ -3,6 +3,7 @@
 //! variable.
 
 use std::{
+	marker::PhantomData,
 	num::NonZero,
 	ops::{AddAssign, Mul},
 };
@@ -18,7 +19,10 @@ use crate::{
 	constraints::{
 		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
 	},
-	helpers::{div_ceil, div_floor},
+	helpers::{
+		div_ceil, div_floor,
+		overflow::{OverflowImpossible, OverflowMode, OverflowPossible},
+	},
 	reformulate::ReformulationError,
 	solver::{activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
@@ -26,16 +30,18 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// This propagator enforces that the product of the two integer decision
 /// variables is equal to a third, i.e.`x * y = z`.
-pub struct IntTimesBounds<const OVERFLOW: bool, I1, I2, I3> {
+pub struct IntTimesBounds<OM: OverflowMode, I1, I2, I3> {
 	/// First factor variable
 	pub(crate) factor1: I1,
 	/// Second factor variable
 	pub(crate) factor2: I2,
 	/// Product variable
 	pub(crate) product: I3,
+	/// Overflow mode
+	pub(crate) overflow_mode: PhantomData<OM>,
 }
 
-impl<I1, I2, I3> IntTimesBounds<true, I1, I2, I3> {
+impl<I1, I2, I3> IntTimesBounds<OverflowPossible, I1, I2, I3> {
 	/// Returns whether given the bounds of the factors, the result can
 	/// overflow.
 	///
@@ -61,36 +67,46 @@ impl<I1, I2, I3> IntTimesBounds<true, I1, I2, I3> {
 		I3: SolverIntView<Engine>,
 	{
 		if Self::can_overflow(solver, &factor1, &factor2) {
-			*solver += Box::new(IntTimesBounds::<true, _, _, _> {
+			*solver += Box::new(IntTimesBounds::<OverflowPossible, _, _, _> {
 				factor1,
 				factor2,
 				product,
+				overflow_mode: PhantomData,
 			});
 		} else {
-			*solver += Box::new(IntTimesBounds::<false, _, _, _> {
+			*solver += Box::new(IntTimesBounds::<OverflowImpossible, _, _, _> {
 				factor1,
 				factor2,
 				product,
+				overflow_mode: PhantomData,
 			});
 		}
 	}
 }
 
-impl<const OVERFLOW: bool, I1, I2, I3> IntTimesBounds<OVERFLOW, I1, I2, I3> {
+impl<OM, I1, I2, I3> IntTimesBounds<OM, I1, I2, I3>
+where
+	OM: OverflowMode,
+{
 	/// Internal multiplication function that if `OVERFLOW` is `true`, it will
 	/// saturate the result when it overflows.
 	fn mul(x: IntVal, y: IntVal) -> IntVal {
-		if OVERFLOW { x.saturating_mul(y) } else { x * y }
+		if OM::HANDLE_OVERFLOW {
+			x.saturating_mul(y)
+		} else {
+			x * y
+		}
 	}
 }
 
-impl<const OVERFLOW: bool, E, I1, I2, I3> Constraint<E> for IntTimesBounds<OVERFLOW, I1, I2, I3>
+impl<OM, E, I1, I2, I3> Constraint<E> for IntTimesBounds<OM, I1, I2, I3>
 where
 	E: ReasoningEngine,
 	I1: ModelIntView<E> + Mul<IntVal, Output = IntDecision>,
 	I2: ModelIntView<E> + Mul<IntVal, Output = IntDecision>,
 	I3: ModelIntView<E>,
 	IntDecision: ModelIntView<E>,
+	OM: OverflowMode,
 {
 	fn simplify(
 		&mut self,
@@ -117,12 +133,13 @@ where
 	}
 }
 
-impl<const OVERFLOW: bool, E, I1, I2, I3> Propagator<E> for IntTimesBounds<OVERFLOW, I1, I2, I3>
+impl<OM, E, I1, I2, I3> Propagator<E> for IntTimesBounds<OM, I1, I2, I3>
 where
 	E: ReasoningEngine,
 	I1: SolverIntView<E>,
 	I2: SolverIntView<E>,
 	I3: SolverIntView<E>,
+	OM: OverflowMode,
 {
 	fn initialize(&mut self, ctx: &mut <E as ReasoningEngine>::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Highest);

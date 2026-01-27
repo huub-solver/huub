@@ -3,7 +3,7 @@
 //! constraint enforce a condition on the sum of (linear transformations of)
 //! integer decision variables.
 
-use std::{num::NonZero, ops::AddAssign};
+use std::{any::TypeId, num::NonZero, ops::AddAssign};
 
 use itertools::{Either, Itertools};
 use pindakaas::{
@@ -23,16 +23,23 @@ use crate::{
 		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, ReasonBuilder,
 		SimplificationStatus, SolverBoolView, SolverIntView,
 	},
-	helpers::opt_field::OptField,
+	helpers::{
+		overflow::{OverflowImpossible, OverflowMode, OverflowPossible},
+		true_type::True,
+	},
 	reformulate::ReformulationError,
 	solver::{
-		BoolView, BoolViewInner, IntView, IntViewInner,
+		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner,
 		activation_list::{IntEvent, IntPropCond},
 		queue::PriorityLevel,
 		trail::TrailedInt,
 	},
 	views::LinearBoolView,
 };
+
+/// A type with double the amount of bits of [`IntVal`], allowing for large
+/// intermediate value computation.
+type DoubleIntVal = i128;
 
 /// Representation of an integer equality constraint that cannot be unified.
 ///
@@ -49,63 +56,58 @@ pub(crate) struct IntEq {
 /// This constraint enforces that a sum of (linear transformations of) integer
 /// decision variables is less than, equal, or not equal to a constant value, or
 /// the implication or reification or whether this is so.
-pub struct IntLinear {
+pub struct IntLinear<OF: OverflowMode> {
 	/// The integer linear terms that are being summed.
 	pub(crate) terms: Vec<IntDecision>,
 	/// The operator that is used to compare the sum to the right-hand side.
 	pub(crate) operator: LinOperator,
 	/// The constant right-hand side value.
-	pub(crate) rhs: IntVal,
+	pub(crate) rhs: OF::Accumulator,
 	/// Boolean decision variable that (half-)reifies the constraint, if any.
 	pub(crate) reif: Option<Reification>,
 }
 
 /// Type alias for the non-reified version of the [`IntLinearLessEqBoundsImpl`]
 /// propagator.
-pub type IntLinearLessEqBounds<IV> = IntLinearLessEqBoundsImpl<0, IV, RawLit>;
+pub type IntLinearLessEqBounds<OV, IV> = IntLinearLessEqBoundsImpl<OV, IV, True>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds consistent propagator for the `int_lin_le` or `int_lin_le_imp`
 /// constraint.
-///
-/// `R` should be `0` if the propagator is not reified, or `1` if it is. Other
-/// values are invalid.
-pub struct IntLinearLessEqBoundsImpl<const R: usize, IV, BV> {
+pub struct IntLinearLessEqBoundsImpl<OV: OverflowMode, IV, BV> {
 	/// Variables that are being summed
 	terms: Vec<IV>,
 	/// Maximum value of the sum can take
-	max: IntVal,
+	max: OV::Accumulator,
 	/// Reified variable, if any
-	reification: OptField<R, BV>,
+	reification: BV,
 }
 
 /// Type alias for the reified version of the [`IntLinearLessEqBoundsImpl`]
 /// propagator.
-pub type IntLinearLessEqImpBounds<IV, BV> = IntLinearLessEqBoundsImpl<1, IV, BV>;
+pub type IntLinearLessEqImpBounds<OV, IV, BV> = IntLinearLessEqBoundsImpl<OV, IV, BV>;
 
 /// Type alias for the reified version of the [`IntLinearNotEqValueImpl`]
 /// propagator.
-pub type IntLinearNotEqImpValue<IV, BV> = IntLinearNotEqValueImpl<1, IV, BV>;
+pub type IntLinearNotEqImpValue<OF, IV, BV> = IntLinearNotEqValueImpl<OF, IV, BV>;
 
 /// Type alias for the non-reified version of the [`IntLinearNotEqValueImpl`]
 /// propagator.
-pub type IntLinearNotEqValue<IV> = IntLinearNotEqValueImpl<0, IV, RawLit>;
+pub type IntLinearNotEqValue<OF, IV> = IntLinearNotEqValueImpl<OF, IV, True>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Value consistent propagator for the `int_lin_ne` or `int_lin_ne_imp`
 /// constraint.
-///
-/// `R` should be `0` if the propagator is not reified, or `1` if it is. Other
-/// values are invalid.
-pub struct IntLinearNotEqValueImpl<const R: usize, IV, BV> {
+pub struct IntLinearNotEqValueImpl<OF: OverflowMode, IV, BV> {
 	/// Decision variables in the summation
 	terms: Vec<IV>,
-	/// Number of decision variables that have been fixed to a single value
-	num_fixed: TrailedInt,
+	/// Number of decision variables that have been not yet been fixed to a
+	/// single value
+	num_free: TrailedInt,
 	/// The value the summation should not equal
-	violation: IntVal,
+	violation: OF::Accumulator,
 	/// Reified variable, if any
-	reification: OptField<R, BV>,
+	reification: BV,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -151,13 +153,13 @@ where
 	}
 
 	fn to_solver(&self, actions: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let lin = IntLinear {
+		let lin = IntLinear::<OverflowPossible> {
 			terms: vec![self.vars[0], -self.vars[1]],
 			operator: LinOperator::Equal,
 			rhs: 0,
 			reif: None,
 		};
-		<IntLinear as Constraint<E>>::to_solver(&lin, actions)
+		<_ as Constraint<E>>::to_solver(&lin, actions)
 	}
 }
 
@@ -202,7 +204,37 @@ where
 	}
 }
 
-impl IntLinear {
+impl IntLinear<OverflowPossible> {
+	/// Returns whether the given terms that are summed in integer linear
+	/// expressions can overflow.
+	///
+	/// Note that the order of the terms matters. If the terms are reordered,
+	/// then the result of this method may change.
+	pub(crate) fn can_overflow<Ctx, IV>(ctx: &Ctx, terms: &[IV]) -> bool
+	where
+		Ctx: ReasoningContext + ?Sized,
+		IV: IntInspectionActions<Ctx>,
+	{
+		let mut acc_min: IntVal = 0;
+		let mut acc_max: IntVal = 0;
+		for iv in terms {
+			let (lb, ub) = iv.bounds(ctx);
+			if let Some(min) = acc_min.checked_sub(lb) {
+				acc_min = min;
+			} else {
+				return true;
+			}
+			if let Some(max) = acc_max.checked_add(ub) {
+				acc_max = max;
+			} else {
+				return true;
+			}
+		}
+		false
+	}
+}
+
+impl<OF: OverflowMode> IntLinear<OF> {
 	/// Change the integer linear constraint to be implied by the given Boolean
 	/// decision variable.
 	///
@@ -221,22 +253,30 @@ impl IntLinear {
 	}
 
 	/// Internal method to negate the linear constraint.
-	fn negate(self) -> Self {
-		match self.operator {
+	fn negate<Ctx>(self, ctx: &mut Ctx) -> Result<Self, Ctx::Conflict>
+	where
+		Ctx: ReasoningContext + ?Sized,
+		IntDecision: IntPropagationActions<Ctx>,
+	{
+		Ok(match self.operator {
 			LinOperator::Equal => Self {
 				operator: LinOperator::NotEqual,
 				..self
 			},
 			LinOperator::LessEq => Self {
-				terms: self.terms.into_iter().map(|v| -v).collect(),
-				rhs: -self.rhs - 1,
+				terms: self
+					.terms
+					.into_iter()
+					.map(|v| v.bounding_neg(ctx))
+					.try_collect()?,
+				rhs: -self.rhs - 1.into(),
 				..self
 			},
 			LinOperator::NotEqual => Self {
 				operator: LinOperator::Equal,
 				..self
 			},
-		}
+		})
 	}
 
 	/// Change the integer linear constraint to be reified by the given Boolean
@@ -254,14 +294,55 @@ impl IntLinear {
 			..self
 		}
 	}
+
+	/// Try to convert the integer linear constraint into a [`BoolLinear`]
+	/// constraint, where the given terms are the [`IntView`] representations of
+	/// the [`IntDecision`] terms in `self`.
+	///
+	/// This only succeeds if the linear constraint is not implied, all terms
+	/// are [`BoolLinView`]s, and the comparator is not
+	/// [`LinOperator::NotEqual`].
+	fn try_bool_lin(&self, terms: &[IntView]) -> Option<BoolLinear> {
+		if self.reif.is_some() || self.operator == LinOperator::NotEqual {
+			return None;
+		}
+
+		let mut offset = OF::Accumulator::from(0);
+		let terms: Vec<(RawLit, IntVal)> = terms
+			.iter()
+			.map(|&v| {
+				if let IntViewInner::Bool(lin) = v.0 {
+					offset += lin.offset.into();
+					Ok((lin.var, lin.scale.into()))
+				} else {
+					Err(())
+				}
+			})
+			.collect::<Result<_, ()>>()
+			.ok()?;
+		let rhs = (self.rhs - offset).try_into().ok()?;
+
+		let bool_lin = BoolLinExp::from_terms(&terms);
+		let bool_lin = BoolLinear::new(
+			bool_lin,
+			match self.operator {
+				LinOperator::Equal => pindakaas::bool_linear::Comparator::Equal,
+				LinOperator::LessEq => pindakaas::bool_linear::Comparator::LessEq,
+				LinOperator::NotEqual => unreachable!(),
+			},
+			rhs,
+		);
+		Some(bool_lin)
+	}
 }
 
-impl<E> Constraint<E> for IntLinear
+impl<E, OF> Constraint<E> for IntLinear<OF>
 where
 	E: ReasoningEngine,
 	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
 	IntDecision: ModelIntView<E>,
 	BoolDecision: ModelBoolView<E>,
+	OF: OverflowMode,
 {
 	fn simplify(
 		&mut self,
@@ -279,7 +360,7 @@ where
 				}
 				Some(false) => {
 					if matches!(self.reif.unwrap(), Reification::ReifiedBy(_)) {
-						let mut lin = self.clone().negate();
+						let mut lin = self.clone().negate(ctx)?;
 						lin.reif = None;
 						ctx.add_constraint(lin);
 					}
@@ -296,23 +377,38 @@ where
 				None => Either::Right(var),
 			});
 		self.terms = terms;
-		self.rhs -= vals.iter().sum::<IntVal>();
+		self.rhs -= vals.into_iter().map(OF::Accumulator::from).sum();
 
 		// Perform single-term domain changes and any possible unification
 		match *self.terms.as_slice() {
 			[var] if self.reif.is_none() => {
-				match self.operator {
-					LinOperator::Equal => var.set_val(ctx, self.rhs, [])?,
-					LinOperator::LessEq => var.set_upper_bound(ctx, self.rhs, [])?,
-					LinOperator::NotEqual => var.set_not_eq(ctx, self.rhs, [])?,
+				match (self.operator, self.rhs.try_into()) {
+					(LinOperator::Equal, Ok(rhs)) => var.set_val(ctx, rhs, [])?,
+					(LinOperator::Equal, Err(_)) => return Err(ctx.declare_conflict([])),
+					(LinOperator::LessEq, Ok(rhs)) => var.set_upper_bound(ctx, rhs, [])?,
+					(LinOperator::LessEq, Err(_)) if self.rhs < IntVal::MIN.into() => {
+						return Err(ctx.declare_conflict([]));
+					}
+					(LinOperator::LessEq, Err(_)) => {
+						debug_assert!(self.rhs > IntVal::MAX.into());
+					}
+					(LinOperator::NotEqual, Ok(rhs)) => var.set_not_eq(ctx, rhs, [])?,
+					(LinOperator::NotEqual, Err(_)) => {}
 				}
 				return Ok(SimplificationStatus::Subsumed);
 			}
 			[var] => {
-				let lit = match self.operator {
-					LinOperator::Equal => var.eq(self.rhs),
-					LinOperator::LessEq => var.leq(self.rhs),
-					LinOperator::NotEqual => var.ne(self.rhs),
+				let lit = match (self.operator, self.rhs.try_into()) {
+					(LinOperator::Equal, Ok(rhs)) => var.eq(rhs),
+					(LinOperator::Equal, Err(_)) => false.into(),
+					(LinOperator::LessEq, Ok(rhs)) => var.leq(rhs),
+					(LinOperator::LessEq, Err(_)) if self.rhs < IntVal::MIN.into() => false.into(),
+					(LinOperator::LessEq, Err(_)) => {
+						debug_assert!(self.rhs > IntVal::MAX.into());
+						true.into()
+					}
+					(LinOperator::NotEqual, Ok(rhs)) => var.ne(rhs),
+					(LinOperator::NotEqual, Err(_)) => false.into(),
 				};
 				match self.reif.unwrap() {
 					Reification::ImpliedBy(r) => ctx.add_constraint(BoolFormula::Implies(
@@ -324,7 +420,16 @@ where
 				return Ok(SimplificationStatus::Subsumed);
 			}
 			[a, b] if self.operator == LinOperator::Equal && self.reif.is_none() => {
-				(-a).unify(ctx, b - self.rhs)?;
+				match self.rhs.try_into() {
+					Ok(rhs) => {
+						let b = b.bounding_neg(ctx)?.bounding_add(ctx, rhs)?;
+						a.unify(ctx, b)?;
+					}
+					Err(_) => {
+						// TODO: might be incorrect
+						return Err(ctx.declare_conflict([]));
+					}
+				}
 				return Ok(SimplificationStatus::Subsumed);
 			}
 			_ => {}
@@ -334,8 +439,8 @@ where
 		let lb = self.terms.iter().map(|v| v.lower_bound(ctx)).collect_vec();
 		let ub = self.terms.iter().map(|v| v.upper_bound(ctx)).collect_vec();
 
-		let lb_sum: IntVal = lb.iter().sum();
-		let ub_sum: IntVal = ub.iter().sum();
+		let lb_sum: OF::Accumulator = lb.iter().copied().map(OF::Accumulator::from).sum();
+		let ub_sum: OF::Accumulator = ub.iter().copied().map(OF::Accumulator::from).sum();
 
 		// Check if the constraint is already known to be true or false
 		let known_result = match self.operator {
@@ -414,7 +519,8 @@ where
 		let lb_diff = self.rhs - lb_sum;
 		// Propagate the upper bounds of the variables
 		for (i, v) in self.terms.iter().enumerate() {
-			let new_ub = lb_diff + lb[i];
+			let lb_i = lb[i].into();
+			let new_ub = lb_diff + lb_i;
 			let reason = |ctx: &mut E::PropagationCtx<'_>| {
 				self.terms
 					.iter()
@@ -424,12 +530,18 @@ where
 					.collect_vec()
 			};
 			if let Some(Reification::ReifiedBy(r) | Reification::ImpliedBy(r)) = self.reif {
-				if lb[i] > new_ub {
+				if lb_i > new_ub {
 					r.set_val(ctx, false, reason)?;
 					return Ok(SimplificationStatus::Subsumed);
 				}
 			} else {
-				v.set_upper_bound(ctx, new_ub, reason)?;
+				match new_ub.try_into() {
+					Ok(new_ub) => v.set_upper_bound(ctx, new_ub, reason)?,
+					Err(_) if new_ub < IntVal::MIN.into() => return Err(ctx.declare_conflict([])),
+					Err(_) => {
+						debug_assert!(new_ub > IntVal::MAX.into());
+					}
+				}
 			}
 		}
 
@@ -444,7 +556,8 @@ where
 			// value (negated). Used to propagate lower bounds of each variable.
 			let ub_diff = self.rhs - ub_sum;
 			for (i, v) in self.terms.iter().enumerate() {
-				let new_lb = ub_diff + ub[i];
+				let ub_i = ub[i].into();
+				let new_lb = ub_diff + ub_i;
 				let reason = |ctx: &mut E::PropagationCtx<'_>| {
 					self.terms
 						.iter()
@@ -454,13 +567,25 @@ where
 						.collect_vec()
 				};
 				if let Some(Reification::ReifiedBy(r) | Reification::ImpliedBy(r)) = self.reif {
-					if ub[i] < new_lb {
+					if ub_i < new_lb {
 						r.set_val(ctx, false, reason)?;
 						return Ok(SimplificationStatus::Subsumed);
 					}
 				} else {
-					v.set_lower_bound(ctx, new_lb, reason)?;
+					match new_lb.try_into() {
+						Ok(new_lb) => v.set_lower_bound(ctx, new_lb, reason)?,
+						Err(_) if new_lb > IntVal::MAX.into() => {
+							return Err(ctx.declare_conflict([]));
+						}
+						Err(_) => {
+							debug_assert!(new_lb < IntVal::MAX.into());
+						}
+					}
 				}
+
+				// We create a negated view in [`Self::to_solver`], ensure that it is correctly
+				// bounded.
+				let _ = v.bounding_neg(ctx)?;
 			}
 		}
 		Ok(SimplificationStatus::NoFixpoint)
@@ -478,33 +603,7 @@ where
 		let full_reif = matches!(self.reif, Some(ReifiedBy(_)));
 
 		// Detect Pseudo-Boolean constraints, and simplify them if possible.
-		let (terms, operator, rhs) = if r.is_none()
-			&& self.operator != LinOperator::NotEqual
-			&& terms
-				.iter()
-				.all(|v| matches!(v.0, IntViewInner::Bool { .. }))
-		{
-			let mut offset = 0;
-			let bool_terms: Vec<(RawLit, IntVal)> = terms
-				.iter()
-				.map(|&v| {
-					let IntViewInner::Bool(lin) = v.0 else {
-						unreachable!()
-					};
-					offset += lin.offset;
-					(lin.var, lin.scale.into())
-				})
-				.collect();
-			let bool_lin = BoolLinExp::from_terms(&bool_terms);
-			let bool_lin = BoolLinear::new(
-				bool_lin,
-				match self.operator {
-					LinOperator::Equal => pindakaas::bool_linear::Comparator::Equal,
-					LinOperator::LessEq => pindakaas::bool_linear::Comparator::LessEq,
-					LinOperator::NotEqual => unreachable!(),
-				},
-				self.rhs - offset,
-			);
+		let (terms, operator, rhs) = if let Some(bool_lin) = self.try_bool_lin(&terms) {
 			let map_cmp = |cmp| match cmp {
 				pindakaas::bool_linear::Comparator::Equal => LinOperator::Equal,
 				pindakaas::bool_linear::Comparator::LessEq => LinOperator::LessEq,
@@ -536,55 +635,68 @@ where
 					})
 					.collect_vec(),
 				op,
-				lin.rhs(),
+				lin.rhs().into(),
 			)
 		} else {
 			(terms, self.operator, self.rhs)
 		};
 
+		let negate_terms = |terms: &[IntView]| terms.iter().map(|&v| -v).collect_vec();
+
 		match (operator, r) {
 			(LinOperator::Equal, None) => {
 				// coeffs * vars >= c <=> -coeffs * vars <= -c
-				IntLinearLessEqBounds::post(slv, terms.iter().map(|&v| -v), -rhs);
+				IntLinearLessEqBounds::post(slv, negate_terms(&terms), -rhs);
 				// coeffs * vars <= c
 				IntLinearLessEqBounds::post(slv, terms.clone(), rhs);
 			}
 			(LinOperator::Equal, Some(r)) => {
 				if full_reif {
-					IntLinearNotEqImpValue::post(slv, terms.clone(), rhs, !r);
+					IntLinearNotEqImpValue::<_, _, RawLit>::post(slv, terms.clone(), rhs, !r);
 				}
-				IntLinearLessEqImpBounds::post(slv, terms.iter().map(|&v| -v), -rhs, r);
-				IntLinearLessEqImpBounds::post(slv, terms, rhs, r);
+				IntLinearLessEqImpBounds::<_, _, RawLit>::post(slv, negate_terms(&terms), -rhs, r);
+				IntLinearLessEqImpBounds::<_, _, RawLit>::post(slv, terms, rhs, r);
 			}
 			(LinOperator::LessEq, None) => {
 				IntLinearLessEqBounds::post(slv, terms, rhs);
 			}
 			(LinOperator::LessEq, Some(r)) => {
 				if full_reif {
-					IntLinearLessEqImpBounds::post(slv, terms.iter().map(|&v| -v), -(rhs + 1), !r);
+					IntLinearLessEqImpBounds::<_, _, RawLit>::post(
+						slv,
+						negate_terms(&terms),
+						-(rhs + 1.into()),
+						!r,
+					);
 				}
-				IntLinearLessEqImpBounds::post(slv, terms, rhs, r);
+				IntLinearLessEqImpBounds::<_, _, RawLit>::post(slv, terms, rhs, r);
 			}
 			(LinOperator::NotEqual, None) => {
 				IntLinearNotEqValue::post(slv, terms, rhs);
 			}
 			(LinOperator::NotEqual, Some(r)) => {
 				if full_reif {
-					IntLinearLessEqImpBounds::post(slv, terms.clone(), rhs, !r);
-					IntLinearLessEqImpBounds::post(slv, terms.iter().map(|&v| -v), -rhs, !r);
+					IntLinearLessEqImpBounds::<_, _, RawLit>::post(slv, terms.clone(), rhs, !r);
+					IntLinearLessEqImpBounds::<_, _, RawLit>::post(
+						slv,
+						negate_terms(&terms),
+						-rhs,
+						!r,
+					);
 				}
-				IntLinearNotEqImpValue::post(slv, terms, rhs, r);
+				IntLinearNotEqImpValue::<_, _, RawLit>::post(slv, terms, rhs, r);
 			}
 		}
 		Ok(())
 	}
 }
 
-impl<E> Propagator<E> for IntLinear
+impl<E, OF> Propagator<E> for IntLinear<OF>
 where
 	E: ReasoningEngine,
 	IntDecision: SolverIntView<E>,
 	BoolDecision: SolverBoolView<E>,
+	OF: OverflowMode,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		for &iv in &self.terms {
@@ -600,19 +712,23 @@ where
 	}
 }
 
-impl IntLinearLessEqBounds<IntView> {
+impl IntLinearLessEqBounds<OverflowPossible, IntView> {
 	/// Create a new [`IntLinearLessEqBounds`] propagator and post it in the
 	/// solver.
-	pub fn post<E>(solver: &mut E, vars: impl IntoIterator<Item = IntView>, mut max: IntVal)
-	where
+	pub fn post<E>(
+		solver: &mut E,
+		vars: impl IntoIterator<Item = IntView>,
+		max: impl Into<DoubleIntVal>,
+	) where
 		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
+		let mut max = max.into();
 		let vars: Vec<IntView> = vars
 			.into_iter()
 			.filter(|v| {
 				if let Some(c) = v.val(solver) {
-					max -= c;
+					max -= DoubleIntVal::from(c);
 					false
 				} else {
 					true
@@ -623,16 +739,18 @@ impl IntLinearLessEqBounds<IntView> {
 		*solver += Box::new(Self {
 			terms: vars.clone(),
 			max,
-			reification: Default::default(),
+			reification: True,
 		});
 	}
 }
 
-impl<const R: usize, BV, E, IV> Propagator<E> for IntLinearLessEqBoundsImpl<R, IV, BV>
+impl<OF, BV, E, IV> Propagator<E> for IntLinearLessEqBoundsImpl<OF, IV, BV>
 where
+	OF: OverflowMode,
 	E: ReasoningEngine,
 	BV: SolverBoolView<E>,
 	IV: SolverIntView<E>,
+	E::Atom: SolverBoolView<E>,
 {
 	fn explain(
 		&mut self,
@@ -641,21 +759,20 @@ where
 		data: u64,
 	) -> Conjunction<E::Atom> {
 		let i = data as usize;
-		let mut var_lits: Vec<_> = self
-			.terms
-			.iter()
-			.enumerate()
-			.filter_map(|(j, v)| {
-				if j == i {
-					return None;
-				}
-				Some(v.lower_bound_lit(ctx))
-			})
-			.collect();
-		if let Some(r) = self.reification.get() {
-			var_lits.push(r.clone().into());
+		let const_true: bool = TypeId::of::<BV>() == TypeId::of::<True>();
+		debug_assert!(i <= self.terms.len());
+		debug_assert!(!const_true || i < self.terms.len());
+
+		let mut conj = Vec::with_capacity(self.terms.len() - const_true as usize);
+		for (j, t) in self.terms.iter().enumerate() {
+			if j != i {
+				conj.push(t.lower_bound_lit(ctx));
+			}
 		}
-		var_lits
+		if !const_true && i < self.terms.len() {
+			conj.push(self.reification.clone().into());
+		}
+		conj
 	}
 
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
@@ -663,73 +780,80 @@ where
 		for v in self.terms.iter() {
 			v.enqueue_when(ctx, IntPropCond::LowerBound);
 		}
-		if let Some(r) = self.reification.get() {
-			r.enqueue_when_fixed(ctx);
-		}
+		self.reification.enqueue_when_fixed(ctx);
 	}
 
 	// propagation rule: x[i] <= rhs - sum_{j != i} x[j].lower_bound
 	#[tracing::instrument(name = "int_lin_le", level = "trace", skip(self, ctx))]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// If the reified variable is false, skip propagation
-		if let Some(r) = self.reification.get()
-			&& !r.val(ctx).unwrap_or(true)
-		{
+		let r_val = self.reification.val(ctx);
+		if r_val == Some(false) {
 			return Ok(());
 		}
 
-		// get the difference between the right-hand-side value and the sum of variable
-		// lower bounds
-		let sum = self
+		// Compute the sum of the lower bounds of all terms
+		let lb_sum = self
 			.terms
 			.iter()
-			.map(|v| v.lower_bound(ctx))
-			.fold(self.max, |sum, val| sum - val);
+			.map(|v| OF::Accumulator::from(v.lower_bound(ctx)))
+			.sum();
 
-		// propagate the reified variable if the sum of lower bounds is greater than the
-		// right-hand-side value
-		if let Some(r) = self.reification.get() {
-			if sum < 0 {
-				r.set_val(ctx, false, |ctx: &mut E::PropagationCtx<'_>| {
-					self.terms
-						.iter()
-						.map(|v| v.lower_bound_lit(ctx))
-						.collect_vec()
-				})?;
+		if TypeId::of::<BV>() != TypeId::of::<True>() {
+			// Propagate the reified variable if the sum of lower bounds is greater than the
+			// right-hand-side value
+			if lb_sum > self.max {
+				self.reification
+					.set_val(ctx, false, |ctx: &mut E::PropagationCtx<'_>| {
+						self.terms
+							.iter()
+							.map(|v| v.lower_bound_lit(ctx))
+							.collect_vec()
+					})?;
 			}
-			// skip the remaining propagation if the reified variable is not assigned to
-			// true
-			if !r.val(ctx).unwrap_or(false) {
-				return Ok(());
-			}
+		}
+
+		// skip the remaining propagation if the reified variable is not assigned to
+		// true
+		if r_val != Some(true) {
+			return Ok(());
 		}
 
 		// propagate the upper bound of the variables
 		for (j, v) in self.terms.iter().enumerate() {
 			let reason = ctx.deferred_reason(j as u64);
-			let ub = sum + v.lower_bound(ctx);
-			v.set_upper_bound(ctx, ub, reason)?;
+			let ub = (self.max - lb_sum) + v.lower_bound(ctx).into();
+			match ub.try_into() {
+				Ok(ub) => v.set_upper_bound(ctx, ub, reason)?,
+				Err(_) if ub < IntVal::MIN.into() => v
+					.lit(ctx, IntLitMeaning::Less(IntVal::MIN))
+					.set(ctx, reason)?,
+				Err(_) => {
+					debug_assert!(ub > v.upper_bound(ctx).into());
+				}
+			}
 		}
 		Ok(())
 	}
 }
 
-impl IntLinearLessEqImpBounds<IntView, RawLit> {
+impl IntLinearLessEqImpBounds<OverflowPossible, IntView, RawLit> {
 	/// Create a new [`IntLinearLessEqImpBounds`] propagator and post it in the
 	/// solver.
 	pub fn post<E>(
 		solver: &mut E,
 		vars: impl IntoIterator<Item = IntView>,
-		mut max: IntVal,
+		max: impl Into<DoubleIntVal>,
 		reification: BoolView,
 	) where
 		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
+		let mut max = max.into();
 		let reification = match reification.0 {
 			BoolViewInner::Lit(r) => r,
 			BoolViewInner::Const(true) => {
-				return IntLinearLessEqBounds::<IntView>::post(solver, vars, max);
+				return IntLinearLessEqBounds::post(solver, vars, max);
 			}
 			BoolViewInner::Const(false) => return,
 		};
@@ -737,7 +861,7 @@ impl IntLinearLessEqImpBounds<IntView, RawLit> {
 			.into_iter()
 			.filter(|v| {
 				if let Some(c) = v.val(solver) {
-					max -= c;
+					max -= DoubleIntVal::from(c);
 					false
 				} else {
 					true
@@ -748,93 +872,126 @@ impl IntLinearLessEqImpBounds<IntView, RawLit> {
 		*solver += Box::new(Self {
 			terms: vars.clone(),
 			max,
-			reification: OptField::new(reification),
+			reification,
 		});
 	}
 }
 
-impl IntLinearNotEqImpValue<IntView, RawLit> {
+impl IntLinearNotEqImpValue<OverflowPossible, IntView, RawLit> {
 	/// Create a new [`IntLinearNotEqImpValue`] propagator and post it in the
 	/// solver.
 	pub fn post<E>(
 		solver: &mut E,
 		vars: impl IntoIterator<Item = IntView>,
-		mut violation: IntVal,
+		violation: impl Into<DoubleIntVal>,
 		reification: BoolView,
 	) where
 		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
 		IntView: IntInspectionActions<E>,
+		BoolView: BoolInspectionActions<E>,
 	{
-		let reification = match reification.0 {
-			BoolViewInner::Lit(r) => r,
-			BoolViewInner::Const(true) => {
-				return IntLinearNotEqValue::post(solver, vars, violation);
+		let mut violation = violation.into();
+		let reification = match reification.val(solver) {
+			None => {
+				let BoolViewInner::Lit(r) = reification.0 else {
+					unreachable!()
+				};
+				r
 			}
-			BoolViewInner::Const(false) => return,
+			Some(true) => {
+				return IntLinearNotEqValue::<OverflowPossible, _>::post(solver, vars, violation);
+			}
+			Some(false) => return,
 		};
 
 		let vars: Vec<IntView> = vars
 			.into_iter()
 			.filter(|&v| {
 				if let Some(c) = v.val(solver) {
-					violation -= c;
+					violation -= DoubleIntVal::from(c);
 					false
 				} else {
 					true
 				}
 			})
 			.collect();
-		let num_fixed = solver.new_trailed_int(0);
+		let num_fixed = solver.new_trailed_int(vars.len() as IntVal + 1);
 
-		*solver += Box::new(Self {
-			terms: vars.clone(),
-			violation,
-			num_fixed,
-			reification: OptField::new(reification),
-		});
+		if IntLinear::can_overflow(solver, &vars) || IntVal::try_from(violation).is_err() {
+			*solver += Box::new(IntLinearNotEqImpValue::<OverflowPossible, _, _> {
+				terms: vars.clone(),
+				violation,
+				num_free: num_fixed,
+				reification,
+			});
+		} else {
+			*solver += Box::new(IntLinearNotEqImpValue::<OverflowImpossible, _, _> {
+				terms: vars.clone(),
+				violation: violation as IntVal,
+				num_free: num_fixed,
+				reification,
+			});
+		}
 	}
 }
 
-impl IntLinearNotEqValue<IntView> {
+impl IntLinearNotEqValue<OverflowPossible, IntView> {
 	/// Create a new [`IntLinearNotEqImpValue`] propagator and post it in the
 	/// solver.
-	pub fn post<E>(solver: &mut E, vars: impl IntoIterator<Item = IntView>, mut violation: IntVal)
-	where
+	pub fn post<E>(
+		solver: &mut E,
+		vars: impl IntoIterator<Item = IntView>,
+		violation: impl Into<DoubleIntVal>,
+	) where
 		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
 		IntView: IntInspectionActions<E>,
 	{
+		let mut violation = violation.into();
 		let vars: Vec<IntView> = vars
 			.into_iter()
 			.filter(|&v| {
 				if let Some(c) = v.val(solver) {
-					violation -= c;
+					violation -= DoubleIntVal::from(c);
 					false
 				} else {
 					true
 				}
 			})
 			.collect();
-		let num_fixed = solver.new_trailed_int(0);
+		let num_fixed = solver.new_trailed_int(vars.len() as IntVal);
 
-		*solver += Box::new(Self {
-			terms: vars.clone(),
-			violation,
-			num_fixed,
-			reification: Default::default(),
-		});
+		if IntLinear::can_overflow(solver, &vars) || IntVal::try_from(violation).is_err() {
+			*solver += Box::new(IntLinearNotEqValue::<OverflowPossible, _> {
+				terms: vars.clone(),
+				violation,
+				num_free: num_fixed,
+				reification: True,
+			});
+		} else {
+			*solver += Box::new(IntLinearNotEqValue::<OverflowImpossible, _> {
+				terms: vars.clone(),
+				violation: violation as IntVal,
+				num_free: num_fixed,
+				reification: True,
+			});
+		}
 	}
 }
 
-impl<const R: usize, IV, BV> IntLinearNotEqValueImpl<R, IV, BV> {
+impl<OF, IV, BV> IntLinearNotEqValueImpl<OF, IV, BV>
+where
+	OF: OverflowMode,
+{
 	/// Increment the number of decision variables that are fixed, returning
 	/// whether the propagator should now be enqueued.
-	fn increment_num_fixed<Ctx>(&self, ctx: &mut Ctx) -> bool
+	fn decrement_num_free<Ctx>(&self, ctx: &mut Ctx) -> bool
 	where
 		Ctx: TrailingActions,
 	{
-		let num_fixed = ctx.trailed_int(self.num_fixed) + 1;
-		ctx.set_trailed_int(self.num_fixed, num_fixed);
-		num_fixed == (self.terms.len() + R - 1) as i64
+		let num_free = ctx.trailed_int(self.num_free) - 1;
+		ctx.set_trailed_int(self.num_free, num_free);
+		debug_assert!(num_free >= 0);
+		num_free <= 1
 	}
 
 	/// Helper function to construct the reason for propagation given the index
@@ -844,7 +1001,7 @@ impl<const R: usize, IV, BV> IntLinearNotEqValueImpl<R, IV, BV> {
 	where
 		Ctx: ReasoningContext + ?Sized,
 		IV: IntDecisionActions<Ctx>,
-		BV: Clone + Into<Ctx::Atom>,
+		BV: Clone + Into<Ctx::Atom> + 'static,
 	{
 		move |ctx: &mut Ctx| {
 			let mut conj: Vec<_> = self
@@ -859,29 +1016,28 @@ impl<const R: usize, IV, BV> IntLinearNotEqValueImpl<R, IV, BV> {
 					}
 				})
 				.collect();
-			if let Some(r) = self.reification.get()
-				&& data != self.terms.len()
-			{
-				conj.push(r.clone().into());
+			if TypeId::of::<BV>() != TypeId::of::<True>() && data != self.terms.len() {
+				conj.push(self.reification.clone().into());
 			}
 			conj
 		}
 	}
 }
 
-impl<const R: usize, BV, IV, E> Propagator<E> for IntLinearNotEqValueImpl<R, IV, BV>
+impl<OF, BV, IV, E> Propagator<E> for IntLinearNotEqValueImpl<OF, IV, BV>
 where
+	OF: OverflowMode,
 	E: ReasoningEngine,
 	E::Atom: SolverBoolView<E> + From<bool>,
 	IV: SolverIntView<E>,
 	BV: SolverBoolView<E>,
 {
 	fn advise_of_bool_change(&mut self, ctx: &mut E::NotificationCtx<'_>, _data: u64) -> bool {
-		debug_assert!(self.reification.get().is_some());
+		debug_assert_ne!(TypeId::of::<BV>(), TypeId::of::<True>());
 		debug_assert_eq!(_data, self.terms.len() as u64);
-		debug_assert!(self.reification.get().unwrap().val(ctx).is_some());
+		debug_assert!(self.reification.val(ctx).is_some());
 
-		self.increment_num_fixed(ctx)
+		self.decrement_num_free(ctx)
 	}
 
 	fn advise_of_int_change(
@@ -892,34 +1048,30 @@ where
 	) -> bool {
 		debug_assert!(self.terms[_data as usize].val(ctx).is_some());
 		debug_assert_eq!(_event, IntEvent::Fixed);
-		self.increment_num_fixed(ctx)
+		self.decrement_num_free(ctx)
 	}
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::High);
 		for (i, v) in self.terms.iter().enumerate() {
 			v.advise_when(ctx, IntPropCond::Fixed, i as u64);
 		}
-		if let Some(r) = self.reification.get() {
-			r.advise_when_fixed(ctx, self.terms.len() as u64);
-		}
+		self.reification
+			.advise_when_fixed(ctx, self.terms.len() as u64);
 	}
 
 	#[tracing::instrument(name = "int_lin_ne", level = "trace", skip(self, ctx))]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
-		let (r, r_fixed): (E::Atom, _) = if let Some(r) = self.reification.get() {
-			match r.val(ctx) {
-				Some(false) => return Ok(()),
-				Some(true) => (r.clone().into(), true),
-				None => (r.clone().into(), false),
-			}
-		} else {
-			(true.into(), true)
+		let r_fixed = match self.reification.val(ctx) {
+			Some(false) => return Ok(()),
+			Some(true) => true,
+			None => false,
 		};
-		let mut sum = 0;
+
+		let mut sum = OF::Accumulator::from(0);
 		let mut unfixed = None;
 		for (i, v) in self.terms.iter().enumerate() {
 			if let Some(val) = v.val(ctx) {
-				sum += val;
+				sum += val.into();
 			} else if unfixed.is_some() {
 				debug_assert!(false, "propagator shouldn't have been scheduled");
 				return Ok(());
@@ -933,9 +1085,13 @@ where
 				return Ok(());
 			}
 			let val = self.violation - sum;
-			v.set_not_eq(ctx, val, self.reason(i))
+			if let Ok(val) = val.try_into() {
+				v.set_not_eq(ctx, val, self.reason(i))?;
+			}
+			Ok(())
 		} else if sum == self.violation {
-			r.set_val(ctx, false, self.reason(self.terms.len()))
+			self.reification
+				.set_val(ctx, false, self.reason(self.terms.len()))
 		} else {
 			Ok(())
 		}
@@ -951,14 +1107,19 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		BoolDecision, Model,
-		constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
+		BoolDecision, IntVal, Model,
+		constraints::int_linear::{DoubleIntVal, IntLinearLessEqBounds, IntLinearNotEqValue},
 		reformulate::InitConfig,
 		solver::{
 			Solver,
 			int_var::{EncodingType, IntVar},
 		},
 	};
+
+	#[test]
+	fn double_int_val() {
+		assert_eq!(size_of::<DoubleIntVal>(), 2 * size_of::<IntVal>());
+	}
 
 	#[test]
 	fn test_constraint_rewriting() {

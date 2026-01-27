@@ -18,7 +18,6 @@ use rustc_hash::FxHashMap;
 use crate::{
 	IntSetVal, IntVal, Solver,
 	actions::{BoolInspectionActions, TrailingActions},
-	helpers::opt_field::OptField,
 	solver::{BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, trail::TrailedInt},
 	views::{LinearBoolView, LinearView},
 };
@@ -57,7 +56,7 @@ struct DomainLocation<'a, const OFFSET: usize> {
 	/// Tightest value for the greater-than or equal-to literal
 	greater_eq_val: IntVal,
 	/// Offset of the literal in the variable range.
-	offset: OptField<OFFSET, usize>,
+	offset: [usize; OFFSET],
 	/// Iterator in the domain that point to the range in which the value is
 	/// located.
 	range_iter: RangeIter<'a>,
@@ -447,10 +446,7 @@ impl IntVar {
 		match &self.order_encoding {
 			OrderStorage::Eager { storage, .. } => {
 				let DomainLocation { offset, .. } = OrderStorage::resolve_val::<1>(&self.domain, v);
-				(
-					BoolView(BoolViewInner::Lit(!storage.index(*offset.as_ref()))),
-					v,
-				)
+				(BoolView(BoolViewInner::Lit(!storage.index(offset[0]))), v)
 			}
 			OrderStorage::Lazy(storage) => {
 				let mut ret = (BoolView(BoolViewInner::Const(true)), v);
@@ -499,7 +495,7 @@ impl IntVar {
 		match &self.order_encoding {
 			OrderStorage::Eager { storage, .. } => {
 				let DomainLocation { offset, .. } = OrderStorage::resolve_val::<1>(&self.domain, v);
-				let bv = BoolView(BoolViewInner::Lit(storage.index(*offset.as_ref()).into()));
+				let bv = BoolView(BoolViewInner::Lit(storage.index(offset[0]).into()));
 				(bv, v)
 			}
 			OrderStorage::Lazy(storage) => {
@@ -698,7 +694,7 @@ impl IntVar {
 				} else {
 					let DomainLocation { offset, .. } =
 						OrderStorage::resolve_val::<1>(&self.domain, lb);
-					BoolViewInner::Lit(!storage.index(*offset.as_ref()))
+					BoolViewInner::Lit(!storage.index(offset[0]))
 				})
 			}
 			OrderStorage::Lazy(storage) => {
@@ -980,7 +976,7 @@ impl IntVar {
 				} else {
 					let DomainLocation { offset, .. } =
 						OrderStorage::resolve_val::<1>(&self.domain, ub + 1);
-					BoolViewInner::Lit(storage.index(*offset.as_ref()).into())
+					BoolViewInner::Lit(storage.index(offset[0]).into())
 				})
 			}
 			OrderStorage::Lazy(storage) => {
@@ -1266,7 +1262,7 @@ impl OrderStorage {
 					offset,
 					..
 				} = Self::resolve_val::<1>(domain, val);
-				let entry = OrderEntry::Eager(storage, *offset.as_ref());
+				let entry = OrderEntry::Eager(storage, offset[0]);
 				(entry, less_val, val)
 			}
 			OrderStorage::Lazy(storage) => {
@@ -1330,7 +1326,7 @@ impl OrderStorage {
 					offset,
 					..
 				} = Self::resolve_val::<1>(domain, val);
-				Some((storage.index(*offset.as_ref()), less_val, val))
+				Some((storage.index(offset[0]), less_val, val))
 			}
 			OrderStorage::Lazy(storage) => {
 				let DomainLocation {
@@ -1362,7 +1358,7 @@ impl OrderStorage {
 		domain: &RangeList<IntVal>,
 		val: IntVal,
 	) -> DomainLocation<'_, OFFSET> {
-		let mut offset = -1; // -1 to account for the lower bound
+		let mut offset = if OFFSET >= 1 { -1 } else { 0 }; // -1 to account for the lower bound
 		let mut it = domain.iter().peekable();
 		let mut last_val = IntVal::MIN;
 		loop {
@@ -1371,7 +1367,7 @@ impl OrderStorage {
 				return DomainLocation {
 					less_val: last_val + 1,
 					greater_eq_val: *r.start(),
-					offset: OptField::with_value(if OFFSET >= 1 { offset as usize } else { 0 }),
+					offset: [offset as usize; OFFSET],
 					range_iter: it,
 				};
 			} else if val <= *r.end() {
@@ -1381,7 +1377,7 @@ impl OrderStorage {
 				return DomainLocation {
 					less_val: if val == *r.start() { last_val + 1 } else { val },
 					greater_eq_val: val,
-					offset: OptField::with_value(if OFFSET >= 1 { offset as usize } else { 0 }),
+					offset: [offset as usize; OFFSET],
 					range_iter: it,
 				};
 			} else if OFFSET >= 1 {

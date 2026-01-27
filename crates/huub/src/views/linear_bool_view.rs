@@ -231,7 +231,7 @@ where
 		let atom: Ctx::Atom = self.var.clone().into();
 		if atom == lit {
 			Some(self.transform_meaning(IntLitMeaning::Eq(1)))
-		} else if !atom == lit {
+		} else if atom == !lit {
 			Some(self.transform_meaning(IntLitMeaning::Eq(0)))
 		} else {
 			None
@@ -257,7 +257,7 @@ where
 					self.var.clone().into()
 				}
 				IntLitMeaning::Eq(0) | IntLitMeaning::NotEq(1) | IntLitMeaning::Less(1) => {
-					(!self.var.clone()).into()
+					!Ctx::Atom::from(self.var.clone())
 				}
 				IntLitMeaning::Eq(_) => false.into(),
 				IntLitMeaning::NotEq(_) => true.into(),
@@ -276,7 +276,7 @@ where
 
 	fn upper_bound_lit(&self, ctx: &Ctx) -> Ctx::Atom {
 		if self.var.val(ctx) == Some(false) {
-			(!self.var.clone()).into()
+			!Ctx::Atom::from(self.var.clone())
 		} else {
 			true.into()
 		}
@@ -434,7 +434,10 @@ where
 	}
 }
 
-impl<Var: BoolOperations> Mul<NonZero<IntVal>> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
+impl<Var> Mul<NonZero<IntVal>> for LinearBoolView<NonZero<IntVal>, IntVal, Var>
+where
+	Var: BoolOperations + Not<Output = Var>,
+{
 	type Output = Self;
 
 	fn mul(mut self, rhs: NonZero<IntVal>) -> Self::Output {
@@ -443,8 +446,9 @@ impl<Var: BoolOperations> Mul<NonZero<IntVal>> for LinearBoolView<NonZero<IntVal
 	}
 }
 
-impl<Var: BoolOperations> MulAssign<NonZero<IntVal>>
-	for LinearBoolView<NonZero<IntVal>, IntVal, Var>
+impl<Var> MulAssign<NonZero<IntVal>> for LinearBoolView<NonZero<IntVal>, IntVal, Var>
+where
+	Var: BoolOperations + Not<Output = Var>,
 {
 	fn mul_assign(&mut self, rhs: NonZero<IntVal>) {
 		self.scale = NonZero::new(self.scale.get() * rhs.get()).unwrap();
@@ -457,7 +461,10 @@ impl<Var: BoolOperations> MulAssign<NonZero<IntVal>>
 	}
 }
 
-impl<Var: BoolOperations> Neg for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
+impl<Var> Neg for LinearBoolView<NonZero<IntVal>, IntVal, Var>
+where
+	Var: BoolOperations + Not<Output = Var>,
+{
 	type Output = Self;
 
 	fn neg(self) -> Self::Output {

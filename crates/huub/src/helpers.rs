@@ -2,7 +2,9 @@
 //! multiple places in the library and are not exposed to the user.
 
 pub(crate) mod matrix;
-pub(crate) mod opt_field;
+pub mod overflow;
+mod private;
+pub mod true_type;
 
 use std::num::NonZero;
 

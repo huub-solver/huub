@@ -78,6 +78,7 @@ pub struct Engine {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+/// Statistical information about the execution of the propagation engine.
 pub(crate) struct EngineStatistics {
 	/// Number of conflicts encountered
 	pub(crate) conflicts: u64,

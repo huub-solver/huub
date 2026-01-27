@@ -891,8 +891,10 @@ where
 		match lit {
 			Literal::Identifier(ident) => {
 				if let Some(var) = self.fzn.variables.get(ident) {
-					if var.ty == Type::Bool && var.value.is_some() {
-						self.par_bool(var.value.as_ref().unwrap())
+					if var.ty == Type::Bool
+						&& let Some(ref value) = var.value
+					{
+						self.par_bool(value)
 					} else {
 						Err(FlatZincError::InvalidArgumentType {
 							expected: "par bool",
@@ -915,8 +917,10 @@ where
 		match lit {
 			Literal::Identifier(ident) => {
 				if let Some(var) = self.fzn.variables.get(ident) {
-					if var.ty == Type::Int && var.value.is_some() {
-						self.par_int(var.value.as_ref().unwrap())
+					if var.ty == Type::Int
+						&& let Some(ref value) = var.value
+					{
+						self.par_int(value)
 					} else {
 						Err(FlatZincError::InvalidArgumentType {
 							expected: "par int",
@@ -940,8 +944,10 @@ where
 		match lit {
 			Literal::Identifier(ident) => {
 				if let Some(var) = self.fzn.variables.get(ident) {
-					if var.ty == Type::IntSet && var.value.is_some() {
-						self.par_set(var.value.as_ref().unwrap())
+					if var.ty == Type::IntSet
+						&& let Some(ref value) = var.value
+					{
+						self.par_set(value)
 					} else {
 						Err(FlatZincError::InvalidArgumentType {
 							expected: "par set",
@@ -1009,9 +1015,12 @@ where
 							.map(|l| self.par_bool(l))
 							.try_collect()?;
 						let idx = self.arg_int(idx)?;
+						let idx = idx
+							.bounding_sub(&mut self.prb, 1)
+							.map_err(ReformulationError::from)?;
 						let val = self.arg_bool(val)?;
 
-						array_element(&mut self.prb, arr, idx - 1, val);
+						array_element(&mut self.prb, arr, idx, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_bool_element",
@@ -1046,9 +1055,12 @@ where
 							.map(|l| self.lit_bool(l))
 							.try_collect()?;
 						let idx = self.arg_int(idx)?;
+						let idx = idx
+							.bounding_sub(&mut self.prb, 1)
+							.map_err(ReformulationError::from)?;
 						let val = self.arg_bool(val)?;
 
-						array_element(&mut self.prb, arr, idx - 1, val);
+						array_element(&mut self.prb, arr, idx, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_var_bool_element",
@@ -1065,9 +1077,12 @@ where
 							.map(|l| self.lit_int(l))
 							.try_collect()?;
 						let idx = self.arg_int(idx)?;
+						let idx = idx
+							.bounding_sub(&mut self.prb, 1)
+							.map_err(ReformulationError::from)?;
 						let val = self.arg_int(val)?;
 
-						array_element(&mut self.prb, arr, idx - 1, val);
+						array_element(&mut self.prb, arr, idx, val);
 					} else {
 						return Err(FlatZincError::InvalidNumArgs {
 							name: "array_var_int_element",

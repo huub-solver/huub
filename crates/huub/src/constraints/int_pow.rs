@@ -2,7 +2,7 @@
 //! that the result of exponentiation of two integer variables is equal to a
 //! third integer variable.
 
-use std::ops::AddAssign;
+use std::{marker::PhantomData, ops::AddAssign};
 
 use itertools::{Itertools, MinMaxResult};
 use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Unsatisfiable};
@@ -17,6 +17,7 @@ use crate::{
 		BoxedPropagator, CachedReason, Constraint, ModelIntView, Propagator, SimplificationStatus,
 		SolverIntView,
 	},
+	helpers::overflow::{OverflowImpossible, OverflowMode, OverflowPossible},
 	reformulate::ReformulationError,
 	solver::{
 		BoolView, IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel,
@@ -36,13 +37,15 @@ use crate::{
 ///
 /// The OVERFLOW parameter determines whether the propagator will expect
 /// possible integer overflows.
-pub struct IntPowBounds<const OVERFLOW: bool, I1, I2, I3> {
+pub struct IntPowBounds<OM: OverflowMode, I1, I2, I3> {
 	/// The base in the exponentiation
 	pub(crate) base: I1,
 	/// The exponent in the exponentiation
 	pub(crate) exponent: I2,
 	/// The result of exponentiation
 	pub(crate) result: I3,
+	/// Phantom data for the overflow mode
+	pub(crate) overflow_mode: PhantomData<OM>,
 }
 
 /// Calculate the power of a base to an exponent according to the rules of
@@ -98,7 +101,7 @@ fn overflowing_pow(base: IntVal, exponent: IntVal) -> (IntVal, bool) {
 	(result, false)
 }
 
-impl<I1, I2, I3> IntPowBounds<true, I1, I2, I3> {
+impl<I1, I2, I3> IntPowBounds<OverflowPossible, I1, I2, I3> {
 	/// Returns whether given the bounds of the base and exponent, the result
 	/// can overflow.
 	///
@@ -163,27 +166,32 @@ impl<I1, I2, I3> IntPowBounds<true, I1, I2, I3> {
 		}
 
 		if Self::can_overflow(solver, &base, &exponent) {
-			*solver += Box::new(IntPowBounds::<true, _, _, _> {
+			*solver += Box::new(IntPowBounds::<OverflowPossible, _, _, _> {
 				base,
 				exponent,
 				result,
+				overflow_mode: PhantomData,
 			});
 		} else {
-			*solver += Box::new(IntPowBounds::<false, _, _, _> {
+			*solver += Box::new(IntPowBounds::<OverflowImpossible, _, _, _> {
 				base,
 				exponent,
 				result,
+				overflow_mode: PhantomData,
 			});
 		}
 		Ok(())
 	}
 }
 
-impl<const OVERFLOW: bool, I1, I2, I3> IntPowBounds<OVERFLOW, I1, I2, I3> {
+impl<OM, I1, I2, I3> IntPowBounds<OM, I1, I2, I3>
+where
+	OM: OverflowMode,
+{
 	/// Helper function that functions as [`pow`], but uses [`overflowing_pow`]
 	/// if `OVERFLOW` is `true`.
 	fn pow(base: IntVal, exponent: IntVal) -> IntVal {
-		if OVERFLOW {
+		if OM::HANDLE_OVERFLOW {
 			overflowing_pow(base, exponent).0
 		} else {
 			pow(base, exponent)
@@ -410,12 +418,13 @@ impl<const OVERFLOW: bool, I1, I2, I3> IntPowBounds<OVERFLOW, I1, I2, I3> {
 	}
 }
 
-impl<const OVERFLOW: bool, E, I1, I2, I3> Constraint<E> for IntPowBounds<OVERFLOW, I1, I2, I3>
+impl<OM, E, I1, I2, I3> Constraint<E> for IntPowBounds<OM, I1, I2, I3>
 where
 	E: ReasoningEngine,
 	I1: ModelIntView<E>,
 	I2: ModelIntView<E>,
 	I3: ModelIntView<E>,
+	OM: OverflowMode,
 {
 	fn simplify(
 		&mut self,
@@ -451,17 +460,18 @@ where
 		let base = slv.solver_int(self.base.clone().into());
 		let exponent = slv.solver_int(self.exponent.clone().into());
 		let result = slv.solver_int(self.result.clone().into());
-		IntPowBounds::<true, _, _, _>::post(slv, base, exponent, result).unwrap();
+		IntPowBounds::post(slv, base, exponent, result).unwrap();
 		Ok(())
 	}
 }
 
-impl<const OVERFLOW: bool, E, I1, I2, I3> Propagator<E> for IntPowBounds<OVERFLOW, I1, I2, I3>
+impl<OM, E, I1, I2, I3> Propagator<E> for IntPowBounds<OM, I1, I2, I3>
 where
 	E: ReasoningEngine,
 	I1: SolverIntView<E>,
 	I2: SolverIntView<E>,
 	I3: SolverIntView<E>,
+	OM: OverflowMode,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Highest);
@@ -481,7 +491,7 @@ where
 		// overflow, then the `base` and `exp` should be disallowed, but
 		// because of the internal saturation used, it will instead allow `IntVal::MAX`
 		// or `IntVal::MIN` to be used as the result.
-		if OVERFLOW
+		if OM::HANDLE_OVERFLOW
 			&& let Some(base) = self.base.val(ctx)
 			&& let Some(exp) = self.exponent.val(ctx)
 			&& overflowing_pow(base, exp).1
