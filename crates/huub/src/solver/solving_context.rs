@@ -27,17 +27,6 @@ use crate::{
 };
 
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
-/// Type used to communicate whether a change is redundant, conflicting, or new.
-enum ChangeType {
-	/// Change is redundant, no action needs to be taken.
-	Redundant,
-	/// Change is new and should be propagated.
-	New,
-	/// Change is conflicting, and a conflict should be raised.
-	Conflicting,
-}
-
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 /// Argument type for [`SolvingContext::propagate_int`] to communicate what
 /// change to make to the integer decision variable.
 ///
@@ -53,6 +42,17 @@ enum ChangeRequest {
 	SetValue(IntVal),
 	/// Remove the given value from the domain of the integer decision variable.
 	RemoveValue(IntVal),
+}
+
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+/// Type used to communicate whether a change is redundant, conflicting, or new.
+enum ChangeType {
+	/// Change is redundant, no action needs to be taken.
+	Redundant,
+	/// Change is new and should be propagated.
+	New,
+	/// Change is conflicting, and a conflict should be raised.
+	Conflicting,
 }
 
 /// Helper struct that temporarily captures a built reason to print it for

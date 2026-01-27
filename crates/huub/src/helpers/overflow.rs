@@ -11,6 +11,11 @@ use crate::{IntVal, helpers::private::Sealed};
 /// Type alias for a integer value that has double the bit width of [`IntVal`].
 pub(crate) type DoubleIntVal = i128;
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+/// Marker type indicating that overflow is impossible, and does not need to be
+/// handled by the [`Propagator`].
+pub struct OverflowImpossible;
+
 #[expect(
 	private_bounds,
 	reason = "OverflowPossible and OverflowImpossible are the only allowed implementations"
@@ -43,24 +48,20 @@ pub trait OverflowMode: Sealed + Clone + fmt::Debug + 'static {
 /// handled by the [`Propagator`].
 pub struct OverflowPossible;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-/// Marker type indicating that overflow is impossible, and does not need to be
-/// handled by the [`Propagator`].
-pub struct OverflowImpossible;
+impl OverflowMode for OverflowImpossible {
+	const HANDLE_OVERFLOW: bool = false;
+
+	type Accumulator = IntVal;
+}
 
 impl OverflowMode for OverflowPossible {
 	const HANDLE_OVERFLOW: bool = true;
-	type Accumulator = DoubleIntVal;
-}
 
-impl OverflowMode for OverflowImpossible {
-	const HANDLE_OVERFLOW: bool = false;
-	type Accumulator = IntVal;
+	type Accumulator = DoubleIntVal;
 }
 
 #[cfg(test)]
 mod tests {
-
 	use crate::{
 		IntVal,
 		helpers::overflow::{DoubleIntVal, OverflowImpossible, OverflowMode, OverflowPossible},
@@ -72,22 +73,22 @@ mod tests {
 	}
 
 	#[test]
-	fn test_overflow_possible() {
-		const { assert!(OverflowPossible::HANDLE_OVERFLOW) };
-		assert!(
-			<OverflowPossible as OverflowMode>::Accumulator::from(IntVal::MAX)
-				.checked_add(1)
-				.is_some()
-		);
-	}
-
-	#[test]
 	fn test_overflow_impossible() {
 		const { assert!(!OverflowImpossible::HANDLE_OVERFLOW) };
 		assert!(
 			<OverflowImpossible as OverflowMode>::Accumulator::from(IntVal::MAX)
 				.checked_add(1)
 				.is_none()
+		);
+	}
+
+	#[test]
+	fn test_overflow_possible() {
+		const { assert!(OverflowPossible::HANDLE_OVERFLOW) };
+		assert!(
+			<OverflowPossible as OverflowMode>::Accumulator::from(IntVal::MAX)
+				.checked_add(1)
+				.is_some()
 		);
 	}
 }

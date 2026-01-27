@@ -227,19 +227,6 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		minimal_relevant_tasks
 	}
 
-	/// A helper function to find the index of the maximum usage in the
-	/// time-table profile within a specified period [start, end].
-	fn max_period_within(&self, _task: usize, start: i64, end: i64) -> Option<usize> {
-		let begin = self.bounds.partition_point(|&b| b <= start);
-		if begin >= self.bounds.len() {
-			return None;
-		}
-		// Adjust begin to point to the interval containing `start`
-		let begin = if begin == 0 { 0 } else { begin - 1 };
-		let end = self.bounds[begin..].partition_point(|&b| b < end) + begin;
-		(begin < end).then(|| begin + self.heights[(begin)..end].iter().position_max().unwrap())
-	}
-
 	#[inline]
 	/// Get the earliest completion time of the task `i`.
 	fn earliest_completion_time<C>(&self, ctx: &mut C, i: usize) -> i64
@@ -539,6 +526,19 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 			)?;
 		}
 		Ok(())
+	}
+
+	/// A helper function to find the index of the maximum usage in the
+	/// time-table profile within a specified period [start, end].
+	fn max_period_within(&self, _task: usize, start: i64, end: i64) -> Option<usize> {
+		let begin = self.bounds.partition_point(|&b| b <= start);
+		if begin >= self.bounds.len() {
+			return None;
+		}
+		// Adjust begin to point to the interval containing `start`
+		let begin = if begin == 0 { 0 } else { begin - 1 };
+		let end = self.bounds[begin..].partition_point(|&b| b < end) + begin;
+		(begin < end).then(|| begin + self.heights[(begin)..end].iter().position_max().unwrap())
 	}
 
 	/// Creates a new `CumulativeTimeTablePropagator` propagator and post it in

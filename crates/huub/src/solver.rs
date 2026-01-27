@@ -487,6 +487,7 @@ impl IntView {
 			_ => (None, true),
 		}
 	}
+
 	/// Return a list of integers that can used to identify the literals that
 	/// are associated to an integer view, and the meaning of those literals.
 	pub fn lit_reverse_map_info<Oracle: Assumptions>(

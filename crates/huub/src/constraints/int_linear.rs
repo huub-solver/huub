@@ -204,36 +204,6 @@ where
 	}
 }
 
-impl IntLinear<OverflowPossible> {
-	/// Returns whether the given terms that are summed in integer linear
-	/// expressions can overflow.
-	///
-	/// Note that the order of the terms matters. If the terms are reordered,
-	/// then the result of this method may change.
-	pub(crate) fn can_overflow<Ctx, IV>(ctx: &Ctx, terms: &[IV]) -> bool
-	where
-		Ctx: ReasoningContext + ?Sized,
-		IV: IntInspectionActions<Ctx>,
-	{
-		let mut acc_min: IntVal = 0;
-		let mut acc_max: IntVal = 0;
-		for iv in terms {
-			let (lb, ub) = iv.bounds(ctx);
-			if let Some(min) = acc_min.checked_sub(lb) {
-				acc_min = min;
-			} else {
-				return true;
-			}
-			if let Some(max) = acc_max.checked_add(ub) {
-				acc_max = max;
-			} else {
-				return true;
-			}
-		}
-		false
-	}
-}
-
 impl<OF: OverflowMode> IntLinear<OF> {
 	/// Change the integer linear constraint to be implied by the given Boolean
 	/// decision variable.
@@ -333,6 +303,36 @@ impl<OF: OverflowMode> IntLinear<OF> {
 			rhs,
 		);
 		Some(bool_lin)
+	}
+}
+
+impl IntLinear<OverflowPossible> {
+	/// Returns whether the given terms that are summed in integer linear
+	/// expressions can overflow.
+	///
+	/// Note that the order of the terms matters. If the terms are reordered,
+	/// then the result of this method may change.
+	pub(crate) fn can_overflow<Ctx, IV>(ctx: &Ctx, terms: &[IV]) -> bool
+	where
+		Ctx: ReasoningContext + ?Sized,
+		IV: IntInspectionActions<Ctx>,
+	{
+		let mut acc_min: IntVal = 0;
+		let mut acc_max: IntVal = 0;
+		for iv in terms {
+			let (lb, ub) = iv.bounds(ctx);
+			if let Some(min) = acc_min.checked_sub(lb) {
+				acc_min = min;
+			} else {
+				return true;
+			}
+			if let Some(max) = acc_max.checked_add(ub) {
+				acc_max = max;
+			} else {
+				return true;
+			}
+		}
+		false
 	}
 }
 

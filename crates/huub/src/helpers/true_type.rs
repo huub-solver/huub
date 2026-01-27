@@ -16,6 +16,31 @@ use crate::{
 /// Type that represents compile time constant [`true`] value.
 pub struct True;
 
+impl From<True> for BoolDecision {
+	fn from(_: True) -> Self {
+		true.into()
+	}
+}
+
+impl From<True> for BoolView {
+	fn from(_: True) -> Self {
+		true.into()
+	}
+}
+
+impl<Ctx> BoolInitActions<Ctx> for True
+where
+	bool: BoolInitActions<Ctx>,
+{
+	fn advise_when_fixed(&self, ctx: &mut Ctx, data: u64) {
+		true.advise_when_fixed(ctx, data);
+	}
+
+	fn enqueue_when_fixed(&self, ctx: &mut Ctx) {
+		true.enqueue_when_fixed(ctx);
+	}
+}
+
 impl<Ctx> BoolInspectionActions<Ctx> for True {
 	fn val(&self, _: &Ctx) -> Option<bool> {
 		Some(true)
@@ -39,35 +64,10 @@ where
 	}
 }
 
-impl<Ctx> BoolInitActions<Ctx> for True
-where
-	bool: BoolInitActions<Ctx>,
-{
-	fn advise_when_fixed(&self, ctx: &mut Ctx, data: u64) {
-		true.advise_when_fixed(ctx, data);
-	}
-
-	fn enqueue_when_fixed(&self, ctx: &mut Ctx) {
-		true.enqueue_when_fixed(ctx);
-	}
-}
-
 impl Not for True {
 	type Output = bool;
 
 	fn not(self) -> Self::Output {
 		false
-	}
-}
-
-impl From<True> for BoolView {
-	fn from(_: True) -> Self {
-		true.into()
-	}
-}
-
-impl From<True> for BoolDecision {
-	fn from(_: True) -> Self {
-		true.into()
 	}
 }

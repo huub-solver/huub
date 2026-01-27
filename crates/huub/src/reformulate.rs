@@ -809,28 +809,90 @@ mod tests {
 	}
 
 	#[test]
-	fn simplify_or_formula() {
+	fn simplify_equiv_formula() {
 		use Formula::*;
 
-		// Test case for Or with a true literal
+		// Test case for Equiv(x, true) -> x
 		let mut prb = Model::default();
 		let x = prb.new_bool_var();
-		let mut f: BoolFormula = Or(vec![Atom(x), Atom(true.into())]);
-		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
-			Ok(SimplificationStatus::Subsumed)
-		);
-		assert_eq!(x.val(&prb), None);
-
-		// Test case for Or with a false literal
-		let mut prb = Model::default();
-		let x = prb.new_bool_var();
-		let mut f: BoolFormula = Or(vec![Atom(x), Atom(false.into())]);
+		let mut f: BoolFormula = Equiv(vec![Atom(x), Atom(true.into())]);
 		assert_eq!(
 			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
 			Ok(SimplificationStatus::Subsumed)
 		);
 		assert_eq!(x.val(&prb), Some(true));
+
+		// Test case for Equiv(x, false) -> !x
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let mut f: BoolFormula = Equiv(vec![Atom(x), Atom(false.into())]);
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(x.val(&prb), Some(false));
+	}
+
+	#[test]
+	fn simplify_ifthenelse_formula() {
+		use Formula::*;
+
+		// Test case for IfThenElse(true, t, e) -> t
+		let mut prb = Model::default();
+		let t = prb.new_bool_var();
+		let e = prb.new_bool_var();
+		let mut f: BoolFormula = IfThenElse {
+			cond: Box::new(Atom(true.into())),
+			then: Box::new(Atom(t)),
+			els: Box::new(Atom(e)),
+		};
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(t.val(&prb), Some(true));
+		assert_eq!(e.val(&prb), None);
+
+		// Test case for IfThenElse(false, t, e) -> e
+		let mut prb = Model::default();
+		let t = prb.new_bool_var();
+		let e = prb.new_bool_var();
+		let mut f: BoolFormula = IfThenElse {
+			cond: Box::new(Atom(false.into())),
+			then: Box::new(Atom(t)),
+			els: Box::new(Atom(e)),
+		};
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(t.val(&prb), None);
+		assert_eq!(e.val(&prb), Some(true));
+	}
+
+	#[test]
+	fn simplify_implies_formula() {
+		use Formula::*;
+
+		// Test case for Implies(true, y) -> y
+		let mut prb = Model::default();
+		let y = prb.new_bool_var();
+		let mut f: BoolFormula = Implies(Box::new(Atom(true.into())), Box::new(Atom(y)));
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(y.val(&prb), Some(true));
+
+		// Test case for Implies(x, false) -> !x
+		let mut prb = Model::default();
+		let x = prb.new_bool_var();
+		let mut f: BoolFormula = Implies(Box::new(Atom(x)), Box::new(Atom(false.into())));
+		assert_eq!(
+			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
+			Ok(SimplificationStatus::Subsumed)
+		);
+		assert_eq!(x.val(&prb), Some(false));
 	}
 
 	#[test]
@@ -942,90 +1004,28 @@ mod tests {
 	}
 
 	#[test]
-	fn simplify_implies_formula() {
+	fn simplify_or_formula() {
 		use Formula::*;
 
-		// Test case for Implies(true, y) -> y
-		let mut prb = Model::default();
-		let y = prb.new_bool_var();
-		let mut f: BoolFormula = Implies(Box::new(Atom(true.into())), Box::new(Atom(y)));
-		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
-			Ok(SimplificationStatus::Subsumed)
-		);
-		assert_eq!(y.val(&prb), Some(true));
-
-		// Test case for Implies(x, false) -> !x
+		// Test case for Or with a true literal
 		let mut prb = Model::default();
 		let x = prb.new_bool_var();
-		let mut f: BoolFormula = Implies(Box::new(Atom(x)), Box::new(Atom(false.into())));
+		let mut f: BoolFormula = Or(vec![Atom(x), Atom(true.into())]);
 		assert_eq!(
 			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
 			Ok(SimplificationStatus::Subsumed)
 		);
-		assert_eq!(x.val(&prb), Some(false));
-	}
+		assert_eq!(x.val(&prb), None);
 
-	#[test]
-	fn simplify_ifthenelse_formula() {
-		use Formula::*;
-
-		// Test case for IfThenElse(true, t, e) -> t
-		let mut prb = Model::default();
-		let t = prb.new_bool_var();
-		let e = prb.new_bool_var();
-		let mut f: BoolFormula = IfThenElse {
-			cond: Box::new(Atom(true.into())),
-			then: Box::new(Atom(t)),
-			els: Box::new(Atom(e)),
-		};
-		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
-			Ok(SimplificationStatus::Subsumed)
-		);
-		assert_eq!(t.val(&prb), Some(true));
-		assert_eq!(e.val(&prb), None);
-
-		// Test case for IfThenElse(false, t, e) -> e
-		let mut prb = Model::default();
-		let t = prb.new_bool_var();
-		let e = prb.new_bool_var();
-		let mut f: BoolFormula = IfThenElse {
-			cond: Box::new(Atom(false.into())),
-			then: Box::new(Atom(t)),
-			els: Box::new(Atom(e)),
-		};
-		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
-			Ok(SimplificationStatus::Subsumed)
-		);
-		assert_eq!(t.val(&prb), None);
-		assert_eq!(e.val(&prb), Some(true));
-	}
-
-	#[test]
-	fn simplify_equiv_formula() {
-		use Formula::*;
-
-		// Test case for Equiv(x, true) -> x
+		// Test case for Or with a false literal
 		let mut prb = Model::default();
 		let x = prb.new_bool_var();
-		let mut f: BoolFormula = Equiv(vec![Atom(x), Atom(true.into())]);
+		let mut f: BoolFormula = Or(vec![Atom(x), Atom(false.into())]);
 		assert_eq!(
 			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
 			Ok(SimplificationStatus::Subsumed)
 		);
 		assert_eq!(x.val(&prb), Some(true));
-
-		// Test case for Equiv(x, false) -> !x
-		let mut prb = Model::default();
-		let x = prb.new_bool_var();
-		let mut f: BoolFormula = Equiv(vec![Atom(x), Atom(false.into())]);
-		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(&mut f, &mut prb),
-			Ok(SimplificationStatus::Subsumed)
-		);
-		assert_eq!(x.val(&prb), Some(false));
 	}
 
 	#[test]

@@ -7,5 +7,6 @@ use crate::helpers::overflow::{OverflowImpossible, OverflowPossible};
 /// crate.
 pub(crate) trait Sealed {}
 
-impl Sealed for OverflowPossible {}
 impl Sealed for OverflowImpossible {}
+
+impl Sealed for OverflowPossible {}

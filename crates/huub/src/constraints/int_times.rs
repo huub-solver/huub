@@ -41,6 +41,21 @@ pub struct IntTimesBounds<OM: OverflowMode, I1, I2, I3> {
 	pub(crate) overflow_mode: PhantomData<OM>,
 }
 
+impl<OM, I1, I2, I3> IntTimesBounds<OM, I1, I2, I3>
+where
+	OM: OverflowMode,
+{
+	/// Internal multiplication function that if `OVERFLOW` is `true`, it will
+	/// saturate the result when it overflows.
+	fn mul(x: IntVal, y: IntVal) -> IntVal {
+		if OM::HANDLE_OVERFLOW {
+			x.saturating_mul(y)
+		} else {
+			x * y
+		}
+	}
+}
+
 impl<I1, I2, I3> IntTimesBounds<OverflowPossible, I1, I2, I3> {
 	/// Returns whether given the bounds of the factors, the result can
 	/// overflow.
@@ -80,21 +95,6 @@ impl<I1, I2, I3> IntTimesBounds<OverflowPossible, I1, I2, I3> {
 				product,
 				overflow_mode: PhantomData,
 			});
-		}
-	}
-}
-
-impl<OM, I1, I2, I3> IntTimesBounds<OM, I1, I2, I3>
-where
-	OM: OverflowMode,
-{
-	/// Internal multiplication function that if `OVERFLOW` is `true`, it will
-	/// saturate the result when it overflows.
-	fn mul(x: IntVal, y: IntVal) -> IntVal {
-		if OM::HANDLE_OVERFLOW {
-			x.saturating_mul(y)
-		} else {
-			x * y
 		}
 	}
 }
@@ -238,52 +238,6 @@ mod tests {
 
 	#[test]
 	#[traced_test]
-	fn simple_sat() {
-		let mut slv = Solver::default();
-		let a = IntVar::new_in(
-			&mut slv,
-			(-2..=1).into(),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let b = IntVar::new_in(
-			&mut slv,
-			(-1..=2).into(),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let c = IntVar::new_in(
-			&mut slv,
-			(-4..=2).into(),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-
-		IntTimesBounds::post(&mut slv, a, b, c);
-		slv.expect_solutions(
-			&[a, b, c],
-			expect![[r#"
-		-2, -1, 2
-		-2, 0, 0
-		-2, 1, -2
-		-2, 2, -4
-		-1, -1, 1
-		-1, 0, 0
-		-1, 1, -1
-		-1, 2, -2
-		0, -1, 0
-		0, 0, 0
-		0, 1, 0
-		0, 2, 0
-		1, -1, -1
-		1, 0, 0
-		1, 1, 1
-		1, 2, 2"#]],
-		);
-	}
-
-	#[test]
-	#[traced_test]
 	fn overflow_intermediate_sat() {
 		let mut slv = Solver::default();
 		let a = IntVar::new_in(
@@ -329,6 +283,52 @@ mod tests {
 
 		IntTimesBounds::post(&mut slv, IntVal::MAX, a, b);
 		slv.assert_unsatisfiable();
+	}
+
+	#[test]
+	#[traced_test]
+	fn simple_sat() {
+		let mut slv = Solver::default();
+		let a = IntVar::new_in(
+			&mut slv,
+			(-2..=1).into(),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let b = IntVar::new_in(
+			&mut slv,
+			(-1..=2).into(),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+		let c = IntVar::new_in(
+			&mut slv,
+			(-4..=2).into(),
+			EncodingType::Eager,
+			EncodingType::Lazy,
+		);
+
+		IntTimesBounds::post(&mut slv, a, b, c);
+		slv.expect_solutions(
+			&[a, b, c],
+			expect![[r#"
+		-2, -1, 2
+		-2, 0, 0
+		-2, 1, -2
+		-2, 2, -4
+		-1, -1, 1
+		-1, 0, 0
+		-1, 1, -1
+		-1, 2, -2
+		0, -1, 0
+		0, 0, 0
+		0, 1, 0
+		0, 2, 0
+		1, -1, -1
+		1, 0, 0
+		1, 1, 1
+		1, 2, 2"#]],
+		);
 	}
 
 	#[test]
