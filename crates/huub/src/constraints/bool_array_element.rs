@@ -5,13 +5,16 @@
 use std::iter::once;
 
 use crate::{
-	BoolDecision, IntDecision, IntVal,
+	IntVal,
 	actions::{
 		BoolInitActions, BoolSimplificationActions, IntDecisionActions, IntInitActions,
-		IntInspectionActions, IntPropagationActions, ReasoningEngine, ReformulationActions,
+		IntInspectionActions, IntPropagationActions, ReasoningEngine,
 	},
-	constraints::{Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus},
-	reformulate::ReformulationError,
+	constraints::{
+		BoolModelActions, Constraint, IntModelActions, Propagator, SimplificationStatus,
+	},
+	lower::{LoweringContext, LoweringError},
+	model::view::View,
 	solver::{IntLitMeaning, activation_list::IntPropCond},
 };
 
@@ -24,18 +27,18 @@ use crate::{
 /// the index given by the index integer decision variable.
 pub struct BoolDecisionArrayElement {
 	/// The array of Boolean decision variables
-	pub(crate) array: Vec<BoolDecision>,
+	pub(crate) array: Vec<View<bool>>,
 	/// The index variable
-	pub(crate) index: IntDecision,
+	pub(crate) index: View<IntVal>,
 	/// The resulting variable
-	pub(crate) result: BoolDecision,
+	pub(crate) result: View<bool>,
 }
 
 impl<E> Constraint<E> for BoolDecisionArrayElement
 where
 	E: ReasoningEngine,
-	IntDecision: ModelIntView<E>,
-	BoolDecision: ModelBoolView<E>,
+	View<IntVal>: IntModelActions<E>,
+	View<bool>: BoolModelActions<E>,
 {
 	fn simplify(
 		&mut self,
@@ -50,12 +53,12 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let result = slv.solver_bool(self.result);
-		let index = slv.solver_int(self.index);
+	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
+		let result = slv.solver_view(self.result);
+		let index = slv.solver_view(self.index);
 
 		// Evaluate result literal
-		let arr: Vec<_> = self.array.iter().map(|&v| slv.solver_bool(v)).collect();
+		let arr: Vec<_> = self.array.iter().map(|&v| slv.solver_view(v)).collect();
 
 		for (i, &l) in arr.iter().enumerate() {
 			// Evaluate array literal
@@ -77,8 +80,8 @@ where
 impl<E> Propagator<E> for BoolDecisionArrayElement
 where
 	E: ReasoningEngine,
-	IntDecision: ModelIntView<E>,
-	BoolDecision: ModelBoolView<E>,
+	View<IntVal>: IntModelActions<E>,
+	View<bool>: BoolModelActions<E>,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		for &b in &self.array {
@@ -90,9 +93,9 @@ where
 
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// Fix the bounds of the index is to the length of the array
-		self.index.set_lower_bound(ctx, 0, vec![])?;
+		self.index.tighten_min(ctx, 0, vec![])?;
 		self.index
-			.set_upper_bound(ctx, self.array.len() as IntVal - 1, vec![])?;
+			.tighten_max(ctx, self.array.len() as IntVal - 1, vec![])?;
 
 		// TODO: Do more propagation
 		Ok(())

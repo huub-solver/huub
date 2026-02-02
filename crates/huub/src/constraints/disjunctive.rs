@@ -1,31 +1,52 @@
 //! Structures and algorithms for the `disjunctive_strict` constraint, which
 //! enforces that no two tasks overlap from a list of tasks.
 
-use std::ops::AddAssign;
-
 use itertools::Itertools;
 use tracing::trace;
 
 use crate::{
-	Conjunction, IntDecision, IntVal,
+	Conjunction, IntVal,
 	actions::{
-		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions,
-		PropagationActions, ReasoningContext, ReasoningEngine, ReformulationActions,
-		TrailingActions,
+		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions, PostingActions,
+		PropagationActions, ReasoningContext, ReasoningEngine, Trailed, TrailingActions,
 	},
 	constraints::{
-		BoxedPropagator, Constraint, ModelIntView, Propagator, ReasonBuilder, SimplificationStatus,
-		SolverIntView,
+		Constraint, IntModelActions, IntSolverActions, Propagator, ReasonBuilder,
+		SimplificationStatus,
 	},
-	reformulate::ReformulationError,
-	solver::{
-		IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel,
-		trail::TrailedInt,
-	},
+	lower::{LoweringContext, LoweringError},
+	model,
+	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// The propagation rules for the `disjunctive_strict` constraint. This enum is
+/// Representation of the `disjunctive` constraint within a model.
+///
+/// This constraint enforces that the given a list of integer decision variables
+/// representing the start times of tasks and a list of integer values
+/// representing the durations of tasks, the tasks do not overlap in time.
+pub struct Disjunctive {
+	/// Inner propagator.
+	pub(crate) propagator: DisjunctivePropagator<model::View<IntVal>>,
+	/// Whether to enable the [`DisjunctivePropagationRule::EdgeFinding`]
+	/// propagation rule.
+	///
+	/// Defaults to `true`.
+	pub(crate) edge_finding_propagation: Option<bool>,
+	/// Whether to enable the [`DisjunctivePropagationRule::NotLast`]
+	/// propagation rule.
+	///
+	/// Defaults to `false`.
+	pub(crate) not_last_propagation: Option<bool>,
+	/// Whether to enable the [`DisjunctivePropagationRule::Precedence`]
+	/// propagation rule.
+	///
+	/// Defaults to `false`.
+	pub(crate) detectable_precedence_propagation: Option<bool>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// The propagation rules for the `disjunctive` constraint. This enum is
 /// used to identify which propagation algorithm is being applied during the
 /// propagation phase of the `DisjunctiveStrictPropagator`. Values:
 ///
@@ -43,34 +64,8 @@ enum DisjunctivePropagationRule {
 	Precedence,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// Representation of the `disjunctive_strict` constraint within a model.
-///
-/// This constraint enforces that the given a list of integer decision variables
-/// representing the start times of tasks and a list of integer values
-/// representing the durations of tasks, the tasks do not overlap in time.
-pub struct DisjunctiveStrict {
-	/// Inner propagator.
-	pub(crate) propagator: DisjunctiveStrictPropagator<IntDecision>,
-	/// Whether to enable the [`DisjunctivePropagationRule::EdgeFinding`]
-	/// propagation rule.
-	///
-	/// Defaults to `true`.
-	pub(crate) edge_finding_prop: Option<bool>,
-	/// Whether to enable the [`DisjunctivePropagationRule::NotLast`]
-	/// propagation rule.
-	///
-	/// Defaults to `false`.
-	pub(crate) not_last_prop: Option<bool>,
-	/// Whether to enable the [`DisjunctivePropagationRule::Precedence`]
-	/// propagation rule.
-	///
-	/// Defaults to `false`.
-	pub(crate) detectable_precedence_prop: Option<bool>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// A propagator for the `disjunctive_strict` constraint using the Overload
+/// A propagator for the `disjunctive` constraint using the Overload
 /// Checking, Edge Finding, Not-First/Not-Last, and Detectable Precedence
 /// algorithms. Refer to the corresponding functions for details on propagation
 /// rules and explanations.
@@ -81,7 +76,7 @@ pub struct DisjunctiveStrict {
 ///   Archives of Control Sciences 18.2 (2008): 159-202.
 /// - Vilím, Petr "Computing explanations for the unary resource constraint."
 ///   CPAIOR 2005.
-pub struct DisjunctiveStrictPropagator<I> {
+pub struct DisjunctivePropagator<I> {
 	/// Start time variables of each task.
 	start_times: Vec<I>,
 	/// Durations of each task.
@@ -169,62 +164,35 @@ struct OmegaThetaTreeNode {
 /// Internal structure to store trailed information about tasks.
 struct TaskInfo {
 	/// Earliest start time of the task.
-	earliest_start: TrailedInt,
+	earliest_start: Trailed<IntVal>,
 	/// Latest completion time of the task.
-	latest_completion: TrailedInt,
+	latest_completion: Trailed<IntVal>,
 }
 
-impl DisjunctiveStrict {
+impl Disjunctive {
 	/// Return whether the detectable precedence algorithm will be used when
-	/// creating a [`Solver`] object.
+	/// creating a [`Solver`](crate::solver::Solver) object.
 	pub fn detectable_precedence_propagation_enabled(&self) -> bool {
-		self.detectable_precedence_prop.unwrap_or(false)
+		self.detectable_precedence_propagation.unwrap_or(false)
 	}
 
 	/// Return whether the edge finding algorithm will be used when creating a
-	/// [`Solver`] object.
+	/// [`Solver`](crate::solver::Solver) object.
 	pub fn edge_finding_propagation_enabled(&self) -> bool {
-		self.edge_finding_prop.unwrap_or(true)
+		self.edge_finding_propagation.unwrap_or(true)
 	}
 
 	/// Return whether the not-last algorithm will be used when creating a
-	/// [`Solver`] object.
+	/// [`Solver`](crate::solver::Solver) object.
 	pub fn not_last_propagation_enabled(&self) -> bool {
-		self.not_last_prop.unwrap_or(false)
-	}
-
-	/// Ensure the use of the detectable precedence algorithm when this
-	/// constraint is posted to a [`Solver`] object.
-	///
-	/// Note that this method does not affect whether other propagation
-	/// algorithms will be used or not.
-	pub fn use_detectable_precedence_propagation(&mut self, enable: bool) {
-		self.detectable_precedence_prop = Some(enable);
-	}
-
-	/// Ensure the use of the edge finding algorithm when this constraint is
-	/// posted to a [`Solver`] object.
-	///
-	/// Note that this method does not affect whether other propagation
-	/// algorithms will be used or not.
-	pub fn use_edge_finding_propagation(&mut self, enable: bool) {
-		self.edge_finding_prop = Some(enable);
-	}
-
-	/// Ensure the use of the not-last algorithm when this constraint is posted
-	/// to a [`Solver`] object.
-	///
-	/// Note that this method does not affect whether other propagation
-	/// algorithms will be used or not.
-	pub fn use_not_last_propagation(&mut self, enable: bool) {
-		self.not_last_prop = Some(enable);
+		self.not_last_propagation.unwrap_or(false)
 	}
 }
 
-impl<E> Constraint<E> for DisjunctiveStrict
+impl<E> Constraint<E> for Disjunctive
 where
 	E: ReasoningEngine,
-	IntDecision: ModelIntView<E>,
+	model::View<IntVal>: IntModelActions<E>,
 {
 	fn simplify(
 		&mut self,
@@ -244,24 +212,20 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
 		let start_times = self
 			.propagator
 			.start_times
 			.iter()
-			.map(|&v| slv.solver_int(v))
+			.map(|&v| slv.solver_view(v))
 			.collect_vec();
 		// Add symmetric version of start time for upper bound propagation
 		let iter = start_times.iter().zip(self.propagator.durations.iter());
-		let horizon = iter
-			.clone()
-			.map(|(v, d)| v.upper_bound(slv) + d)
-			.max()
-			.unwrap();
-		let symmetric_vars: Vec<IntView> = iter.map(|(v, d)| -*v + (horizon - d)).collect();
+		let horizon = iter.clone().map(|(v, d)| v.max(slv) + d).max().unwrap();
+		let symmetric_vars: Vec<_> = iter.map(|(v, d)| -*v + (horizon - d)).collect();
 
 		// Add detectable precedence propagators
-		DisjunctiveStrictPropagator::post(
+		DisjunctivePropagator::post(
 			slv,
 			start_times,
 			self.propagator.durations.clone(),
@@ -269,7 +233,7 @@ where
 			self.not_last_propagation_enabled(),
 			self.detectable_precedence_propagation_enabled(),
 		);
-		DisjunctiveStrictPropagator::post(
+		DisjunctivePropagator::post(
 			slv,
 			symmetric_vars,
 			self.propagator.durations.clone(),
@@ -282,10 +246,10 @@ where
 	}
 }
 
-impl<E> Propagator<E> for DisjunctiveStrict
+impl<E> Propagator<E> for Disjunctive
 where
 	E: ReasoningEngine,
-	IntDecision: SolverIntView<E>,
+	model::View<IntVal>: IntSolverActions<E>,
 {
 	fn explain(
 		&mut self,
@@ -305,7 +269,7 @@ where
 	}
 }
 
-impl<I> DisjunctiveStrictPropagator<I> {
+impl<I> DisjunctivePropagator<I> {
 	/// Return the data stored for explanation from propagation rule and task
 	/// number.
 	fn data_for_explanation(
@@ -331,7 +295,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 		Ctx: ReasoningContext + ?Sized,
 		I: IntInspectionActions<Ctx>,
 	{
-		self.start_times[i].lower_bound(ctx)
+		self.start_times[i].min(ctx)
 	}
 
 	/// Explain edge finding propagation for task `i` with the time window
@@ -346,7 +310,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	) -> Conjunction<E::Atom>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
 		// explain why the set of tasks LCut(j) ∪ {i} cannot be completed before
 		// lct_j since energy of the set of tasks (including i) within the time
@@ -393,7 +357,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 				&& earliest_start_times[i] >= earliest_start
 				&& latest_completion_times[i] <= latest_completion
 			{
-				clause.push(self.start_times[i].lower_bound_lit(ctx));
+				clause.push(self.start_times[i].min_lit(ctx));
 				let (bv, _) = self.start_times[i].lit_relaxed(
 					ctx,
 					IntLitMeaning::Less(latest_completion - self.durations[i] + 1),
@@ -420,7 +384,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	) -> Conjunction<E::Atom>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
 		// Collect the set of tasks in NLset(i) = { j | lst_j < lct_i && est_j + p_j
 		// ≥ earliest_start & j ≠ i }
@@ -445,7 +409,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 
 		// Explain the reason why task i cannot be the last task
 		let mut clause = Vec::new();
-		clause.push(self.start_times[task_no].upper_bound_lit(ctx));
+		clause.push(self.start_times[task_no].max_lit(ctx));
 		for j in nlset {
 			// explain the reason why all tasks in NLset(i) will stay in NLset(i)
 			//
@@ -474,7 +438,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	{
 		move |ctx: &mut Ctx| {
 			let binding_task = self.ot_tree.binding_task(time_bound, 0);
-			let earliest_start = self.start_times[binding_task].lower_bound(ctx);
+			let earliest_start = self.start_times[binding_task].min(ctx);
 			let mut slack = time_bound - earliest_start;
 			let mut e_tasks = Vec::new();
 
@@ -503,7 +467,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 						ctx,
 						IntLitMeaning::Less((time_bound - slack) - self.durations[i]),
 					);
-					[self.start_times[i].lower_bound_lit(ctx), bv]
+					[self.start_times[i].min_lit(ctx), bv]
 				})
 				.collect_vec()
 		}
@@ -520,7 +484,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	) -> Conjunction<E::Atom>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
 		// Collect all tasks of which the earliest start time greater than
 		// `earliest_start`
@@ -581,7 +545,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 		Ctx: ReasoningContext + ?Sized,
 		I: IntInspectionActions<Ctx>,
 	{
-		self.start_times[i].upper_bound(ctx)
+		self.start_times[i].max(ctx)
 	}
 
 	/// Create a new [`DisjunctiveStrict`] propagator and post it in the solver.
@@ -599,8 +563,8 @@ impl<I> DisjunctiveStrictPropagator<I> {
 		let n = start_times.len();
 		let trailed_info = (0..n)
 			.map(|_| TaskInfo {
-				earliest_start: solver.new_trailed_int(0),
-				latest_completion: solver.new_trailed_int(0),
+				earliest_start: solver.new_trailed(0),
+				latest_completion: solver.new_trailed(0),
 			})
 			.collect();
 		Self {
@@ -616,6 +580,29 @@ impl<I> DisjunctiveStrictPropagator<I> {
 			tasks_sorted_by_earliest_completion: (0..n).collect_vec(),
 			tasks_sorted_by_latest_completion: (0..n).collect_vec(),
 		}
+	}
+
+	/// Create a new [`Disjunctive`] propagator and post it in the solver.
+	pub fn post<E>(
+		solver: &mut E,
+		start_times: Vec<I>,
+		durations: Vec<IntVal>,
+		edge_finding_enabled: bool,
+		not_last_enabled: bool,
+		detectable_precedence_enabled: bool,
+	) where
+		E: PostingActions + ?Sized,
+		I: IntSolverActions<Engine>,
+	{
+		let b = Box::new(Self::new(
+			solver,
+			start_times,
+			durations,
+			edge_finding_enabled,
+			not_last_enabled,
+			detectable_precedence_enabled,
+		));
+		solver.add_propagator(b);
 	}
 
 	/// Detectable precedence updates the lower bound of each task's earliest
@@ -645,7 +632,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	) -> Result<bool, E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
 		let mut propagated = false;
 		// Clear the Omega-Theta tree
@@ -736,14 +723,14 @@ impl<I> DisjunctiveStrictPropagator<I> {
 				let earliest_start_time = self.earliest_start_time(ctx, i);
 				let earliest_completion_time = self.earliest_completion_time(ctx, i);
 				if updated_est[i] > earliest_start_time {
-					let lb = self.start_times[binding_task].lower_bound(ctx);
-					ctx.set_trailed_int(self.trailed_info[i].earliest_start, lb);
-					ctx.set_trailed_int(
+					let lb = self.start_times[binding_task].min(ctx);
+					ctx.set_trailed(self.trailed_info[i].earliest_start, lb);
+					ctx.set_trailed(
 						self.trailed_info[i].latest_completion,
 						earliest_completion_time,
 					);
 					let data = self.data_for_explanation(i, DisjunctivePropagationRule::Precedence);
-					v.set_lower_bound(ctx, updated_est[i], ctx.deferred_reason(data))?;
+					v.tighten_min(ctx, updated_est[i], ctx.deferred_reason(data))?;
 					propagated = true;
 				}
 			}
@@ -790,15 +777,11 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	) -> Result<bool, E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
 		let mut propagated = false;
 		// Add all tasks to the Omega-Theta tree
-		let earliest_start: Vec<_> = self
-			.start_times
-			.iter()
-			.map(|v| v.lower_bound(ctx))
-			.collect();
+		let earliest_start: Vec<_> = self.start_times.iter().map(|v| v.min(ctx)).collect();
 		self.ot_tree
 			.fill(earliest_start.as_slice(), self.durations.as_slice());
 
@@ -829,7 +812,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 					// Resource overload detected, eagerly build the reason clause for
 					// conflict
 					let expl = self.explain_overload_checking(lct + 1);
-					self.start_times[lct_task].set_lower_bound(
+					self.start_times[lct_task].tighten_min(
 						ctx,
 						ect_in_tree - self.durations[lct_task],
 						expl,
@@ -843,12 +826,12 @@ impl<I> DisjunctiveStrictPropagator<I> {
 			while j > 0 && self.ot_tree.root().earliest_completion_gray > lct {
 				let ect_gray_in_tree = self.ot_tree.root().earliest_completion_gray;
 				let blocked_task = self.ot_tree.blocked_task(ect_gray_in_tree);
-				if self.start_times[blocked_task].lower_bound(ctx) < ect_in_tree {
+				if self.start_times[blocked_task].min(ctx) < ect_in_tree {
 					let gray_est_task = self.ot_tree.blocking_task(ect_gray_in_tree);
-					let lb = self.start_times[gray_est_task].lower_bound(ctx);
+					let lb = self.start_times[gray_est_task].min(ctx);
 					// set trailed integer for lazy explanation
-					ctx.set_trailed_int(self.trailed_info[blocked_task].earliest_start, lb);
-					ctx.set_trailed_int(
+					ctx.set_trailed(self.trailed_info[blocked_task].earliest_start, lb);
+					ctx.set_trailed(
 						self.trailed_info[blocked_task].latest_completion,
 						ect_gray_in_tree - 1,
 					);
@@ -862,7 +845,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 						blocked_task,
 						DisjunctivePropagationRule::EdgeFinding,
 					);
-					self.start_times[blocked_task].set_lower_bound(
+					self.start_times[blocked_task].tighten_min(
 						ctx,
 						ect_in_tree,
 						ctx.deferred_reason(data),
@@ -912,7 +895,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	) -> Result<bool, E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
 		let mut propagated = false;
 		// Clear the Omega-Theta tree
@@ -1006,11 +989,11 @@ impl<I> DisjunctiveStrictPropagator<I> {
 					window =? (lb, updated_lct[i]),
 					"not last propagation"
 				);
-				ctx.set_trailed_int(self.trailed_info[i].earliest_start, lb);
+				ctx.set_trailed(self.trailed_info[i].earliest_start, lb);
 
-				ctx.set_trailed_int(self.trailed_info[i].latest_completion, updated_lct[i]);
+				ctx.set_trailed(self.trailed_info[i].latest_completion, updated_lct[i]);
 				let data = self.data_for_explanation(i, DisjunctivePropagationRule::NotLast);
-				v.set_upper_bound(
+				v.tighten_max(
 					ctx,
 					updated_lct[i] - self.durations[i],
 					ctx.deferred_reason(data),
@@ -1048,7 +1031,7 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
 		// Clear the Omega-Theta tree before propagation
 		self.ot_tree.clear();
@@ -1069,13 +1052,13 @@ impl<I> DisjunctiveStrictPropagator<I> {
 				let binding_task = self
 					.ot_tree
 					.binding_task(self.ot_tree.root().earliest_completion, 0);
-				let earliest_start = self.start_times[binding_task].lower_bound(ctx);
+				let earliest_start = self.start_times[binding_task].min(ctx);
 				let expl = self.explain_overload_checking(lct_i + 1);
 				trace!(
 					time_window =? (earliest_start, lct_i),
 					"Resource overload"
 				);
-				self.start_times[*i].set_lower_bound(ctx, ect - self.durations[*i], expl)?;
+				self.start_times[*i].tighten_min(ctx, ect - self.durations[*i], expl)?;
 			}
 		}
 		Ok(())
@@ -1097,34 +1080,10 @@ impl<I> DisjunctiveStrictPropagator<I> {
 	}
 }
 
-impl DisjunctiveStrictPropagator<IntView> {
-	/// Create a new [`DisjunctiveStrict`] propagator and post it in the solver.
-	pub fn post<E>(
-		solver: &mut E,
-		start_times: Vec<IntView>,
-		durations: Vec<IntVal>,
-		edge_finding_enabled: bool,
-		not_last_enabled: bool,
-		detectable_precedence_enabled: bool,
-	) where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ?Sized,
-	{
-		let b = Box::new(Self::new(
-			solver,
-			start_times,
-			durations,
-			edge_finding_enabled,
-			not_last_enabled,
-			detectable_precedence_enabled,
-		));
-		*solver += b;
-	}
-}
-
-impl<E, I> Propagator<E> for DisjunctiveStrictPropagator<I>
+impl<E, I> Propagator<E> for DisjunctivePropagator<I>
 where
 	E: ReasoningEngine,
-	I: SolverIntView<E>,
+	I: IntSolverActions<E>,
 {
 	/// Explain the propagation of the disjunctive propagator.
 	#[tracing::instrument(name = "disjunctive_strict", level = "trace", skip(self, ctx))]
@@ -1136,8 +1095,8 @@ where
 	) -> Conjunction<E::Atom> {
 		// Extract the task number and propagation rule from the data
 		let task_no = self.task_no_from_data(data);
-		let earliest_start = ctx.trailed_int(self.trailed_info[task_no].earliest_start);
-		let latest_completion = ctx.trailed_int(self.trailed_info[task_no].latest_completion);
+		let earliest_start = ctx.trailed(self.trailed_info[task_no].earliest_start);
+		let latest_completion = ctx.trailed(self.trailed_info[task_no].latest_completion);
 
 		// Explain the reason based on the propagation rule of disjunctive.
 		match self.propagation_rule_from_data(data) {
@@ -1165,11 +1124,7 @@ where
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// Sort the tasks by earliest start time and initialize the Omega-Theta tree
 		// according to the property of the Omega-Theta tree.
-		let earliest_start: Vec<_> = self
-			.start_times
-			.iter()
-			.map(|v| v.lower_bound(ctx))
-			.collect();
+		let earliest_start: Vec<_> = self.start_times.iter().map(|v| v.min(ctx)).collect();
 		self.tasks_sorted_by_earliest_start
 			.sort_by_key(|&i| earliest_start[i]);
 		self.ot_tree
@@ -1459,13 +1414,15 @@ impl OmegaThetaTree {
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use flatzinc_serde::RangeList;
+	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
 	use crate::{
-		Solver,
-		constraints::disjunctive_strict::DisjunctiveStrictPropagator,
-		solver::int_var::{EncodingType, IntVar},
+		constraints::disjunctive::DisjunctivePropagator,
+		solver::{
+			Solver,
+			decision::integer::{EncodingType, IntDecision},
+		},
 	};
 
 	#[test]
@@ -1475,19 +1432,19 @@ mod tests {
 			itertools::iproduct!([true, false], [true, false], [true, false])
 		{
 			let mut slv = Solver::default();
-			let a = IntVar::new_in(
+			let a = IntDecision::new_in(
 				&mut slv,
 				RangeList::from_iter([0..=4]),
 				EncodingType::Eager,
 				EncodingType::Lazy,
 			);
-			let b = IntVar::new_in(
+			let b = IntDecision::new_in(
 				&mut slv,
 				RangeList::from_iter([0..=4]),
 				EncodingType::Eager,
 				EncodingType::Lazy,
 			);
-			let c = IntVar::new_in(
+			let c = IntDecision::new_in(
 				&mut slv,
 				RangeList::from_iter([0..=4]),
 				EncodingType::Eager,
@@ -1495,7 +1452,7 @@ mod tests {
 			);
 
 			let durations = vec![2, 3, 1];
-			DisjunctiveStrictPropagator::post(
+			DisjunctivePropagator::post(
 				&mut slv,
 				vec![a, b, c],
 				durations.clone(),
@@ -1503,7 +1460,7 @@ mod tests {
 				not_last,
 				detectable_precedence,
 			);
-			DisjunctiveStrictPropagator::post(
+			DisjunctivePropagator::post(
 				&mut slv,
 				[a, b, c]
 					.iter()

@@ -1,40 +1,40 @@
-//! Structure and algorithms for the integer diffn constraint, which
+//! Structure and algorithms for the integer no overlap constraint, which
 //! enforces that a number of k-dimensional hyperrectangles do not overlap.
 
 use std::{
 	any::TypeId,
 	cmp::{self, Ordering},
 	iter::{repeat_with, zip},
-	ops::AddAssign,
 };
 
-use itertools::multizip;
+use itertools::izip;
 
 use crate::{
-	IntLitMeaning, IntVal,
+	IntVal,
 	actions::{
-		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions,
-		ReasoningContext, ReasoningEngine, ReformulationActions, TrailingActions,
+		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions, PostingActions,
+		ReasoningContext, ReasoningEngine, Trailed, TrailingActions,
 	},
 	constraints::{
-		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
+		BoxedPropagator, Constraint, IntModelActions, IntSolverActions, Propagator,
+		SimplificationStatus,
 	},
 	helpers::matrix::Matrix,
-	reformulate::ReformulationError,
-	solver::{IntView, activation_list::IntPropCond, queue::PriorityLevel, trail::TrailedInt},
+	lower::{LoweringContext, LoweringError},
+	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// The [`IntDiffnSweep`] propagator ensures that a set of k-dimensional
+/// The [`IntNoOverlapSweep`] propagator ensures that a set of k-dimensional
 /// hyperrectangles do not overlap. It is a sweep-based propagator that reasons
 /// about forbidden regions for each rectangle.
 ///
 /// This propagator was originally proposed in "Sweep as a Generic Pruning
 /// Technique Applied to the Non-overlapping Rectangles Constraint" by Beldinau,
 /// Nicolas and Carlsson, Mats. Then it was implemented within Gecode in
-/// https://urn.kb.se/resolve?urn=urn:nbn:se:uu:diva-325845 and then extended to
-/// lazy clause generation within this solver in
-/// https://urn.kb.se/resolve?urn=urn:nbn:se:uu:diva-562628.
+/// <https://urn.kb.se/resolve?urn=urn:nbn:se:uu:diva-325845> and then extended
+/// to lazy clause generation within this solver in
+/// <https://urn.kb.se/resolve?urn=urn:nbn:se:uu:diva-562628>.
 ///
 /// The core idea is that we reason about forbidden regions of each rectangle,
 /// that is, regions we are not allowed to place the lower-left corner of a
@@ -42,10 +42,9 @@ use crate::{
 /// forbidden in the sense that if we would put our rectangle at that place, it
 /// would guarantee that at least two rectangles are overlapping, which violates
 /// the constraint.
-///
-/// All [`Matrix`] attributes are 2-dimensional, with the first index
-/// representing the object and the second representing the dimension.
-pub struct IntDiffnSweep<const STRICT: bool, I1, I2> {
+// All Matrix attributes are 2-dimensional, with the first index
+// representing the object and the second representing the dimension.
+pub struct IntNoOverlapSweep<const STRICT: bool, I1, I2> {
 	/// The origin position of each object in each dimension.
 	origin: Matrix<2, I1>,
 	/// The size of each object in each dimension.
@@ -54,11 +53,11 @@ pub struct IntDiffnSweep<const STRICT: bool, I1, I2> {
 	/// Trail which tracks the target property, target[i] = 1 if is has been
 	/// lost, and will let us skip some iterations since it at that point has
 	/// been checked to be at a feasible position and fixed.
-	target: Box<[TrailedInt]>,
+	target: Box<[Trailed<bool>]>,
 	/// Trail which tracks the source property, target[i] = 1 if is has been
 	/// lost, and will allow it to be disregarded through the entire algorithm
 	/// since it will not affect any other rectangle.
-	source: Box<[TrailedInt]>,
+	source: Box<[Trailed<bool>]>,
 
 	/// A cache for the upper bounds of the origin variables.
 	origin_ub: Matrix<2, IntVal>,
@@ -81,7 +80,7 @@ pub struct IntDiffnSweep<const STRICT: bool, I1, I2> {
 /// and upper bounds for a single dimension.
 struct Region(Vec<(IntVal, IntVal)>);
 
-impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
+impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 	/// Adjusts the sweep point to find the next potential feasible location
 	/// when pruning upper bounds.
 	///
@@ -168,7 +167,7 @@ impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
 		let origin_ub = self.origin_ub.row(obj);
 		let size_lb = self.size_lb.row(obj);
 
-		multizip((&region.0, origin_lb, origin_ub, size_lb))
+		izip!(&region.0, origin_lb, origin_ub, size_lb)
 			.any(|(&(lb, ub), &o_lb, &o_ub, &size)| o_ub + size - 1 < lb || o_lb > ub)
 	}
 
@@ -197,7 +196,7 @@ impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
 				// If sizes are not [`IntVal`], their lower bounds contribute to the
 				// forbidden region and must be part of the explanation.
 				if TypeId::of::<I2>() != TypeId::of::<IntVal>() {
-					reason.push(self.size[[*support, d]].lower_bound_lit(ctx));
+					reason.push(self.size[[*support, d]].min_lit(ctx));
 				}
 				let mut possible_ub = self.origin_ub[[*support, d]];
 				let origin_ub = self.origin_ub[[obj, d]];
@@ -208,11 +207,11 @@ impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
 				// "Lifting": If a forbidden region overhangs the domain of the object
 				// being pruned, we can use the object's bounds to create a tighter,
 				// more general explanation.
-				if region.upper_bound(d) > origin_ub {
+				if region.max(d) > origin_ub {
 					possible_lb = origin_ub - self.size_lb[[*support, d]] + 1;
 				}
 
-				if region.lower_bound(d) < origin_lb {
+				if region.min(d) < origin_lb {
 					possible_ub = origin_lb + self.size_lb[[obj, d]] - 1;
 				}
 
@@ -252,7 +251,7 @@ impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
 			// If sizes are not [`IntVal`], their lower bounds contribute to the
 			// forbidden region and must be part of the explanation.
 			if TypeId::of::<I2>() != TypeId::of::<IntVal>() {
-				reason.push(self.size[[obj, d]].lower_bound_lit(ctx));
+				reason.push(self.size[[obj, d]].min_lit(ctx));
 			}
 
 			// The literal for the bound we are about to prune is implicitly part of the
@@ -314,7 +313,7 @@ impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
 
 		'obj_iter: for i in 0..self.num_objects() {
 			// Ignore objects that have lost their "source" property.
-			if ctx.trailed_int(self.source[i]) == 1 {
+			if ctx.trailed(self.source[i]) {
 				continue;
 			}
 
@@ -364,8 +363,8 @@ impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
 		forbidden_regions.into_iter().flatten().collect()
 	}
 
-	/// Create a new [`IntDiffnSweep`] propagator, to be used within the given
-	/// engine.
+	/// Create a new [`IntNoOverlapSweep`] propagator, to be used within the
+	/// given engine.
 	///
 	/// # Parameters
 	///
@@ -401,10 +400,10 @@ impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
 			size.into_iter().flatten().collect(),
 		);
 
-		let target = repeat_with(|| engine.new_trailed_int(0))
+		let target = repeat_with(|| engine.new_trailed(false))
 			.take(num_objects)
 			.collect();
-		let source = repeat_with(|| engine.new_trailed_int(0))
+		let source = repeat_with(|| engine.new_trailed(false))
 			.take(num_objects)
 			.collect();
 
@@ -437,6 +436,48 @@ impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
 		self.origin.len(0)
 	}
 
+	/// Posts the [`IntNoOverlapSweep`] propagator to the solver.
+	///
+	/// This is the public entry point for creating the constraint for a
+	/// [`Solver`](crate::solver::Solver) instance.
+	///
+	/// # Parameters
+	///
+	/// - `solver`: The solver instance.
+	/// - `origin`: A matrix-like `Vec<Vec<I>>` where `origin[i][d]` is the
+	///   origin of object `i` in dimension `d`.
+	/// - `size`: A matrix-like `Vec<Vec<I>>` where `size[i][d]` is the size of
+	///   object `i` in dimension `d`.
+	///
+	/// # Panics
+	///
+	/// Panics if the dimensions of `origin` and `size` are inconsistent.
+	/// Specifically, the number of objects (outer `Vec` length) must be the
+	/// same, and the number of dimensions (inner `Vec` length) must be the
+	/// same for all objects.
+	pub fn post<E>(solver: &mut E, origin: Vec<Vec<I1>>, size: Vec<Vec<I2>>)
+	where
+		E: PostingActions + ?Sized,
+		I1: IntSolverActions<Engine>,
+		I2: IntSolverActions<Engine> + IntInspectionActions<E>,
+	{
+		// Use specialized version if all sizes are constant
+		if size.iter().flatten().all(|v| v.val(solver).is_some()) {
+			let size: Vec<Vec<_>> = size
+				.iter()
+				.map(|v| v.iter().map(|v| v.val(solver).unwrap()).collect())
+				.collect();
+
+			let con: BoxedPropagator =
+				Box::new(IntNoOverlapSweep::<STRICT, _, _>::new(solver, origin, size));
+			solver.add_propagator(con);
+			return;
+		}
+
+		let con: BoxedPropagator = Box::new(Self::new(solver, origin, size));
+		solver.add_propagator(con);
+	}
+
 	/// Prunes the upper bound of an object's origin in a specific dimension.
 	///
 	/// This method is analogous to [`Self::prune_min`], but it sweeps backward
@@ -451,8 +492,8 @@ impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I1: SolverIntView<E>,
-		I2: SolverIntView<E>,
+		I1: IntSolverActions<E>,
+		I2: IntSolverActions<E>,
 	{
 		// `sweep` is the current point being checked for feasibility.
 		let mut sweep = self.origin_ub.row(obj).to_vec();
@@ -466,7 +507,7 @@ impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
 			// To escape `fr`, we must jump to at least its lower bound - 1.
 			// We take the maximum of all possible jump points.
 			for (i, j) in jump.iter_mut().enumerate() {
-				*j = cmp::max(*j, fr.unwrap().lower_bound(i) - 1);
+				*j = cmp::max(*j, fr.unwrap().min(i) - 1);
 			}
 
 			let lb = self.origin_lb.row(obj);
@@ -482,7 +523,7 @@ impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
 		// If the sweep found a new, lower feasible upper bound, propagate it.
 		if sweep[dim] != self.origin_ub[[obj, dim]] {
 			let reason = self.explain_propagation(ctx, forbidden_regions, obj, dim, true);
-			self.origin[[obj, dim]].set_upper_bound(ctx, sweep[dim], reason)?;
+			self.origin[[obj, dim]].tighten_max(ctx, sweep[dim], reason)?;
 
 			self.origin_ub[[obj, dim]] = sweep[dim];
 		}
@@ -509,8 +550,8 @@ impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I1: SolverIntView<E>,
-		I2: SolverIntView<E>,
+		I1: IntSolverActions<E>,
+		I2: IntSolverActions<E>,
 	{
 		// `sweep` is the current point being checked for feasibility.
 		let mut sweep = self.origin_lb.row(obj).to_vec();
@@ -525,7 +566,7 @@ impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
 			// we must jump to at least its upper bound + 1 in some dimension.
 			// We take the minimum of all possible jump points.
 			for (i, j) in jump.iter_mut().enumerate() {
-				*j = cmp::min(*j, fr.unwrap().upper_bound(i) + 1);
+				*j = cmp::min(*j, fr.unwrap().max(i) + 1);
 			}
 
 			let lb = self.origin_lb.row(obj);
@@ -540,7 +581,7 @@ impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
 		// If the sweep found a new, higher feasible lower bound, propagate it.
 		if sweep[dim] != self.origin_lb[[obj, dim]] {
 			let reason = self.explain_propagation(ctx, forbidden_regions, obj, dim, false);
-			self.origin[[obj, dim]].set_lower_bound(ctx, sweep[dim], reason)?;
+			self.origin[[obj, dim]].tighten_min(ctx, sweep[dim], reason)?;
 
 			self.origin_lb[[obj, dim]] = sweep[dim];
 		}
@@ -548,54 +589,11 @@ impl<const STRICT: bool, I1, I2> IntDiffnSweep<STRICT, I1, I2> {
 	}
 }
 
-impl<const STRICT: bool> IntDiffnSweep<STRICT, IntView, IntView> {
-	/// Posts the [`IntDiffnSweep`] propagator to the solver.
-	///
-	/// This is the public entry point for creating the constraint for a
-	/// [`Solver`] instance.
-	///
-	/// # Parameters
-	///
-	/// - `solver`: The solver instance.
-	/// - `origin`: A matrix-like `Vec<Vec<I>>` where `origin[i][d]` is the
-	///   origin of object `i` in dimension `d`.
-	/// - `size`: A matrix-like `Vec<Vec<I>>` where `size[i][d]` is the size of
-	///   object `i` in dimension `d`.
-	///
-	/// # Panics
-	///
-	/// Panics if the dimensions of `origin` and `size` are inconsistent.
-	/// Specifically, the number of objects (outer `Vec` length) must be the
-	/// same, and the number of dimensions (inner `Vec` length) must be the
-	/// same for all objects.
-	pub fn post<E>(solver: &mut E, origin: Vec<Vec<IntView>>, size: Vec<Vec<IntView>>)
-	where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
-		IntView: IntInspectionActions<E>,
-	{
-		// Use specialized version if all sizes are constant
-		if size.iter().flatten().all(|v| v.val(solver).is_some()) {
-			let size: Vec<Vec<_>> = size
-				.iter()
-				.map(|v| v.iter().map(|v| v.val(solver).unwrap()).collect())
-				.collect();
-
-			let con: BoxedPropagator =
-				Box::new(IntDiffnSweep::<STRICT, _, _>::new(solver, origin, size));
-			*solver += con;
-			return;
-		}
-
-		let con: BoxedPropagator = Box::new(Self::new(solver, origin, size));
-		*solver += con;
-	}
-}
-
-impl<const STRICT: bool, E, I1, I2> Constraint<E> for IntDiffnSweep<STRICT, I1, I2>
+impl<const STRICT: bool, E, I1, I2> Constraint<E> for IntNoOverlapSweep<STRICT, I1, I2>
 where
 	E: ReasoningEngine,
-	I1: ModelIntView<E>,
-	I2: ModelIntView<E>,
+	I1: IntModelActions<E>,
+	I2: IntModelActions<E>,
 {
 	fn simplify(
 		&mut self,
@@ -611,13 +609,13 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
 		let box_pos = self
 			.origin
 			.row_iter()
 			.map(|row| {
 				row.iter()
-					.map(|v| slv.solver_int(v.clone().into()))
+					.map(|v| slv.solver_view(v.clone().into()))
 					.collect()
 			})
 			.collect();
@@ -626,20 +624,20 @@ where
 			.row_iter()
 			.map(|row| {
 				row.iter()
-					.map(|v| slv.solver_int(v.clone().into()))
+					.map(|v| slv.solver_view(v.clone().into()))
 					.collect()
 			})
 			.collect();
-		IntDiffnSweep::<STRICT, _, _>::post(slv, box_pos, box_size);
+		IntNoOverlapSweep::<STRICT, _, _>::post(slv, box_pos, box_size);
 		Ok(())
 	}
 }
 
-impl<const STRICT: bool, E, I1, I2> Propagator<E> for IntDiffnSweep<STRICT, I1, I2>
+impl<const STRICT: bool, E, I1, I2> Propagator<E> for IntNoOverlapSweep<STRICT, I1, I2>
 where
 	E: ReasoningEngine,
-	I1: SolverIntView<E>,
-	I2: SolverIntView<E>,
+	I1: IntSolverActions<E>,
+	I2: IntSolverActions<E>,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Lowest);
@@ -654,21 +652,21 @@ where
 		}
 	}
 
-	#[tracing::instrument(name = "diffn", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(name = "int_no_overlap", level = "trace", skip(self, ctx))]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// Cache the current bounds of all variables.
 		for o in 0..self.num_objects() {
 			for d in 0..self.num_dimensions() {
-				self.origin_ub[[o, d]] = self.origin[[o, d]].upper_bound(ctx);
-				self.origin_lb[[o, d]] = self.origin[[o, d]].lower_bound(ctx);
-				self.size_lb[[o, d]] = self.size[[o, d]].lower_bound(ctx);
+				self.origin_ub[[o, d]] = self.origin[[o, d]].max(ctx);
+				self.origin_lb[[o, d]] = self.origin[[o, d]].min(ctx);
+				self.size_lb[[o, d]] = self.size[[o, d]].min(ctx);
 			}
 		}
 
 		// Main propagation loop: iterate through each object that is still a "target".
 		for obj in 0..self.num_objects() {
 			// Skip objects that are already fixed and verified.
-			if ctx.trailed_int(self.target[obj]) == 1 {
+			if ctx.trailed(self.target[obj]) {
 				continue;
 			}
 
@@ -685,11 +683,7 @@ where
 				if self.fixed_object(obj) {
 					let reason = self.explain_propagation(ctx, &forbidden_regions, obj, 0, false);
 					// Trigger a conflict by increasing the lower bound.
-					self.origin[[obj, 0]].set_lower_bound(
-						ctx,
-						self.origin_lb[[obj, 0]] + 1,
-						reason,
-					)?;
+					self.origin[[obj, 0]].tighten_min(ctx, self.origin_lb[[obj, 0]] + 1, reason)?;
 				}
 
 				// Prune the domains of the origin variables for the current object.
@@ -705,21 +699,21 @@ where
 				// Target optimization: If pruning has fixed the object at a feasible
 				// position, mark it as no longer being a target.
 				if all_fixed {
-					let _ = ctx.set_trailed_int(self.target[obj], 1);
+					let _ = ctx.set_trailed(self.target[obj], true);
 				}
 			}
 		}
 
 		// Source optimization: Update the bounding box of all non-fixed objects.
 		for obj in 0..self.num_objects() {
-			if ctx.trailed_int(self.target[obj]) == 1 {
+			if ctx.trailed(self.target[obj]) {
 				continue;
 			}
 			for i in 0..self.num_dimensions() {
-				*self.bounding_box.lower_bound_mut(i) =
-					cmp::min(self.bounding_box.lower_bound(i), self.origin_lb[[obj, i]]);
-				*self.bounding_box.upper_bound_mut(i) = cmp::max(
-					self.bounding_box.upper_bound(i),
+				*self.bounding_box.min_mut(i) =
+					cmp::min(self.bounding_box.min(i), self.origin_lb[[obj, i]]);
+				*self.bounding_box.max_mut(i) = cmp::max(
+					self.bounding_box.max(i),
 					self.origin_ub[[obj, i]] + self.size_lb[[obj, i]] - 1,
 				);
 			}
@@ -729,8 +723,8 @@ where
 		// object is now completely disjoint from the bounding box of all other
 		// non-fixed objects, it can no longer create forbidden regions for them.
 		for obj in 0..self.num_objects() {
-			if ctx.trailed_int(self.target[obj]) == 1 && self.disjoint(&self.bounding_box, obj) {
-				let _ = ctx.set_trailed_int(self.source[obj], 1);
+			if ctx.trailed(self.target[obj]) && self.disjoint(&self.bounding_box, obj) {
+				let _ = ctx.set_trailed(self.source[obj], true);
 			}
 		}
 
@@ -797,14 +791,25 @@ impl Region {
 		})
 	}
 
+	/// Returns the upper bound of the region in the specified dimension.
+	fn max(&self, dim: usize) -> IntVal {
+		self.0[dim].1
+	}
+
+	/// Returns a mutable reference to the upper bound of the region in the
+	/// specified dimension.
+	fn max_mut(&mut self, dim: usize) -> &mut IntVal {
+		&mut self.0[dim].1
+	}
+
 	/// Returns the lower bound of the region in the specified dimension.
-	fn lower_bound(&self, dim: usize) -> IntVal {
+	fn min(&self, dim: usize) -> IntVal {
 		self.0[dim].0
 	}
 
 	/// Returns a mutable reference to the lower bound of the region in the
 	/// specified dimension.
-	fn lower_bound_mut(&mut self, dim: usize) -> &mut IntVal {
+	fn min_mut(&mut self, dim: usize) -> &mut IntVal {
 		&mut self.0[dim].0
 	}
 
@@ -820,17 +825,6 @@ impl Region {
 			.all(|(&(lb, ub), (&o_lb, &o_ub))| o_lb <= ub && o_ub >= lb)
 	}
 
-	/// Returns the upper bound of the region in the specified dimension.
-	fn upper_bound(&self, dim: usize) -> IntVal {
-		self.0[dim].1
-	}
-
-	/// Returns a mutable reference to the upper bound of the region in the
-	/// specified dimension.
-	fn upper_bound_mut(&mut self, dim: usize) -> &mut IntVal {
-		&mut self.0[dim].1
-	}
-
 	/// Creates a new `Region` with the given number of dimensions, initialized
 	/// to default values.
 	fn with_dimensions(dimensions: usize) -> Self {
@@ -844,32 +838,31 @@ mod tests {
 	use itertools::Itertools;
 	use tracing_test::traced_test;
 
-	use crate::{Decision, Model, diffn_int, reformulate::InitConfig};
+	use crate::{Model, lower::InitConfig};
 
 	#[test]
 	#[traced_test]
-	fn test_diffn_sat_2d() {
+	fn no_overlap_sat_2d() {
 		let mut prb = Model::default();
 
-		let x1 = prb.new_int_var(1..=3);
-		let y1 = prb.new_int_var(1..=3);
+		let x1 = prb.new_int_decision(1..=3);
+		let y1 = prb.new_int_decision(1..=3);
 
-		let x2 = prb.new_int_var(1..=1);
-		let y2 = prb.new_int_var(1..=1);
+		let x2 = prb.new_int_decision(1..=1);
+		let y2 = prb.new_int_decision(1..=1);
 
-		let size = prb.new_int_var(2..=2);
+		let size = prb.new_int_decision(2..=2);
 
-		diffn_int(
-			&mut prb,
-			vec![vec![x1, y1], vec![x2, y2]],
-			vec![vec![size, size], vec![size, size]],
-			false,
-		);
+		prb.no_overlap()
+			.origins(vec![vec![x1, y1], vec![x2, y2]])
+			.sizes(vec![vec![size, size], vec![size, size]])
+			.strict(true)
+			.post();
 
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
 		let vars = vec![x1, y1, x2, y2]
 			.into_iter()
-			.map(|x| map.get(&mut slv, &Decision::from(x)))
+			.map(|x| map.get(&mut slv, x))
 			.collect_vec();
 
 		slv.expect_solutions(
@@ -885,29 +878,28 @@ mod tests {
 
 	#[test]
 	#[traced_test]
-	fn test_diffn_sat_2d_nonstrict() {
+	fn no_overlap_sat_2d_nonstrict() {
 		let mut prb = Model::default();
 
-		let x1 = prb.new_int_var(1..=3);
-		let y1 = prb.new_int_var(1..=1);
+		let x1 = prb.new_int_decision(1..=3);
+		let y1 = prb.new_int_decision(1..=1);
 
-		let x2 = prb.new_int_var(2..=3);
-		let y2 = prb.new_int_var(1..=1);
+		let x2 = prb.new_int_decision(2..=3);
+		let y2 = prb.new_int_decision(1..=1);
 
-		let size1 = prb.new_int_var(2..=2);
-		let size2 = prb.new_int_var(0..=0);
+		let size1 = prb.new_int_decision(2..=2);
+		let size2 = prb.new_int_decision(0..=0);
 
-		diffn_int(
-			&mut prb,
-			vec![vec![x1, y1], vec![x2, y2]],
-			vec![vec![size1, size1], vec![size2, size2]],
-			true,
-		);
+		prb.no_overlap()
+			.origins(vec![vec![x1, y1], vec![x2, y2]])
+			.sizes(vec![vec![size1, size1], vec![size2, size2]])
+			.strict(false)
+			.post();
 
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
 		let vars = vec![x1, y1, x2, y2]
 			.into_iter()
-			.map(|x| map.get(&mut slv, &Decision::from(x)))
+			.map(|x| map.get(&mut slv, x))
 			.collect_vec();
 
 		slv.expect_solutions(
@@ -924,30 +916,29 @@ mod tests {
 
 	#[test]
 	#[traced_test]
-	fn test_diffn_sat_3d() {
+	fn no_overlap_sat_3d() {
 		let mut prb = Model::default();
 
-		let x1 = prb.new_int_var(2..=3);
-		let y1 = prb.new_int_var(5..=5);
-		let z1 = prb.new_int_var(2..=3);
+		let x1 = prb.new_int_decision(2..=3);
+		let y1 = prb.new_int_decision(5..=5);
+		let z1 = prb.new_int_decision(2..=3);
 
-		let x2 = prb.new_int_var(1..=3);
-		let y2 = prb.new_int_var(4..=4);
-		let z2 = prb.new_int_var(2..=7);
+		let x2 = prb.new_int_decision(1..=3);
+		let y2 = prb.new_int_decision(4..=4);
+		let z2 = prb.new_int_decision(2..=7);
 
-		let size = prb.new_int_var(5..=5);
+		let size = prb.new_int_decision(5..=5);
 
-		diffn_int(
-			&mut prb,
-			vec![vec![x1, y1, z1], vec![x2, y2, z2]],
-			vec![vec![size, size, size], vec![size, size, size]],
-			false,
-		);
+		prb.no_overlap()
+			.origins(vec![vec![x1, y1, z1], vec![x2, y2, z2]])
+			.sizes(vec![vec![size, size, size], vec![size, size, size]])
+			.strict(true)
+			.post();
 
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
 		let vars = vec![x1, y1, z1, x2, y2, z2]
 			.into_iter()
-			.map(|v| map.get(&mut slv, &Decision::from(v)))
+			.map(|v| map.get(&mut slv, v))
 			.collect_vec();
 
 		slv.expect_solutions(
@@ -964,22 +955,21 @@ mod tests {
 
 	#[test]
 	#[traced_test]
-	fn test_diffn_unsat() {
+	fn no_overlap_unsat() {
 		let mut prb = Model::default();
-		let x1 = prb.new_int_var(1..=2);
-		let y1 = prb.new_int_var(1..=2);
+		let x1 = prb.new_int_decision(1..=2);
+		let y1 = prb.new_int_decision(1..=2);
 
-		let x2 = prb.new_int_var(1..=2);
-		let y2 = prb.new_int_var(1..=2);
+		let x2 = prb.new_int_decision(1..=2);
+		let y2 = prb.new_int_decision(1..=2);
 
-		let size = prb.new_int_var(4..=4);
+		let size = prb.new_int_decision(4..=4);
 
-		diffn_int(
-			&mut prb,
-			vec![vec![x1, y1], vec![x2, y2]],
-			vec![vec![size, size], vec![size, size]],
-			false,
-		);
+		prb.no_overlap()
+			.origins(vec![vec![x1, y1], vec![x2, y2]])
+			.sizes(vec![vec![size, size], vec![size, size]])
+			.strict(true)
+			.post();
 
 		prb.assert_unsatisfiable();
 	}

@@ -6,23 +6,20 @@ use std::{
 	ops::{Add, AddAssign, Neg, Sub, SubAssign},
 };
 
-use crate::{IntVal, helpers::private::Sealed};
+use crate::IntVal;
 
 /// Type alias for a integer value that has double the bit width of [`IntVal`].
 pub(crate) type DoubleIntVal = i128;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 /// Marker type indicating that overflow is impossible, and does not need to be
-/// handled by the [`Propagator`].
+/// handled by the [`Propagator`](crate::constraints::Propagator).
 pub struct OverflowImpossible;
 
-#[expect(
-	private_bounds,
-	reason = "OverflowPossible and OverflowImpossible are the only allowed implementations"
-)]
 /// Helper trait that defines the capabilities of [`OverflowPossible`] and
-/// [`OverflowImpossible`] that can be used in [`Propagator`] implementations.
-pub trait OverflowMode: Sealed + Clone + fmt::Debug + 'static {
+/// [`OverflowImpossible`] that can be used in
+/// [`Propagator`](crate::constraints::Propagator) implementations.
+pub trait OverflowMode: private::Sealed + Clone + fmt::Debug + 'static {
 	/// Constant indicating whether overflow should be handled.
 	const HANDLE_OVERFLOW: bool;
 
@@ -45,7 +42,7 @@ pub trait OverflowMode: Sealed + Clone + fmt::Debug + 'static {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 /// Marker type indicating that overflow might be possible, and should be
-/// handled by the [`Propagator`].
+/// handled by the [`Propagator`](crate::constraints::Propagator).
 pub struct OverflowPossible;
 
 impl OverflowMode for OverflowImpossible {
@@ -54,10 +51,21 @@ impl OverflowMode for OverflowImpossible {
 	type Accumulator = IntVal;
 }
 
+impl private::Sealed for OverflowImpossible {}
+
 impl OverflowMode for OverflowPossible {
 	const HANDLE_OVERFLOW: bool = true;
 
 	type Accumulator = DoubleIntVal;
+}
+
+impl private::Sealed for OverflowPossible {}
+
+/// Sealing helpers for `OverflowMode`.
+mod private {
+	/// Helper trait that ensures that the [`OverflowMode`] trait cannot be
+	/// implemented outside of this crate.
+	pub trait Sealed {}
 }
 
 #[cfg(test)]

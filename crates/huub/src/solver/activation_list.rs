@@ -7,8 +7,8 @@ use std::{
 };
 
 use crate::{
-	ConRef, ModAdvisor,
-	solver::engine::{Advisor, PropRef},
+	model::{self, ConRef},
+	solver::engine::{self, PropRef},
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -97,28 +97,28 @@ pub enum IntPropCond {
 	Domain,
 }
 
-impl From<ActivationActionS> for ActivationAction<Advisor, PropRef> {
+impl From<ActivationActionS> for ActivationAction<engine::AdvRef, PropRef> {
 	fn from(value: ActivationActionS) -> Self {
 		if (value.0 & 0b1) == 1 {
-			Self::Advise(Advisor::from_raw(value.0 >> 1))
+			Self::Advise(engine::AdvRef::from_raw(value.0 >> 1))
 		} else {
 			Self::Enqueue(PropRef::from_raw(value.0 >> 1))
 		}
 	}
 }
 
-impl From<ActivationActionS> for ActivationAction<ModAdvisor, ConRef> {
+impl From<ActivationActionS> for ActivationAction<model::AdvRef, ConRef> {
 	fn from(value: ActivationActionS) -> Self {
 		if (value.0 & 0b1) == 1 {
-			Self::Advise(ModAdvisor::from_raw(value.0 >> 1))
+			Self::Advise(model::AdvRef::from_raw(value.0 >> 1))
 		} else {
 			Self::Enqueue(ConRef::from_raw(value.0 >> 1))
 		}
 	}
 }
 
-impl From<ActivationAction<Advisor, PropRef>> for ActivationActionS {
-	fn from(value: ActivationAction<Advisor, PropRef>) -> Self {
+impl From<ActivationAction<engine::AdvRef, PropRef>> for ActivationActionS {
+	fn from(value: ActivationAction<engine::AdvRef, PropRef>) -> Self {
 		Self(match value {
 			ActivationAction::Advise(advisor) => (advisor.raw() << 1) | 0b1,
 			ActivationAction::Enqueue(prop) => prop.raw() << 1,
@@ -126,8 +126,8 @@ impl From<ActivationAction<Advisor, PropRef>> for ActivationActionS {
 	}
 }
 
-impl From<ActivationAction<ModAdvisor, ConRef>> for ActivationActionS {
-	fn from(value: ActivationAction<ModAdvisor, ConRef>) -> Self {
+impl From<ActivationAction<model::AdvRef, ConRef>> for ActivationActionS {
+	fn from(value: ActivationAction<model::AdvRef, ConRef>) -> Self {
 		Self(match value {
 			ActivationAction::Advise(advisor) => (advisor.raw() << 1) | 0b1,
 			ActivationAction::Enqueue(prop) => prop.raw() << 1,
@@ -206,7 +206,7 @@ impl ActivationList {
 	pub(crate) fn extend(&mut self, other: Self) {
 		for (i, act) in other.activations.into_iter().enumerate() {
 			let i = i as u32;
-			let act: ActivationAction<Advisor, PropRef> = act.into();
+			let act: ActivationAction<engine::AdvRef, PropRef> = act.into();
 			self.add(
 				act,
 				if i < other.lower_bound_idx {
@@ -293,11 +293,11 @@ mod tests {
 	#[test]
 	fn test_activation_list() {
 		let props = [
-			(PropRef::from(0), IntPropCond::Fixed),
-			(PropRef::from(1), IntPropCond::LowerBound),
-			(PropRef::from(2), IntPropCond::UpperBound),
-			(PropRef::from(3), IntPropCond::Bounds),
-			(PropRef::from(4), IntPropCond::Domain),
+			(PropRef::new(0), IntPropCond::Fixed),
+			(PropRef::new(1), IntPropCond::LowerBound),
+			(PropRef::new(2), IntPropCond::UpperBound),
+			(PropRef::new(3), IntPropCond::Bounds),
+			(PropRef::new(4), IntPropCond::Domain),
 		];
 
 		for list in props.iter().permutations(5) {
@@ -312,11 +312,11 @@ mod tests {
 			assert_eq!(
 				fixed,
 				FxHashSet::from_iter([
-					ActivationAction::Enqueue(PropRef::from(0)),
-					ActivationAction::Enqueue(PropRef::from(1)),
-					ActivationAction::Enqueue(PropRef::from(2)),
-					ActivationAction::Enqueue(PropRef::from(3)),
-					ActivationAction::Enqueue(PropRef::from(4))
+					ActivationAction::Enqueue(PropRef::new(0)),
+					ActivationAction::Enqueue(PropRef::new(1)),
+					ActivationAction::Enqueue(PropRef::new(2)),
+					ActivationAction::Enqueue(PropRef::new(3)),
+					ActivationAction::Enqueue(PropRef::new(4))
 				])
 			);
 			let mut bounds = FxHashSet::default();
@@ -326,10 +326,10 @@ mod tests {
 			assert_eq!(
 				bounds,
 				FxHashSet::from_iter([
-					ActivationAction::Enqueue(PropRef::from(1)),
-					ActivationAction::Enqueue(PropRef::from(2)),
-					ActivationAction::Enqueue(PropRef::from(3)),
-					ActivationAction::Enqueue(PropRef::from(4))
+					ActivationAction::Enqueue(PropRef::new(1)),
+					ActivationAction::Enqueue(PropRef::new(2)),
+					ActivationAction::Enqueue(PropRef::new(3)),
+					ActivationAction::Enqueue(PropRef::new(4))
 				])
 			);
 			let mut lower_bound = FxHashSet::default();
@@ -342,9 +342,9 @@ mod tests {
 			assert_eq!(
 				lower_bound,
 				FxHashSet::from_iter([
-					ActivationAction::Enqueue(PropRef::from(1)),
-					ActivationAction::Enqueue(PropRef::from(3)),
-					ActivationAction::Enqueue(PropRef::from(4))
+					ActivationAction::Enqueue(PropRef::new(1)),
+					ActivationAction::Enqueue(PropRef::new(3)),
+					ActivationAction::Enqueue(PropRef::new(4))
 				])
 			);
 			let mut upper_bound = FxHashSet::default();
@@ -357,9 +357,9 @@ mod tests {
 			assert_eq!(
 				upper_bound,
 				FxHashSet::from_iter([
-					ActivationAction::Enqueue(PropRef::from(2)),
-					ActivationAction::Enqueue(PropRef::from(3)),
-					ActivationAction::Enqueue(PropRef::from(4))
+					ActivationAction::Enqueue(PropRef::new(2)),
+					ActivationAction::Enqueue(PropRef::new(3)),
+					ActivationAction::Enqueue(PropRef::new(4))
 				])
 			);
 			let mut domain = FxHashSet::default();
@@ -368,7 +368,7 @@ mod tests {
 			});
 			assert_eq!(
 				domain,
-				FxHashSet::from_iter([ActivationAction::Enqueue(PropRef::from(4))])
+				FxHashSet::from_iter([ActivationAction::Enqueue(PropRef::new(4))])
 			);
 		}
 	}

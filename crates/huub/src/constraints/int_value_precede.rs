@@ -2,28 +2,19 @@
 //! enforces that a fixed order of the first occurrences of a given list of
 //! integers in a list of integer variables.
 
-use std::{
-	cmp::{max, min},
-	ops::AddAssign,
-};
-
-use pindakaas::Lit as RawLit;
+use std::cmp::{max, min};
 
 use crate::{
 	Conjunction, IntVal,
 	actions::{
-		BoolInspectionActions, ConstructionActions, InitActions, IntDecisionActions,
-		IntInspectionActions, ReasoningContext, ReasoningEngine, ReformulationActions,
-		TrailingActions,
+		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions, PostingActions,
+		ReasoningContext, ReasoningEngine, Trailed, TrailingActions,
 	},
 	constraints::{
-		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
+		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
 	},
-	reformulate::ReformulationError,
-	solver::{
-		IntLitMeaning, IntView, activation_list::IntPropCond, int_var::IntVarRef,
-		queue::PriorityLevel, trail::TrailedInt,
-	},
+	lower::{LoweringContext, LoweringError},
+	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -35,14 +26,14 @@ pub struct IntSeqPrecedeChainBounds<I> {
 	/// True if initial pass is completed.
 	initialized: bool,
 	/// First possible occurrence of i.
-	first: Vec<TrailedInt>,
+	first: Vec<Trailed<IntVal>>,
 	/// Last possible occurrence of i.
-	last: Vec<TrailedInt>,
+	last: Vec<Trailed<IntVal>>,
 	/// Used for incremental updates of upper bounds, `first[i] = k` implies
 	/// `first_val[k] = i`.
-	first_val: Vec<TrailedInt>,
+	first_val: Vec<Trailed<IntVal>>,
 	/// Greatest i that has to occur.
-	max_last: TrailedInt,
+	max_last: Trailed<IntVal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -56,14 +47,14 @@ pub struct IntValuePrecedeChainValue<I> {
 	/// True if initial pass is completed.
 	initialized: bool,
 	/// First possible occurrence of `values[i]`.
-	first: Vec<TrailedInt>,
+	first: Vec<Trailed<IntVal>>,
 	/// Last possible occurrence of `values[i]`.
-	last: Vec<TrailedInt>,
+	last: Vec<Trailed<IntVal>>,
 	/// Used for incremental updates of upper bounds, `first[i] = k` implies
 	/// `first_val[k] = i`.
-	first_val: Vec<TrailedInt>,
+	first_val: Vec<Trailed<IntVal>>,
 	/// Greatest i such that `values[i]` has to occur.
-	max_last: TrailedInt,
+	max_last: Trailed<IntVal>,
 	/// Minimum value in values.
 	min_val: IntVal,
 	/// Maximum value in values.
@@ -104,7 +95,7 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 				let mut i = i + 1;
 				let mut k = k;
 				loop {
-					if self.vars[i].lower_bound(ctx) > k {
+					if self.vars[i].min(ctx) > k {
 						reason.push(self.vars[i].lit(ctx, IntLitMeaning::GreaterEq(k + 1)));
 						break;
 					}
@@ -147,7 +138,7 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 	fn initial_propagation<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
 		// Current upper bound
 		let mut up = 0;
@@ -156,40 +147,40 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 
 		// Forward pass to set upper bounds and capture the highest lower bound.
 		for (i, v) in self.vars.iter().enumerate() {
-			let mut ub_v = v.upper_bound(ctx);
+			let mut ub_v = v.max(ctx);
 			// Upper bound can only increase by 1, set new bound if larger values are in the
 			// domain.
 			if ub_v > up + 1 {
 				if v.in_domain(ctx, up + 1) {
 					ub_v = up + 1;
 				}
-				v.set_upper_bound(ctx, up + 1, self.explain_upper(i, up + 1))?;
+				v.tighten_max(ctx, up + 1, self.explain_upper(i, up + 1))?;
 			}
 			// The current var is the first possibility to reach value up + 1.
 			if ub_v == up + 1 {
 				up += 1;
-				ctx.set_trailed_int(self.first[up as usize], i as IntVal);
-				ctx.set_trailed_int(self.first_val[i], up);
+				ctx.set_trailed(self.first[up as usize], i as IntVal);
+				ctx.set_trailed(self.first_val[i], up);
 			}
-			let lb_v = v.lower_bound(ctx);
+			let lb_v = v.min(ctx);
 			// The lower bound will be needed for the backward pass.
 			if low < lb_v {
-				ctx.set_trailed_int(self.last[lb_v as usize], i as IntVal);
+				ctx.set_trailed(self.last[lb_v as usize], i as IntVal);
 				low = lb_v;
 			}
 		}
 		// The highest lower bound is stored.
-		ctx.set_trailed_int(self.max_last, low);
+		ctx.set_trailed(self.max_last, low);
 
 		// Backward pass to set lower bounds.
 		for (i, v) in self.vars.iter().enumerate().rev() {
 			// Lower bound is enforced if upper and lower bound coincide.
-			if ctx.trailed_int(self.first[low as usize]) == i as IntVal {
-				v.set_lower_bound(ctx, low, self.explain_lower(i, low))?;
+			if ctx.trailed(self.first[low as usize]) == i as IntVal {
+				v.tighten_min(ctx, low, self.explain_lower(i, low))?;
 			}
 			// Found possibility to use a lower value - reduce lower bound.
-			if i as IntVal <= ctx.trailed_int(self.last[low as usize]) && v.in_domain(ctx, low) {
-				ctx.set_trailed_int(self.last[low as usize], i as IntVal);
+			if i as IntVal <= ctx.trailed(self.last[low as usize]) && v.in_domain(ctx, low) {
+				ctx.set_trailed(self.last[low as usize], i as IntVal);
 				low -= 1;
 			}
 			// Stop early if no more lower bounds can be propagated.
@@ -210,26 +201,16 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 		I: IntInspectionActions<E>,
 	{
 		let n = vars.len();
-		let ub = vars.iter().fold(0, |u, item| {
-			if item.upper_bound(engine) > u {
-				u + 1
-			} else {
-				u
-			}
-		});
+		let ub = vars
+			.iter()
+			.fold(0, |u, item| if item.max(engine) > u { u + 1 } else { u });
 
-		let first = (0..=ub).map(|_| engine.new_trailed_int(0)).collect();
+		let first = (0..=ub).map(|_| engine.new_trailed(0)).collect();
 		let last = (0..=ub)
-			.map(|i| {
-				if i == 0 {
-					engine.new_trailed_int(IntVal::MIN)
-				} else {
-					engine.new_trailed_int(IntVal::MAX)
-				}
-			})
+			.map(|i| engine.new_trailed(if i == 0 { IntVal::MIN } else { IntVal::MAX }))
 			.collect();
-		let first_val = (0..n).map(|_| engine.new_trailed_int(0)).collect();
-		let max_last = engine.new_trailed_int(0);
+		let first_val = (0..n).map(|_| engine.new_trailed(0)).collect();
+		let max_last = engine.new_trailed(0);
 
 		Self {
 			vars: vars.clone(),
@@ -241,6 +222,24 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 		}
 	}
 
+	/// Create a new [`IntSeqPrecedeChainBounds`] propagator and post it in the
+	/// solver.
+	pub fn post<E>(solver: &mut E, mut vars: Vec<I>)
+	where
+		E: PostingActions + ?Sized,
+		I: IntSolverActions<Engine> + IntInspectionActions<E>,
+	{
+		// Variables that do not allow positive values are irrelevant.
+		vars.retain(|v| v.max(solver) > 0);
+		if vars.is_empty() {
+			return;
+		}
+		vars.shrink_to_fit();
+
+		let con = IntSeqPrecedeChainBounds::new(solver, vars);
+		solver.add_propagator(Box::new(con));
+	}
+
 	/// Iteratively repairs the lower bounds starting with k, only iterates as
 	/// far as necessary.
 	fn repair_lower<E>(
@@ -250,25 +249,21 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 	) -> Result<(IntVal, IntVal), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
 		// Start at the last possible occurrence of k, then iterate backwards.
-		let mut i = ctx.trailed_int(self.last[k as usize]);
+		let mut i = ctx.trailed(self.last[k as usize]);
 		// If k == 0, no more lower bounds can be propagated.
 		while k > 0 {
 			if self.vars[i as usize].in_domain(ctx, k) {
-				ctx.set_trailed_int(self.last[k as usize], i);
+				ctx.set_trailed(self.last[k as usize], i);
 				// Enforce lower bound if lower and upper bound coincide.
-				if ctx.trailed_int(self.first[k as usize]) == i {
-					self.vars[i as usize].set_lower_bound(
-						ctx,
-						k,
-						self.explain_lower(i as usize, k),
-					)?;
+				if ctx.trailed(self.first[k as usize]) == i {
+					self.vars[i as usize].tighten_min(ctx, k, self.explain_lower(i as usize, k))?;
 				}
 				k -= 1;
 				// Abort early if the previous state is rejoined.
-				if ctx.trailed_int(self.last[k as usize]) < i {
+				if ctx.trailed(self.last[k as usize]) < i {
 					return Ok((i, k + 1));
 				}
 			}
@@ -276,7 +271,7 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 			i -= 1;
 			// Hit boundary case, this will cause a conflict.
 			if i < 0 {
-				self.vars[0].set_lower_bound(ctx, k, self.explain_lower(0, k))?;
+				self.vars[0].tighten_min(ctx, k, self.explain_lower(0, k))?;
 			}
 		}
 
@@ -292,31 +287,27 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
-		let mut i = ctx.trailed_int(self.first[k as usize]);
+		let mut i = ctx.trailed(self.first[k as usize]);
 		let mut lim = self.upper_limit(ctx, k as usize);
 
 		while i <= lim {
 			// Set new upper bound if necessary.
-			if self.vars[i as usize].upper_bound(ctx) > k {
-				self.vars[i as usize].set_upper_bound(ctx, k, self.explain_upper(i as usize, k))?;
+			if self.vars[i as usize].max(ctx) > k {
+				self.vars[i as usize].tighten_max(ctx, k, self.explain_upper(i as usize, k))?;
 			}
 			// If var i is the first possibility to reach value k
 			if self.vars[i as usize].in_domain(ctx, k) {
-				ctx.set_trailed_int(self.first[k as usize], i);
-				ctx.set_trailed_int(self.first_val[i as usize], k);
+				ctx.set_trailed(self.first[k as usize], i);
+				ctx.set_trailed(self.first_val[i as usize], k);
 				// Enforce lower bound if lower and upper bound coincide.
-				if ctx.trailed_int(self.last[k as usize]) == i {
-					self.vars[i as usize].set_lower_bound(
-						ctx,
-						k,
-						self.explain_lower(i as usize, k),
-					)?;
+				if ctx.trailed(self.last[k as usize]) == i {
+					self.vars[i as usize].tighten_min(ctx, k, self.explain_lower(i as usize, k))?;
 				}
 				k += 1;
 				// Abort early if the previous state is rejoined.
-				if (k as usize) == self.first.len() || i < ctx.trailed_int(self.first[k as usize]) {
+				if (k as usize) == self.first.len() || i < ctx.trailed(self.first[k as usize]) {
 					return Ok(());
 				}
 				lim = self.upper_limit(ctx, k as usize);
@@ -326,51 +317,24 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 
 		// Hit boundary case, this will cause a conflict.
 		if (i as usize) < self.vars.len() {
-			self.vars[i as usize - 1].set_lower_bound(
-				ctx,
-				k,
-				self.explain_lower(i as usize - 1, k),
-			)?;
+			self.vars[i as usize - 1].tighten_min(ctx, k, self.explain_lower(i as usize - 1, k))?;
 		}
 
-		ctx.set_trailed_int(self.first[k as usize], 0);
+		ctx.set_trailed(self.first[k as usize], 0);
 		Ok(())
 	}
 
 	/// Get the latest occurrence of k, or the maximum variable index if there
 	/// is no latest.
 	fn upper_limit<Ctx: TrailingActions>(&self, ctx: &mut Ctx, k: usize) -> IntVal {
-		min(ctx.trailed_int(self.last[k]), self.vars.len() as IntVal - 1)
-	}
-}
-
-impl IntSeqPrecedeChainBounds<IntView> {
-	/// Create a new [`IntSeqPrecedeChainBounds`] propagator and post it in the
-	/// solver.
-	pub fn post<E>(solver: &mut E, mut vars: Vec<IntView>)
-	where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
-		E::Atom: From<bool> + From<RawLit>,
-		IntView: IntInspectionActions<E>,
-		IntVarRef: IntInspectionActions<E>,
-		RawLit: BoolInspectionActions<E>,
-	{
-		// Variables that do not allow positive values are irrelevant.
-		vars.retain(|&v| v.upper_bound(solver) > 0);
-		if vars.is_empty() {
-			return;
-		}
-		vars.shrink_to_fit();
-
-		let con = IntSeqPrecedeChainBounds::new(solver, vars);
-		*solver += Box::new(con);
+		min(ctx.trailed(self.last[k]), self.vars.len() as IntVal - 1)
 	}
 }
 
 impl<E, I> Constraint<E> for IntSeqPrecedeChainBounds<I>
 where
 	E: ReasoningEngine,
-	I: ModelIntView<E>,
+	I: IntModelActions<E>,
 {
 	fn simplify(
 		&mut self,
@@ -378,7 +342,7 @@ where
 	) -> Result<SimplificationStatus, E::Conflict> {
 		if !self.initialized {
 			// Variables that do not allow positive values are irrelevant.
-			self.vars.retain(|v| v.upper_bound(ctx) > 0);
+			self.vars.retain(|v| v.max(ctx) > 0);
 			self.vars.shrink_to_fit();
 		}
 
@@ -390,11 +354,11 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
 		let vars: Vec<_> = self
 			.vars
 			.iter()
-			.map(|v| slv.solver_int(v.clone().into()))
+			.map(|v| slv.solver_view(v.clone().into()))
 			.collect();
 
 		IntSeqPrecedeChainBounds::post(slv, vars);
@@ -405,7 +369,7 @@ where
 impl<E, I> Propagator<E> for IntSeqPrecedeChainBounds<I>
 where
 	E: ReasoningEngine,
-	I: SolverIntView<E>,
+	I: IntSolverActions<E>,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
@@ -424,37 +388,35 @@ where
 		// Check upper bound updates, only necessary for all elements in first,
 		// not all variables.
 		for (k, &t) in self.first.iter().enumerate() {
-			let i = ctx.trailed_int(t);
-			if ctx.trailed_int(self.first_val[i as usize]) == k as IntVal
-				&& self.vars[i as usize].upper_bound(ctx) < k as IntVal
+			let i = ctx.trailed(t);
+			if ctx.trailed(self.first_val[i as usize]) == k as IntVal
+				&& self.vars[i as usize].max(ctx) < k as IntVal
 			{
 				self.repair_upper(ctx, k as IntVal)?;
 			}
 		}
 		// Lower bound requires full pass to catch all potential propagations.
 		let mut i = self.vars.len() as IntVal;
-		let mut k = ctx.trailed_int(self.max_last);
+		let mut k = ctx.trailed(self.max_last);
 		while i > 0 {
 			i -= 1;
-			if k > 0 && ctx.trailed_int(self.last[k as usize - 1]) == i {
+			if k > 0 && ctx.trailed(self.last[k as usize - 1]) == i {
 				k -= 1;
 			}
-			let lb = self.vars[i as usize].lower_bound(ctx);
+			let lb = self.vars[i as usize].min(ctx);
 			// Deal with increase of lower bound.
 			if lb > k {
-				ctx.set_trailed_int(self.last[lb as usize], i);
+				ctx.set_trailed(self.last[lb as usize], i);
 				// Update highest lower bound if necessary.
-				if lb > ctx.trailed_int(self.max_last) {
-					ctx.set_trailed_int(self.max_last, lb);
+				if lb > ctx.trailed(self.max_last) {
+					ctx.set_trailed(self.max_last, lb);
 				}
 				// If a repair is necessary, continue check where the repair ended.
 				(i, k) = self.repair_lower(ctx, lb)?;
 				continue;
 			}
 			// Deal with moving the last possibility to have value k for the first.
-			if ctx.trailed_int(self.last[k as usize]) == i
-				&& !self.vars[i as usize].in_domain(ctx, k)
-			{
+			if ctx.trailed(self.last[k as usize]) == i && !self.vars[i as usize].in_domain(ctx, k) {
 				(i, k) = self.repair_lower(ctx, k)?;
 			}
 		}
@@ -553,7 +515,7 @@ impl<I> IntValuePrecedeChainValue<I> {
 	fn initial_propagation<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
 		// Current upper bound
 		let mut up = 0;
@@ -564,18 +526,18 @@ impl<I> IntValuePrecedeChainValue<I> {
 		for (i, v) in self.vars.iter().enumerate() {
 			// Upper bound can only increase by 1, set new bound if larger values are in the
 			// domain.
-			self.propagate_upper_bound(ctx, i, up + 1)?;
+			self.propagate_max(ctx, i, up + 1)?;
 			// The current var is the first possibility to reach index up + 1.
 			if up < self.values.len() && v.in_domain(ctx, self.values[up]) {
 				up += 1;
-				ctx.set_trailed_int(self.first[up], i as IntVal);
-				ctx.set_trailed_int(self.first_val[i], up as IntVal);
+				ctx.set_trailed(self.first[up], i as IntVal);
+				ctx.set_trailed(self.first_val[i], up as IntVal);
 			}
 			// The lower bound will be needed for the backward pass.
 			if let Ok(Some(lb)) = self.lowest_index(ctx, i)
 				&& low < lb
 			{
-				ctx.set_trailed_int(self.last[lb], i as IntVal);
+				ctx.set_trailed(self.last[lb], i as IntVal);
 				low = lb;
 			}
 		}
@@ -583,14 +545,13 @@ impl<I> IntValuePrecedeChainValue<I> {
 		// Backward pass to set lower bounds.
 		for (i, v) in self.vars.iter().enumerate().rev() {
 			// Lower bound is enforced if upper and lower bound coincide.
-			if ctx.trailed_int(self.first[low]) == i as IntVal {
-				self.propagate_lower_bound(ctx, i, low)?;
+			if ctx.trailed(self.first[low]) == i as IntVal {
+				self.propagate_min(ctx, i, low)?;
 			}
 			// Found possibility to use a lower value - reduce lower bound.
-			if i as IntVal <= ctx.trailed_int(self.last[low])
-				&& v.in_domain(ctx, self.values[low - 1])
+			if i as IntVal <= ctx.trailed(self.last[low]) && v.in_domain(ctx, self.values[low - 1])
 			{
-				ctx.set_trailed_int(self.last[low], i as IntVal);
+				ctx.set_trailed(self.last[low], i as IntVal);
 				low -= 1;
 			}
 			// Stop early if no more lower bounds can be propagated.
@@ -651,23 +612,17 @@ impl<I> IntValuePrecedeChainValue<I> {
 		let first = (0..=values.len())
 			.map(|i| {
 				if i == 0 {
-					engine.new_trailed_int(0)
+					engine.new_trailed(0)
 				} else {
-					engine.new_trailed_int(vars.len() as IntVal - 1)
+					engine.new_trailed(vars.len() as IntVal - 1)
 				}
 			})
 			.collect();
 		let last = (0..=values.len())
-			.map(|i| {
-				if i == 0 {
-					engine.new_trailed_int(IntVal::MIN)
-				} else {
-					engine.new_trailed_int(IntVal::MAX)
-				}
-			})
+			.map(|i| engine.new_trailed(if i == 0 { IntVal::MIN } else { IntVal::MAX }))
 			.collect();
-		let first_val = (0..vars.len()).map(|_| engine.new_trailed_int(0)).collect();
-		let max_last = engine.new_trailed_int(0);
+		let first_val = (0..vars.len()).map(|_| engine.new_trailed(0)).collect();
+		let max_last = engine.new_trailed(0);
 		// Set up some data structures to deal with holes in values more efficiently.
 		let min_val = *values.iter().min().unwrap_or(&IntVal::MAX);
 		let max_val = *values.iter().max().unwrap_or(&IntVal::MIN);
@@ -705,9 +660,25 @@ impl<I> IntValuePrecedeChainValue<I> {
 		}
 	}
 
-	/// Propagate a lower bound by excluding all elements outside values, and
-	/// values with lower index.
-	fn propagate_lower_bound<E>(
+	/// Create a new [`IntValuePrecedeChainValue`] propagator and post it in the
+	/// [`Solver`](crate::solver::Solver).
+	pub fn post<E>(solver: &mut E, values: Vec<IntVal>, mut vars: Vec<I>)
+	where
+		E: PostingActions + ?Sized,
+		I: IntSolverActions<Engine> + IntInspectionActions<E>,
+	{
+		// Variables that do not any tracked values are irrelevant.
+		vars.retain(|var| values.iter().any(|&val| var.in_domain(solver, val)));
+		if vars.is_empty() {
+			return;
+		}
+		vars.shrink_to_fit();
+		let con = IntValuePrecedeChainValue::new(solver, values, vars);
+		solver.add_propagator(Box::new(con));
+	}
+
+	/// Propagate an upper bound by removing all values with higher index.
+	fn propagate_max<E>(
 		&self,
 		ctx: &mut E::PropagationCtx<'_>,
 		i: usize,
@@ -715,16 +686,36 @@ impl<I> IntValuePrecedeChainValue<I> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
+	{
+		for k in j..self.values.len() {
+			if self.vars[i].in_domain(ctx, self.values[k]) {
+				self.vars[i].remove_val(ctx, self.values[k], self.explain_upper(i, k))?;
+			}
+		}
+		Ok(())
+	}
+
+	/// Propagate a lower bound by excluding all elements outside values, and
+	/// values with lower index.
+	fn propagate_min<E>(
+		&self,
+		ctx: &mut E::PropagationCtx<'_>,
+		i: usize,
+		j: usize,
+	) -> Result<(), E::Conflict>
+	where
+		E: ReasoningEngine,
+		I: IntSolverActions<E>,
 	{
 		let (lb, ub) = self.vars[i].bounds(ctx);
 		// Exclude values below the minimum tracked value.
 		if lb < self.min_val {
-			self.vars[i].set_lower_bound(ctx, self.min_val, self.explain_lower(i, j))?;
+			self.vars[i].tighten_min(ctx, self.min_val, self.explain_lower(i, j))?;
 		}
 		// Exclude values above the maximum tracked value.
 		if ub > self.max_val {
-			self.vars[i].set_upper_bound(ctx, self.max_val, self.explain_lower(i, j))?;
+			self.vars[i].tighten_max(ctx, self.max_val, self.explain_lower(i, j))?;
 		}
 		// Exclude holes in the tracked values.
 		let mut h = max(lb, self.min_hole);
@@ -734,33 +725,14 @@ impl<I> IntValuePrecedeChainValue<I> {
 				break;
 			}
 			if self.vars[i].in_domain(ctx, h) {
-				self.vars[i].set_not_eq(ctx, h, self.explain_lower(i, j))?;
+				self.vars[i].remove_val(ctx, h, self.explain_lower(i, j))?;
 			}
 			h += 1;
 		}
 		// Exclude values with lower index.
 		for k in 0..j - 1 {
 			if self.vars[i].in_domain(ctx, self.values[k]) {
-				self.vars[i].set_not_eq(ctx, self.values[k], self.explain_lower(i, j))?;
-			}
-		}
-		Ok(())
-	}
-
-	/// Propagate an upper bound by removing all values with higher index.
-	fn propagate_upper_bound<E>(
-		&self,
-		ctx: &mut E::PropagationCtx<'_>,
-		i: usize,
-		j: usize,
-	) -> Result<(), E::Conflict>
-	where
-		E: ReasoningEngine,
-		I: SolverIntView<E>,
-	{
-		for k in j..self.values.len() {
-			if self.vars[i].in_domain(ctx, self.values[k]) {
-				self.vars[i].set_not_eq(ctx, self.values[k], self.explain_upper(i, k))?;
+				self.vars[i].remove_val(ctx, self.values[k], self.explain_lower(i, j))?;
 			}
 		}
 		Ok(())
@@ -775,21 +747,21 @@ impl<I> IntValuePrecedeChainValue<I> {
 	) -> Result<(usize, usize), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
 		// Start at the last possible occurrence of k, then iterate backwards.
-		let mut i = ctx.trailed_int(self.last[k]);
+		let mut i = ctx.trailed(self.last[k]);
 		// If k == 0, no more lower bounds can be propagated.
 		while k > 0 {
 			if self.vars[i as usize].in_domain(ctx, self.values[k - 1]) {
-				ctx.set_trailed_int(self.last[k], i);
+				ctx.set_trailed(self.last[k], i);
 				// Enforce lower bound if lower and upper bound coincide.
-				if ctx.trailed_int(self.first[k]) == i {
-					self.propagate_lower_bound(ctx, i as usize, k)?;
+				if ctx.trailed(self.first[k]) == i {
+					self.propagate_min(ctx, i as usize, k)?;
 				}
 				k -= 1;
 				// Abort early if the previous state is rejoined.
-				if ctx.trailed_int(self.last[k]) < i {
+				if ctx.trailed(self.last[k]) < i {
 					return Ok((i as usize, k + 1));
 				}
 			}
@@ -797,7 +769,7 @@ impl<I> IntValuePrecedeChainValue<I> {
 			i -= 1;
 			// Hit boundary case, this will cause a conflict.
 			if i < 0 {
-				self.propagate_lower_bound(ctx, 0, k)?;
+				self.propagate_min(ctx, 0, k)?;
 				// Return Ok since the conflict is only detected during propagation
 				// (several domain elements are removed separately).
 				return Ok((0, k));
@@ -819,25 +791,25 @@ impl<I> IntValuePrecedeChainValue<I> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
-		let mut i = ctx.trailed_int(self.first[k]);
+		let mut i = ctx.trailed(self.first[k]);
 		let mut lim = self.upper_limit(ctx, k);
 
 		while i <= lim {
 			// Set new upper bound if necessary.
-			self.propagate_upper_bound(ctx, i as usize, k)?;
+			self.propagate_max(ctx, i as usize, k)?;
 			// If var i is the first possibility to reach value k
 			if self.vars[i as usize].in_domain(ctx, self.values[k - 1]) {
-				ctx.set_trailed_int(self.first[k], i);
-				ctx.set_trailed_int(self.first_val[i as usize], k as IntVal);
+				ctx.set_trailed(self.first[k], i);
+				ctx.set_trailed(self.first_val[i as usize], k as IntVal);
 				// Enforce lower bound if lower and upper bound coincide.
-				if ctx.trailed_int(self.last[k]) == i {
-					self.propagate_lower_bound(ctx, i as usize, k)?;
+				if ctx.trailed(self.last[k]) == i {
+					self.propagate_min(ctx, i as usize, k)?;
 				}
 				k += 1;
 				// Abort early if the previous state is rejoined.
-				if k == self.first.len() || i < ctx.trailed_int(self.first[k]) {
+				if k == self.first.len() || i < ctx.trailed(self.first[k]) {
 					return Ok(());
 				}
 				lim = self.upper_limit(ctx, k);
@@ -847,13 +819,13 @@ impl<I> IntValuePrecedeChainValue<I> {
 
 		// Hit boundary case, this will cause a conflict.
 		if (i as usize) < self.vars.len() {
-			self.propagate_lower_bound(ctx, i as usize - 1, k)?;
+			self.propagate_min(ctx, i as usize - 1, k)?;
 			// Return Ok since the conflict is only detected during propagation
 			// (several domain elements are removed separately).
 			return Ok(());
 		}
 
-		ctx.set_trailed_int(self.first[k], 0);
+		ctx.set_trailed(self.first[k], 0);
 		Ok(())
 	}
 
@@ -863,33 +835,14 @@ impl<I> IntValuePrecedeChainValue<I> {
 	where
 		Ctx: TrailingActions,
 	{
-		min(ctx.trailed_int(self.last[k]), self.vars.len() as IntVal - 1)
-	}
-}
-
-impl IntValuePrecedeChainValue<IntView> {
-	/// Create a new [`ValuePrecedeChainValue`] propagator and post it in the
-	/// solver.
-	pub fn post<E>(solver: &mut E, values: Vec<IntVal>, mut vars: Vec<IntView>)
-	where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
-		IntView: IntInspectionActions<E>,
-	{
-		// Variables that do not any tracked values are irrelevant.
-		vars.retain(|&var| values.iter().any(|&val| var.in_domain(solver, val)));
-		if vars.is_empty() {
-			return;
-		}
-		vars.shrink_to_fit();
-		let con = IntValuePrecedeChainValue::new(solver, values, vars);
-		*solver += Box::new(con);
+		min(ctx.trailed(self.last[k]), self.vars.len() as IntVal - 1)
 	}
 }
 
 impl<E, I> Constraint<E> for IntValuePrecedeChainValue<I>
 where
 	E: ReasoningEngine,
-	I: ModelIntView<E>,
+	I: IntModelActions<E>,
 {
 	fn simplify(
 		&mut self,
@@ -914,11 +867,11 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
 		let vars: Vec<_> = self
 			.vars
 			.iter()
-			.map(|v| slv.solver_int(v.clone().into()))
+			.map(|v| slv.solver_view(v.clone().into()))
 			.collect();
 		IntValuePrecedeChainValue::post(slv, self.values.clone(), vars);
 		Ok(())
@@ -928,7 +881,7 @@ where
 impl<E, I> Propagator<E> for IntValuePrecedeChainValue<I>
 where
 	E: ReasoningEngine,
-	I: SolverIntView<E>,
+	I: IntSolverActions<E>,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
@@ -947,8 +900,8 @@ where
 		// Check upper bound updates, only necessary for all elements in first,
 		// not all variables.
 		for (k, &t) in self.first.iter().enumerate().skip(1) {
-			let i = ctx.trailed_int(t);
-			if ctx.trailed_int(self.first_val[i as usize]) == k as IntVal
+			let i = ctx.trailed(t);
+			if ctx.trailed(self.first_val[i as usize]) == k as IntVal
 				&& !self.vars[i as usize].in_domain(ctx, self.values[k - 1])
 			{
 				self.repair_upper(ctx, k)?;
@@ -956,10 +909,10 @@ where
 		}
 		// Lower bound requires full pass to catch all potential propagation.
 		let mut i = self.vars.len();
-		let mut k = ctx.trailed_int(self.max_last) as usize;
+		let mut k = ctx.trailed(self.max_last) as usize;
 		while i > 0 {
 			i -= 1;
-			if k > 0 && ctx.trailed_int(self.last[k - 1]) == i as IntVal {
+			if k > 0 && ctx.trailed(self.last[k - 1]) == i as IntVal {
 				k -= 1;
 			};
 			let li = self.lowest_index(ctx, i);
@@ -971,10 +924,10 @@ where
 			if let Ok(Some(lb)) = li {
 				// Deal with increase of lower bound.
 				if lb > k {
-					ctx.set_trailed_int(self.last[lb], i as IntVal);
+					ctx.set_trailed(self.last[lb], i as IntVal);
 					// Update highest lower bound if necessary.
-					if lb as IntVal > ctx.trailed_int(self.max_last) {
-						ctx.set_trailed_int(self.max_last, lb as IntVal);
+					if lb as IntVal > ctx.trailed(self.max_last) {
+						ctx.set_trailed(self.max_last, lb as IntVal);
 					}
 					// If a repair is necessary, continue check where the repair ended.
 					(i, k) = self.repair_lower(ctx, lb)?;
@@ -982,7 +935,7 @@ where
 				}
 			}
 			// Deal with moving the last possibility to have value k for the first time.
-			if ctx.trailed_int(self.last[k]) == i as IntVal
+			if ctx.trailed(self.last[k]) == i as IntVal
 				&& !self.vars[i].in_domain(ctx, self.values[k - 1])
 			{
 				(i, k) = self.repair_lower(ctx, k)?;
@@ -1005,7 +958,7 @@ mod tests {
 		solver::{
 			Solver,
 			Value::{self, Int},
-			int_var::{EncodingType, IntVar},
+			decision::integer::{EncodingType, IntDecision},
 		},
 	};
 
@@ -1013,55 +966,55 @@ mod tests {
 	#[traced_test]
 	fn test_seq_precede_chain_paper() {
 		let mut slv = Solver::default();
-		let x1 = IntVar::new_in(
+		let x1 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=1]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x2 = IntVar::new_in(
+		let x2 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=1, 5..=5]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x3 = IntVar::new_in(
+		let x3 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=0, 3..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x4 = IntVar::new_in(
+		let x4 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=2, 4..=4]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x5 = IntVar::new_in(
+		let x5 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=1, 3..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x6 = IntVar::new_in(
+		let x6 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=1, 3..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x7 = IntVar::new_in(
+		let x7 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([2..=5]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x8 = IntVar::new_in(
+		let x8 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([4..=5]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x9 = IntVar::new_in(
+		let x9 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=3]),
 			EncodingType::Eager,
@@ -1079,25 +1032,25 @@ mod tests {
 	#[traced_test]
 	fn test_seq_precede_chain_unrestricted() {
 		let mut slv = Solver::default();
-		let x1 = IntVar::new_in(
+		let x1 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=4]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x2 = IntVar::new_in(
+		let x2 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=4]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x3 = IntVar::new_in(
+		let x3 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=4]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x4 = IntVar::new_in(
+		let x4 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=4]),
 			EncodingType::Eager,
@@ -1112,55 +1065,55 @@ mod tests {
 	#[traced_test]
 	fn test_value_precede_chain_complex() {
 		let mut slv = Solver::default();
-		let x0 = IntVar::new_in(
+		let x0 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=0, 2..=2]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x1 = IntVar::new_in(
+		let x1 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([2..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x2 = IntVar::new_in(
+		let x2 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([-3..=-3, 1..=1]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x3 = IntVar::new_in(
+		let x3 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([-2..=0, 2..=2]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x4 = IntVar::new_in(
+		let x4 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=2]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x5 = IntVar::new_in(
+		let x5 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x6 = IntVar::new_in(
+		let x6 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([-2..=-1, 1..=1]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x7 = IntVar::new_in(
+		let x7 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([-1..=-1, 3..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x8 = IntVar::new_in(
+		let x8 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=3]),
 			EncodingType::Eager,
@@ -1182,19 +1135,19 @@ mod tests {
 	#[traced_test]
 	fn test_value_precede_chain_out_of_bounds() {
 		let mut slv = Solver::default();
-		let x0 = IntVar::new_in(
+		let x0 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=1]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x1 = IntVar::new_in(
+		let x1 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=1]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x2 = IntVar::new_in(
+		let x2 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=1]),
 			EncodingType::Eager,
@@ -1209,19 +1162,19 @@ mod tests {
 	#[traced_test]
 	fn test_value_precede_chain_simple() {
 		let mut slv = Solver::default();
-		let x0 = IntVar::new_in(
+		let x0 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x1 = IntVar::new_in(
+		let x1 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x2 = IntVar::new_in(
+		let x2 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([0..=3]),
 			EncodingType::Eager,
@@ -1236,25 +1189,25 @@ mod tests {
 	#[traced_test]
 	fn test_value_precede_chain_unrestricted() {
 		let mut slv = Solver::default();
-		let x0 = IntVar::new_in(
+		let x0 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([-2..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x1 = IntVar::new_in(
+		let x1 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([-3..=2]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x2 = IntVar::new_in(
+		let x2 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([-2..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let x3 = IntVar::new_in(
+		let x3 = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([-3..=2]),
 			EncodingType::Eager,

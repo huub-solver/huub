@@ -3,30 +3,17 @@
 use std::ops::Not;
 
 use crate::{
-	BoolDecision,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, PropagationActions,
 		ReasoningContext,
 	},
 	constraints::ReasonBuilder,
-	solver::BoolView,
+	model, solver,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 /// Type that represents compile time constant [`true`] value.
 pub struct True;
-
-impl From<True> for BoolDecision {
-	fn from(_: True) -> Self {
-		true.into()
-	}
-}
-
-impl From<True> for BoolView {
-	fn from(_: True) -> Self {
-		true.into()
-	}
-}
 
 impl<Ctx> BoolInitActions<Ctx> for True
 where
@@ -51,7 +38,7 @@ impl<Ctx> BoolPropagationActions<Ctx> for True
 where
 	Ctx: ReasoningContext + PropagationActions,
 {
-	fn set_val(
+	fn fix(
 		&self,
 		ctx: &mut Ctx,
 		val: bool,
@@ -69,5 +56,17 @@ impl Not for True {
 
 	fn not(self) -> Self::Output {
 		false
+	}
+}
+
+impl From<True> for model::View<bool> {
+	fn from(_: True) -> Self {
+		true.into()
+	}
+}
+
+impl From<True> for solver::View<bool> {
+	fn from(_: True) -> Self {
+		true.into()
 	}
 }

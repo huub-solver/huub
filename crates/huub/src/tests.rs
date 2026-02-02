@@ -7,58 +7,64 @@ use rangelist::RangeList;
 use tracing_test::traced_test;
 
 use crate::{
-	Decision, InitConfig, IntVal, Model, ReformulationError, Solver, ValueSelection,
-	VariableSelection,
-	actions::{IntInspectionActions, IntSimplificationActions},
-	branchers::IntBrancher,
+	IntVal, Model,
 	constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
+	lower::{InitConfig, LoweringError},
+	model::deserialize::AnyView as ModelView,
 	solver::{
-		SolveResult, Value, View,
-		int_var::{EncodingType, IntVar},
+		AnyView as SolverView, BoolValuation, IntValuation, Solver, Status, Value,
+		branchers::{IntBrancher, ValueSelection, VariableSelection},
+		decision::integer::{EncodingType, IntDecision},
 	},
 };
 
 #[test]
 fn it_works() {
 	let mut prb = Model::default();
-	let a = prb.new_bool_var();
-	let b = prb.new_bool_var();
+	let a = prb.new_bool_decision();
+	let b = prb.new_bool_decision();
 
-	prb.add_constraint(Formula::Or(vec![(!a).into(), (!b).into()]));
-	prb.add_constraint(Formula::Or(vec![a.into(), b.into()]));
+	prb.proposition(Formula::Or(vec![(!a).into(), (!b).into()]))
+		.post();
+	prb.proposition(Formula::Or(vec![a.into(), b.into()]))
+		.post();
 
 	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-	let a = map.get_bool(&mut slv, a);
-	let b = map.get_bool(&mut slv, b);
+	let a = map.get(&mut slv, a);
+	let b = map.get(&mut slv, b);
 
 	assert_eq!(
-		slv.solve(|value| {
-			assert_ne!(value(a.into()), value(b.into()));
+		slv.solve(|sol| {
+			assert_ne!(a.val(sol), b.val(sol));
 		}),
-		SolveResult::Satisfied
+		Status::Satisfied
 	);
 }
 
 #[test]
 /// Test case to check if resolving a multi-step linear alias works properly.
 fn lin_multi_alias() {
+	use crate::actions::{IntInspectionActions, IntSimplificationActions};
+
 	let mut prb = Model::default();
-	let x = prb.new_int_var(RangeList::from_iter([1..=10]));
-	let y = prb.new_int_var(RangeList::from_iter([1..=10]));
-	let z = prb.new_int_var(RangeList::from_iter([1..=10]));
+	let x = prb.new_int_decision(RangeList::from_iter([1..=10]));
+	let y = prb.new_int_decision(RangeList::from_iter([1..=10]));
+	let z = prb.new_int_decision(RangeList::from_iter([1..=10]));
 	let x_trans = x * -1 - 1;
 	let y_trans = y + 1;
 	let z_trans = z + 1;
 	assert!(x.unify(&mut prb, y_trans).is_ok());
 	assert!(y.unify(&mut prb, z_trans).is_ok());
-	assert_eq!(x_trans.lower_bound(&prb), -11);
-	assert_eq!(x_trans.upper_bound(&prb), -4);
+	assert_eq!(x_trans.min(&prb), -11);
+	assert_eq!(x_trans.max(&prb), -4);
 }
 
 #[test]
 fn test_bounding_add() {
+	use crate::actions::IntInspectionActions;
+
 	let mut prb = Model::default();
-	let x = prb.new_int_var(IntVal::MIN..=IntVal::MAX);
+	let x = prb.new_int_decision(IntVal::MIN..=IntVal::MAX);
 
 	let y = x.bounding_add(&mut prb, 100).unwrap();
 
@@ -70,8 +76,10 @@ fn test_bounding_add() {
 
 #[test]
 fn test_bounding_mul() {
+	use crate::actions::IntInspectionActions;
+
 	let mut prb = Model::default();
-	let x = prb.new_int_var(IntVal::MIN..=IntVal::MAX);
+	let x = prb.new_int_decision(IntVal::MIN..=IntVal::MAX);
 
 	let y = x.bounding_mul(&mut prb, 2).unwrap();
 
@@ -83,8 +91,10 @@ fn test_bounding_mul() {
 
 #[test]
 fn test_bounding_neg() {
+	use crate::actions::IntInspectionActions;
+
 	let mut prb = Model::default();
-	let x = prb.new_int_var(IntVal::MIN..=IntVal::MAX);
+	let x = prb.new_int_decision(IntVal::MIN..=IntVal::MAX);
 
 	let y = x.bounding_neg(&mut prb).unwrap();
 
@@ -96,8 +106,10 @@ fn test_bounding_neg() {
 
 #[test]
 fn test_bounding_sub() {
+	use crate::actions::IntInspectionActions;
+
 	let mut prb = Model::default();
-	let x = prb.new_int_var(IntVal::MIN..=IntVal::MAX);
+	let x = prb.new_int_decision(IntVal::MIN..=IntVal::MAX);
 
 	let y = x.bounding_sub(&mut prb, 255).unwrap();
 
@@ -113,13 +125,13 @@ fn test_bounding_sub() {
 /// same call.
 fn test_duplicate_propagation() {
 	let mut slv = Solver::default();
-	let a = IntVar::new_in(
+	let a = IntDecision::new_in(
 		&mut slv,
 		RangeList::from(0..=1),
 		EncodingType::Eager,
 		EncodingType::Lazy,
 	);
-	let b = IntVar::new_in(
+	let b = IntDecision::new_in(
 		&mut slv,
 		RangeList::from(0..=1),
 		EncodingType::Eager,
@@ -153,48 +165,48 @@ fn test_duplicate_propagation() {
 #[test]
 fn test_unify_int_impossible() {
 	let mut prb = Model::default();
-	let a = prb.new_int_var(1..=5);
-	let b = prb.new_int_var(1..=2);
+	let a = prb.new_int_decision(1..=5);
+	let b = prb.new_int_decision(1..=2);
 
-	rel!(&mut prb, 0 == a * 2 - b * 5);
+	prb.linear(a * 2 - b * 5).eq(0).post();
 
 	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-	let a = map.get_int(&mut slv, a);
-	let b = map.get_int(&mut slv, b);
+	let a = map.get(&mut slv, a);
+	let b = map.get(&mut slv, b);
 
 	assert_eq!(
-		slv.solve(|value| {
-			assert_eq!(value(a.into()), Value::Int(5));
-			assert_eq!(value(b.into()), Value::Int(2));
+		slv.solve(|sol| {
+			assert_eq!(a.val(sol), 5);
+			assert_eq!(b.val(sol), 2);
 		}),
-		SolveResult::Satisfied
+		Status::Satisfied
 	);
 }
 
 #[test]
 fn test_unify_int_lin_view_domains() {
 	let mut prb = Model::default();
-	let a = prb.new_int_var(RangeList::from_iter([1..=1, 3..=3, 5..=5]));
-	let b = prb.new_int_var(RangeList::from_iter([1..=3]));
+	let a = prb.new_int_decision(RangeList::from_iter([1..=1, 3..=3, 5..=5]));
+	let b = prb.new_int_decision(RangeList::from_iter([1..=3]));
 
-	rel!(&mut prb, 0 == a * 6 - b * 2);
+	prb.linear(a * 6 - b * 2).eq(0).post();
 
 	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-	let a = map.get_int(&mut slv, a);
-	let b = map.get_int(&mut slv, b);
+	let a = map.get(&mut slv, a);
+	let b = map.get(&mut slv, b);
 
 	let (res, _, solns) = slv.collect_all_solutions(&[a.into(), b.into()]);
-	assert_eq!(res, SolveResult::Complete);
+	assert_eq!(res, Status::Complete);
 	assert_eq!(solns, vec![vec![Value::Int(1), Value::Int(3)]]);
 }
 
 #[test]
 fn test_unify_int_view_for_bool_1() {
 	let mut prb = Model::default();
-	let a = prb.new_bool_var();
-	let b = prb.new_bool_var();
+	let a = prb.new_bool_decision();
+	let b = prb.new_bool_decision();
 
-	rel!(&mut prb, 0 == a * 2 + b * -2);
+	prb.linear(a * 2 + b * -2).eq(0).post();
 
 	prb.expect_solutions(
 		&[a, b],
@@ -207,10 +219,10 @@ fn test_unify_int_view_for_bool_1() {
 #[test]
 fn test_unify_int_view_for_bool_2() {
 	let mut prb = Model::default();
-	let a = prb.new_bool_var();
-	let b = prb.new_bool_var();
+	let a = prb.new_bool_decision();
+	let b = prb.new_bool_decision();
 
-	rel!(&mut prb, 0 == a * -2 + b * 3);
+	prb.linear(a * -2 + b * 3).eq(0).post();
 
 	prb.expect_solutions(
 		&[a, b],
@@ -222,10 +234,10 @@ fn test_unify_int_view_for_bool_2() {
 #[test]
 fn test_unify_int_view_for_bool_3() {
 	let mut prb = Model::default();
-	let a = prb.new_bool_var();
-	let b = prb.new_bool_var();
+	let a = prb.new_bool_decision();
+	let b = prb.new_bool_decision();
 
-	rel!(&mut prb, 0 == a * -2 + b * -3);
+	prb.linear(a * -2 + b * -3).eq(0).post();
 
 	prb.expect_solutions(
 		&[a, b],
@@ -237,10 +249,10 @@ fn test_unify_int_view_for_bool_3() {
 #[test]
 fn test_unify_int_view_for_bool_4() {
 	let mut prb = Model::default();
-	let a = prb.new_bool_var();
-	let b = prb.new_bool_var();
+	let a = prb.new_bool_decision();
+	let b = prb.new_bool_decision();
 
-	rel!(&mut prb, 0 == a * 2 + b * 3);
+	prb.linear(a * 2 + b * 3).eq(0).post();
 
 	prb.expect_solutions(
 		&[a, b],
@@ -252,10 +264,10 @@ fn test_unify_int_view_for_bool_4() {
 #[test]
 fn test_unify_int_view_for_bool_5() {
 	let mut prb = Model::default();
-	let a = prb.new_bool_var();
-	let b = prb.new_bool_var();
+	let a = prb.new_bool_decision();
+	let b = prb.new_bool_decision();
 
-	rel!(&mut prb, 0 == a * 2 + b * -3);
+	prb.linear(a * 2 + b * -3).eq(0).post();
 
 	prb.expect_solutions(
 		&[a, b],
@@ -267,10 +279,10 @@ fn test_unify_int_view_for_bool_5() {
 #[test]
 fn test_unify_int_view_for_bool_6() {
 	let mut prb = Model::default();
-	let a = prb.new_bool_var();
-	let b = prb.new_bool_var();
+	let a = prb.new_bool_decision();
+	let b = prb.new_bool_decision();
 
-	rel!(&mut prb, 0 == ((a * 2) + 2) + b * -3);
+	prb.linear(((a * 2) + 2) + b * -3).eq(0).post();
 
 	prb.assert_unsatisfiable();
 }
@@ -279,12 +291,12 @@ impl Model {
 	pub(crate) fn assert_unsatisfiable(&mut self) {
 		let err: Result<(Solver, _), _> = self.to_solver(&InitConfig::default());
 		assert!(
-			matches!(err, Err(ReformulationError::SimplificationConflict(_))),
+			matches!(err, Err(LoweringError::Simplification(_))),
 			"expected unsatisfiable"
 		);
 	}
 
-	pub(crate) fn expect_solutions<V: Into<Decision> + Clone>(
+	pub(crate) fn expect_solutions<V: Into<ModelView> + Clone>(
 		mut self,
 		vars: &[V],
 		expected: Expect,
@@ -292,37 +304,41 @@ impl Model {
 		let (mut slv, map) = self.to_solver(&InitConfig::default()).unwrap();
 		let vars = vars
 			.iter()
-			.map(|v| map.get(&mut slv, &v.clone().into()))
+			.map(|v| map.get_any(&mut slv, v.clone().into()))
 			.collect_vec();
 		slv.expect_solutions(&vars, expected);
 	}
 }
 
 impl Solver {
-	pub(crate) fn assert_all_solutions<V: Into<View> + Clone>(
+	pub(crate) fn assert_all_solutions<V: Into<SolverView> + Clone>(
 		self,
 		vars: &[V],
 		pred: impl Fn(&[Value]) -> bool,
 	) {
 		let vars: Vec<_> = vars.iter().map(|v| v.clone().into()).collect();
-		let (status, _) = self.all_solutions(&vars, |value| {
+		let (status, _) = self.all_solutions(&vars, |sol| {
 			let mut soln = Vec::with_capacity(vars.len());
 			for var in &vars {
-				soln.push(value(*var));
+				soln.push(var.val(sol));
 			}
 			assert!(pred(&soln));
 		});
-		assert_eq!(status, SolveResult::Complete);
+		assert_eq!(status, Status::Complete);
 	}
 
 	pub(crate) fn assert_unsatisfiable(&mut self) {
-		assert_eq!(self.solve(|_| unreachable!()), SolveResult::Unsatisfiable);
+		assert_eq!(self.solve(|_| unreachable!()), Status::Unsatisfiable);
 	}
 
-	pub(crate) fn expect_solutions<V: Into<View> + Clone>(self, vars: &[V], expected: Expect) {
+	pub(crate) fn expect_solutions<V: Into<SolverView> + Clone>(
+		self,
+		vars: &[V],
+		expected: Expect,
+	) {
 		let vars: Vec<_> = vars.iter().map(|v| v.clone().into()).collect();
 		let (status, _, mut solns) = self.collect_all_solutions(&vars);
-		assert_eq!(status, SolveResult::Complete);
+		assert_eq!(status, Status::Complete);
 		solns.sort();
 		let solns = format!(
 			"{}",

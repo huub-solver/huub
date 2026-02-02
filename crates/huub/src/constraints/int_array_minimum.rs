@@ -2,17 +2,15 @@
 //! enforces that a decision variable takes the minimum value of an array of
 //! decision variables.
 
-use std::ops::AddAssign;
-
 use itertools::Itertools;
 
 use crate::{
-	actions::{InitActions, ReasoningEngine, ReformulationActions},
+	actions::{InitActions, PostingActions, ReasoningEngine},
 	constraints::{
-		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
+		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
 	},
-	reformulate::ReformulationError,
-	solver::{IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel},
+	lower::{LoweringContext, LoweringError},
+	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -24,25 +22,27 @@ pub struct IntArrayMinimumBounds<I1, I2> {
 	pub(crate) min: I2,
 }
 
-impl IntArrayMinimumBounds<IntView, IntView> {
-	/// Create a new [`ArrayIntMinimumBounds`] propagator and post it in the
+impl<I1, I2> IntArrayMinimumBounds<I1, I2> {
+	/// Create a new [`IntArrayMinimumBounds`] propagator and post it in the
 	/// solver.
-	pub fn post<E>(solver: &mut E, vars: Vec<IntView>, min: IntView)
+	pub fn post<E>(solver: &mut E, vars: Vec<I1>, min: I2)
 	where
-		E: AddAssign<BoxedPropagator> + ?Sized,
+		E: PostingActions + ?Sized,
+		I1: IntSolverActions<Engine>,
+		I2: IntSolverActions<Engine>,
 	{
-		*solver += Box::new(Self {
+		solver.add_propagator(Box::new(Self {
 			vars: vars.clone(),
 			min,
-		});
+		}));
 	}
 }
 
 impl<E, I1, I2> Constraint<E> for IntArrayMinimumBounds<I1, I2>
 where
 	E: ReasoningEngine,
-	I1: ModelIntView<E>,
-	I2: ModelIntView<E>,
+	I1: IntModelActions<E>,
+	I2: IntModelActions<E>,
 {
 	fn simplify(
 		&mut self,
@@ -54,7 +54,7 @@ where
 			&& self.vars.iter().any(|v| v.val(ctx) == Some(c))
 		{
 			for v in &self.vars {
-				v.set_lower_bound(ctx, c, [self.min.lower_bound_lit(ctx)])?;
+				v.tighten_min(ctx, c, [self.min.min_lit(ctx)])?;
 			}
 			return Ok(SimplificationStatus::Subsumed);
 		}
@@ -62,13 +62,13 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
 		let vars: Vec<_> = self
 			.vars
 			.iter()
-			.map(|v| slv.solver_int(v.clone().into()))
+			.map(|v| slv.solver_view(v.clone().into()))
 			.collect();
-		let min = slv.solver_int(self.min.clone().into());
+		let min = slv.solver_view(self.min.clone().into());
 		IntArrayMinimumBounds::post(slv, vars, min);
 		Ok(())
 	}
@@ -77,8 +77,8 @@ where
 impl<E, I1, I2> Propagator<E> for IntArrayMinimumBounds<I1, I2>
 where
 	E: ReasoningEngine,
-	I1: SolverIntView<E>,
-	I2: SolverIntView<E>,
+	I1: IntSolverActions<E>,
+	I2: IntSolverActions<E>,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
@@ -95,16 +95,16 @@ where
 		let (min_ub, min_ub_var) = self
 			.vars
 			.iter()
-			.map(|x| (x.upper_bound(ctx), x))
+			.map(|x| (x.max(ctx), x))
 			.min_by_key(|(ub, _)| *ub)
 			.unwrap();
-		let reason = min_ub_var.upper_bound_lit(ctx);
-		self.min.set_upper_bound(ctx, min_ub, [reason])?;
+		let reason = min_ub_var.max_lit(ctx);
+		self.min.tighten_max(ctx, min_ub, [reason])?;
 
 		// set y to be greater than or equal to the minimum of lower bounds of x_i
-		let min_lb = self.vars.iter().map(|x| x.lower_bound(ctx)).min().unwrap();
+		let min_lb = self.vars.iter().map(|x| x.min(ctx)).min().unwrap();
 		self.min
-			.set_lower_bound(ctx, min_lb, |ctx: &mut E::PropagationCtx<'_>| {
+			.tighten_min(ctx, min_lb, |ctx: &mut E::PropagationCtx<'_>| {
 				self.vars
 					.iter()
 					.map(|x| x.lit(ctx, IntLitMeaning::GreaterEq(min_lb)))
@@ -112,10 +112,10 @@ where
 			})?;
 
 		// set x_i to be greater than or equal to y.lowerbound
-		let reason = &[self.min.lower_bound_lit(ctx)];
-		let y_lb = self.min.lower_bound(ctx);
+		let reason = &[self.min.min_lit(ctx)];
+		let y_lb = self.min.min(ctx);
 		for x in self.vars.iter() {
-			x.set_lower_bound(ctx, y_lb, reason)?;
+			x.tighten_min(ctx, y_lb, reason)?;
 		}
 
 		Ok(())
@@ -128,22 +128,23 @@ mod tests {
 	use itertools::Itertools;
 	use tracing_test::traced_test;
 
-	use crate::{Decision, Model, array_maximum_int, array_minimum_int, reformulate::InitConfig};
+	use crate::{Model, lower::InitConfig};
 
 	#[test]
 	#[traced_test]
 	fn test_maximum_sat() {
 		let mut prb = Model::default();
-		let a = prb.new_int_var(1..=6);
-		let b = prb.new_int_var(3..=5);
-		let c = prb.new_int_var(2..=5);
-		let y = prb.new_int_var(1..=3);
+		let a = prb.new_int_decision(1..=6);
+		let b = prb.new_int_decision(3..=5);
+		let c = prb.new_int_decision(2..=5);
+		let y = prb.new_int_decision(1..=3);
 
-		array_maximum_int(&mut prb, vec![a, b, c], y);
+		prb.maximum(vec![a, b, c]).result(y).post();
+
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
 		let vars = vec![a, b, c, y]
 			.into_iter()
-			.map(|x| map.get(&mut slv, &Decision::from(x)))
+			.map(|x| map.get(&mut slv, x))
 			.collect_vec();
 
 		slv.expect_solutions(
@@ -162,12 +163,12 @@ mod tests {
 	#[traced_test]
 	fn test_maximum_unsat() {
 		let mut prb = Model::default();
-		let a = prb.new_int_var(3..=5);
-		let b = prb.new_int_var(4..=5);
-		let c = prb.new_int_var(4..=10);
-		let y = prb.new_int_var(13..=20);
+		let a = prb.new_int_decision(3..=5);
+		let b = prb.new_int_decision(4..=5);
+		let c = prb.new_int_decision(4..=10);
+		let y = prb.new_int_decision(13..=20);
 
-		array_maximum_int(&mut prb, vec![a, b, c], y);
+		prb.maximum(vec![a, b, c]).result(y).post();
 		prb.assert_unsatisfiable();
 	}
 
@@ -175,16 +176,16 @@ mod tests {
 	#[traced_test]
 	fn test_minimum_sat() {
 		let mut prb = Model::default();
-		let a = prb.new_int_var(3..=4);
-		let b = prb.new_int_var(2..=3);
-		let c = prb.new_int_var(2..=3);
-		let y = prb.new_int_var(3..=4);
+		let a = prb.new_int_decision(3..=4);
+		let b = prb.new_int_decision(2..=3);
+		let c = prb.new_int_decision(2..=3);
+		let y = prb.new_int_decision(3..=4);
 
-		array_minimum_int(&mut prb, vec![a, b, c], y);
+		prb.minimum(vec![a, b, c]).result(y).post();
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
 		let vars = vec![a, b, c, y]
 			.into_iter()
-			.map(|x| map.get(&mut slv, &Decision::from(x)))
+			.map(|x| map.get(&mut slv, x))
 			.collect_vec();
 		slv.expect_solutions(
 			&vars,
@@ -198,12 +199,12 @@ mod tests {
 	#[traced_test]
 	fn test_minimum_unsat() {
 		let mut prb = Model::default();
-		let a = prb.new_int_var(3..=5);
-		let b = prb.new_int_var(4..=5);
-		let c = prb.new_int_var(4..=10);
-		let y = prb.new_int_var(1..=2);
+		let a = prb.new_int_decision(3..=5);
+		let b = prb.new_int_decision(4..=5);
+		let c = prb.new_int_decision(4..=10);
+		let y = prb.new_int_decision(1..=2);
 
-		array_minimum_int(&mut prb, vec![a, b, c], y);
+		prb.minimum(vec![a, b, c]).result(y).post();
 		prb.assert_unsatisfiable();
 	}
 }

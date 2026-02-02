@@ -13,14 +13,17 @@ use std::{
 use rangelist::RangeList;
 
 use crate::{
-	IntSetVal, IntVal,
+	IntSet, IntVal,
 	actions::{
 		IntDecisionActions, IntExplanationActions, IntInspectionActions, IntPropagationActions,
 		IntSimplificationActions, PropagationActions, ReasoningContext,
 	},
 	constraints::ReasonBuilder,
 	helpers::{div_ceil, div_floor},
-	solver::IntLitMeaning,
+	solver::{
+		IntLitMeaning,
+		solution::{IntValuation, Solution},
+	},
 	views::offset_view::OffsetView,
 };
 
@@ -56,7 +59,7 @@ pub struct LinearView<Scale, Offset, Var> {
 
 impl<Var> LinearView<NonZero<IntVal>, IntVal, Var> {
 	/// Reverses the transformation of an [`IntSetVal`].
-	pub(crate) fn reverse_intset(&self, set: &IntSetVal) -> IntSetVal {
+	pub(crate) fn reverse_intset(&self, set: &IntSet) -> IntSet {
 		if self.scale.is_positive() {
 			RangeList::from_sorted_ranges(set.iter().map(|range| {
 				let start = div_ceil(*range.start() - self.offset, self.scale);
@@ -222,7 +225,7 @@ where
 		(self.transform_val(lb), self.transform_val(ub))
 	}
 
-	fn domain(&self, ctx: &Ctx) -> IntSetVal {
+	fn domain(&self, ctx: &Ctx) -> IntSet {
 		let dom = self.var.domain(ctx);
 		if self.scale.get() == 1 {
 			RangeList::from_sorted_ranges(
@@ -260,19 +263,35 @@ where
 		Some(self.transform_meaning(self.var.lit_meaning(ctx, lit)?))
 	}
 
-	fn lower_bound(&self, ctx: &Ctx) -> IntVal {
+	fn max(&self, ctx: &Ctx) -> IntVal {
 		self.transform_val(if self.scale.get() >= 0 {
-			self.var.lower_bound(ctx)
+			self.var.max(ctx)
 		} else {
-			self.var.upper_bound(ctx)
+			self.var.min(ctx)
 		})
 	}
 
-	fn lower_bound_lit(&self, ctx: &Ctx) -> Ctx::Atom {
+	fn max_lit(&self, ctx: &Ctx) -> Ctx::Atom {
 		if self.scale.get() >= 0 {
-			self.var.lower_bound_lit(ctx)
+			self.var.max_lit(ctx)
 		} else {
-			self.var.upper_bound_lit(ctx)
+			self.var.min_lit(ctx)
+		}
+	}
+
+	fn min(&self, ctx: &Ctx) -> IntVal {
+		self.transform_val(if self.scale.get() >= 0 {
+			self.var.min(ctx)
+		} else {
+			self.var.max(ctx)
+		})
+	}
+
+	fn min_lit(&self, ctx: &Ctx) -> Ctx::Atom {
+		if self.scale.get() >= 0 {
+			self.var.min_lit(ctx)
+		} else {
+			self.var.max_lit(ctx)
 		}
 	}
 
@@ -280,22 +299,6 @@ where
 		match self.reverse_meaning(meaning) {
 			Ok(meaning) => self.var.try_lit(ctx, meaning),
 			Err(b) => Some(b.into()),
-		}
-	}
-
-	fn upper_bound(&self, ctx: &Ctx) -> IntVal {
-		self.transform_val(if self.scale.get() >= 0 {
-			self.var.upper_bound(ctx)
-		} else {
-			self.var.lower_bound(ctx)
-		})
-	}
-
-	fn upper_bound_lit(&self, ctx: &Ctx) -> Ctx::Atom {
-		if self.scale.get() >= 0 {
-			self.var.upper_bound_lit(ctx)
-		} else {
-			self.var.lower_bound_lit(ctx)
 		}
 	}
 
@@ -310,49 +313,7 @@ where
 	Ctx::Atom: From<bool>,
 	Var: IntPropagationActions<Ctx>,
 {
-	fn set_lower_bound(
-		&self,
-		ctx: &mut Ctx,
-		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
-	) -> Result<(), Ctx::Conflict> {
-		if self.scale.get() >= 0 {
-			self.var
-				.set_lower_bound(ctx, self.reverse_val_ceil(val), reason)
-		} else {
-			self.var
-				.set_upper_bound(ctx, self.reverse_val_floor(val), reason)
-		}
-	}
-
-	fn set_not_eq(
-		&self,
-		ctx: &mut Ctx,
-		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
-	) -> Result<(), Ctx::Conflict> {
-		let Some(val) = self.try_reverse_val(val) else {
-			return Ok(());
-		};
-		self.var.set_not_eq(ctx, val, reason)
-	}
-
-	fn set_upper_bound(
-		&self,
-		ctx: &mut Ctx,
-		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
-	) -> Result<(), Ctx::Conflict> {
-		if self.scale.get() >= 0 {
-			self.var
-				.set_upper_bound(ctx, self.reverse_val_floor(val), reason)
-		} else {
-			self.var
-				.set_lower_bound(ctx, self.reverse_val_ceil(val), reason)
-		}
-	}
-
-	fn set_val(
+	fn fix(
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
@@ -361,7 +322,49 @@ where
 		let Some(val) = self.try_reverse_val(val) else {
 			return Err(ctx.declare_conflict(reason));
 		};
-		self.var.set_val(ctx, val, reason)
+		self.var.fix(ctx, val, reason)
+	}
+
+	fn remove_val(
+		&self,
+		ctx: &mut Ctx,
+		val: IntVal,
+		reason: impl ReasonBuilder<Ctx>,
+	) -> Result<(), Ctx::Conflict> {
+		let Some(val) = self.try_reverse_val(val) else {
+			return Ok(());
+		};
+		self.var.remove_val(ctx, val, reason)
+	}
+
+	fn tighten_max(
+		&self,
+		ctx: &mut Ctx,
+		val: IntVal,
+		reason: impl ReasonBuilder<Ctx>,
+	) -> Result<(), Ctx::Conflict> {
+		if self.scale.get() >= 0 {
+			self.var
+				.tighten_max(ctx, self.reverse_val_floor(val), reason)
+		} else {
+			self.var
+				.tighten_min(ctx, self.reverse_val_ceil(val), reason)
+		}
+	}
+
+	fn tighten_min(
+		&self,
+		ctx: &mut Ctx,
+		val: IntVal,
+		reason: impl ReasonBuilder<Ctx>,
+	) -> Result<(), Ctx::Conflict> {
+		if self.scale.get() >= 0 {
+			self.var
+				.tighten_min(ctx, self.reverse_val_ceil(val), reason)
+		} else {
+			self.var
+				.tighten_max(ctx, self.reverse_val_floor(val), reason)
+		}
 	}
 }
 
@@ -371,24 +374,23 @@ where
 	Ctx::Atom: From<bool>,
 	Var: IntSimplificationActions<Ctx>,
 {
-	fn set_domain(
+	fn exclude(
 		&self,
 		ctx: &mut Ctx,
-		domain: &IntSetVal,
+		values: &IntSet,
 		reason: impl ReasonBuilder<Ctx>,
 	) -> Result<(), Ctx::Conflict> {
-		self.var
-			.set_domain(ctx, &self.reverse_intset(domain), reason)
+		self.var.exclude(ctx, &self.reverse_intset(values), reason)
 	}
 
-	fn set_not_in_set(
+	fn restrict_domain(
 		&self,
 		ctx: &mut Ctx,
-		values: &IntSetVal,
+		domain: &IntSet,
 		reason: impl ReasonBuilder<Ctx>,
 	) -> Result<(), Ctx::Conflict> {
 		self.var
-			.set_not_in_set(ctx, &self.reverse_intset(values), reason)
+			.restrict_domain(ctx, &self.reverse_intset(domain), reason)
 	}
 
 	fn unify(
@@ -397,6 +399,15 @@ where
 		_other: impl Into<Self>,
 	) -> Result<(), <Ctx as ReasoningContext>::Conflict> {
 		panic!("unify cannot be defined for any generic LinearView")
+	}
+}
+
+impl<Var> IntValuation for LinearView<NonZero<IntVal>, IntVal, Var>
+where
+	Var: IntValuation,
+{
+	fn val(&self, sol: Solution<'_>) -> IntVal {
+		self.transform_val(self.var.val(sol))
 	}
 }
 

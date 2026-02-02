@@ -2,29 +2,22 @@
 //! enforces that a numerator, a denominator, and a result variable are
 //! correctly related by integer division.
 
-use std::{
-	mem,
-	num::NonZero,
-	ops::{AddAssign, Neg},
-};
-
-use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Unsatisfiable};
+use std::{mem, num::NonZero, ops::Neg};
 
 use crate::{
-	BoolDecision, BoolFormula, IntDecision,
+	IntVal,
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, IntPropagationActions,
-		ReasoningContext, ReasoningEngine, ReformulationActions, SimplificationActions,
+		PostingActions, ReasoningEngine, SimplificationActions,
 	},
 	constraints::{
-		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, SimplificationStatus,
-		SolverIntView,
+		BoolModelActions, Constraint, IntModelActions, IntSolverActions, Propagator,
+		SimplificationStatus,
 	},
 	helpers::div_ceil,
-	reformulate::ReformulationError,
-	solver::{
-		BoolView, IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel,
-	},
+	lower::{LoweringContext, LoweringError},
+	model::{expressions::bool_formula::BoolFormula, view::View},
+	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -42,6 +35,51 @@ pub struct IntDivBounds<I1, I2, I3> {
 }
 
 impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
+	/// Create a new [`IntDivBounds`] propagator and post it in the solver.
+	pub fn post<E>(
+		solver: &mut E,
+		numerator: I1,
+		denominator: I2,
+		result: I3,
+	) -> Result<(), E::Conflict>
+	where
+		E: PostingActions + ?Sized,
+		I1: IntSolverActions<Engine> + Neg + Into<<I1 as Neg>::Output> + IntDecisionActions<E>,
+		<I1 as Neg>::Output: IntSolverActions<Engine>,
+		I2: IntSolverActions<Engine> + Neg + Into<<I2 as Neg>::Output> + IntDecisionActions<E>,
+		<I2 as Neg>::Output: IntSolverActions<Engine>,
+		I3: IntSolverActions<Engine> + Neg + Into<<I3 as Neg>::Output> + IntDecisionActions<E>,
+		<I3 as Neg>::Output: IntSolverActions<Engine>,
+	{
+		// Ensure the consistency of the signs of the three variables using the
+		// following clauses.
+		if numerator.min(solver) < 0 || denominator.min(solver) < 0 || result.min(solver) < 0 {
+			let num_pos = numerator.lit(solver, IntLitMeaning::GreaterEq(0));
+			let num_neg = numerator.lit(solver, IntLitMeaning::Less(1));
+			let denom_pos = denominator.lit(solver, IntLitMeaning::GreaterEq(0));
+			let denom_neg = !denom_pos.clone();
+			let res_pos = result.lit(solver, IntLitMeaning::GreaterEq(0));
+			let res_neg = result.lit(solver, IntLitMeaning::Less(1));
+
+			// num >= 0 /\ denom > 0 => res >= 0
+			solver.add_clause([!num_pos.clone(), !denom_pos.clone(), res_pos.clone()])?;
+			// num <= 0 /\ denom < 0 => res >= 0
+			solver.add_clause([!num_neg.clone(), !denom_neg.clone(), res_pos])?;
+			// num >= 0 /\ denom < 0 => res < 0
+			solver.add_clause([!num_pos, !denom_neg, res_neg.clone()])?;
+			// num < 0 /\ denom >= 0 => res < 0
+			solver.add_clause([!num_neg, !denom_pos, res_neg])?;
+		}
+
+		solver.add_propagator(Box::new(Self {
+			numerator,
+			denominator,
+			result,
+		}));
+
+		Ok(())
+	}
+
 	/// Propagate the result and numerator lower bounds, and the denominator
 	/// bounds, assuming all lower bounds are positive.
 	fn propagate_positive_domains<E, I4, I5, I6>(
@@ -52,9 +90,9 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I4: SolverIntView<E>,
-		I5: SolverIntView<E>,
-		I6: SolverIntView<E>,
+		I4: IntSolverActions<E>,
+		I5: IntSolverActions<E>,
+		I6: IntSolverActions<E>,
 	{
 		let (num_lb, num_ub) = numerator.bounds(ctx);
 		let (denom_lb, denom_ub) = denominator.bounds(ctx);
@@ -62,58 +100,47 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 
 		let new_res_lb = num_lb / denom_ub;
 		if new_res_lb > res_lb {
-			result.set_lower_bound(ctx, new_res_lb, |ctx: &mut E::PropagationCtx<'_>| {
+			result.tighten_min(ctx, new_res_lb, |ctx: &mut E::PropagationCtx<'_>| {
 				[
-					numerator.lower_bound_lit(ctx),
+					numerator.min_lit(ctx),
 					denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
-					denominator.upper_bound_lit(ctx),
+					denominator.max_lit(ctx),
 				]
 			})?;
 		}
 
 		let new_num_lb = denom_lb * res_lb;
 		if new_num_lb > num_lb {
-			numerator.set_lower_bound(ctx, new_num_lb, |ctx: &mut E::PropagationCtx<'_>| {
-				[
-					denominator.lower_bound_lit(ctx),
-					result.lower_bound_lit(ctx),
-				]
+			numerator.tighten_min(ctx, new_num_lb, |ctx: &mut E::PropagationCtx<'_>| {
+				[denominator.min_lit(ctx), result.min_lit(ctx)]
 			})?;
 		}
 
 		if res_lb > 0 {
 			let new_denom_ub = num_ub / res_lb;
 			if new_denom_ub < denom_ub {
-				denominator.set_upper_bound(
-					ctx,
-					new_denom_ub,
-					|ctx: &mut E::PropagationCtx<'_>| {
-						[
-							numerator.upper_bound_lit(ctx),
-							numerator.lit(ctx, IntLitMeaning::GreaterEq(0)),
-							result.lower_bound_lit(ctx),
-							denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
-						]
-					},
-				)?;
+				denominator.tighten_max(ctx, new_denom_ub, |ctx: &mut E::PropagationCtx<'_>| {
+					[
+						numerator.max_lit(ctx),
+						numerator.lit(ctx, IntLitMeaning::GreaterEq(0)),
+						result.min_lit(ctx),
+						denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
+					]
+				})?;
 			}
 		}
 
 		if let Some(res_ub_inc) = NonZero::new(res_ub + 1) {
 			let new_denom_lb = div_ceil(num_lb + 1, res_ub_inc);
 			if new_denom_lb > denom_lb {
-				denominator.set_lower_bound(
-					ctx,
-					new_denom_lb,
-					|ctx: &mut E::PropagationCtx<'_>| {
-						[
-							numerator.lower_bound_lit(ctx),
-							result.upper_bound_lit(ctx),
-							result.lit(ctx, IntLitMeaning::GreaterEq(0)),
-							denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
-						]
-					},
-				)?;
+				denominator.tighten_min(ctx, new_denom_lb, |ctx: &mut E::PropagationCtx<'_>| {
+					[
+						numerator.min_lit(ctx),
+						result.max_lit(ctx),
+						result.lit(ctx, IntLitMeaning::GreaterEq(0)),
+						denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
+					]
+				})?;
 			}
 		}
 
@@ -130,33 +157,30 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I4: SolverIntView<E>,
-		I5: SolverIntView<E>,
-		I6: SolverIntView<E>,
+		I4: IntSolverActions<E>,
+		I5: IntSolverActions<E>,
+		I6: IntSolverActions<E>,
 	{
-		let num_ub = numerator.upper_bound(ctx);
+		let num_ub = numerator.max(ctx);
 		let (denom_lb, denom_ub) = denominator.bounds(ctx);
-		let res_ub = result.upper_bound(ctx);
+		let res_ub = result.max(ctx);
 
 		if denom_lb != 0 {
 			let new_res_ub = num_ub / denom_lb;
 			if new_res_ub < res_ub {
-				result.set_upper_bound(ctx, new_res_ub, |ctx: &mut E::PropagationCtx<'_>| {
-					[
-						numerator.upper_bound_lit(ctx),
-						denominator.lower_bound_lit(ctx),
-					]
+				result.tighten_max(ctx, new_res_ub, |ctx: &mut E::PropagationCtx<'_>| {
+					[numerator.max_lit(ctx), denominator.min_lit(ctx)]
 				})?;
 			}
 		}
 
 		let new_num_ub = (res_ub + 1) * denom_ub - 1;
 		if new_num_ub < num_ub {
-			numerator.set_upper_bound(ctx, new_num_ub, |ctx: &mut E::PropagationCtx<'_>| {
+			numerator.tighten_max(ctx, new_num_ub, |ctx: &mut E::PropagationCtx<'_>| {
 				[
 					denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
-					denominator.upper_bound_lit(ctx),
-					result.upper_bound_lit(ctx),
+					denominator.max_lit(ctx),
+					result.max_lit(ctx),
 				]
 			})?;
 		}
@@ -164,57 +188,12 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 	}
 }
 
-impl IntDivBounds<IntView, IntView, IntView> {
-	/// Create a new [`IntDivBounds`] propagator and post it in the solver.
-	pub fn post<E>(
-		solver: &mut E,
-		numerator: IntView,
-		denominator: IntView,
-		result: IntView,
-	) -> Result<(), Unsatisfiable>
-	where
-		E: AddAssign<BoxedPropagator> + ClauseDatabase + ReasoningContext<Atom = BoolView> + ?Sized,
-		IntView: IntDecisionActions<E>,
-	{
-		// Ensure the consistency of the signs of the three variables using the
-		// following clauses.
-		if numerator.lower_bound(solver) < 0
-			|| denominator.lower_bound(solver) < 0
-			|| result.lower_bound(solver) < 0
-		{
-			let num_pos = numerator.lit(solver, IntLitMeaning::GreaterEq(0));
-			let num_neg = numerator.lit(solver, IntLitMeaning::Less(1));
-			let denom_pos = denominator.lit(solver, IntLitMeaning::GreaterEq(0));
-			let denom_neg = !denom_pos;
-			let res_pos = result.lit(solver, IntLitMeaning::GreaterEq(0));
-			let res_neg = result.lit(solver, IntLitMeaning::Less(1));
-
-			// num >= 0 /\ denom > 0 => res >= 0
-			solver.add_clause([!num_pos, !denom_pos, res_pos])?;
-			// num <= 0 /\ denom < 0 => res >= 0
-			solver.add_clause([!num_neg, !denom_neg, res_pos])?;
-			// num >= 0 /\ denom < 0 => res < 0
-			solver.add_clause([!num_pos, !denom_neg, res_neg])?;
-			// num < 0 /\ denom >= 0 => res < 0
-			solver.add_clause([!num_neg, !denom_pos, res_neg])?;
-		}
-
-		*solver += Box::new(Self {
-			numerator,
-			denominator,
-			result,
-		});
-
-		Ok(())
-	}
-}
-
-impl<E> Constraint<E> for IntDivBounds<IntDecision, IntDecision, IntDecision>
+impl<E> Constraint<E> for IntDivBounds<View<IntVal>, View<IntVal>, View<IntVal>>
 where
-	E: ReasoningEngine<Atom = BoolDecision>,
+	E: ReasoningEngine<Atom = View<bool>>,
 	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
-	IntDecision: ModelIntView<E>,
-	BoolDecision: ModelBoolView<E>,
+	View<IntVal>: IntModelActions<E>,
+	View<bool>: BoolModelActions<E>,
 {
 	fn simplify(
 		&mut self,
@@ -223,7 +202,7 @@ where
 		use pindakaas::propositional_logic::Formula::*;
 
 		// Always exclude zero from the domain.
-		self.denominator.set_not_eq(ctx, 0, [])?;
+		self.denominator.remove_val(ctx, 0, [])?;
 
 		// Channel the signs of the decision variables
 		let num_pos = self.numerator.lit(ctx, IntLitMeaning::GreaterEq(0));
@@ -266,10 +245,10 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let numerator = slv.solver_int(self.numerator);
-		let denominator = slv.solver_int(self.denominator);
-		let result = slv.solver_int(self.result);
+	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
+		let numerator = slv.solver_view(self.numerator);
+		let denominator = slv.solver_view(self.denominator);
+		let result = slv.solver_view(self.result);
 		IntDivBounds::post(slv, numerator, denominator, result).unwrap();
 		Ok(())
 	}
@@ -278,12 +257,12 @@ where
 impl<E, I1, I2, I3> Propagator<E> for IntDivBounds<I1, I2, I3>
 where
 	E: ReasoningEngine,
-	I1: SolverIntView<E> + Neg + Into<<I1 as Neg>::Output>,
-	<I1 as Neg>::Output: SolverIntView<E>,
-	I2: SolverIntView<E> + Neg + Into<<I2 as Neg>::Output>,
-	<I2 as Neg>::Output: SolverIntView<E>,
-	I3: SolverIntView<E> + Neg + Into<<I3 as Neg>::Output>,
-	<I3 as Neg>::Output: SolverIntView<E>,
+	I1: IntSolverActions<E> + Neg + Into<<I1 as Neg>::Output>,
+	<I1 as Neg>::Output: IntSolverActions<E>,
+	I2: IntSolverActions<E> + Neg + Into<<I2 as Neg>::Output>,
+	<I2 as Neg>::Output: IntSolverActions<E>,
+	I3: IntSolverActions<E> + Neg + Into<<I3 as Neg>::Output>,
+	<I3 as Neg>::Output: IntSolverActions<E>,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Highest);
@@ -315,24 +294,24 @@ where
 
 		// If both the upper bound of the numerator and the upper bound of the
 		// right-hand side are positive, then propagate their upper bounds directly.
-		if numerator.upper_bound(ctx) >= 0 && self.result.upper_bound(ctx) >= 0 {
+		if numerator.max(ctx) >= 0 && self.result.max(ctx) >= 0 {
 			Self::propagate_upper_bounds(ctx, &numerator, &denominator, &self.result)?;
 		}
 		// If their upper bounds are negative, then propagate the upper bounds of
 		// the negated versions.
-		if neg_num.upper_bound(ctx) >= 0 && neg_res.upper_bound(ctx) >= 0 {
+		if neg_num.max(ctx) >= 0 && neg_res.max(ctx) >= 0 {
 			Self::propagate_upper_bounds(ctx, &neg_num, &denominator, &neg_res)?;
 		}
 
 		// If the numerator and the results are known positive, then we can
 		// propagate the remainder of the bounds under the assumption all values
 		// must be positive.
-		if numerator.lower_bound(ctx) >= 0 && self.result.lower_bound(ctx) >= 0 {
+		if numerator.min(ctx) >= 0 && self.result.min(ctx) >= 0 {
 			Self::propagate_positive_domains(ctx, &numerator, &denominator, &self.result)?;
 		}
 		// If the domain of the numerator and the result are known negative, then
 		// propagate their using their negations.
-		if neg_num.lower_bound(ctx) >= 0 && neg_res.lower_bound(ctx) >= 0 {
+		if neg_num.min(ctx) >= 0 && neg_res.min(ctx) >= 0 {
 			Self::propagate_positive_domains(ctx, &neg_num, &denominator, &neg_res)?;
 		}
 
@@ -349,10 +328,9 @@ mod tests {
 	use crate::{
 		Model,
 		constraints::int_div::IntDivBounds,
-		div_int,
 		solver::{
 			Solver,
-			int_var::{EncodingType, IntVar},
+			decision::integer::{EncodingType, IntDecision},
 		},
 	};
 
@@ -360,19 +338,19 @@ mod tests {
 	#[traced_test]
 	fn test_int_div_sat() {
 		let mut slv = Solver::default();
-		let a = IntVar::new_in(
+		let a = IntDecision::new_in(
 			&mut slv,
 			(-7..=7).into(),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
-		let b = IntVar::new_in(
+		let b = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([-3..=-1, 1..=3]),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
-		let c = IntVar::new_in(
+		let c = IntDecision::new_in(
 			&mut slv,
 			(-7..=7).into(),
 			EncodingType::Eager,
@@ -481,11 +459,11 @@ mod tests {
 	#[traced_test]
 	fn test_int_div_simplify() {
 		let mut prb = Model::default();
-		let num = prb.new_int_var(-20..=-10);
-		let den = prb.new_int_var(0..=4);
-		let res = prb.new_int_var(-20..=20);
+		let num = prb.new_int_decision(-20..=-10);
+		let den = prb.new_int_decision(0..=4);
+		let res = prb.new_int_decision(-20..=20);
 
-		div_int(&mut prb, num, den, res);
+		prb.div(num, den).result(res).post();
 
 		prb.expect_solutions(
 			&[num, den, res],

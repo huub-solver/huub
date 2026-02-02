@@ -4,7 +4,10 @@
 use pindakaas::{Var as RawVar, VarRange};
 use rustc_hash::FxHashMap;
 
-use crate::{IntLitMeaning, solver::int_var::IntVarRef};
+use crate::{
+	IntVal,
+	solver::{IntLitMeaning, decision::Decision},
+};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 /// A mapping of Boolean variables to integer variables of which they represent
@@ -12,17 +15,17 @@ use crate::{IntLitMeaning, solver::int_var::IntVarRef};
 pub(crate) struct BoolToIntMap {
 	/// The mapping of eagerly created Boolean variables to the integer
 	/// variables.
-	eager: Vec<(VarRange, IntVarRef)>,
+	eager: Vec<(VarRange, Decision<IntVal>)>,
 	/// The mapping of lazily created Boolean variables to the integer variables
 	/// and their meanings.
-	lazy: FxHashMap<RawVar, (IntVarRef, IntLitMeaning)>,
+	lazy: FxHashMap<RawVar, (Decision<IntVal>, IntLitMeaning)>,
 }
 
 impl BoolToIntMap {
 	/// Return the integer variable the given Boolean variable represents a
 	/// condition for, if any. If the Boolean variable was lazily created, then
 	/// also return the [`LitMeaning`] of the literal.
-	pub(crate) fn get(&self, var: RawVar) -> Option<(IntVarRef, Option<IntLitMeaning>)> {
+	pub(crate) fn get(&self, var: RawVar) -> Option<(Decision<IntVal>, Option<IntLitMeaning>)> {
 		let is_eager = self
 			.eager
 			.last()
@@ -49,7 +52,7 @@ impl BoolToIntMap {
 	}
 	/// Insert a range of Boolean variables to map them to the integer variable
 	/// for which they are eagerly created to represent conditions for.
-	pub(crate) fn insert_eager(&mut self, range: VarRange, var: IntVarRef) {
+	pub(crate) fn insert_eager(&mut self, range: VarRange, var: Decision<IntVal>) {
 		if range.is_empty() {
 			return;
 		}
@@ -62,7 +65,7 @@ impl BoolToIntMap {
 
 	/// Insert a mapping of a lazily created Boolean variable to the integer
 	/// variable and the meaning of the literal on the integer variable.
-	pub(crate) fn insert_lazy(&mut self, var: RawVar, iv: IntVarRef, lit: IntLitMeaning) {
+	pub(crate) fn insert_lazy(&mut self, var: RawVar, iv: Decision<IntVal>, lit: IntLitMeaning) {
 		let x = self.lazy.insert(var, (iv, lit));
 		debug_assert_eq!(x, None, "lazy literal already exists");
 	}

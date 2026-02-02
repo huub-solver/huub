@@ -59,5 +59,7 @@ jobs:
         with:
           channel: ${{ env.RUST_CHANNEL }}
           components: clippy
+      - name: Run clippy (no extra features)
+        run: cargo clippy -p huub --tests -- -D warnings
       - name: Run clippy
         run: cargo clippy --tests -- -D warnings

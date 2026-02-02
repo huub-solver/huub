@@ -1,65 +1,55 @@
 //! Structure and algorithms for the integer all different constraint, which
 //! enforces that a list of integer variables each take a different value.
 
-use std::{cmp, ops::AddAssign};
+use std::cmp;
 
 use itertools::{Either, Itertools};
 use rangelist::RangeList;
 
 use crate::{
-	IntDecision, IntVal,
+	IntVal,
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, IntSimplificationActions,
-		ReasoningEngine, ReformulationActions,
+		PostingActions, ReasoningEngine,
 	},
 	constraints::{
-		BoxedPropagator, Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView,
+		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
 	},
-	reformulate::ReformulationError,
+	lower::{LoweringContext, LoweringError},
+	model::View,
 	solver::{
-		IntLitMeaning, IntView,
+		IntLitMeaning,
 		activation_list::{IntEvent, IntPropCond},
+		engine::Engine,
 		queue::PriorityLevel,
 	},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Information that is tracked for each variable for the propagation of
-/// [`IntAllDifferentBounds`]
-struct AllDiffVarMeta {
-	/// Transition for the variable's position in the Hall interval tree.
-	next: usize,
-	/// Minimum index in the [`IntAllDifferentBounds::bounds`] vector
-	min_rank: usize,
-	/// Maximum index in the [`IntAllDifferentBounds::bounds`] vector
-	max_rank: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Representation of the `all_different_int` constraint within a model.
+/// Representation of the integer `unique` constraint within a model.
 ///
 /// This constraint enforces that all the given integer decisions take different
 /// values.
-pub struct IntAllDifferent {
+pub struct IntUnique {
 	/// List of integer decision variables that must take different values.
-	pub(crate) prop: IntAllDifferentBounds<IntDecision>,
+	pub(crate) prop: IntUniqueBounds<View<IntVal>>,
 	/// Whether to enable the bounds consistent propagator.
 	///
 	/// Defaults to `true`.
-	pub(crate) bounds_prop: Option<bool>,
+	pub(crate) bounds_propagation: Option<bool>,
 	/// Whether to enable the value consistent propagator.
 	///
 	/// Defaults to `false`.
-	pub(crate) value_prop: Option<bool>,
+	pub(crate) value_propagation: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Bounds consistent propagator for the `all_different_int` constraint.
-pub struct IntAllDifferentBounds<I> {
+/// Bounds consistent propagator for the integer `unique` constraint.
+pub struct IntUniqueBounds<I> {
 	/// List of integer variables that must take different values.
 	pub(crate) var: Vec<I>,
 	/// Struct to store information about variable
-	var_info: Vec<AllDiffVarMeta>,
+	var_info: Vec<UniqueVarMeta>,
 	/// Cached lower bounds
 	lb_cache: Vec<IntVal>,
 	/// Cached upper bounds
@@ -90,50 +80,43 @@ pub struct IntAllDifferentBounds<I> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// Value consistent propagator for the `all_different_int` constraint.
-pub struct IntAllDifferentValue<I> {
+/// Value consistent propagator for the integer `unique` constraint.
+pub struct IntUniqueValue<I> {
 	/// List of integer variables that must take different values.
 	vars: Vec<I>,
 	/// List of (indexes of) variable signaled to be fixed.
 	action_list: Vec<usize>,
 }
 
-impl IntAllDifferent {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Information that is tracked for each variable for the propagation of
+/// [`IntUniqueBounds`]
+struct UniqueVarMeta {
+	/// Transition for the variable's position in the Hall interval tree.
+	next: usize,
+	/// Minimum index in the [`IntUniqueBounds::bounds`] vector
+	min_rank: usize,
+	/// Maximum index in the [`IntUniqueBounds::bounds`] vector
+	max_rank: usize,
+}
+
+impl IntUnique {
 	/// Returns whether a bounds consistent propagator will be posted when
-	/// creating a [`Solver`] object.
-	pub fn bounds_consistent_propagator_enabled(&self) -> bool {
-		self.bounds_prop.unwrap_or(true)
+	/// creating a [`Solver`](crate::solver::Solver) object.
+	pub fn bounds_propagation(&self) -> bool {
+		self.bounds_propagation.unwrap_or(true)
 	}
-
-	/// Ensure the use of the bounds consistent propagator when this constraint
-	/// is posted to a [`Solver`] object.
-	///
-	/// Note that this method does not affect whether a value consistent
-	/// propagator will be used or not.
-	pub fn use_bounds_consistent_propagator(&mut self, enable: bool) {
-		self.bounds_prop = Some(enable);
-	}
-
-	/// Ensure the use of the value consistent propagator when this constraint
-	/// is posted to a [`Solver`] object.
-	///
-	/// Note that this method does not affect whether a bounds consistent
-	/// propagator will be used or not.
-	pub fn use_value_consistent_propagator(&mut self, enable: bool) {
-		self.value_prop = Some(enable);
-	}
-
 	/// Returns whether a value consistent propagator will be posted when
-	/// creating a [`Solver`] object.
-	pub fn value_consistent_propagator_enabled(&self) -> bool {
-		self.value_prop.unwrap_or(false)
+	/// creating a [`Solver`](crate::solver::Solver) object.
+	pub fn value_propagation(&self) -> bool {
+		self.value_propagation.unwrap_or(false)
 	}
 }
 
-impl<E> Constraint<E> for IntAllDifferent
+impl<E> Constraint<E> for IntUnique
 where
 	E: ReasoningEngine,
-	IntDecision: ModelIntView<E>,
+	View<IntVal>: IntModelActions<E>,
 {
 	fn simplify(
 		&mut self,
@@ -154,7 +137,7 @@ where
 		if !vals.is_empty() {
 			let neg: RangeList<_> = vals.iter().map(|&(_, v)| v..=v).collect();
 			for var in &vars {
-				var.set_not_in_set(ctx, &neg, |ctx: &mut E::PropagationCtx<'_>| {
+				var.exclude(ctx, &neg, |ctx: &mut E::PropagationCtx<'_>| {
 					vals.iter()
 						.map(|&(i, _)| self.prop.var[i].val_lit(ctx).unwrap())
 						.collect_vec()
@@ -180,24 +163,24 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
-		let vars: Vec<_> = self.prop.var.iter().map(|v| slv.solver_int(*v)).collect();
+	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
+		let vars: Vec<_> = self.prop.var.iter().map(|v| slv.solver_view(*v)).collect();
 		// propagation should have removed any fixed values
 		debug_assert!(vars.iter().all(|v| v.val(slv).is_none()));
-		if self.value_consistent_propagator_enabled() {
-			IntAllDifferentValue::post(slv, vars.clone());
+		if self.value_propagation() {
+			IntUniqueValue::post(slv, vars.clone());
 		}
-		if self.bounds_consistent_propagator_enabled() {
-			IntAllDifferentBounds::post(slv, vars);
+		if self.bounds_propagation() {
+			IntUniqueBounds::post(slv, vars);
 		}
 		Ok(())
 	}
 }
 
-impl<E> Propagator<E> for IntAllDifferent
+impl<E> Propagator<E> for IntUnique
 where
 	E: ReasoningEngine,
-	IntDecision: SolverIntView<E>,
+	View<IntVal>: IntSolverActions<E>,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		self.prop.initialize(ctx);
@@ -208,12 +191,12 @@ where
 	}
 }
 
-impl<I> IntAllDifferentBounds<I> {
+impl<I> IntUniqueBounds<I> {
 	/// Filter the lower bounds of the considered variables
 	fn filter_lower<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
 		for i in 1..=self.num_bounds + 1 {
 			self.hall_interval[i] = i - 1;
@@ -267,7 +250,7 @@ impl<I> IntAllDifferentBounds<I> {
 					k -= 1;
 				}
 
-				self.var[self.max_sorted[i]].set_lower_bound(ctx, hall_max, reason)?;
+				self.var[self.max_sorted[i]].tighten_min(ctx, hall_max, reason)?;
 				self.lb_cache[self.max_sorted[i]] = hall_max;
 
 				Self::path_set(&mut self.hall_interval, min_rank, w, w);
@@ -286,7 +269,7 @@ impl<I> IntAllDifferentBounds<I> {
 	fn filter_upper<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
 		for i in 0..=self.num_bounds {
 			self.hall_interval[i] = i + 1;
@@ -338,7 +321,7 @@ impl<I> IntAllDifferentBounds<I> {
 					k += 1;
 				}
 
-				self.var[self.min_sorted[i]].set_upper_bound(ctx, hall_min - 1, reason)?;
+				self.var[self.min_sorted[i]].tighten_max(ctx, hall_min - 1, reason)?;
 				self.ub_cache[self.min_sorted[i]] = hall_min - 1;
 
 				Self::path_set(&mut self.hall_interval, max_rank, w, w);
@@ -354,10 +337,10 @@ impl<I> IntAllDifferentBounds<I> {
 		Ok(())
 	}
 
-	/// Create a new [`IntAllDifferentBounds`] propagator.
+	/// Create a new [`IntUniqueBounds`] propagator.
 	pub(crate) fn new(vars: Vec<I>) -> Self {
 		let interval = vec![
-			AllDiffVarMeta {
+			UniqueVarMeta {
 				next: 0,
 				min_rank: 0,
 				max_rank: 0
@@ -406,9 +389,9 @@ impl<I> IntAllDifferentBounds<I> {
 	/// # Example
 	///
 	/// ```ignore
-	/// # use huub::constraints::int_all_different::IntAllDifferentBounds;
+	/// # use huub::constraints::int_all_different::IntUniqueBounds;
 	/// let mut transition = vec![4, 2, 0, 1, 3, 0]; // giving e.g. 0 -> 4 -> 3 -> 1 -> 2 -> 0
-	/// IntAllDifferentBounds::path_set(&mut transition, 2, 3, 5);
+	/// IntUniqueBounds::path_set(&mut transition, 2, 3, 5);
 	/// assert_eq!(transition, vec![5, 2, 5, 1, 5, 0]); // now gives // 0 -> 5 -> 0
 	/// ```
 	fn path_set(transition: &mut [usize], start: usize, end: usize, to: usize) {
@@ -421,11 +404,21 @@ impl<I> IntAllDifferentBounds<I> {
 		}
 	}
 
+	/// Create a new [`IntUniqueBounds`] propagator and post it in the
+	/// solver.
+	pub fn post<E>(solver: &mut E, vars: Vec<I>)
+	where
+		E: PostingActions + ?Sized,
+		I: IntSolverActions<Engine>,
+	{
+		solver.add_propagator(Box::new(Self::new(vars)));
+	}
+
 	/// Sorts max_sorted and min_sorted and sets the bounds vector
 	fn sort<E>(&mut self, ctx: &mut E::PropagationCtx<'_>)
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
 		let size: usize = self.var.len();
 
@@ -474,21 +467,10 @@ impl<I> IntAllDifferentBounds<I> {
 	}
 }
 
-impl IntAllDifferentBounds<IntView> {
-	/// Create a new [`IntAllDifferentBounds`] propagator and post it in the
-	/// solver.
-	pub fn post<E>(solver: &mut E, vars: Vec<IntView>)
-	where
-		E: AddAssign<BoxedPropagator> + ?Sized,
-	{
-		*solver += Box::new(Self::new(vars));
-	}
-}
-
-impl<E, I> Propagator<E> for IntAllDifferentBounds<I>
+impl<E, I> Propagator<E> for IntUniqueBounds<I>
 where
 	E: ReasoningEngine,
-	I: SolverIntView<E>,
+	I: IntSolverActions<E>,
 {
 	fn initialize(&mut self, ctx: &mut <E as ReasoningEngine>::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
@@ -497,7 +479,7 @@ where
 		}
 	}
 
-	#[tracing::instrument(name = "all_different", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(name = "int_unique_bounds", level = "trace", skip(self, ctx))]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		self.sort(ctx);
 		self.filter_lower(ctx)?;
@@ -506,24 +488,25 @@ where
 	}
 }
 
-impl IntAllDifferentValue<IntView> {
-	/// Create a new [`IntAllDifferentValue`] propagator and post it in the
+impl<I> IntUniqueValue<I> {
+	/// Create a new [`IntUniqueBounds`] propagator and post it in the
 	/// solver.
-	pub fn post<E>(solver: &mut E, vars: Vec<IntView>)
+	pub fn post<E>(solver: &mut E, vars: Vec<I>)
 	where
-		E: AddAssign<BoxedPropagator> + ?Sized,
+		E: PostingActions + ?Sized,
+		I: IntSolverActions<Engine>,
 	{
-		*solver += Box::new(Self {
+		solver.add_propagator(Box::new(Self {
 			vars: vars.clone(),
 			action_list: Vec::new(),
-		});
+		}));
 	}
 }
 
-impl<E, I> Propagator<E> for IntAllDifferentValue<I>
+impl<E, I> Propagator<E> for IntUniqueValue<I>
 where
 	E: ReasoningEngine,
-	I: SolverIntView<E>,
+	I: IntSolverActions<E>,
 {
 	fn advise_of_backtrack(&mut self, _: &mut E::NotificationCtx<'_>) {
 		// We forget any previously remembered fixed decisions.
@@ -553,7 +536,7 @@ where
 		ctx.advise_on_backtrack();
 	}
 
-	#[tracing::instrument(name = "all_different", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(name = "int_unique_value", level = "trace", skip(self, ctx))]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		debug_assert!(!self.action_list.is_empty() && self.action_list.iter().all_unique());
 		// We walk through all fixed decisions (indices).
@@ -566,7 +549,7 @@ where
 			// equal to the fixed value.
 			for (j, v) in self.vars.iter().enumerate() {
 				if j != i {
-					v.set_not_eq(ctx, val, reason)?;
+					v.remove_val(ctx, val, reason)?;
 				}
 			}
 		}
@@ -585,12 +568,12 @@ mod tests {
 	use crate::{
 		IntVal,
 		constraints::{
-			int_all_different::{IntAllDifferentBounds, IntAllDifferentValue},
 			int_linear::IntLinearLessEqBounds,
+			int_unique::{IntUniqueBounds, IntUniqueValue},
 		},
 		solver::{
-			SolveResult, Solver,
-			int_var::{EncodingType, IntVar},
+			IntValuation, Solver, Status,
+			decision::integer::{EncodingType, IntDecision},
 		},
 	};
 
@@ -598,69 +581,69 @@ mod tests {
 	#[traced_test]
 	fn test_all_different_bounds_sat_1() {
 		let mut slv = Solver::default();
-		let a = IntVar::new_in(
+		let a = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let b = IntVar::new_in(
+		let b = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let c = IntVar::new_in(
+		let c = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		IntAllDifferentBounds::post(&mut slv, vec![a, b, c]);
+		IntUniqueBounds::post(&mut slv, vec![a, b, c]);
 		slv.assert_all_solutions(&[a, b, c], |sol| sol.iter().all_unique());
 	}
 	#[test]
 	#[traced_test]
 	fn test_all_different_bounds_sat_2() {
 		let mut slv = Solver::default();
-		let a = IntVar::new_in(
+		let a = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([3..=4]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let b = IntVar::new_in(
+		let b = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([2..=4]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let c = IntVar::new_in(
+		let c = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([3..=4]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let d = IntVar::new_in(
+		let d = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([2..=5]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let e = IntVar::new_in(
+		let e = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([3..=6]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let f = IntVar::new_in(
+		let f = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=6]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 
-		IntAllDifferentBounds::post(&mut slv, vec![a, b, c, d, e, f]);
+		IntUniqueBounds::post(&mut slv, vec![a, b, c, d, e, f]);
 		slv.assert_all_solutions(&[a, b, c, d, e, f], |sol| sol.iter().all_unique());
 	}
 
@@ -668,44 +651,44 @@ mod tests {
 	#[traced_test]
 	fn test_all_different_bounds_sat_3() {
 		let mut slv = Solver::default();
-		let a = IntVar::new_in(
+		let a = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([3..=6]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let b = IntVar::new_in(
+		let b = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([3..=4]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let c = IntVar::new_in(
+		let c = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([2..=5]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let d = IntVar::new_in(
+		let d = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([2..=4]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let e = IntVar::new_in(
+		let e = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([3..=4]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let f = IntVar::new_in(
+		let f = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=6]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 
-		IntAllDifferentBounds::post(&mut slv, vec![a, b, c, d, e, f]);
+		IntUniqueBounds::post(&mut slv, vec![a, b, c, d, e, f]);
 		slv.assert_all_solutions(&[a, b, c, d, e, f], |sol| sol.iter().all_unique());
 	}
 
@@ -713,26 +696,26 @@ mod tests {
 	#[traced_test]
 	fn test_all_different_bounds_unsat() {
 		let mut slv = Solver::default();
-		let a = IntVar::new_in(
+		let a = IntDecision::new_in(
 			&mut slv,
 			RangeList::from(1..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let b = IntVar::new_in(
+		let b = IntDecision::new_in(
 			&mut slv,
 			RangeList::from(1..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let c = IntVar::new_in(
+		let c = IntDecision::new_in(
 			&mut slv,
 			RangeList::from(1..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 
-		IntAllDifferentBounds::post(&mut slv, vec![a, b, c]);
+		IntUniqueBounds::post(&mut slv, vec![a, b, c]);
 		IntLinearLessEqBounds::post(&mut slv, vec![-a, -b, -c], -8);
 		slv.assert_unsatisfiable();
 	}
@@ -741,26 +724,26 @@ mod tests {
 	#[traced_test]
 	fn test_all_different_value_sat() {
 		let mut slv = Solver::default();
-		let a = IntVar::new_in(
+		let a = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=4]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let b = IntVar::new_in(
+		let b = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=4]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let c = IntVar::new_in(
+		let c = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=4]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 
-		IntAllDifferentValue::post(&mut slv, vec![a, b, c]);
+		IntUniqueValue::post(&mut slv, vec![a, b, c]);
 
 		slv.assert_all_solutions(&[a, b, c], |sol| sol.iter().all_unique());
 	}
@@ -769,31 +752,31 @@ mod tests {
 	#[traced_test]
 	fn test_all_different_value_unsat() {
 		let mut slv = Solver::default();
-		let a = IntVar::new_in(
+		let a = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let b = IntVar::new_in(
+		let b = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let c = IntVar::new_in(
+		let c = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 
-		IntAllDifferentValue::post(&mut slv, vec![a, b, c]);
+		IntUniqueValue::post(&mut slv, vec![a, b, c]);
 
 		slv.assert_unsatisfiable();
 	}
 
-	fn test_sudoku(grid: &[&str], expected: SolveResult) {
+	fn test_sudoku(grid: &[&str], expected: Status) {
 		debug_assert_eq!(grid.len(), 9);
 		debug_assert!(grid.iter().all(|row| row.len() == 9));
 
@@ -809,7 +792,7 @@ mod tests {
 							let num = IntVal::from(c.to_digit(10).unwrap());
 							num.into()
 						} else {
-							IntVar::new_in(
+							IntDecision::new_in(
 								&mut slv,
 								RangeList::from_iter([1..=9]),
 								EncodingType::Eager,
@@ -819,7 +802,7 @@ mod tests {
 					})
 					.collect();
 
-				IntAllDifferentValue::post(&mut slv, vars.clone());
+				IntUniqueValue::post(&mut slv, vars.clone());
 				vars
 			})
 			.collect();
@@ -832,7 +815,7 @@ mod tests {
 				.map(|(j, _)| all_vars[j][i])
 				.collect();
 
-			IntAllDifferentValue::post(&mut slv, col_vars);
+			IntUniqueValue::post(&mut slv, col_vars);
 		}
 		// add all different propagator for each 3 by 3 grid
 		for i in 0..3 {
@@ -844,20 +827,20 @@ mod tests {
 					}
 				}
 
-				IntAllDifferentValue::post(&mut slv, block_vars);
+				IntUniqueValue::post(&mut slv, block_vars);
 			}
 		}
 		assert_eq!(
-			slv.solve(|val| {
+			slv.solve(|sol| {
 				(0..9).for_each(|r| {
-					let row = all_vars[r].iter().map(|&v| val(v.into())).collect_vec();
+					let row = all_vars[r].iter().map(|&v| v.val(sol)).collect_vec();
 					assert!(
 						row.iter().all_unique(),
 						"Values in row {r} are not all different: {row:?}",
 					);
 				});
 				(0..9).for_each(|c| {
-					let col = all_vars.iter().map(|row| val(row[c].into())).collect_vec();
+					let col = all_vars.iter().map(|row| row[c].val(sol)).collect_vec();
 					assert!(
 						col.iter().all_unique(),
 						"Values in column {c} are not all different: {col:?}",
@@ -867,7 +850,7 @@ mod tests {
 					(0..3).for_each(|j| {
 						let block = (0..3)
 							.flat_map(|x| (0..3).map(move |y| (x, y)))
-							.map(|(x, y)| val(all_vars[3 * i + x][3 * j + y].into()))
+							.map(|(x, y)| all_vars[3 * i + x][3 * j + y].val(sol))
 							.collect_vec();
 						assert!(
 							block.iter().all_unique(),
@@ -895,7 +878,7 @@ mod tests {
 				"593742168",
 				"687351492",
 			],
-			SolveResult::Satisfied,
+			Status::Satisfied,
 		);
 	}
 
@@ -914,7 +897,7 @@ mod tests {
 				".63....8.",
 				"...6.8...",
 			],
-			SolveResult::Satisfied,
+			Status::Satisfied,
 		);
 	}
 
@@ -933,7 +916,7 @@ mod tests {
 				"..9...6..",
 				"5..3.9..8",
 			],
-			SolveResult::Satisfied,
+			Status::Satisfied,
 		);
 	}
 
@@ -952,7 +935,7 @@ mod tests {
 				".48..69.7",
 				"....8....",
 			],
-			SolveResult::Satisfied,
+			Status::Satisfied,
 		);
 	}
 
@@ -971,7 +954,7 @@ mod tests {
 				"....2..6.",
 				".2.4..5..",
 			],
-			SolveResult::Satisfied,
+			Status::Satisfied,
 		);
 	}
 
@@ -990,7 +973,7 @@ mod tests {
 				"........5",
 				".34.9.71.",
 			],
-			SolveResult::Satisfied,
+			Status::Satisfied,
 		);
 	}
 }

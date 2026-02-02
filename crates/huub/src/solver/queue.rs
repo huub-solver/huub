@@ -3,8 +3,6 @@
 
 use std::collections::VecDeque;
 
-use index_vec::{Idx, IndexVec};
-
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 /// The priority levels at which propagators can be scheduled.
@@ -44,16 +42,16 @@ pub(crate) struct PropagatorInfo {
 	pub(crate) priority: PriorityLevel,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 /// A priority queue for propagators.
-pub(crate) struct PropagatorQueue<E: Idx> {
+pub(crate) struct PropagatorQueue {
 	/// Priority queue of the propagators.
-	queue: PriorityQueue<E>,
+	queue: PriorityQueue<u32>,
 	/// General information about the propagators in the solver.
-	pub(crate) info: IndexVec<E, PropagatorInfo>,
+	pub(crate) info: Vec<PropagatorInfo>,
 }
 
-impl<E: Idx> PriorityQueue<E> {
+impl<E> PriorityQueue<E> {
 	/// Inserts an element into the queue at the end of the given priority
 	/// level.
 	pub(crate) fn insert(&mut self, priority: PriorityLevel, elem: E) {
@@ -81,27 +79,20 @@ impl<E> Default for PriorityQueue<E> {
 	}
 }
 
-impl<E: Idx> PropagatorQueue<E> {
+impl PropagatorQueue {
 	/// Enqueue a given propagator when it is not already enqueued.
-	pub(crate) fn enqueue_propagator(&mut self, prop: E) {
-		if !self.info[prop].enqueued {
-			self.queue.insert(self.info[prop].priority, prop);
-			self.info[prop].enqueued = true;
+	pub(crate) fn enqueue_propagator(&mut self, prop: u32) {
+		if !self.info[prop as usize].enqueued {
+			self.info[prop as usize].enqueued = true;
+			self.queue.insert(self.info[prop as usize].priority, prop);
 		}
 	}
 
 	/// Pop a propagator from the queue if there are any.
-	pub(crate) fn pop(&mut self) -> Option<E> {
-		self.queue.pop().inspect(|&p| self.info[p].enqueued = false)
-	}
-}
-
-impl<E: Idx> Default for PropagatorQueue<E> {
-	fn default() -> Self {
-		Self {
-			queue: Default::default(),
-			info: Default::default(),
-		}
+	pub(crate) fn pop(&mut self) -> Option<u32> {
+		self.queue
+			.pop()
+			.inspect(|p| self.info[*p as usize].enqueued = false)
 	}
 }
 

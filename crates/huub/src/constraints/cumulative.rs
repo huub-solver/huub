@@ -4,7 +4,7 @@
 //! It uses a time-table propagation approach to efficiently manage the
 //! scheduling of tasks.
 
-use std::{iter::once, ops::AddAssign};
+use std::iter::once;
 
 use itertools::Itertools;
 use tracing::trace;
@@ -12,15 +12,15 @@ use tracing::trace;
 use crate::{
 	Conjunction, IntVal,
 	actions::{
-		InitActions, IntDecisionActions, IntInspectionActions, ReasoningContext, ReasoningEngine,
-		ReformulationActions,
+		InitActions, IntDecisionActions, IntInspectionActions, PostingActions, ReasoningContext,
+		ReasoningEngine,
 	},
 	constraints::{
-		BoxedPropagator, Constraint, ModelIntView, Propagator, ReasonBuilder, SimplificationStatus,
-		SolverIntView,
+		Constraint, IntModelActions, IntSolverActions, Propagator, ReasonBuilder,
+		SimplificationStatus,
 	},
-	reformulate::ReformulationError,
-	solver::{IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel},
+	lower::{LoweringContext, LoweringError},
+	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -83,21 +83,21 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	) -> Result<bool, E::Conflict>
 	where
 		E: ReasoningEngine,
-		I1: SolverIntView<E>,
-		I2: SolverIntView<E>,
-		I3: SolverIntView<E>,
-		I4: SolverIntView<E>,
+		I1: IntSolverActions<E>,
+		I2: IntSolverActions<E>,
+		I3: IntSolverActions<E>,
+		I4: IntSolverActions<E>,
 	{
 		self.bounds.clear();
 		self.heights.clear();
 		let n = self.start_times.len();
 		let mut events = Vec::with_capacity(2 * n);
-		let mut capacity_lb = self.capacity.lower_bound(ctx);
+		let mut capacity_lb = self.capacity.min(ctx);
 		// Collect all start and end events of compulsory tasks
 		for i in 0..n {
 			let lst = self.latest_start_time(ctx, i);
 			let ect = self.earliest_completion_time(ctx, i);
-			let min_usage = self.usages[i].lower_bound(ctx);
+			let min_usage = self.usages[i].min(ctx);
 			if lst < ect {
 				events.push((lst, min_usage));
 				events.push((ect, -min_usage));
@@ -129,7 +129,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 						capacity_lb, cur_height, "push capacity lower bound"
 					);
 					let mid_point = last_time.map_or(t, |lt| (lt + t) / 2);
-					self.capacity.set_lower_bound(
+					self.capacity.tighten_min(
 						ctx,
 						cur_height,
 						self.explain_overload_time_point(cur_height, mid_point),
@@ -149,7 +149,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 			trace!(
 				bounds = ?self.bounds,
 				heights = ?self.heights,
-				capacity_ub =? self.capacity.upper_bound(ctx),
+				capacity_ub =? self.capacity.max(ctx),
 				"cumulative time table profile"
 			);
 		}
@@ -189,7 +189,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 			if self.latest_start_time(ctx, i) <= time_point
 				&& self.earliest_completion_time(ctx, i) > time_point
 			{
-				let usage_lb = self.usages[i].lower_bound(ctx);
+				let usage_lb = self.usages[i].min(ctx);
 				if usage_lb > 0 {
 					relevant_tasks.push(i);
 					collected_energy += usage_lb;
@@ -204,7 +204,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		let mut remaining_slack = collected_energy - to_cover;
 		let mut minimal_relevant_tasks = Vec::new();
 		for &i in relevant_tasks.iter() {
-			let usage = self.usages[i].lower_bound(ctx);
+			let usage = self.usages[i].min(ctx);
 			if remaining_slack > usage {
 				remaining_slack -= usage;
 				continue;
@@ -235,7 +235,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		I1: IntInspectionActions<C>,
 		I2: IntInspectionActions<C>,
 	{
-		self.start_times[i].lower_bound(ctx) + self.durations[i].lower_bound(ctx)
+		self.start_times[i].min(ctx) + self.durations[i].min(ctx)
 	}
 
 	#[inline]
@@ -245,7 +245,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		C: ReasoningContext + ?Sized,
 		I1: IntInspectionActions<C>,
 	{
-		self.start_times[i].lower_bound(ctx)
+		self.start_times[i].min(ctx)
 	}
 
 	/// Constructs a reason for limiting the usage of a task at a specific
@@ -273,7 +273,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				usage_limit,
 				"Explain task usage limit"
 			);
-			let capacity_ub = self.capacity.upper_bound(ctx);
+			let capacity_ub = self.capacity.max(ctx);
 			let to_cover = capacity_ub - usage_limit;
 			let relevant_tasks =
 				self.collect_compulsory_tasks(ctx, to_cover, time_point, Some(task_no));
@@ -282,7 +282,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				time_point,
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
-					self.durations[i].lower_bound(ctx),
+					self.durations[i].min(ctx),
 					self.latest_start_time(ctx, i),
 					self.earliest_completion_time(ctx, i),
 				)).collect_vec(),
@@ -290,7 +290,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				"Explain task usage limit"
 			);
 
-			let cap_lit = self.capacity.upper_bound_lit(ctx);
+			let cap_lit = self.capacity.max_lit(ctx);
 
 			// Explanation: (1) relevant tasks (together with task `task_no`) have
 			// the required compulsory part at time `time_point`
@@ -302,12 +302,10 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 						self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
 						self.start_times[i].lit(
 							ctx,
-							IntLitMeaning::GreaterEq(
-								time_point + 1 - self.durations[i].lower_bound(ctx),
-							),
+							IntLitMeaning::GreaterEq(time_point + 1 - self.durations[i].min(ctx)),
 						),
-						self.durations[i].lower_bound_lit(ctx),
-						self.usages[i].lower_bound_lit(ctx),
+						self.durations[i].min_lit(ctx),
+						self.usages[i].min_lit(ctx),
 					]
 				})
 				// Explanation: (2) the resource capacity is at a given level
@@ -345,7 +343,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				"Explain resource overload"
 			);
 
-			let cap_lit = self.capacity.upper_bound_lit(ctx);
+			let cap_lit = self.capacity.max_lit(ctx);
 
 			// Explanation: relevant tasks have the required compulsory part at time
 			// `time_point`
@@ -356,12 +354,10 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 						self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
 						self.start_times[i].lit(
 							ctx,
-							IntLitMeaning::GreaterEq(
-								time_point - self.durations[i].lower_bound(ctx) + 1,
-							),
+							IntLitMeaning::GreaterEq(time_point - self.durations[i].min(ctx) + 1),
 						),
-						self.durations[i].lower_bound_lit(ctx),
-						self.usages[i].lower_bound_lit(ctx),
+						self.durations[i].min_lit(ctx),
+						self.usages[i].min_lit(ctx),
 					]
 				})
 				.chain(once(cap_lit))
@@ -386,8 +382,8 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		I4: IntDecisionActions<Ctx>,
 	{
 		move |ctx: &mut Ctx| {
-			let capacity_ub = self.capacity.upper_bound(ctx);
-			let min_usage = self.usages[task_no].lower_bound(ctx);
+			let capacity_ub = self.capacity.max(ctx);
+			let min_usage = self.usages[task_no].min(ctx);
 			let to_cover = capacity_ub - min_usage + 1;
 			let relevant_tasks =
 				self.collect_compulsory_tasks(ctx, to_cover, time_point, Some(task_no));
@@ -396,7 +392,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				time_point,
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
-					self.durations[i].lower_bound(ctx),
+					self.durations[i].min(ctx),
 					self.latest_start_time(ctx, i),
 					self.earliest_completion_time(ctx, i),
 				)).collect_vec(),
@@ -414,12 +410,10 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 					self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
 					self.start_times[i].lit(
 						ctx,
-						IntLitMeaning::GreaterEq(
-							time_point - self.durations[i].lower_bound(ctx) + 1,
-						),
+						IntLitMeaning::GreaterEq(time_point - self.durations[i].min(ctx) + 1),
 					),
-					self.durations[i].lower_bound_lit(ctx),
-					self.usages[i].lower_bound_lit(ctx),
+					self.durations[i].min_lit(ctx),
+					self.usages[i].min_lit(ctx),
 				]
 			}));
 
@@ -429,9 +423,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				CumulativePropagationRule::ForwardShift => {
 					reason.push(self.start_times[task_no].lit(
 						ctx,
-						IntLitMeaning::GreaterEq(
-							time_point - self.durations[task_no].lower_bound(ctx) + 1,
-						),
+						IntLitMeaning::GreaterEq(time_point - self.durations[task_no].min(ctx) + 1),
 					));
 				}
 				CumulativePropagationRule::BackwardShift => {
@@ -440,11 +432,11 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 					);
 				}
 			}
-			reason.push(self.durations[task_no].lower_bound_lit(ctx));
-			reason.push(self.usages[task_no].lower_bound_lit(ctx));
+			reason.push(self.durations[task_no].min_lit(ctx));
+			reason.push(self.usages[task_no].min_lit(ctx));
 
 			// Explanation: (3) the resource capacity is at a given level
-			reason.push(self.capacity.upper_bound_lit(ctx));
+			reason.push(self.capacity.max_lit(ctx));
 
 			reason
 		}
@@ -458,7 +450,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		I1: IntInspectionActions<C>,
 		I2: IntInspectionActions<C>,
 	{
-		self.start_times[i].upper_bound(ctx) + self.durations[i].upper_bound(ctx)
+		self.start_times[i].max(ctx) + self.durations[i].max(ctx)
 	}
 
 	#[inline]
@@ -468,7 +460,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		C: ReasoningContext + ?Sized,
 		I1: IntInspectionActions<C>,
 	{
-		self.start_times[i].upper_bound(ctx)
+		self.start_times[i].max(ctx)
 	}
 
 	/// Propagates the upper bound of a task's resource usage to ensure that,
@@ -489,15 +481,15 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I1: SolverIntView<E>,
-		I2: SolverIntView<E>,
-		I3: SolverIntView<E>,
-		I4: SolverIntView<E>,
+		I1: IntSolverActions<E>,
+		I2: IntSolverActions<E>,
+		I3: IntSolverActions<E>,
+		I4: IntSolverActions<E>,
 	{
 		let lst = self.latest_start_time(ctx, task);
 		let ect = self.earliest_completion_time(ctx, task);
-		let dur_lb = self.durations[task].lower_bound(ctx);
-		let usage_lb = self.usages[task].lower_bound(ctx);
+		let dur_lb = self.durations[task].min(ctx);
+		let usage_lb = self.usages[task].min(ctx);
 		debug_assert!(lst < ect, "Task must have compulsory part");
 
 		if !(dur_lb > 0 && usage_lb > 0) {
@@ -510,7 +502,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		let max_period = self.max_period_within(task, lst, ect);
 		if let Some(max_period) = max_period {
 			let max_usage = self.heights[max_period];
-			let limit = self.capacity.upper_bound(ctx) - max_usage + usage_lb;
+			let limit = self.capacity.max(ctx) - max_usage + usage_lb;
 			trace!(
 				task,
 				compulosary_part =? (lst, ect),
@@ -519,7 +511,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				limit,
 				"Limit task usage"
 			);
-			self.usages[task].set_upper_bound(
+			self.usages[task].tighten_max(
 				ctx,
 				limit,
 				self.explain_limit_usage(task, self.bounds[max_period], limit),
@@ -559,6 +551,29 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		}
 	}
 
+	/// Creates a new `CumulativeTimeTablePropagator` propagator and post it in
+	/// the solver.
+	pub fn post<E>(
+		solver: &mut E,
+		start_times: Vec<I1>,
+		durations: Vec<I2>,
+		usages: Vec<I3>,
+		capacity: I4,
+	) where
+		E: PostingActions + ?Sized,
+		I1: IntSolverActions<Engine>,
+		I2: IntSolverActions<Engine>,
+		I3: IntSolverActions<Engine>,
+		I4: IntSolverActions<Engine>,
+	{
+		solver.add_propagator(Box::new(CumulativeTimeTable::new(
+			start_times,
+			durations,
+			usages,
+			capacity,
+		)));
+	}
+
 	/// Performs a backward sweep for a given task to propagate its latest
 	/// completion time based on the current cumulative resource profile.
 	///
@@ -583,16 +598,16 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I1: SolverIntView<E>,
-		I2: SolverIntView<E>,
-		I3: SolverIntView<E>,
-		I4: SolverIntView<E>,
+		I1: IntSolverActions<E>,
+		I2: IntSolverActions<E>,
+		I3: IntSolverActions<E>,
+		I4: IntSolverActions<E>,
 	{
 		let est = self.earliest_start_time(ctx, task);
 		let lst = self.latest_start_time(ctx, task);
 		let ect = self.earliest_completion_time(ctx, task);
-		let dur_lb = self.durations[task].lower_bound(ctx);
-		let usage_lb = self.usages[task].lower_bound(ctx);
+		let dur_lb = self.durations[task].min(ctx);
+		let usage_lb = self.usages[task].min(ctx);
 
 		if dur_lb <= 0 || usage_lb <= 0 {
 			// If the task has no duration or usage, no need to sweep
@@ -603,7 +618,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		let last = self.bounds.partition_point(|&b| b < lst + dur_lb);
 		trace!(task, dur_lb, est, lst, usage_lb, "Task sweep backward");
 		let mut updated_lct = self.latest_completion_time(ctx, task);
-		let max_capacity = self.capacity.upper_bound(ctx);
+		let max_capacity = self.capacity.max(ctx);
 		for i in (1..last).rev() {
 			let b_start = self.bounds[i - 1];
 			let b_end = self.bounds[i];
@@ -648,7 +663,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				for t in time_points {
 					if t < updated_lct {
 						// Set new upper bound for the task's start time
-						self.start_times[task].set_upper_bound(
+						self.start_times[task].tighten_max(
 							ctx,
 							t - dur_lb,
 							self.explain_sweeping_time(
@@ -689,15 +704,15 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I1: SolverIntView<E>,
-		I2: SolverIntView<E>,
-		I3: SolverIntView<E>,
-		I4: SolverIntView<E>,
+		I1: IntSolverActions<E>,
+		I2: IntSolverActions<E>,
+		I3: IntSolverActions<E>,
+		I4: IntSolverActions<E>,
 	{
 		let est = self.earliest_start_time(ctx, task);
 		let lst = self.latest_start_time(ctx, task);
-		let dur_lb = self.durations[task].lower_bound(ctx);
-		let usage_lb = self.usages[task].lower_bound(ctx);
+		let dur_lb = self.durations[task].min(ctx);
+		let usage_lb = self.usages[task].min(ctx);
 
 		if dur_lb <= 0 || usage_lb <= 0 {
 			// If the task has no duration or usage, no need to sweep
@@ -708,7 +723,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		let first = self.bounds.partition_point(|&b| b < est);
 		trace!(task, dur_lb, est, lst, usage_lb, "Task sweep forward");
 		let mut updated_est = est;
-		let max_capacity = self.capacity.upper_bound(ctx);
+		let max_capacity = self.capacity.max(ctx);
 		for i in first..self.bounds.len() - 1 {
 			let b_start = self.bounds[i];
 			let b_end = self.bounds[i + 1];
@@ -751,7 +766,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				for t in time_points {
 					if t > updated_est {
 						// Set new lower bound for the task's start time
-						self.start_times[task].set_lower_bound(
+						self.start_times[task].tighten_min(
 							ctx,
 							t,
 							self.explain_sweeping_time(
@@ -769,34 +784,13 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	}
 }
 
-impl CumulativeTimeTable<IntView, IntView, IntView, IntView> {
-	/// Creates a new `CumulativeTimeTablePropagator` propagator and post it in
-	/// the solver.
-	pub fn post<E>(
-		solver: &mut E,
-		start_times: Vec<IntView>,
-		durations: Vec<IntView>,
-		usages: Vec<IntView>,
-		capacity: IntView,
-	) where
-		E: AddAssign<BoxedPropagator> + ?Sized,
-	{
-		*solver += Box::new(CumulativeTimeTable::new(
-			start_times,
-			durations,
-			usages,
-			capacity,
-		));
-	}
-}
-
 impl<E, I1, I2, I3, I4> Constraint<E> for CumulativeTimeTable<I1, I2, I3, I4>
 where
 	E: ReasoningEngine,
-	I1: ModelIntView<E>,
-	I2: ModelIntView<E>,
-	I3: ModelIntView<E>,
-	I4: ModelIntView<E>,
+	I1: IntModelActions<E>,
+	I2: IntModelActions<E>,
+	I3: IntModelActions<E>,
+	I4: IntModelActions<E>,
 {
 	fn simplify(
 		&mut self,
@@ -815,23 +809,23 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
 		let start_times = self
 			.start_times
 			.iter()
-			.map(|v| slv.solver_int(v.clone().into()))
+			.map(|v| slv.solver_view(v.clone().into()))
 			.collect_vec();
 		let durations = self
 			.durations
 			.iter()
-			.map(|v| slv.solver_int(v.clone().into()))
+			.map(|v| slv.solver_view(v.clone().into()))
 			.collect_vec();
 		let usages = self
 			.usages
 			.iter()
-			.map(|v| slv.solver_int(v.clone().into()))
+			.map(|v| slv.solver_view(v.clone().into()))
 			.collect_vec();
-		let capacity = { slv.solver_int(self.capacity.clone().into()) };
+		let capacity = { slv.solver_view(self.capacity.clone().into()) };
 		CumulativeTimeTable::post(slv, start_times, durations, usages, capacity);
 		Ok(())
 	}
@@ -840,10 +834,10 @@ where
 impl<E, I1, I2, I3, I4> Propagator<E> for CumulativeTimeTable<I1, I2, I3, I4>
 where
 	E: ReasoningEngine,
-	I1: SolverIntView<E>,
-	I2: SolverIntView<E>,
-	I3: SolverIntView<E>,
-	I4: SolverIntView<E>,
+	I1: IntSolverActions<E>,
+	I2: IntSolverActions<E>,
+	I3: IntSolverActions<E>,
+	I4: IntSolverActions<E>,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
@@ -898,16 +892,16 @@ where
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use flatzinc_serde::RangeList;
 	use itertools::Itertools;
+	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
 	use crate::{
-		Solver,
+		IntVal,
 		constraints::cumulative::CumulativeTimeTable,
 		solver::{
-			IntView,
-			int_var::{EncodingType, IntVar},
+			Solver, View,
+			decision::integer::{EncodingType, IntDecision},
 		},
 	};
 
@@ -918,10 +912,10 @@ mod tests {
 		start_time: RangeList<i64>,
 		duration: RangeList<i64>,
 		usage: RangeList<i64>,
-	) -> (IntView, IntView, IntView) {
-		let start = IntVar::new_in(slv, start_time, EncodingType::Eager, EncodingType::Lazy);
-		let dur = IntVar::new_in(slv, duration, EncodingType::Eager, EncodingType::Lazy);
-		let usage = IntVar::new_in(slv, usage, EncodingType::Eager, EncodingType::Lazy);
+	) -> (View<IntVal>, View<IntVal>, View<IntVal>) {
+		let start = IntDecision::new_in(slv, start_time, EncodingType::Eager, EncodingType::Lazy);
+		let dur = IntDecision::new_in(slv, duration, EncodingType::Eager, EncodingType::Lazy);
+		let usage = IntDecision::new_in(slv, usage, EncodingType::Eager, EncodingType::Lazy);
 		(start, dur, usage)
 	}
 
@@ -929,30 +923,30 @@ mod tests {
 	#[traced_test]
 	fn test_cumulative_val_sat() {
 		let mut slv = Solver::default();
-		let a = IntVar::new_in(
+		let a = IntDecision::new_in(
 			&mut slv,
 			(0..=4).into(),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
-		let b = IntVar::new_in(
+		let b = IntDecision::new_in(
 			&mut slv,
 			(0..=4).into(),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
-		let c = IntVar::new_in(
+		let c = IntDecision::new_in(
 			&mut slv,
 			(0..=4).into(),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
 
-		let durations: Vec<IntView> = [2, 3, 1].into_iter().map_into().collect();
-		let resources_profile_1 = [1, 2, 3].into_iter().map_into().collect();
-		let resources_profile_2 = [2, 2, 1].into_iter().map_into().collect();
-		let capacity_1 = 3.into();
-		let capacity_2 = 2.into();
+		let durations: Vec<View<IntVal>> = [2, 3, 1].into_iter().map_into().collect();
+		let resources_profile_1 = vec![1, 2, 3];
+		let resources_profile_2 = vec![2, 2, 1];
+		let capacity_1 = 3;
+		let capacity_2 = 2;
 		CumulativeTimeTable::post(
 			&mut slv,
 			vec![a, b, c],
@@ -988,29 +982,29 @@ mod tests {
 	#[traced_test]
 	fn test_cumulative_val_unsat() {
 		let mut slv = Solver::default();
-		let a = IntVar::new_in(
+		let a = IntDecision::new_in(
 			&mut slv,
 			(0..=3).into(),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
-		let b = IntVar::new_in(
+		let b = IntDecision::new_in(
 			&mut slv,
 			(0..=3).into(),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
-		let c = IntVar::new_in(
+		let c = IntDecision::new_in(
 			&mut slv,
 			(0..=3).into(),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
 
-		let durations: Vec<IntView> = [2, 3, 2].into_iter().map_into().collect();
-		let resources_profile_1: Vec<IntView> = [2, 2, 3].into_iter().map_into().collect();
-		let resources_profile_2: Vec<IntView> = [2, 2, 2].into_iter().map_into().collect();
-		let capacity = 3.into();
+		let durations: Vec<View<IntVal>> = [2, 3, 2].into_iter().map_into().collect();
+		let resources_profile_1: Vec<View<IntVal>> = [2, 2, 3].into_iter().map_into().collect();
+		let resources_profile_2: Vec<View<IntVal>> = [2, 2, 2].into_iter().map_into().collect();
+		let capacity = 3;
 
 		CumulativeTimeTable::post(
 			&mut slv,
@@ -1034,10 +1028,10 @@ mod tests {
 	#[traced_test]
 	fn test_cumulative_var_capacity_sat() {
 		let mut slv = Solver::default();
-		let start = [0, 3, 4, 6, 8, 8].into_iter().map_into().collect();
-		let duration = [3, 2, 5, 2, 1, 4].into_iter().map_into().collect();
-		let usage = [2, 3, 1, 4, 3, 2].into_iter().map_into().collect();
-		let capacity = IntVar::new_in(
+		let start = vec![0, 3, 4, 6, 8, 8];
+		let duration = vec![3, 2, 5, 2, 1, 4];
+		let usage = vec![2, 3, 1, 4, 3, 2];
+		let capacity = IntDecision::new_in(
 			&mut slv,
 			(1..=6).into(),
 			EncodingType::Eager,
@@ -1052,10 +1046,10 @@ mod tests {
 	#[traced_test]
 	fn test_cumulative_var_capacity_unsat() {
 		let mut slv = Solver::default();
-		let start = [0, 3, 4, 6, 8, 8].into_iter().map_into().collect();
-		let duration = [3, 2, 5, 2, 1, 4].into_iter().map_into().collect();
-		let usage = [2, 3, 1, 4, 3, 2].into_iter().map_into().collect();
-		let capacity = IntVar::new_in(
+		let start = vec![0, 3, 4, 6, 8, 8];
+		let duration = vec![3, 2, 5, 2, 1, 4];
+		let usage = vec![2, 3, 1, 4, 3, 2];
+		let capacity = IntDecision::new_in(
 			&mut slv,
 			(1..=4).into(),
 			EncodingType::Eager,
@@ -1090,7 +1084,7 @@ mod tests {
 			RangeList::from_iter([1..=3]),
 			RangeList::from_iter([2..=2]),
 		);
-		let capacity = 2.into();
+		let capacity = 2;
 
 		CumulativeTimeTable::post(
 			&mut slv,
@@ -1148,7 +1142,7 @@ mod tests {
 			RangeList::from_iter([2..=3]),
 			RangeList::from_iter([2..=2]),
 		);
-		let capacity = 2.into();
+		let capacity = 2;
 
 		CumulativeTimeTable::post(
 			&mut slv,
@@ -1185,7 +1179,7 @@ mod tests {
 			RangeList::from_iter([2..=2]),
 			RangeList::from_iter([2..=3]),
 		);
-		let capacity = 3.into();
+		let capacity = 3;
 
 		CumulativeTimeTable::post(
 			&mut slv,
@@ -1231,7 +1225,7 @@ mod tests {
 			RangeList::from_iter([2..=2]),
 			RangeList::from_iter([2..=3]),
 		);
-		let capacity = 2.into();
+		let capacity = 2;
 
 		CumulativeTimeTable::post(
 			&mut slv,

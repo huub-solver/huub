@@ -3,7 +3,7 @@
 //! constraint enforce a condition on the sum of (linear transformations of)
 //! integer decision variables.
 
-use std::{any::TypeId, num::NonZero, ops::AddAssign};
+use std::{any::TypeId, num::NonZero};
 
 use itertools::{Either, Itertools};
 use pindakaas::{
@@ -12,27 +12,28 @@ use pindakaas::{
 };
 
 use crate::{
-	BoolDecision, BoolFormula, Conjunction, IntDecision, IntVal,
+	Conjunction, IntVal,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
-		ConstructionActions, InitActions, IntDecisionActions, IntInitActions, IntInspectionActions,
-		IntPropagationActions, IntSimplificationActions, PropagationActions, ReasoningContext,
-		ReasoningEngine, ReformulationActions, SimplificationActions, TrailingActions,
+		InitActions, IntDecisionActions, IntInitActions, IntInspectionActions,
+		IntPropagationActions, IntSimplificationActions, PostingActions, PropagationActions,
+		ReasoningContext, ReasoningEngine, SimplificationActions, Trailed, TrailingActions,
 	},
 	constraints::{
-		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, ReasonBuilder,
-		SimplificationStatus, SolverBoolView, SolverIntView,
+		BoolModelActions, BoolSolverActions, Constraint, IntModelActions, IntSolverActions,
+		Propagator, ReasonBuilder, SimplificationStatus,
 	},
 	helpers::{
 		overflow::{OverflowImpossible, OverflowMode, OverflowPossible},
 		true_type::True,
 	},
-	reformulate::ReformulationError,
+	lower::{LoweringContext, LoweringError},
+	model::{self, expressions::bool_formula::BoolFormula},
 	solver::{
-		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner,
+		self, BoolView, Decision, IntLitMeaning,
 		activation_list::{IntEvent, IntPropCond},
 		queue::PriorityLevel,
-		trail::TrailedInt,
+		view::integer::IntView,
 	},
 	views::LinearBoolView,
 };
@@ -47,7 +48,7 @@ type DoubleIntVal = i128;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct IntEq {
 	/// The two integer decisions that must be equal.
-	pub(crate) vars: [IntDecision; 2],
+	pub(crate) vars: [model::View<IntVal>; 2],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -58,9 +59,9 @@ pub(crate) struct IntEq {
 /// the implication or reification or whether this is so.
 pub struct IntLinear<OF: OverflowMode> {
 	/// The integer linear terms that are being summed.
-	pub(crate) terms: Vec<IntDecision>,
+	pub(crate) terms: Vec<model::View<IntVal>>,
 	/// The operator that is used to compare the sum to the right-hand side.
-	pub(crate) operator: LinOperator,
+	pub(crate) comparator: LinComparator,
 	/// The constant right-hand side value.
 	pub(crate) rhs: OF::Accumulator,
 	/// Boolean decision variable that (half-)reifies the constraint, if any.
@@ -103,7 +104,7 @@ pub struct IntLinearNotEqValueImpl<OF: OverflowMode, IV, BV> {
 	terms: Vec<IV>,
 	/// Number of decision variables that have been not yet been fixed to a
 	/// single value
-	num_free: TrailedInt,
+	num_free: Trailed<usize>,
 	/// The value the summation should not equal
 	violation: OF::Accumulator,
 	/// Reified variable, if any
@@ -112,7 +113,7 @@ pub struct IntLinearNotEqValueImpl<OF: OverflowMode, IV, BV> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Possible operators that can be used for in a linear constraint.
-pub(crate) enum LinOperator {
+pub(crate) enum LinComparator {
 	/// Sum is equal to the constant
 	Equal,
 	/// Sum is less than or equal to the constant
@@ -125,17 +126,17 @@ pub(crate) enum LinOperator {
 /// Reification possibilities for a linear constraint.
 pub(crate) enum Reification {
 	/// The constraint is half-reified by the given [`BoolDecision`].
-	ImpliedBy(BoolDecision),
+	ImpliedBy(model::View<bool>),
 	/// The constraint is reified by the given [`BoolDecision`].
-	ReifiedBy(BoolDecision),
+	ReifiedBy(model::View<bool>),
 }
 
 impl<E> Constraint<E> for IntEq
 where
 	E: ReasoningEngine,
 	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
-	IntDecision: ModelIntView<E>,
-	BoolDecision: ModelBoolView<E>,
+	model::View<IntVal>: IntModelActions<E>,
+	model::View<bool>: BoolModelActions<E>,
 {
 	fn simplify(
 		&mut self,
@@ -152,10 +153,10 @@ where
 		}
 	}
 
-	fn to_solver(&self, actions: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&self, actions: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
 		let lin = IntLinear::<OverflowPossible> {
 			terms: vec![self.vars[0], -self.vars[1]],
-			operator: LinOperator::Equal,
+			comparator: LinComparator::Equal,
 			rhs: 0,
 			reif: None,
 		};
@@ -166,7 +167,7 @@ where
 impl<E> Propagator<E> for IntEq
 where
 	E: ReasoningEngine,
-	IntDecision: SolverIntView<E>,
+	model::View<IntVal>: IntSolverActions<E>,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Highest);
@@ -178,62 +179,29 @@ where
 
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// Channel bounds of self.vars[0] to self.vars[1]
-		self.vars[0].set_lower_bound(
-			ctx,
-			self.vars[1].lower_bound(ctx),
-			[self.vars[1].lower_bound_lit(ctx)],
-		)?;
-		self.vars[0].set_upper_bound(
-			ctx,
-			self.vars[1].upper_bound(ctx),
-			[self.vars[1].upper_bound_lit(ctx)],
-		)?;
+		self.vars[0].tighten_min(ctx, self.vars[1].min(ctx), [self.vars[1].min_lit(ctx)])?;
+		self.vars[0].tighten_max(ctx, self.vars[1].max(ctx), [self.vars[1].max_lit(ctx)])?;
 
 		// Channel bounds of self.vars[1] to self.vars[0]
-		self.vars[1].set_lower_bound(
-			ctx,
-			self.vars[0].lower_bound(ctx),
-			[self.vars[0].lower_bound_lit(ctx)],
-		)?;
-		self.vars[1].set_upper_bound(
-			ctx,
-			self.vars[0].upper_bound(ctx),
-			[self.vars[0].upper_bound_lit(ctx)],
-		)?;
+		self.vars[1].tighten_min(ctx, self.vars[0].min(ctx), [self.vars[0].min_lit(ctx)])?;
+		self.vars[1].tighten_max(ctx, self.vars[0].max(ctx), [self.vars[0].max_lit(ctx)])?;
 		Ok(())
 	}
 }
 
 impl<OF: OverflowMode> IntLinear<OF> {
-	/// Change the integer linear constraint to be implied by the given Boolean
-	/// decision variable.
-	///
-	/// The integer linear constraint must hold when the given Boolean decision
-	/// variable is `true`. If the constraint does not hold, then the Boolean
-	/// decision variable must be `false`.
-	pub fn implied_by(self, b: BoolDecision) -> Self {
-		assert!(
-			self.reif.is_none(),
-			"IntLinear is already implied or reified."
-		);
-		Self {
-			reif: Some(Reification::ImpliedBy(b)),
-			..self
-		}
-	}
-
 	/// Internal method to negate the linear constraint.
 	fn negate<Ctx>(self, ctx: &mut Ctx) -> Result<Self, Ctx::Conflict>
 	where
 		Ctx: ReasoningContext + ?Sized,
-		IntDecision: IntPropagationActions<Ctx>,
+		model::View<IntVal>: IntPropagationActions<Ctx>,
 	{
-		Ok(match self.operator {
-			LinOperator::Equal => Self {
-				operator: LinOperator::NotEqual,
+		Ok(match self.comparator {
+			LinComparator::Equal => Self {
+				comparator: LinComparator::NotEqual,
 				..self
 			},
-			LinOperator::LessEq => Self {
+			LinComparator::LessEq => Self {
 				terms: self
 					.terms
 					.into_iter()
@@ -242,27 +210,11 @@ impl<OF: OverflowMode> IntLinear<OF> {
 				rhs: -self.rhs - 1.into(),
 				..self
 			},
-			LinOperator::NotEqual => Self {
-				operator: LinOperator::Equal,
+			LinComparator::NotEqual => Self {
+				comparator: LinComparator::Equal,
 				..self
 			},
 		})
-	}
-
-	/// Change the integer linear constraint to be reified by the given Boolean
-	/// decision variable.
-	///
-	/// The integer linear constraint must hold if-and-only-if the given Boolean
-	/// decision variable is `true`.
-	pub fn reified_by(self, b: BoolDecision) -> Self {
-		assert!(
-			self.reif.is_none(),
-			"IntLinear is already implied or reified."
-		);
-		Self {
-			reif: Some(Reification::ReifiedBy(b)),
-			..self
-		}
 	}
 
 	/// Try to convert the integer linear constraint into a [`BoolLinear`]
@@ -272,8 +224,8 @@ impl<OF: OverflowMode> IntLinear<OF> {
 	/// This only succeeds if the linear constraint is not implied, all terms
 	/// are [`BoolLinView`]s, and the comparator is not
 	/// [`LinOperator::NotEqual`].
-	fn try_bool_lin(&self, terms: &[IntView]) -> Option<BoolLinear> {
-		if self.reif.is_some() || self.operator == LinOperator::NotEqual {
+	fn try_bool_lin(&self, terms: &[solver::View<IntVal>]) -> Option<BoolLinear> {
+		if self.reif.is_some() || self.comparator == LinComparator::NotEqual {
 			return None;
 		}
 
@@ -281,9 +233,9 @@ impl<OF: OverflowMode> IntLinear<OF> {
 		let terms: Vec<(RawLit, IntVal)> = terms
 			.iter()
 			.map(|&v| {
-				if let IntViewInner::Bool(lin) = v.0 {
+				if let IntView::Bool(lin) = v.0 {
 					offset += lin.offset.into();
-					Ok((lin.var, lin.scale.into()))
+					Ok((lin.var.0, lin.scale.into()))
 				} else {
 					Err(())
 				}
@@ -295,10 +247,10 @@ impl<OF: OverflowMode> IntLinear<OF> {
 		let bool_lin = BoolLinExp::from_terms(&terms);
 		let bool_lin = BoolLinear::new(
 			bool_lin,
-			match self.operator {
-				LinOperator::Equal => pindakaas::bool_linear::Comparator::Equal,
-				LinOperator::LessEq => pindakaas::bool_linear::Comparator::LessEq,
-				LinOperator::NotEqual => unreachable!(),
+			match self.comparator {
+				LinComparator::Equal => pindakaas::bool_linear::Comparator::Equal,
+				LinComparator::LessEq => pindakaas::bool_linear::Comparator::LessEq,
+				LinComparator::NotEqual => unreachable!(),
 			},
 			rhs,
 		);
@@ -340,8 +292,8 @@ impl<E, OF> Constraint<E> for IntLinear<OF>
 where
 	E: ReasoningEngine,
 	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
-	IntDecision: ModelIntView<E>,
-	BoolDecision: ModelBoolView<E>,
+	model::View<IntVal>: IntModelActions<E>,
+	model::View<bool>: BoolModelActions<E>,
 	OF: OverflowMode,
 {
 	fn simplify(
@@ -355,14 +307,14 @@ where
 				Some(true) => {
 					let mut lin = self.clone();
 					lin.reif = None;
-					ctx.add_constraint(lin);
+					ctx.post_constraint(lin);
 					return Ok(SimplificationStatus::Subsumed);
 				}
 				Some(false) => {
 					if matches!(self.reif.unwrap(), Reification::ReifiedBy(_)) {
 						let mut lin = self.clone().negate(ctx)?;
 						lin.reif = None;
-						ctx.add_constraint(lin);
+						ctx.post_constraint(lin);
 					}
 					return Ok(SimplificationStatus::Subsumed);
 				}
@@ -382,36 +334,38 @@ where
 		// Perform single-term domain changes and any possible unification
 		match *self.terms.as_slice() {
 			[var] if self.reif.is_none() => {
-				match (self.operator, self.rhs.try_into()) {
-					(LinOperator::Equal, Ok(rhs)) => var.set_val(ctx, rhs, [])?,
-					(LinOperator::Equal, Err(_)) => return Err(ctx.declare_conflict([])),
-					(LinOperator::LessEq, Ok(rhs)) => var.set_upper_bound(ctx, rhs, [])?,
-					(LinOperator::LessEq, Err(_)) if self.rhs < IntVal::MIN.into() => {
+				match (self.comparator, self.rhs.try_into()) {
+					(LinComparator::Equal, Ok(rhs)) => var.fix(ctx, rhs, [])?,
+					(LinComparator::Equal, Err(_)) => return Err(ctx.declare_conflict([])),
+					(LinComparator::LessEq, Ok(rhs)) => var.tighten_max(ctx, rhs, [])?,
+					(LinComparator::LessEq, Err(_)) if self.rhs < IntVal::MIN.into() => {
 						return Err(ctx.declare_conflict([]));
 					}
-					(LinOperator::LessEq, Err(_)) => {
+					(LinComparator::LessEq, Err(_)) => {
 						debug_assert!(self.rhs > IntVal::MAX.into());
 					}
-					(LinOperator::NotEqual, Ok(rhs)) => var.set_not_eq(ctx, rhs, [])?,
-					(LinOperator::NotEqual, Err(_)) => {}
+					(LinComparator::NotEqual, Ok(rhs)) => var.remove_val(ctx, rhs, [])?,
+					(LinComparator::NotEqual, Err(_)) => {}
 				}
 				return Ok(SimplificationStatus::Subsumed);
 			}
 			[var] => {
-				let lit = match (self.operator, self.rhs.try_into()) {
-					(LinOperator::Equal, Ok(rhs)) => var.eq(rhs),
-					(LinOperator::Equal, Err(_)) => false.into(),
-					(LinOperator::LessEq, Ok(rhs)) => var.leq(rhs),
-					(LinOperator::LessEq, Err(_)) if self.rhs < IntVal::MIN.into() => false.into(),
-					(LinOperator::LessEq, Err(_)) => {
+				let lit = match (self.comparator, self.rhs.try_into()) {
+					(LinComparator::Equal, Ok(rhs)) => var.eq(rhs),
+					(LinComparator::Equal, Err(_)) => false.into(),
+					(LinComparator::LessEq, Ok(rhs)) => var.leq(rhs),
+					(LinComparator::LessEq, Err(_)) if self.rhs < IntVal::MIN.into() => {
+						false.into()
+					}
+					(LinComparator::LessEq, Err(_)) => {
 						debug_assert!(self.rhs > IntVal::MAX.into());
 						true.into()
 					}
-					(LinOperator::NotEqual, Ok(rhs)) => var.ne(rhs),
-					(LinOperator::NotEqual, Err(_)) => false.into(),
+					(LinComparator::NotEqual, Ok(rhs)) => var.ne(rhs),
+					(LinComparator::NotEqual, Err(_)) => false.into(),
 				};
 				match self.reif.unwrap() {
-					Reification::ImpliedBy(r) => ctx.add_constraint(BoolFormula::Implies(
+					Reification::ImpliedBy(r) => ctx.post_constraint(BoolFormula::Implies(
 						Box::new(BoolFormula::Atom(r)),
 						Box::new(BoolFormula::Atom(lit)),
 					)),
@@ -419,7 +373,7 @@ where
 				}
 				return Ok(SimplificationStatus::Subsumed);
 			}
-			[a, b] if self.operator == LinOperator::Equal && self.reif.is_none() => {
+			[a, b] if self.comparator == LinComparator::Equal && self.reif.is_none() => {
 				match self.rhs.try_into() {
 					Ok(rhs) => {
 						let b = b.bounding_neg(ctx)?.bounding_add(ctx, rhs)?;
@@ -436,23 +390,23 @@ where
 		}
 
 		// Collect variable bounds and create their sums
-		let lb = self.terms.iter().map(|v| v.lower_bound(ctx)).collect_vec();
-		let ub = self.terms.iter().map(|v| v.upper_bound(ctx)).collect_vec();
+		let lb = self.terms.iter().map(|v| v.min(ctx)).collect_vec();
+		let ub = self.terms.iter().map(|v| v.max(ctx)).collect_vec();
 
 		let lb_sum: OF::Accumulator = lb.iter().copied().map(OF::Accumulator::from).sum();
 		let ub_sum: OF::Accumulator = ub.iter().copied().map(OF::Accumulator::from).sum();
 
 		// Check if the constraint is already known to be true or false
-		let known_result = match self.operator {
-			LinOperator::Equal if lb_sum > self.rhs || ub_sum < self.rhs => Some(false),
-			LinOperator::Equal if lb_sum == ub_sum => {
+		let known_result = match self.comparator {
+			LinComparator::Equal if lb_sum > self.rhs || ub_sum < self.rhs => Some(false),
+			LinComparator::Equal if lb_sum == ub_sum => {
 				debug_assert_eq!(lb_sum, self.rhs);
 				Some(true)
 			}
-			LinOperator::LessEq if ub_sum <= self.rhs => Some(true),
-			LinOperator::LessEq if lb_sum > self.rhs => Some(false),
-			LinOperator::NotEqual if lb_sum > self.rhs || ub_sum < self.rhs => Some(true),
-			LinOperator::NotEqual if lb_sum == ub_sum => {
+			LinComparator::LessEq if ub_sum <= self.rhs => Some(true),
+			LinComparator::LessEq if lb_sum > self.rhs => Some(false),
+			LinComparator::NotEqual if lb_sum > self.rhs || ub_sum < self.rhs => Some(true),
+			LinComparator::NotEqual if lb_sum == ub_sum => {
 				debug_assert_eq!(lb_sum, self.rhs);
 				Some(false)
 			}
@@ -461,11 +415,11 @@ where
 		let fail_reason = |ctx: &mut E::PropagationCtx<'_>| {
 			self.terms
 				.iter()
-				.map(|v| match self.operator {
-					LinOperator::Equal if lb_sum > self.rhs => v.lower_bound_lit(ctx),
-					LinOperator::Equal if ub_sum < self.rhs => v.upper_bound_lit(ctx),
-					LinOperator::LessEq => v.lower_bound_lit(ctx),
-					LinOperator::NotEqual => v.val_lit(ctx).unwrap(),
+				.map(|v| match self.comparator {
+					LinComparator::Equal if lb_sum > self.rhs => v.min_lit(ctx),
+					LinComparator::Equal if ub_sum < self.rhs => v.max_lit(ctx),
+					LinComparator::LessEq => v.min_lit(ctx),
+					LinComparator::NotEqual => v.val_lit(ctx).unwrap(),
 					_ => unreachable!(),
 				})
 				.collect_vec()
@@ -475,24 +429,24 @@ where
 			return match self.reif {
 				Some(Reification::ImpliedBy(r)) => {
 					if !satisfied {
-						r.set_val(ctx, false, fail_reason)?;
+						r.fix(ctx, false, fail_reason)?;
 					}
 					Ok(SimplificationStatus::Subsumed)
 				}
 				Some(Reification::ReifiedBy(r)) if satisfied => {
-					r.set(ctx, |ctx: &mut E::PropagationCtx<'_>| {
+					r.require(ctx, |ctx: &mut E::PropagationCtx<'_>| {
 						self.terms
 							.iter()
-							.flat_map(|v| match self.operator {
-								LinOperator::NotEqual if lb_sum > self.rhs => {
-									vec![v.lower_bound_lit(ctx)]
+							.flat_map(|v| match self.comparator {
+								LinComparator::NotEqual if lb_sum > self.rhs => {
+									vec![v.min_lit(ctx)]
 								}
-								LinOperator::NotEqual if ub_sum < self.rhs => {
-									vec![v.upper_bound_lit(ctx)]
+								LinComparator::NotEqual if ub_sum < self.rhs => {
+									vec![v.max_lit(ctx)]
 								}
-								LinOperator::LessEq => vec![v.upper_bound_lit(ctx)],
-								LinOperator::NotEqual => {
-									vec![v.lower_bound_lit(ctx), v.upper_bound_lit(ctx)]
+								LinComparator::LessEq => vec![v.max_lit(ctx)],
+								LinComparator::NotEqual => {
+									vec![v.min_lit(ctx), v.max_lit(ctx)]
 								}
 								_ => unreachable!(),
 							})
@@ -502,13 +456,13 @@ where
 				}
 				Some(Reification::ReifiedBy(r)) => {
 					debug_assert!(!satisfied);
-					r.set_val(ctx, false, fail_reason)?;
+					r.fix(ctx, false, fail_reason)?;
 					Ok(SimplificationStatus::Subsumed)
 				}
 				None if !satisfied => Err(ctx.declare_conflict(fail_reason)),
 				None => Ok(SimplificationStatus::Subsumed),
 			};
-		} else if self.operator == LinOperator::NotEqual {
+		} else if self.comparator == LinComparator::NotEqual {
 			// No further bounds propagation possible
 			return Ok(SimplificationStatus::NoFixpoint);
 		}
@@ -526,17 +480,17 @@ where
 					.iter()
 					.enumerate()
 					.filter(|&(j, _)| j != i)
-					.map(|(_, w)| w.lower_bound_lit(ctx))
+					.map(|(_, w)| w.min_lit(ctx))
 					.collect_vec()
 			};
 			if let Some(Reification::ReifiedBy(r) | Reification::ImpliedBy(r)) = self.reif {
 				if lb_i > new_ub {
-					r.set_val(ctx, false, reason)?;
+					r.fix(ctx, false, reason)?;
 					return Ok(SimplificationStatus::Subsumed);
 				}
 			} else {
 				match new_ub.try_into() {
-					Ok(new_ub) => v.set_upper_bound(ctx, new_ub, reason)?,
+					Ok(new_ub) => v.tighten_max(ctx, new_ub, reason)?,
 					Err(_) if new_ub < IntVal::MIN.into() => return Err(ctx.declare_conflict([])),
 					Err(_) => {
 						debug_assert!(new_ub > IntVal::MAX.into());
@@ -546,7 +500,7 @@ where
 		}
 
 		// For equality constraints, propagate the lower bounds of the variables
-		if self.operator == LinOperator::Equal {
+		if self.comparator == LinComparator::Equal {
 			if lb_sum == ub_sum {
 				assert_eq!(lb_sum, self.rhs);
 				return Ok(SimplificationStatus::Subsumed);
@@ -563,17 +517,17 @@ where
 						.iter()
 						.enumerate()
 						.filter(|&(j, _)| j != i)
-						.map(|(_, &w)| w.upper_bound_lit(ctx))
+						.map(|(_, &w)| w.max_lit(ctx))
 						.collect_vec()
 				};
 				if let Some(Reification::ReifiedBy(r) | Reification::ImpliedBy(r)) = self.reif {
 					if ub_i < new_lb {
-						r.set_val(ctx, false, reason)?;
+						r.fix(ctx, false, reason)?;
 						return Ok(SimplificationStatus::Subsumed);
 					}
 				} else {
 					match new_lb.try_into() {
-						Ok(new_lb) => v.set_lower_bound(ctx, new_lb, reason)?,
+						Ok(new_lb) => v.tighten_min(ctx, new_lb, reason)?,
 						Err(_) if new_lb > IntVal::MAX.into() => {
 							return Err(ctx.declare_conflict([]));
 						}
@@ -591,12 +545,12 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(&self, slv: &mut dyn ReformulationActions) -> Result<(), ReformulationError> {
+	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
 		use Reification::*;
 
-		let terms = self.terms.iter().map(|&v| slv.solver_int(v)).collect_vec();
+		let terms = self.terms.iter().map(|&v| slv.solver_view(v)).collect_vec();
 		let r = self.reif.as_ref().map(|&r| {
-			slv.solver_bool(match r {
+			slv.solver_view(match r {
 				ImpliedBy(r) | ReifiedBy(r) => r,
 			})
 		});
@@ -605,86 +559,96 @@ where
 		// Detect Pseudo-Boolean constraints, and simplify them if possible.
 		let (terms, operator, rhs) = if let Some(bool_lin) = self.try_bool_lin(&terms) {
 			let map_cmp = |cmp| match cmp {
-				pindakaas::bool_linear::Comparator::Equal => LinOperator::Equal,
-				pindakaas::bool_linear::Comparator::LessEq => LinOperator::LessEq,
+				pindakaas::bool_linear::Comparator::Equal => LinComparator::Equal,
+				pindakaas::bool_linear::Comparator::LessEq => LinComparator::LessEq,
 				pindakaas::bool_linear::Comparator::GreaterEq => unreachable!(),
 			};
 
-			let mut wrapper = slv.clause_database_wrapper();
-			let (op, lin) = match BoolLinAggregator::default().aggregate(&mut wrapper, &bool_lin) {
-				Err(Unsatisfiable) => return Err(wrapper.error.unwrap()),
+			let (op, lin) = match BoolLinAggregator::default().aggregate(slv, &bool_lin) {
+				Err(Unsatisfiable) => return Err(slv.error.take().unwrap()),
 				Ok(BoolLinVariant::Cardinality(card)) => (map_cmp(card.comparator()), card.into()),
 				Ok(BoolLinVariant::CardinalityOne(card))
 					if card.comparator() == pindakaas::bool_linear::Comparator::Equal =>
 				{
-					slv.add_clause(card.iter_lits())?;
-					(LinOperator::LessEq, card.into())
+					slv.add_clause(card.iter_lits().map(Decision))?;
+					(LinComparator::LessEq, card.into())
 				}
-				Ok(BoolLinVariant::CardinalityOne(card)) => (LinOperator::LessEq, card.into()),
+				Ok(BoolLinVariant::CardinalityOne(card)) => (LinComparator::LessEq, card.into()),
 				Ok(BoolLinVariant::Linear(lin)) => (map_cmp(lin.comparator()), lin),
 				Ok(BoolLinVariant::Trivial) => return Ok(()),
 			};
 			(
 				lin.iter_terms()
 					.map(|(lit, coeff)| {
-						IntView(IntViewInner::Bool(LinearBoolView::new(
-							NonZero::new(coeff).unwrap(),
-							0,
-							lit,
-						)))
+						LinearBoolView::new(NonZero::new(coeff).unwrap(), 0, Decision(lit)).into()
 					})
 					.collect_vec(),
 				op,
 				lin.rhs().into(),
 			)
 		} else {
-			(terms, self.operator, self.rhs)
+			(terms, self.comparator, self.rhs)
 		};
 
-		let negate_terms = |terms: &[IntView]| terms.iter().map(|&v| -v).collect_vec();
+		let negate_terms = |terms: &[solver::View<IntVal>]| terms.iter().map(|&v| -v).collect_vec();
 
 		match (operator, r) {
-			(LinOperator::Equal, None) => {
+			(LinComparator::Equal, None) => {
 				// coeffs * vars >= c <=> -coeffs * vars <= -c
 				IntLinearLessEqBounds::post(slv, negate_terms(&terms), -rhs);
 				// coeffs * vars <= c
 				IntLinearLessEqBounds::post(slv, terms.clone(), rhs);
 			}
-			(LinOperator::Equal, Some(r)) => {
+			(LinComparator::Equal, Some(r)) => {
 				if full_reif {
-					IntLinearNotEqImpValue::<_, _, RawLit>::post(slv, terms.clone(), rhs, !r);
+					IntLinearNotEqImpValue::<_, _, Decision<bool>>::post(
+						slv,
+						terms.clone(),
+						rhs,
+						!r,
+					);
 				}
-				IntLinearLessEqImpBounds::<_, _, RawLit>::post(slv, negate_terms(&terms), -rhs, r);
-				IntLinearLessEqImpBounds::<_, _, RawLit>::post(slv, terms, rhs, r);
+				IntLinearLessEqImpBounds::<_, _, Decision<bool>>::post(
+					slv,
+					negate_terms(&terms),
+					-rhs,
+					r,
+				);
+				IntLinearLessEqImpBounds::<_, _, Decision<bool>>::post(slv, terms, rhs, r);
 			}
-			(LinOperator::LessEq, None) => {
+			(LinComparator::LessEq, None) => {
 				IntLinearLessEqBounds::post(slv, terms, rhs);
 			}
-			(LinOperator::LessEq, Some(r)) => {
+			(LinComparator::LessEq, Some(r)) => {
 				if full_reif {
-					IntLinearLessEqImpBounds::<_, _, RawLit>::post(
+					IntLinearLessEqImpBounds::<_, _, Decision<bool>>::post(
 						slv,
 						negate_terms(&terms),
 						-(rhs + 1.into()),
 						!r,
 					);
 				}
-				IntLinearLessEqImpBounds::<_, _, RawLit>::post(slv, terms, rhs, r);
+				IntLinearLessEqImpBounds::<_, _, Decision<bool>>::post(slv, terms, rhs, r);
 			}
-			(LinOperator::NotEqual, None) => {
+			(LinComparator::NotEqual, None) => {
 				IntLinearNotEqValue::post(slv, terms, rhs);
 			}
-			(LinOperator::NotEqual, Some(r)) => {
+			(LinComparator::NotEqual, Some(r)) => {
 				if full_reif {
-					IntLinearLessEqImpBounds::<_, _, RawLit>::post(slv, terms.clone(), rhs, !r);
-					IntLinearLessEqImpBounds::<_, _, RawLit>::post(
+					IntLinearLessEqImpBounds::<_, _, Decision<bool>>::post(
+						slv,
+						terms.clone(),
+						rhs,
+						!r,
+					);
+					IntLinearLessEqImpBounds::<_, _, Decision<bool>>::post(
 						slv,
 						negate_terms(&terms),
 						-rhs,
 						!r,
 					);
 				}
-				IntLinearNotEqImpValue::<_, _, RawLit>::post(slv, terms, rhs, r);
+				IntLinearNotEqImpValue::<_, _, Decision<bool>>::post(slv, terms, rhs, r);
 			}
 		}
 		Ok(())
@@ -694,8 +658,8 @@ where
 impl<E, OF> Propagator<E> for IntLinear<OF>
 where
 	E: ReasoningEngine,
-	IntDecision: SolverIntView<E>,
-	BoolDecision: SolverBoolView<E>,
+	model::View<IntVal>: IntSolverActions<E>,
+	model::View<bool>: BoolSolverActions<E>,
 	OF: OverflowMode,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
@@ -712,19 +676,19 @@ where
 	}
 }
 
-impl IntLinearLessEqBounds<OverflowPossible, IntView> {
+impl IntLinearLessEqBounds<OverflowPossible, solver::View<IntVal>> {
 	/// Create a new [`IntLinearLessEqBounds`] propagator and post it in the
 	/// solver.
 	pub fn post<E>(
 		solver: &mut E,
-		vars: impl IntoIterator<Item = IntView>,
+		vars: impl IntoIterator<Item = solver::View<IntVal>>,
 		max: impl Into<DoubleIntVal>,
 	) where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
-		IntView: IntInspectionActions<E>,
+		E: PostingActions + ?Sized,
+		solver::View<IntVal>: IntInspectionActions<E>,
 	{
 		let mut max = max.into();
-		let vars: Vec<IntView> = vars
+		let vars: Vec<solver::View<IntVal>> = vars
 			.into_iter()
 			.filter(|v| {
 				if let Some(c) = v.val(solver) {
@@ -736,11 +700,11 @@ impl IntLinearLessEqBounds<OverflowPossible, IntView> {
 			})
 			.collect();
 
-		*solver += Box::new(Self {
+		solver.add_propagator(Box::new(Self {
 			terms: vars.clone(),
 			max,
 			reification: True,
-		});
+		}));
 	}
 }
 
@@ -748,9 +712,9 @@ impl<OF, BV, E, IV> Propagator<E> for IntLinearLessEqBoundsImpl<OF, IV, BV>
 where
 	OF: OverflowMode,
 	E: ReasoningEngine,
-	BV: SolverBoolView<E>,
-	IV: SolverIntView<E>,
-	E::Atom: SolverBoolView<E>,
+	BV: BoolSolverActions<E>,
+	IV: IntSolverActions<E>,
+	E::Atom: BoolSolverActions<E>,
 {
 	fn explain(
 		&mut self,
@@ -766,7 +730,7 @@ where
 		let mut conj = Vec::with_capacity(self.terms.len() - const_true as usize);
 		for (j, t) in self.terms.iter().enumerate() {
 			if j != i {
-				conj.push(t.lower_bound_lit(ctx));
+				conj.push(t.min_lit(ctx));
 			}
 		}
 		if !const_true && i < self.terms.len() {
@@ -796,7 +760,7 @@ where
 		let lb_sum = self
 			.terms
 			.iter()
-			.map(|v| OF::Accumulator::from(v.lower_bound(ctx)))
+			.map(|v| OF::Accumulator::from(v.min(ctx)))
 			.sum();
 
 		if TypeId::of::<BV>() != TypeId::of::<True>() {
@@ -804,11 +768,8 @@ where
 			// right-hand-side value
 			if lb_sum > self.max {
 				self.reification
-					.set_val(ctx, false, |ctx: &mut E::PropagationCtx<'_>| {
-						self.terms
-							.iter()
-							.map(|v| v.lower_bound_lit(ctx))
-							.collect_vec()
+					.fix(ctx, false, |ctx: &mut E::PropagationCtx<'_>| {
+						self.terms.iter().map(|v| v.min_lit(ctx)).collect_vec()
 					})?;
 			}
 		}
@@ -822,14 +783,14 @@ where
 		// propagate the upper bound of the variables
 		for (j, v) in self.terms.iter().enumerate() {
 			let reason = ctx.deferred_reason(j as u64);
-			let ub = (self.max - lb_sum) + v.lower_bound(ctx).into();
+			let ub = (self.max - lb_sum) + v.min(ctx).into();
 			match ub.try_into() {
-				Ok(ub) => v.set_upper_bound(ctx, ub, reason)?,
+				Ok(ub) => v.tighten_max(ctx, ub, reason)?,
 				Err(_) if ub < IntVal::MIN.into() => v
 					.lit(ctx, IntLitMeaning::Less(IntVal::MIN))
-					.set(ctx, reason)?,
+					.require(ctx, reason)?,
 				Err(_) => {
-					debug_assert!(ub > v.upper_bound(ctx).into());
+					debug_assert!(ub > v.max(ctx).into());
 				}
 			}
 		}
@@ -837,27 +798,27 @@ where
 	}
 }
 
-impl IntLinearLessEqImpBounds<OverflowPossible, IntView, RawLit> {
+impl IntLinearLessEqImpBounds<OverflowPossible, solver::View<IntVal>, Decision<bool>> {
 	/// Create a new [`IntLinearLessEqImpBounds`] propagator and post it in the
 	/// solver.
 	pub fn post<E>(
 		solver: &mut E,
-		vars: impl IntoIterator<Item = IntView>,
+		vars: impl IntoIterator<Item = solver::View<IntVal>>,
 		max: impl Into<DoubleIntVal>,
-		reification: BoolView,
+		reification: solver::View<bool>,
 	) where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
-		IntView: IntInspectionActions<E>,
+		E: PostingActions + ?Sized,
+		solver::View<IntVal>: IntInspectionActions<E>,
 	{
 		let mut max = max.into();
 		let reification = match reification.0 {
-			BoolViewInner::Lit(r) => r,
-			BoolViewInner::Const(true) => {
+			BoolView::Lit(r) => r,
+			BoolView::Const(true) => {
 				return IntLinearLessEqBounds::post(solver, vars, max);
 			}
-			BoolViewInner::Const(false) => return,
+			BoolView::Const(false) => return,
 		};
-		let vars: Vec<IntView> = vars
+		let vars: Vec<_> = vars
 			.into_iter()
 			.filter(|v| {
 				if let Some(c) = v.val(solver) {
@@ -869,31 +830,31 @@ impl IntLinearLessEqImpBounds<OverflowPossible, IntView, RawLit> {
 			})
 			.collect();
 
-		*solver += Box::new(Self {
+		solver.add_propagator(Box::new(Self {
 			terms: vars.clone(),
 			max,
 			reification,
-		});
+		}));
 	}
 }
 
-impl IntLinearNotEqImpValue<OverflowPossible, IntView, RawLit> {
+impl IntLinearNotEqImpValue<OverflowPossible, solver::View<IntVal>, Decision<bool>> {
 	/// Create a new [`IntLinearNotEqImpValue`] propagator and post it in the
 	/// solver.
 	pub fn post<E>(
 		solver: &mut E,
-		vars: impl IntoIterator<Item = IntView>,
+		vars: impl IntoIterator<Item = solver::View<IntVal>>,
 		violation: impl Into<DoubleIntVal>,
-		reification: BoolView,
+		reification: solver::View<bool>,
 	) where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
-		IntView: IntInspectionActions<E>,
-		BoolView: BoolInspectionActions<E>,
+		E: PostingActions + ?Sized,
+		solver::View<IntVal>: IntInspectionActions<E>,
+		solver::View<bool>: BoolInspectionActions<E>,
 	{
 		let mut violation = violation.into();
 		let reification = match reification.val(solver) {
 			None => {
-				let BoolViewInner::Lit(r) = reification.0 else {
+				let BoolView::Lit(r) = reification.0 else {
 					unreachable!()
 				};
 				r
@@ -904,7 +865,7 @@ impl IntLinearNotEqImpValue<OverflowPossible, IntView, RawLit> {
 			Some(false) => return,
 		};
 
-		let vars: Vec<IntView> = vars
+		let vars: Vec<_> = vars
 			.into_iter()
 			.filter(|&v| {
 				if let Some(c) = v.val(solver) {
@@ -915,39 +876,41 @@ impl IntLinearNotEqImpValue<OverflowPossible, IntView, RawLit> {
 				}
 			})
 			.collect();
-		let num_fixed = solver.new_trailed_int(vars.len() as IntVal + 1);
+		let num_free = solver.new_trailed(vars.len() + 1);
 
 		if IntLinear::can_overflow(solver, &vars) || IntVal::try_from(violation).is_err() {
-			*solver += Box::new(IntLinearNotEqImpValue::<OverflowPossible, _, _> {
+			solver.add_propagator(Box::new(IntLinearNotEqImpValue::<OverflowPossible, _, _> {
 				terms: vars.clone(),
 				violation,
-				num_free: num_fixed,
+				num_free,
 				reification,
-			});
+			}));
 		} else {
-			*solver += Box::new(IntLinearNotEqImpValue::<OverflowImpossible, _, _> {
-				terms: vars.clone(),
-				violation: violation as IntVal,
-				num_free: num_fixed,
-				reification,
-			});
+			solver.add_propagator(Box::new(
+				IntLinearNotEqImpValue::<OverflowImpossible, _, _> {
+					terms: vars.clone(),
+					violation: violation as IntVal,
+					num_free,
+					reification,
+				},
+			));
 		}
 	}
 }
 
-impl IntLinearNotEqValue<OverflowPossible, IntView> {
+impl IntLinearNotEqValue<OverflowPossible, solver::View<IntVal>> {
 	/// Create a new [`IntLinearNotEqImpValue`] propagator and post it in the
 	/// solver.
 	pub fn post<E>(
 		solver: &mut E,
-		vars: impl IntoIterator<Item = IntView>,
+		vars: impl IntoIterator<Item = solver::View<IntVal>>,
 		violation: impl Into<DoubleIntVal>,
 	) where
-		E: AddAssign<BoxedPropagator> + ConstructionActions + ReasoningContext + ?Sized,
-		IntView: IntInspectionActions<E>,
+		E: PostingActions + ?Sized,
+		solver::View<IntVal>: IntInspectionActions<E>,
 	{
 		let mut violation = violation.into();
-		let vars: Vec<IntView> = vars
+		let vars: Vec<_> = vars
 			.into_iter()
 			.filter(|&v| {
 				if let Some(c) = v.val(solver) {
@@ -958,22 +921,22 @@ impl IntLinearNotEqValue<OverflowPossible, IntView> {
 				}
 			})
 			.collect();
-		let num_fixed = solver.new_trailed_int(vars.len() as IntVal);
+		let num_free = solver.new_trailed(vars.len());
 
 		if IntLinear::can_overflow(solver, &vars) || IntVal::try_from(violation).is_err() {
-			*solver += Box::new(IntLinearNotEqValue::<OverflowPossible, _> {
+			solver.add_propagator(Box::new(IntLinearNotEqValue::<OverflowPossible, _> {
 				terms: vars.clone(),
 				violation,
-				num_free: num_fixed,
+				num_free,
 				reification: True,
-			});
+			}));
 		} else {
-			*solver += Box::new(IntLinearNotEqValue::<OverflowImpossible, _> {
+			solver.add_propagator(Box::new(IntLinearNotEqValue::<OverflowImpossible, _> {
 				terms: vars.clone(),
 				violation: violation as IntVal,
-				num_free: num_fixed,
+				num_free,
 				reification: True,
-			});
+			}));
 		}
 	}
 }
@@ -988,9 +951,10 @@ where
 	where
 		Ctx: TrailingActions,
 	{
-		let num_free = ctx.trailed_int(self.num_free) - 1;
-		ctx.set_trailed_int(self.num_free, num_free);
-		debug_assert!(num_free >= 0);
+		let num_free = ctx.trailed(self.num_free);
+		debug_assert!(num_free >= 1);
+		let num_free = num_free - 1;
+		ctx.set_trailed(self.num_free, num_free);
 		num_free <= 1
 	}
 
@@ -1028,9 +992,9 @@ impl<OF, BV, IV, E> Propagator<E> for IntLinearNotEqValueImpl<OF, IV, BV>
 where
 	OF: OverflowMode,
 	E: ReasoningEngine,
-	E::Atom: SolverBoolView<E> + From<bool>,
-	IV: SolverIntView<E>,
-	BV: SolverBoolView<E>,
+	E::Atom: BoolSolverActions<E> + From<bool>,
+	IV: IntSolverActions<E>,
+	BV: BoolSolverActions<E>,
 {
 	fn advise_of_bool_change(&mut self, ctx: &mut E::NotificationCtx<'_>, _data: u64) -> bool {
 		debug_assert_ne!(TypeId::of::<BV>(), TypeId::of::<True>());
@@ -1086,12 +1050,12 @@ where
 			}
 			let val = self.violation - sum;
 			if let Ok(val) = val.try_into() {
-				v.set_not_eq(ctx, val, self.reason(i))?;
+				v.remove_val(ctx, val, self.reason(i))?;
 			}
 			Ok(())
 		} else if sum == self.violation {
 			self.reification
-				.set_val(ctx, false, self.reason(self.terms.len()))
+				.fix(ctx, false, self.reason(self.terms.len()))
 		} else {
 			Ok(())
 		}
@@ -1107,12 +1071,13 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		BoolDecision, IntVal, Model,
+		IntVal, Model,
 		constraints::int_linear::{DoubleIntVal, IntLinearLessEqBounds, IntLinearNotEqValue},
-		reformulate::InitConfig,
+		lower::InitConfig,
+		model::view::View,
 		solver::{
 			Solver,
-			int_var::{EncodingType, IntVar},
+			decision::integer::{EncodingType, IntDecision},
 		},
 	};
 
@@ -1126,10 +1091,10 @@ mod tests {
 		// Regression test for GitHub issue 233, where a `int_lin_le_reif` known to be
 		// false was rewritten incorrectly. It allowed `a` to be 2.
 		let mut prb = Model::default();
-		let a = prb.new_int_var(1..=2);
-		let r: BoolDecision = false.into();
+		let a = prb.new_int_decision(1..=2);
+		let r: View<bool> = false.into();
 
-		rel!(&mut prb, r <-> -2 >= -a);
+		prb.linear(-a).le(-2).reified_by(r).post();
 
 		prb.expect_solutions(&[a], expect![[r#"1"#]]);
 	}
@@ -1138,19 +1103,19 @@ mod tests {
 	#[traced_test]
 	fn test_linear_ge_sat() {
 		let mut slv = Solver::default();
-		let a = IntVar::new_in(
+		let a = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
-		let b = IntVar::new_in(
+		let b = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
-		let c = IntVar::new_in(
+		let c = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
 			EncodingType::Eager,
@@ -1174,11 +1139,11 @@ mod tests {
 	#[traced_test]
 	fn test_linear_ge_unsat() {
 		let mut prb = Model::default();
-		let a = prb.new_int_var(1..=2);
-		let b = prb.new_int_var(1..=2);
-		let c = prb.new_int_var(1..=2);
+		let a = prb.new_int_decision(1..=2);
+		let b = prb.new_int_decision(1..=2);
+		let c = prb.new_int_decision(1..=2);
 
-		rel!(&mut prb, 10 <= a * 2 + b + c);
+		prb.linear(a * 2 + b + c).ge(10).post();
 		prb.assert_unsatisfiable();
 	}
 
@@ -1186,19 +1151,19 @@ mod tests {
 	#[traced_test]
 	fn test_linear_le_sat() {
 		let mut slv = Solver::default();
-		let a = IntVar::new_in(
+		let a = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
-		let b = IntVar::new_in(
+		let b = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
-		let c = IntVar::new_in(
+		let c = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
 			EncodingType::Eager,
@@ -1222,11 +1187,11 @@ mod tests {
 	#[traced_test]
 	fn test_linear_le_unsat() {
 		let mut prb = Model::default();
-		let a = prb.new_int_var(1..=4);
-		let b = prb.new_int_var(1..=4);
-		let c = prb.new_int_var(1..=4);
+		let a = prb.new_int_decision(1..=4);
+		let b = prb.new_int_decision(1..=4);
+		let c = prb.new_int_decision(1..=4);
 
-		rel!(&mut prb, 3 >= a * 2 + b + c);
+		prb.linear(a * 2 + b + c).le(3).post();
 
 		prb.assert_unsatisfiable();
 	}
@@ -1235,19 +1200,19 @@ mod tests {
 	#[traced_test]
 	fn test_linear_ne_sat() {
 		let mut slv = Solver::default();
-		let a = IntVar::new_in(
+		let a = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let b = IntVar::new_in(
+		let b = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let c = IntVar::new_in(
+		let c = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=2]),
 			EncodingType::Eager,
@@ -1272,18 +1237,18 @@ mod tests {
 	#[traced_test]
 	fn test_reified_linear_ge_sat() {
 		let mut prb = Model::default();
-		let r = prb.new_bool_var();
-		let a = prb.new_int_var(1..=2);
-		let b = prb.new_int_var(1..=2);
-		let c = prb.new_int_var(1..=2);
+		let r = prb.new_bool_decision();
+		let a = prb.new_int_decision(1..=2);
+		let b = prb.new_int_decision(1..=2);
+		let c = prb.new_int_decision(1..=2);
 
-		rel!(&mut prb, r -> 7 <= a * 2 + b + c);
+		prb.linear(a * 2 + b + c).ge(7).implied_by(r).post();
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let a = map.get(&mut slv, &a.into());
-		let b = map.get(&mut slv, &b.into());
-		let c = map.get(&mut slv, &c.into());
-		let r = map.get(&mut slv, &r.into());
+		let a = map.get_any(&mut slv, a.into());
+		let b = map.get_any(&mut slv, b.into());
+		let c = map.get_any(&mut slv, c.into());
+		let r = map.get_any(&mut slv, r.into());
 		slv.expect_solutions(
 			&[r, a, b, c],
 			expect![[r#"
@@ -1305,18 +1270,18 @@ mod tests {
 	#[traced_test]
 	fn test_reified_linear_le_sat() {
 		let mut prb = Model::default();
-		let r = prb.new_bool_var();
-		let a = prb.new_int_var(1..=2);
-		let b = prb.new_int_var(1..=2);
-		let c = prb.new_int_var(1..=2);
+		let r = prb.new_bool_decision();
+		let a = prb.new_int_decision(1..=2);
+		let b = prb.new_int_decision(1..=2);
+		let c = prb.new_int_decision(1..=2);
 
-		rel!(&mut prb, r -> 5 >= a * 2 + b + c);
+		prb.linear(a * 2 + b + c).le(5).implied_by(r).post();
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let a = map.get(&mut slv, &a.into());
-		let b = map.get(&mut slv, &b.into());
-		let c = map.get(&mut slv, &c.into());
-		let r = map.get(&mut slv, &r.into());
+		let a = map.get_any(&mut slv, a.into());
+		let b = map.get_any(&mut slv, b.into());
+		let c = map.get_any(&mut slv, c.into());
+		let r = map.get_any(&mut slv, r.into());
 		slv.expect_solutions(
 			&[r, a, b, c],
 			expect![[r#"
@@ -1338,18 +1303,18 @@ mod tests {
 	#[traced_test]
 	fn test_reified_linear_ne_sat() {
 		let mut prb = Model::default();
-		let r = prb.new_bool_var();
-		let a = prb.new_int_var(1..=2);
-		let b = prb.new_int_var(1..=2);
-		let c = prb.new_int_var(1..=2);
+		let r = prb.new_bool_decision();
+		let a = prb.new_int_decision(1..=2);
+		let b = prb.new_int_decision(1..=2);
+		let c = prb.new_int_decision(1..=2);
 
-		rel!(&mut prb, r -> 6 != a * 2 + b + c);
+		prb.linear(a * 2 + b + c).ne(6).implied_by(r).post();
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let a = map.get(&mut slv, &a.into());
-		let b = map.get(&mut slv, &b.into());
-		let c = map.get(&mut slv, &c.into());
-		let r = map.get(&mut slv, &r.into());
+		let a = map.get_any(&mut slv, a.into());
+		let b = map.get_any(&mut slv, b.into());
+		let c = map.get_any(&mut slv, c.into());
+		let r = map.get_any(&mut slv, r.into());
 		slv.expect_solutions(
 			&[r, a, b, c],
 			expect![[r#"

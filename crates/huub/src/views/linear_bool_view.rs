@@ -1,7 +1,6 @@
 //! with an affine transformation:
 //!     value = scale * b + offset
 //! where `b ∈ {0, 1}` corresponds to `{false, true}` respectively.
-
 //! This module defines `LinearBoolView`, an integer view of a Boolean variable
 
 use std::{
@@ -14,7 +13,7 @@ use std::{
 use rangelist::{IntervalIterator, RangeList};
 
 use crate::{
-	IntSetVal, IntVal,
+	IntSet, IntVal,
 	actions::{
 		BoolInspectionActions, BoolOperations, BoolPropagationActions, BoolSimplificationActions,
 		IntDecisionActions, IntExplanationActions, IntInspectionActions, IntPropagationActions,
@@ -22,7 +21,10 @@ use crate::{
 	},
 	constraints::ReasonBuilder,
 	helpers::{div_ceil, div_floor},
-	solver::IntLitMeaning,
+	solver::{
+		IntLitMeaning,
+		solution::{BoolValuation, IntValuation, Solution},
+	},
 	views::offset_view::OffsetView,
 };
 
@@ -34,7 +36,8 @@ use crate::{
 ///     value = scale * b + offset
 /// where `b` is `0` for `false` and `1` for `true`.
 ///
-/// This view represents an optimization over [`LinearView`] by ensuring that
+/// This view represents an optimization over
+/// [`LinearView`](crate::views::linear_view::LinearView) by ensuring that
 /// the stored `scale` is strictly positive.
 ///
 /// Examples:
@@ -208,7 +211,7 @@ where
 		(self.transform_val(lb), self.transform_val(ub))
 	}
 
-	fn domain(&self, ctx: &Ctx) -> IntSetVal {
+	fn domain(&self, ctx: &Ctx) -> IntSet {
 		if let Some(v) = self.var.val(ctx) {
 			RangeList::from_sorted_elements([self.transform_val(v as IntVal)])
 		} else {
@@ -238,11 +241,23 @@ where
 		}
 	}
 
-	fn lower_bound(&self, ctx: &Ctx) -> IntVal {
+	fn max(&self, ctx: &Ctx) -> IntVal {
+		self.transform_val(self.var.val(ctx).unwrap_or(true) as IntVal)
+	}
+
+	fn max_lit(&self, ctx: &Ctx) -> Ctx::Atom {
+		if self.var.val(ctx) == Some(false) {
+			!Ctx::Atom::from(self.var.clone())
+		} else {
+			true.into()
+		}
+	}
+
+	fn min(&self, ctx: &Ctx) -> IntVal {
 		self.transform_val(self.var.val(ctx).unwrap_or(false) as IntVal)
 	}
 
-	fn lower_bound_lit(&self, ctx: &Ctx) -> Ctx::Atom {
+	fn min_lit(&self, ctx: &Ctx) -> Ctx::Atom {
 		if self.var.val(ctx) == Some(true) {
 			self.var.clone().into()
 		} else {
@@ -270,18 +285,6 @@ where
 		})
 	}
 
-	fn upper_bound(&self, ctx: &Ctx) -> IntVal {
-		self.transform_val(self.var.val(ctx).unwrap_or(true) as IntVal)
-	}
-
-	fn upper_bound_lit(&self, ctx: &Ctx) -> Ctx::Atom {
-		if self.var.val(ctx) == Some(false) {
-			!Ctx::Atom::from(self.var.clone())
-		} else {
-			true.into()
-		}
-	}
-
 	fn val(&self, ctx: &Ctx) -> Option<IntVal> {
 		Some(self.transform_val(self.var.val(ctx)? as IntVal))
 	}
@@ -293,55 +296,7 @@ where
 	Ctx::Atom: BoolOperations + From<bool> + From<Var>,
 	Var: BoolPropagationActions<Ctx>,
 {
-	fn set_lower_bound(
-		&self,
-		ctx: &mut Ctx,
-		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
-	) -> Result<(), Ctx::Conflict> {
-		let val = self.reverse_val_ceil(val);
-		if val > 1 {
-			Err(ctx.declare_conflict(reason))
-		} else if val == 1 {
-			self.var.set(ctx, reason)
-		} else {
-			Ok(())
-		}
-	}
-
-	fn set_not_eq(
-		&self,
-		ctx: &mut Ctx,
-		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
-	) -> Result<(), Ctx::Conflict> {
-		let Some(val) = self.try_reverse_val(val) else {
-			return Ok(());
-		};
-		if (0..=1).contains(&val) {
-			self.var.set_val(ctx, val != 1, reason)
-		} else {
-			Ok(())
-		}
-	}
-
-	fn set_upper_bound(
-		&self,
-		ctx: &mut Ctx,
-		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
-	) -> Result<(), Ctx::Conflict> {
-		let val = self.reverse_val_floor(val);
-		if val < 0 {
-			Err(ctx.declare_conflict(reason))
-		} else if val == 0 {
-			self.var.set_val(ctx, false, reason)
-		} else {
-			Ok(())
-		}
-	}
-
-	fn set_val(
+	fn fix(
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
@@ -351,9 +306,57 @@ where
 			return Err(ctx.declare_conflict(reason));
 		};
 		if (0..=1).contains(&val) {
-			self.var.set_val(ctx, val == 1, reason)
+			self.var.fix(ctx, val == 1, reason)
 		} else {
 			Err(ctx.declare_conflict(reason))
+		}
+	}
+
+	fn remove_val(
+		&self,
+		ctx: &mut Ctx,
+		val: IntVal,
+		reason: impl ReasonBuilder<Ctx>,
+	) -> Result<(), Ctx::Conflict> {
+		let Some(val) = self.try_reverse_val(val) else {
+			return Ok(());
+		};
+		if (0..=1).contains(&val) {
+			self.var.fix(ctx, val != 1, reason)
+		} else {
+			Ok(())
+		}
+	}
+
+	fn tighten_max(
+		&self,
+		ctx: &mut Ctx,
+		val: IntVal,
+		reason: impl ReasonBuilder<Ctx>,
+	) -> Result<(), Ctx::Conflict> {
+		let val = self.reverse_val_floor(val);
+		if val < 0 {
+			Err(ctx.declare_conflict(reason))
+		} else if val == 0 {
+			self.var.fix(ctx, false, reason)
+		} else {
+			Ok(())
+		}
+	}
+
+	fn tighten_min(
+		&self,
+		ctx: &mut Ctx,
+		val: IntVal,
+		reason: impl ReasonBuilder<Ctx>,
+	) -> Result<(), Ctx::Conflict> {
+		let val = self.reverse_val_ceil(val);
+		if val > 1 {
+			Err(ctx.declare_conflict(reason))
+		} else if val == 1 {
+			self.var.require(ctx, reason)
+		} else {
+			Ok(())
 		}
 	}
 }
@@ -364,29 +367,10 @@ where
 	Ctx::Atom: BoolOperations + From<bool> + From<Var>,
 	Var: BoolSimplificationActions<Ctx>,
 {
-	fn set_domain(
+	fn exclude(
 		&self,
 		ctx: &mut Ctx,
-		domain: &IntSetVal,
-		reason: impl ReasonBuilder<Ctx>,
-	) -> Result<(), Ctx::Conflict> {
-		let lb = domain.contains(&self.offset);
-		let ub = domain.contains(&(self.offset + self.scale.get()));
-		if lb && ub {
-			Ok(())
-		} else if ub {
-			self.var.set(ctx, reason)
-		} else if lb {
-			self.var.set_val(ctx, false, reason)
-		} else {
-			Err(ctx.declare_conflict(reason))
-		}
-	}
-
-	fn set_not_in_set(
-		&self,
-		ctx: &mut Ctx,
-		values: &IntSetVal,
+		values: &IntSet,
 		reason: impl ReasonBuilder<Ctx>,
 	) -> Result<(), Ctx::Conflict> {
 		let lb = values.contains(&self.offset);
@@ -394,11 +378,30 @@ where
 		if lb && ub {
 			Err(ctx.declare_conflict(reason))
 		} else if ub {
-			self.var.set_val(ctx, false, reason)
+			self.var.fix(ctx, false, reason)
 		} else if lb {
-			self.var.set(ctx, reason)
+			self.var.require(ctx, reason)
 		} else {
 			Ok(())
+		}
+	}
+
+	fn restrict_domain(
+		&self,
+		ctx: &mut Ctx,
+		domain: &IntSet,
+		reason: impl ReasonBuilder<Ctx>,
+	) -> Result<(), Ctx::Conflict> {
+		let lb = domain.contains(&self.offset);
+		let ub = domain.contains(&(self.offset + self.scale.get()));
+		if lb && ub {
+			Ok(())
+		} else if ub {
+			self.var.require(ctx, reason)
+		} else if lb {
+			self.var.fix(ctx, false, reason)
+		} else {
+			Err(ctx.declare_conflict(reason))
 		}
 	}
 
@@ -414,23 +417,33 @@ where
 		match (self_lb == other_lb, self_ub == other_ub) {
 			(true, true) => self.var.unify(ctx, other.var),
 			(true, false) => {
-				self.var.set_val(ctx, false, [])?;
-				other.var.set_val(ctx, false, [])
+				self.var.fix(ctx, false, [])?;
+				other.var.fix(ctx, false, [])
 			}
 			(false, true) => {
-				self.var.set_val(ctx, true, [])?;
-				other.var.set_val(ctx, true, [])
+				self.var.fix(ctx, true, [])?;
+				other.var.fix(ctx, true, [])
 			}
 			(false, false) if self_lb == other_ub => {
-				self.var.set_val(ctx, false, [])?;
-				other.var.set_val(ctx, true, [])
+				self.var.fix(ctx, false, [])?;
+				other.var.fix(ctx, true, [])
 			}
 			(false, false) if self_ub == other_lb => {
-				self.var.set_val(ctx, true, [])?;
-				other.var.set_val(ctx, false, [])
+				self.var.fix(ctx, true, [])?;
+				other.var.fix(ctx, false, [])
 			}
 			(false, false) => Err(ctx.declare_conflict([])),
 		}
+	}
+}
+
+impl<Var> IntValuation for LinearBoolView<NonZero<IntVal>, IntVal, Var>
+where
+	Var: BoolValuation,
+{
+	fn val(&self, sol: Solution<'_>) -> IntVal {
+		let b = self.var.val(sol);
+		self.transform_val(b as IntVal)
 	}
 }
 

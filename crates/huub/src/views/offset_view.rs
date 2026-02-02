@@ -10,13 +10,16 @@ use std::{
 use rangelist::RangeList;
 
 use crate::{
-	IntSetVal, IntVal,
+	IntSet, IntVal,
 	actions::{
 		IntDecisionActions, IntExplanationActions, IntInspectionActions, IntPropagationActions,
 		ReasoningContext,
 	},
 	constraints::ReasonBuilder,
-	solver::IntLitMeaning,
+	solver::{
+		IntLitMeaning,
+		solution::{IntValuation, Solution},
+	},
 	views::linear_view::LinearView,
 };
 
@@ -139,7 +142,7 @@ where
 		(lb + self.offset, ub + self.offset)
 	}
 
-	fn domain(&self, ctx: &Ctx) -> IntSetVal {
+	fn domain(&self, ctx: &Ctx) -> IntSet {
 		RangeList::from_sorted_ranges(
 			self.var
 				.domain(ctx)
@@ -161,24 +164,24 @@ where
 		}
 	}
 
-	fn lower_bound(&self, ctx: &Ctx) -> IntVal {
-		self.var.lower_bound(ctx) + self.offset
+	fn max(&self, ctx: &Ctx) -> IntVal {
+		self.var.max(ctx) + self.offset
 	}
 
-	fn lower_bound_lit(&self, ctx: &Ctx) -> Ctx::Atom {
-		self.var.lower_bound_lit(ctx)
+	fn max_lit(&self, ctx: &Ctx) -> Ctx::Atom {
+		self.var.max_lit(ctx)
+	}
+
+	fn min(&self, ctx: &Ctx) -> IntVal {
+		self.var.min(ctx) + self.offset
+	}
+
+	fn min_lit(&self, ctx: &Ctx) -> Ctx::Atom {
+		self.var.min_lit(ctx)
 	}
 
 	fn try_lit(&self, ctx: &Ctx, meaning: IntLitMeaning) -> Option<Ctx::Atom> {
 		self.var.try_lit(ctx, self.reverse_meaning(meaning))
-	}
-
-	fn upper_bound(&self, ctx: &Ctx) -> IntVal {
-		self.var.upper_bound(ctx) + self.offset
-	}
-
-	fn upper_bound_lit(&self, ctx: &Ctx) -> Ctx::Atom {
-		self.var.upper_bound_lit(ctx)
 	}
 
 	fn val(&self, ctx: &Ctx) -> Option<IntVal> {
@@ -191,40 +194,49 @@ where
 	Ctx: ReasoningContext + ?Sized,
 	Var: IntPropagationActions<Ctx>,
 {
-	fn set_lower_bound(
+	fn fix(
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
 		reason: impl ReasonBuilder<Ctx>,
 	) -> Result<(), Ctx::Conflict> {
-		self.var.set_lower_bound(ctx, val - self.offset, reason)
+		self.var.fix(ctx, val - self.offset, reason)
 	}
 
-	fn set_not_eq(
+	fn remove_val(
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
 		reason: impl ReasonBuilder<Ctx>,
 	) -> Result<(), Ctx::Conflict> {
-		self.var.set_not_eq(ctx, val - self.offset, reason)
+		self.var.remove_val(ctx, val - self.offset, reason)
 	}
 
-	fn set_upper_bound(
+	fn tighten_max(
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
 		reason: impl ReasonBuilder<Ctx>,
 	) -> Result<(), Ctx::Conflict> {
-		self.var.set_upper_bound(ctx, val - self.offset, reason)
+		self.var.tighten_max(ctx, val - self.offset, reason)
 	}
 
-	fn set_val(
+	fn tighten_min(
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
 		reason: impl ReasonBuilder<Ctx>,
 	) -> Result<(), Ctx::Conflict> {
-		self.var.set_val(ctx, val - self.offset, reason)
+		self.var.tighten_min(ctx, val - self.offset, reason)
+	}
+}
+
+impl<Var> IntValuation for OffsetView<IntVal, Var>
+where
+	Var: IntValuation,
+{
+	fn val(&self, sol: Solution<'_>) -> IntVal {
+		self.var.val(sol) + self.offset
 	}
 }
 
