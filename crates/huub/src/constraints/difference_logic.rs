@@ -5,13 +5,14 @@ use std::{
 	cmp::{Reverse, max, min},
 	fmt::Debug,
 	hash::Hash,
+	mem,
 	ops::AddAssign,
 	rc::Rc,
 };
 
 use itertools::Itertools;
 use pindakaas::{Lit as RawLit, propositional_logic::Formula};
-use rustc_hash::{FxBuildHasher, FxHashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::trace;
 
 use crate::{
@@ -26,7 +27,10 @@ use crate::{
 		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, ReasonBuilder,
 		SimplificationStatus, SolverBoolView, SolverIntView,
 	},
-	helpers::{trailed_list::TrailedList, trailed_open_list::TrailedOpenList},
+	helpers::{
+		priority_queue::LazyPriorityQueue, trailed_list::TrailedList,
+		trailed_open_list::TrailedOpenList,
+	},
 	reformulate::{BoolDecisionInner, IntDecisionIndex, IntDecisionInner, ReformulationError},
 	solver::{
 		BoolView, IntLitMeaning, IntView,
@@ -36,14 +40,6 @@ use crate::{
 	},
 	views::{LinearBoolView, LinearView},
 };
-
-/// Redefine IndexSet to use fast FxHasher
-type IndexSet<T> = indexmap::IndexSet<T, FxBuildHasher>;
-/// Redefine IndexMap to use fast FxHasher
-type IndexMap<K, V> = indexmap::IndexMap<K, V, FxBuildHasher>;
-/// Redefine PriorityQueue to use fast FxHasher
-type PriorityQueue<I, P> = priority_queue::PriorityQueue<I, P, FxBuildHasher>;
-
 /*-----------------------------------------------------
 - Collection and processing of difference constraints -
 -----------------------------------------------------*/
@@ -324,7 +320,7 @@ pub(crate) struct DifferenceLogicModel {
 	/// Constraint graph.
 	graph: DifferenceLogicGraph<IntDecision, BoolDecision>,
 	/// Mapping of integer decision variables to their index.
-	int_var_index: IndexSet<IntDecision>,
+	int_var_index: FxHashMap<IntDecision, usize>,
 	/// Minimum distances in the global graph.
 	distances: Vec<Vec<IntVal>>,
 	/// Set of nodes reachable with a direct edge of minimum distance for each
@@ -338,6 +334,20 @@ pub(crate) struct DifferenceLogicModel {
 	bool_active: Vec<bool>,
 }
 
+/// Return the index associated to the key if existing, or add the key to the
+/// list and return the new index.
+fn key_to_index<T>(map: &mut FxHashMap<T, usize>, list: &mut Vec<T>, key: T) -> usize
+where
+	T: Eq + Hash + Clone,
+{
+	let len = list.len();
+	let index = *map.entry(key.clone()).or_insert(len);
+	if index == len {
+		list.push(key);
+	}
+	index
+}
+
 impl DifferenceLogicModel {
 	/// Create a new difference logic model from the given parameters and
 	/// collections of difference constraints.
@@ -347,8 +357,10 @@ impl DifferenceLogicModel {
 		global_constraints: Vec<(IntDecision, IntDecision, IntVal)>,
 		imp_constraints: Vec<(BoolDecision, IntDecision, IntDecision, IntVal)>,
 	) -> Result<Self, ReformulationError> {
-		let mut int_var_index = IndexSet::default();
-		let mut bool_var_index = IndexSet::default();
+		let mut int_vars = Vec::new();
+		let mut int_var_index = FxHashMap::default();
+		let mut bool_vars = Vec::new();
+		let mut bool_var_index = FxHashMap::default();
 		let mut trimmed_constraints = Vec::new();
 		let mut trimmed_imp_constraints = Vec::new();
 
@@ -357,8 +369,8 @@ impl DifferenceLogicModel {
 				let (x_trans, xd) = update_transform(x);
 				let (y_trans, yd) = update_transform(y);
 				trimmed_constraints.push((
-					int_var_index.insert_full(x_trans).0,
-					int_var_index.insert_full(y_trans).0,
+					key_to_index(&mut int_var_index, &mut int_vars, x_trans),
+					key_to_index(&mut int_var_index, &mut int_vars, y_trans),
 					d - xd + yd,
 				));
 			}
@@ -373,16 +385,16 @@ impl DifferenceLogicModel {
 					trace!("Fixed boolean {b:?} ({val}) for {x:?} - {y:?} <= {d:?}");
 					if val {
 						trimmed_constraints.push((
-							int_var_index.insert_full(x_trans).0,
-							int_var_index.insert_full(y_trans).0,
+							key_to_index(&mut int_var_index, &mut int_vars, x_trans),
+							key_to_index(&mut int_var_index, &mut int_vars, y_trans),
 							d - xd + yd,
 						));
 					}
 				} else {
 					trimmed_imp_constraints.push((
-						bool_var_index.insert_full(b).0,
-						int_var_index.insert_full(x_trans).0,
-						int_var_index.insert_full(y_trans).0,
+						key_to_index(&mut bool_var_index, &mut bool_vars, b),
+						key_to_index(&mut int_var_index, &mut int_vars, x_trans),
+						key_to_index(&mut int_var_index, &mut int_vars, y_trans),
 						d - xd + yd,
 					));
 				}
@@ -391,12 +403,11 @@ impl DifferenceLogicModel {
 
 		trace!(
 			"Creating DifferenceLogicGraph for {} int and {} bool vars, {} global and {} implied edges.",
-			int_var_index.len(),
-			bool_var_index.len(),
+			int_vars.len(),
+			bool_vars.len(),
 			trimmed_constraints.len(),
 			trimmed_imp_constraints.len()
 		);
-		let int_vars = int_var_index.iter().copied().collect_vec();
 		let num_int = int_vars.len();
 		trace!("Original int vars:");
 		for &v in int_vars.iter() {
@@ -406,7 +417,6 @@ impl DifferenceLogicModel {
 				v.upper_bound(prb)
 			);
 		}
-		let bool_vars = bool_var_index.iter().copied().collect_vec();
 		let num_bool = bool_vars.len();
 		let mut graph =
 			DifferenceLogicGraph::new(prb, int_vars, bool_vars, parameters.bool_reasons);
@@ -508,7 +518,7 @@ impl DifferenceLogicModel {
 	{
 		trace!("Starting Johnson's");
 		let mut pred = vec![vec![usize::MAX; self.graph.num_nodes()]; self.graph.num_nodes()];
-		let mut queue = PriorityQueue::default();
+		let mut queue = LazyPriorityQueue::new();
 
 		for (n, p) in pred.iter_mut().enumerate() {
 			if !self.node_active[n] {
@@ -986,7 +996,7 @@ where
 							self.graph.int_vars[n], alias
 						);
 						let (v_trans, vd) = update_transform(alias);
-						if let Some(new) = self.int_var_index.get_index_of(&v_trans) {
+						if let Some(&new) = self.int_var_index.get(&v_trans) {
 							self.unify_nodes(ctx, n, new, vd)?;
 							self.graph.lower_bound_changes.insert(new);
 							self.graph.upper_bound_changes.insert(new);
@@ -1189,16 +1199,16 @@ pub struct DifferenceLogicGraph<I, B> {
 	/// Storage for the visited state.
 	visited_updates: Vec<usize>,
 	/// List of integer variable indices with reported lower bound changes.
-	lower_bound_changes: IndexSet<usize>,
+	lower_bound_changes: FxHashSet<usize>,
 	/// List of integer variable indices with reported upper bound changes.
-	upper_bound_changes: IndexSet<usize>,
+	upper_bound_changes: FxHashSet<usize>,
 	/// Current lower bound updates.
 	lb_updates: Vec<usize>,
 	/// Current upper bound updates.
 	ub_updates: Vec<usize>,
 	/// List of boolean variable indices that have recently been reported as
 	/// fixed to true.
-	fixed_bools: IndexSet<usize>,
+	fixed_bools: FxHashSet<usize>,
 	/// Mode to produce reasons for booleans set to false.
 	bool_reasons: u8,
 }
@@ -1261,7 +1271,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			upper_bound_changes: (0..num_int).collect(),
 			lb_updates: Vec::new(),
 			ub_updates: Vec::new(),
-			fixed_bools: IndexSet::default(),
+			fixed_bools: FxHashSet::default(),
 			bool_reasons,
 		}
 	}
@@ -1481,8 +1491,8 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			"Performing inc_sat on i{:?} - i{:?} <= {:?}",
 			new_edge.from, new_edge.to, new_edge.val
 		);
-		let mut queue = PriorityQueue::default();
-		let mut pi_new = IndexMap::default(); // todo Could be replaced by the visited state. Q1: Is state or map faster? Q2:
+		let mut queue = LazyPriorityQueue::new();
+		let mut pi_new = FxHashMap::default(); // todo Could be replaced by the visited state. Q1: Is state or map faster? Q2:
 		// Is keeping old pi in case of conflict better?
 		self.backtrace[new_edge.to] = None;
 		let gamma_v = self.pi[new_edge.from] + new_edge.val - self.pi[new_edge.to];
@@ -1532,15 +1542,15 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		actions: &mut A,
 		new_edge: usize,
 		reverse: bool,
-	) -> IndexMap<usize, IntVal> {
+	) -> FxHashMap<usize, IntVal> {
 		trace!("Starting relevant dijkstra for e{new_edge:?} in mode reverse={reverse}");
 		self.reset_visit();
 		let new_edge = &self.edges[new_edge];
 		let origin = if reverse { new_edge.to } else { new_edge.from };
 		let relevant_target = if reverse { new_edge.from } else { new_edge.to };
-		let mut distances = IndexMap::default();
+		let mut distances = FxHashMap::default();
 		let _ = distances.insert(relevant_target, new_edge.val);
-		let mut queue = PriorityQueue::default();
+		let mut queue = LazyPriorityQueue::new();
 		let _ = queue.push(origin, Reverse((0, false)));
 		let _ = queue.push(
 			relevant_target,
@@ -1605,7 +1615,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 							// Remove old distance from the map, if key was present before decrease
 							// relevant count.
 							//trace!("Target {target:?} set to irrelevant");
-							if distances.swap_remove(&target).is_some() {
+							if distances.remove(&target).is_some() {
 								relevant_count -= 1;
 							}
 						}
@@ -1814,7 +1824,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			.map(|&n| self.int_vars[n].lower_bound(ctx) + self.pi[n])
 			.max()
 			.unwrap();
-		let mut queue = PriorityQueue::default();
+		let mut queue = LazyPriorityQueue::new();
 		for &n in self.lower_bound_changes.iter() {
 			let _ = queue.push(
 				n,
@@ -1866,7 +1876,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			.map(|&n| self.int_vars[n].upper_bound(ctx) + self.pi[n])
 			.min()
 			.unwrap();
-		let mut queue = PriorityQueue::default();
+		let mut queue = LazyPriorityQueue::new();
 		for &n in self.upper_bound_changes.iter() {
 			let _ = queue.push(
 				n,
@@ -1997,8 +2007,8 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		}
 
 		// Consequences of lower bound updates on open implied constraints
-		for i in 0..self.lower_bound_changes.len() {
-			let n = self.lower_bound_changes[i];
+		let lb_changes = mem::take(&mut self.lower_bound_changes);
+		for n in lb_changes {
 			let lb = self.lower_bound[n].unwrap();
 
 			for i in self.open_out[n].open_iter(ctx) {
@@ -2026,8 +2036,8 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		}
 
 		// Consequences of upper bound updates on open implied constraints
-		for i in 0..self.upper_bound_changes.len() {
-			let n = self.upper_bound_changes[i];
+		let ub_changes = mem::take(&mut self.upper_bound_changes);
+		for n in ub_changes {
 			let ub = self.upper_bound[n].unwrap();
 
 			for j in self.open_out[n].open_iter(ctx) {
@@ -2054,8 +2064,6 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			}
 		}
 
-		self.lower_bound_changes.clear();
-		self.upper_bound_changes.clear();
 		Ok(())
 	}
 
@@ -2128,8 +2136,8 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		B: SolverBoolView<E>,
 	{
 		trace!("Propagating fixed booleans {:?}.", self.fixed_bools);
-		for i in 0..self.fixed_bools.len() {
-			let b = self.fixed_bools[i];
+		let fixed_bools = mem::take(&mut self.fixed_bools);
+		for b in fixed_bools {
 			let val = self.bool_vars[b].val(ctx).unwrap();
 			trace!("Boolean b{b:?} fixed to {val}");
 			if val {
@@ -2153,7 +2161,6 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			}
 		}
 
-		self.fixed_bools.clear();
 		Ok(())
 	}
 

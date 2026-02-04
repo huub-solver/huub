@@ -2,6 +2,7 @@
 //! multiple places in the library and are not exposed to the user.
 
 pub(crate) mod opt_field;
+pub(crate) mod priority_queue;
 pub(crate) mod trailed_list;
 pub(crate) mod trailed_open_list;
 

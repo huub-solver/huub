@@ -322,10 +322,8 @@ dependencies = [
  "expect-test",
  "flatzinc-serde",
  "index_vec",
- "indexmap",
  "itertools",
  "pindakaas",
- "priority-queue",
  "rangelist 0.4.0",
  "rustc-hash",
  "tracing",
@@ -532,17 +530,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35b5953b3a39fb76295a071893cfec5031c35b37cdd744dae3ad7f6395e8cfc4"
 dependencies = [
  "cc",
-]
-
-[[package]]
-name = "priority-queue"
-version = "2.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93980406f12d9f8140ed5abe7155acb10bb1e69ea55c88960b9c2f117445ef96"
-dependencies = [
- "equivalent",
- "indexmap",
- "serde",
 ]
 
 [[package]]
