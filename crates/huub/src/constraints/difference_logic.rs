@@ -176,7 +176,6 @@ impl DifferenceLogicCollection {
 		let mut imp_constraints = Vec::new();
 		for raw in self.raw_constraints.iter() {
 			match raw {
-				// TODO could check if they are isolated etc?
 				DifferenceLogicConstraint::Global(x, y, d) => global_constraints.push((*x, *y, *d)),
 				DifferenceLogicConstraint::Implied(b, x, y, d) => {
 					imp_constraints.push((*b, *x, *y, *d));
@@ -455,7 +454,10 @@ impl DifferenceLogicModel {
 			return false;
 		}
 		self.check_remove_isolated_booleans(ctx);
-		trace!("Graph at the end of simplify: {}", self.graph.to_dot(ctx));
+		trace!(
+			"Graph at the end of simplify: {}",
+			self.graph.to_dot(ctx, self.node_active.clone())
+		);
 		true
 	}
 
@@ -493,7 +495,6 @@ impl DifferenceLogicModel {
 					let edge = &self.graph.edges[e];
 					if self.graph.pi[edge.from] + edge.val < self.graph.pi[edge.to] {
 						trace!("Found negative cycle!");
-						// TODO output cycle (not needed at the moment)?
 						return Err(ctx.declare_conflict([]));
 					}
 				}
@@ -600,7 +601,6 @@ impl DifferenceLogicModel {
 						"Implied edge {edge:?} is falsified, opposite shortest path of length {} found",
 						self.distances[n][edge.from]
 					);
-					// TODO output cycle (not needed at the moment)?
 					self.graph.bool_vars[edge.bool_var.unwrap()].set_val(ctx, false, [])?;
 					self.graph.close_imp_edge(ctx, e);
 				}
@@ -969,7 +969,7 @@ where
 		if !self.initialized {
 			trace!(
 				"Starting initial propagation with graph: {}",
-				self.graph.to_dot(ctx)
+				self.graph.to_dot(ctx, self.node_active.clone())
 			);
 			self.bellman_ford_init_pi(ctx)?;
 			self.graph.propagate_bounds(ctx)?;
@@ -1186,7 +1186,7 @@ pub struct DifferenceLogicGraph<I, B> {
 	visited: Vec<bool>,
 	/// Number of open implication edges.
 	num_open_edges: TrailedInt,
-	/// List of all edges in the graph. todo could make this a trailed list
+	/// List of all edges in the graph.
 	edges: Vec<DiffEdge>,
 	/// Map from boolean indices to their implied edges.
 	bool_implications: Vec<TrailedOpenList<usize>>,
@@ -1478,16 +1478,13 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		E: ReasoningEngine,
 		B: SolverBoolView<E>,
 	{
-		// TODO unit tests
-
 		let new_edge = &self.edges[new_index];
 		trace!(
 			"Performing inc_sat on i{:?} - i{:?} <= {:?}",
 			new_edge.from, new_edge.to, new_edge.val
 		);
 		let mut queue = LazyPriorityQueue::new();
-		let mut pi_new = FxHashMap::default(); // todo Could be replaced by the visited state. Q1: Is state or map faster? Q2:
-		// Is keeping old pi in case of conflict better?
+		let mut pi_new = FxHashMap::default();
 		self.backtrace[new_edge.to] = None;
 		let gamma_v = self.pi[new_edge.from] + new_edge.val - self.pi[new_edge.to];
 		if gamma_v < 0 {
@@ -1642,11 +1639,11 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		}
 
 		// Incoming paths to relevant nodes starting from u via uv.
-		let incoming_u = self.dijkstra_relevant(ctx, new_index, false); // todo could store distances at nodes as well?
+		let incoming_u = self.dijkstra_relevant(ctx, new_index, false);
 		trace!("incoming_u is {incoming_u:?}");
 		// Outgoing paths from relevant nodes ending at v via uv.
 		let outgoing_v = self.dijkstra_relevant(ctx, new_index, true);
-		trace!("outgoing_v is {outgoing_v:?}"); // todo check how to include pi change check at this point?
+		trace!("outgoing_v is {outgoing_v:?}");
 		let indegree_u: usize = incoming_u
 			.iter()
 			.map(|(&n, _)| self.open_in[n].num_open(ctx))
@@ -1681,7 +1678,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 					{
 						trace!("Constraint {edge:?} is falsified since inverse is implied");
 						self.close_imp_edge(ctx, e);
-						let result = self.inc_sat(ctx, e)?; // TODO could also try these ones lazy? Or keep track of path in dijkstra
+						let result = self.inc_sat(ctx, e)?;
 						debug_assert!(!result, "Adding {e} should not be possible");
 					}
 				}
@@ -1808,8 +1805,6 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		I: SolverIntView<E>,
 		B: SolverBoolView<E>,
 	{
-		// TODO unit tests
-
 		trace!("Running inc_lb on int vars {:?}", self.lower_bound_changes);
 		self.reset_visit();
 		let pi0 = self
@@ -1823,7 +1818,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			let _ = queue.push(
 				n,
 				Reverse(pi0 - self.int_vars[n].lower_bound(ctx) - self.pi[n]),
-			); // TODO prevent 2. call to lower bound? and 3. call later?
+			);
 		}
 		while !queue.is_empty() {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
@@ -1860,8 +1855,6 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		I: SolverIntView<E>,
 		B: SolverBoolView<E>,
 	{
-		// TODO unit tests
-
 		trace!("Running inc_ub on int vars {:?}", self.upper_bound_changes);
 		self.reset_visit();
 		let pi0 = self
@@ -1875,7 +1868,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			let _ = queue.push(
 				n,
 				Reverse(self.pi[n] + self.int_vars[n].upper_bound(ctx) - pi0),
-			); // TODO prevent 2. call to lower bound? and 3. call later?
+			);
 		}
 		while !queue.is_empty() {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
@@ -2159,14 +2152,13 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	}
 
 	/// Generate a dot presentation of the active graph.
-	fn to_dot<E>(&self, ctx: &mut E::PropagationCtx<'_>) -> String
+	fn to_dot<E>(&self, ctx: &mut E::PropagationCtx<'_>, filter: Vec<bool>) -> String
 	where
 		E: ReasoningEngine,
 		I: SolverIntView<E>,
 	{
 		let mut out = "digraph {\n".to_owned();
-		for n in 0..self.num_nodes() {
-			// TODO could include a filter for nodes?
+		for n in (0..self.num_nodes()).filter(|&n| filter[n]) {
 			out.push_str(
 				format!(
 					"\"{:?}\" [label=\"{:?} (lb: {:?}, ub: {:?}, pi: {:?})\"]\n",
@@ -2389,10 +2381,13 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntDecision, Model,
-		actions::{BoolInspectionActions, IntSimplificationActions},
+		IntDecision, IntVal, Model,
+		actions::{
+			BoolInspectionActions, IntInspectionActions, IntPropagationActions,
+			IntSimplificationActions,
+		},
 		constraints::{
-			Constraint, SolverBoolView,
+			Constraint, SolverBoolView, SolverIntView,
 			difference_logic::{
 				DiffEdge, DifferenceLogicCollection, DifferenceLogicConstraint,
 				DifferenceLogicGraph, DifferenceLogicModel,
@@ -2437,22 +2432,32 @@ mod tests {
 		}
 	}
 
+	/// Get a fixed number of integer variables in the given range
+	fn get_int_vars_range(
+		slv: &mut Solver,
+		num_vars: usize,
+		from: IntVal,
+		to: IntVal,
+	) -> Vec<IntView> {
+		(0..num_vars)
+			.map(|_| {
+				IntVar::new_in(
+					slv,
+					RangeList::from_iter([from..=to]),
+					EncodingType::Eager,
+					EncodingType::Eager,
+				)
+			})
+			.collect()
+	}
+
 	#[test]
 	#[traced_test]
 	fn test_relevant_dijkstra() {
 		let mut prb = Model::default();
 		let b = prb.new_bool_var();
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let int_vars: Vec<_> = (0..10)
-			.map(|_| {
-				IntVar::new_in(
-					&mut slv,
-					RangeList::from_iter([1..=10]),
-					EncodingType::Eager,
-					EncodingType::Eager,
-				)
-			})
-			.collect();
+		let int_vars = get_int_vars_range(&mut slv, 10, 1, 10);
 		let bool_vars = vec![map.get_bool(&mut slv, b)];
 		let mut graph = DifferenceLogicGraph::new(&mut slv, int_vars, bool_vars, BOOL_REASONS);
 		let mut dummy_actions = DummyActions;
@@ -2494,6 +2499,85 @@ mod tests {
 
 	#[test]
 	#[traced_test]
+	fn test_inc_lb()
+	where
+		IntView: SolverIntView<Engine>,
+		BoolView: SolverBoolView<Engine>,
+	{
+		let mut prb = Model::default();
+		let (mut slv, _): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+		let int_vars = get_int_vars_range(&mut slv, 5, 1, 10);
+		let mut graph: DifferenceLogicGraph<_, BoolView> =
+			DifferenceLogicGraph::new(&mut slv, int_vars, vec![], BOOL_REASONS);
+		let mut dummy_actions = DummyActions;
+		let mut engine = slv.engine.borrow_mut();
+		let mut ctx = SolvingContext::new(&mut dummy_actions, &mut engine.state);
+		let _ = graph.new_edge(&mut ctx, DiffEdge::new(0, 1, 2, None));
+		let _ = graph.new_edge(&mut ctx, DiffEdge::new(1, 2, 1, None));
+		let _ = graph.new_edge(&mut ctx, DiffEdge::new(1, 3, 3, None));
+		let _ = graph.new_edge(&mut ctx, DiffEdge::new(2, 4, 1, None));
+		assert!(graph.int_vars[0].set_lower_bound(&mut ctx, 8, []).is_ok());
+		assert!(graph.inc_lb(&mut ctx).is_ok());
+		assert_eq!(graph.int_vars[1].lower_bound(&ctx), 6);
+		assert_eq!(graph.int_vars[2].lower_bound(&ctx), 5);
+		assert_eq!(graph.int_vars[3].lower_bound(&ctx), 3);
+		assert_eq!(graph.int_vars[4].lower_bound(&ctx), 4);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_inc_ub()
+	where
+		IntView: SolverIntView<Engine>,
+		BoolView: SolverBoolView<Engine>,
+	{
+		let mut prb = Model::default();
+		let (mut slv, _): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+		let int_vars = get_int_vars_range(&mut slv, 5, 1, 10);
+		let mut graph: DifferenceLogicGraph<_, BoolView> =
+			DifferenceLogicGraph::new(&mut slv, int_vars, vec![], BOOL_REASONS);
+		let mut dummy_actions = DummyActions;
+		let mut engine = slv.engine.borrow_mut();
+		let mut ctx = SolvingContext::new(&mut dummy_actions, &mut engine.state);
+		let _ = graph.new_edge(&mut ctx, DiffEdge::new(0, 1, 2, None));
+		let _ = graph.new_edge(&mut ctx, DiffEdge::new(1, 2, 1, None));
+		let _ = graph.new_edge(&mut ctx, DiffEdge::new(1, 3, 3, None));
+		let _ = graph.new_edge(&mut ctx, DiffEdge::new(2, 4, 1, None));
+		assert!(graph.int_vars[4].set_upper_bound(&mut ctx, 3, []).is_ok());
+		assert!(graph.inc_ub(&mut ctx).is_ok());
+		assert_eq!(graph.int_vars[0].upper_bound(&ctx), 7);
+		assert_eq!(graph.int_vars[1].upper_bound(&ctx), 5);
+		assert_eq!(graph.int_vars[2].upper_bound(&ctx), 4);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_inc_sat()
+	where
+		BoolView: SolverBoolView<Engine>,
+	{
+		let mut prb = Model::default();
+		let b = prb.new_bool_var();
+		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+		let int_vars = get_int_vars_range(&mut slv, 3, 1, 10);
+		let bool_var = map.get_bool(&mut slv, b);
+		let mut graph = DifferenceLogicGraph::new(&mut slv, int_vars, vec![bool_var], BOOL_REASONS);
+		let mut dummy_actions = DummyActions;
+		let mut engine = slv.engine.borrow_mut();
+		let mut ctx = SolvingContext::new(&mut dummy_actions, &mut engine.state);
+		let _ = graph.new_edge(&mut ctx, DiffEdge::new(0, 1, 2, None));
+		let second = graph.new_edge(&mut ctx, DiffEdge::new(1, 2, -4, None));
+		assert!(graph.inc_sat(&mut ctx, second).unwrap());
+		let feasible = graph.new_edge(&mut ctx, DiffEdge::new(2, 0, 3, None));
+		assert!(graph.inc_sat(&mut ctx, feasible).unwrap());
+		let impossible = graph.new_edge(&mut ctx, DiffEdge::new(2, 0, 1, Some(0)));
+		assert!(!graph.inc_sat(&mut ctx, impossible).unwrap());
+		let conflict = graph.new_edge(&mut ctx, DiffEdge::new(2, 0, 1, None));
+		assert!(graph.inc_sat(&mut ctx, conflict).is_err());
+	}
+
+	#[test]
+	#[traced_test]
 	fn test_inc_imp()
 	where
 		BoolView: SolverBoolView<Engine>,
@@ -2501,16 +2585,7 @@ mod tests {
 		let mut prb = Model::default();
 		let bools = (0..3).map(|_| prb.new_bool_var()).collect_vec();
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let int_vars: Vec<_> = (0..3)
-			.map(|_| {
-				IntVar::new_in(
-					&mut slv,
-					RangeList::from_iter([1..=10]),
-					EncodingType::Eager,
-					EncodingType::Eager,
-				)
-			})
-			.collect();
+		let int_vars = get_int_vars_range(&mut slv, 3, 1, 10);
 		let bool_vars = bools
 			.into_iter()
 			.map(|b| map.get_bool(&mut slv, b))
@@ -2545,16 +2620,7 @@ mod tests {
 		let mut prb = Model::default();
 		let bools = (0..4).map(|_| prb.new_bool_var()).collect_vec();
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let int_vars: Vec<_> = (0..4)
-			.map(|_| {
-				IntVar::new_in(
-					&mut slv,
-					RangeList::from_iter([1..=10]),
-					EncodingType::Eager,
-					EncodingType::Eager,
-				)
-			})
-			.collect();
+		let int_vars = get_int_vars_range(&mut slv, 4, 1, 10);
 		let bool_vars = bools
 			.into_iter()
 			.map(|b| map.get_bool(&mut slv, b))
