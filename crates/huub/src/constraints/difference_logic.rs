@@ -80,6 +80,8 @@ pub struct DifferenceLogicParameters {
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Representation of set of raw difference constraints within a model.
 pub struct DifferenceLogicCollection {
+	/// Level of difference logic to add.
+	level: u8,
 	/// User-defined parameters for difference logic.
 	parameters: DifferenceLogicParameters,
 	/// List of raw potential difference constraints.
@@ -128,12 +130,14 @@ impl DifferenceLogicCollection {
 	/// Create a new collection of difference constraints with the given
 	/// parameters.
 	pub(crate) fn new(
+		level: u8,
 		priority_level_bounds: u8,
 		priority_level_bools: u8,
 		use_inc_imp: bool,
 		bool_reasons: u8,
 	) -> Self {
 		Self {
+			level,
 			parameters: DifferenceLogicParameters {
 				priority_level_bounds: parse_priority_level(priority_level_bounds),
 				priority_level_bools: parse_priority_level(priority_level_bools),
@@ -144,24 +148,34 @@ impl DifferenceLogicCollection {
 		}
 	}
 
-	/// Add a raw difference constraint.
-	pub(crate) fn add(&mut self, constraint: DifferenceLogicConstraint) {
-		self.raw_constraints.push(constraint);
+	/// Add a raw difference constraint if accepted, return acceptance status.
+	pub(crate) fn add(&mut self, constraint: DifferenceLogicConstraint) -> bool {
+		let accept = match constraint {
+			// Level 3: Include not equals constraints which require additional boolean variables.
+			DifferenceLogicConstraint::NotEquals(_, _, _)
+			| DifferenceLogicConstraint::ImpliedNotEquals(_, _, _, _)
+			| DifferenceLogicConstraint::ReifiedEquals(_, _, _, _) => self.level > 2,
+			// Level 2+: Accept reified equals constraints.
+			DifferenceLogicConstraint::ImpliedEquals(_, _, _, _) => self.level > 1,
+			// Always accept global constraints and implied / reified constraints.
+			_ => true,
+		};
+		if accept {
+			self.raw_constraints.push(constraint);
+		}
+		accept
 	}
 
-	/// Process the raw difference constraints, transform them to global and
-	/// implied difference constraints and / or reemit them as standalone
-	/// constraints depending on the given level parameter (binary encoding).
+	/// Process the raw difference constraints and transform them to global and
+	/// implied difference constraints.
 	pub(crate) fn process(
 		&mut self,
 		model: &mut Model,
-		level: u8,
 	) -> Result<Option<DifferenceLogicModel>, ReformulationError> {
 		let mut global_constraints = Vec::new();
 		let mut imp_constraints = Vec::new();
 		for raw in self.raw_constraints.iter() {
 			match raw {
-				// If activated, always post global, implied, and reified constraints
 				// TODO could check if they are isolated etc?
 				DifferenceLogicConstraint::Global(x, y, d) => global_constraints.push((*x, *y, *d)),
 				DifferenceLogicConstraint::Implied(b, x, y, d) => {
@@ -171,48 +185,28 @@ impl DifferenceLogicCollection {
 					imp_constraints.push((*b, *x, *y, *d));
 					imp_constraints.push((!*b, *y, *x, -*d - 1));
 				}
-				// Level 2 or 3:
 				// b -> x - y == d is transformed to b -> x - y <= d and b -> x - y >= d.
 				DifferenceLogicConstraint::ImpliedEquals(b, x, y, d) => {
-					if level > 1 {
-						imp_constraints.push((*b, *x, *y, *d));
-						imp_constraints.push((*b, *y, *x, -*d));
-					} else {
-						model.add_constraint((*x - *y).eq(*d).implied_by(*b));
-					}
+					imp_constraints.push((*b, *x, *y, *d));
+					imp_constraints.push((*b, *y, *x, -*d));
 				}
-				// Level 3:
 				// x - y != d is transformed to b -> x - y < d and !b -> x - y > d for a new boolean
 				// variable b.
 				DifferenceLogicConstraint::NotEquals(x, y, d) => {
-					if level > 2 {
-						let decision = model.new_bool_var();
-						imp_constraints.push((decision, *x, *y, *d - 1));
-						imp_constraints.push((!decision, *y, *x, -*d - 1));
-					} else {
-						model.add_constraint((*x - *y).ne(*d));
-					}
+					let decision = model.new_bool_var();
+					imp_constraints.push((decision, *x, *y, *d - 1));
+					imp_constraints.push((!decision, *y, *x, -*d - 1));
 				}
-				// Level 3:
 				// b -> x - y != d is transformed to b -> c \/ e; !c \/ !e; c -> x - y < d;
 				// e -> x - y > d for new boolean variables c and e.
 				DifferenceLogicConstraint::ImpliedNotEquals(b, x, y, d) => {
-					if level > 2 {
-						add_implied_not_equals(model, &mut imp_constraints, *b, *x, *y, *d);
-					} else {
-						model.add_constraint((*x - *y).ne(*d).implied_by(*b));
-					}
+					add_implied_not_equals(model, &mut imp_constraints, *b, *x, *y, *d);
 				}
-				// Level 3:
 				// b <-> x - y == d is transformed to b -> x - y == d and !b -> x - y != d
 				DifferenceLogicConstraint::ReifiedEquals(b, x, y, d) => {
-					if level > 2 {
-						imp_constraints.push((*b, *x, *y, *d));
-						imp_constraints.push((*b, *y, *x, -*d));
-						add_implied_not_equals(model, &mut imp_constraints, !*b, *x, *y, *d);
-					} else {
-						model.add_constraint((*x - *y).eq(*d).reified_by(*b));
-					}
+					imp_constraints.push((*b, *x, *y, *d));
+					imp_constraints.push((*b, *y, *x, -*d));
+					add_implied_not_equals(model, &mut imp_constraints, !*b, *x, *y, *d);
 				}
 			}
 		}
@@ -2592,8 +2586,13 @@ mod tests {
 		let mut prb = Model::default();
 		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=5]));
 		let b = prb.new_bool_var();
-		let mut diff_logic =
-			DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, USE_INC_IMP, bool_reasons);
+		let mut diff_logic = DifferenceLogicCollection::new(
+			LEVEL,
+			PRIO_BOUNDS,
+			PRIO_BOOLS,
+			USE_INC_IMP,
+			bool_reasons,
+		);
 		diff_logic.add(DifferenceLogicConstraint::Global(
 			int_vars[0],
 			int_vars[1],
@@ -2617,7 +2616,7 @@ mod tests {
 			-2,
 		));
 		let diff_logic_model = diff_logic
-			.process(&mut prb, LEVEL)
+			.process(&mut prb)
 			.expect("Creating model failed")
 			.expect("Model is empty");
 		prb.add_constraint(diff_logic_model);
@@ -2668,8 +2667,13 @@ mod tests {
 		let int_vars4 = prb.new_int_vars(2, RangeList::from_iter([1..=4]));
 		let b = prb.new_bool_var();
 		let c = prb.new_bool_var();
-		let mut diff_logic =
-			DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, USE_INC_IMP, BOOL_REASONS);
+		let mut diff_logic = DifferenceLogicCollection::new(
+			LEVEL,
+			PRIO_BOUNDS,
+			PRIO_BOOLS,
+			USE_INC_IMP,
+			BOOL_REASONS,
+		);
 		diff_logic.add(DifferenceLogicConstraint::Global(
 			int_vars5[0],
 			int_vars5[1],
@@ -2725,7 +2729,7 @@ mod tests {
 			-2,
 		));
 		let diff_logic_model = diff_logic
-			.process(&mut prb, LEVEL)
+			.process(&mut prb)
 			.expect("Creating model failed")
 			.expect("Model is empty");
 		prb.add_constraint(diff_logic_model);
@@ -2781,8 +2785,13 @@ mod tests {
 	fn test_conflict() {
 		let mut prb = Model::default();
 		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
-		let mut diff_logic =
-			DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, USE_INC_IMP, BOOL_REASONS);
+		let mut diff_logic = DifferenceLogicCollection::new(
+			LEVEL,
+			PRIO_BOUNDS,
+			PRIO_BOOLS,
+			USE_INC_IMP,
+			BOOL_REASONS,
+		);
 		diff_logic.add(DifferenceLogicConstraint::Global(
 			int_vars[0],
 			int_vars[1],
@@ -2799,7 +2808,7 @@ mod tests {
 			-2,
 		));
 		let mut diff_logic_model = diff_logic
-			.process(&mut prb, LEVEL)
+			.process(&mut prb)
 			.expect("Creating model failed")
 			.expect("Model is empty");
 		assert!(
@@ -2813,8 +2822,13 @@ mod tests {
 	fn test_equal() {
 		let mut prb = Model::default();
 		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
-		let mut diff_logic =
-			DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, USE_INC_IMP, BOOL_REASONS);
+		let mut diff_logic = DifferenceLogicCollection::new(
+			LEVEL,
+			PRIO_BOUNDS,
+			PRIO_BOOLS,
+			USE_INC_IMP,
+			BOOL_REASONS,
+		);
 		diff_logic.add(DifferenceLogicConstraint::Global(
 			int_vars[0],
 			int_vars[1],
@@ -2831,7 +2845,7 @@ mod tests {
 			-1,
 		));
 		let diff_logic_model = diff_logic
-			.process(&mut prb, LEVEL)
+			.process(&mut prb)
 			.expect("Creating model failed")
 			.expect("Model is empty");
 		prb.add_constraint(diff_logic_model);
@@ -2857,8 +2871,13 @@ mod tests {
 		let int_vars = prb.new_int_vars(4, RangeList::from_iter([1..=5]));
 		let b = prb.new_bool_var();
 		let c = prb.new_bool_var();
-		let mut diff_logic =
-			DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, USE_INC_IMP, BOOL_REASONS);
+		let mut diff_logic = DifferenceLogicCollection::new(
+			LEVEL,
+			PRIO_BOUNDS,
+			PRIO_BOOLS,
+			USE_INC_IMP,
+			BOOL_REASONS,
+		);
 		diff_logic.add(DifferenceLogicConstraint::Global(
 			int_vars[0],
 			int_vars[1],
@@ -2894,7 +2913,7 @@ mod tests {
 			-1,
 		));
 		let diff_logic_model = diff_logic
-			.process(&mut prb, LEVEL)
+			.process(&mut prb)
 			.expect("Creating model failed")
 			.expect("Model is empty");
 		prb.add_constraint(diff_logic_model);
@@ -2957,8 +2976,13 @@ mod tests {
 		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=5]));
 		let b = prb.new_bool_var();
 		let c = prb.new_bool_var();
-		let mut diff_logic =
-			DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, USE_INC_IMP, BOOL_REASONS);
+		let mut diff_logic = DifferenceLogicCollection::new(
+			LEVEL,
+			PRIO_BOUNDS,
+			PRIO_BOOLS,
+			USE_INC_IMP,
+			BOOL_REASONS,
+		);
 		diff_logic.add(DifferenceLogicConstraint::Global(
 			int_vars[0],
 			int_vars[1],
@@ -2994,7 +3018,7 @@ mod tests {
 			-1,
 		));
 		let diff_logic_model = diff_logic
-			.process(&mut prb, LEVEL)
+			.process(&mut prb)
 			.expect("Creating model failed")
 			.expect("Model is empty");
 		prb.add_constraint(diff_logic_model);
@@ -3049,8 +3073,13 @@ mod tests {
 	fn test_constants() {
 		let mut prb = Model::default();
 		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
-		let mut diff_logic =
-			DifferenceLogicCollection::new(PRIO_BOUNDS, PRIO_BOOLS, USE_INC_IMP, BOOL_REASONS);
+		let mut diff_logic = DifferenceLogicCollection::new(
+			LEVEL,
+			PRIO_BOUNDS,
+			PRIO_BOOLS,
+			USE_INC_IMP,
+			BOOL_REASONS,
+		);
 		diff_logic.add(DifferenceLogicConstraint::Global(
 			int_vars[0],
 			int_vars[1],
@@ -3067,7 +3096,7 @@ mod tests {
 			5,
 		));
 		let diff_logic_model = diff_logic
-			.process(&mut prb, LEVEL)
+			.process(&mut prb)
 			.expect("Creating model failed")
 			.expect("Model is empty");
 		prb.add_constraint(diff_logic_model);
