@@ -7,7 +7,7 @@ use std::{
 	sync::{Arc, Mutex},
 };
 
-use huub::{IntVal, solver::IntLitMeaning};
+use huub::solver::IntLitMeaning;
 use rustc_hash::FxHashMap;
 use tracing::{
 	Event, Level, Subscriber,
@@ -56,7 +56,7 @@ pub(crate) enum LitName {
 	/// The tuple contains the index of the variable in the FlatZinc model
 	/// (which is used as the key in [`FmtLitFields::int_reverse_map`]), and
 	/// [`LitMeaning`] of the literal.
-	IntLit(usize, IntLitMeaning),
+	IntLit(u32, IntLitMeaning),
 }
 
 /// A visitor wrapper that ensures any fields containing literals are renamed
@@ -79,11 +79,11 @@ struct RecordLazyLits {
 	/// Whether the log message had the "register new literal" message.
 	lazy_lit_message: bool,
 	/// The the `int_var` field of the log message, if any.
-	int_var: Option<usize>,
+	int_var: Option<u32>,
 	/// The `is_eq` field of the log message, if any.
 	eq_lit: Option<bool>,
 	/// The `val` field of the log message, if any.
-	val: Option<IntVal>,
+	val: Option<i64>,
 	/// The `lit` field of the log message, if any.
 	lit: Option<LitInt>,
 	/// Whether the log message contains any unexpected fields.
@@ -167,8 +167,9 @@ impl LitName {
 				format!("{}{name}", if *pos { "" } else { "not " })
 			}
 			LitName::IntLit(var, meaning) => {
-				let var: &dyn Display = if int_map.len() > *var {
-					&int_map[*var]
+				let var = *var as usize;
+				let var: &dyn Display = if int_map.len() > var {
+					&int_map[var]
 				} else {
 					&format!("int_var[{var}]")
 				};
@@ -401,7 +402,7 @@ impl Visit for RecordLazyLits {
 			"lit" if value != 0 && value <= i32::MAX as u64 => {
 				self.lit = Some(NonZeroI32::new(value as i32).unwrap());
 			}
-			"int_var" => self.int_var = Some(value as usize),
+			"int_var" if value <= u32::MAX as u64 => self.int_var = Some(value as u32),
 			"val" => self.val = Some(value as i64),
 			_ => self.other_values = true,
 		}

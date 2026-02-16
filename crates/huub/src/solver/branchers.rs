@@ -2,17 +2,18 @@
 
 use std::fmt::Debug;
 
-use pindakaas::Lit as RawLit;
+use dyn_clone::DynClone;
 
 use crate::{
-	ValueSelection, VariableSelection,
+	IntVal,
 	actions::{
 		BoolInspectionActions, BrancherInitActions, DecisionActions, IntDecisionActions,
-		IntInspectionActions, ReasoningContext,
+		IntInspectionActions, ReasoningContext, Trailed,
 	},
 	solver::{
-		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, View,
-		solving_context::SolvingContext, trail::TrailedInt,
+		Decision, IntLitMeaning,
+		solving_context::SolvingContext,
+		view::{View, boolean::BoolView, integer::IntView},
 	},
 };
 
@@ -21,7 +22,7 @@ use crate::{
 /// following a given [`VariableSelection`] and [`ValueSelection`] strategy.
 pub struct BoolBrancher {
 	/// Boolean variables to be branched on.
-	vars: Vec<RawLit>,
+	vars: Vec<Decision<bool>>,
 	/// [`VariableSelection`] strategy used to select the next decision variable
 	/// to branch on.
 	var_sel: VariableSelection,
@@ -29,7 +30,7 @@ pub struct BoolBrancher {
 	/// the selected decision variable.
 	val_sel: ValueSelection,
 	/// The start of the unfixed variables in `vars`.
-	next: TrailedInt,
+	next: Trailed<usize>,
 }
 
 /// Type alias to represent [`Brancher`] contained in a [`Box`], that is used by
@@ -37,16 +38,16 @@ pub struct BoolBrancher {
 pub(crate) type BoxedBrancher = Box<dyn for<'a> Brancher<SolvingContext<'a>>>;
 
 /// A trait for making search decisions in the solver
-pub trait Brancher<D: DecisionActions>: DynBrancherClone + Debug {
+pub trait Brancher<D: DecisionActions>: Debug + DynClone {
 	/// Make a next search decision using the given decision actions.
-	fn decide(&mut self, actions: &mut D) -> Decision;
+	fn decide(&mut self, actions: &mut D) -> Directive;
 }
 
 /// An search decision made by a [`Brancher`].
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
-pub enum Decision {
+pub enum Directive {
 	/// Make the decision to branch on the given literal.
-	Select(RawLit),
+	Select(View<bool>),
 	/// The brancher has exhausted all possible decisions, but can be
 	/// backtracked to a previous state.
 	Exhausted,
@@ -55,20 +56,12 @@ pub enum Decision {
 	Consumed,
 }
 
-/// A trait to allow the cloning of boxed branchers.
-///
-/// This trait allows us to implement [`Clone`] for [`BoxedBrancher`].
-pub trait DynBrancherClone {
-	/// Clone the object and store it as a boxed trait object.
-	fn clone_dyn_brancher(&self) -> BoxedBrancher;
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// General brancher for integer variables that makes search decision by
 /// following a given [`VariableSelection`] and [`ValueSelection`] strategy.
 pub struct IntBrancher {
 	/// Integer variables to be branched on.
-	vars: Vec<IntView>,
+	vars: Vec<View<IntVal>>,
 	/// [`VariableSelection`] strategy used to select the next decision variable
 	/// to branch on.
 	var_sel: VariableSelection,
@@ -76,7 +69,43 @@ pub struct IntBrancher {
 	/// the selected decision variable.
 	val_sel: ValueSelection,
 	/// The start of the unfixed variables in `vars`.
-	next: TrailedInt,
+	next: Trailed<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Strategy for limiting the domain of a selected decision variable for a
+/// [`BoolBrancher`] or [`IntBrancher`] .
+pub enum ValueSelection {
+	/// Set the decision variable to its current lower bound value.
+	IndomainMax,
+	/// Set the decision variable to its current upper bound value.
+	IndomainMin,
+	/// Exclude the current upper bound value from the domain of the decision
+	/// variable.
+	OutdomainMax,
+	/// Exclude the current lower bound value from the domain of the decision
+	/// variable.
+	OutdomainMin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Strategy of selecting the next decision variable for a [`BoolBrancher`] or
+/// [`IntBrancher`] .
+pub enum VariableSelection {
+	/// Select the unfixed decision variable with the largest remaining domain
+	/// size, using the order of the variables in case of a tie.
+	AntiFirstFail,
+	/// Select the unfixed decision variable with the smallest remaining domain
+	/// size, using the order of the variables in case of a tie.
+	FirstFail,
+	/// Select the first unfixed decision variable in the list.
+	InputOrder,
+	/// Select the unfixed decision variable with the largest upper bound, using
+	/// the order of the variables in case of a tie.
+	Largest,
+	/// Select the unfixed decision variable with the smallest lower bound,
+	/// using the order of the variables in case of a tie.
+	Smallest,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,15 +114,9 @@ pub struct IntBrancher {
 /// i.e. quickly reach, a (partial) known or expected solution.
 pub struct WarmStartBrancher {
 	/// Boolean conditions to be tried.
-	decisions: Vec<RawLit>,
+	decisions: Vec<Decision<bool>>,
 	/// Number of conflicts at the time of posting the brancher.
 	conflicts: u64,
-}
-
-impl<B: for<'a> Brancher<SolvingContext<'a>> + Clone + 'static> DynBrancherClone for B {
-	fn clone_dyn_brancher(&self) -> BoxedBrancher {
-		Box::new(self.clone())
-	}
 }
 
 impl BoolBrancher {
@@ -101,22 +124,22 @@ impl BoolBrancher {
 	/// branching queue in the solver.
 	pub fn new_in(
 		solver: &mut impl BrancherInitActions,
-		vars: Vec<BoolView>,
+		vars: Vec<View<bool>>,
 		var_sel: VariableSelection,
 		val_sel: ValueSelection,
 	) {
 		let vars: Vec<_> = vars
 			.into_iter()
 			.filter_map(|b| match b.0 {
-				BoolViewInner::Lit(l) => {
-					solver.ensure_decidable(View::Bool(b));
+				BoolView::Lit(l) => {
+					solver.ensure_decidable::<bool>(b);
 					Some(l)
 				}
-				BoolViewInner::Const(_) => None,
+				BoolView::Const(_) => None,
 			})
 			.collect();
 
-		let next = solver.new_trailed_int(0);
+		let next = solver.new_trailed(0);
 		solver.push_brancher(Box::new(BoolBrancher {
 			vars,
 			var_sel,
@@ -129,14 +152,14 @@ impl BoolBrancher {
 impl<E> Brancher<E> for BoolBrancher
 where
 	E: DecisionActions,
-	RawLit: BoolInspectionActions<E>,
+	Decision<bool>: BoolInspectionActions<E>,
 {
-	fn decide(&mut self, ctx: &mut E) -> Decision {
-		let begin = ctx.trailed_int(self.next) as usize;
+	fn decide(&mut self, ctx: &mut E) -> Directive {
+		let begin = ctx.trailed(self.next);
 
 		// return if all variables have been assigned
 		if begin == self.vars.len() {
-			return Decision::Exhausted;
+			return Directive::Exhausted;
 		}
 
 		// Variable selection currently can just select first unfixed in the array
@@ -158,24 +181,27 @@ where
 		}
 		let var = if let Some(first_unfixed) = loc {
 			// Update position for next iteration
-			ctx.set_trailed_int(self.next, first_unfixed as i64);
+			ctx.set_trailed(self.next, first_unfixed);
 			self.vars[first_unfixed]
 		} else {
 			// Return that everything has already been assigned
-			return Decision::Exhausted;
+			return Directive::Exhausted;
 		};
 
 		// select the next value to branch on based on the value selection strategy
-		Decision::Select(match self.val_sel {
-			ValueSelection::IndomainMin | ValueSelection::OutdomainMax => !var,
-			ValueSelection::IndomainMax | ValueSelection::OutdomainMin => var,
-		})
+		Directive::Select(
+			match self.val_sel {
+				ValueSelection::IndomainMin | ValueSelection::OutdomainMax => !var,
+				ValueSelection::IndomainMax | ValueSelection::OutdomainMin => var,
+			}
+			.into(),
+		)
 	}
 }
 
 impl Clone for BoxedBrancher {
 	fn clone(&self) -> BoxedBrancher {
-		self.clone_dyn_brancher()
+		dyn_clone::clone_box(&**self)
 	}
 }
 
@@ -184,20 +210,20 @@ impl IntBrancher {
 	/// branching queue in the solver.
 	pub fn new_in(
 		solver: &mut impl BrancherInitActions,
-		vars: Vec<IntView>,
+		vars: Vec<View<IntVal>>,
 		var_sel: VariableSelection,
 		val_sel: ValueSelection,
 	) {
 		let vars: Vec<_> = vars
 			.into_iter()
-			.filter(|i| !matches!(i.0, IntViewInner::Const(_)))
+			.filter(|i| !matches!(i.0, IntView::Const(_)))
 			.collect();
 
 		for &v in &vars {
-			solver.ensure_decidable(v.into());
+			solver.ensure_decidable(v);
 		}
 
-		let next = solver.new_trailed_int(0);
+		let next = solver.new_trailed(0);
 		solver.push_brancher(Box::new(IntBrancher {
 			vars,
 			var_sel,
@@ -209,25 +235,25 @@ impl IntBrancher {
 
 impl<D> Brancher<D> for IntBrancher
 where
-	D: DecisionActions + ReasoningContext<Atom = BoolView>,
-	IntView: IntDecisionActions<D>,
+	D: DecisionActions + ReasoningContext<Atom = View<bool>>,
+	View<IntVal>: IntDecisionActions<D>,
 {
-	fn decide(&mut self, actions: &mut D) -> Decision {
-		let begin = actions.trailed_int(self.next) as usize;
+	fn decide(&mut self, actions: &mut D) -> Directive {
+		let begin = actions.trailed(self.next);
 
 		// return if all variables have been assigned
 		if begin == self.vars.len() {
-			return Decision::Exhausted;
+			return Directive::Exhausted;
 		}
 
-		let score = |var: IntView| match self.var_sel {
+		let score = |var: View<IntVal>| match self.var_sel {
 			VariableSelection::AntiFirstFail | VariableSelection::FirstFail => {
 				let (lb, ub) = var.bounds(actions);
 				ub - lb
 			}
 			VariableSelection::InputOrder => 0,
-			VariableSelection::Largest => var.upper_bound(actions),
-			VariableSelection::Smallest => var.lower_bound(actions),
+			VariableSelection::Largest => var.max(actions),
+			VariableSelection::Smallest => var.min(actions),
 		};
 
 		let is_better = |incumbent_score, new_score| match self.var_sel {
@@ -243,7 +269,7 @@ where
 		let mut first_unfixed = begin;
 		let mut selection = None;
 		for i in begin..self.vars.len() {
-			if self.vars[i].lower_bound(actions) == self.vars[i].upper_bound(actions) {
+			if self.vars[i].min(actions) == self.vars[i].max(actions) {
 				// move the unfixed variable to the front
 				let unfixed_var = self.vars[first_unfixed];
 				let fixed_var = self.vars[i];
@@ -265,54 +291,44 @@ where
 
 		// return if all variables have been assigned
 		let Some((next_var, _)) = selection else {
-			return Decision::Exhausted;
+			return Directive::Exhausted;
 		};
 
 		// update the next variable to the index of the first unfixed variable
-		actions.set_trailed_int(self.next, first_unfixed as i64);
+		actions.set_trailed(self.next, first_unfixed);
 
 		// select the next value to branch on based on the value selection strategy
 		let view = next_var.lit(
 			actions,
 			match self.val_sel {
-				ValueSelection::IndomainMin => {
-					IntLitMeaning::Less(next_var.lower_bound(actions) + 1)
-				}
-				ValueSelection::IndomainMax => {
-					IntLitMeaning::GreaterEq(next_var.upper_bound(actions))
-				}
-				ValueSelection::OutdomainMin => {
-					IntLitMeaning::GreaterEq(next_var.lower_bound(actions) + 1)
-				}
-				ValueSelection::OutdomainMax => IntLitMeaning::Less(next_var.upper_bound(actions)),
+				ValueSelection::IndomainMin => IntLitMeaning::Less(next_var.min(actions) + 1),
+				ValueSelection::IndomainMax => IntLitMeaning::GreaterEq(next_var.max(actions)),
+				ValueSelection::OutdomainMin => IntLitMeaning::GreaterEq(next_var.min(actions) + 1),
+				ValueSelection::OutdomainMax => IntLitMeaning::Less(next_var.max(actions)),
 			},
 		);
-
-		match view.0 {
-			BoolViewInner::Lit(lit) => Decision::Select(lit),
-			_ => unreachable!(),
-		}
+		Directive::Select(view)
 	}
 }
 
 impl WarmStartBrancher {
 	/// Create a new [`BoolBrancher`] brancher and add to the end of the
 	/// branching queue in the solver.
-	pub fn new_in(solver: &mut impl BrancherInitActions, decisions: Vec<BoolView>) {
+	pub fn new_in(solver: &mut impl BrancherInitActions, decisions: Vec<View<bool>>) {
 		// Filter out the decisions that are already satisfied or are known to cause
 		// a conflict
 		let mut filtered_decision = Vec::new();
 		for d in decisions {
 			match d.0 {
-				BoolViewInner::Lit(l) => {
-					solver.ensure_decidable(View::Bool(d));
+				BoolView::Lit(l) => {
+					solver.ensure_decidable::<bool>(d);
 					filtered_decision.push(l);
 				}
 				// Warm starts decision conflict here, we don't have to add this or any
 				// other decisions to the brancher
-				BoolViewInner::Const(false) => break,
+				BoolView::Const(false) => break,
 				// Warm starts decision is already satisfied, we don't have to add this
-				BoolViewInner::Const(true) => {}
+				BoolView::Const(true) => {}
 			}
 		}
 
@@ -329,19 +345,19 @@ impl WarmStartBrancher {
 impl<Context> Brancher<Context> for WarmStartBrancher
 where
 	Context: DecisionActions,
-	RawLit: BoolInspectionActions<Context>,
+	Decision<bool>: BoolInspectionActions<Context>,
 {
-	fn decide(&mut self, ctx: &mut Context) -> Decision {
+	fn decide(&mut self, ctx: &mut Context) -> Directive {
 		if ctx.num_conflicts() > self.conflicts {
-			return Decision::Consumed;
+			return Directive::Consumed;
 		}
 		while let Some(lit) = self.decisions.pop() {
 			match lit.val(ctx) {
 				Some(true) => {}
-				Some(false) => return Decision::Consumed,
-				None => return Decision::Select(lit),
+				Some(false) => return Directive::Consumed,
+				None => return Directive::Select(lit.into()),
 			}
 		}
-		Decision::Consumed
+		Directive::Consumed
 	}
 }

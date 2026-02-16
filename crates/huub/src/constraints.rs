@@ -3,17 +3,18 @@
 pub mod bool_array_element;
 pub mod cumulative;
 pub mod difference_logic;
-pub mod disjunctive_strict;
+pub mod disjunctive;
 pub mod int_abs;
-pub mod int_all_different;
 pub mod int_array_element;
 pub mod int_array_minimum;
 pub mod int_div;
-pub mod int_in_set;
 pub mod int_linear;
+pub mod int_mul;
+pub mod int_no_overlap;
 pub mod int_pow;
+pub mod int_set_contains;
 pub mod int_table;
-pub mod int_times;
+pub mod int_unique;
 pub mod int_value_precede;
 
 use std::{
@@ -25,26 +26,49 @@ use std::{
 };
 
 use dyn_clone::DynClone;
-use index_vec::IndexVec;
 use itertools::Itertools;
 use pindakaas::Lit as RawLit;
 use tracing::warn;
 
 use crate::{
-	BoolDecision, Conjunction, IntDecision, Model,
+	Conjunction, IntVal,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
 		IntExplanationActions, IntInitActions, IntInspectionActions, IntPropagationActions,
-		IntSimplificationActions, ReasoningContext, ReasoningEngine, ReformulationActions,
+		IntSimplificationActions, ReasoningContext, ReasoningEngine,
 		TrailingActions,
 	},
-	reformulate::ReformulationError,
+	lower::{LoweringContext, LoweringError},
+	model::{self, Model},
 	solver::{
-		BoolView, BoolViewInner,
+		self,
 		activation_list::IntEvent,
-		engine::{Engine, PropRef, State},
+		engine::{Engine, State},
+		view::boolean::BoolView,
 	},
 };
+
+/// Helper trait to simplify trait bounds for [`Constraint`] implementations.
+pub trait BoolModelActions<E>
+where
+	E: ReasoningEngine,
+	Self: BoolSolverActions<E>
+		+ for<'a> BoolSimplificationActions<E::PropagationCtx<'a>>
+		+ Into<model::View<bool>>,
+{
+}
+
+/// Helper trait to simplify trait bounds for [`Propagator`] implementations.
+pub trait BoolSolverActions<E>
+where
+	E: ReasoningEngine + ?Sized,
+	Self: for<'a> BoolInitActions<E::InitializationCtx<'a>>
+		+ for<'a> BoolInspectionActions<E::ExplanationCtx<'a>>
+		+ for<'a> BoolInspectionActions<E::NotificationCtx<'a>>
+		+ for<'a> BoolPropagationActions<E::PropagationCtx<'a>>
+		+ Into<E::Atom>,
+{
+}
 
 /// Type alias to represent a user [`Constraint`], stored in a [`Box`], that is
 /// used by [`Model`].
@@ -95,20 +119,17 @@ pub trait Constraint<E: ReasoningEngine + ?Sized>: Any + Debug + DynClone + Prop
 	) -> Result<SimplificationStatus, E::Conflict>;
 
 	/// Encode the constraint using [`Propagator`] objects or clauses for a
-	/// [`Solver`] object.
+	/// [`Solver`](solver::Solver) object.
 	///
 	/// This method should place all required propagators and/or clauses in a
-	/// [`Solver`] object to ensure the constraint will not be violated.
-	fn to_solver(
-		&self,
-		context: &mut dyn ReformulationActions,
-		model_trail: &dyn TrailingActions,
-	) -> Result<(), ReformulationError>;
+	/// [`Solver`](solver::Solver) object to ensure the constraint will not be
+	/// violated.
+	fn to_solver(&self, context: &mut LoweringContext<'_>) -> Result<(), LoweringError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// A note that the mentioned propagator will compute the `Reason` if requested.
-pub struct LazyReason {
+pub struct DeferredReason {
 	/// Reference to the propagator that will compute the reason.
 	pub(crate) propagator: u32,
 	/// Data to be given to the propagator to compute the reason.
@@ -116,22 +137,23 @@ pub struct LazyReason {
 }
 
 /// Helper trait to simplify trait bounds for [`Constraint`] implementations.
-pub trait ModelBoolView<E>
+pub trait IntModelActions<E>
 where
 	E: ReasoningEngine,
-	Self: SolverBoolView<E>
-		+ for<'a> BoolSimplificationActions<E::PropagationCtx<'a>>
-		+ Into<BoolDecision>,
+	Self: IntSolverActions<E>
+		+ for<'a> IntSimplificationActions<E::PropagationCtx<'a>>
+		+ Into<model::View<IntVal>>,
 {
 }
 
-/// Helper trait to simplify trait bounds for [`Constraint`] implementations.
-pub trait ModelIntView<E>
+/// Helper trait to simplify trait bounds for [`Propagator`] implementations.
+pub trait IntSolverActions<E>
 where
-	E: ReasoningEngine,
-	Self: SolverIntView<E>
-		+ for<'a> IntSimplificationActions<E::PropagationCtx<'a>>
-		+ Into<IntDecision>,
+	E: ReasoningEngine + ?Sized,
+	Self: for<'a> IntInitActions<E::InitializationCtx<'a>>
+		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>>
+		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>>
+		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>>,
 {
 }
 
@@ -142,9 +164,10 @@ where
 /// domains of decision variables as a conjunction of literals that imply the
 /// change. If these explanations are too expensive to compute during
 /// propagation, then the propagator can delay giving the explanation using
-/// [`PropagationActions::deferred_reason`]. If the explanation is needed, then
-/// the propagation engine will revert the state of the solver and call
-/// [`Propagator::explain`] to receive the explanation.
+/// [`PropagationActions::deferred_reason`](crate::actions::PropagationActions::deferred_reason).
+/// If the explanation is needed, then the propagation engine will revert the
+/// state of the solver and call [`Propagator::explain`] to receive the
+/// explanation.
 pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 	/// Advises the propagator that the solver is backtracking.
 	fn advise_of_backtrack(&mut self, context: &mut E::NotificationCtx<'_>) {
@@ -152,8 +175,8 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 		unreachable!("propagator did not provide a backtrack advisor implementation")
 	}
 
-	/// Advises the propagator that a [`BoolView`] is assigned with the
-	/// associated data given when registering the advisor. If the advisor
+	/// Advises the propagator that a Boolean decision (view) is assigned with
+	/// the associated data given when registering the advisor. If the advisor
 	/// returns `true`, then the propagator will be enqueued.
 	fn advise_of_bool_change(&mut self, context: &mut E::NotificationCtx<'_>, data: u64) -> bool {
 		let _ = context;
@@ -161,8 +184,8 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 		unreachable!("propagator did not provide a Boolean advisor implementation")
 	}
 
-	/// Advises the propagator that a [`IntView`] has changed with the
-	/// associated data given when registering the advisor. If the advisor
+	/// Advises the propagator that a integer decision (view) has changed with
+	/// the associated data given when registering the advisor. If the advisor
 	/// returns `true`, then the propagator will be enqueued.
 	fn advise_of_int_change(
 		&mut self,
@@ -184,9 +207,9 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 	/// propagated.
 	///
 	/// The method is called with the data that was passed to the
-	/// [`PropagationActions::deferred_reason`] method, and the literal that was
-	/// propagated. If the `lit` argument is `None`, then the reason was used to
-	/// explain `false`.
+	/// [`PropagationActions::deferred_reason`](crate::actions::PropagationActions::deferred_reason)
+	/// method, and the literal that was propagated. If the `lit` argument is
+	/// `None`, then the reason was used to explain `false`.
 	///
 	/// The state of the solver is reverted to the state before the propagation
 	/// of the `lit` to be explained.
@@ -217,7 +240,7 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 pub enum Reason<Atom> {
 	/// A promise that a given propagator will compute a causation of the change
 	/// when given the attached data.
-	Lazy(LazyReason),
+	Lazy(DeferredReason),
 	/// A conjunction of literals forming the causation of the change.
 	Eager(Box<[Atom]>),
 	/// A single literal that is the causation of the change.
@@ -233,7 +256,7 @@ pub trait ReasonBuilder<Context: ReasoningContext + ?Sized> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-/// Status returned by the [`SimplificationActions::simplify`] method,
+/// Status returned by the [`Constraint::simplify`] method,
 /// indicating whether the constraint has been subsumed (such that it can be
 /// removed from the [`Model`]) or not.
 pub enum SimplificationStatus {
@@ -247,39 +270,16 @@ pub enum SimplificationStatus {
 	Subsumed,
 }
 
-/// Helper trait to simplify trait bounds for [`Propagator`] implementations.
-pub trait SolverBoolView<E>
-where
-	E: ReasoningEngine + ?Sized,
-	Self: for<'a> BoolInitActions<E::InitializationCtx<'a>>
-		+ for<'a> BoolInspectionActions<E::ExplanationCtx<'a>>
-		+ for<'a> BoolInspectionActions<E::NotificationCtx<'a>>
-		+ for<'a> BoolPropagationActions<E::PropagationCtx<'a>>
-		+ Into<E::Atom>,
-{
-}
-
-/// Helper trait to simplify trait bounds for [`Propagator`] implementations.
-pub trait SolverIntView<E>
-where
-	E: ReasoningEngine + ?Sized,
-	Self: for<'a> IntInitActions<E::InitializationCtx<'a>>
-		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>>
-		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>>
-		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>>,
-{
-}
-
-impl<E, B> ModelBoolView<E> for B
+impl<E, B> BoolModelActions<E> for B
 where
 	E: ReasoningEngine,
-	B: SolverBoolView<E>
+	B: BoolSolverActions<E>
 		+ for<'a> BoolSimplificationActions<E::PropagationCtx<'a>>
-		+ Into<BoolDecision>,
+		+ Into<model::View<bool>>,
 {
 }
 
-impl<E, B> SolverBoolView<E> for B
+impl<E, B> BoolSolverActions<E> for B
 where
 	E: ReasoningEngine + ?Sized,
 	Self: for<'a> BoolInitActions<E::InitializationCtx<'a>>
@@ -358,11 +358,11 @@ where
 	}
 }
 
-impl Conflict<RawLit> {
+impl Conflict<solver::Decision<bool>> {
 	/// Create a new conflict with the given reason
-	pub(crate) fn new<Ctx: ReasoningContext<Atom = BoolView> + ?Sized>(
+	pub(crate) fn new<Ctx: ReasoningContext<Atom = solver::View<bool>> + ?Sized>(
 		ctx: &mut Ctx,
-		subject: Option<RawLit>,
+		subject: Option<solver::Decision<bool>>,
 		reason: impl ReasonBuilder<Ctx>,
 	) -> Self {
 		match Reason::from_view(reason.build_reason(ctx)) {
@@ -395,6 +395,15 @@ impl<Atom: Debug> fmt::Display for Conflict<Atom> {
 	}
 }
 
+impl<C> ReasonBuilder<C> for DeferredReason
+where
+	C: ReasoningContext + ?Sized,
+{
+	fn build_reason(self, _: &mut C) -> Result<Reason<C::Atom>, bool> {
+		Ok(Reason::Lazy(self))
+	}
+}
+
 impl<C, F, I> ReasonBuilder<C> for F
 where
 	C: ReasoningContext + ?Sized,
@@ -406,16 +415,16 @@ where
 	}
 }
 
-impl<E, I> ModelIntView<E> for I
+impl<E, I> IntModelActions<E> for I
 where
 	E: ReasoningEngine,
-	I: SolverIntView<E>
+	I: IntSolverActions<E>
 		+ for<'a> IntSimplificationActions<E::PropagationCtx<'a>>
-		+ Into<IntDecision>,
+		+ Into<model::View<IntVal>>,
 {
 }
 
-impl<E, I> SolverIntView<E> for I
+impl<E, I> IntSolverActions<E> for I
 where
 	E: ReasoningEngine + ?Sized,
 	I: for<'a> IntInitActions<E::InitializationCtx<'a>>
@@ -423,15 +432,6 @@ where
 		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>>
 		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>>,
 {
-}
-
-impl<C> ReasonBuilder<C> for LazyReason
-where
-	C: ReasoningContext + ?Sized,
-{
-	fn build_reason(self, _: &mut C) -> Result<Reason<C::Atom>, bool> {
-		Ok(Reason::Lazy(self))
-	}
 }
 
 impl<A> Reason<A> {
@@ -446,34 +446,33 @@ impl<A> Reason<A> {
 	}
 }
 
-impl Reason<RawLit> {
+impl Reason<solver::Decision<bool>> {
 	/// Make the reason produce an explanation of the `lit`.
 	///
 	/// Explanation is in terms of a clause that can be added to the solver.
 	/// When the `lit` argument is `None`, the reason is explaining `false`.
 	pub(crate) fn explain<Clause: FromIterator<RawLit>>(
 		&self,
-		props: &mut IndexVec<PropRef, BoxedPropagator>,
+		props: &mut [BoxedPropagator],
 		actions: &mut State,
-		lit: Option<RawLit>,
+		lit: Option<solver::Decision<bool>>,
 	) -> Clause {
 		match self {
-			Reason::Lazy(LazyReason {
+			&Reason::Lazy(DeferredReason {
 				propagator: prop,
 				data,
 			}) => {
-				let reason = props[PropRef::from_raw(*prop)].explain(
+				let reason = props[prop as usize].explain(
 					actions,
-					lit.map(|lit| BoolView(BoolViewInner::Lit(lit)))
-						.unwrap_or(true.into()),
-					*data,
+					lit.map(|lit| lit.into()).unwrap_or(true.into()),
+					data,
 				);
 				let v: Result<Vec<_>, _> = reason
 					.into_iter()
 					.filter_map(|v| match v.0 {
-						BoolViewInner::Lit(lit) => Some(Ok(lit)),
-						BoolViewInner::Const(false) => Some(Err(false)),
-						BoolViewInner::Const(true) => None,
+						BoolView::Lit(lit) => Some(Ok(lit)),
+						BoolView::Const(false) => Some(Err(false)),
+						BoolView::Const(true) => None,
 					})
 					.collect();
 				match v {
@@ -482,18 +481,24 @@ impl Reason<RawLit> {
 					Err(true) => Vec::new(),
 				}
 				.into_iter()
-				.map(|l| !l)
-				.chain(lit)
+				.map(|l| !l.0)
+				.chain(lit.map(|lit| lit.0))
 				.collect()
 			}
-			Reason::Eager(v) => v.iter().map(|&l| !l).chain(lit).collect(),
-			&Reason::Simple(reason) => once(!reason).chain(lit).collect(),
+			Reason::Eager(v) => v
+				.iter()
+				.map(|&l| !l.0)
+				.chain(lit.map(|lit| lit.0))
+				.collect(),
+			&Reason::Simple(reason) => once(!reason.0).chain(lit.map(|lit| lit.0)).collect(),
 		}
 	}
 
 	/// Internal function used to tighten a [`Reason`] with [`BoolView`] atoms
 	/// to a [`Reason`] with [`RawLit`] atoms.
-	pub(crate) fn from_view(reason: Result<Reason<BoolView>, bool>) -> Result<Self, bool> {
+	pub(crate) fn from_view(
+		reason: Result<Reason<solver::View<bool>>, bool>,
+	) -> Result<Self, bool> {
 		let v = match reason? {
 			Reason::Lazy(lazy) => return Ok(Self::Lazy(lazy)),
 			Reason::Eager(items) => items.into_vec(),
@@ -502,9 +507,9 @@ impl Reason<RawLit> {
 		let mut v: Vec<_> = v
 			.into_iter()
 			.filter_map(|v| match v.0 {
-				BoolViewInner::Lit(lit) => Some(Ok(lit)),
-				BoolViewInner::Const(false) => Some(Err(false)),
-				BoolViewInner::Const(true) => None,
+				BoolView::Lit(lit) => Some(Ok(lit)),
+				BoolView::Const(false) => Some(Err(false)),
+				BoolView::Const(true) => None,
 			})
 			.try_collect()?;
 		match v.len() {

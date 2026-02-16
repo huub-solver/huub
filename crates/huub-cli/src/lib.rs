@@ -37,13 +37,13 @@ use std::{
 	time::{Duration, Instant},
 };
 
-use flatzinc_serde::{FlatZinc, Literal, Method};
+use flatzinc_serde::{FlatZinc, Literal};
 use huub::{
-	TermSignal,
+	Goal, TerminationSignal,
 	actions::IntDecisionActions,
-	flatzinc::{FlatZincError, FlatZincStatistics},
-	reformulate::{InitConfig, ReformulationError},
-	solver::{Goal, IntLitMeaning, SolveResult, Solver, Valuation, Value, View},
+	lower::{InitConfig, LoweringError},
+	model::deserialize::flatzinc::FlatZincError,
+	solver::{AnyView, IntLitMeaning, Solution, Solver, Status, Value},
 };
 use mimalloc::MiMalloc;
 use pico_args::Arguments;
@@ -109,18 +109,18 @@ pub struct Cli<Stdout, Stderr> {
 	// -- Preprocessing/Inprocessing configuration ---
 	/// Whether to enable the globally blocked clause elimination (conditioning)
 	conditioning: bool,
-	/// Whether to enable inprocessing during search in the oracle solver
+	/// Whether to enable inprocessing during search in the SAT solver
 	inprocessing: bool,
-	/// The number of preprocessing rounds in the oracle solver
+	/// The number of preprocessing rounds in the SAT solver
 	preprocessing: Option<usize>,
-	/// Whether to enable the failed literal probing in the oracle solver.
+	/// Whether to enable the failed literal probing in the SAT solver.
 	probing: bool,
 	/// Whether to enable asking for explanation clauses for all literals
 	/// propagated on the level of a conflict.
 	reason_eager: bool,
-	/// Whether to enable the global forward subsumption in the oracle solver.
+	/// Whether to enable the global forward subsumption in the SAT solver.
 	subsumption: bool,
-	/// Whether to enable the bounded variable elimination in the oracle solver.
+	/// Whether to enable the bounded variable elimination in the SAT solver.
 	variable_elimination: bool,
 	/// Whether the vivification heuristic is enabled
 	vivification: bool,
@@ -148,13 +148,13 @@ pub struct Cli<Stdout, Stderr> {
 }
 
 /// Solution struct to display the results of the solver
-struct Solution<'a> {
+struct SolutionWrap<'a> {
 	/// FlatZinc instance
 	fzn: &'a FlatZinc<InternedStr>,
 	/// Mapping from solver views to solution values
-	value: &'a dyn Valuation,
+	sol: Solution<'a>,
 	/// Mapping from FlatZinc identifiers to solver views
-	var_map: &'a FxHashMap<InternedStr, View>,
+	var_map: &'a FxHashMap<InternedStr, AnyView>,
 }
 
 /// Parse time duration for the time limit flag
@@ -241,20 +241,11 @@ where
 			)
 		})?;
 
-		// Convert FlatZinc model to internal Solver representation
-		let res = Solver::from_fzn::<InternedStr, FxHashMap<InternedStr, View>>(
-			&fzn,
-			&self.init_config(),
-		);
-		// Resolve any errors that may have occurred during the conversion
-		let (mut slv, var_map, fzn_stats): (
-			Solver,
-			FxHashMap<InternedStr, View>,
-			FlatZincStatistics,
-		) = match res {
+		// Convert FlatZinc model to internal Solver representation and resolve any
+		// errors that may have occurred during the conversion
+		let (mut slv, meta) = match Solver::from_fzn(&fzn, &self.init_config()) {
 			Err(FlatZincError::ReformulationError(
-				ReformulationError::SimplificationConflict(_)
-				| ReformulationError::TranslationConflict(_),
+				LoweringError::Simplification(_) | LoweringError::Lowering(_),
 			)) => {
 				outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
 				return Ok(());
@@ -273,8 +264,8 @@ where
 				&[
 					("intVariables", &stats.int_vars()),
 					("propagators", &stats.propagators()),
-					("unifiedVariables", &fzn_stats.unified_variables()),
-					("extractedViews", &fzn_stats.extracted_views()),
+					("unifiedVariables", &meta.stats.unified_variables()),
+					("extractedViews", &meta.stats.extracted_views()),
 					(
 						"initTime",
 						&Instant::now().duration_since(start).as_secs_f64(),
@@ -293,19 +284,19 @@ where
 			let mut int_map = int_reverse_map.lock().unwrap();
 			debug_assert!(int_map.is_empty());
 			*int_map = vec![InternedStr::default(); slv.init_statistics().int_vars()];
-			for (name, v) in &var_map {
+			for (name, v) in &meta.names {
 				match v {
-					View::Bool(bv) => {
+					AnyView::Bool(bv) => {
 						if let Some(info) = bv.reverse_map_info() {
 							lit_map.insert(info, LitName::BoolVar(*name, true));
 							lit_map.insert(-info, LitName::BoolVar(*name, false));
 						}
 					}
-					View::Int(iv) => {
+					AnyView::Int(iv) => {
 						let (pos, is_view) = iv.int_reverse_map_info();
 						if let Some(i) = pos {
-							if !is_view || int_map[i].is_empty() {
-								int_map[i] = *name;
+							if !is_view || int_map[i as usize].is_empty() {
+								int_map[i as usize] = *name;
 								for (lit, meaning) in iv.lit_reverse_map_info(&slv) {
 									lit_map.insert(lit, LitName::IntLit(i, meaning));
 								}
@@ -345,41 +336,18 @@ where
 			slv.set_vsids_after_restart(self.vsids_after_restart);
 		}
 
-		// Determine Goal and Objective
 		let start_solve = Instant::now();
-		let goal = if fzn.solve.method != Method::Satisfy {
-			let obj_expr = fzn.solve.objective.as_ref().unwrap();
-			if let Literal::Identifier(ident) = obj_expr {
-				Some((
-					if fzn.solve.method == Method::Minimize {
-						Goal::Minimize
-					} else {
-						Goal::Maximize
-					},
-					if let View::Int(iv) = var_map[ident] {
-						iv
-					} else {
-						todo!()
-					},
-				))
-			} else {
-				None
-			}
-		} else {
-			None
-		};
-
 		// Set termination conditions for solver
-		let interrupt_handling = goal.is_some() && !self.intermediate_solutions;
+		let interrupt_handling = meta.goal.is_some() && !self.intermediate_solutions;
 		let interrupted = Arc::new(AtomicBool::new(false));
 		match (interrupt_handling, deadline) {
 			(true, Some(deadline)) => {
 				let interrupted = Arc::clone(&interrupted);
 				slv.set_terminate_callback(Some(move || {
 					if interrupted.load(Ordering::SeqCst) || Instant::now() >= deadline {
-						TermSignal::Terminate
+						TerminationSignal::Terminate
 					} else {
-						TermSignal::Continue
+						TerminationSignal::Continue
 					}
 				}));
 			}
@@ -387,18 +355,18 @@ where
 				let interrupted = Arc::clone(&interrupted);
 				slv.set_terminate_callback(Some(move || {
 					if interrupted.load(Ordering::SeqCst) {
-						TermSignal::Terminate
+						TerminationSignal::Terminate
 					} else {
-						TermSignal::Continue
+						TerminationSignal::Continue
 					}
 				}));
 			}
 			(false, Some(deadline)) => {
 				slv.set_terminate_callback(Some(move || {
 					if Instant::now() >= deadline {
-						TermSignal::Terminate
+						TerminationSignal::Terminate
 					} else {
-						TermSignal::Continue
+						TerminationSignal::Continue
 					}
 				}));
 			}
@@ -415,20 +383,20 @@ where
 						.iter()
 						.filter_map(|lit| {
 							if let Literal::Identifier(ident) = lit {
-								Some(var_map[ident])
+								Some(meta.names[ident])
 							} else {
 								None
 							}
 						})
 						.collect()
 				} else {
-					vec![var_map[ident]]
+					vec![meta.names[ident]]
 				}
 			})
 			.collect();
 		// Run the solver!
-		let (res, stats) = match goal {
-			Some((goal, obj)) => {
+		let (res, stats) = match meta.goal {
+			Some(goal) => {
 				if self.all_solutions {
 					warn!(
 						"--all-solutions is ignored when optimizing, use --intermediate-solutions or --all-optimal instead"
@@ -449,19 +417,19 @@ where
 					None
 				};
 				let (status, stats, obj_val) = if self.intermediate_solutions {
-					slv.branch_and_bound(obj, goal, |value| {
+					slv.branch_and_bound(goal, |sol| {
 						output!(
 							self.stdout,
 							"{}",
-							Solution {
-								value,
+							SolutionWrap {
+								sol,
 								fzn: &fzn,
-								var_map: &var_map
+								var_map: &meta.names
 							}
 						);
 						if self.all_optimal {
 							for (i, var) in output_vars.iter().enumerate() {
-								no_good_vals[i] = value(*var);
+								no_good_vals[i] = var.val(sol);
 							}
 						}
 					})
@@ -474,45 +442,50 @@ where
 					}
 
 					let mut last_sol = String::new();
-					let res = slv.branch_and_bound(obj, goal, |value| {
-						last_sol = Solution {
-							value,
+					let res = slv.branch_and_bound(goal, |sol| {
+						last_sol = SolutionWrap {
+							sol,
 							fzn: &fzn,
-							var_map: &var_map,
+							var_map: &meta.names,
 						}
 						.to_string();
 						if self.all_optimal {
 							for (i, var) in output_vars.iter().enumerate() {
-								no_good_vals[i] = value(*var);
+								no_good_vals[i] = var.val(sol);
 							}
 						}
 					});
 					output!(self.stdout, "{}", last_sol);
 					res
 				};
-				if status == SolveResult::Complete && self.all_optimal {
+				if status == Status::Complete && self.all_optimal {
 					let mut slv = all_opt_slv.unwrap();
 					// Ensure all following solutions have the same objective value as the
 					// first optimal solution
 					let Some(obj_val) = obj_val else {
 						unreachable!()
 					};
-					let obj_lit = obj.lit(&mut slv, IntLitMeaning::Eq(obj_val));
-					slv.add_clause([obj_lit]).unwrap();
+					match goal {
+						Goal::Minimize(obj) | Goal::Maximize(obj) => {
+							let obj_lit = obj.lit(&mut slv, IntLitMeaning::Eq(obj_val));
+							slv.add_clause([obj_lit]).unwrap();
+						}
+						_ => panic!("unknown optimization goal"),
+					}
 					// Ensure all following solutions are different from the first optimal
 					// solution
 					if slv.add_no_good(&output_vars, &no_good_vals).is_err() {
-						(SolveResult::Complete, stats)
+						(Status::Complete, stats)
 					} else {
 						// Find remaining optimal solutions
-						let (res, stats_all) = slv.all_solutions(&output_vars, |value| {
+						let (res, stats_all) = slv.all_solutions(&output_vars, |sol| {
 							output!(
 								self.stdout,
 								"{}",
-								Solution {
-									value,
+								SolutionWrap {
+									sol,
 									fzn: &fzn,
-									var_map: &var_map
+									var_map: &meta.names
 								}
 							);
 						});
@@ -522,26 +495,26 @@ where
 					(status, stats)
 				}
 			}
-			None if self.all_solutions => slv.all_solutions(&output_vars, |value| {
+			None if self.all_solutions => slv.all_solutions(&output_vars, |sol| {
 				output!(
 					self.stdout,
 					"{}",
-					Solution {
-						value,
+					SolutionWrap {
+						sol,
 						fzn: &fzn,
-						var_map: &var_map
+						var_map: &meta.names
 					}
 				);
 			}),
 			None => {
-				let res = slv.solve(|value| {
+				let res = slv.solve(|sol| {
 					output!(
 						self.stdout,
 						"{}",
-						Solution {
-							value,
+						SolutionWrap {
+							sol,
 							fzn: &fzn,
-							var_map: &var_map
+							var_map: &meta.names
 						}
 					);
 				});
@@ -559,20 +532,20 @@ where
 					("peakDepth", &stats.peak_depth()),
 					("propagations", &stats.cp_propagations()),
 					("restarts", &stats.restarts()),
-					("oracleDecisions", &stats.oracle_decisions()),
+					("satDecisions", &stats.sat_decisions()),
 					("userDecisions", &stats.user_decisions()),
 				],
 			);
 		}
 		match res {
-			SolveResult::Satisfied => {}
-			SolveResult::Unsatisfiable => {
+			Status::Satisfied => {}
+			Status::Unsatisfiable => {
 				outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
 			}
-			SolveResult::Unknown => {
+			Status::Unknown => {
 				outputln!(self.stdout, "{}", FZN_UNKNOWN);
 			}
-			SolveResult::Complete => {
+			Status::Complete => {
 				outputln!(self.stdout, "{}", FZN_COMPLETE);
 			}
 		}
@@ -779,14 +752,14 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 	}
 }
 
-impl Solution<'_> {
+impl SolutionWrap<'_> {
 	/// Method used to print a literal that is part of a solution.
 	fn print_lit(&self, lit: &Literal<InternedStr>) -> String {
 		match lit {
 			Literal::Int(i) => format!("{i}"),
 			Literal::Float(f) => format!("{f}"),
 			Literal::Identifier(ident) => {
-				format!("{}", (self.value)(self.var_map[ident]))
+				format!("{}", self.var_map[ident].val(self.sol))
 			}
 			Literal::Bool(b) => format!("{b}"),
 			Literal::IntSet(is) => is
@@ -804,7 +777,7 @@ impl Solution<'_> {
 	}
 }
 
-impl Display for Solution<'_> {
+impl Display for SolutionWrap<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		for ident in &self.fzn.output {
 			if let Some(arr) = self.fzn.arrays.get(ident) {
@@ -818,7 +791,7 @@ impl Display for Solution<'_> {
 						.join(",")
 				)?;
 			} else {
-				writeln!(f, "{ident} = {};", (self.value)(self.var_map[ident]))?;
+				writeln!(f, "{ident} = {};", self.var_map[ident].val(self.sol))?;
 			}
 		}
 		writeln!(f, "{FZN_SEPERATOR}")

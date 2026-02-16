@@ -2,7 +2,8 @@
 //!
 //! Depending on the actions implemented by the decision variables, views on the
 //! generic variable will automatically implement the appropriate action traits
-//! for all [`ReasoningEngine`]s that support them.
+//! for all [`ReasoningEngine`](crate::actions::ReasoningEngine)s that support
+//! them.
 
 mod linear_bool_view;
 mod linear_view;

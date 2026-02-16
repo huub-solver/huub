@@ -2,25 +2,23 @@
 //! that the result of exponentiation of two integer variables is equal to a
 //! third integer variable.
 
-use std::ops::AddAssign;
+use std::marker::PhantomData;
 
 use itertools::{Itertools, MinMaxResult};
-use pindakaas::{ClauseDatabase, ClauseDatabaseTools, Unsatisfiable};
 
 use crate::{
 	IntVal,
 	actions::{
-		InitActions, IntDecisionActions, IntInspectionActions, ReasoningContext, ReasoningEngine,
-		ReformulationActions, TrailingActions,
+		InitActions, IntDecisionActions, IntInspectionActions, PostingActions, ReasoningContext,
+		ReasoningEngine,
 	},
 	constraints::{
-		BoxedPropagator, CachedReason, Constraint, ModelIntView, Propagator, SimplificationStatus,
-		SolverIntView,
+		CachedReason, Constraint, IntModelActions, IntSolverActions, Propagator,
+		SimplificationStatus,
 	},
-	reformulate::ReformulationError,
-	solver::{
-		BoolView, IntLitMeaning, IntView, activation_list::IntPropCond, queue::PriorityLevel,
-	},
+	helpers::overflow::{OverflowImpossible, OverflowMode, OverflowPossible},
+	lower::{LoweringContext, LoweringError},
+	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -33,23 +31,58 @@ use crate::{
 /// Note that the exponentiation with negative exponents has similar behaviour
 /// to integer division, including the fact the constraint will remove any
 /// (semi-)division by zero.
-pub struct IntPowBounds<I1, I2, I3> {
+///
+/// The OVERFLOW parameter determines whether the propagator will expect
+/// possible integer overflows.
+pub struct IntPowBounds<OM: OverflowMode, I1, I2, I3> {
 	/// The base in the exponentiation
 	pub(crate) base: I1,
 	/// The exponent in the exponentiation
 	pub(crate) exponent: I2,
 	/// The result of exponentiation
 	pub(crate) result: I3,
+	/// Phantom data for the overflow mode
+	pub(crate) overflow_mode: PhantomData<OM>,
+}
+
+/// Calculate the power of a base to an exponent according to the rules of
+/// integer arithmetic (matching the MiniZinc semantics), returning whether
+/// the result can overflow.
+///
+/// If the result has overflowed, the function returns the saturated result
+/// ([`IntVal::MIN`] or [`IntVal::MAX`] depending on the sign of the base).
+///
+/// # Panics
+/// The function panics when the exponent is negative and the base
+/// is zero.
+fn overflowing_pow(base: IntVal, exponent: IntVal) -> (IntVal, bool) {
+	if exponent < 1 {
+		return (pow(base, exponent), false);
+	}
+
+	let mut result: IntVal = 1;
+	for i in 0..exponent {
+		match result.checked_mul(base) {
+			Some(v) => result = v,
+			None if base.is_negative() && i % 2 == 1 => return (IntVal::MIN, true),
+			None => return (IntVal::MAX, true),
+		}
+	}
+	(result, false)
 }
 
 /// Calculate the power of a base to an exponent according to the rules of
 /// integer arithmetic (matching the MiniZinc semantics).
-fn pow(base: IntVal, exponent: IntVal) -> Option<IntVal> {
-	Some(match exponent {
+///
+/// # Panics
+/// The function panics when the exponent is negative and the base
+/// is zero.
+fn pow(base: IntVal, exponent: IntVal) -> IntVal {
+	match exponent {
 		0 => 1,
 		1 => base,
 		exp if exp < 0 => match base {
-			0 => return None,
+			0 => panic!("pow: division by zero"),
 			1 => 1,
 			-1 if exp % 2 == 0 => 1,
 			-1 => -1,
@@ -62,17 +95,30 @@ fn pow(base: IntVal, exponent: IntVal) -> Option<IntVal> {
 			}
 			result
 		}
-	})
+	}
 }
 
-impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
+impl<OM, I1, I2, I3> IntPowBounds<OM, I1, I2, I3>
+where
+	OM: OverflowMode,
+{
+	/// Helper function that functions as [`pow`], but uses [`overflowing_pow`]
+	/// if `OVERFLOW` is `true`.
+	fn pow(base: IntVal, exponent: IntVal) -> IntVal {
+		if OM::HANDLE_OVERFLOW {
+			overflowing_pow(base, exponent).0
+		} else {
+			pow(base, exponent)
+		}
+	}
+
 	/// Propagates the bounds of the base and exponent to the result.
 	fn propagate_base<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I1: SolverIntView<E>,
-		I2: SolverIntView<E>,
-		I3: SolverIntView<E>,
+		I1: IntSolverActions<E>,
+		I2: IntSolverActions<E>,
+		I3: IntSolverActions<E>,
 	{
 		let (base_lb, base_ub) = self.base.bounds(ctx);
 		let (res_lb, res_ub) = self.result.bounds(ctx);
@@ -98,10 +144,10 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 
 		let mut reason = CachedReason::new(|ctx: &mut E::PropagationCtx<'_>| {
 			[
-				self.result.lower_bound_lit(ctx),
-				self.result.upper_bound_lit(ctx),
-				self.exponent.lower_bound_lit(ctx),
-				self.exponent.upper_bound_lit(ctx),
+				self.result.min_lit(ctx),
+				self.result.max_lit(ctx),
+				self.exponent.min_lit(ctx),
+				self.exponent.max_lit(ctx),
 			]
 		});
 
@@ -119,11 +165,11 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 		if min > base_lb {
 			// Correct possible numerical error
 			if (min - 1 != 0 || exp_lb > 0)
-				&& res_lb <= pow(min - 1, if min < 0 { exp_pos_uneven } else { exp_ub }).unwrap()
+				&& res_lb <= Self::pow(min - 1, if min < 0 { exp_pos_uneven } else { exp_ub })
 			{
 				min -= 1;
 			}
-			self.base.set_lower_bound(ctx, min, &mut reason)?;
+			self.base.tighten_min(ctx, min, &mut reason)?;
 		}
 
 		// Propagate upper bound
@@ -140,10 +186,10 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 
 		if max < base_ub {
 			// Correct possible numerical error
-			if res_ub >= pow(max + 1, if min < 0 { exp_pos_even } else { exp_lb }).unwrap() {
+			if res_ub >= Self::pow(max + 1, if min < 0 { exp_pos_even } else { exp_lb }) {
 				max += 1;
 			}
-			self.base.set_upper_bound(ctx, max, &mut reason)?;
+			self.base.tighten_max(ctx, max, &mut reason)?;
 		}
 		Ok(())
 	}
@@ -153,9 +199,9 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 	fn propagate_exponent<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I1: SolverIntView<E>,
-		I2: SolverIntView<E>,
-		I3: SolverIntView<E>,
+		I1: IntSolverActions<E>,
+		I2: IntSolverActions<E>,
+		I3: IntSolverActions<E>,
 	{
 		let (base_lb, base_ub) = self.base.bounds(ctx);
 		let (res_lb, res_ub) = self.result.bounds(ctx);
@@ -169,10 +215,10 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 		let (exp_lb, exp_ub) = self.exponent.bounds(ctx);
 		let mut reason = CachedReason::new(|ctx: &mut E::PropagationCtx<'_>| {
 			[
-				self.result.lower_bound_lit(ctx),
-				self.result.upper_bound_lit(ctx),
-				self.base.lower_bound_lit(ctx),
-				self.base.upper_bound_lit(ctx),
+				self.result.min_lit(ctx),
+				self.result.max_lit(ctx),
+				self.base.min_lit(ctx),
+				self.base.max_lit(ctx),
 			]
 		});
 
@@ -180,20 +226,20 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 		let mut min = ((res_lb as f64).log2() / (base_ub as f64).log2()).ceil() as IntVal;
 		if min > exp_lb {
 			// Correct possible numerical error
-			if res_lb <= pow(base_lb, min - 1).unwrap() {
+			if res_lb <= Self::pow(base_lb, min - 1) {
 				min -= 1;
 			}
-			self.exponent.set_lower_bound(ctx, min, &mut reason)?;
+			self.exponent.tighten_min(ctx, min, &mut reason)?;
 		}
 
 		// Propagate upper bound
 		let mut max = ((res_ub as f64).log2() / (base_lb as f64).log2()).floor() as IntVal;
 		if max < exp_ub {
 			// Correct possible numerical error
-			if res_ub <= pow(base_ub, max + 1).unwrap() {
+			if res_ub <= Self::pow(base_ub, max + 1) {
 				max += 1;
 			}
-			self.exponent.set_upper_bound(ctx, max, &mut reason)?;
+			self.exponent.tighten_max(ctx, max, &mut reason)?;
 		}
 
 		Ok(())
@@ -225,9 +271,9 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 	fn propagate_result<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I1: SolverIntView<E>,
-		I2: SolverIntView<E>,
-		I3: SolverIntView<E>,
+		I1: IntSolverActions<E>,
+		I2: IntSolverActions<E>,
+		I3: IntSolverActions<E>,
 	{
 		let (base_lb, base_ub) = self.base.bounds(ctx);
 		let (exp_lb, exp_ub) = self.exponent.bounds(ctx);
@@ -259,7 +305,12 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 		let (lb, ub) = match base_candidates
 			.iter()
 			.flatten()
-			.flat_map(|&b| exp_candidates.iter().filter_map(move |&e| pow(b, e)))
+			.flat_map(|&b| {
+				exp_candidates
+					.iter()
+					.filter(move |&&e| b != 0 || e >= 0)
+					.map(move |&e| Self::pow(b, e))
+			})
 			.minmax()
 		{
 			MinMaxResult::NoElements => unreachable!(),
@@ -269,29 +320,59 @@ impl<I1, I2, I3> IntPowBounds<I1, I2, I3> {
 
 		let mut reason = CachedReason::new(|ctx: &mut E::PropagationCtx<'_>| {
 			[
-				self.base.lower_bound_lit(ctx),
-				self.base.upper_bound_lit(ctx),
-				self.exponent.lower_bound_lit(ctx),
-				self.exponent.upper_bound_lit(ctx),
+				self.base.min_lit(ctx),
+				self.base.max_lit(ctx),
+				self.exponent.min_lit(ctx),
+				self.exponent.max_lit(ctx),
 			]
 		});
-		self.result.set_lower_bound(ctx, lb, &mut reason)?;
-		self.result.set_upper_bound(ctx, ub, &mut reason)?;
+		self.result.tighten_min(ctx, lb, &mut reason)?;
+		self.result.tighten_max(ctx, ub, &mut reason)?;
 		Ok(())
 	}
 }
 
-impl IntPowBounds<IntView, IntView, IntView> {
-	/// Create a new [`IntPowBounds`] propagator and post it in the solver.
-	pub fn post<E>(
-		solver: &mut E,
-		base: IntView,
-		exponent: IntView,
-		result: IntView,
-	) -> Result<(), Unsatisfiable>
+impl<I1, I2, I3> IntPowBounds<OverflowPossible, I1, I2, I3> {
+	/// Returns whether given the bounds of the base and exponent, the result
+	/// can overflow.
+	///
+	/// If this method returns `true`, then the propagator used should have
+	/// `OVERFLOW` set to `true`.
+	pub(crate) fn can_overflow<Ctx>(ctx: &Ctx, base: &I1, exponent: &I2) -> bool
 	where
-		E: AddAssign<BoxedPropagator> + ClauseDatabase + ReasoningContext<Atom = BoolView> + ?Sized,
-		IntView: IntDecisionActions<E>,
+		Ctx: ReasoningContext + ?Sized,
+		I1: IntInspectionActions<Ctx>,
+		I2: IntInspectionActions<Ctx>,
+	{
+		let (base_lb, base_ub) = base.bounds(ctx);
+		let exp_ub = exponent.max(ctx);
+		if exp_ub <= 0 {
+			return false;
+		}
+
+		let worst_base = if base_lb.abs() >= base_ub {
+			base_lb
+		} else {
+			base_ub
+		};
+
+		let mut acc: IntVal = 1;
+		for _ in 0..exp_ub {
+			match acc.checked_mul(worst_base) {
+				Some(v) => acc = v,
+				None => return true,
+			}
+		}
+		false
+	}
+
+	/// Create a new [`IntPowBounds`] propagator and post it in the solver.
+	pub fn post<E>(solver: &mut E, base: I1, exponent: I2, result: I3) -> Result<(), E::Conflict>
+	where
+		E: PostingActions + ?Sized,
+		I1: IntDecisionActions<E> + IntSolverActions<Engine>,
+		I2: IntDecisionActions<E> + IntSolverActions<Engine>,
+		I3: IntDecisionActions<E> + IntSolverActions<Engine>,
 	{
 		// Ensure that if the base is negative, then the exponent cannot be zero
 		let (exp_lb, exp_ub) = exponent.bounds(solver);
@@ -315,37 +396,46 @@ impl IntPowBounds<IntView, IntView, IntView> {
 			solver.add_clause(clause)?;
 		}
 
-		*solver += Box::new(Self {
-			base,
-			exponent,
-			result,
-		});
+		if Self::can_overflow(solver, &base, &exponent) {
+			solver.add_propagator(Box::new(IntPowBounds::<OverflowPossible, _, _, _> {
+				base,
+				exponent,
+				result,
+				overflow_mode: PhantomData,
+			}));
+		} else {
+			solver.add_propagator(Box::new(IntPowBounds::<OverflowImpossible, _, _, _> {
+				base,
+				exponent,
+				result,
+				overflow_mode: PhantomData,
+			}));
+		}
 		Ok(())
 	}
 }
 
-impl<E, I1, I2, I3> Constraint<E> for IntPowBounds<I1, I2, I3>
+impl<OM, E, I1, I2, I3> Constraint<E> for IntPowBounds<OM, I1, I2, I3>
 where
 	E: ReasoningEngine,
-	I1: ModelIntView<E>,
-	I2: ModelIntView<E>,
-	I3: ModelIntView<E>,
+	I1: IntModelActions<E>,
+	I2: IntModelActions<E>,
+	I3: IntModelActions<E>,
+	OM: OverflowMode,
 {
 	fn simplify(
 		&mut self,
 		ctx: &mut E::PropagationCtx<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		// If the base is negative, then the exponent cannot be zero
-		if self.base.upper_bound(ctx) < 0 {
-			self.base
-				.set_not_eq(ctx, 0, [self.base.upper_bound_lit(ctx)])?;
+		if self.base.max(ctx) < 0 {
+			self.base.remove_val(ctx, 0, [self.base.max_lit(ctx)])?;
 		}
 		// If the exponent is zero, then the result is one
 		if self.exponent.val(ctx) == Some(0) {
-			self.result
-				.set_val(ctx, 1, |ctx: &mut E::PropagationCtx<'_>| {
-					[self.exponent.val_lit(ctx).unwrap()]
-				})?;
+			self.result.fix(ctx, 1, |ctx: &mut E::PropagationCtx<'_>| {
+				[self.exponent.val_lit(ctx).unwrap()]
+			})?;
 		}
 
 		self.propagate(ctx)?;
@@ -361,25 +451,22 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(
-		&self,
-		slv: &mut dyn ReformulationActions,
-		_model_trail: &dyn TrailingActions,
-	) -> Result<(), ReformulationError> {
-		let base = slv.solver_int(self.base.clone().into());
-		let exponent = slv.solver_int(self.exponent.clone().into());
-		let result = slv.solver_int(self.result.clone().into());
+	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
+		let base = slv.solver_view(self.base.clone().into());
+		let exponent = slv.solver_view(self.exponent.clone().into());
+		let result = slv.solver_view(self.result.clone().into());
 		IntPowBounds::post(slv, base, exponent, result).unwrap();
 		Ok(())
 	}
 }
 
-impl<E, I1, I2, I3> Propagator<E> for IntPowBounds<I1, I2, I3>
+impl<OM, E, I1, I2, I3> Propagator<E> for IntPowBounds<OM, I1, I2, I3>
 where
 	E: ReasoningEngine,
-	I1: SolverIntView<E>,
-	I2: SolverIntView<E>,
-	I3: SolverIntView<E>,
+	I1: IntSolverActions<E>,
+	I2: IntSolverActions<E>,
+	I3: IntSolverActions<E>,
+	OM: OverflowMode,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Highest);
@@ -395,6 +482,25 @@ where
 		self.propagate_base(ctx)?;
 		self.propagate_exponent(ctx)?;
 
+		// Protect against saturation inaccuracy: if `pow(base, exp)` causes
+		// overflow, then the `base` and `exp` should be disallowed, but
+		// because of the internal saturation used, it will instead allow `IntVal::MAX`
+		// or `IntVal::MIN` to be used as the result.
+		if OM::HANDLE_OVERFLOW
+			&& let Some(base) = self.base.val(ctx)
+			&& let Some(exp) = self.exponent.val(ctx)
+			&& overflowing_pow(base, exp).1
+		{
+			self.exponent
+				.tighten_max(ctx, exp - 1, |ctx: &mut E::PropagationCtx<'_>| {
+					[if base.is_positive() {
+						self.base.min_lit(ctx)
+					} else {
+						self.base.max_lit(ctx)
+					}]
+				})?;
+		}
+
 		Ok(())
 	}
 }
@@ -405,30 +511,63 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
+		IntVal,
 		constraints::int_pow::IntPowBounds,
 		solver::{
 			Solver,
-			int_var::{EncodingType, IntVar},
+			decision::integer::{EncodingType, IntDecision},
 		},
 	};
 
 	#[test]
 	#[traced_test]
+	fn test_int_pow_overflow() {
+		let mut slv = Solver::default();
+		let base = IntDecision::new_in(
+			&mut slv,
+			(10..=10).into(),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let exponent = IntDecision::new_in(
+			&mut slv,
+			(18..=19).into(),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let result = IntDecision::new_in(
+			&mut slv,
+			(0..=IntVal::MAX).into(),
+			EncodingType::Lazy,
+			EncodingType::Lazy,
+		);
+
+		IntPowBounds::post(&mut slv, base, exponent, result)
+			.expect("int_pow(a,b,c) was found to be unsatisfiable");
+
+		slv.expect_solutions(
+			&[base, exponent, result],
+			expect!["10, 18, 1000000000000000000"],
+		);
+	}
+
+	#[test]
+	#[traced_test]
 	fn test_int_pow_sat() {
 		let mut slv = Solver::default();
-		let a = IntVar::new_in(
+		let a = IntDecision::new_in(
 			&mut slv,
 			(-2..=3).into(),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let b = IntVar::new_in(
+		let b = IntDecision::new_in(
 			&mut slv,
 			(-2..=2).into(),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let c = IntVar::new_in(
+		let c = IntDecision::new_in(
 			&mut slv,
 			(-2..=9).into(),
 			EncodingType::Eager,
@@ -469,5 +608,34 @@ mod tests {
 			3, 1, 3
 			3, 2, 9"#]],
 		);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_int_pow_underflow() {
+		let mut slv = Solver::default();
+		let base = IntDecision::new_in(
+			&mut slv,
+			(-10..=-10).into(),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let exponent = IntDecision::new_in(
+			&mut slv,
+			(19..=19).into(),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let result = IntDecision::new_in(
+			&mut slv,
+			(IntVal::MIN..=0).into(),
+			EncodingType::Lazy,
+			EncodingType::Lazy,
+		);
+
+		IntPowBounds::post(&mut slv, base, exponent, result)
+			.expect("int_pow(a,b,c) was found to be unsatisfiable");
+
+		slv.assert_unsatisfiable();
 	}
 }

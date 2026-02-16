@@ -3,15 +3,14 @@
 //! [`Trail`] structure, if the search process needs to backtrack, then these
 //! values can be restored to their previous state.
 
-use std::{mem, num::NonZeroI32};
+use std::{marker::PhantomData, mem, num::NonZeroI32};
 
-use index_vec::IndexVec;
 use pindakaas::{Lit as RawLit, Var as RawVar};
 use tracing::trace;
 
 use crate::{
-	IntVal,
-	actions::{BoolInspectionActions, TrailingActions},
+	actions::{Trailed, TrailingActions},
+	helpers::bytes::Bytes,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -25,6 +24,7 @@ struct BoolStore {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Storage structure that allows restoring tracked values to an earlier state.
 pub(crate) struct Trail {
 	/// The storage of event that have been trailed.
 	///
@@ -40,7 +40,7 @@ pub(crate) struct Trail {
 	prev_len: Vec<usize>,
 
 	/// Stores the current value of trailed integer values.
-	int_value: IndexVec<TrailedInt, IntVal>,
+	int_value: Vec<[u8; 8]>,
 	/// Stores the current assigned values of Boolean variables, and "redo"
 	/// values when untrailing.
 	sat_store: Vec<BoolStore>,
@@ -53,18 +53,20 @@ pub(crate) enum TrailEvent {
 	SatAssignment(RawVar),
 	/// The assignment of a trailed integer value, and the previous value it
 	/// had.
-	IntAssignment(TrailedInt, IntVal),
-}
-
-impl BoolInspectionActions<Trail> for RawLit {
-	fn val(&self, ctx: &Trail) -> Option<bool> {
-		ctx.sat_value(*self)
-	}
+	IntAssignment {
+		/// The index of the trailed value in the trail storage.
+		index: u32,
+		/// The previous value encoded as bytes.
+		value: [u8; 8],
+	},
 }
 
 impl Trail {
 	/// A trailed integer that is used to track the currently active brancher.
-	pub(crate) const CURRENT_BRANCHER: TrailedInt = TrailedInt { _raw: 0 };
+	pub(crate) const CURRENT_BRANCHER: Trailed<usize> = Trailed {
+		index: 0,
+		ty: PhantomData,
+	};
 
 	/// Record the assignment of a literal in the Trail
 	///
@@ -91,8 +93,8 @@ impl Trail {
 	/// Method used to restore the state of all value to the point at which a
 	/// literal was assigned.
 	///
-	/// This method is used when creating lazy explanations, as the oracle doesn
-	/// not allow the usage of literals that are not
+	/// This method is used when creating lazy explanations, as the SAT solver
+	/// does not allow the usage of literals that are not
 	pub(crate) fn goto_assign_lit(&mut self, lit: RawLit) {
 		let var = lit.var();
 		if self.sat_store[Self::sat_index(var)].value.is_none() {
@@ -177,7 +179,7 @@ impl Trail {
 		debug_assert_eq!(self.pos, self.trail.len());
 		match event {
 			TrailEvent::SatAssignment(_) => self.trail.push(0),
-			TrailEvent::IntAssignment(_, _) => self.trail.extend([0; 3]),
+			TrailEvent::IntAssignment { .. } => self.trail.extend([0; 3]),
 		}
 		event.write_trail(&mut self.trail[self.pos..]);
 		self.pos = self.trail.len();
@@ -217,12 +219,12 @@ impl Trail {
 				debug_assert!(store.value.is_none());
 				mem::swap(&mut store.restore, &mut store.value);
 			}
-			TrailEvent::IntAssignment(i, v) => {
-				let x = self.int_value[i];
-				TrailEvent::IntAssignment(i, x)
+			TrailEvent::IntAssignment { index, value } => {
+				let x = self.int_value[index as usize];
+				TrailEvent::IntAssignment { index, value: x }
 					.write_trail(&mut self.trail[self.pos - 3..self.pos]);
 
-				self.int_value[i] = v;
+				self.int_value[index as usize] = value;
 			}
 		}
 		Some(event)
@@ -253,8 +255,12 @@ impl Trail {
 	}
 
 	/// Create a new trailed integer with initial value `val`
-	pub(crate) fn track_int(&mut self, val: IntVal) -> TrailedInt {
-		self.int_value.push(val)
+	pub(crate) fn track<T: Bytes>(&mut self, val: T) -> Trailed<T> {
+		self.int_value.push(val.to_bytes());
+		Trailed {
+			index: (self.int_value.len() - 1) as u32,
+			ty: PhantomData,
+		}
 	}
 
 	/// Internal method to undo the last change on the trail.
@@ -289,13 +295,13 @@ impl Trail {
 					store.restore = b;
 				}
 			}
-			TrailEvent::IntAssignment(i, v) => {
+			TrailEvent::IntAssignment { index, value } => {
 				if RESTORE {
-					let x = self.int_value[i];
-					TrailEvent::IntAssignment(i, x)
+					let x = self.int_value[index as usize];
+					TrailEvent::IntAssignment { index, value: x }
 						.write_rev_trail(&mut self.trail[self.pos..=self.pos + 2]);
 				}
-				self.int_value[i] = v;
+				self.int_value[index as usize] = value;
 			}
 		}
 		Some(event)
@@ -308,24 +314,28 @@ impl Default for Trail {
 			trail: Vec::new(),
 			pos: 0,
 			prev_len: Vec::new(),
-			int_value: IndexVec::from_vec(vec![0]),
+			int_value: vec![0_u64.to_bytes()],
 			sat_store: Vec::new(),
 		}
 	}
 }
 
 impl TrailingActions for Trail {
-	fn set_trailed_int(&mut self, i: TrailedInt, v: IntVal) -> IntVal {
-		if self.int_value[i] == v {
-			return v;
+	fn set_trailed<T: Bytes>(&mut self, i: Trailed<T>, v: T) -> T {
+		let bytes = v.to_bytes();
+		if self.int_value[i.index as usize] == bytes {
+			return T::from_bytes(bytes);
 		}
-		let old = mem::replace(&mut self.int_value[i], v);
-		self.push_trail(TrailEvent::IntAssignment(i, old));
-		old
+		let old = mem::replace(&mut self.int_value[i.index as usize], bytes);
+		self.push_trail(TrailEvent::IntAssignment {
+			index: i.index,
+			value: old,
+		});
+		T::from_bytes(old)
 	}
 
-	fn trailed_int(&self, i: TrailedInt) -> IntVal {
-		self.int_value[i]
+	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
+		T::from_bytes(self.int_value[i.index as usize])
 	}
 }
 
@@ -334,20 +344,22 @@ impl TrailEvent {
 	/// Internal method used to transform a slice of the trail to a
 	/// [`TrailEvent::IntAssignment`] object for the [`Trail::redo`] method.
 	fn int_from_rev_trail(raw: [u32; 3]) -> Self {
-		let i = -(raw[0] as i32) as usize;
+		let index = -(raw[0] as i32) as u32;
 		let high = raw[1] as u64;
 		let low = raw[2] as u64;
-		TrailEvent::IntAssignment(i.into(), ((high << 32) | low) as i64)
+		let value = ((high << 32) | low).to_ne_bytes();
+		TrailEvent::IntAssignment { index, value }
 	}
 
 	#[inline]
 	/// Internal method used to transform a slice of the trail to a
 	/// [`TrailEvent::IntAssignment`] object for the [`Trail::undo`] method.
 	fn int_from_trail(raw: [u32; 3]) -> Self {
-		let i = -(raw[2] as i32) as usize;
+		let index = -(raw[2] as i32) as u32;
 		let high = raw[1] as u64;
 		let low = raw[0] as u64;
-		TrailEvent::IntAssignment(i.into(), ((high << 32) | low) as i64)
+		let value = ((high << 32) | low).to_ne_bytes();
+		TrailEvent::IntAssignment { index, value }
 	}
 
 	#[inline]
@@ -356,11 +368,11 @@ impl TrailEvent {
 	fn write_rev_trail(&self, trail: &mut [u32]) {
 		match self {
 			TrailEvent::SatAssignment(var) => trail[0] = i32::from(*var) as u32,
-			TrailEvent::IntAssignment(i, val) => {
-				let val = *val as u64;
+			TrailEvent::IntAssignment { index, value } => {
+				let val = u64::from_ne_bytes(*value);
 				let high = (val >> 32) as u32;
 				let low = val as u32;
-				trail[0] = -(usize::from(*i) as i32) as u32;
+				trail[0] = -(*index as i32) as u32;
 				trail[1] = high;
 				trail[2] = low;
 			}
@@ -373,21 +385,16 @@ impl TrailEvent {
 	fn write_trail(&self, trail: &mut [u32]) {
 		match self {
 			TrailEvent::SatAssignment(var) => trail[0] = i32::from(*var) as u32,
-			TrailEvent::IntAssignment(i, val) => {
-				let val = *val as u64;
+			TrailEvent::IntAssignment { index, value } => {
+				let val = u64::from_ne_bytes(*value);
 				let high = (val >> 32) as u32;
 				let low = val as u32;
 				trail[0] = low;
 				trail[1] = high;
-				trail[2] = -(usize::from(*i) as i32) as u32;
+				trail[2] = -(*index as i32) as u32;
 			}
 		}
 	}
-}
-
-index_vec::define_index_type! {
-	/// Identifies an trailed integer tracked within [`Solver`]
-	pub struct TrailedInt = u32;
 }
 
 #[cfg(test)]
@@ -397,6 +404,7 @@ mod tests {
 	use crate::{
 		IntVal,
 		actions::TrailingActions,
+		helpers::bytes::Bytes,
 		solver::trail::{Trail, TrailEvent},
 	};
 
@@ -419,30 +427,26 @@ mod tests {
 			1718,
 		]
 		.into_iter()
-		.map(|i| (trail.track_int(0), i))
+		.map(|i| (trail.track(0), i))
 		.collect();
 
 		for (l, &(i, v)) in lits.zip(int_events.iter()) {
-			trail.assign_lit(if usize::from(i) % 2 == 0 {
-				l.into()
-			} else {
-				!l
-			});
-			trail.set_trailed_int(i, v);
+			trail.assign_lit(if i.index % 2 == 0 { l.into() } else { !l });
+			trail.set_trailed(i, v);
 		}
 
 		for (l, &(i, v)) in lits.rev().zip(int_events.iter().rev()) {
-			assert_eq!(trail.trailed_int(i), v);
+			assert_eq!(trail.trailed(i), v);
 			if v != 0 {
 				let e = trail.undo::<true>().unwrap();
-				let TrailEvent::IntAssignment(event_i, event_v) = e else {
+				let TrailEvent::IntAssignment { index, value } = e else {
 					panic!("unexpected trail event type {e:?}");
 				};
-				assert_eq!(i, event_i);
-				assert_eq!(trail.trailed_int(i), event_v);
+				assert_eq!(i.index, index);
+				assert_eq!(trail.trailed(i), i64::from_bytes(value));
 			}
 
-			assert_eq!(trail.sat_value(l), Some(usize::from(i) % 2 == 0));
+			assert_eq!(trail.sat_value(l), Some(i.index % 2 == 0));
 			let e = trail.undo::<true>().unwrap();
 			assert_eq!(e, TrailEvent::SatAssignment(l));
 			assert_eq!(trail.sat_value(l), None);

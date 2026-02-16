@@ -7,15 +7,17 @@ use std::mem;
 use itertools::Itertools;
 
 use crate::{
-	IntDecision, IntVal,
+	IntVal,
 	actions::{
 		InitActions, IntDecisionActions, IntInitActions, IntInspectionActions,
 		IntPropagationActions, IntSimplificationActions, PropagationActions, ReasoningEngine,
-		ReformulationActions, TrailingActions,
 	},
-	constraints::{Constraint, ModelIntView, Propagator, SimplificationStatus, SolverIntView},
-	reformulate::ReformulationError,
-	solver::{BoolView, IntLitMeaning, activation_list::IntPropCond, queue::PriorityLevel},
+	constraints::{
+		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
+	},
+	lower::{LoweringContext, LoweringError},
+	model::View,
+	solver::{IntLitMeaning, activation_list::IntPropCond, queue::PriorityLevel},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -25,7 +27,7 @@ use crate::{
 /// values according to one of the given lists of integer values.
 pub struct IntTable {
 	/// List of variables that must take the values of a row in the table.
-	pub(crate) vars: Vec<IntDecision>,
+	pub(crate) vars: Vec<View<IntVal>>,
 	/// The table of possible values for the variables.
 	pub(crate) table: Vec<Vec<IntVal>>,
 }
@@ -33,7 +35,7 @@ pub struct IntTable {
 impl<E> Constraint<E> for IntTable
 where
 	E: ReasoningEngine,
-	IntDecision: ModelIntView<E>,
+	View<IntVal>: IntModelActions<E>,
 {
 	fn simplify(
 		&mut self,
@@ -43,7 +45,7 @@ where
 			0 => return Ok(SimplificationStatus::Subsumed),
 			1 => {
 				let dom = self.table.iter().map(|v| v[0]..=v[0]).collect();
-				self.vars[0].set_domain(ctx, &dom, [])?;
+				self.vars[0].restrict_domain(ctx, &dom, [])?;
 				return Ok(SimplificationStatus::Subsumed);
 			}
 			_ => {}
@@ -69,7 +71,7 @@ where
 		// tuple.
 		if self.table.len() == 1 {
 			for (j, &var) in self.vars.iter().enumerate() {
-				var.set_val(ctx, self.table[0][j], [])?;
+				var.fix(ctx, self.table[0][j], [])?;
 			}
 			return Ok(SimplificationStatus::Subsumed);
 		}
@@ -78,25 +80,27 @@ where
 			let dom = (0..self.table.len())
 				.map(|i| self.table[i][j]..=self.table[i][j])
 				.collect();
-			var.set_domain(ctx, &dom, [])?;
+			var.restrict_domain(ctx, &dom, [])?;
 		}
 
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(
-		&self,
-		slv: &mut dyn ReformulationActions,
-		_model_trail: &dyn TrailingActions,
-	) -> Result<(), ReformulationError> {
+	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
 		assert!(self.vars.len() >= 2);
 
 		let selector = if self.vars.len() != 2 {
-			(0..self.table.len()).map(|_| slv.new_bool_var()).collect()
+			(0..self.table.len())
+				.map(|_| slv.new_bool_decision())
+				.collect()
 		} else {
 			Vec::new()
 		};
-		let vars = self.vars.iter().map(|&iv| slv.solver_int(iv)).collect_vec();
+		let vars = self
+			.vars
+			.iter()
+			.map(|&iv| slv.solver_view(iv))
+			.collect_vec();
 
 		// Create clauses that say foreach tuple i, if `selector[i]` is true, then the
 		// variable `j` equals `vals[i][j]`.
@@ -114,7 +118,7 @@ where
 		// possible selectors that can be active.
 		for (j, var) in vars.iter().enumerate() {
 			let (lb, ub) = var.bounds(slv);
-			let mut support_clauses: Vec<Vec<BoolView>> = vec![Vec::new(); (ub - lb + 1) as usize];
+			let mut support_clauses: Vec<Vec<_>> = vec![Vec::new(); (ub - lb + 1) as usize];
 			for (i, tup) in self.table.iter().enumerate() {
 				let k = tup[j] - lb;
 				if !(0..support_clauses.len() as IntVal).contains(&k) {
@@ -147,7 +151,7 @@ where
 impl<E> Propagator<E> for IntTable
 where
 	E: ReasoningEngine,
-	IntDecision: SolverIntView<E>,
+	View<IntVal>: IntSolverActions<E>,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
@@ -166,12 +170,12 @@ mod tests {
 	use expect_test::expect;
 	use itertools::Itertools;
 
-	use crate::{Decision, Model, reformulate::InitConfig, table_int};
+	use crate::{Model, lower::InitConfig};
 
 	#[test]
 	fn test_binary_table_sat() {
 		let mut prb = Model::default();
-		let vars = prb.new_int_vars(3, 1..=5);
+		let vars = prb.new_int_decisions(3, 1..=5);
 		let table = vec![
 			vec![1, 3],
 			vec![1, 4],
@@ -184,14 +188,15 @@ mod tests {
 			vec![5, 2],
 			vec![5, 3],
 		];
-		table_int(&mut prb, vec![vars[0], vars[1]], table.clone());
-		table_int(&mut prb, vec![vars[1], vars[2]], table.clone());
+		prb.table(vec![vars[0], vars[1]])
+			.values(table.clone())
+			.post();
+		prb.table(vec![vars[1], vars[2]])
+			.values(table.clone())
+			.post();
 
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
-		let vars = vars
-			.into_iter()
-			.map(|x| map.get(&mut slv, &Decision::Int(x)))
-			.collect_vec();
+		let vars = vars.into_iter().map(|x| map.get(&mut slv, x)).collect_vec();
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"
@@ -221,7 +226,7 @@ mod tests {
 	#[test]
 	fn test_tertiary_table_sat() {
 		let mut prb = Model::default();
-		let vars = prb.new_int_vars(5, 1..=5);
+		let vars = prb.new_int_decisions(5, 1..=5);
 		let table = vec![
 			vec![1, 3, 1],
 			vec![1, 3, 5],
@@ -232,22 +237,15 @@ mod tests {
 			vec![5, 3, 1],
 			vec![5, 3, 5],
 		];
-		table_int(
-			&mut prb,
-			vars[0..3].iter().cloned().map_into().collect(),
-			table.clone(),
-		);
-		table_int(
-			&mut prb,
-			vars[2..5].iter().cloned().map_into().collect(),
-			table.clone(),
-		);
+		prb.table(vars[0..3].iter().cloned())
+			.values(table.clone())
+			.post();
+		prb.table(vars[2..5].iter().cloned())
+			.values(table.clone())
+			.post();
 
 		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
-		let vars = vars
-			.into_iter()
-			.map(|x| map.get(&mut slv, &Decision::Int(x)))
-			.collect_vec();
+		let vars = vars.into_iter().map(|x| map.get(&mut slv, x)).collect_vec();
 		slv.expect_solutions(
 			&vars,
 			expect![[r#"

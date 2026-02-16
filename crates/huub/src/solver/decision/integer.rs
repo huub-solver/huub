@@ -1,4 +1,4 @@
-//! Module containing the representation of integer variables within the solver.
+//! Integer decision variable definitions for the solver layer.
 
 use std::{
 	collections::hash_map::{self, VacantEntry},
@@ -16,9 +16,18 @@ use rangelist::{IntervalIterator, RangeList};
 use rustc_hash::FxHashMap;
 
 use crate::{
-	IntSetVal, IntVal, Solver,
-	actions::{BoolInspectionActions, TrailingActions},
-	solver::{BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner, trail::TrailedInt},
+	IntSet, IntVal,
+	actions::{
+		BoolInspectionActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
+		Trailed, TrailingActions,
+	},
+	solver::{
+		IntLitMeaning, Solver,
+		decision::{Decision, DecisionReference, private},
+		engine::State,
+		solving_context::SolvingContext,
+		view::{View, boolean::BoolView},
+	},
 	views::{LinearBoolView, LinearView},
 };
 
@@ -27,7 +36,7 @@ use crate::{
 /// represent the condition otherwise.
 enum DirectEntry<'a> {
 	/// The condition is already stored in the [`DirectStorage`].
-	Occupied(BoolViewInner),
+	Occupied(View<bool>),
 	/// The condition is not yet stored in the [`DirectStorage`].
 	Vacant(VacantEntry<'a, IntVal, RawVar>),
 }
@@ -50,13 +59,13 @@ pub(crate) enum DirectStorage {
 /// their tightest literal meaning.
 ///
 /// Used as the return type of [`OrderStorage::resolve_val`].
-struct DomainLocation<'a> {
+struct DomainLocation<'a, const OFFSET: usize> {
 	/// Tightest value for the less-than literal
 	less_val: IntVal,
 	/// Tightest value for the greater-than or equal-to literal
 	greater_eq_val: IntVal,
 	/// Offset of the literal in the variable range.
-	offset: usize,
+	offset: [usize; OFFSET],
 	/// Iterator in the domain that point to the range in which the value is
 	/// located.
 	range_iter: RangeIter<'a>,
@@ -74,7 +83,7 @@ pub(crate) enum EncodingType {
 #[derive(Debug, PartialEq, Eq, Clone)]
 /// The structure used to store information about an integer variable within
 /// the solver.
-pub(crate) struct IntVar {
+pub(crate) struct IntDecision {
 	/// The direct encoding of the integer variable.
 	///
 	/// Literals in this encoding are used to reason about whether an integer
@@ -91,7 +100,7 @@ pub(crate) struct IntVar {
 	/// variable.
 	///
 	/// Note that the lower bound is tracked within [`Self::order_encoding`].
-	upper_bound: TrailedInt,
+	upper_bound: Trailed<IntVal>,
 }
 
 #[derive(Debug)]
@@ -120,10 +129,10 @@ pub(crate) struct LazyOrderStorage {
 	max_index: u32,
 	/// The index of the node that currently represents the lower bound of the
 	/// integer variable.
-	lb_index: TrailedInt,
+	lb_index: Trailed<isize>,
 	/// The index of the node that currently represents the upper bound of the
 	/// integer variable.
-	ub_index: TrailedInt,
+	ub_index: Trailed<isize>,
 	/// The storage of all currently created nodes containing the order literals
 	/// for the integer variable.
 	storage: Vec<OrderNode>,
@@ -198,7 +207,7 @@ pub(crate) enum OrderStorage {
 	Eager {
 		/// A trailed integer that represents the currently lower bound of the
 		/// variable.
-		lower_bound: TrailedInt,
+		lower_bound: Trailed<IntVal>,
 		/// The range of Boolean variables that represent the inequality
 		/// conditions.
 		storage: VarRange,
@@ -226,16 +235,196 @@ enum SearchDirection {
 	Decreasing,
 }
 
+impl Decision<IntVal> {
+	/// Return the a integer identifier that can be used for this decision.
+	pub(crate) fn ident(&self) -> u32 {
+		self.0
+	}
+
+	/// Return the index used to access this decision in solver storage.
+	pub(crate) fn idx(&self) -> usize {
+		self.0 as usize
+	}
+}
+
+impl<Sat: ExternalPropagation> IntDecisionActions<Solver<Sat>> for Decision<IntVal> {
+	fn lit(&self, ctx: &mut Solver<Sat>, meaning: IntLitMeaning) -> View<bool> {
+		let (mut actions, mut engine) = ctx.as_parts_mut();
+		let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
+		self.lit(&mut ctx, meaning)
+	}
+
+	fn val_lit(&self, ctx: &mut Solver<Sat>) -> Option<View<bool>> {
+		let (mut actions, mut engine) = ctx.as_parts_mut();
+		let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
+		IntDecisionActions::val_lit(self, &mut ctx)
+	}
+}
+
+impl IntExplanationActions<State> for Decision<IntVal> {
+	fn lit_relaxed(&self, ctx: &State, mut meaning: IntLitMeaning) -> (View<bool>, IntLitMeaning) {
+		debug_assert!(
+			!matches!(meaning, IntLitMeaning::Eq(_)),
+			"relaxed integer literals are not yet supported for IntLitMeaning::Eq(_)"
+		);
+
+		let var_def = &ctx.int_vars[self.idx()];
+		// If we are looking for a not-equal literal, try and find it. Return it if we
+		// find it, otherwise defer to an order literal.
+		if let IntLitMeaning::NotEq(v) = meaning {
+			if let Some((bv, _)) = var_def.try_lit(meaning) {
+				return (bv, IntLitMeaning::NotEq(v));
+			}
+
+			let lb = var_def.lower_bound(&ctx.trail);
+			if v < lb {
+				meaning = IntLitMeaning::GreaterEq(v + 1);
+			} else {
+				debug_assert!(v > var_def.upper_bound(&ctx.trail));
+				meaning = IntLitMeaning::Less(v);
+			}
+		}
+		// Find the strongest order literal that fits the given meaning.
+		match meaning {
+			IntLitMeaning::GreaterEq(v) => {
+				let (bv, v) = var_def.greater_eq_lit_or_weaker(&ctx.trail, v);
+				(bv, IntLitMeaning::GreaterEq(v))
+			}
+			IntLitMeaning::Less(v) => {
+				let (bv, v) = var_def.less_lit_or_weaker(&ctx.trail, v);
+				(bv, IntLitMeaning::Less(v))
+			}
+			_ => unreachable!(),
+		}
+	}
+}
+
+impl<Sat> IntInspectionActions<Solver<Sat>> for Decision<IntVal> {
+	fn bounds(&self, ctx: &Solver<Sat>) -> (IntVal, IntVal) {
+		let lb = self.min(ctx);
+		let ub = self.max(ctx);
+		(lb, ub)
+	}
+
+	fn domain(&self, ctx: &Solver<Sat>) -> IntSet {
+		self.domain(&ctx.engine.borrow().state)
+	}
+
+	fn in_domain(&self, ctx: &Solver<Sat>, val: IntVal) -> bool {
+		self.in_domain(&ctx.engine.borrow().state, val)
+	}
+
+	fn lit_meaning(&self, ctx: &Solver<Sat>, lit: View<bool>) -> Option<IntLitMeaning> {
+		self.lit_meaning(&ctx.engine.borrow().state, lit)
+	}
+
+	fn max(&self, ctx: &Solver<Sat>) -> IntVal {
+		self.max(&ctx.engine.borrow().state)
+	}
+
+	fn max_lit(&self, ctx: &Solver<Sat>) -> View<bool> {
+		self.max_lit(&ctx.engine.borrow().state)
+	}
+
+	fn min(&self, ctx: &Solver<Sat>) -> IntVal {
+		self.min(&ctx.engine.borrow().state)
+	}
+
+	fn min_lit(&self, ctx: &Solver<Sat>) -> View<bool> {
+		self.min_lit(&ctx.engine.borrow().state)
+	}
+
+	fn try_lit(&self, ctx: &Solver<Sat>, meaning: IntLitMeaning) -> Option<View<bool>> {
+		self.try_lit(&ctx.engine.borrow().state, meaning)
+	}
+
+	fn val(&self, ctx: &Solver<Sat>) -> Option<IntVal> {
+		let (lb, ub) = self.bounds(ctx);
+		if lb == ub { Some(lb) } else { None }
+	}
+}
+
+impl IntInspectionActions<State> for Decision<IntVal> {
+	fn bounds(&self, ctx: &State) -> (IntVal, IntVal) {
+		let lb = self.min(ctx);
+		let ub = self.max(ctx);
+		(lb, ub)
+	}
+
+	fn domain(&self, ctx: &State) -> IntSet {
+		ctx.int_vars[self.idx()].domain(&ctx.trail)
+	}
+
+	fn in_domain(&self, ctx: &State, val: IntVal) -> bool {
+		let (lb, ub) = self.bounds(ctx);
+		if lb <= val && val <= ub {
+			let eq_lit = self.try_lit(ctx, IntLitMeaning::Eq(val));
+			if let Some(eq_lit) = eq_lit {
+				eq_lit.val(ctx).unwrap_or(true)
+			} else {
+				true
+			}
+		} else {
+			false
+		}
+	}
+
+	fn lit_meaning(&self, ctx: &State, lit: View<bool>) -> Option<IntLitMeaning> {
+		let BoolView::Lit(lit) = lit.0 else {
+			return None;
+		};
+		let (iv, meaning) = ctx.get_int_lit_meaning(lit)?;
+		if *self != iv {
+			return None;
+		}
+		Some(meaning)
+	}
+
+	fn max(&self, ctx: &State) -> IntVal {
+		ctx.int_vars[self.idx()].upper_bound(&ctx.trail)
+	}
+
+	fn max_lit(&self, ctx: &State) -> View<bool> {
+		ctx.int_vars[self.idx()].upper_bound_lit(&ctx.trail)
+	}
+
+	fn min(&self, ctx: &State) -> IntVal {
+		ctx.int_vars[self.idx()].lower_bound(&ctx.trail)
+	}
+
+	fn min_lit(&self, ctx: &State) -> View<bool> {
+		ctx.int_vars[self.idx()].lower_bound_lit(&ctx.trail)
+	}
+
+	fn try_lit(&self, ctx: &State, meaning: IntLitMeaning) -> Option<View<bool>> {
+		ctx.int_vars[self.idx()].try_lit(meaning).map(|t| t.0)
+	}
+
+	fn val(&self, ctx: &State) -> Option<IntVal> {
+		let (lb, ub) = self.bounds(ctx);
+		if lb == ub { Some(lb) } else { None }
+	}
+}
+
+impl Neg for Decision<IntVal> {
+	type Output = LinearView<NonZero<IntVal>, IntVal, Self>;
+
+	fn neg(self) -> Self::Output {
+		let lin: LinearView<NonZero<IntVal>, IntVal, Self> = self.into();
+		-lin
+	}
+}
+
 impl DirectEntry<'_> {
 	/// Extract the [`BoolViewInner`] if the entry is occupied, or insert a new
 	/// variable using the given function.
-	fn or_insert_with(self, f: impl FnOnce() -> RawVar) -> BoolViewInner {
+	fn or_insert_with(self, f: impl FnOnce() -> RawVar) -> View<bool> {
 		match self {
 			DirectEntry::Occupied(bv) => bv,
 			DirectEntry::Vacant(no_entry) => {
 				let v = f();
 				no_entry.insert(v);
-				BoolViewInner::Lit(v.into())
+				Decision(v.into()).into()
 			}
 		}
 	}
@@ -274,20 +463,20 @@ impl DirectStorage {
 						0,
 						vars.len(),
 					);
-					DirectEntry::Occupied(BoolViewInner::Lit(vars.index(offset as usize).into()))
+					DirectEntry::Occupied(Decision(vars.index(offset as usize).into()).into())
 				} else {
-					DirectEntry::Occupied(BoolViewInner::Const(false))
+					DirectEntry::Occupied(false.into())
 				}
 			}
 			DirectStorage::Lazy(map) => match map.entry(i) {
 				hash_map::Entry::Occupied(entry) => {
-					DirectEntry::Occupied(BoolViewInner::Lit((*entry.get()).into()))
+					DirectEntry::Occupied(Decision((*entry.get()).into()).into())
 				}
 				hash_map::Entry::Vacant(no_entry) => {
 					if domain.contains(&i) {
 						DirectEntry::Vacant(no_entry)
 					} else {
-						DirectEntry::Occupied(BoolViewInner::Const(false))
+						DirectEntry::Occupied(false.into())
 					}
 				}
 			},
@@ -299,7 +488,7 @@ impl DirectStorage {
 	///
 	/// The given `domain` is (in the case of eager creation) used to determine
 	/// the offset of the variable in the `VarRange`.
-	fn find(&self, domain: &RangeList<IntVal>, i: IntVal) -> Option<BoolViewInner> {
+	fn find(&self, domain: &RangeList<IntVal>, i: IntVal) -> Option<View<bool>> {
 		match self {
 			DirectStorage::Eager(vars) => {
 				// Calculate the offset in the VarRange
@@ -323,33 +512,34 @@ impl DirectStorage {
 						0,
 						vars.len(),
 					);
-					BoolViewInner::Lit(vars.index(offset as usize).into())
+					Decision(vars.index(offset as usize).into()).into()
 				} else {
-					BoolViewInner::Const(false)
+					false.into()
 				})
 			}
-			DirectStorage::Lazy(map) => map
-				.get(&i)
-				.map(|v| BoolViewInner::Lit((*v).into()))
-				.or_else(|| {
-					if !domain.contains(&i) {
-						Some(BoolViewInner::Const(false))
-					} else {
-						None
-					}
-				}),
+			DirectStorage::Lazy(map) => {
+				map.get(&i)
+					.map(|v| Decision((*v).into()).into())
+					.or_else(|| {
+						if !domain.contains(&i) {
+							Some(false.into())
+						} else {
+							None
+						}
+					})
+			}
 		}
 	}
 }
 
-impl IntVar {
+impl IntDecision {
 	/// Returns the lower and upper bounds of the current state of the integer
 	/// variable.
 	pub(crate) fn bounds(&self, trail: &impl TrailingActions) -> (IntVal, IntVal) {
 		let lb = match &self.order_encoding {
-			OrderStorage::Eager { lower_bound, .. } => trail.trailed_int(*lower_bound),
+			OrderStorage::Eager { lower_bound, .. } => trail.trailed(*lower_bound),
 			OrderStorage::Lazy(storage) => {
-				let low = trail.trailed_int(storage.lb_index);
+				let low = trail.trailed(storage.lb_index);
 				if low >= 0 {
 					storage.storage[low as usize].val
 				} else {
@@ -357,14 +547,14 @@ impl IntVar {
 				}
 			}
 		};
-		(lb, trail.trailed_int(self.upper_bound))
+		(lb, trail.trailed(self.upper_bound))
 	}
 
 	/// Returns the current domain of the integer variable.
 	pub(crate) fn domain<T>(&self, trail: &T) -> RangeList<IntVal>
 	where
 		T: TrailingActions,
-		RawLit: BoolInspectionActions<T>,
+		Decision<bool>: BoolInspectionActions<T>,
 	{
 		let (lb, ub) = self.bounds(trail);
 		let domain = &self.domain;
@@ -396,7 +586,7 @@ impl IntVar {
 							)
 						})
 						.take_while(|(v, _)| *v <= ub)
-						.filter(|&(_, lit)| RawLit::from(lit).val(trail) != Some(false))
+						.filter(|&(_, lit)| Decision::<bool>(lit.into()).val(trail) != Some(false))
 						.map(|(v, _)| v),
 				)
 			}
@@ -420,7 +610,7 @@ impl IntVar {
 					})
 					.take_while(|(v, _)| *v <= ub)
 					.filter(|&(_, lit)| {
-						lit.map(|lit| RawLit::from(lit).val(trail) != Some(false))
+						lit.map(|lit| Decision::<bool>(lit.into()).val(trail) != Some(false))
 							.unwrap_or(true)
 					})
 					.map(|(v, _)| v),
@@ -433,24 +623,24 @@ impl IntVar {
 	///
 	/// ## Warning
 	/// This function assumes that `v <= lb`.
-	pub(crate) fn greater_eq_lit_or_weaker<T>(&self, trail: &T, v: IntVal) -> (BoolView, IntVal)
+	pub(crate) fn greater_eq_lit_or_weaker<T>(&self, trail: &T, v: IntVal) -> (View<bool>, IntVal)
 	where
 		T: TrailingActions,
-		RawLit: BoolInspectionActions<T>,
+		Decision<bool>: BoolInspectionActions<T>,
 	{
 		debug_assert!(v <= self.lower_bound(trail));
 		if v <= *self.domain.lower_bound().unwrap() {
-			return (BoolView(BoolViewInner::Const(true)), v);
+			return (true.into(), v);
 		}
 
 		match &self.order_encoding {
 			OrderStorage::Eager { storage, .. } => {
-				let DomainLocation { offset, .. } = OrderStorage::resolve_val(&self.domain, v);
-				(BoolView(BoolViewInner::Lit(!storage.index(offset))), v)
+				let DomainLocation { offset, .. } = OrderStorage::resolve_val::<1>(&self.domain, v);
+				(Decision(!storage.index(offset[0])).into(), v)
 			}
 			OrderStorage::Lazy(storage) => {
-				let mut ret = (BoolView(BoolViewInner::Const(true)), v);
-				let lb_index = trail.trailed_int(storage.lb_index);
+				let mut ret = (true.into(), v);
+				let lb_index = trail.trailed(storage.lb_index);
 				let mut index = if lb_index < 0 {
 					return ret;
 				} else {
@@ -458,7 +648,7 @@ impl IntVar {
 				};
 				while storage.storage[index].val >= v {
 					let node = &storage.storage[index];
-					let lit = BoolView(BoolViewInner::Lit(!node.var));
+					let lit: View<bool> = Decision(!node.var).into();
 					if let Some(v) = lit.val(trail) {
 						debug_assert!(v);
 						ret = (lit, node.val);
@@ -478,10 +668,10 @@ impl IntVar {
 	///
 	/// ## Warning
 	/// This function assumes that `v >= ub`.
-	pub(crate) fn less_lit_or_weaker<T>(&self, trail: &T, v: IntVal) -> (BoolView, IntVal)
+	pub(crate) fn less_lit_or_weaker<T>(&self, trail: &T, v: IntVal) -> (View<bool>, IntVal)
 	where
 		T: TrailingActions,
-		RawLit: BoolInspectionActions<T>,
+		Decision<bool>: BoolInspectionActions<T>,
 	{
 		if v < self.upper_bound(trail) {
 			println!("{}", self.upper_bound(trail));
@@ -489,18 +679,18 @@ impl IntVar {
 		}
 		debug_assert!(v >= self.upper_bound(trail));
 		if v > *self.domain.upper_bound().unwrap() {
-			return (BoolView(BoolViewInner::Const(true)), v);
+			return (true.into(), v);
 		}
 
 		match &self.order_encoding {
 			OrderStorage::Eager { storage, .. } => {
-				let DomainLocation { offset, .. } = OrderStorage::resolve_val(&self.domain, v);
-				let bv = BoolView(BoolViewInner::Lit(storage.index(offset).into()));
+				let DomainLocation { offset, .. } = OrderStorage::resolve_val::<1>(&self.domain, v);
+				let bv = Decision(storage.index(offset[0]).into()).into();
 				(bv, v)
 			}
 			OrderStorage::Lazy(storage) => {
-				let mut ret = (BoolView(BoolViewInner::Const(true)), v);
-				let ub_index = trail.trailed_int(storage.ub_index);
+				let mut ret = (true.into(), v);
+				let ub_index = trail.trailed(storage.ub_index);
 				let mut index = if ub_index < 0 {
 					return ret;
 				} else {
@@ -508,7 +698,7 @@ impl IntVar {
 				};
 				while storage.storage[index].val <= v {
 					let node = &storage.storage[index];
-					let lit = BoolView(BoolViewInner::Lit(node.var.into()));
+					let lit: View<bool> = Decision(node.var.into()).into();
 					if let Some(v) = lit.val(trail) {
 						debug_assert!(v);
 						ret = (lit, node.val);
@@ -529,7 +719,7 @@ impl IntVar {
 		&mut self,
 		lit_req: IntLitMeaning,
 		mut new_var: impl FnMut(LazyLitDef) -> RawVar,
-	) -> (BoolView, IntLitMeaning) {
+	) -> (View<bool>, IntLitMeaning) {
 		let lb = *self.domain.lower_bound().unwrap();
 		let ub = *self.domain.upper_bound().unwrap();
 
@@ -543,9 +733,9 @@ impl IntVar {
 			_ => lit_req,
 		};
 
-		let bv = BoolView(match lit_req {
+		let bv = match lit_req {
 			IntLitMeaning::Eq(i) | IntLitMeaning::NotEq(i) if i < lb || i > ub => {
-				BoolViewInner::Const(matches!(lit_req, IntLitMeaning::NotEq(_)))
+				matches!(lit_req, IntLitMeaning::NotEq(_)).into()
 			}
 			IntLitMeaning::Eq(i) | IntLitMeaning::NotEq(i) => {
 				let bv = self
@@ -585,10 +775,10 @@ impl IntVar {
 				}
 			}
 			IntLitMeaning::GreaterEq(i) | IntLitMeaning::Less(i) if i <= lb => {
-				BoolViewInner::Const(matches!(lit_req, IntLitMeaning::GreaterEq(_)))
+				matches!(lit_req, IntLitMeaning::GreaterEq(_)).into()
 			}
 			IntLitMeaning::GreaterEq(i) | IntLitMeaning::Less(i) if i > ub => {
-				BoolViewInner::Const(matches!(lit_req, IntLitMeaning::Less(_)))
+				matches!(lit_req, IntLitMeaning::Less(_)).into()
 			}
 			IntLitMeaning::GreaterEq(i) | IntLitMeaning::Less(i) => {
 				let (entry, lt, geq) = self.order_encoding.entry(&self.domain, i);
@@ -602,15 +792,16 @@ impl IntVar {
 					})
 					.1
 					.into();
-				BoolViewInner::Lit(if matches!(lit_req, IntLitMeaning::GreaterEq(_)) {
+				Decision(if matches!(lit_req, IntLitMeaning::GreaterEq(_)) {
 					lit_req = IntLitMeaning::GreaterEq(geq);
 					!var
 				} else {
 					lit_req = IntLitMeaning::Less(lt);
 					var
 				})
+				.into()
 			}
-		});
+		};
 
 		(bv, lit_req)
 	}
@@ -623,8 +814,8 @@ impl IntVar {
 	/// This method can only be used with literals that were eagerly created for
 	/// this integer variable. Lazy literals should be mapped using
 	/// [`BoolToIntMap`].
-	pub(crate) fn lit_meaning(&self, lit: RawLit) -> IntLitMeaning {
-		let var = lit.var();
+	pub(crate) fn lit_meaning(&self, lit: Decision<bool>) -> IntLitMeaning {
+		let var = lit.0.var();
 		let ret = |l: IntLitMeaning| {
 			if lit.is_negated() { !l } else { l }
 		};
@@ -664,12 +855,12 @@ impl IntVar {
 	pub(crate) fn lower_bound<T>(&self, trail: &T) -> IntVal
 	where
 		T: TrailingActions,
-		RawLit: BoolInspectionActions<T>,
+		Decision<bool>: BoolInspectionActions<T>,
 	{
 		match &self.order_encoding {
-			OrderStorage::Eager { lower_bound, .. } => trail.trailed_int(*lower_bound),
+			OrderStorage::Eager { lower_bound, .. } => trail.trailed(*lower_bound),
 			OrderStorage::Lazy(storage) => {
-				let low = trail.trailed_int(storage.lb_index);
+				let low = trail.trailed(storage.lb_index);
 				if low >= 0 {
 					storage.storage[low as usize].val
 				} else {
@@ -681,28 +872,29 @@ impl IntVar {
 
 	/// Returns the boolean view associated with the lower bound of the variable
 	/// being this value.
-	pub(crate) fn lower_bound_lit(&self, trail: &impl TrailingActions) -> BoolView {
+	pub(crate) fn lower_bound_lit(&self, trail: &impl TrailingActions) -> View<bool> {
 		match &self.order_encoding {
 			OrderStorage::Eager {
 				lower_bound,
 				storage,
 				..
 			} => {
-				let lb = trail.trailed_int(*lower_bound);
-				BoolView(if lb == *self.domain.lower_bound().unwrap() {
-					BoolViewInner::Const(true)
+				let lb = trail.trailed(*lower_bound);
+				if lb == *self.domain.lower_bound().unwrap() {
+					true.into()
 				} else {
-					let DomainLocation { offset, .. } = OrderStorage::resolve_val(&self.domain, lb);
-					BoolViewInner::Lit(!storage.index(offset))
-				})
+					let DomainLocation { offset, .. } =
+						OrderStorage::resolve_val::<1>(&self.domain, lb);
+					Decision(!storage.index(offset[0])).into()
+				}
 			}
 			OrderStorage::Lazy(storage) => {
-				let lb_index = trail.trailed_int(storage.lb_index);
-				BoolView(if lb_index >= 0 {
-					BoolViewInner::Lit(!storage[lb_index as u32].var)
+				let lb_index = trail.trailed(storage.lb_index);
+				if lb_index >= 0 {
+					Decision(!storage[lb_index as u32].var).into()
 				} else {
-					BoolViewInner::Const(true)
-				})
+					true.into()
+				}
 			}
 		}
 	}
@@ -711,12 +903,12 @@ impl IntVar {
 	/// domain. The `order_encoding` and `direct_encoding` parameters determine
 	/// whether literals to reason about the integer variables are created
 	/// eagerly or lazily.
-	pub(crate) fn new_in<Oracle: ExternalPropagation>(
-		slv: &mut Solver<Oracle>,
-		domain: IntSetVal,
+	pub(crate) fn new_in<Sat: ExternalPropagation>(
+		slv: &mut Solver<Sat>,
+		domain: IntSet,
 		order_encoding: EncodingType,
 		direct_encoding: EncodingType,
-	) -> IntView {
+	) -> View<IntVal> {
 		let orig_domain_len = domain.card();
 		assert_ne!(
 			orig_domain_len,
@@ -724,29 +916,24 @@ impl IntVar {
 			"Unable to create integer variable empty domain"
 		);
 		if orig_domain_len == Some(1) {
-			return IntView(IntViewInner::Const(*domain.lower_bound().unwrap()));
+			return (*domain.lower_bound().unwrap()).into();
 		}
 		let lb = *domain.lower_bound().unwrap();
 		let ub = *domain.upper_bound().unwrap();
 		if orig_domain_len == Some(2) {
-			let lit = slv.oracle.new_lit();
-
-			return IntView(IntViewInner::Bool(LinearBoolView::new(
-				NonZero::new(ub - lb).unwrap(),
-				lb,
-				lit,
-			)));
+			let lit = slv.new_bool_decision();
+			return LinearBoolView::new(NonZero::new(ub - lb).unwrap(), lb, lit).into();
 		}
 		debug_assert!(
 			direct_encoding != EncodingType::Eager || order_encoding == EncodingType::Eager
 		);
 
 		let mut engine = slv.engine.borrow_mut();
-		let upper_bound = engine.state.trail.track_int(ub);
+		let upper_bound = engine.state.trail.track(ub);
 		let order_encoding = match order_encoding {
 			EncodingType::Eager => OrderStorage::Eager {
-				lower_bound: engine.state.trail.track_int(lb),
-				storage: slv.oracle.new_var_range(
+				lower_bound: engine.state.trail.track(lb),
+				storage: slv.sat.new_var_range(
 					orig_domain_len.expect(
 						"unable to create literals eagerly for domains that exceed usize::MAX",
 					) - 1,
@@ -755,21 +942,21 @@ impl IntVar {
 			EncodingType::Lazy => OrderStorage::Lazy(LazyOrderStorage {
 				min_index: 0,
 				max_index: 0,
-				lb_index: engine.state.trail.track_int(-1),
-				ub_index: engine.state.trail.track_int(-1),
+				lb_index: engine.state.trail.track(-1),
+				ub_index: engine.state.trail.track(-1),
 				storage: Vec::default(),
 			}),
 		};
 		let direct_encoding =
 			match direct_encoding {
-				EncodingType::Eager => DirectStorage::Eager(slv.oracle.new_var_range(
+				EncodingType::Eager => DirectStorage::Eager(slv.sat.new_var_range(
 					orig_domain_len.expect(
 						"unable to create literals eagerly for domains that exceed usize::MAX",
 					) - 2,
 				)),
 				EncodingType::Lazy => DirectStorage::Lazy(FxHashMap::default()),
 			};
-		// Drop engine to allow oracle interaction
+		// Drop engine to allow SAT interaction
 		drop(engine);
 
 		// Enforce consistency constraints for eager literals
@@ -784,12 +971,12 @@ impl IntVar {
 			for (ord_i, ord_j) in (*storage).tuple_windows() {
 				let ord_i: RawLit = ord_i.into(); // x<i
 				let ord_j: RawLit = ord_j.into(); // x<j, where j = i + n and n≥1
-				slv.oracle.add_clause([!ord_i, ord_j]).unwrap(); // x<i -> x<(i+n)
+				slv.sat.add_clause([!ord_i, ord_j]).unwrap(); // x<i -> x<(i+n)
 				if matches!(direct_encoding, DirectStorage::Eager(_)) {
 					let eq_i: RawLit = direct_enc_iter.next().unwrap().into();
-					slv.oracle.add_clause([!eq_i, !ord_i]).unwrap(); // x=i -> x≥i
-					slv.oracle.add_clause([!eq_i, ord_j]).unwrap(); // x=i -> x<(i+n)
-					slv.oracle.add_clause([eq_i, ord_i, !ord_j]).unwrap(); // x≠i -> (x<i \/
+					slv.sat.add_clause([!eq_i, !ord_i]).unwrap(); // x=i -> x≥i
+					slv.sat.add_clause([!eq_i, ord_j]).unwrap(); // x=i -> x<(i+n)
+					slv.sat.add_clause([eq_i, ord_i, !ord_j]).unwrap(); // x≠i -> (x<i \/
 					// x≥(i+n))
 				}
 			}
@@ -798,20 +985,25 @@ impl IntVar {
 
 		// Create the resulting integer variable
 		let mut engine = slv.engine.borrow_mut();
-		let iv = engine.state.int_vars.push(Self {
+		engine.state.int_vars.push(Self {
 			direct_encoding,
 			domain,
 			order_encoding,
 			upper_bound,
 		});
+		let iv = Decision((engine.state.int_vars.len() - 1) as u32);
 		// Create propagator activation list
-		let r = engine.state.int_activation.push(Default::default());
-		debug_assert_eq!(iv, r);
+		engine.state.int_activation.push(Default::default());
+		debug_assert_eq!(
+			engine.state.int_vars.len(),
+			engine.state.int_activation.len()
+		);
 
 		// Setup the boolean to integer mapping
-		if let OrderStorage::Eager { storage, .. } = engine.state.int_vars[iv].order_encoding {
+		if let OrderStorage::Eager { storage, .. } = engine.state.int_vars[iv.idx()].order_encoding
+		{
 			let mut vars = storage;
-			if let DirectStorage::Eager(vars2) = &engine.state.int_vars[iv].direct_encoding {
+			if let DirectStorage::Eager(vars2) = &engine.state.int_vars[iv.idx()].direct_encoding {
 				debug_assert_eq!(Into::<i32>::into(vars.end()) + 1, vars2.start().into());
 				vars = VarRange::new(vars.start(), vars2.end());
 			}
@@ -821,11 +1013,11 @@ impl IntVar {
 				.trail
 				.grow_to_boolvar(vars.clone().next_back().unwrap());
 			for l in vars {
-				slv.oracle.add_observed_var(l);
+				slv.sat.add_observed_var(l);
 			}
 		}
 
-		IntView(IntViewInner::Linear(iv.into()))
+		iv.into()
 	}
 
 	/// Notify that a new lower bound has been propagated for the variable,
@@ -838,13 +1030,13 @@ impl IntVar {
 	pub(crate) fn notify_lower_bound<T>(&mut self, trail: &mut T, val: IntVal)
 	where
 		T: TrailingActions,
-		RawLit: BoolInspectionActions<T>,
+		Decision<bool>: BoolInspectionActions<T>,
 	{
 		debug_assert!(self.domain.contains(&val));
 		debug_assert!(val > self.lower_bound(trail));
 		match &self.order_encoding {
 			OrderStorage::Eager { lower_bound, .. } => {
-				trail.set_trailed_int(*lower_bound, val);
+				trail.set_trailed(*lower_bound, val);
 			}
 			OrderStorage::Lazy(
 				storage @ LazyOrderStorage {
@@ -853,7 +1045,7 @@ impl IntVar {
 					..
 				},
 			) => {
-				let cur_index = trail.trailed_int(*lb_index);
+				let cur_index = trail.trailed(*lb_index);
 				let cur_index = if cur_index < 0 {
 					*min_index
 				} else {
@@ -862,7 +1054,7 @@ impl IntVar {
 				debug_assert!(storage[cur_index].val <= val);
 				let new_index = storage.find_index(cur_index, SearchDirection::Increasing, val);
 				debug_assert_eq!(storage[new_index].val, val);
-				let old_index = trail.set_trailed_int(*lb_index, new_index as IntVal);
+				let old_index = trail.set_trailed(*lb_index, new_index as isize);
 				debug_assert!(old_index < 0 || cur_index == old_index as u32);
 			}
 		}
@@ -878,7 +1070,7 @@ impl IntVar {
 	pub(crate) fn notify_upper_bound(&mut self, trail: &mut impl TrailingActions, val: IntVal) {
 		debug_assert!(self.domain.contains(&val));
 		debug_assert!(val < self.upper_bound(trail));
-		trail.set_trailed_int(self.upper_bound, val);
+		trail.set_trailed(self.upper_bound, val);
 		if let OrderStorage::Lazy(
 			storage @ LazyOrderStorage {
 				max_index,
@@ -890,8 +1082,8 @@ impl IntVar {
 			let DomainLocation {
 				greater_eq_val: val,
 				..
-			} = OrderStorage::resolve_val(&self.domain, val + 1);
-			let cur_index = trail.trailed_int(*ub_index);
+			} = OrderStorage::resolve_val::<0>(&self.domain, val + 1);
+			let cur_index = trail.trailed(*ub_index);
 			let cur_index = if cur_index < 0 {
 				*max_index
 			} else {
@@ -899,7 +1091,7 @@ impl IntVar {
 			};
 			let new_index = storage.find_index(cur_index, SearchDirection::Decreasing, val);
 			debug_assert_eq!(storage[new_index].val, val);
-			let old_index = trail.set_trailed_int(*ub_index, new_index as IntVal);
+			let old_index = trail.set_trailed(*ub_index, new_index as isize);
 			debug_assert!(old_index < 0 || cur_index == old_index as u32);
 		}
 	}
@@ -922,7 +1114,7 @@ impl IntVar {
 
 	/// Try and find an (already) existing Boolean literal with the given
 	/// meaning
-	pub(crate) fn try_lit(&self, lit_req: IntLitMeaning) -> Option<(BoolView, IntLitMeaning)> {
+	pub(crate) fn try_lit(&self, lit_req: IntLitMeaning) -> Option<(View<bool>, IntLitMeaning)> {
 		let lb = *self.domain.lower_bound().unwrap();
 		let ub = *self.domain.upper_bound().unwrap();
 
@@ -936,68 +1128,64 @@ impl IntVar {
 			_ => lit_req,
 		};
 
-		let bv = BoolView(match lit_req {
-			IntLitMeaning::Eq(i) if i < lb || i > ub => BoolViewInner::Const(false),
+		let bv = match lit_req {
+			IntLitMeaning::Eq(i) if i < lb || i > ub => false.into(),
 			IntLitMeaning::Eq(i) => self.direct_encoding.find(&self.domain, i)?,
-			IntLitMeaning::GreaterEq(i) if i <= lb => BoolViewInner::Const(true),
-			IntLitMeaning::GreaterEq(i) if i > ub => BoolViewInner::Const(false),
+			IntLitMeaning::GreaterEq(i) if i <= lb => true.into(),
+			IntLitMeaning::GreaterEq(i) if i > ub => false.into(),
 			IntLitMeaning::GreaterEq(i) => {
 				let (var, _, geq) = self.order_encoding.find(&self.domain, i)?;
 				lit_req = IntLitMeaning::GreaterEq(geq);
-				BoolViewInner::Lit(!var)
+				Decision(!var).into()
 			}
-			IntLitMeaning::Less(i) if i <= lb => BoolViewInner::Const(false),
-			IntLitMeaning::Less(i) if i > ub => BoolViewInner::Const(true),
+			IntLitMeaning::Less(i) if i <= lb => false.into(),
+			IntLitMeaning::Less(i) if i > ub => true.into(),
 			IntLitMeaning::Less(i) => {
 				let (var, lt, _) = self.order_encoding.find(&self.domain, i)?;
 				lit_req = IntLitMeaning::Less(lt);
-				BoolViewInner::Lit(var.into())
+				Decision(var.into()).into()
 			}
-			IntLitMeaning::NotEq(i) if i < lb || i > ub => BoolViewInner::Const(true),
+			IntLitMeaning::NotEq(i) if i < lb || i > ub => true.into(),
 			IntLitMeaning::NotEq(i) => !self.direct_encoding.find(&self.domain, i)?,
-		});
+		};
 		Some((bv, lit_req))
 	}
 
 	/// Returns the upper bound of the current state of the integer variable.
 	pub(crate) fn upper_bound(&self, trail: &impl TrailingActions) -> IntVal {
-		trail.trailed_int(self.upper_bound)
+		trail.trailed(self.upper_bound)
 	}
 
 	/// Returns the boolean view associated with the upper bound of the variable
 	/// being this value.
-	pub(crate) fn upper_bound_lit(&self, trail: &impl TrailingActions) -> BoolView {
+	pub(crate) fn upper_bound_lit(&self, trail: &impl TrailingActions) -> View<bool> {
 		match &self.order_encoding {
 			OrderStorage::Eager { storage, .. } => {
-				let ub = trail.trailed_int(self.upper_bound);
-				BoolView(if ub == *self.domain.upper_bound().unwrap() {
-					BoolViewInner::Const(true)
+				let ub = trail.trailed(self.upper_bound);
+				if ub == *self.domain.upper_bound().unwrap() {
+					true.into()
 				} else {
 					let DomainLocation { offset, .. } =
-						OrderStorage::resolve_val(&self.domain, ub + 1);
-					BoolViewInner::Lit(storage.index(offset).into())
-				})
+						OrderStorage::resolve_val::<1>(&self.domain, ub + 1);
+					Decision(storage.index(offset[0]).into()).into()
+				}
 			}
 			OrderStorage::Lazy(storage) => {
-				let ub_index = trail.trailed_int(storage.ub_index);
-				BoolView(if ub_index >= 0 {
-					BoolViewInner::Lit(storage[ub_index as u32].var.into())
+				let ub_index = trail.trailed(storage.ub_index);
+				if ub_index >= 0 {
+					Decision(storage[ub_index as u32].var.into()).into()
 				} else {
-					BoolViewInner::Const(true)
-				})
+					true.into()
+				}
 			}
 		}
 	}
 }
 
-impl Neg for IntVarRef {
-	type Output = LinearView<NonZero<IntVal>, IntVal, Self>;
-
-	fn neg(self) -> Self::Output {
-		let lin: LinearView<NonZero<IntVal>, IntVal, Self> = self.into();
-		-lin
-	}
+impl DecisionReference for IntVal {
+	type Ref = u32;
 }
+impl private::Sealed for IntVal {}
 
 impl LazyOrderStorage {
 	/// Find the the index of the node that contains the value or the node
@@ -1253,17 +1441,25 @@ impl OrderStorage {
 		domain: &'a RangeList<IntVal>,
 		val: IntVal,
 	) -> (OrderEntry<'a>, IntVal, IntVal) {
-		let DomainLocation {
-			less_val,
-			greater_eq_val: val,
-			offset,
-			range_iter,
-		} = Self::resolve_val(domain, val);
-
-		let entry = match self {
-			OrderStorage::Eager { storage, .. } => OrderEntry::Eager(storage, offset),
+		match self {
+			OrderStorage::Eager { storage, .. } => {
+				let DomainLocation {
+					less_val,
+					greater_eq_val: val,
+					offset,
+					..
+				} = Self::resolve_val::<1>(domain, val);
+				let entry = OrderEntry::Eager(storage, offset[0]);
+				(entry, less_val, val)
+			}
 			OrderStorage::Lazy(storage) => {
-				if storage.is_empty() || storage.min().unwrap().val > val {
+				let DomainLocation {
+					less_val,
+					greater_eq_val: val,
+					range_iter,
+					..
+				} = Self::resolve_val::<0>(domain, val);
+				let entry = if storage.is_empty() || storage.min().unwrap().val > val {
 					OrderEntry::Vacant {
 						storage,
 						prev_index: -1,
@@ -1294,10 +1490,10 @@ impl OrderStorage {
 							val,
 						}
 					}
-				}
+				};
+				(entry, less_val, val)
 			}
-		};
-		(entry, less_val, val)
+		}
 	}
 
 	/// Return the [`RawVar`] that represent the condition `< val`, or `≥ val`
@@ -1309,32 +1505,34 @@ impl OrderStorage {
 	/// The given `domain` is (in the case of eager creation) used to determine
 	/// the offset of the variable in the `VarRange`.
 	fn find(&self, domain: &RangeList<IntVal>, val: IntVal) -> Option<(RawVar, IntVal, IntVal)> {
-		let DomainLocation {
-			less_val,
-			greater_eq_val: val,
-			offset,
-			..
-		} = Self::resolve_val(domain, val);
-
-		let var = match self {
-			OrderStorage::Eager { storage, .. } => Some(storage.index(offset)),
+		match self {
+			OrderStorage::Eager { storage, .. } => {
+				let DomainLocation {
+					less_val,
+					greater_eq_val: val,
+					offset,
+					..
+				} = Self::resolve_val::<1>(domain, val);
+				Some((storage.index(offset[0]), less_val, val))
+			}
 			OrderStorage::Lazy(storage) => {
+				let DomainLocation {
+					less_val,
+					greater_eq_val: val,
+					..
+				} = Self::resolve_val::<0>(domain, val);
 				if storage.is_empty()
 					|| storage.min().unwrap().val > val
 					|| storage.max().unwrap().val < val
 				{
 					return None;
-				}
+				};
 
 				let i = storage.find_index(storage.min_index, SearchDirection::Increasing, val);
-				if storage[i].val == val {
-					Some(storage[i].var)
-				} else {
-					None
-				}
+				let var = (storage[i].val == val).then(|| storage[i].var)?;
+				Some((var, less_val, val))
 			}
-		}?;
-		Some((var, less_val, val))
+		}
 	}
 
 	#[inline]
@@ -1343,8 +1541,11 @@ impl OrderStorage {
 	/// range in `domain` in which `j` is located, and calculate the offset of
 	/// the representation `< j` in a VarRange when the order literals are
 	/// eagerly created.
-	fn resolve_val(domain: &RangeList<IntVal>, val: IntVal) -> DomainLocation<'_> {
-		let mut offset = -1; // -1 to account for the lower bound
+	fn resolve_val<const OFFSET: usize>(
+		domain: &RangeList<IntVal>,
+		val: IntVal,
+	) -> DomainLocation<'_, OFFSET> {
+		let mut offset = if OFFSET >= 1 { -1 } else { 0 }; // -1 to account for the lower bound
 		let mut it = domain.iter().peekable();
 		let mut last_val = IntVal::MIN;
 		loop {
@@ -1353,28 +1554,25 @@ impl OrderStorage {
 				return DomainLocation {
 					less_val: last_val + 1,
 					greater_eq_val: *r.start(),
-					offset: offset as usize,
+					offset: [offset as usize; OFFSET],
 					range_iter: it,
 				};
 			} else if val <= *r.end() {
-				offset += val - r.start();
+				if OFFSET >= 1 {
+					offset += val - r.start();
+				}
 				return DomainLocation {
 					less_val: if val == *r.start() { last_val + 1 } else { val },
 					greater_eq_val: val,
-					offset: offset as usize,
+					offset: [offset as usize; OFFSET],
 					range_iter: it,
 				};
-			} else {
+			} else if OFFSET >= 1 {
 				offset += r.end() - r.start() + 1;
 			}
 			last_val = *it.next().unwrap().end();
 		}
 	}
-}
-
-index_vec::define_index_type! {
-	/// Identifies an integer variable in a [`Solver`]
-	pub struct IntVarRef = u32;
 }
 
 #[cfg(test)]
@@ -1386,19 +1584,23 @@ mod tests {
 	use rangelist::RangeList;
 
 	use crate::{
-		Solver,
+		IntVal,
 		actions::{IntDecisionActions, IntInspectionActions},
 		solver::{
-			BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner,
-			int_var::{EncodingType, IntVar, IntVarRef},
+			IntLitMeaning, Solver,
+			decision::{
+				Decision,
+				integer::{EncodingType, IntDecision},
+			},
+			view::{View, boolean::BoolView, integer::IntView},
 		},
 		views::LinearView,
 	};
 
 	fn assert_eager_lits_eq(
-		iv: &mut IntVar,
+		iv: &mut IntDecision,
 		input: impl IntoIterator<Item = IntLitMeaning>,
-		lits: impl IntoIterator<Item = BoolView>,
+		lits: impl IntoIterator<Item = View<bool>>,
 		output: impl IntoIterator<Item = IntLitMeaning>,
 	) {
 		for (req, expected) in input.into_iter().zip_eq(lits.into_iter().zip_eq(output)) {
@@ -1406,7 +1608,7 @@ mod tests {
 			assert_eq!(out, expected, "given {req:?}");
 			let out = iv.lit(req, |_| panic!("all literals should be eagerly created"));
 			assert_eq!(out, expected, "given {req:?}");
-			if let BoolViewInner::Lit(l) = out.0.0 {
+			if let BoolView::Lit(l) = out.0.0 {
 				assert_eq!(iv.lit_meaning(l), expected.1);
 			}
 		}
@@ -1414,9 +1616,9 @@ mod tests {
 
 	fn assert_lazy_lits_eq(
 		slv: &mut Solver,
-		iv: IntVarRef,
+		iv: Decision<IntVal>,
 		input: impl IntoIterator<Item = IntLitMeaning>,
-		lits: impl IntoIterator<Item = BoolView>,
+		lits: impl IntoIterator<Item = View<bool>>,
 		output: impl IntoIterator<Item = IntLitMeaning>,
 	) {
 		for (req, expected) in input.into_iter().zip_eq(lits.into_iter().zip_eq(output)) {
@@ -1424,7 +1626,7 @@ mod tests {
 			let m = iv.lit_meaning(slv, bv).unwrap_or(req);
 			assert_eq!((bv, m), expected, "given {req:?}");
 
-			let v = &mut slv.engine.borrow_mut().state.int_vars[iv];
+			let v = &mut slv.engine.borrow_mut().state.int_vars[iv.idx()];
 			let out = v.try_lit(req).expect("lit must be present");
 			assert_eq!(out, expected, "given {req:?}");
 		}
@@ -1435,48 +1637,48 @@ mod tests {
 		use IntLitMeaning::*;
 
 		let mut slv: Solver = Solver::default();
-		let a = IntVar::new_in(
+		let a = IntDecision::new_in(
 			&mut slv,
 			RangeList::from(1..=4),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let IntView(IntViewInner::Linear(LinearView { var: a, .. })) = a else {
+		let IntView::Linear(LinearView { var: a, .. }) = a.0 else {
 			unreachable!()
 		};
-		let a = &mut slv.engine.borrow_mut().state.int_vars[a];
+		let a = &mut slv.engine.borrow_mut().state.int_vars[a.idx()];
 		assert_eager_lits_eq(
 			a,
 			(0..=6).map(Less),
-			vec![BoolView::from(false); 2]
+			vec![false.into(); 2]
 				.into_iter()
 				.chain(vec![1, 2, 3].into_iter().map(into_lit))
-				.chain(vec![BoolView::from(true); 2]),
+				.chain(vec![true.into(); 2]),
 			(0..=6).map(Less),
 		);
 		assert_eager_lits_eq(
 			a,
 			(0..=6).map(GreaterEq),
-			vec![BoolView::from(true); 2]
+			vec![true.into(); 2]
 				.into_iter()
 				.chain(vec![-1, -2, -3].into_iter().map(into_lit))
-				.chain(vec![BoolView::from(false); 2]),
+				.chain(vec![false.into(); 2]),
 			(0..=6).map(GreaterEq),
 		);
 		assert_eager_lits_eq(
 			a,
 			(0..=6).map(Eq),
-			once(BoolView::from(false))
+			once(false.into())
 				.chain(vec![1, 4, 5, -3].into_iter().map(into_lit))
-				.chain(vec![BoolView::from(false); 2]),
+				.chain(vec![false.into(); 2]),
 			vec![Eq(0), Less(2), Eq(2), Eq(3), GreaterEq(4), Eq(5), Eq(6)],
 		);
 		assert_eager_lits_eq(
 			a,
 			(0..=6).map(NotEq),
-			once(BoolView::from(true))
+			once(true.into())
 				.chain(vec![-1, -4, -5, 3].into_iter().map(into_lit))
-				.chain(vec![BoolView::from(true); 2]),
+				.chain(vec![true.into(); 2]),
 			vec![
 				NotEq(0),
 				GreaterEq(2),
@@ -1494,16 +1696,16 @@ mod tests {
 		use IntLitMeaning::*;
 
 		let mut slv: Solver = Solver::default();
-		let a = IntVar::new_in(
+		let a = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=3, 8..=10]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
-		let IntView(IntViewInner::Linear(LinearView { var: a, .. })) = a else {
+		let IntView::Linear(LinearView { var: a, .. }) = a.0 else {
 			unreachable!()
 		};
-		let a = &mut slv.engine.borrow_mut().state.int_vars[a];
+		let a = &mut slv.engine.borrow_mut().state.int_vars[a.idx()];
 		assert_eager_lits_eq(
 			a,
 			(2..=10).map(Less),
@@ -1544,7 +1746,7 @@ mod tests {
 			vec![1, 6, 7]
 				.into_iter()
 				.map(into_lit)
-				.chain(vec![BoolView::from(false); 4])
+				.chain(vec![false.into(); 4])
 				.chain(vec![8, 9, -5].into_iter().map(into_lit)),
 			once(Less(2))
 				.chain((2..=9).map(Eq))
@@ -1556,7 +1758,7 @@ mod tests {
 			vec![-1, -6, -7]
 				.into_iter()
 				.map(into_lit)
-				.chain(vec![BoolView::from(true); 4])
+				.chain(vec![true.into(); 4])
 				.chain(vec![-8, -9, 5].into_iter().map(into_lit)),
 			once(GreaterEq(2))
 				.chain((2..=9).map(NotEq))
@@ -1564,10 +1766,8 @@ mod tests {
 		);
 	}
 
-	fn into_lit(i: i32) -> BoolView {
-		BoolView(BoolViewInner::Lit(RawLit::from_raw(
-			NonZeroI32::new(i).unwrap(),
-		)))
+	fn into_lit(i: i32) -> View<bool> {
+		Decision(RawLit::from_raw(NonZeroI32::new(i).unwrap())).into()
 	}
 
 	#[test]
@@ -1575,13 +1775,13 @@ mod tests {
 		use IntLitMeaning::*;
 
 		let mut slv: Solver = Solver::default();
-		let a = IntVar::new_in(
+		let a = IntDecision::new_in(
 			&mut slv,
 			RangeList::from_iter([1..=3, 8..=10]),
 			EncodingType::Lazy,
 			EncodingType::Lazy,
 		);
-		let IntView(IntViewInner::Linear(LinearView { var: a, .. })) = a else {
+		let IntView::Linear(LinearView { var: a, .. }) = a.0 else {
 			unreachable!()
 		};
 		assert_lazy_lits_eq(
@@ -1627,7 +1827,7 @@ mod tests {
 			vec![1, 6, 7]
 				.into_iter()
 				.map(into_lit)
-				.chain(vec![BoolView::from(false); 4])
+				.chain(vec![false.into(); 4])
 				.chain(vec![8, 9, -5].into_iter().map(into_lit)),
 			once(Less(2))
 				.chain((2..=9).map(Eq))
@@ -1640,7 +1840,7 @@ mod tests {
 			vec![-1, -6, -7]
 				.into_iter()
 				.map(into_lit)
-				.chain(vec![BoolView::from(true); 4])
+				.chain(vec![true.into(); 4])
 				.chain(vec![-8, -9, 5].into_iter().map(into_lit)),
 			once(GreaterEq(2))
 				.chain((2..=9).map(NotEq))

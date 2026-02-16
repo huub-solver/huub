@@ -1,23 +1,25 @@
-//! This module contains the [`PostingContext`] struct, which is used to provide
 //! [`ReasoningEngine::PostingCtx`] to [`Propagator`] implementations when they
 //! are posted to a [`Solver`].
 
+//! This module contains the [`PostingContext`] struct, which is used to provide
+
 use std::num::NonZero;
 
-use pindakaas::{Lit as RawLit, Var as RawVar};
+use pindakaas::Var as RawVar;
 
 use crate::{
-	IntSetVal, IntVal,
+	IntSet, IntVal,
 	actions::{
 		BoolInitActions, BoolInspectionActions, InitActions, IntInitActions, IntInspectionActions,
 		ReasoningContext, ReasoningEngine,
 	},
 	solver::{
-		BoolView, BoolViewInner, IntLitMeaning, IntView, IntViewInner,
+		IntLitMeaning,
 		activation_list::{ActivationAction, IntPropCond},
-		engine::{AdvisorDef, Engine, PropRef, State},
-		int_var::IntVarRef,
+		decision::Decision,
+		engine::{AdvRef, AdvisorDef, Engine, PropRef, State},
 		queue::PriorityLevel,
+		view::{View, boolean::BoolView, integer::IntView},
 	},
 	views::{LinearBoolView, LinearView, OffsetView},
 };
@@ -43,23 +45,103 @@ pub struct InitializationContext<'a> {
 	pub(crate) observed_variables: Vec<RawVar>,
 }
 
-impl BoolInitActions<InitializationContext<'_>> for BoolView {
+impl BoolInitActions<InitializationContext<'_>> for Decision<bool> {
 	fn advise_when_fixed(&self, ctx: &mut InitializationContext<'_>, data: u64) {
-		match self.0 {
-			BoolViewInner::Lit(lit) => lit.advise_when_fixed(ctx, data),
-			BoolViewInner::Const(_) => {
-				// constant will never change, so we don't need to add an
-				// advisor.
-			}
+		if self.val(ctx.state).is_some() {
+			// The literal will never change, so we don't need to add an advisor.
+			return;
 		}
+		// Otherwise, add the advisor to the engine
+		ctx.add_lit_advisor(*self, data, false);
 	}
 	fn enqueue_when_fixed(&self, ctx: &mut InitializationContext<'_>) {
-		match self.0 {
-			BoolViewInner::Lit(lit) => lit.enqueue_when_fixed(ctx),
-			BoolViewInner::Const(_) => {
-				ctx.semantic_enqueue = true;
-			}
+		if self.val(ctx.state).is_some() {
+			ctx.semantic_enqueue = true;
+		} else {
+			ctx.state
+				.bool_activation
+				.entry(self.0.var())
+				.or_insert_with(|| {
+					ctx.observed_variables.push(self.0.var());
+					Vec::new()
+				})
+				.push(ActivationAction::Enqueue(ctx.prop).into());
 		}
+	}
+}
+
+impl BoolInspectionActions<InitializationContext<'_>> for Decision<bool> {
+	fn val(&self, ctx: &InitializationContext<'_>) -> Option<bool> {
+		self.val(ctx.state)
+	}
+}
+
+impl IntInitActions<InitializationContext<'_>> for Decision<IntVal> {
+	fn advise_when(&self, ctx: &mut InitializationContext<'_>, condition: IntPropCond, data: u64) {
+		View::from(*self).advise_when(ctx, condition, data);
+	}
+
+	fn enqueue_when(&self, ctx: &mut InitializationContext<'_>, condition: IntPropCond) {
+		if self.val(ctx.state).is_some() {
+			ctx.semantic_enqueue = true;
+			// No further change will happen, so we don't need to the propagator to any
+			// activation lists.
+			return;
+		}
+		if condition != IntPropCond::Fixed {
+			ctx.semantic_enqueue = true;
+		}
+		ctx.state.int_activation[self.idx()].add(ActivationAction::Enqueue(ctx.prop), condition);
+	}
+}
+
+impl IntInspectionActions<InitializationContext<'_>> for Decision<IntVal> {
+	fn bounds(&self, ctx: &InitializationContext<'_>) -> (IntVal, IntVal) {
+		self.bounds(ctx.state)
+	}
+
+	fn domain(&self, ctx: &InitializationContext<'_>) -> IntSet {
+		self.domain(ctx.state)
+	}
+
+	fn in_domain(&self, ctx: &InitializationContext<'_>, val: IntVal) -> bool {
+		self.in_domain(ctx.state, val)
+	}
+
+	fn lit_meaning(
+		&self,
+		ctx: &InitializationContext<'_>,
+		lit: View<bool>,
+	) -> Option<IntLitMeaning> {
+		self.lit_meaning(ctx.state, lit)
+	}
+
+	fn max(&self, ctx: &InitializationContext<'_>) -> IntVal {
+		self.max(ctx.state)
+	}
+
+	fn max_lit(&self, ctx: &InitializationContext<'_>) -> View<bool> {
+		self.max_lit(ctx.state)
+	}
+
+	fn min(&self, ctx: &InitializationContext<'_>) -> IntVal {
+		self.min(ctx.state)
+	}
+
+	fn min_lit(&self, ctx: &InitializationContext<'_>) -> View<bool> {
+		self.min_lit(ctx.state)
+	}
+
+	fn try_lit(
+		&self,
+		ctx: &InitializationContext<'_>,
+		meaning: IntLitMeaning,
+	) -> Option<View<bool>> {
+		self.try_lit(ctx.state, meaning)
+	}
+
+	fn val(&self, ctx: &InitializationContext<'_>) -> Option<IntVal> {
+		self.val(ctx.state)
 	}
 }
 
@@ -69,19 +151,20 @@ impl InitializationContext<'_> {
 	///
 	/// Used by [`Solver::advise_on_bool_change`] and
 	/// [`Solver::advise_on_int_change`].
-	fn add_lit_advisor(&mut self, lit: RawLit, data: u64, bool2int: bool) {
+	fn add_lit_advisor(&mut self, lit: Decision<bool>, data: u64, bool2int: bool) {
 		// Otherwise, add the advisor to the engine
-		let adv = self.state.advisors.push(AdvisorDef {
+		self.state.advisors.push(AdvisorDef {
 			bool2int,
 			data,
 			negated: false,
 			propagator: self.prop,
 		});
+		let adv = AdvRef::new(self.state.advisors.len() - 1);
 		self.state
 			.bool_activation
-			.entry(lit.var())
+			.entry(lit.0.var())
 			.or_insert_with(|| {
-				self.observed_variables.push(lit.var());
+				self.observed_variables.push(lit.0.var());
 				Vec::new()
 			})
 			.push(ActivationAction::<_, PropRef>::Advise(adv).into());
@@ -152,101 +235,8 @@ impl IntInitActions<InitializationContext<'_>> for IntVal {
 	}
 }
 
-impl IntInitActions<InitializationContext<'_>> for IntVarRef {
-	fn advise_when(&self, ctx: &mut InitializationContext<'_>, condition: IntPropCond, data: u64) {
-		IntView(IntViewInner::Linear((*self).into())).advise_when(ctx, condition, data);
-	}
-
-	fn enqueue_when(&self, ctx: &mut InitializationContext<'_>, condition: IntPropCond) {
-		if self.val(ctx.state).is_some() {
-			ctx.semantic_enqueue = true;
-			// No further change will happen, so we don't need to the propagator to any
-			// activation lists.
-			return;
-		}
-		if condition != IntPropCond::Fixed {
-			ctx.semantic_enqueue = true;
-		}
-		ctx.state.int_activation[*self].add(ActivationAction::Enqueue(ctx.prop), condition);
-	}
-}
-
-impl IntInspectionActions<InitializationContext<'_>> for IntVarRef {
-	fn bounds(&self, ctx: &InitializationContext<'_>) -> (IntVal, IntVal) {
-		self.bounds(ctx.state)
-	}
-
-	fn domain(&self, ctx: &InitializationContext<'_>) -> IntSetVal {
-		self.domain(ctx.state)
-	}
-
-	fn in_domain(&self, ctx: &InitializationContext<'_>, val: IntVal) -> bool {
-		self.in_domain(ctx.state, val)
-	}
-
-	fn lit_meaning(&self, ctx: &InitializationContext<'_>, lit: BoolView) -> Option<IntLitMeaning> {
-		self.lit_meaning(ctx.state, lit)
-	}
-
-	fn lower_bound(&self, ctx: &InitializationContext<'_>) -> IntVal {
-		self.lower_bound(ctx.state)
-	}
-
-	fn lower_bound_lit(&self, ctx: &InitializationContext<'_>) -> BoolView {
-		self.lower_bound_lit(ctx.state)
-	}
-
-	fn try_lit(&self, ctx: &InitializationContext<'_>, meaning: IntLitMeaning) -> Option<BoolView> {
-		self.try_lit(ctx.state, meaning)
-	}
-
-	fn upper_bound(&self, ctx: &InitializationContext<'_>) -> IntVal {
-		self.upper_bound(ctx.state)
-	}
-
-	fn upper_bound_lit(&self, ctx: &InitializationContext<'_>) -> BoolView {
-		self.upper_bound_lit(ctx.state)
-	}
-
-	fn val(&self, ctx: &InitializationContext<'_>) -> Option<IntVal> {
-		self.val(ctx.state)
-	}
-}
-
-impl<'a> IntInitActions<InitializationContext<'a>> for IntView {
-	fn advise_when(&self, ctx: &mut InitializationContext<'a>, condition: IntPropCond, data: u64) {
-		match self.0 {
-			IntViewInner::Linear(lin) => {
-				lin.advise_when(ctx, condition, data);
-			}
-			IntViewInner::Const(_) => {
-				// The variable will never change, so we don't need to add an
-				// advisor.
-			}
-			IntViewInner::Bool(lin) => {
-				lin.advise_when(ctx, condition, data);
-			}
-		}
-	}
-	fn enqueue_when(&self, ctx: &mut InitializationContext<'a>, condition: IntPropCond) {
-		match self.0 {
-			IntViewInner::Const(_) => {
-				ctx.semantic_enqueue = true;
-				// No further change will happen, so we don't need to add the
-				// propagator to any activation lists.
-			}
-			IntViewInner::Linear(lin) => {
-				lin.enqueue_when(ctx, condition);
-			}
-			IntViewInner::Bool(lin) => {
-				lin.enqueue_when(ctx, condition);
-			}
-		}
-	}
-}
-
 impl<'a> IntInitActions<InitializationContext<'a>>
-	for LinearBoolView<NonZero<IntVal>, IntVal, RawLit>
+	for LinearBoolView<NonZero<IntVal>, IntVal, Decision<bool>>
 {
 	fn advise_when(&self, ctx: &mut InitializationContext<'a>, _: IntPropCond, data: u64) {
 		ctx.add_lit_advisor(self.var, data, true);
@@ -261,7 +251,7 @@ impl<'a> IntInitActions<InitializationContext<'a>>
 }
 
 impl<'a> IntInitActions<InitializationContext<'a>>
-	for LinearView<NonZero<IntVal>, IntVal, IntVarRef>
+	for LinearView<NonZero<IntVal>, IntVal, Decision<IntVal>>
 {
 	fn advise_when(&self, ctx: &mut InitializationContext<'a>, condition: IntPropCond, data: u64) {
 		let negated = self.scale.is_negative();
@@ -270,13 +260,15 @@ impl<'a> IntInitActions<InitializationContext<'a>>
 			IntPropCond::UpperBound if self.scale.is_negative() => IntPropCond::LowerBound,
 			_ => condition,
 		};
-		let adv = ctx.state.advisors.push(AdvisorDef {
+		ctx.state.advisors.push(AdvisorDef {
 			bool2int: false,
 			data,
 			negated,
 			propagator: ctx.prop,
 		});
-		ctx.state.int_activation[self.var].add(ActivationAction::<_, PropRef>::Advise(adv), cond);
+		let adv = AdvRef::new(ctx.state.advisors.len() - 1);
+		ctx.state.int_activation[self.var.idx()]
+			.add(ActivationAction::<_, PropRef>::Advise(adv), cond);
 	}
 
 	fn enqueue_when(&self, ctx: &mut InitializationContext<'a>, condition: IntPropCond) {
@@ -302,34 +294,55 @@ where
 	}
 }
 
-impl BoolInitActions<InitializationContext<'_>> for RawLit {
+impl BoolInitActions<InitializationContext<'_>> for View<bool> {
 	fn advise_when_fixed(&self, ctx: &mut InitializationContext<'_>, data: u64) {
-		if self.val(ctx.state).is_some() {
-			// The literal will never change, so we don't need to add an advisor.
-			return;
+		match self.0 {
+			BoolView::Lit(lit) => lit.advise_when_fixed(ctx, data),
+			BoolView::Const(_) => {
+				// constant will never change, so we don't need to add an
+				// advisor.
+			}
 		}
-		// Otherwise, add the advisor to the engine
-		ctx.add_lit_advisor(*self, data, false);
 	}
 	fn enqueue_when_fixed(&self, ctx: &mut InitializationContext<'_>) {
-		if self.val(ctx.state).is_some() {
-			ctx.semantic_enqueue = true;
-		} else {
-			ctx.state
-				.bool_activation
-				.entry(self.var())
-				.or_insert_with(|| {
-					ctx.observed_variables.push(self.var());
-					Vec::new()
-				})
-				.push(ActivationAction::Enqueue(ctx.prop).into());
+		match self.0 {
+			BoolView::Lit(lit) => lit.enqueue_when_fixed(ctx),
+			BoolView::Const(_) => {
+				ctx.semantic_enqueue = true;
+			}
 		}
 	}
 }
 
-impl BoolInspectionActions<InitializationContext<'_>> for RawLit {
-	fn val(&self, ctx: &InitializationContext<'_>) -> Option<bool> {
-		self.val(ctx.state)
+impl<'a> IntInitActions<InitializationContext<'a>> for View<IntVal> {
+	fn advise_when(&self, ctx: &mut InitializationContext<'a>, condition: IntPropCond, data: u64) {
+		match self.0 {
+			IntView::Linear(lin) => {
+				lin.advise_when(ctx, condition, data);
+			}
+			IntView::Const(_) => {
+				// The variable will never change, so we don't need to add an
+				// advisor.
+			}
+			IntView::Bool(lin) => {
+				lin.advise_when(ctx, condition, data);
+			}
+		}
+	}
+	fn enqueue_when(&self, ctx: &mut InitializationContext<'a>, condition: IntPropCond) {
+		match self.0 {
+			IntView::Const(_) => {
+				ctx.semantic_enqueue = true;
+				// No further change will happen, so we don't need to add the
+				// propagator to any activation lists.
+			}
+			IntView::Linear(lin) => {
+				lin.enqueue_when(ctx, condition);
+			}
+			IntView::Bool(lin) => {
+				lin.enqueue_when(ctx, condition);
+			}
+		}
 	}
 }
 
