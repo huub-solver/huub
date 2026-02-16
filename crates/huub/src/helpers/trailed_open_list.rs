@@ -1,4 +1,4 @@
-//! Append-only list that allows to iterate open elements and trails their open
+//! To-do list that allows to iterate open elements and trails their open
 //! status.
 
 use std::ops::Range;
@@ -10,8 +10,8 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-/// A **append only** list which allows iterating only open elements with
-/// backtracking of the open state.
+/// A list which allows iterating only open elements with backtracking of the
+/// open state. New elements can be added to the end of the list in open status.
 pub(crate) struct TrailedOpenList<T> {
 	/// Underlying list.
 	list: Vec<T>,
@@ -83,12 +83,17 @@ impl<T: Clone> TrailedOpenList<T> {
 		self.list.len() - actions.trailed_int(self.closed) as usize
 	}
 
+	/// Check if the list is empty (contains no open elements).
+	pub(crate) fn is_empty<A: TrailingActions>(&self, actions: &A) -> bool {
+		self.list.len() == actions.trailed_int(self.closed) as usize
+	}
+
 	/// Return the number of open elements in the list.
 	pub(crate) fn open_iter<A: TrailingActions + ?Sized>(&self, actions: &A) -> Range<usize> {
 		actions.trailed_int(self.closed) as usize..self.len()
 	}
 
-	/// Add a new element to the list.
+	/// Add a new open element to the list.
 	pub(crate) fn push(&mut self, value: T) {
 		self.list.push(value);
 	}

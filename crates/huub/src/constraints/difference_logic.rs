@@ -84,7 +84,7 @@ pub struct DifferenceLogicCollection {
 	level: u8,
 	/// User-defined parameters for difference logic.
 	parameters: DifferenceLogicParameters,
-	/// List of raw potential difference constraints.
+	/// List of raw difference constraints.
 	raw_constraints: Vec<DifferenceLogicConstraint>,
 }
 
@@ -155,7 +155,7 @@ impl DifferenceLogicCollection {
 			DifferenceLogicConstraint::NotEquals(_, _, _)
 			| DifferenceLogicConstraint::ImpliedNotEquals(_, _, _, _)
 			| DifferenceLogicConstraint::ReifiedEquals(_, _, _, _) => self.level > 2,
-			// Level 2+: Accept reified equals constraints.
+			// Level 2+: Accept implied equals constraints.
 			DifferenceLogicConstraint::ImpliedEquals(_, _, _, _) => self.level > 1,
 			// Always accept global constraints and implied / reified constraints.
 			_ => true,
@@ -235,15 +235,13 @@ fn check_vars_different<A: SimplificationActions<Target = Model>>(
 	b: Option<BoolDecision>,
 ) -> bool {
 	if x == y && d >= 0 {
-		trace!("Removing redundant {b:?} implies {x:?} - {y:?} <= {d:?}");
+		trace!(b = ?b, x = ?x, y = ?y, d = ?d, "removing redundant edge");
 		return false;
 	}
 	let x_var = get_int_var_index(x);
 	let y_var = get_int_var_index(y);
 	if x_var == y_var || x_var.is_none() || y_var.is_none() {
-		trace!(
-			"Decisions implied by {b:?} {x:?} and {y:?} (<= {d:?}) have the same underlying variable or include a constant, reemitting"
-		);
+		trace!(b = ?b, x = ?x, y = ?y, d = ?d, "reemitting edge with same underlying variable or constant");
 		let mut reemit = (x - y).leq(d);
 		if let Some(b) = b {
 			reemit = reemit.implied_by(b);
@@ -375,7 +373,7 @@ impl DifferenceLogicModel {
 				let (y_trans, yd) = update_transform(y);
 				if let Some(val) = b.val(prb) {
 					// Boolean is already fixed: Global constraint if true, skipped if false.
-					trace!("Fixed boolean {b:?} ({val}) for {x:?} - {y:?} <= {d:?}");
+					trace!(b = ?b, x = ?x, y = ?y, d = ?d, "boolean already fixed");
 					if val {
 						trimmed_constraints.push((
 							key_to_index(&mut int_var_index, &mut int_vars, x_trans),
@@ -395,21 +393,13 @@ impl DifferenceLogicModel {
 		}
 
 		trace!(
-			"Creating DifferenceLogicGraph for {} int and {} bool vars, {} global and {} implied edges.",
-			int_vars.len(),
-			bool_vars.len(),
-			trimmed_constraints.len(),
-			trimmed_imp_constraints.len()
+			int_vars = int_vars.len(),
+			bool_vars = bool_vars.len(),
+			global_edges = trimmed_constraints.len(),
+			implied_edges = trimmed_imp_constraints.len(),
+			"creating graph"
 		);
 		let num_int = int_vars.len();
-		trace!("Original int vars:");
-		for &v in int_vars.iter() {
-			trace!(
-				"{v:?}: lb {:?}, ub: {:?}",
-				v.lower_bound(prb),
-				v.upper_bound(prb)
-			);
-		}
 		let num_bool = bool_vars.len();
 		let mut graph =
 			DifferenceLogicGraph::new(prb, int_vars, bool_vars, parameters.bool_reasons);
@@ -450,14 +440,10 @@ impl DifferenceLogicModel {
 		self.check_remove_isolated_nodes(ctx);
 		if self.num_active_nodes == 0 {
 			// If no nodes are left, there is nothing more to do
-			trace!("No more nodes left, return subsumed");
+			trace!("no more nodes left, return subsumed");
 			return false;
 		}
 		self.check_remove_isolated_booleans(ctx);
-		trace!(
-			"Graph at the end of simplify: {}",
-			self.graph.to_dot(ctx, self.node_active.clone())
-		);
 		true
 	}
 
@@ -472,7 +458,7 @@ impl DifferenceLogicModel {
 		E: ReasoningEngine,
 		IntDecision: ModelIntView<E>,
 	{
-		trace!("Calculating initial pi values.");
+		trace!("calculating initial pi values");
 		let mut changed = false;
 		for _ in 0..self.graph.num_nodes() {
 			changed = false;
@@ -494,7 +480,7 @@ impl DifferenceLogicModel {
 				for &e in self.graph.active_out[n].iter(ctx) {
 					let edge = &self.graph.edges[e];
 					if self.graph.pi[edge.from] + edge.val < self.graph.pi[edge.to] {
-						trace!("Found negative cycle!");
+						trace!(e = ?e, "found negative cycle");
 						return Err(ctx.declare_conflict([]));
 					}
 				}
@@ -511,7 +497,7 @@ impl DifferenceLogicModel {
 		IntDecision: ModelIntView<E>,
 		BoolDecision: ModelBoolView<E>,
 	{
-		trace!("Starting Johnson's");
+		trace!("starting Johnson's");
 		let mut pred = vec![vec![usize::MAX; self.graph.num_nodes()]; self.graph.num_nodes()];
 		let mut queue = LazyPriorityQueue::new();
 
@@ -524,7 +510,6 @@ impl DifferenceLogicModel {
 			while !queue.is_empty() {
 				let (s, Reverse(dist)) = queue.pop().unwrap();
 				self.graph.visit(s);
-				//trace!("dijkstra on current node {s:?} with dist {dist}");
 				for &index in self.graph.active_out[s].iter(ctx) {
 					let edge = &self.graph.edges[index];
 					let new_dist = dist + edge.val + self.graph.pi[s] - self.graph.pi[edge.to];
@@ -535,8 +520,6 @@ impl DifferenceLogicModel {
 								new_dist - self.graph.pi[n] + self.graph.pi[edge.to];
 							p[edge.to] = s;
 						}
-						//trace!("dijkstra adding node {:?} with dist
-						// {new_dist}", target.var);
 					} else if edge.to == n && new_dist < self.distances[n][n] {
 						// Loop back to origin - store distance, but don't enqueue again
 						self.distances[n][n] = new_dist;
@@ -546,22 +529,12 @@ impl DifferenceLogicModel {
 			}
 		}
 
-		trace!("Distances:");
-		for (i, row) in self.distances.iter().enumerate() {
-			trace!(
-				"{i}: {:?}",
-				row.iter()
-					.enumerate()
-					.filter(|&(_, &val)| val < IntVal::MAX)
-					.collect_vec()
-			);
-		}
-		trace!("Checking impact on edges");
+		trace!("checking impact on edges");
 		for n in 0..self.graph.num_nodes() {
 			if !self.node_active[n] {
 				continue;
 			}
-			let reached = self.direct_edge.get_mut(n).unwrap();
+			let reached = &mut self.direct_edge[n];
 			let mut i = 0;
 			while i < self.graph.active_out[n].len(ctx) {
 				let &e = self.graph.active_out[n].index(ctx, i);
@@ -569,10 +542,7 @@ impl DifferenceLogicModel {
 				if self.distances[n][edge.to] < edge.val
 					|| (self.distances[n][edge.to] == edge.val && reached.contains(&edge.to))
 				{
-					trace!(
-						"Global edge {edge:?} is redundant, shortest path of length {} found",
-						self.distances[n][edge.to]
-					);
+					trace!(edge = ?edge, distance = self.distances[n][edge.to], "global edge is redundant");
 					let _ = self.graph.active_out[n].swap_remove(ctx, i);
 					let _ = self.graph.active_in[edge.to].swap_remove_element(ctx, &e);
 				} else {
@@ -585,10 +555,7 @@ impl DifferenceLogicModel {
 				let &e = self.graph.open_out[n].index(ctx, i);
 				let edge = &self.graph.edges[e];
 				if self.distances[n][edge.to] <= edge.val {
-					trace!(
-						"Implied edge {edge:?} is redundant, shortest path of length {} found",
-						self.distances[n][edge.to]
-					);
+					trace!(edge = ?edge, distance = self.distances[n][edge.to], "implied edge is redundant");
 					self.graph.close_imp_edge(ctx, e);
 				}
 			}
@@ -597,10 +564,7 @@ impl DifferenceLogicModel {
 				let &e = self.graph.open_in[n].index(ctx, i);
 				let edge = &self.graph.edges[e];
 				if self.distances[n][edge.from] < -edge.val {
-					trace!(
-						"Implied edge {edge:?} is falsified, opposite shortest path of length {} found",
-						self.distances[n][edge.from]
-					);
+					trace!(edge = ?edge, opposite_distance = self.distances[n][edge.to], "implied edge is falsified");
 					self.graph.bool_vars[edge.bool_var.unwrap()].set_val(ctx, false, [])?;
 					self.graph.close_imp_edge(ctx, e);
 				}
@@ -609,7 +573,7 @@ impl DifferenceLogicModel {
 
 		for n in (0..self.graph.num_nodes()).filter(|&n| self.node_active[n]) {
 			if self.distances[n][n] == 0 {
-				trace!("Found cycle of length 0");
+				trace!(n = ?n, "cycle of length 0");
 				let origin = n;
 				let mut offset = 0;
 				let mut cur = n;
@@ -619,7 +583,7 @@ impl DifferenceLogicModel {
 						break;
 					}
 					offset += self.distances[prev][cur];
-					trace!("Unifying {prev} and {origin} with offset {offset}");
+					trace!(prev = ?prev, origin = ?origin, offset = ?offset, "unifying nodes");
 					self.graph.int_vars[prev].unify(ctx, self.graph.int_vars[origin] + offset)?;
 					cur = prev;
 					self.distances[cur][cur] = IntVal::MAX;
@@ -643,7 +607,7 @@ impl DifferenceLogicModel {
 		IntDecision: ModelIntView<E>,
 		BoolDecision: ModelBoolView<E>,
 	{
-		trace!("Updating the offset of node {n} by {offset}");
+		trace!(n = ?n, offset = ?offset, "updating node offset");
 		self.graph.pi[n] += offset;
 		let mut i = 0;
 		while i < self.graph.active_out[n].len(ctx) {
@@ -656,7 +620,7 @@ impl DifferenceLogicModel {
 				self.graph.edges[e].val,
 				None,
 			) {
-				self.graph.edges.get_mut(e).unwrap().val -= offset;
+				self.graph.edges[e].val -= offset;
 				i += 1;
 			} else {
 				let _ = self.graph.active_out[n].swap_remove(ctx, i);
@@ -674,7 +638,7 @@ impl DifferenceLogicModel {
 				self.graph.edges[e].val,
 				None,
 			) {
-				self.graph.edges.get_mut(e).unwrap().val += offset;
+				self.graph.edges[e].val += offset;
 				i += 1;
 			} else {
 				let _ = self.graph.active_out[from].swap_remove_element(ctx, &e);
@@ -692,7 +656,7 @@ impl DifferenceLogicModel {
 					.bool_var
 					.map(|b| self.graph.bool_vars[b]),
 			) {
-				self.graph.edges.get_mut(e).unwrap().val -= offset;
+				self.graph.edges[e].val -= offset;
 			} else {
 				self.graph.close_imp_edge(ctx, e);
 			}
@@ -708,7 +672,7 @@ impl DifferenceLogicModel {
 					.bool_var
 					.map(|b| self.graph.bool_vars[b]),
 			) {
-				self.graph.edges.get_mut(e).unwrap().val += offset;
+				self.graph.edges[e].val += offset;
 			} else {
 				self.graph.close_imp_edge(ctx, e);
 			}
@@ -731,7 +695,7 @@ impl DifferenceLogicModel {
 		IntDecision: ModelIntView<E>,
 		BoolDecision: ModelBoolView<E>,
 	{
-		trace!("Moving all edges from node {old} to node {new} with offset {offset}");
+		trace!(old = ?old, new = ?new, offset = ?offset, "moving all edges");
 		let mut mod_edges = Vec::new();
 		for i in 0..self.graph.active_out[old].len(ctx) {
 			let &e = self.graph.active_out[old].index(ctx, i);
@@ -747,11 +711,11 @@ impl DifferenceLogicModel {
 				|| (self.distances[new][to] == val - offset
 					&& !self.direct_edge[new].contains(&to)))
 			{
-				let edge = self.graph.edges.get_mut(e).unwrap();
+				let edge = &mut self.graph.edges[e];
 				edge.from = new;
 				edge.val -= offset;
 				self.graph.active_out[new].push(ctx, e);
-				let _ = self.direct_edge.get_mut(new).unwrap().insert(edge.to);
+				let _ = self.direct_edge[new].insert(edge.to);
 				mod_edges.push(e);
 			} else {
 				let _ = self.graph.active_in[to].swap_remove_element(ctx, &e);
@@ -772,11 +736,11 @@ impl DifferenceLogicModel {
 				|| (self.distances[from][new] == val + offset
 					&& !self.direct_edge[from].contains(&new)))
 			{
-				let edge = self.graph.edges.get_mut(e).unwrap();
+				let edge = &mut self.graph.edges[e];
 				edge.to = new;
 				edge.val += offset;
 				self.graph.active_in[new].push(ctx, e);
-				let _ = self.direct_edge.get_mut(from).unwrap().insert(new);
+				let _ = self.direct_edge[from].insert(new);
 				mod_edges.push(e);
 			} else {
 				let _ = self.graph.active_out[from].swap_remove_element(ctx, &e);
@@ -794,7 +758,7 @@ impl DifferenceLogicModel {
 					.bool_var
 					.map(|b| self.graph.bool_vars[b]),
 			) {
-				let edge = self.graph.edges.get_mut(e).unwrap();
+				let edge = &mut self.graph.edges[e];
 				edge.from = new;
 				edge.val -= offset;
 				edge.out_index = self.graph.open_out[new].len();
@@ -815,7 +779,7 @@ impl DifferenceLogicModel {
 					.bool_var
 					.map(|b| self.graph.bool_vars[b]),
 			) {
-				let edge = self.graph.edges.get_mut(e).unwrap();
+				let edge = &mut self.graph.edges[e];
 				edge.to = new;
 				edge.val += offset;
 				edge.in_index = self.graph.open_in[new].len();
@@ -867,23 +831,21 @@ impl DifferenceLogicModel {
 			if self.node_active[n]
 				&& let Some(val) = self.graph.int_vars[n].val(ctx)
 			{
-				trace!("Var {n} has a fixed value - removing from graph");
+				trace!(n = ?n, "removing variable with fixed value");
 				self.node_active[n] = false;
 				self.num_active_nodes -= 1;
 				for &e in self.graph.active_out[n].iter(ctx) {
 					let edge = &self.graph.edges[e];
-					trace!("Removing outgoing edge {edge:?}");
 					let _ = self.graph.active_in[edge.to].swap_remove_element(ctx, &e);
 				}
 				for &e in self.graph.active_in[n].iter(ctx) {
 					let edge = &self.graph.edges[e];
-					trace!("Removing incoming edge {edge:?}");
 					let _ = self.graph.active_out[edge.from].swap_remove_element(ctx, &e);
 				}
 				for i in self.graph.open_out[n].open_iter(ctx) {
 					let &e = self.graph.open_out[n].index(ctx, i);
 					let edge = &self.graph.edges[e];
-					trace!("Reemitting implied outgoing edge {edge:?}");
+					trace!(edge = ?edge, "reemitting implied outgoing edge");
 					self.add_implied_bound(
 						ctx,
 						edge.bool_var.unwrap(),
@@ -896,7 +858,7 @@ impl DifferenceLogicModel {
 				for i in self.graph.open_in[n].open_iter(ctx) {
 					let &e = self.graph.open_in[n].index(ctx, i);
 					let edge = &self.graph.edges[e];
-					trace!("Reemitting implied incoming edge {edge:?}");
+					trace!(edge = ?edge, "reemitting implied incoming edge");
 					self.add_implied_bound(
 						ctx,
 						edge.bool_var.unwrap(),
@@ -914,12 +876,12 @@ impl DifferenceLogicModel {
 	fn check_remove_isolated_nodes<A: TrailingActions>(&mut self, actions: &mut A) {
 		for n in 0..self.graph.num_nodes() {
 			if self.node_active[n]
-				&& self.graph.active_out[n].len(actions) == 0
-				&& self.graph.active_in[n].len(actions) == 0
-				&& self.graph.open_out[n].num_open(actions) == 0
-				&& self.graph.open_in[n].num_open(actions) == 0
+				&& self.graph.active_out[n].is_empty(actions)
+				&& self.graph.active_in[n].is_empty(actions)
+				&& self.graph.open_out[n].is_empty(actions)
+				&& self.graph.open_in[n].is_empty(actions)
 			{
-				trace!("Var {n} has no edges - removing from graph");
+				trace!(n = ?n, "removing variable with no edges");
 				self.node_active[n] = false;
 				self.num_active_nodes -= 1;
 			}
@@ -930,7 +892,7 @@ impl DifferenceLogicModel {
 	fn check_remove_isolated_booleans<A: TrailingActions>(&mut self, actions: &mut A) {
 		for b in 0..self.graph.bool_implications.len() {
 			if self.bool_active[b] && self.graph.bool_implications[b].num_open(actions) == 0 {
-				trace!("Boolean {b} has no edges - removing from graph");
+				trace!(b = ?b, "removing boolean with no edges");
 				self.bool_active[b] = false;
 			}
 		}
@@ -968,7 +930,7 @@ where
 	) -> Result<SimplificationStatus, E::Conflict> {
 		if !self.initialized {
 			trace!(
-				"Starting initial propagation with graph: {}",
+				"starting initial propagation with graph: {}",
 				self.graph.to_dot(ctx, self.node_active.clone())
 			);
 			self.bellman_ford_init_pi(ctx)?;
@@ -985,10 +947,7 @@ where
 					// Check if variables have been unified
 					let alias = ctx.resolve_alias(self.graph.int_vars[n]);
 					if self.graph.int_vars[n] != alias {
-						trace!(
-							"Var alias is different (was {:?}, is {:?})",
-							self.graph.int_vars[n], alias
-						);
+						trace!(n = ?n, alias = ?alias, "var alias is different");
 						let (v_trans, vd) = update_transform(alias);
 						if let Some(&new) = self.int_var_index.get(&v_trans) {
 							self.unify_nodes(ctx, n, new, vd)?;
@@ -1018,13 +977,7 @@ where
 		ctx: &mut dyn ReformulationActions,
 		model_trail: &dyn TrailingActions,
 	) -> Result<(), ReformulationError> {
-		trace!("Transforming DifferenceLogicGraph to solver");
-		trace!("Immediately before transformation:");
-		for (i, &v) in self.graph.int_vars.iter().enumerate() {
-			if self.node_active[i] {
-				trace!("{v:?}");
-			}
-		}
+		trace!("transforming DifferenceLogicGraph to solver"); // TODO would like to output graph here
 		let int_vars = self
 			.graph
 			.int_vars
@@ -1033,14 +986,6 @@ where
 			.filter(|(i, _)| self.node_active[*i])
 			.map(|(_, &v)| ctx.solver_int(v))
 			.collect_vec();
-		trace!("Transformed int vars:");
-		for &v in int_vars.iter() {
-			trace!(
-				"{v:?}: lb {:?}, ub: {:?}",
-				v.lower_bound(ctx),
-				v.upper_bound(ctx)
-			);
-		}
 		let bool_vars = self
 			.graph
 			.bool_vars
@@ -1082,7 +1027,6 @@ where
 	BoolDecision: ModelBoolView<E>,
 {
 	fn advise_of_bool_change(&mut self, _ctx: &mut E::NotificationCtx<'_>, data: u64) -> bool {
-		trace!("Boolean b{data} fixed.");
 		self.graph.fixed_bools.insert(data as usize)
 	}
 
@@ -1190,7 +1134,7 @@ pub struct DifferenceLogicGraph<I, B> {
 	edges: Vec<DiffEdge>,
 	/// Map from boolean indices to their implied edges.
 	bool_implications: Vec<TrailedOpenList<usize>>,
-	/// Storage for the visited state.
+	/// List of updated visited states.
 	visited_updates: Vec<usize>,
 	/// List of integer variable indices with reported lower bound changes.
 	lower_bound_changes: FxHashSet<usize>,
@@ -1407,7 +1351,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	}
 
 	/// Get the current lower bound for the node, either stored or from the
-	/// search.
+	/// context.
 	fn get_cur_lower_bound<Ctx>(&self, ctx: &mut Ctx, n: usize) -> IntVal
 	where
 		Ctx: ReasoningContext,
@@ -1428,7 +1372,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	}
 
 	/// Get the current upper bound for the node, either stored or from the
-	/// search.
+	/// context.
 	fn get_cur_upper_bound<Ctx>(&self, ctx: &mut Ctx, n: usize) -> IntVal
 	where
 		Ctx: ReasoningContext,
@@ -1480,8 +1424,10 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	{
 		let new_edge = &self.edges[new_index];
 		trace!(
-			"Performing inc_sat on i{:?} - i{:?} <= {:?}",
-			new_edge.from, new_edge.to, new_edge.val
+			x = new_edge.from,
+			y = new_edge.to,
+			d = new_edge.val,
+			"inc_sat"
 		);
 		let mut queue = LazyPriorityQueue::new();
 		let mut pi_new = FxHashMap::default();
@@ -1508,10 +1454,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		}
 		// If the origin is in the queue, we have a cycle of negative length.
 		if queue.get_priority(&new_edge.from).is_some() {
-			trace!(
-				"Found cycle with negative length for b{:?}",
-				new_edge.bool_var
-			);
+			trace!(b = ?new_edge.bool_var, "cycle with negative length");
 			if let Some(b) = new_edge.bool_var {
 				self.bool_vars[b].set_val(ctx, false, self.get_cycle_reason(new_edge.from))?;
 			} else {
@@ -1534,7 +1477,6 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		new_edge: usize,
 		reverse: bool,
 	) -> FxHashMap<usize, IntVal> {
-		trace!("Starting relevant dijkstra for e{new_edge:?} in mode reverse={reverse}");
 		self.reset_visit();
 		let new_edge = &self.edges[new_edge];
 		let origin = if reverse { new_edge.to } else { new_edge.from };
@@ -1559,8 +1501,6 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		while !queue.is_empty() && relevant_count > 0 {
 			let (s, Reverse((dist, relevant))) = queue.pop().unwrap();
 			self.visit(s);
-			//trace!("dijkstra on current node {s:?} with dist {dist} and relevancy
-			// {relevant}");
 			for &e in if reverse {
 				self.active_in[s].iter(actions)
 			} else {
@@ -1587,7 +1527,6 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 						if new_relevant {
 							// A new shortest distance has been found, add new distance to the map,
 							// if key was not present before increase relevant count.
-							// trace!("Target {target:?} set to relevant");
 							if distances
 								.insert(
 									target,
@@ -1605,14 +1544,11 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 						} else {
 							// Remove old distance from the map, if key was present before decrease
 							// relevant count.
-							//trace!("Target {target:?} set to irrelevant");
 							if distances.remove(&target).is_some() {
 								relevant_count -= 1;
 							}
 						}
 					}
-					//trace!("dijkstra adding node {:?} with dist {new_dist}
-					// and relevancy {relevant}", target);
 				}
 			}
 			if relevant {
@@ -1640,10 +1576,8 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 
 		// Incoming paths to relevant nodes starting from u via uv.
 		let incoming_u = self.dijkstra_relevant(ctx, new_index, false);
-		trace!("incoming_u is {incoming_u:?}");
 		// Outgoing paths from relevant nodes ending at v via uv.
 		let outgoing_v = self.dijkstra_relevant(ctx, new_index, true);
-		trace!("outgoing_v is {outgoing_v:?}");
 		let indegree_u: usize = incoming_u
 			.iter()
 			.map(|(&n, _)| self.open_in[n].num_open(ctx))
@@ -1652,7 +1586,6 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			.iter()
 			.map(|(&n, _)| self.open_out[n].num_open(ctx))
 			.sum();
-		trace!("indegree: {indegree_u:?}, outdegree: {outdegree_v:?}");
 
 		let new_edge_val = self.edges[new_index].val;
 
@@ -1665,7 +1598,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 					if outgoing_v.contains_key(&edge.from)
 						&& outgoing_v[&edge.from] + incoming_u[&edge.to] - new_edge_val <= edge.val
 					{
-						trace!("Constraint {edge:?} is implied");
+						trace!(edge = ?edge, "constraint is implied");
 						self.close_imp_edge(ctx, e);
 					}
 				}
@@ -1676,7 +1609,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 					if outgoing_v.contains_key(&edge.to)
 						&& outgoing_v[&edge.to] + incoming_u[&edge.from] - new_edge_val < -edge.val
 					{
-						trace!("Constraint {edge:?} is falsified since inverse is implied");
+						trace!(edge = ?edge, "constraint is falsified since inverse is implied");
 						self.close_imp_edge(ctx, e);
 						let result = self.inc_sat(ctx, e)?;
 						debug_assert!(!result, "Adding {e} should not be possible");
@@ -1692,7 +1625,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 					if incoming_u.contains_key(&edge.to)
 						&& outgoing_v[&edge.from] + incoming_u[&edge.to] - new_edge_val <= edge.val
 					{
-						trace!("Constraint {:?} is implied", edge);
+						trace!(edge = ?edge, "constraint is implied");
 						self.close_imp_edge(ctx, e);
 					}
 				}
@@ -1703,10 +1636,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 					if incoming_u.contains_key(&edge.from)
 						&& outgoing_v[&edge.to] + incoming_u[&edge.from] - new_edge_val < -edge.val
 					{
-						trace!(
-							"Constraint {:?} is falsified since inverse is implied",
-							edge
-						);
+						trace!(edge = ?edge, "constraint is falsified since inverse is implied");
 						self.close_imp_edge(ctx, e);
 						let result = self.inc_sat(ctx, e)?;
 						debug_assert!(!result, "Adding {e} should not be possible");
@@ -1726,7 +1656,6 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		I: SolverIntView<E>,
 	{
 		if self.lower_bound[n].is_none_or(|v| v < self.int_vars[n].lower_bound(ctx)) {
-			trace!("Integer i{n} lower bound change.");
 			return self.lower_bound_changes.insert(n);
 		}
 		false
@@ -1740,7 +1669,6 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		I: SolverIntView<E>,
 	{
 		if self.upper_bound[n].is_none_or(|v| v > self.int_vars[n].upper_bound(ctx)) {
-			trace!("Integer i{n} upper bound change.");
 			return self.upper_bound_changes.insert(n);
 		}
 		false
@@ -1805,7 +1733,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		I: SolverIntView<E>,
 		B: SolverBoolView<E>,
 	{
-		trace!("Running inc_lb on int vars {:?}", self.lower_bound_changes);
+		trace!(lb_changes = ?self.lower_bound_changes, "running inc_lb");
 		self.reset_visit();
 		let pi0 = self
 			.lower_bound_changes
@@ -1827,7 +1755,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			if bound > self.get_cur_lower_bound(ctx, s) || self.lower_bound_changes.contains(&s) {
 				self.update_lb(s, bound);
 				if bound > self.int_vars[s].lower_bound(ctx) {
-					trace!("Updating lower bound for i{:?} to {bound}", s);
+					trace!(n = ?s, bound = ?bound, "updating lower bound");
 					let (prev, b) = self.backtrace[s].unwrap();
 					let lb = self.get_cur_lower_bound(ctx, prev);
 					self.set_int_lower_bound(ctx, s, bound, b, prev, lb)?;
@@ -1855,7 +1783,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		I: SolverIntView<E>,
 		B: SolverBoolView<E>,
 	{
-		trace!("Running inc_ub on int vars {:?}", self.upper_bound_changes);
+		trace!(ub_changes = ?self.upper_bound_changes, "running inc_ub");
 		self.reset_visit();
 		let pi0 = self
 			.upper_bound_changes
@@ -1877,7 +1805,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			if bound < self.get_cur_upper_bound(ctx, s) || self.upper_bound_changes.contains(&s) {
 				self.update_ub(s, bound);
 				if bound < self.int_vars[s].upper_bound(ctx) {
-					trace!("Updating upper bound for i{:?} to {bound}", s);
+					trace!(n = ?s, bound = ?bound, "updating upper bound");
 					let (prev, b) = self.backtrace[s].unwrap();
 					let ub = self.get_cur_upper_bound(ctx, prev);
 					self.set_int_upper_bound(ctx, s, bound, b, prev, ub)?;
@@ -1978,11 +1906,6 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		I: SolverIntView<E>,
 		B: SolverBoolView<E>,
 	{
-		trace!(
-			"Propagating bounds on lb changes {:?}, ub changes {:?}.",
-			self.lower_bound_changes, self.upper_bound_changes
-		);
-
 		// Lower bound updates
 		if !self.lower_bound_changes.is_empty() {
 			self.inc_lb(ctx)?;
@@ -2004,7 +1927,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 				let target_ub = self.get_cur_upper_bound(ctx, edge.to);
 				if lb - target_ub > edge.val {
 					// Constraint is falsified by bounds.
-					trace!("Constraint {:?} is falsified by bounds.", edge);
+					trace!(edge = ?edge, "constraint is falsified by bounds");
 					// Lower bound is lifted
 					self.set_bool_false(ctx, edge.bool_var, e, false)?;
 					self.close_imp_edge(ctx, e);
@@ -2016,7 +1939,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 				let edge = &self.edges[e];
 				if self.get_cur_upper_bound(ctx, edge.from) - lb <= edge.val {
 					// Constraint is implied by bounds.
-					trace!("Constraint {:?} is implied by bounds.", edge);
+					trace!(edge = ?edge, "constraint is implied by bounds");
 					self.close_imp_edge(ctx, e);
 				}
 			}
@@ -2032,7 +1955,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 				let edge = &self.edges[e];
 				if ub - self.get_cur_lower_bound(ctx, edge.to) <= edge.val {
 					// Constraint is implied by bounds.
-					trace!("Constraint {:?} is implied by bounds.", edge);
+					trace!(edge = ?edge, "Constraint is implied by bounds");
 					self.close_imp_edge(ctx, e);
 				}
 			}
@@ -2043,7 +1966,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 				let source_lb = self.get_cur_lower_bound(ctx, edge.from);
 				if source_lb - ub > edge.val {
 					// Constraint is falsified by bounds.
-					trace!("Constraint {:?} is falsified by bounds.", edge);
+					trace!(edge = ?edge, "constraint is falsified by bounds");
 					// Upper bound is lifted
 					self.set_bool_false(ctx, edge.bool_var, e, true)?;
 					self.close_imp_edge(ctx, e);
@@ -2122,17 +2045,16 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		I: SolverIntView<E>,
 		B: SolverBoolView<E>,
 	{
-		trace!("Propagating fixed booleans {:?}.", self.fixed_bools);
 		let fixed_bools = mem::take(&mut self.fixed_bools);
 		for b in fixed_bools {
 			let val = self.bool_vars[b].val(ctx).unwrap();
-			trace!("Boolean b{b:?} fixed to {val}");
+			trace!(b = ?b, val = ?val, "boolean fixed");
 			if val {
 				//trace!("Graph before adding edges: {}", self.to_dot(adapter));
 				// Consequences of setting the boolean to true -> add all implied edges.
 				for j in self.bool_implications[b].open_iter(ctx) {
 					if let Some(&e) = self.bool_implications[b].index_opt(ctx, j) {
-						trace!("Processing adding edge {:?}", self.edges[e]);
+						trace!(edge = ?self.edges[e], "adding edge");
 						self.close_imp_edge(ctx, e);
 						self.activate_imp_edge(ctx, e);
 						self.propagate_edge_addition(ctx, e, check_implied, update_local_bounds)?;
@@ -2142,7 +2064,6 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 				// Consequences of setting the boolean to false -> close all implied edges.
 				for j in self.bool_implications[b].open_iter(ctx) {
 					let &e = self.bool_implications[b].index(ctx, j);
-					trace!("Closing edge {:?})", self.edges[e]);
 					self.close_imp_edge(ctx, e);
 				}
 			}
@@ -2288,7 +2209,7 @@ where
 				lit_ub,
 			]
 		};
-		trace!("Explaining {data} with {views:?}");
+		trace!(data = ?data, views = ?views, "lazy explanation");
 		views
 	}
 
@@ -2349,7 +2270,6 @@ where
 	}
 
 	fn advise_of_bool_change(&mut self, _ctx: &mut E::NotificationCtx<'_>, data: u64) -> bool {
-		trace!("Boolean b{data} fixed.");
 		self.graph.borrow_mut().fixed_bools.insert(data as usize)
 	}
 

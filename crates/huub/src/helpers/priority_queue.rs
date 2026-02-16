@@ -27,8 +27,8 @@ where
 	}
 
 	/// Insert the given item with the given priority, causing previous entries
-	/// for the same item to get stale. The previous priority is returned if it
-	/// exists.
+	/// for the same item to become stale. The previous priority is returned if
+	/// it exists.
 	pub(crate) fn push(&mut self, item: I, priority: P) -> Option<P> {
 		self.heap.push((priority.clone(), item.clone()));
 		self.current.insert(item, priority)
@@ -36,8 +36,8 @@ where
 
 	/// Insert the given item with the new priority if not present or currently
 	/// present with a lower priority, causing previous entries for the same
-	/// item to get stale. The previous priority is returned if the item is new
-	/// or the priority was updated, otherwise the new priority argument is
+	/// item to become stale. The previous priority is returned if the item is
+	/// new or the priority was updated, otherwise the new priority argument is
 	/// returned.
 	pub(crate) fn push_increase(&mut self, item: I, priority: P) -> Option<P> {
 		if self

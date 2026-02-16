@@ -9,9 +9,8 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-/// A **append only** list from which elements are automatically removed when
-/// the solver backtracks. Removals are only possible before trailing is
-/// initialized.
+/// An **append only** list from which newly added elements are automatically
+/// removed when the solver backtracks. Other removals can't be reverted.
 pub(crate) struct TrailedList<T> {
 	/// Underlying list.
 	list: Vec<T>,
@@ -52,6 +51,11 @@ impl<T: PartialEq + Clone> TrailedList<T> {
 		actions.trailed_int(self.size) as usize
 	}
 
+	/// Check if the list is empty (contains no active elements).
+	pub(crate) fn is_empty<A: TrailingActions + ?Sized>(&self, actions: &A) -> bool {
+		actions.trailed_int(self.size) as usize == 0
+	}
+
 	/// Add an element to the active list.
 	pub(crate) fn push<A: TrailingActions + ?Sized>(&mut self, actions: &mut A, value: T) {
 		let len = self.len(actions);
@@ -64,20 +68,20 @@ impl<T: PartialEq + Clone> TrailedList<T> {
 		debug_assert_eq!(prev, len as IntVal);
 	}
 
-	/// Remove all elements from the list.
+	/// Remove all elements from the list (can't be reverted, only if removal is
+	/// allowed).
 	pub(crate) fn clear<A: TrailingActions + ?Sized>(&self, actions: &mut A) {
 		assert!(self.allow_removal, "removal is not allowed for this list");
 		let _ = actions.set_trailed_int(self.size, 0);
 	}
 
-	/// Remove the given element by swapping it out of the active range.
-	/// Can only be called before trailing is initialized.
+	/// Remove the given element by swapping it out of the active range (can't
+	/// be reverted, only if removal is allowed).
 	pub(crate) fn swap_remove_element<A: TrailingActions>(
 		&mut self,
 		actions: &mut A,
 		element: &T,
 	) -> &T {
-		// TODO check performance!
 		assert!(self.allow_removal, "removal is not allowed for this list");
 		let len = self.len(actions);
 		let index = self
@@ -90,7 +94,7 @@ impl<T: PartialEq + Clone> TrailedList<T> {
 	}
 
 	/// Remove the element at the given index by swapping it out of the active
-	/// range. Can only be called before trailing is initialized.
+	/// range (can't be reverted, only if removal is allowed).
 	pub(crate) fn swap_remove<A: TrailingActions>(&mut self, actions: &mut A, index: usize) -> &T {
 		assert!(self.allow_removal, "removal is not allowed for this list");
 		let len = self.len(actions);
