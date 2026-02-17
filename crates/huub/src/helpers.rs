@@ -2,11 +2,11 @@
 //! multiple places in the library and are not exposed to the user.
 
 pub(crate) mod bytes;
+pub(crate) mod matrix;
+pub mod overflow;
 pub(crate) mod priority_queue;
 pub(crate) mod trailed_list;
 pub(crate) mod trailed_open_list;
-pub(crate) mod matrix;
-pub mod overflow;
 pub mod true_type;
 
 use std::num::NonZero;

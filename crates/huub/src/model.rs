@@ -576,6 +576,11 @@ impl SimplificationActions for Model {
 		self.post_constraint(constraint);
 	}
 
+	fn resolve_alias(&self, view: View<IntVal>) -> View<IntVal> {
+		view.resolve_alias(self)
+	}
+}
+
 impl TrailAccessActions for Model {
 	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
 		T::from_bytes(self.trail[i.index as usize])

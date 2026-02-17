@@ -327,7 +327,7 @@ impl Solver {
 		assert_eq!(status, Status::Complete);
 	}
 
-	pub(crate) fn assert_num_solutions<V: Into<View> + Clone>(
+	pub(crate) fn assert_num_solutions<V: Into<SolverView> + Clone>(
 		self,
 		vars: &[V],
 		num_expected: usize,
@@ -335,15 +335,15 @@ impl Solver {
 	) {
 		let vars: Vec<_> = vars.iter().map(|v| v.clone().into()).collect();
 		let mut count = 0;
-		let (status, _) = self.all_solutions(&vars, |value| {
+		let (status, _) = self.all_solutions(&vars, |sol| {
 			let mut soln = Vec::with_capacity(vars.len());
 			for var in &vars {
-				soln.push(value(*var));
+				soln.push(var.val(sol));
 			}
 			assert!(pred(&soln));
 			count += 1;
 		});
-		assert_eq!(status, SolveResult::Complete);
+		assert_eq!(status, Status::Complete);
 		assert_eq!(count, num_expected);
 	}
 

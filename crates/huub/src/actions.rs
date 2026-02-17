@@ -18,8 +18,10 @@ pub use crate::actions::{
 	},
 };
 use crate::{
+	IntVal,
 	constraints::{BoxedPropagator, Constraint, DeferredReason, ReasonBuilder},
 	helpers::bytes::Bytes,
+	model::View,
 };
 
 /// Actions that can be performed during the construction of [`Propagator`]s and
@@ -101,7 +103,6 @@ pub trait ReasoningEngine {
 		+ PropagationActions<Atom = Self::Atom, Conflict = Self::Conflict>;
 }
 
-
 /// Actions that can be performed to simplify a Model considering a given
 /// constraint.
 pub trait SimplificationActions {
@@ -116,10 +117,10 @@ pub trait SimplificationActions {
 	/// constraints and then returns [`SimplificationStatus::Subsumed`] to
 	/// indicate that the current constraint can be removed.
 	fn post_constraint<C: Constraint<Self::Target>>(&mut self, constraint: C);
-}
 
-	/// Resolve the alias of the integer decision variable.
-	fn resolve_alias(&self, var: IntDecision) -> IntDecision;
+	/// Resolve the alias of the integer view.
+	fn resolve_alias(&self, view: View<IntVal>) -> View<IntVal>;
+}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// A typed handle to a value tracked by the trail.

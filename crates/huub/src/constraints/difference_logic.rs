@@ -6,37 +6,46 @@ use std::{
 	fmt::Debug,
 	hash::Hash,
 	mem,
-	ops::AddAssign,
 	rc::Rc,
 };
 
 use itertools::Itertools;
-use pindakaas::{Lit as RawLit, propositional_logic::Formula};
+use pindakaas::propositional_logic::Formula;
 use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::trace;
 
 use crate::{
-	BoolDecision, BoolFormula, Conjunction, IntDecision, IntVal, Model,
+	Conjunction, IntVal, Model,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, ConstructionActions,
 		InitActions, IntDecisionActions, IntExplanationActions, IntInitActions,
-		IntInspectionActions, IntSimplificationActions, PropagationActions, ReasoningContext,
-		ReasoningEngine, ReformulationActions, SimplificationActions, TrailingActions,
+		IntInspectionActions, IntSimplificationActions, PostingActions, PropagationActions,
+		ReasoningContext, ReasoningEngine, SimplificationActions, TrailAccessActions, Trailed,
+		TrailingActions,
 	},
 	constraints::{
-		BoxedPropagator, Constraint, ModelBoolView, ModelIntView, Propagator, ReasonBuilder,
-		SimplificationStatus, SolverBoolView, SolverIntView,
+		BoolModelActions, BoolSolverActions, Constraint, IntModelActions, IntSolverActions,
+		Propagator, ReasonBuilder, SimplificationStatus,
+		int_linear::{IntLinear, LinComparator, Reification},
 	},
 	helpers::{
-		priority_queue::LazyPriorityQueue, trailed_list::TrailedList,
+		overflow::{OverflowImpossible, OverflowPossible},
+		priority_queue::LazyPriorityQueue,
+		trailed_list::TrailedList,
 		trailed_open_list::TrailedOpenList,
 	},
-	reformulate::{BoolDecisionInner, IntDecisionIndex, IntDecisionInner, ReformulationError},
+	lower::{LoweringContext, LoweringError},
+	model,
+	model::{
+		expressions::BoolFormula,
+		view::{boolean::BoolView, integer::IntView},
+	},
+	solver,
 	solver::{
-		BoolView, IntLitMeaning, IntView,
+		IntLitMeaning,
 		activation_list::{IntEvent, IntPropCond},
+		engine::Engine,
 		queue::PriorityLevel,
-		trail::TrailedInt,
 	},
 	views::{LinearBoolView, LinearView},
 };
@@ -48,20 +57,45 @@ use crate::{
 /// Different types of (potential) difference logic constraints.
 pub enum DifferenceLogicConstraint {
 	/// A globally active difference constraint: x - y <= d
-	Global(IntDecision, IntDecision, IntVal),
+	Global(model::View<IntVal>, model::View<IntVal>, IntVal),
 	/// An implied difference constraint: b -> x - y <= d
-	Implied(BoolDecision, IntDecision, IntDecision, IntVal),
+	Implied(
+		model::View<bool>,
+		model::View<IntVal>,
+		model::View<IntVal>,
+		IntVal,
+	),
 	/// A reified difference constraint: b <-> x - y <= d
-	Reified(BoolDecision, IntDecision, IntDecision, IntVal),
+	Reified(
+		model::View<bool>,
+		model::View<IntVal>,
+		model::View<IntVal>,
+		IntVal,
+	),
 	/// An implied equality constraint: b -> x - y == d (without implication is
 	/// covered by views)
-	ImpliedEquals(BoolDecision, IntDecision, IntDecision, IntVal),
+	ImpliedEquals(
+		model::View<bool>,
+		model::View<IntVal>,
+		model::View<IntVal>,
+		IntVal,
+	),
 	/// A not equals constraint: x - y != d
-	NotEquals(IntDecision, IntDecision, IntVal),
+	NotEquals(model::View<IntVal>, model::View<IntVal>, IntVal),
 	/// An implied not equals constraint: b -> x - y != d
-	ImpliedNotEquals(BoolDecision, IntDecision, IntDecision, IntVal),
+	ImpliedNotEquals(
+		model::View<bool>,
+		model::View<IntVal>,
+		model::View<IntVal>,
+		IntVal,
+	),
 	/// A reified equality constraint: b <-> x - y == d
-	ReifiedEquals(BoolDecision, IntDecision, IntDecision, IntVal),
+	ReifiedEquals(
+		model::View<bool>,
+		model::View<IntVal>,
+		model::View<IntVal>,
+		IntVal,
+	),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,20 +139,25 @@ fn parse_priority_level(level: u8) -> PriorityLevel {
 /// by introducing 2 new boolean decision variables.
 fn add_implied_not_equals(
 	model: &mut Model,
-	imp_constraints: &mut Vec<(BoolDecision, IntDecision, IntDecision, IntVal)>,
-	b: BoolDecision,
-	x: IntDecision,
-	y: IntDecision,
+	imp_constraints: &mut Vec<(
+		model::View<bool>,
+		model::View<IntVal>,
+		model::View<IntVal>,
+		IntVal,
+	)>,
+	b: model::View<bool>,
+	x: model::View<IntVal>,
+	y: model::View<IntVal>,
 	d: IntVal,
 ) {
-	let decision1 = model.new_bool_var();
-	let decision2 = model.new_bool_var();
-	model.add_constraint(Formula::Or(vec![
+	let decision1 = model.new_bool_decision();
+	let decision2 = model.new_bool_decision();
+	model.post_constraint(Formula::Or(vec![
 		Formula::from(!b),
 		Formula::from(decision1),
 		Formula::from(decision2),
 	]));
-	model.add_constraint(Formula::Or(vec![
+	model.post_constraint(Formula::Or(vec![
 		Formula::from(!decision1),
 		Formula::from(!decision2),
 	]));
@@ -171,7 +210,7 @@ impl DifferenceLogicCollection {
 	pub(crate) fn process(
 		&mut self,
 		model: &mut Model,
-	) -> Result<Option<DifferenceLogicModel>, ReformulationError> {
+	) -> Result<Option<DifferenceLogicModel>, LoweringError> {
 		let mut global_constraints = Vec::new();
 		let mut imp_constraints = Vec::new();
 		for raw in self.raw_constraints.iter() {
@@ -192,7 +231,7 @@ impl DifferenceLogicCollection {
 				// x - y != d is transformed to b -> x - y < d and !b -> x - y > d for a new boolean
 				// variable b.
 				DifferenceLogicConstraint::NotEquals(x, y, d) => {
-					let decision = model.new_bool_var();
+					let decision = model.new_bool_decision();
 					imp_constraints.push((decision, *x, *y, *d - 1));
 					imp_constraints.push((!decision, *y, *x, -*d - 1));
 				}
@@ -227,74 +266,77 @@ impl DifferenceLogicCollection {
 
 /// Check if the underlying variables are different, if not reemit the
 /// potentially implied difference constraint.
-fn check_vars_different<A: SimplificationActions<Target = Model>>(
-	actions: &mut A,
-	x: IntDecision,
-	y: IntDecision,
+fn check_vars_different<E>(
+	ctx: &mut E::PropagationCtx<'_>,
+	x: model::View<IntVal>,
+	y: model::View<IntVal>,
 	d: IntVal,
-	b: Option<BoolDecision>,
-) -> bool {
+	b: Option<model::View<bool>>,
+) -> Result<bool, E::Conflict>
+where
+	E: ReasoningEngine,
+	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = Model>,
+	model::View<IntVal>: IntModelActions<E>,
+{
 	if x == y && d >= 0 {
 		trace!(b = ?b, x = ?x, y = ?y, d = ?d, "removing redundant edge");
-		return false;
+		return Ok(false);
 	}
-	let x_var = get_int_var_index(x);
-	let y_var = get_int_var_index(y);
+	let x_var = get_int_var_index(ctx.resolve_alias(x));
+	let y_var = get_int_var_index(ctx.resolve_alias(y));
 	if x_var == y_var || x_var.is_none() || y_var.is_none() {
 		trace!(b = ?b, x = ?x, y = ?y, d = ?d, "reemitting edge with same underlying variable or constant");
-		let mut reemit = (x - y).leq(d);
-		if let Some(b) = b {
-			reemit = reemit.implied_by(b);
+		let terms = vec![x, y.bounding_neg(ctx)?];
+		if IntLinear::can_overflow(ctx, &terms) {
+			ctx.post_constraint(IntLinear::<OverflowPossible> {
+				terms,
+				rhs: d.into(),
+				reif: b.map(Reification::ImpliedBy),
+				comparator: LinComparator::LessEq,
+			});
+		} else {
+			ctx.post_constraint(IntLinear::<OverflowImpossible> {
+				terms,
+				rhs: d,
+				reif: b.map(Reification::ImpliedBy),
+				comparator: LinComparator::LessEq,
+			});
 		}
-		actions.add_constraint(reemit);
-		return false;
+		return Ok(false);
 	}
-	true
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// The actual underlying variable below all transformations.
-enum VarIndex {
-	/// An underlying integer decision variable.
-	IntIndex(IntDecisionIndex),
-	/// An underlying boolean.
-	BoolIndex(RawLit),
+	Ok(true)
 }
 
 /// Get the underlying variable for a boolean decision (None if constant).
-fn get_bool_var_index(b: BoolDecision) -> Option<VarIndex> {
+fn get_bool_var_index(b: model::View<bool>) -> Option<usize> {
 	match b.0 {
-		BoolDecisionInner::Lit(l) => Some(VarIndex::BoolIndex(l)),
-		BoolDecisionInner::Const(_) => None,
-		BoolDecisionInner::IntEq(i, _) => Some(VarIndex::IntIndex(i)),
-		BoolDecisionInner::IntGreaterEq(i, _) => Some(VarIndex::IntIndex(i)),
-		BoolDecisionInner::IntLess(i, _) => Some(VarIndex::IntIndex(i)),
-		BoolDecisionInner::IntNotEq(i, _) => Some(VarIndex::IntIndex(i)),
+		BoolView::Decision(d) => Some(d.idx()),
+		BoolView::Const(_) => None,
+		BoolView::IntEq(d, _) => Some(d.idx()),
+		BoolView::IntGreaterEq(d, _) => Some(d.idx()),
+		BoolView::IntLess(d, _) => Some(d.idx()),
+		BoolView::IntNotEq(d, _) => Some(d.idx()),
 	}
 }
 
 /// Get the underlying variable for an integer decision (None if constant).
-fn get_int_var_index(x: IntDecision) -> Option<VarIndex> {
+fn get_int_var_index(x: model::View<IntVal>) -> Option<usize> {
 	match x.0 {
-		IntDecisionInner::Const(_) => None,
-		IntDecisionInner::Linear(view) => Some(VarIndex::IntIndex(view.var)),
-		IntDecisionInner::Bool(view) => get_bool_var_index(view.var),
+		IntView::Const(_) => None,
+		IntView::Linear(view) => Some(view.var.idx()),
+		IntView::Bool(view) => get_bool_var_index(view.var),
 	}
 }
 
 /// Get a transformation of the integer decision that has an offset of 0.
-fn update_transform(x: IntDecision) -> (IntDecision, IntVal) {
+fn update_transform(x: model::View<IntVal>) -> (model::View<IntVal>, IntVal) {
 	match x.0 {
-		IntDecisionInner::Linear(view) => (
-			IntDecision(IntDecisionInner::Linear(LinearView::new(
-				view.scale, 0, view.var,
-			))),
+		IntView::Linear(view) => (
+			model::View(IntView::Linear(LinearView::new(view.scale, 0, view.var))),
 			view.offset,
 		),
-		IntDecisionInner::Bool(view) => (
-			IntDecision(IntDecisionInner::Bool(LinearBoolView::new(
-				view.scale, 0, view.var,
-			))),
+		IntView::Bool(view) => (
+			model::View(IntView::Bool(LinearBoolView::new(view.scale, 0, view.var))),
 			view.offset,
 		),
 		_ => (x, 0),
@@ -309,9 +351,9 @@ pub(crate) struct DifferenceLogicModel {
 	/// Whether initial simplification has been performed.
 	initialized: bool,
 	/// Constraint graph.
-	graph: DifferenceLogicGraph<IntDecision, BoolDecision>,
+	graph: DifferenceLogicGraph<model::View<IntVal>, model::View<bool>>,
 	/// Mapping of integer decision variables to their index.
-	int_var_index: FxHashMap<IntDecision, usize>,
+	int_var_index: FxHashMap<model::View<IntVal>, usize>,
 	/// Minimum distances in the global graph.
 	distances: Vec<Vec<IntVal>>,
 	/// Set of nodes reachable with a direct edge of minimum distance for each
@@ -345,9 +387,14 @@ impl DifferenceLogicModel {
 	fn new(
 		prb: &mut Model,
 		parameters: DifferenceLogicParameters,
-		global_constraints: Vec<(IntDecision, IntDecision, IntVal)>,
-		imp_constraints: Vec<(BoolDecision, IntDecision, IntDecision, IntVal)>,
-	) -> Result<Self, ReformulationError> {
+		global_constraints: Vec<(model::View<IntVal>, model::View<IntVal>, IntVal)>,
+		imp_constraints: Vec<(
+			model::View<bool>,
+			model::View<IntVal>,
+			model::View<IntVal>,
+			IntVal,
+		)>,
+	) -> Result<Self, LoweringError> {
 		let mut int_vars = Vec::new();
 		let mut int_var_index = FxHashMap::default();
 		let mut bool_vars = Vec::new();
@@ -356,7 +403,7 @@ impl DifferenceLogicModel {
 		let mut trimmed_imp_constraints = Vec::new();
 
 		for (x, y, d) in global_constraints.into_iter() {
-			if check_vars_different(prb, x, y, d, None) {
+			if check_vars_different::<Model>(prb, x, y, d, None)? {
 				let (x_trans, xd) = update_transform(x);
 				let (y_trans, yd) = update_transform(y);
 				trimmed_constraints.push((
@@ -368,7 +415,7 @@ impl DifferenceLogicModel {
 		}
 
 		for (b, x, y, d) in imp_constraints.into_iter() {
-			if check_vars_different(prb, x, y, d, Some(b)) {
+			if check_vars_different::<Model>(prb, x, y, d, Some(b))? {
 				let (x_trans, xd) = update_transform(x);
 				let (y_trans, yd) = update_transform(y);
 				if let Some(val) = b.val(prb) {
@@ -433,8 +480,8 @@ impl DifferenceLogicModel {
 	where
 		E: ReasoningEngine,
 		for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = Model>,
-		IntDecision: ModelIntView<E>,
-		BoolDecision: ModelBoolView<E>,
+		model::View<IntVal>: IntModelActions<E>,
+		model::View<bool>: BoolModelActions<E>,
 	{
 		self.check_remove_fixed_nodes(ctx);
 		self.check_remove_isolated_nodes(ctx);
@@ -456,7 +503,7 @@ impl DifferenceLogicModel {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		IntDecision: ModelIntView<E>,
+		model::View<IntVal>: IntModelActions<E>,
 	{
 		trace!("calculating initial pi values");
 		let mut changed = false;
@@ -494,8 +541,8 @@ impl DifferenceLogicModel {
 	fn johnson_full<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		IntDecision: ModelIntView<E>,
-		BoolDecision: ModelBoolView<E>,
+		model::View<IntVal>: IntModelActions<E>,
+		model::View<bool>: BoolModelActions<E>,
 	{
 		trace!("starting Johnson's");
 		let mut pred = vec![vec![usize::MAX; self.graph.num_nodes()]; self.graph.num_nodes()];
@@ -565,7 +612,7 @@ impl DifferenceLogicModel {
 				let edge = &self.graph.edges[e];
 				if self.distances[n][edge.from] < -edge.val {
 					trace!(edge = ?edge, opposite_distance = self.distances[n][edge.to], "implied edge is falsified");
-					self.graph.bool_vars[edge.bool_var.unwrap()].set_val(ctx, false, [])?;
+					self.graph.bool_vars[edge.bool_var.unwrap()].fix(ctx, false, [])?;
 					self.graph.close_imp_edge(ctx, e);
 				}
 			}
@@ -604,8 +651,8 @@ impl DifferenceLogicModel {
 	where
 		E: ReasoningEngine,
 		for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = Model>,
-		IntDecision: ModelIntView<E>,
-		BoolDecision: ModelBoolView<E>,
+		model::View<IntVal>: IntModelActions<E>,
+		model::View<bool>: BoolModelActions<E>,
 	{
 		trace!(n = ?n, offset = ?offset, "updating node offset");
 		self.graph.pi[n] += offset;
@@ -619,7 +666,7 @@ impl DifferenceLogicModel {
 				self.graph.int_vars[to],
 				self.graph.edges[e].val,
 				None,
-			) {
+			)? {
 				self.graph.edges[e].val -= offset;
 				i += 1;
 			} else {
@@ -637,7 +684,7 @@ impl DifferenceLogicModel {
 				self.graph.int_vars[n],
 				self.graph.edges[e].val,
 				None,
-			) {
+			)? {
 				self.graph.edges[e].val += offset;
 				i += 1;
 			} else {
@@ -655,7 +702,7 @@ impl DifferenceLogicModel {
 				self.graph.edges[e]
 					.bool_var
 					.map(|b| self.graph.bool_vars[b]),
-			) {
+			)? {
 				self.graph.edges[e].val -= offset;
 			} else {
 				self.graph.close_imp_edge(ctx, e);
@@ -671,7 +718,7 @@ impl DifferenceLogicModel {
 				self.graph.edges[e]
 					.bool_var
 					.map(|b| self.graph.bool_vars[b]),
-			) {
+			)? {
 				self.graph.edges[e].val += offset;
 			} else {
 				self.graph.close_imp_edge(ctx, e);
@@ -692,8 +739,8 @@ impl DifferenceLogicModel {
 	where
 		E: ReasoningEngine,
 		for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = Model>,
-		IntDecision: ModelIntView<E>,
-		BoolDecision: ModelBoolView<E>,
+		model::View<IntVal>: IntModelActions<E>,
+		model::View<bool>: BoolModelActions<E>,
 	{
 		trace!(old = ?old, new = ?new, offset = ?offset, "moving all edges");
 		let mut mod_edges = Vec::new();
@@ -707,7 +754,7 @@ impl DifferenceLogicModel {
 				self.graph.int_vars[to],
 				val - offset,
 				None,
-			) && (self.distances[new][to] > val - offset
+			)? && (self.distances[new][to] > val - offset
 				|| (self.distances[new][to] == val - offset
 					&& !self.direct_edge[new].contains(&to)))
 			{
@@ -732,7 +779,7 @@ impl DifferenceLogicModel {
 				self.graph.int_vars[new],
 				val + offset,
 				None,
-			) && (self.distances[from][new] > val + offset
+			)? && (self.distances[from][new] > val + offset
 				|| (self.distances[from][new] == val + offset
 					&& !self.direct_edge[from].contains(&new)))
 			{
@@ -757,7 +804,7 @@ impl DifferenceLogicModel {
 				self.graph.edges[e]
 					.bool_var
 					.map(|b| self.graph.bool_vars[b]),
-			) {
+			)? {
 				let edge = &mut self.graph.edges[e];
 				edge.from = new;
 				edge.val -= offset;
@@ -778,7 +825,7 @@ impl DifferenceLogicModel {
 				self.graph.edges[e]
 					.bool_var
 					.map(|b| self.graph.bool_vars[b]),
-			) {
+			)? {
 				let edge = &mut self.graph.edges[e];
 				edge.to = new;
 				edge.val += offset;
@@ -812,7 +859,7 @@ impl DifferenceLogicModel {
 		} else {
 			Box::new(BoolFormula::Atom(self.graph.int_vars[int_var].geq(value)))
 		};
-		actions.add_constraint(BoolFormula::Implies(
+		actions.post_constraint(BoolFormula::Implies(
 			Box::new(BoolFormula::Atom(self.graph.bool_vars[bool_var])),
 			bound,
 		));
@@ -824,8 +871,8 @@ impl DifferenceLogicModel {
 	where
 		E: ReasoningEngine,
 		for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = Model>,
-		IntDecision: ModelIntView<E>,
-		BoolDecision: ModelBoolView<E>,
+		model::View<IntVal>: IntModelActions<E>,
+		model::View<bool>: BoolModelActions<E>,
 	{
 		for n in 0..self.graph.num_nodes() {
 			if self.node_active[n]
@@ -873,7 +920,7 @@ impl DifferenceLogicModel {
 	}
 
 	/// Check if nodes with no edges exist, if yes remove them from the graph.
-	fn check_remove_isolated_nodes<A: TrailingActions>(&mut self, actions: &mut A) {
+	fn check_remove_isolated_nodes<A: TrailAccessActions>(&mut self, actions: &mut A) {
 		for n in 0..self.graph.num_nodes() {
 			if self.node_active[n]
 				&& self.graph.active_out[n].is_empty(actions)
@@ -889,7 +936,7 @@ impl DifferenceLogicModel {
 	}
 
 	/// Check if isolated booleans exist, if yes mark them as inactive.
-	fn check_remove_isolated_booleans<A: TrailingActions>(&mut self, actions: &mut A) {
+	fn check_remove_isolated_booleans<A: TrailAccessActions>(&mut self, actions: &mut A) {
 		for b in 0..self.graph.bool_implications.len() {
 			if self.bool_active[b] && self.graph.bool_implications[b].num_open(actions) == 0 {
 				trace!(b = ?b, "removing boolean with no edges");
@@ -899,7 +946,7 @@ impl DifferenceLogicModel {
 	}
 
 	/// Return statistics about the size of the graph.
-	pub(crate) fn output_statistics<A: TrailingActions>(
+	pub(crate) fn output_statistics<A: TrailAccessActions>(
 		&self,
 		actions: &mut A,
 	) -> (usize, usize, usize, usize) {
@@ -920,8 +967,8 @@ impl<E> Constraint<E> for DifferenceLogicModel
 where
 	E: ReasoningEngine,
 	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = Model>,
-	IntDecision: ModelIntView<E>,
-	BoolDecision: ModelBoolView<E>,
+	model::View<IntVal>: IntModelActions<E>,
+	model::View<bool>: BoolModelActions<E>,
 {
 	#[tracing::instrument(name = "diff_logic_simplify", level = "trace", skip(self, ctx))]
 	fn simplify(
@@ -953,7 +1000,7 @@ where
 							self.unify_nodes(ctx, n, new, vd)?;
 							self.graph.lower_bound_changes.insert(new);
 							self.graph.upper_bound_changes.insert(new);
-						} else if !matches!(alias.0, IntDecisionInner::Const(_)) {
+						} else if !matches!(alias.0, IntView::Const(_)) {
 							*self.graph.lower_bound[n].as_mut().unwrap() -= vd;
 							*self.graph.upper_bound[n].as_mut().unwrap() -= vd;
 							self.update_node_offset(ctx, n, vd)?;
@@ -972,11 +1019,7 @@ where
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
-	fn to_solver(
-		&self,
-		ctx: &mut dyn ReformulationActions,
-		model_trail: &dyn TrailingActions,
-	) -> Result<(), ReformulationError> {
+	fn to_solver(&self, ctx: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
 		trace!("transforming DifferenceLogicGraph to solver"); // TODO would like to output graph here
 		let int_vars = self
 			.graph
@@ -984,7 +1027,7 @@ where
 			.iter()
 			.enumerate()
 			.filter(|(i, _)| self.node_active[*i])
-			.map(|(_, &v)| ctx.solver_int(v))
+			.map(|(_, &v)| ctx.solver_view(v))
 			.collect_vec();
 		let bool_vars = self
 			.graph
@@ -992,14 +1035,13 @@ where
 			.iter()
 			.enumerate()
 			.filter(|(i, _)| self.bool_active[*i])
-			.map(|(_, &v)| ctx.solver_bool(v))
+			.map(|(_, &v)| ctx.solver_view(v))
 			.collect_vec();
 		let node_map = remap_vec(&self.node_active);
 		let bool_map = remap_vec(&self.bool_active);
 		let graph_cell = Rc::new(RefCell::new(DifferenceLogicGraph::from(
 			&self.graph,
 			ctx,
-			model_trail,
 			int_vars,
 			bool_vars,
 			node_map,
@@ -1023,8 +1065,8 @@ where
 impl<E> Propagator<E> for DifferenceLogicModel
 where
 	E: ReasoningEngine,
-	IntDecision: ModelIntView<E>,
-	BoolDecision: ModelBoolView<E>,
+	model::View<IntVal>: IntModelActions<E>,
+	model::View<bool>: BoolModelActions<E>,
 {
 	fn advise_of_bool_change(&mut self, _ctx: &mut E::NotificationCtx<'_>, data: u64) -> bool {
 		self.graph.fixed_bools.insert(data as usize)
@@ -1129,7 +1171,7 @@ pub struct DifferenceLogicGraph<I, B> {
 	/// Visited state for each node.
 	visited: Vec<bool>,
 	/// Number of open implication edges.
-	num_open_edges: TrailedInt,
+	num_open_edges: Trailed<usize>,
 	/// List of all edges in the graph.
 	edges: Vec<DiffEdge>,
 	/// Map from boolean indices to their implied edges.
@@ -1199,7 +1241,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			pi: vec![0; num_int],
 			backtrace: vec![None; num_int],
 			visited: vec![false; num_int],
-			num_open_edges: solver.new_trailed_int(0),
+			num_open_edges: solver.new_trailed(0),
 			edges: Vec::new(),
 			bool_implications: (0..num_bool)
 				.map(|_| TrailedOpenList::new(solver))
@@ -1218,19 +1260,14 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	/// old trail is used to access trailed information for the existing graph.
 	/// Old nodes are mapped (if present) or dropped (if None) according to
 	/// node_map, booleans are mapped according to bool_map.
-	fn from<A, T, I1, B1>(
+	fn from<I1, B1>(
 		from: &DifferenceLogicGraph<I1, B1>,
-		ctx: &mut A,
-		old_trail: &T,
+		ctx: &mut LoweringContext,
 		int_vars: Vec<I>,
 		bool_vars: Vec<B>,
 		node_map: Vec<Option<usize>>,
 		bool_map: Vec<Option<usize>>,
-	) -> Self
-	where
-		A: ReformulationActions + ?Sized,
-		T: TrailingActions + ?Sized,
-	{
+	) -> Self {
 		let mut new_graph = DifferenceLogicGraph::new(ctx, int_vars, bool_vars, from.bool_reasons);
 		new_graph.lower_bound_changes.clear();
 		new_graph.upper_bound_changes.clear();
@@ -1245,11 +1282,11 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		// Identify edges in use
 		let mut edge_map = vec![0; from.edges.len()];
 		for n in (0..from.num_nodes()).filter(|i| node_map[*i].is_some()) {
-			for &e in from.active_out[n].iter(old_trail) {
+			for &e in from.active_out[n].iter(ctx.model_trail()) {
 				edge_map[e] = 1;
 			}
-			for i in from.open_out[n].open_iter(old_trail) {
-				edge_map[*from.open_out[n].index(old_trail, i)] = 2;
+			for i in from.open_out[n].open_iter(ctx.model_trail()) {
+				edge_map[*from.open_out[n].index(ctx.model_trail(), i)] = 2;
 			}
 		}
 
@@ -1295,9 +1332,9 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			self.open_out[edge.from].push(index);
 			edge.in_index = self.open_in[edge.to].len();
 			self.open_in[edge.to].push(index);
-			let _ = actions.set_trailed_int(
+			let _ = actions.set_trailed(
 				self.num_open_edges,
-				actions.trailed_int(self.num_open_edges) + 1,
+				actions.trailed(self.num_open_edges) + 1,
 			);
 		} else {
 			self.active_out[edge.from].push(actions, index);
@@ -1328,9 +1365,9 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			& self.open_out[from].close(actions, out_index, |&e, i| self.edges[e].out_index = i)
 			& self.open_in[to].close(actions, in_index, |&e, i| self.edges[e].in_index = i);
 		debug_assert!(was_open);
-		let _ = actions.set_trailed_int(
+		let _ = actions.set_trailed(
 			self.num_open_edges,
-			actions.trailed_int(self.num_open_edges) - 1,
+			actions.trailed(self.num_open_edges) - 1,
 		);
 	}
 
@@ -1359,7 +1396,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	{
 		match self.lower_bound[n] {
 			Some(lb) => lb,
-			None => self.int_vars[n].lower_bound(ctx),
+			None => self.int_vars[n].min(ctx),
 		}
 	}
 
@@ -1380,7 +1417,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	{
 		match self.upper_bound[n] {
 			Some(ub) => ub,
-			None => self.int_vars[n].upper_bound(ctx),
+			None => self.int_vars[n].max(ctx),
 		}
 	}
 
@@ -1420,7 +1457,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	) -> Result<bool, E::Conflict>
 	where
 		E: ReasoningEngine,
-		B: SolverBoolView<E>,
+		B: BoolSolverActions<E>,
 	{
 		let new_edge = &self.edges[new_index];
 		trace!(
@@ -1456,7 +1493,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 		if queue.get_priority(&new_edge.from).is_some() {
 			trace!(b = ?new_edge.bool_var, "cycle with negative length");
 			if let Some(b) = new_edge.bool_var {
-				self.bool_vars[b].set_val(ctx, false, self.get_cycle_reason(new_edge.from))?;
+				self.bool_vars[b].fix(ctx, false, self.get_cycle_reason(new_edge.from))?;
 			} else {
 				return Err(ctx.declare_conflict(self.get_cycle_reason(new_edge.from)));
 			}
@@ -1471,7 +1508,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	/// Perform dijkstra from the given node to all relevant nodes in the graph,
 	/// return a map of distances. Can be performed in forward or backward
 	/// direction.
-	fn dijkstra_relevant<A: TrailingActions>(
+	fn dijkstra_relevant<A: TrailAccessActions>(
 		&mut self,
 		actions: &mut A,
 		new_edge: usize,
@@ -1567,9 +1604,9 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		B: SolverBoolView<E>,
+		B: BoolSolverActions<E>,
 	{
-		if ctx.trailed_int(self.num_open_edges) == 0 {
+		if ctx.trailed(self.num_open_edges) == 0 {
 			trace!("No open implications");
 			return Ok(());
 		}
@@ -1653,9 +1690,9 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	fn notify_lb_change<E>(&mut self, ctx: &mut E::NotificationCtx<'_>, n: usize) -> bool
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
-		if self.lower_bound[n].is_none_or(|v| v < self.int_vars[n].lower_bound(ctx)) {
+		if self.lower_bound[n].is_none_or(|v| v < self.int_vars[n].min(ctx)) {
 			return self.lower_bound_changes.insert(n);
 		}
 		false
@@ -1666,9 +1703,9 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	fn notify_ub_change<E>(&mut self, ctx: &mut E::NotificationCtx<'_>, n: usize) -> bool
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
-		if self.upper_bound[n].is_none_or(|v| v > self.int_vars[n].upper_bound(ctx)) {
+		if self.upper_bound[n].is_none_or(|v| v > self.int_vars[n].max(ctx)) {
 			return self.upper_bound_changes.insert(n);
 		}
 		false
@@ -1687,10 +1724,10 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
-		B: SolverBoolView<E>,
+		I: IntSolverActions<E>,
+		B: BoolSolverActions<E>,
 	{
-		self.int_vars[n].set_lower_bound(ctx, value, |ctx: &mut E::PropagationCtx<'_>| {
+		self.int_vars[n].tighten_min(ctx, value, |ctx: &mut E::PropagationCtx<'_>| {
 			let mut reason = vec![self.int_vars[lb_var].lit(ctx, IntLitMeaning::GreaterEq(lb_val))];
 			if let Some(b) = bool_var {
 				reason.push(self.bool_vars[b].clone().into());
@@ -1713,10 +1750,10 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
-		B: SolverBoolView<E>,
+		I: IntSolverActions<E>,
+		B: BoolSolverActions<E>,
 	{
-		self.int_vars[n].set_upper_bound(ctx, value, |ctx: &mut E::PropagationCtx<'_>| {
+		self.int_vars[n].tighten_max(ctx, value, |ctx: &mut E::PropagationCtx<'_>| {
 			let mut reason = vec![self.int_vars[ub_var].lit(ctx, IntLitMeaning::Less(ub_val + 1))];
 			if let Some(b) = bool_var {
 				reason.push(self.bool_vars[b].clone().into());
@@ -1730,23 +1767,20 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	fn inc_lb<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
-		B: SolverBoolView<E>,
+		I: IntSolverActions<E>,
+		B: BoolSolverActions<E>,
 	{
 		trace!(lb_changes = ?self.lower_bound_changes, "running inc_lb");
 		self.reset_visit();
 		let pi0 = self
 			.lower_bound_changes
 			.iter()
-			.map(|&n| self.int_vars[n].lower_bound(ctx) + self.pi[n])
+			.map(|&n| self.int_vars[n].min(ctx) + self.pi[n])
 			.max()
 			.unwrap();
 		let mut queue = LazyPriorityQueue::new();
 		for &n in self.lower_bound_changes.iter() {
-			let _ = queue.push(
-				n,
-				Reverse(pi0 - self.int_vars[n].lower_bound(ctx) - self.pi[n]),
-			);
+			let _ = queue.push(n, Reverse(pi0 - self.int_vars[n].min(ctx) - self.pi[n]));
 		}
 		while !queue.is_empty() {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
@@ -1754,7 +1788,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			let bound = pi0 - gamma_s - self.pi[s];
 			if bound > self.get_cur_lower_bound(ctx, s) || self.lower_bound_changes.contains(&s) {
 				self.update_lb(s, bound);
-				if bound > self.int_vars[s].lower_bound(ctx) {
+				if bound > self.int_vars[s].min(ctx) {
 					trace!(n = ?s, bound = ?bound, "updating lower bound");
 					let (prev, b) = self.backtrace[s].unwrap();
 					let lb = self.get_cur_lower_bound(ctx, prev);
@@ -1780,23 +1814,20 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	fn inc_ub<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
-		B: SolverBoolView<E>,
+		I: IntSolverActions<E>,
+		B: BoolSolverActions<E>,
 	{
 		trace!(ub_changes = ?self.upper_bound_changes, "running inc_ub");
 		self.reset_visit();
 		let pi0 = self
 			.upper_bound_changes
 			.iter()
-			.map(|&n| self.int_vars[n].upper_bound(ctx) + self.pi[n])
+			.map(|&n| self.int_vars[n].max(ctx) + self.pi[n])
 			.min()
 			.unwrap();
 		let mut queue = LazyPriorityQueue::new();
 		for &n in self.upper_bound_changes.iter() {
-			let _ = queue.push(
-				n,
-				Reverse(self.pi[n] + self.int_vars[n].upper_bound(ctx) - pi0),
-			);
+			let _ = queue.push(n, Reverse(self.pi[n] + self.int_vars[n].max(ctx) - pi0));
 		}
 		while !queue.is_empty() {
 			let (s, Reverse(gamma_s)) = queue.pop().unwrap();
@@ -1804,7 +1835,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 			let bound = pi0 + gamma_s - self.pi[s];
 			if bound < self.get_cur_upper_bound(ctx, s) || self.upper_bound_changes.contains(&s) {
 				self.update_ub(s, bound);
-				if bound < self.int_vars[s].upper_bound(ctx) {
+				if bound < self.int_vars[s].max(ctx) {
 					trace!(n = ?s, bound = ?bound, "updating upper bound");
 					let (prev, b) = self.backtrace[s].unwrap();
 					let ub = self.get_cur_upper_bound(ctx, prev);
@@ -1877,8 +1908,8 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		B: SolverBoolView<E>,
-		I: SolverIntView<E>,
+		B: BoolSolverActions<E>,
+		I: IntSolverActions<E>,
 	{
 		if self.bool_reasons == 0 {
 			let data = if lb_fixed {
@@ -1887,12 +1918,12 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 				-(edge as i64) as u64
 			};
 			if let Some(b) = bool_var {
-				self.bool_vars[b].set_val(ctx, false, ctx.deferred_reason(data))?;
+				self.bool_vars[b].fix(ctx, false, ctx.deferred_reason(data))?;
 			} else {
 				return Err(ctx.declare_conflict(ctx.deferred_reason(data)));
 			}
 		} else if let Some(b) = bool_var {
-			self.bool_vars[b].set_val(ctx, false, self.get_bool_reason(edge, lb_fixed))?;
+			self.bool_vars[b].fix(ctx, false, self.get_bool_reason(edge, lb_fixed))?;
 		} else {
 			return Err(ctx.declare_conflict(self.get_bool_reason(edge, lb_fixed)));
 		};
@@ -1903,8 +1934,8 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	fn propagate_bounds<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
-		B: SolverBoolView<E>,
+		I: IntSolverActions<E>,
+		B: BoolSolverActions<E>,
 	{
 		// Lower bound updates
 		if !self.lower_bound_changes.is_empty() {
@@ -1988,8 +2019,8 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
-		B: SolverBoolView<E>,
+		I: IntSolverActions<E>,
+		B: BoolSolverActions<E>,
 	{
 		// If the edge can't be added, a conflict will be generated
 		let result = self.inc_sat(ctx, e)?;
@@ -2042,15 +2073,14 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
-		B: SolverBoolView<E>,
+		I: IntSolverActions<E>,
+		B: BoolSolverActions<E>,
 	{
 		let fixed_bools = mem::take(&mut self.fixed_bools);
 		for b in fixed_bools {
 			let val = self.bool_vars[b].val(ctx).unwrap();
 			trace!(b = ?b, val = ?val, "boolean fixed");
 			if val {
-				//trace!("Graph before adding edges: {}", self.to_dot(adapter));
 				// Consequences of setting the boolean to true -> add all implied edges.
 				for j in self.bool_implications[b].open_iter(ctx) {
 					if let Some(&e) = self.bool_implications[b].index_opt(ctx, j) {
@@ -2076,7 +2106,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 	fn to_dot<E>(&self, ctx: &mut E::PropagationCtx<'_>, filter: Vec<bool>) -> String
 	where
 		E: ReasoningEngine,
-		I: SolverIntView<E>,
+		I: IntSolverActions<E>,
 	{
 		let mut out = "digraph {\n".to_owned();
 		for n in (0..self.num_nodes()).filter(|&n| filter[n]) {
@@ -2117,7 +2147,7 @@ pub struct DifferenceLogicBounds {
 	/// Priority level for bounds propagation.
 	priority_level: PriorityLevel,
 	/// Shared reference to the difference logic graph.
-	graph: Rc<RefCell<DifferenceLogicGraph<IntView, BoolView>>>,
+	graph: Rc<RefCell<DifferenceLogicGraph<solver::View<IntVal>, solver::View<bool>>>>,
 }
 
 impl DifferenceLogicBounds {
@@ -2126,22 +2156,24 @@ impl DifferenceLogicBounds {
 	pub fn post<E>(
 		solver: &mut E,
 		priority_level: PriorityLevel,
-		graph: Rc<RefCell<DifferenceLogicGraph<IntView, BoolView>>>,
+		graph: Rc<RefCell<DifferenceLogicGraph<solver::View<IntVal>, solver::View<bool>>>>,
 	) where
-		E: AddAssign<BoxedPropagator> + ?Sized,
+		E: PostingActions + ?Sized,
+		solver::View<IntVal>: IntSolverActions<Engine>,
+		solver::View<bool>: BoolSolverActions<Engine>,
 	{
-		*solver += Box::new(Self {
+		solver.add_propagator(Box::new(Self {
 			priority_level,
 			graph: Rc::clone(&graph),
-		});
+		}));
 	}
 }
 
 impl<E> Propagator<E> for DifferenceLogicBounds
 where
 	E: ReasoningEngine,
-	IntView: SolverIntView<E>,
-	BoolView: SolverBoolView<E>,
+	solver::View<IntVal>: IntSolverActions<E>,
+	solver::View<bool>: BoolSolverActions<E>,
 {
 	fn advise_of_backtrack(&mut self, _ctx: &mut E::NotificationCtx<'_>) {
 		trace!("Backtrack advise");
@@ -2176,7 +2208,7 @@ where
 		let graph = self.graph.borrow();
 		let views = if signed_data < 0 {
 			let edge = &graph.edges[-signed_data as usize];
-			let target_ub = graph.int_vars[edge.to].upper_bound(ctx);
+			let target_ub = graph.int_vars[edge.to].max(ctx);
 			let (lit_lb, IntLitMeaning::GreaterEq(meaning_lb)) = graph.int_vars[edge.from]
 				.lit_relaxed(ctx, IntLitMeaning::GreaterEq(target_ub + edge.val + 1))
 			else {
@@ -2193,7 +2225,7 @@ where
 			]
 		} else {
 			let edge = &self.graph.borrow().edges[signed_data as usize];
-			let source_lb = graph.int_vars[edge.from].lower_bound(ctx);
+			let source_lb = graph.int_vars[edge.from].min(ctx);
 			let (lit_ub, IntLitMeaning::Less(meaning_ub)) =
 				graph.int_vars[edge.to].lit_relaxed(ctx, IntLitMeaning::Less(source_lb - edge.val))
 			else {
@@ -2234,7 +2266,7 @@ pub struct DifferenceLogicBooleans {
 	/// Priority level for bounds propagation.
 	priority_level: PriorityLevel,
 	/// Shared reference to the difference logic graph.
-	graph: Rc<RefCell<DifferenceLogicGraph<IntView, BoolView>>>,
+	graph: Rc<RefCell<DifferenceLogicGraph<solver::View<IntVal>, solver::View<bool>>>>,
 	/// Whether to proactively check implied constraints.
 	use_inc_imp: bool,
 }
@@ -2246,23 +2278,25 @@ impl DifferenceLogicBooleans {
 		solver: &mut E,
 		priority_level: PriorityLevel,
 		use_inc_imp: bool,
-		graph: Rc<RefCell<DifferenceLogicGraph<IntView, BoolView>>>,
+		graph: Rc<RefCell<DifferenceLogicGraph<solver::View<IntVal>, solver::View<bool>>>>,
 	) where
-		E: AddAssign<BoxedPropagator> + ?Sized,
+		E: PostingActions + ?Sized,
+		solver::View<IntVal>: IntSolverActions<Engine>,
+		solver::View<bool>: BoolSolverActions<Engine>,
 	{
-		*solver += Box::new(Self {
+		solver.add_propagator(Box::new(Self {
 			priority_level,
 			graph: Rc::clone(&graph),
 			use_inc_imp,
-		});
+		}));
 	}
 }
 
 impl<E> Propagator<E> for DifferenceLogicBooleans
 where
 	E: ReasoningEngine,
-	IntView: SolverIntView<E>,
-	BoolView: SolverBoolView<E>,
+	solver::View<IntVal>: IntSolverActions<E>,
+	solver::View<bool>: BoolSolverActions<E>,
 {
 	fn advise_of_backtrack(&mut self, _ctx: &mut E::NotificationCtx<'_>) {
 		trace!("Backtrack advise");
@@ -2301,24 +2335,27 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntDecision, IntVal, Model,
+		IntVal, Model,
 		actions::{
 			BoolInspectionActions, IntInspectionActions, IntPropagationActions,
 			IntSimplificationActions,
 		},
 		constraints::{
-			Constraint, SolverBoolView, SolverIntView,
+			BoolSolverActions, Constraint, IntSolverActions,
 			difference_logic::{
 				DiffEdge, DifferenceLogicCollection, DifferenceLogicConstraint,
 				DifferenceLogicGraph, DifferenceLogicModel,
 			},
 		},
-		reformulate::{InitConfig, IntDecisionInner},
+		lower::InitConfig,
+		model,
+		model::{ConRef, view::integer::IntView},
+		solver,
 		solver::{
-			BoolView, IntView, Solver,
+			Solver,
 			Value::Int,
+			decision::integer::{EncodingType, IntDecision},
 			engine::Engine,
-			int_var::{EncodingType, IntVar},
 			solving_context::SolvingContext,
 		},
 		views::LinearView,
@@ -2358,27 +2395,27 @@ mod tests {
 		num_vars: usize,
 		from: IntVal,
 		to: IntVal,
-	) -> Vec<IntView> {
+	) -> Vec<solver::View<IntVal>> {
 		(0..num_vars)
 			.map(|_| {
-				IntVar::new_in(
+				IntDecision::new_in(
 					slv,
 					RangeList::from_iter([from..=to]),
 					EncodingType::Eager,
 					EncodingType::Eager,
 				)
 			})
-			.collect()
+			.collect_vec()
 	}
 
 	#[test]
 	#[traced_test]
 	fn test_relevant_dijkstra() {
 		let mut prb = Model::default();
-		let b = prb.new_bool_var();
+		let b = prb.new_bool_decision();
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let int_vars = get_int_vars_range(&mut slv, 10, 1, 10);
-		let bool_vars = vec![map.get_bool(&mut slv, b)];
+		let bool_vars = vec![map.get(&mut slv, b)];
 		let mut graph = DifferenceLogicGraph::new(&mut slv, int_vars, bool_vars, BOOL_REASONS);
 		let mut dummy_actions = DummyActions;
 		let mut engine = slv.engine.borrow_mut();
@@ -2421,13 +2458,13 @@ mod tests {
 	#[traced_test]
 	fn test_inc_lb()
 	where
-		IntView: SolverIntView<Engine>,
-		BoolView: SolverBoolView<Engine>,
+		solver::View<IntVal>: IntSolverActions<Engine>,
+		solver::View<bool>: BoolSolverActions<Engine>,
 	{
 		let mut prb = Model::default();
 		let (mut slv, _): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let int_vars = get_int_vars_range(&mut slv, 5, 1, 10);
-		let mut graph: DifferenceLogicGraph<_, BoolView> =
+		let mut graph: DifferenceLogicGraph<_, solver::View<bool>> =
 			DifferenceLogicGraph::new(&mut slv, int_vars, vec![], BOOL_REASONS);
 		let mut dummy_actions = DummyActions;
 		let mut engine = slv.engine.borrow_mut();
@@ -2436,25 +2473,25 @@ mod tests {
 		let _ = graph.new_edge(&mut ctx, DiffEdge::new(1, 2, 1, None));
 		let _ = graph.new_edge(&mut ctx, DiffEdge::new(1, 3, 3, None));
 		let _ = graph.new_edge(&mut ctx, DiffEdge::new(2, 4, 1, None));
-		assert!(graph.int_vars[0].set_lower_bound(&mut ctx, 8, []).is_ok());
+		assert!(graph.int_vars[0].tighten_min(&mut ctx, 8, []).is_ok());
 		assert!(graph.inc_lb(&mut ctx).is_ok());
-		assert_eq!(graph.int_vars[1].lower_bound(&ctx), 6);
-		assert_eq!(graph.int_vars[2].lower_bound(&ctx), 5);
-		assert_eq!(graph.int_vars[3].lower_bound(&ctx), 3);
-		assert_eq!(graph.int_vars[4].lower_bound(&ctx), 4);
+		assert_eq!(graph.int_vars[1].min(&ctx), 6);
+		assert_eq!(graph.int_vars[2].min(&ctx), 5);
+		assert_eq!(graph.int_vars[3].min(&ctx), 3);
+		assert_eq!(graph.int_vars[4].min(&ctx), 4);
 	}
 
 	#[test]
 	#[traced_test]
 	fn test_inc_ub()
 	where
-		IntView: SolverIntView<Engine>,
-		BoolView: SolverBoolView<Engine>,
+		solver::View<IntVal>: IntSolverActions<Engine>,
+		solver::View<bool>: BoolSolverActions<Engine>,
 	{
 		let mut prb = Model::default();
 		let (mut slv, _): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let int_vars = get_int_vars_range(&mut slv, 5, 1, 10);
-		let mut graph: DifferenceLogicGraph<_, BoolView> =
+		let mut graph: DifferenceLogicGraph<_, solver::View<bool>> =
 			DifferenceLogicGraph::new(&mut slv, int_vars, vec![], BOOL_REASONS);
 		let mut dummy_actions = DummyActions;
 		let mut engine = slv.engine.borrow_mut();
@@ -2463,24 +2500,24 @@ mod tests {
 		let _ = graph.new_edge(&mut ctx, DiffEdge::new(1, 2, 1, None));
 		let _ = graph.new_edge(&mut ctx, DiffEdge::new(1, 3, 3, None));
 		let _ = graph.new_edge(&mut ctx, DiffEdge::new(2, 4, 1, None));
-		assert!(graph.int_vars[4].set_upper_bound(&mut ctx, 3, []).is_ok());
+		assert!(graph.int_vars[4].tighten_max(&mut ctx, 3, []).is_ok());
 		assert!(graph.inc_ub(&mut ctx).is_ok());
-		assert_eq!(graph.int_vars[0].upper_bound(&ctx), 7);
-		assert_eq!(graph.int_vars[1].upper_bound(&ctx), 5);
-		assert_eq!(graph.int_vars[2].upper_bound(&ctx), 4);
+		assert_eq!(graph.int_vars[0].max(&ctx), 7);
+		assert_eq!(graph.int_vars[1].max(&ctx), 5);
+		assert_eq!(graph.int_vars[2].max(&ctx), 4);
 	}
 
 	#[test]
 	#[traced_test]
 	fn test_inc_sat()
 	where
-		BoolView: SolverBoolView<Engine>,
+		solver::View<bool>: BoolSolverActions<Engine>,
 	{
 		let mut prb = Model::default();
-		let b = prb.new_bool_var();
+		let b = prb.new_bool_decision();
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let int_vars = get_int_vars_range(&mut slv, 3, 1, 10);
-		let bool_var = map.get_bool(&mut slv, b);
+		let bool_var = map.get(&mut slv, b);
 		let mut graph = DifferenceLogicGraph::new(&mut slv, int_vars, vec![bool_var], BOOL_REASONS);
 		let mut dummy_actions = DummyActions;
 		let mut engine = slv.engine.borrow_mut();
@@ -2500,15 +2537,15 @@ mod tests {
 	#[traced_test]
 	fn test_inc_imp()
 	where
-		BoolView: SolverBoolView<Engine>,
+		solver::View<bool>: BoolSolverActions<Engine>,
 	{
 		let mut prb = Model::default();
-		let bools = (0..3).map(|_| prb.new_bool_var()).collect_vec();
+		let bools = (0..3).map(|_| prb.new_bool_decision()).collect_vec();
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let int_vars = get_int_vars_range(&mut slv, 3, 1, 10);
 		let bool_vars = bools
 			.into_iter()
-			.map(|b| map.get_bool(&mut slv, b))
+			.map(|b| map.get(&mut slv, b))
 			.collect_vec();
 		let mut graph =
 			DifferenceLogicGraph::new(&mut slv, int_vars, bool_vars.clone(), BOOL_REASONS);
@@ -2535,15 +2572,15 @@ mod tests {
 	#[traced_test]
 	fn test_inc_imp2()
 	where
-		BoolView: SolverBoolView<Engine>,
+		solver::View<bool>: BoolSolverActions<Engine>,
 	{
 		let mut prb = Model::default();
-		let bools = (0..4).map(|_| prb.new_bool_var()).collect_vec();
+		let bools = (0..4).map(|_| prb.new_bool_decision()).collect_vec();
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let int_vars = get_int_vars_range(&mut slv, 4, 1, 10);
 		let bool_vars = bools
 			.into_iter()
-			.map(|b| map.get_bool(&mut slv, b))
+			.map(|b| map.get(&mut slv, b))
 			.collect_vec();
 		let mut graph =
 			DifferenceLogicGraph::new(&mut slv, int_vars, bool_vars.clone(), BOOL_REASONS);
@@ -2570,8 +2607,8 @@ mod tests {
 
 	fn test_paper_simple(bool_reasons: u8) {
 		let mut prb = Model::default();
-		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=5]));
-		let b = prb.new_bool_var();
+		let int_vars = prb.new_int_decisions(3, RangeList::from_iter([1..=5]));
+		let b = prb.new_bool_decision();
 		let mut diff_logic = DifferenceLogicCollection::new(
 			LEVEL,
 			PRIO_BOUNDS,
@@ -2605,14 +2642,11 @@ mod tests {
 			.process(&mut prb)
 			.expect("Creating model failed")
 			.expect("Model is empty");
-		prb.add_constraint(diff_logic_model);
+		prb.post_constraint(diff_logic_model);
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let int_views = int_vars
-			.iter()
-			.map(|&v| map.get_int(&mut slv, v))
-			.collect_vec();
-		let b_view = IntView::from(map.get_bool(&mut slv, b));
+		let int_views = int_vars.iter().map(|&v| map.get(&mut slv, v)).collect_vec();
+		let b_view = solver::View::from(map.get(&mut slv, b));
 		slv.assert_num_solutions(
 			&[int_views[0], int_views[1], int_views[2], b_view],
 			41,
@@ -2649,10 +2683,10 @@ mod tests {
 	#[traced_test]
 	fn test_paper_medium() {
 		let mut prb = Model::default();
-		let int_vars5 = prb.new_int_vars(4, RangeList::from_iter([1..=5]));
-		let int_vars4 = prb.new_int_vars(2, RangeList::from_iter([1..=4]));
-		let b = prb.new_bool_var();
-		let c = prb.new_bool_var();
+		let int_vars5 = prb.new_int_decisions(4, RangeList::from_iter([1..=5]));
+		let int_vars4 = prb.new_int_decisions(2, RangeList::from_iter([1..=4]));
+		let b = prb.new_bool_decision();
+		let c = prb.new_bool_decision();
 		let mut diff_logic = DifferenceLogicCollection::new(
 			LEVEL,
 			PRIO_BOUNDS,
@@ -2718,19 +2752,19 @@ mod tests {
 			.process(&mut prb)
 			.expect("Creating model failed")
 			.expect("Model is empty");
-		prb.add_constraint(diff_logic_model);
+		prb.post_constraint(diff_logic_model);
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 		let int_views5 = int_vars5
 			.iter()
-			.map(|&v| map.get_int(&mut slv, v))
+			.map(|&v| map.get(&mut slv, v))
 			.collect_vec();
 		let int_views4 = int_vars4
 			.iter()
-			.map(|&v| map.get_int(&mut slv, v))
+			.map(|&v| map.get(&mut slv, v))
 			.collect_vec();
-		let b_view = IntView::from(map.get_bool(&mut slv, b));
-		let c_view = IntView::from(map.get_bool(&mut slv, c));
+		let b_view = solver::View::from(map.get(&mut slv, b));
+		let c_view = solver::View::from(map.get(&mut slv, c));
 		slv.assert_num_solutions(
 			&[
 				int_views5[0],
@@ -2770,7 +2804,7 @@ mod tests {
 	#[traced_test]
 	fn test_conflict() {
 		let mut prb = Model::default();
-		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
+		let int_vars = prb.new_int_decisions(3, RangeList::from_iter([1..=10]));
 		let mut diff_logic = DifferenceLogicCollection::new(
 			LEVEL,
 			PRIO_BOUNDS,
@@ -2807,7 +2841,7 @@ mod tests {
 	#[traced_test]
 	fn test_equal() {
 		let mut prb = Model::default();
-		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
+		let int_vars = prb.new_int_decisions(3, RangeList::from_iter([1..=10]));
 		let mut diff_logic = DifferenceLogicCollection::new(
 			LEVEL,
 			PRIO_BOUNDS,
@@ -2834,13 +2868,10 @@ mod tests {
 			.process(&mut prb)
 			.expect("Creating model failed")
 			.expect("Model is empty");
-		prb.add_constraint(diff_logic_model);
+		prb.post_constraint(diff_logic_model);
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let int_views = int_vars
-			.iter()
-			.map(|&v| map.get_int(&mut slv, v))
-			.collect_vec();
+		let int_views = int_vars.iter().map(|&v| map.get(&mut slv, v)).collect_vec();
 		slv.assert_num_solutions(&[int_views[0], int_views[1], int_views[2]], 7, move |sol| {
 			let Int(x) = sol[0] else { return false };
 			let Int(y) = sol[1] else { return false };
@@ -2854,9 +2885,9 @@ mod tests {
 	#[traced_test]
 	fn test_replacement() {
 		let mut prb = Model::default();
-		let int_vars = prb.new_int_vars(4, RangeList::from_iter([1..=5]));
-		let b = prb.new_bool_var();
-		let c = prb.new_bool_var();
+		let int_vars = prb.new_int_decisions(4, RangeList::from_iter([1..=5]));
+		let b = prb.new_bool_decision();
+		let c = prb.new_bool_decision();
 		let mut diff_logic = DifferenceLogicCollection::new(
 			LEVEL,
 			PRIO_BOUNDS,
@@ -2902,13 +2933,9 @@ mod tests {
 			.process(&mut prb)
 			.expect("Creating model failed")
 			.expect("Model is empty");
-		prb.add_constraint(diff_logic_model);
-		let con_ref = prb
-			.propagator_queue
-			.pop()
-			.expect("Diff logic was not enqueued");
-		assert!(prb.propagate(con_ref).is_ok());
-		let IntDecisionInner::Linear(view) = int_vars[3].0 else {
+		prb.post_constraint(diff_logic_model);
+		assert!(prb.propagate(ConRef::new(0)).is_ok());
+		let IntView::Linear(view) = int_vars[3].0 else {
 			unreachable!();
 		};
 		let var_index = view.var;
@@ -2916,7 +2943,7 @@ mod tests {
 			int_vars[0]
 				.unify(
 					&mut prb,
-					IntDecision(IntDecisionInner::Linear(LinearView::new(
+					model::View::<IntVal>(IntView::Linear(LinearView::new(
 						NonZero::new(2).unwrap(),
 						1,
 						var_index
@@ -2926,12 +2953,9 @@ mod tests {
 		);
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let int_views = int_vars
-			.iter()
-			.map(|&v| map.get_int(&mut slv, v))
-			.collect_vec();
-		let b_view = IntView::from(map.get_bool(&mut slv, b));
-		let c_view = IntView::from(map.get_bool(&mut slv, c));
+		let int_views = int_vars.iter().map(|&v| map.get(&mut slv, v)).collect_vec();
+		let b_view = solver::View::from(map.get(&mut slv, b));
+		let c_view = solver::View::from(map.get(&mut slv, c));
 		slv.assert_num_solutions(
 			&[
 				int_views[0],
@@ -2959,9 +2983,9 @@ mod tests {
 	#[traced_test]
 	fn test_unification() {
 		let mut prb = Model::default();
-		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=5]));
-		let b = prb.new_bool_var();
-		let c = prb.new_bool_var();
+		let int_vars = prb.new_int_decisions(3, RangeList::from_iter([1..=5]));
+		let b = prb.new_bool_decision();
+		let c = prb.new_bool_decision();
 		let mut diff_logic = DifferenceLogicCollection::new(
 			LEVEL,
 			PRIO_BOUNDS,
@@ -3007,13 +3031,9 @@ mod tests {
 			.process(&mut prb)
 			.expect("Creating model failed")
 			.expect("Model is empty");
-		prb.add_constraint(diff_logic_model);
-		let con_ref = prb
-			.propagator_queue
-			.pop()
-			.expect("Diff logic was not enqueued");
-		assert!(prb.propagate(con_ref).is_ok());
-		let IntDecisionInner::Linear(view) = int_vars[2].0 else {
+		prb.post_constraint(diff_logic_model);
+		assert!(prb.propagate(ConRef::new(0)).is_ok());
+		let IntView::Linear(view) = int_vars[2].0 else {
 			unreachable!();
 		};
 		let var_index = view.var;
@@ -3021,7 +3041,7 @@ mod tests {
 			int_vars[0]
 				.unify(
 					&mut prb,
-					IntDecision(IntDecisionInner::Linear(LinearView::new(
+					model::View::<IntVal>(IntView::Linear(LinearView::new(
 						NonZero::new(1).unwrap(),
 						1,
 						var_index
@@ -3031,12 +3051,9 @@ mod tests {
 		);
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let int_views = int_vars
-			.iter()
-			.map(|&v| map.get_int(&mut slv, v))
-			.collect_vec();
-		let b_view = IntView::from(map.get_bool(&mut slv, b));
-		let c_view = IntView::from(map.get_bool(&mut slv, c));
+		let int_views = int_vars.iter().map(|&v| map.get(&mut slv, v)).collect_vec();
+		let b_view = solver::View::from(map.get(&mut slv, b));
+		let c_view = solver::View::from(map.get(&mut slv, c));
 		slv.assert_num_solutions(
 			&[int_views[0], int_views[1], int_views[2], b_view, c_view],
 			10,
@@ -3058,7 +3075,7 @@ mod tests {
 	#[traced_test]
 	fn test_constants() {
 		let mut prb = Model::default();
-		let int_vars = prb.new_int_vars(3, RangeList::from_iter([1..=10]));
+		let int_vars = prb.new_int_decisions(3, RangeList::from_iter([1..=10]));
 		let mut diff_logic = DifferenceLogicCollection::new(
 			LEVEL,
 			PRIO_BOUNDS,
@@ -3085,20 +3102,13 @@ mod tests {
 			.process(&mut prb)
 			.expect("Creating model failed")
 			.expect("Model is empty");
-		prb.add_constraint(diff_logic_model);
-		let con_ref = prb
-			.propagator_queue
-			.pop()
-			.expect("Diff logic was not enqueued");
-		assert!(prb.propagate(con_ref).is_ok());
-		assert!(int_vars[0].unify(&mut prb, IntDecision::from(5)).is_ok());
-		assert!(int_vars[2].unify(&mut prb, IntDecision::from(5)).is_ok());
+		prb.post_constraint(diff_logic_model);
+		assert!(prb.propagate(ConRef::new(0)).is_ok());
+		assert!(int_vars[0].unify(&mut prb, model::View::from(5)).is_ok());
+		assert!(int_vars[2].unify(&mut prb, model::View::from(5)).is_ok());
 
 		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-		let int_views = int_vars
-			.iter()
-			.map(|&v| map.get_int(&mut slv, v))
-			.collect_vec();
+		let int_views = int_vars.iter().map(|&v| map.get(&mut slv, v)).collect_vec();
 		slv.assert_num_solutions(&[int_views[0], int_views[1], int_views[2]], 2, move |sol| {
 			let Int(x) = sol[0] else { return false };
 			let Int(y) = sol[1] else { return false };
