@@ -9,7 +9,6 @@ use crate::{
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, IntPropagationActions,
 		PostingActions, ReasoningEngine, SimplificationActions,
-		TrailingActions,
 	},
 	constraints::{
 		BoolModelActions, Constraint, IntModelActions, IntSolverActions, Propagator,

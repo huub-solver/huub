@@ -32,7 +32,8 @@ use crate::{
 	IntSet, IntVal,
 	actions::{
 		ConstructionActions, DecisionActions, IntInspectionActions, PropagationActions,
-		ReasoningContext, ReasoningEngine, SimplificationActions, Trailed, TrailingActions,
+		ReasoningContext, ReasoningEngine, SimplificationActions, TrailAccessActions, Trailed,
+		TrailingActions,
 	},
 	constraints::{
 		BoxedConstraint, Conflict, Constraint, DeferredReason, Reason, ReasonBuilder,
@@ -574,6 +575,11 @@ impl SimplificationActions for Model {
 	fn post_constraint<C: Constraint<Model>>(&mut self, constraint: C) {
 		self.post_constraint(constraint);
 	}
+
+impl TrailAccessActions for Model {
+	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
+		T::from_bytes(self.trail[i.index as usize])
+	}
 }
 
 impl TrailingActions for Model {
@@ -582,9 +588,5 @@ impl TrailingActions for Model {
 			&mut self.trail[i.index as usize],
 			v.to_bytes(),
 		))
-	}
-
-	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
-		T::from_bytes(self.trail[i.index as usize])
 	}
 }

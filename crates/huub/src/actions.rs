@@ -130,15 +130,18 @@ pub struct Trailed<T: Bytes> {
 	pub(crate) ty: PhantomData<T>,
 }
 
+/// Read only access to a trail.
+pub trait TrailAccessActions {
+	/// Get the current value of a [`Trailed`] value.
+	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T;
+}
+
 /// Basic actions that can be performed when the trailing infrastructure is
 /// available.
-pub trait TrailingActions {
+pub trait TrailingActions: TrailAccessActions {
 	/// Set a [`Trailed`] value, replacing the current value with the new value.
 	///
 	/// If any backtracking occurs, the value will be restored to its previous
 	/// value.
 	fn set_trailed<T: Bytes>(&mut self, i: Trailed<T>, v: T) -> T;
-
-	/// Get the current value of a [`Trailed`] value.
-	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T;
 }

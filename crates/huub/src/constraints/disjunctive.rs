@@ -8,7 +8,8 @@ use crate::{
 	Conjunction, IntVal,
 	actions::{
 		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions, PostingActions,
-		PropagationActions, ReasoningContext, ReasoningEngine, Trailed, TrailingActions,
+		PropagationActions, ReasoningContext, ReasoningEngine, TrailAccessActions, Trailed,
+		TrailingActions,
 	},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, ReasonBuilder,

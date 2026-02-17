@@ -19,7 +19,8 @@ use crate::{
 	IntSet, IntVal, Model,
 	actions::{
 		BoolInspectionActions, ConstructionActions, IntDecisionActions, IntInspectionActions,
-		PostingActions, ReasoningContext, ReasoningEngine, Trailed,
+		PostingActions, ReasoningContext, ReasoningEngine, TrailAccessActions, Trailed,
+		TrailingActions,
 	},
 	constraints::{BoxedPropagator, Conflict, ReasonBuilder},
 	helpers::bytes::Bytes,
@@ -124,8 +125,27 @@ trait LoweringActions {
 	/// [`Solver`].
 	fn new_trailed(&mut self, init: u64) -> Trailed<u64>;
 
+	/// Set a [`Trailed`] value, replacing the current value with the new value.
+	fn set_trailed(&mut self, i: Trailed<u64>, v: u64) -> u64;
+
+	/// Get the current value of a [`Trailed`] value.
+	fn trailed(&self, i: Trailed<u64>) -> u64;
+
 	/// Create a fresh range of Boolean variables in the underlying SAT solver.
 	fn new_var_range(&mut self, len: usize) -> pindakaas::VarRange;
+}
+
+#[derive(Debug)]
+/// Read only access to the [`Model`] trail.
+pub struct ModelTrail<'a> {
+	/// The state of the trailed values in the source [`Model`] object.
+	trail: &'a [[u8; 8]],
+}
+
+impl TrailAccessActions for ModelTrail<'_> {
+	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
+		T::from_bytes(self.trail[i.index as usize])
+	}
 }
 
 /// Context object used during the lowering process that creates a
@@ -144,7 +164,7 @@ pub struct LoweringContext<'a> {
 	/// [`Unsatisfiable`].
 	pub(crate) error: Option<LoweringError>,
 	/// The state of the trailed values in the source [`Model`] object.
-	trail: &'a [[u8; 8]],
+	model_trail: ModelTrail<'a>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -372,9 +392,9 @@ impl<'a> LoweringContext<'a> {
 		Conflict::new(self, None, reason)
 	}
 
-	/// Read a trailed value from the [`Model`] trail.
-	pub fn model_trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
-		T::from_bytes(self.trail[i.index as usize])
+	/// Provide access to the [`Model`] trail.
+	pub fn model_trail(&self) -> &impl TrailAccessActions {
+		&self.model_trail
 	}
 
 	/// Create a lowering context for a solver, a mapping, and a trail snapshot.
@@ -387,7 +407,7 @@ impl<'a> LoweringContext<'a> {
 			slv,
 			map,
 			error: None,
-			trail,
+			model_trail: ModelTrail { trail },
 		}
 	}
 
@@ -438,6 +458,30 @@ impl ConstructionActions for LoweringContext<'_> {
 	}
 }
 
+impl TrailAccessActions for LoweringContext<'_> {
+	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
+		let t = Trailed {
+			index: i.index,
+			ty: PhantomData,
+		};
+		let res = self.slv.trailed(t).to_bytes();
+		T::from_bytes(res)
+	}
+}
+
+impl TrailingActions for LoweringContext<'_> {
+	fn set_trailed<T: Bytes>(&mut self, i: Trailed<T>, v: T) -> T {
+		let bytes = v.to_bytes();
+		let d = u64::from_bytes(bytes);
+		let t = Trailed {
+			index: i.index,
+			ty: PhantomData,
+		};
+		let res = self.slv.set_trailed(t, d).to_bytes();
+		T::from_bytes(res)
+	}
+}
+
 impl Debug for LoweringContext<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let ptr: *const _ = &self.slv;
@@ -445,7 +489,7 @@ impl Debug for LoweringContext<'_> {
 			.field("slv", &ptr)
 			.field("map", &self.map)
 			.field("error", &self.error)
-			.field("trail", &self.trail)
+			.field("model_trail", &self.model_trail)
 			.finish()
 	}
 }
@@ -777,6 +821,14 @@ impl<Sat: ExternalPropagation> LoweringActions for Solver<Sat> {
 
 	fn new_trailed(&mut self, init: u64) -> Trailed<u64> {
 		ConstructionActions::new_trailed(self, init)
+	}
+
+	fn set_trailed(&mut self, i: Trailed<u64>, v: u64) -> u64 {
+		TrailingActions::set_trailed(self, i, v)
+	}
+
+	fn trailed(&self, i: Trailed<u64>) -> u64 {
+		TrailAccessActions::trailed(self, i)
 	}
 
 	fn new_var_range(&mut self, len: usize) -> pindakaas::VarRange {

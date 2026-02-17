@@ -113,7 +113,6 @@ where
 					self.reif.into(),
 				]),
 				slv,
-				model_trail,
 			)
 		} else {
 			let eq_lits = self
@@ -125,7 +124,6 @@ where
 			<BoolFormula as Constraint<E>>::to_solver(
 				&Formula::Equiv(vec![self.reif.into(), Formula::Or(eq_lits)]),
 				slv,
-				model_trail,
 			)
 		}
 	}

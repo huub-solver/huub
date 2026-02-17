@@ -36,7 +36,6 @@ use crate::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
 		IntExplanationActions, IntInitActions, IntInspectionActions, IntPropagationActions,
 		IntSimplificationActions, ReasoningContext, ReasoningEngine,
-		TrailingActions,
 	},
 	lower::{LoweringContext, LoweringError},
 	model::{self, Model},
