@@ -20,7 +20,7 @@
 //! for n-dimensional data. It is backed by a single, flat `Box<[T]>` array,
 
 use std::{
-	iter::repeat_with,
+	iter::{repeat_n, repeat_with},
 	ops::{Index, IndexMut},
 };
 
@@ -93,6 +93,16 @@ impl<const D: usize, T> Matrix<D, T> {
 			dimensions,
 			repeat_with(|| T::default()).take(size).collect(),
 		)
+	}
+
+	/// Creates a new matrix with the given dimensions and filled with clones of
+	/// the specified value.
+	pub(crate) fn with_dimensions_and_value(dimensions: [usize; D], value: T) -> Self
+	where
+		T: Clone,
+	{
+		let size = dimensions.iter().product();
+		Self::new(dimensions, repeat_n(value, size).collect())
 	}
 }
 

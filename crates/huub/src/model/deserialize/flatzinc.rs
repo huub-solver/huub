@@ -2055,7 +2055,7 @@ where
 				self.stats.diff_logic_bool_vars,
 				self.stats.diff_logic_global_constraints,
 				self.stats.diff_logic_implied_constraints,
-			) = diff_logic_model.output_statistics(&mut self.prb);
+			) = diff_logic_model.output_statistics(&self.prb);
 			self.prb.post_constraint(diff_logic_model);
 		}
 
