@@ -745,6 +745,7 @@ impl DifferenceLogicModel {
 		model::View<bool>: BoolModelActions<E>,
 	{
 		trace!(old = ?old, new = ?new, offset = ?offset, "moving all edges");
+		// Move active edges, remove them if redundant, or fail if conflicting.
 		let mut mod_edges = Vec::new();
 		for i in 0..self.graph.active_out[old].len(ctx) {
 			let &e = self.graph.active_out[old].index(ctx, i);
@@ -796,9 +797,10 @@ impl DifferenceLogicModel {
 			}
 		}
 		self.graph.active_in[old].clear(ctx);
+		// Outgoing implied arcs: First check if they should be closed, then move remaining.
 		for i in self.graph.open_out[old].open_iter(ctx) {
 			let &e = self.graph.open_out[old].index(ctx, i);
-			if check_vars_different(
+			if !check_vars_different(
 				ctx,
 				self.graph.int_vars[new],
 				self.graph.int_vars[self.graph.edges[e].to],
@@ -807,19 +809,22 @@ impl DifferenceLogicModel {
 					.bool_var
 					.map(|b| self.graph.bool_vars[b]),
 			)? {
-				let edge = &mut self.graph.edges[e];
-				edge.from = new;
-				edge.val -= offset;
-				edge.out_index = self.graph.open_out[new].len();
-				self.graph.open_out[new].push(e);
-			} else {
 				self.graph.close_imp_edge(ctx, e);
 			}
 		}
+		for i in self.graph.open_out[old].open_iter(ctx) {
+			let &e = self.graph.open_out[old].index(ctx, i);
+			let edge = &mut self.graph.edges[e];
+			edge.from = new;
+			edge.val -= offset;
+			edge.out_index = self.graph.open_out[new].len();
+			self.graph.open_out[new].push(e);
+		}
 		self.graph.open_out[old].clear(ctx);
+		// Incoming implied arcs: First check if they should be closed, then move remaining.
 		for i in self.graph.open_in[old].open_iter(ctx) {
 			let &e = self.graph.open_in[old].index(ctx, i);
-			if check_vars_different(
+			if !check_vars_different(
 				ctx,
 				self.graph.int_vars[self.graph.edges[e].from],
 				self.graph.int_vars[new],
@@ -828,14 +833,16 @@ impl DifferenceLogicModel {
 					.bool_var
 					.map(|b| self.graph.bool_vars[b]),
 			)? {
-				let edge = &mut self.graph.edges[e];
-				edge.to = new;
-				edge.val += offset;
-				edge.in_index = self.graph.open_in[new].len();
-				self.graph.open_in[new].push(e);
-			} else {
 				self.graph.close_imp_edge(ctx, e);
 			}
+		}
+		for i in self.graph.open_in[old].open_iter(ctx) {
+			let &e = self.graph.open_in[old].index(ctx, i);
+			let edge = &mut self.graph.edges[e];
+			edge.to = new;
+			edge.val += offset;
+			edge.in_index = self.graph.open_in[new].len();
+			self.graph.open_in[new].push(e);
 		}
 		self.graph.open_in[old].clear(ctx);
 		// Check consequences of all modified active edges
@@ -1019,6 +1026,9 @@ where
 			trace!("diff logic subsumed");
 			return Ok(SimplificationStatus::Subsumed);
 		}
+
+		debug_assert!((0..self.graph.num_nodes()).all(|n| {self.graph.open_out[n].open_iter(ctx).all(|i| self.graph.edges[*self.graph.open_out[n].index(ctx, i)].out_index == i)}));
+		debug_assert!((0..self.graph.num_nodes()).all(|n| {self.graph.open_in[n].open_iter(ctx).all(|i| self.graph.edges[*self.graph.open_in[n].index(ctx, i)].in_index == i)}));
 
 		trace!(
 			"graph after simplify: {}",
