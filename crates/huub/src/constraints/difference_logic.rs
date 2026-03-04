@@ -797,7 +797,8 @@ impl DifferenceLogicModel {
 			}
 		}
 		self.graph.active_in[old].clear(ctx);
-		// Outgoing implied arcs: First check if they should be closed, then move remaining.
+		// Outgoing implied arcs: First check if they should be closed, then move
+		// remaining.
 		for i in self.graph.open_out[old].open_iter(ctx) {
 			let &e = self.graph.open_out[old].index(ctx, i);
 			if !check_vars_different(
@@ -821,7 +822,8 @@ impl DifferenceLogicModel {
 			self.graph.open_out[new].push(e);
 		}
 		self.graph.open_out[old].clear(ctx);
-		// Incoming implied arcs: First check if they should be closed, then move remaining.
+		// Incoming implied arcs: First check if they should be closed, then move
+		// remaining.
 		for i in self.graph.open_in[old].open_iter(ctx) {
 			let &e = self.graph.open_in[old].index(ctx, i);
 			if !check_vars_different(
@@ -884,8 +886,12 @@ impl DifferenceLogicModel {
 		model::View<bool>: BoolModelActions<E>,
 	{
 		for n in 0..self.graph.num_nodes() {
+			// Remove node if it is still active, fixed, and does not have bound changes to
+			// propagate.
 			if self.node_active[n]
 				&& let Some(val) = self.graph.int_vars[n].val(ctx)
+				&& !self.graph.lower_bound_changes.contains(&n)
+				&& !self.graph.upper_bound_changes.contains(&n)
 			{
 				trace!(n = ?n, "removing variable with fixed value");
 				self.node_active[n] = false;
@@ -1027,8 +1033,16 @@ where
 			return Ok(SimplificationStatus::Subsumed);
 		}
 
-		debug_assert!((0..self.graph.num_nodes()).all(|n| {self.graph.open_out[n].open_iter(ctx).all(|i| self.graph.edges[*self.graph.open_out[n].index(ctx, i)].out_index == i)}));
-		debug_assert!((0..self.graph.num_nodes()).all(|n| {self.graph.open_in[n].open_iter(ctx).all(|i| self.graph.edges[*self.graph.open_in[n].index(ctx, i)].in_index == i)}));
+		debug_assert!((0..self.graph.num_nodes()).all(|n| {
+			self.graph.open_out[n]
+				.open_iter(ctx)
+				.all(|i| self.graph.edges[*self.graph.open_out[n].index(ctx, i)].out_index == i)
+		}));
+		debug_assert!((0..self.graph.num_nodes()).all(|n| {
+			self.graph.open_in[n]
+				.open_iter(ctx)
+				.all(|i| self.graph.edges[*self.graph.open_in[n].index(ctx, i)].in_index == i)
+		}));
 
 		trace!(
 			"graph after simplify: {}",
@@ -1705,10 +1719,10 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 
 	/// Evaluate and enqueue the lower bound change, return true if the change
 	/// is new.
-	fn notify_lb_change<E>(&mut self, ctx: &mut E::NotificationCtx<'_>, n: usize) -> bool
+	fn notify_lb_change<Ctx>(&mut self, ctx: &mut Ctx, n: usize) -> bool
 	where
-		E: ReasoningEngine,
-		I: IntSolverActions<E>,
+		Ctx: ReasoningContext,
+		I: IntInspectionActions<Ctx>,
 	{
 		if self.lower_bound[n].is_none_or(|v| v < self.int_vars[n].min(ctx)) {
 			return self.lower_bound_changes.insert(n);
@@ -1718,10 +1732,10 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 
 	/// Evaluate and enqueue the upper bound change, return true if the change
 	/// is new.
-	fn notify_ub_change<E>(&mut self, ctx: &mut E::NotificationCtx<'_>, n: usize) -> bool
+	fn notify_ub_change<Ctx>(&mut self, ctx: &mut Ctx, n: usize) -> bool
 	where
-		E: ReasoningEngine,
-		I: IntSolverActions<E>,
+		Ctx: ReasoningContext,
+		I: IntInspectionActions<Ctx>,
 	{
 		if self.upper_bound[n].is_none_or(|v| v > self.int_vars[n].max(ctx)) {
 			return self.upper_bound_changes.insert(n);
@@ -2060,6 +2074,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 				source_lb,
 			)?;
 			if update_local_bounds {
+				self.notify_lb_change(ctx, self.edges[e].to);
 				self.update_lb(self.edges[e].to, lb_y);
 			}
 		}
@@ -2076,6 +2091,7 @@ impl<I, B> DifferenceLogicGraph<I, B> {
 				target_ub,
 			)?;
 			if update_local_bounds {
+				self.notify_ub_change(ctx, self.edges[e].from);
 				self.update_ub(self.edges[e].from, ub_x);
 			}
 		}
