@@ -12,10 +12,12 @@ use rustc_hash::FxHashMap;
 use tracing::{
 	Event, Level, Subscriber,
 	field::{Field, Visit},
+	level_filters::LevelFilter,
 };
 use tracing_subscriber::{
 	Layer,
 	field::{MakeVisitor, RecordFields, VisitOutput},
+	filter::Targets,
 	fmt::{
 		FormatFields, MakeWriter,
 		format::{DefaultFields, Writer},
@@ -103,6 +105,7 @@ struct RegisterLazyLits {
 /// using the name mapping provided by `lit_reverse_map` and `int_reverse_map`.
 pub(crate) fn create_subscriber<W>(
 	verbose: u8,
+	trace_targets: &[String],
 	make_writer: W,
 	ansi: bool,
 	lit_reverse_map: Arc<Mutex<FxHashMap<LitInt, LitName>>>,
@@ -111,25 +114,35 @@ pub(crate) fn create_subscriber<W>(
 where
 	W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
 {
+	let selected_level = match verbose {
+		0 => Level::INFO,
+		1 => Level::DEBUG,
+		_ => Level::TRACE, // 2 or more
+	};
+	let mut filter = Targets::new();
+	for target in trace_targets {
+		filter = filter.with_target(target.as_str(), selected_level);
+	}
+
 	// Builder for the formatting subscriber
-	let builder = tracing_subscriber::fmt()
-		.with_max_level(match verbose {
-			0 => Level::INFO,
-			1 => Level::DEBUG,
-			_ => Level::TRACE, // 2 or more
-		})
+	let fmt_layer = tracing_subscriber::fmt::layer()
 		.with_writer(make_writer)
 		.with_ansi(ansi)
 		.with_timer(uptime())
-		.map_fmt_fields(|fmt| {
-			FmtLitFields::new(fmt, Arc::clone(&lit_reverse_map), int_reverse_map)
-		});
+		.map_fmt_fields(|fmt| FmtLitFields::new(fmt, Arc::clone(&lit_reverse_map), int_reverse_map))
+		.with_filter(filter);
 
-	// Create final subscriber and add the layer that will register new lazily
-	// created literals
-	builder
-		.finish()
-		.with(RegisterLazyLits::new(lit_reverse_map))
+	tracing_subscriber::registry()
+		.with(
+			RegisterLazyLits::new(lit_reverse_map).with_filter(Targets::new().with_target(
+				"literal",
+				match verbose {
+					0 => LevelFilter::OFF,
+					_ => Level::TRACE.into(),
+				},
+			)),
+		)
+		.with(fmt_layer)
 }
 
 impl FmtLitFields {
@@ -417,9 +430,9 @@ impl RegisterLazyLits {
 }
 
 impl<S: Subscriber> Layer<S> for RegisterLazyLits {
-	fn event_enabled(&self, event: &Event<'_>, _: Context<'_, S>) -> bool {
+	fn on_event(&self, event: &Event<'_>, _: Context<'_, S>) {
 		let mut rec = RecordLazyLits::default();
 		event.record(&mut rec);
-		!rec.finish(&self.lit_reverse_map)
+		let _ = rec.finish(&self.lit_reverse_map);
 	}
 }

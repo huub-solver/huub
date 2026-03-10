@@ -108,6 +108,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 
 		if !events.is_empty() {
 			trace!(
+				target: "cumulative",
 				events =? events,
 				"events for compulsory parts from tasks"
 			);
@@ -125,6 +126,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				}
 				if cur_height > capacity_lb {
 					trace!(
+						target: "cumulative",
 						timepoint = t,
 						capacity_lb, cur_height, "push capacity lower bound"
 					);
@@ -147,6 +149,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 
 		if !self.bounds.is_empty() {
 			trace!(
+				target: "cumulative",
 				bounds = ?self.bounds,
 				heights = ?self.heights,
 				capacity_ub =? self.capacity.max(ctx),
@@ -214,6 +217,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		}
 
 		trace!(
+			target: "cumulative",
 			time_point,
 			relevant_tasks = ?minimal_relevant_tasks.iter().map(|&i| (
 				i,
@@ -268,10 +272,11 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	{
 		move |ctx: &mut Ctx| {
 			trace!(
+				target: "cumulative",
 				task_no,
 				timepoint =? time_point,
 				usage_limit,
-				"Explain task usage limit"
+				"explain task usage limit"
 			);
 			let capacity_ub = self.capacity.max(ctx);
 			let to_cover = capacity_ub - usage_limit;
@@ -279,6 +284,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				self.collect_compulsory_tasks(ctx, to_cover, time_point, Some(task_no));
 
 			trace!(
+				target: "cumulative",
 				time_point,
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
@@ -287,7 +293,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 					self.earliest_completion_time(ctx, i),
 				)).collect_vec(),
 				capacity_ub,
-				"Explain task usage limit"
+				"explain task usage limit"
 			);
 
 			let cap_lit = self.capacity.max_lit(ctx);
@@ -333,6 +339,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 			let relevant_tasks = self.collect_compulsory_tasks(ctx, to_cover, time_point, None);
 
 			trace!(
+				target: "cumulative",
 				time_point,
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
@@ -340,7 +347,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 					self.earliest_completion_time(ctx, i),
 					&self.durations[i]
 				)).collect_vec(),
-				"Explain resource overload"
+				"explain resource overload"
 			);
 
 			let cap_lit = self.capacity.max_lit(ctx);
@@ -389,6 +396,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				self.collect_compulsory_tasks(ctx, to_cover, time_point, Some(task_no));
 
 			trace!(
+				target: "cumulative",
 				time_point,
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
@@ -397,7 +405,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 					self.earliest_completion_time(ctx, i),
 				)).collect_vec(),
 				rule =? propagation_rule,
-				"Explain task sweeping"
+				"explain task sweeping"
 			);
 
 			// Construct the reason for the propagation
@@ -504,12 +512,13 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 			let max_usage = self.heights[max_period];
 			let limit = self.capacity.max(ctx) - max_usage + usage_lb;
 			trace!(
+				target: "cumulative",
 				task,
-				compulosary_part =? (lst, ect),
+				compulsory_part =? (lst, ect),
 				max_period,
 				max_usage,
 				limit,
-				"Limit task usage"
+				"limit task usage"
 			);
 			self.usages[task].tighten_max(
 				ctx,
@@ -616,7 +625,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 
 		// Find the partition point where b < lst + dur
 		let last = self.bounds.partition_point(|&b| b < lst + dur_lb);
-		trace!(task, dur_lb, est, lst, usage_lb, "Task sweep backward");
+		trace!(target: "cumulative", task, dur_lb, est, lst, usage_lb, "task sweep backward");
 		let mut updated_lct = self.latest_completion_time(ctx, task);
 		let max_capacity = self.capacity.max(ctx);
 		for i in (1..last).rev() {
@@ -653,6 +662,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 					.skip(1)
 					.collect_vec();
 				trace!(
+					target: "cumulative",
 					updated_lct,
 					b_start,
 					remainder,
@@ -721,7 +731,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 
 		// Find the partition point where est > b
 		let first = self.bounds.partition_point(|&b| b < est);
-		trace!(task, dur_lb, est, lst, usage_lb, "Task sweep forward");
+		trace!(target: "cumulative", task, dur_lb, est, lst, usage_lb, "task sweep forward");
 		let mut updated_est = est;
 		let max_capacity = self.capacity.max(ctx);
 		for i in first..self.bounds.len() - 1 {
@@ -756,6 +766,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 					.skip(1)
 					.collect_vec();
 				trace!(
+					target: "cumulative",
 					updated_est,
 					b_end,
 					remainder,
@@ -854,7 +865,12 @@ where
 		self.capacity.enqueue_when(ctx, IntPropCond::UpperBound);
 	}
 
-	#[tracing::instrument(name = "cumulative_timetable", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "cumulative_time_table",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// Build the time-table profile and check resource overload
 		match self.build_profile_and_check_overload(ctx) {

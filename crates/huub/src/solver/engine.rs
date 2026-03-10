@@ -3,7 +3,8 @@
 /// Macro to output a trace message when a new literal is registered.
 macro_rules! trace_new_lit {
 	($iv:expr, $def:expr, $lit:expr) => {
-		tracing::debug!(
+		tracing::trace!(
+			target: "literal",
 			lit = i32::from($lit),
 			int_var = $iv.ident(),
 			is_eq = matches!($def.meaning, IntLitMeaning::Eq(_)),
@@ -14,7 +15,6 @@ macro_rules! trace_new_lit {
 			},
 			"register new literal"
 		);
-		tracing::trace!(lit = i32::from($lit), "lazy literal")
 	};
 }
 
@@ -227,6 +227,7 @@ impl Engine {
 				// Ensure that the same literal is not negated in the reason
 				if seen.contains(&!l) {
 					tracing::error!(
+						target: "solver",
 						clause = ?clause.iter().map(|&l| i32::from(l)).collect::<Vec<_>>(),
 						lit_explained = i32::from(lit),
 						lit_pos = i32::from(!l),
@@ -248,6 +249,7 @@ impl Engine {
 				let val = Decision::<bool>(!l).val(&self.state.trail);
 				if !val.unwrap_or(false) {
 					tracing::error!(
+						target: "solver",
 						clause = ?clause.iter().map(|&l| i32::from(l)).collect::<Vec<_>>(),
 						lit_explained = i32::from(lit),
 						lit_invalid = i32::from(!l),
@@ -333,7 +335,11 @@ impl PropagatorExtension for Engine {
 	) -> Option<(Clause<RawLit>, ClausePersistence)> {
 		if !self.state.clauses.is_empty() {
 			let clause = self.state.clauses.pop_front(); // Known to be `Some`
-			trace!(clause = ?clause.as_ref().unwrap().iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add external clause");
+			trace!(
+				target: "solver",
+				clause = ?clause.as_ref().unwrap().iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(),
+				"add external clause"
+			);
 			clause.map(|c| (c, ClausePersistence::Irreduntant))
 		} else if !self.state.propagation_queue.is_empty() {
 			None // Require that the solver first applies the remaining propagation
@@ -343,7 +349,11 @@ impl PropagatorExtension for Engine {
 				conflict
 					.reason
 					.explain(&mut self.propagators, ctx.state, conflict.subject);
-			debug!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add conflict clause");
+			debug!(
+				target: "solver",
+				clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(),
+				"add conflict clause"
+			);
 			Some((clause, ClausePersistence::Forgettable))
 		} else {
 			None
@@ -370,11 +380,15 @@ impl PropagatorExtension for Engine {
 			vec![propagated_lit]
 		};
 
-		debug!(clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "add reason clause");
+		debug!(
+			target: "solver",
+			clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(),
+			"add reason clause"
+		);
 		clause
 	}
 
-	#[tracing::instrument(level = "debug", skip(self, slv, _sol))]
+	#[tracing::instrument(target = "solver", level = "debug", skip(self, slv, _sol))]
 	fn check_solution(
 		&mut self,
 		slv: &mut dyn SolvingActions,
@@ -478,7 +492,7 @@ impl PropagatorExtension for Engine {
 		self.state.conflict = conflict;
 
 		let accept = self.state.conflict.is_none();
-		debug!(accept, "check model");
+		debug!(target: "solver", accept, "check model");
 		accept
 	}
 
@@ -505,7 +519,7 @@ impl PropagatorExtension for Engine {
 							"brancher yielded an already fixed literal"
 						);
 						// The current brancher has selected a literal, return it as our decision
-						debug!(lit = i32::from(lit.0), "decide");
+						debug!(target: "solver", lit = i32::from(lit.0), "decide");
 						self.state.statistics.user_decisions += 1;
 						return SearchDecision::Assign(lit.0);
 					}
@@ -531,7 +545,11 @@ impl PropagatorExtension for Engine {
 	}
 
 	fn notify_assignments(&mut self, lits: &[RawLit]) {
-		debug!(lits = ?lits.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(), "assignments");
+		debug!(
+			target: "solver",
+			lits = ?lits.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(),
+			"assignments"
+		);
 
 		self.state.trail.reset_to_trail_head();
 
@@ -601,7 +619,13 @@ impl PropagatorExtension for Engine {
 						// Although we do not expect this to happen, it seems that CaDiCaL
 						// chronological backtracking might send notifications before
 						// additional propagation.
-						trace!(lit = i32::from(lit), lb, ub, "invalid eq notification");
+						trace!(
+							target: "solver",
+							lit = i32::from(lit),
+							lb,
+							ub,
+							"invalid eq notification"
+						);
 						None
 					}
 					IntLitMeaning::Eq(val) => {
@@ -625,7 +649,7 @@ impl PropagatorExtension for Engine {
 					IntLitMeaning::NotEq(_) => Some(IntEvent::Domain),
 					IntLitMeaning::GreaterEq(new_lb) if new_lb <= lb => None,
 					IntLitMeaning::GreaterEq(new_lb) => {
-						trace!(lit = i32::from(lit), lb = new_lb, "new lb");
+						trace!(target: "solver", lit = i32::from(lit), lb = new_lb, "new lb");
 						self.state.int_vars[iv.idx()]
 							.notify_lower_bound(&mut self.state.trail, new_lb);
 						Some(if new_lb == ub {
@@ -637,7 +661,12 @@ impl PropagatorExtension for Engine {
 					IntLitMeaning::Less(i) => {
 						let new_ub = i - 1;
 						if new_ub < ub {
-							trace!(lit = i32::from(lit), ub = new_ub, "new ub");
+							trace!(
+								target: "solver",
+								lit = i32::from(lit),
+								ub = new_ub,
+								"new ub"
+							);
 							self.state.int_vars[iv.idx()]
 								.notify_upper_bound(&mut self.state.trail, new_ub);
 							Some(if new_ub == lb {
@@ -682,7 +711,7 @@ impl PropagatorExtension for Engine {
 	}
 
 	fn notify_backtrack(&mut self, new_level: usize, restart: bool) {
-		debug!(new_level, restart, "backtrack");
+		debug!(target: "solver", new_level, restart, "backtrack");
 		self.notify_backtrack::<false>(new_level, restart);
 	}
 
@@ -697,7 +726,7 @@ impl PropagatorExtension for Engine {
 		// might have introduced a new literal, which would in turn add its defining
 		// clauses to `self.state.clauses`.
 
-		trace!("new decision level");
+		trace!(target: "solver", "new decision level");
 		self.state.notify_new_decision_level();
 
 		// Update peak decision level
@@ -707,7 +736,12 @@ impl PropagatorExtension for Engine {
 		}
 	}
 
-	#[tracing::instrument(level = "debug", skip(self, slv), fields(level = self.state.decision_level()))]
+	#[tracing::instrument(
+		target = "solver",
+		level = "debug",
+		skip(self, slv),
+		fields(level = self.state.decision_level())
+	)]
 	fn propagate(&mut self, slv: &mut dyn SolvingActions) -> Option<RawLit> {
 		debug_assert!(self.state.last_propagated.is_none());
 		// Check whether there are previous clauses to be communicated
@@ -741,7 +775,7 @@ impl PropagatorExtension for Engine {
 		if let Some(LitPropagation { lit, reason, event }) =
 			self.state.propagation_queue.pop_front()
 		{
-			debug!(lit = i32::from(lit), "propagate");
+			debug!(target: "solver", lit = i32::from(lit), "propagate");
 			debug_assert!(self.state.trail.sat_value(lit).is_some());
 			self.state.register_reason(lit, reason);
 			#[cfg(debug_assertions)]
@@ -870,9 +904,10 @@ impl State {
 			self.vsids = true;
 			self.config.vsids_after_conflict = None; // Only switch once
 			debug!(
+				target: "solver",
 				vsids = self.vsids,
 				conflicts = self.statistics.conflicts,
-				"enable vsids after N conflicts"
+				"enable vsids after conflict threshold"
 			);
 		}
 
@@ -882,13 +917,15 @@ impl State {
 			if self.config.toggle_vsids && !self.config.vsids_only {
 				self.vsids = !self.vsids;
 				debug!(
+					target: "solver",
 					vsids = self.vsids,
 					restart = self.statistics.restarts,
-					"toggling vsids"
+					"toggle vsids on restart"
 				);
 			} else if self.config.vsids_after_restart {
 				self.vsids = true;
 				debug!(
+					target: "solver",
 					vsids = self.vsids,
 					restart = self.statistics.restarts,
 					"enable vsids after restart"

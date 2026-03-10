@@ -716,6 +716,12 @@ where
 	IV: IntSolverActions<E>,
 	E::Atom: BoolSolverActions<E>,
 {
+	#[tracing::instrument(
+		name = "int_linear_less_eq_bounds",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn explain(
 		&mut self,
 		ctx: &mut E::ExplanationCtx<'_>,
@@ -748,7 +754,12 @@ where
 	}
 
 	// propagation rule: x[i] <= rhs - sum_{j != i} x[j].lower_bound
-	#[tracing::instrument(name = "int_lin_le", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "int_linear_less_eq_bounds",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// If the reified variable is false, skip propagation
 		let r_val = self.reification.val(ctx);
@@ -1023,7 +1034,12 @@ where
 			.advise_when_fixed(ctx, self.terms.len() as u64);
 	}
 
-	#[tracing::instrument(name = "int_lin_ne", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "int_linear_not_eq_value",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		let r_fixed = match self.reification.val(ctx) {
 			Some(false) => return Ok(()),

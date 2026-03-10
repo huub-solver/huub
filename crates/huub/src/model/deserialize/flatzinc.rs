@@ -274,7 +274,11 @@ where
 								warm_start.extend(w);
 								branchings.extend(b);
 							}
-							_ => warn!("unsupported search annotation: {}", ann),
+							_ => warn!(
+								target: "flatzinc",
+								annotation = ?ann,
+								"unsupported search annotation"
+							),
 						}
 					}
 					Ok((warm_start, branchings))
@@ -347,7 +351,11 @@ where
 				}
 			}
 			other => {
-				warn!("ignoring unsupported search annotation: {}", other);
+				warn!(
+					target: "flatzinc",
+					annotation = ?other,
+					"ignore unsupported search annotation"
+				);
 				Ok((Vec::new(), Vec::new()))
 			}
 		}
@@ -372,7 +380,12 @@ where
 					// "outdomain_median" => Ok(ValueSelection::OutdomainMedian),
 					// "outdomain_random" => Ok(ValueSelection::OutdomainRandom),
 					_ => {
-						warn!("unsupported value selection `{}', using `indomain_min'", s);
+						warn!(
+							target: "flatzinc",
+							selection = %s,
+							fallback = "indomain_min",
+							"unsupported value selection"
+						);
 						Ok(ValueSelection::IndomainMin)
 					}
 				}
@@ -402,8 +415,10 @@ where
 					"smallest" => Ok(VariableSelection::Smallest),
 					_ => {
 						warn!(
-							"unsupported variable selection `{}', using `input_order'",
-							s
+							target: "flatzinc",
+							selection = %s,
+							fallback = "input_order",
+							"unsupported variable selection"
 						);
 						Ok(VariableSelection::InputOrder)
 					}
@@ -610,7 +625,11 @@ where
 					warm_start.extend(w);
 					branchings.extend(b);
 				}
-				_ => warn!("ignoring unsupported search annotation: {}", ann),
+				_ => warn!(
+					target: "flatzinc",
+					annotation = ?ann,
+					"ignore unsupported search annotation"
+				),
 			}
 		}
 		branchings.insert(0, Branching::WarmStart(warm_start));
@@ -907,10 +926,11 @@ where
 							Some(_) => unreachable!(),
 							None => {
 								warn!(
-									"decision variable `{}' was unbounded, assuming domain {}..{}",
-									ident,
-									FULL_INT_DOMAIN.start(),
-									FULL_INT_DOMAIN.end()
+									target: "flatzinc",
+									variable = %ident,
+									min = FULL_INT_DOMAIN.start(),
+									max = FULL_INT_DOMAIN.end(),
+									"assume full integer domain for unbounded decision variable"
 								);
 								self.prb.new_int_decision(FULL_INT_DOMAIN).into()
 							}
@@ -1907,8 +1927,10 @@ where
 			for (i, used) in ann_used.iter().enumerate() {
 				if !used {
 					warn!(
-						"ignored unsupported annotation `{}' on constraint type `{}`",
-						c.ann[i], c.id
+						target: "flatzinc",
+						annotation = ?c.ann[i],
+						constraint = %c.id,
+						"ignore unsupported constraint annotation"
 					);
 				}
 			}
@@ -2106,10 +2128,11 @@ where
 								})
 								.unwrap();
 							warn!(
-								"decision variable `{}' was unbounded, assuming domain {}..{}",
-								id,
-								FULL_INT_DOMAIN.start(),
-								FULL_INT_DOMAIN.end()
+								target: "flatzinc",
+								variable = %id,
+								min = FULL_INT_DOMAIN.start(),
+								max = FULL_INT_DOMAIN.end(),
+								"assume full integer domain for unbounded decision variable"
 							);
 							self.prb.new_int_decision(FULL_INT_DOMAIN).into()
 						}

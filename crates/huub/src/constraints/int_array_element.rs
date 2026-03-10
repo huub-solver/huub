@@ -196,7 +196,12 @@ where
 		}
 	}
 
-	#[tracing::instrument(name = "array_int_element", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "int_array_element_bounds",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// ensure bounds of result and self.vars[self.index] are consistent when
 		// self.index is fixed only trigger when self.index is fixed and (1) y is

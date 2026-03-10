@@ -419,7 +419,10 @@ impl Model {
 			// user search heuristics are provided
 			r.set_option("restart", config.restart() as i32);
 		} else {
-			warn!("unknown solver: vivification and restart options are ignored");
+			warn!(
+				target: "solver",
+				"ignore vivification and restart options for unknown solver"
+			);
 		}
 
 		while let Some(con) = self.propagator_queue.pop() {

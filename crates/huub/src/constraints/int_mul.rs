@@ -145,7 +145,12 @@ where
 		self.product.enqueue_when(ctx, IntPropCond::Bounds);
 	}
 
-	#[tracing::instrument(name = "int_times", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "int_mul_bounds",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		let (f1_lb, f1_ub) = self.factor1.bounds(ctx);
 		let f1_lb_lit = self.factor1.min_lit(ctx);

@@ -372,7 +372,8 @@ impl Conflict<solver::Decision<bool>> {
 				},
 				None => {
 					warn!(
-						"Empty conflict detected. This suggests additional reasoning might be possible during Model simplification."
+						target: "solver",
+						"empty conflict detected; additional model simplification reasoning may be possible"
 					);
 					Self {
 						subject: None,
