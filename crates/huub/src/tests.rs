@@ -161,6 +161,25 @@ fn test_duplicate_propagation() {
 	);
 }
 
+#[test]
+fn test_require_bool_view_over_aliased_int_decision() {
+	use crate::actions::IntSimplificationActions;
+
+	let mut prb = Model::default();
+	let a = prb.new_bool_decision();
+	let x = prb.new_int_decision(1..=2);
+
+	assert!(x.unify(&mut prb, a + 1).is_ok());
+	prb.proposition(Formula::Atom(x.eq(1))).post();
+
+	let vars = [ModelView::from(a), ModelView::from(x)];
+	prb.expect_solutions(
+		&vars,
+		expect![[r#"
+		false, 1"#]],
+	);
+}
+
 #[traced_test]
 #[test]
 fn test_unify_int_impossible() {

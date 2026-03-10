@@ -23,7 +23,7 @@ use crate::{
 	},
 	constraints::{BoxedPropagator, Conflict, ReasonBuilder},
 	helpers::bytes::Bytes,
-	model::{self, decision::integer::Domain},
+	model::{self, decision::integer::Domain, resolved::Resolved},
 	solver::{
 		self, IntLitMeaning, Solver,
 		decision::integer::{EncodingType, IntDecision},
@@ -178,13 +178,13 @@ pub(crate) struct LoweringMapBuilder {
 	pub(crate) bool_map: Vec<Option<solver::View<bool>>>,
 	/// Set of integer decision for which the direct encoding should be created
 	/// eagerly.
-	pub(crate) int_eager_direct: FxHashSet<model::Decision<IntVal>>,
+	pub(crate) int_eager_direct: FxHashSet<Resolved<model::Decision<IntVal>>>,
 	/// The (default) maximum cardinality of the domain of an integer variable
 	/// before its order encoding is created lazily.
 	pub(crate) int_eager_limit: usize,
 	/// Set of integer decision for which the order encoding should be created
 	/// eagerly.
-	pub(crate) int_eager_order: FxHashSet<model::Decision<IntVal>>,
+	pub(crate) int_eager_order: FxHashSet<Resolved<model::Decision<IntVal>>>,
 	/// Map of integer decisions to integer views.
 	pub(crate) int_map: Vec<Option<solver::View<IntVal>>>,
 }
@@ -674,36 +674,43 @@ impl LoweringMapBuilder {
 			return v;
 		}
 
-		let def = &model.int_vars[iv.idx()];
-		let view = match &def.domain {
-			Domain::Domain(dom) => {
-				let direct_enc = if self.int_eager_direct.contains(&iv) {
-					EncodingType::Eager
-				} else {
-					EncodingType::Lazy
+		let r = iv.resolve_alias(model);
+		let view = match r.into_inner().0 {
+			Const(c) => c.into(),
+			Linear(lin) => {
+				let var = Resolved(lin.var);
+				let base = match self.int_map[var.idx()] {
+					Some(v) => v,
+					None => {
+						let def = &model.int_vars[var.idx()];
+						let Domain::Domain(dom) = &def.domain else {
+							unreachable!()
+						};
+						let direct_enc = if self.int_eager_direct.contains(&var) {
+							EncodingType::Eager
+						} else {
+							EncodingType::Lazy
+						};
+						let card = dom.card();
+						let order_enc = if self.int_eager_order.contains(&var)
+							|| self.int_eager_direct.contains(&var)
+							|| card.is_some() && card.unwrap() <= self.int_eager_limit
+						{
+							EncodingType::Eager
+						} else {
+							EncodingType::Lazy
+						};
+						let view = IntDecision::new_in(slv, dom.clone(), order_enc, direct_enc);
+						self.int_map[var.idx()] = Some(view);
+						view
+					}
 				};
-				let card = dom.card();
-				let order_enc = if self.int_eager_order.contains(&iv)
-					|| self.int_eager_direct.contains(&iv)
-					|| card.is_some() && card.unwrap() <= self.int_eager_limit
-				{
-					EncodingType::Eager
-				} else {
-					EncodingType::Lazy
-				};
-				IntDecision::new_in(slv, dom.clone(), order_enc, direct_enc)
+				base * lin.scale + lin.offset
 			}
-			Domain::Alias(alias) => match alias.0 {
-				Const(c) => c.into(),
-				Linear(lin) => {
-					let iv = self.get_or_create_int(model, slv, lin.var);
-					iv * lin.scale + lin.offset
-				}
-				Bool(lin) => {
-					let bv = self.get_or_create_bool(model, slv, lin.var);
-					bv * lin.scale + lin.offset
-				}
-			},
+			Bool(lin) => {
+				let bv = self.get_or_create_bool(model, slv, lin.var);
+				bv * lin.scale + lin.offset
+			}
 		};
 
 		self.int_map[iv.idx()] = Some(view);

@@ -882,7 +882,7 @@ where
 	fn lit_bool(&mut self, lit: &Literal<S>) -> Result<View<bool>, FlatZincError> {
 		match lit {
 			Literal::Identifier(ident) => self.lookup_or_create_var(ident).map(|mv| match mv {
-				AnyView::Bool(bv) => Ok(bv.resolve_alias(&self.prb)),
+				AnyView::Bool(bv) => Ok(bv.resolve_alias(&self.prb).into_inner()),
 				AnyView::Int(_) => Err(FlatZincError::InvalidArgumentType {
 					expected: "bool",
 					found: "int".to_owned(),
@@ -899,7 +899,7 @@ where
 	fn lit_int(&mut self, lit: &Literal<S>) -> Result<View<IntVal>, FlatZincError> {
 		match lit {
 			Literal::Identifier(ident) => self.lookup_or_create_var(ident).map(|mv| match mv {
-				AnyView::Int(iv) => Ok(iv.resolve_alias(&self.prb)),
+				AnyView::Int(iv) => Ok(iv.resolve_alias(&self.prb).into_inner()),
 				AnyView::Bool(_) => Err(FlatZincError::InvalidArgumentType {
 					expected: "int",
 					found: "bool".to_owned(),

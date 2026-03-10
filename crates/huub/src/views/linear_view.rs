@@ -103,12 +103,12 @@ impl<Var> LinearView<NonZero<IntVal>, IntVal, Var> {
 	}
 
 	/// Reverses the transformation of an [`IntVal`], rounding up.
-	fn reverse_val_ceil(&self, val: IntVal) -> IntVal {
+	pub(crate) fn reverse_val_ceil(&self, val: IntVal) -> IntVal {
 		div_ceil(val - self.offset, self.scale)
 	}
 
 	/// Reverses the transformation of an [`IntVal`], rounding down.
-	fn reverse_val_floor(&self, val: IntVal) -> IntVal {
+	pub(crate) fn reverse_val_floor(&self, val: IntVal) -> IntVal {
 		div_floor(val - self.offset, self.scale)
 	}
 
@@ -136,7 +136,7 @@ impl<Var> LinearView<NonZero<IntVal>, IntVal, Var> {
 	}
 
 	/// Try to reverse the transformation of an [`IntVal`] without rounding.
-	fn try_reverse_val(&self, val: IntVal) -> Option<IntVal> {
+	pub(crate) fn try_reverse_val(&self, val: IntVal) -> Option<IntVal> {
 		let val = val - self.offset;
 		if val % self.scale.get() == 0 {
 			Some(val / self.scale.get())

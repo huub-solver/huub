@@ -4,6 +4,7 @@ pub(crate) mod decision;
 pub mod deserialize;
 pub mod expressions;
 mod initilization_context;
+pub(crate) mod resolved;
 pub(crate) mod view;
 
 use std::{
@@ -50,7 +51,7 @@ use crate::{
 			integer::{Domain, IntDecision},
 		},
 		initilization_context::ModelInitContext,
-		view::integer::IntView,
+		resolved::Resolved,
 	},
 	solver::{
 		IntLitMeaning, Solver,
@@ -436,26 +437,26 @@ impl Model {
 		}
 
 		// Determine encoding types for integer variables
-		let mut int_eager_direct = FxHashSet::<Decision<IntVal>>::default();
-		let int_eager_order = FxHashSet::<Decision<IntVal>>::default();
+		let mut int_eager_direct = FxHashSet::<Resolved<Decision<IntVal>>>::default();
+		let int_eager_order = FxHashSet::<Resolved<Decision<IntVal>>>::default();
 
 		for c in self.constraints.iter().flatten() {
 			let c: &dyn Constraint<Model> = c.as_ref();
 			let c: &dyn Any = c;
 			if let Some(c) = c.downcast_ref::<BoolDecisionArrayElement>() {
 				let index = c.index.resolve_alias(self);
-				if let IntView::Linear(lin) = index.0 {
-					int_eager_direct.insert(lin.var);
+				if let Some(var) = index.integer_decision() {
+					int_eager_direct.insert(var);
 				}
 			} else if let Some(c) = c.downcast_ref::<IntUnique>() {
 				for v in &c.prop.var {
 					let v = v.resolve_alias(self);
-					if let IntView::Linear(lin) = v.0 {
-						let Domain::Domain(dom) = &self.int_vars[lin.var.idx()].domain else {
+					if let Some(var) = v.integer_decision() {
+						let Domain::Domain(dom) = &self.int_vars[var.idx()].domain else {
 							unreachable!()
 						};
 						if dom.card() <= Some(c.prop.var.len() * 100 / 80) {
-							int_eager_direct.insert(lin.var);
+							int_eager_direct.insert(var);
 						}
 					}
 				}
@@ -463,22 +464,22 @@ impl Model {
 				c.downcast_ref::<IntArrayElementBounds<View<IntVal>, View<IntVal>, View<IntVal>>>()
 			{
 				let index = c.index.resolve_alias(self);
-				if let IntView::Linear(lin) = index.0 {
-					int_eager_direct.insert(lin.var);
+				if let Some(var) = index.integer_decision() {
+					int_eager_direct.insert(var);
 				}
 			} else if let Some(c) = c.downcast_ref::<IntTable>() {
 				for &v in &c.vars {
 					let v = v.resolve_alias(self);
-					if let IntView::Linear(lin) = v.0 {
-						int_eager_direct.insert(lin.var);
+					if let Some(var) = v.integer_decision() {
+						int_eager_direct.insert(var);
 					}
 				}
 			} else if let Some(c) =
 				c.downcast_ref::<IntValArrayElement<View<IntVal>, View<IntVal>>>()
 			{
 				let index = c.0.index.resolve_alias(self);
-				if let IntView::Linear(lin) = index.0 {
-					int_eager_direct.insert(lin.var);
+				if let Some(var) = index.integer_decision() {
+					int_eager_direct.insert(var);
 				}
 			}
 		}

@@ -16,8 +16,8 @@ use crate::{
 	constraints::{Conflict, ReasonBuilder, int_linear::IntEq},
 	model::{
 		Decision, Model, View,
-		decision::integer::Domain,
 		expressions::linear::IntLinearExp,
+		resolved::Resolved,
 		view::{DefaultView, boolean::BoolView, private},
 	},
 	solver::IntLitMeaning,
@@ -42,6 +42,339 @@ impl DefaultView for IntVal {
 	type View = IntView;
 }
 impl private::Sealed for IntVal {}
+
+impl Resolved<View<IntVal>> {
+	/// Consuming variant of [`IntSimplificationActions::exclude`].
+	pub(crate) fn exclude(
+		self,
+		ctx: &mut Model,
+		values: &IntSet,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<View<bool>>> {
+		match self.0.0 {
+			IntView::Const(v) => v.exclude(ctx, values, reason),
+			IntView::Linear(lin) => {
+				Resolved(lin.var).exclude(ctx, &lin.reverse_intset(values), reason)
+			}
+			IntView::Bool(lin) => lin.exclude(ctx, values, reason),
+		}
+	}
+
+	/// Consuming variant of [`IntPropagationActions::fix`].
+	pub(crate) fn fix(
+		self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<View<bool>>> {
+		match self.0.0 {
+			IntView::Const(v) => v.fix(ctx, val, reason),
+			IntView::Linear(lin) => {
+				let Some(val) = lin.try_reverse_val(val) else {
+					return Err(ctx.declare_conflict(reason));
+				};
+				Resolved(lin.var).fix(ctx, val, reason)
+			}
+			IntView::Bool(lin) => lin.fix(ctx, val, reason),
+		}
+	}
+
+	/// Consuming variant of [`IntPropagationActions::remove_val`].
+	pub(crate) fn remove_val(
+		self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<View<bool>>> {
+		match self.0.0 {
+			IntView::Const(v) => v.remove_val(ctx, val, reason),
+			IntView::Linear(lin) => {
+				let Some(val) = lin.try_reverse_val(val) else {
+					return Ok(());
+				};
+				Resolved(lin.var).remove_val(ctx, val, reason)
+			}
+			IntView::Bool(lin) => lin.remove_val(ctx, val, reason),
+		}
+	}
+
+	/// Consuming variant of [`IntSimplificationActions::restrict_domain`].
+	pub(crate) fn restrict_domain(
+		self,
+		ctx: &mut Model,
+		values: &IntSet,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<View<bool>>> {
+		match self.0.0 {
+			IntView::Const(v) => v.restrict_domain(ctx, values, reason),
+			IntView::Linear(lin) => {
+				Resolved(lin.var).restrict_domain(ctx, &lin.reverse_intset(values), reason)
+			}
+			IntView::Bool(lin) => lin.restrict_domain(ctx, values, reason),
+		}
+	}
+
+	/// Consuming variant of [`IntPropagationActions::tighten_max`].
+	pub(crate) fn tighten_max(
+		self,
+		ctx: &mut Model,
+		ub: IntVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<View<bool>>> {
+		match self.0.0 {
+			IntView::Const(v) => v.tighten_max(ctx, ub, reason),
+			IntView::Linear(lin) => {
+				if lin.scale.get() >= 0 {
+					Resolved(lin.var).tighten_max(ctx, lin.reverse_val_floor(ub), reason)
+				} else {
+					Resolved(lin.var).tighten_min(ctx, lin.reverse_val_ceil(ub), reason)
+				}
+			}
+			IntView::Bool(lin) => lin.tighten_max(ctx, ub, reason),
+		}
+	}
+
+	/// Consuming variant of [`IntPropagationActions::tighten_min`].
+	pub(crate) fn tighten_min(
+		self,
+		ctx: &mut Model,
+		val: IntVal,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<View<bool>>> {
+		match self.0.0 {
+			IntView::Const(v) => v.tighten_min(ctx, val, reason),
+			IntView::Linear(lin) => {
+				if lin.scale.get() >= 0 {
+					Resolved(lin.var).tighten_min(ctx, lin.reverse_val_ceil(val), reason)
+				} else {
+					Resolved(lin.var).tighten_max(ctx, lin.reverse_val_floor(val), reason)
+				}
+			}
+			IntView::Bool(lin) => lin.tighten_min(ctx, val, reason),
+		}
+	}
+
+	/// Consuming variant of [`IntSimplificationActions::unify`].
+	pub(crate) fn unify(
+		self,
+		ctx: &mut Model,
+		other: Resolved<View<IntVal>>,
+	) -> Result<(), Conflict<View<bool>>> {
+		use IntView::*;
+
+		let (idx, target) = match (self.0.0, other.0.0) {
+			(x, y) if x == y => return Ok(()),
+			(Bool(x), Bool(y)) => return x.unify(ctx, y),
+			(Const(x), Const(y)) if x != y => return Err(ctx.declare_conflict([])),
+			(Const(y), x) | (x, Const(y)) => {
+				let x = View::<IntVal>(x);
+				return x.fix(ctx, y, []);
+			}
+			(Linear(lin_x), Linear(lin_y)) => {
+				// Decide which variable to redefine based on the other.
+				let can_define_x = lin_y.scale.get() % lin_x.scale.get() == 0
+					&& (lin_y.offset - lin_x.offset) % lin_x.scale.get() == 0;
+				let can_define_y = lin_x.scale.get() % lin_y.scale.get() == 0
+					&& (lin_x.offset - lin_y.offset) % lin_y.scale.get() == 0;
+				let (lin_x, lin_y) = if can_define_x && can_define_y && lin_x.var.0 > lin_y.var.0 {
+					(lin_x, lin_y)
+				} else if can_define_y {
+					(lin_y, lin_x)
+				} else if can_define_x {
+					(lin_x, lin_y)
+				} else {
+					ctx.post_constraint(IntEq {
+						vars: [self.0, other.0],
+					});
+					return Ok(());
+				};
+
+				// Perform the transformation and add the aliasing domain to x:
+				// x_scale * x + x_scale = y_scale * y + y_offset
+				// === x = (y_scale / x_scale) * y + ((y_offset - x_offset) / x_scale)
+				let scale = NonZero::new(lin_y.scale.get() / lin_x.scale.get()).unwrap();
+				let offset = (lin_y.offset - lin_x.offset) / lin_x.scale.get();
+				let target = View(Linear(LinearView::new(scale, offset, lin_y.var)));
+				(lin_x.var, target)
+			}
+			(Linear(lin), Bool(b)) | (Bool(b), Linear(lin)) => {
+				let lb = b.transform_val(0);
+				let ub = b.transform_val(1);
+
+				let contains_lb = lin.in_domain(ctx, lb);
+				let contains_ub = lin.in_domain(ctx, ub);
+
+				match (contains_lb, contains_ub) {
+					(false, false) => {
+						return Err(ctx.declare_conflict(|ctx: &mut Model| {
+							[
+								lin.lit(ctx, IntLitMeaning::NotEq(lb)),
+								lin.lit(ctx, IntLitMeaning::NotEq(ub)),
+							]
+						}));
+					}
+					(false, true) => {
+						let Some(val) = lin.try_reverse_val(ub) else {
+							unreachable!()
+						};
+						Resolved(lin.var).fix(ctx, val, [])?;
+						return b.var.require(ctx, |ctx: &mut Model| {
+							[lin.lit(ctx, IntLitMeaning::NotEq(lb))]
+						});
+					}
+					(true, false) => {
+						let Some(val) = lin.try_reverse_val(lb) else {
+							unreachable!()
+						};
+						Resolved(lin.var).fix(ctx, val, [])?;
+						return b.var.fix(ctx, false, |ctx: &mut Model| {
+							[lin.lit(ctx, IntLitMeaning::NotEq(ub))]
+						});
+					}
+					(true, true) => {
+						let Ok(IntLitMeaning::Eq(i_lb)) =
+							lin.reverse_meaning(IntLitMeaning::Eq(lb))
+						else {
+							unreachable!()
+						};
+						let Ok(IntLitMeaning::Eq(i_ub)) =
+							lin.reverse_meaning(IntLitMeaning::Eq(ub))
+						else {
+							unreachable!()
+						};
+						let target = View(Bool(LinearBoolView::new(
+							NonZero::new(i_ub - i_lb).unwrap(),
+							i_lb,
+							b.var,
+						)));
+
+						(lin.var, target)
+					}
+				}
+			}
+		};
+
+		Resolved(idx).unify_internal(ctx, target)
+	}
+}
+
+impl IntDecisionActions<Model> for Resolved<View<IntVal>> {
+	fn lit(&self, ctx: &mut Model, meaning: IntLitMeaning) -> View<bool> {
+		IntInspectionActions::try_lit(self, ctx, meaning).unwrap()
+	}
+
+	fn val_lit(&self, ctx: &mut Model) -> Option<View<bool>> {
+		let val = self.val(ctx)?;
+		Some(IntInspectionActions::try_lit(self, ctx, IntLitMeaning::Eq(val)).unwrap())
+	}
+}
+
+impl IntInspectionActions<Model> for Resolved<View<IntVal>> {
+	fn bounds(&self, ctx: &Model) -> (IntVal, IntVal) {
+		match self.0.0 {
+			IntView::Const(v) => (v, v),
+			IntView::Linear(lin) => {
+				LinearView::new(lin.scale, lin.offset, Resolved(lin.var)).bounds(ctx)
+			}
+			IntView::Bool(lin) => lin.bounds(ctx),
+		}
+	}
+
+	fn domain(&self, ctx: &Model) -> IntSet {
+		match self.0.0 {
+			IntView::Const(c) => (c..=c).into(),
+			IntView::Linear(lin) => {
+				LinearView::new(lin.scale, lin.offset, Resolved(lin.var)).domain(ctx)
+			}
+			IntView::Bool(lin) => lin.domain(ctx),
+		}
+	}
+
+	fn in_domain(&self, ctx: &Model, val: IntVal) -> bool {
+		match self.0.0 {
+			IntView::Const(v) => v == val,
+			IntView::Linear(lin) => {
+				LinearView::new(lin.scale, lin.offset, Resolved(lin.var)).in_domain(ctx, val)
+			}
+			IntView::Bool(lin) => lin.in_domain(ctx, val),
+		}
+	}
+
+	fn lit_meaning(&self, ctx: &Model, lit: View<bool>) -> Option<IntLitMeaning> {
+		match self.0.0 {
+			IntView::Const(_) => None,
+			IntView::Linear(lin) => {
+				LinearView::new(lin.scale, lin.offset, Resolved(lin.var)).lit_meaning(ctx, lit)
+			}
+			IntView::Bool(lin) => lin.lit_meaning(ctx, lit),
+		}
+	}
+
+	fn max(&self, ctx: &Model) -> IntVal {
+		match self.0.0 {
+			IntView::Const(v) => v,
+			IntView::Linear(lin) => {
+				LinearView::new(lin.scale, lin.offset, Resolved(lin.var)).max(ctx)
+			}
+			IntView::Bool(lin) => lin.max(ctx),
+		}
+	}
+
+	fn max_lit(&self, ctx: &Model) -> View<bool> {
+		match self.0.0 {
+			IntView::Const(_) => true.into(),
+			IntView::Linear(lin) => {
+				LinearView::new(lin.scale, lin.offset, Resolved(lin.var)).max_lit(ctx)
+			}
+			IntView::Bool(lin) => lin.max_lit(ctx),
+		}
+	}
+
+	fn min(&self, ctx: &Model) -> IntVal {
+		match self.0.0 {
+			IntView::Const(v) => v,
+			IntView::Linear(lin) => {
+				LinearView::new(lin.scale, lin.offset, Resolved(lin.var)).min(ctx)
+			}
+			IntView::Bool(lin) => lin.min(ctx),
+		}
+	}
+
+	fn min_lit(&self, ctx: &Model) -> View<bool> {
+		match self.0.0 {
+			IntView::Const(_) => true.into(),
+			IntView::Linear(lin) => {
+				LinearView::new(lin.scale, lin.offset, Resolved(lin.var)).min_lit(ctx)
+			}
+			IntView::Bool(lin) => lin.min_lit(ctx),
+		}
+	}
+
+	fn try_lit(&self, ctx: &Model, meaning: IntLitMeaning) -> Option<View<bool>> {
+		match self.0.0 {
+			IntView::Const(v) => Some(match meaning {
+				IntLitMeaning::Eq(i) => (v == i).into(),
+				IntLitMeaning::NotEq(i) => (v != i).into(),
+				IntLitMeaning::GreaterEq(i) => (v >= i).into(),
+				IntLitMeaning::Less(i) => (v < i).into(),
+			}),
+			IntView::Linear(lin) => {
+				LinearView::new(lin.scale, lin.offset, Resolved(lin.var)).try_lit(ctx, meaning)
+			}
+			IntView::Bool(lin) => lin.try_lit(ctx, meaning),
+		}
+	}
+
+	fn val(&self, ctx: &Model) -> Option<IntVal> {
+		match self.0.0 {
+			IntView::Const(v) => Some(v),
+			IntView::Linear(lin) => {
+				LinearView::new(lin.scale, lin.offset, Resolved(lin.var)).val(ctx)
+			}
+			IntView::Bool(lin) => lin.val(ctx),
+		}
+	}
+}
 
 impl View<IntVal> {
 	/// Create a view that represents the addition of a constant value to the
@@ -226,44 +559,6 @@ impl View<IntVal> {
 	pub fn ne(&self, v: IntVal) -> View<bool> {
 		!self.eq(v)
 	}
-
-	/// Resolve any aliasing in the IntDecision, ensuring the result is a
-	/// IntDecision that if it is a `Var` or `Linear`, then the domain is not an
-	/// alias.
-	pub(crate) fn resolve_alias(self, model: &Model) -> Self {
-		use IntView::*;
-
-		let mut view = self;
-		let mut scale = 1;
-		let mut offset = 0;
-		loop {
-			match view.0 {
-				Const(c) => {
-					return (c * scale + offset).into();
-				}
-				_ if scale == 0 => {
-					return offset.into();
-				}
-				Linear(lin) => match model.int_vars[lin.var.idx()].domain {
-					Domain::Domain(_) => {
-						return View(Linear(lin * NonZero::new(scale).unwrap() + offset));
-					}
-					Domain::Alias(alias) => {
-						view = alias;
-						offset += scale * lin.offset;
-						scale *= lin.scale.get();
-					}
-				},
-				Bool(lin) => {
-					let var = lin.var.resolve_alias(model);
-					if let BoolView::Const(b) = var.0 {
-						return View(Const(lin.transform_val(b as IntVal) * scale + offset));
-					}
-					return View(Bool(lin * NonZero::new(scale).unwrap() + offset));
-				}
-			}
-		}
-	}
 }
 
 impl Add<IntVal> for View<IntVal> {
@@ -331,12 +626,11 @@ impl From<i64> for View<IntVal> {
 
 impl IntDecisionActions<Model> for View<IntVal> {
 	fn lit(&self, ctx: &mut Model, meaning: IntLitMeaning) -> View<bool> {
-		IntInspectionActions::try_lit(self, ctx, meaning).unwrap()
+		self.resolve_alias(ctx).lit(ctx, meaning)
 	}
 
 	fn val_lit(&self, ctx: &mut Model) -> Option<View<bool>> {
-		let val = self.val(ctx)?;
-		Some(Self::eq(self, val))
+		self.resolve_alias(ctx).val_lit(ctx)
 	}
 }
 
@@ -348,84 +642,43 @@ impl IntExplanationActions<Model> for View<IntVal> {
 
 impl IntInspectionActions<Model> for View<IntVal> {
 	fn bounds(&self, ctx: &Model) -> (IntVal, IntVal) {
-		match self.resolve_alias(ctx).0 {
-			IntView::Const(v) => (v, v),
-			IntView::Linear(lin) => lin.bounds(ctx),
-			IntView::Bool(lin) => lin.bounds(ctx),
-		}
+		self.resolve_alias(ctx).bounds(ctx)
 	}
 
 	fn domain(&self, ctx: &Model) -> IntSet {
-		match self.resolve_alias(ctx).0 {
-			IntView::Const(c) => (c..=c).into(),
-			IntView::Linear(lin) => lin.domain(ctx),
-			IntView::Bool(lin) => lin.domain(ctx),
-		}
+		self.resolve_alias(ctx).domain(ctx)
 	}
 
 	fn in_domain(&self, ctx: &Model, val: IntVal) -> bool {
-		match self.resolve_alias(ctx).0 {
-			IntView::Const(v) => v == val,
-			IntView::Linear(lin) => lin.in_domain(ctx, val),
-			IntView::Bool(lin) => lin.in_domain(ctx, val),
-		}
+		self.resolve_alias(ctx).in_domain(ctx, val)
 	}
 
 	fn lit_meaning(&self, ctx: &Model, lit: View<bool>) -> Option<IntLitMeaning> {
-		match self.0 {
-			IntView::Const(_) => None,
-			IntView::Linear(lin) => lin.lit_meaning(ctx, lit),
-			IntView::Bool(lin) => lin.lit_meaning(ctx, lit),
-		}
+		self.resolve_alias(ctx).lit_meaning(ctx, lit)
 	}
 
 	fn max(&self, ctx: &Model) -> IntVal {
-		match self.resolve_alias(ctx).0 {
-			IntView::Const(v) => v,
-			IntView::Linear(lin) => lin.max(ctx),
-			IntView::Bool(lin) => lin.max(ctx),
-		}
+		self.resolve_alias(ctx).max(ctx)
 	}
 
 	fn max_lit(&self, ctx: &Model) -> View<bool> {
-		match self.resolve_alias(ctx).0 {
-			IntView::Const(_) => true.into(),
-			IntView::Linear(lin) => lin.max_lit(ctx),
-			IntView::Bool(lin) => lin.max_lit(ctx),
-		}
+		self.resolve_alias(ctx).max_lit(ctx)
 	}
 
 	fn min(&self, ctx: &Model) -> IntVal {
-		match self.resolve_alias(ctx).0 {
-			IntView::Const(v) => v,
-			IntView::Linear(lin) => lin.min(ctx),
-			IntView::Bool(lin) => lin.min(ctx),
-		}
+		self.resolve_alias(ctx).min(ctx)
 	}
 
 	fn min_lit(&self, ctx: &Model) -> View<bool> {
-		match self.resolve_alias(ctx).0 {
-			IntView::Const(_) => true.into(),
-			IntView::Linear(lin) => lin.min_lit(ctx),
-			IntView::Bool(lin) => lin.min_lit(ctx),
-		}
+		self.resolve_alias(ctx).min_lit(ctx)
 	}
 
-	fn try_lit(&self, _: &Model, meaning: IntLitMeaning) -> Option<View<bool>> {
-		Some(match meaning {
-			IntLitMeaning::Eq(v) => self.eq(v),
-			IntLitMeaning::NotEq(v) => self.ne(v),
-			IntLitMeaning::GreaterEq(v) => self.geq(v),
-			IntLitMeaning::Less(v) => self.lt(v),
-		})
+	fn try_lit(&self, ctx: &Model, meaning: IntLitMeaning) -> Option<View<bool>> {
+		self.resolve_alias(ctx).try_lit(ctx, meaning)
 	}
 
 	fn val(&self, ctx: &Model) -> Option<IntVal> {
-		match self.resolve_alias(ctx).0 {
-			IntView::Const(v) => Some(v),
-			IntView::Linear(lin) => lin.val(ctx),
-			IntView::Bool(lin) => lin.val(ctx),
-		}
+		self.resolve_alias(ctx).val(ctx)
 	}
 }
 
@@ -436,11 +689,7 @@ impl IntPropagationActions<Model> for View<IntVal> {
 		val: IntVal,
 		reason: impl ReasonBuilder<Model>,
 	) -> Result<(), Conflict<View<bool>>> {
-		match self.resolve_alias(ctx).0 {
-			IntView::Const(v) => v.fix(ctx, val, reason),
-			IntView::Linear(lin) => lin.fix(ctx, val, reason),
-			IntView::Bool(lin) => lin.fix(ctx, val, reason),
-		}
+		self.resolve_alias(ctx).fix(ctx, val, reason)
 	}
 
 	fn remove_val(
@@ -449,11 +698,7 @@ impl IntPropagationActions<Model> for View<IntVal> {
 		val: IntVal,
 		reason: impl ReasonBuilder<Model>,
 	) -> Result<(), Conflict<View<bool>>> {
-		match self.resolve_alias(ctx).0 {
-			IntView::Const(v) => v.remove_val(ctx, val, reason),
-			IntView::Linear(lin) => lin.remove_val(ctx, val, reason),
-			IntView::Bool(lin) => lin.remove_val(ctx, val, reason),
-		}
+		self.resolve_alias(ctx).remove_val(ctx, val, reason)
 	}
 
 	fn tighten_max(
@@ -462,11 +707,7 @@ impl IntPropagationActions<Model> for View<IntVal> {
 		ub: IntVal,
 		reason: impl ReasonBuilder<Model>,
 	) -> Result<(), Conflict<View<bool>>> {
-		match self.resolve_alias(ctx).0 {
-			IntView::Const(v) => v.tighten_max(ctx, ub, reason),
-			IntView::Linear(lin) => lin.tighten_max(ctx, ub, reason),
-			IntView::Bool(lin) => lin.tighten_max(ctx, ub, reason),
-		}
+		self.resolve_alias(ctx).tighten_max(ctx, ub, reason)
 	}
 
 	fn tighten_min(
@@ -475,11 +716,7 @@ impl IntPropagationActions<Model> for View<IntVal> {
 		val: IntVal,
 		reason: impl ReasonBuilder<Model>,
 	) -> Result<(), Conflict<View<bool>>> {
-		match self.resolve_alias(ctx).0 {
-			IntView::Const(v) => v.tighten_min(ctx, val, reason),
-			IntView::Linear(lin) => lin.tighten_min(ctx, val, reason),
-			IntView::Bool(lin) => lin.tighten_min(ctx, val, reason),
-		}
+		self.resolve_alias(ctx).tighten_min(ctx, val, reason)
 	}
 }
 
@@ -490,11 +727,7 @@ impl IntSimplificationActions<Model> for View<IntVal> {
 		values: &IntSet,
 		reason: impl ReasonBuilder<Model>,
 	) -> Result<(), Conflict<View<bool>>> {
-		match self.resolve_alias(ctx).0 {
-			IntView::Const(v) => v.exclude(ctx, values, reason),
-			IntView::Linear(lin) => lin.exclude(ctx, values, reason),
-			IntView::Bool(lin) => lin.exclude(ctx, values, reason),
-		}
+		self.resolve_alias(ctx).exclude(ctx, values, reason)
 	}
 
 	fn restrict_domain(
@@ -503,104 +736,12 @@ impl IntSimplificationActions<Model> for View<IntVal> {
 		values: &IntSet,
 		reason: impl ReasonBuilder<Model>,
 	) -> Result<(), Conflict<View<bool>>> {
-		match self.resolve_alias(ctx).0 {
-			IntView::Const(v) => v.restrict_domain(ctx, values, reason),
-			IntView::Linear(lin) => lin.restrict_domain(ctx, values, reason),
-			IntView::Bool(lin) => lin.restrict_domain(ctx, values, reason),
-		}
+		self.resolve_alias(ctx).restrict_domain(ctx, values, reason)
 	}
 
 	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Conflict<View<bool>>> {
-		use IntView::*;
-
-		let x = self.resolve_alias(ctx);
-		let y = other.into().resolve_alias(ctx);
-
-		let (idx, target) = match (x.0, y.0) {
-			(x, y) if x == y => return Ok(()),
-			(Bool(x), Bool(y)) => return x.unify(ctx, y),
-			(Const(x), Const(y)) if x != y => return Err(ctx.declare_conflict([])),
-			(Const(y), x) | (x, Const(y)) => {
-				let x = View::<IntVal>(x);
-				return x.fix(ctx, y, []);
-			}
-			(Linear(lin_x), Linear(lin_y)) => {
-				// Decide which variable to redefine based on the other.
-				let can_define_x = lin_y.scale.get() % lin_x.scale.get() == 0
-					&& (lin_y.offset - lin_x.offset) % lin_x.scale.get() == 0;
-				let can_define_y = lin_x.scale.get() % lin_y.scale.get() == 0
-					&& (lin_x.offset - lin_y.offset) % lin_y.scale.get() == 0;
-				let (lin_x, lin_y) = if can_define_x && can_define_y && lin_x.var.0 > lin_y.var.0 {
-					(lin_x, lin_y)
-				} else if can_define_y {
-					(lin_y, lin_x)
-				} else if can_define_x {
-					(lin_x, lin_y)
-				} else {
-					ctx.post_constraint(IntEq { vars: [x, y] });
-					return Ok(());
-				};
-
-				// Perform the transformation and add the aliasing domain to x:
-				// x_scale * x + x_scale = y_scale * y + y_offset
-				// === x = (y_scale / x_scale) * y + ((y_offset - x_offset) / x_scale)
-				let scale = NonZero::new(lin_y.scale.get() / lin_x.scale.get()).unwrap();
-				let offset = (lin_y.offset - lin_x.offset) / lin_x.scale.get();
-				let target = View(Linear(LinearView::new(scale, offset, lin_y.var)));
-				(lin_x.var, target)
-			}
-			(Linear(lin), Bool(b)) | (Bool(b), Linear(lin)) => {
-				let lb = b.transform_val(0);
-				let ub = b.transform_val(1);
-
-				let contains_lb = lin.in_domain(ctx, lb);
-				let contains_ub = lin.in_domain(ctx, ub);
-
-				match (contains_lb, contains_ub) {
-					(false, false) => {
-						return Err(ctx.declare_conflict(|ctx: &mut Model| {
-							[
-								lin.lit(ctx, IntLitMeaning::NotEq(lb)),
-								lin.lit(ctx, IntLitMeaning::NotEq(ub)),
-							]
-						}));
-					}
-					(false, true) => {
-						lin.fix(ctx, ub, [])?;
-						return b.var.require(ctx, |ctx: &mut Model| {
-							[lin.lit(ctx, IntLitMeaning::NotEq(lb))]
-						});
-					}
-					(true, false) => {
-						lin.fix(ctx, lb, [])?;
-						return b.var.fix(ctx, false, |ctx: &mut Model| {
-							[lin.lit(ctx, IntLitMeaning::NotEq(ub))]
-						});
-					}
-					(true, true) => {
-						let Ok(IntLitMeaning::Eq(i_lb)) =
-							lin.reverse_meaning(IntLitMeaning::Eq(lb))
-						else {
-							unreachable!()
-						};
-						let Ok(IntLitMeaning::Eq(i_ub)) =
-							lin.reverse_meaning(IntLitMeaning::Eq(ub))
-						else {
-							unreachable!()
-						};
-						let target = View(Bool(LinearBoolView::new(
-							NonZero::new(i_ub - i_lb).unwrap(),
-							i_lb,
-							b.var,
-						)));
-
-						(lin.var, target)
-					}
-				}
-			}
-		};
-
-		idx.unify_internal(ctx, target)
+		let other = other.into().resolve_alias(ctx);
+		self.resolve_alias(ctx).unify(ctx, other)
 	}
 }
 
