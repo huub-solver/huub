@@ -509,7 +509,7 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 
 	/// Split the solver into an solving actions objects (limiting the
 	/// interaction with the SAT) and the dynamic engine reference.
-	fn as_parts_mut(&mut self) -> (impl SolvingActions + '_, RefMut<'_, Engine>) {
+	pub(crate) fn as_parts_mut(&mut self) -> (impl SolvingActions + '_, RefMut<'_, Engine>) {
 		struct SA<'a, O>(&'a mut O);
 		impl<O: ExternalPropagation> SolvingActions for SA<'_, O> {
 			fn is_decision(&mut self, _: RawLit) -> bool {
