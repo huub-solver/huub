@@ -134,7 +134,8 @@ fn main() -> ExitCode {
 				move || {
 					fs::OpenOptions::new()
 						.create(true)
-						.append(true)
+						.write(true)
+						.truncate(true)
 						.open(&log_file)
 						.expect("Failed to open log file")
 				},
