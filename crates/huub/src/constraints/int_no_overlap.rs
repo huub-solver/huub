@@ -652,7 +652,12 @@ where
 		}
 	}
 
-	#[tracing::instrument(name = "int_no_overlap", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "int_no_overlap_sweep",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// Cache the current bounds of all variables.
 		for o in 0..self.num_objects() {

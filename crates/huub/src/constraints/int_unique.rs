@@ -479,7 +479,12 @@ where
 		}
 	}
 
-	#[tracing::instrument(name = "int_unique_bounds", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "int_unique_bounds",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		self.sort(ctx);
 		self.filter_lower(ctx)?;
@@ -536,7 +541,12 @@ where
 		ctx.advise_on_backtrack();
 	}
 
-	#[tracing::instrument(name = "int_unique_value", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "int_unique_value",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		debug_assert!(!self.action_list.is_empty() && self.action_list.iter().all_unique());
 		// We walk through all fixed decisions (indices).

@@ -104,7 +104,12 @@ where
 		self.abs.enqueue_when(ctx, IntPropCond::Bounds);
 	}
 
-	#[tracing::instrument(name = "int_abs", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "int_abs_bounds",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		let (lb, ub) = self.origin.bounds(ctx);
 

@@ -379,7 +379,12 @@ where
 		}
 	}
 
-	#[tracing::instrument(name = "seq_precede_chain", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "int_seq_precede_chain_bounds",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		if !self.initialized {
 			return self.initial_propagation(ctx);
@@ -891,7 +896,12 @@ where
 		}
 	}
 
-	#[tracing::instrument(name = "value_precede_chain", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "int_value_precede_chain_value",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		if !self.initialized {
 			return self.initial_propagation(ctx);

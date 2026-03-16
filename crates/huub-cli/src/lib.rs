@@ -89,6 +89,8 @@ pub struct Cli<Stdout, Stderr> {
 	time_limit: Option<Duration>,
 	/// Level of verbosity
 	verbose: u8,
+	/// Tracing targets enabled at the selected verbosity level.
+	trace_targets: Vec<String>,
 
 	// --- Initialization configuration ---
 	/// Cardinatility cutoff for eager order literals
@@ -219,6 +221,7 @@ where
 		let int_reverse_map: Arc<Mutex<Vec<InternedStr>>> = Arc::default();
 		let subscriber = trace::create_subscriber(
 			self.verbose,
+			&self.trace_targets,
 			self.stderr.clone(),
 			self.ansi_color,
 			Arc::clone(&lit_reverse_map),
@@ -399,7 +402,8 @@ where
 			Some(goal) => {
 				if self.all_solutions {
 					warn!(
-						"--all-solutions is ignored when optimizing, use --intermediate-solutions or --all-optimal instead"
+						target: "solver",
+						"ignore --all-solutions when optimizing; use --intermediate-solutions or --all-optimal instead"
 					);
 				}
 				let mut no_good_vals = vec![
@@ -438,7 +442,7 @@ where
 					if let Err(err) = ctrlc::set_handler(move || {
 						interrupted.store(true, Ordering::SeqCst);
 					}) {
-						warn!("unable to set Ctrl-C handler: {}", err);
+						warn!(target: "solver", error = %err, "unable to set ctrl-c handler");
 					}
 
 					let mut last_sol = String::new();
@@ -570,6 +574,7 @@ where
 			statistics: self.statistics,
 			time_limit: self.time_limit,
 			verbose: self.verbose,
+			trace_targets: self.trace_targets,
 			int_eager_limit: self.int_eager_limit,
 			reason_eager: self.reason_eager,
 			restart: self.restart,
@@ -606,6 +611,7 @@ where
 			statistics: self.statistics,
 			time_limit: self.time_limit,
 			verbose: self.verbose,
+			trace_targets: self.trace_targets,
 			int_eager_limit: self.int_eager_limit,
 			reason_eager: self.reason_eager,
 			restart: self.restart,
@@ -638,6 +644,18 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 		let mut verbose = 0;
 		while args.contains(["-v", "--verbose"]) {
 			verbose += 1;
+		}
+		let mut trace_targets = vec!["solver".to_owned(), "flatzinc".to_owned()];
+		let add_targets: Vec<String> = args
+			.values_from_str("--trace-target")
+			.map_err(|e| e.to_string())?;
+		trace_targets.extend(add_targets);
+		let rm_targets: Vec<String> = args
+			.values_from_str("--no-trace-target")
+			.map_err(|e| e.to_string())?;
+
+		for target in rm_targets {
+			trace_targets.retain(|value| value != &target);
 		}
 
 		let parse_bool_arg = |s: &str| match s {
@@ -722,6 +740,7 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 				.map_err(|e| e.to_string())?,
 
 			verbose,
+			trace_targets,
 			path: args
 				.free_from_os_str(|s| -> Result<PathBuf, &'static str> { Ok(s.into()) })
 				.map_err(|e| e.to_string())?,

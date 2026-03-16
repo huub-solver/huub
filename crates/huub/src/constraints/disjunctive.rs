@@ -323,6 +323,7 @@ impl<I> DisjunctivePropagator<I> {
 			.map(|i| self.earliest_start_time(ctx, i))
 			.collect_vec();
 		trace!(
+			target: "disjunctive",
 			task_no,
 			left_cut_set =? (0..self.start_times.len())
 				.filter(|&j| {
@@ -400,6 +401,7 @@ impl<I> DisjunctivePropagator<I> {
 			.collect_vec();
 
 		trace!(
+			target: "disjunctive",
 			task_no,
 			window =? (earliest_start, updated_lct_i),
 			nlset = ? nlset.iter().map(|&j| (j, self.durations[j], self.earliest_start_time(ctx,j, ), self.latest_start_time( ctx,j,))).collect_vec(),
@@ -444,6 +446,7 @@ impl<I> DisjunctivePropagator<I> {
 			let mut e_tasks = Vec::new();
 
 			trace!(
+				target: "disjunctive",
 				window =? (earliest_start, time_bound),
 				"explain resource overload"
 			);
@@ -498,6 +501,7 @@ impl<I> DisjunctivePropagator<I> {
 			.collect_vec();
 
 		trace!(
+			target: "disjunctive",
 			task_no,
 			window =? (earliest_start, latest_start),
 			precedence_set = ?precedence_set,
@@ -675,6 +679,7 @@ impl<I> DisjunctivePropagator<I> {
 					self.durations[front_task],
 				);
 				trace!(
+					target: "disjunctive",
 					successor = ect_task,
 					predecessor = front_task,
 					"precedence detected",
@@ -692,6 +697,7 @@ impl<I> DisjunctivePropagator<I> {
 				binding_tasks[ect_task] = Some(self.ot_tree.binding_task(tasks_in_tree_ect, 0));
 				updated_est[ect_task] = updated_est[ect_task].max(tasks_in_tree_ect);
 				trace!(
+					target: "disjunctive",
 					ect_task,
 					updated_est = updated_est[ect_task],
 					tasks_in_tree =? (0..lst_front_idx)
@@ -736,7 +742,7 @@ impl<I> DisjunctivePropagator<I> {
 				}
 			}
 		}
-		trace!(propagated, "detectable precedence propagation completed");
+		trace!(target: "disjunctive", propagated, "detectable precedence propagation completed");
 		Ok(propagated)
 	}
 
@@ -837,6 +843,7 @@ impl<I> DisjunctivePropagator<I> {
 						ect_gray_in_tree - 1,
 					);
 					trace!(
+						target: "disjunctive",
 						ect_in_tree,
 						task = blocked_task,
 						window =? (lb, ect_gray_in_tree - 1),
@@ -859,7 +866,7 @@ impl<I> DisjunctivePropagator<I> {
 			}
 			self.ot_tree.annotate_gray_task(lct_task);
 		}
-		trace!(propagated, "edge finding propagation completed");
+		trace!(target: "disjunctive", propagated, "edge finding propagation completed");
 		Ok(propagated)
 	}
 
@@ -952,6 +959,7 @@ impl<I> DisjunctivePropagator<I> {
 					latest_start_times[self.tasks_sorted_by_latest_start[lst_front_idx - 1]];
 				updated_lct[lct_task] = updated_lct[lct_task].min(front_lst);
 				trace!(
+					target: "disjunctive",
 					lct_task=? (lct_task, lct),
 					updated_lct = updated_lct[lct_task],
 					lst_front_idx,
@@ -986,6 +994,7 @@ impl<I> DisjunctivePropagator<I> {
 			{
 				let lb = self.earliest_start_time(ctx, binding_task);
 				trace!(
+					target: "disjunctive",
 					task = i,
 					window =? (lb, updated_lct[i]),
 					"not last propagation"
@@ -1002,7 +1011,7 @@ impl<I> DisjunctivePropagator<I> {
 				propagated = true;
 			}
 		}
-		trace!(propagated, "not last propagation completed");
+		trace!(target: "disjunctive", propagated, "not last propagation completed");
 		Ok(propagated)
 	}
 
@@ -1056,8 +1065,9 @@ impl<I> DisjunctivePropagator<I> {
 				let earliest_start = self.start_times[binding_task].min(ctx);
 				let expl = self.explain_overload_checking(lct_i + 1);
 				trace!(
+					target: "disjunctive",
 					time_window =? (earliest_start, lct_i),
-					"Resource overload"
+					"resource overload"
 				);
 				self.start_times[*i].tighten_min(ctx, ect - self.durations[*i], expl)?;
 			}
@@ -1071,7 +1081,7 @@ impl<I> DisjunctivePropagator<I> {
 			0 => DisjunctivePropagationRule::EdgeFinding,
 			1 => DisjunctivePropagationRule::NotLast,
 			2 => DisjunctivePropagationRule::Precedence,
-			_ => unreachable!("Invalid propagation rule in data"),
+			_ => unreachable!("invalid propagation rule in data"),
 		}
 	}
 
@@ -1087,7 +1097,12 @@ where
 	I: IntSolverActions<E>,
 {
 	/// Explain the propagation of the disjunctive propagator.
-	#[tracing::instrument(name = "disjunctive_strict", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "disjunctive",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn explain(
 		&mut self,
 		ctx: &mut E::ExplanationCtx<'_>,
@@ -1121,7 +1136,12 @@ where
 	}
 
 	/// Propagate the disjunctive propagator.
-	#[tracing::instrument(name = "disjunctive_strict", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "disjunctive",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// Sort the tasks by earliest start time and initialize the Omega-Theta tree
 		// according to the property of the Omega-Theta tree.

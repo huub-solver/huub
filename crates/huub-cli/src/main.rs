@@ -83,6 +83,12 @@ FLAGS
 
                       === BEHAVIOUR OPTIONS ===
   --log-file <FILE>               Output log messages from the solver to a file, instead of stderr.
+  --trace-target <target>         Enable the given tracing target at the selected verbosity level.
+                                  Can be repeated. Targets are available for core components such as
+                                  `brancher` and for individual constraints such as `disjunctive` and
+                                  `mul`. The `solver` and `flatzinc` targets are enabled by default.
+  --no-trace-target <target>      Disable the given tracing target at the selected verbosity level.
+                                  Can be repeated.
 
 DESCRIPTION
   Create a Huub Solver instance tailored to a given FlatZinc JSON input file and solve the problem.
@@ -137,7 +143,8 @@ fn main() -> ExitCode {
 				move || {
 					fs::OpenOptions::new()
 						.create(true)
-						.append(true)
+						.write(true)
+						.truncate(true)
 						.open(&log_file)
 						.expect("Failed to open log file")
 				},

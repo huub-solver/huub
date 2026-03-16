@@ -89,7 +89,12 @@ where
 		self.min.enqueue_when(ctx, IntPropCond::LowerBound);
 	}
 
-	#[tracing::instrument(name = "array_int_minimum", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "int_array_minimum_bounds",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// set y to be less than or equal to the minimum of upper bounds of x_i
 		let (min_ub, min_ub_var) = self

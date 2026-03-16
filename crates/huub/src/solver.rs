@@ -169,7 +169,11 @@ pub enum Status {
 ///
 /// This function is used as part of the callback given to the SAT solver.
 fn trace_learned_clause(clause: &mut dyn Iterator<Item = RawLit>) {
-	debug!(clause = ?clause.map(i32::from).collect::<Vec<i32>>(), "learn clause");
+	debug!(
+		target: "solver",
+		clause = ?clause.map(i32::from).collect::<Vec<i32>>(),
+		"learn clause"
+	);
 }
 
 impl<A: FailedAssumptions> AssumptionChecker for A {
@@ -400,7 +404,18 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 				}
 			})
 			.collect_vec();
-		debug!(clause = ?clause.iter().filter_map(|&x| if let BoolView::Lit(x) = x.0 { Some(i32::from(x.0)) } else { None }).collect::<Vec<i32>>(), "add solution nogood");
+		debug!(
+			target: "solver",
+			clause = ?clause
+				.iter()
+				.filter_map(|&x| if let BoolView::Lit(x) = x.0 {
+					Some(i32::from(x.0))
+				} else {
+					None
+				})
+				.collect::<Vec<i32>>(),
+			"add solution nogood"
+		);
 		self.add_clause(clause)
 	}
 
@@ -494,7 +509,7 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 
 	/// Split the solver into an solving actions objects (limiting the
 	/// interaction with the SAT) and the dynamic engine reference.
-	fn as_parts_mut(&mut self) -> (impl SolvingActions + '_, RefMut<'_, Engine>) {
+	pub(crate) fn as_parts_mut(&mut self) -> (impl SolvingActions + '_, RefMut<'_, Engine>) {
 		struct SA<'a, O>(&'a mut O);
 		impl<O: ExternalPropagation> SolvingActions for SA<'_, O> {
 			fn is_decision(&mut self, _: RawLit) -> bool {
@@ -533,13 +548,20 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 			Goal::Minimize(objective) => (objective.min(&self), objective),
 			Goal::Maximize(objective) => (objective.max(&self), objective),
 		};
-		debug!(obj_bound, "start branch and bound");
+		debug!(target: "solver", obj_bound, "start branch and bound");
 		loop {
 			let status = self.solve(|sol| {
 				obj_curr = Some(IntValuation::val(&objective, sol));
 				on_sol(sol);
 			});
-			debug!(?status, ?obj_curr, obj_bound, ?goal, "SAT solve result");
+			debug!(
+				target: "solver",
+				?status,
+				?obj_curr,
+				obj_bound,
+				goal = %if goal == Goal::Minimize(objective) { "Minimize" } else { "Maximize" },
+				"sat solve result"
+			);
 			match status {
 				Satisfied => {
 					if obj_curr == Some(obj_bound) {
@@ -557,6 +579,7 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 							}
 						};
 						debug!(
+							target: "solver",
 							lit = i32::from({
 								let BoolView::Lit(l) = bound_lit.unwrap().0 else {
 									unreachable!()

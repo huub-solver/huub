@@ -476,7 +476,12 @@ where
 		self.result.enqueue_when(ctx, IntPropCond::Bounds);
 	}
 
-	#[tracing::instrument(name = "int_pow", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "int_pow_bounds",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		self.propagate_result(ctx)?;
 		self.propagate_base(ctx)?;

@@ -272,7 +272,12 @@ where
 		self.result.enqueue_when(ctx, IntPropCond::Bounds);
 	}
 
-	#[tracing::instrument(name = "int_div", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "int_div_bounds",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		let (denom_lb, denom_ub) = self.denominator.bounds(ctx);
 		if denom_lb < 0 && denom_ub > 0 {

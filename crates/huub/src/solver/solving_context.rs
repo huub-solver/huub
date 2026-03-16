@@ -354,6 +354,7 @@ impl<'a> SolvingContext<'a> {
 	) {
 		let reason = Reason::from_view(reason.build_reason(self));
 		trace!(
+			target: "solver",
 			lit = i32::from(lit.0),
 			reason = ?ReasonTracePrint(&reason),
 			prop = self.current_prop.index(),
@@ -382,6 +383,7 @@ impl<'a> SolvingContext<'a> {
 			self.current_prop = PropRef::INVALID;
 			if let Err(conflict) = res {
 				trace!(
+					target: "solver",
 					lit = conflict
 						.subject
 						.map(|s| i32::from(s.0))

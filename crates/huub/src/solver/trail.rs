@@ -103,6 +103,7 @@ impl Trail {
 					let e: Option<TrailEvent> = self.undo::<true>();
 					debug_assert_eq!(e, Some(TrailEvent::SatAssignment(var)));
 					trace!(
+						target: "solver",
 						len = self.pos,
 						lit = i32::from(lit),
 						"redo to when literal was set"
@@ -111,6 +112,7 @@ impl Trail {
 				}
 			}
 			trace!(
+				target: "solver",
 				len = self.pos,
 				lit = i32::from(lit),
 				"trail reset for unknown literal"
@@ -120,6 +122,7 @@ impl Trail {
 		while let Some(event) = self.undo::<true>() {
 			if matches!(event, TrailEvent::SatAssignment(r) if r == var) {
 				trace!(
+					target: "solver",
 					len = self.pos,
 					lit = i32::from(lit),
 					"undo to when literal was set"
