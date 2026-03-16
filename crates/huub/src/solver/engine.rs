@@ -1010,7 +1010,6 @@ impl TrailingActions for State {
 	fn set_trailed<T: Bytes>(&mut self, x: Trailed<T>, v: T) -> T {
 		self.trail.set_trailed(x, v)
 	}
-	}
 }
 
 #[cfg(test)]
@@ -1132,4 +1131,5 @@ mod tests {
 		assert_eq!(propagated, None);
 
 		assert_eq!(*notifications.borrow(), 1);
+	}
 }

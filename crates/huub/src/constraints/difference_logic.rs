@@ -1003,30 +1003,30 @@ where
 			self.check_remove_isolated_nodes(ctx);
 			self.johnson_full(ctx)?;
 			self.initialized = true;
-		} else {
-			for n in 0..self.graph.int_vars.len() {
-				if self.node_active[n] {
-					// Check if variables have been unified
-					let alias = ctx.resolve_alias(self.graph.int_vars[n]);
-					if self.graph.int_vars[n] != alias {
-						trace!(n = ?n, alias = ?alias, "var alias is different");
-						let (v_trans, vd) = update_transform(alias);
-						if let Some(&new) = self.int_var_index.get(&v_trans) {
-							self.unify_nodes(ctx, n, new, vd)?;
-							self.graph.lower_bound_changes.insert(new);
-							self.graph.upper_bound_changes.insert(new);
-						} else if !matches!(alias.0, IntView::Const(_)) {
-							*self.graph.lower_bound[n].as_mut().unwrap() -= vd;
-							*self.graph.upper_bound[n].as_mut().unwrap() -= vd;
-							self.update_node_offset(ctx, n, vd)?;
-							self.graph.int_vars[n] = v_trans;
-						}
+		}
+
+		for n in 0..self.graph.int_vars.len() {
+			if self.node_active[n] {
+				// Check if variables have been unified
+				let alias = ctx.resolve_alias(self.graph.int_vars[n]);
+				if self.graph.int_vars[n] != alias {
+					trace!(n = ?n, alias = ?alias, "var alias is different");
+					let (v_trans, vd) = update_transform(alias);
+					if let Some(&new) = self.int_var_index.get(&v_trans) {
+						self.unify_nodes(ctx, n, new, vd)?;
+						self.graph.lower_bound_changes.insert(new);
+						self.graph.upper_bound_changes.insert(new);
+					} else if !matches!(alias.0, IntView::Const(_)) {
+						*self.graph.lower_bound[n].as_mut().unwrap() -= vd;
+						*self.graph.upper_bound[n].as_mut().unwrap() -= vd;
+						self.update_node_offset(ctx, n, vd)?;
+						self.graph.int_vars[n] = v_trans;
 					}
 				}
 			}
-
-			self.propagate(ctx)?;
 		}
+
+		self.propagate(ctx)?;
 
 		if !self.reduce_and_check(ctx) {
 			trace!("diff logic subsumed");
