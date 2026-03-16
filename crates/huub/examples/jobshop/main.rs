@@ -16,33 +16,34 @@
 //! model with precedence and disjunctive constraints, and solves it using
 //! Huub's Lazy Clause Generation engine. Various solver options and statistics
 //! are available via command-line flags.
-#![expect(
-	unused_crate_dependencies,
-	reason = "only dependencies for the jobshop scheduling example are used in this file"
-)]
 
 use std::{
 	fmt,
 	fs::File,
+	i64,
 	io::{self, BufRead, BufReader},
 	process::exit,
 	sync::{
-		atomic::{AtomicBool, Ordering},
 		Arc,
+		atomic::{AtomicBool, Ordering},
 	},
 	time::{Duration, Instant},
 };
 
 use huub::{
-	actions::{BrancherInitActions, DecisionActions},
-	branchers::{Brancher, Decision},
-	disjunctive_strict,
-	reformulate::{InitConfig, ReformulationMap},
-	solver::{Goal, IntLitMeaning, IntView, Solver, TrailedInt, Valuation, Value, View},
-	Branching, IntDecision, IntLinExpr, Model, TermSignal, ValueSelection, VariableSelection,
+	Goal, TerminationSignal,
+	actions::{
+		BoolInspectionActions, BrancherInitActions, DecisionActions, IntDecisionActions,
+		IntInspectionActions, ReasoningContext, Trailed,
+	},
+	lower::{InitConfig, LoweringMap},
+	model::{self, Model, deserialize::Branching, expressions::IntLinearExp},
+	solver::{
+		self, IntLitMeaning, IntValuation, Solver,
+		branchers::{Brancher, Directive, ValueSelection, VariableSelection},
+	},
 };
 use pico_args::Arguments;
-use rangelist::RangeList;
 
 /// Parses a time duration for the time limit flag.
 /// If no unit is provided, assumes milliseconds.
@@ -221,7 +222,7 @@ impl Instance {
 pub struct Solution {
 	/// For each machine, a list of (job_index, operation_index,
 	/// start_time_view)
-	pub machine_schedule: Vec<Vec<(usize, usize, IntView)>>,
+	pub machine_schedule: Vec<Vec<(usize, usize, solver::View<i64>)>>,
 	/// Start times for each operation on each machine
 	pub start_time: Option<Vec<Vec<(usize, usize, i64)>>>,
 }
@@ -229,15 +230,15 @@ pub struct Solution {
 impl Solution {
 	pub(crate) fn init(
 		instance: &Instance,
-		start_time: &[Vec<IntDecision>],
-		map: &ReformulationMap,
+		start_time: &[Vec<model::View<i64>>],
+		map: &LoweringMap,
 		slv: &mut Solver,
 	) -> Self {
 		let mut machine_schedule = vec![Vec::new(); instance.m];
 		for (machine_id, schedule) in machine_schedule.iter_mut().enumerate() {
 			for &(job_idx, op_idx) in &instance.operations_on_machine[machine_id] {
 				let var = start_time[job_idx][op_idx];
-				let start = map.get_int(slv, var);
+				let start = map.get(slv, var);
 				schedule.push((job_idx, op_idx, start));
 			}
 		}
@@ -248,14 +249,12 @@ impl Solution {
 	}
 
 	/// Constructs a Solution from the start times and instance.
-	pub(crate) fn save_assignment<T: Valuation>(&mut self, value: T) {
+	pub(crate) fn save_assignment(&mut self, value: solver::Solution<'_>) {
 		let mut start_time = Vec::with_capacity(self.machine_schedule.len());
 		for ops in self.machine_schedule.iter() {
 			let mut machine_profile = Vec::new();
 			for (job_idx, op_idx, start_view) in ops {
-				if let Value::Int(start_val) = value(View::Int(*start_view)) {
-					machine_profile.push((*job_idx, *op_idx, start_val));
-				}
+				machine_profile.push((*job_idx, *op_idx, IntValuation::val(start_view, value)));
 			}
 			machine_profile.sort_by_key(|&(_, _, st)| st);
 			start_time.push(machine_profile);
@@ -339,7 +338,7 @@ impl Default for BranchingStrategy {
 /// Creates a static branching strategy for the job shop scheduling problem.
 fn create_static_branching(
 	strategy: StaticBranching,
-	start_time: &[Vec<IntDecision>],
+	start_time: &[Vec<model::View<i64>>],
 	instance: &Instance,
 ) -> Branching {
 	let mut vars = Vec::new();
@@ -433,28 +432,28 @@ struct DynamicBrancher {
 	/// The dynamic branching strategy to use
 	strategy: DynamicBranching,
 	/// The operations along with their start time variables
-	operations: Vec<(Operation, IntView)>,
+	operations: Vec<(Operation, solver::View<i64>)>,
 	/// The scores for each job computed during branching
-	scores: Vec<TrailedInt>,
+	scores: Vec<Trailed<usize>>,
 	/// The start of the unfixed variables in `vars`.
-	next: TrailedInt,
+	next: Trailed<usize>,
 }
 
 impl DynamicBrancher {
 	fn new_in(
 		solver: &mut impl BrancherInitActions,
 		strategy: DynamicBranching,
-		start_time: Vec<Vec<IntView>>,
+		start_time: Vec<Vec<solver::View<i64>>>,
 		jobs: &Vec<Job>,
 	) {
 		for job_start_times in start_time.iter() {
 			for &op_start_time in job_start_times.iter() {
-				solver.ensure_decidable(View::Int(op_start_time));
+				solver.ensure_decidable(op_start_time);
 			}
 		}
 
 		// Create trailed integers for job scores
-		let scores = vec![solver.new_trailed_int(0); jobs.len()];
+		let scores = vec![solver.new_trailed(0); jobs.len()];
 
 		// Collect all operations with their start time variables
 		let mut operations = Vec::new();
@@ -472,7 +471,7 @@ impl DynamicBrancher {
 			}
 		}
 
-		let next = solver.new_trailed_int(0);
+		let next = solver.new_trailed(0);
 		solver.push_brancher(Box::new(DynamicBrancher {
 			strategy,
 			operations,
@@ -482,13 +481,18 @@ impl DynamicBrancher {
 	}
 }
 
-impl<D: DecisionActions> Brancher<D> for DynamicBrancher {
-	fn decide(&mut self, actions: &mut D) -> Decision {
-		let begin = actions.get_trailed_int(self.next) as usize;
+impl<D> Brancher<D> for DynamicBrancher
+where
+	D: DecisionActions + ReasoningContext<Atom = solver::View<bool>>,
+	solver::Decision<i64>: IntDecisionActions<D>,
+	solver::Decision<bool>: BoolInspectionActions<D>,
+{
+	fn decide(&mut self, ctx: &mut D) -> Directive {
+		let begin = ctx.trailed(self.next);
 
 		// Return if all variables have been assigned
 		if begin == self.operations.len() {
-			return Decision::Exhausted;
+			return Directive::Exhausted;
 		}
 
 		// Record the unfixed operation with the smallest index in `self.operations`
@@ -496,15 +500,11 @@ impl<D: DecisionActions> Brancher<D> for DynamicBrancher {
 		// Record the first unfixed operation for each job
 		let mut first_unfixed_op = vec![None; self.scores.len()];
 		// Compute job scores based on fixed operations
-		let mut job_scores = self
-			.scores
-			.iter()
-			.map(|&s| actions.get_trailed_int(s))
-			.collect::<Vec<_>>();
+		let mut job_scores: Vec<_> = self.scores.iter().map(|&s| ctx.trailed(s)).collect();
 
 		for i in begin..self.operations.len() {
 			let (operation, var) = &self.operations[i];
-			let (lb, ub) = actions.get_int_bounds(*var);
+			let (lb, ub) = var.bounds(ctx);
 			if lb == ub {
 				// Update the score of the job according to the branching strategy
 				match self.strategy {
@@ -512,7 +512,7 @@ impl<D: DecisionActions> Brancher<D> for DynamicBrancher {
 						job_scores[operation.job_idx] += 1;
 					}
 					DynamicBranching::OpLwr | DynamicBranching::OpMwr => {
-						job_scores[operation.job_idx] += operation.processing_time as i64;
+						job_scores[operation.job_idx] += operation.processing_time;
 					}
 				}
 				// Move the fixed variable to the front
@@ -545,16 +545,16 @@ impl<D: DecisionActions> Brancher<D> for DynamicBrancher {
 
 		// Return if all variables have been assigned
 		let Some((selected_job_idx, _)) = selected_job else {
-			return Decision::Exhausted;
+			return Directive::Exhausted;
 		};
 
 		// Update the scores of all jobs
 		for (job_idx, &score) in job_scores.iter().enumerate() {
-			let _ = actions.set_trailed_int(self.scores[job_idx], score);
+			let _ = ctx.set_trailed(self.scores[job_idx], score);
 		}
 
 		// Update the next operation to consider
-		let _ = actions.set_trailed_int(self.next, first_unfixed as i64);
+		let _ = ctx.set_trailed(self.next, first_unfixed);
 
 		// Select the operation to branch on from the selected job
 		let op_view = first_unfixed_op[selected_job_idx]
@@ -563,13 +563,8 @@ impl<D: DecisionActions> Brancher<D> for DynamicBrancher {
 
 		// Create a decision to assign the selected operation's start time to its lower
 		// bound
-		let lb = actions.get_int_lower_bound(op_view);
-		Decision::Select(
-			actions
-				.get_int_lit(op_view, IntLitMeaning::Less(lb + 1))
-				.get_raw_lit()
-				.unwrap(),
-		)
+		let lb = op_view.min(ctx);
+		Directive::Select(op_view.lit(ctx, IntLitMeaning::Less(lb + 1)))
 	}
 }
 
@@ -677,8 +672,7 @@ fn main() {
 	let mut model = Model::default();
 	let mut start_time = Vec::with_capacity(instance.n);
 	for job in &instance.jobs {
-		let op_start_times =
-			model.new_int_vars(job.len(), RangeList::from(0..=(instance.max_time as i64)));
+		let op_start_times = model.new_int_decisions(job.len(), 0..=(instance.max_time as i64));
 		start_time.push(op_start_times);
 	}
 
@@ -687,7 +681,7 @@ fn main() {
 		let job = &instance.jobs[i];
 		for j in 0..(job.len() - 1) {
 			let op1_end = job_start_time[j] + job[j].processing_time as i64;
-			model += (job_start_time[j + 1] - op1_end).geq(0);
+			model.linear(job_start_time[j + 1] - op1_end).ge(0).post();
 		}
 	}
 
@@ -709,27 +703,28 @@ fn main() {
 			.iter()
 			.map(|(_, _, duration)| *duration)
 			.collect::<Vec<_>>();
-		model += disjunctive_strict(op_start_times, op_durations);
+		model
+			.disjunctive()
+			.start_times(op_start_times)
+			.durations(op_durations)
+			.post();
 	}
 
 	// Add objective variable: minimize the total completion time
 	let objective_variable = match options.objective_type {
 		ObjectiveType::Makespan => {
 			// Makespan objective
-			let makespan = model.new_int_var(RangeList::from(0..=(instance.max_time as i64)));
+			let makespan = model.new_int_decision(0..=(instance.max_time as i64));
 			for (job_idx, job) in instance.jobs.iter().enumerate() {
 				let last_op_idx = job.len() - 1;
 				let end_time =
 					start_time[job_idx][last_op_idx] + job[last_op_idx].processing_time as i64;
-				model += (makespan - end_time).geq(0);
+				model.linear(makespan - end_time).ge(0).post();
 			}
 			makespan
 		}
 		ObjectiveType::TotalCompletionTime => {
 			// Total completion time objective
-			let total_completion_time = model.new_int_var(RangeList::from(
-				0..=(instance.max_time as i64 * instance.n as i64),
-			));
 			let mut completion_times = Vec::new();
 			for (job_idx, job) in instance.jobs.iter().enumerate() {
 				let last_op_idx = job.len() - 1;
@@ -737,16 +732,11 @@ fn main() {
 					start_time[job_idx][last_op_idx] + job[last_op_idx].processing_time as i64;
 				completion_times.push(end_time);
 			}
-			model +=
-				(completion_times.into_iter().sum::<IntLinExpr>() - total_completion_time).leq(0);
-			total_completion_time
+			model
+				.linear(completion_times.into_iter().sum::<IntLinearExp>())
+				.define()
 		}
 	};
-
-	// Add branching strategy for start times
-	if let BranchingStrategy::Static(strategy) = options.strategy {
-		model += create_static_branching(strategy, &start_time, &instance);
-	}
 
 	println!("Solver configurations:");
 	println!("{0}", options);
@@ -758,13 +748,19 @@ fn main() {
 		.with_reason_eager(options.reason_eager);
 	let (mut slv, map): (Solver, _) = model.to_solver(&init_config).unwrap();
 
-	// Set up dynamic branching if specified
-	if let BranchingStrategy::Dynamic(strategy) = options.strategy {
-		let start_time: Vec<Vec<IntView>> = start_time
-			.iter()
-			.map(|ops| ops.iter().map(|&v| map.get_int(&mut slv, v)).collect())
-			.collect();
-		DynamicBrancher::new_in(&mut slv, strategy, start_time, &instance.jobs);
+	// Set up branching
+	match options.strategy {
+		BranchingStrategy::Static(static_branching) => {
+			let branching = create_static_branching(static_branching, &start_time, &instance);
+			branching.to_solver(&mut slv, &map);
+		}
+		BranchingStrategy::Dynamic(strategy) => {
+			let start_time: Vec<Vec<_>> = start_time
+				.iter()
+				.map(|ops| ops.iter().map(|&v| map.get(&mut slv, v)).collect())
+				.collect();
+			DynamicBrancher::new_in(&mut slv, strategy, start_time, &instance.jobs);
+		}
 	}
 
 	// Set solver options from command-line flags
@@ -774,12 +770,8 @@ fn main() {
 	slv.set_vsids_only(options.vsids_only);
 
 	// Solve the problem using branch-and-bound for the makespan objective
-	let obj = map.get_int(&mut slv, objective_variable);
-	let goal = Goal::Minimize;
-	let mut last_obj = match goal {
-		Goal::Minimize => i64::MAX,
-		Goal::Maximize => i64::MIN,
-	};
+	let obj = map.get(&mut slv, objective_variable);
+	let mut last_obj = None;
 	let mut solution = Solution::init(&instance, &start_time, &map, &mut slv);
 
 	// Set up termination callback for time limit and Ctrl-C
@@ -792,9 +784,9 @@ fn main() {
 			|| time_limit.map_or(false, |deadline| {
 				Instant::now().duration_since(start) >= deadline
 			}) {
-			TermSignal::Terminate
+			TerminationSignal::Terminate
 		} else {
-			TermSignal::Continue
+			TerminationSignal::Continue
 		}
 	}));
 	if let Err(err) = ctrlc::set_handler({
@@ -807,13 +799,11 @@ fn main() {
 		exit(-1);
 	}
 
-	let (status, stats, obj_val) = slv.branch_and_bound(obj, goal, |value| {
-		solution.save_assignment(value);
-		if let Value::Int(obj_val) = value(View::Int(obj)) {
-			last_obj = obj_val;
-		}
+	let (status, stats, _) = slv.branch_and_bound(Goal::Minimize(obj), |sol| {
+		solution.save_assignment(sol);
+		last_obj = Some(IntValuation::val(&obj, sol));
 		if options.verbose {
-			println!("Found new solution with objective: {last_obj}");
+			println!("Found new solution with objective: {}", last_obj.unwrap());
 			println!("{solution}");
 			println!("-------------------------");
 		}
@@ -822,7 +812,7 @@ fn main() {
 	if !options.verbose {
 		println!(
 			"Best solution found with objective: {}",
-			obj_val.unwrap_or(last_obj)
+			last_obj.unwrap_or(i64::MAX)
 		);
 		println!("{solution}");
 	}
@@ -831,9 +821,9 @@ fn main() {
 	if options.statistics {
 		println!("Solving statistics:");
 		println!("  Status: {status:?}");
-		println!("  Objective value: {}", obj_val.unwrap_or(last_obj));
+		println!("  Objective value: {}", last_obj.unwrap_or(i64::MAX));
 		println!("  User decisions: {}", stats.user_decisions());
-		println!("  Oracle decisions: {}", stats.oracle_decisions());
+		println!("  Oracle decisions: {}", stats.sat_decisions());
 		println!("  Propagations: {}", stats.cp_propagations());
 		println!("  Conflicts: {}", stats.conflicts());
 		println!("  Restarts: {}", stats.restarts());
