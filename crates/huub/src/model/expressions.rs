@@ -409,9 +409,9 @@ impl Model {
 			if values.is_empty() {
 				return;
 			}
-			// If the values are consecutive, then this is actually a sequential precede
-			// chain constraint and we can use the `IntValuePrecedeChainValue` constraint.
-			if values.iter().tuple_windows().all(|(&x, &y)| x + 1 == y) {
+			// If the values are not consecutive, then we need the general value
+			// precede chain constraint that tracks the explicit values.
+			if !values.iter().tuple_windows().all(|(&x, &y)| x + 1 == y) {
 				let con = IntValuePrecedeChainValue::new(
 					self,
 					values.into_iter().collect(),
@@ -420,8 +420,9 @@ impl Model {
 				self.post_constraint(con);
 				return;
 			}
-			// The `values` array might not have started at 1, calculate the offset to
-			// subtract from the decision variables.
+			// Otherwise this is a sequential precede chain constraint, and we can
+			// normalize it to start at 1. The `values` array might not have started
+			// at 1, calculate the offset to subtract from the decision variables.
 			offset = values[0] - 1;
 		}
 
