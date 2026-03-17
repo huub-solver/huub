@@ -118,9 +118,12 @@ impl fmt::Display for Options {
 /// - `--objective-type <TYPE>`: Objective type: `makespan` (minimize max
 ///   completion time) or `total_completion_time` (minimize sum of completion
 ///   times).
-/// - `--branching-strategy <STRATEGY>`: Branching strategy: `job-fifo`,
-///   `job-lwf`, `job-mwf`, `job-sjf`, `job-ljf`, `op-fifo`, `op-lpt`, `op-spt`,
-///   `op-lwr`, `op-mwr`, `op-lor`, or `op-mor`.
+/// - `--branching-strategy <STRATEGY>`: Branching strategy: `job-input-order`,
+///   `job-least-total-work`, `job-most-total-work`, `job-fewest-operations`,
+///   `job-most-operations`, `operation-input-order`,
+///   `operation-longest-processing-time`, `operation-shortest-processing-time`,
+///   `least-work-remaining`, `most-work-remaining`,
+///   `fewest-operations-remaining`, or `most-operations-remaining`.
 /// - `<data_file>`: Path to the JSP instance file (required).
 ///
 /// # errors
@@ -136,18 +139,38 @@ fn parse_args() -> Result<(Instance, Options), String> {
 	};
 
 	let parse_branching_strategy = |s: &str| match s {
-		"job-fifo" => Ok(BranchingStrategy::Static(StaticBranching::JobFifo)),
-		"job-lwf" => Ok(BranchingStrategy::Static(StaticBranching::JobLwf)),
-		"job-mwf" => Ok(BranchingStrategy::Static(StaticBranching::JobMwf)),
-		"job-sjf" => Ok(BranchingStrategy::Static(StaticBranching::JobSjf)),
-		"job-ljf" => Ok(BranchingStrategy::Static(StaticBranching::JobLjf)),
-		"op-fifo" => Ok(BranchingStrategy::Static(StaticBranching::OpFifo)),
-		"op-lpt" => Ok(BranchingStrategy::Static(StaticBranching::OpLpt)),
-		"op-spt" => Ok(BranchingStrategy::Static(StaticBranching::OpSpt)),
-		"op-lwr" => Ok(BranchingStrategy::Dynamic(DynamicBranching::OpLwr)),
-		"op-mwr" => Ok(BranchingStrategy::Dynamic(DynamicBranching::OpMwr)),
-		"op-lor" => Ok(BranchingStrategy::Dynamic(DynamicBranching::OpLor)),
-		"op-mor" => Ok(BranchingStrategy::Dynamic(DynamicBranching::OpMor)),
+		"job-input-order" => Ok(BranchingStrategy::Static(StaticBranching::JobInputOrder)),
+		"job-least-total-work" => Ok(BranchingStrategy::Static(
+			StaticBranching::JobLeastTotalWork,
+		)),
+		"job-most-total-work" => Ok(BranchingStrategy::Static(StaticBranching::JobMostTotalWork)),
+		"job-fewest-operations" => Ok(BranchingStrategy::Static(
+			StaticBranching::JobFewestOperations,
+		)),
+		"job-most-operations" => Ok(BranchingStrategy::Static(
+			StaticBranching::JobMostOperations,
+		)),
+		"operation-input-order" => Ok(BranchingStrategy::Static(
+			StaticBranching::OperationInputOrder,
+		)),
+		"operation-longest-processing-time" => Ok(BranchingStrategy::Static(
+			StaticBranching::OperationLongestProcessingTime,
+		)),
+		"operation-shortest-processing-time" => Ok(BranchingStrategy::Static(
+			StaticBranching::OperationShortestProcessingTime,
+		)),
+		"least-work-remaining" => Ok(BranchingStrategy::Dynamic(
+			DynamicBranching::LeastWorkRemaining,
+		)),
+		"most-work-remaining" => Ok(BranchingStrategy::Dynamic(
+			DynamicBranching::MostWorkRemaining,
+		)),
+		"fewest-operations-remaining" => Ok(BranchingStrategy::Dynamic(
+			DynamicBranching::FewestOperationsRemaining,
+		)),
+		"most-operations-remaining" => Ok(BranchingStrategy::Dynamic(
+			DynamicBranching::MostOperationsRemaining,
+		)),
 		_ => Err(format!("Invalid branching strategy: {s}")),
 	};
 
@@ -171,7 +194,7 @@ fn parse_args() -> Result<(Instance, Options), String> {
 			.unwrap_or_default(),
 		strategy: pargs
 			.value_from_fn("--branching-strategy", parse_branching_strategy)
-			.unwrap_or(BranchingStrategy::Static(StaticBranching::JobFifo)),
+			.unwrap_or(BranchingStrategy::Static(StaticBranching::JobInputOrder)),
 	};
 
 	let data_file: String = pargs.free_from_str().expect("Missing data file argument");
