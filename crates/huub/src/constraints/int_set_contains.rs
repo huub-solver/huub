@@ -11,16 +11,16 @@ use crate::{
 	IntSet, IntVal,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
-		InitActions, IntInspectionActions, IntSimplificationActions, ReasoningEngine,
+		IntInitActions, IntInspectionActions, IntSimplificationActions, ReasoningEngine,
 		SimplificationActions,
 	},
 	constraints::{
-		BoolModelActions, BoolSolverActions, Constraint, IntModelActions, Propagator,
-		SimplificationStatus,
+		BoolModelActions, BoolSolverActions, Constraint, IntModelActions, IntSolverActions,
+		Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
 	model::{expressions::BoolFormula, view::View},
-	solver::queue::PriorityLevel,
+	solver::activation_list::IntPropCond,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -132,13 +132,11 @@ where
 impl<E> Propagator<E> for IntSetContainsReif
 where
 	E: ReasoningEngine,
+	View<IntVal>: IntSolverActions<E>,
 	View<bool>: BoolSolverActions<E>,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
-		ctx.set_priority(PriorityLevel::Highest);
-		// Enqueue once to check the domain of the integer decision variable,
-		// then only if the reification variable is fixed.
-		ctx.enqueue_now(true);
+		self.var.enqueue_when(ctx, IntPropCond::Domain);
 		self.reif.enqueue_when_fixed(ctx);
 	}
 
