@@ -5,6 +5,7 @@
 use std::iter::once;
 
 use itertools::Itertools;
+use rangelist::IntervalIterator;
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -233,12 +234,15 @@ where
 		}
 
 		let (result_lb, result_ub) = self.result.bounds(ctx);
+		let idx_dom: IntSet = self.index.domain(ctx);
 		let min_support = ctx.trailed(self.min_support);
 		let max_support = ctx.trailed(self.max_support);
 		let old_min = self.vars[min_support].min(ctx);
 		let old_max = self.vars[max_support].max(ctx);
-		let mut need_min_support = old_min > result_lb;
-		let mut need_max_support = old_max < result_ub;
+		let mut need_min_support =
+			old_min > result_lb || !idx_dom.contains(&(min_support as IntVal));
+		let mut need_max_support =
+			old_max < result_ub || !idx_dom.contains(&(max_support as IntVal));
 		let mut new_min_support = min_support;
 		let mut new_max_support = max_support;
 		let mut new_min = if need_min_support {
@@ -258,7 +262,6 @@ where
 		//  (2) result.lower_bound > self.vars[i].upper_bound -> index != i
 		// 2. update min_support and max_support if necessary
 		// only trigger when result variable is updated or self.vars[i] is updated
-		let idx_dom: IntSet = self.index.domain(ctx);
 		for i in idx_dom.iter().flatten() {
 			debug_assert!(i >= 0 && i <= self.vars.len() as IntVal);
 			let i = i as usize;
@@ -453,7 +456,9 @@ mod tests {
 
 	use crate::{
 		Model,
+		actions::{IntInspectionActions, IntPropagationActions},
 		constraints::int_array_element::IntArrayElementBounds,
+		lower::InitConfig,
 		solver::{
 			Solver,
 			decision::integer::{EncodingType, IntDecision},
@@ -557,6 +562,46 @@ mod tests {
     0, 3, 3, 2
     0, 3, 3, 3"#]],
 		);
+	}
+
+	#[test]
+	fn recompute_min_support_after_index_pruning() {
+		let mut prb = Model::default();
+		let a = prb.new_int_decision(1..=1);
+		let b = prb.new_int_decision(3..=3);
+		let c = prb.new_int_decision(4..=4);
+		let result = prb.new_int_decision(2..=4);
+		let index = prb.new_int_decision(0..=2);
+
+		prb.element(vec![a, b, c])
+			.index(index)
+			.result(result)
+			.post();
+		index.remove_val(&mut prb, 0, []).unwrap();
+		let _: (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+
+		assert_eq!(index.domain(&prb), (1..=2).into());
+		assert_eq!(result.bounds(&prb), (3, 4));
+	}
+
+	#[test]
+	fn recompute_max_support_after_index_pruning() {
+		let mut prb = Model::default();
+		let a = prb.new_int_decision(1..=1);
+		let b = prb.new_int_decision(3..=3);
+		let c = prb.new_int_decision(4..=4);
+		let result = prb.new_int_decision(1..=4);
+		let index = prb.new_int_decision(0..=2);
+
+		prb.element(vec![a, b, c])
+			.index(index)
+			.result(result)
+			.post();
+		index.remove_val(&mut prb, 2, []).unwrap();
+		let _: (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+
+		assert_eq!(index.domain(&prb), (0..=1).into());
+		assert_eq!(result.bounds(&prb), (1, 3));
 	}
 
 	#[test]
