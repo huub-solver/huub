@@ -335,7 +335,7 @@ impl Model {
 							}
 							IntLitMeaning::GreaterEq(v) | IntLitMeaning::Less(v) => {
 								let (min, max) = iv.bounds(self);
-								v >= min || v < max
+								v <= min || v > max
 							}
 						};
 						if triggered {
