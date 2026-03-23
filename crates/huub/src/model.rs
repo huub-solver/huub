@@ -284,6 +284,12 @@ impl Model {
 				self.constraints[con.index()] = Some(con_obj);
 			}
 		}
+		self.notify_advisors();
+		Ok(())
+	}
+
+	/// Notify all advisors of changes.
+	pub(crate) fn notify_advisors(&mut self) {
 		// Notify propagators about all events that occurred
 		let advise_of_int_change = |model: &mut Model, con: ConRef, data: u64, event| {
 			if let Some(mut c) = model.constraints[con.index()].take() {
@@ -382,7 +388,6 @@ impl Model {
 			}
 		}
 		self.bool_events = bool_events;
-		Ok(())
 	}
 
 	/// Process the model to create a [`Solver`] instance that can be used to
@@ -425,6 +430,7 @@ impl Model {
 			);
 		}
 
+		self.notify_advisors();
 		while let Some(con) = self.propagator_queue.pop() {
 			self.propagate(ConRef::from_raw(con))?;
 		}
