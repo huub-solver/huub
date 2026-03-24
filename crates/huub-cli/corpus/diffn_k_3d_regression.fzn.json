@@ -1,0 +1,26 @@
+{
+  "variables": {
+    "x1" : { "type" : "int", "domain" : [[2, 3]] },
+    "y1" : { "type" : "int", "domain" : [[5, 5]] },
+    "z1" : { "type" : "int", "domain" : [[2, 3]] },
+    "x2" : { "type" : "int", "domain" : [[1, 3]] },
+    "y2" : { "type" : "int", "domain" : [[4, 4]] },
+    "z2" : { "type" : "int", "domain" : [[2, 7]] }
+  },
+  "arrays": {
+
+  },
+  "constraints": [
+    {
+      "id" : "huub_diffn_k_int",
+      "args" : [
+        ["x1", "y1", "z1", "x2", "y2", "z2"],
+        [5, 5, 5, 5, 5, 5],
+        3
+      ]
+    }
+  ],
+  "output": ["x1", "y1", "z1", "x2", "y2", "z2"],
+  "solve": { "method" : "satisfy" },
+  "version": "1.0"
+}
