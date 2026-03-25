@@ -403,20 +403,25 @@ impl Model {
 		values: Option<Vec<IntVal>>,
 	) {
 		let mut offset = 0;
+		let vars: Vec<_> = vars.into_iter().collect();
+		// If there are no variables, then the constraint is trivially
+		// satisfied.
+		if vars.is_empty() {
+			return;
+		}
 		if let Some(values) = values {
-			// If the list of values is empty, then the constraint is trivially
-			// satisfied.
-			if values.is_empty() {
+			// If the list of values doesn't contain at least two values, then the
+			// constraint is trivially satisfied.
+			if values.len() <= 1 {
 				return;
 			}
-			// If the values are not consecutive, then we need the general value
+			// If the values are not consecutive or if the largest value does not cover the
+			// full decision variable domain, then we need the general value
 			// precede chain constraint that tracks the explicit values.
-			if !values.iter().tuple_windows().all(|(&x, &y)| x + 1 == y) {
-				let con = IntValuePrecedeChainValue::new(
-					self,
-					values.into_iter().collect(),
-					vars.into_iter().collect(),
-				);
+			if !values.iter().tuple_windows().all(|(&x, &y)| x + 1 == y)
+				|| *values.last().unwrap() < vars.iter().map(|v| v.max(self)).max().unwrap()
+			{
+				let con = IntValuePrecedeChainValue::new(self, values.into_iter().collect(), vars);
 				self.post_constraint(con);
 				return;
 			}
