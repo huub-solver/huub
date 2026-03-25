@@ -284,6 +284,12 @@ impl Model {
 				self.constraints[con.index()] = Some(con_obj);
 			}
 		}
+		self.notify_advisors();
+		Ok(())
+	}
+
+	/// Notify all advisors of changes.
+	pub(crate) fn notify_advisors(&mut self) {
 		// Notify propagators about all events that occurred
 		let advise_of_int_change = |model: &mut Model, con: ConRef, data: u64, event| {
 			if let Some(mut c) = model.constraints[con.index()].take() {
@@ -329,7 +335,7 @@ impl Model {
 							}
 							IntLitMeaning::GreaterEq(v) | IntLitMeaning::Less(v) => {
 								let (min, max) = iv.bounds(self);
-								v >= min || v < max
+								v <= min || v > max
 							}
 						};
 						if triggered {
@@ -382,7 +388,6 @@ impl Model {
 			}
 		}
 		self.bool_events = bool_events;
-		Ok(())
 	}
 
 	/// Process the model to create a [`Solver`] instance that can be used to
@@ -425,6 +430,7 @@ impl Model {
 			);
 		}
 
+		self.notify_advisors();
 		while let Some(con) = self.propagator_queue.pop() {
 			self.propagate(ConRef::from_raw(con))?;
 		}
@@ -582,5 +588,160 @@ impl TrailingActions for Model {
 
 	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
 		T::from_bytes(self.trail[i.index as usize])
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use tracing_test::traced_test;
+
+	use crate::{
+		IntVal,
+		actions::{
+			BoolInitActions, BoolInspectionActions, ConstructionActions, IntInitActions,
+			IntInspectionActions, IntPropagationActions, ReasoningEngine, Trailed, TrailingActions,
+		},
+		constraints::{
+			BoolModelActions, Constraint, IntModelActions, Propagator, SimplificationStatus,
+		},
+		lower::{InitConfig, LoweringContext, LoweringError},
+		model::{Model, View},
+		solver::{
+			Solver,
+			activation_list::{IntEvent, IntPropCond},
+		},
+	};
+
+	#[derive(Debug, Clone)]
+	struct TestModel {
+		b: View<bool>,
+		i: View<IntVal>,
+		bool_check: Trailed<IntVal>,
+		int_check: Trailed<IntVal>,
+	}
+
+	impl<E> Constraint<E> for TestModel
+	where
+		E: ReasoningEngine,
+		View<IntVal>: IntModelActions<E>,
+		View<bool>: BoolModelActions<E>,
+	{
+		fn simplify(
+			&mut self,
+			_context: &mut E::PropagationCtx<'_>,
+		) -> Result<SimplificationStatus, E::Conflict> {
+			Ok(SimplificationStatus::NoFixpoint)
+		}
+
+		fn to_solver(&self, _context: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
+			Ok(())
+		}
+	}
+
+	impl<E> Propagator<E> for TestModel
+	where
+		E: ReasoningEngine,
+		View<IntVal>: IntModelActions<E>,
+		View<bool>: BoolModelActions<E>,
+	{
+		fn advise_of_bool_change(
+			&mut self,
+			context: &mut E::NotificationCtx<'_>,
+			_data: u64,
+		) -> bool {
+			assert!(self.b.val(context).is_some());
+			context.set_trailed(self.bool_check, context.trailed(self.bool_check) + 1);
+			true
+		}
+
+		fn advise_of_int_change(
+			&mut self,
+			context: &mut E::NotificationCtx<'_>,
+			_data: u64,
+			_event: IntEvent,
+		) -> bool {
+			context.set_trailed(self.int_check, context.trailed(self.int_check) + 1);
+			true
+		}
+
+		fn initialize(&mut self, context: &mut E::InitializationCtx<'_>) {
+			self.b.advise_when_fixed(context, 0);
+			self.i.advise_when(context, IntPropCond::Bounds, 0);
+		}
+
+		fn propagate(&mut self, _context: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+			Ok(())
+		}
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_model_advisor_bool_no_call() {
+		let mut prb = Model::default();
+		let i = prb.new_int_decision(0..=3);
+		let b = i.geq(2);
+		let bool_check = prb.new_trailed(0);
+		let int_check = prb.new_trailed(0);
+		let t = TestModel {
+			b,
+			i,
+			bool_check,
+			int_check,
+		};
+		prb.post_constraint(t);
+		i.tighten_min(&mut prb, 1, []).expect("tighten_min failed");
+		let (_, _): (Solver, _) = prb
+			.to_solver(&InitConfig::default())
+			.expect("to_solver failed");
+		assert_eq!(prb.trailed(bool_check), 0);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_model_advisor_bool_call() {
+		let mut prb = Model::default();
+		let i = prb.new_int_decision(0..=3);
+		let b = i.geq(2);
+		let bool_check = prb.new_trailed(0);
+		let int_check = prb.new_trailed(0);
+		let t = TestModel {
+			b,
+			i,
+			bool_check,
+			int_check,
+		};
+		prb.post_constraint(t);
+		i.tighten_min(&mut prb, 2, []).expect("tighten_min failed");
+		let (_, _): (Solver, _) = prb
+			.to_solver(&InitConfig::default())
+			.expect("to_solver failed");
+		assert_eq!(prb.trailed(bool_check), 1);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_model_advisor_int_call() {
+		let mut prb = Model::default();
+		let i = prb.new_int_decision(0..=3);
+		let b = prb.new_bool_decision();
+		let bool_check = prb.new_trailed(0);
+		let int_check = prb.new_trailed(0);
+		let t = TestModel {
+			b,
+			i,
+			bool_check,
+			int_check,
+		};
+		prb.post_constraint(t);
+		i.tighten_min(&mut prb, 1, []).expect("tighten_min failed");
+		i.tighten_max(&mut prb, 2, []).expect("tighten_max failed");
+		let (mut slv, map): (Solver, _) = prb
+			.to_solver(&InitConfig::default())
+			.expect("to_solver failed");
+		assert_eq!(prb.trailed(int_check), 1);
+		let i_slv = map.get(&mut slv, i);
+		let (min, max) = i_slv.bounds(&slv);
+		assert_eq!(min, 1);
+		assert_eq!(max, 2);
 	}
 }
