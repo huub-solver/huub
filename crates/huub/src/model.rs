@@ -581,7 +581,7 @@ impl SimplificationActions for Model {
 	}
 
 	fn resolve_alias(&self, view: View<IntVal>) -> View<IntVal> {
-		view.resolve_alias(self)
+		view.resolve_alias(self).into_inner()
 	}
 }
 
@@ -598,7 +598,6 @@ impl TrailingActions for Model {
 			v.to_bytes(),
 		))
 	}
-	}
 }
 
 #[cfg(test)]
@@ -609,7 +608,8 @@ mod tests {
 		IntVal,
 		actions::{
 			BoolInitActions, BoolInspectionActions, ConstructionActions, IntInitActions,
-			IntInspectionActions, IntPropagationActions, ReasoningEngine, Trailed, TrailingActions,
+			IntInspectionActions, IntPropagationActions, ReasoningEngine, TrailAccessActions,
+			Trailed, TrailingActions,
 		},
 		constraints::{
 			BoolModelActions, Constraint, IntModelActions, Propagator, SimplificationStatus,
@@ -753,4 +753,5 @@ mod tests {
 		let (min, max) = i_slv.bounds(&slv);
 		assert_eq!(min, 1);
 		assert_eq!(max, 2);
+	}
 }

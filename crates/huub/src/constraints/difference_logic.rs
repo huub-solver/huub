@@ -985,7 +985,12 @@ where
 	model::View<IntVal>: IntModelActions<E>,
 	model::View<bool>: BoolModelActions<E>,
 {
-	#[tracing::instrument(name = "diff_logic", target = "solver", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "diff_logic",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn simplify(
 		&mut self,
 		ctx: &mut E::PropagationCtx<'_>,
@@ -2283,7 +2288,12 @@ where
 		ctx.advise_on_backtrack();
 	}
 
-	#[tracing::instrument(name = "diff_logic_bounds", target = "solver", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "diff_logic_bounds",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		self.graph.borrow_mut().propagate_bounds(ctx)?;
 		Ok(())
@@ -2345,7 +2355,12 @@ where
 		ctx.advise_on_backtrack();
 	}
 
-	#[tracing::instrument(name = "diff_logic_booleans", target = "solver", level = "trace", skip(self, ctx))]
+	#[tracing::instrument(
+		name = "diff_logic_booleans",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		self.graph
 			.borrow_mut()
