@@ -912,7 +912,7 @@ where
 	fn lit_bool(&mut self, lit: &Literal<S>) -> Result<View<bool>, FlatZincError> {
 		match lit {
 			Literal::Identifier(ident) => self.lookup_or_create_var(ident).map(|mv| match mv {
-				AnyView::Bool(bv) => Ok(bv.resolve_alias(&self.prb)),
+				AnyView::Bool(bv) => Ok(bv.resolve_alias(&self.prb).into_inner()),
 				AnyView::Int(_) => Err(FlatZincError::InvalidArgumentType {
 					expected: "bool",
 					found: "int".to_owned(),
@@ -929,7 +929,7 @@ where
 	fn lit_int(&mut self, lit: &Literal<S>) -> Result<View<IntVal>, FlatZincError> {
 		match lit {
 			Literal::Identifier(ident) => self.lookup_or_create_var(ident).map(|mv| match mv {
-				AnyView::Int(iv) => Ok(iv.resolve_alias(&self.prb)),
+				AnyView::Int(iv) => Ok(iv.resolve_alias(&self.prb).into_inner()),
 				AnyView::Bool(_) => Err(FlatZincError::InvalidArgumentType {
 					expected: "int",
 					found: "bool".to_owned(),
@@ -1388,7 +1388,12 @@ where
 				"huub_diffn_k_int" | "huub_diffn_nonstrict_k_int" => {
 					let strict = c.id.deref() == "huub_diffn_k_int";
 					if let [box_posn, box_size, d] = c.args.as_slice() {
-						let dimensions = self.arg_par_int(d)?;
+						let dimensions = usize::try_from(self.arg_par_int(d)?).map_err(|_| {
+							FlatZincError::InvalidArgumentType {
+								expected: "positive integer",
+								found: d.to_string(),
+							}
+						})?;
 						let flat_start_pos = self.arg_array(box_posn)?;
 						let flat_start_pos: Vec<_> = flat_start_pos
 							.iter()
@@ -1398,13 +1403,28 @@ where
 						let flat_sizes: Vec<_> =
 							flat_sizes.iter().map(|l| self.lit_int(l)).try_collect()?;
 
-						let mut origins: Vec<Vec<_>> = vec![Vec::new(); dimensions as usize];
-						let mut sizes: Vec<Vec<_>> = vec![Vec::new(); dimensions as usize];
-
-						for (i, (pos, size)) in flat_start_pos.iter().zip(flat_sizes).enumerate() {
-							origins[i % dimensions as usize].push(*pos);
-							sizes[i % dimensions as usize].push(size);
+						if dimensions == 0
+							|| flat_start_pos.len() != flat_sizes.len()
+							|| flat_start_pos.len() % dimensions != 0
+						{
+							return Err(FlatZincError::InvalidArgumentType {
+								expected: "flattened object-major arrays with a positive number of dimensions",
+								found: format!(
+									"box_posn length {}, box_size length {}, dimensions {}",
+									flat_start_pos.len(),
+									flat_sizes.len(),
+									dimensions
+								),
+							});
 						}
+						let origins: Vec<Vec<_>> = flat_start_pos
+							.chunks_exact(dimensions)
+							.map(|chunk| chunk.to_vec())
+							.collect();
+						let sizes: Vec<Vec<_>> = flat_sizes
+							.chunks_exact(dimensions)
+							.map(|chunk| chunk.to_vec())
+							.collect();
 
 						self.prb
 							.no_overlap()

@@ -4,6 +4,7 @@ pub(crate) mod decision;
 pub mod deserialize;
 pub mod expressions;
 mod initilization_context;
+pub(crate) mod resolved;
 pub(crate) mod view;
 
 use std::{
@@ -51,7 +52,7 @@ use crate::{
 			integer::{Domain, IntDecision},
 		},
 		initilization_context::ModelInitContext,
-		view::integer::IntView,
+		resolved::Resolved,
 	},
 	solver::{
 		IntLitMeaning, Solver,
@@ -337,7 +338,7 @@ impl Model {
 							}
 							IntLitMeaning::GreaterEq(v) | IntLitMeaning::Less(v) => {
 								let (min, max) = iv.bounds(self);
-								v >= min || v < max
+								v <= min || v > max
 							}
 						};
 						if triggered {
@@ -438,26 +439,26 @@ impl Model {
 		}
 
 		// Determine encoding types for integer variables
-		let mut int_eager_direct = FxHashSet::<Decision<IntVal>>::default();
-		let int_eager_order = FxHashSet::<Decision<IntVal>>::default();
+		let mut int_eager_direct = FxHashSet::<Resolved<Decision<IntVal>>>::default();
+		let int_eager_order = FxHashSet::<Resolved<Decision<IntVal>>>::default();
 
 		for c in self.constraints.iter().flatten() {
 			let c: &dyn Constraint<Model> = c.as_ref();
 			let c: &dyn Any = c;
 			if let Some(c) = c.downcast_ref::<BoolDecisionArrayElement>() {
 				let index = c.index.resolve_alias(self);
-				if let IntView::Linear(lin) = index.0 {
-					int_eager_direct.insert(lin.var);
+				if let Some(var) = index.integer_decision() {
+					int_eager_direct.insert(var);
 				}
 			} else if let Some(c) = c.downcast_ref::<IntUnique>() {
 				for v in &c.prop.var {
 					let v = v.resolve_alias(self);
-					if let IntView::Linear(lin) = v.0 {
-						let Domain::Domain(dom) = &self.int_vars[lin.var.idx()].domain else {
+					if let Some(var) = v.integer_decision() {
+						let Domain::Domain(dom) = &self.int_vars[var.idx()].domain else {
 							unreachable!()
 						};
 						if dom.card() <= Some(c.prop.var.len() * 100 / 80) {
-							int_eager_direct.insert(lin.var);
+							int_eager_direct.insert(var);
 						}
 					}
 				}
@@ -465,22 +466,22 @@ impl Model {
 				c.downcast_ref::<IntArrayElementBounds<View<IntVal>, View<IntVal>, View<IntVal>>>()
 			{
 				let index = c.index.resolve_alias(self);
-				if let IntView::Linear(lin) = index.0 {
-					int_eager_direct.insert(lin.var);
+				if let Some(var) = index.integer_decision() {
+					int_eager_direct.insert(var);
 				}
 			} else if let Some(c) = c.downcast_ref::<IntTable>() {
 				for &v in &c.vars {
 					let v = v.resolve_alias(self);
-					if let IntView::Linear(lin) = v.0 {
-						int_eager_direct.insert(lin.var);
+					if let Some(var) = v.integer_decision() {
+						int_eager_direct.insert(var);
 					}
 				}
 			} else if let Some(c) =
 				c.downcast_ref::<IntValArrayElement<View<IntVal>, View<IntVal>>>()
 			{
 				let index = c.0.index.resolve_alias(self);
-				if let IntView::Linear(lin) = index.0 {
-					int_eager_direct.insert(lin.var);
+				if let Some(var) = index.integer_decision() {
+					int_eager_direct.insert(var);
 				}
 			}
 		}
@@ -597,4 +598,159 @@ impl TrailingActions for Model {
 			v.to_bytes(),
 		))
 	}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use tracing_test::traced_test;
+
+	use crate::{
+		IntVal,
+		actions::{
+			BoolInitActions, BoolInspectionActions, ConstructionActions, IntInitActions,
+			IntInspectionActions, IntPropagationActions, ReasoningEngine, Trailed, TrailingActions,
+		},
+		constraints::{
+			BoolModelActions, Constraint, IntModelActions, Propagator, SimplificationStatus,
+		},
+		lower::{InitConfig, LoweringContext, LoweringError},
+		model::{Model, View},
+		solver::{
+			Solver,
+			activation_list::{IntEvent, IntPropCond},
+		},
+	};
+
+	#[derive(Debug, Clone)]
+	struct TestModel {
+		b: View<bool>,
+		i: View<IntVal>,
+		bool_check: Trailed<IntVal>,
+		int_check: Trailed<IntVal>,
+	}
+
+	impl<E> Constraint<E> for TestModel
+	where
+		E: ReasoningEngine,
+		View<IntVal>: IntModelActions<E>,
+		View<bool>: BoolModelActions<E>,
+	{
+		fn simplify(
+			&mut self,
+			_context: &mut E::PropagationCtx<'_>,
+		) -> Result<SimplificationStatus, E::Conflict> {
+			Ok(SimplificationStatus::NoFixpoint)
+		}
+
+		fn to_solver(&self, _context: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
+			Ok(())
+		}
+	}
+
+	impl<E> Propagator<E> for TestModel
+	where
+		E: ReasoningEngine,
+		View<IntVal>: IntModelActions<E>,
+		View<bool>: BoolModelActions<E>,
+	{
+		fn advise_of_bool_change(
+			&mut self,
+			context: &mut E::NotificationCtx<'_>,
+			_data: u64,
+		) -> bool {
+			assert!(self.b.val(context).is_some());
+			context.set_trailed(self.bool_check, context.trailed(self.bool_check) + 1);
+			true
+		}
+
+		fn advise_of_int_change(
+			&mut self,
+			context: &mut E::NotificationCtx<'_>,
+			_data: u64,
+			_event: IntEvent,
+		) -> bool {
+			context.set_trailed(self.int_check, context.trailed(self.int_check) + 1);
+			true
+		}
+
+		fn initialize(&mut self, context: &mut E::InitializationCtx<'_>) {
+			self.b.advise_when_fixed(context, 0);
+			self.i.advise_when(context, IntPropCond::Bounds, 0);
+		}
+
+		fn propagate(&mut self, _context: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+			Ok(())
+		}
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_model_advisor_bool_no_call() {
+		let mut prb = Model::default();
+		let i = prb.new_int_decision(0..=3);
+		let b = i.geq(2);
+		let bool_check = prb.new_trailed(0);
+		let int_check = prb.new_trailed(0);
+		let t = TestModel {
+			b,
+			i,
+			bool_check,
+			int_check,
+		};
+		prb.post_constraint(t);
+		i.tighten_min(&mut prb, 1, []).expect("tighten_min failed");
+		let (_, _): (Solver, _) = prb
+			.to_solver(&InitConfig::default())
+			.expect("to_solver failed");
+		assert_eq!(prb.trailed(bool_check), 0);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_model_advisor_bool_call() {
+		let mut prb = Model::default();
+		let i = prb.new_int_decision(0..=3);
+		let b = i.geq(2);
+		let bool_check = prb.new_trailed(0);
+		let int_check = prb.new_trailed(0);
+		let t = TestModel {
+			b,
+			i,
+			bool_check,
+			int_check,
+		};
+		prb.post_constraint(t);
+		i.tighten_min(&mut prb, 2, []).expect("tighten_min failed");
+		let (_, _): (Solver, _) = prb
+			.to_solver(&InitConfig::default())
+			.expect("to_solver failed");
+		assert_eq!(prb.trailed(bool_check), 1);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_model_advisor_int_call() {
+		let mut prb = Model::default();
+		let i = prb.new_int_decision(0..=3);
+		let b = prb.new_bool_decision();
+		let bool_check = prb.new_trailed(0);
+		let int_check = prb.new_trailed(0);
+		let t = TestModel {
+			b,
+			i,
+			bool_check,
+			int_check,
+		};
+		prb.post_constraint(t);
+		i.tighten_min(&mut prb, 1, []).expect("tighten_min failed");
+		i.tighten_max(&mut prb, 2, []).expect("tighten_max failed");
+		let (mut slv, map): (Solver, _) = prb
+			.to_solver(&InitConfig::default())
+			.expect("to_solver failed");
+		assert_eq!(prb.trailed(int_check), 1);
+		let i_slv = map.get(&mut slv, i);
+		let (min, max) = i_slv.bounds(&slv);
+		assert_eq!(min, 1);
+		assert_eq!(max, 2);
 }

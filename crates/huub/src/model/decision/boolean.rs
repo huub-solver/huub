@@ -5,7 +5,10 @@ use std::ops::Not;
 use pindakaas::Lit as RawLit;
 
 use crate::{
-	actions::BoolInspectionActions,
+	actions::{
+		BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions, ReasoningContext,
+	},
+	constraints::ReasonBuilder,
 	model::{
 		Model,
 		decision::{Decision, DecisionReference, private},
@@ -46,8 +49,29 @@ impl Decision<bool> {
 
 impl BoolInspectionActions<Model> for Decision<bool> {
 	fn val(&self, ctx: &Model) -> Option<bool> {
-		let view: View<bool> = (*self).into();
-		view.val(ctx)
+		self.resolve_alias(ctx).val(ctx)
+	}
+}
+
+impl BoolPropagationActions<Model> for Decision<bool> {
+	fn fix(
+		&self,
+		ctx: &mut Model,
+		val: bool,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		self.resolve_alias(ctx).fix(ctx, val, reason)
+	}
+}
+
+impl BoolSimplificationActions<Model> for Decision<bool> {
+	fn unify(
+		&self,
+		ctx: &mut Model,
+		other: impl Into<View<bool>>,
+	) -> Result<(), <Model as ReasoningContext>::Conflict> {
+		let other = other.into().resolve_alias(ctx);
+		self.resolve_alias(ctx).unify(ctx, other)
 	}
 }
 

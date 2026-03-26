@@ -8,6 +8,7 @@ use crate::{
 	},
 	model::{
 		AdvRef, Advisor, ConRef, Decision, Model,
+		resolved::Resolved,
 		view::{View, boolean::BoolView, integer::IntView},
 	},
 	solver::{
@@ -37,13 +38,11 @@ pub struct ModelInitContext<'a> {
 
 impl BoolInitActions<ModelInitContext<'_>> for Decision<bool> {
 	fn advise_when_fixed(&self, ctx: &mut ModelInitContext<'_>, data: u64) {
-		let view: View<bool> = (*self).into();
-		view.advise_when_fixed(ctx, data);
+		self.resolve_alias(ctx.model).advise_when_fixed(ctx, data);
 	}
 
 	fn enqueue_when_fixed(&self, ctx: &mut ModelInitContext<'_>) {
-		let view: View<bool> = (*self).into();
-		view.enqueue_when_fixed(ctx);
+		self.resolve_alias(ctx.model).enqueue_when_fixed(ctx);
 	}
 }
 
@@ -55,26 +54,11 @@ impl BoolInspectionActions<ModelInitContext<'_>> for Decision<bool> {
 
 impl IntInitActions<ModelInitContext<'_>> for Decision<IntVal> {
 	fn advise_when(&self, ctx: &mut ModelInitContext<'_>, cond: IntPropCond, data: u64) {
-		ctx.model.advisors.push(Advisor {
-			con: ctx.con,
-			data,
-			negated: false,
-			bool2int: false,
-			condition: None,
-		});
-		let adv = AdvRef::new(ctx.model.advisors.len() - 1);
-		ctx.model.int_vars[self.idx()]
-			.constraints
-			.add(ActivationAction::Advise(adv), cond);
+		self.resolve_alias(ctx.model).advise_when(ctx, cond, data);
 	}
 
 	fn enqueue_when(&self, ctx: &mut ModelInitContext<'_>, condition: IntPropCond) {
-		if condition != IntPropCond::Fixed {
-			ctx.semantic_enqueue();
-		}
-		ctx.model.int_vars[self.idx()]
-			.constraints
-			.add(ActivationAction::Enqueue(ctx.con), condition);
+		self.resolve_alias(ctx.model).enqueue_when(ctx, condition);
 	}
 }
 
@@ -177,26 +161,34 @@ impl ReasoningContext for ModelInitContext<'_> {
 	type Conflict = <Model as ReasoningEngine>::Conflict;
 }
 
-impl BoolInitActions<ModelInitContext<'_>> for View<bool> {
+impl BoolInitActions<ModelInitContext<'_>> for Resolved<Decision<bool>> {
 	fn advise_when_fixed(&self, ctx: &mut ModelInitContext<'_>, data: u64) {
-		let var = self.resolve_alias(ctx.model);
-		let (iv, cond, event) = match var.0 {
-			BoolView::Decision(lit) => {
-				ctx.model.advisors.push(Advisor {
-					con: ctx.con,
-					data,
-					negated: false,
-					bool2int: false,
-					condition: None,
-				});
-				let adv = AdvRef::new(ctx.model.advisors.len() - 1);
-				ctx.model.bool_vars[lit.idx()]
-					.constraints
-					.push(ActivationAction::Advise(adv).into());
-				return;
-			}
+		ctx.model.advisors.push(Advisor {
+			con: ctx.con,
+			data,
+			negated: false,
+			bool2int: false,
+			condition: None,
+		});
+		let adv = AdvRef::new(ctx.model.advisors.len() - 1);
+		ctx.model.bool_vars[self.0.idx()]
+			.constraints
+			.push(ActivationAction::Advise(adv).into());
+	}
+
+	fn enqueue_when_fixed(&self, ctx: &mut ModelInitContext<'_>) {
+		ctx.model.bool_vars[self.0.idx()]
+			.constraints
+			.push(ActivationAction::Enqueue(ctx.con).into());
+	}
+}
+
+impl BoolInitActions<ModelInitContext<'_>> for Resolved<View<bool>> {
+	fn advise_when_fixed(&self, ctx: &mut ModelInitContext<'_>, data: u64) {
+		let (iv, cond, event) = match self.0.0 {
+			BoolView::Decision(lit) => return Resolved(lit).advise_when_fixed(ctx, data),
 			BoolView::Const(_) => {
-				// Value does not change, so no advisor will ever be called
+				// Value does not change, so no advisor will ever be called.
 				return;
 			}
 			BoolView::IntEq(iv, v) => (iv, IntLitMeaning::Eq(v), IntPropCond::Domain),
@@ -216,12 +208,10 @@ impl BoolInitActions<ModelInitContext<'_>> for View<bool> {
 			.constraints
 			.add(ActivationAction::Advise(adv), event);
 	}
+
 	fn enqueue_when_fixed(&self, ctx: &mut ModelInitContext<'_>) {
-		let var = self.resolve_alias(ctx.model);
-		match var.0 {
-			BoolView::Decision(lit) => ctx.model.bool_vars[lit.idx()]
-				.constraints
-				.push(ActivationAction::Enqueue(ctx.con).into()),
+		match self.0.0 {
+			BoolView::Decision(lit) => Resolved(lit).enqueue_when_fixed(ctx),
 			BoolView::Const(_) => ctx.semantic_enqueue(),
 			// TODO: These definitions might enqueue when the boolean is not fixed. Use advisors
 			// instead?
@@ -235,17 +225,46 @@ impl BoolInitActions<ModelInitContext<'_>> for View<bool> {
 	}
 }
 
-impl BoolInspectionActions<ModelInitContext<'_>> for View<bool> {
+impl BoolInspectionActions<ModelInitContext<'_>> for Resolved<Decision<bool>> {
+	fn val(&self, ctx: &ModelInitContext<'_>) -> Option<bool> {
+		self.0.val(ctx.model)
+	}
+}
+
+impl BoolInspectionActions<ModelInitContext<'_>> for Resolved<View<bool>> {
 	fn val(&self, ctx: &ModelInitContext<'_>) -> Option<bool> {
 		self.val(ctx.model)
 	}
 }
 
-impl IntInitActions<ModelInitContext<'_>> for View<IntVal> {
+impl IntInitActions<ModelInitContext<'_>> for Resolved<Decision<IntVal>> {
 	fn advise_when(&self, ctx: &mut ModelInitContext<'_>, cond: IntPropCond, data: u64) {
-		let var = self.resolve_alias(ctx.model);
+		ctx.model.advisors.push(Advisor {
+			con: ctx.con,
+			data,
+			negated: false,
+			bool2int: false,
+			condition: None,
+		});
+		let adv = AdvRef::new(ctx.model.advisors.len() - 1);
+		ctx.model.int_vars[self.idx()]
+			.constraints
+			.add(ActivationAction::Advise(adv), cond);
+	}
 
-		match var.0 {
+	fn enqueue_when(&self, ctx: &mut ModelInitContext<'_>, condition: IntPropCond) {
+		if condition != IntPropCond::Fixed {
+			ctx.semantic_enqueue();
+		}
+		ctx.model.int_vars[self.idx()]
+			.constraints
+			.add(ActivationAction::Enqueue(ctx.con), condition);
+	}
+}
+
+impl IntInitActions<ModelInitContext<'_>> for Resolved<View<IntVal>> {
+	fn advise_when(&self, ctx: &mut ModelInitContext<'_>, cond: IntPropCond, data: u64) {
+		match self.0.0 {
 			IntView::Linear(lin) => {
 				let negated = lin.scale.is_negative();
 				ctx.model.advisors.push(Advisor {
@@ -263,7 +282,7 @@ impl IntInitActions<ModelInitContext<'_>> for View<IntVal> {
 			IntView::Const(_) => ctx.semantic_enqueue(),
 			IntView::Bool(lin) => {
 				let var = lin.var.resolve_alias(ctx.model);
-				let (iv, cond, event) = match var.0 {
+				let (iv, cond, event) = match var.into_inner().0 {
 					BoolView::Decision(lit) => {
 						ctx.model.advisors.push(Advisor {
 							con: ctx.con,
@@ -305,16 +324,14 @@ impl IntInitActions<ModelInitContext<'_>> for View<IntVal> {
 	}
 
 	fn enqueue_when(&self, ctx: &mut ModelInitContext<'_>, condition: IntPropCond) {
-		let var = self.resolve_alias(ctx.model);
-
-		match var.0 {
+		match self.0.0 {
 			IntView::Linear(lin) => {
 				let condition = match condition {
 					IntPropCond::LowerBound if lin.scale.is_negative() => IntPropCond::UpperBound,
 					IntPropCond::UpperBound if lin.scale.is_negative() => IntPropCond::LowerBound,
 					_ => condition,
 				};
-				lin.var.enqueue_when(ctx, condition);
+				Resolved(lin.var).enqueue_when(ctx, condition);
 			}
 			IntView::Const(_) => ctx.semantic_enqueue(),
 			IntView::Bool(lin) => {
@@ -324,6 +341,115 @@ impl IntInitActions<ModelInitContext<'_>> for View<IntVal> {
 				lin.var.enqueue_when_fixed(ctx);
 			}
 		}
+	}
+}
+
+impl IntInspectionActions<ModelInitContext<'_>> for Resolved<Decision<IntVal>> {
+	fn bounds(&self, ctx: &ModelInitContext<'_>) -> (IntVal, IntVal) {
+		self.bounds(ctx.model)
+	}
+
+	fn domain(&self, ctx: &ModelInitContext<'_>) -> IntSet {
+		self.domain(ctx.model)
+	}
+
+	fn in_domain(&self, ctx: &ModelInitContext<'_>, val: IntVal) -> bool {
+		self.in_domain(ctx.model, val)
+	}
+
+	fn lit_meaning(&self, ctx: &ModelInitContext<'_>, lit: View<bool>) -> Option<IntLitMeaning> {
+		self.lit_meaning(ctx.model, lit)
+	}
+
+	fn max(&self, ctx: &ModelInitContext<'_>) -> IntVal {
+		self.max(ctx.model)
+	}
+
+	fn max_lit(&self, ctx: &ModelInitContext<'_>) -> View<bool> {
+		self.max_lit(ctx.model)
+	}
+
+	fn min(&self, ctx: &ModelInitContext<'_>) -> IntVal {
+		self.min(ctx.model)
+	}
+
+	fn min_lit(&self, ctx: &ModelInitContext<'_>) -> View<bool> {
+		self.min_lit(ctx.model)
+	}
+
+	fn try_lit(&self, ctx: &ModelInitContext<'_>, meaning: IntLitMeaning) -> Option<View<bool>> {
+		self.try_lit(ctx.model, meaning)
+	}
+
+	fn val(&self, ctx: &ModelInitContext<'_>) -> Option<IntVal> {
+		self.val(ctx.model)
+	}
+}
+
+impl IntInspectionActions<ModelInitContext<'_>> for Resolved<View<IntVal>> {
+	fn bounds(&self, ctx: &ModelInitContext<'_>) -> (IntVal, IntVal) {
+		self.bounds(ctx.model)
+	}
+
+	fn domain(&self, ctx: &ModelInitContext<'_>) -> IntSet {
+		self.domain(ctx.model)
+	}
+
+	fn in_domain(&self, ctx: &ModelInitContext<'_>, val: IntVal) -> bool {
+		self.in_domain(ctx.model, val)
+	}
+
+	fn lit_meaning(&self, ctx: &ModelInitContext<'_>, lit: View<bool>) -> Option<IntLitMeaning> {
+		self.lit_meaning(ctx.model, lit)
+	}
+
+	fn max(&self, ctx: &ModelInitContext<'_>) -> IntVal {
+		self.max(ctx.model)
+	}
+
+	fn max_lit(&self, ctx: &ModelInitContext<'_>) -> View<bool> {
+		self.max_lit(ctx.model)
+	}
+
+	fn min(&self, ctx: &ModelInitContext<'_>) -> IntVal {
+		self.min(ctx.model)
+	}
+
+	fn min_lit(&self, ctx: &ModelInitContext<'_>) -> View<bool> {
+		self.min_lit(ctx.model)
+	}
+
+	fn try_lit(&self, ctx: &ModelInitContext<'_>, meaning: IntLitMeaning) -> Option<View<bool>> {
+		self.try_lit(ctx.model, meaning)
+	}
+
+	fn val(&self, ctx: &ModelInitContext<'_>) -> Option<IntVal> {
+		self.val(ctx.model)
+	}
+}
+
+impl BoolInitActions<ModelInitContext<'_>> for View<bool> {
+	fn advise_when_fixed(&self, ctx: &mut ModelInitContext<'_>, data: u64) {
+		self.resolve_alias(ctx.model).advise_when_fixed(ctx, data);
+	}
+	fn enqueue_when_fixed(&self, ctx: &mut ModelInitContext<'_>) {
+		self.resolve_alias(ctx.model).enqueue_when_fixed(ctx);
+	}
+}
+
+impl BoolInspectionActions<ModelInitContext<'_>> for View<bool> {
+	fn val(&self, ctx: &ModelInitContext<'_>) -> Option<bool> {
+		self.val(ctx.model)
+	}
+}
+
+impl IntInitActions<ModelInitContext<'_>> for View<IntVal> {
+	fn advise_when(&self, ctx: &mut ModelInitContext<'_>, cond: IntPropCond, data: u64) {
+		self.resolve_alias(ctx.model).advise_when(ctx, cond, data);
+	}
+
+	fn enqueue_when(&self, ctx: &mut ModelInitContext<'_>, condition: IntPropCond) {
+		self.resolve_alias(ctx.model).enqueue_when(ctx, condition);
 	}
 }
 

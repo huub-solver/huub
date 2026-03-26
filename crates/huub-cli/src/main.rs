@@ -8,7 +8,7 @@
 	unused_crate_dependencies,
 	reason = "other dependencies are used in the lib.rs file"
 )]
-use std::{convert::Infallible, fs, path::PathBuf, process::ExitCode};
+use std::{convert::Infallible, fs, path::PathBuf, process::ExitCode, sync::Arc};
 
 use huub_cli::Cli;
 use pico_args::Arguments;
@@ -139,17 +139,13 @@ fn main() -> ExitCode {
 	};
 	let result = match log_file {
 		Some(log_file) => {
-			let mut cli = cli.with_stderr(
-				move || {
-					fs::OpenOptions::new()
-						.create(true)
-						.write(true)
-						.truncate(true)
-						.open(&log_file)
-						.expect("Failed to open log file")
-				},
-				false,
-			);
+			let f = fs::OpenOptions::new()
+				.create(true)
+				.write(true)
+				.truncate(true)
+				.open(&log_file)
+				.expect("Failed to open log file");
+			let mut cli = cli.with_stderr(Arc::new(f), false);
 			cli.run()
 		}
 		None => cli.run(),

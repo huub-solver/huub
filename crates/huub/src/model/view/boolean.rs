@@ -11,13 +11,14 @@ use crate::{
 	IntVal,
 	actions::{
 		BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
-		IntInspectionActions, IntPropagationActions, PropagationActions,
+		PropagationActions,
 	},
 	constraints::{Conflict, ReasonBuilder},
 	model::{
 		AdvRef, Advisor, ConRef, Model,
 		decision::Decision,
 		expressions::BoolFormula,
+		resolved::Resolved,
 		view::{DefaultView, View, private},
 	},
 	solver::{
@@ -49,126 +50,52 @@ pub enum BoolView {
 	IntNotEq(Decision<IntVal>, IntVal),
 }
 
-impl View<bool> {
-	/// Resolve any aliasing in the BoolDecision, ensuring the result is a
-	/// BoolDecision that if it is a `Lit`, then it is not an alias.
-	pub(crate) fn resolve_alias(self, model: &Model) -> Self {
-		use BoolView::*;
-
-		let mut result = self;
-		// If the current Lit is an alias, then resolve it.
-		while let Decision(lit) = result.0 {
-			if let Some(alias) = model.bool_vars[lit.idx()].alias {
-				debug_assert_ne!(alias, result);
-				debug_assert_ne!(alias, !result);
-				result = if lit.is_negated() { !alias } else { alias };
-			} else {
-				break;
-			}
-		}
-		// If the current Lit is a integer view, check whether it is already fixed.
-		match result.0 {
-			IntEq(iv, val) => {
-				let (lb, ub) = iv.bounds(model);
-				if val < lb || val > ub {
-					return false.into();
-				} else if val == lb && val == ub {
-					return true.into();
-				}
-			}
-			IntGreaterEq(iv, val) => {
-				let (lb, ub) = iv.bounds(model);
-				if lb >= val {
-					return true.into();
-				} else if ub < val {
-					return false.into();
-				}
-			}
-			IntLess(iv, val) => {
-				let (lb, ub) = iv.bounds(model);
-				if ub < val {
-					return true.into();
-				} else if lb >= val {
-					return false.into();
-				}
-			}
-			IntNotEq(iv, val) => {
-				let (lb, ub) = iv.bounds(model);
-				if val < lb || val > ub {
-					return true.into();
-				} else if val == lb && val == ub {
-					return false.into();
-				}
-			}
-			_ => {}
-		}
-		result
-	}
-}
-
-impl Add<IntVal> for View<bool> {
-	type Output = View<IntVal>;
-
-	fn add(self, rhs: IntVal) -> Self::Output {
-		let me: View<IntVal> = self.into();
-		me + rhs
-	}
-}
-
-impl BoolInspectionActions<Model> for View<bool> {
-	fn val(&self, ctx: &Model) -> Option<bool> {
-		use BoolView::*;
-
-		let b = self.resolve_alias(ctx);
-		match b.0 {
-			Const(b) => Some(b),
-			_ => None,
-		}
-	}
-}
-
-impl BoolPropagationActions<Model> for View<bool> {
-	fn fix(
-		&self,
+impl Resolved<View<bool>> {
+	/// Consuming variant of [`BoolPropagationActions::fix`].
+	pub(crate) fn fix(
+		self,
 		ctx: &mut Model,
 		val: bool,
 		reason: impl ReasonBuilder<Model>,
 	) -> Result<(), Conflict<View<bool>>> {
-		let lit = if val { *self } else { !*self };
-		lit.require(ctx, reason)
+		let lit = if val { self.0 } else { !self.0 };
+		Resolved(lit).require(ctx, reason)
 	}
 
-	fn require(
-		&self,
+	/// Consuming variant of [`BoolPropagationActions::require`].
+	pub(crate) fn require(
+		self,
 		ctx: &mut Model,
 		reason: impl ReasonBuilder<Model>,
 	) -> Result<(), Conflict<View<bool>>> {
 		use BoolView::*;
 
-		let var = self.resolve_alias(ctx);
-		match var.0 {
+		match self.0.0 {
 			Decision(l) => {
 				let def = &mut ctx.bool_vars[l.idx()];
 				debug_assert!(def.alias.is_none());
 				def.alias = Some(View(Const(!l.is_negated())));
 				ctx.bool_events.push(l.var());
-				Ok(())
 			}
-			Const(c) => c.require(ctx, reason),
-			IntEq(iv, val) => iv.fix(ctx, val, reason),
-			IntGreaterEq(iv, val) => iv.tighten_min(ctx, val, reason),
-			IntLess(iv, val) => iv.tighten_max(ctx, val - 1, reason),
-			IntNotEq(iv, val) => iv.remove_val(ctx, val, reason),
-		}
+			Const(c) => c.require(ctx, reason)?,
+			IntEq(iv, val) => iv.resolve_alias(ctx).fix(ctx, val, reason)?,
+			IntGreaterEq(iv, val) => iv.resolve_alias(ctx).tighten_min(ctx, val, reason)?,
+			IntLess(iv, val) => iv.resolve_alias(ctx).tighten_max(ctx, val - 1, reason)?,
+			IntNotEq(iv, val) => iv.resolve_alias(ctx).remove_val(ctx, val, reason)?,
+		};
+		Ok(())
 	}
-}
 
-impl BoolSimplificationActions<Model> for View<bool> {
-	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Conflict<View<bool>>> {
+	/// Consuming variant of [`BoolSimplificationActions::unify`].
+	pub(crate) fn unify(
+		self,
+		ctx: &mut Model,
+		other: Resolved<View<bool>>,
+	) -> Result<(), Conflict<View<bool>>> {
 		use BoolView::*;
 
-		let x = self.resolve_alias(ctx);
-		let y = other.into().resolve_alias(ctx);
+		let x = self.0;
+		let y = other.0;
 
 		match (x.0, y.0) {
 			(x, y) if x == y => Ok(()),
@@ -176,7 +103,7 @@ impl BoolSimplificationActions<Model> for View<bool> {
 				Err(ctx.declare_conflict([x, y]))
 			}
 			(Const(x), Const(y)) if x != y => Err(ctx.declare_conflict([])),
-			(x, Const(b)) | (Const(b), x) => View::<bool>(x).fix(ctx, b, []),
+			(x, Const(b)) | (Const(b), x) => Resolved(View::<bool>(x)).fix(ctx, b, []),
 			(Decision(x), y) | (y, Decision(x)) => {
 				let (x, y) = if let Decision(y) = y {
 					if x.0.var() > y.0.var() {
@@ -243,9 +170,67 @@ impl BoolSimplificationActions<Model> for View<bool> {
 	}
 }
 
+impl BoolInspectionActions<Model> for Resolved<View<bool>> {
+	fn val(&self, _ctx: &Model) -> Option<bool> {
+		use BoolView::*;
+
+		match self.0.0 {
+			Const(b) => Some(b),
+			_ => None,
+		}
+	}
+}
+
+impl Add<IntVal> for View<bool> {
+	type Output = View<IntVal>;
+
+	fn add(self, rhs: IntVal) -> Self::Output {
+		let me: View<IntVal> = self.into();
+		me + rhs
+	}
+}
+
+impl BoolInspectionActions<Model> for View<bool> {
+	fn val(&self, ctx: &Model) -> Option<bool> {
+		self.resolve_alias(ctx).val(ctx)
+	}
+}
+
+impl BoolPropagationActions<Model> for View<bool> {
+	fn fix(
+		&self,
+		ctx: &mut Model,
+		val: bool,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<View<bool>>> {
+		self.resolve_alias(ctx).fix(ctx, val, reason)
+	}
+
+	fn require(
+		&self,
+		ctx: &mut Model,
+		reason: impl ReasonBuilder<Model>,
+	) -> Result<(), Conflict<View<bool>>> {
+		self.resolve_alias(ctx).require(ctx, reason)
+	}
+}
+
+impl BoolSimplificationActions<Model> for View<bool> {
+	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Conflict<View<bool>>> {
+		let other = other.into().resolve_alias(ctx);
+		self.resolve_alias(ctx).unify(ctx, other)
+	}
+}
+
 impl From<Decision<bool>> for View<bool> {
 	fn from(decision: Decision<bool>) -> Self {
 		View(BoolView::Decision(decision))
+	}
+}
+
+impl From<Resolved<View<bool>>> for View<bool> {
+	fn from(value: Resolved<View<bool>>) -> Self {
+		value.into_inner()
 	}
 }
 
