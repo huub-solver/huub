@@ -932,7 +932,9 @@ mod tests {
 
 	use crate::{
 		IntVal,
+		actions::IntInspectionActions,
 		constraints::cumulative::CumulativeTimeTable,
+		model::{ConRef, Model},
 		solver::{
 			Solver, View,
 			decision::integer::{EncodingType, IntDecision},
@@ -1270,5 +1272,72 @@ mod tests {
 		);
 
 		slv.assert_unsatisfiable();
+	}
+
+	#[test]
+	#[traced_test]
+	/// This test verifies that the cumulative propagator performs multiple
+	/// rounds of propagation to reach a fixpoint. In each round, the
+	/// propagator first updates the start times of tasks according to the
+	/// time-table profile. Once no further updates to start times are possible,
+	/// the propagator then tightens the usage bounds based on the current
+	/// profile. This ensures the time-table profile is the latest and the
+	/// propagation of usage bounds are correct.
+	fn test_cumulative_propagate() {
+		let mut prb = Model::default();
+		// Task A: can start at 0, 1, or 2; duration 3. Latest start time: 2, earliest
+		// completion time: 3. Compulsory part: [0, 2] (must be scheduled in this
+		// interval for feasibility).
+		let start_time_a = prb.new_int_decision(0..=2);
+		// Task B: same as Task A (identical domain and duration).
+		let start_time_b = prb.new_int_decision(0..=2);
+		// Task C: can start at 0..=4; duration 3. Latest start time: 4, earliest
+		// completion time: 3. No compulsory part.
+		let start_time_c = prb.new_int_decision(0..=4);
+		let usages = prb.new_int_decisions(3, 1..=2);
+		prb.cumulative()
+			.start_times(vec![start_time_a, start_time_b, start_time_c])
+			.durations(vec![3, 3, 3])
+			.usages(usages.clone())
+			.capacity(2)
+			.post();
+
+		// First propagation: The compulsory parts of Task A and B ([0, 2])
+		// require that Task C cannot overlap with them due to capacity constraints.
+		// This pushes the earliest start time of Task C to 3.
+		let _ = prb.propagate(ConRef::from_raw(0));
+		let time_bounds = start_time_a.bounds(&prb);
+		assert_eq!(time_bounds, (0, 2));
+		let usage_bounds = usages[0].bounds(&prb);
+		assert_eq!(usage_bounds, (1, 2));
+
+		let time_bounds = start_time_b.bounds(&prb);
+		assert_eq!(time_bounds, (0, 2));
+		let usage_bounds = usages[1].bounds(&prb);
+		assert_eq!(usage_bounds, (1, 2));
+
+		let time_bounds = start_time_c.bounds(&prb);
+		assert_eq!(time_bounds, (3, 4));
+		let usage_bounds = usages[2].bounds(&prb);
+		assert_eq!(usage_bounds, (1, 2));
+
+		// Second propagation: With Task C's start time now at least 3, only A and B
+		// overlap in [0, 2]. The combined usage of A and B in this interval must not
+		// exceed the capacity (2), so their usage upper bounds are tightened to 1.
+		let _ = prb.propagate(ConRef::from_raw(0));
+		let time_bounds = start_time_a.bounds(&prb);
+		assert_eq!(time_bounds, (0, 2));
+		let usage_bounds = usages[0].bounds(&prb);
+		assert_eq!(usage_bounds, (1, 1));
+
+		let time_bounds = start_time_b.bounds(&prb);
+		assert_eq!(time_bounds, (0, 2));
+		let usage_bounds = usages[1].bounds(&prb);
+		assert_eq!(usage_bounds, (1, 1));
+
+		let time_bounds = start_time_c.bounds(&prb);
+		assert_eq!(time_bounds, (3, 4));
+		let usage_bounds = usages[2].bounds(&prb);
+		assert_eq!(usage_bounds, (1, 2));
 	}
 }
