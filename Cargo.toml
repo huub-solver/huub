@@ -16,7 +16,7 @@ keywords = ["sat", "lcg", "flatzinc", "minizinc", "optimization"]
 
 [workspace.dependencies]
 bon = "3.8.2"
-ctrlc = "3.4"
+ctrlc = "3.5"
 divan = { package = "codspeed-divan-compat", version = "4.0" }
 dyn-clone = "1.0.20"
 expect-test = "1.5"
