@@ -32,7 +32,7 @@ rustc-hash = "2.1.1"
 serde = "1.0"
 serde_json = "1.0"
 tracing = "0.1.40"
-tracing-subscriber = "0.3.18"
+tracing-subscriber = "0.3.23"
 tracing-test = "0.2.5"
 
 [workspace.lints.rust]
