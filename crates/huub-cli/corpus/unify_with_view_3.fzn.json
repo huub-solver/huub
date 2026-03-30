@@ -1,13 +1,10 @@
 {
-  "variables": {
-    "x" : { "type" : "int", "domain" : [[1, 3]]},
-    "y" : { "type" : "int", "domain" : [[1, 3]], "rhs" : "x", "defined" : true },
-    "z" : { "type" : "int", "domain" : [[2, 4]]}
-  },
-  "constraints": [
-    { "id" : "array_int_element", "args" : ["x", [2, 3, 4], "z"], "defines" : "z"}
-  ],
-  "output": ["y", "z"],
-  "solve": { "method" : "satisfy"},
-  "version": "1.0"
+	"variables": {
+		"x": { "type": "bool" },
+		"y": { "type": "int", "domain": [[0, 0]] }
+	},
+	"constraints": [{ "id": "bool2int", "args": ["x", "y"], "defines": "y" }],
+	"output": ["x", "y"],
+	"solve": { "method": "satisfy" },
+	"version": "1.0"
 }

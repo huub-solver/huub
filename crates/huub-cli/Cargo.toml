@@ -27,7 +27,6 @@ humantime = { workspace = true }
 huub = { path = "../huub", features = ["flatzinc"] }
 mimalloc = { workspace = true }
 rustc-hash = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

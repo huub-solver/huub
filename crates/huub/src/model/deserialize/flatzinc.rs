@@ -7,13 +7,14 @@ use std::{
 	fmt::{self, Debug, Display},
 	hash::Hash,
 	num::NonZero,
-	ops::{Deref, Not, RangeInclusive},
+	ops::{Not, RangeInclusive},
 	rc::Rc,
+	sync::Arc,
 };
 
 use flatzinc_serde::{
-	Annotation, AnnotationArgument, AnnotationCall, AnnotationLiteral, Argument, Domain, FlatZinc,
-	Literal, Type,
+	Annotation, AnnotationArgument, AnnotationCall, AnnotationLiteral, Argument, FlatZinc, Literal,
+	NamedRef, Type, Variable, helpers::ArcKey,
 };
 use itertools::Itertools;
 use pindakaas::{propositional_logic::Formula, solver::propagation::ExternalPropagation};
@@ -43,6 +44,172 @@ use crate::{
 /// Domain assumed for integer decision variables that do not have a domain
 /// definition.
 const FULL_INT_DOMAIN: RangeInclusive<IntVal> = IntVal::MIN..=IntVal::MAX;
+
+/// Annotation identifiers that are known to the FlatZinc deserializer.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum AnnotationIdent {
+	/// "bool_search" annotation for Boolean search strategies.
+	BoolSearch,
+	/// "bounds" consistency annotation.
+	ConsistencyBounds,
+	/// "domain" consistency annotation.
+	ConsistencyDomain,
+	/// "value_propagation" consistency annotation.
+	ConsistencyValue,
+	/// "edge_finding" annotation to enable edge finding propagation within a
+	/// disjunctive propagator.
+	DisjEdgeFinding,
+	/// "not_last" annotation to enable not last propagation within the
+	/// disjunctive propagator.
+	DisjNotLast,
+	/// "detectable_precedence" annotation to detectable precedence propagation
+	/// within the disjunctive propagator.
+	DisjDetectPrec,
+	/// "int_search" annotation for integer search strategies.
+	IntSearch,
+	/// "seq_search" annotation for sequential search strategies.
+	SeqSearch,
+	/// "indomain" value selection annotation.
+	ValSelIndomain,
+	/// "indomain_min" value selection annotation.
+	ValSelIndomainMin,
+	/// "indomain_max" value selection annotation.
+	ValSelIndomainMax,
+	/// "outdomain_max" value selection annotation.
+	ValSelOutdomainMax,
+	/// "outdomain_min" value selection annotation.
+	ValSelOutdomainMin,
+	/// "anti_first_fail" variable selection annotation.
+	VarSelAntiFirstFail,
+	/// "first_fail" variable selection annotation.
+	VarSelFirstFail,
+	/// "input_order" variable selection annotation.
+	VarSelInputOrder,
+	/// "largest" variable selection annotation.
+	VarSelLargest,
+	/// "smallest" variable selection annotation.
+	VarSelSmallest,
+	/// "warm_start_array" annotation for grouped warm start directives.
+	WarmStartArray,
+	/// "warm_start_bool" annotation for Boolean warm start directives.
+	WarmStartBool,
+	/// "warm_start_int" annotation for integer warm start directives.
+	WarmStartInt,
+}
+
+/// Represents the identifier of a constraint as used in the MiniZinc standard
+/// library or Huub's MiniZinc library.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ConstraintIdent {
+	/// "huub_all_different_int"
+	AllDifferentInt,
+	/// "array_bool_and"
+	ArrayBoolAnd,
+	/// "array_bool_element"
+	ArrayBoolElement,
+	/// "array_bool_xor"
+	ArrayBoolXor,
+	/// "array_int_element"
+	ArrayIntElement,
+	/// "array_int_maximum"
+	ArrayIntMaximum,
+	/// "array_int_minimum"
+	ArrayIntMinimum,
+	/// "array_var_bool_element"
+	ArrayVarBoolElement,
+	/// "array_var_int_element"
+	ArrayVarIntElement,
+	/// "bool2int"
+	Bool2Int,
+	/// "bool_clause"
+	BoolClause,
+	/// "huub_bool_clause_reif"
+	BoolClauseReif,
+	/// "bool_eq"
+	BoolEq,
+	/// "bool_eq_reif"
+	BoolEqReif,
+	/// "bool_lin_eq"
+	BoolLinEq,
+	/// "bool_not"
+	BoolNot,
+	/// "bool_xor"
+	BoolXor,
+	/// "cumulative"
+	Cumulative,
+	/// "huub_diffn_int" and "huub_diffn_nonstrict_int"
+	DiffnInt {
+		/// Whether the constraint is strict or non-strict.
+		strict: bool,
+	},
+	/// "huub_diffn_k_int" and "huub_diffn_k_nonstrict_int"
+	DiffnKInt {
+		/// Whether the constraint is strict or non-strict.
+		strict: bool,
+	},
+	/// "huub_disjunctive_strict"
+	DisjuctiveStrict,
+	/// "int_abs"
+	IntAbs,
+	/// "int_abs"
+	IntDiv,
+	/// "int_eq"
+	IntEq,
+	/// "int_eq_imp"
+	IntEqImp,
+	/// "int_eq_reif"
+	IntEqReif,
+	/// "int_le"
+	IntLe,
+	/// "int_le_imp"
+	IntLeImp,
+	/// "int_le_reif"
+	IntLeReif,
+	/// "int_lin_eq"
+	IntLinEq,
+	/// "int_lin_eq_imp"
+	IntLinEqImp,
+	/// "int_lin_eq_reif"
+	IntLinEqReif,
+	/// "int_lin_le"
+	IntLinLe,
+	/// "int_lin_le_imp"
+	IntLinLeImp,
+	/// "int_lin_le_reif"
+	IntLinLeReif,
+	/// "int_lin_ne"
+	IntLinNe,
+	/// "int_lin_ne_imp"
+	IntLinNeImp,
+	/// "int_lin_ne_reif"
+	IntLinNeReif,
+	/// "int_max"
+	IntMax,
+	/// "int_min"
+	IntMin,
+	/// "int_ne"
+	IntNe,
+	/// "int_ne_imp"
+	IntNeImp,
+	/// "int_ne_reif"
+	IntNeReif,
+	/// "int_pow"
+	IntPow,
+	/// "int_times"
+	IntTimes,
+	/// "huub_regular"
+	Regular,
+	/// "huub_seq_precede_chain_int"
+	SeqPrecedeChainInt,
+	/// "set_in"
+	SetIn,
+	/// "set_in_reif"
+	SetInReif,
+	/// "huub_table_int"
+	TableInt,
+	/// "huub_value_precede_chain_int"
+	ValuePrecedeChain,
+}
 
 /// Errors that can occur when converting a [`FlatZinc`] instance to a [`Model`]
 /// or [`Solver`] object.
@@ -80,9 +247,9 @@ pub enum FlatZincError {
 /// Metadata produced when building a model from a FlatZinc instance.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
-pub struct FlatZincModelMeta<S> {
+pub struct FlatZincModelMeta {
 	/// Mapping from FlatZinc identifiers to model views.
-	pub names: FxHashMap<S, AnyView>,
+	pub names: FxHashMap<ArcKey<Variable<FznIdent>>, AnyView>,
 	/// Statistics gathered during FlatZinc extraction.
 	pub stats: FlatZincStatistics,
 	/// Optional branching annotation extracted from the instance.
@@ -94,9 +261,9 @@ pub struct FlatZincModelMeta<S> {
 /// Metadata produced when building a solver from a FlatZinc instance.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
-pub struct FlatZincSolverMeta<S> {
+pub struct FlatZincSolverMeta {
 	/// Mapping from FlatZinc identifiers to solver views.
-	pub names: FxHashMap<S, solver::AnyView>,
+	pub names: FxHashMap<ArcKey<Variable<FznIdent>>, solver::AnyView>,
 	/// Statistics gathered during FlatZinc extraction.
 	pub stats: FlatZincStatistics,
 	/// Optional optimization goal extracted from the instance.
@@ -113,18 +280,240 @@ pub struct FlatZincStatistics {
 	vars_unified: u32,
 }
 
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+/// Representation of a FlatZinc identifier for Huub specific constraints and
+/// annotations.
+///
+/// Note that it has a `Unknown` variant for identifiers that are not known to
+/// Huub for reporting error messages.
+pub enum FznIdent {
+	/// An identifier for a known constraint or annotation.
+	Known(KnownIdent),
+	/// An unknown identifier that was not recognized by Huub.
+	Unknown(Box<str>),
+}
+
 /// Builder for creating a model from a FlatZinc instance
-pub(crate) struct FznModelBuilder<'a, S: Eq + Hash + Ord> {
+pub(crate) struct FznModelBuilder<'a> {
 	/// The FlatZinc instance to build the model from
-	fzn: &'a FlatZinc<S>,
+	fzn: &'a FlatZinc<FznIdent>,
 	/// A mapping from FlatZinc identifiers to model views
-	map: FxHashMap<S, AnyView>,
+	map: FxHashMap<ArcKey<Variable<FznIdent>>, AnyView>,
 	/// The incumbent model
 	prb: Model,
 	/// Flags indicating which constraints have been processed
 	processed: Vec<bool>,
 	/// Statistics about the extraction process
 	stats: FlatZincStatistics,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+/// Identifiers that are known to the FlatZinc deserializer.
+pub enum KnownIdent {
+	/// Annotation identifiers.
+	Annotation(AnnotationIdent),
+	/// Constraint identifiers.
+	Constraint(ConstraintIdent),
+}
+
+impl AnnotationIdent {
+	/// Returns the string representation of the annotation identifier as used
+	/// in the MiniZinc standard library or Huub's MiniZinc library.
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			Self::BoolSearch => "bool_search",
+			Self::ConsistencyBounds => "bounds",
+			Self::ConsistencyDomain => "domain",
+			Self::ConsistencyValue => "value_propagation",
+			Self::DisjDetectPrec => "detectable_precedence",
+			Self::DisjEdgeFinding => "edge_finding",
+			Self::DisjNotLast => "not_last",
+			Self::IntSearch => "int_search",
+			Self::SeqSearch => "seq_search",
+			Self::ValSelIndomain => "indomain",
+			Self::ValSelIndomainMax => "indomain_max",
+			Self::ValSelIndomainMin => "indomain_min",
+			Self::ValSelOutdomainMax => "outdomain_max",
+			Self::ValSelOutdomainMin => "outdomain_min",
+			Self::VarSelAntiFirstFail => "anti_first_fail",
+			Self::VarSelFirstFail => "first_fail",
+			Self::VarSelInputOrder => "input_order",
+			Self::VarSelLargest => "largest",
+			Self::VarSelSmallest => "smallest",
+			Self::WarmStartArray => "warm_start_array",
+			Self::WarmStartBool => "warm_start_bool",
+			Self::WarmStartInt => "warm_start_int",
+		}
+	}
+}
+
+impl Display for AnnotationIdent {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str(self.as_str())
+	}
+}
+
+impl TryFrom<&str> for AnnotationIdent {
+	type Error = ();
+
+	fn try_from(value: &str) -> Result<Self, Self::Error> {
+		match value {
+			"anti_first_fail" => Ok(Self::VarSelAntiFirstFail),
+			"bool_search" => Ok(Self::BoolSearch),
+			"bounds" => Ok(Self::ConsistencyBounds),
+			"detectable_precedence" => Ok(Self::DisjDetectPrec),
+			"domain" => Ok(Self::ConsistencyDomain),
+			"edge_finding" => Ok(Self::DisjEdgeFinding),
+			"first_fail" => Ok(Self::VarSelFirstFail),
+			"indomain" => Ok(Self::ValSelIndomain),
+			"indomain_max" => Ok(Self::ValSelIndomainMax),
+			"indomain_min" => Ok(Self::ValSelIndomainMin),
+			"input_order" => Ok(Self::VarSelInputOrder),
+			"int_search" => Ok(Self::IntSearch),
+			"largest" => Ok(Self::VarSelLargest),
+			"not_last" => Ok(Self::DisjNotLast),
+			"outdomain_max" => Ok(Self::ValSelOutdomainMax),
+			"outdomain_min" => Ok(Self::ValSelOutdomainMin),
+			"seq_search" => Ok(Self::SeqSearch),
+			"smallest" => Ok(Self::VarSelSmallest),
+			"value_propagation" => Ok(Self::ConsistencyValue),
+			"warm_start_array" => Ok(Self::WarmStartArray),
+			"warm_start_bool" => Ok(Self::WarmStartBool),
+			"warm_start_int" => Ok(Self::WarmStartInt),
+			_ => Err(()),
+		}
+	}
+}
+
+impl ConstraintIdent {
+	/// Returns the string representation of the constraint identifier as used
+	/// in the MiniZinc standard library or Huub's MiniZinc library.
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			Self::AllDifferentInt => "huub_all_different_int",
+			Self::ArrayBoolAnd => "array_bool_and",
+			Self::ArrayBoolElement => "array_bool_element",
+			Self::ArrayBoolXor => "array_bool_xor",
+			Self::ArrayIntElement => "array_int_element",
+			Self::ArrayIntMaximum => "huub_array_int_maximum",
+			Self::ArrayIntMinimum => "huub_array_int_minimum",
+			Self::ArrayVarBoolElement => "array_var_bool_element",
+			Self::ArrayVarIntElement => "array_var_int_element",
+			Self::Bool2Int => "bool2int",
+			Self::BoolClause => "bool_clause",
+			Self::BoolClauseReif => "huub_bool_clause_reif",
+			Self::BoolEq => "bool_eq",
+			Self::BoolEqReif => "bool_eq_reif",
+			Self::BoolLinEq => "bool_lin_eq",
+			Self::BoolNot => "bool_not",
+			Self::BoolXor => "bool_xor",
+			Self::Cumulative => "huub_cumulative",
+			Self::DiffnInt { strict: false } => "huub_diffn_nonstrict_int",
+			Self::DiffnInt { strict: true } => "huub_diffn_int",
+			Self::DiffnKInt { strict: false } => "huub_diffn_k_nonstrict_int",
+			Self::DiffnKInt { strict: true } => "huub_diffn_k_int",
+			Self::DisjuctiveStrict => "huub_disjunctive_strict",
+			Self::IntAbs => "int_abs",
+			Self::IntDiv => "int_div",
+			Self::IntEq => "int_eq",
+			Self::IntEqImp => "int_eq_imp",
+			Self::IntEqReif => "int_eq_reif",
+			Self::IntLe => "int_le",
+			Self::IntLeImp => "int_le_imp",
+			Self::IntLeReif => "int_le_reif",
+			Self::IntLinEq => "int_lin_eq",
+			Self::IntLinEqImp => "int_lin_eq_imp",
+			Self::IntLinEqReif => "int_lin_eq_reif",
+			Self::IntLinLe => "int_lin_le",
+			Self::IntLinLeImp => "int_lin_le_imp",
+			Self::IntLinLeReif => "int_lin_le_reif",
+			Self::IntLinNe => "int_lin_ne",
+			Self::IntLinNeImp => "int_lin_ne_imp",
+			Self::IntLinNeReif => "int_lin_ne_reif",
+			Self::IntMax => "int_max",
+			Self::IntMin => "int_min",
+			Self::IntNe => "int_ne",
+			Self::IntNeImp => "int_ne_imp",
+			Self::IntNeReif => "int_ne_reif",
+			Self::IntPow => "int_pow",
+			Self::IntTimes => "int_times",
+			Self::Regular => "huub_regular",
+			Self::SeqPrecedeChainInt => "huub_seq_precede_chain_int",
+			Self::SetIn => "set_in",
+			Self::SetInReif => "set_in_reif",
+			Self::TableInt => "huub_table_int",
+			Self::ValuePrecedeChain => "huub_value_precede_chain_int",
+		}
+	}
+}
+
+impl Display for ConstraintIdent {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str(self.as_str())
+	}
+}
+
+impl TryFrom<&str> for ConstraintIdent {
+	type Error = ();
+
+	fn try_from(value: &str) -> Result<Self, Self::Error> {
+		match value {
+			"array_bool_and" => Ok(Self::ArrayBoolAnd),
+			"array_bool_element" => Ok(Self::ArrayBoolElement),
+			"array_bool_xor" => Ok(Self::ArrayBoolXor),
+			"array_int_element" => Ok(Self::ArrayIntElement),
+			"array_var_bool_element" => Ok(Self::ArrayVarBoolElement),
+			"array_var_int_element" => Ok(Self::ArrayVarIntElement),
+			"bool2int" => Ok(Self::Bool2Int),
+			"bool_clause" => Ok(Self::BoolClause),
+			"bool_eq" => Ok(Self::BoolEq),
+			"bool_eq_reif" => Ok(Self::BoolEqReif),
+			"bool_lin_eq" => Ok(Self::BoolLinEq),
+			"bool_not" => Ok(Self::BoolNot),
+			"bool_xor" => Ok(Self::BoolXor),
+			"huub_all_different_int" => Ok(Self::AllDifferentInt),
+			"huub_array_int_maximum" => Ok(Self::ArrayIntMaximum),
+			"huub_array_int_minimum" => Ok(Self::ArrayIntMinimum),
+			"huub_bool_clause_reif" => Ok(Self::BoolClauseReif),
+			"huub_cumulative" => Ok(Self::Cumulative),
+			"huub_diffn_int" => Ok(Self::DiffnInt { strict: true }),
+			"huub_diffn_k_int" => Ok(Self::DiffnKInt { strict: true }),
+			"huub_diffn_k_nonstrict_int" => Ok(Self::DiffnKInt { strict: false }),
+			"huub_diffn_nonstrict_int" => Ok(Self::DiffnInt { strict: false }),
+			"huub_disjunctive_strict" => Ok(Self::DisjuctiveStrict),
+			"huub_regular" => Ok(Self::Regular),
+			"huub_seq_precede_chain_int" => Ok(Self::SeqPrecedeChainInt),
+			"huub_table_int" => Ok(Self::TableInt),
+			"huub_value_precede_chain_int" => Ok(Self::ValuePrecedeChain),
+			"int_abs" => Ok(Self::IntAbs),
+			"int_div" => Ok(Self::IntDiv),
+			"int_eq" => Ok(Self::IntEq),
+			"int_eq_imp" => Ok(Self::IntEqImp),
+			"int_eq_reif" => Ok(Self::IntEqReif),
+			"int_le" => Ok(Self::IntLe),
+			"int_le_imp" => Ok(Self::IntLeImp),
+			"int_le_reif" => Ok(Self::IntLeReif),
+			"int_lin_eq" => Ok(Self::IntLinEq),
+			"int_lin_eq_imp" => Ok(Self::IntLinEqImp),
+			"int_lin_eq_reif" => Ok(Self::IntLinEqReif),
+			"int_lin_le" => Ok(Self::IntLinLe),
+			"int_lin_le_imp" => Ok(Self::IntLinLeImp),
+			"int_lin_le_reif" => Ok(Self::IntLinLeReif),
+			"int_lin_ne" => Ok(Self::IntLinNe),
+			"int_lin_ne_imp" => Ok(Self::IntLinNeImp),
+			"int_lin_ne_reif" => Ok(Self::IntLinNeReif),
+			"int_max" => Ok(Self::IntMax),
+			"int_min" => Ok(Self::IntMin),
+			"int_ne" => Ok(Self::IntNe),
+			"int_ne_imp" => Ok(Self::IntNeImp),
+			"int_ne_reif" => Ok(Self::IntNeReif),
+			"int_pow" => Ok(Self::IntPow),
+			"int_times" => Ok(Self::IntTimes),
+			"set_in" => Ok(Self::SetIn),
+			"set_in_reif" => Ok(Self::SetInReif),
+			_ => Err(()),
+		}
+	}
 }
 
 impl Display for FlatZincError {
@@ -181,40 +570,69 @@ impl FlatZincStatistics {
 	}
 }
 
-impl<'a, S> FznModelBuilder<'a, S>
-where
-	S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
-{
+impl Display for FznIdent {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Known(ident) => Display::fmt(&ident, f),
+			Self::Unknown(ident) => f.write_str(ident),
+		}
+	}
+}
+
+impl From<&str> for FznIdent {
+	fn from(value: &str) -> Self {
+		if let Ok(ident) = ConstraintIdent::try_from(value) {
+			Self::Known(KnownIdent::Constraint(ident))
+		} else if let Ok(ident) = AnnotationIdent::try_from(value) {
+			Self::Known(KnownIdent::Annotation(ident))
+		} else {
+			Self::Unknown(value.into())
+		}
+	}
+}
+
+impl<'a> FznModelBuilder<'a> {
 	/// Extract a [`Vec<Literal>`] from an [`AnnotationArgument`].
 	fn ann_arg_var_array(
 		&self,
-		arg: &'a AnnotationArgument<S>,
-	) -> Result<Vec<Literal<S>>, FlatZincError> {
-		match arg {
-			AnnotationArgument::Array(x) => Ok(x
+		arg: &AnnotationArgument<FznIdent>,
+	) -> Result<Vec<Literal<FznIdent>>, FlatZincError> {
+		let arr = match arg {
+			AnnotationArgument::Array(x) => x.clone(),
+			AnnotationArgument::ArrayNamed(x) => x
+				.upgrade()
+				.unwrap()
+				.contents
 				.iter()
-				.filter_map(|l| {
-					if let AnnotationLiteral::BaseLiteral(l) = l {
-						Some(l.clone())
-					} else {
-						None
+				.cloned()
+				.map_into()
+				.collect(),
+			_ => {
+				return Err(FlatZincError::InvalidArgumentType {
+					expected: "array of literals",
+					found: format!("{arg:?}"),
+				});
+			}
+		};
+		arr.into_iter()
+			.map(|l| {
+				Ok(match l {
+					AnnotationLiteral::Int(x) => Literal::Int(x),
+					AnnotationLiteral::Float(x) => Literal::Float(x),
+					AnnotationLiteral::Variable(x) => Literal::Variable(x.upgrade().unwrap()),
+					AnnotationLiteral::Bool(x) => Literal::Bool(x),
+					AnnotationLiteral::IntSet(x) => Literal::IntSet(x),
+					AnnotationLiteral::FloatSet(x) => Literal::FloatSet(x),
+					AnnotationLiteral::String(x) => Literal::String(x),
+					AnnotationLiteral::Annotation(x) => {
+						return Err(FlatZincError::InvalidArgumentType {
+							expected: "literal",
+							found: format!("{x:?}"),
+						});
 					}
 				})
-				.collect()),
-			AnnotationArgument::Literal(AnnotationLiteral::BaseLiteral(Literal::Identifier(
-				ident,
-			))) => {
-				if let Some(arr) = self.fzn.arrays.get(ident) {
-					Ok(arr.contents.clone())
-				} else {
-					Err(FlatZincError::UnknownIdentifier(ident.to_string()))
-				}
-			}
-			_ => Err(FlatZincError::InvalidArgumentType {
-				expected: "identifier",
-				found: format!("{arg:?}"),
-			}),
-		}
+			})
+			.collect()
 	}
 
 	/// Process a [`AnnotationCall`] expected to contain a search selection
@@ -222,221 +640,212 @@ where
 	/// and (2) the warm start instructions.
 	fn ann_to_branchings(
 		&mut self,
-		c: &'a AnnotationCall<S>,
+		c: &AnnotationCall<FznIdent>,
 	) -> Result<(Vec<View<bool>>, Vec<Branching>), FlatZincError> {
-		match c.id.deref() {
-			"bool_search" => {
-				if let [vars, var_sel, val_sel, _] = c.args.as_slice() {
-					let vars = self
-						.ann_arg_var_array(vars)?
-						.iter()
-						.map(|l| self.lit_bool(l))
-						.try_collect()?;
-					let var_sel = Self::ann_var_sel(var_sel)?;
-					let val_sel = Self::ann_val_sel(val_sel)?;
-
-					Ok((Vec::new(), vec![Branching::Bool(vars, var_sel, val_sel)]))
-				} else {
-					Err(FlatZincError::InvalidNumArgs {
-						name: "bool_search",
-						found: c.args.len(),
-						expected: 4,
-					})
+		if let FznIdent::Known(KnownIdent::Annotation(ann)) = c.id {
+			match ann {
+				AnnotationIdent::BoolSearch => {
+					return if let [vars, var_sel, val_sel, _] = c.args.as_slice() {
+						let vars = self
+							.ann_arg_var_array(vars)?
+							.iter()
+							.map(|l| self.lit_bool(l))
+							.try_collect()?;
+						let var_sel = Self::ann_var_sel(var_sel)?;
+						let val_sel = Self::ann_val_sel(val_sel)?;
+						Ok((Vec::new(), vec![Branching::Bool(vars, var_sel, val_sel)]))
+					} else {
+						Err(FlatZincError::InvalidNumArgs {
+							name: ann.as_str(),
+							found: c.args.len(),
+							expected: 4,
+						})
+					};
 				}
-			}
-			"int_search" => {
-				if let [vars, var_sel, val_sel, _] = c.args.as_slice() {
-					let vars = self
-						.ann_arg_var_array(vars)?
-						.iter()
-						.map(|l| self.lit_int(l))
-						.try_collect()?;
-					let var_sel = Self::ann_var_sel(var_sel)?;
-					let val_sel = Self::ann_val_sel(val_sel)?;
+				AnnotationIdent::IntSearch => {
+					return if let [vars, var_sel, val_sel, _] = c.args.as_slice() {
+						let vars = self
+							.ann_arg_var_array(vars)?
+							.iter()
+							.map(|l| self.lit_int(l))
+							.try_collect()?;
+						let var_sel = Self::ann_var_sel(var_sel)?;
+						let val_sel = Self::ann_val_sel(val_sel)?;
 
-					Ok((Vec::new(), vec![Branching::Int(vars, var_sel, val_sel)]))
-				} else {
-					Err(FlatZincError::InvalidNumArgs {
-						name: "int_search",
-						found: c.args.len(),
-						expected: 4,
-					})
+						Ok((Vec::new(), vec![Branching::Int(vars, var_sel, val_sel)]))
+					} else {
+						Err(FlatZincError::InvalidNumArgs {
+							name: ann.as_str(),
+							found: c.args.len(),
+							expected: 4,
+						})
+					};
 				}
-			}
-			"seq_search" | "warm_start_array" => {
-				if let [AnnotationArgument::Array(searches)] = c.args.as_slice() {
-					let mut warm_start = Vec::new();
-					let mut branchings = Vec::new();
-					for ann in searches {
-						match ann {
-							AnnotationLiteral::Annotation(Annotation::Call(sub_call)) => {
-								let (w, b) = self.ann_to_branchings(sub_call)?;
-								warm_start.extend(w);
-								branchings.extend(b);
+				AnnotationIdent::SeqSearch | AnnotationIdent::WarmStartArray => {
+					return if let [AnnotationArgument::Array(searches)] = c.args.as_slice() {
+						let mut warm_start = Vec::new();
+						let mut branchings = Vec::new();
+						for ann in searches {
+							match ann {
+								AnnotationLiteral::Annotation(Annotation::Call(sub_call)) => {
+									let (w, b) = self.ann_to_branchings(sub_call)?;
+									warm_start.extend(w);
+									branchings.extend(b);
+								}
+								_ => warn!(
+									target: "flatzinc",
+									annotation = %ann,
+									"unsupported search annotation"
+								),
 							}
-							_ => warn!(
-								target: "flatzinc",
-								annotation = %ann,
-								"unsupported search annotation"
-							),
 						}
-					}
-					Ok((warm_start, branchings))
-				} else {
-					Err(FlatZincError::InvalidNumArgs {
-						name: if c.id.deref() == "seq_search" {
-							"seq_search"
-						} else {
-							"warm_start_array"
-						},
-						found: c.args.len(),
-						expected: 1,
-					})
+						Ok((warm_start, branchings))
+					} else {
+						Err(FlatZincError::InvalidNumArgs {
+							name: ann.as_str(),
+							found: c.args.len(),
+							expected: 1,
+						})
+					};
 				}
-			}
-			"warm_start_bool" => {
-				if let [vars, vals] = c.args.as_slice() {
-					let vars: Vec<_> = self
-						.ann_arg_var_array(vars)?
-						.iter()
-						.map(|l| self.lit_bool(l))
-						.try_collect()?;
-					let vals: Vec<_> = self
-						.ann_arg_var_array(vals)?
-						.iter()
-						.map(|l| self.par_bool(l))
-						.try_collect()?;
+				AnnotationIdent::WarmStartBool => {
+					return if let [vars, vals] = c.args.as_slice() {
+						let vars: Vec<_> = self
+							.ann_arg_var_array(vars)?
+							.iter()
+							.map(|l| self.lit_bool(l))
+							.try_collect()?;
+						let vals: Vec<_> = self
+							.ann_arg_var_array(vals)?
+							.iter()
+							.map(|l| self.par_bool(l))
+							.try_collect()?;
 
-					Ok((
-						vars.into_iter()
-							.zip(vals)
-							.map(|(v, b)| if b { v } else { !v })
-							.collect(),
-						Vec::new(),
-					))
-				} else {
-					Err(FlatZincError::InvalidNumArgs {
-						name: "warm_start_bool",
-						found: c.args.len(),
-						expected: 2,
-					})
+						Ok((
+							vars.into_iter()
+								.zip(vals)
+								.map(|(v, b)| if b { v } else { !v })
+								.collect(),
+							Vec::new(),
+						))
+					} else {
+						Err(FlatZincError::InvalidNumArgs {
+							name: ann.as_str(),
+							found: c.args.len(),
+							expected: 2,
+						})
+					};
 				}
-			}
-			"warm_start_int" => {
-				if let [vars, vals] = c.args.as_slice() {
-					let vars: Vec<_> = self
-						.ann_arg_var_array(vars)?
-						.iter()
-						.map(|l| self.lit_int(l))
-						.try_collect()?;
-					let vals: Vec<_> = self
-						.ann_arg_var_array(vals)?
-						.iter()
-						.map(|l| self.par_int(l))
-						.try_collect()?;
+				AnnotationIdent::WarmStartInt => {
+					return if let [vars, vals] = c.args.as_slice() {
+						let vars: Vec<_> = self
+							.ann_arg_var_array(vars)?
+							.iter()
+							.map(|l| self.lit_int(l))
+							.try_collect()?;
+						let vals: Vec<_> = self
+							.ann_arg_var_array(vals)?
+							.iter()
+							.map(|l| self.par_int(l))
+							.try_collect()?;
 
-					Ok((
-						vars.into_iter()
-							.zip(vals)
-							.map(|(var, val)| var.eq(val))
-							.collect(),
-						Vec::new(),
-					))
-				} else {
-					Err(FlatZincError::InvalidNumArgs {
-						name: "warm_start_int",
-						found: c.args.len(),
-						expected: 2,
-					})
+						Ok((
+							vars.into_iter()
+								.zip(vals)
+								.map(|(var, val)| var.eq(val))
+								.collect(),
+							Vec::new(),
+						))
+					} else {
+						Err(FlatZincError::InvalidNumArgs {
+							name: ann.as_str(),
+							found: c.args.len(),
+							expected: 2,
+						})
+					};
 				}
-			}
-			other => {
-				warn!(
-					target: "flatzinc",
-					annotation = %other,
-					"ignore unsupported search annotation"
-				);
-				Ok((Vec::new(), Vec::new()))
+				_ => {}
 			}
 		}
+		warn!(
+			target: "flatzinc",
+			annotation = %c.id,
+			"ignore unsupported search annotation"
+		);
+		Ok((Vec::new(), Vec::new()))
 	}
 
 	/// Extract an [`ValueSelection`] from an [`AnnotationArgument`] in a
 	/// [`FlatZinc`] instance, or return a
 	/// [`FlatZincError::InvalidArgumentType`] if an invalid type.
-	fn ann_val_sel(arg: &AnnotationArgument<S>) -> Result<ValueSelection, FlatZincError> {
-		match arg {
-			AnnotationArgument::Literal(AnnotationLiteral::BaseLiteral(Literal::Identifier(s))) => {
-				match s.deref() {
-					"indomain" | "indomain_min" => Ok(ValueSelection::IndomainMin),
-					"indomain_max" => Ok(ValueSelection::IndomainMax),
-					// "indomain_median" => Ok(ValueSelection::IndomainMedian),
-					// "indomain_random" => Ok(ValueSelection::IndomainRandom),
-					// "indomain_split" => Ok(ValueSelection::IndomainSplit),
-					// "indomain_split_random" => Ok(ValueSelection::IndomainSplitRandom),
-					// "indomain_reverse_split" => Ok(ValueSelection::IndomainReverseSplit),
-					"outdomain_max" => Ok(ValueSelection::OutdomainMax),
-					"outdomain_min" => Ok(ValueSelection::OutdomainMin),
-					// "outdomain_median" => Ok(ValueSelection::OutdomainMedian),
-					// "outdomain_random" => Ok(ValueSelection::OutdomainRandom),
-					_ => {
-						warn!(
-							target: "flatzinc",
-							selection = %s,
-							fallback = "indomain_min",
-							"unsupported value selection"
-						);
-						Ok(ValueSelection::IndomainMin)
-					}
-				}
-			}
-			_ => Err(FlatZincError::InvalidArgumentType {
-				expected: "string",
+	fn ann_val_sel(arg: &AnnotationArgument<FznIdent>) -> Result<ValueSelection, FlatZincError> {
+		let AnnotationArgument::Literal(AnnotationLiteral::Annotation(ann)) = arg else {
+			return Err(FlatZincError::InvalidArgumentType {
+				expected: "ann",
 				found: format!("{arg:?}"),
-			}),
+			});
+		};
+		if let Annotation::Atom(FznIdent::Known(KnownIdent::Annotation(ann))) = ann {
+			match ann {
+				AnnotationIdent::ValSelIndomain | AnnotationIdent::ValSelIndomainMin => {
+					return Ok(ValueSelection::IndomainMin);
+				}
+				AnnotationIdent::ValSelIndomainMax => return Ok(ValueSelection::IndomainMax),
+				AnnotationIdent::ValSelOutdomainMax => return Ok(ValueSelection::OutdomainMax),
+				AnnotationIdent::ValSelOutdomainMin => return Ok(ValueSelection::OutdomainMin),
+				_ => {}
+			}
 		}
+		warn!(
+			target: "flatzinc",
+			selection = %ann,
+			fallback = "indomain_min",
+			"unsupported value selection"
+		);
+		Ok(ValueSelection::IndomainMin)
 	}
 
 	/// Extract an [`VariableSelection`] from an [`AnnotationArgument`] in a
 	/// [`FlatZinc`] instance, or return a
 	/// [`FlatZincError::InvalidArgumentType`] if an invalid type.
-	fn ann_var_sel(arg: &AnnotationArgument<S>) -> Result<VariableSelection, FlatZincError> {
-		match arg {
-			AnnotationArgument::Literal(AnnotationLiteral::BaseLiteral(Literal::Identifier(s))) => {
-				match s.deref() {
-					"anti_first_fail" => Ok(VariableSelection::AntiFirstFail),
-					// "dom_w_deg" => Ok(VariableSelection::DomWDeg),
-					"first_fail" => Ok(VariableSelection::FirstFail),
-					"input_order" => Ok(VariableSelection::InputOrder),
-					"largest" => Ok(VariableSelection::Largest),
-					// "max_regret" => Ok(VariableSelection::MaxRegret),
-					// "most_constrained" => Ok(VariableSelection::MostConstrained),
-					// "occurrence" => Ok(VariableSelection::Occurrence),
-					"smallest" => Ok(VariableSelection::Smallest),
-					_ => {
-						warn!(
-							target: "flatzinc",
-							selection = %s,
-							fallback = "input_order",
-							"unsupported variable selection"
-						);
-						Ok(VariableSelection::InputOrder)
-					}
-				}
-			}
-			_ => Err(FlatZincError::InvalidArgumentType {
-				expected: "string",
+	fn ann_var_sel(arg: &AnnotationArgument<FznIdent>) -> Result<VariableSelection, FlatZincError> {
+		let AnnotationArgument::Literal(AnnotationLiteral::Annotation(ann)) = arg else {
+			return Err(FlatZincError::InvalidArgumentType {
+				expected: "ann",
 				found: format!("{arg:?}"),
-			}),
+			});
+		};
+		if let Annotation::Atom(FznIdent::Known(KnownIdent::Annotation(ann))) = ann {
+			match ann {
+				AnnotationIdent::VarSelAntiFirstFail => {
+					return Ok(VariableSelection::AntiFirstFail);
+				}
+				AnnotationIdent::VarSelFirstFail => return Ok(VariableSelection::FirstFail),
+				AnnotationIdent::VarSelInputOrder => return Ok(VariableSelection::InputOrder),
+				AnnotationIdent::VarSelLargest => return Ok(VariableSelection::Largest),
+				AnnotationIdent::VarSelSmallest => return Ok(VariableSelection::Smallest),
+				_ => {}
+			}
 		}
+		warn!(
+			target: "flatzinc",
+			selection = %ann,
+			fallback = "first_fail",
+			"unsupported value selection"
+		);
+		Ok(VariableSelection::FirstFail)
 	}
 
 	/// Check whether an annotation atom is present in the given list of
 	/// annotations, marking it as used if found.
-	fn anns_contains(ann: &[Annotation<S>], ann_used: &mut [bool], ident: &str) -> bool {
+	fn anns_contains(
+		ann: &[Annotation<FznIdent>],
+		ann_used: &mut [bool],
+		ident: AnnotationIdent,
+	) -> bool {
 		for (i, a) in ann.iter().enumerate() {
-			if let Annotation::Atom(x) = a
-				&& x.deref() == ident
+			if let Annotation::Atom(FznIdent::Known(KnownIdent::Annotation(x))) = a
+				&& *x == ident
 			{
 				ann_used[i] = true;
 				return true;
@@ -446,16 +855,13 @@ where
 	}
 
 	/// Extract a [`Vec<Literal>`] from an [`Argument`].
-	fn arg_array(&self, arg: &'a Argument<S>) -> Result<&'a Vec<Literal<S>>, FlatZincError> {
+	fn arg_array(
+		&self,
+		arg: &'a Argument<FznIdent>,
+	) -> Result<&'a [Literal<FznIdent>], FlatZincError> {
 		match arg {
 			Argument::Array(x) => Ok(x),
-			Argument::Literal(Literal::Identifier(ident)) => {
-				if let Some(arr) = self.fzn.arrays.get(ident) {
-					Ok(&arr.contents)
-				} else {
-					Err(FlatZincError::UnknownIdentifier(ident.to_string()))
-				}
-			}
+			Argument::ArrayNamed(x) => Ok(&x.contents),
 			Argument::Literal(x) => Err(FlatZincError::InvalidArgumentType {
 				expected: "array",
 				found: format!("{x:?}"),
@@ -466,7 +872,7 @@ where
 	/// Extract a Boolean decision variable from the an [`Argument`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
 	/// returned if the argument was not a Boolean decision variable.
-	fn arg_bool(&mut self, arg: &Argument<S>) -> Result<View<bool>, FlatZincError> {
+	fn arg_bool(&mut self, arg: &Argument<FznIdent>) -> Result<View<bool>, FlatZincError> {
 		match arg {
 			Argument::Literal(l) => self.lit_bool(l),
 			_ => Err(FlatZincError::InvalidArgumentType {
@@ -477,16 +883,10 @@ where
 	}
 
 	/// Check whether the given [`Argument`] is an array of length `len`.
-	fn arg_has_length(&self, arg: &Argument<S>, len: usize) -> bool {
+	fn arg_has_length(&self, arg: &Argument<FznIdent>, len: usize) -> bool {
 		match arg {
 			Argument::Array(x) => x.len() == len,
-			Argument::Literal(Literal::Identifier(ident)) => {
-				if let Some(arr) = self.fzn.arrays.get(ident) {
-					arr.contents.len() == len
-				} else {
-					false
-				}
-			}
+			Argument::ArrayNamed(x) => x.contents.len() == len,
 			_ => false,
 		}
 	}
@@ -494,7 +894,7 @@ where
 	/// Extract a integer decision variable from the an [`Argument`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
 	/// returned if the argument was not a integer decision variable.
-	fn arg_int(&mut self, arg: &Argument<S>) -> Result<View<IntVal>, FlatZincError> {
+	fn arg_int(&mut self, arg: &Argument<FznIdent>) -> Result<View<IntVal>, FlatZincError> {
 		match arg {
 			Argument::Literal(l) => self.lit_int(l),
 			_ => Err(FlatZincError::InvalidArgumentType {
@@ -507,7 +907,7 @@ where
 	/// Extract a parameter integer value from the an [`Argument`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
 	/// returned if the argument was not an integer parameter.
-	fn arg_par_int(&self, arg: &Argument<S>) -> Result<IntVal, FlatZincError> {
+	fn arg_par_int(&self, arg: &Argument<FznIdent>) -> Result<IntVal, FlatZincError> {
 		match arg {
 			Argument::Literal(l) => self.par_int(l),
 			_ => Err(FlatZincError::InvalidArgumentType {
@@ -520,10 +920,7 @@ where
 	/// Extract a parameter integer set value from the an [`Argument`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
 	/// returned if the argument was not a parameter set.
-	fn arg_par_set(&self, arg: &Argument<S>) -> Result<IntSet, FlatZincError>
-	where
-		S: Deref<Target = str> + Clone + Debug,
-	{
+	fn arg_par_set(&self, arg: &Argument<FznIdent>) -> Result<IntSet, FlatZincError> {
 		match arg {
 			Argument::Literal(l) => self.par_set(l),
 			_ => Err(FlatZincError::InvalidArgumentType {
@@ -597,17 +994,18 @@ where
 
 	/// Ensure all variables in the FlatZinc instance output are in the model
 	pub(crate) fn ensure_output(&mut self) -> Result<(), FlatZincError> {
-		for ident in self.fzn.output.iter() {
-			if self.fzn.variables.contains_key(ident) {
-				self.lookup_or_create_var(ident)?;
-			} else if let Some(arr) = self.fzn.arrays.get(ident) {
-				for x in &arr.contents {
-					if let Literal::Identifier(ident) = x {
-						self.lookup_or_create_var(ident)?;
+		for out in self.fzn.output.iter() {
+			match out {
+				NamedRef::Variable(var) => {
+					self.lookup_or_create_var(var)?;
+				}
+				NamedRef::Array(arr) => {
+					for x in &arr.contents {
+						if let Literal::Variable(var) = x {
+							self.lookup_or_create_var(var)?;
+						}
 					}
 				}
-			} else {
-				return Err(FlatZincError::UnknownIdentifier(ident.to_string()));
 			}
 		}
 		Ok(())
@@ -644,14 +1042,10 @@ where
 	/// Create branching specification according to the search annotations in
 	/// the FlatZinc instance
 	pub(crate) fn extract_goal(&mut self) -> Result<Option<Goal<View<IntVal>>>, FlatZincError> {
-		if self.fzn.solve.method == flatzinc_serde::Method::Satisfy {
-			return Ok(None);
-		}
-		let dv = self.lit_int(self.fzn.solve.objective.as_ref().unwrap())?;
-		Ok(match self.fzn.solve.method {
-			flatzinc_serde::Method::Satisfy => unreachable!(),
-			flatzinc_serde::Method::Minimize => Some(Goal::Minimize(dv)),
-			flatzinc_serde::Method::Maximize => Some(Goal::Maximize(dv)),
+		Ok(match &self.fzn.solve.method {
+			flatzinc_serde::Method::Satisfy => None,
+			flatzinc_serde::Method::Minimize(lit) => Some(Goal::Minimize(self.lit_int(lit)?)),
+			flatzinc_serde::Method::Maximize(lit) => Some(Goal::Maximize(self.lit_int(lit)?)),
 		})
 	}
 
@@ -662,14 +1056,17 @@ where
 	/// consistent using propagators.
 	fn extract_view(
 		&mut self,
-		defined_by: &FxHashMap<&S, usize>,
+		defined_by: &FxHashMap<ArcKey<Variable<FznIdent>>, usize>,
 		con: usize,
 	) -> Result<(), FlatZincError> {
 		debug_assert!(!self.processed[con]);
 		let c = &self.fzn.constraints[con];
 
-		let add_view = |me: &mut Self, name: S, view: AnyView| -> Result<(), FlatZincError> {
-			match me.map.entry(name.clone()) {
+		let add_view = |me: &mut Self,
+		                var: &'a Arc<Variable<FznIdent>>,
+		                view: AnyView|
+		 -> Result<(), FlatZincError> {
+			match me.map.entry(var.cloned_key()) {
 				Entry::Occupied(e) => match *e.get() {
 					AnyView::Bool(bv) => {
 						let AnyView::Bool(view) = view else {
@@ -686,11 +1083,7 @@ where
 				},
 				Entry::Vacant(e) => {
 					// Enforce the domain of the named (uncreated) variable on the view
-					let def = me.fzn.variables.get(&name).unwrap();
-					if let Some(dom) = &def.domain {
-						let Domain::Int(dom) = dom else {
-							unreachable!()
-						};
+					if let Type::Int(Some(dom)) = &var.ty {
 						let AnyView::Int(view) = view else {
 							unreachable!()
 						};
@@ -706,95 +1099,103 @@ where
 			Ok(())
 		};
 		let arg_bool_view =
-			|me: &mut Self, arg: &Argument<S>| -> Result<View<bool>, FlatZincError> {
-				if let Argument::Literal(Literal::Identifier(x)) = arg
-					&& !me.map.contains_key(x)
-					&& defined_by.contains_key(x)
-					&& defined_by[x] != con
-				{
-					me.extract_view(defined_by, defined_by[x])?;
+			|me: &mut Self, arg: &Argument<FznIdent>| -> Result<View<bool>, FlatZincError> {
+				if let Argument::Literal(Literal::Variable(x)) = arg {
+					let key = x.cloned_key();
+					if !me.map.contains_key(&key)
+						&& defined_by.contains_key(&key)
+						&& defined_by[&key] != con
+					{
+						me.extract_view(defined_by, defined_by[&key])?;
+					}
 				}
 				me.arg_bool(arg)
 			};
 		let lit_int_view =
-			|me: &mut Self, lit: &Literal<S>| -> Result<View<IntVal>, FlatZincError> {
-				if let Literal::Identifier(x) = lit
-					&& !me.map.contains_key(x)
-					&& defined_by.contains_key(x)
-					&& defined_by[x] != con
-				{
-					me.extract_view(defined_by, defined_by[x])?;
+			|me: &mut Self, lit: &'a Literal<FznIdent>| -> Result<View<IntVal>, FlatZincError> {
+				if let Literal::Variable(x) = lit {
+					let key = x.cloned_key();
+					if !me.map.contains_key(&key)
+						&& defined_by.contains_key(&key)
+						&& defined_by[&key] != con
+					{
+						me.extract_view(defined_by, defined_by[&key])?;
+					}
 				}
 				me.lit_int(lit)
 			};
 
-		match c.id.deref() {
-			"bool2int" => {
-				if let [b, Argument::Literal(Literal::Identifier(x))] = c.args.as_slice() {
+		let FznIdent::Known(KnownIdent::Constraint(ident)) = &c.id else {
+			return Ok(()); // Bad identifier is signaled during post_constraints
+		};
+
+		match ident {
+			ConstraintIdent::Bool2Int => {
+				if let [b, Argument::Literal(Literal::Variable(x))] = c.args.as_slice() {
 					let b = arg_bool_view(self, b)?;
-					add_view(self, x.clone(), View::<IntVal>::from(b).into())?;
+					add_view(self, x, View::<IntVal>::from(b).into())?;
 				}
 			}
-			"bool_not" => match c.args.as_slice() {
-				[b, Argument::Literal(Literal::Identifier(x))]
-				| [Argument::Literal(Literal::Identifier(x)), b] => {
+			ConstraintIdent::BoolNot => match c.args.as_slice() {
+				[b, Argument::Literal(Literal::Variable(x))]
+				| [Argument::Literal(Literal::Variable(x)), b] => {
 					let b = arg_bool_view(self, b)?;
-					add_view(self, x.clone(), (!b).into())?;
+					add_view(self, x, (!b).into())?;
 				}
 				_ => {}
 			},
-			"int_eq_reif" => match c.args.as_slice() {
+			ConstraintIdent::IntEqReif => match c.args.as_slice() {
 				[
 					Argument::Literal(Literal::Int(i)),
 					Argument::Literal(x),
-					Argument::Literal(Literal::Identifier(r)),
+					Argument::Literal(Literal::Variable(r)),
 				]
 				| [
 					Argument::Literal(x),
 					Argument::Literal(Literal::Int(i)),
-					Argument::Literal(Literal::Identifier(r)),
+					Argument::Literal(Literal::Variable(r)),
 				] => {
 					let x = lit_int_view(self, x)?;
-					add_view(self, r.clone(), x.eq(*i).into())?;
+					add_view(self, r, x.eq(*i).into())?;
 				}
 				_ => {}
 			},
-			"int_le_reif" => match c.args.as_slice() {
+			ConstraintIdent::IntLeReif => match c.args.as_slice() {
 				[
 					Argument::Literal(Literal::Int(i)),
 					Argument::Literal(x),
-					Argument::Literal(Literal::Identifier(r)),
+					Argument::Literal(Literal::Variable(r)),
 				] => {
 					let x = lit_int_view(self, x)?;
-					add_view(self, r.clone(), x.geq(*i).into())?;
+					add_view(self, r, x.geq(*i).into())?;
 				}
 				[
 					Argument::Literal(x),
 					Argument::Literal(Literal::Int(i)),
-					Argument::Literal(Literal::Identifier(r)),
+					Argument::Literal(Literal::Variable(r)),
 				] => {
 					let x = lit_int_view(self, x)?;
-					add_view(self, r.clone(), x.leq(*i).into())?;
+					add_view(self, r, x.leq(*i).into())?;
 				}
 				_ => {}
 			},
-			"int_ne_reif" => match c.args.as_slice() {
+			ConstraintIdent::IntNeReif => match c.args.as_slice() {
 				[
 					Argument::Literal(Literal::Int(i)),
 					Argument::Literal(x),
-					Argument::Literal(Literal::Identifier(r)),
+					Argument::Literal(Literal::Variable(r)),
 				]
 				| [
 					Argument::Literal(x),
 					Argument::Literal(Literal::Int(i)),
-					Argument::Literal(Literal::Identifier(r)),
+					Argument::Literal(Literal::Variable(r)),
 				] => {
 					let x = lit_int_view(self, x)?;
-					add_view(self, r.clone(), x.ne(*i).into())?;
+					add_view(self, r, x.ne(*i).into())?;
 				}
 				_ => {}
 			},
-			"int_lin_eq"
+			ConstraintIdent::IntLinEq
 				if c.args
 					.get(1)
 					.map(|v| self.arg_has_length(v, 2))
@@ -803,17 +1204,17 @@ where
 				let [coeff, vars, sum] = c.args.as_slice() else {
 					break 'int_lin_eq;
 				};
-				let Some(l) = &c.defines else {
+				let Some(NamedRef::Variable(l)) = &c.defines else {
 					break 'int_lin_eq;
 				};
 
 				let coeff = self.arg_array(coeff)?;
 				let vars = self.arg_array(vars)?;
-				let (c, (cy, vy)) = match vars.as_slice() {
-					[Literal::Identifier(v), y] if v == l => {
+				let (c, (cy, vy)) = match vars {
+					[Literal::Variable(v), y] if v.name == l.name => {
 						(self.par_int(&coeff[0])?, (self.par_int(&coeff[1])?, y))
 					}
-					[y, Literal::Identifier(v)] if v == l => {
+					[y, Literal::Variable(v)] if v.name == l.name => {
 						(self.par_int(&coeff[1])?, (self.par_int(&coeff[0])?, y))
 					}
 					_ => break 'int_lin_eq,
@@ -833,7 +1234,7 @@ where
 				} else {
 					offset.into()
 				};
-				add_view(self, l.clone(), view.into())?;
+				add_view(self, l, view.into())?;
 			}
 			_ => {}
 		}
@@ -844,12 +1245,18 @@ where
 	/// as views of other variables.
 	pub(crate) fn extract_views(&mut self) -> Result<(), FlatZincError> {
 		// Create a mapping from identifiers to the constraint that defines them
-		let defined_by: FxHashMap<&S, usize> = self
+		let defined_by: FxHashMap<ArcKey<Variable<FznIdent>>, usize> = self
 			.fzn
 			.constraints
 			.iter()
 			.enumerate()
-			.filter_map(|(i, c)| c.defines.as_ref().map(|d| (d, i)))
+			.filter_map(|(i, c)| {
+				if let Some(NamedRef::Variable(var)) = c.defines.as_ref() {
+					Some((var.cloned_key(), i))
+				} else {
+					None
+				}
+			})
 			.collect();
 
 		// Extract views for all constraints that define an identifier
@@ -862,7 +1269,7 @@ where
 	}
 
 	/// Finalize the builder and return the model
-	pub(crate) fn finalize(mut self) -> Result<(Model, FlatZincModelMeta<S>), FlatZincError> {
+	pub(crate) fn finalize(mut self) -> Result<(Model, FlatZincModelMeta), FlatZincError> {
 		let branching = self.extract_branchings()?;
 		let goal = self.extract_goal()?;
 		Ok((
@@ -879,9 +1286,9 @@ where
 	/// Extract a Boolean decision variable from the a [`Literal`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
 	/// returned if the argument was not a Boolean decision variable.
-	fn lit_bool(&mut self, lit: &Literal<S>) -> Result<View<bool>, FlatZincError> {
+	fn lit_bool(&mut self, lit: &Literal<FznIdent>) -> Result<View<bool>, FlatZincError> {
 		match lit {
-			Literal::Identifier(ident) => self.lookup_or_create_var(ident).map(|mv| match mv {
+			Literal::Variable(var) => self.lookup_or_create_var(var).map(|mv| match mv {
 				AnyView::Bool(bv) => Ok(bv.resolve_alias(&self.prb).into_inner()),
 				AnyView::Int(_) => Err(FlatZincError::InvalidArgumentType {
 					expected: "bool",
@@ -896,9 +1303,9 @@ where
 	/// Extract a integer decision variable from a [`Literal`] in a [`FlatZinc`]
 	/// instance. A [`FlatZincError::InvalidArgumentType`] will be returned if
 	/// the argument was not a integer decision variable.
-	fn lit_int(&mut self, lit: &Literal<S>) -> Result<View<IntVal>, FlatZincError> {
+	fn lit_int(&mut self, lit: &Literal<FznIdent>) -> Result<View<IntVal>, FlatZincError> {
 		match lit {
-			Literal::Identifier(ident) => self.lookup_or_create_var(ident).map(|mv| match mv {
+			Literal::Variable(var) => self.lookup_or_create_var(var).map(|mv| match mv {
 				AnyView::Int(iv) => Ok(iv.resolve_alias(&self.prb).into_inner()),
 				AnyView::Bool(_) => Err(FlatZincError::InvalidArgumentType {
 					expected: "int",
@@ -913,40 +1320,35 @@ where
 
 	/// Find the decision variable, i.e. [`ModelView`], associated with the
 	/// given identifier, or create a new one if it doesn't yet exist.
-	fn lookup_or_create_var(&mut self, ident: &S) -> Result<AnyView, FlatZincError> {
-		match self.map.entry(ident.clone()) {
-			Entry::Vacant(e) => {
-				if let Some(var) = self.fzn.variables.get(ident) {
-					Ok(e.insert(match var.ty {
-						Type::Bool => AnyView::Bool(self.prb.new_bool_decision()),
-						Type::Int => match &var.domain {
-							Some(Domain::Int(r)) => AnyView::Int(
-								self.prb.new_int_decision(r.iter().collect::<IntSet>()),
-							),
-							Some(_) => unreachable!(),
-							None => {
-								warn!(
-									target: "flatzinc",
-									variable = %ident,
-									min = FULL_INT_DOMAIN.start(),
-									max = FULL_INT_DOMAIN.end(),
-									"assume full integer domain for unbounded decision variable"
-								);
-								self.prb.new_int_decision(FULL_INT_DOMAIN).into()
-							}
-						},
-						_ => todo!("Variables of {:?} are not yet supported", var.ty),
-					})
-					.clone())
-				} else {
-					Err(FlatZincError::UnknownIdentifier(ident.to_string()))
-				}
-			}
+	fn lookup_or_create_var(
+		&mut self,
+		var: &Arc<Variable<FznIdent>>,
+	) -> Result<AnyView, FlatZincError> {
+		match self.map.entry(var.cloned_key()) {
+			Entry::Vacant(e) => Ok(e
+				.insert(match &var.ty {
+					Type::Bool => AnyView::Bool(self.prb.new_bool_decision()),
+					Type::Int(dom) => match dom {
+						Some(dom) => AnyView::Int(self.prb.new_int_decision(dom.clone())),
+						None => {
+							warn!(
+								target: "flatzinc",
+								variable = %var.name,
+								min = FULL_INT_DOMAIN.start(),
+								max = FULL_INT_DOMAIN.end(),
+								"assume full integer domain for unbounded decision variable"
+							);
+							self.prb.new_int_decision(FULL_INT_DOMAIN).into()
+						}
+					},
+					_ => todo!("Variables of {:?} are not yet supported", var.ty),
+				})
+				.clone()),
 			Entry::Occupied(e) => Ok(e.get().clone()),
 		}
 	}
 	/// Create a new builder to create a model from a FlatZinc instance
-	pub(crate) fn new(fzn: &'a FlatZinc<S>) -> Self {
+	pub(crate) fn new(fzn: &'a FlatZinc<FznIdent>) -> Self {
 		Self {
 			fzn,
 			map: FxHashMap::default(),
@@ -959,79 +1361,40 @@ where
 	/// Extract a Boolean parameter from the a [`Literal`] in a [`FlatZinc`]
 	/// instance. A [`FlatZincError::InvalidArgumentType`] will be returned if
 	/// the argument was not a Boolean parameter.
-	fn par_bool(&self, lit: &Literal<S>) -> Result<bool, FlatZincError> {
+	fn par_bool(&self, lit: &Literal<FznIdent>) -> Result<bool, FlatZincError> {
 		match lit {
-			Literal::Identifier(ident) => {
-				if let Some(var) = self.fzn.variables.get(ident) {
-					if var.ty == Type::Bool
-						&& let Some(ref value) = var.value
-					{
-						self.par_bool(value)
-					} else {
-						Err(FlatZincError::InvalidArgumentType {
-							expected: "par bool",
-							found: format!("{:?}", var.ty),
-						})
-					}
-				} else {
-					Err(FlatZincError::UnknownIdentifier(ident.to_string()))
-				}
-			}
 			Literal::Bool(v) => Ok(*v),
-			_ => todo!(),
+			_ => Err(FlatZincError::InvalidArgumentType {
+				expected: "par bool",
+				found: format!("{:?}", lit),
+			}),
 		}
 	}
 
 	/// Extract a parameter integer value from the a [`Literal`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
 	/// returned if the argument was not an integer parameter.
-	fn par_int(&self, lit: &Literal<S>) -> Result<IntVal, FlatZincError> {
+	fn par_int(&self, lit: &Literal<FznIdent>) -> Result<IntVal, FlatZincError> {
 		match lit {
-			Literal::Identifier(ident) => {
-				if let Some(var) = self.fzn.variables.get(ident) {
-					if var.ty == Type::Int
-						&& let Some(ref value) = var.value
-					{
-						self.par_int(value)
-					} else {
-						Err(FlatZincError::InvalidArgumentType {
-							expected: "par int",
-							found: format!("{:?}", var.ty),
-						})
-					}
-				} else {
-					Err(FlatZincError::UnknownIdentifier(ident.to_string()))
-				}
-			}
 			Literal::Bool(v) => Ok(if *v { 1 } else { 0 }),
 			Literal::Int(v) => Ok(*v),
-			_ => todo!(),
+			_ => Err(FlatZincError::InvalidArgumentType {
+				expected: "par int",
+				found: format!("{:?}", lit),
+			}),
 		}
 	}
 
 	/// Extract a parameter integer set value from the a [`Literal`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
 	/// returned if the argument was not a parameter set.
-	fn par_set(&self, lit: &Literal<S>) -> Result<IntSet, FlatZincError> {
+	fn par_set(&self, lit: &Literal<FznIdent>) -> Result<IntSet, FlatZincError> {
 		match lit {
-			Literal::Identifier(ident) => {
-				if let Some(var) = self.fzn.variables.get(ident) {
-					if var.ty == Type::IntSet
-						&& let Some(ref value) = var.value
-					{
-						self.par_set(value)
-					} else {
-						Err(FlatZincError::InvalidArgumentType {
-							expected: "par set",
-							found: format!("{:?}", var.ty),
-						})
-					}
-				} else {
-					Err(FlatZincError::UnknownIdentifier(ident.to_string()))
-				}
-			}
 			Literal::IntSet(v) => Ok(v.iter().collect()),
-			_ => todo!(),
+			_ => Err(FlatZincError::InvalidArgumentType {
+				expected: "par set of int",
+				found: format!("{:?}", lit),
+			}),
 		}
 	}
 
@@ -1044,905 +1407,729 @@ where
 				continue;
 			}
 			let mut ann_used = vec![false; c.ann.len()];
-			match c.id.deref() {
-				"array_bool_and" => {
-					if let [es, r] = c.args.as_slice() {
-						let es = self.arg_array(es)?;
-						let r = self.arg_bool(r)?;
-						let es: Vec<_> = es
-							.iter()
-							.map(|l| self.lit_bool(l).map(Into::into))
-							.try_collect()?;
-						self.prb.proposition(Formula::And(es)).reified_by(r).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "array_bool_and",
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
-				}
-				"array_bool_xor" => {
-					if let [es] = c.args.as_slice() {
-						let es = self.arg_array(es)?;
-						let es: Vec<BoolFormula> = es
-							.iter()
-							.map(|l| self.lit_bool(l).map(Into::into))
-							.try_collect()?;
-						self.prb.proposition(Formula::Xor(es)).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "array_bool_xor",
-							found: c.args.len(),
-							expected: 1,
-						});
-					}
-				}
-				"array_bool_element" => {
-					if let [idx, arr, val] = c.args.as_slice() {
-						let arr: Vec<_> = self
-							.arg_array(arr)?
-							.iter()
-							.map(|l| self.par_bool(l))
-							.try_collect()?;
-						let idx = self.arg_int(idx)?;
-						let idx = idx
-							.bounding_sub(&mut self.prb, 1)
-							.map_err(LoweringError::from)?;
-						let val = self.arg_bool(val)?;
-						self.prb.element(arr).index(idx).result(val).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "array_bool_element",
-							found: c.args.len(),
-							expected: 3,
-						});
-					}
-				}
-				"array_int_element" => {
-					if let [idx, arr, val] = c.args.as_slice() {
-						let arr: Vec<_> = self
-							.arg_array(arr)?
-							.iter()
-							.map(|l| self.par_int(l))
-							.try_collect()?;
-						let idx = self.arg_int(idx)?;
-						let idx = idx
-							.bounding_sub(&mut self.prb, 1)
-							.map_err(LoweringError::from)?;
-						let val = self.arg_int(val)?;
 
-						self.prb.element(arr).index(idx).result(val).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "array_int_element",
-							found: c.args.len(),
-							expected: 3,
-						});
-					}
-				}
-				"array_var_bool_element" => {
-					if let [idx, arr, val] = c.args.as_slice() {
-						let arr = self
-							.arg_array(arr)?
-							.iter()
-							.map(|l| self.lit_bool(l))
-							.try_collect()?;
-						let idx = self.arg_int(idx)?;
-						let idx = idx
-							.bounding_sub(&mut self.prb, 1)
-							.map_err(LoweringError::from)?;
-						let val = self.arg_bool(val)?;
+			let FznIdent::Known(KnownIdent::Constraint(ident)) = c.id else {
+				return Err(FlatZincError::UnknownConstraint(c.id.to_string()));
+			};
 
-						self.prb.element(arr).index(idx).result(val).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "array_var_bool_element",
-							found: c.args.len(),
-							expected: 3,
-						});
-					}
-				}
-				"array_var_int_element" => {
-					if let [idx, arr, val] = c.args.as_slice() {
-						let arr: Vec<_> = self
-							.arg_array(arr)?
-							.iter()
-							.map(|l| self.lit_int(l))
-							.try_collect()?;
-						let idx = self.arg_int(idx)?;
-						let idx = idx
-							.bounding_sub(&mut self.prb, 1)
-							.map_err(LoweringError::from)?;
-						let val = self.arg_int(val)?;
+			let num_args_err = |expected: usize| {
+				Err(FlatZincError::InvalidNumArgs {
+					name: ident.as_str(),
+					found: c.args.len(),
+					expected,
+				})
+			};
 
-						self.prb.element(arr).index(idx).result(val).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "array_var_int_element",
-							found: c.args.len(),
-							expected: 3,
-						});
-					}
+			match ident {
+				ConstraintIdent::ArrayBoolAnd => {
+					let [es, r] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let es = self.arg_array(es)?;
+					let r = self.arg_bool(r)?;
+					let es: Vec<_> = es
+						.iter()
+						.map(|l| self.lit_bool(l).map(Into::into))
+						.try_collect()?;
+					self.prb.proposition(Formula::And(es)).reified_by(r).post();
 				}
-				"bool2int" => {
-					if let [b, i] = c.args.as_slice() {
-						let b = self.arg_bool(b)?;
-						let i = self.arg_int(i)?;
-						i.unify(&mut self.prb, b).map_err(LoweringError::from)?;
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "bool2int",
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
+				ConstraintIdent::ArrayBoolXor => {
+					let [es] = c.args.as_slice() else {
+						return num_args_err(1);
+					};
+					let es = self.arg_array(es)?;
+					let es: Vec<BoolFormula> = es
+						.iter()
+						.map(|l| self.lit_bool(l).map(Into::into))
+						.try_collect()?;
+					self.prb.proposition(Formula::Xor(es)).post();
 				}
-				"bool_lin_eq" => {
-					if let [coeffs, vars, sum] = c.args.as_slice() {
-						let coeffs: Vec<_> = self
-							.arg_array(coeffs)?
-							.iter()
-							.map(|l| self.par_int(l))
-							.try_collect()?;
-						let vars: Vec<_> = self
-							.arg_array(vars)?
-							.iter()
-							.map(|l| self.lit_bool(l))
-							.try_collect()?;
-						let sum = self.arg_int(sum)?;
+				ConstraintIdent::ArrayBoolElement => {
+					let [idx, arr, val] = c.args.as_slice() else {
+						return num_args_err(3);
+					};
+					let arr: Vec<_> = self
+						.arg_array(arr)?
+						.iter()
+						.map(|l| self.par_bool(l))
+						.try_collect()?;
+					let idx = self.arg_int(idx)?;
+					let idx = idx
+						.bounding_sub(&mut self.prb, 1)
+						.map_err(LoweringError::from)?;
+					let val = self.arg_bool(val)?;
+					self.prb.element(arr).index(idx).result(val).post();
+				}
+				ConstraintIdent::ArrayIntElement => {
+					let [idx, arr, val] = c.args.as_slice() else {
+						return num_args_err(3);
+					};
+					let arr: Vec<_> = self
+						.arg_array(arr)?
+						.iter()
+						.map(|l| self.par_int(l))
+						.try_collect()?;
+					let idx = self.arg_int(idx)?;
+					let idx = idx
+						.bounding_sub(&mut self.prb, 1)
+						.map_err(LoweringError::from)?;
+					let val = self.arg_int(val)?;
 
-						let mut terms = Vec::with_capacity(vars.len() + 1);
-						for (x, c) in vars.into_iter().zip(coeffs) {
-							if let Some(c) = NonZero::new(c) {
-								terms.push(
-									View::from(x)
-										.bounding_mul(&mut self.prb, c.get())
-										.map_err(LoweringError::from)?,
-								);
-							}
-						}
-						terms.push(-sum);
-						let lin_exp: IntLinearExp = terms.into_iter().sum();
+					self.prb.element(arr).index(idx).result(val).post();
+				}
+				ConstraintIdent::ArrayVarBoolElement => {
+					let [idx, arr, val] = c.args.as_slice() else {
+						return num_args_err(3);
+					};
+					let arr = self
+						.arg_array(arr)?
+						.iter()
+						.map(|l| self.lit_bool(l))
+						.try_collect()?;
+					let idx = self.arg_int(idx)?;
+					let idx = idx
+						.bounding_sub(&mut self.prb, 1)
+						.map_err(LoweringError::from)?;
+					let val = self.arg_bool(val)?;
 
-						self.prb.linear(lin_exp).eq(0).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "bool_lin_eq",
-							found: c.args.len(),
-							expected: 3,
-						});
-					}
+					self.prb.element(arr).index(idx).result(val).post();
 				}
-				"bool_clause" => {
-					if let [pos, neg] = c.args.as_slice() {
-						let pos = self.arg_array(pos)?;
-						let neg = self.arg_array(neg)?;
-						let mut lits = Vec::with_capacity(pos.len() + neg.len());
-						let mut satisfied = false;
-						for lit in pos
-							.iter()
-							.map(|l| self.lit_bool(l))
-							.collect_vec()
-							.into_iter()
-							.chain(neg.iter().map(|l| self.lit_bool(l).map(Not::not)))
-						{
-							match lit?.0 {
-								BoolView::Const(true) => {
-									satisfied = true;
-									break;
-								}
-								BoolView::Const(false) => {}
-								x => lits.push(View(x)),
-							}
-						}
-						if !satisfied {
-							match lits.len() {
-								0 => {
-									return Err(FlatZincError::ReformulationError(
-										LoweringError::Simplification(
-											self.prb.declare_conflict([]),
-										),
-									));
-								}
-								1 => lits[0]
-									.require(&mut self.prb, vec![])
-									.map_err(LoweringError::from)?,
-								_ => {
-									self.prb
-										.proposition(Formula::Or(
-											lits.into_iter().map_into().collect(),
-										))
-										.post();
-								}
-							}
-						}
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "bool_clause",
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
-				}
-				"bool_eq_reif" => {
-					if let [a, b, r] = c.args.as_slice() {
-						let a = self.arg_bool(a)?;
-						let b = self.arg_bool(b)?;
-						let r = self.arg_bool(r)?;
-						self.prb
-							.proposition(Formula::Equiv(vec![a.into(), b.into()]))
-							.reified_by(r)
-							.post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "bool_eq_reif",
-							found: c.args.len(),
-							expected: 3,
-						});
-					}
-				}
-				"bool_not" => {
-					if let [a, b] = c.args.as_slice() {
-						let a = self.arg_bool(a)?;
-						let b = self.arg_bool(b)?;
-						a.unify(&mut self.prb, !b).map_err(LoweringError::from)?;
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "bool_not",
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
-				}
-				"bool_xor" => {
-					if (2..=3).contains(&c.args.len()) {
-						let a = self.arg_bool(&c.args[0])?;
-						let b = self.arg_bool(&c.args[1])?;
-						let mut f = Formula::Xor(vec![a.into(), b.into()]);
-						if c.args.len() == 3 {
-							let r = self.arg_bool(&c.args[2])?;
-							f = Formula::Equiv(vec![r.into(), f]);
-						}
-						self.prb.proposition(f).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "bool_xor",
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
-				}
-				"huub_diffn_int" | "huub_diffn_nonstrict_int" => {
-					let strict = c.id.deref() == "huub_diffn_int";
-					if let [x, y, dx, dy] = c.args.as_slice() {
-						let origins: Result<_, FlatZincError> = self
-							.arg_array(x)?
-							.iter()
-							.zip(self.arg_array(y)?)
-							.map(|(x, y)| Ok(vec![self.lit_int(x)?, self.lit_int(y)?]))
-							.try_collect();
-						let sizes: Result<_, FlatZincError> = self
-							.arg_array(dx)?
-							.iter()
-							.zip(self.arg_array(dy)?)
-							.map(|(dx, dy)| Ok(vec![self.lit_int(dx)?, self.lit_int(dy)?]))
-							.try_collect();
+				ConstraintIdent::ArrayVarIntElement => {
+					let [idx, arr, val] = c.args.as_slice() else {
+						return num_args_err(3);
+					};
+					let arr: Vec<_> = self
+						.arg_array(arr)?
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+					let idx = self.arg_int(idx)?;
+					let idx = idx
+						.bounding_sub(&mut self.prb, 1)
+						.map_err(LoweringError::from)?;
+					let val = self.arg_int(val)?;
 
-						self.prb
-							.no_overlap()
-							.origins(origins?)
-							.sizes(sizes?)
-							.strict(strict)
-							.post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: if strict {
-								"huub_diffn"
-							} else {
-								"huub_diffn_nonstrict"
-							},
-							found: c.args.len(),
-							expected: 4,
-						});
-					}
+					self.prb.element(arr).index(idx).result(val).post();
 				}
-				"huub_diffn_k_int" | "huub_diffn_nonstrict_k_int" => {
-					let strict = c.id.deref() == "huub_diffn_k_int";
-					if let [box_posn, box_size, d] = c.args.as_slice() {
-						let dimensions = usize::try_from(self.arg_par_int(d)?).map_err(|_| {
-							FlatZincError::InvalidArgumentType {
-								expected: "positive integer",
-								found: d.to_string(),
-							}
-						})?;
-						let flat_start_pos = self.arg_array(box_posn)?;
-						let flat_start_pos: Vec<_> = flat_start_pos
-							.iter()
-							.map(|l| self.lit_int(l))
-							.try_collect()?;
-						let flat_sizes = self.arg_array(box_size)?;
-						let flat_sizes: Vec<_> =
-							flat_sizes.iter().map(|l| self.lit_int(l)).try_collect()?;
+				ConstraintIdent::Bool2Int => {
+					let [b, i] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let b = self.arg_bool(b)?;
+					let i = self.arg_int(i)?;
+					i.unify(&mut self.prb, b).map_err(LoweringError::from)?;
+				}
+				ConstraintIdent::BoolLinEq => {
+					let [coeffs, vars, sum] = c.args.as_slice() else {
+						return num_args_err(3);
+					};
 
-						if dimensions == 0
-							|| flat_start_pos.len() != flat_sizes.len()
-							|| flat_start_pos.len() % dimensions != 0
-						{
-							return Err(FlatZincError::InvalidArgumentType {
-								expected: "flattened object-major arrays with a positive number of dimensions",
-								found: format!(
-									"box_posn length {}, box_size length {}, dimensions {}",
-									flat_start_pos.len(),
-									flat_sizes.len(),
-									dimensions
-								),
-							});
-						}
-						let origins: Vec<Vec<_>> = flat_start_pos
-							.chunks_exact(dimensions)
-							.map(|chunk| chunk.to_vec())
-							.collect();
-						let sizes: Vec<Vec<_>> = flat_sizes
-							.chunks_exact(dimensions)
-							.map(|chunk| chunk.to_vec())
-							.collect();
+					let coeffs: Vec<_> = self
+						.arg_array(coeffs)?
+						.iter()
+						.map(|l| self.par_int(l))
+						.try_collect()?;
+					let vars: Vec<_> = self
+						.arg_array(vars)?
+						.iter()
+						.map(|l| self.lit_bool(l))
+						.try_collect()?;
+					let sum = self.arg_int(sum)?;
 
-						self.prb
-							.no_overlap()
-							.origins(origins)
-							.sizes(sizes)
-							.strict(strict)
-							.post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: if strict {
-								"huub_diffn_k_int"
-							} else {
-								"huub_diffn_nonstrict_k_int"
-							},
-							found: c.args.len(),
-							expected: 3,
-						});
-					}
-				}
-				"huub_all_different_int" => {
-					if let [args] = c.args.as_slice() {
-						let args = self.arg_array(args)?;
-						let args: Vec<_> = args.iter().map(|l| self.lit_int(l)).try_collect()?;
-						let (bounds, value) = match (
-							Self::anns_contains(&c.ann, &mut ann_used, "bounds"),
-							Self::anns_contains(&c.ann, &mut ann_used, "value_propagation"),
-						) {
-							// No annotations given, use default for all.
-							(false, false) => (None, None),
-							// At least one annotation given, assume absence means `false`
-							// explicitly.
-							(bounds, value) => (Some(bounds), Some(value)),
-						};
-						self.prb
-							.unique(args)
-							.maybe_bounds_propagation(bounds)
-							.maybe_value_propagation(value)
-							.post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "huub_all_different",
-							found: c.args.len(),
-							expected: 1,
-						});
-					}
-				}
-				"huub_array_int_maximum" | "huub_array_int_minimum" => {
-					let is_maximum = c.id.deref() == "huub_array_int_maximum";
-					if let [m, args] = c.args.as_slice() {
-						let args: Vec<_> = self
-							.arg_array(args)?
-							.iter()
-							.map(|l| self.lit_int(l))
-							.try_collect()?;
-						let m = self.arg_int(m)?;
-						if is_maximum {
-							self.prb.maximum(args).result(m).post();
-						} else {
-							self.prb.minimum(args).result(m).post();
-						}
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: if is_maximum {
-								"huub_array_int_maximum"
-							} else {
-								"huub_array_int_minimum"
-							},
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
-				}
-				"huub_bool_clause_reif" => {
-					if let [pos, neg, r] = c.args.as_slice() {
-						let pos = self.arg_array(pos)?;
-						let neg = self.arg_array(neg)?;
-						let r = self.arg_bool(r)?;
-						let mut lits = Vec::with_capacity(pos.len() + neg.len());
-						for l in pos {
-							let e = self.lit_bool(l)?;
-							lits.push(e.into());
-						}
-						for l in neg {
-							let e = self.lit_bool(l)?;
-							lits.push((!e).into());
-						}
-						self.prb.proposition(Formula::Or(lits)).reified_by(r).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "bool_clause_reif",
-							found: c.args.len(),
-							expected: 3,
-						});
-					}
-				}
-				"huub_cumulative" => {
-					if let [starts, durations, heights, r] = c.args.as_slice() {
-						let starts = self
-							.arg_array(starts)?
-							.iter()
-							.map(|l| self.lit_int(l))
-							.try_collect()?;
-						let durations = self
-							.arg_array(durations)?
-							.iter()
-							.map(|l| self.lit_int(l))
-							.try_collect()?;
-						let heights = self
-							.arg_array(heights)?
-							.iter()
-							.map(|l| self.lit_int(l))
-							.try_collect()?;
-						let r = self.arg_int(r)?;
-						self.prb
-							.cumulative()
-							.start_times(starts)
-							.durations(durations)
-							.usages(heights)
-							.capacity(r)
-							.post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "huub_cumulative",
-							found: c.args.len(),
-							expected: 4,
-						});
-					}
-				}
-				"huub_disjunctive_strict" => {
-					if let [starts, durations] = c.args.as_slice() {
-						let start_times = self
-							.arg_array(starts)?
-							.iter()
-							.map(|l| self.lit_int(l))
-							.try_collect()?;
-						let durations = self
-							.arg_array(durations)?
-							.iter()
-							.map(|l| self.par_int(l))
-							.try_collect()?;
-
-						let (edge_finding, not_last, detectable_precedence) = match (
-							Self::anns_contains(&c.ann, &mut ann_used, "edge_finding"),
-							Self::anns_contains(&c.ann, &mut ann_used, "not_last"),
-							Self::anns_contains(&c.ann, &mut ann_used, "detectable_precedence"),
-						) {
-							// No annotations found, so we assume the user wants the default
-							// configuration
-							(false, false, false) => (None, None, None),
-							// At least one annotation was found, so we assume missing annotations
-							// disable certain propagation options.
-							(ef, nl, dp) => (Some(ef), Some(nl), Some(dp)),
-						};
-
-						self.prb
-							.disjunctive()
-							.start_times(start_times)
-							.durations(durations)
-							.maybe_edge_finding_propagation(edge_finding)
-							.maybe_not_last_propagation(not_last)
-							.maybe_detectable_precedence_propagation(detectable_precedence)
-							.post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "huub_disjunctive_strict",
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
-				}
-				"huub_regular" => {
-					if let [x, q, s, d, q0, f] = c.args.as_slice() {
-						let x: Vec<_> = self
-							.arg_array(x)?
-							.iter()
-							.map(|l| self.lit_int(l))
-							.try_collect()?;
-
-						let q = self.arg_par_int(q)?;
-						let s = self.arg_par_int(s)?;
-						let d: Vec<_> = self
-							.arg_array(d)?
-							.iter()
-							.map(|l| self.par_int(l))
-							.try_collect()?;
-						if d.len() != (q * s) as usize {
-							return Err(FlatZincError::InvalidArgumentType {
-								expected: "array with an element for each combination of state and input value",
-								found: format!(
-									"array of size {}, for {q} states and {s} input values",
-									d.len()
-								),
-							});
-						}
-						let d: Vec<Vec<_>> = d
-							.into_iter()
-							.chunks(s as usize)
-							.into_iter()
-							.map(|c| c.collect())
-							.collect();
-						debug_assert!(d.last().map(|t| t.len() == s as usize).unwrap_or(true));
-
-						let q0 = self.arg_par_int(q0)?;
-						let f = self.arg_par_set(f)?;
-						let f: FxHashSet<IntVal> = f.iter().flat_map(|r| r.into_iter()).collect();
-
-						// Convert regular constraint in to table constraints and add them to the
-						// model
-						self.convert_regular_to_tables(x, d, q0, f);
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "huub_regular",
-							found: c.args.len(),
-							expected: 6,
-						});
-					}
-				}
-				"huub_table_int" => {
-					if let [args, table] = c.args.as_slice() {
-						let args = self.arg_array(args)?;
-						let args: Vec<_> = args.iter().map(|l| self.lit_int(l)).try_collect()?;
-						let table = self.arg_array(table)?;
-						let table: Vec<_> = table.iter().map(|l| self.par_int(l)).try_collect()?;
-						if args.is_empty() || (table.len() % args.len()) != 0 {
-							return Err(FlatZincError::InvalidArgumentType {
-								expected: "array of n integers, where n is divisible by the number of variables",
-								found: format!(
-									"array of {} integers, to give values to {} variables",
-									table.len(),
-									args.len()
-								),
-							});
-						}
-						if table.is_empty() {
-							return Err(FlatZincError::ReformulationError(
-								LoweringError::Simplification(self.prb.declare_conflict([])),
-							));
-						}
-						let table: Vec<Vec<_>> = table
-							.into_iter()
-							.chunks(args.len())
-							.into_iter()
-							.map(|c| c.collect())
-							.collect();
-						self.prb.table(args).values(table).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "huub_table_int",
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
-				}
-				"huub_seq_precede_chain_int" => {
-					if let [args] = c.args.as_slice() {
-						let args = self.arg_array(args)?;
-						let args: Vec<_> = args.iter().map(|l| self.lit_int(l)).try_collect()?;
-						self.prb.value_precede(args).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "huub_seq_precede_chain",
-							found: c.args.len(),
-							expected: 1,
-						});
-					}
-				}
-				"huub_value_precede_chain_int" => {
-					if let [values, variables] = c.args.as_slice() {
-						let values: Vec<_> = self
-							.arg_array(values)?
-							.iter()
-							.map(|l| self.par_int(l))
-							.try_collect()?;
-						let variables: Vec<_> = self
-							.arg_array(variables)?
-							.iter()
-							.map(|l| self.lit_int(l))
-							.try_collect()?;
-						self.prb.value_precede(variables).values(values).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "huub_value_precede_chain",
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
-				}
-				"int_abs" => {
-					if let [origin, abs] = c.args.as_slice() {
-						let origin = self.arg_int(origin)?;
-						let abs = self.arg_int(abs)?;
-						self.prb.abs(origin).result(abs).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "int_abs",
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
-				}
-				"int_div" => {
-					if let [num, denom, res] = c.args.as_slice() {
-						let num = self.arg_int(num)?;
-						let denom = self.arg_int(denom)?;
-						let res = self.arg_int(res)?;
-						self.prb.div(num, denom).result(res).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "int_div",
-							found: c.args.len(),
-							expected: 3,
-						});
-					}
-				}
-				"int_le" | "int_ne" => {
-					if let [a, b] = c.args.as_slice() {
-						let a = self.arg_int(a)?;
-						let b = self
-							.arg_int(b)?
-							.bounding_neg(&mut self.prb)
-							.map_err(LoweringError::from)?;
-						let lin = self.prb.linear(a + b);
-						match c.id.deref() {
-							"int_le" => lin.le(0),
-							"int_ne" => lin.ne(0),
-							_ => unreachable!(),
-						}
-						.post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: match c.id.deref() {
-								"int_le" => "int_le",
-								"int_ne" => "int_ne",
-								_ => unreachable!(),
-							},
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
-				}
-				"int_eq_imp" | "int_eq_reif" | "int_le_imp" | "int_le_reif" | "int_ne_imp"
-				| "int_ne_reif" => {
-					if let [a, b, r] = c.args.as_slice() {
-						let a = self.arg_int(a)?;
-						let b = self.arg_int(b)?;
-						let r = self.arg_bool(r)?;
-
-						let lin_exp =
-							a + b.bounding_neg(&mut self.prb).map_err(LoweringError::from)?;
-						let lin = self.prb.linear(lin_exp);
-						let lin = match c.id.deref() {
-							"int_eq_imp" | "int_eq_reif" => lin.eq(0),
-							"int_le_imp" | "int_le_reif" => lin.le(0),
-							"int_ne_imp" | "int_ne_reif" => lin.ne(0),
-							_ => unreachable!(),
-						};
-						match c.id.deref() {
-							"int_eq_imp" | "int_le_imp" | "int_ne_imp" => lin.implied_by(r),
-							"int_eq_reif" | "int_le_reif" | "int_ne_reif" => lin.reified_by(r),
-							_ => unreachable!(),
-						}
-						.post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: match c.id.deref() {
-								"int_eq_imp" => "int_eq_imp",
-								"int_eq_reif" => "int_eq_reif",
-								"int_le_imp" => "int_le_imp",
-								"int_le_reif" => "int_le_reif",
-								"int_ne_imp" => "int_ne_imp",
-								"int_ne_reif" => "int_ne_reif",
-								_ => unreachable!(),
-							},
-							found: c.args.len(),
-							expected: 3,
-						});
-					}
-				}
-				"int_lin_eq" | "int_lin_le" | "int_lin_ne" => {
-					if let [coeffs, vars, rhs] = c.args.as_slice() {
-						let coeffs: Vec<_> = self
-							.arg_array(coeffs)?
-							.iter()
-							.map(|l| self.par_int(l))
-							.try_collect()?;
-						let vars: Vec<_> = self
-							.arg_array(vars)?
-							.iter()
-							.map(|l| self.lit_int(l))
-							.try_collect()?;
-						let rhs = self.arg_par_int(rhs)?;
-						let mut terms = Vec::with_capacity(vars.len());
-						for (x, c) in vars.into_iter().zip(coeffs) {
+					let mut terms = Vec::with_capacity(vars.len() + 1);
+					for (x, c) in vars.into_iter().zip(coeffs) {
+						if let Some(c) = NonZero::new(c) {
 							terms.push(
-								x.bounding_mul(&mut self.prb, c)
+								View::from(x)
+									.bounding_mul(&mut self.prb, c.get())
 									.map_err(LoweringError::from)?,
 							);
 						}
-						let lin_exp: IntLinearExp = terms.into_iter().sum();
-						let lin = self.prb.linear(lin_exp);
-
-						match c.id.deref() {
-							"int_lin_eq" => lin.eq(rhs),
-							"int_lin_le" => lin.le(rhs),
-							"int_lin_ne" => lin.ne(rhs),
-							_ => unreachable!(),
-						}
-						.post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: match c.id.deref() {
-								"int_lin_eq" => "int_lin_eq",
-								"int_lin_le" => "int_lin_le",
-								"int_lin_ne" => "int_lin_ne",
-								_ => unreachable!(),
-							},
-							found: c.args.len(),
-							expected: 3,
-						});
 					}
-				}
-				"int_lin_eq_imp" | "int_lin_eq_reif" | "int_lin_le_imp" | "int_lin_le_reif"
-				| "int_lin_ne_imp" | "int_lin_ne_reif" => {
-					if let [coeffs, vars, rhs, reified] = c.args.as_slice() {
-						let coeffs: Vec<_> = self
-							.arg_array(coeffs)?
-							.iter()
-							.map(|l| self.par_int(l))
-							.try_collect()?;
-						let vars: Vec<_> = self
-							.arg_array(vars)?
-							.iter()
-							.map(|l| self.lit_int(l))
-							.try_collect()?;
-						let rhs = self.arg_par_int(rhs)?;
-						let reified = self.arg_bool(reified)?;
-						let mut terms = Vec::with_capacity(vars.len());
-						for (x, c) in vars.into_iter().zip(coeffs) {
-							terms.push(
-								x.bounding_mul(&mut self.prb, c)
-									.map_err(LoweringError::from)?,
-							);
-						}
+					terms.push(-sum);
+					let lin_exp: IntLinearExp = terms.into_iter().sum();
 
-						let lin = self.prb.linear(terms.into_iter().sum::<IntLinearExp>());
-						let lin = match c.id.deref() {
-							"int_lin_eq_imp" | "int_lin_eq_reif" => lin.eq(rhs),
-							"int_lin_le_imp" | "int_lin_le_reif" => lin.le(rhs),
-							"int_lin_ne_imp" | "int_lin_ne_reif" => lin.ne(rhs),
-							_ => unreachable!(),
-						};
-						match c.id.deref() {
-							"int_lin_eq_imp" | "int_lin_le_imp" | "int_lin_ne_imp" => {
-								lin.implied_by(reified)
+					self.prb.linear(lin_exp).eq(0).post();
+				}
+				ConstraintIdent::BoolClause => {
+					let [pos, neg] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let pos = self.arg_array(pos)?;
+					let neg = self.arg_array(neg)?;
+					let mut lits = Vec::with_capacity(pos.len() + neg.len());
+					let mut satisfied = false;
+					for lit in pos
+						.iter()
+						.map(|l| self.lit_bool(l))
+						.collect_vec()
+						.into_iter()
+						.chain(neg.iter().map(|l| self.lit_bool(l).map(Not::not)))
+					{
+						match lit?.0 {
+							BoolView::Const(true) => {
+								satisfied = true;
+								break;
 							}
-							"int_lin_eq_reif" | "int_lin_le_reif" | "int_lin_ne_reif" => {
-								lin.reified_by(reified)
+							BoolView::Const(false) => {}
+							x => lits.push(View(x)),
+						}
+					}
+					if !satisfied {
+						match lits.len() {
+							0 => {
+								return Err(FlatZincError::ReformulationError(
+									LoweringError::Simplification(self.prb.declare_conflict([])),
+								));
 							}
-							_ => unreachable!(),
+							1 => lits[0]
+								.require(&mut self.prb, vec![])
+								.map_err(LoweringError::from)?,
+							_ => {
+								self.prb
+									.proposition(Formula::Or(lits.into_iter().map_into().collect()))
+									.post();
+							}
 						}
+					}
+				}
+				ConstraintIdent::BoolEqReif => {
+					let [a, b, r] = c.args.as_slice() else {
+						return num_args_err(3);
+					};
+					let a = self.arg_bool(a)?;
+					let b = self.arg_bool(b)?;
+					let r = self.arg_bool(r)?;
+					self.prb
+						.proposition(Formula::Equiv(vec![a.into(), b.into()]))
+						.reified_by(r)
 						.post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: match c.id.deref() {
-								"int_lin_eq_imp" => "int_lin_eq_imp",
-								"int_lin_eq_reif" => "int_lin_eq_reif",
-								"int_lin_le_imp" => "int_lin_le_imp",
-								"int_lin_le_reif" => "int_lin_le_reif",
-								"int_lin_ne_imp" => "int_lin_ne_imp",
-								"int_lin_ne_reif" => "int_lin_ne_reif",
-								_ => unreachable!(),
-							},
-							found: c.args.len(),
-							expected: 4,
-						});
-					}
 				}
-				"int_max" | "int_min" => {
-					let is_maximum = c.id.deref() == "int_max";
-					if let [a, b, m] = c.args.as_slice() {
-						let a = self.arg_int(a)?;
-						let b = self.arg_int(b)?;
-						let m = self.arg_int(m)?;
-						if is_maximum {
-							self.prb.maximum([a, b]).result(m).post();
-						} else {
-							self.prb.minimum([a, b]).result(m).post();
-						}
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: if is_maximum { "int_max" } else { "int_min" },
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
+				ConstraintIdent::BoolNot => {
+					let [a, b] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let a = self.arg_bool(a)?;
+					let b = self.arg_bool(b)?;
+					a.unify(&mut self.prb, !b).map_err(LoweringError::from)?;
 				}
-				"int_pow" => {
-					if let [base, exponent, res] = c.args.as_slice() {
-						let base = self.arg_int(base)?;
-						let exponent = self.arg_int(exponent)?;
-						let res = self.arg_int(res)?;
-
-						self.prb.pow(base, exponent).result(res).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "int_pow",
-							found: c.args.len(),
-							expected: 3,
-						});
+				ConstraintIdent::BoolXor => {
+					let [a, b, rest @ ..] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					if rest.len() > 1 {
+						return num_args_err(3);
 					}
-				}
-				"int_times" => {
-					if let [x, y, z] = c.args.as_slice() {
-						let a = self.arg_int(x)?;
-						let b = self.arg_int(y)?;
-						let m = self.arg_int(z)?;
-						self.prb.mul(a, b).result(m).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "int_times",
-							found: c.args.len(),
-							expected: 3,
-						});
-					}
-				}
-				"set_in" => {
-					if let [x, s] = c.args.as_slice() {
-						let x = self.arg_int(x)?;
-						let s = self.arg_par_set(s)?;
-
-						x.restrict_domain(&mut self.prb, &s, vec![])
-							.map_err(LoweringError::from)?;
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "set_in",
-							found: c.args.len(),
-							expected: 2,
-						});
-					}
-				}
-				"set_in_reif" => {
-					if let [x, s, r] = c.args.as_slice() {
-						let x = self.arg_int(x)?;
-						let s = self.arg_par_set(s)?;
+					let a = self.arg_bool(a)?;
+					let b = self.arg_bool(b)?;
+					let mut f = Formula::Xor(vec![a.into(), b.into()]);
+					if let [r] = rest {
 						let r = self.arg_bool(r)?;
+						f = Formula::Equiv(vec![r.into(), f]);
+					}
+					self.prb.proposition(f).post();
+				}
+				ConstraintIdent::DiffnInt { strict } => {
+					let [x, y, dx, dy] = c.args.as_slice() else {
+						return num_args_err(4);
+					};
+					let origins: Result<_, FlatZincError> = self
+						.arg_array(x)?
+						.iter()
+						.zip(self.arg_array(y)?)
+						.map(|(x, y)| Ok(vec![self.lit_int(x)?, self.lit_int(y)?]))
+						.try_collect();
+					let sizes: Result<_, FlatZincError> = self
+						.arg_array(dx)?
+						.iter()
+						.zip(self.arg_array(dy)?)
+						.map(|(dx, dy)| Ok(vec![self.lit_int(dx)?, self.lit_int(dy)?]))
+						.try_collect();
 
-						self.prb.contains(s).member(x).result(r).post();
-					} else {
-						return Err(FlatZincError::InvalidNumArgs {
-							name: "set_in_reif",
-							found: c.args.len(),
-							expected: 3,
+					self.prb
+						.no_overlap()
+						.origins(origins?)
+						.sizes(sizes?)
+						.strict(strict)
+						.post();
+				}
+				ConstraintIdent::DiffnKInt { strict } => {
+					let [box_posn, box_size, d] = c.args.as_slice() else {
+						return num_args_err(3);
+					};
+					let dimensions = usize::try_from(self.arg_par_int(d)?).map_err(|_| {
+						FlatZincError::InvalidArgumentType {
+							expected: "positive integer",
+							found: d.to_string(),
+						}
+					})?;
+					let flat_start_pos = self.arg_array(box_posn)?;
+					let flat_start_pos: Vec<_> = flat_start_pos
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+					let flat_sizes = self.arg_array(box_size)?;
+					let flat_sizes: Vec<_> =
+						flat_sizes.iter().map(|l| self.lit_int(l)).try_collect()?;
+
+					if dimensions == 0
+						|| flat_start_pos.len() != flat_sizes.len()
+						|| flat_start_pos.len() % dimensions != 0
+					{
+						return Err(FlatZincError::InvalidArgumentType {
+							expected: "flattened object-major arrays with a positive number of dimensions",
+							found: format!(
+								"box_posn length {}, box_size length {}, dimensions {}",
+								flat_start_pos.len(),
+								flat_sizes.len(),
+								dimensions
+							),
 						});
 					}
+					let origins: Vec<Vec<_>> = flat_start_pos
+						.chunks_exact(dimensions)
+						.map(|chunk| chunk.to_vec())
+						.collect();
+					let sizes: Vec<Vec<_>> = flat_sizes
+						.chunks_exact(dimensions)
+						.map(|chunk| chunk.to_vec())
+						.collect();
+
+					self.prb
+						.no_overlap()
+						.origins(origins)
+						.sizes(sizes)
+						.strict(strict)
+						.post();
 				}
-				_ => return Err(FlatZincError::UnknownConstraint(c.id.to_string())),
+				ConstraintIdent::AllDifferentInt => {
+					let [args] = c.args.as_slice() else {
+						return num_args_err(1);
+					};
+					let args = self.arg_array(args)?;
+					let args: Vec<_> = args.iter().map(|l| self.lit_int(l)).try_collect()?;
+					let (bounds, value) = match (
+						Self::anns_contains(
+							&c.ann,
+							&mut ann_used,
+							AnnotationIdent::ConsistencyBounds,
+						),
+						Self::anns_contains(
+							&c.ann,
+							&mut ann_used,
+							AnnotationIdent::ConsistencyValue,
+						),
+					) {
+						(false, false) => (None, None),
+						(bounds, value) => (Some(bounds), Some(value)),
+					};
+					self.prb
+						.unique(args)
+						.maybe_bounds_propagation(bounds)
+						.maybe_value_propagation(value)
+						.post();
+				}
+				ConstraintIdent::ArrayIntMaximum | ConstraintIdent::ArrayIntMinimum => {
+					let [m, args] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let args: Vec<_> = self
+						.arg_array(args)?
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+					let m = self.arg_int(m)?;
+					match ident {
+						ConstraintIdent::ArrayIntMaximum => self.prb.maximum(args).result(m).post(),
+						ConstraintIdent::ArrayIntMinimum => self.prb.minimum(args).result(m).post(),
+						_ => unreachable!(),
+					}
+				}
+				ConstraintIdent::BoolClauseReif => {
+					let [pos, neg, r] = c.args.as_slice() else {
+						return num_args_err(3);
+					};
+					let pos = self.arg_array(pos)?;
+					let neg = self.arg_array(neg)?;
+					let r = self.arg_bool(r)?;
+					let mut lits = Vec::with_capacity(pos.len() + neg.len());
+					for l in pos {
+						let e = self.lit_bool(l)?;
+						lits.push(e.into());
+					}
+					for l in neg {
+						let e = self.lit_bool(l)?;
+						lits.push((!e).into());
+					}
+					self.prb.proposition(Formula::Or(lits)).reified_by(r).post();
+				}
+				ConstraintIdent::Cumulative => {
+					let [starts, durations, heights, r] = c.args.as_slice() else {
+						return num_args_err(4);
+					};
+					let starts = self
+						.arg_array(starts)?
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+					let durations = self
+						.arg_array(durations)?
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+					let heights = self
+						.arg_array(heights)?
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+					let r = self.arg_int(r)?;
+					self.prb
+						.cumulative()
+						.start_times(starts)
+						.durations(durations)
+						.usages(heights)
+						.capacity(r)
+						.post();
+				}
+				ConstraintIdent::DisjuctiveStrict => {
+					let [starts, durations] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let start_times = self
+						.arg_array(starts)?
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+					let durations = self
+						.arg_array(durations)?
+						.iter()
+						.map(|l| self.par_int(l))
+						.try_collect()?;
+
+					let (edge_finding, not_last, detectable_precedence) = match (
+						Self::anns_contains(
+							&c.ann,
+							&mut ann_used,
+							AnnotationIdent::DisjEdgeFinding,
+						),
+						Self::anns_contains(&c.ann, &mut ann_used, AnnotationIdent::DisjNotLast),
+						Self::anns_contains(&c.ann, &mut ann_used, AnnotationIdent::DisjDetectPrec),
+					) {
+						// No annotations found, so we assume the user wants the default
+						// configuration
+						(false, false, false) => (None, None, None),
+						// At least one annotation was found, so we assume missing annotations
+						// disable certain propagation options.
+						(ef, nl, dp) => (Some(ef), Some(nl), Some(dp)),
+					};
+
+					self.prb
+						.disjunctive()
+						.start_times(start_times)
+						.durations(durations)
+						.maybe_edge_finding_propagation(edge_finding)
+						.maybe_not_last_propagation(not_last)
+						.maybe_detectable_precedence_propagation(detectable_precedence)
+						.post();
+				}
+				ConstraintIdent::Regular => {
+					let [x, q, s, d, q0, f] = c.args.as_slice() else {
+						return num_args_err(6);
+					};
+					let x: Vec<_> = self
+						.arg_array(x)?
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+
+					let q = self.arg_par_int(q)?;
+					let s = self.arg_par_int(s)?;
+					let d: Vec<_> = self
+						.arg_array(d)?
+						.iter()
+						.map(|l| self.par_int(l))
+						.try_collect()?;
+					if d.len() != (q * s) as usize {
+						return Err(FlatZincError::InvalidArgumentType {
+							expected: "array with an element for each combination of state and input value",
+							found: format!(
+								"array of size {}, for {q} states and {s} input values",
+								d.len()
+							),
+						});
+					}
+					let d: Vec<Vec<_>> = d
+						.into_iter()
+						.chunks(s as usize)
+						.into_iter()
+						.map(|c| c.collect())
+						.collect();
+					debug_assert!(d.last().map(|t| t.len() == s as usize).unwrap_or(true));
+
+					let q0 = self.arg_par_int(q0)?;
+					let f = self.arg_par_set(f)?;
+					let f: FxHashSet<IntVal> = f.iter().flat_map(|r| r.into_iter()).collect();
+
+					// Convert regular constraint in to table constraints and add them to the
+					// model
+					self.convert_regular_to_tables(x, d, q0, f);
+				}
+				ConstraintIdent::TableInt => {
+					let [args, table] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let args = self.arg_array(args)?;
+					let args: Vec<_> = args.iter().map(|l| self.lit_int(l)).try_collect()?;
+					let table = self.arg_array(table)?;
+					let table: Vec<_> = table.iter().map(|l| self.par_int(l)).try_collect()?;
+					if args.is_empty() || (table.len() % args.len()) != 0 {
+						return Err(FlatZincError::InvalidArgumentType {
+							expected: "array of n integers, where n is divisible by the number of variables",
+							found: format!(
+								"array of {} integers, to give values to {} variables",
+								table.len(),
+								args.len()
+							),
+						});
+					}
+					if table.is_empty() {
+						return Err(FlatZincError::ReformulationError(
+							LoweringError::Simplification(self.prb.declare_conflict([])),
+						));
+					}
+					let table: Vec<Vec<_>> = table
+						.into_iter()
+						.chunks(args.len())
+						.into_iter()
+						.map(|c| c.collect())
+						.collect();
+					self.prb.table(args).values(table).post();
+				}
+				ConstraintIdent::SeqPrecedeChainInt => {
+					let [args] = c.args.as_slice() else {
+						return num_args_err(1);
+					};
+					let args = self.arg_array(args)?;
+					let args: Vec<_> = args.iter().map(|l| self.lit_int(l)).try_collect()?;
+					self.prb.value_precede(args).post();
+				}
+				ConstraintIdent::ValuePrecedeChain => {
+					let [values, variables] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let values: Vec<_> = self
+						.arg_array(values)?
+						.iter()
+						.map(|l| self.par_int(l))
+						.try_collect()?;
+					let variables: Vec<_> = self
+						.arg_array(variables)?
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+					self.prb.value_precede(variables).values(values).post();
+				}
+				ConstraintIdent::IntAbs => {
+					let [origin, abs] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let origin = self.arg_int(origin)?;
+					let abs = self.arg_int(abs)?;
+					self.prb.abs(origin).result(abs).post();
+				}
+				ConstraintIdent::IntDiv => {
+					let [num, denom, res] = c.args.as_slice() else {
+						return num_args_err(3);
+					};
+					let num = self.arg_int(num)?;
+					let denom = self.arg_int(denom)?;
+					let res = self.arg_int(res)?;
+					self.prb.div(num, denom).result(res).post();
+				}
+				ConstraintIdent::IntLe | ConstraintIdent::IntNe => {
+					let [a, b] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let a = self.arg_int(a)?;
+					let b = self
+						.arg_int(b)?
+						.bounding_neg(&mut self.prb)
+						.map_err(LoweringError::from)?;
+					let lin = self.prb.linear(a + b);
+					match ident {
+						ConstraintIdent::IntLe => lin.le(0),
+						ConstraintIdent::IntNe => lin.ne(0),
+						_ => unreachable!(),
+					}
+					.post();
+				}
+				ConstraintIdent::IntEqImp
+				| ConstraintIdent::IntEqReif
+				| ConstraintIdent::IntLeImp
+				| ConstraintIdent::IntLeReif
+				| ConstraintIdent::IntNeImp
+				| ConstraintIdent::IntNeReif => {
+					let [a, b, r] = c.args.as_slice() else {
+						return num_args_err(3);
+					};
+					let a = self.arg_int(a)?;
+					let b = self.arg_int(b)?;
+					let r = self.arg_bool(r)?;
+
+					let lin_exp = a + b.bounding_neg(&mut self.prb).map_err(LoweringError::from)?;
+					let lin = self.prb.linear(lin_exp);
+					let lin = match ident {
+						ConstraintIdent::IntEqImp | ConstraintIdent::IntEqReif => lin.eq(0),
+						ConstraintIdent::IntLeImp | ConstraintIdent::IntLeReif => lin.le(0),
+						ConstraintIdent::IntNeImp | ConstraintIdent::IntNeReif => lin.ne(0),
+						_ => unreachable!(),
+					};
+					match ident {
+						ConstraintIdent::IntEqImp
+						| ConstraintIdent::IntLeImp
+						| ConstraintIdent::IntNeImp => lin.implied_by(r),
+						ConstraintIdent::IntEqReif
+						| ConstraintIdent::IntLeReif
+						| ConstraintIdent::IntNeReif => lin.reified_by(r),
+						_ => unreachable!(),
+					}
+					.post();
+				}
+				ConstraintIdent::IntLinEq
+				| ConstraintIdent::IntLinLe
+				| ConstraintIdent::IntLinNe => {
+					let [coeffs, vars, rhs] = c.args.as_slice() else {
+						return num_args_err(3);
+					};
+					let coeffs: Vec<_> = self
+						.arg_array(coeffs)?
+						.iter()
+						.map(|l| self.par_int(l))
+						.try_collect()?;
+					let vars: Vec<_> = self
+						.arg_array(vars)?
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+					let rhs = self.arg_par_int(rhs)?;
+					let mut terms = Vec::with_capacity(vars.len());
+					for (x, c) in vars.into_iter().zip(coeffs) {
+						terms.push(
+							x.bounding_mul(&mut self.prb, c)
+								.map_err(LoweringError::from)?,
+						);
+					}
+					let lin_exp: IntLinearExp = terms.into_iter().sum();
+					let lin = self.prb.linear(lin_exp);
+
+					match ident {
+						ConstraintIdent::IntLinEq => lin.eq(rhs),
+						ConstraintIdent::IntLinLe => lin.le(rhs),
+						ConstraintIdent::IntLinNe => lin.ne(rhs),
+						_ => unreachable!(),
+					}
+					.post();
+				}
+				ConstraintIdent::IntLinEqImp
+				| ConstraintIdent::IntLinEqReif
+				| ConstraintIdent::IntLinLeImp
+				| ConstraintIdent::IntLinLeReif
+				| ConstraintIdent::IntLinNeImp
+				| ConstraintIdent::IntLinNeReif => {
+					let [coeffs, vars, rhs, reified] = c.args.as_slice() else {
+						return num_args_err(4);
+					};
+					let coeffs: Vec<_> = self
+						.arg_array(coeffs)?
+						.iter()
+						.map(|l| self.par_int(l))
+						.try_collect()?;
+					let vars: Vec<_> = self
+						.arg_array(vars)?
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+					let rhs = self.arg_par_int(rhs)?;
+					let reified = self.arg_bool(reified)?;
+					let mut terms = Vec::with_capacity(vars.len());
+					for (x, c) in vars.into_iter().zip(coeffs) {
+						terms.push(
+							x.bounding_mul(&mut self.prb, c)
+								.map_err(LoweringError::from)?,
+						);
+					}
+
+					let lin = self.prb.linear(terms.into_iter().sum::<IntLinearExp>());
+					let lin = match ident {
+						ConstraintIdent::IntLinEqImp | ConstraintIdent::IntLinEqReif => lin.eq(rhs),
+						ConstraintIdent::IntLinLeImp | ConstraintIdent::IntLinLeReif => lin.le(rhs),
+						ConstraintIdent::IntLinNeImp | ConstraintIdent::IntLinNeReif => lin.ne(rhs),
+						_ => unreachable!(),
+					};
+					match ident {
+						ConstraintIdent::IntLinEqImp
+						| ConstraintIdent::IntLinLeImp
+						| ConstraintIdent::IntLinNeImp => lin.implied_by(reified),
+						ConstraintIdent::IntLinEqReif
+						| ConstraintIdent::IntLinLeReif
+						| ConstraintIdent::IntLinNeReif => lin.reified_by(reified),
+						_ => unreachable!(),
+					}
+					.post();
+				}
+				ConstraintIdent::IntMax | ConstraintIdent::IntMin => {
+					let [a, b, m] = c.args.as_slice() else {
+						return num_args_err(3);
+					};
+					let a = self.arg_int(a)?;
+					let b = self.arg_int(b)?;
+					let m = self.arg_int(m)?;
+					match ident {
+						ConstraintIdent::IntMax => self.prb.maximum([a, b]).result(m).post(),
+						ConstraintIdent::IntMin => self.prb.minimum([a, b]).result(m).post(),
+						_ => unreachable!(),
+					}
+				}
+				ConstraintIdent::IntPow => {
+					let [base, exponent, res] = c.args.as_slice() else {
+						return num_args_err(3);
+					};
+					let base = self.arg_int(base)?;
+					let exponent = self.arg_int(exponent)?;
+					let res = self.arg_int(res)?;
+
+					self.prb.pow(base, exponent).result(res).post();
+				}
+				ConstraintIdent::IntTimes => {
+					let [x, y, z] = c.args.as_slice() else {
+						return num_args_err(3);
+					};
+					let a = self.arg_int(x)?;
+					let b = self.arg_int(y)?;
+					let m = self.arg_int(z)?;
+					self.prb.mul(a, b).result(m).post();
+				}
+				ConstraintIdent::SetIn => {
+					let [x, s] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let x = self.arg_int(x)?;
+					let s = self.arg_par_set(s)?;
+
+					x.restrict_domain(&mut self.prb, &s, vec![])
+						.map_err(LoweringError::from)?;
+				}
+				ConstraintIdent::SetInReif => {
+					let [x, s, r] = c.args.as_slice() else {
+						return num_args_err(3);
+					};
+					let x = self.arg_int(x)?;
+					let s = self.arg_par_set(s)?;
+					let r = self.arg_bool(r)?;
+
+					self.prb.contains(s).member(x).result(r).post();
+				}
+				ConstraintIdent::IntEq | ConstraintIdent::BoolEq => unreachable!(),
 			}
 			for (i, used) in ann_used.iter().enumerate() {
 				if !used {
@@ -1964,18 +2151,24 @@ where
 	/// This can happen because of `bool_eq` and `int_eq` constraints in the
 	/// [`FlatZinc`] instance, or because of the `rhs` property of a variable.
 	pub(crate) fn unify_variables(&mut self) -> Result<(), FlatZincError> {
-		let mut unify_map = FxHashMap::<S, Rc<RefCell<Vec<Literal<S>>>>>::default();
-		let unify_map_find = |map: &FxHashMap<S, Rc<RefCell<Vec<Literal<S>>>>>, a: &Literal<S>| {
-			if let Literal::Identifier(x) = a {
-				map.get(x).map(Rc::clone)
-			} else {
-				None
-			}
-		};
+		let mut unify_map =
+			FxHashMap::<ArcKey<Variable<FznIdent>>, Rc<RefCell<Vec<Literal<FznIdent>>>>>::default();
+		let unify_map_find =
+			|map: &FxHashMap<ArcKey<Variable<FznIdent>>, Rc<RefCell<Vec<Literal<FznIdent>>>>>,
+			 a: &Literal<FznIdent>| {
+				if let Literal::Variable(x) = a {
+					map.get(&x.cloned_key()).map(Rc::clone)
+				} else {
+					None
+				}
+			};
 
-		let record_unify = |map: &mut FxHashMap<S, Rc<RefCell<Vec<Literal<S>>>>>,
-		                    a: &Literal<S>,
-		                    b: &Literal<S>| {
+		let record_unify = |map: &mut FxHashMap<
+			ArcKey<Variable<FznIdent>>,
+			Rc<RefCell<Vec<Literal<FznIdent>>>>,
+		>,
+		                    a: &Literal<FznIdent>,
+		                    b: &Literal<FznIdent>| {
 			let a_set = unify_map_find(map, a);
 			let b_set = unify_map_find(map, b);
 			match (a_set, b_set) {
@@ -1983,65 +2176,63 @@ where
 					let mut members = (*a_set).borrow_mut();
 					members.extend(b_set.take());
 					for b in members.iter() {
-						if let Literal::Identifier(b) = b {
-							map.insert(b.clone(), Rc::clone(&a_set));
+						if let Literal::Variable(b) = b {
+							map.insert(b.cloned_key(), Rc::clone(&a_set));
 						}
 					}
 				}
 				(Some(a_set), None) => {
 					let mut members = (*a_set).borrow_mut();
 					members.push(b.clone());
-					if let Literal::Identifier(b) = b {
-						map.insert(b.clone(), Rc::clone(&a_set));
+					if let Literal::Variable(b) = b {
+						map.insert(b.cloned_key(), Rc::clone(&a_set));
 					}
 				}
 				(None, Some(b_set)) => {
 					let mut members = (*b_set).borrow_mut();
 					members.push(a.clone());
-					if let Literal::Identifier(a) = a {
-						map.insert(a.clone(), Rc::clone(&b_set));
+					if let Literal::Variable(a) = a {
+						map.insert(a.cloned_key(), Rc::clone(&b_set));
 					}
 				}
 				(None, None) => {
 					let n_set = Rc::new(RefCell::new(vec![a.clone(), b.clone()]));
-					if let Literal::Identifier(a) = a {
-						map.insert(a.clone(), Rc::clone(&n_set));
+					if let Literal::Variable(a) = a {
+						map.insert(a.cloned_key(), Rc::clone(&n_set));
 					}
-					if let Literal::Identifier(b) = b {
-						map.insert(b.clone(), n_set);
+					if let Literal::Variable(b) = b {
+						map.insert(b.cloned_key(), n_set);
 					}
 				}
 			};
 		};
-
-		// Unify variables with their `rhs` value
-		for (s, v) in self.fzn.variables.iter() {
-			if let Some(l) = &v.value {
-				let s_lit = Literal::Identifier(s.clone());
-				record_unify(&mut unify_map, &s_lit, l);
-			}
-		}
 
 		// Unify variables based on constraints
 		for (i, c) in self.fzn.constraints.iter().enumerate() {
 			if self.processed[i] {
 				continue;
 			}
+			let FznIdent::Known(KnownIdent::Constraint(ident)) = c.id else {
+				continue;
+			};
 			let mark_processed = |me: &mut Self| me.processed[i] = true;
-			match c.id.deref() {
-				"bool_eq" => {
+			match ident {
+				ConstraintIdent::BoolEq => {
 					if let [Argument::Literal(a), Argument::Literal(b)] = c.args.as_slice() {
 						record_unify(&mut unify_map, a, b);
 						mark_processed(self);
 					}
 				}
-				"int_eq" => {
+				ConstraintIdent::IntEq => {
 					if let [Argument::Literal(a), Argument::Literal(b)] = c.args.as_slice() {
 						record_unify(&mut unify_map, a, b);
 						mark_processed(self);
 					}
 				}
-				"array_bool_element" | "array_int_element" => {
+				ConstraintIdent::ArrayBoolElement
+				| ConstraintIdent::ArrayIntElement
+				| ConstraintIdent::ArrayVarBoolElement
+				| ConstraintIdent::ArrayVarIntElement => {
 					if let [idx, arr, Argument::Literal(b)] = c.args.as_slice() {
 						let arr = self.arg_array(arr)?;
 						// unify if the index is constants
@@ -2067,64 +2258,62 @@ where
 			if self.map.contains_key(k) {
 				continue;
 			}
-			let ty = &self.fzn.variables[k].ty;
+			let is_bool = li.first().is_some_and(|l| match l {
+				Literal::Variable(var) => var.ty == Type::Bool,
+				Literal::Bool(_) => true,
+				_ => false,
+			});
 			// Determine the domain of the list of literals
-			let domain: Option<Literal<S>> = match ty {
-				Type::Bool => {
-					let mut domain = None;
-					for lit in li.iter() {
-						match lit {
-							Literal::Bool(b) => {
-								if domain == Some(!b) {
-									return Err(FlatZincError::ReformulationError(
-										LoweringError::Simplification(
-											self.prb.declare_conflict([]),
-										),
-									));
-								} else {
-									domain = Some(*b);
-								}
+			let domain: Option<Literal<()>> = if is_bool {
+				let mut domain = None;
+				for lit in li.iter() {
+					match lit {
+						Literal::Bool(b) => {
+							if domain == Some(!b) {
+								return Err(FlatZincError::ReformulationError(
+									LoweringError::Simplification(self.prb.declare_conflict([])),
+								));
+							} else {
+								domain = Some(*b);
 							}
-							Literal::Identifier(_) => {}
-							_ => unreachable!(),
-						};
-					}
-					domain.map(Literal::Bool)
+						}
+						Literal::Variable(_) => {}
+						_ => unreachable!(),
+					};
 				}
-				Type::Int => {
-					let mut domain = None::<IntSet>;
-					for lit in li.iter() {
-						match lit {
-							Literal::Int(i) => {
-								let rl = (*i..=*i).into();
+				domain.map(Literal::Bool)
+			} else {
+				let mut domain = None::<IntSet>;
+				for lit in li.iter() {
+					match lit {
+						Literal::Int(i) => {
+							let rl = (*i..=*i).into();
+							if let Some(dom) = domain {
+								domain = Some(dom.intersect(&rl));
+							} else {
+								domain = Some(rl);
+							}
+						}
+						Literal::Variable(var) => {
+							if let Type::Int(Some(d)) = &var.ty {
 								if let Some(dom) = domain {
-									domain = Some(dom.intersect(&rl));
+									domain = Some(dom.intersect(d));
 								} else {
-									domain = Some(rl);
+									domain = Some(d.clone());
 								}
 							}
-							Literal::Identifier(id) => {
-								if let Some(Domain::Int(d)) = &self.fzn.variables[id].domain {
-									if let Some(dom) = domain {
-										domain = Some(dom.intersect(d));
-									} else {
-										domain = Some(d.clone());
-									}
-								}
-							}
-							_ => unreachable!(),
-						};
-					}
-					domain.map(Literal::IntSet)
+						}
+						_ => unreachable!(),
+					};
 				}
-				_ => unreachable!(),
+				domain.map(Literal::IntSet)
 			};
 			// Find any view that is part of a unified group
 			let var = li
 				.iter()
 				.find_map(|lit| -> Option<AnyView> {
-					if let Literal::Identifier(id) = lit {
-						self.map.get(id).cloned()
+					if let Literal::Variable(v) = lit {
+						self.map.get(&v.cloned_key()).cloned()
 					} else {
 						None
 					}
@@ -2134,14 +2323,15 @@ where
 					Some(Literal::Bool(b)) => View::<bool>::from(b).into(),
 					Some(Literal::IntSet(dom)) => self.prb.new_int_decision(dom).into(),
 					Some(_) => unreachable!(),
-					None => match ty {
-						Type::Bool => self.prb.new_bool_decision().into(),
-						Type::Int => {
-							let id = li
+					None => {
+						if is_bool {
+							self.prb.new_bool_decision().into()
+						} else {
+							let var = li
 								.iter()
 								.find_map(|lit| {
-									if let Literal::Identifier(id) = lit {
-										Some(id)
+									if let Literal::Variable(var) = lit {
+										Some(var)
 									} else {
 										None
 									}
@@ -2149,21 +2339,20 @@ where
 								.unwrap();
 							warn!(
 								target: "flatzinc",
-								variable = %id,
+								variable = %var.name,
 								min = FULL_INT_DOMAIN.start(),
 								max = FULL_INT_DOMAIN.end(),
 								"assume full integer domain for unbounded decision variable"
 							);
 							self.prb.new_int_decision(FULL_INT_DOMAIN).into()
 						}
-						_ => unreachable!(),
-					},
+					}
 				});
 
 			// Map (or equate) all names in the group to the new variable
 			for lit in li.iter() {
-				if let Literal::Identifier(id) = lit {
-					let prev = self.map.insert(id.clone(), var.clone());
+				if let Literal::Variable(v) = lit {
+					let prev = self.map.insert(v.cloned_key(), var.clone());
 					debug_assert_eq!(prev, None);
 				}
 			}
@@ -2172,12 +2361,18 @@ where
 	}
 }
 
+impl Display for KnownIdent {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Annotation(ident) => Display::fmt(ident, f),
+			Self::Constraint(ident) => Display::fmt(ident, f),
+		}
+	}
+}
+
 impl Model {
 	/// Create a new [`Model`] instance from a [`FlatZinc`] instance.
-	pub fn from_fzn<S>(fzn: &FlatZinc<S>) -> Result<(Self, FlatZincModelMeta<S>), FlatZincError>
-	where
-		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
-	{
+	pub fn from_fzn(fzn: &FlatZinc<FznIdent>) -> Result<(Self, FlatZincModelMeta), FlatZincError> {
 		let mut builder = FznModelBuilder::new(fzn);
 		builder.unify_variables()?;
 		builder.extract_views()?;
@@ -2190,12 +2385,11 @@ impl Model {
 
 impl<Sat: ExternalPropagation> Solver<Sat> {
 	/// Create a new [`Solver`] instance from a [`FlatZinc`] instance.
-	pub fn from_fzn<S>(
-		fzn: &FlatZinc<S>,
+	pub fn from_fzn(
+		fzn: &FlatZinc<FznIdent>,
 		config: &InitConfig,
-	) -> Result<(Self, FlatZincSolverMeta<S>), FlatZincError>
+	) -> Result<(Self, FlatZincSolverMeta), FlatZincError>
 	where
-		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
 		Solver<Sat>: Default,
 		Sat: 'static,
 	{
@@ -2221,5 +2415,121 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 				goal,
 			},
 		))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::model::deserialize::flatzinc::{
+		AnnotationIdent, ConstraintIdent, FznIdent, KnownIdent,
+	};
+
+	#[test]
+	fn annotation_ident_display_roundtrips() {
+		let ident = AnnotationIdent::DisjDetectPrec;
+		assert_eq!(ident.to_string(), "detectable_precedence");
+		assert_eq!(
+			AnnotationIdent::try_from(ident.to_string().as_str()),
+			Ok(AnnotationIdent::DisjDetectPrec)
+		);
+		let ident = AnnotationIdent::WarmStartInt;
+		assert_eq!(ident.to_string(), "warm_start_int");
+		assert_eq!(
+			AnnotationIdent::try_from(ident.to_string().as_str()),
+			Ok(AnnotationIdent::WarmStartInt)
+		);
+	}
+
+	#[test]
+	fn annotation_ident_try_from() {
+		assert_eq!(
+			AnnotationIdent::try_from("bounds"),
+			Ok(AnnotationIdent::ConsistencyBounds)
+		);
+		assert_eq!(
+			AnnotationIdent::try_from("bool_search"),
+			Ok(AnnotationIdent::BoolSearch)
+		);
+		assert_eq!(
+			AnnotationIdent::try_from("input_order"),
+			Ok(AnnotationIdent::VarSelInputOrder)
+		);
+		assert_eq!(
+			AnnotationIdent::try_from("indomain_max"),
+			Ok(AnnotationIdent::ValSelIndomainMax)
+		);
+		assert_eq!(AnnotationIdent::try_from("unknown_annotation"), Err(()));
+	}
+
+	#[test]
+	fn constraint_ident_display_roundtrips() {
+		let ident = ConstraintIdent::DiffnKInt { strict: false };
+		assert_eq!(ident.to_string(), "huub_diffn_k_nonstrict_int");
+		assert_eq!(
+			ConstraintIdent::try_from(ident.to_string().as_str()),
+			Ok(ConstraintIdent::DiffnKInt { strict: false })
+		);
+	}
+
+	#[test]
+	fn constraint_ident_try_from() {
+		assert_eq!(
+			ConstraintIdent::try_from("int_div"),
+			Ok(ConstraintIdent::IntDiv)
+		);
+		assert_eq!(ConstraintIdent::try_from("unknown_constraint"), Err(()));
+	}
+
+	#[test]
+	fn fzn_ident_display_roundtrips() {
+		let known = FznIdent::from("int_div");
+		assert_eq!(known.to_string(), "int_div");
+		let unknown = FznIdent::from("not_a_known_identifier");
+		assert_eq!(unknown.to_string(), "not_a_known_identifier");
+	}
+
+	#[test]
+	fn ident_size() {
+		assert_eq!(size_of::<FznIdent>(), size_of::<Box<str>>());
+	}
+
+	#[test]
+	fn parses_known_identifiers() {
+		assert_eq!(
+			FznIdent::from("int_div"),
+			FznIdent::Known(KnownIdent::Constraint(ConstraintIdent::IntDiv))
+		);
+		assert_eq!(
+			FznIdent::from("value_propagation"),
+			FznIdent::Known(KnownIdent::Annotation(AnnotationIdent::ConsistencyValue))
+		);
+		assert_eq!(
+			FznIdent::from("huub_diffn_k_int"),
+			FznIdent::Known(KnownIdent::Constraint(ConstraintIdent::DiffnKInt {
+				strict: true
+			}))
+		);
+		assert_eq!(
+			FznIdent::from("huub_diffn_k_nonstrict_int"),
+			FznIdent::Known(KnownIdent::Constraint(ConstraintIdent::DiffnKInt {
+				strict: false
+			}))
+		);
+		assert_eq!(
+			FznIdent::from("bool_search"),
+			FznIdent::Known(KnownIdent::Annotation(AnnotationIdent::BoolSearch))
+		);
+		assert_eq!(
+			FznIdent::from("outdomain_min"),
+			FznIdent::Known(KnownIdent::Annotation(AnnotationIdent::ValSelOutdomainMin))
+		);
+	}
+
+	#[test]
+	fn preserves_unknown_identifiers() {
+		let FznIdent::Unknown(ident) = FznIdent::from("not_a_known_identifier") else {
+			unreachable!()
+		};
+		assert_eq!(&*ident, "not_a_known_identifier");
 	}
 }
