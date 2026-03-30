@@ -4,7 +4,6 @@ import os
 import subprocess
 import tempfile
 import urllib.request
-
 from pathlib import Path
 
 # Map of objects containing [model] key that points to the url where the model
@@ -51,7 +50,9 @@ INSTANCES = [
     },
     {  # (Generalized) Peacable Queens
         "model": "https://raw.githubusercontent.com/MiniZinc/mzn-challenge/refs/heads/develop/2022/generalized-peacable-queens/peaceable_queens.mzn",
-        "instances": {"peaceable_queens_n5_q3.fzn.json": "peaceable_queens_n5_q3.json"},
+        "instances": {
+            "peaceable_queens_n5_q3.fzn.json": "peaceable_queens_n5_q3.json"
+        },
     },
     {
         # Portal
@@ -128,7 +129,13 @@ def load_file(temp_file, url, base_path):
 if __name__ == "__main__":
     this_dir = Path(os.path.dirname(os.path.realpath(__file__)))
     msc_file = (
-        this_dir.parent.parent.parent / "share" / "minizinc" / "solvers" / "huub.msc"
+        this_dir.parent.parent.parent
+        / "target"
+        / "staging"
+        / "share"
+        / "minizinc"
+        / "solvers"
+        / "huub.msc"
     )
     assert msc_file.exists(), f"Solver configuration file not found: {msc_file}"
 

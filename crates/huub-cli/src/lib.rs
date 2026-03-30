@@ -22,7 +22,6 @@ macro_rules! outputln {
 }
 
 mod cli;
-mod interned_str;
 mod trace;
 
 use std::{
@@ -36,12 +35,12 @@ use std::{
 	time::Instant,
 };
 
-use flatzinc_serde::{FlatZinc, Literal};
+use flatzinc_serde::{FlatZinc, Literal, NamedRef, Variable, helpers::ArcKey};
 use huub::{
 	Goal, TerminationSignal,
 	actions::IntDecisionActions,
 	lower::LoweringError,
-	model::deserialize::flatzinc::FlatZincError,
+	model::deserialize::flatzinc::{FlatZincError, FznIdent},
 	solver::{
 		AnyView, IntLitMeaning, SearchStrategy, Solution, Solver, Status, SwitchTrigger, Value,
 	},
@@ -53,8 +52,7 @@ use tracing::{subscriber::set_default, warn};
 pub use crate::cli::Cli;
 use crate::{
 	cli::{CliSearchStrategy, CliSearchTrigger},
-	interned_str::InternedStr,
-	trace::LitName,
+	trace::{LitName, VarRef},
 };
 
 /// Status message to output when it is proven that no more/better solutions can
@@ -75,11 +73,11 @@ static GLOBAL: MiMalloc = MiMalloc;
 /// Solution struct to display the results of the solver
 struct SolutionWrap<'a> {
 	/// FlatZinc instance
-	fzn: &'a FlatZinc<InternedStr>,
+	fzn: &'a FlatZinc<FznIdent>,
 	/// Mapping from solver views to solution values
 	sol: Solution<'a>,
 	/// Mapping from FlatZinc identifiers to solver views
-	var_map: &'a FxHashMap<InternedStr, AnyView>,
+	var_map: &'a FxHashMap<ArcKey<Variable<FznIdent>>, AnyView>,
 }
 
 /// Print a statistics block formulated for MiniZinc
@@ -97,7 +95,7 @@ impl<'a> Cli<'a> {
 		let (trace_writer, ansi_color) = self.trace_writer()?;
 		let trace_targets = self.trace_targets();
 		let lit_reverse_map: Arc<Mutex<FxHashMap<NonZeroI32, LitName>>> = Arc::default();
-		let int_reverse_map: Arc<Mutex<Vec<InternedStr>>> = Arc::default();
+		let int_reverse_map: Arc<Mutex<Vec<Option<VarRef>>>> = Arc::default();
 		let subscriber = trace::create_subscriber(
 			self.verbose,
 			&trace_targets,
@@ -115,7 +113,7 @@ impl<'a> Cli<'a> {
 			std::fs::File::open(&self.path)
 				.map_err(|_| format!("Unable to open file “{}”", self.path.display()))?,
 		);
-		let fzn: FlatZinc<InternedStr> = serde_json::from_reader(rdr).map_err(|_| {
+		let fzn: FlatZinc<_> = serde_json::from_reader(rdr).map_err(|_| {
 			format!(
 				"Unable to parse file “{}” as FlatZinc JSON",
 				self.path.display()
@@ -155,22 +153,24 @@ impl<'a> Cli<'a> {
 			let mut lit_map = lit_reverse_map.lock().unwrap();
 			let mut int_map = int_reverse_map.lock().unwrap();
 			debug_assert!(int_map.is_empty());
-			*int_map = vec![InternedStr::default(); slv.init_statistics().int_vars()];
-			for (name, v) in &meta.names {
+			*int_map = vec![None; slv.init_statistics().int_vars()];
+			for (var, v) in &meta.names {
 				match v {
 					AnyView::Bool(bv) => {
+						let var: VarRef = var.clone().into();
 						if let Some(info) = bv.reverse_map_info() {
-							lit_map.insert(info, LitName::BoolVar(*name, true));
-							lit_map.insert(-info, LitName::BoolVar(*name, false));
+							lit_map.insert(info, LitName::BoolVar(Arc::clone(&var), true));
+							lit_map.insert(-info, LitName::BoolVar(var, false));
 						}
 					}
 					AnyView::Int(iv) => {
+						let var: VarRef = var.clone().into();
 						let (pos, is_view) = iv.int_reverse_map_info();
 						if let Some(i) = pos {
-							if !is_view || int_map[i as usize].is_empty() {
-								int_map[i as usize] = *name;
+							if !is_view || int_map[i as usize].is_none() {
+								int_map[i as usize] = Some(Arc::clone(&var));
 								for (lit, meaning) in iv.lit_reverse_map_info(&slv) {
-									lit_map.insert(lit, LitName::IntLit(i, meaning));
+									lit_map.insert(lit, LitName::IntLit(Arc::clone(&var), meaning));
 								}
 							} else {
 								debug_assert!(
@@ -182,15 +182,9 @@ impl<'a> Cli<'a> {
 						} else {
 							debug_assert!(is_view);
 							for (lit, meaning) in iv.lit_reverse_map_info(&slv) {
-								lit_map.entry(lit).or_insert_with(|| {
-									let (op, val) = match meaning {
-										IntLitMeaning::Eq(v) => ("=", v),
-										IntLitMeaning::NotEq(v) => ("!=", v),
-										IntLitMeaning::GreaterEq(v) => (">=", v),
-										IntLitMeaning::Less(v) => ("<", v),
-									};
-									LitName::BoolVar(format!("{name}{op}{val}").into(), true)
-								});
+								lit_map
+									.entry(lit)
+									.or_insert_with(|| LitName::IntLit(Arc::clone(&var), meaning));
 							}
 						}
 					}
@@ -251,21 +245,19 @@ impl<'a> Cli<'a> {
 		let output_vars: Vec<_> = fzn
 			.output
 			.iter()
-			.flat_map(|ident| {
-				if let Some(arr) = fzn.arrays.get(ident) {
-					arr.contents
-						.iter()
-						.filter_map(|lit| {
-							if let Literal::Identifier(ident) = lit {
-								Some(meta.names[ident])
-							} else {
-								None
-							}
-						})
-						.collect()
-				} else {
-					vec![meta.names[ident]]
-				}
+			.flat_map(|named_ref| match named_ref {
+				NamedRef::Variable(var) => vec![meta.names[&var.cloned_key()]],
+				NamedRef::Array(arr) => arr
+					.contents
+					.iter()
+					.filter_map(|lit| {
+						if let Literal::Variable(var) = lit {
+							Some(meta.names[&var.cloned_key()])
+						} else {
+							None
+						}
+					})
+					.collect(),
 			})
 			.collect();
 		let (res, stats) = match meta.goal {
@@ -417,12 +409,12 @@ impl<'a> Cli<'a> {
 
 impl SolutionWrap<'_> {
 	/// Method used to print a literal that is part of a solution.
-	fn print_lit(&self, lit: &Literal<InternedStr>) -> String {
+	fn print_lit(&self, lit: &Literal<FznIdent>) -> String {
 		match lit {
 			Literal::Int(i) => format!("{i}"),
 			Literal::Float(f) => format!("{f}"),
-			Literal::Identifier(ident) => {
-				format!("{}", self.var_map[ident].val(self.sol))
+			Literal::Variable(var) => {
+				format!("{}", self.var_map[&var.cloned_key()].val(self.sol))
 			}
 			Literal::Bool(b) => format!("{b}"),
 			Literal::IntSet(is) => is
@@ -442,19 +434,24 @@ impl SolutionWrap<'_> {
 
 impl Display for SolutionWrap<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		for ident in &self.fzn.output {
-			if let Some(arr) = self.fzn.arrays.get(ident) {
-				writeln!(
+		for named_ref in &self.fzn.output {
+			match named_ref {
+				NamedRef::Variable(var) => writeln!(
 					f,
-					"{ident} = [{}];",
+					"{} = {};",
+					var.name,
+					self.var_map[&var.cloned_key()].val(self.sol)
+				)?,
+				NamedRef::Array(arr) => writeln!(
+					f,
+					"{} = [{}];",
+					arr.name,
 					arr.contents
 						.iter()
 						.map(|lit| self.print_lit(lit))
 						.collect::<Vec<_>>()
 						.join(",")
-				)?;
-			} else {
-				writeln!(f, "{ident} = {};", self.var_map[ident].val(self.sol))?;
+				)?,
 			}
 		}
 		writeln!(f, "{FZN_SEPARATOR}")

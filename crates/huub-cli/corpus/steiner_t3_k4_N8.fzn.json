@@ -1643,21 +1643,7 @@
     "X_INTRODUCED_2531_" : { "type" : "bool", "introduced": true, "defined" : true },
     "X_INTRODUCED_2532_" : { "type" : "bool", "introduced": true, "defined" : true },
     "X_INTRODUCED_2534_" : { "type" : "bool", "introduced": true, "defined" : true },
-    "X_INTRODUCED_2535_" : { "type" : "bool", "introduced": true, "defined" : true },
-    "X_INTRODUCED_1166_" : { "type" : "bool", "rhs" : true, "introduced": true },
-    "X_INTRODUCED_1223_" : { "type" : "bool", "rhs" : true, "introduced": true },
-    "X_INTRODUCED_1333_" : { "type" : "bool", "rhs" : true, "introduced": true },
-    "X_INTRODUCED_1434_" : { "type" : "bool", "rhs" : true, "introduced": true },
-    "X_INTRODUCED_1535_" : { "type" : "bool", "rhs" : true, "introduced": true },
-    "X_INTRODUCED_1636_" : { "type" : "bool", "rhs" : true, "introduced": true },
-    "X_INTRODUCED_1737_" : { "type" : "bool", "rhs" : true, "introduced": true },
-    "X_INTRODUCED_1838_" : { "type" : "bool", "rhs" : true, "introduced": true },
-    "X_INTRODUCED_1939_" : { "type" : "bool", "rhs" : true, "introduced": true },
-    "X_INTRODUCED_2040_" : { "type" : "bool", "rhs" : true, "introduced": true },
-    "X_INTRODUCED_2141_" : { "type" : "bool", "rhs" : true, "introduced": true },
-    "X_INTRODUCED_2242_" : { "type" : "bool", "rhs" : true, "introduced": true },
-    "X_INTRODUCED_2343_" : { "type" : "bool", "rhs" : true, "introduced": true },
-    "X_INTRODUCED_2444_" : { "type" : "bool", "rhs" : true, "introduced": true }
+    "X_INTRODUCED_2535_" : { "type" : "bool", "introduced": true, "defined" : true }
   },
   "arrays": {
     "X_INTRODUCED_24_" : { "a": ["X_INTRODUCED_16_", "X_INTRODUCED_17_", "X_INTRODUCED_18_", "X_INTRODUCED_19_", "X_INTRODUCED_20_", "X_INTRODUCED_21_", "X_INTRODUCED_22_", "X_INTRODUCED_23_"] },

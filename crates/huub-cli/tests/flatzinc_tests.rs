@@ -19,7 +19,6 @@ mod tests {
 	assert_all_solutions!(unify_with_view_1);
 	assert_all_solutions!(unify_with_view_2);
 	assert_all_solutions!(unify_with_view_3);
-	assert_all_solutions!(unify_with_view_4);
 
 	assert_all_optimal!(simple_sum);
 

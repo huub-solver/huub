@@ -398,9 +398,9 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "flatzinc-serde"
-version = "0.4.4"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6326022851a9eb73445a7839835c8dfc45dbfda3b2bda0dcd07073401b1b072"
+checksum = "1d5488f39d755f9d8a0938eb546023b5f5e88f023d21a1b4bf9f03267eeedf88"
 dependencies = [
  "rangelist 0.4.0",
  "serde",
@@ -486,7 +486,6 @@ dependencies = [
  "huub",
  "mimalloc",
  "rustc-hash",
- "serde",
  "serde_json",
  "tracing",
  "tracing-subscriber",
