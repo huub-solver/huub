@@ -33,7 +33,7 @@ serde = "1.0"
 serde_json = "1.0"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
-tracing-test = "0.2.5"
+tracing-test = "0.2.6"
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"
