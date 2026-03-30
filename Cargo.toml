@@ -15,7 +15,7 @@ categories = ["algorithms", "mathematics", "science"]
 keywords = ["sat", "lcg", "flatzinc", "minizinc", "optimization"]
 
 [workspace.dependencies]
-bon = "3.8.2"
+bon = "3.9.1"
 ctrlc = "3.4"
 divan = { package = "codspeed-divan-compat", version = "4.0" }
 dyn-clone = "1.0.20"
