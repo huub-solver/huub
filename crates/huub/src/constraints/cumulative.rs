@@ -289,6 +289,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
 					self.durations[i].min(ctx),
+					self.usages[i].min(ctx),
 					self.latest_start_time(ctx, i),
 					self.earliest_completion_time(ctx, i),
 				)).collect_vec(),
@@ -532,6 +533,15 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// A helper function to find the index of the maximum usage in the
 	/// time-table profile within a specified period [start, end].
 	fn max_period_within(&self, _task: usize, start: i64, end: i64) -> Option<usize> {
+		trace!(
+			target: "cumulative",
+			task = _task,
+			start,
+			end,
+			bounds = ?self.bounds,
+			heights = ?self.heights,
+			"find max usage period within compulsory part"
+		);
 		let begin = self.bounds.partition_point(|&b| b <= start);
 		if begin >= self.bounds.len() {
 			return None;
@@ -604,7 +614,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		&self,
 		ctx: &mut E::PropagationCtx<'_>,
 		task: usize,
-	) -> Result<(), E::Conflict>
+	) -> Result<bool, E::Conflict>
 	where
 		E: ReasoningEngine,
 		I1: IntSolverActions<E>,
@@ -620,7 +630,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 
 		if dur_lb <= 0 || usage_lb <= 0 {
 			// If the task has no duration or usage, no need to sweep
-			return Ok(());
+			return Ok(false);
 		}
 
 		// Find the partition point where b < lst + dur
@@ -628,6 +638,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		trace!(target: "cumulative", task, dur_lb, est, lst, usage_lb, "task sweep backward");
 		let mut updated_lct = self.latest_completion_time(ctx, task);
 		let max_capacity = self.capacity.max(ctx);
+		let mut updated = false;
 		for i in (1..last).rev() {
 			let b_start = self.bounds[i - 1];
 			let b_end = self.bounds[i];
@@ -683,11 +694,12 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 							),
 						)?;
 						updated_lct = t;
+						updated = true;
 					}
 				}
 			}
 		}
-		Ok(())
+		Ok(updated)
 	}
 
 	/// Performs a forward sweep for a given task to propagate its earliest
@@ -711,7 +723,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		&self,
 		ctx: &mut E::PropagationCtx<'_>,
 		task: usize,
-	) -> Result<(), E::Conflict>
+	) -> Result<bool, E::Conflict>
 	where
 		E: ReasoningEngine,
 		I1: IntSolverActions<E>,
@@ -726,7 +738,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 
 		if dur_lb <= 0 || usage_lb <= 0 {
 			// If the task has no duration or usage, no need to sweep
-			return Ok(());
+			return Ok(false);
 		}
 
 		// Find the partition point where est > b
@@ -734,6 +746,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		trace!(target: "cumulative", task, dur_lb, est, lst, usage_lb, "task sweep forward");
 		let mut updated_est = est;
 		let max_capacity = self.capacity.max(ctx);
+		let mut updated = false;
 		for i in first..self.bounds.len() - 1 {
 			let b_start = self.bounds[i];
 			let b_end = self.bounds[i + 1];
@@ -787,11 +800,12 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 							),
 						)?;
 						updated_est = t;
+						updated = true;
 					}
 				}
 			}
 		}
-		Ok(())
+		Ok(updated)
 	}
 }
 
@@ -873,26 +887,30 @@ where
 	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// Build the time-table profile and check resource overload
-		match self.build_profile_and_check_overload(ctx) {
-			// If the profile is empty, no tasks are active, so we can skip further
-			// propagation
-			Ok(true) => return Ok(()),
-			// If there is a conflict, return it
-			Err(conflict) => return Err(conflict),
-			_ => {}
+		let profile_empty = self.build_profile_and_check_overload(ctx)?;
+		if profile_empty {
+			return Ok(());
 		}
 
 		// Sweeping time: update the earliest start times and the latest completion
 		// times
+		let mut bounds_updated = false;
 		for i in 0..self.start_times.len() {
 			let (lb, ub) = self.start_times[i].bounds(ctx);
 			if lb < ub {
-				self.sweep_forward(ctx, i)?;
-				self.sweep_backward(ctx, i)?;
+				bounds_updated |= self.sweep_forward(ctx, i)?;
+				bounds_updated |= self.sweep_backward(ctx, i)?;
 			}
 		}
 
-		// Limit usage: update the upper bounds of the resource usage
+		// Defer usage propagation until after the bounds have been updated by the
+		// solver engine. This will ensure that the profile is up-to-date before
+		// limiting usage.
+		if bounds_updated {
+			return Ok(());
+		}
+
+		// Limit usage: update the upper bounds of the resource usages of tasks
 		for i in 0..self.start_times.len() {
 			let (req_lb, req_ub) = self.usages[i].bounds(ctx);
 			if req_lb < req_ub
