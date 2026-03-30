@@ -276,7 +276,7 @@ where
 							}
 							_ => warn!(
 								target: "flatzinc",
-								annotation = ?ann,
+								annotation = %ann,
 								"unsupported search annotation"
 							),
 						}
@@ -353,7 +353,7 @@ where
 			other => {
 				warn!(
 					target: "flatzinc",
-					annotation = ?other,
+					annotation = %other,
 					"ignore unsupported search annotation"
 				);
 				Ok((Vec::new(), Vec::new()))
@@ -627,7 +627,7 @@ where
 				}
 				_ => warn!(
 					target: "flatzinc",
-					annotation = ?ann,
+					annotation = %ann,
 					"ignore unsupported search annotation"
 				),
 			}
@@ -1948,7 +1948,7 @@ where
 				if !used {
 					warn!(
 						target: "flatzinc",
-						annotation = ?c.ann[i],
+						annotation = %c.ann[i],
 						constraint = %c.id,
 						"ignore unsupported constraint annotation"
 					);
