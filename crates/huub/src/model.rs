@@ -493,15 +493,15 @@ impl Model {
 			int_map: vec![None; self.int_vars.len()],
 		};
 
-		// Ensure the creation of all integer variables.
-		for (idx, _) in self.int_vars.iter().enumerate() {
-			map_builder.get_or_create_int(self, &mut slv, Decision(idx as u32));
-		}
-
 		// Ensure the creation of all Boolean variables.
 		for var in 1..=self.bool_vars.len() as u32 {
 			let raw = RawLit::from_raw(NonZeroI32::new(var as i32).unwrap());
 			map_builder.get_or_create_bool(self, &mut slv, Decision(raw).into());
+		}
+
+		// Ensure the creation of all integer variables.
+		for (idx, _) in self.int_vars.iter().enumerate() {
+			map_builder.get_or_create_int(self, &mut slv, Decision(idx as u32));
 		}
 
 		// Finalize the reformulation map (all variables must be created by now)
