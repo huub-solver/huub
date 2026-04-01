@@ -610,7 +610,7 @@ mod tests {
 		actions::{
 			BoolInitActions, BoolInspectionActions, ConstructionActions, IntInitActions,
 			IntInspectionActions, IntPropagationActions, IntSimplificationActions, ReasoningEngine,
-			Trailed, TrailingActions,
+			TrailAccessActions, Trailed, TrailingActions,
 		},
 		constraints::{
 			BoolModelActions, Constraint, IntModelActions, Propagator, SimplificationStatus,
