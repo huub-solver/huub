@@ -1,4 +1,0 @@
----
-title: Example Guide
-description: ''
----

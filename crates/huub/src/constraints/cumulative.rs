@@ -289,6 +289,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
 					i,
 					self.durations[i].min(ctx),
+					self.usages[i].min(ctx),
 					self.latest_start_time(ctx, i),
 					self.earliest_completion_time(ctx, i),
 				)).collect_vec(),
@@ -532,6 +533,15 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// A helper function to find the index of the maximum usage in the
 	/// time-table profile within a specified period [start, end].
 	fn max_period_within(&self, _task: usize, start: i64, end: i64) -> Option<usize> {
+		trace!(
+			target: "cumulative",
+			task = _task,
+			start,
+			end,
+			bounds = ?self.bounds,
+			heights = ?self.heights,
+			"find max usage period within compulsory part"
+		);
 		let begin = self.bounds.partition_point(|&b| b <= start);
 		if begin >= self.bounds.len() {
 			return None;
@@ -604,7 +614,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		&self,
 		ctx: &mut E::PropagationCtx<'_>,
 		task: usize,
-	) -> Result<(), E::Conflict>
+	) -> Result<bool, E::Conflict>
 	where
 		E: ReasoningEngine,
 		I1: IntSolverActions<E>,
@@ -620,7 +630,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 
 		if dur_lb <= 0 || usage_lb <= 0 {
 			// If the task has no duration or usage, no need to sweep
-			return Ok(());
+			return Ok(false);
 		}
 
 		// Find the partition point where b < lst + dur
@@ -628,6 +638,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		trace!(target: "cumulative", task, dur_lb, est, lst, usage_lb, "task sweep backward");
 		let mut updated_lct = self.latest_completion_time(ctx, task);
 		let max_capacity = self.capacity.max(ctx);
+		let mut updated = false;
 		for i in (1..last).rev() {
 			let b_start = self.bounds[i - 1];
 			let b_end = self.bounds[i];
@@ -683,11 +694,12 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 							),
 						)?;
 						updated_lct = t;
+						updated = true;
 					}
 				}
 			}
 		}
-		Ok(())
+		Ok(updated)
 	}
 
 	/// Performs a forward sweep for a given task to propagate its earliest
@@ -711,7 +723,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		&self,
 		ctx: &mut E::PropagationCtx<'_>,
 		task: usize,
-	) -> Result<(), E::Conflict>
+	) -> Result<bool, E::Conflict>
 	where
 		E: ReasoningEngine,
 		I1: IntSolverActions<E>,
@@ -726,7 +738,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 
 		if dur_lb <= 0 || usage_lb <= 0 {
 			// If the task has no duration or usage, no need to sweep
-			return Ok(());
+			return Ok(false);
 		}
 
 		// Find the partition point where est > b
@@ -734,6 +746,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		trace!(target: "cumulative", task, dur_lb, est, lst, usage_lb, "task sweep forward");
 		let mut updated_est = est;
 		let max_capacity = self.capacity.max(ctx);
+		let mut updated = false;
 		for i in first..self.bounds.len() - 1 {
 			let b_start = self.bounds[i];
 			let b_end = self.bounds[i + 1];
@@ -787,11 +800,12 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 							),
 						)?;
 						updated_est = t;
+						updated = true;
 					}
 				}
 			}
 		}
-		Ok(())
+		Ok(updated)
 	}
 }
 
@@ -873,26 +887,30 @@ where
 	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 		// Build the time-table profile and check resource overload
-		match self.build_profile_and_check_overload(ctx) {
-			// If the profile is empty, no tasks are active, so we can skip further
-			// propagation
-			Ok(true) => return Ok(()),
-			// If there is a conflict, return it
-			Err(conflict) => return Err(conflict),
-			_ => {}
+		let profile_empty = self.build_profile_and_check_overload(ctx)?;
+		if profile_empty {
+			return Ok(());
 		}
 
 		// Sweeping time: update the earliest start times and the latest completion
 		// times
+		let mut bounds_updated = false;
 		for i in 0..self.start_times.len() {
 			let (lb, ub) = self.start_times[i].bounds(ctx);
 			if lb < ub {
-				self.sweep_forward(ctx, i)?;
-				self.sweep_backward(ctx, i)?;
+				bounds_updated |= self.sweep_forward(ctx, i)?;
+				bounds_updated |= self.sweep_backward(ctx, i)?;
 			}
 		}
 
-		// Limit usage: update the upper bounds of the resource usage
+		// Defer usage propagation until after the bounds have been updated by the
+		// solver engine. This will ensure that the profile is up-to-date before
+		// limiting usage.
+		if bounds_updated {
+			return Ok(());
+		}
+
+		// Limit usage: update the upper bounds of the resource usages of tasks
 		for i in 0..self.start_times.len() {
 			let (req_lb, req_ub) = self.usages[i].bounds(ctx);
 			if req_lb < req_ub
@@ -914,7 +932,9 @@ mod tests {
 
 	use crate::{
 		IntVal,
+		actions::IntInspectionActions,
 		constraints::cumulative::CumulativeTimeTable,
+		model::{ConRef, Model},
 		solver::{
 			Solver, View,
 			decision::integer::{EncodingType, IntDecision},
@@ -1252,5 +1272,72 @@ mod tests {
 		);
 
 		slv.assert_unsatisfiable();
+	}
+
+	#[test]
+	#[traced_test]
+	/// This test verifies that the cumulative propagator performs multiple
+	/// rounds of propagation to reach a fixpoint. In each round, the
+	/// propagator first updates the start times of tasks according to the
+	/// time-table profile. Once no further updates to start times are possible,
+	/// the propagator then tightens the usage bounds based on the current
+	/// profile. This ensures the time-table profile is the latest and the
+	/// propagation of usage bounds are correct.
+	fn test_cumulative_propagate() {
+		let mut prb = Model::default();
+		// Task A: can start at 0, 1, or 2; duration 3. Latest start time: 2, earliest
+		// completion time: 3. Compulsory part: [0, 2] (must be scheduled in this
+		// interval for feasibility).
+		let start_time_a = prb.new_int_decision(0..=2);
+		// Task B: same as Task A (identical domain and duration).
+		let start_time_b = prb.new_int_decision(0..=2);
+		// Task C: can start at 0..=4; duration 3. Latest start time: 4, earliest
+		// completion time: 3. No compulsory part.
+		let start_time_c = prb.new_int_decision(0..=4);
+		let usages = prb.new_int_decisions(3, 1..=2);
+		prb.cumulative()
+			.start_times(vec![start_time_a, start_time_b, start_time_c])
+			.durations(vec![3, 3, 3])
+			.usages(usages.clone())
+			.capacity(2)
+			.post();
+
+		// First propagation: The compulsory parts of Task A and B ([0, 2])
+		// require that Task C cannot overlap with them due to capacity constraints.
+		// This pushes the earliest start time of Task C to 3.
+		let _ = prb.propagate(ConRef::from_raw(0));
+		let time_bounds = start_time_a.bounds(&prb);
+		assert_eq!(time_bounds, (0, 2));
+		let usage_bounds = usages[0].bounds(&prb);
+		assert_eq!(usage_bounds, (1, 2));
+
+		let time_bounds = start_time_b.bounds(&prb);
+		assert_eq!(time_bounds, (0, 2));
+		let usage_bounds = usages[1].bounds(&prb);
+		assert_eq!(usage_bounds, (1, 2));
+
+		let time_bounds = start_time_c.bounds(&prb);
+		assert_eq!(time_bounds, (3, 4));
+		let usage_bounds = usages[2].bounds(&prb);
+		assert_eq!(usage_bounds, (1, 2));
+
+		// Second propagation: With Task C's start time now at least 3, only A and B
+		// overlap in [0, 2]. The combined usage of A and B in this interval must not
+		// exceed the capacity (2), so their usage upper bounds are tightened to 1.
+		let _ = prb.propagate(ConRef::from_raw(0));
+		let time_bounds = start_time_a.bounds(&prb);
+		assert_eq!(time_bounds, (0, 2));
+		let usage_bounds = usages[0].bounds(&prb);
+		assert_eq!(usage_bounds, (1, 1));
+
+		let time_bounds = start_time_b.bounds(&prb);
+		assert_eq!(time_bounds, (0, 2));
+		let usage_bounds = usages[1].bounds(&prb);
+		assert_eq!(usage_bounds, (1, 1));
+
+		let time_bounds = start_time_c.bounds(&prb);
+		assert_eq!(time_bounds, (3, 4));
+		let usage_bounds = usages[2].bounds(&prb);
+		assert_eq!(usage_bounds, (1, 2));
 	}
 }

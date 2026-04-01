@@ -318,7 +318,9 @@ impl<'a> SolvingContext<'a> {
 		let event = match lit_req {
 			IntLitMeaning::Eq(_) => IntEvent::Fixed,
 			IntLitMeaning::NotEq(_) => IntEvent::Domain,
+			IntLitMeaning::GreaterEq(i) if i == ub => IntEvent::Fixed,
 			IntLitMeaning::GreaterEq(_) => IntEvent::LowerBound,
+			IntLitMeaning::Less(i) if i == lb + 1 => IntEvent::Fixed,
 			IntLitMeaning::Less(_) => IntEvent::UpperBound,
 		};
 		self.propagate_lit(lit, reason, Some((iv, event)));

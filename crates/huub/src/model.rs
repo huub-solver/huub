@@ -602,20 +602,21 @@ impl TrailingActions for Model {
 
 #[cfg(test)]
 mod tests {
+	use expect_test::expect;
 	use tracing_test::traced_test;
 
 	use crate::{
 		IntVal,
 		actions::{
 			BoolInitActions, BoolInspectionActions, ConstructionActions, IntInitActions,
-			IntInspectionActions, IntPropagationActions, ReasoningEngine, TrailAccessActions,
+			IntInspectionActions, IntPropagationActions, IntSimplificationActions, ReasoningEngine,
 			Trailed, TrailingActions,
 		},
 		constraints::{
 			BoolModelActions, Constraint, IntModelActions, Propagator, SimplificationStatus,
 		},
 		lower::{InitConfig, LoweringContext, LoweringError},
-		model::{Model, View},
+		model::{Model, View, deserialize::AnyView},
 		solver::{
 			Solver,
 			activation_list::{IntEvent, IntPropCond},
@@ -753,5 +754,26 @@ mod tests {
 		let (min, max) = i_slv.bounds(&slv);
 		assert_eq!(min, 1);
 		assert_eq!(max, 2);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_inverted_bool() {
+		let mut prb = Model::default();
+		let b = prb.new_bool_decision();
+		let i1 = prb.new_int_decision(-1..=0);
+		i1.unify(&mut prb, !b - 1).expect("unify failed");
+
+		let (mut slv, map): (Solver, _) = prb
+			.to_solver(&InitConfig::default())
+			.expect("to_solver failed");
+		let b_slv = map.get_any(&mut slv, AnyView::from(b));
+		let i1_slv = map.get_any(&mut slv, AnyView::from(i1));
+		slv.expect_solutions(
+			&[b_slv, i1_slv],
+			expect![[r#"
+    			false, 0
+    			true, -1"#]],
+		);
 	}
 }

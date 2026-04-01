@@ -1020,8 +1020,7 @@ impl IntDecision {
 		iv.into()
 	}
 
-	/// Notify that a new lower bound has been propagated for the variable,
-	/// returning the previous lower bound.
+	/// Notify that a new lower bound has been propagated for the variable.
 	///
 	/// # Warning
 	///
@@ -1060,8 +1059,7 @@ impl IntDecision {
 		}
 	}
 
-	/// Notify that a new upper bound has been propagated for the variable,
-	/// returning the previous upper bound.
+	/// Notify that a new upper bound has been propagated for the variable.
 	///
 	/// # Warning
 	///
