@@ -33,7 +33,8 @@ use crate::{
 	IntSet, IntVal,
 	actions::{
 		ConstructionActions, DecisionActions, IntInspectionActions, PropagationActions,
-		ReasoningContext, ReasoningEngine, SimplificationActions, Trailed, TrailingActions,
+		ReasoningContext, ReasoningEngine, SimplificationActions, TrailAccessActions, Trailed,
+		TrailingActions,
 	},
 	constraints::{
 		BoxedConstraint, Conflict, Constraint, DeferredReason, Reason, ReasonBuilder,
@@ -285,6 +286,7 @@ impl Model {
 				self.constraints[con.index()] = Some(con_obj);
 			}
 		}
+
 		self.notify_advisors();
 		Ok(())
 	}
@@ -577,6 +579,16 @@ impl SimplificationActions for Model {
 	fn post_constraint<C: Constraint<Model>>(&mut self, constraint: C) {
 		self.post_constraint(constraint);
 	}
+
+	fn resolve_alias(&self, view: View<IntVal>) -> View<IntVal> {
+		view.resolve_alias(self).into_inner()
+	}
+}
+
+impl TrailAccessActions for Model {
+	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
+		T::from_bytes(self.trail[i.index as usize])
+	}
 }
 
 impl TrailingActions for Model {
@@ -585,10 +597,6 @@ impl TrailingActions for Model {
 			&mut self.trail[i.index as usize],
 			v.to_bytes(),
 		))
-	}
-
-	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
-		T::from_bytes(self.trail[i.index as usize])
 	}
 }
 
@@ -602,7 +610,7 @@ mod tests {
 		actions::{
 			BoolInitActions, BoolInspectionActions, ConstructionActions, IntInitActions,
 			IntInspectionActions, IntPropagationActions, IntSimplificationActions, ReasoningEngine,
-			Trailed, TrailingActions,
+			TrailAccessActions, Trailed, TrailingActions,
 		},
 		constraints::{
 			BoolModelActions, Constraint, IntModelActions, Propagator, SimplificationStatus,

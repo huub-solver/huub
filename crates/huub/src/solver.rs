@@ -43,8 +43,8 @@ use crate::{
 	Clause, Goal, IntVal, TerminationSignal,
 	actions::{
 		BrancherInitActions, ConstructionActions, DecisionActions, IntDecisionActions,
-		IntInspectionActions, PostingActions, ReasoningContext, ReasoningEngine, Trailed,
-		TrailingActions,
+		IntInspectionActions, PostingActions, ReasoningContext, ReasoningEngine,
+		TrailAccessActions, Trailed, TrailingActions,
 	},
 	constraints::{BoxedPropagator, Conflict},
 	helpers::bytes::Bytes,
@@ -847,12 +847,14 @@ impl<Sat> ReasoningContext for Solver<Sat> {
 	type Conflict = <Engine as ReasoningEngine>::Conflict;
 }
 
+impl<Sat> TrailAccessActions for Solver<Sat> {
+	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
+		self.engine.borrow().state.trailed(i)
+	}
+}
+
 impl<Sat> TrailingActions for Solver<Sat> {
 	fn set_trailed<T: Bytes>(&mut self, i: Trailed<T>, v: T) -> T {
 		self.engine.borrow_mut().state.set_trailed(i, v)
-	}
-
-	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
-		self.engine.borrow().state.trailed(i)
 	}
 }

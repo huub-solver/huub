@@ -13,7 +13,7 @@ use crate::{
 	actions::{
 		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions,
 		IntSimplificationActions, PostingActions, ReasoningContext, ReasoningEngine,
-		SimplificationActions, Trailed, TrailingActions,
+		SimplificationActions, TrailAccessActions, Trailed, TrailingActions,
 	},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,

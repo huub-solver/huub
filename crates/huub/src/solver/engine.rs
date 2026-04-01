@@ -33,7 +33,10 @@ use tracing::{debug, trace, warn};
 
 use crate::{
 	Clause, IntVal,
-	actions::{BoolInspectionActions, ReasoningContext, ReasoningEngine, Trailed, TrailingActions},
+	actions::{
+		BoolInspectionActions, ReasoningContext, ReasoningEngine, TrailAccessActions, Trailed,
+		TrailingActions,
+	},
 	constraints::{BoxedPropagator, Conflict, DeferredReason, Reason},
 	helpers::bytes::Bytes,
 	solver::{
@@ -997,13 +1000,15 @@ impl ReasoningContext for State {
 	type Conflict = <Engine as ReasoningEngine>::Conflict;
 }
 
+impl TrailAccessActions for State {
+	fn trailed<T: Bytes>(&self, x: Trailed<T>) -> T {
+		self.trail.trailed(x)
+	}
+}
+
 impl TrailingActions for State {
 	fn set_trailed<T: Bytes>(&mut self, x: Trailed<T>, v: T) -> T {
 		self.trail.set_trailed(x, v)
-	}
-
-	fn trailed<T: Bytes>(&self, x: Trailed<T>) -> T {
-		self.trail.trailed(x)
 	}
 }
 

@@ -18,8 +18,10 @@ pub use crate::actions::{
 	},
 };
 use crate::{
+	IntVal,
 	constraints::{BoxedPropagator, Constraint, DeferredReason, ReasonBuilder},
 	helpers::bytes::Bytes,
+	model::View,
 };
 
 /// Actions that can be performed during the construction of [`Propagator`]s and
@@ -115,6 +117,9 @@ pub trait SimplificationActions {
 	/// constraints and then returns [`SimplificationStatus::Subsumed`] to
 	/// indicate that the current constraint can be removed.
 	fn post_constraint<C: Constraint<Self::Target>>(&mut self, constraint: C);
+
+	/// Resolve the alias of the integer view.
+	fn resolve_alias(&self, view: View<IntVal>) -> View<IntVal>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -126,15 +131,18 @@ pub struct Trailed<T: Bytes> {
 	pub(crate) ty: PhantomData<T>,
 }
 
+/// Read only access to a trail.
+pub trait TrailAccessActions {
+	/// Get the current value of a [`Trailed`] value.
+	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T;
+}
+
 /// Basic actions that can be performed when the trailing infrastructure is
 /// available.
-pub trait TrailingActions {
+pub trait TrailingActions: TrailAccessActions {
 	/// Set a [`Trailed`] value, replacing the current value with the new value.
 	///
 	/// If any backtracking occurs, the value will be restored to its previous
 	/// value.
 	fn set_trailed<T: Bytes>(&mut self, i: Trailed<T>, v: T) -> T;
-
-	/// Get the current value of a [`Trailed`] value.
-	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T;
 }

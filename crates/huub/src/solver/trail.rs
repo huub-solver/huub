@@ -9,7 +9,7 @@ use pindakaas::{Lit as RawLit, Var as RawVar};
 use tracing::trace;
 
 use crate::{
-	actions::{Trailed, TrailingActions},
+	actions::{TrailAccessActions, Trailed, TrailingActions},
 	helpers::bytes::Bytes,
 };
 
@@ -323,6 +323,12 @@ impl Default for Trail {
 	}
 }
 
+impl TrailAccessActions for Trail {
+	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
+		T::from_bytes(self.int_value[i.index as usize])
+	}
+}
+
 impl TrailingActions for Trail {
 	fn set_trailed<T: Bytes>(&mut self, i: Trailed<T>, v: T) -> T {
 		let bytes = v.to_bytes();
@@ -335,10 +341,6 @@ impl TrailingActions for Trail {
 			value: old,
 		});
 		T::from_bytes(old)
-	}
-
-	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
-		T::from_bytes(self.int_value[i.index as usize])
 	}
 }
 
@@ -406,7 +408,7 @@ mod tests {
 
 	use crate::{
 		IntVal,
-		actions::TrailingActions,
+		actions::{TrailAccessActions, TrailingActions},
 		helpers::bytes::Bytes,
 		solver::trail::{Trail, TrailEvent},
 	};

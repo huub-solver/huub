@@ -127,6 +127,17 @@ pub struct Cli<Stdout, Stderr> {
 	/// Whether the vivification heuristic is enabled
 	vivification: bool,
 
+	/// Difference logic mode.
+	diff_logic: Option<u8>,
+	/// Difference logic priority for bound propagation.
+	diff_logic_prio_bounds: Option<u8>,
+	/// Difference logic priority for boolean propagation.
+	diff_logic_prio_bools: Option<u8>,
+	/// Whether to use inc_imp to check implied booleans proactively.
+	diff_logic_inc_imp: bool,
+	/// Difference logic mode for explaining boolean changes.
+	diff_logic_bool_reasons: Option<u8>,
+
 	// --- Output configuration ---
 	/// Output stream for (intermediate) solutions and statistics
 	///
@@ -193,7 +204,13 @@ where
 			.with_subsumption(self.subsumption)
 			.with_variable_elimination(self.variable_elimination)
 			.with_vivification(self.vivification);
-
+		config = config.with_diff_logic(
+			self.diff_logic,
+			self.diff_logic_prio_bounds,
+			self.diff_logic_prio_bools,
+			self.diff_logic_inc_imp,
+			self.diff_logic_bool_reasons,
+		);
 		config
 	}
 
@@ -256,6 +273,10 @@ where
 						"initTime",
 						&Instant::now().duration_since(start).as_secs_f64(),
 					),
+					("diffLogicIntVars", &meta.stats.diff_int_vars()),
+					("diffLogicBoolVars", &meta.stats.diff_bool_vars()),
+					("diffLogicGlobals", &meta.stats.diff_globals()),
+					("diffLogicImplied", &meta.stats.diff_implied()),
 				],
 			);
 		}
@@ -568,6 +589,11 @@ where
 			vsids_after_conflict: self.vsids_after_conflict,
 			vsids_after_restart: self.vsids_after_restart,
 			vsids_only: self.vsids_only,
+			diff_logic: self.diff_logic,
+			diff_logic_prio_bounds: self.diff_logic_prio_bounds,
+			diff_logic_prio_bools: self.diff_logic_prio_bools,
+			diff_logic_inc_imp: self.diff_logic_inc_imp,
+			diff_logic_bool_reasons: self.diff_logic_bool_reasons,
 			stdout: self.stdout,
 		}
 	}
@@ -600,6 +626,11 @@ where
 			vsids_after_conflict: self.vsids_after_conflict,
 			vsids_after_restart: self.vsids_after_restart,
 			vsids_only: self.vsids_only,
+			diff_logic: self.diff_logic,
+			diff_logic_prio_bounds: self.diff_logic_prio_bounds,
+			diff_logic_prio_bools: self.diff_logic_prio_bools,
+			diff_logic_inc_imp: self.diff_logic_inc_imp,
+			diff_logic_bool_reasons: self.diff_logic_bool_reasons,
 			stderr: self.stderr,
 			ansi_color: self.ansi_color,
 		}
@@ -690,6 +721,22 @@ impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
 			subsumption: args
 				.opt_value_from_fn("--subsumption", parse_bool_arg)
 				.map(|x| x.unwrap_or(false))
+				.map_err(|e| e.to_string())?,
+			diff_logic: args
+				.opt_value_from_str("--diff-logic")
+				.map_err(|e| e.to_string())?,
+			diff_logic_prio_bounds: args
+				.opt_value_from_str("--diff-logic-prio-bounds")
+				.map_err(|e| e.to_string())?,
+			diff_logic_prio_bools: args
+				.opt_value_from_str("--diff-logic-prio-bools")
+				.map_err(|e| e.to_string())?,
+			diff_logic_inc_imp: args
+				.opt_value_from_fn("--diff-logic-inc-imp", parse_bool_arg)
+				.map(|x| x.unwrap_or(true))
+				.map_err(|e| e.to_string())?,
+			diff_logic_bool_reasons: args
+				.opt_value_from_str("--diff-logic-bool-reasons")
 				.map_err(|e| e.to_string())?,
 
 			verbose,

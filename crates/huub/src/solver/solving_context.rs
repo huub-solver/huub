@@ -13,7 +13,7 @@ use crate::{
 	actions::{
 		BoolInspectionActions, BoolPropagationActions, DecisionActions, IntDecisionActions,
 		IntInspectionActions, IntPropagationActions, PropagationActions, ReasoningContext,
-		ReasoningEngine, Trailed, TrailingActions,
+		ReasoningEngine, TrailAccessActions, Trailed, TrailingActions,
 	},
 	constraints::{Conflict, DeferredReason, Reason, ReasonBuilder},
 	helpers::bytes::Bytes,
@@ -437,13 +437,15 @@ impl ReasoningContext for SolvingContext<'_> {
 	type Conflict = <Engine as ReasoningEngine>::Conflict;
 }
 
+impl TrailAccessActions for SolvingContext<'_> {
+	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
+		self.state.trailed(i)
+	}
+}
+
 impl TrailingActions for SolvingContext<'_> {
 	fn set_trailed<T: Bytes>(&mut self, i: Trailed<T>, v: T) -> T {
 		self.state.set_trailed(i, v)
-	}
-
-	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
-		self.state.trailed(i)
 	}
 }
 

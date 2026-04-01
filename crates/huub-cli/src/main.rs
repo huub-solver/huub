@@ -71,6 +71,15 @@ FLAGS
                                   (overwritten by --vsids-only)
   --vsids-only                    Only use the activity-based search heuristic provided by the SAT
                                   solver. Ignore the user-specific search heuristic.
+  --diff-logic                    Mode to use for diff logic: 0 for off, 1 (default) for global,
+  								  implied and reified difference constraints, 2 to include implied 
+  								  equalities, 3 to include not-equal constraints
+  --diff-logic-prio-bounds		  Priority for difference logic bound propagation (default: 1, range: 0-5)
+  --diff-logic-prio-bools		  Priority for difference logic boolean propagation (default: 1, range: 0-5)
+  --diff-logic-inc-imp <on|off>	  Use incremental check of implied constraints (default: on)
+  --diff-logic-bool-reasons       Mode for difference logic boolean reasons: 0 (lazy + lifted, default), 
+  								  1 (eager + lifted), 2 (eager, not lifted) 
+  
 
                       === BEHAVIOUR OPTIONS ===
   --log-file <FILE>               Output log messages from the solver to a file, instead of stderr.

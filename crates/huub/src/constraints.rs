@@ -2,6 +2,7 @@
 
 pub mod bool_array_element;
 pub mod cumulative;
+pub mod difference_logic;
 pub mod disjunctive;
 pub mod int_abs;
 pub mod int_array_element;
@@ -119,7 +120,7 @@ pub trait Constraint<E: ReasoningEngine + ?Sized>: Any + Debug + DynClone + Prop
 	/// Encode the constraint using [`Propagator`] objects or clauses for a
 	/// [`Solver`](solver::Solver) object.
 	///
-	/// This method is should place all required propagators and/or clauses in a
+	/// This method should place all required propagators and/or clauses in a
 	/// [`Solver`](solver::Solver) object to ensure the constraint will not be
 	/// violated.
 	fn to_solver(&self, context: &mut LoweringContext<'_>) -> Result<(), LoweringError>;

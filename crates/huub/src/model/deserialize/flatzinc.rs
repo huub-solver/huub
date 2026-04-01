@@ -27,12 +27,13 @@ use crate::{
 		BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions,
 		PropagationActions,
 	},
+	constraints::difference_logic::{DifferenceLogicCollection, DifferenceLogicConstraint},
 	lower::{InitConfig, LoweringError},
 	model::{
 		Model,
 		deserialize::{AnyView, Branching},
 		expressions::{BoolFormula, linear::IntLinearExp},
-		view::{View, boolean::BoolView},
+		view::{View, boolean::BoolView, integer::IntView},
 	},
 	solver::{
 		self, Solver,
@@ -111,6 +112,14 @@ pub struct FlatZincStatistics {
 	extracted_views: u32,
 	/// Number of variables removed by unification
 	vars_unified: u32,
+	/// Number of integer variables involved in global difference logic
+	diff_logic_int_vars: usize,
+	/// Number of boolean variables involved in global difference logic
+	diff_logic_bool_vars: usize,
+	/// Number of globally active difference constraints
+	diff_logic_global_constraints: usize,
+	/// Number of implied difference constraints
+	diff_logic_implied_constraints: usize,
 }
 
 /// Builder for creating a model from a FlatZinc instance
@@ -178,6 +187,27 @@ impl FlatZincStatistics {
 	/// Returns the number of variables removed by unification
 	pub fn unified_variables(&self) -> u32 {
 		self.vars_unified
+	}
+
+	/// Returns the number of integer variables used by difference logic
+	pub fn diff_int_vars(&self) -> usize {
+		self.diff_logic_int_vars
+	}
+
+	/// Returns the number of boolean variables used by difference logic
+	pub fn diff_bool_vars(&self) -> usize {
+		self.diff_logic_bool_vars
+	}
+
+	/// Returns the number of globally active constraints used by difference
+	/// logic
+	pub fn diff_globals(&self) -> usize {
+		self.diff_logic_global_constraints
+	}
+
+	/// Returns the number of implied constraints used by difference logic
+	pub fn diff_implied(&self) -> usize {
+		self.diff_logic_implied_constraints
 	}
 }
 
@@ -1037,7 +1067,15 @@ where
 
 	/// Process the [`FlatZinc::constraints`] field and add [`Constraint`] items
 	/// to the [`Model`] to enforce the constraints.
-	pub(crate) fn post_constraints(&mut self) -> Result<(), FlatZincError> {
+	pub(crate) fn post_constraints(&mut self, config: &InitConfig) -> Result<(), FlatZincError> {
+		// Global propagators dealing with multiple constraints
+		let mut diff_logic = DifferenceLogicCollection::new(
+			config.diff_logic,
+			config.diff_logic_prio_bounds,
+			config.diff_logic_prio_bools,
+			config.diff_logic_inc_imp,
+			config.diff_logic_bool_reasons,
+		);
 		// Traditional relational constraints
 		for (i, c) in self.fzn.constraints.iter().enumerate() {
 			if self.processed[i] {
@@ -1708,6 +1746,22 @@ where
 							.arg_int(b)?
 							.bounding_neg(&mut self.prb)
 							.map_err(LoweringError::from)?;
+
+						if config.diff_logic > 0
+							&& !matches!(a.0, IntView::Const(_))
+							&& !matches!(b.0, IntView::Const(_))
+							&& match c.id.deref() {
+								"int_le" => {
+									diff_logic.add(DifferenceLogicConstraint::Global(a, b, 0))
+								}
+								"int_ne" => {
+									diff_logic.add(DifferenceLogicConstraint::NotEquals(a, b, 0))
+								}
+								_ => unreachable!(),
+							} {
+							continue;
+						}
+
 						let lin = self.prb.linear(a + b);
 						match c.id.deref() {
 							"int_le" => lin.le(0),
@@ -1734,9 +1788,33 @@ where
 						let b = self.arg_int(b)?;
 						let r = self.arg_bool(r)?;
 
+						if config.diff_logic > 0
+							&& !matches!(a.0, IntView::Const(_))
+							&& !matches!(b.0, IntView::Const(_))
+							&& match c.id.deref() {
+								"int_eq_imp" => diff_logic
+									.add(DifferenceLogicConstraint::ImpliedEquals(r, a, b, 0)),
+								"int_eq_reif" => diff_logic
+									.add(DifferenceLogicConstraint::ReifiedEquals(r, a, b, 0)),
+								"int_le_imp" => {
+									diff_logic.add(DifferenceLogicConstraint::Implied(r, a, b, 0))
+								}
+								"int_le_reif" => {
+									diff_logic.add(DifferenceLogicConstraint::Reified(r, a, b, 0))
+								}
+								"int_ne_imp" => diff_logic
+									.add(DifferenceLogicConstraint::ImpliedNotEquals(r, a, b, 0)),
+								"int_ne_reif" => diff_logic
+									.add(DifferenceLogicConstraint::ReifiedEquals(!r, a, b, 0)),
+								_ => unreachable!(),
+							} {
+							continue;
+						}
+
 						let lin_exp =
 							a + b.bounding_neg(&mut self.prb).map_err(LoweringError::from)?;
 						let lin = self.prb.linear(lin_exp);
+
 						let lin = match c.id.deref() {
 							"int_eq_imp" | "int_eq_reif" => lin.eq(0),
 							"int_le_imp" | "int_le_reif" => lin.le(0),
@@ -1778,6 +1856,30 @@ where
 							.map(|l| self.lit_int(l))
 							.try_collect()?;
 						let rhs = self.arg_par_int(rhs)?;
+
+						// diff logic only if there are exactly 2 coefficients
+						if config.diff_logic > 0
+							&& coeffs.len() == 2 && c.id.deref() != "int_lin_eq"
+						{
+							// Order variables (larger coeff first), create views if necessary
+							let (x, y) = if coeffs[0] > coeffs[1] {
+								(vars[0] * coeffs[0], vars[1] * -coeffs[1])
+							} else {
+								(vars[1] * coeffs[1], vars[0] * -coeffs[0])
+							};
+							if match c.id.deref() {
+								"int_lin_le" => {
+									diff_logic.add(DifferenceLogicConstraint::Global(x, y, rhs))
+								}
+								"int_lin_ne" => {
+									diff_logic.add(DifferenceLogicConstraint::NotEquals(x, y, rhs))
+								}
+								_ => unreachable!(),
+							} {
+								continue;
+							}
+						}
+
 						let mut terms = Vec::with_capacity(vars.len());
 						for (x, c) in vars.into_iter().zip(coeffs.into_iter()) {
 							terms.push(
@@ -1823,6 +1925,38 @@ where
 							.try_collect()?;
 						let rhs = self.arg_par_int(rhs)?;
 						let reified = self.arg_bool(reified)?;
+
+						// diff logic only if there are exactly 2 coefficients
+						if config.diff_logic > 0 && coeffs.len() == 2 {
+							// Order variables (larger coeff first), create views if necessary
+							let (x, y) = if coeffs[0] > coeffs[1] {
+								(vars[0] * coeffs[0], vars[1] * -coeffs[1])
+							} else {
+								(vars[1] * coeffs[1], vars[0] * -coeffs[0])
+							};
+							if match c.id.deref() {
+								"int_lin_eq_imp" => diff_logic.add(
+									DifferenceLogicConstraint::ImpliedEquals(reified, x, y, rhs),
+								),
+								"int_lin_eq_reif" => diff_logic.add(
+									DifferenceLogicConstraint::ReifiedEquals(reified, x, y, rhs),
+								),
+								"int_lin_le_imp" => diff_logic
+									.add(DifferenceLogicConstraint::Implied(reified, x, y, rhs)),
+								"int_lin_le_reif" => diff_logic
+									.add(DifferenceLogicConstraint::Reified(reified, x, y, rhs)),
+								"int_lin_ne_imp" => diff_logic.add(
+									DifferenceLogicConstraint::ImpliedNotEquals(reified, x, y, rhs),
+								),
+								"int_lin_ne_reif" => diff_logic.add(
+									DifferenceLogicConstraint::ReifiedEquals(!reified, x, y, rhs),
+								),
+								_ => unreachable!(),
+							} {
+								continue;
+							}
+						}
+
 						let mut terms = Vec::with_capacity(vars.len());
 						for (x, c) in vars.into_iter().zip(coeffs.into_iter()) {
 							terms.push(
@@ -1954,6 +2088,17 @@ where
 					);
 				}
 			}
+		}
+
+		// Add global diff logic propagator if there is anything to handle
+		if let Some(diff_logic_model) = diff_logic.process(&mut self.prb)? {
+			(
+				self.stats.diff_logic_int_vars,
+				self.stats.diff_logic_bool_vars,
+				self.stats.diff_logic_global_constraints,
+				self.stats.diff_logic_implied_constraints,
+			) = diff_logic_model.output_statistics(&self.prb);
+			self.prb.post_constraint(diff_logic_model);
 		}
 
 		Ok(())
@@ -2174,14 +2319,17 @@ where
 
 impl Model {
 	/// Create a new [`Model`] instance from a [`FlatZinc`] instance.
-	pub fn from_fzn<S>(fzn: &FlatZinc<S>) -> Result<(Self, FlatZincModelMeta<S>), FlatZincError>
+	pub fn from_fzn<S>(
+		fzn: &FlatZinc<S>,
+		config: &InitConfig,
+	) -> Result<(Self, FlatZincModelMeta<S>), FlatZincError>
 	where
 		S: Clone + Debug + Deref<Target = str> + Display + Eq + Hash + Ord,
 	{
 		let mut builder = FznModelBuilder::new(fzn);
 		builder.unify_variables()?;
 		builder.extract_views()?;
-		builder.post_constraints()?;
+		builder.post_constraints(config)?;
 		builder.ensure_output()?;
 
 		builder.finalize()
@@ -2199,7 +2347,7 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		Solver<Sat>: Default,
 		Sat: 'static,
 	{
-		let (mut prb, meta) = Model::from_fzn(fzn)?;
+		let (mut prb, meta) = Model::from_fzn(fzn, config)?;
 		let (mut slv, map) = prb.to_solver(config)?;
 		if let Some(branching) = meta.branching {
 			branching.to_solver(&mut slv, &map);

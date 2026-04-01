@@ -13,7 +13,7 @@ use crate::{
 	IntVal,
 	actions::{
 		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions, PostingActions,
-		ReasoningContext, ReasoningEngine, Trailed, TrailingActions,
+		ReasoningContext, ReasoningEngine, TrailAccessActions, Trailed, TrailingActions,
 	},
 	constraints::{
 		BoxedPropagator, Constraint, IntModelActions, IntSolverActions, Propagator,
