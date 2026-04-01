@@ -635,7 +635,7 @@ impl LoweringMapBuilder {
 					None => slv.new_bool_decision().into(),
 				};
 				self.bool_map[idx] = Some(view);
-				view
+				if lit.is_negated() { !view } else { view }
 			}
 			Const(b) => b.into(),
 			IntEq(idx, val) => {
