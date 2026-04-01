@@ -21,7 +21,7 @@ mod brancher;
 mod model;
 
 use std::{
-	fmt, i64,
+	fmt::{self, Display},
 	process::exit,
 	sync::{
 		Arc,
@@ -53,30 +53,50 @@ fn parse_time_limit(s: &str) -> Result<Duration, humantime::DurationError> {
 }
 
 #[derive(Debug, Default)]
+/// The parsed command line options for the jobshop solver.
 struct Options {
+	/// Whether to print statistics after solving.
 	statistics: bool,
+	/// Whether to instruct CaDiCaL to use eager reasons for propagation.
 	reason_eager: bool,
+	/// The time limit before stopping the solver.
 	time_limit: Option<Duration>,
+	/// The maximal domain size before switching from eager to lazy literals for
+	/// the integer decision variables.
 	int_eager_limit: usize,
+	/// Whether to enable restarting.
 	restart: bool,
+	/// The number of conflicts before starting to use VSIDS.
 	vsids_after_conflict: Option<u32>,
+	/// Whether to use VSIDS after the first restart
 	vsids_after_restart: bool,
+	/// Whether to toggle VSIDS on and off after each conflict.
 	toggle_vsids: bool,
+	/// Whether to use VSIDS only, ignoring the branching strategy.
 	vsids_only: bool,
+	/// Whether to print verbose output.
 	verbose: bool,
+	/// The chosen objective.
 	objective_type: ObjectiveType,
+	/// The branching strategy to use by the solver.
 	strategy: BranchingStrategy,
 }
 
 impl Options {
-	fn format_option<T: ToString>(&self, opt: &Option<T>) -> String {
-		opt.as_ref()
-			.map(ToString::to_string)
-			.unwrap_or_else(|| "N/A".to_string())
+	/// Formats an option value as a string, using "N/A" as the default if the
+	/// value is `None`.
+	fn display_option<'a, T: Display>(&self, opt: &'a Option<T>) -> &'a dyn Display {
+		const N_A: &str = "N/A";
+		if let Some(v) = opt {
+			let v: &dyn Display = v;
+			v
+		} else {
+			&N_A
+		}
 	}
 }
 
-impl fmt::Display for Options {
+impl Display for Options {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		writeln!(f, "  Objective type: {:?}", self.objective_type)?;
 		writeln!(f, "  Reason eager: {}", self.reason_eager)?;
@@ -84,13 +104,13 @@ impl fmt::Display for Options {
 		writeln!(
 			f,
 			"  Time limit: {}",
-			self.format_option(&self.time_limit.map(|tl| tl.as_secs_f32()))
+			self.display_option(&self.time_limit.map(|tl| tl.as_secs_f32()))
 		)?;
 		writeln!(f, "  Restart: {}", self.restart)?;
 		writeln!(
 			f,
 			"  VSIDS after conflict: {}",
-			self.format_option(&self.vsids_after_conflict)
+			self.display_option(&self.vsids_after_conflict)
 		)?;
 		writeln!(f, "  VSIDS after restart: {}", self.vsids_after_restart)?;
 		writeln!(f, "  Toggle VSIDS: {}", self.toggle_vsids)?;
@@ -122,8 +142,7 @@ impl fmt::Display for Options {
 ///   `job-least-total-work`, `job-most-total-work`, `job-fewest-operations`,
 ///   `job-most-operations`, `operation-input-order`,
 ///   `operation-longest-processing-time`, `operation-shortest-processing-time`,
-///   `least-work-remaining`, `most-work-remaining`,
-///   `fewest-operations-remaining`, or `most-operations-remaining`.
+///   `least-work`, `most-work`, `fewest-operations`, or `most-operations`.
 /// - `<data_file>`: Path to the JSP instance file (required).
 ///
 /// # errors
@@ -159,18 +178,12 @@ fn parse_args() -> Result<(Instance, Options), String> {
 		"operation-shortest-processing-time" => Ok(BranchingStrategy::Static(
 			StaticBranching::OperationShortestProcessingTime,
 		)),
-		"least-work-remaining" => Ok(BranchingStrategy::Dynamic(
-			DynamicBranching::LeastWorkRemaining,
+		"least-work" => Ok(BranchingStrategy::Dynamic(DynamicBranching::LeastWork)),
+		"most-work" => Ok(BranchingStrategy::Dynamic(DynamicBranching::MostWork)),
+		"fewest-operations" => Ok(BranchingStrategy::Dynamic(
+			DynamicBranching::FewestOperations,
 		)),
-		"most-work-remaining" => Ok(BranchingStrategy::Dynamic(
-			DynamicBranching::MostWorkRemaining,
-		)),
-		"fewest-operations-remaining" => Ok(BranchingStrategy::Dynamic(
-			DynamicBranching::FewestOperationsRemaining,
-		)),
-		"most-operations-remaining" => Ok(BranchingStrategy::Dynamic(
-			DynamicBranching::MostOperationsRemaining,
-		)),
+		"most-operations" => Ok(BranchingStrategy::Dynamic(DynamicBranching::MostOperations)),
 		_ => Err(format!("Invalid branching strategy: {s}")),
 	};
 
@@ -214,7 +227,7 @@ fn main() {
 	let JobShopModel {
 		mut model,
 		start_time,
-		objective_variable,
+		objective: objective_variable,
 	} = JobShopModel::new(&instance, options.objective_type);
 
 	println!(
@@ -237,7 +250,7 @@ fn main() {
 
 	options
 		.strategy
-		.install(&mut slv, &map, &start_time, &instance);
+		.to_solver(&mut slv, &map, &start_time, &instance);
 
 	// Set solver options from command-line flags.
 	slv.set_toggle_vsids(options.toggle_vsids);
@@ -257,9 +270,8 @@ fn main() {
 	let time_limit = options.time_limit;
 	slv.set_terminate_callback(Some(move || {
 		if interrupted.load(Ordering::SeqCst)
-			|| time_limit.map_or(false, |deadline| {
-				Instant::now().duration_since(start) >= deadline
-			}) {
+			|| time_limit.is_some_and(|deadline| Instant::now().duration_since(start) >= deadline)
+		{
 			TerminationSignal::Terminate
 		} else {
 			TerminationSignal::Continue
@@ -297,7 +309,9 @@ fn main() {
 	if options.statistics {
 		println!("Solving statistics:");
 		println!("  Status: {status:?}");
-		println!("  Objective value: {}", last_obj.unwrap_or(i64::MAX));
+		if let Some(obj) = last_obj {
+			println!("  Objective value: {obj}");
+		}
 		println!("  User decisions: {}", stats.user_decisions());
 		println!("  Oracle decisions: {}", stats.sat_decisions());
 		println!("  Propagations: {}", stats.cp_propagations());

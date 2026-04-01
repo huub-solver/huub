@@ -15,11 +15,13 @@ use huub::{
 
 use crate::model::{Instance, Job, Operation};
 
+/// Branching strategy descriptions of branching strategies for jobshop that can
+/// be implemented using the Huub standard [`Brancher`] implementations.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub(crate) enum StaticBranching {
-	#[default]
 	/// Select jobs in their input order and schedule all operations of a job
 	/// before moving to the next job.
+	#[default]
 	JobInputOrder,
 	/// Select jobs with the least total processing time first and schedule all
 	/// operations of a job before moving to the next job.
@@ -42,27 +44,33 @@ pub(crate) enum StaticBranching {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// Branching strategies for [`DynamicBranching`], a specialized [`Brancher`]
+/// implementation for the job shop scheduling problem.
 pub(crate) enum DynamicBranching {
 	#[default]
 	/// Select the first available operation of the job with the least total
 	/// processing time remaining across all jobs.
-	LeastWorkRemaining,
+	LeastWork,
 	/// Select the first available operation of the job with the most total
 	/// processing time remaining across all jobs.
-	MostWorkRemaining,
+	MostWork,
 	/// Select the first available operation of the job with the least number of
 	/// operations remaining across all jobs.
-	FewestOperationsRemaining,
+	FewestOperations,
 	/// Select the first available operation of the job with the most number of
 	/// operations remaining across all jobs.
-	MostOperationsRemaining,
+	MostOperations,
 }
 
 /// Branching strategies for variable selection in the job shop scheduling
 /// problem.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum BranchingStrategy {
+	/// A static branching strategy using the brancher implementations provided
+	/// in Huub.
 	Static(StaticBranching),
+	/// A (custom) dynamic branching strategy specifically for the jobshop
+	/// scheduling problem.
 	Dynamic(DynamicBranching),
 }
 
@@ -73,7 +81,8 @@ impl Default for BranchingStrategy {
 }
 
 impl BranchingStrategy {
-	pub(crate) fn install(
+	/// Adds a brancher for the [`BranchingStrategy`] to the solver.
+	pub(crate) fn to_solver(
 		self,
 		solver: &mut Solver,
 		map: &LoweringMap,
@@ -110,10 +119,8 @@ fn create_static_branching(
 	match strategy {
 		StaticBranching::JobInputOrder | StaticBranching::OperationInputOrder => {
 			// Order jobs or operations by their original order in the input.
-			for job_idx in 0..instance.n {
-				for &op in &start_time[job_idx] {
-					vars.push(op);
-				}
+			for &op in start_time.iter().flatten() {
+				vars.push(op);
 			}
 		}
 		StaticBranching::JobLeastTotalWork | StaticBranching::JobMostTotalWork => {
@@ -189,6 +196,8 @@ fn create_static_branching(
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// A dynamic branching strategy that selects variables to branch on based on
+/// the given [`DynamicBranching`] strategy.
 struct DynamicBrancher {
 	/// The dynamic branching strategy to use.
 	strategy: DynamicBranching,
@@ -201,6 +210,8 @@ struct DynamicBrancher {
 }
 
 impl DynamicBrancher {
+	/// Adds a new [`DynamicBrancher`] with the given strategy and start time
+	/// variables within the solver.
 	fn new_in(
 		solver: &mut impl BrancherInitActions,
 		strategy: DynamicBranching,
@@ -256,11 +267,10 @@ where
 			let (lb, ub) = var.bounds(ctx);
 			if lb == ub {
 				match self.strategy {
-					DynamicBranching::FewestOperationsRemaining
-					| DynamicBranching::MostOperationsRemaining => {
+					DynamicBranching::FewestOperations | DynamicBranching::MostOperations => {
 						job_scores[operation.job_idx] += 1;
 					}
-					DynamicBranching::LeastWorkRemaining | DynamicBranching::MostWorkRemaining => {
+					DynamicBranching::LeastWork | DynamicBranching::MostWork => {
 						job_scores[operation.job_idx] += operation.processing_time;
 					}
 				}
@@ -271,7 +281,7 @@ where
 				self.operations[i] = unfixed_var;
 				first_unfixed += 1;
 			} else if first_unfixed_op[operation.job_idx]
-				.map_or(true, |(incumbent_idx, _)| operation.op_idx < incumbent_idx)
+				.is_none_or(|(incumbent_idx, _)| operation.op_idx < incumbent_idx)
 			{
 				first_unfixed_op[operation.job_idx] =
 					Some((operation.op_idx, self.operations[i].1));
@@ -283,9 +293,10 @@ where
 			.enumerate()
 			.filter(|(job_idx, _)| first_unfixed_op[*job_idx].is_some())
 			.max_by(|(_, score_a), (_, score_b)| match self.strategy {
-				DynamicBranching::LeastWorkRemaining
-				| DynamicBranching::FewestOperationsRemaining => score_b.cmp(score_a),
-				DynamicBranching::MostWorkRemaining | DynamicBranching::MostOperationsRemaining => {
+				DynamicBranching::LeastWork | DynamicBranching::FewestOperations => {
+					score_b.cmp(score_a)
+				}
+				DynamicBranching::MostWork | DynamicBranching::MostOperations => {
 					score_a.cmp(score_b)
 				}
 			});
