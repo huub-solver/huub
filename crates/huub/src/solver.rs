@@ -128,9 +128,8 @@ pub struct Solver<Sat = Cadical> {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-/// Structure holding the options using to configure the solver during its
-/// initialization.
-pub(crate) struct SolverConfiguration {
+/// Structure holding the options used to configure the solver during search.
+pub struct SolverConfiguration {
 	/// Switch between the activity-based search heuristic and the user-specific
 	/// search heuristic after each restart.
 	///
@@ -150,6 +149,30 @@ pub(crate) struct SolverConfiguration {
 	/// Only use the activity-based search heuristic provided by the SAT solver.
 	/// Ignore the user-specific search heuristic.
 	vsids_only: bool,
+}
+
+impl SolverConfiguration {
+	/// Get whether the solver should toggle between VSIDS and the user-defined
+	/// search heuristic after each restart.
+	pub fn toggle_vsids(&self) -> bool {
+		self.toggle_vsids
+	}
+
+	/// Get the number of conflicts after which the solver should switch to
+	/// VSIDS, if any.
+	pub fn vsids_after_conflict(&self) -> Option<u32> {
+		self.vsids_after_conflict
+	}
+
+	/// Get whether the solver should switch to VSIDS after each restart.
+	pub fn vsids_after_restart(&self) -> bool {
+		self.vsids_after_restart
+	}
+
+	/// Get whether the solver should use VSIDS only.
+	pub fn vsids_only(&self) -> bool {
+		self.vsids_only
+	}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

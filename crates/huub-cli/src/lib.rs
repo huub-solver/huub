@@ -21,36 +21,34 @@ macro_rules! outputln {
 	};
 }
 
+mod cli;
 mod interned_str;
 mod trace;
 
 use std::{
 	fmt::{self, Debug, Display},
-	fs::File,
-	io::{self, BufReader},
+	io,
 	num::NonZeroI32,
-	path::PathBuf,
 	sync::{
 		Arc, Mutex,
 		atomic::{AtomicBool, Ordering},
 	},
-	time::{Duration, Instant},
+	time::Instant,
 };
 
 use flatzinc_serde::{FlatZinc, Literal};
 use huub::{
 	Goal, TerminationSignal,
 	actions::IntDecisionActions,
-	lower::{InitConfig, LoweringError},
+	lower::LoweringError,
 	model::deserialize::flatzinc::FlatZincError,
 	solver::{AnyView, IntLitMeaning, Solution, Solver, Status, Value},
 };
 use mimalloc::MiMalloc;
-use pico_args::Arguments;
 use rustc_hash::FxHashMap;
 use tracing::{subscriber::set_default, warn};
-use tracing_subscriber::fmt::MakeWriter;
 
+pub use crate::cli::Cli;
 use crate::{interned_str::InternedStr, trace::LitName};
 
 /// Status message to output when it is proven that no more/better solutions can
@@ -68,76 +66,6 @@ const FZN_UNSATISFIABLE: &str = "=====UNSATISFIABLE=====";
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-/// FlatZinc command line interface for the Huub solver
-///
-/// This interface is intended to connect Huub with MiniZinc
-#[derive(Debug)]
-pub struct Cli<Stdout, Stderr> {
-	/// Path to the FlatZinc JSON input file
-	path: PathBuf,
-	/// Output all (satisfiable) solutions
-	all_solutions: bool,
-	/// Output all optimal solutions
-	all_optimal: bool,
-	/// Output intermediate solutions
-	intermediate_solutions: bool,
-	/// Allow the solver to adjust search configuration
-	free_search: bool,
-	/// Print solving statistics
-	statistics: bool,
-	/// Solving time limit
-	time_limit: Option<Duration>,
-	/// Level of verbosity
-	verbose: u8,
-	/// Tracing targets enabled at the selected verbosity level.
-	trace_targets: Vec<String>,
-
-	// --- Initialization configuration ---
-	/// Cardinatility cutoff for eager order literals
-	int_eager_limit: Option<usize>,
-
-	// --- Search configuration ---
-	/// Whether solver is allowed to restart
-	restart: bool,
-	/// Alternate between the SAT and VSIDS heuristic after every restart
-	toggle_vsids: bool,
-	/// Switch to the VSIDS heuristic after a certain number of conflicts
-	vsids_after_conflict: Option<u32>,
-	/// Whether to switch to the VSIDS heuristic after a restart
-	vsids_after_restart: bool,
-	/// Only use the SAT VSIDS heuristic for search
-	vsids_only: bool,
-
-	// -- Preprocessing/Inprocessing configuration ---
-	/// Whether to enable the globally blocked clause elimination (conditioning)
-	conditioning: bool,
-	/// Whether to enable inprocessing during search in the SAT solver
-	inprocessing: bool,
-	/// The number of preprocessing rounds in the SAT solver
-	preprocessing: Option<usize>,
-	/// Whether to enable the failed literal probing in the SAT solver.
-	probing: bool,
-	/// Whether to enable asking for explanation clauses for all literals
-	/// propagated on the level of a conflict.
-	reason_eager: bool,
-	/// Whether to enable the global forward subsumption in the SAT solver.
-	subsumption: bool,
-	/// Whether to enable the bounded variable elimination in the SAT solver.
-	variable_elimination: bool,
-	/// Whether the vivification heuristic is enabled
-	vivification: bool,
-
-	// --- Output configuration ---
-	/// Output stream for (intermediate) solutions and statistics
-	///
-	/// Note that this stream will be parsed by MiniZinc
-	stdout: Stdout,
-	/// Output stream for other messages (errors, warnings, debug, etc.)
-	stderr: Stderr,
-	/// Whether to use ANSI color codes in the output (only for stderr)
-	ansi_color: bool,
-}
-
 /// Solution struct to display the results of the solver
 struct SolutionWrap<'a> {
 	/// FlatZinc instance
@@ -146,18 +74,6 @@ struct SolutionWrap<'a> {
 	sol: Solution<'a>,
 	/// Mapping from FlatZinc identifiers to solver views
 	var_map: &'a FxHashMap<InternedStr, AnyView>,
-}
-
-/// Parse time duration for the time limit flag
-///
-/// This function can uses [`humantime::parse_duration`], but assumes a single
-/// millisecond measurement if no unit is provided.
-fn parse_time_limit(s: &str) -> Result<Duration, humantime::DurationError> {
-	if let Ok(ms) = s.parse() {
-		Ok(Duration::from_millis(ms))
-	} else {
-		humantime::parse_duration(s)
-	}
 }
 
 /// Print a statistics block formulated for MiniZinc
@@ -169,44 +85,18 @@ fn print_statistics_block<W: io::Write>(stream: &mut W, name: &str, stats: &[(&s
 	outputln!(stream, "%%%mzn-stat-end");
 }
 
-impl<Stdout, Stderr> Cli<Stdout, Stderr>
-where
-	Stdout: io::Write,
-	Stderr: Clone + for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
-{
-	/// Distill the initialization configution, used to initialize the Huub
-	/// solver, from the given command line arguments.
-	fn init_config(&self) -> InitConfig {
-		let mut config = InitConfig::default();
-		if let Some(eager_limit) = self.int_eager_limit {
-			config = config.with_int_eager_limit(eager_limit);
-		}
-		if let Some(preprocessing) = self.preprocessing {
-			config = config.with_preprocessing(preprocessing);
-		}
-		config = config
-			.with_conditioning(self.conditioning)
-			.with_inprocessing(self.inprocessing)
-			.with_probing(self.probing)
-			.with_reason_eager(self.reason_eager)
-			.with_restart(self.free_search || self.restart)
-			.with_subsumption(self.subsumption)
-			.with_variable_elimination(self.variable_elimination)
-			.with_vivification(self.vivification);
-
-		config
-	}
-
+impl<'a> Cli<'a> {
 	/// Run the Huub solver in accordance to the given command line arguments.
 	pub fn run(&mut self) -> Result<(), String> {
-		// Enable tracing functionality
+		let (trace_writer, ansi_color) = self.trace_writer()?;
+		let trace_targets = self.trace_targets();
 		let lit_reverse_map: Arc<Mutex<FxHashMap<NonZeroI32, LitName>>> = Arc::default();
 		let int_reverse_map: Arc<Mutex<Vec<InternedStr>>> = Arc::default();
 		let subscriber = trace::create_subscriber(
 			self.verbose,
-			&self.trace_targets,
-			self.stderr.clone(),
-			self.ansi_color,
+			&trace_targets,
+			trace_writer,
+			ansi_color,
 			Arc::clone(&lit_reverse_map),
 			Arc::clone(&int_reverse_map),
 		);
@@ -215,9 +105,8 @@ where
 		let start = Instant::now();
 		let deadline = self.time_limit.map(|t| start + t);
 
-		// Parse FlatZinc JSON file
-		let rdr = BufReader::new(
-			File::open(&self.path)
+		let rdr = io::BufReader::new(
+			std::fs::File::open(&self.path)
 				.map_err(|_| format!("Unable to open file “{}”", self.path.display()))?,
 		);
 		let fzn: FlatZinc<InternedStr> = serde_json::from_reader(rdr).map_err(|_| {
@@ -227,8 +116,6 @@ where
 			)
 		})?;
 
-		// Convert FlatZinc model to internal Solver representation and resolve any
-		// errors that may have occurred during the conversion
 		let (mut slv, meta) = match Solver::from_fzn(&fzn, &self.init_config()) {
 			Err(FlatZincError::ReformulationError(
 				LoweringError::Simplification(_) | LoweringError::Lowering(_),
@@ -236,9 +123,7 @@ where
 				outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
 				return Ok(());
 			}
-			Err(err) => {
-				return Err(err.to_string());
-			}
+			Err(err) => return Err(err.to_string()),
 			Ok(x) => x,
 		};
 
@@ -260,7 +145,6 @@ where
 			);
 		}
 
-		// Create reverse map for solver variables if required
 		if self.verbose > 0 {
 			let mut lit_map = lit_reverse_map.lock().unwrap();
 			let mut int_map = int_reverse_map.lock().unwrap();
@@ -308,7 +192,6 @@ where
 			}
 		}
 
-		// Set Solver Configuration
 		if self.free_search {
 			slv.set_vsids_after_conflict(Some(1000));
 		} else {
@@ -319,7 +202,6 @@ where
 		}
 
 		let start_solve = Instant::now();
-		// Set termination conditions for solver
 		let interrupt_handling = meta.goal.is_some() && !self.intermediate_solutions;
 		let interrupted = Arc::new(AtomicBool::new(false));
 		match (interrupt_handling, deadline) {
@@ -355,7 +237,6 @@ where
 			_ => {}
 		};
 
-		// Variables that the user is interested in
 		let output_vars: Vec<_> = fzn
 			.output
 			.iter()
@@ -376,7 +257,6 @@ where
 				}
 			})
 			.collect();
-		// Run the solver!
 		let (res, stats) = match meta.goal {
 			Some(goal) => {
 				if self.all_solutions {
@@ -393,7 +273,6 @@ where
 						0
 					}
 				];
-				// TODO: Fix statistics
 				let all_opt_slv = if self.all_optimal {
 					Some(slv.clone())
 				} else {
@@ -417,7 +296,6 @@ where
 						}
 					})
 				} else {
-					// Set up Ctrl-C handler (to allow printing last solution)
 					if let Err(err) = ctrlc::set_handler(move || {
 						interrupted.store(true, Ordering::SeqCst);
 					}) {
@@ -443,8 +321,6 @@ where
 				};
 				if status == Status::Complete && self.all_optimal {
 					let mut slv = all_opt_slv.unwrap();
-					// Ensure all following solutions have the same objective value as the
-					// first optimal solution
 					let Some(obj_val) = obj_val else {
 						unreachable!()
 					};
@@ -455,12 +331,9 @@ where
 						}
 						_ => panic!("unknown optimization goal"),
 					}
-					// Ensure all following solutions are different from the first optimal
-					// solution
 					if slv.add_no_good(&output_vars, &no_good_vals).is_err() {
 						(Status::Complete, stats)
 					} else {
-						// Find remaining optimal solutions
 						let (res, stats_all) = slv.all_solutions(&output_vars, |sol| {
 							output!(
 								self.stdout,
@@ -504,7 +377,6 @@ where
 				(res, slv.search_statistics())
 			}
 		};
-		// output solving statistics
 		if self.statistics {
 			print_statistics_block(
 				&mut self.stdout,
@@ -522,205 +394,11 @@ where
 		}
 		match res {
 			Status::Satisfied => {}
-			Status::Unsatisfiable => {
-				outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
-			}
-			Status::Unknown => {
-				outputln!(self.stdout, "{}", FZN_UNKNOWN);
-			}
-			Status::Complete => {
-				outputln!(self.stdout, "{}", FZN_COMPLETE);
-			}
+			Status::Unsatisfiable => outputln!(self.stdout, "{}", FZN_UNSATISFIABLE),
+			Status::Unknown => outputln!(self.stdout, "{}", FZN_UNKNOWN),
+			Status::Complete => outputln!(self.stdout, "{}", FZN_COMPLETE),
 		}
 		Ok(())
-	}
-
-	/// Set the writer that is used for error, warning, and other logging
-	/// messages.
-	pub fn with_stderr<W>(self, stderr: W, ansi_color: bool) -> Cli<Stdout, W>
-	where
-		W: Clone + for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
-	{
-		Cli {
-			stderr,
-			ansi_color,
-			// Copy the rest of the fields
-			path: self.path,
-			all_solutions: self.all_solutions,
-			all_optimal: self.all_optimal,
-			intermediate_solutions: self.intermediate_solutions,
-			free_search: self.free_search,
-			statistics: self.statistics,
-			time_limit: self.time_limit,
-			verbose: self.verbose,
-			trace_targets: self.trace_targets,
-			int_eager_limit: self.int_eager_limit,
-			reason_eager: self.reason_eager,
-			restart: self.restart,
-			toggle_vsids: self.toggle_vsids,
-			preprocessing: self.preprocessing,
-			inprocessing: self.inprocessing,
-			vivification: self.vivification,
-			subsumption: self.subsumption,
-			variable_elimination: self.variable_elimination,
-			probing: self.probing,
-			conditioning: self.conditioning,
-			vsids_after_conflict: self.vsids_after_conflict,
-			vsids_after_restart: self.vsids_after_restart,
-			vsids_only: self.vsids_only,
-			stdout: self.stdout,
-		}
-	}
-
-	/// Set the writer that is used for the standard (solution) output.
-	pub fn with_stdout<W: io::Write>(self, stdout: W) -> Cli<W, Stderr> {
-		Cli {
-			stdout,
-			// Copy the rest of the fields
-			path: self.path,
-			all_solutions: self.all_solutions,
-			all_optimal: self.all_optimal,
-			intermediate_solutions: self.intermediate_solutions,
-			free_search: self.free_search,
-			statistics: self.statistics,
-			time_limit: self.time_limit,
-			verbose: self.verbose,
-			trace_targets: self.trace_targets,
-			int_eager_limit: self.int_eager_limit,
-			reason_eager: self.reason_eager,
-			restart: self.restart,
-			toggle_vsids: self.toggle_vsids,
-			preprocessing: self.preprocessing,
-			inprocessing: self.inprocessing,
-			vivification: self.vivification,
-			subsumption: self.subsumption,
-			variable_elimination: self.variable_elimination,
-			probing: self.probing,
-			conditioning: self.conditioning,
-			vsids_after_conflict: self.vsids_after_conflict,
-			vsids_after_restart: self.vsids_after_restart,
-			vsids_only: self.vsids_only,
-			stderr: self.stderr,
-			ansi_color: self.ansi_color,
-		}
-	}
-}
-
-impl TryFrom<Arguments> for Cli<io::Stdout, fn() -> io::Stderr> {
-	type Error = String;
-
-	fn try_from(mut args: Arguments) -> Result<Self, Self::Error> {
-		let mut verbose = 0;
-		while args.contains(["-v", "--verbose"]) {
-			verbose += 1;
-		}
-		let mut trace_targets = vec!["solver".to_owned(), "flatzinc".to_owned()];
-		let add_targets: Vec<String> = args
-			.values_from_str("--trace-target")
-			.map_err(|e| e.to_string())?;
-		trace_targets.extend(add_targets);
-		let rm_targets: Vec<String> = args
-			.values_from_str("--no-trace-target")
-			.map_err(|e| e.to_string())?;
-
-		for target in rm_targets {
-			trace_targets.retain(|value| value != &target);
-		}
-
-		let parse_bool_arg = |s: &str| match s {
-			"true" | "on" | "1" => Ok(true),
-			"false" | "off" | "0" => Ok(false),
-			_ => Err(format!(
-				"expected 'true','false','on','off','0', or '1', found '{s}'"
-			)),
-		};
-
-		let cli = Cli {
-			all_solutions: args.contains(["-a", "--all-solutions"]),
-			all_optimal: args.contains("--all-optimal"),
-			intermediate_solutions: args.contains(["-i", "--intermediate-solutions"]),
-			free_search: args.contains(["-f", "--free-search"]),
-			statistics: args.contains(["-s", "--statistics"]),
-			time_limit: args
-				.opt_value_from_fn(["-t", "--time-limit"], parse_time_limit)
-				.map_err(|e| e.to_string())?,
-
-			int_eager_limit: args
-				.opt_value_from_str("--int-eager-limit")
-				.map_err(|e| e.to_string())?,
-
-			restart: args
-				.opt_value_from_fn("--restart", parse_bool_arg)
-				.map(|x| x.unwrap_or(false))
-				.map_err(|e| e.to_string())?,
-			toggle_vsids: args.contains("--toggle-vsids"),
-			vsids_after_conflict: args
-				.opt_value_from_str("--vsids-after-conflict")
-				.map_err(|e| e.to_string())?,
-			vsids_after_restart: args.contains("--vsids-after-restart"),
-			vsids_only: args.contains("--vsids-only"),
-
-			reason_eager: args
-				.opt_value_from_fn("--reason-eager", parse_bool_arg)
-				.map(|x| x.unwrap_or(false))
-				.map_err(|e| e.to_string())?,
-			conditioning: args
-				.opt_value_from_fn("--conditioning", parse_bool_arg)
-				.map(|x| x.unwrap_or(false))
-				.map_err(|e| e.to_string())?,
-			inprocessing: args
-				.opt_value_from_fn("--inprocessing", parse_bool_arg)
-				.map(|x| x.unwrap_or(false))
-				.map_err(|e| e.to_string())?,
-			preprocessing: args
-				.opt_value_from_str("--preprocessing")
-				.map_err(|e| e.to_string())?,
-			probing: args
-				.opt_value_from_fn("--probing", parse_bool_arg)
-				.map(|x| x.unwrap_or(false))
-				.map_err(|e| e.to_string())?,
-			variable_elimination: args
-				.opt_value_from_fn("--variable-elimination", parse_bool_arg)
-				.map(|x| x.unwrap_or(false))
-				.map_err(|e| e.to_string())?,
-			vivification: args
-				.opt_value_from_fn("--vivify", parse_bool_arg)
-				.map(|x| x.unwrap_or(false)) // TODO: investigate whether this can be re-enabled
-				.map_err(|e| e.to_string())?,
-			subsumption: args
-				.opt_value_from_fn("--subsumption", parse_bool_arg)
-				.map(|x| x.unwrap_or(false))
-				.map_err(|e| e.to_string())?,
-
-			verbose,
-			trace_targets,
-			path: args
-				.free_from_os_str(|s| -> Result<PathBuf, &'static str> { Ok(s.into()) })
-				.map_err(|e| e.to_string())?,
-
-			stdout: io::stdout(),
-			#[expect(trivial_casts, reason = "doesn't compile without the case")]
-			stderr: io::stderr as fn() -> io::Stderr,
-			ansi_color: true,
-		};
-
-		let remaining = args.finish();
-		match remaining.len() {
-			0 => Ok(()),
-			1 => Err(format!(
-				"unexpected argument: '{}'",
-				remaining[0].to_string_lossy()
-			)),
-			_ => Err(format!(
-				"unexpected arguments: {}",
-				remaining
-					.into_iter()
-					.map(|s| format!("'{}'", s.to_string_lossy()))
-					.collect::<Vec<_>>()
-					.join(", ")
-			)),
-		}?;
-		Ok(cli)
 	}
 }
 
@@ -768,11 +446,4 @@ impl Display for SolutionWrap<'_> {
 		}
 		writeln!(f, "{FZN_SEPERATOR}")
 	}
-}
-
-#[cfg(test)]
-mod tests {
-	// Used by integration testing and benchmarks
-	use divan as _;
-	use expect_test as _;
 }

@@ -92,7 +92,7 @@ macro_rules! assert_unsat {
 use std::{
 	env::{consts::EXE_SUFFIX, current_exe, var_os, vars},
 	ffi::OsString,
-	io::Write,
+	iter,
 	path::{Path, PathBuf},
 	process::Command,
 };
@@ -105,15 +105,10 @@ pub(crate) use assert_search_order;
 pub(crate) use assert_unsat;
 use expect_test::ExpectFile;
 use huub_cli::Cli;
-use pico_args::Arguments;
 
 const FZN_COMPLETE: &str = "==========\n";
 const FZN_SEPERATOR: &str = "----------\n";
 const FZN_UNSATISFIABLE: &str = "=====UNSATISFIABLE=====\n";
-
-#[derive(Debug, Clone, Copy)]
-/// Output stream that immediately discards all data.
-struct DummyOutput;
 
 pub(crate) fn check_all_optimal(file: &Path, sort: bool, solns: ExpectFile) {
 	let args: &[OsString] = &["--all-optimal".into(), file.into()];
@@ -176,20 +171,12 @@ pub(crate) fn check_unsat(file: &Path) {
 
 /// Run the solver on the given instance and return the output as raw bytes.
 fn run_solver<I: Into<OsString>>(args: impl IntoIterator<Item = I>) -> Vec<u8> {
-	let args = Arguments::from_vec(args.into_iter().map(|arg| arg.into()).collect());
-	let cli: Cli<_, _> = args.try_into().unwrap();
+	let args = iter::once(OsString::from("huub")).chain(args.into_iter().map(Into::into));
+	let cli = Cli::try_parse_from(args).unwrap();
 	let mut out = Vec::new();
-	let mut cli = cli.with_stdout(&mut out).with_stderr(|| DummyOutput, false);
+	let mut cli = cli.with_stdout(&mut out);
 	cli.run()
 		.expect("unexpected error while running the solver");
+	drop(cli);
 	out
-}
-
-impl Write for DummyOutput {
-	fn flush(&mut self) -> std::io::Result<()> {
-		Ok(())
-	}
-	fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-		Ok(buf.len())
-	}
 }
