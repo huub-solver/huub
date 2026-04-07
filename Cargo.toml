@@ -1,6 +1,7 @@
 [workspace]
 
-members = ["crates/huub", "crates/huub-cli"]
+members = ["crates/huub", "crates/huub-cli", "xtask"]
+default-members = ["crates/huub", "crates/huub-cli"]
 
 resolver = "2"
 
@@ -18,6 +19,7 @@ keywords = ["sat", "lcg", "flatzinc", "minizinc", "optimization"]
 anstream = "1.0.0"
 bon = "3.9.1"
 clap = { version = "4.6.0", features = ["derive"] }
+clap_complete = "4.5.61"
 ctrlc = "3.5.2"
 divan = { package = "codspeed-divan-compat", version = "4.4.1" }
 dyn-clone = "1.0.20"

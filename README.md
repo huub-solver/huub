@@ -70,12 +70,28 @@ Huub is inspired by the following LCG solvers, among others.
 
 ## Development
 
-When working on the integration of Huub with MiniZinc, you would likely want to compile a MiniZinc instance and run it using a current build of `huub`.
+For local MiniZinc debugging, you can assemble a staging deployment tree under `target/staging` with the current debug and release binaries, the MiniZinc library, generated solver configurations (`huub.msc` and `huub-dev.msc`), and generated completions using the following commands.
+
+```sh
+cargo xtask stage
+```
+
+This creates symlinks `target/staging/bin/huub` and `target/staging/bin/huub-dev`, pointing at the current release and debug builds (Don't forget to trigger `cargo build` or `cargo build --release` before running!), and the associated MiniZinc solver configurations in `huub.msc` and `huub-dev.msc` in `target/staging/share/minizinc/solvers`.
+The `huub-dev.msc` solver entry uses the `Huub (dev)` name and the `solutions.huub-dev` identifier so it is easy to distinguish from a release build.
+Adding the `target/staging/share/minizinc/solvers` to the [`MZN_SOLVER_PATH`](https://docs.minizinc.dev/en/stable/fzn-spec.html#solver-configuration-files), will allow you to use the two solver configuration as follows.
+
+```sh
+minizinc --solver huub [ARGS...]
+# or
+minizinc --solver huub-dev [ARGS...]
+```
+ 
+Alternatively, you can compile a MiniZinc instance and run it using a current build of `huub`.
 This process can be split into two steps.
 First, the required `.fzn.json` and `.ozn` files can be produced using the following command.
 
 ```sh
-minizinc --solver share/minizinc/solvers/huub.msc --compile [OTHER FLAGS AND INSTANCE FILES]
+minizinc --solver huub --compile [OTHER FLAGS AND INSTANCE FILES]
 ```
 
 Then, you can run the current version of `huub` using `cargo` and pipe the result back into MiniZinc to evaluate the output using the following command.
@@ -84,7 +100,7 @@ Then, you can run the current version of `huub` using `cargo` and pipe the resul
 cargo run [BUILD FLAGS] -- [HUUB FLAGS AND FZNJSON FILE] | minizinc --ozn-file [OZN FILE]
 ```
 
-Note that if you are intending to use a debugger on `huub`, then you would find the latest build in `./target/debug` or `./target/release-with-debug` (created using `cargo build` or `cargo build --profile release-with-debug`) to give to the debugger in combination with the `[HUUB FLAGS AND FZNJSON FILE]`.
+If you want to attach a debugger directly, then you can still point it at the latest build in `./target/debug` or `./target/release-with-debug` (created using `cargo build` or `cargo build --profile release-with-debug`) in combination with the `[HUUB FLAGS AND FZNJSON FILE]`.
 For example, the following command can be used to run `huub` with the `lldb` debugger.
 
 ```sh

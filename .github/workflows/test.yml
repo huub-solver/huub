@@ -62,4 +62,4 @@ jobs:
       - name: Run clippy (no extra features)
         run: cargo clippy -p huub --tests -- -D warnings
       - name: Run clippy
-        run: cargo clippy --tests -- -D warnings
+        run: cargo clippy --all --tests -- -D warnings

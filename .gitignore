@@ -8,3 +8,9 @@ target/
 
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
+
+# Generated program data in `/share/`
+/share/*
+!/share/minizinc
+/share/minizinc/*
+!/share/minizinc/huub
