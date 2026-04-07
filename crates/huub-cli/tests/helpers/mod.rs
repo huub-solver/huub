@@ -1,16 +1,12 @@
-#![allow(
-	dead_code,
-	reason = "module is shared between benchmarks and integration tests"
-)]
-#![allow(
+//! Shared helpers for the CLI integration tests and benchmarks.
+
+#![expect(
 	unused_imports,
 	reason = "module is shared between benchmarks and integration tests"
 )]
-#![allow(
-	unused_macros,
-	reason = "module is shared between benchmarks and integration tests"
-)]
 
+/// Define an integration test that checks every optimal solution emitted by the
+/// solver.
 macro_rules! assert_all_optimal {
 	($file:ident) => {
 		#[test]
@@ -24,6 +20,7 @@ macro_rules! assert_all_optimal {
 	};
 }
 
+/// Define an integration test that checks every solution emitted by the solver.
 macro_rules! assert_all_solutions {
 	($file:ident) => {
 		#[test]
@@ -37,6 +34,8 @@ macro_rules! assert_all_solutions {
 	};
 }
 
+/// Define an integration test that checks only the first solution emitted by
+/// the solver.
 macro_rules! assert_first_solution {
 	($file:ident) => {
 		#[test]
@@ -51,6 +50,8 @@ macro_rules! assert_first_solution {
 	};
 }
 
+/// Define an integration test that checks the final optimal solution emitted by
+/// the solver.
 macro_rules! assert_optimal {
 	($file:ident) => {
 		#[test]
@@ -64,6 +65,7 @@ macro_rules! assert_optimal {
 	};
 }
 
+/// Define an integration test that checks the solver's solution order exactly.
 macro_rules! assert_search_order {
 	($file:ident) => {
 		#[test]
@@ -77,6 +79,7 @@ macro_rules! assert_search_order {
 	};
 }
 
+/// Define an integration test that checks an instance is unsatisfiable.
 macro_rules! assert_unsat {
 	($file:ident) => {
 		#[test]
@@ -106,10 +109,17 @@ pub(crate) use assert_unsat;
 use expect_test::ExpectFile;
 use huub_cli::Cli;
 
+/// The FlatZinc marker that terminates a complete search.
 const FZN_COMPLETE: &str = "==========\n";
+
+/// The FlatZinc marker that separates consecutive solutions.
 const FZN_SEPERATOR: &str = "----------\n";
+
+/// The FlatZinc marker that reports an unsatisfiable instance.
 const FZN_UNSATISFIABLE: &str = "=====UNSATISFIABLE=====\n";
 
+/// Run the solver in all-optimal mode and compare the emitted solutions against
+/// an expectation.
 pub(crate) fn check_all_optimal(file: &Path, sort: bool, solns: ExpectFile) {
 	let args: &[OsString] = &["--all-optimal".into(), file.into()];
 	let output = run_solver(args);
@@ -125,6 +135,8 @@ pub(crate) fn check_all_optimal(file: &Path, sort: bool, solns: ExpectFile) {
 	solns.assert_eq(&stdout);
 }
 
+/// Run the solver in all-solutions mode and compare the emitted solutions
+/// against an expectation.
 pub(crate) fn check_all_solutions(file: &Path, sort: bool, solns: ExpectFile) {
 	let args: &[OsString] = &["--all-solutions".into(), file.into()];
 	let output = run_solver(args);
@@ -140,6 +152,8 @@ pub(crate) fn check_all_solutions(file: &Path, sort: bool, solns: ExpectFile) {
 	solns.assert_eq(&stdout);
 }
 
+/// Run the solver once and compare the final reported solution against an
+/// expectation.
 pub(crate) fn check_final(file: &Path, expect_optimal: bool, expect_sol: ExpectFile) {
 	let output = run_solver([file]);
 	let stdout = String::from_utf8(output).unwrap();
@@ -159,6 +173,8 @@ pub(crate) fn check_final(file: &Path, expect_optimal: bool, expect_sol: ExpectF
 	expect_sol.assert_eq(slice);
 }
 
+/// Run the solver once and assert that it reports the instance as
+/// unsatisfiable.
 pub(crate) fn check_unsat(file: &Path) {
 	let output = run_solver([file]);
 	let stdout = String::from_utf8(output).unwrap();

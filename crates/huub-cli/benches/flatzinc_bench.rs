@@ -8,6 +8,12 @@
 	reason = "only dependencies for benchmarking are used in this file"
 )]
 
+/// Shared benchmark assertions imported from the CLI test helpers.
+#[allow(
+	dead_code,
+	unused_macros,
+	reason = "shared helper module includes integration-test-only items"
+)]
 #[path = "../tests/helpers/mod.rs"]
 mod helpers;
 
@@ -17,6 +23,8 @@ use expect_test::expect_file;
 
 use crate::helpers::check_final;
 
+/// Optimization benchmark instances that should produce a (generally) stable
+/// optimum.
 const OPTIMIZATION_INSTANCES: &[&str] = &[
 	"ccmcp_3_20_0",
 	"rcpsp_01",
@@ -37,6 +45,8 @@ const OPTIMIZATION_INSTANCES: &[&str] = &[
 	"svrp_s4_v2_c3",
 ];
 
+/// Satisfaction benchmark instances that should produce a (generally) stable
+/// solution.
 const SATISFACTION_INSTANCES: &[&str] = &[
 	"amaze3_2012_03_19",
 	"steiner_t3_k4_N8",
