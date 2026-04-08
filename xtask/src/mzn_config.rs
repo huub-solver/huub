@@ -61,11 +61,13 @@ fn default_config_path() -> PathBuf {
 
 /// Parse the Clap default value into the corresponding JSON representation.
 fn default_value_or(arg: &Arg, fallback: Value) -> Value {
+	if arg.is_hide_default_value_set() {
+		return fallback;
+	}
 	let Some(def) = arg
 		.get_default_values()
 		.first()
 		.and_then(|value| value.to_str())
-		.map(ToOwned::to_owned)
 	else {
 		return fallback;
 	};
@@ -75,7 +77,7 @@ fn default_value_or(arg: &Arg, fallback: Value) -> Value {
 	if let Ok(x) = def.parse::<i64>() {
 		return Value::Number(x.into());
 	}
-	Value::String(def)
+	Value::String(def.to_owned())
 }
 
 /// Convert a Clap argument into a MiniZinc extra flag entry.
@@ -96,11 +98,6 @@ fn extra_flag(arg: &Arg) -> ExtraFlag {
 
 /// Infer the MiniZinc type and default value for a Clap flag.
 fn flag_type(arg: &Arg) -> (String, Value) {
-	// Manual overrides
-	if let Some("vsids-after-conflict") = arg.get_long() {
-		return ("int".to_owned(), Value::String("".to_owned()));
-	}
-
 	let possible_values = arg
 		.get_possible_values()
 		.into_iter()
@@ -115,26 +112,35 @@ fn flag_type(arg: &Arg) -> (String, Value) {
 			);
 		}
 		let type_name = format!("opt:{}", possible_values.join(":"));
-		let def = default_value_or(
-			arg,
-			Value::String(possible_values.first().cloned().unwrap_or_else(String::new)),
-		);
+		let def = default_value_or(arg, Value::Null);
 		return (type_name, def);
 	}
 
 	match arg.get_action() {
-		ArgAction::SetTrue | ArgAction::SetFalse => {
-			("bool".to_owned(), default_value_or(arg, Value::Bool(false)))
-		}
+		ArgAction::SetTrue | ArgAction::SetFalse => (
+			"bool".to_owned(),
+			default_value_or(
+				arg,
+				Value::Bool(matches!(arg.get_action(), ArgAction::SetFalse)),
+			),
+		),
 		ArgAction::Set | ArgAction::Append => {
-			let def = default_value_or(arg, Value::String(String::new()));
-			let type_name = match def {
-				Value::Bool(_) => "bool",
-				Value::Number(_) => "int",
-				Value::String(_) => "string",
-				_ => unreachable!(),
+			let type_name = if let Some(def) = arg
+				.get_default_values()
+				.first()
+				.and_then(|value| value.to_str())
+			{
+				if def.parse::<bool>().is_ok() {
+					"bool"
+				} else if def.parse::<i64>().is_ok() {
+					"int"
+				} else {
+					"string"
+				}
+			} else {
+				"string"
 			};
-			(type_name.to_owned(), def)
+			(type_name.to_owned(), default_value_or(arg, Value::Null))
 		}
 		_ => unreachable!(),
 	}

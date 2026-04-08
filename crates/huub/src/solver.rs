@@ -128,51 +128,31 @@ pub struct Solver<Sat = Cadical> {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-/// Structure holding the options used to configure the solver during search.
-pub struct SolverConfiguration {
-	/// Switch between the activity-based search heuristic and the user-specific
-	/// search heuristic after each restart.
-	///
-	/// This option is ignored if [`vsids_only`] is set to `true`.
-	toggle_vsids: bool,
-	/// Switch to the activity-based search heuristic after the given number of
-	/// conflicts.
-	///
-	/// This option is ignored if [`toggle_vsids`] or [`vsids_only`] is set to
-	/// `true`.
-	vsids_after_conflict: Option<u32>,
-	/// Switch to the activity-based search heuristic after restart.
-	///
-	/// This option is ignored if [`toggle_vsids`] or [`vsids_only`] is set to
-	/// `true`.
-	vsids_after_restart: bool,
-	/// Only use the activity-based search heuristic provided by the SAT solver.
-	/// Ignore the user-specific search heuristic.
-	vsids_only: bool,
+/// The overarching search strategy used by the solver.
+pub enum SearchStrategy {
+	/// Use the user provided [`Brancher`]s until they are all exhausted, and
+	/// only then defer to the SAT solver to make search decisions.
+	#[default]
+	Branchers,
+	/// Always defer to the SAT solver to make search decisions, ignoring any
+	/// user provided [`Brancher`]s.
+	Sat,
+	/// Transition from [`SearchStrategy::Branchers`] to [`SearchStrategy::Sat`]
+	/// when the given trigger condition is met.
+	Transition(SwitchTrigger),
+	/// Interleave [`SearchStrategy::Branchers`] and [`SearchStrategy::Sat`]
+	/// search strategies, switching between them each time the trigger
+	/// condition is met.
+	Interleaved(SwitchTrigger),
 }
 
-impl SolverConfiguration {
-	/// Get whether the solver should toggle between VSIDS and the user-defined
-	/// search heuristic after each restart.
-	pub fn toggle_vsids(&self) -> bool {
-		self.toggle_vsids
-	}
-
-	/// Get the number of conflicts after which the solver should switch to
-	/// VSIDS, if any.
-	pub fn vsids_after_conflict(&self) -> Option<u32> {
-		self.vsids_after_conflict
-	}
-
-	/// Get whether the solver should switch to VSIDS after each restart.
-	pub fn vsids_after_restart(&self) -> bool {
-		self.vsids_after_restart
-	}
-
-	/// Get whether the solver should use VSIDS only.
-	pub fn vsids_only(&self) -> bool {
-		self.vsids_only
-	}
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// Trigger for switching between search strategies.
+pub enum SwitchTrigger {
+	/// Switch after the given number of conflicts have been encountered.
+	Conflicts(u64),
+	/// Switch after the given number of restarts have been encountered.
+	Restarts(u64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -683,37 +663,9 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		}
 	}
 
-	/// Set whether the solver should toggle between VSIDS and a user defined
-	/// search strategy after every restart.
-	///
-	/// Note that this setting is ignored if the solver is set to use VSIDS
-	/// only.
-	pub fn set_toggle_vsids(&mut self, enable: bool) {
-		self.engine.borrow_mut().state.set_toggle_vsids(enable);
-	}
-
-	/// Set the number of conflicts after which the solver should switch to
-	/// using VSIDS to make search decisions.
-	pub fn set_vsids_after_conflict(&mut self, conflicts: Option<u32>) {
-		self.engine
-			.borrow_mut()
-			.state
-			.set_vsids_after_conflict(conflicts);
-	}
-
-	/// Set whether the solver should switch to VSIDS after restart to make
-	/// search.
-	pub fn set_vsids_after_restart(&mut self, enable: bool) {
-		self.engine
-			.borrow_mut()
-			.state
-			.set_vsids_after_restart(enable);
-	}
-
-	/// Set whether the solver should make all search decisions based on the
-	/// VSIDS only.
-	pub fn set_vsids_only(&mut self, enable: bool) {
-		self.engine.borrow_mut().state.set_vsids_only(enable);
+	/// Set the overarching search strategy to use during solving.
+	pub fn set_search_strategy(&mut self, strategy: SearchStrategy) {
+		self.engine.borrow_mut().state.set_search_strategy(strategy);
 	}
 
 	/// Try and find a solution to the problem for which the Solver was

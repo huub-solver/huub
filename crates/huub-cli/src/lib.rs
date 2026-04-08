@@ -42,14 +42,20 @@ use huub::{
 	actions::IntDecisionActions,
 	lower::LoweringError,
 	model::deserialize::flatzinc::FlatZincError,
-	solver::{AnyView, IntLitMeaning, Solution, Solver, Status, Value},
+	solver::{
+		AnyView, IntLitMeaning, SearchStrategy, Solution, Solver, Status, SwitchTrigger, Value,
+	},
 };
 use mimalloc::MiMalloc;
 use rustc_hash::FxHashMap;
 use tracing::{subscriber::set_default, warn};
 
 pub use crate::cli::Cli;
-use crate::{interned_str::InternedStr, trace::LitName};
+use crate::{
+	cli::{CliSearchStrategy, CliSearchTrigger},
+	interned_str::InternedStr,
+	trace::LitName,
+};
 
 /// Status message to output when it is proven that no more/better solutions can
 /// be found.
@@ -192,14 +198,19 @@ impl<'a> Cli<'a> {
 			}
 		}
 
-		if self.free_search {
-			slv.set_vsids_after_conflict(Some(1000));
-		} else {
-			slv.set_vsids_only(self.vsids_only);
-			slv.set_toggle_vsids(self.toggle_vsids);
-			slv.set_vsids_after_conflict(self.vsids_after_conflict);
-			slv.set_vsids_after_restart(self.vsids_after_restart);
-		}
+		let trigger = match self.search_trigger {
+			CliSearchTrigger::Conflicts => SwitchTrigger::Conflicts,
+			CliSearchTrigger::Restarts => SwitchTrigger::Restarts,
+		};
+		let trigger = trigger(self.search_interval);
+		let strategy = match self.search_strategy {
+			_ if self.free_search => SearchStrategy::Transition(SwitchTrigger::Conflicts(1000)),
+			CliSearchStrategy::Branchers => SearchStrategy::Branchers,
+			CliSearchStrategy::Sat => SearchStrategy::Sat,
+			CliSearchStrategy::Transition => SearchStrategy::Transition(trigger),
+			CliSearchStrategy::Interleaved => SearchStrategy::Interleaved(trigger),
+		};
+		slv.set_search_strategy(strategy);
 
 		let start_solve = Instant::now();
 		let interrupt_handling = meta.goal.is_some() && !self.intermediate_solutions;

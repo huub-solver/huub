@@ -12,10 +12,10 @@ use std::{
 
 use anstream::AutoStream;
 use clap::{
-	ArgAction, ColorChoice, Parser,
+	ArgAction, ColorChoice, Parser, ValueEnum,
 	builder::{BoolishValueParser, StyledStr, styling::Styles},
 };
-use huub::{lower::InitConfig, solver::SolverConfiguration};
+use huub::lower::InitConfig;
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
 
 /// Long description for the command-line interface.
@@ -56,7 +56,10 @@ pub struct Cli<'a> {
 	/// Output all (satisfiable) solutions.
 	#[arg(short = 'a', long, help_heading = CLI_SECTION_FLATZINC_STD)]
 	pub(crate) all_solutions: bool,
-	/// Output all optimal solutions (MiniZinc compatibility alias: -a-o).
+	/// Output all optimal solutions.
+	///
+	/// For MiniZinc compatibility, this option is also available under the
+	/// (invalid short flag) alias `-a-o`.
 	#[arg(long, help_heading = CLI_SECTION_FLATZINC_STD)]
 	pub(crate) all_optimal: bool,
 	/// Output intermediate solutions.
@@ -109,22 +112,26 @@ pub struct Cli<'a> {
 	#[arg(long, value_name = "usize", default_value_t = InitConfig::default().int_eager_limit(), help_heading = CLI_SECTION_INIT)]
 	pub(crate) int_eager_limit: usize,
 
-	/// Control whether the solver may restart.
+	/// Control whether the solver may restart, overwritten by `-f`.
 	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = InitConfig::default().restart(), help_heading = CLI_SECTION_SEARCH)]
 	pub(crate) restart: bool,
-	/// Alternate between the default search heuristic and SAT VSIDS after each
-	/// restart.
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = SolverConfiguration::default().toggle_vsids(), help_heading = CLI_SECTION_SEARCH)]
-	pub(crate) toggle_vsids: bool,
-	/// Switch to SAT VSIDS after the given number of conflicts.
-	#[arg(long, value_name = "u32", help_heading = CLI_SECTION_SEARCH)]
-	pub(crate) vsids_after_conflict: Option<u32>,
-	/// Switch to SAT VSIDS after each restart.
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = SolverConfiguration::default().vsids_after_restart(), help_heading = CLI_SECTION_SEARCH)]
-	pub(crate) vsids_after_restart: bool,
-	/// Use only the SAT VSIDS heuristic for search.
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = SolverConfiguration::default().vsids_only(), help_heading = CLI_SECTION_SEARCH)]
-	pub(crate) vsids_only: bool,
+	/// Set the overarching search strategy used by the solver, overwritten by
+	/// `-f`.
+	#[arg(long, value_enum, value_name = "strategy", default_value_t = CliSearchStrategy::Branchers, help_heading = CLI_SECTION_SEARCH)]
+	pub(crate) search_strategy: CliSearchStrategy,
+	/// Set the search trigger used by the solver, required if
+	/// `--search-strategy` is “transition” or “interleaved”.
+	#[arg(long, value_enum, value_name = "trigger", default_value_t = CliSearchTrigger::Conflicts, hide_default_value = true, required_if_eq_any = [("search_strategy", "transition"), ("search_strategy", "interleaved")], help_heading = CLI_SECTION_SEARCH)]
+	pub(crate) search_trigger: CliSearchTrigger,
+	/// Set the required trigger interval (i.e. count) for search strategy
+	/// “transition” or “interleaved”.
+	///
+	/// The interval is interpreted in units of the search trigger.
+	/// For example, `--search-trigger conflicts --search-interval 100` triggers
+	/// after/every 100 conflicts, while `--search-trigger restarts
+	/// --search-interval 2` triggers after/every 2 restarts.
+	#[arg(long, default_value_t = 1, value_name = "u64", hide_default_value = true, required_if_eq_any = [("search_strategy", "transition"), ("search_strategy", "interleaved")], help_heading = CLI_SECTION_SEARCH)]
+	pub(crate) search_interval: u64,
 
 	/// Control globally blocked clause elimination (conditioning).
 	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = InitConfig::default().conditioning(), help_heading = CLI_SECTION_PROCESSING)]
@@ -169,6 +176,33 @@ pub struct Cli<'a> {
 	/// Print version information.
 	#[arg(short = 'V', long = "version", action = clap::ArgAction::Version, hide = true)]
 	pub(crate) version: Option<bool>,
+}
+
+/// Search strategy options exposed through the CLI.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum CliSearchStrategy {
+	/// Use the user provided branchers for all search decisions until they are
+	/// exhausted, and only then defer to the SAT solver to make search
+	/// decisions.
+	Branchers,
+	/// Always defer to the SAT solver to make search decisions, ignoring any
+	/// user provided branchers.
+	Sat,
+	/// Transition from “branchers” to “sat” when the given trigger condition is
+	/// met.
+	Transition,
+	/// Interleave “branchers” and “sat” search strategies, switching between
+	/// them each time the trigger condition is met.
+	Interleaved,
+}
+
+/// Trigger counters that can drive search-strategy transitions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum CliSearchTrigger {
+	/// Switch after the given number of conflicts have been encountered.
+	Conflicts,
+	/// Switch after the given number of restarts have been encountered.
+	Restarts,
 }
 
 /// Build the styled examples block shown after the generated help output.
@@ -280,10 +314,9 @@ impl<'a> Cli<'a> {
 			no_trace_target: self.no_trace_target,
 			int_eager_limit: self.int_eager_limit,
 			restart: self.restart,
-			toggle_vsids: self.toggle_vsids,
-			vsids_after_conflict: self.vsids_after_conflict,
-			vsids_after_restart: self.vsids_after_restart,
-			vsids_only: self.vsids_only,
+			search_strategy: self.search_strategy,
+			search_trigger: self.search_trigger,
+			search_interval: self.search_interval,
 			conditioning: self.conditioning,
 			inprocessing: self.inprocessing,
 			preprocessing: self.preprocessing,
@@ -341,10 +374,9 @@ impl Debug for Cli<'_> {
 			.field("no_trace_target", &self.no_trace_target)
 			.field("int_eager_limit", &self.int_eager_limit)
 			.field("restart", &self.restart)
-			.field("toggle_vsids", &self.toggle_vsids)
-			.field("vsids_after_conflict", &self.vsids_after_conflict)
-			.field("vsids_after_restart", &self.vsids_after_restart)
-			.field("vsids_only", &self.vsids_only)
+			.field("search_strategy", &self.search_strategy)
+			.field("search_trigger", &self.search_trigger)
+			.field("search_interval", &self.search_interval)
 			.field("conditioning", &self.conditioning)
 			.field("inprocessing", &self.inprocessing)
 			.field("preprocessing", &self.preprocessing)
@@ -366,7 +398,7 @@ mod tests {
 	use clap::ColorChoice;
 	use divan as _;
 	use expect_test as _;
-	use huub::{lower::InitConfig, solver::SolverConfiguration};
+	use huub::lower::InitConfig;
 
 	use crate::cli::Cli;
 
@@ -470,15 +502,6 @@ mod tests {
 			InitConfig::default().variable_elimination()
 		);
 		assert_eq!(cli.vivification, InitConfig::default().vivification());
-		assert_eq!(
-			cli.toggle_vsids,
-			SolverConfiguration::default().toggle_vsids()
-		);
-		assert_eq!(
-			cli.vsids_after_restart,
-			SolverConfiguration::default().vsids_after_restart()
-		);
-		assert_eq!(cli.vsids_only, SolverConfiguration::default().vsids_only());
 	}
 
 	#[test]

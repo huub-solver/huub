@@ -37,7 +37,7 @@ use crate::{
 	constraints::{BoxedPropagator, Conflict, DeferredReason, Reason},
 	helpers::bytes::Bytes,
 	solver::{
-		IntLitMeaning, SolverConfiguration,
+		IntLitMeaning, SearchStrategy, SwitchTrigger,
 		activation_list::{ActivationAction, ActivationActionS, ActivationList, IntEvent},
 		bool_to_int::BoolToIntMap,
 		branchers::{BoxedBrancher, Directive},
@@ -124,23 +124,22 @@ pub(crate) struct PropRef(u32);
 /// the user. It should merely be seen as the implementation of the
 /// [`ExplanationActions`] trait.
 pub struct State {
-	/// Solver configuration
-	pub(crate) config: SolverConfiguration,
+	/// Search strategy to use during solving
+	pub(crate) search_strategy: SearchStrategy,
 
 	// ---- Trailed Value Infrastructure (e.g., decision variables) ----
-	/// Storage for the integer variables and
+	/// Storage for the data of the integer decision variables.
 	pub(crate) int_vars: Vec<IntDecision>,
-	/// Mapping from boolean variables to integer variables
+	/// Mapping from boolean variables to integer variables.
 	pub(crate) bool_to_int: BoolToIntMap,
-	/// Trailed Storage
-	/// Includes lower and upper bounds for integer variables and Boolean
-	/// variable assignments
+	/// Trailed storage, including lower and upper bounds for integer variables
+	/// and Boolean variable assignments.
 	pub(crate) trail: Trail,
 	/// Literals to be propagated by the SAT solver
 	pub(crate) propagation_queue: VecDeque<LitPropagation>,
-	/// Reasons for setting values
+	/// Reasons for setting values.
 	pub(crate) reason_map: FxHashMap<RawLit, Reason<Decision<bool>>>,
-	/// Whether conflict has (already) been detected
+	/// Whether conflict has (already) been detected.
 	pub(crate) conflict: Option<Conflict<Decision<bool>>>,
 	/// Whether the solver is in a failure state.
 	///
@@ -151,23 +150,25 @@ pub struct State {
 	pub(crate) failed: bool,
 
 	// ---- Non-Trailed Infrastructure ----
-	/// Storage for clauses to be communicated to the solver
+	/// Storage for clauses to be communicated to the solver.
 	pub(crate) clauses: VecDeque<Clause<RawLit>>,
-	/// Solving statistics
+	/// Solving statistics.
 	pub(crate) statistics: EngineStatistics,
-	/// Whether VSIDS is currently enabled
-	pub(crate) vsids: bool,
+	/// Whether search decisions are currently being deferred to the SAT solver.
+	pub(crate) sat_search: bool,
+	/// Counter used to determine whether to action the [`SearchStrategy`].
+	pub(crate) search_trigger: u64,
 
 	// ---- Queuing Infrastructure ----
-	/// Advisor data storage
+	/// Advisor data storage.
 	pub(crate) advisors: Vec<AdvisorDef>,
-	/// List of propagators to advise of backtracking
+	/// List of propagators to advise of backtracking.
 	pub(crate) notify_of_backtrack: Vec<PropRef>,
-	/// Boolean variable enqueueing information
+	/// Boolean variable enqueueing information.
 	pub(crate) bool_activation: FxHashMap<RawVar, Vec<ActivationActionS>>,
-	/// Integer variable enqueueing information
+	/// Integer variable enqueueing information.
 	pub(crate) int_activation: Vec<ActivationList>,
-	/// Queue of propagators awaiting action
+	/// Queue of propagators awaiting action.
 	pub(crate) propagator_queue: PropagatorQueue,
 	/// Last literal propagated by the Engine.
 	last_propagated: Option<(RawLit, Option<(Decision<IntVal>, IntEvent)>)>,
@@ -497,7 +498,7 @@ impl PropagatorExtension for Engine {
 	}
 
 	fn decide(&mut self, slv: &mut dyn SolvingActions) -> SearchDecision {
-		if !self.state.vsids {
+		if !self.state.sat_search {
 			// Find the current position in the brancher queue, and return
 			// immediately if all branchers have been exhausted.
 			let mut current = self.state.trail.trailed(Trail::CURRENT_BRANCHER);
@@ -895,42 +896,54 @@ impl State {
 		// Update conflict statistics
 		self.statistics.conflicts += 1;
 
-		// Switch to VSIDS if the number of conflicts exceeds the threshold
-		if let Some(conflicts) = self.config.vsids_after_conflict
-			&& !self.config.vsids_only
-			&& !self.config.toggle_vsids
-			&& self.statistics.conflicts > conflicts as u64
+		// Handle conflict-based search strategies
+		if let SearchStrategy::Interleaved(SwitchTrigger::Conflicts(cfl))
+		| SearchStrategy::Transition(SwitchTrigger::Conflicts(cfl)) = self.search_strategy
 		{
-			debug_assert!(!self.vsids);
-			self.vsids = true;
-			self.config.vsids_after_conflict = None; // Only switch once
-			debug!(
-				target: "solver",
-				vsids = self.vsids,
-				conflicts = self.statistics.conflicts,
-				"enable vsids after conflict threshold"
-			);
+			self.search_trigger += 1;
+			// Change search strategy if the counted number of conflicts exceeds the
+			// threshold
+			if self.search_trigger >= cfl {
+				self.sat_search = !self.sat_search;
+				self.search_trigger = 0;
+				debug!(
+					target: "solver",
+					sat_search = self.sat_search,
+					conflicts = self.statistics.conflicts,
+					"change search strategy after reaching conflict threshold"
+				);
+				// Transition has been completed. Strategy has permanently switched to SAT.
+				if let SearchStrategy::Transition(_) = self.search_strategy {
+					self.search_strategy = SearchStrategy::Sat;
+				}
+			}
 		}
 
 		if restart {
 			// Update restart statistics
 			self.statistics.restarts += 1;
-			if self.config.toggle_vsids && !self.config.vsids_only {
-				self.vsids = !self.vsids;
-				debug!(
-					target: "solver",
-					vsids = self.vsids,
-					restart = self.statistics.restarts,
-					"toggle vsids on restart"
-				);
-			} else if self.config.vsids_after_restart {
-				self.vsids = true;
-				debug!(
-					target: "solver",
-					vsids = self.vsids,
-					restart = self.statistics.restarts,
-					"enable vsids after restart"
-				);
+
+			// Handle restart-based search strategies
+			if let SearchStrategy::Interleaved(SwitchTrigger::Restarts(rst))
+			| SearchStrategy::Transition(SwitchTrigger::Restarts(rst)) = self.search_strategy
+			{
+				self.search_trigger += 1;
+				// Change search strategy if the counted number of restarts exceeds the
+				// threshold
+				if self.search_trigger >= rst {
+					self.sat_search = !self.sat_search;
+					self.search_trigger = 0;
+					debug!(
+						target: "solver",
+						sat_search = self.sat_search,
+						restarts = self.statistics.restarts,
+						"change search strategy after reaching restart threshold"
+					);
+					// Transition has been completed. Strategy has permanently switched to SAT.
+					if let SearchStrategy::Transition(_) = self.search_strategy {
+						self.search_strategy = SearchStrategy::Sat;
+					}
+				}
 			}
 			if level == 0 {
 				// Memory cleanup (Reasons are known to no longer be relevant)
@@ -964,31 +977,11 @@ impl State {
 		}
 	}
 
-	/// Set whether the solver should toggle between VSIDS and a user defined
-	/// search strategy after every restart.
-	///
-	/// Note that this setting is ignored if the solver is set to use VSIDS
-	/// only.
-	pub(crate) fn set_toggle_vsids(&mut self, enabled: bool) {
-		self.config.toggle_vsids = enabled;
-	}
-
-	/// Set the number of conflicts after which the solver should switch to
-	/// using VSIDS to make search decisions.
-	pub(crate) fn set_vsids_after_conflict(&mut self, conflicts: Option<u32>) {
-		self.config.vsids_after_conflict = conflicts;
-	}
-
-	/// Set whether the solver should switch to using VSIDS after a restart.
-	pub(crate) fn set_vsids_after_restart(&mut self, enable: bool) {
-		self.config.vsids_after_restart = enable;
-	}
-
-	/// Set wether the solver should make all search decisions based on the
-	/// VSIDS only.
-	pub(crate) fn set_vsids_only(&mut self, enable: bool) {
-		self.config.vsids_only = enable;
-		self.vsids = enable;
+	/// Set the overarching search strategy to use during solving.
+	pub(crate) fn set_search_strategy(&mut self, strategy: SearchStrategy) {
+		self.search_strategy = strategy;
+		self.sat_search = matches!(self.search_strategy, SearchStrategy::Sat);
+		self.search_trigger = 0;
 	}
 }
 
