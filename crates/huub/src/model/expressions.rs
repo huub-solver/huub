@@ -41,10 +41,10 @@ use crate::{
 
 #[bon]
 impl Model {
-	#[builder(finish_fn = post)]
 	/// Create a constraint that enforces that the second integer decision
 	/// variable takes the absolute value of the first integer decision
 	/// variable.
+	#[builder(finish_fn = post)]
 	pub fn abs(
 		&mut self,
 		#[builder(into, start_fn)] origin: View<IntVal>,
@@ -57,9 +57,9 @@ impl Model {
 		});
 	}
 
-	#[builder(finish_fn = post)]
 	/// Create constraint that enforces that the given Boolean variable takes
 	/// the value `true` if-and-only-if an integer variable is in a given set.
+	#[builder(finish_fn = post)]
 	pub fn contains(
 		&mut self,
 		#[builder(start_fn, into)] collection: IntSet,
@@ -73,13 +73,13 @@ impl Model {
 		});
 	}
 
-	#[builder(finish_fn = post)]
 	/// Create a constraint that enforces that the given a list of integer
 	/// decision variables representing the start times of tasks, a list of
 	/// integer values representing the durations of tasks, a list of integer
 	/// values representing the resource usages of tasks, and a resource
 	/// capacity, the sum of the resource usages of all tasks running at any
 	/// time does not exceed the resource capacity.
+	#[builder(finish_fn = post)]
 	pub fn cumulative(
 		&mut self,
 		start_times: Vec<impl Into<View<IntVal>>>,
@@ -105,7 +105,6 @@ impl Model {
 		));
 	}
 
-	#[builder(finish_fn = post)]
 	/// Create a constraint that enforces that the given a list of integer
 	/// decision variables representing the start times of tasks and a list of
 	/// integer values representing the durations of tasks, the tasks do not
@@ -113,6 +112,7 @@ impl Model {
 	///
 	/// Note that this constraint is strict, meaning that tasks with a zero
 	/// duration cannot occur during another task.
+	#[builder(finish_fn = post)]
 	pub fn disjunctive(
 		&mut self,
 		start_times: Vec<View<IntVal>>,
@@ -139,10 +139,10 @@ impl Model {
 		});
 	}
 
-	#[builder(finish_fn = post)]
 	/// Create a constraint that enforces that a numerator decision integer
 	/// variable divided by a denominator integer decision variable is equal to
 	/// a result integer decision variable.
+	#[builder(finish_fn = post)]
 	pub fn div(
 		&mut self,
 		#[builder(into, start_fn)] numerator: View<IntVal>,
@@ -156,10 +156,10 @@ impl Model {
 		});
 	}
 
-	#[builder(finish_fn = post)]
 	/// Create a constraint that enforces that a result decision variable takes
 	/// the value equal the element of the given array at the given index
 	/// decision variable.
+	#[builder(finish_fn = post)]
 	pub fn element<E: ElementConstraint>(
 		&mut self,
 		#[builder(start_fn)] array: Vec<E>,
@@ -169,8 +169,8 @@ impl Model {
 		<E as ElementConstraint>::element_constraint(self, array, index, result);
 	}
 
-	#[builder(finish_fn = post)]
 	/// Create a linear equation constraint.
+	#[builder(finish_fn = post)]
 	pub fn linear(
 		&mut self,
 		#[builder(start_fn, into)] mut expr: IntLinearExp,
@@ -218,9 +218,9 @@ impl Model {
 		}
 	}
 
-	#[builder(finish_fn = post)]
 	/// Create a constraint that enforces that an integer decision variable
 	/// takes the minimum value of an array of integer decision variables.
+	#[builder(finish_fn = post)]
 	pub fn maximum(
 		&mut self,
 		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
@@ -231,9 +231,9 @@ impl Model {
 			.post();
 	}
 
-	#[builder(finish_fn = post)]
 	/// Create a constraint that enforces that an integer decision variable
 	/// takes the minimum value of an array of integer decision variables.
+	#[builder(finish_fn = post)]
 	pub fn minimum(
 		&mut self,
 		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
@@ -245,9 +245,9 @@ impl Model {
 		});
 	}
 
-	#[builder(finish_fn = post)]
 	/// Create a constraint that enforces that the product of the two integer
 	/// decision variables is equal to a third.
+	#[builder(finish_fn = post)]
 	pub fn mul(
 		&mut self,
 		#[builder(start_fn)] factor1: View<IntVal>,
@@ -271,7 +271,6 @@ impl Model {
 		}
 	}
 
-	#[builder(finish_fn = post)]
 	/// Create a constraint that enforces that given decision variables of
 	/// origin/starting positions and sizes of k-dimensional hyperrectangles,
 	/// none of the rectangles overlap.
@@ -292,6 +291,7 @@ impl Model {
 	/// Specifically, the number of objects (outer `Vec` length) must be the
 	/// same, and the number of dimensions (inner `Vec` length) must be the
 	/// same for all objects.
+	#[builder(finish_fn = post)]
 	pub fn no_overlap(
 		&mut self,
 		origins: Vec<Vec<View<IntVal>>>,
@@ -307,10 +307,10 @@ impl Model {
 		}
 	}
 
-	#[builder(finish_fn = post)]
 	/// Create a constraint that enforces that a base integer decision variable
 	/// exponentiation by an exponent integer decision variable is equal to a
 	/// result integer decision variable.
+	#[builder(finish_fn = post)]
 	pub fn pow(
 		&mut self,
 		#[builder(start_fn, into)] base: View<IntVal>,
@@ -334,9 +334,9 @@ impl Model {
 		}
 	}
 
-	#[builder(finish_fn = post)]
 	/// Create a constraint that enforces that a propositional logic formula is
 	/// true.
+	#[builder(finish_fn = post)]
 	pub fn proposition(
 		&mut self,
 		#[builder(start_fn, into)] mut formula: BoolFormula,
@@ -354,10 +354,10 @@ impl Model {
 		self.post_constraint(formula);
 	}
 
-	#[builder(finish_fn = post)]
 	/// Create a `table` constraint that enforces that given list of integer
 	/// views take their values according to one of the given lists of integer
 	/// values.
+	#[builder(finish_fn = post)]
 	pub fn table(
 		&mut self,
 		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
@@ -372,9 +372,9 @@ impl Model {
 		self.post_constraint(IntTable { vars, table });
 	}
 
-	#[builder(finish_fn = post)]
 	/// Create a constraint that enforces that all the given integer decisions
 	/// take different values.
+	#[builder(finish_fn = post)]
 	pub fn unique(
 		&mut self,
 		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
@@ -388,7 +388,6 @@ impl Model {
 		});
 	}
 
-	#[builder(finish_fn = post)]
 	/// Create a value precede (chain) constraint that enforces that the first
 	/// occurrence of each value in `values` among the decisions `vars` happens
 	/// in the order of `values`.
@@ -396,6 +395,7 @@ impl Model {
 	/// If no values are explicitly provided, then the values are assumed to be
 	/// consecutive integers starting from 1. This variant of the constraint is
 	/// sometimes referred to as a sequential precede chain constraint.
+	#[builder(finish_fn = post)]
 	pub fn value_precede(
 		&mut self,
 		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,

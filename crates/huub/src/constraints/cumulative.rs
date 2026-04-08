@@ -23,12 +23,12 @@ use crate::{
 	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// The propagation rules for the `cumulative` constraint. This enum is
 /// used to identify the type of propagation that is being applied. Values:
 ///
 /// - `ForwardShift`: Propagates the earliest start times of tasks forward.
 /// - `BackwardShift`: Propagates the latest start times of tasks backward.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum CumulativePropagationRule {
 	/// The forward shifting propagation rule.
 	ForwardShift,
@@ -36,7 +36,6 @@ enum CumulativePropagationRule {
 	BackwardShift,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A propagator for the `cumulative` constraint that uses a time-table
 /// profile to manage the scheduling of tasks. Refer to the corresponding
 /// functions for details on propagation rules and explanations.
@@ -47,6 +46,7 @@ enum CumulativePropagationRule {
 ///   cumulative propagator. Constraints, 16(3):173-194, 2011.
 /// - Gay, Steven, Renaud Hartert, and Pierre Schaus. "Simple and scalable
 ///   time-table filtering for the cumulative constraint." CP 2015.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct CumulativeTimeTable<I1, I2, I3, I4> {
 	/// Start time variables of each task.
 	start_times: Vec<I1>,
@@ -231,8 +231,8 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		minimal_relevant_tasks
 	}
 
-	#[inline]
 	/// Get the earliest completion time of the task `i`.
+	#[inline]
 	fn earliest_completion_time<C>(&self, ctx: &mut C, i: usize) -> i64
 	where
 		C: ReasoningContext + ?Sized,
@@ -242,8 +242,8 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		self.start_times[i].min(ctx) + self.durations[i].min(ctx)
 	}
 
-	#[inline]
 	/// Get the earliest start time of the task `i`.
+	#[inline]
 	fn earliest_start_time<C>(&self, ctx: &mut C, i: usize) -> i64
 	where
 		C: ReasoningContext + ?Sized,
@@ -451,8 +451,8 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		}
 	}
 
-	#[inline]
 	/// Get the latest completion time of the task `i`.
+	#[inline]
 	fn latest_completion_time<C>(&self, ctx: &mut C, i: usize) -> i64
 	where
 		C: ReasoningContext + ?Sized,
@@ -462,8 +462,8 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		self.start_times[i].max(ctx) + self.durations[i].max(ctx)
 	}
 
-	#[inline]
 	/// Get the latest start time of the task `i`.
+	#[inline]
 	fn latest_start_time<C>(&self, ctx: &mut C, i: usize) -> i64
 	where
 		C: ReasoningContext + ?Sized,
@@ -1274,8 +1274,6 @@ mod tests {
 		slv.assert_unsatisfiable();
 	}
 
-	#[test]
-	#[traced_test]
 	/// This test verifies that the cumulative propagator performs multiple
 	/// rounds of propagation to reach a fixpoint. In each round, the
 	/// propagator first updates the start times of tasks according to the
@@ -1283,6 +1281,8 @@ mod tests {
 	/// the propagator then tightens the usage bounds based on the current
 	/// profile. This ensures the time-table profile is the latest and the
 	/// propagation of usage bounds are correct.
+	#[test]
+	#[traced_test]
 	fn test_cumulative_propagate() {
 		let mut prb = Model::default();
 		// Task A: can start at 0, 1, or 2; duration 3. Latest start time: 2, earliest

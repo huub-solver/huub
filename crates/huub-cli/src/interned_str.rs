@@ -23,8 +23,8 @@ use serde::{
 static INTERNER: LazyLock<Mutex<Interner>> =
 	LazyLock::new(|| Mutex::new(Interner::with_capacity(32768)));
 
-#[derive(Debug, Clone, Copy, Ord, PartialOrd)]
 /// A representation of a string that is interned in the [`Interner`].
+#[derive(Clone, Copy, Debug, Ord, PartialOrd)]
 pub(crate) struct InternedStr {
 	/// The permanent reference to the stored string
 	inner: &'static str,

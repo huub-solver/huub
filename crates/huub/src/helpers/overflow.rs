@@ -11,9 +11,9 @@ use crate::IntVal;
 /// Type alias for a integer value that has double the bit width of [`IntVal`].
 pub(crate) type DoubleIntVal = i128;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 /// Marker type indicating that overflow is impossible, and does not need to be
 /// handled by the [`Propagator`](crate::constraints::Propagator).
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct OverflowImpossible;
 
 /// Helper trait that defines the capabilities of [`OverflowPossible`] and
@@ -40,9 +40,9 @@ pub trait OverflowMode: private::Sealed + Clone + fmt::Debug + 'static {
 		+ TryInto<IntVal>;
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 /// Marker type indicating that overflow might be possible, and should be
 /// handled by the [`Propagator`](crate::constraints::Propagator).
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct OverflowPossible;
 
 impl OverflowMode for OverflowImpossible {

@@ -60,13 +60,13 @@ use crate::{
 	},
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 /// Identifies an advisor in the [`Model`]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct AdvRef(u32);
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// Definition of how a constraint has requested to be advised at the model
 /// level.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct Advisor {
 	/// Reference to the constraint that has requested to be advised.
 	con: ConRef,
@@ -81,12 +81,12 @@ struct Advisor {
 	condition: Option<IntLitMeaning>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 /// Identifies an constraint in the [`Model`]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ConRef(u32);
 
-#[derive(Clone, Debug, Default)]
 /// A formulation of a problem instance in terms of decisions and constraints.
+#[derive(Clone, Debug, Default)]
 pub struct Model {
 	/// A base [`Cnf`] object that contains pure Boolean parts of the problem.
 	pub(crate) cnf: Cnf,
@@ -615,7 +615,7 @@ mod tests {
 		},
 	};
 
-	#[derive(Debug, Clone)]
+	#[derive(Clone, Debug)]
 	struct TestModel {
 		b: View<bool>,
 		i: View<IntVal>,

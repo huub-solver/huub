@@ -11,8 +11,8 @@ use crate::{
 	model, solver,
 };
 
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 /// Type that represents compile time constant [`true`] value.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct True;
 
 impl<Ctx> BoolInitActions<Ctx> for True

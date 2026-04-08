@@ -18,9 +18,9 @@ use crate::{
 	},
 };
 
-#[derive(Debug)]
 /// Wrapper around [`Model`] that knows the constraint being
 /// initialized.
+#[derive(Debug)]
 pub struct ModelInitContext<'a> {
 	/// Index of the constraint being initialized.
 	con: ConRef,

@@ -79,26 +79,26 @@ fn remove_existing(path: &Path) -> io::Result<()> {
 	}
 }
 
-#[cfg(unix)]
 /// Create a directory symlink on Unix platforms.
+#[cfg(unix)]
 fn symlink_dir(source: &Path, destination: &Path) -> io::Result<()> {
 	std::os::unix::fs::symlink(source, destination)
 }
 
-#[cfg(windows)]
 /// Create a directory symlink on Windows platforms.
+#[cfg(windows)]
 fn symlink_dir(source: &Path, destination: &Path) -> io::Result<()> {
 	std::os::windows::fs::symlink_dir(source, destination)
 }
 
-#[cfg(unix)]
 /// Create a file symlink on Unix platforms.
+#[cfg(unix)]
 fn symlink_file(source: &Path, destination: &Path) -> io::Result<()> {
 	std::os::unix::fs::symlink(source, destination)
 }
 
-#[cfg(windows)]
 /// Create a file symlink on Windows platforms.
+#[cfg(windows)]
 fn symlink_file(source: &Path, destination: &Path) -> io::Result<()> {
 	std::os::windows::fs::symlink_file(source, destination)
 }

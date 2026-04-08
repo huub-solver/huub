@@ -23,7 +23,6 @@ use crate::{
 	views::linear_view::LinearView,
 };
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// A view that applies a fixed additive offset to an underlying decision
 /// variable.
 ///
@@ -55,6 +54,7 @@ use crate::{
 ///
 /// See also:
 /// - [`LinearView`] for general linear transformations of integer variables.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct OffsetView<Offset, Var> {
 	/// Offset applied to the decision variable.
 	pub(crate) offset: Offset,

@@ -27,7 +27,6 @@ use crate::{
 	views::offset_view::OffsetView,
 };
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// A linear view over an decision variable: scale * x + offset
 ///
 /// LinearView wraps a decision variable or view and presents an affine
@@ -48,6 +47,7 @@ use crate::{
 /// y += 5;                 // y = 2*x + 8
 /// y *= NonZero::new(-1).unwrap(); // y = -2*x - 8
 /// ```
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct LinearView<Scale, Offset, Var> {
 	/// Scale applied to the decision variable.
 	pub(crate) scale: Scale,

@@ -24,9 +24,9 @@ use crate::{
 	solver::{activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// This propagator enforces that the product of the two integer decision
 /// variables is equal to a third, i.e.`x * y = z`.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntMulBounds<OM: OverflowMode, I1, I2, I3> {
 	/// First factor variable
 	pub(crate) factor1: I1,

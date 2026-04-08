@@ -11,8 +11,8 @@ use crate::{
 	solver::engine::{self, PropRef},
 };
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// Possible actions to be triggered by the activation list.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum ActivationAction<A, P> {
 	/// When activated, advise the propagator with the given [`PropRef`] of the
 	/// event that triggered the activation. If the adviser method returns
@@ -23,11 +23,10 @@ pub(crate) enum ActivationAction<A, P> {
 	Enqueue(P),
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// Object used to efficiently store an [`ActivationAction`].
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ActivationActionS(u32);
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
 /// A data structure that store a list of propagators to be enqueued based on
 /// different propagation conditions.
 ///
@@ -40,6 +39,7 @@ pub(crate) struct ActivationActionS(u32);
 /// index of the LowerBound condition, enqueue all propagators until the
 /// beginning of the UpperBound condition, and then continue from the beginning
 /// of the Bound condition to the end of the list.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct ActivationList {
 	/// The list of propagators that are to be enqueue based on different
 	/// propagation conditions.
@@ -58,8 +58,8 @@ pub(crate) struct ActivationList {
 	domain_idx: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Change that has occurred in the domain of an integer variable.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum IntEvent {
 	/// The variable has been fixed to a single value.
 	Fixed,
@@ -74,9 +74,9 @@ pub enum IntEvent {
 	Domain,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// The conditions of an integer variable domain change that can trigger a
 /// propagator to be enqueued.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum IntPropCond {
 	/// Condition that triggers when the variable is fixed.
 	Fixed,

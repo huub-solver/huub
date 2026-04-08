@@ -26,13 +26,13 @@ use crate::{
 	},
 };
 
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 /// Argument type for [`SolvingContext::propagate_int`] to communicate what
 /// change to make to the integer decision variable.
 ///
 /// Note that this enum is slightly different from [`IntLitMeaning`] in that it
 /// represents the the actual upper bound (less-eq), rather than
 /// [`IntLitMeaning::Less`], which has to add `1` potentially causing overflow.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum ChangeRequest {
 	/// Set the lower bound of the integer decision variable to the given value.
 	SetLowerBound(IntVal),
@@ -44,8 +44,8 @@ enum ChangeRequest {
 	RemoveValue(IntVal),
 }
 
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 /// Type used to communicate whether a change is redundant, conflicting, or new.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum ChangeType {
 	/// Change is redundant, no action needs to be taken.
 	Redundant,
@@ -239,9 +239,9 @@ impl<'a> SolvingContext<'a> {
 		}
 	}
 
-	#[inline]
 	/// Internal method used to propagate an integer variable given a literal
 	/// description to be enforced.
+	#[inline]
 	fn propagate_int(
 		&mut self,
 		iv: Decision<IntVal>,
@@ -341,13 +341,13 @@ impl<'a> SolvingContext<'a> {
 		Ok(())
 	}
 
-	#[inline]
 	/// Internal method used to propagate a Boolean literal.
 	///
 	/// ## Warning
 	///
 	/// This method assumes that the literal has not already been assigned, not
 	/// even to the same value.
+	#[inline]
 	fn propagate_lit(
 		&mut self,
 		lit: Decision<bool>,

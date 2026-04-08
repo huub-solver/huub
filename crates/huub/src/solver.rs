@@ -68,8 +68,8 @@ pub trait AssumptionChecker {
 	fn fail(&self, bv: View<bool>) -> bool;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Statistics related to the initialization of the solver
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct InitStatistics {
 	// TODO
 	// /// Number of (non-view) boolean variables present in the solver
@@ -80,8 +80,8 @@ pub struct InitStatistics {
 	propagators: usize,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// The meaning of a literal in the context of a integer decision variable `x`.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum IntLitMeaning {
 	/// Literal representing the condition `x = i`.
 	Eq(IntVal),
@@ -98,9 +98,9 @@ pub enum IntLitMeaning {
 /// Note that this checker will always return false.
 pub(crate) struct NoAssumptions;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 /// Structure capturing statistical information about the search performed by
 /// the solver instance.
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct SearchStatistics {
 	/// Number of conflicts encountered
 	pub(crate) conflicts: u64,
@@ -116,8 +116,8 @@ pub struct SearchStatistics {
 	pub(crate) user_decisions: u64,
 }
 
-#[derive(Debug)]
 /// The main solver object that is used to interact with the LCG solver.
+#[derive(Debug)]
 pub struct Solver<Sat = Cadical> {
 	/// The SAT solver that has been connected to [`Self::engine`] to perform
 	/// external propagation.
@@ -127,8 +127,8 @@ pub struct Solver<Sat = Cadical> {
 	pub(crate) engine: Rc<RefCell<Engine>>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
 /// The overarching search strategy used by the solver.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum SearchStrategy {
 	/// Use the user provided [`Brancher`]s until they are all exhausted, and
 	/// only then defer to the SAT solver to make search decisions.
@@ -146,8 +146,8 @@ pub enum SearchStrategy {
 	Interleaved(SwitchTrigger),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 /// Trigger for switching between search strategies.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SwitchTrigger {
 	/// Switch after the given number of conflicts have been encountered.
 	Conflicts(u64),
@@ -155,8 +155,8 @@ pub enum SwitchTrigger {
 	Restarts(u64),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Result of a solving attempt
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Status {
 	/// The solver has found a solution.
 	Satisfied,
@@ -378,13 +378,13 @@ impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 }
 
 impl<Sat: ExternalPropagation> Solver<Sat> {
-	#[doc(hidden)]
 	/// Method used to add a no-good clause from a solution. This clause can be
 	/// used to ensure that the same solution is not found again.
 	///
 	/// ## Warning
 	/// This method will panic if the number of variables and values do not
 	/// match.
+	#[doc(hidden)]
 	pub fn add_no_good(
 		&mut self,
 		vars: &[AnyView],

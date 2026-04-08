@@ -3,8 +3,8 @@
 pub(crate) mod boolean;
 pub(crate) mod integer;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 /// A typed handle to a decision variable in a model.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Decision<T: DecisionReference>(pub(crate) T::Ref);
 
 /// Marker trait for types that can be used as model decision references.

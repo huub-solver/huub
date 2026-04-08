@@ -19,12 +19,12 @@ use crate::{
 	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// Representation of the `disjunctive` constraint within a model.
 ///
 /// This constraint enforces that the given a list of integer decision variables
 /// representing the start times of tasks and a list of integer values
 /// representing the durations of tasks, the tasks do not overlap in time.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Disjunctive {
 	/// Inner propagator.
 	pub(crate) propagator: DisjunctivePropagator<model::View<IntVal>>,
@@ -45,7 +45,6 @@ pub struct Disjunctive {
 	pub(crate) detectable_precedence_propagation: Option<bool>,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// The propagation rules for the `disjunctive` constraint. This enum is
 /// used to identify which propagation algorithm is being applied during the
 /// propagation phase of the `DisjunctiveStrictPropagator`. Values:
@@ -55,6 +54,7 @@ pub struct Disjunctive {
 /// - `NotLast`: The not-last propagation rule in function `propagate_not_last`.
 /// - `Precedence`: The detectable precedence propagation rule in function
 ///   `propagate_detectable_precedence`.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum DisjunctivePropagationRule {
 	/// The edge finding propagation in `propagate_edge_finding`.
 	EdgeFinding,
@@ -64,7 +64,6 @@ enum DisjunctivePropagationRule {
 	Precedence,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A propagator for the `disjunctive` constraint using the Overload
 /// Checking, Edge Finding, Not-First/Not-Last, and Detectable Precedence
 /// algorithms. Refer to the corresponding functions for details on propagation
@@ -76,6 +75,7 @@ enum DisjunctivePropagationRule {
 ///   Archives of Control Sciences 18.2 (2008): 159-202.
 /// - Vilím, Petr "Computing explanations for the unary resource constraint."
 ///   CPAIOR 2005.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct DisjunctivePropagator<I> {
 	/// Start time variables of each task.
 	start_times: Vec<I>,
@@ -106,7 +106,6 @@ pub struct DisjunctivePropagator<I> {
 	tasks_sorted_by_latest_completion: Vec<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// The Omega-Theta tree is a balanced binary tree data structure used in
 /// disjunctive scheduling to efficiently maintain and update earliest
 /// completion times (ECT) for sets of tasks. Each leaf node represents a task;
@@ -130,6 +129,7 @@ pub struct DisjunctivePropagator<I> {
 ///
 /// This structure allows efficient updates and queries for ECTs and gray ECTs
 /// as tasks are added, removed, or marked gray. For details, see Vilim (2008).
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct OmegaThetaTree {
 	/// Storage of the nodes of the tree.
 	nodes: Vec<OmegaThetaTreeNode>,
@@ -144,8 +144,8 @@ struct OmegaThetaTree {
 	task_no: Vec<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A node structure for the [`OmegaThetaTree`].
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct OmegaThetaTreeNode {
 	/// Total duration of the tasks under the tree rooted at this node.
 	total_durations: i64,
@@ -160,8 +160,8 @@ struct OmegaThetaTreeNode {
 	earliest_completion_gray: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Internal structure to store trailed information about tasks.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct TaskInfo {
 	/// Earliest start time of the task.
 	earliest_start: Trailed<IntVal>,

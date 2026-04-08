@@ -113,7 +113,7 @@ use huub_cli::Cli;
 const FZN_COMPLETE: &str = "==========\n";
 
 /// The FlatZinc marker that separates consecutive solutions.
-const FZN_SEPERATOR: &str = "----------\n";
+const FZN_SEPARATOR: &str = "----------\n";
 
 /// The FlatZinc marker that reports an unsatisfiable instance.
 const FZN_UNSATISFIABLE: &str = "=====UNSATISFIABLE=====\n";
@@ -125,13 +125,13 @@ pub(crate) fn check_all_optimal(file: &Path, sort: bool, solns: ExpectFile) {
 	let output = run_solver(args);
 	let stdout = String::from_utf8(output).unwrap();
 	assert!(!stdout.is_empty(), "Solver did not produce any output");
-	let mut stdout: Vec<&str> = stdout.split(FZN_SEPERATOR).collect();
+	let mut stdout: Vec<&str> = stdout.split(FZN_SEPARATOR).collect();
 	let marker = stdout.pop().unwrap(); // complete marker
 	if sort {
 		stdout.sort();
 	}
 	stdout.push(marker);
-	let stdout = stdout.join(FZN_SEPERATOR);
+	let stdout = stdout.join(FZN_SEPARATOR);
 	solns.assert_eq(&stdout);
 }
 
@@ -142,13 +142,13 @@ pub(crate) fn check_all_solutions(file: &Path, sort: bool, solns: ExpectFile) {
 	let output = run_solver(args);
 	let stdout = String::from_utf8(output).unwrap();
 	assert!(!stdout.is_empty(), "Solver did not produce any output");
-	let mut stdout: Vec<&str> = stdout.split(FZN_SEPERATOR).collect();
+	let mut stdout: Vec<&str> = stdout.split(FZN_SEPARATOR).collect();
 	let marker = stdout.pop().unwrap(); // complete marker
 	if sort {
 		stdout.sort();
 	}
 	stdout.push(marker);
-	let stdout = stdout.join(FZN_SEPERATOR);
+	let stdout = stdout.join(FZN_SEPARATOR);
 	solns.assert_eq(&stdout);
 }
 
@@ -166,10 +166,10 @@ pub(crate) fn check_final(file: &Path, expect_optimal: bool, expect_sol: ExpectF
 		slice = &slice[..slice.len() - FZN_COMPLETE.len()];
 	}
 	assert!(
-		slice.ends_with(FZN_SEPERATOR),
-		"Solution did not end with a seperator:\n{slice}",
+		slice.ends_with(FZN_SEPARATOR),
+		"Solution did not end with a separator:\n{slice}",
 	);
-	slice = &slice[..slice.len() - FZN_SEPERATOR.len()];
+	slice = &slice[..slice.len() - FZN_SEPARATOR.len()];
 	expect_sol.assert_eq(slice);
 }
 

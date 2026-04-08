@@ -31,9 +31,9 @@ type Clause<L> = Vec<L>;
 /// documentation.
 type Conjunction<L> = Vec<L>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 /// Type of the optimization objective
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum Goal<V> {
 	/// Search for a solution that minimizes the given objective.
 	Minimize(V),

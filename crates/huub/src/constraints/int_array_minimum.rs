@@ -13,8 +13,8 @@ use crate::{
 	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds consistent propagator for the `array_minimum_int` constraint.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntArrayMinimumBounds<I1, I2> {
 	/// Set of decision variables from which the minimum must be taken
 	pub(crate) vars: Vec<I1>,

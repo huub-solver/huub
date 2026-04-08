@@ -25,11 +25,11 @@ use crate::{
 	},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Representation of the integer `unique` constraint within a model.
 ///
 /// This constraint enforces that all the given integer decisions take different
 /// values.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntUnique {
 	/// List of integer decision variables that must take different values.
 	pub(crate) prop: IntUniqueBounds<View<IntVal>>,
@@ -43,8 +43,8 @@ pub struct IntUnique {
 	pub(crate) value_propagation: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds consistent propagator for the integer `unique` constraint.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntUniqueBounds<I> {
 	/// List of integer variables that must take different values.
 	pub(crate) var: Vec<I>,
@@ -79,8 +79,8 @@ pub struct IntUniqueBounds<I> {
 	bucket: Vec<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Value consistent propagator for the integer `unique` constraint.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntUniqueValue<I> {
 	/// List of integer variables that must take different values.
 	vars: Vec<I>,
@@ -88,9 +88,9 @@ pub struct IntUniqueValue<I> {
 	action_list: Vec<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Information that is tracked for each variable for the propagation of
 /// [`IntUniqueBounds`]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct UniqueVarMeta {
 	/// Transition for the variable's position in the Hall interval tree.
 	next: usize,

@@ -9,8 +9,8 @@ pub trait DefaultView: private::Sealed + 'static {
 	type View;
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 /// A typed view over a decision variable or constant in the solver.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct View<T: DefaultView>(pub(crate) T::View);
 
 /// Sealing helpers for solver view traits.

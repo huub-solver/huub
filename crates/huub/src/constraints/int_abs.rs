@@ -19,11 +19,11 @@ use crate::{
 	},
 };
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// Representation of the `int_abs` constraint within a model.
 ///
 /// This constraint enforces that the second integer decision variable takes the
 /// absolute value of the first integer decision variable.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntAbsBounds<I1, I2, B> {
 	/// The integer decision variable whose absolute value is being taken
 	pub(crate) origin: I1,

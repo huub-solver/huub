@@ -60,8 +60,8 @@ use crate::{
 /// Status message to output when it is proven that no more/better solutions can
 /// be found.
 const FZN_COMPLETE: &str = "==========";
-/// Seperator to output between solutions.
-const FZN_SEPERATOR: &str = "----------";
+/// Separator to output between solutions.
+const FZN_SEPARATOR: &str = "----------";
 /// Status message to output when no solution is found within the time limit,
 /// but the problem is not proven to be unsatisfiable.
 const FZN_UNKNOWN: &str = "=====UNKNOWN=====";
@@ -455,6 +455,6 @@ impl Display for SolutionWrap<'_> {
 				writeln!(f, "{ident} = {};", self.var_map[ident].val(self.sol))?;
 			}
 		}
-		writeln!(f, "{FZN_SEPERATOR}")
+		writeln!(f, "{FZN_SEPARATOR}")
 	}
 }

@@ -23,11 +23,11 @@ use crate::{
 	solver::activation_list::IntPropCond,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Representation of the integer `contains` constraint within a model.
 ///
 /// This constraint enforces that the given Boolean variable takes the value
 /// `true` if-and-only-if an integer variable is in a given set.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntSetContainsReif {
 	/// The integer decision variable monitored.
 	pub(crate) var: View<IntVal>,

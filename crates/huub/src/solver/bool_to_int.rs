@@ -9,9 +9,9 @@ use crate::{
 	solver::{IntLitMeaning, decision::Decision},
 };
 
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
 /// A mapping of Boolean variables to integer variables of which they represent
 /// conditions.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct BoolToIntMap {
 	/// The mapping of eagerly created Boolean variables to the integer
 	/// variables.

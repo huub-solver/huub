@@ -76,9 +76,9 @@ pub(crate) type BoxedConstraint = Box<dyn Constraint<Model>>;
 /// by [`Engine`].
 pub(crate) type BoxedPropagator = Box<dyn Propagator<Engine>>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A `ReasonBuilder` whose result is cached so it can be used multiple times,
 /// and is only evaluated once used.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum CachedReason<B, Atom> {
 	/// A evaluated reason that can be reused
 	Cached(Result<Reason<Atom>, bool>),
@@ -88,7 +88,7 @@ pub(crate) enum CachedReason<B, Atom> {
 
 /// Conflict is an error type returned when a variable is assigned two
 /// inconsistent values.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Conflict<Atom> {
 	/// The subject of the conflict (i.e., the literal that couldn't be
 	/// propagated).
@@ -125,8 +125,8 @@ pub trait Constraint<E: ReasoningEngine + ?Sized>: Any + Debug + DynClone + Prop
 	fn to_solver(&self, context: &mut LoweringContext<'_>) -> Result<(), LoweringError>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// A note that the mentioned propagator will compute the `Reason` if requested.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct DeferredReason {
 	/// Reference to the propagator that will compute the reason.
 	pub(crate) propagator: u32,
@@ -233,8 +233,8 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 	fn propagate(&mut self, context: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A conjunction of literals that implies a change in the state
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Reason<Atom> {
 	/// A promise that a given propagator will compute a causation of the change
 	/// when given the attached data.
@@ -253,10 +253,10 @@ pub trait ReasonBuilder<Context: ReasoningContext + ?Sized> {
 	fn build_reason(self, ctx: &mut Context) -> Result<Reason<Context::Atom>, bool>;
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// Status returned by the [`Constraint::simplify`] method,
 /// indicating whether the constraint has been subsumed (such that it can be
 /// removed from the [`Model`]) or not.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum SimplificationStatus {
 	/// The constraint has been simplified as much as possible, but should be
 	/// kept in the [`Model`]. Simplification can be triggered again if any of

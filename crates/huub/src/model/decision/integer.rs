@@ -23,9 +23,9 @@ use crate::{
 	},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Wrapper type to distinguish between a variable with a domain, and an alias
 /// to another variable.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Domain<E, Alias> {
 	/// A normal variable with a domain.
 	Domain(E),
@@ -33,8 +33,8 @@ pub(crate) enum Domain<E, Alias> {
 	Alias(Alias),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// Definition of an integer decision variable in a [`Model`].
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct IntDecision {
 	/// The set of possible values that the variable can take.
 	pub(crate) domain: Domain<IntSet, View<IntVal>>,

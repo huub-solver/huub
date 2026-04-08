@@ -10,8 +10,8 @@ use std::num::NonZero;
 
 use crate::IntVal;
 
-#[inline]
 /// Integer division that rounds towards positive infinity.
+#[inline]
 pub(crate) fn div_ceil(a: IntVal, b: NonZero<IntVal>) -> IntVal {
 	let d = a / b.get();
 	let r = a % b.get();

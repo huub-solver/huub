@@ -24,7 +24,6 @@ use crate::{
 	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// The [`IntNoOverlapSweep`] propagator ensures that a set of k-dimensional
 /// hyperrectangles do not overlap. It is a sweep-based propagator that reasons
 /// about forbidden regions for each rectangle.
@@ -42,6 +41,7 @@ use crate::{
 /// forbidden in the sense that if we would put our rectangle at that place, it
 /// would guarantee that at least two rectangles are overlapping, which violates
 /// the constraint.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 // All Matrix attributes are 2-dimensional, with the first index
 // representing the object and the second representing the dimension.
 pub struct IntNoOverlapSweep<const STRICT: bool, I1, I2> {
@@ -73,11 +73,11 @@ pub struct IntNoOverlapSweep<const STRICT: bool, I1, I2> {
 	bounding_box: Region,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A region, or bounding box, in a multi-dimensional space.
 ///
 /// It is represented by a vector of tuples, where each tuple contains the lower
 /// and upper bounds for a single dimension.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct Region(Vec<(IntVal, IntVal)>);
 
 impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {

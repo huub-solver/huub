@@ -24,9 +24,9 @@ use crate::{
 	views::{LinearBoolView, LinearView, OffsetView},
 };
 
-#[derive(Debug)]
 /// The context given to [`Propagator`] implementations (during
 /// [`Propagators::post`]) when added to [`Solver`].
+#[derive(Debug)]
 pub struct InitializationContext<'a> {
 	/// State object of the solver.
 	state: &'a mut State,

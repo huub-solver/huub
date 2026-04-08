@@ -3,9 +3,9 @@
 
 use std::collections::VecDeque;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[repr(u8)]
 /// The priority levels at which propagators can be scheduled.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[repr(u8)]
 pub enum PriorityLevel {
 	/// The lowest priority level, all other priority levels are more important
 	Lowest,
@@ -26,15 +26,15 @@ pub enum PriorityLevel {
 	Immediate,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// A priority queue with for element with a given [`PriorityLevel`].
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PriorityQueue<E> {
 	/// Internal storage of the queues for each priority level.
 	storage: [VecDeque<E>; 6],
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 /// Information about a propagator in the propagation engine.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PropagatorInfo {
 	/// Whether the propagator is currently enqueued.
 	pub(crate) enqueued: bool,
@@ -42,8 +42,8 @@ pub(crate) struct PropagatorInfo {
 	pub(crate) priority: PriorityLevel,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
 /// A priority queue for propagators.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct PropagatorQueue {
 	/// Priority queue of the propagators.
 	queue: PriorityQueue<u32>,

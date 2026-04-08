@@ -17,8 +17,8 @@ use crate::{
 	solver::activation_list::ActivationActionS,
 };
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// Definition of an Boolean decision variable in a [`Model`].
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct BoolDecision {
 	/// Whether the Boolean variable has already been assigned a value, or has
 	/// been aliased to another variable.

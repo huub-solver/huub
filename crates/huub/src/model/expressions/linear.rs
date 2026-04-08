@@ -23,7 +23,6 @@ pub(crate) enum Comparator {
 	NotEqual,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Object to help with the creation of integer linear constraints.
 ///
 /// This object is generally created when [`View<IntVal>`] objects are added
@@ -31,6 +30,7 @@ pub(crate) enum Comparator {
 /// these expressions can be used to create
 /// [`IntLinear`](crate::constraints::int_linear::IntLinear) constraints and add
 /// them to the [`Model`](crate::model::Model) .
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntLinearExp {
 	/// The (linear transformation of) integer decision variables that are added
 	/// together.

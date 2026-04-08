@@ -53,13 +53,13 @@ use crate::{
 	},
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 /// Identifies an advisor in the [`State`]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct AdvRef(u32);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Definition of an [`Advisor`] giving the information about the [`View`]
 /// subscribed to and the way in which to advise the propagator.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct AdvisorDef {
 	/// Whether the advise is on a [`BoolView`] being used as an [`IntView`]
 	pub(crate) bool2int: bool,
@@ -71,8 +71,8 @@ pub(crate) struct AdvisorDef {
 	pub(crate) propagator: PropRef,
 }
 
-#[derive(Debug, Default, Clone)]
 /// A propagation engine implementing the [`Propagator`] trait.
+#[derive(Clone, Debug, Default)]
 pub struct Engine {
 	/// Storage of the propagators.
 	pub(crate) propagators: Vec<BoxedPropagator>,
@@ -82,8 +82,8 @@ pub struct Engine {
 	pub(crate) state: State,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 /// Statistical information about the execution of the propagation engine.
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub(crate) struct EngineStatistics {
 	/// Number of conflicts encountered
 	pub(crate) conflicts: u64,
@@ -99,8 +99,8 @@ pub(crate) struct EngineStatistics {
 	pub(crate) user_decisions: u64,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 /// Description of a literal propagation event in the propagation queue.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LitPropagation {
 	/// The literal that was propagated.
 	pub(crate) lit: RawLit,
@@ -111,11 +111,10 @@ pub(crate) struct LitPropagation {
 	/// This event should be used to schedule further propagators.
 	pub(crate) event: Option<(Decision<IntVal>, IntEvent)>,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 /// Identifies an propagator in a [`Solver`]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct PropRef(u32);
 
-#[derive(Clone, Debug, Default)]
 /// Internal state representation of the propagation engine disconnected from
 /// the storage of the propagators and branchers.
 ///
@@ -123,6 +122,7 @@ pub(crate) struct PropRef(u32);
 /// construct [`BoxedPropagator`], but it is not intended to be constructed by
 /// the user. It should merely be seen as the implementation of the
 /// [`ExplanationActions`] trait.
+#[derive(Clone, Debug, Default)]
 pub struct State {
 	/// Search strategy to use during solving
 	pub(crate) search_strategy: SearchStrategy,
@@ -174,9 +174,9 @@ pub struct State {
 	last_propagated: Option<(RawLit, Option<(Decision<IntVal>, IntEvent)>)>,
 
 	// ---- Debugging Helpers ----
-	#[cfg(debug_assertions)]
 	/// List of integer variables that have been notified as fixed, but should
 	/// be checked that the bounds match before propagation.
+	#[cfg(debug_assertions)]
 	pub(crate) check_int_fixed: Vec<(Decision<IntVal>, IntVal)>,
 }
 
@@ -205,9 +205,9 @@ impl AdvRef {
 }
 
 impl Engine {
-	#[cfg(debug_assertions)]
 	/// (DEBUG ONLY) Check that the reason of a propagated literal contains only
 	/// known true literals
+	#[cfg(debug_assertions)]
 	fn debug_check_reason(&mut self, lit: RawLit) {
 		use rustc_hash::FxHashSet;
 
@@ -1020,7 +1020,6 @@ mod tests {
 		},
 	};
 
-	#[test]
 	/// Regression test for losing an integer notification when a queued
 	/// propagation is also implied by another propagated literal.
 	///
@@ -1034,6 +1033,7 @@ mod tests {
 	/// together, the lower-bound advisor still has to be notified exactly once.
 	/// Before the fix, the queued event was purged and this notification was
 	/// lost.
+	#[test]
 	fn queued_integer_event_survives_sat_assignment() {
 		use std::{cell::RefCell, rc::Rc};
 

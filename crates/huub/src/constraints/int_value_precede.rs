@@ -17,8 +17,8 @@ use crate::{
 	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds propagator for the `seq_precede_chain_int` constraint.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntSeqPrecedeChainBounds<I> {
 	/// List of integer variables where first occurrences of all i>0 must be
 	/// ordered.
@@ -36,8 +36,8 @@ pub struct IntSeqPrecedeChainBounds<I> {
 	max_last: Trailed<IntVal>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Value consistent propagator for the `value_precede_chain` constraint.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntValuePrecedeChainValue<I> {
 	/// List of integers that need to occur in order
 	values: Vec<IntVal>,

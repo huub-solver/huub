@@ -41,10 +41,10 @@ enum DirectEntry<'a> {
 	Vacant(VacantEntry<'a, IntVal, RawVar>),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 /// The structure that stores the equality conditions. Equality conditions can
 /// either be eagerly crated, and stored as a range of variables, or lazily
 /// created and stored in a [`HashMap`] once created.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum DirectStorage {
 	/// Variables for all equality conditions are eagerly created and stored in
 	/// order
@@ -54,11 +54,11 @@ pub(crate) enum DirectStorage {
 	Lazy(FxHashMap<IntVal, RawVar>),
 }
 
-#[derive(Clone, Debug)]
 /// Type used resolve (possible) values in the domain to order literals and
 /// their tightest literal meaning.
 ///
 /// Used as the return type of [`OrderStorage::resolve_val`].
+#[derive(Clone, Debug)]
 struct DomainLocation<'a, const OFFSET: usize> {
 	/// Tightest value for the less-than literal
 	less_val: IntVal,
@@ -72,7 +72,7 @@ struct DomainLocation<'a, const OFFSET: usize> {
 }
 
 /// A type to represent when certain literals are created
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum EncodingType {
 	/// The literal is created before solving starts
 	Eager,
@@ -80,9 +80,9 @@ pub(crate) enum EncodingType {
 	Lazy,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
 /// The structure used to store information about an integer variable within
 /// the solver.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct IntDecision {
 	/// The direct encoding of the integer variable.
 	///
@@ -103,8 +103,8 @@ pub(crate) struct IntDecision {
 	upper_bound: Trailed<IntVal>,
 }
 
-#[derive(Debug)]
 /// The definition given to a lazily created literal.
+#[derive(Debug)]
 pub(crate) struct LazyLitDef {
 	/// The meaning that the literal is meant to represent.
 	pub(crate) meaning: IntLitMeaning,
@@ -119,9 +119,9 @@ pub(crate) struct LazyLitDef {
 	pub(crate) next: Option<RawVar>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 /// A storage structure to manage lazily created order literals for an integer
 /// variable.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LazyOrderStorage {
 	/// The index of the node with the minimum value in the storage.
 	min_index: u32,
@@ -138,10 +138,10 @@ pub(crate) struct LazyOrderStorage {
 	storage: Vec<OrderNode>,
 }
 
-#[derive(Debug)]
 /// An entry in [`OrderStorage`] that can be used to access the representation
 /// of an inequality condition, or insert a new literal to represent the
 /// condition otherwise.
+#[derive(Debug)]
 enum OrderEntry<'a> {
 	/// Entry already exists and was eagerly created.
 	Eager(&'a VarRange, usize),
@@ -170,7 +170,6 @@ enum OrderEntry<'a> {
 	},
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// Type used to store individual entries in [`LazyOrderStorage`].
 ///
 /// ## Warning
@@ -180,6 +179,7 @@ enum OrderEntry<'a> {
 /// However, the positive [`RawVar`] is used to represent a `<` literal (because
 /// of standard phasing in SAT solvers), which might have a stronger meaning
 /// than `< val` because of gaps in the original domain.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct OrderNode {
 	/// The value for which `!var` represents `x ≥ val`.
 	val: IntVal,
@@ -195,7 +195,7 @@ pub(crate) struct OrderNode {
 	next: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[allow(
 	variant_size_differences,
 	reason = "TODO: Investigate if using Box improves performance"
@@ -226,8 +226,8 @@ type RangeIter<'a> = Peekable<
 	>,
 >;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// A direction to search in.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SearchDirection {
 	/// Search from low to high.
 	Increasing,
@@ -1533,12 +1533,12 @@ impl OrderStorage {
 		}
 	}
 
-	#[inline]
 	/// Returns the lowest integer value `j`, for which `< i` is equivalent to
 	/// `< j` in the given `domain. In addition it returns the index of the
 	/// range in `domain` in which `j` is located, and calculate the offset of
 	/// the representation `< j` in a VarRange when the order literals are
 	/// eagerly created.
+	#[inline]
 	fn resolve_val<const OFFSET: usize>(
 		domain: &RangeList<IntVal>,
 		val: IntVal,

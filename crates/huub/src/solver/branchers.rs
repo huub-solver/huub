@@ -17,9 +17,9 @@ use crate::{
 	},
 };
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// General brancher for Boolean variables that makes search decision by
 /// following a given [`VariableSelection`] and [`ValueSelection`] strategy.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct BoolBrancher {
 	/// Boolean variables to be branched on.
 	vars: Vec<Decision<bool>>,
@@ -44,7 +44,7 @@ pub trait Brancher<D: DecisionActions>: Debug + DynClone {
 }
 
 /// An search decision made by a [`Brancher`].
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Directive {
 	/// Make the decision to branch on the given literal.
 	Select(View<bool>),
@@ -56,9 +56,9 @@ pub enum Directive {
 	Consumed,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 /// General brancher for integer variables that makes search decision by
 /// following a given [`VariableSelection`] and [`ValueSelection`] strategy.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IntBrancher {
 	/// Integer variables to be branched on.
 	vars: Vec<View<IntVal>>,
@@ -72,9 +72,9 @@ pub struct IntBrancher {
 	next: Trailed<usize>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Strategy for limiting the domain of a selected decision variable for a
 /// [`BoolBrancher`] or [`IntBrancher`] .
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ValueSelection {
 	/// Set the decision variable to its current lower bound value.
 	IndomainMax,
@@ -88,9 +88,9 @@ pub enum ValueSelection {
 	OutdomainMin,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Strategy of selecting the next decision variable for a [`BoolBrancher`] or
 /// [`IntBrancher`] .
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum VariableSelection {
 	/// Select the unfixed decision variable with the largest remaining domain
 	/// size, using the order of the variables in case of a tie.
@@ -108,10 +108,10 @@ pub enum VariableSelection {
 	Smallest,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 /// A brancher that enforces Boolean conditions that is abandoned when a
 /// conflict is encountered. These branchers are generally used to warm start,
 /// i.e. quickly reach, a (partial) known or expected solution.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WarmStartBrancher {
 	/// Boolean conditions to be tried.
 	decisions: Vec<Decision<bool>>,

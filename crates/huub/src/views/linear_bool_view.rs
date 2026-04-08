@@ -28,7 +28,6 @@ use crate::{
 	views::offset_view::OffsetView,
 };
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// An (integer) linear view over a Boolean decision variable.
 ///
 /// Conceptually, this view exposes a boolean `var ∈ {false, true}` as an
@@ -58,6 +57,7 @@ use crate::{
 /// // From a boolean variable directly (scale = 1, offset = 0):
 /// let as_int = LinearBoolView::from(v.clone()); // Domain {0, 1}
 /// ```
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct LinearBoolView<Scale, Offset, Var> {
 	/// Scale applied to the decision variable.
 	///

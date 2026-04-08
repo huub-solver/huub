@@ -44,9 +44,9 @@ use crate::{
 /// definition.
 const FULL_INT_DOMAIN: RangeInclusive<IntVal> = IntVal::MIN..=IntVal::MAX;
 
-#[derive(Debug)]
 /// Errors that can occur when converting a [`FlatZinc`] instance to a [`Model`]
 /// or [`Solver`] object.
+#[derive(Debug)]
 pub enum FlatZincError {
 	/// FlatZinc instance contained a decision variable with an unsupported
 	/// type.
@@ -77,9 +77,9 @@ pub enum FlatZincError {
 	ReformulationError(LoweringError),
 }
 
+/// Metadata produced when building a model from a FlatZinc instance.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
-/// Metadata produced when building a model from a FlatZinc instance.
 pub struct FlatZincModelMeta<S> {
 	/// Mapping from FlatZinc identifiers to model views.
 	pub names: FxHashMap<S, AnyView>,
@@ -91,9 +91,9 @@ pub struct FlatZincModelMeta<S> {
 	pub goal: Option<Goal<View<IntVal>>>,
 }
 
+/// Metadata produced when building a solver from a FlatZinc instance.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
-/// Metadata produced when building a solver from a FlatZinc instance.
 pub struct FlatZincSolverMeta<S> {
 	/// Mapping from FlatZinc identifiers to solver views.
 	pub names: FxHashMap<S, solver::AnyView>,
@@ -103,9 +103,9 @@ pub struct FlatZincSolverMeta<S> {
 	pub goal: Option<Goal<solver::View<IntVal>>>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
 /// Statistical information about the extraction process that creates a
 /// [`Model`] from a [`FlatZinc`] instance.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct FlatZincStatistics {
 	/// Number of literal views extracted from the FlatZinc specification
 	extracted_views: u32,

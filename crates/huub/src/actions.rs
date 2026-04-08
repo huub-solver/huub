@@ -117,8 +117,8 @@ pub trait SimplificationActions {
 	fn post_constraint<C: Constraint<Self::Target>>(&mut self, constraint: C);
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// A typed handle to a value tracked by the trail.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Trailed<T: Bytes> {
 	/// Index into the trail's integer value storage.
 	pub(crate) index: u32,

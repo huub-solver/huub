@@ -13,9 +13,9 @@ use crate::{
 	helpers::bytes::Bytes,
 };
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 /// A structure that stores the currently assigned value of a Boolean variable
 /// and the value it had while undoing the last assignment.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct BoolStore {
 	/// The current value of the variable, if it is assigned.
 	value: Option<bool>,
@@ -23,8 +23,8 @@ struct BoolStore {
 	restore: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// Storage structure that allows restoring tracked values to an earlier state.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Trail {
 	/// The storage of event that have been trailed.
 	///
@@ -46,8 +46,8 @@ pub(crate) struct Trail {
 	sat_store: Vec<BoolStore>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// An event that is recorded such that it can be undone.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum TrailEvent {
 	/// The assignment of a Boolean variable.
 	SatAssignment(RawVar),
@@ -238,8 +238,8 @@ impl Trail {
 		while self.redo().is_some() {}
 	}
 
-	#[inline]
 	/// Return the index for `sat_store` based on a [`RawVar`].
+	#[inline]
 	fn sat_index(var: RawVar) -> usize {
 		// TODO: Consider grounding (either always deduct 1 because there is no var
 		// 0, or at the least observed var)
@@ -343,9 +343,9 @@ impl TrailingActions for Trail {
 }
 
 impl TrailEvent {
-	#[inline]
 	/// Internal method used to transform a slice of the trail to a
 	/// [`TrailEvent::IntAssignment`] object for the [`Trail::redo`] method.
+	#[inline]
 	fn int_from_rev_trail(raw: [u32; 3]) -> Self {
 		let index = -(raw[0] as i32) as u32;
 		let high = raw[1] as u64;
@@ -354,9 +354,9 @@ impl TrailEvent {
 		TrailEvent::IntAssignment { index, value }
 	}
 
-	#[inline]
 	/// Internal method used to transform a slice of the trail to a
 	/// [`TrailEvent::IntAssignment`] object for the [`Trail::undo`] method.
+	#[inline]
 	fn int_from_trail(raw: [u32; 3]) -> Self {
 		let index = -(raw[2] as i32) as u32;
 		let high = raw[1] as u64;
@@ -365,9 +365,9 @@ impl TrailEvent {
 		TrailEvent::IntAssignment { index, value }
 	}
 
-	#[inline]
 	/// Internal method to write a [`TailEvent`] in reverse order to `trail` so
 	/// it can be redone later.
+	#[inline]
 	fn write_rev_trail(&self, trail: &mut [u32]) {
 		match self {
 			TrailEvent::SatAssignment(var) => trail[0] = i32::from(*var) as u32,
@@ -382,9 +382,9 @@ impl TrailEvent {
 		}
 	}
 
-	#[inline]
 	/// Internal method to write a [`TailEvent`] to the slice `trail` using an
 	/// efficient format.
+	#[inline]
 	fn write_trail(&self, trail: &mut [u32]) {
 		match self {
 			TrailEvent::SatAssignment(var) => trail[0] = i32::from(*var) as u32,

@@ -23,11 +23,11 @@ use crate::{
 	views::{LinearBoolView, LinearView},
 };
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 /// The internal representation of [`IntView`].
 ///
 /// Note that this representation is not meant to be exposed to the user.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum IntView {
 	/// Constant Integer Value
 	Const(IntVal),
@@ -43,10 +43,10 @@ impl DefaultView for IntVal {
 impl private::Sealed for IntVal {}
 
 impl View<IntVal> {
-	#[doc(hidden)]
 	/// Returns an integer that can be used to identify the associated integer
 	/// decision variable and whether the int view is a view on another decision
 	/// variable.
+	#[doc(hidden)]
 	pub fn int_reverse_map_info(&self) -> (Option<u32>, bool) {
 		match self.0 {
 			IntView::Bool { .. } => (None, true),
@@ -58,9 +58,9 @@ impl View<IntVal> {
 		}
 	}
 
-	#[doc(hidden)]
 	/// Return a list of integers that can used to identify the literals that
 	/// are associated to an integer view, and the meaning of those literals.
+	#[doc(hidden)]
 	pub fn lit_reverse_map_info<Sat: Assumptions>(
 		&self,
 		slv: &Solver<Sat>,

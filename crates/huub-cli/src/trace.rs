@@ -45,8 +45,8 @@ struct FmtLitFields {
 /// Type alias of an integer type that can be used to represent literals.
 type LitInt = NonZeroI32;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 /// Definition of how a literal should be named.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum LitName {
 	/// The literal represents a Boolean variable in the FlatZinc model.
 	///
@@ -63,7 +63,7 @@ pub(crate) enum LitName {
 
 /// A visitor wrapper that ensures any fields containing literals are renamed
 /// to use their FlatZinc names
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 struct LitNames<'a, V> {
 	/// Inner visitor that will be used to format the fields.
 	inner: V,
@@ -74,9 +74,9 @@ struct LitNames<'a, V> {
 	int_reverse_map: &'a Vec<InternedStr>,
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
 /// Structure used to parse log messages informing the subscriber about a new
 /// literal that has been created.
+#[derive(Debug, Default, Eq, PartialEq)]
 struct RecordLazyLits {
 	/// Whether the log message had the "register new literal" message.
 	lazy_lit_message: bool,
@@ -198,9 +198,9 @@ impl LitName {
 }
 
 impl<V: Visit> LitNames<'_, V> {
-	#[inline]
 	/// Check if the field should and can be formatted as a clause or a list of
 	/// literals.
+	#[inline]
 	fn check_clause(&mut self, field: &Field, value: &dyn fmt::Debug) -> bool {
 		if field.name().starts_with("clause")
 			|| field.name().starts_with("conj")
@@ -234,8 +234,8 @@ impl<V: Visit> LitNames<'_, V> {
 		false
 	}
 
-	#[inline]
 	/// Check if the field should and can be formatted as an integer variable.
+	#[inline]
 	fn check_int_var(&mut self, field: &Field, value: u64) -> bool {
 		if field.name().starts_with("int_var")
 			&& let Some(name) = self.int_reverse_map.get(value as usize)
@@ -246,9 +246,9 @@ impl<V: Visit> LitNames<'_, V> {
 		false
 	}
 
-	#[inline]
 	/// Check whether the field should and can be formatted as a list of integer
 	/// variables.
+	#[inline]
 	fn check_int_vars(&mut self, field: &Field, value: &dyn fmt::Debug) -> bool {
 		if field.name().starts_with("int_vars") {
 			let res: Result<Vec<usize>, _> = serde_json::from_str(&format!("{value:?}"));
@@ -267,8 +267,8 @@ impl<V: Visit> LitNames<'_, V> {
 		}
 		false
 	}
-	#[inline]
 	/// Check if the field should and can be formatted as a literal.
+	#[inline]
 	fn check_lit(&mut self, field: &Field, value: i64) -> bool {
 		if field.name().starts_with("lit") | field.name().starts_with("bool_var") {
 			if value == 0 || value < i32::MIN as i64 || value > i32::MAX as i64 {

@@ -11,12 +11,12 @@ use crate::{
 	},
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 /// Wrapper for model values whose aliases have been resolved against a model.
 ///
 /// This type marks a model handle whose alias chain has already been followed
 /// against the current model state. Mutating operations should keep this
 /// wrapper updated in place, or the wrapper should simply be discarded.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct Resolved<T>(pub(crate) T);
 
 impl Decision<IntVal> {

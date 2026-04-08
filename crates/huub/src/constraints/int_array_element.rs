@@ -23,9 +23,9 @@ use crate::{
 	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds consistent propagator for the `array_element` constraint with an
 /// array of integer decision variables.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntArrayElementBounds<I1, I2, I3> {
 	/// Array of variables from which the element is selected
 	vars: Vec<I1>,
@@ -39,13 +39,13 @@ pub struct IntArrayElementBounds<I1, I2, I3> {
 	max_support: Trailed<usize>,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// Representation of the `array_element` constraint with an array of integer
 /// values within a model.
 ///
 /// This constraint enforces that a result integer decision variable takes the
 /// value equal the element of the given array of integer values at the given
 /// index decision variable.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntValArrayElement<I1, I2>(pub(crate) IntArrayElementBounds<IntVal, I1, I2>);
 
 impl<I1, I2, I3> IntArrayElementBounds<I1, I2, I3> {

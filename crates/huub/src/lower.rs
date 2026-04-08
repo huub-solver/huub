@@ -33,9 +33,9 @@ use crate::{
 	views::LinearBoolView,
 };
 
-#[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
 /// Configuration object for the reformulation process of creating a [`Solver`]
 /// object from a [`Model`].
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct InitConfig {
 	/// Whether to enable the globally blocked clause elimination (conditioning)
 	conditioning: bool,
@@ -147,9 +147,9 @@ pub struct LoweringContext<'a> {
 	trail: &'a [[u8; 8]],
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 /// Error type used during the reformulation process of creating a [`Solver`],
 /// e.g. when creating a [`Solver`] from a [`Model`].
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LoweringError {
 	/// Error used when a conflict is found during the simplification process of
 	/// the model.
@@ -161,7 +161,7 @@ pub enum LoweringError {
 
 /// A reformulation helper that maps decisions in a [`Model`] objects to the
 /// [`solver::View`] that is used to represent it in a [`Solver`] object.
-#[derive(Default, Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LoweringMap {
 	/// Map of Boolean decisions to Boolean views.
 	pub(crate) bool_map: Vec<solver::View<bool>>,

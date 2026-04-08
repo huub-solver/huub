@@ -24,11 +24,11 @@ use crate::{
 	views::{LinearBoolView, LinearView},
 };
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 /// The internal representation of [`IntDecision`].
 ///
 /// Note that this representation is not meant to be exposed to the user.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum IntView {
 	/// Constant Integer Value
 	Const(IntVal),

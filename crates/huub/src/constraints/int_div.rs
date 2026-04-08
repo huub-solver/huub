@@ -20,11 +20,11 @@ use crate::{
 	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds propagator for the division of two integer variables.
 ///
 /// This propagator enforces truncating rounding on the result of the division,
 /// and enforces that the denominator is non-zero.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntDivBounds<I1, I2, I3> {
 	/// The numerator of the division
 	pub(crate) numerator: I1,

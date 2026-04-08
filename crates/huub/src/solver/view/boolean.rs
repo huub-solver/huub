@@ -16,15 +16,15 @@ use crate::{
 	views::LinearBoolView,
 };
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[allow(
 	variant_size_differences,
 	reason = "`Lit` cannot be as small as `bool`"
 )]
-#[non_exhaustive]
 /// The internal representation of a [`BoolView`].
 ///
 /// Note that this representation is not meant to be exposed to the user.
+#[non_exhaustive]
 pub enum BoolView {
 	/// A Boolean literal in the solver.
 	Lit(Decision<bool>),
@@ -33,9 +33,9 @@ pub enum BoolView {
 }
 
 impl View<bool> {
-	#[doc(hidden)]
 	/// Return an integers that can used to identify the literal, if there is
 	/// one.
+	#[doc(hidden)]
 	pub fn reverse_map_info(&self) -> Option<NonZero<i32>> {
 		match self.0 {
 			BoolView::Lit(v) => Some(v.0.into()),

@@ -21,7 +21,6 @@ use crate::{
 	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds propagator for the constraint `result = base^exponent`.
 ///
 /// This constraint enforces that a base integer decision variable
@@ -34,6 +33,7 @@ use crate::{
 ///
 /// The OVERFLOW parameter determines whether the propagator will expect
 /// possible integer overflows.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntPowBounds<OM: OverflowMode, I1, I2, I3> {
 	/// The base in the exponentiation
 	pub(crate) base: I1,

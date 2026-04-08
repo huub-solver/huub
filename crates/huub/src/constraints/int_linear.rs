@@ -45,18 +45,18 @@ type DoubleIntVal = i128;
 /// Representation of an integer equality constraint that cannot be unified.
 ///
 /// This constraint enforces that two integer decisions take the same value.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct IntEq {
 	/// The two integer decisions that must be equal.
 	pub(crate) vars: [model::View<IntVal>; 2],
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Representation of an integer linear constraint within a model.
 ///
 /// This constraint enforces that a sum of (linear transformations of) integer
 /// decision variables is less than, equal, or not equal to a constant value, or
 /// the implication or reification or whether this is so.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntLinear<OF: OverflowMode> {
 	/// The integer linear terms that are being summed.
 	pub(crate) terms: Vec<model::View<IntVal>>,
@@ -72,9 +72,9 @@ pub struct IntLinear<OF: OverflowMode> {
 /// propagator.
 pub type IntLinearLessEqBounds<OV, IV> = IntLinearLessEqBoundsImpl<OV, IV, True>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Bounds consistent propagator for the `int_lin_le` or `int_lin_le_imp`
 /// constraint.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntLinearLessEqBoundsImpl<OV: OverflowMode, IV, BV> {
 	/// Variables that are being summed
 	terms: Vec<IV>,
@@ -96,9 +96,9 @@ pub type IntLinearNotEqImpValue<OF, IV, BV> = IntLinearNotEqValueImpl<OF, IV, BV
 /// propagator.
 pub type IntLinearNotEqValue<OF, IV> = IntLinearNotEqValueImpl<OF, IV, True>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Value consistent propagator for the `int_lin_ne` or `int_lin_ne_imp`
 /// constraint.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntLinearNotEqValueImpl<OF: OverflowMode, IV, BV> {
 	/// Decision variables in the summation
 	terms: Vec<IV>,
@@ -111,8 +111,8 @@ pub struct IntLinearNotEqValueImpl<OF: OverflowMode, IV, BV> {
 	reification: BV,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Possible operators that can be used for in a linear constraint.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum LinComparator {
 	/// Sum is equal to the constant
 	Equal,
@@ -122,8 +122,8 @@ pub(crate) enum LinComparator {
 	NotEqual,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Reification possibilities for a linear constraint.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Reification {
 	/// The constraint is half-reified by the given [`BoolDecision`].
 	ImpliedBy(model::View<bool>),

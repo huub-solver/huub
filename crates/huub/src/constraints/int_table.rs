@@ -20,11 +20,11 @@ use crate::{
 	solver::{IntLitMeaning, activation_list::IntPropCond, queue::PriorityLevel},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// Representation of the `table_int` constraint within a model.
 ///
 /// This constraint enforces that the given list of integer views take their
 /// values according to one of the given lists of integer values.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntTable {
 	/// List of variables that must take the values of a row in the table.
 	pub(crate) vars: Vec<View<IntVal>>,

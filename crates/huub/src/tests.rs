@@ -41,8 +41,8 @@ fn it_works() {
 	);
 }
 
-#[test]
 /// Test case to check if resolving a multi-step linear alias works properly.
+#[test]
 fn lin_multi_alias() {
 	use crate::actions::{IntInspectionActions, IntSimplificationActions};
 
@@ -120,9 +120,9 @@ fn test_bounding_sub() {
 	assert_eq!(y.bounds(&prb), (IntVal::MIN, IntVal::MAX - 255));
 }
 
-#[test]
 /// Tests for when a propagator propagates the same literal twice within the
 /// same call.
+#[test]
 fn test_duplicate_propagation() {
 	let mut slv = Solver::default();
 	let a = IntDecision::new_in(

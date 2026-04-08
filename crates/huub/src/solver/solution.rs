@@ -15,12 +15,12 @@ use crate::{
 	},
 };
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 /// A general representation for any default view in the solver.
 ///
 /// This representation is used only when list with different types of decision
 /// variable views have to be created. In general users should prefer using
 /// [`View`] instead.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum AnyView {
 	/// A Boolean type value.
 	Bool(View<bool>),
@@ -40,11 +40,11 @@ pub trait IntValuation {
 	fn val(&self, sol: Solution<'_>) -> IntVal;
 }
 
-#[derive(Clone, Copy)]
 /// Reference to a solution state of the [`Solver`](crate::solver::Solver).
 ///
 /// Solution allows the user to query the values that decision variable have
 /// been assigned in the solution.
+#[derive(Clone, Copy)]
 pub struct Solution<'a> {
 	/// SAT valuation used to retrieve Boolean assignments.
 	pub(crate) sat: &'a dyn Valuation,
@@ -52,7 +52,7 @@ pub struct Solution<'a> {
 	pub(crate) state: &'a State,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[allow(
 	variant_size_differences,
 	reason = "`Int` cannot be as small as `Bool`"
