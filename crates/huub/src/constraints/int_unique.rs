@@ -4,14 +4,11 @@
 use std::cmp;
 
 use itertools::{Either, Itertools};
-use rangelist::RangeList;
+use tracing::warn;
 
 use crate::{
 	IntVal,
-	actions::{
-		InitActions, IntDecisionActions, IntInspectionActions, IntSimplificationActions,
-		PostingActions, ReasoningEngine,
-	},
+	actions::{InitActions, IntInspectionActions, PostingActions, ReasoningEngine},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
 	},
@@ -31,8 +28,10 @@ use crate::{
 /// values.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IntUnique {
-	/// List of integer decision variables that must take different values.
-	pub(crate) prop: IntUniqueBounds<View<IntVal>>,
+	/// Instance of the [`IntUniqueBounds`] propagator.
+	pub(crate) bounds_prop: IntUniqueBounds<View<IntVal>>,
+	/// Instance of the [`IntUniqueValue`] propagator.
+	pub(crate) value_prop: IntUniqueValue<View<IntVal>>,
 	/// Whether to enable the bounds consistent propagator.
 	///
 	/// Defaults to `true`.
@@ -106,6 +105,7 @@ impl IntUnique {
 	pub fn bounds_propagation(&self) -> bool {
 		self.bounds_propagation.unwrap_or(true)
 	}
+
 	/// Returns whether a value consistent propagator will be posted when
 	/// creating a [`Solver`](crate::solver::Solver) object.
 	pub fn value_propagation(&self) -> bool {
@@ -123,54 +123,45 @@ where
 		ctx: &mut E::PropagationCtx<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
-
-		// TODO: Should this just use the value consistent propagator, or should this
-		// not be done by the bounds consistent propagator?
-		let (vals, vars): (Vec<_>, Vec<_>) =
-			self.prop.var.iter().enumerate().partition_map(|(i, &var)| {
-				if let Some(val) = var.val(ctx) {
-					Either::Left((i, val))
-				} else {
-					Either::Right(var)
-				}
-			});
-		if !vals.is_empty() {
-			let neg: RangeList<_> = vals.iter().map(|&(_, v)| v..=v).collect();
-			for var in &vars {
-				var.exclude(ctx, &neg, |ctx: &mut E::PropagationCtx<'_>| {
-					vals.iter()
-						.map(|&(i, _)| self.prop.var[i].val_lit(ctx).unwrap())
-						.collect_vec()
-				})?;
-			}
-			// Shrink variable array (and related caches)
-			let n = 2 * vars.len() + 2;
-			self.prop.lb_cache.shrink_to(n);
-			self.prop.ub_cache.shrink_to(n);
-			self.prop.min_sorted = (0..vars.len()).collect();
-			self.prop.max_sorted = (0..vars.len()).collect();
-			self.prop.bounds.shrink_to(n);
-			self.prop.predecessor.shrink_to(n);
-			self.prop.diff.shrink_to(n);
-			self.prop.hall_interval.shrink_to(n);
-			self.prop.bucket.shrink_to(n);
-			self.prop.var = vars;
-		}
-
-		if self.prop.var.iter().all(|v| v.val(ctx).is_some()) {
-			return Ok(SimplificationStatus::Subsumed);
-		}
 		Ok(SimplificationStatus::NoFixpoint)
 	}
 
 	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
-		let vars: Vec<_> = self.prop.var.iter().map(|v| slv.solver_view(*v)).collect();
-		// propagation should have removed any fixed values
-		debug_assert!(vars.iter().all(|v| v.val(slv).is_none()));
-		if self.value_propagation() {
+		let (_vals, vars): (Vec<_>, Vec<_>) = self.bounds_prop.var.iter().partition_map(|&var| {
+			let var = slv.solver_view(var);
+			if let Some(val) = var.val(slv) {
+				Either::Left(val)
+			} else {
+				Either::Right(var)
+			}
+		});
+		// Propagation should have detected any duplicate fixed values and removed them
+		// from the domains of other decision variables.
+		debug_assert!(_vals.iter().unique().collect_vec().len() == _vals.len());
+		debug_assert!(
+			_vals
+				.iter()
+				.all(|&val| vars.iter().all(|var| !var.in_domain(slv, val)))
+		);
+
+		// If the number of non-fixed decision variables is less than or equal
+		// to 1, there is no need to post any propagators.
+		if vars.len() <= 1 {
+			return Ok(());
+		}
+
+		let value_propagation = self.value_propagation();
+		if value_propagation {
 			IntUniqueValue::post(slv, vars.clone());
 		}
-		if self.bounds_propagation() {
+		let mut bounds_propagation = self.bounds_propagation();
+		if !value_propagation && !bounds_propagation {
+			warn!(
+				"all propagation algorithms are disabled for `int_unique` constraint, override with bounds propagation to ensure consistency"
+			);
+			bounds_propagation = true;
+		}
+		if bounds_propagation {
 			IntUniqueBounds::post(slv, vars);
 		}
 		Ok(())
@@ -182,12 +173,29 @@ where
 	E: ReasoningEngine,
 	View<IntVal>: IntSolverActions<E>,
 {
+	fn advise_of_backtrack(&mut self, ctx: &mut E::NotificationCtx<'_>) {
+		self.value_prop.advise_of_backtrack(ctx);
+	}
+
+	fn advise_of_int_change(
+		&mut self,
+		ctx: &mut E::NotificationCtx<'_>,
+		data: u64,
+		event: IntEvent,
+	) -> bool {
+		self.value_prop.advise_of_int_change(ctx, data, event)
+	}
+
 	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
-		self.prop.initialize(ctx);
+		self.value_prop.initialize(ctx);
+		self.bounds_prop.initialize(ctx);
 	}
 
 	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
-		self.prop.propagate(ctx)
+		if !self.value_prop.action_list.is_empty() {
+			self.value_prop.propagate(ctx)?;
+		}
+		self.bounds_prop.propagate(ctx)
 	}
 }
 
@@ -494,6 +502,14 @@ where
 }
 
 impl<I> IntUniqueValue<I> {
+	/// Create a new [`IntUniqueValue`] propagator.
+	pub(crate) fn new(vars: Vec<I>) -> Self {
+		Self {
+			vars,
+			action_list: Vec::new(),
+		}
+	}
+
 	/// Create a new [`IntUniqueBounds`] propagator and post it in the
 	/// solver.
 	pub fn post<E>(solver: &mut E, vars: Vec<I>)
@@ -501,10 +517,7 @@ impl<I> IntUniqueValue<I> {
 		E: PostingActions + ?Sized,
 		I: IntSolverActions<Engine>,
 	{
-		solver.add_propagator(Box::new(Self {
-			vars: vars.clone(),
-			action_list: Vec::new(),
-		}));
+		solver.add_propagator(Box::new(Self::new(vars)));
 	}
 }
 
@@ -534,7 +547,13 @@ where
 		// Let the propagator be advised when each specific decision is fixed to a
 		// value, with the index of the decision.
 		for (i, v) in self.vars.iter().enumerate() {
-			v.advise_when(ctx, IntPropCond::Fixed, i as u64);
+			if self.vars[i].val(ctx).is_some() {
+				// If the variable is already fixed, then add it to the action list immediately.
+				self.action_list.push(i);
+				ctx.enqueue_now(true);
+			} else {
+				v.advise_when(ctx, IntPropCond::Fixed, i as u64);
+			}
 		}
 		// Advise the propagator of backtracking to clear the list of fixed decision
 		// (indices).
@@ -576,7 +595,7 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntVal,
+		IntVal, Model,
 		constraints::{
 			int_linear::IntLinearLessEqBounds,
 			int_unique::{IntUniqueBounds, IntUniqueValue},
@@ -784,6 +803,24 @@ mod tests {
 		IntUniqueValue::post(&mut slv, vec![a, b, c]);
 
 		slv.assert_unsatisfiable();
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_gapped_domain_regression() {
+		let mut prb = Model::default();
+		let prev: Vec<_> = [
+			RangeList::from_iter([15..=15, 20..=20]),
+			RangeList::from(20..=20),
+			RangeList::from_iter([15..=15, 20..=20]),
+		]
+		.into_iter()
+		.map(|domain| prb.new_int_decision(domain))
+		.collect();
+
+		prb.unique(prev.iter().copied()).post();
+
+		prb.assert_unsatisfiable();
 	}
 
 	fn test_sudoku(grid: &[&str], expected: Status) {

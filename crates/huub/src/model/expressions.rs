@@ -32,7 +32,7 @@ use crate::{
 		int_pow::IntPowBounds,
 		int_set_contains::IntSetContainsReif,
 		int_table::IntTable,
-		int_unique::{IntUnique, IntUniqueBounds},
+		int_unique::{IntUnique, IntUniqueBounds, IntUniqueValue},
 		int_value_precede::{IntSeqPrecedeChainBounds, IntValuePrecedeChainValue},
 	},
 	helpers::overflow::{OverflowImpossible, OverflowPossible},
@@ -381,8 +381,10 @@ impl Model {
 		bounds_propagation: Option<bool>,
 		value_propagation: Option<bool>,
 	) {
+		let vars: Vec<_> = vars.into_iter().map_into().collect();
 		self.post_constraint(IntUnique {
-			prop: IntUniqueBounds::new(vars.into_iter().map_into().collect()),
+			bounds_prop: IntUniqueBounds::new(vars.clone()),
+			value_prop: IntUniqueValue::new(vars),
 			bounds_propagation,
 			value_propagation,
 		});

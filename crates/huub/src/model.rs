@@ -449,13 +449,13 @@ impl Model {
 					int_eager_direct.insert(var);
 				}
 			} else if let Some(c) = c.downcast_ref::<IntUnique>() {
-				for v in &c.prop.var {
+				for v in &c.bounds_prop.var {
 					let v = v.resolve_alias(self);
 					if let Some(var) = v.integer_decision() {
 						let Domain::Domain(dom) = &self.int_vars[var.idx()].domain else {
 							unreachable!()
 						};
-						if dom.card() <= Some(c.prop.var.len() * 100 / 80) {
+						if dom.card() <= Some(c.bounds_prop.var.len() * 100 / 80) {
 							int_eager_direct.insert(var);
 						}
 					}
