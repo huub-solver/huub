@@ -1,5 +1,5 @@
 //! # Job Shop Scheduling Example using Huub
-//!
+//! are available via command-line flags.
 //! This project demonstrates how to model and solve the Job Shop Scheduling
 //! Problem (JSSP) using the Huub constraint programming library. The JSSP is a
 //! classic optimization problem where multiple jobs, each consisting of a
@@ -15,7 +15,6 @@
 //! This example parses a JSSP instance from a text file, builds the scheduling
 //! model with precedence and disjunctive constraints, and solves it using
 //! Huub's Lazy Clause Generation engine. Various solver options and statistics
-//! are available via command-line flags.
 
 mod brancher;
 mod model;
@@ -41,16 +40,6 @@ use crate::{
 	brancher::{BranchingStrategy, StaticBranching},
 	model::{Instance, JobShopModel, ObjectiveType, Solution},
 };
-
-/// Parses a time duration for the time limit flag.
-/// If no unit is provided, assumes milliseconds.
-fn parse_time_limit(s: &str) -> Result<Duration, humantime::DurationError> {
-	if let Ok(ms) = s.parse() {
-		Ok(Duration::from_millis(ms))
-	} else {
-		humantime::parse_duration(s)
-	}
-}
 
 #[derive(Debug, Parser)]
 #[command(
@@ -143,59 +132,6 @@ enum SearchTrigger {
 	Conflicts,
 	/// Switch after the given number of restarts have been encountered.
 	Restarts,
-}
-
-impl Cli {
-	/// Formats an option value as a string, using "N/A" as the default if the
-	/// value is `None`.
-	fn display_option<'a, T: Display>(&self, opt: &'a Option<T>) -> &'a dyn Display {
-		const N_A: &str = "N/A";
-		if let Some(v) = opt {
-			let v: &dyn Display = v;
-			v
-		} else {
-			&N_A
-		}
-	}
-
-	/// Build the solver search strategy from the CLI flags.
-	fn search_strategy(&self) -> SearchStrategy {
-		let trigger = match self.search_trigger {
-			SearchTrigger::Conflicts => SwitchTrigger::Conflicts,
-			SearchTrigger::Restarts => SwitchTrigger::Restarts,
-		};
-		let trigger = trigger(self.search_interval);
-		match self.search_strategy {
-			SearchMode::Branchers => SearchStrategy::Branchers,
-			SearchMode::Sat => SearchStrategy::Sat,
-			SearchMode::Transition => SearchStrategy::Transition(trigger),
-			SearchMode::Interleaved => SearchStrategy::Interleaved(trigger),
-		}
-	}
-}
-
-impl Display for Cli {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		writeln!(f, "  Objective type: {:?}", self.objective_type)?;
-		writeln!(f, "  Branching strategy: {:?}", self.branching_strategy)?;
-		writeln!(f, "  Reason eager: {}", self.reason_eager)?;
-		writeln!(f, "  Integer eager limit: {}", self.int_eager_limit)?;
-		writeln!(
-			f,
-			"  Time limit: {}",
-			self.display_option(&self.time_limit.map(|tl| tl.as_secs_f32()))
-		)?;
-		writeln!(f, "  Restart: {}", self.restart)?;
-		writeln!(f, "  Search strategy: {:?}", self.search_strategy)?;
-		if matches!(
-			self.search_strategy,
-			SearchMode::Transition | SearchMode::Interleaved
-		) {
-			writeln!(f, "  Search trigger: {:?}", self.search_trigger)?;
-			writeln!(f, "  Search interval: {}", self.search_interval)?;
-		}
-		Ok(())
-	}
 }
 
 fn main() {
@@ -309,5 +245,68 @@ fn main() {
 			"  Time: {:.3} seconds",
 			(Instant::now() - start).as_secs_f32()
 		);
+	}
+}
+
+/// Parses a time duration for the time limit flag.
+/// If no unit is provided, assumes milliseconds.
+fn parse_time_limit(s: &str) -> Result<Duration, humantime::DurationError> {
+	if let Ok(ms) = s.parse() {
+		Ok(Duration::from_millis(ms))
+	} else {
+		humantime::parse_duration(s)
+	}
+}
+
+impl Cli {
+	/// Formats an option value as a string, using "N/A" as the default if the
+	/// value is `None`.
+	fn display_option<'a, T: Display>(&self, opt: &'a Option<T>) -> &'a dyn Display {
+		const N_A: &str = "N/A";
+		if let Some(v) = opt {
+			let v: &dyn Display = v;
+			v
+		} else {
+			&N_A
+		}
+	}
+
+	/// Build the solver search strategy from the CLI flags.
+	fn search_strategy(&self) -> SearchStrategy {
+		let trigger = match self.search_trigger {
+			SearchTrigger::Conflicts => SwitchTrigger::Conflicts,
+			SearchTrigger::Restarts => SwitchTrigger::Restarts,
+		};
+		let trigger = trigger(self.search_interval);
+		match self.search_strategy {
+			SearchMode::Branchers => SearchStrategy::Branchers,
+			SearchMode::Sat => SearchStrategy::Sat,
+			SearchMode::Transition => SearchStrategy::Transition(trigger),
+			SearchMode::Interleaved => SearchStrategy::Interleaved(trigger),
+		}
+	}
+}
+
+impl Display for Cli {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		writeln!(f, "  Objective type: {:?}", self.objective_type)?;
+		writeln!(f, "  Branching strategy: {:?}", self.branching_strategy)?;
+		writeln!(f, "  Reason eager: {}", self.reason_eager)?;
+		writeln!(f, "  Integer eager limit: {}", self.int_eager_limit)?;
+		writeln!(
+			f,
+			"  Time limit: {}",
+			self.display_option(&self.time_limit.map(|tl| tl.as_secs_f32()))
+		)?;
+		writeln!(f, "  Restart: {}", self.restart)?;
+		writeln!(f, "  Search strategy: {:?}", self.search_strategy)?;
+		if matches!(
+			self.search_strategy,
+			SearchMode::Transition | SearchMode::Interleaved
+		) {
+			writeln!(f, "  Search trigger: {:?}", self.search_trigger)?;
+			writeln!(f, "  Search interval: {}", self.search_interval)?;
+		}
+		Ok(())
 	}
 }

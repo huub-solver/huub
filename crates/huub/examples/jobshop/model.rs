@@ -13,22 +13,6 @@ use huub::{
 	solver::{self, IntValuation, Solver},
 };
 
-#[derive(Copy, Debug, Clone, PartialEq, Eq)]
-/// The representation of an operation to be scheduled on a machine.
-pub(crate) struct Operation {
-	/// The index of the job this operation belongs to.
-	pub(crate) job_idx: usize,
-	/// The index of the machine this operation is assigned to.
-	pub(crate) machine: usize,
-	/// The index of the operation within the job.
-	pub(crate) op_idx: usize,
-	/// The time required to process this operation.
-	pub(crate) processing_time: usize,
-}
-
-/// A job is represented as a vector of operations.
-pub(crate) type Job = Vec<Operation>;
-
 #[derive(Debug, Default)]
 /// The representation of the data for a jobshop scheduling instance.
 pub(crate) struct Instance {
@@ -44,12 +28,70 @@ pub(crate) struct Instance {
 	pub(crate) operations_on_machine: Vec<Vec<(usize, usize)>>,
 }
 
-impl Instance {
-	/// Returns the number of operations in the instance.
-	pub(crate) fn operation_count(&self) -> usize {
-		self.jobs.iter().map(Vec::len).sum()
-	}
+/// A job is represented as a vector of operations.
+pub(crate) type Job = Vec<Operation>;
 
+/// A job shop constraint model for the given instance and objective type.
+pub(crate) struct JobShopModel {
+	/// The underlying Huub [`Model`] representation.
+	pub(crate) model: Model,
+	/// The start time of each operation on each machine.
+	pub(crate) start_time: Vec<Vec<model::View<i64>>>,
+	/// The decision variable representing the objective value.
+	pub(crate) objective: model::View<i64>,
+}
+
+/// Choice of objective function to use to access the quality of a jobshop
+/// assignment.
+#[derive(Debug, Clone, Copy, Default, PartialEq, ValueEnum)]
+pub(crate) enum ObjectiveType {
+	/// The makespan objective function, which minimizes the completion time of
+	/// the last operation on the last machine.
+	#[default]
+	Makespan,
+	/// The total completion time objective function, which minimizes the sum of
+	/// completion times of all operations.
+	TotalCompletionTime,
+}
+
+#[derive(Copy, Debug, Clone, PartialEq, Eq)]
+/// The representation of an operation to be scheduled on a machine.
+pub(crate) struct Operation {
+	/// The index of the job this operation belongs to.
+	pub(crate) job_idx: usize,
+	/// The index of the machine this operation is assigned to.
+	pub(crate) machine: usize,
+	/// The index of the operation within the job.
+	pub(crate) op_idx: usize,
+	/// The time required to process this operation.
+	pub(crate) processing_time: usize,
+}
+
+/// Stores the solution for a job-shop instance.
+#[derive(Debug)]
+pub(crate) struct Solution {
+	/// For each machine, a list of `(job_idx, op_idx, start_time_view)`.
+	pub(crate) machine_schedule: Vec<Vec<(usize, usize, solver::View<i64>)>>,
+	/// Start times for each operation on each machine.
+	pub(crate) start_time: Option<Vec<Vec<(usize, usize, i64)>>>,
+}
+
+/// Create
+fn job_completion_times(
+	instance: &Instance,
+	start_time: &[Vec<model::View<i64>>],
+) -> Vec<model::View<i64>> {
+	let mut completion_times = Vec::with_capacity(instance.jobs.len());
+	for (job_idx, job) in instance.jobs.iter().enumerate() {
+		let Some((last_op_idx, last_op)) = job.iter().enumerate().next_back() else {
+			continue;
+		};
+		completion_times.push(start_time[job_idx][last_op_idx] + last_op.processing_time as i64);
+	}
+	completion_times
+}
+
+impl Instance {
 	/// Parses a job-shop scheduling instance from a text file.
 	pub(crate) fn from_jsp_file(path: &str) -> Result<Self, io::Error> {
 		let mut instance = Instance::default();
@@ -129,29 +171,11 @@ impl Instance {
 
 		Ok(instance)
 	}
-}
 
-/// Choice of objective function to use to access the quality of a jobshop
-/// assignment.
-#[derive(Debug, Clone, Copy, Default, PartialEq, ValueEnum)]
-pub(crate) enum ObjectiveType {
-	/// The makespan objective function, which minimizes the completion time of
-	/// the last operation on the last machine.
-	#[default]
-	Makespan,
-	/// The total completion time objective function, which minimizes the sum of
-	/// completion times of all operations.
-	TotalCompletionTime,
-}
-
-/// A job shop constraint model for the given instance and objective type.
-pub(crate) struct JobShopModel {
-	/// The underlying Huub [`Model`] representation.
-	pub(crate) model: Model,
-	/// The start time of each operation on each machine.
-	pub(crate) start_time: Vec<Vec<model::View<i64>>>,
-	/// The decision variable representing the objective value.
-	pub(crate) objective: model::View<i64>,
+	/// Returns the number of operations in the instance.
+	pub(crate) fn operation_count(&self) -> usize {
+		self.jobs.iter().map(Vec::len).sum()
+	}
 }
 
 impl JobShopModel {
@@ -208,30 +232,6 @@ impl JobShopModel {
 			objective: objective_variable,
 		}
 	}
-}
-
-/// Create
-fn job_completion_times(
-	instance: &Instance,
-	start_time: &[Vec<model::View<i64>>],
-) -> Vec<model::View<i64>> {
-	let mut completion_times = Vec::with_capacity(instance.jobs.len());
-	for (job_idx, job) in instance.jobs.iter().enumerate() {
-		let Some((last_op_idx, last_op)) = job.iter().enumerate().next_back() else {
-			continue;
-		};
-		completion_times.push(start_time[job_idx][last_op_idx] + last_op.processing_time as i64);
-	}
-	completion_times
-}
-
-/// Stores the solution for a job-shop instance.
-#[derive(Debug)]
-pub(crate) struct Solution {
-	/// For each machine, a list of `(job_idx, op_idx, start_time_view)`.
-	pub(crate) machine_schedule: Vec<Vec<(usize, usize, solver::View<i64>)>>,
-	/// Start times for each operation on each machine.
-	pub(crate) start_time: Option<Vec<Vec<(usize, usize, i64)>>>,
 }
 
 impl Solution {
