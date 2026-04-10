@@ -981,56 +981,6 @@ mod tests {
 
 	#[test]
 	#[traced_test]
-	fn test_seq_precede_chain_single_var() {
-		let mut slv = Solver::default();
-		let x0 = IntDecision::new_in(
-			&mut slv,
-			RangeList::from_iter([-1..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-
-		IntSeqPrecedeChainBounds::post(&mut slv, vec![x0]);
-		slv.expect_solutions(
-			&[x0],
-			expect![[r#"
-			-1
-			0
-			1"#]],
-		);
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_seq_precede_chain_simple() {
-		let mut slv = Solver::default();
-		let x0 = IntDecision::new_in(
-			&mut slv,
-			RangeList::from_iter([0..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x1 = IntDecision::new_in(
-			&mut slv,
-			RangeList::from_iter([0..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-
-		IntSeqPrecedeChainBounds::post(&mut slv, vec![x0, x1]);
-		slv.expect_solutions(
-			&[x0, x1],
-			expect![[r#"
-    		0, 0
-    		0, 1
-    		1, 0
-    		1, 1
-    		1, 2"#]],
-		);
-	}
-
-	#[test]
-	#[traced_test]
 	fn test_seq_precede_chain_paper() {
 		let mut slv = Solver::default();
 		let x1 = IntDecision::new_in(
@@ -1097,6 +1047,56 @@ mod tests {
 
 	#[test]
 	#[traced_test]
+	fn test_seq_precede_chain_simple() {
+		let mut slv = Solver::default();
+		let x0 = IntDecision::new_in(
+			&mut slv,
+			RangeList::from_iter([0..=3]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let x1 = IntDecision::new_in(
+			&mut slv,
+			RangeList::from_iter([0..=3]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+
+		IntSeqPrecedeChainBounds::post(&mut slv, vec![x0, x1]);
+		slv.expect_solutions(
+			&[x0, x1],
+			expect![[r#"
+    		0, 0
+    		0, 1
+    		1, 0
+    		1, 1
+    		1, 2"#]],
+		);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_seq_precede_chain_single_var() {
+		let mut slv = Solver::default();
+		let x0 = IntDecision::new_in(
+			&mut slv,
+			RangeList::from_iter([-1..=3]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+
+		IntSeqPrecedeChainBounds::post(&mut slv, vec![x0]);
+		slv.expect_solutions(
+			&[x0],
+			expect![[r#"
+			-1
+			0
+			1"#]],
+		);
+	}
+
+	#[test]
+	#[traced_test]
 	fn test_seq_precede_chain_unrestricted() {
 		let mut slv = Solver::default();
 		let x1 = IntDecision::new_in(
@@ -1126,6 +1126,87 @@ mod tests {
 
 		IntSeqPrecedeChainBounds::post(&mut slv, vec![x1, x2, x3, x4]);
 		slv.assert_all_solutions(&[x1, x2, x3, x4], valid_sequence_precede);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_val_precede_chain_all_enforced() {
+		let mut slv = Solver::default();
+		let x0 = IntDecision::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=3]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let x1 = IntDecision::new_in(
+			&mut slv,
+			RangeList::from_iter([1..=3]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+
+		IntValuePrecedeChainValue::post(&mut slv, vec![3, 2, 1], vec![x0, x1]);
+		slv.expect_solutions(
+			&[x0, x1],
+			expect![[r#"
+    		3, 2
+    		3, 3"#]],
+		);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_val_precede_chain_simple() {
+		let mut slv = Solver::default();
+		let x0 = IntDecision::new_in(
+			&mut slv,
+			RangeList::from_iter([0..=3]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+		let x1 = IntDecision::new_in(
+			&mut slv,
+			RangeList::from_iter([0..=3]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+
+		IntValuePrecedeChainValue::post(&mut slv, vec![1, 3], vec![x0, x1]);
+		slv.expect_solutions(
+			&[x0, x1],
+			expect![[r#"
+    		0, 0
+    		0, 1
+    		0, 2
+    		1, 0
+    		1, 1
+    		1, 2
+    		1, 3
+    		2, 0
+    		2, 1
+    		2, 2"#]],
+		);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_val_precede_chain_single_var() {
+		let mut slv = Solver::default();
+		let x0 = IntDecision::new_in(
+			&mut slv,
+			RangeList::from_iter([0..=3]),
+			EncodingType::Eager,
+			EncodingType::Eager,
+		);
+
+		IntValuePrecedeChainValue::post(&mut slv, vec![2, 1], vec![x0]);
+		slv.expect_solutions(
+			&[x0],
+			expect![[r#"
+    		0
+    		2
+    		3"#]],
+		);
 	}
 
 	#[test]
@@ -1195,87 +1276,6 @@ mod tests {
 		slv.assert_all_solutions(
 			&[x0, x1, x2, x3, x4, x5, x6, x7, x8],
 			valid_value_precede(vec![2, -2, 1, -1]),
-		);
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_val_precede_chain_single_var() {
-		let mut slv = Solver::default();
-		let x0 = IntDecision::new_in(
-			&mut slv,
-			RangeList::from_iter([0..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-
-		IntValuePrecedeChainValue::post(&mut slv, vec![2, 1], vec![x0]);
-		slv.expect_solutions(
-			&[x0],
-			expect![[r#"
-    		0
-    		2
-    		3"#]],
-		);
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_val_precede_chain_simple() {
-		let mut slv = Solver::default();
-		let x0 = IntDecision::new_in(
-			&mut slv,
-			RangeList::from_iter([0..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x1 = IntDecision::new_in(
-			&mut slv,
-			RangeList::from_iter([0..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-
-		IntValuePrecedeChainValue::post(&mut slv, vec![1, 3], vec![x0, x1]);
-		slv.expect_solutions(
-			&[x0, x1],
-			expect![[r#"
-    		0, 0
-    		0, 1
-    		0, 2
-    		1, 0
-    		1, 1
-    		1, 2
-    		1, 3
-    		2, 0
-    		2, 1
-    		2, 2"#]],
-		);
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_val_precede_chain_all_enforced() {
-		let mut slv = Solver::default();
-		let x0 = IntDecision::new_in(
-			&mut slv,
-			RangeList::from_iter([1..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x1 = IntDecision::new_in(
-			&mut slv,
-			RangeList::from_iter([1..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-
-		IntValuePrecedeChainValue::post(&mut slv, vec![3, 2, 1], vec![x0, x1]);
-		slv.expect_solutions(
-			&[x0, x1],
-			expect![[r#"
-    		3, 2
-    		3, 3"#]],
 		);
 	}
 

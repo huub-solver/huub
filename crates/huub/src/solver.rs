@@ -116,17 +116,6 @@ pub struct SearchStatistics {
 	pub(crate) user_decisions: u64,
 }
 
-/// The main solver object that is used to interact with the LCG solver.
-#[derive(Debug)]
-pub struct Solver<Sat = Cadical> {
-	/// The SAT solver that has been connected to [`Self::engine`] to perform
-	/// external propagation.
-	pub(crate) sat: Sat,
-	/// A reference to the [`Engine`] instance that is connected to
-	/// [`Self::sat`].
-	pub(crate) engine: Rc<RefCell<Engine>>,
-}
-
 /// The overarching search strategy used by the solver.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum SearchStrategy {
@@ -146,13 +135,15 @@ pub enum SearchStrategy {
 	Interleaved(SwitchTrigger),
 }
 
-/// Trigger for switching between search strategies.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SwitchTrigger {
-	/// Switch after the given number of conflicts have been encountered.
-	Conflicts(u64),
-	/// Switch after the given number of restarts have been encountered.
-	Restarts(u64),
+/// The main solver object that is used to interact with the LCG solver.
+#[derive(Debug)]
+pub struct Solver<Sat = Cadical> {
+	/// The SAT solver that has been connected to [`Self::engine`] to perform
+	/// external propagation.
+	pub(crate) sat: Sat,
+	/// A reference to the [`Engine`] instance that is connected to
+	/// [`Self::sat`].
+	pub(crate) engine: Rc<RefCell<Engine>>,
 }
 
 /// Result of a solving attempt
@@ -166,6 +157,15 @@ pub enum Status {
 	Complete,
 	/// The solver was interrupted before a result could be reached.
 	Unknown,
+}
+
+/// Trigger for switching between search strategies.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SwitchTrigger {
+	/// Switch after the given number of conflicts have been encountered.
+	Conflicts(u64),
+	/// Switch after the given number of restarts have been encountered.
+	Restarts(u64),
 }
 
 /// Helper function that calls [`tracing::debug!`] on learned clauses.

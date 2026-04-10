@@ -230,65 +230,6 @@ impl Model {
 			.collect()
 	}
 
-	/// Post a constraint to the model.
-	///
-	/// The constraint is added to the model. It will be enforced during
-	/// simplification and in any subsequent solving method.
-	pub fn post_constraint<C: Constraint<Self>>(&mut self, mut constraint: C) {
-		let con = ConRef::new(self.constraints.len());
-		let mut ctx = ModelInitContext::new(self, con);
-		constraint.initialize(&mut ctx);
-		let priority = ctx.priority;
-		let enqueue = ctx.enqueue();
-		self.constraints.push(Some(Box::new(constraint)));
-		let r = ConRef::new(self.constraints.len() - 1);
-		debug_assert_eq!(r, con);
-		self.propagator_queue.info.push(PropagatorInfo {
-			enqueued: false,
-			priority,
-		});
-		debug_assert_eq!(r.index(), self.propagator_queue.info.len() - 1);
-		if enqueue {
-			self.propagator_queue.enqueue_propagator(con.raw());
-		}
-	}
-
-	/// Propagate the constraint at index `con`, updating the domains of the
-	/// variables and rewriting the constraint if necessary.
-	pub(crate) fn propagate(&mut self, con: ConRef) -> Result<(), LoweringError> {
-		let Some(mut con_obj) = self.constraints[con.index()].take() else {
-			return Ok(());
-		};
-		self.cur_prop = Some(con);
-		let mut status = con_obj.simplify(self);
-		self.cur_prop = None;
-
-		// Resolve lazy explanation if it is required.
-		if let Err(Conflict {
-			subject,
-			reason: Reason::Lazy(r),
-		}) = status
-		{
-			debug_assert_eq!(ConRef::new(r.propagator as usize), con);
-			let conj = con_obj.explain(self, subject.unwrap_or(false.into()), r.data);
-			status = Err(Conflict {
-				subject,
-				reason: Reason::Eager(conj.into_boxed_slice()),
-			});
-		};
-
-		match status? {
-			SimplificationStatus::Subsumed => {
-				// Constraint is known to be satisfied, no need to place back.
-			}
-			SimplificationStatus::NoFixpoint => {
-				self.constraints[con.index()] = Some(con_obj);
-			}
-		}
-		self.notify_advisors();
-		Ok(())
-	}
-
 	/// Notify all advisors of changes.
 	pub(crate) fn notify_advisors(&mut self) {
 		// Notify propagators about all events that occurred
@@ -389,6 +330,65 @@ impl Model {
 			}
 		}
 		self.bool_events = bool_events;
+	}
+
+	/// Post a constraint to the model.
+	///
+	/// The constraint is added to the model. It will be enforced during
+	/// simplification and in any subsequent solving method.
+	pub fn post_constraint<C: Constraint<Self>>(&mut self, mut constraint: C) {
+		let con = ConRef::new(self.constraints.len());
+		let mut ctx = ModelInitContext::new(self, con);
+		constraint.initialize(&mut ctx);
+		let priority = ctx.priority;
+		let enqueue = ctx.enqueue();
+		self.constraints.push(Some(Box::new(constraint)));
+		let r = ConRef::new(self.constraints.len() - 1);
+		debug_assert_eq!(r, con);
+		self.propagator_queue.info.push(PropagatorInfo {
+			enqueued: false,
+			priority,
+		});
+		debug_assert_eq!(r.index(), self.propagator_queue.info.len() - 1);
+		if enqueue {
+			self.propagator_queue.enqueue_propagator(con.raw());
+		}
+	}
+
+	/// Propagate the constraint at index `con`, updating the domains of the
+	/// variables and rewriting the constraint if necessary.
+	pub(crate) fn propagate(&mut self, con: ConRef) -> Result<(), LoweringError> {
+		let Some(mut con_obj) = self.constraints[con.index()].take() else {
+			return Ok(());
+		};
+		self.cur_prop = Some(con);
+		let mut status = con_obj.simplify(self);
+		self.cur_prop = None;
+
+		// Resolve lazy explanation if it is required.
+		if let Err(Conflict {
+			subject,
+			reason: Reason::Lazy(r),
+		}) = status
+		{
+			debug_assert_eq!(ConRef::new(r.propagator as usize), con);
+			let conj = con_obj.explain(self, subject.unwrap_or(false.into()), r.data);
+			status = Err(Conflict {
+				subject,
+				reason: Reason::Eager(conj.into_boxed_slice()),
+			});
+		};
+
+		match status? {
+			SimplificationStatus::Subsumed => {
+				// Constraint is known to be satisfied, no need to place back.
+			}
+			SimplificationStatus::NoFixpoint => {
+				self.constraints[con.index()] = Some(con_obj);
+			}
+		}
+		self.notify_advisors();
+		Ok(())
 	}
 
 	/// Process the model to create a [`Solver`] instance that can be used to
@@ -623,6 +623,98 @@ mod tests {
 		int_check: Trailed<IntVal>,
 	}
 
+	#[test]
+	#[traced_test]
+	fn test_inverted_bool() {
+		let mut prb = Model::default();
+		let b = prb.new_bool_decision();
+		let i1 = prb.new_int_decision(-1..=0);
+		i1.unify(&mut prb, !b - 1).expect("unify failed");
+
+		let (mut slv, map): (Solver, _) = prb
+			.to_solver(&InitConfig::default())
+			.expect("to_solver failed");
+		let b_slv = map.get_any(&mut slv, AnyView::from(b));
+		let i1_slv = map.get_any(&mut slv, AnyView::from(i1));
+		slv.expect_solutions(
+			&[b_slv, i1_slv],
+			expect![[r#"
+    			false, 0
+    			true, -1"#]],
+		);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_model_advisor_bool_call() {
+		let mut prb = Model::default();
+		let i = prb.new_int_decision(0..=3);
+		let b = i.geq(2);
+		let bool_check = prb.new_trailed(0);
+		let int_check = prb.new_trailed(0);
+		let t = TestModel {
+			b,
+			i,
+			bool_check,
+			int_check,
+		};
+		prb.post_constraint(t);
+		i.tighten_min(&mut prb, 2, []).expect("tighten_min failed");
+		let (_, _): (Solver, _) = prb
+			.to_solver(&InitConfig::default())
+			.expect("to_solver failed");
+		assert_eq!(prb.trailed(bool_check), 1);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_model_advisor_bool_no_call() {
+		let mut prb = Model::default();
+		let i = prb.new_int_decision(0..=3);
+		let b = i.geq(2);
+		let bool_check = prb.new_trailed(0);
+		let int_check = prb.new_trailed(0);
+		let t = TestModel {
+			b,
+			i,
+			bool_check,
+			int_check,
+		};
+		prb.post_constraint(t);
+		i.tighten_min(&mut prb, 1, []).expect("tighten_min failed");
+		let (_, _): (Solver, _) = prb
+			.to_solver(&InitConfig::default())
+			.expect("to_solver failed");
+		assert_eq!(prb.trailed(bool_check), 0);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_model_advisor_int_call() {
+		let mut prb = Model::default();
+		let i = prb.new_int_decision(0..=3);
+		let b = prb.new_bool_decision();
+		let bool_check = prb.new_trailed(0);
+		let int_check = prb.new_trailed(0);
+		let t = TestModel {
+			b,
+			i,
+			bool_check,
+			int_check,
+		};
+		prb.post_constraint(t);
+		i.tighten_min(&mut prb, 1, []).expect("tighten_min failed");
+		i.tighten_max(&mut prb, 2, []).expect("tighten_max failed");
+		let (mut slv, map): (Solver, _) = prb
+			.to_solver(&InitConfig::default())
+			.expect("to_solver failed");
+		assert_eq!(prb.trailed(int_check), 1);
+		let i_slv = map.get(&mut slv, i);
+		let (min, max) = i_slv.bounds(&slv);
+		assert_eq!(min, 1);
+		assert_eq!(max, 2);
+	}
+
 	impl<E> Constraint<E> for TestModel
 	where
 		E: ReasoningEngine,
@@ -675,97 +767,5 @@ mod tests {
 		fn propagate(&mut self, _context: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
 			Ok(())
 		}
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_model_advisor_bool_no_call() {
-		let mut prb = Model::default();
-		let i = prb.new_int_decision(0..=3);
-		let b = i.geq(2);
-		let bool_check = prb.new_trailed(0);
-		let int_check = prb.new_trailed(0);
-		let t = TestModel {
-			b,
-			i,
-			bool_check,
-			int_check,
-		};
-		prb.post_constraint(t);
-		i.tighten_min(&mut prb, 1, []).expect("tighten_min failed");
-		let (_, _): (Solver, _) = prb
-			.to_solver(&InitConfig::default())
-			.expect("to_solver failed");
-		assert_eq!(prb.trailed(bool_check), 0);
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_model_advisor_bool_call() {
-		let mut prb = Model::default();
-		let i = prb.new_int_decision(0..=3);
-		let b = i.geq(2);
-		let bool_check = prb.new_trailed(0);
-		let int_check = prb.new_trailed(0);
-		let t = TestModel {
-			b,
-			i,
-			bool_check,
-			int_check,
-		};
-		prb.post_constraint(t);
-		i.tighten_min(&mut prb, 2, []).expect("tighten_min failed");
-		let (_, _): (Solver, _) = prb
-			.to_solver(&InitConfig::default())
-			.expect("to_solver failed");
-		assert_eq!(prb.trailed(bool_check), 1);
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_model_advisor_int_call() {
-		let mut prb = Model::default();
-		let i = prb.new_int_decision(0..=3);
-		let b = prb.new_bool_decision();
-		let bool_check = prb.new_trailed(0);
-		let int_check = prb.new_trailed(0);
-		let t = TestModel {
-			b,
-			i,
-			bool_check,
-			int_check,
-		};
-		prb.post_constraint(t);
-		i.tighten_min(&mut prb, 1, []).expect("tighten_min failed");
-		i.tighten_max(&mut prb, 2, []).expect("tighten_max failed");
-		let (mut slv, map): (Solver, _) = prb
-			.to_solver(&InitConfig::default())
-			.expect("to_solver failed");
-		assert_eq!(prb.trailed(int_check), 1);
-		let i_slv = map.get(&mut slv, i);
-		let (min, max) = i_slv.bounds(&slv);
-		assert_eq!(min, 1);
-		assert_eq!(max, 2);
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_inverted_bool() {
-		let mut prb = Model::default();
-		let b = prb.new_bool_decision();
-		let i1 = prb.new_int_decision(-1..=0);
-		i1.unify(&mut prb, !b - 1).expect("unify failed");
-
-		let (mut slv, map): (Solver, _) = prb
-			.to_solver(&InitConfig::default())
-			.expect("to_solver failed");
-		let b_slv = map.get_any(&mut slv, AnyView::from(b));
-		let i1_slv = map.get_any(&mut slv, AnyView::from(i1));
-		slv.expect_solutions(
-			&[b_slv, i1_slv],
-			expect![[r#"
-    			false, 0
-    			true, -1"#]],
-		);
 	}
 }

@@ -466,6 +466,46 @@ mod tests {
 	};
 
 	#[test]
+	fn recompute_max_support_after_index_pruning() {
+		let mut prb = Model::default();
+		let a = prb.new_int_decision(1..=1);
+		let b = prb.new_int_decision(3..=3);
+		let c = prb.new_int_decision(4..=4);
+		let result = prb.new_int_decision(1..=4);
+		let index = prb.new_int_decision(0..=2);
+
+		prb.element(vec![a, b, c])
+			.index(index)
+			.result(result)
+			.post();
+		index.remove_val(&mut prb, 2, []).unwrap();
+		let _: (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+
+		assert_eq!(index.domain(&prb), (0..=1).into());
+		assert_eq!(result.bounds(&prb), (1, 3));
+	}
+
+	#[test]
+	fn recompute_min_support_after_index_pruning() {
+		let mut prb = Model::default();
+		let a = prb.new_int_decision(1..=1);
+		let b = prb.new_int_decision(3..=3);
+		let c = prb.new_int_decision(4..=4);
+		let result = prb.new_int_decision(2..=4);
+		let index = prb.new_int_decision(0..=2);
+
+		prb.element(vec![a, b, c])
+			.index(index)
+			.result(result)
+			.post();
+		index.remove_val(&mut prb, 0, []).unwrap();
+		let _: (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+
+		assert_eq!(index.domain(&prb), (1..=2).into());
+		assert_eq!(result.bounds(&prb), (3, 4));
+	}
+
+	#[test]
 	#[traced_test]
 	fn test_element_bounds_sat() {
 		let mut slv = Solver::default();
@@ -562,46 +602,6 @@ mod tests {
     0, 3, 3, 2
     0, 3, 3, 3"#]],
 		);
-	}
-
-	#[test]
-	fn recompute_min_support_after_index_pruning() {
-		let mut prb = Model::default();
-		let a = prb.new_int_decision(1..=1);
-		let b = prb.new_int_decision(3..=3);
-		let c = prb.new_int_decision(4..=4);
-		let result = prb.new_int_decision(2..=4);
-		let index = prb.new_int_decision(0..=2);
-
-		prb.element(vec![a, b, c])
-			.index(index)
-			.result(result)
-			.post();
-		index.remove_val(&mut prb, 0, []).unwrap();
-		let _: (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-
-		assert_eq!(index.domain(&prb), (1..=2).into());
-		assert_eq!(result.bounds(&prb), (3, 4));
-	}
-
-	#[test]
-	fn recompute_max_support_after_index_pruning() {
-		let mut prb = Model::default();
-		let a = prb.new_int_decision(1..=1);
-		let b = prb.new_int_decision(3..=3);
-		let c = prb.new_int_decision(4..=4);
-		let result = prb.new_int_decision(1..=4);
-		let index = prb.new_int_decision(0..=2);
-
-		prb.element(vec![a, b, c])
-			.index(index)
-			.result(result)
-			.post();
-		index.remove_val(&mut prb, 2, []).unwrap();
-		let _: (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
-
-		assert_eq!(index.domain(&prb), (0..=1).into());
-		assert_eq!(result.bounds(&prb), (1, 3));
 	}
 
 	#[test]
