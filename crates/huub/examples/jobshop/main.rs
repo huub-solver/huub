@@ -22,7 +22,7 @@ mod model;
 
 use std::{
 	fmt::{self, Display},
-	process::exit,
+	path::PathBuf,
 	sync::{
 		Arc,
 		atomic::{AtomicBool, Ordering},
@@ -30,15 +30,15 @@ use std::{
 	time::{Duration, Instant},
 };
 
+use clap::{ArgAction, Parser, ValueEnum, builder::BoolishValueParser};
 use huub::{
 	Goal, TerminationSignal,
 	lower::InitConfig,
-	solver::{IntValuation, Solver},
+	solver::{IntValuation, SearchStrategy, Solver, SwitchTrigger},
 };
-use pico_args::Arguments;
 
 use crate::{
-	brancher::{BranchingStrategy, DynamicBranching, StaticBranching},
+	brancher::{BranchingStrategy, StaticBranching},
 	model::{Instance, JobShopModel, ObjectiveType, Solution},
 };
 
@@ -52,37 +52,100 @@ fn parse_time_limit(s: &str) -> Result<Duration, humantime::DurationError> {
 	}
 }
 
-#[derive(Debug, Default)]
-/// The parsed command line options for the jobshop solver.
-struct Options {
+#[derive(Debug, Parser)]
+#[command(
+	name = "jobshop",
+	about = "Solve a job-shop scheduling instance with Huub.",
+	disable_help_subcommand = true
+)]
+/// The parsed command-line options for the jobshop solver.
+struct Cli {
+	/// Path to the JSP instance file.
+	#[arg(value_name = "FILE")]
+	path: PathBuf,
 	/// Whether to print statistics after solving.
+	#[arg(short, long)]
 	statistics: bool,
 	/// Whether to instruct CaDiCaL to use eager reasons for propagation.
+	#[arg(
+		long,
+		action = ArgAction::Set,
+		value_parser = BoolishValueParser::new(),
+		value_name = "bool",
+		default_value_t = InitConfig::default().reason_eager()
+	)]
 	reason_eager: bool,
 	/// The time limit before stopping the solver.
+	#[arg(short = 't', long, value_parser = parse_time_limit, value_name = "duration")]
 	time_limit: Option<Duration>,
 	/// The maximal domain size before switching from eager to lazy literals for
 	/// the integer decision variables.
+	#[arg(
+		long,
+		value_name = "usize",
+		default_value_t = InitConfig::default().int_eager_limit()
+	)]
 	int_eager_limit: usize,
 	/// Whether to enable restarting.
+	#[arg(
+		long,
+		action = ArgAction::Set,
+		value_parser = BoolishValueParser::new(),
+		value_name = "bool",
+		default_value_t = InitConfig::default().restart()
+	)]
 	restart: bool,
-	/// The number of conflicts before starting to use VSIDS.
-	vsids_after_conflict: Option<u32>,
-	/// Whether to use VSIDS after the first restart
-	vsids_after_restart: bool,
-	/// Whether to toggle VSIDS on and off after each conflict.
-	toggle_vsids: bool,
-	/// Whether to use VSIDS only, ignoring the branching strategy.
-	vsids_only: bool,
+	/// Set the overarching search strategy used by the solver.
+	#[arg(long, value_enum, value_name = "strategy", default_value_t = SearchMode::Branchers)]
+	search_strategy: SearchMode,
+	/// Set the search trigger used by the solver, required if
+	/// `--search-strategy` is “transition” or “interleaved”.
+	#[arg(long, value_enum, value_name = "trigger", default_value_t = SearchTrigger::Conflicts, hide_default_value = true, required_if_eq_any = [("search_strategy", "transition"), ("search_strategy", "interleaved")])]
+	search_trigger: SearchTrigger,
+	/// Set the required trigger interval for search strategy “transition” or
+	/// “interleaved”.
+	#[arg(long, default_value_t = 1, value_name = "u64", hide_default_value = true, required_if_eq_any = [("search_strategy", "transition"), ("search_strategy", "interleaved")])]
+	search_interval: u64,
 	/// Whether to print verbose output.
+	#[arg(short, long)]
 	verbose: bool,
 	/// The chosen objective.
+	#[arg(long, value_enum, value_name = "objective", default_value_t = ObjectiveType::Makespan)]
 	objective_type: ObjectiveType,
 	/// The branching strategy to use by the solver.
-	strategy: BranchingStrategy,
+	#[arg(long, value_enum, value_name = "strategy", default_value_t = BranchingStrategy::Static(StaticBranching::JobInputOrder))]
+	branching_strategy: BranchingStrategy,
 }
 
-impl Options {
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+/// Search strategy options exposed through the job-shop CLI.
+enum SearchMode {
+	/// Use the user-provided branchers for all search decisions until they are
+	/// exhausted, and only then defer to the SAT solver.
+	#[default]
+	Branchers,
+	/// Always defer to the SAT solver to make search decisions, ignoring any
+	/// user-provided branchers.
+	Sat,
+	/// Transition from “branchers” to “sat” when the given trigger condition is
+	/// met.
+	Transition,
+	/// Interleave “branchers” and “sat” search strategies, switching between
+	/// them each time the trigger condition is met.
+	Interleaved,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+/// Trigger counters that can drive search-strategy transitions.
+enum SearchTrigger {
+	/// Switch after the given number of conflicts have been encountered.
+	#[default]
+	Conflicts,
+	/// Switch after the given number of restarts have been encountered.
+	Restarts,
+}
+
+impl Cli {
 	/// Formats an option value as a string, using "N/A" as the default if the
 	/// value is `None`.
 	fn display_option<'a, T: Display>(&self, opt: &'a Option<T>) -> &'a dyn Display {
@@ -94,11 +157,27 @@ impl Options {
 			&N_A
 		}
 	}
+
+	/// Build the solver search strategy from the CLI flags.
+	fn search_strategy(&self) -> SearchStrategy {
+		let trigger = match self.search_trigger {
+			SearchTrigger::Conflicts => SwitchTrigger::Conflicts,
+			SearchTrigger::Restarts => SwitchTrigger::Restarts,
+		};
+		let trigger = trigger(self.search_interval);
+		match self.search_strategy {
+			SearchMode::Branchers => SearchStrategy::Branchers,
+			SearchMode::Sat => SearchStrategy::Sat,
+			SearchMode::Transition => SearchStrategy::Transition(trigger),
+			SearchMode::Interleaved => SearchStrategy::Interleaved(trigger),
+		}
+	}
 }
 
-impl Display for Options {
+impl Display for Cli {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		writeln!(f, "  Objective type: {:?}", self.objective_type)?;
+		writeln!(f, "  Branching strategy: {:?}", self.branching_strategy)?;
 		writeln!(f, "  Reason eager: {}", self.reason_eager)?;
 		writeln!(f, "  Integer eager limit: {}", self.int_eager_limit)?;
 		writeln!(
@@ -107,123 +186,36 @@ impl Display for Options {
 			self.display_option(&self.time_limit.map(|tl| tl.as_secs_f32()))
 		)?;
 		writeln!(f, "  Restart: {}", self.restart)?;
-		writeln!(
-			f,
-			"  VSIDS after conflict: {}",
-			self.display_option(&self.vsids_after_conflict)
-		)?;
-		writeln!(f, "  VSIDS after restart: {}", self.vsids_after_restart)?;
-		writeln!(f, "  Toggle VSIDS: {}", self.toggle_vsids)?;
-		writeln!(f, "  VSIDS only: {}", self.vsids_only)?;
+		writeln!(f, "  Search strategy: {:?}", self.search_strategy)?;
+		if matches!(
+			self.search_strategy,
+			SearchMode::Transition | SearchMode::Interleaved
+		) {
+			writeln!(f, "  Search trigger: {:?}", self.search_trigger)?;
+			writeln!(f, "  Search interval: {}", self.search_interval)?;
+		}
 		Ok(())
 	}
 }
 
-/// Parses command-line arguments and builds a job-shop scheduling instance.
-///
-/// # command-line options
-/// - `-v`, `--verbose`: Print details for every solution found.
-/// - `-s`, `--statistics`: Print solver statistics after solving.
-/// - `--reason-eager`: Enable eager reason requests for propagated literals.
-/// - `-t`, `--time-limit <DURATION>`: Set a time limit (e.g., `60`, `1m`,
-///   `2h`). Accepts milliseconds (default), seconds (`s`), minutes (`m`), or
-///   hours (`h`).
-/// - `--int-eager-limit <INT>`: Set the integer eager limit (default: 256).
-/// - `--restart`: Enable solver restarts.
-/// - `--vsids-after-conflict <INT>`: Enable VSIDS after a given number of
-///   conflicts.
-/// - `--vsids-after-restart`: Enable VSIDS after each restart.
-/// - `--toggle-vsids`: Toggle VSIDS during solving.
-/// - `--vsids-only`: Use only VSIDS for variable selection.
-/// - `--objective-type <TYPE>`: Objective type: `makespan` (minimize max
-///   completion time) or `total_completion_time` (minimize sum of completion
-///   times).
-/// - `--branching-strategy <STRATEGY>`: Branching strategy: `job-input-order`,
-///   `job-least-total-work`, `job-most-total-work`, `job-fewest-operations`,
-///   `job-most-operations`, `operation-input-order`,
-///   `operation-longest-processing-time`, `operation-shortest-processing-time`,
-///   `least-work`, `most-work`, `fewest-operations`, or `most-operations`.
-/// - `<data_file>`: Path to the JSP instance file (required).
-///
-/// # errors
-/// Returns an error if required arguments are missing, unexpected arguments
-/// are present, or the JSP file cannot be parsed.
-fn parse_args() -> Result<(Instance, Options), String> {
-	let mut pargs = Arguments::from_env();
-
-	let parse_objective_type = |s: &str| match s {
-		"makespan" => Ok(ObjectiveType::Makespan),
-		"total_completion_time" => Ok(ObjectiveType::TotalCompletionTime),
-		_ => Err(format!("Invalid objective type: {s}")),
-	};
-
-	let parse_branching_strategy = |s: &str| match s {
-		"job-input-order" => Ok(BranchingStrategy::Static(StaticBranching::JobInputOrder)),
-		"job-least-total-work" => Ok(BranchingStrategy::Static(
-			StaticBranching::JobLeastTotalWork,
-		)),
-		"job-most-total-work" => Ok(BranchingStrategy::Static(StaticBranching::JobMostTotalWork)),
-		"job-fewest-operations" => Ok(BranchingStrategy::Static(
-			StaticBranching::JobFewestOperations,
-		)),
-		"job-most-operations" => Ok(BranchingStrategy::Static(
-			StaticBranching::JobMostOperations,
-		)),
-		"operation-input-order" => Ok(BranchingStrategy::Static(
-			StaticBranching::OperationInputOrder,
-		)),
-		"operation-longest-processing-time" => Ok(BranchingStrategy::Static(
-			StaticBranching::OperationLongestProcessingTime,
-		)),
-		"operation-shortest-processing-time" => Ok(BranchingStrategy::Static(
-			StaticBranching::OperationShortestProcessingTime,
-		)),
-		"least-work" => Ok(BranchingStrategy::Dynamic(DynamicBranching::LeastWork)),
-		"most-work" => Ok(BranchingStrategy::Dynamic(DynamicBranching::MostWork)),
-		"fewest-operations" => Ok(BranchingStrategy::Dynamic(
-			DynamicBranching::FewestOperations,
-		)),
-		"most-operations" => Ok(BranchingStrategy::Dynamic(DynamicBranching::MostOperations)),
-		_ => Err(format!("Invalid branching strategy: {s}")),
-	};
-
-	let options = Options {
-		verbose: pargs.contains(["-v", "--verbose"]),
-		statistics: pargs.contains(["-s", "--statistics"]),
-		reason_eager: pargs.contains("--reason-eager"),
-		time_limit: pargs
-			.opt_value_from_fn(["-t", "--time-limit"], parse_time_limit)
-			.map_err(|e| e.to_string())?,
-		int_eager_limit: pargs.value_from_str("--int-eager-limit").unwrap_or(256),
-		restart: pargs.contains("--restart"),
-		vsids_after_conflict: pargs
-			.opt_value_from_str("--vsids-after-conflict")
-			.unwrap_or(None),
-		vsids_after_restart: pargs.contains("--vsids-after-restart"),
-		toggle_vsids: pargs.contains("--toggle-vsids"),
-		vsids_only: pargs.contains("--vsids-only"),
-		objective_type: pargs
-			.value_from_fn("--objective-type", parse_objective_type)
-			.unwrap_or_default(),
-		strategy: pargs
-			.value_from_fn("--branching-strategy", parse_branching_strategy)
-			.unwrap_or(BranchingStrategy::Static(StaticBranching::JobInputOrder)),
-	};
-
-	let data_file: String = pargs.free_from_str().expect("Missing data file argument");
-
-	let remaining_args = pargs.finish();
-	if !remaining_args.is_empty() {
-		return Err(format!("Unexpected arguments: {remaining_args:?}"));
-	}
-
-	let instance = Instance::from_jsp_file(data_file.as_str()).expect("Failed to parse JSP file");
-
-	Ok((instance, options))
-}
-
 fn main() {
-	let (instance, options) = parse_args().expect("Failed to parse arguments");
+	let options = match Cli::try_parse_from(std::env::args_os()) {
+		Ok(options) => options,
+		Err(err) => {
+			err.print().expect("unable to write clap error output");
+			std::process::exit(2);
+		}
+	};
+	let instance = match Instance::from_jsp_file(options.path.to_string_lossy().as_ref()) {
+		Ok(instance) => instance,
+		Err(err) => {
+			eprintln!(
+				"failed to parse JSP file “{}”: {err}",
+				options.path.display()
+			);
+			std::process::exit(2);
+		}
+	};
 	let JobShopModel {
 		mut model,
 		start_time,
@@ -249,14 +241,9 @@ fn main() {
 	let (mut slv, map): (Solver, _) = model.to_solver(&init_config).unwrap();
 
 	options
-		.strategy
+		.branching_strategy
 		.to_solver(&mut slv, &map, &start_time, &instance);
-
-	// Set solver options from command-line flags.
-	slv.set_toggle_vsids(options.toggle_vsids);
-	slv.set_vsids_after_conflict(options.vsids_after_conflict);
-	slv.set_vsids_after_restart(options.vsids_after_restart);
-	slv.set_vsids_only(options.vsids_only);
+	slv.set_search_strategy(options.search_strategy());
 
 	// Solve the problem using branch-and-bound for the selected objective.
 	let obj = map.get(&mut slv, objective_variable);
@@ -284,7 +271,7 @@ fn main() {
 		}
 	}) {
 		println!("unable to set Ctrl-C handler: {err}");
-		exit(-1);
+		std::process::exit(-1);
 	}
 
 	let (status, stats, _) = slv.branch_and_bound(Goal::Minimize(obj), |sol| {

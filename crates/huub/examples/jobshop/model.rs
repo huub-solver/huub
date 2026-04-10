@@ -6,6 +6,7 @@ use std::{
 	io::{self, BufRead, BufReader},
 };
 
+use clap::ValueEnum;
 use huub::{
 	lower::LoweringMap,
 	model::{self, Model, expressions::IntLinearExp},
@@ -132,7 +133,7 @@ impl Instance {
 
 /// Choice of objective function to use to access the quality of a jobshop
 /// assignment.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, ValueEnum)]
 pub(crate) enum ObjectiveType {
 	/// The makespan objective function, which minimizes the completion time of
 	/// the last operation on the last machine.

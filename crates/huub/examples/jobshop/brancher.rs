@@ -1,5 +1,6 @@
 //! Branching strategies for the job shop example.
 
+use clap::{ValueEnum, builder::PossibleValue};
 use huub::{
 	actions::{
 		BoolInspectionActions, BrancherInitActions, DecisionActions, IntDecisionActions,
@@ -74,6 +75,47 @@ pub(crate) enum BranchingStrategy {
 	Dynamic(DynamicBranching),
 }
 
+impl ValueEnum for BranchingStrategy {
+	fn value_variants<'a>() -> &'a [Self] {
+		&[
+			Self::Static(StaticBranching::JobInputOrder),
+			Self::Static(StaticBranching::JobLeastTotalWork),
+			Self::Static(StaticBranching::JobMostTotalWork),
+			Self::Static(StaticBranching::JobFewestOperations),
+			Self::Static(StaticBranching::JobMostOperations),
+			Self::Static(StaticBranching::OperationInputOrder),
+			Self::Static(StaticBranching::OperationLongestProcessingTime),
+			Self::Static(StaticBranching::OperationShortestProcessingTime),
+			Self::Dynamic(DynamicBranching::LeastWork),
+			Self::Dynamic(DynamicBranching::MostWork),
+			Self::Dynamic(DynamicBranching::FewestOperations),
+			Self::Dynamic(DynamicBranching::MostOperations),
+		]
+	}
+
+	fn to_possible_value(&self) -> Option<PossibleValue> {
+		let name = match self {
+			Self::Static(StaticBranching::JobInputOrder) => "job-input-order",
+			Self::Static(StaticBranching::JobLeastTotalWork) => "job-least-total-work",
+			Self::Static(StaticBranching::JobMostTotalWork) => "job-most-total-work",
+			Self::Static(StaticBranching::JobFewestOperations) => "job-fewest-operations",
+			Self::Static(StaticBranching::JobMostOperations) => "job-most-operations",
+			Self::Static(StaticBranching::OperationInputOrder) => "operation-input-order",
+			Self::Static(StaticBranching::OperationLongestProcessingTime) => {
+				"operation-longest-processing-time"
+			}
+			Self::Static(StaticBranching::OperationShortestProcessingTime) => {
+				"operation-shortest-processing-time"
+			}
+			Self::Dynamic(DynamicBranching::LeastWork) => "least-work",
+			Self::Dynamic(DynamicBranching::MostWork) => "most-work",
+			Self::Dynamic(DynamicBranching::FewestOperations) => "fewest-operations",
+			Self::Dynamic(DynamicBranching::MostOperations) => "most-operations",
+		};
+		Some(PossibleValue::new(name))
+	}
+}
+
 impl Default for BranchingStrategy {
 	fn default() -> Self {
 		BranchingStrategy::Static(StaticBranching::JobInputOrder)
@@ -91,7 +133,7 @@ impl BranchingStrategy {
 	) {
 		match self {
 			BranchingStrategy::Static(strategy) => {
-				let branching = create_static_branching(strategy, start_time, instance);
+				let branching = strategy.huub_branching(start_time, instance);
 				branching.to_solver(solver, map);
 			}
 			BranchingStrategy::Dynamic(strategy) => {
@@ -109,90 +151,92 @@ impl BranchingStrategy {
 	}
 }
 
-/// Creates a static branching strategy for the job shop scheduling problem.
-fn create_static_branching(
-	strategy: StaticBranching,
-	start_time: &[Vec<huub_model::View<i64>>],
-	instance: &Instance,
-) -> Branching {
-	let mut vars = Vec::new();
-	match strategy {
-		StaticBranching::JobInputOrder | StaticBranching::OperationInputOrder => {
-			// Order jobs or operations by their original order in the input.
-			for &op in start_time.iter().flatten() {
-				vars.push(op);
-			}
-		}
-		StaticBranching::JobLeastTotalWork | StaticBranching::JobMostTotalWork => {
-			// Order jobs by total processing time.
-			let mut job_work: Vec<(usize, i64)> = (0..instance.n)
-				.map(|job_idx| {
-					let work = instance.jobs[job_idx]
-						.iter()
-						.map(|op| op.processing_time as i64)
-						.sum();
-					(job_idx, work)
-				})
-				.collect();
-			job_work.sort_by(|a, b| {
-				if strategy == StaticBranching::JobMostTotalWork {
-					b.1.cmp(&a.1)
-				} else {
-					a.1.cmp(&b.1)
-				}
-			});
-			for (job_idx, _) in job_work {
-				for &op in &start_time[job_idx] {
+impl StaticBranching {
+	/// Creates a static branching strategy for the job shop scheduling problem.
+	fn huub_branching(
+		self,
+		start_time: &[Vec<huub_model::View<i64>>],
+		instance: &Instance,
+	) -> Branching {
+		let mut vars = Vec::new();
+		match self {
+			StaticBranching::JobInputOrder | StaticBranching::OperationInputOrder => {
+				// Order jobs or operations by their original order in the input.
+				for &op in start_time.iter().flatten() {
 					vars.push(op);
 				}
 			}
-		}
-		StaticBranching::JobMostOperations | StaticBranching::JobFewestOperations => {
-			// Order jobs by the number of remaining operations.
-			let mut job_lengths: Vec<(usize, i64)> = (0..instance.n)
-				.map(|job_idx| (job_idx, instance.jobs[job_idx].len() as i64))
-				.collect();
-			job_lengths.sort_by(|a, b| {
-				if strategy == StaticBranching::JobMostOperations {
-					b.1.cmp(&a.1)
-				} else {
-					a.1.cmp(&b.1)
-				}
-			});
-			for (job_idx, _) in job_lengths {
-				for &op in &start_time[job_idx] {
-					vars.push(op);
-				}
-			}
-		}
-		StaticBranching::OperationLongestProcessingTime
-		| StaticBranching::OperationShortestProcessingTime => {
-			// Order all operations by processing time.
-			let mut operations = Vec::new();
-			for (job_idx, job) in instance.jobs.iter().enumerate() {
-				for (op_idx, op) in job.iter().enumerate() {
-					operations.push((job_idx, op_idx, op.processing_time as i64));
+			StaticBranching::JobLeastTotalWork | StaticBranching::JobMostTotalWork => {
+				// Order jobs by total processing time.
+				let mut job_work: Vec<(usize, i64)> = (0..instance.n)
+					.map(|job_idx| {
+						let work = instance.jobs[job_idx]
+							.iter()
+							.map(|op| op.processing_time as i64)
+							.sum();
+						(job_idx, work)
+					})
+					.collect();
+				job_work.sort_by(|a, b| {
+					if self == StaticBranching::JobMostTotalWork {
+						b.1.cmp(&a.1)
+					} else {
+						a.1.cmp(&b.1)
+					}
+				});
+				for (job_idx, _) in job_work {
+					for &op in &start_time[job_idx] {
+						vars.push(op);
+					}
 				}
 			}
-			operations.sort_by(|a, b| {
-				if strategy == StaticBranching::OperationLongestProcessingTime {
-					b.2.cmp(&a.2)
-				} else {
-					a.2.cmp(&b.2)
+			StaticBranching::JobMostOperations | StaticBranching::JobFewestOperations => {
+				// Order jobs by the number of remaining operations.
+				let mut job_lengths: Vec<(usize, i64)> = (0..instance.n)
+					.map(|job_idx| (job_idx, instance.jobs[job_idx].len() as i64))
+					.collect();
+				job_lengths.sort_by(|a, b| {
+					if self == StaticBranching::JobMostOperations {
+						b.1.cmp(&a.1)
+					} else {
+						a.1.cmp(&b.1)
+					}
+				});
+				for (job_idx, _) in job_lengths {
+					for &op in &start_time[job_idx] {
+						vars.push(op);
+					}
 				}
-			});
+			}
+			StaticBranching::OperationLongestProcessingTime
+			| StaticBranching::OperationShortestProcessingTime => {
+				// Order all operations by processing time.
+				let mut operations = Vec::new();
+				for (job_idx, job) in instance.jobs.iter().enumerate() {
+					for (op_idx, op) in job.iter().enumerate() {
+						operations.push((job_idx, op_idx, op.processing_time as i64));
+					}
+				}
+				operations.sort_by(|a, b| {
+					if self == StaticBranching::OperationLongestProcessingTime {
+						b.2.cmp(&a.2)
+					} else {
+						a.2.cmp(&b.2)
+					}
+				});
 
-			for (job_idx, op_idx, _) in operations {
-				vars.push(start_time[job_idx][op_idx]);
+				for (job_idx, op_idx, _) in operations {
+					vars.push(start_time[job_idx][op_idx]);
+				}
 			}
 		}
+
+		Branching::Int(
+			vars,
+			VariableSelection::InputOrder,
+			ValueSelection::IndomainMin,
+		)
 	}
-
-	Branching::Int(
-		vars,
-		VariableSelection::InputOrder,
-		ValueSelection::IndomainMin,
-	)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
