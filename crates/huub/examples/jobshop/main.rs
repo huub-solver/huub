@@ -235,12 +235,12 @@ fn main() {
 		if let Some(obj) = last_obj {
 			println!("  Objective value: {obj}");
 		}
-		println!("  User decisions: {}", stats.user_decisions());
-		println!("  Oracle decisions: {}", stats.sat_decisions());
-		println!("  Propagations: {}", stats.cp_propagations());
-		println!("  Conflicts: {}", stats.conflicts());
-		println!("  Restarts: {}", stats.restarts());
-		println!("  Peak depth: {}", stats.peak_depth());
+		println!("  User decisions: {}", stats.user_search_directives);
+		println!("  Oracle decisions: {}", stats.sat_search_directives);
+		println!("  Propagations: {}", stats.cp_propagator_calls);
+		println!("  Conflicts: {}", stats.conflicts);
+		println!("  Restarts: {}", stats.restarts);
+		println!("  Peak depth: {}", stats.peak_depth);
 		println!(
 			"  Time: {:.3} seconds",
 			(Instant::now() - start).as_secs_f32()
