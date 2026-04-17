@@ -1193,7 +1193,7 @@ where
 						let sum = self.arg_int(sum)?;
 
 						let mut terms = Vec::with_capacity(vars.len() + 1);
-						for (x, c) in vars.into_iter().zip(coeffs.into_iter()) {
+						for (x, c) in vars.into_iter().zip(coeffs) {
 							if let Some(c) = NonZero::new(c) {
 								terms.push(
 									View::from(x)
@@ -1779,7 +1779,7 @@ where
 							.try_collect()?;
 						let rhs = self.arg_par_int(rhs)?;
 						let mut terms = Vec::with_capacity(vars.len());
-						for (x, c) in vars.into_iter().zip(coeffs.into_iter()) {
+						for (x, c) in vars.into_iter().zip(coeffs) {
 							terms.push(
 								x.bounding_mul(&mut self.prb, c)
 									.map_err(LoweringError::from)?,
@@ -1824,7 +1824,7 @@ where
 						let rhs = self.arg_par_int(rhs)?;
 						let reified = self.arg_bool(reified)?;
 						let mut terms = Vec::with_capacity(vars.len());
-						for (x, c) in vars.into_iter().zip(coeffs.into_iter()) {
+						for (x, c) in vars.into_iter().zip(coeffs) {
 							terms.push(
 								x.bounding_mul(&mut self.prb, c)
 									.map_err(LoweringError::from)?,
