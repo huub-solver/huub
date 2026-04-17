@@ -285,3 +285,72 @@ impl fmt::Display for Solution {
 		Ok(())
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use huub::{
+		Goal,
+		lower::InitConfig,
+		solver::{IntValuation, Solver},
+	};
+
+	use super::{Instance, JobShopModel, ObjectiveType};
+
+	fn solve_objective(path: &str, objective_type: ObjectiveType) -> i64 {
+		let instance = Instance::from_jsp_file(path).expect("failed to parse instance");
+		let JobShopModel {
+			mut model,
+			objective,
+			..
+		} = JobShopModel::new(&instance, objective_type);
+		let (mut slv, map): (Solver, _) = model.to_solver(&InitConfig::default()).unwrap();
+		let obj = map.get(&mut slv, objective);
+		let mut best = None;
+		slv.branch_and_bound(Goal::Minimize(obj), |sol| {
+			best = Some(IntValuation::val(&obj, sol));
+		});
+		best.expect("no solution found")
+	}
+
+	#[test]
+	fn small_2x2_optimal_makespan() {
+		let path = concat!(
+			env!("CARGO_MANIFEST_DIR"),
+			"/examples/jobshop/instances/small_2x2.jsp"
+		);
+		assert_eq!(solve_objective(path, ObjectiveType::Makespan), 6);
+	}
+
+	#[test]
+	fn small_2x2_optimal_total_completion_time() {
+		let path = concat!(
+			env!("CARGO_MANIFEST_DIR"),
+			"/examples/jobshop/instances/small_2x2.jsp"
+		);
+		assert_eq!(
+			solve_objective(path, ObjectiveType::TotalCompletionTime),
+			11
+		);
+	}
+
+	#[test]
+	fn ft06_optimal_makespan() {
+		let path = concat!(
+			env!("CARGO_MANIFEST_DIR"),
+			"/examples/jobshop/instances/ft06.jsp"
+		);
+		assert_eq!(solve_objective(path, ObjectiveType::Makespan), 55);
+	}
+
+	#[test]
+	fn ft06_optimal_optimal_total_completion_time() {
+		let path = concat!(
+			env!("CARGO_MANIFEST_DIR"),
+			"/examples/jobshop/instances/ft06.jsp"
+		);
+		assert_eq!(
+			solve_objective(path, ObjectiveType::TotalCompletionTime),
+			265
+		);
+	}
+}
