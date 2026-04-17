@@ -385,7 +385,7 @@ impl<'a> Cli<'a> {
 						}
 					);
 				});
-				(res, slv.search_statistics())
+				(res, slv.solver_statistics())
 			}
 		};
 		if self.statistics {
@@ -394,12 +394,14 @@ impl<'a> Cli<'a> {
 				"complete",
 				&[
 					("solveTime", &(Instant::now() - start_solve).as_secs_f64()),
-					("failures", &stats.conflicts()),
-					("peakDepth", &stats.peak_depth()),
-					("propagations", &stats.cp_propagations()),
-					("restarts", &stats.restarts()),
-					("satDecisions", &stats.sat_decisions()),
-					("userDecisions", &stats.user_decisions()),
+					("failures", &stats.conflicts),
+					("restarts", &stats.restarts),
+					("peakDepth", &stats.peak_depth),
+					("cpPropagatorCalls", &stats.cp_propagator_calls),
+					("satSearchDirectives", &stats.sat_search_directives),
+					("userSearchDirectives", &stats.user_search_directives),
+					("eagerLiterals", &stats.eager_literals),
+					("lazyLiterals", &stats.lazy_literals),
 				],
 			);
 		}

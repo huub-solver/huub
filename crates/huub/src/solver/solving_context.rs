@@ -115,6 +115,7 @@ impl IntDecisionActions<SolvingContext<'_>> for Decision<IntVal> {
 		let new_var = |def: LazyLitDef| {
 			// Create new variable
 			let v = ctx.slv.new_observed_var();
+			ctx.state.statistics.lazy_literals += 1;
 			ctx.state.trail.grow_to_boolvar(v);
 			trace_new_lit!(*self, def, v);
 			ctx.state.bool_to_int.insert_lazy(v, *self, def.meaning);

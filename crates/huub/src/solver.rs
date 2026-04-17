@@ -98,24 +98,6 @@ pub enum IntLitMeaning {
 /// Note that this checker will always return false.
 pub(crate) struct NoAssumptions;
 
-/// Structure capturing statistical information about the search performed by
-/// the solver instance.
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
-pub struct SearchStatistics {
-	/// Number of conflicts encountered
-	pub(crate) conflicts: u64,
-	/// Number of search decisions left to the SAT solver
-	pub(crate) sat_decisions: u64,
-	/// Peak search depth
-	pub(crate) peak_depth: u32,
-	/// Number of times a CP propagator was called
-	pub(crate) propagations: u64,
-	/// Number of backtracks to level 0
-	pub(crate) restarts: u32,
-	/// Number of decisions following the user-specified search heuristics
-	pub(crate) user_decisions: u64,
-}
-
 /// The overarching search strategy used by the solver.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum SearchStrategy {
@@ -144,6 +126,31 @@ pub struct Solver<Sat = Cadical> {
 	/// A reference to the [`Engine`] instance that is connected to
 	/// [`Self::sat`].
 	pub(crate) engine: Rc<RefCell<Engine>>,
+}
+
+/// Structure capturing statistical information about the solver instance and
+/// the search it has performed.
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub struct SolverStatistics {
+	/// Number of conflicts encountered during the search.
+	pub conflicts: u64,
+	/// Number of search directives made by the SAT solver.
+	pub sat_search_directives: u64,
+	/// Peak depth of the search tree.
+	pub peak_depth: u32,
+	/// Number of times a [`Propagator`] instance was called.
+	pub cp_propagator_calls: u64,
+	/// Number of times the search was restarted from the root (as signalled by
+	/// the SAT solver).
+	pub restarts: u32,
+	/// Number of search directives made by the user-specified search
+	/// heuristics
+	pub user_search_directives: u64,
+	/// Number of eagerly created SAT literals to represent decisions variables
+	pub eager_literals: u64,
+	/// Number of lazily created SAT literals to represent decision variables
+	pub lazy_literals: u64,
 }
 
 /// Result of a solving attempt
@@ -257,84 +264,6 @@ impl AssumptionChecker for NoAssumptions {
 	}
 }
 
-impl SearchStatistics {
-	/// Returns the number of conflicts encountered during the search.
-	pub fn conflicts(&self) -> u64 {
-		self.conflicts
-	}
-
-	/// Returns the number of propagations performed by the constraint
-	/// programming engine during the search.
-	pub fn cp_propagations(&self) -> u64 {
-		self.propagations
-	}
-
-	/// Returns the peak depth of the search tree.
-	pub fn peak_depth(&self) -> u32 {
-		self.peak_depth
-	}
-
-	/// Returns the number of times the search was restarted by the SAT
-	/// solver.
-	pub fn restarts(&self) -> u32 {
-		self.restarts
-	}
-
-	/// Return the number of search decisions that was left to the SAT
-	/// solver.
-	pub fn sat_decisions(&self) -> u64 {
-		self.sat_decisions
-	}
-
-	/// Returns the number of search decisions that followed the user specified
-	/// search heuristic.
-	pub fn user_decisions(&self) -> u64 {
-		self.user_decisions
-	}
-}
-
-impl Add for SearchStatistics {
-	type Output = SearchStatistics;
-
-	fn add(mut self, other: SearchStatistics) -> SearchStatistics {
-		self += other;
-		self
-	}
-}
-
-impl AddAssign for SearchStatistics {
-	fn add_assign(&mut self, other: SearchStatistics) {
-		self.conflicts += other.conflicts;
-		self.sat_decisions += other.sat_decisions;
-		self.peak_depth = self.peak_depth.max(other.peak_depth);
-		self.propagations += other.propagations;
-		self.restarts += other.restarts;
-		self.user_decisions += other.user_decisions;
-	}
-}
-
-impl<Sat: ClauseDatabase> Solver<Sat> {
-	/// Add a clause to the solver
-	pub fn add_clause<Iter>(
-		&mut self,
-		clause: Iter,
-	) -> Result<(), <Self as ReasoningContext>::Conflict>
-	where
-		Iter: IntoIterator,
-		Iter::Item: Into<View<bool>>,
-	{
-		let clause = clause.into_iter().map(Into::into).collect_vec();
-		match ClauseDatabaseTools::add_clause(&mut self.sat, clause.clone()) {
-			Ok(()) => Ok(()),
-			Err(Unsatisfiable) => Err(Conflict::new(
-				self,
-				None,
-				clause.into_iter().map(|l| !l).collect_vec(),
-			)),
-		}
-	}
-}
-
 impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 	/// Try and find a solution to the problem for which the Solver was
 	/// initialized, given a list of Boolean assumptions.
@@ -373,6 +302,28 @@ impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 				Status::Unsatisfiable
 			}
 			SatSolveResult::Unknown => Status::Unknown,
+		}
+	}
+}
+
+impl<Sat: ClauseDatabase> Solver<Sat> {
+	/// Add a clause to the solver
+	pub fn add_clause<Iter>(
+		&mut self,
+		clause: Iter,
+	) -> Result<(), <Self as ReasoningContext>::Conflict>
+	where
+		Iter: IntoIterator,
+		Iter::Item: Into<View<bool>>,
+	{
+		let clause = clause.into_iter().map(Into::into).collect_vec();
+		match ClauseDatabaseTools::add_clause(&mut self.sat, clause.clone()) {
+			Ok(()) => Ok(()),
+			Err(Unsatisfiable) => Err(Conflict::new(
+				self,
+				None,
+				clause.into_iter().map(|l| !l).collect_vec(),
+			)),
 		}
 	}
 }
@@ -470,10 +421,10 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		mut self,
 		vars: &[AnyView],
 		mut on_sol: impl FnMut(Solution<'_>),
-	) -> (Status, SearchStatistics) {
+	) -> (Status, SolverStatistics) {
 		use Status::*;
 
-		let ret = |x: Self, status: Status| (status, x.search_statistics());
+		let ret = |x: Self, status: Status| (status, x.solver_statistics());
 
 		let mut num_sol = 0;
 		loop {
@@ -541,10 +492,10 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		mut self,
 		goal: Goal<View<IntVal>>,
 		mut on_sol: impl FnMut(Solution<'_>),
-	) -> (Status, SearchStatistics, Option<IntVal>) {
+	) -> (Status, SolverStatistics, Option<IntVal>) {
 		use Status::*;
 		let ret =
-			|x: Self, status: Status, obj: Option<IntVal>| (status, x.search_statistics(), obj);
+			|x: Self, status: Status, obj: Option<IntVal>| (status, x.solver_statistics(), obj);
 
 		let mut obj_curr = None;
 		let (obj_bound, objective) = match goal {
@@ -624,7 +575,7 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 	pub fn collect_all_solutions(
 		self,
 		vars: &[AnyView],
-	) -> (Status, SearchStatistics, Vec<Vec<Value>>) {
+	) -> (Status, SolverStatistics, Vec<Vec<Value>>) {
 		let mut solutions = Vec::new();
 		let (status, stats) = self.all_solutions(vars, |sol| {
 			let mut sol_vec = Vec::with_capacity(vars.len());
@@ -647,20 +598,8 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 	/// Create a new Boolean decision variable in the solver.
 	pub fn new_bool_decision(&mut self) -> Decision<bool> {
 		let lit = self.sat.new_lit();
+		self.engine.borrow_mut().state.statistics.eager_literals += 1;
 		Decision(lit)
-	}
-
-	/// Access the search statistics for the search process up to this point.
-	pub fn search_statistics(&self) -> SearchStatistics {
-		let cp_stats = &self.engine.borrow().state.statistics;
-		SearchStatistics {
-			conflicts: cp_stats.conflicts,
-			sat_decisions: cp_stats.sat_decisions,
-			peak_depth: cp_stats.peak_depth,
-			propagations: cp_stats.propagations,
-			restarts: cp_stats.restarts,
-			user_decisions: cp_stats.user_decisions,
-		}
 	}
 
 	/// Set the overarching search strategy to use during solving.
@@ -683,6 +622,21 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 			}
 			SatSolveResult::Unsatisfiable(_) => Status::Unsatisfiable,
 			SatSolveResult::Unknown => Status::Unknown,
+		}
+	}
+
+	/// Access the solver statistics for the search process up to this point.
+	pub fn solver_statistics(&self) -> SolverStatistics {
+		let cp_stats = &self.engine.borrow().state.statistics;
+		SolverStatistics {
+			conflicts: cp_stats.conflicts,
+			sat_search_directives: cp_stats.sat_search_directives,
+			peak_depth: cp_stats.peak_depth,
+			cp_propagator_calls: cp_stats.propagations,
+			restarts: cp_stats.restarts,
+			user_search_directives: cp_stats.user_search_directives,
+			eager_literals: cp_stats.eager_literals,
+			lazy_literals: cp_stats.lazy_literals,
 		}
 	}
 }
@@ -829,5 +783,27 @@ impl<Sat> TrailingActions for Solver<Sat> {
 
 	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
 		self.engine.borrow().state.trailed(i)
+	}
+}
+
+impl Add for SolverStatistics {
+	type Output = SolverStatistics;
+
+	fn add(mut self, other: SolverStatistics) -> SolverStatistics {
+		self += other;
+		self
+	}
+}
+
+impl AddAssign for SolverStatistics {
+	fn add_assign(&mut self, other: SolverStatistics) {
+		self.conflicts += other.conflicts;
+		self.sat_search_directives += other.sat_search_directives;
+		self.peak_depth = self.peak_depth.max(other.peak_depth);
+		self.cp_propagator_calls += other.cp_propagator_calls;
+		self.restarts += other.restarts;
+		self.user_search_directives += other.user_search_directives;
+		self.eager_literals = self.eager_literals.max(other.eager_literals);
+		self.lazy_literals = self.lazy_literals.max(other.lazy_literals);
 	}
 }

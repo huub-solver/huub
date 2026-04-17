@@ -931,14 +931,15 @@ impl IntDecision {
 		let mut engine = slv.engine.borrow_mut();
 		let upper_bound = engine.state.trail.track(ub);
 		let order_encoding = match order_encoding {
-			EncodingType::Eager => OrderStorage::Eager {
-				lower_bound: engine.state.trail.track(lb),
-				storage: slv.sat.new_var_range(
-					orig_domain_len.expect(
-						"unable to create literals eagerly for domains that exceed usize::MAX",
-					) - 1,
-				),
-			},
+			EncodingType::Eager => {
+				let card = orig_domain_len
+					.expect("unable to create literals eagerly for domains that exceed usize::MAX");
+				engine.state.statistics.eager_literals += (card - 1) as u64;
+				OrderStorage::Eager {
+					lower_bound: engine.state.trail.track(lb),
+					storage: slv.sat.new_var_range(card - 1),
+				}
+			}
 			EncodingType::Lazy => OrderStorage::Lazy(LazyOrderStorage {
 				min_index: 0,
 				max_index: 0,
@@ -947,15 +948,15 @@ impl IntDecision {
 				storage: Vec::default(),
 			}),
 		};
-		let direct_encoding =
-			match direct_encoding {
-				EncodingType::Eager => DirectStorage::Eager(slv.sat.new_var_range(
-					orig_domain_len.expect(
-						"unable to create literals eagerly for domains that exceed usize::MAX",
-					) - 2,
-				)),
-				EncodingType::Lazy => DirectStorage::Lazy(FxHashMap::default()),
-			};
+		let direct_encoding = match direct_encoding {
+			EncodingType::Eager => {
+				let card = orig_domain_len
+					.expect("unable to create literals eagerly for domains that exceed usize::MAX");
+				engine.state.statistics.eager_literals += (card - 2) as u64;
+				DirectStorage::Eager(slv.sat.new_var_range(card - 2))
+			}
+			EncodingType::Lazy => DirectStorage::Lazy(FxHashMap::default()),
+		};
 		// Drop engine to allow SAT interaction
 		drop(engine);
 
