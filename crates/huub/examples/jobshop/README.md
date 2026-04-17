@@ -26,13 +26,13 @@ Lazy Clause Generation engine, supporting two objective functions:
 
 ```bash
 # Solve an instance (makespan objective, default settings)
-cargo run --example jobshop -- instances/small_2x2.jsp
+cargo run --example jobshop -- instances/2x2.jsp
 
 # Solve with a 30-second time limit, print statistics, and verbose output
-cargo run --example jobshop -- -t 30s -s -v instances/ft06.jsp
+cargo run --example jobshop -- -t 30s -s -v instances/6x6.jsp
 
 # Minimise total completion time instead
-cargo run --example jobshop -- --objective-type total-completion-time instances/ft06.jsp
+cargo run --example jobshop -- --objective-type total-completion-time instances/6x6.jsp
 ```
 
 Use the command `cargo run --example jobshop -- --help` to get more information
@@ -56,7 +56,7 @@ m(N-1,0) d(N-1,0)  ...  m(N-1,M-1) d(N-1,M-1)
   operation of that job: it must run on `machine_id` for `processing_time` time
   units. Machine indices start at 0.
 
-### Example — `instances/small_2x2.jsp`
+### Example — `instances/2x2.jsp`
 
 ```
 2 2
@@ -79,10 +79,10 @@ cargo test --example jobshop
 
 ## Included instances
 
-| File | Jobs × Machines | Optimal makespan | Source |
-|------|-----------------|-----------------|--------|
-| `instances/small_2x2.jsp` | 2 × 2 | 6 | Hand-crafted |
-| `instances/ft06.jsp` | 6 × 6 | 55 | [Fisher & Thompson (1963)][orlib], also known as *mt06* |
+| File | Jobs × Machines | Optimal makespan | Optimal total completion | 
+|------|-----------------|-----------------| -------------|
+| `instances/2x2.jsp` | 2 × 2 | 6 | 11 |
+| `instances/6x6.jsp` | 6 × 6 | 23 | 107 |
 
 ## Finding more instances
 

@@ -313,19 +313,19 @@ mod tests {
 	}
 
 	#[test]
-	fn small_2x2_optimal_makespan() {
+	fn two_by_two_optimal_makespan() {
 		let path = concat!(
 			env!("CARGO_MANIFEST_DIR"),
-			"/examples/jobshop/instances/small_2x2.jsp"
+			"/examples/jobshop/instances/2x2.jsp"
 		);
 		assert_eq!(solve_objective(path, ObjectiveType::Makespan), 6);
 	}
 
 	#[test]
-	fn small_2x2_optimal_total_completion_time() {
+	fn two_by_two_optimal_total_completion_time() {
 		let path = concat!(
 			env!("CARGO_MANIFEST_DIR"),
-			"/examples/jobshop/instances/small_2x2.jsp"
+			"/examples/jobshop/instances/2x2.jsp"
 		);
 		assert_eq!(
 			solve_objective(path, ObjectiveType::TotalCompletionTime),
@@ -334,23 +334,23 @@ mod tests {
 	}
 
 	#[test]
-	fn ft06_optimal_makespan() {
+	fn six_by_six_optimal_makespan() {
 		let path = concat!(
 			env!("CARGO_MANIFEST_DIR"),
-			"/examples/jobshop/instances/ft06.jsp"
+			"/examples/jobshop/instances/6x6.jsp"
 		);
-		assert_eq!(solve_objective(path, ObjectiveType::Makespan), 55);
+		assert_eq!(solve_objective(path, ObjectiveType::Makespan), 23);
 	}
 
 	#[test]
-	fn ft06_optimal_optimal_total_completion_time() {
+	fn six_by_six_optimal_total_completion_time() {
 		let path = concat!(
 			env!("CARGO_MANIFEST_DIR"),
-			"/examples/jobshop/instances/ft06.jsp"
+			"/examples/jobshop/instances/6x6.jsp"
 		);
 		assert_eq!(
 			solve_objective(path, ObjectiveType::TotalCompletionTime),
-			265
+			107
 		);
 	}
 }
