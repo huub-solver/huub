@@ -1,0 +1,46 @@
+# Summary
+
+[Home](index.md)
+
+# Introduction
+
+  - [What is Huub?](./introduction/what-is-huub.md)
+  - [Using Huub from MiniZinc](./introduction/using-huub-from-minizinc.md)
+  - [Using Huub as a Rust crate](./introduction/using-huub-as-a-rust-crate.md)
+  - [Solver architecture](./introduction/solver-architecture.md)
+
+# Modelling
+
+- [Getting started](./modelling/getting-started.md)
+- [Getting comfortable](./modelling/getting-comfortable.md)
+- [Boolean decisions and constraints](./modelling/boolean-decisions-and-constraints.md)
+- [Integer decisions and constraints](./modelling/integer-decisions-and-constraints.md)
+- [Branching](./modelling/branching.md)
+- [Search](./modelling/search.md)
+
+# Case Studies
+
+- [Jobshop](./case-studies/jobshop.md)
+- [More case studies](./case-studies/more-case-studies.md)
+  
+# Programming Propagators
+
+- [Overview](./propagators/overview.md)
+- [Propagator lifecycle](./propagators/propagator-lifecycle.md)
+- [Subscriptions and events](./propagators/subscriptions-and-events.md)
+- [Explanations and reason generation](./propagators/explanations-and-reason-generation.md)
+- [State, trailing, and backtracking](./propagators/state-trailing-and-backtracking.md)
+- [Implementing a first propagator](./propagators/implementing-a-first-propagator.md)
+
+# Programming Branchers
+
+- [Overview](./branchers/overview.md)
+- [Built-in branchers](./branchers/built-in-branchers.md)
+- [Variable and value selection](./branchers/variable-and-value-selection.md)
+- [Search directives and exhaustion](./branchers/search-directives-and-exhaustion.md)
+- [Implementing a custom brancher](./branchers/implementing-a-custom-brancher.md)
+
+-----------
+
+[Funding](misc/funding.md)
+[Contributors](misc/contributors.md)

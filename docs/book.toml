@@ -1,0 +1,8 @@
+[book]
+authors = ["Jip J. Dekker"]
+language = "en"
+src = "src"
+title = "Huub"
+
+[rust]
+edition = "2024"
