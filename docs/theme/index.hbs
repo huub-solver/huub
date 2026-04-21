@@ -48,11 +48,53 @@
 
 		<input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
 
+		<header id="menu-bar" class="site-header{{#if path_to_root}} site-header--docs sticky{{else}} site-header--landing{{/if}}">
+			<div class="site-header__inner">
+				<a class="site-header__brand" href="{{#if path_to_root}}{{ path_to_root }}{{else}}./{{/if}}" aria-label="{{ book_title }} home">
+					<span class="site-header__wordmark">{{ book_title }}</span>
+				</a>
+
+				<nav class="site-header__nav" aria-label="Primary">
+					<ul class="site-header__links">
+						<li><a href="{{#if path_to_root}}{{ path_to_root }}{{else}}./{{/if}}introduction/what-is-huub.html">Docs</a></li>
+					</ul>
+
+					<div class="site-header__utilities">
+						<div class="site-header__social">
+							{{#if search_enabled}}
+							<button id="search-toggle" class="icon-button site-header__icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+								<i class="fa fa-search"></i>
+							</button>
+							{{/if}}
+							{{#if git_repository_url}}
+							<a href="{{git_repository_url}}" title="Git repository" aria-label="Git repository">
+								<i id="git-repository-button" class="fa {{git_repository_icon}}"></i>
+							</a>
+							{{/if}}
+							{{#if git_repository_edit_url}}
+							<a href="{{git_repository_edit_url}}" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+								<i id="git-edit-button" class="fa fa-edit"></i>
+							</a>
+							{{/if}}
+							<button id="theme-toggle" class="icon-button site-header__icon-button" type="button" title="Switch to dark mode" aria-label="Switch to dark mode">
+								<i class="fa fa-moon-o"></i>
+							</button>
+							<ul id="theme-list" class="theme-popup theme-popup--sr-only" aria-label="Themes" role="menu">
+								<li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+								<li role="none"><button role="menuitem" class="theme" id="{{ preferred_dark_theme }}">{{ preferred_dark_theme }}</button></li>
+							</ul>
+						</div>
+					</div>
+				</nav>
+			</div>
+		</header>
+
 		<!-- Hide / unhide sidebar before it is displayed -->
 		<script>
 			let sidebar = null;
 			const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
-			if (document.body.clientWidth >= 1080) {
+			const docs_desktop_breakpoint = 1200;
+			if (document.body.clientWidth >= docs_desktop_breakpoint) {
 				try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
 				sidebar = sidebar || 'visible';
 			} else {
@@ -67,8 +109,9 @@
 		</script>
 
 		{{#unless path_to_root}}
-		<h1>{{ title }}</h1>
-		<a href="/introduction/what-is-huub.html">test</a>
+		<main>
+			{{{ content }}}
+		</main>
 		{{else}}
 		<nav id="sidebar" class="sidebar" aria-label="Table of contents">
 			<!-- populated by js -->
@@ -76,59 +119,12 @@
 			<noscript>
 				<iframe class="sidebar-iframe-outer" src="{{ path_to_root }}toc.html"></iframe>
 			</noscript>
-			<div id="sidebar-resize-handle" class="sidebar-resize-handle">
-				<div class="sidebar-resize-indicator"></div>
-			</div>
+			<div id="sidebar-resize-handle" class="sidebar-resize-handle hidden" aria-hidden="true"></div>
 		</nav>
 
 		<div id="page-wrapper" class="page-wrapper">
 			<div class="page">
 				{{> header}}
-				<div id="menu-bar-hover-placeholder"></div>
-				<div id="menu-bar" class="menu-bar sticky">
-					<div class="left-buttons">
-						<label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
-							<i class="fa fa-bars"></i>
-						</label>
-						<button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
-							<i class="fa fa-paint-brush"></i>
-						</button>
-						<ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
-							<li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
-							<li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
-							<li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
-							<li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
-							<li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
-							<li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
-						</ul>
-						{{#if search_enabled}}
-						<button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
-							<i class="fa fa-search"></i>
-						</button>
-						{{/if}}
-					</div>
-
-					<h1 class="menu-title">{{ book_title }}</h1>
-
-					<div class="right-buttons">
-						{{#if print_enable}}
-						<a href="{{ path_to_root }}print.html" title="Print this book" aria-label="Print this book">
-							<i id="print-button" class="fa fa-print"></i>
-						</a>
-						{{/if}}
-						{{#if git_repository_url}}
-						<a href="{{git_repository_url}}" title="Git repository" aria-label="Git repository">
-							<i id="git-repository-button" class="fa {{git_repository_icon}}"></i>
-						</a>
-						{{/if}}
-						{{#if git_repository_edit_url}}
-						<a href="{{git_repository_edit_url}}" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
-							<i id="git-edit-button" class="fa fa-edit"></i>
-						</a>
-						{{/if}}
-
-					</div>
-				</div>
 
 				{{#if search_enabled}}
 				<div id="search-wrapper" class="hidden">
@@ -148,6 +144,14 @@
 				</div>
 				{{/if}}
 
+				<nav class="docs-mobile-nav" aria-label="Documentation navigation">
+					<label class="docs-mobile-nav__trigger" for="sidebar-toggle-anchor">
+						<i class="fa fa-bars docs-mobile-nav__icon" aria-hidden="true"></i>
+						<span class="docs-mobile-nav__label">Documentation</span>
+						<span id="docs-mobile-nav-current" class="docs-mobile-nav__current">{{ title }}</span>
+					</label>
+				</nav>
+
 				<!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
 				<script>
 					document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
@@ -158,9 +162,16 @@
 				</script>
 
 				<div id="content" class="content">
-					<main>
+					<main id="page-document">
 						{{{ content }}}
 					</main>
+
+					<aside id="page-toc" class="page-toc hidden" aria-label="Content">
+						<nav class="page-toc__nav">
+							<h2 class="page-toc__title">Content</h2>
+							<ol class="page-toc__list"></ol>
+						</nav>
+					</aside>
 
 					<nav class="nav-wrapper" aria-label="Page navigation">
 						<!-- Mobile navigation buttons -->
@@ -181,19 +192,6 @@
 				</div>
 			</div>
 
-			<nav class="nav-wide-wrapper" aria-label="Page navigation">
-				{{#previous}}
-					<a rel="prev" href="{{ path_to_root }}{{link}}" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
-						<i class="fa fa-angle-left"></i>
-					</a>
-				{{/previous}}
-
-				{{#next}}
-					<a rel="next prefetch" href="{{ path_to_root }}{{link}}" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
-						<i class="fa fa-angle-right"></i>
-					</a>
-				{{/next}}
-			</nav>
 		</div>
 		{{/unless}}
 
@@ -264,6 +262,294 @@
 		<script src="{{ resource "clipboard.min.js" }}"></script>
 		<script src="{{ resource "highlight.js" }}"></script>
 		<script src="{{ resource "book.js" }}"></script>
+		<script>
+			(function() {
+				function slugify(text) {
+					return text
+						.toLowerCase()
+						.trim()
+						.replace(/[^\w\s-]/g, "")
+						.replace(/\s+/g, "-");
+				}
+
+				function buildPageToc() {
+					const toc = document.getElementById("page-toc");
+					const tocList = toc && toc.querySelector(".page-toc__list");
+					const contentRoot = document.getElementById("page-document");
+					if (!toc || !tocList || !contentRoot) {
+						return;
+					}
+
+					const headings = Array.from(
+						contentRoot.querySelectorAll("h2, h3")
+					).filter(function(heading) {
+						return heading.textContent.trim().length > 0;
+					});
+
+					if (headings.length === 0) {
+						toc.classList.add("hidden");
+						return;
+					}
+
+					const fragmentCounts = new Map();
+					tocList.innerHTML = "";
+
+					headings.forEach(function(heading) {
+						if (!heading.id) {
+							const baseId = slugify(heading.textContent) || "section";
+							const seen = fragmentCounts.get(baseId) || 0;
+							fragmentCounts.set(baseId, seen + 1);
+							heading.id = seen === 0 ? baseId : `${baseId}-${seen + 1}`;
+						}
+
+						const item = document.createElement("li");
+						item.className = `page-toc__item page-toc__item--${heading.tagName.toLowerCase()}`;
+
+						const link = document.createElement("a");
+						link.href = `#${heading.id}`;
+						link.textContent = heading.textContent.trim();
+						item.appendChild(link);
+						tocList.appendChild(item);
+					});
+
+					toc.classList.remove("hidden");
+
+					const links = Array.from(tocList.querySelectorAll("a"));
+					const linkById = new Map(
+						links.map(function(link) {
+							return [link.getAttribute("href").slice(1), link];
+						})
+					);
+
+					function setCurrent(id) {
+						links.forEach(function(link) {
+							if (link.getAttribute("href") === `#${id}`) {
+								link.setAttribute("aria-current", "true");
+							} else {
+								link.removeAttribute("aria-current");
+							}
+						});
+					}
+
+					const observer = new IntersectionObserver(
+						function(entries) {
+							const visible = entries
+								.filter(function(entry) {
+									return entry.isIntersecting;
+								})
+								.sort(function(a, b) {
+									return a.boundingClientRect.top - b.boundingClientRect.top;
+								});
+							if (visible.length > 0) {
+								setCurrent(visible[0].target.id);
+							}
+						},
+						{
+							rootMargin: "-140px 0px -65% 0px",
+							threshold: [0, 1],
+						}
+					);
+
+					headings.forEach(function(heading) {
+						observer.observe(heading);
+					});
+
+					if (headings[0]) {
+						setCurrent(headings[0].id);
+					}
+
+					if (window.location.hash) {
+						const initialId = window.location.hash.slice(1);
+						if (linkById.has(initialId)) {
+							setCurrent(initialId);
+						}
+					}
+				}
+
+				document.addEventListener("DOMContentLoaded", buildPageToc);
+			})();
+		</script>
+		<script>
+			(function() {
+				function syncMobileDocsNav() {
+					const current = document.getElementById("docs-mobile-nav-current");
+					const activeLink = document.querySelector("#sidebar .chapter a.active");
+					if (current && activeLink) {
+						current.textContent = activeLink.textContent.trim();
+					}
+				}
+
+				function wireMobileDocsNav() {
+					const trigger = document.querySelector(".docs-mobile-nav__trigger");
+					const checkbox = document.getElementById("sidebar-toggle-anchor");
+					const sidebar = document.getElementById("sidebar");
+					if (!trigger || !checkbox || !sidebar) {
+						return;
+					}
+
+					trigger.addEventListener("click", function() {
+						if (!checkbox.checked) {
+							sidebar.style.display = "";
+							sidebar.offsetHeight;
+						}
+					});
+
+					const media = window.matchMedia("(min-width: 1200px)");
+					function syncForViewport(event) {
+						if (event.matches) {
+							sidebar.style.display = "";
+							checkbox.checked = true;
+							document.documentElement.classList.add("sidebar-visible");
+						} else {
+							checkbox.checked = false;
+							document.documentElement.classList.remove("sidebar-visible");
+							sidebar.style.display = "none";
+						}
+					}
+
+					syncForViewport(media);
+					media.addEventListener("change", syncForViewport);
+				}
+
+				document.addEventListener("DOMContentLoaded", function() {
+					syncMobileDocsNav();
+					wireMobileDocsNav();
+				});
+			})();
+		</script>
+		<script>
+			(function() {
+				function enhanceSidebarGroups() {
+					const chapter = document.querySelector("#sidebar .chapter");
+					if (!chapter || chapter.dataset.grouped === "true") {
+						return Boolean(chapter);
+					}
+
+					const items = Array.from(chapter.children);
+					for (let i = 0; i < items.length; i += 1) {
+						const item = items[i];
+						if (!item.classList.contains("part-title")) {
+							continue;
+						}
+
+						const group = document.createElement("li");
+						group.className = "chapter-group";
+
+						const toggle = document.createElement("button");
+						toggle.type = "button";
+						toggle.className = "chapter-group__toggle";
+						toggle.textContent = item.textContent.trim();
+
+						const section = document.createElement("ol");
+						section.className = "section chapter-group__items";
+
+						let next = item.nextElementSibling;
+						while (
+							next &&
+							!next.classList.contains("part-title") &&
+							!next.classList.contains("spacer")
+						) {
+							const current = next;
+							next = next.nextElementSibling;
+							if (current.classList.contains("chapter-item") && !current.classList.contains("affix")) {
+								section.appendChild(current);
+							} else {
+								break;
+							}
+						}
+
+						const isCurrentGroup = Boolean(section.querySelector("a.active"));
+						group.classList.toggle("expanded", isCurrentGroup);
+						toggle.setAttribute("aria-expanded", String(isCurrentGroup));
+						group.append(toggle, section);
+						item.replaceWith(group);
+					}
+
+					const groups = Array.from(chapter.querySelectorAll(".chapter-group"));
+					groups.forEach(function(group) {
+						const toggle = group.querySelector(".chapter-group__toggle");
+						if (!toggle) {
+							return;
+						}
+
+						toggle.addEventListener("click", function() {
+							const shouldExpand = !group.classList.contains("expanded");
+							group.classList.toggle("expanded", shouldExpand);
+							toggle.setAttribute("aria-expanded", String(shouldExpand));
+						});
+					});
+
+					chapter.dataset.grouped = "true";
+					return true;
+				}
+
+				function initSidebarGroups(attemptsLeft) {
+					if (enhanceSidebarGroups() || attemptsLeft <= 0) {
+						return;
+					}
+					window.requestAnimationFrame(function() {
+						initSidebarGroups(attemptsLeft - 1);
+					});
+				}
+
+				document.addEventListener("DOMContentLoaded", function() {
+					if (document.getElementById("sidebar")) {
+						initSidebarGroups(20);
+					}
+				});
+			})();
+		</script>
+		<script>
+			(function() {
+				const themeToggleButton = document.getElementById("theme-toggle");
+				const themePopup = document.getElementById("theme-list");
+				if (!themeToggleButton || !themePopup) {
+					return;
+				}
+
+				const html = document.documentElement;
+				const darkThemes = new Set(["ayu", "coal", "navy", default_dark_theme]);
+				const lightButton = themePopup.querySelector("#light");
+				const darkButton = themePopup.querySelector("#" + CSS.escape(default_dark_theme));
+				const icon = themeToggleButton.querySelector("i");
+
+				function currentTheme() {
+					const savedTheme = localStorage.getItem("mdbook-theme");
+					if (savedTheme) {
+						return savedTheme;
+					}
+					return window.matchMedia("(prefers-color-scheme: dark)").matches
+						? default_dark_theme
+						: default_light_theme;
+				}
+
+				function syncThemeToggle() {
+					const theme = currentTheme();
+					const isDark = darkThemes.has(theme) || html.classList.contains(default_dark_theme);
+					const nextLabel = isDark ? "Switch to light mode" : "Switch to dark mode";
+					themeToggleButton.title = nextLabel;
+					themeToggleButton.setAttribute("aria-label", nextLabel);
+					if (icon) {
+						icon.classList.toggle("fa-moon-o", !isDark);
+						icon.classList.toggle("fa-sun-o", isDark);
+					}
+				}
+
+				themeToggleButton.addEventListener("click", function(event) {
+					event.preventDefault();
+					event.stopImmediatePropagation();
+					const isDark = darkThemes.has(currentTheme()) || html.classList.contains(default_dark_theme);
+					const targetButton = isDark ? lightButton : darkButton;
+					if (targetButton) {
+						targetButton.click();
+						window.requestAnimationFrame(syncThemeToggle);
+					}
+				}, true);
+
+				window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", syncThemeToggle);
+				syncThemeToggle();
+			})();
+		</script>
 
 		<!-- Custom JS scripts -->
 		{{#each additional_js}}

@@ -6,3 +6,6 @@ title = "Huub"
 
 [rust]
 edition = "2024"
+
+[output.html]
+git-repository-url = "https://github.com/huub-solver/huub"
