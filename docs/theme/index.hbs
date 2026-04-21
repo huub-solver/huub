@@ -51,7 +51,7 @@
 		<header id="menu-bar" class="site-header{{#if path_to_root}} site-header--docs sticky{{else}} site-header--landing{{/if}}">
 			<div class="site-header__inner">
 				<a class="site-header__brand" href="{{#if path_to_root}}{{ path_to_root }}{{else}}./{{/if}}" aria-label="{{ book_title }} home">
-					<span class="site-header__wordmark">{{ book_title }}</span>
+					<span class="site-header__wordmark menu-title">{{ book_title }}</span>
 				</a>
 
 				<nav class="site-header__nav" aria-label="Primary">
@@ -61,10 +61,12 @@
 
 					<div class="site-header__utilities">
 						<div class="site-header__social">
+							{{#if path_to_root}}
 							{{#if search_enabled}}
 							<button id="search-toggle" class="icon-button site-header__icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
 								<i class="fa fa-search"></i>
 							</button>
+							{{/if}}
 							{{/if}}
 							{{#if git_repository_url}}
 							<a href="{{git_repository_url}}" title="Git repository" aria-label="Git repository">
@@ -109,6 +111,11 @@
 		</script>
 
 		{{#unless path_to_root}}
+		<!-- Keep mdBook's expected sidebar hooks on the landing page so shared book.js modules don't fail. -->
+		<label id="sidebar-toggle" class="hidden" for="sidebar-toggle-anchor" aria-controls="sidebar"></label>
+		<nav id="sidebar" class="sidebar hidden" aria-hidden="true">
+			<div id="sidebar-resize-handle" class="sidebar-resize-handle hidden" aria-hidden="true"></div>
+		</nav>
 		<main>
 			{{{ content }}}
 		</main>
@@ -145,7 +152,7 @@
 				{{/if}}
 
 				<nav class="docs-mobile-nav" aria-label="Documentation navigation">
-					<label class="docs-mobile-nav__trigger" for="sidebar-toggle-anchor">
+					<label id="sidebar-toggle" class="docs-mobile-nav__trigger" for="sidebar-toggle-anchor" aria-controls="sidebar">
 						<i class="fa fa-bars docs-mobile-nav__icon" aria-hidden="true"></i>
 						<span class="docs-mobile-nav__label">Documentation</span>
 						<span id="docs-mobile-nav-current" class="docs-mobile-nav__current">{{ title }}</span>
@@ -163,6 +170,7 @@
 
 				<div id="content" class="content">
 					<main id="page-document">
+						<div id="page-kicker" class="page-kicker hidden"></div>
 						{{{ content }}}
 					</main>
 
@@ -254,9 +262,11 @@
 		{{/if}}
 
 		{{#if search_js}}
+		{{#if path_to_root}}
 		<script src="{{ resource "elasticlunr.min.js" }}"></script>
 		<script src="{{ resource "mark.min.js" }}"></script>
 		<script src="{{ resource "searcher.js" }}"></script>
+		{{/if}}
 		{{/if}}
 
 		<script src="{{ resource "clipboard.min.js" }}"></script>
@@ -371,6 +381,24 @@
 		</script>
 		<script>
 			(function() {
+				function updatePageKicker() {
+					const kicker = document.getElementById("page-kicker");
+					const activeLink = document.querySelector("#sidebar .chapter a.active");
+					if (!kicker || !activeLink) {
+						return;
+					}
+
+					const group = activeLink.closest(".chapter-group");
+					const toggle = group && group.querySelector(".chapter-group__toggle");
+					if (!toggle) {
+						kicker.classList.add("hidden");
+						return;
+					}
+
+					kicker.textContent = toggle.textContent.trim();
+					kicker.classList.remove("hidden");
+				}
+
 				function syncMobileDocsNav() {
 					const current = document.getElementById("docs-mobile-nav-current");
 					const activeLink = document.querySelector("#sidebar .chapter a.active");
@@ -414,6 +442,7 @@
 				document.addEventListener("DOMContentLoaded", function() {
 					syncMobileDocsNav();
 					wireMobileDocsNav();
+					updatePageKicker();
 				});
 			})();
 		</script>
@@ -480,6 +509,16 @@
 					});
 
 					chapter.dataset.grouped = "true";
+					const kicker = document.getElementById("page-kicker");
+					if (kicker) {
+						const activeLink = chapter.querySelector("a.active");
+						const group = activeLink && activeLink.closest(".chapter-group");
+						const toggle = group && group.querySelector(".chapter-group__toggle");
+						if (toggle) {
+							kicker.textContent = toggle.textContent.trim();
+							kicker.classList.remove("hidden");
+						}
+					}
 					return true;
 				}
 

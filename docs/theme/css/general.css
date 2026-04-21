@@ -121,7 +121,6 @@ h6:target::before {
 }
 
 .content {
-	overflow-y: auto;
 	padding: 0 5px 50px 5px;
 }
 .content main {
@@ -159,12 +158,16 @@ h6:target::before {
 
 .page-toc {
 	display: none;
+	position: sticky;
+	top: calc(var(--menu-bar-height) + var(--docs-top-offset));
+	align-self: start;
+	max-height: calc(100vh - var(--menu-bar-height) - var(--docs-top-offset) - 2.4rem);
+	overflow: auto;
 }
 
 .page-toc__nav {
-	position: sticky;
-	top: calc(var(--menu-bar-height) + var(--docs-top-offset));
 	padding-top: 1rem;
+	padding-right: 0.2rem;
 }
 
 .page-toc__title {
@@ -191,7 +194,7 @@ h6:target::before {
 	margin-inline-start: -1px;
 	padding: 0.45rem 0 0.45rem 1.6rem;
 	border-inline-start: 1px solid transparent;
-	color: var(--site-header-link);
+	color: var(--sidebar-fg);
 	font-size: 1.4rem;
 	font-weight: 400;
 	line-height: 1.4;
@@ -200,6 +203,11 @@ h6:target::before {
 		border-color 160ms ease,
 		color 160ms ease,
 		font-weight 160ms ease;
+}
+
+.page-toc__item a:link,
+.page-toc__item a:visited {
+	color: var(--sidebar-fg);
 }
 
 .page-toc__item a:hover {
@@ -222,6 +230,36 @@ h6:target::before {
 .page-toc__item--h3 a {
 	padding-inline-start: 2.8rem;
 	font-size: 1.4rem;
+}
+
+.page-kicker {
+	margin: 0 0 0.3rem 0;
+	color: var(--sidebar-active);
+	font-family: var(--text-font);
+	font-size: 1.45rem;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	line-height: 1.2;
+	text-transform: uppercase;
+}
+
+.content main > h1:first-of-type {
+	margin-top: 0;
+	margin-bottom: 2.4rem;
+	font-size: 5.6rem;
+	line-height: 1.05;
+	letter-spacing: -0.08rem;
+}
+
+.content main > h2 {
+	font-size: 4rem;
+	line-height: 1.1;
+	letter-spacing: -0.04rem;
+}
+
+.content main > h3 {
+	font-size: 3rem;
+	line-height: 1.15;
 }
 
 .docs-mobile-nav {
