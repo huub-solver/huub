@@ -294,9 +294,47 @@ mod tests {
 		solver::{IntValuation, Solver},
 	};
 
-	use super::{Instance, JobShopModel, ObjectiveType};
+	use crate::model::{Instance, JobShopModel, ObjectiveType};
 
-	fn solve_objective(path: &str, objective_type: ObjectiveType) -> i64 {
+	#[test]
+	fn optimal_completion_time_2x2() {
+		let path = concat!(
+			env!("CARGO_MANIFEST_DIR"),
+			"/examples/jobshop/instances/2x2.jsp"
+		);
+		assert_eq!(solve_jobshop(path, ObjectiveType::TotalCompletionTime), 11);
+	}
+
+	#[test]
+	fn optimal_completion_time_6x6() {
+		let path = concat!(
+			env!("CARGO_MANIFEST_DIR"),
+			"/examples/jobshop/instances/6x6.jsp"
+		);
+		assert_eq!(solve_jobshop(path, ObjectiveType::TotalCompletionTime), 107);
+	}
+
+	#[test]
+	fn optimal_makespan_2x2() {
+		let path = concat!(
+			env!("CARGO_MANIFEST_DIR"),
+			"/examples/jobshop/instances/2x2.jsp"
+		);
+		assert_eq!(solve_jobshop(path, ObjectiveType::Makespan), 6);
+	}
+
+	#[test]
+	fn optimal_makespan_6x6() {
+		let path = concat!(
+			env!("CARGO_MANIFEST_DIR"),
+			"/examples/jobshop/instances/6x6.jsp"
+		);
+		assert_eq!(solve_jobshop(path, ObjectiveType::Makespan), 23);
+	}
+
+	/// Solves a job-shop scheduling instance using the given objective type and
+	/// returns the optimal objective value.
+	fn solve_jobshop(path: &str, objective_type: ObjectiveType) -> i64 {
 		let instance = Instance::from_jsp_file(path).expect("failed to parse instance");
 		let JobShopModel {
 			mut model,
@@ -309,48 +347,6 @@ mod tests {
 		slv.branch_and_bound(Goal::Minimize(obj), |sol| {
 			best = Some(IntValuation::val(&obj, sol));
 		});
-		best.expect("no solution found")
-	}
-
-	#[test]
-	fn two_by_two_optimal_makespan() {
-		let path = concat!(
-			env!("CARGO_MANIFEST_DIR"),
-			"/examples/jobshop/instances/2x2.jsp"
-		);
-		assert_eq!(solve_objective(path, ObjectiveType::Makespan), 6);
-	}
-
-	#[test]
-	fn two_by_two_optimal_total_completion_time() {
-		let path = concat!(
-			env!("CARGO_MANIFEST_DIR"),
-			"/examples/jobshop/instances/2x2.jsp"
-		);
-		assert_eq!(
-			solve_objective(path, ObjectiveType::TotalCompletionTime),
-			11
-		);
-	}
-
-	#[test]
-	fn six_by_six_optimal_makespan() {
-		let path = concat!(
-			env!("CARGO_MANIFEST_DIR"),
-			"/examples/jobshop/instances/6x6.jsp"
-		);
-		assert_eq!(solve_objective(path, ObjectiveType::Makespan), 23);
-	}
-
-	#[test]
-	fn six_by_six_optimal_total_completion_time() {
-		let path = concat!(
-			env!("CARGO_MANIFEST_DIR"),
-			"/examples/jobshop/instances/6x6.jsp"
-		);
-		assert_eq!(
-			solve_objective(path, ObjectiveType::TotalCompletionTime),
-			107
-		);
+		best.expect("failed to find a solution")
 	}
 }
