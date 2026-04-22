@@ -20,14 +20,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
-        uses: moonrepo/setup-rust@v0
+        uses: moonrepo/setup-rust@v1
         with:
           cache: false
           channel: ${{ env.RUST_TEST_CHANNEL }}
-      - name: cargo install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Generate code coverage
-        run: cargo llvm-cov --all-features --workspace --codecov --output-path codecov.json
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@nextest
+      - name: Collect coverage data
+        run: |
+          cargo llvm-cov --no-report nextest --all-features --workspace --tests --bins --examples
+          cargo llvm-cov --no-report --doc
+          cargo llvm-cov report --doctests --codecov --output-path codecov.json
       - uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -55,11 +58,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain and clippy
-        uses: moonrepo/setup-rust@v0
+        uses: moonrepo/setup-rust@v1
         with:
           channel: ${{ env.RUST_CHANNEL }}
           components: clippy
       - name: Run clippy (no extra features)
         run: cargo clippy -p huub --all-targets -- -D warnings
       - name: Run clippy
-        run: cargo clippy --all --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
