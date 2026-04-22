@@ -116,8 +116,51 @@
 		<nav id="sidebar" class="sidebar hidden" aria-hidden="true">
 			<div id="sidebar-resize-handle" class="sidebar-resize-handle hidden" aria-hidden="true"></div>
 		</nav>
-		<main>
-			{{{ content }}}
+		<main class="landing-page">
+			<section class="landing-hero" aria-label="Huub introduction">
+				<div class="landing-hero__inner">
+					<div class="landing-hero__logo-panel">
+						<img class="landing-hero__logo" src="{{ resource "favicon.svg" }}" alt="Huub logo">
+					</div>
+					<div class="landing-hero__content">
+						<p class="landing-hero__tagline">Make better decisions with a solver built to be robust, performant, and extensible.</p>
+						<div class="landing-hero__actions">
+							<a class="landing-hero__cta" href="./introduction/what-is-huub.html">Get Started</a>
+						</div>
+						<p class="landing-hero__problem-intro">Built for ...</p>
+						<div class="landing-hero__problem-grid" aria-label="Example problem types">
+							<article class="landing-problem-card landing-problem-card--scheduling">
+								<div class="landing-problem-card__icon" aria-hidden="true">
+									<i class="fa fa-calendar"></i>
+								</div>
+								<p class="landing-problem-card__text">Scheduling and rostering</p>
+							</article>
+							<article class="landing-problem-card landing-problem-card--packing">
+								<div class="landing-problem-card__icon" aria-hidden="true">
+									<i class="fa fa-cubes"></i>
+								</div>
+								<p class="landing-problem-card__text">Packing and planning</p>
+							</article>
+							<article class="landing-problem-card landing-problem-card--configuration">
+								<div class="landing-problem-card__icon" aria-hidden="true">
+									<i class="fa fa-sliders"></i>
+								</div>
+								<p class="landing-problem-card__text">Configuration</p>
+							</article>
+							<article class="landing-problem-card landing-problem-card--other">
+								<div class="landing-problem-card__icon" aria-hidden="true">
+									<img class="landing-problem-card__logo" src="{{ resource "minizinc.svg" }}" alt="">
+								</div>
+								<p class="landing-problem-card__text">MiniZinc</p>
+							</article>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<div class="landing-page__content">
+				{{{ content }}}
+			</div>
 		</main>
 		{{else}}
 		<nav id="sidebar" class="sidebar" aria-label="Table of contents">
