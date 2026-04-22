@@ -21,7 +21,10 @@ rustc-hash = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+clap = { workspace = true }
+ctrlc = { workspace = true }
 expect-test = { workspace = true }
+humantime = { workspace = true }
 tracing-test = { workspace = true }
 
 [lints]

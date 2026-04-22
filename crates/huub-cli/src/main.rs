@@ -4,11 +4,6 @@
 //! functionality is contained in the `lib.rs` file, to allow testing the
 //! functionality as a library.
 
-#![allow(
-	unused_crate_dependencies,
-	reason = "other dependencies are used in the lib.rs file"
-)]
-
 use std::process::ExitCode;
 
 use huub_cli::Cli;

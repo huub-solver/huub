@@ -3,10 +3,6 @@
 //! Note that these benchmarks run through the full solver, providing the
 //! instances as file input, and reading the output from its output stream. The
 //! total time taken is repeatedly measured.
-#![expect(
-	unused_crate_dependencies,
-	reason = "only dependencies for benchmarking are used in this file"
-)]
 
 /// Shared benchmark assertions imported from the CLI test helpers.
 #[allow(

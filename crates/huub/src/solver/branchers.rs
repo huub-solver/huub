@@ -312,7 +312,7 @@ where
 }
 
 impl WarmStartBrancher {
-	/// Create a new [`BoolBrancher`] brancher and add to the end of the
+	/// Create a new [`WarmStartBrancher`] brancher and add to the end of the
 	/// branching queue in the solver.
 	pub fn new_in(solver: &mut impl BrancherInitActions, decisions: Vec<View<bool>>) {
 		// Filter out the decisions that are already satisfied or are known to cause

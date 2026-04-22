@@ -396,8 +396,6 @@ mod tests {
 	use std::{path::PathBuf, time::Duration};
 
 	use clap::ColorChoice;
-	use divan as _;
-	use expect_test as _;
 	use huub::lower::InitConfig;
 
 	use crate::cli::Cli;
