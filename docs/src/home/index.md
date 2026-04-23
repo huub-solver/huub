@@ -1,3 +1,1 @@
 <!-- Landing-page sections are rendered by the theme template. -->
-
-{{#include home/index.md}}

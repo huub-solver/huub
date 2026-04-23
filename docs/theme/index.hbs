@@ -18,6 +18,7 @@
 		</div>
 	</div>
 	<div id="body-container">
+		<span class="menu-title hidden" aria-hidden="true"></span>
 		<!-- Work around some values being stored in localStorage wrapped in quotes -->
 		<script>
 			try {
@@ -51,7 +52,7 @@
 		<header id="menu-bar" class="site-header{{#if path_to_root}} site-header--docs sticky{{else}} site-header--landing{{/if}}">
 			<div class="site-header__inner">
 				<a class="site-header__brand" href="{{#if path_to_root}}{{ path_to_root }}{{else}}./{{/if}}" aria-label="{{ book_title }} home">
-					<span class="site-header__wordmark menu-title">{{ book_title }}</span>
+					<span class="site-header__wordmark">{{ book_title }}</span>
 				</a>
 
 				<nav class="site-header__nav" aria-label="Primary">
@@ -123,7 +124,7 @@
 						<img class="landing-hero__logo" src="{{ resource "favicon.svg" }}" alt="Huub logo">
 					</div>
 					<div class="landing-hero__content">
-						<p class="landing-hero__tagline">Make better decisions with a solver built to be robust, performant, and extensible.</p>
+						<p class="landing-hero__tagline">Make better decisions with a solver built to be reliable, performant, and extensible.</p>
 						<div class="landing-hero__actions">
 							<a class="landing-hero__cta" href="./introduction/what-is-huub.html">Get Started</a>
 						</div>
@@ -149,11 +150,109 @@
 							</article>
 							<article class="landing-problem-card landing-problem-card--other">
 								<div class="landing-problem-card__icon" aria-hidden="true">
-									<img class="landing-problem-card__logo" src="{{ resource "minizinc.svg" }}" alt="">
+									<img class="landing-problem-card__logo" src="{{ resource "home/minizinc.svg" }}" alt="">
 								</div>
 								<p class="landing-problem-card__text">MiniZinc</p>
 							</article>
 						</div>
+					</div>
+				</div>
+			</section>
+
+			<section class="landing-why" aria-labelledby="landing-why-title">
+				<div class="landing-why__inner">
+					<div class="landing-section-heading">
+						<p id="landing-why-title" class="landing-section-heading__title">Why Huub?</p>
+					</div>
+
+					<div class="landing-why__grid">
+						<article class="landing-why-card">
+							<p class="landing-why-card__title">Reliability</p>
+							<p class="landing-why-card__text">Huub is built to behave predictably in practice. It is well-tested, performs state-of-the-art preprocessing before search begins, and is implemented in Rust for a safer and more dependable solver core. The result is a solver you can use with more confidence in production workflows as well as in day-to-day modelling.</p>
+						</article>
+
+						<article class="landing-why-card">
+							<p class="landing-why-card__title">Performance</p>
+							<p class="landing-why-card__text">Huub is designed for serious combinatorial workloads, combining strong propagation with modern solving techniques to deliver competitive performance on demanding decision problems. Careful preprocessing, effective propagation, and a solver architecture focused on practical runtime behaviour help Huub scale to harder instances without sacrificing robustness.</p>
+						</article>
+
+						<article class="landing-why-card">
+							<p class="landing-why-card__title">Extensible</p>
+							<p class="landing-why-card__text">Huub is designed to be extended where it matters. You can add your own propagators, branchers, and even decision variable views, so the solver can be shaped more closely around your problem than a fixed off-the-shelf workflow allows. At the same time, Huub remains modular and straightforward to integrate into larger systems and decision pipelines.</p>
+						</article>
+					</div>
+				</div>
+			</section>
+
+			<section class="landing-services" aria-labelledby="landing-services-title">
+				<div class="landing-services__inner">
+					<div class="landing-section-heading landing-section-heading--services">
+						<div class="landing-services__heading-row">
+							<p id="landing-services-title" class="landing-section-heading__title">Professional services</p>
+							<div class="landing-services__brand" aria-hidden="true">
+								<img class="landing-services__logo landing-services__logo--light" src="{{ resource "home/decisns-logo-light.svg" }}" alt="">
+								<img class="landing-services__logo landing-services__logo--dark" src="{{ resource "home/decisns-logo-dark.svg" }}" alt="">
+							</div>
+						</div>
+					</div>
+
+					<div class="landing-services__card">
+						<div class="landing-services__content">
+							<p class="landing-services__text">Need help getting the most out of Huub? deciZns provides specialist support for organisations using Huub in real decision workflows, from solver integration and performance tuning to custom modelling support and deeper technical extensions.</p>
+							<a class="landing-services__link" href="https://decizns.com" target="_blank" rel="noopener noreferrer">Learn about deciZns</a>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<section class="landing-involved" aria-labelledby="landing-involved-title">
+				<div class="landing-involved__inner">
+					<div class="landing-section-heading landing-section-heading--involved">
+						<p id="landing-involved-title" class="landing-section-heading__title">Work with Huub</p>
+					</div>
+
+					<div class="landing-involved__grid">
+						<article class="landing-involved__card">
+							<p class="landing-involved__card-title">Use from MiniZinc</p>
+							<p class="landing-involved__card-text">Start with Huub through MiniZinc and explore a familiar modelling workflow backed by Huub’s solver technology.</p>
+							<a class="landing-involved__link" href="./introduction/using-huub-from-minizinc.html">Installation instructions</a>
+						</article>
+
+						<article class="landing-involved__card">
+							<p class="landing-involved__card-title">Modelling and programming in Huub</p>
+							<p class="landing-involved__card-text">Learn how to model directly in Huub and how to program custom propagators, branchers, and other solver extensions.</p>
+							<a class="landing-involved__link" href="./modelling/getting-started.html">Explore the docs</a>
+						</article>
+					</div>
+
+					<article class="landing-involved__card landing-involved__card--wide">
+						<p class="landing-involved__card-title">Contribute code</p>
+						<p class="landing-involved__card-text">Huub is an open solver project, and contributions are welcome. Whether you want to improve the implementation, extend the documentation, or help shape new capabilities, the codebase is open for collaboration.</p>
+						<a class="landing-involved__link" href="https://github.com/huub-solver/huub" target="_blank" rel="noopener noreferrer">Visit the repository</a>
+					</article>
+				</div>
+			</section>
+
+			<section class="landing-thanks" aria-labelledby="landing-thanks-title">
+				<div class="landing-thanks__inner">
+					<div class="landing-section-heading landing-section-heading--thanks">
+						<p id="landing-thanks-title" class="landing-section-heading__title">Thanks</p>
+					</div>
+
+					<p class="landing-thanks__intro">Huub would not exist without the generous contributions of time, work, and resources from individuals and organisations. We are very grateful for the support.</p>
+
+					<div class="landing-thanks__grid">
+						<article class="landing-thanks__card">
+							<p class="landing-thanks__card-title">Individuals</p>
+							<p class="landing-thanks__card-text">Huub is a community project and is deeply thankful for the individual contributions it receives, from code and documentation to testing, discussion, and feedback.</p>
+							<a class="landing-thanks__link" href="./misc/contributors.html">See contributors</a>
+						</article>
+
+						<article class="landing-thanks__card">
+							<p class="landing-thanks__card-title">Supporting organisations</p>
+							<p class="landing-thanks__card-text">Huub receives support by organisations that makes sustained development possible through funding, collaboration, and long-term investment.</p>
+							<a class="landing-thanks__link" href="./misc/funding.html">See funding</a>
+						</article>
 					</div>
 				</div>
 			</section>

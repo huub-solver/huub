@@ -20,23 +20,17 @@ a > .hljs {
         the screen on small screens. Without it, dragging on mobile Safari
         will want to reposition the viewport in a weird way.
     */
-	overflow-x: clip;
+	overflow-x: visible;
 }
 
 /* Site Header */
 
 #menu-bar {
 	z-index: 101;
-	position: relative;
+	position: sticky;
+	top: 0 !important;
 	padding-block: 0.5rem;
 	border-block-end: 1px solid var(--site-header-border);
-	background: var(--bg);
-}
-
-#menu-bar.sticky,
-html.sidebar-visible #menu-bar {
-	position: sticky;
-	top: 0;
 	backdrop-filter: blur(16px);
 	background: var(--site-header-bg);
 	border-block-end-color: var(--site-header-border);
@@ -218,6 +212,10 @@ html:not(.js) #theme-toggle {
 }
 
 @media only screen and (max-width: 900px) {
+	#body-container {
+		overflow-x: clip;
+	}
+
 	.site-header__inner,
 	.site-header__nav {
 		gap: 1.2rem;
@@ -909,13 +907,33 @@ ul#searchresults span.teaser em {
 	text-decoration: none;
 	color: var(--sidebar-fg);
 	font-weight: 400;
+	text-align: left;
+	text-justify: auto;
+	hyphens: manual;
+	overflow-wrap: normal;
+	word-break: normal;
 	transition:
 		border-color 160ms ease,
 		color 160ms ease,
 		font-weight 160ms ease;
 }
 
-.chapter li a strong[aria-hidden="true"] {
+.chapter li > div {
+	display: block;
+	width: calc(100% - 0.4rem);
+	box-sizing: border-box;
+	margin-inline-start: 0.4rem;
+	padding: 0.3rem 0 0.3rem 1.4rem;
+	color: color-mix(in srgb, var(--sidebar-fg) 60%, var(--bg));
+	font-weight: 400;
+	text-align: left;
+	text-justify: auto;
+	hyphens: manual;
+	overflow-wrap: normal;
+	word-break: normal;
+}
+
+.chapter li strong[aria-hidden="true"] {
 	display: none;
 }
 
