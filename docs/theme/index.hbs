@@ -689,14 +689,14 @@
 				}
 
 				const html = document.documentElement;
-				const darkThemes = new Set(["ayu", "coal", "navy", default_dark_theme]);
+				const darkThemes = new Set([default_dark_theme]);
 				const lightButton = themePopup.querySelector("#light");
 				const darkButton = themePopup.querySelector("#" + CSS.escape(default_dark_theme));
 				const icon = themeToggleButton.querySelector("i");
 
 				function currentTheme() {
 					const savedTheme = localStorage.getItem("mdbook-theme");
-					if (savedTheme) {
+					if (savedTheme === default_light_theme || savedTheme === default_dark_theme) {
 						return savedTheme;
 					}
 					return window.matchMedia("(prefers-color-scheme: dark)").matches

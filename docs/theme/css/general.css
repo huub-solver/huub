@@ -223,11 +223,7 @@ h6:target::before {
 .page-toc__item a:hover {
 	color: var(--site-header-link-hover);
 	text-decoration: none;
-	border-inline-start-color: color-mix(
-		in srgb,
-		var(--sidebar-active) 55%,
-		transparent
-	);
+	border-inline-start-color: var(--sidebar-hover-rule);
 }
 
 .page-toc__item a[aria-current] {
@@ -364,7 +360,7 @@ h6:target::before {
 	font-weight: 600;
 	font-family: var(--title-font);
 	line-height: 1.22;
-	color: color-mix(in srgb, var(--fg) 82%, var(--bg));
+	color: var(--text-fg-muted);
 	text-wrap: balance;
 }
 
@@ -379,7 +375,7 @@ h6:target::before {
 	font-weight: 700;
 	letter-spacing: 0.02em;
 	line-height: 1.15;
-	color: color-mix(in srgb, var(--fg) 84%, var(--bg));
+	color: var(--text-fg-muted);
 }
 
 .landing-hero__problem-grid {
@@ -431,7 +427,7 @@ h6:target::before {
 	font-family: var(--title-font);
 	font-weight: 600;
 	line-height: 1.2;
-	color: color-mix(in srgb, var(--fg) 78%, var(--bg));
+	color: var(--text-fg-subtle);
 }
 
 .landing-hero__cta {
@@ -465,7 +461,7 @@ h6:target::before {
 
 .landing-hero__cta:hover {
 	color: var(--fg);
-	background: transparent;
+	background: var(--transparent-bg);
 	text-decoration: none;
 	transform: translateY(-1px);
 }
@@ -481,8 +477,8 @@ h6:target::before {
 	padding: 5.4rem 0 5.8rem;
 	background: linear-gradient(
 		180deg,
-		color-mix(in srgb, var(--sidebar-active) 8%, var(--bg)) 0%,
-		color-mix(in srgb, var(--sidebar-active) 14%, var(--bg)) 100%
+		var(--landing-why-bg-start) 0%,
+		var(--landing-why-bg-end) 100%
 	);
 }
 
@@ -504,8 +500,7 @@ h6:target::before {
 	font-weight: 700;
 	letter-spacing: -0.03rem;
 	padding-bottom: 0.4rem;
-	border-bottom: 0.6rem solid
-		color-mix(in srgb, var(--sidebar-active) 65%, var(--fg));
+	border-bottom: 0.6rem solid var(--landing-section-accent);
 	font-size: clamp(3.4rem, 3.8vw, 5rem);
 	line-height: 1;
 }
@@ -534,7 +529,7 @@ h6:target::before {
 	margin: 1.5rem 0 0;
 	font-size: 1.65rem;
 	line-height: 1.5;
-	color: color-mix(in srgb, var(--fg) 82%, var(--bg));
+	color: var(--text-fg-muted);
 }
 
 .landing-services {
@@ -572,7 +567,7 @@ h6:target::before {
 	margin: 0;
 	font-size: 2.1rem;
 	line-height: 1.5;
-	color: color-mix(in srgb, var(--fg) 84%, var(--bg));
+	color: var(--text-fg-muted);
 }
 
 .landing-services__link {
@@ -586,7 +581,7 @@ h6:target::before {
 	width: calc(100% - 2.4rem);
 	border-radius: 1rem;
 	background: var(--sidebar-active);
-	color: #fff;
+	color: var(--text-on-accent);
 	font-family: var(--title-font);
 	font-size: 2.2rem;
 	font-weight: 700;
@@ -601,7 +596,7 @@ h6:target::before {
 
 .landing-services__link:link,
 .landing-services__link:visited {
-	color: #fff;
+	color: var(--text-on-accent);
 }
 
 .landing-services__content {
@@ -617,8 +612,8 @@ h6:target::before {
 }
 
 .landing-services__link:hover {
-	background: color-mix(in srgb, var(--sidebar-active) 84%, black);
-	color: #fff;
+	background: var(--landing-action-hover-bg);
+	color: var(--text-on-accent);
 	text-decoration: none;
 	transform: translateY(-1px);
 }
@@ -641,14 +636,10 @@ h6:target::before {
 	display: none;
 }
 
-html.ayu .landing-services__logo--light,
-html.coal .landing-services__logo--light,
 html.navy .landing-services__logo--light {
 	display: none;
 }
 
-html.ayu .landing-services__logo--dark,
-html.coal .landing-services__logo--dark,
 html.navy .landing-services__logo--dark {
 	display: block;
 }
@@ -657,10 +648,10 @@ html.navy .landing-services__logo--dark {
 	padding: 5.6rem 0 6rem;
 	background: linear-gradient(
 		180deg,
-		color-mix(in srgb, var(--sidebar-active) 12%, #324259) 0%,
-		color-mix(in srgb, var(--sidebar-active) 8%, #243147) 100%
+		var(--landing-involved-bg-start) 0%,
+		var(--landing-involved-bg-end) 100%
 	);
-	color: #fff;
+	color: var(--text-on-accent);
 }
 
 .landing-involved__inner {
@@ -671,8 +662,8 @@ html.navy .landing-services__logo--dark {
 }
 
 .landing-section-heading--involved .landing-section-heading__title {
-	border-bottom-color: color-mix(in srgb, var(--sidebar-active) 55%, #b7d9ff);
-	color: #fff;
+	border-bottom-color: var(--landing-section-accent-strong);
+	color: var(--text-on-accent);
 }
 
 .landing-involved__grid {
@@ -700,7 +691,7 @@ html.navy .landing-services__logo--dark {
 	font-size: 3rem;
 	font-weight: 700;
 	line-height: 1;
-	color: #fff;
+	color: var(--text-on-accent);
 }
 
 .landing-involved__card-text {
@@ -708,7 +699,7 @@ html.navy .landing-services__logo--dark {
 	flex: 1;
 	font-size: 2rem;
 	line-height: 1.5;
-	color: rgba(255, 255, 255, 0.96);
+	color: var(--landing-involved-text-fg);
 }
 
 .landing-involved__link {
@@ -720,9 +711,9 @@ html.navy .landing-services__logo--dark {
 	margin-inline: auto;
 	padding: 1.3rem 1.8rem;
 	width: calc(100% - 2.4rem);
-	background: color-mix(in srgb, var(--sidebar-active) 30%, #1c2740);
+	background: var(--landing-involved-link-bg);
 	border-radius: 0.6rem;
-	color: #fff;
+	color: var(--text-on-accent);
 	font-family: var(--title-font);
 	font-size: 2rem;
 	font-weight: 700;
@@ -737,12 +728,12 @@ html.navy .landing-services__logo--dark {
 
 .landing-involved__link:link,
 .landing-involved__link:visited {
-	color: #fff;
+	color: var(--text-on-accent);
 }
 
 .landing-involved__link:hover {
-	background: color-mix(in srgb, var(--sidebar-active) 42%, #162036);
-	color: #fff;
+	background: var(--landing-involved-link-hover-bg);
+	color: var(--text-on-accent);
 	text-decoration: none;
 	transform: translateY(-1px);
 }
@@ -764,7 +755,7 @@ html.navy .landing-services__logo--dark {
 	margin: 2.6rem 0 0;
 	font-size: clamp(2rem, 2.1vw, 2.6rem);
 	line-height: 1.45;
-	color: color-mix(in srgb, var(--fg) 92%, var(--bg));
+	color: var(--text-fg-strong);
 }
 
 .landing-thanks__grid {
@@ -795,7 +786,7 @@ html.navy .landing-services__logo--dark {
 	flex: 1;
 	font-size: 2rem;
 	line-height: 1.5;
-	color: color-mix(in srgb, var(--fg) 84%, var(--bg));
+	color: var(--text-fg-muted);
 }
 
 .landing-thanks__link {
@@ -808,8 +799,8 @@ html.navy .landing-services__logo--dark {
 	padding: 1.3rem 1.8rem;
 	width: calc(100% - 2.4rem);
 	border-radius: 0.8rem;
-	background: color-mix(in srgb, var(--sidebar-active) 88%, #f7c948);
-	color: #fff;
+	background: var(--sidebar-active);
+	color: var(--text-on-accent);
 	font-family: var(--title-font);
 	font-size: 2rem;
 	font-weight: 700;
@@ -824,12 +815,12 @@ html.navy .landing-services__logo--dark {
 
 .landing-thanks__link:link,
 .landing-thanks__link:visited {
-	color: #fff;
+	color: var(--text-on-accent);
 }
 
 .landing-thanks__link:hover {
-	background: color-mix(in srgb, var(--sidebar-active) 78%, black);
-	color: #fff;
+	background: var(--landing-action-hover-bg);
+	color: var(--text-on-accent);
 	text-decoration: none;
 	transform: translateY(-1px);
 }
@@ -1151,8 +1142,8 @@ sup {
 .tooltiptext {
 	position: absolute;
 	visibility: hidden;
-	color: #fff;
-	background-color: #333;
+	color: var(--tooltip-fg);
+	background-color: var(--tooltip-bg);
 	transform: translateX(
 		-50%
 	); /* Center by moving tooltip 50% of its width left */

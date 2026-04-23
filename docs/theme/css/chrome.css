@@ -477,7 +477,7 @@ mark {
 }
 
 mark.fade-out {
-	background-color: rgba(0, 0, 0, 0) !important;
+	background-color: var(--transparent-bg) !important;
 	cursor: auto;
 }
 
@@ -924,7 +924,7 @@ ul#searchresults span.teaser em {
 	box-sizing: border-box;
 	margin-inline-start: 0.4rem;
 	padding: 0.3rem 0 0.3rem 1.4rem;
-	color: color-mix(in srgb, var(--sidebar-fg) 60%, var(--bg));
+	color: var(--sidebar-placeholder-fg);
 	font-weight: 400;
 	text-align: left;
 	text-justify: auto;
@@ -939,11 +939,7 @@ ul#searchresults span.teaser em {
 
 .chapter li a:hover {
 	color: var(--sidebar-active);
-	border-inline-start-color: color-mix(
-		in srgb,
-		var(--sidebar-active) 55%,
-		transparent
-	);
+	border-inline-start-color: var(--sidebar-hover-rule);
 }
 
 .chapter li a.active {
@@ -1075,7 +1071,7 @@ ul#searchresults span.teaser em {
 
 /* The popup help box. */
 #mdbook-help-popup {
-	box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+	box-shadow: var(--overlay-shadow);
 	min-width: 300px;
 	max-width: 500px;
 	width: 100%;
