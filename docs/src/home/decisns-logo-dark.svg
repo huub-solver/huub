@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="245" height="34" viewBox="88 86.5 236.5 35.2">
   <style>
     svg {
-      --decizns-logo-neutral: #edf3f8;
+      --decizns-logo-neutral: #ffffff;
       --decizns-logo-accent: #55b5ff;
     }
 
