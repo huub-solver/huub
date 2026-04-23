@@ -106,7 +106,7 @@
 	--landing-involved-link-hover-bg: var(--accent-contrast-action-hover);
 	--sidebar-placeholder-fg: color-mix(
 		in srgb,
-		var(--sidebar-fg) 60%,
+		var(--sidebar-fg) 40%,
 		var(--bg)
 	);
 	--sidebar-hover-rule: color-mix(in srgb, var(--accent) 55%, transparent);
@@ -124,7 +124,11 @@
 		var(--dark-fg) 14%,
 		var(--dark-bg)
 	);
-	--dark-landing-surface: color-mix(in srgb, var(--dark-accent) 9%, var(--dark-bg));
+	--dark-landing-surface: color-mix(
+		in srgb,
+		var(--dark-accent) 9%,
+		var(--dark-bg)
+	);
 	--dark-landing-section-accent: color-mix(
 		in srgb,
 		var(--dark-accent) 78%,
@@ -202,7 +206,11 @@ html:not(.js) {
 	--landing-hero-cta-bg: var(--accent);
 	--landing-hero-cta-border: var(--accent);
 	--landing-hero-cta-fg: var(--text-on-accent);
-	--landing-hero-cta-hover-bg: color-mix(in srgb, var(--accent) 14%, transparent);
+	--landing-hero-cta-hover-bg: color-mix(
+		in srgb,
+		var(--accent) 14%,
+		transparent
+	);
 	--landing-hero-cta-hover-border: var(--accent);
 	--landing-hero-cta-hover-fg: var(--accent);
 	--landing-action-hover-bg: var(--dark-landing-action-hover-bg);

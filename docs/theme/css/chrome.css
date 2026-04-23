@@ -925,6 +925,7 @@ ul#searchresults span.teaser em {
 	padding: 0.3rem 0 0.3rem 1.4rem;
 	color: var(--sidebar-placeholder-fg);
 	font-weight: 400;
+	font-style: italic;
 	text-align: left;
 	text-justify: auto;
 	hyphens: manual;

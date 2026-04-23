@@ -413,7 +413,35 @@
 
 		<script src="{{ resource "clipboard.min.js" }}"></script>
 		<script src="{{ resource "highlight.js" }}"></script>
+		<script>
+			(function suppressLegacyMenuScrollEffects() {
+				const originalAddEventListener = document.addEventListener.bind(document);
+				window.__mdbookOriginalDocumentAddEventListener = originalAddEventListener;
+				window.__mdbookSuppressScrollLinkedEffects = true;
+				document.addEventListener = function(type, listener, options) {
+					if (window.__mdbookSuppressScrollLinkedEffects && type === "scroll") {
+						return;
+					}
+					return originalAddEventListener(type, listener, options);
+				};
+			})();
+		</script>
 		<script src="{{ resource "book.js" }}"></script>
+		<script>
+			(function restoreDocumentListeners() {
+				const originalAddEventListener = window.__mdbookOriginalDocumentAddEventListener;
+				if (originalAddEventListener) {
+					document.addEventListener = originalAddEventListener;
+				}
+				window.__mdbookSuppressScrollLinkedEffects = false;
+
+				const menu = document.getElementById("menu-bar");
+				if (menu) {
+					menu.style.top = "0px";
+					menu.classList.add("sticky");
+				}
+			})();
+		</script>
 		<script>
 			(function() {
 				function slugify(text) {

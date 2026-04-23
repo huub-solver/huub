@@ -1,6 +1,6 @@
 # Summary
 
-[Home](index.md)
+[Home](home/index.md)
 
 # Introduction
 
@@ -21,24 +21,31 @@
 # Case Studies
 
 - [Jobshop](./case-studies/jobshop.md)
-- [More case studies](./case-studies/more-case-studies.md)
+- [More coming soon...]()
   
 # Programming Propagators
 
+- [Coming soon...]()
+<!--
 - [Overview](./propagators/overview.md)
 - [Propagator lifecycle](./propagators/propagator-lifecycle.md)
 - [Subscriptions and events](./propagators/subscriptions-and-events.md)
 - [Explanations and reason generation](./propagators/explanations-and-reason-generation.md)
 - [State, trailing, and backtracking](./propagators/state-trailing-and-backtracking.md)
 - [Implementing a first propagator](./propagators/implementing-a-first-propagator.md)
+-->
 
 # Programming Branchers
 
+- [Coming soon...]()
+
+<!--
 - [Overview](./branchers/overview.md)
 - [Built-in branchers](./branchers/built-in-branchers.md)
 - [Variable and value selection](./branchers/variable-and-value-selection.md)
 - [Search directives and exhaustion](./branchers/search-directives-and-exhaustion.md)
 - [Implementing a custom brancher](./branchers/implementing-a-custom-brancher.md)
+-->
 
 -----------
 
