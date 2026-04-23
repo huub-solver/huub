@@ -77,15 +77,6 @@ h6 code {
 	display: none !important;
 }
 
-h2,
-h3 {
-	margin-block-start: 2.5em;
-}
-h4,
-h5 {
-	margin-block-start: 2em;
-}
-
 .header + .header h3,
 .header + .header h4,
 .header + .header h5 {
@@ -405,7 +396,7 @@ h6:target::before {
 	width: 4rem;
 	height: 8.4rem;
 	border-radius: 999px;
-	color: var(--sidebar-active);
+	color: var(--landing-section-accent);
 	font-size: 4.8rem;
 }
 
@@ -475,11 +466,7 @@ h6:target::before {
 .landing-why {
 	margin-top: 1.6rem;
 	padding: 5.4rem 0 5.8rem;
-	background: linear-gradient(
-		180deg,
-		var(--landing-why-bg-start) 0%,
-		var(--landing-why-bg-end) 100%
-	);
+	background: var(--landing-why-bg);
 }
 
 .landing-why__inner {
@@ -646,12 +633,8 @@ html.navy .landing-services__logo--dark {
 
 .landing-involved {
 	padding: 5.6rem 0 6rem;
-	background: linear-gradient(
-		180deg,
-		var(--landing-involved-bg-start) 0%,
-		var(--landing-involved-bg-end) 100%
-	);
-	color: var(--text-on-accent);
+	background: var(--landing-involved-bg);
+	color: var(--landing-involved-text-fg);
 }
 
 .landing-involved__inner {
@@ -663,7 +646,7 @@ html.navy .landing-services__logo--dark {
 
 .landing-section-heading--involved .landing-section-heading__title {
 	border-bottom-color: var(--landing-section-accent-strong);
-	color: var(--text-on-accent);
+	color: var(--landing-involved-heading-fg);
 }
 
 .landing-involved__grid {
@@ -691,7 +674,7 @@ html.navy .landing-services__logo--dark {
 	font-size: 3rem;
 	font-weight: 700;
 	line-height: 1;
-	color: var(--text-on-accent);
+	color: var(--landing-involved-title-fg);
 }
 
 .landing-involved__card-text {
