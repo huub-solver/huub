@@ -193,10 +193,6 @@ html:not(.js) #theme-toggle {
 	display: none;
 }
 
-#sidebar-toggle {
-	display: none;
-}
-
 .theme-popup--sr-only {
 	position: absolute;
 	width: 1px;
@@ -826,6 +822,10 @@ ul#searchresults span.teaser em {
 @media only screen and (max-width: 1199px) {
 	.docs-mobile-nav {
 		display: block;
+	}
+
+	.page-kicker {
+		display: none;
 	}
 }
 

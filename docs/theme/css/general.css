@@ -426,7 +426,7 @@ h6:target::before {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	min-width: 19rem;
+	min-width: 22rem;
 	min-height: 5.8rem;
 	padding: 1.4rem 2.8rem;
 	border: 2px solid var(--landing-hero-cta-border);
@@ -564,11 +564,16 @@ h6:target::before {
 	font-weight: 700;
 	line-height: 1;
 	text-decoration: none;
-	text-transform: uppercase;
 	transition:
 		background-color 160ms ease,
 		color 160ms ease,
 		transform 160ms ease;
+}
+
+.landing-services__link,
+.landing-involved__link,
+.landing-thanks__link {
+	text-transform: uppercase;
 }
 
 .landing-services__link {

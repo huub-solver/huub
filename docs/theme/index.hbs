@@ -296,7 +296,7 @@
 				<nav class="docs-mobile-nav" aria-label="Documentation navigation">
 					<label id="sidebar-toggle" class="docs-mobile-nav__trigger" for="sidebar-toggle-anchor" aria-controls="sidebar">
 						<i class="fa fa-bars docs-mobile-nav__icon" aria-hidden="true"></i>
-						<span class="docs-mobile-nav__label">Documentation</span>
+						<span id="docs-mobile-nav-label" class="docs-mobile-nav__label">Documentation</span>
 						<span id="docs-mobile-nav-current" class="docs-mobile-nav__current">{{ title }}</span>
 					</label>
 				</nav>
@@ -551,6 +551,18 @@
 		</script>
 		<script>
 			(function() {
+				function visibleNavText(element) {
+					if (!element) {
+						return "";
+					}
+
+					const clone = element.cloneNode(true);
+					clone.querySelectorAll('strong[aria-hidden="true"]').forEach(function(node) {
+						node.remove();
+					});
+					return clone.textContent.replace(/\s+/g, " ").trim();
+				}
+
 				function updatePageKicker() {
 					const kicker = document.getElementById("page-kicker");
 					const activeLink = document.querySelector("#sidebar .chapter a.active");
@@ -565,17 +577,32 @@
 						return;
 					}
 
-					kicker.textContent = toggle.textContent.trim();
+					kicker.textContent = visibleNavText(toggle);
 					kicker.classList.remove("hidden");
 				}
 
 				function syncMobileDocsNav() {
+					const label = document.getElementById("docs-mobile-nav-label");
 					const current = document.getElementById("docs-mobile-nav-current");
 					const activeLink = document.querySelector("#sidebar .chapter a.active");
-					if (current && activeLink) {
-						current.textContent = activeLink.textContent.trim();
+					if (!activeLink) {
+						return;
+					}
+
+					const group = activeLink.closest(".chapter-group");
+					const toggle = group && group.querySelector(".chapter-group__toggle");
+
+					if (label && toggle) {
+						label.textContent = visibleNavText(toggle);
+					}
+
+					if (current) {
+						current.textContent = visibleNavText(activeLink);
 					}
 				}
+
+				window.__syncMobileDocsNav = syncMobileDocsNav;
+				window.__updatePageKicker = updatePageKicker;
 
 				function wireMobileDocsNav() {
 					const trigger = document.querySelector(".docs-mobile-nav__trigger");
@@ -679,15 +706,11 @@
 					});
 
 					chapter.dataset.grouped = "true";
-					const kicker = document.getElementById("page-kicker");
-					if (kicker) {
-						const activeLink = chapter.querySelector("a.active");
-						const group = activeLink && activeLink.closest(".chapter-group");
-						const toggle = group && group.querySelector(".chapter-group__toggle");
-						if (toggle) {
-							kicker.textContent = toggle.textContent.trim();
-							kicker.classList.remove("hidden");
-						}
+					if (window.__updatePageKicker) {
+						window.__updatePageKicker();
+					}
+					if (window.__syncMobileDocsNav) {
+						window.__syncMobileDocsNav();
 					}
 					return true;
 				}
@@ -721,15 +744,18 @@
 				const lightButton = themePopup.querySelector("#light");
 				const darkButton = themePopup.querySelector("#" + CSS.escape(default_dark_theme));
 				const icon = themeToggleButton.querySelector("i");
+				const darkMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+				function autoTheme() {
+					return darkMediaQuery.matches ? default_dark_theme : default_light_theme;
+				}
 
 				function currentTheme() {
 					const savedTheme = localStorage.getItem("mdbook-theme");
 					if (savedTheme === default_light_theme || savedTheme === default_dark_theme) {
 						return savedTheme;
 					}
-					return window.matchMedia("(prefers-color-scheme: dark)").matches
-						? default_dark_theme
-						: default_light_theme;
+					return autoTheme();
 				}
 
 				function syncThemeToggle() {
@@ -755,7 +781,25 @@
 					}
 				}, true);
 
-				window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", syncThemeToggle);
+				[lightButton, darkButton].forEach(function(button) {
+					if (!button) {
+						return;
+					}
+
+					button.addEventListener("click", function() {
+						const selectedTheme = button.id;
+						window.requestAnimationFrame(function() {
+							if (selectedTheme === autoTheme()) {
+								try {
+									localStorage.removeItem("mdbook-theme");
+								} catch (e) { }
+							}
+							syncThemeToggle();
+						});
+					});
+				});
+
+				darkMediaQuery.addEventListener("change", syncThemeToggle);
 				syncThemeToggle();
 			})();
 		</script>
