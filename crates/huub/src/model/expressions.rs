@@ -1,8 +1,11 @@
 //! Helper types and functions used to build constraints for a [`Model`].
 
-#![allow(
-	clippy::missing_docs_in_private_items,
-	reason = "unable to document members of generated builders"
+#![cfg_attr(
+	not(test),
+	expect(
+		clippy::missing_docs_in_private_items,
+		reason = "unable to document members of generated builders"
+	)
 )]
 
 pub(crate) mod bool_formula;

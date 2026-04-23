@@ -53,7 +53,7 @@ pub struct Solution<'a> {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-#[allow(
+#[expect(
 	variant_size_differences,
 	reason = "`Int` cannot be as small as `Bool`"
 )]

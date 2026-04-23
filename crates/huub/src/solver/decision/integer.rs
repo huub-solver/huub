@@ -196,10 +196,6 @@ pub(crate) struct OrderNode {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[allow(
-	variant_size_differences,
-	reason = "TODO: Investigate if using Box improves performance"
-)]
 /// The storage used to store the variables for the inequality conditions.
 pub(crate) enum OrderStorage {
 	/// Variables for all inequality conditions are eagerly created and stored

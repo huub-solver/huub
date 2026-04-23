@@ -28,10 +28,6 @@ use crate::{
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[allow(
-	variant_size_differences,
-	reason = "`bool` is smaller than all other variants"
-)]
 /// Inner storage for [`BoolDecision`], kept private to prevent access from
 /// users.
 #[non_exhaustive]

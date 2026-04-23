@@ -5,7 +5,7 @@
 //! total time taken is repeatedly measured.
 
 /// Shared benchmark assertions imported from the CLI test helpers.
-#[allow(
+#[expect(
 	dead_code,
 	unused_macros,
 	reason = "shared helper module includes integration-test-only items"

@@ -17,7 +17,7 @@ use crate::{
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[allow(
+#[expect(
 	variant_size_differences,
 	reason = "`Lit` cannot be as small as `bool`"
 )]
