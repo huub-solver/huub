@@ -351,7 +351,7 @@ h6:target::before {
 	font-weight: 600;
 	font-family: var(--title-font);
 	line-height: 1.22;
-	color: var(--text-fg-muted);
+	color: var(--fg);
 	text-wrap: balance;
 }
 
@@ -366,7 +366,7 @@ h6:target::before {
 	font-weight: 700;
 	letter-spacing: 0.02em;
 	line-height: 1.15;
-	color: var(--text-fg-muted);
+	color: var(--fg);
 }
 
 .landing-hero__problem-grid {
@@ -418,7 +418,7 @@ h6:target::before {
 	font-family: var(--title-font);
 	font-weight: 600;
 	line-height: 1.2;
-	color: var(--text-fg-subtle);
+	color: var(--fg);
 }
 
 .landing-hero__cta {
@@ -517,7 +517,7 @@ h6:target::before {
 	margin: 1.5rem 0 0;
 	font-size: 1.65rem;
 	line-height: 1.5;
-	color: var(--text-fg-muted);
+	color: var(--fg);
 }
 
 .landing-services {
@@ -555,7 +555,7 @@ h6:target::before {
 	margin: 0;
 	font-size: 2.1rem;
 	line-height: 1.5;
-	color: var(--text-fg-muted);
+	color: var(--fg);
 }
 
 .landing-services__link {
@@ -739,7 +739,7 @@ html.navy .landing-services__logo--dark {
 	margin: 2.6rem 0 0;
 	font-size: clamp(2rem, 2.1vw, 2.6rem);
 	line-height: 1.45;
-	color: var(--text-fg-strong);
+	color: var(--fg);
 }
 
 .landing-thanks__grid {
@@ -770,7 +770,7 @@ html.navy .landing-services__logo--dark {
 	flex: 1;
 	font-size: 2rem;
 	line-height: 1.5;
-	color: var(--text-fg-muted);
+	color: var(--fg);
 }
 
 .landing-thanks__link {
