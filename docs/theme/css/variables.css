@@ -99,6 +99,12 @@
 	--landing-why-bg: var(--accent-subtle);
 	--landing-section-accent: var(--accent-strong);
 	--landing-section-accent-strong: var(--landing-section-accent);
+	--landing-hero-cta-bg: var(--fg);
+	--landing-hero-cta-border: var(--fg);
+	--landing-hero-cta-fg: var(--bg);
+	--landing-hero-cta-hover-bg: var(--transparent-bg);
+	--landing-hero-cta-hover-border: var(--fg);
+	--landing-hero-cta-hover-fg: var(--fg);
 	--landing-action-hover-bg: var(--accent-hover);
 	--landing-involved-bg: var(--accent-contrast-surface-start);
 	--landing-involved-heading-fg: var(--text-on-accent);
@@ -114,18 +120,36 @@
 	--sidebar-hover-rule: color-mix(in srgb, var(--accent) 55%, transparent);
 
 	/* Dark theme variables */
-	--dark-bg: hsl(226, 23%, 11%);
-	--dark-fg: hsl(236, 16%, 78%);
-	--dark-accent: hsl(200, 58%, 40%);
-	--dark-sidebar-fg: color-mix(in srgb, var(--dark-fg) 88%, white);
-	--dark-inline-code-color: color-mix(in srgb, var(--dark-fg) 88%, white);
+	--dark-bg: hsl(223, 26%, 11%);
+	--dark-fg: hsl(0, 0%, 100%);
+	--dark-accent: hsl(210, 72%, 60%);
+	--dark-sidebar-fg: var(--dark-fg);
+	--dark-inline-code-color: var(--dark-fg);
 	--dark-searchbar-bg: color-mix(in srgb, var(--dark-fg) 86%, var(--dark-bg));
 	--dark-searchbar-fg: var(--dark-bg);
-	--dark-site-header-brand: color-mix(in srgb, var(--dark-fg) 96%, white);
-	--dark-site-header-link: color-mix(in srgb, var(--dark-fg) 82%, white);
-	--dark-site-header-link-hover: color-mix(in srgb, var(--dark-fg) 96%, white);
-	--dark-site-header-icon: color-mix(in srgb, var(--dark-fg) 96%, white);
-	--dark-site-header-icon-hover: white;
+	--dark-site-header-brand: var(--dark-fg);
+	--dark-site-header-link: var(--dark-fg);
+	--dark-site-header-link-hover: var(--dark-fg);
+	--dark-site-header-icon: var(--dark-fg);
+	--dark-site-header-icon-hover: var(--dark-accent);
+	--dark-site-header-bg: color-mix(in srgb, var(--dark-bg) 90%, black);
+	--dark-site-header-separator: color-mix(
+		in srgb,
+		var(--dark-fg) 14%,
+		var(--dark-bg)
+	);
+	--dark-landing-surface: color-mix(in srgb, var(--dark-accent) 9%, var(--dark-bg));
+	--dark-landing-section-accent: color-mix(
+		in srgb,
+		var(--dark-accent) 78%,
+		white
+	);
+	--dark-landing-copy-fg: var(--dark-fg);
+	--dark-landing-action-hover-bg: color-mix(
+		in srgb,
+		var(--dark-accent) 88%,
+		white
+	);
 }
 
 /* Themes */
@@ -146,6 +170,12 @@ html:not(.js) {
 	--landing-involved-link-hover-bg: var(--landing-action-hover-bg);
 	--landing-section-accent: color-mix(in srgb, var(--accent) 72%, var(--fg));
 	--landing-section-accent-strong: var(--landing-section-accent);
+	--landing-hero-cta-bg: var(--fg);
+	--landing-hero-cta-border: var(--fg);
+	--landing-hero-cta-fg: var(--bg);
+	--landing-hero-cta-hover-bg: var(--transparent-bg);
+	--landing-hero-cta-hover-border: var(--fg);
+	--landing-hero-cta-hover-fg: var(--fg);
 	--site-header-bg: color-mix(in srgb, var(--bg) 92%, var(--accent-subtle));
 	--site-header-link: var(--text-fg-strong);
 	--site-header-icon: var(--text-fg-strong);
@@ -164,6 +194,9 @@ html:not(.js) {
 	--bg: var(--dark-bg);
 	--fg: var(--dark-fg);
 	--accent: var(--dark-accent);
+	--text-fg-strong: var(--fg);
+	--text-fg-muted: var(--fg);
+	--text-fg-subtle: var(--fg);
 
 	--color-scheme: dark;
 
@@ -178,11 +211,29 @@ html:not(.js) {
 	--inline-code-color: var(--dark-inline-code-color);
 	--searchbar-bg: var(--dark-searchbar-bg);
 	--searchbar-fg: var(--dark-searchbar-fg);
+	--site-header-bg: var(--dark-site-header-bg);
 	--site-header-brand: var(--dark-site-header-brand);
 	--site-header-link: var(--dark-site-header-link);
 	--site-header-link-hover: var(--dark-site-header-link-hover);
 	--site-header-icon: var(--dark-site-header-icon);
 	--site-header-icon-hover: var(--dark-site-header-icon-hover);
+	--site-header-separator: var(--dark-site-header-separator);
+	--landing-why-bg: var(--dark-landing-surface);
+	--landing-involved-bg: var(--dark-landing-surface);
+	--landing-section-accent: var(--dark-landing-section-accent);
+	--landing-section-accent-strong: var(--landing-section-accent);
+	--landing-hero-cta-bg: var(--accent);
+	--landing-hero-cta-border: var(--accent);
+	--landing-hero-cta-fg: var(--text-on-accent);
+	--landing-hero-cta-hover-bg: color-mix(in srgb, var(--accent) 14%, transparent);
+	--landing-hero-cta-hover-border: var(--accent);
+	--landing-hero-cta-hover-fg: var(--accent);
+	--landing-action-hover-bg: var(--dark-landing-action-hover-bg);
+	--landing-involved-heading-fg: var(--text-fg-strong);
+	--landing-involved-title-fg: var(--text-fg-strong);
+	--landing-involved-text-fg: var(--dark-landing-copy-fg);
+	--landing-involved-link-bg: var(--accent);
+	--landing-involved-link-hover-bg: var(--landing-action-hover-bg);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -190,6 +241,9 @@ html:not(.js) {
 		--bg: var(--dark-bg);
 		--fg: var(--dark-fg);
 		--accent: var(--dark-accent);
+		--text-fg-strong: var(--fg);
+		--text-fg-muted: var(--fg);
+		--text-fg-subtle: var(--fg);
 
 		--color-scheme: dark;
 
@@ -204,10 +258,32 @@ html:not(.js) {
 		--inline-code-color: var(--dark-inline-code-color);
 		--searchbar-bg: var(--dark-searchbar-bg);
 		--searchbar-fg: var(--dark-searchbar-fg);
+		--site-header-bg: var(--dark-site-header-bg);
 		--site-header-brand: var(--dark-site-header-brand);
 		--site-header-link: var(--dark-site-header-link);
 		--site-header-link-hover: var(--dark-site-header-link-hover);
 		--site-header-icon: var(--dark-site-header-icon);
 		--site-header-icon-hover: var(--dark-site-header-icon-hover);
+		--site-header-separator: var(--dark-site-header-separator);
+		--landing-why-bg: var(--dark-landing-surface);
+		--landing-involved-bg: var(--dark-landing-surface);
+		--landing-section-accent: var(--dark-landing-section-accent);
+		--landing-section-accent-strong: var(--landing-section-accent);
+		--landing-hero-cta-bg: var(--accent);
+		--landing-hero-cta-border: var(--accent);
+		--landing-hero-cta-fg: var(--text-on-accent);
+		--landing-hero-cta-hover-bg: color-mix(
+			in srgb,
+			var(--accent) 14%,
+			transparent
+		);
+		--landing-hero-cta-hover-border: var(--accent);
+		--landing-hero-cta-hover-fg: var(--accent);
+		--landing-action-hover-bg: var(--dark-landing-action-hover-bg);
+		--landing-involved-heading-fg: var(--text-fg-strong);
+		--landing-involved-title-fg: var(--text-fg-strong);
+		--landing-involved-text-fg: var(--dark-landing-copy-fg);
+		--landing-involved-link-bg: var(--accent);
+		--landing-involved-link-hover-bg: var(--landing-action-hover-bg);
 	}
 }

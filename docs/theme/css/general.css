@@ -428,10 +428,10 @@ h6:target::before {
 	min-width: 19rem;
 	min-height: 5.8rem;
 	padding: 1.4rem 2.8rem;
-	border: 2px solid var(--fg);
+	border: 2px solid var(--landing-hero-cta-border);
 	border-radius: 1rem;
-	background: var(--fg);
-	color: var(--bg);
+	background: var(--landing-hero-cta-bg);
+	color: var(--landing-hero-cta-fg);
 	font-family: var(--title-font);
 	font-size: 3.5rem;
 	font-weight: 700;
@@ -447,12 +447,13 @@ h6:target::before {
 
 .landing-hero__cta:link,
 .landing-hero__cta:visited {
-	color: var(--bg);
+	color: var(--landing-hero-cta-fg);
 }
 
 .landing-hero__cta:hover {
-	color: var(--fg);
-	background: var(--transparent-bg);
+	color: var(--landing-hero-cta-hover-fg);
+	background: var(--landing-hero-cta-hover-bg);
+	border-color: var(--landing-hero-cta-hover-border);
 	text-decoration: none;
 	transform: translateY(-1px);
 }
