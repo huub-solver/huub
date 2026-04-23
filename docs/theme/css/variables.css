@@ -47,7 +47,6 @@
 		var(--accent) 12%,
 		#324259
 	);
-	--accent-contrast-surface-end: color-mix(in srgb, var(--accent) 8%, #243147);
 	--accent-contrast-action: color-mix(in srgb, var(--accent) 30%, #1c2740);
 	--accent-contrast-action-hover: color-mix(
 		in srgb,
@@ -95,7 +94,6 @@
 	--site-header-separator: color-mix(in srgb, var(--fg) 11%, var(--bg));
 	--landing-why-bg: var(--accent-subtle);
 	--landing-section-accent: var(--accent-strong);
-	--landing-section-accent-strong: var(--landing-section-accent);
 	--landing-hero-cta-bg: var(--fg);
 	--landing-hero-cta-border: var(--fg);
 	--landing-hero-cta-fg: var(--bg);
@@ -104,9 +102,6 @@
 	--landing-hero-cta-hover-fg: var(--fg);
 	--landing-action-hover-bg: var(--accent-hover);
 	--landing-involved-bg: var(--accent-contrast-surface-start);
-	--landing-involved-heading-fg: var(--text-on-accent);
-	--landing-involved-title-fg: var(--text-on-accent);
-	--landing-involved-text-fg: rgba(255, 255, 255, 0.96);
 	--landing-involved-link-bg: var(--accent-contrast-action);
 	--landing-involved-link-hover-bg: var(--accent-contrast-action-hover);
 	--sidebar-placeholder-fg: color-mix(
@@ -120,14 +115,8 @@
 	--dark-bg: hsl(223, 26%, 11%);
 	--dark-fg: hsl(0, 0%, 100%);
 	--dark-accent: hsl(205, 84%, 50%);
-	--dark-sidebar-fg: var(--dark-fg);
-	--dark-inline-code-color: var(--dark-fg);
 	--dark-searchbar-bg: color-mix(in srgb, var(--dark-fg) 86%, var(--dark-bg));
 	--dark-searchbar-fg: var(--dark-bg);
-	--dark-site-header-brand: var(--dark-fg);
-	--dark-site-header-link: var(--dark-fg);
-	--dark-site-header-link-hover: var(--dark-fg);
-	--dark-site-header-icon: var(--dark-fg);
 	--dark-site-header-icon-hover: var(--dark-accent);
 	--dark-site-header-bg: color-mix(in srgb, var(--dark-bg) 90%, black);
 	--dark-site-header-separator: color-mix(
@@ -141,7 +130,6 @@
 		var(--dark-accent) 78%,
 		white
 	);
-	--dark-landing-copy-fg: var(--dark-fg);
 	--dark-landing-action-hover-bg: color-mix(
 		in srgb,
 		var(--dark-accent) 88%,
@@ -160,13 +148,9 @@ html:not(.js) {
 	/* Light theme landing palette */
 	--landing-why-bg: color-mix(in srgb, var(--accent) 11%, var(--bg));
 	--landing-involved-bg: var(--landing-why-bg);
-	--landing-involved-heading-fg: var(--fg);
-	--landing-involved-title-fg: var(--fg);
-	--landing-involved-text-fg: var(--fg);
 	--landing-involved-link-bg: var(--sidebar-active);
 	--landing-involved-link-hover-bg: var(--landing-action-hover-bg);
 	--landing-section-accent: color-mix(in srgb, var(--accent) 72%, var(--fg));
-	--landing-section-accent-strong: var(--landing-section-accent);
 	--landing-hero-cta-bg: var(--fg);
 	--landing-hero-cta-border: var(--fg);
 	--landing-hero-cta-fg: var(--bg);
@@ -201,21 +185,20 @@ html:not(.js) {
 	--copy-button-filter-hover: invert(46%) sepia(20%) saturate(1537%)
 		hue-rotate(156deg) brightness(85%) contrast(90%);
 
-	--sidebar-fg: var(--dark-sidebar-fg);
-	--inline-code-color: var(--dark-inline-code-color);
+	--sidebar-fg: var(--dark-fg);
+	--inline-code-color: var(--dark-fg);
 	--searchbar-bg: var(--dark-searchbar-bg);
 	--searchbar-fg: var(--dark-searchbar-fg);
 	--site-header-bg: var(--dark-site-header-bg);
-	--site-header-brand: var(--dark-site-header-brand);
-	--site-header-link: var(--dark-site-header-link);
-	--site-header-link-hover: var(--dark-site-header-link-hover);
-	--site-header-icon: var(--dark-site-header-icon);
+	--site-header-brand: var(--dark-fg);
+	--site-header-link: var(--dark-fg);
+	--site-header-link-hover: var(--dark-fg);
+	--site-header-icon: var(--dark-fg);
 	--site-header-icon-hover: var(--dark-site-header-icon-hover);
 	--site-header-separator: var(--dark-site-header-separator);
 	--landing-why-bg: var(--dark-landing-surface);
 	--landing-involved-bg: var(--dark-landing-surface);
 	--landing-section-accent: var(--dark-landing-section-accent);
-	--landing-section-accent-strong: var(--landing-section-accent);
 	--landing-hero-cta-bg: var(--accent);
 	--landing-hero-cta-border: var(--accent);
 	--landing-hero-cta-fg: var(--text-on-accent);
@@ -223,9 +206,6 @@ html:not(.js) {
 	--landing-hero-cta-hover-border: var(--accent);
 	--landing-hero-cta-hover-fg: var(--accent);
 	--landing-action-hover-bg: var(--dark-landing-action-hover-bg);
-	--landing-involved-heading-fg: var(--fg);
-	--landing-involved-title-fg: var(--fg);
-	--landing-involved-text-fg: var(--dark-landing-copy-fg);
 	--landing-involved-link-bg: var(--accent);
 	--landing-involved-link-hover-bg: var(--landing-action-hover-bg);
 }
@@ -245,21 +225,20 @@ html:not(.js) {
 		--copy-button-filter-hover: invert(46%) sepia(20%) saturate(1537%)
 			hue-rotate(156deg) brightness(85%) contrast(90%);
 
-		--sidebar-fg: var(--dark-sidebar-fg);
-		--inline-code-color: var(--dark-inline-code-color);
+		--sidebar-fg: var(--dark-fg);
+		--inline-code-color: var(--dark-fg);
 		--searchbar-bg: var(--dark-searchbar-bg);
 		--searchbar-fg: var(--dark-searchbar-fg);
 		--site-header-bg: var(--dark-site-header-bg);
-		--site-header-brand: var(--dark-site-header-brand);
-		--site-header-link: var(--dark-site-header-link);
-		--site-header-link-hover: var(--dark-site-header-link-hover);
-		--site-header-icon: var(--dark-site-header-icon);
+		--site-header-brand: var(--dark-fg);
+		--site-header-link: var(--dark-fg);
+		--site-header-link-hover: var(--dark-fg);
+		--site-header-icon: var(--dark-fg);
 		--site-header-icon-hover: var(--dark-site-header-icon-hover);
 		--site-header-separator: var(--dark-site-header-separator);
 		--landing-why-bg: var(--dark-landing-surface);
 		--landing-involved-bg: var(--dark-landing-surface);
 		--landing-section-accent: var(--dark-landing-section-accent);
-		--landing-section-accent-strong: var(--landing-section-accent);
 		--landing-hero-cta-bg: var(--accent);
 		--landing-hero-cta-border: var(--accent);
 		--landing-hero-cta-fg: var(--text-on-accent);
@@ -271,9 +250,6 @@ html:not(.js) {
 		--landing-hero-cta-hover-border: var(--accent);
 		--landing-hero-cta-hover-fg: var(--accent);
 		--landing-action-hover-bg: var(--dark-landing-action-hover-bg);
-		--landing-involved-heading-fg: var(--fg);
-		--landing-involved-title-fg: var(--fg);
-		--landing-involved-text-fg: var(--dark-landing-copy-fg);
 		--landing-involved-link-bg: var(--accent);
 		--landing-involved-link-hover-bg: var(--landing-action-hover-bg);
 	}

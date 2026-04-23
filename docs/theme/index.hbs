@@ -119,30 +119,30 @@
 		</nav>
 		<main class="landing-page">
 			<section class="landing-hero" aria-label="Huub introduction">
-				<div class="landing-hero__inner">
+				<div class="landing-section__inner landing-hero__inner">
 					<div class="landing-hero__logo-panel">
 						<img class="landing-hero__logo" src="{{ resource "favicon.svg" }}" alt="Huub logo">
 					</div>
 					<div class="landing-hero__content">
 						<p class="landing-hero__tagline">Make better decisions with a solver built to be reliable, performant, and extensible.</p>
 						<div class="landing-hero__actions">
-							<a class="landing-hero__cta" href="./introduction/what-is-huub.html">Get Started</a>
+							<a class="landing-button landing-hero__cta" href="./introduction/what-is-huub.html">Get Started</a>
 						</div>
 						<p class="landing-hero__problem-intro">Built for ...</p>
 						<div class="landing-hero__problem-grid" aria-label="Example problem types">
-							<article class="landing-problem-card landing-problem-card--scheduling">
+							<article class="landing-problem-card">
 								<div class="landing-problem-card__icon" aria-hidden="true">
 									<i class="fa fa-calendar"></i>
 								</div>
 								<p class="landing-problem-card__text">Scheduling and rostering</p>
 							</article>
-							<article class="landing-problem-card landing-problem-card--packing">
+							<article class="landing-problem-card">
 								<div class="landing-problem-card__icon" aria-hidden="true">
 									<i class="fa fa-cubes"></i>
 								</div>
 								<p class="landing-problem-card__text">Packing and planning</p>
 							</article>
-							<article class="landing-problem-card landing-problem-card--configuration">
+							<article class="landing-problem-card">
 								<div class="landing-problem-card__icon" aria-hidden="true">
 									<i class="fa fa-sliders"></i>
 								</div>
@@ -160,7 +160,7 @@
 			</section>
 
 			<section class="landing-why" aria-labelledby="landing-why-title">
-				<div class="landing-why__inner">
+				<div class="landing-section__inner">
 					<div class="landing-section-heading">
 						<p id="landing-why-title" class="landing-section-heading__title">Why Huub?</p>
 					</div>
@@ -185,8 +185,8 @@
 			</section>
 
 			<section class="landing-services" aria-labelledby="landing-services-title">
-				<div class="landing-services__inner">
-					<div class="landing-section-heading landing-section-heading--services">
+				<div class="landing-section__inner">
+					<div class="landing-section-heading">
 						<div class="landing-services__heading-row">
 							<p id="landing-services-title" class="landing-section-heading__title">Professional services</p>
 							<div class="landing-services__brand" aria-hidden="true">
@@ -199,59 +199,59 @@
 					<div class="landing-services__card">
 						<div class="landing-services__content">
 							<p class="landing-services__text">Need help getting the most out of Huub? deciZns provides specialist support for organisations using Huub in real decision workflows, from solver integration and performance tuning to custom modelling support and deeper technical extensions.</p>
-							<a class="landing-services__link" href="https://decizns.com" target="_blank" rel="noopener noreferrer">Learn about deciZns</a>
+							<a class="landing-button landing-services__link" href="https://decizns.com" target="_blank" rel="noopener noreferrer">Learn about deciZns</a>
 						</div>
 					</div>
 				</div>
 			</section>
 
 			<section class="landing-involved" aria-labelledby="landing-involved-title">
-				<div class="landing-involved__inner">
-					<div class="landing-section-heading landing-section-heading--involved">
+				<div class="landing-section__inner">
+					<div class="landing-section-heading">
 						<p id="landing-involved-title" class="landing-section-heading__title">Work with Huub</p>
 					</div>
 
 					<div class="landing-involved__grid">
-						<article class="landing-involved__card">
-							<p class="landing-involved__card-title">Use from MiniZinc</p>
-							<p class="landing-involved__card-text">Start with Huub through MiniZinc and explore a familiar modelling workflow backed by Huub’s solver technology.</p>
-							<a class="landing-involved__link" href="./introduction/using-huub-from-minizinc.html">Installation instructions</a>
+						<article class="landing-column-card landing-involved__card">
+							<p class="landing-column-card__title">Use from MiniZinc</p>
+							<p class="landing-column-card__text">Start with Huub through MiniZinc and explore a familiar modelling workflow backed by Huub’s solver technology.</p>
+							<a class="landing-button landing-involved__link" href="./introduction/using-huub-from-minizinc.html">Installation instructions</a>
 						</article>
 
-						<article class="landing-involved__card">
-							<p class="landing-involved__card-title">Modelling and programming in Huub</p>
-							<p class="landing-involved__card-text">Learn how to model directly in Huub and how to program custom propagators, branchers, and other solver extensions.</p>
-							<a class="landing-involved__link" href="./modelling/getting-started.html">Explore the docs</a>
+						<article class="landing-column-card landing-involved__card">
+							<p class="landing-column-card__title">Modelling and programming in Huub</p>
+							<p class="landing-column-card__text">Learn how to model directly in Huub and how to program custom propagators, branchers, and other solver extensions.</p>
+							<a class="landing-button landing-involved__link" href="./modelling/getting-started.html">Explore the docs</a>
 						</article>
 					</div>
 
-					<article class="landing-involved__card landing-involved__card--wide">
-						<p class="landing-involved__card-title">Contribute code</p>
-						<p class="landing-involved__card-text">Huub is an open solver project, and contributions are welcome. Whether you want to improve the implementation, extend the documentation, or help shape new capabilities, the codebase is open for collaboration.</p>
-						<a class="landing-involved__link" href="https://github.com/huub-solver/huub" target="_blank" rel="noopener noreferrer">Visit the repository</a>
+					<article class="landing-column-card landing-involved__card landing-involved__card--wide">
+						<p class="landing-column-card__title">Contribute code</p>
+						<p class="landing-column-card__text">Huub is an open solver project, and contributions are welcome. Whether you want to improve the implementation, extend the documentation, or help shape new capabilities, the codebase is open for collaboration.</p>
+						<a class="landing-button landing-involved__link" href="https://github.com/huub-solver/huub" target="_blank" rel="noopener noreferrer">Visit the repository</a>
 					</article>
 				</div>
 			</section>
 
 			<section class="landing-thanks" aria-labelledby="landing-thanks-title">
-				<div class="landing-thanks__inner">
-					<div class="landing-section-heading landing-section-heading--thanks">
+				<div class="landing-section__inner">
+					<div class="landing-section-heading">
 						<p id="landing-thanks-title" class="landing-section-heading__title">Thanks</p>
 					</div>
 
 					<p class="landing-thanks__intro">Huub would not exist without the generous contributions of time, work, and resources from individuals and organisations. We are very grateful for the support.</p>
 
 					<div class="landing-thanks__grid">
-						<article class="landing-thanks__card">
-							<p class="landing-thanks__card-title">Individuals</p>
-							<p class="landing-thanks__card-text">Huub is a community project and is deeply thankful for the individual contributions it receives, from code and documentation to testing, discussion, and feedback.</p>
-							<a class="landing-thanks__link" href="./misc/contributors.html">See contributors</a>
+						<article class="landing-column-card landing-thanks__card">
+							<p class="landing-column-card__title">Individuals</p>
+							<p class="landing-column-card__text">Huub is a community project and is deeply thankful for the individual contributions it receives, from code and documentation to testing, discussion, and feedback.</p>
+							<a class="landing-button landing-thanks__link" href="./misc/contributors.html">See contributors</a>
 						</article>
 
-						<article class="landing-thanks__card">
-							<p class="landing-thanks__card-title">Supporting organisations</p>
-							<p class="landing-thanks__card-text">Huub receives support by organisations that makes sustained development possible through funding, collaboration, and long-term investment.</p>
-							<a class="landing-thanks__link" href="./misc/funding.html">See funding</a>
+						<article class="landing-column-card landing-thanks__card">
+							<p class="landing-column-card__title">Supporting organisations</p>
+							<p class="landing-column-card__text">Huub receives support by organisations that makes sustained development possible through funding, collaboration, and long-term investment.</p>
+							<a class="landing-button landing-thanks__link" href="./misc/funding.html">See funding</a>
 						</article>
 					</div>
 				</div>
