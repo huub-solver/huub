@@ -6,8 +6,7 @@
 
   - [What is Huub?](./introduction/what-is-huub.md)
   - [Using Huub from MiniZinc](./introduction/using-huub-from-minizinc.md)
-  - [Using Huub as a Rust crate](./introduction/using-huub-as-a-rust-crate.md)
-  - [Solver architecture](./introduction/solver-architecture.md)
+  - [Installing the Huub crate](./introduction/installing-the-huub-crate.md)
 
 # Modelling
 

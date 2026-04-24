@@ -1,66 +1,119 @@
 # What is Huub?
 
-Huub is a lazy clause generation solver that combines constraint programming
-with SAT-style learning.
+Huub is an efficient library for developing constraint-based decision or optimization systems and applications with learning capabilities.
+It combines the modelling strengths of constraint programming (CP) with the learning and proof machinery of Boolean satisfiability (SAT) solving.
+Huub belongs to the solving family generally referred to as CP+SAT or Lazy Clause Generation (LCG) solvers.
 
-It is designed to support both practical modelling workflows and
-experimentation with solver architecture.
+Constraint programming and SAT solving come from different traditions, and each has its own strengths.
+Constraint programming is a natural fit for modelling structured combinatorial problems: abstract decision variable types, complex constraints that capture patterns from problem classes including scheduling, packing, and configuration, and explicit search control.
+SAT solving, on the other hand, excels at conflict analysis, clause learning, restart-based search, and extracting strong guidance from failure.
+A CP+SAT solver aims to combine these two worlds.
+Rather than choosing between high-level modelling power and conflict-driven reasoning, it uses both.
 
-## Test 123
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla in malesuada leo. Cras sed justo ante. Fusce egestas vestibulum ullamcorper. Aliquam erat volutpat. Proin ut orci dapibus, ultricies eros a, scelerisque est. Maecenas eget arcu porttitor ipsum mollis aliquet ac sed enim. Sed ac ullamcorper lectus. Phasellus semper nisi elit, non ullamcorper est vestibulum eget. Nunc sit amet placerat odio. Nulla lobortis pulvinar sapien at egestas. Nullam egestas condimentum porttitor. Integer posuere mollis magna in dignissim. Proin non libero velit. Vestibulum mauris orci, ornare id enim eget, consequat condimentum metus. Ut dapibus varius placerat. Donec vel erat ut odio aliquet auctor eget ac tortor.
+This viewpoint is central to Huub.
+Huub is not merely a SAT solver with a thin modelling front-end, and it is not merely a classical constraint programming engine with a few SAT-inspired heuristics attached to it.
+Instead, it is meant to be a solver in which propagation, explanation, clause learning, and search all play first-class roles.
 
-Fusce laoreet ex efficitur nulla dignissim dignissim. Maecenas pellentesque orci nec sem gravida, nec efficitur dolor lobortis. Mauris tincidunt arcu sem, sed aliquet mauris auctor eu. Sed volutpat mattis sem, et dapibus risus maximus non. Nam vitae leo sit amet quam fringilla mattis. Proin in magna sit amet magna dapibus eleifend a nec ante. Sed feugiat eu lacus ac aliquet. Phasellus tristique in augue feugiat fermentum. Donec sed lectus ut nunc lacinia ullamcorper. Phasellus nec bibendum sapien.
+In practice, this means that Huub works with decision variables and constraints that look familiar to a constraint programmer, while also maintaining the ability to explain deductions and failures in a form that can be given to a SAT engine.
+When the solver encounters a conflict, it does not simply backtrack and forget what happened.
+It analyses the failure, learns information from it, and uses that information to avoid making essentially the same mistake again.
 
-Interdum et malesuada fames ac ante ipsum primis in faucibus. Quisque vitae purus ac arcu rutrum maximus. Aliquam erat volutpat. Pellentesque commodo sit amet ex mollis luctus. Aliquam molestie sapien eget nulla molestie, convallis semper mi auctor. Proin vulputate augue non turpis interdum, at ultrices mauris dictum. Sed sem augue, luctus sit amet diam vel, molestie tempus neque. Ut neque nisl, maximus vitae ligula eu, iaculis euismod sapien. Donec eleifend eu turpis id rutrum. Nulla at dui eu felis egestas ultrices at in sem. Sed vitae rutrum dui, in ullamcorper risus. Duis sed fringilla lacus.
+This combination matters because combinatorial optimisation problems are often too rich to encode comfortably as pure SAT, but also too difficult to solve well using propagation and chronological backtracking alone.
+A CP+SAT solver can exploit the structure of high-level constraints while still benefitting from the learning mechanisms that have made modern SAT solving so effective.
 
-Duis ultricies in turpis eu feugiat. Cras vulputate luctus sollicitudin. Mauris sed quam urna. Suspendisse vitae gravida mauris, et semper nisl. Aliquam sed nibh faucibus, mollis quam quis, tempor nulla. Praesent tempus posuere odio mollis vestibulum. Nam viverra dui ligula, sed porta erat dignissim eget. Integer blandit elit nec orci euismod vulputate.
+Huub is also intended to be studied and extended.
+The goal is not only to solve models well, but also to provide a clean and modular implementation that is suitable for practical use, experimentation with solver design, and implementation of new ideas.
 
-Aliquam facilisis eget diam id iaculis. Proin sagittis finibus sagittis. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Nam nisl lorem, imperdiet nec sapien sit amet, maximus sagittis arcu. Suspendisse tempus, massa quis consectetur cursus, arcu nisl sollicitudin libero, non fermentum nibh diam et leo. Proin mattis lobortis felis, eu imperdiet nulla maximus eget. Curabitur semper ullamcorper neque, et aliquet tellus pulvinar vel. Cras quis purus convallis libero fermentum euismod. Aliquam euismod egestas massa, at ultricies nunc consequat at. Quisque vel malesuada purus. Ut nec volutpat est. Mauris vitae laoreet velit. In sit amet rutrum tortor. Ut ac purus nibh.  Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla in malesuada leo. Cras sed justo ante. Fusce egestas vestibulum ullamcorper. Aliquam erat volutpat. Proin ut orci dapibus, ultricies eros a, scelerisque est. Maecenas eget arcu porttitor ipsum mollis aliquet ac sed enim. Sed ac ullamcorper lectus. Phasellus semper nisi elit, non ullamcorper est vestibulum eget. Nunc sit amet placerat odio. Nulla lobortis pulvinar sapien at egestas. Nullam egestas condimentum porttitor. Integer posuere mollis magna in dignissim. Proin non libero velit. Vestibulum mauris orci, ornare id enim eget, consequat condimentum metus. Ut dapibus varius placerat. Donec vel erat ut odio aliquet auctor eget ac tortor.
+The rest of this section serves as a first orientation.
+It explains the two main ways in which Huub can be used, sketches the architecture of the system, and points to the main project resources that accompany the text.
 
-Fusce laoreet ex efficitur nulla dignissim dignissim. Maecenas pellentesque orci nec sem gravida, nec efficitur dolor lobortis. Mauris tincidunt arcu sem, sed aliquet mauris auctor eu. Sed volutpat mattis sem, et dapibus risus maximus non. Nam vitae leo sit amet quam fringilla mattis. Proin in magna sit amet magna dapibus eleifend a nec ante. Sed feugiat eu lacus ac aliquet. Phasellus tristique in augue feugiat fermentum. Donec sed lectus ut nunc lacinia ullamcorper. Phasellus nec bibendum sapien.
+## Using Huub
 
-Interdum et malesuada fames ac ante ipsum primis in faucibus. Quisque vitae purus ac arcu rutrum maximus. Aliquam erat volutpat. Pellentesque commodo sit amet ex mollis luctus. Aliquam molestie sapien eget nulla molestie, convallis semper mi auctor. Proin vulputate augue non turpis interdum, at ultrices mauris dictum. Sed sem augue, luctus sit amet diam vel, molestie tempus neque. Ut neque nisl, maximus vitae ligula eu, iaculis euismod sapien. Donec eleifend eu turpis id rutrum. Nulla at dui eu felis egestas ultrices at in sem. Sed vitae rutrum dui, in ullamcorper risus. Duis sed fringilla lacus.
+There are two main ways to use Huub, and it is helpful to distinguish them from the beginning because they lead into different parts of the documentation.
+Some readers will approach Huub primarily as a solver.
+They want to write decision or optimization models, run them, and understand how to obtain good solutions or good proofs of infeasibility.
+Other readers will approach Huub as a library.
+They want to construct models programmatically, integrate solving into an application, or understand and extend the internal machinery of the solver.
 
-Duis ultricies in turpis eu feugiat. Cras vulputate luctus sollicitudin. Mauris sed quam urna. Suspendisse vitae gravida mauris, et semper nisl. Aliquam sed nibh faucibus, mollis quam quis, tempor nulla. Praesent tempus posuere odio mollis vestibulum. Nam viverra dui ligula, sed porta erat dignissim eget. Integer blandit elit nec orci euismod vulputate.
+Both workflows are important, and both are supported by the same project.
+But they answer different questions:
+- If your question is “How do I formulate my problem and solve it with Huub?”, then you might best use Huub through [MiniZinc](https://www.minizinc.org/).
+- If your question is “How do I integrate Huub into my application?” or “How do I extend Huub's behaviour?”, then you should explore how to use Huub as a Rust library.
 
-Aliquam facilisis eget diam id iaculis. Proin sagittis finibus sagittis. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Nam nisl lorem, imperdiet nec sapien sit amet, maximus sagittis arcu. Suspendisse tempus, massa quis consectetur cursus, arcu nisl sollicitudin libero, non fermentum nibh diam et leo. Proin mattis lobortis felis, eu imperdiet nulla maximus eget. Curabitur semper ullamcorper neque, et aliquet tellus pulvinar vel. Cras quis purus convallis libero fermentum euismod. Aliquam euismod egestas massa, at ultricies nunc consequat at. Quisque vel malesuada purus. Ut nec volutpat est. Mauris vitae laoreet velit. In sit amet rutrum tortor. Ut ac purus nibh. 
+### From MiniZinc
 
-## Test 345
+If you are not planning on integrating Huub directly in your application or extending it, then [MiniZinc](https://www.minizinc.org/) is the natural starting point for most users.
+MiniZinc provides a high-level modelling language with rich support for different types of decision variables, constraints, functional programming, and solver-independent experimentation.
+If your main goal is to express and solve a combinatorial problem well, then this is usually the most convenient route into Huub.
 
- Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla in malesuada leo. Cras sed justo ante. Fusce egestas vestibulum ullamcorper. Aliquam erat volutpat. Proin ut orci dapibus, ultricies eros a, scelerisque est. Maecenas eget arcu porttitor ipsum mollis aliquet ac sed enim. Sed ac ullamcorper lectus. Phasellus semper nisi elit, non ullamcorper est vestibulum eget. Nunc sit amet placerat odio. Nulla lobortis pulvinar sapien at egestas. Nullam egestas condimentum porttitor. Integer posuere mollis magna in dignissim. Proin non libero velit. Vestibulum mauris orci, ornare id enim eget, consequat condimentum metus. Ut dapibus varius placerat. Donec vel erat ut odio aliquet auctor eget ac tortor.
+In this workflow, you write a MiniZinc model, possibly together with instance data.
+MiniZinc then compiles the model, checks it, and flattens it into Huub solver input.
+Huub receives that input, constructs its internal representation of the problem, and then begins solving.
+This mode of use has several practical advantages.
 
-Fusce laoreet ex efficitur nulla dignissim dignissim. Maecenas pellentesque orci nec sem gravida, nec efficitur dolor lobortis. Mauris tincidunt arcu sem, sed aliquet mauris auctor eu. Sed volutpat mattis sem, et dapibus risus maximus non. Nam vitae leo sit amet quam fringilla mattis. Proin in magna sit amet magna dapibus eleifend a nec ante. Sed feugiat eu lacus ac aliquet. Phasellus tristique in augue feugiat fermentum. Donec sed lectus ut nunc lacinia ullamcorper. Phasellus nec bibendum sapien.
+1. It gives access to Huub without requiring you to program directly against the Rust API.
+  If you already know MiniZinc, you can begin by modelling immediately rather than by learning the structure of the crate.
+2. It separates modelling concerns from implementation concerns.
+  You can focus on which decision variables and constraints best capture your problem, while MiniZinc and Huub takes care of rewriting constraints and decision types not directly supported by Huub.
+3. It makes comparison easy.
+  Because MiniZinc supports multiple solvers, you can test the same model with Huub and with other backends.
+  This is often useful both for benchmarking and for understanding where Huub's CP+SAT behaviour is especially effective.
 
-Interdum et malesuada fames ac ante ipsum primis in faucibus. Quisque vitae purus ac arcu rutrum maximus. Aliquam erat volutpat. Pellentesque commodo sit amet ex mollis luctus. Aliquam molestie sapien eget nulla molestie, convallis semper mi auctor. Proin vulputate augue non turpis interdum, at ultrices mauris dictum. Sed sem augue, luctus sit amet diam vel, molestie tempus neque. Ut neque nisl, maximus vitae ligula eu, iaculis euismod sapien. Donec eleifend eu turpis id rutrum. Nulla at dui eu felis egestas ultrices at in sem. Sed vitae rutrum dui, in ullamcorper risus. Duis sed fringilla lacus.
+This book is written with that modelling perspective in mind.
+Even when later chapters discuss internals, the ultimate purpose is still to help the reader understand how solver behaviour and model structure interact.
 
-Duis ultricies in turpis eu feugiat. Cras vulputate luctus sollicitudin. Mauris sed quam urna. Suspendisse vitae gravida mauris, et semper nisl. Aliquam sed nibh faucibus, mollis quam quis, tempor nulla. Praesent tempus posuere odio mollis vestibulum. Nam viverra dui ligula, sed porta erat dignissim eget. Integer blandit elit nec orci euismod vulputate.
+If this is how you want to use Huub, then continue to “[Using Huub from MiniZinc](./using-huub-from-minizinc.md)”.
+It describes how to install Huub as a MiniZinc solver, and the additional functionality that Huub makes available from its MiniZinc library.
 
-Aliquam facilisis eget diam id iaculis. Proin sagittis finibus sagittis. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Nam nisl lorem, imperdiet nec sapien sit amet, maximus sagittis arcu. Suspendisse tempus, massa quis consectetur cursus, arcu nisl sollicitudin libero, non fermentum nibh diam et leo. Proin mattis lobortis felis, eu imperdiet nulla maximus eget. Curabitur semper ullamcorper neque, et aliquet tellus pulvinar vel. Cras quis purus convallis libero fermentum euismod. Aliquam euismod egestas massa, at ultricies nunc consequat at. Quisque vel malesuada purus. Ut nec volutpat est. Mauris vitae laoreet velit. In sit amet rutrum tortor. Ut ac purus nibh.  Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla in malesuada leo. Cras sed justo ante. Fusce egestas vestibulum ullamcorper. Aliquam erat volutpat. Proin ut orci dapibus, ultricies eros a, scelerisque est. Maecenas eget arcu porttitor ipsum mollis aliquet ac sed enim. Sed ac ullamcorper lectus. Phasellus semper nisi elit, non ullamcorper est vestibulum eget. Nunc sit amet placerat odio. Nulla lobortis pulvinar sapien at egestas. Nullam egestas condimentum porttitor. Integer posuere mollis magna in dignissim. Proin non libero velit. Vestibulum mauris orci, ornare id enim eget, consequat condimentum metus. Ut dapibus varius placerat. Donec vel erat ut odio aliquet auctor eget ac tortor.
+### From Rust
 
-Fusce laoreet ex efficitur nulla dignissim dignissim. Maecenas pellentesque orci nec sem gravida, nec efficitur dolor lobortis. Mauris tincidunt arcu sem, sed aliquet mauris auctor eu. Sed volutpat mattis sem, et dapibus risus maximus non. Nam vitae leo sit amet quam fringilla mattis. Proin in magna sit amet magna dapibus eleifend a nec ante. Sed feugiat eu lacus ac aliquet. Phasellus tristique in augue feugiat fermentum. Donec sed lectus ut nunc lacinia ullamcorper. Phasellus nec bibendum sapien.
+Huub is designed to be used as a Rust crate.
+This is the right way to use it if you want to construct decision or optimization models programmatically, integrate solving into a Rust application, or work on solver components such as propagators, branchers, and search.
+Using Huub from Rust gives much more direct control over the solving process.
+You define how you build, transform, and solve the model inside your Rust program.
+This is useful when the model is naturally generated by code, when solving must be embedded into a larger software system, or when you want to extend or fine-tune Huub's capabilities.
 
-Interdum et malesuada fames ac ante ipsum primis in faucibus. Quisque vitae purus ac arcu rutrum maximus. Aliquam erat volutpat. Pellentesque commodo sit amet ex mollis luctus. Aliquam molestie sapien eget nulla molestie, convallis semper mi auctor. Proin vulputate augue non turpis interdum, at ultrices mauris dictum. Sed sem augue, luctus sit amet diam vel, molestie tempus neque. Ut neque nisl, maximus vitae ligula eu, iaculis euismod sapien. Donec eleifend eu turpis id rutrum. Nulla at dui eu felis egestas ultrices at in sem. Sed vitae rutrum dui, in ullamcorper risus. Duis sed fringilla lacus.
+The installation instructions for the Rust crate can be found in “[Installing the Huub crate](./installing-the-huub-crate.md)”.
+The remainder of the book, apart from “Using Huub from MiniZinc”, assumes that the reader is willing to engage with Huub as a Rust code base.
 
-Duis ultricies in turpis eu feugiat. Cras vulputate luctus sollicitudin. Mauris sed quam urna. Suspendisse vitae gravida mauris, et semper nisl. Aliquam sed nibh faucibus, mollis quam quis, tempor nulla. Praesent tempus posuere odio mollis vestibulum. Nam viverra dui ligula, sed porta erat dignissim eget. Integer blandit elit nec orci euismod vulputate.
+## Architecture
 
-Aliquam facilisis eget diam id iaculis. Proin sagittis finibus sagittis. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Nam nisl lorem, imperdiet nec sapien sit amet, maximus sagittis arcu. Suspendisse tempus, massa quis consectetur cursus, arcu nisl sollicitudin libero, non fermentum nibh diam et leo. Proin mattis lobortis felis, eu imperdiet nulla maximus eget. Curabitur semper ullamcorper neque, et aliquet tellus pulvinar vel. Cras quis purus convallis libero fermentum euismod. Aliquam euismod egestas massa, at ultricies nunc consequat at. Quisque vel malesuada purus. Ut nec volutpat est. Mauris vitae laoreet velit. In sit amet rutrum tortor. Ut ac purus nibh. 
+At a high level, the Huub library is split into two different layers: a modelling layer and a solver layer.
+The modelling layer is responsible for describing a problem in a convenient way for the user, such that it can be understood and solved by the Huub library.
+At this level, the concern is the meaning of the problem: what the decisions are and what relationships must hold.
+When using this layer, a user will create a `Model` object that provides methods to define decision variables and constraints, but in a way where their underlying structure can easily be changed.
+For example, constraints can be rewritten and the representation of decision variables can change from one type to another.
 
-### Mini Test
+The solving layer, on the other hand, is designed for an efficient search process to take place.
+This efficiency requires the `Solver` object, created in this layer, to be more rigid.
+Constraints and decision variables will remain in the same shape for the full duration of the `Solver`'s lifetime.
+Notably, this is also the layer that concerns itself with the “search goal”, such as maximizing or minimizing a certain variable, and the search/branching order, e.g. which values for which decision variables will be tried first.
 
- Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla in malesuada leo. Cras sed justo ante. Fusce egestas vestibulum ullamcorper. Aliquam erat volutpat. Proin ut orci dapibus, ultricies eros a, scelerisque est. Maecenas eget arcu porttitor ipsum mollis aliquet ac sed enim. Sed ac ullamcorper lectus. Phasellus semper nisi elit, non ullamcorper est vestibulum eget. Nunc sit amet placerat odio. Nulla lobortis pulvinar sapien at egestas. Nullam egestas condimentum porttitor. Integer posuere mollis magna in dignissim. Proin non libero velit. Vestibulum mauris orci, ornare id enim eget, consequat condimentum metus. Ut dapibus varius placerat. Donec vel erat ut odio aliquet auctor eget ac tortor.
+This distinction is useful because the flexible modelling representation is a good place for preprocessing and simplification.
+At the `Model` level, Huub can simplify constraints, unify different decision variables, and perform other preprocessing techniques that transform the problem into a form that is more convenient for solving.
+Only once this process is complete does Huub create the more rigid `Solver` representation that will actually be searched.
 
-Fusce laoreet ex efficitur nulla dignissim dignissim. Maecenas pellentesque orci nec sem gravida, nec efficitur dolor lobortis. Mauris tincidunt arcu sem, sed aliquet mauris auctor eu. Sed volutpat mattis sem, et dapibus risus maximus non. Nam vitae leo sit amet quam fringilla mattis. Proin in magna sit amet magna dapibus eleifend a nec ante. Sed feugiat eu lacus ac aliquet. Phasellus tristique in augue feugiat fermentum. Donec sed lectus ut nunc lacinia ullamcorper. Phasellus nec bibendum sapien.
+The remaining chapters of the book can largely be divided according to the layers in the architecture.
+The “Modelling” chapter is largely concerned with the modelling layer, discussing how to express and solve problems in Huub from a `Model` object.
+The “Programming ...” chapters are mainly concerned with the solver layer, where propagation, branching, explanations, and search are implemented.
 
-Interdum et malesuada fames ac ante ipsum primis in faucibus. Quisque vitae purus ac arcu rutrum maximus. Aliquam erat volutpat. Pellentesque commodo sit amet ex mollis luctus. Aliquam molestie sapien eget nulla molestie, convallis semper mi auctor. Proin vulputate augue non turpis interdum, at ultrices mauris dictum. Sed sem augue, luctus sit amet diam vel, molestie tempus neque. Ut neque nisl, maximus vitae ligula eu, iaculis euismod sapien. Donec eleifend eu turpis id rutrum. Nulla at dui eu felis egestas ultrices at in sem. Sed vitae rutrum dui, in ullamcorper risus. Duis sed fringilla lacus.
+## Further references
 
-Duis ultricies in turpis eu feugiat. Cras vulputate luctus sollicitudin. Mauris sed quam urna. Suspendisse vitae gravida mauris, et semper nisl. Aliquam sed nibh faucibus, mollis quam quis, tempor nulla. Praesent tempus posuere odio mollis vestibulum. Nam viverra dui ligula, sed porta erat dignissim eget. Integer blandit elit nec orci euismod vulputate.
+This book is accompanied by code, examples, and external reference material.
+Readers will typically move back and forth between the text and those resources, so it is useful to know from the beginning where they are.
 
-Aliquam facilisis eget diam id iaculis. Proin sagittis finibus sagittis. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Nam nisl lorem, imperdiet nec sapien sit amet, maximus sagittis arcu. Suspendisse tempus, massa quis consectetur cursus, arcu nisl sollicitudin libero, non fermentum nibh diam et leo. Proin mattis lobortis felis, eu imperdiet nulla maximus eget. Curabitur semper ullamcorper neque, et aliquet tellus pulvinar vel. Cras quis purus convallis libero fermentum euismod. Aliquam euismod egestas massa, at ultricies nunc consequat at. Quisque vel malesuada purus. Ut nec volutpat est. Mauris vitae laoreet velit. In sit amet rutrum tortor. Ut ac purus nibh.  Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla in malesuada leo. Cras sed justo ante. Fusce egestas vestibulum ullamcorper. Aliquam erat volutpat. Proin ut orci dapibus, ultricies eros a, scelerisque est. Maecenas eget arcu porttitor ipsum mollis aliquet ac sed enim. Sed ac ullamcorper lectus. Phasellus semper nisi elit, non ullamcorper est vestibulum eget. Nunc sit amet placerat odio. Nulla lobortis pulvinar sapien at egestas. Nullam egestas condimentum porttitor. Integer posuere mollis magna in dignissim. Proin non libero velit. Vestibulum mauris orci, ornare id enim eget, consequat condimentum metus. Ut dapibus varius placerat. Donec vel erat ut odio aliquet auctor eget ac tortor.
+**Examples.** The examples used in this documentation can be found in the [Huub repository](https://github.com/huub-solver/huub).
+In particular, the Rust examples live under [`crates/huub/examples`](https://github.com/huub-solver/huub/tree/develop/crates/huub/examples/).
+When an example in the text is based on runnable code, this is the first place to look.
+Reading the example source alongside the surrounding discussion is often the quickest way to connect the ideas in the book with concrete solver usage.
 
-Fusce laoreet ex efficitur nulla dignissim dignissim. Maecenas pellentesque orci nec sem gravida, nec efficitur dolor lobortis. Mauris tincidunt arcu sem, sed aliquet mauris auctor eu. Sed volutpat mattis sem, et dapibus risus maximus non. Nam vitae leo sit amet quam fringilla mattis. Proin in magna sit amet magna dapibus eleifend a nec ante. Sed feugiat eu lacus ac aliquet. Phasellus tristique in augue feugiat fermentum. Donec sed lectus ut nunc lacinia ullamcorper. Phasellus nec bibendum sapien.
+**API Reference** The API reference for the Rust crate is available on [docs.rs](https://docs.rs/huub/latest/huub/) or locally using [`cargo doc`](https://doc.rust-lang.org/cargo/commands/cargo-doc.html).
+The API reference serves a different purpose from this book.
+The book is organised pedagogically: it introduces concepts in an order intended to be useful for learning.
+The API reference is organised by modules, types, and functions.
+When you already know what functionality you need, then the API reference is best way to inspect the signatures and item-level documentation.
+When you want to understand why a concept exists, how pieces fit together, or how to approach a modelling or implementation task, the book should usually be your first stop.
 
-Interdum et malesuada fames ac ante ipsum primis in faucibus. Quisque vitae purus ac arcu rutrum maximus. Aliquam erat volutpat. Pellentesque commodo sit amet ex mollis luctus. Aliquam molestie sapien eget nulla molestie, convallis semper mi auctor. Proin vulputate augue non turpis interdum, at ultrices mauris dictum. Sed sem augue, luctus sit amet diam vel, molestie tempus neque. Ut neque nisl, maximus vitae ligula eu, iaculis euismod sapien. Donec eleifend eu turpis id rutrum. Nulla at dui eu felis egestas ultrices at in sem. Sed vitae rutrum dui, in ullamcorper risus. Duis sed fringilla lacus.
-
-Duis ultricies in turpis eu feugiat. Cras vulputate luctus sollicitudin. Mauris sed quam urna. Suspendisse vitae gravida mauris, et semper nisl. Aliquam sed nibh faucibus, mollis quam quis, tempor nulla. Praesent tempus posuere odio mollis vestibulum. Nam viverra dui ligula, sed porta erat dignissim eget. Integer blandit elit nec orci euismod vulputate.
-
-Aliquam facilisis eget diam id iaculis. Proin sagittis finibus sagittis. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Nam nisl lorem, imperdiet nec sapien sit amet, maximus sagittis arcu. Suspendisse tempus, massa quis consectetur cursus, arcu nisl sollicitudin libero, non fermentum nibh diam et leo. Proin mattis lobortis felis, eu imperdiet nulla maximus eget. Curabitur semper ullamcorper neque, et aliquet tellus pulvinar vel. Cras quis purus convallis libero fermentum euismod. Aliquam euismod egestas massa, at ultricies nunc consequat at. Quisque vel malesuada purus. Ut nec volutpat est. Mauris vitae laoreet velit. In sit amet rutrum tortor. Ut ac purus nibh.
+**Community Discussions** For help, questions, and discussion, use the [GitHub Discussions](https://github.com/huub-solver/huub/discussions).
+This is the best place to ask questions about modelling with Huub, practical solver use, the design of the API, and the behaviour of the implementation.
+It is also the natural place to discuss documentation gaps, modelling idioms, and ideas for future extensions.
