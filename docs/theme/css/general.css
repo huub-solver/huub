@@ -623,15 +623,15 @@ h6:target::before {
 	height: auto;
 }
 
-.landing-services__logo--dark {
+.dark-only {
 	display: none;
 }
 
-html.navy .landing-services__logo--light {
+html.navy .light-only {
 	display: none;
 }
 
-html.navy .landing-services__logo--dark {
+html.navy .dark-only {
 	display: block;
 }
 
