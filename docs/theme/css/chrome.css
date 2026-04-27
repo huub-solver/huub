@@ -84,7 +84,7 @@ a > .hljs {
 .site-header__social {
 	display: flex;
 	align-items: center;
-	gap: 0.8rem;
+	gap: 1.8rem;
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -95,6 +95,7 @@ a > .hljs {
 }
 
 .site-header__links a {
+	position: relative;
 	display: inline;
 	padding: 0;
 	text-decoration-line: underline;
@@ -115,6 +116,47 @@ a > .hljs {
 	background: transparent !important;
 	color: var(--fg);
 	text-decoration-color: currentColor;
+}
+
+.external-link {
+	white-space: nowrap;
+}
+
+.external-link .fa-external-link {
+	display: inline-block;
+	margin-inline-start: 0.18em;
+	font-size: 0.78em;
+	transform: translateY(-0.06em);
+}
+
+.site-header__links .external-link {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 0.2em;
+	text-decoration-line: none;
+}
+
+.site-header__links .external-link .fa-external-link {
+	margin-inline-start: 0;
+}
+
+.site-header__links .external-link:hover {
+	text-decoration-line: none;
+}
+
+.site-header__links .external-link::after {
+	content: "";
+	position: absolute;
+	inset-inline: 0;
+	bottom: -0.08em;
+	height: 0.07em;
+	background: currentColor;
+	opacity: 0;
+	transition: opacity 160ms ease;
+}
+
+.site-header__links .external-link:hover::after {
+	opacity: 1;
 }
 
 .site-header__utilities {
@@ -983,6 +1025,32 @@ ul#searchresults span.teaser em {
 }
 .chapter .spacer {
 	background-color: var(--sidebar-spacer);
+}
+
+.sidebar-external-links {
+	margin-block-start: 1.6rem;
+	padding-block-start: 1.2rem;
+	border-block-start: 1px solid var(--site-header-separator);
+}
+
+.sidebar-external-link {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.8rem;
+	width: calc(100% - 0.4rem);
+	box-sizing: border-box;
+	margin-inline-start: 0.4rem;
+	padding: 0.3rem 0 0.3rem 1.4rem;
+	border-inline-start: 1px solid transparent;
+	color: var(--sidebar-fg);
+	font-weight: 600;
+	text-decoration: none;
+}
+
+.sidebar-external-link:hover {
+	color: var(--sidebar-active);
+	border-inline-start-color: var(--sidebar-hover-rule);
 }
 
 @media (-moz-touch-enabled: 1), (pointer: coarse) {
