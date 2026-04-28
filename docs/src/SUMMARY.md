@@ -48,5 +48,5 @@
 
 -----------
 
+[Contributors](misc/contributors/index.md)
 [Funding](misc/funding.md)
-[Contributors](misc/contributors.md)
