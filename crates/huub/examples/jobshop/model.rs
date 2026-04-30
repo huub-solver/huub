@@ -190,10 +190,7 @@ impl JobShopModel {
 		for (job, job_start_time) in instance.jobs.iter().zip(&start_time) {
 			for (op_idx, op) in job.iter().enumerate().take(job.len().saturating_sub(1)) {
 				let op_end = job_start_time[op_idx] + op.processing_time as i64;
-				model
-					.linear(job_start_time[op_idx + 1] - op_end)
-					.ge(0)
-					.post();
+				model.linear(job_start_time[op_idx + 1]).ge(op_end).post();
 			}
 		}
 
@@ -217,13 +214,14 @@ impl JobShopModel {
 			ObjectiveType::Makespan => {
 				let makespan = model.new_int_decision(0..=(instance.max_time as i64));
 				for completion_time in completion_times {
-					model.linear(makespan - completion_time).ge(0).post();
+					model.linear(makespan).ge(completion_time).post();
 				}
 				makespan
 			}
-			ObjectiveType::TotalCompletionTime => model
-				.linear(completion_times.into_iter().sum::<IntLinearExp>())
-				.define(),
+			ObjectiveType::TotalCompletionTime => {
+				let exp: IntLinearExp = completion_times.into_iter().sum();
+				model.linear(exp).define()
+			}
 		};
 
 		JobShopModel {

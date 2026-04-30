@@ -1951,14 +1951,11 @@ impl<'a> FznModelBuilder<'a> {
 						return num_args_err(2);
 					};
 					let a = self.arg_int(a)?;
-					let b = self
-						.arg_int(b)?
-						.bounding_neg(&mut self.prb)
-						.map_err(LoweringError::from)?;
-					let lin = self.prb.linear(a + b);
+					let b = self.arg_int(b)?;
+					let lin = self.prb.linear(a);
 					match ident {
-						ConstraintIdent::IntLe => lin.le(0),
-						ConstraintIdent::IntNe => lin.ne(0),
+						ConstraintIdent::IntLe => lin.le(b),
+						ConstraintIdent::IntNe => lin.ne(b),
 						_ => unreachable!(),
 					}
 					.post();
@@ -1976,12 +1973,11 @@ impl<'a> FznModelBuilder<'a> {
 					let b = self.arg_int(b)?;
 					let r = self.arg_bool(r)?;
 
-					let lin_exp = a + b.bounding_neg(&mut self.prb).map_err(LoweringError::from)?;
-					let lin = self.prb.linear(lin_exp);
+					let lin = self.prb.linear(a);
 					let lin = match ident {
-						ConstraintIdent::IntEqImp | ConstraintIdent::IntEqReif => lin.eq(0),
-						ConstraintIdent::IntLeImp | ConstraintIdent::IntLeReif => lin.le(0),
-						ConstraintIdent::IntNeImp | ConstraintIdent::IntNeReif => lin.ne(0),
+						ConstraintIdent::IntEqImp | ConstraintIdent::IntEqReif => lin.eq(b),
+						ConstraintIdent::IntLeImp | ConstraintIdent::IntLeReif => lin.le(b),
+						ConstraintIdent::IntNeImp | ConstraintIdent::IntNeReif => lin.ne(b),
 						_ => unreachable!(),
 					};
 					match ident {

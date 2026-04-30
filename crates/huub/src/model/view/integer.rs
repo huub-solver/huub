@@ -582,9 +582,7 @@ impl Add<View<IntVal>> for View<IntVal> {
 	type Output = IntLinearExp;
 
 	fn add(self, rhs: View<IntVal>) -> Self::Output {
-		IntLinearExp {
-			terms: vec![self, rhs],
-		}
+		IntLinearExp::from(self).add(rhs)
 	}
 }
 

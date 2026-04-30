@@ -12,7 +12,7 @@ pub(crate) mod bool_formula;
 pub(crate) mod element;
 pub(crate) mod linear;
 
-use std::{cmp, marker::PhantomData};
+use std::{cmp, marker::PhantomData, num::NonZero};
 
 use bon::bon;
 use itertools::{Itertools, MinMaxResult, iproduct};
@@ -39,7 +39,7 @@ use crate::{
 		int_value_precede::{IntSeqPrecedeChainBounds, IntValuePrecedeChainValue},
 	},
 	helpers::overflow::{OverflowImpossible, OverflowPossible},
-	model::{Model, View, expressions::linear::Comparator},
+	model::{Model, View, expressions::linear::Comparator, view::integer::IntView},
 };
 
 #[bon]
@@ -178,42 +178,67 @@ impl Model {
 		&mut self,
 		#[builder(start_fn, into)] mut expr: IntLinearExp,
 		#[builder(setters(name = comparator_internal, vis = ""))] comparator: Comparator,
-		#[builder(setters(name = constant_internal, vis = ""))] constant: IntVal,
+		#[builder(setters(name = rhs_internal, vis = ""))] rhs: IntLinearExp,
 		#[builder(setters(name = reif_internal, vis = ""))] reif: Option<Reification>,
 	) {
+		// Subtract the RHS from the LHS to get a linear expression with a constant 0 on
+		// the RHS
+		expr -= rhs;
+
+		// Move the constant offset to the RHS
+		let rhs = -expr.offset;
+		// Collect the terms as a vector of `View<IntVal>`
+		let mut terms: Vec<View<IntVal>> = expr
+			.terms
+			.iter()
+			.map(|(&v, &k)| {
+				match v.0 {
+					IntView::Const(_) => debug_assert!(false),
+					IntView::Linear(lin) => {
+						debug_assert_eq!(lin.scale, NonZero::new(1).unwrap());
+						debug_assert_eq!(lin.offset, 0);
+					}
+					IntView::Bool(lin) => {
+						debug_assert_eq!(lin.scale, NonZero::new(1).unwrap());
+						debug_assert_eq!(lin.offset, 0);
+					}
+				}
+				v * k
+			})
+			.collect();
+
 		let mut negate_terms = || {
-			expr.terms.iter_mut().for_each(|v| {
+			terms.iter_mut().for_each(|v| {
 				*v = v
 					.bounding_neg(self)
 					.expect("TODO: need to defer failure to propagate");
 			});
 		};
-
 		let (comparator, rhs) = match comparator {
-			Comparator::Less => (LinComparator::LessEq, constant - 1),
-			Comparator::LessEqual => (LinComparator::LessEq, constant),
-			Comparator::Equal => (LinComparator::Equal, constant),
+			Comparator::Less => (LinComparator::LessEq, rhs - 1),
+			Comparator::LessEqual => (LinComparator::LessEq, rhs),
+			Comparator::Equal => (LinComparator::Equal, rhs),
 			Comparator::GreaterEqual => {
 				negate_terms();
-				(LinComparator::LessEq, -constant)
+				(LinComparator::LessEq, -rhs)
 			}
 			Comparator::Greater => {
 				negate_terms();
-				(LinComparator::LessEq, -constant - 1)
+				(LinComparator::LessEq, -rhs - 1)
 			}
-			Comparator::NotEqual => (LinComparator::NotEqual, constant),
+			Comparator::NotEqual => (LinComparator::NotEqual, rhs),
 		};
 
-		if IntLinear::can_overflow(self, &expr.terms) {
+		if IntLinear::can_overflow(self, &terms) {
 			self.post_constraint(IntLinear::<OverflowPossible> {
-				terms: expr.terms,
+				terms,
 				rhs: rhs.into(),
 				reif,
 				comparator,
 			});
 		} else {
 			self.post_constraint(IntLinear::<OverflowImpossible> {
-				terms: expr.terms,
+				terms,
 				rhs,
 				reif,
 				comparator,
@@ -534,18 +559,17 @@ impl<E: ElementConstraint, S: model_element_builder::State> ModelElementBuilder<
 impl<'a, S: model_linear_builder::State> ModelLinearBuilder<'a, S> {
 	/// Create a new integer decision variable that is defined as the result of
 	/// the linear expression.
-	pub fn define(mut self) -> View<IntVal>
+	pub fn define(self) -> View<IntVal>
 	where
-		S::Constant: model_linear_builder::IsUnset,
+		S::Rhs: model_linear_builder::IsUnset,
 		S::Reif: model_linear_builder::IsUnset,
 		S::Comparator: model_linear_builder::IsUnset,
 	{
 		let res = self
 			.self_receiver
 			.new_int_decision((IntVal::MIN + 1)..=IntVal::MAX);
-		self.expr += -res;
 		self.comparator_internal(Comparator::Equal)
-			.constant_internal(0)
+			.rhs_internal(res.into())
 			.post();
 		res
 	}
@@ -553,50 +577,41 @@ impl<'a, S: model_linear_builder::State> ModelLinearBuilder<'a, S> {
 	/// Equate the linear expression to be equal to the given value.
 	pub fn eq(
 		self,
-		rhs: IntVal,
-	) -> ModelLinearBuilder<
-		'a,
-		model_linear_builder::SetConstant<model_linear_builder::SetComparator<S>>,
-	>
+		rhs: impl Into<IntLinearExp>,
+	) -> ModelLinearBuilder<'a, model_linear_builder::SetRhs<model_linear_builder::SetComparator<S>>>
 	where
-		S::Constant: model_linear_builder::IsUnset,
+		S::Rhs: model_linear_builder::IsUnset,
 		S::Comparator: model_linear_builder::IsUnset,
 	{
 		self.comparator_internal(Comparator::Equal)
-			.constant_internal(rhs)
+			.rhs_internal(rhs.into())
 	}
 
 	/// Equate the linear expression to be greater than or equal to the given
 	/// value.
 	pub fn ge(
 		self,
-		rhs: IntVal,
-	) -> ModelLinearBuilder<
-		'a,
-		model_linear_builder::SetConstant<model_linear_builder::SetComparator<S>>,
-	>
+		rhs: impl Into<IntLinearExp>,
+	) -> ModelLinearBuilder<'a, model_linear_builder::SetRhs<model_linear_builder::SetComparator<S>>>
 	where
-		S::Constant: model_linear_builder::IsUnset,
+		S::Rhs: model_linear_builder::IsUnset,
 		S::Comparator: model_linear_builder::IsUnset,
 	{
 		self.comparator_internal(Comparator::GreaterEqual)
-			.constant_internal(rhs)
+			.rhs_internal(rhs.into())
 	}
 
 	/// Equate the linear expression to be greater than the given value.
 	pub fn gt(
 		self,
-		rhs: IntVal,
-	) -> ModelLinearBuilder<
-		'a,
-		model_linear_builder::SetConstant<model_linear_builder::SetComparator<S>>,
-	>
+		rhs: impl Into<IntLinearExp>,
+	) -> ModelLinearBuilder<'a, model_linear_builder::SetRhs<model_linear_builder::SetComparator<S>>>
 	where
-		S::Constant: model_linear_builder::IsUnset,
+		S::Rhs: model_linear_builder::IsUnset,
 		S::Comparator: model_linear_builder::IsUnset,
 	{
 		self.comparator_internal(Comparator::Greater)
-			.constant_internal(rhs)
+			.rhs_internal(rhs.into())
 	}
 
 	/// Require that if the given Boolean view is true that then the linear
@@ -615,49 +630,40 @@ impl<'a, S: model_linear_builder::State> ModelLinearBuilder<'a, S> {
 	/// value.
 	pub fn le(
 		self,
-		rhs: IntVal,
-	) -> ModelLinearBuilder<
-		'a,
-		model_linear_builder::SetConstant<model_linear_builder::SetComparator<S>>,
-	>
+		rhs: impl Into<IntLinearExp>,
+	) -> ModelLinearBuilder<'a, model_linear_builder::SetRhs<model_linear_builder::SetComparator<S>>>
 	where
-		S::Constant: model_linear_builder::IsUnset,
+		S::Rhs: model_linear_builder::IsUnset,
 		S::Comparator: model_linear_builder::IsUnset,
 	{
 		self.comparator_internal(Comparator::LessEqual)
-			.constant_internal(rhs)
+			.rhs_internal(rhs.into())
 	}
 
 	/// Equate the linear expression to be less than the given value.
 	pub fn lt(
 		self,
-		rhs: IntVal,
-	) -> ModelLinearBuilder<
-		'a,
-		model_linear_builder::SetConstant<model_linear_builder::SetComparator<S>>,
-	>
+		rhs: impl Into<IntLinearExp>,
+	) -> ModelLinearBuilder<'a, model_linear_builder::SetRhs<model_linear_builder::SetComparator<S>>>
 	where
-		S::Constant: model_linear_builder::IsUnset,
+		S::Rhs: model_linear_builder::IsUnset,
 		S::Comparator: model_linear_builder::IsUnset,
 	{
 		self.comparator_internal(Comparator::Less)
-			.constant_internal(rhs)
+			.rhs_internal(rhs.into())
 	}
 
 	/// Equate the linear expression to be not equal to the given value.
 	pub fn ne(
 		self,
-		rhs: IntVal,
-	) -> ModelLinearBuilder<
-		'a,
-		model_linear_builder::SetConstant<model_linear_builder::SetComparator<S>>,
-	>
+		rhs: impl Into<IntLinearExp>,
+	) -> ModelLinearBuilder<'a, model_linear_builder::SetRhs<model_linear_builder::SetComparator<S>>>
 	where
-		S::Constant: model_linear_builder::IsUnset,
+		S::Rhs: model_linear_builder::IsUnset,
 		S::Comparator: model_linear_builder::IsUnset,
 	{
 		self.comparator_internal(Comparator::NotEqual)
-			.constant_internal(rhs)
+			.rhs_internal(rhs.into())
 	}
 
 	/// Require that the given Boolean view is true if-and-only-if the linear
@@ -677,7 +683,7 @@ impl<'a, S: model_linear_builder::State> ModelLinearBuilder<'a, S> {
 	pub fn reify(self) -> View<bool>
 	where
 		S::Reif: model_linear_builder::IsUnset,
-		S::Constant: model_linear_builder::IsSet,
+		S::Rhs: model_linear_builder::IsSet,
 		S::Comparator: model_linear_builder::IsSet,
 	{
 		let res = self.self_receiver.new_bool_decision();

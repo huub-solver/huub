@@ -187,7 +187,7 @@ fn test_unify_int_impossible() {
 	let a = prb.new_int_decision(1..=5);
 	let b = prb.new_int_decision(1..=2);
 
-	prb.linear(a * 2 - b * 5).eq(0).post();
+	prb.linear(a * 2).eq(b * 5).post();
 
 	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 	let a = map.get(&mut slv, a);
@@ -208,7 +208,7 @@ fn test_unify_int_lin_view_domains() {
 	let a = prb.new_int_decision(RangeList::from_iter([1..=1, 3..=3, 5..=5]));
 	let b = prb.new_int_decision(RangeList::from_iter([1..=3]));
 
-	prb.linear(a * 6 - b * 2).eq(0).post();
+	prb.linear(a * 6).eq(b * 2).post();
 
 	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 	let a = map.get(&mut slv, a);
@@ -225,7 +225,7 @@ fn test_unify_int_view_for_bool_1() {
 	let a = prb.new_bool_decision();
 	let b = prb.new_bool_decision();
 
-	prb.linear(a * 2 + b * -2).eq(0).post();
+	prb.linear(a * 2).eq(b * 2).post();
 
 	prb.expect_solutions(
 		&[a, b],
@@ -241,7 +241,7 @@ fn test_unify_int_view_for_bool_2() {
 	let a = prb.new_bool_decision();
 	let b = prb.new_bool_decision();
 
-	prb.linear(a * -2 + b * 3).eq(0).post();
+	prb.linear(a * -2).eq(b * -3).post();
 
 	prb.expect_solutions(
 		&[a, b],
@@ -256,7 +256,7 @@ fn test_unify_int_view_for_bool_3() {
 	let a = prb.new_bool_decision();
 	let b = prb.new_bool_decision();
 
-	prb.linear(a * -2 + b * -3).eq(0).post();
+	prb.linear(a * -2).eq(b * 3).post();
 
 	prb.expect_solutions(
 		&[a, b],
@@ -286,7 +286,7 @@ fn test_unify_int_view_for_bool_5() {
 	let a = prb.new_bool_decision();
 	let b = prb.new_bool_decision();
 
-	prb.linear(a * 2 + b * -3).eq(0).post();
+	prb.linear(a * 2).eq(b * 3).post();
 
 	prb.expect_solutions(
 		&[a, b],
@@ -301,7 +301,7 @@ fn test_unify_int_view_for_bool_6() {
 	let a = prb.new_bool_decision();
 	let b = prb.new_bool_decision();
 
-	prb.linear(((a * 2) + 2) + b * -3).eq(0).post();
+	prb.linear(a * 2 + 2).eq(b * 3).post();
 
 	prb.assert_unsatisfiable();
 }
