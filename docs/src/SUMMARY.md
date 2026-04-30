@@ -10,12 +10,10 @@
 
 # Modelling
 
-- [Getting started](./modelling/getting-started.md)
-- [Getting comfortable](./modelling/getting-comfortable.md)
-- [Boolean decisions and constraints](./modelling/boolean-decisions-and-constraints.md)
-- [Integer decisions and constraints](./modelling/integer-decisions-and-constraints.md)
-- [Branching](./modelling/branching.md)
-- [Search](./modelling/search.md)
+- [Getting Started](./modelling/getting-started.md)
+- [Decision Variables](./modelling/decision-variables.md)
+- [Constraints](./modelling/constraints.md)
+- [Search and Branching](./modelling/search-branching.md)
 
 # Case Studies
 
@@ -50,3 +48,4 @@
 
 [Contributors](misc/contributors/index.md)
 [Funding](misc/funding.md)
+[Developing Huub](misc/developing-huub.md)
