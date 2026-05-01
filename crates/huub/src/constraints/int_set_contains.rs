@@ -11,8 +11,8 @@ use crate::{
 	IntSet, IntVal,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
-		IntInitActions, IntInspectionActions, IntSimplificationActions, ReasoningEngine,
-		SimplificationActions,
+		IntInitActions, IntInspectionActions, IntPropCond, IntSimplificationActions,
+		ReasoningEngine, SimplificationActions,
 	},
 	constraints::{
 		BoolModelActions, BoolSolverActions, Constraint, IntModelActions, IntSolverActions,
@@ -20,7 +20,6 @@ use crate::{
 	},
 	lower::{LoweringContext, LoweringError},
 	model::{expressions::BoolFormula, view::View},
-	solver::activation_list::IntPropCond,
 };
 
 /// Representation of the integer `contains` constraint within a model.

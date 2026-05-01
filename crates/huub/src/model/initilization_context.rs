@@ -4,18 +4,14 @@ use crate::{
 	IntSet, IntVal,
 	actions::{
 		BoolInitActions, BoolInspectionActions, InitActions, IntInitActions, IntInspectionActions,
-		ReasoningContext, ReasoningEngine,
+		IntPropCond, ReasoningContext, ReasoningEngine,
 	},
 	model::{
 		AdvRef, Advisor, ConRef, Decision, Model,
 		resolved::Resolved,
 		view::{View, boolean::BoolView, integer::IntView},
 	},
-	solver::{
-		IntLitMeaning,
-		activation_list::{ActivationAction, IntPropCond},
-		queue::PriorityLevel,
-	},
+	solver::{IntLitMeaning, activation_list::ActivationAction, queue::PriorityLevel},
 };
 
 /// Wrapper around [`Model`] that knows the constraint being

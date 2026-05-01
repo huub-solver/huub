@@ -5,12 +5,12 @@
 use itertools::Itertools;
 
 use crate::{
-	actions::{InitActions, PostingActions, ReasoningEngine},
+	actions::{InitActions, IntPropCond, PostingActions, ReasoningEngine},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
-	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
+	solver::{IntLitMeaning, engine::Engine, queue::PriorityLevel},
 };
 
 /// Bounds consistent propagator for the `array_minimum_int` constraint.

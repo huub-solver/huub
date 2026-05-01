@@ -36,7 +36,7 @@ use crate::{
 		ReasoningContext, ReasoningEngine, SimplificationActions, Trailed, TrailingActions,
 	},
 	constraints::{
-		BoxedConstraint, Conflict, Constraint, DeferredReason, Reason, ReasonBuilder,
+		BoxedConstraint, Conflict, Constraint, DeferredReason, IntEvent, Reason, ReasonBuilder,
 		SimplificationStatus,
 		bool_array_element::BoolDecisionArrayElement,
 		int_array_element::{IntArrayElementBounds, IntValArrayElement},
@@ -55,7 +55,7 @@ use crate::{
 	},
 	solver::{
 		IntLitMeaning, Solver,
-		activation_list::{ActivationAction, IntEvent},
+		activation_list::ActivationAction,
 		queue::{PropagatorInfo, PropagatorQueue},
 	},
 };
@@ -601,18 +601,16 @@ mod tests {
 		IntVal,
 		actions::{
 			BoolInitActions, BoolInspectionActions, ConstructionActions, IntInitActions,
-			IntInspectionActions, IntPropagationActions, IntSimplificationActions, ReasoningEngine,
-			Trailed, TrailingActions,
+			IntInspectionActions, IntPropCond, IntPropagationActions, IntSimplificationActions,
+			ReasoningEngine, Trailed, TrailingActions,
 		},
 		constraints::{
-			BoolModelActions, Constraint, IntModelActions, Propagator, SimplificationStatus,
+			BoolModelActions, Constraint, IntEvent, IntModelActions, Propagator,
+			SimplificationStatus,
 		},
 		lower::{InitConfig, LoweringContext, LoweringError},
 		model::{Model, View, deserialize::AnyView},
-		solver::{
-			Solver,
-			activation_list::{IntEvent, IntPropCond},
-		},
+		solver::Solver,
 	};
 
 	#[derive(Clone, Debug)]

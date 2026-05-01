@@ -15,13 +15,13 @@ use crate::{
 	Conjunction, IntVal,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
-		InitActions, IntDecisionActions, IntInitActions, IntInspectionActions,
+		InitActions, IntDecisionActions, IntInitActions, IntInspectionActions, IntPropCond,
 		IntPropagationActions, IntSimplificationActions, PostingActions, PropagationActions,
 		ReasoningContext, ReasoningEngine, SimplificationActions, Trailed, TrailingActions,
 	},
 	constraints::{
-		BoolModelActions, BoolSolverActions, Constraint, IntModelActions, IntSolverActions,
-		Propagator, ReasonBuilder, SimplificationStatus,
+		BoolModelActions, BoolSolverActions, Constraint, IntEvent, IntModelActions,
+		IntSolverActions, Propagator, ReasonBuilder, SimplificationStatus,
 	},
 	helpers::{
 		overflow::{OverflowImpossible, OverflowMode, OverflowPossible},
@@ -30,10 +30,7 @@ use crate::{
 	lower::{LoweringContext, LoweringError},
 	model::{self, expressions::bool_formula::BoolFormula},
 	solver::{
-		self, BoolView, Decision, IntLitMeaning,
-		activation_list::{IntEvent, IntPropCond},
-		queue::PriorityLevel,
-		view::integer::IntView,
+		self, BoolView, Decision, IntLitMeaning, queue::PriorityLevel, view::integer::IntView,
 	},
 	views::LinearBoolView,
 };

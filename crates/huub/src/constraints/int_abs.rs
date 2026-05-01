@@ -7,15 +7,18 @@ use std::{
 };
 
 use crate::{
-	actions::{InitActions, IntDecisionActions, PostingActions, ReasoningContext, ReasoningEngine},
+	actions::{
+		InitActions, IntDecisionActions, IntPropCond, PostingActions, ReasoningContext,
+		ReasoningEngine,
+	},
 	constraints::{
 		BoolModelActions, BoolSolverActions, Constraint, IntModelActions, IntSolverActions,
 		Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
 	solver::{
-		Decision, IntLitMeaning, View, activation_list::IntPropCond, engine::Engine,
-		queue::PriorityLevel, view::boolean::BoolView,
+		Decision, IntLitMeaning, View, engine::Engine, queue::PriorityLevel,
+		view::boolean::BoolView,
 	},
 };
 

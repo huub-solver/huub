@@ -8,14 +8,14 @@ use crate::{
 	IntVal,
 	actions::{
 		BoolInitActions, BoolSimplificationActions, IntDecisionActions, IntInitActions,
-		IntInspectionActions, IntPropagationActions, ReasoningEngine,
+		IntInspectionActions, IntPropCond, IntPropagationActions, ReasoningEngine,
 	},
 	constraints::{
 		BoolModelActions, Constraint, IntModelActions, Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
 	model::view::View,
-	solver::{IntLitMeaning, activation_list::IntPropCond},
+	solver::IntLitMeaning,
 };
 
 /// Representation of the `array_element` constraint with an array of Boolean

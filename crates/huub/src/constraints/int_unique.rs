@@ -8,18 +8,13 @@ use tracing::warn;
 
 use crate::{
 	IntVal,
-	actions::{InitActions, IntInspectionActions, PostingActions, ReasoningEngine},
+	actions::{InitActions, IntInspectionActions, IntPropCond, PostingActions, ReasoningEngine},
 	constraints::{
-		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
+		Constraint, IntEvent, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
 	model::View,
-	solver::{
-		IntLitMeaning,
-		activation_list::{IntEvent, IntPropCond},
-		engine::Engine,
-		queue::PriorityLevel,
-	},
+	solver::{IntLitMeaning, engine::Engine, queue::PriorityLevel},
 };
 
 /// Representation of the integer `unique` constraint within a model.

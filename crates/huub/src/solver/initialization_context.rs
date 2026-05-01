@@ -11,11 +11,11 @@ use crate::{
 	IntSet, IntVal,
 	actions::{
 		BoolInitActions, BoolInspectionActions, InitActions, IntInitActions, IntInspectionActions,
-		ReasoningContext, ReasoningEngine,
+		IntPropCond, ReasoningContext, ReasoningEngine,
 	},
 	solver::{
 		IntLitMeaning,
-		activation_list::{ActivationAction, IntPropCond},
+		activation_list::ActivationAction,
 		decision::Decision,
 		engine::{AdvRef, AdvisorDef, Engine, PropRef, State},
 		queue::PriorityLevel,

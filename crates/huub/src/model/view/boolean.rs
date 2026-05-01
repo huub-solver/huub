@@ -10,7 +10,7 @@ use std::{
 use crate::{
 	IntVal,
 	actions::{
-		BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
+		BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions, IntPropCond,
 		PropagationActions,
 	},
 	constraints::{Conflict, ReasonBuilder},
@@ -21,10 +21,7 @@ use crate::{
 		resolved::Resolved,
 		view::{DefaultView, View, private},
 	},
-	solver::{
-		IntLitMeaning,
-		activation_list::{ActivationAction, IntPropCond},
-	},
+	solver::{IntLitMeaning, activation_list::ActivationAction},
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

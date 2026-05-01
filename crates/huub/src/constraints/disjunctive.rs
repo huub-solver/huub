@@ -7,8 +7,9 @@ use tracing::trace;
 use crate::{
 	Conjunction, IntVal,
 	actions::{
-		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions, PostingActions,
-		PropagationActions, ReasoningContext, ReasoningEngine, Trailed, TrailingActions,
+		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions, IntPropCond,
+		PostingActions, PropagationActions, ReasoningContext, ReasoningEngine, Trailed,
+		TrailingActions,
 	},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, ReasonBuilder,
@@ -16,7 +17,7 @@ use crate::{
 	},
 	lower::{LoweringContext, LoweringError},
 	model,
-	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
+	solver::{IntLitMeaning, engine::Engine, queue::PriorityLevel},
 };
 
 /// Representation of the `disjunctive` constraint within a model.

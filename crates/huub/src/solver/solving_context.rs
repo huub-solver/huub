@@ -15,11 +15,10 @@ use crate::{
 		IntInspectionActions, IntPropagationActions, PropagationActions, ReasoningContext,
 		ReasoningEngine, Trailed, TrailingActions,
 	},
-	constraints::{Conflict, DeferredReason, Reason, ReasonBuilder},
+	constraints::{Conflict, DeferredReason, IntEvent, Reason, ReasonBuilder},
 	helpers::bytes::Bytes,
 	solver::{
 		BoxedPropagator, IntLitMeaning,
-		activation_list::IntEvent,
 		decision::{Decision, integer::LazyLitDef},
 		engine::{Engine, LitPropagation, PropRef, State, trace_new_lit},
 		view::{View, boolean::BoolView},

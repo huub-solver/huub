@@ -9,7 +9,7 @@ use itertools::{Itertools, MinMaxResult, iproduct};
 use crate::{
 	IntVal,
 	actions::{
-		InitActions, IntInspectionActions, IntSimplificationActions, PostingActions,
+		InitActions, IntInspectionActions, IntPropCond, IntSimplificationActions, PostingActions,
 		ReasoningContext, ReasoningEngine,
 	},
 	constraints::{
@@ -21,7 +21,7 @@ use crate::{
 	},
 	lower::{LoweringContext, LoweringError},
 	model::View,
-	solver::{activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
+	solver::{engine::Engine, queue::PriorityLevel},
 };
 
 /// This propagator enforces that the product of the two integer decision

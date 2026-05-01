@@ -7,6 +7,8 @@ use std::{
 };
 
 use crate::{
+	actions::IntPropCond,
+	constraints::IntEvent,
 	model::{self, ConRef},
 	solver::engine::{self, PropRef},
 };
@@ -56,45 +58,6 @@ pub(crate) struct ActivationList {
 	/// The index for the first propagator to be activated when an event
 	/// triggers [`IntPropCond::Domain`].
 	domain_idx: u32,
-}
-
-/// Change that has occurred in the domain of an integer variable.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum IntEvent {
-	/// The variable has been fixed to a single value.
-	Fixed,
-	/// Both of the bounds of the variable has changed.
-	Bounds,
-	/// The lower bound of the variable has changed.
-	LowerBound,
-	/// The upper bound of the variable has changed.
-	UpperBound,
-	/// One or more values (excluding the bounds) have been removed from the
-	/// domain of the variable.
-	Domain,
-}
-
-/// The conditions of an integer variable domain change that can trigger a
-/// propagator to be enqueued.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum IntPropCond {
-	/// Condition that triggers when the variable is fixed.
-	Fixed,
-	/// Condition that triggers when the lower bound of the variable changes.
-	///
-	/// This includes the case where the variable is fixed.
-	LowerBound,
-	/// Condition that triggers when the upper bound of the variable changes.
-	///
-	/// This includes the case where the variable is fixed.
-	UpperBound,
-	/// Condition that triggers when either of the bounds of the variable
-	/// change.
-	///
-	/// This includes the case where the variable is fixed.
-	Bounds,
-	/// Condition that triggers for any change in the domain of the variable.
-	Domain,
 }
 
 impl From<ActivationActionS> for ActivationAction<engine::AdvRef, PropRef> {
@@ -285,9 +248,13 @@ mod tests {
 	use itertools::Itertools;
 	use rustc_hash::FxHashSet;
 
-	use crate::solver::{
-		activation_list::{ActivationAction, ActivationList, IntEvent, IntPropCond},
-		engine::PropRef,
+	use crate::{
+		actions::IntPropCond,
+		constraints::IntEvent,
+		solver::{
+			activation_list::{ActivationAction, ActivationList},
+			engine::PropRef,
+		},
 	};
 
 	#[test]

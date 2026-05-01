@@ -9,8 +9,8 @@ use itertools::{Itertools, MinMaxResult};
 use crate::{
 	IntVal,
 	actions::{
-		InitActions, IntDecisionActions, IntInspectionActions, PostingActions, ReasoningContext,
-		ReasoningEngine,
+		InitActions, IntDecisionActions, IntInspectionActions, IntPropCond, PostingActions,
+		ReasoningContext, ReasoningEngine,
 	},
 	constraints::{
 		CachedReason, Constraint, IntModelActions, IntSolverActions, Propagator,
@@ -18,7 +18,7 @@ use crate::{
 	},
 	helpers::overflow::{OverflowImpossible, OverflowMode, OverflowPossible},
 	lower::{LoweringContext, LoweringError},
-	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
+	solver::{IntLitMeaning, engine::Engine, queue::PriorityLevel},
 };
 
 /// Bounds propagator for the constraint `result = base^exponent`.

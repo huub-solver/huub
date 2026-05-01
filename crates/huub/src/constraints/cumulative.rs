@@ -12,15 +12,15 @@ use tracing::trace;
 use crate::{
 	Conjunction, IntVal,
 	actions::{
-		InitActions, IntDecisionActions, IntInspectionActions, PostingActions, ReasoningContext,
-		ReasoningEngine,
+		InitActions, IntDecisionActions, IntInspectionActions, IntPropCond, PostingActions,
+		ReasoningContext, ReasoningEngine,
 	},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, ReasonBuilder,
 		SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
-	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
+	solver::{IntLitMeaning, engine::Engine, queue::PriorityLevel},
 };
 
 /// The propagation rules for the `cumulative` constraint. This enum is

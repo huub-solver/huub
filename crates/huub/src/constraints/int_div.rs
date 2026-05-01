@@ -7,7 +7,7 @@ use std::{mem, num::NonZero, ops::Neg};
 use crate::{
 	IntVal,
 	actions::{
-		InitActions, IntDecisionActions, IntInspectionActions, IntPropagationActions,
+		InitActions, IntDecisionActions, IntInspectionActions, IntPropCond, IntPropagationActions,
 		PostingActions, ReasoningEngine, SimplificationActions,
 	},
 	constraints::{
@@ -17,7 +17,7 @@ use crate::{
 	helpers::div_ceil,
 	lower::{LoweringContext, LoweringError},
 	model::{expressions::bool_formula::BoolFormula, view::View},
-	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
+	solver::{IntLitMeaning, engine::Engine, queue::PriorityLevel},
 };
 
 /// Bounds propagator for the division of two integer variables.

@@ -7,10 +7,10 @@ use rangelist::{IntervalIterator, RangeList};
 use crate::{
 	IntSet, IntVal,
 	actions::{
-		IntDecisionActions, IntInspectionActions, IntPropagationActions, IntSimplificationActions,
-		ReasoningContext,
+		IntDecisionActions, IntInspectionActions, IntPropCond, IntPropagationActions,
+		IntSimplificationActions, ReasoningContext,
 	},
-	constraints::ReasonBuilder,
+	constraints::{IntEvent, ReasonBuilder},
 	model::{
 		AdvRef, ConRef, Decision, Model,
 		decision::{DecisionReference, private},
@@ -19,7 +19,7 @@ use crate::{
 	},
 	solver::{
 		IntLitMeaning,
-		activation_list::{ActivationAction, ActivationList, IntEvent, IntPropCond},
+		activation_list::{ActivationAction, ActivationList},
 	},
 };
 

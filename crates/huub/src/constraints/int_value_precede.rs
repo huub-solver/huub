@@ -7,14 +7,14 @@ use std::cmp::{max, min};
 use crate::{
 	Conjunction, IntVal,
 	actions::{
-		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions, PostingActions,
-		ReasoningContext, ReasoningEngine, Trailed, TrailingActions,
+		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions, IntPropCond,
+		PostingActions, ReasoningContext, ReasoningEngine, Trailed, TrailingActions,
 	},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
-	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
+	solver::{IntLitMeaning, engine::Engine, queue::PriorityLevel},
 };
 
 /// Bounds propagator for the `seq_precede_chain_int` constraint.

@@ -11,7 +11,7 @@ use rustc_hash::FxHashMap;
 use crate::{
 	IntSet, IntVal,
 	actions::{
-		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions,
+		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions, IntPropCond,
 		IntSimplificationActions, PostingActions, ReasoningContext, ReasoningEngine,
 		SimplificationActions, Trailed, TrailingActions,
 	},
@@ -20,7 +20,7 @@ use crate::{
 	},
 	lower::{LoweringContext, LoweringError},
 	model::View,
-	solver::{IntLitMeaning, activation_list::IntPropCond, engine::Engine, queue::PriorityLevel},
+	solver::{IntLitMeaning, engine::Engine, queue::PriorityLevel},
 };
 
 /// Bounds consistent propagator for the `array_element` constraint with an

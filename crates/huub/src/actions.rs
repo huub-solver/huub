@@ -11,7 +11,9 @@ pub use crate::actions::{
 	boolean::{
 		BoolInspectionActions, BoolOperations, BoolPropagationActions, BoolSimplificationActions,
 	},
-	initialization::{BoolInitActions, BrancherInitActions, InitActions, IntInitActions},
+	initialization::{
+		BoolInitActions, BrancherInitActions, InitActions, IntInitActions, IntPropCond,
+	},
 	integer::{
 		IntDecisionActions, IntExplanationActions, IntInspectionActions, IntOperations,
 		IntPropagationActions, IntSimplificationActions,

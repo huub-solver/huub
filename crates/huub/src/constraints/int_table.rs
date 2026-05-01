@@ -9,7 +9,7 @@ use itertools::Itertools;
 use crate::{
 	IntVal,
 	actions::{
-		InitActions, IntDecisionActions, IntInitActions, IntInspectionActions,
+		InitActions, IntDecisionActions, IntInitActions, IntInspectionActions, IntPropCond,
 		IntPropagationActions, IntSimplificationActions, PropagationActions, ReasoningEngine,
 	},
 	constraints::{
@@ -17,7 +17,7 @@ use crate::{
 	},
 	lower::{LoweringContext, LoweringError},
 	model::View,
-	solver::{IntLitMeaning, activation_list::IntPropCond, queue::PriorityLevel},
+	solver::{IntLitMeaning, queue::PriorityLevel},
 };
 
 /// Representation of the `table_int` constraint within a model.
