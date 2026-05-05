@@ -182,18 +182,23 @@ impl JobShopModel {
 	/// Create a new job shop model for the given instance and objective type.
 	pub(crate) fn new(instance: &Instance, objective_type: ObjectiveType) -> Self {
 		let mut model = Model::default();
+		// ANCHOR: create_decision_variables
 		let mut start_time = Vec::with_capacity(instance.n);
 		for job in &instance.jobs {
 			start_time.push(model.new_int_decisions(job.len(), 0..=(instance.max_time as i64)));
 		}
+		// ANCHOR_END: create_decision_variables
 
+		// ANCHOR: precedence_constraints
 		for (job, job_start_time) in instance.jobs.iter().zip(&start_time) {
 			for (op_idx, op) in job.iter().enumerate().take(job.len().saturating_sub(1)) {
 				let op_end = job_start_time[op_idx] + op.processing_time as i64;
 				model.linear(job_start_time[op_idx + 1]).ge(op_end).post();
 			}
 		}
+		// ANCHOR_END: precedence_constraints
 
+		// ANCHOR: disjunctive_constraints
 		for operations_on_machine in &instance.operations_on_machine {
 			let mut op_start_times = Vec::with_capacity(operations_on_machine.len());
 			let mut op_durations = Vec::with_capacity(operations_on_machine.len());
@@ -208,8 +213,10 @@ impl JobShopModel {
 				.durations(op_durations)
 				.post();
 		}
+		// ANCHOR_END: disjunctive_constraints
 
 		let completion_times = job_completion_times(instance, &start_time);
+		// ANCHOR: define_objective
 		let objective_variable = match objective_type {
 			ObjectiveType::Makespan => {
 				let makespan = model.new_int_decision(0..=(instance.max_time as i64));
@@ -223,6 +230,7 @@ impl JobShopModel {
 				model.linear(exp).define()
 			}
 		};
+		// ANCHOR_END: define_objective
 
 		JobShopModel {
 			model,
