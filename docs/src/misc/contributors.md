@@ -53,7 +53,7 @@ The following individuals have contributed to the Huub project:
 
 ## Acknowledgements
 
-We also thank the developers of the projects and libraries that Huub builds, including following.
+We also thank the developers of the projects and libraries that Huub builds, including the following.
 
 - [CaDiCaL](https://github.com/arminbiere/cadical) — The underlying SAT solver
 - [Pindakaas](https://github.com/pindakaashq/pindakaas) — SAT encoding library

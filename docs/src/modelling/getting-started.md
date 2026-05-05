@@ -38,7 +38,7 @@ By restricting S and M to `1..=9`, we also enforce that they cannot be zero with
 The next step is to post constraints that the solution must satisfy.
 In this problem, we have to post two constraints.
 
-**1. Unique constraint:** Each letter must be different digit.
+**1. Unique constraint:** Each letter must be a different digit.
 
 ```text
 {{#include ../../../crates/huub/examples/send-more-money/main.rs:unique_constraint}}

@@ -2,7 +2,7 @@
 
 For many users, the easiest way to use Huub is through [MiniZinc](https://www.minizinc.org/).
 In this workflow, MiniZinc is used as the modelling language and Huub is used as the backend solver.
-You write a MiniZinc model, MiniZinc compile with given instance data, and MiniZinc instructs Huub to solve it.
+You write a MiniZinc model, MiniZinc compiles it with given instance data, and MiniZinc instructs Huub to solve it.
 
 This chapter has two purposes.
 First, it explains how to install Huub as a MiniZinc solver.
@@ -47,7 +47,7 @@ minizinc --help huub
 
 In the Huub MiniZinc library, used to compile MiniZinc instances to Huub specific FlatZinc, we include an additional user-facing `huub.mzn` file.
 This file contains the MiniZinc definitions to expose Huub-specific functionality in models.
-When selecting the Huub solver and using the Huub solver configuration file, the `huub.mzn` library file can be included simply as folllows.
+When selecting the Huub solver and using the Huub solver configuration file, the `huub.mzn` library file can be included simply as follows.
 
 ```mzn
 include "huub.mzn";

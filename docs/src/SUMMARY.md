@@ -1,6 +1,6 @@
 # Summary
 
-[Home](home/index.md)
+[Home](./index.md)
 
 # Introduction
 
@@ -46,7 +46,7 @@
 
 -----------
 
-[Contributors](misc/contributors/index.md)
+[Contributors](misc/contributors.md)
 [Funding](misc/funding.md)
 [Researching Huub](misc/researching-huub.md)
 [Developing Huub](misc/developing-huub.md)
