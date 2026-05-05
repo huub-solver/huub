@@ -23,3 +23,17 @@ And it is **extensible**: you can add your own propagators, branchers, and even 
 ## Thanks
 
 Thanks to our [contributors](https://huub.solutions/misc/contributors.html) and [funding partners](https://huub.solutions/misc/funding.html).
+
+## Citing Huub
+
+If you want to cite Huub please use our general software citation, in addition to any citation to a specific version or paper:
+
+```bibtex
+@software{Huub,
+  author = {Dekker, Jip J. and Stuckey, Peter J. and Zhong, Allen Z.},
+  title = {Huub},
+  license = {MPL-2.0},
+  url = {https://huub.solutions},
+  doi = {10.5281/zenodo.15591852},
+}
+```

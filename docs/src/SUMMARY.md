@@ -48,4 +48,5 @@
 
 [Contributors](misc/contributors/index.md)
 [Funding](misc/funding.md)
+[Researching Huub](misc/researching-huub.md)
 [Developing Huub](misc/developing-huub.md)
