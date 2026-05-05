@@ -1,0 +1,83 @@
+/*
+ * Catppuccin Mocha Syntax Highlighting
+ * https://github.com/catppuccin/catppuccin
+ */
+
+.hljs {
+  display: block;
+  overflow-x: auto;
+  background: #1e1e2e;
+  color: #cdd6f4;
+}
+
+/* Comment */
+.hljs-comment,
+.hljs-quote {
+  color: #585b70;
+  font-style: italic;
+}
+
+/* Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-attribute,
+.hljs-attr,
+.hljs-tag,
+.hljs-name,
+.hljs-regexp,
+.hljs-link,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: #f38ba8;
+}
+
+/* Mauve */
+.hljs-number,
+.hljs-meta,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params {
+  color: #cba6f7;
+}
+
+/* Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet {
+  color: #a6e3a1;
+}
+
+/* Blue */
+.hljs-title,
+.hljs-section {
+  color: #89b4fa;
+}
+
+/* Keyword */
+.hljs-keyword,
+.hljs-selector-tag {
+  color: #f38ba8;
+}
+
+/* Peach */
+.hljs-emphasis {
+  font-style: italic;
+  color: #fab387;
+}
+
+.hljs-strong {
+  font-weight: bold;
+  color: #fab387;
+}
+
+/* Green for additions */
+.hljs-addition {
+  color: #a6e3a1;
+}
+
+/* Red for deletions */
+.hljs-deletion {
+  color: #f38ba8;
+}

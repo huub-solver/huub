@@ -98,10 +98,7 @@ a > .hljs {
 	position: relative;
 	display: inline;
 	padding: 0;
-	text-decoration-line: underline;
-	text-decoration-color: transparent;
-	text-underline-offset: 0.18em;
-	text-decoration-thickness: 0.07em;
+	text-decoration-line: none;
 	color: var(--fg);
 	font-family: var(--title-font);
 	font-size: 1.6em;
@@ -109,13 +106,27 @@ a > .hljs {
 	line-height: 1.2;
 	transition:
 		color 160ms ease,
-		text-decoration-color 160ms ease;
+		opacity 160ms ease;
 }
 
 .site-header__links a:hover {
 	background: transparent !important;
 	color: var(--fg);
-	text-decoration-color: currentColor;
+}
+
+.site-header__links a::after {
+	content: "";
+	position: absolute;
+	inset-inline: 0;
+	bottom: -0.08em;
+	height: 0.07em;
+	background: currentColor;
+	opacity: 0;
+	transition: opacity 160ms ease;
+}
+
+.site-header__links a:hover::after {
+	opacity: 1;
 }
 
 .external-link {

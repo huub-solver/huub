@@ -48,22 +48,22 @@ For each integer decision variable, we must specify its **domain** upon creation
 The domain is the set of possible values the decision can take.
 Choosing a good domain means specifying realistic values based on your problem, which can be critical for solver efficiency.
 
-In Huub, domains are represented as **interval lists**, using the `RangeList` type.
+In Huub, domains are represented as **interval lists**, using the `rangelist::RangeList` type.
 This allows Huub to represent domains compactly even for large ranges of values.
 For example, the domain `{0, 1, 2, 3, 10, 11, 12}` is represented as two intervals: `[0,3]` and `[10,12]`, which is much more memory-efficient than storing each value individually.
 This representation is transparent to you as a modeler, but it enables Huub to efficiently handle decisions with large domains without excessive memory overhead.
 
 You can create an integer decision using `model.new_int_decision(<domain>)`.
-The `<domain>` argument can be any value that can be converted into a `RangeList<i64>`, such as a `RangeInclusive<i64>` or a `RangeList<i64>` itself.
+The `<domain>` argument can be any value that can be converted into a `Set<i64>`, such as a `RangeInclusive<i64>` or a `rangelist::RangeList<i64>` itself.
 For example:
 
 ```rust
 # extern crate huub;
-# use huub::model::Model;
+# use huub::{model::Model, Set};
 # let mut model = Model::default();
 let x = model.new_int_decision(1..=9);      // values 1 to 9
 let y = model.new_int_decision(0..=100);    // values 0 to 100
-// You can also create decisions with non-contiguous domains using RangeList from the rangelist crate
+let z = model.new_int_decision(Set::from_iter([1..=1, 3..=3, 5..=5, 7..=7])); // specific values
 ```
 
 For convenience, when you need many decisions with the same domain, you can use the batch creation method.

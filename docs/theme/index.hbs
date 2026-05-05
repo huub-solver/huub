@@ -63,13 +63,6 @@
 
 					<div class="site-header__utilities">
 						<div class="site-header__social">
-							{{#if path_to_root}}
-							{{#if search_enabled}}
-							<button id="search-toggle" class="icon-button site-header__icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
-								<i class="fa fa-search"></i>
-							</button>
-							{{/if}}
-							{{/if}}
 							{{#if git_repository_url}}
 							<a href="{{git_repository_url}}" title="Git repository" aria-label="Git repository">
 								<i id="git-repository-button" class="fa {{git_repository_icon}}"></i>
@@ -83,6 +76,18 @@
 							<button id="theme-toggle" class="icon-button site-header__icon-button" type="button" title="Switch to dark mode" aria-label="Switch to dark mode">
 								<i class="fa fa-moon-o"></i>
 							</button>
+							{{#if search_enabled}}
+							{{#if path_to_root}}
+							<button id="search-toggle" class="icon-button site-header__icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+								<i class="fa fa-search"></i>
+							</button>
+							{{else}}
+							<!-- Reserve space for search icon on landing page to prevent layout shift -->
+							<div class="icon-button site-header__icon-button" style="visibility: hidden;">
+								<i class="fa fa-search"></i>
+							</div>
+							{{/if}}
+							{{/if}}
 							<ul id="theme-list" class="theme-popup theme-popup--sr-only" aria-label="Themes" role="menu">
 								<li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
 								<li role="none"><button role="menuitem" class="theme" id="{{ preferred_dark_theme }}">{{ preferred_dark_theme }}</button></li>

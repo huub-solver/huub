@@ -190,7 +190,7 @@ h6:target::before {
 	margin-inline-start: -1px;
 	padding: 0.45rem 0 0.45rem 1.6rem;
 	border-inline-start: 1px solid transparent;
-	color: var(--sidebar-fg);
+	color: var(--fg);
 	font-size: 1.4rem;
 	font-weight: 400;
 	line-height: 1.4;
@@ -206,9 +206,12 @@ h6:target::before {
 		font-weight 160ms ease;
 }
 
-.page-toc__item a:link,
-.page-toc__item a:visited {
-	color: var(--sidebar-fg);
+.page-toc .page-toc__item a:link {
+	color: var(--fg);
+}
+
+.page-toc .page-toc__item a:visited {
+	color: var(--fg);
 }
 
 .page-toc__item a:hover {
@@ -227,6 +230,7 @@ h6:target::before {
 .page-toc__item--h3 a {
 	padding-inline-start: 2.8rem;
 	font-size: 1.4rem;
+	color: var(--fg);
 }
 
 .page-kicker {
