@@ -23,18 +23,27 @@ In Huub, constraints are posted using a builder pattern on the `Model`.
 Constraints accept positional argument in the initial call, named (and sometimes optional) arguments using calls on the builder object, before finalizing with `.post()`.
 The pattern typically looks like:
 
-```rust
+```rust,ignore
 model.constraint_name(pos1, pos2)
-    .name1(val1)
-    .name2(val2)
-    .post();
+	.name1(val1)
+	.name2(val2)
+	.post();
 ```
 
 For example:
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
+# let x = model.new_int_decision(0..=10);
+# let y = model.new_int_decision(0..=10);
+# let z = model.new_int_decision(0..=10);
+# let array = vec![x, y, z];
+# let idx = model.new_int_decision(0..=2);
+# let res = model.new_int_decision(0..=10);
 model.unique(vec![x, y, z]).post();
-model.linear(x + 2*y).eq(10).post();
+model.linear(x + y*2).eq(10).post();
 model.element(array).index(idx).result(res).post();
 ```
 
@@ -45,6 +54,9 @@ model.element(array).index(idx).result(res).post();
 The `unique` constraint enforces that each position in a collection take different values (also known as “all different”).
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let digits = model.new_int_decisions(8, 0..=9);
 model.unique(digits).post();
 ```
@@ -57,11 +69,14 @@ Linear constraints enforce arithmetic relationships between decisions.
 They are expressed as linear equations or inequalities.
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let x = model.new_int_decision(0..=10);
 let y = model.new_int_decision(0..=10);
 
 model.linear(x + y).eq(15).post();   // x + y = 15
-model.linear(2*x + y).le(20).post(); // 2*x + y <= 20
+model.linear(x*2 + y).le(20).post(); // 2*x + y <= 20
 model.linear(x).gt(y).post();        // x > y
 ```
 
@@ -83,6 +98,9 @@ Supported comparisons are:
 The element constraint relates a decision variable to an element of an array based on an index decision variable.
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let index = model.new_int_decision(0..=4);
 let array = model.new_int_decisions(5, 1..=10);
 let result = model.new_int_decision(1..=10);
@@ -96,6 +114,9 @@ model.element(array).index(index).result(result).post();
 These constraints enforce that a decision variable is the minimum or maximum of a set of decision variables.
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let vars = model.new_int_decisions(5, 1..=20);
 let min_var = model.new_int_decision(1..=20);
 let max_var = model.new_int_decision(1..=20);
@@ -109,11 +130,14 @@ model.maximum(vars).result(max_var).post();
 The `mul` constraint enforces that one decision variable is the product of two others.
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let x = model.new_int_decision(0..=10);
 let y = model.new_int_decision(0..=10);
 let product = model.new_int_decision(0..=100);
 
-model.mul(x).with(y).result(product).post();
+model.mul(x, y).result(product).post();
 // product = x * y
 ```
 
@@ -122,16 +146,19 @@ model.mul(x).with(y).result(product).post();
 Table constraints restrict decisions to take only combinations of values that appear in a given table (like a relation in a database).
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let x = model.new_int_decision(1..=3);
 let y = model.new_int_decision(1..=3);
 
 let valid_combinations = vec![
-    vec![1, 2],
-    vec![1, 3],
-    vec![2, 3],
+	vec![1, 2],
+	vec![1, 3],
+	vec![2, 3],
 ];
 
-model.table(vec![x, y]).combinations(valid_combinations).post();
+model.table(vec![x, y]).values(valid_combinations).post();
 // (x, y) must be one of the valid combinations
 ```
 
@@ -143,6 +170,9 @@ The value precedence constraint enforces an ordering on the first occurrences of
 By default, it enforces that value 1 precedes value 2, which precedes value 3, and so on.
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let vars = model.new_int_decisions(5, 1..=3);
 
 model.value_precede(vars).post();
@@ -153,6 +183,9 @@ model.value_precede(vars).post();
 You can also specify a custom list of values to order:
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let vars = model.new_int_decisions(5, 0..=10);
 
 model.value_precede(vars).values(vec![10, 5, 2]).post();
@@ -166,6 +199,9 @@ This is useful for breaking symmetries in solutions.
 The power constraint enforces that one decision variable is the result of raising a base to an exponent.
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let base = model.new_int_decision(0..=10);
 let exponent = model.new_int_decision(0..=5);
 let result = model.new_int_decision(0..=100000);
@@ -179,6 +215,9 @@ model.pow(base, exponent).result(result).post();
 The division constraint enforces that one decision variable is the integer division of two others (using truncation towards zero).
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let numerator = model.new_int_decision(-100..=100);
 let denominator = model.new_int_decision(-10..=10);
 let result = model.new_int_decision(-100..=100);
@@ -192,6 +231,10 @@ model.div(numerator, denominator).result(result).post();
 Boolean formulas allow you to express complex logical conditions using conjunction (AND), disjunction (OR), negation (NOT), implication, and equivalence.
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# use huub::model::expressions::BoolFormula;
+# let mut model = Model::default();
 let x = model.new_bool_decision();
 let y = model.new_bool_decision();
 let z = model.new_bool_decision();
@@ -210,7 +253,7 @@ let formula = BoolFormula::Or(vec![
 model.proposition(formula).post();
 ```
 
-## Constraints on constraints
+## General posting options
 
 Some constraints support additional options that control how they propagate and enable more expressive modeling patterns.
 
@@ -220,6 +263,9 @@ A reified constraint is one that is controlled by a Boolean decision variable.
 The Boolean decision variable is `true` if-and-only-if the constraint is satisfied.
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let x = model.new_int_decision(0..=10);
 let y = model.new_int_decision(0..=10);
 let active = model.new_bool_decision();
@@ -232,6 +278,12 @@ Many constraint builders also support half-reification with `implied_by`, which 
 This is useful for modeling conditional logic and implications.
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
+# let x = model.new_int_decision(0..=10);
+# let y = model.new_int_decision(0..=10);
+# let active = model.new_bool_decision();
 model.linear(x + y).eq(5).implied_by(active).post();
 // If `active` is true, then x + y = 5 (but x + y can still equal 5 when `active` is false)
 ```
@@ -242,6 +294,9 @@ Constraint that compute a functional value, that have a `.result()` named argume
 This is a concise alternative to manually creating a resulting decision and posting the constraint.
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let x = model.new_int_decision(0..=10);
 let y = model.new_int_decision(0..=10);
 
@@ -249,7 +304,7 @@ let y = model.new_int_decision(0..=10);
 let sum = model.linear(x + y).define();
 
 // Or in multiplication:
-let product = model.mul(x).with(y).define();
+let product = model.mul(x, y).define();
 
 // Or in absolute value:
 let abs_value = model.abs(x).define();
@@ -258,9 +313,13 @@ let abs_value = model.abs(x).define();
 Using `.define()` is equivalent to manually creating a resulting decision and posting a constraint.
 For example, `model.maximum([x,y]).define()` is shorthand for:
 ```rust
-let max = model.new_int_decision(domain_of_x_union_y);
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
+# let x = model.new_int_decision(0..=10);
+# let y = model.new_int_decision(0..=10);
+let max = model.new_int_decision(0..=10);
 model.maximum([x, y]).result(max).post();
-max
 ```
 
 The new decision variable is automatically added to the model with an appropriate domain inferred from the constraint.

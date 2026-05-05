@@ -10,6 +10,9 @@ They are unknowns that must take the value `true` or `false`.
 You can create Boolean decisions using `model.new_bool_decision()`:
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let x = model.new_bool_decision();
 let y = model.new_bool_decision();
 ```
@@ -17,6 +20,9 @@ let y = model.new_bool_decision();
 For convenience, you can also create multiple Boolean decisions at once:
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let vars = model.new_bool_decisions(10);
 ```
 
@@ -52,15 +58,21 @@ The `<domain>` argument can be any value that can be converted into a `RangeList
 For example:
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let x = model.new_int_decision(1..=9);      // values 1 to 9
 let y = model.new_int_decision(0..=100);    // values 0 to 100
-let z = model.new_int_decision(RangeList::from([1..=1, 3..=3, 5..=5, 7..=7])); // specific values
+// You can also create decisions with non-contiguous domains using RangeList from the rangelist crate
 ```
 
 For convenience, when you need many decisions with the same domain, you can use the batch creation method.
 The following fragment creates 20 integer decisions, each with the domain 0 to 9:
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let vars = model.new_int_decisions(20, 0..=9);
 ```
 
@@ -83,7 +95,10 @@ The effort spent on specifying good domains upfront pays dividends in solver per
 When creating a new decision, you must ensure the domain is not empty.
 For example, attempting to create a decision with an invalid range will panic:
 
-```rust
+```rust,ignore
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let invalid = model.new_int_decision(5..=2);  // This panics: min > max
 ```
 
@@ -114,6 +129,9 @@ When you copy (or clone) a `View`, you don't create a new decision, you just cre
 For example:
 
 ```rust
+# extern crate huub;
+# use huub::model::Model;
+# let mut model = Model::default();
 let x = model.new_int_decision(1..=10);
 let x_alias = x;  // x_alias refers to the same decision as x
 ```

@@ -39,7 +39,7 @@
 <!--
 - [Overview](./branchers/overview.md)
 - [Built-in branchers](./branchers/built-in-branchers.md)
-- [Variable and value selection](./branchers/variable-and-value-selection.md)
+- [Decision and value selection](./branchers/decision-and-value-selection.md)
 - [Search directives and exhaustion](./branchers/search-directives-and-exhaustion.md)
 - [Implementing a custom brancher](./branchers/implementing-a-custom-brancher.md)
 -->

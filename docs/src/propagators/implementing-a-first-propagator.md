@@ -1,1 +1,0 @@
-# Implementing a first propagator
