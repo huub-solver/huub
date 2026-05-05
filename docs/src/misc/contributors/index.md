@@ -36,12 +36,18 @@ The Huub solver is developed and maintained by the following core team members.
   </div>
 </div>
 
+## Who was Huub?
+
+Huub is named after Hubertus Dekker, a passionate business administration and accounting teacher who spent his holidays creating the rosters for his school by hand, allowing students to pick any combination of possible subjects.
+This solver is dedicated to him in the hope that it allows problems to be solved with the same flexibility and care that he put into his rosters.
+The logo of the solver is based on an old caricature of him as a teacher, made to include his features at an older age.
+
 ## Contributors
 
 We are grateful to all contributors who have helped improve Huub through code contributions, bug reports, feedback, and suggestions.
 The following individuals have contributed to the Huub project:
 
-- **Lucas Kletzander** — [univeristy profile](https://informatics.tuwien.ac.at/people/lucas-kletzander) — Multiple propagator contributions and core solver experimentation
+- **Lucas Kletzander** — [university profile](https://informatics.tuwien.ac.at/people/lucas-kletzander) — Multiple propagator contributions and core solver experimentation
 - **Alexey Ignatiev** — [website](https://alexeyignatiev.github.io/) — Early development and architectural contributions
 - **Danyal Mirza** — [GitHub](https://github.com/dannem1337) — Contributed multiple propagators
 
