@@ -1,0 +1,43 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: Huub
+message: >-
+  An efficient library for developing constraint-based
+  decision or optimization systems and applications with
+  learning capabilities
+type: software
+authors:
+  - given-names: Jip J.
+    family-names: Dekker
+    email: jip.dekker@monash.edu
+    affiliation: Monash University
+    orcid: 'https://orcid.org/0000-0002-0053-6724'
+  - given-names: Peter J.
+    family-names: Stuckey
+    email: peter.stuckey@monash.edu
+    affiliation: Monash University
+    orcid: 'https://orcid.org/0000-0003-2186-0459'
+  - given-names: Allen Z.
+    family-names: Zhong
+    email: allen.zhong@monash.edu
+    affiliation: Monash University
+    orcid: 'https://orcid.org/0000-0001-8807-8600'
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.15591852
+repository-code: 'https://github.com/huub-solver/huub'
+url: 'https://huub.solutions'
+abstract: >-
+  Huub is an efficient library for developing
+  constraint-based decision or optimization systems and
+  applications with learning capabilities. It combines the
+  modelling strengths of constraint programming (CP) with
+  the learning and proof machinery of Boolean satisfiability
+  (SAT) solving.
+keywords:
+  - constraint-programming
+  - boolean-satisfiability
+  - optimization
+license: MPL-2.0
