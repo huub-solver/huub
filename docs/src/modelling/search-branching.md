@@ -30,7 +30,7 @@ This gives you precise control over the search strategy.
 The solver processes user-defined branchers first; when they are exhausted, it falls back to the SAT solver.
 This allows you to guide the search for the most critical decisions while letting the SAT solver handle others.
 
-**Automatic search:** The solver defers to the built-in SAT solver (Cadical), which uses modern heuristics like VSIDS (Variable State Independent Decaying Sum) to make decisions.
+**Automatic search:** The solver defers to the built-in SAT solver (e.g. CaDiCaL), which uses modern heuristics like VSIDS (Variable State Independent Decaying Sum) to make decisions.
 This often works well without explicit configuration.
 
 You can set which mode the solver uses via the `SearchStrategy` setting.
@@ -226,7 +226,7 @@ The callback is called periodically during the search, allowing you to check con
 - **Resource limits**: Stop when memory or CPU usage exceeds a threshold.
 - **External signals**: Stop when receiving an interrupt signal (Ctrl+C).
 
-When the callback returns `TermSignal::Terminate`, the solver will abandon the current search branch and return immediately with `Status::Unknown` if no solution has been found yet.
+When the callback returns `TerminationSignal::Terminate`, the solver will abandon the current search branch and return immediately with `Status::Unknown` if no solution has been found yet.
 
 
 ## Finding Optimal Solutions
@@ -274,7 +274,7 @@ match status {
 The branch-and-bound loop continues until:
 
 - **Complete**: A solution is found that cannot be improved further (proven optimal).
-- **Unsatisfiable**: No solutions exists.
+- **Unsatisfiable**: No feasible solutions exist.
 - **Satisfied**: The search was interrupted by a termination signal, after at least one solution was found.
 - **Unknown**: The search was interrupted by a termination signal, before any solution was found.
 

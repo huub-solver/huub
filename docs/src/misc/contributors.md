@@ -9,7 +9,7 @@ The Huub solver is developed and maintained by the following core team members.
 ### Jip J. Dekker — Creator
 
 <div style="display: flex; gap: 20px; align-items: flex-start;">
-  <img src="./jip.jpg" alt="Jip J. Dekker" style="width: 175px; height: 175px; flex-shrink: 0; border-radius: 8px;">
+  <img src="./contributors/jip.jpg" alt="Jip J. Dekker" style="width: 175px; height: 175px; flex-shrink: 0; border-radius: 8px;">
   <div>
     <p>Jip J. Dekker is the creator of Huub and leads its development. With a deep background in constraint programming and lazy clause generation, Jip designed Huub from the ground up to prioritize modularity, maintainability, and performance. His vision for Huub is to create a solver that is both powerful and accessible to the research and industrial communities.</p>
     <p><strong>Website:</strong> <a href="https://dekker.one/">dekker.one</a></p>
@@ -19,7 +19,7 @@ The Huub solver is developed and maintained by the following core team members.
 ### Allen Zhong — Maintainer
 
 <div style="display: flex; gap: 20px; align-items: flex-start;">
-  <img src="./allen.jpg" alt="Allen Zhong" style="width: 175px; height: 175px; flex-shrink: 0; border-radius: 8px;">
+  <img src="./contributors/allen.jpg" alt="Allen Zhong" style="width: 175px; height: 175px; flex-shrink: 0; border-radius: 8px;">
   <div>
     <p>Allen Zhong is responsible for the ongoing maintenance and development of Huub. He works closely with the community to address issues, implement improvements, and ensure the solver remains robust and performant. Allen's focus is on code quality, testing, and user experience.</p>
     <p><strong>Website:</strong> <a href="https://allenzzw.github.io/">allenzzw.github.io</a></p>
@@ -29,7 +29,7 @@ The Huub solver is developed and maintained by the following core team members.
 ### Peter J. Stuckey — Scientific Advisor
 
 <div style="display: flex; gap: 20px; align-items: flex-start;">
-  <img src="./peter.jpg" alt="Peter J. Stuckey" style="width: 175px; height: 175px; flex-shrink: 0; border-radius: 8px;">
+  <img src="./contributors/peter.jpg" alt="Peter J. Stuckey" style="width: 175px; height: 175px; flex-shrink: 0; border-radius: 8px;">
   <div>
     <p>Peter J. Stuckey is a leading researcher in constraint programming and optimization. He provides scientific guidance and expertise to the Huub project, helping to ensure that the solver incorporates the latest advances in the field. Peter's contributions span theoretical foundations, algorithm design, and validation of optimization techniques.</p>
     <p><strong>Website:</strong> <a href="https://people.eng.unimelb.edu.au/pstuckey/">unimelb.edu.au/pstuckey</a></p>

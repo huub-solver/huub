@@ -52,13 +52,14 @@ lldb -- ./target/debug/huub [HUUB FLAGS AND FZNJSON FILE]
 
 ### SAT Solver Integration
 
-Huub is built using the IPASIR-UP interface for SAT solvers, proposed by [Fazakas et al.](https://doi.org/10.4230/LIPIcs.SAT.2023.8). Huub is tested with the following solvers that implement this interface:
+Huub is built using the IPASIR-UP interface for SAT solvers, proposed by [Fazakas et al.](https://doi.org/10.4230/LIPIcs.SAT.2023.8).
+Huub is tested with the following solvers that implement this interface:
 
 - [CaDiCaL](https://github.com/arminbiere/cadical)
 
 ### Encoding to SAT
 
-The connection to SAT solvers and encoding methods to SAT for Huub use [Pindakaas](https://github.com/pindakaashq/pindakaas), a Rust crate for SAT solving and encoding to SAT.
+The connection to SAT solvers and encoding methods to CNF from Huub use [Pindakaas](https://github.com/pindakaashq/pindakaas), a Rust crate for SAT solving and encoding to SAT.
 
 ### Related Solvers
 

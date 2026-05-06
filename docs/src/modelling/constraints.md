@@ -290,7 +290,7 @@ model.linear(x + y).eq(5).implied_by(active).post();
 
 ### Defining new decision from constraints
 
-Constraint that compute a functional value, that have a `.result()` named argument, can instead use `.define()` to create and return a new decision variable representing that result.
+Constraints that compute a functional value, that have a `.result()` named argument, can instead use `.define()` to create and return a new decision variable representing that result.
 This is a concise alternative to manually creating a resulting decision and posting the constraint.
 
 ```rust

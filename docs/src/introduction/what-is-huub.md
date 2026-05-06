@@ -54,7 +54,7 @@ This mode of use has several practical advantages.
 1. It gives access to Huub without requiring you to program directly against the Rust API.
   If you already know MiniZinc, you can begin by modelling immediately rather than by learning the structure of the crate.
 2. It separates modelling concerns from implementation concerns.
-  You can focus on which decision variables and constraints best capture your problem, while MiniZinc and Huub takes care of rewriting constraints and decision types not directly supported by Huub.
+  You can focus on which decision variables and constraints best capture your problem, while MiniZinc and Huub take care of rewriting constraints and decision types not directly supported by Huub.
 3. It makes comparison easy.
   Because MiniZinc supports multiple solvers, you can test the same model with Huub and with other backends.
   This is often useful both for benchmarking and for understanding where Huub's CP+SAT behaviour is especially effective.
