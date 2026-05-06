@@ -1080,11 +1080,10 @@ mod tests {
 	use std::num::NonZero;
 
 	use expect_test::expect;
-	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntVal, Model,
+		IntSet, IntVal, Model,
 		constraints::int_linear::{DoubleIntVal, IntLinearLessEqBounds, IntLinearNotEqValue},
 		lower::InitConfig,
 		model::view::View,
@@ -1118,19 +1117,19 @@ mod tests {
 		let mut slv = Solver::default();
 		let a = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=2]),
+			IntSet::from(1..=2),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
 		let b = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=2]),
+			IntSet::from(1..=2),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
 		let c = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=2]),
+			IntSet::from(1..=2),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
@@ -1166,19 +1165,19 @@ mod tests {
 		let mut slv = Solver::default();
 		let a = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=2]),
+			IntSet::from(1..=2),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
 		let b = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=2]),
+			IntSet::from(1..=2),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
 		let c = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=2]),
+			IntSet::from(1..=2),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
@@ -1215,19 +1214,19 @@ mod tests {
 		let mut slv = Solver::default();
 		let a = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=2]),
+			IntSet::from(1..=2),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let b = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=2]),
+			IntSet::from(1..=2),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let c = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=2]),
+			IntSet::from(1..=2),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);

@@ -7,8 +7,6 @@ use std::{
 	ops::{Add, AddAssign, Neg},
 };
 
-use rangelist::RangeList;
-
 use crate::{
 	IntSet, IntVal,
 	actions::{
@@ -143,7 +141,7 @@ where
 	}
 
 	fn domain(&self, ctx: &Ctx) -> IntSet {
-		RangeList::from_sorted_ranges(
+		IntSet::from_sorted_ranges(
 			self.var
 				.domain(ctx)
 				.into_iter()

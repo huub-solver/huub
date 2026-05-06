@@ -451,11 +451,10 @@ where
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
 	use crate::{
-		Model,
+		IntSet, Model,
 		actions::{IntInspectionActions, IntPropagationActions},
 		constraints::int_array_element::IntArrayElementBounds,
 		lower::InitConfig,
@@ -511,31 +510,31 @@ mod tests {
 		let mut slv = Solver::default();
 		let a = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([3..=4]),
+			IntSet::from(3..=4),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
 		let b = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([2..=3]),
+			IntSet::from(2..=3),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
 		let c = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([4..=5]),
+			IntSet::from(4..=5),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
 		let y = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([3..=4]),
+			IntSet::from(3..=4),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
 		let index = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=2]),
+			IntSet::from(0..=2),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
@@ -570,25 +569,25 @@ mod tests {
 		let mut slv = Solver::default();
 		let a = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=3]),
+			IntSet::from(1..=3),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
 		let b = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=3]),
+			IntSet::from(1..=3),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
 		let y = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([3..=4]),
+			IntSet::from(3..=4),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);
 		let index = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=0, 3..=3]),
+			IntSet::from_iter([0..=0, 3..=3]),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);

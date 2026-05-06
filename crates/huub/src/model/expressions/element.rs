@@ -2,10 +2,9 @@
 //! constraints in a more generic way.
 
 use itertools::{Itertools, MinMaxResult};
-use rangelist::RangeList;
 
 use crate::{
-	IntVal,
+	IntSet, IntVal,
 	actions::IntInspectionActions,
 	constraints::{
 		bool_array_element::BoolDecisionArrayElement,
@@ -147,7 +146,7 @@ impl ElementConstraint for bool {
 
 		prb.post_constraint(Self::Constraint {
 			var: index,
-			set: RangeList::from_iter(ranges),
+			set: IntSet::from_iter(ranges),
 			reif: result,
 		});
 	}

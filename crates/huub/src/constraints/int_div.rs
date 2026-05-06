@@ -327,11 +327,10 @@ where
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
 	use crate::{
-		Model,
+		IntSet, Model,
 		constraints::int_div::IntDivBounds,
 		solver::{
 			Solver,
@@ -351,7 +350,7 @@ mod tests {
 		);
 		let b = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-3..=-1, 1..=3]),
+			IntSet::from_iter([-3..=-1, 1..=3]),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);

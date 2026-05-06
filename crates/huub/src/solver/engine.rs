@@ -1008,10 +1008,9 @@ impl TrailingActions for State {
 #[cfg(test)]
 mod tests {
 	use pindakaas::solver::propagation::Propagator as ExternalPropagator;
-	use rangelist::RangeList;
 
 	use crate::{
-		IntVal,
+		IntSet, IntVal,
 		actions::{
 			BoolPropagationActions, InitActions, IntDecisionActions, IntInitActions, IntPropCond,
 			IntPropagationActions, ReasoningEngine,
@@ -1085,7 +1084,7 @@ mod tests {
 		let imply = slv.new_bool_decision();
 		let var = IntDecision::new_in(
 			&mut slv,
-			RangeList::from(0..=2),
+			IntSet::from(0..=2),
 			EncodingType::Eager,
 			EncodingType::Lazy,
 		);

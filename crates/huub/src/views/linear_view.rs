@@ -10,8 +10,6 @@ use std::{
 	ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
-use rangelist::RangeList;
-
 use crate::{
 	IntSet, IntVal,
 	actions::{
@@ -61,13 +59,13 @@ impl<Var> LinearView<NonZero<IntVal>, IntVal, Var> {
 	/// Reverses the transformation of an [`IntSetVal`].
 	pub(crate) fn reverse_intset(&self, set: &IntSet) -> IntSet {
 		if self.scale.is_positive() {
-			RangeList::from_sorted_ranges(set.iter().map(|range| {
+			IntSet::from_sorted_ranges(set.iter().map(|range| {
 				let start = div_ceil(*range.start() - self.offset, self.scale);
 				let end = div_floor(*range.end() - self.offset, self.scale);
 				start..=end
 			}))
 		} else {
-			RangeList::from_sorted_ranges(set.iter().rev().map(|range| {
+			IntSet::from_sorted_ranges(set.iter().rev().map(|range| {
 				let start = div_ceil(range.end() - self.offset, self.scale);
 				let end = div_floor(range.start() - self.offset, self.scale);
 				start..=end
@@ -228,22 +226,20 @@ where
 	fn domain(&self, ctx: &Ctx) -> IntSet {
 		let dom = self.var.domain(ctx);
 		if self.scale.get() == 1 {
-			RangeList::from_sorted_ranges(
+			IntSet::from_sorted_ranges(
 				dom.into_iter()
 					.map(|r| (r.start() + self.offset)..=(r.end() + self.offset)),
 			)
 		} else if self.scale.get() == -1 {
-			RangeList::from_sorted_ranges(
+			IntSet::from_sorted_ranges(
 				dom.into_iter()
 					.rev()
 					.map(|r| -r.end() + self.offset..=-r.start() + self.offset),
 			)
 		} else if self.scale.is_positive() {
-			RangeList::from_sorted_elements(
-				dom.into_iter().flatten().map(|v| self.transform_val(v)),
-			)
+			IntSet::from_sorted_elements(dom.into_iter().flatten().map(|v| self.transform_val(v)))
 		} else {
-			RangeList::from_sorted_elements(
+			IntSet::from_sorted_elements(
 				dom.into_iter()
 					.flatten()
 					.rev()

@@ -1576,10 +1576,9 @@ mod tests {
 
 	use itertools::Itertools;
 	use pindakaas::Lit as RawLit;
-	use rangelist::RangeList;
 
 	use crate::{
-		IntVal,
+		IntSet, IntVal,
 		actions::{IntDecisionActions, IntInspectionActions},
 		solver::{
 			IntLitMeaning, Solver,
@@ -1634,7 +1633,7 @@ mod tests {
 		let mut slv: Solver = Solver::default();
 		let a = IntDecision::new_in(
 			&mut slv,
-			RangeList::from(1..=4),
+			IntSet::from(1..=4),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
@@ -1693,7 +1692,7 @@ mod tests {
 		let mut slv: Solver = Solver::default();
 		let a = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=3, 8..=10]),
+			IntSet::from_iter([1..=3, 8..=10]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
@@ -1772,7 +1771,7 @@ mod tests {
 		let mut slv: Solver = Solver::default();
 		let a = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=3, 8..=10]),
+			IntSet::from_iter([1..=3, 8..=10]),
 			EncodingType::Lazy,
 			EncodingType::Lazy,
 		);

@@ -927,11 +927,10 @@ where
 mod tests {
 	use expect_test::expect;
 	use itertools::Itertools;
-	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntVal,
+		IntSet, IntVal,
 		actions::IntInspectionActions,
 		constraints::cumulative::CumulativeTimeTable,
 		model::{ConRef, Model},
@@ -945,9 +944,9 @@ mod tests {
 	/// usage.
 	fn create_task(
 		slv: &mut Solver,
-		start_time: RangeList<i64>,
-		duration: RangeList<i64>,
-		usage: RangeList<i64>,
+		start_time: IntSet,
+		duration: IntSet,
+		usage: IntSet,
 	) -> (View<IntVal>, View<IntVal>, View<IntVal>) {
 		let start = IntDecision::new_in(slv, start_time, EncodingType::Eager, EncodingType::Lazy);
 		let dur = IntDecision::new_in(slv, duration, EncodingType::Eager, EncodingType::Lazy);
@@ -1169,23 +1168,23 @@ mod tests {
 		let mut slv = Solver::default();
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
-			RangeList::from_iter([0..=2]),
-			RangeList::from_iter([1..=3]),
-			RangeList::from_iter([2..=2]),
+			IntSet::from(0..=2),
+			IntSet::from(1..=3),
+			IntSet::from(2..=2),
 		);
 
 		let (s_b, d_b, u_b) = create_task(
 			&mut slv,
-			RangeList::from_iter([0..=2]),
-			RangeList::from_iter([1..=3]),
-			RangeList::from_iter([2..=2]),
+			IntSet::from(0..=2),
+			IntSet::from(1..=3),
+			IntSet::from(2..=2),
 		);
 
 		let (s_c, d_c, u_c) = create_task(
 			&mut slv,
-			RangeList::from_iter([0..=2]),
-			RangeList::from_iter([1..=3]),
-			RangeList::from_iter([2..=2]),
+			IntSet::from(0..=2),
+			IntSet::from(1..=3),
+			IntSet::from(2..=2),
 		);
 		let capacity = 2;
 
@@ -1227,23 +1226,23 @@ mod tests {
 		let mut slv = Solver::default();
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
-			RangeList::from_iter([0..=2]),
-			RangeList::from_iter([2..=3]),
-			RangeList::from_iter([2..=2]),
+			IntSet::from(0..=2),
+			IntSet::from(2..=3),
+			IntSet::from(2..=2),
 		);
 
 		let (s_b, d_b, u_b) = create_task(
 			&mut slv,
-			RangeList::from_iter([0..=2]),
-			RangeList::from_iter([2..=3]),
-			RangeList::from_iter([2..=2]),
+			IntSet::from(0..=2),
+			IntSet::from(2..=3),
+			IntSet::from(2..=2),
 		);
 
 		let (s_c, d_c, u_c) = create_task(
 			&mut slv,
-			RangeList::from_iter([0..=2]),
-			RangeList::from_iter([2..=3]),
-			RangeList::from_iter([2..=2]),
+			IntSet::from(0..=2),
+			IntSet::from(2..=3),
+			IntSet::from(2..=2),
 		);
 		let capacity = 2;
 
@@ -1264,23 +1263,23 @@ mod tests {
 		let mut slv = Solver::default();
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
-			RangeList::from_iter([0..=2]),
-			RangeList::from_iter([1..=1]),
-			RangeList::from_iter([1..=2]),
+			IntSet::from(0..=2),
+			IntSet::from(1..=1),
+			IntSet::from(1..=2),
 		);
 
 		let (s_b, d_b, u_b) = create_task(
 			&mut slv,
-			RangeList::from_iter([0..=2]),
-			RangeList::from_iter([3..=3]),
-			RangeList::from_iter([2..=3]),
+			IntSet::from(0..=2),
+			IntSet::from(3..=3),
+			IntSet::from(2..=3),
 		);
 
 		let (s_c, d_c, u_c) = create_task(
 			&mut slv,
-			RangeList::from_iter([0..=2]),
-			RangeList::from_iter([2..=2]),
-			RangeList::from_iter([2..=3]),
+			IntSet::from(0..=2),
+			IntSet::from(2..=2),
+			IntSet::from(2..=3),
 		);
 		let capacity = 3;
 
@@ -1310,23 +1309,23 @@ mod tests {
 		let mut slv = Solver::default();
 		let (s_a, d_a, u_a) = create_task(
 			&mut slv,
-			RangeList::from_iter([0..=2]),
-			RangeList::from_iter([2..=2]),
-			RangeList::from_iter([1..=3]),
+			IntSet::from(0..=2),
+			IntSet::from(2..=2),
+			IntSet::from(1..=3),
 		);
 
 		let (s_b, d_b, u_b) = create_task(
 			&mut slv,
-			RangeList::from_iter([0..=2]),
-			RangeList::from_iter([2..=2]),
-			RangeList::from_iter([2..=3]),
+			IntSet::from(0..=2),
+			IntSet::from(2..=2),
+			IntSet::from(2..=3),
 		);
 
 		let (s_c, d_c, u_c) = create_task(
 			&mut slv,
-			RangeList::from_iter([0..=2]),
-			RangeList::from_iter([2..=2]),
-			RangeList::from_iter([2..=3]),
+			IntSet::from(0..=2),
+			IntSet::from(2..=2),
+			IntSet::from(2..=3),
 		);
 		let capacity = 2;
 

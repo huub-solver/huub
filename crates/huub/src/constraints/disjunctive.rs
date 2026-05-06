@@ -1435,10 +1435,10 @@ impl OmegaThetaTree {
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
 	use crate::{
+		IntSet,
 		constraints::disjunctive::DisjunctivePropagator,
 		solver::{
 			Solver,
@@ -1455,19 +1455,19 @@ mod tests {
 			let mut slv = Solver::default();
 			let a = IntDecision::new_in(
 				&mut slv,
-				RangeList::from_iter([0..=4]),
+				IntSet::from(0..=4),
 				EncodingType::Eager,
 				EncodingType::Lazy,
 			);
 			let b = IntDecision::new_in(
 				&mut slv,
-				RangeList::from_iter([0..=4]),
+				IntSet::from(0..=4),
 				EncodingType::Eager,
 				EncodingType::Lazy,
 			);
 			let c = IntDecision::new_in(
 				&mut slv,
-				RangeList::from_iter([0..=4]),
+				IntSet::from(0..=4),
 				EncodingType::Eager,
 				EncodingType::Lazy,
 			);

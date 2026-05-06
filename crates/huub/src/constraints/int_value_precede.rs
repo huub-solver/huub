@@ -966,11 +966,10 @@ mod tests {
 	use std::cmp::max;
 
 	use expect_test::expect;
-	use rangelist::RangeList;
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntVal,
+		IntSet, IntVal,
 		constraints::int_value_precede::{IntSeqPrecedeChainBounds, IntValuePrecedeChainValue},
 		solver::{
 			Solver,
@@ -985,55 +984,55 @@ mod tests {
 		let mut slv = Solver::default();
 		let x1 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-1..=1]),
+			IntSet::from(-1..=1),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x2 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-1..=1, 5..=5]),
+			IntSet::from_iter([-1..=1, 5..=5]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x3 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-1..=0, 3..=3]),
+			IntSet::from_iter([-1..=0, 3..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x4 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=2, 4..=4]),
+			IntSet::from_iter([0..=2, 4..=4]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x5 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=1, 3..=3]),
+			IntSet::from_iter([0..=1, 3..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x6 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=1, 3..=3]),
+			IntSet::from_iter([1..=1, 3..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x7 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([2..=5]),
+			IntSet::from(2..=5),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x8 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([4..=5]),
+			IntSet::from(4..=5),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x9 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=3]),
+			IntSet::from(0..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
@@ -1051,13 +1050,13 @@ mod tests {
 		let mut slv = Solver::default();
 		let x0 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=3]),
+			IntSet::from(0..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x1 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=3]),
+			IntSet::from(0..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
@@ -1080,7 +1079,7 @@ mod tests {
 		let mut slv = Solver::default();
 		let x0 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-1..=3]),
+			IntSet::from(-1..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
@@ -1101,25 +1100,25 @@ mod tests {
 		let mut slv = Solver::default();
 		let x1 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-1..=4]),
+			IntSet::from(-1..=4),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x2 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-1..=4]),
+			IntSet::from(-1..=4),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x3 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-1..=4]),
+			IntSet::from(-1..=4),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x4 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-1..=4]),
+			IntSet::from(-1..=4),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
@@ -1134,13 +1133,13 @@ mod tests {
 		let mut slv = Solver::default();
 		let x0 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=3]),
+			IntSet::from(1..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x1 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=3]),
+			IntSet::from(1..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
@@ -1160,13 +1159,13 @@ mod tests {
 		let mut slv = Solver::default();
 		let x0 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=3]),
+			IntSet::from(0..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x1 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=3]),
+			IntSet::from(0..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
@@ -1194,7 +1193,7 @@ mod tests {
 		let mut slv = Solver::default();
 		let x0 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=3]),
+			IntSet::from(0..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
@@ -1215,55 +1214,55 @@ mod tests {
 		let mut slv = Solver::default();
 		let x0 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=0, 2..=2]),
+			IntSet::from_iter([0..=0, 2..=2]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x1 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([2..=3]),
+			IntSet::from(2..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x2 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-3..=-3, 1..=1]),
+			IntSet::from_iter([-3..=-3, 1..=1]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x3 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-2..=0, 2..=2]),
+			IntSet::from_iter([-2..=0, 2..=2]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x4 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=2]),
+			IntSet::from(0..=2),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x5 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=2]),
+			IntSet::from(1..=2),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x6 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-2..=-1, 1..=1]),
+			IntSet::from_iter([-2..=-1, 1..=1]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x7 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-1..=-1, 3..=3]),
+			IntSet::from_iter([-1..=-1, 3..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x8 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([1..=3]),
+			IntSet::from(1..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
@@ -1285,7 +1284,7 @@ mod tests {
 		let mut slv = Solver::default();
 		let x0 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=1, 3..=3]),
+			IntSet::from_iter([0..=1, 3..=3]),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
@@ -1305,19 +1304,19 @@ mod tests {
 		let mut slv = Solver::default();
 		let x0 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=1]),
+			IntSet::from(0..=1),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x1 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=1]),
+			IntSet::from(0..=1),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x2 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=1]),
+			IntSet::from(0..=1),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
@@ -1332,19 +1331,19 @@ mod tests {
 		let mut slv = Solver::default();
 		let x0 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=3]),
+			IntSet::from(0..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x1 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=3]),
+			IntSet::from(0..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x2 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([0..=3]),
+			IntSet::from(0..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
@@ -1359,25 +1358,25 @@ mod tests {
 		let mut slv = Solver::default();
 		let x0 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-2..=3]),
+			IntSet::from(-2..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x1 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-3..=2]),
+			IntSet::from(-3..=2),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x2 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-2..=3]),
+			IntSet::from(-2..=3),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);
 		let x3 = IntDecision::new_in(
 			&mut slv,
-			RangeList::from_iter([-3..=2]),
+			IntSet::from(-3..=2),
 			EncodingType::Eager,
 			EncodingType::Eager,
 		);

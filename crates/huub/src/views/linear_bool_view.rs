@@ -10,7 +10,7 @@ use std::{
 	ops::{Add, AddAssign, Mul, MulAssign, Neg, Not, Sub, SubAssign},
 };
 
-use rangelist::{IntervalIterator, RangeList};
+use rangelist::IntervalIterator;
 
 use crate::{
 	IntSet, IntVal,
@@ -213,9 +213,9 @@ where
 
 	fn domain(&self, ctx: &Ctx) -> IntSet {
 		if let Some(v) = self.var.val(ctx) {
-			RangeList::from_sorted_elements([self.transform_val(v as IntVal)])
+			IntSet::from_sorted_elements([self.transform_val(v as IntVal)])
 		} else {
-			RangeList::from_sorted_elements([self.offset, self.scale.get() + self.offset])
+			IntSet::from_sorted_elements([self.offset, self.scale.get() + self.offset])
 		}
 	}
 

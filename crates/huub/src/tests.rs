@@ -3,11 +3,10 @@ use std::num::NonZero;
 use expect_test::{Expect, expect};
 use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;
-use rangelist::RangeList;
 use tracing_test::traced_test;
 
 use crate::{
-	IntVal, Model,
+	IntSet, IntVal, Model,
 	constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
 	lower::{InitConfig, LoweringError},
 	model::deserialize::AnyView as ModelView,
@@ -47,9 +46,9 @@ fn lin_multi_alias() {
 	use crate::actions::{IntInspectionActions, IntSimplificationActions};
 
 	let mut prb = Model::default();
-	let x = prb.new_int_decision(RangeList::from_iter([1..=10]));
-	let y = prb.new_int_decision(RangeList::from_iter([1..=10]));
-	let z = prb.new_int_decision(RangeList::from_iter([1..=10]));
+	let x = prb.new_int_decision(IntSet::from(1..=10));
+	let y = prb.new_int_decision(IntSet::from(1..=10));
+	let z = prb.new_int_decision(IntSet::from(1..=10));
 	let x_trans = x * -1 - 1;
 	let y_trans = y + 1;
 	let z_trans = z + 1;
@@ -127,13 +126,13 @@ fn test_duplicate_propagation() {
 	let mut slv = Solver::default();
 	let a = IntDecision::new_in(
 		&mut slv,
-		RangeList::from(0..=1),
+		IntSet::from(0..=1),
 		EncodingType::Eager,
 		EncodingType::Lazy,
 	);
 	let b = IntDecision::new_in(
 		&mut slv,
-		RangeList::from(0..=1),
+		IntSet::from(0..=1),
 		EncodingType::Eager,
 		EncodingType::Lazy,
 	);
@@ -205,8 +204,8 @@ fn test_unify_int_impossible() {
 #[test]
 fn test_unify_int_lin_view_domains() {
 	let mut prb = Model::default();
-	let a = prb.new_int_decision(RangeList::from_iter([1..=1, 3..=3, 5..=5]));
-	let b = prb.new_int_decision(RangeList::from_iter([1..=3]));
+	let a = prb.new_int_decision(IntSet::from_iter([1..=1, 3..=3, 5..=5]));
+	let b = prb.new_int_decision(IntSet::from(1..=3));
 
 	prb.linear(a * 6).eq(b * 2).post();
 

@@ -2,7 +2,7 @@
 
 use std::mem;
 
-use rangelist::{IntervalIterator, RangeList};
+use rangelist::IntervalIterator;
 
 use crate::{
 	IntSet, IntVal,
@@ -293,7 +293,7 @@ impl Resolved<Decision<IntVal>> {
 		let Domain::Domain(dom) = &ctx.int_vars[self.idx()].domain else {
 			unreachable!()
 		};
-		let diff: RangeList<_> = dom.diff(values);
+		let diff: IntSet = dom.diff(values);
 		if diff.is_empty() {
 			return Err(ctx.create_conflict(
 				View(BoolView::IntNotEq(self.0, *values.lower_bound().unwrap())),
@@ -364,7 +364,7 @@ impl Resolved<Decision<IntVal>> {
 		let Domain::Domain(dom) = &ctx.int_vars[self.idx()].domain else {
 			unreachable!()
 		};
-		let intersect: RangeList<_> = dom.intersect(domain);
+		let intersect: IntSet = dom.intersect(domain);
 		if intersect.is_empty() {
 			return Err(ctx.create_conflict(
 				View(BoolView::IntNotEq(self.0, *dom.lower_bound().unwrap())),
