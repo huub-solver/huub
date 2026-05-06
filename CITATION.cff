@@ -3,10 +3,6 @@
 
 cff-version: 1.2.0
 title: Huub
-message: >-
-  An efficient library for developing constraint-based
-  decision or optimization systems and applications with
-  learning capabilities
 type: software
 authors:
   - given-names: Jip J.
