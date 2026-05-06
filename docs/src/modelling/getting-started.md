@@ -23,9 +23,9 @@ Let's build the model step by step.
 ### Creating decision variables
 
 The first step is to create decision variables for each unknown digit.
-In Huub, we do this using `model.new_int_decision()`.
+In Huub, we do this using `Model::new_int_decision`.
 
-```text
+```rust,ignore
 {{#include ../../../crates/huub/examples/send-more-money/main.rs:create_model}}
 ```
 
@@ -40,7 +40,7 @@ In this problem, we have to post two constraints.
 
 **1. Unique constraint:** Each letter must be a different digit.
 
-```text
+```rust,ignore
 {{#include ../../../crates/huub/examples/send-more-money/main.rs:unique_constraint}}
 ```
 
