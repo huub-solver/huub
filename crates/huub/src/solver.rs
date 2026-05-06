@@ -669,7 +669,7 @@ impl<Sat: LearnCallback> Solver<Sat> {
 	///
 	/// Subsequent calls to this method override the previously set
 	/// callback function.
-	pub fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = RawLit>) + 'static>(
+	pub fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Decision<bool>>) + 'static>(
 		&mut self,
 		cb: Option<F>,
 	) {
@@ -677,7 +677,8 @@ impl<Sat: LearnCallback> Solver<Sat> {
 			self.sat
 				.set_learn_callback(Some(move |clause: &mut dyn Iterator<Item = RawLit>| {
 					trace_learned_clause(clause);
-					f(clause);
+					let mut clause = clause.map(Decision);
+					f(&mut clause);
 				}));
 		} else {
 			self.sat.set_learn_callback(Some(trace_learned_clause));
