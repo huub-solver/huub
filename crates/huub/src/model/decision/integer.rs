@@ -7,10 +7,10 @@ use rangelist::IntervalIterator;
 use crate::{
 	IntSet, IntVal,
 	actions::{
-		IntDecisionActions, IntInspectionActions, IntPropCond, IntPropagationActions,
+		IntDecisionActions, IntEvent, IntInspectionActions, IntPropCond, IntPropagationActions,
 		IntSimplificationActions, ReasoningContext,
 	},
-	constraints::{IntEvent, ReasonBuilder},
+	constraints::ReasonBuilder,
 	model::{
 		AdvRef, ConRef, Decision, Model,
 		decision::{DecisionReference, private},

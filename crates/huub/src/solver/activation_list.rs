@@ -7,8 +7,7 @@ use std::{
 };
 
 use crate::{
-	actions::IntPropCond,
-	constraints::IntEvent,
+	actions::{IntEvent, IntPropCond},
 	model::{self, ConRef},
 	solver::engine::{self, PropRef},
 };
@@ -249,8 +248,7 @@ mod tests {
 	use rustc_hash::FxHashSet;
 
 	use crate::{
-		actions::IntPropCond,
-		constraints::IntEvent,
+		actions::{IntEvent, IntPropCond},
 		solver::{
 			activation_list::{ActivationAction, ActivationList},
 			engine::PropRef,

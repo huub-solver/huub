@@ -4,8 +4,9 @@
 
 use crate::{
 	actions::{
-		ConstructionActions, DecisionActions, ReasoningContext, boolean::BoolInspectionActions,
-		integer::IntInspectionActions,
+		ConstructionActions, DecisionActions, ReasoningContext,
+		boolean::BoolInspectionActions,
+		integer::{IntInspectionActions, IntPropCond},
 	},
 	solver::{DefaultView, View, branchers::BoxedBrancher, queue::PriorityLevel},
 };
@@ -79,27 +80,4 @@ where
 	/// Enqueue the propagator when `self` is changed according to the given
 	/// propagation condition.
 	fn enqueue_when(&self, ctx: &mut Context, condition: IntPropCond);
-}
-
-/// The conditions of an integer variable domain change that can trigger a
-/// propagator to be enqueued.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum IntPropCond {
-	/// Condition that triggers when the variable is fixed.
-	Fixed,
-	/// Condition that triggers when the lower bound of the variable changes.
-	///
-	/// This includes the case where the variable is fixed.
-	LowerBound,
-	/// Condition that triggers when the upper bound of the variable changes.
-	///
-	/// This includes the case where the variable is fixed.
-	UpperBound,
-	/// Condition that triggers when either of the bounds of the variable
-	/// change.
-	///
-	/// This includes the case where the variable is fixed.
-	Bounds,
-	/// Condition that triggers for any change in the domain of the variable.
-	Domain,
 }

@@ -15,13 +15,14 @@ use crate::{
 	Conjunction, IntVal,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
-		InitActions, IntDecisionActions, IntInitActions, IntInspectionActions, IntPropCond,
-		IntPropagationActions, IntSimplificationActions, PostingActions, PropagationActions,
-		ReasoningContext, ReasoningEngine, SimplificationActions, Trailed, TrailingActions,
+		InitActions, IntDecisionActions, IntEvent, IntInitActions, IntInspectionActions,
+		IntPropCond, IntPropagationActions, IntSimplificationActions, PostingActions,
+		PropagationActions, ReasoningContext, ReasoningEngine, SimplificationActions, Trailed,
+		TrailingActions,
 	},
 	constraints::{
-		BoolModelActions, BoolSolverActions, Constraint, IntEvent, IntModelActions,
-		IntSolverActions, Propagator, ReasonBuilder, SimplificationStatus,
+		BoolModelActions, BoolSolverActions, Constraint, IntModelActions, IntSolverActions,
+		Propagator, ReasonBuilder, SimplificationStatus,
 	},
 	helpers::{
 		overflow::{OverflowImpossible, OverflowMode, OverflowPossible},

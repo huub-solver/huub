@@ -12,10 +12,10 @@ use crate::{
 	IntSet, IntVal,
 	actions::{
 		BoolInspectionActions, BoolPropagationActions, DecisionActions, IntDecisionActions,
-		IntInspectionActions, IntPropagationActions, PropagationActions, ReasoningContext,
-		ReasoningEngine, Trailed, TrailingActions,
+		IntEvent, IntInspectionActions, IntPropagationActions, PropagationActions,
+		ReasoningContext, ReasoningEngine, Trailed, TrailingActions,
 	},
-	constraints::{Conflict, DeferredReason, IntEvent, Reason, ReasonBuilder},
+	constraints::{Conflict, DeferredReason, Reason, ReasonBuilder},
 	helpers::bytes::Bytes,
 	solver::{
 		BoxedPropagator, IntLitMeaning,

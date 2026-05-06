@@ -32,11 +32,11 @@ pub use crate::model::{
 use crate::{
 	IntSet, IntVal,
 	actions::{
-		ConstructionActions, DecisionActions, IntInspectionActions, PropagationActions,
+		ConstructionActions, DecisionActions, IntEvent, IntInspectionActions, PropagationActions,
 		ReasoningContext, ReasoningEngine, SimplificationActions, Trailed, TrailingActions,
 	},
 	constraints::{
-		BoxedConstraint, Conflict, Constraint, DeferredReason, IntEvent, Reason, ReasonBuilder,
+		BoxedConstraint, Conflict, Constraint, DeferredReason, Reason, ReasonBuilder,
 		SimplificationStatus,
 		bool_array_element::BoolDecisionArrayElement,
 		int_array_element::{IntArrayElementBounds, IntValArrayElement},
@@ -600,13 +600,12 @@ mod tests {
 	use crate::{
 		IntVal,
 		actions::{
-			BoolInitActions, BoolInspectionActions, ConstructionActions, IntInitActions,
+			BoolInitActions, BoolInspectionActions, ConstructionActions, IntEvent, IntInitActions,
 			IntInspectionActions, IntPropCond, IntPropagationActions, IntSimplificationActions,
 			ReasoningEngine, Trailed, TrailingActions,
 		},
 		constraints::{
-			BoolModelActions, Constraint, IntEvent, IntModelActions, Propagator,
-			SimplificationStatus,
+			BoolModelActions, Constraint, IntModelActions, Propagator, SimplificationStatus,
 		},
 		lower::{InitConfig, LoweringContext, LoweringError},
 		model::{Model, View, deserialize::AnyView},

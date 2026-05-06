@@ -8,9 +8,11 @@ use tracing::warn;
 
 use crate::{
 	IntVal,
-	actions::{InitActions, IntInspectionActions, IntPropCond, PostingActions, ReasoningEngine},
+	actions::{
+		InitActions, IntEvent, IntInspectionActions, IntPropCond, PostingActions, ReasoningEngine,
+	},
 	constraints::{
-		Constraint, IntEvent, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
+		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
 	model::View,

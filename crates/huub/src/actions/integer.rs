@@ -34,6 +34,22 @@ where
 	}
 }
 
+/// Change that has occurred in the domain of an integer variable.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum IntEvent {
+	/// The variable has been fixed to a single value.
+	Fixed,
+	/// Both of the bounds of the variable has changed.
+	Bounds,
+	/// The lower bound of the variable has changed.
+	LowerBound,
+	/// The upper bound of the variable has changed.
+	UpperBound,
+	/// One or more values (excluding the bounds) have been removed from the
+	/// domain of the variable.
+	Domain,
+}
+
 /// Actions available to [`Propagator`](crate::constraints::Propagator) and
 /// [`Constraint`](crate::constraints::Constraint) implementations in
 /// [`ReasoningEngine::ExplanationCtx`](crate::actions::ReasoningEngine::ExplanationCtx) for
@@ -106,6 +122,29 @@ where
 /// Operations that are required to be possible to perform on types acting as
 /// integer decision variables.
 pub trait IntOperations: Clone + Debug + Eq + Hash + 'static {}
+
+/// The conditions of an integer variable domain change that can trigger a
+/// propagator to be enqueued.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum IntPropCond {
+	/// Condition that triggers when the variable is fixed.
+	Fixed,
+	/// Condition that triggers when the lower bound of the variable changes.
+	///
+	/// This includes the case where the variable is fixed.
+	LowerBound,
+	/// Condition that triggers when the upper bound of the variable changes.
+	///
+	/// This includes the case where the variable is fixed.
+	UpperBound,
+	/// Condition that triggers when either of the bounds of the variable
+	/// change.
+	///
+	/// This includes the case where the variable is fixed.
+	Bounds,
+	/// Condition that triggers for any change in the domain of the variable.
+	Domain,
+}
 
 /// Actions available to [`Propagator`](crate::constraints::Propagator) and
 /// [`Constraint`](crate::constraints::Constraint) implementations in

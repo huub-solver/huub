@@ -11,12 +11,10 @@ pub use crate::actions::{
 	boolean::{
 		BoolInspectionActions, BoolOperations, BoolPropagationActions, BoolSimplificationActions,
 	},
-	initialization::{
-		BoolInitActions, BrancherInitActions, InitActions, IntInitActions, IntPropCond,
-	},
+	initialization::{BoolInitActions, BrancherInitActions, InitActions, IntInitActions},
 	integer::{
-		IntDecisionActions, IntExplanationActions, IntInspectionActions, IntOperations,
-		IntPropagationActions, IntSimplificationActions,
+		IntDecisionActions, IntEvent, IntExplanationActions, IntInspectionActions, IntOperations,
+		IntPropCond, IntPropagationActions, IntSimplificationActions,
 	},
 };
 use crate::{

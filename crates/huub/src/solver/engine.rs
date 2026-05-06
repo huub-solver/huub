@@ -33,8 +33,11 @@ use tracing::{debug, trace, warn};
 
 use crate::{
 	Clause, IntVal,
-	actions::{BoolInspectionActions, ReasoningContext, ReasoningEngine, Trailed, TrailingActions},
-	constraints::{BoxedPropagator, Conflict, DeferredReason, IntEvent, Reason},
+	actions::{
+		BoolInspectionActions, IntEvent, ReasoningContext, ReasoningEngine, Trailed,
+		TrailingActions,
+	},
+	constraints::{BoxedPropagator, Conflict, DeferredReason, Reason},
 	helpers::bytes::Bytes,
 	solver::{
 		IntLitMeaning, SearchStrategy, SwitchTrigger,
@@ -1012,10 +1015,10 @@ mod tests {
 	use crate::{
 		IntSet, IntVal,
 		actions::{
-			BoolPropagationActions, InitActions, IntDecisionActions, IntInitActions, IntPropCond,
-			IntPropagationActions, ReasoningEngine,
+			BoolPropagationActions, InitActions, IntDecisionActions, IntEvent, IntInitActions,
+			IntPropCond, IntPropagationActions, ReasoningEngine,
 		},
-		constraints::{IntEvent, Propagator},
+		constraints::Propagator,
 		solver::{
 			BoolView, Decision, IntLitMeaning, Solver, View,
 			decision::integer::{EncodingType, IntDecision},
