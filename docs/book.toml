@@ -1,0 +1,16 @@
+[book]
+authors = ["Jip J. Dekker"]
+description = "The website and documentation for Huub, a Rust constraint solver focused on reliability, performance, and extensibility."
+language = "en"
+src = "src"
+title = "Huub"
+
+[rust]
+edition = "2024"
+
+[output.html]
+git-repository-url = "https://github.com/huub-solver/huub"
+cname = "huub.solutions"
+
+[output.html.playground]
+runnable = false

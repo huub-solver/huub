@@ -210,6 +210,7 @@ fn main() {
 		std::process::exit(-1);
 	}
 
+	// ANCHOR: solve_with_branch_and_bound
 	let (status, stats, _) = slv.branch_and_bound(Goal::Minimize(obj), |sol| {
 		solution.save_assignment(sol);
 		last_obj = Some(IntValuation::val(&obj, sol));
@@ -219,6 +220,7 @@ fn main() {
 			println!("-------------------------");
 		}
 	});
+	// ANCHOR_END: solve_with_branch_and_bound
 
 	if !options.verbose {
 		println!(

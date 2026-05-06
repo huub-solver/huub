@@ -1,0 +1,853 @@
+<!DOCTYPE HTML>
+<html lang="{{ language }}" class="{{ default_theme }} sidebar-visible" dir="{{ text_direction }}">
+  <head>
+		{{> head}}
+  </head>
+	<body>
+	<div id="mdbook-help-container">
+		<div id="mdbook-help-popup">
+			<h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+			<div>
+				<p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+				{{#if search_enabled}}
+				<p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+				{{/if}}
+				<p>Press <kbd>?</kbd> to show this help</p>
+				<p>Press <kbd>Esc</kbd> to hide this help</p>
+			</div>
+		</div>
+	</div>
+	<div id="body-container">
+		<span class="menu-title hidden" aria-hidden="true"></span>
+		<!-- Work around some values being stored in localStorage wrapped in quotes -->
+		<script>
+			try {
+				let theme = localStorage.getItem('mdbook-theme');
+				let sidebar = localStorage.getItem('mdbook-sidebar');
+
+				if (theme.startsWith('"') && theme.endsWith('"')) {
+					localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+				}
+
+				if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+					localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+				}
+			} catch (e) { }
+		</script>
+
+		<!-- Set the theme before any content is loaded, prevents flash -->
+		<script>
+			const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+			let theme;
+			try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+			if (theme === null || theme === undefined) { theme = default_theme; }
+			const html = document.documentElement;
+			html.classList.remove('{{ default_theme }}')
+			html.classList.add(theme);
+			html.classList.add("js");
+		</script>
+
+		<input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+		<header id="menu-bar" class="site-header{{#if path_to_root}} site-header--docs sticky{{else}} site-header--landing{{/if}}">
+			<div class="site-header__inner">
+				<a class="site-header__brand" href="{{#if path_to_root}}{{ path_to_root }}{{else}}./{{/if}}" aria-label="{{ book_title }} home">
+					<span class="site-header__wordmark">{{ book_title }}</span>
+				</a>
+
+				<nav class="site-header__nav" aria-label="Primary">
+					<ul class="site-header__links">
+						<li><a class="external-link" href="https://docs.rs/huub/latest/huub/" target="_blank" rel="noopener noreferrer" aria-label="API reference, opens external page">API <i class="fa fa-external-link" aria-hidden="true"></i></a></li>
+						<li><a href="{{#if path_to_root}}{{ path_to_root }}{{else}}./{{/if}}introduction/what-is-huub.html">Docs</a></li>
+					</ul>
+
+					<div class="site-header__utilities">
+						<div class="site-header__social">
+							{{#if git_repository_url}}
+							<a href="{{git_repository_url}}" title="Git repository" aria-label="Git repository">
+								<i id="git-repository-button" class="fa {{git_repository_icon}}"></i>
+							</a>
+							{{/if}}
+							{{#if git_repository_edit_url}}
+							<a href="{{git_repository_edit_url}}" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+								<i id="git-edit-button" class="fa fa-edit"></i>
+							</a>
+							{{/if}}
+							<button id="theme-toggle" class="icon-button site-header__icon-button" type="button" title="Switch to dark mode" aria-label="Switch to dark mode">
+								<i class="fa fa-moon-o"></i>
+							</button>
+							{{#if search_enabled}}
+							{{#if path_to_root}}
+							<button id="search-toggle" class="icon-button site-header__icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+								<i class="fa fa-search"></i>
+							</button>
+							{{else}}
+							<!-- Reserve space for search icon on landing page to prevent layout shift -->
+							<div class="icon-button site-header__icon-button" style="visibility: hidden;">
+								<i class="fa fa-search"></i>
+							</div>
+							{{/if}}
+							{{/if}}
+							<ul id="theme-list" class="theme-popup theme-popup--sr-only" aria-label="Themes" role="menu">
+								<li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+								<li role="none"><button role="menuitem" class="theme" id="{{ preferred_dark_theme }}">{{ preferred_dark_theme }}</button></li>
+							</ul>
+						</div>
+					</div>
+				</nav>
+			</div>
+		</header>
+
+		<!-- Hide / unhide sidebar before it is displayed -->
+		<script>
+			let sidebar = null;
+			const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+			const docs_desktop_breakpoint = 1200;
+			if (document.body.clientWidth >= docs_desktop_breakpoint) {
+				try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+				sidebar = sidebar || 'visible';
+			} else {
+				sidebar = 'hidden';
+				sidebar_toggle.checked = false;
+			}
+			if (sidebar === 'visible') {
+				sidebar_toggle.checked = true;
+			} else {
+				html.classList.remove('sidebar-visible');
+			}
+		</script>
+
+		{{#unless path_to_root}}
+		<!-- Keep mdBook's expected sidebar hooks on the landing page so shared book.js modules don't fail. -->
+		<label id="sidebar-toggle" class="hidden" for="sidebar-toggle-anchor" aria-controls="sidebar"></label>
+		<nav id="sidebar" class="sidebar hidden" aria-hidden="true">
+			<div id="sidebar-resize-handle" class="sidebar-resize-handle hidden" aria-hidden="true"></div>
+		</nav>
+		<main class="landing-page">
+			<section class="landing-hero" aria-label="Huub introduction">
+				<div class="landing-section__inner landing-hero__inner">
+					<div class="landing-hero__logo-panel">
+						<img class="landing-hero__logo" src="{{ resource "favicon.svg" }}" alt="Huub logo">
+					</div>
+					<div class="landing-hero__content">
+						<p class="landing-hero__tagline">Make better decisions with a solver built to be reliable, performant, and extensible.</p>
+						<div class="landing-hero__actions">
+							<a class="landing-button landing-hero__cta" href="./introduction/what-is-huub.html">Get Started</a>
+						</div>
+						<p class="landing-hero__problem-intro">Built for ...</p>
+						<div class="landing-hero__problem-grid" aria-label="Example problem types">
+							<article class="landing-problem-card">
+								<div class="landing-problem-card__icon" aria-hidden="true">
+									<i class="fa fa-calendar"></i>
+								</div>
+								<p class="landing-problem-card__text">Scheduling and rostering</p>
+							</article>
+							<article class="landing-problem-card">
+								<div class="landing-problem-card__icon" aria-hidden="true">
+									<i class="fa fa-cubes"></i>
+								</div>
+								<p class="landing-problem-card__text">Packing and planning</p>
+							</article>
+							<article class="landing-problem-card">
+								<div class="landing-problem-card__icon" aria-hidden="true">
+									<i class="fa fa-sliders"></i>
+								</div>
+								<p class="landing-problem-card__text">Configuration</p>
+							</article>
+							<article class="landing-problem-card landing-problem-card--other">
+								<div class="landing-problem-card__icon" aria-hidden="true">
+									<img class="landing-problem-card__logo" src="{{ resource "home/minizinc.svg" }}" alt="">
+								</div>
+								<p class="landing-problem-card__text">MiniZinc</p>
+							</article>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<section class="landing-why" aria-labelledby="landing-why-title">
+				<div class="landing-section__inner">
+					<div class="landing-section-heading">
+						<p id="landing-why-title" class="landing-section-heading__title">Why Huub?</p>
+					</div>
+
+					<div class="landing-why__grid">
+						<article class="landing-why-card">
+							<p class="landing-why-card__title">Reliability</p>
+							<p class="landing-why-card__text">Huub is built to behave predictably in practice. It is well-tested, performs state-of-the-art preprocessing before search begins, and is implemented in Rust for a safer and more dependable solver core. The result is a solver you can use with more confidence in production workflows as well as in day-to-day modelling.</p>
+						</article>
+
+						<article class="landing-why-card">
+							<p class="landing-why-card__title">Performance</p>
+							<p class="landing-why-card__text">Huub is designed for serious combinatorial workloads, combining strong propagation with modern solving techniques to deliver competitive performance on demanding decision problems. Careful preprocessing, effective propagation, and a solver architecture focused on practical runtime behaviour help Huub scale to harder instances without sacrificing robustness.</p>
+						</article>
+
+						<article class="landing-why-card">
+							<p class="landing-why-card__title">Extensible</p>
+							<p class="landing-why-card__text">Huub is designed to be extended where it matters. You can add your own propagators, branchers, and even decision variable views, so the solver can be shaped more closely around your problem than a fixed off-the-shelf workflow allows. At the same time, Huub remains modular and straightforward to integrate into larger systems and decision pipelines.</p>
+						</article>
+					</div>
+				</div>
+			</section>
+
+			<section class="landing-services" aria-labelledby="landing-services-title">
+				<div class="landing-section__inner">
+					<div class="landing-section-heading">
+						<div class="landing-services__heading-row">
+							<p id="landing-services-title" class="landing-section-heading__title">Professional services</p>
+							<div class="landing-services__brand" aria-hidden="true">
+								<img class="landing-services__logo light-only" src="{{ resource "home/decisns-logo-light.svg" }}" alt="">
+								<img class="landing-services__logo dark-only" src="{{ resource "home/decisns-logo-dark.svg" }}" alt="">
+							</div>
+						</div>
+					</div>
+
+					<div class="landing-services__card">
+						<div class="landing-services__content">
+							<p class="landing-services__text">Need help getting the most out of Huub? deciZns provides specialist support for organisations using Huub in real decision workflows, from solver integration and performance tuning to custom modelling support and deeper technical extensions.</p>
+							<a class="landing-button landing-services__link" href="https://decizns.com" target="_blank" rel="noopener noreferrer">Learn about deciZns</a>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<section class="landing-involved" aria-labelledby="landing-involved-title">
+				<div class="landing-section__inner">
+					<div class="landing-section-heading">
+						<p id="landing-involved-title" class="landing-section-heading__title">Work with Huub</p>
+					</div>
+
+					<div class="landing-involved__grid">
+						<article class="landing-column-card landing-involved__card">
+							<p class="landing-column-card__title">Use from MiniZinc</p>
+							<p class="landing-column-card__text">Start with Huub through MiniZinc and explore a familiar modelling workflow backed by Huub’s solver technology.</p>
+							<a class="landing-button landing-involved__link" href="./introduction/using-huub-from-minizinc.html">Installation instructions</a>
+						</article>
+
+						<article class="landing-column-card landing-involved__card">
+							<p class="landing-column-card__title">Modelling and programming in Huub</p>
+							<p class="landing-column-card__text">Learn how to model directly in Huub and how to program custom propagators, branchers, and other solver extensions.</p>
+							<a class="landing-button landing-involved__link" href="./modelling/getting-started.html">Explore the docs</a>
+						</article>
+					</div>
+
+					<article class="landing-column-card landing-involved__card landing-involved__card--wide">
+						<p class="landing-column-card__title">Contribute code</p>
+						<p class="landing-column-card__text">Huub is an open solver project, and contributions are welcome. Whether you want to improve the implementation, extend the documentation, or help shape new capabilities, the codebase is open for collaboration.</p>
+						<a class="landing-button landing-involved__link" href="https://github.com/huub-solver/huub" target="_blank" rel="noopener noreferrer">Visit the repository</a>
+					</article>
+				</div>
+			</section>
+
+			<section class="landing-thanks" aria-labelledby="landing-thanks-title">
+				<div class="landing-section__inner">
+					<div class="landing-section-heading">
+						<p id="landing-thanks-title" class="landing-section-heading__title">Thanks</p>
+					</div>
+
+					<p class="landing-thanks__intro">Huub would not exist without the generous contributions of time, work, and resources from individuals and organisations. We are very grateful for the support.</p>
+
+					<div class="landing-thanks__grid">
+						<article class="landing-column-card landing-thanks__card">
+							<p class="landing-column-card__title">Individuals</p>
+							<p class="landing-column-card__text">Huub is a community project and is deeply thankful for the individual contributions it receives, from code and documentation to testing, discussion, and feedback.</p>
+							<a class="landing-button landing-thanks__link" href="./misc/contributors.html">See contributors</a>
+						</article>
+
+						<article class="landing-column-card landing-thanks__card">
+							<p class="landing-column-card__title">Supporting organisations</p>
+							<p class="landing-column-card__text">Huub receives support by organisations that makes sustained development possible through funding, collaboration, and long-term investment.</p>
+							<a class="landing-button landing-thanks__link" href="./misc/funding.html">See funding</a>
+						</article>
+					</div>
+				</div>
+			</section>
+
+			<div class="landing-page__content">
+				{{{ content }}}
+			</div>
+		</main>
+		{{else}}
+		<nav id="sidebar" class="sidebar" aria-label="Table of contents">
+			<!-- populated by js -->
+			<mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+			<noscript>
+				<iframe class="sidebar-iframe-outer" src="{{ path_to_root }}toc.html"></iframe>
+			</noscript>
+			<div id="sidebar-resize-handle" class="sidebar-resize-handle hidden" aria-hidden="true"></div>
+		</nav>
+
+		<div id="page-wrapper" class="page-wrapper">
+			<div class="page">
+				{{> header}}
+
+				{{#if search_enabled}}
+				<div id="search-wrapper" class="hidden">
+					<form id="searchbar-outer" class="searchbar-outer">
+						<div class="search-wrapper">
+							<input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+							<div class="spinner-wrapper">
+								<i class="fa fa-spinner fa-spin"></i>
+							</div>
+						</div>
+					</form>
+					<div id="searchresults-outer" class="searchresults-outer hidden">
+						<div id="searchresults-header" class="searchresults-header"></div>
+						<ul id="searchresults">
+						</ul>
+					</div>
+				</div>
+				{{/if}}
+
+				<nav class="docs-mobile-nav" aria-label="Documentation navigation">
+					<label id="sidebar-toggle" class="docs-mobile-nav__trigger" for="sidebar-toggle-anchor" aria-controls="sidebar">
+						<i class="fa fa-bars docs-mobile-nav__icon" aria-hidden="true"></i>
+						<span id="docs-mobile-nav-label" class="docs-mobile-nav__label">Documentation</span>
+						<span id="docs-mobile-nav-current" class="docs-mobile-nav__current">{{ title }}</span>
+					</label>
+				</nav>
+
+				<!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+				<script>
+					document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+					document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+					Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+						link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+					});
+				</script>
+
+				<div id="content" class="content">
+					<main id="page-document">
+						<div id="page-kicker" class="page-kicker hidden"></div>
+						{{{ content }}}
+					</main>
+
+					<aside id="page-toc" class="page-toc hidden" aria-label="Content">
+						<nav class="page-toc__nav">
+							<h2 class="page-toc__title">Content</h2>
+							<ol class="page-toc__list"></ol>
+						</nav>
+					</aside>
+
+					<nav class="nav-wrapper" aria-label="Page navigation">
+						<!-- Mobile navigation buttons -->
+						{{#if previous}}
+							<a rel="prev" href="{{ path_to_root }}{{previous.link}}" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+								<i class="fa fa-angle-left"></i>
+							</a>
+						{{/if}}
+
+						{{#if next}}
+							<a rel="next prefetch" href="{{ path_to_root }}{{next.link}}" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+								<i class="fa fa-angle-right"></i>
+							</a>
+						{{/if}}
+
+						<div style="clear: both"></div>
+					</nav>
+				</div>
+			</div>
+
+		</div>
+		{{/unless}}
+
+		{{#if live_reload_endpoint}}
+		<!-- Livereload script (if served using the cli tool) -->
+		<script>
+			const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+			const wsAddress = wsProtocol + "//" + location.host + "/" + "{{{live_reload_endpoint}}}";
+			const socket = new WebSocket(wsAddress);
+			socket.onmessage = function (event) {
+				if (event.data === "reload") {
+					socket.close();
+					location.reload();
+				}
+			};
+
+			window.onbeforeunload = function() {
+				socket.close();
+			}
+		</script>
+		{{/if}}
+
+		{{#if google_analytics}}
+		<!-- Google Analytics Tag -->
+		<script>
+			const localAddrs = ["localhost", "127.0.0.1", ""];
+
+			// make sure we don't activate google analytics if the developer is
+			// inspecting the book locally...
+			if (localAddrs.indexOf(document.location.hostname) === -1) {
+				(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+				(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+				m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+				})(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+				ga('create', '{{google_analytics}}', 'auto');
+				ga('send', 'pageview');
+			}
+		</script>
+		{{/if}}
+
+		{{#if playground_line_numbers}}
+		<script>
+			window.playground_line_numbers = true;
+		</script>
+		{{/if}}
+
+		{{#if playground_copyable}}
+		<script>
+			window.playground_copyable = true;
+		</script>
+		{{/if}}
+
+		{{#if playground_js}}
+		<script src="{{ resource "ace.js" }}"></script>
+		<script src="{{ resource "mode-rust.js" }}"></script>
+		<script src="{{ resource "editor.js" }}"></script>
+		<script src="{{ resource "theme-dawn.js" }}"></script>
+		<script src="{{ resource "theme-tomorrow_night.js" }}"></script>
+		{{/if}}
+
+		{{#if search_js}}
+		{{#if path_to_root}}
+		<script src="{{ resource "elasticlunr.min.js" }}"></script>
+		<script src="{{ resource "mark.min.js" }}"></script>
+		<script src="{{ resource "searcher.js" }}"></script>
+		{{/if}}
+		{{/if}}
+
+		<script src="{{ resource "clipboard.min.js" }}"></script>
+		<script src="{{ resource "highlight.js" }}"></script>
+		<script>
+			(function suppressLegacyMenuScrollEffects() {
+				const originalAddEventListener = document.addEventListener.bind(document);
+				window.__mdbookOriginalDocumentAddEventListener = originalAddEventListener;
+				window.__mdbookSuppressScrollLinkedEffects = true;
+				document.addEventListener = function(type, listener, options) {
+					if (window.__mdbookSuppressScrollLinkedEffects && type === "scroll") {
+						return;
+					}
+					return originalAddEventListener(type, listener, options);
+				};
+			})();
+		</script>
+		<script src="{{ resource "book.js" }}"></script>
+		<script>
+			(function restoreDocumentListeners() {
+				const originalAddEventListener = window.__mdbookOriginalDocumentAddEventListener;
+				if (originalAddEventListener) {
+					document.addEventListener = originalAddEventListener;
+				}
+				window.__mdbookSuppressScrollLinkedEffects = false;
+
+				const menu = document.getElementById("menu-bar");
+				if (menu) {
+					menu.style.top = "0px";
+					menu.classList.add("sticky");
+				}
+			})();
+		</script>
+		<script>
+			(function() {
+				function slugify(text) {
+					return text
+						.toLowerCase()
+						.trim()
+						.replace(/[^\w\s-]/g, "")
+						.replace(/\s+/g, "-");
+				}
+
+				function buildPageToc() {
+					const toc = document.getElementById("page-toc");
+					const tocList = toc && toc.querySelector(".page-toc__list");
+					const contentRoot = document.getElementById("page-document");
+					if (!toc || !tocList || !contentRoot) {
+						return;
+					}
+
+					const headings = Array.from(
+						contentRoot.querySelectorAll("h2, h3")
+					).filter(function(heading) {
+						return heading.textContent.trim().length > 0;
+					});
+
+					if (headings.length === 0) {
+						toc.classList.add("hidden");
+						return;
+					}
+
+					const fragmentCounts = new Map();
+					tocList.innerHTML = "";
+
+					headings.forEach(function(heading) {
+						if (!heading.id) {
+							const baseId = slugify(heading.textContent) || "section";
+							const seen = fragmentCounts.get(baseId) || 0;
+							fragmentCounts.set(baseId, seen + 1);
+							heading.id = seen === 0 ? baseId : `${baseId}-${seen + 1}`;
+						}
+
+						const item = document.createElement("li");
+						item.className = `page-toc__item page-toc__item--${heading.tagName.toLowerCase()}`;
+
+						const link = document.createElement("a");
+						link.href = `#${heading.id}`;
+						link.textContent = heading.textContent.trim();
+						item.appendChild(link);
+						tocList.appendChild(item);
+					});
+
+					toc.classList.remove("hidden");
+
+					const links = Array.from(tocList.querySelectorAll("a"));
+					const linkById = new Map(
+						links.map(function(link) {
+							return [link.getAttribute("href").slice(1), link];
+						})
+					);
+
+					function setCurrent(id) {
+						links.forEach(function(link) {
+							if (link.getAttribute("href") === `#${id}`) {
+								link.setAttribute("aria-current", "true");
+							} else {
+								link.removeAttribute("aria-current");
+							}
+						});
+					}
+
+					const observer = new IntersectionObserver(
+						function(entries) {
+							const visible = entries
+								.filter(function(entry) {
+									return entry.isIntersecting;
+								})
+								.sort(function(a, b) {
+									return a.boundingClientRect.top - b.boundingClientRect.top;
+								});
+							if (visible.length > 0) {
+								setCurrent(visible[0].target.id);
+							}
+						},
+						{
+							rootMargin: "-140px 0px -65% 0px",
+							threshold: [0, 1],
+						}
+					);
+
+					headings.forEach(function(heading) {
+						observer.observe(heading);
+					});
+
+					if (headings[0]) {
+						setCurrent(headings[0].id);
+					}
+
+					if (window.location.hash) {
+						const initialId = window.location.hash.slice(1);
+						if (linkById.has(initialId)) {
+							setCurrent(initialId);
+						}
+					}
+				}
+
+				document.addEventListener("DOMContentLoaded", buildPageToc);
+			})();
+		</script>
+		<script>
+			(function() {
+				function visibleNavText(element) {
+					if (!element) {
+						return "";
+					}
+
+					const clone = element.cloneNode(true);
+					clone.querySelectorAll('strong[aria-hidden="true"]').forEach(function(node) {
+						node.remove();
+					});
+					return clone.textContent.replace(/\s+/g, " ").trim();
+				}
+
+				function updatePageKicker() {
+					const kicker = document.getElementById("page-kicker");
+					const activeLink = document.querySelector("#sidebar .chapter a.active");
+					if (!kicker || !activeLink) {
+						return;
+					}
+
+					const group = activeLink.closest(".chapter-group");
+					const toggle = group && group.querySelector(".chapter-group__toggle");
+					if (!toggle) {
+						kicker.classList.add("hidden");
+						return;
+					}
+
+					kicker.textContent = visibleNavText(toggle);
+					kicker.classList.remove("hidden");
+				}
+
+				function syncMobileDocsNav() {
+					const label = document.getElementById("docs-mobile-nav-label");
+					const current = document.getElementById("docs-mobile-nav-current");
+					const activeLink = document.querySelector("#sidebar .chapter a.active");
+					if (!activeLink) {
+						return;
+					}
+
+					const group = activeLink.closest(".chapter-group");
+					const toggle = group && group.querySelector(".chapter-group__toggle");
+
+					if (label && toggle) {
+						label.textContent = visibleNavText(toggle);
+					}
+
+					if (current) {
+						current.textContent = visibleNavText(activeLink);
+					}
+				}
+
+				window.__syncMobileDocsNav = syncMobileDocsNav;
+				window.__updatePageKicker = updatePageKicker;
+
+				function wireMobileDocsNav() {
+					const trigger = document.querySelector(".docs-mobile-nav__trigger");
+					const checkbox = document.getElementById("sidebar-toggle-anchor");
+					const sidebar = document.getElementById("sidebar");
+					if (!trigger || !checkbox || !sidebar) {
+						return;
+					}
+
+					trigger.addEventListener("click", function() {
+						if (!checkbox.checked) {
+							sidebar.style.display = "";
+							sidebar.offsetHeight;
+						}
+					});
+
+					const media = window.matchMedia("(min-width: 1200px)");
+					function syncForViewport(event) {
+						if (event.matches) {
+							sidebar.style.display = "";
+							checkbox.checked = true;
+							document.documentElement.classList.add("sidebar-visible");
+						} else {
+							checkbox.checked = false;
+							document.documentElement.classList.remove("sidebar-visible");
+							sidebar.style.display = "none";
+						}
+					}
+
+					syncForViewport(media);
+					media.addEventListener("change", syncForViewport);
+				}
+
+				document.addEventListener("DOMContentLoaded", function() {
+					syncMobileDocsNav();
+					wireMobileDocsNav();
+					updatePageKicker();
+				});
+			})();
+		</script>
+		<script>
+			(function() {
+				function enhanceSidebarGroups() {
+					const chapter = document.querySelector("#sidebar .chapter");
+					if (!chapter || chapter.dataset.grouped === "true") {
+						return Boolean(chapter);
+					}
+
+					const items = Array.from(chapter.children);
+					for (let i = 0; i < items.length; i += 1) {
+						const item = items[i];
+						if (!item.classList.contains("part-title")) {
+							continue;
+						}
+
+						const group = document.createElement("li");
+						group.className = "chapter-group";
+
+						const toggle = document.createElement("button");
+						toggle.type = "button";
+						toggle.className = "chapter-group__toggle";
+						toggle.textContent = item.textContent.trim();
+
+						const section = document.createElement("ol");
+						section.className = "section chapter-group__items";
+
+						let next = item.nextElementSibling;
+						while (
+							next &&
+							!next.classList.contains("part-title") &&
+							!next.classList.contains("spacer")
+						) {
+							const current = next;
+							next = next.nextElementSibling;
+							if (current.classList.contains("chapter-item") && !current.classList.contains("affix")) {
+								section.appendChild(current);
+							} else {
+								break;
+							}
+						}
+
+						const isCurrentGroup = Boolean(section.querySelector("a.active"));
+						group.classList.toggle("expanded", isCurrentGroup);
+						toggle.setAttribute("aria-expanded", String(isCurrentGroup));
+						group.append(toggle, section);
+						item.replaceWith(group);
+					}
+
+					const groups = Array.from(chapter.querySelectorAll(".chapter-group"));
+					groups.forEach(function(group) {
+						const toggle = group.querySelector(".chapter-group__toggle");
+						if (!toggle) {
+							return;
+						}
+
+						toggle.addEventListener("click", function() {
+							const shouldExpand = !group.classList.contains("expanded");
+							group.classList.toggle("expanded", shouldExpand);
+							toggle.setAttribute("aria-expanded", String(shouldExpand));
+						});
+					});
+
+					chapter.dataset.grouped = "true";
+					if (window.__updatePageKicker) {
+						window.__updatePageKicker();
+					}
+					if (window.__syncMobileDocsNav) {
+						window.__syncMobileDocsNav();
+					}
+					return true;
+				}
+
+				function initSidebarGroups(attemptsLeft) {
+					if (enhanceSidebarGroups() || attemptsLeft <= 0) {
+						return;
+					}
+					window.requestAnimationFrame(function() {
+						initSidebarGroups(attemptsLeft - 1);
+					});
+				}
+
+				document.addEventListener("DOMContentLoaded", function() {
+					if (document.getElementById("sidebar")) {
+						initSidebarGroups(20);
+					}
+				});
+			})();
+		</script>
+		<script>
+			(function() {
+				const themeToggleButton = document.getElementById("theme-toggle");
+				const themePopup = document.getElementById("theme-list");
+				if (!themeToggleButton || !themePopup) {
+					return;
+				}
+
+				const html = document.documentElement;
+				const darkThemes = new Set([default_dark_theme]);
+				const lightButton = themePopup.querySelector("#light");
+				const darkButton = themePopup.querySelector("#" + CSS.escape(default_dark_theme));
+				const icon = themeToggleButton.querySelector("i");
+				const darkMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+				function autoTheme() {
+					return darkMediaQuery.matches ? default_dark_theme : default_light_theme;
+				}
+
+				function currentTheme() {
+					const savedTheme = localStorage.getItem("mdbook-theme");
+					if (savedTheme === default_light_theme || savedTheme === default_dark_theme) {
+						return savedTheme;
+					}
+					return autoTheme();
+				}
+
+				function syncThemeToggle() {
+					const theme = currentTheme();
+					const isDark = darkThemes.has(theme) || html.classList.contains(default_dark_theme);
+					const nextLabel = isDark ? "Switch to light mode" : "Switch to dark mode";
+					themeToggleButton.title = nextLabel;
+					themeToggleButton.setAttribute("aria-label", nextLabel);
+					if (icon) {
+						icon.classList.toggle("fa-moon-o", !isDark);
+						icon.classList.toggle("fa-sun-o", isDark);
+					}
+				}
+
+				themeToggleButton.addEventListener("click", function(event) {
+					event.preventDefault();
+					event.stopImmediatePropagation();
+					const isDark = darkThemes.has(currentTheme()) || html.classList.contains(default_dark_theme);
+					const targetButton = isDark ? lightButton : darkButton;
+					if (targetButton) {
+						targetButton.click();
+						window.requestAnimationFrame(syncThemeToggle);
+					}
+				}, true);
+
+				[lightButton, darkButton].forEach(function(button) {
+					if (!button) {
+						return;
+					}
+
+					button.addEventListener("click", function() {
+						const selectedTheme = button.id;
+						window.requestAnimationFrame(function() {
+							if (selectedTheme === autoTheme()) {
+								try {
+									localStorage.removeItem("mdbook-theme");
+								} catch (e) { }
+							}
+							syncThemeToggle();
+						});
+					});
+				});
+
+				darkMediaQuery.addEventListener("change", syncThemeToggle);
+				syncThemeToggle();
+			})();
+		</script>
+
+		<!-- Custom JS scripts -->
+		{{#each additional_js}}
+		<script src="{{ resource this}}"></script>
+		{{/each}}
+
+		{{#if is_print}}
+		{{#if mathjax_support}}
+		<script>
+		window.addEventListener('load', function() {
+			MathJax.Hub.Register.StartupHook('End', function() {
+				window.setTimeout(window.print, 100);
+			});
+		});
+		</script>
+		{{else}}
+		<script>
+		window.addEventListener('load', function() {
+			window.setTimeout(window.print, 100);
+		});
+		</script>
+		{{/if}}
+		{{/if}}
+
+		{{#if fragment_map}}
+		<script>
+			document.addEventListener('DOMContentLoaded', function() {
+				const fragmentMap =
+					{{{fragment_map}}}
+				;
+				const target = fragmentMap[window.location.hash];
+				if (target) {
+					let url = new URL(target, window.location.href);
+					window.location.replace(url.href);
+				}
+			});
+		</script>
+		{{/if}}
+
+	</div>
+	</body>
+</html>

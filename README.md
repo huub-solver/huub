@@ -1,108 +1,39 @@
+# Huub
+
 <p align="center">
   <img
-    src="https://huub.solutions/logo.svg"
+    src="https://huub.solutions/favicon.svg"
     alt="Huub logo"
     height="350px">
 </p>
 
-Huub is a Lazy Clause Generation (LCG) solver with a focus on modularity and maintainability in addition to speed.
-LCG solvers are a class of solvers that can be used to solve decision and optimization problems.
-They are characterized by their ability to dynamically add new Boolean variables and clauses to a Boolean Satisfiability (SAT) solver during the search process.
-This allows the solver exploit SAT solver's ability to learn from failures during the search process, without having to encode the full problem into Boolean variables and clauses.
+Huub is an efficient library for developing constraint-based decision or optimization systems and applications with learning capabilities.
+It combines the modelling strengths of constraint programming (CP) with the learning and proof machinery of Boolean satisfiability (SAT) solving.
 
-## Documentation
+Huub is **reliable**: it is well-tested, performs state-of-the-art preprocessing before search begins, and is implemented in Rust for a safer and more dependable solver core.
+It is **performant**: it combines strong propagation with modern solving techniques to deliver competitive performance on demanding decision problems.
+And it is **extensible**: you can add your own propagators, branchers, and even replace the underlying SAT solver, so it can be shaped around your specific needs.
 
-[Documentation](https://docs.rs/huub/latest/huub/)
+## Links
 
-## Installation
-
-Huub can be used either as a [MiniZinc](https://www.minizinc.org/) solver or as a standalone Rust modelling and solving library for decision and optimization problems.
-
-### Installing Huub as a MiniZinc solver
-
-1. Download the latest release of Huub from the [releases page](https://github.com/huub-solver/huub/releases) and download the `huub` archive that matches your system.
-2. Extract (and install) the downloaded archive to a sensible location on your system.
-3. Add the `share/minizinc/solvers` directory from the extracted archive to the [`MZN_SOLVER_PATH`](https://docs.minizinc.dev/en/stable/fzn-spec.html#solver-configuration-files) environment variable.
-4. `Huub` should now show up in the list of solvers when running `minizinc --solvers` and in the MiniZinc IDE.
-
-### Installing Huub as a Rust library
-
-The following command can be used to add Huub as a dependency to your Rust project.
-
-```bash
-cargo add huub
-```
-
+- [Website](https://huub.solutions)
 - [crates.io](https://crates.io/crates/huub)
+- [docs.rs](https://docs.rs/huub/latest/huub/)
 
-## Naming
+## Thanks
 
-Huub is named after Hubertus Dekker, a passionate business administration and accounting teacher who spent his holidays creating the rosters for his school by hand, allowing students to pick any combination of possible subjects.
-This solver is dedicated to him in the hope that it allows problems to be solved with the same flexibility and care that he put into his rosters.
-The logo of the solver is based on an old caricature of him as a teacher, made to include his features at an older age.
+Thanks to our [contributors](https://huub.solutions/misc/contributors.html) and [funding partners](https://huub.solutions/misc/funding.html).
 
-## Authors
+## Citing Huub
 
-- [Jip J. Dekker](https://dekker.one/)
-- [Alexey Ignatiev](https://alexeyignatiev.github.io/)
-- [Peter J. Stuckey](https://research.monash.edu/en/persons/peter-stuckey)
-- [Allen Zhong](https://research.monash.edu/en/persons/allen-zhong)
+If you want to cite Huub please use our general software citation, in addition to any citation to a specific version or paper:
 
-## Acknowledgements
-
-This research was partially funded by the Australian Government through the Australian Research Council Industrial Transformation Training Centre in Optimization Technologies, Integrated Methodologies, and Applications ([OPTIMA](https://optima.org.au)), Project ID IC200100009.
-
-## Related
-
-Huub is built using the IPASIR-UP interface for SAT solvers, proposed by [Fazakas et al.](https://doi.org/10.4230/LIPIcs.SAT.2023.8).
-Huub is tested with the following solvers that implement this interface.
-
-- [CaDiCaL](https://github.com/arminbiere/cadical)
-
-The connection to SAT solvers and encoding methods to SAT for Huub use Pindakaas, a Rust crate for SAT solving and encoding to SAT.
-
-- [Pindakaas](https://github.com/pindakaashq/pindakaas)
-
-Huub is inspired by the following LCG solvers, among others.
-
-- [Chuffed](https://github.com/chuffed/chuffed)
-- [OR-Tools](https://github.com/google/or-tools)
-
-## Development
-
-For local MiniZinc debugging, you can assemble a staging deployment tree under `target/staging` with the current debug and release binaries, the MiniZinc library, generated solver configurations (`huub.msc` and `huub-dev.msc`), and generated completions using the following commands.
-
-```sh
-cargo xtask stage
-```
-
-This creates symlinks `target/staging/bin/huub` and `target/staging/bin/huub-dev`, pointing at the current release and debug builds (Don't forget to trigger `cargo build` or `cargo build --release` before running!), and the associated MiniZinc solver configurations in `huub.msc` and `huub-dev.msc` in `target/staging/share/minizinc/solvers`.
-The `huub-dev.msc` solver entry uses the `Huub (dev)` name and the `solutions.huub-dev` identifier so it is easy to distinguish from a release build.
-Adding the `target/staging/share/minizinc/solvers` to the [`MZN_SOLVER_PATH`](https://docs.minizinc.dev/en/stable/fzn-spec.html#solver-configuration-files), will allow you to use the two solver configuration as follows.
-
-```sh
-minizinc --solver huub [ARGS...]
-# or
-minizinc --solver huub-dev [ARGS...]
-```
- 
-Alternatively, you can compile a MiniZinc instance and run it using a current build of `huub`.
-This process can be split into two steps.
-First, the required `.fzn.json` and `.ozn` files can be produced using the following command.
-
-```sh
-minizinc --solver huub --compile [OTHER FLAGS AND INSTANCE FILES]
-```
-
-Then, you can run the current version of `huub` using `cargo` and pipe the result back into MiniZinc to evaluate the output using the following command.
-
-```sh
-cargo run [BUILD FLAGS] -- [HUUB FLAGS AND FZNJSON FILE] | minizinc --ozn-file [OZN FILE]
-```
-
-If you want to attach a debugger directly, then you can still point it at the latest build in `./target/debug` or `./target/release-with-debug` (created using `cargo build` or `cargo build --profile release-with-debug`) in combination with the `[HUUB FLAGS AND FZNJSON FILE]`.
-For example, the following command can be used to run `huub` with the `lldb` debugger.
-
-```sh
-lldb -- ./target/debug/huub [HUUB FLAGS AND FZNJSON FILE]
+```bibtex
+@software{Huub,
+  author = {Dekker, Jip J. and Stuckey, Peter J. and Zhong, Allen Z.},
+  title = {Huub},
+  license = {MPL-2.0},
+  url = {https://huub.solutions},
+  doi = {10.5281/zenodo.15591852},
+}
 ```

@@ -1,0 +1,83 @@
+/*
+ * Catppuccin Latte Syntax Highlighting
+ * https://github.com/catppuccin/catppuccin
+ */
+
+.hljs {
+  display: block;
+  overflow-x: auto;
+  background: #eff1f5;
+  color: #4c4f69;
+}
+
+/* Comment */
+.hljs-comment,
+.hljs-quote {
+  color: #acb0be;
+  font-style: italic;
+}
+
+/* Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-attribute,
+.hljs-attr,
+.hljs-tag,
+.hljs-name,
+.hljs-regexp,
+.hljs-link,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: #d20f39;
+}
+
+/* Mauve */
+.hljs-number,
+.hljs-meta,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params {
+  color: #8839ef;
+}
+
+/* Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet {
+  color: #40a02b;
+}
+
+/* Blue */
+.hljs-title,
+.hljs-section {
+  color: #1e66f5;
+}
+
+/* Keyword */
+.hljs-keyword,
+.hljs-selector-tag {
+  color: #d20f39;
+}
+
+/* Peach */
+.hljs-emphasis {
+  font-style: italic;
+  color: #fe640b;
+}
+
+.hljs-strong {
+  font-weight: bold;
+  color: #fe640b;
+}
+
+/* Green for additions */
+.hljs-addition {
+  color: #40a02b;
+}
+
+/* Red for deletions */
+.hljs-deletion {
+  color: #d20f39;
+}

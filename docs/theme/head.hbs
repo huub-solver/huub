@@ -1,0 +1,62 @@
+<!-- Book generated using mdBook -->
+<meta charset="UTF-8">
+<title>{{ title }}</title>
+{{#if is_print }}
+<meta name="robots" content="noindex">
+{{/if}}
+{{#if base_url}}
+<base href="{{ base_url }}">
+{{/if}}
+
+
+<!-- Custom HTML head -->
+
+<meta name="description" content="{{ description }}">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#ffffff">
+
+{{#if favicon_svg}}
+<link rel="icon" href="{{ resource "favicon.svg" }}">
+{{/if}}
+{{#if favicon_png}}
+<link rel="shortcut icon" href="{{ resource "favicon.png" }}">
+{{/if}}
+<link rel="stylesheet" href="{{ resource "css/variables.css" }}">
+<link rel="stylesheet" href="{{ resource "css/general.css" }}">
+<link rel="stylesheet" href="{{ resource "css/chrome.css" }}">
+{{#if print_enable}}
+<link rel="stylesheet" href="{{ resource "css/print.css" }}" media="print">
+{{/if}}
+
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Asap+Condensed:ital,wght@0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&family=Atkinson+Hyperlegible+Next:ital,wght@0,200..800;1,200..800&family=DM+Mono:ital@0;1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ resource "FontAwesome/css/font-awesome.css" }}">
+
+<!-- Highlight.js Stylesheets -->
+<link rel="stylesheet" id="highlight-css" href="{{ resource "highlight.css" }}">
+<link rel="stylesheet" id="tomorrow-night-css" href="{{ resource "tomorrow-night.css" }}">
+<link rel="stylesheet" id="ayu-highlight-css" href="{{ resource "ayu-highlight.css" }}">
+
+<!-- Custom theme stylesheets -->
+{{#each additional_css}}
+<link rel="stylesheet" href="{{ resource this }}">
+{{/each}}
+
+{{#if mathjax_support}}
+<!-- MathJax -->
+<script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+{{/if}}
+
+<!-- Provide site root and default themes to javascript -->
+<script>
+    const path_to_root = "{{ path_to_root }}";
+    const default_light_theme = "{{ default_theme }}";
+    const default_dark_theme = "{{ preferred_dark_theme }}";
+{{#if search_js}}
+    window.path_to_searchindex_js = "{{ resource "searchindex.js" }}";
+{{/if}}
+</script>
+<!-- Start loading toc.js asap -->
+<script src="{{ resource "toc.js" }}"></script>

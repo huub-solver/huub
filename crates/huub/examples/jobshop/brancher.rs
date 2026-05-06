@@ -168,6 +168,7 @@ impl ValueEnum for BranchingStrategy {
 impl DynamicBrancher {
 	/// Adds a new [`DynamicBrancher`] with the given strategy and start time
 	/// variables within the solver.
+	// ANCHOR: initialize_brancher
 	fn new_in(
 		solver: &mut impl BrancherInitActions,
 		strategy: DynamicBranching,
@@ -196,6 +197,7 @@ impl DynamicBrancher {
 			next,
 		}));
 	}
+	// ANCHOR_END: initialize_brancher
 }
 
 impl<D> Brancher<D> for DynamicBrancher
@@ -204,6 +206,7 @@ where
 	solver::Decision<i64>: IntDecisionActions<D>,
 	solver::Decision<bool>: BoolInspectionActions<D>,
 {
+	// ANCHOR: decide_method
 	fn decide(&mut self, ctx: &mut D) -> Directive {
 		let begin = ctx.trailed(self.next);
 		if begin == self.operations.len() {
@@ -271,6 +274,7 @@ where
 		let lb = op_view.min(ctx);
 		Directive::Select(op_view.lit(ctx, IntLitMeaning::Less(lb + 1)))
 	}
+	// ANCHOR_END: decide_method
 }
 
 impl StaticBranching {

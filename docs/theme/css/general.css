@@ -1,0 +1,1054 @@
+/* Base styles and content styles */
+
+:root {
+	/* Browser default font-size is 16px, this way 1 rem = 10px */
+	font-size: 62.5%;
+	color-scheme: var(--color-scheme);
+}
+
+html {
+	font-family: var(--text-font);
+	font-optical-sizing: auto;
+	font-weight: 400;
+	font-style: normal;
+	color: var(--fg);
+	background-color: var(--bg);
+	text-size-adjust: none;
+	-webkit-text-size-adjust: none;
+}
+
+body {
+	margin: 0;
+	font-size: 1.6rem;
+	overflow-x: hidden;
+	text-align: justify;
+	text-justify: inter-word;
+	hyphens: auto;
+}
+
+code {
+	font-family: var(--mono-font) !important;
+	font-size: var(--code-font-size);
+	direction: ltr !important;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+	font-family: var(--title-font);
+}
+
+/* make long words/inline code not x overflow */
+main {
+	overflow-wrap: break-word;
+}
+
+/* make wide tables scroll if they overflow */
+.table-wrapper {
+	overflow-x: auto;
+}
+
+/* Don't change font size in headers. */
+h1 code,
+h2 code,
+h3 code,
+h4 code,
+h5 code,
+h6 code {
+	font-size: unset;
+}
+
+.left {
+	float: left;
+}
+.right {
+	float: right;
+}
+.boring {
+	opacity: 0.6;
+}
+.hide-boring .boring {
+	display: none;
+}
+.hidden {
+	display: none !important;
+}
+
+.header + .header h3,
+.header + .header h4,
+.header + .header h5 {
+	margin-block-start: 1em;
+}
+
+h1:target::before,
+h2:target::before,
+h3:target::before,
+h4:target::before,
+h5:target::before,
+h6:target::before {
+	display: inline-block;
+	content: "»";
+	margin-inline-start: -30px;
+	width: 30px;
+}
+
+/* This is broken on Safari as of version 14, but is fixed
+   in Safari Technology Preview 117 which I think will be Safari 14.2.
+   https://bugs.webkit.org/show_bug.cgi?id=218076
+*/
+:target {
+	/* Safari does not support logical properties */
+	scroll-margin-top: calc(var(--menu-bar-height) + 0.5em);
+}
+
+.page {
+	outline: 0;
+	padding: 0 var(--page-padding);
+	margin-block-start: 0;
+}
+.page-wrapper {
+	box-sizing: border-box;
+	background-color: var(--bg);
+}
+
+.content {
+	padding: 0 5px 50px 5px;
+}
+.content main {
+	margin-inline-start: auto;
+	margin-inline-end: auto;
+	max-width: var(--content-max-width);
+}
+.content p {
+	line-height: 1.45em;
+}
+.content ol {
+	line-height: 1.45em;
+}
+.content ul {
+	line-height: 1.45em;
+}
+.content a {
+	text-decoration: none;
+}
+.content a:hover {
+	text-decoration: underline;
+}
+.content img,
+.content video {
+	max-width: 100%;
+}
+.content .header:link,
+.content .header:visited {
+	color: var(--fg);
+}
+.content .header:link,
+.content .header:visited:hover {
+	text-decoration: none;
+}
+
+.page-toc {
+	display: none;
+	position: sticky;
+	top: calc(var(--menu-bar-height) + var(--docs-top-offset));
+	align-self: start;
+	max-height: calc(
+		100vh - var(--menu-bar-height) - var(--docs-top-offset) - 2.4rem
+	);
+	overflow: auto;
+}
+
+.page-toc__nav {
+	padding-top: 1rem;
+	padding-right: 0.2rem;
+}
+
+.page-toc__title {
+	margin: 0 0 1.2rem 0;
+	font-family: var(--title-font);
+	font-size: 1.54rem;
+	font-weight: 700;
+	line-height: 1.35;
+}
+
+.page-toc__list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	border-inline-start: 1px solid var(--site-header-separator);
+}
+
+.page-toc__item {
+	margin: 0;
+}
+
+.page-toc__item a {
+	display: block;
+	margin-inline-start: -1px;
+	padding: 0.45rem 0 0.45rem 1.6rem;
+	border-inline-start: 1px solid transparent;
+	color: var(--fg);
+	font-size: 1.4rem;
+	font-weight: 400;
+	line-height: 1.4;
+	text-decoration: none;
+	text-align: left;
+	text-justify: auto;
+	hyphens: manual;
+	overflow-wrap: normal;
+	word-break: normal;
+	transition:
+		border-color 160ms ease,
+		color 160ms ease,
+		font-weight 160ms ease;
+}
+
+.page-toc .page-toc__item a:link {
+	color: var(--fg);
+}
+
+.page-toc .page-toc__item a:visited {
+	color: var(--fg);
+}
+
+.page-toc__item a:hover {
+	color: var(--site-header-link-hover);
+	text-decoration: none;
+	border-inline-start-color: var(--sidebar-hover-rule);
+}
+
+.page-toc__item a[aria-current] {
+	color: var(--sidebar-active);
+	border-inline-start-width: 2px;
+	border-inline-start-color: var(--sidebar-active);
+	font-weight: 600;
+}
+
+.page-toc__item--h3 a {
+	padding-inline-start: 2.8rem;
+	font-size: 1.4rem;
+	color: var(--fg);
+}
+
+.page-kicker {
+	margin: 0 0 0.3rem 0;
+	color: var(--sidebar-active);
+	font-family: var(--text-font);
+	font-size: 1.45rem;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	line-height: 1.2;
+	text-transform: uppercase;
+}
+
+.content main > h1:first-of-type {
+	margin-top: 0;
+	margin-bottom: 2.4rem;
+	font-size: 5.6rem;
+	line-height: 1.05;
+	letter-spacing: -0.08rem;
+}
+
+.content main > h2 {
+	font-size: 4rem;
+	line-height: 1.1;
+	letter-spacing: -0.04rem;
+}
+
+.content main > h3 {
+	font-size: 3rem;
+	line-height: 1.15;
+}
+
+.docs-mobile-nav {
+	display: none;
+}
+
+.docs-mobile-nav__trigger {
+	display: flex;
+	align-items: center;
+	gap: 0.8rem;
+	width: 100%;
+	padding: 1.2rem 0;
+	border-bottom: 1px solid var(--site-header-separator);
+	color: var(--site-header-link);
+	font-size: 1.5rem;
+	font-weight: 500;
+	line-height: 1.3;
+	cursor: pointer;
+}
+
+.docs-mobile-nav__icon {
+	flex-shrink: 0;
+	font-size: 1.55rem;
+}
+
+.docs-mobile-nav__label {
+	display: inline-flex;
+	align-items: center;
+	flex-shrink: 0;
+	color: var(--site-header-link-hover);
+	font-weight: 600;
+}
+
+.docs-mobile-nav__label::after {
+	content: ">";
+	margin-inline-start: 0.8rem;
+	color: var(--site-header-link);
+}
+
+.docs-mobile-nav__current {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.landing-page {
+	padding: 0 0 8rem;
+}
+
+.landing-hero {
+	padding: 2rem 0 4.8rem;
+}
+
+.landing-hero__inner {
+	box-sizing: border-box;
+	display: grid;
+	grid-template-columns: minmax(30rem, 1.16fr) minmax(0, 0.98fr);
+	align-items: center;
+	gap: clamp(1.2rem, 2.1vw, 2.8rem);
+	max-width: 112rem;
+	margin: 0 auto;
+	padding: 0 max(2.4rem, var(--page-padding));
+}
+
+.landing-hero__logo-panel {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	padding: 0;
+}
+
+.landing-hero__logo {
+	display: block;
+	width: clamp(34rem, 37vw, 50rem);
+	max-width: none;
+	height: auto;
+}
+
+.landing-hero__content {
+	max-width: 56rem;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	text-align: center;
+}
+
+.landing-hero__tagline {
+	margin: 0;
+	max-width: 52rem;
+	font-size: clamp(2.3rem, 2vw, 3.1rem);
+	font-weight: 600;
+	font-family: var(--title-font);
+	line-height: 1.22;
+	color: var(--fg);
+	text-wrap: balance;
+}
+
+.landing-hero__actions {
+	margin-top: 2.8rem;
+}
+
+.landing-hero__problem-intro {
+	margin: 2.6rem 0 0;
+	font-family: var(--title-font);
+	font-size: 2.5rem;
+	font-weight: 700;
+	letter-spacing: 0.02em;
+	line-height: 1.15;
+	color: var(--fg);
+}
+
+.landing-hero__problem-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(14rem, 16rem));
+	row-gap: 1.2rem;
+	column-gap: 0.6rem;
+	width: fit-content;
+	margin-inline: auto;
+	margin-top: 1.8rem;
+}
+
+.landing-problem-card {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: flex-start;
+	min-height: 8rem;
+	padding: 0;
+	text-align: center;
+}
+
+.landing-problem-card__icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 4rem;
+	height: 8.4rem;
+	border-radius: 999px;
+	color: var(--landing-section-accent);
+	font-size: 4.8rem;
+}
+
+.landing-problem-card--other .landing-problem-card__icon {
+	width: 8.8rem;
+}
+
+.landing-problem-card__logo {
+	display: block;
+	width: 8.6rem;
+	height: auto;
+	max-height: 5.8rem;
+}
+
+.landing-problem-card__text {
+	margin: 0;
+	max-width: 20ch;
+	font-size: 1.7rem;
+	font-family: var(--title-font);
+	font-weight: 600;
+	line-height: 1.2;
+	color: var(--fg);
+}
+
+.landing-hero__cta {
+	box-sizing: border-box;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 22rem;
+	min-height: 5.8rem;
+	padding: 1.4rem 2.8rem;
+	border: 2px solid var(--landing-hero-cta-border);
+	border-radius: 1rem;
+	background: var(--landing-hero-cta-bg);
+	color: var(--landing-hero-cta-fg);
+	font-family: var(--title-font);
+	font-size: 3.5rem;
+	font-weight: 700;
+	letter-spacing: 0.03em;
+	line-height: 1;
+	text-decoration: none;
+	transition:
+		transform 160ms ease,
+		background-color 160ms ease,
+		color 160ms ease,
+		border-color 160ms ease;
+}
+
+.landing-hero__cta:link,
+.landing-hero__cta:visited {
+	color: var(--landing-hero-cta-fg);
+}
+
+.landing-hero__cta:hover {
+	color: var(--landing-hero-cta-hover-fg);
+	background: var(--landing-hero-cta-hover-bg);
+	border-color: var(--landing-hero-cta-hover-border);
+	text-decoration: none;
+	transform: translateY(-1px);
+}
+
+.landing-page__content {
+	max-width: 112rem;
+	margin: 0 auto;
+	padding: 0 max(2.4rem, var(--page-padding));
+}
+
+.landing-section__inner {
+	box-sizing: border-box;
+	max-width: 112rem;
+	margin: 0 auto;
+	padding: 0 max(2.4rem, var(--page-padding));
+}
+
+.landing-why {
+	margin-top: 1.6rem;
+	padding: 5.4rem 0 5.8rem;
+	background: var(--landing-why-bg);
+}
+
+.landing-section-heading {
+	max-width: 74rem;
+}
+
+.landing-services .landing-section-heading {
+	max-width: none;
+}
+
+.landing-section-heading__title {
+	margin: 0;
+	display: inline-block;
+	font-family: var(--title-font);
+	font-weight: 700;
+	letter-spacing: -0.03rem;
+	padding-bottom: 0.4rem;
+	border-bottom: 0.6rem solid var(--landing-section-accent);
+	font-size: clamp(3.4rem, 3.8vw, 5rem);
+	line-height: 1;
+}
+
+.landing-why__grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 2.8rem;
+	margin-top: 3rem;
+}
+
+.landing-why-card {
+	padding-right: 1rem;
+}
+
+.landing-why-card__title {
+	margin: 0;
+	font-family: var(--title-font);
+	font-weight: 700;
+	letter-spacing: -0.02rem;
+	font-size: 2.8rem;
+	line-height: 1;
+}
+
+.landing-why-card__text {
+	margin: 1.5rem 0 0;
+	font-size: 1.65rem;
+	line-height: 1.5;
+	color: var(--fg);
+}
+
+.landing-services {
+	padding: 5.2rem 0 5.8rem;
+}
+
+.landing-services__heading-row {
+	display: flex;
+	align-items: flex-end;
+	justify-content: space-between;
+	gap: 2.4rem;
+}
+
+.landing-services__card {
+	display: grid;
+	grid-template-columns: 1fr;
+	align-items: center;
+	gap: 0;
+	margin-top: 2.4rem;
+	padding: 0;
+}
+
+.landing-services__text {
+	margin: 0;
+	font-size: 2.1rem;
+	line-height: 1.5;
+	color: var(--fg);
+}
+
+.landing-button {
+	box-sizing: border-box;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: calc(100% - 2.4rem);
+	margin-inline: auto;
+	color: var(--text-on-accent);
+	font-family: var(--title-font);
+	font-weight: 700;
+	line-height: 1;
+	text-decoration: none;
+	transition:
+		background-color 160ms ease,
+		color 160ms ease,
+		transform 160ms ease;
+}
+
+.landing-services__link,
+.landing-involved__link,
+.landing-thanks__link {
+	text-transform: uppercase;
+}
+
+.landing-services__link {
+	margin-top: 2.2rem;
+	padding: 1.1rem 1.8rem;
+	border-radius: 1rem;
+	background: var(--sidebar-active);
+	font-size: 2.2rem;
+	letter-spacing: 0.02em;
+}
+
+.landing-button:link,
+.landing-button:visited {
+	color: var(--text-on-accent);
+}
+
+.landing-services__content {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	text-align: left;
+	width: 100%;
+}
+
+.landing-services__content .landing-services__text {
+	align-self: stretch;
+}
+
+.landing-button:hover {
+	background: var(--landing-action-hover-bg);
+	color: var(--text-on-accent);
+	text-decoration: none;
+	transform: translateY(-1px);
+}
+
+.landing-services__brand {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 40rem;
+}
+
+.landing-services__logo {
+	display: block;
+	width: 100%;
+	max-width: 40rem;
+	height: auto;
+}
+
+.dark-only {
+	display: none;
+}
+
+html.navy .light-only {
+	display: none;
+}
+
+html.navy .dark-only {
+	display: block;
+}
+
+.landing-involved {
+	padding: 5.6rem 0 6rem;
+	background: var(--landing-involved-bg);
+	color: var(--fg);
+}
+
+.landing-involved__grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 2.8rem;
+	align-items: stretch;
+	margin-top: 3rem;
+}
+
+.landing-column-card {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+}
+
+.landing-involved__card {
+	height: 100%;
+}
+
+.landing-involved__card--wide {
+	margin-top: 2.8rem;
+}
+
+.landing-column-card__title {
+	margin: 0;
+	font-family: var(--title-font);
+	font-size: 3rem;
+	font-weight: 700;
+	line-height: 1;
+	color: var(--fg);
+}
+
+.landing-column-card__text {
+	margin: 1.8rem 0 0;
+	flex: 1;
+	font-size: 2rem;
+	line-height: 1.5;
+	color: var(--fg);
+}
+
+.landing-involved__link,
+.landing-thanks__link {
+	margin-top: 2.8rem;
+	padding: 1.3rem 1.8rem;
+	font-size: 2rem;
+	letter-spacing: 0.04em;
+}
+
+.landing-involved__link {
+	background: var(--landing-involved-link-bg);
+	border-radius: 0.6rem;
+}
+
+.landing-thanks {
+	padding: 5.4rem 0 6rem;
+	background: var(--bg);
+}
+
+.landing-thanks__intro {
+	max-width: 108rem;
+	margin: 2.6rem 0 0;
+	font-size: clamp(2rem, 2.1vw, 2.6rem);
+	line-height: 1.45;
+	color: var(--fg);
+}
+
+.landing-thanks__grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 2.8rem;
+	margin-top: 3.2rem;
+}
+
+.landing-thanks__card {
+	min-width: 0;
+}
+
+.landing-thanks__link {
+	border-radius: 0.8rem;
+	background: var(--sidebar-active);
+}
+
+@media only screen and (max-width: 900px) {
+	.landing-hero {
+		padding-top: 4.2rem;
+	}
+
+	.landing-hero__inner {
+		grid-template-columns: 1fr;
+		gap: 2.8rem;
+	}
+
+	.landing-hero__logo-panel {
+		justify-content: center;
+	}
+
+	.landing-hero__logo {
+		width: min(32rem, 74vw);
+		max-width: 100%;
+	}
+
+	.landing-hero__content {
+		max-width: none;
+	}
+
+	.landing-hero__problem-grid {
+		max-width: 48rem;
+	}
+
+	.landing-why {
+		padding: 4.6rem 0 5rem;
+	}
+
+	.landing-why__grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 2.6rem 2rem;
+	}
+
+	.landing-services__card {
+		gap: 2.4rem;
+	}
+
+	.landing-services__heading-row {
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 1.4rem;
+	}
+
+	.landing-services__brand {
+		flex-basis: auto;
+		width: min(100%, 24rem);
+	}
+
+	.landing-involved__grid {
+		grid-template-columns: 1fr;
+		gap: 2.4rem;
+	}
+
+	.landing-involved__card--wide {
+		margin-top: 2.4rem;
+	}
+
+	.landing-thanks__grid {
+		grid-template-columns: 1fr;
+	}
+}
+
+@media only screen and (max-width: 520px) {
+	.landing-page {
+		padding-bottom: 5.6rem;
+	}
+
+	.landing-hero {
+		padding: 2rem 0 3.6rem;
+	}
+
+	.landing-hero__tagline {
+		font-size: 2rem;
+	}
+
+	.landing-hero__actions {
+		width: min(100%, 32rem);
+		margin-inline: auto;
+	}
+
+	.landing-hero__cta {
+		width: calc(100% - 2.4rem);
+		margin-inline: auto;
+		min-width: 0;
+		min-height: 5rem;
+		padding: 1.1rem 1.8rem;
+		font-size: 2.6rem;
+	}
+
+	.landing-hero__problem-grid {
+		grid-template-columns: 1fr;
+		gap: 1.2rem;
+	}
+
+	.landing-problem-card {
+		min-height: 0;
+	}
+
+	.landing-problem-card__icon {
+		width: 7.2rem;
+		height: 7.2rem;
+		margin-bottom: 1.2rem;
+		font-size: 4rem;
+	}
+
+	.landing-section-heading__title {
+		font-size: 3rem;
+	}
+
+	.landing-why__grid {
+		grid-template-columns: 1fr;
+		gap: 2rem;
+		margin-top: 3rem;
+	}
+
+	.landing-why-card {
+		padding-right: 0;
+	}
+
+	.landing-services {
+		padding: 4.6rem 0 5.2rem;
+	}
+
+	.landing-involved,
+	.landing-thanks {
+		padding: 4.8rem 0 5.2rem;
+	}
+
+	.landing-column-card__title {
+		font-size: 2.7rem;
+	}
+
+	.landing-column-card__text {
+		font-size: 1.8rem;
+	}
+
+	.landing-involved__link,
+	.landing-thanks__link {
+		font-size: 1.85rem;
+	}
+
+	.landing-services__card {
+		margin-top: 2.6rem;
+	}
+
+	.landing-services__text {
+		font-size: 1.8rem;
+	}
+
+	.landing-services__link {
+		font-size: 1.95rem;
+	}
+
+	.landing-services__logo {
+		max-width: 20rem;
+	}
+
+	.landing-thanks__intro {
+		font-size: 2rem;
+	}
+}
+
+table {
+	margin: 0 auto;
+	border-collapse: collapse;
+}
+table td {
+	padding: 3px 20px;
+	border: 1px var(--table-border-color) solid;
+}
+table thead {
+	background: var(--table-header-bg);
+}
+table thead td {
+	font-weight: 700;
+	border: none;
+}
+table thead th {
+	padding: 3px 20px;
+}
+table thead tr {
+	border: 1px var(--table-header-bg) solid;
+}
+/* Alternate background colors for rows */
+table tbody tr:nth-child(2n) {
+	background: var(--table-alternate-bg);
+}
+
+blockquote {
+	margin: 20px 0;
+	padding: 0 20px;
+	color: var(--fg);
+	background-color: var(--quote-bg);
+	border-block-start: 0.1em solid var(--quote-border);
+	border-block-end: 0.1em solid var(--quote-border);
+}
+
+.warning {
+	margin: 20px;
+	padding: 0 20px;
+	border-inline-start: 2px solid var(--warning-border);
+}
+
+.warning:before {
+	position: absolute;
+	width: 3rem;
+	height: 3rem;
+	margin-inline-start: calc(-1.5rem - 21px);
+	content: "ⓘ";
+	text-align: center;
+	background-color: var(--bg);
+	color: var(--warning-border);
+	font-weight: bold;
+	font-size: 2rem;
+}
+
+blockquote .warning:before {
+	background-color: var(--quote-bg);
+}
+
+kbd {
+	background-color: var(--table-border-color);
+	border-radius: 4px;
+	border: solid 1px var(--theme-popup-border);
+	box-shadow: inset 0 -1px 0 var(--theme-hover);
+	display: inline-block;
+	font-size: var(--code-font-size);
+	font-family: var(--mono-font);
+	line-height: 10px;
+	padding: 4px 5px;
+	vertical-align: middle;
+}
+
+sup {
+	/* Set the line-height for superscript and footnote references so that there
+       isn't an awkward space appearing above lines that contain the footnote.
+
+       See https://github.com/rust-lang/mdBook/pull/2443#discussion_r1813773583
+       for an explanation.
+    */
+	line-height: 0;
+}
+
+.footnote-definition {
+	font-size: 0.9em;
+}
+/* The default spacing for a list is a little too large. */
+.footnote-definition ul,
+.footnote-definition ol {
+	padding-left: 20px;
+}
+.footnote-definition > li {
+	/* Required to position the ::before target */
+	position: relative;
+}
+.footnote-definition > li:target {
+	scroll-margin-top: 50vh;
+}
+.footnote-reference:target {
+	scroll-margin-top: 50vh;
+}
+/* Draws a border around the footnote (including the marker) when it is selected.
+   TODO: If there are multiple linkbacks, highlight which one you just came
+   from so you know which one to click.
+*/
+.footnote-definition > li:target::before {
+	border: 2px solid var(--footnote-highlight);
+	border-radius: 6px;
+	position: absolute;
+	top: -8px;
+	right: -8px;
+	bottom: -8px;
+	left: -32px;
+	pointer-events: none;
+	content: "";
+}
+/* Pulses the footnote reference so you can quickly see where you left off reading.
+   This could use some improvement.
+*/
+@media not (prefers-reduced-motion) {
+	.footnote-reference:target {
+		animation: fn-highlight 0.8s;
+		border-radius: 2px;
+	}
+
+	@keyframes fn-highlight {
+		from {
+			background-color: var(--footnote-highlight);
+		}
+	}
+}
+
+.tooltiptext {
+	position: absolute;
+	visibility: hidden;
+	color: var(--tooltip-fg);
+	background-color: var(--tooltip-bg);
+	transform: translateX(
+		-50%
+	); /* Center by moving tooltip 50% of its width left */
+	left: -8px; /* Half of the width of the icon */
+	top: -35px;
+	font-size: 0.8em;
+	text-align: center;
+	border-radius: 6px;
+	padding: 5px 8px;
+	margin: 5px;
+	z-index: 1000;
+}
+.tooltipped .tooltiptext {
+	visibility: visible;
+}
+
+.chapter li.part-title {
+	color: var(--sidebar-fg);
+	margin: 5px 0px;
+	font-family: var(--title-font);
+	font-weight: bold;
+}
+
+.result-no-output {
+	font-style: italic;
+}

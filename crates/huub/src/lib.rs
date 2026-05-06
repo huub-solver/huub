@@ -42,10 +42,17 @@ pub enum Goal<V> {
 }
 
 /// Type alias for a set of integers parameter value.
-pub type IntSet = RangeList<IntVal>;
+type IntSet = Set<IntVal>;
 
 /// Type alias for an parameter integer value.
 type IntVal = i64;
+
+/// Type alias for an efficient set of values, that is suitable to track
+/// decision variable domains.
+///
+/// This uses [`rangelist::RangeList`] to represent a set of values efficiently,
+/// without storing each value individually.
+pub type Set<T> = RangeList<T>;
 
 /// Type alias for a signal given by callbacks to the [`Solver`](solver::Solver)
 /// to indicate whether it should terminate.
