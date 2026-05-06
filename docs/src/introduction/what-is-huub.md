@@ -18,7 +18,7 @@ In practice, this means that Huub works with decision variables and constraints 
 When the solver encounters a conflict, it does not simply backtrack and forget what happened.
 It analyses the failure, learns information from it, and uses that information to avoid making essentially the same mistake again.
 
-This combination matters because combinatorial optimisation problems are often too rich to encode comfortably as pure SAT, but also too difficult to solve well using propagation and chronological backtracking alone.
+This combination matters because combinatorial optimization problems are often too rich to encode comfortably as pure SAT, but also too difficult to solve well using propagation and chronological backtracking alone.
 A CP+SAT solver can exploit the structure of high-level constraints while still benefitting from the learning mechanisms that have made modern SAT solving so effective.
 
 Huub is also intended to be studied and extended.
@@ -38,7 +38,7 @@ They want to construct models programmatically, integrate solving into an applic
 Both workflows are important, and both are supported by the same project.
 But they answer different questions:
 - If your question is “How do I formulate my problem and solve it with Huub?”, then you might best use Huub through [MiniZinc](https://www.minizinc.org/).
-- If your question is “How do I integrate Huub into my application?” or “How do I extend Huub's behaviour?”, then you should explore how to use Huub as a Rust library.
+- If your question is “How do I integrate Huub into my application?” or “How do I extend Huub's behavior?”, then you should explore how to use Huub as a Rust library.
 
 ### From MiniZinc
 
@@ -57,10 +57,10 @@ This mode of use has several practical advantages.
   You can focus on which decision variables and constraints best capture your problem, while MiniZinc and Huub take care of rewriting constraints and decision types not directly supported by Huub.
 3. It makes comparison easy.
   Because MiniZinc supports multiple solvers, you can test the same model with Huub and with other backends.
-  This is often useful both for benchmarking and for understanding where Huub's CP+SAT behaviour is especially effective.
+  This is often useful both for benchmarking and for understanding where Huub's CP+SAT behavior is especially effective.
 
 This book is written with that modelling perspective in mind.
-Even when later chapters discuss internals, the ultimate purpose is still to help the reader understand how solver behaviour and model structure interact.
+Even when later chapters discuss internals, the ultimate purpose is still to help the reader understand how solver behavior and model structure interact.
 
 If this is how you want to use Huub, then continue to “[Using Huub from MiniZinc](./using-huub-from-minizinc.md)”.
 It describes how to install Huub as a MiniZinc solver, and the additional functionality that Huub makes available from its MiniZinc library.
@@ -109,11 +109,11 @@ Reading the example source alongside the surrounding discussion is often the qui
 
 **API Reference** The API reference for the Rust crate is available on [docs.rs](https://docs.rs/huub/latest/huub/) or locally using [`cargo doc`](https://doc.rust-lang.org/cargo/commands/cargo-doc.html).
 The API reference serves a different purpose from this book.
-The book is organised pedagogically: it introduces concepts in an order intended to be useful for learning.
-The API reference is organised by modules, types, and functions.
-When you already know what functionality you need, then the API reference is best way to inspect the signatures and item-level documentation.
+The book is organized pedagogically: it introduces concepts in an order intended to be useful for learning.
+The API reference is organized by modules, types, and functions.
+When you already know what functionality you need, then the API reference is the best way to inspect the signatures and item-level documentation.
 When you want to understand why a concept exists, how pieces fit together, or how to approach a modelling or implementation task, the book should usually be your first stop.
 
 **Community Discussions** For help, questions, and discussion, use the [GitHub Discussions](https://github.com/huub-solver/huub/discussions).
-This is the best place to ask questions about modelling with Huub, practical solver use, the design of the API, and the behaviour of the implementation.
+This is the best place to ask questions about modelling with Huub, practical solver use, the design of the API, and the behavior of the implementation.
 It is also the natural place to discuss documentation gaps, modelling idioms, and ideas for future extensions.

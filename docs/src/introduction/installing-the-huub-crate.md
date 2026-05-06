@@ -56,7 +56,7 @@ The `flatzinc` feature enables support for constructing Huub objects from FlatZi
 This is useful when a Rust application wants to reuse the MiniZinc front-end while still working with Huub's Rust API.
 If a Rust program builds Huub models directly through the Rust API, the feature is not required.
 
-With this feature enabled, Huub exposes the FlatZinc deserialisation module at `huub::model::deserialize::flatzinc`.
+With this feature enabled, Huub exposes the FlatZinc deserialization module at `huub::model::deserialize::flatzinc`.
 That module provides the conversion path from a parsed FlatZinc instance into a `Model`, and from there into a `Solver`.
 
 The two main entry points are:
@@ -77,6 +77,6 @@ For example, the MiniZinc compilation step can be performed with:
 minizinc --solver huub --compile model.mzn data.dzn
 ```
 
-Huub's MiniZinc solver configuration uses JSON input, so the generated solver input is the format expected by the FlatZinc deserialisation path.
+Huub's MiniZinc solver configuration uses JSON input, so the generated solver input is the format expected by the FlatZinc deserialization path.
 Reading a FlatZinc JSON file directly in an application also requires code that parses the JSON into the FlatZinc data structure.
 In practice, that usually means depending on `flatzinc-serde` and `serde_json` in the application as well as enabling Huub's `flatzinc` feature.

@@ -1,6 +1,6 @@
-# Jobshop
+# Job shop
 
-Jobshop scheduling is a strong first case study because it connects modelling, propagation, and search behavior in a single example.
+Job shop scheduling is a strong first case study because it connects modelling, propagation, and search behavior in a single example.
 
 
 ## Problem description
@@ -17,12 +17,12 @@ This example models both constraints and solves to optimality using Huub's Lazy 
 
 | Objective | Description |
 |-----------|-------------|
-| `makespan` *(default)* | Minimise the time at which the last operation completes. |
-| `total-completion-time` | Minimise the sum of per-job completion times. |
+| `makespan` *(default)* | Minimize the time at which the last operation completes. |
+| `total-completion-time` | Minimize the sum of per-job completion times. |
 
 ## Implementation walkthrough
 
-The implementation of the jobshop example is organized into three modules:
+The implementation of the job shop example is organized into three modules:
 
 ### Creating decision variables
 
@@ -37,7 +37,7 @@ Each start time variable has a domain from 0 to the sum of all processing times 
 
 ### Posting constraints
 
-Two types of constraints model the jobshop problem:
+Two types of constraints model the job shop problem:
 
 **Precedence constraints**: Each job's operations must be executed in order.
 For each job, we ensure that operation `i+1` cannot start before operation `i` finishes:
@@ -68,7 +68,7 @@ For the total completion time objective, we use `.define()` to create a derived 
 This example demonstrates how to implement a custom brancher for domain-specific search strategies.
 While Huub provides built-in branchers for common variable selection strategies, implementing a custom brancher allows you to leverage problem-specific knowledge.
 
-In the jobshop problem, a key insight is that jobs with more work remaining are generally less constrained.
+In the job shop problem, a key insight is that jobs with more work remaining are generally less constrained.
 By prioritizing these jobs early, we can detect infeasibility faster and prune more of the search space.
 
 To implement a custom brancher, you create a struct that implements the `Brancher` trait, which requires a `decide` method called at each search node to determine the next variable-value assignment to try.
@@ -92,7 +92,7 @@ We then register the brancher with the solver using `push_brancher()`.
 
 At each search node, the `decide` method implements the following logic:
 
-1. **Check if done**: If we've assigned all operations, return `Directive::Exhausted` to signal the brancher has finished.
+1. **Check if done**: If we've assigned all operations, then we return `Directive::Exhausted` to signal the brancher has finished.
 
 2. **Compute job scores**: Iterate through all unfixed operations. Track which job each unfixed operation belongs to. The score for each job is either the total remaining processing time or the number of remaining operations, depending on the chosen strategy.
 
@@ -113,7 +113,7 @@ This algorithm maintains an upper bound on the objective (the best solution foun
 
 Each time a solution is found, it triggers a callback.
 The callback is your opportunity to extract the solution, perform logging, or update the objective bound.
-In the jobshop example, the callback displays the makespan or total completion time of each solution found, allowing you to track progress as the solver explores the search space:
+In the job shop example, the callback displays the makespan or total completion time of each solution found, allowing you to track progress as the solver explores the search space:
 
 ```rust,ignore
 {{#include ../../../crates/huub/examples/jobshop/main.rs:solve_with_branch_and_bound}}
@@ -121,7 +121,7 @@ In the jobshop example, the callback displays the makespan or total completion t
 
 ## Running the example
 
-The jobshop example is available in the Huub repository.
+The job shop example is available in the Huub repository.
 Instances are provided in a simple text format (see [Instance file format](#instance-file-format) below).
 
 Run the example with:

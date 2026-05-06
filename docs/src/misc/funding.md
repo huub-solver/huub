@@ -7,7 +7,7 @@ Huub is developed as part of ongoing research into constraint programming, SAT s
 This research was partially funded by the Australian Government through the Australian Research Council Industrial Transformation Training Centre in Optimization Technologies, Integrated Methodologies, and Applications ([OPTIMA](https://optima.org.au)), Project ID IC200100009.
 
 OPTIMA is a collaborative research center focused on developing next-generation optimization technologies and methodologies.
-The centre brings together leading researchers from academia and industry to address real-world optimization challenges.
+The center brings together leading researchers from academia and industry to address real-world optimization challenges.
 The funding provided by OPTIMA has been instrumental in supporting the core research and development of Huub.
 
 ## Amazon Research Award
