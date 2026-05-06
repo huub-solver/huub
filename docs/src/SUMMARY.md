@@ -17,7 +17,7 @@
 
 # Case Studies
 
-- [Jobshop](./case-studies/jobshop.md)
+- [Job shop](./case-studies/jobshop.md)
 - [More coming soon...]()
   
 # Programming Propagators
