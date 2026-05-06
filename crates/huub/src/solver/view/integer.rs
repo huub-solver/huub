@@ -6,8 +6,6 @@ use std::{
 	ops::{Add, Mul, Neg},
 };
 
-use pindakaas::solver::Assumptions;
-
 use crate::{
 	IntSet, IntVal,
 	actions::{
@@ -61,7 +59,7 @@ impl View<IntVal> {
 	/// Return a list of integers that can used to identify the literals that
 	/// are associated to an integer view, and the meaning of those literals.
 	#[doc(hidden)]
-	pub fn lit_reverse_map_info<Sat: Assumptions>(
+	pub fn lit_reverse_map_info<Sat>(
 		&self,
 		slv: &Solver<Sat>,
 	) -> Vec<(NonZero<i32>, IntLitMeaning)> {
