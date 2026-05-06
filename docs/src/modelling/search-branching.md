@@ -387,7 +387,6 @@ let mut config = InitConfig::default()
 
 - **Preprocessing** (`with_preprocessing(n)`): Run N rounds of SAT preprocessing before search begins.
   More rounds can reduce the problem size but take more time upfront.
-  Default is typically 1.
 - **Inprocessing** (`with_inprocessing(bool)`):
   Enable or disable SAT inprocessing during search.
   Inprocessing simplifies clauses and removes redundant variables as the solver learns more.

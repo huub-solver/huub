@@ -23,7 +23,7 @@ It shows how using a pluggable SAT backend through IPASIR-UP enables better solv
 DOI: [10.4230/LIPIcs.CP.2025.42](https://doi.org/10.4230/LIPIcs.CP.2025.42)
 
 **Satisfiability Modulo User Propagators**
-*IPASIR-UP journal paper**
+*IPASIR-UP journal paper*
 
 Huub is built on the IPASIR-UP interface, which fundamentally changes how constraint programming and SAT solving can be integrated.
 Rather than encoding everything into clauses upfront, IPASIR-UP allows external components to dynamically participate in the SAT solver's search process.
