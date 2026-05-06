@@ -23,12 +23,12 @@ use std::{
 };
 
 use itertools::Itertools;
+pub use pindakaas::solver::cadical::Cadical;
 use pindakaas::{
 	ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
 	solver::{
 		Assumptions, FailedAssumptions, LearnCallback, SolveResult as SatSolveResult,
 		TerminateCallback,
-		cadical::Cadical,
 		propagation::{ExternalPropagation, SolvingActions},
 	},
 };
