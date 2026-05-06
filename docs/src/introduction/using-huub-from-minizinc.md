@@ -31,7 +31,7 @@ For example, from the command line a model can be solved using the following com
 minizinc --solver huub model.mzn data.dzn
 ```
 
-You can use the following command to inspect the available command line flag for Huub.
+You can use the following command to inspect the available command line flags for Huub.
 
 ```sh
 huub --help

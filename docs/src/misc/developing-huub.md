@@ -59,7 +59,7 @@ Huub is tested with the following solvers that implement this interface:
 
 ### Encoding to SAT
 
-The connection to SAT solvers and encoding methods to CNF from Huub use [Pindakaas](https://github.com/pindakaashq/pindakaas), a Rust crate for SAT solving and encoding to SAT.
+Huub uses [Pindakaas](https://github.com/pindakaashq/pindakaas), a Rust crate for SAT solving and encoding to CNF, for its SAT solver integration and CNF encoding.
 
 ### Related Solvers
 

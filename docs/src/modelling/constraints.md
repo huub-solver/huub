@@ -20,7 +20,7 @@ This is why good constraint propagation is so important: more values can be elim
 ## The constraint posting interface
 
 In Huub, constraints are posted using a builder pattern on the `Model`.
-Constraints accept positional argument in the initial call, named (and sometimes optional) arguments using calls on the builder object, before finalizing with `.post()`.
+Constraints accept positional arguments in the initial call, named (and sometimes optional) arguments using calls on the builder object, before finalizing with `.post()`.
 The pattern typically looks like:
 
 ```rust,ignore
@@ -51,7 +51,7 @@ model.element(array).index(idx).result(res).post();
 
 ### Uniqueness constraints
 
-The `unique` constraint enforces that each position in a collection take different values (also known as “all different”).
+The `unique` constraint enforces that each position in a collection takes a different value (also known as “all different”).
 
 ```rust
 # extern crate huub;

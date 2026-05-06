@@ -116,7 +116,7 @@ The beauty of Huub's CP+SAT approach is that complex constraints like `unique()`
 
 ## Complete working example
 
-The complete example is available as the `send-more-money` and can be run with:
+The complete example is available as the `send-more-money` example and can be run with:
 
 ```bash
 cargo run --example send-more-money
