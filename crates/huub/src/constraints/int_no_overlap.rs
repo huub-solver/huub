@@ -843,7 +843,7 @@ mod tests {
 	use itertools::Itertools;
 	use tracing_test::traced_test;
 
-	use crate::{Model, lower::InitConfig};
+	use crate::{lower::InitConfig, model::Model};
 
 	#[test]
 	#[traced_test]

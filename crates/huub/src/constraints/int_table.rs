@@ -170,7 +170,7 @@ mod tests {
 	use expect_test::expect;
 	use itertools::Itertools;
 
-	use crate::{Model, lower::InitConfig};
+	use crate::{lower::InitConfig, model::Model};
 
 	#[test]
 	fn test_binary_table_sat() {

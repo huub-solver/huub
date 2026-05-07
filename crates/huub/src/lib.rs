@@ -18,10 +18,7 @@ pub mod solver;
 pub(crate) mod tests;
 pub mod views;
 
-use pindakaas::solver::TermSignal;
 use rangelist::RangeList;
-
-use crate::model::Model;
 
 /// Type alias for a disjunction of literals (clause), used for internal type
 /// documentation.
@@ -30,16 +27,6 @@ type Clause<L> = Vec<L>;
 /// Type alias for a conjunction of literals (clause), used for internal type
 /// documentation.
 type Conjunction<L> = Vec<L>;
-
-/// Type of the optimization objective
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum Goal<V> {
-	/// Search for a solution that minimizes the given objective.
-	Minimize(V),
-	/// Search for a solution that maximizes the given objective.
-	Maximize(V),
-}
 
 /// Type alias for a set of integers parameter value.
 type IntSet = Set<IntVal>;
@@ -53,7 +40,3 @@ type IntVal = i64;
 /// This uses [`rangelist::RangeList`] to represent a set of values efficiently,
 /// without storing each value individually.
 pub type Set<T> = RangeList<T>;
-
-/// Type alias for a signal given by callbacks to the [`Solver`](solver::Solver)
-/// to indicate whether it should terminate.
-pub type TerminationSignal = TermSignal;

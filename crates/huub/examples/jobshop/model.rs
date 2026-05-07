@@ -295,9 +295,8 @@ impl fmt::Display for Solution {
 #[cfg(test)]
 mod tests {
 	use huub::{
-		Goal,
 		lower::InitConfig,
-		solver::{IntValuation, Solver},
+		solver::{Goal, IntValuation, Solver},
 	};
 
 	use crate::model::{Instance, JobShopModel, ObjectiveType};

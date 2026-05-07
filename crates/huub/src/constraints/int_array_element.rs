@@ -454,10 +454,11 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntSet, Model,
+		IntSet,
 		actions::{IntInspectionActions, IntPropagationActions},
 		constraints::int_array_element::IntArrayElementBounds,
 		lower::InitConfig,
+		model::Model,
 		solver::{
 			Solver,
 			decision::integer::{EncodingType, IntDecision},

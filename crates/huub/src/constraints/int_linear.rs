@@ -1084,10 +1084,10 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntSet, IntVal, Model,
+		IntSet, IntVal,
 		constraints::int_linear::{DoubleIntVal, IntLinearLessEqBounds, IntLinearNotEqValue},
 		lower::InitConfig,
-		model::view::View,
+		model::{Model, view::View},
 		solver::{
 			Solver,
 			decision::integer::{EncodingType, IntDecision},

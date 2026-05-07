@@ -177,10 +177,9 @@ mod tests {
 	use pindakaas::propositional_logic::Formula;
 
 	use crate::{
-		Model,
 		actions::BoolInspectionActions,
 		constraints::{Constraint, SimplificationStatus},
-		model::expressions::bool_formula::BoolFormula,
+		model::{Model, expressions::bool_formula::BoolFormula},
 	};
 
 	#[test]

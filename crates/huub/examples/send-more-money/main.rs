@@ -14,6 +14,15 @@
 //! Leading digits S and M cannot be zero.
 
 #[cfg(test)]
+/// A macro override for `println!` that writes to the `OUTPUT` buffer instead
+/// of stdout.
+macro_rules! println {
+    ($($tt:tt)*) => {
+        let _ = writeln!(&mut OUTPUT.lock().unwrap(), $($tt)*);
+    }
+}
+
+#[cfg(test)]
 use std::{fmt::Write, sync::Mutex};
 
 use huub::{
@@ -25,15 +34,6 @@ use huub::{
 #[cfg(test)]
 /// A mutex-protected string buffer for storing the output (just when testing)
 static OUTPUT: Mutex<String> = Mutex::new(String::new());
-
-#[cfg(test)]
-/// A macro override for `println!` that writes to the `OUTPUT` buffer instead
-/// of stdout.
-macro_rules! println {
-    ($($tt:tt)*) => {
-        let _ = writeln!(&mut OUTPUT.lock().unwrap(), $($tt)*);
-    }
-}
 
 /// Runs the Send More Money solver and prints the solution.
 pub fn main() {

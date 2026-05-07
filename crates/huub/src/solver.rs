@@ -40,7 +40,7 @@ pub use crate::solver::{
 	view::{DefaultView, View, boolean::BoolView, integer::IntView},
 };
 use crate::{
-	Clause, Goal, IntVal, TerminationSignal,
+	Clause, IntVal,
 	actions::{
 		BrancherInitActions, ConstructionActions, DecisionActions, IntDecisionActions,
 		IntInspectionActions, PostingActions, ReasoningContext, ReasoningEngine, Trailed,
@@ -66,6 +66,16 @@ pub trait AssumptionChecker {
 	/// Note that for literals 'bv' which are not assumption literals, the
 	/// behavior of is not specified.
 	fn fail(&self, bv: View<bool>) -> bool;
+}
+
+/// Type of the optimization objective.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum Goal<V> {
+	/// Search for a solution that minimizes the given objective.
+	Minimize(V),
+	/// Search for a solution that maximizes the given objective.
+	Maximize(V),
 }
 
 /// Statistics related to the initialization of the solver
@@ -175,6 +185,10 @@ pub enum SwitchTrigger {
 	Restarts(u64),
 }
 
+/// Type alias for a signal given by callbacks to the [`Solver`] to indicate
+/// whether it should terminate.
+pub type TerminationSignal = pindakaas::solver::TermSignal;
+
 /// Helper function that calls [`tracing::debug!`] on learned clauses.
 ///
 /// This function is used as part of the callback given to the SAT solver.
@@ -264,6 +278,28 @@ impl AssumptionChecker for NoAssumptions {
 	}
 }
 
+impl<Sat: ClauseDatabase> Solver<Sat> {
+	/// Add a clause to the solver
+	pub fn add_clause<Iter>(
+		&mut self,
+		clause: Iter,
+	) -> Result<(), <Self as ReasoningContext>::Conflict>
+	where
+		Iter: IntoIterator,
+		Iter::Item: Into<View<bool>>,
+	{
+		let clause = clause.into_iter().map(Into::into).collect_vec();
+		match ClauseDatabaseTools::add_clause(&mut self.sat, clause.clone()) {
+			Ok(()) => Ok(()),
+			Err(Unsatisfiable) => Err(Conflict::new(
+				self,
+				None,
+				clause.into_iter().map(|l| !l).collect_vec(),
+			)),
+		}
+	}
+}
+
 impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 	/// Try and find a solution to the problem for which the Solver was
 	/// initialized, given a list of Boolean assumptions.
@@ -302,28 +338,6 @@ impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 				Status::Unsatisfiable
 			}
 			SatSolveResult::Unknown => Status::Unknown,
-		}
-	}
-}
-
-impl<Sat: ClauseDatabase> Solver<Sat> {
-	/// Add a clause to the solver
-	pub fn add_clause<Iter>(
-		&mut self,
-		clause: Iter,
-	) -> Result<(), <Self as ReasoningContext>::Conflict>
-	where
-		Iter: IntoIterator,
-		Iter::Item: Into<View<bool>>,
-	{
-		let clause = clause.into_iter().map(Into::into).collect_vec();
-		match ClauseDatabaseTools::add_clause(&mut self.sat, clause.clone()) {
-			Ok(()) => Ok(()),
-			Err(Unsatisfiable) => Err(Conflict::new(
-				self,
-				None,
-				clause.into_iter().map(|l| !l).collect_vec(),
-			)),
 		}
 	}
 }

@@ -330,8 +330,9 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntSet, Model,
+		IntSet,
 		constraints::int_div::IntDivBounds,
+		model::Model,
 		solver::{
 			Solver,
 			decision::integer::{EncodingType, IntDecision},

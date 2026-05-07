@@ -591,11 +591,12 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntSet, IntVal, Model,
+		IntSet, IntVal,
 		constraints::{
 			int_linear::IntLinearLessEqBounds,
 			int_unique::{IntUniqueBounds, IntUniqueValue},
 		},
+		model::Model,
 		solver::{
 			IntValuation, Solver, Status,
 			decision::integer::{EncodingType, IntDecision},

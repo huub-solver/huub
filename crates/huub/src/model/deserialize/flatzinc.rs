@@ -23,7 +23,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::warn;
 
 use crate::{
-	Goal, IntSet, IntVal,
+	IntSet, IntVal,
 	actions::{
 		BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions,
 		PropagationActions,
@@ -36,7 +36,7 @@ use crate::{
 		view::{View, boolean::BoolView},
 	},
 	solver::{
-		self, Solver,
+		self, Goal, Solver,
 		branchers::{ValueSelection, VariableSelection},
 	},
 };

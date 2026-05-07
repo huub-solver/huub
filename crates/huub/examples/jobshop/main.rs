@@ -31,9 +31,8 @@ use std::{
 
 use clap::{ArgAction, Parser, ValueEnum, builder::BoolishValueParser};
 use huub::{
-	Goal, TerminationSignal,
 	lower::InitConfig,
-	solver::{IntValuation, SearchStrategy, Solver, SwitchTrigger},
+	solver::{Goal, IntValuation, SearchStrategy, Solver, SwitchTrigger, TerminationSignal},
 };
 
 use crate::{

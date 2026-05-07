@@ -66,19 +66,19 @@ impl Add<IntVal> for IntLinearExp {
 	}
 }
 
-impl Add<View<bool>> for IntLinearExp {
+impl Add<View<IntVal>> for IntLinearExp {
 	type Output = IntLinearExp;
 
-	fn add(mut self, rhs: View<bool>) -> Self::Output {
+	fn add(mut self, rhs: View<IntVal>) -> Self::Output {
 		self += rhs;
 		self
 	}
 }
 
-impl Add<View<IntVal>> for IntLinearExp {
+impl Add<View<bool>> for IntLinearExp {
 	type Output = IntLinearExp;
 
-	fn add(mut self, rhs: View<IntVal>) -> Self::Output {
+	fn add(mut self, rhs: View<bool>) -> Self::Output {
 		self += rhs;
 		self
 	}
@@ -99,13 +99,6 @@ impl AddAssign<IntLinearExp> for IntLinearExp {
 impl AddAssign<IntVal> for IntLinearExp {
 	fn add_assign(&mut self, rhs: IntVal) {
 		self.offset += rhs;
-	}
-}
-
-impl AddAssign<View<bool>> for IntLinearExp {
-	fn add_assign(&mut self, rhs: View<bool>) {
-		let rhs: View<IntVal> = rhs.into();
-		*self += rhs;
 	}
 }
 
@@ -139,6 +132,13 @@ impl AddAssign<View<IntVal>> for IntLinearExp {
 				}
 			}
 		}
+	}
+}
+
+impl AddAssign<View<bool>> for IntLinearExp {
+	fn add_assign(&mut self, rhs: View<bool>) {
+		let rhs: View<IntVal> = rhs.into();
+		*self += rhs;
 	}
 }
 
@@ -200,19 +200,19 @@ impl Sub<IntVal> for IntLinearExp {
 	}
 }
 
-impl Sub<View<bool>> for IntLinearExp {
+impl Sub<View<IntVal>> for IntLinearExp {
 	type Output = IntLinearExp;
 
-	fn sub(mut self, rhs: View<bool>) -> Self::Output {
+	fn sub(mut self, rhs: View<IntVal>) -> Self::Output {
 		self -= rhs;
 		self
 	}
 }
 
-impl Sub<View<IntVal>> for IntLinearExp {
+impl Sub<View<bool>> for IntLinearExp {
 	type Output = IntLinearExp;
 
-	fn sub(mut self, rhs: View<IntVal>) -> Self::Output {
+	fn sub(mut self, rhs: View<bool>) -> Self::Output {
 		self -= rhs;
 		self
 	}
@@ -230,15 +230,15 @@ impl SubAssign<IntVal> for IntLinearExp {
 	}
 }
 
-impl SubAssign<View<bool>> for IntLinearExp {
-	fn sub_assign(&mut self, rhs: View<bool>) {
-		self.add_assign(rhs * -1);
-	}
-}
-
 impl SubAssign<View<IntVal>> for IntLinearExp {
 	fn sub_assign(&mut self, rhs: View<IntVal>) {
 		self.add_assign(-rhs);
+	}
+}
+
+impl SubAssign<View<bool>> for IntLinearExp {
+	fn sub_assign(&mut self, rhs: View<bool>) {
+		self.add_assign(rhs * -1);
 	}
 }
 
@@ -252,8 +252,8 @@ impl Sum<IntLinearExp> for IntLinearExp {
 	}
 }
 
-impl Sum<View<bool>> for IntLinearExp {
-	fn sum<I: Iterator<Item = View<bool>>>(iter: I) -> Self {
+impl Sum<View<IntVal>> for IntLinearExp {
+	fn sum<I: Iterator<Item = View<IntVal>>>(iter: I) -> Self {
 		let mut result = IntLinearExp::from(0);
 		for item in iter {
 			result += item;
@@ -262,8 +262,8 @@ impl Sum<View<bool>> for IntLinearExp {
 	}
 }
 
-impl Sum<View<IntVal>> for IntLinearExp {
-	fn sum<I: Iterator<Item = View<IntVal>>>(iter: I) -> Self {
+impl Sum<View<bool>> for IntLinearExp {
+	fn sum<I: Iterator<Item = View<bool>>>(iter: I) -> Self {
 		let mut result = IntLinearExp::from(0);
 		for item in iter {
 			result += item;

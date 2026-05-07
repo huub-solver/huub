@@ -6,10 +6,10 @@ use pindakaas::propositional_logic::Formula;
 use tracing_test::traced_test;
 
 use crate::{
-	IntSet, IntVal, Model,
+	IntSet, IntVal,
 	constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
 	lower::{InitConfig, LoweringError},
-	model::deserialize::AnyView as ModelView,
+	model::{Model, deserialize::AnyView as ModelView},
 	solver::{
 		AnyView as SolverView, BoolValuation, IntValuation, Solver, Status, Value,
 		branchers::{IntBrancher, ValueSelection, VariableSelection},

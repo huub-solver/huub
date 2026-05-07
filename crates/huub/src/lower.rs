@@ -16,14 +16,14 @@ use rangelist::IntervalIterator;
 use rustc_hash::FxHashSet;
 
 use crate::{
-	IntSet, IntVal, Model,
+	IntSet, IntVal,
 	actions::{
 		BoolInspectionActions, ConstructionActions, IntDecisionActions, IntInspectionActions,
 		PostingActions, ReasoningContext, ReasoningEngine, Trailed,
 	},
 	constraints::{BoxedPropagator, Conflict, ReasonBuilder},
 	helpers::bytes::Bytes,
-	model::{self, decision::integer::Domain, resolved::Resolved},
+	model::{self, Model, decision::integer::Domain, resolved::Resolved},
 	solver::{
 		self, IntLitMeaning, Solver,
 		decision::integer::{EncodingType, IntDecision},

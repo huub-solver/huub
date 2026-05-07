@@ -192,8 +192,7 @@ The `set_terminate_callback` method allows you to provide a closure that returns
 # use huub::{
 # 	lower::InitConfig,
 # 	model::Model,
-# 	solver::{Solver, Status},
-# 	TerminationSignal,
+# 	solver::{Solver, Status, TerminationSignal},
 # };
 # let mut model = Model::default();
 # let (mut solver, _): (Solver, _) = model.to_solver(&InitConfig::default()).unwrap();
@@ -239,8 +238,7 @@ This performs an iterative search: after finding each solution, it adds a constr
 # use huub::{
 # 	lower::InitConfig,
 # 	model::Model,
-# 	solver::{IntValuation, Solver, Status},
-# 	Goal,
+# 	solver::{Goal, IntValuation, Solver, Status},
 # };
 # let mut model = Model::default();
 # let x = model.new_int_decision(0..=100);
