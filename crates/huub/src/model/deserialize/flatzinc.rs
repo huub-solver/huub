@@ -273,11 +273,19 @@ pub struct FlatZincSolverMeta {
 /// Statistical information about the extraction process that creates a
 /// [`Model`] from a [`FlatZinc`] instance.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct FlatZincStatistics {
-	/// Number of literal views extracted from the FlatZinc specification
-	extracted_views: u32,
-	/// Number of variables removed by unification
-	vars_unified: u32,
+	/// Number of views extracted from the FlatZinc specification
+	///
+	/// Views currently creates the following types of views:
+	/// - literal views (i.e., direct use of literals used to as part of
+	///   variable representation instead of reified constraints)
+	/// - linear views (i.e., scaled and offset views of integer variables)
+	/// - Boolean linear views (i.e., scaled and offset views of Boolean
+	///   variables, able to represent any integer value with two values)
+	pub extracted_views: u32,
+	/// Number of decisions removed through unification
+	pub unified_decisions: u32,
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -548,25 +556,6 @@ impl Error for FlatZincError {}
 impl From<LoweringError> for FlatZincError {
 	fn from(reformulation_error: LoweringError) -> Self {
 		Self::ReformulationError(reformulation_error)
-	}
-}
-
-impl FlatZincStatistics {
-	/// Returns the number of views extracted from the FlatZinc instance
-	///
-	/// Views currently creates the following types of views:
-	/// - literal views (i.e., direct use of literals used to as part of
-	///   variable representation instead of reified constraints)
-	/// - linear views (i.e., scaled and offset views of integer variables)
-	/// - Boolean linear views (i.e., scaled and offset views of Boolean
-	///   variables, able to represent any integer value with two values)
-	pub fn extracted_views(&self) -> u32 {
-		self.extracted_views
-	}
-
-	/// Returns the number of variables removed by unification
-	pub fn unified_variables(&self) -> u32 {
-		self.vars_unified
 	}
 }
 

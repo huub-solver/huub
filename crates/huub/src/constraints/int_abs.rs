@@ -68,7 +68,7 @@ where
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		match self.origin_positive.val(ctx) {
 			Some(true) => {
@@ -101,7 +101,7 @@ where
 	I1: IntSolverActions<E>,
 	I2: IntSolverActions<E>,
 {
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Highest);
 		self.origin.enqueue_when(ctx, IntPropCond::Bounds);
 		self.abs.enqueue_when(ctx, IntPropCond::Bounds);
@@ -113,18 +113,18 @@ where
 		level = "trace",
 		skip(self, ctx)
 	)]
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		let (lb, ub) = self.origin.bounds(ctx);
 
 		match self.origin_positive.val(ctx) {
 			Some(false) => {
 				// If we know that the origin is negative, then just negate the bounds
 				self.abs
-					.tighten_min(ctx, -ub, |ctx: &mut E::PropagationCtx<'_>| {
+					.tighten_min(ctx, -ub, |ctx: &mut E::PropagationContext<'_>| {
 						[self.origin.max_lit(ctx)]
 					})?;
 				self.abs
-					.tighten_max(ctx, -lb, |ctx: &mut E::PropagationCtx<'_>| {
+					.tighten_max(ctx, -lb, |ctx: &mut E::PropagationContext<'_>| {
 						[
 							self.origin.min_lit(ctx),
 							(!self.origin_positive.clone()).into(),
@@ -133,11 +133,11 @@ where
 
 				let (lb, ub) = self.abs.bounds(ctx);
 				self.origin
-					.tighten_min(ctx, -ub, |ctx: &mut E::PropagationCtx<'_>| {
+					.tighten_min(ctx, -ub, |ctx: &mut E::PropagationContext<'_>| {
 						[self.abs.max_lit(ctx)]
 					})?;
 				self.origin
-					.tighten_max(ctx, -lb, |ctx: &mut E::PropagationCtx<'_>| {
+					.tighten_max(ctx, -lb, |ctx: &mut E::PropagationContext<'_>| {
 						[
 							self.abs.min_lit(ctx),
 							(!self.origin_positive.clone()).into(),
@@ -148,11 +148,11 @@ where
 				// If we know that the origin is positive, then the bounds
 				// are the same.
 				self.abs
-					.tighten_min(ctx, lb, |ctx: &mut E::PropagationCtx<'_>| {
+					.tighten_min(ctx, lb, |ctx: &mut E::PropagationContext<'_>| {
 						[self.origin.min_lit(ctx)]
 					})?;
 				self.abs
-					.tighten_max(ctx, ub, |ctx: &mut E::PropagationCtx<'_>| {
+					.tighten_max(ctx, ub, |ctx: &mut E::PropagationContext<'_>| {
 						[
 							self.origin.max_lit(ctx),
 							self.origin_positive.clone().into(),
@@ -161,11 +161,11 @@ where
 
 				let (lb, ub) = self.abs.bounds(ctx);
 				self.origin
-					.tighten_min(ctx, lb, |ctx: &mut E::PropagationCtx<'_>| {
+					.tighten_min(ctx, lb, |ctx: &mut E::PropagationContext<'_>| {
 						[self.abs.min_lit(ctx), self.origin_positive.clone().into()]
 					})?;
 				self.origin
-					.tighten_max(ctx, ub, |ctx: &mut E::PropagationCtx<'_>| {
+					.tighten_max(ctx, ub, |ctx: &mut E::PropagationContext<'_>| {
 						[self.abs.max_lit(ctx)]
 					})?;
 			}
@@ -174,7 +174,7 @@ where
 				// the maximum of the absolute values
 				let abs_max = cmp::max(ub, -lb);
 				self.abs
-					.tighten_max(ctx, abs_max, |ctx: &mut E::PropagationCtx<'_>| {
+					.tighten_max(ctx, abs_max, |ctx: &mut E::PropagationContext<'_>| {
 						[
 							self.origin.lit(ctx, IntLitMeaning::GreaterEq(-abs_max)),
 							self.origin.lit(ctx, IntLitMeaning::Less(abs_max + 1)),

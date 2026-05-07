@@ -50,7 +50,7 @@ pub trait BoolModelActions<E>
 where
 	E: ReasoningEngine,
 	Self: BoolSolverActions<E>
-		+ for<'a> BoolSimplificationActions<E::PropagationCtx<'a>>
+		+ for<'a> BoolSimplificationActions<E::PropagationContext<'a>>
 		+ Into<model::View<bool>>,
 {
 }
@@ -59,10 +59,10 @@ where
 pub trait BoolSolverActions<E>
 where
 	E: ReasoningEngine + ?Sized,
-	Self: for<'a> BoolInitActions<E::InitializationCtx<'a>>
-		+ for<'a> BoolInspectionActions<E::ExplanationCtx<'a>>
-		+ for<'a> BoolInspectionActions<E::NotificationCtx<'a>>
-		+ for<'a> BoolPropagationActions<E::PropagationCtx<'a>>
+	Self: for<'a> BoolInitActions<E::InitializationContext<'a>>
+		+ for<'a> BoolInspectionActions<E::ExplanationContext<'a>>
+		+ for<'a> BoolInspectionActions<E::NotificationContext<'a>>
+		+ for<'a> BoolPropagationActions<E::PropagationContext<'a>>
 		+ Into<E::Atom>,
 {
 }
@@ -112,7 +112,7 @@ pub trait Constraint<E: ReasoningEngine + ?Sized>: Any + Debug + DynClone + Prop
 	/// is already subsumed by the current state of the model.
 	fn simplify(
 		&mut self,
-		context: &mut E::PropagationCtx<'_>,
+		context: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict>;
 
 	/// Encode the constraint using [`Propagator`] objects or clauses for a
@@ -138,7 +138,7 @@ pub trait IntModelActions<E>
 where
 	E: ReasoningEngine,
 	Self: IntSolverActions<E>
-		+ for<'a> IntSimplificationActions<E::PropagationCtx<'a>>
+		+ for<'a> IntSimplificationActions<E::PropagationContext<'a>>
 		+ Into<model::View<IntVal>>,
 {
 }
@@ -147,10 +147,10 @@ where
 pub trait IntSolverActions<E>
 where
 	E: ReasoningEngine + ?Sized,
-	Self: for<'a> IntInitActions<E::InitializationCtx<'a>>
-		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>>
-		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>>
-		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>>,
+	Self: for<'a> IntInitActions<E::InitializationContext<'a>>
+		+ for<'a> IntExplanationActions<E::ExplanationContext<'a>>
+		+ for<'a> IntInspectionActions<E::NotificationContext<'a>>
+		+ for<'a> IntPropagationActions<E::PropagationContext<'a>>,
 {
 }
 
@@ -167,7 +167,7 @@ where
 /// explanation.
 pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 	/// Advises the propagator that the solver is backtracking.
-	fn advise_of_backtrack(&mut self, context: &mut E::NotificationCtx<'_>) {
+	fn advise_of_backtrack(&mut self, context: &mut E::NotificationContext<'_>) {
 		let _ = context;
 		unreachable!("propagator did not provide a backtrack advisor implementation")
 	}
@@ -175,7 +175,11 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 	/// Advises the propagator that a Boolean decision (view) is assigned with
 	/// the associated data given when registering the advisor. If the advisor
 	/// returns `true`, then the propagator will be enqueued.
-	fn advise_of_bool_change(&mut self, context: &mut E::NotificationCtx<'_>, data: u64) -> bool {
+	fn advise_of_bool_change(
+		&mut self,
+		context: &mut E::NotificationContext<'_>,
+		data: u64,
+	) -> bool {
 		let _ = context;
 		let _ = data;
 		unreachable!("propagator did not provide a Boolean advisor implementation")
@@ -186,7 +190,7 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 	/// returns `true`, then the propagator will be enqueued.
 	fn advise_of_int_change(
 		&mut self,
-		context: &mut E::NotificationCtx<'_>,
+		context: &mut E::NotificationContext<'_>,
 		data: u64,
 		event: IntEvent,
 	) -> bool {
@@ -212,7 +216,7 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 	/// of the `lit` to be explained.
 	fn explain(
 		&mut self,
-		context: &mut E::ExplanationCtx<'_>,
+		context: &mut E::ExplanationContext<'_>,
 		lit: E::Atom,
 		data: u64,
 	) -> Conjunction<E::Atom> {
@@ -225,11 +229,11 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 
 	/// This method is called when the propagator is posted to the solver to
 	/// allow the propagator to subscribe to events.œ
-	fn initialize(&mut self, context: &mut E::InitializationCtx<'_>);
+	fn initialize(&mut self, context: &mut E::InitializationContext<'_>);
 
 	/// The propagate method is called during the search process to allow the
 	/// propagator to enforce
-	fn propagate(&mut self, context: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>;
+	fn propagate(&mut self, context: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict>;
 }
 
 /// A conjunction of literals that implies a change in the state
@@ -271,7 +275,7 @@ impl<E, B> BoolModelActions<E> for B
 where
 	E: ReasoningEngine,
 	B: BoolSolverActions<E>
-		+ for<'a> BoolSimplificationActions<E::PropagationCtx<'a>>
+		+ for<'a> BoolSimplificationActions<E::PropagationContext<'a>>
 		+ Into<model::View<bool>>,
 {
 }
@@ -279,10 +283,10 @@ where
 impl<E, B> BoolSolverActions<E> for B
 where
 	E: ReasoningEngine + ?Sized,
-	Self: for<'a> BoolInitActions<E::InitializationCtx<'a>>
-		+ for<'a> BoolInspectionActions<E::ExplanationCtx<'a>>
-		+ for<'a> BoolInspectionActions<E::NotificationCtx<'a>>
-		+ for<'a> BoolPropagationActions<E::PropagationCtx<'a>>
+	Self: for<'a> BoolInitActions<E::InitializationContext<'a>>
+		+ for<'a> BoolInspectionActions<E::ExplanationContext<'a>>
+		+ for<'a> BoolInspectionActions<E::NotificationContext<'a>>
+		+ for<'a> BoolPropagationActions<E::PropagationContext<'a>>
 		+ Into<E::Atom>,
 {
 }
@@ -417,7 +421,7 @@ impl<E, I> IntModelActions<E> for I
 where
 	E: ReasoningEngine,
 	I: IntSolverActions<E>
-		+ for<'a> IntSimplificationActions<E::PropagationCtx<'a>>
+		+ for<'a> IntSimplificationActions<E::PropagationContext<'a>>
 		+ Into<model::View<IntVal>>,
 {
 }
@@ -425,10 +429,10 @@ where
 impl<E, I> IntSolverActions<E> for I
 where
 	E: ReasoningEngine + ?Sized,
-	I: for<'a> IntInitActions<E::InitializationCtx<'a>>
-		+ for<'a> IntExplanationActions<E::ExplanationCtx<'a>>
-		+ for<'a> IntInspectionActions<E::NotificationCtx<'a>>
-		+ for<'a> IntPropagationActions<E::PropagationCtx<'a>>,
+	I: for<'a> IntInitActions<E::InitializationContext<'a>>
+		+ for<'a> IntExplanationActions<E::ExplanationContext<'a>>
+		+ for<'a> IntInspectionActions<E::NotificationContext<'a>>
+		+ for<'a> IntPropagationActions<E::PropagationContext<'a>>,
 {
 }
 

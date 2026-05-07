@@ -83,7 +83,7 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 	/// Propagate the result and numerator lower bounds, and the denominator
 	/// bounds, assuming all lower bounds are positive.
 	fn propagate_positive_domains<E, I4, I5, I6>(
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 		numerator: &I4,
 		denominator: &I5,
 		result: &I6,
@@ -100,7 +100,7 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 
 		let new_res_lb = num_lb / denom_ub;
 		if new_res_lb > res_lb {
-			result.tighten_min(ctx, new_res_lb, |ctx: &mut E::PropagationCtx<'_>| {
+			result.tighten_min(ctx, new_res_lb, |ctx: &mut E::PropagationContext<'_>| {
 				[
 					numerator.min_lit(ctx),
 					denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
@@ -111,7 +111,7 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 
 		let new_num_lb = denom_lb * res_lb;
 		if new_num_lb > num_lb {
-			numerator.tighten_min(ctx, new_num_lb, |ctx: &mut E::PropagationCtx<'_>| {
+			numerator.tighten_min(ctx, new_num_lb, |ctx: &mut E::PropagationContext<'_>| {
 				[denominator.min_lit(ctx), result.min_lit(ctx)]
 			})?;
 		}
@@ -119,28 +119,36 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 		if res_lb > 0 {
 			let new_denom_ub = num_ub / res_lb;
 			if new_denom_ub < denom_ub {
-				denominator.tighten_max(ctx, new_denom_ub, |ctx: &mut E::PropagationCtx<'_>| {
-					[
-						numerator.max_lit(ctx),
-						numerator.lit(ctx, IntLitMeaning::GreaterEq(0)),
-						result.min_lit(ctx),
-						denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
-					]
-				})?;
+				denominator.tighten_max(
+					ctx,
+					new_denom_ub,
+					|ctx: &mut E::PropagationContext<'_>| {
+						[
+							numerator.max_lit(ctx),
+							numerator.lit(ctx, IntLitMeaning::GreaterEq(0)),
+							result.min_lit(ctx),
+							denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
+						]
+					},
+				)?;
 			}
 		}
 
 		if let Some(res_ub_inc) = NonZero::new(res_ub + 1) {
 			let new_denom_lb = div_ceil(num_lb + 1, res_ub_inc);
 			if new_denom_lb > denom_lb {
-				denominator.tighten_min(ctx, new_denom_lb, |ctx: &mut E::PropagationCtx<'_>| {
-					[
-						numerator.min_lit(ctx),
-						result.max_lit(ctx),
-						result.lit(ctx, IntLitMeaning::GreaterEq(0)),
-						denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
-					]
-				})?;
+				denominator.tighten_min(
+					ctx,
+					new_denom_lb,
+					|ctx: &mut E::PropagationContext<'_>| {
+						[
+							numerator.min_lit(ctx),
+							result.max_lit(ctx),
+							result.lit(ctx, IntLitMeaning::GreaterEq(0)),
+							denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
+						]
+					},
+				)?;
 			}
 		}
 
@@ -150,7 +158,7 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 	/// Propagate the  upper bounds of the result and numerator, assuming the
 	/// signs of the result and the numerator are positive.
 	fn propagate_upper_bounds<E, I4, I5, I6>(
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 		numerator: &I4,
 		denominator: &I5,
 		result: &I6,
@@ -168,7 +176,7 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 		if denom_lb != 0 {
 			let new_res_ub = num_ub / denom_lb;
 			if new_res_ub < res_ub {
-				result.tighten_max(ctx, new_res_ub, |ctx: &mut E::PropagationCtx<'_>| {
+				result.tighten_max(ctx, new_res_ub, |ctx: &mut E::PropagationContext<'_>| {
 					[numerator.max_lit(ctx), denominator.min_lit(ctx)]
 				})?;
 			}
@@ -176,7 +184,7 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 
 		let new_num_ub = (res_ub + 1) * denom_ub - 1;
 		if new_num_ub < num_ub {
-			numerator.tighten_max(ctx, new_num_ub, |ctx: &mut E::PropagationCtx<'_>| {
+			numerator.tighten_max(ctx, new_num_ub, |ctx: &mut E::PropagationContext<'_>| {
 				[
 					denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
 					denominator.max_lit(ctx),
@@ -191,13 +199,13 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 impl<E> Constraint<E> for IntDivBounds<View<IntVal>, View<IntVal>, View<IntVal>>
 where
 	E: ReasoningEngine<Atom = View<bool>>,
-	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
+	for<'a> E::PropagationContext<'a>: SimplificationActions<Target = E>,
 	View<IntVal>: IntModelActions<E>,
 	View<bool>: BoolModelActions<E>,
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		use pindakaas::propositional_logic::Formula::*;
 
@@ -264,7 +272,7 @@ where
 	I3: IntSolverActions<E> + Neg + Into<<I3 as Neg>::Output>,
 	<I3 as Neg>::Output: IntSolverActions<E>,
 {
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Highest);
 
 		self.numerator.enqueue_when(ctx, IntPropCond::Bounds);
@@ -278,7 +286,7 @@ where
 		level = "trace",
 		skip(self, ctx)
 	)]
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		let (denom_lb, denom_ub) = self.denominator.bounds(ctx);
 		if denom_lb < 0 && denom_ub > 0 {
 			// Wait until the sign of the denominator is known

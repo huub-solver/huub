@@ -135,7 +135,10 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 
 	/// Do a full propagation run, requires checking all variables in both
 	/// directions.
-	fn initial_propagation<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
+	fn initial_propagation<E>(
+		&mut self,
+		ctx: &mut E::PropagationContext<'_>,
+	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
 		I: IntSolverActions<E>,
@@ -247,7 +250,7 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 	/// far as necessary.
 	fn repair_lower<E>(
 		&self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 		mut k: IntVal,
 	) -> Result<(IntVal, IntVal), E::Conflict>
 	where
@@ -285,7 +288,7 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 	/// far as necessary.
 	fn repair_upper<E>(
 		&self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 		mut k: IntVal,
 	) -> Result<(), E::Conflict>
 	where
@@ -341,7 +344,7 @@ where
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		if !self.initialized {
 			// Variables that do not allow positive values are irrelevant.
@@ -374,7 +377,7 @@ where
 	E: ReasoningEngine,
 	I: IntSolverActions<E>,
 {
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 
 		for v in &self.vars {
@@ -388,7 +391,7 @@ where
 		level = "trace",
 		skip(self, ctx)
 	)]
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		if !self.initialized {
 			return self.initial_propagation(ctx);
 		}
@@ -520,7 +523,10 @@ impl<I> IntValuePrecedeChainValue<I> {
 
 	/// Do a full propagation run, requires checking all variables in both
 	/// directions.
-	fn initial_propagation<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
+	fn initial_propagation<E>(
+		&mut self,
+		ctx: &mut E::PropagationContext<'_>,
+	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
 		I: IntSolverActions<E>,
@@ -691,7 +697,7 @@ impl<I> IntValuePrecedeChainValue<I> {
 	/// Propagate an upper bound by removing all values with higher index.
 	fn propagate_max<E>(
 		&self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 		i: usize,
 		j: usize,
 	) -> Result<(), E::Conflict>
@@ -711,7 +717,7 @@ impl<I> IntValuePrecedeChainValue<I> {
 	/// values with lower index.
 	fn propagate_min<E>(
 		&self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 		i: usize,
 		j: usize,
 	) -> Result<(), E::Conflict>
@@ -753,7 +759,7 @@ impl<I> IntValuePrecedeChainValue<I> {
 	/// far as necessary.
 	fn repair_lower<E>(
 		&self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 		mut k: usize,
 	) -> Result<(usize, usize), E::Conflict>
 	where
@@ -797,7 +803,7 @@ impl<I> IntValuePrecedeChainValue<I> {
 	/// far as necessary.
 	fn repair_upper<E>(
 		&self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 		mut k: usize,
 	) -> Result<(), E::Conflict>
 	where
@@ -857,7 +863,7 @@ where
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		if self.values.len() < 2 {
 			return Ok(SimplificationStatus::Subsumed);
@@ -894,7 +900,7 @@ where
 	E: ReasoningEngine,
 	I: IntSolverActions<E>,
 {
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 
 		for v in &self.vars {
@@ -908,7 +914,7 @@ where
 		level = "trace",
 		skip(self, ctx)
 	)]
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		if !self.initialized {
 			return self.initial_propagation(ctx);
 		}

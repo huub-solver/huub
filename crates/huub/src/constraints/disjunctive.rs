@@ -197,7 +197,7 @@ where
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
 
@@ -254,18 +254,18 @@ where
 {
 	fn explain(
 		&mut self,
-		ctx: &mut E::ExplanationCtx<'_>,
+		ctx: &mut E::ExplanationContext<'_>,
 		lit: E::Atom,
 		data: u64,
 	) -> Conjunction<E::Atom> {
 		self.propagator.explain(ctx, lit, data)
 	}
 
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		self.propagator.initialize(ctx);
 	}
 
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		self.propagator.propagate(ctx)
 	}
 }
@@ -304,7 +304,7 @@ impl<I> DisjunctivePropagator<I> {
 	/// paper by Vilim (2005).
 	fn explain_edge_finding<E>(
 		&mut self,
-		ctx: &mut E::ExplanationCtx<'_>,
+		ctx: &mut E::ExplanationContext<'_>,
 		task_no: usize,
 		earliest_start: i64,
 		latest_completion: i64,
@@ -379,7 +379,7 @@ impl<I> DisjunctivePropagator<I> {
 	/// paper by Vilim (2005).
 	fn explain_not_last<E>(
 		&mut self,
-		ctx: &mut E::ExplanationCtx<'_>,
+		ctx: &mut E::ExplanationContext<'_>,
 		task_no: usize,
 		earliest_start: i64,
 		updated_lct_i: i64,
@@ -481,7 +481,7 @@ impl<I> DisjunctivePropagator<I> {
 	/// For details, refer to the CPAIOR paper by Vilim (2005).
 	fn explain_precedence<E>(
 		&mut self,
-		ctx: &mut E::ExplanationCtx<'_>,
+		ctx: &mut E::ExplanationContext<'_>,
 		task_no: usize,
 		earliest_start: i64,
 		latest_start: i64,
@@ -633,7 +633,7 @@ impl<I> DisjunctivePropagator<I> {
 	/// tree.
 	fn propagate_detectable_precedence<E>(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<bool, E::Conflict>
 	where
 		E: ReasoningEngine,
@@ -779,7 +779,7 @@ impl<I> DisjunctivePropagator<I> {
 	/// original paper by Vilim (2008).
 	fn propagate_edge_finding<E>(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 		check_overload: bool,
 	) -> Result<bool, E::Conflict>
 	where
@@ -899,7 +899,7 @@ impl<I> DisjunctivePropagator<I> {
 	/// is less than $lct_i$. The task $i$ is then added back to the tree.
 	fn propagate_not_last<E>(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<bool, E::Conflict>
 	where
 		E: ReasoningEngine,
@@ -1037,7 +1037,7 @@ impl<I> DisjunctivePropagator<I> {
 	/// is detected and a conflict is triggered.
 	fn propagate_overload_checking<E>(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
@@ -1105,7 +1105,7 @@ where
 	)]
 	fn explain(
 		&mut self,
-		ctx: &mut E::ExplanationCtx<'_>,
+		ctx: &mut E::ExplanationContext<'_>,
 		_: E::Atom,
 		data: u64,
 	) -> Conjunction<E::Atom> {
@@ -1128,7 +1128,7 @@ where
 		}
 	}
 
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 		for v in &self.start_times {
 			v.enqueue_when(ctx, IntPropCond::Bounds);
@@ -1142,7 +1142,7 @@ where
 		level = "trace",
 		skip(self, ctx)
 	)]
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		// Sort the tasks by earliest start time and initialize the Omega-Theta tree
 		// according to the property of the Omega-Theta tree.
 		let earliest_start: Vec<_> = self.start_times.iter().map(|v| v.min(ctx)).collect();

@@ -113,7 +113,7 @@ where
 	}
 
 	/// Propagates the bounds of the base and exponent to the result.
-	fn propagate_base<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
+	fn propagate_base<E>(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
 		I1: IntSolverActions<E>,
@@ -142,7 +142,7 @@ where
 			return Ok(());
 		}
 
-		let mut reason = CachedReason::new(|ctx: &mut E::PropagationCtx<'_>| {
+		let mut reason = CachedReason::new(|ctx: &mut E::PropagationContext<'_>| {
 			[
 				self.result.min_lit(ctx),
 				self.result.max_lit(ctx),
@@ -196,7 +196,10 @@ where
 
 	/// Filter the bounds of the exponent based on the bounds of the base and
 	/// the result.
-	fn propagate_exponent<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
+	fn propagate_exponent<E>(
+		&mut self,
+		ctx: &mut E::PropagationContext<'_>,
+	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
 		I1: IntSolverActions<E>,
@@ -213,7 +216,7 @@ where
 		}
 
 		let (exp_lb, exp_ub) = self.exponent.bounds(ctx);
-		let mut reason = CachedReason::new(|ctx: &mut E::PropagationCtx<'_>| {
+		let mut reason = CachedReason::new(|ctx: &mut E::PropagationContext<'_>| {
 			[
 				self.result.min_lit(ctx),
 				self.result.max_lit(ctx),
@@ -268,7 +271,10 @@ where
 	///
 	/// Thus, by evaluating x^y for all (x, y) in X × Y (excluding undefined
 	/// cases), we find the true min and max of S.
-	fn propagate_result<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
+	fn propagate_result<E>(
+		&mut self,
+		ctx: &mut E::PropagationContext<'_>,
+	) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
 		I1: IntSolverActions<E>,
@@ -318,7 +324,7 @@ where
 			MinMaxResult::MinMax(lb, ub) => (lb, ub),
 		};
 
-		let mut reason = CachedReason::new(|ctx: &mut E::PropagationCtx<'_>| {
+		let mut reason = CachedReason::new(|ctx: &mut E::PropagationContext<'_>| {
 			[
 				self.base.min_lit(ctx),
 				self.base.max_lit(ctx),
@@ -425,7 +431,7 @@ where
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		// If the base is negative, then the exponent cannot be zero
 		if self.base.max(ctx) < 0 {
@@ -433,9 +439,10 @@ where
 		}
 		// If the exponent is zero, then the result is one
 		if self.exponent.val(ctx) == Some(0) {
-			self.result.fix(ctx, 1, |ctx: &mut E::PropagationCtx<'_>| {
-				[self.exponent.val_lit(ctx).unwrap()]
-			})?;
+			self.result
+				.fix(ctx, 1, |ctx: &mut E::PropagationContext<'_>| {
+					[self.exponent.val_lit(ctx).unwrap()]
+				})?;
 		}
 
 		self.propagate(ctx)?;
@@ -468,7 +475,7 @@ where
 	I3: IntSolverActions<E>,
 	OM: OverflowMode,
 {
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Highest);
 
 		self.base.enqueue_when(ctx, IntPropCond::Bounds);
@@ -482,7 +489,7 @@ where
 		level = "trace",
 		skip(self, ctx)
 	)]
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		self.propagate_result(ctx)?;
 		self.propagate_base(ctx)?;
 		self.propagate_exponent(ctx)?;
@@ -497,7 +504,7 @@ where
 			&& overflowing_pow(base, exp).1
 		{
 			self.exponent
-				.tighten_max(ctx, exp - 1, |ctx: &mut E::PropagationCtx<'_>| {
+				.tighten_max(ctx, exp - 1, |ctx: &mut E::PropagationContext<'_>| {
 					[if base.is_positive() {
 						self.base.min_lit(ctx)
 					} else {

@@ -42,7 +42,7 @@ where
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		Self::propagate(self, ctx)?;
 		// Unify if the index is already fixed
@@ -83,7 +83,7 @@ where
 	View<IntVal>: IntModelActions<E>,
 	View<bool>: BoolModelActions<E>,
 {
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		for &b in &self.array {
 			b.enqueue_when_fixed(ctx);
 		}
@@ -91,7 +91,7 @@ where
 		self.result.enqueue_when_fixed(ctx);
 	}
 
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		// Fix the bounds of the index is to the length of the array
 		self.index.tighten_min(ctx, 0, vec![])?;
 		self.index

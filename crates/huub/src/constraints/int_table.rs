@@ -39,7 +39,7 @@ where
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		match self.vars.len() {
 			0 => return Ok(SimplificationStatus::Subsumed),
@@ -153,14 +153,14 @@ where
 	E: ReasoningEngine,
 	View<IntVal>: IntSolverActions<E>,
 {
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 		for var in &self.vars {
 			var.enqueue_when(ctx, IntPropCond::Domain);
 		}
 	}
 
-	fn propagate(&mut self, _: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, _: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		unreachable!()
 	}
 }

@@ -117,7 +117,7 @@ where
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
 		Ok(SimplificationStatus::NoFixpoint)
@@ -170,25 +170,25 @@ where
 	E: ReasoningEngine,
 	View<IntVal>: IntSolverActions<E>,
 {
-	fn advise_of_backtrack(&mut self, ctx: &mut E::NotificationCtx<'_>) {
+	fn advise_of_backtrack(&mut self, ctx: &mut E::NotificationContext<'_>) {
 		self.value_prop.advise_of_backtrack(ctx);
 	}
 
 	fn advise_of_int_change(
 		&mut self,
-		ctx: &mut E::NotificationCtx<'_>,
+		ctx: &mut E::NotificationContext<'_>,
 		data: u64,
 		event: IntEvent,
 	) -> bool {
 		self.value_prop.advise_of_int_change(ctx, data, event)
 	}
 
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		self.value_prop.initialize(ctx);
 		self.bounds_prop.initialize(ctx);
 	}
 
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		if !self.value_prop.action_list.is_empty() {
 			self.value_prop.propagate(ctx)?;
 		}
@@ -198,7 +198,7 @@ where
 
 impl<I> IntUniqueBounds<I> {
 	/// Filter the lower bounds of the considered variables
-	fn filter_lower<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
+	fn filter_lower<E>(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
 		I: IntSolverActions<E>,
@@ -271,7 +271,7 @@ impl<I> IntUniqueBounds<I> {
 	}
 
 	/// Filter the upper bounds of the considered variables
-	fn filter_upper<E>(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict>
+	fn filter_upper<E>(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
 		I: IntSolverActions<E>,
@@ -420,7 +420,7 @@ impl<I> IntUniqueBounds<I> {
 	}
 
 	/// Sorts max_sorted and min_sorted and sets the bounds vector
-	fn sort<E>(&mut self, ctx: &mut E::PropagationCtx<'_>)
+	fn sort<E>(&mut self, ctx: &mut E::PropagationContext<'_>)
 	where
 		E: ReasoningEngine,
 		I: IntSolverActions<E>,
@@ -477,7 +477,7 @@ where
 	E: ReasoningEngine,
 	I: IntSolverActions<E>,
 {
-	fn initialize(&mut self, ctx: &mut <E as ReasoningEngine>::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut <E as ReasoningEngine>::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 		for v in &self.var {
 			v.enqueue_when(ctx, IntPropCond::Bounds);
@@ -490,7 +490,7 @@ where
 		level = "trace",
 		skip(self, ctx)
 	)]
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		self.sort(ctx);
 		self.filter_lower(ctx)?;
 		self.filter_upper(ctx)?;
@@ -523,14 +523,14 @@ where
 	E: ReasoningEngine,
 	I: IntSolverActions<E>,
 {
-	fn advise_of_backtrack(&mut self, _: &mut E::NotificationCtx<'_>) {
+	fn advise_of_backtrack(&mut self, _: &mut E::NotificationContext<'_>) {
 		// We forget any previously remembered fixed decisions.
 		self.action_list.clear();
 	}
 
 	fn advise_of_int_change(
 		&mut self,
-		_: &mut E::NotificationCtx<'_>,
+		_: &mut E::NotificationContext<'_>,
 		data: u64,
 		event: IntEvent,
 	) -> bool {
@@ -540,7 +540,7 @@ where
 		true
 	}
 
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		// Let the propagator be advised when each specific decision is fixed to a
 		// value, with the index of the decision.
 		for (i, v) in self.vars.iter().enumerate() {
@@ -563,7 +563,7 @@ where
 		level = "trace",
 		skip(self, ctx)
 	)]
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		debug_assert!(!self.action_list.is_empty() && self.action_list.iter().all_unique());
 		// We walk through all fixed decisions (indices).
 		for &i in &self.action_list {

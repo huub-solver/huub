@@ -107,7 +107,7 @@ where
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
 		if let Some(f1) = self.factor1.val(ctx) {
@@ -138,7 +138,7 @@ where
 	I3: IntSolverActions<E>,
 	OM: OverflowMode,
 {
-	fn initialize(&mut self, ctx: &mut <E as ReasoningEngine>::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut <E as ReasoningEngine>::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Highest);
 		self.factor1.enqueue_when(ctx, IntPropCond::Bounds);
 		self.factor2.enqueue_when(ctx, IntPropCond::Bounds);
@@ -151,7 +151,7 @@ where
 		level = "trace",
 		skip(self, ctx)
 	)]
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		let (f1_lb, f1_ub) = self.factor1.bounds(ctx);
 		let f1_lb_lit = self.factor1.min_lit(ctx);
 		let f1_ub_lit = self.factor1.max_lit(ctx);

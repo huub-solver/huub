@@ -46,7 +46,7 @@ where
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
 
@@ -80,7 +80,7 @@ where
 	I1: IntSolverActions<E>,
 	I2: IntSolverActions<E>,
 {
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 
 		for v in &self.vars {
@@ -95,7 +95,7 @@ where
 		level = "trace",
 		skip(self, ctx)
 	)]
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		// set y to be less than or equal to the minimum of upper bounds of x_i
 		let (min_ub, min_ub_var) = self
 			.vars
@@ -109,7 +109,7 @@ where
 		// set y to be greater than or equal to the minimum of lower bounds of x_i
 		let min_lb = self.vars.iter().map(|x| x.min(ctx)).min().unwrap();
 		self.min
-			.tighten_min(ctx, min_lb, |ctx: &mut E::PropagationCtx<'_>| {
+			.tighten_min(ctx, min_lb, |ctx: &mut E::PropagationContext<'_>| {
 				self.vars
 					.iter()
 					.map(|x| x.lit(ctx, IntLitMeaning::GreaterEq(min_lb)))

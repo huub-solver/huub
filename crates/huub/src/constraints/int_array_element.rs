@@ -121,7 +121,7 @@ impl<I1, I2, I3> IntArrayElementBounds<I1, I2, I3> {
 impl<E, I1, I2, I3> Constraint<E> for IntArrayElementBounds<I1, I2, I3>
 where
 	E: ReasoningEngine,
-	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
+	for<'a> E::PropagationContext<'a>: SimplificationActions<Target = E>,
 	I1: IntModelActions<E>,
 	I2: IntModelActions<E>,
 	I3: IntModelActions<E>,
@@ -130,7 +130,7 @@ where
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		// Constrain the index to be within the bounds of the array
 		self.index.tighten_min(ctx, 0, [])?;
@@ -181,7 +181,7 @@ where
 	I2: IntSolverActions<E>,
 	I3: IntSolverActions<E>,
 {
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 
 		self.result.enqueue_when(ctx, IntPropCond::Bounds);
@@ -203,7 +203,7 @@ where
 		level = "trace",
 		skip(self, ctx)
 	)]
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		// ensure bounds of result and self.vars[self.index] are consistent when
 		// self.index is fixed only trigger when self.index is fixed and (1) y is
 		// updated or (2) self.vars[self.index] is updated
@@ -213,22 +213,30 @@ where
 			self.result.tighten_min(
 				ctx,
 				fixed_var.min(ctx),
-				|ctx: &mut E::PropagationCtx<'_>| [index_val_lit.clone(), fixed_var.min_lit(ctx)],
+				|ctx: &mut E::PropagationContext<'_>| {
+					[index_val_lit.clone(), fixed_var.min_lit(ctx)]
+				},
 			)?;
 			fixed_var.tighten_min(
 				ctx,
 				self.result.min(ctx),
-				|ctx: &mut E::PropagationCtx<'_>| [index_val_lit.clone(), self.result.min_lit(ctx)],
+				|ctx: &mut E::PropagationContext<'_>| {
+					[index_val_lit.clone(), self.result.min_lit(ctx)]
+				},
 			)?;
 			self.result.tighten_max(
 				ctx,
 				fixed_var.max(ctx),
-				|ctx: &mut E::PropagationCtx<'_>| [index_val_lit.clone(), fixed_var.max_lit(ctx)],
+				|ctx: &mut E::PropagationContext<'_>| {
+					[index_val_lit.clone(), fixed_var.max_lit(ctx)]
+				},
 			)?;
 			fixed_var.tighten_max(
 				ctx,
 				self.result.max(ctx),
-				|ctx: &mut E::PropagationCtx<'_>| [index_val_lit.clone(), self.result.max_lit(ctx)],
+				|ctx: &mut E::PropagationContext<'_>| {
+					[index_val_lit.clone(), self.result.max_lit(ctx)]
+				},
 			)?;
 			return Ok(());
 		}
@@ -269,23 +277,29 @@ where
 
 			let (v_lb, v_ub) = v.bounds(ctx);
 			if result_ub < v_lb {
-				self.index
-					.remove_val(ctx, i as IntVal, |ctx: &mut E::PropagationCtx<'_>| {
+				self.index.remove_val(
+					ctx,
+					i as IntVal,
+					|ctx: &mut E::PropagationContext<'_>| {
 						[
 							self.result.lit(ctx, IntLitMeaning::Less(v_lb)),
 							v.min_lit(ctx),
 						]
-					})?;
+					},
+				)?;
 			}
 
 			if v_ub < result_lb {
-				self.index
-					.remove_val(ctx, i as IntVal, |ctx: &mut E::PropagationCtx<'_>| {
+				self.index.remove_val(
+					ctx,
+					i as IntVal,
+					|ctx: &mut E::PropagationContext<'_>| {
 						[
 							self.result.lit(ctx, IntLitMeaning::GreaterEq(v_ub + 1)),
 							v.max_lit(ctx),
 						]
-					})?;
+					},
+				)?;
 			}
 
 			// update min_support if i is in the domain of self.index and the lower bound of
@@ -319,7 +333,7 @@ where
 		// is out of domain
 		if new_min > result_lb {
 			self.result
-				.tighten_min(ctx, new_min, |ctx: &mut E::PropagationCtx<'_>| {
+				.tighten_min(ctx, new_min, |ctx: &mut E::PropagationContext<'_>| {
 					let mut reason = Vec::with_capacity(self.vars.len());
 					let dom = self.index.domain(ctx);
 					let mut dom = dom.iter().flatten().peekable();
@@ -345,7 +359,7 @@ where
 		// is out of domain
 		if new_max < result_ub {
 			self.result
-				.tighten_max(ctx, new_max, |ctx: &mut E::PropagationCtx<'_>| {
+				.tighten_max(ctx, new_max, |ctx: &mut E::PropagationContext<'_>| {
 					let mut reason = Vec::with_capacity(self.vars.len());
 					let dom = self.index.domain(ctx);
 					let mut dom = dom.iter().flatten().peekable();
@@ -369,7 +383,7 @@ where
 impl<E, I1, I2> Constraint<E> for IntValArrayElement<I1, I2>
 where
 	E: ReasoningEngine,
-	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
+	for<'a> E::PropagationContext<'a>: SimplificationActions<Target = E>,
 	I1: IntModelActions<E>,
 	I2: IntModelActions<E>,
 	IntVal: IntModelActions<E>,
@@ -377,7 +391,7 @@ where
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		// Constrain the index to be within the bounds of the array
 		self.0.index.tighten_min(ctx, 0, [])?;
@@ -439,11 +453,11 @@ where
 	I2: IntSolverActions<E>,
 	IntVal: IntSolverActions<E>,
 {
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		self.0.initialize(ctx);
 	}
 
-	fn propagate(&mut self, _: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, _: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		unreachable!()
 	}
 }

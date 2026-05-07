@@ -312,7 +312,7 @@ impl InitConfig {
 		self
 	}
 
-	/// Change whether to enable the vivification in the oracle solver.
+	/// Change whether to enable the vivification in the SAT solver.
 	pub fn with_vivification(mut self, vivification: bool) -> Self {
 		self.vivification = vivification;
 		self

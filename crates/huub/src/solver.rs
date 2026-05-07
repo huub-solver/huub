@@ -81,13 +81,12 @@ pub enum Goal<V> {
 /// Statistics related to the initialization of the solver
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct InitStatistics {
-	// TODO
-	// /// Number of (non-view) boolean variables present in the solver
-	// bool_vars: usize,
-	/// Number of (non-view) integer variables represented in the solver
-	int_vars: usize,
-	/// Number of propagators in the solver
-	propagators: usize,
+	/// Number of (non-view) Boolean decision variables present in the solver.
+	pub bool_decisions: usize,
+	/// Number of (non-view) integer decision variables present in the solver.
+	pub int_decisions: usize,
+	/// Number of propagators in the solver.
+	pub propagators: usize,
 }
 
 /// The meaning of a literal in the context of a integer decision variable `x`.
@@ -207,17 +206,6 @@ impl<A: FailedAssumptions> AssumptionChecker for A {
 			BoolView::Const(false) => true,
 			BoolView::Const(true) => false,
 		}
-	}
-}
-
-impl InitStatistics {
-	/// Number of integer variables present in the solver
-	pub fn int_vars(&self) -> usize {
-		self.int_vars
-	}
-	/// Number of propagators present in the solver
-	pub fn propagators(&self) -> usize {
-		self.propagators
 	}
 }
 
@@ -604,7 +592,9 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 	/// Access the initialization statistics of the [`Solver`] object.
 	pub fn init_statistics(&self) -> InitStatistics {
 		InitStatistics {
-			int_vars: self.engine.borrow().state.int_vars.len(),
+			bool_decisions: self.engine.borrow().state.statistics.eager_literals as usize
+				+ self.engine.borrow().state.statistics.lazy_literals as usize,
+			int_decisions: self.engine.borrow().state.int_vars.len(),
 			propagators: self.engine.borrow().propagators.len(),
 		}
 	}

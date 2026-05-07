@@ -565,10 +565,10 @@ impl ReasoningEngine for Model {
 	type Atom = View<bool>;
 
 	type Conflict = Conflict<View<bool>>;
-	type ExplanationCtx<'a> = Self;
-	type InitializationCtx<'a> = ModelInitContext<'a>;
-	type NotificationCtx<'a> = Self;
-	type PropagationCtx<'a> = Self;
+	type ExplanationContext<'a> = Self;
+	type InitializationContext<'a> = ModelInitContext<'a>;
+	type NotificationContext<'a> = Self;
+	type PropagationContext<'a> = Self;
 }
 
 impl SimplificationActions for Model {
@@ -720,7 +720,7 @@ mod tests {
 	{
 		fn simplify(
 			&mut self,
-			_context: &mut E::PropagationCtx<'_>,
+			_context: &mut E::PropagationContext<'_>,
 		) -> Result<SimplificationStatus, E::Conflict> {
 			Ok(SimplificationStatus::NoFixpoint)
 		}
@@ -738,7 +738,7 @@ mod tests {
 	{
 		fn advise_of_bool_change(
 			&mut self,
-			context: &mut E::NotificationCtx<'_>,
+			context: &mut E::NotificationContext<'_>,
 			_data: u64,
 		) -> bool {
 			assert!(self.b.val(context).is_some());
@@ -748,7 +748,7 @@ mod tests {
 
 		fn advise_of_int_change(
 			&mut self,
-			context: &mut E::NotificationCtx<'_>,
+			context: &mut E::NotificationContext<'_>,
 			_data: u64,
 			_event: IntEvent,
 		) -> bool {
@@ -756,12 +756,15 @@ mod tests {
 			true
 		}
 
-		fn initialize(&mut self, context: &mut E::InitializationCtx<'_>) {
+		fn initialize(&mut self, context: &mut E::InitializationContext<'_>) {
 			self.b.advise_when_fixed(context, 0);
 			self.i.advise_when(context, IntPropCond::Bounds, 0);
 		}
 
-		fn propagate(&mut self, _context: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+		fn propagate(
+			&mut self,
+			_context: &mut E::PropagationContext<'_>,
+		) -> Result<(), E::Conflict> {
 			Ok(())
 		}
 	}

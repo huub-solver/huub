@@ -40,13 +40,13 @@ pub struct IntSetContainsReif {
 impl<E> Constraint<E> for IntSetContainsReif
 where
 	E: ReasoningEngine,
-	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
+	for<'a> E::PropagationContext<'a>: SimplificationActions<Target = E>,
 	View<IntVal>: IntModelActions<E>,
 	View<bool>: BoolModelActions<E>,
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		// Check whether `reif` is set, then just enforce the domain.
 		match self.reif.val(ctx) {
@@ -66,13 +66,14 @@ where
 		self.set = self.set.intersect(&domain);
 		// If the intersection is empty, then `reif` must be false.
 		if self.set.is_empty() {
-			self.reif.fix(ctx, false, |_: &mut E::PropagationCtx<'_>| {
-				self.set
-					.iter()
-					.flatten()
-					.map(|v| self.var.ne(v).into())
-					.collect_vec()
-			})?;
+			self.reif
+				.fix(ctx, false, |_: &mut E::PropagationContext<'_>| {
+					self.set
+						.iter()
+						.flatten()
+						.map(|v| self.var.ne(v).into())
+						.collect_vec()
+				})?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
 		// If `set` is a superset of domain, then it is known that `reif` is true.
@@ -134,12 +135,12 @@ where
 	View<IntVal>: IntSolverActions<E>,
 	View<bool>: BoolSolverActions<E>,
 {
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		self.var.enqueue_when(ctx, IntPropCond::Domain);
 		self.reif.enqueue_when_fixed(ctx);
 	}
 
-	fn propagate(&mut self, _: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, _: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		unreachable!()
 	}
 }

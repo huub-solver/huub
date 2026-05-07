@@ -485,7 +485,7 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 	/// position.
 	fn prune_max<E>(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 		forbidden_regions: &[(Region, usize)],
 		obj: usize,
 		dim: usize,
@@ -543,7 +543,7 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 	/// found within the object's domain, a conflict is triggered.
 	fn prune_min<E>(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 		forbidden_regions: &[(Region, usize)],
 		obj: usize,
 		dim: usize,
@@ -597,7 +597,7 @@ where
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
 
@@ -639,7 +639,7 @@ where
 	I1: IntSolverActions<E>,
 	I2: IntSolverActions<E>,
 {
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Lowest);
 
 		// The propagator needs to be re-run whenever the bounds of any origin or
@@ -658,7 +658,7 @@ where
 		level = "trace",
 		skip(self, ctx)
 	)]
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		// Cache the current bounds of all variables.
 		for o in 0..self.num_objects() {
 			for d in 0..self.num_dimensions() {

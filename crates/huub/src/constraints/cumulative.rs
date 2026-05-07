@@ -79,7 +79,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// of the capacity variable to the height of the profile at the time point.
 	fn build_profile_and_check_overload<E>(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<bool, E::Conflict>
 	where
 		E: ReasoningEngine,
@@ -485,7 +485,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// `usage_lb` is the lower bound of the task's usage.
 	fn limit_usage<E>(
 		&self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 		task: usize,
 	) -> Result<(), E::Conflict>
 	where
@@ -612,7 +612,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// described in the original paper by Schutt et al. (2011).
 	fn sweep_backward<E>(
 		&self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 		task: usize,
 	) -> Result<bool, E::Conflict>
 	where
@@ -721,7 +721,7 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 	/// described in the original paper by Schutt et al. (2011).
 	fn sweep_forward<E>(
 		&self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 		task: usize,
 	) -> Result<bool, E::Conflict>
 	where
@@ -819,7 +819,7 @@ where
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
 
@@ -864,7 +864,7 @@ where
 	I3: IntSolverActions<E>,
 	I4: IntSolverActions<E>,
 {
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 
 		for v in &self.start_times {
@@ -885,7 +885,7 @@ where
 		level = "trace",
 		skip(self, ctx)
 	)]
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		// Build the time-table profile and check resource overload
 		let profile_empty = self.build_profile_and_check_overload(ctx)?;
 		if profile_empty {

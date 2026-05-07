@@ -85,19 +85,19 @@ pub trait ReasoningEngine {
 	/// The context given to the constraint propagator when they are asked to
 	/// explain a reason for a change they made using
 	/// [`PropagationActions::deferred_reason`].
-	type ExplanationCtx<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
+	type ExplanationContext<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
 		+ TrailingActions;
 	/// The context given to constraint propagators to attach themselves to
 	/// changes in the state of the reasoning engine or decision variables.
-	type InitializationCtx<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
+	type InitializationContext<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
 		+ InitActions;
 	/// The context given to constraint propagators when they are advised of a
 	/// change in the state of the reasoning engine or decision variables.
-	type NotificationCtx<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
+	type NotificationContext<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
 		+ TrailingActions;
 	/// The context given to constraint propagators when they are asked to
 	/// propagate changes based on the constraint they enforce.
-	type PropagationCtx<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
+	type PropagationContext<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
 		+ PropagationActions<Atom = Self::Atom, Conflict = Self::Conflict>;
 }
 

@@ -132,13 +132,13 @@ pub(crate) enum Reification {
 impl<E> Constraint<E> for IntEq
 where
 	E: ReasoningEngine,
-	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
+	for<'a> E::PropagationContext<'a>: SimplificationActions<Target = E>,
 	model::View<IntVal>: IntModelActions<E>,
 	model::View<bool>: BoolModelActions<E>,
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
 		// Note that one variable might be fixed and not the other one. Gaps in domains
@@ -167,7 +167,7 @@ where
 	E: ReasoningEngine,
 	model::View<IntVal>: IntSolverActions<E>,
 {
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Highest);
 
 		for iv in self.vars {
@@ -175,7 +175,7 @@ where
 		}
 	}
 
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		// Channel bounds of self.vars[0] to self.vars[1]
 		self.vars[0].tighten_min(ctx, self.vars[1].min(ctx), [self.vars[1].min_lit(ctx)])?;
 		self.vars[0].tighten_max(ctx, self.vars[1].max(ctx), [self.vars[1].max_lit(ctx)])?;
@@ -289,14 +289,14 @@ impl IntLinear<OverflowPossible> {
 impl<E, OF> Constraint<E> for IntLinear<OF>
 where
 	E: ReasoningEngine,
-	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
+	for<'a> E::PropagationContext<'a>: SimplificationActions<Target = E>,
 	model::View<IntVal>: IntModelActions<E>,
 	model::View<bool>: BoolModelActions<E>,
 	OF: OverflowMode,
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		// If the reification of the constraint is known, simplify to non-reified
 		// version
@@ -410,7 +410,7 @@ where
 			}
 			_ => None,
 		};
-		let fail_reason = |ctx: &mut E::PropagationCtx<'_>| {
+		let fail_reason = |ctx: &mut E::PropagationContext<'_>| {
 			self.terms
 				.iter()
 				.map(|v| match self.comparator {
@@ -432,7 +432,7 @@ where
 					Ok(SimplificationStatus::Subsumed)
 				}
 				Some(Reification::ReifiedBy(r)) if satisfied => {
-					r.require(ctx, |ctx: &mut E::PropagationCtx<'_>| {
+					r.require(ctx, |ctx: &mut E::PropagationContext<'_>| {
 						self.terms
 							.iter()
 							.flat_map(|v| match self.comparator {
@@ -473,7 +473,7 @@ where
 		for (i, v) in self.terms.iter().enumerate() {
 			let lb_i = lb[i].into();
 			let new_ub = lb_diff + lb_i;
-			let reason = |ctx: &mut E::PropagationCtx<'_>| {
+			let reason = |ctx: &mut E::PropagationContext<'_>| {
 				self.terms
 					.iter()
 					.enumerate()
@@ -510,7 +510,7 @@ where
 			for (i, v) in self.terms.iter().enumerate() {
 				let ub_i = ub[i].into();
 				let new_lb = ub_diff + ub_i;
-				let reason = |ctx: &mut E::PropagationCtx<'_>| {
+				let reason = |ctx: &mut E::PropagationContext<'_>| {
 					self.terms
 						.iter()
 						.enumerate()
@@ -660,7 +660,7 @@ where
 	model::View<bool>: BoolSolverActions<E>,
 	OF: OverflowMode,
 {
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		for &iv in &self.terms {
 			iv.enqueue_when(ctx, IntPropCond::Bounds);
 		}
@@ -669,7 +669,7 @@ where
 		}
 	}
 
-	fn propagate(&mut self, _: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, _: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		unreachable!()
 	}
 }
@@ -722,7 +722,7 @@ where
 	)]
 	fn explain(
 		&mut self,
-		ctx: &mut E::ExplanationCtx<'_>,
+		ctx: &mut E::ExplanationContext<'_>,
 		_: E::Atom,
 		data: u64,
 	) -> Conjunction<E::Atom> {
@@ -743,7 +743,7 @@ where
 		conj
 	}
 
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
 		for v in self.terms.iter() {
 			v.enqueue_when(ctx, IntPropCond::LowerBound);
@@ -758,7 +758,7 @@ where
 		level = "trace",
 		skip(self, ctx)
 	)]
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		// If the reified variable is false, skip propagation
 		let r_val = self.reification.val(ctx);
 		if r_val == Some(false) {
@@ -777,7 +777,7 @@ where
 			// right-hand-side value
 			if lb_sum > self.max {
 				self.reification
-					.fix(ctx, false, |ctx: &mut E::PropagationCtx<'_>| {
+					.fix(ctx, false, |ctx: &mut E::PropagationContext<'_>| {
 						self.terms.iter().map(|v| v.min_lit(ctx)).collect_vec()
 					})?;
 			}
@@ -1005,7 +1005,7 @@ where
 	IV: IntSolverActions<E>,
 	BV: BoolSolverActions<E>,
 {
-	fn advise_of_bool_change(&mut self, ctx: &mut E::NotificationCtx<'_>, _data: u64) -> bool {
+	fn advise_of_bool_change(&mut self, ctx: &mut E::NotificationContext<'_>, _data: u64) -> bool {
 		debug_assert_ne!(TypeId::of::<BV>(), TypeId::of::<True>());
 		debug_assert_eq!(_data, self.terms.len() as u64);
 		debug_assert!(self.reification.val(ctx).is_some());
@@ -1015,7 +1015,7 @@ where
 
 	fn advise_of_int_change(
 		&mut self,
-		ctx: &mut E::NotificationCtx<'_>,
+		ctx: &mut E::NotificationContext<'_>,
 		_data: u64,
 		_event: IntEvent,
 	) -> bool {
@@ -1023,7 +1023,7 @@ where
 		debug_assert_eq!(_event, IntEvent::Fixed);
 		self.decrement_num_free(ctx)
 	}
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::High);
 		for (i, v) in self.terms.iter().enumerate() {
 			v.advise_when(ctx, IntPropCond::Fixed, i as u64);
@@ -1038,7 +1038,7 @@ where
 		level = "trace",
 		skip(self, ctx)
 	)]
-	fn propagate(&mut self, ctx: &mut E::PropagationCtx<'_>) -> Result<(), E::Conflict> {
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		let r_fixed = match self.reification.val(ctx) {
 			Some(false) => return Ok(()),
 			Some(true) => true,

@@ -811,10 +811,10 @@ impl ReasoningEngine for Engine {
 	type Atom = View<bool>;
 	type Conflict = Conflict<Decision<bool>>;
 
-	type ExplanationCtx<'a> = State;
-	type InitializationCtx<'a> = InitializationContext<'a>;
-	type NotificationCtx<'a> = State;
-	type PropagationCtx<'a> = SolvingContext<'a>;
+	type ExplanationContext<'a> = State;
+	type InitializationContext<'a> = InitializationContext<'a>;
+	type NotificationContext<'a> = State;
+	type PropagationContext<'a> = SolvingContext<'a>;
 }
 
 impl PropRef {
@@ -1052,7 +1052,10 @@ mod tests {
 		}
 
 		impl Propagator<Engine> for ProducerAndListener {
-			fn initialize(&mut self, ctx: &mut <Engine as ReasoningEngine>::InitializationCtx<'_>) {
+			fn initialize(
+				&mut self,
+				ctx: &mut <Engine as ReasoningEngine>::InitializationContext<'_>,
+			) {
 				ctx.enqueue_now(true);
 				self.ge_1_second
 					.advise_when(ctx, IntPropCond::LowerBound, 0);
@@ -1060,7 +1063,7 @@ mod tests {
 
 			fn advise_of_int_change(
 				&mut self,
-				_: &mut <Engine as ReasoningEngine>::NotificationCtx<'_>,
+				_: &mut <Engine as ReasoningEngine>::NotificationContext<'_>,
 				data: u64,
 				event: IntEvent,
 			) -> bool {
@@ -1072,7 +1075,7 @@ mod tests {
 
 			fn propagate(
 				&mut self,
-				ctx: &mut <Engine as ReasoningEngine>::PropagationCtx<'_>,
+				ctx: &mut <Engine as ReasoningEngine>::PropagationContext<'_>,
 			) -> Result<(), <Engine as ReasoningEngine>::Conflict> {
 				assert!(!self.done);
 				self.done = true;

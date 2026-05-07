@@ -37,12 +37,12 @@ use std::{
 
 use flatzinc_serde::{FlatZinc, Literal, NamedRef, Variable, helpers::ArcKey};
 use huub::{
-	Goal, TerminationSignal,
 	actions::IntDecisionActions,
 	lower::LoweringError,
 	model::deserialize::flatzinc::{FlatZincError, FznIdent},
 	solver::{
-		AnyView, IntLitMeaning, SearchStrategy, Solution, Solver, Status, SwitchTrigger, Value,
+		AnyView, Goal, IntLitMeaning, SearchStrategy, Solution, Solver, Status, SwitchTrigger,
+		TerminationSignal, Value,
 	},
 };
 use mimalloc::MiMalloc;
@@ -137,10 +137,11 @@ impl<'a> Cli<'a> {
 				&mut self.stdout,
 				"init",
 				&[
-					("intVariables", &stats.int_vars()),
-					("propagators", &stats.propagators()),
-					("unifiedVariables", &meta.stats.unified_variables()),
-					("extractedViews", &meta.stats.extracted_views()),
+					("boolDecisions", &stats.bool_decisions),
+					("intDecisions", &stats.int_decisions),
+					("propagators", &stats.propagators),
+					("unifiedDecisions", &meta.stats.unified_decisions),
+					("extractedViews", &meta.stats.extracted_views),
 					(
 						"initTime",
 						&Instant::now().duration_since(start).as_secs_f64(),
@@ -153,7 +154,7 @@ impl<'a> Cli<'a> {
 			let mut lit_map = lit_reverse_map.lock().unwrap();
 			let mut int_map = int_reverse_map.lock().unwrap();
 			debug_assert!(int_map.is_empty());
-			*int_map = vec![None; slv.init_statistics().int_vars()];
+			*int_map = vec![None; slv.init_statistics().int_decisions];
 			for (var, v) in &meta.names {
 				match v {
 					AnyView::Bool(bv) => {

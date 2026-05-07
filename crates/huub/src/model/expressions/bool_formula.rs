@@ -26,12 +26,12 @@ pub type BoolFormula = Formula<View<bool>>;
 impl<E> Constraint<E> for BoolFormula
 where
 	E: ReasoningEngine,
-	for<'a> E::PropagationCtx<'a>: SimplificationActions<Target = E>,
+	for<'a> E::PropagationContext<'a>: SimplificationActions<Target = E>,
 	View<bool>: BoolModelActions<E>,
 {
 	fn simplify(
 		&mut self,
-		ctx: &mut E::PropagationCtx<'_>,
+		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		let mut resolver = |bv: View<bool>| {
 			if let Some(b) = bv.val(ctx) {
@@ -143,7 +143,7 @@ where
 	E: ReasoningEngine,
 	View<bool>: BoolSolverActions<E>,
 {
-	fn initialize(&mut self, ctx: &mut E::InitializationCtx<'_>) {
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.enqueue_now(true);
 		match self {
 			Formula::And(v) => v.iter_mut().for_each(|f| f.initialize(ctx)),
@@ -166,7 +166,7 @@ where
 
 	fn propagate(
 		&mut self,
-		_: &mut <E as ReasoningEngine>::PropagationCtx<'_>,
+		_: &mut <E as ReasoningEngine>::PropagationContext<'_>,
 	) -> Result<(), <E as ReasoningEngine>::Conflict> {
 		unreachable!()
 	}
