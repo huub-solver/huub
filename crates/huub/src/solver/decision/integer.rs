@@ -232,7 +232,7 @@ enum SearchDirection {
 }
 
 impl Decision<IntVal> {
-	/// Return the a integer identifier that can be used for this decision.
+	/// Return an integer identifier that can be used for this decision.
 	pub(crate) fn ident(&self) -> u32 {
 		self.0
 	}

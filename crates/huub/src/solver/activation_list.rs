@@ -16,7 +16,7 @@ use crate::{
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum ActivationAction<A, P> {
 	/// When activated, advise the propagator with the given [`PropRef`] of the
-	/// event that triggered the activation. If the adviser method returns
+	/// event that triggered the activation. If the advisor method returns
 	/// `true`, then enqueue the propagator if it is not already in the queue.
 	Advise(A),
 	/// When activated, simply add the propagator with the given [`PropRef`] to
@@ -28,7 +28,7 @@ pub(crate) enum ActivationAction<A, P> {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ActivationActionS(u32);
 
-/// A data structure that store a list of propagators to be enqueued based on
+/// A data structure that stores a list of propagators to be enqueued based on
 /// different propagation conditions.
 ///
 /// The list is sorted in the following order of propagation condition:
@@ -42,7 +42,7 @@ pub(crate) struct ActivationActionS(u32);
 /// of the Bound condition to the end of the list.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct ActivationList {
-	/// The list of propagators that are to be enqueue based on different
+	/// The list of propagators that are to be enqueued based on different
 	/// propagation conditions.
 	activations: Vec<ActivationActionS>,
 	/// The index for the first propagator to be activated when an event

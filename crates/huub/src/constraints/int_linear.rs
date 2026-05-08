@@ -36,7 +36,7 @@ use crate::{
 	views::LinearBoolView,
 };
 
-/// A type with double the amount of bits of [`IntVal`], allowing for large
+/// A type with twice the bit width of [`IntVal`], allowing for large
 /// intermediate value computation.
 type DoubleIntVal = i128;
 

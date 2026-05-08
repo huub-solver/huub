@@ -18,18 +18,18 @@ pub trait BoolInspectionActions<Context: ?Sized>: BoolOperations {
 }
 
 /// Operations that are required to be possible to perform on types acting as
-/// boolean decision variables.
+/// Boolean decision variables.
 pub trait BoolOperations: Clone + Debug + Eq + Hash + Not + 'static {}
 
 /// Actions available to [`Propagator`](crate::constraints::Propagator) and
 /// [`Constraint`](crate::constraints::Constraint) implementations in
-/// [`ReasoningEngine::PropagationCtx`](crate::actions::ReasoningEngine::PropagationCtx)
+/// [`ReasoningEngine::PropagationContext`](crate::actions::ReasoningEngine::PropagationContext)
 /// for Boolean decision variables.
 pub trait BoolPropagationActions<Context>: BoolInspectionActions<Context>
 where
 	Context: ReasoningContext + ?Sized,
 {
-	/// Enforce that the value of a Boolean decision variable is to be `val`,
+	/// Enforce that the value of a Boolean decision variable must be `val`
 	/// because of the given reason.
 	fn fix(
 		&self,
@@ -38,7 +38,7 @@ where
 		reason: impl ReasonBuilder<Context>,
 	) -> Result<(), Context::Conflict>;
 
-	/// Enforce that the value of a Boolean decision variable is to be `true`,
+	/// Enforce that the value of a Boolean decision variable must be `true`
 	/// because of the given reason.
 	fn require(
 		&self,
@@ -51,7 +51,7 @@ where
 
 /// Actions available to [`Constraint`](crate::constraints::Constraint)
 /// implementations in
-/// [`ReasoningEngine::PropagationCtx`](crate::actions::ReasoningEngine::PropagationCtx)
+/// [`ReasoningEngine::PropagationContext`](crate::actions::ReasoningEngine::PropagationContext)
 /// for Boolean decision variables.
 ///
 /// Generally these actions are used in

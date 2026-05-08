@@ -33,7 +33,7 @@ pub enum BoolView {
 }
 
 impl View<bool> {
-	/// Return an integers that can used to identify the literal, if there is
+	/// Return an integer that can be used to identify the literal, if there is
 	/// one.
 	#[doc(hidden)]
 	pub fn reverse_map_info(&self) -> Option<NonZero<i32>> {

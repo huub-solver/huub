@@ -79,9 +79,9 @@ pub(crate) type BoxedPropagator = Box<dyn Propagator<Engine>>;
 /// and is only evaluated once used.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum CachedReason<B, Atom> {
-	/// A evaluated reason that can be reused
+	/// An evaluated reason that can be reused.
 	Cached(Result<Reason<Atom>, bool>),
-	/// A reason that has not yet been evaluated
+	/// A reason that has not yet been evaluated.
 	Builder(B),
 }
 
@@ -94,8 +94,9 @@ pub struct Conflict<Atom> {
 	///
 	/// If `None`, the conflict is a root conflict.
 	pub(crate) subject: Option<Atom>,
-	/// The reason for the conflict
-	/// This reason must result a conjunction that implies false
+	/// The reason for the conflict.
+	///
+	/// This reason must produce a conjunction that implies false.
 	pub(crate) reason: Reason<Atom>,
 }
 
@@ -118,7 +119,7 @@ pub trait Constraint<E: ReasoningEngine + ?Sized>: Any + Debug + DynClone + Prop
 	/// Encode the constraint using [`Propagator`] objects or clauses for a
 	/// [`Solver`](solver::Solver) object.
 	///
-	/// This method is should place all required propagators and/or clauses in a
+	/// This method should place all required propagators and/or clauses in a
 	/// [`Solver`](solver::Solver) object to ensure the constraint will not be
 	/// violated.
 	fn to_solver(&self, context: &mut LoweringContext<'_>) -> Result<(), LoweringError>;
@@ -185,7 +186,7 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 		unreachable!("propagator did not provide a Boolean advisor implementation")
 	}
 
-	/// Advises the propagator that a integer decision (view) has changed with
+	/// Advises the propagator that an integer decision view has changed with
 	/// the associated data given when registering the advisor. If the advisor
 	/// returns `true`, then the propagator will be enqueued.
 	fn advise_of_int_change(
@@ -228,15 +229,15 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 	}
 
 	/// This method is called when the propagator is posted to the solver to
-	/// allow the propagator to subscribe to events.œ
+	/// allow the propagator to subscribe to events.
 	fn initialize(&mut self, context: &mut E::InitializationContext<'_>);
 
 	/// The propagate method is called during the search process to allow the
-	/// propagator to enforce
+	/// propagator to enforce its constraint.
 	fn propagate(&mut self, context: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict>;
 }
 
-/// A conjunction of literals that implies a change in the state
+/// A conjunction of literals that implies a change in the state.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Reason<Atom> {
 	/// A promise that a given propagator will compute a causation of the change
@@ -360,7 +361,7 @@ where
 }
 
 impl Conflict<solver::Decision<bool>> {
-	/// Create a new conflict with the given reason
+	/// Create a new conflict with the given reason.
 	pub(crate) fn new<Ctx: ReasoningContext<Atom = solver::View<bool>> + ?Sized>(
 		ctx: &mut Ctx,
 		subject: Option<solver::Decision<bool>>,

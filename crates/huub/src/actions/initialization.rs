@@ -13,7 +13,8 @@ use crate::{
 
 /// Actions available to [`Propagator`](crate::constraints::Propagator)
 /// implementations in
-/// [`ReasoningEngine::InitializationCtx`](crate::actions::ReasoningEngine::InitializationCtx) for Boolean decision variables.
+/// [`ReasoningEngine::InitializationContext`](crate::actions::ReasoningEngine::InitializationContext)
+/// for Boolean decision variables.
 pub trait BoolInitActions<Context>: BoolInspectionActions<Context> {
 	/// Advise the propagator when `self` is assigned, allowing the
 	/// propagator to decide whether to enqueue itself.
@@ -59,8 +60,8 @@ pub trait InitActions {
 
 /// Actions available to [`Propagator`](crate::constraints::Propagator)
 /// implementations in
-/// [`ReasoningEngine::InitializationCtx`](crate::actions::ReasoningEngine::InitializationCtx)
-/// for Boolean decision variables.
+/// [`ReasoningEngine::InitializationContext`](crate::actions::ReasoningEngine::InitializationContext)
+/// for integer decision variables.
 pub trait IntInitActions<Context>: IntInspectionActions<Context>
 where
 	Context: ReasoningContext + ?Sized,

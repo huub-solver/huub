@@ -92,7 +92,7 @@ where
 	}
 
 	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
-		// Fix the bounds of the index is to the length of the array
+		// Restrict the index to the bounds of the array.
 		self.index.tighten_min(ctx, 0, vec![])?;
 		self.index
 			.tighten_max(ctx, self.array.len() as IntVal - 1, vec![])?;

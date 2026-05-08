@@ -17,7 +17,7 @@ use crate::{
 	},
 };
 
-/// General brancher for Boolean variables that makes search decision by
+/// General brancher for Boolean variables that makes search decisions by
 /// following a given [`VariableSelection`] and [`ValueSelection`] strategy.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct BoolBrancher {
@@ -37,13 +37,13 @@ pub struct BoolBrancher {
 /// [`Engine`].
 pub(crate) type BoxedBrancher = Box<dyn for<'a> Brancher<SolvingContext<'a>>>;
 
-/// A trait for making search decisions in the solver
+/// A trait for making search decisions in the solver.
 pub trait Brancher<D: DecisionActions>: Debug + DynClone {
 	/// Make a next search decision using the given decision actions.
 	fn decide(&mut self, actions: &mut D) -> Directive;
 }
 
-/// An search decision made by a [`Brancher`].
+/// A search decision made by a [`Brancher`].
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Directive {
 	/// Make the decision to branch on the given literal.
@@ -56,7 +56,7 @@ pub enum Directive {
 	Consumed,
 }
 
-/// General brancher for integer variables that makes search decision by
+/// General brancher for integer variables that makes search decisions by
 /// following a given [`VariableSelection`] and [`ValueSelection`] strategy.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IntBrancher {
@@ -73,12 +73,12 @@ pub struct IntBrancher {
 }
 
 /// Strategy for limiting the domain of a selected decision variable for a
-/// [`BoolBrancher`] or [`IntBrancher`] .
+/// [`BoolBrancher`] or [`IntBrancher`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ValueSelection {
-	/// Set the decision variable to its current lower bound value.
+	/// Set the decision variable to its current maximum value.
 	IndomainMax,
-	/// Set the decision variable to its current upper bound value.
+	/// Set the decision variable to its current minimum value.
 	IndomainMin,
 	/// Exclude the current upper bound value from the domain of the decision
 	/// variable.
@@ -89,7 +89,7 @@ pub enum ValueSelection {
 }
 
 /// Strategy of selecting the next decision variable for a [`BoolBrancher`] or
-/// [`IntBrancher`] .
+/// [`IntBrancher`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum VariableSelection {
 	/// Select the unfixed decision variable with the largest remaining domain
@@ -108,7 +108,7 @@ pub enum VariableSelection {
 	Smallest,
 }
 
-/// A brancher that enforces Boolean conditions that is abandoned when a
+/// A brancher that enforces Boolean conditions and is abandoned when a
 /// conflict is encountered. These branchers are generally used to warm start,
 /// i.e. quickly reach, a (partial) known or expected solution.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -157,12 +157,12 @@ where
 	fn decide(&mut self, ctx: &mut E) -> Directive {
 		let begin = ctx.trailed(self.next);
 
-		// return if all variables have been assigned
+		// Return if all variables have been assigned.
 		if begin == self.vars.len() {
 			return Directive::Exhausted;
 		}
 
-		// Variable selection currently can just select first unfixed in the array
+		// Boolean variable selection currently selects the first unfixed variable.
 		debug_assert!(matches!(
 			self.var_sel,
 			VariableSelection::InputOrder
@@ -208,6 +208,36 @@ impl Clone for BoxedBrancher {
 impl IntBrancher {
 	/// Create a new [`IntBrancher`] brancher and add to the end of the
 	/// branching queue in the solver.
+	///
+	/// ```
+	/// # use huub::{
+	/// #     lower::InitConfig,
+	/// #     model::Model,
+	/// #     solver::{
+	/// #         branchers::{IntBrancher, ValueSelection, VariableSelection},
+	/// #         IntValuation, Solver, Status,
+	/// #     },
+	/// # };
+	/// # let mut model = Model::default();
+	/// # let x = model.new_int_decision(1..=3);
+	/// # let y = model.new_int_decision(1..=3);
+	/// # model.linear(x + y).eq(4).post();
+	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let x = map.get(&mut solver, x);
+	/// # let y = map.get(&mut solver, y);
+	/// IntBrancher::new_in(
+	///     &mut solver,
+	///     vec![x, y],
+	///     VariableSelection::FirstFail,
+	///     ValueSelection::IndomainMin,
+	/// );
+	///
+	/// # let status = solver.solve(|solution| {
+	/// #     assert_eq!(x.val(solution) + y.val(solution), 4);
+	/// # });
+	/// # assert_eq!(status, Status::Satisfied);
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
 	pub fn new_in(
 		solver: &mut impl BrancherInitActions,
 		vars: Vec<View<IntVal>>,
@@ -314,6 +344,33 @@ where
 impl WarmStartBrancher {
 	/// Create a new [`WarmStartBrancher`] brancher and add to the end of the
 	/// branching queue in the solver.
+	///
+	/// A warm start is a preference, not a constraint. If the suggested
+	/// decisions cause a conflict, the brancher is consumed and regular search
+	/// continues.
+	///
+	/// ```
+	/// # use huub::{
+	/// #     actions::IntDecisionActions,
+	/// #     lower::InitConfig,
+	/// #     model::Model,
+	/// #     solver::{branchers::WarmStartBrancher, IntLitMeaning, IntValuation, Solver, Status},
+	/// # };
+	/// # let mut model = Model::default();
+	/// # let x = model.new_int_decision(1..=3);
+	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let x = map.get(&mut solver, x);
+	/// let prefer_two = x.lit(&mut solver, IntLitMeaning::Eq(2));
+	/// WarmStartBrancher::new_in(&mut solver, vec![prefer_two]);
+	///
+	/// # let mut value = None;
+	/// # let status = solver.solve(|solution| {
+	/// #     value = Some(x.val(solution));
+	/// # });
+	/// # assert_eq!(status, Status::Satisfied);
+	/// # assert_eq!(value, Some(2));
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
 	pub fn new_in(solver: &mut impl BrancherInitActions, decisions: Vec<View<bool>>) {
 		// Filter out the decisions that are already satisfied or are known to cause
 		// a conflict

@@ -50,13 +50,13 @@ pub struct IntNoOverlapSweep<const STRICT: bool, I1, I2> {
 	/// The size of each object in each dimension.
 	size: Matrix<2, I2>,
 
-	/// Trail which tracks the target property, target[i] = 1 if is has been
-	/// lost, and will let us skip some iterations since it at that point has
-	/// been checked to be at a feasible position and fixed.
+	/// Trailed flags for target objects that have been lost and can be skipped
+	/// in later iterations because they have been checked to be fixed at a
+	/// feasible position.
 	target: Box<[Trailed<bool>]>,
-	/// Trail which tracks the source property, target[i] = 1 if is has been
-	/// lost, and will allow it to be disregarded through the entire algorithm
-	/// since it will not affect any other rectangle.
+	/// Trailed flags for source objects that have been lost and can be ignored
+	/// for the rest of the algorithm because they cannot affect any other
+	/// rectangle.
 	source: Box<[Trailed<bool>]>,
 
 	/// A cache for the upper bounds of the origin variables.

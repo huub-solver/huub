@@ -17,7 +17,7 @@ use crate::{
 /// These actions are also available to
 /// [`Propagator`](crate::constraints::Propagator) and
 /// [`Constraint`](crate::constraints::Constraint) implementations in
-/// [`ReasoningEngine::PropagationCtx`](crate::actions::ReasoningEngine::PropagationCtx).
+/// [`ReasoningEngine::PropagationContext`](crate::actions::ReasoningEngine::PropagationContext).
 pub trait IntDecisionActions<Context>: IntInspectionActions<Context>
 where
 	Context: ReasoningContext + ?Sized,
@@ -39,7 +39,7 @@ where
 pub enum IntEvent {
 	/// The variable has been fixed to a single value.
 	Fixed,
-	/// Both of the bounds of the variable has changed.
+	/// Both bounds of the variable have changed.
 	Bounds,
 	/// The lower bound of the variable has changed.
 	LowerBound,
@@ -52,7 +52,7 @@ pub enum IntEvent {
 
 /// Actions available to [`Propagator`](crate::constraints::Propagator) and
 /// [`Constraint`](crate::constraints::Constraint) implementations in
-/// [`ReasoningEngine::ExplanationCtx`](crate::actions::ReasoningEngine::ExplanationCtx) for
+/// [`ReasoningEngine::ExplanationContext`](crate::actions::ReasoningEngine::ExplanationContext) for
 /// integer decision variables.
 pub trait IntExplanationActions<Context>: IntInspectionActions<Context>
 where
@@ -91,7 +91,7 @@ where
 	fn in_domain(&self, ctx: &Context, val: IntVal) -> bool;
 
 	/// Get the meaning of the given literal with respect to the given integer
-	/// view, or `None` it has no direct meaning.
+	/// view, or `None` if it has no direct meaning.
 	fn lit_meaning(&self, ctx: &Context, lit: Context::Atom) -> Option<IntLitMeaning>;
 
 	/// Get the maximum value that an integer view is guaranteed to take (given
@@ -99,7 +99,7 @@ where
 	fn max(&self, ctx: &Context) -> IntVal;
 
 	/// Get the Boolean view that represents that the integer view will take a
-	/// value less or equal to its current upper bound.
+	/// value less than or equal to its current upper bound.
 	fn max_lit(&self, ctx: &Context) -> Context::Atom;
 
 	/// Get the minimum value that an integer view is guaranteed to take (given
@@ -107,7 +107,7 @@ where
 	fn min(&self, ctx: &Context) -> IntVal;
 
 	/// Get the Boolean view that represents that the integer view will take a
-	/// value greater or equal to its current lower bound.
+	/// value greater than or equal to its current lower bound.
 	fn min_lit(&self, ctx: &Context) -> Context::Atom;
 
 	/// Get a Boolean view that represents the given meaning on the integer
@@ -148,12 +148,12 @@ pub enum IntPropCond {
 
 /// Actions available to [`Propagator`](crate::constraints::Propagator) and
 /// [`Constraint`](crate::constraints::Constraint) implementations in
-/// [`ReasoningEngine::PropagationCtx`](crate::actions::ReasoningEngine::PropagationCtx) for integer decision variables.
+/// [`ReasoningEngine::PropagationContext`](crate::actions::ReasoningEngine::PropagationContext) for integer decision variables.
 pub trait IntPropagationActions<Context>: IntDecisionActions<Context>
 where
 	Context: ReasoningContext + ?Sized,
 {
-	/// Enforce that a an integer view takes a value `val` because of the given
+	/// Enforce that an integer view takes the value `val` because of the given
 	/// `reason`.
 	fn fix(
 		&self,
@@ -162,7 +162,7 @@ where
 		reason: impl ReasonBuilder<Context>,
 	) -> Result<(), Context::Conflict>;
 
-	/// Enforce that a an integer view cannot take a value `val` because of the
+	/// Enforce that an integer view cannot take the value `val` because of the
 	/// given `reason`.
 	fn remove_val(
 		&self,
@@ -171,7 +171,7 @@ where
 		reason: impl ReasonBuilder<Context>,
 	) -> Result<(), Context::Conflict>;
 
-	/// Enforce that a an integer view takes a value that is less or equal to
+	/// Enforce that an integer view takes a value that is less than or equal to
 	/// `val` because of the given `reason`.
 	fn tighten_max(
 		&self,
@@ -180,8 +180,8 @@ where
 		reason: impl ReasonBuilder<Context>,
 	) -> Result<(), Context::Conflict>;
 
-	/// Enforce that a an integer view takes a value that is greater or equal to
-	/// `val` because of the given `reason`.
+	/// Enforce that an integer view takes a value that is greater than or equal
+	/// to `val` because of the given `reason`.
 	fn tighten_min(
 		&self,
 		ctx: &mut Context,
@@ -192,7 +192,7 @@ where
 
 /// Actions available to [`Constraint`](crate::constraints::Constraint)
 /// implementations in
-/// [`ReasoningEngine::PropagationCtx`](crate::actions::ReasoningEngine::PropagationCtx)
+/// [`ReasoningEngine::PropagationContext`](crate::actions::ReasoningEngine::PropagationContext)
 /// for integer decision variables.
 ///
 /// Generally these actions are used in
@@ -210,7 +210,7 @@ where
 		reason: impl ReasonBuilder<Context>,
 	) -> Result<(), Context::Conflict>;
 
-	/// Enforce that the given integer expression takes a value in in the given
+	/// Enforce that the given integer expression takes a value in the given
 	/// set.
 	fn restrict_domain(
 		&self,

@@ -8,7 +8,7 @@ use std::{
 
 use crate::IntVal;
 
-/// Type alias for a integer value that has double the bit width of [`IntVal`].
+/// Type alias for an integer value that has double the bit width of [`IntVal`].
 pub(crate) type DoubleIntVal = i128;
 
 /// Marker type indicating that overflow is impossible, and does not need to be

@@ -1,7 +1,6 @@
-//! Structures and algorithms for the integer in set constraint, which
-//! constraints that an integer decision variable is assigned to a member of a
-//! given set if-and-only-if a given Boolean decision variable is assigned to
-//! `true`.
+//! Structures and algorithms for the integer in set constraint, which enforces
+//! that an integer decision variable is assigned to a member of a given set
+//! if-and-only-if a given Boolean decision variable is assigned to `true`.
 
 use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;

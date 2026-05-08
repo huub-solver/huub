@@ -1,4 +1,9 @@
-//! Helper types and functions used to build constraints for a [`Model`].
+//! Helper types and builder methods used to create constraints for a
+//! [`Model`].
+//!
+//! Most modelling methods return a builder. Call `.post()` to add the completed
+//! constraint to the model, or use a `.define()` or `.reify()` helper when the
+//! builder supports creating the result decision variable for you.
 
 #![cfg_attr(
 	not(test),
@@ -45,8 +50,8 @@ use crate::{
 #[bon]
 impl Model {
 	/// Create a constraint that enforces that the second integer decision
-	/// variable takes the absolute value of the first integer decision
-	/// variable.
+	/// decision variable takes the absolute value of the first integer decision
+	/// decision variable.
 	#[builder(finish_fn = post)]
 	pub fn abs(
 		&mut self,
@@ -60,8 +65,9 @@ impl Model {
 		});
 	}
 
-	/// Create constraint that enforces that the given Boolean variable takes
-	/// the value `true` if-and-only-if an integer variable is in a given set.
+	/// Create constraint that enforces that the given Boolean decision variable
+	/// takes the value `true` if-and-only-if an integer decision variable is in
+	/// a given set.
 	#[builder(finish_fn = post)]
 	pub fn contains(
 		&mut self,
@@ -142,7 +148,7 @@ impl Model {
 		});
 	}
 
-	/// Create a constraint that enforces that a numerator decision integer
+	/// Create a constraint that enforces that a numerator integer decision
 	/// variable divided by a denominator integer decision variable is equal to
 	/// a result integer decision variable.
 	#[builder(finish_fn = post)]
@@ -173,6 +179,32 @@ impl Model {
 	}
 
 	/// Create a linear equation constraint.
+	///
+	/// Linear expressions can be built with ordinary arithmetic on integer
+	/// views and constants. The builder is completed with a comparator such as
+	/// [`ModelLinearBuilder::eq`], [`ModelLinearBuilder::le`], or
+	/// [`ModelLinearBuilder::ge`], and then posted.
+	///
+	/// ```
+	/// # use huub::{
+	/// #     lower::InitConfig,
+	/// #     model::Model,
+	/// #     solver::{IntValuation, Solver, Status},
+	/// # };
+	/// # let mut model = Model::default();
+	/// let x = model.new_int_decision(0..=10);
+	/// let y = model.new_int_decision(0..=10);
+	///
+	/// model.linear(x * 2 + y).eq(7).post();
+	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let x = map.get(&mut solver, x);
+	/// # let y = map.get(&mut solver, y);
+	/// # let status = solver.solve(|solution| {
+	/// #     assert_eq!(x.val(solution) * 2 + y.val(solution), 7);
+	/// # });
+	/// # assert_eq!(status, Status::Satisfied);
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
 	#[builder(finish_fn = post)]
 	pub fn linear(
 		&mut self,
@@ -402,6 +434,28 @@ impl Model {
 
 	/// Create a constraint that enforces that all the given integer decisions
 	/// take different values.
+	///
+	/// ```
+	/// # use huub::{
+	/// #     lower::InitConfig,
+	/// #     model::Model,
+	/// #     solver::{IntValuation, Solver, Status},
+	/// # };
+	/// # let mut model = Model::default();
+	/// let x = model.new_int_decisions(3, 1..=3);
+	/// # let x_clone = x.clone();
+	/// model.unique(x).post();
+	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let &[x, y, z] = x_clone.into_iter().map(|var| map.get(&mut solver, var)).collect::<Vec<_>>().as_slice() else {
+	/// # 	unreachable!()
+	/// # };
+	/// # let status = solver.solve(|solution| {
+	/// #     let values = [x.val(solution), y.val(solution), z.val(solution)];
+	/// #     assert_eq!(values.iter().sum::<i64>(), 6);
+	/// # });
+	/// # assert_eq!(status, Status::Satisfied);
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
 	#[builder(finish_fn = post)]
 	pub fn unique(
 		&mut self,
@@ -434,7 +488,7 @@ impl Model {
 	) {
 		let mut offset = 0;
 		let vars: Vec<_> = vars.into_iter().collect();
-		// If there are no variables, then the constraint is trivially
+		// If there are no decision variables, then the constraint is trivially
 		// satisfied.
 		if vars.is_empty() {
 			return;
@@ -475,7 +529,7 @@ impl Model {
 
 impl<S: model_abs_builder::State> ModelAbsBuilder<'_, S> {
 	/// Create a new integer decision variable that is defined as the absolute
-	/// value of the given integer variable.
+	/// value of the given integer decision variable.
 	pub fn define(self) -> View<IntVal>
 	where
 		S::Result: model_abs_builder::IsUnset,
@@ -505,7 +559,7 @@ impl<S: model_contains_builder::State> ModelContainsBuilder<'_, S> {
 
 impl<S: model_div_builder::State> ModelDivBuilder<'_, S> {
 	/// Create a new integer decision variable that is defined as the result of
-	/// the division of the given two integer variables.
+	/// the division of the given two integer decision variables.
 	pub fn define(self) -> View<IntVal>
 	where
 		S::Result: model_div_builder::IsUnset,
@@ -680,6 +734,30 @@ impl<'a, S: model_linear_builder::State> ModelLinearBuilder<'a, S> {
 
 	/// Create a new Boolean decision variable that is defined to be true
 	/// if-and-only-if the linear constraint is satisfied.
+	///
+	/// ```
+	/// # use huub::{
+	/// #     lower::InitConfig,
+	/// #     model::Model,
+	/// #     solver::{BoolValuation, IntValuation, Solver, Status},
+	/// # };
+	/// # let mut model = Model::default();
+	/// let x = model.new_int_decision(0..=5);
+	/// let y = model.new_int_decision(0..=5);
+	///
+	/// let at_least_three = model.linear(x - y).ge(3).reify();
+	///
+	/// # model.proposition(at_least_three).post();
+	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let x = map.get(&mut solver, x);
+	/// # let at_least_three = map.get(&mut solver, at_least_three);
+	/// # let status = solver.solve(|solution| {
+	/// #     assert!(at_least_three.val(solution));
+	/// #     assert!(x.val(solution) >= 3);
+	/// # });
+	/// # assert_eq!(status, Status::Satisfied);
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
 	pub fn reify(self) -> View<bool>
 	where
 		S::Reif: model_linear_builder::IsUnset,

@@ -28,7 +28,7 @@ struct BoolStore {
 pub(crate) struct Trail {
 	/// The storage of event that have been trailed.
 	///
-	/// Note that the trail is contains a sequence of integers, but 1 or 3 of
+	/// Note that the trail contains a sequence of integers, but 1 or 3 of
 	/// these integers are intended to be read as a [`TrailEvent`].
 	trail: Vec<u32>,
 	/// The current position in the trail.
@@ -68,7 +68,7 @@ impl Trail {
 		ty: PhantomData,
 	};
 
-	/// Record the assignment of a literal in the Trail
+	/// Record the assignment of a literal in the trail.
 	///
 	/// # Warning
 	/// This method expects that `self.sat_store` has already been extended to

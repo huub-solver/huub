@@ -35,7 +35,7 @@ pub enum BoolView {
 	Const(bool),
 	/// Whether an integer is equal to a constant.
 	IntEq(Decision<IntVal>, IntVal),
-	/// Whether an integer is greater or equal to a constant.
+	/// Whether an integer is greater than or equal to a constant.
 	IntGreaterEq(Decision<IntVal>, IntVal),
 	/// Whether an integer is less than a constant.
 	IntLess(Decision<IntVal>, IntVal),

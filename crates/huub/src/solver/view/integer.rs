@@ -42,8 +42,8 @@ impl private::Sealed for IntVal {}
 
 impl View<IntVal> {
 	/// Returns an integer that can be used to identify the associated integer
-	/// decision variable and whether the int view is a view on another decision
-	/// variable.
+	/// decision variable and whether the integer view is a view on another
+	/// decision variable.
 	#[doc(hidden)]
 	pub fn int_reverse_map_info(&self) -> (Option<u32>, bool) {
 		match self.0 {

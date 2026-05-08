@@ -22,7 +22,8 @@ use crate::{
 	helpers::bytes::Bytes,
 };
 
-/// Actions that can be performed during the construction of [`Propagator`]s and
+/// Actions that can be performed during the construction of
+/// [`Propagator`](crate::constraints::Propagator)s and
 /// [`Constraint`]s.
 pub trait ConstructionActions {
 	/// Create a new trailed integer value with the given initial value.
@@ -50,10 +51,11 @@ pub trait PostingActions: ConstructionActions + ReasoningContext {
 	fn add_propagator(&mut self, propagator: BoxedPropagator);
 }
 
-/// General actions that can be performed in [`ReasoningEngine::PropagationCtx`]
+/// General actions that can be performed in
+/// [`ReasoningEngine::PropagationContext`].
 pub trait PropagationActions: DecisionActions + ReasoningContext {
-	/// Declare that given reason (seen as a conjunction of atoms) is represents
-	/// a conflict in the current state (requiring backtracking).
+	/// Declare that the given reason, seen as a conjunction of atoms,
+	/// represents a conflict in the current state, requiring backtracking.
 	///
 	/// Note that it is generally recommended to use this method only when
 	/// integer or Boolean propagation methods do not seem relevant.
@@ -65,10 +67,10 @@ pub trait PropagationActions: DecisionActions + ReasoningContext {
 	fn deferred_reason(&self, data: u64) -> DeferredReason;
 }
 
-/// The ReasoningContext trait names the fundamental reasoning types used by the
-/// context objects used by the various Action traits.
+/// The `ReasoningContext` trait names the fundamental reasoning types used by
+/// the context objects used by the various action traits.
 pub trait ReasoningContext {
-	/// Type used to represent an atom in an reason for propagation.
+	/// Type used to represent an atom in a reason for propagation.
 	type Atom: BoolOperations + Not<Output = Self::Atom>;
 	/// Type used to represent a conflict that occurs during propagation.
 	type Conflict;
@@ -77,7 +79,7 @@ pub trait ReasoningContext {
 /// Trait for environments that support constraint propagation and decision
 /// variable pruning to simplify the current problem state.
 pub trait ReasoningEngine {
-	/// Type used to represent an atom in an reason for propagation.
+	/// Type used to represent an atom in a reason for propagation.
 	type Atom: BoolOperations + Not<Output = Self::Atom>;
 	/// Type used to represent a conflict that occurs during propagation.
 	type Conflict;
@@ -101,18 +103,20 @@ pub trait ReasoningEngine {
 		+ PropagationActions<Atom = Self::Atom, Conflict = Self::Conflict>;
 }
 
-/// Actions that can be performed to simplify a Model considering a given
-/// constraint.
+/// Actions that can be performed to simplify a [`Model`](crate::model::Model)
+/// considering a given constraint.
 pub trait SimplificationActions {
 	/// The type of the reasoning engine that is used when adding new
 	/// constraints.
 	type Target: ReasoningEngine;
 
-	/// Post a constraint to the model, mirroring [`Model::post_constraint`].
+	/// Post a constraint to the model, mirroring
+	/// [`Model::post_constraint`](crate::model::Model::post_constraint).
 	///
-	/// This functionality is generally used to replaced the current constraint
-	/// by a new one. The [`Constraint::simplify`] step one or more new
-	/// constraints and then returns [`SimplificationStatus::Subsumed`] to
+	/// This functionality is generally used to replace the current constraint
+	/// by a new one. The [`Constraint::simplify`] step posts one or more new
+	/// constraints, and then returns
+	/// [`SimplificationStatus::Subsumed`](crate::constraints::SimplificationStatus::Subsumed) to
 	/// indicate that the current constraint can be removed.
 	fn post_constraint<C: Constraint<Self::Target>>(&mut self, constraint: C);
 }

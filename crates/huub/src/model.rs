@@ -1,4 +1,5 @@
-//! Module containing the modelling layer for the Huub solver.
+//! The modelling layer for constructing, simplifying, and lowering problem
+//! instances.
 
 pub(crate) mod decision;
 pub mod deserialize;
@@ -60,7 +61,7 @@ use crate::{
 	},
 };
 
-/// Identifies an advisor in the [`Model`]
+/// Identifies an advisor in the [`Model`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct AdvRef(u32);
 
@@ -74,27 +75,62 @@ struct Advisor {
 	data: u64,
 	/// Whether lower and upper bound events must be swapped.
 	negated: bool,
-	/// Whether the advise on a Boolean must be advised as an integer event.
+	/// Whether advice on a Boolean view must be converted to an integer event.
 	bool2int: bool,
 	/// The condition on the integer decision variable that must be decided
 	/// before the constraint is advised.
 	condition: Option<IntLitMeaning>,
 }
 
-/// Identifies an constraint in the [`Model`]
+/// Identifies a constraint in the [`Model`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ConRef(u32);
 
 /// A formulation of a problem instance in terms of decisions and constraints.
+///
+/// A [`Model`] is the construction and simplification layer of Huub. It stores
+/// decision variables, constraints, aliases, and simplifications, but it does
+/// not perform search itself. Search starts after the model is converted to a
+/// [`Solver`] with [`Self::to_solver`].
+///
+/// After lowering, values in a solution should be queried through the solver
+/// views returned by the [`LoweringMap`].
+///
+/// ```
+/// # use huub::{
+/// #     lower::InitConfig,
+/// #     model::Model,
+/// #     solver::{IntValuation, Solver, Status},
+/// # };
+/// let mut model = Model::default();
+/// let x = model.new_int_decision(1..=3);
+/// let y = model.new_int_decision(1..=3);
+///
+/// model.linear(x + y).eq(4).post();
+///
+/// let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+/// # let x = map.get(&mut solver, x);
+/// # let y = map.get(&mut solver, y);
+/// # let mut pair = None;
+/// # let status = solver.solve(|solution| {
+/// #     pair = Some((x.val(solution), y.val(solution)));
+/// # });
+/// # assert_eq!(status, Status::Satisfied);
+/// # let (x, y) = pair.unwrap();
+/// # assert_eq!(x + y, 4);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Clone, Debug, Default)]
 pub struct Model {
 	/// A base [`Cnf`] object that contains pure Boolean parts of the problem.
 	pub(crate) cnf: Cnf,
 	/// A list of constraints that have been added to the model.
 	constraints: Vec<Option<BoxedConstraint>>,
-	/// The definitions of the Boolean variables that have been created.
+	/// The definitions of the Boolean decision variables that have been
+	/// created.
 	pub(crate) bool_vars: Vec<BoolDecision>,
-	/// The definitions of the integer variables that have been created.
+	/// The definitions of the integer decision variables that have been
+	/// created.
 	pub(crate) int_vars: Vec<IntDecision>,
 	/// A queue of constraints that need to be propagated.
 	propagator_queue: PropagatorQueue,
@@ -109,7 +145,7 @@ pub struct Model {
 	/// current propagator.
 	bool_events: Vec<Decision<bool>>,
 
-	/// Definitions of the advisors that are listening to the certain changes.
+	/// Definitions of the advisors that are listening to selected changes.
 	advisors: Vec<Advisor>,
 }
 
@@ -138,13 +174,13 @@ impl AdvRef {
 }
 
 impl ConRef {
-	/// Access the raw value of the constraint reference.
+	/// Recreate the constraint reference from a raw value.
 	pub(crate) fn from_raw(raw: u32) -> Self {
 		debug_assert!(raw <= i32::MAX as u32);
 		Self(raw)
 	}
 
-	/// Recreate the constraint reference from a raw value.
+	/// Get the index into the constraint vector.
 	pub(crate) fn index(&self) -> usize {
 		self.0 as usize
 	}
@@ -155,7 +191,7 @@ impl ConRef {
 		Self(index as u32)
 	}
 
-	/// Access the raw value of the advisor reference.
+	/// Access the raw value of the constraint reference.
 	pub(crate) fn raw(&self) -> u32 {
 		self.0
 	}
@@ -193,12 +229,25 @@ impl Model {
 		var.into()
 	}
 
-	/// Create `len` new Boolean variables.
+	/// Create `len` new Boolean decision variables.
 	pub fn new_bool_decisions(&mut self, len: usize) -> Vec<View<bool>> {
 		repeat_with(|| self.new_bool_decision()).take(len).collect()
 	}
 
-	/// Create a new integer variable with the given domain.
+	/// Create a new integer decision variable with the given domain.
+	///
+	/// The domain describes the values the decision variable may take before
+	/// propagation and search. If the domain contains exactly one value, Huub
+	/// returns a constant view instead of allocating a solver decision.
+	///
+	/// ```
+	/// # use huub::model::Model;
+	/// # let mut model = Model::default();
+	/// let digit = model.new_int_decision(0..=9);
+	/// let non_zero_digit = model.new_int_decision(1..=9);
+	///
+	/// model.linear(digit + non_zero_digit).le(18).post();
+	/// ```
 	pub fn new_int_decision(&mut self, domain: impl Into<IntSet>) -> View<IntVal> {
 		let domain = domain.into();
 		match domain.card() {
@@ -399,6 +448,23 @@ impl Model {
 	/// to [`solver::View`](crate::solver::View). If an error occurs during the
 	/// reformulation process, or if it is found to be trivially unsatisfiable,
 	/// then an error will be returned.
+	///
+	/// ```
+	/// # use huub::{
+	/// #     lower::InitConfig,
+	/// #     model::Model,
+	/// #     solver::{IntValuation, Solver},
+	/// # };
+	/// # let mut model = Model::default();
+	/// # let x = model.new_int_decision(1..=3);
+	/// let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// let x = map.get(&mut solver, x);
+	///
+	/// solver.solve(|solution| {
+	///     assert!((1..=3).contains(&x.val(solution)));
+	/// });
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
 	pub fn to_solver<Sat>(
 		&mut self,
 		config: &InitConfig,

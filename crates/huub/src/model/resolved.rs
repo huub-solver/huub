@@ -125,7 +125,7 @@ impl View<bool> {
 				break;
 			}
 		}
-		// If the current Lit is a integer view, check whether it is already fixed.
+		// If the current literal is an integer view, check whether it is already fixed.
 		match result.0 {
 			IntEq(iv, val) => {
 				let (lb, ub) = iv.bounds(model);

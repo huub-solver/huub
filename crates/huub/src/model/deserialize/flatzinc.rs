@@ -858,7 +858,7 @@ impl<'a> FznModelBuilder<'a> {
 		}
 	}
 
-	/// Extract a Boolean decision variable from the an [`Argument`] in a
+	/// Extract a Boolean decision variable from an [`Argument`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
 	/// returned if the argument was not a Boolean decision variable.
 	fn arg_bool(&mut self, arg: &Argument<FznIdent>) -> Result<View<bool>, FlatZincError> {
@@ -880,9 +880,9 @@ impl<'a> FznModelBuilder<'a> {
 		}
 	}
 
-	/// Extract a integer decision variable from the an [`Argument`] in a
+	/// Extract an integer decision variable from an [`Argument`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
-	/// returned if the argument was not a integer decision variable.
+	/// returned if the argument was not an integer decision variable.
 	fn arg_int(&mut self, arg: &Argument<FznIdent>) -> Result<View<IntVal>, FlatZincError> {
 		match arg {
 			Argument::Literal(l) => self.lit_int(l),
@@ -893,7 +893,7 @@ impl<'a> FznModelBuilder<'a> {
 		}
 	}
 
-	/// Extract a parameter integer value from the an [`Argument`] in a
+	/// Extract a parameter integer value from an [`Argument`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
 	/// returned if the argument was not an integer parameter.
 	fn arg_par_int(&self, arg: &Argument<FznIdent>) -> Result<IntVal, FlatZincError> {
@@ -906,7 +906,7 @@ impl<'a> FznModelBuilder<'a> {
 		}
 	}
 
-	/// Extract a parameter integer set value from the an [`Argument`] in a
+	/// Extract a parameter integer set value from an [`Argument`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
 	/// returned if the argument was not a parameter set.
 	fn arg_par_set(&self, arg: &Argument<FznIdent>) -> Result<IntSet, FlatZincError> {
@@ -1272,7 +1272,7 @@ impl<'a> FznModelBuilder<'a> {
 		))
 	}
 
-	/// Extract a Boolean decision variable from the a [`Literal`] in a
+	/// Extract a Boolean decision variable from a [`Literal`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
 	/// returned if the argument was not a Boolean decision variable.
 	fn lit_bool(&mut self, lit: &Literal<FznIdent>) -> Result<View<bool>, FlatZincError> {
@@ -1289,9 +1289,9 @@ impl<'a> FznModelBuilder<'a> {
 		}
 	}
 
-	/// Extract a integer decision variable from a [`Literal`] in a [`FlatZinc`]
-	/// instance. A [`FlatZincError::InvalidArgumentType`] will be returned if
-	/// the argument was not a integer decision variable.
+	/// Extract an integer decision variable from a [`Literal`] in a
+	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
+	/// returned if the argument was not an integer decision variable.
 	fn lit_int(&mut self, lit: &Literal<FznIdent>) -> Result<View<IntVal>, FlatZincError> {
 		match lit {
 			Literal::Variable(var) => self.lookup_or_create_var(var).map(|mv| match mv {
@@ -1307,7 +1307,7 @@ impl<'a> FznModelBuilder<'a> {
 		}
 	}
 
-	/// Find the decision variable, i.e. [`ModelView`], associated with the
+	/// Find the decision variable associated with the
 	/// given identifier, or create a new one if it doesn't yet exist.
 	fn lookup_or_create_var(
 		&mut self,
@@ -1336,7 +1336,7 @@ impl<'a> FznModelBuilder<'a> {
 			Entry::Occupied(e) => Ok(e.get().clone()),
 		}
 	}
-	/// Create a new builder to create a model from a FlatZinc instance
+	/// Create a new builder to create a model from a FlatZinc instance.
 	pub(crate) fn new(fzn: &'a FlatZinc<FznIdent>) -> Self {
 		Self {
 			fzn,
@@ -1347,7 +1347,7 @@ impl<'a> FznModelBuilder<'a> {
 		}
 	}
 
-	/// Extract a Boolean parameter from the a [`Literal`] in a [`FlatZinc`]
+	/// Extract a Boolean parameter from a [`Literal`] in a [`FlatZinc`]
 	/// instance. A [`FlatZincError::InvalidArgumentType`] will be returned if
 	/// the argument was not a Boolean parameter.
 	fn par_bool(&self, lit: &Literal<FznIdent>) -> Result<bool, FlatZincError> {
@@ -1360,7 +1360,7 @@ impl<'a> FznModelBuilder<'a> {
 		}
 	}
 
-	/// Extract a parameter integer value from the a [`Literal`] in a
+	/// Extract a parameter integer value from a [`Literal`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
 	/// returned if the argument was not an integer parameter.
 	fn par_int(&self, lit: &Literal<FznIdent>) -> Result<IntVal, FlatZincError> {
@@ -1374,7 +1374,7 @@ impl<'a> FznModelBuilder<'a> {
 		}
 	}
 
-	/// Extract a parameter integer set value from the a [`Literal`] in a
+	/// Extract a parameter integer set value from a [`Literal`] in a
 	/// [`FlatZinc`] instance. A [`FlatZincError::InvalidArgumentType`] will be
 	/// returned if the argument was not a parameter set.
 	fn par_set(&self, lit: &Literal<FznIdent>) -> Result<IntSet, FlatZincError> {

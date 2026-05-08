@@ -64,11 +64,11 @@ pub(crate) struct AdvRef(u32);
 /// subscribed to and the way in which to advise the propagator.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct AdvisorDef {
-	/// Whether the advise is on a [`BoolView`] being used as an [`IntView`]
+	/// Whether the advice is on a [`BoolView`] being used as an [`IntView`].
 	pub(crate) bool2int: bool,
 	/// 64 bits of data communicated when advising propagator.
 	pub(crate) data: u64,
-	/// Whether the advise is on a [`IntView`] with a negative coefficient.
+	/// Whether the advice is on an [`IntView`] with a negative coefficient.
 	pub(crate) negated: bool,
 	/// The propagator being advised.
 	pub(crate) propagator: PropRef,

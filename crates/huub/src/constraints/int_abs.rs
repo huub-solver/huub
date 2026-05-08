@@ -171,7 +171,7 @@ where
 			}
 			None => {
 				// If the origin can be either positive or negative, then the bounds are
-				// the maximum of the absolute values
+				// The maximum absolute value bounds the absolute value variable.
 				let abs_max = cmp::max(ub, -lb);
 				self.abs
 					.tighten_max(ctx, abs_max, |ctx: &mut E::PropagationContext<'_>| {
@@ -181,8 +181,8 @@ where
 						]
 					})?;
 
-				// If the upper bound of the absolute value variable have changed, we
-				// propagate bounds of the origin variable
+				// If the upper bound of the absolute value variable has changed, we
+				// propagate bounds of the origin variable.
 				let abs_ub = self.abs.max(ctx);
 				let ub_lit = self.abs.max_lit(ctx);
 				self.origin.tighten_min(ctx, -abs_ub, [ub_lit.clone()])?;

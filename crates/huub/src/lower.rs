@@ -79,7 +79,7 @@ trait LoweringActions {
 	/// a value.
 	fn int_domain(&self, var: solver::Decision<IntVal>) -> IntSet;
 
-	/// Check whether a given integer view can take a given value
+	/// Check whether a given integer view can take a given value.
 	fn int_in_domain(&self, var: solver::Decision<IntVal>, val: IntVal) -> bool;
 
 	/// Get (or create) a literal for the given integer view with the given
@@ -91,7 +91,7 @@ trait LoweringActions {
 	) -> solver::View<bool>;
 
 	/// Get the meaning of the given literal with respect to the given integer
-	/// view, or `None` it has no direct meaning.
+	/// view, or `None` if it has no direct meaning.
 	fn int_lit_meaning(
 		&self,
 		var: solver::Decision<IntVal>,
@@ -102,14 +102,14 @@ trait LoweringActions {
 	fn int_max(&self, var: solver::Decision<IntVal>) -> IntVal;
 
 	/// Get the Boolean view that represents that the integer view will take a
-	/// value less or equal to its current upper bound.
+	/// value less than or equal to its current upper bound.
 	fn int_max_lit(&self, var: solver::Decision<IntVal>) -> solver::View<bool>;
 
 	/// Get the minimum value that an integer view is guaranteed to take.
 	fn int_min(&self, var: solver::Decision<IntVal>) -> IntVal;
 
 	/// Get the Boolean view that represents that the integer view will take a
-	/// value greater or equal to its current lower bound.
+	/// value greater than or equal to its current lower bound.
 	fn int_min_lit(&self, var: solver::Decision<IntVal>) -> solver::View<bool>;
 
 	/// Get a Boolean view that represents the given meaning (that is currently
@@ -159,7 +159,7 @@ pub enum LoweringError {
 	Lowering(<Engine as ReasoningEngine>::Conflict),
 }
 
-/// A reformulation helper that maps decisions in a [`Model`] objects to the
+/// A lowering helper that maps decisions in a [`Model`] object to the
 /// [`solver::View`] that is used to represent it in a [`Solver`] object.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LoweringMap {
@@ -169,20 +169,20 @@ pub struct LoweringMap {
 	pub(crate) int_map: Vec<solver::View<IntVal>>,
 }
 
-/// Helper type to create a [`ReformulationMap`] object.
+/// Helper type to create a [`LoweringMap`] object.
 ///
 /// This type is primarily meant to resolve the order of creation issue when
 /// dealing with aliased variables.
 pub(crate) struct LoweringMapBuilder {
 	/// Map of Boolean decisions to Boolean views.
 	pub(crate) bool_map: Vec<Option<solver::View<bool>>>,
-	/// Set of integer decision for which the direct encoding should be created
+	/// Set of integer decisions for which the direct encoding should be created
 	/// eagerly.
 	pub(crate) int_eager_direct: FxHashSet<Resolved<model::Decision<IntVal>>>,
 	/// The (default) maximum cardinality of the domain of an integer variable
 	/// before its order encoding is created lazily.
 	pub(crate) int_eager_limit: usize,
-	/// Set of integer decision for which the order encoding should be created
+	/// Set of integer decisions for which the order encoding should be created
 	/// eagerly.
 	pub(crate) int_eager_order: FxHashSet<Resolved<model::Decision<IntVal>>>,
 	/// Map of integer decisions to integer views.
@@ -499,6 +499,27 @@ impl From<<Model as ReasoningEngine>::Conflict> for LoweringError {
 impl LoweringMap {
 	/// Lookup the [`solver::View`] to which the given model [`model::View`]
 	/// maps.
+	///
+	/// Model views belong to the modelling layer. Use this method after
+	/// [`Model::to_solver`](crate::model::Model::to_solver) to obtain the
+	/// corresponding solver view before querying solution values.
+	///
+	/// ```
+	/// # use huub::{
+	/// #     lower::InitConfig,
+	/// #     model::Model,
+	/// #     solver::{IntValuation, Solver, Status},
+	/// # };
+	/// # let mut model = Model::default();
+	/// let model_x = model.new_int_decision(1..=3);
+	/// let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	///
+	/// let solver_x = map.get(&mut solver, model_x);
+	/// solver.solve(|solution| {
+	///     assert!((1..=3).contains(&solver_x.val(solution)));
+	/// });
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
 	pub fn get<Ctx, T>(&self, ctx: &mut Ctx, view: model::View<T>) -> solver::View<T>
 	where
 		Ctx: ReasoningContext<Atom = solver::View<bool>> + ?Sized,
@@ -523,7 +544,7 @@ impl LoweringMap {
 		}
 	}
 
-	/// Perform [`Self::get`] in for the more general
+	/// Perform [`Self::get`] for the more general
 	/// [`model::deserialize::AnyView`], resulting in a [`solver::AnyView`].
 	///
 	/// Note that it is generally recommended to use [`Self::get`] when
@@ -593,7 +614,7 @@ impl LoweringMap {
 }
 
 impl LoweringMapBuilder {
-	/// Create the [`ReformulationMap`] object ensuring that all variables have
+	/// Create the [`LoweringMap`] object ensuring that all variables have
 	/// a representation in the [`Solver`].
 	pub(crate) fn finalize(self) -> LoweringMap {
 		LoweringMap {
@@ -657,7 +678,7 @@ impl LoweringMapBuilder {
 		}
 	}
 
-	/// Get the representation of a Integer decision variable in the [`Solver`]
+	/// Get the representation of an integer decision variable in the [`Solver`]
 	/// or create it if it does not yet exist.
 	///
 	/// Note that this method will function recursively (together with

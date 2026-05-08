@@ -57,14 +57,15 @@ use crate::{
 	views::LinearBoolView,
 };
 
-/// Trait implemented by the object given to the callback on detecting failure
+/// Trait implemented by the object given to the callback when assumption
+/// solving detects unsatisfiability.
 pub trait AssumptionChecker {
 	/// Check if the given assumption literal was used to prove the
 	/// unsatisfiability of the formula under the assumptions used for the last
 	/// SAT search.
 	///
-	/// Note that for literals 'bv' which are not assumption literals, the
-	/// behavior of is not specified.
+	/// Note that for Boolean views that are not assumption literals, the
+	/// behavior is unspecified.
 	fn fail(&self, bv: View<bool>) -> bool;
 }
 
@@ -78,7 +79,7 @@ pub enum Goal<V> {
 	Maximize(V),
 }
 
-/// Statistics related to the initialization of the solver
+/// Statistics related to the initialization of the solver.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct InitStatistics {
 	/// Number of (non-view) Boolean decision variables present in the solver.
@@ -89,7 +90,7 @@ pub struct InitStatistics {
 	pub propagators: usize,
 }
 
-/// The meaning of a literal in the context of a integer decision variable `x`.
+/// The meaning of a literal in the context of an integer decision variable `x`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum IntLitMeaning {
 	/// Literal representing the condition `x = i`.
@@ -110,12 +111,13 @@ pub(crate) struct NoAssumptions;
 /// The overarching search strategy used by the solver.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum SearchStrategy {
-	/// Use the user provided [`Brancher`]s until they are all exhausted, and
-	/// only then defer to the SAT solver to make search decisions.
+	/// Use the user provided [`Brancher`](crate::solver::branchers::Brancher)s
+	/// until they are all exhausted, and only then defer to the SAT solver to
+	/// make search decisions.
 	#[default]
 	Branchers,
 	/// Always defer to the SAT solver to make search decisions, ignoring any
-	/// user provided [`Brancher`]s.
+	/// user provided [`Brancher`](crate::solver::branchers::Brancher)s.
 	Sat,
 	/// Transition from [`SearchStrategy::Branchers`] to [`SearchStrategy::Sat`]
 	/// when the given trigger condition is met.
@@ -148,7 +150,8 @@ pub struct SolverStatistics {
 	pub sat_search_directives: u64,
 	/// Peak depth of the search tree.
 	pub peak_depth: u32,
-	/// Number of times a [`Propagator`] instance was called.
+	/// Number of times a [`Propagator`](crate::constraints::Propagator)
+	/// instance was called.
 	pub cp_propagator_calls: u64,
 	/// Number of times the search was restarted from the root (as signalled by
 	/// the SAT solver).
@@ -162,14 +165,14 @@ pub struct SolverStatistics {
 	pub lazy_literals: u64,
 }
 
-/// Result of a solving attempt
+/// Result of a solving attempt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Status {
 	/// The solver has found a solution.
 	Satisfied,
 	/// The solver has proven that the problem is unsatisfiable.
 	Unsatisfiable,
-	/// The solver that no more/better solutions can be found.
+	/// The solver has proven that no more or better solutions can be found.
 	Complete,
 	/// The solver was interrupted before a result could be reached.
 	Unknown,
@@ -289,8 +292,8 @@ impl<Sat: ClauseDatabase> Solver<Sat> {
 }
 
 impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
-	/// Try and find a solution to the problem for which the Solver was
-	/// initialized, given a list of Boolean assumptions.
+	/// Try to find a solution to the problem for which the [`Solver`] was
+	/// initialized, using the given Boolean assumptions.
 	pub fn solve_assuming(
 		&mut self,
 		assumptions: impl IntoIterator<Item = View<bool>>,
@@ -411,7 +414,7 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		}
 	}
 
-	/// Find all solutions with regard to a list of given variables.
+	/// Find all solutions with respect to a list of given variables.
 	/// The given closure will be called for each solution found.
 	///
 	/// WARNING: This method will add additional clauses into the solver to
@@ -463,8 +466,8 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		}
 	}
 
-	/// Split the solver into an solving actions objects (limiting the
-	/// interaction with the SAT) and the dynamic engine reference.
+	/// Split the solver into a solving actions object that limits interaction
+	/// with the SAT solver, and the dynamic engine reference.
 	pub(crate) fn as_parts_mut(&mut self) -> (impl SolvingActions + '_, RefMut<'_, Engine>) {
 		struct SA<'a, O>(&'a mut O);
 		impl<O: ExternalPropagation> SolvingActions for SA<'_, O> {
@@ -485,11 +488,32 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		(SA(&mut self.sat), self.engine.borrow_mut())
 	}
 
-	/// Find an optimal solution with regards to the given objective and goal.
+	/// Find an optimal solution with respect to the given objective and goal.
 	///
-	/// Note that this method uses assumptions iteratively increase the lower
-	/// bound of the objective. This does not impact the state of the solver
-	/// for continued use.
+	/// Note that this method repeatedly adds objective-bound clauses. It takes
+	/// ownership of the solver, so these clauses do not affect any cloned
+	/// solver that existed before the call.
+	///
+	/// ```
+	/// # use huub::{
+	/// #     lower::InitConfig,
+	/// #     model::Model,
+	/// #     solver::{Goal, IntValuation, Solver, Status},
+	/// # };
+	/// # let mut model = Model::default();
+	/// # let x = model.new_int_decision(0..=10);
+	/// # model.linear(x).ge(3).post();
+	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let x = map.get(&mut solver, x);
+	/// let mut best = None;
+	/// let (status, _, optimum) = solver.branch_and_bound(Goal::Minimize(x), |solution| {
+	///     best = Some(x.val(solution));
+	/// });
+	///
+	/// assert_eq!(status, Status::Complete);
+	/// assert_eq!(optimum, Some(3));
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
 	pub fn branch_and_bound(
 		mut self,
 		goal: Goal<View<IntVal>>,
@@ -611,8 +635,32 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		self.engine.borrow_mut().state.set_search_strategy(strategy);
 	}
 
-	/// Try and find a solution to the problem for which the Solver was
+	/// Try to find a solution to the problem for which the [`Solver`] was
 	/// initialized.
+	///
+	/// The callback is called at most once, when the solver finds a satisfying
+	/// assignment.
+	///
+	/// ```
+	/// # use huub::{
+	/// #     lower::InitConfig,
+	/// #     model::Model,
+	/// #     solver::{IntValuation, Solver, Status},
+	/// # };
+	/// # let mut model = Model::default();
+	/// # let x = model.new_int_decision(1..=4);
+	/// # model.linear(x).ne(2).post();
+	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let x = map.get(&mut solver, x);
+	/// let mut value = None;
+	/// let status = solver.solve(|solution| {
+	///     value = Some(x.val(solution));
+	/// });
+	///
+	/// assert_eq!(status, Status::Satisfied);
+	/// assert_ne!(value, Some(2));
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
 	pub fn solve(&mut self, mut on_sol: impl FnMut(Solution<'_>)) -> Status {
 		let result = self.sat.solve();
 		match result {

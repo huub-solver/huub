@@ -1,7 +1,8 @@
-//! during the propagation and solution checking process. This structure
-//! contains the implementation of the actions that are exposed to the
-//! propagators.
-//! Module containing the [`SolvingContext`] structure used to take actions
+//! The [`SolvingContext`] structure used to take actions during propagation
+//! and solution checking.
+//!
+//! This structure contains the implementation of the action traits that are
+//! exposed to propagators.
 
 use std::fmt::{self, Debug, Formatter};
 
@@ -29,7 +30,7 @@ use crate::{
 /// change to make to the integer decision variable.
 ///
 /// Note that this enum is slightly different from [`IntLitMeaning`] in that it
-/// represents the the actual upper bound (less-eq), rather than
+/// represents the actual upper bound (less-eq), rather than
 /// [`IntLitMeaning::Less`], which has to add `1` potentially causing overflow.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum ChangeRequest {
@@ -68,11 +69,11 @@ struct ReasonTracePrint<'a>(&'a Result<Reason<Decision<bool>>, bool>);
 /// to be constructed by the user. It should merely be seen as the
 /// implementation of the [`PropagationActions`] trait.
 pub struct SolvingContext<'a> {
-	/// Actions to create new variables in the solver
+	/// Actions to create new variables in the solver.
 	pub(crate) slv: &'a mut dyn SolvingActions,
-	/// Engine state object
+	/// Engine state object.
 	pub(crate) state: &'a mut State,
-	/// Current propagator being executed
+	/// Current propagator being executed.
 	pub(crate) current_prop: PropRef,
 }
 
