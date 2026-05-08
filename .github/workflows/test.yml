@@ -66,3 +66,13 @@ jobs:
         run: cargo clippy -p huub --all-targets -- -D warnings
       - name: Run clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+  rustdoc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: moonrepo/setup-rust@v1
+        with:
+          channel: ${{ env.RUST_CHANNEL }}
+      - name: Run rustdoc
+        run: RUSTDOCFLAGS="-D warnings" cargo doc -p huub --no-deps --all-features
