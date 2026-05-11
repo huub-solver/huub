@@ -92,14 +92,14 @@ This version of the decision variables will allow us to query the solution for t
 ### Running the solver
 
 Now we can search for solutions.
-For a simple constraint satisfaction problem (finding one solution without optimization), we use the `solve()` method with a callback:
+For a simple constraint satisfaction problem (finding one solution without optimization), we use the `solve()` builder with an `on_solution()` callback and finish with `satisfy()`:
 
 ```rust,ignore
 {{#include ../../../crates/huub/examples/send-more-money/main.rs:solve_and_print}}
 ```
 
 The callback function is called if a solution is found.
-Inside the callback, you can query decision variable values using the `val` method from the `IntValuation` trait.
+Inside the callback, you can query decision variable values using the `val` method from the `Valuation` trait.
 If no solution is found (either because of a set search limit or because none exists), then the callback is never called.
 
 ## Understanding the solving process

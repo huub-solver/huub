@@ -98,9 +98,9 @@ pub(crate) struct ConRef(u32);
 ///
 /// ```
 /// # use huub::{
-/// #     lower::InitConfig,
-/// #     model::Model,
-/// #     solver::{IntValuation, Solver, Status},
+/// # 	lower::InitConfig,
+/// # 	model::Model,
+/// # 	solver::{Solver, Status, Valuation},
 /// # };
 /// let mut model = Model::default();
 /// let x = model.new_int_decision(1..=3);
@@ -112,9 +112,12 @@ pub(crate) struct ConRef(u32);
 /// # let x = map.get(&mut solver, x);
 /// # let y = map.get(&mut solver, y);
 /// # let mut pair = None;
-/// # let status = solver.solve(|solution| {
-/// #     pair = Some((x.val(solution), y.val(solution)));
-/// # });
+/// # let status = solver
+/// # 	.solve()
+/// # 	.on_solution(|solution| {
+/// # 		pair = Some((x.val(solution), y.val(solution)));
+/// # 	})
+/// # 	.satisfy();
 /// # assert_eq!(status, Status::Satisfied);
 /// # let (x, y) = pair.unwrap();
 /// # assert_eq!(x + y, 4);
@@ -451,18 +454,22 @@ impl Model {
 	///
 	/// ```
 	/// # use huub::{
-	/// #     lower::InitConfig,
-	/// #     model::Model,
-	/// #     solver::{IntValuation, Solver},
+	/// # 	lower::InitConfig,
+	/// # 	model::Model,
+	/// # 	solver::{Solver, Status, Valuation},
 	/// # };
 	/// # let mut model = Model::default();
 	/// # let x = model.new_int_decision(1..=3);
 	/// let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
 	/// let x = map.get(&mut solver, x);
 	///
-	/// solver.solve(|solution| {
-	///     assert!((1..=3).contains(&x.val(solution)));
-	/// });
+	/// let status = solver
+	/// 	.solve()
+	/// 	.on_solution(|solution| {
+	/// 		assert!((1..=3).contains(&x.val(solution)));
+	/// 	})
+	/// 	.satisfy();
+	/// assert_eq!(status, Status::Satisfied);
 	/// # Ok::<(), Box<dyn std::error::Error>>(())
 	/// ```
 	pub fn to_solver<Sat>(
@@ -702,8 +709,8 @@ mod tests {
 		slv.expect_solutions(
 			&[b_slv, i1_slv],
 			expect![[r#"
-    			false, 0
-    			true, -1"#]],
+			false, 0
+			true, -1"#]],
 		);
 	}
 

@@ -3,7 +3,7 @@
 
 use std::fmt::{self, Debug, Display, Formatter};
 
-use pindakaas::Valuation;
+use pindakaas::Valuation as RawValuation;
 
 use crate::{
 	IntVal,
@@ -28,18 +28,6 @@ pub enum AnyView {
 	Int(View<IntVal>),
 }
 
-/// Trait for extracting a Boolean value from a solution.
-pub trait BoolValuation {
-	/// Return the Boolean value for this view in the given solution.
-	fn val(&self, sol: Solution<'_>) -> bool;
-}
-
-/// Trait for extracting an integer value from a solution.
-pub trait IntValuation {
-	/// Return the integer value for this view in the given solution.
-	fn val(&self, sol: Solution<'_>) -> IntVal;
-}
-
 /// Reference to a solution state of the [`Solver`](crate::solver::Solver).
 ///
 /// Solution allows the user to query the values that decision variable have
@@ -47,9 +35,19 @@ pub trait IntValuation {
 #[derive(Clone, Copy)]
 pub struct Solution<'a> {
 	/// SAT valuation used to retrieve Boolean assignments.
-	pub(crate) sat: &'a dyn Valuation,
+	pub(crate) sat: &'a dyn RawValuation,
 	/// Solver state used to resolve integer values and views.
 	pub(crate) state: &'a State,
+}
+
+/// Trait for extracting a solution value from a [`Solution`] for a given
+/// decision variable view.
+pub trait Valuation {
+	/// The type of value associated with this view in a solution.
+	type Val;
+
+	/// Return the value for this view in the given solution.
+	fn val(&self, sol: Solution<'_>) -> Self::Val;
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -63,16 +61,6 @@ pub enum Value {
 	Bool(bool),
 	/// An integer value.
 	Int(IntVal),
-}
-
-impl AnyView {
-	/// Return the value of this view in the given solution.
-	pub fn val(&self, sol: Solution<'_>) -> Value {
-		match self {
-			AnyView::Bool(view) => Value::Bool(BoolValuation::val(view, sol)),
-			AnyView::Int(view) => Value::Int(IntValuation::val(view, sol)),
-		}
-	}
 }
 
 impl From<IntVal> for AnyView {
@@ -93,13 +81,21 @@ impl From<View<bool>> for AnyView {
 	}
 }
 
-impl BoolValuation for Decision<bool> {
-	fn val(&self, sol: Solution<'_>) -> bool {
-		sol.sat.value(self.0)
+impl Valuation for AnyView {
+	type Val = Value;
+
+	/// Return the value of this view in the given solution.
+	fn val(&self, sol: Solution<'_>) -> Value {
+		match self {
+			AnyView::Bool(view) => Value::Bool(view.val(sol)),
+			AnyView::Int(view) => Value::Int(Valuation::val(view, sol)),
+		}
 	}
 }
 
-impl IntValuation for Decision<IntVal> {
+impl Valuation for Decision<IntVal> {
+	type Val = IntVal;
+
 	fn val(&self, sol: Solution<'_>) -> IntVal {
 		debug_assert_eq!(
 			IntInspectionActions::min(self, sol.state),
@@ -109,9 +105,17 @@ impl IntValuation for Decision<IntVal> {
 	}
 }
 
+impl Valuation for Decision<bool> {
+	type Val = bool;
+
+	fn val(&self, sol: Solution<'_>) -> bool {
+		sol.sat.value(self.0)
+	}
+}
+
 impl Debug for Solution<'_> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		let sat_str: *const dyn Valuation = self.sat;
+		let sat_str: *const dyn RawValuation = self.sat;
 		f.debug_struct("Solution")
 			.field("sat", &(sat_str as *const std::ffi::c_void))
 			.field("state", &self.state)
@@ -140,21 +144,25 @@ impl From<bool> for Value {
 	}
 }
 
-impl BoolValuation for View<bool> {
-	fn val(&self, sol: Solution<'_>) -> bool {
+impl Valuation for View<IntVal> {
+	type Val = IntVal;
+
+	fn val(&self, sol: Solution<'_>) -> IntVal {
 		match self.0 {
-			BoolView::Lit(decision) => BoolValuation::val(&decision, sol),
-			BoolView::Const(b) => b,
+			IntView::Const(c) => c,
+			IntView::Linear(v) => Valuation::val(&v, sol),
+			IntView::Bool(v) => Valuation::val(&v, sol),
 		}
 	}
 }
 
-impl IntValuation for View<IntVal> {
-	fn val(&self, sol: Solution<'_>) -> IntVal {
+impl Valuation for View<bool> {
+	type Val = bool;
+
+	fn val(&self, sol: Solution<'_>) -> bool {
 		match self.0 {
-			IntView::Const(c) => c,
-			IntView::Linear(v) => IntValuation::val(&v, sol),
-			IntView::Bool(v) => IntValuation::val(&v, sol),
+			BoolView::Lit(decision) => decision.val(sol),
+			BoolView::Const(b) => b,
 		}
 	}
 }

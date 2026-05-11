@@ -187,9 +187,9 @@ impl Model {
 	///
 	/// ```
 	/// # use huub::{
-	/// #     lower::InitConfig,
-	/// #     model::Model,
-	/// #     solver::{IntValuation, Solver, Status},
+	/// # 	lower::InitConfig,
+	/// # 	model::Model,
+	/// # 	solver::{Solver, Status, Valuation},
 	/// # };
 	/// # let mut model = Model::default();
 	/// let x = model.new_int_decision(0..=10);
@@ -199,9 +199,12 @@ impl Model {
 	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
 	/// # let x = map.get(&mut solver, x);
 	/// # let y = map.get(&mut solver, y);
-	/// # let status = solver.solve(|solution| {
-	/// #     assert_eq!(x.val(solution) * 2 + y.val(solution), 7);
-	/// # });
+	/// # let status = solver
+	/// # 	.solve()
+	/// # 	.on_solution(|solution| {
+	/// # 		assert_eq!(x.val(solution) * 2 + y.val(solution), 7);
+	/// # 	})
+	/// # 	.satisfy();
 	/// # assert_eq!(status, Status::Satisfied);
 	/// # Ok::<(), Box<dyn std::error::Error>>(())
 	/// ```
@@ -437,22 +440,30 @@ impl Model {
 	///
 	/// ```
 	/// # use huub::{
-	/// #     lower::InitConfig,
-	/// #     model::Model,
-	/// #     solver::{IntValuation, Solver, Status},
+	/// # 	lower::InitConfig,
+	/// # 	model::Model,
+	/// # 	solver::{Solver, Status, Valuation},
 	/// # };
 	/// # let mut model = Model::default();
 	/// let x = model.new_int_decisions(3, 1..=3);
 	/// # let x_clone = x.clone();
 	/// model.unique(x).post();
 	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
-	/// # let &[x, y, z] = x_clone.into_iter().map(|var| map.get(&mut solver, var)).collect::<Vec<_>>().as_slice() else {
+	/// # let &[x, y, z] = x_clone
+	/// # 	.into_iter()
+	/// # 	.map(|var| map.get(&mut solver, var))
+	/// # 	.collect::<Vec<_>>()
+	/// # 	.as_slice()
+	/// # else {
 	/// # 	unreachable!()
 	/// # };
-	/// # let status = solver.solve(|solution| {
-	/// #     let values = [x.val(solution), y.val(solution), z.val(solution)];
-	/// #     assert_eq!(values.iter().sum::<i64>(), 6);
-	/// # });
+	/// # let status = solver
+	/// # 	.solve()
+	/// # 	.on_solution(|solution| {
+	/// # 		let values = [x.val(solution), y.val(solution), z.val(solution)];
+	/// # 		assert_eq!(values.iter().sum::<i64>(), 6);
+	/// # 	})
+	/// # 	.satisfy();
 	/// # assert_eq!(status, Status::Satisfied);
 	/// # Ok::<(), Box<dyn std::error::Error>>(())
 	/// ```
@@ -737,9 +748,9 @@ impl<'a, S: model_linear_builder::State> ModelLinearBuilder<'a, S> {
 	///
 	/// ```
 	/// # use huub::{
-	/// #     lower::InitConfig,
-	/// #     model::Model,
-	/// #     solver::{BoolValuation, IntValuation, Solver, Status},
+	/// # 	lower::InitConfig,
+	/// # 	model::Model,
+	/// # 	solver::{Solver, Status, Valuation},
 	/// # };
 	/// # let mut model = Model::default();
 	/// let x = model.new_int_decision(0..=5);
@@ -751,10 +762,13 @@ impl<'a, S: model_linear_builder::State> ModelLinearBuilder<'a, S> {
 	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
 	/// # let x = map.get(&mut solver, x);
 	/// # let at_least_three = map.get(&mut solver, at_least_three);
-	/// # let status = solver.solve(|solution| {
-	/// #     assert!(at_least_three.val(solution));
-	/// #     assert!(x.val(solution) >= 3);
-	/// # });
+	/// # let status = solver
+	/// # 	.solve()
+	/// # 	.on_solution(|solution| {
+	/// # 		assert!(at_least_three.val(solution));
+	/// # 		assert!(x.val(solution) >= 3);
+	/// # 	})
+	/// # 	.satisfy();
 	/// # assert_eq!(status, Status::Satisfied);
 	/// # Ok::<(), Box<dyn std::error::Error>>(())
 	/// ```

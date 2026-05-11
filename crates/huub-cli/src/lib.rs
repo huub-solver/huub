@@ -37,12 +37,14 @@ use std::{
 
 use flatzinc_serde::{FlatZinc, Literal, NamedRef, Variable, helpers::ArcKey};
 use huub::{
-	actions::IntDecisionActions,
 	lower::LoweringError,
-	model::deserialize::flatzinc::{FlatZincError, FznIdent},
+	model::deserialize::{
+		Goal,
+		flatzinc::{FlatZincError, FznIdent},
+	},
 	solver::{
-		AnyView, Goal, IntLitMeaning, SearchStrategy, Solution, Solver, Status, SwitchTrigger,
-		TerminationSignal, Value,
+		AnyView, SearchStrategy, Solution, Solver, Status, SwitchTrigger, TerminationSignal,
+		Valuation,
 	},
 };
 use mimalloc::MiMalloc;
@@ -120,7 +122,7 @@ impl<'a> Cli<'a> {
 			)
 		})?;
 
-		let (mut slv, meta) = match Solver::from_fzn(&fzn, &self.init_config()) {
+		let (mut slv, meta): (Solver, _) = match Solver::from_fzn(&fzn, &self.init_config()) {
 			Err(FlatZincError::ReformulationError(
 				LoweringError::Simplification(_) | LoweringError::Lowering(_),
 			)) => {
@@ -261,7 +263,7 @@ impl<'a> Cli<'a> {
 					.collect(),
 			})
 			.collect();
-		let (res, stats) = match meta.goal {
+		let res = match meta.goal {
 			Some(goal) => {
 				if self.all_solutions {
 					warn!(
@@ -269,76 +271,11 @@ impl<'a> Cli<'a> {
 						"ignore --all-solutions when optimizing; use --intermediate-solutions or --all-optimal instead"
 					);
 				}
-				let mut no_good_vals = vec![
-					Value::Bool(false);
-					if self.all_optimal {
-						output_vars.len()
-					} else {
-						0
-					}
-				];
-				let all_opt_slv = if self.all_optimal {
-					Some(slv.clone())
-				} else {
-					None
-				};
-				let (status, stats, obj_val) = if self.intermediate_solutions {
-					slv.branch_and_bound(goal, |sol| {
-						output!(
-							self.stdout,
-							"{}",
-							SolutionWrap {
-								sol,
-								fzn: &fzn,
-								var_map: &meta.names
-							}
-						);
-						if self.all_optimal {
-							for (i, var) in output_vars.iter().enumerate() {
-								no_good_vals[i] = var.val(sol);
-							}
-						}
-					})
-				} else {
-					if let Err(err) = ctrlc::set_handler(move || {
-						interrupted.store(true, Ordering::SeqCst);
-					}) {
-						warn!(target: "solver", error = %err, "unable to set ctrl-c handler");
-					}
-
-					let mut last_sol = String::new();
-					let res = slv.branch_and_bound(goal, |sol| {
-						last_sol = SolutionWrap {
-							sol,
-							fzn: &fzn,
-							var_map: &meta.names,
-						}
-						.to_string();
-						if self.all_optimal {
-							for (i, var) in output_vars.iter().enumerate() {
-								no_good_vals[i] = var.val(sol);
-							}
-						}
-					});
-					output!(self.stdout, "{}", last_sol);
-					res
-				};
-				if status == Status::Complete && self.all_optimal {
-					let mut slv = all_opt_slv.unwrap();
-					let Some(obj_val) = obj_val else {
-						unreachable!()
-					};
-					match goal {
-						Goal::Minimize(obj) | Goal::Maximize(obj) => {
-							let obj_lit = obj.lit(&mut slv, IntLitMeaning::Eq(obj_val));
-							slv.add_clause([obj_lit]).unwrap();
-						}
-						_ => panic!("unknown optimization goal"),
-					}
-					if slv.add_no_good(&output_vars, &no_good_vals).is_err() {
-						(Status::Complete, stats)
-					} else {
-						let (res, stats_all) = slv.all_solutions(&output_vars, |sol| {
+				if self.intermediate_solutions {
+					let solve = slv
+						.solve()
+						.bind_using_clauses(true)
+						.on_solution(|sol| {
 							output!(
 								self.stdout,
 								"{}",
@@ -348,26 +285,72 @@ impl<'a> Cli<'a> {
 									var_map: &meta.names
 								}
 							);
-						});
-						(res, stats + stats_all)
+						})
+						.maybe_all_solutions(self.all_optimal.then(|| output_vars.clone()));
+					match goal {
+						Goal::Minimize(obj) => solve.minimize(obj),
+						Goal::Maximize(obj) => solve.maximize(obj),
+						_ => panic!("unknown optimization goal"),
 					}
+					.0
 				} else {
-					(status, stats)
+					if let Err(err) = ctrlc::set_handler(move || {
+						interrupted.store(true, Ordering::SeqCst);
+					}) {
+						warn!(target: "solver", error = %err, "unable to set ctrl-c handler");
+					}
+
+					let obj_dcn = match goal {
+						Goal::Minimize(obj) => obj,
+						Goal::Maximize(obj) => obj,
+						_ => panic!("unknown optimization goal"),
+					};
+					let mut last_obj = None;
+					let mut last_sol = String::new();
+					let solve = slv
+						.solve()
+						.bind_using_clauses(!self.all_optimal)
+						.on_solution(|sol| {
+							if last_obj == Some(obj_dcn.val(sol)) {
+								if !last_sol.is_empty() {
+									output!(self.stdout, "{}", last_sol);
+									last_sol = String::new();
+								}
+								output!(
+									self.stdout,
+									"{}",
+									SolutionWrap {
+										sol,
+										fzn: &fzn,
+										var_map: &meta.names
+									}
+								);
+							} else {
+								last_sol = SolutionWrap {
+									sol,
+									fzn: &fzn,
+									var_map: &meta.names,
+								}
+								.to_string();
+								last_obj = Some(obj_dcn.val(sol));
+							}
+						})
+						.maybe_all_solutions(self.all_optimal.then(|| output_vars.clone()));
+					let (status, _obj) = match goal {
+						Goal::Minimize(obj) => solve.minimize(obj),
+						Goal::Maximize(obj) => solve.maximize(obj),
+						_ => panic!("unknown optimization goal"),
+					};
+					if !last_sol.is_empty() {
+						output!(self.stdout, "{}", last_sol);
+					}
+					status
 				}
 			}
-			None if self.all_solutions => slv.all_solutions(&output_vars, |sol| {
-				output!(
-					self.stdout,
-					"{}",
-					SolutionWrap {
-						sol,
-						fzn: &fzn,
-						var_map: &meta.names
-					}
-				);
-			}),
-			None => {
-				let res = slv.solve(|sol| {
+			None => slv
+				.solve()
+				.bind_using_clauses(true)
+				.on_solution(|sol| {
 					output!(
 						self.stdout,
 						"{}",
@@ -377,11 +360,12 @@ impl<'a> Cli<'a> {
 							var_map: &meta.names
 						}
 					);
-				});
-				(res, slv.solver_statistics())
-			}
+				})
+				.maybe_all_solutions(self.all_solutions.then(|| output_vars.clone()))
+				.satisfy(),
 		};
 		if self.statistics {
+			let stats = slv.solver_statistics();
 			print_statistics_block(
 				&mut self.stdout,
 				"complete",

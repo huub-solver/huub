@@ -16,7 +16,7 @@ use crate::{
 	constraints::ReasonBuilder,
 	solver::{
 		IntLitMeaning,
-		solution::{IntValuation, Solution},
+		solution::{Solution, Valuation},
 	},
 	views::linear_view::LinearView,
 };
@@ -229,20 +229,22 @@ where
 	}
 }
 
-impl<Var> IntValuation for OffsetView<IntVal, Var>
-where
-	Var: IntValuation,
-{
-	fn val(&self, sol: Solution<'_>) -> IntVal {
-		self.var.val(sol) + self.offset
-	}
-}
-
 impl<Var> Neg for OffsetView<IntVal, Var> {
 	type Output = LinearView<NonZero<IntVal>, IntVal, Var>;
 
 	fn neg(self) -> Self::Output {
 		let lin: LinearView<NonZero<IntVal>, IntVal, Var> = self.into();
 		-lin
+	}
+}
+
+impl<Var> Valuation for OffsetView<IntVal, Var>
+where
+	Var: Valuation<Val = IntVal>,
+{
+	type Val = IntVal;
+
+	fn val(&self, sol: Solution<'_>) -> IntVal {
+		self.var.val(sol) + self.offset
 	}
 }

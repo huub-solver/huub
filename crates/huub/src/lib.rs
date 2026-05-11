@@ -25,9 +25,9 @@
 //!
 //! ```
 //! # use huub::{
-//! #     lower::InitConfig,
-//! #     model::Model,
-//! #     solver::{IntValuation, Solver, Status},
+//! # 	lower::InitConfig,
+//! # 	model::Model,
+//! # 	solver::{Solver, Status, Valuation},
 //! # };
 //! let mut model = Model::default();
 //! let x = model.new_int_decision(0..=5);
@@ -41,9 +41,12 @@
 //! let y = map.get(&mut solver, y);
 //!
 //! let mut solution = None;
-//! let status = solver.solve(|sol| {
-//!     solution = Some((x.val(sol), y.val(sol)));
-//! });
+//! let status = solver
+//! 	.solve()
+//! 	.on_solution(|sol| {
+//! 		solution = Some((x.val(sol), y.val(sol)));
+//! 	})
+//! 	.satisfy();
 //!
 //! assert_eq!(status, Status::Satisfied);
 //! let (x, y) = solution.unwrap();
@@ -51,6 +54,12 @@
 //! assert_ne!(x, y);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
+
+#![expect(
+	clippy::tabs_in_doc_comments,
+	reason = "doctest examples use tab-indented code to match rustfmt output",
+	// Tracking Issue: https://github.com/rust-lang/rust-clippy/issues/12425
+)]
 
 pub mod actions;
 pub mod constraints;

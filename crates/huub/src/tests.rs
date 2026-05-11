@@ -1,4 +1,8 @@
-use std::num::NonZero;
+use std::{
+	any::{Any, TypeId},
+	fmt::Debug,
+	num::NonZero,
+};
 
 use expect_test::{Expect, expect};
 use itertools::Itertools;
@@ -11,7 +15,7 @@ use crate::{
 	lower::{InitConfig, LoweringError},
 	model::{Model, deserialize::AnyView as ModelView},
 	solver::{
-		AnyView as SolverView, BoolValuation, IntValuation, Solver, Status, Value,
+		AnyView as SolverView, Solver, Status, Valuation, Value,
 		branchers::{IntBrancher, ValueSelection, VariableSelection},
 		decision::integer::{EncodingType, IntDecision},
 	},
@@ -33,9 +37,11 @@ fn it_works() {
 	let b = map.get(&mut slv, b);
 
 	assert_eq!(
-		slv.solve(|sol| {
-			assert_ne!(a.val(sol), b.val(sol));
-		}),
+		slv.solve()
+			.on_solution(|sol| {
+				assert_ne!(a.val(sol), b.val(sol));
+			})
+			.satisfy(),
 		Status::Satisfied
 	);
 }
@@ -155,8 +161,8 @@ fn test_duplicate_propagation() {
 	slv.expect_solutions(
 		&[a, b],
 		expect![[r#"
-    0, 0
-    0, 1"#]],
+		0, 0
+		0, 1"#]],
 	);
 }
 
@@ -193,10 +199,12 @@ fn test_unify_int_impossible() {
 	let b = map.get(&mut slv, b);
 
 	assert_eq!(
-		slv.solve(|sol| {
-			assert_eq!(a.val(sol), 5);
-			assert_eq!(b.val(sol), 2);
-		}),
+		slv.solve()
+			.on_solution(|sol| {
+				assert_eq!(a.val(sol), 5);
+				assert_eq!(b.val(sol), 2);
+			})
+			.satisfy(),
 		Status::Satisfied
 	);
 }
@@ -212,10 +220,16 @@ fn test_unify_int_lin_view_domains() {
 	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
 	let a = map.get(&mut slv, a);
 	let b = map.get(&mut slv, b);
+	let vars = vec![a, b];
 
-	let (res, _, solns) = slv.collect_all_solutions(&[a.into(), b.into()]);
+	let mut solns: Vec<Vec<i64>> = Vec::new();
+	let res = slv
+		.solve()
+		.all_solutions(vars.clone())
+		.collect_solutions_in(vars, &mut solns)
+		.satisfy();
 	assert_eq!(res, Status::Complete);
-	assert_eq!(solns, vec![vec![Value::Int(1), Value::Int(3)]]);
+	assert_eq!(solns, vec![vec![1, 3]]);
 }
 
 #[test]
@@ -330,32 +344,43 @@ impl Model {
 
 impl Solver {
 	pub(crate) fn assert_all_solutions<V: Into<SolverView> + Clone>(
-		self,
+		mut self,
 		vars: &[V],
 		pred: impl Fn(&[Value]) -> bool,
 	) {
 		let vars: Vec<_> = vars.iter().map(|v| v.clone().into()).collect();
-		let (status, _) = self.all_solutions(&vars, |sol| {
-			let mut soln = Vec::with_capacity(vars.len());
-			for var in &vars {
-				soln.push(var.val(sol));
-			}
-			assert!(pred(&soln));
-		});
+		let status = self
+			.solve()
+			.all_solutions(vars.clone())
+			.on_solution(|sol| {
+				let mut soln = Vec::with_capacity(vars.len());
+				for var in &vars {
+					soln.push(var.val(sol));
+				}
+				assert!(pred(&soln));
+			})
+			.satisfy();
 		assert_eq!(status, Status::Complete);
 	}
 
 	pub(crate) fn assert_unsatisfiable(&mut self) {
-		assert_eq!(self.solve(|_| unreachable!()), Status::Unsatisfiable);
+		assert_eq!(
+			self.solve().on_solution(|_| unreachable!()).satisfy(),
+			Status::Unsatisfiable
+		);
 	}
 
-	pub(crate) fn expect_solutions<V: Into<SolverView> + Clone>(
-		self,
-		vars: &[V],
-		expected: Expect,
-	) {
-		let vars: Vec<_> = vars.iter().map(|v| v.clone().into()).collect();
-		let (status, _, mut solns) = self.collect_all_solutions(&vars);
+	pub(crate) fn expect_solutions<V>(mut self, vars: &[V], expected: Expect)
+	where
+		V: Clone + Into<SolverView> + Valuation,
+		V::Val: Any + Debug + Ord,
+	{
+		let mut solns: Vec<Vec<V::Val>> = Vec::new();
+		let status = self
+			.solve()
+			.all_solutions(vars.iter().map(|v| v.clone().into()))
+			.collect_solutions_in(vars.to_vec(), &mut solns)
+			.satisfy();
 		assert_eq!(status, Status::Complete);
 		solns.sort();
 		let solns = format!(
@@ -363,9 +388,16 @@ impl Solver {
 			solns.iter().format_with("\n", |sol, f| {
 				f(&format_args!(
 					"{}",
-					sol.iter().format_with(", ", |elt, g| match elt {
-						Value::Bool(b) => g(&format_args!("{b}")),
-						Value::Int(i) => g(&format_args!("{i}")),
+					sol.iter().format_with(", ", |elt, g| {
+						if TypeId::of::<V::Val>() == TypeId::of::<Value>() {
+							let elt_any: &dyn Any = elt;
+							match elt_any.downcast_ref::<Value>().unwrap() {
+								Value::Bool(b) => g(&format_args!("{b}")),
+								Value::Int(i) => g(&format_args!("{i}")),
+							}
+						} else {
+							g(&format_args!("{elt:?}"))
+						}
 					})
 				))
 			})

@@ -211,12 +211,12 @@ impl IntBrancher {
 	///
 	/// ```
 	/// # use huub::{
-	/// #     lower::InitConfig,
-	/// #     model::Model,
-	/// #     solver::{
-	/// #         branchers::{IntBrancher, ValueSelection, VariableSelection},
-	/// #         IntValuation, Solver, Status,
-	/// #     },
+	/// # 	lower::InitConfig,
+	/// # 	model::Model,
+	/// # 	solver::{
+	/// # 		Solver, Status, Valuation,
+	/// # 		branchers::{IntBrancher, ValueSelection, VariableSelection},
+	/// # 	},
 	/// # };
 	/// # let mut model = Model::default();
 	/// # let x = model.new_int_decision(1..=3);
@@ -226,15 +226,18 @@ impl IntBrancher {
 	/// # let x = map.get(&mut solver, x);
 	/// # let y = map.get(&mut solver, y);
 	/// IntBrancher::new_in(
-	///     &mut solver,
-	///     vec![x, y],
-	///     VariableSelection::FirstFail,
-	///     ValueSelection::IndomainMin,
+	/// 	&mut solver,
+	/// 	vec![x, y],
+	/// 	VariableSelection::FirstFail,
+	/// 	ValueSelection::IndomainMin,
 	/// );
 	///
-	/// # let status = solver.solve(|solution| {
-	/// #     assert_eq!(x.val(solution) + y.val(solution), 4);
-	/// # });
+	/// # let status = solver
+	/// # 	.solve()
+	/// # 	.on_solution(|solution| {
+	/// # 		assert_eq!(x.val(solution) + y.val(solution), 4);
+	/// # 	})
+	/// # 	.satisfy();
 	/// # assert_eq!(status, Status::Satisfied);
 	/// # Ok::<(), Box<dyn std::error::Error>>(())
 	/// ```
@@ -351,10 +354,10 @@ impl WarmStartBrancher {
 	///
 	/// ```
 	/// # use huub::{
-	/// #     actions::IntDecisionActions,
-	/// #     lower::InitConfig,
-	/// #     model::Model,
-	/// #     solver::{branchers::WarmStartBrancher, IntLitMeaning, IntValuation, Solver, Status},
+	/// # 	actions::IntDecisionActions,
+	/// # 	lower::InitConfig,
+	/// # 	model::Model,
+	/// # 	solver::{IntLitMeaning, Solver, Status, Valuation, branchers::WarmStartBrancher},
 	/// # };
 	/// # let mut model = Model::default();
 	/// # let x = model.new_int_decision(1..=3);
@@ -364,9 +367,12 @@ impl WarmStartBrancher {
 	/// WarmStartBrancher::new_in(&mut solver, vec![prefer_two]);
 	///
 	/// # let mut value = None;
-	/// # let status = solver.solve(|solution| {
-	/// #     value = Some(x.val(solution));
-	/// # });
+	/// # let status = solver
+	/// # 	.solve()
+	/// # 	.on_solution(|solution| {
+	/// # 		value = Some(x.val(solution));
+	/// # 	})
+	/// # 	.satisfy();
 	/// # assert_eq!(status, Status::Satisfied);
 	/// # assert_eq!(value, Some(2));
 	/// # Ok::<(), Box<dyn std::error::Error>>(())

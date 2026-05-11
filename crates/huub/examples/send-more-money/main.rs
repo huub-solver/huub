@@ -28,7 +28,7 @@ use std::{fmt::Write, sync::Mutex};
 use huub::{
 	lower::InitConfig,
 	model::Model,
-	solver::{IntValuation, Solver},
+	solver::{Solver, Valuation},
 };
 
 #[cfg(test)]
@@ -85,15 +85,17 @@ pub fn main() {
 
 	// ANCHOR: solve_and_print
 	// Solve and print the first solution
-	solver.solve(|sol| {
-		let [s, e, n, d, m, o, r, y] = [s, e, n, d, m, o, r, y].map(|v| v.val(sol));
+	let _status = solver
+		.solve()
+		.on_solution(|sol| {
+			let [s, e, n, d, m, o, r, y] = [s, e, n, d, m, o, r, y].map(|v| v.val(sol));
 
-		let send = 1000 * s + 100 * e + 10 * n + d;
-		let more = 1000 * m + 100 * o + 10 * r + e;
-		let money = 10000 * m + 1000 * o + 100 * n + 10 * e + y;
+			let send = 1000 * s + 100 * e + 10 * n + d;
+			let more = 1000 * m + 100 * o + 10 * r + e;
+			let money = 10000 * m + 1000 * o + 100 * n + 10 * e + y;
 
-		println!(
-			"Solution found!
+			println!(
+				"Solution found!
 
      S={s}, E={e}, N={n}, D={d}
  +   M={m}, O={o}, R={r}, E={e}
@@ -101,8 +103,9 @@ pub fn main() {
 M={m}, O={o}, N={n}, E={e}, Y={y}
 
 {send} + {more} = {money}"
-		);
-	});
+			);
+		})
+		.satisfy();
 	// ANCHOR_END: solve_and_print
 }
 

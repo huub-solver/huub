@@ -31,12 +31,12 @@ use crate::{
 	lower::{InitConfig, LoweringError},
 	model::{
 		Model,
-		deserialize::{AnyView, Branching},
+		deserialize::{AnyView, Branching, Goal},
 		expressions::{BoolFormula, linear::IntLinearExp},
 		view::{View, boolean::BoolView},
 	},
 	solver::{
-		self, Goal, Solver,
+		self, Solver,
 		branchers::{ValueSelection, VariableSelection},
 	},
 };

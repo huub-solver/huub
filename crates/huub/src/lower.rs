@@ -506,18 +506,22 @@ impl LoweringMap {
 	///
 	/// ```
 	/// # use huub::{
-	/// #     lower::InitConfig,
-	/// #     model::Model,
-	/// #     solver::{IntValuation, Solver, Status},
+	/// # 	lower::InitConfig,
+	/// # 	model::Model,
+	/// # 	solver::{Solver, Status, Valuation},
 	/// # };
 	/// # let mut model = Model::default();
 	/// let model_x = model.new_int_decision(1..=3);
 	/// let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
 	///
 	/// let solver_x = map.get(&mut solver, model_x);
-	/// solver.solve(|solution| {
-	///     assert!((1..=3).contains(&solver_x.val(solution)));
-	/// });
+	/// let status = solver
+	/// 	.solve()
+	/// 	.on_solution(|solution| {
+	/// 		assert!((1..=3).contains(&solver_x.val(solution)));
+	/// 	})
+	/// 	.satisfy();
+	/// assert_eq!(status, Status::Satisfied);
 	/// # Ok::<(), Box<dyn std::error::Error>>(())
 	/// ```
 	pub fn get<Ctx, T>(&self, ctx: &mut Ctx, view: model::View<T>) -> solver::View<T>

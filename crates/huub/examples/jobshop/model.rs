@@ -10,7 +10,7 @@ use clap::ValueEnum;
 use huub::{
 	lower::LoweringMap,
 	model::{self, Model, expressions::IntLinearExp},
-	solver::{self, IntValuation, Solver},
+	solver::{self, Solver, Valuation},
 };
 
 #[derive(Debug, Default)]
@@ -268,7 +268,7 @@ impl Solution {
 		for ops in &self.machine_schedule {
 			let mut machine_profile = Vec::new();
 			for (job_idx, op_idx, start_view) in ops {
-				machine_profile.push((*job_idx, *op_idx, IntValuation::val(start_view, value)));
+				machine_profile.push((*job_idx, *op_idx, Valuation::val(start_view, value)));
 			}
 			machine_profile.sort_by_key(|&(_, _, start)| start);
 			start_time.push(machine_profile);
@@ -296,7 +296,7 @@ impl fmt::Display for Solution {
 mod tests {
 	use huub::{
 		lower::InitConfig,
-		solver::{Goal, IntValuation, Solver},
+		solver::{Solver, Valuation},
 	};
 
 	use crate::model::{Instance, JobShopModel, ObjectiveType};
@@ -349,9 +349,11 @@ mod tests {
 		let (mut slv, map): (Solver, _) = model.to_solver(&InitConfig::default()).unwrap();
 		let obj = map.get(&mut slv, objective);
 		let mut best = None;
-		slv.branch_and_bound(Goal::Minimize(obj), |sol| {
-			best = Some(IntValuation::val(&obj, sol));
-		});
+		slv.solve()
+			.on_solution(|sol| {
+				best = Some(Valuation::val(&obj, sol));
+			})
+			.minimize(obj);
 		best.expect("failed to find a solution")
 	}
 }

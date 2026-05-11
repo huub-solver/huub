@@ -88,7 +88,7 @@ To use a brancher, create it with a list of decisions, a decision selection stra
 # 	model::Model,
 # 	solver::{
 # 		branchers::{IntBrancher, ValueSelection, VariableSelection},
-# 		IntValuation, Solver,
+# 		Solver, Valuation,
 # 	},
 # };
 # let mut model = Model::default();
@@ -106,9 +106,12 @@ IntBrancher::new_in(
 	ValueSelection::IndomainMin,
 );
 
-solver.solve(|sol| {
-	println!("Found solution: x={}, y={}", x.val(sol), y.val(sol));
-});
+solver
+	.solve()
+	.on_solution(|sol| {
+		println!("Found solution: x={}, y={}", x.val(sol), y.val(sol));
+	})
+	.satisfy();
 ```
 
 **Note:** Once you have assigned all branchers to the solver, any remaining unfixed decisions will be handled by the SAT solver's automatic heuristics.
@@ -141,16 +144,19 @@ let warm_start_decisions = vec![b, x.lit(&mut solver, IntLitMeaning::Eq(5))];
 // Create and register the warm-start brancher
 WarmStartBrancher::new_in(&mut solver, warm_start_decisions);
 
-solver.solve(|solution| {
-	println!("Found solution");
-});
+solver
+	.solve()
+	.on_solution(|solution| {
+		println!("Found solution");
+	})
+	.satisfy();
 ```
 
 The warm-start brancher will try to enforce these decisions first, potentially finding a solution much faster than exploring from scratch.
 
 ## Finding Solutions
 
-Once you have created a solver, you can search for solutions using the `solve()` method:
+Once you have created a solver, you can search for solutions using the `solve()` builder:
 
 ```rust
 # extern crate huub;
@@ -162,10 +168,13 @@ Once you have created a solver, you can search for solutions using the `solve()`
 # let mut model = Model::default();
 # let x = model.new_int_decision(1..=9);
 # let (mut solver, _): (Solver, _) = model.to_solver(&InitConfig::default()).unwrap();
-let status = solver.solve(|solution| {
-	// This callback is invoked if a solution is found.
-	println!("Found a solution!");
-});
+let status = solver
+	.solve()
+	.on_solution(|solution| {
+		// This callback is invoked if a solution is found.
+		println!("Found a solution!");
+	})
+	.satisfy();
 
 match status {
 	Status::Satisfied => println!("Found a solution"),
@@ -175,7 +184,7 @@ match status {
 }
 ```
 
-The `solve()` method returns immediately after finding the first solution.
+The `solve()` builder returns immediately after finding the first solution once you call `satisfy()`.
 For some applications, this is sufficient—you have a valid assignment to all decision variables.
 
 ## Setting Termination Limits
@@ -207,9 +216,12 @@ solver.set_terminate_callback(Some(move || {
 	}
 }));
 
-let status = solver.solve(|solution| {
-	println!("Found solution");
-});
+let status = solver
+	.solve()
+	.on_solution(|solution| {
+		println!("Found solution");
+	})
+	.satisfy();
 
 match status {
 	Status::Satisfied => println!("Found solution within time limit"),
@@ -230,7 +242,7 @@ When the callback returns `TerminationSignal::Terminate`, the solver will abando
 
 ## Finding Optimal Solutions
 
-To find the *best* solution (minimizing or maximizing an objective), Huub provides the `branch_and_bound()` method.
+To find the *best* solution (minimizing or maximizing an objective), use the `solve()` builder with `minimize()` or `maximize()`.
 This performs an iterative search: after finding each solution, it adds a constraint that the next solution must be better, and continues searching.
 
 ```rust
@@ -238,7 +250,7 @@ This performs an iterative search: after finding each solution, it adds a constr
 # use huub::{
 # 	lower::InitConfig,
 # 	model::Model,
-# 	solver::{Goal, IntValuation, Solver, Status},
+# 	solver::{Solver, Status, Valuation},
 # };
 # let mut model = Model::default();
 # let x = model.new_int_decision(0..=100);
@@ -246,11 +258,10 @@ This performs an iterative search: after finding each solution, it adds a constr
 # let cost = model.linear(x + y).define();
 # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default()).unwrap();
 # let cost = map.get(&mut solver, cost);
-let (status, stats, optimal_cost) = solver.branch_and_bound(
-	Goal::Minimize(cost),
-	// This callback is invoked for each solution that is found.
-	|sol| println!("Found (better) solution with cost {}", cost.val(sol)),
-);
+let (status, optimal_cost) = solver
+	.solve()
+	.on_solution(|sol| println!("Found (better) solution with cost {}", cost.val(sol)))
+	.minimize(cost);
 
 match status {
 	Status::Complete => {
@@ -282,7 +293,7 @@ For a maximization goal, it adds a constraint that the objective must be greater
 
 ## Finding All Solutions
 
-To find all possible solutions (not just the first one or the optimal one), use the `all_solutions()` method.
+To find all possible solutions (not just the first one or the optimal one), use `solve().all_solutions(...)`.
 This is useful for exploring the solution space, enumerating all valid assignments, or finding Pareto-optimal solutions.
 
 ```rust
@@ -290,7 +301,7 @@ This is useful for exploring the solution space, enumerating all valid assignmen
 # use huub::{
 # 	lower::InitConfig,
 # 	model::Model,
-# 	solver::{IntValuation, Solver, Status},
+# 	solver::{Solver, Status, Valuation},
 # };
 # let mut model = Model::default();
 # let x = model.new_int_decision(1..=3);
@@ -300,10 +311,14 @@ This is useful for exploring the solution space, enumerating all valid assignmen
 # let x = map.get(&mut solver, x);
 # let y = map.get(&mut solver, y);
 let mut num_sol = 0;
-let (status, stats) = solver.all_solutions(&vec![x.into(), y.into()], |solution| {
-	num_sol += 1;
-	println!("Solution: x={}, y={}", x.val(solution), y.val(solution));
-});
+let status = solver
+	.solve()
+	.all_solutions([x, y])
+	.on_solution(|solution| {
+		num_sol += 1;
+		println!("Solution: x={}, y={}", x.val(solution), y.val(solution));
+	})
+	.satisfy();
 
 match status {
 	Status::Complete => {
@@ -319,7 +334,7 @@ match status {
 }
 ```
 
-The method works by iteratively finding solutions and then adding "no-good" constraints that exclude each found solution from future searches.
+The builder works by iteratively finding solutions and then adding "no-good" constraints that exclude each found solution from future searches.
 The solver continues until either:
 
 - **Complete**: All solutions have been enumerated (trying to find another solution fails).
@@ -339,7 +354,7 @@ You can retrieve statistics about the search process to understand solver behavi
 # use huub::{lower::InitConfig, model::Model, solver::Solver};
 # let mut model = Model::default();
 # let (mut solver, _): (Solver, _) = model.to_solver(&InitConfig::default()).unwrap();
-# let _ = solver.solve(|_| {});
+# let _ = solver.solve().on_solution(|_| {}).satisfy();
 let stats = solver.solver_statistics();
 
 println!("Conflicts: {}", stats.conflicts);

@@ -23,7 +23,7 @@ use crate::{
 	helpers::{div_ceil, div_floor},
 	solver::{
 		IntLitMeaning,
-		solution::{BoolValuation, IntValuation, Solution},
+		solution::{Solution, Valuation},
 	},
 	views::offset_view::OffsetView,
 };
@@ -437,16 +437,6 @@ where
 	}
 }
 
-impl<Var> IntValuation for LinearBoolView<NonZero<IntVal>, IntVal, Var>
-where
-	Var: BoolValuation,
-{
-	fn val(&self, sol: Solution<'_>) -> IntVal {
-		let b = self.var.val(sol);
-		self.transform_val(b as IntVal)
-	}
-}
-
 impl<Var> Mul<NonZero<IntVal>> for LinearBoolView<NonZero<IntVal>, IntVal, Var>
 where
 	Var: BoolOperations + Not<Output = Var>,
@@ -497,5 +487,17 @@ impl<Var> Sub<IntVal> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
 impl<Var> SubAssign<IntVal> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
 	fn sub_assign(&mut self, rhs: IntVal) {
 		self.offset -= rhs;
+	}
+}
+
+impl<Var> Valuation for LinearBoolView<NonZero<IntVal>, IntVal, Var>
+where
+	Var: Valuation<Val = bool>,
+{
+	type Val = IntVal;
+
+	fn val(&self, sol: Solution<'_>) -> IntVal {
+		let b = self.var.val(sol);
+		self.transform_val(b as IntVal)
 	}
 }

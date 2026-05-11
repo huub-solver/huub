@@ -20,7 +20,7 @@ use crate::{
 	helpers::{div_ceil, div_floor},
 	solver::{
 		IntLitMeaning,
-		solution::{IntValuation, Solution},
+		solution::{Solution, Valuation},
 	},
 	views::offset_view::OffsetView,
 };
@@ -398,15 +398,6 @@ where
 	}
 }
 
-impl<Var> IntValuation for LinearView<NonZero<IntVal>, IntVal, Var>
-where
-	Var: IntValuation,
-{
-	fn val(&self, sol: Solution<'_>) -> IntVal {
-		self.transform_val(self.var.val(sol))
-	}
-}
-
 impl<Var> Mul<NonZero<IntVal>> for LinearView<NonZero<IntVal>, IntVal, Var> {
 	type Output = Self;
 
@@ -443,5 +434,16 @@ impl<Var> Sub<IntVal> for LinearView<NonZero<IntVal>, IntVal, Var> {
 impl<Var> SubAssign<IntVal> for LinearView<NonZero<IntVal>, IntVal, Var> {
 	fn sub_assign(&mut self, rhs: IntVal) {
 		self.offset -= rhs;
+	}
+}
+
+impl<Var> Valuation for LinearView<NonZero<IntVal>, IntVal, Var>
+where
+	Var: Valuation<Val = IntVal>,
+{
+	type Val = IntVal;
+
+	fn val(&self, sol: Solution<'_>) -> IntVal {
+		self.transform_val(self.var.val(sol))
 	}
 }

@@ -49,6 +49,16 @@ pub enum Branching {
 	WarmStart(Vec<View<bool>>),
 }
 
+/// Type of an optimization goal found during model or solver deserialization.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum Goal<V> {
+	/// Search for a solution that minimizes the given objective.
+	Minimize(V),
+	/// Search for a solution that maximizes the given objective.
+	Maximize(V),
+}
+
 impl From<View<IntVal>> for AnyView {
 	fn from(value: View<IntVal>) -> Self {
 		Self::Int(value)

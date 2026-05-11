@@ -32,7 +32,7 @@ use std::{
 use clap::{ArgAction, Parser, ValueEnum, builder::BoolishValueParser};
 use huub::{
 	lower::InitConfig,
-	solver::{Goal, IntValuation, SearchStrategy, Solver, SwitchTrigger, TerminationSignal},
+	solver::{SearchStrategy, Solver, SwitchTrigger, TerminationSignal, Valuation},
 };
 
 use crate::{
@@ -210,15 +210,19 @@ fn main() {
 	}
 
 	// ANCHOR: solve_with_branch_and_bound
-	let (status, stats, _) = slv.branch_and_bound(Goal::Minimize(obj), |sol| {
-		solution.save_assignment(sol);
-		last_obj = Some(IntValuation::val(&obj, sol));
-		if options.verbose {
-			println!("Found new solution with objective: {}", last_obj.unwrap());
-			println!("{solution}");
-			println!("-------------------------");
-		}
-	});
+	let (status, _) = slv
+		.solve()
+		.on_solution(|sol| {
+			solution.save_assignment(sol);
+			last_obj = Some(Valuation::val(&obj, sol));
+			if options.verbose {
+				println!("Found new solution with objective: {}", last_obj.unwrap());
+				println!("{solution}");
+				println!("-------------------------");
+			}
+		})
+		.minimize(obj);
+	let stats = slv.solver_statistics();
 	// ANCHOR_END: solve_with_branch_and_bound
 
 	if !options.verbose {

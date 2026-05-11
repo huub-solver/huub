@@ -22,6 +22,7 @@ use std::{
 	rc::Rc,
 };
 
+use bon::Builder;
 use itertools::Itertools;
 pub use pindakaas::solver::cadical::Cadical;
 use pindakaas::{
@@ -32,11 +33,11 @@ use pindakaas::{
 		propagation::{ExternalPropagation, SolvingActions},
 	},
 };
-use tracing::debug;
+use tracing::{debug, warn};
 
 pub use crate::solver::{
 	decision::{Decision, DecisionReference},
-	solution::{AnyView, BoolValuation, IntValuation, Solution, Value},
+	solution::{AnyView, Solution, Valuation, Value},
 	view::{DefaultView, View, boolean::BoolView, integer::IntView},
 };
 use crate::{
@@ -69,14 +70,13 @@ pub trait AssumptionChecker {
 	fn fail(&self, bv: View<bool>) -> bool;
 }
 
-/// Type of the optimization objective.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum Goal<V> {
-	/// Search for a solution that minimizes the given objective.
-	Minimize(V),
-	/// Search for a solution that maximizes the given objective.
-	Maximize(V),
+/// Helper method for collecting solution values.
+#[derive(Debug, Eq, PartialEq)]
+pub struct CollectSolutionsIn<'a, View: Valuation> {
+	/// Decision variables to track.
+	vars: Vec<View>,
+	/// Mutable reference to storage for collected solutions.
+	store: &'a mut Vec<Vec<View::Val>>,
 }
 
 /// Statistics related to the initialization of the solver.
@@ -126,6 +126,131 @@ pub enum SearchStrategy {
 	/// search strategies, switching between them each time the trigger
 	/// condition is met.
 	Interleaved(SwitchTrigger),
+}
+
+/// Callback invoked each time a solution is found.
+///
+/// Implement this trait or use a closure to react to discovered solutions.
+/// The callback receives a [`Solution`] reference for querying decision
+/// variable values.
+pub trait SolutionCallback {
+	/// Handle a newly found solution.
+	///
+	/// This method receives a reference to the current solution. Use the
+	/// [`Valuation`] trait to extract decision variable values.
+	fn on_solution(&mut self, sol: Solution<'_>);
+}
+
+/// Internal struct representing complete solve arguments.
+///
+/// Users interact with this through the public [`SolveArgs`] builder type
+/// returned by [`Solver::solve`].
+#[derive(Builder)]
+#[builder(
+	builder_type(
+		name = SolveArgs,
+		vis = "pub",
+		doc {
+			/// Builder to configure and execute a solve operation.
+			///
+			/// Obtained by calling [`Solver::solve()`]. The builder uses type-state
+			/// parameters to enforce that each option is set at most once and that
+			/// terminal methods are only callable on a fully configured instance.
+			///
+			/// # Terminal methods
+			///
+			/// Call one of the following to execute the solve and consume the builder:
+			///
+			/// - **[`.satisfy()`][SolveArgs::satisfy]**: search for any satisfying
+			///   assignment.
+			/// - **[`.minimize(obj)`][SolveArgs::minimize]**: find the assignment
+			///   minimizing `obj` via branch-and-bound.
+			/// - **[`.maximize(obj)`][SolveArgs::maximize]**: find the assignment
+			///   maximizing `obj` via branch-and-bound.
+		}
+	),
+  generics(setters(name = "with_{}", vis = "")),
+  start_fn(vis = "", name = builder_internal),
+  finish_fn(vis = "", name = finalize_internal),
+)]
+struct SolveArgsComplete<'a, Sat, S, F>
+where
+	S: SolutionCallback,
+	F: FnOnce(&dyn AssumptionChecker),
+{
+	/// Reference to the solver being used for the search.
+	/// This field is set directly by [`Solver::solve`].
+	#[builder(setters(name = solver_internal, vis = ""))]
+	solver: &'a mut Solver<Sat>,
+	/// Boolean assumptions to pass to the underlying SAT solver.
+	///
+	/// Assumptions are used to restrict the SAT solver to consider the search
+	/// space where all assumptions are satisfied. Assumptions are temporary:
+	/// they are only used for the current solve call.
+	#[builder(default = Vec::new(), with = FromIterator::from_iter)]
+	assuming: Vec<View<bool>>,
+	/// Optional callback invoked each time a solution is found.
+	///
+	/// The callback receives a reference to the current solution context,
+	/// allowing inspection of decision variable values via the [`Valuation`]
+	/// trait.
+	///
+	/// Behavior:
+	/// - For satisfiability checks (`.satisfy()`): called at most once.
+	/// - For optimization (`.minimize()`, `.maximize()`): called for each
+	///   improving solution.
+	/// - For all-solutions enumeration: called for each distinct solution
+	///   found.
+	/// - If not set, solutions are accepted silently.
+	#[builder(setters(name = on_solution_internal, vis = ""))]
+	on_solution: Option<S>,
+	/// Optional callback invoked when the SAT solver reports unsatisfiability.
+	///
+	/// The callback receives an [`AssumptionChecker`], which allows analyzing
+	/// which assumptions (if any) contributed to the conflict. This is useful
+	/// for debugging infeasible problems or implementing iterative relaxation
+	/// strategies.
+	#[builder(setters(name = on_failure_internal, vis = ""))]
+	on_failure: Option<F>,
+	/// Optional list of decision variable views for exhaustive solution
+	/// enumeration.
+	///
+	/// When set in combination with `.minimize()` or `.maximize()`, the solver
+	/// will continue to search for all other solutions with the same optimal
+	/// objective value after the first optimum is found.
+	///
+	/// Behavior:
+	/// - If unset, then standard search is performed, stopping at the first
+	///   solution or once optimality is proven.
+	/// - If set with `.satisfy()`: enumerate all feasible solutions
+	/// - If set with `.minimize()`/`.maximize()`: find all optimal solutions
+	///
+	///
+	/// # Warning
+	///
+	/// No-good clauses are added internally to prevent re-visiting
+	/// solutions. This tightens the search space permanently and cannot be
+	/// undone.
+	#[builder(setters(name = all_solutions_internal, vis = ""))]
+	all_solutions: Option<Vec<AnyView>>,
+	/// Controls whether to use clauses to communicate objective bounds to the
+	/// SAT solver during optimization.
+	///
+	/// Two strategies are supported:
+	///
+	/// - **False (default)**: Objective bounds are passed as assumptions to the
+	///   SAT solver. Assumptions are released after each solve attempt. This is
+	///   useful when exploring multiple scenarios or performing incremental
+	///   solving.
+	///
+	/// - **True**: Objective bounds are added as permanent clauses to the
+	///   solver. **warning**: this tightens the search space permanently and
+	///   cannot be undone. Use this when performing standalone optimization
+	///   where the solver instance is not needed later.
+	///
+	/// Note: This setting is ignored if `all_solutions` is set, in which case
+	/// assumptions are always used to ensure no-good clauses work correctly.
+	bind_using_clauses: Option<bool>,
 }
 
 /// The main solver object that is used to interact with the LCG solver.
@@ -212,6 +337,24 @@ impl<A: FailedAssumptions> AssumptionChecker for A {
 	}
 }
 
+/// Implementation of solution collection callback.
+impl<'a, View: Valuation> SolutionCallback for CollectSolutionsIn<'a, View> {
+	fn on_solution(&mut self, sol: Solution<'_>) {
+		self.store
+			.push(self.vars.iter().map(|v| Valuation::val(v, sol)).collect());
+	}
+}
+
+/// Blanket implementation for closures and function pointers.
+impl<F> SolutionCallback for F
+where
+	F: for<'a> FnMut(Solution<'a>),
+{
+	fn on_solution(&mut self, sol: Solution<'_>) {
+		self(sol);
+	}
+}
+
 impl IntLitMeaning {
 	/// Returns the clauses that can be used to define the given literal
 	/// according to the meaning `self`.
@@ -269,6 +412,412 @@ impl AssumptionChecker for NoAssumptions {
 	}
 }
 
+impl<'a, Sat, S, F, State: solve_args::State> SolveArgs<'a, Sat, S, F, State>
+where
+	S: SolutionCallback,
+	F: FnOnce(&dyn AssumptionChecker),
+{
+	/// Enable exhaustive solution enumeration for selected decision variable
+	/// views.
+	///
+	/// When set, the solver will continue searching after finding the requested
+	/// solution, collecting all distinct solutions for the given views. In case
+	/// of:
+	/// - **Satisfiability checks**: It finds all feasible solutions
+	/// - **Optimization**: If finds all solutions with the same optimal
+	///   objective value
+	pub fn all_solutions<T: Into<AnyView>>(
+		self,
+		views: impl IntoIterator<Item = T>,
+	) -> SolveArgs<'a, Sat, S, F, solve_args::SetAllSolutions<State>>
+	where
+		State::AllSolutions: solve_args::IsUnset,
+	{
+		self.maybe_all_solutions(Some(views))
+	}
+
+	/// Collect solution values into a vector for later inspection.
+	///
+	/// Convenience method that creates a [`SolutionCallback`] implementation
+	/// to automatically gather variable values from each solution found.
+	/// Solutions are stored in row-major order (one solution per row).
+	///
+	/// # Arguments
+	///
+	/// - `vars`: List of decision variable views to track
+	/// - `store`: Mutable vector where solutions will be appended
+	///
+	/// # Important
+	///
+	/// This method only sets up the callback to collect solutions. To actually
+	/// enumerate all solutions, you must also call `.all_solutions(vars)` with
+	/// the same (or related) variables, or the search will terminate after
+	/// finding the first solution.
+	///
+	/// # Examples
+	///
+	/// Collect all satisfying assignments:
+	/// ```
+	/// # use huub::{lower::InitConfig, model::Model, solver::{Solver, Status}};
+	/// # let mut model = Model::default();
+	/// # let x = model.new_int_decision(1..=3);
+	/// # let y = model.new_int_decision(1..=3);
+	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let x = map.get(&mut solver, x);
+	/// # let y = map.get(&mut solver, y);
+	/// let mut solutions = Vec::new();
+	/// let status = solver
+	/// 	.solve()
+	/// 	.all_solutions([x, y])
+	/// 	.collect_solutions_in(vec![x, y], &mut solutions)
+	/// 	.satisfy();
+	/// assert_eq!(status, Status::Complete);
+	/// // solutions now contains all feasible (x, y) pairs
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
+	pub fn collect_solutions_in<'b, View: Valuation>(
+		self,
+		vars: Vec<View>,
+		store: &'b mut Vec<Vec<View::Val>>,
+	) -> SolveArgs<'a, Sat, CollectSolutionsIn<'b, View>, F, solve_args::SetOnSolution<State>>
+	where
+		State::OnSolution: solve_args::IsUnset,
+	{
+		// Note: Unfortunately due to Rust's type system limitations, we cannot
+		// automatically convert the View variables to AnyView here for the
+		// all_solutions field. The caller must explicitly use
+		// .all_solutions() if they need it.
+		self.with_s::<CollectSolutionsIn<'b, View>>()
+			.on_solution_internal(CollectSolutionsIn { vars, store })
+	}
+
+	/// Find a solution that maximizes the given objective expression.
+	pub fn maximize(self, objective: impl Into<View<IntVal>>) -> (Status, Option<IntVal>)
+	where
+		Sat: ExternalPropagation + Assumptions,
+		State::Solver: solve_args::IsSet,
+	{
+		let objective = objective.into();
+		let (status, opt) = self.minimize(-objective);
+		(status, opt.map(|v| -v))
+	}
+
+	/// Enable exhaustive solution enumeration for selected decision variable
+	/// views.
+	///
+	/// When set, the solver will continue searching after finding the requested
+	/// solution, collecting all distinct solutions for the given views. In case
+	/// of:
+	/// - **Satisfiability checks**: It finds all feasible solutions
+	/// - **Optimization**: If finds all solutions with the same optimal
+	///   objective value
+	pub fn maybe_all_solutions<T: Into<AnyView>>(
+		self,
+		views: Option<impl IntoIterator<Item = T>>,
+	) -> SolveArgs<'a, Sat, S, F, solve_args::SetAllSolutions<State>>
+	where
+		State::AllSolutions: solve_args::IsUnset,
+	{
+		self.maybe_all_solutions_internal(views.map(|v| v.into_iter().map(|v| v.into()).collect()))
+	}
+
+	/// Find a solution that minimizes the given objective expression.
+	/// Implements branch-and-bound search, iteratively improving the solution
+	/// until proven optimal.
+	pub fn minimize(self, objective: impl Into<View<IntVal>>) -> (Status, Option<IntVal>)
+	where
+		Sat: ExternalPropagation + Assumptions,
+		State::Solver: solve_args::IsSet,
+	{
+		use Status::*;
+
+		// Process arguments
+		let SolveArgsComplete {
+			solver,
+			assuming,
+			mut on_solution,
+			on_failure,
+			all_solutions,
+			bind_using_clauses,
+		} = self.finalize_internal();
+		let mut bind_using_clauses = bind_using_clauses.unwrap_or(false);
+		if bind_using_clauses && all_solutions.is_some() {
+			warn!("bind_using_clauses option ignored because all_solutions is enabled");
+			bind_using_clauses = false;
+		}
+
+		// Process assumptions
+		let Ok(mut assumptions): Result<Vec<RawLit>, _> = assuming
+			.into_iter()
+			.filter_map(|bv| match bv.0 {
+				BoolView::Lit(lit) => Some(Ok(lit.0)),
+				BoolView::Const(true) => None,
+				BoolView::Const(false) => Some(Err(())),
+			})
+			.collect()
+		else {
+			if let Some(on_failure) = on_failure {
+				on_failure(&NoAssumptions);
+			}
+			return (Unsatisfiable, None);
+		};
+
+		// Start branch and bound loop
+		let objective = objective.into();
+		let mut obj_curr = None;
+		let obj_bound = objective.min(solver);
+		let mut obj_assump = None;
+		let mut vals: Vec<Value> = vec![
+			Value::Int(0);
+			if let Some(all_solutions) = &all_solutions {
+				all_solutions.len()
+			} else {
+				0
+			}
+		];
+
+		debug!(target: "solver", obj_bound, "start branch and bound");
+		let (status, obj) = loop {
+			let result = solver
+				.sat
+				.solve_assuming(assumptions.iter().cloned().chain(obj_assump));
+			match result {
+				SatSolveResult::Satisfied(ref sol) => {
+					let sol = Solution {
+						sat: sol,
+						state: &solver.engine.borrow().state,
+					};
+					obj_curr = Some(Valuation::val(&objective, sol));
+					if let Some(callback) = &mut on_solution {
+						callback.on_solution(sol);
+					}
+					if let Some(vars) = &all_solutions {
+						for (i, v) in vars.iter().enumerate() {
+							vals[i] = Valuation::val(v, sol);
+						}
+					}
+					debug!(
+						target: "solver",
+						?obj_curr,
+						obj_bound,
+						"sat solve result"
+					);
+				}
+				// Latest SAT solve was unsatisfiable:
+				// - If no previous solution was found, then the problem doesn't have any feasible
+				//   solutions.
+				// - If a previous solution was found, then the current bound is the best solution
+				//   under the current constraints and assumptions.
+				SatSolveResult::Unsatisfiable(fail) => {
+					break if obj_curr.is_none() {
+						if let Some(on_failure) = on_failure {
+							on_failure(&fail);
+						}
+						(Unsatisfiable, None)
+					} else {
+						(Complete, obj_curr)
+					};
+				}
+				// Latest SAT solve returned unknown: this indicates that the
+				// solver reached a search limit.
+				// We return `Satisfied` if we found at least one solution,
+				// and `Unknown` if we didn't find any solutions yet.
+				SatSolveResult::Unknown => {
+					break if obj_curr.is_none() {
+						(Unknown, None)
+					} else {
+						(Satisfied, obj_curr)
+					};
+				}
+			}
+			drop(result);
+
+			if obj_curr == Some(obj_bound) {
+				break (Complete, obj_curr);
+			} else {
+				let bound_lit = objective.lit(solver, IntLitMeaning::Less(obj_curr.unwrap()));
+				debug!(
+					target: "solver",
+					clause = bind_using_clauses,
+					lit = i32::from({
+						let BoolView::Lit(l) = bound_lit.0 else {
+							unreachable!()
+						};
+						l.0
+					}),
+					"add objective bound"
+				);
+				if bind_using_clauses {
+					solver.add_clause([bound_lit]).unwrap();
+				} else {
+					let BoolView::Lit(l) = bound_lit.0 else {
+						unreachable!()
+					};
+					obj_assump = Some(l.0);
+				}
+			}
+		};
+		if all_solutions.is_none() || status != Complete {
+			return (status, obj);
+		}
+
+		// Continue to look for all other solutions with the same objective value.
+		// Solutions already visited are added as (permanent) no-good clauses.
+		let vars = all_solutions.unwrap();
+		let BoolView::Lit(opt_lit) = objective
+			.lit(solver, IntLitMeaning::Eq(obj_curr.unwrap()))
+			.0
+		else {
+			unreachable!()
+		};
+		assumptions.push(opt_lit.0);
+		loop {
+			solver.add_no_good(&vars, &vals).unwrap();
+
+			let result = solver.sat.solve_assuming(assumptions.clone());
+			match result {
+				SatSolveResult::Satisfied(ref sol) => {
+					let sol = Solution {
+						sat: sol,
+						state: &solver.engine.borrow().state,
+					};
+					obj_curr = Some(Valuation::val(&objective, sol));
+					if let Some(callback) = &mut on_solution {
+						callback.on_solution(sol);
+					}
+					for (i, v) in vars.iter().enumerate() {
+						vals[i] = Valuation::val(v, sol);
+					}
+					debug!(
+						target: "solver",
+						?obj_curr,
+						obj_bound,
+						"sat solve result"
+					);
+				}
+				SatSolveResult::Unsatisfiable(_) => break (Complete, obj_curr),
+				SatSolveResult::Unknown => break (Satisfied, obj_curr),
+			}
+		}
+	}
+
+	/// Register a failure callback for assumption analysis.
+	///
+	/// The callback is invoked when the SAT solver reports unsatisfiability.
+	/// It receives an [`AssumptionChecker`] object that can determine which
+	/// assumptions contributed to the conflict.
+	pub fn on_failure<NewF>(
+		self,
+		on_failure: NewF,
+	) -> SolveArgs<'a, Sat, S, NewF, solve_args::SetOnFailure<State>>
+	where
+		State::OnFailure: solve_args::IsUnset,
+		NewF: FnOnce(&dyn AssumptionChecker),
+	{
+		self.with_f::<NewF>().on_failure_internal(on_failure)
+	}
+
+	/// Register a solution callback.
+	///
+	/// The callback is invoked each time a solution is found:
+	/// - For satisfiability checks: called at most once
+	/// - For optimization: called each time a better solution is found
+	/// - For all-solutions: called for each distinct solution
+	pub fn on_solution<NewS>(
+		self,
+		on_solution: NewS,
+	) -> SolveArgs<'a, Sat, NewS, F, solve_args::SetOnSolution<State>>
+	where
+		State::OnSolution: solve_args::IsUnset,
+		NewS: for<'b> FnMut(Solution<'b>),
+	{
+		self.with_s::<NewS>().on_solution_internal(on_solution)
+	}
+
+	/// Execute a satisfiability check.
+	///
+	/// Searches for any assignment satisfying all constraints and assumptions.
+	/// The search generally terminates as soon as a solution is found (or when
+	/// we determine no solution is possible). However, if `all_solutions` is
+	/// set, the search will continue to enumerate all feasible solutions.
+	pub fn satisfy(self) -> Status
+	where
+		Sat: ExternalPropagation + Assumptions,
+		State: solve_args::IsComplete,
+	{
+		let SolveArgsComplete {
+			solver,
+			assuming,
+			mut on_solution,
+			on_failure,
+			all_solutions,
+			..
+		} = self.finalize_internal();
+
+		// Process assumptions
+		let Ok(assumptions): Result<Vec<RawLit>, _> = assuming
+			.into_iter()
+			.filter_map(|bv| match bv.0 {
+				BoolView::Lit(lit) => Some(Ok(lit.0)),
+				BoolView::Const(true) => None,
+				BoolView::Const(false) => Some(Err(())),
+			})
+			.collect()
+		else {
+			if let Some(on_failure) = on_failure {
+				on_failure(&NoAssumptions);
+			}
+			return Status::Unsatisfiable;
+		};
+
+		let mut has_solution = false;
+		loop {
+			let result = solver.sat.solve_assuming(assumptions.clone());
+			let vals: Vec<_> = match result {
+				SatSolveResult::Satisfied(ref sol) => {
+					let sol = Solution {
+						sat: sol,
+						state: &solver.engine.borrow().state,
+					};
+					has_solution = true;
+					if let Some(callback) = &mut on_solution {
+						callback.on_solution(sol);
+					}
+					if let Some(vars) = &all_solutions {
+						vars.iter().map(|v| v.val(sol)).collect()
+					} else {
+						break Status::Satisfied;
+					}
+				}
+				SatSolveResult::Unsatisfiable(fail) => {
+					if let Some(on_failure) = on_failure {
+						on_failure(&fail);
+					}
+					break if has_solution {
+						Status::Complete
+					} else {
+						Status::Unsatisfiable
+					};
+				}
+				SatSolveResult::Unknown => {
+					break if has_solution {
+						Status::Satisfied
+					} else {
+						Status::Unknown
+					};
+				}
+			};
+			drop(result);
+
+			debug_assert!(all_solutions.is_some());
+			let vars = all_solutions.as_ref().unwrap();
+			if solver.add_no_good(vars, &vals).is_err() {
+				break Status::Complete;
+			}
+		}
+	}
+}
+
 impl<Sat: ClauseDatabase> Solver<Sat> {
 	/// Add a clause to the solver
 	pub fn add_clause<Iter>(
@@ -292,6 +841,118 @@ impl<Sat: ClauseDatabase> Solver<Sat> {
 }
 
 impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
+	/// Solve the problem given the current state.
+	///
+	/// This is the main entry point for all solving operations. It returns a
+	/// fluent builder API that allows configuring solve options and callbacks
+	/// before execution.
+	///
+	/// # Examples
+	///
+	/// Simple satisfiability solving:
+	/// ```
+	/// # use huub::{
+	/// # 	lower::InitConfig,
+	/// # 	model::Model,
+	/// # 	solver::{Solver, Status},
+	/// # };
+	/// # let mut model = Model::default();
+	/// # let (mut solver, _): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// let status = solver.solve().satisfy();
+	/// assert_eq!(status, Status::Satisfied);
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
+	///
+	/// Satisfiability with callback to inspect solution:
+	/// ```
+	/// # use huub::{
+	/// # 	lower::InitConfig,
+	/// # 	model::Model,
+	/// # 	solver::{Solver, Status, Valuation},
+	/// # };
+	/// # let mut model = Model::default();
+	/// # let x = model.new_int_decision(1..=4);
+	/// # model.linear(x).ne(2).post();
+	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let x = map.get(&mut solver, x);
+	/// let mut value = None;
+	/// let status = solver
+	/// 	.solve()
+	/// 	.on_solution(|solution| {
+	/// 		value = Some(x.val(solution));
+	/// 	})
+	/// 	.satisfy();
+	/// assert_eq!(status, Status::Satisfied);
+	/// assert_ne!(value, Some(2));
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
+	///
+	/// Optimization with callbacks:
+	/// ```
+	/// # use huub::{
+	/// # 	lower::InitConfig,
+	/// # 	model::Model,
+	/// # 	solver::{Solver, Status, Valuation},
+	/// # };
+	/// # let mut model = Model::default();
+	/// # let x = model.new_int_decision(1..=4);
+	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let x = map.get(&mut solver, x);
+	/// let (status, optimum) = solver.solve().on_solution(|_| {}).minimize(x);
+	/// assert_eq!(status, Status::Complete);
+	/// assert_eq!(optimum, Some(1));
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
+	///
+	/// With assumptions for incremental solving:
+	/// ```
+	/// # use huub::{
+	/// # 	lower::InitConfig,
+	/// # 	model::Model,
+	/// # 	solver::{Solver, Status},
+	/// # };
+	/// # let mut model = Model::default();
+	/// # let b = model.new_bool_decision();
+	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let b = map.get(&mut solver, b);
+	/// let status = solver.solve().assuming([b]).on_failure(|_| {}).satisfy();
+	/// assert_eq!(status, Status::Satisfied);
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
+	///
+	/// Enumerating all solutions:
+	/// ```
+	/// # use huub::{
+	/// # 	lower::InitConfig,
+	/// # 	model::Model,
+	/// # 	solver::{Solver, Status, Valuation},
+	/// # };
+	/// # let mut model = Model::default();
+	/// # let x = model.new_int_decision(1..=3);
+	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let x = map.get(&mut solver, x);
+	/// let mut count = 0;
+	/// let status = solver
+	/// 	.solve()
+	/// 	.all_solutions([x])
+	/// 	.on_solution(|_| count += 1)
+	/// 	.satisfy();
+	/// assert_eq!(status, Status::Complete);
+	/// assert_eq!(count, 3);
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
+	pub fn solve<'a>(
+		&'a mut self,
+	) -> SolveArgs<
+		'a,
+		Sat,
+		for<'b> fn(Solution<'b>),
+		for<'b> fn(&'b dyn AssumptionChecker),
+		solve_args::SetSolver,
+	> {
+		SolveArgsComplete::builder_internal().solver_internal(self)
+	}
+
 	/// Try to find a solution to the problem for which the [`Solver`] was
 	/// initialized, using the given Boolean assumptions.
 	pub fn solve_assuming(
@@ -414,58 +1075,6 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		}
 	}
 
-	/// Find all solutions with respect to a list of given variables.
-	/// The given closure will be called for each solution found.
-	///
-	/// WARNING: This method will add additional clauses into the solver to
-	/// prevent the same solution from being generated twice. This will make
-	/// repeated use of the Solver object impossible. Note that you can clone
-	/// the Solver object before calling this method to work around this
-	/// limitation.
-	pub fn all_solutions(
-		mut self,
-		vars: &[AnyView],
-		mut on_sol: impl FnMut(Solution<'_>),
-	) -> (Status, SolverStatistics) {
-		use Status::*;
-
-		let ret = |x: Self, status: Status| (status, x.solver_statistics());
-
-		let mut num_sol = 0;
-		loop {
-			let mut vals = Vec::with_capacity(vars.len());
-			let status = self.solve(|sol| {
-				num_sol += 1;
-				for v in vars {
-					vals.push(v.val(sol));
-				}
-				on_sol(sol);
-			});
-			match status {
-				Satisfied => {
-					if self.add_no_good(vars, &vals).is_err() {
-						return ret(self, Complete);
-					}
-				}
-				Unsatisfiable => {
-					if num_sol == 0 {
-						return ret(self, Unsatisfiable);
-					} else {
-						return ret(self, Complete);
-					}
-				}
-				Unknown => {
-					if num_sol == 0 {
-						return ret(self, Unknown);
-					} else {
-						return ret(self, Satisfied);
-					}
-				}
-				_ => unreachable!(),
-			}
-		}
-	}
-
 	/// Split the solver into a solving actions object that limits interaction
 	/// with the SAT solver, and the dynamic engine reference.
 	pub(crate) fn as_parts_mut(&mut self) -> (impl SolvingActions + '_, RefMut<'_, Engine>) {
@@ -488,131 +1097,6 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		(SA(&mut self.sat), self.engine.borrow_mut())
 	}
 
-	/// Find an optimal solution with respect to the given objective and goal.
-	///
-	/// Note that this method repeatedly adds objective-bound clauses. It takes
-	/// ownership of the solver, so these clauses do not affect any cloned
-	/// solver that existed before the call.
-	///
-	/// ```
-	/// # use huub::{
-	/// #     lower::InitConfig,
-	/// #     model::Model,
-	/// #     solver::{Goal, IntValuation, Solver, Status},
-	/// # };
-	/// # let mut model = Model::default();
-	/// # let x = model.new_int_decision(0..=10);
-	/// # model.linear(x).ge(3).post();
-	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
-	/// # let x = map.get(&mut solver, x);
-	/// let mut best = None;
-	/// let (status, _, optimum) = solver.branch_and_bound(Goal::Minimize(x), |solution| {
-	///     best = Some(x.val(solution));
-	/// });
-	///
-	/// assert_eq!(status, Status::Complete);
-	/// assert_eq!(optimum, Some(3));
-	/// # Ok::<(), Box<dyn std::error::Error>>(())
-	/// ```
-	pub fn branch_and_bound(
-		mut self,
-		goal: Goal<View<IntVal>>,
-		mut on_sol: impl FnMut(Solution<'_>),
-	) -> (Status, SolverStatistics, Option<IntVal>) {
-		use Status::*;
-		let ret =
-			|x: Self, status: Status, obj: Option<IntVal>| (status, x.solver_statistics(), obj);
-
-		let mut obj_curr = None;
-		let (obj_bound, objective) = match goal {
-			Goal::Minimize(objective) => (objective.min(&self), objective),
-			Goal::Maximize(objective) => (objective.max(&self), objective),
-		};
-		debug!(target: "solver", obj_bound, "start branch and bound");
-		loop {
-			let status = self.solve(|sol| {
-				obj_curr = Some(IntValuation::val(&objective, sol));
-				on_sol(sol);
-			});
-			debug!(
-				target: "solver",
-				?status,
-				?obj_curr,
-				obj_bound,
-				goal = %if goal == Goal::Minimize(objective) { "Minimize" } else { "Maximize" },
-				"sat solve result"
-			);
-			match status {
-				Satisfied => {
-					if obj_curr == Some(obj_bound) {
-						return ret(self, Complete, obj_curr);
-					} else {
-						let bound_lit = match goal {
-							Goal::Minimize(_) => Some(
-								objective.lit(&mut self, IntLitMeaning::Less(obj_curr.unwrap())),
-							),
-							Goal::Maximize(_) => {
-								Some(objective.lit(
-									&mut self,
-									IntLitMeaning::GreaterEq(obj_curr.unwrap() + 1),
-								))
-							}
-						};
-						debug!(
-							target: "solver",
-							lit = i32::from({
-								let BoolView::Lit(l) = bound_lit.unwrap().0 else {
-									unreachable!()
-								};
-								l.0
-							}),
-							"add objective bound"
-						);
-						self.add_clause([bound_lit.unwrap()]).unwrap();
-					}
-				}
-				Unsatisfiable => {
-					return if obj_curr.is_none() {
-						ret(self, Unsatisfiable, None)
-					} else {
-						ret(self, Complete, obj_curr)
-					};
-				}
-				Unknown => {
-					return if obj_curr.is_none() {
-						ret(self, Unknown, None)
-					} else {
-						ret(self, Satisfied, obj_curr)
-					};
-				}
-				Complete => unreachable!(),
-			}
-		}
-	}
-
-	/// Wrapper function for `all_solutions` that collects all solutions and
-	/// returns them in a vector of solution values.
-	///
-	/// WARNING: This method will add additional clauses into the solver to
-	/// prevent the same solution from being generated twice. This will make
-	/// repeated use of the Solver object impossible. Note that you can clone
-	/// the Solver object before calling this method to work around this
-	/// limitation.
-	pub fn collect_all_solutions(
-		self,
-		vars: &[AnyView],
-	) -> (Status, SolverStatistics, Vec<Vec<Value>>) {
-		let mut solutions = Vec::new();
-		let (status, stats) = self.all_solutions(vars, |sol| {
-			let mut sol_vec = Vec::with_capacity(vars.len());
-			for v in vars {
-				sol_vec.push(v.val(sol));
-			}
-			solutions.push(sol_vec);
-		});
-		(status, stats, solutions)
-	}
-
 	/// Access the initialization statistics of the [`Solver`] object.
 	pub fn init_statistics(&self) -> InitStatistics {
 		InitStatistics {
@@ -633,48 +1117,6 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 	/// Set the overarching search strategy to use during solving.
 	pub fn set_search_strategy(&mut self, strategy: SearchStrategy) {
 		self.engine.borrow_mut().state.set_search_strategy(strategy);
-	}
-
-	/// Try to find a solution to the problem for which the [`Solver`] was
-	/// initialized.
-	///
-	/// The callback is called at most once, when the solver finds a satisfying
-	/// assignment.
-	///
-	/// ```
-	/// # use huub::{
-	/// #     lower::InitConfig,
-	/// #     model::Model,
-	/// #     solver::{IntValuation, Solver, Status},
-	/// # };
-	/// # let mut model = Model::default();
-	/// # let x = model.new_int_decision(1..=4);
-	/// # model.linear(x).ne(2).post();
-	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
-	/// # let x = map.get(&mut solver, x);
-	/// let mut value = None;
-	/// let status = solver.solve(|solution| {
-	///     value = Some(x.val(solution));
-	/// });
-	///
-	/// assert_eq!(status, Status::Satisfied);
-	/// assert_ne!(value, Some(2));
-	/// # Ok::<(), Box<dyn std::error::Error>>(())
-	/// ```
-	pub fn solve(&mut self, mut on_sol: impl FnMut(Solution<'_>)) -> Status {
-		let result = self.sat.solve();
-		match result {
-			SatSolveResult::Satisfied(value) => {
-				let sol = Solution {
-					sat: &value,
-					state: &self.engine.borrow().state,
-				};
-				on_sol(sol);
-				Status::Satisfied
-			}
-			SatSolveResult::Unsatisfiable(_) => Status::Unsatisfiable,
-			SatSolveResult::Unknown => Status::Unknown,
-		}
 	}
 
 	/// Access the solver statistics for the search process up to this point.

@@ -598,7 +598,7 @@ mod tests {
 		},
 		model::Model,
 		solver::{
-			IntValuation, Solver, Status,
+			Solver, Status, Valuation,
 			decision::integer::{EncodingType, IntDecision},
 		},
 	};
@@ -875,34 +875,36 @@ mod tests {
 			}
 		}
 		assert_eq!(
-			slv.solve(|sol| {
-				(0..9).for_each(|r| {
-					let row = all_vars[r].iter().map(|&v| v.val(sol)).collect_vec();
-					assert!(
-						row.iter().all_unique(),
-						"Values in row {r} are not all different: {row:?}",
-					);
-				});
-				(0..9).for_each(|c| {
-					let col = all_vars.iter().map(|row| row[c].val(sol)).collect_vec();
-					assert!(
-						col.iter().all_unique(),
-						"Values in column {c} are not all different: {col:?}",
-					);
-				});
-				(0..3).for_each(|i| {
-					(0..3).for_each(|j| {
-						let block = (0..3)
-							.flat_map(|x| (0..3).map(move |y| (x, y)))
-							.map(|(x, y)| all_vars[3 * i + x][3 * j + y].val(sol))
-							.collect_vec();
+			slv.solve()
+				.on_solution(|sol| {
+					(0..9).for_each(|r| {
+						let row = all_vars[r].iter().map(|&v| v.val(sol)).collect_vec();
 						assert!(
-							block.iter().all_unique(),
-							"Values in block ({i}, {j}) are not all different: {block:?}",
+							row.iter().all_unique(),
+							"Values in row {r} are not all different: {row:?}",
 						);
 					});
-				});
-			}),
+					(0..9).for_each(|c| {
+						let col = all_vars.iter().map(|row| row[c].val(sol)).collect_vec();
+						assert!(
+							col.iter().all_unique(),
+							"Values in column {c} are not all different: {col:?}",
+						);
+					});
+					(0..3).for_each(|i| {
+						(0..3).for_each(|j| {
+							let block = (0..3)
+								.flat_map(|x| (0..3).map(move |y| (x, y)))
+								.map(|(x, y)| all_vars[3 * i + x][3 * j + y].val(sol))
+								.collect_vec();
+							assert!(
+								block.iter().all_unique(),
+								"Values in block ({i}, {j}) are not all different: {block:?}",
+							);
+						});
+					});
+				})
+				.satisfy(),
 			expected
 		);
 	}
