@@ -7,7 +7,7 @@ resolver = "2"
 
 [workspace.package]
 repository = "https://github.com/huub-solver/huub"
-version = "0.1.0"
+version = "0.0.1"
 authors = ["Jip J. Dekker <jip@dekker.one>"]
 edition = "2024"
 license = "MPL-2.0"

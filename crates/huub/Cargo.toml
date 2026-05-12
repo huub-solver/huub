@@ -1,5 +1,6 @@
 [package]
 name = "huub"
+description = "CP+SAT solver framework built to be reliable, performant, and extensible"
 
 authors.workspace = true
 version.workspace = true
