@@ -9,22 +9,16 @@ pub(crate) mod resolved;
 pub(crate) mod view;
 
 use std::{
-	any::Any,
 	fmt::Debug,
 	hash::Hash,
 	iter::{repeat_n, repeat_with},
 	marker::PhantomData,
 	mem,
-	num::NonZeroI32,
 };
 
-use pindakaas::{
-	ClauseDatabaseTools, Cnf, Lit as RawLit,
-	solver::{cadical::Cadical, propagation::ExternalPropagation},
-};
+use pindakaas::{ClauseDatabaseTools, Cnf};
 use rangelist::IntervalIterator;
-use rustc_hash::{FxHashMap, FxHashSet};
-use tracing::warn;
+use rustc_hash::FxHashMap;
 
 pub use crate::model::{
 	decision::{Decision, DecisionReference},
@@ -39,23 +33,15 @@ use crate::{
 	constraints::{
 		BoxedConstraint, Conflict, Constraint, DeferredReason, Reason, ReasonBuilder,
 		SimplificationStatus,
-		bool_array_element::BoolDecisionArrayElement,
-		int_array_element::{IntArrayElementBounds, IntValArrayElement},
-		int_table::IntTable,
-		int_unique::IntUnique,
 	},
 	helpers::bytes::Bytes,
-	lower::{InitConfig, LoweringContext, LoweringError, LoweringMap, LoweringMapBuilder},
+	lower::{Lowerer, LowererComplete, LoweringError},
 	model::{
-		decision::{
-			boolean::BoolDecision,
-			integer::{Domain, IntDecision},
-		},
+		decision::{boolean::BoolDecision, integer::IntDecision},
 		initilization_context::ModelInitContext,
-		resolved::Resolved,
 	},
 	solver::{
-		IntLitMeaning, Solver,
+		IntLitMeaning,
 		activation_list::ActivationAction,
 		queue::{PropagatorInfo, PropagatorQueue},
 	},
@@ -91,14 +77,13 @@ pub(crate) struct ConRef(u32);
 /// A [`Model`] is the construction and simplification layer of Huub. It stores
 /// decision variables, constraints, aliases, and simplifications, but it does
 /// not perform search itself. Search starts after the model is converted to a
-/// [`Solver`] with [`Self::to_solver`].
+/// [`Solver`](crate::solver::Solver) with [`Self::lower`].
 ///
 /// After lowering, values in a solution should be queried through the solver
-/// views returned by the [`LoweringMap`].
+/// views returned by the [`LoweringMap`](crate::lower::LoweringMap).
 ///
 /// ```
 /// # use huub::{
-/// # 	lower::InitConfig,
 /// # 	model::Model,
 /// # 	solver::{Solver, Status, Valuation},
 /// # };
@@ -108,7 +93,7 @@ pub(crate) struct ConRef(u32);
 ///
 /// model.linear(x + y).eq(4).post();
 ///
-/// let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+/// let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
 /// # let x = map.get(&mut solver, x);
 /// # let y = map.get(&mut solver, y);
 /// # let mut pair = None;
@@ -128,7 +113,7 @@ pub struct Model {
 	/// A base [`Cnf`] object that contains pure Boolean parts of the problem.
 	pub(crate) cnf: Cnf,
 	/// A list of constraints that have been added to the model.
-	constraints: Vec<Option<BoxedConstraint>>,
+	pub(crate) constraints: Vec<Option<BoxedConstraint>>,
 	/// The definitions of the Boolean decision variables that have been
 	/// created.
 	pub(crate) bool_vars: Vec<BoolDecision>,
@@ -138,7 +123,7 @@ pub struct Model {
 	/// A queue of constraints that need to be propagated.
 	propagator_queue: PropagatorQueue,
 	/// Fake trailed storage
-	trail: Vec<[u8; 8]>,
+	pub(crate) trail: Vec<[u8; 8]>,
 	/// Reference for the current propagator being executed.
 	cur_prop: Option<ConRef>,
 	/// Integer variable changes that occurred during the execution of the
@@ -219,6 +204,30 @@ impl Model {
 			},
 			Err(false) => unreachable!("invalid reason"),
 		}
+	}
+
+	/// Returns a builder that can be used to lower the [`Model`] to a
+	/// [`Solver`](crate::solver::Solver) (via
+	/// [`to_solver()`](Lowerer::to_solver)).
+	///
+	/// The builder allows configuring various SAT solver options and
+	/// preprocessing techniques before starting the lowering process.
+	///
+	/// ```
+	/// # use huub::{
+	/// # 	model::Model,
+	/// # 	solver::{Solver, Valuation},
+	/// # };
+	/// # let mut model = Model::default();
+	/// # let x = model.new_int_decision(1..=3);
+	/// let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
+	/// let x = map.get(&mut solver, x);
+	///
+	/// solver.solve().satisfy();
+	/// # Ok::<(), Box<dyn std::error::Error>>(())
+	/// ```
+	pub fn lower(&mut self) -> Lowerer<&'_ mut Model> {
+		LowererComplete::builder_internal(self)
 	}
 
 	/// Create a new Boolean variable.
@@ -407,9 +416,28 @@ impl Model {
 		}
 	}
 
+	/// Propagate all constraints until the propagator queue is empty.
+	///
+	/// This method performs fixed-point iteration of all constraints currently
+	/// in the propagator queue. It will continue to propagate until no more
+	/// changes can be made to the domains of the decision variables, or until
+	/// an inconsistency is found.
+	///
+	/// Note that Huub performs propagation automatically during the lowering
+	/// process (see [`Self::lower`]). You generally only need to call this
+	/// method manually if you want to inspect the results of propagation
+	/// (e.g. decision variable domains) during the modeling process.
+	pub fn propagate(&mut self) -> Result<(), LoweringError> {
+		self.notify_advisors();
+		while let Some(con) = self.propagator_queue.pop() {
+			self.propagate_single(ConRef::from_raw(con))?;
+		}
+		Ok(())
+	}
+
 	/// Propagate the constraint at index `con`, updating the domains of the
 	/// variables and rewriting the constraint if necessary.
-	pub(crate) fn propagate(&mut self, con: ConRef) -> Result<(), LoweringError> {
+	pub(crate) fn propagate_single(&mut self, con: ConRef) -> Result<(), LoweringError> {
 		let Some(mut con_obj) = self.constraints[con.index()].take() else {
 			return Ok(());
 		};
@@ -441,152 +469,6 @@ impl Model {
 		}
 		self.notify_advisors();
 		Ok(())
-	}
-
-	/// Process the model to create a [`Solver`] instance that can be used to
-	/// solve it.
-	///
-	/// This method will return a [`Solver`] instance in addition to a
-	/// [`LoweringMap`], which can be used to map from [`model::View`](View)
-	/// to [`solver::View`](crate::solver::View). If an error occurs during the
-	/// reformulation process, or if it is found to be trivially unsatisfiable,
-	/// then an error will be returned.
-	///
-	/// ```
-	/// # use huub::{
-	/// # 	lower::InitConfig,
-	/// # 	model::Model,
-	/// # 	solver::{Solver, Status, Valuation},
-	/// # };
-	/// # let mut model = Model::default();
-	/// # let x = model.new_int_decision(1..=3);
-	/// let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
-	/// let x = map.get(&mut solver, x);
-	///
-	/// let status = solver
-	/// 	.solve()
-	/// 	.on_solution(|solution| {
-	/// 		assert!((1..=3).contains(&x.val(solution)));
-	/// 	})
-	/// 	.satisfy();
-	/// assert_eq!(status, Status::Satisfied);
-	/// # Ok::<(), Box<dyn std::error::Error>>(())
-	/// ```
-	pub fn to_solver<Sat>(
-		&mut self,
-		config: &InitConfig,
-	) -> Result<(Solver<Sat>, LoweringMap), LoweringError>
-	where
-		Solver<Sat>: Default,
-		Sat: ExternalPropagation + 'static,
-	{
-		let mut slv = Solver::<Sat>::default();
-		let any_slv: &mut dyn Any = &mut slv.sat;
-		if let Some(r) = any_slv.downcast_mut::<Cadical>() {
-			// Set the solver options for preprocessing/inprocessing
-			r.set_option("condition", config.conditioning() as i32);
-			r.set_option("elim", config.variable_elimination() as i32);
-			r.set_option("exteagerreasons", config.reason_eager() as i32);
-			r.set_option("inprocessing", config.inprocessing() as i32);
-			r.set_limit("preprocessing", config.preprocessing() as i32);
-			r.set_option("probe", config.probing() as i32);
-			r.set_option("subsume", config.subsumption() as i32);
-			r.set_option("vivify", config.vivification() as i32);
-
-			// Set the solver options for search configurations
-			// Enable restart if the config is set to true or if there are no
-			// user search heuristics are provided
-			r.set_option("restart", config.restart() as i32);
-		} else {
-			warn!(
-				target: "solver",
-				"ignore vivification and restart options for unknown solver"
-			);
-		}
-
-		self.notify_advisors();
-		while let Some(con) = self.propagator_queue.pop() {
-			self.propagate(ConRef::from_raw(con))?;
-		}
-
-		// Determine encoding types for integer variables
-		let mut int_eager_direct = FxHashSet::<Resolved<Decision<IntVal>>>::default();
-		let int_eager_order = FxHashSet::<Resolved<Decision<IntVal>>>::default();
-
-		for c in self.constraints.iter().flatten() {
-			let c: &dyn Constraint<Model> = c.as_ref();
-			let c: &dyn Any = c;
-			if let Some(c) = c.downcast_ref::<BoolDecisionArrayElement>() {
-				let index = c.index.resolve_alias(self);
-				if let Some(var) = index.integer_decision() {
-					int_eager_direct.insert(var);
-				}
-			} else if let Some(c) = c.downcast_ref::<IntUnique>() {
-				for v in &c.bounds_prop.var {
-					let v = v.resolve_alias(self);
-					if let Some(var) = v.integer_decision() {
-						let Domain::Domain(dom) = &self.int_vars[var.idx()].domain else {
-							unreachable!()
-						};
-						if dom.card() <= Some(c.bounds_prop.var.len() * 100 / 80) {
-							int_eager_direct.insert(var);
-						}
-					}
-				}
-			} else if let Some(c) =
-				c.downcast_ref::<IntArrayElementBounds<View<IntVal>, View<IntVal>, View<IntVal>>>()
-			{
-				let index = c.index.resolve_alias(self);
-				if let Some(var) = index.integer_decision() {
-					int_eager_direct.insert(var);
-				}
-			} else if let Some(c) = c.downcast_ref::<IntTable>() {
-				for &v in &c.vars {
-					let v = v.resolve_alias(self);
-					if let Some(var) = v.integer_decision() {
-						int_eager_direct.insert(var);
-					}
-				}
-			} else if let Some(c) =
-				c.downcast_ref::<IntValArrayElement<View<IntVal>, View<IntVal>>>()
-			{
-				let index = c.0.index.resolve_alias(self);
-				if let Some(var) = index.integer_decision() {
-					int_eager_direct.insert(var);
-				}
-			}
-		}
-
-		// Create the mapping between model decisions and solver views.
-		let mut map_builder = LoweringMapBuilder {
-			bool_map: vec![None; self.bool_vars.len()],
-			int_eager_direct,
-			int_eager_limit: config.int_eager_limit(),
-			int_eager_order,
-			int_map: vec![None; self.int_vars.len()],
-		};
-
-		// Ensure the creation of all integer variables.
-		for (idx, _) in self.int_vars.iter().enumerate() {
-			map_builder.get_or_create_int(self, &mut slv, Decision(idx as u32));
-		}
-
-		// Ensure the creation of all Boolean variables.
-		for var in 1..=self.bool_vars.len() as u32 {
-			let raw = RawLit::from_raw(NonZeroI32::new(var as i32).unwrap());
-			map_builder.get_or_create_bool(self, &mut slv, Decision(raw).into());
-		}
-
-		// Finalize the reformulation map (all variables must be created by now)
-		let map = map_builder.finalize();
-
-		// Create constraint data structures within the solver
-		let mut ctx = LoweringContext::new(&mut slv, &map, &self.trail);
-		for c in self.constraints.iter().flatten() {
-			c.to_solver(&mut ctx)?;
-		}
-
-		Ok((slv, map))
 	}
 }
 
@@ -680,7 +562,7 @@ mod tests {
 		constraints::{
 			BoolModelActions, Constraint, IntModelActions, Propagator, SimplificationStatus,
 		},
-		lower::{InitConfig, LoweringContext, LoweringError},
+		lower::{LoweringContext, LoweringError},
 		model::{Model, View, deserialize::AnyView},
 		solver::Solver,
 	};
@@ -701,9 +583,7 @@ mod tests {
 		let i1 = prb.new_int_decision(-1..=0);
 		i1.unify(&mut prb, !b - 1).expect("unify failed");
 
-		let (mut slv, map): (Solver, _) = prb
-			.to_solver(&InitConfig::default())
-			.expect("to_solver failed");
+		let (mut slv, map): (Solver, _) = prb.lower().to_solver().expect("to_solver failed");
 		let b_slv = map.get_any(&mut slv, AnyView::from(b));
 		let i1_slv = map.get_any(&mut slv, AnyView::from(i1));
 		slv.expect_solutions(
@@ -730,9 +610,7 @@ mod tests {
 		};
 		prb.post_constraint(t);
 		i.tighten_min(&mut prb, 2, []).expect("tighten_min failed");
-		let (_, _): (Solver, _) = prb
-			.to_solver(&InitConfig::default())
-			.expect("to_solver failed");
+		let (_, _): (Solver, _) = prb.lower().to_solver().expect("to_solver failed");
 		assert_eq!(prb.trailed(bool_check), 1);
 	}
 
@@ -752,9 +630,7 @@ mod tests {
 		};
 		prb.post_constraint(t);
 		i.tighten_min(&mut prb, 1, []).expect("tighten_min failed");
-		let (_, _): (Solver, _) = prb
-			.to_solver(&InitConfig::default())
-			.expect("to_solver failed");
+		let (_, _): (Solver, _) = prb.lower().to_solver().expect("to_solver failed");
 		assert_eq!(prb.trailed(bool_check), 0);
 	}
 
@@ -775,9 +651,7 @@ mod tests {
 		prb.post_constraint(t);
 		i.tighten_min(&mut prb, 1, []).expect("tighten_min failed");
 		i.tighten_max(&mut prb, 2, []).expect("tighten_max failed");
-		let (mut slv, map): (Solver, _) = prb
-			.to_solver(&InitConfig::default())
-			.expect("to_solver failed");
+		let (mut slv, map): (Solver, _) = prb.lower().to_solver().expect("to_solver failed");
 		assert_eq!(prb.trailed(int_check), 1);
 		let i_slv = map.get(&mut slv, i);
 		let (min, max) = i_slv.bounds(&slv);

@@ -211,7 +211,6 @@ impl IntBrancher {
 	///
 	/// ```
 	/// # use huub::{
-	/// # 	lower::InitConfig,
 	/// # 	model::Model,
 	/// # 	solver::{
 	/// # 		Solver, Status, Valuation,
@@ -222,7 +221,7 @@ impl IntBrancher {
 	/// # let x = model.new_int_decision(1..=3);
 	/// # let y = model.new_int_decision(1..=3);
 	/// # model.linear(x + y).eq(4).post();
-	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
 	/// # let x = map.get(&mut solver, x);
 	/// # let y = map.get(&mut solver, y);
 	/// IntBrancher::new_in(
@@ -355,13 +354,12 @@ impl WarmStartBrancher {
 	/// ```
 	/// # use huub::{
 	/// # 	actions::IntDecisionActions,
-	/// # 	lower::InitConfig,
 	/// # 	model::Model,
 	/// # 	solver::{IntLitMeaning, Solver, Status, Valuation, branchers::WarmStartBrancher},
 	/// # };
 	/// # let mut model = Model::default();
 	/// # let x = model.new_int_decision(1..=3);
-	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
 	/// # let x = map.get(&mut solver, x);
 	/// let prefer_two = x.lit(&mut solver, IntLitMeaning::Eq(2));
 	/// WarmStartBrancher::new_in(&mut solver, vec![prefer_two]);

@@ -25,7 +25,6 @@
 //!
 //! ```
 //! # use huub::{
-//! # 	lower::InitConfig,
 //! # 	model::Model,
 //! # 	solver::{Solver, Status, Valuation},
 //! # };
@@ -36,7 +35,7 @@
 //! model.linear(x + y).eq(5).post();
 //! model.unique(vec![x, y]).post();
 //!
-//! let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+//! let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
 //! let x = map.get(&mut solver, x);
 //! let y = map.get(&mut solver, y);
 //!

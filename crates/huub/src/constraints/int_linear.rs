@@ -1086,7 +1086,6 @@ mod tests {
 	use crate::{
 		IntSet, IntVal,
 		constraints::int_linear::{DoubleIntVal, IntLinearLessEqBounds, IntLinearNotEqValue},
-		lower::InitConfig,
 		model::{Model, view::View},
 		solver::{
 			Solver,
@@ -1257,7 +1256,7 @@ mod tests {
 
 		prb.linear(a * 2 + b + c).ge(7).implied_by(r).post();
 
-		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+		let (mut slv, map): (Solver, _) = prb.lower().to_solver().unwrap();
 		let a = map.get_any(&mut slv, a.into());
 		let b = map.get_any(&mut slv, b.into());
 		let c = map.get_any(&mut slv, c.into());
@@ -1290,7 +1289,7 @@ mod tests {
 
 		prb.linear(a * 2 + b + c).le(5).implied_by(r).post();
 
-		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+		let (mut slv, map): (Solver, _) = prb.lower().to_solver().unwrap();
 		let a = map.get_any(&mut slv, a.into());
 		let b = map.get_any(&mut slv, b.into());
 		let c = map.get_any(&mut slv, c.into());
@@ -1323,7 +1322,7 @@ mod tests {
 
 		prb.linear(a * 2 + b + c).ne(6).implied_by(r).post();
 
-		let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+		let (mut slv, map): (Solver, _) = prb.lower().to_solver().unwrap();
 		let a = map.get_any(&mut slv, a.into());
 		let b = map.get_any(&mut slv, b.into());
 		let c = map.get_any(&mut slv, c.into());

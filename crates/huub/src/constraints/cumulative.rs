@@ -985,7 +985,7 @@ mod tests {
 		// First propagation: The compulsory parts of Task A and B ([0, 2])
 		// require that Task C cannot overlap with them due to capacity constraints.
 		// This pushes the earliest start time of Task C to 3.
-		let _ = prb.propagate(ConRef::from_raw(0));
+		let _ = prb.propagate_single(ConRef::from_raw(0));
 		let time_bounds = start_time_a.bounds(&prb);
 		assert_eq!(time_bounds, (0, 2));
 		let usage_bounds = usages[0].bounds(&prb);
@@ -1004,7 +1004,7 @@ mod tests {
 		// Second propagation: With Task C's start time now at least 3, only A and B
 		// overlap in [0, 2]. The combined usage of A and B in this interval must not
 		// exceed the capacity (2), so their usage upper bounds are tightened to 1.
-		let _ = prb.propagate(ConRef::from_raw(0));
+		let _ = prb.propagate_single(ConRef::from_raw(0));
 		let time_bounds = start_time_a.bounds(&prb);
 		assert_eq!(time_bounds, (0, 2));
 		let usage_bounds = usages[0].bounds(&prb);

@@ -84,7 +84,6 @@ To use a brancher, create it with a list of decisions, a decision selection stra
 ```rust
 # extern crate huub;
 # use huub::{
-# 	lower::InitConfig,
 # 	model::Model,
 # 	solver::{
 # 		branchers::{IntBrancher, ValueSelection, VariableSelection},
@@ -94,7 +93,7 @@ To use a brancher, create it with a list of decisions, a decision selection stra
 # let mut model = Model::default();
 # let x = model.new_int_decision(0..=100);
 # let y = model.new_int_decision(0..=100);
-# let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default()).unwrap();
+# let (mut solver, map): (Solver, _) = model.lower().to_solver().unwrap();
 # let x = map.get(&mut solver, x);
 # let y = map.get(&mut solver, y);
 // Use an IntBrancher to branch on decisions [x, y] using FirstFail and
@@ -128,14 +127,13 @@ This makes warm-starting robust: if your partial solution turns out to be incomp
 # extern crate huub;
 # use huub::{
 # 	actions::IntDecisionActions,
-# 	lower::InitConfig,
 # 	model::Model,
 # 	solver::{branchers::WarmStartBrancher, IntLitMeaning, Solver},
 # };
 # let mut model = Model::default();
 # let b = model.new_bool_decision();
 # let x = model.new_int_decision(1..=10);
-# let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default()).unwrap();
+# let (mut solver, map): (Solver, _) = model.lower().to_solver().unwrap();
 # let b = map.get(&mut solver, b);
 # let x = map.get(&mut solver, x);
 // Warm start by suggesting certain boolean decisions should be true
@@ -161,13 +159,12 @@ Once you have created a solver, you can search for solutions using the `solve()`
 ```rust
 # extern crate huub;
 # use huub::{
-# 	lower::InitConfig,
 # 	model::Model,
 # 	solver::{Solver, Status},
 # };
 # let mut model = Model::default();
 # let x = model.new_int_decision(1..=9);
-# let (mut solver, _): (Solver, _) = model.to_solver(&InitConfig::default()).unwrap();
+# let (mut solver, _): (Solver, _) = model.lower().to_solver().unwrap();
 let status = solver
 	.solve()
 	.on_solution(|solution| {
@@ -199,12 +196,11 @@ The `set_terminate_callback` method allows you to provide a closure that returns
 # use std::time::Instant;
 #
 # use huub::{
-# 	lower::InitConfig,
 # 	model::Model,
 # 	solver::{Solver, Status, TerminationSignal},
 # };
 # let mut model = Model::default();
-# let (mut solver, _): (Solver, _) = model.to_solver(&InitConfig::default()).unwrap();
+# let (mut solver, map): (Solver, _) = model.lower().to_solver().unwrap();
 let start_time = Instant::now();
 let time_limit = std::time::Duration::from_secs(10);
 
@@ -248,7 +244,6 @@ This performs an iterative search: after finding each solution, it adds a constr
 ```rust
 # extern crate huub;
 # use huub::{
-# 	lower::InitConfig,
 # 	model::Model,
 # 	solver::{Solver, Status, Valuation},
 # };
@@ -256,7 +251,7 @@ This performs an iterative search: after finding each solution, it adds a constr
 # let x = model.new_int_decision(0..=100);
 # let y = model.new_int_decision(0..=100);
 # let cost = model.linear(x + y).define();
-# let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default()).unwrap();
+# let (mut solver, map): (Solver, _) = model.lower().to_solver().unwrap();
 # let cost = map.get(&mut solver, cost);
 let (status, optimal_cost) = solver
 	.solve()
@@ -299,7 +294,6 @@ This is useful for exploring the solution space, enumerating all valid assignmen
 ```rust
 # extern crate huub;
 # use huub::{
-# 	lower::InitConfig,
 # 	model::Model,
 # 	solver::{Solver, Status, Valuation},
 # };
@@ -307,7 +301,7 @@ This is useful for exploring the solution space, enumerating all valid assignmen
 # let x = model.new_int_decision(1..=3);
 # let y = model.new_int_decision(1..=3);
 # model.linear(x).ne(y).post();
-# let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default()).unwrap();
+# let (mut solver, map): (Solver, _) = model.lower().to_solver().unwrap();
 # let x = map.get(&mut solver, x);
 # let y = map.get(&mut solver, y);
 let mut num_sol = 0;
@@ -351,9 +345,9 @@ You can retrieve statistics about the search process to understand solver behavi
 
 ```rust
 # extern crate huub;
-# use huub::{lower::InitConfig, model::Model, solver::Solver};
+# use huub::{model::Model, solver::Solver};
 # let mut model = Model::default();
-# let (mut solver, _): (Solver, _) = model.to_solver(&InitConfig::default()).unwrap();
+# let (mut solver, _): (Solver, _) = model.lower().to_solver().unwrap();
 # let _ = solver.solve().on_solution(|_| {}).satisfy();
 let stats = solver.solver_statistics();
 
@@ -375,44 +369,43 @@ These statistics help you understand:
 ## SAT Solver Control Options
 
 Huub's underlying SAT solver includes various preprocessing and inprocessing techniques that can be tuned to control search behavior and performance.
-These are configured when creating the solver through the `InitConfig`:
+These are configured using the builder returned by `lower()` before calling `to_solver()`:
 
 ```rust
 # extern crate huub;
-# use huub::{lower::InitConfig, model::Model, solver::Solver};
+# use huub::{model::Model, solver::Solver};
 # let mut model = Model::default();
 # let x = model.new_int_decision(0..=10);
 // Enable/disable various SAT preprocessing and inprocessing techniques
-let mut config = InitConfig::default()
-	.with_preprocessing(2)
-	.with_inprocessing(true)
-	.with_probing(true)
-	.with_subsumption(true)
-	.with_variable_elimination(true)
-	.with_vivification(true)
-	.with_conditioning(true)
-	.with_reason_eager(true);
-
-# let (_, _): (Solver, _) = model.to_solver(&config).unwrap();
+let (mut solver, map): (Solver, _) = model.lower()
+	.preprocessing(2)
+	.inprocessing(true)
+	.probing(true)
+	.subsumption(true)
+	.variable_elimination(true)
+	.vivification(true)
+	.conditioning(true)
+	.reason_eager(true)
+	.to_solver()
+# .unwrap();
 ```
 
 **Key SAT solver options:**
 
-- **Preprocessing** (`with_preprocessing(n)`): Run N rounds of SAT preprocessing before search begins.
+- `preprocessing(n)`: Run N rounds of SAT preprocessing before search begins.
   More rounds can reduce the problem size but take more time upfront.
-- **Inprocessing** (`with_inprocessing(bool)`):
-  Enable or disable SAT inprocessing during search.
+- `inprocessing(bool)`: Enable or disable SAT inprocessing during search.
   Inprocessing simplifies clauses and removes redundant variables as the solver learns more.
   Can improve search efficiency but adds overhead.
-- **Probing** (`with_probing(bool)`): Enable or disable failed-literal probing, which tries to detect implications of setting variables to specific values.
+- `probing(bool)`: Enable or disable failed-literal probing, which tries to detect implications of setting variables to specific values.
   This helps find inconsistencies early, but it is computationally expensive.
-- **Subsumption** (`with_subsumption(bool)`): Enable or disable forward subsumption, which removes clauses that are subsumed by learned clauses.
+- `subsumption(bool)`: Enable or disable forward subsumption, which removes clauses that are subsumed by learned clauses.
   This reduces clause database bloat, but requires expensive checking.
-- **Variable Elimination** (`with_variable_elimination(bool)`): Enable or disable bounded variable elimination, which removes variables by adding resolvent clauses.
+- `variable_elimination(bool)`: Enable or disable bounded variable elimination, which removes variables by adding resolvent clauses.
   It can reduce the problem size significantly, but it is expensive.
-- **Vivification** (`with_vivification(bool)`): Enable or disable clause vivification, which strengthens clauses by removing literals that are implied. Helps derive stronger learned clauses.
-- **Conditioning** (`with_conditioning(bool)`): Enable or disable blocked clause elimination (conditioning), which removes clauses that are logically redundant with respect to the learned clause set.
-- **Reason Eager** (`with_reason_eager(bool)`): Eagerly compute explanation clauses for all literals propagated at the conflict level.
+- `vivification(bool)`: Enable or disable clause vivification, which strengthens clauses by removing literals that are implied. Helps derive stronger learned clauses.
+- `conditioning(bool)`: Enable or disable blocked clause elimination (conditioning), which removes clauses that are logically redundant with respect to the learned clause set.
+- `reason_eager(bool)`: Eagerly compute explanation clauses for all literals propagated at the conflict level.
   This improves explanations but adds memory overhead.
 
 These options trade off between problem size reduction (fewer variables/clauses means faster search) and preprocessing time.

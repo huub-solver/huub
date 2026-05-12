@@ -40,7 +40,7 @@ use huub::{
 	lower::LoweringError,
 	model::deserialize::{
 		Goal,
-		flatzinc::{FlatZincError, FznIdent},
+		flatzinc::{FlatZincError, FznIdent, HuubFlatZinc},
 	},
 	solver::{
 		AnyView, SearchStrategy, Solution, Solver, Status, SwitchTrigger, TerminationSignal,
@@ -122,7 +122,20 @@ impl<'a> Cli<'a> {
 			)
 		})?;
 
-		let (mut slv, meta): (Solver, _) = match Solver::from_fzn(&fzn, &self.init_config()) {
+		let (mut slv, meta): (Solver, _) = match fzn
+			.lower()
+			.int_eager_limit(self.int_eager_limit)
+			.preprocessing(self.preprocessing)
+			.conditioning(self.conditioning)
+			.inprocessing(self.inprocessing)
+			.probing(self.probing)
+			.reason_eager(self.reason_eager)
+			.restart(self.free_search || self.restart)
+			.subsumption(self.subsumption)
+			.variable_elimination(self.variable_elimination)
+			.vivification(self.vivification)
+			.to_solver()
+		{
 			Err(FlatZincError::ReformulationError(
 				LoweringError::Simplification(_) | LoweringError::Lowering(_),
 			)) => {

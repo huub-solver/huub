@@ -72,7 +72,8 @@ Now that we have defined the model, we need to convert it to a solver and run th
 
 ### Converting to a solver
 
-The first step is to convert the model to a solver object that can search for solutions:
+The first step is to convert the model to a solver object that can search for solutions.
+We do this using the `lower()` method, which returns a builder that allows for solver configuration before finalizing the conversion with `to_solver()`:
 
 ```rust,ignore
 {{#include ../../../crates/huub/examples/send-more-money/main.rs:convert_to_solver}}

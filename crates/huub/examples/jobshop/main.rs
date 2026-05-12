@@ -31,7 +31,7 @@ use std::{
 
 use clap::{ArgAction, Parser, ValueEnum, builder::BoolishValueParser};
 use huub::{
-	lower::InitConfig,
+	lower::Lowerer,
 	solver::{SearchStrategy, Solver, SwitchTrigger, TerminationSignal, Valuation},
 };
 
@@ -60,7 +60,7 @@ struct Cli {
 		action = ArgAction::Set,
 		value_parser = BoolishValueParser::new(),
 		value_name = "bool",
-		default_value_t = InitConfig::default().reason_eager()
+		default_value_t = Lowerer::DEFAULT_REASON_EAGER
 	)]
 	reason_eager: bool,
 	/// The time limit before stopping the solver.
@@ -71,7 +71,7 @@ struct Cli {
 	#[arg(
 		long,
 		value_name = "usize",
-		default_value_t = InitConfig::default().int_eager_limit()
+		default_value_t = Lowerer::DEFAULT_INT_EAGER_LIMIT
 	)]
 	int_eager_limit: usize,
 	/// Whether to enable restarting.
@@ -80,7 +80,7 @@ struct Cli {
 		action = ArgAction::Set,
 		value_parser = BoolishValueParser::new(),
 		value_name = "bool",
-		default_value_t = InitConfig::default().restart()
+		default_value_t = Lowerer::DEFAULT_RESTART
 	)]
 	restart: bool,
 	/// Set the overarching search strategy used by the solver.
@@ -169,11 +169,13 @@ fn main() {
 	println!("{0}", options);
 
 	// Configure solver initialization options.
-	let init_config = InitConfig::default()
-		.with_restart(options.restart)
-		.with_int_eager_limit(options.int_eager_limit)
-		.with_reason_eager(options.reason_eager);
-	let (mut slv, map): (Solver, _) = model.to_solver(&init_config).unwrap();
+	let (mut slv, map): (Solver, _) = model
+		.lower()
+		.restart(options.restart)
+		.int_eager_limit(options.int_eager_limit)
+		.reason_eager(options.reason_eager)
+		.to_solver()
+		.unwrap();
 
 	options
 		.branching_strategy

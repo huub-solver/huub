@@ -7,7 +7,7 @@ While decision variables represent the unknowns, constraints encode the problem 
 ## Understanding constraints and propagation
 
 When you post constraints to Huub, they are stored in the model.
-Once you convert the model to a solver (via `to_solver`), Huub's *constraint propagation* eliminates values from domains that would violate the constraints.
+Once you convert the model to a solver (via `lower().to_solver()`), Huub's *constraint propagation* eliminates values from domains that would violate the constraints.
 This reduction happens automatically, even before the solver begins searching for solutions.
 
 For example, if you post the constraint that `x != y` (x and y are different), and x can be {1, 2, 3} while y is {3}, then:

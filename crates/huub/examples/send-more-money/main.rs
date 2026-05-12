@@ -26,7 +26,6 @@ macro_rules! println {
 use std::{fmt::Write, sync::Mutex};
 
 use huub::{
-	lower::InitConfig,
 	model::Model,
 	solver::{Solver, Valuation},
 };
@@ -69,7 +68,7 @@ pub fn main() {
 
 	// ANCHOR: convert_to_solver
 	// Convert the model to a solver
-	let (mut solver, map): (Solver, _) = match model.to_solver(&InitConfig::default()) {
+	let (mut solver, map): (Solver, _) = match model.lower().to_solver() {
 		Ok(result) => result,
 		Err(e) => {
 			eprintln!("Error initializing solver: {}", e);

@@ -294,10 +294,7 @@ impl fmt::Display for Solution {
 
 #[cfg(test)]
 mod tests {
-	use huub::{
-		lower::InitConfig,
-		solver::{Solver, Valuation},
-	};
+	use huub::solver::{Solver, Valuation};
 
 	use crate::model::{Instance, JobShopModel, ObjectiveType};
 
@@ -346,7 +343,7 @@ mod tests {
 			objective,
 			..
 		} = JobShopModel::new(&instance, objective_type);
-		let (mut slv, map): (Solver, _) = model.to_solver(&InitConfig::default()).unwrap();
+		let (mut slv, map): (Solver, _) = model.lower().to_solver().unwrap();
 		let obj = map.get(&mut slv, objective);
 		let mut best = None;
 		slv.solve()

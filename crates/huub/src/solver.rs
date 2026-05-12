@@ -458,11 +458,11 @@ where
 	///
 	/// Collect all satisfying assignments:
 	/// ```
-	/// # use huub::{lower::InitConfig, model::Model, solver::{Solver, Status}};
+	/// # use huub::{model::Model, solver::{Solver, Status}};
 	/// # let mut model = Model::default();
 	/// # let x = model.new_int_decision(1..=3);
 	/// # let y = model.new_int_decision(1..=3);
-	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
 	/// # let x = map.get(&mut solver, x);
 	/// # let y = map.get(&mut solver, y);
 	/// let mut solutions = Vec::new();
@@ -852,12 +852,11 @@ impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 	/// Simple satisfiability solving:
 	/// ```
 	/// # use huub::{
-	/// # 	lower::InitConfig,
 	/// # 	model::Model,
 	/// # 	solver::{Solver, Status},
 	/// # };
 	/// # let mut model = Model::default();
-	/// # let (mut solver, _): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let (mut solver, _): (Solver, _) = model.lower().to_solver()?;
 	/// let status = solver.solve().satisfy();
 	/// assert_eq!(status, Status::Satisfied);
 	/// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -866,14 +865,13 @@ impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 	/// Satisfiability with callback to inspect solution:
 	/// ```
 	/// # use huub::{
-	/// # 	lower::InitConfig,
 	/// # 	model::Model,
 	/// # 	solver::{Solver, Status, Valuation},
 	/// # };
 	/// # let mut model = Model::default();
 	/// # let x = model.new_int_decision(1..=4);
 	/// # model.linear(x).ne(2).post();
-	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
 	/// # let x = map.get(&mut solver, x);
 	/// let mut value = None;
 	/// let status = solver
@@ -890,13 +888,12 @@ impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 	/// Optimization with callbacks:
 	/// ```
 	/// # use huub::{
-	/// # 	lower::InitConfig,
 	/// # 	model::Model,
 	/// # 	solver::{Solver, Status, Valuation},
 	/// # };
 	/// # let mut model = Model::default();
 	/// # let x = model.new_int_decision(1..=4);
-	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
 	/// # let x = map.get(&mut solver, x);
 	/// let (status, optimum) = solver.solve().on_solution(|_| {}).minimize(x);
 	/// assert_eq!(status, Status::Complete);
@@ -907,13 +904,12 @@ impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 	/// With assumptions for incremental solving:
 	/// ```
 	/// # use huub::{
-	/// # 	lower::InitConfig,
 	/// # 	model::Model,
 	/// # 	solver::{Solver, Status},
 	/// # };
 	/// # let mut model = Model::default();
 	/// # let b = model.new_bool_decision();
-	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
 	/// # let b = map.get(&mut solver, b);
 	/// let status = solver.solve().assuming([b]).on_failure(|_| {}).satisfy();
 	/// assert_eq!(status, Status::Satisfied);
@@ -923,13 +919,12 @@ impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 	/// Enumerating all solutions:
 	/// ```
 	/// # use huub::{
-	/// # 	lower::InitConfig,
 	/// # 	model::Model,
 	/// # 	solver::{Solver, Status, Valuation},
 	/// # };
 	/// # let mut model = Model::default();
 	/// # let x = model.new_int_decision(1..=3);
-	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
 	/// # let x = map.get(&mut solver, x);
 	/// let mut count = 0;
 	/// let status = solver

@@ -843,7 +843,7 @@ mod tests {
 	use itertools::Itertools;
 	use tracing_test::traced_test;
 
-	use crate::{lower::InitConfig, model::Model};
+	use crate::model::Model;
 
 	#[test]
 	#[traced_test]
@@ -864,7 +864,7 @@ mod tests {
 			.strict(true)
 			.post();
 
-		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
+		let (mut slv, map) = prb.lower().to_solver().unwrap();
 		let vars = vec![x1, y1, x2, y2]
 			.into_iter()
 			.map(|x| map.get(&mut slv, x))
@@ -901,7 +901,7 @@ mod tests {
 			.strict(false)
 			.post();
 
-		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
+		let (mut slv, map) = prb.lower().to_solver().unwrap();
 		let vars = vec![x1, y1, x2, y2]
 			.into_iter()
 			.map(|x| map.get(&mut slv, x))
@@ -940,7 +940,7 @@ mod tests {
 			.strict(true)
 			.post();
 
-		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
+		let (mut slv, map) = prb.lower().to_solver().unwrap();
 		let vars = vec![x1, y1, z1, x2, y2, z2]
 			.into_iter()
 			.map(|v| map.get(&mut slv, v))

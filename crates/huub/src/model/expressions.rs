@@ -187,7 +187,6 @@ impl Model {
 	///
 	/// ```
 	/// # use huub::{
-	/// # 	lower::InitConfig,
 	/// # 	model::Model,
 	/// # 	solver::{Solver, Status, Valuation},
 	/// # };
@@ -196,7 +195,7 @@ impl Model {
 	/// let y = model.new_int_decision(0..=10);
 	///
 	/// model.linear(x * 2 + y).eq(7).post();
-	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
 	/// # let x = map.get(&mut solver, x);
 	/// # let y = map.get(&mut solver, y);
 	/// # let status = solver
@@ -440,7 +439,6 @@ impl Model {
 	///
 	/// ```
 	/// # use huub::{
-	/// # 	lower::InitConfig,
 	/// # 	model::Model,
 	/// # 	solver::{Solver, Status, Valuation},
 	/// # };
@@ -448,7 +446,7 @@ impl Model {
 	/// let x = model.new_int_decisions(3, 1..=3);
 	/// # let x_clone = x.clone();
 	/// model.unique(x).post();
-	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
 	/// # let &[x, y, z] = x_clone
 	/// # 	.into_iter()
 	/// # 	.map(|var| map.get(&mut solver, var))
@@ -748,7 +746,6 @@ impl<'a, S: model_linear_builder::State> ModelLinearBuilder<'a, S> {
 	///
 	/// ```
 	/// # use huub::{
-	/// # 	lower::InitConfig,
 	/// # 	model::Model,
 	/// # 	solver::{Solver, Status, Valuation},
 	/// # };
@@ -759,7 +756,7 @@ impl<'a, S: model_linear_builder::State> ModelLinearBuilder<'a, S> {
 	/// let at_least_three = model.linear(x - y).ge(3).reify();
 	///
 	/// # model.proposition(at_least_three).post();
-	/// # let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// # let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
 	/// # let x = map.get(&mut solver, x);
 	/// # let at_least_three = map.get(&mut solver, at_least_three);
 	/// # let status = solver

@@ -17,7 +17,7 @@ use flatzinc_serde::{
 	NamedRef, Type, Variable, helpers::ArcKey,
 };
 use itertools::Itertools;
-use pindakaas::{propositional_logic::Formula, solver::propagation::ExternalPropagation};
+use pindakaas::propositional_logic::Formula;
 use rangelist::IntervalIterator;
 use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::warn;
@@ -28,7 +28,7 @@ use crate::{
 		BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions,
 		PropagationActions,
 	},
-	lower::{InitConfig, LoweringError},
+	lower::{Lowerer, LowererComplete, LoweringError},
 	model::{
 		Model,
 		deserialize::{AnyView, Branching, Goal},
@@ -36,7 +36,7 @@ use crate::{
 		view::{View, boolean::BoolView},
 	},
 	solver::{
-		self, Solver,
+		self,
 		branchers::{ValueSelection, VariableSelection},
 	},
 };
@@ -212,7 +212,7 @@ pub enum ConstraintIdent {
 }
 
 /// Errors that can occur when converting a [`FlatZinc`] instance to a [`Model`]
-/// or [`Solver`] object.
+/// or [`Solver`](crate::solver::Solver) object.
 #[derive(Debug)]
 pub enum FlatZincError {
 	/// FlatZinc instance contained a decision variable with an unsupported
@@ -240,8 +240,17 @@ pub enum FlatZincError {
 		found: String,
 	},
 	/// Error that occurred when constructing the [`Model`] object or
-	/// translating it to a [`Solver`] object.
+	/// translating it to a [`Solver`](crate::solver::Solver) object.
 	ReformulationError(LoweringError),
+}
+
+#[derive(Clone, Debug)]
+/// Intermediate data structure used during the lowering of a FlatZinc instance.
+pub struct FlatZincLowerData {
+	/// Metadata produced when building the model from the FlatZinc instance.
+	pub(crate) meta: FlatZincModelMeta,
+	/// The [`Model`] instance created from the FlatZinc instance.
+	pub(crate) model: Model,
 }
 
 /// Metadata produced when building a model from a FlatZinc instance.
@@ -313,6 +322,31 @@ pub(crate) struct FznModelBuilder<'a> {
 	processed: Vec<bool>,
 	/// Statistics about the extraction process
 	stats: FlatZincStatistics,
+}
+
+/// Trait that extends [`FlatZinc`] with Huub-specific functionality.
+///
+/// This trait provides the [`lower()`](HuubFlatZinc::lower) method, which is
+/// the recommended way to convert a FlatZinc instance into a Huub [`Model`] or
+/// [`Solver`](crate::solver::Solver).
+///
+/// ```rust,ignore
+/// use huub::model::deserialize::flatzinc::HuubFlatZinc;
+///
+/// // Lower to a model
+/// let (model, meta) = fzn.lower().to_model()?;
+///
+/// // Lower to a solver with custom configuration
+/// let (solver, meta) = fzn.lower()
+///     .preprocessing(2)
+///     .to_solver()?;
+/// ```
+pub trait HuubFlatZinc {
+	/// Returns a builder that can be used to lower the [`FlatZinc`] instance
+	/// to a [`Model`] (via [`to_model()`](Lowerer::to_model)) or directly to
+	/// a [`Solver`](crate::solver::Solver) (via
+	/// [`to_solver()`](Lowerer::to_solver)).
+	fn lower(&self) -> Lowerer<Result<FlatZincLowerData, FlatZincError>>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -521,6 +555,24 @@ impl TryFrom<&str> for ConstraintIdent {
 			"set_in_reif" => Ok(Self::SetInReif),
 			_ => Err(()),
 		}
+	}
+}
+
+impl HuubFlatZinc for FlatZinc<FznIdent> {
+	fn lower(&self) -> Lowerer<Result<FlatZincLowerData, FlatZincError>> {
+		let deserialize_model = |fzn: &FlatZinc<FznIdent>| {
+			let mut builder = FznModelBuilder::new(fzn);
+			builder.unify_variables()?;
+			builder.extract_views()?;
+			builder.post_constraints()?;
+			builder.ensure_output()?;
+
+			builder.finalize()
+		};
+
+		LowererComplete::builder_internal(
+			deserialize_model(self).map(|(model, meta)| FlatZincLowerData { meta, model }),
+		)
 	}
 }
 
@@ -2352,54 +2404,6 @@ impl Display for KnownIdent {
 			Self::Annotation(ident) => Display::fmt(ident, f),
 			Self::Constraint(ident) => Display::fmt(ident, f),
 		}
-	}
-}
-
-impl Model {
-	/// Create a new [`Model`] instance from a [`FlatZinc`] instance.
-	pub fn from_fzn(fzn: &FlatZinc<FznIdent>) -> Result<(Self, FlatZincModelMeta), FlatZincError> {
-		let mut builder = FznModelBuilder::new(fzn);
-		builder.unify_variables()?;
-		builder.extract_views()?;
-		builder.post_constraints()?;
-		builder.ensure_output()?;
-
-		builder.finalize()
-	}
-}
-
-impl<Sat: ExternalPropagation> Solver<Sat> {
-	/// Create a new [`Solver`] instance from a [`FlatZinc`] instance.
-	pub fn from_fzn(
-		fzn: &FlatZinc<FznIdent>,
-		config: &InitConfig,
-	) -> Result<(Self, FlatZincSolverMeta), FlatZincError>
-	where
-		Solver<Sat>: Default,
-		Sat: 'static,
-	{
-		let (mut prb, meta) = Model::from_fzn(fzn)?;
-		let (mut slv, map) = prb.to_solver(config)?;
-		if let Some(branching) = meta.branching {
-			branching.to_solver(&mut slv, &map);
-		}
-		let names = meta
-			.names
-			.into_iter()
-			.map(|(k, v)| (k, map.get_any(&mut slv, v)))
-			.collect();
-		let goal = meta.goal.map(|g| match g {
-			Goal::Minimize(v) => Goal::Minimize(map.get(&mut slv, v)),
-			Goal::Maximize(v) => Goal::Maximize(map.get(&mut slv, v)),
-		});
-		Ok((
-			slv,
-			FlatZincSolverMeta {
-				names,
-				stats: meta.stats,
-				goal,
-			},
-		))
 	}
 }
 

@@ -133,7 +133,7 @@ mod tests {
 	use itertools::Itertools;
 	use tracing_test::traced_test;
 
-	use crate::{lower::InitConfig, model::Model};
+	use crate::model::Model;
 
 	#[test]
 	#[traced_test]
@@ -146,7 +146,7 @@ mod tests {
 
 		prb.maximum(vec![a, b, c]).result(y).post();
 
-		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
+		let (mut slv, map) = prb.lower().to_solver().unwrap();
 		let vars = vec![a, b, c, y]
 			.into_iter()
 			.map(|x| map.get(&mut slv, x))
@@ -187,7 +187,7 @@ mod tests {
 		let y = prb.new_int_decision(3..=4);
 
 		prb.minimum(vec![a, b, c]).result(y).post();
-		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
+		let (mut slv, map) = prb.lower().to_solver().unwrap();
 		let vars = vec![a, b, c, y]
 			.into_iter()
 			.map(|x| map.get(&mut slv, x))

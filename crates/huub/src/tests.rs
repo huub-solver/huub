@@ -12,7 +12,7 @@ use tracing_test::traced_test;
 use crate::{
 	IntSet, IntVal,
 	constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
-	lower::{InitConfig, LoweringError},
+	lower::LoweringError,
 	model::{Model, deserialize::AnyView as ModelView},
 	solver::{
 		AnyView as SolverView, Solver, Status, Valuation, Value,
@@ -32,7 +32,7 @@ fn it_works() {
 	prb.proposition(Formula::Or(vec![a.into(), b.into()]))
 		.post();
 
-	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+	let (mut slv, map): (Solver, _) = prb.lower().to_solver().unwrap();
 	let a = map.get(&mut slv, a);
 	let b = map.get(&mut slv, b);
 
@@ -194,7 +194,7 @@ fn test_unify_int_impossible() {
 
 	prb.linear(a * 2).eq(b * 5).post();
 
-	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+	let (mut slv, map): (Solver, _) = prb.lower().to_solver().unwrap();
 	let a = map.get(&mut slv, a);
 	let b = map.get(&mut slv, b);
 
@@ -217,7 +217,7 @@ fn test_unify_int_lin_view_domains() {
 
 	prb.linear(a * 6).eq(b * 2).post();
 
-	let (mut slv, map): (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+	let (mut slv, map): (Solver, _) = prb.lower().to_solver().unwrap();
 	let a = map.get(&mut slv, a);
 	let b = map.get(&mut slv, b);
 	let vars = vec![a, b];
@@ -321,7 +321,7 @@ fn test_unify_int_view_for_bool_6() {
 
 impl Model {
 	pub(crate) fn assert_unsatisfiable(&mut self) {
-		let err: Result<(Solver, _), _> = self.to_solver(&InitConfig::default());
+		let err: Result<(Solver, _), _> = self.lower().to_solver();
 		assert!(
 			matches!(err, Err(LoweringError::Simplification(_))),
 			"expected unsatisfiable"
@@ -333,7 +333,7 @@ impl Model {
 		vars: &[V],
 		expected: Expect,
 	) {
-		let (mut slv, map) = self.to_solver(&InitConfig::default()).unwrap();
+		let (mut slv, map) = self.lower().to_solver().unwrap();
 		let vars = vars
 			.iter()
 			.map(|v| map.get_any(&mut slv, v.clone().into()))

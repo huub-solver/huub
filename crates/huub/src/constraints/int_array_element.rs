@@ -471,7 +471,6 @@ mod tests {
 		IntSet,
 		actions::{IntInspectionActions, IntPropagationActions},
 		constraints::int_array_element::IntArrayElementBounds,
-		lower::InitConfig,
 		model::Model,
 		solver::{
 			Solver,
@@ -493,7 +492,7 @@ mod tests {
 			.result(result)
 			.post();
 		index.remove_val(&mut prb, 2, []).unwrap();
-		let _: (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+		let _: (Solver, _) = prb.lower().to_solver().unwrap();
 
 		assert_eq!(index.domain(&prb), (0..=1).into());
 		assert_eq!(result.bounds(&prb), (1, 3));
@@ -513,7 +512,7 @@ mod tests {
 			.result(result)
 			.post();
 		index.remove_val(&mut prb, 0, []).unwrap();
-		let _: (Solver, _) = prb.to_solver(&InitConfig::default()).unwrap();
+		let _: (Solver, _) = prb.lower().to_solver().unwrap();
 
 		assert_eq!(index.domain(&prb), (1..=2).into());
 		assert_eq!(result.bounds(&prb), (3, 4));

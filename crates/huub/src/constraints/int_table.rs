@@ -170,7 +170,7 @@ mod tests {
 	use expect_test::expect;
 	use itertools::Itertools;
 
-	use crate::{lower::InitConfig, model::Model};
+	use crate::model::Model;
 
 	#[test]
 	fn test_binary_table_sat() {
@@ -195,7 +195,7 @@ mod tests {
 			.values(table.clone())
 			.post();
 
-		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
+		let (mut slv, map) = prb.lower().to_solver().unwrap();
 		let vars = vars.into_iter().map(|x| map.get(&mut slv, x)).collect_vec();
 		slv.expect_solutions(
 			&vars,
@@ -244,7 +244,7 @@ mod tests {
 			.values(table.clone())
 			.post();
 
-		let (mut slv, map) = prb.to_solver(&InitConfig::default()).unwrap();
+		let (mut slv, map) = prb.lower().to_solver().unwrap();
 		let vars = vars.into_iter().map(|x| map.get(&mut slv, x)).collect_vec();
 		slv.expect_solutions(
 			&vars,

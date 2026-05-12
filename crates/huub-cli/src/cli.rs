@@ -15,7 +15,7 @@ use clap::{
 	ArgAction, ColorChoice, Parser, ValueEnum,
 	builder::{BoolishValueParser, StyledStr, styling::Styles},
 };
-use huub::lower::InitConfig;
+use huub::lower::Lowerer;
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
 
 /// Long description for the command-line interface.
@@ -109,11 +109,11 @@ pub struct Cli<'a> {
 	pub(crate) color: ColorChoice,
 
 	/// Maximum domain size for eagerly creating order literals.
-	#[arg(long, value_name = "usize", default_value_t = InitConfig::default().int_eager_limit(), help_heading = CLI_SECTION_INIT)]
+	#[arg(long, value_name = "usize", default_value_t = Lowerer::DEFAULT_INT_EAGER_LIMIT, help_heading = CLI_SECTION_INIT)]
 	pub(crate) int_eager_limit: usize,
 
 	/// Control whether the solver may restart, overwritten by `-f`.
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = InitConfig::default().restart(), help_heading = CLI_SECTION_SEARCH)]
+	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_RESTART, help_heading = CLI_SECTION_SEARCH)]
 	pub(crate) restart: bool,
 	/// Set the overarching search strategy used by the solver, overwritten by
 	/// `-f`.
@@ -134,34 +134,34 @@ pub struct Cli<'a> {
 	pub(crate) search_interval: u64,
 
 	/// Control globally blocked clause elimination (conditioning).
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = InitConfig::default().conditioning(), help_heading = CLI_SECTION_PROCESSING)]
+	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_CONDITIONING, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) conditioning: bool,
 	/// Control SAT inprocessing during search.
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = InitConfig::default().inprocessing(), help_heading = CLI_SECTION_PROCESSING)]
+	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_INPROCESSING, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) inprocessing: bool,
 	/// Run the given number of SAT preprocessing rounds before search.
 	#[arg(
 		long,
 		value_name = "usize",
-		default_value_t = InitConfig::default().preprocessing(),
+		default_value_t = Lowerer::DEFAULT_PREPROCESSING,
 		help_heading = CLI_SECTION_PROCESSING
 	)]
 	pub(crate) preprocessing: usize,
 	/// Control failed-literal probing in the SAT solver.
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = InitConfig::default().probing(), help_heading = CLI_SECTION_PROCESSING)]
+	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_PROBING, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) probing: bool,
 	/// Request explanation clauses for all literals propagated at the conflict
 	/// level.
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = InitConfig::default().reason_eager(), help_heading = CLI_SECTION_PROCESSING)]
+	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_REASON_EAGER, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) reason_eager: bool,
 	/// Control global forward subsumption in the SAT solver.
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = InitConfig::default().subsumption(), help_heading = CLI_SECTION_PROCESSING)]
+	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_SUBSUMPTION, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) subsumption: bool,
 	/// Control bounded variable elimination in the SAT solver.
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = InitConfig::default().variable_elimination(), help_heading = CLI_SECTION_PROCESSING)]
+	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_VARIABLE_ELIMINATION, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) variable_elimination: bool,
 	/// Control clause vivification.
-	#[arg(long = "vivify", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = InitConfig::default().vivification(), help_heading = CLI_SECTION_PROCESSING)]
+	#[arg(long = "vivify", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_VIVIFICATION, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) vivification: bool,
 
 	// --- API options, not set through CLI ---
@@ -241,24 +241,6 @@ fn parse_time_limit(s: &str) -> Result<Duration, humantime::DurationError> {
 }
 
 impl<'a> Cli<'a> {
-	/// Build the solver initialization configuration from the CLI arguments.
-	pub(crate) fn init_config(&self) -> InitConfig {
-		let mut config = InitConfig::default();
-		config = config
-			.with_int_eager_limit(self.int_eager_limit)
-			.with_preprocessing(self.preprocessing)
-			.with_conditioning(self.conditioning)
-			.with_inprocessing(self.inprocessing)
-			.with_probing(self.probing)
-			.with_reason_eager(self.reason_eager)
-			.with_restart(self.free_search || self.restart)
-			.with_subsumption(self.subsumption)
-			.with_variable_elimination(self.variable_elimination)
-			.with_vivification(self.vivification);
-
-		config
-	}
-
 	/// Collect the active tracing targets after applying user overrides.
 	pub(crate) fn trace_targets(&self) -> Vec<String> {
 		let mut trace_targets = vec!["solver".to_owned(), "flatzinc".to_owned()];
@@ -396,7 +378,7 @@ mod tests {
 	use std::{path::PathBuf, time::Duration};
 
 	use clap::ColorChoice;
-	use huub::lower::InitConfig;
+	use huub::lower::Lowerer;
 
 	use crate::cli::Cli;
 
@@ -487,19 +469,19 @@ mod tests {
 	fn solver_backed_defaults() {
 		let cli = Cli::try_parse_from(["huub", "instance.fzn.json"]).unwrap();
 
-		assert_eq!(cli.int_eager_limit, InitConfig::default().int_eager_limit());
-		assert_eq!(cli.restart, InitConfig::default().restart());
-		assert_eq!(cli.conditioning, InitConfig::default().conditioning());
-		assert_eq!(cli.inprocessing, InitConfig::default().inprocessing());
-		assert_eq!(cli.preprocessing, InitConfig::default().preprocessing());
-		assert_eq!(cli.probing, InitConfig::default().probing());
-		assert_eq!(cli.reason_eager, InitConfig::default().reason_eager());
-		assert_eq!(cli.subsumption, InitConfig::default().subsumption());
+		assert_eq!(cli.int_eager_limit, Lowerer::DEFAULT_INT_EAGER_LIMIT);
+		assert_eq!(cli.restart, Lowerer::DEFAULT_RESTART);
+		assert_eq!(cli.conditioning, Lowerer::DEFAULT_CONDITIONING);
+		assert_eq!(cli.inprocessing, Lowerer::DEFAULT_INPROCESSING);
+		assert_eq!(cli.preprocessing, Lowerer::DEFAULT_PREPROCESSING);
+		assert_eq!(cli.probing, Lowerer::DEFAULT_PROBING);
+		assert_eq!(cli.reason_eager, Lowerer::DEFAULT_REASON_EAGER);
+		assert_eq!(cli.subsumption, Lowerer::DEFAULT_SUBSUMPTION);
 		assert_eq!(
 			cli.variable_elimination,
-			InitConfig::default().variable_elimination()
+			Lowerer::DEFAULT_VARIABLE_ELIMINATION
 		);
-		assert_eq!(cli.vivification, InitConfig::default().vivification());
+		assert_eq!(cli.vivification, Lowerer::DEFAULT_VIVIFICATION);
 	}
 
 	#[test]

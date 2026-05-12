@@ -6,22 +6,37 @@ use std::{
 	error::Error,
 	fmt::{self, Debug, Display},
 	marker::PhantomData,
+	num::NonZeroI32,
 };
 
+use bon::Builder;
 use itertools::Itertools;
 use pindakaas::{
-	ClauseDatabase, Lit as RawLit, Unsatisfiable, solver::propagation::ExternalPropagation,
+	ClauseDatabase, Lit as RawLit, Unsatisfiable,
+	solver::{cadical::Cadical, propagation::ExternalPropagation},
 };
 use rangelist::IntervalIterator;
 use rustc_hash::FxHashSet;
+use tracing::warn;
 
+#[cfg(feature = "flatzinc")]
+use crate::model::deserialize::{
+	Goal,
+	flatzinc::{FlatZincError, FlatZincLowerData, FlatZincModelMeta, FlatZincSolverMeta},
+};
 use crate::{
 	IntSet, IntVal,
 	actions::{
 		BoolInspectionActions, ConstructionActions, IntDecisionActions, IntInspectionActions,
 		PostingActions, ReasoningContext, ReasoningEngine, Trailed,
 	},
-	constraints::{BoxedPropagator, Conflict, ReasonBuilder},
+	constraints::{
+		BoxedPropagator, Conflict, Constraint, ReasonBuilder,
+		bool_array_element::BoolDecisionArrayElement,
+		int_array_element::{IntArrayElementBounds, IntValArrayElement},
+		int_table::IntTable,
+		int_unique::IntUnique,
+	},
 	helpers::bytes::Bytes,
 	model::{self, Model, decision::integer::Domain, resolved::Resolved},
 	solver::{
@@ -33,30 +48,63 @@ use crate::{
 	views::LinearBoolView,
 };
 
-/// Configuration object for the reformulation process of creating a [`Solver`]
-/// object from a [`Model`].
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
-pub struct InitConfig {
+/// Internal type to represent a complete [`Lowerer`] builder.
+#[derive(Builder)]
+#[builder(
+	builder_type(
+		name = Lowerer,
+		vis = "pub",
+		doc {
+			/// A builder for the lowering process, which converts a high-level
+			/// [`Model`] or a `FlatZinc` instance into a lower-level representation
+			/// (typically a [`Solver`]).
+			///
+			/// This builder allows configuring various SAT solver options and preprocessing
+			/// techniques before starting the lowering process.
+		},
+	),
+	start_fn(name = builder_internal, vis = "pub(crate)"),
+	finish_fn(name = finish_internal, vis = "")
+)]
+#[allow(
+	clippy::missing_docs_in_private_items,
+	reason = "cargo clippy triggers on origin for unknown reason"
+)]
+pub(crate) struct LowererComplete<Origin = ()> {
+	/// A origin source from which the model was created, used to define wrapper
+	/// methods for the lowering process.
+	#[builder(start_fn)]
+	origin: Origin,
 	/// Whether to enable the globally blocked clause elimination (conditioning)
+	#[builder(default = Lowerer::DEFAULT_CONDITIONING)]
 	conditioning: bool,
 	/// Whether to enable inprocessing in the SAT solver.
+	#[builder(default = Lowerer::DEFAULT_INPROCESSING)]
 	inprocessing: bool,
 	/// The maximum cardinality of the domain of an integer variable before its
 	/// order encoding is created lazily.
-	int_eager_limit: Option<usize>,
+	#[builder(default = Lowerer::DEFAULT_INT_EAGER_LIMIT)]
+	int_eager_limit: usize,
 	/// The number of preprocessing rounds in the SAT solver
-	preprocessing: Option<usize>,
+	#[builder(default = Lowerer::DEFAULT_PREPROCESSING)]
+	preprocessing: usize,
 	/// Whether to enable the failed literal probing in the SAT solver.
+	#[builder(default = Lowerer::DEFAULT_PROBING)]
 	probing: bool,
 	/// Whether to enable restarts in the SAT solver.
+	#[builder(default = Lowerer::DEFAULT_RESTART)]
 	restart: bool,
 	/// Whether to enable the global forward subsumption in the SAT solver.
+	#[builder(default = Lowerer::DEFAULT_SUBSUMPTION)]
 	subsumption: bool,
 	/// Whether to enable asking reason eagerly in the SAT solver.
+	#[builder(default = Lowerer::DEFAULT_REASON_EAGER)]
 	reason_eager: bool,
 	/// Whether to enable the bounded variable elimination in the SAT solver.
+	#[builder(default = Lowerer::DEFAULT_VARIABLE_ELIMINATION)]
 	variable_elimination: bool,
 	/// Whether to enable the vivification in the SAT solver.
+	#[builder(default = Lowerer::DEFAULT_VIVIFICATION)]
 	vivification: bool,
 }
 
@@ -189,133 +237,244 @@ pub(crate) struct LoweringMapBuilder {
 	pub(crate) int_map: Vec<Option<solver::View<IntVal>>>,
 }
 
-impl InitConfig {
-	/// The default maximum cardinality of the domain of an integer variable
-	/// before its order encoding is created lazily.
+impl Lowerer {
+	/// The default value when [`conditioning`](Lowerer::conditioning) is not
+	/// explicitly set.
+	pub const DEFAULT_CONDITIONING: bool = false;
+	/// The default value when [`inprocessing`](Lowerer::inprocessing) is not
+	/// explicitly set.
+	pub const DEFAULT_INPROCESSING: bool = false;
+	/// The default value when [`int_eager_limit`](Lowerer::int_eager_limit) is
+	/// not explicitly set.
 	pub const DEFAULT_INT_EAGER_LIMIT: usize = 255;
-
-	/// Get the default number of preprocessing rounds in the SAT solver.
+	/// The default value when [`preprocessing`](Lowerer::preprocessing) is not
+	/// explicitly set.
 	pub const DEFAULT_PREPROCESSING: usize = 0;
+	/// The default value when [`probing`](Lowerer::probing) is not explicitly
+	/// set.
+	pub const DEFAULT_PROBING: bool = false;
+	/// The default value when [`reason_eager`](Lowerer::reason_eager) is not
+	/// explicitly set.
+	pub const DEFAULT_REASON_EAGER: bool = false;
+	/// The default value when [`restart`](Lowerer::restart) is not explicitly
+	/// set.
+	pub const DEFAULT_RESTART: bool = false;
+	/// The default value when [`subsumption`](Lowerer::subsumption) is not
+	/// explicitly set.
+	pub const DEFAULT_SUBSUMPTION: bool = false;
+	/// The default value when
+	/// [`variable_elimination`](Lowerer::variable_elimination) is not
+	/// explicitly set.
+	pub const DEFAULT_VARIABLE_ELIMINATION: bool = false;
+	/// The default value when [`vivification`](Lowerer::vivification) is not
+	/// explicitly set.
+	pub const DEFAULT_VIVIFICATION: bool = false;
+}
 
-	/// Get whether to enable the globally blocked clause elimination
-	/// (conditioning) in the SAT solver.
-	pub fn conditioning(&self) -> bool {
-		self.conditioning
+impl<State: lowerer::State> Lowerer<&mut Model, State> {
+	/// Lower the [`Model`] to a [`Solver`].
+	///
+	/// This method will simplify the model, create the mapping between model
+	/// decisions and solver views, and then create the constraint data
+	/// structures within the solver.
+	pub fn to_solver<Sat>(self) -> Result<(Solver<Sat>, LoweringMap), LoweringError>
+	where
+		Solver<Sat>: Default,
+		Sat: ExternalPropagation + 'static,
+		State: lowerer::IsComplete,
+	{
+		self.finish_internal().into_solver_internal()
 	}
+}
 
-	/// Get whether to enable inprocessing in the SAT solver.
-	pub fn inprocessing(&self) -> bool {
-		self.inprocessing
+#[cfg(feature = "flatzinc")]
+impl<State: lowerer::State> Lowerer<Result<FlatZincLowerData, FlatZincError>, State> {
+	/// Lower the [`FlatZinc`](flatzinc_serde::FlatZinc) instance to a
+	/// [`Solver`].
+	///
+	/// This method will internally create a [`Model`] from the FlatZinc data
+	/// and then lower that model to a [`Solver`].
+	pub fn to_solver<Sat>(self) -> Result<(Solver<Sat>, FlatZincSolverMeta), FlatZincError>
+	where
+		Solver<Sat>: Default,
+		Sat: ExternalPropagation + 'static,
+	{
+		let complete = self.finish_internal();
+		let FlatZincLowerData { meta, mut model } = complete.origin?;
+
+		let (mut slv, map) = LowererComplete {
+			origin: &mut model,
+			conditioning: complete.conditioning,
+			inprocessing: complete.inprocessing,
+			int_eager_limit: complete.int_eager_limit,
+			preprocessing: complete.preprocessing,
+			probing: complete.probing,
+			restart: complete.restart,
+			subsumption: complete.subsumption,
+			reason_eager: complete.reason_eager,
+			variable_elimination: complete.variable_elimination,
+			vivification: complete.vivification,
+		}
+		.into_solver_internal()?;
+		if let Some(branching) = meta.branching {
+			branching.to_solver(&mut slv, &map);
+		}
+		let names = meta
+			.names
+			.into_iter()
+			.map(|(k, v)| (k, map.get_any(&mut slv, v)))
+			.collect();
+		let goal = meta.goal.map(|g| match g {
+			Goal::Minimize(v) => Goal::Minimize(map.get(&mut slv, v)),
+			Goal::Maximize(v) => Goal::Maximize(map.get(&mut slv, v)),
+		});
+		Ok((
+			slv,
+			FlatZincSolverMeta {
+				names,
+				stats: meta.stats,
+				goal,
+			},
+		))
 	}
+}
 
-	/// Get the maximum cardinality of the domain of an integer variable before
-	/// its order encoding is created lazily.
-	pub fn int_eager_limit(&self) -> usize {
-		self.int_eager_limit
-			.unwrap_or(Self::DEFAULT_INT_EAGER_LIMIT)
+#[cfg(feature = "flatzinc")]
+impl Lowerer<Result<FlatZincLowerData, FlatZincError>, lowerer::Empty> {
+	/// Lower the [`FlatZinc`](flatzinc_serde::FlatZinc) instance to a
+	/// [`Model`] with accompanying [`FlatZincModelMeta`] data.
+	pub fn to_model(self) -> Result<(Model, FlatZincModelMeta), FlatZincError> {
+		self.origin.map(|data| (data.model, data.meta))
 	}
+}
 
-	/// Get whether to enable preprocessing in the SAT solver.
-	pub fn preprocessing(&self) -> usize {
-		self.preprocessing.unwrap_or(Self::DEFAULT_PREPROCESSING)
-	}
+impl LowererComplete<&mut Model> {
+	/// Internal implementation for lowering a model to a solver.
+	fn into_solver_internal<Sat>(self) -> Result<(Solver<Sat>, LoweringMap), LoweringError>
+	where
+		Solver<Sat>: Default,
+		Sat: ExternalPropagation + 'static,
+	{
+		let LowererComplete {
+			origin: model,
+			conditioning,
+			inprocessing,
+			int_eager_limit,
+			preprocessing,
+			probing,
+			restart,
+			subsumption,
+			reason_eager,
+			variable_elimination,
+			vivification,
+		} = self;
 
-	/// Get whether to enable the failed literal probing in the SAT solver.
-	pub fn probing(&self) -> bool {
-		self.probing
-	}
+		let mut slv = Solver::<Sat>::default();
+		let any_slv: &mut dyn Any = &mut slv.sat;
+		if let Some(r) = any_slv.downcast_mut::<Cadical>() {
+			// Set the solver options for preprocessing/inprocessing
+			r.set_option("condition", conditioning as i32);
+			r.set_option("elim", variable_elimination as i32);
+			r.set_option("exteagerreasons", reason_eager as i32);
+			r.set_option("inprocessing", inprocessing as i32);
+			r.set_limit("preprocessing", preprocessing as i32);
+			r.set_option("probe", probing as i32);
+			r.set_option("subsume", subsumption as i32);
+			r.set_option("vivify", vivification as i32);
 
-	/// Get whether to enable asking for explanation clauses for all literals
-	/// propagated on the level of a conflict.
-	pub fn reason_eager(&self) -> bool {
-		self.reason_eager
-	}
+			// Set the solver options for search configurations
+			// Enable restart if the config is set to true or if there are no
+			// user search heuristics are provided
+			r.set_option("restart", restart as i32);
+		} else {
+			warn!(
+				target: "solver",
+				"ignore vivification and restart options for unknown solver"
+			);
+		}
 
-	/// Get whether to enable restarts in the SAT solver.
-	pub fn restart(&self) -> bool {
-		self.restart
-	}
+		model.propagate()?;
 
-	/// Get whether to enable the global forward subsumption in the SAT
-	/// solver.
-	pub fn subsumption(&self) -> bool {
-		self.subsumption
-	}
+		// Determine encoding types for integer variables
+		let mut int_eager_direct = FxHashSet::<Resolved<model::Decision<IntVal>>>::default();
+		let int_eager_order = FxHashSet::<Resolved<model::Decision<IntVal>>>::default();
 
-	/// Get whether to enable the bounded variable elimination in the SAT
-	/// solver.
-	pub fn variable_elimination(&self) -> bool {
-		self.variable_elimination
-	}
+		for c in model.constraints.iter().flatten() {
+			let c: &dyn Constraint<Model> = c.as_ref();
+			let c: &dyn Any = c;
+			if let Some(c) = c.downcast_ref::<BoolDecisionArrayElement>() {
+				let index = c.index.resolve_alias(model);
+				if let Some(var) = index.integer_decision() {
+					int_eager_direct.insert(var);
+				}
+			} else if let Some(c) = c.downcast_ref::<IntUnique>() {
+				for v in &c.bounds_prop.var {
+					let v = v.resolve_alias(model);
+					if let Some(var) = v.integer_decision() {
+						let Domain::Domain(dom) = &model.int_vars[var.idx()].domain else {
+							unreachable!()
+						};
+						if dom.card() <= Some(c.bounds_prop.var.len() * 100 / 80) {
+							int_eager_direct.insert(var);
+						}
+					}
+				}
+			} else if let Some(c) = c.downcast_ref::<IntArrayElementBounds<
+				model::View<IntVal>,
+				model::View<IntVal>,
+				model::View<IntVal>,
+			>>() {
+				let index = c.index.resolve_alias(model);
+				if let Some(var) = index.integer_decision() {
+					int_eager_direct.insert(var);
+				}
+			} else if let Some(c) = c.downcast_ref::<IntTable>() {
+				for &v in &c.vars {
+					let v = v.resolve_alias(model);
+					if let Some(var) = v.integer_decision() {
+						int_eager_direct.insert(var);
+					}
+				}
+			} else if let Some(c) =
+				c.downcast_ref::<IntValArrayElement<model::View<IntVal>, model::View<IntVal>>>()
+			{
+				let index = c.0.index.resolve_alias(model);
+				if let Some(var) = index.integer_decision() {
+					int_eager_direct.insert(var);
+				}
+			}
+		}
 
-	/// Get whether to enable the vivification in the SAT solver.
-	pub fn vivification(&self) -> bool {
-		self.vivification
-	}
+		// Create the mapping between model decisions and solver views.
+		let mut map_builder = LoweringMapBuilder {
+			bool_map: vec![None; model.bool_vars.len()],
+			int_eager_direct,
+			int_eager_limit,
+			int_eager_order,
+			int_map: vec![None; model.int_vars.len()],
+		};
 
-	/// Change whether to enable the globally blocked clause elimination
-	/// (conditioning) in the SAT solver.
-	pub fn with_conditioning(mut self, conditioning: bool) -> Self {
-		self.conditioning = conditioning;
-		self
-	}
+		// Ensure the creation of all integer variables.
+		for (idx, _) in model.int_vars.iter().enumerate() {
+			map_builder.get_or_create_int(model, &mut slv, model::Decision(idx as u32));
+		}
 
-	/// Change whether to enable inprocessing in the SAT solver.
-	pub fn with_inprocessing(mut self, inprocessing: bool) -> Self {
-		self.inprocessing = inprocessing;
-		self
-	}
+		// Ensure the creation of all Boolean variables.
+		for var in 1..=model.bool_vars.len() as u32 {
+			let raw = RawLit::from_raw(NonZeroI32::new(var as i32).unwrap());
+			map_builder.get_or_create_bool(model, &mut slv, model::Decision(raw).into());
+		}
 
-	/// Change the maximum cardinality of the domain of an integer variable
-	/// before its order encoding is created lazily.
-	pub fn with_int_eager_limit(mut self, limit: usize) -> Self {
-		self.int_eager_limit = Some(limit);
-		self
-	}
+		// Finalize the reformulation map (all variables must be created by now)
+		let map = map_builder.finalize();
 
-	/// Change the number of preprocessing rounds in the SAT solver.
-	pub fn with_preprocessing(mut self, preprocessing: usize) -> Self {
-		self.preprocessing = Some(preprocessing);
-		self
-	}
+		// Create constraint data structures within the solver
+		let mut ctx = LoweringContext::new(&mut slv, &map, &model.trail);
+		for c in model.constraints.iter().flatten() {
+			c.to_solver(&mut ctx)?;
+		}
 
-	/// Change whether to enable the failed literal probing in the SAT
-	/// solver.
-	pub fn with_probing(mut self, probing: bool) -> Self {
-		self.probing = probing;
-		self
-	}
-
-	/// Change whether to enable asking reason eagerly in the SAT solver.
-	pub fn with_reason_eager(mut self, reason_eager: bool) -> Self {
-		self.reason_eager = reason_eager;
-		self
-	}
-
-	/// Change whether to enable restarts in the SAT solver.
-	pub fn with_restart(mut self, restart: bool) -> Self {
-		self.restart = restart;
-		self
-	}
-
-	/// Change whether to enable the global forward subsumption in the SAT
-	/// solver.
-	pub fn with_subsumption(mut self, subsumption: bool) -> Self {
-		self.subsumption = subsumption;
-		self
-	}
-
-	/// Change whether to enable the bounded variable elimination in the SAT
-	/// solver.
-	pub fn with_variable_elimination(mut self, variable_elimination: bool) -> Self {
-		self.variable_elimination = variable_elimination;
-		self
-	}
-
-	/// Change whether to enable the vivification in the SAT solver.
-	pub fn with_vivification(mut self, vivification: bool) -> Self {
-		self.vivification = vivification;
-		self
+		Ok((slv, map))
 	}
 }
 
@@ -501,18 +660,17 @@ impl LoweringMap {
 	/// maps.
 	///
 	/// Model views belong to the modelling layer. Use this method after
-	/// [`Model::to_solver`](crate::model::Model::to_solver) to obtain the
+	/// [`Model::lower`](crate::model::Model::lower) to obtain the
 	/// corresponding solver view before querying solution values.
 	///
 	/// ```
 	/// # use huub::{
-	/// # 	lower::InitConfig,
 	/// # 	model::Model,
 	/// # 	solver::{Solver, Status, Valuation},
 	/// # };
 	/// # let mut model = Model::default();
 	/// let model_x = model.new_int_decision(1..=3);
-	/// let (mut solver, map): (Solver, _) = model.to_solver(&InitConfig::default())?;
+	/// let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
 	///
 	/// let solver_x = map.get(&mut solver, model_x);
 	/// let status = solver
