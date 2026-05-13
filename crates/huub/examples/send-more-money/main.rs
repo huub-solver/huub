@@ -26,6 +26,7 @@ macro_rules! println {
 use std::{fmt::Write, sync::Mutex};
 
 use huub::{
+	lower::LoweringError,
 	model::Model,
 	solver::{Solver, Valuation},
 };
@@ -35,7 +36,7 @@ use huub::{
 static OUTPUT: Mutex<String> = Mutex::new(String::new());
 
 /// Runs the Send More Money solver and prints the solution.
-pub fn main() {
+pub fn main() -> Result<(), LoweringError> {
 	// ANCHOR: create_model
 	let mut model = Model::default();
 
@@ -55,7 +56,7 @@ pub fn main() {
 
 	// ANCHOR: unique_constraint
 	// All variables must be different
-	model.unique(vec![s, e, n, d, m, o, r, y]).post();
+	model.unique(vec![s, e, n, d, m, o, r, y]).post()?;
 	// ANCHOR_END: unique_constraint
 
 	// ANCHOR: arithmetic_constraint
@@ -63,18 +64,12 @@ pub fn main() {
 	let send = s * 1000 + e * 100 + n * 10 + d;
 	let more = m * 1000 + o * 100 + r * 10 + e;
 	let money = m * 10000 + o * 1000 + n * 100 + e * 10 + y;
-	model.linear(send + more).eq(money).post();
+	model.linear(send + more).eq(money).post()?;
 	// ANCHOR_END: arithmetic_constraint
 
 	// ANCHOR: convert_to_solver
 	// Convert the model to a solver
-	let (mut solver, map): (Solver, _) = match model.lower().to_solver() {
-		Ok(result) => result,
-		Err(e) => {
-			eprintln!("Error initializing solver: {}", e);
-			return;
-		}
-	};
+	let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
 	// ANCHOR_END: convert_to_solver
 
 	// ANCHOR: map_variables
@@ -106,6 +101,7 @@ M={m}, O={o}, N={n}, E={e}, Y={y}
 		})
 		.satisfy();
 	// ANCHOR_END: solve_and_print
+	Ok(())
 }
 
 #[cfg(test)]
@@ -115,7 +111,7 @@ mod tests {
 	#[test]
 	fn send_more_money() {
 		// Run the solver, collecting its output in `OUTPUT`
-		main();
+		main().unwrap();
 
 		// Parse the output to extract variable values
 		let output = OUTPUT.lock().unwrap();

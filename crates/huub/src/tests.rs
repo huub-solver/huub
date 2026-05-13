@@ -12,7 +12,6 @@ use tracing_test::traced_test;
 use crate::{
 	IntSet, IntVal,
 	constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
-	lower::LoweringError,
 	model::{Model, deserialize::AnyView as ModelView},
 	solver::{
 		AnyView as SolverView, Solver, Status, Valuation, Value,
@@ -28,9 +27,11 @@ fn it_works() {
 	let b = prb.new_bool_decision();
 
 	prb.proposition(Formula::Or(vec![(!a).into(), (!b).into()]))
-		.post();
+		.post()
+		.unwrap();
 	prb.proposition(Formula::Or(vec![a.into(), b.into()]))
-		.post();
+		.post()
+		.unwrap();
 
 	let (mut slv, map): (Solver, _) = prb.lower().to_solver().unwrap();
 	let a = map.get(&mut slv, a);
@@ -175,7 +176,7 @@ fn test_require_bool_view_over_aliased_int_decision() {
 	let x = prb.new_int_decision(1..=2);
 
 	assert!(x.unify(&mut prb, a + 1).is_ok());
-	prb.proposition(Formula::Atom(x.eq(1))).post();
+	prb.proposition(Formula::Atom(x.eq(1))).post().unwrap();
 
 	let vars = [ModelView::from(a), ModelView::from(x)];
 	prb.expect_solutions(
@@ -192,7 +193,7 @@ fn test_unify_int_impossible() {
 	let a = prb.new_int_decision(1..=5);
 	let b = prb.new_int_decision(1..=2);
 
-	prb.linear(a * 2).eq(b * 5).post();
+	prb.linear(a * 2).eq(b * 5).post().unwrap();
 
 	let (mut slv, map): (Solver, _) = prb.lower().to_solver().unwrap();
 	let a = map.get(&mut slv, a);
@@ -215,7 +216,7 @@ fn test_unify_int_lin_view_domains() {
 	let a = prb.new_int_decision(IntSet::from_iter([1..=1, 3..=3, 5..=5]));
 	let b = prb.new_int_decision(IntSet::from(1..=3));
 
-	prb.linear(a * 6).eq(b * 2).post();
+	prb.linear(a * 6).eq(b * 2).post().unwrap();
 
 	let (mut slv, map): (Solver, _) = prb.lower().to_solver().unwrap();
 	let a = map.get(&mut slv, a);
@@ -238,7 +239,7 @@ fn test_unify_int_view_for_bool_1() {
 	let a = prb.new_bool_decision();
 	let b = prb.new_bool_decision();
 
-	prb.linear(a * 2).eq(b * 2).post();
+	prb.linear(a * 2).eq(b * 2).post().unwrap();
 
 	prb.expect_solutions(
 		&[a, b],
@@ -254,7 +255,7 @@ fn test_unify_int_view_for_bool_2() {
 	let a = prb.new_bool_decision();
 	let b = prb.new_bool_decision();
 
-	prb.linear(a * -2).eq(b * -3).post();
+	prb.linear(a * -2).eq(b * -3).post().unwrap();
 
 	prb.expect_solutions(
 		&[a, b],
@@ -269,7 +270,7 @@ fn test_unify_int_view_for_bool_3() {
 	let a = prb.new_bool_decision();
 	let b = prb.new_bool_decision();
 
-	prb.linear(a * -2).eq(b * 3).post();
+	prb.linear(a * -2).eq(b * 3).post().unwrap();
 
 	prb.expect_solutions(
 		&[a, b],
@@ -284,7 +285,7 @@ fn test_unify_int_view_for_bool_4() {
 	let a = prb.new_bool_decision();
 	let b = prb.new_bool_decision();
 
-	prb.linear(a * 2 + b * 3).eq(0).post();
+	prb.linear(a * 2 + b * 3).eq(0).post().unwrap();
 
 	prb.expect_solutions(
 		&[a, b],
@@ -299,7 +300,7 @@ fn test_unify_int_view_for_bool_5() {
 	let a = prb.new_bool_decision();
 	let b = prb.new_bool_decision();
 
-	prb.linear(a * 2).eq(b * 3).post();
+	prb.linear(a * 2).eq(b * 3).post().unwrap();
 
 	prb.expect_solutions(
 		&[a, b],
@@ -314,20 +315,10 @@ fn test_unify_int_view_for_bool_6() {
 	let a = prb.new_bool_decision();
 	let b = prb.new_bool_decision();
 
-	prb.linear(a * 2 + 2).eq(b * 3).post();
-
-	prb.assert_unsatisfiable();
+	assert!(prb.linear(a * 2 + 2).eq(b * 3).post().is_err());
 }
 
 impl Model {
-	pub(crate) fn assert_unsatisfiable(&mut self) {
-		let err: Result<(Solver, _), _> = self.lower().to_solver();
-		assert!(
-			matches!(err, Err(LoweringError::Simplification(_))),
-			"expected unsatisfiable"
-		);
-	}
-
 	pub(crate) fn expect_solutions<V: Into<ModelView> + Clone>(
 		mut self,
 		vars: &[V],

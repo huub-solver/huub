@@ -35,7 +35,7 @@ use crate::{
 		SimplificationStatus,
 	},
 	helpers::bytes::Bytes,
-	lower::{Lowerer, LowererComplete, LoweringError},
+	lower::{Lowerer, LowererComplete},
 	model::{
 		decision::{boolean::BoolDecision, integer::IntDecision},
 		initilization_context::ModelInitContext,
@@ -186,6 +186,28 @@ impl ConRef {
 }
 
 impl Model {
+	/// Notify a single boolean advisor or propagator.
+	fn advise_of_bool_change(&mut self, con: ConRef, data: u64) -> bool {
+		if let Some(mut c) = self.constraints[con.index()].take() {
+			let ret = c.advise_of_bool_change(self, data);
+			self.constraints[con.index()] = Some(c);
+			ret
+		} else {
+			false
+		}
+	}
+
+	/// Notify a single integer advisor or propagator.
+	fn advise_of_int_change(&mut self, con: ConRef, data: u64, event: IntEvent) -> bool {
+		if let Some(mut c) = self.constraints[con.index()].take() {
+			let ret = c.advise_of_int_change(self, data, event);
+			self.constraints[con.index()] = Some(c);
+			ret
+		} else {
+			false
+		}
+	}
+
 	/// Create a [`ReasoningEngine::Conflict`] instance based on the failure to
 	/// set `subject`, that must be set because of `reason`.
 	fn create_conflict(
@@ -204,6 +226,30 @@ impl Model {
 			},
 			Err(false) => unreachable!("invalid reason"),
 		}
+	}
+
+	/// Initialize a constraint and register its subscriptions without
+	/// propagating it yet.
+	///
+	/// This is used by [`Model::post_constraint`] and by internal rewriting
+	/// paths that need to add a constraint before deciding whether to
+	/// propagate it immediately.
+	fn initialize_constraint<C: Constraint<Self>>(&mut self, constraint: C) -> (ConRef, bool) {
+		let con = ConRef::new(self.constraints.len());
+		let mut ctx = ModelInitContext::new(self, con);
+		let mut constraint = constraint;
+		constraint.initialize(&mut ctx);
+		let priority = ctx.priority;
+		let enqueue = ctx.enqueue();
+		self.constraints.push(Some(Box::new(constraint)));
+		let r = ConRef::new(self.constraints.len() - 1);
+		debug_assert_eq!(r, con);
+		self.propagator_queue.info.push(PropagatorInfo {
+			enqueued: false,
+			priority,
+		});
+		debug_assert_eq!(r.index(), self.propagator_queue.info.len() - 1);
+		(con, enqueue)
 	}
 
 	/// Returns a builder that can be used to lower the [`Model`] to a
@@ -291,126 +337,120 @@ impl Model {
 			.collect()
 	}
 
-	/// Notify all advisors of changes.
+	/// Notify propagators of the changes that happened since the last call to
+	/// this method.
 	pub(crate) fn notify_advisors(&mut self) {
-		// Notify propagators about all events that occurred
-		let advise_of_int_change = |model: &mut Model, con: ConRef, data: u64, event| {
-			if let Some(mut c) = model.constraints[con.index()].take() {
-				let ret = c.advise_of_int_change(model, data, event);
-				model.constraints[con.index()] = Some(c);
-				ret
-			} else {
-				false
-			}
-		};
-		let advise_of_bool_change = |model: &mut Model, con: ConRef, data: u64| {
-			if let Some(mut c) = model.constraints[con.index()].take() {
-				let ret = c.advise_of_bool_change(model, data);
-				model.constraints[con.index()] = Some(c);
-				ret
-			} else {
-				false
-			}
-		};
 		let mut int_events = mem::take(&mut self.int_events);
 		for (i, event) in int_events.drain() {
-			let constraints = mem::take(&mut self.int_vars[i as usize].constraints);
-			let iv = Decision(i);
-			constraints.for_each_activated_by(event, |act| match act {
+			self.notify_int_event(i, event);
+		}
+		self.int_events = int_events;
+		let mut bool_events = mem::take(&mut self.bool_events);
+		for bv in bool_events.drain(..) {
+			self.notify_bool_event(bv);
+		}
+		self.bool_events = bool_events;
+	}
+
+	/// Notify the propagators interested in a single boolean event.
+	pub(crate) fn notify_bool_event(&mut self, bv: Decision<bool>) {
+		debug_assert!(!bv.is_negated());
+		for &act in self.bool_vars[bv.idx()].constraints.clone().iter() {
+			match act.into() {
 				ActivationAction::Advise::<AdvRef, _>(adv) => {
 					let x: &Advisor = &self.advisors[adv.index()];
 					let Advisor {
 						con,
 						data,
-						negated,
 						bool2int,
-						condition,
+						..
 					} = x.clone();
-					let event = match event {
-						IntEvent::LowerBound if negated => IntEvent::UpperBound,
-						IntEvent::UpperBound if negated => IntEvent::LowerBound,
-						_ => event,
-					};
-					let enqueue = if let Some(cond) = condition {
-						let triggered = match cond {
-							IntLitMeaning::Eq(_) | IntLitMeaning::NotEq(_) => {
-								iv.val(self).is_some()
-							}
-							IntLitMeaning::GreaterEq(v) | IntLitMeaning::Less(v) => {
-								let (min, max) = iv.bounds(self);
-								v <= min || v > max
-							}
-						};
-						if triggered {
-							if bool2int {
-								advise_of_int_change(self, con, data, IntEvent::Fixed)
-							} else {
-								advise_of_bool_change(self, con, data)
-							}
-						} else {
-							false
-						}
+					let enqueue = if bool2int {
+						self.advise_of_int_change(con, data, IntEvent::Fixed)
 					} else {
-						advise_of_int_change(self, con, data, event)
+						self.advise_of_bool_change(con, data)
 					};
 					if enqueue {
 						self.propagator_queue.enqueue_propagator(con.raw());
 					}
 				}
-				ActivationAction::Enqueue(c) => self.propagator_queue.enqueue_propagator(c.raw()),
-			});
-			self.int_vars[i as usize].constraints = constraints;
-		}
-		self.int_events = int_events;
-		let mut bool_events = mem::take(&mut self.bool_events);
-		for bv in bool_events.drain(..) {
-			debug_assert!(!bv.is_negated());
-			for &act in self.bool_vars[bv.idx()].constraints.clone().iter() {
-				match act.into() {
-					ActivationAction::Advise::<AdvRef, _>(adv) => {
-						let x: &Advisor = &self.advisors[adv.index()];
-						let Advisor {
-							con,
-							data,
-							bool2int,
-							..
-						} = x.clone();
-						let enqueue = if bool2int {
-							advise_of_int_change(self, con, data, IntEvent::Fixed)
-						} else {
-							advise_of_bool_change(self, con, data)
-						};
-						if enqueue {
-							self.propagator_queue.enqueue_propagator(con.raw());
-						}
-					}
-					ActivationAction::Enqueue(c) => {
-						self.propagator_queue.enqueue_propagator(c.raw());
-					}
+				ActivationAction::Enqueue(c) => {
+					self.propagator_queue.enqueue_propagator(c.raw());
 				}
 			}
 		}
-		self.bool_events = bool_events;
+	}
+
+	/// Notify the propagators interested in a single integer event.
+	pub(crate) fn notify_int_event(&mut self, i: u32, event: IntEvent) {
+		let constraints = mem::take(&mut self.int_vars[i as usize].constraints);
+		let iv = Decision(i);
+		constraints.for_each_activated_by(event, |act| match act {
+			ActivationAction::Advise::<AdvRef, _>(adv) => {
+				let x: &Advisor = &self.advisors[adv.index()];
+				let Advisor {
+					con,
+					data,
+					negated,
+					bool2int,
+					condition,
+				} = x.clone();
+				let event = match event {
+					IntEvent::LowerBound if negated => IntEvent::UpperBound,
+					IntEvent::UpperBound if negated => IntEvent::LowerBound,
+					_ => event,
+				};
+				let enqueue = if let Some(cond) = condition {
+					let triggered = match cond {
+						IntLitMeaning::Eq(_) | IntLitMeaning::NotEq(_) => iv.val(self).is_some(),
+						IntLitMeaning::GreaterEq(v) | IntLitMeaning::Less(v) => {
+							let (min, max) = iv.bounds(self);
+							v <= min || v > max
+						}
+					};
+					if triggered {
+						if bool2int {
+							self.advise_of_int_change(con, data, IntEvent::Fixed)
+						} else {
+							self.advise_of_bool_change(con, data)
+						}
+					} else {
+						false
+					}
+				} else {
+					self.advise_of_int_change(con, data, event)
+				};
+				if enqueue {
+					self.propagator_queue.enqueue_propagator(con.raw());
+				}
+			}
+			ActivationAction::Enqueue(c) => self.propagator_queue.enqueue_propagator(c.raw()),
+		});
+		self.int_vars[i as usize].constraints = constraints;
 	}
 
 	/// Post a constraint to the model.
 	///
 	/// The constraint is added to the model. It will be enforced during
 	/// simplification and in any subsequent solving method.
-	pub fn post_constraint<C: Constraint<Self>>(&mut self, mut constraint: C) {
-		let con = ConRef::new(self.constraints.len());
-		let mut ctx = ModelInitContext::new(self, con);
-		constraint.initialize(&mut ctx);
-		let priority = ctx.priority;
-		let enqueue = ctx.enqueue();
-		self.constraints.push(Some(Box::new(constraint)));
-		let r = ConRef::new(self.constraints.len() - 1);
-		debug_assert_eq!(r, con);
-		self.propagator_queue.info.push(PropagatorInfo {
-			enqueued: false,
-			priority,
-		});
-		debug_assert_eq!(r.index(), self.propagator_queue.info.len() - 1);
+	pub fn post_constraint<C: Constraint<Self>>(
+		&mut self,
+		constraint: C,
+	) -> Result<(), Conflict<View<bool>>> {
+		let (con, enqueue) = self.initialize_constraint(constraint);
+		if enqueue {
+			self.propagate_single(con)?;
+		}
+		Ok(())
+	}
+
+	/// Internal implementation of [`Model::post_constraint`] that does not yet
+	/// propagate.
+	///
+	/// This function is used internally by [`Model::post_constraint`] and when
+	/// rewriting constraints within the propagation loop.
+	pub(crate) fn post_constraint_internal<C: Constraint<Self>>(&mut self, constraint: C) {
+		let (con, enqueue) = self.initialize_constraint(constraint);
 		if enqueue {
 			self.propagator_queue.enqueue_propagator(con.raw());
 		}
@@ -427,7 +467,7 @@ impl Model {
 	/// process (see [`Self::lower`]). You generally only need to call this
 	/// method manually if you want to inspect the results of propagation
 	/// (e.g. decision variable domains) during the modeling process.
-	pub fn propagate(&mut self) -> Result<(), LoweringError> {
+	pub fn propagate(&mut self) -> Result<(), Conflict<View<bool>>> {
 		self.notify_advisors();
 		while let Some(con) = self.propagator_queue.pop() {
 			self.propagate_single(ConRef::from_raw(con))?;
@@ -437,7 +477,7 @@ impl Model {
 
 	/// Propagate the constraint at index `con`, updating the domains of the
 	/// variables and rewriting the constraint if necessary.
-	pub(crate) fn propagate_single(&mut self, con: ConRef) -> Result<(), LoweringError> {
+	pub(crate) fn propagate_single(&mut self, con: ConRef) -> Result<(), Conflict<View<bool>>> {
 		let Some(mut con_obj) = self.constraints[con.index()].take() else {
 			return Ok(());
 		};
@@ -530,7 +570,7 @@ impl SimplificationActions for Model {
 	type Target = Model;
 
 	fn post_constraint<C: Constraint<Model>>(&mut self, constraint: C) {
-		self.post_constraint(constraint);
+		self.post_constraint_internal(constraint);
 	}
 }
 
@@ -608,7 +648,7 @@ mod tests {
 			bool_check,
 			int_check,
 		};
-		prb.post_constraint(t);
+		prb.post_constraint(t).unwrap();
 		i.tighten_min(&mut prb, 2, []).expect("tighten_min failed");
 		let (_, _): (Solver, _) = prb.lower().to_solver().expect("to_solver failed");
 		assert_eq!(prb.trailed(bool_check), 1);
@@ -628,7 +668,7 @@ mod tests {
 			bool_check,
 			int_check,
 		};
-		prb.post_constraint(t);
+		prb.post_constraint(t).unwrap();
 		i.tighten_min(&mut prb, 1, []).expect("tighten_min failed");
 		let (_, _): (Solver, _) = prb.lower().to_solver().expect("to_solver failed");
 		assert_eq!(prb.trailed(bool_check), 0);
@@ -648,7 +688,7 @@ mod tests {
 			bool_check,
 			int_check,
 		};
-		prb.post_constraint(t);
+		prb.post_constraint(t).unwrap();
 		i.tighten_min(&mut prb, 1, []).expect("tighten_min failed");
 		i.tighten_max(&mut prb, 2, []).expect("tighten_max failed");
 		let (mut slv, map): (Solver, _) = prb.lower().to_solver().expect("to_solver failed");

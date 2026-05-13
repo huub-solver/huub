@@ -1106,7 +1106,7 @@ mod tests {
 		let a = prb.new_int_decision(1..=2);
 		let r: View<bool> = false.into();
 
-		prb.linear(-a).le(-2).reified_by(r).post();
+		prb.linear(-a).le(-2).reified_by(r).post().unwrap();
 
 		prb.expect_solutions(&[a], expect![[r#"1"#]]);
 	}
@@ -1155,8 +1155,7 @@ mod tests {
 		let b = prb.new_int_decision(1..=2);
 		let c = prb.new_int_decision(1..=2);
 
-		prb.linear(a * 2 + b + c).ge(10).post();
-		prb.assert_unsatisfiable();
+		assert!(prb.linear(a * 2 + b + c).ge(10).post().is_err());
 	}
 
 	#[test]
@@ -1203,9 +1202,7 @@ mod tests {
 		let b = prb.new_int_decision(1..=4);
 		let c = prb.new_int_decision(1..=4);
 
-		prb.linear(a * 2 + b + c).le(3).post();
-
-		prb.assert_unsatisfiable();
+		assert!(prb.linear(a * 2 + b + c).le(3).post().is_err());
 	}
 
 	#[test]
@@ -1254,7 +1251,11 @@ mod tests {
 		let b = prb.new_int_decision(1..=2);
 		let c = prb.new_int_decision(1..=2);
 
-		prb.linear(a * 2 + b + c).ge(7).implied_by(r).post();
+		prb.linear(a * 2 + b + c)
+			.ge(7)
+			.implied_by(r)
+			.post()
+			.unwrap();
 
 		let (mut slv, map): (Solver, _) = prb.lower().to_solver().unwrap();
 		let a = map.get_any(&mut slv, a.into());
@@ -1287,7 +1288,11 @@ mod tests {
 		let b = prb.new_int_decision(1..=2);
 		let c = prb.new_int_decision(1..=2);
 
-		prb.linear(a * 2 + b + c).le(5).implied_by(r).post();
+		prb.linear(a * 2 + b + c)
+			.le(5)
+			.implied_by(r)
+			.post()
+			.unwrap();
 
 		let (mut slv, map): (Solver, _) = prb.lower().to_solver().unwrap();
 		let a = map.get_any(&mut slv, a.into());
@@ -1320,7 +1325,11 @@ mod tests {
 		let b = prb.new_int_decision(1..=2);
 		let c = prb.new_int_decision(1..=2);
 
-		prb.linear(a * 2 + b + c).ne(6).implied_by(r).post();
+		prb.linear(a * 2 + b + c)
+			.ne(6)
+			.implied_by(r)
+			.post()
+			.unwrap();
 
 		let (mut slv, map): (Solver, _) = prb.lower().to_solver().unwrap();
 		let a = map.get_any(&mut slv, a.into());

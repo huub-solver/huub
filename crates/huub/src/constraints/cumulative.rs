@@ -975,12 +975,12 @@ mod tests {
 		// completion time: 3. No compulsory part.
 		let start_time_c = prb.new_int_decision(0..=4);
 		let usages = prb.new_int_decisions(3, 1..=2);
-		prb.cumulative()
-			.start_times(vec![start_time_a, start_time_b, start_time_c])
-			.durations(vec![3, 3, 3])
-			.usages(usages.clone())
-			.capacity(2)
-			.post();
+		prb.post_constraint_internal(CumulativeTimeTable::new(
+			vec![start_time_a, start_time_b, start_time_c],
+			vec![3, 3, 3],
+			usages.clone(),
+			2,
+		));
 
 		// First propagation: The compulsory parts of Task A and B ([0, 2])
 		// require that Task C cannot overlap with them due to capacity constraints.

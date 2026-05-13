@@ -20,6 +20,7 @@ mod brancher;
 mod model;
 
 use std::{
+	error::Error,
 	fmt::{self, Display},
 	path::PathBuf,
 	sync::{
@@ -31,8 +32,8 @@ use std::{
 
 use clap::{ArgAction, Parser, ValueEnum, builder::BoolishValueParser};
 use huub::{
-	lower::Lowerer,
-	solver::{SearchStrategy, Solver, SwitchTrigger, TerminationSignal, Valuation},
+	lower::{Lowerer, LoweringError},
+	solver::{SearchStrategy, Solver, Status, SwitchTrigger, TerminationSignal, Valuation},
 };
 
 use crate::{
@@ -133,7 +134,7 @@ enum SearchTrigger {
 	Restarts,
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
 	let options = match Cli::try_parse_from(std::env::args_os()) {
 		Ok(options) => options,
 		Err(err) => {
@@ -151,12 +152,6 @@ fn main() {
 			std::process::exit(2);
 		}
 	};
-	let JobShopModel {
-		mut model,
-		start_time,
-		objective: objective_variable,
-	} = JobShopModel::new(&instance, options.objective_type);
-
 	println!(
 		"Parsed JSP instance: {} jobs, {} machines, {} operations, max time {}",
 		instance.n,
@@ -168,14 +163,26 @@ fn main() {
 	println!("Solver configurations:");
 	println!("{0}", options);
 
+	let JobShopModel {
+		mut model,
+		start_time,
+		objective: objective_variable,
+	} = match JobShopModel::new(&instance, options.objective_type) {
+		Ok(model) => model,
+		Err(LoweringError::Simplification(_)) => {
+			println!("Status: {:?}", Status::Unsatisfiable);
+			return Ok(());
+		}
+		Err(err) => return Err(err.into()),
+	};
+
 	// Configure solver initialization options.
 	let (mut slv, map): (Solver, _) = model
 		.lower()
 		.restart(options.restart)
 		.int_eager_limit(options.int_eager_limit)
 		.reason_eager(options.reason_eager)
-		.to_solver()
-		.unwrap();
+		.to_solver()?;
 
 	options
 		.branching_strategy
@@ -253,6 +260,7 @@ fn main() {
 			(Instant::now() - start).as_secs_f32()
 		);
 	}
+	Ok(())
 }
 
 /// Parses a time duration for the time limit flag.

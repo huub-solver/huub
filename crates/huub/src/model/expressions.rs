@@ -27,8 +27,9 @@ pub use crate::model::expressions::{
 };
 use crate::{
 	IntSet, IntVal,
-	actions::IntInspectionActions,
+	actions::{IntInspectionActions, IntPropagationActions, IntSimplificationActions},
 	constraints::{
+		Conflict,
 		cumulative::CumulativeTimeTable,
 		disjunctive::{Disjunctive, DisjunctivePropagator},
 		int_abs::IntAbsBounds,
@@ -57,12 +58,12 @@ impl Model {
 		&mut self,
 		#[builder(into, start_fn)] origin: View<IntVal>,
 		#[builder(into)] result: View<IntVal>,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		self.post_constraint(IntAbsBounds {
 			origin,
 			abs: result,
 			origin_positive: origin.geq(0),
-		});
+		})
 	}
 
 	/// Create constraint that enforces that the given Boolean decision variable
@@ -74,12 +75,12 @@ impl Model {
 		#[builder(start_fn, into)] collection: IntSet,
 		#[builder(into)] member: View<IntVal>,
 		#[builder(into)] result: View<bool>,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		self.post_constraint(IntSetContainsReif {
 			var: member,
 			set: collection,
 			reif: result,
-		});
+		})
 	}
 
 	/// Create a constraint that enforces that the given a list of integer
@@ -95,7 +96,7 @@ impl Model {
 		durations: Vec<impl Into<View<IntVal>>>,
 		usages: Vec<impl Into<View<IntVal>>>,
 		capacity: impl Into<View<IntVal>>,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		assert_eq!(
 			start_times.len(),
 			durations.len(),
@@ -111,7 +112,7 @@ impl Model {
 			durations.into_iter().map_into().collect(),
 			usages.into_iter().map_into().collect(),
 			capacity.into(),
-		));
+		))
 	}
 
 	/// Create a constraint that enforces that the given a list of integer
@@ -129,7 +130,7 @@ impl Model {
 		edge_finding_propagation: Option<bool>,
 		not_last_propagation: Option<bool>,
 		detectable_precedence_propagation: Option<bool>,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		assert_eq!(
 			start_times.len(),
 			durations.len(),
@@ -145,7 +146,7 @@ impl Model {
 			edge_finding_propagation,
 			not_last_propagation,
 			detectable_precedence_propagation,
-		});
+		})
 	}
 
 	/// Create a constraint that enforces that a numerator integer decision
@@ -157,12 +158,12 @@ impl Model {
 		#[builder(into, start_fn)] numerator: View<IntVal>,
 		#[builder(into, start_fn)] denominator: View<IntVal>,
 		#[builder(into)] result: View<IntVal>,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		self.post_constraint(IntDivBounds {
 			numerator,
 			denominator,
 			result,
-		});
+		})
 	}
 
 	/// Create a constraint that enforces that a result decision variable takes
@@ -174,8 +175,8 @@ impl Model {
 		#[builder(start_fn)] array: Vec<E>,
 		#[builder(getter(name = index_internal, vis = ""), into)] index: View<IntVal>,
 		result: <E as ElementConstraint>::Result,
-	) {
-		<E as ElementConstraint>::element_constraint(self, array, index, result);
+	) -> Result<(), Conflict<View<bool>>> {
+		<E as ElementConstraint>::element_constraint(self, array, index, result)
 	}
 
 	/// Create a linear equation constraint.
@@ -214,7 +215,7 @@ impl Model {
 		#[builder(setters(name = comparator_internal, vis = ""))] comparator: Comparator,
 		#[builder(setters(name = rhs_internal, vis = ""))] rhs: IntLinearExp,
 		#[builder(setters(name = reif_internal, vis = ""))] reif: Option<Reification>,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		// Subtract the RHS from the LHS to get a linear expression with a constant 0 on
 		// the RHS
 		expr -= rhs;
@@ -241,23 +242,22 @@ impl Model {
 			})
 			.collect();
 
-		let mut negate_terms = || {
-			terms.iter_mut().for_each(|v| {
-				*v = v
-					.bounding_neg(self)
-					.expect("TODO: need to defer failure to propagate");
-			});
+		let mut negate_terms = || -> Result<(), Conflict<View<bool>>> {
+			for v in &mut terms {
+				*v = v.bounding_neg(self)?;
+			}
+			Ok(())
 		};
 		let (comparator, rhs) = match comparator {
 			Comparator::Less => (LinComparator::LessEq, rhs - 1),
 			Comparator::LessEqual => (LinComparator::LessEq, rhs),
 			Comparator::Equal => (LinComparator::Equal, rhs),
 			Comparator::GreaterEqual => {
-				negate_terms();
+				negate_terms()?;
 				(LinComparator::LessEq, -rhs)
 			}
 			Comparator::Greater => {
-				negate_terms();
+				negate_terms()?;
 				(LinComparator::LessEq, -rhs - 1)
 			}
 			Comparator::NotEqual => (LinComparator::NotEqual, rhs),
@@ -269,14 +269,14 @@ impl Model {
 				rhs: rhs.into(),
 				reif,
 				comparator,
-			});
+			})
 		} else {
 			self.post_constraint(IntLinear::<OverflowImpossible> {
 				terms,
 				rhs,
 				reif,
 				comparator,
-			});
+			})
 		}
 	}
 
@@ -287,10 +287,10 @@ impl Model {
 		&mut self,
 		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
 		#[builder(into)] result: View<IntVal>,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		self.minimum(vars.into_iter().map(|v| -v))
 			.result(-result)
-			.post();
+			.post()
 	}
 
 	/// Create a constraint that enforces that an integer decision variable
@@ -300,11 +300,11 @@ impl Model {
 		&mut self,
 		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
 		#[builder(into)] result: View<IntVal>,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		self.post_constraint(IntArrayMinimumBounds {
 			vars: vars.into_iter().collect(),
 			min: result,
-		});
+		})
 	}
 
 	/// Create a constraint that enforces that the product of the two integer
@@ -315,21 +315,21 @@ impl Model {
 		#[builder(start_fn)] factor1: View<IntVal>,
 		#[builder(start_fn)] factor2: View<IntVal>,
 		result: View<IntVal>,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		if IntMulBounds::<_, _, _, View<IntVal>>::can_overflow(self, &factor1, &factor2) {
 			self.post_constraint(IntMulBounds::<OverflowPossible, _, _, _> {
 				factor1,
 				factor2,
 				product: result,
 				overflow_mode: PhantomData,
-			});
+			})
 		} else {
 			self.post_constraint(IntMulBounds::<OverflowImpossible, _, _, _> {
 				factor1,
 				factor2,
 				product: result,
 				overflow_mode: PhantomData,
-			});
+			})
 		}
 	}
 
@@ -359,13 +359,13 @@ impl Model {
 		origins: Vec<Vec<View<IntVal>>>,
 		sizes: Vec<Vec<View<IntVal>>>,
 		#[builder(default = true)] strict: bool,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		if strict {
 			let prop = IntNoOverlapSweep::<true, _, _>::new(self, origins, sizes);
-			self.post_constraint(prop);
+			self.post_constraint(prop)
 		} else {
 			let prop = IntNoOverlapSweep::<false, _, _>::new(self, origins, sizes);
-			self.post_constraint(prop);
+			self.post_constraint(prop)
 		}
 	}
 
@@ -378,21 +378,21 @@ impl Model {
 		#[builder(start_fn, into)] base: View<IntVal>,
 		#[builder(start_fn, into)] exponent: View<IntVal>,
 		#[builder(into)] result: View<IntVal>,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		if IntPowBounds::<_, _, _, View<IntVal>>::can_overflow(self, &base, &exponent) {
 			self.post_constraint(IntPowBounds::<OverflowPossible, _, _, _> {
 				base,
 				exponent,
 				result,
 				overflow_mode: PhantomData,
-			});
+			})
 		} else {
 			self.post_constraint(IntPowBounds::<OverflowImpossible, _, _, _> {
 				base,
 				exponent,
 				result,
 				overflow_mode: PhantomData,
-			});
+			})
 		}
 	}
 
@@ -403,7 +403,7 @@ impl Model {
 		&mut self,
 		#[builder(start_fn, into)] mut formula: BoolFormula,
 		#[builder(setters(name = reif_internal, vis = ""))] reif: Option<Reification>,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		match reif {
 			Some(Reification::ReifiedBy(b)) => {
 				formula = BoolFormula::Equiv(vec![BoolFormula::Atom(b), formula]);
@@ -413,7 +413,7 @@ impl Model {
 			}
 			None => {}
 		}
-		self.post_constraint(formula);
+		self.post_constraint(formula)
 	}
 
 	/// Create a `table` constraint that enforces that given list of integer
@@ -424,14 +424,14 @@ impl Model {
 		&mut self,
 		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
 		values: impl IntoIterator<Item = Vec<IntVal>>,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		let vars: Vec<_> = vars.into_iter().collect();
 		let table: Vec<_> = values.into_iter().collect();
 		assert!(
 			table.iter().all(|tup| tup.len() == vars.len()),
 			"The number of values in each row of the table must be equal to the number of decision variables."
 		);
-		self.post_constraint(IntTable { vars, table });
+		self.post_constraint(IntTable { vars, table })
 	}
 
 	/// Create a constraint that enforces that all the given integer decisions
@@ -471,14 +471,14 @@ impl Model {
 		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
 		bounds_propagation: Option<bool>,
 		value_propagation: Option<bool>,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		let vars: Vec<_> = vars.into_iter().map_into().collect();
 		self.post_constraint(IntUnique {
 			bounds_prop: IntUniqueBounds::new(vars.clone()),
 			value_prop: IntUniqueValue::new(vars),
 			bounds_propagation,
 			value_propagation,
-		});
+		})
 	}
 
 	/// Create a value precede (chain) constraint that enforces that the first
@@ -494,19 +494,19 @@ impl Model {
 		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
 		#[builder(with = |values: impl IntoIterator<Item = IntVal>| values.into_iter().collect())]
 		values: Option<Vec<IntVal>>,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		let mut offset = 0;
 		let vars: Vec<_> = vars.into_iter().collect();
 		// If there are no decision variables, then the constraint is trivially
 		// satisfied.
 		if vars.is_empty() {
-			return;
+			return Ok(());
 		}
 		if let Some(values) = values {
 			// If the list of values doesn't contain at least two values, then the
 			// constraint is trivially satisfied.
 			if values.len() <= 1 {
-				return;
+				return Ok(());
 			}
 			// If the values are not consecutive or if the largest value does not cover the
 			// full decision variable domain, then we need the general value
@@ -514,9 +514,10 @@ impl Model {
 			if !values.iter().tuple_windows().all(|(&x, &y)| x + 1 == y)
 				|| *values.last().unwrap() < vars.iter().map(|v| v.max(self)).max().unwrap()
 			{
+				vars[0].exclude(self, &values[1..].iter().map(|&v| v..=v).collect(), [])?;
+
 				let con = IntValuePrecedeChainValue::new(self, values.into_iter().collect(), vars);
-				self.post_constraint(con);
-				return;
+				return self.post_constraint(con);
 			}
 			// Otherwise this is a sequential precede chain constraint, and we can
 			// normalize it to start at 1. The `values` array might not have started
@@ -526,13 +527,16 @@ impl Model {
 
 		let vars = vars
 			.into_iter()
-			.map(|v| {
-				v.bounding_sub(self, offset)
-					.expect("TODO: need to defer failure to propagate")
-			})
-			.collect();
-		let con = IntSeqPrecedeChainBounds::new(self, vars);
-		self.post_constraint(con);
+			.map(|v| v.bounding_sub(self, offset))
+			.collect::<Result<Vec<_>, _>>()?;
+		vars[0].tighten_max(self, 1, [])?;
+		match vars.len() {
+			1 => Ok(()),
+			_ => {
+				let con = IntSeqPrecedeChainBounds::new(self, vars);
+				self.post_constraint(con)
+			}
+		}
 	}
 }
 
@@ -547,7 +551,7 @@ impl<S: model_abs_builder::State> ModelAbsBuilder<'_, S> {
 		let res = self
 			.self_receiver
 			.new_int_decision(0..=cmp::max(min.abs(), max.abs()));
-		self.result(res).post();
+		self.result(res).post().unwrap();
 		res
 	}
 }
@@ -561,7 +565,7 @@ impl<S: model_contains_builder::State> ModelContainsBuilder<'_, S> {
 		S::Result: model_contains_builder::IsUnset,
 	{
 		let res = self.self_receiver.new_bool_decision();
-		self.result(res).post();
+		self.result(res).post().unwrap();
 		res
 	}
 }
@@ -599,7 +603,7 @@ impl<S: model_div_builder::State> ModelDivBuilder<'_, S> {
 		};
 
 		let res = self.self_receiver.new_int_decision(range);
-		self.result(res).post();
+		self.result(res).post().unwrap();
 		res
 	}
 }
@@ -614,7 +618,7 @@ impl<E: ElementConstraint, S: model_element_builder::State> ModelElementBuilder<
 	{
 		let index = self.index_internal();
 		let res = E::define_result(self.self_receiver, &self.array, *index);
-		self.result(res.clone()).post();
+		self.result(res.clone()).post().unwrap();
 		res
 	}
 }
@@ -633,7 +637,8 @@ impl<'a, S: model_linear_builder::State> ModelLinearBuilder<'a, S> {
 			.new_int_decision((IntVal::MIN + 1)..=IntVal::MAX);
 		self.comparator_internal(Comparator::Equal)
 			.rhs_internal(res.into())
-			.post();
+			.post()
+			.unwrap();
 		res
 	}
 
@@ -776,7 +781,9 @@ impl<'a, S: model_linear_builder::State> ModelLinearBuilder<'a, S> {
 		S::Comparator: model_linear_builder::IsSet,
 	{
 		let res = self.self_receiver.new_bool_decision();
-		self.reif_internal(Reification::ReifiedBy(res)).post();
+		self.reif_internal(Reification::ReifiedBy(res))
+			.post()
+			.unwrap();
 		res
 	}
 }
@@ -795,7 +802,7 @@ where
 		let res = self
 			.self_receiver
 			.new_int_decision(IntVal::MIN..=IntVal::MAX);
-		self.result(res).post();
+		self.result(res).post().unwrap();
 		res
 	}
 }
@@ -814,7 +821,7 @@ where
 		let res = self
 			.self_receiver
 			.new_int_decision(IntVal::MIN..=IntVal::MAX);
-		self.result(res).post();
+		self.result(res).post().unwrap();
 		res
 	}
 }
@@ -829,7 +836,7 @@ impl<S: model_mul_builder::State> ModelMulBuilder<'_, S> {
 		let res = self
 			.self_receiver
 			.new_int_decision(IntVal::MIN..=IntVal::MAX);
-		self.result(res).post();
+		self.result(res).post().unwrap();
 		res
 	}
 }
@@ -844,7 +851,7 @@ impl<S: model_pow_builder::State> ModelPowBuilder<'_, S> {
 		let res = self
 			.self_receiver
 			.new_int_decision(IntVal::MIN..=IntVal::MAX);
-		self.result(res).post();
+		self.result(res).post().unwrap();
 		res
 	}
 }
@@ -881,7 +888,7 @@ impl<'a, S: model_proposition_builder::State> ModelPropositionBuilder<'a, S> {
 		S::Reif: model_proposition_builder::IsUnset,
 	{
 		let res = self.self_receiver.new_bool_decision();
-		self.reified_by(res).post();
+		self.reified_by(res).post().unwrap();
 		res
 	}
 }

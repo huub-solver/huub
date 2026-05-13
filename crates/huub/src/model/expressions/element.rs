@@ -7,6 +7,7 @@ use crate::{
 	IntSet, IntVal,
 	actions::IntInspectionActions,
 	constraints::{
+		Conflict,
 		bool_array_element::BoolDecisionArrayElement,
 		int_array_element::{IntArrayElementBounds, IntValArrayElement},
 		int_set_contains::IntSetContainsReif,
@@ -33,7 +34,7 @@ pub trait ElementConstraint: Sized {
 		array: Vec<Self>,
 		index: View<IntVal>,
 		result: Self::Result,
-	);
+	) -> Result<(), Conflict<View<bool>>>;
 }
 
 impl ElementConstraint for IntVal {
@@ -54,9 +55,9 @@ impl ElementConstraint for IntVal {
 		array: Vec<Self>,
 		index: View<IntVal>,
 		result: Self::Result,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		let con = IntValArrayElement(IntArrayElementBounds::new(prb, array, index, result));
-		prb.post_constraint(con);
+		prb.post_constraint(con)
 	}
 }
 
@@ -83,9 +84,9 @@ impl ElementConstraint for View<IntVal> {
 		array: Vec<Self>,
 		index: View<IntVal>,
 		result: Self::Result,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		let con = IntArrayElementBounds::new(prb, array, index, result);
-		prb.post_constraint(con);
+		prb.post_constraint(con)
 	}
 }
 
@@ -102,12 +103,12 @@ impl ElementConstraint for View<bool> {
 		array: Vec<Self>,
 		index: View<IntVal>,
 		result: Self::Result,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		prb.post_constraint(Self::Constraint {
 			index,
 			array,
 			result,
-		});
+		})
 	}
 }
 
@@ -124,7 +125,7 @@ impl ElementConstraint for bool {
 		array: Vec<Self>,
 		index: View<IntVal>,
 		result: Self::Result,
-	) {
+	) -> Result<(), Conflict<View<bool>>> {
 		// Convert array of boolean values to a set literals of the indices where
 		// the value is true
 		let mut ranges = Vec::new();
@@ -148,6 +149,6 @@ impl ElementConstraint for bool {
 			var: index,
 			set: IntSet::from_iter(ranges),
 			reif: result,
-		});
+		})
 	}
 }

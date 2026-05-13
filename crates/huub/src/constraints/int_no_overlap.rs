@@ -862,7 +862,8 @@ mod tests {
 			.origins(vec![vec![x1, y1], vec![x2, y2]])
 			.sizes(vec![vec![size, size], vec![size, size]])
 			.strict(true)
-			.post();
+			.post()
+			.unwrap();
 
 		let (mut slv, map) = prb.lower().to_solver().unwrap();
 		let vars = vec![x1, y1, x2, y2]
@@ -899,7 +900,8 @@ mod tests {
 			.origins(vec![vec![x1, y1], vec![x2, y2]])
 			.sizes(vec![vec![size1, size1], vec![size2, size2]])
 			.strict(false)
-			.post();
+			.post()
+			.unwrap();
 
 		let (mut slv, map) = prb.lower().to_solver().unwrap();
 		let vars = vec![x1, y1, x2, y2]
@@ -938,7 +940,8 @@ mod tests {
 			.origins(vec![vec![x1, y1, z1], vec![x2, y2, z2]])
 			.sizes(vec![vec![size, size, size], vec![size, size, size]])
 			.strict(true)
-			.post();
+			.post()
+			.unwrap();
 
 		let (mut slv, map) = prb.lower().to_solver().unwrap();
 		let vars = vec![x1, y1, z1, x2, y2, z2]
@@ -970,12 +973,13 @@ mod tests {
 
 		let size = prb.new_int_decision(4..=4);
 
-		prb.no_overlap()
-			.origins(vec![vec![x1, y1], vec![x2, y2]])
-			.sizes(vec![vec![size, size], vec![size, size]])
-			.strict(true)
-			.post();
-
-		prb.assert_unsatisfiable();
+		assert!(
+			prb.no_overlap()
+				.origins(vec![vec![x1, y1], vec![x2, y2]])
+				.sizes(vec![vec![size, size], vec![size, size]])
+				.strict(true)
+				.post()
+				.is_err()
+		);
 	}
 }

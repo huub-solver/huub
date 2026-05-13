@@ -46,7 +46,7 @@ In this problem, we have to post two constraints.
 
 The `unique()` constraint ensures that all decisions in the vector have different values.
 It is important that each decision variable only appears once in the argument vector, since the `unique()` constraint enforces that *each position* in the vector takes a different value.
-Constraint-builder methods, like `unique()` are finalized using the `.post()` method, which adds it to the model.
+Constraint-builder methods, like `unique()`, are finalized using the `.post()` method, which adds the constraint to the model and immediately propagates it.
 
 **2. Arithmetic constraint:** The addition `SEND+MORE=MONEY` must be correct.
 The key insight here is to connect the individual digits into the larger numbers by multiplying them and adding them together.
@@ -65,6 +65,7 @@ Similar to our strategy above we can first create expressions for `SEND`, `MORE`
 
 The `linear()` method takes a linear expression and returns a builder.
 We then call `.eq()` to specify that the expression should equal another expression, and again use `.post()` to add the constraint to the model.
+Like other posted constraints, this call can already detect contradictions and return an error.
 
 ## Solving the problem
 

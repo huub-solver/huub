@@ -6,9 +6,10 @@ While decision variables represent the unknowns, constraints encode the problem 
 
 ## Understanding constraints and propagation
 
-When you post constraints to Huub, they are stored in the model.
-Once you convert the model to a solver (via `lower().to_solver()`), Huub's *constraint propagation* eliminates values from domains that would violate the constraints.
-This reduction happens automatically, even before the solver begins searching for solutions.
+When you post a constraint to Huub, it is immediately propagated.
+If that propagation finds an inconsistency, `.post()` returns an error.
+Huub performs broader propagation across the model when requested (via `.propagate()`) or when you convert the model to a solver (via `.lower().to_solver()`).
+Here, propagation continues until it no longer triggers any other constraint propagation, i.e. fix-point.
 
 For example, if you post the constraint that `x != y` (x and y are different), and x can be {1, 2, 3} while y is {3}, then:
 1. The constraint discovers that y = 3

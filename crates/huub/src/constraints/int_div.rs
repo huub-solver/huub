@@ -476,7 +476,7 @@ mod tests {
 		let den = prb.new_int_decision(0..=4);
 		let res = prb.new_int_decision(-20..=20);
 
-		prb.div(num, den).result(res).post();
+		prb.div(num, den).result(res).post().unwrap();
 
 		prb.expect_solutions(
 			&[num, den, res],

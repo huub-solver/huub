@@ -190,10 +190,12 @@ mod tests {
 		];
 		prb.table(vec![vars[0], vars[1]])
 			.values(table.clone())
-			.post();
+			.post()
+			.unwrap();
 		prb.table(vec![vars[1], vars[2]])
 			.values(table.clone())
-			.post();
+			.post()
+			.unwrap();
 
 		let (mut slv, map) = prb.lower().to_solver().unwrap();
 		let vars = vars.into_iter().map(|x| map.get(&mut slv, x)).collect_vec();
@@ -239,10 +241,12 @@ mod tests {
 		];
 		prb.table(vars[0..3].iter().cloned())
 			.values(table.clone())
-			.post();
+			.post()
+			.unwrap();
 		prb.table(vars[2..5].iter().cloned())
 			.values(table.clone())
-			.post();
+			.post()
+			.unwrap();
 
 		let (mut slv, map) = prb.lower().to_solver().unwrap();
 		let vars = vars.into_iter().map(|x| map.get(&mut slv, x)).collect_vec();

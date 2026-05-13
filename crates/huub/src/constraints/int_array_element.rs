@@ -490,7 +490,8 @@ mod tests {
 		prb.element(vec![a, b, c])
 			.index(index)
 			.result(result)
-			.post();
+			.post()
+			.unwrap();
 		index.remove_val(&mut prb, 2, []).unwrap();
 		let _: (Solver, _) = prb.lower().to_solver().unwrap();
 
@@ -510,7 +511,8 @@ mod tests {
 		prb.element(vec![a, b, c])
 			.index(index)
 			.result(result)
-			.post();
+			.post()
+			.unwrap();
 		index.remove_val(&mut prb, 0, []).unwrap();
 		let _: (Solver, _) = prb.lower().to_solver().unwrap();
 
@@ -627,10 +629,12 @@ mod tests {
 		let result = prb.new_int_decision(1..=2);
 		let index = prb.new_int_decision(0..=2);
 
-		prb.element(vec![a, b, c])
-			.index(index)
-			.result(result)
-			.post();
-		prb.assert_unsatisfiable();
+		assert!(
+			prb.element(vec![a, b, c])
+				.index(index)
+				.result(result)
+				.post()
+				.is_err()
+		);
 	}
 }

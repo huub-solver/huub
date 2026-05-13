@@ -156,7 +156,7 @@ impl Resolved<View<bool>> {
 				let x = BoolFormula::Atom(View(x));
 				let y = BoolFormula::Atom(View(y));
 
-				ctx.post_constraint(BoolFormula::Equiv(vec![x, y]));
+				ctx.post_constraint_internal(BoolFormula::Equiv(vec![x, y]));
 				Ok(())
 			}
 		}

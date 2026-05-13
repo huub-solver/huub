@@ -42,7 +42,7 @@ impl<E, I1, I2> Constraint<E> for IntArrayMinimumBounds<I1, I2>
 where
 	E: ReasoningEngine,
 	I1: IntModelActions<E>,
-	I2: IntModelActions<E>,
+	I2: IntModelActions<E> + Into<I1>,
 {
 	fn simplify(
 		&mut self,
@@ -50,6 +50,20 @@ where
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
 
+		// Filter out variables that are too large to be the minimum
+		let max_min = self.min.max(ctx);
+		self.vars.retain(|v| v.min(ctx) <= max_min);
+		debug_assert!(!self.vars.is_empty());
+
+		// If there is only one variable left, unify it with the minimum value and
+		// subsume the constraint.
+		if self.vars.len() == 1 {
+			self.vars[0].unify(ctx, self.min.clone())?;
+			return Ok(SimplificationStatus::Subsumed);
+		}
+
+		// If the minimum value is known and one of the variables is equal to it,
+		// tighten the minimum bounds of the others and subsume the constraint.
 		if let Some(c) = self.min.val(ctx)
 			&& self.vars.iter().any(|v| v.val(ctx) == Some(c))
 		{
@@ -144,7 +158,7 @@ mod tests {
 		let c = prb.new_int_decision(2..=5);
 		let y = prb.new_int_decision(1..=3);
 
-		prb.maximum(vec![a, b, c]).result(y).post();
+		prb.maximum(vec![a, b, c]).result(y).post().unwrap();
 
 		let (mut slv, map) = prb.lower().to_solver().unwrap();
 		let vars = vec![a, b, c, y]
@@ -173,8 +187,7 @@ mod tests {
 		let c = prb.new_int_decision(4..=10);
 		let y = prb.new_int_decision(13..=20);
 
-		prb.maximum(vec![a, b, c]).result(y).post();
-		prb.assert_unsatisfiable();
+		assert!(prb.maximum(vec![a, b, c]).result(y).post().is_err());
 	}
 
 	#[test]
@@ -186,7 +199,7 @@ mod tests {
 		let c = prb.new_int_decision(2..=3);
 		let y = prb.new_int_decision(3..=4);
 
-		prb.minimum(vec![a, b, c]).result(y).post();
+		prb.minimum(vec![a, b, c]).result(y).post().unwrap();
 		let (mut slv, map) = prb.lower().to_solver().unwrap();
 		let vars = vec![a, b, c, y]
 			.into_iter()
@@ -209,7 +222,6 @@ mod tests {
 		let c = prb.new_int_decision(4..=10);
 		let y = prb.new_int_decision(1..=2);
 
-		prb.minimum(vec![a, b, c]).result(y).post();
-		prb.assert_unsatisfiable();
+		assert!(prb.minimum(vec![a, b, c]).result(y).post().is_err());
 	}
 }

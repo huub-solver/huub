@@ -199,7 +199,7 @@ impl private::Sealed for IntVal {}
 impl Resolved<Decision<IntVal>> {
 	/// Internal method performing unification under the assumption that the
 	/// receiver is an integer decision index that is not already aliased, and
-	/// that it can be aliased to directly point to `other`.
+	/// that it can be aliased to directly point to `target`.
 	pub(crate) fn unify_internal(
 		self,
 		ctx: &mut Model,
@@ -219,6 +219,10 @@ impl Resolved<Decision<IntVal>> {
 			Domain::Alias(View(IntView::Const(v))) => target.fix(ctx, v, [])?,
 			_ => unreachable!(),
 		};
+		// Process any pending integer events for the variable being aliased.
+		if let Some(event) = ctx.int_events.remove(&(idx as u32)) {
+			ctx.notify_int_event(idx as u32, event);
+		}
 		// Transfer any constraints from the aliased variable to the target variable
 		let constraints = mem::take(&mut ctx.int_vars[idx].constraints);
 		// Move subscriptions to target decision variable
@@ -309,10 +313,10 @@ impl Resolved<Decision<IntVal>> {
 			ctx.int_events.insert(self.0.0, IntEvent::Fixed);
 		} else {
 			let entry = ctx.int_events.entry(self.0.0).or_insert(IntEvent::Domain);
-			if dom.lower_bound().unwrap() == diff.lower_bound().unwrap() {
+			if dom.lower_bound().unwrap() != diff.lower_bound().unwrap() {
 				*entry += IntEvent::LowerBound;
 			}
-			if dom.upper_bound().unwrap() == diff.upper_bound().unwrap() {
+			if dom.upper_bound().unwrap() != diff.upper_bound().unwrap() {
 				*entry += IntEvent::UpperBound;
 			}
 
@@ -379,10 +383,10 @@ impl Resolved<Decision<IntVal>> {
 			ctx.int_events.insert(self.0.0, IntEvent::Fixed);
 		} else {
 			let entry = ctx.int_events.entry(self.0.0).or_insert(IntEvent::Domain);
-			if dom.lower_bound().unwrap() == intersect.lower_bound().unwrap() {
+			if dom.lower_bound().unwrap() != intersect.lower_bound().unwrap() {
 				*entry += IntEvent::LowerBound;
 			}
-			if dom.upper_bound().unwrap() == intersect.upper_bound().unwrap() {
+			if dom.upper_bound().unwrap() != intersect.upper_bound().unwrap() {
 				*entry += IntEvent::UpperBound;
 			}
 

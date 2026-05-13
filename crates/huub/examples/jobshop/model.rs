@@ -8,7 +8,7 @@ use std::{
 
 use clap::ValueEnum;
 use huub::{
-	lower::LoweringMap,
+	lower::{LoweringError, LoweringMap},
 	model::{self, Model, expressions::IntLinearExp},
 	solver::{self, Solver, Valuation},
 };
@@ -180,7 +180,10 @@ impl Instance {
 
 impl JobShopModel {
 	/// Create a new job shop model for the given instance and objective type.
-	pub(crate) fn new(instance: &Instance, objective_type: ObjectiveType) -> Self {
+	pub(crate) fn new(
+		instance: &Instance,
+		objective_type: ObjectiveType,
+	) -> Result<Self, LoweringError> {
 		let mut model = Model::default();
 		// ANCHOR: create_decision_variables
 		let mut start_time = Vec::with_capacity(instance.n);
@@ -193,7 +196,7 @@ impl JobShopModel {
 		for (job, job_start_time) in instance.jobs.iter().zip(&start_time) {
 			for (op_idx, op) in job.iter().enumerate().take(job.len().saturating_sub(1)) {
 				let op_end = job_start_time[op_idx] + op.processing_time as i64;
-				model.linear(job_start_time[op_idx + 1]).ge(op_end).post();
+				model.linear(job_start_time[op_idx + 1]).ge(op_end).post()?;
 			}
 		}
 		// ANCHOR_END: precedence_constraints
@@ -211,7 +214,7 @@ impl JobShopModel {
 				.disjunctive()
 				.start_times(op_start_times)
 				.durations(op_durations)
-				.post();
+				.post()?;
 		}
 		// ANCHOR_END: disjunctive_constraints
 
@@ -221,7 +224,7 @@ impl JobShopModel {
 			ObjectiveType::Makespan => {
 				let makespan = model.new_int_decision(0..=(instance.max_time as i64));
 				for completion_time in completion_times {
-					model.linear(makespan).ge(completion_time).post();
+					model.linear(makespan).ge(completion_time).post()?;
 				}
 				makespan
 			}
@@ -232,11 +235,11 @@ impl JobShopModel {
 		};
 		// ANCHOR_END: define_objective
 
-		JobShopModel {
+		Ok(JobShopModel {
 			model,
 			start_time,
 			objective: objective_variable,
-		}
+		})
 	}
 }
 
@@ -342,7 +345,7 @@ mod tests {
 			mut model,
 			objective,
 			..
-		} = JobShopModel::new(&instance, objective_type);
+		} = JobShopModel::new(&instance, objective_type).unwrap();
 		let (mut slv, map): (Solver, _) = model.lower().to_solver().unwrap();
 		let obj = map.get(&mut slv, objective);
 		let mut best = None;

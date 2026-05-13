@@ -183,7 +183,7 @@ impl Resolved<View<IntVal>> {
 				} else if can_define_x {
 					(lin_x, lin_y)
 				} else {
-					ctx.post_constraint(IntEq {
+					ctx.post_constraint_internal(IntEq {
 						vars: [self.0, other.0],
 					});
 					return Ok(());

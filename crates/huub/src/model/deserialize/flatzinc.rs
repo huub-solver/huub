@@ -26,7 +26,7 @@ use crate::{
 	IntSet, IntVal,
 	actions::{
 		BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions,
-		PropagationActions,
+		PropagationActions, ReasoningEngine,
 	},
 	lower::{Lowerer, LowererComplete, LoweringError},
 	model::{
@@ -605,6 +605,12 @@ impl Display for FlatZincError {
 
 impl Error for FlatZincError {}
 
+impl From<<Model as ReasoningEngine>::Conflict> for FlatZincError {
+	fn from(conflict: <Model as ReasoningEngine>::Conflict) -> Self {
+		Self::ReformulationError(LoweringError::from(conflict))
+	}
+}
+
 impl From<LoweringError> for FlatZincError {
 	fn from(reformulation_error: LoweringError) -> Self {
 		Self::ReformulationError(reformulation_error)
@@ -979,7 +985,7 @@ impl<'a> FznModelBuilder<'a> {
 		transitions: Vec<Vec<IntVal>>,
 		init_state: IntVal,
 		accept_states: FxHashSet<IntVal>,
-	) {
+	) -> Result<(), LoweringError> {
 		// TODO: Add the regular checking
 
 		let mut start: Vec<Vec<IntVal>> = Vec::new();
@@ -1019,18 +1025,19 @@ impl<'a> FznModelBuilder<'a> {
 
 		// Add table constraint to force a transition for the starting state
 		let sx: Vec<View<IntVal>> = vec![vars[0], state_vars[0]];
-		self.prb.table(sx).values(start).post();
+		self.prb.table(sx).values(start).post()?;
 
 		// Add table constraint to force valid transition for the intermediate
 		// states
 		for i in 1..vars.len() - 1 {
 			let mx: Vec<View<IntVal>> = vec![state_vars[i - 1], vars[i], state_vars[i]];
-			self.prb.table(mx).values(middle.clone()).post();
+			self.prb.table(mx).values(middle.clone()).post()?;
 		}
 
 		// Add table constraint to force ending in an accepting state
 		let ex: Vec<View<IntVal>> = vec![*state_vars.last().unwrap(), *vars.last().unwrap()];
-		self.prb.table(ex).values(end).post();
+		self.prb.table(ex).values(end).post()?;
+		Ok(())
 	}
 
 	/// Ensure all variables in the FlatZinc instance output are in the model
@@ -1113,13 +1120,13 @@ impl<'a> FznModelBuilder<'a> {
 						let AnyView::Bool(view) = view else {
 							unreachable!()
 						};
-						bv.unify(&mut me.prb, view).map_err(LoweringError::from)?;
+						bv.unify(&mut me.prb, view)?;
 					}
 					AnyView::Int(iv) => {
 						let AnyView::Int(view) = view else {
 							unreachable!()
 						};
-						iv.unify(&mut me.prb, view).map_err(LoweringError::from)?;
+						iv.unify(&mut me.prb, view)?;
 					}
 				},
 				Entry::Vacant(e) => {
@@ -1128,8 +1135,7 @@ impl<'a> FznModelBuilder<'a> {
 						let AnyView::Int(view) = view else {
 							unreachable!()
 						};
-						view.restrict_domain(&mut me.prb, dom, vec![])
-							.map_err(LoweringError::from)?;
+						view.restrict_domain(&mut me.prb, dom, vec![])?;
 					}
 					// Insert the view to use instead of a new variable for the name
 					e.insert(view);
@@ -1268,10 +1274,8 @@ impl<'a> FznModelBuilder<'a> {
 				let offset = sum / c;
 				let view = if let Some(scale) = NonZero::new(-cy / c) {
 					let y = lit_int_view(self, vy)?;
-					y.bounding_mul(&mut self.prb, scale.get())
-						.map_err(LoweringError::from)?
-						.bounding_add(&mut self.prb, offset)
-						.map_err(LoweringError::from)?
+					y.bounding_mul(&mut self.prb, scale.get())?
+						.bounding_add(&mut self.prb, offset)?
 				} else {
 					offset.into()
 				};
@@ -1366,8 +1370,8 @@ impl<'a> FznModelBuilder<'a> {
 		var: &Arc<Variable<FznIdent>>,
 	) -> Result<AnyView, FlatZincError> {
 		match self.map.entry(var.cloned_key()) {
-			Entry::Vacant(e) => Ok(e
-				.insert(match &var.ty {
+			Entry::Vacant(e) => {
+				let view = match &var.ty {
 					Type::Bool => AnyView::Bool(self.prb.new_bool_decision()),
 					Type::Int(dom) => match dom {
 						Some(dom) => AnyView::Int(self.prb.new_int_decision(dom.clone())),
@@ -1383,8 +1387,9 @@ impl<'a> FznModelBuilder<'a> {
 						}
 					},
 					_ => todo!("Variables of {:?} are not yet supported", var.ty),
-				})
-				.clone()),
+				};
+				Ok(e.insert(view).clone())
+			}
 			Entry::Occupied(e) => Ok(e.get().clone()),
 		}
 	}
@@ -1472,7 +1477,10 @@ impl<'a> FznModelBuilder<'a> {
 						.iter()
 						.map(|l| self.lit_bool(l).map(Into::into))
 						.try_collect()?;
-					self.prb.proposition(Formula::And(es)).reified_by(r).post();
+					self.prb
+						.proposition(Formula::And(es))
+						.reified_by(r)
+						.post()?;
 				}
 				ConstraintIdent::ArrayBoolXor => {
 					let [es] = c.args.as_slice() else {
@@ -1483,7 +1491,7 @@ impl<'a> FznModelBuilder<'a> {
 						.iter()
 						.map(|l| self.lit_bool(l).map(Into::into))
 						.try_collect()?;
-					self.prb.proposition(Formula::Xor(es)).post();
+					self.prb.proposition(Formula::Xor(es)).post()?;
 				}
 				ConstraintIdent::ArrayBoolElement => {
 					let [idx, arr, val] = c.args.as_slice() else {
@@ -1495,11 +1503,9 @@ impl<'a> FznModelBuilder<'a> {
 						.map(|l| self.par_bool(l))
 						.try_collect()?;
 					let idx = self.arg_int(idx)?;
-					let idx = idx
-						.bounding_sub(&mut self.prb, 1)
-						.map_err(LoweringError::from)?;
+					let idx = idx.bounding_sub(&mut self.prb, 1)?;
 					let val = self.arg_bool(val)?;
-					self.prb.element(arr).index(idx).result(val).post();
+					self.prb.element(arr).index(idx).result(val).post()?;
 				}
 				ConstraintIdent::ArrayIntElement => {
 					let [idx, arr, val] = c.args.as_slice() else {
@@ -1511,12 +1517,10 @@ impl<'a> FznModelBuilder<'a> {
 						.map(|l| self.par_int(l))
 						.try_collect()?;
 					let idx = self.arg_int(idx)?;
-					let idx = idx
-						.bounding_sub(&mut self.prb, 1)
-						.map_err(LoweringError::from)?;
+					let idx = idx.bounding_sub(&mut self.prb, 1)?;
 					let val = self.arg_int(val)?;
 
-					self.prb.element(arr).index(idx).result(val).post();
+					self.prb.element(arr).index(idx).result(val).post()?;
 				}
 				ConstraintIdent::ArrayVarBoolElement => {
 					let [idx, arr, val] = c.args.as_slice() else {
@@ -1528,12 +1532,10 @@ impl<'a> FznModelBuilder<'a> {
 						.map(|l| self.lit_bool(l))
 						.try_collect()?;
 					let idx = self.arg_int(idx)?;
-					let idx = idx
-						.bounding_sub(&mut self.prb, 1)
-						.map_err(LoweringError::from)?;
+					let idx = idx.bounding_sub(&mut self.prb, 1)?;
 					let val = self.arg_bool(val)?;
 
-					self.prb.element(arr).index(idx).result(val).post();
+					self.prb.element(arr).index(idx).result(val).post()?;
 				}
 				ConstraintIdent::ArrayVarIntElement => {
 					let [idx, arr, val] = c.args.as_slice() else {
@@ -1545,12 +1547,10 @@ impl<'a> FznModelBuilder<'a> {
 						.map(|l| self.lit_int(l))
 						.try_collect()?;
 					let idx = self.arg_int(idx)?;
-					let idx = idx
-						.bounding_sub(&mut self.prb, 1)
-						.map_err(LoweringError::from)?;
+					let idx = idx.bounding_sub(&mut self.prb, 1)?;
 					let val = self.arg_int(val)?;
 
-					self.prb.element(arr).index(idx).result(val).post();
+					self.prb.element(arr).index(idx).result(val).post()?;
 				}
 				ConstraintIdent::Bool2Int => {
 					let [b, i] = c.args.as_slice() else {
@@ -1558,7 +1558,7 @@ impl<'a> FznModelBuilder<'a> {
 					};
 					let b = self.arg_bool(b)?;
 					let i = self.arg_int(i)?;
-					i.unify(&mut self.prb, b).map_err(LoweringError::from)?;
+					i.unify(&mut self.prb, b)?;
 				}
 				ConstraintIdent::BoolLinEq => {
 					let [coeffs, vars, sum] = c.args.as_slice() else {
@@ -1580,17 +1580,13 @@ impl<'a> FznModelBuilder<'a> {
 					let mut terms = Vec::with_capacity(vars.len() + 1);
 					for (x, c) in vars.into_iter().zip(coeffs) {
 						if let Some(c) = NonZero::new(c) {
-							terms.push(
-								View::from(x)
-									.bounding_mul(&mut self.prb, c.get())
-									.map_err(LoweringError::from)?,
-							);
+							terms.push(View::from(x).bounding_mul(&mut self.prb, c.get())?);
 						}
 					}
 					terms.push(-sum);
 					let lin_exp: IntLinearExp = terms.into_iter().sum();
 
-					self.prb.linear(lin_exp).eq(0).post();
+					self.prb.linear(lin_exp).eq(0).post()?;
 				}
 				ConstraintIdent::BoolClause => {
 					let [pos, neg] = c.args.as_slice() else {
@@ -1623,13 +1619,11 @@ impl<'a> FznModelBuilder<'a> {
 									LoweringError::Simplification(self.prb.declare_conflict([])),
 								));
 							}
-							1 => lits[0]
-								.require(&mut self.prb, vec![])
-								.map_err(LoweringError::from)?,
+							1 => lits[0].require(&mut self.prb, vec![])?,
 							_ => {
 								self.prb
 									.proposition(Formula::Or(lits.into_iter().map_into().collect()))
-									.post();
+									.post()?;
 							}
 						}
 					}
@@ -1644,7 +1638,7 @@ impl<'a> FznModelBuilder<'a> {
 					self.prb
 						.proposition(Formula::Equiv(vec![a.into(), b.into()]))
 						.reified_by(r)
-						.post();
+						.post()?;
 				}
 				ConstraintIdent::BoolNot => {
 					let [a, b] = c.args.as_slice() else {
@@ -1652,7 +1646,7 @@ impl<'a> FznModelBuilder<'a> {
 					};
 					let a = self.arg_bool(a)?;
 					let b = self.arg_bool(b)?;
-					a.unify(&mut self.prb, !b).map_err(LoweringError::from)?;
+					a.unify(&mut self.prb, !b)?;
 				}
 				ConstraintIdent::BoolXor => {
 					let [a, b, rest @ ..] = c.args.as_slice() else {
@@ -1668,7 +1662,7 @@ impl<'a> FznModelBuilder<'a> {
 						let r = self.arg_bool(r)?;
 						f = Formula::Equiv(vec![r.into(), f]);
 					}
-					self.prb.proposition(f).post();
+					self.prb.proposition(f).post()?;
 				}
 				ConstraintIdent::DiffnInt { strict } => {
 					let [x, y, dx, dy] = c.args.as_slice() else {
@@ -1692,7 +1686,7 @@ impl<'a> FznModelBuilder<'a> {
 						.origins(origins?)
 						.sizes(sizes?)
 						.strict(strict)
-						.post();
+						.post()?;
 				}
 				ConstraintIdent::DiffnKInt { strict } => {
 					let [box_posn, box_size, d] = c.args.as_slice() else {
@@ -1741,7 +1735,7 @@ impl<'a> FznModelBuilder<'a> {
 						.origins(origins)
 						.sizes(sizes)
 						.strict(strict)
-						.post();
+						.post()?;
 				}
 				ConstraintIdent::AllDifferentInt => {
 					let [args] = c.args.as_slice() else {
@@ -1768,7 +1762,7 @@ impl<'a> FznModelBuilder<'a> {
 						.unique(args)
 						.maybe_bounds_propagation(bounds)
 						.maybe_value_propagation(value)
-						.post();
+						.post()?;
 				}
 				ConstraintIdent::ArrayIntMaximum | ConstraintIdent::ArrayIntMinimum => {
 					let [m, args] = c.args.as_slice() else {
@@ -1784,7 +1778,7 @@ impl<'a> FznModelBuilder<'a> {
 						ConstraintIdent::ArrayIntMaximum => self.prb.maximum(args).result(m).post(),
 						ConstraintIdent::ArrayIntMinimum => self.prb.minimum(args).result(m).post(),
 						_ => unreachable!(),
-					}
+					}?;
 				}
 				ConstraintIdent::BoolClauseReif => {
 					let [pos, neg, r] = c.args.as_slice() else {
@@ -1802,7 +1796,10 @@ impl<'a> FznModelBuilder<'a> {
 						let e = self.lit_bool(l)?;
 						lits.push((!e).into());
 					}
-					self.prb.proposition(Formula::Or(lits)).reified_by(r).post();
+					self.prb
+						.proposition(Formula::Or(lits))
+						.reified_by(r)
+						.post()?;
 				}
 				ConstraintIdent::Cumulative => {
 					let [starts, durations, heights, r] = c.args.as_slice() else {
@@ -1830,7 +1827,7 @@ impl<'a> FznModelBuilder<'a> {
 						.durations(durations)
 						.usages(heights)
 						.capacity(r)
-						.post();
+						.post()?;
 				}
 				ConstraintIdent::DisjuctiveStrict => {
 					let [starts, durations] = c.args.as_slice() else {
@@ -1871,7 +1868,7 @@ impl<'a> FznModelBuilder<'a> {
 						.maybe_edge_finding_propagation(edge_finding)
 						.maybe_not_last_propagation(not_last)
 						.maybe_detectable_precedence_propagation(detectable_precedence)
-						.post();
+						.post()?;
 				}
 				ConstraintIdent::Regular => {
 					let [x, q, s, d, q0, f] = c.args.as_slice() else {
@@ -1913,7 +1910,8 @@ impl<'a> FznModelBuilder<'a> {
 
 					// Convert regular constraint in to table constraints and add them to the
 					// model
-					self.convert_regular_to_tables(x, d, q0, f);
+					self.convert_regular_to_tables(x, d, q0, f)
+						.map_err(FlatZincError::from)?;
 				}
 				ConstraintIdent::TableInt => {
 					let [args, table] = c.args.as_slice() else {
@@ -1944,7 +1942,7 @@ impl<'a> FznModelBuilder<'a> {
 						.into_iter()
 						.map(|c| c.collect())
 						.collect();
-					self.prb.table(args).values(table).post();
+					self.prb.table(args).values(table).post()?;
 				}
 				ConstraintIdent::SeqPrecedeChainInt => {
 					let [args] = c.args.as_slice() else {
@@ -1952,7 +1950,7 @@ impl<'a> FznModelBuilder<'a> {
 					};
 					let args = self.arg_array(args)?;
 					let args: Vec<_> = args.iter().map(|l| self.lit_int(l)).try_collect()?;
-					self.prb.value_precede(args).post();
+					self.prb.value_precede(args).post()?;
 				}
 				ConstraintIdent::ValuePrecedeChain => {
 					let [values, variables] = c.args.as_slice() else {
@@ -1968,7 +1966,7 @@ impl<'a> FznModelBuilder<'a> {
 						.iter()
 						.map(|l| self.lit_int(l))
 						.try_collect()?;
-					self.prb.value_precede(variables).values(values).post();
+					self.prb.value_precede(variables).values(values).post()?;
 				}
 				ConstraintIdent::IntAbs => {
 					let [origin, abs] = c.args.as_slice() else {
@@ -1976,7 +1974,7 @@ impl<'a> FznModelBuilder<'a> {
 					};
 					let origin = self.arg_int(origin)?;
 					let abs = self.arg_int(abs)?;
-					self.prb.abs(origin).result(abs).post();
+					self.prb.abs(origin).result(abs).post()?;
 				}
 				ConstraintIdent::IntDiv => {
 					let [num, denom, res] = c.args.as_slice() else {
@@ -1985,7 +1983,7 @@ impl<'a> FznModelBuilder<'a> {
 					let num = self.arg_int(num)?;
 					let denom = self.arg_int(denom)?;
 					let res = self.arg_int(res)?;
-					self.prb.div(num, denom).result(res).post();
+					self.prb.div(num, denom).result(res).post()?;
 				}
 				ConstraintIdent::IntLe | ConstraintIdent::IntNe => {
 					let [a, b] = c.args.as_slice() else {
@@ -1999,7 +1997,7 @@ impl<'a> FznModelBuilder<'a> {
 						ConstraintIdent::IntNe => lin.ne(b),
 						_ => unreachable!(),
 					}
-					.post();
+					.post()?;
 				}
 				ConstraintIdent::IntEqImp
 				| ConstraintIdent::IntEqReif
@@ -2030,7 +2028,7 @@ impl<'a> FznModelBuilder<'a> {
 						| ConstraintIdent::IntNeReif => lin.reified_by(r),
 						_ => unreachable!(),
 					}
-					.post();
+					.post()?;
 				}
 				ConstraintIdent::IntLinEq
 				| ConstraintIdent::IntLinLe
@@ -2051,10 +2049,7 @@ impl<'a> FznModelBuilder<'a> {
 					let rhs = self.arg_par_int(rhs)?;
 					let mut terms = Vec::with_capacity(vars.len());
 					for (x, c) in vars.into_iter().zip(coeffs) {
-						terms.push(
-							x.bounding_mul(&mut self.prb, c)
-								.map_err(LoweringError::from)?,
-						);
+						terms.push(x.bounding_mul(&mut self.prb, c)?);
 					}
 					let lin_exp: IntLinearExp = terms.into_iter().sum();
 					let lin = self.prb.linear(lin_exp);
@@ -2065,7 +2060,7 @@ impl<'a> FznModelBuilder<'a> {
 						ConstraintIdent::IntLinNe => lin.ne(rhs),
 						_ => unreachable!(),
 					}
-					.post();
+					.post()?;
 				}
 				ConstraintIdent::IntLinEqImp
 				| ConstraintIdent::IntLinEqReif
@@ -2090,10 +2085,7 @@ impl<'a> FznModelBuilder<'a> {
 					let reified = self.arg_bool(reified)?;
 					let mut terms = Vec::with_capacity(vars.len());
 					for (x, c) in vars.into_iter().zip(coeffs) {
-						terms.push(
-							x.bounding_mul(&mut self.prb, c)
-								.map_err(LoweringError::from)?,
-						);
+						terms.push(x.bounding_mul(&mut self.prb, c)?);
 					}
 
 					let lin = self.prb.linear(terms.into_iter().sum::<IntLinearExp>());
@@ -2112,7 +2104,7 @@ impl<'a> FznModelBuilder<'a> {
 						| ConstraintIdent::IntLinNeReif => lin.reified_by(reified),
 						_ => unreachable!(),
 					}
-					.post();
+					.post()?;
 				}
 				ConstraintIdent::IntMax | ConstraintIdent::IntMin => {
 					let [a, b, m] = c.args.as_slice() else {
@@ -2125,7 +2117,7 @@ impl<'a> FznModelBuilder<'a> {
 						ConstraintIdent::IntMax => self.prb.maximum([a, b]).result(m).post(),
 						ConstraintIdent::IntMin => self.prb.minimum([a, b]).result(m).post(),
 						_ => unreachable!(),
-					}
+					}?;
 				}
 				ConstraintIdent::IntPow => {
 					let [base, exponent, res] = c.args.as_slice() else {
@@ -2135,7 +2127,7 @@ impl<'a> FznModelBuilder<'a> {
 					let exponent = self.arg_int(exponent)?;
 					let res = self.arg_int(res)?;
 
-					self.prb.pow(base, exponent).result(res).post();
+					self.prb.pow(base, exponent).result(res).post()?;
 				}
 				ConstraintIdent::IntTimes => {
 					let [x, y, z] = c.args.as_slice() else {
@@ -2144,7 +2136,7 @@ impl<'a> FznModelBuilder<'a> {
 					let a = self.arg_int(x)?;
 					let b = self.arg_int(y)?;
 					let m = self.arg_int(z)?;
-					self.prb.mul(a, b).result(m).post();
+					self.prb.mul(a, b).result(m).post()?;
 				}
 				ConstraintIdent::SetIn => {
 					let [x, s] = c.args.as_slice() else {
@@ -2153,8 +2145,7 @@ impl<'a> FznModelBuilder<'a> {
 					let x = self.arg_int(x)?;
 					let s = self.arg_par_set(s)?;
 
-					x.restrict_domain(&mut self.prb, &s, vec![])
-						.map_err(LoweringError::from)?;
+					x.restrict_domain(&mut self.prb, &s, vec![])?;
 				}
 				ConstraintIdent::SetInReif => {
 					let [x, s, r] = c.args.as_slice() else {
@@ -2164,7 +2155,7 @@ impl<'a> FznModelBuilder<'a> {
 					let s = self.arg_par_set(s)?;
 					let r = self.arg_bool(r)?;
 
-					self.prb.contains(s).member(x).result(r).post();
+					self.prb.contains(s).member(x).result(r).post()?;
 				}
 				ConstraintIdent::IntEq | ConstraintIdent::BoolEq => unreachable!(),
 			}

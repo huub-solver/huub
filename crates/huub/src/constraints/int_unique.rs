@@ -815,9 +815,7 @@ mod tests {
 		.map(|domain| prb.new_int_decision(domain))
 		.collect();
 
-		prb.unique(prev.iter().copied()).post();
-
-		prb.assert_unsatisfiable();
+		assert!(prb.unique(prev.iter().copied()).post().is_err());
 	}
 
 	fn test_sudoku(grid: &[&str], expected: Status) {
