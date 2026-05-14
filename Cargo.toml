@@ -7,7 +7,7 @@ resolver = "2"
 
 [workspace.package]
 repository = "https://github.com/huub-solver/huub"
-version = "0.0.1"
+version = "100.0.0"
 authors = ["Jip J. Dekker <jip@dekker.one>"]
 edition = "2024"
 license = "MPL-2.0"
@@ -19,9 +19,9 @@ keywords = ["sat", "lcg", "flatzinc", "minizinc", "optimization"]
 anstream = "1.0.0"
 bon = { version = "3.9.1", features = ["experimental-generics-setters"] }
 clap = { version = "4.6.1", features = ["derive"] }
-clap_complete = "4.6.4"
+clap_complete = "4.6.5"
 ctrlc = "3.5.2"
-divan = { package = "codspeed-divan-compat", version = "4.4.1" }
+divan = { package = "codspeed-divan-compat", version = "4.6.0" }
 dyn-clone = "1.0.20"
 expect-test = "1.5.1"
 flatzinc-serde = { version = "0.5.0" }

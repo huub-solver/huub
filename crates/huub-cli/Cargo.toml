@@ -10,6 +10,7 @@ homepage.workspace = true
 categories.workspace = true
 keywords.workspace = true
 repository.workspace = true
+readme = "README.md"
 
 [[bin]]
 name = "huub"
@@ -25,7 +26,7 @@ clap = { workspace = true }
 ctrlc = { workspace = true }
 flatzinc-serde = { workspace = true }
 humantime = { workspace = true }
-huub = { version = "0.0.1", path = "../huub", features = ["flatzinc"] }
+huub = { version = "100.0.0", path = "../huub", features = ["flatzinc"] }
 mimalloc = { workspace = true }
 rustc-hash = { workspace = true }
 serde_json = { workspace = true }
