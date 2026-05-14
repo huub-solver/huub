@@ -1342,7 +1342,10 @@ impl<'a> FznModelBuilder<'a> {
 				}),
 			})?,
 			&Literal::Bool(v) => Ok(v.into()),
-			_ => todo!(),
+			other => Err(FlatZincError::InvalidArgumentType {
+				expected: "bool",
+				found: format!("{:?}", other).to_owned(),
+			}),
 		}
 	}
 
@@ -1360,7 +1363,10 @@ impl<'a> FznModelBuilder<'a> {
 			})?,
 			&Literal::Bool(v) => Ok((v as IntVal).into()),
 			&Literal::Int(v) => Ok(v.into()),
-			_ => todo!(),
+			other => Err(FlatZincError::InvalidArgumentType {
+				expected: "int",
+				found: format!("{:?}", other).to_owned(),
+			}),
 		}
 	}
 
@@ -1387,7 +1393,7 @@ impl<'a> FznModelBuilder<'a> {
 							self.prb.new_int_decision(FULL_INT_DOMAIN).into()
 						}
 					},
-					_ => todo!("Variables of {:?} are not yet supported", var.ty),
+					ty => panic!("Variables of {:?} are not supported", ty),
 				};
 				Ok(e.insert(view).clone())
 			}

@@ -310,7 +310,7 @@ impl Model {
 		let domain = domain.into();
 		match domain.card() {
 			Some(0) => {
-				unimplemented!("integer decision must have at least 1 value in their domain")
+				panic!("integer decision must have at least 1 value in their domain")
 			}
 			Some(1) => (*domain.lower_bound().unwrap()).into(),
 			_ => {
