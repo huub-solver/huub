@@ -1,3 +1,9 @@
 [[package]]
+name = "huub-cli"
+git_release_enable = false
+git_tag_enable = false
+semver_check = false
+
+[[package]]
 name = "xtask"
 release = false # don't process this package

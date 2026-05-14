@@ -23,7 +23,7 @@ jobs:
   upload-assets:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
-    if: github.repository_owner == 'huub-solver' && (startsWith(github.event.release.name, 'huub-cli-v') || github.event_name == 'push' )
+    if: github.repository_owner == 'huub-solver' && (startsWith(github.event.release.name, 'huub-v') || github.event_name == 'push' )
     strategy:
       matrix:
         include:
@@ -71,7 +71,8 @@ jobs:
           bin: huub
           package: huub-cli
           target: ${{ matrix.target }}
-          include: LICENSE,share/
+          bin-leading-dir: bin
+          include: LICENSE,share
           tar: all
           zip: windows
           token: ${{ secrets.GITHUB_TOKEN }}
