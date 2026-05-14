@@ -290,7 +290,8 @@ impl Engine {
 	/// backtracking from an artificial decision level
 	fn notify_backtrack<const ARTIFICIAL: bool>(&mut self, new_level: usize, restart: bool) {
 		// Revert value changes to previous decision level
-		self.state.notify_backtrack::<false>(new_level, restart);
+		self.state
+			.notify_backtrack::<ARTIFICIAL>(new_level, restart);
 
 		// Notify subscribed propagators of backtracking
 		let notify = mem::take(&mut self.state.notify_of_backtrack);
