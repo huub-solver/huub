@@ -125,6 +125,7 @@ pub(crate) struct NoAssumptions;
 
 /// The overarching search strategy used by the solver.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum SearchStrategy {
 	/// Use the user provided [`Brancher`](crate::solver::branchers::Brancher)s
 	/// until they are all exhausted, and only then defer to the SAT solver to
@@ -320,6 +321,7 @@ pub enum Status {
 
 /// Trigger for switching between search strategies.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum SwitchTrigger {
 	/// Switch after the given number of conflicts have been encountered.
 	Conflicts(u64),

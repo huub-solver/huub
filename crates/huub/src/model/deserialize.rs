@@ -19,6 +19,7 @@ use crate::{
 
 /// Reference to a decision in a [`Model`](crate::model::Model).
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum AnyView {
 	/// Reference to a Boolean decision.
 	Bool(View<bool>),
@@ -33,6 +34,7 @@ pub enum AnyView {
 /// Note that a [`Branching`] might be ignored (or used as only a suggestion) in
 /// [`Solver`] depending on the configuration.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum Branching {
 	/// Make a search decision by using the [`VariableSelection`] to select a
 	/// Boolean decision variable, and then set its value by using the

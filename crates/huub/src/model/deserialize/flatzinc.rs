@@ -214,6 +214,7 @@ pub enum ConstraintIdent {
 /// Errors that can occur when converting a [`FlatZinc`] instance to a [`Model`]
 /// or [`Solver`](crate::solver::Solver) object.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum FlatZincError {
 	/// FlatZinc instance contained a decision variable with an unsupported
 	/// type.

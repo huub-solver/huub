@@ -75,7 +75,7 @@ pub struct IntBrancher {
 /// Strategy for limiting the domain of a selected decision variable for a
 /// [`BoolBrancher`] or [`IntBrancher`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum ValueSelection {
+#[non_exhaustive]
 	/// Set the decision variable to its current maximum value.
 	IndomainMax,
 	/// Set the decision variable to its current minimum value.
@@ -91,7 +91,7 @@ pub enum ValueSelection {
 /// Strategy of selecting the next decision variable for a [`BoolBrancher`] or
 /// [`IntBrancher`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum VariableSelection {
+#[non_exhaustive]
 	/// Select the unfixed decision variable with the largest remaining domain
 	/// size, using the order of the variables in case of a tie.
 	AntiFirstFail,
