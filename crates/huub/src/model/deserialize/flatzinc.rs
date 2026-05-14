@@ -37,7 +37,7 @@ use crate::{
 	},
 	solver::{
 		self,
-		branchers::{ValueSelection, VariableSelection},
+		branchers::{DecisionSelection, DomainSelection},
 	},
 };
 
@@ -699,8 +699,8 @@ impl<'a> FznModelBuilder<'a> {
 							.iter()
 							.map(|l| self.lit_bool(l))
 							.try_collect()?;
-						let var_sel = Self::ann_var_sel(var_sel)?;
-						let val_sel = Self::ann_val_sel(val_sel)?;
+						let var_sel = Self::ann_dcn_sel(var_sel)?;
+						let val_sel = Self::ann_dom_sel(val_sel)?;
 						Ok((Vec::new(), vec![Branching::Bool(vars, var_sel, val_sel)]))
 					} else {
 						Err(FlatZincError::InvalidNumArgs {
@@ -717,8 +717,8 @@ impl<'a> FznModelBuilder<'a> {
 							.iter()
 							.map(|l| self.lit_int(l))
 							.try_collect()?;
-						let var_sel = Self::ann_var_sel(var_sel)?;
-						let val_sel = Self::ann_val_sel(val_sel)?;
+						let var_sel = Self::ann_dcn_sel(var_sel)?;
+						let val_sel = Self::ann_dom_sel(val_sel)?;
 
 						Ok((Vec::new(), vec![Branching::Int(vars, var_sel, val_sel)]))
 					} else {
@@ -823,10 +823,10 @@ impl<'a> FznModelBuilder<'a> {
 		Ok((Vec::new(), Vec::new()))
 	}
 
-	/// Extract an [`ValueSelection`] from an [`AnnotationArgument`] in a
+	/// Extract an [`DomainSelection`] from an [`AnnotationArgument`] in a
 	/// [`FlatZinc`] instance, or return a
 	/// [`FlatZincError::InvalidArgumentType`] if an invalid type.
-	fn ann_val_sel(arg: &AnnotationArgument<FznIdent>) -> Result<ValueSelection, FlatZincError> {
+	fn ann_dom_sel(arg: &AnnotationArgument<FznIdent>) -> Result<DomainSelection, FlatZincError> {
 		let AnnotationArgument::Literal(AnnotationLiteral::Annotation(ann)) = arg else {
 			return Err(FlatZincError::InvalidArgumentType {
 				expected: "ann",
@@ -836,11 +836,11 @@ impl<'a> FznModelBuilder<'a> {
 		if let Annotation::Atom(FznIdent::Known(KnownIdent::Annotation(ann))) = ann {
 			match ann {
 				AnnotationIdent::ValSelIndomain | AnnotationIdent::ValSelIndomainMin => {
-					return Ok(ValueSelection::IndomainMin);
+					return Ok(DomainSelection::IndomainMin);
 				}
-				AnnotationIdent::ValSelIndomainMax => return Ok(ValueSelection::IndomainMax),
-				AnnotationIdent::ValSelOutdomainMax => return Ok(ValueSelection::OutdomainMax),
-				AnnotationIdent::ValSelOutdomainMin => return Ok(ValueSelection::OutdomainMin),
+				AnnotationIdent::ValSelIndomainMax => return Ok(DomainSelection::IndomainMax),
+				AnnotationIdent::ValSelOutdomainMax => return Ok(DomainSelection::OutdomainMax),
+				AnnotationIdent::ValSelOutdomainMin => return Ok(DomainSelection::OutdomainMin),
 				_ => {}
 			}
 		}
@@ -850,13 +850,13 @@ impl<'a> FznModelBuilder<'a> {
 			fallback = "indomain_min",
 			"unsupported value selection"
 		);
-		Ok(ValueSelection::IndomainMin)
+		Ok(DomainSelection::IndomainMin)
 	}
 
-	/// Extract an [`VariableSelection`] from an [`AnnotationArgument`] in a
+	/// Extract an [`DecisionSelection`] from an [`AnnotationArgument`] in a
 	/// [`FlatZinc`] instance, or return a
 	/// [`FlatZincError::InvalidArgumentType`] if an invalid type.
-	fn ann_var_sel(arg: &AnnotationArgument<FznIdent>) -> Result<VariableSelection, FlatZincError> {
+	fn ann_dcn_sel(arg: &AnnotationArgument<FznIdent>) -> Result<DecisionSelection, FlatZincError> {
 		let AnnotationArgument::Literal(AnnotationLiteral::Annotation(ann)) = arg else {
 			return Err(FlatZincError::InvalidArgumentType {
 				expected: "ann",
@@ -866,12 +866,12 @@ impl<'a> FznModelBuilder<'a> {
 		if let Annotation::Atom(FznIdent::Known(KnownIdent::Annotation(ann))) = ann {
 			match ann {
 				AnnotationIdent::VarSelAntiFirstFail => {
-					return Ok(VariableSelection::AntiFirstFail);
+					return Ok(DecisionSelection::AntiFirstFail);
 				}
-				AnnotationIdent::VarSelFirstFail => return Ok(VariableSelection::FirstFail),
-				AnnotationIdent::VarSelInputOrder => return Ok(VariableSelection::InputOrder),
-				AnnotationIdent::VarSelLargest => return Ok(VariableSelection::Largest),
-				AnnotationIdent::VarSelSmallest => return Ok(VariableSelection::Smallest),
+				AnnotationIdent::VarSelFirstFail => return Ok(DecisionSelection::FirstFail),
+				AnnotationIdent::VarSelInputOrder => return Ok(DecisionSelection::InputOrder),
+				AnnotationIdent::VarSelLargest => return Ok(DecisionSelection::Largest),
+				AnnotationIdent::VarSelSmallest => return Ok(DecisionSelection::Smallest),
 				_ => {}
 			}
 		}
@@ -881,7 +881,7 @@ impl<'a> FznModelBuilder<'a> {
 			fallback = "first_fail",
 			"unsupported value selection"
 		);
-		Ok(VariableSelection::FirstFail)
+		Ok(DecisionSelection::FirstFail)
 	}
 
 	/// Check whether an annotation atom is present in the given list of

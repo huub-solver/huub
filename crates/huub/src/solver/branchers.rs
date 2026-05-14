@@ -17,18 +17,18 @@ use crate::{
 	},
 };
 
-/// General brancher for Boolean variables that makes search decisions by
-/// following a given [`VariableSelection`] and [`ValueSelection`] strategy.
+/// General brancher for Boolean decision variables that makes search decisions
+/// by following a given [`DecisionSelection`] and [`DomainSelection`] strategy.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct BoolBrancher {
-	/// Boolean variables to be branched on.
+	/// Boolean decision variables to be branched on.
 	vars: Vec<Decision<bool>>,
-	/// [`VariableSelection`] strategy used to select the next decision variable
+	/// [`DecisionSelection`] strategy used to select the next decision variable
 	/// to branch on.
-	var_sel: VariableSelection,
-	/// [`ValueSelection`] strategy used to select the way in which to branch on
-	/// the selected decision variable.
-	val_sel: ValueSelection,
+	var_sel: DecisionSelection,
+	/// [`DomainSelection`] strategy used to select the way in which to branch
+	/// on the selected decision variable.
+	val_sel: DomainSelection,
 	/// The start of the unfixed variables in `vars`.
 	next: Trailed<usize>,
 }
@@ -57,17 +57,17 @@ pub enum Directive {
 }
 
 /// General brancher for integer variables that makes search decisions by
-/// following a given [`VariableSelection`] and [`ValueSelection`] strategy.
+/// following a given [`DecisionSelection`] and [`DomainSelection`] strategy.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IntBrancher {
 	/// Integer variables to be branched on.
 	vars: Vec<View<IntVal>>,
-	/// [`VariableSelection`] strategy used to select the next decision variable
+	/// [`DecisionSelection`] strategy used to select the next decision variable
 	/// to branch on.
-	var_sel: VariableSelection,
-	/// [`ValueSelection`] strategy used to select the way in which to branch on
-	/// the selected decision variable.
-	val_sel: ValueSelection,
+	var_sel: DecisionSelection,
+	/// [`DomainSelection`] strategy used to select the way in which to branch
+	/// on the selected decision variable.
+	val_sel: DomainSelection,
 	/// The start of the unfixed variables in `vars`.
 	next: Trailed<usize>,
 }
@@ -76,6 +76,7 @@ pub struct IntBrancher {
 /// [`BoolBrancher`] or [`IntBrancher`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
+pub enum DomainSelection {
 	/// Set the decision variable to its current maximum value.
 	IndomainMax,
 	/// Set the decision variable to its current minimum value.
@@ -92,6 +93,7 @@ pub struct IntBrancher {
 /// [`IntBrancher`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
+pub enum DecisionSelection {
 	/// Select the unfixed decision variable with the largest remaining domain
 	/// size, using the order of the variables in case of a tie.
 	AntiFirstFail,
@@ -125,8 +127,8 @@ impl BoolBrancher {
 	pub fn new_in(
 		solver: &mut impl BrancherInitActions,
 		vars: Vec<View<bool>>,
-		var_sel: VariableSelection,
-		val_sel: ValueSelection,
+		var_sel: DecisionSelection,
+		val_sel: DomainSelection,
 	) {
 		let vars: Vec<_> = vars
 			.into_iter()
@@ -165,11 +167,11 @@ where
 		// Boolean variable selection currently selects the first unfixed variable.
 		debug_assert!(matches!(
 			self.var_sel,
-			VariableSelection::InputOrder
-				| VariableSelection::Smallest
-				| VariableSelection::Largest
-				| VariableSelection::FirstFail
-				| VariableSelection::AntiFirstFail
+			DecisionSelection::InputOrder
+				| DecisionSelection::Smallest
+				| DecisionSelection::Largest
+				| DecisionSelection::FirstFail
+				| DecisionSelection::AntiFirstFail
 		));
 
 		let mut loc = None;
@@ -191,8 +193,8 @@ where
 		// select the next value to branch on based on the value selection strategy
 		Directive::Select(
 			match self.val_sel {
-				ValueSelection::IndomainMin | ValueSelection::OutdomainMax => !var,
-				ValueSelection::IndomainMax | ValueSelection::OutdomainMin => var,
+				DomainSelection::IndomainMin | DomainSelection::OutdomainMax => !var,
+				DomainSelection::IndomainMax | DomainSelection::OutdomainMin => var,
 			}
 			.into(),
 		)
@@ -214,7 +216,7 @@ impl IntBrancher {
 	/// # 	model::Model,
 	/// # 	solver::{
 	/// # 		Solver, Status, Valuation,
-	/// # 		branchers::{IntBrancher, ValueSelection, VariableSelection},
+	/// # 		branchers::{IntBrancher, DomainSelection, DecisionSelection},
 	/// # 	},
 	/// # };
 	/// # let mut model = Model::default();
@@ -227,8 +229,8 @@ impl IntBrancher {
 	/// IntBrancher::new_in(
 	/// 	&mut solver,
 	/// 	vec![x, y],
-	/// 	VariableSelection::FirstFail,
-	/// 	ValueSelection::IndomainMin,
+	/// 	DecisionSelection::FirstFail,
+	/// 	DomainSelection::IndomainMin,
 	/// );
 	///
 	/// # let status = solver
@@ -243,8 +245,8 @@ impl IntBrancher {
 	pub fn new_in(
 		solver: &mut impl BrancherInitActions,
 		vars: Vec<View<IntVal>>,
-		var_sel: VariableSelection,
-		val_sel: ValueSelection,
+		var_sel: DecisionSelection,
+		val_sel: DomainSelection,
 	) {
 		let vars: Vec<_> = vars
 			.into_iter()
@@ -279,23 +281,23 @@ where
 		}
 
 		let score = |var: View<IntVal>| match self.var_sel {
-			VariableSelection::AntiFirstFail | VariableSelection::FirstFail => {
+			DecisionSelection::AntiFirstFail | DecisionSelection::FirstFail => {
 				let (lb, ub) = var.bounds(actions);
 				ub - lb
 			}
-			VariableSelection::InputOrder => 0,
-			VariableSelection::Largest => var.max(actions),
-			VariableSelection::Smallest => var.min(actions),
+			DecisionSelection::InputOrder => 0,
+			DecisionSelection::Largest => var.max(actions),
+			DecisionSelection::Smallest => var.min(actions),
 		};
 
 		let is_better = |incumbent_score, new_score| match self.var_sel {
-			VariableSelection::AntiFirstFail | VariableSelection::Largest => {
+			DecisionSelection::AntiFirstFail | DecisionSelection::Largest => {
 				incumbent_score < new_score
 			}
-			VariableSelection::FirstFail | VariableSelection::Smallest => {
+			DecisionSelection::FirstFail | DecisionSelection::Smallest => {
 				incumbent_score > new_score
 			}
-			VariableSelection::InputOrder => unreachable!(),
+			DecisionSelection::InputOrder => unreachable!(),
 		};
 
 		let mut first_unfixed = begin;
@@ -315,7 +317,7 @@ where
 				}
 			} else {
 				selection = Some((self.vars[i], score(self.vars[i])));
-				if self.var_sel == VariableSelection::InputOrder {
+				if self.var_sel == DecisionSelection::InputOrder {
 					break;
 				}
 			}
@@ -333,10 +335,12 @@ where
 		let view = next_var.lit(
 			actions,
 			match self.val_sel {
-				ValueSelection::IndomainMin => IntLitMeaning::Less(next_var.min(actions) + 1),
-				ValueSelection::IndomainMax => IntLitMeaning::GreaterEq(next_var.max(actions)),
-				ValueSelection::OutdomainMin => IntLitMeaning::GreaterEq(next_var.min(actions) + 1),
-				ValueSelection::OutdomainMax => IntLitMeaning::Less(next_var.max(actions)),
+				DomainSelection::IndomainMin => IntLitMeaning::Less(next_var.min(actions) + 1),
+				DomainSelection::IndomainMax => IntLitMeaning::GreaterEq(next_var.max(actions)),
+				DomainSelection::OutdomainMin => {
+					IntLitMeaning::GreaterEq(next_var.min(actions) + 1)
+				}
+				DomainSelection::OutdomainMax => IntLitMeaning::Less(next_var.max(actions)),
 			},
 		);
 		Directive::Select(view)

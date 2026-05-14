@@ -15,7 +15,7 @@ use crate::{
 	model::{Model, deserialize::AnyView as ModelView},
 	solver::{
 		AnyView as SolverView, LiteralStrategy, Solver, Status, Valuation, Value,
-		branchers::{IntBrancher, ValueSelection, VariableSelection},
+		branchers::{DecisionSelection, DomainSelection, IntBrancher},
 	},
 };
 
@@ -151,8 +151,8 @@ fn test_duplicate_propagation() {
 	IntBrancher::new_in(
 		&mut slv,
 		vec![a, b],
-		VariableSelection::InputOrder,
-		ValueSelection::IndomainMax,
+		DecisionSelection::InputOrder,
+		DomainSelection::IndomainMax,
 	);
 	slv.expect_solutions(
 		&[a, b],

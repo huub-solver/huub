@@ -55,7 +55,7 @@ A `Brancher` is an object that directs the search.
 Huub provides two pre-built branchers for common use cases: `IntBrancher` for integer decisions and `BoolBrancher` for Boolean decisions.
 You can also implement custom branchers for specialized problems.
 
-### Decision and value selection strategies
+### Decision and domain selection strategies
 
 The built-in branchers use two independent strategies to make decisions:
 
@@ -70,7 +70,7 @@ The built-in branchers use two independent strategies to make decisions:
   Useful when you want to explore small values first.
 - `Largest`: Choose the decision with the largest upper bound. Useful when you want to explore large values first.
 
-**Value selection** — how to limit the chosen decision:
+**Domain selection** — how to limit the chosen decision:
 
 - `IndomainMin`: Assign the decision to its **lower bound** (smallest possible value). This explores small values first.
 - `IndomainMax`: Assign the decision to its **upper bound** (largest possible value). This explores large values first.
@@ -79,12 +79,12 @@ The built-in branchers use two independent strategies to make decisions:
 
 ### Using branchers in the solver
 
-To use a brancher, create it with a list of decisions, a decision selection strategy, and a value selection strategy, then add it to the solver:
+To use a brancher, create it with a list of decisions, a decision selection strategy, and a domain selection strategy, then add it to the solver:
 
 ```rust
 # extern crate huub;
 # use huub::solver::{
-# 	branchers::{IntBrancher, ValueSelection, VariableSelection},
+# 	branchers::{DecisionSelection, DomainSelection, IntBrancher},
 # 	Solver, Valuation,
 # };
 # let mut solver: Solver = Solver::default();
@@ -95,8 +95,8 @@ To use a brancher, create it with a list of decisions, a decision selection stra
 IntBrancher::new_in(
 	&mut solver,
 	vec![x, y],
-	VariableSelection::FirstFail,
-	ValueSelection::IndomainMin,
+	DecisionSelection::FirstFail,
+	DomainSelection::IndomainMin,
 );
 
 solver

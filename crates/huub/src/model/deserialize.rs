@@ -12,7 +12,7 @@ use crate::{
 	solver::{
 		Solver,
 		branchers::{
-			BoolBrancher, IntBrancher, ValueSelection, VariableSelection, WarmStartBrancher,
+			BoolBrancher, DecisionSelection, DomainSelection, IntBrancher, WarmStartBrancher,
 		},
 	},
 };
@@ -36,14 +36,14 @@ pub enum AnyView {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum Branching {
-	/// Make a search decision by using the [`VariableSelection`] to select a
+	/// Make a search decision by using the [`DecisionSelection`] to select a
 	/// Boolean decision variable, and then set its value by using the
-	/// [`ValueSelection`].
-	Bool(Vec<View<bool>>, VariableSelection, ValueSelection),
-	/// Make a search decision by using the [`VariableSelection`] to select a
+	/// [`DomainSelection`].
+	Bool(Vec<View<bool>>, DecisionSelection, DomainSelection),
+	/// Make a search decision by using the [`DecisionSelection`] to select a
 	/// integer decision variable, and then limit the domain of the variable by
-	/// using the [`ValueSelection`].
-	Int(Vec<View<IntVal>>, VariableSelection, ValueSelection),
+	/// using the [`DomainSelection`].
+	Int(Vec<View<IntVal>>, DecisionSelection, DomainSelection),
 	/// Search by sequentially applying the given branching strategies.
 	Seq(Vec<Branching>),
 	/// Search by enforcing the given Boolean expressions, but abandon the

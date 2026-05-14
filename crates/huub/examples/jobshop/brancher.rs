@@ -10,7 +10,7 @@ use huub::{
 	model::{self as huub_model, deserialize::Branching},
 	solver::{
 		self, IntLitMeaning, Solver,
-		branchers::{Brancher, Directive, ValueSelection, VariableSelection},
+		branchers::{Brancher, DecisionSelection, Directive, DomainSelection},
 	},
 };
 
@@ -359,8 +359,8 @@ impl StaticBranching {
 
 		Branching::Int(
 			vars,
-			VariableSelection::InputOrder,
-			ValueSelection::IndomainMin,
+			DecisionSelection::InputOrder,
+			DomainSelection::IndomainMin,
 		)
 	}
 }
