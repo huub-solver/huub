@@ -472,10 +472,7 @@ mod tests {
 		actions::{IntInspectionActions, IntPropagationActions},
 		constraints::int_array_element::IntArrayElementBounds,
 		model::Model,
-		solver::{
-			Solver,
-			decision::integer::{EncodingType, IntDecision},
-		},
+		solver::{LiteralStrategy, Solver},
 	};
 
 	#[test]
@@ -524,36 +521,26 @@ mod tests {
 	#[traced_test]
 	fn test_element_bounds_sat() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(3..=4),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(2..=3),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let c = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(4..=5),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let y = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(3..=4),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let index = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(0..=2),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
+		let a = slv
+			.new_int_decision(3..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(2..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
+		let c = slv
+			.new_int_decision(4..=5)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
+		let y = slv
+			.new_int_decision(3..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
+		let index = slv
+			.new_int_decision(0..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntArrayElementBounds::post(&mut slv, vec![a, b, c], index, y).unwrap();
 
@@ -583,30 +570,22 @@ mod tests {
 	#[traced_test]
 	fn test_element_holes() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=3),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=3),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let y = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(3..=4),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let index = IntDecision::new_in(
-			&mut slv,
-			IntSet::from_iter([0..=0, 3..=3]),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
+		let a = slv
+			.new_int_decision(1..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(1..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
+		let y = slv
+			.new_int_decision(3..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
+		let index = slv
+			.new_int_decision(IntSet::from_iter([0..=0, 3..=3]))
+			.order_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntArrayElementBounds::post(&mut slv, vec![a, b], index, y).unwrap();
 

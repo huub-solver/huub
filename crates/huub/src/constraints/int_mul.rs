@@ -232,28 +232,15 @@ mod tests {
 	use crate::{
 		IntVal,
 		constraints::int_mul::IntMulBounds,
-		solver::{
-			Solver,
-			decision::integer::{EncodingType, IntDecision},
-		},
+		solver::{LiteralStrategy, Solver},
 	};
 
 	#[test]
 	#[traced_test]
 	fn overflow_intermediate_sat() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			(IntVal::MIN..=IntVal::MAX).into(),
-			EncodingType::Lazy,
-			EncodingType::Lazy,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			(IntVal::MIN..=IntVal::MAX).into(),
-			EncodingType::Lazy,
-			EncodingType::Lazy,
-		);
+		let a = slv.new_int_decision(IntVal::MIN..=IntVal::MAX).view();
+		let b = slv.new_int_decision(IntVal::MIN..=IntVal::MAX).view();
 
 		IntMulBounds::post(&mut slv, a, b, 2);
 		slv.expect_solutions(
@@ -270,18 +257,8 @@ mod tests {
 	#[traced_test]
 	fn overflow_unsat() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			(2..=IntVal::MAX).into(),
-			EncodingType::Lazy,
-			EncodingType::Lazy,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			(IntVal::MIN..=IntVal::MAX).into(),
-			EncodingType::Lazy,
-			EncodingType::Lazy,
-		);
+		let a = slv.new_int_decision(2..=IntVal::MAX).view();
+		let b = slv.new_int_decision(IntVal::MIN..=IntVal::MAX).view();
 
 		IntMulBounds::post(&mut slv, IntVal::MAX, a, b);
 		slv.assert_unsatisfiable();
@@ -291,24 +268,18 @@ mod tests {
 	#[traced_test]
 	fn simple_sat() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			(-2..=1).into(),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			(-1..=2).into(),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let c = IntDecision::new_in(
-			&mut slv,
-			(-4..=2).into(),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
+		let a = slv
+			.new_int_decision(-2..=1)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(-1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
+		let c = slv
+			.new_int_decision(-4..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntMulBounds::post(&mut slv, a, b, c);
 		slv.expect_solutions(
@@ -337,18 +308,8 @@ mod tests {
 	#[traced_test]
 	fn underflow_unsat() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			(2..=IntVal::MAX).into(),
-			EncodingType::Lazy,
-			EncodingType::Lazy,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			(IntVal::MIN..=IntVal::MAX).into(),
-			EncodingType::Lazy,
-			EncodingType::Lazy,
-		);
+		let a = slv.new_int_decision(2..=IntVal::MAX).view();
+		let b = slv.new_int_decision(IntVal::MIN..=IntVal::MAX).view();
 
 		IntMulBounds::post(&mut slv, IntVal::MIN, a, b);
 		slv.assert_unsatisfiable();

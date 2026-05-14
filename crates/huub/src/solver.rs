@@ -18,21 +18,24 @@ use std::{
 	fmt::Debug,
 	hash::Hash,
 	mem,
+	num::NonZero,
 	ops::{Add, AddAssign, Not},
 	rc::Rc,
 };
 
-use bon::Builder;
+use bon::{Builder, bon};
 use itertools::Itertools;
 pub use pindakaas::solver::cadical::Cadical;
 use pindakaas::{
-	ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable,
+	ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable, VarRange,
 	solver::{
 		Assumptions, FailedAssumptions, LearnCallback, SolveResult as SatSolveResult,
 		TerminateCallback,
 		propagation::{ExternalPropagation, SolvingActions},
 	},
 };
+use rangelist::IntervalIterator;
+use rustc_hash::FxHashMap;
 use tracing::{debug, warn};
 
 pub use crate::solver::{
@@ -41,7 +44,7 @@ pub use crate::solver::{
 	view::{DefaultView, View, boolean::BoolView, integer::IntView},
 };
 use crate::{
-	Clause, IntVal,
+	Clause, IntSet, IntVal,
 	actions::{
 		BrancherInitActions, ConstructionActions, DecisionActions, IntDecisionActions,
 		IntInspectionActions, PostingActions, ReasoningContext, ReasoningEngine, Trailed,
@@ -51,6 +54,7 @@ use crate::{
 	helpers::bytes::Bytes,
 	solver::{
 		branchers::BoxedBrancher,
+		decision::integer::{DirectStorage, IntDecision, LazyOrderStorage, OrderStorage},
 		engine::{Engine, PropRef},
 		initialization_context::InitializationContext,
 		queue::PropagatorInfo,
@@ -101,6 +105,17 @@ pub enum IntLitMeaning {
 	GreaterEq(IntVal),
 	/// Literal representing the condition `x < i`.
 	Less(IntVal),
+}
+
+/// Strategy used to create SAT literals for complex decision variables.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum LiteralStrategy {
+	/// All literals are created before solving starts.
+	Eager,
+	/// Literals are created the first time they are requested.
+	#[default]
+	Lazy,
 }
 
 /// An assumption checker that can be used when no assumptions are used.
@@ -458,13 +473,10 @@ where
 	///
 	/// Collect all satisfying assignments:
 	/// ```
-	/// # use huub::{model::Model, solver::{Solver, Status}};
-	/// # let mut model = Model::default();
-	/// # let x = model.new_int_decision(1..=3);
-	/// # let y = model.new_int_decision(1..=3);
-	/// # let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
-	/// # let x = map.get(&mut solver, x);
-	/// # let y = map.get(&mut solver, y);
+	/// # use huub::solver::{Solver, Status};
+	/// # let mut solver: Solver = Solver::default();
+	/// # let x = solver.new_int_decision(1..=3).view();
+	/// # let y = solver.new_int_decision(1..=3).view();
 	/// let mut solutions = Vec::new();
 	/// let status = solver
 	/// 	.solve()
@@ -851,12 +863,8 @@ impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 	///
 	/// Simple satisfiability solving:
 	/// ```
-	/// # use huub::{
-	/// # 	model::Model,
-	/// # 	solver::{Solver, Status},
-	/// # };
-	/// # let mut model = Model::default();
-	/// # let (mut solver, _): (Solver, _) = model.lower().to_solver()?;
+	/// # use huub::solver::{Solver, Status};
+	/// # let mut solver: Solver = Solver::default();
 	/// let status = solver.solve().satisfy();
 	/// assert_eq!(status, Status::Satisfied);
 	/// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -864,15 +872,9 @@ impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 	///
 	/// Satisfiability with callback to inspect solution:
 	/// ```
-	/// # use huub::{
-	/// # 	model::Model,
-	/// # 	solver::{Solver, Status, Valuation},
-	/// # };
-	/// # let mut model = Model::default();
-	/// # let x = model.new_int_decision(1..=4);
-	/// # model.linear(x).ne(2).post();
-	/// # let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
-	/// # let x = map.get(&mut solver, x);
+	/// # use huub::solver::{Solver, Status, Valuation};
+	/// # let mut solver: Solver = Solver::default();
+	/// # let x = solver.new_int_decision(1..=4).view();
 	/// let mut value = None;
 	/// let status = solver
 	/// 	.solve()
@@ -881,20 +883,15 @@ impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 	/// 	})
 	/// 	.satisfy();
 	/// assert_eq!(status, Status::Satisfied);
-	/// assert_ne!(value, Some(2));
+	/// assert!(value.is_some());
 	/// # Ok::<(), Box<dyn std::error::Error>>(())
 	/// ```
 	///
 	/// Optimization with callbacks:
 	/// ```
-	/// # use huub::{
-	/// # 	model::Model,
-	/// # 	solver::{Solver, Status, Valuation},
-	/// # };
-	/// # let mut model = Model::default();
-	/// # let x = model.new_int_decision(1..=4);
-	/// # let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
-	/// # let x = map.get(&mut solver, x);
+	/// # use huub::solver::{Solver, Status};
+	/// # let mut solver: Solver = Solver::default();
+	/// # let x = solver.new_int_decision(1..=4).view();
 	/// let (status, optimum) = solver.solve().on_solution(|_| {}).minimize(x);
 	/// assert_eq!(status, Status::Complete);
 	/// assert_eq!(optimum, Some(1));
@@ -903,29 +900,23 @@ impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 	///
 	/// With assumptions for incremental solving:
 	/// ```
-	/// # use huub::{
-	/// # 	model::Model,
-	/// # 	solver::{Solver, Status},
-	/// # };
-	/// # let mut model = Model::default();
-	/// # let b = model.new_bool_decision();
-	/// # let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
-	/// # let b = map.get(&mut solver, b);
-	/// let status = solver.solve().assuming([b]).on_failure(|_| {}).satisfy();
+	/// # use huub::solver::{Solver, Status};
+	/// # let mut solver: Solver = Solver::default();
+	/// # let b = solver.new_bool_decision();
+	/// let status = solver
+	/// 	.solve()
+	/// 	.assuming([b.into()])
+	/// 	.on_failure(|_| {})
+	/// 	.satisfy();
 	/// assert_eq!(status, Status::Satisfied);
 	/// # Ok::<(), Box<dyn std::error::Error>>(())
 	/// ```
 	///
 	/// Enumerating all solutions:
 	/// ```
-	/// # use huub::{
-	/// # 	model::Model,
-	/// # 	solver::{Solver, Status, Valuation},
-	/// # };
-	/// # let mut model = Model::default();
-	/// # let x = model.new_int_decision(1..=3);
-	/// # let (mut solver, map): (Solver, _) = model.lower().to_solver()?;
-	/// # let x = map.get(&mut solver, x);
+	/// # use huub::solver::{Solver, Status};
+	/// # let mut solver: Solver = Solver::default();
+	/// # let x = solver.new_int_decision(1..=3).view();
 	/// let mut count = 0;
 	/// let status = solver
 	/// 	.solve()
@@ -989,6 +980,7 @@ impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 	}
 }
 
+#[bon]
 impl<Sat: ExternalPropagation> Solver<Sat> {
 	/// Method used to add a no-good clause from a solution. This clause can be
 	/// used to ensure that the same solution is not found again.
@@ -1107,6 +1099,144 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		let lit = self.sat.new_lit();
 		self.engine.borrow_mut().state.statistics.eager_literals += 1;
 		Decision(lit)
+	}
+
+	/// Create a new integer decision variable with the given `domain`.
+	///
+	/// Use the optional `order_literals` and `direct_literals` setters to
+	/// choose whether order and direct literals are created eagerly or lazily.
+	/// Direct literal can only be eager when the order literals are also
+	/// eager. Both default to lazy.
+	///
+	/// Finalize the builder with `.view()` to always get a [`View<IntVal>`], or
+	/// with `.decision()` to get a [`Decision<IntVal>`] when the domain has at
+	/// least three values.
+	#[builder(finish_fn(name = view, doc {
+		/// Finalize the builder and return a [`View`] of the new integer decision.
+		///
+		/// This always succeeds, even for domains with one or two values, which
+		/// are represented more compactly than a full integer decision.
+	}))]
+	#[allow(
+		clippy::missing_docs_in_private_items,
+		reason = "unable to document domain member on generated builder"
+	)]
+	pub fn new_int_decision(
+		&mut self,
+		#[builder(start_fn, into)] domain: IntSet,
+		#[builder(default)] mut order_literals: LiteralStrategy,
+		#[builder(default)] direct_literals: LiteralStrategy,
+	) -> View<IntVal> {
+		let orig_domain_len = domain.card();
+		assert_ne!(
+			orig_domain_len,
+			Some(0),
+			"Unable to create integer variable empty domain"
+		);
+		if orig_domain_len == Some(1) {
+			return (*domain.lower_bound().unwrap()).into();
+		}
+		let lb = *domain.lower_bound().unwrap();
+		let ub = *domain.upper_bound().unwrap();
+		if orig_domain_len == Some(2) {
+			let lit = self.new_bool_decision();
+			return LinearBoolView::new(NonZero::new(ub - lb).unwrap(), lb, lit).into();
+		}
+		if (direct_literals, order_literals) == (LiteralStrategy::Eager, LiteralStrategy::Lazy) {
+			warn!(
+				target: "solver",
+				"coercing order_literals to eager because direct_literals is eager"
+			);
+			order_literals = LiteralStrategy::Eager;
+		};
+
+		let mut engine = self.engine.borrow_mut();
+		let upper_bound = engine.state.trail.track(ub);
+		let order_encoding = match order_literals {
+			LiteralStrategy::Eager => {
+				let card = orig_domain_len
+					.expect("unable to create literals eagerly for domains that exceed usize::MAX");
+				engine.state.statistics.eager_literals += (card - 1) as u64;
+				OrderStorage::Eager {
+					lower_bound: engine.state.trail.track(lb),
+					storage: self.sat.new_var_range(card - 1),
+				}
+			}
+			LiteralStrategy::Lazy => {
+				OrderStorage::Lazy(LazyOrderStorage::new_in(&mut engine.state.trail))
+			}
+		};
+		let direct_encoding = match direct_literals {
+			LiteralStrategy::Eager => {
+				let card = orig_domain_len
+					.expect("unable to create literals eagerly for domains that exceed usize::MAX");
+				engine.state.statistics.eager_literals += (card - 2) as u64;
+				DirectStorage::Eager(self.sat.new_var_range(card - 2))
+			}
+			LiteralStrategy::Lazy => DirectStorage::Lazy(FxHashMap::default()),
+		};
+		// Drop engine to allow SAT interaction
+		drop(engine);
+
+		// Enforce consistency constraints for eager literals
+		if let OrderStorage::Eager { storage, .. } = &order_encoding {
+			let mut direct_enc_iter = if let DirectStorage::Eager(vars) = &direct_encoding {
+				Some(*vars)
+			} else {
+				None
+			}
+			.into_iter()
+			.flatten();
+			for (ord_i, ord_j) in (*storage).tuple_windows() {
+				let ord_i: RawLit = ord_i.into(); // x<i
+				let ord_j: RawLit = ord_j.into(); // x<j, where j = i + n and n≥1
+				self.sat.add_clause([!ord_i, ord_j]).unwrap(); // x<i -> x<(i+n)
+				if matches!(direct_encoding, DirectStorage::Eager(_)) {
+					let eq_i: RawLit = direct_enc_iter.next().unwrap().into();
+					self.sat.add_clause([!eq_i, !ord_i]).unwrap(); // x=i -> x≥i
+					self.sat.add_clause([!eq_i, ord_j]).unwrap(); // x=i -> x<(i+n)
+					self.sat.add_clause([eq_i, ord_i, !ord_j]).unwrap(); // x≠i -> (x<i \/
+					// x≥(i+n))
+				}
+			}
+			debug_assert!(direct_enc_iter.next().is_none());
+		}
+
+		// Create the resulting integer variable
+		let mut engine = self.engine.borrow_mut();
+		engine.state.int_vars.push(IntDecision {
+			direct_encoding,
+			domain,
+			order_encoding,
+			upper_bound,
+		});
+		let iv = Decision((engine.state.int_vars.len() - 1) as u32);
+		// Create propagator activation list
+		engine.state.int_activation.push(Default::default());
+		debug_assert_eq!(
+			engine.state.int_vars.len(),
+			engine.state.int_activation.len()
+		);
+
+		// Setup the boolean to integer mapping
+		if let OrderStorage::Eager { storage, .. } = engine.state.int_vars[iv.idx()].order_encoding
+		{
+			let mut vars = storage;
+			if let DirectStorage::Eager(vars2) = &engine.state.int_vars[iv.idx()].direct_encoding {
+				debug_assert_eq!(Into::<i32>::into(vars.end()) + 1, vars2.start().into());
+				vars = VarRange::new(vars.start(), vars2.end());
+			}
+			engine.state.bool_to_int.insert_eager(vars, iv);
+			engine
+				.state
+				.trail
+				.grow_to_boolvar(vars.clone().next_back().unwrap());
+			for l in vars {
+				self.sat.add_observed_var(l);
+			}
+		}
+
+		iv.into()
 	}
 
 	/// Set the overarching search strategy to use during solving.
@@ -1295,5 +1425,31 @@ impl AddAssign for SolverStatistics {
 		self.user_search_directives += other.user_search_directives;
 		self.eager_literals = self.eager_literals.max(other.eager_literals);
 		self.lazy_literals = self.lazy_literals.max(other.lazy_literals);
+	}
+}
+
+impl<'a, Sat, State> SolverNewIntDecisionBuilder<'a, Sat, State>
+where
+	Sat: ExternalPropagation,
+	State: solver_new_int_decision_builder::State,
+{
+	/// Finalize the builder and return the [`Decision<IntVal>`] for the new
+	/// integer variable.
+	///
+	/// # Panics
+	///
+	/// Panics if the domain has fewer than three values, because those domains
+	/// are represented as constants or linear Boolean views instead of a full
+	/// integer decision.
+	pub fn decision(self) -> Decision<IntVal>
+	where
+		State: solver_new_int_decision_builder::IsComplete,
+	{
+		let IntView::Linear(lin_view) = self.view().0 else {
+			panic!("domain did not contain at least three values");
+		};
+		debug_assert_eq!(lin_view.offset, 0);
+		debug_assert_eq!(lin_view.scale.get(), 1);
+		lin_view.var
 	}
 }

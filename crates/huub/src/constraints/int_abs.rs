@@ -200,30 +200,22 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntSet,
 		constraints::int_abs::IntAbsBounds,
-		solver::{
-			Solver,
-			decision::integer::{EncodingType, IntDecision},
-		},
+		solver::{LiteralStrategy, Solver},
 	};
 
 	#[test]
 	#[traced_test]
 	fn test_int_abs_sat() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			(-3..=3).into(),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(-3..=3),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
+		let a = slv
+			.new_int_decision(-3..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(-3..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntAbsBounds::post(&mut slv, a, b);
 

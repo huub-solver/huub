@@ -14,9 +14,8 @@ use crate::{
 	constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
 	model::{Model, deserialize::AnyView as ModelView},
 	solver::{
-		AnyView as SolverView, Solver, Status, Valuation, Value,
+		AnyView as SolverView, LiteralStrategy, Solver, Status, Valuation, Value,
 		branchers::{IntBrancher, ValueSelection, VariableSelection},
-		decision::integer::{EncodingType, IntDecision},
 	},
 };
 
@@ -53,9 +52,9 @@ fn lin_multi_alias() {
 	use crate::actions::{IntInspectionActions, IntSimplificationActions};
 
 	let mut prb = Model::default();
-	let x = prb.new_int_decision(IntSet::from(1..=10));
-	let y = prb.new_int_decision(IntSet::from(1..=10));
-	let z = prb.new_int_decision(IntSet::from(1..=10));
+	let x = prb.new_int_decision(1..=10);
+	let y = prb.new_int_decision(1..=10);
+	let z = prb.new_int_decision(1..=10);
 	let x_trans = x * -1 - 1;
 	let y_trans = y + 1;
 	let z_trans = z + 1;
@@ -131,18 +130,14 @@ fn test_bounding_sub() {
 #[test]
 fn test_duplicate_propagation() {
 	let mut slv = Solver::default();
-	let a = IntDecision::new_in(
-		&mut slv,
-		IntSet::from(0..=1),
-		EncodingType::Eager,
-		EncodingType::Lazy,
-	);
-	let b = IntDecision::new_in(
-		&mut slv,
-		IntSet::from(0..=1),
-		EncodingType::Eager,
-		EncodingType::Lazy,
-	);
+	let a = slv
+		.new_int_decision(0..=1)
+		.order_literals(LiteralStrategy::Eager)
+		.view();
+	let b = slv
+		.new_int_decision(0..=1)
+		.order_literals(LiteralStrategy::Eager)
+		.view();
 	IntLinearLessEqBounds::post(
 		&mut slv,
 		[
@@ -214,7 +209,7 @@ fn test_unify_int_impossible() {
 fn test_unify_int_lin_view_domains() {
 	let mut prb = Model::default();
 	let a = prb.new_int_decision(IntSet::from_iter([1..=1, 3..=3, 5..=5]));
-	let b = prb.new_int_decision(IntSet::from(1..=3));
+	let b = prb.new_int_decision(1..=3);
 
 	prb.linear(a * 6).eq(b * 2).post().unwrap();
 

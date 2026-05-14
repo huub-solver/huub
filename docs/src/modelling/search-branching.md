@@ -83,19 +83,13 @@ To use a brancher, create it with a list of decisions, a decision selection stra
 
 ```rust
 # extern crate huub;
-# use huub::{
-# 	model::Model,
-# 	solver::{
-# 		branchers::{IntBrancher, ValueSelection, VariableSelection},
-# 		Solver, Valuation,
-# 	},
+# use huub::solver::{
+# 	branchers::{IntBrancher, ValueSelection, VariableSelection},
+# 	Solver, Valuation,
 # };
-# let mut model = Model::default();
-# let x = model.new_int_decision(0..=100);
-# let y = model.new_int_decision(0..=100);
-# let (mut solver, map): (Solver, _) = model.lower().to_solver().unwrap();
-# let x = map.get(&mut solver, x);
-# let y = map.get(&mut solver, y);
+# let mut solver: Solver = Solver::default();
+# let x = solver.new_int_decision(0..=100).view();
+# let y = solver.new_int_decision(0..=100).view();
 // Use an IntBrancher to branch on decisions [x, y] using FirstFail and
 // IndomainMin
 IntBrancher::new_in(
@@ -127,15 +121,11 @@ This makes warm-starting robust: if your partial solution turns out to be incomp
 # extern crate huub;
 # use huub::{
 # 	actions::IntDecisionActions,
-# 	model::Model,
-# 	solver::{branchers::WarmStartBrancher, IntLitMeaning, Solver},
+# 	solver::{branchers::WarmStartBrancher, IntLitMeaning, Solver, View},
 # };
-# let mut model = Model::default();
-# let b = model.new_bool_decision();
-# let x = model.new_int_decision(1..=10);
-# let (mut solver, map): (Solver, _) = model.lower().to_solver().unwrap();
-# let b = map.get(&mut solver, b);
-# let x = map.get(&mut solver, x);
+# let mut solver: Solver = Solver::default();
+# let b: View<bool> = solver.new_bool_decision().into();
+# let x = solver.new_int_decision(1..=10).view();
 // Warm start by suggesting certain boolean decisions should be true
 let warm_start_decisions = vec![b, x.lit(&mut solver, IntLitMeaning::Eq(5))];
 
@@ -158,13 +148,9 @@ Once you have created a solver, you can search for solutions using the `solve()`
 
 ```rust
 # extern crate huub;
-# use huub::{
-# 	model::Model,
-# 	solver::{Solver, Status},
-# };
-# let mut model = Model::default();
-# let x = model.new_int_decision(1..=9);
-# let (mut solver, _): (Solver, _) = model.lower().to_solver().unwrap();
+# use huub::solver::{Solver, Status};
+# let mut solver: Solver = Solver::default();
+# let _x = solver.new_int_decision(1..=9).view();
 let status = solver
 	.solve()
 	.on_solution(|solution| {
@@ -195,12 +181,8 @@ The `set_terminate_callback` method allows you to provide a closure that returns
 # extern crate huub;
 # use std::time::Instant;
 #
-# use huub::{
-# 	model::Model,
-# 	solver::{Solver, Status, TerminationSignal},
-# };
-# let mut model = Model::default();
-# let (mut solver, map): (Solver, _) = model.lower().to_solver().unwrap();
+# use huub::solver::{Solver, Status, TerminationSignal};
+# let mut solver: Solver = Solver::default();
 let start_time = Instant::now();
 let time_limit = std::time::Duration::from_secs(10);
 
@@ -345,9 +327,8 @@ You can retrieve statistics about the search process to understand solver behavi
 
 ```rust
 # extern crate huub;
-# use huub::{model::Model, solver::Solver};
-# let mut model = Model::default();
-# let (mut solver, _): (Solver, _) = model.lower().to_solver().unwrap();
+# use huub::solver::Solver;
+# let mut solver: Solver = Solver::default();
 # let _ = solver.solve().on_solution(|_| {}).satisfy();
 let stats = solver.solver_statistics();
 

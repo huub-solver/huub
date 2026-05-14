@@ -341,34 +341,25 @@ mod tests {
 		IntSet,
 		constraints::int_div::IntDivBounds,
 		model::Model,
-		solver::{
-			Solver,
-			decision::integer::{EncodingType, IntDecision},
-		},
+		solver::{LiteralStrategy, Solver},
 	};
 
 	#[test]
 	#[traced_test]
 	fn test_int_div_sat() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			(-7..=7).into(),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			IntSet::from_iter([-3..=-1, 1..=3]),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let c = IntDecision::new_in(
-			&mut slv,
-			(-7..=7).into(),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
+		let a = slv
+			.new_int_decision(-7..=7)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(IntSet::from_iter([-3..=-1, 1..=3]))
+			.order_literals(LiteralStrategy::Eager)
+			.view();
+		let c = slv
+			.new_int_decision(-7..=7)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntDivBounds::post(&mut slv, a, b, c).unwrap();
 

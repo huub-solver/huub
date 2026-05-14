@@ -597,34 +597,28 @@ mod tests {
 			int_unique::{IntUniqueBounds, IntUniqueValue},
 		},
 		model::Model,
-		solver::{
-			Solver, Status, Valuation,
-			decision::integer::{EncodingType, IntDecision},
-		},
+		solver::{LiteralStrategy, Solver, Status, Valuation},
 	};
 
 	#[test]
 	#[traced_test]
 	fn test_all_different_bounds_sat_1() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let c = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let a = slv
+			.new_int_decision(1..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(1..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let c = slv
+			.new_int_decision(1..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 		IntUniqueBounds::post(&mut slv, vec![a, b, c]);
 		slv.assert_all_solutions(&[a, b, c], |sol| sol.iter().all_unique());
 	}
@@ -632,42 +626,36 @@ mod tests {
 	#[traced_test]
 	fn test_all_different_bounds_sat_2() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(3..=4),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(2..=4),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let c = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(3..=4),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let d = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(2..=5),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let e = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(3..=6),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let f = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=6),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let a = slv
+			.new_int_decision(3..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(2..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let c = slv
+			.new_int_decision(3..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let d = slv
+			.new_int_decision(2..=5)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let e = slv
+			.new_int_decision(3..=6)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let f = slv
+			.new_int_decision(1..=6)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntUniqueBounds::post(&mut slv, vec![a, b, c, d, e, f]);
 		slv.assert_all_solutions(&[a, b, c, d, e, f], |sol| sol.iter().all_unique());
@@ -677,42 +665,36 @@ mod tests {
 	#[traced_test]
 	fn test_all_different_bounds_sat_3() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(3..=6),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(3..=4),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let c = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(2..=5),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let d = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(2..=4),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let e = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(3..=4),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let f = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=6),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let a = slv
+			.new_int_decision(3..=6)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(3..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let c = slv
+			.new_int_decision(2..=5)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let d = slv
+			.new_int_decision(2..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let e = slv
+			.new_int_decision(3..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let f = slv
+			.new_int_decision(1..=6)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntUniqueBounds::post(&mut slv, vec![a, b, c, d, e, f]);
 		slv.assert_all_solutions(&[a, b, c, d, e, f], |sol| sol.iter().all_unique());
@@ -722,24 +704,21 @@ mod tests {
 	#[traced_test]
 	fn test_all_different_bounds_unsat() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let c = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let a = slv
+			.new_int_decision(1..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(1..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let c = slv
+			.new_int_decision(1..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntUniqueBounds::post(&mut slv, vec![a, b, c]);
 		IntLinearLessEqBounds::post(&mut slv, vec![-a, -b, -c], -8);
@@ -750,24 +729,21 @@ mod tests {
 	#[traced_test]
 	fn test_all_different_value_sat() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=4),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=4),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let c = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=4),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let a = slv
+			.new_int_decision(1..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(1..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let c = slv
+			.new_int_decision(1..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntUniqueValue::post(&mut slv, vec![a, b, c]);
 
@@ -778,24 +754,21 @@ mod tests {
 	#[traced_test]
 	fn test_all_different_value_unsat() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=2),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=2),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let c = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=2),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let a = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let c = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntUniqueValue::post(&mut slv, vec![a, b, c]);
 
@@ -808,7 +781,7 @@ mod tests {
 		let mut prb = Model::default();
 		let prev: Vec<_> = [
 			IntSet::from_iter([15..=15, 20..=20]),
-			IntSet::from(20..=20),
+			(20..=20).into(),
 			IntSet::from_iter([15..=15, 20..=20]),
 		]
 		.into_iter()
@@ -834,12 +807,10 @@ mod tests {
 							let num = IntVal::from(c.to_digit(10).unwrap());
 							num.into()
 						} else {
-							IntDecision::new_in(
-								&mut slv,
-								IntSet::from(1..=9),
-								EncodingType::Eager,
-								EncodingType::Eager,
-							)
+							slv.new_int_decision(1..=9)
+								.order_literals(LiteralStrategy::Eager)
+								.direct_literals(LiteralStrategy::Eager)
+								.view()
 						}
 					})
 					.collect();

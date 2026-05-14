@@ -1013,16 +1013,14 @@ mod tests {
 	use pindakaas::solver::propagation::Propagator as ExternalPropagator;
 
 	use crate::{
-		IntSet, IntVal,
+		IntVal,
 		actions::{
 			BoolPropagationActions, InitActions, IntDecisionActions, IntEvent, IntInitActions,
 			IntPropCond, IntPropagationActions, ReasoningEngine,
 		},
 		constraints::Propagator,
 		solver::{
-			BoolView, Decision, IntLitMeaning, Solver, View,
-			decision::integer::{EncodingType, IntDecision},
-			engine::Engine,
+			BoolView, Decision, IntLitMeaning, LiteralStrategy, Solver, View, engine::Engine,
 		},
 	};
 
@@ -1088,12 +1086,10 @@ mod tests {
 		let mut slv: Solver = Solver::default();
 		let notifications = Rc::new(RefCell::new(0));
 		let imply = slv.new_bool_decision();
-		let var = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(0..=2),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
+		let var = slv
+			.new_int_decision(0..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
 		slv.add_propagator(
 			Box::new(ProducerAndListener {
 				req_first: imply,

@@ -1438,12 +1438,8 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntSet,
 		constraints::disjunctive::DisjunctivePropagator,
-		solver::{
-			Solver,
-			decision::integer::{EncodingType, IntDecision},
-		},
+		solver::{LiteralStrategy, Solver},
 	};
 
 	#[test]
@@ -1453,24 +1449,18 @@ mod tests {
 			itertools::iproduct!([true, false], [true, false], [true, false])
 		{
 			let mut slv = Solver::default();
-			let a = IntDecision::new_in(
-				&mut slv,
-				IntSet::from(0..=4),
-				EncodingType::Eager,
-				EncodingType::Lazy,
-			);
-			let b = IntDecision::new_in(
-				&mut slv,
-				IntSet::from(0..=4),
-				EncodingType::Eager,
-				EncodingType::Lazy,
-			);
-			let c = IntDecision::new_in(
-				&mut slv,
-				IntSet::from(0..=4),
-				EncodingType::Eager,
-				EncodingType::Lazy,
-			);
+			let a = slv
+				.new_int_decision(0..=4)
+				.order_literals(LiteralStrategy::Eager)
+				.view();
+			let b = slv
+				.new_int_decision(0..=4)
+				.order_literals(LiteralStrategy::Eager)
+				.view();
+			let c = slv
+				.new_int_decision(0..=4)
+				.order_literals(LiteralStrategy::Eager)
+				.view();
 
 			let durations = vec![2, 3, 1];
 			DisjunctivePropagator::post(

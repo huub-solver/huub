@@ -40,10 +40,7 @@ use crate::{
 	helpers::bytes::Bytes,
 	model::{self, Model, decision::integer::Domain, resolved::Resolved},
 	solver::{
-		self, IntLitMeaning, Solver,
-		decision::integer::{EncodingType, IntDecision},
-		engine::Engine,
-		view::boolean::BoolView,
+		self, IntLitMeaning, LiteralStrategy, Solver, engine::Engine, view::boolean::BoolView,
 	},
 	views::LinearBoolView,
 };
@@ -870,20 +867,24 @@ impl LoweringMapBuilder {
 							unreachable!()
 						};
 						let direct_enc = if self.int_eager_direct.contains(&var) {
-							EncodingType::Eager
+							LiteralStrategy::Eager
 						} else {
-							EncodingType::Lazy
+							LiteralStrategy::Lazy
 						};
 						let card = dom.card();
 						let order_enc = if self.int_eager_order.contains(&var)
 							|| self.int_eager_direct.contains(&var)
 							|| card.is_some() && card.unwrap() <= self.int_eager_limit
 						{
-							EncodingType::Eager
+							LiteralStrategy::Eager
 						} else {
-							EncodingType::Lazy
+							LiteralStrategy::Lazy
 						};
-						let view = IntDecision::new_in(slv, dom.clone(), order_enc, direct_enc);
+						let view = slv
+							.new_int_decision(dom.clone())
+							.order_literals(order_enc)
+							.direct_literals(direct_enc)
+							.view();
 						self.int_map[var.idx()] = Some(view);
 						view
 					}

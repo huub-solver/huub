@@ -7,11 +7,7 @@ use std::{
 	ops::{Index, IndexMut, Neg, RangeBounds, RangeInclusive},
 };
 
-use itertools::Itertools;
-use pindakaas::{
-	ClauseDatabaseTools, Lit as RawLit, Var as RawVar, VarRange,
-	solver::propagation::ExternalPropagation,
-};
+use pindakaas::{Lit as RawLit, Var as RawVar, VarRange, solver::propagation::ExternalPropagation};
 use rangelist::{IntervalIterator, RangeList};
 use rustc_hash::FxHashMap;
 
@@ -26,9 +22,10 @@ use crate::{
 		decision::{Decision, DecisionReference, private},
 		engine::State,
 		solving_context::SolvingContext,
+		trail::Trail,
 		view::{View, boolean::BoolView},
 	},
-	views::{LinearBoolView, LinearView},
+	views::LinearView,
 };
 
 /// An entry in the [`DirectStorage`] that can be used to access the
@@ -71,15 +68,6 @@ struct DomainLocation<'a, const OFFSET: usize> {
 	range_iter: RangeIter<'a>,
 }
 
-/// A type to represent when certain literals are created
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum EncodingType {
-	/// The literal is created before solving starts
-	Eager,
-	/// The literal is created the first time it is mentioned
-	Lazy,
-}
-
 /// The structure used to store information about an integer variable within
 /// the solver.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -100,7 +88,7 @@ pub(crate) struct IntDecision {
 	/// variable.
 	///
 	/// Note that the lower bound is tracked within [`Self::order_encoding`].
-	upper_bound: Trailed<IntVal>,
+	pub(crate) upper_bound: Trailed<IntVal>,
 }
 
 /// The definition given to a lazily created literal.
@@ -895,128 +883,6 @@ impl IntDecision {
 		}
 	}
 
-	/// Create a new integer variable within the given solver, which the given
-	/// domain. The `order_encoding` and `direct_encoding` parameters determine
-	/// whether literals to reason about the integer variables are created
-	/// eagerly or lazily.
-	pub(crate) fn new_in<Sat: ExternalPropagation>(
-		slv: &mut Solver<Sat>,
-		domain: IntSet,
-		order_encoding: EncodingType,
-		direct_encoding: EncodingType,
-	) -> View<IntVal> {
-		let orig_domain_len = domain.card();
-		assert_ne!(
-			orig_domain_len,
-			Some(0),
-			"Unable to create integer variable empty domain"
-		);
-		if orig_domain_len == Some(1) {
-			return (*domain.lower_bound().unwrap()).into();
-		}
-		let lb = *domain.lower_bound().unwrap();
-		let ub = *domain.upper_bound().unwrap();
-		if orig_domain_len == Some(2) {
-			let lit = slv.new_bool_decision();
-			return LinearBoolView::new(NonZero::new(ub - lb).unwrap(), lb, lit).into();
-		}
-		debug_assert!(
-			direct_encoding != EncodingType::Eager || order_encoding == EncodingType::Eager
-		);
-
-		let mut engine = slv.engine.borrow_mut();
-		let upper_bound = engine.state.trail.track(ub);
-		let order_encoding = match order_encoding {
-			EncodingType::Eager => {
-				let card = orig_domain_len
-					.expect("unable to create literals eagerly for domains that exceed usize::MAX");
-				engine.state.statistics.eager_literals += (card - 1) as u64;
-				OrderStorage::Eager {
-					lower_bound: engine.state.trail.track(lb),
-					storage: slv.sat.new_var_range(card - 1),
-				}
-			}
-			EncodingType::Lazy => OrderStorage::Lazy(LazyOrderStorage {
-				min_index: 0,
-				max_index: 0,
-				lb_index: engine.state.trail.track(-1),
-				ub_index: engine.state.trail.track(-1),
-				storage: Vec::default(),
-			}),
-		};
-		let direct_encoding = match direct_encoding {
-			EncodingType::Eager => {
-				let card = orig_domain_len
-					.expect("unable to create literals eagerly for domains that exceed usize::MAX");
-				engine.state.statistics.eager_literals += (card - 2) as u64;
-				DirectStorage::Eager(slv.sat.new_var_range(card - 2))
-			}
-			EncodingType::Lazy => DirectStorage::Lazy(FxHashMap::default()),
-		};
-		// Drop engine to allow SAT interaction
-		drop(engine);
-
-		// Enforce consistency constraints for eager literals
-		if let OrderStorage::Eager { storage, .. } = &order_encoding {
-			let mut direct_enc_iter = if let DirectStorage::Eager(vars) = &direct_encoding {
-				Some(*vars)
-			} else {
-				None
-			}
-			.into_iter()
-			.flatten();
-			for (ord_i, ord_j) in (*storage).tuple_windows() {
-				let ord_i: RawLit = ord_i.into(); // x<i
-				let ord_j: RawLit = ord_j.into(); // x<j, where j = i + n and n≥1
-				slv.sat.add_clause([!ord_i, ord_j]).unwrap(); // x<i -> x<(i+n)
-				if matches!(direct_encoding, DirectStorage::Eager(_)) {
-					let eq_i: RawLit = direct_enc_iter.next().unwrap().into();
-					slv.sat.add_clause([!eq_i, !ord_i]).unwrap(); // x=i -> x≥i
-					slv.sat.add_clause([!eq_i, ord_j]).unwrap(); // x=i -> x<(i+n)
-					slv.sat.add_clause([eq_i, ord_i, !ord_j]).unwrap(); // x≠i -> (x<i \/
-					// x≥(i+n))
-				}
-			}
-			debug_assert!(direct_enc_iter.next().is_none());
-		}
-
-		// Create the resulting integer variable
-		let mut engine = slv.engine.borrow_mut();
-		engine.state.int_vars.push(Self {
-			direct_encoding,
-			domain,
-			order_encoding,
-			upper_bound,
-		});
-		let iv = Decision((engine.state.int_vars.len() - 1) as u32);
-		// Create propagator activation list
-		engine.state.int_activation.push(Default::default());
-		debug_assert_eq!(
-			engine.state.int_vars.len(),
-			engine.state.int_activation.len()
-		);
-
-		// Setup the boolean to integer mapping
-		if let OrderStorage::Eager { storage, .. } = engine.state.int_vars[iv.idx()].order_encoding
-		{
-			let mut vars = storage;
-			if let DirectStorage::Eager(vars2) = &engine.state.int_vars[iv.idx()].direct_encoding {
-				debug_assert_eq!(Into::<i32>::into(vars.end()) + 1, vars2.start().into());
-				vars = VarRange::new(vars.start(), vars2.end());
-			}
-			engine.state.bool_to_int.insert_eager(vars, iv);
-			engine
-				.state
-				.trail
-				.grow_to_boolvar(vars.clone().next_back().unwrap());
-			for l in vars {
-				slv.sat.add_observed_var(l);
-			}
-		}
-
-		iv.into()
-	}
-
 	/// Notify that a new lower bound has been propagated for the variable.
 	///
 	/// # Warning
@@ -1183,6 +1049,17 @@ impl DecisionReference for IntVal {
 impl private::Sealed for IntVal {}
 
 impl LazyOrderStorage {
+	/// Create an empty lazy storage for order literals.
+	pub(crate) fn new_in(trail: &mut Trail) -> Self {
+		Self {
+			min_index: 0,
+			max_index: 0,
+			lb_index: trail.track(-1),
+			ub_index: trail.track(-1),
+			storage: Vec::default(),
+		}
+	}
+
 	/// Find the the index of the node that contains the value or the node
 	/// "before" the value.
 	fn find_index(&self, start: u32, direction: SearchDirection, val: IntVal) -> u32 {
@@ -1581,11 +1458,8 @@ mod tests {
 		IntSet, IntVal,
 		actions::{IntDecisionActions, IntInspectionActions},
 		solver::{
-			IntLitMeaning, Solver,
-			decision::{
-				Decision,
-				integer::{EncodingType, IntDecision},
-			},
+			IntLitMeaning, LiteralStrategy, Solver,
+			decision::{Decision, integer::IntDecision},
 			view::{View, boolean::BoolView, integer::IntView},
 		},
 		views::LinearView,
@@ -1631,12 +1505,11 @@ mod tests {
 		use IntLitMeaning::*;
 
 		let mut slv: Solver = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=4),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let a = slv
+			.new_int_decision(1..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 		let IntView::Linear(LinearView { var: a, .. }) = a.0 else {
 			unreachable!()
 		};
@@ -1690,12 +1563,11 @@ mod tests {
 		use IntLitMeaning::*;
 
 		let mut slv: Solver = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			IntSet::from_iter([1..=3, 8..=10]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let a = slv
+			.new_int_decision(IntSet::from_iter([1..=3, 8..=10]))
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 		let IntView::Linear(LinearView { var: a, .. }) = a.0 else {
 			unreachable!()
 		};
@@ -1769,12 +1641,9 @@ mod tests {
 		use IntLitMeaning::*;
 
 		let mut slv: Solver = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			IntSet::from_iter([1..=3, 8..=10]),
-			EncodingType::Lazy,
-			EncodingType::Lazy,
-		);
+		let a = slv
+			.new_int_decision(IntSet::from_iter([1..=3, 8..=10]))
+			.view();
 		let IntView::Linear(LinearView { var: a, .. }) = a.0 else {
 			unreachable!()
 		};

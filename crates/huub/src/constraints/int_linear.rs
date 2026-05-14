@@ -1084,13 +1084,10 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntSet, IntVal,
+		IntVal,
 		constraints::int_linear::{DoubleIntVal, IntLinearLessEqBounds, IntLinearNotEqValue},
 		model::{Model, view::View},
-		solver::{
-			Solver,
-			decision::integer::{EncodingType, IntDecision},
-		},
+		solver::{LiteralStrategy, Solver},
 	};
 
 	#[test]
@@ -1115,24 +1112,18 @@ mod tests {
 	#[traced_test]
 	fn test_linear_ge_sat() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=2),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=2),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let c = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=2),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
+		let a = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
+		let c = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntLinearLessEqBounds::post(&mut slv, vec![a * NonZero::new(-2).unwrap(), -b, -c], -6);
 
@@ -1162,24 +1153,18 @@ mod tests {
 	#[traced_test]
 	fn test_linear_le_sat() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=2),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=2),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
-		let c = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=2),
-			EncodingType::Eager,
-			EncodingType::Lazy,
-		);
+		let a = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
+		let c = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntLinearLessEqBounds::post(&mut slv, vec![a * NonZero::new(2).unwrap(), b, c], 6);
 
@@ -1209,24 +1194,21 @@ mod tests {
 	#[traced_test]
 	fn test_linear_ne_sat() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=2),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=2),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let c = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=2),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let a = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let c = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntLinearNotEqValue::post(&mut slv, vec![a * NonZero::new(2).unwrap(), b, c], 6);
 

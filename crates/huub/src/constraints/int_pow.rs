@@ -525,34 +525,24 @@ mod tests {
 	use crate::{
 		IntVal,
 		constraints::int_pow::IntPowBounds,
-		solver::{
-			Solver,
-			decision::integer::{EncodingType, IntDecision},
-		},
+		solver::{LiteralStrategy, Solver},
 	};
 
 	#[test]
 	#[traced_test]
 	fn test_int_pow_overflow() {
 		let mut slv = Solver::default();
-		let base = IntDecision::new_in(
-			&mut slv,
-			(10..=10).into(),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let exponent = IntDecision::new_in(
-			&mut slv,
-			(18..=19).into(),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let result = IntDecision::new_in(
-			&mut slv,
-			(0..=IntVal::MAX).into(),
-			EncodingType::Lazy,
-			EncodingType::Lazy,
-		);
+		let base = slv
+			.new_int_decision(10..=10)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let exponent = slv
+			.new_int_decision(18..=19)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let result = slv.new_int_decision(0..=IntVal::MAX).view();
 
 		IntPowBounds::post(&mut slv, base, exponent, result)
 			.expect("int_pow(a,b,c) was found to be unsatisfiable");
@@ -567,24 +557,21 @@ mod tests {
 	#[traced_test]
 	fn test_int_pow_sat() {
 		let mut slv = Solver::default();
-		let a = IntDecision::new_in(
-			&mut slv,
-			(-2..=3).into(),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let b = IntDecision::new_in(
-			&mut slv,
-			(-2..=2).into(),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let c = IntDecision::new_in(
-			&mut slv,
-			(-2..=9).into(),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let a = slv
+			.new_int_decision(-2..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(-2..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let c = slv
+			.new_int_decision(-2..=9)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntPowBounds::post(&mut slv, a, b, c)
 			.expect("int_pow(a,b,c) was found to be unsatisfiable");
@@ -626,24 +613,17 @@ mod tests {
 	#[traced_test]
 	fn test_int_pow_underflow() {
 		let mut slv = Solver::default();
-		let base = IntDecision::new_in(
-			&mut slv,
-			(-10..=-10).into(),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let exponent = IntDecision::new_in(
-			&mut slv,
-			(19..=19).into(),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let result = IntDecision::new_in(
-			&mut slv,
-			(IntVal::MIN..=0).into(),
-			EncodingType::Lazy,
-			EncodingType::Lazy,
-		);
+		let base = slv
+			.new_int_decision(-10..=-10)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let exponent = slv
+			.new_int_decision(19..=19)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let result = slv.new_int_decision(IntVal::MIN..=0).view();
 
 		IntPowBounds::post(&mut slv, base, exponent, result)
 			.expect("int_pow(a,b,c) was found to be unsatisfiable");

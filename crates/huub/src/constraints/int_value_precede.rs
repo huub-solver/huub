@@ -978,9 +978,8 @@ mod tests {
 		IntSet, IntVal,
 		constraints::int_value_precede::{IntSeqPrecedeChainBounds, IntValuePrecedeChainValue},
 		solver::{
-			Solver,
+			LiteralStrategy, Solver,
 			Value::{self, Int},
-			decision::integer::{EncodingType, IntDecision},
 		},
 	};
 
@@ -988,60 +987,51 @@ mod tests {
 	#[traced_test]
 	fn test_seq_precede_chain_paper() {
 		let mut slv = Solver::default();
-		let x1 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(-1..=1),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x2 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from_iter([-1..=1, 5..=5]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x3 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from_iter([-1..=0, 3..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x4 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from_iter([0..=2, 4..=4]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x5 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from_iter([0..=1, 3..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x6 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from_iter([1..=1, 3..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x7 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(2..=5),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x8 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(4..=5),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x9 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(0..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let x1 = slv
+			.new_int_decision(-1..=1)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x2 = slv
+			.new_int_decision(IntSet::from_iter([-1..=1, 5..=5]))
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x3 = slv
+			.new_int_decision(IntSet::from_iter([-1..=0, 3..=3]))
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x4 = slv
+			.new_int_decision(IntSet::from_iter([0..=2, 4..=4]))
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x5 = slv
+			.new_int_decision(IntSet::from_iter([0..=1, 3..=3]))
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x6 = slv
+			.new_int_decision(IntSet::from_iter([1..=1, 3..=3]))
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x7 = slv
+			.new_int_decision(2..=5)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x8 = slv
+			.new_int_decision(4..=5)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x9 = slv
+			.new_int_decision(0..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntSeqPrecedeChainBounds::post(&mut slv, vec![x1, x2, x3, x4, x5, x6, x7, x8, x9]);
 		slv.assert_all_solutions(
@@ -1054,18 +1044,16 @@ mod tests {
 	#[traced_test]
 	fn test_seq_precede_chain_simple() {
 		let mut slv = Solver::default();
-		let x0 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(0..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x1 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(0..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let x0 = slv
+			.new_int_decision(0..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x1 = slv
+			.new_int_decision(0..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntSeqPrecedeChainBounds::post(&mut slv, vec![x0, x1]);
 		slv.expect_solutions(
@@ -1083,12 +1071,11 @@ mod tests {
 	#[traced_test]
 	fn test_seq_precede_chain_single_var() {
 		let mut slv = Solver::default();
-		let x0 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(-1..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let x0 = slv
+			.new_int_decision(-1..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntSeqPrecedeChainBounds::post(&mut slv, vec![x0]);
 		slv.expect_solutions(
@@ -1104,30 +1091,26 @@ mod tests {
 	#[traced_test]
 	fn test_seq_precede_chain_unrestricted() {
 		let mut slv = Solver::default();
-		let x1 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(-1..=4),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x2 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(-1..=4),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x3 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(-1..=4),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x4 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(-1..=4),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let x1 = slv
+			.new_int_decision(-1..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x2 = slv
+			.new_int_decision(-1..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x3 = slv
+			.new_int_decision(-1..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x4 = slv
+			.new_int_decision(-1..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntSeqPrecedeChainBounds::post(&mut slv, vec![x1, x2, x3, x4]);
 		slv.assert_all_solutions(&[x1, x2, x3, x4], valid_sequence_precede);
@@ -1137,18 +1120,16 @@ mod tests {
 	#[traced_test]
 	fn test_val_precede_chain_all_enforced() {
 		let mut slv = Solver::default();
-		let x0 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x1 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let x0 = slv
+			.new_int_decision(1..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x1 = slv
+			.new_int_decision(1..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntValuePrecedeChainValue::post(&mut slv, vec![3, 2, 1], vec![x0, x1]);
 		slv.expect_solutions(
@@ -1163,18 +1144,16 @@ mod tests {
 	#[traced_test]
 	fn test_val_precede_chain_simple() {
 		let mut slv = Solver::default();
-		let x0 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(0..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x1 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(0..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let x0 = slv
+			.new_int_decision(0..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x1 = slv
+			.new_int_decision(0..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntValuePrecedeChainValue::post(&mut slv, vec![1, 3], vec![x0, x1]);
 		slv.expect_solutions(
@@ -1197,12 +1176,11 @@ mod tests {
 	#[traced_test]
 	fn test_val_precede_chain_single_var() {
 		let mut slv = Solver::default();
-		let x0 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(0..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let x0 = slv
+			.new_int_decision(0..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntValuePrecedeChainValue::post(&mut slv, vec![2, 1], vec![x0]);
 		slv.expect_solutions(
@@ -1218,60 +1196,51 @@ mod tests {
 	#[traced_test]
 	fn test_value_precede_chain_complex() {
 		let mut slv = Solver::default();
-		let x0 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from_iter([0..=0, 2..=2]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x1 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(2..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x2 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from_iter([-3..=-3, 1..=1]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x3 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from_iter([-2..=0, 2..=2]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x4 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(0..=2),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x5 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=2),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x6 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from_iter([-2..=-1, 1..=1]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x7 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from_iter([-1..=-1, 3..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x8 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(1..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let x0 = slv
+			.new_int_decision(IntSet::from_iter([0..=0, 2..=2]))
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x1 = slv
+			.new_int_decision(2..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x2 = slv
+			.new_int_decision(IntSet::from_iter([-3..=-3, 1..=1]))
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x3 = slv
+			.new_int_decision(IntSet::from_iter([-2..=0, 2..=2]))
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x4 = slv
+			.new_int_decision(0..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x5 = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x6 = slv
+			.new_int_decision(IntSet::from_iter([-2..=-1, 1..=1]))
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x7 = slv
+			.new_int_decision(IntSet::from_iter([-1..=-1, 3..=3]))
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x8 = slv
+			.new_int_decision(1..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntValuePrecedeChainValue::post(
 			&mut slv,
@@ -1288,12 +1257,11 @@ mod tests {
 	#[traced_test]
 	fn test_value_precede_chain_holes() {
 		let mut slv = Solver::default();
-		let x0 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from_iter([0..=1, 3..=3]),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let x0 = slv
+			.new_int_decision(IntSet::from_iter([0..=1, 3..=3]))
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntValuePrecedeChainValue::post(&mut slv, vec![1, 3], vec![x0]);
 		slv.expect_solutions(
@@ -1308,24 +1276,21 @@ mod tests {
 	#[traced_test]
 	fn test_value_precede_chain_out_of_bounds() {
 		let mut slv = Solver::default();
-		let x0 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(0..=1),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x1 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(0..=1),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x2 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(0..=1),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let x0 = slv
+			.new_int_decision(0..=1)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x1 = slv
+			.new_int_decision(0..=1)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x2 = slv
+			.new_int_decision(0..=1)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntValuePrecedeChainValue::post(&mut slv, vec![1, 3], vec![x0, x1, x2]);
 		slv.assert_all_solutions(&[x0, x1, x2], valid_value_precede(vec![1, 3]));
@@ -1335,24 +1300,21 @@ mod tests {
 	#[traced_test]
 	fn test_value_precede_chain_simple() {
 		let mut slv = Solver::default();
-		let x0 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(0..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x1 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(0..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x2 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(0..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let x0 = slv
+			.new_int_decision(0..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x1 = slv
+			.new_int_decision(0..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x2 = slv
+			.new_int_decision(0..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntValuePrecedeChainValue::post(&mut slv, vec![1, 2], vec![x0, x1, x2]);
 		slv.assert_all_solutions(&[x0, x1, x2], valid_value_precede(vec![1, 2]));
@@ -1362,30 +1324,26 @@ mod tests {
 	#[traced_test]
 	fn test_value_precede_chain_unrestricted() {
 		let mut slv = Solver::default();
-		let x0 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(-2..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x1 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(-3..=2),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x2 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(-2..=3),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
-		let x3 = IntDecision::new_in(
-			&mut slv,
-			IntSet::from(-3..=2),
-			EncodingType::Eager,
-			EncodingType::Eager,
-		);
+		let x0 = slv
+			.new_int_decision(-2..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x1 = slv
+			.new_int_decision(-3..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x2 = slv
+			.new_int_decision(-2..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let x3 = slv
+			.new_int_decision(-3..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
 
 		IntValuePrecedeChainValue::post(&mut slv, vec![2, -2, 1, -1], vec![x0, x1, x2, x3]);
 		slv.assert_all_solutions(&[x0, x1, x2, x3], valid_value_precede(vec![2, -2, 1, -1]));
