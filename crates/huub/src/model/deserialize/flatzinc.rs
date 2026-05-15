@@ -2208,6 +2208,9 @@ impl<'a> FznModelBuilder<'a> {
 			let b_set = unify_map_find(map, b);
 			match (a_set, b_set) {
 				(Some(a_set), Some(b_set)) => {
+					if Rc::ptr_eq(&a_set, &b_set) {
+						return;
+					}
 					let mut members = (*a_set).borrow_mut();
 					members.extend(b_set.take());
 					for b in members.iter() {

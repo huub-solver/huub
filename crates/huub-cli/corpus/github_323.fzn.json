@@ -1,0 +1,14 @@
+{
+  "variables": {
+    "x": { "type": "bool" },
+    "y": { "type": "bool", "defined": true }
+  },
+  "arrays": {},
+  "constraints": [
+    { "id": "array_var_bool_element", "args": [1, ["x"], "y"], "defines": "y" },
+    { "id": "bool_clause", "args": [["x"], []] }
+  ],
+  "output": ["x", "y"],
+  "solve": { "method": "satisfy" },
+  "version": "1.0"
+}
