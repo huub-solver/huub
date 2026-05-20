@@ -858,12 +858,10 @@ impl TarjanScratch {
 /// on the residual bipartite graph, and remove any value from a variable's
 /// domain whenever the variable and value land in different SCCs.
 ///
-/// The four nested structs ([`TrailedPartition`], [`VariableValueMatching`],
-/// [`AugmentingPathScratch`], [`TarjanScratch`]) are intentionally written in
-/// graph-generic language so they can be lifted into
-/// `crates/huub/src/helpers/` when a second consumer appears (e.g. `circuit`,
-/// `global_cardinality`). No other propagator in the crate currently uses
-/// them, so they live here for now.
+/// The four nested structs are intentionally written in graph-generic language
+/// so they can be lifted into `crates/huub/src/helpers/` when a second consumer
+/// appears (e.g. `circuit`, `global_cardinality`). No other propagator in the
+/// crate currently uses them, so they live here for now.
 ///
 /// **References**
 ///
