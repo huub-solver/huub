@@ -1750,7 +1750,7 @@ impl<'a> FznModelBuilder<'a> {
 					};
 					let args = self.arg_array(args)?;
 					let args: Vec<_> = args.iter().map(|l| self.lit_int(l)).try_collect()?;
-					let (bounds, value) = match (
+					let (bounds, value, domain) = match (
 						Self::anns_contains(
 							&c.ann,
 							&mut ann_used,
@@ -1761,14 +1761,20 @@ impl<'a> FznModelBuilder<'a> {
 							&mut ann_used,
 							AnnotationIdent::ConsistencyValue,
 						),
+						Self::anns_contains(
+							&c.ann,
+							&mut ann_used,
+							AnnotationIdent::ConsistencyDomain,
+						),
 					) {
-						(false, false) => (None, None),
-						(bounds, value) => (Some(bounds), Some(value)),
+						(false, false, false) => (None, None, None),
+						(bounds, value, domain) => (Some(bounds), Some(value), Some(domain)),
 					};
 					self.prb
 						.unique(args)
 						.maybe_bounds_propagation(bounds)
 						.maybe_value_propagation(value)
+						.maybe_domain_propagation(domain)
 						.post()?;
 				}
 				ConstraintIdent::ArrayIntMaximum | ConstraintIdent::ArrayIntMinimum => {

@@ -479,6 +479,7 @@ impl Model {
 		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
 		bounds_propagation: Option<bool>,
 		value_propagation: Option<bool>,
+		domain_propagation: Option<bool>,
 	) -> Result<(), Conflict<View<bool>>> {
 		let vars: Vec<_> = vars.into_iter().map_into().collect();
 		self.post_constraint(IntUnique {
@@ -486,6 +487,7 @@ impl Model {
 			value_prop: IntUniqueValue::new(vars),
 			bounds_propagation,
 			value_propagation,
+			domain_propagation,
 		})
 	}
 

@@ -1,15 +1,18 @@
-//! Structure and algorithms for the integer all different constraint, which
+//! Structure and algorithms for the integer unique constraint, which
 //! enforces that a list of integer variables each take a different value.
 
 use std::cmp;
 
+use fixedbitset::FixedBitSet;
 use itertools::{Either, Itertools};
+use rangelist::IntervalIterator;
 use tracing::warn;
 
 use crate::{
-	IntVal,
+	Conjunction, IntVal,
 	actions::{
-		InitActions, IntEvent, IntInspectionActions, IntPropCond, PostingActions, ReasoningEngine,
+		InitActions, IntEvent, IntInspectionActions, IntPropCond, PostingActions,
+		PropagationActions, ReasoningContext, ReasoningEngine, Trailed, TrailingActions,
 	},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
@@ -37,6 +40,10 @@ pub struct IntUnique {
 	///
 	/// Defaults to `false`.
 	pub(crate) value_propagation: Option<bool>,
+	/// Whether to enable the domain consistent propagator.
+	///
+	/// Defaults to `false`.
+	pub(crate) domain_propagation: Option<bool>,
 }
 
 /// Bounds consistent propagator for the integer `unique` constraint.
@@ -56,7 +63,7 @@ pub struct IntUniqueBounds<I> {
 	max_sorted: Vec<usize>,
 	/// Number of different bounds
 	num_bounds: usize,
-	/// Ordered vector of all different max and min bounds with dummies
+	/// Ordered vector of distinct max and min bounds with dummies
 	bounds: Vec<IntVal>,
 	/// The critical capacity pointers; that is, `predecessor[i]` points to the
 	/// predecessor of i in the `bounds` list.
@@ -108,6 +115,12 @@ impl IntUnique {
 	pub fn value_propagation(&self) -> bool {
 		self.value_propagation.unwrap_or(false)
 	}
+
+	/// Returns whether a domain consistent propagator will be posted when
+	/// creating a [`Solver`](crate::solver::Solver) object.
+	pub fn domain_propagation(&self) -> bool {
+		self.domain_propagation.unwrap_or(false)
+	}
 }
 
 impl<E> Constraint<E> for IntUnique
@@ -151,15 +164,19 @@ where
 		if value_propagation {
 			IntUniqueValue::post(slv, vars.clone());
 		}
+		let domain_propagation = self.domain_propagation();
 		let mut bounds_propagation = self.bounds_propagation();
-		if !value_propagation && !bounds_propagation {
+		if !value_propagation && !bounds_propagation && !domain_propagation {
 			warn!(
 				"all propagation algorithms are disabled for `int_unique` constraint, override with bounds propagation to ensure consistency"
 			);
 			bounds_propagation = true;
 		}
 		if bounds_propagation {
-			IntUniqueBounds::post(slv, vars);
+			IntUniqueBounds::post(slv, vars.clone());
+		}
+		if domain_propagation {
+			IntUniqueDomain::post(slv, vars);
 		}
 		Ok(())
 	}
@@ -394,7 +411,7 @@ impl<I> IntUniqueBounds<I> {
 	/// # Example
 	///
 	/// ```ignore
-	/// # use huub::constraints::int_all_different::IntUniqueBounds;
+	/// # use huub::constraints::int_unique::IntUniqueBounds;
 	/// let mut transition = vec![4, 2, 0, 1, 3, 0]; // giving e.g. 0 -> 4 -> 3 -> 1 -> 2 -> 0
 	/// IntUniqueBounds::path_set(&mut transition, 2, 3, 5);
 	/// assert_eq!(transition, vec![5, 2, 5, 1, 5, 0]); // now gives // 0 -> 5 -> 0
@@ -585,6 +602,825 @@ where
 	}
 }
 
+/// Backtrackable disjoint-set partition of `{0, .., n-1}`. Each block is a
+/// contiguous slice of [`Self::elems`]. Block membership is maintained during
+/// search by trailed [`Self::layout`]. The data structure is
+/// generic in what `{0..n}` means — in [`IntUniqueDomain`] the elements are
+/// variable indices, but nothing here depends on that.
+///
+/// `layout` uses a dual encoding, indexed by position in `elems`:
+///
+/// - if position `p` is the **root** (smallest position) of its block, the slot
+///   stores the block's exclusive end position;
+/// - otherwise the slot stores the root position of `p`'s block.
+///
+/// Example with 4 elements partitioned into `{0,2}` (positions 0..2) and
+/// `{1,3}` (positions 2..4):
+///
+/// ```text
+///   pos:           0  1  2  3
+///   elems:         0  2  1  3
+///   positions:     0  2  1  3
+///   layout:        2  0  4  2     // pos 0 -> end 2; pos 2 -> end 4
+/// ```
+#[derive(Clone, Debug)]
+struct TrailedPartition {
+	/// Permutation of `0..n` whose contiguous slices are the current blocks.
+	elems: Vec<usize>,
+	/// Inverse permutation: `elems[positions[i]] == i` for every `i`.
+	positions: Vec<usize>,
+	/// Per-position trailed slot (see struct doc for dual encoding).
+	layout: Vec<Trailed<i64>>,
+}
+
+impl TrailedPartition {
+	/// Root position of the block containing `elem`.
+	fn block_root(&self, elem: usize, ctx: &impl TrailingActions) -> usize {
+		let pos = self.positions[elem];
+		let info = ctx.trailed::<i64>(self.layout[pos]) as usize;
+		cmp::min(info, pos)
+	}
+
+	/// Exclusive end position of the block rooted at `root`. Caller must pass
+	/// the block's root position or otherwise results are meaningless.
+	fn block_end(&self, root: usize, ctx: &impl TrailingActions) -> usize {
+		debug_assert_eq!(
+			self.block_root(self.elems[root], ctx),
+			root,
+			"block_end called with a non-root position"
+		);
+		ctx.trailed::<i64>(self.layout[root]) as usize
+	}
+
+	/// Split the listed `elems` (all of which must currently belong to the
+	/// same block) out into a new block. Returns `(orig_root, Some(new_root))`,
+	/// or `(orig_root, None)` if every member of the original block was moved.
+	fn split_off(
+		&mut self,
+		elems: &[usize],
+		ctx: &mut impl TrailingActions,
+	) -> (usize, Option<usize>) {
+		let orig_root = self.block_root(elems[0], ctx);
+		let orig_end = self.block_end(orig_root, ctx);
+		debug_assert!(elems.iter().all(|&i| self.block_root(i, ctx) == orig_root));
+		if elems.len() == (orig_end - orig_root) {
+			return (orig_root, None);
+		}
+
+		let mut new_end = orig_end;
+		for &elem in elems {
+			let pos = self.positions[elem];
+			let swap_pos = new_end - 1;
+			let swap_ele = self.elems[swap_pos];
+			self.elems[pos] = swap_ele;
+			self.elems[swap_pos] = elem;
+			self.positions[elem] = swap_pos;
+			self.positions[swap_ele] = pos;
+			new_end -= 1;
+			debug_assert!(new_end >= orig_root);
+		}
+
+		let new_root = new_end;
+		for &elem in elems {
+			let pos = self.positions[elem];
+			let _ = ctx.set_trailed::<i64>(
+				self.layout[pos],
+				if pos == new_root {
+					(new_root + elems.len()) as i64
+				} else {
+					new_root as i64
+				},
+			);
+		}
+		let _ = ctx.set_trailed::<i64>(self.layout[orig_root], new_end as i64);
+		(orig_root, Some(new_root))
+	}
+}
+
+/// The bipartite "variable <-> value" graph that Régin's algorithm operates on,
+/// together with the current maximum matching between the two sides.
+///
+/// All variable/value bookkeeping lives here: the variable list, the
+/// union-domain origin used to translate between integer values and right-side
+/// indices, and the matching tables. Algorithms (augmenting-path search,
+/// Tarjan, Hall-set reasoning) operate on this struct from the outside.
+#[derive(Clone, Debug)]
+struct VariableValueMatching<I> {
+	/// Left side: the integer decision variables.
+	vars: Vec<I>,
+	/// Lower bound of the union of all initial variable domains. The
+	/// right-side index `r` represents the integer value
+	/// `union_domain_lb + r`, for `r` in `0..n_values()`.
+	union_domain_lb: IntVal,
+	/// Matching: variable index -> value index.
+	var_to_val: Vec<Option<usize>>,
+	/// Matching: value index -> variable index. Sized once in [`Self::init`]
+	/// to the size of the union of initial variable domains.
+	val_to_var: Vec<Option<usize>>,
+}
+
+impl<I> VariableValueMatching<I> {
+	/// Number of left-side nodes (variables).
+	fn n_vars(&self) -> usize {
+		self.vars.len()
+	}
+
+	/// Number of right-side nodes (values in the union of initial domains).
+	fn n_values(&self) -> usize {
+		self.val_to_var.len()
+	}
+
+	/// Total nodes in the bipartite graph.
+	fn n_nodes(&self) -> usize {
+		self.n_vars() + self.n_values()
+	}
+
+	/// Integer value at the given right-side index.
+	fn value_at(&self, right_idx: usize) -> IntVal {
+		self.union_domain_lb + right_idx as IntVal
+	}
+
+	/// Right-side index for a value already known to lie in
+	/// `[union_domain_lb, union_domain_lb + n_values())`.
+	fn value_index(&self, val: IntVal) -> usize {
+		(val - self.union_domain_lb) as usize
+	}
+
+	/// Rewire the matching along a freshly discovered BFS-augmenting path
+	/// ending at `(end_var, end_val)`. Walks backwards through
+	/// `bfs_parent`, flipping each edge until it reaches the path's root
+	/// (a variable whose previous match was `None`).
+	fn augment_along_path(&mut self, end_var: usize, end_val: usize, bfs_parent: &[usize]) {
+		let mut cur_var = end_var;
+		let mut cur_val = end_val;
+		loop {
+			let prev_val = self.var_to_val[cur_var];
+			self.val_to_var[cur_val] = Some(cur_var);
+			self.var_to_val[cur_var] = Some(cur_val);
+			let Some(pv) = prev_val else {
+				break;
+			};
+			cur_val = pv;
+			let parent = bfs_parent[cur_var];
+			debug_assert_ne!(parent, usize::MAX, "BFS parent missing");
+			cur_var = parent;
+		}
+	}
+
+	/// One-shot lazy initialisation: compute union-domain extents from
+	/// variable bounds and size the matching's right side accordingly. Must
+	/// be called exactly once before any propagation; calling twice would
+	/// empty `val_to_var` and discard the current matching.
+	fn init<E>(&mut self, ctx: &mut E::InitializationContext<'_>)
+	where
+		E: ReasoningEngine,
+		I: IntSolverActions<E>,
+	{
+		let mut lb = IntVal::MAX;
+		let mut ub = IntVal::MIN;
+		for v in &self.vars {
+			let (l, u) = v.bounds(ctx);
+			lb = cmp::min(lb, l);
+			ub = cmp::max(ub, u);
+		}
+		debug_assert!(lb <= ub);
+		self.union_domain_lb = lb;
+		self.val_to_var = vec![None; (ub - lb + 1) as usize];
+	}
+}
+
+/// Reusable scratch for BFS-based augmenting-path search on a bipartite
+/// graph. Depends only on the number of left nodes.
+#[derive(Clone, Debug)]
+struct AugmentingPathScratch {
+	/// BFS queue (over left nodes).
+	queue: Vec<usize>,
+	/// Per-left-node BFS visited flag; cleared at the start of each search.
+	visited: FixedBitSet,
+	/// Per-left-node BFS parent pointer; `usize::MAX` means "no parent /
+	/// root".
+	parent: Vec<usize>,
+}
+
+/// Reusable scratch for Tarjan's SCC algorithm over a graph with `n` total
+/// nodes. `vars_buf` / `vals_buf` are sized for the bipartite use-case (one
+/// bitset per side); a single-bucket variant would suit a non-bipartite
+/// consumer.
+#[derive(Clone, Debug)]
+struct TarjanScratch {
+	/// Stack for Tarjan's algorithm.
+	dfs_stack: Vec<usize>,
+	/// Whether a node is currently on the DFS stack.
+	dfs_on_stack: Vec<bool>,
+	/// DFS index assigned to each node during the current search.
+	/// Value `0` means "not yet visited in this run".
+	dfs_index: Vec<usize>,
+	/// Lowest reachable DFS index from each node during the current search.
+	/// Value `0` means "not yet visited in this run".
+	low_link: Vec<usize>,
+	/// Neighbour frame-stack: each `tarjan_dfs` call appends its current
+	/// node's neighbours, remembers `(start, end)` for its own slice, and
+	/// truncates back on unwind. Reuses one allocation across all DFS frames.
+	neighbours: Vec<usize>,
+	/// Scratch bitset of left nodes in the SCC currently being popped.
+	vars_buf: Vec<usize>,
+	/// Scratch bitset of right nodes in the SCC currently being popped.
+	vals_buf: Vec<usize>,
+}
+
+impl TarjanScratch {
+	/// Reset bookkeeping before a fresh DFS run. After this call,
+	/// `dfs_index[v] == 0` signals "not yet visited" (indices are assigned
+	/// starting at `1`).
+	fn reset(&mut self) {
+		self.dfs_stack.clear();
+		self.dfs_on_stack.fill(false);
+		self.dfs_index.fill(0);
+		self.low_link.fill(0);
+		self.neighbours.clear();
+	}
+
+	/// Size the per-node buffers to fit a graph with `n_nodes` total nodes and
+	/// `n_values` right-side nodes. Called once after the union-domain
+	/// extents are known.
+	fn resize(&mut self, n_nodes: usize) {
+		self.dfs_on_stack = vec![false; n_nodes];
+		self.dfs_index = vec![0; n_nodes];
+		self.low_link = vec![0; n_nodes];
+	}
+}
+
+/// Domain consistent propagator for the integer `unique` constraint.
+///
+/// Implements Régin's bipartite matching + Tarjan SCC algorithm (AAAI 1994):
+/// maintain a maximum matching from variables to values. After each domain
+/// change, repair the matching with BFS-augmenting paths. Then run Tarjan's SCC
+/// on the residual bipartite graph, and remove any value from a variable's
+/// domain whenever the variable and value land in different SCCs.
+///
+/// The four nested structs ([`TrailedPartition`], [`VariableValueMatching`],
+/// [`AugmentingPathScratch`], [`TarjanScratch`]) are intentionally written in
+/// graph-generic language so they can be lifted into
+/// `crates/huub/src/helpers/` when a second consumer appears (e.g. `circuit`,
+/// `global_cardinality`). No other propagator in the crate currently uses
+/// them, so they live here for now.
+///
+/// **References**
+///
+/// - Régin, Jean-Charles. "A filtering algorithm for constraints of difference
+///   in CSPs." AAAI 94 (1994): 362-367.
+/// - Gent, Ian P., Ian Miguel, and Peter Nightingale. "Generalised arc
+///   consistency for the AllDifferent constraint: An empirical survey."
+///   Artificial Intelligence 172.18 (2008): 1973-2000.
+/// - Downing, Nicholas, Thibaut Feydy, and Peter J. Stuckey. "Explaining
+///   alldifferent." In Proceedings of the Australasian Computer Science
+///   Conference (ACSC 2012), CRPIT Volume 122, pages 115--124, 2012
+#[derive(Clone, Debug)]
+pub struct IntUniqueDomain<I> {
+	/// Variables, values, and their current matching.
+	graph: VariableValueMatching<I>,
+	/// Set of variable indices whose domain has changed since the last
+	/// propagation pass; cleared by `propagate` and `advise_of_backtrack`.
+	dirty_vars: FixedBitSet,
+	/// Always-empty (but `n_vars`-sized) scratch bitset. `propagate` swaps
+	/// this with `dirty_vars` so it can iterate the dirty bits while
+	/// `advise_of_int_change` keeps writing into the (now empty) bitset.
+	dirty_scratch: FixedBitSet,
+	/// Backtrackable partition of variable indices into current SCCs.
+	partition: TrailedPartition,
+	/// Per-call scratch for augmenting-path search.
+	bfs: AugmentingPathScratch,
+	/// Per-call scratch for Tarjan SCC.
+	tarjan: TarjanScratch,
+}
+
+impl<I> IntUniqueDomain<I> {
+	/// Create a new [`IntUniqueDomain`] propagator and post it in the solver.
+	///
+	/// Domain extents and the value-side tables are sized lazily on the first
+	/// propagation call (we cannot probe variable bounds from
+	/// [`PostingActions`]).
+	pub fn post<E>(solver: &mut E, vars: Vec<I>)
+	where
+		E: PostingActions + ?Sized,
+		I: IntSolverActions<Engine>,
+	{
+		let n = vars.len();
+		// Each variable owns one trailed slot; the partition layout starts as a
+		// single block containing every variable: `layout[0] = n` (end position)
+		// and every other entry is `0` (pointing to root position 0).
+		let layout: Vec<Trailed<i64>> = (0..n)
+			.map(|i| solver.new_trailed::<i64>(if i == 0 { n as i64 } else { 0 }))
+			.collect();
+
+		solver.add_propagator(Box::new(Self {
+			graph: VariableValueMatching {
+				vars,
+				union_domain_lb: 0,
+				var_to_val: vec![None; n],
+				val_to_var: Vec::new(),
+			},
+			dirty_vars: FixedBitSet::with_capacity(n),
+			dirty_scratch: FixedBitSet::with_capacity(n),
+			partition: TrailedPartition {
+				elems: (0..n).collect(),
+				positions: (0..n).collect(),
+				layout,
+			},
+			bfs: AugmentingPathScratch {
+				queue: Vec::new(),
+				visited: FixedBitSet::with_capacity(n),
+				parent: vec![usize::MAX; n],
+			},
+			tarjan: TarjanScratch {
+				dfs_stack: Vec::new(),
+				dfs_on_stack: Vec::new(),
+				dfs_index: Vec::new(),
+				low_link: Vec::new(),
+				neighbours: Vec::new(),
+				vars_buf: Vec::new(),
+				vals_buf: Vec::new(),
+			},
+		}));
+	}
+
+	/// One-shot lazy initialisation performed on the first propagate.
+	/// Initialises the graph's union-domain extents and sizes every
+	/// Tarjan scratch buffer that depends on them.
+	fn init_lazy_state<E>(&mut self, ctx: &mut E::InitializationContext<'_>)
+	where
+		E: ReasoningEngine,
+		I: IntSolverActions<E>,
+	{
+		self.graph.init::<E>(ctx);
+		self.tarjan.resize(self.graph.n_nodes());
+	}
+
+	/// Attempt to repair the matching for `start_var` (whose previously matched
+	/// value is no longer in its domain) by finding a BFS-augmenting path.
+	///
+	/// On success, rewires the matching along the discovered path and returns
+	/// `Ok(())`. On failure, restores the previous matching and returns
+	/// `Err(conflict)`. The conflict closure constructs a Hall-set explanation
+	/// from the BFS-visited variables, whose domain union has strictly fewer
+	/// values than variables.
+	fn find_augmenting_path<E>(
+		&mut self,
+		start_var: usize,
+		ctx: &mut E::PropagationContext<'_>,
+	) -> Result<(), E::Conflict>
+	where
+		E: ReasoningEngine,
+		I: IntSolverActions<E>,
+	{
+		let matched_val_idx = self.graph.var_to_val[start_var];
+		if let Some(val_idx) = matched_val_idx {
+			self.graph.val_to_var[val_idx] = None;
+			self.graph.var_to_val[start_var] = None;
+		}
+
+		self.bfs.queue.clear();
+		self.bfs.queue.push(start_var);
+		self.bfs.visited.clear();
+		self.bfs.parent.fill(usize::MAX);
+		self.bfs.visited.insert(start_var);
+		let mut queue_head = 0;
+		while queue_head < self.bfs.queue.len() {
+			let var_idx = self.bfs.queue[queue_head];
+			queue_head += 1;
+			for val in self.graph.vars[var_idx].domain(ctx).iter().flatten() {
+				let val_idx = self.graph.value_index(val);
+				if let Some(matched_var) = self.graph.val_to_var[val_idx] {
+					if !self.bfs.visited.contains(matched_var) {
+						self.bfs.queue.push(matched_var);
+						self.bfs.parent[matched_var] = var_idx;
+						self.bfs.visited.insert(matched_var);
+					}
+				} else {
+					self.graph
+						.augment_along_path(var_idx, val_idx, &self.bfs.parent);
+					return Ok(());
+				}
+			}
+		}
+
+		// No augmenting path: restore the previous matching and signal conflict
+		// with a Hall-set explanation built from the BFS-visited variables.
+		if let Some(val_idx) = matched_val_idx {
+			self.graph.val_to_var[val_idx] = Some(start_var);
+			self.graph.var_to_val[start_var] = Some(val_idx);
+		}
+
+		Err(ctx.declare_conflict(
+			move |ctx: &mut E::PropagationContext<'_>| -> Vec<<E as ReasoningEngine>::Atom> {
+				self.build_hall_set_reason(ctx, &self.bfs.queue, |var, ctx, meaning| {
+					var.lit(ctx, meaning)
+				})
+			},
+		))
+	}
+
+	/// Append `start_idx`'s residual-graph neighbours to `tarjan.neighbours`.
+	/// Caller records `tarjan.neighbours.len()` before and after this call to
+	/// know which slice belongs to its frame, and truncates back on unwind.
+	fn push_tarjan_neighbours<E>(&mut self, start_idx: usize, ctx: &mut E::PropagationContext<'_>)
+	where
+		E: ReasoningEngine,
+		I: IntSolverActions<E>,
+	{
+		let n_vars = self.graph.n_vars();
+		if start_idx < n_vars {
+			let var_idx = start_idx;
+			for val in self.graph.vars[var_idx].domain(ctx).iter().flatten() {
+				let val_idx = self.graph.value_index(val);
+				if self.graph.var_to_val[var_idx] == Some(val_idx) {
+					continue;
+				}
+				self.tarjan.neighbours.push(n_vars + val_idx);
+			}
+		} else {
+			let val_idx = start_idx - n_vars;
+			if let Some(var_idx) = self.graph.val_to_var[val_idx] {
+				self.tarjan.neighbours.push(var_idx);
+			} else {
+				// Unmatched value: connected to every matched value node.
+				for vi in 0..self.graph.n_values() {
+					if self.graph.val_to_var[vi].is_some() {
+						self.tarjan.neighbours.push(n_vars + vi);
+					}
+				}
+			}
+		}
+	}
+
+	/// Process the SCC rooted at `start_idx`: pop nodes off the DFS stack into
+	/// `tarjan.vars_buf` / `vals_buf`, partition the variables out of the live
+	/// SCC, and remove the SCC's values from any variable outside it.
+	fn process_scc_root<E>(
+		&mut self,
+		start_idx: usize,
+		ctx: &mut E::PropagationContext<'_>,
+	) -> Result<(), E::Conflict>
+	where
+		E: ReasoningEngine,
+		I: IntSolverActions<E>,
+	{
+		let n_vars = self.graph.n_vars();
+		self.tarjan.vars_buf.clear();
+		self.tarjan.vals_buf.clear();
+
+		// Pop the SCC off the DFS stack into the two bitsets.
+		let mut has_var_in_scc = false;
+		loop {
+			let node = self.tarjan.dfs_stack.pop().expect("non-empty DFS stack");
+			self.tarjan.dfs_on_stack[node] = false;
+			if node < n_vars {
+				self.tarjan.vars_buf.push(node);
+				has_var_in_scc = true;
+			} else {
+				self.tarjan.vals_buf.push(node - n_vars);
+			}
+			if node == start_idx {
+				break;
+			}
+		}
+
+		// An SCC with no variable nodes does nothing useful: any matched value
+		// in this SCC would force its matched var to be in the SCC too (the
+		// matching edge is in the residual graph), and an unmatched value with
+		// no adjacent var has no support to remove from anywhere.
+		if !has_var_in_scc {
+			return Ok(());
+		}
+
+		// Move the SCC's variables into their own block. `split_off` keeps the
+		// SCC's vars in positions [new_root..orig_end); the *other* vars from
+		// the same original block now occupy [orig_root..new_root) — exactly
+		// the variables that still need this SCC's values stripped from them.
+		let (orig_root, new_scc_root) = self.partition.split_off(&self.tarjan.vars_buf, ctx);
+		let Some(new_root) = new_scc_root else {
+			// The new SCC absorbed the entire original block — no outside
+			// variables to strip values from.
+			return Ok(());
+		};
+
+		// `new_root` is the SCC's block root for both matched and unmatched
+		// values (a matched val's matched_var is in this SCC; for an unmatched
+		// val, any in-SCC var serves as the SCC representative). One scc_id
+		// covers every value in the SCC.
+		let scc_id = new_root;
+		let val_reason = ctx.deferred_reason(scc_id as u64);
+		for &val_idx in self.tarjan.vals_buf.iter() {
+			let val = self.graph.value_at(val_idx);
+			for pos in orig_root..new_root {
+				let var_idx = self.partition.elems[pos];
+				let var = self.graph.vars[var_idx].clone();
+				if !var.in_domain(ctx, val) {
+					continue;
+				}
+				var.remove_val(ctx, val, val_reason)?;
+			}
+		}
+		Ok(())
+	}
+
+	/// Recursive Tarjan DFS on the bipartite var/value residual graph. When
+	/// the root of a non-trivial SCC is popped and the run already detected an
+	/// SCC split, delegates filtering to [`Self::process_scc_root`].
+	fn tarjan_dfs<E>(
+		&mut self,
+		start_idx: usize,
+		next_dfs_index: &mut usize,
+		n_left_visited: &mut usize,
+		scc_split_detected: &mut bool,
+		ctx: &mut E::PropagationContext<'_>,
+	) -> Result<(), E::Conflict>
+	where
+		E: ReasoningEngine,
+		I: IntSolverActions<E>,
+	{
+		let n_vars = self.graph.n_vars();
+		if start_idx < n_vars {
+			*n_left_visited += 1;
+		}
+
+		self.tarjan.dfs_stack.push(start_idx);
+		self.tarjan.dfs_on_stack[start_idx] = true;
+		self.tarjan.dfs_index[start_idx] = *next_dfs_index;
+		self.tarjan.low_link[start_idx] = *next_dfs_index;
+		*next_dfs_index += 1;
+
+		let frame_start = self.tarjan.neighbours.len();
+		self.push_tarjan_neighbours::<E>(start_idx, ctx);
+		let frame_end = self.tarjan.neighbours.len();
+		let mut i = frame_start;
+		while i < frame_end {
+			let nb = self.tarjan.neighbours[i];
+			if self.tarjan.dfs_index[nb] != 0 {
+				if self.tarjan.dfs_on_stack[nb] {
+					self.tarjan.low_link[start_idx] =
+						cmp::min(self.tarjan.low_link[start_idx], self.tarjan.dfs_index[nb]);
+				}
+			} else {
+				self.tarjan_dfs::<E>(nb, next_dfs_index, n_left_visited, scc_split_detected, ctx)?;
+				self.tarjan.low_link[start_idx] =
+					cmp::min(self.tarjan.low_link[start_idx], self.tarjan.low_link[nb]);
+			}
+			i += 1;
+		}
+		self.tarjan.neighbours.truncate(frame_start);
+
+		// SCC root?
+		if self.tarjan.low_link[start_idx] == self.tarjan.dfs_index[start_idx] {
+			// Either we entered the DFS in the middle (low_link > 1) or some
+			// left nodes weren't reached from this root -> graph is not one
+			// single SCC. The counter avoids re-scanning `dfs_index` on every
+			// SCC-root pop.
+			if self.tarjan.low_link[start_idx] > 1 || *n_left_visited < n_vars {
+				*scc_split_detected = true;
+			}
+			if *scc_split_detected {
+				self.process_scc_root::<E>(start_idx, ctx)?;
+			}
+		}
+		Ok(())
+	}
+}
+
+impl<E, I> Propagator<E> for IntUniqueDomain<I>
+where
+	E: ReasoningEngine,
+	I: IntSolverActions<E>,
+{
+	fn advise_of_backtrack(&mut self, _: &mut E::NotificationContext<'_>) {
+		self.dirty_vars.clear();
+	}
+
+	/// When a variable's domain changes, mark it as dirty and only enqueue
+	/// propagation if its domain size is now less than the number of variables.
+	/// Larger domains cannot participate in any non-trivial Hall set, so there
+	/// is nothing to propagate.
+	fn advise_of_int_change(
+		&mut self,
+		ctx: &mut E::NotificationContext<'_>,
+		data: u64,
+		_event: IntEvent,
+	) -> bool {
+		// safe to unwrap: `card()` only returns `None` if the number of steps would
+		// overflow `usize`
+		let domain_size = self.graph.vars[data as usize].domain(ctx).card().unwrap();
+		self.dirty_vars.set(data as usize, true);
+		domain_size < self.graph.n_vars()
+	}
+
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
+		self.init_lazy_state(ctx);
+		self.dirty_vars.set_range(.., true);
+		ctx.set_priority(PriorityLevel::Low);
+		for (i, v) in self.graph.vars.iter().enumerate() {
+			v.advise_when(ctx, IntPropCond::Domain, i as u64);
+		}
+		ctx.advise_on_backtrack();
+		ctx.enqueue_now(true);
+	}
+
+	fn explain(
+		&mut self,
+		ctx: &mut E::ExplanationContext<'_>,
+		_lit: E::Atom,
+		data: u64,
+	) -> Conjunction<E::Atom> {
+		let scc_id = data as usize;
+		let scc_end = self.partition.block_end(scc_id, ctx);
+		self.build_hall_set_reason(
+			ctx,
+			&self.partition.elems[scc_id..scc_end],
+			|var, ctx, meaning| {
+				let (atom, _) = var.lit_relaxed(ctx, meaning);
+				atom
+			},
+		)
+	}
+
+	#[tracing::instrument(
+		name = "int_unique_domain",
+		target = "solver",
+		level = "trace",
+		skip(self, ctx)
+	)]
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
+		// Phase 1: drain dirty variables, fix the matching, and collect the
+		// set of SCC roots whose residual graph may have changed.
+		//
+		// Swap the dirty bitset out into a local so `advise_of_int_change` can
+		// keep writing during the call (it sees the just-emptied scratch in
+		// `self.dirty_vars`). Restore the scratch at the end so the next
+		// propagate is set up again.
+		std::mem::swap(&mut self.dirty_vars, &mut self.dirty_scratch);
+		let mut dirty = std::mem::take(&mut self.dirty_scratch);
+		let result = self.repair_matching_and_propagate_fixed(&dirty, ctx);
+		// Restore the scratch *before* propagating the error so the next
+		// propagate call sees a sized (empty) `dirty_scratch`.
+		dirty.clear();
+		self.dirty_scratch = dirty;
+		let changed_scc = result?;
+
+		// Phase 2: re-run Tarjan on every SCC that changed in phase 1.
+		self.run_tarjan_on_changed_sccs(&changed_scc, ctx)
+	}
+}
+
+impl<I> IntUniqueDomain<I> {
+	/// Phase 1 of `propagate`. For each dirty variable: repair its matching
+	/// entry if its previous match left the domain, then either propagate the
+	/// "newly fixed" case (singleton domain -> strip its value from the rest of
+	/// its SCC) or mark the surrounding SCC as needing a Tarjan re-run.
+	///
+	/// Returns the set of SCC roots that need to be revisited in phase 2.
+	fn repair_matching_and_propagate_fixed<E>(
+		&mut self,
+		dirty: &FixedBitSet,
+		ctx: &mut E::PropagationContext<'_>,
+	) -> Result<FixedBitSet, E::Conflict>
+	where
+		E: ReasoningEngine,
+		I: IntSolverActions<E>,
+	{
+		let mut changed_scc = FixedBitSet::with_capacity(self.graph.n_vars());
+		for i in dirty.ones() {
+			let scc_id = self.partition.block_root(i, ctx);
+			let needs_augment = match self.graph.var_to_val[i] {
+				None => true,
+				Some(val_idx) => !self.graph.vars[i].in_domain(ctx, self.graph.value_at(val_idx)),
+			};
+			if needs_augment {
+				self.find_augmenting_path::<E>(i, ctx)?;
+			}
+
+			// If the variable is now fixed, propagate the newly fixed event.
+			// Otherwise, mark its involved SCC as dirty for phase 2.
+			if let Some(val) = self.graph.vars[i].val(ctx) {
+				changed_scc.set(scc_id, false);
+				let (orig_scc, new_scc) = self.partition.split_off(&[i], ctx);
+				if new_scc.is_some() {
+					let orig_scc_end = self.partition.block_end(orig_scc, ctx);
+					let reason_lit = self.graph.vars[i].lit(ctx, IntLitMeaning::Eq(val));
+					for pos in orig_scc..orig_scc_end {
+						let idx = self.partition.elems[pos];
+						let v = self.graph.vars[idx].clone();
+						v.remove_val(ctx, val, [reason_lit.clone()].as_slice())?;
+					}
+					changed_scc.set(orig_scc, orig_scc_end - orig_scc > 1);
+				}
+			} else {
+				let scc_end = self.partition.block_end(scc_id, ctx);
+				changed_scc.set(scc_id, scc_end - scc_id > 1);
+			}
+		}
+		Ok(changed_scc)
+	}
+
+	/// Phase 2 of `propagate`. Runs Tarjan on every SCC root flagged in
+	/// `changed_scc`. Tarjan walks the residual bipartite graph and, for each
+	/// non-trivial SCC discovered, partitions the variables out and removes
+	/// the SCC's values from variables outside it.
+	fn run_tarjan_on_changed_sccs<E>(
+		&mut self,
+		changed_scc: &FixedBitSet,
+		ctx: &mut E::PropagationContext<'_>,
+	) -> Result<(), E::Conflict>
+	where
+		E: ReasoningEngine,
+		I: IntSolverActions<E>,
+	{
+		self.tarjan.reset();
+		let mut next_dfs_index: usize = 1;
+		let mut n_left_visited: usize = 0;
+		let mut scc_split_detected = false;
+		for i in changed_scc.ones() {
+			let scc_end = self.partition.block_end(i, ctx);
+			for var_idx in i..scc_end {
+				if self.tarjan.dfs_index[var_idx] == 0 {
+					self.tarjan_dfs::<E>(
+						var_idx,
+						&mut next_dfs_index,
+						&mut n_left_visited,
+						&mut scc_split_detected,
+						ctx,
+					)?;
+				}
+			}
+		}
+		Ok(())
+	}
+
+	/// Build a Hall-set explanation over `members`.
+	///
+	/// For the set `S = members`, computes
+	///   `dom_lb = min_{v in S} lb(v)`,
+	///   `dom_ub = max_{v in S} ub(v)`,
+	///   `holes  = { x in [dom_lb, dom_ub] : x not in dom(v) for any v in S }`,
+	/// and emits, for each `v in S`: `v >= dom_lb`, `v <= dom_ub`, and `v != x`
+	/// for every `x in holes`. The reason pins each member into the shared
+	/// window minus the union's complement, so a Hall set of size `|S|`
+	/// occupying `|S|` values can be reconstructed from the reason alone.
+	///
+	/// This is the form Régin's algorithm requires for both UNSAT conflicts
+	/// (no augmenting path) and value-removal explanations (SCC pruning).
+	/// `get_lit` lets the caller choose between `lit` (propagation) and
+	/// `lit_relaxed` (explanation), which live in different traits with
+	/// different context mutability.
+	fn build_hall_set_reason<C, A, F>(
+		&self,
+		ctx: &mut C,
+		members: &[usize],
+		mut get_lit: F,
+	) -> Vec<A>
+	where
+		C: ReasoningContext,
+		I: IntInspectionActions<C>,
+		F: FnMut(&I, &mut C, IntLitMeaning) -> A,
+	{
+		// Pass 1: dom_lb / dom_ub from bounds only — cheap and lets us size
+		// the union bitset to the [dom_lb, dom_ub] window (typically far
+		// smaller than the absolute union-domain span).
+		let mut dom_lb = IntVal::MAX;
+		let mut dom_ub = IntVal::MIN;
+		for &vid in members {
+			let (lb, ub) = self.graph.vars[vid].bounds(ctx);
+			dom_lb = cmp::min(dom_lb, lb);
+			dom_ub = cmp::max(dom_ub, ub);
+		}
+		let window = (dom_ub - dom_lb + 1) as usize;
+
+		// Pass 2: union of member domains, window-indexed.
+		let mut union_bits = FixedBitSet::with_capacity(window);
+		for &vid in members {
+			for val in self.graph.vars[vid].domain(ctx).iter().flatten() {
+				union_bits.insert((val - dom_lb) as usize);
+			}
+		}
+
+		// Pass 3: emit per-member literals, deriving holes inline from the
+		// bitset's zero positions (no separate holes Vec).
+		let n_holes = window - union_bits.count_ones(..);
+		let mut reason: Vec<A> = Vec::with_capacity(members.len() * (2 + n_holes));
+		for &vid in members {
+			let var = &self.graph.vars[vid];
+			reason.push(get_lit(var, ctx, IntLitMeaning::GreaterEq(dom_lb)));
+			reason.push(get_lit(var, ctx, IntLitMeaning::Less(dom_ub + 1)));
+			for hole_idx in union_bits.zeroes() {
+				reason.push(get_lit(
+					var,
+					ctx,
+					IntLitMeaning::NotEq(dom_lb + hole_idx as IntVal),
+				));
+			}
+		}
+		reason
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use itertools::Itertools;
@@ -594,7 +1430,7 @@ mod tests {
 		IntSet, IntVal,
 		constraints::{
 			int_linear::IntLinearLessEqBounds,
-			int_unique::{IntUniqueBounds, IntUniqueValue},
+			int_unique::{IntUniqueBounds, IntUniqueDomain, IntUniqueValue},
 		},
 		model::Model,
 		solver::{LiteralStrategy, Solver, Status, Valuation},
@@ -777,6 +1613,80 @@ mod tests {
 
 	#[test]
 	#[traced_test]
+	fn test_all_different_domain_sat() {
+		let mut slv = Solver::default();
+		let a = slv
+			.new_int_decision(1..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(1..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let c = slv
+			.new_int_decision(1..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		IntUniqueDomain::post(&mut slv, vec![a, b, c]);
+		slv.assert_all_solutions(&[a, b, c], |sol| sol.iter().all_unique());
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_all_different_domain_unsat() {
+		// Three variables on {1,2}: Hall set, no matching exists.
+		let mut slv = Solver::default();
+		let a = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let c = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		IntUniqueDomain::post(&mut slv, vec![a, b, c]);
+		slv.assert_unsatisfiable();
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_all_different_domain_filtering() {
+		// Régin-style example: {1,2}, {1,2}, {1,2,3}. The Hall set {a,b} on
+		// {1,2} should prune 1 and 2 from c, leaving c = 3.
+		let mut slv = Solver::default();
+		let a = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(1..=2)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let c = slv
+			.new_int_decision(1..=3)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		IntUniqueDomain::post(&mut slv, vec![a, b, c]);
+		slv.assert_all_solutions(&[a, b, c], |sol| {
+			sol.iter().all_unique() && sol[2] == crate::solver::Value::Int(3)
+		});
+	}
+
+	#[test]
+	#[traced_test]
 	fn test_gapped_domain_regression() {
 		let mut prb = Model::default();
 		let prev: Vec<_> = [
@@ -796,7 +1706,7 @@ mod tests {
 		debug_assert!(grid.iter().all(|row| row.len() == 9));
 
 		let mut slv: Solver = Solver::default();
-		// create variables and add all different propagator for each row
+		// create variables and add int_unique propagator for each row
 		let all_vars: Vec<_> = grid
 			.iter()
 			.map(|row| {
@@ -820,7 +1730,7 @@ mod tests {
 			})
 			.collect();
 
-		// add all different propagator for each column
+		// add int_unique propagator for each column
 		for (i, _) in grid.iter().enumerate() {
 			let col_vars: Vec<_> = grid
 				.iter()
@@ -830,7 +1740,7 @@ mod tests {
 
 			IntUniqueValue::post(&mut slv, col_vars);
 		}
-		// add all different propagator for each 3 by 3 grid
+		// add int_unique propagator for each 3 by 3 grid
 		for i in 0..3 {
 			for j in 0..3 {
 				let mut block_vars: Vec<_> = Vec::with_capacity(grid.len());
