@@ -543,9 +543,14 @@ impl IntDecision {
 		let (lb, ub) = self.bounds(trail);
 		let domain = &self.domain;
 		let orig_lb = *domain.lower_bound().unwrap();
-		let lb_var = || self.order_encoding.find(domain, orig_lb + 1).map(|v| v.0);
+		let lb_var = || {
+			self.order_encoding
+				.find(domain, orig_lb + 1)
+				.map(|v| v.0.into())
+		};
 		let orig_ub = *domain.upper_bound().unwrap();
-		let ub_var = || self.order_encoding.find(domain, orig_ub).map(|v| v.0);
+		// Negate the order lit `x < orig_ub`, to get `x >= orig_ub`.
+		let ub_var = || self.order_encoding.find(domain, orig_ub).map(|v| !v.0);
 
 		match &self.direct_encoding {
 			DirectStorage::Eager(direct_range) => {
@@ -565,12 +570,12 @@ impl IntDecision {
 								} else if v == orig_ub {
 									ub_var().unwrap()
 								} else {
-									direct_range.index(pos + i - 1)
+									direct_range.index(pos + i - 1).into()
 								},
 							)
 						})
 						.take_while(|(v, _)| *v <= ub)
-						.filter(|&(_, lit)| Decision::<bool>(lit.into()).val(trail) != Some(false))
+						.filter(|&(_, lit)| Decision::<bool>(lit).val(trail) != Some(false))
 						.map(|(v, _)| v),
 				)
 			}
@@ -588,13 +593,13 @@ impl IntDecision {
 							} else if v == orig_ub {
 								ub_var()
 							} else {
-								hash_map.get(&v).copied()
+								hash_map.get(&v).copied().map(|v| v.into())
 							},
 						)
 					})
 					.take_while(|(v, _)| *v <= ub)
 					.filter(|&(_, lit)| {
-						lit.map(|lit| Decision::<bool>(lit.into()).val(trail) != Some(false))
+						lit.map(|lit| Decision::<bool>(lit).val(trail) != Some(false))
 							.unwrap_or(true)
 					})
 					.map(|(v, _)| v),
@@ -1709,5 +1714,79 @@ mod tests {
 				.chain((2..=9).map(NotEq))
 				.chain(once(Less(10))),
 		);
+	}
+
+	#[test]
+	fn domain_access() {
+		use crate::{
+			actions::{IntInspectionActions, IntPropagationActions},
+			solver::solving_context::SolvingContext,
+		};
+
+		for (order, direct) in [
+			(LiteralStrategy::Eager, LiteralStrategy::Eager),
+			(LiteralStrategy::Eager, LiteralStrategy::Lazy),
+			(LiteralStrategy::Lazy, LiteralStrategy::Eager),
+			(LiteralStrategy::Lazy, LiteralStrategy::Lazy),
+		] {
+			let orig = IntSet::from_iter([1..=4, 6..=6]);
+			let make_solver = || {
+				let mut slv: Solver = Solver::default();
+				let x = slv
+					.new_int_decision(orig.clone())
+					.order_literals(order)
+					.direct_literals(direct)
+					.view();
+				let IntView::Linear(LinearView { var: x, .. }) = x.0 else {
+					unreachable!()
+				};
+				(slv, x)
+			};
+
+			// Scenario 1: tighten the minimum to the original upper bound.
+			{
+				let (mut slv, x) = make_solver();
+				let (mut actions, mut engine) = slv.as_parts_mut();
+				assert_eq!(x.bounds(&engine.state), (1, 6));
+				assert_eq!(x.domain(&engine.state), orig);
+				let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
+				x.tighten_min(&mut ctx, 6, []).unwrap();
+
+				let state = &engine.state;
+				assert_eq!(x.bounds(state), (6, 6));
+				assert_eq!(x.domain(state), (6..=6).into());
+				assert!(x.in_domain(state, 6));
+				assert!(!x.in_domain(state, 4));
+			}
+
+			// Scenario 2: tighten the maximum to remove the original upper bound.
+			{
+				let (mut slv, x) = make_solver();
+				let (mut actions, mut engine) = slv.as_parts_mut();
+				let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
+				x.tighten_max(&mut ctx, 4, []).unwrap();
+
+				let state = &engine.state;
+				assert_eq!(x.bounds(state), (1, 4));
+				assert_eq!(x.domain(state), (1..=4).into());
+				assert!(!x.in_domain(state, 6));
+			}
+
+			// Scenario 3: tighten the minimum, and punch a hole.
+			{
+				let (mut slv, x) = make_solver();
+				let (mut actions, mut engine) = slv.as_parts_mut();
+				let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
+				x.tighten_min(&mut ctx, 3, []).unwrap();
+				x.remove_val(&mut ctx, 4, []).unwrap();
+
+				let state = &engine.state;
+				assert_eq!(x.bounds(state), (3, 6));
+				assert_eq!(x.domain(state), IntSet::from_iter([3..=3, 6..=6]));
+				assert!(x.in_domain(state, 3));
+				assert!(!x.in_domain(state, 4));
+				assert!(x.in_domain(state, 6));
+			}
+		}
 	}
 }
