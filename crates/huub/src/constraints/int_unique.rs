@@ -3,9 +3,9 @@
 
 use std::cmp;
 
-use fixedbitset::FixedBitSet;
 use itertools::{Either, Itertools};
 use rangelist::IntervalIterator;
+use rustc_hash::FxHashSet;
 use tracing::warn;
 
 use crate::{
@@ -796,7 +796,7 @@ struct AugmentingPathScratch {
 	/// BFS queue (over left nodes).
 	queue: Vec<usize>,
 	/// Per-left-node BFS visited flag; cleared at the start of each search.
-	visited: FixedBitSet,
+	visited: FxHashSet<usize>,
 	/// Per-left-node BFS parent pointer; `usize::MAX` means "no parent /
 	/// root".
 	parent: Vec<usize>,
@@ -879,11 +879,11 @@ pub struct IntUniqueDomain<I> {
 	graph: VariableValueMatching<I>,
 	/// Set of variable indices whose domain has changed since the last
 	/// propagation pass; cleared by `propagate` and `advise_of_backtrack`.
-	dirty_vars: FixedBitSet,
+	dirty_vars: FxHashSet<usize>,
 	/// Always-empty (but `n_vars`-sized) scratch bitset. `propagate` swaps
 	/// this with `dirty_vars` so it can iterate the dirty bits while
 	/// `advise_of_int_change` keeps writing into the (now empty) bitset.
-	dirty_scratch: FixedBitSet,
+	dirty_scratch: FxHashSet<usize>,
 	/// Backtrackable partition of variable indices into current SCCs.
 	partition: TrailedPartition,
 	/// Per-call scratch for augmenting-path search.
@@ -918,8 +918,8 @@ impl<I> IntUniqueDomain<I> {
 				var_to_val: vec![None; n],
 				val_to_var: Vec::new(),
 			},
-			dirty_vars: FixedBitSet::with_capacity(n),
-			dirty_scratch: FixedBitSet::with_capacity(n),
+			dirty_vars: FxHashSet::default(),
+			dirty_scratch: FxHashSet::default(),
 			partition: TrailedPartition {
 				elems: (0..n).collect(),
 				positions: (0..n).collect(),
@@ -927,7 +927,7 @@ impl<I> IntUniqueDomain<I> {
 			},
 			bfs: AugmentingPathScratch {
 				queue: Vec::new(),
-				visited: FixedBitSet::with_capacity(n),
+				visited: FxHashSet::default(),
 				parent: vec![usize::MAX; n],
 			},
 			tarjan: TarjanScratch {
@@ -989,7 +989,7 @@ impl<I> IntUniqueDomain<I> {
 			for val in self.graph.vars[var_idx].domain(ctx).iter().flatten() {
 				let val_idx = self.graph.value_index(val);
 				if let Some(matched_var) = self.graph.val_to_var[val_idx] {
-					if !self.bfs.visited.contains(matched_var) {
+					if !self.bfs.visited.contains(&matched_var) {
 						self.bfs.queue.push(matched_var);
 						self.bfs.parent[matched_var] = var_idx;
 						self.bfs.visited.insert(matched_var);
@@ -1207,13 +1207,15 @@ where
 		// safe to unwrap: `card()` only returns `None` if the number of steps would
 		// overflow `usize`
 		let domain_size = self.graph.vars[data as usize].domain(ctx).card().unwrap();
-		self.dirty_vars.set(data as usize, true);
+		self.dirty_vars.insert(data as usize);
 		domain_size < self.graph.n_vars()
 	}
 
 	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		self.init_lazy_state(ctx);
-		self.dirty_vars.set_range(.., true);
+		for i in 0..self.graph.n_vars() {
+			self.dirty_vars.insert(i);
+		}
 		ctx.set_priority(PriorityLevel::Low);
 		for (i, v) in self.graph.vars.iter().enumerate() {
 			v.advise_when(ctx, IntPropCond::Domain, i as u64);
@@ -1277,15 +1279,15 @@ impl<I> IntUniqueDomain<I> {
 	/// Returns the set of SCC roots that need to be revisited in phase 2.
 	fn repair_matching_and_propagate_fixed<E>(
 		&mut self,
-		dirty: &FixedBitSet,
+		dirty: &FxHashSet<usize>,
 		ctx: &mut E::PropagationContext<'_>,
-	) -> Result<FixedBitSet, E::Conflict>
+	) -> Result<FxHashSet<usize>, E::Conflict>
 	where
 		E: ReasoningEngine,
 		I: IntSolverActions<E>,
 	{
-		let mut changed_scc = FixedBitSet::with_capacity(self.graph.n_vars());
-		for i in dirty.ones() {
+		let mut changed_scc = FxHashSet::default();
+		for &i in dirty.iter() {
 			let scc_id = self.partition.block_root(i, ctx);
 			let needs_augment = match self.graph.var_to_val[i] {
 				None => true,
@@ -1298,7 +1300,7 @@ impl<I> IntUniqueDomain<I> {
 			// If the variable is now fixed, propagate the newly fixed event.
 			// Otherwise, mark its involved SCC as dirty for phase 2.
 			if let Some(val) = self.graph.vars[i].val(ctx) {
-				changed_scc.set(scc_id, false);
+				changed_scc.insert(scc_id);
 				let (orig_scc, new_scc) = self.partition.split_off(&[i], ctx);
 				if new_scc.is_some() {
 					let orig_scc_end = self.partition.block_end(orig_scc, ctx);
@@ -1308,11 +1310,15 @@ impl<I> IntUniqueDomain<I> {
 						let v = self.graph.vars[idx].clone();
 						v.remove_val(ctx, val, [reason_lit.clone()].as_slice())?;
 					}
-					changed_scc.set(orig_scc, orig_scc_end - orig_scc > 1);
+					if orig_scc_end - orig_scc > 1 {
+						changed_scc.insert(orig_scc);
+					}
 				}
 			} else {
 				let scc_end = self.partition.block_end(scc_id, ctx);
-				changed_scc.set(scc_id, scc_end - scc_id > 1);
+				if scc_end - scc_id > 1 {
+					changed_scc.insert(scc_id);
+				}
 			}
 		}
 		Ok(changed_scc)
@@ -1324,7 +1330,7 @@ impl<I> IntUniqueDomain<I> {
 	/// the SCC's values from variables outside it.
 	fn run_tarjan_on_changed_sccs<E>(
 		&mut self,
-		changed_scc: &FixedBitSet,
+		chanegd_scc: &FxHashSet<usize>,
 		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<(), E::Conflict>
 	where
@@ -1335,7 +1341,7 @@ impl<I> IntUniqueDomain<I> {
 		let mut next_dfs_index: usize = 1;
 		let mut n_left_visited: usize = 0;
 		let mut scc_split_detected = false;
-		for i in changed_scc.ones() {
+		for &i in chanegd_scc.iter() {
 			let scc_end = self.partition.block_end(i, ctx);
 			for var_idx in i..scc_end {
 				if self.tarjan.dfs_index[var_idx] == 0 {
@@ -1392,7 +1398,7 @@ impl<I> IntUniqueDomain<I> {
 		let window = (dom_ub - dom_lb + 1) as usize;
 
 		// Pass 2: union of member domains, window-indexed.
-		let mut union_bits = FixedBitSet::with_capacity(window);
+		let mut union_bits = FxHashSet::default();
 		for &vid in members {
 			for val in self.graph.vars[vid].domain(ctx).iter().flatten() {
 				union_bits.insert((val - dom_lb) as usize);
@@ -1401,18 +1407,16 @@ impl<I> IntUniqueDomain<I> {
 
 		// Pass 3: emit per-member literals, deriving holes inline from the
 		// bitset's zero positions (no separate holes Vec).
-		let n_holes = window - union_bits.count_ones(..);
+		let n_holes = window - union_bits.len();
 		let mut reason: Vec<A> = Vec::with_capacity(members.len() * (2 + n_holes));
 		for &vid in members {
 			let var = &self.graph.vars[vid];
 			reason.push(get_lit(var, ctx, IntLitMeaning::GreaterEq(dom_lb)));
 			reason.push(get_lit(var, ctx, IntLitMeaning::Less(dom_ub + 1)));
-			for hole_idx in union_bits.zeroes() {
-				reason.push(get_lit(
-					var,
-					ctx,
-					IntLitMeaning::NotEq(dom_lb + hole_idx as IntVal),
-				));
+			for i in dom_lb..=dom_ub {
+				if !union_bits.contains(&((i - dom_lb) as usize)) {
+					reason.push(get_lit(var, ctx, IntLitMeaning::NotEq(i)));
+				}
 			}
 		}
 		reason
