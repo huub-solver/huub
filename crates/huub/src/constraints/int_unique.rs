@@ -1334,7 +1334,7 @@ impl<I> IntUniqueDomain<I> {
 	/// the SCC's values from variables outside it.
 	fn run_tarjan_on_changed_sccs<E>(
 		&mut self,
-		chanegd_scc: &FxHashSet<usize>,
+		changed_scc: &FxHashSet<usize>,
 		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<(), E::Conflict>
 	where
@@ -1345,7 +1345,7 @@ impl<I> IntUniqueDomain<I> {
 		let mut next_dfs_index: usize = 1;
 		let mut n_left_visited: usize = 0;
 		let mut scc_split_detected = false;
-		for &i in chanegd_scc.iter() {
+		for &i in changed_scc.iter() {
 			let scc_end = self.partition.block_end(i, ctx);
 			for var_idx in i..scc_end {
 				if self.tarjan.dfs_index[var_idx] == 0 {
