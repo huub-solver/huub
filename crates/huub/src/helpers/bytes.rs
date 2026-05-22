@@ -42,6 +42,16 @@ impl Bytes for f64 {
 	}
 }
 
+impl Bytes for i8 {
+	fn from_bytes(bytes: [u8; 8]) -> Self {
+		i64::from_ne_bytes(bytes) as i8
+	}
+
+	fn to_bytes(self) -> [u8; 8] {
+		(self as i64).to_ne_bytes()
+	}
+}
+
 impl Bytes for i16 {
 	fn from_bytes(bytes: [u8; 8]) -> Self {
 		i64::from_ne_bytes(bytes) as i16
@@ -72,16 +82,6 @@ impl Bytes for i64 {
 	}
 }
 
-impl Bytes for i8 {
-	fn from_bytes(bytes: [u8; 8]) -> Self {
-		i64::from_ne_bytes(bytes) as i8
-	}
-
-	fn to_bytes(self) -> [u8; 8] {
-		(self as i64).to_ne_bytes()
-	}
-}
-
 impl Bytes for isize {
 	fn from_bytes(bytes: [u8; 8]) -> Self {
 		i64::from_ne_bytes(bytes) as isize
@@ -89,6 +89,16 @@ impl Bytes for isize {
 
 	fn to_bytes(self) -> [u8; 8] {
 		(self as i64).to_ne_bytes()
+	}
+}
+
+impl Bytes for u8 {
+	fn from_bytes(bytes: [u8; 8]) -> Self {
+		u64::from_ne_bytes(bytes) as u8
+	}
+
+	fn to_bytes(self) -> [u8; 8] {
+		(self as u64).to_ne_bytes()
 	}
 }
 
@@ -119,16 +129,6 @@ impl Bytes for u64 {
 
 	fn to_bytes(self) -> [u8; 8] {
 		self.to_ne_bytes()
-	}
-}
-
-impl Bytes for u8 {
-	fn from_bytes(bytes: [u8; 8]) -> Self {
-		u64::from_ne_bytes(bytes) as u8
-	}
-
-	fn to_bytes(self) -> [u8; 8] {
-		(self as u64).to_ne_bytes()
 	}
 }
 

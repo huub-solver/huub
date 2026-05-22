@@ -43,52 +43,6 @@ pub trait Brancher<D: DecisionActions>: Debug + DynClone {
 	fn decide(&mut self, actions: &mut D) -> Directive;
 }
 
-/// A search decision made by a [`Brancher`].
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum Directive {
-	/// Make the decision to branch on the given literal.
-	Select(View<bool>),
-	/// The brancher has exhausted all possible decisions, but can be
-	/// backtracked to a previous state.
-	Exhausted,
-	/// The brancher has exhausted all possible decisions and cannot be
-	/// backtracked to a previous state.
-	Consumed,
-}
-
-/// General brancher for integer variables that makes search decisions by
-/// following a given [`DecisionSelection`] and [`DomainSelection`] strategy.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct IntBrancher {
-	/// Integer variables to be branched on.
-	vars: Vec<View<IntVal>>,
-	/// [`DecisionSelection`] strategy used to select the next decision variable
-	/// to branch on.
-	var_sel: DecisionSelection,
-	/// [`DomainSelection`] strategy used to select the way in which to branch
-	/// on the selected decision variable.
-	val_sel: DomainSelection,
-	/// The start of the unfixed variables in `vars`.
-	next: Trailed<usize>,
-}
-
-/// Strategy for limiting the domain of a selected decision variable for a
-/// [`BoolBrancher`] or [`IntBrancher`].
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[non_exhaustive]
-pub enum DomainSelection {
-	/// Set the decision variable to its current maximum value.
-	IndomainMax,
-	/// Set the decision variable to its current minimum value.
-	IndomainMin,
-	/// Exclude the current upper bound value from the domain of the decision
-	/// variable.
-	OutdomainMax,
-	/// Exclude the current lower bound value from the domain of the decision
-	/// variable.
-	OutdomainMin,
-}
-
 /// Strategy of selecting the next decision variable for a [`BoolBrancher`] or
 /// [`IntBrancher`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -108,6 +62,52 @@ pub enum DecisionSelection {
 	/// Select the unfixed decision variable with the smallest lower bound,
 	/// using the order of the variables in case of a tie.
 	Smallest,
+}
+
+/// A search decision made by a [`Brancher`].
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum Directive {
+	/// Make the decision to branch on the given literal.
+	Select(View<bool>),
+	/// The brancher has exhausted all possible decisions, but can be
+	/// backtracked to a previous state.
+	Exhausted,
+	/// The brancher has exhausted all possible decisions and cannot be
+	/// backtracked to a previous state.
+	Consumed,
+}
+
+/// Strategy for limiting the domain of a selected decision variable for a
+/// [`BoolBrancher`] or [`IntBrancher`].
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum DomainSelection {
+	/// Set the decision variable to its current maximum value.
+	IndomainMax,
+	/// Set the decision variable to its current minimum value.
+	IndomainMin,
+	/// Exclude the current upper bound value from the domain of the decision
+	/// variable.
+	OutdomainMax,
+	/// Exclude the current lower bound value from the domain of the decision
+	/// variable.
+	OutdomainMin,
+}
+
+/// General brancher for integer variables that makes search decisions by
+/// following a given [`DecisionSelection`] and [`DomainSelection`] strategy.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IntBrancher {
+	/// Integer variables to be branched on.
+	vars: Vec<View<IntVal>>,
+	/// [`DecisionSelection`] strategy used to select the next decision variable
+	/// to branch on.
+	var_sel: DecisionSelection,
+	/// [`DomainSelection`] strategy used to select the way in which to branch
+	/// on the selected decision variable.
+	val_sel: DomainSelection,
+	/// The start of the unfixed variables in `vars`.
+	next: Trailed<usize>,
 }
 
 /// A brancher that enforces Boolean conditions and is abandoned when a

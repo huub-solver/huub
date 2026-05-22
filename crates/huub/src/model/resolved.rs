@@ -1,4 +1,5 @@
 //! Resolved model handles that no longer carry aliasing ambiguity.
+
 use std::{num::NonZero, ops::Not};
 
 use crate::{

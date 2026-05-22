@@ -683,6 +683,67 @@ impl<'a> FznModelBuilder<'a> {
 			.collect()
 	}
 
+	/// Extract an [`DecisionSelection`] from an [`AnnotationArgument`] in a
+	/// [`FlatZinc`] instance, or return a
+	/// [`FlatZincError::InvalidArgumentType`] if an invalid type.
+	fn ann_dcn_sel(arg: &AnnotationArgument<FznIdent>) -> Result<DecisionSelection, FlatZincError> {
+		let AnnotationArgument::Literal(AnnotationLiteral::Annotation(ann)) = arg else {
+			return Err(FlatZincError::InvalidArgumentType {
+				expected: "ann",
+				found: format!("{arg:?}"),
+			});
+		};
+		if let Annotation::Atom(FznIdent::Known(KnownIdent::Annotation(ann))) = ann {
+			match ann {
+				AnnotationIdent::VarSelAntiFirstFail => {
+					return Ok(DecisionSelection::AntiFirstFail);
+				}
+				AnnotationIdent::VarSelFirstFail => return Ok(DecisionSelection::FirstFail),
+				AnnotationIdent::VarSelInputOrder => return Ok(DecisionSelection::InputOrder),
+				AnnotationIdent::VarSelLargest => return Ok(DecisionSelection::Largest),
+				AnnotationIdent::VarSelSmallest => return Ok(DecisionSelection::Smallest),
+				_ => {}
+			}
+		}
+		warn!(
+			target: "flatzinc",
+			selection = %ann,
+			fallback = "first_fail",
+			"unsupported value selection"
+		);
+		Ok(DecisionSelection::FirstFail)
+	}
+
+	/// Extract an [`DomainSelection`] from an [`AnnotationArgument`] in a
+	/// [`FlatZinc`] instance, or return a
+	/// [`FlatZincError::InvalidArgumentType`] if an invalid type.
+	fn ann_dom_sel(arg: &AnnotationArgument<FznIdent>) -> Result<DomainSelection, FlatZincError> {
+		let AnnotationArgument::Literal(AnnotationLiteral::Annotation(ann)) = arg else {
+			return Err(FlatZincError::InvalidArgumentType {
+				expected: "ann",
+				found: format!("{arg:?}"),
+			});
+		};
+		if let Annotation::Atom(FznIdent::Known(KnownIdent::Annotation(ann))) = ann {
+			match ann {
+				AnnotationIdent::ValSelIndomain | AnnotationIdent::ValSelIndomainMin => {
+					return Ok(DomainSelection::IndomainMin);
+				}
+				AnnotationIdent::ValSelIndomainMax => return Ok(DomainSelection::IndomainMax),
+				AnnotationIdent::ValSelOutdomainMax => return Ok(DomainSelection::OutdomainMax),
+				AnnotationIdent::ValSelOutdomainMin => return Ok(DomainSelection::OutdomainMin),
+				_ => {}
+			}
+		}
+		warn!(
+			target: "flatzinc",
+			selection = %ann,
+			fallback = "indomain_min",
+			"unsupported value selection"
+		);
+		Ok(DomainSelection::IndomainMin)
+	}
+
 	/// Process a [`AnnotationCall`] expected to contain a search selection
 	/// strategy, and return a tuple containing (1) the general search strategy,
 	/// and (2) the warm start instructions.
@@ -821,67 +882,6 @@ impl<'a> FznModelBuilder<'a> {
 			"ignore unsupported search annotation"
 		);
 		Ok((Vec::new(), Vec::new()))
-	}
-
-	/// Extract an [`DomainSelection`] from an [`AnnotationArgument`] in a
-	/// [`FlatZinc`] instance, or return a
-	/// [`FlatZincError::InvalidArgumentType`] if an invalid type.
-	fn ann_dom_sel(arg: &AnnotationArgument<FznIdent>) -> Result<DomainSelection, FlatZincError> {
-		let AnnotationArgument::Literal(AnnotationLiteral::Annotation(ann)) = arg else {
-			return Err(FlatZincError::InvalidArgumentType {
-				expected: "ann",
-				found: format!("{arg:?}"),
-			});
-		};
-		if let Annotation::Atom(FznIdent::Known(KnownIdent::Annotation(ann))) = ann {
-			match ann {
-				AnnotationIdent::ValSelIndomain | AnnotationIdent::ValSelIndomainMin => {
-					return Ok(DomainSelection::IndomainMin);
-				}
-				AnnotationIdent::ValSelIndomainMax => return Ok(DomainSelection::IndomainMax),
-				AnnotationIdent::ValSelOutdomainMax => return Ok(DomainSelection::OutdomainMax),
-				AnnotationIdent::ValSelOutdomainMin => return Ok(DomainSelection::OutdomainMin),
-				_ => {}
-			}
-		}
-		warn!(
-			target: "flatzinc",
-			selection = %ann,
-			fallback = "indomain_min",
-			"unsupported value selection"
-		);
-		Ok(DomainSelection::IndomainMin)
-	}
-
-	/// Extract an [`DecisionSelection`] from an [`AnnotationArgument`] in a
-	/// [`FlatZinc`] instance, or return a
-	/// [`FlatZincError::InvalidArgumentType`] if an invalid type.
-	fn ann_dcn_sel(arg: &AnnotationArgument<FznIdent>) -> Result<DecisionSelection, FlatZincError> {
-		let AnnotationArgument::Literal(AnnotationLiteral::Annotation(ann)) = arg else {
-			return Err(FlatZincError::InvalidArgumentType {
-				expected: "ann",
-				found: format!("{arg:?}"),
-			});
-		};
-		if let Annotation::Atom(FznIdent::Known(KnownIdent::Annotation(ann))) = ann {
-			match ann {
-				AnnotationIdent::VarSelAntiFirstFail => {
-					return Ok(DecisionSelection::AntiFirstFail);
-				}
-				AnnotationIdent::VarSelFirstFail => return Ok(DecisionSelection::FirstFail),
-				AnnotationIdent::VarSelInputOrder => return Ok(DecisionSelection::InputOrder),
-				AnnotationIdent::VarSelLargest => return Ok(DecisionSelection::Largest),
-				AnnotationIdent::VarSelSmallest => return Ok(DecisionSelection::Smallest),
-				_ => {}
-			}
-		}
-		warn!(
-			target: "flatzinc",
-			selection = %ann,
-			fallback = "first_fail",
-			"unsupported value selection"
-		);
-		Ok(DecisionSelection::FirstFail)
 	}
 
 	/// Check whether an annotation atom is present in the given list of

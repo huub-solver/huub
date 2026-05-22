@@ -1408,28 +1408,6 @@ impl<Sat> TrailingActions for Solver<Sat> {
 	}
 }
 
-impl Add for SolverStatistics {
-	type Output = SolverStatistics;
-
-	fn add(mut self, other: SolverStatistics) -> SolverStatistics {
-		self += other;
-		self
-	}
-}
-
-impl AddAssign for SolverStatistics {
-	fn add_assign(&mut self, other: SolverStatistics) {
-		self.conflicts += other.conflicts;
-		self.sat_search_directives += other.sat_search_directives;
-		self.peak_depth = self.peak_depth.max(other.peak_depth);
-		self.cp_propagator_calls += other.cp_propagator_calls;
-		self.restarts += other.restarts;
-		self.user_search_directives += other.user_search_directives;
-		self.eager_literals = self.eager_literals.max(other.eager_literals);
-		self.lazy_literals = self.lazy_literals.max(other.lazy_literals);
-	}
-}
-
 impl<'a, Sat, State> SolverNewIntDecisionBuilder<'a, Sat, State>
 where
 	Sat: ExternalPropagation,
@@ -1453,5 +1431,27 @@ where
 		debug_assert_eq!(lin_view.offset, 0);
 		debug_assert_eq!(lin_view.scale.get(), 1);
 		lin_view.var
+	}
+}
+
+impl Add for SolverStatistics {
+	type Output = SolverStatistics;
+
+	fn add(mut self, other: SolverStatistics) -> SolverStatistics {
+		self += other;
+		self
+	}
+}
+
+impl AddAssign for SolverStatistics {
+	fn add_assign(&mut self, other: SolverStatistics) {
+		self.conflicts += other.conflicts;
+		self.sat_search_directives += other.sat_search_directives;
+		self.peak_depth = self.peak_depth.max(other.peak_depth);
+		self.cp_propagator_calls += other.cp_propagator_calls;
+		self.restarts += other.restarts;
+		self.user_search_directives += other.user_search_directives;
+		self.eager_literals = self.eager_literals.max(other.eager_literals);
+		self.lazy_literals = self.lazy_literals.max(other.lazy_literals);
 	}
 }
