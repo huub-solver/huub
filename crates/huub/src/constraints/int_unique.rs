@@ -197,7 +197,11 @@ where
 		data: u64,
 		event: IntEvent,
 	) -> bool {
-		self.value_prop.advise_of_int_change(ctx, data, event)
+		match event {
+			IntEvent::Fixed => self.value_prop.advise_of_int_change(ctx, data, event),
+			IntEvent::Bounds => self.bounds_prop.advise_of_int_change(ctx, data, event),
+			_ => unreachable!("IntUnique should only be advised of Fixed and Bounds events"),
+		}
 	}
 
 	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
