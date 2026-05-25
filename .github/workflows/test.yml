@@ -31,7 +31,7 @@ jobs:
           cargo llvm-cov --no-report nextest --all-features --workspace --tests --bins --examples
           cargo llvm-cov --no-report --doc
           cargo llvm-cov report --doctests --codecov --output-path codecov.json
-      - uses: codecov/codecov-action@v4
+      - uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: codecov.json
