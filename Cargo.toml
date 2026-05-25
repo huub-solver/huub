@@ -27,7 +27,7 @@ expect-test = "1.5.1"
 flatzinc-serde = { version = "0.5.0" }
 humantime = "2.3.0"
 itertools = "0.14.0"
-mimalloc = "0.1.50"
+mimalloc = "0.1.52"
 pindakaas = { version = "0.2.3", features = ["external-propagation"] }
 rangelist = "0.4.0"
 rustc-hash = "2.1.2"
