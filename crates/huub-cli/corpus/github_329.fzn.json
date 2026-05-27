@@ -1,0 +1,31 @@
+{
+	"variables": {
+		"x": { "type": "int" },
+		"z": { "type": "int" },
+		"flag": { "type": "bool" }
+	},
+	"arrays": {},
+	"constraints": [{ "id": "int_eq_imp", "args": ["x", "z", "flag"] }],
+	"output": ["x", "z", "flag"],
+	"solve": {
+		"method": "satisfy",
+		"ann": [
+			{
+				"id": "seq_search",
+				"args": [
+					[
+						{
+							"id": "bool_search",
+							"args": [["flag"], "input_order", "indomain_min", "complete"]
+						},
+						{
+							"id": "int_search",
+							"args": [["x", "z"], "input_order", "indomain_min", "complete"]
+						}
+					]
+				]
+			}
+		]
+	},
+	"version": "1.0"
+}

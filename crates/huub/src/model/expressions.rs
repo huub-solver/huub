@@ -186,6 +186,17 @@ impl Model {
 	/// [`ModelLinearBuilder::eq`], [`ModelLinearBuilder::le`], or
 	/// [`ModelLinearBuilder::ge`], and then posted.
 	///
+	/// # Warning
+	///
+	/// Each term in the linear expression is required to fit within `i64` after
+	/// its coefficient is applied. To guarantee this, the domain of any
+	/// variable whose scaled value would overflow `i64` is tightened
+	/// automatically when the constraint is posted (using
+	/// [`View::bounding_mul`]). This is a current limitation of the
+	/// implementation: variables with extreme domains (e.g. an unbounded `var
+	/// int` with minimum `i64::MIN` that appears with a negative coefficient)
+	/// will have their domains silently narrowed.
+	///
 	/// ```
 	/// # use huub::{
 	/// # 	model::Model,
@@ -223,24 +234,21 @@ impl Model {
 		// Move the constant offset to the RHS
 		let rhs = -expr.offset;
 		// Collect the terms as a vector of `View<IntVal>`
-		let mut terms: Vec<View<IntVal>> = expr
-			.terms
-			.iter()
-			.map(|(&v, &k)| {
-				match v.0 {
-					IntView::Const(_) => debug_assert!(false),
-					IntView::Linear(lin) => {
-						debug_assert_eq!(lin.scale, NonZero::new(1).unwrap());
-						debug_assert_eq!(lin.offset, 0);
-					}
-					IntView::Bool(lin) => {
-						debug_assert_eq!(lin.scale, NonZero::new(1).unwrap());
-						debug_assert_eq!(lin.offset, 0);
-					}
+		let mut terms: Vec<View<IntVal>> = Vec::with_capacity(expr.terms.len());
+		for (&v, &k) in expr.terms.iter() {
+			match v.0 {
+				IntView::Const(_) => debug_assert!(false),
+				IntView::Linear(lin) => {
+					debug_assert_eq!(lin.scale, NonZero::new(1).unwrap());
+					debug_assert_eq!(lin.offset, 0);
 				}
-				v * k
-			})
-			.collect();
+				IntView::Bool(lin) => {
+					debug_assert_eq!(lin.scale, NonZero::new(1).unwrap());
+					debug_assert_eq!(lin.offset, 0);
+				}
+			}
+			terms.push(v.bounding_mul(self, k)?);
+		}
 
 		let mut negate_terms = || -> Result<(), Conflict<View<bool>>> {
 			for v in &mut terms {
