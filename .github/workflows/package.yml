@@ -48,7 +48,7 @@ jobs:
             os: ubuntu-22.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Generate MiniZinc solver configuration
@@ -94,7 +94,7 @@ jobs:
     if: github.repository_owner == 'huub-solver' && github.event_name == 'push'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Update tag
         run: |
           git tag -f continuous_deployment
