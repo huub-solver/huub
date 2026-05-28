@@ -799,10 +799,8 @@ impl<I> VariableValueMatching<I> {
 struct AugmentingPathScratch {
 	/// BFS queue (over left nodes).
 	queue: Vec<usize>,
-	/// Per-left-node BFS visited flag; cleared at the start of each search.
-	visited: FxHashSet<usize>,
 	/// Per-left-node BFS parent pointer; `usize::MAX` means "no parent /
-	/// root".
+	/// root / not yet visited".
 	parent: Vec<usize>,
 }
 
@@ -916,10 +914,6 @@ pub struct IntUniqueDomain<I> {
 	/// Set of variable indices whose domain has changed since the last
 	/// propagation pass; cleared by `propagate` and `advise_of_backtrack`.
 	dirty_vars: FxHashSet<usize>,
-	/// Always-empty (but `n_vars`-sized) scratch bitset. `propagate` swaps
-	/// this with `dirty_vars` so it can iterate the dirty bits while
-	/// `advise_of_int_change` keeps writing into the (now empty) bitset.
-	dirty_scratch: FxHashSet<usize>,
 	/// Backtrackable partition of variable indices into current SCCs.
 	partition: TrailedPartition,
 	/// Per-call scratch for augmenting-path search.
@@ -955,7 +949,6 @@ impl<I> IntUniqueDomain<I> {
 				val_to_var: Vec::new(),
 			},
 			dirty_vars: FxHashSet::default(),
-			dirty_scratch: FxHashSet::default(),
 			partition: TrailedPartition {
 				elems: (0..n).collect(),
 				positions: (0..n).collect(),
@@ -963,7 +956,6 @@ impl<I> IntUniqueDomain<I> {
 			},
 			bfs: AugmentingPathScratch {
 				queue: Vec::new(),
-				visited: FxHashSet::default(),
 				parent: vec![usize::MAX; n],
 			},
 			tarjan: TarjanScratch {
@@ -1016,9 +1008,7 @@ impl<I> IntUniqueDomain<I> {
 
 		self.bfs.queue.clear();
 		self.bfs.queue.push(start_var);
-		self.bfs.visited.clear();
 		self.bfs.parent.fill(usize::MAX);
-		self.bfs.visited.insert(start_var);
 		let mut queue_head = 0;
 		while queue_head < self.bfs.queue.len() {
 			let var_idx = self.bfs.queue[queue_head];
@@ -1026,10 +1016,9 @@ impl<I> IntUniqueDomain<I> {
 			for val in self.graph.vars[var_idx].domain(ctx).iter().flatten() {
 				let val_idx = self.graph.value_index(val);
 				if let Some(matched_var) = self.graph.val_to_var[val_idx] {
-					if !self.bfs.visited.contains(&matched_var) {
+					if self.bfs.parent[matched_var] == usize::MAX {
 						self.bfs.queue.push(matched_var);
 						self.bfs.parent[matched_var] = var_idx;
-						self.bfs.visited.insert(matched_var);
 					}
 				} else {
 					self.graph
@@ -1329,17 +1318,13 @@ where
 		// Phase 1: drain dirty variables, fix the matching, and collect the
 		// set of SCC roots whose residual graph may have changed.
 		//
-		// Swap the dirty bitset out into a local so `advise_of_int_change` can
-		// keep writing during the call (it sees the just-emptied scratch in
-		// `self.dirty_vars`). Restore the scratch at the end so the next
-		// propagate is set up again.
-		std::mem::swap(&mut self.dirty_vars, &mut self.dirty_scratch);
-		let mut dirty = std::mem::take(&mut self.dirty_scratch);
+		// Borrow the dirty set out so phase 1 can take `&mut self` while reading
+		// it. Put the emptied set back on every path, including on conflict from
+		// `?`, so its capacity is reused next round.
+		let mut dirty = std::mem::take(&mut self.dirty_vars);
 		let result = self.repair_matching_and_propagate_fixed(&dirty, ctx);
-		// Restore the scratch *before* propagating the error so the next
-		// propagate call sees a sized (empty) `dirty_scratch`.
 		dirty.clear();
-		self.dirty_scratch = dirty;
+		self.dirty_vars = dirty;
 		let changed_scc = result?;
 
 		// Phase 2: re-run Tarjan on every SCC that changed in phase 1.
@@ -1353,7 +1338,10 @@ impl<I> IntUniqueDomain<I> {
 	/// "newly fixed" case (singleton domain -> strip its value from the rest of
 	/// its SCC) or mark the surrounding SCC as needing a Tarjan re-run.
 	///
-	/// Returns the set of SCC roots that need to be revisited in phase 2.
+	/// Returns the set of SCC roots that need to be revisited in phase 2. Takes
+	/// the dirty set by reference (rather than reading `self.dirty_vars`) so
+	/// the caller can own the take/restore and guarantee the set is put back
+	/// on every exit path.
 	fn repair_matching_and_propagate_fixed<E>(
 		&mut self,
 		dirty: &FxHashSet<usize>,
