@@ -15,7 +15,6 @@ readme = "../../README.md"
 [dependencies]
 bon = { workspace = true }
 dyn-clone = { workspace = true }
-fixedbitset = "0.5.7"
 flatzinc-serde = { workspace = true, optional	= true }
 itertools = { workspace = true }
 pindakaas = { workspace = true, features = ["external-propagation"] }
