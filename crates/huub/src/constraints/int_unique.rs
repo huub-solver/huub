@@ -806,6 +806,22 @@ struct AugmentingPathScratch {
 	parent: Vec<usize>,
 }
 
+/// One pending node in the explicit (heap-allocated) Tarjan DFS work-stack.
+/// Replaces a native call frame: `i` is the resumption point into this node's
+/// neighbour slice `[frame_start, frame_end)` of [`TarjanScratch::neighbours`].
+#[derive(Clone, Debug)]
+struct TarjanFrame {
+	/// Graph node this frame is exploring.
+	node: usize,
+	/// Start of this frame's neighbour slice in [`TarjanScratch::neighbours`];
+	/// the slice is truncated back to here when the frame is popped.
+	frame_start: usize,
+	/// Exclusive end of this frame's neighbour slice.
+	frame_end: usize,
+	/// Index of the next neighbour to visit (the DFS resumption point).
+	i: usize,
+}
+
 /// Reusable scratch for Tarjan's SCC algorithm over a graph with `n` total
 /// nodes. `vars_buf` / `vals_buf` are sized for the bipartite use-case (one
 /// bitset per side); a single-bucket variant would suit a non-bipartite
@@ -822,9 +838,13 @@ struct TarjanScratch {
 	/// Lowest reachable DFS index from each node during the current search.
 	/// Value `0` means "not yet visited in this run".
 	low_link: Vec<usize>,
-	/// Neighbour frame-stack: each `tarjan_dfs` call appends its current
-	/// node's neighbours, remembers `(start, end)` for its own slice, and
-	/// truncates back on unwind. Reuses one allocation across all DFS frames.
+	/// Explicit Tarjan DFS work-stack: one [`TarjanFrame`] per node currently
+	/// being explored, replacing native recursion so deep graphs cannot
+	/// overflow the call stack. Reuses one allocation across all DFS runs.
+	work_stack: Vec<TarjanFrame>,
+	/// Neighbour frame-stack: each pushed [`TarjanFrame`] appends its node's
+	/// neighbours, remembers `(start, end)` for its own slice, and truncates
+	/// back on pop. Reuses one allocation across all DFS frames.
 	neighbours: Vec<usize>,
 	/// Scratch bitset of left nodes in the SCC currently being popped.
 	vars_buf: Vec<usize>,
@@ -841,6 +861,7 @@ impl TarjanScratch {
 		self.dfs_on_stack.fill(false);
 		self.dfs_index.fill(0);
 		self.low_link.fill(0);
+		self.work_stack.clear();
 		self.neighbours.clear();
 	}
 
@@ -939,6 +960,7 @@ impl<I> IntUniqueDomain<I> {
 				dfs_on_stack: Vec::new(),
 				dfs_index: Vec::new(),
 				low_link: Vec::new(),
+				work_stack: Vec::new(),
 				neighbours: Vec::new(),
 				vars_buf: Vec::new(),
 				vals_buf: Vec::new(),
@@ -1022,39 +1044,6 @@ impl<I> IntUniqueDomain<I> {
 		))
 	}
 
-	/// Append `start_idx`'s residual-graph neighbours to `tarjan.neighbours`.
-	/// Caller records `tarjan.neighbours.len()` before and after this call to
-	/// know which slice belongs to its frame, and truncates back on unwind.
-	fn push_tarjan_neighbours<E>(&mut self, start_idx: usize, ctx: &mut E::PropagationContext<'_>)
-	where
-		E: ReasoningEngine,
-		I: IntSolverActions<E>,
-	{
-		let n_vars = self.graph.n_vars();
-		if start_idx < n_vars {
-			let var_idx = start_idx;
-			for val in self.graph.vars[var_idx].domain(ctx).iter().flatten() {
-				let val_idx = self.graph.value_index(val);
-				if self.graph.var_to_val[var_idx] == Some(val_idx) {
-					continue;
-				}
-				self.tarjan.neighbours.push(n_vars + val_idx);
-			}
-		} else {
-			let val_idx = start_idx - n_vars;
-			if let Some(var_idx) = self.graph.val_to_var[val_idx] {
-				self.tarjan.neighbours.push(var_idx);
-			} else {
-				// Unmatched value: connected to every matched value node.
-				for vi in 0..self.graph.n_values() {
-					if self.graph.val_to_var[vi].is_some() {
-						self.tarjan.neighbours.push(n_vars + vi);
-					}
-				}
-			}
-		}
-	}
-
 	/// Process the SCC rooted at `start_idx`: pop nodes off the DFS stack into
 	/// `tarjan.vars_buf` / `vals_buf`, partition the variables out of the live
 	/// SCC, and remove the SCC's values from any variable outside it.
@@ -1126,9 +1115,12 @@ impl<I> IntUniqueDomain<I> {
 		Ok(())
 	}
 
-	/// Recursive Tarjan DFS on the bipartite var/value residual graph. When
-	/// the root of a non-trivial SCC is popped and the run already detected an
-	/// SCC split, delegates filtering to [`Self::process_scc_root`].
+	/// Iterative Tarjan DFS on the bipartite var/value residual graph, rooted
+	/// at `start_idx`. Uses an explicit heap work-stack ([`TarjanFrame`])
+	/// instead of native recursion, so the maximum DFS depth (up to `2 *
+	/// n_vars`) does not consume the call stack. When the root of a
+	/// non-trivial SCC is popped and the run already detected an SCC split,
+	/// delegates filtering to [`Self::process_scc_root`].
 	fn tarjan_dfs<E>(
 		&mut self,
 		start_idx: usize,
@@ -1141,48 +1133,107 @@ impl<I> IntUniqueDomain<I> {
 		E: ReasoningEngine,
 		I: IntSolverActions<E>,
 	{
-		let n_vars = self.graph.n_vars();
-		if start_idx < n_vars {
-			*n_left_visited += 1;
-		}
+		// Visit `node`: assign its DFS index, append its residual-graph
+		// neighbours to `tarjan.neighbours`, and push a `TarjanFrame`. The
+		// iterative analogue of entering a recursive call.
+		let push_frame = |this: &mut Self,
+		                  node: usize,
+		                  next_dfs_index: &mut usize,
+		                  n_left_visited: &mut usize,
+		                  ctx: &mut E::PropagationContext<'_>| {
+			let n_vars = this.graph.n_vars();
+			if node < n_vars {
+				*n_left_visited += 1;
+			}
+			this.tarjan.dfs_stack.push(node);
+			this.tarjan.dfs_on_stack[node] = true;
+			this.tarjan.dfs_index[node] = *next_dfs_index;
+			this.tarjan.low_link[node] = *next_dfs_index;
+			*next_dfs_index += 1;
 
-		self.tarjan.dfs_stack.push(start_idx);
-		self.tarjan.dfs_on_stack[start_idx] = true;
-		self.tarjan.dfs_index[start_idx] = *next_dfs_index;
-		self.tarjan.low_link[start_idx] = *next_dfs_index;
-		*next_dfs_index += 1;
-
-		let frame_start = self.tarjan.neighbours.len();
-		self.push_tarjan_neighbours::<E>(start_idx, ctx);
-		let frame_end = self.tarjan.neighbours.len();
-		let mut i = frame_start;
-		while i < frame_end {
-			let nb = self.tarjan.neighbours[i];
-			if self.tarjan.dfs_index[nb] != 0 {
-				if self.tarjan.dfs_on_stack[nb] {
-					self.tarjan.low_link[start_idx] =
-						cmp::min(self.tarjan.low_link[start_idx], self.tarjan.dfs_index[nb]);
+			let frame_start = this.tarjan.neighbours.len();
+			if node < n_vars {
+				for val in this.graph.vars[node].domain(ctx).iter().flatten() {
+					let val_idx = this.graph.value_index(val);
+					if this.graph.var_to_val[node] == Some(val_idx) {
+						continue;
+					}
+					this.tarjan.neighbours.push(n_vars + val_idx);
 				}
 			} else {
-				self.tarjan_dfs::<E>(nb, next_dfs_index, n_left_visited, scc_split_detected, ctx)?;
-				self.tarjan.low_link[start_idx] =
-					cmp::min(self.tarjan.low_link[start_idx], self.tarjan.low_link[nb]);
+				let val_idx = node - n_vars;
+				if let Some(var_idx) = this.graph.val_to_var[val_idx] {
+					this.tarjan.neighbours.push(var_idx);
+				} else {
+					// Unmatched value: connected to every matched value node.
+					for vi in 0..this.graph.n_values() {
+						if this.graph.val_to_var[vi].is_some() {
+							this.tarjan.neighbours.push(n_vars + vi);
+						}
+					}
+				}
 			}
-			i += 1;
-		}
-		self.tarjan.neighbours.truncate(frame_start);
+			let frame_end = this.tarjan.neighbours.len();
+			this.tarjan.work_stack.push(TarjanFrame {
+				node,
+				frame_start,
+				frame_end,
+				i: frame_start,
+			});
+		};
 
-		// SCC root?
-		if self.tarjan.low_link[start_idx] == self.tarjan.dfs_index[start_idx] {
-			// Either we entered the DFS in the middle (low_link > 1) or some
-			// left nodes weren't reached from this root -> graph is not one
-			// single SCC. The counter avoids re-scanning `dfs_index` on every
-			// SCC-root pop.
-			if self.tarjan.low_link[start_idx] > 1 || *n_left_visited < n_vars {
-				*scc_split_detected = true;
+		let n_vars = self.graph.n_vars();
+		push_frame(self, start_idx, next_dfs_index, n_left_visited, ctx);
+
+		while let Some(&TarjanFrame {
+			node, frame_end, i, ..
+		}) = self.tarjan.work_stack.last()
+		{
+			if i < frame_end {
+				// Advance this frame's cursor, then explore the neighbour. A
+				// not-yet-visited neighbour pushes a new frame (the recursive
+				// call); when we later pop it, the `else` branch below folds its
+				// low-link back into this frame — exactly the post-recursion
+				// update of the original code.
+				let nb = self.tarjan.neighbours[i];
+				self.tarjan.work_stack.last_mut().unwrap().i += 1;
+				if self.tarjan.dfs_index[nb] != 0 {
+					if self.tarjan.dfs_on_stack[nb] {
+						self.tarjan.low_link[node] =
+							cmp::min(self.tarjan.low_link[node], self.tarjan.dfs_index[nb]);
+					}
+				} else {
+					push_frame(self, nb, next_dfs_index, n_left_visited, ctx);
+				}
+				continue;
 			}
-			if *scc_split_detected {
-				self.process_scc_root::<E>(start_idx, ctx)?;
+
+			// Frame exhausted: pop it (the recursive return) and release its
+			// neighbour slice.
+			let frame = self.tarjan.work_stack.pop().unwrap();
+			self.tarjan.neighbours.truncate(frame.frame_start);
+
+			// SCC root?
+			if self.tarjan.low_link[frame.node] == self.tarjan.dfs_index[frame.node] {
+				// Either we entered the DFS in the middle (low_link > 1) or some
+				// left nodes weren't reached from this root -> graph is not one
+				// single SCC. The counter avoids re-scanning `dfs_index` on every
+				// SCC-root pop.
+				if self.tarjan.low_link[frame.node] > 1 || *n_left_visited < n_vars {
+					*scc_split_detected = true;
+				}
+				if *scc_split_detected {
+					self.process_scc_root::<E>(frame.node, ctx)?;
+				}
+			}
+
+			// Fold this node's low-link into its parent (the post-recursion
+			// update the caller would have done).
+			if let Some(&TarjanFrame { node: parent, .. }) = self.tarjan.work_stack.last() {
+				self.tarjan.low_link[parent] = cmp::min(
+					self.tarjan.low_link[parent],
+					self.tarjan.low_link[frame.node],
+				);
 			}
 		}
 		Ok(())
@@ -1688,6 +1739,31 @@ mod tests {
 		IntUniqueDomain::post(&mut slv, vec![a, b, c]);
 		slv.assert_all_solutions(&[a, b, c], |sol| {
 			sol.iter().all_unique() && sol[2] == crate::solver::Value::Int(3)
+		});
+	}
+
+	#[test]
+	fn test_all_different_domain_deep_chain() {
+		// Staircase that forces a long DFS over the residual graph: `x_i in
+		// {i, i+1}` for `i < N`, with the top pinned to `x_N = N`. All-different
+		// forces a downward cascade `x_i = i`, but reaching that fixpoint walks
+		// a chain whose length is proportional to `N`.
+		const N: IntVal = 300;
+		let mut slv = Solver::default();
+		let vars: Vec<_> = (1..=N)
+			.map(|i| {
+				let dom = if i == N { N..=N } else { i..=i + 1 };
+				slv.new_int_decision(dom)
+					.order_literals(LiteralStrategy::Eager)
+					.direct_literals(LiteralStrategy::Eager)
+					.view()
+			})
+			.collect();
+		IntUniqueDomain::post(&mut slv, vars.clone());
+		slv.assert_all_solutions(&vars, |sol| {
+			sol.iter()
+				.enumerate()
+				.all(|(i, v)| *v == crate::solver::Value::Int(i as IntVal + 1))
 		});
 	}
 
