@@ -403,6 +403,30 @@ impl<'a> SolvingContext<'a> {
 			}
 		}
 	}
+
+	/// Pop the next propagator from the queue and run it exactly once, returning
+	/// its propagation result. Unlike [`Self::run_propagators`], this never
+	/// advances past a single propagator, so the caller can inspect the effect
+	/// of one propagator in isolation (the literals it propagated are left in
+	/// `state.propagation_queue`).
+	///
+	/// Panics if the propagator queue is empty.
+	#[cfg(test)]
+	pub(crate) fn run_next_propagator(
+		&mut self,
+		propagators: &mut [BoxedPropagator],
+	) -> Result<(), Conflict<Decision<bool>>> {
+		let p = self
+			.state
+			.propagator_queue
+			.pop()
+			.expect("`run_next_propagator` called with an empty propagator queue");
+		self.current_prop = PropRef::from_raw(p);
+		let res = propagators[self.current_prop.index()].as_mut().propagate(self);
+		self.state.statistics.propagations += 1;
+		self.current_prop = PropRef::INVALID;
+		res
+	}
 }
 
 impl Debug for SolvingContext<'_> {

@@ -11,11 +11,17 @@ use tracing_test::traced_test;
 
 use crate::{
 	IntSet, IntVal,
-	constraints::int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
+	constraints::{
+		Conflict,
+		int_linear::{IntLinearLessEqBounds, IntLinearNotEqValue},
+	},
 	model::{Model, deserialize::AnyView as ModelView},
 	solver::{
 		AnyView as SolverView, LiteralStrategy, Solver, Status, Valuation, Value,
 		branchers::{DecisionSelection, DomainSelection, IntBrancher},
+		decision::Decision,
+		solving_context::SolvingContext,
+		view::View,
 	},
 };
 
@@ -347,6 +353,35 @@ impl Solver {
 			})
 			.satisfy();
 		assert_eq!(status, Status::Complete);
+	}
+
+	/// Pop the next propagator from the queue and run it exactly once at the
+	/// current (root) decision level, without invoking the SAT solver or
+	/// search. Returns the literals the propagator propagated, in order, or the
+	/// conflict it detected.
+	///
+	/// Integer propagation updates the engine [`State`](crate::solver::engine)
+	/// synchronously (bound moves via `notify_*_bound`, value removals by
+	/// assigning the corresponding `NotEq` literal), so the variable domains
+	/// reflect everything the propagator inferred as soon as this returns. The
+	/// returned literal list lets a test additionally assert *which* literals
+	/// were propagated. This method is intended to observe a propagator's
+	/// strength (which values it prunes) instead of the final solution set.
+	///
+	/// Panics if the propagator queue is empty.
+	pub(crate) fn propagate_next(&mut self) -> Result<Vec<View<bool>>, Conflict<Decision<bool>>> {
+		let (mut actions, mut engine) = self.as_parts_mut();
+		let engine = &mut *engine;
+		{
+			let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
+			ctx.run_next_propagator(&mut engine.propagators)?;
+		}
+		Ok(engine
+			.state
+			.propagation_queue
+			.drain(..)
+			.map(|p| Decision(p.lit).into())
+			.collect())
 	}
 
 	pub(crate) fn assert_unsatisfiable(&mut self) {

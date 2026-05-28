@@ -865,13 +865,24 @@ impl TarjanScratch {
 		self.neighbours.clear();
 	}
 
-	/// Size the per-node buffers to fit a graph with `n_nodes` total nodes and
-	/// `n_values` right-side nodes. Called once after the union-domain
-	/// extents are known.
+	/// Size the per-node buffers to fit `n_nodes` real graph nodes plus the
+	/// auxiliary dummy node (see [`Self::dummy_node`]). Called once after the
+	/// union-domain extents are known.
 	fn resize(&mut self, n_nodes: usize) {
-		self.dfs_on_stack = vec![false; n_nodes];
-		self.dfs_index = vec![0; n_nodes];
-		self.low_link = vec![0; n_nodes];
+		let n_slots = n_nodes + 1;
+		self.dfs_on_stack = vec![false; n_slots];
+		self.dfs_index = vec![0; n_slots];
+		self.low_link = vec![0; n_slots];
+	}
+
+	/// Index of the auxiliary "dummy" node in the residual graph: the single
+	/// slot immediately after the real (variable and value) nodes. Every free
+	/// (unmatched) value points at this node, which in turn points at every
+	/// matched value, keeping the free-value fanout linear in the number of
+	/// values rather than quadratic. It is not a real graph node: it is skipped
+	/// when an SCC is extracted in [`IntUniqueDomain::process_scc_root`].
+	fn dummy_node(&self) -> usize {
+		self.dfs_on_stack.len() - 1
 	}
 }
 
@@ -1057,10 +1068,13 @@ impl<I> IntUniqueDomain<I> {
 		I: IntSolverActions<E>,
 	{
 		let n_vars = self.graph.n_vars();
+		let dummy = self.tarjan.dummy_node();
 		self.tarjan.vars_buf.clear();
 		self.tarjan.vals_buf.clear();
 
-		// Pop the SCC off the DFS stack into the two bitsets.
+		// Pop the SCC off the DFS stack into the two bitsets. The dummy node is
+		// not a real graph node, so it is dropped (but still terminates the loop
+		// if it happens to be the SCC root).
 		let mut has_var_in_scc = false;
 		loop {
 			let node = self.tarjan.dfs_stack.pop().expect("non-empty DFS stack");
@@ -1068,7 +1082,7 @@ impl<I> IntUniqueDomain<I> {
 			if node < n_vars {
 				self.tarjan.vars_buf.push(node);
 				has_var_in_scc = true;
-			} else {
+			} else if node != dummy {
 				self.tarjan.vals_buf.push(node - n_vars);
 			}
 			if node == start_idx {
@@ -1152,7 +1166,9 @@ impl<I> IntUniqueDomain<I> {
 			*next_dfs_index += 1;
 
 			let frame_start = this.tarjan.neighbours.len();
+			let dummy = this.tarjan.dummy_node();
 			if node < n_vars {
+				// Variable: non-matching edges to the other values in its domain.
 				for val in this.graph.vars[node].domain(ctx).iter().flatten() {
 					let val_idx = this.graph.value_index(val);
 					if this.graph.var_to_val[node] == Some(val_idx) {
@@ -1160,17 +1176,23 @@ impl<I> IntUniqueDomain<I> {
 					}
 					this.tarjan.neighbours.push(n_vars + val_idx);
 				}
+			} else if node == dummy {
+				// Dummy: forwards every free value to all matched values. Built
+				// once per run (the dummy is visited at most once).
+				for vi in 0..this.graph.n_values() {
+					if this.graph.val_to_var[vi].is_some() {
+						this.tarjan.neighbours.push(n_vars + vi);
+					}
+				}
 			} else {
 				let val_idx = node - n_vars;
 				if let Some(var_idx) = this.graph.val_to_var[val_idx] {
+					// Matched value: matching edge back to its variable.
 					this.tarjan.neighbours.push(var_idx);
 				} else {
-					// Unmatched value: connected to every matched value node.
-					for vi in 0..this.graph.n_values() {
-						if this.graph.val_to_var[vi].is_some() {
-							this.tarjan.neighbours.push(n_vars + vi);
-						}
-					}
+					// Free value: a single edge to the shared dummy node, which
+					// fans out to every matched value on its behalf.
+					this.tarjan.neighbours.push(dummy);
 				}
 			}
 			let frame_end = this.tarjan.neighbours.len();
@@ -1765,6 +1787,62 @@ mod tests {
 				.enumerate()
 				.all(|(i, v)| *v == crate::solver::Value::Int(i as IntVal + 1))
 		});
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_all_different_domain_interior_hole() {
+		// One test covering the distinguishing behaviours of the domain
+		// propagator at once:
+		// - The universe (1..=6) exceeds the variable count, so the matching leaves
+		//   free values (2, 5, 6) and the residual graph routes through the dummy node.
+		// - The Hall set {a, b} occupies {3, 4}, so domain consistency must remove the
+		//   *interior* values 3 and 4 from `e`, leaving the disconnected set {1, 2, 5,
+		//   6}. A bounds-consistent propagator could not do this: e's bounds stay (1,
+		//   6) and only the holes change.
+		// - We assert the exact set of literals propagated, not just the resulting
+		//   domain.
+		use crate::actions::{IntDecisionActions, IntInspectionActions};
+
+		let mut slv = Solver::default();
+		let a = slv
+			.new_int_decision(3..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let b = slv
+			.new_int_decision(3..=4)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		let e = slv
+			.new_int_decision(1..=6)
+			.order_literals(LiteralStrategy::Eager)
+			.direct_literals(LiteralStrategy::Eager)
+			.view();
+		IntUniqueDomain::post(&mut slv, vec![a, b, e]);
+		let propagated = slv.propagate_next().unwrap();
+
+		assert_eq!(a.domain(&slv), IntSet::from(3..=4));
+		assert_eq!(b.domain(&slv), IntSet::from(3..=4));
+		assert_eq!(e.domain(&slv), IntSet::from_iter([1..=2, 5..=6]));
+		assert!(!e.in_domain(&slv, 3));
+		assert!(!e.in_domain(&slv, 4));
+		// Bounds are untouched; only the interior was pruned.
+		assert_eq!(e.bounds(&slv), (1, 6));
+
+		// The only inferences are the interior removals "e != 3" and "e != 4".
+		let expected = [
+			e.lit(&mut slv, crate::solver::IntLitMeaning::NotEq(3)),
+			e.lit(&mut slv, crate::solver::IntLitMeaning::NotEq(4)),
+		];
+		assert_eq!(propagated.len(), expected.len());
+		for lit in expected {
+			assert!(
+				propagated.contains(&lit),
+				"missing propagated literal {lit:?}"
+			);
+		}
 	}
 
 	#[test]
