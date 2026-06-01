@@ -455,7 +455,7 @@ checksum = "135b12329e5e3ce057a9f972339ea52bc954fe1e9358ef27f95e89716fbc5424"
 
 [[package]]
 name = "huub"
-version = "100.0.0"
+version = "100.1.0"
 dependencies = [
  "bon",
  "clap",
@@ -474,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "huub-cli"
-version = "100.0.0"
+version = "100.1.0"
 dependencies = [
  "anstream",
  "clap",
@@ -1154,7 +1154,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "xtask"
-version = "100.0.0"
+version = "100.1.0"
 dependencies = [
  "clap",
  "clap_complete",
