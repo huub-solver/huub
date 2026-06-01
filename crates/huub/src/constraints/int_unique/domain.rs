@@ -1,22 +1,7 @@
 //! Domain-consistent propagator for the integer `unique` constraint.
-//!
-//! Implements Régin's bipartite-matching + Tarjan SCC algorithm (AAAI 1994):
-//! maintain a maximum matching from variables to values, repair it with
-//! BFS-augmenting paths after domain changes, then run Tarjan's SCC on the
-//! residual bipartite graph (with a single dummy node fanning out free values
-//! so the residual graph stays linear in size) and remove any value from a
-//! variable's domain whenever the variable and value land in different SCCs.
-//!
-//! **References**
-//!
-//! - Régin, Jean-Charles. "A filtering algorithm for constraints of difference
-//!   in CSPs." AAAI 94 (1994): 362-367.
-//! - Gent, Ian P., Ian Miguel, and Peter Nightingale. "Generalised arc
-//!   consistency for the AllDifferent constraint: An empirical survey."
-//!   Artificial Intelligence 172.18 (2008): 1973-2000.
-//! - Downing, Nicholas, Thibaut Feydy, and Peter J. Stuckey. "Explaining
-//!   alldifferent." In Proceedings of the Australasian Computer Science
-//!   Conference (ACSC 2012), CRPIT Volume 122, pages 115--124, 2012.
+//! The public algorithm overview and references live on
+//! [`IntUniqueDomain`]; this module file contains the propagator and its
+//! private graph/matching/Tarjan helpers.
 
 use std::cmp;
 
@@ -45,10 +30,26 @@ struct AugmentingPathScratch {
 	parent: Vec<usize>,
 }
 
-/// Domain consistent propagator for the integer `unique` constraint.
+/// Domain-consistent propagator for the integer `unique` constraint.
 ///
-/// See the [module-level documentation](self) for the algorithm overview and
-/// references.
+/// Implements Régin's bipartite-matching + Tarjan SCC algorithm (AAAI 1994):
+/// maintain a maximum matching from variables to values, repair it with
+/// BFS-augmenting paths after domain changes, then run Tarjan's SCC on the
+/// residual bipartite graph (with a single dummy node fanning out free
+/// values so the residual graph stays linear in size) and remove any value
+/// from a variable's domain whenever the variable and value land in
+/// different SCCs.
+///
+/// **References**
+///
+/// - Régin, Jean-Charles. "A filtering algorithm for constraints of difference
+///   in CSPs." AAAI 94 (1994): 362-367.
+/// - Gent, Ian P., Ian Miguel, and Peter Nightingale. "Generalised arc
+///   consistency for the AllDifferent constraint: An empirical survey."
+///   Artificial Intelligence 172.18 (2008): 1973-2000.
+/// - Downing, Nicholas, Thibaut Feydy, and Peter J. Stuckey. "Explaining
+///   alldifferent." In Proceedings of the Australasian Computer Science
+///   Conference (ACSC 2012), CRPIT Volume 122, pages 115--124, 2012.
 #[derive(Clone, Debug)]
 pub struct IntUniqueDomain<I> {
 	/// Variables, values, and their current matching.
