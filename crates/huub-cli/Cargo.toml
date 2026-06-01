@@ -12,6 +12,11 @@ keywords.workspace = true
 repository.workspace = true
 readme = "README.md"
 
+# The published tarball is assumed to be consumed via `cargo install`, which
+# only builds the executable. Benches and integration tests are expected to be
+# run in-repo, so we exclude them to keep the published crate lean.
+exclude = ["benches/", "corpus/", "tests/"]
+
 [[bin]]
 name = "huub"
 path = "src/main.rs"
