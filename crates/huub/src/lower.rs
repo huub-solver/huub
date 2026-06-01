@@ -405,13 +405,13 @@ impl LowererComplete<&mut Model> {
 					int_eager_direct.insert(var);
 				}
 			} else if let Some(c) = c.downcast_ref::<IntUnique>() {
-				for v in &c.bounds_prop.var {
+				for v in &c.bounds_prop.vars {
 					let v = v.resolve_alias(model);
 					if let Some(var) = v.integer_decision() {
 						let Domain::Domain(dom) = &model.int_vars[var.idx()].domain else {
 							unreachable!()
 						};
-						if dom.card() <= Some(c.bounds_prop.var.len() * 100 / 80) {
+						if dom.card() <= Some(c.bounds_prop.vars.len() * 100 / 80) {
 							int_eager_direct.insert(var);
 						}
 					}

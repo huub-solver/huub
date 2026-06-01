@@ -4,6 +4,7 @@
 pub(crate) mod bytes;
 pub(crate) mod matrix;
 pub mod overflow;
+pub(crate) mod trailed_partition;
 pub mod true_type;
 
 use std::num::NonZero;

@@ -662,10 +662,6 @@ impl IntDecision {
 		T: TrailingActions,
 		Decision<bool>: BoolInspectionActions<T>,
 	{
-		if v < self.upper_bound(trail) {
-			println!("{}", self.upper_bound(trail));
-			println!("What?!");
-		}
 		debug_assert!(v >= self.upper_bound(trail));
 		if v > *self.domain.upper_bound().unwrap() {
 			return (true.into(), v);
