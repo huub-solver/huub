@@ -1,0 +1,16 @@
+{
+  "variables": {
+    "a" : { "type" : "bool" },
+    "ai" : { "type" : "int", "domain" : [[0, 1]], "defined" : true },
+    "x" : { "type" : "int", "domain" : [[0, 3]] }
+  },
+  "arrays": {},
+  "constraints": [
+    { "id" : "bool2int", "args" : ["a", "ai"], "defines" : "ai" },
+    { "id" : "int_lin_le", "args" : [[2, -1], ["ai", "x"], 0] },
+    { "id" : "huub_assume", "args" : [["a"]] }
+  ],
+  "output": ["a", "x"],
+  "solve": { "method" : "minimize", "objective" : "x" },
+  "version": "1.0"
+}

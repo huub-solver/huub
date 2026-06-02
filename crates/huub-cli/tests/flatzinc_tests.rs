@@ -6,8 +6,8 @@ mod helpers;
 #[cfg(test)]
 mod tests {
 	use crate::helpers::{
-		assert_all_optimal, assert_all_solutions, assert_first_solution, assert_optimal,
-		assert_search_order, assert_unsat,
+		FZN_COMPLETE, FZN_UNSATISFIABLE, assert_all_optimal, assert_all_solutions, assert_core,
+		assert_first_solution, assert_optimal, assert_search_order, assert_unsat,
 	};
 
 	assert_all_solutions!(array_var_int_element);
@@ -21,6 +21,10 @@ mod tests {
 	assert_all_solutions!(unify_with_view_3);
 
 	assert_all_optimal!(simple_sum);
+
+	assert_core!(assume_basic_unsat, FZN_UNSATISFIABLE, &["a", "neg_a"]);
+	assert_core!(assume_static_false, FZN_UNSATISFIABLE, &["false"]);
+	assert_core!(assume_minimize_boundary, FZN_COMPLETE, &["a", "x < 2"]);
 
 	assert_first_solution!(seq_search_1);
 	assert_first_solution!(seq_search_2);

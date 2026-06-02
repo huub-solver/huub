@@ -34,6 +34,20 @@ macro_rules! assert_all_solutions {
 	};
 }
 
+/// Define an integration test that checks the UNSAT core emitted by the solver.
+macro_rules! assert_core {
+	($file:ident, $status:expr, $core:expr) => {
+		#[test]
+		fn $file() {
+			$crate::helpers::check_core(
+				&std::path::PathBuf::from(format!("./corpus/{}.fzn.json", stringify!($file))),
+				$status,
+				$core,
+			)
+		}
+	};
+}
+
 /// Define an integration test that checks only the first solution emitted by
 /// the solver.
 macro_rules! assert_first_solution {
@@ -102,6 +116,7 @@ use std::{
 
 pub(crate) use assert_all_optimal;
 pub(crate) use assert_all_solutions;
+pub(crate) use assert_core;
 pub(crate) use assert_first_solution;
 pub(crate) use assert_optimal;
 pub(crate) use assert_search_order;
@@ -110,13 +125,13 @@ use expect_test::ExpectFile;
 use huub_cli::Cli;
 
 /// The FlatZinc marker that terminates a complete search.
-const FZN_COMPLETE: &str = "==========\n";
+pub(crate) const FZN_COMPLETE: &str = "==========\n";
 
 /// The FlatZinc marker that separates consecutive solutions.
 const FZN_SEPARATOR: &str = "----------\n";
 
 /// The FlatZinc marker that reports an unsatisfiable instance.
-const FZN_UNSATISFIABLE: &str = "=====UNSATISFIABLE=====\n";
+pub(crate) const FZN_UNSATISFIABLE: &str = "=====UNSATISFIABLE=====\n";
 
 /// Run the solver in all-optimal mode and compare the emitted solutions against
 /// an expectation.
@@ -150,6 +165,44 @@ pub(crate) fn check_all_solutions(file: &Path, sort: bool, solns: ExpectFile) {
 	stdout.push(marker);
 	let stdout = stdout.join(FZN_SEPARATOR);
 	solns.assert_eq(&stdout);
+}
+
+/// Run the solver once and assert that the FlatZinc output contains a
+/// `%%%mzn-core: [<expected>]` line. The check is order-insensitive: the
+/// reported core is split on `, ` and compared to `expected` as multisets.
+///
+/// `expected_status_marker` must equal one of [`FZN_UNSATISFIABLE`] or
+/// [`FZN_COMPLETE`]; the solver's final line is verified to match it so the
+/// test fails loudly if the model becomes satisfiable for an unrelated reason.
+pub(crate) fn check_core(file: &Path, expected_status_marker: &str, expected_core: &[&str]) {
+	let output = run_solver(vec![file.as_os_str()]);
+	let stdout = String::from_utf8(output).unwrap();
+	let core_line = stdout
+		.lines()
+		.find(|l| l.starts_with("%%%mzn-core: "))
+		.unwrap_or_else(|| panic!("solver did not emit a `%%%mzn-core:` line:\n{stdout}"));
+	let body = core_line
+		.trim_start_matches("%%%mzn-core: ")
+		.trim_start_matches('[')
+		.trim_end_matches(']');
+	let mut actual: Vec<&str> = if body.is_empty() {
+		Vec::new()
+	} else {
+		body.split(", ").collect()
+	};
+	actual.sort();
+	let mut expected: Vec<&str> = expected_core.to_vec();
+	expected.sort();
+	assert_eq!(
+		actual, expected,
+		"unexpected `%%%mzn-core` contents:\n{stdout}"
+	);
+	assert!(
+		stdout
+			.trim_end()
+			.ends_with(expected_status_marker.trim_end()),
+		"solver did not finish with expected marker `{expected_status_marker}`:\n{stdout}"
+	);
 }
 
 /// Run the solver once and compare the final reported solution against an

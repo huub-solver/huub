@@ -1,0 +1,12 @@
+{
+  "variables": {
+    "a" : { "type" : "bool" }
+  },
+  "arrays": {},
+  "constraints": [
+    { "id" : "huub_assume", "args" : [["a", false]] }
+  ],
+  "output": ["a"],
+  "solve": { "method" : "satisfy" },
+  "version": "1.0"
+}

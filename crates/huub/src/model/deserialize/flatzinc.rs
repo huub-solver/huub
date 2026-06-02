@@ -119,6 +119,8 @@ pub enum ConstraintIdent {
 	ArrayVarBoolElement,
 	/// "array_var_int_element"
 	ArrayVarIntElement,
+	/// "huub_assume"
+	Assume,
 	/// "bool2int"
 	Bool2Int,
 	/// "bool_clause"
@@ -266,6 +268,14 @@ pub struct FlatZincModelMeta {
 	pub branching: Option<Branching>,
 	/// Optional optimization goal extracted from the instance.
 	pub goal: Option<Goal<View<IntVal>>>,
+	/// Boolean assumptions collected from `huub_assume` constraints.
+	///
+	/// Each entry pairs a human-readable label (the FlatZinc identifier of the
+	/// variable, or the literal string `"false"` for static constants) with the
+	/// model-level Boolean view that the solver should treat as an assumption.
+	/// The list preserves the order in which the `huub_assume` constraints (and
+	/// elements within each constraint) appeared in the FlatZinc instance.
+	pub assumptions: Vec<(String, View<bool>)>,
 }
 
 /// Metadata produced when building a solver from a FlatZinc instance.
@@ -278,6 +288,12 @@ pub struct FlatZincSolverMeta {
 	pub stats: FlatZincStatistics,
 	/// Optional optimization goal extracted from the instance.
 	pub goal: Option<Goal<solver::View<IntVal>>>,
+	/// Boolean assumptions collected from `huub_assume` constraints, lowered
+	/// to solver-level Boolean views.
+	///
+	/// See [`FlatZincModelMeta::assumptions`] for the semantics of the label
+	/// associated with each view.
+	pub assumptions: Vec<(String, solver::View<bool>)>,
 }
 
 /// Statistical information about the extraction process that creates a
@@ -323,6 +339,9 @@ pub(crate) struct FznModelBuilder<'a> {
 	processed: Vec<bool>,
 	/// Statistics about the extraction process
 	stats: FlatZincStatistics,
+	/// Boolean assumptions collected from `huub_assume` constraints, in the
+	/// order in which they were encountered in the FlatZinc instance.
+	assumptions: Vec<(String, View<bool>)>,
 }
 
 /// Trait that extends [`FlatZinc`] with Huub-specific functionality.
@@ -442,6 +461,7 @@ impl ConstraintIdent {
 			Self::ArrayIntMinimum => "huub_array_int_minimum",
 			Self::ArrayVarBoolElement => "array_var_bool_element",
 			Self::ArrayVarIntElement => "array_var_int_element",
+			Self::Assume => "huub_assume",
 			Self::Bool2Int => "bool2int",
 			Self::BoolClause => "bool_clause",
 			Self::BoolClauseReif => "huub_bool_clause_reif",
@@ -517,6 +537,7 @@ impl TryFrom<&str> for ConstraintIdent {
 			"huub_all_different_int" => Ok(Self::AllDifferentInt),
 			"huub_array_int_maximum" => Ok(Self::ArrayIntMaximum),
 			"huub_array_int_minimum" => Ok(Self::ArrayIntMinimum),
+			"huub_assume" => Ok(Self::Assume),
 			"huub_bool_clause_reif" => Ok(Self::BoolClauseReif),
 			"huub_cumulative" => Ok(Self::Cumulative),
 			"huub_diffn_int" => Ok(Self::DiffnInt { strict: true }),
@@ -1325,6 +1346,7 @@ impl<'a> FznModelBuilder<'a> {
 				stats: self.stats,
 				branching,
 				goal,
+				assumptions: self.assumptions,
 			},
 		))
 	}
@@ -1408,6 +1430,7 @@ impl<'a> FznModelBuilder<'a> {
 			prb: Model::default(),
 			processed: vec![false; fzn.constraints.len()],
 			stats: FlatZincStatistics::default(),
+			assumptions: Vec::new(),
 		}
 	}
 
@@ -1558,6 +1581,35 @@ impl<'a> FznModelBuilder<'a> {
 					let val = self.arg_int(val)?;
 
 					self.prb.element(arr).index(idx).result(val).post()?;
+				}
+				ConstraintIdent::Assume => {
+					let [arr] = c.args.as_slice() else {
+						return num_args_err(1);
+					};
+					// Resolve every element to a model-level Boolean view, pairing
+					// each view with a human-readable label that the CLI can print
+					// when the assumption ends up in an UNSAT core.
+					//
+					// For variables we use the FlatZinc identifier. For static `false`
+					// literals we keep the textual constant, so the user can see when a
+					// static `false` was passed in. `true` literals are ignored.
+					let arr = self.arg_array(arr)?;
+					self.assumptions.reserve(arr.len());
+					for l in arr {
+						let label = match l {
+							Literal::Variable(v) => v.name.clone(),
+							Literal::Bool(true) => continue,
+							Literal::Bool(false) => "false".to_owned(),
+							l => {
+								return Err(FlatZincError::InvalidArgumentType {
+									expected: "bool",
+									found: format!("{:?}", l),
+								});
+							}
+						};
+						let view = self.lit_bool(l)?;
+						self.assumptions.push((label, view));
+					}
 				}
 				ConstraintIdent::Bool2Int => {
 					let [b, i] = c.args.as_slice() else {

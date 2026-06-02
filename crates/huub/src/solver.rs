@@ -535,6 +535,37 @@ where
 		self.maybe_all_solutions_internal(views.map(|v| v.into_iter().map(|v| v.into()).collect()))
 	}
 
+	/// Conditionally register a failure callback.
+	///
+	/// Behaves like [`on_failure`](Self::on_failure) when given `Some`, and
+	/// leaves the callback unset when given `None`.
+	pub fn maybe_on_failure<NewF>(
+		self,
+		on_failure: Option<NewF>,
+	) -> SolveArgs<'a, Sat, S, NewF, solve_args::SetOnFailure<State>>
+	where
+		State::OnFailure: solve_args::IsUnset,
+		NewF: FnOnce(&dyn AssumptionChecker),
+	{
+		self.with_f::<NewF>().maybe_on_failure_internal(on_failure)
+	}
+
+	/// Conditionally register a solution callback.
+	///
+	/// Behaves like [`on_solution`](Self::on_solution) when given `Some`, and
+	/// leaves the callback unset when given `None`.
+	pub fn maybe_on_solution<NewS>(
+		self,
+		on_solution: Option<NewS>,
+	) -> SolveArgs<'a, Sat, NewS, F, solve_args::SetOnSolution<State>>
+	where
+		State::OnSolution: solve_args::IsUnset,
+		NewS: for<'b> FnMut(Solution<'b>),
+	{
+		self.with_s::<NewS>()
+			.maybe_on_solution_internal(on_solution)
+	}
+
 	/// Find a solution that minimizes the given objective expression.
 	/// Implements branch-and-bound search, iteratively improving the solution
 	/// until proven optimal.
@@ -623,10 +654,10 @@ where
 				// - If a previous solution was found, then the current bound is the best solution
 				//   under the current constraints and assumptions.
 				SatSolveResult::Unsatisfiable(fail) => {
+					if let Some(on_failure) = on_failure {
+						on_failure(&fail);
+					}
 					break if obj_curr.is_none() {
-						if let Some(on_failure) = on_failure {
-							on_failure(&fail);
-						}
 						(Unsatisfiable, None)
 					} else {
 						(Complete, obj_curr)
@@ -647,6 +678,9 @@ where
 			drop(result);
 
 			if obj_curr == Some(obj_bound) {
+				if let Some(on_failure) = on_failure {
+					on_failure(&NoAssumptions);
+				}
 				break (Complete, obj_curr);
 			} else {
 				let bound_lit = objective.lit(solver, IntLitMeaning::Less(obj_curr.unwrap()));

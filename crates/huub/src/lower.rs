@@ -364,12 +364,18 @@ impl<State: lowerer::State> Lowerer<Result<FlatZincLowerData, FlatZincError>, St
 			Goal::Minimize(v) => Goal::Minimize(map.get(&mut slv, v)),
 			Goal::Maximize(v) => Goal::Maximize(map.get(&mut slv, v)),
 		});
+		let assumptions = meta
+			.assumptions
+			.into_iter()
+			.map(|(label, view)| (label, map.get(&mut slv, view)))
+			.collect();
 		Ok((
 			slv,
 			FlatZincSolverMeta {
 				names,
 				stats: meta.stats,
 				goal,
+				assumptions,
 			},
 		))
 	}

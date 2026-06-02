@@ -1,0 +1,14 @@
+{
+  "variables": {
+    "a" : { "type" : "bool" },
+    "neg_a" : { "type" : "bool", "defined" : true }
+  },
+  "arrays": {},
+  "constraints": [
+    { "id" : "bool_not", "args" : ["a", "neg_a"], "defines" : "neg_a" },
+    { "id" : "huub_assume", "args" : [["a", "neg_a"]] }
+  ],
+  "output": ["a"],
+  "solve": { "method" : "satisfy" },
+  "version": "1.0"
+}

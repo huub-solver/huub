@@ -25,6 +25,7 @@ mod cli;
 mod trace;
 
 use std::{
+	cell::RefCell,
 	fmt::{self, Debug, Display},
 	io,
 	num::NonZeroI32,
@@ -35,7 +36,7 @@ use std::{
 	time::Instant,
 };
 
-use flatzinc_serde::{FlatZinc, Literal, NamedRef, Variable, helpers::ArcKey};
+use flatzinc_serde::{FlatZinc, Literal, Method, NamedRef, Variable, helpers::ArcKey};
 use huub::{
 	lower::LoweringError,
 	model::deserialize::{
@@ -43,8 +44,8 @@ use huub::{
 		flatzinc::{FlatZincError, FznIdent, HuubFlatZinc},
 	},
 	solver::{
-		AnyView, SearchStrategy, Solution, Solver, Status, SwitchTrigger, TerminationSignal,
-		Valuation,
+		AnyView, AssumptionChecker, SearchStrategy, Solution, Solver, Status, SwitchTrigger,
+		TerminationSignal, Valuation, View,
 	},
 };
 use mimalloc::MiMalloc;
@@ -279,7 +280,43 @@ impl<'a> Cli<'a> {
 					.collect(),
 			})
 			.collect();
-		let res = match meta.goal {
+
+		// Assumption interface: every `huub_assume` constraint in the FlatZinc
+		// instance contributes its array elements to `meta.assumptions`. The
+		// CLI forwards them to the solver via `.assuming(...)` and prints the
+		// failing subset (the "core") as a `%%%mzn-core` line when the solver
+		// reports UNSAT or proves optimality.
+		let assumption_views: Vec<View<bool>> = meta.assumptions.iter().map(|(_, v)| *v).collect();
+		let has_assumptions = !assumption_views.is_empty();
+		// FlatZinc identifier of the objective decision, used to label the
+		// boundary literal that appears in the core on `Status::Complete`.
+		let obj_name: Option<&str> = match &fzn.solve.method {
+			Method::Minimize(Literal::Variable(v)) | Method::Maximize(Literal::Variable(v)) => {
+				Some(&v.name)
+			}
+			_ => None,
+		};
+		// Populated from inside the `on_failure` callback with the labels of
+		// the user assumptions that the solver attributed to the failure.
+		let unsat_core: RefCell<Option<Vec<String>>> = RefCell::default();
+		let make_on_failure = || {
+			|checker: &dyn AssumptionChecker| {
+				*unsat_core.borrow_mut() = Some(
+					meta.assumptions
+						.iter()
+						.filter_map(|(label, view)| {
+							if checker.fail(*view) {
+								Some(label.clone())
+							} else {
+								None
+							}
+						})
+						.collect(),
+				);
+			}
+		};
+
+		let (status, obj_val) = match meta.goal {
 			Some(goal) => {
 				if self.all_solutions {
 					warn!(
@@ -302,13 +339,14 @@ impl<'a> Cli<'a> {
 								}
 							);
 						})
+						.assuming(assumption_views)
+						.maybe_on_failure(has_assumptions.then(|| make_on_failure()))
 						.maybe_all_solutions(self.all_optimal.then(|| output_vars.clone()));
 					match goal {
 						Goal::Minimize(obj) => solve.minimize(obj),
 						Goal::Maximize(obj) => solve.maximize(obj),
 						_ => panic!("unknown optimization goal"),
 					}
-					.0
 				} else {
 					if let Err(err) = ctrlc::set_handler(move || {
 						interrupted.store(true, Ordering::SeqCst);
@@ -351,8 +389,10 @@ impl<'a> Cli<'a> {
 								last_obj = Some(obj_dcn.val(sol));
 							}
 						})
+						.assuming(assumption_views)
+						.maybe_on_failure(has_assumptions.then(|| make_on_failure()))
 						.maybe_all_solutions(self.all_optimal.then(|| output_vars.clone()));
-					let (status, _obj) = match goal {
+					let ret = match goal {
 						Goal::Minimize(obj) => solve.minimize(obj),
 						Goal::Maximize(obj) => solve.maximize(obj),
 						_ => panic!("unknown optimization goal"),
@@ -360,25 +400,30 @@ impl<'a> Cli<'a> {
 					if !last_sol.is_empty() {
 						output!(self.stdout, "{}", last_sol);
 					}
-					status
+					ret
 				}
 			}
-			None => slv
-				.solve()
-				.bind_using_clauses(true)
-				.on_solution(|sol| {
-					output!(
-						self.stdout,
-						"{}",
-						SolutionWrap {
-							sol,
-							fzn: &fzn,
-							var_map: &meta.names
-						}
-					);
-				})
-				.maybe_all_solutions(self.all_solutions.then(|| output_vars.clone()))
-				.satisfy(),
+			None => {
+				let status = slv
+					.solve()
+					.bind_using_clauses(true)
+					.on_solution(|sol| {
+						output!(
+							self.stdout,
+							"{}",
+							SolutionWrap {
+								sol,
+								fzn: &fzn,
+								var_map: &meta.names
+							}
+						);
+					})
+					.assuming(assumption_views)
+					.maybe_on_failure(has_assumptions.then(|| make_on_failure()))
+					.maybe_all_solutions(self.all_solutions.then(|| output_vars.clone()))
+					.satisfy();
+				(status, None)
+			}
 		};
 		if self.statistics {
 			let stats = slv.solver_statistics();
@@ -398,7 +443,21 @@ impl<'a> Cli<'a> {
 				],
 			);
 		}
-		match res {
+		if let Some(mut core) = unsat_core.into_inner() {
+			// If `Status::Complete` for an optimisation problem we annotate
+			// the core with the objective literal.
+			if status == Status::Complete {
+				let (name, val) = (obj_name.unwrap_or("objective"), obj_val.unwrap());
+				let bound_label = match &fzn.solve.method {
+					Method::Minimize(_) => format!("{name} < {val}"),
+					Method::Maximize(_) => format!("{name} >= {}", val + 1),
+					Method::Satisfy => unreachable!(),
+				};
+				core.push(bound_label);
+			}
+			outputln!(self.stdout, "%%%mzn-core: [{}]", core.join(", "));
+		}
+		match status {
 			Status::Satisfied => {}
 			Status::Unsatisfiable => outputln!(self.stdout, "{}", FZN_UNSATISFIABLE),
 			Status::Unknown => outputln!(self.stdout, "{}", FZN_UNKNOWN),
