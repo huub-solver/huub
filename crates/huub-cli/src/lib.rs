@@ -124,7 +124,7 @@ impl<'a> Cli<'a> {
 		})?;
 
 		let (mut slv, meta): (Solver, _) = match fzn
-			.lower()
+			.lower_with_diff_logic_level(self.diff_logic_level)
 			.int_eager_limit(self.int_eager_limit)
 			.preprocessing(self.cadical.preprocessing)
 			.conditioning(self.cadical.conditioning)
@@ -149,6 +149,18 @@ impl<'a> Cli<'a> {
 			Err(err) => return Err(err.to_string()),
 			Ok(x) => x,
 		};
+
+		if let Ok(v) = std::env::var("HUUB_BOOL_REASONS") {
+			if let Ok(n) = v.parse::<u8>() {
+				slv.set_diff_logic_bool_reasons(n);
+			}
+		}
+		if let Ok(v) = std::env::var("HUUB_INC_IMP") {
+			slv.set_diff_logic_use_inc_imp(matches!(
+				v.as_str(),
+				"1" | "true" | "on" | "TRUE" | "True"
+			));
+		}
 
 		if self.statistics {
 			let stats = slv.init_statistics();

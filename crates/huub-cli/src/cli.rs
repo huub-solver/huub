@@ -161,6 +161,12 @@ pub struct Cli<'a> {
 	#[arg(long, value_name = "usize", default_value_t = Lowerer::DEFAULT_INT_EAGER_LIMIT, help_heading = CLI_SECTION_INIT)]
 	pub(crate) int_eager_limit: usize,
 
+	/// Auto-detection level for the model-side difference-logic service:
+	/// 0/off, 1/basic = Global/Implied/Reified, 2/equals = +ImpliedEquals,
+	/// 3/not-equals = +NotEquals/ImpliedNotEquals/ReifiedEquals.
+	#[arg(long, value_name = "level", default_value_t = Lowerer::DEFAULT_DIFF_LOGIC_LEVEL, help_heading = CLI_SECTION_INIT)]
+	pub(crate) diff_logic_level: huub::constraints::diff_logic::DiffLogicLevel,
+
 	/// Control whether the solver may restart, overwritten by `-f`.
 	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_RESTART, help_heading = CLI_SECTION_SEARCH)]
 	pub(crate) restart: bool,
@@ -328,6 +334,7 @@ impl<'a> Cli<'a> {
 			trace_target: self.trace_target,
 			no_trace_target: self.no_trace_target,
 			int_eager_limit: self.int_eager_limit,
+			diff_logic_level: self.diff_logic_level,
 			restart: self.restart,
 			search_strategy: self.search_strategy,
 			search_trigger: self.search_trigger,

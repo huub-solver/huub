@@ -402,7 +402,24 @@ pub trait HuubFlatZinc {
 	/// to a [`Model`] (via [`to_model()`](Lowerer::to_model)) or directly to
 	/// a [`Solver`](crate::solver::Solver) (via
 	/// [`to_solver()`](Lowerer::to_solver)).
+	///
+	/// Equivalent to
+	/// [`lower_with_diff_logic_level`](Self::lower_with_diff_logic_level)
+	/// called with [`Lowerer::DEFAULT_DIFF_LOGIC_LEVEL`].
 	fn lower(&self) -> Lowerer<Result<FlatZincLowerData, FlatZincError>>;
+
+	/// Like [`lower`](Self::lower), but sets the
+	/// [`Model::diff_logic`](crate::model::Model::diff_logic) level
+	/// *before* constraints are posted. The level reached via the
+	/// builder's `.diff_logic_level(...)` setter only takes effect after
+	/// deserialisation — by which point `Model::linear`'s
+	/// auto-detection has already routed two-term linears at the
+	/// default level. Callers that want the flag to actually gate
+	/// FlatZinc-time routing must use this method.
+	fn lower_with_diff_logic_level(
+		&self,
+		diff_logic_level: crate::constraints::diff_logic::DiffLogicLevel,
+	) -> Lowerer<Result<FlatZincLowerData, FlatZincError>>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -648,8 +665,22 @@ impl TryFrom<&str> for ConstraintIdent {
 
 impl HuubFlatZinc for FlatZinc<FznIdent> {
 	fn lower(&self) -> Lowerer<Result<FlatZincLowerData, FlatZincError>> {
+		self.lower_with_diff_logic_level(Lowerer::DEFAULT_DIFF_LOGIC_LEVEL)
+	}
+
+	fn lower_with_diff_logic_level(
+		&self,
+		diff_logic_level: crate::constraints::diff_logic::DiffLogicLevel,
+	) -> Lowerer<Result<FlatZincLowerData, FlatZincError>> {
 		let deserialize_model = |fzn: &FlatZinc<FznIdent>| {
 			let mut builder = FznModelBuilder::new(fzn);
+			// Apply the requested level BEFORE `post_constraints`:
+			// `Model::linear` reads `self.diff_logic_level` to decide
+			// whether to route a two-term linear into the diff-logic
+			// service. The builder's `.diff_logic_level(...)` setter
+			// only takes effect later (in `lower.rs`), too late to
+			// gate FlatZinc-time auto-detection.
+			builder.prb.diff_logic_level = diff_logic_level;
 			builder.unify_variables()?;
 			builder.extract_views()?;
 			builder.post_constraints()?;

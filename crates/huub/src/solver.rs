@@ -1317,6 +1317,67 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		iv.into()
 	}
 
+	/// Populate the engine-side mid-search subsumption cache for
+	/// `b ↔ (x − y ≤ d)`. Called once per cache entry by
+	/// [`DiffLogicConstraint::to_solver`] when the surviving model
+	/// graph is translated to engine views.
+	pub(crate) fn populate_diff_lit_cache(
+		&mut self,
+		x: View<IntVal>,
+		y: View<IntVal>,
+		d: IntVal,
+		b: View<bool>,
+	) {
+		let mut handle = self.engine.borrow_mut();
+		let _ = handle
+			.state
+			.diff_lit_map
+			.diff_lit_cache
+			.entry((x, y))
+			.or_default()
+			.insert(d, b);
+	}
+
+	/// Set the reason mode used by the engine-side diff-logic propagator
+	/// for `set_bool_false`. See
+	/// [`crate::constraints::diff_logic::DiffLogicPropagator::bool_reasons`]
+	/// for mode semantics. No-op when no diff-logic edge was posted
+	/// (the propagator does not exist on the engine).
+	pub fn set_diff_logic_bool_reasons(&mut self, mode: u8) {
+		use std::any::Any;
+
+		use crate::constraints::diff_logic::DiffLogicPropagator;
+		let mut handle = self.engine.borrow_mut();
+		let engine = &mut *handle;
+		let Some(owner) = engine.state.diff_lit_map.owner else {
+			return;
+		};
+		let any: &mut dyn Any = engine.propagators[owner.index()].as_mut();
+		if let Some(dl) = any.downcast_mut::<DiffLogicPropagator>() {
+			dl.bool_reasons = mode;
+		}
+	}
+
+	/// Toggle the engine-side diff-logic `inc_imp` proactive implication
+	/// check. When `true`, after every edge activation the propagator
+	/// runs Dijkstra over open implication edges and fixes any gating
+	/// Boolean whose implication is now entailed. Matches lucas's
+	/// default. No-op when no diff-logic edge was posted.
+	pub fn set_diff_logic_use_inc_imp(&mut self, on: bool) {
+		use std::any::Any;
+
+		use crate::constraints::diff_logic::DiffLogicPropagator;
+		let mut handle = self.engine.borrow_mut();
+		let engine = &mut *handle;
+		let Some(owner) = engine.state.diff_lit_map.owner else {
+			return;
+		};
+		let any: &mut dyn Any = engine.propagators[owner.index()].as_mut();
+		if let Some(dl) = any.downcast_mut::<DiffLogicPropagator>() {
+			dl.use_inc_imp = on;
+		}
+	}
+
 	/// Set the overarching search strategy to use during solving.
 	pub fn set_search_strategy(&mut self, strategy: SearchStrategy) {
 		self.engine.borrow_mut().state.set_search_strategy(strategy);

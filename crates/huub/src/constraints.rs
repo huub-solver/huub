@@ -3,6 +3,7 @@
 pub mod bool_array_element;
 pub mod circuit;
 pub mod cumulative;
+pub mod diff_logic;
 pub mod disjunctive;
 pub mod int_abs;
 pub mod int_array_element;
@@ -179,7 +180,7 @@ where
 /// If the explanation is needed, then the propagation engine will revert the
 /// state of the solver and call [`Propagator::explain`] to receive the
 /// explanation.
-pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
+pub trait Propagator<E: ReasoningEngine + ?Sized>: Any + Debug + DynClone + 'static {
 	/// Advises the propagator that the solver is backtracking.
 	fn advise_of_backtrack(&mut self, context: &mut E::NotificationContext<'_>) {
 		let _ = context;

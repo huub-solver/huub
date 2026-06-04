@@ -329,6 +329,14 @@ impl Model {
 			Comparator::NotEqual => (LinComparator::NotEqual, rhs),
 		};
 
+		// Try the model-side diff-logic service first. If the shape matches
+		// (two unit-scaled terms with opposite signs) and the current
+		// `diff_logic.level` accepts the variant, the constraint is routed
+		// into the service and we skip the regular `IntLinear` post.
+		if let Some(routed) = self.try_route_diff_logic(&terms, comparator, rhs, reif) {
+			return routed;
+		}
+
 		if IntLinear::can_overflow(self, &terms) {
 			self.post_constraint(IntLinear::<OverflowPossible> {
 				terms,

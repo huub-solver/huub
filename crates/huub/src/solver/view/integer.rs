@@ -56,6 +56,22 @@ impl View<IntVal> {
 		}
 	}
 
+	/// Whether this view can serve as a difference-logic endpoint —
+	/// i.e. unit-scaled, zero-offset `Linear` over an integer decision.
+	/// `Const` and `Bool`-backed views, and scaled / offset Linear views
+	/// are *not* eligible (the engine's `diff_lit` get-or-create only
+	/// reasons about untransformed integer decisions).
+	#[expect(
+		dead_code,
+		reason = "supports the deferred `diff_lit` get-or-create consumers (diff-logic brancher/reservoir)"
+	)]
+	pub(crate) fn is_diff_lit_endpoint(&self) -> bool {
+		matches!(
+			self.0,
+			IntView::Linear(lin) if lin.offset == 0 && lin.scale == NonZero::new(1).unwrap()
+		)
+	}
+
 	/// Return a list of integers that can used to identify the literals that
 	/// are associated to an integer view, and the meaning of those literals.
 	#[doc(hidden)]
@@ -163,6 +179,22 @@ where
 	Decision<bool>: BoolInspectionActions<Ctx>,
 	View<bool>: BoolInspectionActions<Ctx>,
 {
+	fn diff_lit(&self, ctx: &mut Ctx, other: Self, d: IntVal) -> Ctx::Atom {
+		match (self.0, other.0) {
+			(IntView::Linear(x), IntView::Linear(y))
+				if x.offset == 0
+					&& y.offset == 0
+					&& x.scale == NonZero::new(1).unwrap()
+					&& y.scale == NonZero::new(1).unwrap() =>
+			{
+				x.var.diff_lit(ctx, y.var, d)
+			}
+			_ => unimplemented!(
+				"View::diff_lit only supports unit-scaled, zero-offset Linear endpoints"
+			),
+		}
+	}
+
 	fn lit(&self, ctx: &mut Ctx, meaning: IntLitMeaning) -> Ctx::Atom {
 		match self.0 {
 			IntView::Linear(lin) => lin.lit(ctx, meaning),

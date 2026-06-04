@@ -14,6 +14,7 @@ pub use crate::constraints::circuit::{
 	check::CircuitCheck, prevent::CircuitPrevent, scc::CircuitScc,
 };
 use crate::{
+	IntSet, IntVal,
 	actions::{
 		IntAnalyzeActions, IntEvent, IntPropagationActions, IntSimplificationActions,
 		ReasoningEngine,
@@ -23,7 +24,6 @@ use crate::{
 	},
 	lower::{LoweringContext, LoweringError},
 	model::View,
-	IntSet, IntVal,
 };
 
 /// Representation of the `circuit` / `subcircuit` constraint within a model.
@@ -197,17 +197,17 @@ mod tests {
 	// Single-round, per-algorithm tests: post one propagator (no `alldifferent`),
 	// run one `Solver::propagate_next`, assert the exact inference.
 	use crate::{
+		IntSet,
 		actions::{IntDecisionActions, IntInspectionActions},
 		constraints::circuit::{CircuitCheck, CircuitPrevent, CircuitScc},
 		solver::{
-			branchers::WarmStartBrancher, IntLitMeaning, LiteralStrategy, View as SolverView,
+			IntLitMeaning, LiteralStrategy, View as SolverView, branchers::WarmStartBrancher,
 		},
-		IntSet,
 	};
 	use crate::{
+		IntVal,
 		model::{Model, View},
 		solver::{Solver, Status},
-		IntVal,
 	};
 
 	/// Collect every solution of the model as a sorted list of successor-value
@@ -378,6 +378,25 @@ mod tests {
 		assert!(solns.iter().all(|s| is_circuit(s)));
 	}
 
+	#[test]
+	#[traced_test]
+	fn test_circuit_narrows_wide_successor_domain() {
+		// Regression: a successor declared wider than the index set (offset 2,
+		// domain -100..100 over nodes 2..=5) must be narrowed to the node range, so
+		// no out-of-range value can satisfy the circuit.
+		let mut prb = Model::default();
+		let vars = prb.new_int_decisions(4, -100..=100);
+		prb.circuit(vars.iter().copied()).offset(2).post().unwrap();
+		let solns = collect(prb, &vars);
+		assert_eq!(solns.len(), 6, "expected 6 cycles, got {solns:?}");
+		assert!(
+			solns
+				.iter()
+				.all(|s| s.iter().all(|&v| (2..=5).contains(&v))),
+			"a successor escaped the node range 2..=5: {solns:?}"
+		);
+	}
+
 	/// A disconnected graph (two size-3 groups that never point at each other)
 	/// is unsatisfiable but only `scc` can see it — there is no fixed sub-tour
 	/// for `check`. Size-3 groups keep every domain > 1 so self-loop exclusion
@@ -434,47 +453,6 @@ mod tests {
 		let solns = collect(prb, &vars);
 		// The two directed Hamiltonian cycles on {0,1,2}: 0->1->2->0 and 0->2->1->0.
 		assert_eq!(solns, vec![vec![1, 2, 0], vec![2, 0, 1]]);
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_circuit_narrows_wide_successor_domain() {
-		// Regression: a successor declared wider than the index set (offset 2,
-		// domain -100..100 over nodes 2..=5) must be narrowed to the node range, so
-		// no out-of-range value can satisfy the circuit.
-		let mut prb = Model::default();
-		let vars = prb.new_int_decisions(4, -100..=100);
-		prb.circuit(vars.iter().copied()).offset(2).post().unwrap();
-		let solns = collect(prb, &vars);
-		assert_eq!(solns.len(), 6, "expected 6 cycles, got {solns:?}");
-		assert!(
-			solns
-				.iter()
-				.all(|s| s.iter().all(|&v| (2..=5).contains(&v))),
-			"a successor escaped the node range 2..=5: {solns:?}"
-		);
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_subcircuit_narrows_wide_successor_domain() {
-		// The same range bound applies to `subcircuit`: successors are still nodes
-		// (self-loops included, which lie in range), so a wide declared domain must
-		// not admit out-of-range values.
-		let mut prb = Model::default();
-		let vars = prb.new_int_decisions(4, -100..=100);
-		prb.subcircuit(vars.iter().copied())
-			.offset(2)
-			.post()
-			.unwrap();
-		let solns = collect(prb, &vars);
-		assert_eq!(solns.len(), 21, "expected 21 subcircuits, got {solns:?}");
-		assert!(
-			solns
-				.iter()
-				.all(|s| s.iter().all(|&v| (2..=5).contains(&v))),
-			"a successor escaped the node range 2..=5: {solns:?}"
-		);
 	}
 
 	#[test]
@@ -692,6 +670,28 @@ mod tests {
 				),
 			}
 		}
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_subcircuit_narrows_wide_successor_domain() {
+		// The same range bound applies to `subcircuit`: successors are still nodes
+		// (self-loops included, which lie in range), so a wide declared domain must
+		// not admit out-of-range values.
+		let mut prb = Model::default();
+		let vars = prb.new_int_decisions(4, -100..=100);
+		prb.subcircuit(vars.iter().copied())
+			.offset(2)
+			.post()
+			.unwrap();
+		let solns = collect(prb, &vars);
+		assert_eq!(solns.len(), 21, "expected 21 subcircuits, got {solns:?}");
+		assert!(
+			solns
+				.iter()
+				.all(|s| s.iter().all(|&v| (2..=5).contains(&v))),
+			"a successor escaped the node range 2..=5: {solns:?}"
+		);
 	}
 
 	#[test]

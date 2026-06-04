@@ -13,16 +13,17 @@ use crate::{
 	IntSet, IntVal,
 	actions::{
 		BoolInspectionActions, BoolPropagationActions, DecisionActions, IntDecisionActions,
-		IntEvent, IntInspectionActions, IntPropagationActions, PropagationActions,
+		IntEvent, IntInspectionActions, IntPropCond, IntPropagationActions, PropagationActions,
 		ReasoningContext, ReasoningEngine, Trailed, TrailingActions,
 	},
 	constraints::{Conflict, DeferredReason, Reason, ReasonBuilder},
 	helpers::bytes::Bytes,
 	solver::{
 		BoxedPropagator, IntLitMeaning, Polarity,
+		activation_list::ActivationAction,
 		decision::{Decision, integer::LazyLitDef},
-		engine::{Engine, LitPropagation, PropRef, State, trace_new_lit},
-		view::{View, boolean::BoolView},
+		engine::{AdvRef, AdvisorDef, Engine, LitPropagation, PropRef, State, trace_new_lit},
+		view::{View, boolean::BoolView, integer::IntView},
 	},
 };
 
@@ -110,6 +111,12 @@ impl<'a> BoolPropagationActions<SolvingContext<'a>> for Decision<bool> {
 }
 
 impl IntDecisionActions<SolvingContext<'_>> for Decision<IntVal> {
+	fn diff_lit(&self, ctx: &mut SolvingContext<'_>, other: Self, d: IntVal) -> View<bool> {
+		let x: View<IntVal> = (*self).into();
+		let y: View<IntVal> = other.into();
+		ctx.diff_logic_lazy_diff_lit(x, y, d)
+	}
+
 	fn lit(&self, ctx: &mut SolvingContext<'_>, meaning: IntLitMeaning) -> View<bool> {
 		let var = &mut ctx.state.int_vars[self.idx()];
 		let polarity = var.polarity;
@@ -206,6 +213,17 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for Decision<IntVal> {
 		ctx.propagate_int(*self, ChangeRequest::RemoveValue(val), reason)
 	}
 
+	fn tighten_difference(
+		&self,
+		ctx: &mut SolvingContext<'a>,
+		other: Self,
+		d: IntVal,
+		reason: impl ReasonBuilder<SolvingContext<'a>>,
+	) -> Result<(), Conflict<Decision<bool>>> {
+		let b = self.diff_lit(ctx, other, d);
+		b.fix(ctx, true, reason)
+	}
+
 	fn tighten_max(
 		&self,
 		ctx: &mut SolvingContext<'a>,
@@ -242,6 +260,175 @@ impl Debug for ReasonTracePrint<'_> {
 }
 
 impl<'a> SolvingContext<'a> {
+	/// Mid-search lazy `diff_lit` against the engine-side diff-logic
+	/// propagator.
+	///
+	/// 1. Cache hit (forward or reverse direction) → return.
+	/// 2. Probe forward chain neighbours for SAT-subsumption clauses.
+	/// 3. Mint a fresh SAT variable for the gate Boolean.
+	/// 4. Queue the new edge for the owning [`DiffLogicPropagator`] to install
+	///    at the end of this propagation cycle (it owns the graph + trail; we
+	///    can't reach into it while another propagator is borrowed for
+	///    `propagate`).
+	/// 5. Populate the cache in both directions.
+	/// 6. Post chain implication clauses to `state.clauses`.
+	pub(crate) fn diff_logic_lazy_diff_lit(
+		&mut self,
+		x: View<IntVal>,
+		y: View<IntVal>,
+		d: IntVal,
+	) -> View<bool> {
+		// 1. Cache hits.
+		if let Some(b) = self
+			.state
+			.diff_lit_map
+			.diff_lit_cache
+			.get(&(x, y))
+			.and_then(|m| m.get(&d))
+		{
+			return *b;
+		}
+		if let Some(b) = self
+			.state
+			.diff_lit_map
+			.diff_lit_cache
+			.get(&(y, x))
+			.and_then(|m| m.get(&(-d - 1)))
+		{
+			return !*b;
+		}
+
+		// 2. Probe forward chain neighbours BEFORE allocating.
+		let prev_b = self
+			.state
+			.diff_lit_map
+			.diff_lit_cache
+			.get(&(x, y))
+			.and_then(|m| m.range(..d).next_back().map(|(_, &b)| b));
+		let next_b = self
+			.state
+			.diff_lit_map
+			.diff_lit_cache
+			.get(&(x, y))
+			.and_then(|m| m.range((d + 1)..).next().map(|(_, &b)| b));
+
+		// 3. Allocate a fresh SAT variable for the new gate.
+		let raw_var = self.slv.new_observed_var();
+		self.state.statistics.lazy_literals += 1;
+		self.state.trail.grow_to_boolvar(raw_var);
+		let new_lit: pindakaas::Lit = raw_var.into();
+		let b: View<bool> = View(BoolView::Lit(Decision(new_lit)));
+
+		// 4. Queue both gated edges for the owning propagator's `register_edge` drain.
+		//    The drain happens after the current propagator returns from `propagate`
+		//    (see `Self::drain_pending_register_edges`), so we are not re-entrantly
+		//    mutating the diff-logic propagator while the caller is propagating.
+		self.state
+			.diff_lit_map
+			.pending_register_edges
+			.push((x, y, d, b));
+		self.state
+			.diff_lit_map
+			.pending_register_edges
+			.push((y, x, -d - 1, !b));
+
+		// 5. Populate cache in BOTH directions.
+		let _ = self
+			.state
+			.diff_lit_map
+			.diff_lit_cache
+			.entry((x, y))
+			.or_default()
+			.insert(d, b);
+		let _ = self
+			.state
+			.diff_lit_map
+			.diff_lit_cache
+			.entry((y, x))
+			.or_default()
+			.insert(-d - 1, !b);
+
+		// 6. Push order-encoding chain implication clauses.
+		let as_raw = |v: View<bool>| -> pindakaas::Lit {
+			match v.0 {
+				BoolView::Lit(d) => d.0,
+				BoolView::Const(_) => unreachable!(
+					"chain neighbour can not be a constant: the cache only stores Lit views"
+				),
+			}
+		};
+		if let Some(bp) = prev_b {
+			self.state.clauses.push_back(vec![!as_raw(bp), as_raw(b)]);
+		}
+		if let Some(bn) = next_b {
+			self.state.clauses.push_back(vec![!as_raw(b), as_raw(bn)]);
+		}
+
+		b
+	}
+
+	/// Take the lazily-queued diff-logic edges out of `state.diff_lit_map`
+	/// and install them on the owner propagator. Run once after each
+	/// propagator returns from `propagate`; safe to call when the queue
+	/// is non-empty because the running propagator has already released
+	/// its borrow on the propagator slot.
+	///
+	/// After installing, subscribe `Bounds` advisors on newly-interned
+	/// int endpoints and `Fixed` advisors on newly-interned gate
+	/// Booleans so the lazy edges participate in the regular
+	/// notification flow.
+	fn drain_pending_register_edges(&mut self, propagators: &mut [BoxedPropagator]) {
+		use crate::constraints::diff_logic::DiffLogicPropagator;
+
+		let pending = std::mem::take(&mut self.state.diff_lit_map.pending_register_edges);
+		// `owner` is `Some` whenever lazy edges have been queued — the
+		// queue itself is only populated through
+		// `diff_logic_lazy_diff_lit`, which sets `owner` lazily during
+		// the first mint.
+		let owner = self
+			.state
+			.diff_lit_map
+			.owner
+			.expect("diff-logic owner not set but pending edges queued");
+
+		// Track newly-interned int endpoints + gates so we can
+		// subscribe advisors on them after the prop borrow is dropped.
+		let new_int_nodes: Vec<(View<IntVal>, u64)>;
+		let new_bool_nodes: Vec<(View<bool>, u64)>;
+		{
+			let any: &mut dyn std::any::Any = propagators[owner.index()].as_mut();
+			let prop = any
+				.downcast_mut::<DiffLogicPropagator>()
+				.expect("owner propagator must be a DiffLogicPropagator");
+			let int_before = prop.int_vars.len();
+			let bool_before = prop.bool_vars.len();
+			for (x, y, d, gate) in pending {
+				let _ = prop.register_edge(&mut self.state.trail, x, y, d, Some(gate));
+			}
+			new_int_nodes = (int_before..prop.int_vars.len())
+				.map(|n| (prop.int_vars[n], n as u64))
+				.collect();
+			new_bool_nodes = (bool_before..prop.bool_vars.len())
+				.map(|n| (prop.bool_vars[n], n as u64))
+				.collect();
+		}
+
+		// Subscribe bounds advisors on freshly-interned endpoints and
+		// fixed advisors on freshly-interned gate Booleans. Owner is
+		// the propagator slot we want all of these routed to.
+		for (view, data) in new_int_nodes {
+			self.subscribe_lazy_int_bounds(owner, view, data);
+		}
+		for (view, data) in new_bool_nodes {
+			self.subscribe_lazy_bool_fixed(owner, view, data);
+		}
+
+		// Re-enqueue the owner so its next `propagate` picks up the
+		// new edges (its `advise_*` advisors were not invoked because
+		// the edges arrive via the lazy path).
+		self.state.propagator_queue.enqueue_propagator(owner.raw());
+	}
+
 	/// Create a new SolvingContext given the solver actions exposed by the SAT
 	/// solver and the engine state.
 	pub(crate) fn new(slv: &'a mut dyn SolvingActions, state: &'a mut State) -> Self {
@@ -441,8 +628,87 @@ impl<'a> SolvingContext<'a> {
 				self.state.failed = true;
 				self.state.conflict = Some(conflict);
 			}
+
+			// Drain mid-search lazy edges that this propagator may have
+			// minted via `diff_logic_lazy_diff_lit`. Each entry installs
+			// one gated edge on the diff-logic propagator; subscribing
+			// advisors on freshly-interned endpoints / gate Booleans is
+			// handled at mint time. We do the drain here (outside the
+			// inner propagate borrow) to avoid aliasing the propagator
+			// twice. Wakes the diff-logic propagator so it processes the
+			// new edge on its next turn through the queue.
+			if !self.state.diff_lit_map.pending_register_edges.is_empty() {
+				self.drain_pending_register_edges(propagators);
+			}
+
 			if self.state.conflict.is_some() || !self.state.propagation_queue.is_empty() {
 				return;
+			}
+		}
+	}
+
+	/// Mid-search subscription helper for a gating Boolean view
+	/// (gate of a freshly-minted lazy edge).
+	fn subscribe_lazy_bool_fixed(&mut self, owner: PropRef, view: View<bool>, data: u64) {
+		let lit = match view.0 {
+			BoolView::Lit(l) => l,
+			BoolView::Const(_) => return,
+		};
+		if lit.val(&self.state.trail).is_some() {
+			return;
+		}
+		let var = lit.0.var();
+		self.state.advisors.push(AdvisorDef {
+			bool2int: false,
+			data,
+			negated: false,
+			propagator: owner,
+		});
+		let adv = AdvRef::new(self.state.advisors.len() - 1);
+		self.state
+			.bool_activation
+			.entry(var)
+			.or_default()
+			.push(ActivationAction::<_, PropRef>::Advise(adv).into());
+	}
+
+	/// Mid-search subscription helper used by
+	/// [`Self::drain_pending_register_edges`] when a lazy edge's
+	/// endpoint hadn't been seen before. The owner propagator handles
+	/// `Bounds` advice on the given int view; const views are a no-op.
+	fn subscribe_lazy_int_bounds(&mut self, owner: PropRef, view: View<IntVal>, data: u64) {
+		match view.0 {
+			IntView::Linear(lin) => {
+				let negated = lin.scale.is_negative();
+				self.state.advisors.push(AdvisorDef {
+					bool2int: false,
+					data,
+					negated,
+					propagator: owner,
+				});
+				let adv = AdvRef::new(self.state.advisors.len() - 1);
+				self.state.int_activation[lin.var.idx()].add(
+					ActivationAction::<_, PropRef>::Advise(adv),
+					IntPropCond::Bounds,
+				);
+			}
+			IntView::Const(_) => {}
+			IntView::Bool(lin) => {
+				if lin.var.val(&self.state.trail).is_some() {
+					return;
+				}
+				self.state.advisors.push(AdvisorDef {
+					bool2int: true,
+					data,
+					negated: lin.scale.is_negative(),
+					propagator: owner,
+				});
+				let adv = AdvRef::new(self.state.advisors.len() - 1);
+				self.state
+					.bool_activation
+					.entry(lin.var.0.var())
+					.or_default()
+					.push(ActivationAction::<_, PropRef>::Advise(adv).into());
 			}
 		}
 	}

@@ -22,6 +22,27 @@ pub trait IntDecisionActions<Context>: IntInspectionActions<Context>
 where
 	Context: ReasoningContext + ?Sized,
 {
+	/// Get (or create) the Reified Boolean literal `b ↔ (self − other ≤ d)`.
+	///
+	/// Get-or-create against the engine-side diff-logic service: on a
+	/// cache hit returns the canonical Boolean; on a miss the
+	/// implementation mints a fresh Boolean, registers two gated edges
+	/// (`b → (x − y ≤ d)` and `¬b → (y − x ≤ −d − 1)`), inserts both
+	/// directions into the engine cache, and subscribes sentinel
+	/// advisors so future bound/gate changes wake the service.
+	///
+	/// The default `unimplemented!()` keeps wrapper contexts honest —
+	/// only `SolvingContext` is expected to override this with a real
+	/// engine-service-backed implementation (deferred follow-up; the
+	/// brancher / reservoir consumers that need this aren't on this
+	/// branch yet).
+	fn diff_lit(&self, _ctx: &mut Context, _other: Self, _d: IntVal) -> Context::Atom
+	where
+		Self: Sized,
+	{
+		unimplemented!("diff_lit not implemented for this context/view")
+	}
+
 	/// Get (or create) a literal for the given referenced integer variable with
 	/// the given meaning.
 	fn lit(&self, ctx: &mut Context, meaning: IntLitMeaning) -> Context::Atom;
@@ -170,6 +191,30 @@ where
 		val: IntVal,
 		reason: impl ReasonBuilder<Context>,
 	) -> Result<(), Context::Conflict>;
+
+	/// Enforce the binary diff-logic constraint `self − other ≤ d`
+	/// because of the given `reason`.
+	///
+	/// Composes [`IntDecisionActions::diff_lit`] (get-or-create the
+	/// Reified gating Boolean for the `(self, other, d)` shape) with a
+	/// `b = true` propagation: the engine-side diff-logic service then
+	/// activates the corresponding gated edge and propagates the
+	/// implied bound updates.
+	///
+	/// Default `unimplemented!()` — only `SolvingContext` implementations
+	/// are expected to override (deferred follow-up).
+	fn tighten_difference(
+		&self,
+		_ctx: &mut Context,
+		_other: Self,
+		_d: IntVal,
+		_reason: impl ReasonBuilder<Context>,
+	) -> Result<(), Context::Conflict>
+	where
+		Self: Sized,
+	{
+		unimplemented!("tighten_difference not implemented for this context/view")
+	}
 
 	/// Enforce that an integer view takes a value that is less than or equal to
 	/// `val` because of the given `reason`.

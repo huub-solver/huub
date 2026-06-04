@@ -204,6 +204,103 @@ impl<'a> InitializationContext<'a> {
 	pub(crate) fn priority(&self) -> PriorityLevel {
 		self.priority
 	}
+
+	/// Internal hook for the diff-logic service to record itself as the
+	/// `DiffLitMap` owner during `initialize`. Mid-search `subscribe_*`
+	/// helpers and the engine main loop's lazy-edge drain look the owner
+	/// up here; setting it during `initialize` keeps that lookup correct
+	/// for the rest of the search.
+	pub(crate) fn register_as_diff_logic_owner(&mut self) {
+		debug_assert!(
+			self.state.diff_lit_map.owner.is_none(),
+			"DiffLogicConstraint::to_solver must be posted at most once"
+		);
+		self.state.diff_lit_map.owner = Some(self.prop);
+	}
+
+	/// Internal accessor for the engine [`Trail`] underlying the
+	/// initialisation state. Used by [`DiffLogicPropagator::initialize`]
+	/// to install the edges that `DiffLogicConstraint::to_solver`
+	/// stashed (no access to the engine trail at lowering time).
+	pub(crate) fn state_trail_mut(&mut self) -> &mut crate::solver::trail::Trail {
+		&mut self.state.trail
+	}
+
+	/// Subscribe a fixed-event advisor on a gating Boolean view, routed
+	/// to the currently-initialising propagator. Mirror of
+	/// [`Self::subscribe_diff_logic_int_bounds`] for gate Booleans.
+	pub(crate) fn subscribe_diff_logic_bool_fixed(&mut self, view: View<bool>, data: u64) {
+		let lit = match view.0 {
+			BoolView::Lit(l) => l,
+			BoolView::Const(_) => return,
+		};
+		if lit.val(self.state).is_some() {
+			return;
+		}
+		let var = lit.0.var();
+		self.state.advisors.push(AdvisorDef {
+			bool2int: false,
+			data,
+			negated: false,
+			propagator: self.prop,
+		});
+		let adv = AdvRef::new(self.state.advisors.len() - 1);
+		self.state
+			.bool_activation
+			.entry(var)
+			.or_insert_with(|| {
+				self.observed_variables.push(var);
+				Vec::new()
+			})
+			.push(ActivationAction::<_, PropRef>::Advise(adv).into());
+	}
+
+	/// Subscribe a bounds advisor on the given int view routed to the
+	/// currently-initialising propagator, with the supplied advisor data.
+	///
+	/// Distinct from [`IntInitActions::advise_when`]: this variant is
+	/// used at lowering time when the propagator needs to subscribe at a
+	/// fixed [`PropRef`] (its own slot) and supply node-index data even
+	/// when the view is a `Bool`-backed integer.
+	pub(crate) fn subscribe_diff_logic_int_bounds(&mut self, view: View<IntVal>, data: u64) {
+		match view.0 {
+			IntView::Linear(lin) => {
+				let negated = lin.scale.is_negative();
+				self.state.advisors.push(AdvisorDef {
+					bool2int: false,
+					data,
+					negated,
+					propagator: self.prop,
+				});
+				let adv = AdvRef::new(self.state.advisors.len() - 1);
+				self.state.int_activation[lin.var.idx()].add(
+					ActivationAction::<_, PropRef>::Advise(adv),
+					IntPropCond::Bounds,
+				);
+			}
+			IntView::Const(_) => {}
+			IntView::Bool(lin) => {
+				if lin.var.val(self.state).is_some() {
+					return;
+				}
+				self.state.advisors.push(AdvisorDef {
+					bool2int: true,
+					data,
+					negated: lin.scale.is_negative(),
+					propagator: self.prop,
+				});
+				let adv = AdvRef::new(self.state.advisors.len() - 1);
+				self.state
+					.bool_activation
+					.entry(lin.var.0.var())
+					.or_insert_with(|| {
+						self.observed_variables.push(lin.var.0.var());
+						Vec::new()
+					})
+					.push(ActivationAction::<_, PropRef>::Advise(adv).into());
+			}
+		}
+	}
 }
 
 impl InitActions for InitializationContext<'_> {

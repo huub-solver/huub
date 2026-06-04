@@ -239,8 +239,20 @@ pub(crate) fn check_unsat(file: &Path) {
 }
 
 /// Run the solver on the given instance and return the output as raw bytes.
+///
+/// Honours the `HUUB_BENCH_DIFF_LOGIC_LEVEL` env var (if present, valid
+/// values are `"0"`, `"1"`, `"2"`, `"3"`) so the same bench harness
+/// can be invoked multiple times against different auto-detection
+/// levels without recompiling.
 fn run_solver<I: Into<OsString>>(args: impl IntoIterator<Item = I>) -> Vec<u8> {
-	let args = iter::once(OsString::from("huub")).chain(args.into_iter().map(Into::into));
+	let mut extra: Vec<OsString> = Vec::new();
+	if let Ok(level) = std::env::var("HUUB_BENCH_DIFF_LOGIC_LEVEL") {
+		extra.push(OsString::from("--diff-logic-level"));
+		extra.push(OsString::from(level));
+	}
+	let args = iter::once(OsString::from("huub"))
+		.chain(extra.into_iter())
+		.chain(args.into_iter().map(Into::into));
 	let cli = Cli::try_parse_from(args).unwrap();
 	let mut out = Vec::new();
 	let mut cli = cli.with_stdout(&mut out);

@@ -143,6 +143,9 @@ pub(crate) struct LowererComplete<Origin = ()> {
 	/// [`negative_polarity`](Lowerer::negative_polarity) builder setters rather
 	/// than setting this directly.
 	objective: Option<Goal<model::View<IntVal>>>,
+	/// Auto-detection level for two-term difference constraint.
+	#[builder(default = Lowerer::DEFAULT_DIFF_LOGIC_LEVEL)]
+	diff_logic_level: crate::constraints::diff_logic::DiffLogicLevel,
 }
 
 /// Actions that can be performed when reformulating a [`Model`] object into a
@@ -211,6 +214,17 @@ trait LoweringActions {
 
 	/// Create a fresh range of Boolean variables in the underlying SAT solver.
 	fn new_var_range(&mut self, len: usize) -> pindakaas::VarRange;
+
+	/// Populate the engine-side mid-search subsumption cache with
+	/// `(x, y, d) → b` so subsequent lazy gate mints honour the model
+	/// simplification's subsumption decisions.
+	fn populate_diff_lit_cache(
+		&mut self,
+		x: solver::View<IntVal>,
+		y: solver::View<IntVal>,
+		d: IntVal,
+		b: solver::View<bool>,
+	);
 }
 
 /// Context object used during the lowering process that creates a
@@ -537,6 +551,11 @@ impl Lowerer {
 	/// The default value when [`conditioning`](Lowerer::conditioning) is not
 	/// explicitly set.
 	pub const DEFAULT_CONDITIONING: bool = false;
+	/// The default value when
+	/// [`diff_logic_level`](Lowerer::diff_logic_level) is not explicitly
+	/// set. Matches [`crate::constraints::diff_logic::DiffLogicLevel::Basic`].
+	pub const DEFAULT_DIFF_LOGIC_LEVEL: crate::constraints::diff_logic::DiffLogicLevel =
+		crate::constraints::diff_logic::DiffLogicLevel::Basic;
 	/// The default value when [`inprocessing`](Lowerer::inprocessing) is not
 	/// explicitly set.
 	pub const DEFAULT_INPROCESSING: bool = false;
@@ -646,6 +665,12 @@ impl<State: lowerer::State> Lowerer<Result<FlatZincLowerData, FlatZincError>, St
 		let complete = self.finish_internal();
 		let FlatZincLowerData { meta, mut model } = complete.origin?;
 
+		// Apply the diff-logic level to the freshly-deserialised model
+		// before lowering, so auto-detection in `Model::linear` (which
+		// the FlatZinc loader may have already triggered via constraint
+		// posting) honours the requested setting.
+		model.diff_logic_level = complete.diff_logic_level;
+
 		let (mut slv, map) = LowererComplete {
 			origin: &mut model,
 			conditioning: complete.conditioning,
@@ -664,6 +689,7 @@ impl<State: lowerer::State> Lowerer<Result<FlatZincLowerData, FlatZincError>, St
 			// Use the parsed optimization goal to bias polarity, unless an
 			// explicit objective was set on the builder.
 			objective: complete.objective.or(meta.goal),
+			diff_logic_level: complete.diff_logic_level,
 		}
 		.into_solver_internal()?;
 		if let Some(branching) = meta.branching {
@@ -727,7 +753,13 @@ impl LowererComplete<&mut Model> {
 			variable_elimination,
 			vivification,
 			objective,
+			diff_logic_level,
 		} = self;
+
+		// Apply the lowering-time diff-logic level on the model. The
+		// auto-detection paths in `Model::linear` and friends consult
+		// `Model::diff_logic_level` directly.
+		model.diff_logic_level = diff_logic_level;
 
 		let mut slv = Solver::<Sat>::default();
 		let any_slv: &mut dyn Any = &mut slv.sat;
@@ -755,6 +787,14 @@ impl LowererComplete<&mut Model> {
 				"ignore vivification and restart options for unknown solver"
 			);
 		}
+
+		// Post the diff-logic constraint just before the fix-point so
+		// it participates in `Model::propagate` like any other
+		// constraint. Its `Constraint::simplify` drains
+		// `model.diff_edges` into the constraint's own edge / cache
+		// state, leaving the slot ready for `to_solver` once
+		// `propagate` returns.
+		model.post_diff_logic_constraint();
 
 		model.propagate()?;
 
@@ -881,6 +921,20 @@ impl<'a> LoweringContext<'a> {
 	/// Create a new Boolean decision for the [`Solver`].
 	pub fn new_bool_decision(&mut self) -> solver::View<bool> {
 		solver::Decision(self.slv.new_var_range(1).start().into()).into()
+	}
+
+	/// Populate the engine-side `diff_lit_cache` with a single mapping
+	/// `(x, y, d) → b` so mid-search lazy gate mints honour the same
+	/// subsumption decisions that the model-side simplification reached.
+	/// Used only by `DiffLogicConstraint::to_solver`.
+	pub(crate) fn populate_diff_lit_cache(
+		&mut self,
+		x: solver::View<IntVal>,
+		y: solver::View<IntVal>,
+		d: IntVal,
+		b: solver::View<bool>,
+	) {
+		self.slv.populate_diff_lit_cache(x, y, d, b);
 	}
 
 	/// Map a [`model::View`] to its corresponding [`solver::View`].
@@ -1309,6 +1363,16 @@ impl<Sat: ExternalPropagation> LoweringActions for Solver<Sat> {
 
 	fn new_var_range(&mut self, len: usize) -> pindakaas::VarRange {
 		self.sat.new_var_range(len)
+	}
+
+	fn populate_diff_lit_cache(
+		&mut self,
+		x: solver::View<IntVal>,
+		y: solver::View<IntVal>,
+		d: IntVal,
+		b: solver::View<bool>,
+	) {
+		Solver::populate_diff_lit_cache(self, x, y, d, b);
 	}
 }
 

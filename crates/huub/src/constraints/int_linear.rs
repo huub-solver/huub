@@ -690,6 +690,15 @@ where
 		if let Some(Reification::ImpliedBy(r) | Reification::ReifiedBy(r)) = self.reif {
 			r.enqueue_when_fixed(ctx);
 		}
+
+		// Force an initial enqueue so `simplify` can fold the constraint to
+		// `Subsumed` when `self.terms` is already empty (e.g. all coefficients
+		// collapsed to constants during model lowering). Without this the
+		// constraint slips past simplify and `to_solver` calls
+		// `IntLinearLessEqBounds::post` on an empty term list, which panics.
+		if self.terms.is_empty() {
+			ctx.enqueue_now(true);
+		}
 	}
 
 	fn propagate(&mut self, _: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
@@ -726,10 +735,14 @@ impl IntLinearLessEqBounds<OverflowPossible, solver::View<IntVal>> {
 				}
 			})
 			.collect();
-		assert!(
-			!vars.is_empty(),
-			"`IntLinearLessEqBounds::post` must be given at least one term"
-		);
+		if vars.is_empty() {
+			// All terms folded to solver-side constants. The constraint
+			// reduced to `0 <= max`; either trivially true (max >= 0) or
+			// trivially false (max < 0). The model-side `simplify` pass is
+			// responsible for surfacing the unsat case before lowering, so
+			// just no-op here. Matches lucas behaviour.
+			return;
+		}
 
 		solver.add_propagator(Box::new(Self {
 			terms: vars.clone(),
@@ -877,10 +890,11 @@ impl IntLinearLessEqImpBounds<OverflowPossible, solver::View<IntVal>, Decision<b
 				}
 			})
 			.collect();
-		assert!(
-			!vars.is_empty(),
-			"`IntLinearLessEqImpBounds::post` must be given at least one term"
-		);
+		if vars.is_empty() {
+			// All terms folded to constants. See note on
+			// `IntLinearLessEqBounds::post`.
+			return;
+		}
 
 		solver.add_propagator(Box::new(Self {
 			terms: vars.clone(),
@@ -934,10 +948,11 @@ impl IntLinearNotEqImpValue<OverflowPossible, solver::View<IntVal>, Decision<boo
 				}
 			})
 			.collect();
-		assert!(
-			!vars.is_empty(),
-			"`IntLinearNotEqImpValue::post` must be given at least one term"
-		);
+		if vars.is_empty() {
+			// All terms folded to constants. See note on
+			// `IntLinearLessEqBounds::post`.
+			return;
+		}
 
 		let num_free = solver.new_trailed(vars.len() + 1);
 
@@ -990,10 +1005,11 @@ impl IntLinearNotEqValue<OverflowPossible, solver::View<IntVal>> {
 				}
 			})
 			.collect();
-		assert!(
-			!vars.is_empty(),
-			"`IntLinearNotEqValue::post` must be given at least one term"
-		);
+		if vars.is_empty() {
+			// All terms folded to constants. See note on
+			// `IntLinearLessEqBounds::post`.
+			return;
+		}
 
 		let num_free = solver.new_trailed(vars.len());
 

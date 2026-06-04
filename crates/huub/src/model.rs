@@ -33,6 +33,7 @@ use crate::{
 	constraints::{
 		BoxedConstraint, Conflict, Constraint, DeferredReason, Reason, ReasonBuilder,
 		SimplificationStatus,
+		diff_logic::{DiffEdgeCollection, DiffLogicLevel},
 	},
 	helpers::bytes::Bytes,
 	lower::{Lowerer, LowererComplete},
@@ -136,6 +137,16 @@ pub struct Model {
 
 	/// Definitions of the advisors that are listening to selected changes.
 	advisors: Vec<Advisor>,
+
+	/// Auto-detection level for two-term difference constraints:
+	/// - `0` — disable diff-logic routing entirely.
+	/// - `1` — route Global / Implied / Reified (default).
+	/// - `2` — also route ImpliedEquals.
+	/// - `3` — also route ReifiedEquals / NotEquals / ImpliedNotEquals.
+	pub(crate) diff_logic_level: DiffLogicLevel,
+
+	/// Diff-logic edge mailbox + reified-Boolean subsumption cache.
+	pub(crate) diff_edges: DiffEdgeCollection,
 }
 
 impl AdvRef {
@@ -226,6 +237,17 @@ impl Model {
 				reason: Reason::Simple(!subject),
 			},
 			Err(false) => unreachable!("invalid reason"),
+		}
+	}
+
+	/// Enqueue the posted [`DiffLogicConstraint`] so its
+	/// [`Constraint::simplify`] runs on the next propagation iteration.
+	/// No-op if the constraint has not yet been posted (i.e. during
+	/// model construction before [`crate::lower::Lowerer`] runs).
+	#[inline]
+	pub(crate) fn enqueue_diff_logic(&mut self) {
+		if let Some(con) = self.diff_edges.con_ref {
+			self.propagator_queue.enqueue_propagator(con.raw());
 		}
 	}
 
@@ -510,6 +532,19 @@ impl Model {
 		}
 	}
 
+	/// Post the model-side [`DiffLogicConstraint`] so it participates in
+	/// [`Model::propagate`]. Records the resulting `ConRef` on
+	/// [`Model::diff_edges`] so subsequent auto-detection paths can
+	/// enqueue the constraint. Called by [`crate::lower::Lowerer`] just
+	/// before lowering propagates, and by tests that drive the
+	/// fix-point without going through the lowerer.
+	pub(crate) fn post_diff_logic_constraint(&mut self) {
+		use crate::constraints::diff_logic::DiffLogicConstraint;
+		let con = ConRef::new(self.constraints.len());
+		self.diff_edges.con_ref = Some(con);
+		let _ = self.post_constraint(DiffLogicConstraint::default());
+	}
+
 	/// Propagate all constraints until the propagator queue is empty.
 	///
 	/// This method performs fixed-point iteration of all constraints currently
@@ -563,6 +598,20 @@ impl Model {
 		}
 		self.notify_advisors();
 		Ok(())
+	}
+
+	/// Append an edge to the diff-logic mailbox and (if the constraint
+	/// has been posted) enqueue it so the next propagation iteration
+	/// drains the mailbox via `simplify`. Single source of truth for
+	/// the auto-detection paths in
+	/// [`crate::constraints::diff_logic`].
+	#[inline]
+	pub(crate) fn push_pending_diff_edge(
+		&mut self,
+		edge: crate::constraints::diff_logic::ModelDiffEdge,
+	) {
+		self.diff_edges.pending_edges.push(edge);
+		self.enqueue_diff_logic();
 	}
 
 	/// Invoke `f` with a [`ConRef`] for each constraint that the given integer
