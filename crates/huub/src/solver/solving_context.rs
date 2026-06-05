@@ -328,8 +328,13 @@ impl<'a> SolvingContext<'a> {
 		// Make the domains match.
 		match lit_req {
 			IntLitMeaning::Eq(val) => {
-				self.state.int_vars[iv.idx()].notify_lower_bound(&mut self.state.trail, val);
-				self.state.int_vars[iv.idx()].notify_upper_bound(&mut self.state.trail, val);
+				// Only notify when a bound actually changes.
+				if val > lb {
+					self.state.int_vars[iv.idx()].notify_lower_bound(&mut self.state.trail, val);
+				}
+				if val < ub {
+					self.state.int_vars[iv.idx()].notify_upper_bound(&mut self.state.trail, val);
+				}
 			}
 			IntLitMeaning::NotEq(_) => {}
 			IntLitMeaning::GreaterEq(lb) => {
