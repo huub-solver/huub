@@ -527,7 +527,7 @@ impl IntDecision {
 				if low >= 0 {
 					storage.storage[low as usize].val
 				} else {
-					*self.domain.lower_bound().unwrap()
+					*self.domain.min().unwrap()
 				}
 			}
 		};
@@ -542,13 +542,13 @@ impl IntDecision {
 	{
 		let (lb, ub) = self.bounds(trail);
 		let domain = &self.domain;
-		let orig_lb = *domain.lower_bound().unwrap();
+		let orig_lb = *domain.min().unwrap();
 		let lb_var = || {
 			self.order_encoding
 				.find(domain, orig_lb + 1)
 				.map(|v| v.0.into())
 		};
-		let orig_ub = *domain.upper_bound().unwrap();
+		let orig_ub = *domain.max().unwrap();
 		// Negate the order lit `x < orig_ub`, to get `x >= orig_ub`.
 		let ub_var = || self.order_encoding.find(domain, orig_ub).map(|v| !v.0);
 
@@ -618,7 +618,7 @@ impl IntDecision {
 		Decision<bool>: BoolInspectionActions<T>,
 	{
 		debug_assert!(v <= self.lower_bound(trail));
-		if v <= *self.domain.lower_bound().unwrap() {
+		if v <= *self.domain.min().unwrap() {
 			return (true.into(), v);
 		}
 
@@ -663,7 +663,7 @@ impl IntDecision {
 		Decision<bool>: BoolInspectionActions<T>,
 	{
 		debug_assert!(v >= self.upper_bound(trail));
-		if v > *self.domain.upper_bound().unwrap() {
+		if v > *self.domain.max().unwrap() {
 			return (true.into(), v);
 		}
 
@@ -705,8 +705,8 @@ impl IntDecision {
 		lit_req: IntLitMeaning,
 		mut new_var: impl FnMut(LazyLitDef) -> RawVar,
 	) -> (View<bool>, IntLitMeaning) {
-		let lb = *self.domain.lower_bound().unwrap();
-		let ub = *self.domain.upper_bound().unwrap();
+		let lb = *self.domain.min().unwrap();
+		let ub = *self.domain.max().unwrap();
 
 		// Use the order literals when requesting an equality literal of the global
 		// bounds.
@@ -849,7 +849,7 @@ impl IntDecision {
 				if low >= 0 {
 					storage.storage[low as usize].val
 				} else {
-					*self.domain.lower_bound().unwrap()
+					*self.domain.min().unwrap()
 				}
 			}
 		}
@@ -865,7 +865,7 @@ impl IntDecision {
 				..
 			} => {
 				let lb = trail.trailed(*lower_bound);
-				if lb == *self.domain.lower_bound().unwrap() {
+				if lb == *self.domain.min().unwrap() {
 					true.into()
 				} else {
 					let DomainLocation { offset, .. } =
@@ -977,8 +977,8 @@ impl IntDecision {
 	/// Try and find an (already) existing Boolean literal with the given
 	/// meaning
 	pub(crate) fn try_lit(&self, lit_req: IntLitMeaning) -> Option<(View<bool>, IntLitMeaning)> {
-		let lb = *self.domain.lower_bound().unwrap();
-		let ub = *self.domain.upper_bound().unwrap();
+		let lb = *self.domain.min().unwrap();
+		let ub = *self.domain.max().unwrap();
 
 		// Use the order literals when requesting an equality literal of the global
 		// bounds.
@@ -1024,7 +1024,7 @@ impl IntDecision {
 		match &self.order_encoding {
 			OrderStorage::Eager { storage, .. } => {
 				let ub = trail.trailed(self.upper_bound);
-				if ub == *self.domain.upper_bound().unwrap() {
+				if ub == *self.domain.max().unwrap() {
 					true.into()
 				} else {
 					let DomainLocation { offset, .. } =

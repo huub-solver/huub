@@ -34,8 +34,8 @@ use crate::{
 /// let x_plus_5 = OffsetView::new(5, x);
 ///
 /// // Inspecting bounds applies the offset:
-/// let lb = x_plus_5.lower_bound(ctx); // equals x.lower_bound(ctx) + 5
-/// let ub = x_plus_5.upper_bound(ctx); // equals x.upper_bound(ctx) + 5
+/// let lb = x_plus_5.min(ctx); // equals x.min(ctx) + 5
+/// let ub = x_plus_5.max(ctx); // equals x.max(ctx) + 5
 ///
 /// // Propagations are translated back:
 /// x_plus_5.set_upper_bound(ctx, 12, reason)?; // sets x's upper bound to 12 - 5 = 7

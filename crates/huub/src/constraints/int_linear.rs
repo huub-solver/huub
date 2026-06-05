@@ -751,7 +751,7 @@ where
 		self.reification.enqueue_when_fixed(ctx);
 	}
 
-	// propagation rule: x[i] <= rhs - sum_{j != i} x[j].lower_bound
+	// propagation rule: x[i] <= rhs - sum_{j != i} x[j].min
 	#[tracing::instrument(
 		name = "int_linear_less_eq_bounds",
 		target = "solver",

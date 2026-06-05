@@ -300,7 +300,7 @@ impl Resolved<Decision<IntVal>> {
 		let diff: IntSet = dom.diff(values);
 		if diff.is_empty() {
 			return Err(ctx.create_conflict(
-				View(BoolView::IntNotEq(self.0, *values.lower_bound().unwrap())),
+				View(BoolView::IntNotEq(self.0, *values.min().unwrap())),
 				reason,
 			));
 		}
@@ -308,15 +308,15 @@ impl Resolved<Decision<IntVal>> {
 			return Ok(());
 		}
 		if diff.card() == Some(1) {
-			let val = *diff.lower_bound().unwrap();
+			let val = *diff.min().unwrap();
 			ctx.int_vars[self.idx()].domain = Domain::Alias(val.into());
 			ctx.int_events.insert(self.0.0, IntEvent::Fixed);
 		} else {
 			let entry = ctx.int_events.entry(self.0.0).or_insert(IntEvent::Domain);
-			if dom.lower_bound().unwrap() != diff.lower_bound().unwrap() {
+			if dom.min().unwrap() != diff.min().unwrap() {
 				*entry += IntEvent::LowerBound;
 			}
-			if dom.upper_bound().unwrap() != diff.upper_bound().unwrap() {
+			if dom.max().unwrap() != diff.max().unwrap() {
 				*entry += IntEvent::UpperBound;
 			}
 
@@ -371,22 +371,22 @@ impl Resolved<Decision<IntVal>> {
 		let intersect: IntSet = dom.intersect(domain);
 		if intersect.is_empty() {
 			return Err(ctx.create_conflict(
-				View(BoolView::IntNotEq(self.0, *dom.lower_bound().unwrap())),
+				View(BoolView::IntNotEq(self.0, *dom.min().unwrap())),
 				reason,
 			));
 		} else if *dom == intersect {
 			return Ok(());
 		}
 		if intersect.card() == Some(1) {
-			let val = *intersect.lower_bound().unwrap();
+			let val = *intersect.min().unwrap();
 			ctx.int_vars[self.idx()].domain = Domain::Alias(val.into());
 			ctx.int_events.insert(self.0.0, IntEvent::Fixed);
 		} else {
 			let entry = ctx.int_events.entry(self.0.0).or_insert(IntEvent::Domain);
-			if dom.lower_bound().unwrap() != intersect.lower_bound().unwrap() {
+			if dom.min().unwrap() != intersect.min().unwrap() {
 				*entry += IntEvent::LowerBound;
 			}
-			if dom.upper_bound().unwrap() != intersect.upper_bound().unwrap() {
+			if dom.max().unwrap() != intersect.max().unwrap() {
 				*entry += IntEvent::UpperBound;
 			}
 
@@ -407,13 +407,13 @@ impl Resolved<Decision<IntVal>> {
 		let Domain::Domain(dom) = &mut def.domain else {
 			unreachable!()
 		};
-		if val >= *dom.upper_bound().unwrap() {
+		if val >= *dom.max().unwrap() {
 			return Ok(());
-		} else if val < *dom.lower_bound().unwrap() {
+		} else if val < *dom.min().unwrap() {
 			return Err(ctx.create_conflict(View(BoolView::IntLess(self.0, val + 1)), reason));
 		}
-		if val != *dom.lower_bound().unwrap() {
-			dom.set_upper_bound(val);
+		if val != *dom.min().unwrap() {
+			dom.tighten_max(val);
 			ctx.int_events
 				.entry(self.0.0)
 				.and_modify(|v| *v += IntEvent::UpperBound)
@@ -437,13 +437,13 @@ impl Resolved<Decision<IntVal>> {
 		let Domain::Domain(dom) = &mut def.domain else {
 			unreachable!()
 		};
-		if val <= *dom.lower_bound().unwrap() {
+		if val <= *dom.min().unwrap() {
 			return Ok(());
-		} else if val > *dom.upper_bound().unwrap() {
+		} else if val > *dom.max().unwrap() {
 			return Err(ctx.create_conflict(View(BoolView::IntGreaterEq(self.0, val)), reason));
 		}
-		if val != *dom.upper_bound().unwrap() {
-			dom.set_lower_bound(val);
+		if val != *dom.max().unwrap() {
+			dom.tighten_min(val);
 			ctx.int_events
 				.entry(self.0.0)
 				.and_modify(|e| *e += IntEvent::LowerBound)
@@ -470,7 +470,7 @@ impl IntDecisionActions<Model> for Resolved<Decision<IntVal>> {
 impl IntInspectionActions<Model> for Resolved<Decision<IntVal>> {
 	fn bounds(&self, ctx: &Model) -> (IntVal, IntVal) {
 		match &ctx.int_vars[self.idx()].domain {
-			Domain::Domain(d) => (*d.lower_bound().unwrap(), *d.upper_bound().unwrap()),
+			Domain::Domain(d) => (*d.min().unwrap(), *d.max().unwrap()),
 			Domain::Alias(_) => unreachable!(),
 		}
 	}
@@ -507,7 +507,7 @@ impl IntInspectionActions<Model> for Resolved<Decision<IntVal>> {
 
 	fn max(&self, ctx: &Model) -> IntVal {
 		match &ctx.int_vars[self.idx()].domain {
-			Domain::Domain(d) => *d.upper_bound().unwrap(),
+			Domain::Domain(d) => *d.max().unwrap(),
 			Domain::Alias(_) => unreachable!(),
 		}
 	}
@@ -515,7 +515,7 @@ impl IntInspectionActions<Model> for Resolved<Decision<IntVal>> {
 	fn max_lit(&self, ctx: &Model) -> <Model as ReasoningContext>::Atom {
 		match &ctx.int_vars[self.idx()].domain {
 			Domain::Domain(d) => d
-				.lower_bound()
+				.min()
 				.map(|&val| View(BoolView::IntLess(self.0, val + 1)))
 				.unwrap(),
 			Domain::Alias(_) => unreachable!(),
@@ -524,7 +524,7 @@ impl IntInspectionActions<Model> for Resolved<Decision<IntVal>> {
 
 	fn min(&self, ctx: &Model) -> IntVal {
 		match &ctx.int_vars[self.idx()].domain {
-			Domain::Domain(d) => *d.lower_bound().unwrap(),
+			Domain::Domain(d) => *d.min().unwrap(),
 			Domain::Alias(_) => unreachable!(),
 		}
 	}
@@ -532,7 +532,7 @@ impl IntInspectionActions<Model> for Resolved<Decision<IntVal>> {
 	fn min_lit(&self, ctx: &Model) -> <Model as ReasoningContext>::Atom {
 		match &ctx.int_vars[self.idx()].domain {
 			Domain::Domain(d) => d
-				.lower_bound()
+				.min()
 				.map(|&val| View(BoolView::IntGreaterEq(self.0, val)))
 				.unwrap(),
 			Domain::Alias(_) => unreachable!(),
@@ -558,7 +558,7 @@ impl IntInspectionActions<Model> for Resolved<Decision<IntVal>> {
 	fn val(&self, ctx: &Model) -> Option<IntVal> {
 		match &ctx.int_vars[self.idx()].domain {
 			Domain::Domain(d) => {
-				let (lb, ub) = (d.lower_bound().unwrap(), d.upper_bound().unwrap());
+				let (lb, ub) = (d.min().unwrap(), d.max().unwrap());
 				if lb == ub { Some(*lb) } else { None }
 			}
 			Domain::Alias(_) => unreachable!(),

@@ -1136,10 +1136,10 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 			"Unable to create integer variable empty domain"
 		);
 		if orig_domain_len == Some(1) {
-			return (*domain.lower_bound().unwrap()).into();
+			return (*domain.min().unwrap()).into();
 		}
-		let lb = *domain.lower_bound().unwrap();
-		let ub = *domain.upper_bound().unwrap();
+		let lb = *domain.min().unwrap();
+		let ub = *domain.max().unwrap();
 		if orig_domain_len == Some(2) {
 			let lit = self.new_bool_decision();
 			return LinearBoolView::new(NonZero::new(ub - lb).unwrap(), lb, lit).into();

@@ -398,11 +398,11 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "flatzinc-serde"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d5488f39d755f9d8a0938eb546023b5f5e88f023d21a1b4bf9f03267eeedf88"
+checksum = "1b8a8cb0474b334bc21842e19d0c1d5380c76728a736a813b73259ad981d3e03"
 dependencies = [
- "rangelist 0.4.0",
+ "rangelist 0.5.0",
  "serde",
 ]
 
@@ -466,7 +466,7 @@ dependencies = [
  "humantime",
  "itertools",
  "pindakaas",
- "rangelist 0.4.0",
+ "rangelist 0.5.0",
  "rustc-hash",
  "tracing",
  "tracing-test",
@@ -730,9 +730,9 @@ checksum = "066eb6d0fb14509e98a1a3d1be63693ed51f4eb39669ce8728f24ea6fb369dda"
 
 [[package]]
 name = "rangelist"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2005c11e700bd122d87a5294e6753b4a4e85b99b8d6b97334ca2d8ecfd0e049"
+checksum = "f29e404ad93c4ca7067453de0924a82e1144adfdb4afd24fa15aeac91ca8e4c3"
 
 [[package]]
 name = "regex"

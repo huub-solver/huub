@@ -312,7 +312,7 @@ impl Model {
 			Some(0) => {
 				panic!("integer decision must have at least 1 value in their domain")
 			}
-			Some(1) => (*domain.lower_bound().unwrap()).into(),
+			Some(1) => (*domain.min().unwrap()).into(),
 			_ => {
 				self.int_vars.push(IntDecision::with_domain(domain));
 				let idx = self.int_vars.len() - 1;

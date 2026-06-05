@@ -84,17 +84,17 @@ where
 		// Otherwise, we check whether we can rewrite the constraint into a simpler
 		// form.
 		if self.set.intervals().len() == 1 {
-			let lb = self.set.lower_bound().unwrap();
-			let ub = self.set.upper_bound().unwrap();
+			let lb = self.set.min().unwrap();
+			let ub = self.set.max().unwrap();
 			if lb == ub {
 				self.reif.unify(ctx, self.var.eq(*lb))?;
 				return Ok(SimplificationStatus::Subsumed);
 			}
-			if lb == domain.lower_bound().unwrap() {
+			if lb == domain.min().unwrap() {
 				self.reif.unify(ctx, self.var.leq(*ub))?;
 				return Ok(SimplificationStatus::Subsumed);
 			}
-			if ub == domain.upper_bound().unwrap() {
+			if ub == domain.max().unwrap() {
 				self.reif.unify(ctx, self.var.geq(*lb))?;
 				return Ok(SimplificationStatus::Subsumed);
 			}
@@ -104,8 +104,8 @@ where
 
 	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
 		if self.set.iter().len() == 1 {
-			let lb = *self.set.lower_bound().unwrap();
-			let ub = *self.set.upper_bound().unwrap();
+			let lb = *self.set.min().unwrap();
+			let ub = *self.set.max().unwrap();
 			<BoolFormula as Constraint<E>>::to_solver(
 				&Formula::Equiv(vec![
 					Formula::And(vec![self.var.geq(lb).into(), self.var.leq(ub).into()]),

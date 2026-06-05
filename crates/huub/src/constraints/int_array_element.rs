@@ -266,8 +266,8 @@ where
 
 		// Iterate through all variables:
 		// 1. remove values from the index variable when:
-		// 	(1) result.upper_bound < self.vars[i].lower_bound -> index != i
-		//  (2) result.lower_bound > self.vars[i].upper_bound -> index != i
+		// 	(1) result.max < self.vars[i].min -> index != i
+		//  (2) result.min > self.vars[i].max -> index != i
 		// 2. update min_support and max_support if necessary
 		// only trigger when result variable is updated or self.vars[i] is updated
 		for i in idx_dom.iter().flatten() {
@@ -327,7 +327,7 @@ where
 		// propagate the lower bound of the selected variable y if min_support is not
 		// valid anymore:
 		//
-		//   result.lower_bound >= min(i in domain(x))(self.vars[i].lower_bound)
+		//   result.min >= min(i in domain(x))(self.vars[i].min)
 		//
 		// only trigger when self.vars[min_support] is changed or self.vars[min_support]
 		// is out of domain
@@ -353,7 +353,7 @@ where
 		// propagate the upper bound of the selected variable y if max_support is not
 		// valid anymore:
 		//
-		//   result.upper_bound <= max(i in domain(x))(self.vars[i].upper_bound)
+		//   result.max <= max(i in domain(x))(self.vars[i].max)
 		//
 		// only trigger when self.vars[max_support] is changed or self.vars[max_support]
 		// is out of domain
