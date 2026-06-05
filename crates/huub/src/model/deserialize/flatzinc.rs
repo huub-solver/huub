@@ -142,7 +142,7 @@ pub enum ConstraintIdent {
 		/// Whether the constraint is strict or non-strict.
 		strict: bool,
 	},
-	/// "huub_diffn_k_int" and "huub_diffn_k_nonstrict_int"
+	/// "huub_diffn_k_int" and "huub_diffn_nonstrict_k_int"
 	DiffnKInt {
 		/// Whether the constraint is strict or non-strict.
 		strict: bool,
@@ -453,7 +453,7 @@ impl ConstraintIdent {
 			Self::Cumulative => "huub_cumulative",
 			Self::DiffnInt { strict: false } => "huub_diffn_nonstrict_int",
 			Self::DiffnInt { strict: true } => "huub_diffn_int",
-			Self::DiffnKInt { strict: false } => "huub_diffn_k_nonstrict_int",
+			Self::DiffnKInt { strict: false } => "huub_diffn_nonstrict_k_int",
 			Self::DiffnKInt { strict: true } => "huub_diffn_k_int",
 			Self::DisjuctiveStrict => "huub_disjunctive_strict",
 			Self::IntAbs => "int_abs",
@@ -521,7 +521,7 @@ impl TryFrom<&str> for ConstraintIdent {
 			"huub_cumulative" => Ok(Self::Cumulative),
 			"huub_diffn_int" => Ok(Self::DiffnInt { strict: true }),
 			"huub_diffn_k_int" => Ok(Self::DiffnKInt { strict: true }),
-			"huub_diffn_k_nonstrict_int" => Ok(Self::DiffnKInt { strict: false }),
+			"huub_diffn_nonstrict_k_int" => Ok(Self::DiffnKInt { strict: false }),
 			"huub_diffn_nonstrict_int" => Ok(Self::DiffnInt { strict: false }),
 			"huub_disjunctive_strict" => Ok(Self::DisjuctiveStrict),
 			"huub_regular" => Ok(Self::Regular),
@@ -2460,7 +2460,7 @@ mod tests {
 	#[test]
 	fn constraint_ident_display_roundtrips() {
 		let ident = ConstraintIdent::DiffnKInt { strict: false };
-		assert_eq!(ident.to_string(), "huub_diffn_k_nonstrict_int");
+		assert_eq!(ident.to_string(), "huub_diffn_nonstrict_k_int");
 		assert_eq!(
 			ConstraintIdent::try_from(ident.to_string().as_str()),
 			Ok(ConstraintIdent::DiffnKInt { strict: false })
@@ -2506,7 +2506,7 @@ mod tests {
 			}))
 		);
 		assert_eq!(
-			FznIdent::from("huub_diffn_k_nonstrict_int"),
+			FznIdent::from("huub_diffn_nonstrict_k_int"),
 			FznIdent::Known(KnownIdent::Constraint(ConstraintIdent::DiffnKInt {
 				strict: false
 			}))
