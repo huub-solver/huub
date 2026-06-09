@@ -28,7 +28,7 @@ flatzinc-serde = { version = "0.5.1" }
 humantime = "2.3.0"
 itertools = "0.14.0"
 mimalloc = "0.1.52"
-pindakaas = { version = "0.2.3", features = ["external-propagation"] }
+pindakaas = { version = "0.5.1", features = ["external-propagation"] }
 rangelist = "0.5.0"
 rustc-hash = "2.1.2"
 serde = "1.0.228"

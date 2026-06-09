@@ -554,7 +554,7 @@ impl PropagatorExtension for Engine {
 		SearchDecision::Free
 	}
 
-	fn notify_assignments(&mut self, lits: &[RawLit]) {
+	fn notify_assignment(&mut self, lits: &[RawLit]) {
 		debug!(
 			target: "solver",
 			lits = ?lits.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(),
@@ -1118,7 +1118,7 @@ mod tests {
 
 		// SAT now reports both literals together. The queued lower-bound event must
 		// survive this path so the advisor is still notified.
-		ExternalPropagator::notify_assignments(&mut *engine, &[imply.0, ge.0]);
+		ExternalPropagator::notify_assignment(&mut *engine, &[imply.0, ge.0]);
 		assert_eq!(*notifications.borrow(), 1);
 
 		let propagated = ExternalPropagator::propagate(&mut *engine, &mut actions);

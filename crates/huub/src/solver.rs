@@ -1345,15 +1345,9 @@ impl<Sat: ExternalPropagation> BrancherInitActions for Solver<Sat> {
 
 impl Clone for Solver<Cadical> {
 	fn clone(&self) -> Self {
-		let mut sat = self.sat.shallow_clone();
 		let engine: Engine = self.engine.borrow().clone();
 		let engine = Rc::new(RefCell::new(engine));
-		sat.connect_propagator(Rc::clone(&engine));
-		for var in sat.emitted_vars() {
-			if self.sat.is_observed(var.into()) {
-				sat.add_observed_var(var);
-			}
-		}
+		let sat = self.sat.shallow_clone_with_propagator(Rc::clone(&engine));
 		Solver { sat, engine }
 	}
 }
