@@ -47,6 +47,7 @@ const FULL_INT_DOMAIN: RangeInclusive<IntVal> = IntVal::MIN..=IntVal::MAX;
 
 /// Annotation identifiers that are known to the FlatZinc deserializer.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[non_exhaustive]
 pub enum AnnotationIdent {
 	/// "bool_search" annotation for Boolean search strategies.
 	BoolSearch,
@@ -100,6 +101,7 @@ pub enum AnnotationIdent {
 /// Represents the identifier of a constraint as used in the MiniZinc standard
 /// library or Huub's MiniZinc library.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[non_exhaustive]
 pub enum ConstraintIdent {
 	/// "huub_all_different_int"
 	AllDifferentInt,
@@ -315,6 +317,7 @@ pub struct FlatZincStatistics {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[non_exhaustive]
 /// Representation of a FlatZinc identifier for Huub specific constraints and
 /// annotations.
 ///
