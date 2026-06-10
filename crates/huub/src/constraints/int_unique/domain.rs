@@ -30,6 +30,22 @@ struct AugmentingPathScratch {
 	parent: Vec<usize>,
 }
 
+/// Reusable scratch for the explain-time down-closure: the tight Hall set
+/// rebuilt in [`IntUniqueDomain::compute_scc_closure_for_explain`].
+#[derive(Clone, Debug)]
+struct ClosureScratch {
+	/// Variable members `H` of the tight Hall set. Membership is marked in
+	/// [`Self::var_in`]; the list lets the marks be cleared in O(closure).
+	vars: Vec<usize>,
+	/// Value set `V` of the tight Hall set (marked in [`Self::val_in`]).
+	vals: Vec<usize>,
+	/// `var_in[v]` is `true` while variable `v` is in the down-closure being
+	/// built (a re-entrancy-free dedup bitset).
+	var_in: Vec<bool>,
+	/// `val_in[i]` is `true` while value index `i` is in the down-closure.
+	val_in: Vec<bool>,
+}
+
 /// Domain-consistent propagator for the integer `unique` constraint.
 ///
 /// Implements Régin's bipartite-matching + Tarjan SCC algorithm (AAAI 1994):
@@ -63,6 +79,8 @@ pub struct IntUniqueDomain<I> {
 	bfs: AugmentingPathScratch,
 	/// Per-call scratch for Tarjan SCC.
 	tarjan: TarjanScratch,
+	/// Per-call scratch for the explain-time down-closure (Hall-set rebuild).
+	closure: ClosureScratch,
 }
 
 /// One pending node in the explicit (heap-allocated) Tarjan DFS work-stack.
@@ -143,6 +161,18 @@ impl AugmentingPathScratch {
 	}
 }
 
+impl ClosureScratch {
+	/// Create scratch for `n_vars` variables and `n_values` values.
+	fn new(n_vars: usize, n_values: usize) -> Self {
+		Self {
+			vars: Vec::new(),
+			vals: Vec::new(),
+			var_in: vec![false; n_vars],
+			val_in: vec![false; n_values],
+		}
+	}
+}
+
 impl<I> IntUniqueDomain<I> {
 	/// Attempt to repair the matching for `start_var` (whose previously matched
 	/// value is no longer in its domain) by finding a BFS-augmenting path.
@@ -213,14 +243,15 @@ impl<I> IntUniqueDomain<I> {
 	{
 		let graph = VariableValueMatching::new(solver, vars);
 		let n = graph.n_vars();
-		let n_nodes = n + graph.n_values();
+		let n_values = graph.n_values();
 		let partition = TrailedPartition::new(solver, n);
 		solver.add_propagator(Box::new(Self {
 			graph,
 			dirty_vars: FxHashSet::default(),
 			partition,
 			bfs: AugmentingPathScratch::new(n),
-			tarjan: TarjanScratch::new(n_nodes),
+			tarjan: TarjanScratch::new(n, n_values),
+			closure: ClosureScratch::new(n, n_values),
 		}));
 	}
 
@@ -244,13 +275,11 @@ impl<I> IntUniqueDomain<I> {
 		// Pop the SCC off the DFS stack into the two bitsets. The dummy node is
 		// not a real graph node, so it is dropped (but still terminates the loop
 		// if it happens to be the SCC root).
-		let mut has_var_in_scc = false;
 		loop {
 			let node = self.tarjan.dfs_stack.pop().expect("non-empty DFS stack");
 			self.tarjan.dfs_on_stack[node] = false;
 			if node < n_vars {
 				self.tarjan.vars_buf.push(node);
-				has_var_in_scc = true;
 			} else if node != dummy {
 				self.tarjan.vals_buf.push(node - n_vars);
 			}
@@ -259,13 +288,14 @@ impl<I> IntUniqueDomain<I> {
 			}
 		}
 
-		// An SCC with no variable nodes does nothing useful: any matched value
-		// in this SCC would force its matched var to be in the SCC too (the
-		// matching edge is in the residual graph), and an unmatched value with
-		// no adjacent var has no support to remove from anywhere.
-		if !has_var_in_scc {
-			return Ok(());
-		}
+		// Every popped SCC must contain at least one variable, because the
+		// 2-cycle construction makes every matched value share its variable's SCC.
+		// This is to avoid value-only SCC in classic Régin's algorithm,
+		// which would require a separate pass to filter out
+		debug_assert!(
+			!self.tarjan.vars_buf.is_empty(),
+			"2-cycle construction guarantees every SCC contains a variable"
+		);
 
 		// Move the SCC's variables into their own block. `split_off` keeps the
 		// SCC's vars in positions [new_root..orig_end); the *other* vars from
@@ -304,6 +334,18 @@ impl<I> IntUniqueDomain<I> {
 	/// n_vars`) does not consume the call stack. When the root of a
 	/// non-trivial SCC is popped and the run already detected an SCC split,
 	/// delegates filtering to [`Self::process_scc_root`].
+	///
+	/// The implicit graph is constructed such that each variables and values
+	/// has a node together with a dummy node. There are three types of edges:
+	/// (1) If a variable is matched to a value, there is an arc from the
+	/// variable  node to the value node, and also a value node to a variable
+	/// node. (2) For each matched value, there is an arc from the dummy node
+	/// to the value node. (3) For each unmatched value, there is an arc from
+	/// the value node to the dummy node. Note that this construction is
+	/// slightly different from classical Regin's algorithm, but it guarantees
+	/// that every SCC contains at least one variable, so no value-only SCC can
+	/// arise, and thus avoids the need for a separate SCC pass to filter out
+	/// value-only SCCs.
 	fn tarjan_dfs<E>(
 		&mut self,
 		start_idx: usize,
@@ -337,12 +379,10 @@ impl<I> IntUniqueDomain<I> {
 			let frame_start = this.tarjan.neighbours.len();
 			let dummy = this.tarjan.dummy_node();
 			if node < n_vars {
-				// Variable: non-matching edges to the other values in its domain.
+				// 2-cycle: edges to ALL domain values incl. the matched one, so
+				// every matched pair shares an SCC and no value-only SCC arises.
 				for val in this.graph.vars[node].domain(ctx).iter().flatten() {
 					let val_idx = this.graph.value_index(val);
-					if this.graph.var_to_val[node] == Some(val_idx) {
-						continue;
-					}
 					this.tarjan.neighbours.push(n_vars + val_idx);
 				}
 			} else if node == dummy {
@@ -439,9 +479,18 @@ impl<I> IntUniqueDomain<I> {
 	///   `dom_ub = max_{v in S} ub(v)`,
 	///   `holes  = { x in [dom_lb, dom_ub] : x not in dom(v) for any v in S }`,
 	/// and emits, for each `v in S`: `v >= dom_lb`, `v <= dom_ub`, and `v != x`
-	/// for every `x in holes`. The reason pins each member into the shared
-	/// window minus the union's complement, so a Hall set of size `|S|`
-	/// occupying `|S|` values can be reconstructed from the reason alone.
+	/// for every `x in holes`. Equivalently, the emitted reason is the clause
+	///
+	/// ```text
+	///   R(S) = AND_{v in S} ( v >= dom_lb /\ v <= dom_ub /\ AND_{x in holes} v != x )
+	/// ```
+	///
+	/// where each per-member group is exactly `dom(v) subseteq V`, for
+	/// `V = [dom_lb, dom_ub] \ holes` (the union of the member domains).
+	/// Because `|S|` distinct variables are pinned into the `|V| == |S|`
+	/// values of `V` they exhaust it, so `R(S)` entails the explained literal:
+	/// `w != d` for any outside variable `w` and `d in V` (value removal), or
+	/// `false` when `S` itself is the over-tight Hall set (UNSAT conflict).
 	///
 	/// This is the form Régin's algorithm requires for both UNSAT conflicts
 	/// (no augmenting path) and value-removal explanations (SCC pruning).
@@ -494,6 +543,64 @@ impl<I> IntUniqueDomain<I> {
 			}
 		}
 		reason
+	}
+
+	/// Rebuild the down-closure of the SCC whose variable members occupy the
+	/// partition positions `block`, leaving the closed variable set `H` in
+	/// `closure.vars` and the value set `V` in `closure.vals`.
+	/// The closure is the tight Hall set used for explanation:
+	/// ```text
+	///   V := U_{h in H} dom(h)              // values any member can still take
+	///   H := H_scc U { match(v) : v in V }  // variables matched to those values
+	/// ```
+	/// computed to a least fixpoint from `H = {SCC variables}`. The matching is
+	/// a bijection between `H` and `V`, so `|H| == |V|`. With `dom(h) subseteq
+	/// V` for every `h in H` (the first line at fixpoint) this makes the Hall
+	/// set tight: `|U_{h in H} dom(h)| == |H|`.
+	///
+	/// Seeding from the SCC's variables suffices: the 2-cycle graph keeps every
+	/// matched value inside its variable's SCC, and the shared dummy node fans
+	/// out to every matched value, so neither an out-of-closure value nor a
+	/// free (unmatched) value is reachable without leaving the SCC.
+	fn compute_scc_closure_for_explain<C>(&mut self, ctx: &mut C, block: std::ops::Range<usize>)
+	where
+		C: ReasoningContext,
+		I: IntInspectionActions<C>,
+	{
+		self.closure.vars.clear();
+		self.closure.vals.clear();
+		for pos in block {
+			let u = self.partition.elements()[pos];
+			if !self.closure.var_in[u] {
+				self.closure.var_in[u] = true;
+				self.closure.vars.push(u);
+			}
+		}
+
+		let mut head = 0;
+		while head < self.closure.vars.len() {
+			let u = self.closure.vars[head];
+			head += 1;
+			for val in self.graph.vars[u].domain(ctx).iter().flatten() {
+				let vi = self.graph.value_index(val);
+				if self.closure.val_in[vi] {
+					continue;
+				}
+				self.closure.val_in[vi] = true;
+				self.closure.vals.push(vi);
+				match self.graph.val_to_var[vi] {
+					Some(w) => {
+						if !self.closure.var_in[w] {
+							self.closure.var_in[w] = true;
+							self.closure.vars.push(w);
+						}
+					}
+					None => {
+						debug_assert!(false, "free value reachable from a proper SCC down-closure");
+					}
+				}
+			}
+		}
 	}
 
 	/// Phase 1 of `propagate`. For each dirty variable: repair its matching
@@ -621,14 +728,37 @@ where
 	) -> Conjunction<E::Atom> {
 		let scc_id = data as usize;
 		let scc_end = self.partition.block_end(scc_id, ctx);
-		self.build_hall_set_reason(
-			ctx,
-			&self.partition.elements()[scc_id..scc_end],
-			|var, ctx, meaning| {
-				let (atom, _) = var.lit_relaxed(ctx, meaning);
-				atom
-			},
-		)
+
+		// Rebuild the SCC's down-closure from the restored partition block: a
+		// variable set `H` provably confined to an equal-sized value set `V` in
+		// the current domains. Note that the raw SCC members alone are unsound:
+		// a member can still hold an out-of-SCC value (a cross-SCC edge that a
+		// downstream prune/backtrack left behind), making the Hall set non-tight and
+		// the nogood too weak. The closure absorbs every such escape so
+		// `|H| == |V|` by construction.
+		self.compute_scc_closure_for_explain(ctx, scc_id..scc_end);
+		debug_assert_eq!(
+			self.closure.vars.len(),
+			self.closure.vals.len(),
+			"down-closure Hall set is not tight"
+		);
+
+		let members = std::mem::take(&mut self.closure.vars);
+		let reason = self.build_hall_set_reason(ctx, &members, |var, ctx, meaning| {
+			let (atom, _) = var.lit_relaxed(ctx, meaning);
+			atom
+		});
+
+		// Clear the closure marks (O(closure)) and hand the scratch vec back.
+		for &u in &members {
+			self.closure.var_in[u] = false;
+		}
+		for &vi in &self.closure.vals {
+			self.closure.val_in[vi] = false;
+		}
+		self.closure.vals.clear();
+		self.closure.vars = members;
+		reason
 	}
 
 	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
@@ -678,10 +808,10 @@ impl TarjanScratch {
 		self.dfs_on_stack.len() - 1
 	}
 
-	/// Create scratch sized to fit `n_nodes` real graph nodes plus the
-	/// auxiliary dummy node (see [`Self::dummy_node`]).
-	fn new(n_nodes: usize) -> Self {
-		let n_slots = n_nodes + 1;
+	/// Create scratch sized to fit `n_vars` variable nodes and `n_values` value
+	/// nodes, plus the auxiliary dummy node (see [`Self::dummy_node`]).
+	fn new(n_vars: usize, n_values: usize) -> Self {
+		let n_slots = n_vars + n_values + 1;
 		Self {
 			dfs_stack: Vec::new(),
 			dfs_on_stack: vec![false; n_slots],
@@ -837,6 +967,46 @@ mod tests {
 		slv.assert_all_solutions(&[a, b, c], |sol| {
 			sol.iter().all_unique() && sol[2] == crate::solver::Value::Int(3)
 		});
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_all_different_domain_hall_set_reason_soundness() {
+		// Regression: the Hall-set explanation must stay sound. When an SCC's
+		// values are pruned from outside variables, the reason is only valid if
+		// every Hall-set member is confined to the SCC's value set `V`. If a
+		// member still holds an out-of-`V` value (a residual edge left behind by a
+		// prune/backtrack), the Hall set is non-tight and the nogood is too weak,
+		// wrongly cutting feasible assignments. Minimizing `x[0]` below, the true
+		// optimum is 2 (witness `[2, 1, 4, 3, 7, 5, 8]`, all-different); the buggy
+		// propagator excluded `x[0] = 2` and proved 3.
+		let mut slv: Solver = Solver::default();
+		let domains: [&[IntVal]; 7] = [
+			&[2, 3, 4, 5, 6],
+			&[1, 2, 5],
+			&[2, 4],
+			&[1, 3, 7],
+			&[7],
+			&[2, 5, 7],
+			&[1, 3, 8],
+		];
+		let views: Vec<_> = domains
+			.iter()
+			.map(|d| {
+				slv.new_int_decision(IntSet::from_iter(d.iter().map(|&v| v..=v)))
+					.order_literals(LiteralStrategy::Eager)
+					.direct_literals(LiteralStrategy::Eager)
+					.view()
+			})
+			.collect();
+		IntUniqueDomain::post(&mut slv, views.clone());
+		let (status, opt) = slv.solve().minimize(views[0]);
+		assert_eq!(status, crate::solver::Status::Complete);
+		assert_eq!(
+			opt,
+			Some(2),
+			"unsound Hall-set reason: domain propagator proved a wrong optimum"
+		);
 	}
 
 	#[test]
