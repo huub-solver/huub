@@ -7,8 +7,8 @@ use std::iter::once;
 use crate::{
 	IntVal,
 	actions::{
-		BoolInitActions, BoolSimplificationActions, IntDecisionActions, IntInitActions,
-		IntInspectionActions, IntPropCond, IntPropagationActions, ReasoningEngine,
+		BoolInitActions, BoolSimplificationActions, IntAnalyzeActions, IntDecisionActions,
+		IntInitActions, IntInspectionActions, IntPropCond, IntPropagationActions, ReasoningEngine,
 	},
 	constraints::{
 		BoolModelActions, Constraint, IntModelActions, Propagator, SimplificationStatus,
@@ -40,6 +40,11 @@ where
 	View<IntVal>: IntModelActions<E>,
 	View<bool>: BoolModelActions<E>,
 {
+	fn analyze(&self, ctx: &mut E::InitializationContext<'_>) {
+		// The element propagator requires the direct encoding of the index.
+		self.index.request_direct_eager(ctx);
+	}
+
 	fn simplify(
 		&mut self,
 		ctx: &mut E::PropagationContext<'_>,

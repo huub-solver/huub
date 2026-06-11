@@ -10,8 +10,9 @@ use std::{
 use crate::{
 	IntSet, IntVal,
 	actions::{
-		BoolPropagationActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
-		IntPropagationActions, IntSimplificationActions, PropagationActions, ReasoningContext,
+		BoolPropagationActions, IntAnalyzeActions, IntDecisionActions, IntExplanationActions,
+		IntInspectionActions, IntPropagationActions, IntSimplificationActions, PropagationActions,
+		ReasoningContext,
 	},
 	constraints::{Conflict, ReasonBuilder, int_linear::IntEq},
 	model::{
@@ -20,7 +21,7 @@ use crate::{
 		resolved::Resolved,
 		view::{DefaultView, boolean::BoolView, private},
 	},
-	solver::IntLitMeaning,
+	solver::{IntLitMeaning, Polarity},
 	views::{LinearBoolView, LinearView},
 };
 
@@ -619,6 +620,37 @@ impl From<View<bool>> for View<IntVal> {
 impl From<i64> for View<IntVal> {
 	fn from(value: i64) -> Self {
 		View(IntView::Const(value))
+	}
+}
+
+impl<Ctx> IntAnalyzeActions<Ctx> for View<IntVal>
+where
+	Ctx: ReasoningContext + ?Sized,
+	LinearView<NonZero<IntVal>, IntVal, Decision<IntVal>>: IntAnalyzeActions<Ctx>,
+	LinearBoolView<NonZero<IntVal>, IntVal, View<bool>>: IntAnalyzeActions<Ctx>,
+{
+	fn polarity(&self, ctx: &mut Ctx, polarity: Polarity) {
+		match self.0 {
+			IntView::Const(c) => c.polarity(ctx, polarity),
+			IntView::Linear(lin) => lin.polarity(ctx, polarity),
+			IntView::Bool(lin) => lin.polarity(ctx, polarity),
+		}
+	}
+
+	fn request_direct_eager(&self, ctx: &mut Ctx) {
+		match self.0 {
+			IntView::Const(c) => c.request_direct_eager(ctx),
+			IntView::Linear(lin) => lin.request_direct_eager(ctx),
+			IntView::Bool(lin) => lin.request_direct_eager(ctx),
+		}
+	}
+
+	fn request_order_eager(&self, ctx: &mut Ctx) {
+		match self.0 {
+			IntView::Const(c) => c.request_order_eager(ctx),
+			IntView::Linear(lin) => lin.request_order_eager(ctx),
+			IntView::Bool(lin) => lin.request_order_eager(ctx),
+		}
 	}
 }
 

@@ -21,7 +21,7 @@ use crate::{
 	},
 	helpers::matrix::Matrix,
 	lower::{LoweringContext, LoweringError},
-	solver::{IntLitMeaning, engine::Engine, queue::PriorityLevel},
+	solver::{IntLitMeaning, Polarity, engine::Engine, queue::PriorityLevel},
 };
 
 /// The [`IntNoOverlapSweep`] propagator ensures that a set of k-dimensional
@@ -595,6 +595,13 @@ where
 	I1: IntModelActions<E>,
 	I2: IntModelActions<E>,
 {
+	fn analyze(&self, ctx: &mut E::InitializationContext<'_>) {
+		// Smaller objects are easier to place without overlap.
+		for size in self.size.iter_elem() {
+			size.polarity(ctx, Polarity::Negative);
+		}
+	}
+
 	fn simplify(
 		&mut self,
 		ctx: &mut E::PropagationContext<'_>,

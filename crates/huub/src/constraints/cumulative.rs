@@ -20,7 +20,7 @@ use crate::{
 		SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
-	solver::{IntLitMeaning, engine::Engine, queue::PriorityLevel},
+	solver::{IntLitMeaning, Polarity, engine::Engine, queue::PriorityLevel},
 };
 
 /// The propagation rules for the `cumulative` constraint. This enum is
@@ -817,6 +817,18 @@ where
 	I3: IntModelActions<E>,
 	I4: IntModelActions<E>,
 {
+	fn analyze(&self, ctx: &mut E::InitializationContext<'_>) {
+		// The constraint is easier to satisfy with a larger resource capacity,
+		// and with tasks that use less of the resource for a shorter time.
+		self.capacity.polarity(ctx, Polarity::Positive);
+		for usage in &self.usages {
+			usage.polarity(ctx, Polarity::Negative);
+		}
+		for duration in &self.durations {
+			duration.polarity(ctx, Polarity::Negative);
+		}
+	}
+
 	fn simplify(
 		&mut self,
 		ctx: &mut E::PropagationContext<'_>,

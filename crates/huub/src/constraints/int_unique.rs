@@ -13,14 +13,15 @@ mod domain;
 mod value;
 
 use itertools::{Either, Itertools};
+use rangelist::IntervalIterator;
 use tracing::warn;
 
 pub use crate::constraints::int_unique::{
 	bounds::IntUniqueBounds, domain::IntUniqueDomain, value::IntUniqueValue,
 };
 use crate::{
-	IntVal,
-	actions::{IntEvent, IntInspectionActions, ReasoningEngine},
+	IntSet, IntVal,
+	actions::{IntAnalyzeActions, IntEvent, IntInspectionActions, ReasoningEngine},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
 	},
@@ -77,6 +78,35 @@ where
 	E: ReasoningEngine,
 	View<IntVal>: IntModelActions<E>,
 {
+	fn analyze(&self, ctx: &mut E::InitializationContext<'_>) {
+		// The direct encoding is only used by the value- and domain-consistency
+		// propagators.
+		if !(self.value_propagation() || self.domain_propagation()) {
+			return;
+		}
+
+		// The eager value encoding pays off when the decisions jointly range over
+		// few values relative to their number. Use the cardinality of the union of
+		// all the decision variable domains.
+		let dcns = &self.bounds_prop.vars;
+		let mut union: Option<IntSet> = None;
+		for d in dcns {
+			let dom = d.domain(ctx);
+			union = Some(match union {
+				None => dom,
+				Some(u) => u.union(&dom),
+			});
+		}
+		let tight = union
+			.and_then(|u| u.card())
+			.is_some_and(|card| card <= dcns.len() * 100 / 80);
+		if tight {
+			for d in dcns {
+				d.request_direct_eager(ctx);
+			}
+		}
+	}
+
 	fn simplify(
 		&mut self,
 		ctx: &mut E::PropagationContext<'_>,

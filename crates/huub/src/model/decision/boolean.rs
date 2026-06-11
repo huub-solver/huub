@@ -11,7 +11,7 @@ use crate::{
 	constraints::ReasonBuilder,
 	model::{
 		Model,
-		decision::{Decision, DecisionReference, private},
+		decision::{Decision, DecisionReference, PolarityScore, private},
 		view::View,
 	},
 	solver::activation_list::ActivationActionS,
@@ -28,6 +28,8 @@ pub(crate) struct BoolDecision {
 	/// This list is used to enqueue the constraints for propagation when the
 	/// domain of the variable changes.
 	pub(crate) constraints: Vec<ActivationActionS>,
+	/// Accumulated polarity evidence collected during the analyze stage.
+	pub(crate) polarity: PolarityScore,
 }
 
 impl Decision<bool> {

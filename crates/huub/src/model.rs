@@ -4,7 +4,7 @@
 pub(crate) mod decision;
 pub mod deserialize;
 pub mod expressions;
-mod initilization_context;
+pub(crate) mod initilization_context;
 pub(crate) mod resolved;
 pub(crate) mod view;
 
@@ -37,11 +37,12 @@ use crate::{
 	helpers::bytes::Bytes,
 	lower::{Lowerer, LowererComplete},
 	model::{
-		decision::{boolean::BoolDecision, integer::IntDecision},
+		decision::{PolarityScore, Tier, boolean::BoolDecision, integer::IntDecision},
 		initilization_context::ModelInitContext,
+		view::{boolean::BoolView, integer::IntView},
 	},
 	solver::{
-		IntLitMeaning,
+		IntLitMeaning, Polarity,
 		activation_list::ActivationAction,
 		queue::{PropagatorInfo, PropagatorQueue},
 	},
@@ -282,6 +283,7 @@ impl Model {
 		self.bool_vars.push(BoolDecision {
 			alias: None,
 			constraints: Vec::new(),
+			polarity: PolarityScore::default(),
 		});
 		debug_assert_eq!(var.idx(), self.bool_vars.len() - 1);
 		var.into()
@@ -429,6 +431,58 @@ impl Model {
 		self.int_vars[i as usize].constraints = constraints;
 	}
 
+	/// Record one unit of polarity evidence at the given `tier` stating that
+	/// the Boolean `view` should be pushed in direction `polarity` (where
+	/// [`Positive`](Polarity::Positive) means "prefer true").
+	///
+	/// Evidence is only recorded for views backed by a pure Boolean decision;
+	/// the literal's negation is folded into the sign.
+	pub(crate) fn observe_bool_polarity(
+		&mut self,
+		view: View<bool>,
+		tier: Tier,
+		polarity: Polarity,
+	) {
+		if let BoolView::Decision(l) = view.resolve_alias(self).into_inner().0 {
+			// A negated literal flips the desired direction onto the variable.
+			let polarity = if l.is_negated() { !polarity } else { polarity };
+			self.bool_vars[l.idx()].polarity.observe(tier, polarity);
+		}
+	}
+
+	/// Record one unit of polarity evidence at the given `tier` stating that
+	/// the integer `view` should be pushed in direction `polarity`. The view's
+	/// scale sign (and any Boolean negation) is folded onto the underlying
+	/// decision.
+	pub(crate) fn observe_int_polarity(
+		&mut self,
+		view: View<IntVal>,
+		tier: Tier,
+		polarity: Polarity,
+	) {
+		match view.resolve_alias(self).into_inner().0 {
+			IntView::Linear(lin) => {
+				let polarity = if lin.scale.get() < 0 {
+					!polarity
+				} else {
+					polarity
+				};
+				self.int_vars[lin.var.idx()]
+					.polarity
+					.observe(tier, polarity);
+			}
+			IntView::Bool(lin) => {
+				let polarity = if lin.scale.get() < 0 {
+					!polarity
+				} else {
+					polarity
+				};
+				self.observe_bool_polarity(lin.var, tier, polarity);
+			}
+			IntView::Const(_) => {}
+		}
+	}
+
 	/// Post a constraint to the model.
 	///
 	/// The constraint is added to the model. It will be enforced during
@@ -509,6 +563,22 @@ impl Model {
 		}
 		self.notify_advisors();
 		Ok(())
+	}
+
+	/// Invoke `f` with a [`ConRef`] for each constraint that the given integer
+	/// decision is subscribed to (i.e. that may involve it). The same
+	/// constraint may be reported more than once.
+	pub(crate) fn subscribed_constraints(&self, dec: Decision<IntVal>, mut f: impl FnMut(ConRef)) {
+		self.int_vars[dec.idx()].constraints.for_each_activated_by(
+			IntEvent::Fixed,
+			|act: ActivationAction<AdvRef, ConRef>| {
+				let con = match act {
+					ActivationAction::Enqueue(con) => con,
+					ActivationAction::Advise(adv) => self.advisors[adv.index()].con,
+				};
+				f(con);
+			},
+		);
 	}
 }
 

@@ -6,7 +6,7 @@
 
 use std::fmt::{self, Debug, Formatter};
 
-use pindakaas::solver::propagation::SolvingActions;
+use pindakaas::{Lit as RawLit, solver::propagation::SolvingActions};
 use tracing::trace;
 
 use crate::{
@@ -19,7 +19,7 @@ use crate::{
 	constraints::{Conflict, DeferredReason, Reason, ReasonBuilder},
 	helpers::bytes::Bytes,
 	solver::{
-		BoxedPropagator, IntLitMeaning,
+		BoxedPropagator, IntLitMeaning, Polarity,
 		decision::{Decision, integer::LazyLitDef},
 		engine::{Engine, LitPropagation, PropRef, State, trace_new_lit},
 		view::{View, boolean::BoolView},
@@ -112,9 +112,21 @@ impl<'a> BoolPropagationActions<SolvingContext<'a>> for Decision<bool> {
 impl IntDecisionActions<SolvingContext<'_>> for Decision<IntVal> {
 	fn lit(&self, ctx: &mut SolvingContext<'_>, meaning: IntLitMeaning) -> View<bool> {
 		let var = &mut ctx.state.int_vars[self.idx()];
+		let polarity = var.polarity;
 		let new_var = |def: LazyLitDef| {
 			// Create new variable
 			let v = ctx.slv.new_observed_var();
+			// Apply a phase hint to newly created (lazy) order literals according
+			// to the variable's polarity. The positive literal represents
+			// `x < val`, so a positive polarity (prefer large values) phases the
+			// negation. Direct (equality) literals are left unphased.
+			if matches!(def.meaning, IntLitMeaning::Less(_)) {
+				match polarity {
+					Some(Polarity::Positive) => ctx.slv.phase(!Into::<RawLit>::into(v)),
+					Some(Polarity::Negative) => ctx.slv.phase(v.into()),
+					None => {}
+				}
+			}
 			ctx.state.statistics.lazy_literals += 1;
 			ctx.state.trail.grow_to_boolvar(v);
 			trace_new_lit!(*self, def, v);

@@ -9,8 +9,9 @@ use itertools::Itertools;
 use crate::{
 	IntVal,
 	actions::{
-		InitActions, IntDecisionActions, IntInitActions, IntInspectionActions, IntPropCond,
-		IntPropagationActions, IntSimplificationActions, PropagationActions, ReasoningEngine,
+		InitActions, IntAnalyzeActions, IntDecisionActions, IntInitActions, IntInspectionActions,
+		IntPropCond, IntPropagationActions, IntSimplificationActions, PropagationActions,
+		ReasoningEngine,
 	},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
@@ -37,6 +38,14 @@ where
 	E: ReasoningEngine,
 	View<IntVal>: IntModelActions<E>,
 {
+	fn analyze(&self, ctx: &mut E::InitializationContext<'_>) {
+		// The table constraint is encoded using the direct encoding of all its
+		// variables.
+		for v in &self.vars {
+			v.request_direct_eager(ctx);
+		}
+	}
+
 	fn simplify(
 		&mut self,
 		ctx: &mut E::PropagationContext<'_>,

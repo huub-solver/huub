@@ -3,6 +3,7 @@
 
 use std::{
 	any::Any,
+	collections::VecDeque,
 	error::Error,
 	fmt::{self, Debug, Display},
 	marker::PhantomData,
@@ -20,9 +21,8 @@ use rustc_hash::FxHashSet;
 use tracing::warn;
 
 #[cfg(feature = "flatzinc")]
-use crate::model::deserialize::{
-	Goal,
-	flatzinc::{FlatZincError, FlatZincLowerData, FlatZincModelMeta, FlatZincSolverMeta},
+use crate::model::deserialize::flatzinc::{
+	FlatZincError, FlatZincLowerData, FlatZincModelMeta, FlatZincSolverMeta,
 };
 use crate::{
 	IntSet, IntVal,
@@ -31,19 +31,45 @@ use crate::{
 		PostingActions, ReasoningContext, ReasoningEngine, Trailed,
 	},
 	constraints::{
-		BoxedPropagator, Conflict, Constraint, ReasonBuilder,
-		bool_array_element::BoolDecisionArrayElement,
-		int_array_element::{IntArrayElementBounds, IntValArrayElement},
-		int_table::IntTable,
-		int_unique::IntUnique,
+		BoxedConstraint, BoxedPropagator, Conflict, Constraint, ReasonBuilder,
+		int_array_minimum::IntArrayMinimumBounds,
+		int_div::IntDivBounds,
+		int_linear::{IntEq, IntLinear, LinComparator},
+		int_mul::IntMulBounds,
+		int_pow::IntPowBounds,
 	},
-	helpers::bytes::Bytes,
-	model::{self, Model, decision::integer::Domain, resolved::Resolved},
+	helpers::{
+		bytes::Bytes,
+		overflow::{OverflowImpossible, OverflowMode, OverflowPossible},
+	},
+	model::{
+		self, ConRef, Model,
+		decision::{Tier, integer::Domain},
+		deserialize::Goal,
+		initilization_context::ModelInitContext,
+		resolved::Resolved,
+		view::integer::IntView,
+	},
 	solver::{
-		self, IntLitMeaning, LiteralStrategy, Solver, engine::Engine, view::boolean::BoolView,
+		self, IntLitMeaning, LiteralStrategy, Polarity, Solver, engine::Engine,
+		view::boolean::BoolView,
 	},
 	views::LinearBoolView,
 };
+
+/// State of the breadth-first walk used to reconstruct the goal polarity in
+/// [`GoalPolarity::process`].
+#[derive(Debug, Default)]
+struct GoalPolarity {
+	/// The constraint currently being processed.
+	current_con: Option<ConRef>,
+	/// The queue of decisions still to be processed: the decision, the desired
+	/// direction, and the constraint that enqueued it or `None` for the goal
+	/// itself.
+	queue: VecDeque<(Resolved<model::Decision<IntVal>>, Polarity, Option<ConRef>)>,
+	/// The (decision, direction) pairs already enqueued.
+	visited: FxHashSet<(Resolved<model::Decision<IntVal>>, Polarity)>,
+}
 
 /// Internal type to represent a complete [`Lowerer`] builder.
 #[derive(Builder)]
@@ -114,6 +140,13 @@ pub(crate) struct LowererComplete<Origin = ()> {
 	/// Whether to enable the vivification in the SAT solver.
 	#[builder(default = Lowerer::DEFAULT_VIVIFICATION)]
 	vivification: bool,
+	/// The (optional) intended objective, used to bias the polarity of the
+	/// decision variables that compose it.
+	///
+	/// Use the [`positive_polarity`](Lowerer::positive_polarity) and
+	/// [`negative_polarity`](Lowerer::negative_polarity) builder setters rather
+	/// than setting this directly.
+	objective: Option<Goal<model::View<IntVal>>>,
 }
 
 /// Actions that can be performed when reformulating a [`Model`] object into a
@@ -232,15 +265,9 @@ pub struct LoweringMap {
 pub(crate) struct LoweringMapBuilder {
 	/// Map of Boolean decisions to Boolean views.
 	pub(crate) bool_map: Vec<Option<solver::View<bool>>>,
-	/// Set of integer decisions for which the direct encoding should be created
-	/// eagerly.
-	pub(crate) int_eager_direct: FxHashSet<Resolved<model::Decision<IntVal>>>,
 	/// The (default) maximum cardinality of the domain of an integer variable
 	/// before its order encoding is created lazily.
 	pub(crate) int_eager_limit: usize,
-	/// Set of integer decisions for which the order encoding should be created
-	/// eagerly.
-	pub(crate) int_eager_order: FxHashSet<Resolved<model::Decision<IntVal>>>,
 	/// Map of integer decisions to integer views.
 	pub(crate) int_map: Vec<Option<solver::View<IntVal>>>,
 }
@@ -258,6 +285,256 @@ pub enum ReduceType {
 	Sqrt = 1,
 	/// Logarithmic reduction target (CaDiCaL `reduceopt` value `2`).
 	Log = 2,
+}
+
+impl GoalPolarity {
+	/// Reconstruct the goal polarity (best-effort) from the intended
+	/// optimization `goal`, recording objective-level evidence on the
+	/// decisions that compose it.
+	///
+	/// Starting from the goal decision, it walks breadth-first over the
+	/// constraints each visited decision is subscribed to (via
+	/// [`Model::subscribed_constraints`]), recording the desired direction onto
+	/// the other variables those constraints relate, which are in turn
+	/// enqueued.
+	///
+	/// The relations considered are the (non-reified) linear (in)equalities and
+	/// the monotone/antitone relationships of arithmetic constraints such as
+	/// multiplication, division, exponentiation, and array minimum.
+	fn process(
+		model: &mut Model,
+		constraints: &[Option<BoxedConstraint>],
+		goal: Goal<model::View<IntVal>>,
+	) {
+		// Record the polarity of the objective itself, and seed the walk from
+		// its underlying integer decision.
+		let (obj, dir) = match goal {
+			Goal::Maximize(obj) => (obj, Polarity::Positive),
+			Goal::Minimize(obj) => (obj, Polarity::Negative),
+		};
+		model.observe_int_polarity(obj, Tier::Objective, dir);
+		let IntView::Linear(lin) = obj.resolve_alias(model).into_inner().0 else {
+			return;
+		};
+		let start = Resolved(lin.var);
+		let start_dir = if lin.scale.get() < 0 { !dir } else { dir };
+		let mut walk = GoalPolarity::default();
+		let _ = walk.visited.insert((start.clone(), start_dir));
+		walk.queue.push_back((start, start_dir, None));
+
+		let mut con_refs: Vec<ConRef> = Vec::new();
+		while let Some((input, input_polarity, discovering)) = walk.queue.pop_front() {
+			// Collect the constraints the decision is involved in
+			con_refs.clear();
+			model.subscribed_constraints(input.0, |con| con_refs.push(con));
+			con_refs.sort_unstable_by_key(|con| con.index());
+			con_refs.dedup();
+			for &con in &con_refs {
+				// Never enqueue decisions from the constraint that enqueued this
+				// decision
+				if discovering == Some(con) {
+					continue;
+				}
+				let Some(c) = constraints[con.index()].as_ref() else {
+					continue;
+				};
+				let c: &dyn Constraint<Model> = c.as_ref();
+				let c: &dyn Any = c;
+				walk.current_con = Some(con);
+				walk.process_constraint(model, c, &input, input_polarity);
+			}
+		}
+	}
+
+	/// Process the constraint `con` during the objective walk: derive the
+	/// relations it implies and record the direction `input_polarity` of the
+	/// visited decision `input` onto the other variables of those relations.
+	fn process_constraint(
+		&mut self,
+		model: &mut Model,
+		con: &dyn Any,
+		input: &Resolved<model::Decision<IntVal>>,
+		input_polarity: Polarity,
+	) {
+		/// Type alias to abbreviate the integer view type in the downcasts.
+		type V = model::View<IntVal>;
+
+		if let Some(lin) = con.downcast_ref::<IntLinear<OverflowImpossible>>() {
+			if lin.reif.is_none() && lin.comparator != LinComparator::NotEqual {
+				self.record_relation(model, &lin.terms, input, input_polarity);
+			}
+		} else if let Some(lin) = con.downcast_ref::<IntLinear<OverflowPossible>>() {
+			if lin.reif.is_none() && lin.comparator != LinComparator::NotEqual {
+				self.record_relation(model, &lin.terms, input, input_polarity);
+			}
+		} else if let Some(eq) = con.downcast_ref::<IntEq>() {
+			// `a = b` expressed as the linear equality `a - b = 0`.
+			self.record_relation(model, &[eq.vars[0], -eq.vars[1]], input, input_polarity);
+		} else if let Some(mul) = con.downcast_ref::<IntMulBounds<OverflowImpossible, V, V, V>>() {
+			self.record_mul(model, mul, input, input_polarity);
+		} else if let Some(mul) = con.downcast_ref::<IntMulBounds<OverflowPossible, V, V, V>>() {
+			self.record_mul(model, mul, input, input_polarity);
+		} else if let Some(pow) = con.downcast_ref::<IntPowBounds<OverflowImpossible, V, V, V>>() {
+			self.record_pow(model, pow, input, input_polarity);
+		} else if let Some(pow) = con.downcast_ref::<IntPowBounds<OverflowPossible, V, V, V>>() {
+			self.record_pow(model, pow, input, input_polarity);
+		} else if let Some(div) = con.downcast_ref::<IntDivBounds<V, V, V>>() {
+			self.record_div(model, div, input, input_polarity);
+		} else if let Some(min) = con.downcast_ref::<IntArrayMinimumBounds<V, V>>() {
+			// The minimum is monotone in every element of the array.
+			for &el in &min.vars {
+				self.record_relation(model, &[min.min, -el], input, input_polarity);
+			}
+		}
+	}
+
+	/// Record the polarity implied by `result = numerator / denominator` for
+	/// the related variables of the visited decision.
+	fn record_div(
+		&mut self,
+		model: &mut Model,
+		div: &IntDivBounds<model::View<IntVal>, model::View<IntVal>, model::View<IntVal>>,
+		input: &Resolved<model::Decision<IntVal>>,
+		input_polarity: Polarity,
+	) {
+		// The denominator must be strictly positive or strictly negative for the
+		// division to be monotone in either argument. The result follows the
+		// numerator when the denominator is positive, and opposes it when the
+		// denominator is negative.
+		let (den_lb, den_ub) = div.denominator.bounds(model);
+		if den_lb >= 1 {
+			self.record_relation(model, &[div.result, -div.numerator], input, input_polarity);
+		} else if den_ub <= -1 {
+			self.record_relation(model, &[div.result, div.numerator], input, input_polarity);
+		} else {
+			return;
+		}
+		// Increasing the denominator moves the result toward zero, i.e. against
+		// the sign of the numerator.
+		let (num_lb, num_ub) = div.numerator.bounds(model);
+		if num_lb >= 0 {
+			self.record_relation(model, &[div.result, div.denominator], input, input_polarity);
+		} else if num_ub <= 0 {
+			self.record_relation(
+				model,
+				&[div.result, -div.denominator],
+				input,
+				input_polarity,
+			);
+		}
+	}
+
+	/// Record the polarity implied by `product = factor1 * factor2` for the
+	/// related variables of the visited decision.
+	///
+	/// The product is monotone in a factor when the other factor is
+	/// non-negative, and antitone when it is non-positive.
+	fn record_mul<OM: OverflowMode>(
+		&mut self,
+		model: &mut Model,
+		mul: &IntMulBounds<OM, model::View<IntVal>, model::View<IntVal>, model::View<IntVal>>,
+		input: &Resolved<model::Decision<IntVal>>,
+		input_polarity: Polarity,
+	) {
+		let (f2_lb, f2_ub) = mul.factor2.bounds(model);
+		if f2_lb >= 0 {
+			self.record_relation(model, &[mul.product, -mul.factor1], input, input_polarity);
+		} else if f2_ub <= 0 {
+			self.record_relation(model, &[mul.product, mul.factor1], input, input_polarity);
+		}
+		let (f1_lb, f1_ub) = mul.factor1.bounds(model);
+		if f1_lb >= 0 {
+			self.record_relation(model, &[mul.product, -mul.factor2], input, input_polarity);
+		} else if f1_ub <= 0 {
+			self.record_relation(model, &[mul.product, mul.factor2], input, input_polarity);
+		}
+	}
+
+	/// Record the polarity implied by `result = base ^ exponent` for the
+	/// related variables of the visited decision.
+	fn record_pow<OM: OverflowMode>(
+		&mut self,
+		model: &mut Model,
+		pow: &IntPowBounds<OM, model::View<IntVal>, model::View<IntVal>, model::View<IntVal>>,
+		input: &Resolved<model::Decision<IntVal>>,
+		input_polarity: Polarity,
+	) {
+		let (base_lb, base_ub) = pow.base.bounds(model);
+		let (exp_lb, exp_ub) = pow.exponent.bounds(model);
+		let fixed_exp = (exp_lb == exp_ub).then_some(exp_lb);
+
+		// The result is monotone in the base for non-negative bases with
+		// positive exponents, and for any fixed odd exponent; it is antitone in
+		// the base for non-positive bases with a fixed even exponent.
+		if (exp_lb >= 1 && base_lb >= 0) || fixed_exp.is_some_and(|k| k >= 1 && k % 2 == 1) {
+			self.record_relation(model, &[pow.result, -pow.base], input, input_polarity);
+		} else if base_ub <= 0 && fixed_exp.is_some_and(|k| k >= 2 && k % 2 == 0) {
+			self.record_relation(model, &[pow.result, pow.base], input, input_polarity);
+		}
+		// The result is monotone in the exponent when the base is at least one.
+		if base_lb >= 1 {
+			self.record_relation(model, &[pow.result, -pow.exponent], input, input_polarity);
+		}
+	}
+
+	/// Record the direction `input_polarity` of the visited decision `input`
+	/// onto the other terms of a single relation, given as the terms of a
+	/// linear equality (views with opposite coefficient signs are monotone,
+	/// views with the same coefficient sign are antitone).
+	///
+	/// Every (non-`input`) term has a push recorded, so the score accumulates
+	/// across all the relations that mention a decision. Integer decisions are
+	/// additionally enqueued (once) so the walk continues through them.
+	fn record_relation(
+		&mut self,
+		model: &mut Model,
+		terms: &[model::View<IntVal>],
+		input: &Resolved<model::Decision<IntVal>>,
+		input_polarity: Polarity,
+	) {
+		// Whether `input`'s coefficient in this relation is negative.
+		let Some(input_neg) =
+			terms
+				.iter()
+				.find_map(|t| match t.resolve_alias(model).into_inner().0 {
+					IntView::Linear(lin) if &Resolved(lin.var) == input => {
+						Some(lin.scale.get() < 0)
+					}
+					_ => None,
+				})
+		else {
+			return;
+		};
+		// To push `input` in `input_polarity`, the other terms must be pushed in
+		// the opposite direction.
+		let term_dir = if input_neg {
+			input_polarity
+		} else {
+			!input_polarity
+		};
+		for &t in terms {
+			match t.resolve_alias(model).into_inner().0 {
+				IntView::Linear(lin) => {
+					let w = Resolved(lin.var);
+					if &w == input {
+						continue;
+					}
+					model.observe_int_polarity(t, Tier::Objective, term_dir);
+					// The direction wanted for `w` is `term_dir` folded by `w`'s scale.
+					let w_dir = if lin.scale.get() < 0 {
+						!term_dir
+					} else {
+						term_dir
+					};
+					if self.visited.insert((w.clone(), w_dir)) {
+						self.queue.push_back((w, w_dir, self.current_con));
+					}
+				}
+				// Boolean- and constant-backed terms are leaves of the walk.
+				_ => model.observe_int_polarity(t, Tier::Objective, term_dir),
+			}
+		}
+	}
 }
 
 impl Lowerer {
@@ -320,6 +597,44 @@ impl<State: lowerer::State> Lowerer<&mut Model, State> {
 	}
 }
 
+impl<Origin, State: lowerer::State> Lowerer<Origin, State> {
+	/// Indicate that the search should prefer smaller values for the given
+	/// objective view (e.g. a minimization objective), biasing the polarity of
+	/// the decision variables that compose it toward smaller values at
+	/// objective priority.
+	///
+	/// This is mutually exclusive with
+	/// [`positive_polarity`](Lowerer::positive_polarity): both set the same
+	/// intended objective.
+	pub fn negative_polarity(
+		self,
+		objective: model::View<IntVal>,
+	) -> Lowerer<Origin, lowerer::SetObjective<State>>
+	where
+		State::Objective: lowerer::IsUnset,
+	{
+		self.objective(Goal::Minimize(objective))
+	}
+
+	/// Indicate that the search should prefer larger values for the given
+	/// objective view (e.g. a maximization objective), biasing the polarity of
+	/// the decision variables that compose it toward larger values at objective
+	/// priority.
+	///
+	/// This is mutually exclusive with
+	/// [`negative_polarity`](Lowerer::negative_polarity): both set the same
+	/// intended objective.
+	pub fn positive_polarity(
+		self,
+		objective: model::View<IntVal>,
+	) -> Lowerer<Origin, lowerer::SetObjective<State>>
+	where
+		State::Objective: lowerer::IsUnset,
+	{
+		self.objective(Goal::Maximize(objective))
+	}
+}
+
 #[cfg(feature = "flatzinc")]
 impl<State: lowerer::State> Lowerer<Result<FlatZincLowerData, FlatZincError>, State> {
 	/// Lower the [`FlatZinc`](flatzinc_serde::FlatZinc) instance to a
@@ -350,6 +665,9 @@ impl<State: lowerer::State> Lowerer<Result<FlatZincLowerData, FlatZincError>, St
 			reason_eager: complete.reason_eager,
 			variable_elimination: complete.variable_elimination,
 			vivification: complete.vivification,
+			// Use the parsed optimization goal to bias polarity, unless an
+			// explicit objective was set on the builder.
+			objective: complete.objective.or(meta.goal),
 		}
 		.into_solver_internal()?;
 		if let Some(branching) = meta.branching {
@@ -412,6 +730,7 @@ impl LowererComplete<&mut Model> {
 			reason_eager,
 			variable_elimination,
 			vivification,
+			objective,
 		} = self;
 
 		let mut slv = Solver::<Sat>::default();
@@ -443,62 +762,27 @@ impl LowererComplete<&mut Model> {
 
 		model.propagate()?;
 
-		// Determine encoding types for integer variables
-		let mut int_eager_direct = FxHashSet::<Resolved<model::Decision<IntVal>>>::default();
-		let int_eager_order = FxHashSet::<Resolved<model::Decision<IntVal>>>::default();
-
-		for c in model.constraints.iter().flatten() {
-			let c: &dyn Constraint<Model> = c.as_ref();
-			let c: &dyn Any = c;
-			if let Some(c) = c.downcast_ref::<BoolDecisionArrayElement>() {
-				let index = c.index.resolve_alias(model);
-				if let Some(var) = index.integer_decision() {
-					int_eager_direct.insert(var);
-				}
-			} else if let Some(c) = c.downcast_ref::<IntUnique>() {
-				for v in &c.bounds_prop.vars {
-					let v = v.resolve_alias(model);
-					if let Some(var) = v.integer_decision() {
-						let Domain::Domain(dom) = &model.int_vars[var.idx()].domain else {
-							unreachable!()
-						};
-						if dom.card() <= Some(c.bounds_prop.vars.len() * 100 / 80) {
-							int_eager_direct.insert(var);
-						}
-					}
-				}
-			} else if let Some(c) = c.downcast_ref::<IntArrayElementBounds<
-				model::View<IntVal>,
-				model::View<IntVal>,
-				model::View<IntVal>,
-			>>() {
-				let index = c.index.resolve_alias(model);
-				if let Some(var) = index.integer_decision() {
-					int_eager_direct.insert(var);
-				}
-			} else if let Some(c) = c.downcast_ref::<IntTable>() {
-				for &v in &c.vars {
-					let v = v.resolve_alias(model);
-					if let Some(var) = v.integer_decision() {
-						int_eager_direct.insert(var);
-					}
-				}
-			} else if let Some(c) =
-				c.downcast_ref::<IntValArrayElement<model::View<IntVal>, model::View<IntVal>>>()
-			{
-				let index = c.0.index.resolve_alias(model);
-				if let Some(var) = index.integer_decision() {
-					int_eager_direct.insert(var);
-				}
+		// Analyze each constraint to record its literal-encoding requirements
+		// and polarity evidence onto the model's decision definitions, then
+		// reconstruct the objective polarity. The constraints are temporarily
+		// taken out of the model so the analyze stage can mutate the decision
+		// definitions while iterating.
+		let constraints = std::mem::take(&mut model.constraints);
+		for (idx, c) in constraints.iter().enumerate() {
+			if let Some(c) = c {
+				let mut ctx = ModelInitContext::new(model, ConRef::new(idx));
+				c.analyze(&mut ctx);
 			}
 		}
+		if let Some(obj) = objective {
+			GoalPolarity::process(model, &constraints, obj);
+		}
+		model.constraints = constraints;
 
 		// Create the mapping between model decisions and solver views.
 		let mut map_builder = LoweringMapBuilder {
 			bool_map: vec![None; model.bool_vars.len()],
-			int_eager_direct,
 			int_eager_limit,
-			int_eager_order,
 			int_map: vec![None; model.int_vars.len()],
 		};
 
@@ -780,10 +1064,7 @@ impl LoweringMap {
 		use crate::model::view::boolean::BoolView::*;
 
 		let int_lit = |slv: &mut Ctx, iv: model::Decision<IntVal>, lit_meaning: IntLitMeaning| {
-			let iv = self.get_int(
-				slv,
-				model::View(model::view::integer::IntView::Linear(iv.into())),
-			);
+			let iv = self.get_int(slv, model::View(IntView::Linear(iv.into())));
 			iv.lit(slv, lit_meaning)
 		};
 
@@ -863,7 +1144,15 @@ impl LoweringMapBuilder {
 				let def = &model.bool_vars[idx];
 				let view = match def.alias {
 					Some(alias) => self.get_or_create_bool(model, slv, alias),
-					None => slv.new_bool_decision().into(),
+					None => {
+						let dcn = slv.new_bool_decision();
+						match def.polarity.resolve() {
+							Some(Polarity::Positive) => slv.sat.phase(dcn.0),
+							Some(Polarity::Negative) => slv.sat.phase(!dcn.0),
+							None => {}
+						};
+						dcn.into()
+					}
 				};
 				self.bool_map[idx] = Some(view);
 				if lit.is_negated() { !view } else { view }
@@ -917,15 +1206,15 @@ impl LoweringMapBuilder {
 						let Domain::Domain(dom) = &def.domain else {
 							unreachable!()
 						};
-						let direct_enc = if self.int_eager_direct.contains(&var) {
+						let direct_enc = if def.eager_direct {
 							LiteralStrategy::Eager
 						} else {
 							LiteralStrategy::Lazy
 						};
 						let card = dom.card();
-						let order_enc = if self.int_eager_order.contains(&var)
-							|| self.int_eager_direct.contains(&var)
-							|| card.is_some() && card.unwrap() <= self.int_eager_limit
+						let order_enc = if def.eager_order
+							|| def.eager_direct || card.is_some()
+							&& card.unwrap() <= self.int_eager_limit
 						{
 							LiteralStrategy::Eager
 						} else {
@@ -935,6 +1224,7 @@ impl LoweringMapBuilder {
 							.new_int_decision(dom.clone())
 							.order_literals(order_enc)
 							.direct_literals(direct_enc)
+							.maybe_polarity(def.polarity.resolve())
 							.view();
 						self.int_map[var.idx()] = Some(view);
 						view
@@ -1162,5 +1452,155 @@ impl IntInspectionActions<dyn LoweringActions + '_> for solver::Decision<IntVal>
 	fn val(&self, ctx: &dyn LoweringActions) -> Option<IntVal> {
 		let (lb, ub) = self.bounds(ctx);
 		if lb == ub { Some(lb) } else { None }
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::{
+		IntVal,
+		model::{
+			Model, View,
+			view::{boolean::BoolView, integer::IntView},
+		},
+		solver::{Polarity, Solver, Status, Valuation},
+		views::LinearView,
+	};
+
+	/// Helper to find the model storage index of the integer decision backing
+	/// the given (unscaled) model view.
+	fn int_decision_index(v: View<IntVal>) -> usize {
+		let IntView::Linear(LinearView { var, .. }) = v.0 else {
+			panic!("expected a linear view")
+		};
+		var.idx()
+	}
+
+	/// `r -> (a + b <= 1)` is vacuously satisfied when `r` is false, so the
+	/// constraint analysis prefers `r` to be false.
+	#[test]
+	fn polarity_halfreified_prefers_false() {
+		let mut model = Model::default();
+		let a = model.new_int_decision(0..=5);
+		let b = model.new_int_decision(0..=5);
+		let r = model.new_bool_decision();
+		model.linear(a + b).le(1).implied_by(r).post().unwrap();
+
+		let BoolView::Decision(l) = r.0 else {
+			panic!("expected a Boolean decision view")
+		};
+		let ri = l.idx();
+		let (_slv, _map): (Solver, _) = model.lower().to_solver().unwrap();
+		assert_eq!(
+			model.bool_vars[ri].polarity.resolve(),
+			Some(Polarity::Negative)
+		);
+	}
+
+	/// Minimizing `-x` should prefer larger `x`; the negative scale of the
+	/// objective view must be folded so that `x` receives a positive polarity.
+	#[test]
+	fn polarity_objective_negative_scale() {
+		let mut model = Model::default();
+		let x = model.new_int_decision(1..=10);
+		let (mut slv, map): (Solver, _) = model.lower().negative_polarity(-x).to_solver().unwrap();
+		let sx = map.get(&mut slv, x);
+		let mut found = None;
+		let status = slv
+			.solve()
+			.on_solution(|sol| {
+				found = Some(Valuation::val(&sx, sol));
+			})
+			.satisfy();
+		assert_eq!(status, Status::Satisfied);
+		assert_eq!(found, Some(10));
+	}
+
+	/// `a - b + c - x = 0` (relates x to a, b, c) and `d + e - c = 0` (relates
+	/// c to d, e). Maximizing x (positive polarity) should prefer a, c, d and
+	/// e large and b small, walking from x through c into d and e, and folding
+	/// the negative coefficient of b. Posted as plain equalities (no
+	/// `defines_var` / `.define()`) to exercise the variable-to-linear map on
+	/// a user-built model.
+	#[test]
+	fn polarity_objective_recursive_reconstruction() {
+		let mut model = Model::default();
+		let a = model.new_int_decision(1..=5);
+		let b = model.new_int_decision(1..=5);
+		let c = model.new_int_decision(1..=8);
+		let d = model.new_int_decision(1..=5);
+		let e = model.new_int_decision(1..=5);
+		let x = model.new_int_decision(-100..=100);
+		model.linear(a - b + c - x).eq(0).post().unwrap();
+		model.linear(d + e - c).eq(0).post().unwrap();
+
+		// Resolve each view to its decision index before lowering borrows `model`.
+		let idx = int_decision_index;
+		let (ai, bi, ci, di, ei) = (idx(a), idx(b), idx(c), idx(d), idx(e));
+
+		let (_slv, _map): (Solver, _) = model.lower().positive_polarity(x).to_solver().unwrap();
+
+		let pol = |i: usize| model.int_vars[i].polarity.resolve();
+		assert_eq!(pol(ai), Some(Polarity::Positive), "a");
+		assert_eq!(pol(bi), Some(Polarity::Negative), "b");
+		assert_eq!(pol(ci), Some(Polarity::Positive), "c");
+		assert_eq!(pol(di), Some(Polarity::Positive), "d");
+		assert_eq!(pol(ei), Some(Polarity::Positive), "e");
+	}
+
+	/// `a + b - z <= 0` (i.e. `a + b <= z`): increasing `a` or `b` forces
+	/// `z` upward, so maximizing `z` prefers `a` and `b` large. Note that
+	/// the objective-level signal dominates the constraint-level preference
+	/// for smaller terms in the inequality.
+	#[test]
+	fn polarity_objective_through_leq() {
+		let mut model = Model::default();
+		let a = model.new_int_decision(1..=5);
+		let b = model.new_int_decision(1..=5);
+		let z = model.new_int_decision(1..=20);
+		model.linear(a + b - z).le(0).post().unwrap();
+
+		let (ai, bi) = (int_decision_index(a), int_decision_index(b));
+		let (_slv, _map): (Solver, _) = model.lower().positive_polarity(z).to_solver().unwrap();
+
+		let pol = |i: usize| model.int_vars[i].polarity.resolve();
+		assert_eq!(pol(ai), Some(Polarity::Positive), "a");
+		assert_eq!(pol(bi), Some(Polarity::Positive), "b");
+	}
+
+	/// `z = min(a, b)` is monotone in both elements of the array, so
+	/// maximizing `z` prefers `a` and `b` large.
+	#[test]
+	fn polarity_objective_through_minimum() {
+		let mut model = Model::default();
+		let a = model.new_int_decision(1..=5);
+		let b = model.new_int_decision(1..=5);
+		let z = model.new_int_decision(1..=5);
+		model.minimum(vec![a, b]).result(z).post().unwrap();
+
+		let (ai, bi) = (int_decision_index(a), int_decision_index(b));
+		let (_slv, _map): (Solver, _) = model.lower().positive_polarity(z).to_solver().unwrap();
+
+		let pol = |i: usize| model.int_vars[i].polarity.resolve();
+		assert_eq!(pol(ai), Some(Polarity::Positive), "a");
+		assert_eq!(pol(bi), Some(Polarity::Positive), "b");
+	}
+
+	/// `m = a * b` with non-negative factors is monotone in both factors,
+	/// so maximizing `m` prefers `a` and `b` large.
+	#[test]
+	fn polarity_objective_through_mul() {
+		let mut model = Model::default();
+		let a = model.new_int_decision(1..=5);
+		let b = model.new_int_decision(1..=5);
+		let m = model.new_int_decision(1..=25);
+		model.mul(a, b).result(m).post().unwrap();
+
+		let (ai, bi) = (int_decision_index(a), int_decision_index(b));
+		let (_slv, _map): (Solver, _) = model.lower().positive_polarity(m).to_solver().unwrap();
+
+		let pol = |i: usize| model.int_vars[i].polarity.resolve();
+		assert_eq!(pol(ai), Some(Polarity::Positive), "a");
+		assert_eq!(pol(bi), Some(Polarity::Positive), "b");
 	}
 }

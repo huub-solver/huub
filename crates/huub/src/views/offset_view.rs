@@ -10,12 +10,12 @@ use std::{
 use crate::{
 	IntSet, IntVal,
 	actions::{
-		IntDecisionActions, IntExplanationActions, IntInspectionActions, IntPropagationActions,
-		ReasoningContext,
+		IntAnalyzeActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
+		IntPropagationActions, ReasoningContext,
 	},
 	constraints::ReasonBuilder,
 	solver::{
-		IntLitMeaning,
+		IntLitMeaning, Polarity,
 		solution::{Solution, Valuation},
 	},
 	views::linear_view::LinearView,
@@ -107,6 +107,25 @@ impl<Offset: Default, Var> From<Var> for OffsetView<Offset, Var> {
 			offset: Offset::default(),
 			var: value,
 		}
+	}
+}
+
+impl<Ctx, Var> IntAnalyzeActions<Ctx> for OffsetView<IntVal, Var>
+where
+	Ctx: ReasoningContext + ?Sized,
+	Var: IntAnalyzeActions<Ctx>,
+{
+	fn polarity(&self, ctx: &mut Ctx, polarity: Polarity) {
+		// The offset does not affect the desired direction.
+		self.var.polarity(ctx, polarity);
+	}
+
+	fn request_direct_eager(&self, ctx: &mut Ctx) {
+		self.var.request_direct_eager(ctx);
+	}
+
+	fn request_order_eager(&self, ctx: &mut Ctx) {
+		self.var.request_order_eager(ctx);
 	}
 }
 

@@ -13,7 +13,7 @@ use crate::{
 	constraints::ReasonBuilder,
 	model::{
 		AdvRef, ConRef, Decision, Model,
-		decision::{DecisionReference, private},
+		decision::{DecisionReference, PolarityScore, private},
 		resolved::Resolved,
 		view::{View, boolean::BoolView, integer::IntView},
 	},
@@ -43,6 +43,14 @@ pub(crate) struct IntDecision {
 	/// This list is used to enqueue the constraints for propagation when the
 	/// domain of the variable changes.
 	pub(crate) constraints: ActivationList,
+	/// Whether the analyze stage requested the direct encoding (the `x = i`
+	/// equality literals) to be created eagerly.
+	pub(crate) eager_direct: bool,
+	/// Whether the analyze stage requested the order encoding (the `x < i`
+	/// inequality literals) to be created eagerly.
+	pub(crate) eager_order: bool,
+	/// Accumulated polarity evidence collected during the analyze stage.
+	pub(crate) polarity: PolarityScore,
 }
 
 impl Decision<IntVal> {
@@ -187,6 +195,9 @@ impl IntDecision {
 		Self {
 			domain: Domain::Domain(dom),
 			constraints: Default::default(),
+			eager_direct: false,
+			eager_order: false,
+			polarity: PolarityScore::default(),
 		}
 	}
 }

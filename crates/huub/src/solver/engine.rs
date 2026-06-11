@@ -40,7 +40,7 @@ use crate::{
 	constraints::{BoxedPropagator, Conflict, DeferredReason, Reason},
 	helpers::bytes::Bytes,
 	solver::{
-		IntLitMeaning, SearchStrategy, SwitchTrigger,
+		IntLitMeaning, Polarity, SearchStrategy, SwitchTrigger,
 		activation_list::{ActivationAction, ActivationActionS, ActivationList},
 		bool_to_int::BoolToIntMap,
 		branchers::{BoxedBrancher, Directive},
@@ -432,13 +432,28 @@ impl PropagatorExtension for Engine {
 					OrderStorage::Lazy(_)
 				));
 
-				// Ensure the lazy literal for the upper bound exists
-				let ub_lit = r.lit(&mut ctx, IntLitMeaning::Less(lb + 1));
-				if let BoolView::Lit(ub_lit) = ub_lit.0 {
-					let prev = ctx.state.trail.assign_lit(ub_lit.0);
-					debug_assert_eq!(prev, None);
+				// Fix the unfixed variable to the bound preferred by its polarity:
+				// a positive polarity fixes to the upper bound (by raising the
+				// lower bound), otherwise to the lower bound (by lowering the upper
+				// bound). Either way the required lazy literal is created.
+				match ctx.state.int_vars[r.idx()].polarity {
+					Some(Polarity::Positive) => {
+						let lb_lit = r.lit(&mut ctx, IntLitMeaning::GreaterEq(ub));
+						if let BoolView::Lit(lb_lit) = lb_lit.0 {
+							let prev = ctx.state.trail.assign_lit(lb_lit.0);
+							debug_assert_eq!(prev, None);
+						}
+						ctx.state.int_vars[r.idx()].notify_lower_bound(&mut ctx.state.trail, ub);
+					}
+					Some(Polarity::Negative) | None => {
+						let ub_lit = r.lit(&mut ctx, IntLitMeaning::Less(lb + 1));
+						if let BoolView::Lit(ub_lit) = ub_lit.0 {
+							let prev = ctx.state.trail.assign_lit(ub_lit.0);
+							debug_assert_eq!(prev, None);
+						}
+						ctx.state.int_vars[r.idx()].notify_upper_bound(&mut ctx.state.trail, lb);
+					}
 				}
-				ctx.state.int_vars[r.idx()].notify_upper_bound(&mut ctx.state.trail, lb);
 
 				let activation = mem::take(&mut ctx.state.int_activation[r.idx()]);
 				activation.for_each_activated_by(IntEvent::Fixed, |action| {

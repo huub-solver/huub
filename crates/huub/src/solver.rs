@@ -123,6 +123,23 @@ pub enum LiteralStrategy {
 /// Note that this checker will always return false.
 pub(crate) struct NoAssumptions;
 
+/// Preferred search direction for an integer decision variable.
+///
+/// The polarity is used to set the phase of the underlying Boolean literals so
+/// that the SAT solver tries the preferred direction first, and to decide to
+/// which bound an unfixed integer variable is fixed during solution checking.
+///
+/// The absence of a preferred direction is represented by `Option<Polarity>`'s
+/// `None`.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum Polarity {
+	/// Prefer larger values (push the variable toward its upper bound).
+	Positive,
+	/// Prefer smaller values (push the variable toward its lower bound).
+	Negative,
+}
+
 /// The overarching search strategy used by the solver.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]
@@ -426,6 +443,17 @@ impl Not for IntLitMeaning {
 impl AssumptionChecker for NoAssumptions {
 	fn fail(&self, bv: View<bool>) -> bool {
 		matches!(bv.0, BoolView::Const(false))
+	}
+}
+
+impl Not for Polarity {
+	type Output = Self;
+
+	fn not(self) -> Self {
+		match self {
+			Polarity::Positive => Polarity::Negative,
+			Polarity::Negative => Polarity::Positive,
+		}
 	}
 }
 
@@ -1162,6 +1190,7 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		#[builder(start_fn, into)] domain: IntSet,
 		#[builder(default)] mut order_literals: LiteralStrategy,
 		#[builder(default)] direct_literals: LiteralStrategy,
+		polarity: Option<Polarity>,
 	) -> View<IntVal> {
 		let orig_domain_len = domain.card();
 		assert_ne!(
@@ -1245,6 +1274,7 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 			domain,
 			order_encoding,
 			upper_bound,
+			polarity,
 		});
 		let iv = Decision((engine.state.int_vars.len() - 1) as u32);
 		// Create propagator activation list
@@ -1257,6 +1287,22 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		// Setup the boolean to integer mapping
 		if let OrderStorage::Eager { storage, .. } = engine.state.int_vars[iv.idx()].order_encoding
 		{
+			// Apply phase hints to the (eager) order literals according to the
+			// polarity. Note that the positive literal represents `x < val`, so a
+			// positive polarity (prefer large values) phases the negation.
+			match polarity {
+				Some(Polarity::Positive) => {
+					for l in storage {
+						self.sat.phase(!Into::<RawLit>::into(l));
+					}
+				}
+				Some(Polarity::Negative) => {
+					for l in storage {
+						self.sat.phase(Into::<RawLit>::into(l));
+					}
+				}
+				None => {}
+			}
 			let mut vars = storage;
 			if let DirectStorage::Eager(vars2) = &engine.state.int_vars[iv.idx()].direct_encoding {
 				debug_assert_eq!(Into::<i32>::into(vars.end()) + 1, vars2.start().into());

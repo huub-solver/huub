@@ -3,15 +3,16 @@
 use crate::{
 	IntSet, IntVal,
 	actions::{
-		BoolInitActions, BoolInspectionActions, InitActions, IntInitActions, IntInspectionActions,
-		IntPropCond, ReasoningContext, ReasoningEngine,
+		BoolAnalyzeActions, BoolInitActions, BoolInspectionActions, InitActions, IntAnalyzeActions,
+		IntInitActions, IntInspectionActions, IntPropCond, ReasoningContext, ReasoningEngine,
 	},
 	model::{
 		AdvRef, Advisor, ConRef, Decision, Model,
+		decision::Tier,
 		resolved::Resolved,
 		view::{View, boolean::BoolView, integer::IntView},
 	},
-	solver::{IntLitMeaning, activation_list::ActivationAction, queue::PriorityLevel},
+	solver::{IntLitMeaning, Polarity, activation_list::ActivationAction, queue::PriorityLevel},
 };
 
 /// Wrapper around [`Model`] that knows the constraint being
@@ -32,6 +33,13 @@ pub struct ModelInitContext<'a> {
 	decision_enqueue: Option<bool>,
 }
 
+impl BoolAnalyzeActions<ModelInitContext<'_>> for Decision<bool> {
+	fn polarity(&self, ctx: &mut ModelInitContext<'_>, polarity: Polarity) {
+		ctx.model
+			.observe_bool_polarity((*self).into(), Tier::Constraint, polarity);
+	}
+}
+
 impl BoolInitActions<ModelInitContext<'_>> for Decision<bool> {
 	fn advise_when_fixed(&self, ctx: &mut ModelInitContext<'_>, data: u64) {
 		self.resolve_alias(ctx.model).advise_when_fixed(ctx, data);
@@ -45,6 +53,25 @@ impl BoolInitActions<ModelInitContext<'_>> for Decision<bool> {
 impl BoolInspectionActions<ModelInitContext<'_>> for Decision<bool> {
 	fn val(&self, ctx: &ModelInitContext<'_>) -> Option<bool> {
 		self.val(ctx.model)
+	}
+}
+
+impl IntAnalyzeActions<ModelInitContext<'_>> for Decision<IntVal> {
+	fn polarity(&self, ctx: &mut ModelInitContext<'_>, polarity: Polarity) {
+		ctx.model
+			.observe_int_polarity((*self).into(), Tier::Constraint, polarity);
+	}
+
+	fn request_direct_eager(&self, ctx: &mut ModelInitContext<'_>) {
+		if let Some(dec) = self.resolve_alias(ctx.model).integer_decision() {
+			ctx.model.int_vars[dec.idx()].eager_direct = true;
+		}
+	}
+
+	fn request_order_eager(&self, ctx: &mut ModelInitContext<'_>) {
+		if let Some(dec) = self.resolve_alias(ctx.model).integer_decision() {
+			ctx.model.int_vars[dec.idx()].eager_order = true;
+		}
 	}
 }
 

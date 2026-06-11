@@ -10,8 +10,8 @@ use std::{
 use crate::{
 	IntVal,
 	actions::{
-		BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions, IntPropCond,
-		PropagationActions,
+		BoolAnalyzeActions, BoolInspectionActions, BoolPropagationActions,
+		BoolSimplificationActions, IntPropCond, PropagationActions, ReasoningContext,
 	},
 	constraints::{Conflict, ReasonBuilder},
 	model::{
@@ -21,7 +21,7 @@ use crate::{
 		resolved::Resolved,
 		view::{DefaultView, View, private},
 	},
-	solver::{IntLitMeaning, activation_list::ActivationAction},
+	solver::{IntLitMeaning, Polarity, activation_list::ActivationAction},
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -180,6 +180,20 @@ impl Add<IntVal> for View<bool> {
 	fn add(self, rhs: IntVal) -> Self::Output {
 		let me: View<IntVal> = self.into();
 		me + rhs
+	}
+}
+
+impl<Ctx> BoolAnalyzeActions<Ctx> for View<bool>
+where
+	Ctx: ReasoningContext + ?Sized,
+	Decision<bool>: BoolAnalyzeActions<Ctx>,
+{
+	fn polarity(&self, ctx: &mut Ctx, polarity: Polarity) {
+		// Only views backed by a pure Boolean decision carry recordable
+		// evidence; the decision resolves any alias and folds its negation.
+		if let BoolView::Decision(l) = self.0 {
+			l.polarity(ctx, polarity);
+		}
 	}
 }
 

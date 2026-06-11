@@ -11,9 +11,9 @@ use rustc_hash::FxHashMap;
 use crate::{
 	IntSet, IntVal,
 	actions::{
-		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions, IntPropCond,
-		IntSimplificationActions, PostingActions, ReasoningContext, ReasoningEngine,
-		SimplificationActions, Trailed, TrailingActions,
+		ConstructionActions, InitActions, IntAnalyzeActions, IntDecisionActions,
+		IntInspectionActions, IntPropCond, IntSimplificationActions, PostingActions,
+		ReasoningContext, ReasoningEngine, SimplificationActions, Trailed, TrailingActions,
 	},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
@@ -128,6 +128,13 @@ where
 	View<IntVal>: IntModelActions<E>,
 	IntVal: IntModelActions<E>,
 {
+	fn analyze(&self, ctx: &mut E::InitializationContext<'_>) {
+		// The element propagator requires the direct encoding of the index. A
+		// constant index resolves to no decision and is a no-op.
+		let index: View<IntVal> = self.index.clone().into();
+		index.request_direct_eager(ctx);
+	}
+
 	fn simplify(
 		&mut self,
 		ctx: &mut E::PropagationContext<'_>,
@@ -389,6 +396,13 @@ where
 	IntVal: IntModelActions<E>,
 	View<IntVal>: IntModelActions<E>,
 {
+	fn analyze(&self, ctx: &mut E::InitializationContext<'_>) {
+		// The element propagator requires the direct encoding of the index. A
+		// constant index resolves to no decision and is a no-op.
+		let index: View<IntVal> = self.0.index.clone().into();
+		index.request_direct_eager(ctx);
+	}
+
 	fn simplify(
 		&mut self,
 		ctx: &mut E::PropagationContext<'_>,

@@ -32,9 +32,10 @@ use tracing::warn;
 use crate::{
 	Conjunction, IntVal,
 	actions::{
-		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
-		IntEvent, IntExplanationActions, IntInitActions, IntInspectionActions,
-		IntPropagationActions, IntSimplificationActions, ReasoningContext, ReasoningEngine,
+		BoolAnalyzeActions, BoolInitActions, BoolInspectionActions, BoolPropagationActions,
+		BoolSimplificationActions, IntAnalyzeActions, IntEvent, IntExplanationActions,
+		IntInitActions, IntInspectionActions, IntPropagationActions, IntSimplificationActions,
+		ReasoningContext, ReasoningEngine,
 	},
 	lower::{LoweringContext, LoweringError},
 	model::{self, Model},
@@ -50,6 +51,7 @@ pub trait BoolModelActions<E>
 where
 	E: ReasoningEngine,
 	Self: BoolSolverActions<E>
+		+ for<'a> BoolAnalyzeActions<E::InitializationContext<'a>>
 		+ for<'a> BoolSimplificationActions<E::PropagationContext<'a>>
 		+ Into<model::View<bool>>,
 {
@@ -106,6 +108,15 @@ pub struct Conflict<Atom> {
 /// their explicit type in an enumerated type to allow for global model
 /// analysis.
 pub trait Constraint<E: ReasoningEngine + ?Sized>: Any + Debug + DynClone + Propagator<E> {
+	/// Analyze the constraint to declare the literal encoding it requires, and
+	/// to contribute polarity evidence for the decision variables it involves.
+	///
+	/// This stage runs once on the [`Model`] before lowering. The default
+	/// implementation contributes nothing.
+	fn analyze(&self, context: &mut E::InitializationContext<'_>) {
+		let _ = context;
+	}
+
 	/// Simplify the [`Model`] given the current constraint.
 	///
 	/// This method is expected to reduce the domains of decision variables,
@@ -139,6 +150,7 @@ pub trait IntModelActions<E>
 where
 	E: ReasoningEngine,
 	Self: IntSolverActions<E>
+		+ for<'a> IntAnalyzeActions<E::InitializationContext<'a>>
 		+ for<'a> IntSimplificationActions<E::PropagationContext<'a>>
 		+ Into<model::View<IntVal>>,
 {
@@ -276,6 +288,7 @@ impl<E, B> BoolModelActions<E> for B
 where
 	E: ReasoningEngine,
 	B: BoolSolverActions<E>
+		+ for<'a> BoolAnalyzeActions<E::InitializationContext<'a>>
 		+ for<'a> BoolSimplificationActions<E::PropagationContext<'a>>
 		+ Into<model::View<bool>>,
 {
@@ -422,6 +435,7 @@ impl<E, I> IntModelActions<E> for I
 where
 	E: ReasoningEngine,
 	I: IntSolverActions<E>
+		+ for<'a> IntAnalyzeActions<E::InitializationContext<'a>>
 		+ for<'a> IntSimplificationActions<E::PropagationContext<'a>>
 		+ Into<model::View<IntVal>>,
 {

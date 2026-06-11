@@ -15,14 +15,15 @@ use rangelist::IntervalIterator;
 use crate::{
 	IntSet, IntVal,
 	actions::{
-		BoolInspectionActions, BoolOperations, BoolPropagationActions, BoolSimplificationActions,
-		IntDecisionActions, IntExplanationActions, IntInspectionActions, IntPropagationActions,
-		IntSimplificationActions, PropagationActions, ReasoningContext,
+		BoolAnalyzeActions, BoolInspectionActions, BoolOperations, BoolPropagationActions,
+		BoolSimplificationActions, IntAnalyzeActions, IntDecisionActions, IntExplanationActions,
+		IntInspectionActions, IntPropagationActions, IntSimplificationActions, PropagationActions,
+		ReasoningContext,
 	},
 	constraints::ReasonBuilder,
 	helpers::{div_ceil, div_floor},
 	solver::{
-		IntLitMeaning,
+		IntLitMeaning, Polarity,
 		solution::{Solution, Valuation},
 	},
 	views::offset_view::OffsetView,
@@ -171,6 +172,32 @@ impl<Var> From<Var> for LinearBoolView<NonZero<IntVal>, IntVal, Var> {
 			offset: 0,
 			var,
 		}
+	}
+}
+
+impl<Ctx, Var> IntAnalyzeActions<Ctx> for LinearBoolView<NonZero<IntVal>, IntVal, Var>
+where
+	Ctx: ReasoningContext + ?Sized,
+	Var: BoolAnalyzeActions<Ctx>,
+{
+	fn polarity(&self, ctx: &mut Ctx, polarity: Polarity) {
+		// The integer view is backed by a Boolean; a negative scale would flip
+		// the direction (the stored scale is kept positive, so this is a no-op
+		// in practice).
+		let polarity = if self.scale.is_negative() {
+			!polarity
+		} else {
+			polarity
+		};
+		self.var.polarity(ctx, polarity);
+	}
+
+	fn request_direct_eager(&self, _ctx: &mut Ctx) {
+		// Backed by a Boolean: there are no integer literals to create eagerly.
+	}
+
+	fn request_order_eager(&self, _ctx: &mut Ctx) {
+		// Backed by a Boolean: there are no integer literals to create eagerly.
 	}
 }
 

@@ -1,6 +1,7 @@
 //! Traits that encapsulate different sets of actions that can be performed at
 //! different phases and by different objects in the solving process.
 
+mod analyze;
 mod boolean;
 mod initialization;
 mod integer;
@@ -8,6 +9,7 @@ mod integer;
 use std::{marker::PhantomData, ops::Not};
 
 pub use crate::actions::{
+	analyze::{BoolAnalyzeActions, IntAnalyzeActions},
 	boolean::{
 		BoolInspectionActions, BoolOperations, BoolPropagationActions, BoolSimplificationActions,
 	},

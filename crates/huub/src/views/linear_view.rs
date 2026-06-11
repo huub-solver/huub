@@ -13,13 +13,13 @@ use std::{
 use crate::{
 	IntSet, IntVal,
 	actions::{
-		IntDecisionActions, IntExplanationActions, IntInspectionActions, IntPropagationActions,
-		IntSimplificationActions, PropagationActions, ReasoningContext,
+		IntAnalyzeActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
+		IntPropagationActions, IntSimplificationActions, PropagationActions, ReasoningContext,
 	},
 	constraints::ReasonBuilder,
 	helpers::{div_ceil, div_floor},
 	solver::{
-		IntLitMeaning,
+		IntLitMeaning, Polarity,
 		solution::{Solution, Valuation},
 	},
 	views::offset_view::OffsetView,
@@ -175,6 +175,30 @@ impl<Var> From<OffsetView<IntVal, Var>> for LinearView<NonZero<IntVal>, IntVal, 
 impl<Var> From<Var> for LinearView<NonZero<IntVal>, IntVal, Var> {
 	fn from(var: Var) -> Self {
 		Self::new(NonZero::new(1).unwrap(), 0, var)
+	}
+}
+
+impl<Ctx, Var> IntAnalyzeActions<Ctx> for LinearView<NonZero<IntVal>, IntVal, Var>
+where
+	Ctx: ReasoningContext + ?Sized,
+	Var: IntAnalyzeActions<Ctx>,
+{
+	fn polarity(&self, ctx: &mut Ctx, polarity: Polarity) {
+		// A negative scale flips the desired direction onto the variable.
+		let polarity = if self.scale.is_negative() {
+			!polarity
+		} else {
+			polarity
+		};
+		self.var.polarity(ctx, polarity);
+	}
+
+	fn request_direct_eager(&self, ctx: &mut Ctx) {
+		self.var.request_direct_eager(ctx);
+	}
+
+	fn request_order_eager(&self, ctx: &mut Ctx) {
+		self.var.request_order_eager(ctx);
 	}
 }
 

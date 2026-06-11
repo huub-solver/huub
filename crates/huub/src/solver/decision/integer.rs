@@ -18,7 +18,7 @@ use crate::{
 		Trailed, TrailingActions,
 	},
 	solver::{
-		IntLitMeaning, Solver,
+		IntLitMeaning, Polarity, Solver,
 		decision::{Decision, DecisionReference, private},
 		engine::State,
 		solving_context::SolvingContext,
@@ -89,6 +89,11 @@ pub(crate) struct IntDecision {
 	///
 	/// Note that the lower bound is tracked within [`Self::order_encoding`].
 	pub(crate) upper_bound: Trailed<IntVal>,
+	/// The preferred search direction for the integer variable, if any.
+	///
+	/// This drives the phase of lazily-created order literals and the bound to
+	/// which the variable is fixed in `check_solution`.
+	pub(crate) polarity: Option<Polarity>,
 }
 
 /// The definition given to a lazily created literal.
@@ -1459,7 +1464,7 @@ mod tests {
 		IntSet, IntVal,
 		actions::{IntDecisionActions, IntInspectionActions},
 		solver::{
-			IntLitMeaning, LiteralStrategy, Solver,
+			IntLitMeaning, LiteralStrategy, Polarity, Solver, Status, Valuation,
 			decision::{Decision, integer::IntDecision},
 			view::{View, boolean::BoolView, integer::IntView},
 		},
@@ -1784,5 +1789,47 @@ mod tests {
 				.chain((2..=9).map(NotEq))
 				.chain(once(Less(10))),
 		);
+	}
+
+	/// An otherwise-unfixed lazy integer variable is fixed to the bound
+	/// preferred by its polarity during solution checking.
+	#[test]
+	fn polarity_check_solution_fixes_to_bound() {
+		for (polarity, expected) in [(Polarity::Positive, 10), (Polarity::Negative, 1)] {
+			let mut slv: Solver = Solver::default();
+			let x = slv.new_int_decision(1..=10).polarity(polarity).view();
+			let mut found = None;
+			let status = slv
+				.solve()
+				.on_solution(|sol| {
+					found = Some(Valuation::val(&x, sol));
+				})
+				.satisfy();
+			assert_eq!(status, Status::Satisfied);
+			assert_eq!(found, Some(expected), "polarity {polarity:?}");
+		}
+	}
+
+	/// With an eager order encoding, the phase hints make the first solution
+	/// take the bound preferred by the polarity.
+	#[test]
+	fn polarity_eager_phase_prefers_bound() {
+		for (polarity, expected) in [(Polarity::Positive, 4), (Polarity::Negative, 1)] {
+			let mut slv: Solver = Solver::default();
+			let x = slv
+				.new_int_decision(1..=4)
+				.order_literals(LiteralStrategy::Eager)
+				.polarity(polarity)
+				.view();
+			let mut found = None;
+			let status = slv
+				.solve()
+				.on_solution(|sol| {
+					found = Some(Valuation::val(&x, sol));
+				})
+				.satisfy();
+			assert_eq!(status, Status::Satisfied);
+			assert_eq!(found, Some(expected), "polarity {polarity:?}");
+		}
 	}
 }

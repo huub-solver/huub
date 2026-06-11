@@ -14,11 +14,11 @@ use pindakaas::{
 use crate::{
 	Conjunction, IntVal,
 	actions::{
-		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
-		InitActions, IntDecisionActions, IntEvent, IntInitActions, IntInspectionActions,
-		IntPropCond, IntPropagationActions, IntSimplificationActions, PostingActions,
-		PropagationActions, ReasoningContext, ReasoningEngine, SimplificationActions, Trailed,
-		TrailingActions,
+		BoolAnalyzeActions, BoolInitActions, BoolInspectionActions, BoolPropagationActions,
+		BoolSimplificationActions, InitActions, IntAnalyzeActions, IntDecisionActions, IntEvent,
+		IntInitActions, IntInspectionActions, IntPropCond, IntPropagationActions,
+		IntSimplificationActions, PostingActions, PropagationActions, ReasoningContext,
+		ReasoningEngine, SimplificationActions, Trailed, TrailingActions,
 	},
 	constraints::{
 		BoolModelActions, BoolSolverActions, Constraint, IntModelActions, IntSolverActions,
@@ -31,7 +31,8 @@ use crate::{
 	lower::{LoweringContext, LoweringError},
 	model::{self, expressions::bool_formula::BoolFormula},
 	solver::{
-		self, BoolView, Decision, IntLitMeaning, queue::PriorityLevel, view::integer::IntView,
+		self, BoolView, Decision, IntLitMeaning, Polarity, queue::PriorityLevel,
+		view::integer::IntView,
 	},
 	views::LinearBoolView,
 };
@@ -294,6 +295,22 @@ where
 	model::View<bool>: BoolModelActions<E>,
 	OF: OverflowMode,
 {
+	fn analyze(&self, ctx: &mut E::InitializationContext<'_>) {
+		match self.reif {
+			// A half-reified constraint is vacuously satisfied when the
+			// implication literal is false.
+			Some(Reification::ImpliedBy(r)) => r.polarity(ctx, Polarity::Negative),
+			// For an `int_lin_le` constraint (sum <= rhs), making each term
+			// smaller makes the constraint easier to satisfy.
+			None if self.comparator == LinComparator::LessEq => {
+				for t in &self.terms {
+					t.polarity(ctx, Polarity::Negative);
+				}
+			}
+			_ => {}
+		}
+	}
+
 	fn simplify(
 		&mut self,
 		ctx: &mut E::PropagationContext<'_>,
