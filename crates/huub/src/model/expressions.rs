@@ -38,6 +38,7 @@ use crate::{
 		int_abs::IntAbsBounds,
 		int_array_minimum::IntArrayMinimumBounds,
 		int_div::IntDivBounds,
+		int_lex_le::IntLexLeBounds,
 		int_linear::{IntLinear, LinComparator, Reification},
 		int_mul::IntMulBounds,
 		int_no_overlap::IntNoOverlapSweep,
@@ -180,6 +181,63 @@ impl Model {
 		result: <E as ElementConstraint>::Result,
 	) -> Result<(), Conflict<View<bool>>> {
 		<E as ElementConstraint>::element_constraint(self, array, index, result)
+	}
+
+	/// Create a lexicographic ordering constraint between two tuples of integer
+	/// decisions.
+	///
+	/// The constraint is completed with a comparator endpoint giving the
+	/// right-hand tuple — [`ModelLexBuilder::le`], [`ModelLexBuilder::lt`],
+	/// [`ModelLexBuilder::ge`], or [`ModelLexBuilder::gt`] — and then posted.
+	///
+	/// The two tuples need not have the same length: when the compared prefixes
+	/// are equal, the shorter tuple is considered the lexicographically smaller
+	/// one (so `[1, 2]` is smaller than `[1, 2, 3]`).
+	#[builder(finish_fn = post)]
+	pub fn lex(
+		&mut self,
+		#[builder(start_fn, into)] lhs: Vec<View<IntVal>>,
+		#[builder(setters(name = comparator_internal, vis = ""))] comparator: Comparator,
+		#[builder(setters(name = rhs_internal, vis = ""))] rhs: Vec<View<IntVal>>,
+	) -> Result<(), Conflict<View<bool>>> {
+		// The constraint enforces `left <=lex right`. `ge`/`gt` are the reverse
+		// orders, obtained by swapping the operands.
+		let (left, right, strict) = match comparator {
+			Comparator::LessEqual => (lhs, rhs, false),
+			Comparator::Less => (lhs, rhs, true),
+			Comparator::GreaterEqual => (rhs, lhs, false),
+			Comparator::Greater => (rhs, lhs, true),
+			Comparator::Equal | Comparator::NotEqual => {
+				unreachable!("the lex builder only exposes ordering endpoints")
+			}
+		};
+
+		let strict_core = if strict {
+			left.len() >= right.len()
+		} else {
+			left.len() > right.len()
+		};
+		let mut position: Vec<_> = left.into_iter().zip(right).collect();
+		// An empty compared prefix means the order is decided purely by the tuple
+		// lengths, which `strict_core` already captures.
+		let Some((last_left, last_right)) = position.pop() else {
+			return strict_core.fix(self, false, []);
+		};
+		if strict_core && last_left.max(self) == IntVal::MAX {
+			// A strict core is normally encoded as `last_left + 1 <= last_right`, but
+			// that would overflow here. Rather than narrowing `last_left`'s domain
+			// append an always-violated position. This forces the order to be decided
+			// strictly within the original positions, leaving every domain untouched.
+			position.push((last_left, last_right));
+			position.push((1.into(), 0.into()));
+		} else {
+			// `last_left + 1 <= last_right` encodes the strict order `<`; a non-strict
+			// core adds zero and leaves the position unchanged.
+			let last_left = last_left.bounding_add(self, strict_core as IntVal)?;
+			position.push((last_left, last_right));
+		}
+		let con = IntLexLeBounds::new(self, position);
+		self.post_constraint(con)
 	}
 
 	/// Create a linear equation constraint.
@@ -653,6 +711,64 @@ impl<E: ElementConstraint, S: model_element_builder::State> ModelElementBuilder<
 		let res = E::define_result(self.self_receiver, &self.array, *index);
 		self.result(res.clone()).post().unwrap();
 		res
+	}
+}
+
+impl<'a, S: model_lex_builder::State> ModelLexBuilder<'a, S> {
+	/// Require the left-hand tuple to be lexicographically greater than or
+	/// equal to the given tuple.
+	pub fn ge(
+		self,
+		rhs: impl IntoIterator<Item = View<IntVal>>,
+	) -> ModelLexBuilder<'a, model_lex_builder::SetRhs<model_lex_builder::SetComparator<S>>>
+	where
+		S::Rhs: model_lex_builder::IsUnset,
+		S::Comparator: model_lex_builder::IsUnset,
+	{
+		self.comparator_internal(Comparator::GreaterEqual)
+			.rhs_internal(rhs.into_iter().collect())
+	}
+
+	/// Require the left-hand tuple to be strictly lexicographically greater
+	/// than the given tuple.
+	pub fn gt(
+		self,
+		rhs: impl IntoIterator<Item = View<IntVal>>,
+	) -> ModelLexBuilder<'a, model_lex_builder::SetRhs<model_lex_builder::SetComparator<S>>>
+	where
+		S::Rhs: model_lex_builder::IsUnset,
+		S::Comparator: model_lex_builder::IsUnset,
+	{
+		self.comparator_internal(Comparator::Greater)
+			.rhs_internal(rhs.into_iter().collect())
+	}
+
+	/// Require the left-hand tuple to be lexicographically smaller than or
+	/// equal to the given tuple.
+	pub fn le(
+		self,
+		rhs: impl IntoIterator<Item = View<IntVal>>,
+	) -> ModelLexBuilder<'a, model_lex_builder::SetRhs<model_lex_builder::SetComparator<S>>>
+	where
+		S::Rhs: model_lex_builder::IsUnset,
+		S::Comparator: model_lex_builder::IsUnset,
+	{
+		self.comparator_internal(Comparator::LessEqual)
+			.rhs_internal(rhs.into_iter().collect())
+	}
+
+	/// Require the left-hand tuple to be strictly lexicographically smaller
+	/// than the given tuple.
+	pub fn lt(
+		self,
+		rhs: impl IntoIterator<Item = View<IntVal>>,
+	) -> ModelLexBuilder<'a, model_lex_builder::SetRhs<model_lex_builder::SetComparator<S>>>
+	where
+		S::Rhs: model_lex_builder::IsUnset,
+		S::Comparator: model_lex_builder::IsUnset,
+	{
+		self.comparator_internal(Comparator::Less)
+			.rhs_internal(rhs.into_iter().collect())
 	}
 }
 

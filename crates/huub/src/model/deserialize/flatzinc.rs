@@ -201,6 +201,10 @@ pub enum ConstraintIdent {
 	IntPow,
 	/// "int_times"
 	IntTimes,
+	/// "huub_lex_less_int"
+	LexLessInt,
+	/// "huub_lex_lesseq_int"
+	LexLesseqInt,
 	/// "huub_regular"
 	Regular,
 	/// "huub_seq_precede_chain_int"
@@ -503,6 +507,8 @@ impl ConstraintIdent {
 			Self::IntNeReif => "int_ne_reif",
 			Self::IntPow => "int_pow",
 			Self::IntTimes => "int_times",
+			Self::LexLessInt => "huub_lex_less_int",
+			Self::LexLesseqInt => "huub_lex_lesseq_int",
 			Self::Regular => "huub_regular",
 			Self::SeqPrecedeChainInt => "huub_seq_precede_chain_int",
 			Self::SetIn => "set_in",
@@ -548,6 +554,8 @@ impl TryFrom<&str> for ConstraintIdent {
 			"huub_diffn_nonstrict_k_int" => Ok(Self::DiffnKInt { strict: false }),
 			"huub_diffn_nonstrict_int" => Ok(Self::DiffnInt { strict: false }),
 			"huub_disjunctive_strict" => Ok(Self::DisjuctiveStrict),
+			"huub_lex_less_int" => Ok(Self::LexLessInt),
+			"huub_lex_lesseq_int" => Ok(Self::LexLesseqInt),
 			"huub_regular" => Ok(Self::Regular),
 			"huub_seq_precede_chain_int" => Ok(Self::SeqPrecedeChainInt),
 			"huub_table_int" => Ok(Self::TableInt),
@@ -2011,6 +2019,38 @@ impl<'a> FznModelBuilder<'a> {
 						.map(|c| c.collect())
 						.collect();
 					self.prb.table(args).values(table).post()?;
+				}
+				ConstraintIdent::LexLessInt => {
+					let [x, y] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let x: Vec<_> = self
+						.arg_array(x)?
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+					let y: Vec<_> = self
+						.arg_array(y)?
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+					self.prb.lex(x).lt(y).post()?;
+				}
+				ConstraintIdent::LexLesseqInt => {
+					let [x, y] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let x: Vec<_> = self
+						.arg_array(x)?
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+					let y: Vec<_> = self
+						.arg_array(y)?
+						.iter()
+						.map(|l| self.lit_int(l))
+						.try_collect()?;
+					self.prb.lex(x).le(y).post()?;
 				}
 				ConstraintIdent::SeqPrecedeChainInt => {
 					let [args] = c.args.as_slice() else {

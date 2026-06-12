@@ -7,6 +7,7 @@ pub mod int_abs;
 pub mod int_array_element;
 pub mod int_array_minimum;
 pub mod int_div;
+pub mod int_lex_le;
 pub mod int_linear;
 pub mod int_mul;
 pub mod int_no_overlap;
