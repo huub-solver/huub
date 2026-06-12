@@ -307,16 +307,17 @@ impl Resolved<Decision<IntVal>> {
 		if *dom == diff {
 			return Ok(());
 		}
-		if diff.card() == Some(1) {
-			let val = *diff.min().unwrap();
-			ctx.int_vars[self.idx()].domain = Domain::Alias(val.into());
+		let min = *diff.min().unwrap();
+		let max = *diff.max().unwrap();
+		if min == max {
+			ctx.int_vars[self.idx()].domain = Domain::Alias(min.into());
 			ctx.int_events.insert(self.0.0, IntEvent::Fixed);
 		} else {
 			let entry = ctx.int_events.entry(self.0.0).or_insert(IntEvent::Domain);
-			if dom.min().unwrap() != diff.min().unwrap() {
+			if *dom.min().unwrap() != min {
 				*entry += IntEvent::LowerBound;
 			}
-			if dom.max().unwrap() != diff.max().unwrap() {
+			if *dom.max().unwrap() != max {
 				*entry += IntEvent::UpperBound;
 			}
 
@@ -377,16 +378,17 @@ impl Resolved<Decision<IntVal>> {
 		} else if *dom == intersect {
 			return Ok(());
 		}
-		if intersect.card() == Some(1) {
-			let val = *intersect.min().unwrap();
-			ctx.int_vars[self.idx()].domain = Domain::Alias(val.into());
+		let min = *intersect.min().unwrap();
+		let max = *intersect.max().unwrap();
+		if min == max {
+			ctx.int_vars[self.idx()].domain = Domain::Alias(min.into());
 			ctx.int_events.insert(self.0.0, IntEvent::Fixed);
 		} else {
 			let entry = ctx.int_events.entry(self.0.0).or_insert(IntEvent::Domain);
-			if dom.min().unwrap() != intersect.min().unwrap() {
+			if *dom.min().unwrap() != min {
 				*entry += IntEvent::LowerBound;
 			}
-			if dom.max().unwrap() != intersect.max().unwrap() {
+			if *dom.max().unwrap() != max {
 				*entry += IntEvent::UpperBound;
 			}
 
@@ -412,15 +414,16 @@ impl Resolved<Decision<IntVal>> {
 		} else if val < *dom.min().unwrap() {
 			return Err(ctx.create_conflict(View(BoolView::IntLess(self.0, val + 1)), reason));
 		}
-		if val != *dom.min().unwrap() {
-			dom.tighten_max(val);
+		dom.tighten_max(val);
+		let min = *dom.min().unwrap();
+		if min == *dom.max().unwrap() {
+			def.domain = Domain::Alias(min.into());
+			ctx.int_events.insert(self.0.0, IntEvent::Fixed);
+		} else {
 			ctx.int_events
 				.entry(self.0.0)
 				.and_modify(|v| *v += IntEvent::UpperBound)
 				.or_insert(IntEvent::UpperBound);
-		} else {
-			def.domain = Domain::Alias(val.into());
-			ctx.int_events.insert(self.0.0, IntEvent::Fixed);
 		};
 		Ok(())
 	}
@@ -442,15 +445,16 @@ impl Resolved<Decision<IntVal>> {
 		} else if val > *dom.max().unwrap() {
 			return Err(ctx.create_conflict(View(BoolView::IntGreaterEq(self.0, val)), reason));
 		}
-		if val != *dom.max().unwrap() {
-			dom.tighten_min(val);
+		dom.tighten_min(val);
+		let min = *dom.min().unwrap();
+		if min == *dom.max().unwrap() {
+			def.domain = Domain::Alias(min.into());
+			ctx.int_events.insert(self.0.0, IntEvent::Fixed);
+		} else {
 			ctx.int_events
 				.entry(self.0.0)
 				.and_modify(|e| *e += IntEvent::LowerBound)
 				.or_insert(IntEvent::LowerBound);
-		} else {
-			def.domain = Domain::Alias(val.into());
-			ctx.int_events.insert(self.0.0, IntEvent::Fixed);
 		};
 		Ok(())
 	}

@@ -187,4 +187,32 @@ mod tests {
 
 		assert!(prb.unique(prev.iter().copied()).post().is_err());
 	}
+
+	#[test]
+	#[traced_test]
+	fn test_lowering_gapped_fixed_sound() {
+		use itertools::Itertools;
+
+		use crate::solver::Solver;
+
+		let mut prb = Model::default();
+		let vars: Vec<_> = [
+			IntSet::from_iter([1..=2, 4..=6]),
+			IntSet::from_iter([1..=1, 3..=4, 6..=6]),
+			IntSet::from_iter([2..=2, 5..=5]),
+			IntSet::from_iter([3..=3, 5..=5]),
+			IntSet::from_iter([3..=6]),
+			(2..=2).into(),
+		]
+		.into_iter()
+		.map(|domain| prb.new_int_decision(domain))
+		.collect();
+		prb.unique(vars.iter().copied())
+			.post()
+			.expect("post failed");
+
+		let (mut slv, map): (Solver, _) = prb.lower().to_solver().expect("to_solver failed");
+		let views: Vec<_> = vars.iter().map(|&v| map.get(&mut slv, v)).collect();
+		slv.assert_all_solutions(&views, |sol| sol.iter().all_unique());
+	}
 }
