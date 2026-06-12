@@ -546,6 +546,12 @@ where
 	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
 		use Reification::*;
 
+		// Linear constraints should otherwise have been simplified.
+		debug_assert!(
+			self.terms.len() > 1,
+			"`IntLinear` must have at least two terms"
+		);
+
 		let terms = self.terms.iter().map(|&v| slv.solver_view(v)).collect_vec();
 		let r = self.reif.as_ref().map(|&r| {
 			slv.solver_view(match r {
@@ -677,6 +683,12 @@ where
 impl IntLinearLessEqBounds<OverflowPossible, solver::View<IntVal>> {
 	/// Create a new [`IntLinearLessEqBounds`] propagator and post it in the
 	/// solver.
+	///
+	/// # Panics
+	///
+	/// Panics if no terms are given. An empty linear constraint is a constant
+	/// comparison rather than a propagation problem, so the caller must
+	/// evaluate it directly instead of posting a propagator.
 	pub fn post<E>(
 		solver: &mut E,
 		vars: impl IntoIterator<Item = solver::View<IntVal>>,
@@ -697,6 +709,10 @@ impl IntLinearLessEqBounds<OverflowPossible, solver::View<IntVal>> {
 				}
 			})
 			.collect();
+		assert!(
+			!vars.is_empty(),
+			"`IntLinearLessEqBounds::post` must be given at least one term"
+		);
 
 		solver.add_propagator(Box::new(Self {
 			terms: vars.clone(),
@@ -810,6 +826,12 @@ where
 impl IntLinearLessEqImpBounds<OverflowPossible, solver::View<IntVal>, Decision<bool>> {
 	/// Create a new [`IntLinearLessEqImpBounds`] propagator and post it in the
 	/// solver.
+	///
+	/// # Panics
+	///
+	/// Panics if no terms are given. An empty linear constraint is a constant
+	/// comparison rather than a propagation problem, so the caller must
+	/// evaluate it directly instead of posting a propagator.
 	pub fn post<E>(
 		solver: &mut E,
 		vars: impl IntoIterator<Item = solver::View<IntVal>>,
@@ -838,6 +860,10 @@ impl IntLinearLessEqImpBounds<OverflowPossible, solver::View<IntVal>, Decision<b
 				}
 			})
 			.collect();
+		assert!(
+			!vars.is_empty(),
+			"`IntLinearLessEqImpBounds::post` must be given at least one term"
+		);
 
 		solver.add_propagator(Box::new(Self {
 			terms: vars.clone(),
@@ -850,6 +876,12 @@ impl IntLinearLessEqImpBounds<OverflowPossible, solver::View<IntVal>, Decision<b
 impl IntLinearNotEqImpValue<OverflowPossible, solver::View<IntVal>, Decision<bool>> {
 	/// Create a new [`IntLinearNotEqImpValue`] propagator and post it in the
 	/// solver.
+	///
+	/// # Panics
+	///
+	/// Panics if no terms are given. An empty linear constraint is a constant
+	/// comparison rather than a propagation problem, so the caller must
+	/// evaluate it directly instead of posting a propagator.
 	pub fn post<E>(
 		solver: &mut E,
 		vars: impl IntoIterator<Item = solver::View<IntVal>>,
@@ -885,6 +917,11 @@ impl IntLinearNotEqImpValue<OverflowPossible, solver::View<IntVal>, Decision<boo
 				}
 			})
 			.collect();
+		assert!(
+			!vars.is_empty(),
+			"`IntLinearNotEqImpValue::post` must be given at least one term"
+		);
+
 		let num_free = solver.new_trailed(vars.len() + 1);
 
 		if IntLinear::can_overflow(solver, &vars) || IntVal::try_from(violation).is_err() {
@@ -910,6 +947,12 @@ impl IntLinearNotEqImpValue<OverflowPossible, solver::View<IntVal>, Decision<boo
 impl IntLinearNotEqValue<OverflowPossible, solver::View<IntVal>> {
 	/// Create a new [`IntLinearNotEqImpValue`] propagator and post it in the
 	/// solver.
+	///
+	/// # Panics
+	///
+	/// Panics if no terms are given. An empty linear constraint is a constant
+	/// comparison rather than a propagation problem, so the caller must
+	/// evaluate it directly instead of posting a propagator.
 	pub fn post<E>(
 		solver: &mut E,
 		vars: impl IntoIterator<Item = solver::View<IntVal>>,
@@ -930,6 +973,11 @@ impl IntLinearNotEqValue<OverflowPossible, solver::View<IntVal>> {
 				}
 			})
 			.collect();
+		assert!(
+			!vars.is_empty(),
+			"`IntLinearNotEqValue::post` must be given at least one term"
+		);
+
 		let num_free = solver.new_trailed(vars.len());
 
 		if IntLinear::can_overflow(solver, &vars) || IntVal::try_from(violation).is_err() {

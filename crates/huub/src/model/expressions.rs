@@ -27,7 +27,10 @@ pub use crate::model::expressions::{
 };
 use crate::{
 	IntSet, IntVal,
-	actions::{IntInspectionActions, IntPropagationActions, IntSimplificationActions},
+	actions::{
+		BoolPropagationActions, IntInspectionActions, IntPropagationActions,
+		IntSimplificationActions,
+	},
 	constraints::{
 		Conflict,
 		cumulative::CumulativeTimeTable,
@@ -248,6 +251,26 @@ impl Model {
 				}
 			}
 			terms.push(v.bounding_mul(self, k)?);
+		}
+
+		if terms.is_empty() {
+			// All variable terms cancelled out, so the constraint reduces to a
+			// comparison between the constant `0` and the (constant) `rhs`. Evaluate
+			// it directly, then either enforce it or fix the reification literal.
+			let satisfied = match comparator {
+				Comparator::NotEqual => 0 != rhs,
+				Comparator::Equal => 0 == rhs,
+				Comparator::Less => 0 < rhs,
+				Comparator::LessEqual => 0 <= rhs,
+				Comparator::GreaterEqual => 0 >= rhs,
+				Comparator::Greater => 0 > rhs,
+			};
+			return match reif {
+				None => satisfied.require(self, []),
+				Some(Reification::ReifiedBy(r)) => r.fix(self, satisfied, []),
+				Some(Reification::ImpliedBy(_)) if satisfied => Ok(()),
+				Some(Reification::ImpliedBy(r)) => r.fix(self, false, []),
+			};
 		}
 
 		let mut negate_terms = || -> Result<(), Conflict<View<bool>>> {
@@ -900,5 +923,44 @@ impl<'a, S: model_proposition_builder::State> ModelPropositionBuilder<'a, S> {
 		let res = self.self_receiver.new_bool_decision();
 		self.reified_by(res).post().unwrap();
 		res
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use expect_test::expect;
+
+	use crate::model::Model;
+
+	#[test]
+	fn test_empty_linear_implied_false() {
+		// `0 == 5` is false, so the half-reification literal `r` must be fixed to
+		// false (the model stays satisfiable).
+		let mut prb = Model::default();
+		let x = prb.new_int_decision(1..=5);
+		let r = prb.new_bool_decision();
+		prb.linear(x - x).eq(5).implied_by(r).post().unwrap();
+		prb.expect_solutions(&[r], expect!["false"]);
+	}
+
+	#[test]
+	fn test_empty_linear_reified_false() {
+		// `0 == 5` is false, so the reification literal `r` must be fixed to false
+		// and the model must remain satisfiable.
+		let mut prb = Model::default();
+		let x = prb.new_int_decision(1..=5);
+		let r = prb.new_bool_decision();
+		prb.linear(x - x).eq(5).reified_by(r).post().unwrap();
+		prb.expect_solutions(&[r], expect!["false"]);
+	}
+
+	#[test]
+	fn test_empty_linear_reified_true() {
+		// `0 == 0` is true, so the reification literal `r` must be fixed to true.
+		let mut prb = Model::default();
+		let x = prb.new_int_decision(1..=5);
+		let r = prb.new_bool_decision();
+		prb.linear(x - x).eq(0).reified_by(r).post().unwrap();
+		prb.expect_solutions(&[r], expect!["true"]);
 	}
 }
