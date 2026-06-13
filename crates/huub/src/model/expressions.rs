@@ -29,6 +29,7 @@ use crate::{
 			CumulativePropagator, ttef_check_propagation_enabled,
 			ttef_filtering_propagation_enabled, ttef_opportunistic_propagation_enabled,
 		},
+		circuit::Circuit,
 		disjunctive::{Disjunctive, DisjunctivePropagator},
 		int_abs::IntAbsBounds,
 		int_array_minimum::IntArrayMinimumBounds,
@@ -62,6 +63,39 @@ impl Model {
 			abs: result,
 			origin_positive: origin.geq(0),
 		})
+	}
+
+	/// Create a `circuit` constraint that enforces that the values of the given
+	/// successor decisions form a single Hamiltonian cycle.
+	#[builder(finish_fn = post)]
+	pub fn circuit(
+		&mut self,
+		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
+		#[builder(default = 1)] offset: IntVal,
+		check_propagation: Option<bool>,
+		prevent_propagation: Option<bool>,
+		scc_propagation: Option<bool>,
+	) -> Result<(), Conflict<View<bool>>> {
+		let vars: Vec<_> = vars.into_iter().map_into().collect();
+		if vars.len() <= 1 {
+			return Ok(());
+		}
+		// Post a model-level `IntUnique` since a `circuit` solution is a permutation
+		self.post_constraint(IntUnique {
+			bounds_prop: IntUniqueBounds::new(vars.clone()),
+			value_prop: IntUniqueValue::new(vars.clone()),
+			bounds_propagation: Some(false),
+			value_propagation: Some(false),
+			domain_propagation: Some(true),
+		})?;
+		self.post_constraint(Circuit::new(
+			vars,
+			offset,
+			false,
+			check_propagation,
+			prevent_propagation,
+			scc_propagation,
+		))
 	}
 
 	/// Create constraint that enforces that the given Boolean decision variable
@@ -446,6 +480,41 @@ impl Model {
 			None => {}
 		}
 		self.post_constraint(formula)
+	}
+
+	/// Create a `subcircuit` constraint that enforces that the values of the
+	/// given successor decisions form a single simple cycle, with every node
+	/// not on the cycle taking itself as successor (a self-loop).
+	#[builder(finish_fn = post)]
+	pub fn subcircuit(
+		&mut self,
+		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
+		#[builder(default = 1)] offset: IntVal,
+		check_propagation: Option<bool>,
+		prevent_propagation: Option<bool>,
+		scc_propagation: Option<bool>,
+	) -> Result<(), Conflict<View<bool>>> {
+		let vars: Vec<_> = vars.into_iter().map_into().collect();
+		if vars.len() <= 1 {
+			return Ok(());
+		}
+		// Post a model-level `IntUnique` since all variables in a `subcircuit`
+		// constraint must take distinct values.
+		self.post_constraint(IntUnique {
+			bounds_prop: IntUniqueBounds::new(vars.clone()),
+			value_prop: IntUniqueValue::new(vars.clone()),
+			bounds_propagation: Some(false),
+			value_propagation: Some(false),
+			domain_propagation: Some(true),
+		})?;
+		self.post_constraint(Circuit::new(
+			vars,
+			offset,
+			true,
+			check_propagation,
+			prevent_propagation,
+			scc_propagation,
+		))
 	}
 
 	/// Create a `table` constraint that enforces that given list of integer
