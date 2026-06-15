@@ -89,10 +89,6 @@ struct GoalPolarity {
 	start_fn(name = builder_internal, vis = "pub(crate)"),
 	finish_fn(name = finish_internal, vis = "")
 )]
-#[allow(
-	clippy::missing_docs_in_private_items,
-	reason = "cargo clippy triggers on origin for unknown reason"
-)]
 pub(crate) struct LowererComplete<Origin = ()> {
 	/// A origin source from which the model was created, used to define wrapper
 	/// methods for the lowering process.

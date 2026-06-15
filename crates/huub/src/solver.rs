@@ -1181,10 +1181,6 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		/// This always succeeds, even for domains with one or two values, which
 		/// are represented more compactly than a full integer decision.
 	}))]
-	#[allow(
-		clippy::missing_docs_in_private_items,
-		reason = "unable to document domain member on generated builder"
-	)]
 	pub fn new_int_decision(
 		&mut self,
 		#[builder(start_fn, into)] domain: IntSet,

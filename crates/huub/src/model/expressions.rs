@@ -5,14 +5,6 @@
 //! constraint to the model, or use a `.define()` or `.reify()` helper when the
 //! builder supports creating the result decision variable for you.
 
-#![cfg_attr(
-	not(test),
-	expect(
-		clippy::missing_docs_in_private_items,
-		reason = "unable to document members of generated builders"
-	)
-)]
-
 pub(crate) mod bool_formula;
 pub(crate) mod element;
 pub(crate) mod linear;
