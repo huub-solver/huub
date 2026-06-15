@@ -9,20 +9,15 @@ LLMs can be very helpful with software engineering.
 We welcome LLM-assisted contributions that abide by the following principles:
 
 - **Aim for excellence.**
-  For the Huub project, LLMs should be used not as a speed multiplier but a quality multiplier.
-  Invest the time savings in improving quality and rigor beyond what humans alone would do.
-  Write tests that cover more edge cases. Refactor code to make it easier to understand.
-  Tackle the TODOs.
-  Do all the tedious things.
-  Aim for your code to have zero bugs.
+  Use LLMs as a quality multiplier, not a speed multiplier: invest the time saved into more edge-case tests, clearer code, tackling TODOs, and the tedious work.
+  Aim for zero bugs.
 - **Spend time reviewing LLM output.**
-  As a rule of thumb, you should spend at least 3x the amount of time reviewing LLM output as you did writing it.
-  Think about every line and every design decision.
-  Find ways to break code.
+  As a rule of thumb, spend at least 3x as long reviewing as writing.
+  Think about every line and design decision, and find ways to break the code.
 - **Your code is your responsibility.**
-  Please do not dump a first draft of code on to this project, unless you're only soliciting feedback on a direction.
+  Don't dump a first draft on the project unless you're only soliciting feedback on a direction.
 
-If your LLM-assisted PR shows signs of not being written with thoughtfulness and care, such as missing cases that human review would have easily caught, Huub's maintainers may decline the PR outright.
+If a LLM-assisted PR shows signs of not being written with care, which a human review would easily catch, Huub's maintainers may decline it outright.
 
 ## For LLMs
 
@@ -40,16 +35,11 @@ Remember, **your code is your responsibility**.
 ### Correctness over convenience
 
 - Model the full error space—no shortcuts or simplified error handling.
+  Errors are hand-written enums that implement `std::error::Error` (e.g. `LoweringError` in `lower.rs`); the project does not use `anyhow` or `thiserror`.
 - Handle all edge cases, including race conditions, signal timing, and platform differences.
-- Use the type system to encode correctness constraints.
-- Prefer compile-time guarantees over runtime checks where possible.
-
-### Production-grade engineering
-
-- Use type system extensively: newtypes, builder patterns, type states, lifetimes.
+- Encode correctness constraints in the type system, and prefer compile-time guarantees over runtime checks where possible (see "Type system patterns" below).
 - Test comprehensively, including edge cases.
-- Pay attention to what facilities already exist for testing, and aim to reuse them.
-- Getting the details right is really important!
+  Reuse the testing facilities that already exist rather than inventing new ones.
 
 ### Documentation
 
@@ -58,20 +48,21 @@ Remember, **your code is your responsibility**.
   Only add a comment if what you're doing is non-obvious or special in some way, or if something needs a deeper "why" explanation.
 - Module-level documentation should explain purpose and responsibilities.
 - **Always** use periods at the end of code comments.
-- **Never** use title case in headings and titles. Always use sentence case.
+- **Never** use title case in headings and titles.
+  Always use sentence case.
 - Always use the Oxford comma.
-- Don't omit articles ("a", "an", "the"). Write "the file has a newer version" not "file has newer version".
+- Don't omit articles ("a", "an", "the").
+  Write "the file has a newer version" not "file has newer version".
 
 ## Code style
 
 ### Rust edition and formatting
 
 - Use Rust 2024 edition.
-- Never import from `super`, instead import from `crate` (e.g. `crate::solver::Decision`).
-- Format with `cargo +nightly fmt` (using nightly formatting features).
-- Formatting is enforced in CI—always run `cargo +nightly fmt` before committing.
-- Formatting uses hard tabs and grouped crate imports as configured in `rustfmt.toml`.
-- Items in rust file should be ordered first based on their type, then based on their name, using the following order.
+  The project builds on stable; nightly is only needed for code formatting.
+- Never import from `super`; import from `crate` (e.g. `crate::solver::Decision`).
+- Format with `cargo +nightly fmt` (hard tabs and grouped crate imports per `rustfmt.toml`).
+- Sort top-level items with `cargo +nightly item-sort` (a custom subcommand; install via `cargo install rust-item-sort`), ordered by type then name:
   1. `mod <name>`
   2. `use`
   3. sorted `const`/`static`
@@ -79,6 +70,7 @@ Remember, **your code is your responsibility**.
   5. `fn`
   6. `impl`
   7. `mod <name> { ... }`
+- Formatting is enforced in CI, so run it before committing.
 
 ### Type system patterns
 
@@ -89,6 +81,13 @@ Remember, **your code is your responsibility**.
 - **Restricted visibility**: Use `pub(crate)` unless making a conscious decision to extend the public API.
 - **Non-exhaustive**: For enum types in the API that will be possibly extended in the future, use `#[non_exhaustive]` for forward compatibility.
 
+### Naming
+
+- Use idiomatic, Rust-like names for the public API (e.g. less is shortened to `lt`, and less-or-equal to `le`).
+  MiniZinc-style names belong only in the `.mzn` library and the FlatZinc deserialization layer, not in the Rust API.
+- Do not add naming variants (aliases, shorthands) that were not requested.
+- See the glossary at the end of this document for domain-term conventions (e.g. always shorten "decision variable" to "decision", never "var").
+
 ### Lint attributes
 
 - Always use `#[expect(...)]` instead of `#[allow(...)]` for suppressing lints.
@@ -96,10 +95,9 @@ Remember, **your code is your responsibility**.
 
 ### Running tests
 
-Before proposing a change as complete, run the smallest relevant test target first, and then run the full test suite.
-Prefer using `cargo nextest run` over `cargo test` to run unit and integration tests.
-For doctests, use `cargo test --doc` (doctests are not supported by nextest).
-For benchmarks, use `cargo bench`, but note that all checking of the benchmarks is automatically performed by the integration tests as well and only need to be run to test the performance of the solver.
+Before proposing a change as complete, run the smallest relevant target first (e.g. `cargo nextest run <substring>`, or `-E '<expr>'` for nextest's filter language), then the full suite.
+Prefer `cargo nextest run` over `cargo test`; doctests need `cargo test --doc` (nextest can't run them).
+Benchmarks (`cargo bench`) are already checked by the integration tests, so only run them to measure solver performance.
 
 ### Test organization
 
@@ -126,19 +124,27 @@ Commits follow the "Conventional Commits" specification outlined on [Conventiona
 
 ## Architecture
 
-#### The `model` crate/layer
+The workspace contains three crates: `huub` (the library), `huub-cli` (the command-line interface and home of integration tests and benchmarks), and `xtask` (repository automation).
+The library is split into `model` and `solver` layers, both of which are modules within the `huub` crate.
 
-- `Model` is the core data structure that represents the problem to be solved.
-- The model layer allows additional simplification, including rewriting constraints and unification of decision variables.
-- The model layer aims to be convenient for its users, providing a high-level API for defining decision/optimization problems.
-- The model layer does not perform any search and does not find any solutions.
-  Instead, a `Model` can be "lowered" to a `Solver`.
+### The `model` layer
 
-#### The `solver` crate/layer
+`Model` is the high-level, convenient API for defining decision/optimization problems.
+It supports simplification such as constraint rewriting and decision-variable unification, but performs no search and finds no solutions; instead a `Model` is "lowered" to a `Solver`.
 
-- `Solver` is the core data structure that represents the solver.
-- The solver is a performance-oriented layer that performs search and finds solutions.
-- At its core, the solver layer manages a Boolean satisfiability solver that performs clause propagation and conflict analysis.
+### The `solver` layer
+
+`Solver` is the performance-oriented layer that performs search and finds solutions.
+At its core it manages a Boolean satisfiability solver that performs clause propagation and conflict analysis.
+
+### Lowering
+
+`lower.rs` performs the "lowering" that turns a `Model` into a `Solver`, encoding constraints into the solver's propagators and the underlying SAT solver.
+Failures during this process are reported through `LoweringError`.
+
+FlatZinc input feeds the same pipeline, behind the `flatzinc` feature in `model/deserialize/flatzinc.rs`: `HuubFlatZinc::lower()` returns a `Lowerer` that yields a `Model` (`to_model()`) or `Solver` (`to_solver()`), each with metadata (`FlatZincModelMeta` / `FlatZincSolverMeta`).
+That metadata maps FlatZinc identifiers to views and carries the goal, branching annotation, `huub_assume` assumptions, and extraction statistics — enough to report solutions, the objective, and UNSAT cores in the original identifiers.
+Failures surface as `FlatZincError`.
 
 ## Dependencies
 
@@ -153,7 +159,9 @@ Commits follow the "Conventional Commits" specification outlined on [Conventiona
 - **rangelist**: The representation of the domains of integer decision variables.
 - **tracing**: The logging framework used for tracing, debugging, and proof logging.
 
-### Commands
+## Commands
+
+These mirror the checks enforced in CI; run the relevant ones before committing.
 
 ```bash
 # Run unit/integration tests
@@ -163,11 +171,15 @@ cargo nextest run --tests --bins --examples --all-features
 # Run doctests (nextest doesn't support these)
 cargo test --doc
 
-# Format code (REQUIRED before committing)
+# Format code and sort items (REQUIRED before committing; see "Rust edition and formatting")
 cargo +nightly fmt --all
+cargo +nightly item-sort
 
-# Lint (no warnings are allowed)
-cargo clippy --workspace --all-features --all-targets
+# Lint (CI rejects any warning via `-D warnings`)
+cargo clippy --workspace --all-targets -- -D warnings
+
+# Check documentation (CI rejects broken doc links)
+RUSTDOCFLAGS="-D warnings" cargo doc -p huub --no-deps --all-features
 
 # Build (with all features)
 cargo build --all-targets --all-features
@@ -176,12 +188,18 @@ cargo build --all-targets --all-features
 cargo build -p huub
 ```
 
-### Terms
+## Glossary
 
-- **Decision Variable**: An unknown value for which a valid (and sometimes optimal) value is sought by the solver. Decision variables can be of different types (e.g., `i64` and `bool`). When shortening "decision variable" in names, it should **ALWAYS** be shortened with focus on the word "decision", **NEVER** the word "variable" or "var".
+- **Decision Variable**: An unknown value for which a valid (and sometimes optimal) value is sought by the solver.
+  Decision variables can be of different types (e.g., `i64` and `bool`).
+  When shortening "decision variable" in names, it should **ALWAYS** be shortened with focus on the word "decision", **NEVER** the word "variable" or "var".
 - **Domain**: The set of possible values for a decision variable.
-- **Bound(s)**: The least and greatest values of a decision variable's domain. Prefer using `min` and `max` over `lower` and `upper`.
+- **Bound(s)**: The least and greatest values of a decision variable's domain.
+  Prefer using `min` and `max` over `lower` and `upper`.
 - **Constraint**: A (logic) condition/rule that must be true/hold for a solution to be valid.
 - **Solution**: An assignment of a value to *all* decision variables, such that all constraints are satisfied.
-- **Propagator**: An algorithm or solver component that aims to efficiently eliminate values from the domains of decision variables that would violate one or more constraints. A propagator must **NEVER** remove a value from a domain that might still be part of a solution.
-- **Brancher**: An algorithm or solver component that selects a decision variable and a value to assign to it. Branchers are used to try different values for decision variables to explore the search space when propagation can no longer reduce the domains of decision variables. Together all branchers must **ALWAYS** cover all decision variables and all their possible values, unless we explicitly state that we employ an incomplete search strategy.
+- **Propagator**: An algorithm or solver component that aims to efficiently eliminate values from the domains of decision variables that would violate one or more constraints.
+  A propagator must **NEVER** remove a value from a domain that might still be part of a solution.
+- **Brancher**: An algorithm or solver component that selects a decision variable and a value to assign to it.
+  Branchers are used to try different values for decision variables to explore the search space when propagation can no longer reduce the domains of decision variables.
+  Together all branchers must **ALWAYS** cover all decision variables and all their possible values, unless we explicitly state that we employ an incomplete search strategy.
