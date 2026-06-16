@@ -14,6 +14,8 @@ env:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    permissions:
+      id-token: write
     strategy:
       matrix:
         os: [ubuntu-latest]
@@ -29,12 +31,13 @@ jobs:
       - name: Collect coverage data
         run: |
           cargo llvm-cov --no-report nextest --all-features --workspace --tests --bins --examples
-          cargo llvm-cov --no-report --doc
+          cargo llvm-cov --no-report --doc --all-features --workspace
           cargo llvm-cov report --doctests --codecov --output-path codecov.json
       - uses: codecov/codecov-action@v7
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          file: codecov.json
+          fail_ci_if_error: true
+          files: codecov.json
+          use_oidc: true
   benchmarks:
     name: Run benchmarks
     runs-on: ubuntu-latest
