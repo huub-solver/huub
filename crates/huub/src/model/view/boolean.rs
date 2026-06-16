@@ -11,7 +11,8 @@ use crate::{
 	IntVal,
 	actions::{
 		BoolAnalyzeActions, BoolInspectionActions, BoolPropagationActions,
-		BoolSimplificationActions, IntPropCond, PropagationActions, ReasoningContext,
+		BoolSimplificationActions, IntInspectionActions, IntPropCond, PropagationActions,
+		ReasoningContext,
 	},
 	constraints::{Conflict, ReasonBuilder},
 	model::{
@@ -164,11 +165,27 @@ impl Resolved<View<bool>> {
 }
 
 impl BoolInspectionActions<Model> for Resolved<View<bool>> {
-	fn val(&self, _ctx: &Model) -> Option<bool> {
+	fn val(&self, ctx: &Model) -> Option<bool> {
 		use BoolView::*;
 
 		match self.0.0 {
+			// View on a constant, or a Boolean decision that was fixed by
+			// propagation (and therefore aliased to a `Const`).
 			Const(b) => Some(b),
+			// Integer comparison views must look at the underlying integer domain to determine
+			// whether a value has been assigned to the Boolean decision.
+			IntEq(iv, val) | IntNotEq(iv, val) if iv.val(ctx) == Some(val) => {
+				Some(matches!(self.0.0, IntEq(_, _)))
+			}
+			IntEq(iv, val) | IntNotEq(iv, val) if !iv.in_domain(ctx, val) => {
+				Some(matches!(self.0.0, IntNotEq(_, _)))
+			}
+			IntGreaterEq(iv, val) | IntLess(iv, val) if iv.min(ctx) >= val => {
+				Some(matches!(self.0.0, IntGreaterEq(_, _)))
+			}
+			IntGreaterEq(iv, val) | IntLess(iv, val) if iv.max(ctx) < val => {
+				Some(matches!(self.0.0, IntLess(_, _)))
+			}
 			_ => None,
 		}
 	}
@@ -294,3 +311,40 @@ impl DefaultView for bool {
 	type View = BoolView;
 }
 impl private::Sealed for bool {}
+
+#[cfg(test)]
+mod tests {
+	use crate::{
+		actions::{BoolInspectionActions, IntInspectionActions, IntPropagationActions},
+		model::Model,
+	};
+
+	/// A Boolean view over an integer decision comparison must report its value
+	/// as soon as its domain allows us to determine it.
+	#[test]
+	fn int_cmp_view_val() {
+		let mut prb = Model::default();
+		let x = prb.new_int_decision(1..=5);
+
+		// Nothing is entailed for an untouched domain.
+		assert_eq!(x.eq(4).val(&prb), None);
+		assert_eq!(x.ne(4).val(&prb), None);
+		assert_eq!(x.geq(3).val(&prb), None);
+		assert_eq!(x.lt(3).val(&prb), None);
+
+		// Removing the single value `4` allows us to determine the value of the
+		// (in)equality.
+		x.remove_val(&mut prb, 4, []).unwrap();
+		assert_eq!(x.val(&prb), None);
+		assert_eq!(x.eq(4).val(&prb), Some(false));
+		assert_eq!(x.ne(4).val(&prb), Some(true));
+
+		// Tightening the lower bound entails the threshold comparisons while `x`
+		// (now in 3, 5) stays unfixed.
+		x.tighten_min(&mut prb, 3, []).unwrap();
+		assert_eq!(x.val(&prb), None);
+		assert_eq!(x.geq(3).val(&prb), Some(true));
+		assert_eq!(x.lt(3).val(&prb), Some(false));
+		assert_eq!(x.geq(6).val(&prb), Some(false));
+	}
+}
