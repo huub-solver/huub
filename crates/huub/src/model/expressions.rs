@@ -25,7 +25,10 @@ use crate::{
 	},
 	constraints::{
 		Conflict,
-		cumulative::CumulativeTimeTable,
+		cumulative::{
+			CumulativePropagator, ttef_check_propagation_enabled,
+			ttef_filtering_propagation_enabled, ttef_opportunistic_propagation_enabled,
+		},
 		disjunctive::{Disjunctive, DisjunctivePropagator},
 		int_abs::IntAbsBounds,
 		int_array_minimum::IntArrayMinimumBounds,
@@ -91,6 +94,9 @@ impl Model {
 		durations: Vec<impl Into<View<IntVal>>>,
 		usages: Vec<impl Into<View<IntVal>>>,
 		capacity: impl Into<View<IntVal>>,
+		ttef_check_propagation: Option<bool>,
+		ttef_filtering_propagation: Option<bool>,
+		ttef_opportunistic_propagation: Option<bool>,
 	) -> Result<(), Conflict<View<bool>>> {
 		assert_eq!(
 			start_times.len(),
@@ -102,11 +108,14 @@ impl Model {
 			usages.len(),
 			"cumulative must be given the same number of start times and usages."
 		);
-		self.post_constraint(CumulativeTimeTable::new(
+		self.post_constraint(CumulativePropagator::new(
 			start_times.into_iter().map_into().collect(),
 			durations.into_iter().map_into().collect(),
 			usages.into_iter().map_into().collect(),
 			capacity.into(),
+			ttef_check_propagation_enabled(ttef_check_propagation),
+			ttef_filtering_propagation_enabled(ttef_filtering_propagation),
+			ttef_opportunistic_propagation_enabled(ttef_opportunistic_propagation),
 		))
 	}
 

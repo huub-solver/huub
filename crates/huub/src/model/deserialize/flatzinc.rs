@@ -1957,6 +1957,9 @@ impl<'a> FznModelBuilder<'a> {
 						.durations(durations)
 						.usages(heights)
 						.capacity(r)
+						.maybe_ttef_check_propagation(Some(true))
+						.maybe_ttef_filtering_propagation(Some(false))
+						.maybe_ttef_opportunistic_propagation(Some(false))
 						.post()?;
 				}
 				ConstraintIdent::DisjuctiveStrict => {
