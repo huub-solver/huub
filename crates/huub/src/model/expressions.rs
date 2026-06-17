@@ -27,7 +27,7 @@ use crate::{
 	constraints::{
 		NO_REASON, Nogood,
 		circuit::Circuit,
-		cumulative::CumulativeTimeTable,
+		cumulative::{Cumulative, CumulativePropagator},
 		disjunctive::{Disjunctive, DisjunctivePropagator},
 		int_abs::IntAbsBounds,
 		int_array_minimum::IntArrayMinimumBounds,
@@ -140,7 +140,15 @@ impl Model {
 		durations: Vec<impl Into<View<IntVal>>>,
 		usages: Vec<impl Into<View<IntVal>>>,
 		capacity: impl Into<View<IntVal>>,
+		energy_overload_checking: Option<bool>,
+		edge_finding_propagation: Option<bool>,
+		opportunistic_edge_finding_propagation: Option<bool>,
 	) -> Result<(), Nogood<View<bool>>> {
+		let start_times: Vec<View<IntVal>> = start_times.into_iter().map_into().collect();
+		let durations: Vec<View<IntVal>> = durations.into_iter().map_into().collect();
+		let usages: Vec<View<IntVal>> = usages.into_iter().map_into().collect();
+		let capacity: View<IntVal> = capacity.into();
+
 		assert_eq!(
 			start_times.len(),
 			durations.len(),
@@ -151,12 +159,14 @@ impl Model {
 			usages.len(),
 			"cumulative must be given the same number of start times and usages."
 		);
-		self.post_constraint(CumulativeTimeTable::new(
-			start_times.into_iter().map_into().collect(),
-			durations.into_iter().map_into().collect(),
-			usages.into_iter().map_into().collect(),
-			capacity.into(),
-		))
+		let propagator =
+			CumulativePropagator::new(start_times, durations, usages, capacity, true, true, true);
+		self.post_constraint(Cumulative {
+			propagator,
+			energy_overload_checking,
+			edge_finding_propagation,
+			opportunistic_edge_finding_propagation,
+		})
 	}
 
 	/// Create a constraint that enforces that the given a list of integer

@@ -64,6 +64,12 @@ pub enum AnnotationIdent {
 	ConsistencyDomain,
 	/// "value_propagation" consistency annotation.
 	ConsistencyValue,
+	/// "overload_checking" annotation to enable energy overload checking within
+	/// a cumulative propagator.
+	CumuEnergyOverload,
+	/// "edge_finding" annotation to enable edge finding propagation within
+	/// a cumulative propagator.
+	CumuEdgeFinding,
 	/// "edge_finding" annotation to enable edge finding propagation within a
 	/// disjunctive propagator.
 	DisjEdgeFinding,
@@ -429,6 +435,8 @@ impl AnnotationIdent {
 			Self::ConsistencyBounds => "bounds",
 			Self::ConsistencyDomain => "domain",
 			Self::ConsistencyValue => "value_propagation",
+			Self::CumuEdgeFinding => "cumulative_edge_finding",
+			Self::CumuEnergyOverload => "cumulative_energy_overload",
 			Self::DisjDetectPrec => "detectable_precedence",
 			Self::DisjEdgeFinding => "edge_finding",
 			Self::DisjNotLast => "not_last",
@@ -2028,7 +2036,7 @@ impl<'a> FznModelBuilder<'a> {
 						.post()?;
 				}
 				ConstraintIdent::Cumulative => {
-					let [starts, durations, heights, r] = c.args.as_slice() else {
+					let [starts, durations, usages, r] = c.args.as_slice() else {
 						return num_args_err(4);
 					};
 					let starts = self
@@ -2041,18 +2049,40 @@ impl<'a> FznModelBuilder<'a> {
 						.iter()
 						.map(|l| self.lit_int(l))
 						.try_collect()?;
-					let heights = self
-						.arg_array(heights)?
+					let usages = self
+						.arg_array(usages)?
 						.iter()
 						.map(|l| self.lit_int(l))
 						.try_collect()?;
 					let r = self.arg_int(r)?;
+					let (energy_overload_check, edge_finding) = match (
+						Self::anns_contains(
+							&c.ann,
+							&mut ann_used,
+							AnnotationIdent::CumuEnergyOverload,
+						),
+						Self::anns_contains(
+							&c.ann,
+							&mut ann_used,
+							AnnotationIdent::CumuEnergyOverload,
+						),
+					) {
+						// No annotations found, so we assume the user wants the default
+						// configuration
+						(false, false) => (None, None),
+						// At least one annotation was found, so we assume missing annotations
+						// disable certain propagation options.
+						(eoc, ef) => (Some(eoc), Some(ef)),
+					};
 					self.prb
 						.cumulative()
 						.start_times(starts)
 						.durations(durations)
-						.usages(heights)
+						.usages(usages)
 						.capacity(r)
+						.maybe_energy_overload_checking(energy_overload_check)
+						.maybe_edge_finding_propagation(edge_finding)
+						.maybe_opportunistic_edge_finding_propagation(Some(false)) // disable opportunistic edge-finding by default
 						.post()?;
 				}
 				ConstraintIdent::DisjuctiveStrict => {
