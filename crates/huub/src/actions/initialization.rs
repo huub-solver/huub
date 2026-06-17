@@ -37,6 +37,11 @@ pub trait BrancherInitActions: ConstructionActions + DecisionActions {
 	/// decidable variable.
 	fn ensure_decidable<T: DefaultView>(&mut self, view: impl Into<View<T>>);
 
+	/// Return the number of (propagator) subscriptions for the decision
+	/// variable underlying the given view. Clauses in the SAT solver are
+	/// included in the count.
+	fn num_subscribers<T: DefaultView>(&self, view: View<T>) -> u32;
+
 	/// Push a new [`Brancher`](crate::solver::branchers::Brancher) to the end
 	/// of the solving branching queue.
 	fn push_brancher(&mut self, brancher: BoxedBrancher);

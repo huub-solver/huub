@@ -76,18 +76,38 @@ pub enum AnnotationIdent {
 	ValSelIndomainMin,
 	/// "indomain_max" value selection annotation.
 	ValSelIndomainMax,
+	/// "indomain_median" value selection annotation.
+	ValSelIndomainMedian,
+	/// "indomain_middle" value selection annotation.
+	ValSelIndomainMiddle,
+	/// "indomain_interval" value selection annotation.
+	ValSelIndomainInterval,
+	/// "indomain_reverse_split" value selection annotation.
+	ValSelIndomainReverseSplit,
+	/// "indomain_split" value selection annotation.
+	ValSelIndomainSplit,
 	/// "outdomain_max" value selection annotation.
 	ValSelOutdomainMax,
+	/// "outdomain_median" value selection annotation.
+	ValSelOutdomainMedian,
 	/// "outdomain_min" value selection annotation.
 	ValSelOutdomainMin,
 	/// "anti_first_fail" variable selection annotation.
 	VarSelAntiFirstFail,
+	/// "dom_w_deg" variable selection annotation.
+	VarSelDomWDeg,
 	/// "first_fail" variable selection annotation.
 	VarSelFirstFail,
 	/// "input_order" variable selection annotation.
 	VarSelInputOrder,
 	/// "largest" variable selection annotation.
 	VarSelLargest,
+	/// "max_regret" variable selection annotation.
+	VarSelMaxRegret,
+	/// "most_constrained" variable selection annotation.
+	VarSelMostConstrained,
+	/// "occurrence" variable selection annotation.
+	VarSelOccurrence,
 	/// "smallest" variable selection annotation.
 	VarSelSmallest,
 	/// "warm_start_array" annotation for grouped warm start directives.
@@ -396,14 +416,24 @@ impl AnnotationIdent {
 			Self::IntSearch => "int_search",
 			Self::SeqSearch => "seq_search",
 			Self::ValSelIndomain => "indomain",
+			Self::ValSelIndomainInterval => "indomain_interval",
 			Self::ValSelIndomainMax => "indomain_max",
+			Self::ValSelIndomainMedian => "indomain_median",
+			Self::ValSelIndomainMiddle => "indomain_middle",
 			Self::ValSelIndomainMin => "indomain_min",
+			Self::ValSelIndomainReverseSplit => "indomain_reverse_split",
+			Self::ValSelIndomainSplit => "indomain_split",
 			Self::ValSelOutdomainMax => "outdomain_max",
+			Self::ValSelOutdomainMedian => "outdomain_median",
 			Self::ValSelOutdomainMin => "outdomain_min",
 			Self::VarSelAntiFirstFail => "anti_first_fail",
+			Self::VarSelDomWDeg => "dom_w_deg",
 			Self::VarSelFirstFail => "first_fail",
 			Self::VarSelInputOrder => "input_order",
 			Self::VarSelLargest => "largest",
+			Self::VarSelMaxRegret => "max_regret",
+			Self::VarSelMostConstrained => "most_constrained",
+			Self::VarSelOccurrence => "occurrence",
 			Self::VarSelSmallest => "smallest",
 			Self::WarmStartArray => "warm_start_array",
 			Self::WarmStartBool => "warm_start_bool",
@@ -427,17 +457,27 @@ impl TryFrom<&str> for AnnotationIdent {
 			"bool_search" => Ok(Self::BoolSearch),
 			"bounds" => Ok(Self::ConsistencyBounds),
 			"detectable_precedence" => Ok(Self::DisjDetectPrec),
+			"dom_w_deg" => Ok(Self::VarSelDomWDeg),
 			"domain" => Ok(Self::ConsistencyDomain),
 			"edge_finding" => Ok(Self::DisjEdgeFinding),
 			"first_fail" => Ok(Self::VarSelFirstFail),
 			"indomain" => Ok(Self::ValSelIndomain),
+			"indomain_interval" => Ok(Self::ValSelIndomainInterval),
 			"indomain_max" => Ok(Self::ValSelIndomainMax),
+			"indomain_median" => Ok(Self::ValSelIndomainMedian),
+			"indomain_middle" => Ok(Self::ValSelIndomainMiddle),
 			"indomain_min" => Ok(Self::ValSelIndomainMin),
+			"indomain_reverse_split" => Ok(Self::ValSelIndomainReverseSplit),
+			"indomain_split" => Ok(Self::ValSelIndomainSplit),
 			"input_order" => Ok(Self::VarSelInputOrder),
 			"int_search" => Ok(Self::IntSearch),
 			"largest" => Ok(Self::VarSelLargest),
+			"max_regret" => Ok(Self::VarSelMaxRegret),
+			"most_constrained" => Ok(Self::VarSelMostConstrained),
 			"not_last" => Ok(Self::DisjNotLast),
+			"occurrence" => Ok(Self::VarSelOccurrence),
 			"outdomain_max" => Ok(Self::ValSelOutdomainMax),
+			"outdomain_median" => Ok(Self::ValSelOutdomainMedian),
 			"outdomain_min" => Ok(Self::ValSelOutdomainMin),
 			"seq_search" => Ok(Self::SeqSearch),
 			"smallest" => Ok(Self::VarSelSmallest),
@@ -722,9 +762,15 @@ impl<'a> FznModelBuilder<'a> {
 				AnnotationIdent::VarSelAntiFirstFail => {
 					return Ok(DecisionSelection::AntiFirstFail);
 				}
+				AnnotationIdent::VarSelDomWDeg => return Ok(DecisionSelection::DomWDeg),
 				AnnotationIdent::VarSelFirstFail => return Ok(DecisionSelection::FirstFail),
 				AnnotationIdent::VarSelInputOrder => return Ok(DecisionSelection::InputOrder),
 				AnnotationIdent::VarSelLargest => return Ok(DecisionSelection::Largest),
+				AnnotationIdent::VarSelMaxRegret => return Ok(DecisionSelection::MaxRegret),
+				AnnotationIdent::VarSelMostConstrained => {
+					return Ok(DecisionSelection::MostConstrained);
+				}
+				AnnotationIdent::VarSelOccurrence => return Ok(DecisionSelection::Occurrence),
 				AnnotationIdent::VarSelSmallest => return Ok(DecisionSelection::Smallest),
 				_ => {}
 			}
@@ -754,7 +800,23 @@ impl<'a> FznModelBuilder<'a> {
 					return Ok(DomainSelection::IndomainMin);
 				}
 				AnnotationIdent::ValSelIndomainMax => return Ok(DomainSelection::IndomainMax),
+				AnnotationIdent::ValSelIndomainMedian => {
+					return Ok(DomainSelection::IndomainMedian);
+				}
+				AnnotationIdent::ValSelIndomainMiddle => {
+					return Ok(DomainSelection::IndomainMiddle);
+				}
+				AnnotationIdent::ValSelIndomainInterval => {
+					return Ok(DomainSelection::IndomainInterval);
+				}
+				AnnotationIdent::ValSelIndomainSplit => return Ok(DomainSelection::IndomainSplit),
+				AnnotationIdent::ValSelIndomainReverseSplit => {
+					return Ok(DomainSelection::IndomainReverseSplit);
+				}
 				AnnotationIdent::ValSelOutdomainMax => return Ok(DomainSelection::OutdomainMax),
+				AnnotationIdent::ValSelOutdomainMedian => {
+					return Ok(DomainSelection::OutdomainMedian);
+				}
 				AnnotationIdent::ValSelOutdomainMin => return Ok(DomainSelection::OutdomainMin),
 				_ => {}
 			}

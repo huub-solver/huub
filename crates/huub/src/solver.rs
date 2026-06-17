@@ -1414,6 +1414,36 @@ impl<Sat: ExternalPropagation> BrancherInitActions for Solver<Sat> {
 		}
 	}
 
+	fn num_subscribers<T: DefaultView>(&self, view: View<T>) -> u32 {
+		let any: &dyn Any = &view;
+		let bool_props = |slv: &Solver<Sat>, bd: Decision<bool>| {
+			slv.engine
+				.borrow()
+				.state
+				.bool_activation
+				.get(&bd.0.var())
+				.map_or(0, Vec::len) as u32
+		};
+		if let Some(view) = any.downcast_ref::<View<bool>>() {
+			match view.0 {
+				// The activation list only holds propagators, not the clauses
+				// of the SAT solver.
+				BoolView::Lit(lit) => bool_props(self, lit),
+				BoolView::Const(_) => 0,
+			}
+		} else if let Some(view) = any.downcast_ref::<View<IntVal>>() {
+			match view.0 {
+				IntView::Linear(view) => self.engine.borrow().state.int_activation
+					[view.var.0 as usize]
+					.subscription_count(),
+				IntView::Bool(view) => bool_props(self, view.var),
+				IntView::Const(_) => 0,
+			}
+		} else {
+			unreachable!()
+		}
+	}
+
 	fn push_brancher(&mut self, brancher: BoxedBrancher) {
 		self.engine.borrow_mut().branchers.push(brancher);
 	}

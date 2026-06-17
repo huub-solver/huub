@@ -218,6 +218,11 @@ impl ActivationList {
 			}
 		}
 	}
+
+	/// Return the number of subscriptions to the decision variable.
+	pub(crate) fn subscription_count(&self) -> u32 {
+		self.activations.len() as u32
+	}
 }
 
 impl Add<IntEvent> for IntEvent {

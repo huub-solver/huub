@@ -40,16 +40,35 @@ mod tests {
 
 	assert_search_order!(bool_indomain_max);
 	assert_search_order!(bool_indomain_min);
+	assert_search_order!(int_dom_w_deg_1);
 	assert_search_order!(int_indomain_max_1);
 	assert_search_order!(int_indomain_max_2);
 	assert_search_order!(int_indomain_max_3);
 	assert_search_order!(int_indomain_max_4);
 	assert_search_order!(int_indomain_max_5);
+	assert_search_order!(int_indomain_median_1);
+	assert_search_order!(int_indomain_median_2);
+	assert_search_order!(int_indomain_median_3);
+	assert_search_order!(int_indomain_median_4);
+	assert_search_order!(int_indomain_median_5);
 	assert_search_order!(int_indomain_min_1);
 	assert_search_order!(int_indomain_min_2);
 	assert_search_order!(int_indomain_min_3);
 	assert_search_order!(int_indomain_min_4);
 	assert_search_order!(int_indomain_min_5);
+	assert_search_order!(int_indomain_reverse_split_1);
+	assert_search_order!(int_indomain_reverse_split_2);
+	assert_search_order!(int_indomain_reverse_split_3);
+	assert_search_order!(int_indomain_reverse_split_4);
+	assert_search_order!(int_indomain_reverse_split_5);
+	assert_search_order!(int_indomain_split_1);
+	assert_search_order!(int_indomain_split_2);
+	assert_search_order!(int_indomain_split_3);
+	assert_search_order!(int_indomain_split_4);
+	assert_search_order!(int_indomain_split_5);
+	assert_search_order!(int_max_regret_1);
+	assert_search_order!(int_most_constrained_1);
+	assert_search_order!(int_occurrence_1);
 
 	assert_unsat!(int_lin_eq_prop);
 
