@@ -226,14 +226,15 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 		reason
 	}
 
-	/// Generates a complete explanation (a "reason") for a pruning operation.
+	/// Generates a complete explanation for a pruning an object's origin
+	/// location.
 	///
 	/// The reason consists of two parts:
 	/// 1. The literals that define the other dimensions of the dimension being
 	///    pruned (`dim`) of the object being pruned (`obj`).
 	/// 2. The literals that explain the existence of the forbidden regions that
 	///    forced the pruning.
-	fn explain_propagation<Ctx>(
+	fn explain_origin_propagation<Ctx>(
 		&mut self,
 		ctx: &mut Ctx,
 		forbidden_regions: &[(Region, usize)],
@@ -258,28 +259,48 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 			// conclusion, so we only need to explain the *other* bounds of the object.
 			if d == dim {
 				if prune_upper {
-					reason.push(
-						self.origin[[obj, d]]
-							.lit(ctx, IntLitMeaning::Less(self.origin_ub[[obj, d]] + 1)),
-					);
+					reason.push(self.origin[[obj, d]].max_lit(ctx));
 				} else {
-					reason.push(
-						self.origin[[obj, d]]
-							.lit(ctx, IntLitMeaning::GreaterEq(self.origin_lb[[obj, d]])),
-					);
+					reason.push(self.origin[[obj, d]].min_lit(ctx));
 				}
 			} else {
-				reason.push(
-					self.origin[[obj, d]]
-						.lit(ctx, IntLitMeaning::Less(self.origin_ub[[obj, d]] + 1)),
-				);
-				reason.push(
-					self.origin[[obj, d]]
-						.lit(ctx, IntLitMeaning::GreaterEq(self.origin_lb[[obj, d]])),
-				);
+				reason.push(self.origin[[obj, d]].max_lit(ctx));
+				reason.push(self.origin[[obj, d]].min_lit(ctx));
 			}
 		}
 		reason.extend(self.explain_forbidden_regions(ctx, forbidden_regions, obj));
+		reason
+	}
+
+	/// Generates the explanation for a size reduction in dimension `dim` for
+	/// the object `target`, which must lie before `cause`.
+	///
+	/// The propagation follows from the two objects being unable to separate in
+	/// any other dimension, and `cause` being unable to lie first in `dim`.
+	fn explain_size_propagation<Ctx>(
+		&mut self,
+		ctx: &mut Ctx,
+		target: usize,
+		cause: usize,
+		dim: usize,
+	) -> Vec<Ctx::Atom>
+	where
+		Ctx: ReasoningContext + ?Sized,
+		I1: IntDecisionActions<Ctx>,
+		I2: IntInspectionActions<Ctx>,
+	{
+		let mut reason = Vec::new();
+		for d in 0..self.num_dimensions() {
+			for obj in [target, cause] {
+				reason.push(self.origin[[obj, d]].min_lit(ctx));
+				reason.push(self.origin[[obj, d]].max_lit(ctx));
+				// Leave out `target`'s size lower bound in `dim`: the conclusion is an
+				// upper bound on its size, which does not depend on its lower bound.
+				if (obj, d) != (target, dim) {
+					reason.push(self.size[[obj, d]].min_lit(ctx));
+				}
+			}
+		}
 		reason
 	}
 
@@ -288,27 +309,35 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 		self.origin_lb.row(obj) == self.origin_ub.row(obj)
 	}
 
-	/// Generates the set of "forbidden regions" for a given object `obj`.
+	/// Reasons about the overlap between `obj` and every other object,
+	/// returning the "forbidden regions" of `obj`'s origin and tightening its
+	/// size.
 	///
-	/// A forbidden region is an area where the origin of `obj` cannot be placed
-	/// because it would guarantee an overlap with another object `i`. Such a
-	/// region is calculated based on the current domain of `i`'s origin and
-	/// the sizes of both `obj` and `i`.
+	/// For each other object `i`, the origins of `obj` that would guarantee
+	/// an overlap with `i` form a forbidden region, computed from the
+	/// current origin domains and the (minimum) sizes of both objects. The
+	/// returned regions drive the origin sweep; a region is dropped when it is
+	/// empty in some dimension or disjoint from `obj`'s origin domain, and a
+	/// region that is a subset of another is merged away.
 	///
-	/// This method performs two key optimizations:
-	/// 1. It filters out any generated forbidden region that does not overlap
-	///    with the current domain of `obj`.
-	/// 2. It merges regions where one is a subset of another to keep the set of
-	///    forbidden regions minimal.
-	///
-	/// # Returns
-	///
-	/// A vector of tuples, where each tuple contains a `Region` and the index
-	/// of the object that induced it.
-	fn forbidden_regions<Ctx>(&mut self, ctx: &mut Ctx, obj: usize) -> Vec<(Region, usize)>
+	/// From the very same intervals the method also tightens `obj`'s size: when
+	/// `obj` and `i` are forced to overlap in every dimension but one, they
+	/// must be separated in the remaining one, which can cap `obj`'s size
+	/// there.
+	fn forbidden_regions<E>(
+		&mut self,
+		ctx: &mut E::PropagationContext<'_>,
+		obj: usize,
+	) -> Result<Vec<(Region, usize)>, E::Conflict>
 	where
-		Ctx: ReasoningContext + TrailingActions,
+		E: ReasoningEngine,
+		I1: IntSolverActions<E>,
+		I2: IntSolverActions<E>,
 	{
+		// `obj`'s size can only be tightened while it is a not-yet-fixed decision.
+		let prune_size = TypeId::of::<I2>() != TypeId::of::<IntVal>()
+			&& self.size.row(obj).iter().any(|v| v.val(ctx).is_none());
+
 		let mut forbidden_regions: Vec<Option<(Region, usize)>> = Vec::new();
 
 		'obj_iter: for i in 0..self.num_objects() {
@@ -325,17 +354,46 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 				continue;
 			}
 
+			// The forbidden interval of `i` for `obj` in each dimension, together
+			// with the single dimension (if any) in which the two can still be
+			// separated. That dimension is where `obj`'s origin pokes out of the
+			// interval, either below (so `obj` can lie first) or above (so `i` can).
 			let mut forbidden = Region::with_dimensions(self.num_dimensions());
-
+			let mut empty = false;
+			let mut free = None;
+			let mut single_free = true;
 			for d in 0..self.num_dimensions() {
 				let fr_lb = self.origin_ub[[i, d]] - self.size_lb[[obj, d]] + 1;
 				let fr_ub = self.origin_lb[[i, d]] + self.size_lb[[i, d]] - 1;
-				if fr_lb <= fr_ub {
-					forbidden.0[d] = (fr_lb, fr_ub);
-				} else {
-					// If the interval is empty in any dimension, no forbidden region exists.
+				forbidden.0[d] = (fr_lb, fr_ub);
+
+				if prune_size {
+					let obj_before = self.origin_lb[[obj, d]] < fr_lb;
+					let i_before = self.origin_ub[[obj, d]] > fr_ub;
+					if obj_before || i_before {
+						single_free &= free.is_none();
+						free = Some((d, obj_before, i_before));
+					}
+					empty &= fr_lb > fr_ub;
+				} else if fr_lb > fr_ub {
 					continue 'obj_iter;
 				}
+			}
+
+			// Tighten `obj`'s size when the objects must be separated in exactly one
+			// dimension (`single_free`) and `obj` can only take the lower position
+			// there (it pokes out below the interval, `true`, but not above, `false`).
+			if single_free && let Some((dim, true, false)) = free {
+				let bound = self.origin_ub[[i, dim]] - self.origin_lb[[obj, dim]];
+				if bound < self.size[[obj, dim]].max(ctx) {
+					let reason = self.explain_size_propagation(ctx, obj, i, dim);
+					self.size[[obj, dim]].tighten_max(ctx, bound, reason)?;
+				}
+			}
+
+			// An interval that is empty in some dimension forbids no origin.
+			if empty {
+				continue;
 			}
 
 			let lb = self.origin_lb.row(obj);
@@ -364,7 +422,7 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 			}
 		}
 
-		forbidden_regions.into_iter().flatten().collect()
+		Ok(forbidden_regions.into_iter().flatten().collect())
 	}
 
 	/// Create a new [`IntNoOverlapSweep`] propagator, to be used within the
@@ -526,7 +584,7 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 
 		// If the sweep found a new, lower feasible upper bound, propagate it.
 		if sweep[dim] != self.origin_ub[[obj, dim]] {
-			let reason = self.explain_propagation(ctx, forbidden_regions, obj, dim, true);
+			let reason = self.explain_origin_propagation(ctx, forbidden_regions, obj, dim, true);
 			self.origin[[obj, dim]].tighten_max(ctx, sweep[dim], reason)?;
 
 			self.origin_ub[[obj, dim]] = sweep[dim];
@@ -584,7 +642,7 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 		}
 		// If the sweep found a new, higher feasible lower bound, propagate it.
 		if sweep[dim] != self.origin_lb[[obj, dim]] {
-			let reason = self.explain_propagation(ctx, forbidden_regions, obj, dim, false);
+			let reason = self.explain_origin_propagation(ctx, forbidden_regions, obj, dim, false);
 			self.origin[[obj, dim]].tighten_min(ctx, sweep[dim], reason)?;
 
 			self.origin_lb[[obj, dim]] = sweep[dim];
@@ -692,13 +750,15 @@ where
 				continue;
 			}
 
-			// Generate forbidden regions for the current object.
-			let forbidden_regions = self.forbidden_regions(ctx, obj);
+			// Reason about the object's overlaps: collect the forbidden regions for
+			// the origin sweep below and, from the same intervals, tighten its size.
+			let forbidden_regions = self.forbidden_regions::<E>(ctx, obj)?;
 			if !forbidden_regions.is_empty() {
 				// Check for conflicts: if an object is fixed and is in a forbidden
 				// region, it's a conflict.
 				if self.fixed_object(obj) {
-					let reason = self.explain_propagation(ctx, &forbidden_regions, obj, 0, false);
+					let reason =
+						self.explain_origin_propagation(ctx, &forbidden_regions, obj, 0, false);
 					// Trigger a conflict by increasing the lower bound.
 					self.origin[[obj, 0]].tighten_min(ctx, self.origin_lb[[obj, 0]] + 1, reason)?;
 				}
@@ -859,8 +919,14 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
+		IntVal,
+		actions::IntInspectionActions,
+		constraints::int_no_overlap::IntNoOverlapSweep,
 		model::Model,
-		solver::branchers::{DecisionSelection, DomainSelection, IntBrancher},
+		solver::{
+			Solver, View,
+			branchers::{DecisionSelection, DomainSelection, IntBrancher},
+		},
 	};
 
 	#[test]
@@ -1029,6 +1095,56 @@ mod tests {
 			2, 1, 1, 1
 			2, 2, 1, 1"#]],
 		);
+	}
+
+	/// Object `a` is pinned at `(1, 1)` with unit width and a free height;
+	/// object `b` is the unit square at `(1, 3)`. The two are forced to overlap
+	/// horizontally, so they must be separated vertically, where `a` can only
+	/// sit below `b`. Its height is therefore bounded to at most `3 - 1 = 2`,
+	/// which is deduced directly without having to first guess a placement.
+	#[test]
+	#[traced_test]
+	fn no_overlap_size_propagation() {
+		let mut slv = Solver::default();
+		let ady = slv.new_int_decision(1..=3).view();
+
+		IntNoOverlapSweep::<true, View<IntVal>, View<IntVal>>::post(
+			&mut slv,
+			vec![vec![1.into(), 1.into()], vec![1.into(), 3.into()]],
+			vec![vec![1.into(), ady], vec![1.into(), 1.into()]],
+		);
+
+		let _ = slv.propagate_next().unwrap();
+		assert_eq!(ady.bounds(&slv), (1, 2));
+
+		// The same scenario as above, but non-strict. However, since the sizes
+		// cannot be zero, the same propagation should be enforced.
+		let mut slv = Solver::default();
+		let ady = slv.new_int_decision(1..=3).view();
+
+		IntNoOverlapSweep::<false, View<IntVal>, View<IntVal>>::post(
+			&mut slv,
+			vec![vec![1.into(), 1.into()], vec![1.into(), 3.into()]],
+			vec![vec![1.into(), ady], vec![1.into(), 1.into()]],
+		);
+
+		let _ = slv.propagate_next().unwrap();
+		assert_eq!(ady.bounds(&slv), (1, 2));
+
+		// Now the same scenario as above, but with `b`'s x-size possibly being zero,
+		// not allowing any further propagation.
+		let mut slv = Solver::default();
+		let ady = slv.new_int_decision(1..=3).view();
+		let bdx = slv.new_int_decision(0..=1).view();
+
+		IntNoOverlapSweep::<false, View<IntVal>, View<IntVal>>::post(
+			&mut slv,
+			vec![vec![1.into(), 1.into()], vec![1.into(), 3.into()]],
+			vec![vec![1.into(), ady], vec![bdx, 1.into()]],
+		);
+
+		let _ = slv.propagate_next().unwrap();
+		assert_eq!(ady.bounds(&slv), (1, 3));
 	}
 
 	#[test]
