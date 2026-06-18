@@ -14,13 +14,16 @@ pub use crate::constraints::circuit::{
 	check::CircuitCheck, prevent::CircuitPrevent, scc::CircuitScc,
 };
 use crate::{
-	IntSet, IntVal,
-	actions::{IntAnalyzeActions, IntEvent, IntSimplificationActions, ReasoningEngine},
+	actions::{
+		IntAnalyzeActions, IntEvent, IntPropagationActions, IntSimplificationActions,
+		ReasoningEngine,
+	},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
 	model::View,
+	IntSet, IntVal,
 };
 
 /// Representation of the `circuit` / `subcircuit` constraint within a model.
@@ -98,10 +101,16 @@ where
 		&mut self,
 		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
-		// every node lies on the cycle, so none is its own successor
 		let graph = &self.check_prop.graph;
+		let offset = graph.offset;
+		let max_node = offset + graph.vars.len() as IntVal - 1;
+		// Tighten every successor to the node range (offset..=max_node).
+		for v in &graph.vars {
+			v.tighten_min(ctx, offset, [])?;
+			v.tighten_max(ctx, max_node, [])?;
+		}
+		// Every node lies on the cycle, so none is its own successor.
 		if !graph.subcircuit {
-			let offset = graph.offset;
 			for (i, v) in graph.vars.iter().enumerate() {
 				let self_val = offset + i as IntVal;
 				v.exclude(ctx, &IntSet::from_iter([self_val..=self_val]), [])?;
@@ -188,17 +197,17 @@ mod tests {
 	// Single-round, per-algorithm tests: post one propagator (no `alldifferent`),
 	// run one `Solver::propagate_next`, assert the exact inference.
 	use crate::{
-		IntSet,
 		actions::{IntDecisionActions, IntInspectionActions},
 		constraints::circuit::{CircuitCheck, CircuitPrevent, CircuitScc},
 		solver::{
-			IntLitMeaning, LiteralStrategy, View as SolverView, branchers::WarmStartBrancher,
+			branchers::WarmStartBrancher, IntLitMeaning, LiteralStrategy, View as SolverView,
 		},
+		IntSet,
 	};
 	use crate::{
-		IntVal,
 		model::{Model, View},
 		solver::{Solver, Status},
+		IntVal,
 	};
 
 	/// Collect every solution of the model as a sorted list of successor-value
@@ -425,6 +434,47 @@ mod tests {
 		let solns = collect(prb, &vars);
 		// The two directed Hamiltonian cycles on {0,1,2}: 0->1->2->0 and 0->2->1->0.
 		assert_eq!(solns, vec![vec![1, 2, 0], vec![2, 0, 1]]);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_circuit_narrows_wide_successor_domain() {
+		// Regression: a successor declared wider than the index set (offset 2,
+		// domain -100..100 over nodes 2..=5) must be narrowed to the node range, so
+		// no out-of-range value can satisfy the circuit.
+		let mut prb = Model::default();
+		let vars = prb.new_int_decisions(4, -100..=100);
+		prb.circuit(vars.iter().copied()).offset(2).post().unwrap();
+		let solns = collect(prb, &vars);
+		assert_eq!(solns.len(), 6, "expected 6 cycles, got {solns:?}");
+		assert!(
+			solns
+				.iter()
+				.all(|s| s.iter().all(|&v| (2..=5).contains(&v))),
+			"a successor escaped the node range 2..=5: {solns:?}"
+		);
+	}
+
+	#[test]
+	#[traced_test]
+	fn test_subcircuit_narrows_wide_successor_domain() {
+		// The same range bound applies to `subcircuit`: successors are still nodes
+		// (self-loops included, which lie in range), so a wide declared domain must
+		// not admit out-of-range values.
+		let mut prb = Model::default();
+		let vars = prb.new_int_decisions(4, -100..=100);
+		prb.subcircuit(vars.iter().copied())
+			.offset(2)
+			.post()
+			.unwrap();
+		let solns = collect(prb, &vars);
+		assert_eq!(solns.len(), 21, "expected 21 subcircuits, got {solns:?}");
+		assert!(
+			solns
+				.iter()
+				.all(|s| s.iter().all(|&v| (2..=5).contains(&v))),
+			"a successor escaped the node range 2..=5: {solns:?}"
+		);
 	}
 
 	#[test]
