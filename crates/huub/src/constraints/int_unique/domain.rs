@@ -7,6 +7,7 @@ use std::{cmp, mem, ops::Range};
 
 use rangelist::IntervalIterator;
 use rustc_hash::FxHashSet;
+use tracing::trace;
 
 use crate::{
 	Conjunction, IntVal,
@@ -30,8 +31,7 @@ struct AugmentingPathScratch {
 	parent: Vec<usize>,
 }
 
-/// Reusable scratch for the explain-time down-closure: the tight Hall set
-/// rebuilt in [`IntUniqueDomain::compute_scc_closure_for_explain`].
+/// Reusable scratch for the explain-time down-closure.
 #[derive(Clone, Debug)]
 struct ClosureScratch {
 	/// Decision members `H` of the tight Hall set. Membership is marked in
@@ -95,6 +95,12 @@ pub struct IntUniqueDomain<I> {
 	/// Set of decision indices whose domain has changed since the last
 	/// propagation pass; cleared by `propagate` and `advise_of_backtrack`.
 	dirty_dcns: FxHashSet<usize>,
+	/// Decisions whose matched value left their domain and thus need their
+	/// matching repaired, carried from phase 1 into phase 2.
+	unmatched_dcns: FxHashSet<usize>,
+	/// The SCC roots that changed and must be re-run through Tarjan, carried
+	/// from phase 2 into phase 3.
+	changed_scc: FxHashSet<usize>,
 	/// Backtrackable partition of decision indices into current SCCs.
 	partition: TrailedPartition,
 	/// Per-call scratch for augmenting-path search.
@@ -137,11 +143,11 @@ struct TarjanScratch {
 	/// Lowest reachable DFS index from each node during the current search.
 	/// Value `0` means "not yet visited in this run".
 	low_link: Vec<usize>,
-	/// Explicit Tarjan DFS work-stack: one [`TarjanFrame`] per node currently
+	/// Explicit Tarjan DFS work-stack: one frame per node currently
 	/// being explored, replacing native recursion so deep graphs cannot
 	/// overflow the call stack. Reuses one allocation across all DFS runs.
 	work_stack: Vec<TarjanFrame>,
-	/// Neighbour frame-stack: each pushed [`TarjanFrame`] appends its node's
+	/// Neighbour frame-stack: each pushed frame appends its node's
 	/// neighbours, remembers `(start, end)` for its own slice, and truncates
 	/// back on pop. Reuses one allocation across all DFS frames.
 	neighbours: Vec<usize>,
@@ -163,10 +169,7 @@ impl AugmentingPathScratch {
 
 impl ClosureScratch {
 	/// Clear the membership marks left by a down-closure computation, walking
-	/// the `dcns` and `vals` lists so only O(closure) entries are touched. The
-	/// `dcns` list is left populated (the caller still needs the member set);
-	/// `vals` is emptied. Afterwards both bitsets are all `false` again, ready
-	/// for the next [`IntUniqueDomain::compute_scc_closure_for_explain`].
+	/// the `dcns` and `vals` lists so only O(closure) entries are touched.
 	fn clear_marks(&mut self) {
 		for &u in &self.dcns {
 			self.dcn_in[u] = false;
@@ -331,6 +334,8 @@ impl<I> IntUniqueDomain<I> {
 		solver.add_propagator(Box::new(Self {
 			graph,
 			dirty_dcns: FxHashSet::default(),
+			unmatched_dcns: FxHashSet::default(),
+			changed_scc: FxHashSet::default(),
 			partition,
 			bfs: AugmentingPathScratch::new(n),
 			tarjan: TarjanScratch::new(n, n_values),
@@ -377,7 +382,7 @@ impl<I> IntUniqueDomain<I> {
 		// which would require a separate pass to filter out.
 		debug_assert!(
 			!self.tarjan.dcns_buf.is_empty(),
-			"2-cycle construction guarantees every SCC contains a decision"
+			"a valid matching's 2-cycle construction guarantees every SCC contains a decision"
 		);
 
 		// Move the SCC's decisions into their own block. `split_off` keeps the
@@ -412,11 +417,7 @@ impl<I> IntUniqueDomain<I> {
 	}
 
 	/// Iterative Tarjan DFS on the bipartite decision/value residual graph,
-	/// rooted at `start_idx`. Uses an explicit heap work-stack
-	/// ([`TarjanFrame`]) instead of native recursion, so the maximum DFS depth
-	/// (up to `2 * n_dcns`) does not consume the call stack. When the root of
-	/// a non-trivial SCC is popped and the run already detected an SCC split,
-	/// delegates filtering to [`Self::process_scc_root`].
+	/// rooted at `start_idx`.
 	///
 	/// The implicit graph is constructed such that each decision and value
 	/// has a node together with a dummy node. There are three types of edges:
@@ -688,69 +689,91 @@ impl<I> IntUniqueDomain<I> {
 		}
 	}
 
-	/// Phase 1 of `propagate`. For each dirty decision: repair its matching
-	/// entry if its previous match left the domain, then either propagate the
-	/// "newly fixed" case (singleton domain -> strip its value from the rest of
-	/// its SCC) or mark the surrounding SCC as needing a Tarjan re-run.
-	///
-	/// Returns the set of SCC roots that need to be revisited in phase 2. Takes
-	/// the dirty set by reference (rather than reading `self.dirty_dcns`) so
-	/// the caller can own the take/restore and guarantee the set is put back
-	/// on every exit path.
-	fn repair_matching_and_propagate_fixed<E>(
-		&mut self,
-		dirty: &FxHashSet<usize>,
-		ctx: &mut E::PropagationContext<'_>,
-	) -> Result<FxHashSet<usize>, E::Conflict>
+	/// Phase 1 of `propagate` to remove fixed values from others' domains.
+	/// Records, in [`Self::unmatched_dcns`], the decisions whose matched value
+	/// was removed from their domain and thus need their matching repaired in
+	/// phase 2.
+	fn propagate_fixed<E>(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
 		I: IntSolverActions<E>,
 	{
-		let mut changed_scc = FxHashSet::default();
-		for &i in dirty.iter() {
-			let scc_id = self.partition.block_root(i, ctx);
+		self.unmatched_dcns.clear();
+		for &i in self.dirty_dcns.iter() {
+			let dcn = &self.graph.dcns[i];
+			let matched_val_index = self.graph.dcn_to_val[i];
+			// If the previously matched value is no longer in the domain, this decision is
+			// now unmatched.
+			if matched_val_index
+				.is_none_or(|val_idx| !dcn.in_domain(ctx, self.graph.value_at(val_idx)))
+			{
+				self.unmatched_dcns.insert(i);
+			}
+			// Fixed decisions: strip their fixed value from the rest of their SCC.
+			if let Some(val) = self.graph.dcns[i].val(ctx) {
+				let scc_id = self.partition.block_root(i, ctx);
+				let scc_end = self.partition.block_end(scc_id, ctx);
+				for pos in scc_id..scc_end {
+					let idx = self.partition.elements()[pos];
+					let reason_lit = self.graph.dcns[i].lit(ctx, IntLitMeaning::Eq(val));
+					if idx != i {
+						self.graph.dcns[idx].remove_val(
+							ctx,
+							val,
+							[reason_lit.clone()].as_slice(),
+						)?;
+						// If `val` was the matched value for decision at `idx`, then it is now
+						// unmatched.
+						if self.graph.dcn_to_val[idx]
+							.is_none_or(|val_idx| val == self.graph.value_at(val_idx))
+						{
+							self.unmatched_dcns.insert(idx);
+						}
+					}
+				}
+			}
+		}
+		self.dirty_dcns.clear();
+		Ok(())
+	}
+
+	/// Phase 2 of `propagate`. For each decision in [`Self::unmatched_dcns`]:
+	/// repair its matching entry if its previous match left the domain, then
+	/// mark the surrounding SCC as needing a Tarjan re-run.
+	///
+	/// Records the SCC roots that need to be revisited in
+	/// [`Self::changed_scc`].
+	fn repair_matching<E>(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict>
+	where
+		E: ReasoningEngine,
+		I: IntSolverActions<E>,
+	{
+		self.changed_scc.clear();
+		// Detach the unmatched set so the loop body can take `&mut self` for the
+		// matching repair; restored below to keep its allocation across calls.
+		let unmatched_dcns = mem::take(&mut self.unmatched_dcns);
+		for &i in unmatched_dcns.iter() {
 			let needs_augment = match self.graph.dcn_to_val[i] {
 				None => true,
 				Some(val_idx) => !self.graph.dcns[i].in_domain(ctx, self.graph.value_at(val_idx)),
 			};
-			if needs_augment {
-				self.find_augmenting_path::<E>(i, ctx)?;
+			if needs_augment && let Err(conflict) = self.find_augmenting_path::<E>(i, ctx) {
+				self.unmatched_dcns = unmatched_dcns;
+				return Err(conflict);
 			}
-
-			// If the decision is now fixed, propagate the newly fixed event.
-			// Otherwise, mark its involved SCC as dirty for phase 2.
-			if let Some(val) = self.graph.dcns[i].val(ctx) {
-				changed_scc.insert(scc_id);
-				let (orig_scc, new_scc) = self.partition.split_off(&[i], ctx);
-				if new_scc.is_some() {
-					let orig_scc_end = self.partition.block_end(orig_scc, ctx);
-					let reason_lit = self.graph.dcns[i].lit(ctx, IntLitMeaning::Eq(val));
-					for pos in orig_scc..orig_scc_end {
-						let idx = self.partition.elements()[pos];
-						let v = self.graph.dcns[idx].clone();
-						v.remove_val(ctx, val, [reason_lit.clone()].as_slice())?;
-					}
-					if orig_scc_end - orig_scc > 1 {
-						changed_scc.insert(orig_scc);
-					}
-				}
-			} else {
-				let scc_end = self.partition.block_end(scc_id, ctx);
-				if scc_end - scc_id > 1 {
-					changed_scc.insert(scc_id);
-				}
-			}
+			let scc_id = self.partition.block_root(i, ctx);
+			self.changed_scc.insert(scc_id);
 		}
-		Ok(changed_scc)
+		self.unmatched_dcns = unmatched_dcns;
+		Ok(())
 	}
 
-	/// Phase 2 of `propagate`. Runs Tarjan on every SCC root flagged in
+	/// Phase 3 of `propagate`. Runs Tarjan on every SCC root flagged in
 	/// `changed_scc`. Tarjan walks the residual bipartite graph and, for each
 	/// non-trivial SCC discovered, partitions the decisions out and removes
 	/// the SCC's values from decisions outside it.
 	fn run_tarjan_on_changed_sccs<E>(
 		&mut self,
-		changed_scc: &FxHashSet<usize>,
 		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<(), E::Conflict>
 	where
@@ -761,20 +784,26 @@ impl<I> IntUniqueDomain<I> {
 		let mut next_dfs_index: usize = 1;
 		let mut n_left_visited: usize = 0;
 		let mut scc_split_detected = false;
+		// Detach the changed-SCC set so the loop body can take `&mut self` for
+		// the Tarjan DFS; restored below to keep its allocation across calls.
+		let changed_scc = mem::take(&mut self.changed_scc);
 		for &i in changed_scc.iter() {
 			let scc_end = self.partition.block_end(i, ctx);
 			for dcn_idx in i..scc_end {
-				if self.tarjan.dfs_index[dcn_idx] == 0 {
-					self.tarjan_dfs::<E>(
+				if self.tarjan.dfs_index[dcn_idx] == 0
+					&& let Err(conflict) = self.tarjan_dfs::<E>(
 						dcn_idx,
 						&mut next_dfs_index,
 						&mut n_left_visited,
 						&mut scc_split_detected,
 						ctx,
-					)?;
+					) {
+					self.changed_scc = changed_scc;
+					return Err(conflict);
 				}
 			}
 		}
+		self.changed_scc = changed_scc;
 		Ok(())
 	}
 }
@@ -857,20 +886,21 @@ where
 		skip(self, ctx)
 	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
-		// Phase 1: drain dirty decisions, fix the matching, and collect the
-		// set of SCC roots whose residual graph may have changed.
-		//
-		// Borrow the dirty set out so phase 1 can take `&mut self` while reading
-		// it. Put the emptied set back on every path, including on conflict from
-		// `?`, so its capacity is reused next round.
-		let mut dirty = mem::take(&mut self.dirty_dcns);
-		let result = self.repair_matching_and_propagate_fixed(&dirty, ctx);
-		dirty.clear();
-		self.dirty_dcns = dirty;
-		let changed_scc = result?;
-
-		// Phase 2: re-run Tarjan on every SCC that changed in phase 1.
-		self.run_tarjan_on_changed_sccs(&changed_scc, ctx)
+		trace!(target: "int_unique", dirty_dcns =? self.dirty_dcns, "dirty decisions");
+		// Phase 1: check whether each dirty decision is now fixed, and
+		// collect the set of unmatched decisions into `self.unmatched_dcns`.
+		self.propagate_fixed(ctx)?;
+		trace!(target: "int_unique", unmatched_decisions =? self.unmatched_dcns, "unmatched decisions");
+		// Phase 2: repair the matching for each dirty decision, and
+		// collect the set of changed SCCs into `self.changed_scc`.
+		self.repair_matching(ctx)?;
+		debug_assert!(
+			(0..self.graph.dcns.len()).all(|i| self.graph.dcn_to_val[i].is_some()),
+			"all decisions should be matched after propagation"
+		);
+		trace!(target: "int_unique", changed_sccs =? self.changed_scc, "changed SCCs");
+		// Phase 3: re-run Tarjan on every SCC that changed in phase 2.
+		self.run_tarjan_on_changed_sccs(ctx)
 	}
 }
 
