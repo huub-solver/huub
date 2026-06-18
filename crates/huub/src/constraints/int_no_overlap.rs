@@ -708,15 +708,18 @@ where
 						all_fixed = false;
 					}
 				}
-				// Target optimization: If pruning has fixed the object at a feasible
-				// position, mark it as no longer being a target.
-				if all_fixed {
+				// Target optimization: mark the object as no longer being a target,
+				// skipping it in future iterations, when its origin and size are fixed.
+				if all_fixed
+					&& (TypeId::of::<I2>() == TypeId::of::<IntVal>()
+						|| self.size.row(obj).iter().all(|v| v.val(ctx).is_some()))
+				{
 					let _ = ctx.set_trailed(self.target[obj], true);
 				}
 			}
 		}
 
-		// Source optimization: Update the bounding box of all non-fixed objects.
+		// Source optimization: update the bounding box of all non-fixed objects.
 		for obj in 0..self.num_objects() {
 			if ctx.trailed(self.target[obj]) {
 				continue;
@@ -726,7 +729,7 @@ where
 					cmp::min(self.bounding_box.min(i), self.origin_lb[[obj, i]]);
 				*self.bounding_box.max_mut(i) = cmp::max(
 					self.bounding_box.max(i),
-					self.origin_ub[[obj, i]] + self.size_lb[[obj, i]] - 1,
+					self.origin_ub[[obj, i]] + self.size[[obj, i]].max(ctx) - 1,
 				);
 			}
 		}
@@ -850,7 +853,10 @@ mod tests {
 	use itertools::Itertools;
 	use tracing_test::traced_test;
 
-	use crate::model::Model;
+	use crate::{
+		model::Model,
+		solver::branchers::{DecisionSelection, DomainSelection, IntBrancher},
+	};
 
 	#[test]
 	#[traced_test]
@@ -965,6 +971,58 @@ mod tests {
 			3, 5, 2, 1, 4, 7
 			3, 5, 2, 2, 4, 7
 			3, 5, 2, 3, 4, 7"#]],
+		);
+	}
+
+	/// Two unit-width objects stacked in a single column: the `x` origin and
+	/// size of each object are fixed, leaving only the `y` origin and the `y`
+	/// size free. Branching on the origins before the sizes lets an object's
+	/// origin become fixed. A previous version of the propagator marked such
+	/// an object as a target before its size was fixed, and also computed the
+	/// bounding box of the other objects using their minimum sizes.
+	#[test]
+	#[traced_test]
+	fn no_overlap_size_growth_regression() {
+		let mut prb = Model::default();
+
+		let y1 = prb.new_int_decision(1..=2);
+		let y2 = prb.new_int_decision(1..=2);
+
+		let dy1 = prb.new_int_decision(1..=2);
+		let dy2 = prb.new_int_decision(1..=2);
+
+		prb.no_overlap()
+			.origins(vec![vec![1.into(), y1], vec![1.into(), y2]])
+			.sizes(vec![vec![1.into(), dy1], vec![1.into(), dy2]])
+			.strict(true)
+			.post()
+			.unwrap();
+
+		let (mut slv, map) = prb.lower().to_solver().unwrap();
+		// Search the origins before the sizes to exercise the target and source
+		// optimizations that the bug lived in.
+		let order = vec![y1, y2, dy1, dy2]
+			.into_iter()
+			.map(|v| map.get(&mut slv, v))
+			.collect_vec();
+		IntBrancher::new_in(
+			&mut slv,
+			order,
+			DecisionSelection::InputOrder,
+			DomainSelection::IndomainMin,
+		);
+
+		let vars = vec![y1, dy1, y2, dy2]
+			.into_iter()
+			.map(|v| map.get(&mut slv, v))
+			.collect_vec();
+		slv.expect_solutions(
+			&vars,
+			expect![[r#"
+			1, 1, 2, 1
+			1, 1, 2, 2
+			2, 1, 1, 1
+			2, 2, 1, 1"#]],
 		);
 	}
 
