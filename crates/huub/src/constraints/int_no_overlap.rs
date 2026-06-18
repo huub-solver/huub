@@ -316,10 +316,14 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 			if ctx.trailed(self.source[i]) {
 				continue;
 			}
-
 			if i == obj {
 				continue;
-			};
+			}
+			// In non-strict mode, objects with size (potential) 0 do not need to be
+			// considered.
+			if !STRICT && self.size_lb.row(i).contains(&0) {
+				continue;
+			}
 
 			let mut forbidden = Region::with_dimensions(self.num_dimensions());
 
@@ -682,8 +686,9 @@ where
 				continue;
 			}
 
-			// In non-strict mode, objects with size 0 do not need to be considered.
-			if !STRICT && self.size.row(obj).iter().any(|v| v.val(ctx) == Some(0)) {
+			// In non-strict mode, objects with size (potential) 0 do not need to be
+			// considered.
+			if !STRICT && self.size_lb.row(obj).contains(&0) {
 				continue;
 			}
 
