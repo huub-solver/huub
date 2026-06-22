@@ -234,7 +234,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f70e4ddd6beedefeb48f59d5f85fc21365a66e7976408c3d39f6cbbc4f03e08c"
 dependencies = [
  "divan-macros",
- "itertools",
+ "itertools 0.14.0",
  "proc-macro-crate",
  "proc-macro2",
  "quote",
@@ -464,7 +464,7 @@ dependencies = [
  "expect-test",
  "flatzinc-serde",
  "humantime",
- "itertools",
+ "itertools 0.15.0",
  "pindakaas",
  "rangelist",
  "rustc-hash",
@@ -518,6 +518,15 @@ name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
 dependencies = [
  "either",
 ]
@@ -664,7 +673,7 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa5074613d21f6c8fc3b0f4efb404980d7cd36ff9823814b577c76d5f2c6aa46"
 dependencies = [
- "itertools",
+ "itertools 0.14.0",
  "pindakaas-cadical",
  "rangelist",
  "rustc-hash",
