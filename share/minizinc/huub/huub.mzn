@@ -10,3 +10,9 @@ annotation not_last;
 
 /** @group huub.annotations When used on a disjunctive constraint, Huub uses the detectable precedence propagation algorithm for the constraint. */
 annotation detectable_precedence;
+
+/** @group huub.annotations When used on a circuit or subcircuit constraint, Huub enables the `no_cycle` propagation algorithm. If any circuit annotation is present, unannotated algorithms are disabled. */
+annotation circuit_no_cycle;
+
+/** @group huub.annotations When used on a circuit or subcircuit constraint, Huub enables the `scc` propagation algorithm. If any circuit annotation is present, unannotated algorithms are disabled. */
+annotation circuit_scc;

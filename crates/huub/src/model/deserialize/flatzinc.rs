@@ -67,6 +67,12 @@ pub enum AnnotationIdent {
 	/// "detectable_precedence" annotation to detectable precedence propagation
 	/// within the disjunctive propagator.
 	DisjDetectPrec,
+	/// "circuit_no_cycle" annotation to enable the `no_cycle` propagator within
+	/// a circuit/subcircuit constraint.
+	CircuitNoCycle,
+	/// "circuit_scc" annotation to enable the `scc` propagator within a
+	/// circuit/subcircuit constraint.
+	CircuitScc,
 	/// "int_search" annotation for integer search strategies.
 	IntSearch,
 	/// "seq_search" annotation for sequential search strategies.
@@ -160,6 +166,8 @@ pub enum ConstraintIdent {
 	BoolNot,
 	/// "bool_xor"
 	BoolXor,
+	/// "huub_circuit"
+	Circuit,
 	/// "cumulative"
 	Cumulative,
 	/// "huub_diffn_int" and "huub_diffn_nonstrict_int"
@@ -228,6 +236,8 @@ pub enum ConstraintIdent {
 	SeqPrecedeChainInt,
 	/// "set_in"
 	SetIn,
+	/// "huub_subcircuit"
+	Subcircuit,
 	/// "set_in_reif"
 	SetInReif,
 	/// "huub_table_int"
@@ -420,6 +430,8 @@ impl AnnotationIdent {
 			Self::DisjDetectPrec => "detectable_precedence",
 			Self::DisjEdgeFinding => "edge_finding",
 			Self::DisjNotLast => "not_last",
+			Self::CircuitNoCycle => "circuit_no_cycle",
+			Self::CircuitScc => "circuit_scc",
 			Self::IntSearch => "int_search",
 			Self::SeqSearch => "seq_search",
 			Self::ValSelIndomain => "indomain",
@@ -463,6 +475,8 @@ impl TryFrom<&str> for AnnotationIdent {
 			"anti_first_fail" => Ok(Self::VarSelAntiFirstFail),
 			"bool_search" => Ok(Self::BoolSearch),
 			"bounds" => Ok(Self::ConsistencyBounds),
+			"circuit_no_cycle" => Ok(Self::CircuitNoCycle),
+			"circuit_scc" => Ok(Self::CircuitScc),
 			"detectable_precedence" => Ok(Self::DisjDetectPrec),
 			"dom_w_deg" => Ok(Self::VarSelDomWDeg),
 			"domain" => Ok(Self::ConsistencyDomain),
@@ -520,6 +534,7 @@ impl ConstraintIdent {
 			Self::BoolLinEq => "bool_lin_eq",
 			Self::BoolNot => "bool_not",
 			Self::BoolXor => "bool_xor",
+			Self::Circuit => "huub_circuit",
 			Self::Cumulative => "huub_cumulative",
 			Self::DiffnInt { strict: false } => "huub_diffn_nonstrict_int",
 			Self::DiffnInt { strict: true } => "huub_diffn_int",
@@ -554,6 +569,7 @@ impl ConstraintIdent {
 			Self::SeqPrecedeChainInt => "huub_seq_precede_chain_int",
 			Self::SetIn => "set_in",
 			Self::SetInReif => "set_in_reif",
+			Self::Subcircuit => "huub_subcircuit",
 			Self::TableInt => "huub_table_int",
 			Self::ValuePrecedeChain => "huub_value_precede_chain_int",
 		}
@@ -589,6 +605,7 @@ impl TryFrom<&str> for ConstraintIdent {
 			"huub_array_int_minimum" => Ok(Self::ArrayIntMinimum),
 			"huub_assume" => Ok(Self::Assume),
 			"huub_bool_clause_reif" => Ok(Self::BoolClauseReif),
+			"huub_circuit" => Ok(Self::Circuit),
 			"huub_cumulative" => Ok(Self::Cumulative),
 			"huub_diffn_int" => Ok(Self::DiffnInt { strict: true }),
 			"huub_diffn_k_int" => Ok(Self::DiffnKInt { strict: true }),
@@ -597,6 +614,7 @@ impl TryFrom<&str> for ConstraintIdent {
 			"huub_disjunctive_strict" => Ok(Self::DisjuctiveStrict),
 			"huub_regular" => Ok(Self::Regular),
 			"huub_seq_precede_chain_int" => Ok(Self::SeqPrecedeChainInt),
+			"huub_subcircuit" => Ok(Self::Subcircuit),
 			"huub_table_int" => Ok(Self::TableInt),
 			"huub_value_precede_chain_int" => Ok(Self::ValuePrecedeChain),
 			"int_abs" => Ok(Self::IntAbs),
@@ -1950,6 +1968,28 @@ impl<'a> FznModelBuilder<'a> {
 						.maybe_domain_propagation(domain)
 						.post()?;
 				}
+				ConstraintIdent::Circuit | ConstraintIdent::Subcircuit => {
+					let [arr, offset] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let args = self.arg_array(arr)?;
+					let args: Vec<_> = args.iter().map(|l| self.lit_int(l)).try_collect()?;
+					let offset = self.arg_par_int(offset)?;
+					let (no_cycle, scc) = match (
+						Self::anns_contains(&c.ann, &mut ann_used, AnnotationIdent::CircuitNoCycle),
+						Self::anns_contains(&c.ann, &mut ann_used, AnnotationIdent::CircuitScc),
+					) {
+						(false, false) => (None, None),
+						(nc, s) => (Some(nc), Some(s)),
+					};
+					self.prb
+						.circuit(args)
+						.offset(offset)
+						.subcircuit(ident == ConstraintIdent::Subcircuit)
+						.maybe_no_cycle_propagation(no_cycle)
+						.maybe_scc_propagation(scc)
+						.post()?;
+				}
 				ConstraintIdent::ArrayIntMaximum | ConstraintIdent::ArrayIntMinimum => {
 					let [m, args] = c.args.as_slice() else {
 						return num_args_err(2);
@@ -2624,6 +2664,20 @@ mod tests {
 			Ok(AnnotationIdent::ValSelIndomainMax)
 		);
 		assert_eq!(AnnotationIdent::try_from("unknown_annotation"), Err(()));
+	}
+
+	#[test]
+	fn circuit_constraint_ident_roundtrips() {
+		assert_eq!(ConstraintIdent::Circuit.as_str(), "huub_circuit");
+		assert_eq!(
+			ConstraintIdent::try_from("huub_circuit"),
+			Ok(ConstraintIdent::Circuit)
+		);
+		assert_eq!(ConstraintIdent::Subcircuit.as_str(), "huub_subcircuit");
+		assert_eq!(
+			ConstraintIdent::try_from("huub_subcircuit"),
+			Ok(ConstraintIdent::Subcircuit)
+		);
 	}
 
 	#[test]
