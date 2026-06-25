@@ -6,7 +6,10 @@
 
 use std::fmt::{self, Debug, Formatter};
 
-use pindakaas::{Lit as RawLit, solver::propagation::SolvingActions};
+use pindakaas::{
+	Lit as RawLit,
+	solver::propagation::{ClauseBuilder, SolvingActions},
+};
 use tracing::trace;
 
 use crate::{
@@ -439,7 +442,15 @@ impl<'a> SolvingContext<'a> {
 				);
 				debug_assert!(self.state.conflict.is_none());
 				self.state.failed = true;
-				self.state.conflict = Some(conflict);
+				// Convert the conflict object into a conflict clause.
+				let mut clause: Vec<RawLit> = Vec::new();
+				conflict.reason.explain(
+					propagators,
+					self.state,
+					conflict.subject,
+					ClauseBuilder::new(&mut clause),
+				);
+				self.state.conflict = Some(clause.into_boxed_slice());
 			}
 			if self.state.conflict.is_some() || !self.state.propagation_queue.is_empty() {
 				return;

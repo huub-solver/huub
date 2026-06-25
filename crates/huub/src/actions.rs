@@ -69,6 +69,29 @@ pub trait PropagationActions: DecisionActions + ReasoningContext {
 	fn deferred_reason(&self, data: u64) -> DeferredReason;
 }
 
+/// Actions for building the explanation of a propagation: the conjunction of
+/// reason atoms that imply the change being explained (see
+/// [`Propagator::explain`](crate::constraints::Propagator::explain)).
+pub trait ReasonActions<Atom> {
+	/// Add several reason atoms to the explanation.
+	fn extend(&mut self, atoms: impl IntoIterator<Item = Atom>) {
+		for atom in atoms {
+			self.push(atom);
+		}
+	}
+
+	/// Add a reason atom to the explanation.
+	fn push(&mut self, atom: Atom);
+
+	/// Reserve capacity for at least `additional` more reason atoms.
+	///
+	/// This is a hint; implementations that cannot usefully reserve may ignore
+	/// it.
+	fn reserve(&mut self, additional: usize) {
+		let _ = additional;
+	}
+}
+
 /// The `ReasoningContext` trait names the fundamental reasoning types used by
 /// the context objects used by the various action traits.
 pub trait ReasoningContext {
@@ -103,6 +126,11 @@ pub trait ReasoningEngine {
 	/// propagate changes based on the constraint they enforce.
 	type PropagationContext<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
 		+ PropagationActions<Atom = Self::Atom, Conflict = Self::Conflict>;
+
+	/// A sink for the conjunctive reason atoms emitted by
+	/// [`Propagator::explain`](crate::constraints::Propagator::explain) that
+	/// imply the propagated literal.
+	type ReasonSink<'a>: ReasonActions<Self::Atom>;
 }
 
 /// Actions that can be performed to simplify a [`Model`](crate::model::Model)
@@ -143,4 +171,18 @@ pub trait TrailingActions {
 
 	/// Get the current value of a [`Trailed`] value.
 	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T;
+}
+
+impl<Atom> ReasonActions<Atom> for Vec<Atom> {
+	fn extend(&mut self, atoms: impl IntoIterator<Item = Atom>) {
+		Extend::extend(self, atoms);
+	}
+
+	fn push(&mut self, atom: Atom) {
+		Vec::push(self, atom);
+	}
+
+	fn reserve(&mut self, additional: usize) {
+		Vec::reserve(self, additional);
+	}
 }

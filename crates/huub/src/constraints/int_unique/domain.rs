@@ -10,10 +10,10 @@ use rustc_hash::FxHashSet;
 use tracing::trace;
 
 use crate::{
-	Conjunction, IntVal,
+	IntVal,
 	actions::{
 		InitActions, IntEvent, IntInspectionActions, IntPropCond, PostingActions,
-		PropagationActions, ReasoningContext, ReasoningEngine,
+		PropagationActions, ReasonActions, ReasoningContext, ReasoningEngine,
 	},
 	constraints::{IntSolverActions, Propagator},
 	helpers::trailed_partition::TrailedPartition,
@@ -314,9 +314,14 @@ impl<I> IntUniqueDomain<I> {
 
 		Err(ctx.declare_conflict(
 			move |ctx: &mut E::PropagationContext<'_>| -> Vec<<E as ReasoningEngine>::Atom> {
-				self.build_hall_set_reason(ctx, &self.bfs.queue, |dcn, ctx, meaning| {
-					dcn.lit(ctx, meaning)
-				})
+				let mut reason = Vec::new();
+				self.build_hall_set_reason(
+					ctx,
+					&self.bfs.queue,
+					&mut reason,
+					|dcn, ctx, meaning| dcn.lit(ctx, meaning),
+				);
+				reason
 			},
 		))
 	}
@@ -581,14 +586,15 @@ impl<I> IntUniqueDomain<I> {
 	/// `get_lit` lets the caller choose between `lit` (propagation) and
 	/// `lit_relaxed` (explanation), which live in different traits with
 	/// different context mutability.
-	fn build_hall_set_reason<C, A, F>(
+	fn build_hall_set_reason<C, A, S, F>(
 		&self,
 		ctx: &mut C,
 		members: &[usize],
+		reason: &mut S,
 		mut get_lit: F,
-	) -> Vec<A>
-	where
+	) where
 		C: ReasoningContext,
+		S: ReasonActions<A>,
 		I: IntInspectionActions<C>,
 		F: FnMut(&I, &mut C, IntLitMeaning) -> A,
 	{
@@ -615,7 +621,7 @@ impl<I> IntUniqueDomain<I> {
 		// Pass 3: emit per-member literals, deriving holes inline from the
 		// bitset's zero positions (no separate holes Vec).
 		let n_holes = window - union_bits.len();
-		let mut reason: Vec<A> = Vec::with_capacity(members.len() * (2 + n_holes));
+		reason.reserve(members.len() * (2 + n_holes));
 		for &did in members {
 			let dcn = &self.graph.dcns[did];
 			reason.push(get_lit(dcn, ctx, IntLitMeaning::GreaterEq(dom_lb)));
@@ -626,7 +632,6 @@ impl<I> IntUniqueDomain<I> {
 				}
 			}
 		}
-		reason
 	}
 
 	/// Rebuild the down-closure of the SCC whose decision members occupy the
@@ -839,7 +844,8 @@ where
 		ctx: &mut E::ExplanationContext<'_>,
 		_lit: E::Atom,
 		data: u64,
-	) -> Conjunction<E::Atom> {
+		reason: &mut E::ReasonSink<'_>,
+	) {
 		let scc_id = data as usize;
 		let scc_end = self.partition.block_end(scc_id, ctx);
 
@@ -856,7 +862,7 @@ where
 			self.closure.vals.len(),
 			"down-closure Hall set is not tight"
 		);
-		let reason = self.build_hall_set_reason(ctx, &self.closure.dcns, |dcn, ctx, meaning| {
+		self.build_hall_set_reason(ctx, &self.closure.dcns, reason, |dcn, ctx, meaning| {
 			let (atom, _) = dcn.lit_relaxed(ctx, meaning);
 			atom
 		});
@@ -864,7 +870,6 @@ where
 		// the next explain. The `dcns`/`vals` lists are the only record of which
 		// entries were marked, so this must run after the reason is built.
 		self.closure.clear_marks();
-		reason
 	}
 
 	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {

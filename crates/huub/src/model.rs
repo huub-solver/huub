@@ -546,7 +546,8 @@ impl Model {
 		}) = status
 		{
 			debug_assert_eq!(ConRef::new(r.propagator as usize), con);
-			let conj = con_obj.explain(self, subject.unwrap_or(false.into()), r.data);
+			let mut conj = Vec::new();
+			con_obj.explain(self, subject.unwrap_or(false.into()), r.data, &mut conj);
 			status = Err(Conflict {
 				subject,
 				reason: Reason::Eager(conj.into_boxed_slice()),
@@ -634,6 +635,7 @@ impl ReasoningEngine for Model {
 	type InitializationContext<'a> = ModelInitContext<'a>;
 	type NotificationContext<'a> = Self;
 	type PropagationContext<'a> = Self;
+	type ReasonSink<'a> = Vec<View<bool>>;
 }
 
 impl SimplificationActions for Model {

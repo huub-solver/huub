@@ -5,11 +5,11 @@ use itertools::Itertools;
 use tracing::trace;
 
 use crate::{
-	Conjunction, IntVal,
+	IntVal,
 	actions::{
 		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions, IntPropCond,
-		PostingActions, PropagationActions, ReasoningContext, ReasoningEngine, Trailed,
-		TrailingActions,
+		PostingActions, PropagationActions, ReasonActions, ReasoningContext, ReasoningEngine,
+		Trailed, TrailingActions,
 	},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, ReasonBuilder,
@@ -257,8 +257,9 @@ where
 		ctx: &mut E::ExplanationContext<'_>,
 		lit: E::Atom,
 		data: u64,
-	) -> Conjunction<E::Atom> {
-		self.propagator.explain(ctx, lit, data)
+		reason: &mut E::ReasonSink<'_>,
+	) {
+		self.propagator.explain(ctx, lit, data, reason);
 	}
 
 	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
@@ -308,8 +309,8 @@ impl<I> DisjunctivePropagator<I> {
 		task_no: usize,
 		earliest_start: i64,
 		latest_completion: i64,
-	) -> Conjunction<E::Atom>
-	where
+		reason: &mut E::ReasonSink<'_>,
+	) where
 		E: ReasoningEngine,
 		I: IntSolverActions<E>,
 	{
@@ -349,29 +350,27 @@ impl<I> DisjunctivePropagator<I> {
 		// latest_completion + 1] because [start(t) >= earliest_start] /\ forall (t'
 		// in O) [start(t') >= earliest_start] /\ forall (t' in O) [end(t') <=
 		// latest_completion]
-		let mut clause = Vec::new();
 		let (bv, _) =
 			self.start_times[task_no].lit_relaxed(ctx, IntLitMeaning::GreaterEq(earliest_start));
-		clause.push(bv);
+		reason.push(bv);
 		let mut energy = latest_completion - earliest_start - self.durations[task_no];
 		for i in 0..self.start_times.len() {
 			if i != task_no
 				&& earliest_start_times[i] >= earliest_start
 				&& latest_completion_times[i] <= latest_completion
 			{
-				clause.push(self.start_times[i].min_lit(ctx));
+				reason.push(self.start_times[i].min_lit(ctx));
 				let (bv, _) = self.start_times[i].lit_relaxed(
 					ctx,
 					IntLitMeaning::Less(latest_completion - self.durations[i] + 1),
 				);
-				clause.push(bv);
+				reason.push(bv);
 				energy -= self.durations[i];
 				if energy < 0 {
 					break;
 				}
 			}
 		}
-		clause
 	}
 
 	/// Explain Not-Last propagation for task `i` with the time window
@@ -383,8 +382,8 @@ impl<I> DisjunctivePropagator<I> {
 		task_no: usize,
 		earliest_start: i64,
 		updated_lct_i: i64,
-	) -> Conjunction<E::Atom>
-	where
+		reason: &mut E::ReasonSink<'_>,
+	) where
 		E: ReasoningEngine,
 		I: IntSolverActions<E>,
 	{
@@ -411,8 +410,7 @@ impl<I> DisjunctivePropagator<I> {
 		assert_ne!(nlset.len(), 0);
 
 		// Explain the reason why task i cannot be the last task
-		let mut clause = Vec::new();
-		clause.push(self.start_times[task_no].max_lit(ctx));
+		reason.push(self.start_times[task_no].max_lit(ctx));
 		for j in nlset {
 			// explain the reason why all tasks in NLset(i) will stay in NLset(i)
 			//
@@ -420,15 +418,14 @@ impl<I> DisjunctivePropagator<I> {
 			// lst_i, and NLset(i) \not\prec i
 			let (bv, _) =
 				self.start_times[j].lit_relaxed(ctx, IntLitMeaning::GreaterEq(earliest_start));
-			clause.push(bv);
+			reason.push(bv);
 			// (2) explain the reason why the latest completion time of task i is set
 			// to latest_completion If for all j in NLset(i) [lst_j ≤ lct_i'], then
 			// max{lst_j, j \in Ω} ≤ lct_i', and lct_i' should be set
 			let (bv, _) =
 				self.start_times[j].lit_relaxed(ctx, IntLitMeaning::Less(updated_lct_i + 1));
-			clause.push(bv);
+			reason.push(bv);
 		}
-		clause
 	}
 
 	/// Explain resource overload within the time window
@@ -485,8 +482,8 @@ impl<I> DisjunctivePropagator<I> {
 		task_no: usize,
 		earliest_start: i64,
 		latest_start: i64,
-	) -> Conjunction<E::Atom>
-	where
+		reason: &mut E::ReasonSink<'_>,
+	) where
 		E: ReasoningEngine,
 		I: IntSolverActions<E>,
 	{
@@ -514,25 +511,23 @@ impl<I> DisjunctivePropagator<I> {
 
 		// Explain the reason why task i must be scheduled after a certain time
 		// bound
-		let mut clause = Vec::new();
 		let (bv, _) =
 			self.start_times[task_no].lit_relaxed(ctx, IntLitMeaning::GreaterEq(task_i_est));
-		clause.push(bv);
+		reason.push(bv);
 		for j in precedence_set {
 			let v = self.start_times[j].clone();
 			// (1) explain the reason why all tasks in precedence_set will stay in
 			// precedence_set
 			let (bv, _) = v.lit_relaxed(ctx, IntLitMeaning::GreaterEq(earliest_start));
-			clause.push(bv);
+			reason.push(bv);
 			// (2) explain the reason why the earliest start time of task i is set to
 			// earliest completeion time of the precedence set
 			let (bv, _) = v.lit_relaxed(
 				ctx,
 				IntLitMeaning::Less(task_i_est + self.durations[task_no]),
 			);
-			clause.push(bv);
+			reason.push(bv);
 		}
-		clause
 	}
 
 	/// Return the (current) latest completion time of task `i`.
@@ -1101,14 +1096,15 @@ where
 		name = "disjunctive",
 		target = "solver",
 		level = "trace",
-		skip(self, ctx)
+		skip(self, ctx, reason)
 	)]
 	fn explain(
 		&mut self,
 		ctx: &mut E::ExplanationContext<'_>,
 		_: E::Atom,
 		data: u64,
-	) -> Conjunction<E::Atom> {
+		reason: &mut E::ReasonSink<'_>,
+	) {
 		// Extract the task number and propagation rule from the data
 		let task_no = self.task_no_from_data(data);
 		let earliest_start = ctx.trailed(self.trailed_info[task_no].earliest_start);
@@ -1117,13 +1113,13 @@ where
 		// Explain the reason based on the propagation rule of disjunctive.
 		match self.propagation_rule_from_data(data) {
 			DisjunctivePropagationRule::EdgeFinding => {
-				self.explain_edge_finding(ctx, task_no, earliest_start, latest_completion)
+				self.explain_edge_finding(ctx, task_no, earliest_start, latest_completion, reason);
 			}
 			DisjunctivePropagationRule::NotLast => {
-				self.explain_not_last(ctx, task_no, earliest_start, latest_completion)
+				self.explain_not_last(ctx, task_no, earliest_start, latest_completion, reason);
 			}
 			DisjunctivePropagationRule::Precedence => {
-				self.explain_precedence(ctx, task_no, earliest_start, latest_completion)
+				self.explain_precedence(ctx, task_no, earliest_start, latest_completion, reason);
 			}
 		}
 	}

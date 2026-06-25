@@ -20,28 +20,27 @@ use std::{
 	any::Any,
 	error::Error,
 	fmt::{self, Debug},
-	iter::once,
 	mem,
 };
 
 use dyn_clone::DynClone;
 use itertools::Itertools;
-use pindakaas::Lit as RawLit;
+use pindakaas::solver::propagation::ClauseBuilder;
 use tracing::warn;
 
 use crate::{
-	Conjunction, IntVal,
+	IntVal,
 	actions::{
 		BoolAnalyzeActions, BoolInitActions, BoolInspectionActions, BoolPropagationActions,
 		BoolSimplificationActions, IntAnalyzeActions, IntEvent, IntExplanationActions,
 		IntInitActions, IntInspectionActions, IntPropagationActions, IntSimplificationActions,
-		ReasoningContext, ReasoningEngine,
+		ReasonActions, ReasoningContext, ReasoningEngine,
 	},
 	lower::{LoweringContext, LoweringError},
 	model::{self, Model},
 	solver::{
 		self,
-		engine::{Engine, State},
+		engine::{Engine, ReasonSink, State},
 		view::boolean::BoolView,
 	},
 };
@@ -216,8 +215,8 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 	/// Explain a lazy reason that was emitted.
 	///
 	/// This method is called by the engine when a conflict is found involving a
-	/// lazy explanation emitted by the propagator. The propagator must now
-	/// produce the conjunction of literals that led to a literal being
+	/// lazy explanation emitted by the propagator. The propagator must now push
+	/// the (conjunction of) literals into `reason` that led to a literal being
 	/// propagated.
 	///
 	/// The method is called with the data that was passed to the
@@ -232,10 +231,12 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 		context: &mut E::ExplanationContext<'_>,
 		lit: E::Atom,
 		data: u64,
-	) -> Conjunction<E::Atom> {
+		reason: &mut E::ReasonSink<'_>,
+	) {
 		let _ = context;
 		let _ = lit;
 		let _ = data;
+		let _ = reason;
 		// Method will only be called if `propagate` used a lazy reason.
 		panic!("propagator did not provide an explain implementation")
 	}
@@ -464,55 +465,44 @@ impl<A> Reason<A> {
 }
 
 impl Reason<solver::Decision<bool>> {
-	/// Make the reason produce an explanation of the `lit`.
+	/// Write a reason clause from the `Reason` into `clause`.
 	///
-	/// Explanation is in terms of a clause that can be added to the solver.
-	/// When the `lit` argument is `None`, the reason is explaining `false`.
-	pub(crate) fn explain<Clause: FromIterator<RawLit>>(
+	/// The reason is the conjunction of (literal) premises that implies `lit`.
+	/// When `lit` is `None` then it explains `false`. In this method we rewrite
+	/// the implication form `(premise_1 /\ premise_2 /\ ...) -> lit` into a
+	/// direct clause `(¬premise_1 \/ ¬premise_2 \/ ... \/ lit)`. For a
+	/// [`Reason::Lazy`] reason, the propagator is asked to compute the
+	/// conjunction of premises.
+	pub(crate) fn explain(
 		&self,
 		props: &mut [BoxedPropagator],
 		actions: &mut State,
 		lit: Option<solver::Decision<bool>>,
-	) -> Clause {
+		mut clause: ClauseBuilder<'_>,
+	) {
+		if let Some(lit) = lit {
+			clause.push(lit.0);
+		}
+		let mut reason = ReasonSink(clause);
 		match self {
 			&Reason::Lazy(DeferredReason {
 				propagator: prop,
 				data,
 			}) => {
-				let reason = props[prop as usize].explain(
+				props[prop as usize].explain(
 					actions,
 					lit.map(|lit| lit.into()).unwrap_or(true.into()),
 					data,
+					&mut reason,
 				);
-				let v: Result<Vec<_>, _> = reason
-					.into_iter()
-					.filter_map(|v| match v.0 {
-						BoolView::Lit(lit) => Some(Ok(lit)),
-						BoolView::Const(false) => Some(Err(false)),
-						BoolView::Const(true) => None,
-					})
-					.collect();
-				match v {
-					Ok(v) => v,
-					Err(false) => panic!("invalid lazy reason"), // TODO: Better message,
-					Err(true) => Vec::new(),
-				}
-				.into_iter()
-				.map(|l| !l.0)
-				.chain(lit.map(|lit| lit.0))
-				.collect()
 			}
-			Reason::Eager(v) => v
-				.iter()
-				.map(|&l| !l.0)
-				.chain(lit.map(|lit| lit.0))
-				.collect(),
-			&Reason::Simple(reason) => once(!reason.0).chain(lit.map(|lit| lit.0)).collect(),
+			Reason::Eager(v) => reason.extend(v.iter().map(|&premise| premise.into())),
+			&Reason::Simple(premise) => reason.push(premise.into()),
 		}
 	}
 
 	/// Internal function used to tighten a [`Reason`] with [`BoolView`] atoms
-	/// to a [`Reason`] with [`RawLit`] atoms.
+	/// to a [`Reason`] with [`RawLit`](pindakaas::Lit) atoms.
 	pub(crate) fn from_view(
 		reason: Result<Reason<solver::View<bool>>, bool>,
 	) -> Result<Self, bool> {

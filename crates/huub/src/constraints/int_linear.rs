@@ -12,13 +12,13 @@ use pindakaas::{
 };
 
 use crate::{
-	Conjunction, IntVal,
+	IntVal,
 	actions::{
 		BoolAnalyzeActions, BoolInitActions, BoolInspectionActions, BoolPropagationActions,
 		BoolSimplificationActions, InitActions, IntAnalyzeActions, IntDecisionActions, IntEvent,
 		IntInitActions, IntInspectionActions, IntPropCond, IntPropagationActions,
-		IntSimplificationActions, PostingActions, PropagationActions, ReasoningContext,
-		ReasoningEngine, SimplificationActions, Trailed, TrailingActions,
+		IntSimplificationActions, PostingActions, PropagationActions, ReasonActions,
+		ReasoningContext, ReasoningEngine, SimplificationActions, Trailed, TrailingActions,
 	},
 	constraints::{
 		BoolModelActions, BoolSolverActions, Constraint, IntModelActions, IntSolverActions,
@@ -751,29 +751,29 @@ where
 		name = "int_linear_less_eq_bounds",
 		target = "solver",
 		level = "trace",
-		skip(self, ctx)
+		skip(self, ctx, reason)
 	)]
 	fn explain(
 		&mut self,
 		ctx: &mut E::ExplanationContext<'_>,
 		_: E::Atom,
 		data: u64,
-	) -> Conjunction<E::Atom> {
+		reason: &mut E::ReasonSink<'_>,
+	) {
 		let i = data as usize;
 		let const_true: bool = TypeId::of::<BV>() == TypeId::of::<True>();
 		debug_assert!(i <= self.terms.len());
 		debug_assert!(!const_true || i < self.terms.len());
 
-		let mut conj = Vec::with_capacity(self.terms.len() - const_true as usize);
+		reason.reserve(self.terms.len() - const_true as usize);
 		for (j, t) in self.terms.iter().enumerate() {
 			if j != i {
-				conj.push(t.min_lit(ctx));
+				reason.push(t.min_lit(ctx));
 			}
 		}
 		if !const_true && i < self.terms.len() {
-			conj.push(self.reification.clone().into());
+			reason.push(self.reification.clone().into());
 		}
-		conj
 	}
 
 	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {

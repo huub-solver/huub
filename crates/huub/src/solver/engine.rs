@@ -23,8 +23,9 @@ use std::{collections::VecDeque, mem};
 use pindakaas::{
 	Lit as RawLit, Var as RawVar,
 	solver::propagation::{
-		ClausePersistence, Propagator as PropagatorExtension,
-		PropagatorDefinition as PropagatorExtensionDefinition, SearchDecision, SolvingActions,
+		ClauseBuilder, ClausePersistence, Propagator as PropagatorExtension,
+		PropagatorConfig as PropagatorExtensionConfig, SearchDecision,
+		Solution as ExternalSolution, SolvingActions,
 	},
 };
 use rustc_hash::FxHashMap;
@@ -34,10 +35,10 @@ use tracing::{debug, trace, warn};
 use crate::{
 	Clause, IntVal,
 	actions::{
-		BoolInspectionActions, IntEvent, ReasoningContext, ReasoningEngine, Trailed,
+		BoolInspectionActions, IntEvent, ReasonActions, ReasoningContext, ReasoningEngine, Trailed,
 		TrailingActions,
 	},
-	constraints::{BoxedPropagator, Conflict, DeferredReason, Reason},
+	constraints::{BoxedPropagator, Conflict, Reason},
 	helpers::bytes::Bytes,
 	solver::{
 		IntLitMeaning, Polarity, SearchStrategy, SwitchTrigger,
@@ -123,6 +124,11 @@ pub(crate) struct LitPropagation {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct PropRef(u32);
 
+/// The sink that captures the reason literals that imply the propagated
+/// literal, which the engine hands to [`Propagator::explain`].
+#[derive(Debug)]
+pub struct ReasonSink<'a>(pub(crate) ClauseBuilder<'a>);
+
 /// Internal state representation of the propagation engine disconnected from
 /// the storage of the propagators and branchers.
 ///
@@ -147,8 +153,9 @@ pub struct State {
 	pub(crate) propagation_queue: VecDeque<LitPropagation>,
 	/// Reasons for setting values.
 	pub(crate) reason_map: FxHashMap<RawLit, Reason<Decision<bool>>>,
-	/// Whether conflict has (already) been detected.
-	pub(crate) conflict: Option<Conflict<Decision<bool>>>,
+	/// The conflict clause to communicate to the SAT solver, if a conflict has
+	/// been detected.
+	pub(crate) conflict: Option<Box<[RawLit]>>,
 	/// Whether the solver is in a failure state.
 	///
 	/// Triggered when a conflict is detected during propagation, the solver
@@ -228,9 +235,14 @@ impl Engine {
 			}
 			// Reason is in the form (a /\ b /\ ...), which then forms the
 			// implication (a /\ b /\ ...) -> lit
-			let clause: Clause<_> =
-				reason.explain(&mut self.propagators, &mut self.state, Some(Decision(lit)));
-			// This is converted into a clause (¬a \/ ¬b \/ ... \/ lit)
+			let mut clause: Clause<RawLit> = Vec::new();
+			reason.explain(
+				&mut self.propagators,
+				&mut self.state,
+				Some(Decision(lit)),
+				ClauseBuilder::new(&mut clause),
+			);
+
 			let mut seen = FxHashSet::default();
 			for &l in &clause {
 				// Ensure that the same literal is not negated in the reason
@@ -339,71 +351,8 @@ impl Engine {
 }
 
 impl PropagatorExtension for Engine {
-	fn add_external_clause(
-		&mut self,
-		slv: &mut dyn SolvingActions,
-	) -> Option<(Clause<RawLit>, ClausePersistence)> {
-		if !self.state.clauses.is_empty() {
-			let clause = self.state.clauses.pop_front(); // Known to be `Some`
-			trace!(
-				target: "solver",
-				clause = ?clause.as_ref().unwrap().iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(),
-				"add external clause"
-			);
-			clause.map(|c| (c, ClausePersistence::Irreduntant))
-		} else if !self.state.propagation_queue.is_empty() {
-			None // Require that the solver first applies the remaining propagation
-		} else if let Some(conflict) = self.state.conflict.take() {
-			let ctx = SolvingContext::new(slv, &mut self.state);
-			let clause: Clause<_> =
-				conflict
-					.reason
-					.explain(&mut self.propagators, ctx.state, conflict.subject);
-			debug!(
-				target: "solver",
-				clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(),
-				"add conflict clause"
-			);
-			Some((clause, ClausePersistence::Forgettable))
-		} else {
-			None
-		}
-	}
-
-	fn add_reason_clause(&mut self, propagated_lit: RawLit) -> Clause<RawLit> {
-		// Find reason in storage
-		let reason = self.state.reason_map.remove(&propagated_lit);
-		// Create an explanation clause from the reason
-		let clause = if let Some(reason) = reason {
-			// If the reason is lazy, restore the current state to the state when the
-			// propagation happened before explaining.
-			if matches!(reason, Reason::Lazy(_)) {
-				self.state.trail.goto_assign_lit(propagated_lit);
-			}
-
-			reason.explain(
-				&mut self.propagators,
-				&mut self.state,
-				Some(Decision(propagated_lit)),
-			)
-		} else {
-			vec![propagated_lit]
-		};
-
-		debug!(
-			target: "solver",
-			clause = ?clause.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(),
-			"add reason clause"
-		);
-		clause
-	}
-
 	#[tracing::instrument(target = "solver", level = "debug", skip(self, slv, _sol))]
-	fn check_solution(
-		&mut self,
-		slv: &mut dyn SolvingActions,
-		_sol: &dyn pindakaas::Valuation,
-	) -> bool {
+	fn check_solution(&mut self, slv: &mut dyn SolvingActions, _sol: ExternalSolution<'_>) -> bool {
 		use crate::actions::IntDecisionActions;
 
 		// Solver should not be in a failed state (no propagator conflict should
@@ -485,31 +434,9 @@ impl PropagatorExtension for Engine {
 		// conflicts are possible)
 		debug_assert!(self.state.propagation_queue.is_empty());
 
-		// Process propagation results, and accept model if no conflict is detected
-		let conflict = self.state.conflict.take().map(|c| {
-			// Convert Lazy reasons into an eager ones
-			if let Reason::Lazy(DeferredReason {
-				propagator: prop,
-				data,
-			}) = c.reason
-			{
-				let reason = self.propagators[prop as usize].explain(
-					&mut self.state,
-					c.subject.map(View::from).unwrap_or(true.into()),
-					data,
-				);
-				Conflict {
-					subject: c.subject,
-					reason: match Reason::from_view(Reason::from_iter(reason)) {
-						Err(false) => panic!("invalid lazy reason"), // TODO: Improve message
-						Err(true) => Reason::Eager(Vec::new().into_boxed_slice()),
-						Ok(r) => r,
-					},
-				}
-			} else {
-				c
-			}
-		});
+		// Preserve the conflict clause across the backtrack below, which clears
+		// `state.conflict`.
+		let conflict = self.state.conflict.take();
 
 		// Revert to real decision level
 		self.notify_backtrack::<true>(level as usize, false);
@@ -567,6 +494,27 @@ impl PropagatorExtension for Engine {
 		}
 		self.state.statistics.sat_search_directives += 1;
 		SearchDecision::Free
+	}
+
+	fn explain_propagation(&mut self, propagated_lit: RawLit, mut clause: ClauseBuilder<'_>) {
+		// Find the stored reason, if any. When there is none, the reason clause is
+		// the unit clause `{propagated_lit}`; otherwise `Reason::explain` writes
+		// the full clause (head plus negated premises).
+		let Some(r) = self.state.reason_map.remove(&propagated_lit) else {
+			clause.push(propagated_lit);
+			return;
+		};
+		// If the reason is lazy, restore the current state to the state when the
+		// propagation happened before explaining.
+		if matches!(r, Reason::Lazy(_)) {
+			self.state.trail.goto_assign_lit(propagated_lit);
+		}
+		r.explain(
+			&mut self.propagators,
+			&mut self.state,
+			Some(Decision(propagated_lit)),
+			clause,
+		);
 	}
 
 	fn notify_assignment(&mut self, lits: &[RawLit]) {
@@ -816,9 +764,37 @@ impl PropagatorExtension for Engine {
 			None
 		}
 	}
+
+	fn provide_clause(
+		&mut self,
+		_slv: &mut dyn SolvingActions,
+		mut clause: ClauseBuilder<'_>,
+	) -> Option<ClausePersistence> {
+		if let Some(cl) = self.state.clauses.pop_front() {
+			trace!(
+				target: "solver",
+				clause = ?cl.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(),
+				"add external clause"
+			);
+			clause.extend(cl);
+			Some(ClausePersistence::Irredundant)
+		} else if !self.state.propagation_queue.is_empty() {
+			None // Require that the solver first applies the remaining propagation
+		} else if let Some(conflict) = self.state.conflict.take() {
+			trace!(
+				target: "solver",
+				clause = ?conflict.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(),
+				"add conflict clause"
+			);
+			clause.extend(conflict.iter().copied());
+			Some(ClausePersistence::Forgettable)
+		} else {
+			None
+		}
+	}
 }
 
-impl PropagatorExtensionDefinition for Engine {
+impl PropagatorExtensionConfig for Engine {
 	const CHECK_ONLY: bool = false;
 	const REASON_PERSISTENCE: ClausePersistence = ClausePersistence::Forgettable;
 }
@@ -826,11 +802,12 @@ impl PropagatorExtensionDefinition for Engine {
 impl ReasoningEngine for Engine {
 	type Atom = View<bool>;
 	type Conflict = Conflict<Decision<bool>>;
-
 	type ExplanationContext<'a> = State;
 	type InitializationContext<'a> = InitializationContext<'a>;
 	type NotificationContext<'a> = State;
 	type PropagationContext<'a> = SolvingContext<'a>;
+
+	type ReasonSink<'a> = ReasonSink<'a>;
 }
 
 impl PropRef {
@@ -857,6 +834,40 @@ impl PropRef {
 	/// Access the raw value of the propagator reference.
 	pub(crate) fn raw(&self) -> u32 {
 		self.0
+	}
+}
+
+impl<'a> ReasonSink<'a> {
+	/// Convert a premise atom (a [`View<bool>`] that currently holds) to its
+	/// literal. A constant `true` premise is vacuous and dropped; a constant
+	/// `false` premise indicates an invalid reason.
+	fn into_raw_lit(atom: View<bool>) -> Option<RawLit> {
+		match atom.0 {
+			BoolView::Lit(decision) => Some(decision.0),
+			BoolView::Const(true) => None,
+			BoolView::Const(false) => panic!("invalid lazy reason"), // TODO: Better message.
+		}
+	}
+}
+
+impl ReasonActions<View<bool>> for ReasonSink<'_> {
+	fn extend(&mut self, atoms: impl IntoIterator<Item = View<bool>>) {
+		self.0.extend(
+			atoms
+				.into_iter()
+				.filter_map(Self::into_raw_lit)
+				.map(|lit| !lit),
+		);
+	}
+
+	fn push(&mut self, atom: View<bool>) {
+		if let Some(lit) = Self::into_raw_lit(atom) {
+			self.0.push(!lit);
+		}
+	}
+
+	fn reserve(&mut self, additional: usize) {
+		self.0.reserve(additional);
 	}
 }
 
