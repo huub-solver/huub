@@ -38,7 +38,7 @@ use crate::{
 		BoolInspectionActions, IntEvent, ReasonActions, ReasoningContext, ReasoningEngine, Trailed,
 		TrailingActions,
 	},
-	constraints::{BoxedPropagator, Conflict, Reason},
+	constraints::{BoxedPropagator, Conflict, DeferredReason, Reason},
 	helpers::bytes::Bytes,
 	solver::{
 		IntLitMeaning, Polarity, SearchStrategy, SwitchTrigger,
@@ -86,6 +86,38 @@ pub struct Engine {
 	pub(crate) state: State,
 }
 
+/// A reason stored in [`State::reason_map`] explaining why a literal was
+/// propagated.
+///
+/// Reasons of up to three premises are stored inline (`Small`); longer ones are
+/// a slice `begin..begin + len` of the [`Trail`]'s reason arena (`Eager`); a
+/// `Lazy` reason is recomputed by the propagator on demand.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum EngineReason {
+	/// Deferred reason: the propagator recomputes it from `data` on demand.
+	Lazy {
+		/// Index of the propagator that computes the reason.
+		propagator: u32,
+		/// Data passed back to the propagator to compute the reason.
+		data: u64,
+	},
+	/// 1–3 premise literals stored inline (no arena allocation).
+	Small {
+		/// Number of premise literals (1–3); only `lits[..len]` are populated.
+		len: u8,
+		/// The premise literals, padded with `None`.
+		lits: [Option<RawLit>; 3],
+	},
+	/// 4+ premise literals, stored as the `begin..begin + len` slice of the
+	/// [`Trail`]'s reason arena.
+	Eager {
+		/// Start index of the premises in the trail's reason arena.
+		begin: u64,
+		/// Number of premise literals.
+		len: u32,
+	},
+}
+
 /// Statistical information about the execution of the propagation engine.
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub(crate) struct EngineStatistics {
@@ -114,7 +146,7 @@ pub(crate) struct LitPropagation {
 	/// The literal that was propagated.
 	pub(crate) lit: RawLit,
 	/// The reason for which the literal was propagated.
-	pub(crate) reason: Result<Reason<Decision<bool>>, bool>,
+	pub(crate) reason: Reason<View<bool>>,
 	/// The underlying event on complex types that triggered the propagation.
 	///
 	/// This event should be used to schedule further propagators.
@@ -151,8 +183,10 @@ pub struct State {
 	pub(crate) trail: Trail,
 	/// Literals to be propagated by the SAT solver
 	pub(crate) propagation_queue: VecDeque<LitPropagation>,
-	/// Reasons for setting values.
-	pub(crate) reason_map: FxHashMap<RawLit, Reason<Decision<bool>>>,
+	/// Reasons for propagating literals.
+	///
+	/// Literals of [`EngineReason::Eager`] reasons live in the [`Trail`].
+	pub(crate) reason_map: FxHashMap<RawLit, EngineReason>,
 	/// The conflict clause to communicate to the SAT solver, if a conflict has
 	/// been detected.
 	pub(crate) conflict: Option<Box<[RawLit]>>,
@@ -228,9 +262,9 @@ impl Engine {
 
 		use crate::actions::BoolInspectionActions;
 
-		if let Some(reason) = self.state.reason_map.get(&lit).cloned() {
+		if let Some(reason) = self.state.reason_map.get(&lit).copied() {
 			// If reason is lazy, go to the assignment level of the literal.
-			if let Reason::Lazy(_) = reason {
+			if let EngineReason::Lazy { .. } = reason {
 				self.state.trail.goto_assign_lit(lit);
 			}
 			// Reason is in the form (a /\ b /\ ...), which then forms the
@@ -239,7 +273,7 @@ impl Engine {
 			reason.explain(
 				&mut self.propagators,
 				&mut self.state,
-				Some(Decision(lit)),
+				lit,
 				ClauseBuilder::new(&mut clause),
 			);
 
@@ -285,7 +319,7 @@ impl Engine {
 				);
 			}
 			// If reason is lazy, return to current level
-			if let Reason::Lazy(_) = reason {
+			if let EngineReason::Lazy { .. } = reason {
 				self.state.trail.reset_to_trail_head();
 			}
 		} else {
@@ -498,7 +532,7 @@ impl PropagatorExtension for Engine {
 
 	fn explain_propagation(&mut self, propagated_lit: RawLit, mut clause: ClauseBuilder<'_>) {
 		// Find the stored reason, if any. When there is none, the reason clause is
-		// the unit clause `{propagated_lit}`; otherwise `Reason::explain` writes
+		// the unit clause `{propagated_lit}`; otherwise `EngineReason::explain`
 		// the full clause (head plus negated premises).
 		let Some(r) = self.state.reason_map.remove(&propagated_lit) else {
 			clause.push(propagated_lit);
@@ -506,13 +540,13 @@ impl PropagatorExtension for Engine {
 		};
 		// If the reason is lazy, restore the current state to the state when the
 		// propagation happened before explaining.
-		if matches!(r, Reason::Lazy(_)) {
+		if let EngineReason::Lazy { .. } = r {
 			self.state.trail.goto_assign_lit(propagated_lit);
 		}
 		r.explain(
 			&mut self.propagators,
 			&mut self.state,
-			Some(Decision(propagated_lit)),
+			propagated_lit,
 			clause,
 		);
 	}
@@ -837,6 +871,45 @@ impl PropRef {
 	}
 }
 
+impl EngineReason {
+	/// `EngineReason` is designed to fit in 128 bits, i.e., 16 bytes.
+	const _SIZE_ASSERT: () = assert!(size_of::<EngineReason>() == 16);
+
+	/// Write the reason clause for the propagated literal `head` into `clause`:
+	/// `head` itself plus the negated premises (an `Eager` reason's premises
+	/// are read from the trail's reason arena; a `Lazy` reason is recomputed by
+	/// its propagator).
+	fn explain(
+		self,
+		props: &mut [BoxedPropagator],
+		state: &mut State,
+		head: RawLit,
+		mut clause: ClauseBuilder<'_>,
+	) {
+		clause.push(head);
+		match self {
+			EngineReason::Small { len, lits } => {
+				for premise in lits.iter().take(len as usize).flatten() {
+					clause.push(!*premise);
+				}
+			}
+			EngineReason::Eager { begin, len } => {
+				let premises = state.trail.reason_lits(begin as usize, len as usize);
+				clause.extend(premises.iter().map(|&l| !l));
+			}
+			EngineReason::Lazy { propagator, data } => {
+				let mut explanation = ReasonSink(clause);
+				props[propagator as usize].explain(
+					state,
+					Decision(head).into(),
+					data,
+					&mut explanation,
+				);
+			}
+		}
+	}
+}
+
 impl<'a> ReasonSink<'a> {
 	/// Convert a premise atom (a [`View<bool>`] that currently holds) to its
 	/// literal. A constant `true` premise is vacuous and dropped; a constant
@@ -981,8 +1054,9 @@ impl State {
 				}
 			}
 			if level == 0 {
-				// Memory cleanup (Reasons are known to no longer be relevant)
+				// Memory cleanup (Reasons are known to no longer be relevant).
 				self.reason_map.clear();
+				self.trail.clear_reason_trail();
 			}
 		}
 	}
@@ -992,23 +1066,70 @@ impl State {
 		self.trail.notify_new_decision_level();
 	}
 
-	/// Register the [`Reason`] to explain why `lit` has been assigned.
-	pub(crate) fn register_reason(
-		&mut self,
-		lit: RawLit,
-		built_reason: Result<Reason<Decision<bool>>, bool>,
-	) {
-		match built_reason {
-			Ok(reason) => {
-				// Insert new reason, possibly overwriting old one (from previous search
-				// attempt)
-				self.reason_map.insert(lit, reason);
+	/// Register the [`Reason`] to explain why `lit` has been assigned,
+	/// converting it into an [`EngineReason`].
+	///
+	/// The `View<bool>` premises are tightened to literals (dropping vacuous
+	/// `Const(true)` premises); reasons of ≤3 literals are stored inline,
+	/// longer ones are appended to the trail's reusable reason arena. Any
+	/// previous reason for `lit` (from an earlier search attempt) is
+	/// overwritten.
+	pub(crate) fn register_reason(&mut self, lit: RawLit, reason: Reason<View<bool>>) {
+		match reason {
+			Reason::Lazy(DeferredReason { propagator, data }) => {
+				let _ = self
+					.reason_map
+					.insert(lit, EngineReason::Lazy { propagator, data });
 			}
-			Err(true) => {
-				// No (previous) reason required
-				self.reason_map.remove(&lit);
+			reason => {
+				let premises: &[View<bool>] = match &reason {
+					Reason::Simple(premise) => std::slice::from_ref(premise),
+					Reason::Eager(premises) => &premises[..],
+					Reason::Lazy(_) => unreachable!("handled above"),
+				};
+				let begin = self.trail.reason_len();
+				let mut lits = [None; 3];
+				let mut len = 0_usize;
+				let mut spilled = false;
+				for &view in premises {
+					// Drop vacuous `Const(true)` premises; `Const(false)` is invalid.
+					let Some(premise) = ReasonSink::into_raw_lit(view) else {
+						continue;
+					};
+					if !spilled && len < 3 {
+						lits[len] = Some(premise);
+					} else {
+						if !spilled {
+							for &held in lits.iter().flatten() {
+								self.trail.push_reason_lit(held);
+							}
+							spilled = true;
+						}
+						self.trail.push_reason_lit(premise);
+					}
+					len += 1;
+				}
+				if len == 0 {
+					// All premises were vacuous; no reason required.
+					let _ = self.reason_map.remove(&lit);
+				} else if spilled {
+					let _ = self.reason_map.insert(
+						lit,
+						EngineReason::Eager {
+							begin: begin as u64,
+							len: len as u32,
+						},
+					);
+				} else {
+					let _ = self.reason_map.insert(
+						lit,
+						EngineReason::Small {
+							len: len as u8,
+							lits,
+						},
+					);
+				}
 			}
-			Err(false) => unreachable!("invalid reason"),
 		}
 	}
 

@@ -60,7 +60,7 @@ enum ChangeType {
 
 /// Helper struct that temporarily captures a built reason to print it for
 /// `tracing`.
-struct ReasonTracePrint<'a>(&'a Result<Reason<Decision<bool>>, bool>);
+struct ReasonTracePrint<'a, A>(&'a Reason<A>);
 
 /// Structure to hold the internal [`State`] of the propagation engine and the
 /// [`SolvingActions`] exposed by the SAT solver.
@@ -228,18 +228,12 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for Decision<IntVal> {
 	}
 }
 
-impl Debug for ReasonTracePrint<'_> {
+impl<A: Debug> Debug for ReasonTracePrint<'_, A> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self.0 {
-			Err(false) => write!(f, "false"),
-			Err(true) => write!(f, "[]"),
-			Ok(Reason::Eager(conj)) => conj
-				.iter()
-				.map(|&l| l.0.into())
-				.collect::<Vec<i32>>()
-				.fmt(f),
-			Ok(Reason::Lazy(_)) => write!(f, "lazy"),
-			&Ok(Reason::Simple(l)) => vec![i32::from(l.0)].fmt(f),
+			Reason::Eager(conj) => conj.fmt(f),
+			Reason::Lazy(_) => write!(f, "lazy"),
+			Reason::Simple(l) => std::slice::from_ref(l).fmt(f),
 		}
 	}
 }
@@ -375,7 +369,14 @@ impl<'a> SolvingContext<'a> {
 		reason: impl ReasonBuilder<Self>,
 		event: Option<(Decision<IntVal>, IntEvent)>,
 	) {
-		let reason = Reason::from_view(reason.build_reason(self));
+		// Build the reason, folding the trivial/invalid markers into `View`
+		// constants so the propagation list carries a plain `Reason` (no
+		// `Result`); these are dropped/rejected when tightened at registration.
+		let reason = match reason.build_reason(self) {
+			Ok(reason) => reason,
+			Err(true) => Reason::Simple(true.into()),
+			Err(false) => Reason::Simple(false.into()),
+		};
 		trace!(
 			target: "solver",
 			lit = i32::from(lit.0),
@@ -437,7 +438,7 @@ impl<'a> SolvingContext<'a> {
 						.subject
 						.map(|s| i32::from(s.0))
 						.unwrap_or_default(),
-					reason = ?ReasonTracePrint(&Ok(conflict.reason.clone())),
+					reason = ?ReasonTracePrint(&conflict.reason),
 					"conflict detected"
 				);
 				debug_assert!(self.state.conflict.is_none());

@@ -23,6 +23,16 @@ struct BoolStore {
 	restore: Option<bool>,
 }
 
+/// The trail and reason-trail lengths recorded when a decision level was
+/// opened, so both can be truncated back to it on backtrack.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct LevelMark {
+	/// The reason-trail length (number of [`Trail::reason_trail`] literals).
+	reason: usize,
+	/// The trail length (number of trail integers).
+	trail: usize,
+}
+
 /// Storage structure that allows restoring tracked values to an earlier state.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Trail {
@@ -36,14 +46,19 @@ pub(crate) struct Trail {
 	/// This is used when undoing changes from the trail, any events after `pos`
 	/// have been transformed so they can be redone if required.
 	pos: usize,
-	/// The length of the trail when previous decisions were made.
-	prev_len: Vec<usize>,
+	/// The trail lengths when previous decisions were made.
+	prev_len: Vec<LevelMark>,
 
 	/// Stores the current value of trailed integer values.
 	int_value: Vec<[u8; 8]>,
 	/// Stores the current assigned values of Boolean variables, and "redo"
 	/// values when untrailing.
 	sat_store: Vec<BoolStore>,
+
+	/// Reason literals of eager reasons
+	/// ([`EngineReason::Eager`](crate::solver::engine::EngineReason::Eager)),
+	/// stored in propagation order, removable when (permanently) backtracking.
+	reason_trail: Vec<RawLit>,
 }
 
 /// An event that is recorded such that it can be undone.
@@ -83,6 +98,11 @@ impl Trail {
 			self.push_trail(TrailEvent::SatAssignment(var));
 			None
 		}
+	}
+
+	/// Clear the reason arena entirely.
+	pub(crate) fn clear_reason_trail(&mut self) {
+		self.reason_trail.clear();
 	}
 
 	/// Return the current decision level
@@ -151,30 +171,40 @@ impl Trail {
 			return;
 		}
 
-		let len = self.prev_len[level];
+		let mark = self.prev_len[level];
 		self.prev_len.truncate(level);
 		debug_assert!(
-			len <= self.trail.len(),
-			"backtracking to level {level} length {len}, but trail is already at length {}",
+			mark.trail <= self.trail.len(),
+			"backtracking to level {level} length {}, but trail is already at length {}",
+			mark.trail,
 			self.trail.len()
 		);
-		if len <= self.pos {
-			while self.pos > len {
+		if mark.trail <= self.pos {
+			while self.pos > mark.trail {
 				self.undo::<false>();
 			}
 		} else {
-			while self.pos < len {
+			while self.pos < mark.trail {
 				self.redo();
 			}
 		}
-		debug_assert_eq!(self.pos, len);
-		self.trail.truncate(len);
+		debug_assert_eq!(self.pos, mark.trail);
+		self.trail.truncate(mark.trail);
+		self.reason_trail.truncate(mark.reason);
 	}
 
 	/// Notify the Trail of a new decision level to which the trail can be
 	/// restored.
 	pub(crate) fn notify_new_decision_level(&mut self) {
-		self.prev_len.push(self.trail.len());
+		self.prev_len.push(LevelMark {
+			trail: self.trail.len(),
+			reason: self.reason_trail.len(),
+		});
+	}
+
+	/// Append a premise literal to the reason trail.
+	pub(crate) fn push_reason_lit(&mut self, lit: RawLit) {
+		self.reason_trail.push(lit);
 	}
 
 	/// Internal method to push a change to the trail
@@ -186,6 +216,22 @@ impl Trail {
 		}
 		event.write_trail(&mut self.trail[self.pos..]);
 		self.pos = self.trail.len();
+	}
+
+	/// The current number of literals in the reason arena, used as the `begin`
+	/// offset when recording a new eager reason before appending its premises.
+	pub(crate) fn reason_len(&self) -> usize {
+		self.reason_trail.len()
+	}
+
+	/// The premise literals of an eager reason stored at
+	/// `reason_trail[begin..begin + len]`.
+	pub(crate) fn reason_lits(&self, begin: usize, len: usize) -> &[RawLit] {
+		debug_assert!(
+			begin + len <= self.reason_trail.len(),
+			"stale reason range into the arena"
+		);
+		&self.reason_trail[begin..begin + len]
 	}
 
 	/// Internal method to redo the last undone change on the trail
@@ -319,6 +365,7 @@ impl Default for Trail {
 			prev_len: Vec::new(),
 			int_value: vec![0_u64.to_bytes()],
 			sat_store: Vec::new(),
+			reason_trail: Vec::new(),
 		}
 	}
 }
