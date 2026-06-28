@@ -10,14 +10,13 @@ use itertools::Itertools;
 use tracing::trace;
 
 use crate::{
-	Conjunction, IntVal,
+	IntVal,
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, IntPropCond, PostingActions,
-		ReasoningContext, ReasoningEngine,
+		PropagationContext, ReasonActions, ReasoningContext, ReasoningEngine,
 	},
 	constraints::{
-		Constraint, IntModelActions, IntSolverActions, Propagator, ReasonBuilder,
-		SimplificationStatus,
+		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
 	solver::{IntLitMeaning, Polarity, engine::Engine, queue::PriorityLevel},
@@ -262,15 +261,15 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		task_no: usize,
 		time_point: i64,
 		usage_limit: i64,
-	) -> impl ReasonBuilder<Ctx> + '_
+	) -> impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>) + '_
 	where
-		Ctx: ReasoningContext + ?Sized,
+		Ctx: PropagationContext + ?Sized,
 		I1: IntDecisionActions<Ctx>,
 		I2: IntDecisionActions<Ctx>,
 		I3: IntDecisionActions<Ctx>,
 		I4: IntDecisionActions<Ctx>,
 	{
-		move |ctx: &mut Ctx| {
+		move |ctx, reason| {
 			trace!(
 				target: "cumulative",
 				task_no,
@@ -297,27 +296,22 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				"explain task usage limit"
 			);
 
-			let cap_lit = self.capacity.max_lit(ctx);
-
 			// Explanation: (1) relevant tasks (together with task `task_no`) have
 			// the required compulsory part at time `time_point`
-			relevant_tasks
-				.iter()
-				.chain(once(&task_no))
-				.flat_map(|&i| {
-					[
-						self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
-						self.start_times[i].lit(
-							ctx,
-							IntLitMeaning::GreaterEq(time_point + 1 - self.durations[i].min(ctx)),
-						),
-						self.durations[i].min_lit(ctx),
-						self.usages[i].min_lit(ctx),
-					]
-				})
-				// Explanation: (2) the resource capacity is at a given level
-				.chain(once(cap_lit))
-				.collect_vec()
+			reason.extend(relevant_tasks.iter().chain(once(&task_no)).flat_map(|&i| {
+				[
+					self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
+					self.start_times[i].lit(
+						ctx,
+						IntLitMeaning::GreaterEq(time_point + 1 - self.durations[i].min(ctx)),
+					),
+					self.durations[i].min_lit(ctx),
+					self.usages[i].min_lit(ctx),
+				]
+			}));
+
+			// Explanation: (2) the resource capacity is at a given level
+			reason.push(self.capacity.max_lit(ctx));
 		}
 	}
 
@@ -328,15 +322,15 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		&self,
 		to_cover: i64,
 		time_point: i64,
-	) -> impl ReasonBuilder<Ctx> + '_
+	) -> impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>) + '_
 	where
-		Ctx: ReasoningContext + ?Sized,
+		Ctx: PropagationContext + ?Sized,
 		I1: IntDecisionActions<Ctx>,
 		I2: IntDecisionActions<Ctx>,
 		I3: IntDecisionActions<Ctx>,
 		I4: IntDecisionActions<Ctx>,
 	{
-		move |ctx: &mut Ctx| {
+		move |ctx, reason| {
 			let relevant_tasks = self.collect_compulsory_tasks(ctx, to_cover, time_point, None);
 
 			trace!(
@@ -351,25 +345,20 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				"explain resource overload"
 			);
 
-			let cap_lit = self.capacity.max_lit(ctx);
-
 			// Explanation: relevant tasks have the required compulsory part at time
 			// `time_point`
-			relevant_tasks
-				.iter()
-				.flat_map(|&i| {
-					[
-						self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
-						self.start_times[i].lit(
-							ctx,
-							IntLitMeaning::GreaterEq(time_point - self.durations[i].min(ctx) + 1),
-						),
-						self.durations[i].min_lit(ctx),
-						self.usages[i].min_lit(ctx),
-					]
-				})
-				.chain(once(cap_lit))
-				.collect_vec()
+			reason.extend(relevant_tasks.iter().flat_map(|&i| {
+				[
+					self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
+					self.start_times[i].lit(
+						ctx,
+						IntLitMeaning::GreaterEq(time_point - self.durations[i].min(ctx) + 1),
+					),
+					self.durations[i].min_lit(ctx),
+					self.usages[i].min_lit(ctx),
+				]
+			}));
+			reason.push(self.capacity.max_lit(ctx));
 		}
 	}
 
@@ -381,15 +370,15 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		task_no: usize,
 		propagation_rule: CumulativePropagationRule,
 		time_point: i64,
-	) -> impl ReasonBuilder<Ctx> + '_
+	) -> impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>) + '_
 	where
-		Ctx: ReasoningContext + ?Sized,
+		Ctx: PropagationContext + ?Sized,
 		I1: IntDecisionActions<Ctx>,
 		I2: IntDecisionActions<Ctx>,
 		I3: IntDecisionActions<Ctx>,
 		I4: IntDecisionActions<Ctx>,
 	{
-		move |ctx: &mut Ctx| {
+		move |ctx, reason| {
 			let capacity_ub = self.capacity.max(ctx);
 			let min_usage = self.usages[task_no].min(ctx);
 			let to_cover = capacity_ub - min_usage + 1;
@@ -408,9 +397,6 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 				rule =? propagation_rule,
 				"explain task sweeping"
 			);
-
-			// Construct the reason for the propagation
-			let mut reason = Conjunction::with_capacity(4 * relevant_tasks.len() + 4);
 
 			// Explanation: (1) relevant tasks have the required compulsory part at time
 			// `time_point`
@@ -446,8 +432,6 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 
 			// Explanation: (3) the resource capacity is at a given level
 			reason.push(self.capacity.max_lit(ctx));
-
-			reason
 		}
 	}
 

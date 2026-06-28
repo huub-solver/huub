@@ -1463,6 +1463,7 @@ mod tests {
 	use crate::{
 		IntSet, IntVal,
 		actions::{IntDecisionActions, IntInspectionActions},
+		constraints::NO_REASON,
 		solver::{
 			IntLitMeaning, LiteralStrategy, Polarity, Solver, Status, Valuation,
 			decision::{Decision, integer::IntDecision},
@@ -1540,7 +1541,7 @@ mod tests {
 				assert_eq!(x.bounds(&engine.state), (1, 6));
 				assert_eq!(x.domain(&engine.state), orig);
 				let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
-				x.tighten_min(&mut ctx, 6, []).unwrap();
+				x.tighten_min(&mut ctx, 6, NO_REASON).unwrap();
 
 				let state = &engine.state;
 				assert_eq!(x.bounds(state), (6, 6));
@@ -1554,7 +1555,7 @@ mod tests {
 				let (mut slv, x) = make_solver();
 				let (mut actions, mut engine) = slv.as_parts_mut();
 				let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
-				x.tighten_max(&mut ctx, 4, []).unwrap();
+				x.tighten_max(&mut ctx, 4, NO_REASON).unwrap();
 
 				let state = &engine.state;
 				assert_eq!(x.bounds(state), (1, 4));
@@ -1567,8 +1568,8 @@ mod tests {
 				let (mut slv, x) = make_solver();
 				let (mut actions, mut engine) = slv.as_parts_mut();
 				let mut ctx = SolvingContext::new(&mut actions, &mut engine.state);
-				x.tighten_min(&mut ctx, 3, []).unwrap();
-				x.remove_val(&mut ctx, 4, []).unwrap();
+				x.tighten_min(&mut ctx, 3, NO_REASON).unwrap();
+				x.remove_val(&mut ctx, 4, NO_REASON).unwrap();
 
 				let state = &engine.state;
 				assert_eq!(x.bounds(state), (3, 6));

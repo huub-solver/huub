@@ -10,11 +10,10 @@ use crate::{
 	IntVal,
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, IntPropCond, PostingActions,
-		ReasoningContext, ReasoningEngine,
+		ReasonActions, ReasoningContext, ReasoningEngine,
 	},
 	constraints::{
-		CachedReason, Constraint, IntModelActions, IntSolverActions, Propagator,
-		SimplificationStatus,
+		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus, reason_ty,
 	},
 	helpers::overflow::{OverflowImpossible, OverflowMode, OverflowPossible},
 	lower::{LoweringContext, LoweringError},
@@ -142,13 +141,13 @@ where
 			return Ok(());
 		}
 
-		let mut reason = CachedReason::new(|ctx: &mut E::PropagationContext<'_>| {
-			[
+		let reason = reason_ty::<E::PropagationContext<'_>, _>(|ctx, reason| {
+			reason.extend([
 				self.result.min_lit(ctx),
 				self.result.max_lit(ctx),
 				self.exponent.min_lit(ctx),
 				self.exponent.max_lit(ctx),
-			]
+			]);
 		});
 
 		// Propagate lower bound
@@ -169,7 +168,7 @@ where
 			{
 				min -= 1;
 			}
-			self.base.tighten_min(ctx, min, &mut reason)?;
+			self.base.tighten_min(ctx, min, reason)?;
 		}
 
 		// Propagate upper bound
@@ -189,7 +188,7 @@ where
 			if res_ub >= Self::pow(max + 1, if min < 0 { exp_pos_even } else { exp_lb }) {
 				max += 1;
 			}
-			self.base.tighten_max(ctx, max, &mut reason)?;
+			self.base.tighten_max(ctx, max, reason)?;
 		}
 		Ok(())
 	}
@@ -216,13 +215,13 @@ where
 		}
 
 		let (exp_lb, exp_ub) = self.exponent.bounds(ctx);
-		let mut reason = CachedReason::new(|ctx: &mut E::PropagationContext<'_>| {
-			[
+		let reason = reason_ty::<E::PropagationContext<'_>, _>(|ctx, reason| {
+			reason.extend([
 				self.result.min_lit(ctx),
 				self.result.max_lit(ctx),
 				self.base.min_lit(ctx),
 				self.base.max_lit(ctx),
-			]
+			]);
 		});
 
 		// Propagate lower bound
@@ -232,7 +231,7 @@ where
 			if res_lb <= Self::pow(base_lb, min - 1) {
 				min -= 1;
 			}
-			self.exponent.tighten_min(ctx, min, &mut reason)?;
+			self.exponent.tighten_min(ctx, min, reason)?;
 		}
 
 		// Propagate upper bound
@@ -242,7 +241,7 @@ where
 			if res_ub <= Self::pow(base_ub, max + 1) {
 				max += 1;
 			}
-			self.exponent.tighten_max(ctx, max, &mut reason)?;
+			self.exponent.tighten_max(ctx, max, reason)?;
 		}
 
 		Ok(())
@@ -324,16 +323,16 @@ where
 			MinMaxResult::MinMax(lb, ub) => (lb, ub),
 		};
 
-		let mut reason = CachedReason::new(|ctx: &mut E::PropagationContext<'_>| {
-			[
+		let reason = reason_ty::<E::PropagationContext<'_>, _>(|ctx, reason| {
+			reason.extend([
 				self.base.min_lit(ctx),
 				self.base.max_lit(ctx),
 				self.exponent.min_lit(ctx),
 				self.exponent.max_lit(ctx),
-			]
+			]);
 		});
-		self.result.tighten_min(ctx, lb, &mut reason)?;
-		self.result.tighten_max(ctx, ub, &mut reason)?;
+		self.result.tighten_min(ctx, lb, reason)?;
+		self.result.tighten_max(ctx, ub, reason)?;
 		Ok(())
 	}
 }
@@ -435,14 +434,14 @@ where
 	) -> Result<SimplificationStatus, E::Conflict> {
 		// If the base is negative, then the exponent cannot be zero
 		if self.base.max(ctx) < 0 {
-			self.base.remove_val(ctx, 0, [self.base.max_lit(ctx)])?;
+			self.base
+				.remove_val(ctx, 0, |ctx, reason| reason.push(self.base.max_lit(ctx)))?;
 		}
 		// If the exponent is zero, then the result is one
 		if self.exponent.val(ctx) == Some(0) {
-			self.result
-				.fix(ctx, 1, |ctx: &mut E::PropagationContext<'_>| {
-					[self.exponent.val_lit(ctx).unwrap()]
-				})?;
+			self.result.fix(ctx, 1, |ctx, reason| {
+				reason.push(self.exponent.val_lit(ctx).unwrap());
+			})?;
 		}
 
 		self.propagate(ctx)?;
@@ -503,14 +502,13 @@ where
 			&& let Some(exp) = self.exponent.val(ctx)
 			&& overflowing_pow(base, exp).1
 		{
-			self.exponent
-				.tighten_max(ctx, exp - 1, |ctx: &mut E::PropagationContext<'_>| {
-					[if base.is_positive() {
-						self.base.min_lit(ctx)
-					} else {
-						self.base.max_lit(ctx)
-					}]
-				})?;
+			self.exponent.tighten_max(ctx, exp - 1, |ctx, reason| {
+				reason.push(if base.is_positive() {
+					self.base.min_lit(ctx)
+				} else {
+					self.base.max_lit(ctx)
+				});
+			})?;
 		}
 
 		Ok(())

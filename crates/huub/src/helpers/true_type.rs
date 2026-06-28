@@ -5,9 +5,8 @@ use std::ops::Not;
 use crate::{
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, PropagationActions,
-		ReasoningContext,
+		PropagationContext, ReasoningContext,
 	},
-	constraints::ReasonBuilder,
 	model, solver,
 };
 
@@ -42,8 +41,8 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: bool,
-		reason: impl ReasonBuilder<Ctx>,
-	) -> Result<(), <Ctx as ReasoningContext>::Conflict> {
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
+	) -> Result<(), <Ctx as PropagationContext>::Conflict> {
 		if !val {
 			return Err(ctx.declare_conflict(reason));
 		}

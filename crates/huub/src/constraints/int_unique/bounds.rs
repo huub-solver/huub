@@ -121,7 +121,9 @@ impl<I> IntUniqueBounds<I> {
 					k -= 1;
 				}
 
-				self.vars[self.max_sorted[i]].tighten_min(ctx, hall_max, reason)?;
+				self.vars[self.max_sorted[i]].tighten_min(ctx, hall_max, |_, sink| {
+					sink.extend(reason);
+				})?;
 				self.lb_cache[self.max_sorted[i]] = hall_max;
 
 				Self::path_set(&mut self.hall_interval, min_rank, w, w);
@@ -192,7 +194,9 @@ impl<I> IntUniqueBounds<I> {
 					k += 1;
 				}
 
-				self.vars[self.min_sorted[i]].tighten_max(ctx, hall_min - 1, reason)?;
+				self.vars[self.min_sorted[i]].tighten_max(ctx, hall_min - 1, |_, sink| {
+					sink.extend(reason);
+				})?;
 				self.ub_cache[self.min_sorted[i]] = hall_min - 1;
 
 				Self::path_set(&mut self.hall_interval, max_rank, w, w);

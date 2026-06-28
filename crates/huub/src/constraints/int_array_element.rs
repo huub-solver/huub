@@ -12,11 +12,11 @@ use crate::{
 	IntSet, IntVal,
 	actions::{
 		ConstructionActions, InitActions, IntAnalyzeActions, IntDecisionActions,
-		IntInspectionActions, IntPropCond, IntSimplificationActions, PostingActions,
+		IntInspectionActions, IntPropCond, IntSimplificationActions, PostingActions, ReasonActions,
 		ReasoningContext, ReasoningEngine, SimplificationActions, Trailed, TrailingActions,
 	},
 	constraints::{
-		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
+		Constraint, IntModelActions, IntSolverActions, NO_REASON, Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
 	model::View,
@@ -140,9 +140,9 @@ where
 		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		// Constrain the index to be within the bounds of the array
-		self.index.tighten_min(ctx, 0, [])?;
+		self.index.tighten_min(ctx, 0, NO_REASON)?;
 		self.index
-			.tighten_max(ctx, self.vars.len() as IntVal - 1, [])?;
+			.tighten_max(ctx, self.vars.len() as IntVal - 1, NO_REASON)?;
 
 		self.propagate(ctx)?;
 
@@ -217,34 +217,20 @@ where
 		if let Some(fixed_index) = self.index.val(ctx) {
 			let index_val_lit = self.index.val_lit(ctx).unwrap();
 			let fixed_var = &self.vars[fixed_index as usize];
-			self.result.tighten_min(
-				ctx,
-				fixed_var.min(ctx),
-				|ctx: &mut E::PropagationContext<'_>| {
-					[index_val_lit.clone(), fixed_var.min_lit(ctx)]
-				},
-			)?;
-			fixed_var.tighten_min(
-				ctx,
-				self.result.min(ctx),
-				|ctx: &mut E::PropagationContext<'_>| {
-					[index_val_lit.clone(), self.result.min_lit(ctx)]
-				},
-			)?;
-			self.result.tighten_max(
-				ctx,
-				fixed_var.max(ctx),
-				|ctx: &mut E::PropagationContext<'_>| {
-					[index_val_lit.clone(), fixed_var.max_lit(ctx)]
-				},
-			)?;
-			fixed_var.tighten_max(
-				ctx,
-				self.result.max(ctx),
-				|ctx: &mut E::PropagationContext<'_>| {
-					[index_val_lit.clone(), self.result.max_lit(ctx)]
-				},
-			)?;
+			self.result
+				.tighten_min(ctx, fixed_var.min(ctx), |ctx, reason| {
+					reason.extend([index_val_lit.clone(), fixed_var.min_lit(ctx)]);
+				})?;
+			fixed_var.tighten_min(ctx, self.result.min(ctx), |ctx, reason| {
+				reason.extend([index_val_lit.clone(), self.result.min_lit(ctx)]);
+			})?;
+			self.result
+				.tighten_max(ctx, fixed_var.max(ctx), |ctx, reason| {
+					reason.extend([index_val_lit.clone(), fixed_var.max_lit(ctx)]);
+				})?;
+			fixed_var.tighten_max(ctx, self.result.max(ctx), |ctx, reason| {
+				reason.extend([index_val_lit.clone(), self.result.max_lit(ctx)]);
+			})?;
 			return Ok(());
 		}
 
@@ -284,29 +270,21 @@ where
 
 			let (v_lb, v_ub) = v.bounds(ctx);
 			if result_ub < v_lb {
-				self.index.remove_val(
-					ctx,
-					i as IntVal,
-					|ctx: &mut E::PropagationContext<'_>| {
-						[
-							self.result.lit(ctx, IntLitMeaning::Less(v_lb)),
-							v.min_lit(ctx),
-						]
-					},
-				)?;
+				self.index.remove_val(ctx, i as IntVal, |ctx, reason| {
+					reason.extend([
+						self.result.lit(ctx, IntLitMeaning::Less(v_lb)),
+						v.min_lit(ctx),
+					]);
+				})?;
 			}
 
 			if v_ub < result_lb {
-				self.index.remove_val(
-					ctx,
-					i as IntVal,
-					|ctx: &mut E::PropagationContext<'_>| {
-						[
-							self.result.lit(ctx, IntLitMeaning::GreaterEq(v_ub + 1)),
-							v.max_lit(ctx),
-						]
-					},
-				)?;
+				self.index.remove_val(ctx, i as IntVal, |ctx, reason| {
+					reason.extend([
+						self.result.lit(ctx, IntLitMeaning::GreaterEq(v_ub + 1)),
+						v.max_lit(ctx),
+					]);
+				})?;
 			}
 
 			// update min_support if i is in the domain of self.index and the lower bound of
@@ -339,22 +317,19 @@ where
 		// only trigger when self.vars[min_support] is changed or self.vars[min_support]
 		// is out of domain
 		if new_min > result_lb {
-			self.result
-				.tighten_min(ctx, new_min, |ctx: &mut E::PropagationContext<'_>| {
-					let mut reason = Vec::with_capacity(self.vars.len());
-					let dom = self.index.domain(ctx);
-					let mut dom = dom.iter().flatten().peekable();
-					for (i, v) in self.vars.iter().enumerate() {
-						debug_assert!(dom.peek().is_none() || *dom.peek().unwrap() >= i as IntVal);
-						if dom.peek() == Some(&(i as IntVal)) {
-							reason.push(v.lit(ctx, IntLitMeaning::GreaterEq(new_min)));
-							dom.next();
-						} else {
-							reason.push(self.index.lit(ctx, IntLitMeaning::NotEq(i as IntVal)));
-						}
+			self.result.tighten_min(ctx, new_min, |ctx, reason| {
+				let dom = self.index.domain(ctx);
+				let mut dom = dom.iter().flatten().peekable();
+				for (i, v) in self.vars.iter().enumerate() {
+					debug_assert!(dom.peek().is_none() || *dom.peek().unwrap() >= i as IntVal);
+					if dom.peek() == Some(&(i as IntVal)) {
+						reason.push(v.lit(ctx, IntLitMeaning::GreaterEq(new_min)));
+						dom.next();
+					} else {
+						reason.push(self.index.lit(ctx, IntLitMeaning::NotEq(i as IntVal)));
 					}
-					reason
-				})?;
+				}
+			})?;
 		}
 
 		// propagate the upper bound of the selected variable y if max_support is not
@@ -365,22 +340,19 @@ where
 		// only trigger when self.vars[max_support] is changed or self.vars[max_support]
 		// is out of domain
 		if new_max < result_ub {
-			self.result
-				.tighten_max(ctx, new_max, |ctx: &mut E::PropagationContext<'_>| {
-					let mut reason = Vec::with_capacity(self.vars.len());
-					let dom = self.index.domain(ctx);
-					let mut dom = dom.iter().flatten().peekable();
-					for (i, v) in self.vars.iter().enumerate() {
-						debug_assert!(dom.peek().is_none() || *dom.peek().unwrap() >= i as IntVal);
-						if dom.peek() == Some(&(i as IntVal)) {
-							reason.push(v.lit(ctx, IntLitMeaning::Less(new_max + 1)));
-							dom.next();
-						} else {
-							reason.push(self.index.lit(ctx, IntLitMeaning::NotEq(i as IntVal)));
-						}
+			self.result.tighten_max(ctx, new_max, |ctx, reason| {
+				let dom = self.index.domain(ctx);
+				let mut dom = dom.iter().flatten().peekable();
+				for (i, v) in self.vars.iter().enumerate() {
+					debug_assert!(dom.peek().is_none() || *dom.peek().unwrap() >= i as IntVal);
+					if dom.peek() == Some(&(i as IntVal)) {
+						reason.push(v.lit(ctx, IntLitMeaning::Less(new_max + 1)));
+						dom.next();
+					} else {
+						reason.push(self.index.lit(ctx, IntLitMeaning::NotEq(i as IntVal)));
 					}
-					reason
-				})?;
+				}
+			})?;
 		}
 
 		Ok(())
@@ -408,10 +380,10 @@ where
 		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		// Constrain the index to be within the bounds of the array
-		self.0.index.tighten_min(ctx, 0, [])?;
+		self.0.index.tighten_min(ctx, 0, NO_REASON)?;
 		self.0
 			.index
-			.tighten_max(ctx, self.0.vars.len() as IntVal - 1, [])?;
+			.tighten_max(ctx, self.0.vars.len() as IntVal - 1, NO_REASON)?;
 
 		self.0.propagate(ctx)?;
 
@@ -484,7 +456,7 @@ mod tests {
 	use crate::{
 		IntSet,
 		actions::{IntInspectionActions, IntPropagationActions},
-		constraints::int_array_element::IntArrayElementBounds,
+		constraints::{NO_REASON, int_array_element::IntArrayElementBounds},
 		model::Model,
 		solver::{LiteralStrategy, Solver},
 	};
@@ -503,7 +475,7 @@ mod tests {
 			.result(result)
 			.post()
 			.unwrap();
-		index.remove_val(&mut prb, 2, []).unwrap();
+		index.remove_val(&mut prb, 2, NO_REASON).unwrap();
 		let _: (Solver, _) = prb.lower().to_solver().unwrap();
 
 		assert_eq!(index.domain(&prb), (0..=1).into());
@@ -524,7 +496,7 @@ mod tests {
 			.result(result)
 			.post()
 			.unwrap();
-		index.remove_val(&mut prb, 0, []).unwrap();
+		index.remove_val(&mut prb, 0, NO_REASON).unwrap();
 		let _: (Solver, _) = prb.lower().to_solver().unwrap();
 
 		assert_eq!(index.domain(&prb), (1..=2).into());

@@ -7,13 +7,12 @@ use tracing::trace;
 use crate::{
 	IntVal,
 	actions::{
-		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions, IntPropCond,
-		PostingActions, PropagationActions, ReasonActions, ReasoningContext, ReasoningEngine,
-		Trailed, TrailingActions,
+		ConstructionActions, DeferReasonActions, InitActions, IntDecisionActions,
+		IntInspectionActions, IntPropCond, PostingActions, PropagationContext, ReasonActions,
+		ReasoningContext, ReasoningEngine, Trailed, TrailingActions,
 	},
 	constraints::{
-		Constraint, IntModelActions, IntSolverActions, Propagator, ReasonBuilder,
-		SimplificationStatus,
+		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
 	model,
@@ -431,12 +430,15 @@ impl<I> DisjunctivePropagator<I> {
 	/// Explain resource overload within the time window
 	/// [`earliest_start`,`time_bound`]. For details, refer to the CPAIOR paper
 	/// by Vilim (2005).
-	fn explain_overload_checking<Ctx>(&self, time_bound: i64) -> impl ReasonBuilder<Ctx> + '_
+	fn explain_overload_checking<Ctx>(
+		&self,
+		time_bound: i64,
+	) -> impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>) + '_
 	where
-		Ctx: ReasoningContext + ?Sized,
+		Ctx: PropagationContext + ?Sized,
 		I: IntDecisionActions<Ctx>,
 	{
-		move |ctx: &mut Ctx| {
+		move |ctx, reason| {
 			let binding_task = self.ot_tree.binding_task(time_bound, 0);
 			let earliest_start = self.start_times[binding_task].min(ctx);
 			let mut slack = time_bound - earliest_start;
@@ -461,16 +463,13 @@ impl<I> DisjunctivePropagator<I> {
 				}
 			}
 
-			e_tasks
-				.iter()
-				.flat_map(|&i| {
-					let bv = self.start_times[i].lit(
-						ctx,
-						IntLitMeaning::Less((time_bound - slack) - self.durations[i]),
-					);
-					[self.start_times[i].min_lit(ctx), bv]
-				})
-				.collect_vec()
+			reason.extend(e_tasks.iter().flat_map(|&i| {
+				let bv = self.start_times[i].lit(
+					ctx,
+					IntLitMeaning::Less((time_bound - slack) - self.durations[i]),
+				);
+				[self.start_times[i].min_lit(ctx), bv]
+			}));
 		}
 	}
 
@@ -732,7 +731,7 @@ impl<I> DisjunctivePropagator<I> {
 						earliest_completion_time,
 					);
 					let data = self.data_for_explanation(i, DisjunctivePropagationRule::Precedence);
-					v.tighten_min(ctx, updated_est[i], ctx.deferred_reason(data))?;
+					v.tighten_min(ctx, updated_est[i], |_, reason| reason.defer(data))?;
 					propagated = true;
 				}
 			}
@@ -848,11 +847,8 @@ impl<I> DisjunctivePropagator<I> {
 						blocked_task,
 						DisjunctivePropagationRule::EdgeFinding,
 					);
-					self.start_times[blocked_task].tighten_min(
-						ctx,
-						ect_in_tree,
-						ctx.deferred_reason(data),
-					)?;
+					self.start_times[blocked_task]
+						.tighten_min(ctx, ect_in_tree, |_, reason| reason.defer(data))?;
 					propagated = true;
 				}
 				// Remove the blocked task as the maximum propagation has been achieved
@@ -998,11 +994,9 @@ impl<I> DisjunctivePropagator<I> {
 
 				ctx.set_trailed(self.trailed_info[i].latest_completion, updated_lct[i]);
 				let data = self.data_for_explanation(i, DisjunctivePropagationRule::NotLast);
-				v.tighten_max(
-					ctx,
-					updated_lct[i] - self.durations[i],
-					ctx.deferred_reason(data),
-				)?;
+				v.tighten_max(ctx, updated_lct[i] - self.durations[i], |_, reason| {
+					reason.defer(data);
+				})?;
 				propagated = true;
 			}
 		}

@@ -5,12 +5,10 @@ use std::ops::Not;
 use pindakaas::Lit as RawLit;
 
 use crate::{
-	actions::{
-		BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions, ReasoningContext,
-	},
-	constraints::ReasonBuilder,
+	actions::{BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions},
+	constraints::{Conflict, Nogood},
 	model::{
-		Model,
+		Model, SimplificationContext, SimplificationReasonSink,
 		decision::{Decision, DecisionReference, PolarityScore, private},
 		view::View,
 	},
@@ -55,14 +53,36 @@ impl BoolInspectionActions<Model> for Decision<bool> {
 	}
 }
 
+impl BoolInspectionActions<SimplificationContext<'_>> for Decision<bool> {
+	fn val(&self, ctx: &SimplificationContext<'_>) -> Option<bool> {
+		self.val(&*ctx.0)
+	}
+}
+
 impl BoolPropagationActions<Model> for Decision<bool> {
 	fn fix(
 		&self,
 		ctx: &mut Model,
 		val: bool,
-		reason: impl ReasonBuilder<Model>,
-	) -> Result<(), <Model as ReasoningContext>::Conflict> {
-		self.resolve_alias(ctx).fix(ctx, val, reason)
+		reason: impl FnOnce(&mut Model, &mut Vec<View<bool>>),
+	) -> Result<(), Nogood<View<bool>>> {
+		self.fix(
+			&mut SimplificationContext(ctx),
+			val,
+			Model::adapt_reason(reason),
+		)
+		.map_err(Conflict::into_nogood)
+	}
+}
+
+impl<'a> BoolPropagationActions<SimplificationContext<'a>> for Decision<bool> {
+	fn fix(
+		&self,
+		ctx: &mut SimplificationContext<'a>,
+		val: bool,
+		reason: impl FnOnce(&mut SimplificationContext<'a>, &mut SimplificationReasonSink),
+	) -> Result<(), Conflict<View<bool>>> {
+		self.resolve_alias(&*ctx.0).fix(ctx, val, reason)
 	}
 }
 
@@ -71,9 +91,20 @@ impl BoolSimplificationActions<Model> for Decision<bool> {
 		&self,
 		ctx: &mut Model,
 		other: impl Into<View<bool>>,
-	) -> Result<(), <Model as ReasoningContext>::Conflict> {
-		let other = other.into().resolve_alias(ctx);
-		self.resolve_alias(ctx).unify(ctx, other)
+	) -> Result<(), Nogood<View<bool>>> {
+		self.unify(&mut SimplificationContext(ctx), other)
+			.map_err(Conflict::into_nogood)
+	}
+}
+
+impl BoolSimplificationActions<SimplificationContext<'_>> for Decision<bool> {
+	fn unify(
+		&self,
+		ctx: &mut SimplificationContext<'_>,
+		other: impl Into<View<bool>>,
+	) -> Result<(), Conflict<View<bool>>> {
+		let other = other.into().resolve_alias(&*ctx.0);
+		self.resolve_alias(&*ctx.0).unify(ctx, other)
 	}
 }
 

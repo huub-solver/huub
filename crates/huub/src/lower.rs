@@ -8,6 +8,7 @@ use std::{
 	fmt::{self, Debug, Display},
 	marker::PhantomData,
 	num::NonZeroI32,
+	ops::Not,
 };
 
 use bon::Builder;
@@ -28,10 +29,10 @@ use crate::{
 	IntSet, IntVal,
 	actions::{
 		BoolInspectionActions, ConstructionActions, IntDecisionActions, IntInspectionActions,
-		PostingActions, ReasoningContext, ReasoningEngine, Trailed,
+		PostingActions, PropagationContext, ReasoningContext, ReasoningEngine, Trailed,
 	},
 	constraints::{
-		BoxedConstraint, BoxedPropagator, Conflict, Constraint, ReasonBuilder,
+		BoxedConstraint, BoxedPropagator, Constraint, NO_REASON, Nogood,
 		int_array_minimum::IntArrayMinimumBounds,
 		int_div::IntDivBounds,
 		int_linear::{IntEq, IntLinear, LinComparator},
@@ -152,7 +153,7 @@ trait LoweringActions {
 	fn add_clause(
 		&mut self,
 		clause: Vec<solver::View<bool>>,
-	) -> Result<(), <Engine as ReasoningEngine>::Conflict>;
+	) -> Result<(), Nogood<solver::Decision<bool>>>;
 
 	/// Add a propagator to the solver.
 	fn add_propagator(&mut self, propagator: BoxedPropagator);
@@ -238,10 +239,10 @@ pub struct LoweringContext<'a> {
 pub enum LoweringError {
 	/// Error used when a conflict is found during the simplification process of
 	/// the model.
-	Simplification(<Model as ReasoningEngine>::Conflict),
+	Simplification(Nogood<model::View<bool>>),
 	/// Error used when a conflict is found by the SAT solver when lowering the
 	/// problem.
-	Lowering(<Engine as ReasoningEngine>::Conflict),
+	Lowering(Nogood<solver::Decision<bool>>),
 }
 
 /// A lowering helper that maps decisions in a [`Model`] object to the
@@ -824,7 +825,7 @@ impl<'a> LoweringContext<'a> {
 			Err(false) => unreachable!(),
 			Err(true) => return Ok(()),
 			Ok(clause) if clause.is_empty() => {
-				return Err(self.declare_conflict([]).into());
+				return Err(self.declare_conflict(NO_REASON).into());
 			}
 			Ok(clause) => clause,
 		};
@@ -854,9 +855,11 @@ impl<'a> LoweringContext<'a> {
 	/// lowering.
 	pub fn declare_conflict(
 		&mut self,
-		reason: impl ReasonBuilder<Self>,
-	) -> <Self as ReasoningContext>::Conflict {
-		Conflict::new(self, None, reason)
+		reason: impl FnOnce(&mut Self, &mut <Self as PropagationContext>::ReasonSink<'_>),
+	) -> <Self as PropagationContext>::Conflict {
+		let mut sink = Vec::new();
+		reason(self, &mut sink);
+		Nogood::from_view_iter(sink.into_iter().map(Not::not))
 	}
 
 	/// Read a trailed value from the [`Model`] trail.
@@ -951,9 +954,13 @@ impl PostingActions for LoweringContext<'_> {
 	}
 }
 
+impl PropagationContext for LoweringContext<'_> {
+	type Conflict = <Solver as PropagationContext>::Conflict;
+	type ReasonSink<'a> = Vec<Self::Atom>;
+}
+
 impl ReasoningContext for LoweringContext<'_> {
 	type Atom = <Engine as ReasoningEngine>::Atom;
-	type Conflict = <Engine as ReasoningEngine>::Conflict;
 }
 
 impl Display for LoweringError {
@@ -973,13 +980,25 @@ impl Error for LoweringError {}
 
 impl From<<Engine as ReasoningEngine>::Conflict> for LoweringError {
 	fn from(value: <Engine as ReasoningEngine>::Conflict) -> Self {
-		Self::Lowering(value)
+		Self::Lowering(value.into_nogood())
 	}
 }
 
 impl From<<Model as ReasoningEngine>::Conflict> for LoweringError {
 	fn from(value: <Model as ReasoningEngine>::Conflict) -> Self {
+		Self::Simplification(value.into_nogood())
+	}
+}
+
+impl From<Nogood<model::View<bool>>> for LoweringError {
+	fn from(value: Nogood<model::View<bool>>) -> Self {
 		Self::Simplification(value)
+	}
+}
+
+impl From<Nogood<solver::Decision<bool>>> for LoweringError {
+	fn from(value: Nogood<solver::Decision<bool>>) -> Self {
+		Self::Lowering(value)
 	}
 }
 
@@ -1243,8 +1262,8 @@ impl<Sat: ExternalPropagation> LoweringActions for Solver<Sat> {
 	fn add_clause(
 		&mut self,
 		clause: Vec<solver::View<bool>>,
-	) -> Result<(), <Engine as ReasoningEngine>::Conflict> {
-		Solver::add_clause(self, clause)
+	) -> Result<(), <Solver as PropagationContext>::Conflict> {
+		self.add_clause(clause)
 	}
 
 	fn add_propagator(&mut self, propagator: BoxedPropagator) {
@@ -1312,9 +1331,13 @@ impl<Sat: ExternalPropagation> LoweringActions for Solver<Sat> {
 	}
 }
 
+impl PropagationContext for dyn LoweringActions + '_ {
+	type Conflict = <Solver as PropagationContext>::Conflict;
+	type ReasonSink<'a> = <Solver as PropagationContext>::ReasonSink<'a>;
+}
+
 impl ReasoningContext for dyn LoweringActions + '_ {
 	type Atom = <Engine as ReasoningEngine>::Atom;
-	type Conflict = <Engine as ReasoningEngine>::Conflict;
 }
 
 impl BoolInspectionActions<LoweringContext<'_>> for solver::Decision<bool> {

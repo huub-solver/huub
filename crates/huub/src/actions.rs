@@ -20,7 +20,7 @@ pub use crate::actions::{
 	},
 };
 use crate::{
-	constraints::{BoxedPropagator, Constraint, DeferredReason, ReasonBuilder},
+	constraints::{BoxedPropagator, Constraint},
 	helpers::bytes::Bytes,
 };
 
@@ -40,9 +40,22 @@ pub trait DecisionActions: TrailingActions {
 	fn num_conflicts(&self) -> u64;
 }
 
+/// A reason sink that additionally lets a propagator *defer* a reason: instead
+/// of creating it immediately, it records that the reason is to be computed on
+/// demand by the current propagator's
+/// [`explain`](crate::constraints::Propagator::explain) (given `data`).
+///
+/// These actions are only available to [`PropagationContext`]s that are given
+/// to [`Propagator`](crate::constraints::Propagator) implementations.
+pub trait DeferReasonActions<Atom>: ReasonActions<Atom> {
+	/// Defer this reason to the current propagator, which will compute it using
+	/// `data` when the reason is needed.
+	fn defer(&mut self, data: u64);
+}
+
 /// Actions that can be performed when posting propagators to the
 /// [`Solver`](crate::solver::Solver).
-pub trait PostingActions: ConstructionActions + ReasoningContext {
+pub trait PostingActions: ConstructionActions + PropagationContext {
 	/// Add a new clause to be enforced by the solver.
 	fn add_clause(
 		&mut self,
@@ -55,31 +68,38 @@ pub trait PostingActions: ConstructionActions + ReasoningContext {
 
 /// General actions that can be performed in
 /// [`ReasoningEngine::PropagationContext`].
-pub trait PropagationActions: DecisionActions + ReasoningContext {
-	/// Declare that the given reason, seen as a conjunction of atoms,
-	/// represents a conflict in the current state, requiring backtracking.
+pub trait PropagationActions: DecisionActions + PropagationContext {
+	/// Declare that the reason built by the given closure represents a conflict
+	/// in the current state, requiring backtracking.
 	///
 	/// Note that it is generally recommended to use this method only when
 	/// integer or Boolean propagation methods do not seem relevant.
-	fn declare_conflict(&mut self, reason: impl ReasonBuilder<Self>) -> Self::Conflict;
+	fn declare_conflict(
+		&mut self,
+		reason: impl FnOnce(&mut Self, &mut Self::ReasonSink<'_>),
+	) -> Self::Conflict;
+}
 
-	/// Create a placeholder reason that will cause the solver to call the
-	/// propagator's [`crate::constraints::Propagator::explain`] method when the
-	/// reason is needed.
-	fn deferred_reason(&self, data: u64) -> DeferredReason;
+/// A context that can raise conflicts and build reasons for the changes it
+/// makes.
+///
+/// This extends [`ReasoningContext`] with the
+/// [`Conflict`](PropagationContext::Conflict) it can raise and the
+/// [`ReasonSink`](PropagationContext::ReasonSink) into which a reason closure
+/// pushes its atoms.
+pub trait PropagationContext: ReasoningContext {
+	/// Type used to represent a conflict that occurs during propagation.
+	type Conflict;
+
+	/// The sink into which a reason closure pushes the atoms of a reason while
+	/// it is being built in this context.
+	type ReasonSink<'a>: ReasonActions<Self::Atom>;
 }
 
 /// Actions for building the explanation of a propagation: the conjunction of
 /// reason atoms that imply the change being explained (see
 /// [`Propagator::explain`](crate::constraints::Propagator::explain)).
-pub trait ReasonActions<Atom> {
-	/// Add several reason atoms to the explanation.
-	fn extend(&mut self, atoms: impl IntoIterator<Item = Atom>) {
-		for atom in atoms {
-			self.push(atom);
-		}
-	}
-
+pub trait ReasonActions<Atom>: Extend<Atom> {
 	/// Add a reason atom to the explanation.
 	fn push(&mut self, atom: Atom);
 
@@ -97,8 +117,6 @@ pub trait ReasonActions<Atom> {
 pub trait ReasoningContext {
 	/// Type used to represent an atom in a reason for propagation.
 	type Atom: BoolOperations + Not<Output = Self::Atom>;
-	/// Type used to represent a conflict that occurs during propagation.
-	type Conflict;
 }
 
 /// Trait for environments that support constraint propagation and decision
@@ -110,26 +128,31 @@ pub trait ReasoningEngine {
 	type Conflict;
 
 	/// The context given to the constraint propagator when they are asked to
-	/// explain a reason for a change they made using
-	/// [`PropagationActions::deferred_reason`].
-	type ExplanationContext<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
-		+ TrailingActions;
+	/// explain a reason for a change they deferred with
+	/// [`DeferReasonActions::defer`].
+	type ExplanationContext<'a>: ReasoningContext<Atom = Self::Atom> + TrailingActions;
 	/// The context given to constraint propagators to attach themselves to
 	/// changes in the state of the reasoning engine or decision variables.
-	type InitializationContext<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
-		+ InitActions;
+	type InitializationContext<'a>: ReasoningContext<Atom = Self::Atom> + InitActions;
 	/// The context given to constraint propagators when they are advised of a
 	/// change in the state of the reasoning engine or decision variables.
-	type NotificationContext<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
-		+ TrailingActions;
+	type NotificationContext<'a>: ReasoningContext<Atom = Self::Atom> + TrailingActions;
 	/// The context given to constraint propagators when they are asked to
 	/// propagate changes based on the constraint they enforce.
-	type PropagationContext<'a>: ReasoningContext<Atom = Self::Atom, Conflict = Self::Conflict>
-		+ PropagationActions<Atom = Self::Atom, Conflict = Self::Conflict>;
+	type PropagationContext<'a>: for<'b> PropagationContext<
+			Atom = Self::Atom,
+			Conflict = Self::Conflict,
+			ReasonSink<'b>: DeferReasonActions<Self::Atom>,
+		> + PropagationActions<Atom = Self::Atom, Conflict = Self::Conflict>;
 
-	/// A sink for the conjunctive reason atoms emitted by
-	/// [`Propagator::explain`](crate::constraints::Propagator::explain) that
-	/// imply the propagated literal.
+	/// The sink given to
+	/// [`Propagator::explain`](crate::constraints::Propagator::explain)
+	/// to receive the conjunction of reason atoms that imply the propagated
+	/// atom.
+	///
+	/// Unlike the propagation context's reason sink, an explanation is always
+	/// eager and can never defer so this is only a [`ReasonActions`], and not a
+	/// [`DeferReasonActions`].
 	type ReasonSink<'a>: ReasonActions<Self::Atom>;
 }
 
@@ -174,10 +197,6 @@ pub trait TrailingActions {
 }
 
 impl<Atom> ReasonActions<Atom> for Vec<Atom> {
-	fn extend(&mut self, atoms: impl IntoIterator<Item = Atom>) {
-		Extend::extend(self, atoms);
-	}
-
 	fn push(&mut self, atom: Atom) {
 		Vec::push(self, atom);
 	}

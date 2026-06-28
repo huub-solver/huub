@@ -222,7 +222,6 @@ impl InitActions for InitializationContext<'_> {
 
 impl ReasoningContext for InitializationContext<'_> {
 	type Atom = <Engine as ReasoningEngine>::Atom;
-	type Conflict = <Engine as ReasoningEngine>::Conflict;
 }
 
 impl IntInitActions<InitializationContext<'_>> for IntVal {

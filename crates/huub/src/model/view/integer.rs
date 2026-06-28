@@ -12,11 +12,11 @@ use crate::{
 	actions::{
 		BoolPropagationActions, IntAnalyzeActions, IntDecisionActions, IntExplanationActions,
 		IntInspectionActions, IntPropagationActions, IntSimplificationActions, PropagationActions,
-		ReasoningContext,
+		PropagationContext, ReasonActions, ReasoningContext,
 	},
-	constraints::{Conflict, ReasonBuilder, int_linear::IntEq},
+	constraints::{Conflict, NO_REASON, Nogood, int_linear::IntEq},
 	model::{
-		Decision, Model, View,
+		Decision, Model, SimplificationContext, SimplificationReasonSink, View,
 		expressions::linear::IntLinearExp,
 		resolved::Resolved,
 		view::{DefaultView, boolean::BoolView, private},
@@ -46,11 +46,11 @@ impl private::Sealed for IntVal {}
 
 impl Resolved<View<IntVal>> {
 	/// Consuming variant of [`IntSimplificationActions::exclude`].
-	pub(crate) fn exclude(
+	pub(crate) fn exclude<'a>(
 		self,
-		ctx: &mut Model,
+		ctx: &mut SimplificationContext<'a>,
 		values: &IntSet,
-		reason: impl ReasonBuilder<Model>,
+		reason: impl FnOnce(&mut SimplificationContext<'a>, &mut SimplificationReasonSink),
 	) -> Result<(), Conflict<View<bool>>> {
 		match self.0.0 {
 			IntView::Const(v) => v.exclude(ctx, values, reason),
@@ -62,11 +62,11 @@ impl Resolved<View<IntVal>> {
 	}
 
 	/// Consuming variant of [`IntPropagationActions::fix`].
-	pub(crate) fn fix(
+	pub(crate) fn fix<'a>(
 		self,
-		ctx: &mut Model,
+		ctx: &mut SimplificationContext<'a>,
 		val: IntVal,
-		reason: impl ReasonBuilder<Model>,
+		reason: impl FnOnce(&mut SimplificationContext<'a>, &mut SimplificationReasonSink),
 	) -> Result<(), Conflict<View<bool>>> {
 		match self.0.0 {
 			IntView::Const(v) => v.fix(ctx, val, reason),
@@ -81,11 +81,11 @@ impl Resolved<View<IntVal>> {
 	}
 
 	/// Consuming variant of [`IntPropagationActions::remove_val`].
-	pub(crate) fn remove_val(
+	pub(crate) fn remove_val<'a>(
 		self,
-		ctx: &mut Model,
+		ctx: &mut SimplificationContext<'a>,
 		val: IntVal,
-		reason: impl ReasonBuilder<Model>,
+		reason: impl FnOnce(&mut SimplificationContext<'a>, &mut SimplificationReasonSink),
 	) -> Result<(), Conflict<View<bool>>> {
 		match self.0.0 {
 			IntView::Const(v) => v.remove_val(ctx, val, reason),
@@ -100,11 +100,11 @@ impl Resolved<View<IntVal>> {
 	}
 
 	/// Consuming variant of [`IntSimplificationActions::restrict_domain`].
-	pub(crate) fn restrict_domain(
+	pub(crate) fn restrict_domain<'a>(
 		self,
-		ctx: &mut Model,
+		ctx: &mut SimplificationContext<'a>,
 		values: &IntSet,
-		reason: impl ReasonBuilder<Model>,
+		reason: impl FnOnce(&mut SimplificationContext<'a>, &mut SimplificationReasonSink),
 	) -> Result<(), Conflict<View<bool>>> {
 		match self.0.0 {
 			IntView::Const(v) => v.restrict_domain(ctx, values, reason),
@@ -116,11 +116,11 @@ impl Resolved<View<IntVal>> {
 	}
 
 	/// Consuming variant of [`IntPropagationActions::tighten_max`].
-	pub(crate) fn tighten_max(
+	pub(crate) fn tighten_max<'a>(
 		self,
-		ctx: &mut Model,
+		ctx: &mut SimplificationContext<'a>,
 		ub: IntVal,
-		reason: impl ReasonBuilder<Model>,
+		reason: impl FnOnce(&mut SimplificationContext<'a>, &mut SimplificationReasonSink),
 	) -> Result<(), Conflict<View<bool>>> {
 		match self.0.0 {
 			IntView::Const(v) => v.tighten_max(ctx, ub, reason),
@@ -136,11 +136,11 @@ impl Resolved<View<IntVal>> {
 	}
 
 	/// Consuming variant of [`IntPropagationActions::tighten_min`].
-	pub(crate) fn tighten_min(
+	pub(crate) fn tighten_min<'a>(
 		self,
-		ctx: &mut Model,
+		ctx: &mut SimplificationContext<'a>,
 		val: IntVal,
-		reason: impl ReasonBuilder<Model>,
+		reason: impl FnOnce(&mut SimplificationContext<'a>, &mut SimplificationReasonSink),
 	) -> Result<(), Conflict<View<bool>>> {
 		match self.0.0 {
 			IntView::Const(v) => v.tighten_min(ctx, val, reason),
@@ -158,7 +158,7 @@ impl Resolved<View<IntVal>> {
 	/// Consuming variant of [`IntSimplificationActions::unify`].
 	pub(crate) fn unify(
 		self,
-		ctx: &mut Model,
+		ctx: &mut SimplificationContext<'_>,
 		other: Resolved<View<IntVal>>,
 	) -> Result<(), Conflict<View<bool>>> {
 		use IntView::*;
@@ -166,10 +166,12 @@ impl Resolved<View<IntVal>> {
 		let (idx, target) = match (self.0.0, other.0.0) {
 			(x, y) if x == y => return Ok(()),
 			(Bool(x), Bool(y)) => return x.unify(ctx, y),
-			(Const(x), Const(y)) if x != y => return Err(ctx.declare_conflict([])),
+			(Const(x), Const(y)) if x != y => {
+				return Err(ctx.declare_conflict(NO_REASON));
+			}
 			(Const(y), x) | (x, Const(y)) => {
 				let x = View::<IntVal>(x);
-				return x.fix(ctx, y, []);
+				return x.fix(ctx, y, NO_REASON);
 			}
 			(Linear(lin_x), Linear(lin_y)) => {
 				// Decide which variable to redefine based on the other.
@@ -184,7 +186,7 @@ impl Resolved<View<IntVal>> {
 				} else if can_define_x {
 					(lin_x, lin_y)
 				} else {
-					ctx.post_constraint_internal(IntEq {
+					ctx.0.post_constraint_internal(IntEq {
 						vars: [self.0, other.0],
 					});
 					return Ok(());
@@ -207,29 +209,29 @@ impl Resolved<View<IntVal>> {
 
 				match (contains_lb, contains_ub) {
 					(false, false) => {
-						return Err(ctx.declare_conflict(|ctx: &mut Model| {
-							[
+						return Err(ctx.declare_conflict(|ctx, reason| {
+							reason.extend([
 								lin.lit(ctx, IntLitMeaning::NotEq(lb)),
 								lin.lit(ctx, IntLitMeaning::NotEq(ub)),
-							]
+							]);
 						}));
 					}
 					(false, true) => {
 						let Some(val) = lin.try_reverse_val(ub) else {
 							unreachable!()
 						};
-						Resolved(lin.var).fix(ctx, val, [])?;
-						return b.var.require(ctx, |ctx: &mut Model| {
-							[lin.lit(ctx, IntLitMeaning::NotEq(lb))]
+						Resolved(lin.var).fix(ctx, val, NO_REASON)?;
+						return b.var.require(ctx, |ctx, reason| {
+							reason.push(lin.lit(ctx, IntLitMeaning::NotEq(lb)));
 						});
 					}
 					(true, false) => {
 						let Some(val) = lin.try_reverse_val(lb) else {
 							unreachable!()
 						};
-						Resolved(lin.var).fix(ctx, val, [])?;
-						return b.var.fix(ctx, false, |ctx: &mut Model| {
-							[lin.lit(ctx, IntLitMeaning::NotEq(ub))]
+						Resolved(lin.var).fix(ctx, val, NO_REASON)?;
+						return b.var.fix(ctx, false, |ctx, reason| {
+							reason.push(lin.lit(ctx, IntLitMeaning::NotEq(ub)));
 						});
 					}
 					(true, true) => {
@@ -267,6 +269,16 @@ impl IntDecisionActions<Model> for Resolved<View<IntVal>> {
 	fn val_lit(&self, ctx: &mut Model) -> Option<View<bool>> {
 		let val = self.val(ctx)?;
 		Some(IntInspectionActions::try_lit(self, ctx, IntLitMeaning::Eq(val)).unwrap())
+	}
+}
+
+impl IntDecisionActions<SimplificationContext<'_>> for Resolved<View<IntVal>> {
+	fn lit(&self, ctx: &mut SimplificationContext<'_>, meaning: IntLitMeaning) -> View<bool> {
+		self.lit(&mut *ctx.0, meaning)
+	}
+
+	fn val_lit(&self, ctx: &mut SimplificationContext<'_>) -> Option<View<bool>> {
+		self.val_lit(&mut *ctx.0)
 	}
 }
 
@@ -377,6 +389,56 @@ impl IntInspectionActions<Model> for Resolved<View<IntVal>> {
 	}
 }
 
+impl IntInspectionActions<SimplificationContext<'_>> for Resolved<View<IntVal>> {
+	fn bounds(&self, ctx: &SimplificationContext<'_>) -> (IntVal, IntVal) {
+		self.bounds(&*ctx.0)
+	}
+
+	fn domain(&self, ctx: &SimplificationContext<'_>) -> IntSet {
+		self.domain(&*ctx.0)
+	}
+
+	fn in_domain(&self, ctx: &SimplificationContext<'_>, val: IntVal) -> bool {
+		self.in_domain(&*ctx.0, val)
+	}
+
+	fn lit_meaning(
+		&self,
+		ctx: &SimplificationContext<'_>,
+		lit: View<bool>,
+	) -> Option<IntLitMeaning> {
+		self.lit_meaning(&*ctx.0, lit)
+	}
+
+	fn max(&self, ctx: &SimplificationContext<'_>) -> IntVal {
+		self.max(&*ctx.0)
+	}
+
+	fn max_lit(&self, ctx: &SimplificationContext<'_>) -> View<bool> {
+		self.max_lit(&*ctx.0)
+	}
+
+	fn min(&self, ctx: &SimplificationContext<'_>) -> IntVal {
+		self.min(&*ctx.0)
+	}
+
+	fn min_lit(&self, ctx: &SimplificationContext<'_>) -> View<bool> {
+		self.min_lit(&*ctx.0)
+	}
+
+	fn try_lit(
+		&self,
+		ctx: &SimplificationContext<'_>,
+		meaning: IntLitMeaning,
+	) -> Option<View<bool>> {
+		self.try_lit(&*ctx.0, meaning)
+	}
+
+	fn val(&self, ctx: &SimplificationContext<'_>) -> Option<IntVal> {
+		self.val(&*ctx.0)
+	}
+}
+
 impl View<IntVal> {
 	/// Create a view that represents the addition of a constant value to the
 	/// integer decision, while ensuring that the domain of the resulting view
@@ -387,17 +449,18 @@ impl View<IntVal> {
 		rhs: IntVal,
 	) -> Result<View<IntVal>, Ctx::Conflict>
 	where
-		Ctx: PropagationActions + ReasoningContext + ?Sized,
+		Ctx: PropagationActions + PropagationContext + ?Sized,
 		View<IntVal>: IntPropagationActions<Ctx>,
+		View<bool>: BoolPropagationActions<Ctx>,
 	{
 		if rhs.is_positive() {
 			let ub = self.max(ctx);
 			if ub.checked_add(rhs).is_none() {
 				if let Some(ub) = ub.checked_sub(rhs) {
-					self.tighten_max(ctx, ub, [])?;
+					self.tighten_max(ctx, ub, NO_REASON)?;
 				} else {
-					return Err(ctx.declare_conflict(|ctx: &mut Ctx| {
-						[self.lit(ctx, IntLitMeaning::Less(IntVal::MIN))]
+					return Err(ctx.declare_conflict(|ctx, reason| {
+						reason.push(self.lit(ctx, IntLitMeaning::Less(IntVal::MIN)));
 					}));
 				}
 			}
@@ -405,10 +468,10 @@ impl View<IntVal> {
 			let lb = self.min(ctx);
 			if lb.checked_add(rhs).is_none() {
 				if let Some(lb) = lb.checked_sub(rhs) {
-					self.tighten_min(ctx, lb, [])?;
+					self.tighten_min(ctx, lb, NO_REASON)?;
 				} else {
 					// Real conflict subject cannot be represented.
-					return Err(ctx.declare_conflict([]));
+					return Err(ctx.declare_conflict(NO_REASON));
 				}
 			}
 		}
@@ -424,8 +487,9 @@ impl View<IntVal> {
 		rhs: IntVal,
 	) -> Result<View<IntVal>, Ctx::Conflict>
 	where
-		Ctx: PropagationActions + ReasoningContext + ?Sized,
+		Ctx: PropagationActions + PropagationContext + ?Sized,
 		View<IntVal>: IntPropagationActions<Ctx>,
+		View<bool>: BoolPropagationActions<Ctx>,
 	{
 		let (lb, ub) = self.bounds(ctx);
 		let (min, max) = if rhs.is_positive() {
@@ -435,18 +499,18 @@ impl View<IntVal> {
 		};
 		if lb.checked_mul(rhs).is_none() {
 			if let Some(lb) = min.checked_div(rhs) {
-				self.tighten_min(ctx, lb, [])?;
+				self.tighten_min(ctx, lb, NO_REASON)?;
 			} else {
 				// Real conflict subject cannot be represented.
-				return Err(ctx.declare_conflict([]));
+				return Err(ctx.declare_conflict(NO_REASON));
 			}
 		}
 		if ub.checked_mul(rhs).is_none() {
 			if let Some(ub) = max.checked_div(rhs) {
-				self.tighten_max(ctx, ub, [])?;
+				self.tighten_max(ctx, ub, NO_REASON)?;
 			} else {
-				return Err(ctx.declare_conflict(|ctx: &mut Ctx| {
-					[self.lit(ctx, IntLitMeaning::Less(IntVal::MIN))]
+				return Err(ctx.declare_conflict(|ctx, reason| {
+					reason.push(self.lit(ctx, IntLitMeaning::Less(IntVal::MIN)));
 				}));
 			}
 		}
@@ -459,11 +523,11 @@ impl View<IntVal> {
 	/// tightening the domain of the view.
 	pub fn bounding_neg<Ctx>(self, ctx: &mut Ctx) -> Result<View<IntVal>, Ctx::Conflict>
 	where
-		Ctx: ReasoningContext + ?Sized,
+		Ctx: PropagationContext + ?Sized,
 		View<IntVal>: IntPropagationActions<Ctx>,
 	{
 		if self.min(ctx) == IntVal::MIN {
-			self.tighten_min(ctx, -IntVal::MAX, [])?;
+			self.tighten_min(ctx, -IntVal::MAX, NO_REASON)?;
 		}
 		Ok(-self)
 	}
@@ -477,8 +541,9 @@ impl View<IntVal> {
 		rhs: IntVal,
 	) -> Result<View<IntVal>, Ctx::Conflict>
 	where
-		Ctx: PropagationActions + ReasoningContext + ?Sized,
+		Ctx: PropagationActions + PropagationContext + ?Sized,
 		View<IntVal>: IntPropagationActions<Ctx>,
+		View<bool>: BoolPropagationActions<Ctx>,
 	{
 		self.bounding_add(ctx, rhs.saturating_neg())
 	}
@@ -664,9 +729,29 @@ impl IntDecisionActions<Model> for View<IntVal> {
 	}
 }
 
+impl IntDecisionActions<SimplificationContext<'_>> for View<IntVal> {
+	fn lit(&self, ctx: &mut SimplificationContext<'_>, meaning: IntLitMeaning) -> View<bool> {
+		self.lit(&mut *ctx.0, meaning)
+	}
+
+	fn val_lit(&self, ctx: &mut SimplificationContext<'_>) -> Option<View<bool>> {
+		self.val_lit(&mut *ctx.0)
+	}
+}
+
 impl IntExplanationActions<Model> for View<IntVal> {
 	fn lit_relaxed(&self, ctx: &Model, meaning: IntLitMeaning) -> (View<bool>, IntLitMeaning) {
 		(self.try_lit(ctx, meaning).unwrap(), meaning)
+	}
+}
+
+impl IntExplanationActions<SimplificationContext<'_>> for View<IntVal> {
+	fn lit_relaxed(
+		&self,
+		ctx: &SimplificationContext<'_>,
+		meaning: IntLitMeaning,
+	) -> (View<bool>, IntLitMeaning) {
+		self.lit_relaxed(&*ctx.0, meaning)
 	}
 }
 
@@ -712,41 +797,149 @@ impl IntInspectionActions<Model> for View<IntVal> {
 	}
 }
 
+impl IntInspectionActions<SimplificationContext<'_>> for View<IntVal> {
+	fn bounds(&self, ctx: &SimplificationContext<'_>) -> (IntVal, IntVal) {
+		self.bounds(&*ctx.0)
+	}
+
+	fn domain(&self, ctx: &SimplificationContext<'_>) -> IntSet {
+		self.domain(&*ctx.0)
+	}
+
+	fn in_domain(&self, ctx: &SimplificationContext<'_>, val: IntVal) -> bool {
+		self.in_domain(&*ctx.0, val)
+	}
+
+	fn lit_meaning(
+		&self,
+		ctx: &SimplificationContext<'_>,
+		lit: View<bool>,
+	) -> Option<IntLitMeaning> {
+		self.lit_meaning(&*ctx.0, lit)
+	}
+
+	fn max(&self, ctx: &SimplificationContext<'_>) -> IntVal {
+		self.max(&*ctx.0)
+	}
+
+	fn max_lit(&self, ctx: &SimplificationContext<'_>) -> View<bool> {
+		self.max_lit(&*ctx.0)
+	}
+
+	fn min(&self, ctx: &SimplificationContext<'_>) -> IntVal {
+		self.min(&*ctx.0)
+	}
+
+	fn min_lit(&self, ctx: &SimplificationContext<'_>) -> View<bool> {
+		self.min_lit(&*ctx.0)
+	}
+
+	fn try_lit(
+		&self,
+		ctx: &SimplificationContext<'_>,
+		meaning: IntLitMeaning,
+	) -> Option<View<bool>> {
+		self.try_lit(&*ctx.0, meaning)
+	}
+
+	fn val(&self, ctx: &SimplificationContext<'_>) -> Option<IntVal> {
+		self.val(&*ctx.0)
+	}
+}
+
 impl IntPropagationActions<Model> for View<IntVal> {
 	fn fix(
 		&self,
 		ctx: &mut Model,
 		val: IntVal,
-		reason: impl ReasonBuilder<Model>,
-	) -> Result<(), Conflict<View<bool>>> {
-		self.resolve_alias(ctx).fix(ctx, val, reason)
+		reason: impl FnOnce(&mut Model, &mut Vec<View<bool>>),
+	) -> Result<(), Nogood<View<bool>>> {
+		self.fix(
+			&mut SimplificationContext(ctx),
+			val,
+			Model::adapt_reason(reason),
+		)
+		.map_err(Conflict::into_nogood)
 	}
 
 	fn remove_val(
 		&self,
 		ctx: &mut Model,
 		val: IntVal,
-		reason: impl ReasonBuilder<Model>,
-	) -> Result<(), Conflict<View<bool>>> {
-		self.resolve_alias(ctx).remove_val(ctx, val, reason)
+		reason: impl FnOnce(&mut Model, &mut Vec<View<bool>>),
+	) -> Result<(), Nogood<View<bool>>> {
+		self.remove_val(
+			&mut SimplificationContext(ctx),
+			val,
+			Model::adapt_reason(reason),
+		)
+		.map_err(Conflict::into_nogood)
 	}
 
 	fn tighten_max(
 		&self,
 		ctx: &mut Model,
 		ub: IntVal,
-		reason: impl ReasonBuilder<Model>,
-	) -> Result<(), Conflict<View<bool>>> {
-		self.resolve_alias(ctx).tighten_max(ctx, ub, reason)
+		reason: impl FnOnce(&mut Model, &mut Vec<View<bool>>),
+	) -> Result<(), Nogood<View<bool>>> {
+		self.tighten_max(
+			&mut SimplificationContext(ctx),
+			ub,
+			Model::adapt_reason(reason),
+		)
+		.map_err(Conflict::into_nogood)
 	}
 
 	fn tighten_min(
 		&self,
 		ctx: &mut Model,
 		val: IntVal,
-		reason: impl ReasonBuilder<Model>,
+		reason: impl FnOnce(&mut Model, &mut Vec<View<bool>>),
+	) -> Result<(), Nogood<View<bool>>> {
+		self.tighten_min(
+			&mut SimplificationContext(ctx),
+			val,
+			Model::adapt_reason(reason),
+		)
+		.map_err(Conflict::into_nogood)
+	}
+}
+
+impl<'a> IntPropagationActions<SimplificationContext<'a>> for View<IntVal> {
+	fn fix(
+		&self,
+		ctx: &mut SimplificationContext<'a>,
+		val: IntVal,
+		reason: impl FnOnce(&mut SimplificationContext<'a>, &mut SimplificationReasonSink),
 	) -> Result<(), Conflict<View<bool>>> {
-		self.resolve_alias(ctx).tighten_min(ctx, val, reason)
+		self.resolve_alias(&*ctx.0).fix(ctx, val, reason)
+	}
+
+	fn remove_val(
+		&self,
+		ctx: &mut SimplificationContext<'a>,
+		val: IntVal,
+		reason: impl FnOnce(&mut SimplificationContext<'a>, &mut SimplificationReasonSink),
+	) -> Result<(), Conflict<View<bool>>> {
+		self.resolve_alias(&*ctx.0).remove_val(ctx, val, reason)
+	}
+
+	fn tighten_max(
+		&self,
+		ctx: &mut SimplificationContext<'a>,
+		ub: IntVal,
+		reason: impl FnOnce(&mut SimplificationContext<'a>, &mut SimplificationReasonSink),
+	) -> Result<(), Conflict<View<bool>>> {
+		self.resolve_alias(&*ctx.0).tighten_max(ctx, ub, reason)
+	}
+
+	fn tighten_min(
+		&self,
+		ctx: &mut SimplificationContext<'a>,
+		val: IntVal,
+		reason: impl FnOnce(&mut SimplificationContext<'a>, &mut SimplificationReasonSink),
+	) -> Result<(), Conflict<View<bool>>> {
+		self.resolve_alias(&*ctx.0).tighten_min(ctx, val, reason)
 	}
 }
 
@@ -755,23 +948,63 @@ impl IntSimplificationActions<Model> for View<IntVal> {
 		&self,
 		ctx: &mut Model,
 		values: &IntSet,
-		reason: impl ReasonBuilder<Model>,
-	) -> Result<(), Conflict<View<bool>>> {
-		self.resolve_alias(ctx).exclude(ctx, values, reason)
+		reason: impl FnOnce(&mut Model, &mut Vec<View<bool>>),
+	) -> Result<(), Nogood<View<bool>>> {
+		self.exclude(
+			&mut SimplificationContext(ctx),
+			values,
+			Model::adapt_reason(reason),
+		)
+		.map_err(Conflict::into_nogood)
 	}
 
 	fn restrict_domain(
 		&self,
 		ctx: &mut Model,
 		values: &IntSet,
-		reason: impl ReasonBuilder<Model>,
-	) -> Result<(), Conflict<View<bool>>> {
-		self.resolve_alias(ctx).restrict_domain(ctx, values, reason)
+		reason: impl FnOnce(&mut Model, &mut Vec<View<bool>>),
+	) -> Result<(), Nogood<View<bool>>> {
+		self.restrict_domain(
+			&mut SimplificationContext(ctx),
+			values,
+			Model::adapt_reason(reason),
+		)
+		.map_err(Conflict::into_nogood)
 	}
 
-	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Conflict<View<bool>>> {
-		let other = other.into().resolve_alias(ctx);
-		self.resolve_alias(ctx).unify(ctx, other)
+	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Nogood<View<bool>>> {
+		self.unify(&mut SimplificationContext(ctx), other)
+			.map_err(Conflict::into_nogood)
+	}
+}
+
+impl<'a> IntSimplificationActions<SimplificationContext<'a>> for View<IntVal> {
+	fn exclude(
+		&self,
+		ctx: &mut SimplificationContext<'a>,
+		values: &IntSet,
+		reason: impl FnOnce(&mut SimplificationContext<'a>, &mut SimplificationReasonSink),
+	) -> Result<(), Conflict<View<bool>>> {
+		self.resolve_alias(&*ctx.0).exclude(ctx, values, reason)
+	}
+
+	fn restrict_domain(
+		&self,
+		ctx: &mut SimplificationContext<'a>,
+		values: &IntSet,
+		reason: impl FnOnce(&mut SimplificationContext<'a>, &mut SimplificationReasonSink),
+	) -> Result<(), Conflict<View<bool>>> {
+		self.resolve_alias(&*ctx.0)
+			.restrict_domain(ctx, values, reason)
+	}
+
+	fn unify(
+		&self,
+		ctx: &mut SimplificationContext<'a>,
+		other: impl Into<Self>,
+	) -> Result<(), Conflict<View<bool>>> {
+		let other = other.into().resolve_alias(&*ctx.0);
+		self.resolve_alias(&*ctx.0).unify(ctx, other)
 	}
 }
 

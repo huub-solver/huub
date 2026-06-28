@@ -3,8 +3,7 @@
 use std::{fmt::Debug, hash::Hash, ops::Not};
 
 use crate::{
-	actions::{PropagationActions, ReasoningContext},
-	constraints::ReasonBuilder,
+	actions::{PropagationActions, PropagationContext, ReasoningContext},
 	model::view::View,
 };
 
@@ -27,7 +26,7 @@ pub trait BoolOperations: Clone + Debug + Eq + Hash + Not + 'static {}
 /// for Boolean decision variables.
 pub trait BoolPropagationActions<Context>: BoolInspectionActions<Context>
 where
-	Context: ReasoningContext + ?Sized,
+	Context: PropagationContext + ?Sized,
 {
 	/// Enforce that the value of a Boolean decision variable must be `val`
 	/// because of the given reason.
@@ -35,7 +34,7 @@ where
 		&self,
 		ctx: &mut Context,
 		val: bool,
-		reason: impl ReasonBuilder<Context>,
+		reason: impl FnOnce(&mut Context, &mut Context::ReasonSink<'_>),
 	) -> Result<(), Context::Conflict>;
 
 	/// Enforce that the value of a Boolean decision variable must be `true`
@@ -43,7 +42,7 @@ where
 	fn require(
 		&self,
 		ctx: &mut Context,
-		reason: impl ReasonBuilder<Context>,
+		reason: impl FnOnce(&mut Context, &mut Context::ReasonSink<'_>),
 	) -> Result<(), Context::Conflict> {
 		self.fix(ctx, true, reason)
 	}
@@ -59,7 +58,7 @@ where
 pub trait BoolSimplificationActions<Context>:
 	BoolPropagationActions<Context> + Into<View<bool>>
 where
-	Context: ReasoningContext + ?Sized,
+	Context: PropagationContext + ?Sized,
 {
 	/// Mark `self` as being equivalent to `other`, instructing the reasoning
 	/// engine to use the same representation.
@@ -86,8 +85,8 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: bool,
-		reason: impl ReasonBuilder<Ctx>,
-	) -> Result<(), <Ctx as ReasoningContext>::Conflict> {
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
+	) -> Result<(), <Ctx as PropagationContext>::Conflict> {
 		if *self != val {
 			return Err(ctx.declare_conflict(reason));
 		}

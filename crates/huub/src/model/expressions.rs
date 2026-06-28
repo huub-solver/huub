@@ -13,6 +13,7 @@ use std::{cmp, marker::PhantomData, num::NonZero};
 
 use bon::bon;
 use itertools::{Itertools, MinMaxResult, iproduct};
+use rangelist::RangeList;
 
 pub use crate::model::expressions::{
 	bool_formula::BoolFormula, element::ElementConstraint, linear::IntLinearExp,
@@ -24,7 +25,7 @@ use crate::{
 		IntSimplificationActions,
 	},
 	constraints::{
-		Conflict,
+		NO_REASON, Nogood,
 		cumulative::CumulativeTimeTable,
 		disjunctive::{Disjunctive, DisjunctivePropagator},
 		int_abs::IntAbsBounds,
@@ -53,7 +54,7 @@ impl Model {
 		&mut self,
 		#[builder(into, start_fn)] origin: View<IntVal>,
 		#[builder(into)] result: View<IntVal>,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		self.post_constraint(IntAbsBounds {
 			origin,
 			abs: result,
@@ -70,7 +71,7 @@ impl Model {
 		#[builder(start_fn, into)] collection: IntSet,
 		#[builder(into)] member: View<IntVal>,
 		#[builder(into)] result: View<bool>,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		self.post_constraint(IntSetContainsReif {
 			var: member,
 			set: collection,
@@ -91,7 +92,7 @@ impl Model {
 		durations: Vec<impl Into<View<IntVal>>>,
 		usages: Vec<impl Into<View<IntVal>>>,
 		capacity: impl Into<View<IntVal>>,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		assert_eq!(
 			start_times.len(),
 			durations.len(),
@@ -125,7 +126,7 @@ impl Model {
 		edge_finding_propagation: Option<bool>,
 		not_last_propagation: Option<bool>,
 		detectable_precedence_propagation: Option<bool>,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		assert_eq!(
 			start_times.len(),
 			durations.len(),
@@ -153,7 +154,7 @@ impl Model {
 		#[builder(into, start_fn)] numerator: View<IntVal>,
 		#[builder(into, start_fn)] denominator: View<IntVal>,
 		#[builder(into)] result: View<IntVal>,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		self.post_constraint(IntDivBounds {
 			numerator,
 			denominator,
@@ -170,7 +171,7 @@ impl Model {
 		#[builder(start_fn)] array: Vec<E>,
 		#[builder(getter(name = index_internal, vis = ""), into)] index: View<IntVal>,
 		result: <E as ElementConstraint>::Result,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		<E as ElementConstraint>::element_constraint(self, array, index, result)
 	}
 
@@ -221,7 +222,7 @@ impl Model {
 		#[builder(setters(name = comparator_internal, vis = ""))] comparator: Comparator,
 		#[builder(setters(name = rhs_internal, vis = ""))] rhs: IntLinearExp,
 		#[builder(setters(name = reif_internal, vis = ""))] reif: Option<Reification>,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		// Subtract the RHS from the LHS to get a linear expression with a constant 0 on
 		// the RHS
 		expr -= rhs;
@@ -258,14 +259,14 @@ impl Model {
 				Comparator::Greater => 0 > rhs,
 			};
 			return match reif {
-				None => satisfied.require(self, []),
-				Some(Reification::ReifiedBy(r)) => r.fix(self, satisfied, []),
+				None => satisfied.require(self, NO_REASON),
+				Some(Reification::ReifiedBy(r)) => r.fix(self, satisfied, NO_REASON),
 				Some(Reification::ImpliedBy(_)) if satisfied => Ok(()),
-				Some(Reification::ImpliedBy(r)) => r.fix(self, false, []),
+				Some(Reification::ImpliedBy(r)) => r.fix(self, false, NO_REASON),
 			};
 		}
 
-		let mut negate_terms = || -> Result<(), Conflict<View<bool>>> {
+		let mut negate_terms = || -> Result<(), Nogood<View<bool>>> {
 			for v in &mut terms {
 				*v = v.bounding_neg(self)?;
 			}
@@ -310,7 +311,7 @@ impl Model {
 		&mut self,
 		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
 		#[builder(into)] result: View<IntVal>,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		self.minimum(vars.into_iter().map(|v| -v))
 			.result(-result)
 			.post()
@@ -323,7 +324,7 @@ impl Model {
 		&mut self,
 		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
 		#[builder(into)] result: View<IntVal>,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		self.post_constraint(IntArrayMinimumBounds {
 			vars: vars.into_iter().collect(),
 			min: result,
@@ -338,7 +339,7 @@ impl Model {
 		#[builder(start_fn)] factor1: View<IntVal>,
 		#[builder(start_fn)] factor2: View<IntVal>,
 		result: View<IntVal>,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		if IntMulBounds::<_, _, _, View<IntVal>>::can_overflow(self, &factor1, &factor2) {
 			self.post_constraint(IntMulBounds::<OverflowPossible, _, _, _> {
 				factor1,
@@ -382,7 +383,7 @@ impl Model {
 		origins: Vec<Vec<View<IntVal>>>,
 		sizes: Vec<Vec<View<IntVal>>>,
 		#[builder(default = true)] strict: bool,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		if strict {
 			let prop = IntNoOverlapSweep::<true, _, _>::new(self, origins, sizes);
 			self.post_constraint(prop)
@@ -401,7 +402,7 @@ impl Model {
 		#[builder(start_fn, into)] base: View<IntVal>,
 		#[builder(start_fn, into)] exponent: View<IntVal>,
 		#[builder(into)] result: View<IntVal>,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		if IntPowBounds::<_, _, _, View<IntVal>>::can_overflow(self, &base, &exponent) {
 			self.post_constraint(IntPowBounds::<OverflowPossible, _, _, _> {
 				base,
@@ -426,7 +427,7 @@ impl Model {
 		&mut self,
 		#[builder(start_fn, into)] mut formula: BoolFormula,
 		#[builder(setters(name = reif_internal, vis = ""))] reif: Option<Reification>,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		match reif {
 			Some(Reification::ReifiedBy(b)) => {
 				formula = BoolFormula::Equiv(vec![BoolFormula::Atom(b), formula]);
@@ -447,7 +448,7 @@ impl Model {
 		&mut self,
 		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
 		values: impl IntoIterator<Item = Vec<IntVal>>,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		let vars: Vec<_> = vars.into_iter().collect();
 		let table: Vec<_> = values.into_iter().collect();
 		assert!(
@@ -495,7 +496,7 @@ impl Model {
 		bounds_propagation: Option<bool>,
 		value_propagation: Option<bool>,
 		domain_propagation: Option<bool>,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		let vars: Vec<_> = vars.into_iter().map_into().collect();
 		self.post_constraint(IntUnique {
 			bounds_prop: IntUniqueBounds::new(vars.clone()),
@@ -519,7 +520,7 @@ impl Model {
 		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
 		#[builder(with = |values: impl IntoIterator<Item = IntVal>| values.into_iter().collect())]
 		values: Option<Vec<IntVal>>,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		let mut offset = 0;
 		let vars: Vec<_> = vars.into_iter().collect();
 		// If there are no decision variables, then the constraint is trivially
@@ -539,7 +540,7 @@ impl Model {
 			if !values.iter().tuple_windows().all(|(&x, &y)| x + 1 == y)
 				|| *values.last().unwrap() < vars.iter().map(|v| v.max(self)).max().unwrap()
 			{
-				vars[0].exclude(self, &values[1..].iter().map(|&v| v..=v).collect(), [])?;
+				vars[0].exclude(self, &RangeList::from_elements(values.clone()), NO_REASON)?;
 
 				let con = IntValuePrecedeChainValue::new(self, values.into_iter().collect(), vars);
 				return self.post_constraint(con);
@@ -554,7 +555,7 @@ impl Model {
 			.into_iter()
 			.map(|v| v.bounding_sub(self, offset))
 			.collect::<Result<Vec<_>, _>>()?;
-		vars[0].tighten_max(self, 1, [])?;
+		vars[0].tighten_max(self, 1, NO_REASON)?;
 		match vars.len() {
 			1 => Ok(()),
 			_ => {

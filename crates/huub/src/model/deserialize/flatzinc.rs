@@ -28,6 +28,7 @@ use crate::{
 		BoolPropagationActions, BoolSimplificationActions, IntSimplificationActions,
 		PropagationActions, ReasoningEngine,
 	},
+	constraints::{NO_REASON, Nogood},
 	lower::{Lowerer, LowererComplete, LoweringError},
 	model::{
 		Model,
@@ -682,6 +683,12 @@ impl From<LoweringError> for FlatZincError {
 	}
 }
 
+impl From<Nogood<View<bool>>> for FlatZincError {
+	fn from(nogood: Nogood<View<bool>>) -> Self {
+		Self::ReformulationError(LoweringError::from(nogood))
+	}
+}
+
 impl Display for FznIdent {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
@@ -1222,7 +1229,7 @@ impl<'a> FznModelBuilder<'a> {
 						let AnyView::Int(view) = view else {
 							unreachable!()
 						};
-						view.restrict_domain(&mut me.prb, dom, vec![])?;
+						view.restrict_domain(&mut me.prb, dom, NO_REASON)?;
 					}
 					// Insert the view to use instead of a new variable for the name
 					e.insert(view);
@@ -1739,11 +1746,9 @@ impl<'a> FznModelBuilder<'a> {
 					if !satisfied {
 						match lits.len() {
 							0 => {
-								return Err(FlatZincError::ReformulationError(
-									LoweringError::Simplification(self.prb.declare_conflict([])),
-								));
+								return Err(self.prb.declare_conflict(NO_REASON).into());
 							}
-							1 => lits[0].require(&mut self.prb, vec![])?,
+							1 => lits[0].require(&mut self.prb, NO_REASON)?,
 							_ => {
 								self.prb
 									.proposition(Formula::Or(lits.into_iter().map_into().collect()))
@@ -2062,9 +2067,7 @@ impl<'a> FznModelBuilder<'a> {
 						});
 					}
 					if table.is_empty() {
-						return Err(FlatZincError::ReformulationError(
-							LoweringError::Simplification(self.prb.declare_conflict([])),
-						));
+						return Err(self.prb.declare_conflict(NO_REASON).into());
 					}
 					let table: Vec<Vec<_>> = table
 						.into_iter()
@@ -2275,7 +2278,7 @@ impl<'a> FznModelBuilder<'a> {
 					let x = self.arg_int(x)?;
 					let s = self.arg_par_set(s)?;
 
-					x.restrict_domain(&mut self.prb, &s, vec![])?;
+					x.restrict_domain(&mut self.prb, &s, NO_REASON)?;
 				}
 				ConstraintIdent::SetInReif => {
 					let [x, s, r] = c.args.as_slice() else {
@@ -2431,9 +2434,7 @@ impl<'a> FznModelBuilder<'a> {
 					match lit {
 						Literal::Bool(b) => {
 							if domain == Some(!b) {
-								return Err(FlatZincError::ReformulationError(
-									LoweringError::Simplification(self.prb.declare_conflict([])),
-								));
+								return Err(self.prb.declare_conflict(NO_REASON).into());
 							} else {
 								domain = Some(*b);
 							}

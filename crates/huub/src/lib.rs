@@ -76,10 +76,6 @@ use rangelist::RangeList;
 /// documentation.
 type Clause<L> = Vec<L>;
 
-/// Type alias for a conjunction of literals, used for internal type
-/// documentation.
-type Conjunction<L> = Vec<L>;
-
 /// Type alias for an integer set parameter value.
 type IntSet = Set<IntVal>;
 

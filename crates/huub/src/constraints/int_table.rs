@@ -14,7 +14,7 @@ use crate::{
 		ReasoningEngine,
 	},
 	constraints::{
-		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
+		Constraint, IntModelActions, IntSolverActions, NO_REASON, Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
 	model::View,
@@ -54,7 +54,7 @@ where
 			0 => return Ok(SimplificationStatus::Subsumed),
 			1 => {
 				let dom = self.table.iter().map(|v| v[0]..=v[0]).collect();
-				self.vars[0].restrict_domain(ctx, &dom, [])?;
+				self.vars[0].restrict_domain(ctx, &dom, NO_REASON)?;
 				return Ok(SimplificationStatus::Subsumed);
 			}
 			_ => {}
@@ -73,14 +73,14 @@ where
 
 		// If no tuples remain, then the problem is trivially unsatisfiable.
 		if self.table.is_empty() {
-			return Err(ctx.declare_conflict([]));
+			return Err(ctx.declare_conflict(NO_REASON));
 		}
 
 		// Restrict the domain of the variables to the values it can take in the
 		// tuple.
 		if self.table.len() == 1 {
 			for (j, &var) in self.vars.iter().enumerate() {
-				var.fix(ctx, self.table[0][j], [])?;
+				var.fix(ctx, self.table[0][j], NO_REASON)?;
 			}
 			return Ok(SimplificationStatus::Subsumed);
 		}
@@ -89,7 +89,7 @@ where
 			let dom = (0..self.table.len())
 				.map(|i| self.table[i][j]..=self.table[i][j])
 				.collect();
-			var.restrict_domain(ctx, &dom, [])?;
+			var.restrict_domain(ctx, &dom, NO_REASON)?;
 		}
 
 		Ok(SimplificationStatus::NoFixpoint)

@@ -13,7 +13,7 @@ use crate::{
 		ReasoningContext, ReasoningEngine,
 	},
 	constraints::{
-		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
+		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus, reason_ty,
 	},
 	helpers::{
 		div_ceil, div_floor,
@@ -152,21 +152,15 @@ where
 		skip(self, ctx)
 	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
-		let (f1_lb, f1_ub) = self.factor1.bounds(ctx);
-		let f1_lb_lit = self.factor1.min_lit(ctx);
-		let f1_ub_lit = self.factor1.max_lit(ctx);
-		let (f2_lb, f2_ub) = self.factor2.bounds(ctx);
-		let f2_lb_lit = self.factor2.min_lit(ctx);
-		let f2_ub_lit = self.factor2.max_lit(ctx);
-		let (pr_lb, pr_ub) = self.product.bounds(ctx);
-		let pr_lb_lit = self.product.min_lit(ctx);
-		let pr_ub_lit = self.product.max_lit(ctx);
+		let (f1_min, f1_max) = self.factor1.bounds(ctx);
+		let (f2_min, f2_max) = self.factor2.bounds(ctx);
+		let (pr_min, pr_max) = self.product.bounds(ctx);
 
 		// TODO: Filter possibilities based on whether variables can be both positive
 		// and negative.
 
 		// Calculate possible bounds for the product
-		let minmax = iproduct!([f1_lb, f1_ub], [f2_lb, f2_ub])
+		let minmax = iproduct!([f1_min, f1_max], [f2_min, f2_max])
 			.map(|(a, b)| Self::mul(a, b))
 			.minmax();
 		let (min, max) = match minmax {
@@ -174,12 +168,15 @@ where
 			MinMaxResult::OneElement(b) => (b, b),
 			MinMaxResult::MinMax(min, max) => (min, max),
 		};
-		let reason = &[
-			f1_lb_lit.clone(),
-			f1_ub_lit.clone(),
-			f2_lb_lit.clone(),
-			f2_ub_lit.clone(),
-		];
+
+		let reason = reason_ty::<E::PropagationContext<'_>, _>(|ctx, reason| {
+			reason.extend([
+				self.factor1.min_lit(ctx),
+				self.factor1.max_lit(ctx),
+				self.factor2.min_lit(ctx),
+				self.factor2.max_lit(ctx),
+			]);
+		});
 		// z >= x * y
 		self.product.tighten_min(ctx, min, reason)?;
 		// z <= x * y
@@ -187,16 +184,23 @@ where
 
 		// Propagate the bounds of the first factor if the second factor is known
 		// positive or known negative.
-		if f2_lb > 0 || f2_ub < 0 {
-			let reason = &[pr_lb_lit.clone(), pr_ub_lit.clone(), f2_lb_lit, f2_ub_lit];
+		if f2_min > 0 || f2_max < 0 {
+			let reason = reason_ty::<E::PropagationContext<'_>, _>(|ctx, reason| {
+				reason.extend([
+					self.product.min_lit(ctx),
+					self.product.max_lit(ctx),
+					self.factor2.min_lit(ctx),
+					self.factor2.max_lit(ctx),
+				]);
+			});
 			// factor1 >= product / factor2
-			let min = iproduct!([pr_lb, pr_ub], [f2_lb, f2_ub])
+			let min = iproduct!([pr_min, pr_max], [f2_min, f2_max])
 				.map(|(pr, f2)| div_ceil(pr, NonZero::new(f2).unwrap()))
 				.min()
 				.unwrap();
 			self.factor1.tighten_min(ctx, min, reason)?;
 			// factor1 <= product / factor2
-			let max = iproduct!([pr_lb, pr_ub], [f2_lb, f2_ub])
+			let max = iproduct!([pr_min, pr_max], [f2_min, f2_max])
 				.map(|(pr, f2)| div_floor(pr, NonZero::new(f2).unwrap()))
 				.max()
 				.unwrap();
@@ -205,16 +209,23 @@ where
 
 		// Propagate the bounds of the second factor if the first factor is known
 		// positive or known negative.
-		if f1_lb > 0 || f1_ub < 0 {
-			let reason = &[pr_lb_lit, pr_ub_lit, f1_lb_lit, f1_ub_lit];
+		if f1_min > 0 || f1_max < 0 {
+			let reason = reason_ty::<E::PropagationContext<'_>, _>(|ctx, reason| {
+				reason.extend([
+					self.product.min_lit(ctx),
+					self.product.max_lit(ctx),
+					self.factor1.min_lit(ctx),
+					self.factor1.max_lit(ctx),
+				]);
+			});
 			// factor2 >= product / factor1
-			let min = iproduct!([pr_lb, pr_ub], [f1_lb, f1_ub])
+			let min = iproduct!([pr_min, pr_max], [f1_min, f1_max])
 				.map(|(pr, f1)| div_ceil(pr, NonZero::new(f1).unwrap()))
 				.min()
 				.unwrap();
 			self.factor2.tighten_min(ctx, min, reason)?;
 			// factor2 <= product / factor1
-			let max = iproduct!([pr_lb, pr_ub], [f1_lb, f1_ub])
+			let max = iproduct!([pr_min, pr_max], [f1_min, f1_max])
 				.map(|(pr, f1)| div_floor(pr, NonZero::new(f1).unwrap()))
 				.max()
 				.unwrap();

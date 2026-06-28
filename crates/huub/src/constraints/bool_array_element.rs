@@ -11,7 +11,7 @@ use crate::{
 		IntInitActions, IntInspectionActions, IntPropCond, IntPropagationActions, ReasoningEngine,
 	},
 	constraints::{
-		BoolModelActions, Constraint, IntModelActions, Propagator, SimplificationStatus,
+		BoolModelActions, Constraint, IntModelActions, NO_REASON, Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
 	model::view::View,
@@ -98,9 +98,9 @@ where
 
 	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		// Restrict the index to the bounds of the array.
-		self.index.tighten_min(ctx, 0, vec![])?;
+		self.index.tighten_min(ctx, 0, NO_REASON)?;
 		self.index
-			.tighten_max(ctx, self.array.len() as IntVal - 1, vec![])?;
+			.tighten_max(ctx, self.array.len() as IntVal - 1, NO_REASON)?;
 
 		// TODO: Do more propagation
 		Ok(())

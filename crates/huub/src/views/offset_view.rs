@@ -11,9 +11,8 @@ use crate::{
 	IntSet, IntVal,
 	actions::{
 		IntAnalyzeActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
-		IntPropagationActions, ReasoningContext,
+		IntPropagationActions, PropagationContext, ReasoningContext,
 	},
-	constraints::ReasonBuilder,
 	solver::{
 		IntLitMeaning, Polarity,
 		solution::{Solution, Valuation},
@@ -208,14 +207,14 @@ where
 
 impl<Ctx, Var> IntPropagationActions<Ctx> for OffsetView<IntVal, Var>
 where
-	Ctx: ReasoningContext + ?Sized,
+	Ctx: PropagationContext + ?Sized,
 	Var: IntPropagationActions<Ctx>,
 {
 	fn fix(
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		self.var.fix(ctx, val - self.offset, reason)
 	}
@@ -224,7 +223,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		self.var.remove_val(ctx, val - self.offset, reason)
 	}
@@ -233,7 +232,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		self.var.tighten_max(ctx, val - self.offset, reason)
 	}
@@ -242,7 +241,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		self.var.tighten_min(ctx, val - self.offset, reason)
 	}

@@ -11,7 +11,7 @@ use crate::{
 		PostingActions, ReasoningEngine, SimplificationActions,
 	},
 	constraints::{
-		BoolModelActions, Constraint, IntModelActions, IntSolverActions, Propagator,
+		BoolModelActions, Constraint, IntModelActions, IntSolverActions, NO_REASON, Propagator,
 		SimplificationStatus,
 	},
 	helpers::div_ceil,
@@ -100,55 +100,47 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 
 		let new_res_lb = num_lb / denom_ub;
 		if new_res_lb > res_lb {
-			result.tighten_min(ctx, new_res_lb, |ctx: &mut E::PropagationContext<'_>| {
-				[
+			result.tighten_min(ctx, new_res_lb, |ctx, reason| {
+				reason.extend([
 					numerator.min_lit(ctx),
 					denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
 					denominator.max_lit(ctx),
-				]
+				]);
 			})?;
 		}
 
 		let new_num_lb = denom_lb * res_lb;
 		if new_num_lb > num_lb {
-			numerator.tighten_min(ctx, new_num_lb, |ctx: &mut E::PropagationContext<'_>| {
-				[denominator.min_lit(ctx), result.min_lit(ctx)]
+			numerator.tighten_min(ctx, new_num_lb, |ctx, reason| {
+				reason.extend([denominator.min_lit(ctx), result.min_lit(ctx)]);
 			})?;
 		}
 
 		if res_lb > 0 {
 			let new_denom_ub = num_ub / res_lb;
 			if new_denom_ub < denom_ub {
-				denominator.tighten_max(
-					ctx,
-					new_denom_ub,
-					|ctx: &mut E::PropagationContext<'_>| {
-						[
-							numerator.max_lit(ctx),
-							numerator.lit(ctx, IntLitMeaning::GreaterEq(0)),
-							result.min_lit(ctx),
-							denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
-						]
-					},
-				)?;
+				denominator.tighten_max(ctx, new_denom_ub, |ctx, reason| {
+					reason.extend([
+						numerator.max_lit(ctx),
+						numerator.lit(ctx, IntLitMeaning::GreaterEq(0)),
+						result.min_lit(ctx),
+						denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
+					]);
+				})?;
 			}
 		}
 
 		if let Some(res_ub_inc) = NonZero::new(res_ub + 1) {
 			let new_denom_lb = div_ceil(num_lb + 1, res_ub_inc);
 			if new_denom_lb > denom_lb {
-				denominator.tighten_min(
-					ctx,
-					new_denom_lb,
-					|ctx: &mut E::PropagationContext<'_>| {
-						[
-							numerator.min_lit(ctx),
-							result.max_lit(ctx),
-							result.lit(ctx, IntLitMeaning::GreaterEq(0)),
-							denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
-						]
-					},
-				)?;
+				denominator.tighten_min(ctx, new_denom_lb, |ctx, reason| {
+					reason.extend([
+						numerator.min_lit(ctx),
+						result.max_lit(ctx),
+						result.lit(ctx, IntLitMeaning::GreaterEq(0)),
+						denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
+					]);
+				})?;
 			}
 		}
 
@@ -176,20 +168,20 @@ impl<I1, I2, I3> IntDivBounds<I1, I2, I3> {
 		if denom_lb != 0 {
 			let new_res_ub = num_ub / denom_lb;
 			if new_res_ub < res_ub {
-				result.tighten_max(ctx, new_res_ub, |ctx: &mut E::PropagationContext<'_>| {
-					[numerator.max_lit(ctx), denominator.min_lit(ctx)]
+				result.tighten_max(ctx, new_res_ub, |ctx, reason| {
+					reason.extend([numerator.max_lit(ctx), denominator.min_lit(ctx)]);
 				})?;
 			}
 		}
 
 		let new_num_ub = (res_ub + 1) * denom_ub - 1;
 		if new_num_ub < num_ub {
-			numerator.tighten_max(ctx, new_num_ub, |ctx: &mut E::PropagationContext<'_>| {
-				[
+			numerator.tighten_max(ctx, new_num_ub, |ctx, reason| {
+				reason.extend([
 					denominator.lit(ctx, IntLitMeaning::GreaterEq(1)),
 					denominator.max_lit(ctx),
 					result.max_lit(ctx),
-				]
+				]);
 			})?;
 		}
 		Ok(())
@@ -210,7 +202,7 @@ where
 		use pindakaas::propositional_logic::Formula::*;
 
 		// Always exclude zero from the domain.
-		self.denominator.remove_val(ctx, 0, [])?;
+		self.denominator.remove_val(ctx, 0, NO_REASON)?;
 
 		// Channel the signs of the decision variables
 		let num_pos = self.numerator.lit(ctx, IntLitMeaning::GreaterEq(0));

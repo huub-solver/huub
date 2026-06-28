@@ -181,7 +181,6 @@ impl InitActions for ModelInitContext<'_> {
 
 impl ReasoningContext for ModelInitContext<'_> {
 	type Atom = <Model as ReasoningEngine>::Atom;
-	type Conflict = <Model as ReasoningEngine>::Conflict;
 }
 
 impl BoolInitActions<ModelInitContext<'_>> for Resolved<Decision<bool>> {

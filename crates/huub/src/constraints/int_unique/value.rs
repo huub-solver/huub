@@ -8,7 +8,7 @@
 use itertools::Itertools;
 
 use crate::{
-	actions::{InitActions, IntEvent, IntPropCond, PostingActions, ReasoningEngine},
+	actions::{InitActions, IntEvent, IntPropCond, PostingActions, ReasonActions, ReasoningEngine},
 	constraints::{IntSolverActions, Propagator},
 	solver::engine::Engine,
 };
@@ -100,13 +100,13 @@ where
 		for &i in &self.action_list {
 			// Retrieve the value and value literal for the fixed decision.
 			let val = self.vars[i].val(ctx).unwrap();
-			let reason = &[self.vars[i].val_lit(ctx).unwrap()];
+			let val_lit = self.vars[i].val_lit(ctx).unwrap();
 
 			// We now enforce that all other decisions (at different indices) are not
 			// equal to the fixed value.
 			for (j, v) in self.vars.iter().enumerate() {
 				if j != i {
-					v.remove_val(ctx, val, reason)?;
+					v.remove_val(ctx, val, |_, reason| reason.push(val_lit.clone()))?;
 				}
 			}
 		}

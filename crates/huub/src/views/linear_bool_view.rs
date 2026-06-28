@@ -18,9 +18,9 @@ use crate::{
 		BoolAnalyzeActions, BoolInspectionActions, BoolOperations, BoolPropagationActions,
 		BoolSimplificationActions, IntAnalyzeActions, IntDecisionActions, IntExplanationActions,
 		IntInspectionActions, IntPropagationActions, IntSimplificationActions, PropagationActions,
-		ReasoningContext,
+		PropagationContext, ReasoningContext,
 	},
-	constraints::ReasonBuilder,
+	constraints::NO_REASON,
 	helpers::{div_ceil, div_floor},
 	solver::{
 		IntLitMeaning, Polarity,
@@ -327,7 +327,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		let Some(val) = self.try_reverse_val(val) else {
 			return Err(ctx.declare_conflict(reason));
@@ -343,7 +343,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		let Some(val) = self.try_reverse_val(val) else {
 			return Ok(());
@@ -359,7 +359,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		let val = self.reverse_val_floor(val);
 		if val < 0 {
@@ -375,7 +375,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		let val = self.reverse_val_ceil(val);
 		if val > 1 {
@@ -398,7 +398,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		values: &IntSet,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		let lb = values.contains(&self.offset);
 		let ub = values.contains(&(self.offset + self.scale.get()));
@@ -417,7 +417,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		domain: &IntSet,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		let lb = domain.contains(&self.offset);
 		let ub = domain.contains(&(self.offset + self.scale.get()));
@@ -436,7 +436,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		other: impl Into<Self>,
-	) -> Result<(), <Ctx as ReasoningContext>::Conflict> {
+	) -> Result<(), <Ctx as PropagationContext>::Conflict> {
 		let other = other.into();
 		let (self_lb, self_ub) = self.bounds(ctx);
 		let (other_lb, other_ub) = other.bounds(ctx);
@@ -444,22 +444,22 @@ where
 		match (self_lb == other_lb, self_ub == other_ub) {
 			(true, true) => self.var.unify(ctx, other.var),
 			(true, false) => {
-				self.var.fix(ctx, false, [])?;
-				other.var.fix(ctx, false, [])
+				self.var.fix(ctx, false, NO_REASON)?;
+				other.var.fix(ctx, false, NO_REASON)
 			}
 			(false, true) => {
-				self.var.fix(ctx, true, [])?;
-				other.var.fix(ctx, true, [])
+				self.var.fix(ctx, true, NO_REASON)?;
+				other.var.fix(ctx, true, NO_REASON)
 			}
 			(false, false) if self_lb == other_ub => {
-				self.var.fix(ctx, false, [])?;
-				other.var.fix(ctx, true, [])
+				self.var.fix(ctx, false, NO_REASON)?;
+				other.var.fix(ctx, true, NO_REASON)
 			}
 			(false, false) if self_ub == other_lb => {
-				self.var.fix(ctx, true, [])?;
-				other.var.fix(ctx, false, [])
+				self.var.fix(ctx, true, NO_REASON)?;
+				other.var.fix(ctx, false, NO_REASON)
 			}
-			(false, false) => Err(ctx.declare_conflict([])),
+			(false, false) => Err(ctx.declare_conflict(NO_REASON)),
 		}
 	}
 }

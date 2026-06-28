@@ -2,10 +2,8 @@
 //! enforces that a decision variable takes the minimum value of an array of
 //! decision variables.
 
-use itertools::Itertools;
-
 use crate::{
-	actions::{InitActions, IntPropCond, PostingActions, ReasoningEngine},
+	actions::{InitActions, IntPropCond, PostingActions, ReasonActions, ReasoningEngine},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
 	},
@@ -68,7 +66,7 @@ where
 			&& self.vars.iter().any(|v| v.val(ctx) == Some(c))
 		{
 			for v in &self.vars {
-				v.tighten_min(ctx, c, [self.min.min_lit(ctx)])?;
+				v.tighten_min(ctx, c, |ctx, reason| reason.push(self.min.min_lit(ctx)))?;
 			}
 			return Ok(SimplificationStatus::Subsumed);
 		}
@@ -117,24 +115,24 @@ where
 			.map(|x| (x.max(ctx), x))
 			.min_by_key(|(ub, _)| *ub)
 			.unwrap();
-		let reason = min_ub_var.max_lit(ctx);
-		self.min.tighten_max(ctx, min_ub, [reason])?;
+		self.min.tighten_max(ctx, min_ub, |ctx, reason| {
+			reason.push(min_ub_var.max_lit(ctx));
+		})?;
 
 		// set y to be greater than or equal to the minimum of lower bounds of x_i
 		let min_lb = self.vars.iter().map(|x| x.min(ctx)).min().unwrap();
-		self.min
-			.tighten_min(ctx, min_lb, |ctx: &mut E::PropagationContext<'_>| {
+		self.min.tighten_min(ctx, min_lb, |ctx, reason| {
+			reason.extend(
 				self.vars
 					.iter()
-					.map(|x| x.lit(ctx, IntLitMeaning::GreaterEq(min_lb)))
-					.collect_vec()
-			})?;
+					.map(|x| x.lit(ctx, IntLitMeaning::GreaterEq(min_lb))),
+			);
+		})?;
 
 		// set x_i to be greater than or equal to y.lowerbound
-		let reason = &[self.min.min_lit(ctx)];
 		let y_lb = self.min.min(ctx);
 		for x in self.vars.iter() {
-			x.tighten_min(ctx, y_lb, reason)?;
+			x.tighten_min(ctx, y_lb, |ctx, reason| reason.push(self.min.min_lit(ctx)))?;
 		}
 
 		Ok(())

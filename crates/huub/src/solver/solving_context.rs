@@ -4,27 +4,33 @@
 //! This structure contains the implementation of the action traits that are
 //! exposed to propagators.
 
-use std::fmt::{self, Debug, Formatter};
+use std::{
+	fmt::{self, Debug, Formatter},
+	mem,
+};
 
 use pindakaas::{
 	Lit as RawLit,
 	solver::propagation::{ClauseBuilder, SolvingActions},
 };
-use tracing::trace;
+use tracing::{trace, warn};
 
 use crate::{
 	IntSet, IntVal,
 	actions::{
-		BoolInspectionActions, BoolPropagationActions, DecisionActions, IntDecisionActions,
-		IntEvent, IntInspectionActions, IntPropagationActions, PropagationActions,
-		ReasoningContext, ReasoningEngine, Trailed, TrailingActions,
+		BoolInspectionActions, BoolPropagationActions, DecisionActions, DeferReasonActions,
+		IntDecisionActions, IntEvent, IntInspectionActions, IntPropagationActions,
+		PropagationActions, PropagationContext, ReasonActions, ReasoningContext, ReasoningEngine,
+		Trailed, TrailingActions,
 	},
-	constraints::{Conflict, DeferredReason, Reason, ReasonBuilder},
+	constraints::{Conflict, ConflictInner},
 	helpers::bytes::Bytes,
 	solver::{
 		BoxedPropagator, IntLitMeaning, Polarity,
 		decision::{Decision, integer::LazyLitDef},
-		engine::{Engine, LitPropagation, PropRef, State, trace_new_lit},
+		engine::{
+			Engine, EngineReason, EngineReasonSink, LitPropagation, PropRef, State, trace_new_lit,
+		},
 		view::{View, boolean::BoolView},
 	},
 };
@@ -58,9 +64,8 @@ enum ChangeType {
 	Conflicting,
 }
 
-/// Helper struct that temporarily captures a built reason to print it for
-/// `tracing`.
-struct ReasonTracePrint<'a, A>(&'a Reason<A>);
+/// Helper struct that prints a [`Conflict`]'s nogood compactly for `tracing`.
+struct ConflictTracePrint<'a, A>(&'a Conflict<A>);
 
 /// Structure to hold the internal [`State`] of the propagation engine and the
 /// [`SolvingActions`] exposed by the SAT solver.
@@ -80,6 +85,28 @@ pub struct SolvingContext<'a> {
 	pub(crate) current_prop: PropRef,
 }
 
+/// The reason-build sink for the engine's [`SolvingContext`]: a reason closure
+/// either pushes the negated its reason atoms onto the reason trail (through
+/// the wrapped [`EngineReasonSink`]) or defers the reason to the current
+/// propagator with [`DeferReasonActions::defer`].
+#[derive(Debug)]
+pub struct SolvingReasonSink<'a> {
+	/// The sink that reason atoms are written to.
+	pub(crate) conditions: EngineReasonSink<'a>,
+	/// `Some(data)` once the reason has been deferred; the propagator index is
+	/// folded in by the caller (which owns the current-propagator reference).
+	pub(crate) deferred: Option<u64>,
+}
+
+impl<A: Debug> Debug for ConflictTracePrint<'_, A> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		match &self.0.0 {
+			ConflictInner::Clause(lits) => lits.fmt(f),
+			ConflictInner::Deferred { subject, .. } => write!(f, "deferred for {subject:?}"),
+		}
+	}
+}
+
 impl BoolInspectionActions<SolvingContext<'_>> for Decision<bool> {
 	fn val(&self, ctx: &SolvingContext<'_>) -> Option<bool> {
 		self.val(ctx.state)
@@ -91,7 +118,7 @@ impl<'a> BoolPropagationActions<SolvingContext<'a>> for Decision<bool> {
 		&self,
 		ctx: &mut SolvingContext<'a>,
 		val: bool,
-		reason: impl ReasonBuilder<SolvingContext<'a>>,
+		reason: impl FnOnce(&mut SolvingContext<'a>, &mut SolvingReasonSink<'_>),
 	) -> Result<(), Conflict<Decision<bool>>> {
 		if val { *self } else { !(*self) }.require(ctx, reason)
 	}
@@ -99,11 +126,11 @@ impl<'a> BoolPropagationActions<SolvingContext<'a>> for Decision<bool> {
 	fn require(
 		&self,
 		ctx: &mut SolvingContext<'a>,
-		reason: impl ReasonBuilder<SolvingContext<'a>>,
+		reason: impl FnOnce(&mut SolvingContext<'a>, &mut SolvingReasonSink<'_>),
 	) -> Result<(), Conflict<Decision<bool>>> {
 		match self.val(&ctx.state.trail) {
 			Some(true) => Ok(()),
-			Some(false) => Err(Conflict::new(ctx, Some(*self), reason)),
+			Some(false) => Err(ctx.make_conflict(Some(*self), reason)),
 			None => {
 				ctx.propagate_lit(*self, reason, None);
 				Ok(())
@@ -195,7 +222,7 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for Decision<IntVal> {
 		&self,
 		ctx: &mut SolvingContext<'a>,
 		val: IntVal,
-		reason: impl ReasonBuilder<SolvingContext<'a>>,
+		reason: impl FnOnce(&mut SolvingContext<'a>, &mut SolvingReasonSink<'_>),
 	) -> Result<(), Conflict<Decision<bool>>> {
 		ctx.propagate_int(*self, ChangeRequest::SetValue(val), reason)
 	}
@@ -204,7 +231,7 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for Decision<IntVal> {
 		&self,
 		ctx: &mut SolvingContext<'a>,
 		val: IntVal,
-		reason: impl ReasonBuilder<SolvingContext<'a>>,
+		reason: impl FnOnce(&mut SolvingContext<'a>, &mut SolvingReasonSink<'_>),
 	) -> Result<(), Conflict<Decision<bool>>> {
 		ctx.propagate_int(*self, ChangeRequest::RemoveValue(val), reason)
 	}
@@ -213,7 +240,7 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for Decision<IntVal> {
 		&self,
 		ctx: &mut SolvingContext<'a>,
 		val: IntVal,
-		reason: impl ReasonBuilder<SolvingContext<'a>>,
+		reason: impl FnOnce(&mut SolvingContext<'a>, &mut SolvingReasonSink<'_>),
 	) -> Result<(), Conflict<Decision<bool>>> {
 		ctx.propagate_int(*self, ChangeRequest::SetUpperBound(val), reason)
 	}
@@ -222,23 +249,52 @@ impl<'a> IntPropagationActions<SolvingContext<'a>> for Decision<IntVal> {
 		&self,
 		ctx: &mut SolvingContext<'a>,
 		val: IntVal,
-		reason: impl ReasonBuilder<SolvingContext<'a>>,
+		reason: impl FnOnce(&mut SolvingContext<'a>, &mut SolvingReasonSink<'_>),
 	) -> Result<(), Conflict<Decision<bool>>> {
 		ctx.propagate_int(*self, ChangeRequest::SetLowerBound(val), reason)
 	}
 }
 
-impl<A: Debug> Debug for ReasonTracePrint<'_, A> {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		match self.0 {
-			Reason::Eager(conj) => conj.fmt(f),
-			Reason::Lazy(_) => write!(f, "lazy"),
-			Reason::Simple(l) => std::slice::from_ref(l).fmt(f),
+impl<'a> SolvingContext<'a> {
+	/// Build a [`Conflict`] from a reason closure, tightening the yielded
+	/// [`View<bool>`] into [`Decision<bool>`].
+	pub(crate) fn make_conflict(
+		&mut self,
+		subject: Option<Decision<bool>>,
+		reason: impl FnOnce(&mut Self, &mut SolvingReasonSink<'_>),
+	) -> Conflict<Decision<bool>> {
+		let mut clause = Vec::new();
+		let deferred = {
+			let mut sink = SolvingReasonSink {
+				conditions: EngineReasonSink(ClauseBuilder::new(&mut clause)),
+				deferred: None,
+			};
+			reason(self, &mut sink);
+			sink.deferred
+		};
+		match deferred {
+			Some(data) => Conflict(ConflictInner::Deferred {
+				subject,
+				propagator: self.current_prop.index() as u32,
+				data,
+			}),
+			None => {
+				// `clause` holds the reason in clausal form (already negated); just add
+				// the subject.
+				let mut lits: Vec<Decision<bool>> = clause.into_iter().map(Decision).collect();
+				match subject {
+					Some(subject) => lits.push(subject),
+					None if lits.is_empty() => warn!(
+						target: "solver",
+						"empty conflict detected; additional model simplification reasoning may be possible"
+					),
+					None => {}
+				}
+				Conflict(ConflictInner::Clause(lits.into_boxed_slice()))
+			}
 		}
 	}
-}
 
-impl<'a> SolvingContext<'a> {
 	/// Create a new SolvingContext given the solver actions exposed by the SAT
 	/// solver and the engine state.
 	pub(crate) fn new(slv: &'a mut dyn SolvingActions, state: &'a mut State) -> Self {
@@ -256,7 +312,7 @@ impl<'a> SolvingContext<'a> {
 		&mut self,
 		iv: Decision<IntVal>,
 		change_req: ChangeRequest,
-		reason: impl ReasonBuilder<Self>,
+		reason: impl FnOnce(&mut Self, &mut SolvingReasonSink<'_>),
 	) -> Result<(), Conflict<Decision<bool>>> {
 		let (lb, ub) = self.state.int_vars[iv.idx()].bounds(self);
 		// Check whether a change is redundant, conflicting, or new with respect to
@@ -309,17 +365,17 @@ impl<'a> SolvingContext<'a> {
 		// 1. Always false (and immediate return if always true).
 		let lit = match bv.0 {
 			BoolView::Const(true) => return Ok(()),
-			BoolView::Const(false) => return Err(Conflict::new(self, None, reason)),
+			BoolView::Const(false) => return Err(self.make_conflict(None, reason)),
 			BoolView::Lit(lit) => lit,
 		};
 		// 2. Bounds check is known to be false.
 		if check == ChangeType::Conflicting {
-			return Err(Conflict::new(self, lit.into(), reason));
+			return Err(self.make_conflict(lit.into(), reason));
 		}
 		// 3. Literal is assigned false (and immediate return if assigned true).
 		match lit.val(&self.state.trail) {
 			Some(true) => return Ok(()),
-			Some(false) => return Err(Conflict::new(self, lit.into(), reason)),
+			Some(false) => return Err(self.make_conflict(lit.into(), reason)),
 			None => {}
 		}
 
@@ -366,21 +422,27 @@ impl<'a> SolvingContext<'a> {
 	fn propagate_lit(
 		&mut self,
 		lit: Decision<bool>,
-		reason: impl ReasonBuilder<Self>,
+		reason: impl FnOnce(&mut Self, &mut SolvingReasonSink<'_>),
 		event: Option<(Decision<IntVal>, IntEvent)>,
 	) {
-		// Build the reason, folding the trivial/invalid markers into `View`
-		// constants so the propagation list carries a plain `Reason` (no
-		// `Result`); these are dropped/rejected when tightened at registration.
-		let reason = match reason.build_reason(self) {
-			Ok(reason) => reason,
-			Err(true) => Reason::Simple(true.into()),
-			Err(false) => Reason::Simple(false.into()),
-		};
+		// Build the reason directly onto the reason trail.
+		let reason = self.with_reason_trail(|ctx, reason_trail| {
+			let begin = reason_trail.len();
+			let deferred = {
+				let mut sink = SolvingReasonSink {
+					conditions: EngineReasonSink(ClauseBuilder::new(reason_trail)),
+					deferred: None,
+				};
+				reason(ctx, &mut sink);
+				sink.deferred
+			};
+			let deferred = deferred.map(|data| (ctx.current_prop.index() as u32, data));
+			EngineReason::finalize_reason(deferred, reason_trail, begin)
+		});
 		trace!(
 			target: "solver",
 			lit = i32::from(lit.0),
-			reason = ?ReasonTracePrint(&reason),
+			reason = ?reason,
 			prop = self.current_prop.index(),
 			"propagate"
 		);
@@ -434,29 +496,35 @@ impl<'a> SolvingContext<'a> {
 			if let Err(conflict) = res {
 				trace!(
 					target: "solver",
-					lit = conflict
-						.subject
-						.map(|s| i32::from(s.0))
-						.unwrap_or_default(),
-					reason = ?ReasonTracePrint(&conflict.reason),
+					conflict = ?ConflictTracePrint(&conflict),
 					"conflict detected"
 				);
 				debug_assert!(self.state.conflict.is_none());
 				self.state.failed = true;
 				// Convert the conflict object into a conflict clause.
 				let mut clause: Vec<RawLit> = Vec::new();
-				conflict.reason.explain(
-					propagators,
-					self.state,
-					conflict.subject,
-					ClauseBuilder::new(&mut clause),
-				);
+				conflict.explain(propagators, self.state, ClauseBuilder::new(&mut clause));
 				self.state.conflict = Some(clause.into_boxed_slice());
 			}
 			if self.state.conflict.is_some() || !self.state.propagation_queue.is_empty() {
 				return;
 			}
 		}
+	}
+
+	/// Run `build` with the reason trail temporarily taken out of the engine
+	/// state, restoring it unconditionally afterwards.
+	///
+	/// The trail is handed to `build` as a `&mut Vec<RawLit>`.
+	pub(crate) fn with_reason_trail<R>(
+		&mut self,
+		build: impl FnOnce(&mut Self, &mut Vec<RawLit>) -> R,
+	) -> R {
+		let mut reason_trail = mem::take(&mut self.state.trail.reason_trail);
+		let result = build(self, &mut reason_trail);
+		debug_assert!(self.state.trail.reason_trail.is_empty());
+		self.state.trail.reason_trail = reason_trail;
+		result
 	}
 }
 
@@ -476,21 +544,21 @@ impl DecisionActions for SolvingContext<'_> {
 }
 
 impl PropagationActions for SolvingContext<'_> {
-	fn declare_conflict(&mut self, reason: impl ReasonBuilder<Self>) -> Conflict<Decision<bool>> {
-		Conflict::new(self, None, reason)
+	fn declare_conflict(
+		&mut self,
+		reason: impl FnOnce(&mut Self, &mut SolvingReasonSink<'_>),
+	) -> Conflict<Decision<bool>> {
+		self.make_conflict(None, reason)
 	}
+}
 
-	fn deferred_reason(&self, data: u64) -> DeferredReason {
-		DeferredReason {
-			propagator: self.current_prop.index() as u32,
-			data,
-		}
-	}
+impl PropagationContext for SolvingContext<'_> {
+	type Conflict = <Engine as ReasoningEngine>::Conflict;
+	type ReasonSink<'a> = SolvingReasonSink<'a>;
 }
 
 impl ReasoningContext for SolvingContext<'_> {
 	type Atom = <Engine as ReasoningEngine>::Atom;
-	type Conflict = <Engine as ReasoningEngine>::Conflict;
 }
 
 impl TrailingActions for SolvingContext<'_> {
@@ -503,12 +571,34 @@ impl TrailingActions for SolvingContext<'_> {
 	}
 }
 
+impl DeferReasonActions<View<bool>> for SolvingReasonSink<'_> {
+	fn defer(&mut self, data: u64) {
+		self.deferred = Some(data);
+	}
+}
+
+impl Extend<View<bool>> for SolvingReasonSink<'_> {
+	fn extend<T: IntoIterator<Item = View<bool>>>(&mut self, iter: T) {
+		self.conditions.extend(iter);
+	}
+}
+
+impl ReasonActions<View<bool>> for SolvingReasonSink<'_> {
+	fn push(&mut self, atom: View<bool>) {
+		self.conditions.push(atom);
+	}
+
+	fn reserve(&mut self, additional: usize) {
+		self.conditions.reserve(additional);
+	}
+}
+
 impl<'a> BoolPropagationActions<SolvingContext<'a>> for View<bool> {
 	fn fix(
 		&self,
 		ctx: &mut SolvingContext<'a>,
 		val: bool,
-		reason: impl ReasonBuilder<SolvingContext<'a>>,
+		reason: impl FnOnce(&mut SolvingContext<'a>, &mut SolvingReasonSink<'_>),
 	) -> Result<(), Conflict<Decision<bool>>> {
 		if val { *self } else { !(*self) }.require(ctx, reason)
 	}
@@ -516,11 +606,11 @@ impl<'a> BoolPropagationActions<SolvingContext<'a>> for View<bool> {
 	fn require(
 		&self,
 		ctx: &mut SolvingContext<'a>,
-		reason: impl ReasonBuilder<SolvingContext<'a>>,
+		reason: impl FnOnce(&mut SolvingContext<'a>, &mut SolvingReasonSink<'_>),
 	) -> Result<(), Conflict<Decision<bool>>> {
 		match self.0 {
 			BoolView::Lit(lit) => lit.require(ctx, reason),
-			BoolView::Const(false) => Err(Conflict::new(ctx, None, reason)),
+			BoolView::Const(false) => Err(ctx.make_conflict(None, reason)),
 			BoolView::Const(true) => Ok(()),
 		}
 	}

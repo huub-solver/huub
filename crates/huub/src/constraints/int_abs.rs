@@ -8,8 +8,8 @@ use std::{
 
 use crate::{
 	actions::{
-		InitActions, IntDecisionActions, IntPropCond, PostingActions, ReasoningContext,
-		ReasoningEngine,
+		InitActions, IntDecisionActions, IntPropCond, PostingActions, ReasonActions,
+		ReasoningContext, ReasoningEngine,
 	},
 	constraints::{
 		BoolModelActions, BoolSolverActions, Constraint, IntModelActions, IntSolverActions,
@@ -119,74 +119,68 @@ where
 		match self.origin_positive.val(ctx) {
 			Some(false) => {
 				// If we know that the origin is negative, then just negate the bounds
-				self.abs
-					.tighten_min(ctx, -ub, |ctx: &mut E::PropagationContext<'_>| {
-						[self.origin.max_lit(ctx)]
-					})?;
-				self.abs
-					.tighten_max(ctx, -lb, |ctx: &mut E::PropagationContext<'_>| {
-						[
-							self.origin.min_lit(ctx),
-							(!self.origin_positive.clone()).into(),
-						]
-					})?;
+				self.abs.tighten_min(ctx, -ub, |ctx, reason| {
+					reason.push(self.origin.max_lit(ctx));
+				})?;
+				self.abs.tighten_max(ctx, -lb, |ctx, reason| {
+					reason.extend([
+						self.origin.min_lit(ctx),
+						(!self.origin_positive.clone()).into(),
+					]);
+				})?;
 
 				let (lb, ub) = self.abs.bounds(ctx);
-				self.origin
-					.tighten_min(ctx, -ub, |ctx: &mut E::PropagationContext<'_>| {
-						[self.abs.max_lit(ctx)]
-					})?;
-				self.origin
-					.tighten_max(ctx, -lb, |ctx: &mut E::PropagationContext<'_>| {
-						[
-							self.abs.min_lit(ctx),
-							(!self.origin_positive.clone()).into(),
-						]
-					})?;
+				self.origin.tighten_min(ctx, -ub, |ctx, reason| {
+					reason.push(self.abs.max_lit(ctx));
+				})?;
+				self.origin.tighten_max(ctx, -lb, |ctx, reason| {
+					reason.extend([
+						self.abs.min_lit(ctx),
+						(!self.origin_positive.clone()).into(),
+					]);
+				})?;
 			}
 			Some(true) => {
 				// If we know that the origin is positive, then the bounds
 				// are the same.
-				self.abs
-					.tighten_min(ctx, lb, |ctx: &mut E::PropagationContext<'_>| {
-						[self.origin.min_lit(ctx)]
-					})?;
-				self.abs
-					.tighten_max(ctx, ub, |ctx: &mut E::PropagationContext<'_>| {
-						[
-							self.origin.max_lit(ctx),
-							self.origin_positive.clone().into(),
-						]
-					})?;
+				self.abs.tighten_min(ctx, lb, |ctx, reason| {
+					reason.push(self.origin.min_lit(ctx));
+				})?;
+				self.abs.tighten_max(ctx, ub, |ctx, reason| {
+					reason.extend([
+						self.origin.max_lit(ctx),
+						self.origin_positive.clone().into(),
+					]);
+				})?;
 
 				let (lb, ub) = self.abs.bounds(ctx);
-				self.origin
-					.tighten_min(ctx, lb, |ctx: &mut E::PropagationContext<'_>| {
-						[self.abs.min_lit(ctx), self.origin_positive.clone().into()]
-					})?;
-				self.origin
-					.tighten_max(ctx, ub, |ctx: &mut E::PropagationContext<'_>| {
-						[self.abs.max_lit(ctx)]
-					})?;
+				self.origin.tighten_min(ctx, lb, |ctx, reason| {
+					reason.extend([self.abs.min_lit(ctx), self.origin_positive.clone().into()]);
+				})?;
+				self.origin.tighten_max(ctx, ub, |ctx, reason| {
+					reason.push(self.abs.max_lit(ctx));
+				})?;
 			}
 			None => {
 				// If the origin can be either positive or negative, then the bounds are
 				// The maximum absolute value bounds the absolute value variable.
 				let abs_max = cmp::max(ub, -lb);
-				self.abs
-					.tighten_max(ctx, abs_max, |ctx: &mut E::PropagationContext<'_>| {
-						[
-							self.origin.lit(ctx, IntLitMeaning::GreaterEq(-abs_max)),
-							self.origin.lit(ctx, IntLitMeaning::Less(abs_max + 1)),
-						]
-					})?;
+				self.abs.tighten_max(ctx, abs_max, |ctx, reason| {
+					reason.extend([
+						self.origin.lit(ctx, IntLitMeaning::GreaterEq(-abs_max)),
+						self.origin.lit(ctx, IntLitMeaning::Less(abs_max + 1)),
+					]);
+				})?;
 
 				// If the upper bound of the absolute value variable has changed, we
 				// propagate bounds of the origin variable.
 				let abs_ub = self.abs.max(ctx);
-				let ub_lit = self.abs.max_lit(ctx);
-				self.origin.tighten_min(ctx, -abs_ub, [ub_lit.clone()])?;
-				self.origin.tighten_max(ctx, abs_ub, [ub_lit])?;
+				self.origin.tighten_min(ctx, -abs_ub, |ctx, reason| {
+					reason.push(self.abs.max_lit(ctx));
+				})?;
+				self.origin.tighten_max(ctx, abs_ub, |ctx, reason| {
+					reason.push(self.abs.max_lit(ctx));
+				})?;
 			}
 		}
 

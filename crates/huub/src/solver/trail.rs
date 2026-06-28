@@ -58,7 +58,7 @@ pub(crate) struct Trail {
 	/// Reason literals of eager reasons
 	/// ([`EngineReason::Eager`](crate::solver::engine::EngineReason::Eager)),
 	/// stored in propagation order, removable when (permanently) backtracking.
-	reason_trail: Vec<RawLit>,
+	pub(crate) reason_trail: Vec<RawLit>,
 }
 
 /// An event that is recorded such that it can be undone.
@@ -202,11 +202,6 @@ impl Trail {
 		});
 	}
 
-	/// Append a premise literal to the reason trail.
-	pub(crate) fn push_reason_lit(&mut self, lit: RawLit) {
-		self.reason_trail.push(lit);
-	}
-
 	/// Internal method to push a change to the trail
 	fn push_trail(&mut self, event: TrailEvent) {
 		debug_assert_eq!(self.pos, self.trail.len());
@@ -216,22 +211,6 @@ impl Trail {
 		}
 		event.write_trail(&mut self.trail[self.pos..]);
 		self.pos = self.trail.len();
-	}
-
-	/// The current number of literals in the reason arena, used as the `begin`
-	/// offset when recording a new eager reason before appending its premises.
-	pub(crate) fn reason_len(&self) -> usize {
-		self.reason_trail.len()
-	}
-
-	/// The premise literals of an eager reason stored at
-	/// `reason_trail[begin..begin + len]`.
-	pub(crate) fn reason_lits(&self, begin: usize, len: usize) -> &[RawLit] {
-		debug_assert!(
-			begin + len <= self.reason_trail.len(),
-			"stale reason range into the arena"
-		);
-		&self.reason_trail[begin..begin + len]
 	}
 
 	/// Internal method to redo the last undone change on the trail

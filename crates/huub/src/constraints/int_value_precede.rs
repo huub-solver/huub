@@ -5,10 +5,11 @@
 use std::cmp::{max, min};
 
 use crate::{
-	Conjunction, IntVal,
+	IntVal,
 	actions::{
 		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions, IntPropCond,
-		PostingActions, ReasoningContext, ReasoningEngine, Trailed, TrailingActions,
+		PostingActions, PropagationContext, ReasonActions, ReasoningContext, ReasoningEngine,
+		Trailed, TrailingActions,
 	},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
@@ -78,13 +79,12 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 		&self,
 		i: usize,
 		k: IntVal,
-	) -> impl FnOnce(&mut Ctx) -> Conjunction<Ctx::Atom> + '_
+	) -> impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>) + '_
 	where
-		Ctx: ReasoningContext + ?Sized,
+		Ctx: PropagationContext + ?Sized,
 		I: IntDecisionActions<Ctx>,
 	{
-		move |ctx: &mut Ctx| {
-			let mut reason = Vec::new();
+		move |ctx, reason| {
 			// Explain a lower bound via 3 cases:
 			// - Lower bound of var i is above k - This is the value that required the
 			//   earlier lower bound that is currently explained (end of recursion).
@@ -109,8 +109,7 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 				}
 			}
 
-			reason.extend(self.explain_upper(i, k)(ctx));
-			reason
+			self.explain_upper(i, k)(ctx, reason);
 		}
 	}
 
@@ -119,17 +118,18 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 		&self,
 		i: usize,
 		k: IntVal,
-	) -> impl FnOnce(&mut Ctx) -> Conjunction<Ctx::Atom> + '_
+	) -> impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>) + '_
 	where
-		Ctx: ReasoningContext + ?Sized,
+		Ctx: PropagationContext + ?Sized,
 		I: IntDecisionActions<Ctx>,
 	{
-		move |ctx: &mut Ctx| {
-			self.vars
-				.iter()
-				.take(i)
-				.map(|v| v.lit(ctx, IntLitMeaning::Less(k)))
-				.collect()
+		move |ctx, reason| {
+			reason.extend(
+				self.vars
+					.iter()
+					.take(i)
+					.map(|v| v.lit(ctx, IntLitMeaning::Less(k))),
+			);
 		}
 	}
 
@@ -443,14 +443,12 @@ impl<I> IntValuePrecedeChainValue<I> {
 		&self,
 		i: usize,
 		j: usize,
-	) -> impl FnOnce(&mut Ctx) -> Conjunction<Ctx::Atom> + '_
+	) -> impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>) + '_
 	where
-		Ctx: ReasoningContext + ?Sized,
+		Ctx: PropagationContext + ?Sized,
 		I: IntDecisionActions<Ctx>,
 	{
-		move |ctx: &mut Ctx| {
-			let mut reason = Vec::new();
-
+		move |ctx, reason| {
 			// Explain a lower bound via 3 cases:
 			// - Current lower bound index is above k - This is the value that required the
 			//   earlier lower bound that is currently explained (end of recursion).
@@ -495,9 +493,8 @@ impl<I> IntValuePrecedeChainValue<I> {
 			}
 
 			if j > 0 {
-				reason.extend(self.explain_upper(i, j)(ctx));
+				self.explain_upper(i, j)(ctx, reason);
 			}
-			reason
 		}
 	}
 
@@ -507,17 +504,18 @@ impl<I> IntValuePrecedeChainValue<I> {
 		&self,
 		i: usize,
 		j: usize,
-	) -> impl FnOnce(&mut Ctx) -> Conjunction<Ctx::Atom> + '_
+	) -> impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>) + '_
 	where
-		Ctx: ReasoningContext + ?Sized,
+		Ctx: PropagationContext + ?Sized,
 		I: IntDecisionActions<Ctx>,
 	{
-		move |ctx: &mut Ctx| {
-			self.vars
-				.iter()
-				.take(i)
-				.map(|v| v.lit(ctx, IntLitMeaning::NotEq(self.values[j - 1])))
-				.collect()
+		move |ctx, reason| {
+			reason.extend(
+				self.vars
+					.iter()
+					.take(i)
+					.map(|v| v.lit(ctx, IntLitMeaning::NotEq(self.values[j - 1]))),
+			);
 		}
 	}
 

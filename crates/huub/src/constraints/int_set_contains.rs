@@ -2,7 +2,6 @@
 //! that an integer decision variable is assigned to a member of a given set
 //! if-and-only-if a given Boolean decision variable is assigned to `true`.
 
-use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;
 use rangelist::IntervalIterator;
 
@@ -10,12 +9,12 @@ use crate::{
 	IntSet, IntVal,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
-		IntInitActions, IntInspectionActions, IntPropCond, IntSimplificationActions,
+		IntInitActions, IntInspectionActions, IntPropCond, IntSimplificationActions, ReasonActions,
 		ReasoningEngine, SimplificationActions,
 	},
 	constraints::{
 		BoolModelActions, BoolSolverActions, Constraint, IntModelActions, IntSolverActions,
-		Propagator, SimplificationStatus,
+		NO_REASON, Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
 	model::{expressions::BoolFormula, view::View},
@@ -50,12 +49,17 @@ where
 		// Check whether `reif` is set, then just enforce the domain.
 		match self.reif.val(ctx) {
 			Some(true) => {
-				self.var
-					.restrict_domain(ctx, &self.set, [self.reif.into()])?;
+				self.var.restrict_domain(ctx, &self.set, |_, reason| {
+					let atom: E::Atom = self.reif.into();
+					reason.push(atom);
+				})?;
 				return Ok(SimplificationStatus::Subsumed);
 			}
 			Some(false) => {
-				self.var.exclude(ctx, &self.set, [(!self.reif).into()])?;
+				self.var.exclude(ctx, &self.set, |_, reason| {
+					let atom: E::Atom = (!self.reif).into();
+					reason.push(atom);
+				})?;
 				return Ok(SimplificationStatus::Subsumed);
 			}
 			None => {}
@@ -65,20 +69,20 @@ where
 		self.set = self.set.intersect(&domain);
 		// If the intersection is empty, then `reif` must be false.
 		if self.set.is_empty() {
-			self.reif
-				.fix(ctx, false, |_: &mut E::PropagationContext<'_>| {
+			self.reif.fix(ctx, false, |_, reason| {
+				reason.extend(
 					self.set
 						.iter()
 						.flatten()
-						.map(|v| self.var.ne(v).into())
-						.collect_vec()
-				})?;
+						.map(|v| -> E::Atom { self.var.ne(v).into() }),
+				);
+			})?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
 		// If `set` is a superset of domain, then it is known that `reif` is true.
 		// (After intersection, we can just check equality)
 		if domain == self.set {
-			self.reif.require(ctx, [])?;
+			self.reif.require(ctx, NO_REASON)?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
 		// Otherwise, we check whether we can rewrite the constraint into a simpler

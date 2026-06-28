@@ -14,9 +14,9 @@ use crate::{
 	IntSet, IntVal,
 	actions::{
 		IntAnalyzeActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
-		IntPropagationActions, IntSimplificationActions, PropagationActions, ReasoningContext,
+		IntPropagationActions, IntSimplificationActions, PropagationActions, PropagationContext,
+		ReasoningContext,
 	},
-	constraints::ReasonBuilder,
 	helpers::{div_ceil, div_floor},
 	solver::{
 		IntLitMeaning, Polarity,
@@ -337,7 +337,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		let Some(val) = self.try_reverse_val(val) else {
 			return Err(ctx.declare_conflict(reason));
@@ -349,7 +349,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		let Some(val) = self.try_reverse_val(val) else {
 			return Ok(());
@@ -361,7 +361,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		if self.scale.get() >= 0 {
 			self.var
@@ -376,7 +376,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		if self.scale.get() >= 0 {
 			self.var
@@ -398,7 +398,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		values: &IntSet,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		self.var.exclude(ctx, &self.reverse_intset(values), reason)
 	}
@@ -407,7 +407,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		domain: &IntSet,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		self.var
 			.restrict_domain(ctx, &self.reverse_intset(domain), reason)
@@ -417,7 +417,7 @@ where
 		&self,
 		_ctx: &mut Ctx,
 		_other: impl Into<Self>,
-	) -> Result<(), <Ctx as ReasoningContext>::Conflict> {
+	) -> Result<(), <Ctx as PropagationContext>::Conflict> {
 		panic!("unify cannot be defined for any generic LinearView")
 	}
 }

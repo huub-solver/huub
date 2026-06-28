@@ -12,8 +12,8 @@ use tracing::trace;
 use crate::{
 	IntVal,
 	actions::{
-		InitActions, IntEvent, IntInspectionActions, IntPropCond, PostingActions,
-		PropagationActions, ReasonActions, ReasoningContext, ReasoningEngine,
+		DeferReasonActions, InitActions, IntEvent, IntInspectionActions, IntPropCond,
+		PostingActions, PropagationActions, ReasonActions, ReasoningContext, ReasoningEngine,
 	},
 	constraints::{IntSolverActions, Propagator},
 	helpers::trailed_partition::TrailedPartition,
@@ -312,18 +312,11 @@ impl<I> IntUniqueDomain<I> {
 			self.graph.dcn_to_val[start_dcn] = Some(val_idx);
 		}
 
-		Err(ctx.declare_conflict(
-			move |ctx: &mut E::PropagationContext<'_>| -> Vec<<E as ReasoningEngine>::Atom> {
-				let mut reason = Vec::new();
-				self.build_hall_set_reason(
-					ctx,
-					&self.bfs.queue,
-					&mut reason,
-					|dcn, ctx, meaning| dcn.lit(ctx, meaning),
-				);
-				reason
-			},
-		))
+		Err(ctx.declare_conflict(move |ctx, reason| {
+			self.build_hall_set_reason(ctx, &self.bfs.queue, reason, |dcn, ctx, meaning| {
+				dcn.lit(ctx, meaning)
+			});
+		}))
 	}
 
 	/// Create a new [`IntUniqueDomain`] propagator and post it in the solver.
@@ -405,17 +398,16 @@ impl<I> IntUniqueDomain<I> {
 		// values (a matched val's matched_dcn is in this SCC; for an unmatched
 		// val, any in-SCC decision serves as the SCC representative). One scc_id
 		// covers every value in the SCC.
-		let scc_id = new_root;
-		let val_reason = ctx.deferred_reason(scc_id as u64);
+		let scc_id = new_root as u64;
 		for &val_idx in self.tarjan.vals_buf.iter() {
 			let val = self.graph.value_at(val_idx);
 			for pos in orig_root..new_root {
 				let dcn_idx = self.partition.elements()[pos];
-				let dcn = self.graph.dcns[dcn_idx].clone();
+				let dcn = &self.graph.dcns[dcn_idx];
 				if !dcn.in_domain(ctx, val) {
 					continue;
 				}
-				dcn.remove_val(ctx, val, val_reason)?;
+				dcn.remove_val(ctx, val, |_, reason| reason.defer(scc_id))?;
 			}
 		}
 		Ok(())
@@ -718,15 +710,13 @@ impl<I> IntUniqueDomain<I> {
 			if let Some(val) = self.graph.dcns[i].val(ctx) {
 				let scc_id = self.partition.block_root(i, ctx);
 				let scc_end = self.partition.block_end(scc_id, ctx);
+				let reason_lit = self.graph.dcns[i].lit(ctx, IntLitMeaning::Eq(val));
 				for pos in scc_id..scc_end {
 					let idx = self.partition.elements()[pos];
-					let reason_lit = self.graph.dcns[i].lit(ctx, IntLitMeaning::Eq(val));
 					if idx != i {
-						self.graph.dcns[idx].remove_val(
-							ctx,
-							val,
-							[reason_lit.clone()].as_slice(),
-						)?;
+						self.graph.dcns[idx].remove_val(ctx, val, |_, reason| {
+							reason.push(reason_lit.clone());
+						})?;
 						// If `val` was the matched value for decision at `idx`, then it is now
 						// unmatched.
 						if self.graph.dcn_to_val[idx]

@@ -47,10 +47,10 @@ use crate::{
 	Clause, IntSet, IntVal,
 	actions::{
 		BrancherInitActions, ConstructionActions, DecisionActions, IntDecisionActions,
-		IntInspectionActions, PostingActions, ReasoningContext, ReasoningEngine, Trailed,
-		TrailingActions,
+		IntInspectionActions, PostingActions, PropagationActions, PropagationContext,
+		ReasoningContext, ReasoningEngine, Trailed, TrailingActions,
 	},
-	constraints::{BoxedPropagator, Conflict},
+	constraints::{BoxedPropagator, Nogood},
 	helpers::bytes::Bytes,
 	solver::{
 		branchers::BoxedBrancher,
@@ -748,7 +748,7 @@ where
 		};
 		assumptions.push(opt_lit.0);
 		loop {
-			solver.add_no_good(&vars, &vals).unwrap();
+			solver.add_solution_nogood(&vars, &vals).unwrap();
 
 			let result = solver.sat.solve_assuming(assumptions.clone());
 			match result {
@@ -887,31 +887,25 @@ where
 
 			debug_assert!(all_solutions.is_some());
 			let vars = all_solutions.as_ref().unwrap();
-			if solver.add_no_good(vars, &vals).is_err() {
+			if solver.add_solution_nogood(vars, &vals).is_err() {
 				break Status::Complete;
 			}
 		}
 	}
 }
 
-impl<Sat: ClauseDatabase> Solver<Sat> {
-	/// Add a clause to the solver
-	pub fn add_clause<Iter>(
-		&mut self,
-		clause: Iter,
-	) -> Result<(), <Self as ReasoningContext>::Conflict>
+impl<Sat: ExternalPropagation + ClauseDatabase> Solver<Sat> {
+	/// Add a clause to the solver, returning the resolved conflict [`Nogood`]
+	/// if the clause makes the problem unsatisfiable.
+	pub fn add_clause<Iter>(&mut self, clause: Iter) -> Result<(), Nogood<Decision<bool>>>
 	where
 		Iter: IntoIterator,
 		Iter::Item: Into<View<bool>>,
 	{
 		let clause = clause.into_iter().map(Into::into).collect_vec();
-		match ClauseDatabaseTools::add_clause(&mut self.sat, clause.clone()) {
+		match ClauseDatabaseTools::add_clause(&mut self.sat, clause.iter().cloned()) {
 			Ok(()) => Ok(()),
-			Err(Unsatisfiable) => Err(Conflict::new(
-				self,
-				None,
-				clause.into_iter().map(|l| !l).collect_vec(),
-			)),
+			Err(Unsatisfiable) => Err(Nogood::from_view_iter(clause)),
 		}
 	}
 }
@@ -1046,50 +1040,6 @@ impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 
 #[bon]
 impl<Sat: ExternalPropagation> Solver<Sat> {
-	/// Method used to add a no-good clause from a solution. This clause can be
-	/// used to ensure that the same solution is not found again.
-	///
-	/// ## Warning
-	/// This method will panic if the number of variables and values do not
-	/// match.
-	#[doc(hidden)]
-	pub fn add_no_good(
-		&mut self,
-		vars: &[AnyView],
-		vals: &[Value],
-	) -> Result<(), <Self as ReasoningContext>::Conflict> {
-		let clause = vars
-			.iter()
-			.zip_eq(vals)
-			.map(|(var, val)| match *var {
-				AnyView::Bool(bv) => match val {
-					Value::Bool(true) => !bv,
-					Value::Bool(false) => bv,
-					_ => unreachable!(),
-				},
-				AnyView::Int(iv) => {
-					let Value::Int(val) = val.clone() else {
-						unreachable!()
-					};
-					iv.lit(self, IntLitMeaning::NotEq(val))
-				}
-			})
-			.collect_vec();
-		debug!(
-			target: "solver",
-			clause = ?clause
-				.iter()
-				.filter_map(|&x| if let BoolView::Lit(x) = x.0 {
-					Some(i32::from(x.0))
-				} else {
-					None
-				})
-				.collect::<Vec<i32>>(),
-			"add solution nogood"
-		);
-		self.add_clause(clause)
-	}
-
 	/// Add a constraint propagator to the solver to enforce a constraint.
 	pub(crate) fn add_propagator(&mut self, propagator: BoxedPropagator, from_model: bool) {
 		let mut handle = self.engine.borrow_mut();
@@ -1124,6 +1074,50 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 			// Ensure the SAT solver knows the literal is observed.
 			self.sat.add_observed_var(v);
 		}
+	}
+
+	/// Method used to add a no-good clause from a solution. This clause can be
+	/// used to ensure that the same solution is not found again.
+	///
+	/// ## Warning
+	/// This method will panic if the number of variables and values do not
+	/// match.
+	#[doc(hidden)]
+	pub fn add_solution_nogood(
+		&mut self,
+		vars: &[AnyView],
+		vals: &[Value],
+	) -> Result<(), Nogood<Decision<bool>>> {
+		let clause = vars
+			.iter()
+			.zip_eq(vals)
+			.map(|(var, val)| match *var {
+				AnyView::Bool(bv) => match val {
+					Value::Bool(true) => !bv,
+					Value::Bool(false) => bv,
+					_ => unreachable!(),
+				},
+				AnyView::Int(iv) => {
+					let Value::Int(val) = val.clone() else {
+						unreachable!()
+					};
+					iv.lit(self, IntLitMeaning::NotEq(val))
+				}
+			})
+			.collect_vec();
+		debug!(
+			target: "solver",
+			clause = ?clause
+				.iter()
+				.filter_map(|&x| if let BoolView::Lit(x) = x.0 {
+					Some(i32::from(x.0))
+				} else {
+					None
+				})
+				.collect::<Vec<i32>>(),
+			"add solution nogood"
+		);
+		self.add_clause(clause)
 	}
 
 	/// Split the solver into a solving actions object that limits interaction
@@ -1485,7 +1479,7 @@ impl<Sat: ExternalPropagation> PostingActions for Solver<Sat> {
 		&mut self,
 		clause: impl IntoIterator<Item = Self::Atom>,
 	) -> Result<(), Self::Conflict> {
-		Solver::add_clause(self, clause)
+		self.add_clause(clause)
 	}
 
 	fn add_propagator(&mut self, propagator: BoxedPropagator) {
@@ -1493,9 +1487,24 @@ impl<Sat: ExternalPropagation> PostingActions for Solver<Sat> {
 	}
 }
 
+impl<Sat: ExternalPropagation> PropagationActions for Solver<Sat> {
+	fn declare_conflict(
+		&mut self,
+		reason: impl FnOnce(&mut Self, &mut Self::ReasonSink<'_>),
+	) -> Self::Conflict {
+		let mut sink = Vec::new();
+		reason(self, &mut sink);
+		Nogood::from_view_iter(sink.into_iter().map(Not::not))
+	}
+}
+
+impl<Sat> PropagationContext for Solver<Sat> {
+	type Conflict = Nogood<Decision<bool>>;
+	type ReasonSink<'a> = Vec<Self::Atom>;
+}
+
 impl<Sat> ReasoningContext for Solver<Sat> {
 	type Atom = <Engine as ReasoningEngine>::Atom;
-	type Conflict = <Engine as ReasoningEngine>::Conflict;
 }
 
 impl<Sat> TrailingActions for Solver<Sat> {

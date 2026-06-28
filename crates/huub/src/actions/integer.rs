@@ -6,8 +6,8 @@ use rangelist::IntervalIterator;
 
 use crate::{
 	IntSet, IntVal,
-	actions::{PropagationActions, ReasoningContext},
-	constraints::ReasonBuilder,
+	actions::{PropagationActions, PropagationContext, ReasoningContext},
+	constraints::NO_REASON,
 	solver::IntLitMeaning,
 };
 
@@ -151,7 +151,7 @@ pub enum IntPropCond {
 /// [`ReasoningEngine::PropagationContext`](crate::actions::ReasoningEngine::PropagationContext) for integer decision variables.
 pub trait IntPropagationActions<Context>: IntDecisionActions<Context>
 where
-	Context: ReasoningContext + ?Sized,
+	Context: PropagationContext + ?Sized,
 {
 	/// Enforce that an integer view takes the value `val` because of the given
 	/// `reason`.
@@ -159,7 +159,7 @@ where
 		&self,
 		ctx: &mut Context,
 		val: IntVal,
-		reason: impl ReasonBuilder<Context>,
+		reason: impl FnOnce(&mut Context, &mut Context::ReasonSink<'_>),
 	) -> Result<(), Context::Conflict>;
 
 	/// Enforce that an integer view cannot take the value `val` because of the
@@ -168,7 +168,7 @@ where
 		&self,
 		ctx: &mut Context,
 		val: IntVal,
-		reason: impl ReasonBuilder<Context>,
+		reason: impl FnOnce(&mut Context, &mut Context::ReasonSink<'_>),
 	) -> Result<(), Context::Conflict>;
 
 	/// Enforce that an integer view takes a value that is less than or equal to
@@ -177,7 +177,7 @@ where
 		&self,
 		ctx: &mut Context,
 		val: IntVal,
-		reason: impl ReasonBuilder<Context>,
+		reason: impl FnOnce(&mut Context, &mut Context::ReasonSink<'_>),
 	) -> Result<(), Context::Conflict>;
 
 	/// Enforce that an integer view takes a value that is greater than or equal
@@ -186,7 +186,7 @@ where
 		&self,
 		ctx: &mut Context,
 		val: IntVal,
-		reason: impl ReasonBuilder<Context>,
+		reason: impl FnOnce(&mut Context, &mut Context::ReasonSink<'_>),
 	) -> Result<(), Context::Conflict>;
 }
 
@@ -199,7 +199,7 @@ where
 /// [`Constraint::simplify`](crate::constraints::Constraint::simplify).
 pub trait IntSimplificationActions<Context>: IntPropagationActions<Context>
 where
-	Context: ReasoningContext + ?Sized,
+	Context: PropagationContext + ?Sized,
 {
 	/// Enforce that a given integer expression cannot take any of the values in
 	/// the given set.
@@ -207,7 +207,7 @@ where
 		&self,
 		ctx: &mut Context,
 		values: &IntSet,
-		reason: impl ReasonBuilder<Context>,
+		reason: impl FnOnce(&mut Context, &mut Context::ReasonSink<'_>),
 	) -> Result<(), Context::Conflict>;
 
 	/// Enforce that the given integer expression takes a value in the given
@@ -216,7 +216,7 @@ where
 		&self,
 		ctx: &mut Context,
 		domain: &IntSet,
-		reason: impl ReasonBuilder<Context>,
+		reason: impl FnOnce(&mut Context, &mut Context::ReasonSink<'_>),
 	) -> Result<(), Context::Conflict>;
 
 	/// Mark two integer decisions as being equivalent, ensuring the two use the
@@ -307,7 +307,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		if val != *self {
 			Err(ctx.declare_conflict(reason))
@@ -320,7 +320,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		if val == *self {
 			Err(ctx.declare_conflict(reason))
@@ -333,7 +333,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		if val < *self {
 			Err(ctx.declare_conflict(reason))
@@ -346,7 +346,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		if val > *self {
 			Err(ctx.declare_conflict(reason))
@@ -365,7 +365,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		values: &IntSet,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		if values.contains(self) {
 			Err(ctx.declare_conflict(reason))
@@ -378,7 +378,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		domain: &IntSet,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		if !domain.contains(self) {
 			Err(ctx.declare_conflict(reason))
@@ -391,7 +391,7 @@ where
 		if self == &other.into() {
 			Ok(())
 		} else {
-			Err(ctx.declare_conflict([]))
+			Err(ctx.declare_conflict(NO_REASON))
 		}
 	}
 }

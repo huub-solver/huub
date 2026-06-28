@@ -27,12 +27,12 @@ pub use crate::model::{
 use crate::{
 	IntSet, IntVal,
 	actions::{
-		ConstructionActions, DecisionActions, IntEvent, IntInspectionActions, PropagationActions,
-		ReasoningContext, ReasoningEngine, SimplificationActions, Trailed, TrailingActions,
+		ConstructionActions, DecisionActions, DeferReasonActions, IntEvent, IntInspectionActions,
+		PropagationActions, PropagationContext, ReasonActions, ReasoningContext, ReasoningEngine,
+		SimplificationActions, Trailed, TrailingActions,
 	},
 	constraints::{
-		BoxedConstraint, Conflict, Constraint, DeferredReason, Reason, ReasonBuilder,
-		SimplificationStatus,
+		BoxedConstraint, Conflict, ConflictInner, Constraint, Nogood, SimplificationStatus,
 	},
 	helpers::bytes::Bytes,
 	lower::{Lowerer, LowererComplete},
@@ -138,6 +138,26 @@ pub struct Model {
 	advisors: Vec<Advisor>,
 }
 
+/// The engine-internal [`PropagationContext`] used while simplifying a
+/// [`Model`]'s constraints.
+#[derive(Debug)]
+pub struct SimplificationContext<'a>(pub(crate) &'a mut Model);
+
+/// The reason-build sink for a [`SimplificationContext`]: a reason closure
+/// either collects the reason atoms into `conditions`, or defers the reason to
+/// the current propagator via [`DeferReasonActions::defer`].
+///
+/// Unlike the user-facing [`Model`] reason sink, this sink implements
+/// [`DeferReasonActions`], so only constraint reasons can defer.
+#[derive(Debug, Default)]
+pub struct SimplificationReasonSink {
+	/// The reason atoms pushed so far.
+	pub(crate) conditions: Vec<View<bool>>,
+	/// `Some(data)` once the reason has been deferred; the propagator index is
+	/// folded in by the caller.
+	pub(crate) deferred: Option<u64>,
+}
+
 impl AdvRef {
 	/// Recreate the advisor reference from a raw value.
 	pub(crate) fn from_raw(raw: u32) -> Self {
@@ -187,6 +207,15 @@ impl ConRef {
 }
 
 impl Model {
+	/// Adapt a reason closure written against the user-facing [`Model`] into
+	/// one usable within a [`SimplificationContext`]. The model closure cannot
+	/// defer, so nothing is lost.
+	pub(crate) fn adapt_reason<'a>(
+		reason: impl FnOnce(&mut Model, &mut Vec<View<bool>>),
+	) -> impl FnOnce(&mut SimplificationContext<'a>, &mut SimplificationReasonSink) {
+		move |ctx, sink| reason(&mut *ctx.0, &mut sink.conditions)
+	}
+
 	/// Notify a single boolean advisor or propagator.
 	fn advise_of_bool_change(&mut self, con: ConRef, data: u64) -> bool {
 		if let Some(mut c) = self.constraints[con.index()].take() {
@@ -206,26 +235,6 @@ impl Model {
 			ret
 		} else {
 			false
-		}
-	}
-
-	/// Create a [`ReasoningEngine::Conflict`] instance based on the failure to
-	/// set `subject`, that must be set because of `reason`.
-	fn create_conflict(
-		&mut self,
-		subject: View<bool>,
-		reason: impl ReasonBuilder<Self>,
-	) -> <Self as ReasoningEngine>::Conflict {
-		match reason.build_reason(self) {
-			Ok(reason) => Conflict {
-				subject: Some(subject),
-				reason,
-			},
-			Err(true) => Conflict {
-				subject: None,
-				reason: Reason::Simple(!subject),
-			},
-			Err(false) => unreachable!("invalid reason"),
 		}
 	}
 
@@ -490,7 +499,7 @@ impl Model {
 	pub fn post_constraint<C: Constraint<Self>>(
 		&mut self,
 		constraint: C,
-	) -> Result<(), Conflict<View<bool>>> {
+	) -> Result<(), Nogood<View<bool>>> {
 		let (con, enqueue) = self.initialize_constraint(constraint);
 		if enqueue {
 			self.propagate_single(con)?;
@@ -521,7 +530,7 @@ impl Model {
 	/// process (see [`Self::lower`]). You generally only need to call this
 	/// method manually if you want to inspect the results of propagation
 	/// (e.g. decision variable domains) during the modeling process.
-	pub fn propagate(&mut self) -> Result<(), Conflict<View<bool>>> {
+	pub fn propagate(&mut self) -> Result<(), Nogood<View<bool>>> {
 		self.notify_advisors();
 		while let Some(con) = self.propagator_queue.pop() {
 			self.propagate_single(ConRef::from_raw(con))?;
@@ -531,30 +540,32 @@ impl Model {
 
 	/// Propagate the constraint at index `con`, updating the domains of the
 	/// variables and rewriting the constraint if necessary.
-	pub(crate) fn propagate_single(&mut self, con: ConRef) -> Result<(), Conflict<View<bool>>> {
+	pub(crate) fn propagate_single(&mut self, con: ConRef) -> Result<(), Nogood<View<bool>>> {
 		let Some(mut con_obj) = self.constraints[con.index()].take() else {
 			return Ok(());
 		};
 		self.cur_prop = Some(con);
-		let mut status = con_obj.simplify(self);
+		let mut status = con_obj.simplify(&mut SimplificationContext(&mut *self));
 		self.cur_prop = None;
 
-		// Resolve lazy explanation if it is required.
-		if let Err(Conflict {
+		// Resolve a deferred conflict's clause while the propagator is available.
+		if let Err(Conflict(ConflictInner::Deferred {
 			subject,
-			reason: Reason::Lazy(r),
-		}) = status
+			propagator,
+			data,
+		})) = status
 		{
-			debug_assert_eq!(ConRef::new(r.propagator as usize), con);
+			debug_assert_eq!(ConRef::new(propagator as usize), con);
 			let mut conj = Vec::new();
-			con_obj.explain(self, subject.unwrap_or(false.into()), r.data, &mut conj);
-			status = Err(Conflict {
-				subject,
-				reason: Reason::Eager(conj.into_boxed_slice()),
-			});
+			con_obj.explain(self, subject.unwrap_or(false.into()), data, &mut conj);
+			// Fold the subject in as the clause head.
+			if let Some(subject) = subject {
+				conj.push(subject);
+			}
+			status = Err(Conflict(ConflictInner::Clause(conj.into_boxed_slice())));
 		};
 
-		match status? {
+		match status.map_err(Conflict::into_nogood)? {
 			SimplificationStatus::Subsumed => {
 				// Constraint is known to be satisfied, no need to place back.
 			}
@@ -600,31 +611,23 @@ impl DecisionActions for Model {
 }
 
 impl PropagationActions for Model {
-	fn declare_conflict(&mut self, reason: impl ReasonBuilder<Self>) -> Conflict<View<bool>> {
-		match reason.build_reason(self) {
-			Ok(reason) => Conflict {
-				subject: None,
-				reason,
-			},
-			Err(false) => panic!("invalid reason"),
-			Err(true) => Conflict {
-				subject: None,
-				reason: Reason::Eager(Box::new([])),
-			},
-		}
+	fn declare_conflict(
+		&mut self,
+		reason: impl FnOnce(&mut Self, &mut Self::ReasonSink<'_>),
+	) -> Nogood<View<bool>> {
+		let mut sink = Vec::new();
+		reason(&mut *self, &mut sink);
+		Nogood(sink.into())
 	}
+}
 
-	fn deferred_reason(&self, data: u64) -> DeferredReason {
-		DeferredReason {
-			propagator: self.cur_prop.unwrap().index() as u32,
-			data,
-		}
-	}
+impl PropagationContext for Model {
+	type Conflict = Nogood<View<bool>>;
+	type ReasonSink<'a> = Vec<View<bool>>;
 }
 
 impl ReasoningContext for Model {
 	type Atom = <Self as ReasoningEngine>::Atom;
-	type Conflict = <Self as ReasoningEngine>::Conflict;
 }
 
 impl ReasoningEngine for Model {
@@ -634,7 +637,7 @@ impl ReasoningEngine for Model {
 	type ExplanationContext<'a> = Self;
 	type InitializationContext<'a> = ModelInitContext<'a>;
 	type NotificationContext<'a> = Self;
-	type PropagationContext<'a> = Self;
+	type PropagationContext<'a> = SimplificationContext<'a>;
 	type ReasonSink<'a> = Vec<View<bool>>;
 }
 
@@ -659,6 +662,110 @@ impl TrailingActions for Model {
 	}
 }
 
+impl SimplificationContext<'_> {
+	/// Create a conflict from the failure to set `subject` (folded in as the
+	/// clause head), required by `reason`.
+	pub(crate) fn create_conflict(
+		&mut self,
+		subject: View<bool>,
+		reason: impl FnOnce(&mut Self, &mut SimplificationReasonSink),
+	) -> Conflict<View<bool>> {
+		let mut sink = SimplificationReasonSink::default();
+		reason(&mut *self, &mut sink);
+		match sink.deferred {
+			Some(data) => Conflict(ConflictInner::Deferred {
+				subject: Some(subject),
+				propagator: self.0.cur_prop.unwrap().index() as u32,
+				data,
+			}),
+			None => {
+				// Fold the subject in as the clause head.
+				sink.conditions.push(subject);
+				Conflict(ConflictInner::Clause(sink.conditions.into_boxed_slice()))
+			}
+		}
+	}
+}
+
+impl ConstructionActions for SimplificationContext<'_> {
+	fn new_trailed<T: Bytes>(&mut self, init: T) -> Trailed<T> {
+		self.0.new_trailed(init)
+	}
+}
+
+impl DecisionActions for SimplificationContext<'_> {
+	fn num_conflicts(&self) -> u64 {
+		self.0.num_conflicts()
+	}
+}
+
+impl PropagationActions for SimplificationContext<'_> {
+	fn declare_conflict(
+		&mut self,
+		reason: impl FnOnce(&mut Self, &mut Self::ReasonSink<'_>),
+	) -> Conflict<View<bool>> {
+		let mut sink = SimplificationReasonSink::default();
+		reason(&mut *self, &mut sink);
+		match sink.deferred {
+			Some(data) => Conflict(ConflictInner::Deferred {
+				subject: None,
+				propagator: self.0.cur_prop.unwrap().index() as u32,
+				data,
+			}),
+			None => Conflict(ConflictInner::Clause(sink.conditions.into_boxed_slice())),
+		}
+	}
+}
+
+impl PropagationContext for SimplificationContext<'_> {
+	type Conflict = Conflict<View<bool>>;
+	type ReasonSink<'a> = SimplificationReasonSink;
+}
+
+impl ReasoningContext for SimplificationContext<'_> {
+	type Atom = View<bool>;
+}
+
+impl SimplificationActions for SimplificationContext<'_> {
+	type Target = Model;
+
+	fn post_constraint<C: Constraint<Model>>(&mut self, constraint: C) {
+		self.0.post_constraint_internal(constraint);
+	}
+}
+
+impl TrailingActions for SimplificationContext<'_> {
+	fn set_trailed<T: Bytes>(&mut self, i: Trailed<T>, v: T) -> T {
+		self.0.set_trailed(i, v)
+	}
+
+	fn trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
+		self.0.trailed(i)
+	}
+}
+
+impl DeferReasonActions<View<bool>> for SimplificationReasonSink {
+	fn defer(&mut self, data: u64) {
+		self.deferred = Some(data);
+	}
+}
+
+impl Extend<View<bool>> for SimplificationReasonSink {
+	fn extend<T: IntoIterator<Item = View<bool>>>(&mut self, iter: T) {
+		self.conditions.extend(iter);
+	}
+}
+
+impl ReasonActions<View<bool>> for SimplificationReasonSink {
+	fn push(&mut self, atom: View<bool>) {
+		self.conditions.push(atom);
+	}
+
+	fn reserve(&mut self, additional: usize) {
+		self.conditions.reserve(additional);
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
@@ -672,7 +779,8 @@ mod tests {
 			ReasoningEngine, Trailed, TrailingActions,
 		},
 		constraints::{
-			BoolModelActions, Constraint, IntModelActions, Propagator, SimplificationStatus,
+			BoolModelActions, Constraint, IntModelActions, NO_REASON, Propagator,
+			SimplificationStatus,
 		},
 		lower::{LoweringContext, LoweringError},
 		model::{Model, View, deserialize::AnyView},
@@ -721,7 +829,8 @@ mod tests {
 			int_check,
 		};
 		prb.post_constraint(t).unwrap();
-		i.tighten_min(&mut prb, 2, []).expect("tighten_min failed");
+		i.tighten_min(&mut prb, 2, NO_REASON)
+			.expect("tighten_min failed");
 		let (_, _): (Solver, _) = prb.lower().to_solver().expect("to_solver failed");
 		assert_eq!(prb.trailed(bool_check), 1);
 	}
@@ -741,7 +850,8 @@ mod tests {
 			int_check,
 		};
 		prb.post_constraint(t).unwrap();
-		i.tighten_min(&mut prb, 1, []).expect("tighten_min failed");
+		i.tighten_min(&mut prb, 1, NO_REASON)
+			.expect("tighten_min failed");
 		let (_, _): (Solver, _) = prb.lower().to_solver().expect("to_solver failed");
 		assert_eq!(prb.trailed(bool_check), 0);
 	}
@@ -761,8 +871,10 @@ mod tests {
 			int_check,
 		};
 		prb.post_constraint(t).unwrap();
-		i.tighten_min(&mut prb, 1, []).expect("tighten_min failed");
-		i.tighten_max(&mut prb, 2, []).expect("tighten_max failed");
+		i.tighten_min(&mut prb, 1, NO_REASON)
+			.expect("tighten_min failed");
+		i.tighten_max(&mut prb, 2, NO_REASON)
+			.expect("tighten_max failed");
 		let (mut slv, map): (Solver, _) = prb.lower().to_solver().expect("to_solver failed");
 		assert_eq!(prb.trailed(int_check), 1);
 		let i_slv = map.get(&mut slv, i);

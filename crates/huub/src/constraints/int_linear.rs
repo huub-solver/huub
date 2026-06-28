@@ -15,14 +15,15 @@ use crate::{
 	IntVal,
 	actions::{
 		BoolAnalyzeActions, BoolInitActions, BoolInspectionActions, BoolPropagationActions,
-		BoolSimplificationActions, InitActions, IntAnalyzeActions, IntDecisionActions, IntEvent,
-		IntInitActions, IntInspectionActions, IntPropCond, IntPropagationActions,
-		IntSimplificationActions, PostingActions, PropagationActions, ReasonActions,
-		ReasoningContext, ReasoningEngine, SimplificationActions, Trailed, TrailingActions,
+		BoolSimplificationActions, DeferReasonActions, InitActions, IntAnalyzeActions,
+		IntDecisionActions, IntEvent, IntInitActions, IntInspectionActions, IntPropCond,
+		IntPropagationActions, IntSimplificationActions, PostingActions, PropagationActions,
+		PropagationContext, ReasonActions, ReasoningContext, ReasoningEngine,
+		SimplificationActions, Trailed, TrailingActions,
 	},
 	constraints::{
 		BoolModelActions, BoolSolverActions, Constraint, IntModelActions, IntSolverActions,
-		Propagator, ReasonBuilder, SimplificationStatus,
+		NO_REASON, Propagator, SimplificationStatus, reason_ty,
 	},
 	helpers::{
 		overflow::{OverflowImpossible, OverflowMode, OverflowPossible},
@@ -178,12 +179,20 @@ where
 
 	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		// Channel bounds of self.vars[0] to self.vars[1]
-		self.vars[0].tighten_min(ctx, self.vars[1].min(ctx), [self.vars[1].min_lit(ctx)])?;
-		self.vars[0].tighten_max(ctx, self.vars[1].max(ctx), [self.vars[1].max_lit(ctx)])?;
+		self.vars[0].tighten_min(ctx, self.vars[1].min(ctx), |ctx, reason| {
+			reason.push(self.vars[1].min_lit(ctx));
+		})?;
+		self.vars[0].tighten_max(ctx, self.vars[1].max(ctx), |ctx, reason| {
+			reason.push(self.vars[1].max_lit(ctx));
+		})?;
 
 		// Channel bounds of self.vars[1] to self.vars[0]
-		self.vars[1].tighten_min(ctx, self.vars[0].min(ctx), [self.vars[0].min_lit(ctx)])?;
-		self.vars[1].tighten_max(ctx, self.vars[0].max(ctx), [self.vars[0].max_lit(ctx)])?;
+		self.vars[1].tighten_min(ctx, self.vars[0].min(ctx), |ctx, reason| {
+			reason.push(self.vars[0].min_lit(ctx));
+		})?;
+		self.vars[1].tighten_max(ctx, self.vars[0].max(ctx), |ctx, reason| {
+			reason.push(self.vars[0].max_lit(ctx));
+		})?;
 		Ok(())
 	}
 }
@@ -192,7 +201,7 @@ impl<OF: OverflowMode> IntLinear<OF> {
 	/// Internal method to negate the linear constraint.
 	fn negate<Ctx>(self, ctx: &mut Ctx) -> Result<Self, Ctx::Conflict>
 	where
-		Ctx: ReasoningContext + ?Sized,
+		Ctx: PropagationContext + ?Sized,
 		model::View<IntVal>: IntPropagationActions<Ctx>,
 	{
 		Ok(match self.comparator {
@@ -350,16 +359,22 @@ where
 		match *self.terms.as_slice() {
 			[var] if self.reif.is_none() => {
 				match (self.comparator, self.rhs.try_into()) {
-					(LinComparator::Equal, Ok(rhs)) => var.fix(ctx, rhs, [])?,
-					(LinComparator::Equal, Err(_)) => return Err(ctx.declare_conflict([])),
-					(LinComparator::LessEq, Ok(rhs)) => var.tighten_max(ctx, rhs, [])?,
+					(LinComparator::Equal, Ok(rhs)) => var.fix(ctx, rhs, NO_REASON)?,
+					(LinComparator::Equal, Err(_)) => {
+						return Err(ctx.declare_conflict(NO_REASON));
+					}
+					(LinComparator::LessEq, Ok(rhs)) => {
+						var.tighten_max(ctx, rhs, NO_REASON)?;
+					}
 					(LinComparator::LessEq, Err(_)) if self.rhs < IntVal::MIN.into() => {
-						return Err(ctx.declare_conflict([]));
+						return Err(ctx.declare_conflict(NO_REASON));
 					}
 					(LinComparator::LessEq, Err(_)) => {
 						debug_assert!(self.rhs > IntVal::MAX.into());
 					}
-					(LinComparator::NotEqual, Ok(rhs)) => var.remove_val(ctx, rhs, [])?,
+					(LinComparator::NotEqual, Ok(rhs)) => {
+						var.remove_val(ctx, rhs, NO_REASON)?;
+					}
 					(LinComparator::NotEqual, Err(_)) => {}
 				}
 				return Ok(SimplificationStatus::Subsumed);
@@ -396,7 +411,7 @@ where
 					}
 					Err(_) => {
 						// TODO: might be incorrect
-						return Err(ctx.declare_conflict([]));
+						return Err(ctx.declare_conflict(NO_REASON));
 					}
 				}
 				return Ok(SimplificationStatus::Subsumed);
@@ -427,18 +442,15 @@ where
 			}
 			_ => None,
 		};
-		let fail_reason = |ctx: &mut E::PropagationContext<'_>| {
-			self.terms
-				.iter()
-				.map(|v| match self.comparator {
-					LinComparator::Equal if lb_sum > self.rhs => v.min_lit(ctx),
-					LinComparator::Equal if ub_sum < self.rhs => v.max_lit(ctx),
-					LinComparator::LessEq => v.min_lit(ctx),
-					LinComparator::NotEqual => v.val_lit(ctx).unwrap(),
-					_ => unreachable!(),
-				})
-				.collect_vec()
-		};
+		let fail_reason = reason_ty::<E::PropagationContext<'_>, _>(|ctx, reason| {
+			reason.extend(self.terms.iter().map(|v| match self.comparator {
+				LinComparator::Equal if lb_sum > self.rhs => v.min_lit(ctx),
+				LinComparator::Equal if ub_sum < self.rhs => v.max_lit(ctx),
+				LinComparator::LessEq => v.min_lit(ctx),
+				LinComparator::NotEqual => v.val_lit(ctx).unwrap(),
+				_ => unreachable!(),
+			}));
+		});
 
 		if let Some(satisfied) = known_result {
 			return match self.reif {
@@ -449,23 +461,20 @@ where
 					Ok(SimplificationStatus::Subsumed)
 				}
 				Some(Reification::ReifiedBy(r)) if satisfied => {
-					r.require(ctx, |ctx: &mut E::PropagationContext<'_>| {
-						self.terms
-							.iter()
-							.flat_map(|v| match self.comparator {
-								LinComparator::NotEqual if lb_sum > self.rhs => {
-									vec![v.min_lit(ctx)]
-								}
-								LinComparator::NotEqual if ub_sum < self.rhs => {
-									vec![v.max_lit(ctx)]
-								}
-								LinComparator::LessEq => vec![v.max_lit(ctx)],
-								LinComparator::NotEqual => {
-									vec![v.min_lit(ctx), v.max_lit(ctx)]
-								}
-								_ => unreachable!(),
-							})
-							.collect_vec()
+					r.require(ctx, |ctx, reason| {
+						reason.extend(self.terms.iter().flat_map(|v| match self.comparator {
+							LinComparator::NotEqual if lb_sum > self.rhs => {
+								vec![v.min_lit(ctx)]
+							}
+							LinComparator::NotEqual if ub_sum < self.rhs => {
+								vec![v.max_lit(ctx)]
+							}
+							LinComparator::LessEq => vec![v.max_lit(ctx)],
+							LinComparator::NotEqual => {
+								vec![v.min_lit(ctx), v.max_lit(ctx)]
+							}
+							_ => unreachable!(),
+						}));
 					})?;
 					Ok(SimplificationStatus::Subsumed)
 				}
@@ -490,14 +499,15 @@ where
 		for (i, v) in self.terms.iter().enumerate() {
 			let lb_i = lb[i].into();
 			let new_ub = lb_diff + lb_i;
-			let reason = |ctx: &mut E::PropagationContext<'_>| {
-				self.terms
-					.iter()
-					.enumerate()
-					.filter(|&(j, _)| j != i)
-					.map(|(_, w)| w.min_lit(ctx))
-					.collect_vec()
-			};
+			let reason = reason_ty::<E::PropagationContext<'_>, _>(|ctx, reason| {
+				reason.extend(
+					self.terms
+						.iter()
+						.enumerate()
+						.filter(|&(j, _)| j != i)
+						.map(|(_, w)| w.min_lit(ctx)),
+				);
+			});
 			if let Some(Reification::ReifiedBy(r) | Reification::ImpliedBy(r)) = self.reif {
 				if lb_i > new_ub {
 					r.fix(ctx, false, reason)?;
@@ -506,7 +516,9 @@ where
 			} else {
 				match new_ub.try_into() {
 					Ok(new_ub) => v.tighten_max(ctx, new_ub, reason)?,
-					Err(_) if new_ub < IntVal::MIN.into() => return Err(ctx.declare_conflict([])),
+					Err(_) if new_ub < IntVal::MIN.into() => {
+						return Err(ctx.declare_conflict(NO_REASON));
+					}
 					Err(_) => {
 						debug_assert!(new_ub > IntVal::MAX.into());
 					}
@@ -527,14 +539,15 @@ where
 			for (i, v) in self.terms.iter().enumerate() {
 				let ub_i = ub[i].into();
 				let new_lb = ub_diff + ub_i;
-				let reason = |ctx: &mut E::PropagationContext<'_>| {
-					self.terms
-						.iter()
-						.enumerate()
-						.filter(|&(j, _)| j != i)
-						.map(|(_, &w)| w.max_lit(ctx))
-						.collect_vec()
-				};
+				let reason = reason_ty::<E::PropagationContext<'_>, _>(|ctx, reason| {
+					reason.extend(
+						self.terms
+							.iter()
+							.enumerate()
+							.filter(|&(j, _)| j != i)
+							.map(|(_, &w)| w.max_lit(ctx)),
+					);
+				});
 				if let Some(Reification::ReifiedBy(r) | Reification::ImpliedBy(r)) = self.reif {
 					if ub_i < new_lb {
 						r.fix(ctx, false, reason)?;
@@ -544,7 +557,7 @@ where
 					match new_lb.try_into() {
 						Ok(new_lb) => v.tighten_min(ctx, new_lb, reason)?,
 						Err(_) if new_lb > IntVal::MAX.into() => {
-							return Err(ctx.declare_conflict([]));
+							return Err(ctx.declare_conflict(NO_REASON));
 						}
 						Err(_) => {
 							debug_assert!(new_lb < IntVal::MAX.into());
@@ -809,10 +822,9 @@ where
 			// Propagate the reified variable if the sum of lower bounds is greater than the
 			// right-hand-side value
 			if lb_sum > self.max {
-				self.reification
-					.fix(ctx, false, |ctx: &mut E::PropagationContext<'_>| {
-						self.terms.iter().map(|v| v.min_lit(ctx)).collect_vec()
-					})?;
+				self.reification.fix(ctx, false, |ctx, reason| {
+					reason.extend(self.terms.iter().map(|v| v.min_lit(ctx)));
+				})?;
 			}
 		}
 
@@ -824,13 +836,12 @@ where
 
 		// propagate the upper bound of the variables
 		for (j, v) in self.terms.iter().enumerate() {
-			let reason = ctx.deferred_reason(j as u64);
 			let ub = (self.max - lb_sum) + v.min(ctx).into();
 			match ub.try_into() {
-				Ok(ub) => v.tighten_max(ctx, ub, reason)?,
+				Ok(ub) => v.tighten_max(ctx, ub, |_, rsn| rsn.defer(j as u64))?,
 				Err(_) if ub < IntVal::MIN.into() => v
 					.lit(ctx, IntLitMeaning::Less(IntVal::MIN))
-					.require(ctx, reason)?,
+					.require(ctx, |_, rsn| rsn.defer(j as u64))?,
 				Err(_) => {
 					debug_assert!(ub > v.max(ctx).into());
 				}
@@ -1035,29 +1046,23 @@ where
 	/// Helper function to construct the reason for propagation given the index
 	/// of the variable in the list of variables to sum or the length of the
 	/// list, if explaining the reification.
-	fn reason<Ctx>(&self, data: usize) -> impl ReasonBuilder<Ctx> + '_
+	fn reason<Ctx>(&self, data: usize) -> impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>) + '_
 	where
-		Ctx: ReasoningContext + ?Sized,
+		Ctx: PropagationContext + ?Sized,
 		IV: IntDecisionActions<Ctx>,
 		BV: Clone + Into<Ctx::Atom> + 'static,
 	{
-		move |ctx: &mut Ctx| {
-			let mut conj: Vec<_> = self
-				.terms
-				.iter()
-				.enumerate()
-				.filter_map(|(i, v)| {
-					if data != i {
-						Some(v.val_lit(ctx).unwrap())
-					} else {
-						None
-					}
-				})
-				.collect();
+		move |ctx, reason| {
+			reason.extend(self.terms.iter().enumerate().filter_map(|(i, v)| {
+				if data != i {
+					Some(v.val_lit(ctx).unwrap())
+				} else {
+					None
+				}
+			}));
 			if TypeId::of::<BV>() != TypeId::of::<True>() && data != self.terms.len() {
-				conj.push(self.reification.clone().into());
+				reason.push(self.reification.clone().into());
 			}
-			conj
 		}
 	}
 }

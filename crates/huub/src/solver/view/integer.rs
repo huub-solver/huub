@@ -12,7 +12,6 @@ use crate::{
 		BoolInspectionActions, BoolPropagationActions, IntDecisionActions, IntExplanationActions,
 		IntInspectionActions, IntPropagationActions, PropagationActions, ReasoningContext,
 	},
-	constraints::ReasonBuilder,
 	solver::{
 		Decision, IntLitMeaning, Solver, View,
 		decision::integer::{DirectStorage, OrderStorage},
@@ -286,7 +285,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		match self.0 {
 			IntView::Linear(lin) => lin.fix(ctx, val, reason),
@@ -299,7 +298,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		match self.0 {
 			IntView::Linear(lin) => lin.remove_val(ctx, val, reason),
@@ -312,7 +311,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		match self.0 {
 			IntView::Linear(lin) => lin.tighten_max(ctx, val, reason),
@@ -325,7 +324,7 @@ where
 		&self,
 		ctx: &mut Ctx,
 		val: IntVal,
-		reason: impl ReasonBuilder<Ctx>,
+		reason: impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>),
 	) -> Result<(), Ctx::Conflict> {
 		match self.0 {
 			IntView::Linear(lin) => lin.tighten_min(ctx, val, reason),

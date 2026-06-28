@@ -20,13 +20,11 @@ use std::{
 	any::Any,
 	error::Error,
 	fmt::{self, Debug},
-	mem,
+	slice,
 };
 
 use dyn_clone::DynClone;
-use itertools::Itertools;
 use pindakaas::solver::propagation::ClauseBuilder;
-use tracing::warn;
 
 use crate::{
 	IntVal,
@@ -34,13 +32,13 @@ use crate::{
 		BoolAnalyzeActions, BoolInitActions, BoolInspectionActions, BoolPropagationActions,
 		BoolSimplificationActions, IntAnalyzeActions, IntEvent, IntExplanationActions,
 		IntInitActions, IntInspectionActions, IntPropagationActions, IntSimplificationActions,
-		ReasonActions, ReasoningContext, ReasoningEngine,
+		PropagationContext, ReasoningEngine,
 	},
 	lower::{LoweringContext, LoweringError},
 	model::{self, Model},
 	solver::{
 		self,
-		engine::{Engine, ReasonSink, State},
+		engine::{Engine, EngineReasonSink, State},
 		view::boolean::BoolView,
 	},
 };
@@ -76,29 +74,36 @@ pub(crate) type BoxedConstraint = Box<dyn Constraint<Model>>;
 /// by [`Engine`].
 pub(crate) type BoxedPropagator = Box<dyn Propagator<Engine>>;
 
-/// A `ReasonBuilder` whose result is cached so it can be used multiple times,
-/// and is only evaluated once used.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum CachedReason<B, Atom> {
-	/// An evaluated reason that can be reused.
-	Cached(Result<Reason<Atom>, bool>),
-	/// A reason that has not yet been evaluated.
-	Builder(B),
-}
-
-/// Conflict is an error type returned when a variable is assigned two
-/// inconsistent values.
+/// A conflict raised during propagation: the nogood clause the current state
+/// falsifies, possibly still deferred to a propagator.
+///
+/// This is the propagation-internal conflict type. It appears in the
+/// propagation API as `E::Conflict`, but it is **opaque to the user**: its only
+/// field is private, so it cannot be constructed or inspected outside the
+/// crate. Before a conflict is handed back to the user it is always resolved
+/// into a [`Nogood`]; the user-facing `Model`/`Solver`/[`LoweringError`]
+/// boundaries only ever expose a [`Nogood`].
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Conflict<Atom> {
-	/// The subject of the conflict (i.e., the literal that couldn't be
-	/// propagated).
-	///
-	/// If `None`, the conflict is a root conflict.
-	pub(crate) subject: Option<Atom>,
-	/// The reason for the conflict.
-	///
-	/// This reason must produce a conjunction that implies false.
-	pub(crate) reason: Reason<Atom>,
+pub struct Conflict<Atom>(pub(crate) ConflictInner<Atom>);
+
+/// The internal representation of a [`Conflict`]: a ready clause, or a reason
+/// deferred to a propagator that holds it (which may be unresolved inside the
+/// propagation loop).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ConflictInner<Atom> {
+	/// A conflict clause, holding the literals of the nogood directly.
+	Clause(Box<[Atom]>),
+	/// A conflict whose clause is computed on demand by a propagator (see
+	/// [`DeferReasonActions::defer`](crate::actions::DeferReasonActions::defer)).
+	Deferred {
+		/// The literal whose (failed) assignment the propagator explains as the
+		/// head of the clause, or `None` for a root conflict.
+		subject: Option<Atom>,
+		/// Reference to the propagator that computes the conflict clause.
+		propagator: u32,
+		/// Data to be given to the propagator to compute the reason.
+		data: u64,
+	},
 }
 
 /// A trait for constraints that can be placed in a [`Model`] object.
@@ -135,15 +140,6 @@ pub trait Constraint<E: ReasoningEngine + ?Sized>: Any + Debug + DynClone + Prop
 	fn to_solver(&self, context: &mut LoweringContext<'_>) -> Result<(), LoweringError>;
 }
 
-/// A note that the mentioned propagator will compute the `Reason` if requested.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct DeferredReason {
-	/// Reference to the propagator that will compute the reason.
-	pub(crate) propagator: u32,
-	/// Data to be given to the propagator to compute the reason.
-	pub(crate) data: u64,
-}
-
 /// Helper trait to simplify trait bounds for [`Constraint`] implementations.
 pub trait IntModelActions<E>
 where
@@ -166,6 +162,13 @@ where
 {
 }
 
+/// A resolved conflict clause (nogood) reported to the user.
+///
+/// This is the form a [`Conflict`] takes once it leaves the propagation loop;
+/// unlike [`Conflict`] it never holds a deferred reason.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Nogood<Atom>(pub(crate) Box<[Atom]>);
+
 /// A trait for a propagator that is called during the search process to filter
 /// the domains of decision variables, and detect inconsistencies.
 ///
@@ -173,7 +176,7 @@ where
 /// domains of decision variables as a conjunction of literals that imply the
 /// change. If these explanations are too expensive to compute during
 /// propagation, then the propagator can delay giving the explanation using
-/// [`PropagationActions::deferred_reason`](crate::actions::PropagationActions::deferred_reason).
+/// [`DeferReasonActions::defer`](crate::actions::DeferReasonActions::defer).
 /// If the explanation is needed, then the propagation engine will revert the
 /// state of the solver and call [`Propagator::explain`] to receive the
 /// explanation.
@@ -220,7 +223,7 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 	/// propagated.
 	///
 	/// The method is called with the data that was passed to the
-	/// [`PropagationActions::deferred_reason`](crate::actions::PropagationActions::deferred_reason)
+	/// [`DeferReasonActions::defer`](crate::actions::DeferReasonActions::defer)
 	/// method, and the literal that was propagated. If the `lit` argument is
 	/// `None`, then the reason was used to explain `false`.
 	///
@@ -250,26 +253,6 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 	fn propagate(&mut self, context: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict>;
 }
 
-/// A conjunction of literals that implies a change in the state.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum Reason<Atom> {
-	/// A promise that a given propagator will compute a causation of the change
-	/// when given the attached data.
-	Lazy(DeferredReason),
-	/// A conjunction of literals forming the causation of the change.
-	Eager(Box<[Atom]>),
-	/// A single literal that is the causation of the change.
-	Simple(Atom),
-}
-
-/// A trait for types that can be used to construct a reason for the propagation
-/// in the `Context` from `Atom`s.
-pub trait ReasonBuilder<Context: ReasoningContext + ?Sized> {
-	/// Construct a `Reason`, or return a Boolean indicating that the reason is
-	/// trivial.
-	fn build_reason(self, ctx: &mut Context) -> Result<Reason<Context::Atom>, bool>;
-}
-
 /// Status returned by the [`Constraint::simplify`] method,
 /// indicating whether the constraint has been subsumed (such that it can be
 /// removed from the [`Model`]) or not.
@@ -283,6 +266,43 @@ pub enum SimplificationStatus {
 	/// The constraint has been simplified to the point where it is subsumed.
 	/// The constraint can be removed from the [`Model`].
 	Subsumed,
+}
+
+/// A reason closure that pushes no conditions: the propagation or conflict it
+/// justifies holds *unconditionally*.
+///
+/// The deliberately alarming, `UPPER_CASE` name marks this as dangerous: using
+/// an empty reason for a fact that is not genuinely unconditional produces an
+/// unsound explanation. Pass it in place of a reason closure, e.g.
+/// `ctx.declare_conflict(NO_REASON)`.
+#[expect(
+	non_snake_case,
+	reason = "an UPPER_CASE marker makes an empty (dangerous) reason stand out at call sites"
+)]
+pub(crate) fn NO_REASON<Ctx: PropagationContext + ?Sized>(
+	_ctx: &mut Ctx,
+	_reason: &mut Ctx::ReasonSink<'_>,
+) {
+}
+
+/// Pin the argument types of a reason closure to a given
+/// [`PropagationContext`], returning the closure unchanged.
+///
+/// Passing the closure through this function supplies `Ctx` explicitly via the
+/// turbofish; the `FnOnce` bound then drives inference of both parameters,
+/// keeping the closure arguments type annotation-free:
+///
+/// ```ignore
+/// let reason = reason_ty::<E::PropagationContext<'_>, _>(|ctx, reason| {
+///     reason.push(self.x.min_lit(ctx));
+/// });
+/// self.y.tighten_min(ctx, bound, reason)?;
+/// self.y.tighten_max(ctx, other, reason)?;
+/// ```
+pub(crate) fn reason_ty<Ctx: PropagationContext, F: FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>)>(
+	f: F,
+) -> F {
+	f
 }
 
 impl<E, B> BoolModelActions<E> for B
@@ -318,117 +338,52 @@ impl Clone for BoxedPropagator {
 	}
 }
 
-impl<C> ReasonBuilder<C> for &[C::Atom]
-where
-	C: ReasoningContext + ?Sized,
-{
-	fn build_reason(self, _: &mut C) -> Result<Reason<C::Atom>, bool> {
-		Reason::from_iter(self.iter().cloned())
-	}
-}
-
-impl<C, const N: usize> ReasonBuilder<C> for &[C::Atom; N]
-where
-	C: ReasoningContext + ?Sized,
-{
-	fn build_reason(self, ctx: &mut C) -> Result<Reason<C::Atom>, bool> {
-		self[..].build_reason(ctx)
-	}
-}
-
-impl<C, const N: usize> ReasonBuilder<C> for [C::Atom; N]
-where
-	C: ReasoningContext + ?Sized,
-{
-	fn build_reason(self, _: &mut C) -> Result<Reason<C::Atom>, bool> {
-		Reason::from_iter(self)
-	}
-}
-
-impl<A, B> CachedReason<B, A> {
-	/// Create a new [`CachedReason`] from a [`ReasonBuilder`].
-	pub(crate) fn new(builder: B) -> Self {
-		CachedReason::Builder(builder)
-	}
-}
-
-impl<B, C> ReasonBuilder<C> for &'_ mut CachedReason<B, C::Atom>
-where
-	C: ReasoningContext + ?Sized,
-	B: ReasonBuilder<C>,
-{
-	fn build_reason(self, ctx: &mut C) -> Result<Reason<C::Atom>, bool> {
-		match self {
-			CachedReason::Cached(items) => items.clone(),
-			CachedReason::Builder(_) => {
-				let CachedReason::Builder(builder) =
-					mem::replace(self, CachedReason::Cached(Err(false)))
-				else {
-					unreachable!()
-				};
-				let reason = builder.build_reason(ctx);
-				*self = CachedReason::Cached(reason.clone());
-				reason
+impl<Atom> Conflict<Atom> {
+	/// Resolve the conflict into its [`Nogood`] clause.
+	///
+	/// A conflict is only ever handed to the user after the propagation loop
+	/// has resolved any deferred reason (the engine in
+	/// [`SolvingContext`](crate::solver::solving_context::SolvingContext), the
+	/// model in `Model::propagate_single`), so it must be a ready clause by
+	/// this point.
+	pub(crate) fn into_nogood(self) -> Nogood<Atom> {
+		match self.0 {
+			ConflictInner::Clause(lits) => Nogood(lits),
+			ConflictInner::Deferred { .. } => {
+				unreachable!("a deferred conflict must be resolved before reaching the user")
 			}
 		}
 	}
 }
 
 impl Conflict<solver::Decision<bool>> {
-	/// Create a new conflict with the given reason.
-	pub(crate) fn new<Ctx: ReasoningContext<Atom = solver::View<bool>> + ?Sized>(
-		ctx: &mut Ctx,
-		subject: Option<solver::Decision<bool>>,
-		reason: impl ReasonBuilder<Ctx>,
-	) -> Self {
-		match Reason::from_view(reason.build_reason(ctx)) {
-			Ok(reason) => Self { subject, reason },
-			Err(true) => match subject {
-				Some(subject) => Self {
-					subject: None,
-					reason: Reason::Simple(!subject),
-				},
-				None => {
-					warn!(
-						target: "solver",
-						"empty conflict detected; additional model simplification reasoning may be possible"
-					);
-					Self {
-						subject: None,
-						reason: Reason::Eager(Box::new([])),
-					}
+	/// Write the conflict's nogood clause into `clause`.
+	///
+	/// A ready clause already holds the nogood in clausal form, so its literals
+	/// are copied straight in; a deferred conflict pushes its `subject` as the
+	/// head and asks the propagator to compute the reason, which it negates
+	/// through the [`EngineReasonSink`] sink.
+	pub(crate) fn explain(
+		&self,
+		props: &mut [BoxedPropagator],
+		actions: &mut State,
+		mut clause: ClauseBuilder<'_>,
+	) {
+		match &self.0 {
+			ConflictInner::Clause(lits) => clause.extend(lits.iter().map(|lit| lit.0)),
+			&ConflictInner::Deferred {
+				subject,
+				propagator,
+				data,
+			} => {
+				if let Some(subject) = subject {
+					clause.push(subject.0);
 				}
-			},
-			Err(false) => unreachable!("invalid reason"),
+				let mut explanation = EngineReasonSink(clause);
+				let head = subject.map(|s| s.into()).unwrap_or(true.into());
+				props[propagator as usize].explain(actions, head, data, &mut explanation);
+			}
 		}
-	}
-}
-
-impl<Atom: Debug> Error for Conflict<Atom> {}
-
-impl<Atom: Debug> fmt::Display for Conflict<Atom> {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "Conflict detected: nogood {:?}", self.reason)
-	}
-}
-
-impl<C> ReasonBuilder<C> for DeferredReason
-where
-	C: ReasoningContext + ?Sized,
-{
-	fn build_reason(self, _: &mut C) -> Result<Reason<C::Atom>, bool> {
-		Ok(Reason::Lazy(self))
-	}
-}
-
-impl<C, F, I> ReasonBuilder<C> for F
-where
-	C: ReasoningContext + ?Sized,
-	F: FnOnce(&mut C) -> I,
-	I: IntoIterator<Item = C::Atom>,
-{
-	fn build_reason(self, ctx: &mut C) -> Result<Reason<C::Atom>, bool> {
-		Reason::from_iter(self(ctx))
 	}
 }
 
@@ -452,86 +407,43 @@ where
 {
 }
 
-impl<A> Reason<A> {
-	/// Collect a conjunction of `BoolView` from an iterator into a `Reason`.
-	pub(crate) fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Result<Self, bool> {
-		let mut lits: Vec<_> = iter.into_iter().collect();
-		match lits.len() {
-			0 => Err(true),
-			1 => Ok(Reason::Simple(lits.remove(0))),
-			_ => Ok(Reason::Eager(lits.into_boxed_slice())),
-		}
+impl<Atom> Nogood<Atom> {
+	/// Returns an non-consuming iterator over the atom in the nogood clause.
+	pub fn iter(&self) -> slice::Iter<'_, Atom> {
+		self.0.iter()
 	}
 }
 
-impl Reason<solver::Decision<bool>> {
-	/// Write a reason clause from the `Reason` into `clause`.
-	///
-	/// The reason is the conjunction of (literal) premises that implies `lit`.
-	/// When `lit` is `None` then it explains `false`. In this method we rewrite
-	/// the implication form `(premise_1 /\ premise_2 /\ ...) -> lit` into a
-	/// direct clause `(¬premise_1 \/ ¬premise_2 \/ ... \/ lit)`. For a
-	/// [`Reason::Lazy`] reason, the propagator is asked to compute the
-	/// conjunction of premises.
-	pub(crate) fn explain(
-		&self,
-		props: &mut [BoxedPropagator],
-		actions: &mut State,
-		lit: Option<solver::Decision<bool>>,
-		mut clause: ClauseBuilder<'_>,
-	) {
-		if let Some(lit) = lit {
-			clause.push(lit.0);
-		}
-		let mut reason = ReasonSink(clause);
-		match self {
-			&Reason::Lazy(DeferredReason {
-				propagator: prop,
-				data,
-			}) => {
-				props[prop as usize].explain(
-					actions,
-					lit.map(|lit| lit.into()).unwrap_or(true.into()),
-					data,
-					&mut reason,
-				);
-			}
-			Reason::Eager(v) => reason.extend(v.iter().map(|&premise| premise.into())),
-			&Reason::Simple(premise) => reason.push(premise.into()),
-		}
-	}
-
-	/// Internal function used to tighten a [`Reason`] with [`BoolView`] atoms
-	/// to a [`Reason`] with [`RawLit`](pindakaas::Lit) atoms.
-	pub(crate) fn from_view(
-		reason: Result<Reason<solver::View<bool>>, bool>,
-	) -> Result<Self, bool> {
-		let v = match reason? {
-			Reason::Lazy(lazy) => return Ok(Self::Lazy(lazy)),
-			Reason::Eager(items) => items.into_vec(),
-			Reason::Simple(lit) => vec![lit],
-		};
-		let mut v: Vec<_> = v
-			.into_iter()
-			.filter_map(|v| match v.0 {
-				BoolView::Lit(lit) => Some(Ok(lit)),
-				BoolView::Const(false) => Some(Err(false)),
-				BoolView::Const(true) => None,
-			})
-			.try_collect()?;
-		match v.len() {
-			0 => Err(true),
-			1 => Ok(Reason::Simple(v.remove(0))),
-			_ => Ok(Reason::Eager(v.into_boxed_slice())),
-		}
+impl Nogood<solver::Decision<bool>> {
+	/// Build the reported [`Nogood`] from the Boolean views that make up a
+	/// conflict clause, resolving any constant views.
+	pub(crate) fn from_view_iter(iter: impl IntoIterator<Item = solver::View<bool>>) -> Self {
+		Self(
+			iter.into_iter()
+				.filter_map(|atom| match atom.0 {
+					BoolView::Lit(lit) => Some(lit),
+					BoolView::Const(true) => unreachable!("invalid nogood: contains `true`"),
+					BoolView::Const(false) => None,
+				})
+				.collect(),
+		)
 	}
 }
 
-impl<C> ReasonBuilder<C> for Vec<C::Atom>
-where
-	C: ReasoningContext + ?Sized,
-{
-	fn build_reason(self, _: &mut C) -> Result<Reason<C::Atom>, bool> {
-		Reason::from_iter(self)
+impl<Atom: Debug> Error for Nogood<Atom> {}
+
+impl<Atom> IntoIterator for Nogood<Atom> {
+	type IntoIter = <Box<[Atom]> as IntoIterator>::IntoIter;
+
+	type Item = Atom;
+
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
+	}
+}
+
+impl<Atom: Debug> fmt::Display for Nogood<Atom> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "conflict detected: nogood {:?}", self.0)
 	}
 }
