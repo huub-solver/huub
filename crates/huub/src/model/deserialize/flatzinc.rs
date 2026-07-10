@@ -357,6 +357,12 @@ pub(crate) struct FznModelBuilder<'a> {
 	fzn: &'a FlatZinc<FznIdent>,
 	/// A mapping from FlatZinc identifiers to model views
 	map: FxHashMap<ArcKey<Variable<FznIdent>>, AnyView>,
+	/// A mapping from each FlatZinc variable to its index in
+	/// [`FlatZinc::variables`], used to reverse map model decisions to their
+	/// FlatZinc variable for the `reverse_map` trace target.
+	///
+	/// This map remains empty if the `reverse_map` trace target is disabled.
+	var_index: FxHashMap<ArcKey<Variable<FznIdent>>, u32>,
 	/// The incumbent model
 	prb: Model,
 	/// Flags indicating which constraints have been processed
@@ -1473,20 +1479,53 @@ impl<'a> FznModelBuilder<'a> {
 		match self.map.entry(var.cloned_key()) {
 			Entry::Vacant(e) => {
 				let view = match &var.ty {
-					Type::Bool => AnyView::Bool(self.prb.new_bool_decision()),
-					Type::Int(dom) => match dom {
-						Some(dom) => AnyView::Int(self.prb.new_int_decision(dom.clone())),
-						None => {
-							warn!(
-								target: "flatzinc",
-								variable = %var.name,
-								min = FULL_INT_DOMAIN.start(),
-								max = FULL_INT_DOMAIN.end(),
-								"assume full integer domain for unbounded decision variable"
+					Type::Bool => {
+						let model = self.prb.bool_vars.len() as u64;
+						let view = AnyView::Bool(self.prb.new_bool_decision());
+						// Register the model Boolean decision against its FlatZinc
+						// variable.
+						if tracing::enabled!(target: "reverse_map", tracing::Level::TRACE)
+							&& let Some(&fzn) = self.var_index.get(&var.cloned_key())
+						{
+							tracing::trace!(
+								target: "reverse_map",
+								fzn,
+								model,
+								"register model decision"
 							);
-							self.prb.new_int_decision(FULL_INT_DOMAIN).into()
 						}
-					},
+						view
+					}
+					Type::Int(dom) => {
+						let before = self.prb.int_vars.len();
+						let view = match dom {
+							Some(dom) => AnyView::Int(self.prb.new_int_decision(dom.clone())),
+							None => {
+								warn!(
+									target: "flatzinc",
+									variable = %var.name,
+									min = FULL_INT_DOMAIN.start(),
+									max = FULL_INT_DOMAIN.end(),
+									"assume full integer domain for unbounded decision variable"
+								);
+								self.prb.new_int_decision(FULL_INT_DOMAIN).into()
+							}
+						};
+						// Register the model integer decision against its FlatZinc
+						// variable, unless it's a constant.
+						if self.prb.int_vars.len() > before
+							&& tracing::enabled!(target: "reverse_map", tracing::Level::TRACE)
+							&& let Some(&fzn) = self.var_index.get(&var.cloned_key())
+						{
+							tracing::trace!(
+								target: "reverse_map",
+								fzn,
+								model = before as u64,
+								"register model decision"
+							);
+						}
+						view
+					}
 					ty => panic!("Variables of {:?} are not supported", ty),
 				};
 				Ok(e.insert(view).clone())
@@ -1496,9 +1535,21 @@ impl<'a> FznModelBuilder<'a> {
 	}
 	/// Create a new builder to create a model from a FlatZinc instance.
 	pub(crate) fn new(fzn: &'a FlatZinc<FznIdent>) -> Self {
+		// Build map from ArcKey to index if `reverse_map` tracing is enabled.
+		let var_index = tracing::enabled!(target: "reverse_map", tracing::Level::TRACE)
+			.then(|| {
+				fzn.variables
+					.iter()
+					.enumerate()
+					.map(|(i, v)| (v.cloned_key(), i as u32))
+					.collect()
+			})
+			.unwrap_or_default();
+
 		Self {
 			fzn,
 			map: FxHashMap::default(),
+			var_index,
 			prb: Model::default(),
 			processed: vec![false; fzn.constraints.len()],
 			stats: FlatZincStatistics::default(),

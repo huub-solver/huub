@@ -1233,6 +1233,31 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		// Drop engine to allow SAT interaction
 		drop(engine);
 
+		// Register the eager literals for tracing.
+		if tracing::enabled!(target: "reverse_map", tracing::Level::TRACE) {
+			let int_var = self.engine.borrow().state.int_vars.len() as u64;
+			let order = match &order_encoding {
+				OrderStorage::Eager { storage, .. } => i32::from(storage.start()),
+				OrderStorage::Lazy(_) => 0,
+			};
+			let eq = match &direct_encoding {
+				DirectStorage::Eager(vars) => i32::from(vars.start()),
+				DirectStorage::Lazy(_) => 0,
+			};
+			let dom: Vec<IntVal> = domain
+				.intervals()
+				.flat_map(|r| [*r.start(), *r.end()])
+				.collect();
+			tracing::trace!(
+				target: "reverse_map",
+				int_var,
+				order,
+				eq,
+				dom = ?dom,
+				"register solver int eager lits"
+			);
+		}
+
 		// Enforce consistency constraints for eager literals
 		if let OrderStorage::Eager { storage, .. } = &order_encoding {
 			let mut direct_enc_iter = if let DirectStorage::Eager(vars) = &direct_encoding {

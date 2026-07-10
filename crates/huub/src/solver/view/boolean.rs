@@ -32,18 +32,6 @@ pub enum BoolView {
 	Const(bool),
 }
 
-impl View<bool> {
-	/// Return an integer that can be used to identify the literal, if there is
-	/// one.
-	#[doc(hidden)]
-	pub fn reverse_map_info(&self) -> Option<NonZero<i32>> {
-		match self.0 {
-			BoolView::Lit(v) => Some(v.0.into()),
-			BoolView::Const(_) => None,
-		}
-	}
-}
-
 impl Add<IntVal> for View<bool> {
 	type Output = View<IntVal>;
 

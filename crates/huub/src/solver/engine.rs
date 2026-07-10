@@ -4,7 +4,7 @@
 macro_rules! trace_new_lit {
 	($iv:expr, $def:expr, $lit:expr) => {
 		tracing::trace!(
-			target: "literal",
+			target: "reverse_map",
 			lit = i32::from($lit),
 			int_var = $iv.ident(),
 			is_eq = matches!($def.meaning, IntLitMeaning::Eq(_)),
@@ -13,7 +13,7 @@ macro_rules! trace_new_lit {
 				IntLitMeaning::Less(val) => val,
 				_ => unreachable!(),
 			},
-			"register new literal"
+			"register solver int lazy lit"
 		);
 	};
 }

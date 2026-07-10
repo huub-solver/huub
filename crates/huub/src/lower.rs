@@ -1166,6 +1166,14 @@ impl LoweringMapBuilder {
 							Some(Polarity::Negative) => slv.sat.phase(!dcn.0),
 							None => {}
 						};
+						// Register the new solver literal based on a model Boolean
+						// decision.
+						tracing::trace!(
+							target: "reverse_map",
+							model = idx as u64,
+							lit = i32::from(dcn.0),
+							"register solver bool"
+						);
 						dcn.into()
 					}
 				};
@@ -1235,12 +1243,42 @@ impl LoweringMapBuilder {
 						} else {
 							LiteralStrategy::Lazy
 						};
+						// Register solver integer decision based, before its
+						// eager literals are created.
+						match card {
+							Some(1 | 2) => {}
+							_ if tracing::enabled!(target: "reverse_map", tracing::Level::TRACE) => {
+								let int_var = slv.engine.borrow().state.int_vars.len() as u64;
+								tracing::trace!(
+									target: "reverse_map",
+									model = var.idx() as u64,
+									int_var,
+									"register solver int"
+								);
+							}
+							_ => {}
+						};
 						let view = slv
 							.new_int_decision(dom.clone())
 							.order_literals(order_enc)
 							.direct_literals(direct_enc)
 							.maybe_polarity(def.polarity.resolve())
 							.view();
+						match view.0 {
+							// Register solver Boolean decision used to represent a model integer
+							// decision.
+							solver::IntView::Bool(lin) if tracing::enabled!(target: "reverse_map", tracing::Level::TRACE) =>
+							{
+								tracing::trace!(
+									target: "reverse_map",
+									model = var.idx() as u64,
+									lit = i32::from(lin.var.0),
+									geq = lin.offset + lin.scale.get(),
+									"register solver bool-backed int"
+								);
+							}
+							_ => {}
+						}
 						self.int_map[var.idx()] = Some(view);
 						view
 					}

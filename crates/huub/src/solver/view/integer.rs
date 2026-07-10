@@ -13,8 +13,7 @@ use crate::{
 		IntInspectionActions, IntPropagationActions, PropagationActions, ReasoningContext,
 	},
 	solver::{
-		Decision, IntLitMeaning, Solver, View,
-		decision::integer::{DirectStorage, OrderStorage},
+		Decision, IntLitMeaning, View,
 		view::{DefaultView, boolean::BoolView, private},
 	},
 	views::{LinearBoolView, LinearView},
@@ -38,71 +37,6 @@ impl DefaultView for IntVal {
 	type View = IntView;
 }
 impl private::Sealed for IntVal {}
-
-impl View<IntVal> {
-	/// Returns an integer that can be used to identify the associated integer
-	/// decision variable and whether the integer view is a view on another
-	/// decision variable.
-	#[doc(hidden)]
-	pub fn int_reverse_map_info(&self) -> (Option<u32>, bool) {
-		match self.0 {
-			IntView::Bool { .. } => (None, true),
-			IntView::Linear(lin) => (
-				Some(lin.var.ident()),
-				lin.offset == 0 && lin.scale == NonZero::new(1).unwrap(),
-			),
-			_ => (None, true),
-		}
-	}
-
-	/// Return a list of integers that can used to identify the literals that
-	/// are associated to an integer view, and the meaning of those literals.
-	#[doc(hidden)]
-	pub fn lit_reverse_map_info<Sat>(
-		&self,
-		slv: &Solver<Sat>,
-	) -> Vec<(NonZero<i32>, IntLitMeaning)> {
-		match self.0 {
-			IntView::Linear(lin) => {
-				let var = &slv.engine.borrow().state.int_vars[lin.var.idx()];
-				let mut lits = Vec::new();
-
-				if let OrderStorage::Eager { storage, .. } = &var.order_encoding {
-					let mut val_iter = var.domain.clone().into_iter().flatten();
-					val_iter.next();
-					for (lit, val) in (*storage).zip(val_iter) {
-						let i: NonZero<i32> = lit.into();
-						let orig = IntLitMeaning::Less(val);
-						let lt = lin.transform_meaning(orig);
-						let geq = !lt;
-						lits.extend([(i, lt), (-i, geq)]);
-					}
-				}
-
-				if let DirectStorage::Eager(vars) = &var.direct_encoding {
-					let mut val_iter = var.domain.clone().into_iter().flatten();
-					val_iter.next();
-					val_iter.next_back();
-					for (lit, val) in (*vars).zip(val_iter) {
-						let i: NonZero<i32> = lit.into();
-						let orig = IntLitMeaning::Eq(val);
-						let eq = lin.transform_meaning(orig);
-						let ne = !eq;
-						lits.extend([(i, eq), (-i, ne)]);
-					}
-				}
-				lits
-			}
-			IntView::Bool(lin) => {
-				let i: NonZero<i32> = lin.var.0.into();
-				let lb = lin.transform_meaning(IntLitMeaning::Eq(0));
-				let ub = lin.transform_meaning(IntLitMeaning::Eq(1));
-				vec![(i, ub), (-i, lb)]
-			}
-			_ => Vec::new(),
-		}
-	}
-}
 
 impl Add<IntVal> for View<IntVal> {
 	type Output = Self;

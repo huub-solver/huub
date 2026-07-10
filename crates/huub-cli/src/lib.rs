@@ -28,9 +28,8 @@ use std::{
 	cell::RefCell,
 	fmt::{self, Debug, Display},
 	io,
-	num::NonZeroI32,
 	sync::{
-		Arc, Mutex,
+		Arc,
 		atomic::{AtomicBool, Ordering},
 	},
 	time::Instant,
@@ -55,7 +54,7 @@ use tracing::{subscriber::set_default, warn};
 pub use crate::cli::Cli;
 use crate::{
 	cli::{CliSearchStrategy, CliSearchTrigger},
-	trace::{LitName, VarRef},
+	trace::ReverseMap,
 };
 
 /// Status message to output when it is proven that no more/better solutions can
@@ -97,31 +96,31 @@ impl<'a> Cli<'a> {
 	pub fn run(&mut self) -> Result<(), String> {
 		let (trace_writer, ansi_color) = self.trace_writer()?;
 		let trace_targets = self.trace_targets();
-		let lit_reverse_map: Arc<Mutex<FxHashMap<NonZeroI32, LitName>>> = Arc::default();
-		let int_reverse_map: Arc<Mutex<Vec<Option<VarRef>>>> = Arc::default();
-		let subscriber = trace::create_subscriber(
-			self.verbose,
-			&trace_targets,
-			trace_writer,
-			ansi_color,
-			Arc::clone(&lit_reverse_map),
-			Arc::clone(&int_reverse_map),
-		);
-		let _guard = set_default(subscriber);
-
-		let start = Instant::now();
-		let deadline = self.time_limit.map(|t| start + t);
 
 		let rdr = io::BufReader::new(
 			std::fs::File::open(&self.path)
 				.map_err(|_| format!("Unable to open file “{}”", self.path.display()))?,
 		);
-		let fzn: FlatZinc<_> = serde_json::from_reader(rdr).map_err(|_| {
+		let fzn: Arc<FlatZinc<_>> = Arc::new(serde_json::from_reader(rdr).map_err(|_| {
 			format!(
 				"Unable to parse file “{}” as FlatZinc JSON",
 				self.path.display()
 			)
-		})?;
+		})?);
+
+		let map = ReverseMap::new();
+		let subscriber = trace::create_subscriber(
+			self.verbose,
+			&trace_targets,
+			trace_writer,
+			ansi_color,
+			&map,
+			Arc::clone(&fzn),
+		);
+		let _guard = set_default(subscriber);
+
+		let start = Instant::now();
+		let deadline = self.time_limit.map(|t| start + t);
 
 		let (mut slv, meta): (Solver, _) = match fzn
 			.lower()
@@ -167,49 +166,6 @@ impl<'a> Cli<'a> {
 					),
 				],
 			);
-		}
-
-		if self.verbose > 0 {
-			let mut lit_map = lit_reverse_map.lock().unwrap();
-			let mut int_map = int_reverse_map.lock().unwrap();
-			debug_assert!(int_map.is_empty());
-			*int_map = vec![None; slv.init_statistics().int_decisions];
-			for (var, v) in &meta.names {
-				match v {
-					AnyView::Bool(bv) => {
-						let var: VarRef = var.clone().into();
-						if let Some(info) = bv.reverse_map_info() {
-							lit_map.insert(info, LitName::BoolVar(Arc::clone(&var), true));
-							lit_map.insert(-info, LitName::BoolVar(var, false));
-						}
-					}
-					AnyView::Int(iv) => {
-						let var: VarRef = var.clone().into();
-						let (pos, is_view) = iv.int_reverse_map_info();
-						if let Some(i) = pos {
-							if !is_view || int_map[i as usize].is_none() {
-								int_map[i as usize] = Some(Arc::clone(&var));
-								for (lit, meaning) in iv.lit_reverse_map_info(&slv) {
-									lit_map.insert(lit, LitName::IntLit(Arc::clone(&var), meaning));
-								}
-							} else {
-								debug_assert!(
-									iv.lit_reverse_map_info(&slv)
-										.iter()
-										.all(|(lit, _)| { lit_map.contains_key(lit) })
-								);
-							}
-						} else {
-							debug_assert!(is_view);
-							for (lit, meaning) in iv.lit_reverse_map_info(&slv) {
-								lit_map
-									.entry(lit)
-									.or_insert_with(|| LitName::IntLit(Arc::clone(&var), meaning));
-							}
-						}
-					}
-				}
-			}
 		}
 
 		let trigger = match self.search_trigger {
