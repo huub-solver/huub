@@ -40,6 +40,7 @@ tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 divan = { workspace = true }
+drcp-format = { workspace = true }
 expect-test = { workspace = true }
 
 [lints]

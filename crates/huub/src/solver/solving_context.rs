@@ -446,6 +446,22 @@ impl<'a> SolvingContext<'a> {
 			prop = self.current_prop.index(),
 			"propagate"
 		);
+		if let Some(proof) = &mut self.state.proof {
+			// Record the propagator queuing this propagation, so that the reason
+			// clause requested for it later can be labelled with the
+			// propagator's provenance.
+			let has_source = proof
+				.propagator_source
+				.get(self.current_prop.index())
+				.is_some_and(Option::is_some);
+			if has_source {
+				let _ = proof.reason_source.insert(lit.0, self.current_prop);
+			} else {
+				// Remove any stale source (e.g., from a previous search attempt)
+				// to avoid mislabeling.
+				let _ = proof.reason_source.remove(&lit.0);
+			}
+		}
 		self.state.propagation_queue.push_back(LitPropagation {
 			lit: lit.0,
 			reason,
@@ -505,6 +521,16 @@ impl<'a> SolvingContext<'a> {
 				let mut clause: Vec<RawLit> = Vec::new();
 				conflict.explain(propagators, self.state, ClauseBuilder::new(&mut clause));
 				self.state.conflict = Some(clause.into_boxed_slice());
+				if let Some(proof) = &mut self.state.proof {
+					// Record the propagator that detected the conflict, so that
+					// the conflict clause communicated to the SAT oracle can be
+					// labelled with the propagator's provenance.
+					proof.conflict_source = proof
+						.propagator_source
+						.get(p as usize)
+						.is_some_and(Option::is_some)
+						.then(|| PropRef::from_raw(p));
+				}
 			}
 			if self.state.conflict.is_some() || !self.state.propagation_queue.is_empty() {
 				return;

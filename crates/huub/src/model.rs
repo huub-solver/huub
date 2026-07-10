@@ -44,6 +44,7 @@ use crate::{
 	solver::{
 		IntLitMeaning, Polarity,
 		activation_list::ActivationAction,
+		proof::ConstraintSource,
 		queue::{PropagatorInfo, PropagatorQueue},
 	},
 };
@@ -115,6 +116,18 @@ pub struct Model {
 	pub(crate) cnf: Cnf,
 	/// A list of constraints that have been added to the model.
 	pub(crate) constraints: Vec<Option<BoxedConstraint>>,
+	/// The provenance of each constraint in [`Self::constraints`], used to
+	/// label clauses when proof logging is enabled.
+	///
+	/// This storage is kept in lockstep with [`Self::constraints`].
+	pub(crate) provenance: Vec<Option<ConstraintSource>>,
+	/// The provenance that will be attached to the next constraint posted to
+	/// the model.
+	///
+	/// This register is sticky: it is read (but not consumed) when a constraint
+	/// is posted, allowing a batch of constraints stemming from the same source
+	/// to be labelled by setting the register once.
+	next_provenance: Option<ConstraintSource>,
 	/// The definitions of the Boolean decision variables that have been
 	/// created.
 	pub(crate) bool_vars: Vec<BoolDecision>,
@@ -245,6 +258,13 @@ impl Model {
 	/// paths that need to add a constraint before deciding whether to
 	/// propagate it immediately.
 	fn initialize_constraint<C: Constraint<Self>>(&mut self, constraint: C) -> (ConRef, bool) {
+		// Determine the provenance of the new constraint: either the current
+		// `next_provenance` register, or — when a constraint is rewritten during
+		// propagation — the provenance of the constraint that posted it.
+		let provenance = self.next_provenance.or_else(|| {
+			self.cur_prop
+				.and_then(|c| self.provenance.get(c.index()).copied().flatten())
+		});
 		let con = ConRef::new(self.constraints.len());
 		let mut ctx = ModelInitContext::new(self, con);
 		let mut constraint = constraint;
@@ -252,6 +272,8 @@ impl Model {
 		let priority = ctx.priority;
 		let enqueue = ctx.enqueue();
 		self.constraints.push(Some(Box::new(constraint)));
+		self.provenance.push(provenance);
+		debug_assert_eq!(self.constraints.len(), self.provenance.len());
 		let r = ConRef::new(self.constraints.len() - 1);
 		debug_assert_eq!(r, con);
 		self.propagator_queue.info.push(PropagatorInfo {
@@ -575,6 +597,19 @@ impl Model {
 		}
 		self.notify_advisors();
 		Ok(())
+	}
+
+	/// Set the [`ConstraintSource`] that will be attached to the constraints
+	/// subsequently posted to the model.
+	///
+	/// The register is sticky: it remains in effect until it is overwritten or
+	/// cleared by setting it to `None`.
+	#[cfg_attr(
+		not(feature = "flatzinc"),
+		expect(dead_code, reason = "only used by the `flatzinc` deserializer")
+	)]
+	pub(crate) fn set_next_provenance(&mut self, provenance: Option<ConstraintSource>) {
+		self.next_provenance = provenance;
 	}
 
 	/// Invoke `f` with a [`ConRef`] for each constraint that the given integer

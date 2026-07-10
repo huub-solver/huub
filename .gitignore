@@ -14,3 +14,9 @@ target/
 !/share/minizinc
 /share/minizinc/*
 !/share/minizinc/huub
+
+# Proof logging output
+*.drcp
+*.pbp
+*.lits
+*.lits.json

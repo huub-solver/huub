@@ -22,10 +22,13 @@ use std::{collections::VecDeque, mem};
 
 use pindakaas::{
 	Lit as RawLit, Var as RawVar,
-	solver::propagation::{
-		ClauseBuilder, ClausePersistence, Propagator as PropagatorExtension,
-		PropagatorConfig as PropagatorExtensionConfig, SearchDecision,
-		Solution as ExternalSolution, SolvingActions,
+	solver::{
+		cadical::{ProofConclusionType, ProofTracer, ProofTracerConfig},
+		propagation::{
+			ClauseBuilder, ClausePersistence, Propagator as PropagatorExtension,
+			PropagatorConfig as PropagatorExtensionConfig, SearchDecision,
+			Solution as ExternalSolution, SolvingActions,
+		},
 	},
 };
 use rustc_hash::FxHashMap;
@@ -50,6 +53,7 @@ use crate::{
 			integer::{IntDecision, OrderStorage},
 		},
 		initialization_context::InitializationContext,
+		proof::{ProofSource, ProofState},
 		queue::PropagatorQueue,
 		solving_context::SolvingContext,
 		trail::Trail,
@@ -203,6 +207,12 @@ pub struct State {
 	// ---- Non-Trailed Infrastructure ----
 	/// Storage for clauses to be communicated to the solver.
 	pub(crate) clauses: VecDeque<Clause<RawLit>>,
+	/// Bookkeeping to support proof logging.
+	///
+	/// This field is `None` unless proof logging was enabled when the solver
+	/// was created, ensuring that the provenance tracking does not affect the
+	/// performance of the solver when proof logging is disabled.
+	pub(crate) proof: Option<Box<ProofState>>,
 	/// Solving statistics.
 	pub(crate) statistics: EngineStatistics,
 	/// Whether search decisions are currently being deferred to the SAT solver.
@@ -386,6 +396,117 @@ impl Engine {
 	}
 }
 
+/// Implementation of the proof tracer interface of the SAT oracle.
+///
+/// When proof logging is enabled, the [`Engine`] is connected to the oracle as
+/// a proof tracer, and these callbacks emit `tracing` events on the `"proof"`
+/// target. The events are intended to be captured by a tracing subscriber
+/// (such as the one in the `huub-cli` crate) that formats them into a proof
+/// file. Note that these callbacks are only invoked when a proof tracer is
+/// connected, i.e. only when proof logging is enabled.
+impl ProofTracer for Engine {
+	fn add_assumption(&mut self, lit: RawLit) {
+		trace!(target: "proof", lit = i32::from(lit), "add assumption");
+	}
+
+	fn add_assumption_clause(&mut self, id: i64, clause: &[RawLit], antecedents: &[i64]) {
+		trace!(
+			target: "proof",
+			id,
+			clause = ?clause.iter().map(|&l| i32::from(l)).collect::<Vec<i32>>(),
+			antecedents = ?antecedents,
+			"add assumption clause"
+		);
+	}
+
+	fn add_derived_clause(
+		&mut self,
+		id: i64,
+		redundant: bool,
+		_witness: Option<RawLit>,
+		clause: &[RawLit],
+		antecedents: &[i64],
+	) {
+		trace!(
+			target: "proof",
+			id,
+			redundant,
+			clause = ?clause.iter().map(|&l| i32::from(l)).collect::<Vec<i32>>(),
+			antecedents = ?antecedents,
+			"add derived clause"
+		);
+	}
+
+	fn add_original_clause(&mut self, id: i64, redundant: bool, clause: &[RawLit], restored: bool) {
+		let mut propagated = 0_i32;
+		let (hint, constraint) = if let Some(proof) = &mut self.state.proof {
+			if let Some(lit) = proof.next_propagated.take() {
+				propagated = i32::from(lit);
+			}
+			proof.resolve_hint()
+		} else {
+			("", None)
+		};
+		trace!(
+			target: "proof",
+			id,
+			redundant,
+			restored,
+			clause = ?clause.iter().map(|&l| i32::from(l)).collect::<Vec<i32>>(),
+			propagated,
+			hint,
+			constraints = ?constraint.as_slice(),
+			"add original clause"
+		);
+	}
+
+	fn begin_proof(&mut self, first_derived_id: i64) {
+		trace!(target: "proof", first_derived_id, "begin proof");
+	}
+
+	fn conclude_sat(&mut self, _assignment: &[RawLit]) {
+		// Note that the satisfying assignment is not emitted, as it can be
+		// excessively large and is not required by the supported proof formats.
+		trace!(target: "proof", "conclude sat");
+	}
+
+	fn conclude_unknown(&mut self, _trail: &[RawLit]) {
+		trace!(target: "proof", "conclude unknown");
+	}
+
+	fn conclude_unsat(&mut self, conclusion_type: ProofConclusionType, clause_ids: &[i64]) {
+		trace!(
+			target: "proof",
+			conclusion_type = ?conclusion_type,
+			clause_ids = ?clause_ids,
+			"conclude unsat"
+		);
+	}
+
+	fn delete_clause(&mut self, id: i64, redundant: bool, clause: &[RawLit]) {
+		trace!(
+			target: "proof",
+			id,
+			redundant,
+			clause = ?clause.iter().map(|&l| i32::from(l)).collect::<Vec<i32>>(),
+			"delete clause"
+		);
+	}
+
+	fn reset_assumptions(&mut self) {
+		trace!(target: "proof", "reset assumptions");
+	}
+
+	fn solve_query(&mut self) {
+		trace!(target: "proof", "solve query");
+	}
+}
+
+impl ProofTracerConfig for Engine {
+	const ANTECEDENTS: bool = true;
+	const FINALIZE_CLAUSES: bool = false;
+}
+
 impl PropagatorExtension for Engine {
 	#[tracing::instrument(target = "solver", level = "debug", skip(self, slv, _sol))]
 	fn check_solution(&mut self, slv: &mut dyn SolvingActions, _sol: ExternalSolution<'_>) -> bool {
@@ -473,11 +594,19 @@ impl PropagatorExtension for Engine {
 		// Preserve the conflict clause across the backtrack below, which clears
 		// `state.conflict`.
 		let conflict = self.state.conflict.take();
+		let conflict_source = self
+			.state
+			.proof
+			.as_mut()
+			.and_then(|proof| proof.conflict_source.take());
 
 		// Revert to real decision level
 		self.notify_backtrack::<true>(level as usize, false);
 		debug_assert!(self.state.conflict.is_none());
 		self.state.conflict = conflict;
+		if let Some(proof) = &mut self.state.proof {
+			proof.conflict_source = conflict_source;
+		}
 
 		let accept = self.state.conflict.is_none();
 		debug!(target: "solver", accept, "check model");
@@ -812,6 +941,14 @@ impl PropagatorExtension for Engine {
 				clause = ?cl.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(),
 				"add external clause"
 			);
+			if let Some(proof) = &mut self.state.proof {
+				// Note that the clause queue is currently only used for the
+				// defining clauses of (lazily created) integer literals. If new
+				// producers of queued clauses are added, then a sidecar queue of
+				// proof sources will be required to label them correctly.
+				proof.next_hint = Some(ProofSource::Rule("lit_def"));
+				proof.next_propagated = None;
+			}
 			clause.extend(cl);
 			Some(ClausePersistence::Irredundant)
 		} else if !self.state.propagation_queue.is_empty() {
@@ -822,6 +959,10 @@ impl PropagatorExtension for Engine {
 				clause = ?conflict.iter().map(|&x| i32::from(x)).collect::<Vec<i32>>(),
 				"add conflict clause"
 			);
+			if let Some(proof) = &mut self.state.proof {
+				proof.next_hint = proof.conflict_source.take().map(ProofSource::Propagator);
+				proof.next_propagated = conflict.first().copied();
+			}
 			clause.extend(conflict.iter().copied());
 			Some(ClausePersistence::Forgettable)
 		} else {
@@ -1030,6 +1171,10 @@ impl State {
 		// Resolve the conflict status
 		self.failed = false;
 		self.conflict = None;
+		if let Some(proof) = &mut self.proof {
+			// The conflict source sidecar follows the conflict itself.
+			proof.conflict_source = None;
+		}
 		// Remove (now invalid) propagations (but leave clauses in place)
 		self.last_propagated = None;
 		self.propagation_queue.clear();
@@ -1102,6 +1247,10 @@ impl State {
 				// Memory cleanup (Reasons are known to no longer be relevant).
 				self.reason_map.clear();
 				self.trail.clear_reason_trail();
+				if let Some(proof) = &mut self.proof {
+					// The reason source sidecar follows the reason map itself.
+					proof.reason_source.clear();
+				}
 			}
 		}
 	}

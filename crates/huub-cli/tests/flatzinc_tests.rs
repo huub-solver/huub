@@ -7,7 +7,7 @@ mod helpers;
 mod tests {
 	use crate::helpers::{
 		FZN_COMPLETE, FZN_UNSATISFIABLE, assert_all_optimal, assert_all_solutions, assert_core,
-		assert_first_solution, assert_optimal, assert_search_order, assert_unsat,
+		assert_first_solution, assert_optimal, assert_proof, assert_search_order, assert_unsat,
 	};
 
 	assert_all_solutions!(array_var_int_element);
@@ -37,6 +37,10 @@ mod tests {
 	assert_first_solution!(warm_start_success);
 
 	assert_optimal!(unbounded);
+
+	assert_proof!(proof_pigeonhole_unsat, pigeonhole_unsat, true);
+	assert_proof!(proof_array_var_int_element, array_var_int_element, false);
+	assert_proof!(proof_jobshop_newspaper, jobshop_newspaper, true);
 
 	assert_search_order!(bool_indomain_max);
 	assert_search_order!(bool_indomain_min);

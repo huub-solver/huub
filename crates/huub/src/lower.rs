@@ -9,6 +9,7 @@ use std::{
 	marker::PhantomData,
 	num::NonZeroI32,
 	ops::Not,
+	rc::Rc,
 };
 
 use bon::Builder;
@@ -52,7 +53,7 @@ use crate::{
 		view::integer::IntView,
 	},
 	solver::{
-		self, IntLitMeaning, LiteralStrategy, Polarity, Solver, engine::Engine,
+		self, IntLitMeaning, LiteralStrategy, Polarity, Solver, engine::Engine, proof::ProofSource,
 		view::boolean::BoolView,
 	},
 	views::LinearBoolView,
@@ -105,6 +106,15 @@ pub(crate) struct LowererComplete<Origin = ()> {
 	/// order encoding is created lazily.
 	#[builder(default = Lowerer::DEFAULT_INT_EAGER_LIMIT)]
 	int_eager_limit: usize,
+	/// Whether to enable proof logging in the resulting [`Solver`].
+	///
+	/// When enabled, the solver is connected to the SAT oracle as a proof
+	/// tracer, and `tracing` events describing the clauses that are added and
+	/// derived are emitted on the `"proof"` target. Note that proof logging is
+	/// only supported when the CaDiCaL oracle is used, and that enabling it
+	/// will slow down the solving process.
+	#[builder(default = Lowerer::DEFAULT_PROOF)]
+	proof: bool,
 	/// The number of preprocessing rounds in the SAT solver
 	#[builder(default = Lowerer::DEFAULT_PREPROCESSING)]
 	preprocessing: usize,
@@ -554,6 +564,8 @@ impl Lowerer {
 	/// The default value when [`probing`](Lowerer::probing) is not explicitly
 	/// set.
 	pub const DEFAULT_PROBING: bool = false;
+	/// The default value when [`proof`](Lowerer::proof) is not explicitly set.
+	pub const DEFAULT_PROOF: bool = false;
 	/// The default value when [`reason_eager`](Lowerer::reason_eager) is not
 	/// explicitly set.
 	pub const DEFAULT_REASON_EAGER: bool = false;
@@ -655,6 +667,7 @@ impl<State: lowerer::State> Lowerer<Result<FlatZincLowerData, FlatZincError>, St
 			preprocessing: complete.preprocessing,
 			preprocessing_light: complete.preprocessing_light,
 			probing: complete.probing,
+			proof: complete.proof,
 			reduce_interval: complete.reduce_interval,
 			reduce_type: complete.reduce_type,
 			restart: complete.restart,
@@ -720,6 +733,7 @@ impl LowererComplete<&mut Model> {
 			preprocessing,
 			preprocessing_light,
 			probing,
+			proof,
 			reduce_interval,
 			reduce_type,
 			restart,
@@ -733,6 +747,14 @@ impl LowererComplete<&mut Model> {
 		let mut slv = Solver::<Sat>::default();
 		let any_slv: &mut dyn Any = &mut slv.sat;
 		if let Some(r) = any_slv.downcast_mut::<Cadical>() {
+			if proof {
+				// Allocate the proof logging state and connect the engine as a
+				// proof tracer to the oracle. Note that this must happen before
+				// any clause is added to the oracle.
+				slv.engine.borrow_mut().state.proof = Some(Box::default());
+				r.connect_proof_tracer(Rc::clone(&slv.engine));
+			}
+
 			// Set the solver options for preprocessing/inprocessing
 			r.set_option("condition", conditioning as i32);
 			r.set_option("elim", variable_elimination as i32);
@@ -751,6 +773,12 @@ impl LowererComplete<&mut Model> {
 			// user search heuristics are provided
 			r.set_option("restart", restart as i32);
 		} else {
+			if proof {
+				warn!(
+					target: "solver",
+					"proof logging is only supported when using the CaDiCaL oracle"
+				);
+			}
 			warn!(
 				target: "solver",
 				"ignore vivification and restart options for unknown solver"
@@ -798,10 +826,23 @@ impl LowererComplete<&mut Model> {
 		let map = map_builder.finalize();
 
 		// Create constraint data structures within the solver
-		let mut ctx = LoweringContext::new(&mut slv, &map, &model.trail);
-		for c in model.constraints.iter().flatten() {
+		debug_assert_eq!(model.constraints.len(), model.provenance.len());
+		for (c, prov) in model.constraints.iter().zip(model.provenance.iter()) {
+			let Some(c) = c else {
+				continue;
+			};
+			// Label the clauses (and propagators) created for this constraint
+			// with its provenance when proof logging is enabled.
+			if let Some(prov) = prov {
+				slv.set_proof_hint(|| ProofSource::Constraint(*prov));
+			} else {
+				slv.clear_proof_hint();
+			}
+			let mut ctx = LoweringContext::new(&mut slv, &map, &model.trail);
 			c.to_solver(&mut ctx)?;
 		}
+		// Clear the proof hint register after the constraint lowering loop.
+		slv.clear_proof_hint();
 
 		Ok((slv, map))
 	}
