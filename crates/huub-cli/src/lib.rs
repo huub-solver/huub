@@ -22,6 +22,7 @@ macro_rules! outputln {
 }
 
 mod cli;
+mod proof;
 mod trace;
 
 use std::{
@@ -49,11 +50,12 @@ use huub::{
 };
 use mimalloc::MiMalloc;
 use rustc_hash::FxHashMap;
-use tracing::{subscriber::set_default, warn};
+use tracing::{subscriber::set_default, trace, warn};
 
 pub use crate::cli::Cli;
 use crate::{
 	cli::{CliSearchStrategy, CliSearchTrigger},
+	proof::ProofLayer,
 	trace::ReverseMap,
 };
 
@@ -109,6 +111,18 @@ impl<'a> Cli<'a> {
 		})?);
 
 		let map = ReverseMap::new();
+		let proof_config = self.proof_config();
+		let proof_layer = if let Some(config) = &proof_config {
+			Some(ProofLayer::new(config, Arc::clone(&map)).map_err(|err| {
+				format!(
+					"Unable to open proof file “{}”: {err}",
+					config.path.display()
+				)
+			})?)
+		} else {
+			None
+		};
+
 		let subscriber = trace::create_subscriber(
 			self.verbose,
 			&trace_targets,
@@ -116,6 +130,7 @@ impl<'a> Cli<'a> {
 			ansi_color,
 			&map,
 			Arc::clone(&fzn),
+			proof_layer,
 		);
 		let _guard = set_default(subscriber);
 
@@ -129,6 +144,7 @@ impl<'a> Cli<'a> {
 			.conditioning(self.cadical.conditioning)
 			.inprocessing(self.cadical.inprocessing)
 			.probing(self.cadical.probing)
+			.proof(proof_config.is_some())
 			.reason_eager(self.cadical.reason_eager)
 			.reduce_interval(self.cadical.reduce_interval)
 			.reduce_type(self.cadical.reduce_type.into())
@@ -142,6 +158,12 @@ impl<'a> Cli<'a> {
 			Err(FlatZincError::ReformulationError(
 				LoweringError::Simplification(_) | LoweringError::Lowering(_),
 			)) => {
+				// End the proof even if found to be UNSAT at the reformulation stage
+				trace!(
+					target: "proof",
+					status = ?Status::Unsatisfiable,
+					"end proof"
+				);
 				outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
 				return Ok(());
 			}
@@ -271,6 +293,11 @@ impl<'a> Cli<'a> {
 				);
 			}
 		};
+
+		// Determine the goal decision variable, used to conclude the proof.
+		let proof_obj: Option<(&str, bool)> = proof_config.and_then(|_| {
+			obj_name.map(|name| (name, matches!(fzn.solve.method, Method::Minimize(_))))
+		});
 
 		let (status, obj_val) = match meta.goal {
 			Some(goal) => {
@@ -412,6 +439,24 @@ impl<'a> Cli<'a> {
 				core.push(bound_label);
 			}
 			outputln!(self.stdout, "%%%mzn-core: [{}]", core.join(", "));
+		}
+		// Conclusion of the proof in proof writer. Note that this event is used
+		// instead of the conclusion events of the SAT oracle, to ensure the proof
+		// is concluded even when the search is interrupted.
+		match (proof_obj, obj_val) {
+			(Some((obj_name, minimize)), Some(objective)) => trace!(
+				target: "proof",
+				status = ?status,
+				objective,
+				obj_name,
+				minimize,
+				"end proof"
+			),
+			_ => trace!(
+				target: "proof",
+				status = ?status,
+				"end proof"
+			),
 		}
 		match status {
 			Status::Satisfied => {}

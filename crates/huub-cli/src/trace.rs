@@ -29,6 +29,8 @@ use tracing_subscriber::{
 	layer::{Context, SubscriberExt},
 };
 
+use crate::proof::ProofLayer;
+
 /// A [`tracing_subscriber::FormatFields`] implementation that attempts to
 /// format literals and integer variables according to their FlatZinc names,
 /// formatting all other fields using a `DefaultFields` formatter.
@@ -137,7 +139,7 @@ enum RegistrationKind {
 /// Shared as an `Arc<Mutex<ReverseMap>>`, so that all of the mappings are
 /// guarded together by a single lock: a registration event, which may touch
 /// several of them, is applied atomically. It is populated by a
-/// [`ReverseMapLayer`] and read by the formatter through
+/// [`ReverseMapLayer`] and read by the formatter and the proof writers through
 /// the model-level ([`ReverseMap::model_int`], [`ReverseMap::model_bool`]) and
 /// solver-level ([`ReverseMap::solver_int`], [`ReverseMap::solver_lit`]) lookup
 /// methods.
@@ -182,6 +184,9 @@ pub(crate) type VarRef = Arc<Variable<FznIdent>>;
 /// registered to build those mappings from the registration messages emitted on
 /// the `"reverse_map"` target, reusing the decision variables of the shared
 /// `fzn` instance to resolve them without re-allocating names.
+///
+/// When a `proof_layer` is given, it receives the events emitted on the
+/// `"proof"` target.
 pub(crate) fn create_subscriber<W>(
 	verbose: u8,
 	trace_targets: &[String],
@@ -189,6 +194,7 @@ pub(crate) fn create_subscriber<W>(
 	ansi: bool,
 	map: &Arc<Mutex<ReverseMap>>,
 	fzn: Arc<FlatZinc<FznIdent>>,
+	proof_layer: Option<ProofLayer>,
 ) -> impl Subscriber
 where
 	W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
@@ -211,11 +217,17 @@ where
 		.map_fmt_fields(|fmt| FmtLitFields::new(fmt, Arc::clone(map)))
 		.with_filter(filter);
 
+	// Filter ensuring the proof layer only receives the events emitted on the
+	// "proof" target.
+	let proof_filter = Targets::new()
+		.with_target("proof", LevelFilter::TRACE)
+		.with_default(LevelFilter::OFF);
+
 	tracing_subscriber::registry()
 		.with(
 			ReverseMapLayer::new(fzn, Arc::clone(map)).with_filter(Targets::new().with_target(
 				"reverse_map",
-				if verbose > 0 {
+				if verbose > 0 || proof_layer.is_some() {
 					Level::TRACE.into()
 				} else {
 					LevelFilter::OFF
@@ -223,6 +235,7 @@ where
 			)),
 		)
 		.with(fmt_layer)
+		.with(proof_layer.map(|layer| layer.with_filter(proof_filter)))
 }
 
 /// Parse a [`Debug`]-formatted list of integers, e.g. `[1, -2, 3]`, as produced
@@ -483,6 +496,21 @@ impl RegistrationKind {
 }
 
 impl ReverseMap {
+	/// Create a shared reverse map pre-populated with the given solver-level
+	/// literal and integer-variable mappings, for tests that exercise the proof
+	/// writers without going through registration events.
+	#[cfg(test)]
+	pub(crate) fn from_solver_maps(
+		solver_lits: FxHashMap<LitInt, LitName>,
+		solver_int_names: Vec<Option<VarRef>>,
+	) -> Arc<Mutex<Self>> {
+		Arc::new(Mutex::new(Self {
+			solver_lits,
+			solver_int_names,
+			..Default::default()
+		}))
+	}
+
 	/// Register the integer literal `lit` (and its negation) as the given
 	/// meaning of `var`.
 	fn insert_int_lit(&mut self, lit: i32, var: &VarRef, m: IntLitMeaning) {

@@ -6,6 +6,7 @@ pub mod branchers;
 pub(crate) mod decision;
 pub(crate) mod engine;
 pub(crate) mod initialization_context;
+pub(crate) mod proof;
 pub(crate) mod queue;
 pub(crate) mod solution;
 pub(crate) mod solving_context;
@@ -57,6 +58,7 @@ use crate::{
 		decision::integer::{DirectStorage, IntDecision, LazyOrderStorage, OrderStorage},
 		engine::{Engine, PropRef},
 		initialization_context::InitializationContext,
+		proof::ProofSource,
 		queue::PropagatorInfo,
 	},
 	views::LinearBoolView,
@@ -724,6 +726,7 @@ where
 					"add objective bound"
 				);
 				if bind_using_clauses {
+					solver.set_proof_rule("objective_bound");
 					solver.add_clause([bound_lit]).unwrap();
 				} else {
 					let BoolView::Lit(l) = bound_lit.0 else {
@@ -894,6 +897,45 @@ where
 	}
 }
 
+impl<Sat> Solver<Sat> {
+	/// Clear the current proof hint, ensuring that subsequent clauses
+	/// communicated to the SAT oracle are not labelled with a stale provenance.
+	///
+	/// This method is a no-op when proof logging is disabled.
+	pub(crate) fn clear_proof_hint(&mut self) {
+		if let Some(proof) = &mut self.engine.borrow_mut().state.proof {
+			proof.next_hint = None;
+		}
+	}
+
+	/// Whether proof logging is enabled for this solver instance.
+	pub fn proof(&self) -> bool {
+		self.engine.borrow().state.proof.is_some()
+	}
+
+	/// Register the [`ProofSource`] constructed by `src` and use it as the
+	/// proof hint for the clauses (and propagators) subsequently added to the
+	/// solver.
+	///
+	/// Note that `src` is only invoked when proof logging is enabled, making
+	/// this method a no-op without cost when proof logging is disabled.
+	pub(crate) fn set_proof_hint(&mut self, src: impl FnOnce() -> ProofSource) {
+		if let Some(proof) = &mut self.engine.borrow_mut().state.proof {
+			proof.next_hint = Some(src());
+		}
+	}
+
+	/// Set the proof hint for the clauses (and propagators) subsequently added
+	/// to the solver to the solver-internal rule with the given name.
+	///
+	/// This method is a no-op when proof logging is disabled.
+	pub(crate) fn set_proof_rule(&mut self, name: &'static str) {
+		if let Some(proof) = &mut self.engine.borrow_mut().state.proof {
+			proof.next_hint = Some(ProofSource::Rule(name));
+		}
+	}
+}
+
 impl<Sat: ExternalPropagation + ClauseDatabase> Solver<Sat> {
 	/// Add a clause to the solver, returning the resolved conflict [`Nogood`]
 	/// if the clause makes the problem unsatisfiable.
@@ -1045,6 +1087,17 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		let mut handle = self.engine.borrow_mut();
 		let engine = &mut *handle;
 		engine.propagators.push(propagator);
+		if let Some(proof) = &mut engine.state.proof {
+			// Register the provenance of the constraint currently being lowered
+			// as the default proof source of the new propagator, keeping the
+			// sidecar storage in lockstep with the propagator storage.
+			let src = match &proof.next_hint {
+				Some(ProofSource::Constraint(src)) => Some(*src),
+				_ => None,
+			};
+			proof.propagator_source.push(src);
+			debug_assert_eq!(proof.propagator_source.len(), engine.propagators.len());
+		}
 		let prop_ref = PropRef::new(engine.propagators.len() - 1);
 		let mut ctx = InitializationContext::new(&mut engine.state, prop_ref);
 		engine.propagators[prop_ref.index()].initialize(&mut ctx);
@@ -1117,6 +1170,10 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 				.collect::<Vec<i32>>(),
 			"add solution nogood"
 		);
+		// Note that the proof hint is set after the creation of the clause, as
+		// the creation of the (lazy) literals in the clause might itself queue
+		// defining clauses.
+		self.set_proof_rule("solution_nogood");
 		self.add_clause(clause)
 	}
 
@@ -1259,6 +1316,7 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		}
 
 		// Enforce consistency constraints for eager literals
+		self.set_proof_rule("lit_def");
 		if let OrderStorage::Eager { storage, .. } = &order_encoding {
 			let mut direct_enc_iter = if let DirectStorage::Eager(vars) = &direct_encoding {
 				Some(*vars)
