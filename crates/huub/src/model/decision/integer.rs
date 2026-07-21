@@ -198,7 +198,7 @@ impl IntPropagationActions<Model> for Decision<IntVal> {
 			val,
 			Model::adapt_reason(reason),
 		)
-		.map_err(Conflict::into_nogood)
+		.map_err(Conflict::into_model_nogood)
 	}
 
 	fn remove_val(
@@ -212,7 +212,7 @@ impl IntPropagationActions<Model> for Decision<IntVal> {
 			val,
 			Model::adapt_reason(reason),
 		)
-		.map_err(Conflict::into_nogood)
+		.map_err(Conflict::into_model_nogood)
 	}
 
 	fn tighten_max(
@@ -226,7 +226,7 @@ impl IntPropagationActions<Model> for Decision<IntVal> {
 			val,
 			Model::adapt_reason(reason),
 		)
-		.map_err(Conflict::into_nogood)
+		.map_err(Conflict::into_model_nogood)
 	}
 
 	fn tighten_min(
@@ -240,7 +240,7 @@ impl IntPropagationActions<Model> for Decision<IntVal> {
 			val,
 			Model::adapt_reason(reason),
 		)
-		.map_err(Conflict::into_nogood)
+		.map_err(Conflict::into_model_nogood)
 	}
 }
 
@@ -294,7 +294,7 @@ impl IntSimplificationActions<Model> for Decision<IntVal> {
 			values,
 			Model::adapt_reason(reason),
 		)
-		.map_err(Conflict::into_nogood)
+		.map_err(Conflict::into_model_nogood)
 	}
 
 	fn restrict_domain(
@@ -308,12 +308,12 @@ impl IntSimplificationActions<Model> for Decision<IntVal> {
 			domain,
 			Model::adapt_reason(reason),
 		)
-		.map_err(Conflict::into_nogood)
+		.map_err(Conflict::into_model_nogood)
 	}
 
 	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Nogood<View<bool>>> {
 		self.unify(&mut SimplificationContext(ctx), other)
-			.map_err(Conflict::into_nogood)
+			.map_err(Conflict::into_model_nogood)
 	}
 }
 
@@ -474,8 +474,8 @@ impl Resolved<Decision<IntVal>> {
 		};
 		let diff: IntSet = dom.diff(values);
 		if diff.is_empty() {
-			return Err(ctx.create_conflict(
-				View(BoolView::IntNotEq(self.0, *values.min().unwrap())),
+			return Err(ctx.make_conflict(
+				Some(View(BoolView::IntNotEq(self.0, *values.min().unwrap()))),
 				reason,
 			));
 		}
@@ -521,7 +521,7 @@ impl Resolved<Decision<IntVal>> {
 			model.int_events.insert(self.0.0, IntEvent::Fixed);
 			Ok(())
 		} else {
-			Err(ctx.create_conflict(View(BoolView::IntEq(self.0, val)), reason))
+			Err(ctx.make_conflict(Some(View(BoolView::IntEq(self.0, val))), reason))
 		}
 	}
 
@@ -550,7 +550,7 @@ impl Resolved<Decision<IntVal>> {
 		let intersect: IntSet = dom.intersect(domain);
 		if intersect.is_empty() {
 			let subject = View(BoolView::IntNotEq(self.0, *dom.min().unwrap()));
-			return Err(ctx.create_conflict(subject, reason));
+			return Err(ctx.make_conflict(Some(subject), reason));
 		} else if *dom == intersect {
 			return Ok(());
 		}
@@ -591,7 +591,9 @@ impl Resolved<Decision<IntVal>> {
 			if val >= *dom.max().unwrap() {
 				return Ok(());
 			} else if val < *dom.min().unwrap() {
-				return Err(ctx.create_conflict(View(BoolView::IntLess(self.0, val + 1)), reason));
+				return Err(
+					ctx.make_conflict(Some(View(BoolView::IntLess(self.0, val + 1))), reason)
+				);
 			}
 		}
 		let model = &mut *ctx.0;
@@ -629,7 +631,9 @@ impl Resolved<Decision<IntVal>> {
 			if val <= *dom.min().unwrap() {
 				return Ok(());
 			} else if val > *dom.max().unwrap() {
-				return Err(ctx.create_conflict(View(BoolView::IntGreaterEq(self.0, val)), reason));
+				return Err(
+					ctx.make_conflict(Some(View(BoolView::IntGreaterEq(self.0, val))), reason)
+				);
 			}
 		}
 		let model = &mut *ctx.0;

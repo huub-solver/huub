@@ -897,6 +897,10 @@ where
 impl<Sat: ExternalPropagation + ClauseDatabase> Solver<Sat> {
 	/// Add a clause to the solver, returning the resolved conflict [`Nogood`]
 	/// if the clause makes the problem unsatisfiable.
+	///
+	/// A clause that is empty (or reduces to one) makes the problem
+	/// unconditionally infeasible, reported as an unconditional [`Nogood`] (see
+	/// [`Nogood::is_unconditional`]).
 	pub fn add_clause<Iter>(&mut self, clause: Iter) -> Result<(), Nogood<Decision<bool>>>
 	where
 		Iter: IntoIterator,
@@ -905,7 +909,7 @@ impl<Sat: ExternalPropagation + ClauseDatabase> Solver<Sat> {
 		let clause = clause.into_iter().map(Into::into).collect_vec();
 		match ClauseDatabaseTools::add_clause(&mut self.sat, clause.iter().cloned()) {
 			Ok(()) => Ok(()),
-			Err(Unsatisfiable) => Err(Nogood::from_view_iter(clause)),
+			Err(Unsatisfiable) => Err(Nogood::from_solver_views(clause.into_iter().map(Not::not))),
 		}
 	}
 }
@@ -1519,7 +1523,7 @@ impl<Sat: ExternalPropagation> PropagationActions for Solver<Sat> {
 	) -> Self::Conflict {
 		let mut sink = Vec::new();
 		reason(self, &mut sink);
-		Nogood::from_view_iter(sink.into_iter().map(Not::not))
+		Nogood::from_solver_views(sink)
 	}
 }
 
@@ -1587,5 +1591,22 @@ impl AddAssign for SolverStatistics {
 		self.user_search_directives += other.user_search_directives;
 		self.eager_literals = self.eager_literals.max(other.eager_literals);
 		self.lazy_literals = self.lazy_literals.max(other.lazy_literals);
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::solver::{Solver, view::View};
+
+	/// The empty clause is unconditionally unsatisfiable, reported as an
+	/// unconditional nogood.
+	#[test]
+	fn test_add_clause_empty_is_unconditional() {
+		let mut slv: Solver = Solver::default();
+		let nogood = slv
+			.add_clause(std::iter::empty::<View<bool>>())
+			.unwrap_err();
+		assert!(nogood.is_unconditional());
+		assert_eq!(nogood.len(), 0);
 	}
 }

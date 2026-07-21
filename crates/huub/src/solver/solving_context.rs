@@ -279,7 +279,7 @@ impl<'a> SolvingContext<'a> {
 				data,
 			}),
 			None => {
-				// `clause` holds the reason in clausal form (already negated); just add
+				// `clause` holds the reason in (partial) clausal form; just add
 				// the subject.
 				let mut lits: Vec<Decision<bool>> = clause.into_iter().map(Decision).collect();
 				match subject {

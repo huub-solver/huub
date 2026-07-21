@@ -252,7 +252,7 @@ impl BoolPropagationActions<Model> for View<bool> {
 			val,
 			Model::adapt_reason(reason),
 		)
-		.map_err(Conflict::into_nogood)
+		.map_err(Conflict::into_model_nogood)
 	}
 
 	fn require(
@@ -261,7 +261,7 @@ impl BoolPropagationActions<Model> for View<bool> {
 		reason: impl FnOnce(&mut Model, &mut Vec<View<bool>>),
 	) -> Result<(), Nogood<View<bool>>> {
 		self.require(&mut SimplificationContext(ctx), Model::adapt_reason(reason))
-			.map_err(Conflict::into_nogood)
+			.map_err(Conflict::into_model_nogood)
 	}
 }
 
@@ -287,7 +287,7 @@ impl<'a> BoolPropagationActions<SimplificationContext<'a>> for View<bool> {
 impl BoolSimplificationActions<Model> for View<bool> {
 	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Nogood<View<bool>>> {
 		self.unify(&mut SimplificationContext(ctx), other)
-			.map_err(Conflict::into_nogood)
+			.map_err(Conflict::into_model_nogood)
 	}
 }
 

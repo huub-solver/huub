@@ -71,7 +71,7 @@ impl BoolPropagationActions<Model> for Decision<bool> {
 			val,
 			Model::adapt_reason(reason),
 		)
-		.map_err(Conflict::into_nogood)
+		.map_err(Conflict::into_model_nogood)
 	}
 }
 
@@ -93,7 +93,7 @@ impl BoolSimplificationActions<Model> for Decision<bool> {
 		other: impl Into<View<bool>>,
 	) -> Result<(), Nogood<View<bool>>> {
 		self.unify(&mut SimplificationContext(ctx), other)
-			.map_err(Conflict::into_nogood)
+			.map_err(Conflict::into_model_nogood)
 	}
 }
 

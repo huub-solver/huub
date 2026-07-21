@@ -8,7 +8,6 @@ use std::{
 	fmt::{self, Debug, Display},
 	marker::PhantomData,
 	num::NonZeroI32,
-	ops::Not,
 };
 
 use bon::Builder;
@@ -859,7 +858,7 @@ impl<'a> LoweringContext<'a> {
 	) -> <Self as PropagationContext>::Conflict {
 		let mut sink = Vec::new();
 		reason(self, &mut sink);
-		Nogood::from_view_iter(sink.into_iter().map(Not::not))
+		Nogood::from_solver_views(sink)
 	}
 
 	/// Read a trailed value from the [`Model`] trail.
@@ -980,13 +979,13 @@ impl Error for LoweringError {}
 
 impl From<<Engine as ReasoningEngine>::Conflict> for LoweringError {
 	fn from(value: <Engine as ReasoningEngine>::Conflict) -> Self {
-		Self::Lowering(value.into_nogood())
+		Self::Lowering(value.into_solver_nogood())
 	}
 }
 
 impl From<<Model as ReasoningEngine>::Conflict> for LoweringError {
 	fn from(value: <Model as ReasoningEngine>::Conflict) -> Self {
-		Self::Simplification(value.into_nogood())
+		Self::Simplification(value.into_model_nogood())
 	}
 }
 

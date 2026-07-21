@@ -556,16 +556,19 @@ impl Model {
 		})) = status
 		{
 			debug_assert_eq!(ConRef::new(propagator as usize), con);
-			let mut conj = Vec::new();
-			con_obj.explain(self, subject.unwrap_or(false.into()), data, &mut conj);
-			// Fold the subject in as the clause head.
-			if let Some(subject) = subject {
-				conj.push(subject);
-			}
-			status = Err(Conflict(ConflictInner::Clause(conj.into_boxed_slice())));
+			status = Err(
+				SimplificationContext(&mut *self).make_conflict(subject, |ctx, sink| {
+					con_obj.explain(
+						ctx.0,
+						subject.unwrap_or(false.into()),
+						data,
+						&mut sink.conditions,
+					);
+				}),
+			);
 		};
 
-		match status.map_err(Conflict::into_nogood)? {
+		match status.map_err(Conflict::into_model_nogood)? {
 			SimplificationStatus::Subsumed => {
 				// Constraint is known to be satisfied, no need to place back.
 			}
@@ -617,7 +620,7 @@ impl PropagationActions for Model {
 	) -> Nogood<View<bool>> {
 		let mut sink = Vec::new();
 		reason(&mut *self, &mut sink);
-		Nogood(sink.into())
+		Nogood::from_model_views(sink)
 	}
 }
 
@@ -663,25 +666,31 @@ impl TrailingActions for Model {
 }
 
 impl SimplificationContext<'_> {
-	/// Create a conflict from the failure to set `subject` (folded in as the
-	/// clause head), required by `reason`.
-	pub(crate) fn create_conflict(
+	/// Build a [`Conflict`] from a reason closure, folding the failing head (if
+	/// any) in as the clause head.
+	pub(crate) fn make_conflict(
 		&mut self,
-		subject: View<bool>,
+		subject: Option<View<bool>>,
 		reason: impl FnOnce(&mut Self, &mut SimplificationReasonSink),
 	) -> Conflict<View<bool>> {
 		let mut sink = SimplificationReasonSink::default();
 		reason(&mut *self, &mut sink);
 		match sink.deferred {
 			Some(data) => Conflict(ConflictInner::Deferred {
-				subject: Some(subject),
+				subject,
 				propagator: self.0.cur_prop.unwrap().index() as u32,
 				data,
 			}),
 			None => {
-				// Fold the subject in as the clause head.
-				sink.conditions.push(subject);
-				Conflict(ConflictInner::Clause(sink.conditions.into_boxed_slice()))
+				let mut clause: Vec<View<bool>> = sink
+					.conditions
+					.into_iter()
+					.map(|condition| !condition)
+					.collect();
+				if let Some(subject) = subject {
+					clause.push(subject);
+				}
+				Conflict(ConflictInner::Clause(clause.into_boxed_slice()))
 			}
 		}
 	}
@@ -704,16 +713,7 @@ impl PropagationActions for SimplificationContext<'_> {
 		&mut self,
 		reason: impl FnOnce(&mut Self, &mut Self::ReasonSink<'_>),
 	) -> Conflict<View<bool>> {
-		let mut sink = SimplificationReasonSink::default();
-		reason(&mut *self, &mut sink);
-		match sink.deferred {
-			Some(data) => Conflict(ConflictInner::Deferred {
-				subject: None,
-				propagator: self.0.cur_prop.unwrap().index() as u32,
-				data,
-			}),
-			None => Conflict(ConflictInner::Clause(sink.conditions.into_boxed_slice())),
-		}
+		self.make_conflict(None, reason)
 	}
 }
 
@@ -776,14 +776,14 @@ mod tests {
 		actions::{
 			BoolInitActions, BoolInspectionActions, ConstructionActions, IntEvent, IntInitActions,
 			IntInspectionActions, IntPropCond, IntPropagationActions, IntSimplificationActions,
-			ReasoningEngine, Trailed, TrailingActions,
+			PropagationActions, ReasoningEngine, Trailed, TrailingActions,
 		},
 		constraints::{
 			BoolModelActions, Constraint, IntModelActions, NO_REASON, Propagator,
 			SimplificationStatus,
 		},
 		lower::{LoweringContext, LoweringError},
-		model::{Model, View, deserialize::AnyView},
+		model::{Model, View, deserialize::AnyView, view::boolean::BoolView},
 		solver::Solver,
 	};
 
@@ -793,6 +793,39 @@ mod tests {
 		i: View<IntVal>,
 		bool_check: Trailed<IntVal>,
 		int_check: Trailed<IntVal>,
+	}
+
+	/// A reported conflict is the conjunction of conditions that hold, so the
+	/// failing head is negated into it: fixing an integer decision outside its
+	/// domain yields the condition `x ≠ v` that holds, not the impossible
+	/// `x = v`.
+	#[test]
+	fn test_conflict_negates_subject() {
+		let mut prb = Model::default();
+		let x = prb.new_int_decision(1..=2);
+		let nogood =
+			<View<IntVal> as IntPropagationActions<Model>>::fix(&x, &mut prb, 5, NO_REASON)
+				.unwrap_err();
+		let atoms: Vec<_> = nogood.iter().copied().collect();
+		assert_eq!(atoms.len(), 1);
+		assert!(matches!(atoms[0].0, BoolView::IntNotEq(_, 5)));
+	}
+
+	/// A model [`Nogood`](crate::constraints::Nogood) obeys the same constant
+	/// convention as a solver one: a trivially-true condition is dropped, and a
+	/// `false` condition collapses the nogood to the unconditional form.
+	#[test]
+	fn test_conflict_resolves_constants() {
+		let mut prb = Model::default();
+		let x = prb.new_bool_decision();
+
+		let dropped_true = prb.declare_conflict(|_, reason| reason.extend([x, true.into()]));
+		assert!(!dropped_true.is_unconditional());
+		assert_eq!(dropped_true.iter().copied().collect::<Vec<_>>(), vec![x]);
+
+		let collapsed = prb.declare_conflict(|_, reason| reason.extend([x, false.into()]));
+		assert!(collapsed.is_unconditional());
+		assert_eq!(collapsed.len(), 0);
 	}
 
 	#[test]

@@ -859,7 +859,7 @@ impl IntPropagationActions<Model> for View<IntVal> {
 			val,
 			Model::adapt_reason(reason),
 		)
-		.map_err(Conflict::into_nogood)
+		.map_err(Conflict::into_model_nogood)
 	}
 
 	fn remove_val(
@@ -873,7 +873,7 @@ impl IntPropagationActions<Model> for View<IntVal> {
 			val,
 			Model::adapt_reason(reason),
 		)
-		.map_err(Conflict::into_nogood)
+		.map_err(Conflict::into_model_nogood)
 	}
 
 	fn tighten_max(
@@ -887,7 +887,7 @@ impl IntPropagationActions<Model> for View<IntVal> {
 			ub,
 			Model::adapt_reason(reason),
 		)
-		.map_err(Conflict::into_nogood)
+		.map_err(Conflict::into_model_nogood)
 	}
 
 	fn tighten_min(
@@ -901,7 +901,7 @@ impl IntPropagationActions<Model> for View<IntVal> {
 			val,
 			Model::adapt_reason(reason),
 		)
-		.map_err(Conflict::into_nogood)
+		.map_err(Conflict::into_model_nogood)
 	}
 }
 
@@ -955,7 +955,7 @@ impl IntSimplificationActions<Model> for View<IntVal> {
 			values,
 			Model::adapt_reason(reason),
 		)
-		.map_err(Conflict::into_nogood)
+		.map_err(Conflict::into_model_nogood)
 	}
 
 	fn restrict_domain(
@@ -969,12 +969,12 @@ impl IntSimplificationActions<Model> for View<IntVal> {
 			values,
 			Model::adapt_reason(reason),
 		)
-		.map_err(Conflict::into_nogood)
+		.map_err(Conflict::into_model_nogood)
 	}
 
 	fn unify(&self, ctx: &mut Model, other: impl Into<Self>) -> Result<(), Nogood<View<bool>>> {
 		self.unify(&mut SimplificationContext(ctx), other)
-			.map_err(Conflict::into_nogood)
+			.map_err(Conflict::into_model_nogood)
 	}
 }
 

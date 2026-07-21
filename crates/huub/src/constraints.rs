@@ -39,7 +39,6 @@ use crate::{
 	solver::{
 		self,
 		engine::{Engine, EngineReasonSink, State},
-		view::boolean::BoolView,
 	},
 };
 
@@ -74,7 +73,7 @@ pub(crate) type BoxedConstraint = Box<dyn Constraint<Model>>;
 /// by [`Engine`].
 pub(crate) type BoxedPropagator = Box<dyn Propagator<Engine>>;
 
-/// A conflict raised during propagation: the nogood clause the current state
+/// A conflict raised during propagation: the clause the current state
 /// falsifies, possibly still deferred to a propagator.
 ///
 /// This is the propagation-internal conflict type. It appears in the
@@ -162,10 +161,21 @@ where
 {
 }
 
-/// A resolved conflict clause (nogood) reported to the user.
+/// A conjunction of conditions that together make the problem infeasible.
 ///
-/// This is the form a [`Conflict`] takes once it leaves the propagation loop;
-/// unlike [`Conflict`] it never holds a deferred reason.
+/// This is a resolved conflict reported to the user, i.e. the falsifying
+/// assignment `¬x1 ∧ ¬x2 ∧ …` that no solution may satisfy.
+///
+/// # Unconditional infeasibility
+///
+/// A conflict can be unconditional. This means the instance is infeasible
+/// regardless of any search decision (for example a constraint that
+/// constant-folds to `false` while lowering, or a clause that is empty). Such a
+/// conflict has no conditions to provide as the cause.
+///
+/// This is not an absence of information: it is a proof that the instance is
+/// unconditionally infeasible, which is easy to overlook. Always test for it
+/// with [`Nogood::is_unconditional`] rather than inspecting the conditions.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Nogood<Atom>(pub(crate) Box<[Atom]>);
 
@@ -338,17 +348,17 @@ impl Clone for BoxedPropagator {
 	}
 }
 
-impl<Atom> Conflict<Atom> {
-	/// Resolve the conflict into its [`Nogood`] clause.
+impl Conflict<model::View<bool>> {
+	/// Resolve the conflict into its [`Nogood`].
 	///
-	/// A conflict is only ever handed to the user after the propagation loop
-	/// has resolved any deferred reason (the engine in
-	/// [`SolvingContext`](crate::solver::solving_context::SolvingContext), the
-	/// model in `Model::propagate_single`), so it must be a ready clause by
-	/// this point.
-	pub(crate) fn into_nogood(self) -> Nogood<Atom> {
+	/// A ready conflict stores the clause, so negating every literal recovers
+	/// the falsifying conjunction that a [`Nogood`] reports. A conflict is
+	/// only ever handed to the user after the propagation loop has resolved
+	/// any deferred reason (the model in `Model::propagate_single`), so it
+	/// must be ready by this point.
+	pub(crate) fn into_model_nogood(self) -> Nogood<model::View<bool>> {
 		match self.0 {
-			ConflictInner::Clause(lits) => Nogood(lits),
+			ConflictInner::Clause(lits) => Nogood::from_model_views(lits.iter().map(|lit| !*lit)),
 			ConflictInner::Deferred { .. } => {
 				unreachable!("a deferred conflict must be resolved before reaching the user")
 			}
@@ -357,12 +367,12 @@ impl<Atom> Conflict<Atom> {
 }
 
 impl Conflict<solver::Decision<bool>> {
-	/// Write the conflict's nogood clause into `clause`.
+	/// Write the conflict's clause into `clause`.
 	///
-	/// A ready clause already holds the nogood in clausal form, so its literals
-	/// are copied straight in; a deferred conflict pushes its `subject` as the
-	/// head and asks the propagator to compute the reason, which it negates
-	/// through the [`EngineReasonSink`] sink.
+	/// A ready conflict already stores the clause, so its literals are copied
+	/// straight in; a deferred conflict pushes its `subject` as the head and
+	/// asks the propagator to compute the reason, which it negates through the
+	/// [`EngineReasonSink`] sink.
 	pub(crate) fn explain(
 		&self,
 		props: &mut [BoxedPropagator],
@@ -382,6 +392,25 @@ impl Conflict<solver::Decision<bool>> {
 				let mut explanation = EngineReasonSink(clause);
 				let head = subject.map(|s| s.into()).unwrap_or(true.into());
 				props[propagator as usize].explain(actions, head, data, &mut explanation);
+			}
+		}
+	}
+
+	/// Resolve the conflict into its [`Nogood`].
+	///
+	/// A ready conflict stores the clause, so negating every literal recovers
+	/// the falsifying conjunction that a [`Nogood`] reports. A conflict is
+	/// only ever handed to the user after the propagation loop has resolved
+	/// any deferred reason (the engine in
+	/// [`SolvingContext`](crate::solver::solving_context::SolvingContext)), so
+	/// it must be ready by this point.
+	pub(crate) fn into_solver_nogood(self) -> Nogood<solver::Decision<bool>> {
+		match self.0 {
+			ConflictInner::Clause(lits) => {
+				Nogood::from_solver_views(lits.iter().map(|lit| (!*lit).into()))
+			}
+			ConflictInner::Deferred { .. } => {
+				unreachable!("a deferred conflict must be resolved before reaching the user")
 			}
 		}
 	}
@@ -407,26 +436,88 @@ where
 {
 }
 
+#[expect(
+	clippy::len_without_is_empty,
+	reason = "a conflict with no conditions is unconditionally infeasible; `is_unconditional` is the named check for it, which a bare `is_empty` would obscure"
+)]
 impl<Atom> Nogood<Atom> {
-	/// Returns an non-consuming iterator over the atom in the nogood clause.
+	/// Returns `true` if the conflict is *unconditional*: the instance is
+	/// infeasible regardless of any search decision.
+	///
+	/// A nogood is the conjunction of conditions that make the problem
+	/// infeasible; when it holds no conditions that conjunction is trivially
+	/// satisfied, so the conflict cannot be pinned on any literal and no
+	/// assignment can avoid it. This method names that case so it is not
+	/// overlooked: it is a proof of unconditional infeasibility, not an absence
+	/// of information.
+	///
+	/// Such a conflict arises when it carries no reason (e.g. a constraint that
+	/// constant-folds to `false` while lowering, or an empty clause added to
+	/// the solver).
+	pub fn is_unconditional(&self) -> bool {
+		self.0.is_empty()
+	}
+
+	/// Returns a non-consuming iterator over the conditions in the nogood.
+	///
+	/// The returned iterator is an [`ExactSizeIterator`], as is the one
+	/// produced by [`IntoIterator::into_iter`].
 	pub fn iter(&self) -> slice::Iter<'_, Atom> {
 		self.0.iter()
+	}
+
+	/// Returns the number of conditions in the nogood.
+	///
+	/// A length of zero denotes an unconditionally infeasible instance; prefer
+	/// the named [`Nogood::is_unconditional`] to check for it.
+	pub fn len(&self) -> usize {
+		self.0.len()
+	}
+}
+
+impl Nogood<model::View<bool>> {
+	/// Build the reported [`Nogood`] from the model Boolean views that make up
+	/// the falsifying conjunction, resolving any constant views.
+	///
+	/// This is the model counterpart of [`Nogood::from_solver_views`] and
+	/// applies the identical constant convention, so a [`Nogood`] behaves the
+	/// same whether it comes from the model or the solver.
+	pub(crate) fn from_model_views(iter: impl IntoIterator<Item = model::View<bool>>) -> Self {
+		use crate::model::view::boolean::BoolView;
+
+		let mut conditions = Vec::new();
+		for atom in iter {
+			match atom.0 {
+				BoolView::Const(true) => {}
+				BoolView::Const(false) => return Self(Box::default()),
+				_ => conditions.push(atom),
+			}
+		}
+		Self(conditions.into_boxed_slice())
 	}
 }
 
 impl Nogood<solver::Decision<bool>> {
-	/// Build the reported [`Nogood`] from the Boolean views that make up a
-	/// conflict clause, resolving any constant views.
-	pub(crate) fn from_view_iter(iter: impl IntoIterator<Item = solver::View<bool>>) -> Self {
-		Self(
-			iter.into_iter()
-				.filter_map(|atom| match atom.0 {
-					BoolView::Lit(lit) => Some(lit),
-					BoolView::Const(true) => unreachable!("invalid nogood: contains `true`"),
-					BoolView::Const(false) => None,
-				})
-				.collect(),
-		)
+	/// Build the reported [`Nogood`] from the solver Boolean views that make up
+	/// the falsifying conjunction, resolving any constant views.
+	///
+	/// A `true` condition holds trivially and is dropped. A `false` condition
+	/// can never actually hold, so its presence means the conflict does not
+	/// depend on the search state at all: the whole nogood collapses to the
+	/// unconditional form (see [`Nogood::is_unconditional`]). A conflict that
+	/// resolves to no conditions is unconditional for the same reason.
+	pub(crate) fn from_solver_views(iter: impl IntoIterator<Item = solver::View<bool>>) -> Self {
+		use crate::solver::view::boolean::BoolView;
+
+		let mut conditions = Vec::new();
+		for atom in iter {
+			match atom.0 {
+				BoolView::Lit(lit) => conditions.push(lit),
+				BoolView::Const(true) => {}
+				BoolView::Const(false) => return Self(Box::default()),
+			}
+		}
+		Self(conditions.into_boxed_slice())
 	}
 }
 
@@ -445,5 +536,54 @@ impl<Atom> IntoIterator for Nogood<Atom> {
 impl<Atom: Debug> fmt::Display for Nogood<Atom> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "conflict detected: nogood {:?}", self.0)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::{
+		constraints::{Conflict, ConflictInner, Nogood},
+		solver::{Solver, View},
+	};
+
+	/// A reported [`Nogood`] is the conjunction of falsifying conditions, so a
+	/// trivially-true condition holds and drops out while the literals remain.
+	#[test]
+	fn test_from_solver_views_drops_true() {
+		let mut slv: Solver = Solver::default();
+		let x = slv.new_bool_decision();
+		let y = slv.new_bool_decision();
+		let nogood = Nogood::from_solver_views([View::from(x), View::from(true), View::from(y)]);
+		assert!(!nogood.is_unconditional());
+		assert_eq!(nogood.iter().copied().collect::<Vec<_>>(), vec![x, y]);
+	}
+
+	/// A `false` condition can never hold, so it proves the conflict is
+	/// unconditional: the whole nogood collapses to the unconditional form.
+	#[test]
+	fn test_from_solver_views_false_is_unconditional() {
+		let mut slv: Solver = Solver::default();
+		let x = slv.new_bool_decision();
+		let y = slv.new_bool_decision();
+		let nogood = Nogood::from_solver_views([View::from(x), View::from(false), View::from(y)]);
+		assert!(nogood.is_unconditional());
+		assert_eq!(nogood.len(), 0);
+	}
+
+	/// A [`Conflict`] stores the clause, and the [`Nogood`] it resolves into is
+	/// that clause with every literal negated. Pins the two negations together
+	/// so they cannot drift apart.
+	#[test]
+	fn test_solver_nogood_negates_stored_clause() {
+		let mut slv: Solver = Solver::default();
+		let x = slv.new_bool_decision();
+		let y = slv.new_bool_decision();
+		// The conflict for reason `x` with failing head `y`: clause `¬x ∨ y`.
+		let clause = [!x, y];
+		let nogood = Conflict(ConflictInner::Clause(Box::from(clause))).into_solver_nogood();
+		assert_eq!(
+			nogood.iter().copied().collect::<Vec<_>>(),
+			clause.iter().map(|lit| !*lit).collect::<Vec<_>>()
+		);
 	}
 }
