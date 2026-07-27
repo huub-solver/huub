@@ -18,21 +18,21 @@ keywords = ["sat", "lcg", "flatzinc", "minizinc", "optimization"]
 [workspace.dependencies]
 anstream = "1.0.0"
 bon = { version = "3.9.3", features = ["experimental-generics-setters"] }
-clap = { version = "4.6.1", features = ["derive"] }
-clap_complete = "4.6.5"
+clap = { version = "4.6.4", features = ["derive"] }
+clap_complete = "4.6.8"
 ctrlc = "3.5.2"
-divan = { package = "codspeed-divan-compat", version = "4.6.0" }
+divan = { package = "codspeed-divan-compat", version = "5.0.1" }
 dyn-clone = "1.0.20"
 expect-test = "1.5.1"
 flatzinc-serde = { version = "0.5.1" }
-humantime = "2.3.0"
+humantime = "2.4.0"
 itertools = "0.15.0"
 mimalloc = { version = "0.1.52", features = ["override"] }
 pindakaas = { version = "0.5.1", features = ["external-propagation"] }
 rangelist = "0.5.0"
-rustc-hash = "2.1.2"
-serde = "1.0.228"
-serde_json = "1.0.150"
+rustc-hash = "2.1.3"
+serde = "1.0.229"
+serde_json = "1.0.151"
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 tracing-test = "0.2.6"
