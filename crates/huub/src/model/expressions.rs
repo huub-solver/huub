@@ -26,6 +26,7 @@ use crate::{
 	},
 	constraints::{
 		NO_REASON, Nogood,
+		circuit::Circuit,
 		cumulative::CumulativeTimeTable,
 		disjunctive::{Disjunctive, DisjunctivePropagator},
 		int_abs::IntAbsBounds,
@@ -60,6 +61,53 @@ impl Model {
 			abs: result,
 			origin_positive: origin.geq(0),
 		})
+	}
+
+	/// Create a `circuit` constraint that enforces that the values of the given
+	/// successor decisions form a single simple cycle.
+	///
+	/// With `subcircuit` set (the `subcircuit` variant), every node not on the
+	/// cycle takes itself as successor (a self-loop) instead of every node
+	/// having to lie on a single Hamiltonian cycle.
+	#[builder(finish_fn = post)]
+	pub fn circuit(
+		&mut self,
+		#[builder(start_fn)] vars: impl IntoIterator<Item = View<IntVal>>,
+		#[builder(default = 1)] offset: IntVal,
+		#[builder(default = false)] subcircuit: bool,
+		no_cycle_propagation: Option<bool>,
+		scc_propagation: Option<bool>,
+	) -> Result<(), Nogood<View<bool>>> {
+		let vars: Vec<View<IntVal>> = vars.into_iter().map_into().collect();
+		match vars[..] {
+			[x] => return x.fix(self, offset, NO_REASON),
+			[] => return Ok(()),
+			_ => {}
+		}
+		// Post a model-level `IntUnique` since all successor values must be distinct
+		// (a permutation for `circuit`, a partial permutation for `subcircuit`).
+		self.post_constraint(IntUnique {
+			bounds_prop: IntUniqueBounds::new(vars.clone()),
+			value_prop: IntUniqueValue::new(vars.clone()),
+			bounds_propagation: Some(false),
+			value_propagation: Some(false),
+			domain_propagation: Some(true),
+		})?;
+		if subcircuit {
+			self.post_constraint(Circuit::<true>::new(
+				vars,
+				offset,
+				no_cycle_propagation,
+				scc_propagation,
+			))
+		} else {
+			self.post_constraint(Circuit::<false>::new(
+				vars,
+				offset,
+				no_cycle_propagation,
+				scc_propagation,
+			))
+		}
 	}
 
 	/// Create constraint that enforces that the given Boolean decision variable
