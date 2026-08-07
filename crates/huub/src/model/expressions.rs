@@ -133,6 +133,28 @@ impl Model {
 	/// values representing the resource usages of tasks, and a resource
 	/// capacity, the sum of the resource usages of all tasks running at any
 	/// time does not exceed the resource capacity.
+	///
+	/// The constraint always uses time-table propagation. The optional
+	/// arguments select which time-table-edge-finding phases the resulting
+	/// [`Solver`](crate::solver::Solver) additionally runs on top of it:
+	///
+	/// - `energy_overload_checking` detects a time window in which the tasks
+	///   require more of the resource than it can supply, but does not tighten
+	///   any bound by itself. It only takes effect when
+	///   `edge_finding_propagation` is disabled, which already reports those
+	///   overloads.
+	/// - `edge_finding_propagation` additionally tightens the start times of
+	///   the tasks that cannot fit in such a window.
+	/// - `opportunistic_edge_finding_propagation` extends that filtering with
+	///   the extended-edge-finding rules, which are stronger but more
+	///   expensive. It only takes effect alongside `edge_finding_propagation`.
+	///
+	/// All three default to enabled, the configuration that solves the most
+	/// instances of the MiniZinc benchmark suite.
+	///
+	/// These select the reasoning used during solving only. Simplification
+	/// within the [`Model`] always uses every phase, so disabling one does not
+	/// widen the domains that the model itself reports.
 	#[builder(finish_fn = post)]
 	pub fn cumulative(
 		&mut self,
@@ -166,6 +188,7 @@ impl Model {
 			energy_overload_checking,
 			edge_finding_propagation,
 			opportunistic_edge_finding_propagation,
+			strengthened: false,
 		})
 	}
 

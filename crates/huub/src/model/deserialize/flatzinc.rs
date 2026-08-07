@@ -64,21 +64,25 @@ pub enum AnnotationIdent {
 	ConsistencyDomain,
 	/// "value_propagation" consistency annotation.
 	ConsistencyValue,
-	/// "overload_checking" annotation to enable energy overload checking within
-	/// a cumulative propagator.
-	CumuEnergyOverload,
-	/// "edge_finding" annotation to enable edge finding propagation within
-	/// a cumulative propagator.
+	/// "cumulative_edge_finding" annotation to enable edge finding propagation
+	/// within a cumulative propagator.
 	CumuEdgeFinding,
-	/// "edge_finding" annotation to enable edge finding propagation within a
-	/// disjunctive propagator.
-	DisjEdgeFinding,
-	/// "not_last" annotation to enable not last propagation within the
-	/// disjunctive propagator.
-	DisjNotLast,
-	/// "detectable_precedence" annotation to detectable precedence propagation
-	/// within the disjunctive propagator.
+	/// "cumulative_energy_overload" annotation to enable energy overload
+	/// checking within a cumulative propagator.
+	CumuEnergyOverload,
+	/// "cumulative_opportunistic_edge_finding" annotation to enable the
+	/// opportunistic extended-edge-finding rules within a cumulative
+	/// propagator.
+	CumuOppEdgeFinding,
+	/// "disjunctive_detectable_precedence" annotation to enable detectable
+	/// precedence propagation within a disjunctive propagator.
 	DisjDetectPrec,
+	/// "disjunctive_edge_finding" annotation to enable edge finding propagation
+	/// within a disjunctive propagator.
+	DisjEdgeFinding,
+	/// "disjunctive_not_last" annotation to enable not-last propagation within
+	/// a disjunctive propagator.
+	DisjNotLast,
 	/// "int_search" annotation for integer search strategies.
 	IntSearch,
 	/// "seq_search" annotation for sequential search strategies.
@@ -437,9 +441,10 @@ impl AnnotationIdent {
 			Self::ConsistencyValue => "value_propagation",
 			Self::CumuEdgeFinding => "cumulative_edge_finding",
 			Self::CumuEnergyOverload => "cumulative_energy_overload",
-			Self::DisjDetectPrec => "detectable_precedence",
-			Self::DisjEdgeFinding => "edge_finding",
-			Self::DisjNotLast => "not_last",
+			Self::CumuOppEdgeFinding => "cumulative_opportunistic_edge_finding",
+			Self::DisjDetectPrec => "disjunctive_detectable_precedence",
+			Self::DisjEdgeFinding => "disjunctive_edge_finding",
+			Self::DisjNotLast => "disjunctive_not_last",
 			Self::IntSearch => "int_search",
 			Self::SeqSearch => "seq_search",
 			Self::ValSelIndomain => "indomain",
@@ -485,10 +490,14 @@ impl TryFrom<&str> for AnnotationIdent {
 			"bounds" => Ok(Self::ConsistencyBounds),
 			"circuit_no_cycle" => Ok(Self::CircuitNoCycle),
 			"circuit_scc" => Ok(Self::CircuitScc),
-			"detectable_precedence" => Ok(Self::DisjDetectPrec),
+			"cumulative_edge_finding" => Ok(Self::CumuEdgeFinding),
+			"cumulative_energy_overload" => Ok(Self::CumuEnergyOverload),
+			"cumulative_opportunistic_edge_finding" => Ok(Self::CumuOppEdgeFinding),
+			"disjunctive_detectable_precedence" => Ok(Self::DisjDetectPrec),
+			"disjunctive_edge_finding" => Ok(Self::DisjEdgeFinding),
+			"disjunctive_not_last" => Ok(Self::DisjNotLast),
 			"dom_w_deg" => Ok(Self::VarSelDomWDeg),
 			"domain" => Ok(Self::ConsistencyDomain),
-			"edge_finding" => Ok(Self::DisjEdgeFinding),
 			"first_fail" => Ok(Self::VarSelFirstFail),
 			"indomain" => Ok(Self::ValSelIndomain),
 			"indomain_interval" => Ok(Self::ValSelIndomainInterval),
@@ -503,7 +512,6 @@ impl TryFrom<&str> for AnnotationIdent {
 			"largest" => Ok(Self::VarSelLargest),
 			"max_regret" => Ok(Self::VarSelMaxRegret),
 			"most_constrained" => Ok(Self::VarSelMostConstrained),
-			"not_last" => Ok(Self::DisjNotLast),
 			"occurrence" => Ok(Self::VarSelOccurrence),
 			"outdomain_max" => Ok(Self::ValSelOutdomainMax),
 			"outdomain_median" => Ok(Self::ValSelOutdomainMedian),
@@ -2055,7 +2063,7 @@ impl<'a> FznModelBuilder<'a> {
 						.map(|l| self.lit_int(l))
 						.try_collect()?;
 					let r = self.arg_int(r)?;
-					let (energy_overload_check, edge_finding) = match (
+					let (energy_overload_check, edge_finding, opportunistic) = match (
 						Self::anns_contains(
 							&c.ann,
 							&mut ann_used,
@@ -2064,15 +2072,20 @@ impl<'a> FznModelBuilder<'a> {
 						Self::anns_contains(
 							&c.ann,
 							&mut ann_used,
-							AnnotationIdent::CumuEnergyOverload,
+							AnnotationIdent::CumuEdgeFinding,
+						),
+						Self::anns_contains(
+							&c.ann,
+							&mut ann_used,
+							AnnotationIdent::CumuOppEdgeFinding,
 						),
 					) {
 						// No annotations found, so we assume the user wants the default
 						// configuration
-						(false, false) => (None, None),
+						(false, false, false) => (None, None, None),
 						// At least one annotation was found, so we assume missing annotations
 						// disable certain propagation options.
-						(eoc, ef) => (Some(eoc), Some(ef)),
+						(eoc, ef, opp) => (Some(eoc), Some(ef), Some(opp)),
 					};
 					self.prb
 						.cumulative()
@@ -2082,7 +2095,7 @@ impl<'a> FznModelBuilder<'a> {
 						.capacity(r)
 						.maybe_energy_overload_checking(energy_overload_check)
 						.maybe_edge_finding_propagation(edge_finding)
-						.maybe_opportunistic_edge_finding_propagation(Some(false)) // disable opportunistic edge-finding by default
+						.maybe_opportunistic_edge_finding_propagation(opportunistic)
 						.post()?;
 				}
 				ConstraintIdent::DisjuctiveStrict => {
@@ -2672,6 +2685,9 @@ mod tests {
 			AnnotationIdent::ConsistencyBounds,
 			AnnotationIdent::ConsistencyDomain,
 			AnnotationIdent::ConsistencyValue,
+			AnnotationIdent::CumuEdgeFinding,
+			AnnotationIdent::CumuEnergyOverload,
+			AnnotationIdent::CumuOppEdgeFinding,
 			AnnotationIdent::DisjDetectPrec,
 			AnnotationIdent::DisjEdgeFinding,
 			AnnotationIdent::DisjNotLast,

@@ -5,6 +5,8 @@
 mod edge_finding;
 mod time_table;
 
+use std::cmp;
+
 use itertools::Itertools;
 
 use crate::{
@@ -21,22 +23,29 @@ use crate::{
 	solver::{Polarity, engine::Engine, queue::PriorityLevel},
 };
 
-/// The largest capacity for which the knapsack-based strengthening rules run.
-/// The knapsack dynamic program is `O(n * capacity)` per task, so a very large
-/// capacity would make strengthening disproportionately expensive for little
-/// gain; the cheap saturation and gcd rules always run.
+/// The largest capacity for which a strengthening knapsack is built.
 const MAX_KNAPSACK_CAPACITY: IntVal = 10_000;
+
+/// The largest number of dynamic-programming steps the strengthening rules may
+/// spend on a single constraint.
+const MAX_STRENGTHENING_WORK: IntVal = 10_000_000;
 
 /// Representation of the `cumulative` constraint within a model.
 ///
-/// This constriant enforces that the given a set of tasks, each with a start
+/// This constraint enforces that the given a set of tasks, each with a start
 /// time, duration, and resource usage, do not exceed the specified resource
 /// capacity at any point in time. The constraint can optionally apply
 /// edge finding propagation to strengthen the reasoning about
 /// the tasks' scheduling.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Cumulative {
-	/// Inner propagator.
+	/// Inner propagator, used to simplify the constraint within the model.
+	///
+	/// Its phases are all enabled regardless of the flags below, which apply
+	/// only to the lowered [`Solver`](crate::solver::Solver). Simplification is
+	/// paid for once while the model is built, so it is worth reasoning as
+	/// strongly as possible there; the flags trade strength against the cost of
+	/// repeating that reasoning at every node of the search.
 	pub(crate) propagator: CumulativePropagator<
 		model::View<IntVal>,
 		model::View<IntVal>,
@@ -51,13 +60,21 @@ pub struct Cumulative {
 	/// Whether to apply the edge-finding bounds-filtering during
 	/// propagation.
 	///
-	/// Defaults to `false`.
+	/// Defaults to `true`.
 	pub(crate) edge_finding_propagation: Option<bool>,
 	/// Whether to apply the edge-finding opportunistic
 	/// extended-edge-finding during propagation.
 	///
-	/// Defaults to `false`.
+	/// Only takes effect when the bounds-filtering phase is enabled.
+	///
+	/// Defaults to `true`.
 	pub(crate) opportunistic_edge_finding_propagation: Option<bool>,
+	/// Whether the coefficient strengthening rules have already run.
+	///
+	/// They depend only on the fixed usages, the fixed capacity, and the task
+	/// windows, so re-running them in every simplification round would repeat
+	/// the same knapsacks for a diminishing gain.
+	pub(crate) strengthened: bool,
 }
 
 /// The propagation rules for the `cumulative` constraint. This enum is
@@ -116,7 +133,7 @@ impl Cumulative {
 	/// Returns whether the edge-finding bounds-filtering is used when
 	/// creating a [`Solver`](crate::solver::Solver) object.
 	pub fn edge_finding_propagation_enabled(&self) -> bool {
-		self.edge_finding_propagation.unwrap_or(false)
+		self.edge_finding_propagation.unwrap_or(true)
 	}
 
 	/// Returns whether the edge-finding consistency check is used when
@@ -125,10 +142,8 @@ impl Cumulative {
 		self.energy_overload_checking.unwrap_or(true)
 	}
 
-	/// Read the fixed usages and capacity, or return `None` when any is still
-	/// unfixed or the instance is ill-formed (a non-positive capacity, or a
-	/// usage outside `0..=capacity`), in which case no strengthening is
-	/// attempted.
+	/// Read the fixed usages, or return `None` when any of them is still
+	/// unfixed, in which case no strengthening is attempted.
 	fn fixed_usages<E>(&self, ctx: &mut E::PropagationContext<'_>) -> Option<Vec<IntVal>>
 	where
 		E: ReasoningEngine,
@@ -181,7 +196,7 @@ impl Cumulative {
 			for s in (0..=cap - w).rev() {
 				if reachable[s] && !reachable[s + w] {
 					reachable[s + w] = true;
-					best = best.max((s + w) as IntVal);
+					best = cmp::max(best, (s + w) as IntVal);
 					if best == capacity {
 						return best;
 					}
@@ -195,7 +210,7 @@ impl Cumulative {
 	/// extended-edge-finding is used when creating a
 	/// [`Solver`](crate::solver::Solver) object.
 	pub fn opportunistic_edge_finding_propagation_enabled(&self) -> bool {
-		self.opportunistic_edge_finding_propagation.unwrap_or(false)
+		self.opportunistic_edge_finding_propagation.unwrap_or(true)
 	}
 
 	/// Raise the usage of every task that cannot run in parallel with any other
@@ -226,12 +241,6 @@ impl Cumulative {
 	///
 	/// Requires constant durations for all tasks.
 	fn strengthen_usages(usages: &mut [IntVal], capacity: IntVal, windows: &[(IntVal, IntVal)]) {
-		// The knapsack dynamic program is `O(n * capacity)`; skip it for very large
-		// capacities, where it would cost more than it can save.
-		if capacity > MAX_KNAPSACK_CAPACITY {
-			return;
-		}
-
 		let n = usages.len();
 		// Strengthen usages sequentially since each update changes the knapsacks of
 		// later tasks.
@@ -259,6 +268,25 @@ impl Cumulative {
 		}
 	}
 
+	/// Whether the knapsack-based strengthening rules are worth running for
+	/// `n` tasks and the given capacity.
+	///
+	/// [`Self::strengthen_usages`] and [`Self::tighten_capacity`] each solve
+	/// one knapsack per task, over a table of `capacity` entries, so together
+	/// they take `O(capacity)` memory and `O(n^2 * capacity)` time. Neither is
+	/// needed for correctness, so where that outgrows what they can save they
+	/// are skipped rather than slowed down; the cheap
+	/// [`Self::saturate_usages`] rule always runs.
+	fn strengthening_affordable(n: usize, capacity: IntVal) -> bool {
+		if capacity > MAX_KNAPSACK_CAPACITY {
+			return false;
+		}
+		let n = n as IntVal;
+		n.checked_mul(n)
+			.and_then(|work| work.checked_mul(capacity))
+			.is_some_and(|work| work <= MAX_STRENGTHENING_WORK)
+	}
+
 	/// Lower the capacity to the largest load that any set of
 	/// concurrently-runnable tasks can actually reach.
 	///
@@ -268,12 +296,6 @@ impl Cumulative {
 		capacity: &mut IntVal,
 		windows: &[(IntVal, IntVal)],
 	) {
-		// The knapsack dynamic program is `O(n * capacity)`; skip it for very large
-		// capacities, where it would cost more than it can save.
-		if *capacity > MAX_KNAPSACK_CAPACITY {
-			return;
-		}
-
 		// The new capacity must stay at least as large as every non-saturating
 		// usage (each is reachable on its own), and at least one.
 		let mut best = usages
@@ -305,7 +327,7 @@ impl Cumulative {
 			if reachable >= *capacity {
 				return;
 			}
-			best = best.max(reachable);
+			best = cmp::max(best, reachable);
 		}
 
 		// Tasks that used the old capacity are lowered to the new one.
@@ -342,13 +364,17 @@ where
 		// Perform coefficient strengthening on a single working copy of the fixed
 		// coefficients, then rewrite the changed usages and capacity in one pass so
 		// that the usages and capacity can never fall out of sync.
-		if let Some(mut capacity) = self.propagator.capacity.val(ctx)
+		if !self.strengthened
+			&& let Some(mut capacity) = self.propagator.capacity.val(ctx)
 			&& let Some(mut usages) = self.fixed_usages(ctx)
 		{
+			self.strengthened = true;
 			let before_usages = usages.clone();
 			let before_capacity = capacity;
 			Self::saturate_usages(&mut usages, capacity);
-			if let Some(windows) = self.fixed_windows(ctx) {
+			if Self::strengthening_affordable(usages.len(), capacity)
+				&& let Some(windows) = self.fixed_windows(ctx)
+			{
 				Self::tighten_capacity(&mut usages, &mut capacity, &windows);
 				Self::strengthen_usages(&mut usages, capacity, &windows);
 			}
@@ -367,7 +393,6 @@ where
 			}
 		}
 
-		// Delagate to the inner propagator's propagate method.
 		self.propagator.propagate(ctx)?;
 
 		if self.propagator.capacity.val(ctx).is_some()
@@ -571,7 +596,7 @@ where
 	}
 
 	#[tracing::instrument(
-		name = "cumulative_time_table",
+		name = "cumulative",
 		target = "solver",
 		level = "trace",
 		skip(self, ctx)
@@ -600,9 +625,14 @@ where
 		// Time-table-edge-finding phases run once the time-table propagation has
 		// reached its fixpoint. Unlike the time-table phase, edge-finding can also
 		// propagate when there are no compulsory parts, so it runs regardless of
-		// whether the profile is empty. It returns early when it updated a bound.
-		if self.edge_finding_enabled() {
-			self.propagate_edge_finding(ctx)?;
+		// whether the profile is empty.
+		//
+		// Tightening a start time can only grow a compulsory part, so a profile
+		// left over from before an edge-finding update understates the resource
+		// usage; defer the usage propagation below until the engine has applied
+		// the update and the profile has been rebuilt.
+		if self.edge_finding_enabled() && self.propagate_edge_finding(ctx)? {
+			return Ok(());
 		}
 
 		if !profile_empty {
@@ -627,7 +657,9 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
+		IntVal,
 		actions::IntInspectionActions,
+		constraints::cumulative::Cumulative,
 		model::{ConRef, Model},
 		solver::Solver,
 	};
@@ -645,6 +677,20 @@ mod tests {
 	/// An edge-finding configuration as `(check, filtering,
 	/// opportunistic)`.
 	type EdgeFindingConfig = (bool, bool, bool);
+
+	/// The bounded max-subset-sum underlying the strengthening rules.
+	#[test]
+	fn test_cumulative_max_reachable_load() {
+		// `{5, 2}` fills the capacity exactly, where `{3, 5}` would overshoot it.
+		assert_eq!(Cumulative::max_reachable_load(&[3, 5, 2], 7), 7);
+		// Without the 2 no subset reaches 7, since `3 + 5` no longer fits.
+		assert_eq!(Cumulative::max_reachable_load(&[3, 5], 7), 5);
+		assert_eq!(Cumulative::max_reachable_load(&[4], 3), 0);
+		assert_eq!(Cumulative::max_reachable_load(&[0, 3], 5), 3);
+		assert_eq!(Cumulative::max_reachable_load(&[], 5), 0);
+		assert_eq!(Cumulative::max_reachable_load(&[2], 0), 0);
+		assert_eq!(Cumulative::max_reachable_load(&[2], -1), 0);
+	}
 
 	/// The model runs full edge finding during simplification, so an
 	/// energy overload is detected when the constraint is posted regardless
@@ -771,5 +817,92 @@ mod tests {
 		assert_eq!(usages[1].bounds(&prb), (1, 1));
 		assert_eq!(start_time_c.bounds(&prb), (3, 4));
 		assert_eq!(usages[2].bounds(&prb), (1, 2));
+	}
+
+	/// A task that cannot share the resource with any other task is raised to
+	/// the capacity, which it already occupies in full.
+	#[test]
+	fn test_cumulative_saturate_usages() {
+		// The smallest other usage is 2, so the task using 3 of the 4 available
+		// leaves too little for any other task to join it.
+		let mut usages = vec![3, 2];
+		Cumulative::saturate_usages(&mut usages, 4);
+		assert_eq!(usages, vec![4, 2]);
+
+		// With a task using only 1, the task using 3 can still be joined.
+		let mut usages = vec![3, 2, 1];
+		Cumulative::saturate_usages(&mut usages, 4);
+		assert_eq!(usages, vec![3, 2, 1]);
+
+		// The only resource-using task uses more than half of the capacity, so
+		// not even a second task like it could join.
+		let mut usages = vec![0, 3];
+		Cumulative::saturate_usages(&mut usages, 4);
+		assert_eq!(usages, vec![0, 4]);
+
+		// Two tasks using half of the capacity each still fit together.
+		let mut usages = vec![0, 2];
+		Cumulative::saturate_usages(&mut usages, 4);
+		assert_eq!(usages, vec![0, 2]);
+	}
+
+	/// A task claims the capacity that the tasks able to run alongside it can
+	/// never take up.
+	#[test]
+	fn test_cumulative_strengthen_usages() {
+		// Tasks whose windows do not overlap never share the resource, so each
+		// can claim all of it.
+		let mut usages = vec![1, 1];
+		Cumulative::strengthen_usages(&mut usages, 4, &[(0, 1), (5, 6)]);
+		assert_eq!(usages, vec![4, 4]);
+
+		// Overlapping tasks: at most two of the three fit, so the first can
+		// claim the 1 unit that the other two leave unused.
+		let mut usages = vec![2, 2, 2];
+		Cumulative::strengthen_usages(&mut usages, 5, &[(0, 2), (0, 2), (0, 2)]);
+		assert_eq!(usages, vec![3, 2, 2]);
+
+		// A task already using the whole capacity, or none of it, is left alone.
+		let mut usages = vec![4, 0];
+		Cumulative::strengthen_usages(&mut usages, 4, &[(0, 2), (0, 2)]);
+		assert_eq!(usages, vec![4, 0]);
+	}
+
+	/// The strengthening rules are skipped once their knapsacks would cost more
+	/// than they can save.
+	#[test]
+	fn test_cumulative_strengthening_affordable() {
+		assert!(Cumulative::strengthening_affordable(100, 1_000));
+		assert!(!Cumulative::strengthening_affordable(101, 1_000));
+		// A capacity beyond the table size is rejected however few the tasks.
+		assert!(!Cumulative::strengthening_affordable(1, 10_001));
+		// The work estimate must not overflow into an affordable value.
+		assert!(!Cumulative::strengthening_affordable(
+			usize::MAX,
+			IntVal::MAX
+		));
+	}
+
+	/// The capacity drops to the largest load that concurrently-runnable tasks
+	/// can actually reach, taking the tasks that saturated it along.
+	#[test]
+	fn test_cumulative_tighten_capacity() {
+		// Two tasks using 2 of a capacity of 3 can never run together, so the
+		// resource never carries more than 2.
+		let (mut usages, mut capacity) = (vec![2, 2], 3);
+		Cumulative::tighten_capacity(&mut usages, &mut capacity, &[(0, 2), (0, 2)]);
+		assert_eq!((usages, capacity), (vec![2, 2], 2));
+
+		// A task using the full capacity is rewritten alongside it, so that it
+		// keeps excluding the task using 1.
+		let (mut usages, mut capacity) = (vec![3, 1], 3);
+		Cumulative::tighten_capacity(&mut usages, &mut capacity, &[(0, 2), (0, 2)]);
+		assert_eq!((usages, capacity), (vec![1, 1], 1));
+
+		// Tasks using 2 and 1 together reach the capacity of 3, which therefore
+		// cannot be lowered.
+		let (mut usages, mut capacity) = (vec![2, 1], 3);
+		Cumulative::tighten_capacity(&mut usages, &mut capacity, &[(0, 2), (0, 2)]);
+		assert_eq!((usages, capacity), (vec![2, 1], 3));
 	}
 }

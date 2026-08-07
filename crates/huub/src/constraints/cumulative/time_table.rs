@@ -2,8 +2,13 @@
 //! compulsory-part profile, the overload check, and the forward/backward
 //! sweeps that tighten task start times, together with their explanations.
 //! Methods extend [`CumulativePropagator`].
+//!
+//! Both sweeps move a task in steps the size of its duration lower bound
+//! rather than straight to the final bound. Every step is then justified by a
+//! single time point at which the task would overrun the profile, which is
+//! what makes the point-wise explanations of Schutt et al. (2011) possible.
 
-use std::iter::once;
+use std::{cmp, iter::once};
 
 use itertools::Itertools;
 use tracing::trace;
@@ -372,6 +377,11 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 	/// Propagates the upper bound of a task's resource usage to ensure that,
 	/// together with the current resource profile, it does not exceed the
 	/// resource capacity.
+	///
+	/// The room left for the task over its compulsory part is
+	/// `capacity - max_usage + usage_lb`, where `max_usage` is the highest
+	/// profile height there. The task's own usage lower bound is added back
+	/// because the profile already counts it.
 	pub(super) fn limit_usage<E>(
 		&self,
 		ctx: &mut E::PropagationContext<'_>,
@@ -397,7 +407,7 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 
 		// Find the maximum usage in the interval [lst, ect]
 		// where the task has a compulsory part
-		let max_period = self.max_period_within(task, lst, ect);
+		let max_period = self.max_period_within(lst, ect);
 		if let Some(max_period) = max_period {
 			let max_usage = self.heights[max_period];
 			let limit = self.capacity.max(ctx) - max_usage + usage_lb;
@@ -421,10 +431,9 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 
 	/// A helper function to find the index of the maximum usage in the
 	/// time-table profile within a specified period [start, end].
-	fn max_period_within(&self, _task: usize, start: i64, end: i64) -> Option<usize> {
+	fn max_period_within(&self, start: i64, end: i64) -> Option<usize> {
 		trace!(
 			target: "cumulative",
-			task = _task,
 			start,
 			end,
 			bounds = ?self.bounds,
@@ -438,11 +447,15 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 		// Adjust begin to point to the interval containing `start`
 		let begin = if begin == 0 { 0 } else { begin - 1 };
 		let end = self.bounds[begin..].partition_point(|&b| b < end) + begin;
-		(begin < end).then(|| begin + self.heights[(begin)..end].iter().position_max().unwrap())
+		(begin < end).then(|| begin + self.heights[begin..end].iter().position_max().unwrap())
 	}
 
 	/// Performs a backward sweep for a given task to propagate its latest
 	/// completion time based on the current cumulative resource profile.
+	///
+	/// The task is pushed back past every profile interval that leaves less
+	/// free than its usage lower bound, in the steps described in the module
+	/// documentation. Returns whether a bound was updated.
 	pub(super) fn sweep_backward<E>(
 		&self,
 		ctx: &mut E::PropagationContext<'_>,
@@ -479,7 +492,7 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 			assert!(b_start < b_end);
 
 			// Stop when the task is not right-conflict with any interval backward
-			if b_end <= ect.max(updated_lct - dur_lb) {
+			if b_end <= cmp::max(ect, updated_lct - dur_lb) {
 				break;
 			}
 			// if `lct` can be push backward (to ≤ `b_end`) and the resource usage is over
@@ -502,7 +515,7 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 				let time_points = (expl_start..=expl_end)
 					.rev()
 					.step_by(dur_lb as usize)
-					.map(|t| (b_start).max(t))
+					.map(|t| cmp::max(b_start, t))
 					.skip(1)
 					.collect_vec();
 				trace!(
@@ -536,7 +549,8 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 	}
 
 	/// Performs a forward sweep for a given task to propagate its earliest
-	/// start time based on the current cumulative resource profile.
+	/// start time based on the current cumulative resource profile. The mirror
+	/// image of [`Self::sweep_backward`].
 	pub(super) fn sweep_forward<E>(
 		&self,
 		ctx: &mut E::PropagationContext<'_>,
@@ -571,7 +585,7 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 			let height = self.heights[i];
 			assert!(b_start < b_end);
 			// Stop when the task is not left-conflict with any interval forward
-			if b_start >= lst.min(updated_est + dur_lb) {
+			if b_start >= cmp::min(lst, updated_est + dur_lb) {
 				break;
 			}
 			// if `est` can be push forward (to ≥ `b_end`) and the resource usage is over
@@ -593,7 +607,7 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 				// time points for earliest start time updates
 				let time_points = (expl_start..=expl_end)
 					.step_by(dur_lb as usize)
-					.map(|t| (b_end).min(t))
+					.map(|t| cmp::min(b_end, t))
 					.skip(1)
 					.collect_vec();
 				trace!(

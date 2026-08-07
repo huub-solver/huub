@@ -57,17 +57,6 @@ include "huub.mzn";
 
 We will now outline the different exposed functionality.
 
-### Disjunctive Propagation
-
-The Huub MiniZinc library contains three annotations that let a model request particular propagation algorithms for the `disjunctive` constraint.
-They allow the users to choose which propagation techniques should be enabled for that constraint.
-The annotations are:
-- `edge_finding` requests edge-finding propagation.
-- `not_last` requests not-last propagation.
-- `detectable_precedence` requests detectable-precedence propagation.
-Whenever any of the annotations is present on the `disjunctive` constraint, it overrides the default enabled propagation methods, disabling any other propagation methods that would be enabled by default.
-This is best thought of as tuning mechanisms rather than adding these annotations for each `disjunctive` constraint.
-
 ### Circuit propagation
 
 The Huub MiniZinc library contains two annotations that let a model request particular propagation algorithms for the `circuit` and `subcircuit` constraints.
@@ -78,3 +67,24 @@ Whenever either of the annotations is present on a `circuit` or `subcircuit` con
 As with the `disjunctive` annotations, these are best thought of as tuning mechanisms rather than annotations to add to every constraint.
 
 Note that disabling both algorithms would leave the constraint unenforced during the search, so Huub re-enables the no-cycle propagation and reports a warning when it is asked to disable both.
+
+### Cumulative propagation
+
+The Huub MiniZinc library contains three annotations that let a model request particular propagation algorithms for the `cumulative` constraint, on top of the time-table propagation that is always used.
+The annotations are:
+- `cumulative_energy_overload` requests the time-table-edge-finding energy overload check, which detects time windows in which the tasks require more of the resource than it can supply. It has an effect only when `cumulative_edge_finding` is not requested, since the bounds filtering already reports those overloads.
+- `cumulative_edge_finding` requests time-table-edge-finding bounds filtering, which additionally tightens the start times of the tasks that cannot fit in such a window.
+- `cumulative_opportunistic_edge_finding` extends that filtering with the opportunistic extended-edge-finding rules, which are stronger but more expensive. It has an effect only alongside `cumulative_edge_finding`.
+All three algorithms are enabled by default, the configuration that solves the most instances of the MiniZinc benchmark suite.
+As for `disjunctive`, the presence of any of the annotations on a `cumulative` constraint overrides the defaults, disabling any propagation method that is not requested.
+
+### Disjunctive Propagation
+
+The Huub MiniZinc library contains three annotations that let a model request particular propagation algorithms for the `disjunctive` constraint.
+They allow the users to choose which propagation techniques should be enabled for that constraint.
+The annotations are:
+- `disjunctive_edge_finding` requests edge-finding propagation.
+- `disjunctive_not_last` requests not-last propagation.
+- `disjunctive_detectable_precedence` requests detectable-precedence propagation.
+Whenever any of the annotations is present on the `disjunctive` constraint, it overrides the default enabled propagation methods, disabling any other propagation methods that would be enabled by default.
+This is best thought of as tuning mechanisms rather than adding these annotations for each `disjunctive` constraint.

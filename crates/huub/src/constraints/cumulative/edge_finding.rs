@@ -1,7 +1,9 @@
-//! Time table edge finding for the `cumulative` constraint:
+//! Time-table-edge-finding for the `cumulative` constraint:
 //! the energy overload check, the est/lct bounds-filtering sweep, and the
 //! opportunistic extended-edge-finding phase, together with their explanations.
 //! Methods extend [`CumulativePropagator`].
+
+use std::cmp;
 
 use tracing::trace;
 
@@ -20,6 +22,10 @@ use crate::{
 /// bound on the energy a task requires). The earliest completion time uses the
 /// minimum duration (the smallest compulsory part), while the latest completion
 /// time uses the maximum duration (the true deadline a task must respect).
+///
+/// Both are clamped to zero, so that `energy > 0` implies `usage > 0`: the
+/// filtering divides available energy by a task's usage, and a negative bound
+/// would silently turn that into an unsound update.
 struct EdgeFindingData {
 	/// Earliest start time `est_i = lb(S_i)`.
 	est: IntVal,
@@ -83,6 +89,20 @@ struct EdgeFindingUpdate {
 }
 
 impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
+	/// The energy of the time-table profile in `[bounds[i], +inf)` for every
+	/// profile bound `i`, so that [`Self::profile_energy_after`] can answer in
+	/// logarithmic time instead of rescanning the whole profile for every task.
+	fn build_profile_energy(&self) -> Vec<IntVal> {
+		let mut profile_energy = vec![0; self.bounds.len()];
+		// The profile is empty after its last bound, so accumulate backwards from
+		// there.
+		for i in (0..self.bounds.len().saturating_sub(1)).rev() {
+			profile_energy[i] =
+				profile_energy[i + 1] + self.heights[i] * (self.bounds[i + 1] - self.bounds[i]);
+		}
+		profile_energy
+	}
+
 	/// Returns the first task interval `[begin, end)` whose required energy
 	/// exceeds the available resource energy `R * (end - begin)`, or `None` if
 	/// no interval is overloaded.
@@ -113,7 +133,7 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 				} else {
 					// Task j starts inside the window but completes after it; only
 					// the part of its free duration forced into the window counts.
-					en_req_free += state.tasks[j].usage * (end - state.tasks[j].lst_ef).max(0);
+					en_req_free += state.tasks[j].usage * cmp::max(end - state.tasks[j].lst_ef, 0);
 				}
 				let en_req =
 					en_req_free + state.tasks[j].tt_after_est - state.tasks[b].tt_after_lct;
@@ -136,7 +156,11 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 
 	/// Collects the per-task energy quantities, the capacity, and the task
 	/// orderings for one propagation from the current domains.
-	fn edge_finding_data<E>(&self, ctx: &mut E::PropagationContext<'_>) -> EdgeFindingState
+	fn edge_finding_data<E>(
+		&self,
+		ctx: &mut E::PropagationContext<'_>,
+		profile_energy: &[IntVal],
+	) -> EdgeFindingState
 	where
 		E: ReasoningEngine,
 		I1: IntSolverActions<E>,
@@ -149,14 +173,12 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 		for i in 0..n {
 			let est = self.earliest_start_time(ctx, i);
 			let lst = self.latest_start_time(ctx, i);
-			let ect = self.earliest_completion_time(ctx, i);
-			let lct = self.latest_completion_time(ctx, i);
-			// Use the minimum duration and usage for the minimum energy the task
-			// is forced to place inside a window.
-			let dur = self.durations[i].min(ctx);
-			let usage = self.usages[i].min(ctx);
+			let dur = cmp::max(self.durations[i].min(ctx), 0);
+			let usage = cmp::max(self.usages[i].min(ctx), 0);
+			let ect = est + dur;
+			let lct = lst + cmp::max(self.durations[i].max(ctx), 0);
 			// Length of the compulsory part.
-			let fixed_dur = (ect - lst).max(0);
+			let fixed_dur = cmp::max(ect - lst, 0);
 			tasks.push(EdgeFindingData {
 				est,
 				lst,
@@ -168,8 +190,8 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 				fixed_dur,
 				free_energy: usage * (dur - fixed_dur),
 				lst_ef: lst + fixed_dur,
-				tt_after_est: self.profile_energy_after(est),
-				tt_after_lct: self.profile_energy_after(lct),
+				tt_after_est: self.profile_energy_after(profile_energy, est),
+				tt_after_lct: self.profile_energy_after(profile_energy, lct),
 			});
 		}
 		// Use the maximum capacity available in a window to ensure the energy
@@ -231,9 +253,12 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 				// `j`, lower its latest completion accordingly.
 				if opportunistic && let Some(mb) = min_begin {
 					let min_en_in = state.tasks[j].usage
-						* (state.tasks[j].ect.min(end) - mb.max(state.tasks[j].lst)).max(0);
+						* cmp::max(
+							cmp::min(state.tasks[j].ect, end) - cmp::max(mb, state.tasks[j].lst),
+							0,
+						);
 					let full = state.tasks[j].usage
-						* (state.tasks[j].lct.min(end) - mb.max(state.tasks[j].lst));
+						* (cmp::min(state.tasks[j].lct, end) - cmp::max(mb, state.tasks[j].lst));
 					if min_en_avail + min_en_in < full {
 						let dur_avail = (min_en_avail + min_en_in) / state.tasks[j].usage;
 						let lct_new = mb + dur_avail;
@@ -253,13 +278,13 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 					en_req_free += state.tasks[j].free_energy;
 				} else {
 					// The free part of `j` is forced into the window from the right.
-					let dur_shift = (end - state.tasks[j].lst_ef).max(0);
+					let dur_shift = cmp::max(end - state.tasks[j].lst_ef, 0);
 					en_req_free += state.tasks[j].usage * dur_shift;
 					// Extra energy `j` would need in the window if started at est_j.
-					let en_req_start = state.tasks[j]
-						.free_energy
-						.min(state.tasks[j].usage * (end - state.tasks[j].est))
-						- state.tasks[j].usage * dur_shift;
+					let en_req_start = cmp::min(
+						state.tasks[j].free_energy,
+						state.tasks[j].usage * (end - state.tasks[j].est),
+					) - state.tasks[j].usage * dur_shift;
 					if en_req_start > max_en_req_start {
 						max_en_req_start = en_req_start;
 						iota = Some(j);
@@ -279,9 +304,10 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 					&& en_avail < max_en_req_start
 				{
 					// Energy of `u` already counted as inside the window.
-					let dur_mand = (state.tasks[u].ect.min(end) - state.tasks[u].lst).max(0);
+					let dur_mand =
+						cmp::max(cmp::min(state.tasks[u].ect, end) - state.tasks[u].lst, 0);
 					let dur_shift = if begin <= state.tasks[u].est {
-						(end - state.tasks[u].lst - dur_mand).max(0)
+						cmp::max(end - state.tasks[u].lst - dur_mand, 0)
 					} else {
 						0
 					};
@@ -380,8 +406,8 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 	/// Minimum energy `task` is forced to place inside `[begin, end)` over
 	/// every placement allowed by its bounds.
 	fn forced_energy(task: &EdgeFindingData, begin: IntVal, end: IntVal) -> IntVal {
-		let overlap = |s: IntVal| ((s + task.dur).min(end) - s.max(begin)).max(0);
-		task.usage * overlap(task.est).min(overlap(task.lst))
+		let overlap = |s: IntVal| cmp::max(cmp::min(s + task.dur, end) - cmp::max(s, begin), 0);
+		task.usage * cmp::min(overlap(task.est), overlap(task.lst))
 	}
 
 	/// Latest-completion-time filtering: for each task interval `[begin, end)`
@@ -425,9 +451,12 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 				// `j`, raise its earliest start accordingly.
 				if opportunistic && let Some(me) = min_end {
 					let min_en_in = state.tasks[j].usage
-						* (me.min(state.tasks[j].ect) - begin.max(state.tasks[j].lst)).max(0);
+						* cmp::max(
+							cmp::min(me, state.tasks[j].ect) - cmp::max(begin, state.tasks[j].lst),
+							0,
+						);
 					let full = state.tasks[j].usage
-						* (me.min(state.tasks[j].ect) - begin.max(state.tasks[j].est));
+						* (cmp::min(me, state.tasks[j].ect) - cmp::max(begin, state.tasks[j].est));
 					if min_en_avail + min_en_in < full {
 						let dur_avail = (min_en_avail + min_en_in) / state.tasks[j].usage;
 						let est_new = me - dur_avail;
@@ -448,15 +477,15 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 				} else {
 					// The free part of `j` is forced into the window from the left.
 					let dur_shift = if end >= state.tasks[j].lct {
-						(state.tasks[j].ect - begin - state.tasks[j].fixed_dur).max(0)
+						cmp::max(state.tasks[j].ect - begin - state.tasks[j].fixed_dur, 0)
 					} else {
 						0
 					};
 					en_req_free += state.tasks[j].usage * dur_shift;
-					let en_req_end = state.tasks[j]
-						.free_energy
-						.min(state.tasks[j].usage * (state.tasks[j].lct - begin))
-						- state.tasks[j].usage * dur_shift;
+					let en_req_end = cmp::min(
+						state.tasks[j].free_energy,
+						state.tasks[j].usage * (state.tasks[j].lct - begin),
+					) - state.tasks[j].usage * dur_shift;
 					if en_req_end > max_en_req_end {
 						max_en_req_end = en_req_end;
 						iota = Some(j);
@@ -475,9 +504,10 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 				if let Some(u) = iota
 					&& en_avail < max_en_req_end
 				{
-					let dur_mand = (state.tasks[u].ect - begin.max(state.tasks[u].lst)).max(0);
+					let dur_mand =
+						cmp::max(state.tasks[u].ect - cmp::max(begin, state.tasks[u].lst), 0);
 					let dur_shift = if end >= state.tasks[u].lct {
-						(state.tasks[u].ect - begin - dur_mand).max(0)
+						cmp::max(state.tasks[u].ect - begin - dur_mand, 0)
 					} else {
 						0
 					};
@@ -499,17 +529,19 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 		None
 	}
 
-	/// A helper function to compute energy of the time-table profile.
-	fn profile_energy_after(&self, tau: IntVal) -> IntVal {
-		let mut energy = 0;
-		for i in 0..self.bounds.len().saturating_sub(1) {
-			let seg_start = self.bounds[i].max(tau);
-			let seg_end = self.bounds[i + 1];
-			if seg_end > seg_start {
-				energy += self.heights[i] * (seg_end - seg_start);
-			}
+	/// The energy of the time-table profile in `[tau, +inf)`, looked up in the
+	/// table that [`Self::build_profile_energy`] built for the current profile.
+	fn profile_energy_after(&self, profile_energy: &[IntVal], tau: IntVal) -> IntVal {
+		// Index of the profile segment `[bounds[i], bounds[i + 1])` that holds
+		// `tau`; the profile carries no energy before its first bound.
+		let Some(i) = self.bounds.partition_point(|&b| b <= tau).checked_sub(1) else {
+			return profile_energy.first().copied().unwrap_or(0);
+		};
+		if i + 1 == self.bounds.len() {
+			// The profile ends at its last bound, and so carries no energy there.
+			return 0;
 		}
-		energy
+		profile_energy[i] - self.heights[i] * (tau - self.bounds[i])
 	}
 
 	/// Runs the enabled edge-finding phases (overload check, bounds
@@ -526,10 +558,11 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 		I3: IntSolverActions<E>,
 		I4: IntSolverActions<E>,
 	{
-		let state = self.edge_finding_data::<E>(ctx);
-		if state.tasks.len() < 2 {
+		if self.start_times.len() < 2 {
 			return Ok(false);
 		}
+		let profile_energy = self.build_profile_energy();
+		let state = self.edge_finding_data::<E>(ctx, &profile_energy);
 
 		// Bounds filtering subsuming the consistency check: its sweeps also detect
 		// resource overloads. When only the check is enabled, run the cheaper
@@ -607,7 +640,7 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 		}
 		let task = &state.tasks[u];
 		let dur_avail = en_avail / task.usage;
-		let overlap = |s: IntVal| ((s + task.dur).min(end) - s.max(begin)).max(0);
+		let overlap = |s: IntVal| cmp::max(cmp::min(s + task.dur, end) - cmp::max(s, begin), 0);
 		if is_lb {
 			// `u` placed at its earliest start cannot fit in the energy left for
 			// it, so any feasible start lies at or after `end - dur_avail`.
@@ -641,6 +674,8 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 
 #[cfg(test)]
 mod tests {
+	use std::cmp;
+
 	use expect_test::expect;
 	use itertools::Itertools;
 	use tracing_test::traced_test;
@@ -652,7 +687,7 @@ mod tests {
 		solver::{LiteralStrategy, Solver, View},
 	};
 
-	/// Every edge-finding configurations.
+	/// Every edge-finding configuration.
 	const ALL_CONFIGS: [EdgeFindingConfig; 4] = [TT, CHECK_ONLY, FILTER, FILTER_OPP];
 	/// Only the consistency check.
 	const CHECK_ONLY: EdgeFindingConfig = (true, false, false);
@@ -760,7 +795,7 @@ mod tests {
 		assert!(checked.propagate_next().is_err());
 	}
 
-	/// edge-finding bounds filtering lifts an earliest start that
+	/// Edge-finding bounds filtering lifts an earliest start that
 	/// time-tabling cannot.
 	#[test]
 	#[traced_test]
@@ -802,7 +837,7 @@ mod tests {
 		assert!(u.in_domain(&filtered, 4));
 	}
 
-	/// edge-finding bounds filtering lowers a latest completion time that
+	/// Edge-finding bounds filtering lowers a latest completion time that
 	/// time-tabling cannot.
 	#[test]
 	#[traced_test]
@@ -888,5 +923,51 @@ mod tests {
 				);
 			}
 		}
+	}
+
+	/// The lookup must agree with a direct scan over the profile at every time
+	/// point, including the segment borders and the ends of the profile.
+	#[test]
+	fn test_edge_finding_profile_energy_after() {
+		let mut prop: CumulativePropagator<View<IntVal>, View<IntVal>, View<IntVal>, View<IntVal>> =
+			CumulativePropagator::new(
+				Vec::new(),
+				Vec::new(),
+				Vec::new(),
+				0.into(),
+				false,
+				false,
+				false,
+			);
+		// Segments `[0, 2)`, `[2, 5)`, and `[5, 9)` carrying 3, 1, and 2 units of
+		// the resource, and the closing bound of the profile.
+		prop.bounds = vec![0, 2, 5, 9];
+		prop.heights = vec![3, 1, 2, 0];
+		let profile_energy = prop.build_profile_energy();
+
+		// The direct scan the lookup replaces.
+		let scan = |tau: IntVal| -> IntVal {
+			(0..prop.bounds.len() - 1)
+				.map(|i| {
+					prop.heights[i]
+						* cmp::max(prop.bounds[i + 1] - cmp::max(prop.bounds[i], tau), 0)
+				})
+				.sum()
+		};
+		for tau in -2..=12 {
+			assert_eq!(
+				prop.profile_energy_after(&profile_energy, tau),
+				scan(tau),
+				"at {tau}"
+			);
+		}
+		assert_eq!(prop.profile_energy_after(&profile_energy, 0), 17);
+		assert_eq!(prop.profile_energy_after(&profile_energy, 9), 0);
+
+		// An empty profile carries no energy anywhere.
+		prop.bounds.clear();
+		prop.heights.clear();
+		let profile_energy = prop.build_profile_energy();
+		assert_eq!(prop.profile_energy_after(&profile_energy, 0), 0);
 	}
 }
