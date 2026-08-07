@@ -93,6 +93,7 @@ INSTANCES = [
         "instances": {
             "bool_indomain_max.fzn.json": "bool_indomain_max.mzn",
             "bool_indomain_min.fzn.json": "bool_indomain_min.mzn",
+            "circuit_global.fzn.json": "circuit_global.mzn",
             "int_indomain_max_1.fzn.json": "int_indomain_max_1.mzn",
             "int_indomain_max_2.fzn.json": "int_indomain_max_2.mzn",
             "int_indomain_max_3.fzn.json": "int_indomain_max_3.mzn",

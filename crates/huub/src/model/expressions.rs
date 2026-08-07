@@ -77,10 +77,12 @@ impl Model {
 		#[builder(default = false)] subcircuit: bool,
 		no_cycle_propagation: Option<bool>,
 		scc_propagation: Option<bool>,
-	) -> Result<(), Conflict<View<bool>>> {
-		let vars: Vec<_> = vars.into_iter().map_into().collect();
-		if vars.len() <= 1 {
-			return Ok(());
+	) -> Result<(), Nogood<View<bool>>> {
+		let vars: Vec<View<IntVal>> = vars.into_iter().map_into().collect();
+		match vars[..] {
+			[x] => return x.fix(self, offset, NO_REASON),
+			[] => return Ok(()),
+			_ => {}
 		}
 		// Post a model-level `IntUnique` since all successor values must be distinct
 		// (a permutation for `circuit`, a partial permutation for `subcircuit`).

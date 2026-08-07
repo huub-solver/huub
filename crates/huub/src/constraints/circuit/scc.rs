@@ -10,7 +10,7 @@ use crate::{
 		InitActions, IntInspectionActions, IntPropCond, IntPropagationActions, PostingActions,
 		PropagationActions, ReasoningEngine,
 	},
-	constraints::{IntSolverActions, Propagator, circuit::CircuitGraph},
+	constraints::{IntSolverActions, Propagator, circuit::CircuitGraph, reason_ty},
 	solver::{engine::Engine, queue::PriorityLevel},
 };
 
@@ -280,27 +280,29 @@ where
 			let reached: Vec<usize> = scratch.dfs.order.clone();
 			let unreached: Vec<usize> = (0..n).filter(|&q| scratch.dfs.idx[q] == -1).collect();
 			if !SUBCIRCUIT {
-				let mut reason = Vec::new();
-				graph.push_no_edge(&mut reason, &reached, &unreached, None, ctx);
-				return Err(ctx.declare_conflict(reason));
+				return Err(ctx.declare_conflict(|ctx, reason| {
+					graph.push_no_edge(ctx, reason, &reached, &unreached, None);
+				}));
 			}
 			// `subcircuit`: if a reached node must lie on the cycle, every unreached
-			// node is off it and must self-loop. The reason is shared, so build once.
+			// node is off it and must self-loop. Every one of those fixes has the same
+			// reason.
 			if let Some(w_in) = reached.iter().copied().find(|&q| graph.forced_in(ctx, q)) {
-				let mut reason = Vec::new();
-				graph.push_forced_in(&mut reason, w_in, ctx);
-				graph.push_no_edge(&mut reason, &reached, &unreached, None, ctx);
+				let reason = reason_ty::<E::PropagationContext<'_>, _>(|ctx, reason| {
+					graph.push_forced_in(ctx, reason, w_in);
+					graph.push_no_edge(ctx, reason, &reached, &unreached, None);
+				});
 				// `fix` is sound when redundant and fails when the self-loop is absent
 				// (an unreached forced-in node ⇒ a genuine conflict), so do not gate it.
 				for &u in &unreached {
-					graph.vars[u].fix(ctx, graph.edge_val(u), reason.clone())?;
+					graph.vars[u].fix(ctx, graph.edge_val(u), reason)?;
 				}
 			}
 			return Ok(());
 		}
 
 		// Prune-root: with ≥2 subtrees the root may only enter the last one. The
-		// witness and reason are the same for every pruned root edge, so build once.
+		// witness and reason are the same for every pruned root edge.
 		if k >= 2 {
 			let e_set = scratch.blocks(n, |s| s < k);
 			let l_set = scratch.blocks(n, |s| s == k);
@@ -312,11 +314,12 @@ where
 			} else {
 				None
 			};
-			let mut reason = Vec::new();
-			if let Some(l) = wit {
-				graph.push_forced_in(&mut reason, l, ctx);
-			}
-			graph.push_no_edge(&mut reason, &e_set, &l_set, None, ctx);
+			let reason = reason_ty::<E::PropagationContext<'_>, _>(|ctx, reason| {
+				if let Some(l) = wit {
+					graph.push_forced_in(ctx, reason, l);
+				}
+				graph.push_no_edge(ctx, reason, &e_set, &l_set, None);
+			});
 			scratch.root_succ.clear();
 			graph.scc_successors(ctx, root, &mut scratch.root_succ);
 			for ri in 0..scratch.root_succ.len() {
@@ -326,7 +329,7 @@ where
 				}
 				let ev = graph.edge_val(e);
 				if graph.vars[root].in_domain(ctx, ev) {
-					graph.vars[root].remove_val(ctx, ev, reason.clone())?;
+					graph.vars[root].remove_val(ctx, ev, reason)?;
 				}
 			}
 		}
@@ -349,19 +352,12 @@ impl SccScratch {
 		C: PropagationActions,
 		I: IntPropagationActions<C>,
 	{
-		let n = graph.n;
+		let n = graph.vars.len();
 		for si in 0..self.skip_edges.len() {
 			let (c, a) = self.skip_edges[si];
 			let ta = self.dfs.subtree[a];
-			// a_set: nodes which are before tree a
-			// b_set: strictly between ta and this subtree
-			// c_set: this subtree and everything still unexplored.
-			let a_set = self.blocks(n, |s| s <= ta);
+			// b_set: the blocks strictly between `ta` and this subtree.
 			let b_set = self.blocks(n, |s| s > ta && s < subtree_num);
-			let c_set: Vec<usize> = (0..n)
-				.filter(|&q| self.dfs.subtree[q] == subtree_num || self.dfs.idx[q] == -1)
-				.collect();
-			let bc: Vec<usize> = b_set.iter().chain(&c_set).copied().collect();
 			let wit = if SUBCIRCUIT {
 				let Some(bw) = b_set.iter().copied().find(|&x| graph.forced_in(ctx, x)) else {
 					continue;
@@ -370,15 +366,24 @@ impl SccScratch {
 			} else {
 				None
 			};
-			graph.vars[c].remove_val(ctx, graph.edge_val(a), move |ctx: &mut C| {
-				let mut reason = Vec::new();
-				if let Some(bw) = wit {
-					graph.push_forced_in(&mut reason, bw, ctx);
-				}
-				graph.push_no_edge(&mut reason, &a_set, &bc, None, ctx);
-				graph.push_no_edge(&mut reason, &b_set, &c_set, None, ctx);
-				reason
-			})?;
+			// a_set: the target's block and everything before it.
+			// c_set: this subtree and everything still unexplored.
+			let a_set = self.blocks(n, |s| s <= ta);
+			let c_set: Vec<usize> = (0..n)
+				.filter(|&q| self.dfs.subtree[q] == subtree_num || self.dfs.idx[q] == -1)
+				.collect();
+			let bc: Vec<usize> = b_set.iter().chain(&c_set).copied().collect();
+			graph.vars[c].remove_val(
+				ctx,
+				graph.edge_val(a),
+				reason_ty::<C, _>(|ctx, reason| {
+					if let Some(bw) = wit {
+						graph.push_forced_in(ctx, reason, bw);
+					}
+					graph.push_no_edge(ctx, reason, &a_set, &bc, None);
+					graph.push_no_edge(ctx, reason, &b_set, &c_set, None);
+				}),
+			)?;
 		}
 		self.skip_edges.clear();
 		Ok(())
@@ -415,16 +420,17 @@ impl SccScratch {
 			} else {
 				None
 			};
-			graph.vars[backfrom].fix(ctx, graph.edge_val(backto), move |ctx: &mut C| {
-				let mut reason = Vec::new();
-				if let Some((bw, cw)) = wit {
-					graph.push_forced_in(&mut reason, bw, ctx);
-					graph.push_forced_in(&mut reason, cw, ctx);
-				}
-				graph.push_no_edge(&mut reason, &c_set, &outside, Some((backfrom, backto)), ctx);
-				reason
-			})?;
-			return Ok(());
+			return graph.vars[backfrom].fix(
+				ctx,
+				graph.edge_val(backto),
+				reason_ty::<C, _>(|ctx, reason| {
+					if let Some((bw, cw)) = wit {
+						graph.push_forced_in(ctx, reason, bw);
+						graph.push_forced_in(ctx, reason, cw);
+					}
+					graph.push_no_edge(ctx, reason, &c_set, &outside, Some((backfrom, backto)));
+				}),
+			);
 		}
 		// Subtrees A (earlier), B (prev), C (this), D (later).
 		let a_set = self.earlier.clone();
@@ -445,18 +451,19 @@ impl SccScratch {
 		} else {
 			None
 		};
-		graph.vars[backfrom].fix(ctx, graph.edge_val(backto), move |ctx: &mut C| {
-			let mut reason = Vec::new();
-			if let Some((p, q)) = wit {
-				graph.push_forced_in(&mut reason, p, ctx);
-				graph.push_forced_in(&mut reason, q, ctx);
-			}
-			graph.push_no_edge(&mut reason, &a_set, &bcd, None, ctx);
-			graph.push_no_edge(&mut reason, &b_set, &cd, None, ctx);
-			graph.push_no_edge(&mut reason, &c_set, &bd, Some((backfrom, backto)), ctx);
-			reason
-		})?;
-		Ok(())
+		graph.vars[backfrom].fix(
+			ctx,
+			graph.edge_val(backto),
+			reason_ty::<C, _>(|ctx, reason| {
+				if let Some((p, q)) = wit {
+					graph.push_forced_in(ctx, reason, p);
+					graph.push_forced_in(ctx, reason, q);
+				}
+				graph.push_no_edge(ctx, reason, &a_set, &bcd, None);
+				graph.push_no_edge(ctx, reason, &b_set, &cd, None);
+				graph.push_no_edge(ctx, reason, &c_set, &bd, Some((backfrom, backto)));
+			}),
+		)
 	}
 
 	/// Apply the prune-within rule for every candidate found in the current
@@ -495,16 +502,17 @@ impl SccScratch {
 				None
 			};
 			// `c_set` reaches nothing outside but `p`, so one reason justifies pruning
-			// both the down edge `p -> c` and every incoming edge `o -> p`. Build it once
-			// and reuse it across all prunes (Chuffed shares the same clause).
-			let mut reason = Vec::new();
-			if let Some((aw, bw)) = wit {
-				graph.push_forced_in(&mut reason, aw, ctx);
-				graph.push_forced_in(&mut reason, bw, ctx);
-			}
-			graph.push_no_edge(&mut reason, &c_set, &a_set, None, ctx);
+			// both the down edge `p -> c` and every incoming edge `o -> p` (Chuffed
+			// shares the same clause).
+			let reason = reason_ty::<C, _>(|ctx, reason| {
+				if let Some((aw, bw)) = wit {
+					graph.push_forced_in(ctx, reason, aw);
+					graph.push_forced_in(ctx, reason, bw);
+				}
+				graph.push_no_edge(ctx, reason, &c_set, &a_set, None);
+			});
 			if graph.vars[p].in_domain(ctx, graph.edge_val(c)) {
-				graph.vars[p].remove_val(ctx, graph.edge_val(c), reason.clone())?;
+				graph.vars[p].remove_val(ctx, graph.edge_val(c), reason)?;
 			}
 			// The strengthened incoming prune holds for `circuit` only: in
 			// `subcircuit` an outside node may still enter `p` when `c_set` is excluded.
@@ -512,7 +520,7 @@ impl SccScratch {
 				let pv = graph.edge_val(p);
 				for &o in &a_set {
 					if graph.vars[o].in_domain(ctx, pv) {
-						graph.vars[o].remove_val(ctx, pv, reason.clone())?;
+						graph.vars[o].remove_val(ctx, pv, reason)?;
 					}
 				}
 			}
@@ -544,26 +552,31 @@ impl SccScratch {
 		let n = graph.vars.len();
 		let lo = self.dfs.idx[v] as usize;
 		let hi = self.dfs.subtree_hi[v];
-		let inside: Vec<usize> = self.dfs.order[lo..hi].to_vec();
 		self.membership.fill(false);
-		for &node in &inside {
+		for &node in &self.dfs.order[lo..hi] {
 			self.membership[node] = true;
 		}
-		let outside: Vec<usize> = (0..n).filter(|&q| !self.membership[q]).collect();
-		let mut reason = Vec::new();
+		let mut witnesses = None;
 		if SUBCIRCUIT {
-			// Only a contradiction if a forced-in node lies on each side.
+			// Only a contradiction if a forced-in node lies on each side. Check that
+			// before materialising the two node sets, since it usually fails.
 			let (Some(w_in), Some(w_out)) = (
-				inside.iter().copied().find(|&q| graph.forced_in(ctx, q)),
-				outside.iter().copied().find(|&q| graph.forced_in(ctx, q)),
+				(0..n).find(|&q| self.membership[q] && graph.forced_in(ctx, q)),
+				(0..n).find(|&q| !self.membership[q] && graph.forced_in(ctx, q)),
 			) else {
 				return None;
 			};
-			graph.push_forced_in(&mut reason, w_in, ctx);
-			graph.push_forced_in(&mut reason, w_out, ctx);
+			witnesses = Some((w_in, w_out));
 		}
-		graph.push_no_edge(&mut reason, &inside, &outside, None, ctx);
-		Some(ctx.declare_conflict(reason))
+		let inside: Vec<usize> = self.dfs.order[lo..hi].to_vec();
+		let outside: Vec<usize> = (0..n).filter(|&q| !self.membership[q]).collect();
+		Some(ctx.declare_conflict(|ctx, reason| {
+			if let Some((w_in, w_out)) = witnesses {
+				graph.push_forced_in(ctx, reason, w_in);
+				graph.push_forced_in(ctx, reason, w_out);
+			}
+			graph.push_no_edge(ctx, reason, &inside, &outside, None);
+		}))
 	}
 
 	/// Iteratively explore one root-child subtree rooted at `child`.
@@ -679,29 +692,10 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntSet, IntVal,
+		IntSet,
 		constraints::circuit::CircuitScc,
-		solver::{LiteralStrategy, Solver, View as SolverView},
+		solver::{LiteralStrategy, Solver},
 	};
-
-	/// Build one successor decision with eager literals, so the exact
-	/// propagated literals are observable.
-	fn succ_decision(slv: &mut Solver, dom: IntSet) -> SolverView<IntVal> {
-		slv.new_int_decision(dom)
-			.order_literals(LiteralStrategy::Eager)
-			.direct_literals(LiteralStrategy::Eager)
-			.view()
-	}
-
-	/// Build successor decisions (1-based values) from contiguous domains.
-	fn succ_vars(
-		slv: &mut Solver,
-		doms: &[std::ops::RangeInclusive<IntVal>],
-	) -> Vec<SolverView<IntVal>> {
-		doms.iter()
-			.map(|d| succ_decision(slv, IntSet::from_iter([d.clone()])))
-			.collect()
-	}
 
 	/// The `scc` DFS is iterative, so a depth-`n` fixed chain must not overflow
 	/// the native stack. This test is to avoid the recursive implementation of
@@ -731,13 +725,19 @@ mod tests {
 		let mut slv = Solver::default();
 		// 1-based values; only node 0 points to value 1 (=node 0), so {1,2,3} has
 		// no edge out.
-		let vars = vec![
-			succ_decision(&mut slv, IntSet::from_iter([2..=4])), // 0 -> nodes 1,2,3
-			succ_decision(&mut slv, IntSet::from_iter([3..=4])), // 1 -> nodes 2,3
-			succ_decision(&mut slv, IntSet::from_iter([2..=2, 4..=4])), // 2 -> nodes 1,3
-			succ_decision(&mut slv, IntSet::from_iter([2..=2, 3..=3])), // 3 -> nodes 1,2
-		];
-		CircuitScc::<false, _>::post(&mut slv, vars, 1);
+		let vars = [
+			IntSet::from_iter([2..=4]),        // 0 -> nodes 1,2,3
+			IntSet::from_iter([3..=4]),        // 1 -> nodes 2,3
+			IntSet::from_iter([2..=2, 4..=4]), // 2 -> nodes 1,3
+			IntSet::from_iter([2..=2, 3..=3]), // 3 -> nodes 1,2
+		]
+		.map(|dom| {
+			slv.new_int_decision(dom)
+				.order_literals(LiteralStrategy::Eager)
+				.direct_literals(LiteralStrategy::Eager)
+				.view()
+		});
+		CircuitScc::<false, _>::post(&mut slv, vars.to_vec(), 1);
 		assert!(
 			slv.propagate_next().is_err(),
 			"scc should fail: {{1,2,3}} is a closed set unreachable-back-from, even though node 0 reaches it"
@@ -755,8 +755,13 @@ mod tests {
 		// `scc` alone: {0,1} and {2,3} never point at each other, so a single round
 		// detects the disconnection.
 		let mut slv = Solver::default();
-		let vars = succ_vars(&mut slv, &[1..=2, 1..=2, 3..=4, 3..=4]);
-		CircuitScc::<false, _>::post(&mut slv, vars, 1);
+		let vars = [1..=2, 1..=2, 3..=4, 3..=4].map(|dom| {
+			slv.new_int_decision(dom)
+				.order_literals(LiteralStrategy::Eager)
+				.direct_literals(LiteralStrategy::Eager)
+				.view()
+		});
+		CircuitScc::<false, _>::post(&mut slv, vars.to_vec(), 1);
 		assert!(
 			slv.propagate_next().is_err(),
 			"scc should fail on the disconnected successor graph"
@@ -770,9 +775,14 @@ mod tests {
 	fn test_scc_post_rejects_out_of_range_successor() {
 		// The same precondition holds for `scc`; here a successor can still take
 		// `4`, one past the 3-node range `1..=3`.
-		let mut slv = Solver::default();
-		let vars = succ_vars(&mut slv, &[1..=3, 1..=3, 1..=4]);
-		CircuitScc::<false, _>::post(&mut slv, vars, 1);
+		let mut slv: Solver = Solver::default();
+		let vars = [1..=3, 1..=3, 1..=4].map(|dom| {
+			slv.new_int_decision(dom)
+				.order_literals(LiteralStrategy::Eager)
+				.direct_literals(LiteralStrategy::Eager)
+				.view()
+		});
+		CircuitScc::<false, _>::post(&mut slv, vars.to_vec(), 1);
 	}
 
 	/// The `subcircuit` variant of the `scc` propagator allows disconnected
@@ -781,8 +791,13 @@ mod tests {
 	#[traced_test]
 	fn test_scc_subcircuit_allows_disconnection() {
 		let mut slv = Solver::default();
-		let vars = succ_vars(&mut slv, &[1..=2, 1..=2, 3..=4, 3..=4]);
-		CircuitScc::<true, _>::post(&mut slv, vars, 1);
+		let vars = [1..=2, 1..=2, 3..=4, 3..=4].map(|dom| {
+			slv.new_int_decision(dom)
+				.order_literals(LiteralStrategy::Eager)
+				.direct_literals(LiteralStrategy::Eager)
+				.view()
+		});
+		CircuitScc::<true, _>::post(&mut slv, vars.to_vec(), 1);
 		assert!(
 			slv.propagate_next().is_ok(),
 			"subcircuit scc must accept the disconnected graph (no forced-in node)"

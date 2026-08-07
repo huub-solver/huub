@@ -13,9 +13,9 @@ use crate::{
 	IntVal,
 	actions::{
 		InitActions, IntEvent, IntInspectionActions, IntPropCond, IntPropagationActions,
-		PostingActions, PropagationActions, ReasoningEngine,
+		PostingActions, PropagationActions, ReasonActions, ReasoningEngine,
 	},
-	constraints::{IntSolverActions, Propagator, circuit::CircuitGraph},
+	constraints::{IntSolverActions, Propagator, circuit::CircuitGraph, reason_ty},
 	solver::{engine::Engine, queue::PriorityLevel},
 };
 
@@ -45,13 +45,12 @@ pub(crate) struct NoCycleScratch {
 	visited: Vec<bool>,
 	/// The current fixed chain/cycle, in visit order, reused across starts.
 	nodes: Vec<usize>,
-	/// The complement of the current closed sub-tour (built only when one
-	/// closes, to resolve it).
+	/// The complement of the current chain (built only when it is needed to
+	/// resolve a closed sub-tour).
 	outside: Vec<usize>,
-	/// Membership of the current closed sub-tour over `0..n`, kept clean
-	/// between sub-tours so the complement is one `O(n)` pass, not
-	/// `O(n·|cycle|)` linear `contains`.
-	in_cycle: Vec<bool>,
+	/// Membership of `nodes` over `0..n`, kept clean between chains so scanning
+	/// the complement is one `O(n)` pass, not `O(n·|chain|)` linear `contains`.
+	in_chain: Vec<bool>,
 }
 
 impl<const SUBCIRCUIT: bool, I> CircuitNoCycle<SUBCIRCUIT, I> {
@@ -217,6 +216,30 @@ where
 }
 
 impl NoCycleScratch {
+	/// Find a node outside the current chain that is forced onto the cycle, in
+	/// one `O(n)` pass over the `in_chain` membership bitset.
+	fn find_forced_in_outside<const SUBCIRCUIT: bool, C, I>(
+		&mut self,
+		graph: &CircuitGraph<SUBCIRCUIT, I>,
+		ctx: &C,
+	) -> Option<usize>
+	where
+		C: PropagationActions,
+		I: IntInspectionActions<C>,
+	{
+		let Self {
+			nodes, in_chain, ..
+		} = self;
+		for &i in nodes.iter() {
+			in_chain[i] = true;
+		}
+		let witness = (0..graph.vars.len()).find(|&k| !in_chain[k] && graph.forced_in(ctx, k));
+		for &i in nodes.iter() {
+			in_chain[i] = false;
+		}
+		witness
+	}
+
 	/// Allocate scratch sized for an `n`-node support graph.
 	pub(crate) fn new(n: usize) -> Self {
 		Self {
@@ -225,7 +248,7 @@ impl NoCycleScratch {
 			visited: vec![false; n],
 			nodes: Vec::new(),
 			outside: Vec::new(),
-			in_cycle: vec![false; n],
+			in_chain: vec![false; n],
 		}
 	}
 
@@ -242,13 +265,10 @@ impl NoCycleScratch {
 		C: PropagationActions,
 		I: IntPropagationActions<C>,
 	{
-		let n = graph.vars.len();
 		// In `subcircuit` the prune is sound only with a forced-in node outside
 		// the chain (witness that the chain must lie on a real cycle).
 		let witness = if SUBCIRCUIT {
-			match (0..n).find(|&k| {
-				!self.nodes.contains(&k) && !graph.vars[k].in_domain(ctx, graph.edge_val(k))
-			}) {
+			match self.find_forced_in_outside(graph, ctx) {
 				Some(k) => Some(k),
 				None => return Ok(()),
 			}
@@ -257,20 +277,22 @@ impl NoCycleScratch {
 		};
 
 		let nodes = &self.nodes;
-		graph.vars[end].remove_val(ctx, graph.edge_val(start), |ctx: &mut C| {
-			let mut reason = Vec::with_capacity(2 * nodes.len() + 1);
-			for &i in nodes {
-				if i != end {
-					// Every interior node of the chain is fixed, so its value literal exists.
-					reason.push(graph.vars[i].val_lit(ctx).unwrap());
+		graph.vars[end].remove_val(
+			ctx,
+			graph.edge_val(start),
+			reason_ty::<C, _>(|ctx, reason| {
+				reason.reserve(nodes.len());
+				for &i in nodes {
+					if i != end {
+						// Every interior node of the chain is fixed, so its value literal exists.
+						reason.push(graph.vars[i].val_lit(ctx).unwrap());
+					}
 				}
-			}
-			if let Some(k) = witness {
-				graph.push_forced_in(&mut reason, k, ctx);
-			}
-			reason
-		})?;
-		Ok(())
+				if let Some(k) = witness {
+					graph.push_forced_in(ctx, reason, k);
+				}
+			}),
+		)
 	}
 
 	/// Rebuild `fixed_pred` from `fixed_succ` after a full successor refresh.
@@ -306,34 +328,35 @@ impl NoCycleScratch {
 		// Build the complement of the closed sub-tour in one `O(n)` pass.
 		let n = graph.vars.len();
 		for &v in &self.nodes {
-			self.in_cycle[v] = true;
+			self.in_chain[v] = true;
 		}
 		self.outside.clear();
 		for q in 0..n {
-			if !self.in_cycle[q] {
+			if !self.in_chain[q] {
 				self.outside.push(q);
 			}
 		}
 		for &v in &self.nodes {
-			self.in_cycle[v] = false;
+			self.in_chain[v] = false;
 		}
 
 		let cycle = &self.nodes;
 		let outside = &self.outside;
-		if SUBCIRCUIT {
-			// `subcircuit`: every outside node is excluded and must self-loop.
-			let w_in = start;
-			let mut reason = Vec::with_capacity(cycle.len() * outside.len() + 1);
-			graph.push_no_edge(&mut reason, cycle, outside, None, ctx);
-			graph.push_forced_in(&mut reason, w_in, ctx);
-			for &k in outside {
-				graph.vars[k].fix(ctx, graph.edge_val(k), reason.clone())?;
-			}
-		} else {
+		if !SUBCIRCUIT {
 			// `circuit`: raise conflict for a closed proper sub-tour.
-			let mut reason = Vec::with_capacity(cycle.len() * outside.len());
-			graph.push_no_edge(&mut reason, cycle, outside, None, ctx);
-			return Err(ctx.declare_conflict(reason));
+			return Err(ctx.declare_conflict(|ctx, reason| {
+				graph.push_no_edge(ctx, reason, cycle, outside, None);
+			}));
+		}
+
+		// `subcircuit`: every outside node is excluded and must self-loop, all for
+		// the same reason.
+		let reason = reason_ty::<C, _>(|ctx, reason| {
+			graph.push_no_edge(ctx, reason, cycle, outside, None);
+			graph.push_forced_in(ctx, reason, start);
+		});
+		for &k in outside {
+			graph.vars[k].fix(ctx, graph.edge_val(k), reason)?;
 		}
 		Ok(())
 	}
@@ -344,30 +367,10 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntSet, IntVal,
 		actions::{IntDecisionActions, IntInspectionActions},
 		constraints::circuit::CircuitNoCycle,
-		solver::{IntLitMeaning, LiteralStrategy, Solver, View as SolverView},
+		solver::{IntLitMeaning, LiteralStrategy, Solver},
 	};
-
-	/// Build one successor decision with eager literals, so the exact
-	/// propagated literals are observable.
-	fn succ_decision(slv: &mut Solver, dom: IntSet) -> SolverView<IntVal> {
-		slv.new_int_decision(dom)
-			.order_literals(LiteralStrategy::Eager)
-			.direct_literals(LiteralStrategy::Eager)
-			.view()
-	}
-
-	/// Build successor decisions (1-based values) from contiguous domains.
-	fn succ_vars(
-		slv: &mut Solver,
-		doms: &[std::ops::RangeInclusive<IntVal>],
-	) -> Vec<SolverView<IntVal>> {
-		doms.iter()
-			.map(|d| succ_decision(slv, IntSet::from_iter([d.clone()])))
-			.collect()
-	}
 
 	/// Regression test: a closed sub-tour of length < n is a conflict for
 	/// `circuit`.
@@ -375,8 +378,14 @@ mod tests {
 	#[traced_test]
 	fn test_no_cycle_detects_subtour() {
 		let mut slv = Solver::default();
-		let vars = succ_vars(&mut slv, &[2..=2, 1..=1, 1..=3]); // 0->1, 1->0, 2 free
-		CircuitNoCycle::<false, _>::post(&mut slv, vars, 1);
+		// 0->1, 1->0, 2 free.
+		let vars = [2..=2, 1..=1, 1..=3].map(|dom| {
+			slv.new_int_decision(dom)
+				.order_literals(LiteralStrategy::Eager)
+				.direct_literals(LiteralStrategy::Eager)
+				.view()
+		});
+		CircuitNoCycle::<false, _>::post(&mut slv, vars.to_vec(), 1);
 		assert!(
 			slv.propagate_next().is_err(),
 			"no_cycle should fail on the 0<->1 sub-tour"
@@ -388,9 +397,14 @@ mod tests {
 	#[test]
 	#[should_panic(expected = "domains must exclude out-of-range values")]
 	fn test_no_cycle_post_rejects_out_of_range_successor() {
-		let mut slv = Solver::default();
-		let vars = succ_vars(&mut slv, &[0..=3, 1..=3, 1..=3]);
-		CircuitNoCycle::<false, _>::post(&mut slv, vars, 1);
+		let mut slv: Solver = Solver::default();
+		let vars = [0..=3, 1..=3, 1..=3].map(|dom| {
+			slv.new_int_decision(dom)
+				.order_literals(LiteralStrategy::Eager)
+				.direct_literals(LiteralStrategy::Eager)
+				.view()
+		});
+		CircuitNoCycle::<false, _>::post(&mut slv, vars.to_vec(), 1);
 	}
 
 	/// Regression test: `no_cycle` forbids the closing edge of an open fixed
@@ -400,19 +414,23 @@ mod tests {
 	fn test_no_cycle_removes_chain_closing_edge() {
 		let mut slv = Solver::default();
 		// 0->1 (val 2), 1->2 (val 3), 2 and 3 free.
-		let vars = succ_vars(&mut slv, &[2..=2, 3..=3, 1..=4, 1..=4]);
-		let s2 = vars[2];
-		CircuitNoCycle::<false, _>::post(&mut slv, vars, 1);
+		let vars = [2..=2, 3..=3, 1..=4, 1..=4].map(|dom| {
+			slv.new_int_decision(dom)
+				.order_literals(LiteralStrategy::Eager)
+				.direct_literals(LiteralStrategy::Eager)
+				.view()
+		});
+		CircuitNoCycle::<false, _>::post(&mut slv, vars.to_vec(), 1);
 		let propagated = slv
 			.propagate_next()
 			.expect("no_cycle must not conflict here");
-		let forbid = s2.lit(&mut slv, IntLitMeaning::NotEq(1)); // succ[2] != node 0
+		let forbid = vars[2].lit(&mut slv, IntLitMeaning::NotEq(1)); // succ[2] != node 0
 		assert!(
 			propagated.contains(&forbid),
 			"no_cycle should forbid closing the chain (succ[2] != 1); got {propagated:?}"
 		);
 		assert!(
-			!s2.in_domain(&slv, 1),
+			!vars[2].in_domain(&slv, 1),
 			"value 1 should be pruned from succ[2]"
 		);
 	}
@@ -423,16 +441,21 @@ mod tests {
 	#[traced_test]
 	fn test_subcircuit_no_cycle_allows_valid_subtour() {
 		let mut slv = Solver::default();
-		let vars = succ_vars(&mut slv, &[2..=2, 1..=1, 1..=3]); // 0->1, 1->0, 2 free
-		let s2 = vars[2];
-		CircuitNoCycle::<true, _>::post(&mut slv, vars, 1);
+		// 0->1, 1->0, 2 free.
+		let vars = [2..=2, 1..=1, 1..=3].map(|dom| {
+			slv.new_int_decision(dom)
+				.order_literals(LiteralStrategy::Eager)
+				.direct_literals(LiteralStrategy::Eager)
+				.view()
+		});
+		CircuitNoCycle::<true, _>::post(&mut slv, vars.to_vec(), 1);
 		assert!(
 			slv.propagate_next().is_ok(),
 			"subcircuit no_cycle must accept the valid {{0,1}} sub-tour"
 		);
 		// Node 2 lies outside the {0,1} sub-tour, so it is forced to self-loop.
 		assert!(
-			!s2.in_domain(&slv, 1) && !s2.in_domain(&slv, 2),
+			!vars[2].in_domain(&slv, 1) && !vars[2].in_domain(&slv, 2),
 			"node 2 outside the sub-tour must be forced to self-loop (succ[2] = 3)"
 		);
 	}

@@ -11,16 +11,18 @@ mod no_cycle;
 mod scc;
 
 use itertools::Itertools;
+use tracing::warn;
 
 pub use crate::constraints::circuit::{no_cycle::CircuitNoCycle, scc::CircuitScc};
 use crate::{
 	IntVal,
 	actions::{
 		IntAnalyzeActions, IntDecisionActions, IntEvent, IntInspectionActions,
-		IntPropagationActions, PropagationActions, ReasoningContext, ReasoningEngine,
+		IntPropagationActions, PropagationActions, ReasonActions, ReasoningContext,
+		ReasoningEngine,
 	},
 	constraints::{
-		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
+		Constraint, IntModelActions, IntSolverActions, NO_REASON, Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
 	model::View,
@@ -57,8 +59,6 @@ pub(crate) struct CircuitGraph<const SUBCIRCUIT: bool, I> {
 	pub(crate) vars: Vec<I>,
 	/// Successor value of node `0`.
 	pub(crate) offset: IntVal,
-	/// Number of nodes in the graph.
-	n: usize,
 }
 
 impl<const SUBCIRCUIT: bool> Circuit<SUBCIRCUIT> {
@@ -82,8 +82,7 @@ impl<const SUBCIRCUIT: bool> Circuit<SUBCIRCUIT> {
 	/// Returns whether a `no_cycle` propagator will be posted when creating a
 	/// [`Solver`](crate::solver::Solver) object.
 	fn no_cycle_propagation(&self) -> bool {
-		// If `no_cycle` and `scc` are both `false`, upgrade to run `no_cycle`.
-		self.no_cycle.unwrap_or(true) || !self.scc_propagation()
+		self.no_cycle.unwrap_or(true)
 	}
 
 	/// Returns whether a `scc` propagator will be posted when creating a
@@ -112,16 +111,17 @@ where
 		let graph = &self.no_cycle_prop.graph;
 		let offset = graph.offset;
 		let max_node = offset + graph.vars.len() as IntVal - 1;
-		// Tighten every successor to the node range (offset..=max_node).
+		// Tighten every successor to the node range (offset..=max_node). The
+		// constraint itself implies the range, so the narrowing is unconditional.
 		for v in &graph.vars {
-			v.tighten_min(ctx, offset, [])?;
-			v.tighten_max(ctx, max_node, [])?;
+			v.tighten_min(ctx, offset, NO_REASON)?;
+			v.tighten_max(ctx, max_node, NO_REASON)?;
 		}
 		// Every node lies on the cycle, so none is its own successor.
 		if !SUBCIRCUIT {
 			for (i, v) in graph.vars.iter().enumerate() {
 				let self_val = offset + i as IntVal;
-				v.remove_val(ctx, self_val, [])?;
+				v.remove_val(ctx, self_val, NO_REASON)?;
 			}
 		}
 		self.propagate(ctx)?;
@@ -129,8 +129,14 @@ where
 	}
 
 	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
-		let no_cycle = self.no_cycle_propagation();
 		let scc = self.scc_propagation();
+		let mut no_cycle = self.no_cycle_propagation();
+		if !no_cycle && !scc {
+			warn!(
+				"all propagation algorithms are disabled for `circuit` constraint, override with no_cycle propagation to ensure consistency"
+			);
+			no_cycle = true;
+		}
 		let graph = &self.no_cycle_prop.graph;
 		let offset = graph.offset;
 		let vars = graph
@@ -216,20 +222,17 @@ impl<const SUBCIRCUIT: bool, I> CircuitGraph<SUBCIRCUIT, I> {
 
 	/// Create a new successor graph.
 	pub(crate) fn new(vars: Vec<I>, offset: IntVal) -> Self {
-		Self {
-			n: vars.len(),
-			vars,
-			offset,
-		}
+		Self { vars, offset }
 	}
 
 	/// Push the literal witnessing that node `i` is *forced into* the cycle
 	/// (`x_i != edge_val(i)`): the reason-literal counterpart of
 	/// [`Self::forced_in`].
 	#[inline]
-	pub(crate) fn push_forced_in<C>(&self, out: &mut Vec<C::Atom>, i: usize, ctx: &mut C)
+	pub(crate) fn push_forced_in<C, S>(&self, ctx: &mut C, out: &mut S, i: usize)
 	where
 		C: ReasoningContext + ?Sized,
+		S: ReasonActions<C::Atom>,
 		I: IntDecisionActions<C> + IntInspectionActions<C>,
 	{
 		out.push(self.vars[i].lit(ctx, IntLitMeaning::NotEq(self.edge_val(i))));
@@ -237,19 +240,23 @@ impl<const SUBCIRCUIT: bool, I> CircuitGraph<SUBCIRCUIT, I> {
 
 	/// Append the `x_i != j` literals for every `i` in `from`, `j` in `to`
 	/// (skipping `i == j` and the optional `except` pair).
-	pub(crate) fn push_no_edge<C>(
+	///
+	/// Callers pass disjoint `from`/`to` sets, so the appended literals are
+	/// pairwise distinct and the resulting clause stays duplicate-free.
+	pub(crate) fn push_no_edge<C, S>(
 		&self,
-		out: &mut Vec<C::Atom>,
+		ctx: &mut C,
+		out: &mut S,
 		from: &[usize],
 		to: &[usize],
 		except: Option<(usize, usize)>,
-		ctx: &mut C,
 	) where
 		C: ReasoningContext + ?Sized,
+		S: ReasonActions<C::Atom>,
 		I: IntDecisionActions<C> + IntInspectionActions<C>,
 	{
+		out.reserve(from.len() * to.len());
 		for &i in from {
-			// Emit each bound literal at most once, so the clause stays duplicate-free.
 			for &j in to {
 				if i == j || except == Some((i, j)) {
 					continue;
@@ -292,84 +299,14 @@ impl<const SUBCIRCUIT: bool, I> CircuitGraph<SUBCIRCUIT, I> {
 #[cfg(test)]
 mod tests {
 	use expect_test::expect;
-	use itertools::Itertools;
 	use tracing_test::traced_test;
 
 	use crate::{
 		IntSet, IntVal,
 		actions::IntDecisionActions,
-		model::{Model, View},
-		solver::{IntLitMeaning, Solver, Status, View as SolverView, branchers::WarmStartBrancher},
+		model::Model,
+		solver::{IntLitMeaning, Solver, View as SolverView, branchers::WarmStartBrancher},
 	};
-
-	/// Collect every solution of the model as a sorted list of successor-value
-	/// vectors.
-	fn collect(mut prb: Model, model_vars: &[View<IntVal>]) -> Vec<Vec<IntVal>> {
-		let (mut slv, map): (Solver, _) = prb.lower().to_solver().unwrap();
-		let vars = model_vars
-			.iter()
-			.map(|&x| map.get(&mut slv, x))
-			.collect_vec();
-		let mut solns: Vec<Vec<IntVal>> = Vec::new();
-		let status = slv
-			.solve()
-			.all_solutions(vars.iter().map(|&v| crate::solver::AnyView::from(v)))
-			.collect_solutions_in(vars.clone(), &mut solns)
-			.satisfy();
-		assert_eq!(status, Status::Complete);
-		solns.sort();
-		solns
-	}
-
-	/// Whether `sol` (1-based successor values) forms a single Hamiltonian
-	/// cycle.
-	fn is_circuit(sol: &[IntVal]) -> bool {
-		let n = sol.len();
-		let mut visited = vec![false; n];
-		let mut node = 0;
-		let mut count = 0;
-		while !visited[node] {
-			visited[node] = true;
-			count += 1;
-			let next = (sol[node] - 1) as usize;
-			if next >= n {
-				return false;
-			}
-			node = next;
-		}
-		count == n && node == 0
-	}
-
-	/// Whether `sol` (1-based successor values) is a valid `subcircuit`: the
-	/// non-self-loop nodes form a single cycle and the rest self-loop.
-	fn is_subcircuit(sol: &[IntVal]) -> bool {
-		let n = sol.len();
-		let in_cycle = (0..n).filter(|&i| (sol[i] - 1) as usize != i).collect_vec();
-		if in_cycle.is_empty() {
-			return true;
-		}
-		let start = in_cycle[0];
-		let mut visited = vec![false; n];
-		let mut node = start;
-		let mut count = 0;
-		while !visited[node] {
-			if (sol[node] - 1) as usize == node {
-				return false;
-			}
-			visited[node] = true;
-			count += 1;
-			let next = (sol[node] - 1) as usize;
-			if next >= n {
-				return false;
-			}
-			node = next;
-		}
-		node == start && count == in_cycle.len()
-	}
-
-	// -----------------------------
-	// Test cases for the `circuit` constraint
-	// -----------------------------
 
 	/// Simple 3-node circuit with two Hamiltonian cycles:
 	/// Tests that the default propagator enumerates all correct solutions.
@@ -387,47 +324,24 @@ mod tests {
 		);
 	}
 
-	/// Cross-config test: three different configurations must agree on
-	/// the number of solutions for a 6-node circuit.  
-	#[test]
-	#[traced_test]
-	fn test_circuit_configs_agree() {
-		let configs = [(true, false), (true, true), (false, true)];
-		let mut reference: Option<Vec<Vec<IntVal>>> = None;
-		for (no_cycle, scc) in configs {
-			let mut prb = Model::default();
-			let vars = prb.new_int_decisions(6, 1..=6);
-			prb.circuit(vars.iter().copied())
-				.no_cycle_propagation(no_cycle)
-				.scc_propagation(scc)
-				.post()
-				.unwrap();
-			let solns = collect(prb, &vars);
-			assert!(solns.iter().all(|s| is_circuit(s)));
-			assert_eq!(solns.len(), 120); // (6-1)! = 120
-			match &reference {
-				None => reference = Some(solns),
-				Some(r) => assert_eq!(r, &solns, "config no_cycle={no_cycle},scc={scc} disagrees"),
-			}
-		}
-	}
-
 	/// Regression test: a successor declared wider than the index set must be
 	/// narrowed to the node range, so no out-of-range value can satisfy the
-	/// circuit.
+	/// circuit. Every successor below stays within the node range 2..=5.
 	#[test]
 	#[traced_test]
 	fn test_circuit_narrows_wide_successor_domain() {
 		let mut prb = Model::default();
 		let vars = prb.new_int_decisions(4, -100..=100);
 		prb.circuit(vars.iter().copied()).offset(2).post().unwrap();
-		let solns = collect(prb, &vars);
-		assert_eq!(solns.len(), 6, "expected 6 cycles, got {solns:?}");
-		assert!(
-			solns
-				.iter()
-				.all(|s| s.iter().all(|&v| (2..=5).contains(&v))),
-			"a successor escaped the node range 2..=5: {solns:?}"
+		prb.expect_solutions(
+			&vars,
+			expect![[r#"
+    3, 4, 5, 2
+    3, 5, 2, 4
+    4, 2, 5, 3
+    4, 5, 3, 2
+    5, 2, 3, 4
+    5, 4, 2, 3"#]],
 		);
 	}
 
@@ -440,14 +354,8 @@ mod tests {
 		for scc in [false, true] {
 			let mut prb = Model::default();
 			// Nodes 0,1,2 may only point within {0,1,2}; nodes 3,4,5 within {3,4,5}.
-			let vars = [
-				prb.new_int_decision(1..=3),
-				prb.new_int_decision(1..=3),
-				prb.new_int_decision(1..=3),
-				prb.new_int_decision(4..=6),
-				prb.new_int_decision(4..=6),
-				prb.new_int_decision(4..=6),
-			];
+			let vars =
+				[1..=3, 1..=3, 1..=3, 4..=6, 4..=6, 4..=6].map(|dom| prb.new_int_decision(dom));
 			let posted = prb
 				.circuit(vars.iter().copied())
 				.scc_propagation(scc)
@@ -459,18 +367,115 @@ mod tests {
 		}
 	}
 
-	/// Regression test: a circuit over fewer than two nodes is a no-op.
+	/// Sparse-domain `circuit`, `both` configuration. The three
+	/// `test_circuit_sparse_*` tests use the same sparse instance and must pin
+	/// identical solutions: sparse domains are where the propagators'
+	/// witness-guarded rules fire, and a rule that removes a value still on a
+	/// solution shows up as a missing line.
 	#[test]
 	#[traced_test]
-	fn test_circuit_trivial_sizes_are_no_ops() {
+	fn test_circuit_sparse_both() {
+		let mut prb = Model::default();
+		let vars = [
+			IntSet::from_iter([2..=3]),
+			IntSet::from_iter([1..=1, 3..=4]),
+			IntSet::from_iter([1..=1, 4..=4]),
+			IntSet::from_iter([1..=3]),
+		]
+		.map(|dom| prb.new_int_decision(dom));
+		prb.circuit(vars.iter().copied())
+			.no_cycle_propagation(true)
+			.scc_propagation(true)
+			.post()
+			.unwrap();
+		prb.expect_solutions(
+			&vars,
+			expect![[r#"
+    2, 3, 4, 1
+    2, 4, 1, 3
+    3, 1, 4, 2"#]],
+		);
+	}
+
+	/// Sparse-domain `circuit`, `no_cycle` configuration. The three
+	/// `test_circuit_sparse_*` tests use the same sparse instance and must pin
+	/// identical solutions: sparse domains are where the propagators'
+	/// witness-guarded rules fire, and a rule that removes a value still on a
+	/// solution shows up as a missing line.
+	#[test]
+	#[traced_test]
+	fn test_circuit_sparse_no_cycle() {
+		let mut prb = Model::default();
+		let vars = [
+			IntSet::from_iter([2..=3]),
+			IntSet::from_iter([1..=1, 3..=4]),
+			IntSet::from_iter([1..=1, 4..=4]),
+			IntSet::from_iter([1..=3]),
+		]
+		.map(|dom| prb.new_int_decision(dom));
+		prb.circuit(vars.iter().copied())
+			.no_cycle_propagation(true)
+			.scc_propagation(false)
+			.post()
+			.unwrap();
+		prb.expect_solutions(
+			&vars,
+			expect![[r#"
+    2, 3, 4, 1
+    2, 4, 1, 3
+    3, 1, 4, 2"#]],
+		);
+	}
+
+	/// Sparse-domain `circuit`, `scc` configuration. The three
+	/// `test_circuit_sparse_*` tests use the same sparse instance and must pin
+	/// identical solutions: sparse domains are where the propagators'
+	/// witness-guarded rules fire, and a rule that removes a value still on a
+	/// solution shows up as a missing line.
+	#[test]
+	#[traced_test]
+	fn test_circuit_sparse_scc() {
+		let mut prb = Model::default();
+		let vars = [
+			IntSet::from_iter([2..=3]),
+			IntSet::from_iter([1..=1, 3..=4]),
+			IntSet::from_iter([1..=1, 4..=4]),
+			IntSet::from_iter([1..=3]),
+		]
+		.map(|dom| prb.new_int_decision(dom));
+		prb.circuit(vars.iter().copied())
+			.no_cycle_propagation(false)
+			.scc_propagation(true)
+			.post()
+			.unwrap();
+		prb.expect_solutions(
+			&vars,
+			expect![[r#"
+    2, 3, 4, 1
+    2, 4, 1, 3
+    3, 1, 4, 2"#]],
+		);
+	}
+
+	/// Regression test: an empty circuit is vacuous, and a one-node circuit is
+	/// satisfied only by the self-loop, even when the node's declared domain is
+	/// wider than the single-node index range.
+	#[test]
+	#[traced_test]
+	fn test_circuit_trivial_sizes() {
 		let mut prb = Model::default();
 		let empty = prb.new_int_decisions(0, 1..=1);
 		prb.circuit(empty.iter().copied()).post().unwrap();
-		// n = 1: the single in-range node keeps its domain; the circuit is vacuous.
+
 		let mut prb = Model::default();
-		let vars = prb.new_int_decisions(1, 1..=1);
+		let vars = prb.new_int_decisions(1, 1..=5);
 		prb.circuit(vars.iter().copied()).post().unwrap();
-		assert_eq!(collect(prb, &vars), vec![vec![1]]);
+		prb.expect_solutions(&vars, expect!["1"]);
+
+		// A lone node whose domain excludes the self-loop is unsatisfiable.
+		let mut prb = Model::default();
+		let x = prb.new_int_decision(2..=5);
+		assert!(prb.circuit([x]).post().is_err());
 	}
 
 	/// Regression test: a 2-cycle over 3 nodes is unsatisfiable.
@@ -484,111 +489,79 @@ mod tests {
 		assert!(prb.circuit([a, b, c]).post().is_err());
 	}
 
-	/// Regression test: a 0-based array must yield both Hamiltonian cycles.
+	/// Regression test: a 0-based array must yield both directed Hamiltonian
+	/// cycles on {0,1,2}: 0->1->2->0 and 0->2->1->0.
 	#[test]
 	#[traced_test]
 	fn test_circuit_zero_based() {
 		let mut prb = Model::default();
 		let vars = prb.new_int_decisions(3, 0..=2);
 		prb.circuit(vars.iter().copied()).offset(0).post().unwrap();
-		let solns = collect(prb, &vars);
-		// The two directed Hamiltonian cycles on {0,1,2}: 0->1->2->0 and 0->2->1->0.
-		assert_eq!(solns, vec![vec![1, 2, 0], vec![2, 0, 1]]);
+		prb.expect_solutions(
+			&vars,
+			expect![[r#"
+    1, 2, 0
+    2, 0, 1"#]],
+		);
 	}
 
 	// -----------------------------
 	// Test cases for the `subcircuit` constraint
 	// -----------------------------
 
-	/// Regression test: a 4-node subcircuit must enumerate all valid
-	/// subcircuits.
+	/// Regression test: a 4-node subcircuit must enumerate every subcircuit:
+	/// the all-self-loop assignment, the full Hamiltonian cycles, and the
+	/// shorter cycles with the remaining nodes self-looping. That is
+	/// 1 + C(4,2) + C(4,3)*2! + 3! = 1 + 6 + 8 + 6 = 21 solutions.
 	#[test]
 	#[traced_test]
-	fn test_subcircuit_all_solutions_valid() {
+	fn test_subcircuit_enumerates_every_subcircuit() {
 		let mut prb = Model::default();
 		let vars = prb.new_int_decisions(4, 1..=4);
 		prb.circuit(vars.iter().copied())
 			.subcircuit(true)
 			.post()
 			.unwrap();
-		let solns = collect(prb, &vars);
-		assert!(solns.iter().all(|s| is_subcircuit(s)));
-		// The all-self-loop assignment is a valid subcircuit.
-		assert!(solns.contains(&vec![1, 2, 3, 4]));
-		// A full Hamiltonian cycle is also a valid subcircuit.
-		assert!(solns.contains(&vec![2, 3, 4, 1]));
-		// A 2-cycle with the other nodes self-looping is also valid.
-		assert!(solns.contains(&vec![2, 1, 3, 4]));
-		// Exact count of subcircuits on 4 nodes:
-		//   |S|=0: 1, |S|=2: C(4,2)=6, |S|=3: C(4,3)*2!=8, |S|=4: 3!=6  => 21.
-		assert_eq!(solns.len(), 21);
+		prb.expect_solutions(
+			&vars,
+			expect![[r#"
+    1, 2, 3, 4
+    1, 2, 4, 3
+    1, 3, 2, 4
+    1, 3, 4, 2
+    1, 4, 2, 3
+    1, 4, 3, 2
+    2, 1, 3, 4
+    2, 3, 1, 4
+    2, 3, 4, 1
+    2, 4, 1, 3
+    2, 4, 3, 1
+    3, 1, 2, 4
+    3, 1, 4, 2
+    3, 2, 1, 4
+    3, 2, 4, 1
+    3, 4, 2, 1
+    4, 1, 2, 3
+    4, 1, 3, 2
+    4, 2, 1, 3
+    4, 2, 3, 1
+    4, 3, 1, 2"#]],
+		);
 	}
 
-	/// Regression test: three different configurations must enumerate the same
-	/// valid subcircuits on 6 nodes.
-	#[test]
-	#[traced_test]
-	fn test_subcircuit_configs_agree() {
-		let configs = [(true, false), (true, true), (false, true)];
-		let mut reference: Option<Vec<Vec<IntVal>>> = None;
-		for (no_cycle, scc) in configs {
-			let mut prb = Model::default();
-			let vars = prb.new_int_decisions(6, 1..=6);
-			prb.circuit(vars.iter().copied())
-				.subcircuit(true)
-				.no_cycle_propagation(no_cycle)
-				.scc_propagation(scc)
-				.post()
-				.unwrap();
-			let solns = collect(prb, &vars);
-			assert!(solns.iter().all(|s| is_subcircuit(s)));
-			// Subcircuits on n=6: 1 + Σ_{k=2..6} C(6,k)·(k-1)!
-			//   = 1 + 15 + 40 + 90 + 144 + 120 = 410.
-			assert_eq!(solns.len(), 410);
-			match &reference {
-				None => reference = Some(solns),
-				Some(r) => assert_eq!(
-					r, &solns,
-					"subcircuit config no_cycle={no_cycle},scc={scc} disagrees"
-				),
-			}
-		}
-	}
-
-	/// Regression test: a subcircuit with a 2-cycle and the other nodes
-	/// self-looping must be enumerated, and not pruned by an unsound nogood.
-	#[test]
-	fn test_subcircuit_no_cycle_reason_current_level() {
-		let mut prb = Model::default();
-		let vars = vec![
-			prb.new_int_decision(IntSet::from_iter([3..=3, 5..=6])), // node0
-			prb.new_int_decision(IntSet::from_iter([1..=4])),        // node1
-			prb.new_int_decision(IntSet::from_iter([6..=6])),        // node2
-			prb.new_int_decision(IntSet::from_iter([1..=2, 4..=4, 6..=6])), // node3
-			prb.new_int_decision(IntSet::from_iter([1..=1, 5..=5])), // node4
-			prb.new_int_decision(IntSet::from_iter([3..=3, 5..=6])), // node5
-		];
-		prb.circuit(vars.iter().copied())
-			.subcircuit(true)
-			.no_cycle_propagation(true)
-			.scc_propagation(false)
-			.post()
-			.unwrap();
-		for s in collect(prb, &vars) {
-			assert!(is_subcircuit(&s), "emitted a non-subcircuit: {s:?}");
-		}
-	}
-
-	/// Warm-start witness not over-pruned by the `no_cycle` propagator.
+	/// Regression test: a warm start that fixes the `{0,1}` cycle must still
+	/// leave the `{2,3}` cycle reachable; an unsound `no_cycle` nogood would
+	/// prune that witness away.
 	#[test]
 	fn test_subcircuit_no_cycle_under_fixed_search() {
 		let mut prb = Model::default();
 		let vars = [
-			prb.new_int_decision(IntSet::from_iter([1..=2])), // node0: self(1) or ->1(2)
-			prb.new_int_decision(IntSet::from_iter([1..=2])), // node1: ->0(1) or self(2)
-			prb.new_int_decision(IntSet::from_iter([3..=4])), // node2: self(3) or ->3(4)
-			prb.new_int_decision(IntSet::from_iter([3..=3])), // node3: ->2(3), forced selected
-		];
+			1..=2, // node0: self(1) or ->1(2)
+			1..=2, // node1: ->0(1) or self(2)
+			3..=4, // node2: self(3) or ->3(4)
+			3..=3, // node3: ->2(3), forced selected
+		]
+		.map(|dom| prb.new_int_decision(dom));
 		prb.circuit(vars.iter().copied())
 			.subcircuit(true)
 			.no_cycle_propagation(true)
@@ -601,43 +574,135 @@ mod tests {
 		let d0 = svars[0].lit(&mut slv, IntLitMeaning::Eq(2));
 		let d1 = svars[1].lit(&mut slv, IntLitMeaning::Eq(1));
 		WarmStartBrancher::new_in(&mut slv, vec![d0, d1]);
-		let mut sols: Vec<Vec<IntVal>> = Vec::new();
-		let status = slv
-			.solve()
-			.all_solutions(svars.iter().map(|&v| crate::solver::AnyView::from(v)))
-			.collect_solutions_in(svars.clone(), &mut sols)
-			.satisfy();
-		assert_eq!(status, Status::Complete);
-		sols.sort();
-		assert_eq!(
-			sols,
-			vec![vec![1, 2, 4, 3]],
-			"w_in witness lost: the {{2,3}} subcircuit was wrongly pruned by an unsound nogood"
+		slv.expect_solutions(&svars, expect!["1, 2, 4, 3"]);
+	}
+
+	/// Sparse-domain `subcircuit`, `both` configuration. The three
+	/// `test_subcircuit_sparse_*` tests use the same sparse instance and must
+	/// pin identical solutions. This also covers the 2-cycle-plus-self-loop
+	/// shapes that an unsound `no_cycle` nogood would prune away.
+	#[test]
+	#[traced_test]
+	fn test_subcircuit_sparse_both() {
+		let mut prb = Model::default();
+		let vars = [
+			IntSet::from_iter([1..=3]),
+			IntSet::from_iter([1..=2, 4..=4]),
+			IntSet::from_iter([1..=1, 3..=4]),
+			IntSet::from_iter([2..=4]),
+		]
+		.map(|dom| prb.new_int_decision(dom));
+		prb.circuit(vars.iter().copied())
+			.subcircuit(true)
+			.no_cycle_propagation(true)
+			.scc_propagation(true)
+			.post()
+			.unwrap();
+		prb.expect_solutions(
+			&vars,
+			expect![[r#"
+    1, 2, 3, 4
+    1, 2, 4, 3
+    1, 4, 3, 2
+    2, 1, 3, 4
+    2, 4, 1, 3
+    3, 1, 4, 2
+    3, 2, 1, 4"#]],
 		);
 	}
 
-	/// Regression test: a subcircuit over fewer than two nodes is a no-op.
+	/// Sparse-domain `subcircuit`, `no_cycle` configuration. The three
+	/// `test_subcircuit_sparse_*` tests use the same sparse instance and must
+	/// pin identical solutions. This also covers the 2-cycle-plus-self-loop
+	/// shapes that an unsound `no_cycle` nogood would prune away.
 	#[test]
 	#[traced_test]
-	fn test_subcircuit_trivial_sizes_are_no_ops() {
+	fn test_subcircuit_sparse_no_cycle() {
+		let mut prb = Model::default();
+		let vars = [
+			IntSet::from_iter([1..=3]),
+			IntSet::from_iter([1..=2, 4..=4]),
+			IntSet::from_iter([1..=1, 3..=4]),
+			IntSet::from_iter([2..=4]),
+		]
+		.map(|dom| prb.new_int_decision(dom));
+		prb.circuit(vars.iter().copied())
+			.subcircuit(true)
+			.no_cycle_propagation(true)
+			.scc_propagation(false)
+			.post()
+			.unwrap();
+		prb.expect_solutions(
+			&vars,
+			expect![[r#"
+    1, 2, 3, 4
+    1, 2, 4, 3
+    1, 4, 3, 2
+    2, 1, 3, 4
+    2, 4, 1, 3
+    3, 1, 4, 2
+    3, 2, 1, 4"#]],
+		);
+	}
+
+	/// Sparse-domain `subcircuit`, `scc` configuration. The three
+	/// `test_subcircuit_sparse_*` tests use the same sparse instance and must
+	/// pin identical solutions. This also covers the 2-cycle-plus-self-loop
+	/// shapes that an unsound `no_cycle` nogood would prune away.
+	#[test]
+	#[traced_test]
+	fn test_subcircuit_sparse_scc() {
+		let mut prb = Model::default();
+		let vars = [
+			IntSet::from_iter([1..=3]),
+			IntSet::from_iter([1..=2, 4..=4]),
+			IntSet::from_iter([1..=1, 3..=4]),
+			IntSet::from_iter([2..=4]),
+		]
+		.map(|dom| prb.new_int_decision(dom));
+		prb.circuit(vars.iter().copied())
+			.subcircuit(true)
+			.no_cycle_propagation(false)
+			.scc_propagation(true)
+			.post()
+			.unwrap();
+		prb.expect_solutions(
+			&vars,
+			expect![[r#"
+    1, 2, 3, 4
+    1, 2, 4, 3
+    1, 4, 3, 2
+    2, 1, 3, 4
+    2, 4, 1, 3
+    3, 1, 4, 2
+    3, 2, 1, 4"#]],
+		);
+	}
+
+	/// Regression test: an empty subcircuit is vacuous, and a one-node
+	/// subcircuit is satisfied only by the self-loop (the node is either the
+	/// whole cycle or excluded from it, and both mean `x = 1`).
+	#[test]
+	#[traced_test]
+	fn test_subcircuit_trivial_sizes() {
 		let mut prb = Model::default();
 		let empty = prb.new_int_decisions(0, 1..=1);
 		prb.circuit(empty.iter().copied())
 			.subcircuit(true)
 			.post()
 			.unwrap();
-		// n = 1: the single node keeps its (in-range) domain.
+
 		let mut prb = Model::default();
-		let vars = prb.new_int_decisions(1, 1..=1);
+		let vars = prb.new_int_decisions(1, 1..=5);
 		prb.circuit(vars.iter().copied())
 			.subcircuit(true)
 			.post()
 			.unwrap();
-		assert_eq!(collect(prb, &vars), vec![vec![1]]);
+		prb.expect_solutions(&vars, expect!["1"]);
 	}
 
 	/// Regression test: a 0-based subcircuit must enumerate all valid
-	/// subcircuits.
+	/// subcircuits: 1 (empty) + C(3,2) (2-cycles) + (3-1)! (3-cycles) = 6.
 	#[test]
 	#[traced_test]
 	fn test_subcircuit_zero_based() {
@@ -648,11 +713,15 @@ mod tests {
 			.offset(0)
 			.post()
 			.unwrap();
-		let solns = collect(prb, &vars);
-		// All-self-loop and a full cycle are both valid 0-based subcircuits.
-		assert!(solns.contains(&vec![0, 1, 2]));
-		assert!(solns.contains(&vec![1, 2, 0]));
-		// 1 (empty) + C(3,2)=3 (2-cycles) + (3-1)!=2 (3-cycles) = 6.
-		assert_eq!(solns.len(), 6);
+		prb.expect_solutions(
+			&vars,
+			expect![[r#"
+    0, 1, 2
+    0, 2, 1
+    1, 0, 2
+    1, 2, 0
+    2, 0, 1
+    2, 1, 0"#]],
+		);
 	}
 }

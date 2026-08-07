@@ -11,6 +11,7 @@ mod tests {
 	};
 
 	assert_all_solutions!(array_var_int_element);
+	assert_all_solutions!(circuit_global);
 	assert_all_solutions!(diffn_k_3d_regression);
 	assert_all_solutions!(sudoku_p0);
 	assert_all_solutions!(unification);

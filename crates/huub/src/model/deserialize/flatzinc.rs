@@ -52,6 +52,12 @@ const FULL_INT_DOMAIN: RangeInclusive<IntVal> = IntVal::MIN..=IntVal::MAX;
 pub enum AnnotationIdent {
 	/// "bool_search" annotation for Boolean search strategies.
 	BoolSearch,
+	/// "circuit_no_cycle" annotation to enable the `no_cycle` propagator within
+	/// a circuit/subcircuit constraint.
+	CircuitNoCycle,
+	/// "circuit_scc" annotation to enable the `scc` propagator within a
+	/// circuit/subcircuit constraint.
+	CircuitScc,
 	/// "bounds" consistency annotation.
 	ConsistencyBounds,
 	/// "domain" consistency annotation.
@@ -67,12 +73,6 @@ pub enum AnnotationIdent {
 	/// "detectable_precedence" annotation to detectable precedence propagation
 	/// within the disjunctive propagator.
 	DisjDetectPrec,
-	/// "circuit_no_cycle" annotation to enable the `no_cycle` propagator within
-	/// a circuit/subcircuit constraint.
-	CircuitNoCycle,
-	/// "circuit_scc" annotation to enable the `scc` propagator within a
-	/// circuit/subcircuit constraint.
-	CircuitScc,
 	/// "int_search" annotation for integer search strategies.
 	IntSearch,
 	/// "seq_search" annotation for sequential search strategies.
@@ -424,14 +424,14 @@ impl AnnotationIdent {
 	pub fn as_str(&self) -> &'static str {
 		match self {
 			Self::BoolSearch => "bool_search",
+			Self::CircuitNoCycle => "circuit_no_cycle",
+			Self::CircuitScc => "circuit_scc",
 			Self::ConsistencyBounds => "bounds",
 			Self::ConsistencyDomain => "domain",
 			Self::ConsistencyValue => "value_propagation",
 			Self::DisjDetectPrec => "detectable_precedence",
 			Self::DisjEdgeFinding => "edge_finding",
 			Self::DisjNotLast => "not_last",
-			Self::CircuitNoCycle => "circuit_no_cycle",
-			Self::CircuitScc => "circuit_scc",
 			Self::IntSearch => "int_search",
 			Self::SeqSearch => "seq_search",
 			Self::ValSelIndomain => "indomain",
@@ -2629,20 +2629,56 @@ mod tests {
 		AnnotationIdent, ConstraintIdent, FznIdent, KnownIdent,
 	};
 
+	/// An annotation that [`AnnotationIdent::as_str`] renders but
+	/// [`AnnotationIdent::try_from`] does not recognise can never be matched
+	/// against a parsed FlatZinc annotation, silently disabling whatever it
+	/// selects, so both directions are checked for every identifier.
 	#[test]
 	fn annotation_ident_display_roundtrips() {
-		let ident = AnnotationIdent::DisjDetectPrec;
-		assert_eq!(ident.to_string(), "detectable_precedence");
-		assert_eq!(
-			AnnotationIdent::try_from(ident.to_string().as_str()),
-			Ok(AnnotationIdent::DisjDetectPrec)
-		);
-		let ident = AnnotationIdent::WarmStartInt;
-		assert_eq!(ident.to_string(), "warm_start_int");
-		assert_eq!(
-			AnnotationIdent::try_from(ident.to_string().as_str()),
-			Ok(AnnotationIdent::WarmStartInt)
-		);
+		const ALL_ANNOTATION_IDENTS: &[AnnotationIdent] = &[
+			AnnotationIdent::BoolSearch,
+			AnnotationIdent::CircuitNoCycle,
+			AnnotationIdent::CircuitScc,
+			AnnotationIdent::ConsistencyBounds,
+			AnnotationIdent::ConsistencyDomain,
+			AnnotationIdent::ConsistencyValue,
+			AnnotationIdent::DisjDetectPrec,
+			AnnotationIdent::DisjEdgeFinding,
+			AnnotationIdent::DisjNotLast,
+			AnnotationIdent::IntSearch,
+			AnnotationIdent::SeqSearch,
+			AnnotationIdent::ValSelIndomain,
+			AnnotationIdent::ValSelIndomainInterval,
+			AnnotationIdent::ValSelIndomainMax,
+			AnnotationIdent::ValSelIndomainMedian,
+			AnnotationIdent::ValSelIndomainMiddle,
+			AnnotationIdent::ValSelIndomainMin,
+			AnnotationIdent::ValSelIndomainReverseSplit,
+			AnnotationIdent::ValSelIndomainSplit,
+			AnnotationIdent::ValSelOutdomainMax,
+			AnnotationIdent::ValSelOutdomainMedian,
+			AnnotationIdent::ValSelOutdomainMin,
+			AnnotationIdent::VarSelAntiFirstFail,
+			AnnotationIdent::VarSelDomWDeg,
+			AnnotationIdent::VarSelFirstFail,
+			AnnotationIdent::VarSelInputOrder,
+			AnnotationIdent::VarSelLargest,
+			AnnotationIdent::VarSelMaxRegret,
+			AnnotationIdent::VarSelMostConstrained,
+			AnnotationIdent::VarSelOccurrence,
+			AnnotationIdent::VarSelSmallest,
+			AnnotationIdent::WarmStartArray,
+			AnnotationIdent::WarmStartBool,
+			AnnotationIdent::WarmStartInt,
+		];
+
+		for &ident in ALL_ANNOTATION_IDENTS {
+			assert_eq!(
+				AnnotationIdent::try_from(ident.to_string().as_str()),
+				Ok(ident),
+				"`{ident}` is not recognised by `AnnotationIdent::try_from`"
+			);
+		}
 	}
 
 	#[test]

@@ -67,3 +67,14 @@ The annotations are:
 - `detectable_precedence` requests detectable-precedence propagation.
 Whenever any of the annotations is present on the `disjunctive` constraint, it overrides the default enabled propagation methods, disabling any other propagation methods that would be enabled by default.
 This is best thought of as tuning mechanisms rather than adding these annotations for each `disjunctive` constraint.
+
+### Circuit propagation
+
+The Huub MiniZinc library contains two annotations that let a model request particular propagation algorithms for the `circuit` and `subcircuit` constraints.
+The annotations are:
+- `circuit_no_cycle` requests the no-cycle propagation, which follows the chains of successors that are already fixed and forbids the edge that would close such a chain into a cycle that does not cover the whole constraint. This algorithm is enabled by default.
+- `circuit_scc` requests the strongly-connected-component propagation, which reasons about the connectivity of the graph of remaining successor edges. It is stronger than the no-cycle propagation, but also considerably more expensive. This algorithm is disabled by default.
+Whenever either of the annotations is present on a `circuit` or `subcircuit` constraint, it overrides the default enabled propagation methods, disabling any other propagation methods that would be enabled by default.
+As with the `disjunctive` annotations, these are best thought of as tuning mechanisms rather than annotations to add to every constraint.
+
+Note that disabling both algorithms would leave the constraint unenforced during the search, so Huub re-enables the no-cycle propagation and reports a warning when it is asked to disable both.
