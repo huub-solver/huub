@@ -1,26 +1,81 @@
-//! Structures and algorithms for the `cumulative` constraint.
-//! This constraint ensures that the sum of resource usages of all tasks
+//! Structures and algorithms for the `cumulative` constraint, which
+//! ensures that the sum of resource usages of all tasks
 //! running at any time does not exceed the resource capacity.
-//! It uses a time-table propagation approach to efficiently manage the
-//! scheduling of tasks.
 
-use std::iter::once;
+mod edge_finding;
+mod time_table;
+
+use std::cmp;
 
 use itertools::Itertools;
-use tracing::trace;
 
 use crate::{
 	IntVal,
 	actions::{
-		InitActions, IntDecisionActions, IntInspectionActions, IntPropCond, PostingActions,
-		PropagationContext, ReasonActions, ReasoningContext, ReasoningEngine,
+		InitActions, IntAnalyzeActions, IntInspectionActions, IntPropCond, PostingActions,
+		ReasoningContext, ReasoningEngine,
 	},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
-	solver::{IntLitMeaning, Polarity, engine::Engine, queue::PriorityLevel},
+	model,
+	solver::{Polarity, engine::Engine, queue::PriorityLevel},
 };
+
+/// The largest capacity for which a strengthening knapsack is built.
+const MAX_KNAPSACK_CAPACITY: IntVal = 10_000;
+
+/// The largest number of dynamic-programming steps the strengthening rules may
+/// spend on a single constraint.
+const MAX_STRENGTHENING_WORK: IntVal = 10_000_000;
+
+/// Representation of the `cumulative` constraint within a model.
+///
+/// This constraint enforces that the given a set of tasks, each with a start
+/// time, duration, and resource usage, do not exceed the specified resource
+/// capacity at any point in time. The constraint can optionally apply
+/// edge finding propagation to strengthen the reasoning about
+/// the tasks' scheduling.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct Cumulative {
+	/// Inner propagator, used to simplify the constraint within the model.
+	///
+	/// Its phases are all enabled regardless of the flags below, which apply
+	/// only to the lowered [`Solver`](crate::solver::Solver). Simplification is
+	/// paid for once while the model is built, so it is worth reasoning as
+	/// strongly as possible there; the flags trade strength against the cost of
+	/// repeating that reasoning at every node of the search.
+	pub(crate) propagator: CumulativePropagator<
+		model::View<IntVal>,
+		model::View<IntVal>,
+		model::View<IntVal>,
+		model::View<IntVal>,
+	>,
+	/// Whether to apply the edge-finding consistency check during
+	/// propagation.
+	///
+	/// Defaults to `true`.
+	pub(crate) energy_overload_checking: Option<bool>,
+	/// Whether to apply the edge-finding bounds-filtering during
+	/// propagation.
+	///
+	/// Defaults to `true`.
+	pub(crate) edge_finding_propagation: Option<bool>,
+	/// Whether to apply the edge-finding opportunistic
+	/// extended-edge-finding during propagation.
+	///
+	/// Only takes effect when the bounds-filtering phase is enabled.
+	///
+	/// Defaults to `true`.
+	pub(crate) opportunistic_edge_finding_propagation: Option<bool>,
+	/// Whether the coefficient strengthening rules have already run.
+	///
+	/// They depend only on the fixed usages, the fixed capacity, and the task
+	/// windows, so re-running them in every simplification round would repeat
+	/// the same knapsacks for a diminishing gain.
+	pub(crate) strengthened: bool,
+}
 
 /// The propagation rules for the `cumulative` constraint. This enum is
 /// used to identify the type of propagation that is being applied. Values:
@@ -35,9 +90,8 @@ enum CumulativePropagationRule {
 	BackwardShift,
 }
 
-/// A propagator for the `cumulative` constraint that uses a time-table
-/// profile to manage the scheduling of tasks. Refer to the corresponding
-/// functions for details on propagation rules and explanations.
+/// A propagator for the `cumulative` constraint using time-table propagation
+/// and optionally edge finding algorithms.
 ///
 /// **References**
 ///
@@ -45,8 +99,14 @@ enum CumulativePropagationRule {
 ///   cumulative propagator. Constraints, 16(3):173-194, 2011.
 /// - Gay, Steven, Renaud Hartert, and Pierre Schaus. "Simple and scalable
 ///   time-table filtering for the cumulative constraint." CP 2015.
+/// - P. Vilím. Timetable edge finding filtering algorithm for discrete
+///   cumulative resources. CPAIOR 2011.
+/// - A. Schutt, T. Feydy, and P.J. Stuckey. Explaining time-table-edge-finding
+///   propagation for the cumulative resource constraint. CPAIOR 2013.
+/// - J. Schulz, "Hybrid Solving Techniques for Project Scheduling Problems", TU
+///   Berlin, 2012
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct CumulativeTimeTable<I1, I2, I3, I4> {
+pub struct CumulativePropagator<I1, I2, I3, I4> {
 	/// Start time variables of each task.
 	start_times: Vec<I1>,
 	/// Durations of each task.
@@ -55,8 +115,13 @@ pub struct CumulativeTimeTable<I1, I2, I3, I4> {
 	usages: Vec<I3>,
 	/// Resource capacity.
 	capacity: I4,
-
-	// Time Table Profile
+	/// Whether to run the edge-finding consistency check on top of the
+	/// time-table propagation.
+	energy_overload_check_enabled: bool,
+	/// Whether to run the edge-finding bounds-filtering phase.
+	edge_finding_propagation_enabled: bool,
+	/// Whether to run the opportunistic extended-edge-finding phase.
+	opportunistic_edge_finding_propagation_enabled: bool,
 	/// Bounds of the time intervals where tasks are active.
 	bounds: Vec<IntVal>,
 	/// Heights of the time intervals, representing the total resource usage at
@@ -64,172 +129,340 @@ pub struct CumulativeTimeTable<I1, I2, I3, I4> {
 	heights: Vec<IntVal>,
 }
 
-impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
-	/// Build the time-table profile as a set of (time, height) rectangles to
-	/// represent the compulsory parts of tasks. The compulsory part of a task
-	/// is formed by the interval between its earliest start time and its latest
-	/// completion time (i.e. the addition of its latest start time and its
-	/// duration lower bound).
-	/// The result is a tuple (bounds, heights), where bounds[i]..bounds[i+1]
-	/// is the interval in which the cumulative compulsory part is heights[i].
-	///
-	/// When the profile is built, it checks if the cumulative compulsory part
-	/// exceeds the capacity lower bound. If it does, it sets the lower bound
-	/// of the capacity variable to the height of the profile at the time point.
-	fn build_profile_and_check_overload<E>(
-		&mut self,
-		ctx: &mut E::PropagationContext<'_>,
-	) -> Result<bool, E::Conflict>
-	where
-		E: ReasoningEngine,
-		I1: IntSolverActions<E>,
-		I2: IntSolverActions<E>,
-		I3: IntSolverActions<E>,
-		I4: IntSolverActions<E>,
-	{
-		self.bounds.clear();
-		self.heights.clear();
-		let n = self.start_times.len();
-		let mut events = Vec::with_capacity(2 * n);
-		let mut capacity_lb = self.capacity.min(ctx);
-		// Collect all start and end events of compulsory tasks
-		for i in 0..n {
-			let lst = self.latest_start_time(ctx, i);
-			let ect = self.earliest_completion_time(ctx, i);
-			let min_usage = self.usages[i].min(ctx);
-			if lst < ect {
-				events.push((lst, min_usage));
-				events.push((ect, -min_usage));
-			}
-		}
-		// Sort events by time
-		events.sort_unstable_by_key(|&(t, _)| t);
-
-		if !events.is_empty() {
-			trace!(
-				target: "cumulative",
-				events =? events,
-				"events for compulsory parts from tasks"
-			);
-		}
-
-		// Build bounds and heights from the events
-		// Check if the resource usage exceeds the capacity lower bound
-		let mut cur_height = 0;
-		let mut last_time = None;
-		for (t, delta) in events {
-			if last_time != Some(t) {
-				if let Some(lt) = last_time {
-					self.bounds.push(lt);
-					self.heights.push(cur_height);
-				}
-				if cur_height > capacity_lb {
-					trace!(
-						target: "cumulative",
-						timepoint = t,
-						capacity_lb, cur_height, "push capacity lower bound"
-					);
-					let mid_point = last_time.map_or(t, |lt| (lt + t) / 2);
-					self.capacity.tighten_min(
-						ctx,
-						cur_height,
-						self.explain_overload_time_point(cur_height, mid_point),
-					)?;
-					capacity_lb = cur_height;
-				}
-				last_time = Some(t);
-			}
-			cur_height += delta;
-		}
-		if let Some(lt) = last_time {
-			self.bounds.push(lt);
-			self.heights.push(cur_height);
-		}
-
-		if !self.bounds.is_empty() {
-			trace!(
-				target: "cumulative",
-				bounds = ?self.bounds,
-				heights = ?self.heights,
-				capacity_ub =? self.capacity.max(ctx),
-				"cumulative time table profile"
-			);
-		}
-		Ok(self.bounds.is_empty())
+impl Cumulative {
+	/// Returns whether the edge-finding bounds-filtering is used when
+	/// creating a [`Solver`](crate::solver::Solver) object.
+	pub fn edge_finding_propagation_enabled(&self) -> bool {
+		self.edge_finding_propagation.unwrap_or(true)
 	}
 
-	/// A helper function to collect the compulsory tasks that cover a given
-	/// amount of energy at a specific time point. This function is used for
-	/// explanation.
-	fn collect_compulsory_tasks<Ctx>(
-		&self,
-		ctx: &mut Ctx,
-		to_cover: i64,
-		time_point: i64,
-		skip_task: Option<usize>,
-	) -> Vec<usize>
-	where
-		Ctx: ReasoningContext + ?Sized,
-		I1: IntInspectionActions<Ctx>,
-		I2: IntInspectionActions<Ctx>,
-		I3: IntInspectionActions<Ctx>,
-		I4: IntInspectionActions<Ctx>,
-	{
-		// No tasks needed to cover zero or negative energy
-		if to_cover <= 0 {
-			return Vec::new();
-		}
+	/// Returns whether the edge-finding consistency check is used when
+	/// creating a [`Solver`](crate::solver::Solver) object.
+	pub fn energy_overload_checking_enabled(&self) -> bool {
+		self.energy_overload_checking.unwrap_or(true)
+	}
 
-		// Collect a sufficient set of tasks with compulsory parts at `time_point` that
-		// cover `to_cover` energy
-		let mut relevant_tasks = Vec::new();
-		let mut collected_energy = 0;
-		for i in 0..self.start_times.len() {
-			if Some(i) == skip_task {
-				continue; // Skip the task itself
+	/// Read the fixed usages, or return `None` when any of them is still
+	/// unfixed, in which case no strengthening is attempted.
+	fn fixed_usages<E>(&self, ctx: &mut E::PropagationContext<'_>) -> Option<Vec<IntVal>>
+	where
+		E: ReasoningEngine,
+		model::View<IntVal>: IntModelActions<E>,
+	{
+		let mut usages = Vec::with_capacity(self.propagator.usages.len());
+		for usage in &self.propagator.usages {
+			usages.push(usage.val(ctx)?);
+		}
+		Some(usages)
+	}
+
+	/// Read each task's `[est, lct)` window from the current start-time bounds
+	/// and the durations, or return `None` when any duration is still unfixed.
+	fn fixed_windows<E>(&self, ctx: &mut E::PropagationContext<'_>) -> Option<Vec<(IntVal, IntVal)>>
+	where
+		E: ReasoningEngine,
+		model::View<IntVal>: IntModelActions<E>,
+	{
+		let mut windows = Vec::with_capacity(self.propagator.start_times.len());
+		for (start, duration) in self
+			.propagator
+			.start_times
+			.iter()
+			.zip(&self.propagator.durations)
+		{
+			let (earliest_start, latest_start) = start.bounds(ctx);
+			windows.push((earliest_start, latest_start + duration.val(ctx)?));
+		}
+		Some(windows)
+	}
+
+	/// The largest total that some subset of `weights` can reach without
+	/// exceeding `capacity`, a bounded max-subset-sum solved by dynamic
+	/// programming.
+	fn max_reachable_load(weights: &[IntVal], capacity: IntVal) -> IntVal {
+		if capacity <= 0 {
+			return 0;
+		}
+		let cap = capacity as usize;
+		let mut reachable = vec![false; cap + 1];
+		reachable[0] = true;
+		let mut best = 0;
+		for &w in weights {
+			if w <= 0 || w > capacity {
+				continue;
 			}
-			if self.latest_start_time(ctx, i) <= time_point
-				&& self.earliest_completion_time(ctx, i) > time_point
-			{
-				let usage_lb = self.usages[i].min(ctx);
-				if usage_lb > 0 {
-					relevant_tasks.push(i);
-					collected_energy += usage_lb;
-					if collected_energy >= to_cover {
-						break;
+			let w = w as usize;
+			// Iterate downward so that each item contributes at most once.
+			for s in (0..=cap - w).rev() {
+				if reachable[s] && !reachable[s + w] {
+					reachable[s + w] = true;
+					best = cmp::max(best, (s + w) as IntVal);
+					if best == capacity {
+						return best;
 					}
 				}
 			}
 		}
+		best
+	}
 
-		// Collect only the minimal set of tasks that cover `to_cover` energy
-		let mut remaining_slack = collected_energy - to_cover;
-		let mut minimal_relevant_tasks = Vec::new();
-		for &i in relevant_tasks.iter() {
-			let usage = self.usages[i].min(ctx);
-			if remaining_slack > usage {
-				remaining_slack -= usage;
+	/// Returns whether the edge-finding opportunistic
+	/// extended-edge-finding is used when creating a
+	/// [`Solver`](crate::solver::Solver) object.
+	pub fn opportunistic_edge_finding_propagation_enabled(&self) -> bool {
+		self.opportunistic_edge_finding_propagation.unwrap_or(true)
+	}
+
+	/// Raise the usage of every task that cannot run in parallel with any other
+	/// resource-using task up to the capacity (Schulz Corollary 3.1). Such a
+	/// task already occupies the whole resource, so saturating its usage
+	/// removes no solution and strengthens the energy arguments.
+	fn saturate_usages(usages: &mut [IntVal], capacity: IntVal) {
+		// The smallest usage that any other resource-using task could run
+		// alongside; a task using more than the capacity left by it cannot share
+		// the resource with any other task.
+		let Some(r_min) = usages
+			.iter()
+			.copied()
+			.filter(|&r| 0 < r && r < capacity)
+			.min()
+		else {
+			return;
+		};
+		for usage in usages.iter_mut() {
+			if *usage < capacity && *usage > capacity - r_min {
+				*usage = capacity;
+			}
+		}
+	}
+
+	/// Inflate each task's usage to fill the gap left by the tasks that can run
+	/// concurrently with it.
+	///
+	/// Requires constant durations for all tasks.
+	fn strengthen_usages(usages: &mut [IntVal], capacity: IntVal, windows: &[(IntVal, IntVal)]) {
+		let n = usages.len();
+		// Strengthen usages sequentially since each update changes the knapsacks of
+		// later tasks.
+		for j in 0..n {
+			let r_j = usages[j];
+			let (est_j, lct_j) = windows[j];
+			if r_j == 0 || r_j >= capacity || est_j >= lct_j {
 				continue;
-			} else {
-				minimal_relevant_tasks.push(i);
+			}
+			// The most the tasks that can overlap task `j` use together is a
+			// knapsack over their usages bounded by the capacity left for them, so
+			// task `j` can claim whatever remains.
+			let others: Vec<IntVal> = (0..n)
+				.filter(|&i| i != j)
+				.filter_map(|i| {
+					let (est_i, lct_i) = windows[i];
+					// The windows `[est_i, lct_i)` and `[est_j, lct_j)` overlap.
+					(est_i < lct_j && est_j < lct_i && usages[i] > 0).then_some(usages[i])
+				})
+				.collect();
+			let others_max = Self::max_reachable_load(&others, capacity - r_j);
+			if capacity - others_max > r_j {
+				usages[j] = capacity - others_max;
+			}
+		}
+	}
+
+	/// Whether the knapsack-based strengthening rules are worth running for
+	/// `n` tasks and the given capacity.
+	///
+	/// [`Self::strengthen_usages`] and [`Self::tighten_capacity`] each solve
+	/// one knapsack per task, over a table of `capacity` entries, so together
+	/// they take `O(capacity)` memory and `O(n^2 * capacity)` time. Neither is
+	/// needed for correctness, so where that outgrows what they can save they
+	/// are skipped rather than slowed down; the cheap
+	/// [`Self::saturate_usages`] rule always runs.
+	fn strengthening_affordable(n: usize, capacity: IntVal) -> bool {
+		if capacity > MAX_KNAPSACK_CAPACITY {
+			return false;
+		}
+		let n = n as IntVal;
+		n.checked_mul(n)
+			.and_then(|work| work.checked_mul(capacity))
+			.is_some_and(|work| work <= MAX_STRENGTHENING_WORK)
+	}
+
+	/// Lower the capacity to the largest load that any set of
+	/// concurrently-runnable tasks can actually reach.
+	///
+	/// Requires constant durations for all tasks.
+	fn tighten_capacity(
+		usages: &mut [IntVal],
+		capacity: &mut IntVal,
+		windows: &[(IntVal, IntVal)],
+	) {
+		// The new capacity must stay at least as large as every non-saturating
+		// usage (each is reachable on its own), and at least one.
+		let mut best = usages
+			.iter()
+			.copied()
+			.filter(|&u| 0 < u && u < *capacity)
+			.max()
+			.unwrap_or(1);
+
+		// The reachable load at each time point is a knapsack over the tasks whose
+		// window covers it.
+		let starts: Vec<IntVal> = windows
+			.iter()
+			.map(|&(est, _)| est)
+			.sorted()
+			.dedup()
+			.collect();
+		for t in starts {
+			let active: Vec<IntVal> = usages
+				.iter()
+				.zip(windows)
+				.filter_map(|(&r, &(est, lct))| {
+					(est <= t && t < lct && 0 < r && r < *capacity).then_some(r)
+				})
+				.collect();
+			let reachable = Self::max_reachable_load(&active, *capacity);
+			// If the reachable load is already at least the current capacity, no
+			// strengthening is possible.
+			if reachable >= *capacity {
+				return;
+			}
+			best = cmp::max(best, reachable);
+		}
+
+		// Tasks that used the old capacity are lowered to the new one.
+		for usage in usages.iter_mut() {
+			if *usage == *capacity {
+				*usage = best;
+			}
+		}
+		*capacity = best;
+	}
+}
+
+impl<E> Constraint<E> for Cumulative
+where
+	E: ReasoningEngine,
+	model::View<IntVal>: IntModelActions<E>,
+{
+	fn analyze(&self, ctx: &mut E::InitializationContext<'_>) {
+		// The constraint is easier to satisfy with a larger resource capacity,
+		// and with tasks that use less of the resource for a shorter time.
+		self.propagator.capacity.polarity(ctx, Polarity::Positive);
+		for usage in &self.propagator.usages {
+			usage.polarity(ctx, Polarity::Negative);
+		}
+		for duration in &self.propagator.durations {
+			duration.polarity(ctx, Polarity::Negative);
+		}
+	}
+
+	fn simplify(
+		&mut self,
+		ctx: &mut E::PropagationContext<'_>,
+	) -> Result<SimplificationStatus, E::Conflict> {
+		// Perform coefficient strengthening on a single working copy of the fixed
+		// coefficients, then rewrite the changed usages and capacity in one pass so
+		// that the usages and capacity can never fall out of sync.
+		if !self.strengthened
+			&& let Some(mut capacity) = self.propagator.capacity.val(ctx)
+			&& let Some(mut usages) = self.fixed_usages(ctx)
+		{
+			self.strengthened = true;
+			let before_usages = usages.clone();
+			let before_capacity = capacity;
+			Self::saturate_usages(&mut usages, capacity);
+			if Self::strengthening_affordable(usages.len(), capacity)
+				&& let Some(windows) = self.fixed_windows(ctx)
+			{
+				Self::tighten_capacity(&mut usages, &mut capacity, &windows);
+				Self::strengthen_usages(&mut usages, capacity, &windows);
+			}
+			for (view, (&before, &after)) in self
+				.propagator
+				.usages
+				.iter_mut()
+				.zip(before_usages.iter().zip(&usages))
+			{
+				if before != after {
+					*view = after.into();
+				}
+			}
+			if capacity != before_capacity {
+				self.propagator.capacity = capacity.into();
 			}
 		}
 
-		trace!(
-			target: "cumulative",
-			time_point,
-			relevant_tasks = ?minimal_relevant_tasks.iter().map(|&i| (
-				i,
-				self.latest_start_time(ctx, i),
-				self.earliest_completion_time(ctx, i),
-				&self.durations[i]
-			)).collect_vec(),
-			"explain resource usage"
-		);
+		self.propagator.propagate(ctx)?;
 
-		minimal_relevant_tasks
+		if self.propagator.capacity.val(ctx).is_some()
+			&& self
+				.propagator
+				.start_times
+				.iter()
+				.all(|v| v.val(ctx).is_some())
+			&& self
+				.propagator
+				.durations
+				.iter()
+				.all(|v| v.val(ctx).is_some())
+			&& self.propagator.usages.iter().all(|v| v.val(ctx).is_some())
+		{
+			Ok(SimplificationStatus::Subsumed)
+		} else {
+			Ok(SimplificationStatus::NoFixpoint)
+		}
 	}
 
+	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
+		let start_times = self
+			.propagator
+			.start_times
+			.iter()
+			.map(|v| slv.solver_view(*v))
+			.collect_vec();
+		let durations = self
+			.propagator
+			.durations
+			.iter()
+			.map(|v| slv.solver_view(*v))
+			.collect_vec();
+		let usages = self
+			.propagator
+			.usages
+			.iter()
+			.map(|v| slv.solver_view(*v))
+			.collect_vec();
+		let capacity = slv.solver_view(self.propagator.capacity);
+		CumulativePropagator::post(
+			slv,
+			start_times,
+			durations,
+			usages,
+			capacity,
+			self.energy_overload_checking_enabled(),
+			self.edge_finding_propagation_enabled(),
+			self.opportunistic_edge_finding_propagation_enabled(),
+		);
+		Ok(())
+	}
+}
+
+impl<E> Propagator<E> for Cumulative
+where
+	E: ReasoningEngine,
+	model::View<IntVal>: IntSolverActions<E>,
+{
+	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
+		self.propagator.initialize(ctx);
+	}
+
+	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
+		self.propagator.propagate(ctx)
+	}
+}
+
+impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 	/// Get the earliest completion time of the task `i`.
 	#[inline]
 	fn earliest_completion_time<C>(&self, ctx: &mut C, i: usize) -> i64
@@ -251,188 +484,13 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		self.start_times[i].min(ctx)
 	}
 
-	/// Constructs a reason for limiting the usage of a task at a specific
-	/// time point. The explanation includes:
-	/// (1) relevant tasks (including the target task) that have compulsory
-	/// parts at the given time point, which are used to cover the required
-	/// resource usage, (2) and the resource capacity at its upper bound.
-	fn explain_limit_usage<Ctx>(
-		&self,
-		task_no: usize,
-		time_point: i64,
-		usage_limit: i64,
-	) -> impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>) + '_
-	where
-		Ctx: PropagationContext + ?Sized,
-		I1: IntDecisionActions<Ctx>,
-		I2: IntDecisionActions<Ctx>,
-		I3: IntDecisionActions<Ctx>,
-		I4: IntDecisionActions<Ctx>,
-	{
-		move |ctx, reason| {
-			trace!(
-				target: "cumulative",
-				task_no,
-				timepoint =? time_point,
-				usage_limit,
-				"explain task usage limit"
-			);
-			let capacity_ub = self.capacity.max(ctx);
-			let to_cover = capacity_ub - usage_limit;
-			let relevant_tasks =
-				self.collect_compulsory_tasks(ctx, to_cover, time_point, Some(task_no));
-
-			trace!(
-				target: "cumulative",
-				time_point,
-				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
-					i,
-					self.durations[i].min(ctx),
-					self.usages[i].min(ctx),
-					self.latest_start_time(ctx, i),
-					self.earliest_completion_time(ctx, i),
-				)).collect_vec(),
-				capacity_ub,
-				"explain task usage limit"
-			);
-
-			// Explanation: (1) relevant tasks (together with task `task_no`) have
-			// the required compulsory part at time `time_point`
-			reason.extend(relevant_tasks.iter().chain(once(&task_no)).flat_map(|&i| {
-				[
-					self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
-					self.start_times[i].lit(
-						ctx,
-						IntLitMeaning::GreaterEq(time_point + 1 - self.durations[i].min(ctx)),
-					),
-					self.durations[i].min_lit(ctx),
-					self.usages[i].min_lit(ctx),
-				]
-			}));
-
-			// Explanation: (2) the resource capacity is at a given level
-			reason.push(self.capacity.max_lit(ctx));
-		}
-	}
-
-	/// Construct a reason for why the resource usage is over `to_cover` at a
-	/// specific `time_point`. Refer to Schutt et al. (2011) for details on the
-	/// explanation construction.
-	fn explain_overload_time_point<Ctx>(
-		&self,
-		to_cover: i64,
-		time_point: i64,
-	) -> impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>) + '_
-	where
-		Ctx: PropagationContext + ?Sized,
-		I1: IntDecisionActions<Ctx>,
-		I2: IntDecisionActions<Ctx>,
-		I3: IntDecisionActions<Ctx>,
-		I4: IntDecisionActions<Ctx>,
-	{
-		move |ctx, reason| {
-			let relevant_tasks = self.collect_compulsory_tasks(ctx, to_cover, time_point, None);
-
-			trace!(
-				target: "cumulative",
-				time_point,
-				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
-					i,
-					self.latest_start_time(ctx, i),
-					self.earliest_completion_time(ctx, i),
-					&self.durations[i]
-				)).collect_vec(),
-				"explain resource overload"
-			);
-
-			// Explanation: relevant tasks have the required compulsory part at time
-			// `time_point`
-			reason.extend(relevant_tasks.iter().flat_map(|&i| {
-				[
-					self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
-					self.start_times[i].lit(
-						ctx,
-						IntLitMeaning::GreaterEq(time_point - self.durations[i].min(ctx) + 1),
-					),
-					self.durations[i].min_lit(ctx),
-					self.usages[i].min_lit(ctx),
-				]
-			}));
-			reason.push(self.capacity.max_lit(ctx));
-		}
-	}
-
-	/// Construct a reason for the task sweeping explanation.
-	/// Refer to Schutt et al. (2011) for details on the explanation
-	/// construction.
-	fn explain_sweeping_time<Ctx>(
-		&self,
-		task_no: usize,
-		propagation_rule: CumulativePropagationRule,
-		time_point: i64,
-	) -> impl FnOnce(&mut Ctx, &mut Ctx::ReasonSink<'_>) + '_
-	where
-		Ctx: PropagationContext + ?Sized,
-		I1: IntDecisionActions<Ctx>,
-		I2: IntDecisionActions<Ctx>,
-		I3: IntDecisionActions<Ctx>,
-		I4: IntDecisionActions<Ctx>,
-	{
-		move |ctx, reason| {
-			let capacity_ub = self.capacity.max(ctx);
-			let min_usage = self.usages[task_no].min(ctx);
-			let to_cover = capacity_ub - min_usage + 1;
-			let relevant_tasks =
-				self.collect_compulsory_tasks(ctx, to_cover, time_point, Some(task_no));
-
-			trace!(
-				target: "cumulative",
-				time_point,
-				relevant_tasks = ?relevant_tasks.iter().map(|&i| (
-					i,
-					self.durations[i].min(ctx),
-					self.latest_start_time(ctx, i),
-					self.earliest_completion_time(ctx, i),
-				)).collect_vec(),
-				rule =? propagation_rule,
-				"explain task sweeping"
-			);
-
-			// Explanation: (1) relevant tasks have the required compulsory part at time
-			// `time_point`
-			reason.extend(relevant_tasks.iter().flat_map(|&i| {
-				[
-					self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
-					self.start_times[i].lit(
-						ctx,
-						IntLitMeaning::GreaterEq(time_point - self.durations[i].min(ctx) + 1),
-					),
-					self.durations[i].min_lit(ctx),
-					self.usages[i].min_lit(ctx),
-				]
-			}));
-
-			// Explanation: (2) the task itself is either left-conflict or right-conflict
-			// with the time point, depending on the propagation rule
-			match propagation_rule {
-				CumulativePropagationRule::ForwardShift => {
-					reason.push(self.start_times[task_no].lit(
-						ctx,
-						IntLitMeaning::GreaterEq(time_point - self.durations[task_no].min(ctx) + 1),
-					));
-				}
-				CumulativePropagationRule::BackwardShift => {
-					reason.push(
-						self.start_times[task_no].lit(ctx, IntLitMeaning::Less(time_point + 1)),
-					);
-				}
-			}
-			reason.push(self.durations[task_no].min_lit(ctx));
-			reason.push(self.usages[task_no].min_lit(ctx));
-
-			// Explanation: (3) the resource capacity is at a given level
-			reason.push(self.capacity.max_lit(ctx));
-		}
+	/// Whether any edge-finding phase is enabled on top of the
+	/// time-table propagation.
+	#[inline]
+	fn edge_finding_enabled(&self) -> bool {
+		self.energy_overload_check_enabled
+			|| self.edge_finding_propagation_enabled
+			|| self.opportunistic_edge_finding_propagation_enabled
 	}
 
 	/// Get the latest completion time of the task `i`.
@@ -456,112 +514,46 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		self.start_times[i].max(ctx)
 	}
 
-	/// Propagates the upper bound of a task's resource usage to ensure that,
-	/// together with the current resource profile, it does not exceed the
-	/// resource capacity.
-	///
-	/// For the given `task`, this method examines the resource profile (built
-	/// from compulsory parts of all tasks) and determines if the task's usage
-	/// upper bound must be reduced. It finds the interval where the profile's
-	/// height is maximal within the compulsory part of the task, and sets the
-	/// task's usage upper bound to `capacity - max_usage + usage_lb`, where
-	/// `max_usage` is the maximum compulsory usage in that interval and
-	/// `usage_lb` is the lower bound of the task's usage.
-	fn limit_usage<E>(
-		&self,
-		ctx: &mut E::PropagationContext<'_>,
-		task: usize,
-	) -> Result<(), E::Conflict>
-	where
-		E: ReasoningEngine,
-		I1: IntSolverActions<E>,
-		I2: IntSolverActions<E>,
-		I3: IntSolverActions<E>,
-		I4: IntSolverActions<E>,
-	{
-		let lst = self.latest_start_time(ctx, task);
-		let ect = self.earliest_completion_time(ctx, task);
-		let dur_lb = self.durations[task].min(ctx);
-		let usage_lb = self.usages[task].min(ctx);
-		debug_assert!(lst < ect, "Task must have compulsory part");
-
-		if !(dur_lb > 0 && usage_lb > 0) {
-			// If the task has no duration or usage, no need to sweep
-			return Ok(());
-		}
-
-		// Find the maximum usage in the interval [lst, ect]
-		// where the task has a compulsory part
-		let max_period = self.max_period_within(task, lst, ect);
-		if let Some(max_period) = max_period {
-			let max_usage = self.heights[max_period];
-			let limit = self.capacity.max(ctx) - max_usage + usage_lb;
-			trace!(
-				target: "cumulative",
-				task,
-				compulsory_part =? (lst, ect),
-				max_period,
-				max_usage,
-				limit,
-				"limit task usage"
-			);
-			self.usages[task].tighten_max(
-				ctx,
-				limit,
-				self.explain_limit_usage(task, self.bounds[max_period], limit),
-			)?;
-		}
-		Ok(())
-	}
-
-	/// A helper function to find the index of the maximum usage in the
-	/// time-table profile within a specified period [start, end].
-	fn max_period_within(&self, _task: usize, start: i64, end: i64) -> Option<usize> {
-		trace!(
-			target: "cumulative",
-			task = _task,
-			start,
-			end,
-			bounds = ?self.bounds,
-			heights = ?self.heights,
-			"find max usage period within compulsory part"
-		);
-		let begin = self.bounds.partition_point(|&b| b <= start);
-		if begin >= self.bounds.len() {
-			return None;
-		}
-		// Adjust begin to point to the interval containing `start`
-		let begin = if begin == 0 { 0 } else { begin - 1 };
-		let end = self.bounds[begin..].partition_point(|&b| b < end) + begin;
-		(begin < end).then(|| begin + self.heights[(begin)..end].iter().position_max().unwrap())
-	}
-
-	/// Creates a new `CumulativeTimeTablePropagator` propagator and post it in
-	/// the solver.
+	/// Creates a new `CumulativePropagator` running the edge-finding
+	/// phases selected by the `*_enabled` phase flags on top of the time-table
+	/// propagation.
 	pub(crate) fn new(
 		start_times: Vec<I1>,
 		durations: Vec<I2>,
 		usages: Vec<I3>,
 		capacity: I4,
+		energy_overload_check_enabled: bool,
+		edge_finding_propagation_enabled: bool,
+		opportunistic_edge_finding_propagation_enabled: bool,
 	) -> Self {
 		Self {
 			start_times,
 			durations,
 			usages,
 			capacity,
+			energy_overload_check_enabled,
+			edge_finding_propagation_enabled,
+			opportunistic_edge_finding_propagation_enabled,
 			bounds: Vec::new(),
 			heights: Vec::new(),
 		}
 	}
 
-	/// Creates a new `CumulativeTimeTablePropagator` propagator and post it in
-	/// the solver.
+	/// Creates a new `CumulativePropagator` with the given edge-finding
+	/// flags and posts it in the solver.
+	#[expect(
+		clippy::too_many_arguments,
+		reason = "the `cumulative` constraint takes four decision arguments plus the three edge-finding phase toggles"
+	)]
 	pub fn post<E>(
 		solver: &mut E,
 		start_times: Vec<I1>,
 		durations: Vec<I2>,
 		usages: Vec<I3>,
 		capacity: I4,
+		energy_overload_check_enabled: bool,
+		edge_finding_propagation_enabled: bool,
+		opportunistic_edge_finding_propagation_enabled: bool,
 	) where
 		E: PostingActions + ?Sized,
 		I1: IntSolverActions<Engine>,
@@ -569,290 +561,19 @@ impl<I1, I2, I3, I4> CumulativeTimeTable<I1, I2, I3, I4> {
 		I3: IntSolverActions<Engine>,
 		I4: IntSolverActions<Engine>,
 	{
-		solver.add_propagator(Box::new(CumulativeTimeTable::new(
+		solver.add_propagator(Box::new(CumulativePropagator::new(
 			start_times,
 			durations,
 			usages,
 			capacity,
+			energy_overload_check_enabled,
+			edge_finding_propagation_enabled,
+			opportunistic_edge_finding_propagation_enabled,
 		)));
 	}
-
-	/// Performs a backward sweep for a given task to propagate its latest
-	/// completion time based on the current cumulative resource profile.
-	///
-	/// This method checks, for the specified `task`, whether the current
-	/// resource profile (built from compulsory parts of all tasks) forces the
-	/// task's latest completion time to be decreased in order to avoid
-	/// exceeding the resource capacity. It iterates over the profile intervals
-	/// in reverse, and if the sum of the task's usage and the profile's height
-	/// at an interval exceeds the resource's upper bound, it attempts to push
-	/// the task's latest completion time backward. If propagation occurs,
-	/// it updates the upper bound of the task's completion time and provides an
-	/// explanation for the propagation.
-	///
-	/// When possible updates on upper bound occur, the method uses a
-	/// step-by-step update with the step size being the task's duration lower
-	/// bound. This facilitates the generation of point-wise explanations as
-	/// described in the original paper by Schutt et al. (2011).
-	fn sweep_backward<E>(
-		&self,
-		ctx: &mut E::PropagationContext<'_>,
-		task: usize,
-	) -> Result<bool, E::Conflict>
-	where
-		E: ReasoningEngine,
-		I1: IntSolverActions<E>,
-		I2: IntSolverActions<E>,
-		I3: IntSolverActions<E>,
-		I4: IntSolverActions<E>,
-	{
-		let est = self.earliest_start_time(ctx, task);
-		let lst = self.latest_start_time(ctx, task);
-		let ect = self.earliest_completion_time(ctx, task);
-		let dur_lb = self.durations[task].min(ctx);
-		let usage_lb = self.usages[task].min(ctx);
-
-		if dur_lb <= 0 || usage_lb <= 0 {
-			// If the task has no duration or usage, no need to sweep
-			return Ok(false);
-		}
-
-		// Find the partition point where b < lst + dur
-		let last = self.bounds.partition_point(|&b| b < lst + dur_lb);
-		trace!(target: "cumulative", task, dur_lb, est, lst, usage_lb, "task sweep backward");
-		let mut updated_lct = self.latest_completion_time(ctx, task);
-		let max_capacity = self.capacity.max(ctx);
-		let mut updated = false;
-		for i in (1..last).rev() {
-			let b_start = self.bounds[i - 1];
-			let b_end = self.bounds[i];
-			let height = self.heights[i - 1];
-			assert!(b_start < b_end);
-
-			// Stop when the task is not right-conflict with any interval backward
-			if b_end <= ect.max(updated_lct - dur_lb) {
-				break;
-			}
-			// if `lct` can be push backward (to ≤ `b_end`) and the resource usage is over
-			// the capacity
-			if updated_lct > b_start && usage_lb + height > max_capacity {
-				if updated_lct - dur_lb < ect && updated_lct - dur_lb <= b_start && ect >= b_end {
-					// Skip if the task has a compulsory part in this interval
-					// Resource overload is already checked in `check_overload`
-					continue;
-				}
-
-				let expl_end = updated_lct;
-				let remainder = (expl_end - b_start).rem_euclid(dur_lb);
-				let expl_start = if remainder > 0 {
-					b_start + remainder - dur_lb
-				} else {
-					b_start
-				};
-				// time points for latest completion time
-				let time_points = (expl_start..=expl_end)
-					.rev()
-					.step_by(dur_lb as usize)
-					.map(|t| (b_start).max(t))
-					.skip(1)
-					.collect_vec();
-				trace!(
-					target: "cumulative",
-					updated_lct,
-					b_start,
-					remainder,
-					time_points =? time_points,
-					"propagate backward shifting"
-				);
-
-				for t in time_points {
-					if t < updated_lct {
-						// Set new upper bound for the task's start time
-						self.start_times[task].tighten_max(
-							ctx,
-							t - dur_lb,
-							self.explain_sweeping_time(
-								task,
-								CumulativePropagationRule::BackwardShift,
-								t,
-							),
-						)?;
-						updated_lct = t;
-						updated = true;
-					}
-				}
-			}
-		}
-		Ok(updated)
-	}
-
-	/// Performs a forward sweep for a given task to propagate its earliest
-	/// start time based on the current cumulative resource profile.
-	///
-	/// This method checks, for the specified `task`, whether the current
-	/// resource profile (built from compulsory parts of all tasks) forces the
-	/// task's earliest start time to be increased in order to avoid exceeding
-	/// the resource capacity. It iterates over the profile intervals and, if
-	/// the sum of the task's usage and the profile's height at an interval
-	/// exceeds the resource's upper bound, it attempts to push the task's
-	/// earliest start time forward. If propagation occurs, it updates the
-	/// lower bound of the task's start time and provides an explanation
-	/// for the propagation.
-	///
-	/// When possible updates on lower bound occur, the method use a
-	/// step-by-step update with the step size being the task's duration lower
-	/// bound. This facilitates the generation of point-wise explanations as
-	/// described in the original paper by Schutt et al. (2011).
-	fn sweep_forward<E>(
-		&self,
-		ctx: &mut E::PropagationContext<'_>,
-		task: usize,
-	) -> Result<bool, E::Conflict>
-	where
-		E: ReasoningEngine,
-		I1: IntSolverActions<E>,
-		I2: IntSolverActions<E>,
-		I3: IntSolverActions<E>,
-		I4: IntSolverActions<E>,
-	{
-		let est = self.earliest_start_time(ctx, task);
-		let lst = self.latest_start_time(ctx, task);
-		let dur_lb = self.durations[task].min(ctx);
-		let usage_lb = self.usages[task].min(ctx);
-
-		if dur_lb <= 0 || usage_lb <= 0 {
-			// If the task has no duration or usage, no need to sweep
-			return Ok(false);
-		}
-
-		// Find the partition point where est > b
-		let first = self.bounds.partition_point(|&b| b < est);
-		trace!(target: "cumulative", task, dur_lb, est, lst, usage_lb, "task sweep forward");
-		let mut updated_est = est;
-		let max_capacity = self.capacity.max(ctx);
-		let mut updated = false;
-		for i in first..self.bounds.len() - 1 {
-			let b_start = self.bounds[i];
-			let b_end = self.bounds[i + 1];
-			let height = self.heights[i];
-			assert!(b_start < b_end);
-			// Stop when the task is not left-conflict with any interval forward
-			if b_start >= lst.min(updated_est + dur_lb) {
-				break;
-			}
-			// if `est` can be push forward (to ≥ `b_end`) and the resource usage is over
-			// the capacity
-			if updated_est < b_end && usage_lb + height > max_capacity {
-				if lst < updated_est + dur_lb && lst <= b_start && b_end <= updated_est + dur_lb {
-					// Skip if the task has a compulsory part in this
-					// Resource overload is already checked in `check_overload`
-					continue;
-				}
-
-				let expl_start = updated_est;
-				let remainder = (b_end - expl_start).rem_euclid(dur_lb);
-				let expl_end = if remainder > 0 {
-					b_end - remainder + dur_lb
-				} else {
-					b_end
-				};
-				// time points for earliest start time updates
-				let time_points = (expl_start..=expl_end)
-					.step_by(dur_lb as usize)
-					.map(|t| (b_end).min(t))
-					.skip(1)
-					.collect_vec();
-				trace!(
-					target: "cumulative",
-					updated_est,
-					b_end,
-					remainder,
-					time_points =? time_points,
-					"propagate forward shifting"
-				);
-
-				for t in time_points {
-					if t > updated_est {
-						// Set new lower bound for the task's start time
-						self.start_times[task].tighten_min(
-							ctx,
-							t,
-							self.explain_sweeping_time(
-								task,
-								CumulativePropagationRule::ForwardShift,
-								t - 1,
-							),
-						)?;
-						updated_est = t;
-						updated = true;
-					}
-				}
-			}
-		}
-		Ok(updated)
-	}
 }
 
-impl<E, I1, I2, I3, I4> Constraint<E> for CumulativeTimeTable<I1, I2, I3, I4>
-where
-	E: ReasoningEngine,
-	I1: IntModelActions<E>,
-	I2: IntModelActions<E>,
-	I3: IntModelActions<E>,
-	I4: IntModelActions<E>,
-{
-	fn analyze(&self, ctx: &mut E::InitializationContext<'_>) {
-		// The constraint is easier to satisfy with a larger resource capacity,
-		// and with tasks that use less of the resource for a shorter time.
-		self.capacity.polarity(ctx, Polarity::Positive);
-		for usage in &self.usages {
-			usage.polarity(ctx, Polarity::Negative);
-		}
-		for duration in &self.durations {
-			duration.polarity(ctx, Polarity::Negative);
-		}
-	}
-
-	fn simplify(
-		&mut self,
-		ctx: &mut E::PropagationContext<'_>,
-	) -> Result<SimplificationStatus, E::Conflict> {
-		self.propagate(ctx)?;
-
-		if self.capacity.val(ctx).is_some()
-			&& self.start_times.iter().all(|v| v.val(ctx).is_some())
-			&& self.durations.iter().all(|v| v.val(ctx).is_some())
-			&& self.usages.iter().all(|v| v.val(ctx).is_some())
-		{
-			return Ok(SimplificationStatus::Subsumed);
-		}
-
-		Ok(SimplificationStatus::NoFixpoint)
-	}
-
-	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
-		let start_times = self
-			.start_times
-			.iter()
-			.map(|v| slv.solver_view(v.clone().into()))
-			.collect_vec();
-		let durations = self
-			.durations
-			.iter()
-			.map(|v| slv.solver_view(v.clone().into()))
-			.collect_vec();
-		let usages = self
-			.usages
-			.iter()
-			.map(|v| slv.solver_view(v.clone().into()))
-			.collect_vec();
-		let capacity = { slv.solver_view(self.capacity.clone().into()) };
-		CumulativeTimeTable::post(slv, start_times, durations, usages, capacity);
-		Ok(())
-	}
-}
-
-impl<E, I1, I2, I3, I4> Propagator<E> for CumulativeTimeTable<I1, I2, I3, I4>
+impl<E, I1, I2, I3, I4> Propagator<E> for CumulativePropagator<I1, I2, I3, I4>
 where
 	E: ReasoningEngine,
 	I1: IntSolverActions<E>,
@@ -862,7 +583,6 @@ where
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Low);
-
 		for v in &self.start_times {
 			v.enqueue_when(ctx, IntPropCond::Bounds);
 		}
@@ -876,45 +596,56 @@ where
 	}
 
 	#[tracing::instrument(
-		name = "cumulative_time_table",
+		name = "cumulative",
 		target = "solver",
 		level = "trace",
 		skip(self, ctx)
 	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
-		// Build the time-table profile and check resource overload
 		let profile_empty = self.build_profile_and_check_overload(ctx)?;
-		if profile_empty {
-			return Ok(());
-		}
 
-		// Sweeping time: update the earliest start times and the latest completion
-		// times
-		let mut bounds_updated = false;
-		for i in 0..self.start_times.len() {
-			let (lb, ub) = self.start_times[i].bounds(ctx);
-			if lb < ub {
-				bounds_updated |= self.sweep_forward(ctx, i)?;
-				bounds_updated |= self.sweep_backward(ctx, i)?;
+		if !profile_empty {
+			let mut bounds_updated = false;
+			for i in 0..self.start_times.len() {
+				let (lb, ub) = self.start_times[i].bounds(ctx);
+				if lb < ub {
+					bounds_updated |= self.sweep_forward(ctx, i)?;
+					bounds_updated |= self.sweep_backward(ctx, i)?;
+				}
+			}
+
+			// Defer further propagation until the engine has applied the bound
+			// changes, so that the profile (and the edge finding below)
+			// operate on up-to-date bounds.
+			if bounds_updated {
+				return Ok(());
 			}
 		}
 
-		// Defer usage propagation until after the bounds have been updated by the
-		// solver engine. This will ensure that the profile is up-to-date before
-		// limiting usage.
-		if bounds_updated {
+		// Time-table-edge-finding phases run once the time-table propagation has
+		// reached its fixpoint. Unlike the time-table phase, edge-finding can also
+		// propagate when there are no compulsory parts, so it runs regardless of
+		// whether the profile is empty.
+		//
+		// Tightening a start time can only grow a compulsory part, so a profile
+		// left over from before an edge-finding update understates the resource
+		// usage; defer the usage propagation below until the engine has applied
+		// the update and the profile has been rebuilt.
+		if self.edge_finding_enabled() && self.propagate_edge_finding(ctx)? {
 			return Ok(());
 		}
 
-		// Limit usage: update the upper bounds of the resource usages of tasks
-		for i in 0..self.start_times.len() {
-			let (req_lb, req_ub) = self.usages[i].bounds(ctx);
-			if req_lb < req_ub
-				&& self.latest_start_time(ctx, i) < self.earliest_completion_time(ctx, i)
-			{
-				self.limit_usage(ctx, i)?;
+		if !profile_empty {
+			for i in 0..self.start_times.len() {
+				let (req_lb, req_ub) = self.usages[i].bounds(ctx);
+				if req_lb < req_ub
+					&& self.latest_start_time(ctx, i) < self.earliest_completion_time(ctx, i)
+				{
+					self.limit_usage(ctx, i)?;
+				}
 			}
 		}
+
 		Ok(())
 	}
 }
@@ -926,335 +657,252 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntSet, IntVal,
+		IntVal,
 		actions::IntInspectionActions,
-		constraints::cumulative::CumulativeTimeTable,
+		constraints::cumulative::Cumulative,
 		model::{ConRef, Model},
-		solver::{LiteralStrategy, Solver, View},
+		solver::Solver,
 	};
 
-	/// Helper function to create a task with given start time, duration, and
-	/// usage.
-	fn create_task(
-		slv: &mut Solver,
-		start_time: impl Into<IntSet>,
-		duration: impl Into<IntSet>,
-		usage: impl Into<IntSet>,
-	) -> (View<IntVal>, View<IntVal>, View<IntVal>) {
-		let start = slv
-			.new_int_decision(start_time)
-			.order_literals(LiteralStrategy::Eager)
-			.view();
-		let dur = slv
-			.new_int_decision(duration)
-			.order_literals(LiteralStrategy::Eager)
-			.view();
-		let usage = slv
-			.new_int_decision(usage)
-			.order_literals(LiteralStrategy::Eager)
-			.view();
-		(start, dur, usage)
+	/// Every edge-finding configuration `(check, filtering,
+	/// opportunistic)`; the model applies them all during full propagation,
+	/// and each must preserve the solution set.
+	const ALL_CONFIGS: [EdgeFindingConfig; 4] = [
+		(false, false, false),
+		(true, false, false),
+		(true, true, false),
+		(true, true, true),
+	];
+
+	/// An edge-finding configuration as `(check, filtering,
+	/// opportunistic)`.
+	type EdgeFindingConfig = (bool, bool, bool);
+
+	/// The bounded max-subset-sum underlying the strengthening rules.
+	#[test]
+	fn test_cumulative_max_reachable_load() {
+		// `{5, 2}` fills the capacity exactly, where `{3, 5}` would overshoot it.
+		assert_eq!(Cumulative::max_reachable_load(&[3, 5, 2], 7), 7);
+		// Without the 2 no subset reaches 7, since `3 + 5` no longer fits.
+		assert_eq!(Cumulative::max_reachable_load(&[3, 5], 7), 5);
+		assert_eq!(Cumulative::max_reachable_load(&[4], 3), 0);
+		assert_eq!(Cumulative::max_reachable_load(&[0, 3], 5), 3);
+		assert_eq!(Cumulative::max_reachable_load(&[], 5), 0);
+		assert_eq!(Cumulative::max_reachable_load(&[2], 0), 0);
+		assert_eq!(Cumulative::max_reachable_load(&[2], -1), 0);
 	}
 
-	/// This test verifies that the cumulative propagator performs multiple
-	/// rounds of propagation to reach a fixpoint. In each round, the
-	/// propagator first updates the start times of tasks according to the
-	/// time-table profile. Once no further updates to start times are possible,
-	/// the propagator then tightens the usage bounds based on the current
-	/// profile. This ensures the time-table profile is the latest and the
-	/// propagation of usage bounds are correct.
+	/// The model runs full edge finding during simplification, so an
+	/// energy overload is detected when the constraint is posted regardless
+	/// of the configured edge-finding phases (the phases only govern the
+	/// lowered solver).
+	#[test]
+	#[traced_test]
+	fn test_cumulative_model_check_detects_unsat() {
+		let post_overload = |(check, filtering, opportunistic): EdgeFindingConfig| {
+			let mut prb = Model::default();
+			let starts = prb.new_int_decisions(3, 0..=2);
+			prb.cumulative()
+				.start_times(starts)
+				.durations(vec![2, 2, 2])
+				.usages(vec![1, 1, 1])
+				.capacity(1)
+				.maybe_energy_overload_checking(Some(check))
+				.maybe_edge_finding_propagation(Some(filtering))
+				.maybe_opportunistic_edge_finding_propagation(Some(opportunistic))
+				.post()
+		};
+
+		// Full model propagation detects the energy overload under every
+		// configuration, including pure time-tabling.
+		for config in ALL_CONFIGS {
+			assert!(post_overload(config).is_err());
+		}
+	}
+
+	/// Soundness across every edge-finding configuration selected
+	/// through the model builder (model -> solver): each configuration must
+	/// lower to a propagator that enumerates the shared four-task solution
+	/// set, so choosing a configuration through the `maybe_*` phase toggles
+	/// and carrying it through lowering never drops a solution.
+	#[test]
+	#[traced_test]
+	fn test_cumulative_model_config_solution_set() {
+		for (check, filtering, opportunistic) in ALL_CONFIGS {
+			let mut prb = Model::default();
+			let starts = prb.new_int_decisions(4, 0..=2);
+			prb.cumulative()
+				.start_times(starts.clone())
+				.durations(vec![2, 1, 2, 1])
+				.usages(vec![1, 2, 1, 1])
+				.capacity(2)
+				.maybe_energy_overload_checking(Some(check))
+				.maybe_edge_finding_propagation(Some(filtering))
+				.maybe_opportunistic_edge_finding_propagation(Some(opportunistic))
+				.post()
+				.unwrap();
+			let (mut slv, map) = prb.lower().to_solver().unwrap();
+			let starts = starts
+				.into_iter()
+				.map(|x| map.get(&mut slv, x))
+				.collect_vec();
+			slv.expect_solutions(
+				&starts,
+				expect![[r#"
+    1, 0, 2, 1
+    2, 0, 1, 1
+    2, 0, 2, 1
+    2, 1, 2, 0"#]],
+			);
+		}
+	}
+
+	/// The model runs full edge finding during simplification, so
+	/// its bounds filtering lifts an earliest start that pure time-tabling
+	/// cannot, regardless of the configured phases.
+	#[test]
+	#[traced_test]
+	fn test_cumulative_model_filtering_lifts_earliest_start() {
+		let make = |(check, filtering, opportunistic): EdgeFindingConfig| {
+			let mut prb = Model::default();
+			let a = prb.new_int_decision(0..=2);
+			let b = prb.new_int_decision(0..=2);
+			let u = prb.new_int_decision(0..=8);
+			prb.cumulative()
+				.start_times(vec![a, b, u])
+				.durations(vec![2, 2, 2])
+				.usages(vec![2, 2, 2])
+				.capacity(2)
+				.maybe_energy_overload_checking(Some(check))
+				.maybe_edge_finding_propagation(Some(filtering))
+				.maybe_opportunistic_edge_finding_propagation(Some(opportunistic))
+				.post()
+				.unwrap();
+			let (mut slv, map): (Solver, _) = prb.lower().to_solver().unwrap();
+			let u = map.get(&mut slv, u);
+			(slv, u)
+		};
+
+		for config in ALL_CONFIGS {
+			let (slv, u) = make(config);
+			assert!(!u.in_domain(&slv, 3));
+			assert!(u.in_domain(&slv, 4));
+		}
+	}
+
+	/// Full model propagation (time-tabling plus edge-finding) reaches the
+	/// fixpoint in a single round.
 	#[test]
 	#[traced_test]
 	fn test_cumulative_propagate() {
 		let mut prb = Model::default();
-		// Task A: can start at 0, 1, or 2; duration 3. Latest start time: 2, earliest
-		// completion time: 3. Compulsory part: [0, 2] (must be scheduled in this
-		// interval for feasibility).
+		// Tasks A and B (start [0, 2], duration 3) each have a compulsory part in
+		// [0, 2]; task C (start [0, 4], duration 3) has none.
 		let start_time_a = prb.new_int_decision(0..=2);
-		// Task B: same as Task A (identical domain and duration).
 		let start_time_b = prb.new_int_decision(0..=2);
-		// Task C: can start at 0..=4; duration 3. Latest start time: 4, earliest
-		// completion time: 3. No compulsory part.
 		let start_time_c = prb.new_int_decision(0..=4);
 		let usages = prb.new_int_decisions(3, 1..=2);
-		prb.post_constraint_internal(CumulativeTimeTable::new(
-			vec![start_time_a, start_time_b, start_time_c],
-			vec![3, 3, 3],
-			usages.clone(),
-			2,
+		prb.cumulative()
+			.start_times(vec![start_time_a, start_time_b, start_time_c])
+			.durations(vec![3, 3, 3])
+			.usages(usages.clone())
+			.capacity(2)
+			.post()
+			.unwrap();
+
+		let _ = prb.propagate_single(ConRef::from_raw(0));
+		assert_eq!(start_time_a.bounds(&prb), (0, 2));
+		assert_eq!(usages[0].bounds(&prb), (1, 1));
+		assert_eq!(start_time_b.bounds(&prb), (0, 2));
+		assert_eq!(usages[1].bounds(&prb), (1, 1));
+		assert_eq!(start_time_c.bounds(&prb), (3, 4));
+		assert_eq!(usages[2].bounds(&prb), (1, 2));
+	}
+
+	/// A task that cannot share the resource with any other task is raised to
+	/// the capacity, which it already occupies in full.
+	#[test]
+	fn test_cumulative_saturate_usages() {
+		// The smallest other usage is 2, so the task using 3 of the 4 available
+		// leaves too little for any other task to join it.
+		let mut usages = vec![3, 2];
+		Cumulative::saturate_usages(&mut usages, 4);
+		assert_eq!(usages, vec![4, 2]);
+
+		// With a task using only 1, the task using 3 can still be joined.
+		let mut usages = vec![3, 2, 1];
+		Cumulative::saturate_usages(&mut usages, 4);
+		assert_eq!(usages, vec![3, 2, 1]);
+
+		// The only resource-using task uses more than half of the capacity, so
+		// not even a second task like it could join.
+		let mut usages = vec![0, 3];
+		Cumulative::saturate_usages(&mut usages, 4);
+		assert_eq!(usages, vec![0, 4]);
+
+		// Two tasks using half of the capacity each still fit together.
+		let mut usages = vec![0, 2];
+		Cumulative::saturate_usages(&mut usages, 4);
+		assert_eq!(usages, vec![0, 2]);
+	}
+
+	/// A task claims the capacity that the tasks able to run alongside it can
+	/// never take up.
+	#[test]
+	fn test_cumulative_strengthen_usages() {
+		// Tasks whose windows do not overlap never share the resource, so each
+		// can claim all of it.
+		let mut usages = vec![1, 1];
+		Cumulative::strengthen_usages(&mut usages, 4, &[(0, 1), (5, 6)]);
+		assert_eq!(usages, vec![4, 4]);
+
+		// Overlapping tasks: at most two of the three fit, so the first can
+		// claim the 1 unit that the other two leave unused.
+		let mut usages = vec![2, 2, 2];
+		Cumulative::strengthen_usages(&mut usages, 5, &[(0, 2), (0, 2), (0, 2)]);
+		assert_eq!(usages, vec![3, 2, 2]);
+
+		// A task already using the whole capacity, or none of it, is left alone.
+		let mut usages = vec![4, 0];
+		Cumulative::strengthen_usages(&mut usages, 4, &[(0, 2), (0, 2)]);
+		assert_eq!(usages, vec![4, 0]);
+	}
+
+	/// The strengthening rules are skipped once their knapsacks would cost more
+	/// than they can save.
+	#[test]
+	fn test_cumulative_strengthening_affordable() {
+		assert!(Cumulative::strengthening_affordable(100, 1_000));
+		assert!(!Cumulative::strengthening_affordable(101, 1_000));
+		// A capacity beyond the table size is rejected however few the tasks.
+		assert!(!Cumulative::strengthening_affordable(1, 10_001));
+		// The work estimate must not overflow into an affordable value.
+		assert!(!Cumulative::strengthening_affordable(
+			usize::MAX,
+			IntVal::MAX
 		));
-
-		// First propagation: The compulsory parts of Task A and B ([0, 2])
-		// require that Task C cannot overlap with them due to capacity constraints.
-		// This pushes the earliest start time of Task C to 3.
-		let _ = prb.propagate_single(ConRef::from_raw(0));
-		let time_bounds = start_time_a.bounds(&prb);
-		assert_eq!(time_bounds, (0, 2));
-		let usage_bounds = usages[0].bounds(&prb);
-		assert_eq!(usage_bounds, (1, 2));
-
-		let time_bounds = start_time_b.bounds(&prb);
-		assert_eq!(time_bounds, (0, 2));
-		let usage_bounds = usages[1].bounds(&prb);
-		assert_eq!(usage_bounds, (1, 2));
-
-		let time_bounds = start_time_c.bounds(&prb);
-		assert_eq!(time_bounds, (3, 4));
-		let usage_bounds = usages[2].bounds(&prb);
-		assert_eq!(usage_bounds, (1, 2));
-
-		// Second propagation: With Task C's start time now at least 3, only A and B
-		// overlap in [0, 2]. The combined usage of A and B in this interval must not
-		// exceed the capacity (2), so their usage upper bounds are tightened to 1.
-		let _ = prb.propagate_single(ConRef::from_raw(0));
-		let time_bounds = start_time_a.bounds(&prb);
-		assert_eq!(time_bounds, (0, 2));
-		let usage_bounds = usages[0].bounds(&prb);
-		assert_eq!(usage_bounds, (1, 1));
-
-		let time_bounds = start_time_b.bounds(&prb);
-		assert_eq!(time_bounds, (0, 2));
-		let usage_bounds = usages[1].bounds(&prb);
-		assert_eq!(usage_bounds, (1, 1));
-
-		let time_bounds = start_time_c.bounds(&prb);
-		assert_eq!(time_bounds, (3, 4));
-		let usage_bounds = usages[2].bounds(&prb);
-		assert_eq!(usage_bounds, (1, 2));
 	}
 
+	/// The capacity drops to the largest load that concurrently-runnable tasks
+	/// can actually reach, taking the tasks that saturated it along.
 	#[test]
-	#[traced_test]
-	fn test_cumulative_val_sat() {
-		let mut slv = Solver::default();
-		let a = slv
-			.new_int_decision(0..=4)
-			.order_literals(LiteralStrategy::Eager)
-			.view();
-		let b = slv
-			.new_int_decision(0..=4)
-			.order_literals(LiteralStrategy::Eager)
-			.view();
-		let c = slv
-			.new_int_decision(0..=4)
-			.order_literals(LiteralStrategy::Eager)
-			.view();
+	fn test_cumulative_tighten_capacity() {
+		// Two tasks using 2 of a capacity of 3 can never run together, so the
+		// resource never carries more than 2.
+		let (mut usages, mut capacity) = (vec![2, 2], 3);
+		Cumulative::tighten_capacity(&mut usages, &mut capacity, &[(0, 2), (0, 2)]);
+		assert_eq!((usages, capacity), (vec![2, 2], 2));
 
-		let durations: Vec<View<IntVal>> = [2, 3, 1].into_iter().map_into().collect();
-		let resources_profile_1 = vec![1, 2, 3];
-		let resources_profile_2 = vec![2, 2, 1];
-		let capacity_1 = 3;
-		let capacity_2 = 2;
-		CumulativeTimeTable::post(
-			&mut slv,
-			vec![a, b, c],
-			durations.clone(),
-			resources_profile_1,
-			capacity_1,
-		);
-		CumulativeTimeTable::post(
-			&mut slv,
-			vec![a, b, c],
-			durations,
-			resources_profile_2,
-			capacity_2,
-		);
+		// A task using the full capacity is rewritten alongside it, so that it
+		// keeps excluding the task using 1.
+		let (mut usages, mut capacity) = (vec![3, 1], 3);
+		Cumulative::tighten_capacity(&mut usages, &mut capacity, &[(0, 2), (0, 2)]);
+		assert_eq!((usages, capacity), (vec![1, 1], 1));
 
-		slv.expect_solutions(
-			&[a, b, c],
-			expect![[r#"
-    0, 3, 2
-    0, 4, 2
-    0, 4, 3
-    1, 3, 0
-    1, 4, 0
-    1, 4, 3
-    2, 4, 0
-    2, 4, 1
-    4, 0, 3
-    4, 1, 0"#]],
-		);
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_cumulative_val_unsat() {
-		let mut slv = Solver::default();
-		let a = slv
-			.new_int_decision(0..=3)
-			.order_literals(LiteralStrategy::Eager)
-			.view();
-		let b = slv
-			.new_int_decision(0..=3)
-			.order_literals(LiteralStrategy::Eager)
-			.view();
-		let c = slv
-			.new_int_decision(0..=3)
-			.order_literals(LiteralStrategy::Eager)
-			.view();
-
-		let durations: Vec<View<IntVal>> = [2, 3, 2].into_iter().map_into().collect();
-		let resources_profile_1: Vec<View<IntVal>> = [2, 2, 3].into_iter().map_into().collect();
-		let resources_profile_2: Vec<View<IntVal>> = [2, 2, 2].into_iter().map_into().collect();
-		let capacity = 3;
-
-		CumulativeTimeTable::post(
-			&mut slv,
-			vec![a, b, c],
-			durations.clone(),
-			resources_profile_1,
-			capacity,
-		);
-		CumulativeTimeTable::post(
-			&mut slv,
-			vec![a, b, c],
-			durations,
-			resources_profile_2,
-			capacity,
-		);
-
-		slv.assert_unsatisfiable();
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_cumulative_var_capacity_sat() {
-		let mut slv = Solver::default();
-		let start = vec![0, 3, 4, 6, 8, 8];
-		let duration = vec![3, 2, 5, 2, 1, 4];
-		let usage = vec![2, 3, 1, 4, 3, 2];
-		let capacity = slv
-			.new_int_decision(1..=6)
-			.order_literals(LiteralStrategy::Eager)
-			.view();
-		CumulativeTimeTable::post(&mut slv, start, duration, usage, capacity);
-
-		slv.expect_solutions(&[capacity], expect![[r#"6"#]]);
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_cumulative_var_capacity_unsat() {
-		let mut slv = Solver::default();
-		let start = vec![0, 3, 4, 6, 8, 8];
-		let duration = vec![3, 2, 5, 2, 1, 4];
-		let usage = vec![2, 3, 1, 4, 3, 2];
-		let capacity = slv
-			.new_int_decision(1..=4)
-			.order_literals(LiteralStrategy::Eager)
-			.view();
-		CumulativeTimeTable::post(&mut slv, start, duration, usage, capacity);
-
-		slv.assert_unsatisfiable();
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_cumulative_var_dur_sat() {
-		let mut slv = Solver::default();
-		let (s_a, d_a, u_a) = create_task(&mut slv, 0..=2, 1..=3, 2..=2);
-		let (s_b, d_b, u_b) = create_task(&mut slv, 0..=2, 1..=3, 2..=2);
-		let (s_c, d_c, u_c) = create_task(&mut slv, 0..=2, 1..=3, 2..=2);
-		let capacity = 2;
-
-		CumulativeTimeTable::post(
-			&mut slv,
-			vec![s_a, s_b, s_c],
-			vec![d_a, d_b, d_c],
-			vec![u_a, u_b, u_c],
-			capacity,
-		);
-
-		slv.expect_solutions(
-			&[s_a, s_b, s_c, d_a, d_b, d_c],
-			expect![[r#"
-    0, 1, 2, 1, 1, 1
-    0, 1, 2, 1, 1, 2
-    0, 1, 2, 1, 1, 3
-    0, 2, 1, 1, 1, 1
-    0, 2, 1, 1, 2, 1
-    0, 2, 1, 1, 3, 1
-    1, 0, 2, 1, 1, 1
-    1, 0, 2, 1, 1, 2
-    1, 0, 2, 1, 1, 3
-    1, 2, 0, 1, 1, 1
-    1, 2, 0, 1, 2, 1
-    1, 2, 0, 1, 3, 1
-    2, 0, 1, 1, 1, 1
-    2, 0, 1, 2, 1, 1
-    2, 0, 1, 3, 1, 1
-    2, 1, 0, 1, 1, 1
-    2, 1, 0, 2, 1, 1
-    2, 1, 0, 3, 1, 1"#]],
-		);
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_cumulative_var_dur_unsat() {
-		let mut slv = Solver::default();
-		let (s_a, d_a, u_a) = create_task(&mut slv, 0..=2, 2..=3, 2..=2);
-		let (s_b, d_b, u_b) = create_task(&mut slv, 0..=2, 2..=3, 2..=2);
-		let (s_c, d_c, u_c) = create_task(&mut slv, 0..=2, 2..=3, 2..=2);
-		let capacity = 2;
-
-		CumulativeTimeTable::post(
-			&mut slv,
-			vec![s_a, s_b, s_c],
-			vec![d_a, d_b, d_c],
-			vec![u_a, u_b, u_c],
-			capacity,
-		);
-
-		slv.assert_unsatisfiable();
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_cumulative_var_usage_sat() {
-		let mut slv = Solver::default();
-		let (s_a, d_a, u_a) = create_task(&mut slv, 0..=2, 1..=1, 1..=2);
-		let (s_b, d_b, u_b) = create_task(&mut slv, 0..=2, 3..=3, 2..=3);
-		let (s_c, d_c, u_c) = create_task(&mut slv, 0..=2, 2..=2, 2..=3);
-		let capacity = 3;
-
-		CumulativeTimeTable::post(
-			&mut slv,
-			vec![s_a, s_b, s_c],
-			vec![d_a, d_b, d_c],
-			vec![u_a, u_b, u_c],
-			capacity,
-		);
-
-		slv.expect_solutions(
-			&[s_a, s_b, s_c, u_a, u_b, u_c],
-			expect![[r#"
-    0, 2, 0, 1, 2, 2
-    0, 2, 0, 1, 3, 2
-    1, 2, 0, 1, 2, 2
-    1, 2, 0, 1, 3, 2
-    2, 2, 0, 1, 2, 2
-    2, 2, 0, 1, 2, 3"#]],
-		);
-	}
-
-	#[test]
-	#[traced_test]
-	fn test_cumulative_var_usage_unsat() {
-		let mut slv = Solver::default();
-		let (s_a, d_a, u_a) = create_task(&mut slv, 0..=2, 2..=2, 1..=3);
-		let (s_b, d_b, u_b) = create_task(&mut slv, 0..=2, 2..=2, 2..=3);
-		let (s_c, d_c, u_c) = create_task(&mut slv, 0..=2, 2..=2, 2..=3);
-		let capacity = 2;
-
-		CumulativeTimeTable::post(
-			&mut slv,
-			vec![s_a, s_b, s_c],
-			vec![d_a, d_b, d_c],
-			vec![u_a, u_b, u_c],
-			capacity,
-		);
-
-		slv.assert_unsatisfiable();
+		// Tasks using 2 and 1 together reach the capacity of 3, which therefore
+		// cannot be lowered.
+		let (mut usages, mut capacity) = (vec![2, 1], 3);
+		Cumulative::tighten_capacity(&mut usages, &mut capacity, &[(0, 2), (0, 2)]);
+		assert_eq!((usages, capacity), (vec![2, 1], 3));
 	}
 }

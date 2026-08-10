@@ -1,0 +1,19 @@
+{
+  "variables": {
+    "X_INTRODUCED_0_" : { "type" : "int", "domain" : [[0, 2]] },
+    "X_INTRODUCED_1_" : { "type" : "int", "domain" : [[0, 2]] },
+    "X_INTRODUCED_2_" : { "type" : "int", "domain" : [[0, 2]] },
+    "X_INTRODUCED_3_" : { "type" : "int", "domain" : [[0, 2]] }
+  },
+  "arrays": {
+    "X_INTRODUCED_4_" : { "a": [1, 2, 1, 1] },
+    "X_INTRODUCED_5_" : { "a": [2, 1, 2, 1] },
+    "s" : { "a": ["X_INTRODUCED_0_", "X_INTRODUCED_1_", "X_INTRODUCED_2_", "X_INTRODUCED_3_"] }
+  },
+  "constraints": [
+    { "id" : "huub_cumulative", "args" : ["s", "X_INTRODUCED_5_", "X_INTRODUCED_4_", 2]}
+  ],
+  "output": ["s"],
+  "solve": { "method" : "satisfy" },
+  "version": "1.0"
+}
