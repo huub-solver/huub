@@ -114,6 +114,6 @@ The API reference is organized by modules, types, and functions.
 When you already know what functionality you need, then the API reference is the best way to inspect the signatures and item-level documentation.
 When you want to understand why a concept exists, how pieces fit together, or how to approach a modelling or implementation task, the book should usually be your first stop.
 
-**Community Discussions** For help, questions, and discussion, use the [GitHub Discussions](https://github.com/huub-solver/huub/discussions).
-This is the best place to ask questions about modelling with Huub, practical solver use, the design of the API, and the behavior of the implementation.
-It is also the natural place to discuss documentation gaps, modelling idioms, and ideas for future extensions.
+**Community Discussions** For help, questions, and discussion, use the [GitHub Discussions](https://github.com/huub-solver/huub/discussions) or the [Huub Discord](https://discord.gg/62xajSNBAR).
+These are the best places to ask questions about modelling with Huub, practical solver use, the design of the API, and the behavior of the implementation.
+They are also the natural place to discuss documentation gaps, modelling idioms, and ideas for future extensions.
