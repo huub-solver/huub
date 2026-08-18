@@ -19,6 +19,7 @@ And it is **extensible**: you can add your own propagators, branchers, and even 
 - [Website](https://huub.solutions)
 - [crates.io](https://crates.io/crates/huub)
 - [docs.rs](https://docs.rs/huub/latest/huub/)
+- [Discord](https://discord.gg/62xajSNBAR)
 
 ## Thanks
 

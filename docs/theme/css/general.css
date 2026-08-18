@@ -697,6 +697,18 @@ html.navy .dark-only {
 	border-radius: 0.6rem;
 }
 
+.landing-involved__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 1.6rem;
+}
+
+.landing-involved__actions .landing-involved__link {
+	width: auto;
+	flex: 1 1 20rem;
+	margin-inline: 0;
+}
+
 .landing-thanks {
 	padding: 5.4rem 0 6rem;
 	background: var(--bg);
