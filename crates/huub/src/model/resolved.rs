@@ -15,8 +15,13 @@ use crate::{
 /// Wrapper for model values whose aliases have been resolved against a model.
 ///
 /// This type marks a model handle whose alias chain has already been followed
-/// against the current model state. Mutating operations should keep this
-/// wrapper updated in place, or the wrapper should simply be discarded.
+/// against the current model state. The claim only holds at the moment it is
+/// made, so a mutating operation must keep the wrapper up to date or discard
+/// it. `Clone` exists only because
+/// [`IntOperations`](crate::actions::IntOperations) and
+/// [`BoolOperations`](crate::actions::BoolOperations) require it: store the
+/// unresolved handle and resolve again where needed, rather than keeping a
+/// clone.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct Resolved<T>(pub(crate) T);
 
@@ -55,6 +60,22 @@ impl Resolved<View<IntVal>> {
 		match self.0.0 {
 			IntView::Linear(lin) => Some(Resolved(lin.var)),
 			IntView::Const(_) | IntView::Bool(_) => None,
+		}
+	}
+}
+
+impl Resolved<View<bool>> {
+	/// Return the underlying canonical decision when the resolved view is
+	/// backed by a Boolean decision variable, rather than a constant or a
+	/// literal derived from an integer comparison.
+	pub(crate) fn decision(&self) -> Option<Resolved<Decision<bool>>> {
+		match self.0.0 {
+			BoolView::Decision(d) => Some(Resolved(d)),
+			BoolView::Const(_)
+			| BoolView::IntEq(..)
+			| BoolView::IntGreaterEq(..)
+			| BoolView::IntLess(..)
+			| BoolView::IntNotEq(..) => None,
 		}
 	}
 }

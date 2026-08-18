@@ -21,7 +21,7 @@ use crate::{
 		queue::PriorityLevel,
 		view::{View, boolean::BoolView, integer::IntView},
 	},
-	views::{LinearBoolView, LinearView, OffsetView},
+	views::{LinearBoolView, LinearView, OffsetView, ScaledView},
 };
 
 /// The context given to [`Propagator`] implementations (during
@@ -422,6 +422,29 @@ where
 
 	fn enqueue_when(&self, ctx: &mut InitializationContext<'a>, condition: IntPropCond) {
 		self.var.enqueue_when(ctx, condition);
+	}
+}
+
+impl IntInitActions<InitializationContext<'_>> for ScaledView<NonZero<IntVal>, Decision<IntVal>> {
+	fn advise_when(&self, ctx: &mut InitializationContext<'_>, condition: IntPropCond, data: u64) {
+		View::from(*self).advise_when(ctx, condition, data);
+	}
+
+	fn cancel_advise_when(
+		&self,
+		ctx: &mut InitializationContext<'_>,
+		condition: IntPropCond,
+		data: u64,
+	) {
+		View::from(*self).cancel_advise_when(ctx, condition, data);
+	}
+
+	fn cancel_enqueue_when(&self, ctx: &mut InitializationContext<'_>, condition: IntPropCond) {
+		View::from(*self).cancel_enqueue_when(ctx, condition);
+	}
+
+	fn enqueue_when(&self, ctx: &mut InitializationContext<'_>, condition: IntPropCond) {
+		View::from(*self).enqueue_when(ctx, condition);
 	}
 }
 

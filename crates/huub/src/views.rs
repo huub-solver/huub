@@ -8,7 +8,9 @@
 mod linear_bool_view;
 mod linear_view;
 mod offset_view;
+mod scaled_view;
 
 pub use linear_bool_view::LinearBoolView;
 pub use linear_view::LinearView;
 pub use offset_view::OffsetView;
+pub use scaled_view::ScaledView;

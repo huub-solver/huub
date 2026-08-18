@@ -7,8 +7,8 @@ use rangelist::IntervalIterator;
 use crate::{
 	IntSet, IntVal,
 	actions::{
-		IntDecisionActions, IntEvent, IntInspectionActions, IntPropCond, IntPropagationActions,
-		IntSimplificationActions, ReasoningContext,
+		IntDecisionActions, IntEvent, IntExplanationActions, IntInspectionActions, IntPropCond,
+		IntPropagationActions, IntSimplificationActions, ReasoningContext,
 	},
 	constraints::{Conflict, NO_REASON, Nogood},
 	model::{
@@ -77,6 +77,22 @@ impl IntDecisionActions<SimplificationContext<'_>> for Decision<IntVal> {
 
 	fn val_lit(&self, ctx: &mut SimplificationContext<'_>) -> Option<View<bool>> {
 		self.val_lit(&mut *ctx.0)
+	}
+}
+
+impl IntExplanationActions<Model> for Decision<IntVal> {
+	fn lit_relaxed(&self, ctx: &Model, meaning: IntLitMeaning) -> (View<bool>, IntLitMeaning) {
+		(self.try_lit(ctx, meaning).unwrap(), meaning)
+	}
+}
+
+impl IntExplanationActions<SimplificationContext<'_>> for Decision<IntVal> {
+	fn lit_relaxed(
+		&self,
+		ctx: &SimplificationContext<'_>,
+		meaning: IntLitMeaning,
+	) -> (View<bool>, IntLitMeaning) {
+		self.lit_relaxed(&*ctx.0, meaning)
 	}
 }
 

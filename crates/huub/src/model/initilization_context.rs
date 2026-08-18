@@ -1,5 +1,7 @@
 //! Initialization context used when model constraints subscribe to events.
 
+use std::num::NonZero;
+
 use crate::{
 	IntSet, IntVal,
 	actions::{
@@ -17,6 +19,7 @@ use crate::{
 		activation_list::{ActivationAction, ActivationActionS},
 		queue::PriorityLevel,
 	},
+	views::ScaledView,
 };
 
 /// Wrapper around [`Model`] that knows the constraint being
@@ -639,6 +642,29 @@ impl IntInspectionActions<ModelInitContext<'_>> for Resolved<View<IntVal>> {
 
 	fn val(&self, ctx: &ModelInitContext<'_>) -> Option<IntVal> {
 		self.val(ctx.model)
+	}
+}
+
+impl IntInitActions<ModelInitContext<'_>> for ScaledView<NonZero<IntVal>, Decision<IntVal>> {
+	fn advise_when(&self, ctx: &mut ModelInitContext<'_>, condition: IntPropCond, data: u64) {
+		View::from(*self).advise_when(ctx, condition, data);
+	}
+
+	fn cancel_advise_when(
+		&self,
+		ctx: &mut ModelInitContext<'_>,
+		condition: IntPropCond,
+		data: u64,
+	) {
+		View::from(*self).cancel_advise_when(ctx, condition, data);
+	}
+
+	fn cancel_enqueue_when(&self, ctx: &mut ModelInitContext<'_>, condition: IntPropCond) {
+		View::from(*self).cancel_enqueue_when(ctx, condition);
+	}
+
+	fn enqueue_when(&self, ctx: &mut ModelInitContext<'_>, condition: IntPropCond) {
+		View::from(*self).enqueue_when(ctx, condition);
 	}
 }
 

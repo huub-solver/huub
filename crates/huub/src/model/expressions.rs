@@ -29,6 +29,7 @@ use crate::{
 		NO_REASON, Nogood,
 		circuit::Circuit,
 		cumulative::{Cumulative, CumulativePropagator},
+		difference_logic::DifferenceLogicConstraint,
 		disjunctive::{Disjunctive, DisjunctivePropagator},
 		int_abs::IntAbsBounds,
 		int_array_minimum::IntArrayMinimumBounds,
@@ -377,6 +378,15 @@ impl Model {
 			}
 			Comparator::NotEqual => (LinComparator::NotEqual, rhs),
 		};
+
+		// Hand a difference constraint straight to the difference logic
+		// component, so that no `IntLinear` is built for it at all.
+		if let Some(difference) =
+			DifferenceLogicConstraint::recognise(self, &terms, comparator, rhs, reif)
+		{
+			self.post_difference(difference);
+			return Ok(());
+		}
 
 		if IntLinear::can_overflow(self, &terms) {
 			self.post_constraint(IntLinear::<OverflowPossible> {

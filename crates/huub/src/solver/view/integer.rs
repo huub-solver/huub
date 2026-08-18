@@ -16,7 +16,7 @@ use crate::{
 		Decision, IntLitMeaning, View,
 		view::{DefaultView, boolean::BoolView, private},
 	},
-	views::{LinearBoolView, LinearView},
+	views::{LinearBoolView, LinearView, ScaledView},
 };
 
 /// The internal representation of [`IntView`].
@@ -77,6 +77,12 @@ impl From<LinearBoolView<NonZero<IntVal>, IntVal, Decision<bool>>> for View<IntV
 impl From<LinearView<NonZero<IntVal>, IntVal, Decision<IntVal>>> for View<IntVal> {
 	fn from(value: LinearView<NonZero<IntVal>, IntVal, Decision<IntVal>>) -> Self {
 		Self(IntView::Linear(value))
+	}
+}
+
+impl From<ScaledView<NonZero<IntVal>, Decision<IntVal>>> for View<IntVal> {
+	fn from(view: ScaledView<NonZero<IntVal>, Decision<IntVal>>) -> Self {
+		View(IntView::Linear(LinearView::new(view.scale, 0, view.var)))
 	}
 }
 

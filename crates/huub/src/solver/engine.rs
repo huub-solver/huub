@@ -210,6 +210,9 @@ pub struct State {
 	pub(crate) failed: bool,
 
 	// ---- Non-Trailed Infrastructure ----
+	/// The difference logic graph, if the model contained any difference
+	/// constraints.
+	///
 	/// Storage for clauses to be communicated to the solver.
 	pub(crate) clauses: VecDeque<Clause<RawLit>>,
 	/// Solving statistics.
