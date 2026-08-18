@@ -16,8 +16,13 @@ use crate::{
 /// Wrapper for model values whose aliases have been resolved against a model.
 ///
 /// This type marks a model handle whose alias chain has already been followed
-/// against the current model state. Mutating operations should keep this
-/// wrapper updated in place, or the wrapper should simply be discarded.
+/// against the current model state. The claim only holds at the moment it is
+/// made, so a mutating operation must keep the wrapper up to date or discard
+/// it. `Clone` exists only because
+/// [`IntOperations`](crate::actions::IntOperations) and
+/// [`BoolOperations`](crate::actions::BoolOperations) require it: store the
+/// unresolved handle and resolve again where needed, rather than keeping a
+/// clone.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct Resolved<T>(pub(crate) T);
 

@@ -38,7 +38,7 @@ use crate::{
 		BoolInspectionActions, IntEvent, ReasonActions, ReasoningContext, ReasoningEngine, Trailed,
 		TrailingActions,
 	},
-	constraints::{BoxedPropagator, Conflict},
+	constraints::{BoxedPropagator, Conflict, difference_logic::DifferenceLogicPropagators},
 	helpers::bytes::Bytes,
 	solver::{
 		IntLitMeaning, Polarity, SearchStrategy, SwitchTrigger,
@@ -210,6 +210,10 @@ pub struct State {
 	pub(crate) failed: bool,
 
 	// ---- Non-Trailed Infrastructure ----
+	/// The difference logic propagators, if the model had any difference
+	/// constraints: the counterpart of the model's reference to its difference
+	/// logic component.
+	pub(crate) diff_logic: Option<DifferenceLogicPropagators>,
 	/// Storage for clauses to be communicated to the solver.
 	pub(crate) clauses: VecDeque<Clause<RawLit>>,
 	/// Solving statistics.

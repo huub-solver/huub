@@ -22,7 +22,7 @@ use crate::{
 		view::{DefaultView, boolean::BoolView, private},
 	},
 	solver::{IntLitMeaning, Polarity},
-	views::{LinearBoolView, LinearView},
+	views::{LinearBoolView, LinearView, ScaledView},
 };
 
 /// The internal representation of [`IntDecision`].
@@ -80,6 +80,16 @@ impl Resolved<View<IntVal>> {
 		}
 	}
 
+	/// The offset this view adds to its scaled decision. A constant has no
+	/// decision and therefore no offset, so this returns `0`.
+	pub(crate) fn offset(&self) -> IntVal {
+		match self.0.0 {
+			IntView::Const(_) => 0,
+			IntView::Linear(lin) => lin.offset,
+			IntView::Bool(lin) => lin.offset,
+		}
+	}
+
 	/// Consuming variant of [`IntPropagationActions::remove_val`].
 	pub(crate) fn remove_val<'a>(
 		self,
@@ -112,6 +122,16 @@ impl Resolved<View<IntVal>> {
 				Resolved(lin.var).restrict_domain(ctx, &lin.reverse_intset(values), reason)
 			}
 			IntView::Bool(lin) => lin.restrict_domain(ctx, values, reason),
+		}
+	}
+
+	/// The scale this view applies to its decision. A constant has no decision
+	/// and therefore no scale, so this returns `1`.
+	pub(crate) fn scale(&self) -> NonZero<IntVal> {
+		match self.0.0 {
+			IntView::Const(_) => NonZero::new(1).unwrap(),
+			IntView::Linear(lin) => lin.scale,
+			IntView::Bool(lin) => lin.scale,
 		}
 	}
 
@@ -672,6 +692,12 @@ impl AddAssign<IntVal> for View<IntVal> {
 impl From<Decision<IntVal>> for View<IntVal> {
 	fn from(decision: Decision<IntVal>) -> Self {
 		View(IntView::Linear(decision.into()))
+	}
+}
+
+impl From<ScaledView<NonZero<IntVal>, Decision<IntVal>>> for View<IntVal> {
+	fn from(view: ScaledView<NonZero<IntVal>, Decision<IntVal>>) -> Self {
+		View(IntView::Linear(LinearView::new(view.scale, 0, view.var)))
 	}
 }
 

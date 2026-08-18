@@ -220,6 +220,20 @@ impl ActivationList {
 		}
 	}
 
+	/// Swap the subscriptions to the lower bound with those to the upper
+	/// bound, as is needed when the list moves to a decision that its owner is
+	/// a negatively scaled view of.
+	pub(crate) fn negate(&mut self) {
+		let (lower, upper, bounds) = (
+			self.lower_bound_idx as usize,
+			self.upper_bound_idx as usize,
+			self.bounds_idx as usize,
+		);
+		// The two blocks are adjacent, so rotating swaps them.
+		self.activations[lower..bounds].rotate_left(upper - lower);
+		self.upper_bound_idx = (lower + (bounds - upper)) as u32;
+	}
+
 	/// Remove the first activation subscribed with the given propagation
 	/// condition for which `matches` returns `true`, and return whether such an
 	/// activation was found.
@@ -490,5 +504,44 @@ mod tests {
 			}
 			assert_activations(&full, &[]);
 		}
+	}
+
+	#[test]
+	fn test_activation_negate() {
+		// Two subscriptions to the lower bound and one to the upper bound, so
+		// that the two blocks that swap differ in size.
+		let props = [
+			(PropagatorId::new(0), IntPropCond::Fixed),
+			(PropagatorId::new(1), IntPropCond::LowerBound),
+			(PropagatorId::new(2), IntPropCond::LowerBound),
+			(PropagatorId::new(3), IntPropCond::UpperBound),
+			(PropagatorId::new(4), IntPropCond::Bounds),
+			(PropagatorId::new(5), IntPropCond::Domain),
+		];
+		let mut list = ActivationList::default();
+		for (prop, cond) in props {
+			list.add(ActivationAction::Enqueue(prop), cond);
+		}
+		assert_activations(&list, &props);
+
+		list.negate();
+		let negated = props.map(|(prop, cond)| {
+			let cond = match cond {
+				IntPropCond::LowerBound => IntPropCond::UpperBound,
+				IntPropCond::UpperBound => IntPropCond::LowerBound,
+				cond => cond,
+			};
+			(prop, cond)
+		});
+		assert_activations(&list, &negated);
+
+		// A list that was negated still takes new subscriptions correctly.
+		let extra = (PropagatorId::new(6), IntPropCond::LowerBound);
+		list.add(ActivationAction::Enqueue(extra.0), extra.1);
+		assert_activations(&list, &negated.into_iter().chain([extra]).collect_vec());
+
+		list.negate();
+		let restored = (extra.0, IntPropCond::UpperBound);
+		assert_activations(&list, &props.into_iter().chain([restored]).collect_vec());
 	}
 }

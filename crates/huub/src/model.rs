@@ -9,6 +9,7 @@ pub(crate) mod resolved;
 pub(crate) mod view;
 
 use std::{
+	any::{Any, TypeId},
 	fmt::Debug,
 	hash::Hash,
 	iter::{repeat_n, repeat_with},
@@ -33,8 +34,13 @@ use crate::{
 	},
 	constraints::{
 		BoxedConstraint, Conflict, ConflictInner, Constraint, Nogood, SimplificationStatus,
+		difference_logic::{DifferenceLogicConstraint, DifferenceLogicLevel, DifferenceLogicModel},
+		int_linear::IntLinear,
 	},
-	helpers::bytes::Bytes,
+	helpers::{
+		bytes::Bytes,
+		overflow::{OverflowImpossible, OverflowPossible},
+	},
 	lower::{Lowerer, LowererComplete},
 	model::{
 		decision::{PolarityScore, Tier, boolean::BoolDecision, integer::IntDecision},
@@ -148,6 +154,31 @@ pub struct Model {
 	/// Definitions of the advisors that are listening to selected changes.
 	#[deepclone(clone)]
 	advisors: Vec<Advisor>,
+	/// Advice for the constraint that is being simplified, which is out of its
+	/// slot and cannot be advised until it is placed back, as `(constraint,
+	/// data, integer event)`, with no event for a Boolean change.
+	///
+	/// Most events wait in [`Self::int_events`] and [`Self::bool_events`]
+	/// until then anyway, but some are delivered at once, such as those of a
+	/// decision at the moment it becomes an alias.
+	#[deepclone(clone)]
+	deferred_advice: Vec<(ConstraintId, u64, Option<IntEvent>)>,
+
+	/// Which difference constraints are captured by the difference logic
+	/// component.
+	pub(crate) diff_logic_level: DifferenceLogicLevel,
+	/// How much work a repeated all-pairs pass of the difference logic
+	/// component may cost, or `None` for `MAX_ALL_PAIRS_WORK`. Only tests set
+	/// it.
+	pub(crate) diff_logic_all_pairs_budget: Option<usize>,
+	/// The difference logic component, created the first time a difference
+	/// constraint is recognised.
+	///
+	/// Keeping the reference means a difference constraint found later — by
+	/// [`Model::post_constraint`], or while simplifying another constraint — is
+	/// added to the same graph instead of becoming a separate propagator.
+	#[deepclone(clone)]
+	pub(crate) diff_logic: Option<ConstraintId>,
 }
 
 /// The engine-internal [`PropagationContext`] used while simplifying a
@@ -235,6 +266,9 @@ impl Model {
 			self.constraints[con.index()] = Some(c);
 			ret
 		} else {
+			if self.cur_prop == Some(con) {
+				self.deferred_advice.push((con, data, None));
+			}
 			false
 		}
 	}
@@ -246,6 +280,9 @@ impl Model {
 			self.constraints[con.index()] = Some(c);
 			ret
 		} else {
+			if self.cur_prop == Some(con) {
+				self.deferred_advice.push((con, data, Some(event)));
+			}
 			false
 		}
 	}
@@ -531,10 +568,20 @@ impl Model {
 	///
 	/// The constraint is added to the model. It will be enforced during
 	/// simplification and in any subsequent solving method.
+	///
+	/// A difference constraint (see [`DifferenceLogicLevel`]) joins the model's
+	/// difference logic component rather than becoming a constraint of its own.
+	/// Posting one therefore never reports a root conflict, since the graph is
+	/// only analysed from [`Model::propagate`], and the identifier returned is
+	/// the component's, shared by every constraint folded into it.
 	pub fn post_constraint<C: Constraint<Self>>(
 		&mut self,
 		constraint: C,
 	) -> Result<ConstraintId, Nogood<View<bool>>> {
+		let constraint = match self.take_difference_constraint(constraint) {
+			Ok(constraint) => constraint,
+			Err(con) => return Ok(con),
+		};
 		let (con, enqueue) = self.initialize_constraint(constraint);
 		if enqueue {
 			self.propagate_single(con)?;
@@ -551,10 +598,47 @@ impl Model {
 		&mut self,
 		constraint: C,
 	) -> ConstraintId {
+		let constraint = match self.take_difference_constraint(constraint) {
+			Ok(constraint) => constraint,
+			Err(con) => return con,
+		};
 		let (con, enqueue) = self.initialize_constraint(constraint);
 		if enqueue {
 			self.propagator_queue.enqueue_propagator(con.raw());
 		}
+		con
+	}
+
+	/// Hand a recognised difference constraint to the difference logic
+	/// component, creating the component if this is the first one.
+	fn post_difference(&mut self, constraint: DifferenceLogicConstraint) -> ConstraintId {
+		let con = match self.diff_logic {
+			Some(con) => con,
+			None => {
+				let component = DifferenceLogicModel::new(self);
+				let (con, _) = self.initialize_constraint(component);
+				self.diff_logic = Some(con);
+				con
+			}
+		};
+		// The component is taken out of its slot so that adding the edge can
+		// borrow the model itself, to create the nodes, gates, and any Boolean
+		// decision the reduction needs. The slot stays reserved, so a
+		// constraint posted while the edge is added does not disturb it.
+		let mut component = self.constraints[con.index()]
+			.take()
+			.expect("the difference logic component is not being simplified");
+		{
+			let component: &mut dyn Any = &mut *component;
+			component
+				.downcast_mut::<DifferenceLogicModel>()
+				.expect("the difference logic slot holds the component")
+				.add(self, constraint);
+		}
+		self.constraints[con.index()] = Some(component);
+		// Subscribe to the nodes and gates that the edge just created.
+		self.update_initialization(con);
+		self.propagator_queue.enqueue_propagator(con.raw());
 		con
 	}
 
@@ -613,11 +697,62 @@ impl Model {
 				// Constraint is known to be satisfied, no need to place back.
 			}
 			SimplificationStatus::NoFixpoint => {
-				self.constraints[con.index()] = Some(con_obj);
+				// A constraint that has become a difference constraint, by
+				// folding away a term or by unifying its decisions, joins the
+				// graph, which releases its slot.
+				if let Some(recognised) = self.recognise_difference(&*con_obj) {
+					self.post_difference(recognised);
+				} else {
+					self.constraints[con.index()] = Some(con_obj);
+				}
 			}
 		}
+		// Deliver the advice that arrived for the constraint while it was out
+		// of its slot. It is dropped when the constraint is gone.
+		let mut deferred_advice = mem::take(&mut self.deferred_advice);
+		for (con, data, event) in deferred_advice.drain(..) {
+			let enqueue = match event {
+				Some(event) => self.advise_of_int_change(con, data, event),
+				None => self.advise_of_bool_change(con, data),
+			};
+			if enqueue {
+				self.propagator_queue.enqueue_propagator(con.raw());
+			}
+		}
+		self.deferred_advice = deferred_advice;
 		self.notify_advisors();
 		Ok(())
+	}
+
+	/// The difference constraint that `constraint` denotes, if it is a linear
+	/// constraint of a shape the configured [`DifferenceLogicLevel`] captures.
+	fn recognise_difference(&mut self, constraint: &dyn Any) -> Option<DifferenceLogicConstraint> {
+		if let Some(lin) = constraint.downcast_ref::<IntLinear<OverflowImpossible>>() {
+			DifferenceLogicConstraint::recognise(
+				self,
+				&lin.terms,
+				lin.comparator,
+				lin.rhs,
+				lin.reif,
+			)
+		} else if let Some(lin) = constraint.downcast_ref::<IntLinear<OverflowPossible>>() {
+			// A right-hand side that does not fit an `IntVal` cannot be an edge
+			// weight; the linear propagator deals with the overflow.
+			let rhs = IntVal::try_from(lin.rhs).ok()?;
+			DifferenceLogicConstraint::recognise(self, &lin.terms, lin.comparator, rhs, lin.reif)
+		} else {
+			None
+		}
+	}
+
+	/// Set which difference constraints are captured by the model's difference
+	/// logic component.
+	///
+	/// Constraints are recognised as they are posted, so this must be set
+	/// before posting them: raising the level afterwards does not reconsider
+	/// the constraints already in the model.
+	pub fn set_difference_logic_level(&mut self, level: DifferenceLogicLevel) {
+		self.diff_logic_level = level;
 	}
 
 	/// Invoke `f` with a [`ConstraintId`] for each constraint that the given
@@ -638,6 +773,27 @@ impl Model {
 				f(con);
 			},
 		);
+	}
+
+	/// Fold `constraint` into the difference logic component when it is a
+	/// difference constraint that the configured [`DifferenceLogicLevel`]
+	/// captures, reporting the component it joined. Every other constraint is
+	/// returned unchanged.
+	fn take_difference_constraint<C: Constraint<Self>>(
+		&mut self,
+		constraint: C,
+	) -> Result<C, ConstraintId> {
+		// `C` is concrete here, so these type tests fold away for every
+		// constraint that is not linear.
+		if TypeId::of::<C>() != TypeId::of::<IntLinear<OverflowImpossible>>()
+			&& TypeId::of::<C>() != TypeId::of::<IntLinear<OverflowPossible>>()
+		{
+			return Ok(constraint);
+		}
+		match self.recognise_difference(&constraint) {
+			Some(recognised) => Err(self.post_difference(recognised)),
+			None => Ok(constraint),
+		}
 	}
 
 	/// Ask the constraint to update what it declared during initialization,
@@ -852,9 +1008,10 @@ mod tests {
 	use crate::{
 		DeepClone, IntVal,
 		actions::{
-			BoolInitActions, BoolInspectionActions, ConstructionActions, IntEvent, IntInitActions,
-			IntInspectionActions, IntPropCond, IntPropagationActions, IntSimplificationActions,
-			PropagationActions, ReasoningEngine, Trailed, TrailingActions,
+			BoolInitActions, BoolInspectionActions, BoolPropagationActions, ConstructionActions,
+			IntEvent, IntInitActions, IntInspectionActions, IntPropCond, IntPropagationActions,
+			IntSimplificationActions, PropagationActions, ReasoningEngine, Trailed,
+			TrailingActions,
 		},
 		constraints::{
 			BoolModelActions, Constraint, IntModelActions, NO_REASON, Propagator,
@@ -873,6 +1030,9 @@ mod tests {
 		decisions: Vec<View<IntVal>>,
 		/// The number of decisions that have already been subscribed to.
 		subscribed: usize,
+		/// The changes of its decisions that the constraint subscribes to.
+		#[deepclone(clone)]
+		condition: IntPropCond,
 		/// Counts how often the constraint has been advised.
 		advised: Trailed<IntVal>,
 	}
@@ -949,6 +1109,7 @@ mod tests {
 			.post_constraint(GrowingModel {
 				decisions: Vec::new(),
 				subscribed: 0,
+				condition: IntPropCond::Bounds,
 				advised,
 			})
 			.unwrap();
@@ -972,6 +1133,73 @@ mod tests {
 			.expect("tighten_min failed");
 		prb.propagate().expect("propagate failed");
 		assert_eq!(prb.trailed(advised), 1);
+	}
+
+	/// An advisor on a literal over a decision that becomes an alias keeps
+	/// following that literal: here `i` becomes `j + 3`, so `i ≥ 5` is fixed
+	/// exactly when `j ≥ 2` is.
+	#[test]
+	#[traced_test]
+	fn test_model_advisor_bool_after_alias() {
+		let mut prb = Model::default();
+		// `i` is created last, so that it is the one to become the alias.
+		let j = prb.new_int_decision(0..=6);
+		let i = prb.new_int_decision(0..=9);
+		let bool_check = prb.new_trailed(0);
+		let int_check = prb.new_trailed(0);
+		prb.post_constraint(TestModel {
+			b: i.geq(5),
+			i,
+			bool_check,
+			int_check,
+		})
+		.unwrap();
+		i.unify(&mut prb, j + 3).unwrap();
+		prb.propagate().expect("propagate failed");
+		assert_eq!(prb.trailed(bool_check), 0);
+
+		// `j ≤ 4` leaves `i ≥ 5` open, although 5 is now above the bounds of
+		// `j`.
+		j.tighten_max(&mut prb, 4, NO_REASON)
+			.expect("tighten_max failed");
+		prb.propagate().expect("propagate failed");
+		assert_eq!(prb.trailed(bool_check), 0);
+
+		// `j ≥ 2` fixes `i ≥ 5`, although 5 is still above the bounds of `j`.
+		j.tighten_min(&mut prb, 2, NO_REASON)
+			.expect("tighten_min failed");
+		prb.propagate().expect("propagate failed");
+		assert_eq!(prb.trailed(bool_check), 1);
+	}
+
+	/// An advisor on a literal over a decision that becomes a view of a
+	/// Boolean stays an advisor of that literal: here `i` becomes `4p + 3`, so
+	/// `i ≥ 5` is fixed when `p` is.
+	#[test]
+	#[traced_test]
+	fn test_model_advisor_bool_after_bool_alias() {
+		let mut prb = Model::default();
+		let i = prb.new_int_decision(0..=9);
+		let p = prb.new_bool_decision();
+		let bool_check = prb.new_trailed(0);
+		let int_check = prb.new_trailed(0);
+		prb.post_constraint(TestModel {
+			b: i.geq(5),
+			i,
+			bool_check,
+			int_check,
+		})
+		.unwrap();
+		i.unify(&mut prb, View::<IntVal>::from(p) * 4 + 3).unwrap();
+		prb.propagate().expect("propagate failed");
+		assert_eq!(prb.trailed(bool_check), 0);
+		let int_calls = prb.trailed(int_check);
+
+		// Fixing `p` fixes both the literal and the decision itself.
+		p.require(&mut prb, NO_REASON).expect("require failed");
+		prb.propagate().expect("propagate failed");
+		assert_eq!(prb.trailed(bool_check), 1);
+		assert_eq!(prb.trailed(int_check), int_calls + 1);
 	}
 
 	#[test]
@@ -1078,6 +1306,37 @@ mod tests {
 		assert_eq!(max, 2);
 	}
 
+	/// An advisor on a single bound of a negated view is called for the
+	/// opposite bound of its decision, and only for that one.
+	#[test]
+	#[traced_test]
+	fn test_model_advisor_int_negated_bound() {
+		let mut prb = Model::default();
+		let i = prb.new_int_decision(0..=10);
+		let advised = prb.new_trailed(0);
+		let con = prb
+			.post_constraint(GrowingModel {
+				decisions: vec![-i],
+				subscribed: 0,
+				condition: IntPropCond::LowerBound,
+				advised,
+			})
+			.unwrap();
+		prb.update_initialization(con);
+
+		// The minimum of `i` is the maximum of `-i`.
+		i.tighten_min(&mut prb, 1, NO_REASON)
+			.expect("tighten_min failed");
+		prb.propagate().expect("propagate failed");
+		assert_eq!(prb.trailed(advised), 0);
+
+		// The maximum of `i` is the minimum of `-i`.
+		i.tighten_max(&mut prb, 9, NO_REASON)
+			.expect("tighten_max failed");
+		prb.propagate().expect("propagate failed");
+		assert_eq!(prb.trailed(advised), 1);
+	}
+
 	/// Refreshing the subscriptions of a constraint that has already subscribed
 	/// to all its decisions does not subscribe to them a second time.
 	#[test]
@@ -1090,6 +1349,7 @@ mod tests {
 			.post_constraint(GrowingModel {
 				decisions: vec![i],
 				subscribed: 0,
+				condition: IntPropCond::Bounds,
 				advised,
 			})
 			.unwrap();
@@ -1149,7 +1409,7 @@ mod tests {
 
 		fn update_initialization(&mut self, context: &mut E::InitializationContext<'_>) {
 			for (i, dec) in self.decisions.iter().enumerate().skip(self.subscribed) {
-				dec.advise_when(context, IntPropCond::Bounds, i as u64);
+				dec.advise_when(context, self.condition, i as u64);
 			}
 			self.subscribed = self.decisions.len();
 		}

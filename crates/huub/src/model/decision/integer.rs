@@ -7,8 +7,8 @@ use rangelist::IntervalIterator;
 use crate::{
 	IntSet, IntVal,
 	actions::{
-		IntDecisionActions, IntEvent, IntInspectionActions, IntPropCond, IntPropagationActions,
-		IntSimplificationActions, ReasoningContext,
+		IntDecisionActions, IntEvent, IntExplanationActions, IntInspectionActions, IntPropCond,
+		IntPropagationActions, IntSimplificationActions, ReasoningContext,
 	},
 	constraints::{Conflict, NO_REASON, Nogood},
 	model::{
@@ -77,6 +77,22 @@ impl IntDecisionActions<SimplificationContext<'_>> for Decision<IntVal> {
 
 	fn val_lit(&self, ctx: &mut SimplificationContext<'_>) -> Option<View<bool>> {
 		self.val_lit(&mut *ctx.0)
+	}
+}
+
+impl IntExplanationActions<Model> for Decision<IntVal> {
+	fn lit_relaxed(&self, ctx: &Model, meaning: IntLitMeaning) -> (View<bool>, IntLitMeaning) {
+		(self.try_lit(ctx, meaning).unwrap(), meaning)
+	}
+}
+
+impl IntExplanationActions<SimplificationContext<'_>> for Decision<IntVal> {
+	fn lit_relaxed(
+		&self,
+		ctx: &SimplificationContext<'_>,
+		meaning: IntLitMeaning,
+	) -> (View<bool>, IntLitMeaning) {
+		self.lit_relaxed(&*ctx.0, meaning)
 	}
 }
 
@@ -396,10 +412,39 @@ impl Resolved<Decision<IntVal>> {
 		}
 		// Transfer any constraints from the aliased variable to the target
 		// variable
-		let constraints = mem::take(&mut ctx.0.int_vars[idx].constraints);
+		let mut constraints = mem::take(&mut ctx.0.int_vars[idx].constraints);
 		// Move subscriptions to target decision variable
 		match target.0 {
 			IntView::Linear(lin) => {
+				// The advisors that move are called for events of the target
+				// from here on, so what they record about the aliased decision
+				// is translated: under a negative scale the two bound events
+				// swap, and a literal condition becomes the same condition on
+				// the target.
+				let negated = lin.scale.is_negative();
+				let model = &mut *ctx.0;
+				constraints.for_each_activated_by(
+					IntEvent::Fixed,
+					|act: ActivationAction<AdvisorId, ConstraintId>| {
+						if let ActivationAction::Advise(adv) = act {
+							let def = &mut model.advisors[adv.index()];
+							def.negated ^= negated;
+							// A condition without a counterpart on the target
+							// is a literal that the alias has fixed, and the
+							// events delivered above have called its advisor.
+							if let Some(Ok(cond)) =
+								def.condition.map(|cond| lin.reverse_meaning(cond))
+							{
+								def.condition = Some(cond);
+							}
+						}
+					},
+				);
+				// The subscriptions to a single bound move to the opposite
+				// one.
+				if negated {
+					constraints.negate();
+				}
 				ctx.0.int_vars[lin.var.idx()]
 					.constraints
 					.extend(constraints);
@@ -415,7 +460,14 @@ impl Resolved<Decision<IntVal>> {
 						|act: ActivationAction<AdvisorId, ConstraintId>| {
 							if let ActivationAction::Advise(adv) = act {
 								let def = &mut model.advisors[adv.index()];
-								def.bool2int = true;
+								// An advisor of a literal over the aliased
+								// decision stays a Boolean advisor: its literal
+								// is fixed exactly when `inner` is. Every other
+								// advisor watches the decision itself, which is
+								// fixed when `inner` is.
+								if def.condition.is_none() || def.bool2int {
+									def.bool2int = true;
+								}
 								def.condition = Some(match inner {
 									BoolView::IntEq(_, v) => IntLitMeaning::Eq(v),
 									BoolView::IntGreaterEq(_, v) => IntLitMeaning::GreaterEq(v),
@@ -446,7 +498,14 @@ impl Resolved<Decision<IntVal>> {
 						|act: ActivationAction<AdvisorId, ConstraintId>| {
 							if let ActivationAction::Advise(adv) = act {
 								let def = &mut model.advisors[adv.index()];
-								def.bool2int = true;
+								// As above: an advisor that watches a literal
+								// over the aliased decision stays a Boolean
+								// advisor, now of the Boolean decision itself.
+								if def.condition.is_none() || def.bool2int {
+									def.bool2int = true;
+								} else {
+									def.condition = None;
+								}
 								def.negated = false;
 							}
 							model.bool_vars[jdx].constraints.push(act.into());
