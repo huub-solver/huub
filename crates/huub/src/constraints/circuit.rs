@@ -377,10 +377,10 @@ mod tests {
 	fn test_circuit_sparse_both() {
 		let mut prb = Model::default();
 		let vars = [
-			IntSet::from_iter([2..=3]),
+			IntSet::from(2..=3),
 			IntSet::from_iter([1..=1, 3..=4]),
 			IntSet::from_iter([1..=1, 4..=4]),
-			IntSet::from_iter([1..=3]),
+			IntSet::from(1..=3),
 		]
 		.map(|dom| prb.new_int_decision(dom));
 		prb.circuit(vars.iter().copied())
@@ -407,10 +407,10 @@ mod tests {
 	fn test_circuit_sparse_no_cycle() {
 		let mut prb = Model::default();
 		let vars = [
-			IntSet::from_iter([2..=3]),
+			IntSet::from(2..=3),
 			IntSet::from_iter([1..=1, 3..=4]),
 			IntSet::from_iter([1..=1, 4..=4]),
-			IntSet::from_iter([1..=3]),
+			IntSet::from(1..=3),
 		]
 		.map(|dom| prb.new_int_decision(dom));
 		prb.circuit(vars.iter().copied())
@@ -437,10 +437,10 @@ mod tests {
 	fn test_circuit_sparse_scc() {
 		let mut prb = Model::default();
 		let vars = [
-			IntSet::from_iter([2..=3]),
+			IntSet::from(2..=3),
 			IntSet::from_iter([1..=1, 3..=4]),
 			IntSet::from_iter([1..=1, 4..=4]),
-			IntSet::from_iter([1..=3]),
+			IntSet::from(1..=3),
 		]
 		.map(|dom| prb.new_int_decision(dom));
 		prb.circuit(vars.iter().copied())
@@ -586,10 +586,10 @@ mod tests {
 	fn test_subcircuit_sparse_both() {
 		let mut prb = Model::default();
 		let vars = [
-			IntSet::from_iter([1..=3]),
+			IntSet::from(1..=3),
 			IntSet::from_iter([1..=2, 4..=4]),
 			IntSet::from_iter([1..=1, 3..=4]),
-			IntSet::from_iter([2..=4]),
+			IntSet::from(2..=4),
 		]
 		.map(|dom| prb.new_int_decision(dom));
 		prb.circuit(vars.iter().copied())
@@ -620,10 +620,10 @@ mod tests {
 	fn test_subcircuit_sparse_no_cycle() {
 		let mut prb = Model::default();
 		let vars = [
-			IntSet::from_iter([1..=3]),
+			IntSet::from(1..=3),
 			IntSet::from_iter([1..=2, 4..=4]),
 			IntSet::from_iter([1..=1, 3..=4]),
-			IntSet::from_iter([2..=4]),
+			IntSet::from(2..=4),
 		]
 		.map(|dom| prb.new_int_decision(dom));
 		prb.circuit(vars.iter().copied())
@@ -654,10 +654,10 @@ mod tests {
 	fn test_subcircuit_sparse_scc() {
 		let mut prb = Model::default();
 		let vars = [
-			IntSet::from_iter([1..=3]),
+			IntSet::from(1..=3),
 			IntSet::from_iter([1..=2, 4..=4]),
 			IntSet::from_iter([1..=1, 3..=4]),
-			IntSet::from_iter([2..=4]),
+			IntSet::from(2..=4),
 		]
 		.map(|dom| prb.new_int_decision(dom));
 		prb.circuit(vars.iter().copied())

@@ -726,8 +726,8 @@ mod tests {
 		// 1-based values; only node 0 points to value 1 (=node 0), so {1,2,3} has
 		// no edge out.
 		let vars = [
-			IntSet::from_iter([2..=4]),        // 0 -> nodes 1,2,3
-			IntSet::from_iter([3..=4]),        // 1 -> nodes 2,3
+			IntSet::from(2..=4),               // 0 -> nodes 1,2,3
+			IntSet::from(3..=4),               // 1 -> nodes 2,3
 			IntSet::from_iter([2..=2, 4..=4]), // 2 -> nodes 1,3
 			IntSet::from_iter([2..=2, 3..=3]), // 3 -> nodes 1,2
 		]

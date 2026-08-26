@@ -636,9 +636,9 @@ mod tests {
 	#[test]
 	fn test_domain_median() {
 		// Odd number of values: the single middle value.
-		assert_eq!(domain_median(&IntSet::from_iter([1..=5])), 3);
+		assert_eq!(domain_median(&IntSet::from(1..=5)), 3);
 		// Even number of values: the smaller of the two middle values.
-		assert_eq!(domain_median(&IntSet::from_iter([1..=4])), 2);
+		assert_eq!(domain_median(&IntSet::from(1..=4)), 2);
 		// Holes are skipped: the median is the middle element, not the bound
 		// midpoint (which would be `4` and `3` respectively here).
 		assert_eq!(domain_median(&IntSet::from_iter([1..=3, 7..=8])), 3);
@@ -649,9 +649,9 @@ mod tests {
 	#[test]
 	fn test_domain_middle() {
 		// Mean of the bounds is in the domain.
-		assert_eq!(domain_middle(&IntSet::from_iter([0..=10])), 5);
+		assert_eq!(domain_middle(&IntSet::from(0..=10)), 5);
 		// Mean falls between two values: the smaller is preferred.
-		assert_eq!(domain_middle(&IntSet::from_iter([0..=9])), 4);
+		assert_eq!(domain_middle(&IntSet::from(0..=9)), 4);
 		// The value closest to the mean of the bounds, regardless of element
 		// counts: the mean `4.5` is nearest to `3` (not the median `7`).
 		assert_eq!(domain_middle(&IntSet::from_iter([0..=3, 7..=9])), 3);

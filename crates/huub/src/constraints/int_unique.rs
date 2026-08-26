@@ -231,7 +231,7 @@ mod tests {
 			IntSet::from_iter([1..=1, 3..=4, 6..=6]),
 			IntSet::from_iter([2..=2, 5..=5]),
 			IntSet::from_iter([3..=3, 5..=5]),
-			IntSet::from_iter([3..=6]),
+			IntSet::from(3..=6),
 			(2..=2).into(),
 		]
 		.into_iter()

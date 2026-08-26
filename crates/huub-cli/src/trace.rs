@@ -556,7 +556,7 @@ impl ReverseMap {
 				};
 				// `dom` is a flat list of inclusive range bounds; the domain values
 				// in ascending order are the concatenation of those ranges.
-				let values = || dom.chunks_exact(2).flat_map(|c| c[0]..=c[1]);
+				let values = || dom.as_chunks::<2>().0.iter().flat_map(|c| c[0]..=c[1]);
 				// The order literal at `order + k` means `< values[k + 1]`, so one is
 				// created for every domain value except the first.
 				if let Some(order) = event.order.filter(|&o| o != 0) {
