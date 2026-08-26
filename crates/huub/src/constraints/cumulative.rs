@@ -660,7 +660,7 @@ mod tests {
 		IntVal,
 		actions::IntInspectionActions,
 		constraints::cumulative::Cumulative,
-		model::{ConRef, Model},
+		model::{ConstraintId, Model},
 		solver::Solver,
 	};
 
@@ -810,7 +810,7 @@ mod tests {
 			.post()
 			.unwrap();
 
-		let _ = prb.propagate_single(ConRef::from_raw(0));
+		let _ = prb.propagate_single(ConstraintId::from_raw(0));
 		assert_eq!(start_time_a.bounds(&prb), (0, 2));
 		assert_eq!(usages[0].bounds(&prb), (1, 1));
 		assert_eq!(start_time_b.bounds(&prb), (0, 2));

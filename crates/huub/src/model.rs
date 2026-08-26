@@ -48,16 +48,12 @@ use crate::{
 	},
 };
 
-/// Identifies an advisor in the [`Model`].
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct AdvRef(u32);
-
 /// Definition of how a constraint has requested to be advised at the model
 /// level.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct Advisor {
 	/// Reference to the constraint that has requested to be advised.
-	con: ConRef,
+	con: ConstraintId,
 	/// The data associated by the constraint with the advisor.
 	data: u64,
 	/// Whether lower and upper bound events must be swapped.
@@ -69,9 +65,18 @@ struct Advisor {
 	condition: Option<IntLitMeaning>,
 }
 
-/// Identifies a constraint in the [`Model`].
+/// Identifies an advisor in the [`Model`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct ConRef(u32);
+pub(crate) struct AdvisorId(u32);
+
+/// Identifies a constraint in the [`Model`].
+///
+/// An identifier is returned when a constraint is posted, and can be used to
+/// inspect the constraint using [`Model::constraint`], or to refresh its
+/// subscriptions using
+/// [`Model::update_initialization`].
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct ConstraintId(u32);
 
 /// A formulation of a problem instance in terms of decisions and constraints.
 ///
@@ -126,7 +131,7 @@ pub struct Model {
 	/// Fake trailed storage
 	pub(crate) trail: Vec<[u8; 8]>,
 	/// Reference for the current propagator being executed.
-	cur_prop: Option<ConRef>,
+	cur_prop: Option<ConstraintId>,
 	/// Integer variable changes that occurred during the execution of the
 	/// current propagator.
 	int_events: FxHashMap<u32, IntEvent>,
@@ -158,8 +163,8 @@ pub struct SimplificationReasonSink {
 	pub(crate) deferred: Option<u64>,
 }
 
-impl AdvRef {
-	/// Recreate the advisor reference from a raw value.
+impl AdvisorId {
+	/// Recreate the advisor identifier from a raw value.
 	pub(crate) fn from_raw(raw: u32) -> Self {
 		debug_assert!(raw <= i32::MAX as u32);
 		Self(raw)
@@ -170,20 +175,20 @@ impl AdvRef {
 		self.0 as usize
 	}
 
-	/// Create a new advisor reference from an index.
+	/// Create a new advisor identifier from an index.
 	pub(crate) fn new(index: usize) -> Self {
 		debug_assert!(index < i32::MAX as usize);
 		Self(index as u32)
 	}
 
-	/// Access the raw value of the advisor reference.
+	/// Access the raw value of the advisor identifier.
 	pub(crate) fn raw(&self) -> u32 {
 		self.0
 	}
 }
 
-impl ConRef {
-	/// Recreate the constraint reference from a raw value.
+impl ConstraintId {
+	/// Recreate the constraint identifier from a raw value.
 	pub(crate) fn from_raw(raw: u32) -> Self {
 		debug_assert!(raw <= i32::MAX as u32);
 		Self(raw)
@@ -194,13 +199,13 @@ impl ConRef {
 		self.0 as usize
 	}
 
-	/// Create a new constraint reference from an index.
+	/// Create a new constraint identifier from an index.
 	pub(crate) fn new(index: usize) -> Self {
 		debug_assert!(index < i32::MAX as usize);
 		Self(index as u32)
 	}
 
-	/// Access the raw value of the constraint reference.
+	/// Access the raw value of the constraint identifier.
 	pub(crate) fn raw(&self) -> u32 {
 		self.0
 	}
@@ -217,7 +222,7 @@ impl Model {
 	}
 
 	/// Notify a single boolean advisor or propagator.
-	fn advise_of_bool_change(&mut self, con: ConRef, data: u64) -> bool {
+	fn advise_of_bool_change(&mut self, con: ConstraintId, data: u64) -> bool {
 		if let Some(mut c) = self.constraints[con.index()].take() {
 			let ret = c.advise_of_bool_change(self, data);
 			self.constraints[con.index()] = Some(c);
@@ -228,7 +233,7 @@ impl Model {
 	}
 
 	/// Notify a single integer advisor or propagator.
-	fn advise_of_int_change(&mut self, con: ConRef, data: u64, event: IntEvent) -> bool {
+	fn advise_of_int_change(&mut self, con: ConstraintId, data: u64, event: IntEvent) -> bool {
 		if let Some(mut c) = self.constraints[con.index()].take() {
 			let ret = c.advise_of_int_change(self, data, event);
 			self.constraints[con.index()] = Some(c);
@@ -238,21 +243,44 @@ impl Model {
 		}
 	}
 
+	/// Returns the constraint with the given identifier.
+	///
+	/// This returns `None` when the constraint is unavailable because it is
+	/// currently being simplified or advised, or because it has been subsumed.
+	pub fn constraint(&self, con: ConstraintId) -> Option<&dyn Constraint<Model>> {
+		self.constraints[con.index()].as_deref()
+	}
+
+	/// Returns the constraint with the given identifier, allowing it to
+	/// be given additional information about the problem.
+	///
+	/// Any decision variables that the constraint acquires this way are only
+	/// subscribed to once [`Model::update_initialization`] is called.
+	///
+	/// This returns `None` when the constraint is unavailable because it is
+	/// currently being simplified or advised, or because it has been subsumed.
+	pub fn constraint_mut(&mut self, con: ConstraintId) -> Option<&mut dyn Constraint<Model>> {
+		self.constraints[con.index()].as_deref_mut()
+	}
+
 	/// Initialize a constraint and register its subscriptions without
 	/// propagating it yet.
 	///
 	/// This is used by [`Model::post_constraint`] and by internal rewriting
 	/// paths that need to add a constraint before deciding whether to
 	/// propagate it immediately.
-	fn initialize_constraint<C: Constraint<Self>>(&mut self, constraint: C) -> (ConRef, bool) {
-		let con = ConRef::new(self.constraints.len());
+	fn initialize_constraint<C: Constraint<Self>>(
+		&mut self,
+		constraint: C,
+	) -> (ConstraintId, bool) {
+		let con = ConstraintId::new(self.constraints.len());
 		let mut ctx = ModelInitContext::new(self, con);
 		let mut constraint = constraint;
 		constraint.initialize(&mut ctx);
 		let priority = ctx.priority;
 		let enqueue = ctx.enqueue();
 		self.constraints.push(Some(Box::new(constraint)));
-		let r = ConRef::new(self.constraints.len() - 1);
+		let r = ConstraintId::new(self.constraints.len() - 1);
 		debug_assert_eq!(r, con);
 		self.propagator_queue.info.push(PropagatorInfo {
 			enqueued: false,
@@ -368,7 +396,7 @@ impl Model {
 		debug_assert!(!bv.is_negated());
 		for &act in self.bool_vars[bv.idx()].constraints.clone().iter() {
 			match act.into() {
-				ActivationAction::Advise::<AdvRef, _>(adv) => {
+				ActivationAction::Advise::<AdvisorId, _>(adv) => {
 					let x: &Advisor = &self.advisors[adv.index()];
 					let Advisor {
 						con,
@@ -397,7 +425,7 @@ impl Model {
 		let constraints = mem::take(&mut self.int_vars[i as usize].constraints);
 		let iv = Decision(i);
 		constraints.for_each_activated_by(event, |act| match act {
-			ActivationAction::Advise::<AdvRef, _>(adv) => {
+			ActivationAction::Advise::<AdvisorId, _>(adv) => {
 				let x: &Advisor = &self.advisors[adv.index()];
 				let Advisor {
 					con,
@@ -499,12 +527,12 @@ impl Model {
 	pub fn post_constraint<C: Constraint<Self>>(
 		&mut self,
 		constraint: C,
-	) -> Result<(), Nogood<View<bool>>> {
+	) -> Result<ConstraintId, Nogood<View<bool>>> {
 		let (con, enqueue) = self.initialize_constraint(constraint);
 		if enqueue {
 			self.propagate_single(con)?;
 		}
-		Ok(())
+		Ok(con)
 	}
 
 	/// Internal implementation of [`Model::post_constraint`] that does not yet
@@ -512,11 +540,15 @@ impl Model {
 	///
 	/// This function is used internally by [`Model::post_constraint`] and when
 	/// rewriting constraints within the propagation loop.
-	pub(crate) fn post_constraint_internal<C: Constraint<Self>>(&mut self, constraint: C) {
+	pub(crate) fn post_constraint_internal<C: Constraint<Self>>(
+		&mut self,
+		constraint: C,
+	) -> ConstraintId {
 		let (con, enqueue) = self.initialize_constraint(constraint);
 		if enqueue {
 			self.propagator_queue.enqueue_propagator(con.raw());
 		}
+		con
 	}
 
 	/// Propagate all constraints until the propagator queue is empty.
@@ -533,14 +565,14 @@ impl Model {
 	pub fn propagate(&mut self) -> Result<(), Nogood<View<bool>>> {
 		self.notify_advisors();
 		while let Some(con) = self.propagator_queue.pop() {
-			self.propagate_single(ConRef::from_raw(con))?;
+			self.propagate_single(ConstraintId::from_raw(con))?;
 		}
 		Ok(())
 	}
 
 	/// Propagate the constraint at index `con`, updating the domains of the
 	/// variables and rewriting the constraint if necessary.
-	pub(crate) fn propagate_single(&mut self, con: ConRef) -> Result<(), Nogood<View<bool>>> {
+	pub(crate) fn propagate_single(&mut self, con: ConstraintId) -> Result<(), Nogood<View<bool>>> {
 		let Some(mut con_obj) = self.constraints[con.index()].take() else {
 			return Ok(());
 		};
@@ -555,7 +587,7 @@ impl Model {
 			data,
 		})) = status
 		{
-			debug_assert_eq!(ConRef::new(propagator as usize), con);
+			debug_assert_eq!(ConstraintId::new(propagator as usize), con);
 			status = Err(
 				SimplificationContext(&mut *self).make_conflict(subject, |ctx, sink| {
 					con_obj.explain(
@@ -580,13 +612,17 @@ impl Model {
 		Ok(())
 	}
 
-	/// Invoke `f` with a [`ConRef`] for each constraint that the given integer
-	/// decision is subscribed to (i.e. that may involve it). The same
+	/// Invoke `f` with a [`ConstraintId`] for each constraint that the given
+	/// integer decision is subscribed to (i.e. that may involve it). The same
 	/// constraint may be reported more than once.
-	pub(crate) fn subscribed_constraints(&self, dec: Decision<IntVal>, mut f: impl FnMut(ConRef)) {
+	pub(crate) fn subscribed_constraints(
+		&self,
+		dec: Decision<IntVal>,
+		mut f: impl FnMut(ConstraintId),
+	) {
 		self.int_vars[dec.idx()].constraints.for_each_activated_by(
 			IntEvent::Fixed,
-			|act: ActivationAction<AdvRef, ConRef>| {
+			|act: ActivationAction<AdvisorId, ConstraintId>| {
 				let con = match act {
 					ActivationAction::Enqueue(con) => con,
 					ActivationAction::Advise(adv) => self.advisors[adv.index()].con,
@@ -594,6 +630,27 @@ impl Model {
 				f(con);
 			},
 		);
+	}
+
+	/// Ask the constraint to update what it declared during initialization,
+	/// calling
+	/// [`Propagator::update_initialization`](crate::constraints::Propagator::update_initialization).
+	///
+	/// The call is ignored when the constraint is unavailable because it is
+	/// currently being simplified or advised, or because it has been subsumed.
+	pub fn update_initialization(&mut self, con: ConstraintId) {
+		let Some(mut con_obj) = self.constraints[con.index()].take() else {
+			return;
+		};
+		let mut ctx = ModelInitContext::update(self, con);
+		con_obj.update_initialization(&mut ctx);
+		let priority = ctx.priority;
+		let enqueue = ctx.enqueue();
+		self.constraints[con.index()] = Some(con_obj);
+		self.propagator_queue.info[con.index()].priority = priority;
+		if enqueue {
+			self.propagator_queue.enqueue_propagator(con.raw());
+		}
 	}
 }
 
@@ -645,10 +702,11 @@ impl ReasoningEngine for Model {
 }
 
 impl SimplificationActions for Model {
+	type ConstraintId = ConstraintId;
 	type Target = Model;
 
-	fn post_constraint<C: Constraint<Model>>(&mut self, constraint: C) {
-		self.post_constraint_internal(constraint);
+	fn post_constraint<C: Constraint<Model>>(&mut self, constraint: C) -> ConstraintId {
+		self.post_constraint_internal(constraint)
 	}
 }
 
@@ -727,10 +785,11 @@ impl ReasoningContext for SimplificationContext<'_> {
 }
 
 impl SimplificationActions for SimplificationContext<'_> {
+	type ConstraintId = ConstraintId;
 	type Target = Model;
 
-	fn post_constraint<C: Constraint<Model>>(&mut self, constraint: C) {
-		self.0.post_constraint_internal(constraint);
+	fn post_constraint<C: Constraint<Model>>(&mut self, constraint: C) -> ConstraintId {
+		self.0.post_constraint_internal(constraint)
 	}
 }
 
@@ -768,6 +827,8 @@ impl ReasonActions<View<bool>> for SimplificationReasonSink {
 
 #[cfg(test)]
 mod tests {
+	use std::any::Any;
+
 	use expect_test::expect;
 	use tracing_test::traced_test;
 
@@ -786,6 +847,18 @@ mod tests {
 		model::{Model, View, deserialize::AnyView, view::boolean::BoolView},
 		solver::Solver,
 	};
+
+	/// A constraint that acquires the decisions it constrains after it has been
+	/// posted, and only ever subscribes to the ones it has not seen before.
+	#[derive(Clone, Debug)]
+	struct GrowingModel {
+		/// The decisions the constraint has been given so far.
+		decisions: Vec<View<IntVal>>,
+		/// The number of decisions that have already been subscribed to.
+		subscribed: usize,
+		/// Counts how often the constraint has been advised.
+		advised: Trailed<IntVal>,
+	}
 
 	#[derive(Clone, Debug)]
 	struct TestModel {
@@ -845,6 +918,43 @@ mod tests {
 			false, 0
 			true, -1"#]],
 		);
+	}
+
+	/// A constraint that gains a decision after it was posted is only advised
+	/// of that decision once its subscriptions have been refreshed.
+	#[test]
+	#[traced_test]
+	fn test_model_acquired_decision_subscription() {
+		let mut prb = Model::default();
+		let i = prb.new_int_decision(0..=10);
+		let advised = prb.new_trailed(0);
+		let con = prb
+			.post_constraint(GrowingModel {
+				decisions: Vec::new(),
+				subscribed: 0,
+				advised,
+			})
+			.unwrap();
+
+		// The constraint is given a decision, but has not subscribed to it yet.
+		let constraint = prb.constraint_mut(con).expect("constraint is available");
+		let constraint: &mut dyn Any = constraint;
+		constraint
+			.downcast_mut::<GrowingModel>()
+			.expect("constraint is a GrowingModel")
+			.decisions
+			.push(i);
+		i.tighten_min(&mut prb, 1, NO_REASON)
+			.expect("tighten_min failed");
+		prb.propagate().expect("propagate failed");
+		assert_eq!(prb.trailed(advised), 0);
+
+		// After refreshing its subscriptions, the constraint is advised.
+		prb.update_initialization(con);
+		i.tighten_min(&mut prb, 2, NO_REASON)
+			.expect("tighten_min failed");
+		prb.propagate().expect("propagate failed");
+		assert_eq!(prb.trailed(advised), 1);
 	}
 
 	#[test]
@@ -914,6 +1024,83 @@ mod tests {
 		let (min, max) = i_slv.bounds(&slv);
 		assert_eq!(min, 1);
 		assert_eq!(max, 2);
+	}
+
+	/// Refreshing the subscriptions of a constraint that has already subscribed
+	/// to all its decisions does not subscribe to them a second time.
+	#[test]
+	#[traced_test]
+	fn test_model_repeated_subscription_update() {
+		let mut prb = Model::default();
+		let i = prb.new_int_decision(0..=10);
+		let advised = prb.new_trailed(0);
+		let con = prb
+			.post_constraint(GrowingModel {
+				decisions: vec![i],
+				subscribed: 0,
+				advised,
+			})
+			.unwrap();
+
+		for _ in 0..3 {
+			prb.update_initialization(con);
+		}
+		i.tighten_min(&mut prb, 1, NO_REASON)
+			.expect("tighten_min failed");
+		prb.propagate().expect("propagate failed");
+		assert_eq!(prb.trailed(advised), 1);
+	}
+
+	impl<E> Constraint<E> for GrowingModel
+	where
+		E: ReasoningEngine,
+		View<IntVal>: IntModelActions<E>,
+	{
+		fn simplify(
+			&mut self,
+			_context: &mut E::PropagationContext<'_>,
+		) -> Result<SimplificationStatus, E::Conflict> {
+			Ok(SimplificationStatus::NoFixpoint)
+		}
+
+		fn to_solver(&self, _context: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
+			Ok(())
+		}
+	}
+
+	impl<E> Propagator<E> for GrowingModel
+	where
+		E: ReasoningEngine,
+		View<IntVal>: IntModelActions<E>,
+	{
+		fn advise_of_int_change(
+			&mut self,
+			context: &mut E::NotificationContext<'_>,
+			_data: u64,
+			_event: IntEvent,
+		) -> bool {
+			context.set_trailed(self.advised, context.trailed(self.advised) + 1);
+			false
+		}
+
+		fn initialize(&mut self, _context: &mut E::InitializationContext<'_>) {
+			// All subscriptions are made in `update_initialization`, which the
+			// code that grows this constraint is expected to trigger.
+		}
+
+		fn propagate(
+			&mut self,
+			_context: &mut E::PropagationContext<'_>,
+		) -> Result<(), E::Conflict> {
+			Ok(())
+		}
+
+		fn update_initialization(&mut self, context: &mut E::InitializationContext<'_>) {
+			for (i, dec) in self.decisions.iter().enumerate().skip(self.subscribed) {
+				dec.advise_when(context, IntPropCond::Bounds, i as u64);
+			}
+			self.subscribed = self.decisions.len();
+		}
 	}
 
 	impl<E> Constraint<E> for TestModel

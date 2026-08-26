@@ -43,7 +43,7 @@ use crate::{
 		overflow::{OverflowImpossible, OverflowMode, OverflowPossible},
 	},
 	model::{
-		self, ConRef, Model,
+		self, ConstraintId, Model,
 		decision::{Tier, integer::Domain},
 		deserialize::Goal,
 		initilization_context::ModelInitContext,
@@ -51,7 +51,7 @@ use crate::{
 		view::integer::IntView,
 	},
 	solver::{
-		self, IntLitMeaning, LiteralStrategy, Polarity, Solver, engine::Engine,
+		self, IntLitMeaning, LiteralStrategy, Polarity, PropagatorId, Solver, engine::Engine,
 		view::boolean::BoolView,
 	},
 	views::LinearBoolView,
@@ -62,11 +62,15 @@ use crate::{
 #[derive(Debug, Default)]
 struct GoalPolarity {
 	/// The constraint currently being processed.
-	current_con: Option<ConRef>,
+	current_con: Option<ConstraintId>,
 	/// The queue of decisions still to be processed: the decision, the desired
 	/// direction, and the constraint that enqueued it or `None` for the goal
 	/// itself.
-	queue: VecDeque<(Resolved<model::Decision<IntVal>>, Polarity, Option<ConRef>)>,
+	queue: VecDeque<(
+		Resolved<model::Decision<IntVal>>,
+		Polarity,
+		Option<ConstraintId>,
+	)>,
 	/// The (decision, direction) pairs already enqueued.
 	visited: FxHashSet<(Resolved<model::Decision<IntVal>>, Polarity)>,
 }
@@ -155,7 +159,7 @@ trait LoweringActions {
 	) -> Result<(), Nogood<solver::Decision<bool>>>;
 
 	/// Add a propagator to the solver.
-	fn add_propagator(&mut self, propagator: BoxedPropagator);
+	fn add_propagator(&mut self, propagator: BoxedPropagator) -> PropagatorId;
 
 	/// Get the current value of a [`BoolView`], if it has been assigned.
 	fn bool_val(&self, bv: solver::Decision<bool>) -> Option<bool>;
@@ -211,6 +215,9 @@ trait LoweringActions {
 
 	/// Create a fresh range of Boolean variables in the underlying SAT solver.
 	fn new_var_range(&mut self, len: usize) -> pindakaas::VarRange;
+
+	/// Ask a propagator to revise its subscriptions.
+	fn update_initialization(&mut self, prop: PropagatorId);
 }
 
 /// Context object used during the lowering process that creates a
@@ -318,14 +325,14 @@ impl GoalPolarity {
 		let _ = walk.visited.insert((start.clone(), start_dir));
 		walk.queue.push_back((start, start_dir, None));
 
-		let mut con_refs: Vec<ConRef> = Vec::new();
+		let mut constraint_ids: Vec<ConstraintId> = Vec::new();
 		while let Some((input, input_polarity, discovering)) = walk.queue.pop_front() {
 			// Collect the constraints the decision is involved in
-			con_refs.clear();
-			model.subscribed_constraints(input.0, |con| con_refs.push(con));
-			con_refs.sort_unstable_by_key(|con| con.index());
-			con_refs.dedup();
-			for &con in &con_refs {
+			constraint_ids.clear();
+			model.subscribed_constraints(input.0, |con| constraint_ids.push(con));
+			constraint_ids.sort_unstable_by_key(|con| con.index());
+			constraint_ids.dedup();
+			for &con in &constraint_ids {
 				// Never enqueue decisions from the constraint that enqueued this
 				// decision
 				if discovering == Some(con) {
@@ -766,7 +773,7 @@ impl LowererComplete<&mut Model> {
 		let constraints = std::mem::take(&mut model.constraints);
 		for (idx, c) in constraints.iter().enumerate() {
 			if let Some(c) = c {
-				let mut ctx = ModelInitContext::new(model, ConRef::new(idx));
+				let mut ctx = ModelInitContext::new(model, ConstraintId::new(idx));
 				c.analyze(&mut ctx);
 			}
 		}
@@ -940,6 +947,8 @@ impl Debug for LoweringContext<'_> {
 }
 
 impl PostingActions for LoweringContext<'_> {
+	type PropagatorId = PropagatorId;
+
 	fn add_clause(
 		&mut self,
 		clause: impl IntoIterator<Item = Self::Atom>,
@@ -948,8 +957,12 @@ impl PostingActions for LoweringContext<'_> {
 		self.slv.add_clause(clause)
 	}
 
-	fn add_propagator(&mut self, propagator: BoxedPropagator) {
-		self.slv.add_propagator(propagator);
+	fn add_propagator(&mut self, propagator: BoxedPropagator) -> PropagatorId {
+		self.slv.add_propagator(propagator)
+	}
+
+	fn update_initialization(&mut self, prop: PropagatorId) {
+		self.slv.update_initialization(prop);
 	}
 }
 
@@ -1303,8 +1316,8 @@ impl<Sat: ExternalPropagation> LoweringActions for Solver<Sat> {
 		self.add_clause(clause)
 	}
 
-	fn add_propagator(&mut self, propagator: BoxedPropagator) {
-		self.add_propagator(propagator, true);
+	fn add_propagator(&mut self, propagator: BoxedPropagator) -> PropagatorId {
+		self.add_propagator(propagator, true)
 	}
 
 	fn bool_val(&self, bv: solver::Decision<bool>) -> Option<bool> {
@@ -1365,6 +1378,10 @@ impl<Sat: ExternalPropagation> LoweringActions for Solver<Sat> {
 
 	fn new_var_range(&mut self, len: usize) -> pindakaas::VarRange {
 		self.sat.new_var_range(len)
+	}
+
+	fn update_initialization(&mut self, prop: PropagatorId) {
+		self.update_initialization(prop);
 	}
 }
 

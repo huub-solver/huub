@@ -395,10 +395,12 @@ where
 					(LinComparator::NotEqual, Err(_)) => false.into(),
 				};
 				match self.reif.unwrap() {
-					Reification::ImpliedBy(r) => ctx.post_constraint(BoolFormula::Implies(
-						Box::new(BoolFormula::Atom(r)),
-						Box::new(BoolFormula::Atom(lit)),
-					)),
+					Reification::ImpliedBy(r) => {
+						let _ = ctx.post_constraint(BoolFormula::Implies(
+							Box::new(BoolFormula::Atom(r)),
+							Box::new(BoolFormula::Atom(lit)),
+						));
+					}
 					Reification::ReifiedBy(r) => r.unify(ctx, lit)?,
 				}
 				return Ok(SimplificationStatus::Subsumed);

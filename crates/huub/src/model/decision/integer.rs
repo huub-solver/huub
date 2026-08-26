@@ -12,7 +12,7 @@ use crate::{
 	},
 	constraints::{Conflict, NO_REASON, Nogood},
 	model::{
-		AdvRef, ConRef, Decision, Model, SimplificationContext, SimplificationReasonSink,
+		AdvisorId, ConstraintId, Decision, Model, SimplificationContext, SimplificationReasonSink,
 		decision::{DecisionReference, PolarityScore, private},
 		resolved::Resolved,
 		view::{View, boolean::BoolView, integer::IntView},
@@ -411,7 +411,7 @@ impl Resolved<Decision<IntVal>> {
 					let model = &mut *ctx.0;
 					constraints.for_each_activated_by(
 						IntEvent::Fixed,
-						|act: ActivationAction<AdvRef, ConRef>| {
+						|act: ActivationAction<AdvisorId, ConstraintId>| {
 							if let ActivationAction::Advise(adv) = act {
 								let def = &mut model.advisors[adv.index()];
 								def.bool2int = true;
@@ -442,7 +442,7 @@ impl Resolved<Decision<IntVal>> {
 					let model = &mut *ctx.0;
 					constraints.for_each_activated_by(
 						IntEvent::Fixed,
-						|act: ActivationAction<AdvRef, ConRef>| {
+						|act: ActivationAction<AdvisorId, ConstraintId>| {
 							if let ActivationAction::Advise(adv) = act {
 								let def = &mut model.advisors[adv.index()];
 								def.bool2int = true;

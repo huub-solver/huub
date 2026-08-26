@@ -57,7 +57,7 @@ impl ElementConstraint for IntVal {
 		result: Self::Result,
 	) -> Result<(), Nogood<View<bool>>> {
 		let con = IntValArrayElement(IntArrayElementBounds::new(prb, array, index, result));
-		prb.post_constraint(con)
+		prb.post_constraint(con).map(|_| ())
 	}
 }
 
@@ -86,7 +86,7 @@ impl ElementConstraint for View<IntVal> {
 		result: Self::Result,
 	) -> Result<(), Nogood<View<bool>>> {
 		let con = IntArrayElementBounds::new(prb, array, index, result);
-		prb.post_constraint(con)
+		prb.post_constraint(con).map(|_| ())
 	}
 }
 
@@ -109,6 +109,7 @@ impl ElementConstraint for View<bool> {
 			array,
 			result,
 		})
+		.map(|_| ())
 	}
 }
 
@@ -150,5 +151,6 @@ impl ElementConstraint for bool {
 			set: IntSet::from_iter(ranges),
 			reif: result,
 		})
+		.map(|_| ())
 	}
 }

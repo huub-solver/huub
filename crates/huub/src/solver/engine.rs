@@ -57,10 +57,6 @@ use crate::{
 	},
 };
 
-/// Identifies an advisor in the [`State`]
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct AdvRef(u32);
-
 /// Definition of an [`Advisor`] giving the information about the [`View`]
 /// subscribed to and the way in which to advise the propagator.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -72,10 +68,15 @@ pub(crate) struct AdvisorDef {
 	/// Whether the advice is on an [`IntView`] with a negative coefficient.
 	pub(crate) negated: bool,
 	/// The propagator being advised.
-	pub(crate) propagator: PropRef,
+	pub(crate) propagator: PropagatorId,
 }
 
-/// A propagation engine implementing the [`Propagator`] trait.
+/// Identifies an advisor in the [`State`]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct AdvisorId(u32);
+
+/// A propagation engine implementing the
+/// [`Propagator`](crate::constraints::Propagator) trait.
 #[derive(Clone, Debug, Default)]
 pub struct Engine {
 	/// Storage of the propagators.
@@ -159,9 +160,16 @@ pub(crate) struct LitPropagation {
 	/// This event is used to schedule further propagators.
 	pub(crate) event: Option<(Decision<IntVal>, IntEvent)>,
 }
-/// Identifies an propagator in a [`Solver`]
+
+/// Identifies a propagator in a [`Solver`](crate::solver::Solver).
+///
+/// An identifier is returned when a propagator is posted, and can be used to
+/// inspect the propagator using
+/// [`Solver::propagator`](crate::solver::Solver::propagator), or to refresh its
+/// subscriptions using
+/// [`crate::actions::PostingActions::update_initialization`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct PropRef(u32);
+pub struct PropagatorId(u32);
 
 /// Internal state representation of the propagation engine disconnected from
 /// the storage of the propagators and branchers.
@@ -214,7 +222,7 @@ pub struct State {
 	/// Advisor data storage.
 	pub(crate) advisors: Vec<AdvisorDef>,
 	/// List of propagators to advise of backtracking.
-	pub(crate) notify_of_backtrack: Vec<PropRef>,
+	pub(crate) notify_of_backtrack: Vec<PropagatorId>,
 	/// Boolean variable enqueueing information.
 	pub(crate) bool_activation: FxHashMap<RawVar, Vec<ActivationActionS>>,
 	/// Integer variable enqueueing information.
@@ -231,7 +239,7 @@ pub struct State {
 	pub(crate) check_int_fixed: Vec<(Decision<IntVal>, IntVal)>,
 }
 
-impl AdvRef {
+impl AdvisorId {
 	/// Recreate the advisor reference from a raw value.
 	pub(crate) fn from_raw(raw: u32) -> Self {
 		debug_assert!(raw <= i32::MAX as u32);
@@ -355,7 +363,7 @@ impl Engine {
 	/// If `negated` is true, then the event is negated.
 	pub(crate) fn notify_int_advisor(
 		&mut self,
-		prop: PropRef,
+		prop: PropagatorId,
 		event: IntEvent,
 		data: u64,
 		negated: bool,
@@ -373,7 +381,12 @@ impl Engine {
 	///
 	/// If `bool2int` is true, then the literal is transformed into an integer
 	/// view.
-	pub(crate) fn notify_lit_advisor(&mut self, prop: PropRef, data: u64, bool2int: bool) -> bool {
+	pub(crate) fn notify_lit_advisor(
+		&mut self,
+		prop: PropagatorId,
+		data: u64,
+		bool2int: bool,
+	) -> bool {
 		if bool2int {
 			self.propagators[prop.index()].advise_of_int_change(
 				&mut self.state,
@@ -443,7 +456,7 @@ impl PropagatorExtension for Engine {
 				let activation = mem::take(&mut ctx.state.int_activation[r.idx()]);
 				activation.for_each_activated_by(IntEvent::Fixed, |action| {
 					let prop = match action {
-						ActivationAction::Advise::<AdvRef, _>(adv) => {
+						ActivationAction::Advise::<AdvisorId, _>(adv) => {
 							let &AdvisorDef {
 								data, propagator, ..
 							} = &ctx.state.advisors[adv.index()];
@@ -595,7 +608,7 @@ impl PropagatorExtension for Engine {
 			{
 				for &action in &activations {
 					let prop = match action.into() {
-						ActivationAction::Advise::<AdvRef, _>(adv) => {
+						ActivationAction::Advise::<AdvisorId, _>(adv) => {
 							let &AdvisorDef {
 								bool2int,
 								data,
@@ -698,7 +711,7 @@ impl PropagatorExtension for Engine {
 				let activations = mem::take(&mut self.state.int_activation[iv.idx()]);
 				activations.for_each_activated_by(event, |action| {
 					let prop = match action {
-						ActivationAction::Advise::<AdvRef, _>(adv) => {
+						ActivationAction::Advise::<AdvisorId, _>(adv) => {
 							let &AdvisorDef {
 								negated,
 								data,
@@ -962,9 +975,9 @@ impl ReasonActions<View<bool>> for EngineReasonSink<'_> {
 	}
 }
 
-impl PropRef {
+impl PropagatorId {
 	/// Invalid propagator reference to be used as a placeholder.
-	pub(crate) const INVALID: PropRef = PropRef(i32::MAX as u32);
+	pub(crate) const INVALID: PropagatorId = PropagatorId(i32::MAX as u32);
 
 	/// Recreate the propagator reference from a raw value.
 	pub(crate) fn from_raw(raw: u32) -> Self {

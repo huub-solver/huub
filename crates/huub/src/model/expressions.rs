@@ -61,6 +61,7 @@ impl Model {
 			abs: result,
 			origin_positive: origin.geq(0),
 		})
+		.map(|_| ())
 	}
 
 	/// Create a `circuit` constraint that enforces that the values of the given
@@ -100,6 +101,7 @@ impl Model {
 				no_cycle_propagation,
 				scc_propagation,
 			))
+			.map(|_| ())
 		} else {
 			self.post_constraint(Circuit::<false>::new(
 				vars,
@@ -107,6 +109,7 @@ impl Model {
 				no_cycle_propagation,
 				scc_propagation,
 			))
+			.map(|_| ())
 		}
 	}
 
@@ -125,6 +128,7 @@ impl Model {
 			set: collection,
 			reif: result,
 		})
+		.map(|_| ())
 	}
 
 	/// Create a constraint that enforces that the given a list of integer
@@ -190,6 +194,7 @@ impl Model {
 			opportunistic_edge_finding_propagation,
 			strengthened: false,
 		})
+		.map(|_| ())
 	}
 
 	/// Create a constraint that enforces that the given a list of integer
@@ -224,6 +229,7 @@ impl Model {
 			not_last_propagation,
 			detectable_precedence_propagation,
 		})
+		.map(|_| ())
 	}
 
 	/// Create a constraint that enforces that a numerator integer decision
@@ -241,6 +247,7 @@ impl Model {
 			denominator,
 			result,
 		})
+		.map(|_| ())
 	}
 
 	/// Create a constraint that enforces that a result decision variable takes
@@ -375,6 +382,7 @@ impl Model {
 				reif,
 				comparator,
 			})
+			.map(|_| ())
 		} else {
 			self.post_constraint(IntLinear::<OverflowImpossible> {
 				terms,
@@ -382,6 +390,7 @@ impl Model {
 				reif,
 				comparator,
 			})
+			.map(|_| ())
 		}
 	}
 
@@ -410,6 +419,7 @@ impl Model {
 			vars: vars.into_iter().collect(),
 			min: result,
 		})
+		.map(|_| ())
 	}
 
 	/// Create a constraint that enforces that the product of the two integer
@@ -428,6 +438,7 @@ impl Model {
 				product: result,
 				overflow_mode: PhantomData,
 			})
+			.map(|_| ())
 		} else {
 			self.post_constraint(IntMulBounds::<OverflowImpossible, _, _, _> {
 				factor1,
@@ -435,6 +446,7 @@ impl Model {
 				product: result,
 				overflow_mode: PhantomData,
 			})
+			.map(|_| ())
 		}
 	}
 
@@ -467,10 +479,10 @@ impl Model {
 	) -> Result<(), Nogood<View<bool>>> {
 		if strict {
 			let prop = IntNoOverlapSweep::<true, _, _>::new(self, origins, sizes);
-			self.post_constraint(prop)
+			self.post_constraint(prop).map(|_| ())
 		} else {
 			let prop = IntNoOverlapSweep::<false, _, _>::new(self, origins, sizes);
-			self.post_constraint(prop)
+			self.post_constraint(prop).map(|_| ())
 		}
 	}
 
@@ -491,6 +503,7 @@ impl Model {
 				result,
 				overflow_mode: PhantomData,
 			})
+			.map(|_| ())
 		} else {
 			self.post_constraint(IntPowBounds::<OverflowImpossible, _, _, _> {
 				base,
@@ -498,6 +511,7 @@ impl Model {
 				result,
 				overflow_mode: PhantomData,
 			})
+			.map(|_| ())
 		}
 	}
 
@@ -518,7 +532,7 @@ impl Model {
 			}
 			None => {}
 		}
-		self.post_constraint(formula)
+		self.post_constraint(formula).map(|_| ())
 	}
 
 	/// Create a `table` constraint that enforces that given list of integer
@@ -536,7 +550,7 @@ impl Model {
 			table.iter().all(|tup| tup.len() == vars.len()),
 			"The number of values in each row of the table must be equal to the number of decision variables."
 		);
-		self.post_constraint(IntTable { vars, table })
+		self.post_constraint(IntTable { vars, table }).map(|_| ())
 	}
 
 	/// Create a constraint that enforces that all the given integer decisions
@@ -586,6 +600,7 @@ impl Model {
 			value_propagation,
 			domain_propagation,
 		})
+		.map(|_| ())
 	}
 
 	/// Create a value precede (chain) constraint that enforces that the first
@@ -624,7 +639,7 @@ impl Model {
 				vars[0].exclude(self, &RangeList::from_elements(values.clone()), NO_REASON)?;
 
 				let con = IntValuePrecedeChainValue::new(self, values.into_iter().collect(), vars);
-				return self.post_constraint(con);
+				return self.post_constraint(con).map(|_| ());
 			}
 			// Otherwise this is a sequential precede chain constraint, and we can
 			// normalize it to start at 1. The `values` array might not have started
@@ -641,7 +656,7 @@ impl Model {
 			1 => Ok(()),
 			_ => {
 				let con = IntSeqPrecedeChainBounds::new(self, vars);
-				self.post_constraint(con)
+				self.post_constraint(con).map(|_| ())
 			}
 		}
 	}

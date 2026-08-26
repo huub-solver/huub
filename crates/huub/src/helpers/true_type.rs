@@ -22,6 +22,14 @@ where
 		true.advise_when_fixed(ctx, data);
 	}
 
+	fn cancel_advise_when_fixed(&self, ctx: &mut Ctx, data: u64) {
+		true.cancel_advise_when_fixed(ctx, data);
+	}
+
+	fn cancel_enqueue_when_fixed(&self, ctx: &mut Ctx) {
+		true.cancel_enqueue_when_fixed(ctx);
+	}
+
 	fn enqueue_when_fixed(&self, ctx: &mut Ctx) {
 		true.enqueue_when_fixed(ctx);
 	}

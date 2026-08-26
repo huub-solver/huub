@@ -27,6 +27,16 @@ pub trait BoolInitActions<Context>: BoolInspectionActions<Context> {
 	/// on the propagator.
 	fn advise_when_fixed(&self, ctx: &mut Context, data: u64);
 
+	/// Remove the advisor that [`Self::advise_when_fixed`] registered with the
+	/// given data, if it is still registered.
+	///
+	/// Note that the storage reserved for the advisor is not reclaimed.
+	fn cancel_advise_when_fixed(&self, ctx: &mut Context, data: u64);
+
+	/// Remove the subscription that [`Self::enqueue_when_fixed`] registered, if
+	/// it is still registered.
+	fn cancel_enqueue_when_fixed(&self, ctx: &mut Context);
+
 	/// Enqueue the propagator when `self` is assigned.
 	fn enqueue_when_fixed(&self, ctx: &mut Context);
 }
@@ -82,6 +92,21 @@ where
 	/// [`Propagator::advise_of_int_change`](crate::constraints::Propagator::advise_of_int_change)
 	/// on the propagator.
 	fn advise_when(&self, ctx: &mut Context, condition: IntPropCond, data: u64);
+
+	/// Remove the advisor that [`Self::advise_when`] registered for the given
+	/// propagation condition and data, if it is still registered.
+	///
+	/// The propagation condition must be the one with which the advisor was
+	/// registered, since an advisor is only found under its own condition.
+	/// Note that the storage reserved for the advisor is not reclaimed.
+	fn cancel_advise_when(&self, ctx: &mut Context, condition: IntPropCond, data: u64);
+
+	/// Remove the subscription that [`Self::enqueue_when`] registered for the
+	/// given propagation condition, if it is still registered.
+	///
+	/// The propagation condition must be the one with which the propagator
+	/// subscribed, since a subscription is only found under its own condition.
+	fn cancel_enqueue_when(&self, ctx: &mut Context, condition: IntPropCond);
 
 	/// Enqueue the propagator when `self` is changed according to the given
 	/// propagation condition.

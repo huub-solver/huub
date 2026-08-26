@@ -6,7 +6,7 @@ mod boolean;
 mod initialization;
 mod integer;
 
-use std::{marker::PhantomData, ops::Not};
+use std::{fmt::Debug, marker::PhantomData, ops::Not};
 
 pub use crate::actions::{
 	analyze::{BoolAnalyzeActions, IntAnalyzeActions},
@@ -56,6 +56,9 @@ pub trait DeferReasonActions<Atom>: ReasonActions<Atom> {
 /// Actions that can be performed when posting propagators to the
 /// [`Solver`](crate::solver::Solver).
 pub trait PostingActions: ConstructionActions + PropagationContext {
+	/// Type used to identify a propagator that has been added.
+	type PropagatorId: Copy + Debug + Eq;
+
 	/// Add a new clause to be enforced by the solver.
 	fn add_clause(
 		&mut self,
@@ -63,7 +66,19 @@ pub trait PostingActions: ConstructionActions + PropagationContext {
 	) -> Result<(), Self::Conflict>;
 
 	/// Add a new propagator to be initialized and propagated by the solver.
-	fn add_propagator(&mut self, propagator: BoxedPropagator);
+	///
+	/// The returned identifier can be used to update the initialization of the
+	/// propagator using [`Self::update_initialization`].
+	fn add_propagator(&mut self, propagator: BoxedPropagator) -> Self::PropagatorId;
+
+	/// Ask the propagator identified by `prop` to update its initialization,
+	/// calling
+	/// [`Propagator::update_initialization`](crate::constraints::Propagator::update_initialization).
+	///
+	/// This must be called by the code that gives a propagator that has already
+	/// been posted additional information about the decision variables it
+	/// constrains.
+	fn update_initialization(&mut self, prop: Self::PropagatorId);
 }
 
 /// General actions that can be performed in
@@ -159,6 +174,8 @@ pub trait ReasoningEngine {
 /// Actions that can be performed to simplify a [`Model`](crate::model::Model)
 /// considering a given constraint.
 pub trait SimplificationActions {
+	/// Type used to identify a constraint that has been posted.
+	type ConstraintId: Copy + Debug + Eq;
 	/// The type of the reasoning engine that is used when adding new
 	/// constraints.
 	type Target: ReasoningEngine;
@@ -171,7 +188,12 @@ pub trait SimplificationActions {
 	/// constraints, and then returns
 	/// [`SimplificationStatus::Subsumed`](crate::constraints::SimplificationStatus::Subsumed) to
 	/// indicate that the current constraint can be removed.
-	fn post_constraint<C: Constraint<Self::Target>>(&mut self, constraint: C);
+	///
+	/// The returned identifier can be used to update the initialization of the
+	/// constraint using
+	/// [`Model::update_initialization`](crate::model::Model::update_initialization).
+	fn post_constraint<C: Constraint<Self::Target>>(&mut self, constraint: C)
+	-> Self::ConstraintId;
 }
 
 /// A typed handle to a value tracked by the trail.

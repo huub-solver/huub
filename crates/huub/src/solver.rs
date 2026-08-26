@@ -14,7 +14,7 @@ pub(crate) mod view;
 
 use std::{
 	any::Any,
-	cell::{RefCell, RefMut},
+	cell::{Ref, RefCell, RefMut},
 	fmt::Debug,
 	hash::Hash,
 	mem,
@@ -27,7 +27,7 @@ use bon::{Builder, bon};
 use itertools::Itertools;
 pub use pindakaas::solver::cadical::Cadical;
 use pindakaas::{
-	ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable, VarRange,
+	ClauseDatabase, ClauseDatabaseTools, Lit as RawLit, Unsatisfiable, Var as RawVar, VarRange,
 	solver::{
 		Assumptions, FailedAssumptions, LearnCallback, SolveResult as SatSolveResult,
 		TerminateCallback,
@@ -40,6 +40,7 @@ use tracing::{debug, warn};
 
 pub use crate::solver::{
 	decision::{Decision, DecisionReference},
+	engine::{Engine, PropagatorId},
 	solution::{AnyView, Solution, Valuation, Value},
 	view::{DefaultView, View, boolean::BoolView, integer::IntView},
 };
@@ -50,12 +51,11 @@ use crate::{
 		IntInspectionActions, PostingActions, PropagationActions, PropagationContext,
 		ReasoningContext, ReasoningEngine, Trailed, TrailingActions,
 	},
-	constraints::{BoxedPropagator, Nogood},
+	constraints::{BoxedPropagator, Nogood, Propagator},
 	helpers::bytes::Bytes,
 	solver::{
 		branchers::BoxedBrancher,
 		decision::integer::{DirectStorage, IntDecision, LazyOrderStorage, OrderStorage},
-		engine::{Engine, PropRef},
 		initialization_context::InitializationContext,
 		queue::PropagatorInfo,
 	},
@@ -308,7 +308,7 @@ pub struct SolverStatistics {
 	pub sat_search_directives: u64,
 	/// Peak depth of the search tree.
 	pub peak_depth: u32,
-	/// Number of times a [`Propagator`](crate::constraints::Propagator)
+	/// Number of times a [`Propagator`]
 	/// instance was called.
 	pub cp_propagator_calls: u64,
 	/// Number of times the search was restarted from the root (as signalled by
@@ -1045,13 +1045,17 @@ impl<Sat: ExternalPropagation + Assumptions> Solver<Sat> {
 #[bon]
 impl<Sat: ExternalPropagation> Solver<Sat> {
 	/// Add a constraint propagator to the solver to enforce a constraint.
-	pub(crate) fn add_propagator(&mut self, propagator: BoxedPropagator, from_model: bool) {
+	pub(crate) fn add_propagator(
+		&mut self,
+		propagator: BoxedPropagator,
+		from_model: bool,
+	) -> PropagatorId {
 		let mut handle = self.engine.borrow_mut();
 		let engine = &mut *handle;
 		engine.propagators.push(propagator);
-		let prop_ref = PropRef::new(engine.propagators.len() - 1);
-		let mut ctx = InitializationContext::new(&mut engine.state, prop_ref);
-		engine.propagators[prop_ref.index()].initialize(&mut ctx);
+		let propagator_id = PropagatorId::new(engine.propagators.len() - 1);
+		let mut ctx = InitializationContext::new(&mut engine.state, propagator_id);
+		engine.propagators[propagator_id.index()].initialize(&mut ctx);
 		let priority = ctx.priority();
 		let enqueue = ctx.enqueue(from_model);
 		let new_observed = mem::take(&mut ctx.observed_variables);
@@ -1060,24 +1064,18 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 			priority,
 		});
 		debug_assert_eq!(
-			prop_ref.index(),
+			propagator_id.index(),
 			engine.state.propagator_queue.info.len() - 1
 		);
 		if enqueue {
 			engine
 				.state
 				.propagator_queue
-				.enqueue_propagator(prop_ref.raw());
+				.enqueue_propagator(propagator_id.raw());
 		}
 		drop(handle);
-		for v in new_observed {
-			// Ensure that the trail has a space to track the literal
-			{
-				self.engine.borrow_mut().state.trail.grow_to_boolvar(v);
-			}
-			// Ensure the SAT solver knows the literal is observed.
-			self.sat.add_observed_var(v);
-		}
+		self.observe_variables(new_observed);
+		propagator_id
 	}
 
 	/// Method used to add a no-good clause from a solution. This clause can be
@@ -1340,6 +1338,106 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		iv.into()
 	}
 
+	/// Ensure that the trail and the SAT solver track the Boolean variables
+	/// that a propagator has just subscribed to.
+	fn observe_variables(&mut self, variables: Vec<RawVar>) {
+		for v in variables {
+			// Ensure that the trail has a space to track the literal
+			{
+				self.engine.borrow_mut().state.trail.grow_to_boolvar(v);
+			}
+			// Ensure the SAT solver knows the literal is observed.
+			self.sat.add_observed_var(v);
+		}
+	}
+
+	/// Returns the propagator with the given identifier, if it is of type `P`.
+	pub fn propagator<P: Propagator<Engine>>(&self, prop: PropagatorId) -> Option<Ref<'_, P>> {
+		Ref::filter_map(self.engine.borrow(), |engine| {
+			let propagator: &dyn Any = &*engine.propagators[prop.index()];
+			propagator.downcast_ref()
+		})
+		.ok()
+	}
+
+	/// Returns the propagator with the given identifier, if it is of type `P`,
+	/// allowing it to be given additional information about the problem.
+	///
+	/// Any decision variables that the propagator acquires this way are only
+	/// subscribed to once [`Solver::update_initialization`] is called.
+	///
+	/// # Warning
+	///
+	/// The returned guard borrows the propagation engine. It must be dropped
+	/// before any other method of the solver is called, or the solver will
+	/// panic.
+	///
+	/// ```
+	/// # use huub::{
+	/// # 	actions::{IntInitActions, IntPropCond, PostingActions, ReasoningEngine},
+	/// # 	constraints::Propagator,
+	/// # 	solver::{Engine, Solver, View},
+	/// # };
+	/// /// A propagator that is told which decisions to watch after it is posted.
+	/// #[derive(Clone, Debug)]
+	/// struct Watcher {
+	/// 	decisions: Vec<View<i64>>,
+	/// 	subscribed: usize,
+	/// }
+	///
+	/// impl Propagator<Engine> for Watcher {
+	/// 	fn initialize(
+	/// 		&mut self,
+	/// 		_ctx: &mut <Engine as ReasoningEngine>::InitializationContext<'_>,
+	/// 	) {
+	/// 	}
+	///
+	/// 	fn propagate(
+	/// 		&mut self,
+	/// 		_ctx: &mut <Engine as ReasoningEngine>::PropagationContext<'_>,
+	/// 	) -> Result<(), <Engine as ReasoningEngine>::Conflict> {
+	/// 		Ok(())
+	/// 	}
+	///
+	/// 	fn update_initialization(
+	/// 		&mut self,
+	/// 		ctx: &mut <Engine as ReasoningEngine>::InitializationContext<'_>,
+	/// 	) {
+	/// 		// Only the decisions that have not been subscribed to yet.
+	/// 		for dec in self.decisions.iter().skip(self.subscribed) {
+	/// 			dec.enqueue_when(ctx, IntPropCond::Bounds);
+	/// 		}
+	/// 		self.subscribed = self.decisions.len();
+	/// 	}
+	/// }
+	///
+	/// let mut solver: Solver = Solver::default();
+	/// let x = solver.new_int_decision(1..=10).view();
+	/// let watcher = solver.add_propagator(Box::new(Watcher {
+	/// 	decisions: Vec::new(),
+	/// 	subscribed: 0,
+	/// }));
+	///
+	/// // The guard is dropped at the end of the statement, so the solver can be
+	/// // asked to update the initialization on the next one.
+	/// solver
+	/// 	.propagator_mut::<Watcher>(watcher)
+	/// 	.unwrap()
+	/// 	.decisions
+	/// 	.push(x);
+	/// solver.update_initialization(watcher);
+	/// ```
+	pub fn propagator_mut<P: Propagator<Engine>>(
+		&mut self,
+		prop: PropagatorId,
+	) -> Option<RefMut<'_, P>> {
+		RefMut::filter_map(self.engine.borrow_mut(), |engine| {
+			let propagator: &mut dyn Any = &mut *engine.propagators[prop.index()];
+			propagator.downcast_mut()
+		})
+		.ok()
+	}
+
 	/// Set the overarching search strategy to use during solving.
 	pub fn set_search_strategy(&mut self, strategy: SearchStrategy) {
 		self.engine.borrow_mut().state.set_search_strategy(strategy);
@@ -1358,6 +1456,24 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 			eager_literals: cp_stats.eager_literals,
 			lazy_literals: cp_stats.lazy_literals,
 		}
+	}
+
+	/// Ask the propagator to subscribe to the decision variables it has
+	/// acquired since it was posted.
+	pub fn update_initialization(&mut self, prop: PropagatorId) {
+		let mut handle = self.engine.borrow_mut();
+		let engine = &mut *handle;
+		let mut ctx = InitializationContext::update(&mut engine.state, prop);
+		engine.propagators[prop.index()].update_initialization(&mut ctx);
+		let priority = ctx.priority();
+		let enqueue = ctx.enqueue(false);
+		let new_observed = mem::take(&mut ctx.observed_variables);
+		engine.state.propagator_queue.info[prop.index()].priority = priority;
+		if enqueue {
+			engine.state.propagator_queue.enqueue_propagator(prop.raw());
+		}
+		drop(handle);
+		self.observe_variables(new_observed);
 	}
 }
 
@@ -1504,6 +1620,8 @@ impl<Sat: Default + ExternalPropagation + LearnCallback> Default for Solver<Sat>
 }
 
 impl<Sat: ExternalPropagation> PostingActions for Solver<Sat> {
+	type PropagatorId = PropagatorId;
+
 	fn add_clause(
 		&mut self,
 		clause: impl IntoIterator<Item = Self::Atom>,
@@ -1511,8 +1629,12 @@ impl<Sat: ExternalPropagation> PostingActions for Solver<Sat> {
 		self.add_clause(clause)
 	}
 
-	fn add_propagator(&mut self, propagator: BoxedPropagator) {
-		self.add_propagator(propagator, false);
+	fn add_propagator(&mut self, propagator: BoxedPropagator) -> PropagatorId {
+		self.add_propagator(propagator, false)
+	}
+
+	fn update_initialization(&mut self, prop: PropagatorId) {
+		Solver::update_initialization(self, prop);
 	}
 }
 
@@ -1596,7 +1718,64 @@ impl AddAssign for SolverStatistics {
 
 #[cfg(test)]
 mod tests {
-	use crate::solver::{Solver, view::View};
+	use std::{cell::RefCell, rc::Rc};
+
+	use crate::{
+		IntVal,
+		actions::{
+			BrancherInitActions, IntDecisionActions, IntEvent, IntInitActions, IntPropCond,
+			ReasoningEngine,
+		},
+		constraints::Propagator,
+		solver::{
+			IntLitMeaning, Solver,
+			engine::{Engine, PropagatorId},
+			view::View,
+		},
+	};
+
+	/// A propagator that acquires the decisions it constrains after it has been
+	/// posted, and only ever subscribes to the ones it has not seen before.
+	#[derive(Clone, Debug)]
+	struct GrowingPropagator {
+		/// The decisions the propagator has been given so far.
+		decisions: Vec<View<IntVal>>,
+		/// The number of decisions that have already been subscribed to.
+		subscribed: usize,
+		/// Whether the next subscription update should cancel every
+		/// subscription instead of adding the missing ones.
+		cancel: bool,
+		/// Counts how often the propagator has been advised.
+		advised: Rc<RefCell<usize>>,
+	}
+
+	/// Give the propagator an additional decision to constrain.
+	fn grow(slv: &mut Solver, prop: PropagatorId, dec: View<IntVal>) {
+		slv.propagator_mut::<GrowingPropagator>(prop)
+			.expect("propagator is a GrowingPropagator")
+			.decisions
+			.push(dec);
+	}
+
+	/// Create a solver with a single integer decision that is forced to take a
+	/// value above its lower bound, alongside a propagator watching nothing.
+	fn growing_solver() -> (Solver, View<IntVal>, PropagatorId, Rc<RefCell<usize>>) {
+		let mut slv: Solver = Solver::default();
+		let x = slv.new_int_decision(0..=10).view();
+		let advised = Rc::new(RefCell::new(0));
+		let prop = slv.add_propagator(
+			Box::new(GrowingPropagator {
+				decisions: Vec::new(),
+				subscribed: 0,
+				cancel: false,
+				advised: Rc::clone(&advised),
+			}),
+			false,
+		);
+		let above = x.lit(&mut slv, IntLitMeaning::GreaterEq(5));
+		slv.add_clause([above]).expect("add_clause failed");
+		(slv, x, prop, advised)
+	}
 
 	/// The empty clause is unconditionally unsatisfiable, reported as an
 	/// unconditional nogood.
@@ -1608,5 +1787,96 @@ mod tests {
 			.unwrap_err();
 		assert!(nogood.is_unconditional());
 		assert_eq!(nogood.len(), 0);
+	}
+
+	/// A propagator that gains a decision after it was posted is only advised
+	/// of that decision once its subscriptions have been refreshed.
+	#[test]
+	fn test_solver_acquired_decision_subscription() {
+		let (mut slv, x, prop, advised) = growing_solver();
+		assert_eq!(slv.num_subscribers(x), 0);
+
+		grow(&mut slv, prop, x);
+		assert_eq!(slv.num_subscribers(x), 0);
+
+		slv.update_initialization(prop);
+		assert_eq!(slv.num_subscribers(x), 1);
+
+		let _ = slv.solve().satisfy();
+		assert!(*advised.borrow() > 0);
+	}
+
+	/// A propagator that has not refreshed its subscriptions is never advised
+	/// of the decisions it acquired.
+	#[test]
+	fn test_solver_acquired_decision_without_update() {
+		let (mut slv, x, prop, advised) = growing_solver();
+		grow(&mut slv, prop, x);
+
+		let _ = slv.solve().satisfy();
+		assert_eq!(*advised.borrow(), 0);
+	}
+
+	/// A propagator that cancels its subscriptions is no longer advised.
+	#[test]
+	fn test_solver_cancelled_subscription() {
+		let (mut slv, x, prop, advised) = growing_solver();
+		grow(&mut slv, prop, x);
+		slv.update_initialization(prop);
+		assert_eq!(slv.num_subscribers(x), 1);
+
+		slv.propagator_mut::<GrowingPropagator>(prop)
+			.expect("propagator is a GrowingPropagator")
+			.cancel = true;
+		slv.update_initialization(prop);
+		assert_eq!(slv.num_subscribers(x), 0);
+
+		let _ = slv.solve().satisfy();
+		assert_eq!(*advised.borrow(), 0);
+	}
+
+	impl Propagator<Engine> for GrowingPropagator {
+		fn advise_of_int_change(
+			&mut self,
+			_context: &mut <Engine as ReasoningEngine>::NotificationContext<'_>,
+			_data: u64,
+			_event: IntEvent,
+		) -> bool {
+			*self.advised.borrow_mut() += 1;
+			false
+		}
+
+		fn initialize(
+			&mut self,
+			_context: &mut <Engine as ReasoningEngine>::InitializationContext<'_>,
+		) {
+			// All subscriptions are made in `update_initialization`, which the
+			// code that grows this propagator is expected to trigger.
+		}
+
+		fn propagate(
+			&mut self,
+			_context: &mut <Engine as ReasoningEngine>::PropagationContext<'_>,
+		) -> Result<(), <Engine as ReasoningEngine>::Conflict> {
+			Ok(())
+		}
+
+		fn update_initialization(
+			&mut self,
+			context: &mut <Engine as ReasoningEngine>::InitializationContext<'_>,
+		) {
+			if self.cancel {
+				for (i, dec) in self.decisions.iter().enumerate().take(self.subscribed) {
+					dec.cancel_advise_when(context, IntPropCond::Bounds, i as u64);
+				}
+				self.subscribed = 0;
+				self.cancel = false;
+				return;
+			}
+			for (i, dec) in self.decisions.iter().enumerate().skip(self.subscribed) {
+				dec.advise_when(context, IntPropCond::Bounds, i as u64);
+			}
+			self.subscribed = self.decisions.len();
+		}
 	}
 }

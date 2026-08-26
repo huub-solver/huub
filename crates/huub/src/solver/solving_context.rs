@@ -29,7 +29,8 @@ use crate::{
 		BoxedPropagator, IntLitMeaning, Polarity,
 		decision::{Decision, integer::LazyLitDef},
 		engine::{
-			Engine, EngineReason, EngineReasonSink, LitPropagation, PropRef, State, trace_new_lit,
+			Engine, EngineReason, EngineReasonSink, LitPropagation, PropagatorId, State,
+			trace_new_lit,
 		},
 		view::{View, boolean::BoolView},
 	},
@@ -82,7 +83,7 @@ pub struct SolvingContext<'a> {
 	/// Engine state object.
 	pub(crate) state: &'a mut State,
 	/// Current propagator being executed.
-	pub(crate) current_prop: PropRef,
+	pub(crate) current_prop: PropagatorId,
 }
 
 /// The reason-build sink for the engine's [`SolvingContext`]: a reason closure
@@ -301,7 +302,7 @@ impl<'a> SolvingContext<'a> {
 		Self {
 			slv,
 			state,
-			current_prop: PropRef::INVALID,
+			current_prop: PropagatorId::INVALID,
 		}
 	}
 
@@ -472,12 +473,12 @@ impl<'a> SolvingContext<'a> {
 			.propagator_queue
 			.pop()
 			.expect("`run_next_propagator` called with an empty propagator queue");
-		self.current_prop = PropRef::from_raw(p);
+		self.current_prop = PropagatorId::from_raw(p);
 		let res = propagators[self.current_prop.index()]
 			.as_mut()
 			.propagate(self);
 		self.state.statistics.propagations += 1;
-		self.current_prop = PropRef::INVALID;
+		self.current_prop = PropagatorId::INVALID;
 		res
 	}
 
@@ -488,11 +489,11 @@ impl<'a> SolvingContext<'a> {
 		while let Some(p) = self.state.propagator_queue.pop() {
 			debug_assert!(!self.state.failed);
 			debug_assert!(self.state.conflict.is_none());
-			self.current_prop = PropRef::from_raw(p);
+			self.current_prop = PropagatorId::from_raw(p);
 			let prop = propagators[self.current_prop.index()].as_mut();
 			let res = prop.propagate(self);
 			self.state.statistics.propagations += 1;
-			self.current_prop = PropRef::INVALID;
+			self.current_prop = PropagatorId::INVALID;
 			if let Err(conflict) = res {
 				trace!(
 					target: "solver",

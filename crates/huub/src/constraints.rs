@@ -191,7 +191,7 @@ pub struct Nogood<Atom>(pub(crate) Box<[Atom]>);
 /// If the explanation is needed, then the propagation engine will revert the
 /// state of the solver and call [`Propagator::explain`] to receive the
 /// explanation.
-pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
+pub trait Propagator<E: ReasoningEngine + ?Sized>: Any + Debug + DynClone {
 	/// Advises the propagator that the solver is backtracking.
 	fn advise_of_backtrack(&mut self, context: &mut E::NotificationContext<'_>) {
 		let _ = context;
@@ -262,6 +262,31 @@ pub trait Propagator<E: ReasoningEngine + ?Sized>: Debug + DynClone + 'static {
 	/// The propagate method is called during the search process to allow the
 	/// propagator to enforce its constraint.
 	fn propagate(&mut self, context: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict>;
+
+	/// Update what [`Propagator::initialize`] declared, after the propagator
+	/// has acquired additional information about the problem.
+	///
+	/// The propagator receives the same context as during initialization, so it
+	/// can subscribe to the decision variables it has acquired, cancel the
+	/// subscriptions it no longer needs, and change the priority at which it is
+	/// enqueued.
+	///
+	/// This method applies the *difference* with what the propagator has
+	/// already declared; it does not start from a clean slate. In particular,
+	/// the propagator must only subscribe to the decision variables that it is
+	/// not already subscribed to, since subscribing twice advises it twice. A
+	/// propagator that wants a single implementation for its initial and its
+	/// later declarations can call this method from
+	/// [`Propagator::initialize`].
+	///
+	/// This method is never called by the reasoning engine itself. The code
+	/// that gives the propagator additional information is responsible for
+	/// calling
+	/// [`PostingActions::update_initialization`](crate::actions::PostingActions::update_initialization)
+	/// or [`Model::update_initialization`] afterwards.
+	fn update_initialization(&mut self, context: &mut E::InitializationContext<'_>) {
+		let _ = context;
+	}
 }
 
 /// Status returned by the [`Constraint::simplify`] method,

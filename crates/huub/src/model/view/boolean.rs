@@ -16,7 +16,7 @@ use crate::{
 	},
 	constraints::{Conflict, NO_REASON, Nogood},
 	model::{
-		AdvRef, Advisor, ConRef, Model, SimplificationContext, SimplificationReasonSink,
+		Advisor, AdvisorId, ConstraintId, Model, SimplificationContext, SimplificationReasonSink,
 		decision::Decision,
 		expressions::BoolFormula,
 		resolved::Resolved,
@@ -134,7 +134,7 @@ impl Resolved<View<bool>> {
 							} else {
 								IntPropCond::Bounds
 							};
-							match ActivationAction::<AdvRef, ConRef>::from(act) {
+							match ActivationAction::<AdvisorId, ConstraintId>::from(act) {
 								ActivationAction::Advise(adv) => {
 									let def: &mut Advisor = &mut model.advisors[adv.index()];
 									def.condition = Some(match y.0 {

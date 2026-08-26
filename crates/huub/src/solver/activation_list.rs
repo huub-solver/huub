@@ -8,19 +8,20 @@ use std::{
 
 use crate::{
 	actions::{IntEvent, IntPropCond},
-	model::{self, ConRef},
-	solver::engine::{self, PropRef},
+	model::{self, ConstraintId},
+	solver::engine::{self, PropagatorId},
 };
 
 /// Possible actions to be triggered by the activation list.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum ActivationAction<A, P> {
-	/// When activated, advise the propagator with the given [`PropRef`] of the
-	/// event that triggered the activation. If the advisor method returns
+	/// When activated, advise the propagator with the given [`PropagatorId`] of
+	/// the event that triggered the activation. If the advisor method returns
 	/// `true`, then enqueue the propagator if it is not already in the queue.
 	Advise(A),
-	/// When activated, simply add the propagator with the given [`PropRef`] to
-	/// the propagator queue if it is not already in the queue.
+	/// When activated, simply add the propagator with the given
+	/// [`PropagatorId`] to the propagator queue if it is not already in the
+	/// queue.
 	Enqueue(P),
 }
 
@@ -59,28 +60,28 @@ pub(crate) struct ActivationList {
 	domain_idx: u32,
 }
 
-impl From<ActivationActionS> for ActivationAction<engine::AdvRef, PropRef> {
+impl From<ActivationActionS> for ActivationAction<engine::AdvisorId, PropagatorId> {
 	fn from(value: ActivationActionS) -> Self {
 		if (value.0 & 0b1) == 1 {
-			Self::Advise(engine::AdvRef::from_raw(value.0 >> 1))
+			Self::Advise(engine::AdvisorId::from_raw(value.0 >> 1))
 		} else {
-			Self::Enqueue(PropRef::from_raw(value.0 >> 1))
+			Self::Enqueue(PropagatorId::from_raw(value.0 >> 1))
 		}
 	}
 }
 
-impl From<ActivationActionS> for ActivationAction<model::AdvRef, ConRef> {
+impl From<ActivationActionS> for ActivationAction<model::AdvisorId, ConstraintId> {
 	fn from(value: ActivationActionS) -> Self {
 		if (value.0 & 0b1) == 1 {
-			Self::Advise(model::AdvRef::from_raw(value.0 >> 1))
+			Self::Advise(model::AdvisorId::from_raw(value.0 >> 1))
 		} else {
-			Self::Enqueue(ConRef::from_raw(value.0 >> 1))
+			Self::Enqueue(ConstraintId::from_raw(value.0 >> 1))
 		}
 	}
 }
 
-impl From<ActivationAction<engine::AdvRef, PropRef>> for ActivationActionS {
-	fn from(value: ActivationAction<engine::AdvRef, PropRef>) -> Self {
+impl From<ActivationAction<engine::AdvisorId, PropagatorId>> for ActivationActionS {
+	fn from(value: ActivationAction<engine::AdvisorId, PropagatorId>) -> Self {
 		Self(match value {
 			ActivationAction::Advise(advisor) => (advisor.raw() << 1) | 0b1,
 			ActivationAction::Enqueue(prop) => prop.raw() << 1,
@@ -88,8 +89,8 @@ impl From<ActivationAction<engine::AdvRef, PropRef>> for ActivationActionS {
 	}
 }
 
-impl From<ActivationAction<model::AdvRef, ConRef>> for ActivationActionS {
-	fn from(value: ActivationAction<model::AdvRef, ConRef>) -> Self {
+impl From<ActivationAction<model::AdvisorId, ConstraintId>> for ActivationActionS {
+	fn from(value: ActivationAction<model::AdvisorId, ConstraintId>) -> Self {
 		Self(match value {
 			ActivationAction::Advise(advisor) => (advisor.raw() << 1) | 0b1,
 			ActivationAction::Enqueue(prop) => prop.raw() << 1,
@@ -168,7 +169,7 @@ impl ActivationList {
 	pub(crate) fn extend(&mut self, other: Self) {
 		for (i, act) in other.activations.into_iter().enumerate() {
 			let i = i as u32;
-			let act: ActivationAction<engine::AdvRef, PropRef> = act.into();
+			let act: ActivationAction<engine::AdvisorId, PropagatorId> = act.into();
 			self.add(
 				act,
 				if i < other.lower_bound_idx {
@@ -219,6 +220,68 @@ impl ActivationList {
 		}
 	}
 
+	/// Remove the first activation subscribed with the given propagation
+	/// condition for which `matches` returns `true`, and return whether such an
+	/// activation was found.
+	///
+	/// An activation must be removed using the same [`IntPropCond`] with which
+	/// it was added, since an activation only ever lives in the block of the
+	/// condition it subscribed with.
+	pub(crate) fn remove(
+		&mut self,
+		condition: IntPropCond,
+		mut matches: impl FnMut(ActivationActionS) -> bool,
+	) -> bool {
+		// The index just past the last activation of each block, in the order in
+		// which the blocks are stored.
+		let ends = [
+			self.lower_bound_idx,
+			self.upper_bound_idx,
+			self.bounds_idx,
+			self.domain_idx,
+			self.activations.len() as u32,
+		];
+		let block = match condition {
+			IntPropCond::Fixed => 0,
+			IntPropCond::LowerBound => 1,
+			IntPropCond::UpperBound => 2,
+			IntPropCond::Bounds => 3,
+			IntPropCond::Domain => 4,
+		};
+		let start = if block == 0 { 0 } else { ends[block - 1] };
+		let Some(pos) = (start..ends[block]).find(|&i| matches(self.activations[i as usize]))
+		else {
+			return false;
+		};
+
+		// The activations within a block are unordered, so the activation can be
+		// swapped with the last one of its own block. That leaves it at the end
+		// of the block, from where the same swap with the next block moves it
+		// along, until it reaches the end of the list and can be removed.
+		let mut hole = pos as usize;
+		for &end in &ends[block..] {
+			let last = end as usize - 1;
+			self.activations.swap(hole, last);
+			hole = last;
+		}
+		debug_assert_eq!(hole, self.activations.len() - 1);
+		let _ = self.activations.pop();
+
+		// Every boundary from the end of the block onwards moves down by one.
+		for idx in [
+			&mut self.lower_bound_idx,
+			&mut self.upper_bound_idx,
+			&mut self.bounds_idx,
+			&mut self.domain_idx,
+		]
+		.into_iter()
+		.skip(block)
+		{
+			*idx -= 1;
+		}
+		true
+	}
+
 	/// Return the number of subscriptions to the decision variable.
 	pub(crate) fn subscription_count(&self) -> u32 {
 		self.activations.len() as u32
@@ -255,19 +318,57 @@ mod tests {
 	use crate::{
 		actions::{IntEvent, IntPropCond},
 		solver::{
-			activation_list::{ActivationAction, ActivationList},
-			engine::PropRef,
+			activation_list::{ActivationAction, ActivationActionS, ActivationList},
+			engine::{AdvisorId, PropagatorId},
 		},
 	};
+
+	/// Assert that `list` reports exactly the propagators of `present` for
+	/// every integer event, based on the propagation condition each subscribed
+	/// with.
+	fn assert_activations(list: &ActivationList, present: &[(PropagatorId, IntPropCond)]) {
+		let triggers = |cond: IntPropCond, event: IntEvent| match event {
+			IntEvent::Fixed => true,
+			IntEvent::Bounds => cond != IntPropCond::Fixed,
+			IntEvent::LowerBound => matches!(
+				cond,
+				IntPropCond::LowerBound | IntPropCond::Bounds | IntPropCond::Domain
+			),
+			IntEvent::UpperBound => matches!(
+				cond,
+				IntPropCond::UpperBound | IntPropCond::Bounds | IntPropCond::Domain
+			),
+			IntEvent::Domain => cond == IntPropCond::Domain,
+		};
+		assert_eq!(list.subscription_count() as usize, present.len());
+		for event in [
+			IntEvent::Fixed,
+			IntEvent::Bounds,
+			IntEvent::LowerBound,
+			IntEvent::UpperBound,
+			IntEvent::Domain,
+		] {
+			let mut actual = FxHashSet::default();
+			list.for_each_activated_by(event, |a: ActivationAction<AdvisorId, PropagatorId>| {
+				let _ = actual.insert(a);
+			});
+			let expected: FxHashSet<ActivationAction<AdvisorId, PropagatorId>> = present
+				.iter()
+				.filter(|&&(_, cond)| triggers(cond, event))
+				.map(|&(prop, _)| ActivationAction::Enqueue(prop))
+				.collect();
+			assert_eq!(actual, expected, "activations of {event:?} for {present:?}");
+		}
+	}
 
 	#[test]
 	fn test_activation_list() {
 		let props = [
-			(PropRef::new(0), IntPropCond::Fixed),
-			(PropRef::new(1), IntPropCond::LowerBound),
-			(PropRef::new(2), IntPropCond::UpperBound),
-			(PropRef::new(3), IntPropCond::Bounds),
-			(PropRef::new(4), IntPropCond::Domain),
+			(PropagatorId::new(0), IntPropCond::Fixed),
+			(PropagatorId::new(1), IntPropCond::LowerBound),
+			(PropagatorId::new(2), IntPropCond::UpperBound),
+			(PropagatorId::new(3), IntPropCond::Bounds),
+			(PropagatorId::new(4), IntPropCond::Domain),
 		];
 
 		for list in props.iter().permutations(5) {
@@ -282,11 +383,11 @@ mod tests {
 			assert_eq!(
 				fixed,
 				FxHashSet::from_iter([
-					ActivationAction::Enqueue(PropRef::new(0)),
-					ActivationAction::Enqueue(PropRef::new(1)),
-					ActivationAction::Enqueue(PropRef::new(2)),
-					ActivationAction::Enqueue(PropRef::new(3)),
-					ActivationAction::Enqueue(PropRef::new(4))
+					ActivationAction::Enqueue(PropagatorId::new(0)),
+					ActivationAction::Enqueue(PropagatorId::new(1)),
+					ActivationAction::Enqueue(PropagatorId::new(2)),
+					ActivationAction::Enqueue(PropagatorId::new(3)),
+					ActivationAction::Enqueue(PropagatorId::new(4))
 				])
 			);
 			let mut bounds = FxHashSet::default();
@@ -296,10 +397,10 @@ mod tests {
 			assert_eq!(
 				bounds,
 				FxHashSet::from_iter([
-					ActivationAction::Enqueue(PropRef::new(1)),
-					ActivationAction::Enqueue(PropRef::new(2)),
-					ActivationAction::Enqueue(PropRef::new(3)),
-					ActivationAction::Enqueue(PropRef::new(4))
+					ActivationAction::Enqueue(PropagatorId::new(1)),
+					ActivationAction::Enqueue(PropagatorId::new(2)),
+					ActivationAction::Enqueue(PropagatorId::new(3)),
+					ActivationAction::Enqueue(PropagatorId::new(4))
 				])
 			);
 			let mut lower_bound = FxHashSet::default();
@@ -312,9 +413,9 @@ mod tests {
 			assert_eq!(
 				lower_bound,
 				FxHashSet::from_iter([
-					ActivationAction::Enqueue(PropRef::new(1)),
-					ActivationAction::Enqueue(PropRef::new(3)),
-					ActivationAction::Enqueue(PropRef::new(4))
+					ActivationAction::Enqueue(PropagatorId::new(1)),
+					ActivationAction::Enqueue(PropagatorId::new(3)),
+					ActivationAction::Enqueue(PropagatorId::new(4))
 				])
 			);
 			let mut upper_bound = FxHashSet::default();
@@ -327,9 +428,9 @@ mod tests {
 			assert_eq!(
 				upper_bound,
 				FxHashSet::from_iter([
-					ActivationAction::Enqueue(PropRef::new(2)),
-					ActivationAction::Enqueue(PropRef::new(3)),
-					ActivationAction::Enqueue(PropRef::new(4))
+					ActivationAction::Enqueue(PropagatorId::new(2)),
+					ActivationAction::Enqueue(PropagatorId::new(3)),
+					ActivationAction::Enqueue(PropagatorId::new(4))
 				])
 			);
 			let mut domain = FxHashSet::default();
@@ -338,8 +439,55 @@ mod tests {
 			});
 			assert_eq!(
 				domain,
-				FxHashSet::from_iter([ActivationAction::Enqueue(PropRef::new(4))])
+				FxHashSet::from_iter([ActivationAction::Enqueue(PropagatorId::new(4))])
 			);
+		}
+	}
+
+	#[test]
+	fn test_activation_list_remove() {
+		let props = [
+			(PropagatorId::new(0), IntPropCond::Fixed),
+			(PropagatorId::new(1), IntPropCond::LowerBound),
+			(PropagatorId::new(2), IntPropCond::UpperBound),
+			(PropagatorId::new(3), IntPropCond::Bounds),
+			(PropagatorId::new(4), IntPropCond::Domain),
+		];
+		let target =
+			|prop| ActivationActionS::from(ActivationAction::<AdvisorId, _>::Enqueue(prop));
+
+		for order in props.iter().permutations(props.len()) {
+			let mut full = ActivationList::default();
+			for &&(prop, cond) in &order {
+				full.add(ActivationAction::<AdvisorId, _>::Enqueue(prop), cond);
+			}
+
+			for &&(prop, cond) in &order {
+				// An activation is only ever found in the block of the condition
+				// it subscribed with.
+				for &(_, other) in props.iter().filter(|&&(_, c)| c != cond) {
+					assert!(!full.clone().remove(other, |a| a == target(prop)));
+				}
+
+				let mut list = full.clone();
+				assert!(list.remove(cond, |a| a == target(prop)));
+				assert!(
+					!list.remove(cond, |a| a == target(prop)),
+					"{prop:?} was still subscribed after being removed"
+				);
+				let present = props
+					.iter()
+					.filter(|&&(p, _)| p != prop)
+					.copied()
+					.collect_vec();
+				assert_activations(&list, &present);
+			}
+
+			// Removing every subscription empties the list.
+			for &&(prop, cond) in &order {
+				assert!(full.remove(cond, |a| a == target(prop)));
+			}
+			assert_activations(&full, &[]);
 		}
 	}
 }

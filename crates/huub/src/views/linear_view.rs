@@ -14,8 +14,8 @@ use crate::{
 	IntSet, IntVal,
 	actions::{
 		IntAnalyzeActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
-		IntPropagationActions, IntSimplificationActions, PropagationActions, PropagationContext,
-		ReasoningContext,
+		IntPropCond, IntPropagationActions, IntSimplificationActions, PropagationActions,
+		PropagationContext, ReasoningContext,
 	},
 	helpers::{div_ceil, div_floor},
 	solver::{
@@ -108,6 +108,17 @@ impl<Var> LinearView<NonZero<IntVal>, IntVal, Var> {
 	/// Reverses the transformation of an [`IntVal`], rounding down.
 	pub(crate) fn reverse_val_floor(&self, val: IntVal) -> IntVal {
 		div_floor(val - self.offset, self.scale)
+	}
+
+	/// Transform a propagation condition on the view into the equivalent
+	/// condition on the underlying variable, swapping the bounds when the view
+	/// is negatively scaled.
+	pub(crate) fn scale_condition(&self, condition: IntPropCond) -> IntPropCond {
+		match condition {
+			IntPropCond::LowerBound if self.scale.is_negative() => IntPropCond::UpperBound,
+			IntPropCond::UpperBound if self.scale.is_negative() => IntPropCond::LowerBound,
+			_ => condition,
+		}
 	}
 
 	/// Transform a [`IntLitMeaning`] from the variable given the view's scale
