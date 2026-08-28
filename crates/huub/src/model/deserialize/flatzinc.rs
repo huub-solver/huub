@@ -33,7 +33,7 @@ use crate::{
 	model::{
 		Model,
 		deserialize::{AnyView, Branching, Goal},
-		expressions::{BoolFormula, linear::IntLinearExp},
+		expressions::linear::IntLinearExp,
 		view::{View, boolean::BoolView},
 	},
 	solver::{
@@ -1674,7 +1674,7 @@ impl<'a> FznModelBuilder<'a> {
 						return num_args_err(1);
 					};
 					let es = self.arg_array(es)?;
-					let es: Vec<BoolFormula> = es
+					let es: Vec<_> = es
 						.iter()
 						.map(|l| self.lit_bool(l).map(Into::into))
 						.try_collect()?;

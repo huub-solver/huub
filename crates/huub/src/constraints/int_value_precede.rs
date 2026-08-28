@@ -5,7 +5,7 @@
 use std::cmp::{max, min};
 
 use crate::{
-	IntVal,
+	DeepClone, IntVal,
 	actions::{
 		ConstructionActions, InitActions, IntDecisionActions, IntInspectionActions, IntPropCond,
 		PostingActions, PropagationContext, ReasonActions, ReasoningContext, ReasoningEngine,
@@ -19,7 +19,7 @@ use crate::{
 };
 
 /// Bounds propagator for the `seq_precede_chain_int` constraint.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct IntSeqPrecedeChainBounds<I> {
 	/// List of integer variables where first occurrences of all i>0 must be
 	/// ordered.
@@ -38,7 +38,7 @@ pub struct IntSeqPrecedeChainBounds<I> {
 }
 
 /// Value consistent propagator for the `value_precede_chain` constraint.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct IntValuePrecedeChainValue<I> {
 	/// List of integers that need to occur in order
 	values: Vec<IntVal>,

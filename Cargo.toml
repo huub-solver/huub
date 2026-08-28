@@ -21,8 +21,8 @@ bon = { version = "3.9.3", features = ["experimental-generics-setters"] }
 clap = { version = "4.6.4", features = ["derive"] }
 clap_complete = "4.6.8"
 ctrlc = "3.5.2"
+deepclone = "0.3.0"
 divan = { package = "codspeed-divan-compat", version = "5.0.1" }
-dyn-clone = "1.0.20"
 expect-test = "1.5.1"
 flatzinc-serde = { version = "0.5.1" }
 humantime = "2.4.0"

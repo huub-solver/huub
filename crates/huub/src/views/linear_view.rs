@@ -11,7 +11,7 @@ use std::{
 };
 
 use crate::{
-	IntSet, IntVal,
+	DeepClone, IntSet, IntVal,
 	actions::{
 		IntAnalyzeActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
 		IntPropCond, IntPropagationActions, IntSimplificationActions, PropagationActions,
@@ -45,7 +45,7 @@ use crate::{
 /// y += 5;                 // y = 2*x + 8
 /// y *= NonZero::new(-1).unwrap(); // y = -2*x - 8
 /// ```
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct LinearView<Scale, Offset, Var> {
 	/// Scale applied to the decision variable.
 	pub(crate) scale: Scale,

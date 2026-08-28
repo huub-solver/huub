@@ -10,7 +10,7 @@
 //!   `subcircuit`.
 
 use crate::{
-	IntVal,
+	DeepClone, IntVal,
 	actions::{
 		InitActions, IntEvent, IntInspectionActions, IntPropCond, IntPropagationActions,
 		PostingActions, PropagationActions, ReasonActions, ReasoningEngine,
@@ -21,7 +21,7 @@ use crate::{
 
 /// The `no_cycle` propagator for the `circuit` and `subcircuit` constraints
 /// (`SUBCIRCUIT` selects the variant).
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct CircuitNoCycle<const SUBCIRCUIT: bool, I> {
 	/// Successor graph plus the shared explanation helpers (the canonical copy
 	/// for the owning `Circuit`).
@@ -35,7 +35,7 @@ pub struct CircuitNoCycle<const SUBCIRCUIT: bool, I> {
 }
 
 /// Reusable scratch for the `no_cycle` algorithm.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub(crate) struct NoCycleScratch {
 	/// Successor position of every fixed node (`None` if unfixed).
 	fixed_succ: Vec<Option<usize>>,

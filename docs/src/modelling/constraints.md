@@ -234,21 +234,16 @@ Boolean formulas allow you to express complex logical conditions using conjuncti
 ```rust
 # extern crate huub;
 # use huub::model::Model;
-# use huub::model::expressions::BoolFormula;
+# use huub::model::expressions::Proposition;
 # let mut model = Model::default();
 let x = model.new_bool_decision();
 let y = model.new_bool_decision();
 let z = model.new_bool_decision();
 
 // Create a formula: (x AND y) OR NOT z
-let formula = BoolFormula::Or(vec![
-	  BoolFormula::And(vec![
-		    BoolFormula::Atom(x),
-		    BoolFormula::Atom(y),
-	  ]),
-	  BoolFormula::Not(Box::new(
-	    	BoolFormula::Atom(z),
-	  )),
+let formula = Proposition::Or(vec![
+	Proposition::And(vec![Proposition::Atom(x), Proposition::Atom(y)]),
+	Proposition::Not(Box::new(Proposition::Atom(z))),
 ]);
 
 model.proposition(formula).post();

@@ -24,8 +24,10 @@ use std::{
 	ops::{Index, IndexMut},
 };
 
+use crate::DeepClone;
+
 /// A generic n-dimensional matrix.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub(crate) struct Matrix<const DIMS: usize, T> {
 	/// The data stored in the matrix in a row-major layout.
 	data: Box<[T]>,

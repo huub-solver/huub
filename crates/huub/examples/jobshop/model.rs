@@ -8,6 +8,7 @@ use std::{
 
 use clap::ValueEnum;
 use huub::{
+	DeepClone,
 	lower::{LoweringError, LoweringMap},
 	model::{self, Model, expressions::IntLinearExp},
 	solver::{self, Solver, Valuation},
@@ -54,7 +55,7 @@ pub(crate) enum ObjectiveType {
 	TotalCompletionTime,
 }
 
-#[derive(Copy, Debug, Clone, PartialEq, Eq)]
+#[derive(Copy, DeepClone, Debug, Clone, PartialEq, Eq)]
 /// The representation of an operation to be scheduled on a machine.
 pub(crate) struct Operation {
 	/// The index of the job this operation belongs to.

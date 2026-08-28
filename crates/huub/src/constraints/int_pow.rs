@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 use itertools::{Itertools, MinMaxResult};
 
 use crate::{
-	IntVal,
+	DeepClone, IntVal,
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, IntPropCond, PostingActions,
 		ReasonActions, ReasoningContext, ReasoningEngine,
@@ -32,7 +32,7 @@ use crate::{
 ///
 /// The OVERFLOW parameter determines whether the propagator will expect
 /// possible integer overflows.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct IntPowBounds<OM: OverflowMode, I1, I2, I3> {
 	/// The base in the exponentiation
 	pub(crate) base: I1,

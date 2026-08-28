@@ -2,6 +2,7 @@
 
 use clap::{ValueEnum, builder::PossibleValue};
 use huub::{
+	DeepClone,
 	actions::{
 		BoolInspectionActions, BrancherInitActions, DecisionActions, IntDecisionActions,
 		IntInspectionActions, ReasoningContext, Trailed,
@@ -28,7 +29,7 @@ pub(crate) enum BranchingStrategy {
 	Dynamic(DynamicBranching),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, PartialEq)]
 /// A dynamic branching strategy that selects variables to branch on based on
 /// the given [`DynamicBranching`] strategy.
 struct DynamicBrancher {
@@ -42,7 +43,7 @@ struct DynamicBrancher {
 	next: Trailed<usize>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(DeepClone, Debug, Clone, Copy, PartialEq, Eq, Default)]
 /// Branching strategies for [`DynamicBranching`], a specialized [`Brancher`]
 /// implementation for the job shop scheduling problem.
 pub(crate) enum DynamicBranching {

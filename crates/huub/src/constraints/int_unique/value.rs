@@ -8,13 +8,14 @@
 use itertools::Itertools;
 
 use crate::{
+	DeepClone,
 	actions::{InitActions, IntEvent, IntPropCond, PostingActions, ReasonActions, ReasoningEngine},
 	constraints::{IntSolverActions, Propagator},
 	solver::engine::Engine,
 };
 
 /// Value consistent propagator for the integer `unique` constraint.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct IntUniqueValue<I> {
 	/// List of integer variables that must take different values.
 	vars: Vec<I>,

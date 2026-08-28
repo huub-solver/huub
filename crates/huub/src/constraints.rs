@@ -24,11 +24,10 @@ use std::{
 	slice,
 };
 
-use dyn_clone::DynClone;
 use pindakaas::solver::propagation::ClauseBuilder;
 
 use crate::{
-	IntVal,
+	DeepClone, DynDeepClone, IntVal,
 	actions::{
 		BoolAnalyzeActions, BoolInitActions, BoolInspectionActions, BoolPropagationActions,
 		BoolSimplificationActions, IntAnalyzeActions, IntEvent, IntExplanationActions,
@@ -111,7 +110,9 @@ pub(crate) enum ConflictInner<Atom> {
 /// Constraints specified in the library implement this trait, but are using
 /// their explicit type in an enumerated type to allow for global model
 /// analysis.
-pub trait Constraint<E: ReasoningEngine + ?Sized>: Any + Debug + DynClone + Propagator<E> {
+pub trait Constraint<E: ReasoningEngine + ?Sized>:
+	Any + Debug + DynDeepClone + Propagator<E>
+{
 	/// Analyze the constraint to declare the literal encoding it requires, and
 	/// to contribute polarity evidence for the decision variables it involves.
 	///
@@ -191,7 +192,7 @@ pub struct Nogood<Atom>(pub(crate) Box<[Atom]>);
 /// If the explanation is needed, then the propagation engine will revert the
 /// state of the solver and call [`Propagator::explain`] to receive the
 /// explanation.
-pub trait Propagator<E: ReasoningEngine + ?Sized>: Any + Debug + DynClone {
+pub trait Propagator<E: ReasoningEngine + ?Sized>: Any + Debug + DynDeepClone {
 	/// Advises the propagator that the solver is backtracking.
 	fn advise_of_backtrack(&mut self, context: &mut E::NotificationContext<'_>) {
 		let _ = context;
@@ -354,24 +355,13 @@ where
 impl<E, B> BoolSolverActions<E> for B
 where
 	E: ReasoningEngine + ?Sized,
-	Self: for<'a> BoolInitActions<E::InitializationContext<'a>>
+	Self: DeepClone
+		+ for<'a> BoolInitActions<E::InitializationContext<'a>>
 		+ for<'a> BoolInspectionActions<E::ExplanationContext<'a>>
 		+ for<'a> BoolInspectionActions<E::NotificationContext<'a>>
 		+ for<'a> BoolPropagationActions<E::PropagationContext<'a>>
 		+ Into<E::Atom>,
 {
-}
-
-impl Clone for BoxedConstraint {
-	fn clone(&self) -> BoxedConstraint {
-		dyn_clone::clone_box(&**self)
-	}
-}
-
-impl Clone for BoxedPropagator {
-	fn clone(&self) -> BoxedPropagator {
-		dyn_clone::clone_box(&**self)
-	}
 }
 
 impl Conflict<model::View<bool>> {
@@ -455,7 +445,8 @@ where
 impl<E, I> IntSolverActions<E> for I
 where
 	E: ReasoningEngine + ?Sized,
-	I: for<'a> IntInitActions<E::InitializationContext<'a>>
+	I: DeepClone
+		+ for<'a> IntInitActions<E::InitializationContext<'a>>
 		+ for<'a> IntExplanationActions<E::ExplanationContext<'a>>
 		+ for<'a> IntInspectionActions<E::NotificationContext<'a>>
 		+ for<'a> IntPropagationActions<E::PropagationContext<'a>>,

@@ -70,6 +70,13 @@ pub mod solver;
 pub(crate) mod tests;
 pub mod views;
 
+/// Re-exported so that a downstream [`Propagator`](constraints::Propagator),
+/// [`Constraint`](constraints::Constraint), or
+/// [`Brancher`](solver::branchers::Brancher) can derive [`DeepClone`] without
+/// depending on `deepclone` directly. [`DynDeepClone`] is the supertrait those
+/// three carry, and [`Cloner`] is the argument a hand-written [`DeepClone`]
+/// impl has to name.
+pub use deepclone::{Cloner, DeepClone, DynDeepClone};
 use rangelist::RangeList;
 
 /// Type alias for a disjunction of literals, used for internal type

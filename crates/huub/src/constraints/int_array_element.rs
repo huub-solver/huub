@@ -9,7 +9,7 @@ use rangelist::IntervalIterator;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	IntSet, IntVal,
+	DeepClone, IntSet, IntVal,
 	actions::{
 		ConstructionActions, InitActions, IntAnalyzeActions, IntDecisionActions,
 		IntInspectionActions, IntPropCond, IntSimplificationActions, PostingActions, ReasonActions,
@@ -25,7 +25,7 @@ use crate::{
 
 /// Bounds consistent propagator for the `array_element` constraint with an
 /// array of integer decision variables.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct IntArrayElementBounds<I1, I2, I3> {
 	/// Array of variables from which the element is selected
 	vars: Vec<I1>,
@@ -45,7 +45,7 @@ pub struct IntArrayElementBounds<I1, I2, I3> {
 /// This constraint enforces that a result integer decision variable takes the
 /// value equal the element of the given array of integer values at the given
 /// index decision variable.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct IntValArrayElement<I1, I2>(pub(crate) IntArrayElementBounds<IntVal, I1, I2>);
 
 impl<I1, I2, I3> IntArrayElementBounds<I1, I2, I3> {

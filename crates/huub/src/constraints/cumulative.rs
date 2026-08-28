@@ -10,7 +10,7 @@ use std::cmp;
 use itertools::Itertools;
 
 use crate::{
-	IntVal,
+	DeepClone, IntVal,
 	actions::{
 		InitActions, IntAnalyzeActions, IntInspectionActions, IntPropCond, PostingActions,
 		ReasoningContext, ReasoningEngine,
@@ -37,7 +37,7 @@ const MAX_STRENGTHENING_WORK: IntVal = 10_000_000;
 /// capacity at any point in time. The constraint can optionally apply
 /// edge finding propagation to strengthen the reasoning about
 /// the tasks' scheduling.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct Cumulative {
 	/// Inner propagator, used to simplify the constraint within the model.
 	///
@@ -105,7 +105,7 @@ enum CumulativePropagationRule {
 ///   propagation for the cumulative resource constraint. CPAIOR 2013.
 /// - J. Schulz, "Hybrid Solving Techniques for Project Scheduling Problems", TU
 ///   Berlin, 2012
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct CumulativePropagator<I1, I2, I3, I4> {
 	/// Start time variables of each task.
 	start_times: Vec<I1>,

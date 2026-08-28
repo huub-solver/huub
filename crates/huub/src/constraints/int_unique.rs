@@ -20,7 +20,7 @@ pub use crate::constraints::int_unique::{
 	bounds::IntUniqueBounds, domain::IntUniqueDomain, value::IntUniqueValue,
 };
 use crate::{
-	IntSet, IntVal,
+	DeepClone, IntSet, IntVal,
 	actions::{IntAnalyzeActions, IntEvent, IntInspectionActions, ReasoningEngine},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
@@ -33,7 +33,7 @@ use crate::{
 ///
 /// This constraint enforces that all the given integer decisions take different
 /// values.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct IntUnique {
 	/// Instance of the [`IntUniqueBounds`] propagator.
 	pub(crate) bounds_prop: IntUniqueBounds<View<IntVal>>,

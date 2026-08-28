@@ -20,6 +20,7 @@ pub use crate::actions::{
 	},
 };
 use crate::{
+	DeepClone,
 	constraints::{BoxedPropagator, Constraint},
 	helpers::bytes::Bytes,
 };
@@ -197,7 +198,7 @@ pub trait SimplificationActions {
 }
 
 /// A typed handle to a value tracked by the trail.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct Trailed<T: Bytes> {
 	/// Index into the trail's integer value storage.
 	pub(crate) index: u32,

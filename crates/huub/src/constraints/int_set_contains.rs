@@ -6,7 +6,7 @@ use pindakaas::propositional_logic::Formula;
 use rangelist::IntervalIterator;
 
 use crate::{
-	IntSet, IntVal,
+	DeepClone, IntSet, IntVal,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, BoolSimplificationActions,
 		IntInitActions, IntInspectionActions, IntPropCond, IntSimplificationActions, ReasonActions,
@@ -17,18 +17,19 @@ use crate::{
 		NO_REASON, Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
-	model::{expressions::BoolFormula, view::View},
+	model::{expressions::proposition::PropositionConstraint, view::View},
 };
 
 /// Representation of the integer `contains` constraint within a model.
 ///
 /// This constraint enforces that the given Boolean variable takes the value
 /// `true` if-and-only-if an integer variable is in a given set.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct IntSetContainsReif {
 	/// The integer decision variable monitored.
 	pub(crate) var: View<IntVal>,
 	/// The set of considered values for the integer decision variable.
+	#[deepclone(clone)]
 	pub(crate) set: IntSet,
 	/// The Boolean variable that indicates if the integer decision variable is
 	/// in the set.
@@ -110,11 +111,11 @@ where
 		if self.set.iter().len() == 1 {
 			let lb = *self.set.min().unwrap();
 			let ub = *self.set.max().unwrap();
-			<BoolFormula as Constraint<E>>::to_solver(
-				&Formula::Equiv(vec![
+			<PropositionConstraint as Constraint<E>>::to_solver(
+				&PropositionConstraint(Formula::Equiv(vec![
 					Formula::And(vec![self.var.geq(lb).into(), self.var.leq(ub).into()]),
 					self.reif.into(),
-				]),
+				])),
 				slv,
 			)
 		} else {
@@ -124,8 +125,11 @@ where
 				.flatten()
 				.map(|v| self.var.eq(v).into())
 				.collect();
-			<BoolFormula as Constraint<E>>::to_solver(
-				&Formula::Equiv(vec![self.reif.into(), Formula::Or(eq_lits)]),
+			<PropositionConstraint as Constraint<E>>::to_solver(
+				&PropositionConstraint(Formula::Equiv(vec![
+					self.reif.into(),
+					Formula::Or(eq_lits),
+				])),
 				slv,
 			)
 		}

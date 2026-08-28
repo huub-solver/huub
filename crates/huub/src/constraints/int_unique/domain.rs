@@ -10,7 +10,7 @@ use rustc_hash::FxHashSet;
 use tracing::trace;
 
 use crate::{
-	IntVal,
+	DeepClone, IntVal,
 	actions::{
 		DeferReasonActions, InitActions, IntEvent, IntInspectionActions, IntPropCond,
 		PostingActions, PropagationActions, ReasonActions, ReasoningContext, ReasoningEngine,
@@ -22,7 +22,7 @@ use crate::{
 
 /// Reusable scratch for BFS-based augmenting-path search on a bipartite
 /// graph. Depends only on the number of left nodes.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DeepClone)]
 struct AugmentingPathScratch {
 	/// BFS queue (over left nodes).
 	queue: Vec<usize>,
@@ -32,7 +32,7 @@ struct AugmentingPathScratch {
 }
 
 /// Reusable scratch for the explain-time down-closure.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DeepClone)]
 struct ClosureScratch {
 	/// Decision members `H` of the tight Hall set. Membership is marked in
 	/// [`Self::dcn_in`]; the list lets the marks be cleared in O(closure).
@@ -53,7 +53,7 @@ struct ClosureScratch {
 /// union-domain origin used to translate between integer values and right-side
 /// indices, and the matching tables. Algorithms (augmenting-path search,
 /// Tarjan, Hall-set reasoning) operate on this struct from the outside.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DeepClone)]
 struct DecisionValueMatching<I> {
 	/// Left side: the integer decision variables.
 	dcns: Vec<I>,
@@ -88,7 +88,7 @@ struct DecisionValueMatching<I> {
 /// - Downing, Nicholas, Thibaut Feydy, and Peter J. Stuckey. "Explaining
 ///   alldifferent." In Proceedings of the Australasian Computer Science
 ///   Conference (ACSC 2012), CRPIT Volume 122, pages 115--124, 2012.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DeepClone)]
 pub struct IntUniqueDomain<I> {
 	/// Decisions, values, and their current matching.
 	graph: DecisionValueMatching<I>,
@@ -114,7 +114,7 @@ pub struct IntUniqueDomain<I> {
 /// One pending node in the explicit (heap-allocated) Tarjan DFS work-stack.
 /// Replaces a native call frame: `i` is the resumption point into this node's
 /// neighbour slice `[frame_start, frame_end)` of [`TarjanScratch::neighbours`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DeepClone)]
 struct TarjanFrame {
 	/// Graph node this frame is exploring.
 	node: usize,
@@ -131,7 +131,7 @@ struct TarjanFrame {
 /// nodes. `dcns_buf` / `vals_buf` are sized for the bipartite use-case (one
 /// buffer per side); a single-bucket variant would suit a non-bipartite
 /// consumer.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DeepClone)]
 struct TarjanScratch {
 	/// Stack for Tarjan's algorithm.
 	dfs_stack: Vec<usize>,

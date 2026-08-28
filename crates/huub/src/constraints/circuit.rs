@@ -15,7 +15,7 @@ use tracing::warn;
 
 pub use crate::constraints::circuit::{no_cycle::CircuitNoCycle, scc::CircuitScc};
 use crate::{
-	IntVal,
+	DeepClone, IntVal,
 	actions::{
 		IntAnalyzeActions, IntDecisionActions, IntEvent, IntInspectionActions,
 		IntPropagationActions, PropagationActions, ReasonActions, ReasoningContext,
@@ -33,7 +33,7 @@ use crate::{
 ///
 /// Enforces that the successor variables form a single cycle through all nodes
 /// (or, for `subcircuit`, through a subset, with the rest self-looping).
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct Circuit<const SUBCIRCUIT: bool> {
 	/// Instance of the [`CircuitNoCycle`] propagator.
 	no_cycle_prop: CircuitNoCycle<SUBCIRCUIT, View<IntVal>>,
@@ -53,7 +53,7 @@ pub struct Circuit<const SUBCIRCUIT: bool> {
 /// successor variable per node position `0..n`, plus the value `offset`. The
 /// `SUBCIRCUIT` const generic selects the `subcircuit` variant (nodes may
 /// self-loop off the cycle), so the variant checks compile away.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub(crate) struct CircuitGraph<const SUBCIRCUIT: bool, I> {
 	/// Successor variables, indexed by node position `0..n`.
 	pub(crate) vars: Vec<I>,

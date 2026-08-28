@@ -8,7 +8,10 @@
 
 use std::cmp;
 
-use crate::actions::{ConstructionActions, Trailed, TrailingActions};
+use crate::{
+	DeepClone,
+	actions::{ConstructionActions, Trailed, TrailingActions},
+};
 
 /// Backtrackable disjoint-set partition of `{0, .., n-1}`. Each block is a
 /// contiguous slice of the underlying element permutation (see
@@ -30,7 +33,7 @@ use crate::actions::{ConstructionActions, Trailed, TrailingActions};
 ///   positions:     0  2  1  3
 ///   layout:        2  0  4  2     // pos 0 -> end 2; pos 2 -> end 4
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DeepClone)]
 pub(crate) struct TrailedPartition {
 	/// Permutation of `0..n` whose contiguous slices are the current blocks.
 	elems: Vec<usize>,

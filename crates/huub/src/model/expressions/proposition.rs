@@ -7,6 +7,7 @@ use pindakaas::{
 };
 
 use crate::{
+	DeepClone,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, InitActions,
 		PropagationActions, ReasoningEngine, SimplificationActions,
@@ -20,11 +21,43 @@ use crate::{
 	solver::view::boolean::BoolView,
 };
 
-/// Type alias for the type used to represent propositional logic formulas that
-/// can be used in [`Model`](crate::model::Model).
-pub type BoolFormula = Formula<View<bool>>;
+/// A [`Proposition`](crate::model::expressions::Proposition) wrapped so that it
+/// can be posted as a constraint.
+#[derive(Clone, Debug, DeepClone)]
+pub struct PropositionConstraint(#[deepclone(clone)] pub(crate) Formula<View<bool>>);
 
-impl<E> Constraint<E> for BoolFormula
+/// Subscribe every atom in `formula` to be notified when it is fixed.
+fn subscribe_atoms<E>(formula: &mut Formula<View<bool>>, ctx: &mut E::InitializationContext<'_>)
+where
+	E: ReasoningEngine,
+	View<bool>: BoolSolverActions<E>,
+{
+	match formula {
+		Formula::And(v) => v.iter_mut().for_each(|f| subscribe_atoms::<E>(f, ctx)),
+		Formula::Atom(a) => a.enqueue_when_fixed(ctx),
+		Formula::Equiv(v) => v.iter_mut().for_each(|f| subscribe_atoms::<E>(f, ctx)),
+		Formula::IfThenElse { cond, then, els } => {
+			subscribe_atoms::<E>(cond, ctx);
+			subscribe_atoms::<E>(then, ctx);
+			subscribe_atoms::<E>(els, ctx);
+		}
+		Formula::Implies(f1, f2) => {
+			subscribe_atoms::<E>(f1, ctx);
+			subscribe_atoms::<E>(f2, ctx);
+		}
+		Formula::Not(f) => subscribe_atoms::<E>(f, ctx),
+		Formula::Or(v) => v.iter_mut().for_each(|f| subscribe_atoms::<E>(f, ctx)),
+		Formula::Xor(v) => v.iter_mut().for_each(|f| subscribe_atoms::<E>(f, ctx)),
+	}
+}
+
+impl From<View<bool>> for Formula<View<bool>> {
+	fn from(v: View<bool>) -> Self {
+		Formula::Atom(v)
+	}
+}
+
+impl<E> Constraint<E> for PropositionConstraint
 where
 	E: ReasoningEngine,
 	for<'a> E::PropagationContext<'a>: SimplificationActions<Target = E>,
@@ -40,14 +73,14 @@ where
 			};
 			Ok(bv)
 		};
-		let result = self.clone().simplify_with(&mut resolver);
+		let result = self.0.clone().simplify_with(&mut resolver);
 		let mut f = match result {
 			Ok(f) => f,
 			Err(true) => return Ok(SimplificationStatus::Subsumed),
 			Err(false) => return Err(ctx.declare_conflict(NO_REASON)),
 		};
 
-		let negate = |f: BoolFormula| match f {
+		let negate = |f: Formula<View<bool>>| match f {
 			Formula::Atom(x) => Formula::Atom(!x),
 			Formula::Not(x) if matches!(*x, Formula::Atom(_)) => {
 				let Formula::Atom(x) = *x else { unreachable!() };
@@ -88,7 +121,7 @@ where
 			};
 		}
 
-		*self = match f {
+		self.0 = match f {
 			Formula::And(v) => {
 				for f in v {
 					match f {
@@ -100,7 +133,7 @@ where
 							x.fix(ctx, false, NO_REASON)?;
 						}
 						f => {
-							ctx.post_constraint(f);
+							ctx.post_constraint(PropositionConstraint(f));
 						}
 					}
 				}
@@ -124,7 +157,7 @@ where
 				BoolView::Lit(l) => Ok(l.0),
 			}
 		};
-		let result: Result<Formula<RawLit>, _> = self.clone().simplify_with(&mut resolver);
+		let result: Result<Formula<RawLit>, _> = self.0.clone().simplify_with(&mut resolver);
 		match result {
 			Err(false) => Err(slv.declare_conflict(NO_REASON).into()),
 			Err(true) => Ok(()),
@@ -133,36 +166,26 @@ where
 	}
 }
 
-impl From<View<bool>> for BoolFormula {
-	fn from(v: View<bool>) -> Self {
-		Self::Atom(v)
+impl From<Formula<View<bool>>> for PropositionConstraint {
+	fn from(f: Formula<View<bool>>) -> Self {
+		PropositionConstraint(f)
 	}
 }
 
-impl<E> Propagator<E> for BoolFormula
+impl From<View<bool>> for PropositionConstraint {
+	fn from(v: View<bool>) -> Self {
+		PropositionConstraint(Formula::Atom(v))
+	}
+}
+
+impl<E> Propagator<E> for PropositionConstraint
 where
 	E: ReasoningEngine,
 	View<bool>: BoolSolverActions<E>,
 {
 	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.enqueue_now(true);
-		match self {
-			Formula::And(v) => v.iter_mut().for_each(|f| f.initialize(ctx)),
-			Formula::Atom(a) => a.enqueue_when_fixed(ctx),
-			Formula::Equiv(v) => v.iter_mut().for_each(|f| f.initialize(ctx)),
-			Formula::IfThenElse { cond, then, els } => {
-				cond.initialize(ctx);
-				then.initialize(ctx);
-				els.initialize(ctx);
-			}
-			Formula::Implies(f1, f2) => {
-				f1.initialize(ctx);
-				f2.initialize(ctx);
-			}
-			Formula::Not(f) => f.initialize(ctx),
-			Formula::Or(v) => v.iter_mut().for_each(|f| f.initialize(ctx)),
-			Formula::Xor(v) => v.iter_mut().for_each(|f| f.initialize(ctx)),
-		}
+		subscribe_atoms::<E>(&mut self.0, ctx);
 	}
 
 	fn propagate(
@@ -180,7 +203,7 @@ mod tests {
 	use crate::{
 		actions::BoolInspectionActions,
 		constraints::{Constraint, SimplificationStatus},
-		model::{Model, SimplificationContext, expressions::bool_formula::BoolFormula},
+		model::{Model, SimplificationContext, expressions::proposition::PropositionConstraint},
 	};
 
 	#[test]
@@ -190,9 +213,9 @@ mod tests {
 		// Test case for And with a true literal
 		let mut prb = Model::default();
 		let x = prb.new_bool_decision();
-		let mut f: BoolFormula = And(vec![Atom(x), Atom(true.into())]);
+		let mut f = PropositionConstraint(And(vec![Atom(x), Atom(true.into())]));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
@@ -203,9 +226,9 @@ mod tests {
 		// Test case for And with a false literal
 		let mut prb = Model::default();
 		let x = prb.new_bool_decision();
-		let mut f: BoolFormula = And(vec![Atom(x), Atom(false.into())]);
+		let mut f = PropositionConstraint(And(vec![Atom(x), Atom(false.into())]));
 		assert!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			)
@@ -220,9 +243,9 @@ mod tests {
 		// Test case for Equiv(x, true) -> x
 		let mut prb = Model::default();
 		let x = prb.new_bool_decision();
-		let mut f: BoolFormula = Equiv(vec![Atom(x), Atom(true.into())]);
+		let mut f = PropositionConstraint(Equiv(vec![Atom(x), Atom(true.into())]));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
@@ -233,9 +256,9 @@ mod tests {
 		// Test case for Equiv(x, false) -> !x
 		let mut prb = Model::default();
 		let x = prb.new_bool_decision();
-		let mut f: BoolFormula = Equiv(vec![Atom(x), Atom(false.into())]);
+		let mut f = PropositionConstraint(Equiv(vec![Atom(x), Atom(false.into())]));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
@@ -252,13 +275,13 @@ mod tests {
 		let mut prb = Model::default();
 		let t = prb.new_bool_decision();
 		let e = prb.new_bool_decision();
-		let mut f: BoolFormula = IfThenElse {
+		let mut f = PropositionConstraint(IfThenElse {
 			cond: Box::new(Atom(true.into())),
 			then: Box::new(Atom(t)),
 			els: Box::new(Atom(e)),
-		};
+		});
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
@@ -271,13 +294,13 @@ mod tests {
 		let mut prb = Model::default();
 		let t = prb.new_bool_decision();
 		let e = prb.new_bool_decision();
-		let mut f: BoolFormula = IfThenElse {
+		let mut f = PropositionConstraint(IfThenElse {
 			cond: Box::new(Atom(false.into())),
 			then: Box::new(Atom(t)),
 			els: Box::new(Atom(e)),
-		};
+		});
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
@@ -294,9 +317,9 @@ mod tests {
 		// Test case for Implies(true, y) -> y
 		let mut prb = Model::default();
 		let y = prb.new_bool_decision();
-		let mut f: BoolFormula = Implies(Box::new(Atom(true.into())), Box::new(Atom(y)));
+		let mut f = PropositionConstraint(Implies(Box::new(Atom(true.into())), Box::new(Atom(y))));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
@@ -307,9 +330,9 @@ mod tests {
 		// Test case for Implies(x, false) -> !x
 		let mut prb = Model::default();
 		let x = prb.new_bool_decision();
-		let mut f: BoolFormula = Implies(Box::new(Atom(x)), Box::new(Atom(false.into())));
+		let mut f = PropositionConstraint(Implies(Box::new(Atom(x)), Box::new(Atom(false.into()))));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
@@ -325,9 +348,9 @@ mod tests {
 		// Test case for Not(Not(x))
 		let mut prb = Model::default();
 		let x = prb.new_bool_decision();
-		let mut f: BoolFormula = Not(Box::new(Not(Box::new(Atom(x)))));
+		let mut f = PropositionConstraint(Not(Box::new(Not(Box::new(Atom(x))))));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
@@ -339,23 +362,23 @@ mod tests {
 		let mut prb = Model::default();
 		let x = prb.new_bool_decision();
 		let y = prb.new_bool_decision();
-		let mut f: BoolFormula = Not(Box::new(And(vec![Atom(x), Atom(y)])));
+		let mut f = PropositionConstraint(Not(Box::new(And(vec![Atom(x), Atom(y)]))));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
 			Ok(SimplificationStatus::NoFixpoint)
 		);
-		assert_eq!(f, Or(vec![Atom(!x), Atom(!y)]));
+		assert_eq!(f.0, Or(vec![Atom(!x), Atom(!y)]));
 
 		// Test case for De Morgan's law with Or
 		let mut prb = Model::default();
 		let x = prb.new_bool_decision();
 		let y = prb.new_bool_decision();
-		let mut f: BoolFormula = Not(Box::new(Or(vec![Atom(x), Atom(y)])));
+		let mut f = PropositionConstraint(Not(Box::new(Or(vec![Atom(x), Atom(y)]))));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
@@ -368,9 +391,10 @@ mod tests {
 		let mut prb = Model::default();
 		let x = prb.new_bool_decision();
 		let y = prb.new_bool_decision();
-		let mut f: BoolFormula = Not(Box::new(Implies(Box::new(Atom(x)), Box::new(Atom(y)))));
+		let mut f =
+			PropositionConstraint(Not(Box::new(Implies(Box::new(Atom(x)), Box::new(Atom(y))))));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
@@ -384,20 +408,20 @@ mod tests {
 		let c = prb.new_bool_decision();
 		let t = prb.new_bool_decision();
 		let e = prb.new_bool_decision();
-		let mut f: BoolFormula = Not(Box::new(IfThenElse {
+		let mut f = PropositionConstraint(Not(Box::new(IfThenElse {
 			cond: Box::new(Atom(c)),
 			then: Box::new(Atom(t)),
 			els: Box::new(Atom(e)),
-		}));
+		})));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
 			Ok(SimplificationStatus::NoFixpoint)
 		);
 		assert_eq!(
-			f,
+			f.0,
 			IfThenElse {
 				cond: Box::new(Atom(c)),
 				then: Box::new(Not(Box::new(Atom(t)))),
@@ -409,9 +433,9 @@ mod tests {
 		let mut prb = Model::default();
 		let x = prb.new_bool_decision();
 		let y = prb.new_bool_decision();
-		let mut f: BoolFormula = Not(Box::new(Equiv(vec![Atom(x), Atom(y)])));
+		let mut f = PropositionConstraint(Not(Box::new(Equiv(vec![Atom(x), Atom(y)]))));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
@@ -424,30 +448,30 @@ mod tests {
 		let mut prb = Model::default();
 		let x = prb.new_bool_decision();
 		let y = prb.new_bool_decision();
-		let mut f: BoolFormula = Not(Box::new(Xor(vec![Atom(x), Atom(y)])));
+		let mut f = PropositionConstraint(Not(Box::new(Xor(vec![Atom(x), Atom(y)]))));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
 			Ok(SimplificationStatus::NoFixpoint)
 		);
-		assert_eq!(f, Equiv(vec![Atom(x), Atom(y)]));
+		assert_eq!(f.0, Equiv(vec![Atom(x), Atom(y)]));
 
 		// Test case for Not(Xor(x, y, z))
 		let mut prb = Model::default();
 		let x = prb.new_bool_decision();
 		let y = prb.new_bool_decision();
 		let z = prb.new_bool_decision();
-		let mut f: BoolFormula = Not(Box::new(Xor(vec![Atom(x), Atom(y), Atom(z)])));
+		let mut f = PropositionConstraint(Not(Box::new(Xor(vec![Atom(x), Atom(y), Atom(z)]))));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
 			Ok(SimplificationStatus::NoFixpoint)
 		);
-		assert_eq!(f, Xor(vec![Atom(!x), Atom(y), Atom(z)]));
+		assert_eq!(f.0, Xor(vec![Atom(!x), Atom(y), Atom(z)]));
 	}
 
 	#[test]
@@ -457,9 +481,9 @@ mod tests {
 		// Test case for Or with a true literal
 		let mut prb = Model::default();
 		let x = prb.new_bool_decision();
-		let mut f: BoolFormula = Or(vec![Atom(x), Atom(true.into())]);
+		let mut f = PropositionConstraint(Or(vec![Atom(x), Atom(true.into())]));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
@@ -470,9 +494,9 @@ mod tests {
 		// Test case for Or with a false literal
 		let mut prb = Model::default();
 		let x = prb.new_bool_decision();
-		let mut f: BoolFormula = Or(vec![Atom(x), Atom(false.into())]);
+		let mut f = PropositionConstraint(Or(vec![Atom(x), Atom(false.into())]));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
@@ -488,9 +512,9 @@ mod tests {
 		// Test case for Xor(x, false) -> x
 		let mut prb = Model::default();
 		let x = prb.new_bool_decision();
-		let mut f: BoolFormula = Xor(vec![Atom(x), Atom(false.into())]);
+		let mut f = PropositionConstraint(Xor(vec![Atom(x), Atom(false.into())]));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
@@ -501,9 +525,9 @@ mod tests {
 		// Test case for Xor(x, true) -> !x
 		let mut prb = Model::default();
 		let x = prb.new_bool_decision();
-		let mut f: BoolFormula = Xor(vec![Atom(x), Atom(true.into())]);
+		let mut f = PropositionConstraint(Xor(vec![Atom(x), Atom(true.into())]));
 		assert_eq!(
-			<BoolFormula as Constraint<Model>>::simplify(
+			<PropositionConstraint as Constraint<Model>>::simplify(
 				&mut f,
 				&mut SimplificationContext(&mut prb)
 			),
