@@ -5,7 +5,7 @@
 use std::iter::once;
 
 use crate::{
-	IntVal,
+	DeepClone, IntVal,
 	actions::{
 		BoolInitActions, BoolSimplificationActions, IntAnalyzeActions, IntDecisionActions,
 		IntInitActions, IntInspectionActions, IntPropCond, IntPropagationActions, ReasoningEngine,
@@ -24,7 +24,7 @@ use crate::{
 /// This constraint enforces that a result Boolean decision variable takes the
 /// value equal the element of the given array of Boolean decision variables at
 /// the index given by the index integer decision variable.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct BoolDecisionArrayElement {
 	/// The array of Boolean decision variables
 	pub(crate) array: Vec<View<bool>>,

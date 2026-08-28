@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-	IntSet, IntVal,
+	DeepClone, IntSet, IntVal,
 	actions::{
 		BoolPropagationActions, IntAnalyzeActions, IntDecisionActions, IntExplanationActions,
 		IntInspectionActions, IntPropagationActions, IntSimplificationActions, PropagationActions,
@@ -28,7 +28,7 @@ use crate::{
 /// The internal representation of [`IntDecision`].
 ///
 /// Note that this representation is not meant to be exposed to the user.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, DeepClone, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum IntView {
 	/// Constant Integer Value

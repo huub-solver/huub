@@ -1374,12 +1374,13 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 	///
 	/// ```
 	/// # use huub::{
+	/// # 	DeepClone,
 	/// # 	actions::{IntInitActions, IntPropCond, PostingActions, ReasoningEngine},
 	/// # 	constraints::Propagator,
 	/// # 	solver::{Engine, Solver, View},
 	/// # };
 	/// /// A propagator that is told which decisions to watch after it is posted.
-	/// #[derive(Clone, Debug)]
+	/// #[derive(Clone, Debug, DeepClone)]
 	/// struct Watcher {
 	/// 	decisions: Vec<View<i64>>,
 	/// 	subscribed: usize,
@@ -1721,7 +1722,7 @@ mod tests {
 	use std::{cell::RefCell, rc::Rc};
 
 	use crate::{
-		IntVal,
+		DeepClone, IntVal,
 		actions::{
 			BrancherInitActions, IntDecisionActions, IntEvent, IntInitActions, IntPropCond,
 			ReasoningEngine,
@@ -1736,7 +1737,7 @@ mod tests {
 
 	/// A propagator that acquires the decisions it constrains after it has been
 	/// posted, and only ever subscribes to the ones it has not seen before.
-	#[derive(Clone, Debug)]
+	#[derive(Clone, Debug, DeepClone)]
 	struct GrowingPropagator {
 		/// The decisions the propagator has been given so far.
 		decisions: Vec<View<IntVal>>,
@@ -1833,6 +1834,48 @@ mod tests {
 
 		let _ = slv.solve().satisfy();
 		assert_eq!(*advised.borrow(), 0);
+	}
+
+	/// Two propagators that share one object must still share one object after
+	/// the solver is cloned, and it must be a copy rather than the original.
+	#[test]
+	fn test_solver_clone_shares_one_copy_of_shared_state() {
+		let mut slv: Solver = Solver::default();
+		let advised = Rc::new(RefCell::new(0));
+		let props: Vec<PropagatorId> = (0..2)
+			.map(|_| {
+				slv.add_propagator(
+					Box::new(GrowingPropagator {
+						decisions: Vec::new(),
+						subscribed: 0,
+						cancel: false,
+						advised: Rc::clone(&advised),
+					}),
+					false,
+				)
+			})
+			.collect();
+
+		let mut copy = slv.clone();
+		let first = Rc::clone(
+			&copy
+				.propagator_mut::<GrowingPropagator>(props[0])
+				.expect("propagator is a GrowingPropagator")
+				.advised,
+		);
+		let second = Rc::clone(
+			&copy
+				.propagator_mut::<GrowingPropagator>(props[1])
+				.expect("propagator is a GrowingPropagator")
+				.advised,
+		);
+
+		assert!(Rc::ptr_eq(&first, &second));
+		assert!(!Rc::ptr_eq(&first, &advised));
+
+		*first.borrow_mut() = 7;
+		assert_eq!(*advised.borrow(), 0);
+		assert_eq!(*second.borrow(), 7);
 	}
 
 	impl Propagator<Engine> for GrowingPropagator {

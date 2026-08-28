@@ -7,7 +7,7 @@ use std::mem;
 use itertools::Itertools;
 
 use crate::{
-	IntVal,
+	DeepClone, IntVal,
 	actions::{
 		InitActions, IntAnalyzeActions, IntDecisionActions, IntInitActions, IntInspectionActions,
 		IntPropCond, IntPropagationActions, IntSimplificationActions, PropagationActions,
@@ -25,7 +25,7 @@ use crate::{
 ///
 /// This constraint enforces that the given list of integer views take their
 /// values according to one of the given lists of integer values.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct IntTable {
 	/// List of variables that must take the values of a row in the table.
 	pub(crate) vars: Vec<View<IntVal>>,

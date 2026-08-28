@@ -3,6 +3,7 @@
 use std::ops::Not;
 
 use crate::{
+	DeepClone,
 	actions::{
 		BoolInitActions, BoolInspectionActions, BoolPropagationActions, PropagationActions,
 		PropagationContext, ReasoningContext,
@@ -11,7 +12,7 @@ use crate::{
 };
 
 /// Type that represents compile time constant [`true`] value.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, DeepClone, Default, Eq, Hash, PartialEq)]
 pub struct True;
 
 impl<Ctx> BoolInitActions<Ctx> for True

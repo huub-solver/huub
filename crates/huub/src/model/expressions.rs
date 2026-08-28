@@ -13,11 +13,10 @@ use std::{cmp, marker::PhantomData, num::NonZero};
 
 use bon::bon;
 use itertools::{Itertools, MinMaxResult, iproduct};
+use pindakaas::propositional_logic::Formula;
 use rangelist::RangeList;
 
-pub use crate::model::expressions::{
-	bool_formula::BoolFormula, element::ElementConstraint, linear::IntLinearExp,
-};
+pub use crate::model::expressions::{element::ElementConstraint, linear::IntLinearExp};
 use crate::{
 	IntSet, IntVal,
 	actions::{
@@ -42,7 +41,11 @@ use crate::{
 		int_value_precede::{IntSeqPrecedeChainBounds, IntValuePrecedeChainValue},
 	},
 	helpers::overflow::{OverflowImpossible, OverflowPossible},
-	model::{Model, View, expressions::linear::Comparator, view::integer::IntView},
+	model::{
+		Model, View,
+		expressions::{bool_formula::BoolFormula, linear::Comparator},
+		view::integer::IntView,
+	},
 };
 
 #[bon]
@@ -525,10 +528,10 @@ impl Model {
 	) -> Result<(), Nogood<View<bool>>> {
 		match reif {
 			Some(Reification::ReifiedBy(b)) => {
-				formula = BoolFormula::Equiv(vec![BoolFormula::Atom(b), formula]);
+				formula = Formula::Equiv(vec![Formula::Atom(b), formula.0]).into();
 			}
 			Some(Reification::ImpliedBy(b)) => {
-				formula = BoolFormula::Implies(BoolFormula::Atom(b).into(), formula.into());
+				formula = Formula::Implies(Formula::Atom(b).into(), formula.0.into()).into();
 			}
 			None => {}
 		}

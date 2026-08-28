@@ -3,7 +3,7 @@
 use std::{num::NonZero, ops::Not};
 
 use crate::{
-	IntVal,
+	Cloner, DeepClone, IntVal,
 	actions::IntInspectionActions,
 	model::{
 		Decision, Model, View,
@@ -56,6 +56,14 @@ impl Resolved<View<IntVal>> {
 			IntView::Linear(lin) => Some(Resolved(lin.var)),
 			IntView::Const(_) | IntView::Bool(_) => None,
 		}
+	}
+}
+
+impl<T> DeepClone for Resolved<T> {
+	fn deep_clone_in(&self, _: &mut Cloner) -> Self {
+		unreachable!(
+			"resolved views should not be cloned as it can then no longer guarantee it stays resolved."
+		)
 	}
 }
 

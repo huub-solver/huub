@@ -33,7 +33,7 @@ pub(crate) use trace_new_lit;
 use tracing::{debug, trace, warn};
 
 use crate::{
-	Clause, IntVal,
+	Clause, DeepClone, IntVal,
 	actions::{
 		BoolInspectionActions, IntEvent, ReasonActions, ReasoningContext, ReasoningEngine, Trailed,
 		TrailingActions,
@@ -77,13 +77,14 @@ pub(crate) struct AdvisorId(u32);
 
 /// A propagation engine implementing the
 /// [`Propagator`](crate::constraints::Propagator) trait.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, DeepClone, Default)]
 pub struct Engine {
 	/// Storage of the propagators.
 	pub(crate) propagators: Vec<BoxedPropagator>,
 	/// Storage of the branchers.
 	pub(crate) branchers: Vec<BoxedBrancher>,
 	/// Internal State representation of the propagation engine.
+	#[deepclone(clone)]
 	pub(crate) state: State,
 }
 
@@ -396,6 +397,15 @@ impl Engine {
 		} else {
 			self.propagators[prop.index()].advise_of_bool_change(&mut self.state, data)
 		}
+	}
+}
+
+impl Clone for Engine {
+	/// Deep, because a copied engine has to be independent of the original.
+	/// Sharing within it survives: an object a propagator and a brancher both
+	/// hold stays one object, held by both of their copies.
+	fn clone(&self) -> Self {
+		self.deep_clone()
 	}
 }
 
@@ -1166,7 +1176,7 @@ mod tests {
 	use pindakaas::solver::propagation::Propagator as ExternalPropagator;
 
 	use crate::{
-		IntVal,
+		DeepClone, IntVal,
 		actions::{
 			BoolPropagationActions, InitActions, IntDecisionActions, IntEvent, IntInitActions,
 			IntPropCond, IntPropagationActions, ReasoningEngine,
@@ -1194,7 +1204,7 @@ mod tests {
 	fn queued_integer_event_survives_sat_assignment() {
 		use std::{cell::RefCell, rc::Rc};
 
-		#[derive(Clone, Debug)]
+		#[derive(Clone, Debug, DeepClone)]
 		struct ProducerAndListener {
 			req_first: Decision<bool>,
 			notifications: Rc<RefCell<usize>>,

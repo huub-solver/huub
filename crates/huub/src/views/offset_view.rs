@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-	IntSet, IntVal,
+	DeepClone, IntSet, IntVal,
 	actions::{
 		IntAnalyzeActions, IntDecisionActions, IntExplanationActions, IntInspectionActions,
 		IntPropagationActions, PropagationContext, ReasoningContext,
@@ -51,7 +51,7 @@ use crate::{
 ///
 /// See also:
 /// - [`LinearView`] for general linear transformations of integer variables.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct OffsetView<Offset, Var> {
 	/// Offset applied to the decision variable.
 	pub(crate) offset: Offset,

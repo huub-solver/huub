@@ -25,7 +25,7 @@ pub use crate::model::{
 	view::{DefaultView, View},
 };
 use crate::{
-	IntSet, IntVal,
+	DeepClone, IntSet, IntVal,
 	actions::{
 		ConstructionActions, DecisionActions, DeferReasonActions, IntEvent, IntInspectionActions,
 		PropagationActions, PropagationContext, ReasonActions, ReasoningContext, ReasoningEngine,
@@ -114,32 +114,39 @@ pub struct ConstraintId(u32);
 /// # assert_eq!(x + y, 4);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, DeepClone, Default)]
 pub struct Model {
 	/// A base [`Cnf`] object that contains pure Boolean parts of the problem.
+	#[deepclone(clone)]
 	pub(crate) cnf: Cnf,
 	/// A list of constraints that have been added to the model.
 	pub(crate) constraints: Vec<Option<BoxedConstraint>>,
 	/// The definitions of the Boolean decision variables that have been
 	/// created.
+	#[deepclone(clone)]
 	pub(crate) bool_vars: Vec<BoolDecision>,
 	/// The definitions of the integer decision variables that have been
 	/// created.
+	#[deepclone(clone)]
 	pub(crate) int_vars: Vec<IntDecision>,
 	/// A queue of constraints that need to be propagated.
+	#[deepclone(clone)]
 	propagator_queue: PropagatorQueue,
 	/// Fake trailed storage
 	pub(crate) trail: Vec<[u8; 8]>,
 	/// Reference for the current propagator being executed.
+	#[deepclone(clone)]
 	cur_prop: Option<ConstraintId>,
 	/// Integer variable changes that occurred during the execution of the
 	/// current propagator.
+	#[deepclone(clone)]
 	int_events: FxHashMap<u32, IntEvent>,
 	/// Boolean variable changes that occurred during the execution of the
 	/// current propagator.
 	bool_events: Vec<Decision<bool>>,
 
 	/// Definitions of the advisors that are listening to selected changes.
+	#[deepclone(clone)]
 	advisors: Vec<Advisor>,
 }
 
@@ -654,6 +661,15 @@ impl Model {
 	}
 }
 
+impl Clone for Model {
+	/// Deep, because a copied model has to be independent of the original.
+	/// Sharing within it survives: an object two constraints both hold stays
+	/// one object, held by both of their copies.
+	fn clone(&self) -> Self {
+		self.deep_clone()
+	}
+}
+
 impl ConstructionActions for Model {
 	fn new_trailed<T: Bytes>(&mut self, init: T) -> Trailed<T> {
 		self.trail.push(init.to_bytes());
@@ -833,7 +849,7 @@ mod tests {
 	use tracing_test::traced_test;
 
 	use crate::{
-		IntVal,
+		DeepClone, IntVal,
 		actions::{
 			BoolInitActions, BoolInspectionActions, ConstructionActions, IntEvent, IntInitActions,
 			IntInspectionActions, IntPropCond, IntPropagationActions, IntSimplificationActions,
@@ -850,7 +866,7 @@ mod tests {
 
 	/// A constraint that acquires the decisions it constrains after it has been
 	/// posted, and only ever subscribes to the ones it has not seen before.
-	#[derive(Clone, Debug)]
+	#[derive(Clone, Debug, DeepClone)]
 	struct GrowingModel {
 		/// The decisions the constraint has been given so far.
 		decisions: Vec<View<IntVal>>,
@@ -860,7 +876,7 @@ mod tests {
 		advised: Trailed<IntVal>,
 	}
 
-	#[derive(Clone, Debug)]
+	#[derive(Clone, Debug, DeepClone)]
 	struct TestModel {
 		b: View<bool>,
 		i: View<IntVal>,

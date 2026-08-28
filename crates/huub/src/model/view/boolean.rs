@@ -7,8 +7,10 @@ use std::{
 	ops::{Add, Mul, Not, Sub},
 };
 
+use pindakaas::propositional_logic::Formula;
+
 use crate::{
-	IntVal,
+	DeepClone, IntVal,
 	actions::{
 		BoolAnalyzeActions, BoolInspectionActions, BoolPropagationActions,
 		BoolSimplificationActions, IntInspectionActions, IntPropCond, PropagationActions,
@@ -18,14 +20,14 @@ use crate::{
 	model::{
 		Advisor, AdvisorId, ConstraintId, Model, SimplificationContext, SimplificationReasonSink,
 		decision::Decision,
-		expressions::BoolFormula,
+		expressions::bool_formula::BoolFormula,
 		resolved::Resolved,
 		view::{DefaultView, View, private},
 	},
 	solver::{IntLitMeaning, Polarity, activation_list::ActivationAction},
 };
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, DeepClone, Eq, Hash, PartialEq)]
 /// Inner storage for [`BoolDecision`], kept private to prevent access from
 /// users.
 #[non_exhaustive]
@@ -161,11 +163,11 @@ impl Resolved<View<bool>> {
 				Ok(())
 			}
 			(x, y) => {
-				let x = BoolFormula::Atom(View(x));
-				let y = BoolFormula::Atom(View(y));
+				let x = Formula::Atom(View(x));
+				let y = Formula::Atom(View(y));
 
 				ctx.0
-					.post_constraint_internal(BoolFormula::Equiv(vec![x, y]));
+					.post_constraint_internal(BoolFormula(Formula::Equiv(vec![x, y])));
 				Ok(())
 			}
 		}

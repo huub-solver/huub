@@ -2,12 +2,11 @@
 
 use std::{cmp, fmt::Debug};
 
-use dyn_clone::DynClone;
 use itertools::Itertools;
 use rangelist::IntervalIterator;
 
 use crate::{
-	IntSet, IntVal,
+	DeepClone, DynDeepClone, IntSet, IntVal,
 	actions::{
 		BoolInspectionActions, BrancherInitActions, DecisionActions, IntDecisionActions,
 		IntInspectionActions, ReasoningContext, Trailed,
@@ -21,7 +20,7 @@ use crate::{
 
 /// General brancher for Boolean decision variables that makes search decisions
 /// by following a given [`DecisionSelection`] and [`DomainSelection`] strategy.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct BoolBrancher {
 	/// Boolean decision variables to be branched on.
 	vars: Vec<Decision<bool>>,
@@ -42,14 +41,14 @@ pub struct BoolBrancher {
 pub(crate) type BoxedBrancher = Box<dyn for<'a> Brancher<SolvingContext<'a>>>;
 
 /// A trait for making search decisions in the solver.
-pub trait Brancher<D: DecisionActions>: Debug + DynClone {
+pub trait Brancher<D: DecisionActions>: Debug + DynDeepClone {
 	/// Make a next search decision using the given decision actions.
 	fn decide(&mut self, actions: &mut D) -> Directive;
 }
 
 /// Strategy of selecting the next decision variable for a [`BoolBrancher`] or
 /// [`IntBrancher`].
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, DeepClone, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum DecisionSelection {
 	/// Select the unfixed decision variable with the largest remaining domain
@@ -100,7 +99,7 @@ pub enum Directive {
 
 /// Strategy for limiting the domain of a selected decision variable for a
 /// [`BoolBrancher`] or [`IntBrancher`].
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, DeepClone, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum DomainSelection {
 	/// If the domain consists of several contiguous intervals, reduce the
@@ -137,7 +136,7 @@ pub enum DomainSelection {
 
 /// General brancher for integer decision variables that makes search decisions
 /// by following a given [`DecisionSelection`] and [`DomainSelection`] strategy.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, PartialEq)]
 pub struct IntBrancher {
 	/// Integer decision variables to be branched on.
 	vars: Vec<View<IntVal>>,
@@ -163,7 +162,7 @@ pub struct IntBrancher {
 /// A brancher that enforces Boolean conditions and is abandoned when a
 /// conflict is encountered. These branchers are generally used to warm start,
 /// i.e. quickly reach, a (partial) known or expected solution.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, PartialEq)]
 pub struct WarmStartBrancher {
 	/// Boolean conditions to be tried.
 	decisions: Vec<Decision<bool>>,
@@ -300,12 +299,6 @@ where
 
 		// Branch on the selected decision variable using the precomputed polarity.
 		Directive::Select(if self.value { var } else { !var }.into())
-	}
-}
-
-impl Clone for BoxedBrancher {
-	fn clone(&self) -> BoxedBrancher {
-		dyn_clone::clone_box(&**self)
 	}
 }
 

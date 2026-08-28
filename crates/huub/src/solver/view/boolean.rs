@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{
-	IntVal,
+	DeepClone, IntVal,
 	actions::BoolInspectionActions,
 	solver::{
 		Decision,
@@ -25,6 +25,7 @@ use crate::{
 ///
 /// Note that this representation is not meant to be exposed to the user.
 #[non_exhaustive]
+#[derive(DeepClone)]
 pub enum BoolView {
 	/// A Boolean literal in the solver.
 	Lit(Decision<bool>),

@@ -5,7 +5,7 @@ use itertools::Itertools;
 use tracing::trace;
 
 use crate::{
-	IntVal,
+	DeepClone, IntVal,
 	actions::{
 		ConstructionActions, DeferReasonActions, InitActions, IntDecisionActions,
 		IntInspectionActions, IntPropCond, PostingActions, PropagationContext, ReasonActions,
@@ -24,7 +24,7 @@ use crate::{
 /// This constraint enforces that the given a list of integer decision variables
 /// representing the start times of tasks and a list of integer values
 /// representing the durations of tasks, the tasks do not overlap in time.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct Disjunctive {
 	/// Inner propagator.
 	pub(crate) propagator: DisjunctivePropagator<model::View<IntVal>>,
@@ -75,7 +75,7 @@ enum DisjunctivePropagationRule {
 ///   Archives of Control Sciences 18.2 (2008): 159-202.
 /// - Vilím, Petr "Computing explanations for the unary resource constraint."
 ///   CPAIOR 2005.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct DisjunctivePropagator<I> {
 	/// Start time variables of each task.
 	start_times: Vec<I>,
@@ -129,7 +129,7 @@ pub struct DisjunctivePropagator<I> {
 ///
 /// This structure allows efficient updates and queries for ECTs and gray ECTs
 /// as tasks are added, removed, or marked gray. For details, see Vilim (2008).
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 struct OmegaThetaTree {
 	/// Storage of the nodes of the tree.
 	nodes: Vec<OmegaThetaTreeNode>,
@@ -145,7 +145,7 @@ struct OmegaThetaTree {
 }
 
 /// A node structure for the [`OmegaThetaTree`].
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 struct OmegaThetaTreeNode {
 	/// Total duration of the tasks under the tree rooted at this node.
 	total_durations: i64,
@@ -161,7 +161,7 @@ struct OmegaThetaTreeNode {
 }
 
 /// Internal structure to store trailed information about tasks.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 struct TaskInfo {
 	/// Earliest start time of the task.
 	earliest_start: Trailed<IntVal>,

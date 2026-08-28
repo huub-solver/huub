@@ -6,20 +6,20 @@ use std::{
 	ops::{Add, AddAssign, Neg, Sub, SubAssign},
 };
 
-use crate::IntVal;
+use crate::{DeepClone, IntVal};
 
 /// Type alias for an integer value that has double the bit width of [`IntVal`].
 pub(crate) type DoubleIntVal = i128;
 
 /// Marker type indicating that overflow is impossible, and does not need to be
 /// handled by the [`Propagator`](crate::constraints::Propagator).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct OverflowImpossible;
 
 /// Helper trait that defines the capabilities of [`OverflowPossible`] and
 /// [`OverflowImpossible`] that can be used in
 /// [`Propagator`](crate::constraints::Propagator) implementations.
-pub trait OverflowMode: private::Sealed + Clone + fmt::Debug + 'static {
+pub trait OverflowMode: private::Sealed + Clone + DeepClone + fmt::Debug + 'static {
 	/// Constant indicating whether overflow should be handled.
 	const HANDLE_OVERFLOW: bool;
 
@@ -28,6 +28,7 @@ pub trait OverflowMode: private::Sealed + Clone + fmt::Debug + 'static {
 		+ AddAssign
 		+ Copy
 		+ Clone
+		+ DeepClone
 		+ fmt::Debug
 		+ fmt::Display
 		+ From<IntVal>
@@ -42,7 +43,7 @@ pub trait OverflowMode: private::Sealed + Clone + fmt::Debug + 'static {
 
 /// Marker type indicating that overflow might be possible, and should be
 /// handled by the [`Propagator`](crate::constraints::Propagator).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct OverflowPossible;
 
 impl OverflowMode for OverflowImpossible {

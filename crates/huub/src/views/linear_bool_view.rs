@@ -13,7 +13,7 @@ use std::{
 use rangelist::IntervalIterator;
 
 use crate::{
-	IntSet, IntVal,
+	DeepClone, IntSet, IntVal,
 	actions::{
 		BoolAnalyzeActions, BoolInspectionActions, BoolOperations, BoolPropagationActions,
 		BoolSimplificationActions, IntAnalyzeActions, IntDecisionActions, IntExplanationActions,
@@ -58,7 +58,7 @@ use crate::{
 /// // From a boolean variable directly (scale = 1, offset = 0):
 /// let as_int = LinearBoolView::from(v.clone()); // Domain {0, 1}
 /// ```
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct LinearBoolView<Scale, Offset, Var> {
 	/// Scale applied to the decision variable.
 	///

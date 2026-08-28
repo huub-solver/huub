@@ -7,6 +7,7 @@ use std::{
 };
 
 use crate::{
+	DeepClone,
 	actions::{
 		InitActions, IntDecisionActions, IntPropCond, PostingActions, ReasonActions,
 		ReasoningContext, ReasoningEngine,
@@ -26,7 +27,7 @@ use crate::{
 ///
 /// This constraint enforces that the second integer decision variable takes the
 /// absolute value of the first integer decision variable.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct IntAbsBounds<I1, I2, B> {
 	/// The integer decision variable whose absolute value is being taken
 	pub(crate) origin: I1,

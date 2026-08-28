@@ -3,6 +3,7 @@
 use std::{fmt::Debug, hash::Hash, ops::Not};
 
 use crate::{
+	DeepClone,
 	actions::{PropagationActions, PropagationContext, ReasoningContext},
 	model::view::View,
 };
@@ -18,7 +19,7 @@ pub trait BoolInspectionActions<Context: ?Sized>: BoolOperations {
 
 /// Operations that are required to be possible to perform on types acting as
 /// Boolean decision variables.
-pub trait BoolOperations: Clone + Debug + Eq + Hash + Not + 'static {}
+pub trait BoolOperations: Clone + Debug + DeepClone + Eq + Hash + Not + 'static {}
 
 /// Actions available to [`Propagator`](crate::constraints::Propagator) and
 /// [`Constraint`](crate::constraints::Constraint) implementations in
@@ -69,7 +70,7 @@ where
 	) -> Result<(), Context::Conflict>;
 }
 
-impl<T> BoolOperations for T where T: Clone + Debug + Eq + Hash + Not + 'static {}
+impl<T> BoolOperations for T where T: Clone + Debug + DeepClone + Eq + Hash + Not + 'static {}
 
 impl<Ctx> BoolInspectionActions<Ctx> for bool {
 	fn val(&self, _: &Ctx) -> Option<bool> {

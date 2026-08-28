@@ -8,14 +8,14 @@
 use std::cmp;
 
 use crate::{
-	IntVal,
+	DeepClone, IntVal,
 	actions::{InitActions, IntPropCond, PostingActions, ReasoningEngine},
 	constraints::{IntSolverActions, Propagator},
 	solver::{IntLitMeaning, engine::Engine, queue::PriorityLevel},
 };
 
 /// Bounds consistent propagator for the integer `unique` constraint.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct IntUniqueBounds<I> {
 	/// List of integer variables that must take different values.
 	pub(crate) vars: Vec<I>,
@@ -52,7 +52,7 @@ pub struct IntUniqueBounds<I> {
 
 /// Information that is tracked for each variable for the propagation of
 /// [`IntUniqueBounds`].
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 struct UniqueVarMeta {
 	/// Transition for the variable's position in the Hall interval tree.
 	next: usize,

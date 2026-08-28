@@ -5,7 +5,7 @@
 //! each subtree finishes and failing the moment a closed sub-tour appears.
 
 use crate::{
-	IntVal,
+	DeepClone, IntVal,
 	actions::{
 		InitActions, IntInspectionActions, IntPropCond, IntPropagationActions, PostingActions,
 		PropagationActions, ReasoningEngine,
@@ -15,7 +15,7 @@ use crate::{
 };
 
 /// Reusable scratch for the iterative single-root DFS.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 struct CircuitDfs {
 	/// DFS index of each node; `-1` if unvisited.
 	idx: Vec<i64>,
@@ -37,7 +37,7 @@ struct CircuitDfs {
 
 /// The `scc` propagator for the `circuit` and `subcircuit` constraints
 /// (`SUBCIRCUIT` selects the variant).
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct CircuitScc<const SUBCIRCUIT: bool, I> {
 	/// Successor graph plus the shared explanation helpers.
 	graph: CircuitGraph<SUBCIRCUIT, I>,
@@ -46,7 +46,7 @@ pub struct CircuitScc<const SUBCIRCUIT: bool, I> {
 }
 
 /// One pending node in the DFS work-stack, replacing a native call frame.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, DeepClone, Eq, Hash, PartialEq)]
 struct DfsFrame {
 	/// Graph node this frame is exploring.
 	node: usize,
@@ -62,7 +62,7 @@ struct DfsFrame {
 }
 
 /// Reusable scratch for the `scc` algorithm.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub(crate) struct SccScratch {
 	/// The iterative DFS state.
 	dfs: CircuitDfs,

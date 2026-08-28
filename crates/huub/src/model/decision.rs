@@ -3,11 +3,12 @@
 pub(crate) mod boolean;
 pub(crate) mod integer;
 
-use crate::solver::Polarity;
+use crate::{DeepClone, solver::Polarity};
 
 /// A typed handle to a decision variable in a model.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct Decision<T: DecisionReference>(pub(crate) T::Ref);
+#[derive(Clone, Copy, Debug, DeepClone, Eq, Hash, PartialEq)]
+#[deepclone(bound = "T: DecisionReference, T::Ref: Clone")]
+pub struct Decision<T: DecisionReference>(#[deepclone(clone)] pub(crate) T::Ref);
 
 /// Marker trait for types that can be used as model decision references.
 pub trait DecisionReference: private::Sealed + 'static {

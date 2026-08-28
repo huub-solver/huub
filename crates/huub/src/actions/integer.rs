@@ -5,7 +5,7 @@ use std::{fmt::Debug, hash::Hash};
 use rangelist::IntervalIterator;
 
 use crate::{
-	IntSet, IntVal,
+	DeepClone, IntSet, IntVal,
 	actions::{PropagationActions, PropagationContext, ReasoningContext},
 	constraints::NO_REASON,
 	solver::IntLitMeaning,
@@ -121,7 +121,7 @@ where
 
 /// Operations that are required to be possible to perform on types acting as
 /// integer decision variables.
-pub trait IntOperations: Clone + Debug + Eq + Hash + 'static {}
+pub trait IntOperations: Clone + Debug + DeepClone + Eq + Hash + 'static {}
 
 /// The conditions of an integer variable domain change that can trigger a
 /// propagator to be enqueued.
@@ -396,4 +396,4 @@ where
 	}
 }
 
-impl<T> IntOperations for T where T: Clone + Debug + Eq + Hash + 'static {}
+impl<T> IntOperations for T where T: Clone + Debug + DeepClone + Eq + Hash + 'static {}

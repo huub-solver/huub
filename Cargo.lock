@@ -323,6 +323,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "deepclone"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d610034873dccc220be6670fec920e3760a365d524279ca3f5716561f05820a3"
+dependencies = [
+ "deepclone-derive",
+ "rustc-hash",
+]
+
+[[package]]
+name = "deepclone-derive"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0df7c787c15b53efce4e2ffebf8d31846d68e98c37708644aecc8bf548b0729"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "dispatch2"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -350,12 +371,6 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
-
-[[package]]
-name = "dyn-clone"
-version = "1.0.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "either"
@@ -447,7 +462,7 @@ dependencies = [
  "bon",
  "clap",
  "ctrlc",
- "dyn-clone",
+ "deepclone",
  "expect-test",
  "flatzinc-serde",
  "humantime",

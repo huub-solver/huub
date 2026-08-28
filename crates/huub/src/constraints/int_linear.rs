@@ -9,10 +9,11 @@ use itertools::{Either, Itertools};
 use pindakaas::{
 	Lit as RawLit, Unsatisfiable,
 	bool_linear::{BoolLinAggregator, BoolLinExp, BoolLinVariant, BoolLinear},
+	propositional_logic::Formula,
 };
 
 use crate::{
-	IntVal,
+	DeepClone, IntVal,
 	actions::{
 		BoolAnalyzeActions, BoolInitActions, BoolInspectionActions, BoolPropagationActions,
 		BoolSimplificationActions, DeferReasonActions, InitActions, IntAnalyzeActions,
@@ -45,7 +46,7 @@ type DoubleIntVal = i128;
 /// Representation of an integer equality constraint that cannot be unified.
 ///
 /// This constraint enforces that two integer decisions take the same value.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub(crate) struct IntEq {
 	/// The two integer decisions that must be equal.
 	pub(crate) vars: [model::View<IntVal>; 2],
@@ -56,7 +57,7 @@ pub(crate) struct IntEq {
 /// This constraint enforces that a sum of (linear transformations of) integer
 /// decision variables is less than, equal, or not equal to a constant value, or
 /// the implication or reification or whether this is so.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct IntLinear<OF: OverflowMode> {
 	/// The integer linear terms that are being summed.
 	pub(crate) terms: Vec<model::View<IntVal>>,
@@ -74,7 +75,7 @@ pub type IntLinearLessEqBounds<OV, IV> = IntLinearLessEqBoundsImpl<OV, IV, True>
 
 /// Bounds consistent propagator for the `int_lin_le` or `int_lin_le_imp`
 /// constraint.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct IntLinearLessEqBoundsImpl<OV: OverflowMode, IV, BV> {
 	/// Variables that are being summed
 	terms: Vec<IV>,
@@ -98,7 +99,7 @@ pub type IntLinearNotEqValue<OF, IV> = IntLinearNotEqValueImpl<OF, IV, True>;
 
 /// Value consistent propagator for the `int_lin_ne` or `int_lin_ne_imp`
 /// constraint.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct IntLinearNotEqValueImpl<OF: OverflowMode, IV, BV> {
 	/// Decision variables in the summation
 	terms: Vec<IV>,
@@ -112,7 +113,7 @@ pub struct IntLinearNotEqValueImpl<OF: OverflowMode, IV, BV> {
 }
 
 /// Possible operators that can be used for in a linear constraint.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub(crate) enum LinComparator {
 	/// Sum is equal to the constant
 	Equal,
@@ -123,7 +124,7 @@ pub(crate) enum LinComparator {
 }
 
 /// Reification possibilities for a linear constraint.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub(crate) enum Reification {
 	/// The constraint is half-reified by the given [`BoolDecision`].
 	ImpliedBy(model::View<bool>),
@@ -396,10 +397,10 @@ where
 				};
 				match self.reif.unwrap() {
 					Reification::ImpliedBy(r) => {
-						let _ = ctx.post_constraint(BoolFormula::Implies(
-							Box::new(BoolFormula::Atom(r)),
-							Box::new(BoolFormula::Atom(lit)),
-						));
+						let _ = ctx.post_constraint(BoolFormula(Formula::Implies(
+							Box::new(r.into()),
+							Box::new(lit.into()),
+						)));
 					}
 					Reification::ReifiedBy(r) => r.unify(ctx, lit)?,
 				}

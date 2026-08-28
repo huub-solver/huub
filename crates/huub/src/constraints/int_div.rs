@@ -5,7 +5,7 @@
 use std::{mem, num::NonZero, ops::Neg};
 
 use crate::{
-	IntVal,
+	DeepClone, IntVal,
 	actions::{
 		InitActions, IntDecisionActions, IntInspectionActions, IntPropCond, IntPropagationActions,
 		PostingActions, ReasoningEngine, SimplificationActions,
@@ -24,7 +24,7 @@ use crate::{
 ///
 /// This propagator enforces truncating rounding on the result of the division,
 /// and enforces that the denominator is non-zero.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
 pub struct IntDivBounds<I1, I2, I3> {
 	/// The numerator of the division
 	pub(crate) numerator: I1,
@@ -214,22 +214,22 @@ where
 
 		// num >= 0 /\ denom > 0 => res >= 0
 		<BoolFormula as Constraint<E>>::simplify(
-			&mut Or(vec![!Atom(num_pos), !Atom(denom_pos), Atom(res_pos)]),
+			&mut BoolFormula(Or(vec![!Atom(num_pos), !Atom(denom_pos), Atom(res_pos)])),
 			ctx,
 		)?;
 		// num <= 0 /\ denom < 0 => res >= 0
 		<BoolFormula as Constraint<E>>::simplify(
-			&mut Or(vec![!Atom(num_neg), !Atom(denom_neg), Atom(res_pos)]),
+			&mut BoolFormula(Or(vec![!Atom(num_neg), !Atom(denom_neg), Atom(res_pos)])),
 			ctx,
 		)?;
 		// num >= 0 /\ denom < 0 => res >= 0
 		<BoolFormula as Constraint<E>>::simplify(
-			&mut Or(vec![!Atom(num_pos), !Atom(denom_neg), Atom(res_neg)]),
+			&mut BoolFormula(Or(vec![!Atom(num_pos), !Atom(denom_neg), Atom(res_neg)])),
 			ctx,
 		)?;
 		// num <= 0 /\ denom > 0 => res <= 0
 		<BoolFormula as Constraint<E>>::simplify(
-			&mut Or(vec![!Atom(num_neg), !Atom(denom_pos), Atom(res_neg)]),
+			&mut BoolFormula(Or(vec![!Atom(num_neg), !Atom(denom_pos), Atom(res_neg)])),
 			ctx,
 		)?;
 
