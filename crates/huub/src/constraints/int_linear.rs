@@ -31,7 +31,7 @@ use crate::{
 		true_type::True,
 	},
 	lower::{LoweringContext, LoweringError},
-	model::{self, expressions::bool_formula::BoolFormula},
+	model::{self, expressions::proposition::PropositionConstraint},
 	solver::{
 		self, BoolView, Decision, IntLitMeaning, Polarity, queue::PriorityLevel,
 		view::integer::IntView,
@@ -397,7 +397,7 @@ where
 				};
 				match self.reif.unwrap() {
 					Reification::ImpliedBy(r) => {
-						let _ = ctx.post_constraint(BoolFormula(Formula::Implies(
+						let _ = ctx.post_constraint(PropositionConstraint(Formula::Implies(
 							Box::new(r.into()),
 							Box::new(lit.into()),
 						)));

@@ -16,7 +16,7 @@ use crate::{
 	},
 	helpers::div_ceil,
 	lower::{LoweringContext, LoweringError},
-	model::{expressions::bool_formula::BoolFormula, view::View},
+	model::{expressions::proposition::PropositionConstraint, view::View},
 	solver::{IntLitMeaning, engine::Engine, queue::PriorityLevel},
 };
 
@@ -213,23 +213,23 @@ where
 		let res_neg = self.result.lit(ctx, IntLitMeaning::Less(1));
 
 		// num >= 0 /\ denom > 0 => res >= 0
-		<BoolFormula as Constraint<E>>::simplify(
-			&mut BoolFormula(Or(vec![!Atom(num_pos), !Atom(denom_pos), Atom(res_pos)])),
+		<PropositionConstraint as Constraint<E>>::simplify(
+			&mut PropositionConstraint(Or(vec![!Atom(num_pos), !Atom(denom_pos), Atom(res_pos)])),
 			ctx,
 		)?;
 		// num <= 0 /\ denom < 0 => res >= 0
-		<BoolFormula as Constraint<E>>::simplify(
-			&mut BoolFormula(Or(vec![!Atom(num_neg), !Atom(denom_neg), Atom(res_pos)])),
+		<PropositionConstraint as Constraint<E>>::simplify(
+			&mut PropositionConstraint(Or(vec![!Atom(num_neg), !Atom(denom_neg), Atom(res_pos)])),
 			ctx,
 		)?;
 		// num >= 0 /\ denom < 0 => res >= 0
-		<BoolFormula as Constraint<E>>::simplify(
-			&mut BoolFormula(Or(vec![!Atom(num_pos), !Atom(denom_neg), Atom(res_neg)])),
+		<PropositionConstraint as Constraint<E>>::simplify(
+			&mut PropositionConstraint(Or(vec![!Atom(num_pos), !Atom(denom_neg), Atom(res_neg)])),
 			ctx,
 		)?;
 		// num <= 0 /\ denom > 0 => res <= 0
-		<BoolFormula as Constraint<E>>::simplify(
-			&mut BoolFormula(Or(vec![!Atom(num_neg), !Atom(denom_pos), Atom(res_neg)])),
+		<PropositionConstraint as Constraint<E>>::simplify(
+			&mut PropositionConstraint(Or(vec![!Atom(num_neg), !Atom(denom_pos), Atom(res_neg)])),
 			ctx,
 		)?;
 

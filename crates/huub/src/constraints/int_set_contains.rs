@@ -17,7 +17,7 @@ use crate::{
 		NO_REASON, Propagator, SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
-	model::{expressions::bool_formula::BoolFormula, view::View},
+	model::{expressions::proposition::PropositionConstraint, view::View},
 };
 
 /// Representation of the integer `contains` constraint within a model.
@@ -111,8 +111,8 @@ where
 		if self.set.iter().len() == 1 {
 			let lb = *self.set.min().unwrap();
 			let ub = *self.set.max().unwrap();
-			<BoolFormula as Constraint<E>>::to_solver(
-				&BoolFormula(Formula::Equiv(vec![
+			<PropositionConstraint as Constraint<E>>::to_solver(
+				&PropositionConstraint(Formula::Equiv(vec![
 					Formula::And(vec![self.var.geq(lb).into(), self.var.leq(ub).into()]),
 					self.reif.into(),
 				])),
@@ -125,8 +125,11 @@ where
 				.flatten()
 				.map(|v| self.var.eq(v).into())
 				.collect();
-			<BoolFormula as Constraint<E>>::to_solver(
-				&BoolFormula(Formula::Equiv(vec![self.reif.into(), Formula::Or(eq_lits)])),
+			<PropositionConstraint as Constraint<E>>::to_solver(
+				&PropositionConstraint(Formula::Equiv(vec![
+					self.reif.into(),
+					Formula::Or(eq_lits),
+				])),
 				slv,
 			)
 		}

@@ -5,18 +5,20 @@
 //! constraint to the model, or use a `.define()` or `.reify()` helper when the
 //! builder supports creating the result decision variable for you.
 
-pub(crate) mod bool_formula;
 pub(crate) mod element;
 pub(crate) mod linear;
+pub(crate) mod proposition;
 
 use std::{cmp, marker::PhantomData, num::NonZero};
 
 use bon::bon;
 use itertools::{Itertools, MinMaxResult, iproduct};
-use pindakaas::propositional_logic::Formula;
+pub use pindakaas::propositional_logic::Formula as Proposition;
 use rangelist::RangeList;
 
-pub use crate::model::expressions::{element::ElementConstraint, linear::IntLinearExp};
+pub use crate::model::expressions::{
+	element::ElementConstraint, linear::IntLinearExp, proposition::PropositionConstraint,
+};
 use crate::{
 	IntSet, IntVal,
 	actions::{
@@ -41,11 +43,7 @@ use crate::{
 		int_value_precede::{IntSeqPrecedeChainBounds, IntValuePrecedeChainValue},
 	},
 	helpers::overflow::{OverflowImpossible, OverflowPossible},
-	model::{
-		Model, View,
-		expressions::{bool_formula::BoolFormula, linear::Comparator},
-		view::integer::IntView,
-	},
+	model::{Model, View, expressions::linear::Comparator, view::integer::IntView},
 };
 
 #[bon]
@@ -523,15 +521,16 @@ impl Model {
 	#[builder(finish_fn = post)]
 	pub fn proposition(
 		&mut self,
-		#[builder(start_fn, into)] mut formula: BoolFormula,
+		#[builder(start_fn, into)] mut formula: PropositionConstraint,
 		#[builder(setters(name = reif_internal, vis = ""))] reif: Option<Reification>,
 	) -> Result<(), Nogood<View<bool>>> {
 		match reif {
 			Some(Reification::ReifiedBy(b)) => {
-				formula = Formula::Equiv(vec![Formula::Atom(b), formula.0]).into();
+				formula = Proposition::Equiv(vec![Proposition::Atom(b), formula.0]).into();
 			}
 			Some(Reification::ImpliedBy(b)) => {
-				formula = Formula::Implies(Formula::Atom(b).into(), formula.0.into()).into();
+				formula =
+					Proposition::Implies(Proposition::Atom(b).into(), formula.0.into()).into();
 			}
 			None => {}
 		}

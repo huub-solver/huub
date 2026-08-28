@@ -20,7 +20,7 @@ use crate::{
 	model::{
 		Advisor, AdvisorId, ConstraintId, Model, SimplificationContext, SimplificationReasonSink,
 		decision::Decision,
-		expressions::bool_formula::BoolFormula,
+		expressions::proposition::PropositionConstraint,
 		resolved::Resolved,
 		view::{DefaultView, View, private},
 	},
@@ -167,7 +167,7 @@ impl Resolved<View<bool>> {
 				let y = Formula::Atom(View(y));
 
 				ctx.0
-					.post_constraint_internal(BoolFormula(Formula::Equiv(vec![x, y])));
+					.post_constraint_internal(PropositionConstraint(Formula::Equiv(vec![x, y])));
 				Ok(())
 			}
 		}
