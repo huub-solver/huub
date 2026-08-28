@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [101.0.0](https://github.com/huub-solver/huub/compare/huub-cli-v100.1.0...huub-cli-v101.0.0) - 2026-08-28
+
+### Added
+
+- [**breaking**] add time-table-edge-finding to the cumulative propagator ([#374](https://github.com/huub-solver/huub/pull/374))
+- circuit and subcircuit propagators ([#354](https://github.com/huub-solver/huub/pull/354))
+- support additional decision and domain selection strategies
+- MiniZinc assumption interface for UNSAT core reporting
+
+### Fixed
+
+- [**breaking**] build explanations in place to stop allocation churn
+
+### Other
+
+- resolve cargo clippy issues
+- build the reverse map from trace messages
+- use `--cadical-` prefix for CaDiCaL specific options
+
 ## [100.1.0](https://github.com/huub-solver/huub/compare/huub-cli-v100.0.0...huub-cli-v100.1.0) - 2026-06-01
 
 
