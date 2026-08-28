@@ -12,6 +12,7 @@ on:
 env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
+  MACOSX_DEPLOYMENT_TARGET: "12.0" # Match the MiniZinc compiler's deployment target.
   RUST_BACKTRACE: 1
   RUSTUP_MAX_RETRIES: 10
 
@@ -23,32 +24,34 @@ jobs:
   upload-assets:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
     if: github.repository_owner == 'huub-solver' && (startsWith(github.event.release.name, 'huub-v') || github.event_name == 'push' )
     strategy:
       matrix:
+        # Use `manylinux_2_28` images to match the MiniZinc compiler and pin the
+        # glibc baseline to 2.28.
         include:
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-22.04
-          - target: aarch64-apple-darwin
-            os: macos-latest
-          # TODO: Possibly add support (requires work on CaDiCaL compilation)
-          # - target: aarch64-pc-windows-msvc
-          #   os: windows-2022
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-22.04
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-22.04
-          - target: x86_64-apple-darwin
-            os: macos-15-intel
-          - target: x86_64-pc-windows-msvc
-            os: windows-2022
-          - target: x86_64-unknown-freebsd
-            os: ubuntu-22.04
+          - { target: aarch64-unknown-linux-gnu,  os: ubuntu-24.04-arm, container: "quay.io/pypa/manylinux_2_28_aarch64" }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04,     container: "" }
+          - { target: aarch64-apple-darwin,       os: macos-14,         container: "" }
+          - { target: aarch64-pc-windows-msvc,    os: windows-11-arm,   container: "" }
+          - { target: x86_64-unknown-linux-gnu,   os: ubuntu-24.04,     container: "quay.io/pypa/manylinux_2_28_x86_64" }
+          - { target: x86_64-unknown-linux-musl,  os: ubuntu-24.04,     container: "" }
+          - { target: x86_64-apple-darwin,        os: macos-26-intel,   container: "" }
+          - { target: x86_64-pc-windows-msvc,     os: windows-2022,     container: "" }
+          - { target: x86_64-unknown-freebsd,     os: ubuntu-24.04,     container: "" }
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+      # The container runs as root in the runner user's workspace, which git
+      # refuses to read, and lacks the `jq` and `gh` that the upload step needs.
+      - name: Prepare the container
+        run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          dnf install -y jq 'dnf-command(config-manager)'
+          dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+          dnf install -y gh
+        if: matrix.container != ''
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Generate MiniZinc solver configuration
@@ -58,8 +61,8 @@ jobs:
       - uses: taiki-e/setup-cross-toolchain-action@v1
         with:
           target: ${{ matrix.target }}
-        if: startsWith(matrix.os, 'ubuntu') && !contains(matrix.target, '-musl')
-      - uses: taiki-e/install-action@v2.86.1
+        if: matrix.target == 'x86_64-unknown-freebsd'
+      - uses: taiki-e/install-action@v2.86.5
         with:
           tool: cross
         if: contains(matrix.target, '-musl')
