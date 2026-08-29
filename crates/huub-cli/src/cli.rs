@@ -1,22 +1,24 @@
 //! Command-line argument definitions and parsing helpers.
+//!
+//! This module depends on nothing but `clap` and `humantime`, so that the
+//! `xtask` crate can compile it directly (through `#[path]`) to generate the
+//! shell completions and the MiniZinc solver configuration without building the
+//! solver. Anything that requires the `huub` library lives elsewhere in this
+//! crate, including the solver defaults that the `DEFAULT_*` constants below
+//! repeat; `crate::tests::solver_backed_defaults` asserts that the two agree.
 
 use std::{
 	ffi::OsString,
 	fmt::{self, Debug, Write},
-	fs::OpenOptions,
 	io,
 	path::PathBuf,
-	sync::Arc,
 	time::Duration,
 };
 
-use anstream::AutoStream;
 use clap::{
 	ArgAction, Args, ColorChoice, Parser, ValueEnum,
 	builder::{BoolishValueParser, StyledStr, styling::Styles},
 };
-use huub::lower::{Lowerer, ReduceType};
-use tracing_subscriber::fmt::writer::BoxMakeWriter;
 
 /// Long description for the command-line interface.
 const CLI_LONG_ABOUT: &str = r#"Create a Huub Solver instance tailored to a given FlatZinc JSON input file and solve the problem.
@@ -34,6 +36,30 @@ const CLI_SECTION_INIT: &str = "Initialization Options";
 const CLI_SECTION_PROCESSING: &str = "Preprocessing/Inprocessing Options";
 /// Help heading used for search flags.
 const CLI_SECTION_SEARCH: &str = "Search Options";
+/// Default value for the `--cadical-conditioning` flag.
+const DEFAULT_CONDITIONING: bool = false;
+/// Default value for the `--cadical-inprocessing` flag.
+const DEFAULT_INPROCESSING: bool = false;
+/// Default value for the `--int-eager-limit` flag.
+const DEFAULT_INT_EAGER_LIMIT: usize = 255;
+/// Default value for the `--cadical-preprocessing` flag.
+const DEFAULT_PREPROCESSING: usize = 0;
+/// Default value for the `--cadical-preprocessing-light` flag.
+const DEFAULT_PREPROCESSING_LIGHT: bool = false;
+/// Default value for the `--cadical-probing` flag.
+const DEFAULT_PROBING: bool = false;
+/// Default value for the `--cadical-reason-eager` flag.
+const DEFAULT_REASON_EAGER: bool = false;
+/// Default value for the `--cadical-reduce-interval` flag.
+const DEFAULT_REDUCE_INTERVAL: usize = 100;
+/// Default value for the `--restart` flag.
+const DEFAULT_RESTART: bool = false;
+/// Default value for the `--cadical-subsumption` flag.
+const DEFAULT_SUBSUMPTION: bool = false;
+/// Default value for the `--cadical-variable-elimination` flag.
+const DEFAULT_VARIABLE_ELIMINATION: bool = false;
+/// Default value for the `--cadical-vivify` flag.
+const DEFAULT_VIVIFICATION: bool = false;
 
 /// CaDiCaL-specific solver options.
 ///
@@ -43,44 +69,44 @@ const CLI_SECTION_SEARCH: &str = "Search Options";
 #[derive(Args, Debug)]
 pub(crate) struct CadicalOptions {
 	/// Control globally blocked clause elimination (conditioning).
-	#[arg(long = "cadical-conditioning", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_CONDITIONING, help_heading = CLI_SECTION_PROCESSING)]
+	#[arg(long = "cadical-conditioning", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = DEFAULT_CONDITIONING, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) conditioning: bool,
 	/// Control SAT inprocessing during search.
-	#[arg(long = "cadical-inprocessing", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_INPROCESSING, help_heading = CLI_SECTION_PROCESSING)]
+	#[arg(long = "cadical-inprocessing", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = DEFAULT_INPROCESSING, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) inprocessing: bool,
 	/// Run the given number of SAT preprocessing rounds before search.
 	#[arg(
 		long = "cadical-preprocessing",
 		value_name = "usize",
-		default_value_t = Lowerer::DEFAULT_PREPROCESSING,
+		default_value_t = DEFAULT_PREPROCESSING,
 		help_heading = CLI_SECTION_PROCESSING
 	)]
 	pub(crate) preprocessing: usize,
 	/// Whether to enable CaDiCaL's light preprocessing.
-	#[arg(long = "cadical-preprocessing-light", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_PREPROCESSING_LIGHT, help_heading = CLI_SECTION_PROCESSING)]
+	#[arg(long = "cadical-preprocessing-light", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = DEFAULT_PREPROCESSING_LIGHT, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) preprocessing_light: bool,
 	/// Control failed-literal probing in the SAT solver.
-	#[arg(long = "cadical-probing", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_PROBING, help_heading = CLI_SECTION_PROCESSING)]
+	#[arg(long = "cadical-probing", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = DEFAULT_PROBING, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) probing: bool,
 	/// Request explanation clauses for all literals propagated at the conflict
 	/// level.
-	#[arg(long = "cadical-reason-eager", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_REASON_EAGER, help_heading = CLI_SECTION_PROCESSING)]
+	#[arg(long = "cadical-reason-eager", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = DEFAULT_REASON_EAGER, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) reason_eager: bool,
 	/// Set the interval (in conflicts) between clause-database reductions.
-	#[arg(long = "cadical-reduce-interval", value_name = "usize", default_value_t = Lowerer::DEFAULT_REDUCE_INTERVAL, help_heading = CLI_SECTION_PROCESSING)]
+	#[arg(long = "cadical-reduce-interval", value_name = "usize", default_value_t = DEFAULT_REDUCE_INTERVAL, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) reduce_interval: usize,
 	/// Set the function used to compute the target size of the learned clause
 	/// database when it is reduced.
 	#[arg(long = "cadical-reduce-type", value_enum, value_name = "type", default_value_t = CliReduceType::Sqrt, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) reduce_type: CliReduceType,
 	/// Control global forward subsumption in the SAT solver.
-	#[arg(long = "cadical-subsumption", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_SUBSUMPTION, help_heading = CLI_SECTION_PROCESSING)]
+	#[arg(long = "cadical-subsumption", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = DEFAULT_SUBSUMPTION, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) subsumption: bool,
 	/// Control bounded variable elimination in the SAT solver.
-	#[arg(long = "cadical-variable-elimination", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_VARIABLE_ELIMINATION, help_heading = CLI_SECTION_PROCESSING)]
+	#[arg(long = "cadical-variable-elimination", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = DEFAULT_VARIABLE_ELIMINATION, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) variable_elimination: bool,
 	/// Control clause vivification.
-	#[arg(long = "cadical-vivify", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_VIVIFICATION, help_heading = CLI_SECTION_PROCESSING)]
+	#[arg(long = "cadical-vivify", action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = DEFAULT_VIVIFICATION, help_heading = CLI_SECTION_PROCESSING)]
 	pub(crate) vivification: bool,
 }
 
@@ -158,11 +184,11 @@ pub struct Cli<'a> {
 	pub(crate) color: ColorChoice,
 
 	/// Maximum domain size for eagerly creating order literals.
-	#[arg(long, value_name = "usize", default_value_t = Lowerer::DEFAULT_INT_EAGER_LIMIT, help_heading = CLI_SECTION_INIT)]
+	#[arg(long, value_name = "usize", default_value_t = DEFAULT_INT_EAGER_LIMIT, help_heading = CLI_SECTION_INIT)]
 	pub(crate) int_eager_limit: usize,
 
 	/// Control whether the solver may restart, overwritten by `-f`.
-	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = Lowerer::DEFAULT_RESTART, help_heading = CLI_SECTION_SEARCH)]
+	#[arg(long, action = ArgAction::Set, value_parser = BoolishValueParser::new(), value_name = "bool", default_value_t = DEFAULT_RESTART, help_heading = CLI_SECTION_SEARCH)]
 	pub(crate) restart: bool,
 	/// Set the overarching search strategy used by the solver, overwritten by
 	/// `-f`.
@@ -274,44 +300,6 @@ fn parse_time_limit(s: &str) -> Result<Duration, humantime::DurationError> {
 }
 
 impl<'a> Cli<'a> {
-	/// Collect the active tracing targets after applying user overrides.
-	pub(crate) fn trace_targets(&self) -> Vec<String> {
-		let mut trace_targets = vec!["solver".to_owned(), "flatzinc".to_owned()];
-		trace_targets.extend(self.trace_target.iter().cloned());
-		for target in &self.no_trace_target {
-			trace_targets.retain(|value| value != target);
-		}
-		trace_targets
-	}
-
-	/// Build the tracing writer and whether ANSI colors should be enabled.
-	pub(crate) fn trace_writer(&self) -> Result<(BoxMakeWriter, bool), String> {
-		match &self.log_file {
-			Some(path) => {
-				let file = OpenOptions::new()
-					.create(true)
-					.write(true)
-					.truncate(true)
-					.open(path)
-					.map_err(|err| {
-						format!("Unable to open log file “{}”: {err}", path.display())
-					})?;
-				Ok((BoxMakeWriter::new(Arc::new(file)), false))
-			}
-			None => Ok((
-				BoxMakeWriter::new(io::stderr),
-				match self.color {
-					ColorChoice::Always => true,
-					ColorChoice::Never => false,
-					ColorChoice::Auto => !matches!(
-						AutoStream::choice(&io::stderr()),
-						anstream::ColorChoice::Never
-					),
-				},
-			)),
-		}
-	}
-
 	/// Set the writer that is used for the standard (solution) output.
 	pub fn with_stdout<'new, W: io::Write + 'new>(self, stdout: W) -> Cli<'new> {
 		Cli {
@@ -392,22 +380,11 @@ impl Debug for Cli<'_> {
 	}
 }
 
-impl From<CliReduceType> for ReduceType {
-	fn from(value: CliReduceType) -> Self {
-		match value {
-			CliReduceType::Prct => ReduceType::Percent,
-			CliReduceType::Sqrt => ReduceType::Sqrt,
-			CliReduceType::Log => ReduceType::Log,
-		}
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use std::{path::PathBuf, time::Duration};
 
 	use clap::ColorChoice;
-	use huub::lower::{Lowerer, ReduceType};
 
 	use crate::cli::{Cli, CliReduceType};
 
@@ -507,10 +484,6 @@ mod tests {
 		.unwrap();
 
 		assert_eq!(cli.cadical.reduce_type, CliReduceType::Prct);
-		assert_eq!(
-			ReduceType::from(cli.cadical.reduce_type),
-			ReduceType::Percent
-		);
 		assert_eq!(cli.cadical.reduce_interval, 250);
 
 		for (input, expected) in [
@@ -535,37 +508,6 @@ mod tests {
 	}
 
 	#[test]
-	fn solver_backed_defaults() {
-		let cli = Cli::try_parse_from(["huub", "instance.fzn.json"]).unwrap();
-
-		assert_eq!(cli.int_eager_limit, Lowerer::DEFAULT_INT_EAGER_LIMIT);
-		assert_eq!(cli.restart, Lowerer::DEFAULT_RESTART);
-		assert_eq!(cli.cadical.conditioning, Lowerer::DEFAULT_CONDITIONING);
-		assert_eq!(cli.cadical.inprocessing, Lowerer::DEFAULT_INPROCESSING);
-		assert_eq!(cli.cadical.preprocessing, Lowerer::DEFAULT_PREPROCESSING);
-		assert_eq!(
-			cli.cadical.preprocessing_light,
-			Lowerer::DEFAULT_PREPROCESSING_LIGHT
-		);
-		assert_eq!(cli.cadical.probing, Lowerer::DEFAULT_PROBING);
-		assert_eq!(cli.cadical.reason_eager, Lowerer::DEFAULT_REASON_EAGER);
-		assert_eq!(
-			cli.cadical.reduce_interval,
-			Lowerer::DEFAULT_REDUCE_INTERVAL
-		);
-		assert_eq!(
-			ReduceType::from(cli.cadical.reduce_type),
-			Lowerer::DEFAULT_REDUCE_TYPE
-		);
-		assert_eq!(cli.cadical.subsumption, Lowerer::DEFAULT_SUBSUMPTION);
-		assert_eq!(
-			cli.cadical.variable_elimination,
-			Lowerer::DEFAULT_VARIABLE_ELIMINATION
-		);
-		assert_eq!(cli.cadical.vivification, Lowerer::DEFAULT_VIVIFICATION);
-	}
-
-	#[test]
 	fn string_args() {
 		let cli = Cli::try_parse_from([
 			"huub",
@@ -579,10 +521,8 @@ mod tests {
 		])
 		.unwrap();
 
-		assert_eq!(
-			cli.trace_targets(),
-			vec!["flatzinc".to_owned(), "brancher".to_owned()]
-		);
+		assert_eq!(cli.trace_target, vec!["brancher".to_owned()]);
+		assert_eq!(cli.no_trace_target, vec!["solver".to_owned()]);
 		assert_eq!(cli.log_file.unwrap().to_string_lossy(), "huub.log");
 	}
 

@@ -1,5 +1,17 @@
 //! Workspace automation tasks for the Huub repository.
 
+// The Huub command-line interface is compiled into `xtask` directly, rather
+// than depended upon through the `huub-cli` crate, so that generating the shell
+// completions and the MiniZinc solver configuration does not require building
+// the solver. `cli.rs` is kept free of any dependency on the `huub` library for
+// this reason.
+#[path = "../../crates/huub-cli/src/cli.rs"]
+#[expect(
+	dead_code,
+	unreachable_pub,
+	reason = "xtask only inspects the interface, it never parses arguments with it"
+)]
+mod cli;
 mod completion;
 mod mzn_config;
 mod stage;

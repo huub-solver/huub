@@ -3,12 +3,15 @@
 
 use std::{
 	fmt::{self, Display},
-	io::Write,
+	fs::OpenOptions,
+	io::{self, Write},
 	num::NonZeroI32,
 	str::FromStr,
 	sync::{Arc, Mutex},
 };
 
+use anstream::AutoStream;
+use clap::ColorChoice;
 use flatzinc_serde::{FlatZinc, Type, Variable};
 use huub::{model::deserialize::flatzinc::FznIdent, solver::IntLitMeaning};
 use rustc_hash::FxHashMap;
@@ -25,9 +28,12 @@ use tracing_subscriber::{
 		FormatFields, MakeWriter,
 		format::{DefaultFields, Writer},
 		time::uptime,
+		writer::BoxMakeWriter,
 	},
 	layer::{Context, SubscriberExt},
 };
+
+use crate::cli::Cli;
 
 /// A [`tracing_subscriber::FormatFields`] implementation that attempts to
 /// format literals and integer variables according to their FlatZinc names,
@@ -244,6 +250,46 @@ pub(crate) fn parse_int_list<T: FromStr>(value: &dyn fmt::Debug) -> Option<Vec<T
 		.split(',')
 		.map(|item| item.trim().parse().ok())
 		.collect()
+}
+
+impl Cli<'_> {
+	/// Collect the active tracing targets after applying user overrides.
+	pub(crate) fn trace_targets(&self) -> Vec<String> {
+		let mut trace_targets = vec!["solver".to_owned(), "flatzinc".to_owned()];
+		trace_targets.extend(self.trace_target.iter().cloned());
+		for target in &self.no_trace_target {
+			trace_targets.retain(|value| value != target);
+		}
+		trace_targets
+	}
+
+	/// Build the tracing writer and whether ANSI colors should be enabled.
+	pub(crate) fn trace_writer(&self) -> Result<(BoxMakeWriter, bool), String> {
+		match &self.log_file {
+			Some(path) => {
+				let file = OpenOptions::new()
+					.create(true)
+					.write(true)
+					.truncate(true)
+					.open(path)
+					.map_err(|err| {
+						format!("Unable to open log file “{}”: {err}", path.display())
+					})?;
+				Ok((BoxMakeWriter::new(Arc::new(file)), false))
+			}
+			None => Ok((
+				BoxMakeWriter::new(io::stderr),
+				match self.color {
+					ColorChoice::Always => true,
+					ColorChoice::Never => false,
+					ColorChoice::Auto => !matches!(
+						AutoStream::choice(&io::stderr()),
+						anstream::ColorChoice::Never
+					),
+				},
+			)),
+		}
+	}
 }
 
 impl FmtLitFields {
@@ -642,5 +688,28 @@ impl<S: Subscriber> Layer<S> for ReverseMapLayer {
 		let mut rec = RegistrationEvent::default();
 		event.record(&mut rec);
 		self.map.lock().unwrap().register(&self.fzn, rec);
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::cli::Cli;
+
+	#[test]
+	fn trace_target_overrides() {
+		let cli = Cli::try_parse_from([
+			"huub",
+			"--trace-target",
+			"brancher",
+			"--no-trace-target",
+			"solver",
+			"instance.fzn.json",
+		])
+		.unwrap();
+
+		assert_eq!(
+			cli.trace_targets(),
+			vec!["flatzinc".to_owned(), "brancher".to_owned()]
+		);
 	}
 }

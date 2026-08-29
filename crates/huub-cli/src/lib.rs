@@ -37,7 +37,7 @@ use std::{
 
 use flatzinc_serde::{FlatZinc, Literal, Method, NamedRef, Variable, helpers::ArcKey};
 use huub::{
-	lower::LoweringError,
+	lower::{LoweringError, ReduceType},
 	model::deserialize::{
 		Goal,
 		flatzinc::{FlatZincError, FznIdent, HuubFlatZinc},
@@ -53,7 +53,7 @@ use tracing::{subscriber::set_default, warn};
 
 pub use crate::cli::Cli;
 use crate::{
-	cli::{CliSearchStrategy, CliSearchTrigger},
+	cli::{CliReduceType, CliSearchStrategy, CliSearchTrigger},
 	trace::ReverseMap,
 };
 
@@ -423,6 +423,16 @@ impl<'a> Cli<'a> {
 	}
 }
 
+impl From<CliReduceType> for ReduceType {
+	fn from(value: CliReduceType) -> Self {
+		match value {
+			CliReduceType::Prct => ReduceType::Percent,
+			CliReduceType::Sqrt => ReduceType::Sqrt,
+			CliReduceType::Log => ReduceType::Log,
+		}
+	}
+}
+
 impl SolutionWrap<'_> {
 	/// Method used to print a literal that is part of a solution.
 	fn print_lit(&self, lit: &Literal<FznIdent>) -> String {
@@ -471,5 +481,53 @@ impl Display for SolutionWrap<'_> {
 			}
 		}
 		writeln!(f, "{FZN_SEPARATOR}")
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use huub::lower::{Lowerer, ReduceType};
+
+	use crate::cli::{Cli, CliReduceType};
+
+	#[test]
+	fn reduce_type_conversion() {
+		assert_eq!(ReduceType::from(CliReduceType::Prct), ReduceType::Percent);
+		assert_eq!(ReduceType::from(CliReduceType::Sqrt), ReduceType::Sqrt);
+		assert_eq!(ReduceType::from(CliReduceType::Log), ReduceType::Log);
+	}
+
+	/// The [`Cli`] defaults are spelled out in `cli.rs`, so that the module can
+	/// be compiled without the `huub` library. This test is what keeps them
+	/// from drifting away from the values that [`Lowerer`] uses.
+	#[test]
+	fn solver_backed_defaults() {
+		let cli = Cli::try_parse_from(["huub", "instance.fzn.json"]).unwrap();
+
+		assert_eq!(cli.int_eager_limit, Lowerer::DEFAULT_INT_EAGER_LIMIT);
+		assert_eq!(cli.restart, Lowerer::DEFAULT_RESTART);
+		assert_eq!(cli.cadical.conditioning, Lowerer::DEFAULT_CONDITIONING);
+		assert_eq!(cli.cadical.inprocessing, Lowerer::DEFAULT_INPROCESSING);
+		assert_eq!(cli.cadical.preprocessing, Lowerer::DEFAULT_PREPROCESSING);
+		assert_eq!(
+			cli.cadical.preprocessing_light,
+			Lowerer::DEFAULT_PREPROCESSING_LIGHT
+		);
+		assert_eq!(cli.cadical.probing, Lowerer::DEFAULT_PROBING);
+		assert_eq!(cli.cadical.reason_eager, Lowerer::DEFAULT_REASON_EAGER);
+		assert_eq!(
+			cli.cadical.reduce_interval,
+			Lowerer::DEFAULT_REDUCE_INTERVAL
+		);
+		assert_eq!(
+			ReduceType::from(cli.cadical.reduce_type),
+			Lowerer::DEFAULT_REDUCE_TYPE
+		);
+		assert_eq!(cli.cadical.subsumption, Lowerer::DEFAULT_SUBSUMPTION);
+		assert_eq!(
+			cli.cadical.variable_elimination,
+			Lowerer::DEFAULT_VARIABLE_ELIMINATION
+		);
+		assert_eq!(cli.cadical.vivification, Lowerer::DEFAULT_VIVIFICATION);
 	}
 }

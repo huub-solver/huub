@@ -13,7 +13,7 @@ repository.workspace = true
 [dependencies]
 clap = { workspace = true }
 clap_complete = { workspace = true }
-huub-cli = { path = "../crates/huub-cli" }
+humantime = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 

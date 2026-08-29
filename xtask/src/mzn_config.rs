@@ -6,7 +6,7 @@ use clap::{Arg, ArgAction, Command, CommandFactory, Parser};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::default_stage_dir;
+use crate::{cli::Cli, default_stage_dir};
 
 /// Serialized MiniZinc extra flag entry.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -155,7 +155,7 @@ fn public_args(command: &Command) -> impl Iterator<Item = &Arg> {
 
 /// Build the MiniZinc solver configuration from the Clap command metadata.
 fn solver_config() -> SolverConfig {
-	let command = huub_cli::Cli::<'static>::command();
+	let command = Cli::<'static>::command();
 	SolverConfig {
 		name: "Huub".to_owned(),
 		version: env!("CARGO_PKG_VERSION"),

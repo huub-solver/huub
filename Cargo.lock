@@ -1078,7 +1078,7 @@ version = "100.1.0"
 dependencies = [
  "clap",
  "clap_complete",
- "huub-cli",
+ "humantime",
  "serde",
  "serde_json",
 ]

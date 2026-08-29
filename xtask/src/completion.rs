@@ -5,7 +5,7 @@ use std::{fs, path::PathBuf};
 use clap::{CommandFactory, Parser};
 use clap_complete::{Shell, generate};
 
-use crate::default_stage_dir;
+use crate::{cli::Cli, default_stage_dir};
 
 /// Arguments for completion generation.
 #[derive(Parser)]
@@ -24,7 +24,7 @@ impl CompletionsArgs {
 	pub(crate) fn run(self) {
 		let shells = self.selected_shells();
 
-		let mut command = huub_cli::Cli::<'static>::command();
+		let mut command = Cli::<'static>::command();
 		let command_name = command.get_name().to_owned();
 
 		for (shell, path) in shells {
@@ -88,11 +88,11 @@ mod tests {
 	use clap::CommandFactory;
 	use clap_complete::generate;
 
-	use crate::completion::Shell;
+	use crate::{cli::Cli, completion::Shell};
 
 	#[test]
 	fn bash_completion_contains_flags() {
-		let mut command = huub_cli::Cli::<'static>::command();
+		let mut command = Cli::<'static>::command();
 		let command_name = command.get_name().to_owned();
 		let mut completion = Vec::new();
 		generate(
