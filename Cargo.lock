@@ -324,9 +324,9 @@ dependencies = [
 
 [[package]]
 name = "deepclone"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d610034873dccc220be6670fec920e3760a365d524279ca3f5716561f05820a3"
+checksum = "8bdde7e02a9b8cf0ca59232f5e470de2863e63e898273253b52484bd8d9b284f"
 dependencies = [
  "deepclone-derive",
  "rustc-hash",
@@ -334,9 +334,9 @@ dependencies = [
 
 [[package]]
 name = "deepclone-derive"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0df7c787c15b53efce4e2ffebf8d31846d68e98c37708644aecc8bf548b0729"
+checksum = "c0aa6e13102fbc4f7f4038b5fdd54436a7ec4d943b0242dcf58dcf66d2604825"
 dependencies = [
  "proc-macro2",
  "quote",
