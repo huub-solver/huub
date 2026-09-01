@@ -476,8 +476,8 @@ impl Visit for RegistrationEvent {
 	fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
 		match field.name() {
 			"message" => {
-				// Write message on the stack to avoid heap allocation, and immediately
-				// convert it to a `RegistrationKind`.
+				// Write message on the stack to avoid heap allocation, and
+				// immediately convert it to a `RegistrationKind`.
 				const CAP: usize = "register solver bool-backed int".len();
 				let mut buf = [0_u8; CAP];
 				let mut tail: &mut [u8] = &mut buf;
@@ -600,18 +600,20 @@ impl ReverseMap {
 				let Some(var) = self.solver_int(int_var as usize).cloned() else {
 					return;
 				};
-				// `dom` is a flat list of inclusive range bounds; the domain values
-				// in ascending order are the concatenation of those ranges.
+				// `dom` is a flat list of inclusive range bounds; the domain
+				// values in ascending order are the concatenation of those
+				// ranges.
 				let values = || dom.as_chunks::<2>().0.iter().flat_map(|c| c[0]..=c[1]);
-				// The order literal at `order + k` means `< values[k + 1]`, so one is
-				// created for every domain value except the first.
+				// The order literal at `order + k` means `< values[k + 1]`, so
+				// one is created for every domain value except the first.
 				if let Some(order) = event.order.filter(|&o| o != 0) {
 					for (k, val) in values().skip(1).enumerate() {
 						self.insert_int_lit(order + k as i32, &var, IntLitMeaning::Less(val));
 					}
 				}
-				// The equality literal at `eq + k` means `== values[k + 1]`, so one is
-				// created for every domain value except the first and the last.
+				// The equality literal at `eq + k` means `== values[k + 1]`, so
+				// one is created for every domain value except the first
+				// and the last.
 				if let Some(eq) = event.eq.filter(|&e| e != 0) {
 					let mut it = values();
 					it.next_back();

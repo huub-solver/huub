@@ -54,15 +54,16 @@ where
 		self.vars.retain(|v| v.min(ctx) <= max_min);
 		debug_assert!(!self.vars.is_empty());
 
-		// If there is only one variable left, unify it with the minimum value and
-		// subsume the constraint.
+		// If there is only one variable left, unify it with the minimum value
+		// and subsume the constraint.
 		if self.vars.len() == 1 {
 			self.vars[0].unify(ctx, self.min.clone())?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
 
-		// If the minimum value is known and one of the variables is equal to it,
-		// tighten the minimum bounds of the others and subsume the constraint.
+		// If the minimum value is known and one of the variables is equal to
+		// it, tighten the minimum bounds of the others and subsume the
+		// constraint.
 		if let Some(c) = self.min.val(ctx)
 			&& self.vars.iter().any(|v| v.val(ctx) == Some(c))
 		{
@@ -120,7 +121,8 @@ where
 			reason.push(min_ub_var.max_lit(ctx));
 		})?;
 
-		// set y to be greater than or equal to the minimum of lower bounds of x_i
+		// set y to be greater than or equal to the minimum of lower bounds of
+		// x_i
 		let min_lb = self.vars.iter().map(|x| x.min(ctx)).min().unwrap();
 		self.min.tighten_min(ctx, min_lb, |ctx, reason| {
 			reason.extend(

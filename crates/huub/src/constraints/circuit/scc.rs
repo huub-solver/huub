@@ -159,7 +159,8 @@ impl<const SUBCIRCUIT: bool, I> CircuitScc<SUBCIRCUIT, I> {
 		I: IntInspectionActions<E> + IntSolverActions<Engine>,
 	{
 		// The domain bounds for variables should exclude out-of-range values
-		// that would otherwise satisfy the constraint without forming a valid cycle.
+		// that would otherwise satisfy the constraint without forming a valid
+		// cycle.
 		let max_node = offset + vars.len() as IntVal - 1;
 		assert!(
 			vars.iter()
@@ -202,8 +203,8 @@ where
 	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		let Self { graph, scratch } = self;
-		// The node count is fixed at construction, and the `circuit` / `subcircuit`
-		// builders never post the propagator below two nodes.
+		// The node count is fixed at construction, and the `circuit` /
+		// `subcircuit` builders never post the propagator below two nodes.
 		let n = graph.vars.len();
 		debug_assert!(n >= 2, "circuit scc posted with fewer than two nodes");
 
@@ -248,7 +249,8 @@ where
 			let (numback, backfrom, backto) =
 				scratch.explore_subtree(graph, ctx, child, prev_lo, prev_hi, k)?;
 
-			// Snapshot the subtree just explored and the still-unexplored nodes.
+			// Snapshot the subtree just explored and the still-unexplored
+			// nodes.
 			scratch.this_subtree.clear();
 			scratch
 				.this_subtree
@@ -284,16 +286,17 @@ where
 					graph.push_no_edge(ctx, reason, &reached, &unreached, None);
 				}));
 			}
-			// `subcircuit`: if a reached node must lie on the cycle, every unreached
-			// node is off it and must self-loop. Every one of those fixes has the same
-			// reason.
+			// `subcircuit`: if a reached node must lie on the cycle, every
+			// unreached node is off it and must self-loop. Every one of
+			// those fixes has the same reason.
 			if let Some(w_in) = reached.iter().copied().find(|&q| graph.forced_in(ctx, q)) {
 				let reason = reason_ty::<E::PropagationContext<'_>, _>(|ctx, reason| {
 					graph.push_forced_in(ctx, reason, w_in);
 					graph.push_no_edge(ctx, reason, &reached, &unreached, None);
 				});
-				// `fix` is sound when redundant and fails when the self-loop is absent
-				// (an unreached forced-in node ⇒ a genuine conflict), so do not gate it.
+				// `fix` is sound when redundant and fails when the self-loop is
+				// absent (an unreached forced-in node ⇒ a genuine
+				// conflict), so do not gate it.
 				for &u in &unreached {
 					graph.vars[u].fix(ctx, graph.edge_val(u), reason)?;
 				}
@@ -301,8 +304,8 @@ where
 			return Ok(());
 		}
 
-		// Prune-root: with ≥2 subtrees the root may only enter the last one. The
-		// witness and reason are the same for every pruned root edge.
+		// Prune-root: with ≥2 subtrees the root may only enter the last one.
+		// The witness and reason are the same for every pruned root edge.
 		if k >= 2 {
 			let e_set = scratch.blocks(n, |s| s < k);
 			let l_set = scratch.blocks(n, |s| s == k);
@@ -501,9 +504,9 @@ impl SccScratch {
 			} else {
 				None
 			};
-			// `c_set` reaches nothing outside but `p`, so one reason justifies pruning
-			// both the down edge `p -> c` and every incoming edge `o -> p` (Chuffed
-			// shares the same clause).
+			// `c_set` reaches nothing outside but `p`, so one reason justifies
+			// pruning both the down edge `p -> c` and every incoming edge `o
+			// -> p` (Chuffed shares the same clause).
 			let reason = reason_ty::<C, _>(|ctx, reason| {
 				if let Some((aw, bw)) = wit {
 					graph.push_forced_in(ctx, reason, aw);
@@ -515,7 +518,8 @@ impl SccScratch {
 				graph.vars[p].remove_val(ctx, graph.edge_val(c), reason)?;
 			}
 			// The strengthened incoming prune holds for `circuit` only: in
-			// `subcircuit` an outside node may still enter `p` when `c_set` is excluded.
+			// `subcircuit` an outside node may still enter `p` when `c_set` is
+			// excluded.
 			if !SUBCIRCUIT {
 				let pv = graph.edge_val(p);
 				for &o in &a_set {
@@ -558,8 +562,9 @@ impl SccScratch {
 		}
 		let mut witnesses = None;
 		if SUBCIRCUIT {
-			// Only a contradiction if a forced-in node lies on each side. Check that
-			// before materialising the two node sets, since it usually fails.
+			// Only a contradiction if a forced-in node lies on each side. Check
+			// that before materialising the two node sets, since it usually
+			// fails.
 			let (Some(w_in), Some(w_out)) = (
 				(0..n).find(|&q| self.membership[q] && graph.forced_in(ctx, q)),
 				(0..n).find(|&q| !self.membership[q] && graph.forced_in(ctx, q)),
@@ -615,16 +620,18 @@ impl SccScratch {
 				self.dfs.work_stack.last_mut().unwrap().cursor += 1;
 				let iw = self.dfs.idx[w];
 				if iw != -1 {
-					// Visited neighbour: classify the arc, then fold its index into
-					// the low-link.
+					// Visited neighbour: classify the arc, then fold its index
+					// into the low-link.
 					let iw = iw as usize;
 					if iw >= prev_lo && iw <= prev_hi {
-						// Back arc to the previous subtree (the root for the first one).
+						// Back arc to the previous subtree (the root for the
+						// first one).
 						numback += 1;
 						backfrom = node;
 						backto = w;
 					} else if iw < prev_lo {
-						// Arc to an earlier subtree (or the root for `t >= 2`): a skip arc.
+						// Arc to an earlier subtree (or the root for `t >= 2`):
+						// a skip arc.
 						self.skip_edges.push((node, w));
 					}
 					if (iw as i64) < self.dfs.low[node] {
@@ -643,22 +650,24 @@ impl SccScratch {
 				self.dfs.neighbours.truncate(frame.nbr_start);
 				self.dfs.subtree_hi[frame.node] = self.dfs.next;
 
-				// prune-within: the first child's subtree reaches nothing above its
-				// parent (`low[c] >= idx[parent]`).
+				// prune-within: the first child's subtree reaches nothing above
+				// its parent (`low[c] >= idx[parent]`).
 				if let Some(c) = frame.first_child
 					&& self.dfs.low[c] >= self.dfs.idx[frame.node]
 				{
 					self.within_edges.push((frame.node, c));
 				}
 
-				// Discovered a subtour and check conflict / pruning reasons for it.
+				// Discovered a subtour and check conflict / pruning reasons for
+				// it.
 				if self.dfs.low[frame.node] == self.dfs.idx[frame.node]
 					&& let Some(conflict) = self.closed_conflict(graph, ctx, frame.node)
 				{
 					return Err(conflict);
 				}
 
-				// Fold this node's low-link into its parent (the post-recursion update).
+				// Fold this node's low-link into its parent (the post-recursion
+				// update).
 				if let Some(parent) = self.dfs.work_stack.last() {
 					let p = parent.node;
 					if self.dfs.low[frame.node] < self.dfs.low[p] {
@@ -723,8 +732,8 @@ mod tests {
 	#[traced_test]
 	fn test_scc_detects_closed_subset_reachable_from_root() {
 		let mut slv = Solver::default();
-		// 1-based values; only node 0 points to value 1 (=node 0), so {1,2,3} has
-		// no edge out.
+		// 1-based values; only node 0 points to value 1 (=node 0), so {1,2,3}
+		// has no edge out.
 		let vars = [
 			IntSet::from(2..=4),               // 0 -> nodes 1,2,3
 			IntSet::from(3..=4),               // 1 -> nodes 2,3
@@ -752,8 +761,8 @@ mod tests {
 	#[test]
 	#[traced_test]
 	fn test_scc_detects_disconnection_one_round() {
-		// `scc` alone: {0,1} and {2,3} never point at each other, so a single round
-		// detects the disconnection.
+		// `scc` alone: {0,1} and {2,3} never point at each other, so a single
+		// round detects the disconnection.
 		let mut slv = Solver::default();
 		let vars = [1..=2, 1..=2, 3..=4, 3..=4].map(|dom| {
 			slv.new_int_decision(dom)
@@ -773,8 +782,8 @@ mod tests {
 	#[test]
 	#[should_panic(expected = "domains must exclude out-of-range values")]
 	fn test_scc_post_rejects_out_of_range_successor() {
-		// The same precondition holds for `scc`; here a successor can still take
-		// `4`, one past the 3-node range `1..=3`.
+		// The same precondition holds for `scc`; here a successor can still
+		// take `4`, one past the 3-node range `1..=3`.
 		let mut slv: Solver = Solver::default();
 		let vars = [1..=3, 1..=3, 1..=4].map(|dom| {
 			slv.new_int_decision(dom)

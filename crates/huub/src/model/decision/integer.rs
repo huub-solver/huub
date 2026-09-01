@@ -394,7 +394,8 @@ impl Resolved<Decision<IntVal>> {
 		if let Some(event) = ctx.0.int_events.remove(&(idx as u32)) {
 			ctx.0.notify_int_event(idx as u32, event);
 		}
-		// Transfer any constraints from the aliased variable to the target variable
+		// Transfer any constraints from the aliased variable to the target
+		// variable
 		let constraints = mem::take(&mut ctx.0.int_vars[idx].constraints);
 		// Move subscriptions to target decision variable
 		match target.0 {

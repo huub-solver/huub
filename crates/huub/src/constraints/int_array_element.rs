@@ -212,8 +212,8 @@ where
 	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		// ensure bounds of result and self.vars[self.index] are consistent when
-		// self.index is fixed only trigger when self.index is fixed and (1) y is
-		// updated or (2) self.vars[self.index] is updated
+		// self.index is fixed only trigger when self.index is fixed and (1) y
+		// is updated or (2) self.vars[self.index] is updated
 		if let Some(fixed_index) = self.index.val(ctx) {
 			let index_val_lit = self.index.val_lit(ctx).unwrap();
 			let fixed_var = &self.vars[fixed_index as usize];
@@ -262,7 +262,8 @@ where
 		// 	(1) result.max < self.vars[i].min -> index != i
 		//  (2) result.min > self.vars[i].max -> index != i
 		// 2. update min_support and max_support if necessary
-		// only trigger when result variable is updated or self.vars[i] is updated
+		// only trigger when result variable is updated or self.vars[i] is
+		// updated
 		for i in idx_dom.iter().flatten() {
 			debug_assert!(i >= 0 && i <= self.vars.len() as IntVal);
 			let i = i as usize;
@@ -287,8 +288,8 @@ where
 				})?;
 			}
 
-			// update min_support if i is in the domain of self.index and the lower bound of
-			// // v is less than the current min
+			// update min_support if i is in the domain of self.index and the
+			// lower bound of // v is less than the current min
 			if need_min_support && v_lb < new_min {
 				new_min_support = i;
 				new_min = v_lb;
@@ -296,8 +297,8 @@ where
 				need_min_support = new_min > result_lb;
 			}
 
-			// update max_support if i is in the domain of self.index and the upper bound of
-			// v is greater than the current max
+			// update max_support if i is in the domain of self.index and the
+			// upper bound of v is greater than the current max
 			if need_max_support && v_ub > new_max {
 				new_max_support = i;
 				new_max = v_ub;
@@ -309,13 +310,13 @@ where
 		ctx.set_trailed(self.min_support, new_min_support);
 		ctx.set_trailed(self.max_support, new_max_support);
 
-		// propagate the lower bound of the selected variable y if min_support is not
-		// valid anymore:
+		// propagate the lower bound of the selected variable y if min_support
+		// is not valid anymore:
 		//
 		//   result.min >= min(i in domain(x))(self.vars[i].min)
 		//
-		// only trigger when self.vars[min_support] is changed or self.vars[min_support]
-		// is out of domain
+		// only trigger when self.vars[min_support] is changed or
+		// self.vars[min_support] is out of domain
 		if new_min > result_lb {
 			self.result.tighten_min(ctx, new_min, |ctx, reason| {
 				let dom = self.index.domain(ctx);
@@ -332,13 +333,13 @@ where
 			})?;
 		}
 
-		// propagate the upper bound of the selected variable y if max_support is not
-		// valid anymore:
+		// propagate the upper bound of the selected variable y if max_support
+		// is not valid anymore:
 		//
 		//   result.max <= max(i in domain(x))(self.vars[i].max)
 		//
-		// only trigger when self.vars[max_support] is changed or self.vars[max_support]
-		// is out of domain
+		// only trigger when self.vars[max_support] is changed or
+		// self.vars[max_support] is out of domain
 		if new_max < result_ub {
 			self.result.tighten_max(ctx, new_max, |ctx, reason| {
 				let dom = self.index.domain(ctx);

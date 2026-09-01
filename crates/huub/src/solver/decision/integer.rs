@@ -258,8 +258,8 @@ impl IntExplanationActions<State> for Decision<IntVal> {
 		);
 
 		let var_def = &ctx.int_vars[self.idx()];
-		// If we are looking for a not-equal literal, try and find it. Return it if we
-		// find it, otherwise defer to an order literal.
+		// If we are looking for a not-equal literal, try and find it. Return it
+		// if we find it, otherwise defer to an order literal.
 		if let IntLitMeaning::NotEq(v) = meaning {
 			if let Some((bv, _)) = var_def.try_lit(meaning) {
 				return (bv, IntLitMeaning::NotEq(v));
@@ -713,8 +713,8 @@ impl IntDecision {
 		let lb = *self.domain.min().unwrap();
 		let ub = *self.domain.max().unwrap();
 
-		// Use the order literals when requesting an equality literal of the global
-		// bounds.
+		// Use the order literals when requesting an equality literal of the
+		// global bounds.
 		let mut lit_req = match lit_req {
 			IntLitMeaning::Eq(i) if i == lb => IntLitMeaning::Less(lb + 1),
 			IntLitMeaning::NotEq(i) if i == lb => IntLitMeaning::GreaterEq(lb + 1),
@@ -985,8 +985,8 @@ impl IntDecision {
 		let lb = *self.domain.min().unwrap();
 		let ub = *self.domain.max().unwrap();
 
-		// Use the order literals when requesting an equality literal of the global
-		// bounds.
+		// Use the order literals when requesting an equality literal of the
+		// global bounds.
 		let mut lit_req = match lit_req {
 			IntLitMeaning::Eq(i) if i == lb => IntLitMeaning::Less(lb + 1),
 			IntLitMeaning::NotEq(i) if i == lb => IntLitMeaning::GreaterEq(lb + 1),
@@ -1550,7 +1550,8 @@ mod tests {
 				assert!(!x.in_domain(state, 4));
 			}
 
-			// Scenario 2: tighten the maximum to remove the original upper bound.
+			// Scenario 2: tighten the maximum to remove the original upper
+			// bound.
 			{
 				let (mut slv, x) = make_solver();
 				let (mut actions, mut engine) = slv.as_parts_mut();

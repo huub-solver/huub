@@ -150,8 +150,8 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 			if sweep[rotation] <= obj_ub[rotation] {
 				return true;
 			} else {
-				// Otherwise, this dimension is exhausted. Reset sweep point to the
-				// lower bound and try the next dimension.
+				// Otherwise, this dimension is exhausted. Reset sweep point to
+				// the lower bound and try the next dimension.
 				sweep[rotation] = obj_lb[rotation];
 			}
 		}
@@ -193,8 +193,8 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 	{
 		for (region, support) in forbidden_regions.iter() {
 			for d in 0..self.num_dimensions() {
-				// If sizes are not [`IntVal`], their lower bounds contribute to the
-				// forbidden region and must be part of the explanation.
+				// If sizes are not [`IntVal`], their lower bounds contribute to
+				// the forbidden region and must be part of the explanation.
 				if TypeId::of::<I2>() != TypeId::of::<IntVal>() {
 					reason.push(self.size[[*support, d]].min_lit(ctx));
 				}
@@ -204,9 +204,9 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 				let mut possible_lb = self.origin_lb[[*support, d]];
 				let origin_lb = self.origin_lb[[obj, d]];
 
-				// "Lifting": If a forbidden region overhangs the domain of the object
-				// being pruned, we can use the object's bounds to create a tighter,
-				// more general explanation.
+				// "Lifting": If a forbidden region overhangs the domain of the
+				// object being pruned, we can use the object's bounds to
+				// create a tighter, more general explanation.
 				if region.max(d) > origin_ub {
 					possible_lb = origin_ub - self.size_lb[[*support, d]] + 1;
 				}
@@ -247,14 +247,15 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 	{
 		move |ctx, reason| {
 			for d in 0..self.num_dimensions() {
-				// If sizes are not [`IntVal`], their lower bounds contribute to the
-				// forbidden region and must be part of the explanation.
+				// If sizes are not [`IntVal`], their lower bounds contribute to
+				// the forbidden region and must be part of the explanation.
 				if TypeId::of::<I2>() != TypeId::of::<IntVal>() {
 					reason.push(self.size[[obj, d]].min_lit(ctx));
 				}
 
-				// The literal for the bound we are about to prune is implicitly part of the
-				// conclusion, so we only need to explain the *other* bounds of the object.
+				// The literal for the bound we are about to prune is implicitly
+				// part of the conclusion, so we only need to explain the
+				// *other* bounds of the object.
 				if d == dim {
 					if prune_upper {
 						reason.push(self.origin[[obj, d]].max_lit(ctx));
@@ -291,8 +292,9 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 				for obj in [target, cause] {
 					reason.push(self.origin[[obj, d]].min_lit(ctx));
 					reason.push(self.origin[[obj, d]].max_lit(ctx));
-					// Leave out `target`'s size lower bound in `dim`: the conclusion is an
-					// upper bound on its size, which does not depend on its lower bound.
+					// Leave out `target`'s size lower bound in `dim`: the
+					// conclusion is an upper bound on its size, which does
+					// not depend on its lower bound.
 					if (obj, d) != (target, dim) {
 						reason.push(self.size[[obj, d]].min_lit(ctx));
 					}
@@ -331,7 +333,8 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 		I1: IntSolverActions<E>,
 		I2: IntSolverActions<E>,
 	{
-		// `obj`'s size can only be tightened while it is a not-yet-fixed decision.
+		// `obj`'s size can only be tightened while it is a not-yet-fixed
+		// decision.
 		let prune_size = TypeId::of::<I2>() != TypeId::of::<IntVal>()
 			&& self.size.row(obj).iter().any(|v| v.val(ctx).is_none());
 
@@ -345,16 +348,17 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 			if i == obj {
 				continue;
 			}
-			// In non-strict mode, objects with size (potential) 0 do not need to be
-			// considered.
+			// In non-strict mode, objects with size (potential) 0 do not need
+			// to be considered.
 			if !STRICT && self.size_lb.row(i).contains(&0) {
 				continue;
 			}
 
-			// The forbidden interval of `i` for `obj` in each dimension, together
-			// with the single dimension (if any) in which the two can still be
-			// separated. That dimension is where `obj`'s origin pokes out of the
-			// interval, either below (so `obj` can lie first) or above (so `i` can).
+			// The forbidden interval of `i` for `obj` in each dimension,
+			// together with the single dimension (if any) in which the two
+			// can still be separated. That dimension is where `obj`'s origin
+			// pokes out of the interval, either below (so `obj` can lie
+			// first) or above (so `i` can).
 			let mut forbidden = Region::with_dimensions(self.num_dimensions());
 			let mut empty = false;
 			let mut free = None;
@@ -377,9 +381,10 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 				}
 			}
 
-			// Tighten `obj`'s size when the objects must be separated in exactly one
-			// dimension (`single_free`) and `obj` can only take the lower position
-			// there (it pokes out below the interval, `true`, but not above, `false`).
+			// Tighten `obj`'s size when the objects must be separated in
+			// exactly one dimension (`single_free`) and `obj` can only take
+			// the lower position there (it pokes out below the interval,
+			// `true`, but not above, `false`).
 			if single_free && let Some((dim, true, false)) = free {
 				let bound = self.origin_ub[[i, dim]] - self.origin_lb[[obj, dim]];
 				self.size[[obj, dim]].tighten_max(
@@ -397,7 +402,8 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 			let lb = self.origin_lb.row(obj);
 			let ub = self.origin_ub.row(obj);
 
-			// Check if the new forbidden region can be coalesced with an existing one.
+			// Check if the new forbidden region can be coalesced with an
+			// existing one.
 			if forbidden.overlaps(lb, ub) {
 				for tup in &mut forbidden_regions {
 					if let Some((f, _)) = tup {
@@ -617,16 +623,17 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 	{
 		// `sweep` is the current point being checked for feasibility.
 		let mut sweep = self.origin_lb.row(obj).to_vec();
-		// `jump` stores the earliest possible escape point from a forbidden region.
+		// `jump` stores the earliest possible escape point from a forbidden
+		// region.
 		let mut jump: Vec<_> = self.origin_ub.row(obj).iter().map(|v| v + 1).collect();
 		let mut b = true;
 
 		// Find the first forbidden region that the sweep point is inside.
 		let mut fr = Region::find_collision(forbidden_regions.iter().map(|(r, _)| r), &sweep);
 		while b && fr.is_some() {
-			// Update the jump point: to escape the current forbidden region `fr`,
-			// we must jump to at least its upper bound + 1 in some dimension.
-			// We take the minimum of all possible jump points.
+			// Update the jump point: to escape the current forbidden region
+			// `fr`, we must jump to at least its upper bound + 1 in some
+			// dimension. We take the minimum of all possible jump points.
 			for (i, j) in jump.iter_mut().enumerate() {
 				*j = cmp::min(*j, fr.unwrap().max(i) + 1);
 			}
@@ -713,8 +720,8 @@ where
 	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
 		ctx.set_priority(PriorityLevel::Lowest);
 
-		// The propagator needs to be re-run whenever the bounds of any origin or
-		// size variable change.
+		// The propagator needs to be re-run whenever the bounds of any origin
+		// or size variable change.
 		for v in self.origin.iter_elem() {
 			v.enqueue_when(ctx, IntPropCond::Bounds);
 		}
@@ -739,25 +746,27 @@ where
 			}
 		}
 
-		// Main propagation loop: iterate through each object that is still a "target".
+		// Main propagation loop: iterate through each object that is still a
+		// "target".
 		for obj in 0..self.num_objects() {
 			// Skip objects that are already fixed and verified.
 			if ctx.trailed(self.target[obj]) {
 				continue;
 			}
 
-			// In non-strict mode, objects with size (potential) 0 do not need to be
-			// considered.
+			// In non-strict mode, objects with size (potential) 0 do not need
+			// to be considered.
 			if !STRICT && self.size_lb.row(obj).contains(&0) {
 				continue;
 			}
 
-			// Reason about the object's overlaps: collect the forbidden regions for
-			// the origin sweep below and, from the same intervals, tighten its size.
+			// Reason about the object's overlaps: collect the forbidden regions
+			// for the origin sweep below and, from the same intervals,
+			// tighten its size.
 			let forbidden = self.forbidden_regions::<E>(ctx, obj)?;
 			if !forbidden.is_empty() {
-				// Check for conflicts: if an object is fixed and is in a forbidden
-				// region, it's a conflict.
+				// Check for conflicts: if an object is fixed and is in a
+				// forbidden region, it's a conflict.
 				if self.fixed_object(obj) {
 					// Trigger a conflict by increasing the lower bound.
 					self.origin[[obj, 0]].tighten_min(
@@ -767,7 +776,8 @@ where
 					)?;
 				}
 
-				// Prune the domains of the origin variables for the current object.
+				// Prune the domains of the origin variables for the current
+				// object.
 				let mut all_fixed = true;
 				for d in 0..self.num_dimensions() {
 					self.prune_min(ctx, &forbidden, obj, d)?;
@@ -777,8 +787,9 @@ where
 						all_fixed = false;
 					}
 				}
-				// Target optimization: mark the object as no longer being a target,
-				// skipping it in future iterations, when its origin and size are fixed.
+				// Target optimization: mark the object as no longer being a
+				// target, skipping it in future iterations, when its origin
+				// and size are fixed.
 				if all_fixed
 					&& (TypeId::of::<I2>() == TypeId::of::<IntVal>()
 						|| self.size.row(obj).iter().all(|v| v.val(ctx).is_some()))
@@ -788,7 +799,8 @@ where
 			}
 		}
 
-		// Source optimization: update the bounding box of all non-fixed objects.
+		// Source optimization: update the bounding box of all non-fixed
+		// objects.
 		for obj in 0..self.num_objects() {
 			if ctx.trailed(self.target[obj]) {
 				continue;
@@ -805,7 +817,8 @@ where
 
 		// Identify objects that have lost their "source" property. If a fixed
 		// object is now completely disjoint from the bounding box of all other
-		// non-fixed objects, it can no longer create forbidden regions for them.
+		// non-fixed objects, it can no longer create forbidden regions for
+		// them.
 		for obj in 0..self.num_objects() {
 			if ctx.trailed(self.target[obj]) && self.disjoint(&self.bounding_box, obj) {
 				let _ = ctx.set_trailed(self.source[obj], true);
@@ -1135,8 +1148,8 @@ mod tests {
 		let _ = slv.propagate_next().unwrap();
 		assert_eq!(ady.bounds(&slv), (1, 2));
 
-		// Now the same scenario as above, but with `b`'s x-size possibly being zero,
-		// not allowing any further propagation.
+		// Now the same scenario as above, but with `b`'s x-size possibly being
+		// zero, not allowing any further propagation.
 		let mut slv = Solver::default();
 		let ady = slv.new_int_decision(1..=3).view();
 		let bdx = slv.new_int_decision(0..=1).view();

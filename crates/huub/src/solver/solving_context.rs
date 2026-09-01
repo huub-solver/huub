@@ -147,10 +147,11 @@ impl IntDecisionActions<SolvingContext<'_>> for Decision<IntVal> {
 		let new_var = |def: LazyLitDef| {
 			// Create new variable
 			let v = ctx.slv.new_observed_var();
-			// Apply a phase hint to newly created (lazy) order literals according
-			// to the variable's polarity. The positive literal represents
-			// `x < val`, so a positive polarity (prefer large values) phases the
-			// negation. Direct (equality) literals are left unphased.
+			// Apply a phase hint to newly created (lazy) order literals
+			// according to the variable's polarity. The positive literal
+			// represents `x < val`, so a positive polarity (prefer large
+			// values) phases the negation. Direct (equality) literals are
+			// left unphased.
 			if matches!(def.meaning, IntLitMeaning::Less(_)) {
 				match polarity {
 					Some(Polarity::Positive) => ctx.slv.phase(!Into::<RawLit>::into(v)),
@@ -316,8 +317,8 @@ impl<'a> SolvingContext<'a> {
 		reason: impl FnOnce(&mut Self, &mut SolvingReasonSink<'_>),
 	) -> Result<(), Conflict<Decision<bool>>> {
 		let (lb, ub) = self.state.int_vars[iv.idx()].bounds(self);
-		// Check whether a change is redundant, conflicting, or new with respect to
-		// the bounds of an integer variable
+		// Check whether a change is redundant, conflicting, or new with respect
+		// to the bounds of an integer variable
 		let check = match change_req {
 			ChangeRequest::SetValue(i) if lb == i && ub == i => ChangeType::Redundant,
 			ChangeRequest::SetValue(i) if i < lb || i > ub => ChangeType::Conflicting,
@@ -334,8 +335,8 @@ impl<'a> SolvingContext<'a> {
 			return Ok(());
 		}
 
-		// Find the right literal, required whether we want to propagate, or raise a
-		// conflict
+		// Find the right literal, required whether we want to propagate, or
+		// raise a conflict
 		let new_var = |def: LazyLitDef| {
 			// Create new variable
 			let v = self.slv.new_observed_var();

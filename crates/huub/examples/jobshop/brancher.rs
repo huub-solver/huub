@@ -288,7 +288,8 @@ impl StaticBranching {
 		let mut vars = Vec::new();
 		match self {
 			StaticBranching::JobInputOrder | StaticBranching::OperationInputOrder => {
-				// Order jobs or operations by their original order in the input.
+				// Order jobs or operations by their original order in the
+				// input.
 				for &op in start_time.iter().flatten() {
 					vars.push(op);
 				}

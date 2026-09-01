@@ -66,26 +66,28 @@ where
 		data: u64,
 		event: IntEvent,
 	) -> bool {
-		// We remember that the decision at index `data` has been fixed to a value.
+		// We remember that the decision at index `data` has been fixed to a
+		// value.
 		debug_assert_eq!(event, IntEvent::Fixed);
 		self.action_list.push(data as usize);
 		true
 	}
 
 	fn initialize(&mut self, ctx: &mut E::InitializationContext<'_>) {
-		// Let the propagator be advised when each specific decision is fixed to a
-		// value, with the index of the decision.
+		// Let the propagator be advised when each specific decision is fixed to
+		// a value, with the index of the decision.
 		for (i, v) in self.vars.iter().enumerate() {
 			if self.vars[i].val(ctx).is_some() {
-				// If the variable is already fixed, then add it to the action list immediately.
+				// If the variable is already fixed, then add it to the action
+				// list immediately.
 				self.action_list.push(i);
 				ctx.enqueue_now(true);
 			} else {
 				v.advise_when(ctx, IntPropCond::Fixed, i as u64);
 			}
 		}
-		// Advise the propagator of backtracking to clear the list of fixed decision
-		// (indices).
+		// Advise the propagator of backtracking to clear the list of fixed
+		// decision (indices).
 		ctx.advise_on_backtrack();
 	}
 
@@ -103,8 +105,8 @@ where
 			let val = self.vars[i].val(ctx).unwrap();
 			let val_lit = self.vars[i].val_lit(ctx).unwrap();
 
-			// We now enforce that all other decisions (at different indices) are not
-			// equal to the fixed value.
+			// We now enforce that all other decisions (at different indices)
+			// are not equal to the fixed value.
 			for (j, v) in self.vars.iter().enumerate() {
 				if j != i {
 					v.remove_val(ctx, val, |_, reason| reason.push(val_lit.clone()))?;

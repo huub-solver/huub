@@ -65,7 +65,8 @@ fn is_advisor_of(
 impl BoolInitActions<InitializationContext<'_>> for Decision<bool> {
 	fn advise_when_fixed(&self, ctx: &mut InitializationContext<'_>, data: u64) {
 		if self.val(ctx.state).is_some() {
-			// The literal will never change, so we don't need to add an advisor.
+			// The literal will never change, so we don't need to add an
+			// advisor.
 			return;
 		}
 		// Otherwise, add the advisor to the engine
@@ -123,8 +124,8 @@ impl IntInitActions<InitializationContext<'_>> for Decision<IntVal> {
 	fn enqueue_when(&self, ctx: &mut InitializationContext<'_>, condition: IntPropCond) {
 		if self.val(ctx.state).is_some() {
 			ctx.semantic_enqueue = true;
-			// No further change will happen, so we don't need to the propagator to any
-			// activation lists.
+			// No further change will happen, so we don't need to the propagator
+			// to any activation lists.
 			return;
 		}
 		if condition != IntPropCond::Fixed {
@@ -303,8 +304,8 @@ impl<'a> InitializationContext<'a> {
 impl InitActions for InitializationContext<'_> {
 	fn advise_on_backtrack(&mut self) {
 		// Registering is idempotent, since a propagator is allowed to run its
-		// initialization actions again after it has been posted, and a duplicate
-		// entry would advise it of every backtrack twice.
+		// initialization actions again after it has been posted, and a
+		// duplicate entry would advise it of every backtrack twice.
 		if !self.state.notify_of_backtrack.contains(&self.prop) {
 			self.state.notify_of_backtrack.push(self.prop);
 		}

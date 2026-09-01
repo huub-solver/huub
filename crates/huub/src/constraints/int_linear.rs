@@ -144,9 +144,9 @@ where
 		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		self.propagate(ctx)?;
-		// Note that one variable might be fixed and not the other one. Gaps in domains
-		// or linear view might require multiple rounds of propagation to reach a
-		// fixpoint.
+		// Note that one variable might be fixed and not the other one. Gaps in
+		// domains or linear view might require multiple rounds of propagation
+		// to reach a fixpoint.
 		if self.vars.iter().all(|v| v.val(ctx).is_some()) {
 			Ok(SimplificationStatus::Subsumed)
 		} else {
@@ -325,8 +325,8 @@ where
 		&mut self,
 		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
-		// If the reification of the constraint is known, simplify to non-reified
-		// version
+		// If the reification of the constraint is known, simplify to
+		// non-reified version
 		if let Some(Reification::ImpliedBy(r) | Reification::ReifiedBy(r)) = self.reif {
 			match r.val(ctx) {
 				Some(true) => {
@@ -494,9 +494,9 @@ where
 			return Ok(SimplificationStatus::NoFixpoint);
 		}
 
-		// The difference between the right-hand-side value and the sum of the lower
-		// bounds. The current lower bound plus this difference is an upper bound
-		// for each variable.
+		// The difference between the right-hand-side value and the sum of the
+		// lower bounds. The current lower bound plus this difference is an
+		// upper bound for each variable.
 		let lb_diff = self.rhs - lb_sum;
 		// Propagate the upper bounds of the variables
 		for (i, v) in self.terms.iter().enumerate() {
@@ -536,8 +536,9 @@ where
 				return Ok(SimplificationStatus::Subsumed);
 			}
 
-			// The amount the sum of the upper bounds exceeds the right-hand-side
-			// value (negated). Used to propagate lower bounds of each variable.
+			// The amount the sum of the upper bounds exceeds the
+			// right-hand-side value (negated). Used to propagate lower
+			// bounds of each variable.
 			let ub_diff = self.rhs - ub_sum;
 			for (i, v) in self.terms.iter().enumerate() {
 				let ub_i = ub[i].into();
@@ -568,8 +569,8 @@ where
 					}
 				}
 
-				// We create a negated view in [`Self::to_solver`], ensure that it is correctly
-				// bounded.
+				// We create a negated view in [`Self::to_solver`], ensure that
+				// it is correctly bounded.
 				let _ = v.bounding_neg(ctx)?;
 			}
 		}
@@ -822,8 +823,8 @@ where
 			.sum();
 
 		if TypeId::of::<BV>() != TypeId::of::<True>() {
-			// Propagate the reified variable if the sum of lower bounds is greater than the
-			// right-hand-side value
+			// Propagate the reified variable if the sum of lower bounds is
+			// greater than the right-hand-side value
 			if lb_sum > self.max {
 				self.reification.fix(ctx, false, |ctx, reason| {
 					reason.extend(self.terms.iter().map(|v| v.min_lit(ctx)));
@@ -831,8 +832,8 @@ where
 			}
 		}
 
-		// skip the remaining propagation if the reified variable is not assigned to
-		// true
+		// skip the remaining propagation if the reified variable is not
+		// assigned to true
 		if r_val != Some(true) {
 			return Ok(());
 		}
@@ -1170,8 +1171,8 @@ mod tests {
 
 	#[test]
 	fn test_constraint_rewriting() {
-		// Regression test for GitHub issue 233, where a `int_lin_le_reif` known to be
-		// false was rewritten incorrectly. It allowed `a` to be 2.
+		// Regression test for GitHub issue 233, where a `int_lin_le_reif` known
+		// to be false was rewritten incorrectly. It allowed `a` to be 2.
 		let mut prb = Model::default();
 		let a = prb.new_int_decision(1..=2);
 		let r: View<bool> = false.into();

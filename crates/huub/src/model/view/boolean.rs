@@ -123,7 +123,8 @@ impl Resolved<View<bool>> {
 				debug_assert_eq!(store.alias, None);
 				store.alias = Some(if x.is_negated() { !y } else { y });
 
-				// Move subscriptions from aliased variable to the new primary variable
+				// Move subscriptions from aliased variable to the new primary
+				// variable
 				let constraints = mem::take(&mut store.constraints);
 				match y.0 {
 					// Move subscriptions to another Boolean decision
@@ -151,8 +152,8 @@ impl Resolved<View<bool>> {
 										.add(ActivationAction::Advise(adv), event);
 								}
 								me @ ActivationAction::Enqueue(_) => {
-									// TODO: This triggers even when the Boolean Condition does not
-									// change value
+									// TODO: This triggers even when the Boolean
+									// Condition does not change value
 									model.int_vars[j.idx()].constraints.add(me, event);
 								}
 							}
@@ -398,8 +399,8 @@ mod tests {
 		assert_eq!(x.eq(4).val(&prb), Some(false));
 		assert_eq!(x.ne(4).val(&prb), Some(true));
 
-		// Tightening the lower bound entails the threshold comparisons while `x`
-		// (now in 3, 5) stays unfixed.
+		// Tightening the lower bound entails the threshold comparisons while
+		// `x` (now in 3, 5) stays unfixed.
 		x.tighten_min(&mut prb, 3, NO_REASON).unwrap();
 		assert_eq!(x.val(&prb), None);
 		assert_eq!(x.geq(3).val(&prb), Some(true));

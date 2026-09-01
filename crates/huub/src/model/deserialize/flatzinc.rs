@@ -1135,16 +1135,16 @@ impl<'a> FznModelBuilder<'a> {
 				if next_state == 0 {
 					continue;
 				}
-				// If the current state is the initial state, add the transition to start
-				// table
+				// If the current state is the initial state, add the transition
+				// to start table
 				if cur_state == init_state {
 					start.push(vec![input_read, next_state]);
 				}
-				// Add transition to the middle table (all valid transitions are allowed
-				// here)
+				// Add transition to the middle table (all valid transitions are
+				// allowed here)
 				middle.push(vec![cur_state, input_read, next_state]);
-				// If the resulting state is an accepting state, add the transition to the
-				// end table
+				// If the resulting state is an accepting state, add the
+				// transition to the end table
 				if accept_states.contains(&next_state) {
 					end.push(vec![cur_state, input_read]);
 				}
@@ -1264,14 +1264,16 @@ impl<'a> FznModelBuilder<'a> {
 					}
 				},
 				Entry::Vacant(e) => {
-					// Enforce the domain of the named (uncreated) variable on the view
+					// Enforce the domain of the named (uncreated) variable on
+					// the view
 					if let Type::Int(Some(dom)) = &var.ty {
 						let AnyView::Int(view) = view else {
 							unreachable!()
 						};
 						view.restrict_domain(&mut me.prb, dom, NO_REASON)?;
 					}
-					// Insert the view to use instead of a new variable for the name
+					// Insert the view to use instead of a new variable for the
+					// name
 					e.insert(view);
 				}
 			}
@@ -1516,8 +1518,8 @@ impl<'a> FznModelBuilder<'a> {
 					Type::Bool => {
 						let model = self.prb.bool_vars.len() as u64;
 						let view = AnyView::Bool(self.prb.new_bool_decision());
-						// Register the model Boolean decision against its FlatZinc
-						// variable.
+						// Register the model Boolean decision against its
+						// FlatZinc variable.
 						if tracing::enabled!(target: "reverse_map", tracing::Level::TRACE)
 							&& let Some(&fzn) = self.var_index.get(&var.cloned_key())
 						{
@@ -1545,8 +1547,8 @@ impl<'a> FznModelBuilder<'a> {
 								self.prb.new_int_decision(FULL_INT_DOMAIN).into()
 							}
 						};
-						// Register the model integer decision against its FlatZinc
-						// variable, unless it's a constant.
+						// Register the model integer decision against its
+						// FlatZinc variable, unless it's a constant.
 						if self.prb.int_vars.len() > before
 							&& tracing::enabled!(target: "reverse_map", tracing::Level::TRACE)
 							&& let Some(&fzn) = self.var_index.get(&var.cloned_key())
@@ -1743,13 +1745,15 @@ impl<'a> FznModelBuilder<'a> {
 					let [arr] = c.args.as_slice() else {
 						return num_args_err(1);
 					};
-					// Resolve every element to a model-level Boolean view, pairing
-					// each view with a human-readable label that the CLI can print
-					// when the assumption ends up in an UNSAT core.
+					// Resolve every element to a model-level Boolean view,
+					// pairing each view with a human-readable label that
+					// the CLI can print when the assumption ends up in an
+					// UNSAT core.
 					//
-					// For variables we use the FlatZinc identifier. For static `false`
-					// literals we keep the textual constant, so the user can see when a
-					// static `false` was passed in. `true` literals are ignored.
+					// For variables we use the FlatZinc identifier. For static
+					// `false` literals we keep the textual constant, so
+					// the user can see when a static `false` was passed
+					// in. `true` literals are ignored.
 					let arr = self.arg_array(arr)?;
 					self.assumptions.reserve(arr.len());
 					for l in arr {
@@ -2177,8 +2181,8 @@ impl<'a> FznModelBuilder<'a> {
 					let f = self.arg_par_set(f)?;
 					let f: FxHashSet<IntVal> = f.iter().flat_map(|r| r.into_iter()).collect();
 
-					// Convert regular constraint in to table constraints and add them to the
-					// model
+					// Convert regular constraint in to table constraints and
+					// add them to the model
 					self.convert_regular_to_tables(x, d, q0, f)
 						.map_err(FlatZincError::from)?;
 				}

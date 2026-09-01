@@ -175,7 +175,8 @@ pub struct WarmStartBrancher {
 /// of values.
 fn domain_median(dom: &IntSet) -> IntVal {
 	if let Some(card) = dom.card() {
-		// The lower median is the value at this (zero-based) index in the domain.
+		// The lower median is the value at this (zero-based) index in the
+		// domain.
 		let mut index = (card - 1) / 2;
 		for interval in dom.iter() {
 			let len = (*interval.end() - *interval.start() + 1) as usize;
@@ -194,8 +195,8 @@ fn domain_median(dom: &IntSet) -> IntVal {
 /// preferring the smaller value when two are equally close.
 fn domain_middle(dom: &IntSet) -> IntVal {
 	// The largest domain value at or below the mean, and the smallest one above
-	// it. As the decision variable is unfixed, `mid < max`, so the latter always
-	// exists.
+	// it. As the decision variable is unfixed, `mid < max`, so the latter
+	// always exists.
 	let min = *dom.min().unwrap();
 	let max = *dom.max().unwrap();
 	let mid = min + (max - min) / 2;
@@ -239,10 +240,11 @@ impl BoolBrancher {
 			})
 			.collect();
 
-		// A Boolean domain `{false, true}` has `false` as its lower value, median,
-		// and middle, and forms a single interval, so every strategy that prefers
-		// the smaller value branches on `false` first, and those that prefer the
-		// larger value or exclude the median branch on `true` first.
+		// A Boolean domain `{false, true}` has `false` as its lower value,
+		// median, and middle, and forms a single interval, so every strategy
+		// that prefers the smaller value branches on `false` first, and those
+		// that prefer the larger value or exclude the median branch on `true`
+		// first.
 		let value = match val_sel {
 			DomainSelection::IndomainMax
 			| DomainSelection::OutdomainMin
@@ -279,8 +281,9 @@ where
 			return Directive::Exhausted;
 		}
 
-		// Boolean decision selection currently selects the first unfixed decision
-		// variable, regardless of the configured decision selection strategy.
+		// Boolean decision selection currently selects the first unfixed
+		// decision variable, regardless of the configured decision selection
+		// strategy.
 		let mut loc = None;
 		for (i, &var) in self.vars.iter().enumerate().skip(begin) {
 			if var.val(ctx).is_none() {
@@ -297,7 +300,8 @@ where
 			return Directive::Exhausted;
 		};
 
-		// Branch on the selected decision variable using the precomputed polarity.
+		// Branch on the selected decision variable using the precomputed
+		// polarity.
 		Directive::Select(if self.value { var } else { !var }.into())
 	}
 }
@@ -353,9 +357,9 @@ impl IntBrancher {
 		}
 
 		// Only the occurrence-based strategies use the degree of a decision
-		// variable. The degree is captured here, when the brancher is installed,
-		// at which point all constraints (and therefore all propagators) have
-		// been posted.
+		// variable. The degree is captured here, when the brancher is
+		// installed, at which point all constraints (and therefore all
+		// propagators) have been posted.
 		let degree = matches!(
 			var_sel,
 			DecisionSelection::Occurrence
@@ -391,8 +395,8 @@ where
 
 		// Score a decision variable for the current strategy as a
 		// `(primary, secondary)` pair; the secondary component is only used by
-		// `MostConstrained` and `DomWDeg`, which require the decision variable's
-		// `degree` (its number of attached propagators).
+		// `MostConstrained` and `DomWDeg`, which require the decision
+		// variable's `degree` (its number of attached propagators).
 		let score = |var: View<IntVal>, degree: u32| -> (IntVal, IntVal) {
 			match self.var_sel {
 				DecisionSelection::AntiFirstFail | DecisionSelection::FirstFail => {
@@ -404,7 +408,8 @@ where
 				DecisionSelection::Smallest => (var.min(actions), 0),
 				DecisionSelection::Occurrence => (IntVal::from(degree), 0),
 				DecisionSelection::MaxRegret => {
-					// The difference between the two smallest values in the domain.
+					// The difference between the two smallest values in the
+					// domain.
 					let Some((first, second)) =
 						var.domain(actions).iter().flatten().take(2).collect_tuple()
 					else {
@@ -434,8 +439,8 @@ where
 			}
 			DecisionSelection::DomWDeg => {
 				// Smallest domain size divided by degree, treating a degree of
-				// zero as an infinite ratio so such decision variables are selected
-				// last.
+				// zero as an infinite ratio so such decision variables are
+				// selected last.
 				// The ratios are compared by cross-multiplication, widened to
 				// `i128` to avoid overflow.
 				match (incumbent.1, candidate.1) {
@@ -455,8 +460,8 @@ where
 		let mut selection = None;
 		for i in begin..self.vars.len() {
 			if self.vars[i].min(actions) == self.vars[i].max(actions) {
-				// Move the fixed decision variable to the front, keeping `degree`
-				// aligned with `vars` when it is populated.
+				// Move the fixed decision variable to the front, keeping
+				// `degree` aligned with `vars` when it is populated.
 				self.vars.swap(first_unfixed, i);
 				if !self.degree.is_empty() {
 					self.degree.swap(first_unfixed, i);
@@ -464,8 +469,8 @@ where
 				first_unfixed += 1;
 			} else {
 				let var = self.vars[i];
-				// `degree` is empty (and thus the degree zero) for the strategies
-				// that do not use it.
+				// `degree` is empty (and thus the degree zero) for the
+				// strategies that do not use it.
 				let new_score = score(var, self.degree.get(i).copied().unwrap_or(0));
 				if let Some((_, sel_score)) = selection {
 					if is_better(sel_score, new_score) {
@@ -488,7 +493,8 @@ where
 		// update the next decision to the index of the first unfixed decision
 		actions.set_trailed(self.next, first_unfixed);
 
-		// select the next value to branch on based on the value selection strategy
+		// select the next value to branch on based on the value selection
+		// strategy
 		let view = next_var.lit(
 			actions,
 			match self.val_sel {
@@ -525,7 +531,8 @@ where
 						.next()
 						.expect("the domain of an unfixed decision variable is non-empty");
 					if intervals.next().is_some() {
-						// Several contiguous intervals: reduce to the first interval.
+						// Several contiguous intervals: reduce to the first
+						// interval.
 						IntLitMeaning::Less(*first.end() + 1)
 					} else {
 						// A single interval: bisect as `indomain_split`.
@@ -572,8 +579,8 @@ impl WarmStartBrancher {
 	/// # Ok::<(), Box<dyn std::error::Error>>(())
 	/// ```
 	pub fn new_in(solver: &mut impl BrancherInitActions, decisions: Vec<View<bool>>) {
-		// Filter out the decisions that are already satisfied or are known to cause
-		// a conflict
+		// Filter out the decisions that are already satisfied or are known to
+		// cause a conflict
 		let mut filtered_decision = Vec::new();
 		for d in decisions {
 			match d.0 {

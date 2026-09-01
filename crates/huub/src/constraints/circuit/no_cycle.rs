@@ -73,7 +73,8 @@ impl<const SUBCIRCUIT: bool, I> CircuitNoCycle<SUBCIRCUIT, I> {
 		I: IntInspectionActions<E> + IntSolverActions<Engine>,
 	{
 		// The domain bounds for variables should exclude out-of-range values
-		// that would otherwise satisfy the constraint without forming a valid cycle.
+		// that would otherwise satisfy the constraint without forming a valid
+		// cycle.
 		let max_node = offset + vars.len() as IntVal - 1;
 		assert!(
 			vars.iter()
@@ -175,8 +176,8 @@ where
 				continue;
 			}
 
-			// Forward walk the fixed chain from `start`, collecting its nodes and
-			// detecting whether the tour is closed.
+			// Forward walk the fixed chain from `start`, collecting its nodes
+			// and detecting whether the tour is closed.
 			scratch.nodes.clear();
 			scratch.nodes.push(start);
 			scratch.visited[start] = true;
@@ -284,7 +285,8 @@ impl NoCycleScratch {
 				reason.reserve(nodes.len());
 				for &i in nodes {
 					if i != end {
-						// Every interior node of the chain is fixed, so its value literal exists.
+						// Every interior node of the chain is fixed, so its
+						// value literal exists.
 						reason.push(graph.vars[i].val_lit(ctx).unwrap());
 					}
 				}
@@ -349,8 +351,8 @@ impl NoCycleScratch {
 			}));
 		}
 
-		// `subcircuit`: every outside node is excluded and must self-loop, all for
-		// the same reason.
+		// `subcircuit`: every outside node is excluded and must self-loop, all
+		// for the same reason.
 		let reason = reason_ty::<C, _>(|ctx, reason| {
 			graph.push_no_edge(ctx, reason, cycle, outside, None);
 			graph.push_forced_in(ctx, reason, start);

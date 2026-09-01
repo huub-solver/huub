@@ -737,8 +737,9 @@ where
 			return (status, obj);
 		}
 
-		// Continue to look for all other solutions with the same objective value.
-		// Solutions already visited are added as (permanent) no-good clauses.
+		// Continue to look for all other solutions with the same objective
+		// value. Solutions already visited are added as (permanent) no-good
+		// clauses.
 		let vars = all_solutions.unwrap();
 		let BoolView::Lit(opt_lit) = objective
 			.lit(solver, IntLitMeaning::Eq(obj_curr.unwrap()))
@@ -1305,8 +1306,8 @@ impl<Sat: ExternalPropagation> Solver<Sat> {
 		if let OrderStorage::Eager { storage, .. } = engine.state.int_vars[iv.idx()].order_encoding
 		{
 			// Apply phase hints to the (eager) order literals according to the
-			// polarity. Note that the positive literal represents `x < val`, so a
-			// positive polarity (prefer large values) phases the negation.
+			// polarity. Note that the positive literal represents `x < val`, so
+			// a positive polarity (prefer large values) phases the negation.
 			match polarity {
 				Some(Polarity::Positive) => {
 					for l in storage {

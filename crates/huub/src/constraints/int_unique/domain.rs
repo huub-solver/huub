@@ -359,8 +359,8 @@ impl<I> IntUniqueDomain<I> {
 		self.tarjan.vals_buf.clear();
 
 		// Pop the SCC off the DFS stack into the two bitsets. The dummy node is
-		// not a real graph node, so it is dropped (but still terminates the loop
-		// if it happens to be the SCC root).
+		// not a real graph node, so it is dropped (but still terminates the
+		// loop if it happens to be the SCC root).
 		loop {
 			let node = self.tarjan.dfs_stack.pop().expect("non-empty DFS stack");
 			self.tarjan.dfs_on_stack[node] = false;
@@ -375,8 +375,8 @@ impl<I> IntUniqueDomain<I> {
 		}
 
 		// Every popped SCC must contain at least one decision, because the
-		// 2-cycle construction makes every matched value share its decision's SCC.
-		// This is to avoid value-only SCCs in classic Régin's algorithm,
+		// 2-cycle construction makes every matched value share its decision's
+		// SCC. This is to avoid value-only SCCs in classic Régin's algorithm,
 		// which would require a separate pass to filter out.
 		debug_assert!(
 			!self.tarjan.dcns_buf.is_empty(),
@@ -384,9 +384,10 @@ impl<I> IntUniqueDomain<I> {
 		);
 
 		// Move the SCC's decisions into their own block. `split_off` keeps the
-		// SCC's decisions in positions [new_root..orig_end); the *other* decisions from
-		// the same original block now occupy [orig_root..new_root) — exactly
-		// the decisions that still need this SCC's values stripped from them.
+		// SCC's decisions in positions [new_root..orig_end); the *other*
+		// decisions from the same original block now occupy
+		// [orig_root..new_root) — exactly the decisions that still need this
+		// SCC's values stripped from them.
 		let (orig_root, new_scc_root) = self.partition.split_off(&self.tarjan.dcns_buf, ctx);
 		let Some(new_root) = new_scc_root else {
 			// The new SCC absorbed the entire original block — no outside
@@ -396,8 +397,8 @@ impl<I> IntUniqueDomain<I> {
 
 		// `new_root` is the SCC's block root for both matched and unmatched
 		// values (a matched val's matched_dcn is in this SCC; for an unmatched
-		// val, any in-SCC decision serves as the SCC representative). One scc_id
-		// covers every value in the SCC.
+		// val, any in-SCC decision serves as the SCC representative). One
+		// scc_id covers every value in the SCC.
 		let scc_id = new_root as u64;
 		for &val_idx in self.tarjan.vals_buf.iter() {
 			let val = self.graph.value_at(val_idx);
@@ -461,7 +462,8 @@ impl<I> IntUniqueDomain<I> {
 			let dummy = this.tarjan.dummy_node();
 			if node < n_dncs {
 				// 2-cycle: edges to ALL domain values incl. the matched one, so
-				// every matched pair shares an SCC and no value-only SCC arises.
+				// every matched pair shares an SCC and no value-only SCC
+				// arises.
 				for val in this.graph.dcns[node].domain(ctx).iter().flatten() {
 					let val_idx = this.graph.value_index(val);
 					this.tarjan.neighbours.push(n_dncs + val_idx);
@@ -504,9 +506,9 @@ impl<I> IntUniqueDomain<I> {
 			if i < frame_end {
 				// Advance this frame's cursor, then explore the neighbour. A
 				// not-yet-visited neighbour pushes a new frame (the recursive
-				// call); when we later pop it, the `else` branch below folds its
-				// low-link back into this frame — exactly the post-recursion
-				// update of the original code.
+				// call); when we later pop it, the `else` branch below folds
+				// its low-link back into this frame — exactly the
+				// post-recursion update of the original code.
 				let nb = self.tarjan.neighbours[i];
 				self.tarjan.work_stack.last_mut().unwrap().i += 1;
 				if self.tarjan.dfs_index[nb] != 0 {
@@ -527,10 +529,10 @@ impl<I> IntUniqueDomain<I> {
 
 			// SCC root?
 			if self.tarjan.low_link[frame.node] == self.tarjan.dfs_index[frame.node] {
-				// Either we entered the DFS in the middle (low_link > 1) or some
-				// left nodes weren't reached from this root -> graph is not one
-				// single SCC. The counter avoids re-scanning `dfs_index` on every
-				// SCC-root pop.
+				// Either we entered the DFS in the middle (low_link > 1) or
+				// some left nodes weren't reached from this root -> graph
+				// is not one single SCC. The counter avoids re-scanning
+				// `dfs_index` on every SCC-root pop.
 				if self.tarjan.low_link[frame.node] > 1 || *n_left_visited < n_dcns {
 					*scc_split_detected = true;
 				}
@@ -699,14 +701,15 @@ impl<I> IntUniqueDomain<I> {
 		for &i in self.dirty_dcns.iter() {
 			let dcn = &self.graph.dcns[i];
 			let matched_val_index = self.graph.dcn_to_val[i];
-			// If the previously matched value is no longer in the domain, this decision is
-			// now unmatched.
+			// If the previously matched value is no longer in the domain, this
+			// decision is now unmatched.
 			if matched_val_index
 				.is_none_or(|val_idx| !dcn.in_domain(ctx, self.graph.value_at(val_idx)))
 			{
 				self.unmatched_dcns.insert(i);
 			}
-			// Fixed decisions: strip their fixed value from the rest of their SCC.
+			// Fixed decisions: strip their fixed value from the rest of their
+			// SCC.
 			if let Some(val) = self.graph.dcns[i].val(ctx) {
 				let scc_id = self.partition.block_root(i, ctx);
 				let scc_end = self.partition.block_end(scc_id, ctx);
@@ -717,8 +720,8 @@ impl<I> IntUniqueDomain<I> {
 						self.graph.dcns[idx].remove_val(ctx, val, |_, reason| {
 							reason.push(reason_lit.clone());
 						})?;
-						// If `val` was the matched value for decision at `idx`, then it is now
-						// unmatched.
+						// If `val` was the matched value for decision at `idx`,
+						// then it is now unmatched.
 						if self.graph.dcn_to_val[idx]
 							.is_none_or(|val_idx| val == self.graph.value_at(val_idx))
 						{
@@ -744,8 +747,9 @@ impl<I> IntUniqueDomain<I> {
 		I: IntSolverActions<E>,
 	{
 		self.changed_scc.clear();
-		// Detach the unmatched set so the loop body can take `&mut self` for the
-		// matching repair; restored below to keep its allocation across calls.
+		// Detach the unmatched set so the loop body can take `&mut self` for
+		// the matching repair; restored below to keep its allocation across
+		// calls.
 		let unmatched_dcns = mem::take(&mut self.unmatched_dcns);
 		for &i in unmatched_dcns.iter() {
 			let needs_augment = match self.graph.dcn_to_val[i] {
@@ -822,8 +826,8 @@ where
 		data: u64,
 		_event: IntEvent,
 	) -> bool {
-		// safe to unwrap: `card()` only returns `None` if the number of steps would
-		// overflow `usize`
+		// safe to unwrap: `card()` only returns `None` if the number of steps
+		// would overflow `usize`
 		let domain_size = self.graph.dcns[data as usize].domain(ctx).card().unwrap();
 		self.dirty_dcns.insert(data as usize);
 		domain_size < self.graph.n_dcns()
@@ -843,9 +847,9 @@ where
 		// decision set `H` provably confined to an equal-sized value set `V` in
 		// the current domains. Note that the raw SCC members alone are unsound:
 		// a member can still hold an out-of-SCC value (a cross-SCC edge that a
-		// downstream prune/backtrack left behind), making the Hall set non-tight and
-		// the nogood too weak. The closure absorbs every such escape so
-		// `|H| == |V|` by construction.
+		// downstream prune/backtrack left behind), making the Hall set
+		// non-tight and the nogood too weak. The closure absorbs every such
+		// escape so `|H| == |V|` by construction.
 		self.compute_scc_closure_for_explain(ctx, scc_id..scc_end);
 		debug_assert_eq!(
 			self.closure.dcns.len(),
@@ -857,8 +861,9 @@ where
 			atom
 		});
 		// Reset the membership marks (O(closure)) so the bitsets are clean for
-		// the next explain. The `dcns`/`vals` lists are the only record of which
-		// entries were marked, so this must run after the reason is built.
+		// the next explain. The `dcns`/`vals` lists are the only record of
+		// which entries were marked, so this must run after the reason is
+		// built.
 		self.closure.clear_marks();
 	}
 
@@ -954,9 +959,9 @@ mod tests {
 	#[traced_test]
 	fn test_domain_deep_chain() {
 		// Staircase that forces a long DFS over the residual graph: `x_i in
-		// {i, i+1}` for `i < N`, with the top pinned to `x_N = N`. All-different
-		// forces a downward cascade `x_i = i`, but reaching that fixpoint walks
-		// a chain whose length is proportional to `N`.
+		// {i, i+1}` for `i < N`, with the top pinned to `x_N = N`.
+		// All-different forces a downward cascade `x_i = i`, but reaching
+		// that fixpoint walks a chain whose length is proportional to `N`.
 		const N: IntVal = 300;
 		let mut slv = Solver::default();
 		let dcns: Vec<_> = (1..=N)
@@ -1008,14 +1013,16 @@ mod tests {
 	fn test_domain_interior_hole() {
 		// One test covering the distinguishing behaviours of the domain
 		// propagator at once:
-		// - The universe (1..=6) exceeds the decision count, so the matching leaves
-		//   free values (2, 5, 6) and the residual graph routes through the dummy node.
-		// - The Hall set {a, b} occupies {3, 4}, so domain consistency must remove the
-		//   *interior* values 3 and 4 from `e`, leaving the disconnected set {1, 2, 5,
-		//   6}. A bounds-consistent propagator could not do this: e's bounds stay (1,
+		// - The universe (1..=6) exceeds the decision count, so the matching
+		//   leaves free values (2, 5, 6) and the residual graph routes through
+		//   the dummy node.
+		// - The Hall set {a, b} occupies {3, 4}, so domain consistency must
+		//   remove the *interior* values 3 and 4 from `e`, leaving the
+		//   disconnected set {1, 2, 5, 6}. A bounds-consistent propagator could
+		//   not do this: e's bounds stay (1,
 		//   6) and only the holes change.
-		// - We assert the exact set of literals propagated, not just the resulting
-		//   domain.
+		// - We assert the exact set of literals propagated, not just the
+		//   resulting domain.
 		use crate::actions::{IntDecisionActions, IntInspectionActions};
 
 		let mut slv = Solver::default();

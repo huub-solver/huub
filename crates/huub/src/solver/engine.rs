@@ -310,8 +310,8 @@ impl Engine {
 				if l == lit {
 					continue;
 				}
-				// Get the value of the original reason lit by negating again: ¬¬a
-				// gives a
+				// Get the value of the original reason lit by negating again:
+				// ¬¬a gives a
 				let val = Decision::<bool>(!l).val(&self.state.trail);
 				if !val.unwrap_or(false) {
 					tracing::error!(
@@ -415,7 +415,8 @@ impl PropagatorExtension for Engine {
 		use crate::actions::IntDecisionActions;
 
 		// Solver should not be in a failed state (no propagator conflict should
-		// exist), and any conflict should have been communicated to the SAT solver.
+		// exist), and any conflict should have been communicated to the SAT
+		// solver.
 		debug_assert!(!self.state.failed);
 		debug_assert!(self.state.conflict.is_none());
 		// All propagation should have been communicated to the SAT solver.
@@ -440,10 +441,11 @@ impl PropagatorExtension for Engine {
 					OrderStorage::Lazy(_)
 				));
 
-				// Fix the unfixed variable to the bound preferred by its polarity:
-				// a positive polarity fixes to the upper bound (by raising the
-				// lower bound), otherwise to the lower bound (by lowering the upper
-				// bound). Either way the required lazy literal is created.
+				// Fix the unfixed variable to the bound preferred by its
+				// polarity: a positive polarity fixes to the upper bound
+				// (by raising the lower bound), otherwise to the lower
+				// bound (by lowering the upper bound). Either way the
+				// required lazy literal is created.
 				match ctx.state.int_vars[r.idx()].polarity {
 					Some(Polarity::Positive) => {
 						let lb_lit = r.lit(&mut ctx, IntLitMeaning::GreaterEq(ub));
@@ -529,7 +531,8 @@ impl PropagatorExtension for Engine {
 							lit.val(&ctx).is_none(),
 							"brancher yielded an already fixed literal"
 						);
-						// The current brancher has selected a literal, return it as our decision
+						// The current brancher has selected a literal, return
+						// it as our decision
 						debug!(target: "solver", lit = i32::from(lit.0), "decide");
 						self.state.statistics.user_search_directives += 1;
 						return SearchDecision::Assign(lit.0);
@@ -540,11 +543,13 @@ impl PropagatorExtension for Engine {
 						ctx.set_trailed(Trail::CURRENT_BRANCHER, current);
 					}
 					Directive::Consumed => {
-						// The current brancher has signaled to never yield decisions again. Remove
-						// the brancher from the queue permanently.
+						// The current brancher has signaled to never yield
+						// decisions again. Remove the brancher from the
+						// queue permanently.
 						//
-						// Note that this shifts all subsequent branchers (so we don't need to
-						// increment current), but has bad complexity. However, due to the low
+						// Note that this shifts all subsequent branchers (so we
+						// don't need to increment current), but has bad
+						// complexity. However, due to the low
 						// number of branchers, this is (likely) acceptable.
 						self.branchers.remove(current);
 					}
@@ -556,15 +561,15 @@ impl PropagatorExtension for Engine {
 	}
 
 	fn explain_propagation(&mut self, propagated_lit: RawLit, mut clause: ClauseBuilder<'_>) {
-		// Find the stored reason, if any. When there is none, the reason clause is
-		// the unit clause `{propagated_lit}`; otherwise `EngineReason::explain`
-		// the full clause.
+		// Find the stored reason, if any. When there is none, the reason clause
+		// is the unit clause `{propagated_lit}`; otherwise
+		// `EngineReason::explain` the full clause.
 		let Some(r) = self.state.reason_map.remove(&propagated_lit) else {
 			clause.push(propagated_lit);
 			return;
 		};
-		// If the reason is lazy, restore the current state to the state when the
-		// propagation happened before explaining.
+		// If the reason is lazy, restore the current state to the state when
+		// the propagation happened before explaining.
 		if let EngineReason::Lazy { .. } = r {
 			self.state.trail.goto_assign_lit(propagated_lit);
 		}
@@ -649,9 +654,10 @@ impl PropagatorExtension for Engine {
 					IntLitMeaning::Eq(val) if val < lb || val > ub => {
 						// Notified of invalid assignment, do nothing.
 						//
-						// Although we do not expect this to happen, it seems that CaDiCaL
-						// chronological backtracking might send notifications before
-						// additional propagation.
+						// Although we do not expect this to happen, it seems
+						// that CaDiCaL chronological backtracking might
+						// send notifications before additional
+						// propagation.
 						trace!(
 							target: "solver",
 							lit = i32::from(lit),
@@ -664,8 +670,9 @@ impl PropagatorExtension for Engine {
 					IntLitMeaning::Eq(val) => {
 						#[cfg(debug_assertions)]
 						{
-							// (DEBUG ONLY) Push the integer variable and its value to check
-							// that its bounds were updated before propagation occurs.
+							// (DEBUG ONLY) Push the integer variable and its
+							// value to check that its bounds were
+							// updated before propagation occurs.
 							self.state.check_int_fixed.push((iv, val));
 						}
 						if val > lb {
@@ -750,14 +757,15 @@ impl PropagatorExtension for Engine {
 
 	fn notify_new_decision_level(&mut self) {
 		// Solver should not be in a failed state (no propagator conflict should
-		// exist), and any conflict should have been communicated to the SAT solver.
+		// exist), and any conflict should have been communicated to the SAT
+		// solver.
 		debug_assert!(!self.state.failed);
 		debug_assert!(self.state.conflict.is_none());
 		// All propagation should have been communicated to the SAT solver.
 		debug_assert!(self.state.propagation_queue.is_empty());
-		// Note that `self.state.clauses` may not be empty because [`Self::decide`]
-		// might have introduced a new literal, which would in turn add its defining
-		// clauses to `self.state.clauses`.
+		// Note that `self.state.clauses` may not be empty because
+		// [`Self::decide`] might have introduced a new literal, which would
+		// in turn add its defining clauses to `self.state.clauses`.
 
 		trace!(target: "solver", "new decision level");
 		self.state.notify_new_decision_level();
@@ -786,8 +794,8 @@ impl PropagatorExtension for Engine {
 			{
 				use crate::actions::{BoolInspectionActions, IntInspectionActions};
 
-				// (DEBUG ONLY) Check that all integers that where fixed by equality
-				// literals had their bound literals set to match.
+				// (DEBUG ONLY) Check that all integers that where fixed by
+				// equality literals had their bound literals set to match.
 				for (iv, i) in mem::take(&mut self.state.check_int_fixed) {
 					debug_assert_eq!(iv.val(&self.state), Some(i));
 					let lb_lit = iv
@@ -801,7 +809,8 @@ impl PropagatorExtension for Engine {
 			// If there are no previous changes, run propagators
 			SolvingContext::new(slv, &mut self.state).run_propagators(&mut self.propagators);
 		}
-		// Check whether there are new clauses that need to be communicated first
+		// Check whether there are new clauses that need to be communicated
+		// first
 		if !self.state.clauses.is_empty() {
 			return None;
 		}
@@ -813,8 +822,8 @@ impl PropagatorExtension for Engine {
 			self.state.register_reason(lit, reason);
 			#[cfg(debug_assertions)]
 			{
-				// (DEBUG ONLY) Ensure the literal's explanation is valid in its trail
-				// position.
+				// (DEBUG ONLY) Ensure the literal's explanation is valid in its
+				// trail position.
 				self.debug_check_reason(lit);
 			}
 			self.state.last_propagated = Some((lit, event));
@@ -1077,8 +1086,8 @@ impl State {
 		| SearchStrategy::Transition(SwitchTrigger::Conflicts(cfl)) = self.search_strategy
 		{
 			self.search_trigger += 1;
-			// Change search strategy if the counted number of conflicts exceeds the
-			// threshold
+			// Change search strategy if the counted number of conflicts exceeds
+			// the threshold
 			if self.search_trigger >= cfl {
 				self.sat_search = !self.sat_search;
 				self.search_trigger = 0;
@@ -1088,7 +1097,8 @@ impl State {
 					conflicts = self.statistics.conflicts,
 					"change search strategy after reaching conflict threshold"
 				);
-				// Transition has been completed. Strategy has permanently switched to SAT.
+				// Transition has been completed. Strategy has permanently
+				// switched to SAT.
 				if let SearchStrategy::Transition(_) = self.search_strategy {
 					self.search_strategy = SearchStrategy::Sat;
 				}
@@ -1104,8 +1114,8 @@ impl State {
 			| SearchStrategy::Transition(SwitchTrigger::Restarts(rst)) = self.search_strategy
 			{
 				self.search_trigger += 1;
-				// Change search strategy if the counted number of restarts exceeds the
-				// threshold
+				// Change search strategy if the counted number of restarts
+				// exceeds the threshold
 				if self.search_trigger >= rst {
 					self.sat_search = !self.sat_search;
 					self.search_trigger = 0;
@@ -1115,7 +1125,8 @@ impl State {
 						restarts = self.statistics.restarts,
 						"change search strategy after reaching restart threshold"
 					);
-					// Transition has been completed. Strategy has permanently switched to SAT.
+					// Transition has been completed. Strategy has permanently
+					// switched to SAT.
 					if let SearchStrategy::Transition(_) = self.search_strategy {
 						self.search_strategy = SearchStrategy::Sat;
 					}
@@ -1270,16 +1281,16 @@ mod tests {
 		slv.add_clause([(!imply).into(), ge_view]).unwrap();
 
 		let (mut actions, mut engine) = slv.as_parts_mut();
-		// Running propagate once communicates only the first consequence back to
-		// SAT. The lower-bound propagation remains queued, but its bound update is
-		// already visible in the integer trail.
+		// Running propagate once communicates only the first consequence back
+		// to SAT. The lower-bound propagation remains queued, but its bound
+		// update is already visible in the integer trail.
 		let propagated = ExternalPropagator::propagate(&mut *engine, &mut actions);
 		assert_eq!(propagated, Some(imply.0));
 		assert_eq!(engine.state.propagation_queue.len(), 1);
 		assert_eq!(engine.state.propagation_queue[0].lit, ge.0);
 
-		// SAT now reports both literals together. The queued lower-bound event must
-		// survive this path so the advisor is still notified.
+		// SAT now reports both literals together. The queued lower-bound event
+		// must survive this path so the advisor is still notified.
 		ExternalPropagator::notify_assignment(&mut *engine, &[imply.0, ge.0]);
 		assert_eq!(*notifications.borrow(), 1);
 

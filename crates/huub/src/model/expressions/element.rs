@@ -127,8 +127,8 @@ impl ElementConstraint for bool {
 		index: View<IntVal>,
 		result: Self::Result,
 	) -> Result<(), Nogood<View<bool>>> {
-		// Convert array of boolean values to a set literals of the indices where
-		// the value is true
+		// Convert array of boolean values to a set literals of the indices
+		// where the value is true
 		let mut ranges = Vec::new();
 		let mut start = None;
 		for (i, b) in array.iter().enumerate() {

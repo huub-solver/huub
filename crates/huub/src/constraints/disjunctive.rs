@@ -346,9 +346,9 @@ impl<I> DisjunctivePropagator<I> {
 		// collect at least latest_completion - earliest_start energy (including
 		// durations[task_no]) from tasks bracketed in
 		// [earliest_start, latest_completion] and form a set O [start(t) >=
-		// latest_completion + 1] because [start(t) >= earliest_start] /\ forall (t'
-		// in O) [start(t') >= earliest_start] /\ forall (t' in O) [end(t') <=
-		// latest_completion]
+		// latest_completion + 1] because [start(t) >= earliest_start] /\ forall
+		// (t' in O) [start(t') >= earliest_start] /\ forall (t' in O)
+		// [end(t') <= latest_completion]
 		let (bv, _) =
 			self.start_times[task_no].lit_relaxed(ctx, IntLitMeaning::GreaterEq(earliest_start));
 		reason.push(bv);
@@ -386,8 +386,8 @@ impl<I> DisjunctivePropagator<I> {
 		E: ReasoningEngine,
 		I: IntSolverActions<E>,
 	{
-		// Collect the set of tasks in NLset(i) = { j | lst_j < lct_i && est_j + p_j
-		// ≥ earliest_start & j ≠ i }
+		// Collect the set of tasks in NLset(i) = { j | lst_j < lct_i && est_j +
+		// p_j ≥ earliest_start & j ≠ i }
 		let nlset = (0..self.start_times.len())
 			.filter(|j| {
 				{
@@ -411,16 +411,18 @@ impl<I> DisjunctivePropagator<I> {
 		// Explain the reason why task i cannot be the last task
 		reason.push(self.start_times[task_no].max_lit(ctx));
 		for j in nlset {
-			// explain the reason why all tasks in NLset(i) will stay in NLset(i)
+			// explain the reason why all tasks in NLset(i) will stay in
+			// NLset(i)
 			//
-			// (1) If for all j in NLset(i) [est_j ≥ earliest_start], then ect_Ω >
-			// lst_i, and NLset(i) \not\prec i
+			// (1) If for all j in NLset(i) [est_j ≥ earliest_start], then ect_Ω
+			// > lst_i, and NLset(i) \not\prec i
 			let (bv, _) =
 				self.start_times[j].lit_relaxed(ctx, IntLitMeaning::GreaterEq(earliest_start));
 			reason.push(bv);
-			// (2) explain the reason why the latest completion time of task i is set
-			// to latest_completion If for all j in NLset(i) [lst_j ≤ lct_i'], then
-			// max{lst_j, j \in Ω} ≤ lct_i', and lct_i' should be set
+			// (2) explain the reason why the latest completion time of task i
+			// is set to latest_completion If for all j in NLset(i) [lst_j ≤
+			// lct_i'], then max{lst_j, j \in Ω} ≤ lct_i', and lct_i' should
+			// be set
 			let (bv, _) =
 				self.start_times[j].lit_relaxed(ctx, IntLitMeaning::Less(updated_lct_i + 1));
 			reason.push(bv);
@@ -515,12 +517,12 @@ impl<I> DisjunctivePropagator<I> {
 		reason.push(bv);
 		for j in precedence_set {
 			let v = self.start_times[j].clone();
-			// (1) explain the reason why all tasks in precedence_set will stay in
-			// precedence_set
+			// (1) explain the reason why all tasks in precedence_set will stay
+			// in precedence_set
 			let (bv, _) = v.lit_relaxed(ctx, IntLitMeaning::GreaterEq(earliest_start));
 			reason.push(bv);
-			// (2) explain the reason why the earliest start time of task i is set to
-			// earliest completeion time of the precedence set
+			// (2) explain the reason why the earliest start time of task i is
+			// set to earliest completeion time of the precedence set
 			let (bv, _) = v.lit_relaxed(
 				ctx,
 				IntLitMeaning::Less(task_i_est + self.durations[task_no]),
@@ -656,7 +658,8 @@ impl<I> DisjunctivePropagator<I> {
 		self.tasks_sorted_by_earliest_completion
 			.sort_by_key(|&i| earliest_completion_times[i]);
 
-		// Initialize the placeholer for the index of the front task in the queue
+		// Initialize the placeholer for the index of the front task in the
+		// queue
 		let mut lst_front_idx = 0;
 		// Traverse all tasks by their earliest completion time non-decreasingly
 		for &ect_task in self.tasks_sorted_by_earliest_completion.iter() {
@@ -665,8 +668,9 @@ impl<I> DisjunctivePropagator<I> {
 				&& ect > latest_start_times[self.tasks_sorted_by_latest_start[lst_front_idx]]
 			{
 				let front_task = self.tasks_sorted_by_latest_start[lst_front_idx];
-				// the latest start time of the front task is smaller than the earliest
-				// completion of the current task, `front_task` << `ect_task` detected
+				// the latest start time of the front task is smaller than the
+				// earliest completion of the current task, `front_task` <<
+				// `ect_task` detected
 				self.ot_tree.add_task(
 					front_task,
 					self.earliest_start_time(ctx, front_task),
@@ -684,8 +688,8 @@ impl<I> DisjunctivePropagator<I> {
 			// temporarily remove task `ect_task` from the tree
 			let task_exists = self.ot_tree.remove_task(ect_task);
 
-			// Check if the earliest completion time of tasks in the tree is greater
-			// than the earliest completion time of task `ect_task`
+			// Check if the earliest completion time of tasks in the tree is
+			// greater than the earliest completion time of task `ect_task`
 			let tasks_in_tree_ect = self.ot_tree.root().earliest_completion;
 			if tasks_in_tree_ect > self.earliest_start_time(ctx, ect_task) {
 				binding_tasks[ect_task] = Some(self.ot_tree.binding_task(tasks_in_tree_ect, 0));
@@ -793,25 +797,26 @@ impl<I> DisjunctivePropagator<I> {
 		self.tasks_sorted_by_latest_completion
 			.sort_by_key(|&i| -latest_completion_times[i]);
 
-		// Traverse all tasks ordered by latest completion time and check the edge
-		// finding propagation rule
+		// Traverse all tasks ordered by latest completion time and check the
+		// edge finding propagation rule
 		//
 		// Invariant:
 		//
-		//   1. all non-gray tasks of `ot_tree` (Ω) forms LCut(j) = { i | lct_i ≤ lct_j
-		//      }
-		//   2. all gray tasks of `ot_tree` (Ѳ) are in the set T \setminus LCut(j)
+		//   1. all non-gray tasks of `ot_tree` (Ω) forms LCut(j) = { i | lct_i
+		//      ≤ lct_j }
+		//   2. all gray tasks of `ot_tree` (Ѳ) are in the set T \setminus
+		//      LCut(j)
 		for (j, &lct_task) in self.tasks_sorted_by_latest_completion.iter().enumerate() {
 			let lct = self.latest_completion_time(ctx, lct_task);
-			// Assume that resource overload is not detected, i.e., ect(LCut(j)) <=
-			// lct_j
+			// Assume that resource overload is not detected, i.e., ect(LCut(j))
+			// <= lct_j
 			let ect_in_tree = self.ot_tree.root().earliest_completion;
 			if check_overload {
-				// Checking resource overload for LCut(j): ect(LCut(j)) > lct_j =>
-				// conflict
+				// Checking resource overload for LCut(j): ect(LCut(j)) > lct_j
+				// => conflict
 				if ect_in_tree > lct {
-					// Resource overload detected, eagerly build the reason clause for
-					// conflict
+					// Resource overload detected, eagerly build the reason
+					// clause for conflict
 					let expl = self.explain_overload_checking(lct + 1);
 					self.start_times[lct_task].tighten_min(
 						ctx,
@@ -851,8 +856,8 @@ impl<I> DisjunctivePropagator<I> {
 						.tighten_min(ctx, ect_in_tree, |_, reason| reason.defer(data))?;
 					propagated = true;
 				}
-				// Remove the blocked task as the maximum propagation has been achieved
-				// by LCut(j) where lct_j is maximum
+				// Remove the blocked task as the maximum propagation has been
+				// achieved by LCut(j) where lct_j is maximum
 				self.ot_tree.remove_task(blocked_task);
 			}
 			self.ot_tree.annotate_gray_task(lct_task);
@@ -924,8 +929,8 @@ impl<I> DisjunctivePropagator<I> {
 		// Traverse all tasks by their latest completion time non-decreasingly
 		for &lct_task in self.tasks_sorted_by_latest_completion.iter() {
 			let lct = latest_completion_times[lct_task];
-			// Add all tasks with latest start time less than lct to the Omega-Theta
-			// tree
+			// Add all tasks with latest start time less than lct to the
+			// Omega-Theta tree
 			while lst_front_idx < self.tasks_sorted_by_latest_start.len()
 				&& lct > latest_start_times[self.tasks_sorted_by_latest_start[lst_front_idx]]
 			{
@@ -941,8 +946,8 @@ impl<I> DisjunctivePropagator<I> {
 			// temporarily remove task `ect_task` from the tree
 			let task_exists = self.ot_tree.remove_task(lct_task);
 
-			// Check if the earliest completion time of tasks in the tree is greater
-			// than the earliest completion time of task `ect_task`
+			// Check if the earliest completion time of tasks in the tree is
+			// greater than the earliest completion time of task `ect_task`
 			let tasks_in_tree_ect = self.ot_tree.root().earliest_completion;
 			if tasks_in_tree_ect > (lct - self.durations[lct_task]) {
 				binding_tasks[lct_task] = Some(self.ot_tree.binding_task(tasks_in_tree_ect, 0));
@@ -1041,8 +1046,8 @@ impl<I> DisjunctivePropagator<I> {
 			.sorted_by_key(|(_, lct)| *lct)
 			.collect_vec();
 
-		// Traverse all tasks ordered by latest completion time and check resource
-		// overload
+		// Traverse all tasks ordered by latest completion time and check
+		// resource overload
 		for (i, lct_i) in tasks_sorted_by_lct.iter() {
 			let est_i = self.earliest_start_time(ctx, *i);
 			self.ot_tree.add_task(*i, est_i, self.durations[*i]);
@@ -1133,16 +1138,16 @@ where
 		skip(self, ctx)
 	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
-		// Sort the tasks by earliest start time and initialize the Omega-Theta tree
-		// according to the property of the Omega-Theta tree.
+		// Sort the tasks by earliest start time and initialize the Omega-Theta
+		// tree according to the property of the Omega-Theta tree.
 		let earliest_start: Vec<_> = self.start_times.iter().map(|v| v.min(ctx)).collect();
 		self.tasks_sorted_by_earliest_start
 			.sort_by_key(|&i| earliest_start[i]);
 		self.ot_tree
 			.initialize(self.tasks_sorted_by_earliest_start.as_slice());
 
-		// Propagate edge finding propagation rule with overload checking or perform
-		// overload checking only
+		// Propagate edge finding propagation rule with overload checking or
+		// perform overload checking only
 		if self.edge_finding_enabled {
 			if self.propagate_edge_finding(ctx, true)? {
 				return Ok(());
@@ -1222,8 +1227,8 @@ impl OmegaThetaTree {
 				+ self.nodes[Self::right_child(node_id)].total_durations_gray
 				>= earliest_completion_time
 			{
-				// The binding task is to the left, blocked task contributes only to the
-				// sum
+				// The binding task is to the left, blocked task contributes
+				// only to the sum
 				earliest_completion_time -=
 					self.nodes[Self::left_child(node_id)].earliest_completion;
 				node_id = Self::right_child(node_id);

@@ -209,8 +209,8 @@ where
 		let (res_lb, res_ub) = self.result.bounds(ctx);
 
 		if base_lb <= 1 || res_lb <= 1 {
-			// TODO: It seems there should be propagation possible, but log2() certainly
-			// won't work.
+			// TODO: It seems there should be propagation possible, but log2()
+			// certainly won't work.
 			return Ok(());
 		}
 
@@ -495,8 +495,8 @@ where
 
 		// Protect against saturation inaccuracy: if `pow(base, exp)` causes
 		// overflow, then the `base` and `exp` should be disallowed, but
-		// because of the internal saturation used, it will instead allow `IntVal::MAX`
-		// or `IntVal::MIN` to be used as the result.
+		// because of the internal saturation used, it will instead allow
+		// `IntVal::MAX` or `IntVal::MIN` to be used as the result.
 		if OM::HANDLE_OVERFLOW
 			&& let Some(base) = self.base.val(ctx)
 			&& let Some(exp) = self.exponent.val(ctx)

@@ -232,8 +232,8 @@ impl ActivationList {
 		condition: IntPropCond,
 		mut matches: impl FnMut(ActivationActionS) -> bool,
 	) -> bool {
-		// The index just past the last activation of each block, in the order in
-		// which the blocks are stored.
+		// The index just past the last activation of each block, in the order
+		// in which the blocks are stored.
 		let ends = [
 			self.lower_bound_idx,
 			self.upper_bound_idx,
@@ -254,10 +254,11 @@ impl ActivationList {
 			return false;
 		};
 
-		// The activations within a block are unordered, so the activation can be
-		// swapped with the last one of its own block. That leaves it at the end
-		// of the block, from where the same swap with the next block moves it
-		// along, until it reaches the end of the list and can be removed.
+		// The activations within a block are unordered, so the activation can
+		// be swapped with the last one of its own block. That leaves it at
+		// the end of the block, from where the same swap with the next block
+		// moves it along, until it reaches the end of the list and can be
+		// removed.
 		let mut hole = pos as usize;
 		for &end in &ends[block..] {
 			let last = end as usize - 1;
@@ -463,8 +464,8 @@ mod tests {
 			}
 
 			for &&(prop, cond) in &order {
-				// An activation is only ever found in the block of the condition
-				// it subscribed with.
+				// An activation is only ever found in the block of the
+				// condition it subscribed with.
 				for &(_, other) in props.iter().filter(|&&(_, c)| c != cond) {
 					assert!(!full.clone().remove(other, |a| a == target(prop)));
 				}

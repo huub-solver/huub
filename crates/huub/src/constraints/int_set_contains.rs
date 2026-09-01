@@ -80,14 +80,14 @@ where
 			})?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
-		// If `set` is a superset of domain, then it is known that `reif` is true.
-		// (After intersection, we can just check equality)
+		// If `set` is a superset of domain, then it is known that `reif` is
+		// true. (After intersection, we can just check equality)
 		if domain == self.set {
 			self.reif.require(ctx, NO_REASON)?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
-		// Otherwise, we check whether we can rewrite the constraint into a simpler
-		// form.
+		// Otherwise, we check whether we can rewrite the constraint into a
+		// simpler form.
 		if self.set.intervals().len() == 1 {
 			let lb = self.set.min().unwrap();
 			let ub = self.set.max().unwrap();

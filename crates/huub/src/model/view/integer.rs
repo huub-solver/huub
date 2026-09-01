@@ -194,7 +194,8 @@ impl Resolved<View<IntVal>> {
 
 				// Perform the transformation and add the aliasing domain to x:
 				// x_scale * x + x_scale = y_scale * y + y_offset
-				// === x = (y_scale / x_scale) * y + ((y_offset - x_offset) / x_scale)
+				// === x = (y_scale / x_scale) * y + ((y_offset - x_offset) /
+				// x_scale)
 				let scale = NonZero::new(lin_y.scale.get() / lin_x.scale.get()).unwrap();
 				let offset = (lin_y.offset - lin_x.offset) / lin_x.scale.get();
 				let target = View(Linear(LinearView::new(scale, offset, lin_y.var)));
@@ -558,7 +559,8 @@ impl View<IntVal> {
 			Linear(lin) => match lin.reverse_meaning(IntLitMeaning::Eq(v)) {
 				Ok(IntLitMeaning::Eq(val)) => View(BoolView::IntEq(lin.var, val)),
 				Err(b) => {
-					// After the transformation, the value `v` does not remain an integer.
+					// After the transformation, the value `v` does not remain
+					// an integer.
 					debug_assert!(!b);
 					false.into()
 				}

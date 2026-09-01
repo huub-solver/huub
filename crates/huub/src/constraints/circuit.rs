@@ -112,7 +112,8 @@ where
 		let offset = graph.offset;
 		let max_node = offset + graph.vars.len() as IntVal - 1;
 		// Tighten every successor to the node range (offset..=max_node). The
-		// constraint itself implies the range, so the narrowing is unconditional.
+		// constraint itself implies the range, so the narrowing is
+		// unconditional.
 		for v in &graph.vars {
 			v.tighten_min(ctx, offset, NO_REASON)?;
 			v.tighten_max(ctx, max_node, NO_REASON)?;
@@ -169,7 +170,8 @@ where
 		data: u64,
 		event: IntEvent,
 	) -> bool {
-		// Forward advising to `no_cycle` to update its incremental successor state.
+		// Forward advising to `no_cycle` to update its incremental successor
+		// state.
 		self.no_cycle_prop.advise_of_int_change(ctx, data, event)
 	}
 
@@ -353,7 +355,8 @@ mod tests {
 	fn test_circuit_scc_disconnection() {
 		for scc in [false, true] {
 			let mut prb = Model::default();
-			// Nodes 0,1,2 may only point within {0,1,2}; nodes 3,4,5 within {3,4,5}.
+			// Nodes 0,1,2 may only point within {0,1,2}; nodes 3,4,5 within
+			// {3,4,5}.
 			let vars =
 				[1..=3, 1..=3, 1..=3, 4..=6, 4..=6, 4..=6].map(|dom| prb.new_int_decision(dom));
 			let posted = prb

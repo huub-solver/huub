@@ -285,8 +285,8 @@ where
 			return Ok(());
 		}
 
-		// If the denominator is known negative, then we swap it and the numerator
-		// with their negations.
+		// If the denominator is known negative, then we swap it and the
+		// numerator with their negations.
 		let mut denominator = self.denominator.clone().into();
 		let mut neg_denom = -self.denominator.clone();
 		let mut numerator = self.numerator.clone().into();
@@ -298,12 +298,13 @@ where
 		}
 
 		// If both the upper bound of the numerator and the upper bound of the
-		// right-hand side are positive, then propagate their upper bounds directly.
+		// right-hand side are positive, then propagate their upper bounds
+		// directly.
 		if numerator.max(ctx) >= 0 && self.result.max(ctx) >= 0 {
 			Self::propagate_upper_bounds(ctx, &numerator, &denominator, &self.result)?;
 		}
-		// If their upper bounds are negative, then propagate the upper bounds of
-		// the negated versions.
+		// If their upper bounds are negative, then propagate the upper bounds
+		// of the negated versions.
 		if neg_num.max(ctx) >= 0 && neg_res.max(ctx) >= 0 {
 			Self::propagate_upper_bounds(ctx, &neg_num, &denominator, &neg_res)?;
 		}
@@ -314,8 +315,8 @@ where
 		if numerator.min(ctx) >= 0 && self.result.min(ctx) >= 0 {
 			Self::propagate_positive_domains(ctx, &numerator, &denominator, &self.result)?;
 		}
-		// If the domain of the numerator and the result are known negative, then
-		// propagate their using their negations.
+		// If the domain of the numerator and the result are known negative,
+		// then propagate their using their negations.
 		if neg_num.min(ctx) >= 0 && neg_res.min(ctx) >= 0 {
 			Self::propagate_positive_domains(ctx, &neg_num, &denominator, &neg_res)?;
 		}

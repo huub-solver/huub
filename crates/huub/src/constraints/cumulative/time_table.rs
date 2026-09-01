@@ -140,8 +140,8 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 			return Vec::new();
 		}
 
-		// Collect a sufficient set of tasks with compulsory parts at `time_point` that
-		// cover `to_cover` energy
+		// Collect a sufficient set of tasks with compulsory parts at
+		// `time_point` that cover `to_cover` energy
 		let mut relevant_tasks = Vec::new();
 		let mut collected_energy = 0;
 		for i in 0..self.start_times.len() {
@@ -235,8 +235,8 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 				"explain task usage limit"
 			);
 
-			// Explanation: (1) relevant tasks (together with task `task_no`) have
-			// the required compulsory part at time `time_point`
+			// Explanation: (1) relevant tasks (together with task `task_no`)
+			// have the required compulsory part at time `time_point`
 			reason.extend(relevant_tasks.iter().chain(once(&task_no)).flat_map(|&i| {
 				[
 					self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
@@ -284,8 +284,8 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 				"explain resource overload"
 			);
 
-			// Explanation: relevant tasks have the required compulsory part at time
-			// `time_point`
+			// Explanation: relevant tasks have the required compulsory part at
+			// time `time_point`
 			reason.extend(relevant_tasks.iter().flat_map(|&i| {
 				[
 					self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
@@ -337,8 +337,8 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 				"explain task sweeping"
 			);
 
-			// Explanation: (1) relevant tasks have the required compulsory part at time
-			// `time_point`
+			// Explanation: (1) relevant tasks have the required compulsory part
+			// at time `time_point`
 			reason.extend(relevant_tasks.iter().flat_map(|&i| {
 				[
 					self.start_times[i].lit(ctx, IntLitMeaning::Less(time_point + 1)),
@@ -351,8 +351,9 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 				]
 			}));
 
-			// Explanation: (2) the task itself is either left-conflict or right-conflict
-			// with the time point, depending on the propagation rule
+			// Explanation: (2) the task itself is either left-conflict or
+			// right-conflict with the time point, depending on the
+			// propagation rule
 			match propagation_rule {
 				CumulativePropagationRule::ForwardShift => {
 					reason.push(self.start_times[task_no].lit(
@@ -491,12 +492,13 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 			let height = self.heights[i - 1];
 			assert!(b_start < b_end);
 
-			// Stop when the task is not right-conflict with any interval backward
+			// Stop when the task is not right-conflict with any interval
+			// backward
 			if b_end <= cmp::max(ect, updated_lct - dur_lb) {
 				break;
 			}
-			// if `lct` can be push backward (to ≤ `b_end`) and the resource usage is over
-			// the capacity
+			// if `lct` can be push backward (to ≤ `b_end`) and the resource
+			// usage is over the capacity
 			if updated_lct > b_start && usage_lb + height > max_capacity {
 				if updated_lct - dur_lb < ect && updated_lct - dur_lb <= b_start && ect >= b_end {
 					// Skip if the task has a compulsory part in this interval
@@ -588,8 +590,8 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 			if b_start >= cmp::min(lst, updated_est + dur_lb) {
 				break;
 			}
-			// if `est` can be push forward (to ≥ `b_end`) and the resource usage is over
-			// the capacity
+			// if `est` can be push forward (to ≥ `b_end`) and the resource
+			// usage is over the capacity
 			if updated_est < b_end && usage_lb + height > max_capacity {
 				if lst < updated_est + dur_lb && lst <= b_start && b_end <= updated_est + dur_lb {
 					// Skip if the task has a compulsory part in this

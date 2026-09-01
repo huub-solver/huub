@@ -111,8 +111,8 @@ where
 			.map(|&iv| slv.solver_view(iv))
 			.collect_vec();
 
-		// Create clauses that say foreach tuple i, if `selector[i]` is true, then the
-		// variable `j` equals `vals[i][j]`.
+		// Create clauses that say foreach tuple i, if `selector[i]` is true,
+		// then the variable `j` equals `vals[i][j]`.
 		if vars.len() != 2 {
 			for (i, tup) in self.table.iter().enumerate() {
 				assert!(tup.len() == vars.len());
@@ -123,22 +123,22 @@ where
 			}
 		}
 
-		// Create clauses that map from the value taken by the variables back to the
-		// possible selectors that can be active.
+		// Create clauses that map from the value taken by the variables back to
+		// the possible selectors that can be active.
 		for (j, var) in vars.iter().enumerate() {
 			let (lb, ub) = var.bounds(slv);
 			let mut support_clauses: Vec<Vec<_>> = vec![Vec::new(); (ub - lb + 1) as usize];
 			for (i, tup) in self.table.iter().enumerate() {
 				let k = tup[j] - lb;
 				if !(0..support_clauses.len() as IntVal).contains(&k) {
-					// Value is not in the domain of the variable, so this tuple should not
-					// be considered.
+					// Value is not in the domain of the variable, so this tuple
+					// should not be considered.
 					continue;
 				}
 				// Add tuple i to be in support of value `k`.
 				if vars.len() == 2 {
-					// Special case where we can use the values of the other variables as
-					// the selection variables directly.
+					// Special case where we can use the values of the other
+					// variables as the selection variables directly.
 					support_clauses[k as usize]
 						.push(vars[1 - j].lit(slv, IntLitMeaning::Eq(tup[1 - j])));
 				} else {

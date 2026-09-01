@@ -587,7 +587,8 @@ impl Model {
 		let mut status = con_obj.simplify(&mut SimplificationContext(&mut *self));
 		self.cur_prop = None;
 
-		// Resolve a deferred conflict's clause while the propagator is available.
+		// Resolve a deferred conflict's clause while the propagator is
+		// available.
 		if let Err(Conflict(ConflictInner::Deferred {
 			subject,
 			propagator,

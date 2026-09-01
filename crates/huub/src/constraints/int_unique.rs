@@ -85,9 +85,9 @@ where
 			return;
 		}
 
-		// The eager value encoding pays off when the decisions jointly range over
-		// few values relative to their number. Use the cardinality of the union of
-		// all the decision variable domains.
+		// The eager value encoding pays off when the decisions jointly range
+		// over few values relative to their number. Use the cardinality of
+		// the union of all the decision variable domains.
 		let dcns = &self.bounds_prop.vars;
 		let mut union: Option<IntSet> = None;
 		for d in dcns {
@@ -124,8 +124,8 @@ where
 				Either::Right(var)
 			}
 		});
-		// Propagation should have detected any duplicate fixed values and removed them
-		// from the domains of other decision variables.
+		// Propagation should have detected any duplicate fixed values and
+		// removed them from the domains of other decision variables.
 		debug_assert!(_vals.iter().unique().collect_vec().len() == _vals.len());
 		debug_assert!(
 			_vals

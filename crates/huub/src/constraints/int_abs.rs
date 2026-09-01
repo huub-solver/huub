@@ -119,7 +119,8 @@ where
 
 		match self.origin_positive.val(ctx) {
 			Some(false) => {
-				// If we know that the origin is negative, then just negate the bounds
+				// If we know that the origin is negative, then just negate the
+				// bounds
 				self.abs.tighten_min(ctx, -ub, |ctx, reason| {
 					reason.push(self.origin.max_lit(ctx));
 				})?;
@@ -163,8 +164,9 @@ where
 				})?;
 			}
 			None => {
-				// If the origin can be either positive or negative, then the bounds are
-				// The maximum absolute value bounds the absolute value variable.
+				// If the origin can be either positive or negative, then the
+				// bounds are The maximum absolute value bounds the absolute
+				// value variable.
 				let abs_max = cmp::max(ub, -lb);
 				self.abs.tighten_max(ctx, abs_max, |ctx, reason| {
 					reason.extend([
@@ -173,8 +175,8 @@ where
 					]);
 				})?;
 
-				// If the upper bound of the absolute value variable has changed, we
-				// propagate bounds of the origin variable.
+				// If the upper bound of the absolute value variable has
+				// changed, we propagate bounds of the origin variable.
 				let abs_ub = self.abs.max(ctx);
 				self.origin.tighten_min(ctx, -abs_ub, |ctx, reason| {
 					reason.push(self.abs.max_lit(ctx));

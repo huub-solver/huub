@@ -86,11 +86,13 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 	{
 		move |ctx, reason| {
 			// Explain a lower bound via 3 cases:
-			// - Lower bound of var i is above k - This is the value that required the
-			//   earlier lower bound that is currently explained (end of recursion).
-			// - k is in the domain of var i - Go one step up and to the next variable.
-			// - k is not in the domain of var i - i can be anything else, go to next
+			// - Lower bound of var i is above k - This is the value that
+			//   required the earlier lower bound that is currently explained
+			//   (end of recursion).
+			// - k is in the domain of var i - Go one step up and to the next
 			//   variable.
+			// - k is not in the domain of var i - i can be anything else, go to
+			//   next variable.
 			{
 				let mut i = i + 1;
 				let mut k = k;
@@ -151,8 +153,8 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 		// Forward pass to set upper bounds and capture the highest lower bound.
 		for (i, v) in self.vars.iter().enumerate() {
 			let mut ub_v = v.max(ctx);
-			// Upper bound can only increase by 1, set new bound if larger values are in the
-			// domain.
+			// Upper bound can only increase by 1, set new bound if larger
+			// values are in the domain.
 			if ub_v > up + 1 {
 				if v.in_domain(ctx, up + 1) {
 					ub_v = up + 1;
@@ -422,11 +424,13 @@ where
 				if lb > ctx.trailed(self.max_last) {
 					ctx.set_trailed(self.max_last, lb);
 				}
-				// If a repair is necessary, continue check where the repair ended.
+				// If a repair is necessary, continue check where the repair
+				// ended.
 				(i, k) = self.repair_lower(ctx, lb)?;
 				continue;
 			}
-			// Deal with moving the last possibility to have value k for the first.
+			// Deal with moving the last possibility to have value k for the
+			// first.
 			if ctx.trailed(self.last[k as usize]) == i && !self.vars[i as usize].in_domain(ctx, k) {
 				(i, k) = self.repair_lower(ctx, k)?;
 			}
@@ -450,20 +454,21 @@ impl<I> IntValuePrecedeChainValue<I> {
 	{
 		move |ctx, reason| {
 			// Explain a lower bound via 3 cases:
-			// - Current lower bound index is above k - This is the value that required the
-			//   earlier lower bound that is currently explained (end of recursion).
-			// - Index k is in the domain of var i - Go one step up and to the next
-			//   variable.
-			// - Index k is not in the domain of var i - i can be anything else, go to next
-			//   variable.
+			// - Current lower bound index is above k - This is the value that
+			//   required the earlier lower bound that is currently explained
+			//   (end of recursion).
+			// - Index k is in the domain of var i - Go one step up and to the
+			//   next variable.
+			// - Index k is not in the domain of var i - i can be anything else,
+			//   go to next variable.
 			{
 				let mut i = i + 1;
 				let mut j = j;
 
 				while j < self.values.len() {
-					// A lower bound is explained by stating that all untracked values are excluded
-					// (< min value, > max value, all holes), as well as all values with smaller
-					// indices.
+					// A lower bound is explained by stating that all untracked
+					// values are excluded (< min value, > max value, all
+					// holes), as well as all values with smaller indices.
 					if let Some(lb) = self.lowest_index(ctx, i).unwrap_or(Some(j + 1))
 						&& lb > j
 					{
@@ -536,8 +541,8 @@ impl<I> IntValuePrecedeChainValue<I> {
 
 		// Forward pass to set upper bounds and capture the highest lower bound.
 		for (i, v) in self.vars.iter().enumerate() {
-			// Upper bound can only increase by 1, set new bound if larger values are in the
-			// domain.
+			// Upper bound can only increase by 1, set new bound if larger
+			// values are in the domain.
 			self.propagate_max(ctx, i, up + 1)?;
 			// The current var is the first possibility to reach index up + 1.
 			if up < self.values.len() && v.in_domain(ctx, self.values[up]) {
@@ -638,7 +643,8 @@ impl<I> IntValuePrecedeChainValue<I> {
 			.collect();
 		let first_val = (0..vars.len()).map(|_| engine.new_trailed(0)).collect();
 		let max_last = engine.new_trailed(0);
-		// Set up some data structures to deal with holes in values more efficiently.
+		// Set up some data structures to deal with holes in values more
+		// efficiently.
 		let min_val = *values.iter().min().unwrap_or(&IntVal::MAX);
 		let max_val = *values.iter().max().unwrap_or(&IntVal::MIN);
 		let holes = (min_val..=max_val)
@@ -785,8 +791,9 @@ impl<I> IntValuePrecedeChainValue<I> {
 			// Hit boundary case, this will cause a conflict.
 			if i < 0 {
 				self.propagate_min(ctx, 0, k)?;
-				// Return Ok since the conflict is only detected during propagation
-				// (several domain elements are removed separately).
+				// Return Ok since the conflict is only detected during
+				// propagation (several domain elements are removed
+				// separately).
 				return Ok((0, k));
 			}
 		}
@@ -937,8 +944,8 @@ where
 			};
 			let li = self.lowest_index(ctx, i);
 			if li.is_err() {
-				// There is already a conflict waiting to propagate, no need for further
-				// propagation
+				// There is already a conflict waiting to propagate, no need for
+				// further propagation
 				return Ok(());
 			}
 			if let Ok(Some(lb)) = li {
@@ -949,12 +956,14 @@ where
 					if lb as IntVal > ctx.trailed(self.max_last) {
 						ctx.set_trailed(self.max_last, lb as IntVal);
 					}
-					// If a repair is necessary, continue check where the repair ended.
+					// If a repair is necessary, continue check where the repair
+					// ended.
 					(i, k) = self.repair_lower(ctx, lb)?;
 					continue;
 				}
 			}
-			// Deal with moving the last possibility to have value k for the first time.
+			// Deal with moving the last possibility to have value k for the
+			// first time.
 			if ctx.trailed(self.last[k]) == i as IntVal
 				&& !self.vars[i].in_domain(ctx, self.values[k - 1])
 			{

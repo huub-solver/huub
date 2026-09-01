@@ -219,8 +219,8 @@ impl Cumulative {
 	/// removes no solution and strengthens the energy arguments.
 	fn saturate_usages(usages: &mut [IntVal], capacity: IntVal) {
 		// The smallest usage that any other resource-using task could run
-		// alongside; a task using more than the capacity left by it cannot share
-		// the resource with any other task.
+		// alongside; a task using more than the capacity left by it cannot
+		// share the resource with any other task.
 		let Some(r_min) = usages
 			.iter()
 			.copied()
@@ -242,8 +242,8 @@ impl Cumulative {
 	/// Requires constant durations for all tasks.
 	fn strengthen_usages(usages: &mut [IntVal], capacity: IntVal, windows: &[(IntVal, IntVal)]) {
 		let n = usages.len();
-		// Strengthen usages sequentially since each update changes the knapsacks of
-		// later tasks.
+		// Strengthen usages sequentially since each update changes the
+		// knapsacks of later tasks.
 		for j in 0..n {
 			let r_j = usages[j];
 			let (est_j, lct_j) = windows[j];
@@ -251,13 +251,14 @@ impl Cumulative {
 				continue;
 			}
 			// The most the tasks that can overlap task `j` use together is a
-			// knapsack over their usages bounded by the capacity left for them, so
-			// task `j` can claim whatever remains.
+			// knapsack over their usages bounded by the capacity left for them,
+			// so task `j` can claim whatever remains.
 			let others: Vec<IntVal> = (0..n)
 				.filter(|&i| i != j)
 				.filter_map(|i| {
 					let (est_i, lct_i) = windows[i];
-					// The windows `[est_i, lct_i)` and `[est_j, lct_j)` overlap.
+					// The windows `[est_i, lct_i)` and `[est_j, lct_j)`
+					// overlap.
 					(est_i < lct_j && est_j < lct_i && usages[i] > 0).then_some(usages[i])
 				})
 				.collect();
@@ -305,8 +306,8 @@ impl Cumulative {
 			.max()
 			.unwrap_or(1);
 
-		// The reachable load at each time point is a knapsack over the tasks whose
-		// window covers it.
+		// The reachable load at each time point is a knapsack over the tasks
+		// whose window covers it.
 		let starts: Vec<IntVal> = windows
 			.iter()
 			.map(|&(est, _)| est)
@@ -322,8 +323,8 @@ impl Cumulative {
 				})
 				.collect();
 			let reachable = Self::max_reachable_load(&active, *capacity);
-			// If the reachable load is already at least the current capacity, no
-			// strengthening is possible.
+			// If the reachable load is already at least the current capacity,
+			// no strengthening is possible.
 			if reachable >= *capacity {
 				return;
 			}
@@ -361,9 +362,10 @@ where
 		&mut self,
 		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
-		// Perform coefficient strengthening on a single working copy of the fixed
-		// coefficients, then rewrite the changed usages and capacity in one pass so
-		// that the usages and capacity can never fall out of sync.
+		// Perform coefficient strengthening on a single working copy of the
+		// fixed coefficients, then rewrite the changed usages and capacity in
+		// one pass so that the usages and capacity can never fall out of
+		// sync.
 		if !self.strengthened
 			&& let Some(mut capacity) = self.propagator.capacity.val(ctx)
 			&& let Some(mut usages) = self.fixed_usages(ctx)
@@ -622,10 +624,10 @@ where
 			}
 		}
 
-		// Time-table-edge-finding phases run once the time-table propagation has
-		// reached its fixpoint. Unlike the time-table phase, edge-finding can also
-		// propagate when there are no compulsory parts, so it runs regardless of
-		// whether the profile is empty.
+		// Time-table-edge-finding phases run once the time-table propagation
+		// has reached its fixpoint. Unlike the time-table phase, edge-finding
+		// can also propagate when there are no compulsory parts, so it runs
+		// regardless of whether the profile is empty.
 		//
 		// Tightening a start time can only grow a compulsory part, so a profile
 		// left over from before an edge-finding update understates the resource
@@ -681,7 +683,8 @@ mod tests {
 	/// The bounded max-subset-sum underlying the strengthening rules.
 	#[test]
 	fn test_cumulative_max_reachable_load() {
-		// `{5, 2}` fills the capacity exactly, where `{3, 5}` would overshoot it.
+		// `{5, 2}` fills the capacity exactly, where `{3, 5}` would overshoot
+		// it.
 		assert_eq!(Cumulative::max_reachable_load(&[3, 5, 2], 7), 7);
 		// Without the 2 no subset reaches 7, since `3 + 5` no longer fits.
 		assert_eq!(Cumulative::max_reachable_load(&[3, 5], 7), 5);
@@ -796,8 +799,8 @@ mod tests {
 	#[traced_test]
 	fn test_cumulative_propagate() {
 		let mut prb = Model::default();
-		// Tasks A and B (start [0, 2], duration 3) each have a compulsory part in
-		// [0, 2]; task C (start [0, 4], duration 3) has none.
+		// Tasks A and B (start [0, 2], duration 3) each have a compulsory part
+		// in [0, 2]; task C (start [0, 4], duration 3) has none.
 		let start_time_a = prb.new_int_decision(0..=2);
 		let start_time_b = prb.new_int_decision(0..=2);
 		let start_time_c = prb.new_int_decision(0..=4);
@@ -862,7 +865,8 @@ mod tests {
 		Cumulative::strengthen_usages(&mut usages, 5, &[(0, 2), (0, 2), (0, 2)]);
 		assert_eq!(usages, vec![3, 2, 2]);
 
-		// A task already using the whole capacity, or none of it, is left alone.
+		// A task already using the whole capacity, or none of it, is left
+		// alone.
 		let mut usages = vec![4, 0];
 		Cumulative::strengthen_usages(&mut usages, 4, &[(0, 2), (0, 2)]);
 		assert_eq!(usages, vec![4, 0]);

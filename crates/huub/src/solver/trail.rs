@@ -266,16 +266,16 @@ impl Trail {
 	/// Return the index for `sat_store` based on a [`RawVar`].
 	#[inline]
 	fn sat_index(var: RawVar) -> usize {
-		// TODO: Consider grounding (either always deduct 1 because there is no var
-		// 0, or at the least observed var)
+		// TODO: Consider grounding (either always deduct 1 because there is no
+		// var 0, or at the least observed var)
 		i32::from(var) as usize
 	}
 
 	/// Get the current assigned value for a literal (if any).
 	pub(crate) fn sat_value(&self, lit: impl Into<RawLit>) -> Option<bool> {
 		let lit = lit.into();
-		// Note that this doesn't use direct indexing as some operations might check
-		// the value of the variable before it is observed by the solver
+		// Note that this doesn't use direct indexing as some operations might
+		// check the value of the variable before it is observed by the solver
 		self.sat_store
 			.get(Self::sat_index(lit.var()))
 			.and_then(|store| store.value)

@@ -333,8 +333,8 @@ impl GoalPolarity {
 			constraint_ids.sort_unstable_by_key(|con| con.index());
 			constraint_ids.dedup();
 			for &con in &constraint_ids {
-				// Never enqueue decisions from the constraint that enqueued this
-				// decision
+				// Never enqueue decisions from the constraint that enqueued
+				// this decision
 				if discovering == Some(con) {
 					continue;
 				}
@@ -400,10 +400,10 @@ impl GoalPolarity {
 		input: &Resolved<model::Decision<IntVal>>,
 		input_polarity: Polarity,
 	) {
-		// The denominator must be strictly positive or strictly negative for the
-		// division to be monotone in either argument. The result follows the
-		// numerator when the denominator is positive, and opposes it when the
-		// denominator is negative.
+		// The denominator must be strictly positive or strictly negative for
+		// the division to be monotone in either argument. The result follows
+		// the numerator when the denominator is positive, and opposes it when
+		// the denominator is negative.
 		let (den_lb, den_ub) = div.denominator.bounds(model);
 		if den_lb >= 1 {
 			self.record_relation(model, &[div.result, -div.numerator], input, input_polarity);
@@ -508,8 +508,8 @@ impl GoalPolarity {
 		else {
 			return;
 		};
-		// To push `input` in `input_polarity`, the other terms must be pushed in
-		// the opposite direction.
+		// To push `input` in `input_polarity`, the other terms must be pushed
+		// in the opposite direction.
 		let term_dir = if input_neg {
 			input_polarity
 		} else {
@@ -523,7 +523,8 @@ impl GoalPolarity {
 						continue;
 					}
 					model.observe_int_polarity(t, Tier::Objective, term_dir);
-					// The direction wanted for `w` is `term_dir` folded by `w`'s scale.
+					// The direction wanted for `w` is `term_dir` folded by
+					// `w`'s scale.
 					let w_dir = if lin.scale.get() < 0 {
 						!term_dir
 					} else {
@@ -1178,8 +1179,8 @@ impl LoweringMapBuilder {
 							Some(Polarity::Negative) => slv.sat.phase(!dcn.0),
 							None => {}
 						};
-						// Register the new solver literal based on a model Boolean
-						// decision.
+						// Register the new solver literal based on a model
+						// Boolean decision.
 						tracing::trace!(
 							target: "reverse_map",
 							model = idx as u64,
@@ -1607,7 +1608,8 @@ mod tests {
 		model.linear(a - b + c - x).eq(0).post().unwrap();
 		model.linear(d + e - c).eq(0).post().unwrap();
 
-		// Resolve each view to its decision index before lowering borrows `model`.
+		// Resolve each view to its decision index before lowering borrows
+		// `model`.
 		let idx = int_decision_index;
 		let (ai, bi, ci, di, ei) = (idx(a), idx(b), idx(c), idx(d), idx(e));
 

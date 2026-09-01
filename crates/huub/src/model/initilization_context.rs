@@ -477,7 +477,8 @@ impl IntInitActions<ModelInitContext<'_>> for Resolved<View<IntVal>> {
 						return;
 					}
 					BoolView::Const(_) => {
-						// Value does not change, so no advisor will ever be called
+						// Value does not change, so no advisor will ever be
+						// called
 						return;
 					}
 					BoolView::IntEq(iv, v) => (iv, IntLitMeaning::Eq(v), IntPropCond::Domain),
@@ -515,7 +516,8 @@ impl IntInitActions<ModelInitContext<'_>> for Resolved<View<IntVal>> {
 						return ctx.cancel_bool_advisor(lit.idx(), data);
 					}
 					BoolView::Const(_) => {
-						// A constant never subscribed, so there is nothing to cancel.
+						// A constant never subscribed, so there is nothing to
+						// cancel.
 						return;
 					}
 					BoolView::IntEq(iv, _) | BoolView::IntNotEq(iv, _) => (iv, IntPropCond::Domain),

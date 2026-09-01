@@ -86,8 +86,9 @@ impl Model {
 			[] => return Ok(()),
 			_ => {}
 		}
-		// Post a model-level `IntUnique` since all successor values must be distinct
-		// (a permutation for `circuit`, a partial permutation for `subcircuit`).
+		// Post a model-level `IntUnique` since all successor values must be
+		// distinct (a permutation for `circuit`, a partial permutation for
+		// `subcircuit`).
 		self.post_constraint(IntUnique {
 			bounds_prop: IntUniqueBounds::new(vars.clone()),
 			value_prop: IntUniqueValue::new(vars.clone()),
@@ -312,8 +313,8 @@ impl Model {
 		#[builder(setters(name = rhs_internal, vis = ""))] rhs: IntLinearExp,
 		#[builder(setters(name = reif_internal, vis = ""))] reif: Option<Reification>,
 	) -> Result<(), Nogood<View<bool>>> {
-		// Subtract the RHS from the LHS to get a linear expression with a constant 0 on
-		// the RHS
+		// Subtract the RHS from the LHS to get a linear expression with a
+		// constant 0 on the RHS
 		expr -= rhs;
 
 		// Move the constant offset to the RHS
@@ -337,8 +338,9 @@ impl Model {
 
 		if terms.is_empty() {
 			// All variable terms cancelled out, so the constraint reduces to a
-			// comparison between the constant `0` and the (constant) `rhs`. Evaluate
-			// it directly, then either enforce it or fix the reification literal.
+			// comparison between the constant `0` and the (constant) `rhs`.
+			// Evaluate it directly, then either enforce it or fix the
+			// reification literal.
 			let satisfied = match comparator {
 				Comparator::NotEqual => 0 != rhs,
 				Comparator::Equal => 0 == rhs,
@@ -627,14 +629,15 @@ impl Model {
 			return Ok(());
 		}
 		if let Some(values) = values {
-			// If the list of values doesn't contain at least two values, then the
-			// constraint is trivially satisfied.
+			// If the list of values doesn't contain at least two values, then
+			// the constraint is trivially satisfied.
 			if values.len() <= 1 {
 				return Ok(());
 			}
-			// If the values are not consecutive or if the largest value does not cover the
-			// full decision variable domain, then we need the general value
-			// precede chain constraint that tracks the explicit values.
+			// If the values are not consecutive or if the largest value does
+			// not cover the full decision variable domain, then we need the
+			// general value precede chain constraint that tracks the
+			// explicit values.
 			if !values.iter().tuple_windows().all(|(&x, &y)| x + 1 == y)
 				|| *values.last().unwrap() < vars.iter().map(|v| v.max(self)).max().unwrap()
 			{
@@ -643,9 +646,10 @@ impl Model {
 				let con = IntValuePrecedeChainValue::new(self, values.into_iter().collect(), vars);
 				return self.post_constraint(con).map(|_| ());
 			}
-			// Otherwise this is a sequential precede chain constraint, and we can
-			// normalize it to start at 1. The `values` array might not have started
-			// at 1, calculate the offset to subtract from the decision variables.
+			// Otherwise this is a sequential precede chain constraint, and we
+			// can normalize it to start at 1. The `values` array might not
+			// have started at 1, calculate the offset to subtract from the
+			// decision variables.
 			offset = values[0] - 1;
 		}
 
@@ -1025,8 +1029,8 @@ mod tests {
 
 	#[test]
 	fn test_empty_linear_implied_false() {
-		// `0 == 5` is false, so the half-reification literal `r` must be fixed to
-		// false (the model stays satisfiable).
+		// `0 == 5` is false, so the half-reification literal `r` must be fixed
+		// to false (the model stays satisfiable).
 		let mut prb = Model::default();
 		let x = prb.new_int_decision(1..=5);
 		let r = prb.new_bool_decision();
@@ -1036,8 +1040,8 @@ mod tests {
 
 	#[test]
 	fn test_empty_linear_reified_false() {
-		// `0 == 5` is false, so the reification literal `r` must be fixed to false
-		// and the model must remain satisfiable.
+		// `0 == 5` is false, so the reification literal `r` must be fixed to
+		// false and the model must remain satisfiable.
 		let mut prb = Model::default();
 		let x = prb.new_int_decision(1..=5);
 		let r = prb.new_bool_decision();
@@ -1047,7 +1051,8 @@ mod tests {
 
 	#[test]
 	fn test_empty_linear_reified_true() {
-		// `0 == 0` is true, so the reification literal `r` must be fixed to true.
+		// `0 == 0` is true, so the reification literal `r` must be fixed to
+		// true.
 		let mut prb = Model::default();
 		let x = prb.new_int_decision(1..=5);
 		let r = prb.new_bool_decision();

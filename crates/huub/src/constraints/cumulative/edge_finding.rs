@@ -94,8 +94,8 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 	/// logarithmic time instead of rescanning the whole profile for every task.
 	fn build_profile_energy(&self) -> Vec<IntVal> {
 		let mut profile_energy = vec![0; self.bounds.len()];
-		// The profile is empty after its last bound, so accumulate backwards from
-		// there.
+		// The profile is empty after its last bound, so accumulate backwards
+		// from there.
 		for i in (0..self.bounds.len().saturating_sub(1)).rev() {
 			profile_energy[i] =
 				profile_energy[i + 1] + self.heights[i] * (self.bounds[i + 1] - self.bounds[i]);
@@ -131,8 +131,9 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 					// The free part of task j is entirely inside the window.
 					en_req_free += state.tasks[j].free_energy;
 				} else {
-					// Task j starts inside the window but completes after it; only
-					// the part of its free duration forced into the window counts.
+					// Task j starts inside the window but completes after it;
+					// only the part of its free duration forced into the
+					// window counts.
 					en_req_free += state.tasks[j].usage * cmp::max(end - state.tasks[j].lst_ef, 0);
 				}
 				let en_req =
@@ -218,8 +219,8 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 		opportunistic: bool,
 		updates: &mut Vec<EdgeFindingUpdate>,
 	) -> Option<(IntVal, IntVal)> {
-		// Strongest new bounds found so far per task, to keep only the best update
-		// and avoid queueing dominated ones.
+		// Strongest new bounds found so far per task, to keep only the best
+		// update and avoid queueing dominated ones.
 		let mut new_est: Vec<IntVal> = state.tasks.iter().map(|t| t.est).collect();
 		let mut new_lct: Vec<IntVal> = state.tasks.iter().map(|t| t.lct).collect();
 		let horizon_energy = state.capacity
@@ -248,9 +249,10 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 					continue;
 				}
 
-				// Opportunistic extended edge finding (Vilím (2011), through/left): if
-				// the tightest window `[min_begin, end)` seen so far cannot fit all of
-				// `j`, lower its latest completion accordingly.
+				// Opportunistic extended edge finding (Vilím (2011),
+				// through/left): if the tightest window `[min_begin, end)`
+				// seen so far cannot fit all of `j`, lower its latest
+				// completion accordingly.
 				if opportunistic && let Some(mb) = min_begin {
 					let min_en_in = state.tasks[j].usage
 						* cmp::max(
@@ -277,10 +279,12 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 				if state.tasks[j].lct <= end {
 					en_req_free += state.tasks[j].free_energy;
 				} else {
-					// The free part of `j` is forced into the window from the right.
+					// The free part of `j` is forced into the window from the
+					// right.
 					let dur_shift = cmp::max(end - state.tasks[j].lst_ef, 0);
 					en_req_free += state.tasks[j].usage * dur_shift;
-					// Extra energy `j` would need in the window if started at est_j.
+					// Extra energy `j` would need in the window if started at
+					// est_j.
 					let en_req_start = cmp::min(
 						state.tasks[j].free_energy,
 						state.tasks[j].usage * (end - state.tasks[j].est),
@@ -312,8 +316,8 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 						0
 					};
 					let en_in = state.tasks[u].usage * (dur_mand + dur_shift);
-					// Only `dur_avail` of `u` can fit before `end`, so it must start at
-					// `end - dur_avail` at the earliest.
+					// Only `dur_avail` of `u` can fit before `end`, so it must
+					// start at `end - dur_avail` at the earliest.
 					let dur_avail = (en_avail + en_in) / state.tasks[u].usage;
 					let start_new = end - dur_avail;
 					if start_new > new_est[u] {
@@ -389,9 +393,10 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 				reason.push(self.durations[i].min_lit(ctx));
 				reason.push(self.usages[i].min_lit(ctx));
 			}
-			// The updated task contributes only the bound on the side from which it
-			// is being pushed (its previous earliest start for a lower-bound update,
-			// or its previous latest start for an upper-bound update).
+			// The updated task contributes only the bound on the side from
+			// which it is being pushed (its previous earliest start for a
+			// lower-bound update, or its previous latest start for an
+			// upper-bound update).
 			if is_lb {
 				reason.push(self.start_times[u].min_lit(ctx));
 			} else {
@@ -446,9 +451,10 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 					continue;
 				}
 
-				// Opportunistic extended edge finding (Vilím (2011), through/left): if
-				// the tightest window `[begin, min_end)` seen so far cannot fit all of
-				// `j`, raise its earliest start accordingly.
+				// Opportunistic extended edge finding (Vilím (2011),
+				// through/left): if the tightest window `[begin, min_end)`
+				// seen so far cannot fit all of `j`, raise its earliest
+				// start accordingly.
 				if opportunistic && let Some(me) = min_end {
 					let min_en_in = state.tasks[j].usage
 						* cmp::max(
@@ -475,7 +481,8 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 				if begin <= state.tasks[j].est {
 					en_req_free += state.tasks[j].free_energy;
 				} else {
-					// The free part of `j` is forced into the window from the left.
+					// The free part of `j` is forced into the window from the
+					// left.
 					let dur_shift = if end >= state.tasks[j].lct {
 						cmp::max(state.tasks[j].ect - begin - state.tasks[j].fixed_dur, 0)
 					} else {
@@ -538,7 +545,8 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 			return profile_energy.first().copied().unwrap_or(0);
 		};
 		if i + 1 == self.bounds.len() {
-			// The profile ends at its last bound, and so carries no energy there.
+			// The profile ends at its last bound, and so carries no energy
+			// there.
 			return 0;
 		}
 		profile_energy[i] - self.heights[i] * (tau - self.bounds[i])
@@ -564,9 +572,9 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 		let profile_energy = self.build_profile_energy();
 		let state = self.edge_finding_data::<E>(ctx, &profile_energy);
 
-		// Bounds filtering subsuming the consistency check: its sweeps also detect
-		// resource overloads. When only the check is enabled, run the cheaper
-		// consistency check on its own.
+		// Bounds filtering subsuming the consistency check: its sweeps also
+		// detect resource overloads. When only the check is enabled, run the
+		// cheaper consistency check on its own.
 		if self.edge_finding_propagation_enabled {
 			let opp = self.opportunistic_edge_finding_propagation_enabled;
 			let mut updates = Vec::new();
@@ -584,8 +592,9 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 			}
 			let mut propagated = false;
 			for upd in &updates {
-				// Re-derive the bound from the forced energy of the other tasks the
-				// reason pins, so the naive edge-finding explanation provably entails it.
+				// Re-derive the bound from the forced energy of the other tasks
+				// the reason pins, so the naive edge-finding explanation
+				// provably entails it.
 				let Some(bound) =
 					Self::sound_update_bound(&state, upd.task, upd.begin, upd.end, upd.is_lb)
 				else {
@@ -642,16 +651,18 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 		let dur_avail = en_avail / task.usage;
 		let overlap = |s: IntVal| cmp::max(cmp::min(s + task.dur, end) - cmp::max(s, begin), 0);
 		if is_lb {
-			// `u` placed at its earliest start cannot fit in the energy left for
-			// it, so any feasible start lies at or after `end - dur_avail`.
+			// `u` placed at its earliest start cannot fit in the energy left
+			// for it, so any feasible start lies at or after `end -
+			// dur_avail`.
 			if overlap(task.est) <= dur_avail {
 				return None;
 			}
 			let start_new = end - dur_avail;
 			(start_new > task.est).then_some(start_new)
 		} else {
-			// Symmetric: `u` placed at its latest start cannot fit, so its latest
-			// completion is at most `begin + dur_avail`, bounding its latest start.
+			// Symmetric: `u` placed at its latest start cannot fit, so its
+			// latest completion is at most `begin + dur_avail`, bounding its
+			// latest start.
 			if overlap(task.lst) <= dur_avail {
 				return None;
 			}
@@ -939,8 +950,8 @@ mod tests {
 				false,
 				false,
 			);
-		// Segments `[0, 2)`, `[2, 5)`, and `[5, 9)` carrying 3, 1, and 2 units of
-		// the resource, and the closing bound of the profile.
+		// Segments `[0, 2)`, `[2, 5)`, and `[5, 9)` carrying 3, 1, and 2 units
+		// of the resource, and the closing bound of the profile.
 		prop.bounds = vec![0, 2, 5, 9];
 		prop.heights = vec![3, 1, 2, 0];
 		let profile_energy = prop.build_profile_energy();

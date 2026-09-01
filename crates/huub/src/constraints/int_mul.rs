@@ -156,8 +156,8 @@ where
 		let (f2_min, f2_max) = self.factor2.bounds(ctx);
 		let (pr_min, pr_max) = self.product.bounds(ctx);
 
-		// TODO: Filter possibilities based on whether variables can be both positive
-		// and negative.
+		// TODO: Filter possibilities based on whether variables can be both
+		// positive and negative.
 
 		// Calculate possible bounds for the product
 		let minmax = iproduct!([f1_min, f1_max], [f2_min, f2_max])
@@ -182,8 +182,8 @@ where
 		// z <= x * y
 		self.product.tighten_max(ctx, max, reason)?;
 
-		// Propagate the bounds of the first factor if the second factor is known
-		// positive or known negative.
+		// Propagate the bounds of the first factor if the second factor is
+		// known positive or known negative.
 		if f2_min > 0 || f2_max < 0 {
 			let reason = reason_ty::<E::PropagationContext<'_>, _>(|ctx, reason| {
 				reason.extend([
@@ -207,8 +207,8 @@ where
 			self.factor1.tighten_max(ctx, max, reason)?;
 		}
 
-		// Propagate the bounds of the second factor if the first factor is known
-		// positive or known negative.
+		// Propagate the bounds of the second factor if the first factor is
+		// known positive or known negative.
 		if f1_min > 0 || f1_max < 0 {
 			let reason = reason_ty::<E::PropagationContext<'_>, _>(|ctx, reason| {
 				reason.extend([
