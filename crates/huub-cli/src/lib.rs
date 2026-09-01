@@ -383,21 +383,22 @@ impl<'a> Cli<'a> {
 		};
 		if self.statistics {
 			let stats = slv.solver_statistics();
-			print_statistics_block(
-				&mut self.stdout,
-				"complete",
-				&[
-					("solveTime", &(Instant::now() - start_solve).as_secs_f64()),
-					("failures", &stats.conflicts),
-					("restarts", &stats.restarts),
-					("peakDepth", &stats.peak_depth),
-					("cpPropagatorCalls", &stats.cp_propagator_calls),
-					("satSearchDirectives", &stats.sat_search_directives),
-					("userSearchDirectives", &stats.user_search_directives),
-					("eagerLiterals", &stats.eager_literals),
-					("lazyLiterals", &stats.lazy_literals),
-				],
-			);
+			let solve_time = (Instant::now() - start_solve).as_secs_f64();
+			let mut block: Vec<(&str, &dyn Debug)> = vec![
+				("solveTime", &solve_time),
+				("failures", &stats.conflicts),
+				("restarts", &stats.restarts),
+				("peakDepth", &stats.peak_depth),
+				("cpPropagatorCalls", &stats.cp_propagator_calls),
+				("satSearchDirectives", &stats.sat_search_directives),
+				("userSearchDirectives", &stats.user_search_directives),
+				("eagerLiterals", &stats.eager_literals),
+				("lazyLiterals", &stats.lazy_literals),
+			];
+			if let Some(objective) = &obj_val {
+				block.push(("internalObjective", objective));
+			}
+			print_statistics_block(&mut self.stdout, "complete", &block);
 		}
 		if let Some(mut core) = unsat_core.into_inner() {
 			// If `Status::Complete` for an optimisation problem we annotate
