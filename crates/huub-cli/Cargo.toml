@@ -31,7 +31,7 @@ clap = { workspace = true }
 ctrlc = { workspace = true }
 flatzinc-serde = { workspace = true }
 humantime = { workspace = true }
-huub = { version = "100.1.0", path = "../huub", features = ["flatzinc"] }
+huub = { version = "101.0.0", path = "../huub", features = ["flatzinc"] }
 mimalloc = { workspace = true }
 rustc-hash = { workspace = true }
 serde_json = { workspace = true }
