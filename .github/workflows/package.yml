@@ -62,7 +62,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
         if: matrix.target == 'x86_64-unknown-freebsd'
-      - uses: taiki-e/install-action@v2.86.5
+      - uses: taiki-e/install-action@v2.87.1
         with:
           tool: cross
         if: contains(matrix.target, '-musl')
