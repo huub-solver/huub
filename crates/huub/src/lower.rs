@@ -3,11 +3,13 @@
 
 use std::{
 	any::Any,
+	cell::RefCell,
 	collections::VecDeque,
 	error::Error,
 	fmt::{self, Debug, Display},
 	marker::PhantomData,
 	num::NonZeroI32,
+	rc::Rc,
 };
 
 use bon::Builder;
@@ -32,6 +34,7 @@ use crate::{
 	},
 	constraints::{
 		BoxedConstraint, BoxedPropagator, Constraint, NO_REASON, Nogood,
+		difference_logic::{DifferenceLogicBooleans, DifferenceLogicBounds, SolverGraph},
 		int_array_minimum::IntArrayMinimumBounds,
 		int_div::IntDivBounds,
 		int_linear::{IntEq, IntLinear, LinComparator},
@@ -235,6 +238,13 @@ pub struct LoweringContext<'a> {
 	/// Error that captures the clause that caused methods to return
 	/// [`Unsatisfiable`].
 	pub(crate) error: Option<LoweringError>,
+	/// The difference logic graph, once the component has been lowered.
+	///
+	/// A constraint cannot reach the [`Solver`] itself, and the graph belongs
+	/// to the solver rather than to either of the propagators that read it, so
+	/// it is left here for [`LowererComplete::into_solver_internal`] to
+	/// install.
+	pub(crate) diff_logic: Option<Rc<RefCell<SolverGraph>>>,
 	/// The state of the trailed values in the source [`Model`] object.
 	trail: &'a [[u8; 8]],
 }
@@ -809,6 +819,19 @@ impl LowererComplete<&mut Model> {
 		for c in model.constraints.iter().flatten() {
 			c.to_solver(&mut ctx)?;
 		}
+		let diff_logic = ctx.diff_logic.take();
+
+		// The two propagators hold the graph jointly, so both are given the
+		// same reference; deep cloning the solver keeps them sharing one copy.
+		if let Some(graph) = diff_logic {
+			let _ = slv.add_propagator(
+				Box::new(DifferenceLogicBounds {
+					graph: Rc::clone(&graph),
+				}),
+				true,
+			);
+			let _ = slv.add_propagator(Box::new(DifferenceLogicBooleans { graph }), true);
+		}
 
 		Ok((slv, map))
 	}
@@ -870,6 +893,12 @@ impl<'a> LoweringContext<'a> {
 	}
 
 	/// Read a trailed value from the [`Model`] trail.
+	///
+	/// A constraint that carries trailed state from the model into the solver
+	/// reads it here. There is nothing to read it back into: lowering creates
+	/// the solver's trailed values at their final value through
+	/// [`ConstructionActions`], since nothing it does can be backtracked over
+	/// yet.
 	pub fn model_trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
 		T::from_bytes(self.trail[i.index as usize])
 	}
@@ -884,6 +913,7 @@ impl<'a> LoweringContext<'a> {
 			slv,
 			map,
 			error: None,
+			diff_logic: None,
 			trail,
 		}
 	}

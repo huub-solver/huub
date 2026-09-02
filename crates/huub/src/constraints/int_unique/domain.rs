@@ -388,7 +388,7 @@ impl<I> IntUniqueDomain<I> {
 		// decisions from the same original block now occupy
 		// [orig_root..new_root) — exactly the decisions that still need this
 		// SCC's values stripped from them.
-		let (orig_root, new_scc_root) = self.partition.split_off(&self.tarjan.dcns_buf, ctx);
+		let (orig_root, new_scc_root) = self.partition.split_off(ctx, &self.tarjan.dcns_buf);
 		let Some(new_root) = new_scc_root else {
 			// The new SCC absorbed the entire original block — no outside
 			// decisions to strip values from.
@@ -711,8 +711,8 @@ impl<I> IntUniqueDomain<I> {
 			// Fixed decisions: strip their fixed value from the rest of their
 			// SCC.
 			if let Some(val) = self.graph.dcns[i].val(ctx) {
-				let scc_id = self.partition.block_root(i, ctx);
-				let scc_end = self.partition.block_end(scc_id, ctx);
+				let scc_id = self.partition.block_root(ctx, i);
+				let scc_end = self.partition.block_end(ctx, scc_id);
 				let reason_lit = self.graph.dcns[i].lit(ctx, IntLitMeaning::Eq(val));
 				for pos in scc_id..scc_end {
 					let idx = self.partition.elements()[pos];
@@ -760,7 +760,7 @@ impl<I> IntUniqueDomain<I> {
 				self.unmatched_dcns = unmatched_dcns;
 				return Err(conflict);
 			}
-			let scc_id = self.partition.block_root(i, ctx);
+			let scc_id = self.partition.block_root(ctx, i);
 			self.changed_scc.insert(scc_id);
 		}
 		self.unmatched_dcns = unmatched_dcns;
@@ -787,7 +787,7 @@ impl<I> IntUniqueDomain<I> {
 		// the Tarjan DFS; restored below to keep its allocation across calls.
 		let changed_scc = mem::take(&mut self.changed_scc);
 		for &i in changed_scc.iter() {
-			let scc_end = self.partition.block_end(i, ctx);
+			let scc_end = self.partition.block_end(ctx, i);
 			for dcn_idx in i..scc_end {
 				if self.tarjan.dfs_index[dcn_idx] == 0
 					&& let Err(conflict) = self.tarjan_dfs::<E>(
@@ -841,7 +841,7 @@ where
 		reason: &mut E::ReasonSink<'_>,
 	) {
 		let scc_id = data as usize;
-		let scc_end = self.partition.block_end(scc_id, ctx);
+		let scc_end = self.partition.block_end(ctx, scc_id);
 
 		// Rebuild the SCC's down-closure from the restored partition block: a
 		// decision set `H` provably confined to an equal-sized value set `V` in

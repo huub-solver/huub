@@ -9,6 +9,7 @@ pub(crate) mod resolved;
 pub(crate) mod view;
 
 use std::{
+	any::{Any, TypeId},
 	fmt::Debug,
 	hash::Hash,
 	iter::{repeat_n, repeat_with},
@@ -33,8 +34,13 @@ use crate::{
 	},
 	constraints::{
 		BoxedConstraint, Conflict, ConflictInner, Constraint, Nogood, SimplificationStatus,
+		difference_logic::{DifferenceLogicConstraint, DifferenceLogicLevel, DifferenceLogicModel},
+		int_linear::IntLinear,
 	},
-	helpers::bytes::Bytes,
+	helpers::{
+		bytes::Bytes,
+		overflow::{OverflowImpossible, OverflowPossible},
+	},
 	lower::{Lowerer, LowererComplete},
 	model::{
 		decision::{PolarityScore, Tier, boolean::BoolDecision, integer::IntDecision},
@@ -148,6 +154,24 @@ pub struct Model {
 	/// Definitions of the advisors that are listening to selected changes.
 	#[deepclone(clone)]
 	advisors: Vec<Advisor>,
+
+	/// Which difference constraints are captured by the difference logic
+	/// component.
+	pub(crate) diff_logic_level: DifferenceLogicLevel,
+	/// How much work the difference logic component's all-pairs pass may cost,
+	/// or `None` for the default budget.
+	///
+	/// Not part of the public API; see `MAX_ALL_PAIRS_WORK` in
+	/// [`difference_logic`](crate::constraints::difference_logic).
+	pub(crate) diff_logic_all_pairs_budget: Option<usize>,
+	/// The difference logic component, created the first time a difference
+	/// constraint is recognised.
+	///
+	/// Keeping the reference means a difference constraint found later — by
+	/// [`Model::linear`], or while simplifying another constraint — is added to
+	/// the same graph instead of becoming a separate propagator.
+	#[deepclone(clone)]
+	diff_logic: Option<ConstraintId>,
 }
 
 /// The engine-internal [`PropagationContext`] used while simplifying a
@@ -531,10 +555,20 @@ impl Model {
 	///
 	/// The constraint is added to the model. It will be enforced during
 	/// simplification and in any subsequent solving method.
+	///
+	/// A difference constraint (see [`DifferenceLogicLevel`]) joins the model's
+	/// difference logic component rather than becoming a constraint of its own.
+	/// Posting one therefore never reports a root conflict, since the graph is
+	/// only analysed from [`Model::propagate`], and the identifier returned is
+	/// the component's, shared by every constraint folded into it.
 	pub fn post_constraint<C: Constraint<Self>>(
 		&mut self,
 		constraint: C,
 	) -> Result<ConstraintId, Nogood<View<bool>>> {
+		let constraint = match self.take_difference_constraint(constraint) {
+			Ok(constraint) => constraint,
+			Err(con) => return Ok(con),
+		};
 		let (con, enqueue) = self.initialize_constraint(constraint);
 		if enqueue {
 			self.propagate_single(con)?;
@@ -551,10 +585,50 @@ impl Model {
 		&mut self,
 		constraint: C,
 	) -> ConstraintId {
+		let constraint = match self.take_difference_constraint(constraint) {
+			Ok(constraint) => constraint,
+			Err(con) => return con,
+		};
 		let (con, enqueue) = self.initialize_constraint(constraint);
 		if enqueue {
 			self.propagator_queue.enqueue_propagator(con.raw());
 		}
+		con
+	}
+
+	/// Hand a recognised difference constraint to the difference logic
+	/// component, creating the component if this is the first one.
+	pub(crate) fn post_difference(
+		&mut self,
+		constraint: DifferenceLogicConstraint,
+	) -> ConstraintId {
+		let con = match self.diff_logic {
+			Some(con) => con,
+			None => {
+				let component = DifferenceLogicModel::new(self);
+				let (con, _) = self.initialize_constraint(component);
+				self.diff_logic = Some(con);
+				con
+			}
+		};
+		// The component is taken out of its slot so that adding the edge can
+		// borrow the model itself, to create the nodes, gates, and any Boolean
+		// decision the reduction needs. The slot stays reserved, so a
+		// constraint posted while the edge is added does not disturb it.
+		let mut component = self.constraints[con.index()]
+			.take()
+			.expect("the difference logic component is not being simplified");
+		{
+			let component: &mut dyn Any = &mut *component;
+			component
+				.downcast_mut::<DifferenceLogicModel>()
+				.expect("the difference logic slot holds the component")
+				.add(self, constraint);
+		}
+		self.constraints[con.index()] = Some(component);
+		// Subscribe to the nodes and gates that the edge just created.
+		self.update_initialization(con);
+		self.propagator_queue.enqueue_propagator(con.raw());
 		con
 	}
 
@@ -613,11 +687,46 @@ impl Model {
 				// Constraint is known to be satisfied, no need to place back.
 			}
 			SimplificationStatus::NoFixpoint => {
-				self.constraints[con.index()] = Some(con_obj);
+				// Simplification may have turned the constraint into a
+				// difference constraint, by folding away a term or by unifying
+				// its decisions. If it has, it joins the difference logic graph
+				// and its slot is released just as a subsumed constraint's is.
+				self.constraints[con.index()] = self.take_difference_boxed(con_obj);
 			}
 		}
 		self.notify_advisors();
 		Ok(())
+	}
+
+	/// The difference constraint that `constraint` denotes, if it is a linear
+	/// constraint of a shape the configured [`DifferenceLogicLevel`] captures.
+	fn recognise_difference(&mut self, constraint: &dyn Any) -> Option<DifferenceLogicConstraint> {
+		if let Some(lin) = constraint.downcast_ref::<IntLinear<OverflowImpossible>>() {
+			DifferenceLogicConstraint::recognise(
+				self,
+				&lin.terms,
+				lin.comparator,
+				lin.rhs,
+				lin.reif,
+			)
+		} else if let Some(lin) = constraint.downcast_ref::<IntLinear<OverflowPossible>>() {
+			// A right-hand side that does not fit an `IntVal` cannot be an edge
+			// weight; the linear propagator deals with the overflow.
+			let rhs = IntVal::try_from(lin.rhs).ok()?;
+			DifferenceLogicConstraint::recognise(self, &lin.terms, lin.comparator, rhs, lin.reif)
+		} else {
+			None
+		}
+	}
+
+	/// Set which difference constraints are captured by the model's difference
+	/// logic component.
+	///
+	/// Constraints are recognised as they are posted, so this must be set
+	/// before posting them: raising the level afterwards does not reconsider
+	/// the constraints already in the model.
+	pub fn set_difference_logic_level(&mut self, level: DifferenceLogicLevel) {
+		self.diff_logic_level = level;
 	}
 
 	/// Invoke `f` with a [`ConstraintId`] for each constraint that the given
@@ -638,6 +747,48 @@ impl Model {
 				f(con);
 			},
 		);
+	}
+
+	/// Fold a constraint that has *become* a difference constraint while being
+	/// simplified into the difference logic component, returning `None`. Every
+	/// other constraint is returned unchanged.
+	///
+	/// A linear constraint can lose terms to constant folding, or have its
+	/// endpoints unified, long after it was posted. Testing it here rather than
+	/// asking it to post itself again keeps the constraint that is not taken
+	/// exactly where it is, with its reference and its subscriptions intact.
+	pub(crate) fn take_difference_boxed(
+		&mut self,
+		constraint: BoxedConstraint,
+	) -> Option<BoxedConstraint> {
+		match self.recognise_difference(&*constraint) {
+			Some(recognised) => {
+				self.post_difference(recognised);
+				None
+			}
+			None => Some(constraint),
+		}
+	}
+
+	/// Fold `constraint` into the difference logic component when it is a
+	/// difference constraint that the configured [`DifferenceLogicLevel`]
+	/// captures, reporting the component it joined. Every other constraint is
+	/// returned unchanged.
+	fn take_difference_constraint<C: Constraint<Self>>(
+		&mut self,
+		constraint: C,
+	) -> Result<C, ConstraintId> {
+		// `C` is concrete here, so these type tests fold away for every
+		// constraint that is not linear.
+		if TypeId::of::<C>() != TypeId::of::<IntLinear<OverflowImpossible>>()
+			&& TypeId::of::<C>() != TypeId::of::<IntLinear<OverflowPossible>>()
+		{
+			return Ok(constraint);
+		}
+		match self.recognise_difference(&constraint) {
+			Some(recognised) => Err(self.post_difference(recognised)),
+			None => Ok(constraint),
+		}
 	}
 
 	/// Ask the constraint to update what it declared during initialization,

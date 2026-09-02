@@ -46,9 +46,9 @@ pub(crate) struct TrailedPartition {
 impl TrailedPartition {
 	/// Exclusive end position of the block rooted at `root`. Caller must pass
 	/// the block's root position or otherwise results are meaningless.
-	pub(crate) fn block_end(&self, root: usize, ctx: &impl TrailingActions) -> usize {
+	pub(crate) fn block_end(&self, ctx: &impl TrailingActions, root: usize) -> usize {
 		debug_assert_eq!(
-			self.block_root(self.elems[root], ctx),
+			self.block_root(ctx, self.elems[root]),
 			root,
 			"block_end called with a non-root position"
 		);
@@ -56,7 +56,7 @@ impl TrailedPartition {
 	}
 
 	/// Root position of the block containing `elem`.
-	pub(crate) fn block_root(&self, elem: usize, ctx: &impl TrailingActions) -> usize {
+	pub(crate) fn block_root(&self, ctx: &impl TrailingActions, elem: usize) -> usize {
 		let pos = self.positions[elem];
 		let info = ctx.trailed::<i64>(self.layout[pos]) as usize;
 		cmp::min(info, pos)
@@ -88,12 +88,12 @@ impl TrailedPartition {
 	/// or `(orig_root, None)` if every member of the original block was moved.
 	pub(crate) fn split_off(
 		&mut self,
-		elems: &[usize],
 		ctx: &mut impl TrailingActions,
+		elems: &[usize],
 	) -> (usize, Option<usize>) {
-		let orig_root = self.block_root(elems[0], ctx);
-		let orig_end = self.block_end(orig_root, ctx);
-		debug_assert!(elems.iter().all(|&i| self.block_root(i, ctx) == orig_root));
+		let orig_root = self.block_root(ctx, elems[0]);
+		let orig_end = self.block_end(ctx, orig_root);
+		debug_assert!(elems.iter().all(|&i| self.block_root(ctx, i) == orig_root));
 		if elems.len() == (orig_end - orig_root) {
 			return (orig_root, None);
 		}
