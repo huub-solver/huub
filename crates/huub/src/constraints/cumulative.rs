@@ -127,6 +127,9 @@ pub struct CumulativePropagator<I1, I2, I3, I4> {
 	/// Heights of the time intervals, representing the total resource usage at
 	/// that time.
 	heights: Vec<IntVal>,
+	/// Scratch buffer for the compulsory part events used to build the
+	/// profile, kept to avoid an allocation on every propagation.
+	events: Vec<(IntVal, IntVal)>,
 }
 
 impl Cumulative {
@@ -528,6 +531,7 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 		edge_finding_propagation_enabled: bool,
 		opportunistic_edge_finding_propagation_enabled: bool,
 	) -> Self {
+		let events = Vec::with_capacity(2 * start_times.len());
 		Self {
 			start_times,
 			durations,
@@ -538,6 +542,7 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 			opportunistic_edge_finding_propagation_enabled,
 			bounds: Vec::new(),
 			heights: Vec::new(),
+			events,
 		}
 	}
 

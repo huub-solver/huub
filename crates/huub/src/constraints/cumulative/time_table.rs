@@ -51,7 +51,7 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 		self.bounds.clear();
 		self.heights.clear();
 		let n = self.start_times.len();
-		let mut events = Vec::with_capacity(2 * n);
+		self.events.clear();
 		let mut capacity_lb = self.capacity.min(ctx);
 		// Collect all start and end events of compulsory tasks
 		for i in 0..n {
@@ -59,17 +59,17 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 			let ect = self.earliest_completion_time(ctx, i);
 			let min_usage = self.usages[i].min(ctx);
 			if lst < ect {
-				events.push((lst, min_usage));
-				events.push((ect, -min_usage));
+				self.events.push((lst, min_usage));
+				self.events.push((ect, -min_usage));
 			}
 		}
 		// Sort events by time
-		events.sort_unstable_by_key(|&(t, _)| t);
+		self.events.sort_unstable_by_key(|&(t, _)| t);
 
-		if !events.is_empty() {
+		if !self.events.is_empty() {
 			trace!(
 				target: "cumulative",
-				events =? events,
+				events =? self.events,
 				"events for compulsory parts from tasks"
 			);
 		}
@@ -78,7 +78,7 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 		// Check if the resource usage exceeds the capacity lower bound
 		let mut cur_height = 0;
 		let mut last_time = None;
-		for (t, delta) in events {
+		for &(t, delta) in &self.events {
 			if last_time != Some(t) {
 				if let Some(lt) = last_time {
 					self.bounds.push(lt);
@@ -518,14 +518,13 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 					.rev()
 					.step_by(dur_lb as usize)
 					.map(|t| cmp::max(b_start, t))
-					.skip(1)
-					.collect_vec();
+					.skip(1);
 				trace!(
 					target: "cumulative",
 					updated_lct,
 					b_start,
 					remainder,
-					time_points =? time_points,
+					time_points =? time_points.clone().collect_vec(),
 					"propagate backward shifting"
 				);
 
@@ -610,14 +609,13 @@ impl<I1, I2, I3, I4> CumulativePropagator<I1, I2, I3, I4> {
 				let time_points = (expl_start..=expl_end)
 					.step_by(dur_lb as usize)
 					.map(|t| cmp::min(b_end, t))
-					.skip(1)
-					.collect_vec();
+					.skip(1);
 				trace!(
 					target: "cumulative",
 					updated_est,
 					b_end,
 					remainder,
-					time_points =? time_points,
+					time_points =? time_points.clone().collect_vec(),
 					"propagate forward shifting"
 				);
 

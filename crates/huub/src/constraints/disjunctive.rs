@@ -778,6 +778,7 @@ impl<I> DisjunctivePropagator<I> {
 	fn propagate_edge_finding<E>(
 		&mut self,
 		ctx: &mut E::PropagationContext<'_>,
+		earliest_start: &[IntVal],
 		check_overload: bool,
 	) -> Result<bool, E::Conflict>
 	where
@@ -786,9 +787,7 @@ impl<I> DisjunctivePropagator<I> {
 	{
 		let mut propagated = false;
 		// Add all tasks to the Omega-Theta tree
-		let earliest_start: Vec<_> = self.start_times.iter().map(|v| v.min(ctx)).collect();
-		self.ot_tree
-			.fill(earliest_start.as_slice(), self.durations.as_slice());
+		self.ot_tree.fill(earliest_start, self.durations.as_slice());
 
 		// Sort the tasks by non-increasing latest completion time
 		let latest_completion_times: Vec<_> = (0..self.start_times.len())
@@ -1149,7 +1148,7 @@ where
 		// Propagate edge finding propagation rule with overload checking or
 		// perform overload checking only
 		if self.edge_finding_enabled {
-			if self.propagate_edge_finding(ctx, true)? {
+			if self.propagate_edge_finding(ctx, &earliest_start, true)? {
 				return Ok(());
 			}
 		} else {
