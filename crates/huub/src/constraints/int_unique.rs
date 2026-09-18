@@ -20,7 +20,7 @@ pub use crate::constraints::int_unique::{
 	bounds::IntUniqueBounds, domain::IntUniqueDomain, value::IntUniqueValue,
 };
 use crate::{
-	DeepClone, IntSet, IntVal,
+	DeepClone, IntVal,
 	actions::{IntAnalyzeActions, IntEvent, IntInspectionActions, ReasoningEngine},
 	constraints::{
 		Constraint, IntModelActions, IntSolverActions, Propagator, SimplificationStatus,
@@ -89,15 +89,10 @@ where
 		// over few values relative to their number. Use the cardinality of
 		// the union of all the decision variable domains.
 		let dcns = &self.bounds_prop.vars;
-		let mut union: Option<IntSet> = None;
-		for d in dcns {
-			let dom = d.domain(ctx);
-			union = Some(match union {
-				None => dom,
-				Some(u) => u.union(&dom),
-			});
-		}
-		let tight = union
+		let tight = dcns
+			.iter()
+			.map(|d| d.domain(ctx))
+			.reduce(|u, dom| u.union(&dom))
 			.and_then(|u| u.card())
 			.is_some_and(|card| card <= dcns.len() * 100 / 80);
 		if tight {

@@ -361,14 +361,9 @@ impl<I1, I2, I3> IntPowBounds<OverflowPossible, I1, I2, I3> {
 			base_ub
 		};
 
-		let mut acc: IntVal = 1;
-		for _ in 0..exp_ub {
-			match acc.checked_mul(worst_base) {
-				Some(v) => acc = v,
-				None => return true,
-			}
-		}
-		false
+		u32::try_from(exp_ub).map_or(worst_base.unsigned_abs() > 1, |exp| {
+			worst_base.checked_pow(exp).is_none()
+		})
 	}
 
 	/// Create a new [`IntPowBounds`] propagator and post it in the solver.

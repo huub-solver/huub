@@ -640,14 +640,7 @@ where
 		let mut obj_curr = None;
 		let obj_bound = objective.min(solver);
 		let mut obj_assump = None;
-		let mut vals: Vec<Value> = vec![
-			Value::Int(0);
-			if let Some(all_solutions) = &all_solutions {
-				all_solutions.len()
-			} else {
-				0
-			}
-		];
+		let mut vals: Vec<Value> = vec![Value::Int(0); all_solutions.as_ref().map_or(0, Vec::len)];
 
 		debug!(target: "solver", obj_bound, "start branch and bound");
 		let (status, obj) = loop {
@@ -886,7 +879,6 @@ where
 			};
 			drop(result);
 
-			debug_assert!(all_solutions.is_some());
 			let vars = all_solutions.as_ref().unwrap();
 			if solver.add_solution_nogood(vars, &vals).is_err() {
 				break Status::Complete;

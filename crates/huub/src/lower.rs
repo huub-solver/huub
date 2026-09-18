@@ -11,7 +11,6 @@ use std::{
 };
 
 use bon::Builder;
-use itertools::Itertools;
 use pindakaas::{
 	ClauseDatabase, Lit as RawLit, Unsatisfiable,
 	solver::{cadical::Cadical, propagation::ExternalPropagation},
@@ -791,7 +790,7 @@ impl LowererComplete<&mut Model> {
 		};
 
 		// Ensure the creation of all integer variables.
-		for (idx, _) in model.int_vars.iter().enumerate() {
+		for idx in 0..model.int_vars.len() {
 			map_builder.get_or_create_int(model, &mut slv, model::Decision(idx as u32));
 		}
 
@@ -820,27 +819,22 @@ impl<'a> LoweringContext<'a> {
 		&mut self,
 		clause: impl IntoIterator<Item = impl Into<solver::View<bool>>>,
 	) -> Result<(), LoweringError> {
-		let clause: Result<Vec<_>, bool> = clause
+		let Ok(clause): Result<Vec<_>, ()> = clause
 			.into_iter()
-			.filter_map(|lit| match lit.into().0 {
-				BoolView::Lit(lit) => Some(Ok(lit.0)),
-				BoolView::Const(true) => Some(Err(true)),
+			.map(Into::into)
+			.filter_map(|lit: solver::View<bool>| match lit.0 {
+				BoolView::Lit(_) => Some(Ok(lit)),
+				BoolView::Const(true) => Some(Err(())),
 				BoolView::Const(false) => None,
 			})
-			.collect();
-		let clause = match clause {
-			Err(false) => unreachable!(),
-			Err(true) => return Ok(()),
-			Ok(clause) if clause.is_empty() => {
-				return Err(self.declare_conflict(NO_REASON).into());
-			}
-			Ok(clause) => clause,
+			.collect()
+		else {
+			return Ok(());
 		};
-		debug_assert!(self.error.is_none());
-		match self.add_clause_from_slice(&clause) {
-			Err(Unsatisfiable) => Err(self.error.take().unwrap()),
-			Ok(()) => Ok(()),
+		if clause.is_empty() {
+			return Err(self.declare_conflict(NO_REASON).into());
 		}
+		self.slv.add_clause(clause).map_err(Into::into)
 	}
 
 	/// Encode the given constraint into conjunctive normal form (CNF) using the
@@ -851,11 +845,8 @@ impl<'a> LoweringContext<'a> {
 		E: pindakaas::Encoder<Self, C> + ?Sized,
 	{
 		debug_assert!(self.error.is_none());
-		let res = pindakaas::Encoder::encode(encoder, self, constraint);
-		match res {
-			Ok(()) => Ok(()),
-			Err(Unsatisfiable) => Err(self.error.take().unwrap()),
-		}
+		pindakaas::Encoder::encode(encoder, self, constraint)
+			.map_err(|Unsatisfiable| self.error.take().unwrap())
 	}
 
 	/// Declare a conflict with the given reason that was encountered during
@@ -904,18 +895,12 @@ impl<'a> LoweringContext<'a> {
 
 impl ClauseDatabase for LoweringContext<'_> {
 	fn add_clause_from_slice(&mut self, clause: &[RawLit]) -> Result<(), Unsatisfiable> {
-		let clause = clause
-			.iter()
-			.map(|&l| solver::Decision(l).into())
-			.collect_vec();
-
-		match self.slv.add_clause(clause) {
-			Ok(()) => Ok(()),
-			Err(err) => {
+		self.slv
+			.add_clause(clause.iter().map(|&l| solver::Decision(l).into()).collect())
+			.map_err(|err| {
 				self.error = Some(err.into());
-				Err(Unsatisfiable)
-			}
-		}
+				Unsatisfiable
+			})
 	}
 
 	fn new_var_range(&mut self, len: usize) -> pindakaas::VarRange {
@@ -954,8 +939,7 @@ impl PostingActions for LoweringContext<'_> {
 		&mut self,
 		clause: impl IntoIterator<Item = Self::Atom>,
 	) -> Result<(), Self::Conflict> {
-		let clause = clause.into_iter().collect::<Vec<_>>();
-		self.slv.add_clause(clause)
+		self.slv.add_clause(clause.into_iter().collect())
 	}
 
 	fn add_propagator(&mut self, propagator: BoxedPropagator) -> PropagatorId {
@@ -1249,8 +1233,8 @@ impl LoweringMapBuilder {
 						};
 						let card = dom.card();
 						let order_enc = if def.eager_order
-							|| def.eager_direct || card.is_some()
-							&& card.unwrap() <= self.int_eager_limit
+							|| def.eager_direct || card
+							.is_some_and(|c| c <= self.int_eager_limit)
 						{
 							LiteralStrategy::Eager
 						} else {

@@ -442,7 +442,7 @@ impl<I> DisjunctivePropagator<I> {
 	{
 		move |ctx, reason| {
 			let binding_task = self.ot_tree.binding_task(time_bound, 0);
-			let earliest_start = self.start_times[binding_task].min(ctx);
+			let earliest_start = self.earliest_start_time(ctx, binding_task);
 			let mut slack = time_bound - earliest_start;
 			let mut e_tasks = Vec::new();
 
@@ -728,7 +728,7 @@ impl<I> DisjunctivePropagator<I> {
 				let earliest_start_time = self.earliest_start_time(ctx, i);
 				let earliest_completion_time = self.earliest_completion_time(ctx, i);
 				if updated_est[i] > earliest_start_time {
-					let lb = self.start_times[binding_task].min(ctx);
+					let lb = self.earliest_start_time(ctx, binding_task);
 					ctx.set_trailed(self.trailed_info[i].earliest_start, lb);
 					ctx.set_trailed(
 						self.trailed_info[i].latest_completion,
@@ -831,9 +831,9 @@ impl<I> DisjunctivePropagator<I> {
 			while j > 0 && self.ot_tree.root().earliest_completion_gray > lct {
 				let ect_gray_in_tree = self.ot_tree.root().earliest_completion_gray;
 				let blocked_task = self.ot_tree.blocked_task(ect_gray_in_tree);
-				if self.start_times[blocked_task].min(ctx) < ect_in_tree {
+				if self.earliest_start_time(ctx, blocked_task) < ect_in_tree {
 					let gray_est_task = self.ot_tree.blocking_task(ect_gray_in_tree);
-					let lb = self.start_times[gray_est_task].min(ctx);
+					let lb = self.earliest_start_time(ctx, gray_est_task);
 					// set trailed integer for lazy explanation
 					ctx.set_trailed(self.trailed_info[blocked_task].earliest_start, lb);
 					ctx.set_trailed(
@@ -1055,7 +1055,7 @@ impl<I> DisjunctivePropagator<I> {
 				let binding_task = self
 					.ot_tree
 					.binding_task(self.ot_tree.root().earliest_completion, 0);
-				let earliest_start = self.start_times[binding_task].min(ctx);
+				let earliest_start = self.earliest_start_time(ctx, binding_task);
 				let expl = self.explain_overload_checking(lct_i + 1);
 				trace!(
 					target: "disjunctive",

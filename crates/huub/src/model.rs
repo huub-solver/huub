@@ -278,22 +278,20 @@ impl Model {
 	/// propagate it immediately.
 	fn initialize_constraint<C: Constraint<Self>>(
 		&mut self,
-		constraint: C,
+		mut constraint: C,
 	) -> (ConstraintId, bool) {
 		let con = ConstraintId::new(self.constraints.len());
 		let mut ctx = ModelInitContext::new(self, con);
-		let mut constraint = constraint;
 		constraint.initialize(&mut ctx);
 		let priority = ctx.priority;
 		let enqueue = ctx.enqueue();
 		self.constraints.push(Some(Box::new(constraint)));
-		let r = ConstraintId::new(self.constraints.len() - 1);
-		debug_assert_eq!(r, con);
 		self.propagator_queue.info.push(PropagatorInfo {
 			enqueued: false,
 			priority,
 		});
-		debug_assert_eq!(r.index(), self.propagator_queue.info.len() - 1);
+		debug_assert_eq!(con.index(), self.constraints.len() - 1);
+		debug_assert_eq!(con.index(), self.propagator_queue.info.len() - 1);
 		(con, enqueue)
 	}
 

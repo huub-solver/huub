@@ -160,10 +160,7 @@ impl<'a> Cli<'a> {
 					("propagators", &stats.propagators),
 					("unifiedDecisions", &meta.stats.unified_decisions),
 					("extractedViews", &meta.stats.extracted_views),
-					(
-						"initTime",
-						&Instant::now().duration_since(start).as_secs_f64(),
-					),
+					("initTime", &start.elapsed().as_secs_f64()),
 				],
 			);
 		}
@@ -260,13 +257,8 @@ impl<'a> Cli<'a> {
 				*unsat_core.borrow_mut() = Some(
 					meta.assumptions
 						.iter()
-						.filter_map(|(label, view)| {
-							if checker.fail(*view) {
-								Some(label.clone())
-							} else {
-								None
-							}
-						})
+						.filter(|(_, view)| checker.fail(*view))
+						.map(|(label, _)| label.clone())
 						.collect(),
 				);
 			}
@@ -311,8 +303,7 @@ impl<'a> Cli<'a> {
 					}
 
 					let obj_dcn = match goal {
-						Goal::Minimize(obj) => obj,
-						Goal::Maximize(obj) => obj,
+						Goal::Minimize(obj) | Goal::Maximize(obj) => obj,
 						_ => panic!("unknown optimization goal"),
 					};
 					let mut last_obj = None;
@@ -383,7 +374,7 @@ impl<'a> Cli<'a> {
 		};
 		if self.statistics {
 			let stats = slv.solver_statistics();
-			let solve_time = (Instant::now() - start_solve).as_secs_f64();
+			let solve_time = start_solve.elapsed().as_secs_f64();
 			let mut block: Vec<(&str, &dyn Debug)> = vec![
 				("solveTime", &solve_time),
 				("failures", &stats.conflicts),

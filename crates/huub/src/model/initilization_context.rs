@@ -235,11 +235,7 @@ impl<'a> ModelInitContext<'a> {
 	/// Returns whether to enqueue the propagator based on its explicit requests
 	/// or otherwise the semantics of its subscriptions.
 	pub(crate) fn enqueue(&self) -> bool {
-		if let Some(enqueue) = self.decision_enqueue {
-			enqueue
-		} else {
-			self.semantic_enqueue
-		}
+		self.decision_enqueue.unwrap_or(self.semantic_enqueue)
 	}
 	/// Creates a new [`ModelPostingContext`] for the given constraint
 	/// reference.
@@ -267,11 +263,8 @@ impl<'a> ModelInitContext<'a> {
 	pub(crate) fn update(model: &'a mut Model, con: ConstraintId) -> Self {
 		let priority = model.propagator_queue.info[con.index()].priority;
 		ModelInitContext {
-			con,
-			model,
 			priority,
-			semantic_enqueue: false,
-			decision_enqueue: None,
+			..Self::new(model, con)
 		}
 	}
 }
