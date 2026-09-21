@@ -111,7 +111,7 @@ where
 	}
 
 	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {
-		let (_vals, vars): (Vec<_>, Vec<_>) = self.bounds_prop.vars.iter().partition_map(|&var| {
+		let (vals, vars): (Vec<_>, Vec<_>) = self.bounds_prop.vars.iter().partition_map(|&var| {
 			let var = slv.solver_view(var);
 			if let Some(val) = var.val(slv) {
 				Either::Left(val)
@@ -121,10 +121,9 @@ where
 		});
 		// Propagation should have detected any duplicate fixed values and
 		// removed them from the domains of other decision variables.
-		debug_assert!(_vals.iter().unique().collect_vec().len() == _vals.len());
+		debug_assert!(vals.iter().all_unique());
 		debug_assert!(
-			_vals
-				.iter()
+			vals.iter()
 				.all(|&val| vars.iter().all(|var| !var.in_domain(slv, val)))
 		);
 
@@ -147,7 +146,23 @@ where
 			bounds_propagation = true;
 		}
 		if bounds_propagation {
-			IntUniqueBounds::post(slv, vars.clone());
+			// The bounds consistent propagator sees only the bounds of the
+			// decisions, not the holes that the removal of the fixed values
+			// left behind, so the fixed values within the remaining range are
+			// added back to restore the Hall intervals they are part of.
+			let min = vars.iter().map(|var| var.min(slv)).min().unwrap();
+			let max = vars.iter().map(|var| var.max(slv)).max().unwrap();
+			let bounds_dcns: Vec<_> = vars
+				.iter()
+				.copied()
+				.chain(
+					vals.iter()
+						.copied()
+						.filter(|val| (min..=max).contains(val))
+						.map(Into::into),
+				)
+				.collect();
+			IntUniqueBounds::post(slv, bounds_dcns);
 		}
 		if domain_propagation {
 			IntUniqueDomain::post(slv, vars);
@@ -213,6 +228,9 @@ mod tests {
 		assert!(prb.unique(prev.iter().copied()).post().is_err());
 	}
 
+	/// The bounds consistent propagator keeps the decisions that were fixed
+	/// during simplification, so it must handle the constant views that those
+	/// decisions lower to.
 	#[test]
 	#[traced_test]
 	fn test_lowering_gapped_fixed_sound() {
