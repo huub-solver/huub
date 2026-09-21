@@ -98,8 +98,9 @@ pub struct IntUniqueDomain<I> {
 	/// Decisions whose matched value left their domain and thus need their
 	/// matching repaired, carried from phase 1 into phase 2.
 	unmatched_dcns: FxHashSet<usize>,
-	/// The SCC roots that changed and must be re-run through Tarjan, carried
-	/// from phase 2 into phase 3.
+	/// Root *positions* (into [`TrailedPartition::elements`]) of the blocks
+	/// that changed and must be re-run through Tarjan, carried from phase 2
+	/// into phase 3.
 	changed_scc: FxHashSet<usize>,
 	/// Backtrackable partition of decision indices into current SCCs.
 	partition: TrailedPartition,
@@ -786,9 +787,13 @@ impl<I> IntUniqueDomain<I> {
 		// Detach the changed-SCC set so the loop body can take `&mut self` for
 		// the Tarjan DFS; restored below to keep its allocation across calls.
 		let changed_scc = mem::take(&mut self.changed_scc);
-		for &i in changed_scc.iter() {
-			let scc_end = self.partition.block_end(i, ctx);
-			for dcn_idx in i..scc_end {
+		for &root in changed_scc.iter() {
+			let scc_end = self.partition.block_end(root, ctx);
+			for pos in root..scc_end {
+				// `root..scc_end` are *positions* in the partition; the
+				// decisions they hold are only the same numbers while the
+				// permutation is still the identity (before the first split).
+				let dcn_idx = self.partition.elements()[pos];
 				if self.tarjan.dfs_index[dcn_idx] == 0
 					&& let Err(conflict) = self.tarjan_dfs::<E>(
 						dcn_idx,

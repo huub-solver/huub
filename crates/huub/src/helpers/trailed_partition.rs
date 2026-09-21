@@ -65,6 +65,10 @@ impl TrailedPartition {
 	/// The element permutation, as a slice. Contiguous sub-slices correspond
 	/// to the current blocks (see [`Self::block_root`] / [`Self::block_end`]
 	/// to find their boundaries).
+	///
+	/// This is indexed by position, not by element: after the first
+	/// [`Self::split_off`] the two disagree, so `elements()[block_root(e)]` is
+	/// not `e`. Every block walk must map its positions through this slice.
 	pub(crate) fn elements(&self) -> &[usize] {
 		&self.elems
 	}
