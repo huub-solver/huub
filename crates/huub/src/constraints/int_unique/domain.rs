@@ -99,7 +99,7 @@ pub struct IntUniqueDomain<I> {
 	/// matching repaired, carried from phase 1 into phase 2.
 	unmatched_dcns: FxHashSet<usize>,
 	/// Root *positions* (into [`TrailedPartition::elements`]) of the blocks
-	/// that changed and must be re-run through Tarjan, carried from phase 2
+	/// that changed and must be re-run through Tarjan, carried from phase 1
 	/// into phase 3.
 	changed_scc: FxHashSet<usize>,
 	/// Backtrackable partition of decision indices into current SCCs.
@@ -692,13 +692,15 @@ impl<I> IntUniqueDomain<I> {
 	/// Phase 1 of `propagate` to remove fixed values from others' domains.
 	/// Records, in [`Self::unmatched_dcns`], the decisions whose matched value
 	/// was removed from their domain and thus need their matching repaired in
-	/// phase 2.
+	/// phase 2, and, in [`Self::changed_scc`], the blocks that phase 3 must
+	/// re-run through Tarjan.
 	fn propagate_fixed<E>(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
 		I: IntSolverActions<E>,
 	{
 		self.unmatched_dcns.clear();
+		self.changed_scc.clear();
 		for &i in self.dirty_dcns.iter() {
 			let dcn = &self.graph.dcns[i];
 			let matched_val_index = self.graph.dcn_to_val[i];
@@ -709,10 +711,15 @@ impl<I> IntUniqueDomain<I> {
 			{
 				self.unmatched_dcns.insert(i);
 			}
+			// Any lost value is a lost edge of the residual graph, which can
+			// split this decision's block even when its matched value
+			// survives. Only phase 3 moves a block root, so the root recorded
+			// here is still valid when Tarjan runs.
+			let scc_id = self.partition.block_root(i, ctx);
+			self.changed_scc.insert(scc_id);
 			// Fixed decisions: strip their fixed value from the rest of their
 			// SCC.
 			if let Some(val) = self.graph.dcns[i].val(ctx) {
-				let scc_id = self.partition.block_root(i, ctx);
 				let scc_end = self.partition.block_end(scc_id, ctx);
 				let reason_lit = self.graph.dcns[i].lit(ctx, IntLitMeaning::Eq(val));
 				for pos in scc_id..scc_end {
@@ -736,18 +743,16 @@ impl<I> IntUniqueDomain<I> {
 		Ok(())
 	}
 
-	/// Phase 2 of `propagate`. For each decision in [`Self::unmatched_dcns`]:
-	/// repair its matching entry if its previous match left the domain, then
-	/// mark the surrounding SCC as needing a Tarjan re-run.
+	/// Phase 2 of `propagate`. For each decision in [`Self::unmatched_dcns`],
+	/// repair its matching entry if its previous match left the domain.
 	///
-	/// Records the SCC roots that need to be revisited in
-	/// [`Self::changed_scc`].
+	/// Phase 1 already flagged every block these decisions belong to, so this
+	/// phase leaves [`Self::changed_scc`] alone.
 	fn repair_matching<E>(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict>
 	where
 		E: ReasoningEngine,
 		I: IntSolverActions<E>,
 	{
-		self.changed_scc.clear();
 		// Detach the unmatched set so the loop body can take `&mut self` for
 		// the matching repair; restored below to keep its allocation across
 		// calls.
@@ -761,8 +766,6 @@ impl<I> IntUniqueDomain<I> {
 				self.unmatched_dcns = unmatched_dcns;
 				return Err(conflict);
 			}
-			let scc_id = self.partition.block_root(i, ctx);
-			self.changed_scc.insert(scc_id);
 		}
 		self.unmatched_dcns = unmatched_dcns;
 		Ok(())
@@ -892,19 +895,19 @@ where
 	)]
 	fn propagate(&mut self, ctx: &mut E::PropagationContext<'_>) -> Result<(), E::Conflict> {
 		trace!(target: "int_unique", dirty_dcns =? self.dirty_dcns, "dirty decisions");
-		// Phase 1: check whether each dirty decision is now fixed, and
-		// collect the set of unmatched decisions into `self.unmatched_dcns`.
+		// Phase 1: check whether each dirty decision is now fixed, and collect
+		// the unmatched decisions into `self.unmatched_dcns` and the blocks
+		// they changed into `self.changed_scc`.
 		self.propagate_fixed(ctx)?;
 		trace!(target: "int_unique", unmatched_decisions =? self.unmatched_dcns, "unmatched decisions");
-		// Phase 2: repair the matching for each dirty decision, and
-		// collect the set of changed SCCs into `self.changed_scc`.
+		// Phase 2: repair the matching for each unmatched decision.
 		self.repair_matching(ctx)?;
 		debug_assert!(
 			(0..self.graph.dcns.len()).all(|i| self.graph.dcn_to_val[i].is_some()),
 			"all decisions should be matched after propagation"
 		);
 		trace!(target: "int_unique", changed_sccs =? self.changed_scc, "changed SCCs");
-		// Phase 3: re-run Tarjan on every SCC that changed in phase 2.
+		// Phase 3: re-run Tarjan on every block flagged in phase 1.
 		self.run_tarjan_on_changed_sccs(ctx)
 	}
 }
@@ -1067,6 +1070,83 @@ mod tests {
 			assert!(
 				propagated.contains(&lit),
 				"missing propagated literal {lit:?}"
+			);
+		}
+	}
+
+	/// Regression for GitHub issue #408: the propagator must reach the domain
+	/// consistent fixpoint after a value removal that leaves the matching
+	/// intact, and it must do so once its block has already been split.
+	///
+	/// Each `hall` pair is a Hall set on a top pair of values, so the first
+	/// propagation splits it out of the block and leaves `d` and the three
+	/// `group` decisions on `{1, 2, 3, 4}`. The `4`-valued peers then take
+	/// `4` away from `group`. That leaves their matched values alone, and it
+	/// makes `group` a Hall set on `{1, 2, 3}`, so `d = 4` is the only domain
+	/// consistent inference left. Missing it, the brancher tries `d = 1`
+	/// first and fails, which is what the conflict count catches.
+	///
+	/// One split exercises the Tarjan re-run over a block whose matching
+	/// survived. Two are needed before a Tarjan indexed by partition position
+	/// rather than by decision actually skips a decision.
+	#[test]
+	#[traced_test]
+	fn test_domain_refilter_after_split() {
+		use crate::solver::{
+			Valuation,
+			branchers::{DecisionSelection, DomainSelection, IntBrancher},
+		};
+
+		for n_splits in 1..=2 {
+			// The explicit type pins the `Sat` parameter, which neither the
+			// brancher nor the statistics call below constrain.
+			let mut slv: Solver = Solver::default();
+			let n_vals = 4 + 2 * n_splits;
+			let mut dcn = |dom| {
+				slv.new_int_decision(dom)
+					.order_literals(LiteralStrategy::Eager)
+					.direct_literals(LiteralStrategy::Eager)
+					.view()
+			};
+			let hall: Vec<_> = (0..n_splits)
+				.flat_map(|i| {
+					let lo = 5 + 2 * i;
+					[dcn(lo..=lo + 1), dcn(lo..=lo + 1)]
+				})
+				.collect();
+			let d = dcn(1..=n_vals);
+			let group: Vec<_> = (0..3).map(|_| dcn(1..=n_vals)).collect();
+
+			// `d` ahead of the group, so the matching hands it the `4` that
+			// the peers strip from the group; no group member then loses its
+			// match.
+			let members = [hall.as_slice(), &[d], &group].concat();
+			IntUniqueDomain::post(&mut slv, members.clone());
+			for &member in &group {
+				IntUniqueDomain::post(&mut slv, vec![member, 4.into()]);
+			}
+			// `d` first, so an unfiltered `d` is branched on before the group
+			// narrows it down.
+			IntBrancher::new_in(
+				&mut slv,
+				[&[d][..], &group, &hall].concat(),
+				DecisionSelection::InputOrder,
+				DomainSelection::IndomainMin,
+			);
+
+			let status = slv
+				.solve()
+				.on_solution(|sol| {
+					assert_eq!(d.val(sol), 4);
+					assert!(members.iter().map(|v| v.val(sol)).all_unique());
+				})
+				.satisfy();
+			assert_eq!(status, crate::solver::Status::Satisfied);
+			assert_eq!(
+				slv.solver_statistics().conflicts,
+				0,
+				"domain propagation did not reach its fixpoint with {n_splits} split(s): \
+				 `d = 4` follows from the Hall set on {{1, 2, 3}}"
 			);
 		}
 	}
