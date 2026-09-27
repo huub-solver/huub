@@ -21,7 +21,7 @@ use tracing::warn;
 
 #[cfg(feature = "flatzinc")]
 use crate::model::deserialize::flatzinc::{
-	FlatZincError, FlatZincLowerData, FlatZincModelMeta, FlatZincSolverMeta,
+	FlatZincError, FlatZincLowerData, FlatZincModelMeta, FlatZincSolverMeta, FlatZincStatistics,
 };
 use crate::{
 	IntSet, IntVal,
@@ -653,6 +653,21 @@ impl<State: lowerer::State> Lowerer<Result<FlatZincLowerData, FlatZincError>, St
 		let complete = self.finish_internal();
 		let FlatZincLowerData { meta, mut model } = complete.origin?;
 
+		// The model at the start of search, for the preprocessing trace, is the
+		// model at the fixpoint of its simplification, before it is lowered.
+		if model.trace_active() {
+			if let Err(nogood) = model.propagate() {
+				model.trace_finish()?;
+				return Err(nogood.into());
+			}
+			model.trace_start_model(
+				meta.names.iter().map(|(k, v)| (k.name.as_str(), v.clone())),
+				meta.goal.as_ref(),
+			)?;
+			model.trace_finish()?;
+		}
+		let unified_decisions = model.unified_decisions;
+
 		let (mut slv, map) = LowererComplete {
 			origin: &mut model,
 			conditioning: complete.conditioning,
@@ -694,7 +709,10 @@ impl<State: lowerer::State> Lowerer<Result<FlatZincLowerData, FlatZincError>, St
 			slv,
 			FlatZincSolverMeta {
 				names,
-				stats: meta.stats,
+				stats: FlatZincStatistics {
+					unified_decisions: meta.stats.unified_decisions + unified_decisions,
+					..meta.stats
+				},
 				goal,
 				assumptions,
 			},

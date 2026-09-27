@@ -71,6 +71,10 @@ impl IntUnique {
 	pub fn value_propagation(&self) -> bool {
 		self.value_propagation.unwrap_or(false)
 	}
+	/// The decisions that must take different values.
+	pub(crate) fn vars(&self) -> &[View<IntVal>] {
+		&self.bounds_prop.vars
+	}
 }
 
 impl<E> Constraint<E> for IntUnique

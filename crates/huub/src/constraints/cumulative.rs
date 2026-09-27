@@ -77,6 +77,20 @@ pub struct Cumulative {
 	pub(crate) strengthened: bool,
 }
 
+/// The parameters of a [`Cumulative`] constraint: the start times, durations,
+/// and resource usages of its tasks, and the capacity of the resource.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CumulativeParameters<'a> {
+	/// The start time of each task.
+	pub(crate) start_times: &'a [model::View<IntVal>],
+	/// The duration of each task.
+	pub(crate) durations: &'a [model::View<IntVal>],
+	/// The resource usage of each task.
+	pub(crate) usages: &'a [model::View<IntVal>],
+	/// The capacity of the resource.
+	pub(crate) capacity: model::View<IntVal>,
+}
+
 /// The propagation rules for the `cumulative` constraint. This enum is
 /// used to identify the type of propagation that is being applied. Values:
 ///
@@ -214,6 +228,17 @@ impl Cumulative {
 	/// [`Solver`](crate::solver::Solver) object.
 	pub fn opportunistic_edge_finding_propagation_enabled(&self) -> bool {
 		self.opportunistic_edge_finding_propagation.unwrap_or(true)
+	}
+
+	/// The parameters of the constraint.
+	pub(crate) fn parameters(&self) -> CumulativeParameters<'_> {
+		let p = &self.propagator;
+		CumulativeParameters {
+			start_times: &p.start_times,
+			durations: &p.durations,
+			usages: &p.usages,
+			capacity: p.capacity,
+		}
 	}
 
 	/// Raise the usage of every task that cannot run in parallel with any other

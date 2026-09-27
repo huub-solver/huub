@@ -11,6 +11,7 @@ target/
 
 # Generated program data in `/share/`
 /share/*
+!/share/huub-semantics.mzn
 !/share/minizinc
 /share/minizinc/*
 !/share/minizinc/huub

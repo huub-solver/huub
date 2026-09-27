@@ -35,7 +35,10 @@ use crate::{
 		PropagationContext, ReasoningEngine,
 	},
 	lower::{LoweringContext, LoweringError},
-	model::{self, Model},
+	model::{
+		self, Model,
+		preprocess::{FztConstraint, FztContext, FztError},
+	},
 	solver::{
 		self,
 		engine::{Engine, EngineReasonSink, State},
@@ -131,6 +134,21 @@ pub trait Constraint<E: ReasoningEngine + ?Sized>:
 		&mut self,
 		context: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict>;
+
+	/// Write the constraint in the `.fzt` model language of the preprocessing
+	/// trace (see [`preprocess`](crate::model::preprocess)).
+	///
+	/// Most constraints of the library are written by a central registry, and
+	/// only constraints whose representation needs more logic implement this
+	/// method. The constraint should use the FlatZinc spelling in which Huub
+	/// receives it wherever one exists. The default implementation reports
+	/// that the constraint cannot be written, which fails the trace.
+	fn to_fzt(&self, context: &FztContext<'_>) -> Result<FztConstraint, FztError> {
+		let _ = context;
+		Err(FztError::UnsupportedConstraint {
+			constraint: std::any::type_name::<Self>(),
+		})
+	}
 
 	/// Encode the constraint using [`Propagator`] objects or clauses for a
 	/// [`Solver`](solver::Solver) object.

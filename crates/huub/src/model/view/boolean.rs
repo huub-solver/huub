@@ -73,6 +73,7 @@ impl Resolved<View<bool>> {
 				debug_assert!(def.alias.is_none());
 				def.alias = Some(View(Const(!l.is_negated())));
 				model.bool_events.push(l.var());
+				model.trace_bool_fixed(l);
 			}
 			Const(c) => c.require(ctx, reason)?,
 			IntEq(iv, val) => iv.resolve_alias(&*ctx.0).fix(ctx, val, reason)?,
@@ -109,6 +110,7 @@ impl Resolved<View<bool>> {
 			(Const(x), Const(y)) if x != y => Err(ctx.declare_conflict(NO_REASON)),
 			(x, Const(b)) | (Const(b), x) => Resolved(View::<bool>(x)).fix(ctx, b, NO_REASON),
 			(Decision(x), y) | (y, Decision(x)) => {
+				ctx.0.trace_flush();
 				let (x, y) = if let Decision(y) = y {
 					if x.0.var() > y.0.var() {
 						(x, View(Decision(y)))
@@ -161,6 +163,8 @@ impl Resolved<View<bool>> {
 					}
 					Const(_) => unreachable!(),
 				};
+				model.unified_decisions += 1;
+				model.trace_bool_unified(x);
 				Ok(())
 			}
 			(x, y) => {

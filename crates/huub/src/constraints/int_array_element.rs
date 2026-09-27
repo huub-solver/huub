@@ -23,6 +23,18 @@ use crate::{
 	solver::{IntLitMeaning, engine::Engine, queue::PriorityLevel},
 };
 
+/// The parameters of an element constraint: the collection, the (zero-based)
+/// index into it, and the result, which equals the element at the index.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ElementParameters<'a, I1, I2, I3> {
+	/// The collection of elements.
+	pub(crate) collection: &'a [I1],
+	/// The zero-based index of the selected element.
+	pub(crate) index: &'a I2,
+	/// The result, which equals the selected element.
+	pub(crate) result: &'a I3,
+}
+
 /// Bounds consistent propagator for the `array_element` constraint with an
 /// array of integer decision variables.
 #[derive(Clone, Debug, DeepClone, Eq, Hash, PartialEq)]
@@ -88,6 +100,15 @@ impl<I1, I2, I3> IntArrayElementBounds<I1, I2, I3> {
 			index,
 			min_support,
 			max_support,
+		}
+	}
+
+	/// The parameters of the constraint.
+	pub(crate) fn parameters(&self) -> ElementParameters<'_, I1, I2, I3> {
+		ElementParameters {
+			collection: &self.vars,
+			index: &self.index,
+			result: &self.result,
 		}
 	}
 
