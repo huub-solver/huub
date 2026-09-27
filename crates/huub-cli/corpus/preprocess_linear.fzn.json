@@ -1,0 +1,140 @@
+{
+  "variables": {
+    "a": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          10
+        ]
+      ]
+    },
+    "b": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          10
+        ]
+      ]
+    },
+    "c": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          10
+        ]
+      ]
+    },
+    "d": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          21
+        ]
+      ]
+    },
+    "e": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          20
+        ]
+      ]
+    },
+    "r": {
+      "type": "bool"
+    }
+  },
+  "arrays": {},
+  "constraints": [
+    {
+      "id": "int_lin_le",
+      "args": [
+        [
+          1,
+          1,
+          1
+        ],
+        [
+          "a",
+          "b",
+          "c"
+        ],
+        5
+      ]
+    },
+    {
+      "id": "int_lin_eq",
+      "args": [
+        [
+          1,
+          -2
+        ],
+        [
+          "d",
+          "e"
+        ],
+        1
+      ]
+    },
+    {
+      "id": "int_le",
+      "args": [
+        "c",
+        3
+      ]
+    },
+    {
+      "id": "int_lin_le",
+      "args": [
+        [
+          1,
+          1
+        ],
+        [
+          "a",
+          "b"
+        ],
+        30
+      ]
+    },
+    {
+      "id": "int_lin_le_reif",
+      "args": [
+        [
+          1,
+          1
+        ],
+        [
+          "a",
+          "b"
+        ],
+        3,
+        "r"
+      ]
+    },
+    {
+      "id": "int_ne",
+      "args": [
+        "a",
+        "b"
+      ]
+    }
+  ],
+  "output": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "r"
+  ],
+  "solve": {
+    "method": "satisfy"
+  },
+  "version": "1.0"
+}

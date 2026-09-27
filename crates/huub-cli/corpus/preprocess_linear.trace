@@ -1,0 +1,23 @@
+trace 0.1
+rewrite #1 => #7 by lin-norm
+  constraint int_lin_le([1, 1, 1], [c, a, b], 5) :: trace_id(7);
+dom c <- 0..5 by preserve hint #7
+dom a <- 0..5 by preserve hint #7
+dom b <- 0..5 by preserve hint #7
+rewrite #2 => #8 by identity
+  constraint int_lin_eq([1, -2], [d, e], 1) :: trace_id(8);
+unify d := 2*e + 1 by lin-affine hint #8
+  dom e <- 0..10
+del #8 by lin-valid
+rewrite #3 => #9 by lin-norm
+  constraint int_lin_le([1], [c], 3) :: trace_id(9);
+dom c <- 0..3 by lin-unary hint #9
+del #9 by lin-valid
+rewrite #4 => #10 by identity
+  constraint int_lin_le([1, 1], [a, b], 30) :: trace_id(10);
+del #10 by lin-valid
+rewrite #5 => #11 by identity
+  constraint int_lin_le_reif([1, 1], [a, b], 3, r) :: trace_id(11);
+rewrite #6 => #12 by lin-norm
+  constraint int_lin_ne([1, -1], [a, b], 0) :: trace_id(12);
+end 14

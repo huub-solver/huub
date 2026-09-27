@@ -79,6 +79,21 @@ macro_rules! assert_optimal {
 	};
 }
 
+/// Define an integration test that checks the preprocessing trace and the
+/// model at the start of search that the solver emits.
+macro_rules! assert_preprocess {
+	($file:ident) => {
+		#[test]
+		fn $file() {
+			$crate::helpers::check_preprocess(
+				&std::path::PathBuf::from(format!("./corpus/{}.fzn.json", stringify!($file))),
+				expect_test::expect_file![&format!("../corpus/{}.trace", stringify!($file))],
+				expect_test::expect_file![&format!("../corpus/{}.fzt", stringify!($file))],
+			)
+		}
+	};
+}
+
 /// Define an integration test that checks the solver's solution order exactly.
 macro_rules! assert_search_order {
 	($file:ident) => {
@@ -107,11 +122,11 @@ macro_rules! assert_unsat {
 }
 
 use std::{
-	env::{consts::EXE_SUFFIX, current_exe, var_os, vars},
+	env::{self, consts::EXE_SUFFIX, current_exe, var_os, vars},
 	ffi::OsString,
-	iter,
+	fs, iter,
 	path::{Path, PathBuf},
-	process::Command,
+	process::{self, Command},
 };
 
 pub(crate) use assert_all_optimal;
@@ -119,6 +134,7 @@ pub(crate) use assert_all_solutions;
 pub(crate) use assert_core;
 pub(crate) use assert_first_solution;
 pub(crate) use assert_optimal;
+pub(crate) use assert_preprocess;
 pub(crate) use assert_search_order;
 pub(crate) use assert_unsat;
 use expect_test::ExpectFile;
@@ -224,6 +240,39 @@ pub(crate) fn check_final(file: &Path, expect_optimal: bool, expect_sol: ExpectF
 	);
 	slice = &slice[..slice.len() - FZN_SEPARATOR.len()];
 	expect_sol.assert_eq(slice);
+}
+
+/// Run the solver once with a preprocessing trace, and compare the steps of the
+/// trace and the model at the start of search against expectations.
+///
+/// The header of the trace is left out of the comparison, since it names the
+/// files and the version of the solver.
+pub(crate) fn check_preprocess(file: &Path, trace: ExpectFile, start_model: ExpectFile) {
+	let dir = env::temp_dir().join(format!(
+		"huub-preprocess-{}-{}",
+		process::id(),
+		file.file_stem().unwrap().to_string_lossy()
+	));
+	fs::create_dir_all(&dir).unwrap();
+	let (trace_path, model_path) = (dir.join("run.trace"), dir.join("start.fzt"));
+	let args: &[OsString] = &[
+		"--preprocess-trace".into(),
+		trace_path.clone().into(),
+		"--start-model".into(),
+		model_path.clone().into(),
+		file.into(),
+	];
+	let _ = run_solver(args);
+	let steps: String = fs::read_to_string(&trace_path)
+		.unwrap()
+		.lines()
+		.filter(|l| !l.starts_with("producer ") && !l.starts_with("model "))
+		.map(|l| format!("{l}\n"))
+		.collect();
+	let model = fs::read_to_string(&model_path).unwrap();
+	fs::remove_dir_all(&dir).unwrap();
+	trace.assert_eq(&steps);
+	start_model.assert_eq(&model);
 }
 
 /// Run the solver once and assert that it reports the instance as

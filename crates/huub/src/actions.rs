@@ -23,6 +23,7 @@ use crate::{
 	DeepClone,
 	constraints::{BoxedPropagator, Constraint},
 	helpers::bytes::Bytes,
+	model::preprocess::PreprocessRule,
 };
 
 /// Actions that can be performed during the construction of
@@ -180,6 +181,20 @@ pub trait SimplificationActions {
 	/// The type of the reasoning engine that is used when adding new
 	/// constraints.
 	type Target: ReasoningEngine;
+
+	/// Name the rule that justifies the changes that the current
+	/// simplification makes from here on, in the preprocessing trace (see
+	/// [`preprocess`](crate::model::preprocess)).
+	///
+	/// A rule applies to the steps of the kind that it justifies, including the
+	/// removal or rewriting of the constraint being simplified when the
+	/// simplification ends. Steps that the rule does not apply to remain
+	/// justified by [`PreprocessRule::Preserve`]. Naming a rule is a claim
+	/// that the checker verifies, and has no effect when no trace is being
+	/// recorded.
+	fn justify(&mut self, rule: PreprocessRule) {
+		let _ = rule;
+	}
 
 	/// Post a constraint to the model, mirroring
 	/// [`Model::post_constraint`](crate::model::Model::post_constraint).

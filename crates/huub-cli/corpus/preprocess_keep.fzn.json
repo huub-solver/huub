@@ -1,0 +1,57 @@
+{
+  "variables": {
+    "x": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          5
+        ]
+      ]
+    },
+    "o": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          10
+        ]
+      ],
+      "defined": true
+    }
+  },
+  "arrays": {},
+  "constraints": [
+    {
+      "id": "int_lin_eq",
+      "args": [
+        [
+          1,
+          -1
+        ],
+        [
+          "o",
+          "x"
+        ],
+        2
+      ],
+      "defines": "o"
+    },
+    {
+      "id": "int_le",
+      "args": [
+        "x",
+        4
+      ]
+    }
+  ],
+  "output": [
+    "x",
+    "o"
+  ],
+  "solve": {
+    "method": "minimize",
+    "objective": "o"
+  },
+  "version": "1.0"
+}

@@ -22,6 +22,7 @@ use crate::{
 	},
 	helpers::matrix::Matrix,
 	lower::{LoweringContext, LoweringError},
+	model::preprocess::{FztConstraint, FztContext, FztError, spelling},
 	solver::{IntLitMeaning, Polarity, engine::Engine, queue::PriorityLevel},
 };
 
@@ -685,6 +686,44 @@ where
 			return Ok(SimplificationStatus::Subsumed);
 		}
 		Ok(SimplificationStatus::NoFixpoint)
+	}
+
+	fn to_fzt(&self, ctx: &FztContext<'_>) -> Result<FztConstraint, FztError> {
+		let dims = self.origin.len(1);
+		if dims == 2 {
+			// Use the spelling of the two-dimensional constraint, which is how
+			// it is usually received.
+			/// The `d`-th column of `m`.
+			fn column<T: Clone>(m: &Matrix<2, T>, d: usize) -> Vec<T> {
+				m.row_iter().map(|r| r[d].clone()).collect()
+			}
+			Ok(FztConstraint::new(
+				if STRICT {
+					spelling::DIFFN_INT
+				} else {
+					spelling::DIFFN_NONSTRICT_INT
+				},
+				vec![
+					ctx.ints(column(&self.origin, 0)),
+					ctx.ints(column(&self.origin, 1)),
+					ctx.ints(column(&self.size, 0)),
+					ctx.ints(column(&self.size, 1)),
+				],
+			))
+		} else {
+			Ok(FztConstraint::new(
+				if STRICT {
+					spelling::DIFFN_K_INT
+				} else {
+					spelling::DIFFN_NONSTRICT_K_INT
+				},
+				vec![
+					ctx.ints(self.origin.iter_elem().cloned()),
+					ctx.ints(self.size.iter_elem().cloned()),
+					(dims as IntVal).into(),
+				],
+			))
+		}
 	}
 
 	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {

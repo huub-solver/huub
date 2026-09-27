@@ -22,6 +22,7 @@ macro_rules! outputln {
 }
 
 mod cli;
+mod preprocess;
 mod trace;
 
 use std::{
@@ -29,7 +30,7 @@ use std::{
 	fmt::{self, Debug, Display},
 	io,
 	sync::{
-		Arc,
+		Arc, Mutex,
 		atomic::{AtomicBool, Ordering},
 	},
 	time::Instant,
@@ -54,6 +55,7 @@ use tracing::{subscriber::set_default, warn};
 pub use crate::cli::Cli;
 use crate::{
 	cli::{CliReduceType, CliSearchStrategy, CliSearchTrigger},
+	preprocess::PreprocessOutput,
 	trace::ReverseMap,
 };
 
@@ -108,6 +110,14 @@ impl<'a> Cli<'a> {
 			)
 		})?);
 
+		let preprocess = match (&self.preprocess_trace, &self.start_model) {
+			(Some(trace), Some(model)) => Some(Arc::new(Mutex::new(
+				PreprocessOutput::new(trace.clone(), model.clone())
+					.map_err(|err| err.to_string())?,
+			))),
+			_ => None,
+		};
+
 		let map = ReverseMap::new();
 		let subscriber = trace::create_subscriber(
 			self.verbose,
@@ -116,13 +126,14 @@ impl<'a> Cli<'a> {
 			ansi_color,
 			&map,
 			Arc::clone(&fzn),
+			preprocess.as_ref(),
 		);
 		let _guard = set_default(subscriber);
 
 		let start = Instant::now();
 		let deadline = self.time_limit.map(|t| start + t);
 
-		let (mut slv, meta): (Solver, _) = match fzn
+		let lowered = fzn
 			.lower()
 			.int_eager_limit(self.int_eager_limit)
 			.preprocessing(self.cadical.preprocessing)
@@ -137,16 +148,31 @@ impl<'a> Cli<'a> {
 			.variable_elimination(self.cadical.variable_elimination)
 			.vivification(self.cadical.vivification)
 			.preprocessing_light(self.cadical.preprocessing_light)
-			.to_solver()
-		{
+			.to_solver();
+		// The preprocessing trace is complete once the model has been lowered,
+		// or found to be unsatisfiable.
+		let finish_trace = || match &preprocess {
+			Some(output) => output
+				.lock()
+				.unwrap()
+				.finish(&self.path)
+				.map_err(|err| err.to_string()),
+			None => Ok(()),
+		};
+		let (mut slv, meta): (Solver, _) = match lowered {
 			Err(FlatZincError::ReformulationError(
 				LoweringError::Simplification(_) | LoweringError::Lowering(_),
 			)) => {
+				finish_trace()?;
 				outputln!(self.stdout, "{}", FZN_UNSATISFIABLE);
 				return Ok(());
 			}
+			// Any other error leaves the trace incomplete, and is its cause.
 			Err(err) => return Err(err.to_string()),
-			Ok(x) => x,
+			Ok(x) => {
+				finish_trace()?;
+				x
+			}
 		};
 
 		if self.statistics {

@@ -5,6 +5,7 @@ pub(crate) mod decision;
 pub mod deserialize;
 pub mod expressions;
 pub(crate) mod initilization_context;
+pub mod preprocess;
 pub(crate) mod resolved;
 pub(crate) mod view;
 
@@ -39,6 +40,7 @@ use crate::{
 	model::{
 		decision::{PolarityScore, Tier, boolean::BoolDecision, integer::IntDecision},
 		initilization_context::ModelInitContext,
+		preprocess::{PreprocessRule, TraceState},
 		view::{boolean::BoolView, integer::IntView},
 	},
 	solver::{
@@ -148,6 +150,12 @@ pub struct Model {
 	/// Definitions of the advisors that are listening to selected changes.
 	#[deepclone(clone)]
 	advisors: Vec<Advisor>,
+
+	/// The number of decisions that have been removed by unification.
+	pub(crate) unified_decisions: u32,
+	/// The state of the preprocessing trace.
+	#[deepclone(clone)]
+	pub(crate) trace: TraceState,
 }
 
 /// The engine-internal [`PropagationContext`] used while simplifying a
@@ -292,6 +300,11 @@ impl Model {
 		});
 		debug_assert_eq!(con.index(), self.constraints.len() - 1);
 		debug_assert_eq!(con.index(), self.propagator_queue.info.len() - 1);
+		// A trace error cannot be returned from here, so it ends the trace, and
+		// is returned when the trace is finished.
+		if let Err(err) = self.trace_constraint_posted(con) {
+			self.trace = TraceState::Failed(err);
+		}
 		(con, enqueue)
 	}
 
@@ -534,7 +547,7 @@ impl Model {
 		constraint: C,
 	) -> Result<ConstraintId, Nogood<View<bool>>> {
 		let (con, enqueue) = self.initialize_constraint(constraint);
-		if enqueue {
+		if enqueue && !self.trace_defer_simplification(con) {
 			self.propagate_single(con)?;
 		}
 		Ok(con)
@@ -581,6 +594,15 @@ impl Model {
 		let Some(mut con_obj) = self.constraints[con.index()].take() else {
 			return Ok(());
 		};
+		// A trace error cannot be returned as a conflict, so it ends the trace,
+		// and is returned when the trace is finished.
+		let traced = match self.trace_simplify_open(con, &*con_obj) {
+			Ok(traced) => traced,
+			Err(err) => {
+				self.trace = TraceState::Failed(err);
+				false
+			}
+		};
 		self.cur_prop = Some(con);
 		let mut status = con_obj.simplify(&mut SimplificationContext(&mut *self));
 		self.cur_prop = None;
@@ -605,6 +627,12 @@ impl Model {
 				}),
 			);
 		};
+		if traced
+			&& let Err(err) =
+				self.trace_simplify_close(&*con_obj, status.as_ref().copied().map_err(|_| ()))
+		{
+			self.trace = TraceState::Failed(err);
+		}
 
 		match status.map_err(Conflict::into_model_nogood)? {
 			SimplificationStatus::Subsumed => {
@@ -802,6 +830,10 @@ impl ReasoningContext for SimplificationContext<'_> {
 impl SimplificationActions for SimplificationContext<'_> {
 	type ConstraintId = ConstraintId;
 	type Target = Model;
+
+	fn justify(&mut self, rule: PreprocessRule) {
+		self.0.trace_rule(rule);
+	}
 
 	fn post_constraint<C: Constraint<Model>>(&mut self, constraint: C) -> ConstraintId {
 		self.0.post_constraint_internal(constraint)

@@ -1,0 +1,15 @@
+var bool: b;
+var -3..5: x;
+var 0..3: y;
+constraint int_lin_le([-3, 1, 1], [y, 1*b, x], 3) :: trace_id(9);
+constraint bool_clause([[x <= 2]], [b]) :: trace_id(10);
+constraint int_lin_le([-2, -1], [y, x], -3) :: trace_id(11);
+psi b := b;
+psi i := 1*b;
+psi nb := !b;
+psi r := [x <= 2];
+psi u := -2*y + 3;
+psi v := -3*y + 4;
+psi x := x;
+psi y := y;
+solve satisfy;

@@ -1,0 +1,10 @@
+trace 0.1
+unify w := y by preserve hint #1
+del #1 by preserve
+rewrite #2 => #4 by identity
+  constraint array_int_element(idx, [4, 5, 6], v) :: trace_id(4);
+dom v <- 4..9 by preserve hint #4
+dom v <- 4..6 by preserve hint #4
+rewrite #3 => #5 by lin-norm
+  constraint int_lin_le([1, 1], [v, y], 12) :: trace_id(5);
+end 6

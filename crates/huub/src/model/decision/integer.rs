@@ -377,16 +377,42 @@ impl Resolved<Decision<IntVal>> {
 		target: View<IntVal>,
 	) -> Result<(), Conflict<View<bool>>> {
 		let idx = self.idx();
+		let var = self.0;
 		debug_assert!(matches!(ctx.0.int_vars[idx].domain, Domain::Domain(_)));
+		let traced = ctx.0.trace_active();
+		if traced {
+			ctx.0.trace_flush();
+			// Restricting the domain of the replaced decision only matters to
+			// the trace when it fixes the decision.
+			ctx.0.trace_suppress();
+		}
 
 		// Set the domain on the variable to be aliased to trigger subscription
 		// events.
 		self.restrict_domain(ctx, &target.domain(ctx), NO_REASON)?;
+		if traced {
+			ctx.0.trace_int_fixed_suppressed(var);
+		}
+		// The target as a term, before its decision can become fixed.
+		let rendered = traced.then(|| ctx.0.trace_unify_target(target.into()));
+		ctx.0.unified_decisions += 1;
 		// Change variable to point to the target
 		match mem::replace(&mut ctx.0.int_vars[idx].domain, Domain::Alias(target)) {
 			// Restrict the domain of the target variable using the variable domain
 			// being aliased.
-			Domain::Domain(dom) => target.restrict_domain(ctx, &dom, NO_REASON)?,
+			Domain::Domain(dom) => {
+				if traced {
+					// The restriction of the target's domain is part of the
+					// unification step.
+					ctx.0.trace_suppress();
+				}
+				target.restrict_domain(ctx, &dom, NO_REASON)?;
+				if let Some(rendered) = rendered {
+					ctx.0.trace_int_unified(var, rendered, target, &dom);
+				}
+			}
+			// The replaced decision was fixed (and replaced by its value in the
+			// trace) by the restriction of its domain.
 			Domain::Alias(View(IntView::Const(v))) => target.fix(ctx, v, NO_REASON)?,
 			_ => unreachable!(),
 		};
@@ -502,6 +528,7 @@ impl Resolved<Decision<IntVal>> {
 
 			model.int_vars[self.idx()].domain = Domain::Domain(diff);
 		};
+		ctx.0.trace_int_changed(self.0);
 		Ok(())
 	}
 
@@ -520,6 +547,7 @@ impl Resolved<Decision<IntVal>> {
 			let model = &mut *ctx.0;
 			model.int_vars[self.idx()].domain = Domain::Alias(val.into());
 			model.int_events.insert(self.0.0, IntEvent::Fixed);
+			model.trace_int_changed(self.0);
 			Ok(())
 		} else {
 			Err(ctx.make_conflict(Some(View(BoolView::IntEq(self.0, val))), reason))
@@ -574,6 +602,7 @@ impl Resolved<Decision<IntVal>> {
 
 			model.int_vars[self.idx()].domain = Domain::Domain(intersect);
 		}
+		ctx.0.trace_int_changed(self.0);
 		Ok(())
 	}
 
@@ -614,6 +643,7 @@ impl Resolved<Decision<IntVal>> {
 				.and_modify(|v| *v += IntEvent::UpperBound)
 				.or_insert(IntEvent::UpperBound);
 		};
+		model.trace_int_changed(self.0);
 		Ok(())
 	}
 
@@ -654,6 +684,7 @@ impl Resolved<Decision<IntVal>> {
 				.and_modify(|e| *e += IntEvent::LowerBound)
 				.or_insert(IntEvent::LowerBound);
 		};
+		model.trace_int_changed(self.0);
 		Ok(())
 	}
 }

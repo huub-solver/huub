@@ -17,7 +17,10 @@ use crate::{
 		SimplificationStatus,
 	},
 	lower::{LoweringContext, LoweringError},
-	model::view::View,
+	model::{
+		preprocess::{FztArg, FztConstraint, FztContext, FztError, spelling},
+		view::{View, boolean::BoolView as ModelBoolView},
+	},
 	solver::view::boolean::BoolView,
 };
 
@@ -25,6 +28,76 @@ use crate::{
 /// can be posted as a constraint.
 #[derive(Clone, Debug, DeepClone)]
 pub struct PropositionConstraint(#[deepclone(clone)] pub(crate) Formula<View<bool>>);
+
+/// The atoms of `fs`, if all of them are atoms.
+fn fzt_atoms(fs: &[Formula<View<bool>>]) -> Option<Vec<View<bool>>> {
+	fs.iter()
+		.map(|f| match f {
+			Formula::Atom(a) => Some(*a),
+			_ => None,
+		})
+		.collect()
+}
+
+/// The positive literals and (the negations of) the negative literals of a
+/// clause.
+fn fzt_clause(ctx: &FztContext<'_>, lits: Vec<View<bool>>) -> (FztArg, FztArg) {
+	let (neg, pos): (Vec<_>, Vec<_>) = lits.into_iter().partition(
+		|&l| matches!(ctx.resolve_bool(l).0, ModelBoolView::Decision(d) if d.is_negated()),
+	);
+	(ctx.bools(pos), ctx.bools(neg.into_iter().map(|l| !l)))
+}
+
+/// Write `formula` using the FlatZinc spelling of its shape, if it has one of
+/// the shapes that Huub receives from FlatZinc.
+fn fzt_shape(ctx: &FztContext<'_>, formula: &Formula<View<bool>>) -> Option<FztConstraint> {
+	match formula {
+		Formula::Or(fs) => {
+			let (pos, neg) = fzt_clause(ctx, fzt_atoms(fs)?);
+			Some(FztConstraint::new("bool_clause", vec![pos, neg]))
+		}
+		Formula::Xor(fs) => {
+			let lits = fzt_atoms(fs)?;
+			Some(match lits.as_slice() {
+				&[a, b] => FztConstraint::new("bool_xor", vec![ctx.bool(a), ctx.bool(b)]),
+				_ => FztConstraint::new("array_bool_xor", vec![ctx.bools(lits)]),
+			})
+		}
+		Formula::Equiv(fs) => match fs.as_slice() {
+			[Formula::Atom(a), Formula::Atom(b)] => Some(FztConstraint::new(
+				"bool_eq",
+				vec![ctx.bool(*a), ctx.bool(*b)],
+			)),
+			[Formula::Atom(r), Formula::And(g)] => Some(FztConstraint::new(
+				"array_bool_and",
+				vec![ctx.bools(fzt_atoms(g)?), ctx.bool(*r)],
+			)),
+			[Formula::Atom(r), Formula::Or(g)] => {
+				let (pos, neg) = fzt_clause(ctx, fzt_atoms(g)?);
+				Some(FztConstraint::new(
+					spelling::BOOL_CLAUSE_REIF,
+					vec![pos, neg, ctx.bool(*r)],
+				))
+			}
+			[Formula::Atom(r), Formula::Equiv(g)] => match fzt_atoms(g)?.as_slice() {
+				&[a, b] => Some(FztConstraint::new(
+					"bool_eq_reif",
+					vec![ctx.bool(a), ctx.bool(b), ctx.bool(*r)],
+				)),
+				_ => None,
+			},
+			[Formula::Atom(r), Formula::Xor(g)] => match fzt_atoms(g)?.as_slice() {
+				&[a, b] => Some(FztConstraint::new(
+					"bool_xor",
+					vec![ctx.bool(a), ctx.bool(b), ctx.bool(*r)],
+				)),
+				_ => None,
+			},
+			_ => None,
+		},
+		_ => None,
+	}
+}
 
 /// Subscribe every atom in `formula` to be notified when it is fixed.
 fn subscribe_atoms<E>(formula: &mut Formula<View<bool>>, ctx: &mut E::InitializationContext<'_>)
@@ -147,6 +220,13 @@ where
 			f => f,
 		};
 		Ok(SimplificationStatus::NoFixpoint)
+	}
+
+	fn to_fzt(&self, ctx: &FztContext<'_>) -> Result<FztConstraint, FztError> {
+		Ok(fzt_shape(ctx, &self.0).unwrap_or_else(|| {
+			let (ops, atoms) = ctx.formula_encoding(&self.0);
+			FztConstraint::new(spelling::FORMULA, vec![ops, atoms])
+		}))
 	}
 
 	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {

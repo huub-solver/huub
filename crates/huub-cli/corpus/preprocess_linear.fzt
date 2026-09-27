@@ -1,0 +1,15 @@
+var 0..5: a;
+var 0..5: b;
+var 0..3: c;
+var 0..10: e;
+var bool: r;
+constraint int_lin_le([1, 1, 1], [c, a, b], 5) :: trace_id(7);
+constraint int_lin_le_reif([1, 1], [a, b], 3, r) :: trace_id(11);
+constraint int_lin_ne([1, -1], [a, b], 0) :: trace_id(12);
+psi a := a;
+psi b := b;
+psi c := c;
+psi d := 2*e + 1;
+psi e := e;
+psi r := r;
+solve satisfy;

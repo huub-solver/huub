@@ -1,0 +1,22 @@
+trace 0.1
+unify i := 1*b by lin-affine hint #1
+del #1 by lin-valid
+unify nb := !b by lin-neg hint #2
+del #2 by lin-valid
+unify r := [x <= 2] by lin-lit hint #3
+  dom x <- -5..5
+del #3 by lin-valid
+unify v := -3*y + 4 by lin-affine hint #4
+  dom y <- 0..3
+del #4 by lin-valid
+unify u := -2*y + 3 by lin-affine hint #5
+  dom y <- 0..3
+del #5 by lin-valid
+rewrite #6 => #9 by lin-norm
+  constraint int_lin_le([-3, 1, 1], [y, 1*b, x], 3) :: trace_id(9);
+rewrite #7 => #10 by preserve
+  constraint bool_clause([[x <= 2]], [b]) :: trace_id(10);
+rewrite #8 => #11 by lin-norm
+  constraint int_lin_le([-2, -1], [y, x], -3) :: trace_id(11);
+dom x <- -3..5 by preserve hint #11
+end 14

@@ -1,0 +1,6 @@
+var 0..4: x;
+var 0..10: o;
+constraint int_lin_eq([1, -1], [o, x + 2], 0) :: trace_id(3);
+psi o := o;
+psi x := x;
+solve minimize o;

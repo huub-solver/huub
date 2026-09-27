@@ -2,7 +2,7 @@
 
 use std::{
 	cell::RefCell,
-	collections::hash_map::Entry,
+	collections::{VecDeque, hash_map::Entry},
 	error::Error,
 	fmt::{self, Debug, Display},
 	hash::Hash,
@@ -31,10 +31,14 @@ use crate::{
 	constraints::{NO_REASON, Nogood},
 	lower::{Lowerer, LowererComplete, LoweringError},
 	model::{
-		Model,
+		self, Model,
 		deserialize::{AnyView, Branching, Goal},
 		expressions::linear::IntLinearExp,
-		view::{View, boolean::BoolView},
+		preprocess::{
+			DeclaredDomain, FznOutcome, FztArg, FztConstraint, FztContext, FztError,
+			PreprocessRule, fzt_domain, lin_norm_equal,
+		},
+		view::{View, boolean::BoolView, integer::IntView},
 	},
 	solver::{
 		self,
@@ -276,6 +280,8 @@ pub enum FlatZincError {
 		/// Number of arguments expected.
 		expected: usize,
 	},
+	/// The preprocessing trace that was requested cannot be produced.
+	PreprocessTrace(FztError),
 	/// FlatZinc instance used an identifier that was not defined.
 	UnknownIdentifier(String),
 	/// FlatZinc constraint or annotation used an argument of the wrong type.
@@ -385,6 +391,9 @@ pub(crate) struct FznModelBuilder<'a> {
 	var_index: FxHashMap<ArcKey<Variable<FznIdent>>, u32>,
 	/// The incumbent model
 	prb: Model,
+	/// The index of the FlatZinc constraint whose posting is logged in the
+	/// preprocessing trace, while its window is open.
+	posting: Option<usize>,
 	/// Flags indicating which constraints have been processed
 	processed: Vec<bool>,
 	/// Statistics about the extraction process
@@ -426,6 +435,20 @@ pub enum KnownIdent {
 	Annotation(AnnotationIdent),
 	/// Constraint identifiers.
 	Constraint(ConstraintIdent),
+}
+
+/// An equality between two FlatZinc literals that caused their unification:
+/// the two sides, the index of the constraint, and whether the constraint is an
+/// equality (rather than an element constraint).
+type UnifyEdge<'a> = (&'a Literal<FznIdent>, &'a Literal<FznIdent>, usize, bool);
+
+/// The domain with which the FlatZinc variable `var` is declared.
+fn declared_domain(var: &Variable<FznIdent>) -> DeclaredDomain {
+	match &var.ty {
+		Type::Bool => DeclaredDomain::Bool,
+		Type::Int(d) => DeclaredDomain::Int(d.clone()),
+		_ => DeclaredDomain::Int(None),
+	}
 }
 
 impl AnnotationIdent {
@@ -590,6 +613,32 @@ impl ConstraintIdent {
 			Self::ValuePrecedeChain => "huub_value_precede_chain_int",
 		}
 	}
+
+	/// Whether the constraint belongs to the linear family, which Huub posts
+	/// as a single linear constraint.
+	pub(crate) fn is_linear(self) -> bool {
+		matches!(
+			self,
+			Self::BoolLinEq
+				| Self::IntEqImp
+				| Self::IntEqReif
+				| Self::IntLe
+				| Self::IntLeImp
+				| Self::IntLeReif
+				| Self::IntLinEq
+				| Self::IntLinEqImp
+				| Self::IntLinEqReif
+				| Self::IntLinLe
+				| Self::IntLinLeImp
+				| Self::IntLinLeReif
+				| Self::IntLinNe
+				| Self::IntLinNeImp
+				| Self::IntLinNeReif
+				| Self::IntNe
+				| Self::IntNeImp
+				| Self::IntNeReif
+		)
+	}
 }
 
 impl Display for ConstraintIdent {
@@ -668,10 +717,21 @@ impl HuubFlatZinc for FlatZinc<FznIdent> {
 	fn lower(&self) -> Lowerer<Result<FlatZincLowerData, FlatZincError>> {
 		let deserialize_model = |fzn: &FlatZinc<FznIdent>| {
 			let mut builder = FznModelBuilder::new(fzn);
-			builder.unify_variables()?;
-			builder.extract_views()?;
-			builder.post_constraints()?;
-			builder.ensure_output()?;
+			let res = builder
+				.unify_variables()
+				.and_then(|()| builder.extract_views())
+				.and_then(|()| builder.post_constraints())
+				.and_then(|()| builder.ensure_output());
+			if let Err(err) = res {
+				builder.trace_posting_fail(&err);
+				// A conflict concludes the trace, which ends in its `unsat`
+				// step. After any other error the trace is incomplete, and
+				// is not finished.
+				if FznOutcome::of_error(&err) == FznOutcome::Conflict {
+					builder.prb.trace_finish()?;
+				}
+				return Err(err);
+			}
 
 			builder.finalize()
 		};
@@ -698,6 +758,7 @@ impl Display for FlatZincError {
 				f,
 				"constraints with identifiers `{name}' must have {expected} arguments, found {found}"
 			),
+			Self::PreprocessTrace(err) => write!(f, "{err}"),
 			Self::UnknownIdentifier(ident) => write!(f, "could not find identifier `{ident}'"),
 			Self::InvalidArgumentType { expected, found } => {
 				write!(f, "argument found of type `{found}', expected `{expected}'")
@@ -714,6 +775,12 @@ impl Error for FlatZincError {}
 impl From<<Model as ReasoningEngine>::Conflict> for FlatZincError {
 	fn from(conflict: <Model as ReasoningEngine>::Conflict) -> Self {
 		Self::ReformulationError(LoweringError::from(conflict))
+	}
+}
+
+impl From<FztError> for FlatZincError {
+	fn from(err: FztError) -> Self {
+		Self::PreprocessTrace(err)
 	}
 }
 
@@ -1241,6 +1308,50 @@ impl<'a> FznModelBuilder<'a> {
 		defined_by: &FxHashMap<ArcKey<Variable<FznIdent>>, usize>,
 		con: usize,
 	) -> Result<(), FlatZincError> {
+		if !self.prb.trace_active() {
+			return self.extract_view_inner(defined_by, con);
+		}
+		let rule = match &self.fzn.constraints[con].id {
+			FznIdent::Known(KnownIdent::Constraint(ident)) => match ident {
+				ConstraintIdent::Bool2Int | ConstraintIdent::IntLinEq => PreprocessRule::LinAffine,
+				ConstraintIdent::BoolNot => PreprocessRule::LinNeg,
+				ConstraintIdent::IntEqReif
+				| ConstraintIdent::IntLeReif
+				| ConstraintIdent::IntNeReif => PreprocessRule::LinLit,
+				_ => PreprocessRule::Preserve,
+			},
+			_ => PreprocessRule::Preserve,
+		};
+		// After the replacement, the constraint holds trivially.
+		let del_rule = match rule {
+			PreprocessRule::LinAffine | PreprocessRule::LinNeg | PreprocessRule::LinLit => {
+				PreprocessRule::LinValid
+			}
+			_ => PreprocessRule::Preserve,
+		};
+		self.prb.trace_fzn_open(con, true, rule);
+		let res = self.extract_view_inner(defined_by, con);
+		let outcome = match FznOutcome::of(&res) {
+			FznOutcome::Processed if !self.processed[con] => FznOutcome::Unprocessed,
+			outcome => outcome,
+		};
+		let closed = self
+			.prb
+			.trace_fzn_close(outcome, |_| PreprocessRule::Preserve, del_rule);
+		// An error of the extraction takes precedence over one of the trace.
+		res?;
+		let deferred = closed?;
+		debug_assert!(deferred.is_empty());
+		Ok(())
+	}
+
+	/// Implementation of [`Self::extract_view`] without the logging of the
+	/// preprocessing trace.
+	fn extract_view_inner(
+		&mut self,
+		defined_by: &FxHashMap<ArcKey<Variable<FznIdent>>, usize>,
+		con: usize,
+	) -> Result<(), FlatZincError> {
 		debug_assert!(!self.processed[con]);
 		let c = &self.fzn.constraints[con];
 
@@ -1264,6 +1375,14 @@ impl<'a> FznModelBuilder<'a> {
 					}
 				},
 				Entry::Vacant(e) => {
+					// The view as a term, before its decision can become fixed
+					// by the restriction of its domain, which is part of the
+					// unification step.
+					let target = me.prb.trace_active().then(|| {
+						let target = me.prb.trace_unify_target(view.clone());
+						me.prb.trace_suppress();
+						target
+					});
 					// Enforce the domain of the named (uncreated) variable on
 					// the view
 					if let Type::Int(Some(dom)) = &var.ty {
@@ -1271,6 +1390,14 @@ impl<'a> FznModelBuilder<'a> {
 							unreachable!()
 						};
 						view.restrict_domain(&mut me.prb, dom, NO_REASON)?;
+					}
+					if let Some(target) = target {
+						me.prb.trace_name_unified(
+							&var.name,
+							&declared_domain(var),
+							target,
+							view.clone(),
+						);
 					}
 					// Insert the view to use instead of a new variable for the
 					// name
@@ -1453,6 +1580,18 @@ impl<'a> FznModelBuilder<'a> {
 	pub(crate) fn finalize(mut self) -> Result<(Model, FlatZincModelMeta), FlatZincError> {
 		let branching = self.extract_branchings()?;
 		let goal = self.extract_goal()?;
+		if self.prb.trace_active() {
+			// Variables that are never referenced are never given a decision,
+			// and remain unconstrained.
+			let unmaterialized = self
+				.fzn
+				.variables
+				.iter()
+				.filter(|v| !self.map.contains_key(&v.cloned_key()))
+				.map(|v| (v.name.clone(), declared_domain(v)))
+				.collect();
+			self.prb.trace_unmaterialized(unmaterialized);
+		}
 		Ok((
 			self.prb,
 			FlatZincModelMeta {
@@ -1463,6 +1602,26 @@ impl<'a> FznModelBuilder<'a> {
 				assumptions: self.assumptions,
 			},
 		))
+	}
+
+	/// The member of a group of equal FlatZinc variables and constants that
+	/// represents the group in the preprocessing trace: a constant if there is
+	/// one, otherwise the objective variable if it is a member (so that it is
+	/// not replaced), and otherwise the first variable.
+	fn group_root<'l>(&self, li: &'l [Literal<FznIdent>]) -> Option<&'l Literal<FznIdent>> {
+		let objective = match &self.fzn.solve.method {
+			flatzinc_serde::Method::Minimize(Literal::Variable(o))
+			| flatzinc_serde::Method::Maximize(Literal::Variable(o)) => Some(o),
+			_ => None,
+		};
+		li.iter()
+			.find(|l| !matches!(l, Literal::Variable(_)))
+			.or_else(|| {
+				li.iter().find(
+					|l| matches!((l, objective), (Literal::Variable(v), Some(o)) if v.name == o.name),
+				)
+			})
+			.or_else(|| li.first())
 	}
 
 	/// Extract a Boolean decision variable from a [`Literal`] in a
@@ -1518,6 +1677,9 @@ impl<'a> FznModelBuilder<'a> {
 					Type::Bool => {
 						let model = self.prb.bool_vars.len() as u64;
 						let view = AnyView::Bool(self.prb.new_bool_decision());
+						if let AnyView::Bool(View(BoolView::Decision(d))) = view {
+							self.prb.trace_name_bool(d, &var.name);
+						}
 						// Register the model Boolean decision against its
 						// FlatZinc variable.
 						if tracing::enabled!(target: "reverse_map", tracing::Level::TRACE)
@@ -1547,6 +1709,19 @@ impl<'a> FznModelBuilder<'a> {
 								self.prb.new_int_decision(FULL_INT_DOMAIN).into()
 							}
 						};
+						if self.prb.int_vars.len() > before {
+							self.prb
+								.trace_name_int(model::Decision(before as u32), &var.name);
+							if dom.is_none() {
+								Self::trace_full_domain(&mut self.prb, &var.name);
+							}
+						} else if let AnyView::Int(View(IntView::Const(k))) = view {
+							self.prb.trace_name_singleton(
+								&var.name,
+								&DeclaredDomain::Int(dom.clone()),
+								k,
+							);
+						}
 						// Register the model integer decision against its
 						// FlatZinc variable, unless it's a constant.
 						if self.prb.int_vars.len() > before
@@ -1582,11 +1757,22 @@ impl<'a> FznModelBuilder<'a> {
 			})
 			.unwrap_or_default();
 
+		let mut prb = Model::default();
+		if tracing::enabled!(target: "preprocess", tracing::Level::TRACE) {
+			let objective = match &fzn.solve.method {
+				flatzinc_serde::Method::Minimize(Literal::Variable(v))
+				| flatzinc_serde::Method::Maximize(Literal::Variable(v)) => Some(v.name.clone()),
+				_ => None,
+			};
+			prb.trace_start(fzn.constraints.len(), objective);
+		}
+
 		Self {
 			fzn,
 			map: FxHashMap::default(),
 			var_index,
-			prb: Model::default(),
+			prb,
+			posting: None,
 			processed: vec![false; fzn.constraints.len()],
 			stats: FlatZincStatistics::default(),
 			assumptions: Vec::new(),
@@ -1641,6 +1827,7 @@ impl<'a> FznModelBuilder<'a> {
 			if self.processed[i] {
 				continue;
 			}
+			self.trace_posting_open(i)?;
 			let mut ann_used = vec![false; c.ann.len()];
 
 			let FznIdent::Known(KnownIdent::Constraint(ident)) = c.id else {
@@ -1756,6 +1943,7 @@ impl<'a> FznModelBuilder<'a> {
 					// in. `true` literals are ignored.
 					let arr = self.arg_array(arr)?;
 					self.assumptions.reserve(arr.len());
+					let first = self.assumptions.len();
 					for l in arr {
 						let label = match l {
 							Literal::Variable(v) => v.name.clone(),
@@ -1771,6 +1959,10 @@ impl<'a> FznModelBuilder<'a> {
 						let view = self.lit_bool(l)?;
 						self.assumptions.push((label, view));
 					}
+					// Search enforces the assumptions, so they remain part of
+					// the model at the start of search.
+					let lits = self.assumptions[first..].iter().map(|(_, v)| *v).collect();
+					self.prb.trace_assume(lits);
 				}
 				ConstraintIdent::Bool2Int => {
 					let [b, i] = c.args.as_slice() else {
@@ -2441,7 +2633,308 @@ impl<'a> FznModelBuilder<'a> {
 				}
 			}
 		}
+		self.trace_posting_close()?;
 
+		Ok(())
+	}
+
+	/// Write the FlatZinc constraint `c` in the `.fzt` model language, as it
+	/// reads after the replacements of its variables that have happened so
+	/// far, or `None` if it contains values that cannot be written.
+	fn render_constraint(&self, c: &flatzinc_serde::Constraint<FznIdent>) -> Option<FztConstraint> {
+		let ctx = FztContext::new(&self.prb);
+		let lit = |l: &Literal<FznIdent>| -> Option<FztArg> {
+			Some(match l {
+				Literal::Int(i) => (*i).into(),
+				Literal::Bool(b) => FztArg::Bool(*b),
+				Literal::IntSet(set) => ctx.set(&set.iter().collect()),
+				Literal::Variable(v) => match self.map.get(&v.cloned_key()) {
+					Some(AnyView::Int(iv)) => ctx.int(*iv),
+					Some(AnyView::Bool(bv)) => ctx.bool(*bv),
+					None => ctx.name(&v.name),
+				},
+				_ => return None,
+			})
+		};
+		let args = c
+			.args
+			.iter()
+			.map(|a| match a {
+				Argument::Literal(l) => lit(l),
+				Argument::Array(ls) => ls.iter().map(lit).collect::<Option<_>>().map(FztArg::Array),
+				Argument::ArrayNamed(arr) => arr
+					.contents
+					.iter()
+					.map(lit)
+					.collect::<Option<_>>()
+					.map(FztArg::Array),
+			})
+			.collect::<Option<_>>()?;
+		Some(FztConstraint::new(c.id.to_string(), args))
+	}
+
+	/// Log that Huub assumes the full range of [`IntVal`] as the domain of the
+	/// unbounded FlatZinc variable `name`.
+	///
+	/// This is not a solution-preserving step, and it is logged as such.
+	fn trace_full_domain(prb: &mut Model, name: &str) {
+		prb.trace_raw(format!(
+			"dom {name} <- {} by preserve",
+			fzt_domain(&IntSet::from(FULL_INT_DOMAIN))
+		));
+	}
+
+	/// Log the steps that merge a group of equal FlatZinc variables into the
+	/// single view `view` that represents all of them, where `root` is the
+	/// member that represents the group, and `group` are the indices in
+	/// `edges` of the equalities between its members.
+	///
+	/// The members are replaced in the order of a breadth-first traversal of
+	/// the equalities from `root`, so that each equality reads `x = root` when
+	/// its member `x` is replaced. The equalities, which then hold trivially,
+	/// are removed afterwards.
+	fn trace_group(
+		&mut self,
+		root: Option<&Literal<FznIdent>>,
+		edges: &[UnifyEdge<'_>],
+		group: &[usize],
+		view: &AnyView,
+	) {
+		/// The node of a literal in the graph of equalities.
+		fn key(l: &Literal<FznIdent>) -> String {
+			match l {
+				Literal::Variable(v) => format!("v:{}", v.name),
+				Literal::Bool(b) => format!("b:{b}"),
+				Literal::Int(i) => format!("i:{i}"),
+				l => format!("?:{l:?}"),
+			}
+		}
+		/// The value of a constant as an integer.
+		fn value(l: &Literal<FznIdent>) -> Option<IntVal> {
+			match l {
+				Literal::Bool(b) => Some(*b as IntVal),
+				Literal::Int(i) => Some(*i),
+				_ => None,
+			}
+		}
+
+		let Some(root) = root else { return };
+		let mut adjacent: FxHashMap<String, Vec<usize>> = FxHashMap::default();
+		for &e in group {
+			let (a, b, _, _) = edges[e];
+			adjacent.entry(key(a)).or_default().push(e);
+			adjacent.entry(key(b)).or_default().push(e);
+		}
+		// The domain of the root variable, while the members are replaced by
+		// it (`None` if it is unbounded, or Boolean).
+		let mut domain = match root {
+			Literal::Variable(r) => match declared_domain(r) {
+				DeclaredDomain::Int(d) => d,
+				DeclaredDomain::Bool => None,
+			},
+			_ => None,
+		};
+		let mut visited = FxHashSet::from_iter([key(root)]);
+		let mut queue = VecDeque::from([root]);
+		while let Some(u) = queue.pop_front() {
+			for &e in adjacent.get(&key(u)).map_or(&[][..], Vec::as_slice) {
+				let (a, b, i, is_eq) = edges[e];
+				let w = if key(a) == key(u) { b } else { a };
+				if !visited.insert(key(w)) {
+					continue;
+				}
+				let hint = i + 1;
+				let Literal::Variable(x) = w else {
+					// A second constant, different from the root, which the
+					// equality contradicts.
+					self.prb
+						.trace_raw(format!("unsat by preserve hint #{hint}"));
+					return;
+				};
+				let declared = declared_domain(x);
+				match root {
+					Literal::Variable(r) => {
+						let rule = if is_eq {
+							PreprocessRule::LinAffine
+						} else {
+							PreprocessRule::Preserve
+						};
+						let mut dom = None;
+						if let DeclaredDomain::Int(Some(dx)) = &declared {
+							let new = match &domain {
+								Some(d) => d.intersect(dx),
+								None => dx.clone(),
+							};
+							if domain.as_ref() != Some(&new) {
+								dom = Some((r.name.clone(), fzt_domain(&new)));
+							}
+							domain = Some(new);
+						}
+						self.prb.trace_name_merged(
+							&x.name,
+							&declared,
+							r.name.clone(),
+							dom,
+							(rule, vec![hint as u32]),
+						);
+					}
+					_ => {
+						let k =
+							value(root).expect("the root of a group is a variable or a constant");
+						let dx = match &declared {
+							DeclaredDomain::Bool => Some(IntSet::from(0..=1)),
+							DeclaredDomain::Int(d) => d.clone(),
+						};
+						if dx.as_ref().is_some_and(|d| !d.contains(&k)) {
+							self.prb
+								.trace_raw(format!("unsat by preserve hint #{hint}"));
+							return;
+						}
+						if dx.as_ref().is_none_or(|d| d.card() != Some(1)) {
+							let rule = if is_eq {
+								PreprocessRule::LinUnary
+							} else {
+								PreprocessRule::Preserve
+							};
+							self.prb.trace_raw(format!(
+								"dom {} <- {{{k}}} by {} hint #{hint}",
+								x.name,
+								rule.as_str()
+							));
+						}
+						let term = match root {
+							Literal::Bool(b) => b.to_string(),
+							_ => k.to_string(),
+						};
+						self.prb.trace_name_merged(
+							&x.name,
+							&declared,
+							term,
+							None,
+							(PreprocessRule::Singleton, Vec::new()),
+						);
+					}
+				}
+				queue.push_back(w);
+			}
+		}
+
+		// The equalities now hold trivially.
+		let mut removed = FxHashSet::default();
+		for &e in group {
+			let (_, _, i, is_eq) = edges[e];
+			if removed.insert(i) {
+				let rule = if is_eq {
+					PreprocessRule::LinValid
+				} else {
+					PreprocessRule::Preserve
+				};
+				self.prb
+					.trace_raw(format!("del #{} by {}", i + 1, rule.as_str()));
+			}
+		}
+
+		// The decision created for the group may not represent the root
+		// variable's domain exactly.
+		if let Literal::Variable(r) = root {
+			match view {
+				AnyView::Int(View(IntView::Const(k))) => {
+					self.prb
+						.trace_name_singleton(&r.name, &DeclaredDomain::Int(domain), *k);
+				}
+				AnyView::Int(_) if domain.is_none() => {
+					Self::trace_full_domain(&mut self.prb, &r.name);
+				}
+				_ => {}
+			}
+		}
+	}
+
+	/// Close the window of the posting of the current FlatZinc constraint in
+	/// the preprocessing trace, if one is open, logging its replacement by the
+	/// constraints that were posted for it, and simplify those constraints.
+	fn trace_posting_close(&mut self) -> Result<(), FlatZincError> {
+		let Some(i) = self.posting.take() else {
+			return Ok(());
+		};
+		let c = &self.fzn.constraints[i];
+		let ident = match c.id {
+			FznIdent::Known(KnownIdent::Constraint(ident)) => Some(ident),
+			_ => None,
+		};
+		let del_rule = match ident {
+			// Posted as unifications, after which the constraint holds
+			// trivially.
+			Some(ConstraintIdent::Bool2Int | ConstraintIdent::BoolNot) => PreprocessRule::LinValid,
+			_ => PreprocessRule::Preserve,
+		};
+		let linear = ident.is_some_and(ConstraintIdent::is_linear);
+		let input = self.render_constraint(c);
+		let deferred = self.prb.trace_fzn_close(
+			FznOutcome::Processed,
+			|outputs| match (outputs, &input) {
+				([out], Some(input)) if input == out => PreprocessRule::Identity,
+				// Guard the claim where the normal form of the input can be
+				// computed, i.e. for an `int_lin_*` spelling.
+				([out], Some(input))
+					if linear
+						&& out.name().starts_with("int_lin_")
+						&& lin_norm_equal(input, out) != Some(false) =>
+				{
+					PreprocessRule::LinNorm
+				}
+				_ => PreprocessRule::Preserve,
+			},
+			del_rule,
+		)?;
+		// The constraints are simplified after their introduction has been
+		// logged.
+		for con in deferred {
+			self.prb.propagate_single(con)?;
+		}
+		Ok(())
+	}
+
+	/// Close the window of the posting of the current FlatZinc constraint in
+	/// the preprocessing trace, if one is open, after its posting failed with
+	/// `err`.
+	fn trace_posting_fail(&mut self, err: &FlatZincError) {
+		if self.posting.take().is_some() {
+			let deferred = self
+				.prb
+				.trace_fzn_close(
+					FznOutcome::of_error(err),
+					|_| PreprocessRule::Preserve,
+					PreprocessRule::Preserve,
+				)
+				.expect("closing a window after a failure renders no constraints");
+			// The posting failed, so the deferred constraints are never
+			// simplified.
+			drop(deferred);
+		}
+	}
+
+	/// Open the window of the posting of the FlatZinc constraint at index `i`
+	/// in the preprocessing trace, closing the window of the previous one.
+	///
+	/// While the window is open, the constraints that are posted are collected,
+	/// and their simplification is deferred until the window is closed.
+	fn trace_posting_open(&mut self, i: usize) -> Result<(), FlatZincError> {
+		self.trace_posting_close()?;
+		if !self.prb.trace_active() {
+			return Ok(());
+		}
+		let rule = match self.fzn.constraints[i].id {
+			FznIdent::Known(KnownIdent::Constraint(ConstraintIdent::Bool2Int)) => {
+				PreprocessRule::LinAffine
+			}
+			FznIdent::Known(KnownIdent::Constraint(ConstraintIdent::BoolNot)) => {
+				PreprocessRule::LinNeg
+			}
+			_ => PreprocessRule::Preserve,
+		};
+		self.prb.trace_fzn_open(i, false, rule);
+		self.posting = Some(i);
 		Ok(())
 	}
 
@@ -2509,6 +3002,12 @@ impl<'a> FznModelBuilder<'a> {
 			};
 		};
 
+		// The equalities behind the unifications, as their two sides, the index
+		// of the constraint, and whether the constraint is an equality (rather
+		// than an element constraint), kept for the preprocessing trace.
+		let traced = self.prb.trace_active();
+		let mut edges: Vec<UnifyEdge<'a>> = Vec::new();
+
 		// Unify variables based on constraints
 		for (i, c) in self.fzn.constraints.iter().enumerate() {
 			if self.processed[i] {
@@ -2519,15 +3018,12 @@ impl<'a> FznModelBuilder<'a> {
 			};
 			let mark_processed = |me: &mut Self| me.processed[i] = true;
 			match ident {
-				ConstraintIdent::BoolEq => {
+				ConstraintIdent::BoolEq | ConstraintIdent::IntEq => {
 					if let [Argument::Literal(a), Argument::Literal(b)] = c.args.as_slice() {
 						record_unify(&mut unify_map, a, b);
-						mark_processed(self);
-					}
-				}
-				ConstraintIdent::IntEq => {
-					if let [Argument::Literal(a), Argument::Literal(b)] = c.args.as_slice() {
-						record_unify(&mut unify_map, a, b);
+						if traced {
+							edges.push((a, b, i, true));
+						}
 						mark_processed(self);
 					}
 				}
@@ -2541,11 +3037,17 @@ impl<'a> FznModelBuilder<'a> {
 						if let Argument::Literal(Literal::Int(idx)) = idx {
 							let a = &arr[(idx - 1) as usize];
 							record_unify(&mut unify_map, a, b);
+							if traced {
+								edges.push((a, b, i, false));
+							}
 							mark_processed(self);
 						}
 						// unify if all values in arr are equal
 						if !arr.is_empty() && arr.iter().all_equal() {
 							record_unify(&mut unify_map, &arr[0], b);
+							if traced {
+								edges.push((&arr[0], b, i, false));
+							}
 							mark_processed(self);
 						}
 					}
@@ -2554,12 +3056,45 @@ impl<'a> FznModelBuilder<'a> {
 			}
 		}
 
+		// The equalities of each group, identified by the address of its member
+		// list. An equality between two constants belongs to no group.
+		let mut group_edges: FxHashMap<*const RefCell<Vec<Literal<FznIdent>>>, Vec<usize>> =
+			FxHashMap::default();
+		// A constraint can contribute the same equality twice, e.g. an element
+		// constraint with a constant index into an array of equal elements.
+		let mut removed = FxHashSet::default();
+		for (e, &(a, b, i, is_eq)) in edges.iter().enumerate() {
+			match [a, b]
+				.into_iter()
+				.find_map(|l| unify_map_find(&unify_map, l))
+			{
+				Some(group) => group_edges.entry(Rc::as_ptr(&group)).or_default().push(e),
+				None if !removed.insert(i) => {}
+				None => {
+					let rule = if is_eq {
+						PreprocessRule::LinValid
+					} else {
+						PreprocessRule::Preserve
+					};
+					self.prb
+						.trace_raw(format!("del #{} by {}", i + 1, rule.as_str()));
+				}
+			}
+		}
+
+		// The groups to log in the preprocessing trace. They are logged once
+		// all groups have been processed, in the order of their first
+		// equality, since the order of the map depends on the addresses of the
+		// variables.
+		let mut traced_groups = Vec::new();
+
 		#[expect(clippy::iter_over_hash_type, reason = "FxHashMap::iter is stable")]
-		for (k, li) in unify_map.iter() {
-			let li = li.borrow();
+		for (k, group) in unify_map.iter() {
+			let li = group.borrow();
 			if self.map.contains_key(k) {
 				continue;
 			}
+			let (int_len, bool_len) = (self.prb.int_vars.len(), self.prb.bool_vars.len());
 			let is_bool = li.first().is_some_and(|l| match l {
 				Literal::Variable(var) => var.ty == Type::Bool,
 				Literal::Bool(_) => true,
@@ -2649,6 +3184,13 @@ impl<'a> FznModelBuilder<'a> {
 					}
 				});
 
+			// All names but one no longer need a decision of their own.
+			let names = li
+				.iter()
+				.filter(|l| matches!(l, Literal::Variable(_)))
+				.count();
+			self.stats.unified_decisions += names.saturating_sub(1) as u32;
+
 			// Map (or equate) all names in the group to the new variable
 			for lit in li.iter() {
 				if let Literal::Variable(v) = lit {
@@ -2656,8 +3198,60 @@ impl<'a> FznModelBuilder<'a> {
 					debug_assert_eq!(prev, None);
 				}
 			}
+
+			if traced {
+				let root = self.group_root(&li);
+				// Name the new decision after the variable that represents the
+				// group.
+				if let Some(Literal::Variable(r)) = root {
+					match var {
+						AnyView::Int(View(IntView::Linear(lin)))
+							if self.prb.int_vars.len() > int_len =>
+						{
+							self.prb.trace_name_int(lin.var, &r.name);
+						}
+						AnyView::Bool(View(BoolView::Decision(d)))
+							if self.prb.bool_vars.len() > bool_len =>
+						{
+							self.prb.trace_name_bool(d, &r.name);
+						}
+						_ => {}
+					}
+				}
+				let es = group_edges
+					.get(&Rc::as_ptr(group))
+					.map_or(&[][..], Vec::as_slice);
+				let first = es.iter().map(|&e| edges[e].2).min();
+				traced_groups.push((first, root.cloned(), es, var));
+			}
+		}
+		traced_groups.sort_by_key(|(first, ..)| *first);
+		for (_, root, es, var) in traced_groups {
+			self.trace_group(root.as_ref(), &edges, es, &var);
 		}
 		Ok(())
+	}
+}
+
+impl FznOutcome {
+	/// The outcome of the processing of a FlatZinc constraint that ended with
+	/// `res`.
+	fn of(res: &Result<(), FlatZincError>) -> Self {
+		match res {
+			Ok(()) => FznOutcome::Processed,
+			Err(err) => Self::of_error(err),
+		}
+	}
+
+	/// The outcome of the processing of a FlatZinc constraint that failed with
+	/// `err`.
+	fn of_error(err: &FlatZincError) -> Self {
+		match err {
+			FlatZincError::ReformulationError(LoweringError::Simplification(_)) => {
+				FznOutcome::Conflict
+			}
+			_ => FznOutcome::Failed,
+		}
 	}
 }
 

@@ -1,0 +1,12 @@
+trace 0.1
+rewrite #1 => #6 by identity
+  constraint huub_all_different_int([x, y, z]) :: trace_id(6);
+rewrite #2 => #7 by identity
+  constraint huub_table_int([x, y], [1, 2, 2, 3, 3, 1]) :: trace_id(7);
+rewrite #3 => #8 by identity
+  constraint bool_clause([p, q], [r]) :: trace_id(8);
+rewrite #4 => #9 by identity
+  constraint array_bool_and([p, q], s) :: trace_id(9);
+rewrite #5 => #10 by identity
+  constraint bool_xor(q, r) :: trace_id(10);
+end 5
