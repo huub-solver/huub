@@ -1,0 +1,21 @@
+trace 0.1
+rewrite #1 => #5 by identity
+  constraint int_lin_eq([1, -1], [x, y], 1) :: trace_id(5);
+unify y := x - 1 by lin-affine hint #5
+  dom x <- 1..20
+del #5 by lin-valid
+rewrite #2 => #6 by lin-norm
+  constraint int_lin_eq([-2, 1], [z, x], 1) :: trace_id(6);
+unify x := 2*z + 1 by lin-affine hint #6
+  dom z <- 0..9
+del #6 by lin-valid
+rewrite #3 => #7 by lin-norm
+  constraint int_lin_le([2, 1], [z, t], 19) :: trace_id(7);
+dom t <- 0..19 by preserve hint #7
+rewrite #4 => #8 by lin-norm
+  constraint int_lin_le([1], [z], 0) :: trace_id(8);
+dom z <- {0} by lin-unary hint #8
+unify z := 0 by singleton
+del #8 by lin-valid
+del #7 by lin-valid
+end 13

@@ -1,0 +1,6 @@
+var 0..19: t;
+psi t := t;
+psi x := 1;
+psi y := 0;
+psi z := 0;
+solve satisfy;

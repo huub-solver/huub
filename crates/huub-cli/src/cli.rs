@@ -174,6 +174,14 @@ pub struct Cli<'a> {
 	/// Output log messages to a file instead of standard error.
 	#[arg(long, value_name = "FILE", help_heading = CLI_SECTION_BEHAVIOUR)]
 	pub(crate) log_file: Option<PathBuf>,
+	/// Write the trace of the preprocessing of the instance to a file, for the
+	/// preprocessing checker (requires `--start-model`).
+	#[arg(long, value_name = "FILE", requires = "start_model", help_heading = CLI_SECTION_BEHAVIOUR)]
+	pub(crate) preprocess_trace: Option<PathBuf>,
+	/// Write the model at the start of search to a file, for the preprocessing
+	/// checker (requires `--preprocess-trace`).
+	#[arg(long, value_name = "FILE", requires = "preprocess_trace", help_heading = CLI_SECTION_BEHAVIOUR)]
+	pub(crate) start_model: Option<PathBuf>,
 	/// Control ANSI color in tracing output.
 	#[arg(
 		long,
@@ -322,6 +330,8 @@ impl<'a> Cli<'a> {
 			search_interval: self.search_interval,
 			cadical: self.cadical,
 			log_file: self.log_file,
+			preprocess_trace: self.preprocess_trace,
+			start_model: self.start_model,
 			color: self.color,
 			stdout: Box::new(stdout),
 		}
@@ -375,6 +385,8 @@ impl Debug for Cli<'_> {
 			.field("search_interval", &self.search_interval)
 			.field("cadical", &self.cadical)
 			.field("log_file", &self.log_file)
+			.field("preprocess_trace", &self.preprocess_trace)
+			.field("start_model", &self.start_model)
 			.field("color", &self.color)
 			.finish_non_exhaustive()
 	}

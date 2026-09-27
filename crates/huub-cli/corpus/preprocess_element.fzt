@@ -1,0 +1,14 @@
+var 1..3: idx;
+var 4..6: v;
+var 0..9: x;
+var 2..7: y;
+var 0..9: z;
+constraint array_int_element(idx, [4, 5, 6], v) :: trace_id(4);
+constraint int_lin_le([1, 1], [v, y], 12) :: trace_id(5);
+psi idx := idx;
+psi v := v;
+psi w := y;
+psi x := x;
+psi y := y;
+psi z := z;
+solve satisfy;

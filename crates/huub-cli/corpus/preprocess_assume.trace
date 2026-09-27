@@ -1,0 +1,8 @@
+trace 0.1
+unify c := a by lin-affine hint #1
+del #1 by lin-valid
+unify a := [x <= 1] by lin-lit hint #3
+del #3 by lin-valid
+rewrite #2 => #4 by preserve
+  constraint huub_assume([[x <= 1]]) :: trace_id(4);
+end 5

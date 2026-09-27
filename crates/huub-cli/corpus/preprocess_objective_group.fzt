@@ -1,0 +1,5 @@
+var 2..4: o;
+psi o := o;
+psi p := o;
+psi q := o;
+solve maximize o;

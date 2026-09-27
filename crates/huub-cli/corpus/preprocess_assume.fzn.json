@@ -1,0 +1,55 @@
+{
+  "variables": {
+    "a": {
+      "type": "bool"
+    },
+    "c": {
+      "type": "bool"
+    },
+    "x": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          3
+        ]
+      ]
+    }
+  },
+  "arrays": {},
+  "constraints": [
+    {
+      "id": "bool_eq",
+      "args": [
+        "a",
+        "c"
+      ]
+    },
+    {
+      "id": "huub_assume",
+      "args": [
+        [
+          "c",
+          true
+        ]
+      ]
+    },
+    {
+      "id": "int_le_reif",
+      "args": [
+        "x",
+        1,
+        "a"
+      ]
+    }
+  ],
+  "output": [
+    "a",
+    "c",
+    "x"
+  ],
+  "solve": {
+    "method": "satisfy"
+  },
+  "version": "1.0"
+}

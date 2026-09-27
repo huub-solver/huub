@@ -1,0 +1,20 @@
+trace 0.1
+unify y := x by lin-affine hint #1
+  dom x <- 3..10
+unify z := x by lin-affine hint #2
+  dom x <- 5..10
+del #1 by lin-valid
+del #2 by lin-valid
+dom w <- {3} by lin-unary hint #3
+unify w := 3 by singleton
+del #3 by lin-valid
+unify b := a by lin-affine hint #4
+del #4 by lin-valid
+rewrite #5 => #7 by lin-norm
+  constraint int_lin_le([1], [x], 7) :: trace_id(7);
+dom x <- 5..7 by lin-unary hint #7
+del #7 by lin-valid
+dom a <- {1} by preserve hint #6
+unify a := true by singleton
+del #6 by preserve
+end 15

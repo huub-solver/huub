@@ -1,0 +1,9 @@
+trace 0.1
+unify o := x + 2 keep #3 by lin-affine hint #1
+  dom x <- 0..5
+del #1 by lin-valid
+rewrite #2 => #4 by lin-norm
+  constraint int_lin_le([1], [x], 4) :: trace_id(4);
+dom x <- 0..4 by lin-unary hint #4
+del #4 by lin-valid
+end 5
