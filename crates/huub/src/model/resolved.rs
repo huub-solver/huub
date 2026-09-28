@@ -10,6 +10,7 @@ use crate::{
 		decision::integer::Domain,
 		view::{boolean::BoolView, integer::IntView},
 	},
+	views::LinearBoolView,
 };
 
 /// Wrapper for model values whose aliases have been resolved against a model.
@@ -105,12 +106,16 @@ impl View<IntVal> {
 				},
 				Bool(lin) => {
 					let var = lin.var.resolve_alias(model).into_inner();
+					offset += scale * lin.offset;
+					scale *= lin.scale.get();
 					if let BoolView::Const(b) = var.0 {
-						return Resolved(View(Const(
-							lin.transform_val(b as IntVal) * scale + offset,
-						)));
+						return Resolved(View(Const(b as IntVal * scale + offset)));
 					}
-					return Resolved(View(Bool(lin * NonZero::new(scale).unwrap() + offset)));
+					return Resolved(View(Bool(LinearBoolView::new(
+						NonZero::new(scale).unwrap(),
+						offset,
+						var,
+					))));
 				}
 			}
 		}

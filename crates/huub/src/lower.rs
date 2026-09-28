@@ -1233,8 +1233,8 @@ impl LoweringMapBuilder {
 						};
 						let card = dom.card();
 						let order_enc = if def.eager_order
-							|| def.eager_direct || card
-							.is_some_and(|c| c <= self.int_eager_limit)
+							|| def.eager_direct
+							|| card.is_some_and(|c| c <= self.int_eager_limit)
 						{
 							LiteralStrategy::Eager
 						} else {

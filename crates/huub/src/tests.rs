@@ -189,6 +189,38 @@ fn test_require_bool_view_over_aliased_int_decision() {
 
 #[traced_test]
 #[test]
+fn test_unify_int_alias_to_aliased_bool() {
+	use crate::{
+		actions::{BoolSimplificationActions, IntSimplificationActions},
+		model::expressions::linear::IntLinearExp,
+	};
+
+	let mut prb = Model::default();
+	let y = prb.new_int_decision(1..=3);
+	// Both Boolean decisions become aliases for a view on `y`.
+	let b = prb.new_bool_decision();
+	b.unify(&mut prb, y.eq(2)).unwrap();
+	let c = prb.new_bool_decision();
+	c.unify(&mut prb, y.eq(3)).unwrap();
+
+	let terms = (0..6).map(|_| prb.new_int_decision(0..=1)).collect_vec();
+	let sum = terms.iter().fold(IntLinearExp::from(0), |acc, &t| acc + t);
+	prb.linear(sum).eq(3).post().unwrap();
+
+	// Only alias the terms now, so the constraint has already subscribed to
+	// the integer decisions that are being replaced.
+	for (i, t) in terms.iter().enumerate() {
+		t.unify(&mut prb, if i < 3 { b } else { c }).unwrap();
+	}
+	// Fixing `y` fixes every term of the linear constraint.
+	prb.linear(y).eq(2).post().unwrap();
+
+	let (mut slv, _): (Solver, _) = prb.lower().to_solver().unwrap();
+	assert_eq!(slv.solve().satisfy(), Status::Satisfied);
+}
+
+#[traced_test]
+#[test]
 fn test_unify_int_impossible() {
 	let mut prb = Model::default();
 	let a = prb.new_int_decision(1..=5);
