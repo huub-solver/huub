@@ -142,9 +142,8 @@ impl ElementConstraint for bool {
 			}
 		}
 		if let Some(s) = start {
-			ranges.push(s..=array.len() as IntVal);
+			ranges.push(s..=array.len() as IntVal - 1);
 		}
-		assert_ne!(ranges.len(), 0, "unexpected empty range list");
 
 		prb.post_constraint(Self::Constraint {
 			var: index,

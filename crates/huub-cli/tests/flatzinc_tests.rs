@@ -14,6 +14,8 @@ mod tests {
 	assert_all_solutions!(circuit_global);
 	assert_all_solutions!(cumulative_overlap);
 	assert_all_solutions!(diffn_k_3d_regression);
+	assert_all_solutions!(github_416);
+	assert_all_solutions!(github_420);
 	assert_all_solutions!(sudoku_p0);
 	assert_all_solutions!(unification);
 	assert_all_solutions!(unify_element_1);

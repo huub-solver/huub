@@ -262,6 +262,9 @@ impl Model {
 		#[builder(getter(name = index_internal, vis = ""), into)] index: View<IntVal>,
 		result: <E as ElementConstraint>::Result,
 	) -> Result<(), Nogood<View<bool>>> {
+		// Restrict the index to the array bounds, which not every
+		// implementation (e.g. `IntSetContainsReif`) enforces itself.
+		index.restrict_domain(self, &(0..=array.len() as IntVal - 1).into(), NO_REASON)?;
 		<E as ElementConstraint>::element_constraint(self, array, index, result)
 	}
 
