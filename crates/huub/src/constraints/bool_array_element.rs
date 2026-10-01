@@ -50,9 +50,16 @@ where
 		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
 		Self::propagate(self, ctx)?;
-		// Unify if the index is already fixed
-		if let Some(i) = self.index.val(ctx) {
-			self.array[i as usize].unify(ctx, self.result)?;
+		// Unify if every possible index selects the same element.
+		let first = self.index.min(ctx) as usize;
+		if self
+			.index
+			.domain(ctx)
+			.iter()
+			.flatten()
+			.all(|i| self.array[i as usize] == self.array[first])
+		{
+			self.array[first].unify(ctx, self.result)?;
 			return Ok(SimplificationStatus::Subsumed);
 		}
 		Ok(SimplificationStatus::NoFixpoint)
@@ -92,7 +99,7 @@ where
 		for &b in &self.array {
 			b.enqueue_when_fixed(ctx);
 		}
-		self.index.enqueue_when(ctx, IntPropCond::Fixed);
+		self.index.enqueue_when(ctx, IntPropCond::Domain);
 		self.result.enqueue_when_fixed(ctx);
 	}
 

@@ -1,0 +1,12 @@
+{
+  "variables": {
+    "v" : { "type" : "int", "domain" : [[0, 9]] }
+  },
+  "arrays": {},
+  "constraints": [
+    { "id" : "array_int_element", "args" : [5, [1, 2, 3], "v"]}
+  ],
+  "output": ["v"],
+  "solve": { "method" : "satisfy" },
+  "version": "1.0"
+}

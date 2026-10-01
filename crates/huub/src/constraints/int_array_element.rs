@@ -146,8 +146,17 @@ where
 
 		self.propagate(ctx)?;
 
-		if let Some(i) = self.index.val(ctx) {
-			self.vars[i as usize]
+		// Unify if every possible index selects the same element (e.g. if the
+		// index is fixed).
+		let first = self.index.min(ctx) as usize;
+		if self
+			.index
+			.domain(ctx)
+			.iter()
+			.flatten()
+			.all(|i| self.vars[i as usize] == self.vars[first])
+		{
+			self.vars[first]
 				.clone()
 				.into()
 				.unify(ctx, self.result.clone())?;

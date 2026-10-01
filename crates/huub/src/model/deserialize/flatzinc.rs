@@ -1,14 +1,12 @@
 //! Module for the creation of a [`Model`] from a [`FlatZinc`] instance.
 
 use std::{
-	cell::RefCell,
 	collections::hash_map::Entry,
 	error::Error,
 	fmt::{self, Debug, Display},
 	hash::Hash,
 	num::NonZero,
 	ops::{Not, RangeInclusive},
-	rc::Rc,
 	sync::Arc,
 };
 
@@ -18,7 +16,6 @@ use flatzinc_serde::{
 };
 use itertools::Itertools;
 use pindakaas::propositional_logic::Formula;
-use rangelist::IntervalIterator;
 use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::warn;
 
@@ -353,8 +350,6 @@ pub struct FlatZincStatistics {
 	/// - Boolean linear views (i.e., scaled and offset views of Boolean
 	///   variables, able to represent any integer value with two values)
 	pub extracted_views: u32,
-	/// Number of decisions removed through unification
-	pub unified_decisions: u32,
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -668,7 +663,6 @@ impl HuubFlatZinc for FlatZinc<FznIdent> {
 	fn lower(&self) -> Lowerer<Result<FlatZincLowerData, FlatZincError>> {
 		let deserialize_model = |fzn: &FlatZinc<FznIdent>| {
 			let mut builder = FznModelBuilder::new(fzn);
-			builder.unify_variables()?;
 			builder.extract_views()?;
 			builder.post_constraints()?;
 			builder.ensure_output()?;
@@ -1846,6 +1840,14 @@ impl<'a> FznModelBuilder<'a> {
 						}
 					}
 				}
+				ConstraintIdent::BoolEq => {
+					let [a, b] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let a = self.arg_bool(a)?;
+					let b = self.arg_bool(b)?;
+					a.unify(&mut self.prb, b)?;
+				}
 				ConstraintIdent::BoolEqReif => {
 					let [a, b, r] = c.args.as_slice() else {
 						return num_args_err(3);
@@ -2256,6 +2258,14 @@ impl<'a> FznModelBuilder<'a> {
 					let res = self.arg_int(res)?;
 					self.prb.div(num, denom).result(res).post()?;
 				}
+				ConstraintIdent::IntEq => {
+					let [a, b] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let a = self.arg_int(a)?;
+					let b = self.arg_int(b)?;
+					a.unify(&mut self.prb, b)?;
+				}
 				ConstraintIdent::IntLe | ConstraintIdent::IntNe => {
 					let [a, b] = c.args.as_slice() else {
 						return num_args_err(2);
@@ -2428,7 +2438,6 @@ impl<'a> FznModelBuilder<'a> {
 
 					self.prb.contains(s).member(x).result(r).post()?;
 				}
-				ConstraintIdent::IntEq | ConstraintIdent::BoolEq => unreachable!(),
 			}
 			for (i, used) in ann_used.iter().enumerate() {
 				if !used {
@@ -2442,221 +2451,6 @@ impl<'a> FznModelBuilder<'a> {
 			}
 		}
 
-		Ok(())
-	}
-
-	/// Unify variables in the [`Model`] that are know to be equivalent.
-	///
-	/// This can happen because of `bool_eq` and `int_eq` constraints in the
-	/// [`FlatZinc`] instance, or because of the `rhs` property of a variable.
-	pub(crate) fn unify_variables(&mut self) -> Result<(), FlatZincError> {
-		let mut unify_map =
-			FxHashMap::<ArcKey<Variable<FznIdent>>, Rc<RefCell<Vec<Literal<FznIdent>>>>>::default();
-		let unify_map_find =
-			|map: &FxHashMap<ArcKey<Variable<FznIdent>>, Rc<RefCell<Vec<Literal<FznIdent>>>>>,
-			 a: &Literal<FznIdent>| {
-				if let Literal::Variable(x) = a {
-					map.get(&x.cloned_key()).map(Rc::clone)
-				} else {
-					None
-				}
-			};
-
-		let record_unify = |map: &mut FxHashMap<
-			ArcKey<Variable<FznIdent>>,
-			Rc<RefCell<Vec<Literal<FznIdent>>>>,
-		>,
-		                    a: &Literal<FznIdent>,
-		                    b: &Literal<FznIdent>| {
-			let a_set = unify_map_find(map, a);
-			let b_set = unify_map_find(map, b);
-			match (a_set, b_set) {
-				(Some(a_set), Some(b_set)) => {
-					if Rc::ptr_eq(&a_set, &b_set) {
-						return;
-					}
-					let mut members = (*a_set).borrow_mut();
-					members.extend(b_set.take());
-					for b in members.iter() {
-						if let Literal::Variable(b) = b {
-							map.insert(b.cloned_key(), Rc::clone(&a_set));
-						}
-					}
-				}
-				(Some(a_set), None) => {
-					let mut members = (*a_set).borrow_mut();
-					members.push(b.clone());
-					if let Literal::Variable(b) = b {
-						map.insert(b.cloned_key(), Rc::clone(&a_set));
-					}
-				}
-				(None, Some(b_set)) => {
-					let mut members = (*b_set).borrow_mut();
-					members.push(a.clone());
-					if let Literal::Variable(a) = a {
-						map.insert(a.cloned_key(), Rc::clone(&b_set));
-					}
-				}
-				(None, None) => {
-					let n_set = Rc::new(RefCell::new(vec![a.clone(), b.clone()]));
-					if let Literal::Variable(a) = a {
-						map.insert(a.cloned_key(), Rc::clone(&n_set));
-					}
-					if let Literal::Variable(b) = b {
-						map.insert(b.cloned_key(), n_set);
-					}
-				}
-			};
-		};
-
-		// Unify variables based on constraints
-		for (i, c) in self.fzn.constraints.iter().enumerate() {
-			if self.processed[i] {
-				continue;
-			}
-			let FznIdent::Known(KnownIdent::Constraint(ident)) = c.id else {
-				continue;
-			};
-			let mark_processed = |me: &mut Self| me.processed[i] = true;
-			match ident {
-				ConstraintIdent::BoolEq => {
-					if let [Argument::Literal(a), Argument::Literal(b)] = c.args.as_slice() {
-						record_unify(&mut unify_map, a, b);
-						mark_processed(self);
-					}
-				}
-				ConstraintIdent::IntEq => {
-					if let [Argument::Literal(a), Argument::Literal(b)] = c.args.as_slice() {
-						record_unify(&mut unify_map, a, b);
-						mark_processed(self);
-					}
-				}
-				ConstraintIdent::ArrayBoolElement
-				| ConstraintIdent::ArrayIntElement
-				| ConstraintIdent::ArrayVarBoolElement
-				| ConstraintIdent::ArrayVarIntElement => {
-					if let [idx, arr, Argument::Literal(b)] = c.args.as_slice() {
-						let arr = self.arg_array(arr)?;
-						// unify if the index is constants
-						if let Argument::Literal(Literal::Int(idx)) = idx {
-							let a = &arr[(idx - 1) as usize];
-							record_unify(&mut unify_map, a, b);
-							mark_processed(self);
-						}
-						// unify if all values in arr are equal
-						if !arr.is_empty() && arr.iter().all_equal() {
-							record_unify(&mut unify_map, &arr[0], b);
-							mark_processed(self);
-						}
-					}
-				}
-				_ => {}
-			}
-		}
-
-		#[expect(clippy::iter_over_hash_type, reason = "FxHashMap::iter is stable")]
-		for (k, li) in unify_map.iter() {
-			let li = li.borrow();
-			if self.map.contains_key(k) {
-				continue;
-			}
-			let is_bool = li.first().is_some_and(|l| match l {
-				Literal::Variable(var) => var.ty == Type::Bool,
-				Literal::Bool(_) => true,
-				_ => false,
-			});
-			// Determine the domain of the list of literals
-			let domain: Option<Literal<()>> = if is_bool {
-				let mut domain = None;
-				for lit in li.iter() {
-					match lit {
-						Literal::Bool(b) => {
-							if domain == Some(!b) {
-								return Err(self.prb.declare_conflict(NO_REASON).into());
-							} else {
-								domain = Some(*b);
-							}
-						}
-						Literal::Variable(_) => {}
-						_ => unreachable!(),
-					};
-				}
-				domain.map(Literal::Bool)
-			} else {
-				let mut domain = None::<IntSet>;
-				for lit in li.iter() {
-					match lit {
-						Literal::Int(i) => {
-							let rl = (*i..=*i).into();
-							if let Some(dom) = domain {
-								domain = Some(dom.intersect(&rl));
-							} else {
-								domain = Some(rl);
-							}
-						}
-						Literal::Variable(var) => {
-							if let Type::Int(Some(d)) = &var.ty {
-								if let Some(dom) = domain {
-									domain = Some(dom.intersect(d));
-								} else {
-									domain = Some(d.clone());
-								}
-							}
-						}
-						_ => unreachable!(),
-					};
-				}
-				domain.map(Literal::IntSet)
-			};
-			// Find any view that is part of a unified group
-			let var = li
-				.iter()
-				.find_map(|lit| -> Option<AnyView> {
-					if let Literal::Variable(v) = lit {
-						self.map.get(&v.cloned_key()).cloned()
-					} else {
-						None
-					}
-				})
-				// Create a new variable if no view is found
-				.unwrap_or_else(|| match domain {
-					Some(Literal::Bool(b)) => View::<bool>::from(b).into(),
-					Some(Literal::IntSet(dom)) => self.prb.new_int_decision(dom).into(),
-					Some(_) => unreachable!(),
-					None => {
-						if is_bool {
-							self.prb.new_bool_decision().into()
-						} else {
-							let var = li
-								.iter()
-								.find_map(|lit| {
-									if let Literal::Variable(var) = lit {
-										Some(var)
-									} else {
-										None
-									}
-								})
-								.unwrap();
-							warn!(
-								target: "flatzinc",
-								variable = %var.name,
-								min = FULL_INT_DOMAIN.start(),
-								max = FULL_INT_DOMAIN.end(),
-								"assume full integer domain for unbounded decision variable"
-							);
-							self.prb.new_int_decision(FULL_INT_DOMAIN).into()
-						}
-					}
-				});
-
-			// Map (or equate) all names in the group to the new variable
-			for lit in li.iter() {
-				if let Literal::Variable(v) = lit {
-					let prev = self.map.insert(v.cloned_key(), var.clone());
-					debug_assert_eq!(prev, None);
-				}
-			}
-		}
 		Ok(())
 	}
 }

@@ -158,7 +158,6 @@ impl<'a> Cli<'a> {
 					("boolDecisions", &stats.bool_decisions),
 					("intDecisions", &stats.int_decisions),
 					("propagators", &stats.propagators),
-					("unifiedDecisions", &meta.stats.unified_decisions),
 					("extractedViews", &meta.stats.extracted_views),
 					("initTime", &start.elapsed().as_secs_f64()),
 				],

@@ -14,7 +14,9 @@ mod tests {
 	assert_all_solutions!(circuit_global);
 	assert_all_solutions!(cumulative_overlap);
 	assert_all_solutions!(diffn_k_3d_regression);
+	assert_all_solutions!(github_415);
 	assert_all_solutions!(github_416);
+	assert_all_solutions!(github_419);
 	assert_all_solutions!(github_420);
 	assert_all_solutions!(sudoku_p0);
 	assert_all_solutions!(unification);
@@ -74,6 +76,8 @@ mod tests {
 	assert_search_order!(int_most_constrained_1);
 	assert_search_order!(int_occurrence_1);
 
+	assert_unsat!(github_417);
+	assert_unsat!(github_418);
 	assert_unsat!(int_lin_eq_prop);
 
 	// ../benches/fzn_huub_benchmarks
