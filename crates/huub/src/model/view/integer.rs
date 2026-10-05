@@ -22,7 +22,7 @@ use crate::{
 		view::{DefaultView, boolean::BoolView, private},
 	},
 	solver::{IntLitMeaning, Polarity},
-	views::{LinearBoolView, LinearView},
+	views::{LinearBoolView, LinearView, ScaledView},
 };
 
 /// The internal representation of [`IntDecision`].
@@ -112,6 +112,36 @@ impl Resolved<View<IntVal>> {
 				Resolved(lin.var).restrict_domain(ctx, &lin.reverse_intset(values), reason)
 			}
 			IntView::Bool(lin) => lin.restrict_domain(ctx, values, reason),
+		}
+	}
+
+	/// The scale this view applies to its decision. A constant has no decision
+	/// and therefore no scale, so this returns `1`.
+	pub(crate) fn scale(&self) -> NonZero<IntVal> {
+		match self.0.0 {
+			IntView::Const(_) => NonZero::new(1).unwrap(),
+			IntView::Linear(lin) => lin.scale,
+			IntView::Bool(lin) => lin.scale,
+		}
+	}
+
+	/// Split a resolved view into its offset-free form and the offset that was
+	/// removed.
+	pub(crate) fn strip_offset(self) -> (Self, IntVal) {
+		match self.0.0 {
+			IntView::Linear(view) => (
+				Self(View(IntView::Linear(LinearView::new(
+					view.scale, 0, view.var,
+				)))),
+				view.offset,
+			),
+			IntView::Bool(view) => (
+				Self(View(IntView::Bool(LinearBoolView::new(
+					view.scale, 0, view.var,
+				)))),
+				view.offset,
+			),
+			IntView::Const(x) => (Self(View(IntView::Const(x))), 0),
 		}
 	}
 
@@ -672,6 +702,12 @@ impl AddAssign<IntVal> for View<IntVal> {
 impl From<Decision<IntVal>> for View<IntVal> {
 	fn from(decision: Decision<IntVal>) -> Self {
 		View(IntView::Linear(decision.into()))
+	}
+}
+
+impl From<ScaledView<NonZero<IntVal>, Decision<IntVal>>> for View<IntVal> {
+	fn from(view: ScaledView<NonZero<IntVal>, Decision<IntVal>>) -> Self {
+		View(IntView::Linear(LinearView::new(view.scale, 0, view.var)))
 	}
 }
 
