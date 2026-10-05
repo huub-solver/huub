@@ -446,7 +446,9 @@ impl Model {
 				};
 				let enqueue = if let Some(cond) = condition {
 					let triggered = match cond {
-						IntLitMeaning::Eq(_) | IntLitMeaning::NotEq(_) => iv.val(self).is_some(),
+						IntLitMeaning::Eq(v) | IntLitMeaning::NotEq(v) => {
+							iv.val(self).is_some() || !iv.in_domain(self, v)
+						}
 						IntLitMeaning::GreaterEq(v) | IntLitMeaning::Less(v) => {
 							let (min, max) = iv.bounds(self);
 							v <= min || v > max
@@ -991,6 +993,41 @@ mod tests {
 			.expect("tighten_min failed");
 		let (_, _): (Solver, _) = prb.lower().to_solver().expect("to_solver failed");
 		assert_eq!(prb.trailed(bool_check), 1);
+	}
+
+	/// An advisor on an (in)equality literal is called exactly when the literal
+	/// becomes fixed: when the decision is fixed, or when the value leaves the
+	/// domain through a bound change or a removed value.
+	#[test]
+	#[traced_test]
+	fn test_model_advisor_bool_eq_call() {
+		type Change = fn(&View<IntVal>, &mut Model);
+		let changes: [(Change, IntVal); 5] = [
+			(|i, prb| i.fix(prb, 2, NO_REASON).unwrap(), 1),
+			(|i, prb| i.tighten_max(prb, 1, NO_REASON).unwrap(), 1),
+			(|i, prb| i.remove_val(prb, 2, NO_REASON).unwrap(), 1),
+			(|i, prb| i.tighten_max(prb, 2, NO_REASON).unwrap(), 0),
+			(|i, prb| i.remove_val(prb, 1, NO_REASON).unwrap(), 0),
+		];
+		let lits: [fn(&View<IntVal>) -> View<bool>; 2] = [|i| i.eq(2), |i| i.ne(2)];
+		for lit in lits {
+			for (change, expected) in changes {
+				let mut prb = Model::default();
+				let i = prb.new_int_decision(0..=3);
+				let bool_check = prb.new_trailed(0);
+				let int_check = prb.new_trailed(0);
+				prb.post_constraint(TestModel {
+					b: lit(&i),
+					i,
+					bool_check,
+					int_check,
+				})
+				.unwrap();
+				change(&i, &mut prb);
+				prb.propagate().expect("propagate failed");
+				assert_eq!(prb.trailed(bool_check), expected);
+			}
+		}
 	}
 
 	#[test]
