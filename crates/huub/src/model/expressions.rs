@@ -13,7 +13,7 @@ use std::{cmp, marker::PhantomData, num::NonZero};
 
 use bon::bon;
 use itertools::{Itertools, MinMaxResult, iproduct};
-pub use pindakaas::propositional_logic::Formula as Proposition;
+pub use pindakaas::constraint::propositional_logic::Formula as Proposition;
 use rangelist::RangeList;
 
 pub use crate::model::expressions::{

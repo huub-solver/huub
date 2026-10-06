@@ -2,8 +2,6 @@
 
 use std::{fmt::Debug, hash::Hash};
 
-use rangelist::IntervalIterator;
-
 use crate::{
 	DeepClone, IntSet, IntVal,
 	actions::{PropagationActions, PropagationContext, ReasoningContext},

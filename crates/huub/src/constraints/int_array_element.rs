@@ -5,7 +5,6 @@
 use std::iter::once;
 
 use itertools::Itertools;
-use rangelist::IntervalIterator;
 use rustc_hash::FxHashMap;
 
 use crate::{

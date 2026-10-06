@@ -7,7 +7,7 @@ use std::{
 	ops::{Add, Mul, Not, Sub},
 };
 
-use pindakaas::propositional_logic::Formula;
+use pindakaas::constraint::propositional_logic::Formula;
 
 use crate::{
 	DeepClone, IntVal,

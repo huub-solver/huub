@@ -2,7 +2,7 @@
 //! that an integer decision variable is assigned to a member of a given set
 //! if-and-only-if a given Boolean decision variable is assigned to `true`.
 
-use pindakaas::propositional_logic::Formula;
+use pindakaas::constraint::propositional_logic::Formula;
 use rangelist::IntervalIterator;
 
 use crate::{
@@ -88,7 +88,7 @@ where
 		}
 		// Otherwise, we check whether we can rewrite the constraint into a
 		// simpler form.
-		if self.set.intervals().len() == 1 {
+		if self.set.iter().len() == 1 {
 			let lb = self.set.min().unwrap();
 			let ub = self.set.max().unwrap();
 			if lb == ub {

@@ -6,7 +6,7 @@ use std::{
 
 use expect_test::{Expect, expect};
 use itertools::Itertools;
-use pindakaas::propositional_logic::Formula;
+use pindakaas::constraint::propositional_logic::Formula;
 use tracing_test::traced_test;
 
 use crate::{

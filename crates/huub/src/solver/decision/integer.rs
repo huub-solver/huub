@@ -2,13 +2,13 @@
 
 use std::{
 	collections::hash_map::{self, VacantEntry},
-	iter::{Map, Peekable},
+	iter::Peekable,
 	num::NonZero,
-	ops::{Index, IndexMut, Neg, RangeBounds, RangeInclusive},
+	ops::{Index, IndexMut, Neg, RangeBounds},
 };
 
 use pindakaas::{Lit as RawLit, Var as RawVar, VarRange, solver::propagation::ExternalPropagation};
-use rangelist::{IntervalIterator, RangeList};
+use rangelist::{Intervals, RangeList};
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -208,12 +208,7 @@ pub(crate) enum OrderStorage {
 
 /// Type alias for an iterator that yields the ranges of a [`RangeList`], which
 /// is used to represent the domains of an integer variable.
-type RangeIter<'a> = Peekable<
-	Map<
-		<&'a RangeList<IntVal> as IntoIterator>::IntoIter,
-		fn(RangeInclusive<&'a IntVal>) -> RangeInclusive<IntVal>,
-	>,
->;
+type RangeIter<'a> = Peekable<Intervals<'a, IntVal>>;
 
 /// A direction to search in.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

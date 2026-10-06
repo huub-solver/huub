@@ -3,7 +3,7 @@
 
 use pindakaas::{
 	Lit as RawLit,
-	propositional_logic::{Formula, TseitinEncoder},
+	constraint::propositional_logic::{Formula, TseitinEncoder},
 };
 
 use crate::{
@@ -198,7 +198,7 @@ where
 
 #[cfg(test)]
 mod tests {
-	use pindakaas::propositional_logic::Formula;
+	use pindakaas::constraint::propositional_logic::Formula;
 
 	use crate::{
 		actions::BoolInspectionActions,

@@ -410,9 +410,9 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "flatzinc-serde"
-version = "0.5.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b8a8cb0474b334bc21842e19d0c1d5380c76728a736a813b73259ad981d3e03"
+checksum = "57382462cfec51299dd6b1bbbf675f3d5b68954d9da7e96c5504cf6fd17790b7"
 dependencies = [
  "rangelist",
  "serde",
@@ -670,7 +670,7 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 [[package]]
 name = "pindakaas"
 version = "0.5.1"
-source = "git+https://github.com/pindakaashq/pindakaas?branch=develop#d8071d2766b4ec78646d8dbee1b7b84cad8ea1cc"
+source = "git+https://github.com/pindakaashq/pindakaas?branch=develop#e9a088428d9d138e646f498bec3c0f11961ee9ab"
 dependencies = [
  "itertools 0.15.0",
  "pindakaas-cadical",
@@ -681,7 +681,7 @@ dependencies = [
 [[package]]
 name = "pindakaas-cadical"
 version = "0.4.0"
-source = "git+https://github.com/pindakaashq/pindakaas?branch=develop#d8071d2766b4ec78646d8dbee1b7b84cad8ea1cc"
+source = "git+https://github.com/pindakaashq/pindakaas?branch=develop#e9a088428d9d138e646f498bec3c0f11961ee9ab"
 dependencies = [
  "cc",
 ]
@@ -731,9 +731,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rangelist"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f29e404ad93c4ca7067453de0924a82e1144adfdb4afd24fa15aeac91ca8e4c3"
+checksum = "5b9f3dfe3a6b4e61b204dd5997fc24c0ac93430b55899e42cd532a0dedc047e4"
 
 [[package]]
 name = "regex"

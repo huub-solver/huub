@@ -10,8 +10,6 @@ use std::{
 	ops::{Add, AddAssign, Mul, MulAssign, Neg, Not, Sub, SubAssign},
 };
 
-use rangelist::IntervalIterator;
-
 use crate::{
 	DeepClone, IntSet, IntVal,
 	actions::{

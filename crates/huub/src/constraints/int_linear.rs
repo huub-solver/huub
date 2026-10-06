@@ -8,8 +8,10 @@ use std::{any::TypeId, num::NonZero};
 use itertools::{Either, Itertools};
 use pindakaas::{
 	Lit as RawLit, Unsatisfiable,
-	bool_linear::{BoolLinAggregator, BoolLinExp, BoolLinVariant, BoolLinear},
-	propositional_logic::Formula,
+	constraint::{
+		linear::{Comparator, LimitComp, LinAggregator, LinExp, LinVariant, Linear},
+		propositional_logic::Formula,
+	},
 };
 
 use crate::{
@@ -233,7 +235,7 @@ impl<OF: OverflowMode> IntLinear<OF> {
 	/// This only succeeds if the linear constraint is not implied, all terms
 	/// are [`BoolLinView`]s, and the comparator is not
 	/// [`LinOperator::NotEqual`].
-	fn try_bool_lin(&self, terms: &[solver::View<IntVal>]) -> Option<BoolLinear> {
+	fn try_bool_lin(&self, terms: &[solver::View<IntVal>]) -> Option<Linear> {
 		if self.reif.is_some() || self.comparator == LinComparator::NotEqual {
 			return None;
 		}
@@ -253,17 +255,15 @@ impl<OF: OverflowMode> IntLinear<OF> {
 			.ok()?;
 		let rhs = (self.rhs - offset).try_into().ok()?;
 
-		let bool_lin = BoolLinExp::from_terms(&terms);
-		let bool_lin = BoolLinear::new(
-			bool_lin,
+		Some(Linear::new(
+			LinExp::from_terms(&terms),
 			match self.comparator {
-				LinComparator::Equal => pindakaas::bool_linear::Comparator::Equal,
-				LinComparator::LessEq => pindakaas::bool_linear::Comparator::LessEq,
+				LinComparator::Equal => Comparator::Equal,
+				LinComparator::LessEq => Comparator::LessEq,
 				LinComparator::NotEqual => unreachable!(),
 			},
 			rhs,
-		);
-		Some(bool_lin)
+		))
 	}
 }
 
@@ -597,32 +597,56 @@ where
 		// Detect Pseudo-Boolean constraints, and simplify them if possible.
 		let (terms, operator, rhs) = if let Some(bool_lin) = self.try_bool_lin(&terms) {
 			let map_cmp = |cmp| match cmp {
-				pindakaas::bool_linear::Comparator::Equal => LinComparator::Equal,
-				pindakaas::bool_linear::Comparator::LessEq => LinComparator::LessEq,
-				pindakaas::bool_linear::Comparator::GreaterEq => unreachable!(),
+				Comparator::Equal => LinComparator::Equal,
+				Comparator::LessEq => LinComparator::LessEq,
+				Comparator::GreaterEq => unreachable!(),
 			};
+			let unit = |lit| (lit, 1);
 
-			let (op, lin) = match BoolLinAggregator::default().aggregate(slv, &bool_lin) {
+			let (op, terms, rhs) = match LinAggregator::default().aggregate(slv, &bool_lin) {
 				Err(Unsatisfiable) => return Err(slv.error.take().unwrap()),
-				Ok(BoolLinVariant::Cardinality(card)) => (map_cmp(card.comparator()), card.into()),
-				Ok(BoolLinVariant::CardinalityOne(card))
-					if card.comparator() == pindakaas::bool_linear::Comparator::Equal =>
-				{
-					slv.add_clause(card.iter_lits().map(Decision))?;
-					(LinComparator::LessEq, card.into())
+				Ok(LinVariant::Cardinality(card)) => (
+					map_cmp(card.comparator()),
+					card.iter_lits().map(unit).collect_vec(),
+					card.rhs(),
+				),
+				Ok(LinVariant::CardinalityOne(card)) => {
+					if card.comparator() == Comparator::Equal {
+						slv.add_clause(card.iter_lits().map(Decision))?;
+					}
+					(
+						LinComparator::LessEq,
+						card.iter_lits().map(unit).collect_vec(),
+						1,
+					)
 				}
-				Ok(BoolLinVariant::CardinalityOne(card)) => (LinComparator::LessEq, card.into()),
-				Ok(BoolLinVariant::Linear(lin)) => (map_cmp(lin.comparator()), lin),
-				Ok(BoolLinVariant::Trivial) => return Ok(()),
+				Ok(LinVariant::BoolLinear(lin)) => (
+					match lin.cmp() {
+						LimitComp::Equal => LinComparator::Equal,
+						LimitComp::LessEq => LinComparator::LessEq,
+					},
+					lin.terms()
+						.iter()
+						.map(|&(lit, coeff)| (lit, coeff.into()))
+						.collect_vec(),
+					lin.k(),
+				),
+				Ok(LinVariant::Trivial) => return Ok(()),
+				// These variants require integer terms or a non-default
+				// aggregator configuration.
+				Ok(LinVariant::Count(_) | LinVariant::Linear(_)) => {
+					unreachable!("aggregated Boolean linear constraint contains integer terms")
+				}
 			};
 			(
-				lin.iter_terms()
+				terms
+					.into_iter()
 					.map(|(lit, coeff)| {
 						LinearBoolView::new(NonZero::new(coeff).unwrap(), 0, Decision(lit)).into()
 					})
 					.collect_vec(),
 				op,
-				lin.rhs().into(),
+				rhs.into(),
 			)
 		} else {
 			(terms, self.comparator, self.rhs)

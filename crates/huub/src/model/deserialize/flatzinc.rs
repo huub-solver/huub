@@ -11,11 +11,12 @@ use std::{
 };
 
 use flatzinc_serde::{
-	Annotation, AnnotationArgument, AnnotationCall, AnnotationLiteral, Argument, FlatZinc, Literal,
-	NamedRef, Type, Variable, helpers::ArcKey,
+	Annotation, AnnotationCall, AnnotationLiteral, Argument, FlatZinc, Literal, NamedRef, Type,
+	Variable,
+	helpers::{ArcKey, Immutable},
 };
 use itertools::Itertools;
-use pindakaas::propositional_logic::Formula;
+use pindakaas::constraint::propositional_logic::Formula;
 use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::warn;
 
@@ -42,6 +43,11 @@ use crate::{
 /// Domain assumed for integer decision variables that do not have a domain
 /// definition.
 const FULL_INT_DOMAIN: RangeInclusive<IntVal> = IntVal::MIN..=IntVal::MAX;
+
+/// Type alias for an argument of an [`AnnotationCall`] in a [`FlatZinc`]
+/// instance.
+type AnnotationArgument<Identifier> =
+	Argument<Identifier, Immutable, AnnotationLiteral<Identifier>>;
 
 /// Annotation identifiers that are known to the FlatZinc deserializer.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -750,42 +756,23 @@ impl<'a> FznModelBuilder<'a> {
 		&self,
 		arg: &AnnotationArgument<FznIdent>,
 	) -> Result<Vec<Literal<FznIdent>>, FlatZincError> {
-		let arr = match arg {
-			AnnotationArgument::Array(x) => x.clone(),
-			AnnotationArgument::ArrayNamed(x) => x
-				.upgrade()
-				.unwrap()
-				.contents
+		match arg {
+			AnnotationArgument::Array(arr) => arr
 				.iter()
-				.cloned()
-				.map_into()
-				.collect(),
-			_ => {
-				return Err(FlatZincError::InvalidArgumentType {
-					expected: "array of literals",
-					found: format!("{arg:?}"),
-				});
-			}
-		};
-		arr.into_iter()
-			.map(|l| {
-				Ok(match l {
-					AnnotationLiteral::Int(x) => Literal::Int(x),
-					AnnotationLiteral::Float(x) => Literal::Float(x),
-					AnnotationLiteral::Variable(x) => Literal::Variable(x.upgrade().unwrap()),
-					AnnotationLiteral::Bool(x) => Literal::Bool(x),
-					AnnotationLiteral::IntSet(x) => Literal::IntSet(x),
-					AnnotationLiteral::FloatSet(x) => Literal::FloatSet(x),
-					AnnotationLiteral::String(x) => Literal::String(x),
-					AnnotationLiteral::Annotation(x) => {
-						return Err(FlatZincError::InvalidArgumentType {
-							expected: "literal",
-							found: format!("{x:?}"),
-						});
-					}
+				.map(|l| match l {
+					AnnotationLiteral::Literal(l) => Ok(l.clone()),
+					AnnotationLiteral::Annotation(x) => Err(FlatZincError::InvalidArgumentType {
+						expected: "literal",
+						found: format!("{x:?}"),
+					}),
 				})
-			})
-			.collect()
+				.collect(),
+			AnnotationArgument::ArrayNamed(arr) => Ok(arr.contents.clone()),
+			AnnotationArgument::Literal(_) => Err(FlatZincError::InvalidArgumentType {
+				expected: "array of literals",
+				found: format!("{arg:?}"),
+			}),
+		}
 	}
 
 	/// Extract an [`DecisionSelection`] from an [`AnnotationArgument`] in a
