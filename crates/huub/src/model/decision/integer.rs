@@ -400,8 +400,8 @@ impl Resolved<Decision<IntVal>> {
 		self.restrict_domain(ctx, &target.domain(ctx), NO_REASON)?;
 		// Change variable to point to the target
 		match mem::replace(&mut ctx.0.int_vars[idx].domain, Domain::Alias(target)) {
-			// Restrict the domain of the target variable using the variable domain
-			// being aliased.
+			// Restrict the domain of the target variable using the variable
+			// domain being aliased.
 			Domain::Domain(dom) => target.restrict_domain(ctx, &dom, NO_REASON)?,
 			Domain::Alias(View(IntView::Const(v))) => target.fix(ctx, v, NO_REASON)?,
 			_ => unreachable!(),

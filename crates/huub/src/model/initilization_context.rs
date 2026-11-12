@@ -380,8 +380,8 @@ impl BoolInitActions<ModelInitContext<'_>> for Resolved<View<bool>> {
 		match self.0.0 {
 			BoolView::Decision(lit) => Resolved(lit).enqueue_when_fixed(ctx),
 			BoolView::Const(_) => ctx.semantic_enqueue(),
-			// TODO: These definitions might enqueue when the boolean is not fixed. Use advisors
-			// instead?
+			// TODO: These definitions might enqueue when the boolean is not
+			// fixed. Use advisors instead?
 			BoolView::IntEq(iv, _) | BoolView::IntNotEq(iv, _) => {
 				iv.enqueue_when(ctx, IntPropCond::Domain);
 			}

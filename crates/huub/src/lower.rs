@@ -1288,8 +1288,8 @@ impl LoweringMapBuilder {
 							.maybe_polarity(def.polarity.resolve())
 							.view();
 						match view.0 {
-							// Register solver Boolean decision used to represent a model integer
-							// decision.
+							// Register solver Boolean decision used to
+							// represent a model integer decision.
 							solver::IntView::Bool(lin) if tracing::enabled!(target: "reverse_map", tracing::Level::TRACE) =>
 							{
 								tracing::trace!(

@@ -183,8 +183,9 @@ impl BoolInspectionActions<Model> for Resolved<View<bool>> {
 			// View on a constant, or a Boolean decision that was fixed by
 			// propagation (and therefore aliased to a `Const`).
 			Const(b) => Some(b),
-			// Integer comparison views must look at the underlying integer domain to determine
-			// whether a value has been assigned to the Boolean decision.
+			// Integer comparison views must look at the underlying integer
+			// domain to determine whether a value has been assigned to the
+			// Boolean decision.
 			IntEq(iv, val) | IntNotEq(iv, val) if iv.val(ctx) == Some(val) => {
 				Some(matches!(self.0.0, IntEq(_, _)))
 			}

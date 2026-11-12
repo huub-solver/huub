@@ -1041,7 +1041,8 @@ impl State {
 		let meaning = match meaning {
 			// Eager literal, request meaning from variable itself.
 			None => self.int_vars[iv.idx()].lit_meaning(lit),
-			// Lazy literal, transform negated meanings dealing with gaps in domain when necessary.
+			// Lazy literal, transform negated meanings dealing with gaps in
+			// domain when necessary.
 			Some(IntLitMeaning::Less(i)) if !lit.is_negated() => {
 				let i = self.int_vars[iv.idx()].tighten_less_lit(i);
 				IntLitMeaning::Less(i)

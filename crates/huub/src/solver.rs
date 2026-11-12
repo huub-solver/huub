@@ -670,10 +670,11 @@ where
 					);
 				}
 				// Latest SAT solve was unsatisfiable:
-				// - If no previous solution was found, then the problem doesn't have any feasible
-				//   solutions.
-				// - If a previous solution was found, then the current bound is the best solution
-				//   under the current constraints and assumptions.
+				// - If no previous solution was found, then the problem doesn't
+				//   have any feasible solutions.
+				// - If a previous solution was found, then the current bound is
+				//   the best solution under the current constraints and
+				//   assumptions.
 				SatSolveResult::Unsatisfiable(fail) => {
 					if let Some(on_failure) = on_failure {
 						on_failure(&fail);

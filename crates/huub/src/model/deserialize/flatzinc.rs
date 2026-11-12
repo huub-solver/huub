@@ -2073,11 +2073,12 @@ impl<'a> FznModelBuilder<'a> {
 							AnnotationIdent::CumuOppEdgeFinding,
 						),
 					) {
-						// No annotations found, so we assume the user wants the default
-						// configuration
+						// No annotations found, so we assume the user wants the
+						// default configuration
 						(false, false, false) => (None, None, None),
-						// At least one annotation was found, so we assume missing annotations
-						// disable certain propagation options.
+						// At least one annotation was found, so we assume
+						// missing annotations disable certain propagation
+						// options.
 						(eoc, ef, opp) => (Some(eoc), Some(ef), Some(opp)),
 					};
 					self.prb
@@ -2115,11 +2116,12 @@ impl<'a> FznModelBuilder<'a> {
 						Self::anns_contains(&c.ann, &mut ann_used, AnnotationIdent::DisjNotLast),
 						Self::anns_contains(&c.ann, &mut ann_used, AnnotationIdent::DisjDetectPrec),
 					) {
-						// No annotations found, so we assume the user wants the default
-						// configuration
+						// No annotations found, so we assume the user wants the
+						// default configuration
 						(false, false, false) => (None, None, None),
-						// At least one annotation was found, so we assume missing annotations
-						// disable certain propagation options.
+						// At least one annotation was found, so we assume
+						// missing annotations disable certain propagation
+						// options.
 						(ef, nl, dp) => (Some(ef), Some(nl), Some(dp)),
 					};
 

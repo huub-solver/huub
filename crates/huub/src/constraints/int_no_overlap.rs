@@ -408,12 +408,13 @@ impl<const STRICT: bool, I1, I2> IntNoOverlapSweep<STRICT, I1, I2> {
 				for tup in &mut forbidden_regions {
 					if let Some((f, _)) = tup {
 						match f.coalesce(&forbidden) {
-							// `forbidden` is a subset of an existing region `f`, so we can ignore
-							// it.
+							// `forbidden` is a subset of an existing region
+							// `f`, so we can ignore it.
 							Some(Ordering::Equal) | Some(Ordering::Greater) => {
 								continue 'obj_iter;
 							}
-							// An existing region `f` is a subset of `forbidden`, so we remove `f`.
+							// An existing region `f` is a subset of
+							// `forbidden`, so we remove `f`.
 							Some(Ordering::Less) => {
 								*tup = None;
 							}
