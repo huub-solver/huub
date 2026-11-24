@@ -61,6 +61,8 @@
 )]
 
 pub mod actions;
+#[cfg(doctest)]
+mod book;
 pub mod constraints;
 pub mod helpers;
 pub mod lower;
