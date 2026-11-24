@@ -381,7 +381,7 @@ impl Model {
 			Comparator::NotEqual => (LinComparator::NotEqual, rhs),
 		};
 
-		if IntLinear::can_overflow(self, &terms) {
+		if IntLinear::can_overflow(self, &terms, rhs.into()) {
 			self.post_constraint(IntLinear::<OverflowPossible> {
 				terms,
 				rhs: rhs.into(),

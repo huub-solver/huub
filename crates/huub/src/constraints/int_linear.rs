@@ -268,32 +268,26 @@ impl<OF: OverflowMode> IntLinear<OF> {
 }
 
 impl IntLinear<OverflowPossible> {
-	/// Returns whether the given terms that are summed in integer linear
-	/// expressions can overflow.
+	/// Returns whether the arithmetic of an integer linear constraint over
+	/// `terms` with right-hand side `rhs` can overflow [`IntVal`].
 	///
 	/// Note that the order of the terms matters. If the terms are reordered,
 	/// then the result of this method may change.
-	pub(crate) fn can_overflow<Ctx, IV>(ctx: &Ctx, terms: &[IV]) -> bool
+	pub(crate) fn can_overflow<Ctx, IV>(ctx: &Ctx, terms: &[IV], rhs: DoubleIntVal) -> bool
 	where
 		Ctx: ReasoningContext + ?Sized,
 		IV: IntInspectionActions<Ctx>,
 	{
-		let mut acc_min: IntVal = 0;
-		let mut acc_max: IntVal = 0;
+		let mut neg: DoubleIntVal = 0;
+		let mut pos: DoubleIntVal = 0;
 		for iv in terms {
 			let (lb, ub) = iv.bounds(ctx);
-			if let Some(min) = acc_min.checked_sub(lb) {
-				acc_min = min;
-			} else {
-				return true;
-			}
-			if let Some(max) = acc_max.checked_add(ub) {
-				acc_max = max;
-			} else {
-				return true;
-			}
+			neg += DoubleIntVal::from(lb.min(0));
+			pos += DoubleIntVal::from(ub.max(0));
 		}
-		false
+		[neg, pos, rhs, rhs - pos, rhs - neg]
+			.into_iter()
+			.any(|x| IntVal::try_from(x).is_err())
 	}
 }
 
@@ -772,11 +766,19 @@ impl IntLinearLessEqBounds<OverflowPossible, solver::View<IntVal>> {
 			"`IntLinearLessEqBounds::post` must be given at least one term"
 		);
 
-		solver.add_propagator(Box::new(Self {
-			terms: vars.clone(),
-			max,
-			reification: True,
-		}));
+		if IntLinear::can_overflow(solver, &vars, max) {
+			solver.add_propagator(Box::new(Self {
+				terms: vars,
+				max,
+				reification: True,
+			}));
+		} else {
+			solver.add_propagator(Box::new(IntLinearLessEqBounds::<OverflowImpossible, _> {
+				terms: vars,
+				max: max as IntVal,
+				reification: True,
+			}));
+		}
 	}
 }
 
@@ -921,11 +923,23 @@ impl IntLinearLessEqImpBounds<OverflowPossible, solver::View<IntVal>, Decision<b
 			"`IntLinearLessEqImpBounds::post` must be given at least one term"
 		);
 
-		solver.add_propagator(Box::new(Self {
-			terms: vars.clone(),
-			max,
-			reification,
-		}));
+		if IntLinear::can_overflow(solver, &vars, max) {
+			solver.add_propagator(Box::new(Self {
+				terms: vars,
+				max,
+				reification,
+			}));
+		} else {
+			solver.add_propagator(Box::new(IntLinearLessEqImpBounds::<
+				OverflowImpossible,
+				_,
+				_,
+			> {
+				terms: vars,
+				max: max as IntVal,
+				reification,
+			}));
+		}
 	}
 }
 
@@ -980,7 +994,7 @@ impl IntLinearNotEqImpValue<OverflowPossible, solver::View<IntVal>, Decision<boo
 
 		let num_free = solver.new_trailed(vars.len() + 1);
 
-		if IntLinear::can_overflow(solver, &vars) || IntVal::try_from(violation).is_err() {
+		if IntLinear::can_overflow(solver, &vars, violation) {
 			solver.add_propagator(Box::new(IntLinearNotEqImpValue::<OverflowPossible, _, _> {
 				terms: vars.clone(),
 				violation,
@@ -1036,7 +1050,7 @@ impl IntLinearNotEqValue<OverflowPossible, solver::View<IntVal>> {
 
 		let num_free = solver.new_trailed(vars.len());
 
-		if IntLinear::can_overflow(solver, &vars) || IntVal::try_from(violation).is_err() {
+		if IntLinear::can_overflow(solver, &vars, violation) {
 			solver.add_propagator(Box::new(IntLinearNotEqValue::<OverflowPossible, _> {
 				terms: vars.clone(),
 				violation,
@@ -1183,7 +1197,9 @@ mod tests {
 
 	use crate::{
 		IntVal,
-		constraints::int_linear::{DoubleIntVal, IntLinearLessEqBounds, IntLinearNotEqValue},
+		constraints::int_linear::{
+			DoubleIntVal, IntLinear, IntLinearLessEqBounds, IntLinearNotEqValue,
+		},
 		model::{Model, view::View},
 		solver::{LiteralStrategy, Solver},
 	};
@@ -1191,6 +1207,31 @@ mod tests {
 	#[test]
 	fn double_int_val() {
 		assert_eq!(size_of::<DoubleIntVal>(), 2 * size_of::<IntVal>());
+	}
+
+	#[test]
+	fn test_can_overflow() {
+		let mut prb = Model::default();
+		let small = prb.new_int_decision(0..=10);
+		let neg = prb.new_int_decision(-10..=0);
+		let half = prb.new_int_decision(0..=IntVal::MAX / 2 + 1);
+		let max = DoubleIntVal::from(IntVal::MAX);
+		let min = DoubleIntVal::from(IntVal::MIN);
+
+		assert!(!IntLinear::can_overflow(&prb, &[small, neg], 5));
+		// `rhs - (-10)` is exactly `IntVal::MAX`.
+		assert!(!IntLinear::can_overflow(&prb, &[small, neg], max - 10));
+		// The terms fit, but `rhs - (-10)` does not.
+		assert!(IntLinear::can_overflow(&prb, &[small, neg], max - 5));
+		// `rhs - 10` is exactly `IntVal::MIN`.
+		assert!(!IntLinear::can_overflow(&prb, &[small, neg], min + 10));
+		assert!(IntLinear::can_overflow(&prb, &[small, neg], min + 5));
+		// The right-hand side itself does not fit.
+		assert!(IntLinear::can_overflow(&prb, &[small], max + 1));
+		// The sum of the upper bounds does not fit, in either order.
+		assert!(IntLinear::can_overflow(&prb, &[half, half], 0));
+		assert!(IntLinear::can_overflow(&prb, &[small, half, half], 0));
+		assert!(IntLinear::can_overflow(&prb, &[half, small, half], 0));
 	}
 
 	#[test]

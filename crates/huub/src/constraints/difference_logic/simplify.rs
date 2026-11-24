@@ -791,7 +791,7 @@ impl DifferenceLogicModel {
 					.map(|&(v, k)| v.bounding_mul(ctx, k))
 					.collect::<Result<Vec<_>, _>>()?;
 				let reif = b.map(Reification::ImpliedBy);
-				if IntLinear::can_overflow(ctx, &terms) {
+				if IntLinear::can_overflow(ctx, &terms, rhs.into()) {
 					ctx.post_constraint(IntLinear::<OverflowPossible> {
 						terms,
 						rhs: rhs.into(),
