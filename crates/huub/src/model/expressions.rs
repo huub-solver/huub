@@ -244,12 +244,23 @@ impl Model {
 		#[builder(into, start_fn)] denominator: View<IntVal>,
 		#[builder(into)] result: View<IntVal>,
 	) -> Result<(), Nogood<View<bool>>> {
-		self.post_constraint(IntDivBounds {
-			numerator,
-			denominator,
-			result,
-		})
-		.map(|_| ())
+		if IntDivBounds::can_overflow(self, &numerator, &denominator, &result) {
+			self.post_constraint(IntDivBounds::<OverflowPossible, _, _, _> {
+				numerator,
+				denominator,
+				result,
+				overflow_mode: PhantomData,
+			})
+			.map(|_| ())
+		} else {
+			self.post_constraint(IntDivBounds::<OverflowImpossible, _, _, _> {
+				numerator,
+				denominator,
+				result,
+				overflow_mode: PhantomData,
+			})
+			.map(|_| ())
+		}
 	}
 
 	/// Create a constraint that enforces that a result decision variable takes

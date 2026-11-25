@@ -383,7 +383,9 @@ impl GoalPolarity {
 			self.record_pow(model, pow, input, input_polarity);
 		} else if let Some(pow) = con.downcast_ref::<IntPowBounds<OverflowPossible, V, V, V>>() {
 			self.record_pow(model, pow, input, input_polarity);
-		} else if let Some(div) = con.downcast_ref::<IntDivBounds<V, V, V>>() {
+		} else if let Some(div) = con.downcast_ref::<IntDivBounds<OverflowImpossible, V, V, V>>() {
+			self.record_div(model, div, input, input_polarity);
+		} else if let Some(div) = con.downcast_ref::<IntDivBounds<OverflowPossible, V, V, V>>() {
 			self.record_div(model, div, input, input_polarity);
 		} else if let Some(min) = con.downcast_ref::<IntArrayMinimumBounds<V, V>>() {
 			// The minimum is monotone in every element of the array.
@@ -395,10 +397,10 @@ impl GoalPolarity {
 
 	/// Record the polarity implied by `result = numerator / denominator` for
 	/// the related variables of the visited decision.
-	fn record_div(
+	fn record_div<OM: OverflowMode>(
 		&mut self,
 		model: &mut Model,
-		div: &IntDivBounds<model::View<IntVal>, model::View<IntVal>, model::View<IntVal>>,
+		div: &IntDivBounds<OM, model::View<IntVal>, model::View<IntVal>, model::View<IntVal>>,
 		input: &Resolved<model::Decision<IntVal>>,
 		input_polarity: Polarity,
 	) {
