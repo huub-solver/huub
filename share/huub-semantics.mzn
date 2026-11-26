@@ -6,11 +6,11 @@
 % brute-force tier needs their meaning, e.g. to negate them. This file gives
 % each of them a definition in terms of the MiniZinc standard library. Every
 % `huub_*` spelling that Huub can emit must be defined here; the list of
-% spellings is `spelling::ALL` in `crates/huub/src/model/preprocess.rs`, and a
-% unit test checks that each has a definition. The spellings in which Huub only
-% receives constraints (`huub_array_int_maximum` and `huub_regular`) are
-% defined as well, since they occur in the checker's obligations about the
-% received model.
+% spellings is `spelling::ALL` in
+% `crates/huub/src/model/preprocess/spelling.rs`, and a unit test checks that
+% each has a definition. The spellings in which Huub only receives constraints
+% (`huub_array_int_maximum` and `huub_regular`) are defined as well, since they
+% occur in the checker's obligations about the received model.
 %
 % These definitions state what the constraints mean, and are not the
 % definitions that Huub's MiniZinc library (`share/minizinc/huub`) uses to
