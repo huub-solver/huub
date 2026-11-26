@@ -34,6 +34,7 @@
 
 mod decisions;
 mod dump;
+mod edges;
 mod fzt;
 mod normalize;
 mod registry;

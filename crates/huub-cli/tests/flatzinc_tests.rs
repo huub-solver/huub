@@ -31,6 +31,7 @@ mod tests {
 
 	assert_preprocess!(preprocess_assume);
 	assert_preprocess!(preprocess_chain);
+	assert_preprocess!(preprocess_difference);
 	assert_preprocess!(preprocess_element);
 	assert_preprocess!(preprocess_globals);
 	assert_preprocess!(preprocess_keep);

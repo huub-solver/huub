@@ -9,6 +9,16 @@
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum PreprocessRule {
+	/// A step that the difference constraints of the model justify: the
+	/// constraint, bound, or conflict follows from the shortest paths through
+	/// the unconditional difference constraints and the domains.
+	Dl,
+	/// The weakening of a half-reified constraint `b → c`, which is removed
+	/// because the constraint `c` is already part of the model.
+	ImpWeaken,
+	/// A domain change that falsifies the condition of a half-reified
+	/// constraint `b → c`, because the model contains the negation of `c`.
+	ImpContra,
 	/// A rewrite to a syntactically equal constraint.
 	Identity,
 	/// A rewrite between two linear constraints with the same normal form.
@@ -30,6 +40,12 @@ pub enum PreprocessRule {
 	LinValid,
 	/// The conclusion that a linear constraint cannot be satisfied.
 	LinUnsat,
+	/// The rewrite of a half-reified equality `b → c = k` into the two
+	/// half-reified inequalities that state it.
+	EqSplit,
+	/// The rewrite of a reified inequality `b ↔ c` into the half-reified
+	/// constraints `b → c` and `¬b → ¬c`, where `¬c` is the negation of `c`.
+	ReifSplit,
 	/// A claim that the step preserves the solutions, which the checker
 	/// discharges by brute force.
 	Preserve,
@@ -58,7 +74,11 @@ impl PreprocessRule {
 	/// The name of the rule in the trace format.
 	pub fn as_str(self) -> &'static str {
 		match self {
+			PreprocessRule::Dl => "dl",
+			PreprocessRule::EqSplit => "eq-split",
 			PreprocessRule::Identity => "identity",
+			PreprocessRule::ImpContra => "imp-contra",
+			PreprocessRule::ImpWeaken => "imp-weaken",
 			PreprocessRule::LinNorm => "lin-norm",
 			PreprocessRule::LinAffine => "lin-affine",
 			PreprocessRule::LinLit => "lin-lit",
@@ -68,13 +88,23 @@ impl PreprocessRule {
 			PreprocessRule::LinValid => "lin-valid",
 			PreprocessRule::LinUnsat => "lin-unsat",
 			PreprocessRule::Preserve => "preserve",
+			PreprocessRule::ReifSplit => "reif-split",
 		}
 	}
 
 	/// Whether the rule applies to a step of the given kind.
 	pub(super) fn fits(self, kind: StepKind) -> bool {
 		match self {
-			PreprocessRule::Identity | PreprocessRule::LinNorm => kind == StepKind::Rewrite,
+			PreprocessRule::Dl => matches!(
+				kind,
+				StepKind::Add | StepKind::Del | StepKind::Dom | StepKind::Unsat
+			),
+			PreprocessRule::EqSplit
+			| PreprocessRule::Identity
+			| PreprocessRule::LinNorm
+			| PreprocessRule::ReifSplit => kind == StepKind::Rewrite,
+			PreprocessRule::ImpContra => kind == StepKind::Dom,
+			PreprocessRule::ImpWeaken => kind == StepKind::Del,
 			PreprocessRule::LinAffine
 			| PreprocessRule::LinLit
 			| PreprocessRule::LinNeg
@@ -89,7 +119,11 @@ impl PreprocessRule {
 	/// Parse the name of a rule in the trace format.
 	pub(super) fn from_str(s: &str) -> Option<Self> {
 		Some(match s {
+			"dl" => PreprocessRule::Dl,
+			"eq-split" => PreprocessRule::EqSplit,
 			"identity" => PreprocessRule::Identity,
+			"imp-contra" => PreprocessRule::ImpContra,
+			"imp-weaken" => PreprocessRule::ImpWeaken,
 			"lin-norm" => PreprocessRule::LinNorm,
 			"lin-affine" => PreprocessRule::LinAffine,
 			"lin-lit" => PreprocessRule::LinLit,
@@ -99,6 +133,7 @@ impl PreprocessRule {
 			"lin-valid" => PreprocessRule::LinValid,
 			"lin-unsat" => PreprocessRule::LinUnsat,
 			"preserve" => PreprocessRule::Preserve,
+			"reif-split" => PreprocessRule::ReifSplit,
 			_ => return None,
 		})
 	}

@@ -41,6 +41,7 @@ use crate::{
 		self, Model,
 		expressions::{IntLinearExp, Proposition, PropositionConstraint},
 		initilization_context::ModelInitContext,
+		preprocess::{FztConstraint, FztContext, PreprocessRule},
 		view::integer::IntView,
 	},
 	solver::{self, IntLitMeaning, Polarity, queue::PriorityLevel},
@@ -109,11 +110,13 @@ impl DifferenceLogicModel {
 			// `b ↔ x - y ≤ d` is `b → x - y ≤ d` together with the negation
 			// `¬b → y - x ≤ -d - 1`.
 			(LessEq, Some(ReifiedBy(b))) => {
+				prb.trace_dl_split(PreprocessRule::ReifSplit);
 				self.add_edge(prb, Some(b), x, y, d);
 				self.add_edge(prb, Some(!b), y, x, -d - 1);
 			}
 			// `b → x - y = d` is the conjunction of the two inequalities.
 			(Equal, Some(ImpliedBy(b))) => {
+				prb.trace_dl_split(PreprocessRule::EqSplit);
 				self.add_edge(prb, Some(b), x, y, d);
 				self.add_edge(prb, Some(b), y, x, -d);
 			}
@@ -143,6 +146,62 @@ impl DifferenceLogicModel {
 		}
 	}
 
+	/// The representation of the edge `e` in the `.fzt` model language.
+	fn edge_item(&self, ctx: &FztContext<'_>, e: usize) -> FztConstraint {
+		let edge = &self.graph.edges[e];
+		self.item_of(ctx, edge.from, edge.to, edge.val, edge.bool_dcn)
+	}
+
+	/// The representation of the edge from node `from` to node `to` of weight
+	/// `val`, gated by the Boolean with index `gate`, in the `.fzt` model
+	/// language.
+	fn item_of(
+		&self,
+		ctx: &FztContext<'_>,
+		from: usize,
+		to: usize,
+		val: IntVal,
+		gate: Option<usize>,
+	) -> FztConstraint {
+		let x = model::View::from(self.graph.int_dcns[from]);
+		let y = model::View::from(self.graph.int_dcns[to]);
+		let (coeffs, vars, rhs) = ctx.linear([x, -y], val.into());
+		let mut args = vec![coeffs, vars, rhs];
+		let name = match gate {
+			Some(b) => {
+				args.push(ctx.bool(self.graph.bool_dcns[b]));
+				"int_lin_le_imp"
+			}
+			None => "int_lin_le",
+		};
+		FztConstraint::new(name, args)
+	}
+
+	/// The representations of the edges that are part of the trace, given the
+	/// trace identifier of each edge, by trace identifier.
+	pub(crate) fn edge_items(
+		&self,
+		ctx: &FztContext<'_>,
+		ids: &[Option<u32>],
+	) -> Vec<(u32, FztConstraint)> {
+		(0..self.graph.edges.len())
+			.filter_map(|e| {
+				let id = ids.get(e).copied().flatten()?;
+				Some((id, self.edge_item(ctx, e)))
+			})
+			.collect()
+	}
+
+	/// Log that the edge `e` has left the model.
+	fn log_removed(&self, ctx: &mut model::SimplificationContext<'_>, e: usize) {
+		if !ctx.0.trace_active() {
+			return;
+		}
+		let before = self.edge_item(&FztContext::new(ctx.0), e);
+		ctx.0
+			.trace_dl_removed(e, &before, self.graph.edges[e].bool_dcn.is_some());
+	}
+
 	/// Add a single edge `x - y ≤ d`, gated by `b`, creating its nodes if
 	/// needed.
 	fn add_edge(
@@ -166,6 +225,10 @@ impl DifferenceLogicModel {
 		let from = self.node_index(prb, x);
 		let to = self.node_index(prb, y);
 		let index = self.graph.new_edge(prb, DiffEdge::new(from, to, d, b));
+		if prb.trace_active() {
+			let item = self.edge_item(&FztContext::new(prb), index);
+			prb.trace_dl_edge(index, item);
+		}
 		if self.initialized {
 			self.new_edges.push(index);
 		}
@@ -272,6 +335,7 @@ impl DifferenceLogicModel {
 				let (to, weight) = (self.graph.edges[e].to, self.graph.edges[e].val);
 				self.graph.int_dcns[to].tighten_min(ctx, val - weight, NO_REASON)?;
 				self.graph.remove_active_in(ctx, e);
+				self.log_removed(ctx, e);
 			}
 			// `y` fixed turns `x - y ≤ d` into the bound `x ≤ y + d`.
 			for i in 0..self.graph.active_in[n].len(ctx) {
@@ -279,6 +343,7 @@ impl DifferenceLogicModel {
 				let (from, weight) = (self.graph.edges[e].from, self.graph.edges[e].val);
 				self.graph.int_dcns[from].tighten_max(ctx, val + weight, NO_REASON)?;
 				self.graph.remove_active_out(ctx, e);
+				self.log_removed(ctx, e);
 			}
 			// Cleared so that a later edge can bring the node back cleanly.
 			self.graph.active_out[n].clear(ctx);
@@ -291,6 +356,7 @@ impl DifferenceLogicModel {
 				trace!(target: "diff_logic", edge = ?edge, "re-emitting implied outgoing edge as a bound");
 				self.add_implied_bound(ctx, edge.gate(), edge.to, false, val - edge.val);
 				self.graph.close_imp_edge(ctx, e);
+				self.log_removed(ctx, e);
 			}
 			for i in self.graph.open_in[n].open_indices(ctx) {
 				let e = *self.graph.open_in[n].index(ctx, i);
@@ -298,6 +364,7 @@ impl DifferenceLogicModel {
 				trace!(target: "diff_logic", edge = ?edge, "re-emitting implied incoming edge as a bound");
 				self.add_implied_bound(ctx, edge.gate(), edge.from, true, val + edge.val);
 				self.graph.close_imp_edge(ctx, e);
+				self.log_removed(ctx, e);
 			}
 		}
 		Ok(())
@@ -537,6 +604,7 @@ impl DifferenceLogicModel {
 				if self.is_redundant(n, to, val) {
 					trace!(target: "diff_logic", e = ?e, distance = self.distances[[n, to]], "global edge is redundant");
 					self.graph.remove_active_edge(ctx, e);
+					self.log_removed(ctx, e);
 				} else {
 					let _ = self.direct_edge[n].insert(to);
 					i += 1;
@@ -688,13 +756,17 @@ impl DifferenceLogicModel {
 						Ok::<(), <Model as ReasoningEngine>::Conflict>(())
 					},
 				)?;
+				ctx.0.trace_dl_dissolved(&edges);
 				for e in edges {
 					if self.graph.edges[e].bool_dcn.is_some() {
 						self.graph.close_imp_edge(ctx, e);
+						self.log_removed(ctx, e);
 					} else if self.graph.edges[e].from == n {
 						self.graph.remove_active_in(ctx, e);
+						self.log_removed(ctx, e);
 					} else {
 						self.graph.remove_active_out(ctx, e);
+						self.log_removed(ctx, e);
 					}
 				}
 				self.graph.active_out[n].clear(ctx);
@@ -719,11 +791,23 @@ impl DifferenceLogicModel {
 		};
 		if self.distance(from, to) <= val {
 			trace!(target: "diff_logic", e = ?e, "implied edge is already entailed");
+			if ctx.0.trace_active() {
+				let item = self.item_of(&FztContext::new(ctx.0), from, to, val, None);
+				ctx.0.trace_dl_weaken(e, item);
+			}
 			self.graph.close_imp_edge(ctx, e);
 		} else if self.distance(to, from) < -val {
 			trace!(target: "diff_logic", e = ?e, "implied edge is falsified");
 			let gate = self.graph.edges[e].gate();
-			self.graph.bool_dcns[gate].fix(ctx, false, NO_REASON)?;
+			let negation = if ctx.0.trace_active() {
+				let item = self.item_of(&FztContext::new(ctx.0), to, from, -val - 1, None);
+				ctx.0.trace_dl_falsify_open(e, item)
+			} else {
+				None
+			};
+			let fixed = self.graph.bool_dcns[gate].fix(ctx, false, NO_REASON);
+			ctx.0.trace_dl_falsify_close(e, negation, fixed.is_ok());
+			fixed?;
 			self.graph.close_imp_edge(ctx, e);
 		}
 		Ok(())
@@ -855,6 +939,7 @@ impl DifferenceLogicModel {
 				moved.push(e);
 			} else {
 				self.graph.remove_active_in(ctx, e);
+				self.log_removed(ctx, e);
 			}
 		}
 		self.graph.active_out[old].clear(ctx);
@@ -877,6 +962,7 @@ impl DifferenceLogicModel {
 				moved.push(e);
 			} else {
 				self.graph.remove_active_out(ctx, e);
+				self.log_removed(ctx, e);
 			}
 		}
 		self.graph.active_in[old].clear(ctx);
@@ -894,6 +980,7 @@ impl DifferenceLogicModel {
 				edge.bool_dcn.map(|b| self.graph.bool_dcns[b]),
 			)? {
 				self.graph.close_imp_edge(ctx, e);
+				self.log_removed(ctx, e);
 			}
 		}
 		for i in self.graph.open_out[old].open_indices(ctx) {
@@ -917,6 +1004,7 @@ impl DifferenceLogicModel {
 				edge.bool_dcn.map(|b| self.graph.bool_dcns[b]),
 			)? {
 				self.graph.close_imp_edge(ctx, e);
+				self.log_removed(ctx, e);
 			}
 		}
 		for i in self.graph.open_in[old].open_indices(ctx) {
@@ -987,6 +1075,7 @@ impl DifferenceLogicModel {
 				i += 1;
 			} else {
 				self.graph.remove_active_edge(ctx, e);
+				self.log_removed(ctx, e);
 			}
 		}
 		i = 0;
@@ -1004,6 +1093,7 @@ impl DifferenceLogicModel {
 				i += 1;
 			} else {
 				self.graph.remove_active_edge(ctx, e);
+				self.log_removed(ctx, e);
 			}
 		}
 		for i in self.graph.open_out[n].open_indices(ctx) {
@@ -1019,6 +1109,7 @@ impl DifferenceLogicModel {
 				self.graph.edges[e].val -= offset;
 			} else {
 				self.graph.close_imp_edge(ctx, e);
+				self.log_removed(ctx, e);
 			}
 		}
 		for i in self.graph.open_in[n].open_indices(ctx) {
@@ -1034,6 +1125,7 @@ impl DifferenceLogicModel {
 				self.graph.edges[e].val += offset;
 			} else {
 				self.graph.close_imp_edge(ctx, e);
+				self.log_removed(ctx, e);
 			}
 		}
 		Ok(())

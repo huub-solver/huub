@@ -726,7 +726,12 @@ impl Model {
 				// folding away a term or by unifying its decisions, joins the
 				// graph, which releases its slot.
 				if let Some(recognised) = self.recognise_difference(&*con_obj) {
+					let replaces = self.trace_origin(con);
+					self.trace_dl_open(replaces);
 					self.post_difference(recognised);
+					if let Err(err) = self.trace_dl_close() {
+						self.trace = TraceState::Failed(err);
+					}
 				} else {
 					self.constraints[con.index()] = Some(con_obj);
 				}

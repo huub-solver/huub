@@ -1,14 +1,16 @@
 //! The emission of the model at the start of search.
 
-use std::{borrow::Cow, num::NonZero};
+use std::{any::Any, borrow::Cow, num::NonZero};
 
 use crate::{
 	IntVal,
+	constraints::difference_logic::DifferenceLogicModel,
 	model::{
 		Decision, Model, View,
 		decision::integer::Domain,
 		deserialize::AnyView,
 		preprocess::{
+			edges::is_difference_logic,
 			fzt::{DeclaredDomain, FztConstraint, FztContext, FztError, fzt_declared, fzt_domain},
 			registry, spelling,
 		},
@@ -107,6 +109,16 @@ impl Model {
 		// The constraints.
 		for (idx, c) in self.constraints.iter().enumerate() {
 			let Some(c) = c else { continue };
+			if is_difference_logic(&**c) {
+				let any: &dyn Any = &**c;
+				let component = any
+					.downcast_ref::<DifferenceLogicModel>()
+					.expect("the constraint is the difference logic graph");
+				for (id, item) in component.edge_items(&ctx, &t.dl_edges) {
+					items.push(format!("constraint {item} :: trace_id({id});"));
+				}
+				continue;
+			}
 			let Some(Some(id)) = t.origin.get(idx) else {
 				return Err(FztError::UnloggedConstraint);
 			};

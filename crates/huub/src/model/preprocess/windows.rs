@@ -8,6 +8,7 @@ use crate::{
 	model::{
 		ConstraintId, Model, View,
 		preprocess::{
+			edges::{is_difference_logic, split_rule},
 			fzt::{FztConstraint, FztContext, FztError},
 			normalize::lin_norm_equal,
 			registry,
@@ -54,6 +55,15 @@ impl Model {
 		if t.origin.len() <= con.index() {
 			t.origin.resize(con.index() + 1, None);
 		}
+		// The difference logic graph is not a constraint of the trace: its
+		// edges are.
+		if self.constraints[con.index()]
+			.as_deref()
+			.is_some_and(is_difference_logic)
+		{
+			return Ok(());
+		}
+		let t = self.trace.recording_mut().unwrap();
 		if let Some(w) = t.windows.last_mut() {
 			w.posted.push(con);
 			return Ok(());
@@ -126,6 +136,7 @@ impl Model {
 			FznOutcome::Failed => return Ok(w.deferred),
 			FznOutcome::Processed | FznOutcome::Unprocessed => {}
 		}
+		let split = split_rule(&w);
 		let mut outputs = Vec::with_capacity(w.posted.len() + w.assumed.len());
 		for &con in &w.posted {
 			let Some(c) = self.constraints[con.index()].as_deref() else {
@@ -133,6 +144,9 @@ impl Model {
 			};
 			let item = registry::to_fzt(c, &FztContext::new(self))?;
 			outputs.push((Output::Constraint(con), item));
+		}
+		for (edge, item) in w.posted_edges {
+			outputs.push((Output::Edge(edge), item));
 		}
 		for lits in w.assumed {
 			let item = FztConstraint::new(
@@ -167,10 +181,10 @@ impl Model {
 		}
 		let items: Vec<_> = outputs.iter().map(|(_, item)| item.clone()).collect();
 		let rule = rewrite_rule(&items);
-		let rule = if rule.fits(StepKind::Rewrite) {
-			rule
-		} else {
-			PreprocessRule::Preserve
+		let rule = match split {
+			Some(split) if items.len() == 2 => split,
+			_ if rule.fits(StepKind::Rewrite) => rule,
+			_ => PreprocessRule::Preserve,
 		};
 		let t = self.trace.recording_mut().unwrap();
 		let mut ids = Vec::with_capacity(outputs.len());
@@ -205,8 +219,10 @@ impl Model {
 			hint: Some(fzn as u32 + 1),
 			rule,
 			posted: Vec::new(),
+			posted_edges: Vec::new(),
 			assumed: Vec::new(),
 			deferred: Vec::new(),
+			split: None,
 		});
 	}
 	/// Close the window of the simplification of a constraint, which ended with
@@ -221,6 +237,11 @@ impl Model {
 		};
 		let w = t.windows.pop().expect("window was not opened");
 		t.suppressed = None;
+		if matches!(w.kind, WindowKind::DifferenceLogic) {
+			self.trace.recording_mut().unwrap().windows.push(w);
+			return self.trace_dl_simplify_close(status.is_err());
+		}
+		let split = split_rule(&w);
 		let WindowKind::Simplify {
 			con,
 			debug,
@@ -261,6 +282,13 @@ impl Model {
 			}
 			outputs.push(self.trace_constraint_item(posted, None)?);
 		}
+		for (edge, item) in w.posted_edges {
+			let t = self.trace.recording_mut().unwrap();
+			let id = t.fresh_id();
+			t.set_edge(edge, Some(id));
+			let text = format!("constraint {item} :: trace_id({id});");
+			outputs.push((id, text, item));
+		}
 		if replaced {
 			let kind = if outputs.is_empty() {
 				StepKind::Del
@@ -268,6 +296,7 @@ impl Model {
 				StepKind::Rewrite
 			};
 			let rule = match (w.rule, outputs.as_slice()) {
+				(_, [_, _]) if split.is_some() => split.unwrap(),
 				// A claim of `lin-norm` is only made when the normal forms are
 				// indeed equal, which can fail when a simplification relies on
 				// the domains, e.g. to evaluate a literal view.
@@ -310,6 +339,10 @@ impl Model {
 		if !self.trace_active() {
 			return Ok(false);
 		}
+		if is_difference_logic(obj) {
+			self.trace_dl_simplify_open();
+			return Ok(true);
+		}
 		self.trace_flush();
 		let Some(Some(id)) = self
 			.trace
@@ -331,8 +364,10 @@ impl Model {
 			hint: Some(id),
 			rule: PreprocessRule::Preserve,
 			posted: Vec::new(),
+			posted_edges: Vec::new(),
 			assumed: Vec::new(),
 			deferred: Vec::new(),
+			split: None,
 		});
 		Ok(true)
 	}

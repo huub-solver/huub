@@ -55,6 +55,8 @@ pub(super) struct Kept {
 /// constraint.
 #[derive(Clone, Debug)]
 pub(super) enum Output {
+	/// An edge of the difference logic graph, by index.
+	Edge(usize),
 	/// A `huub_assume` constraint over the given literals, which search
 	/// enforces as assumptions.
 	Assumption(Vec<View<bool>>),
@@ -73,6 +75,12 @@ pub(crate) struct PreprocessTrace {
 	/// The trace identifier of each constraint of the model, indexed by
 	/// [`ConstraintId`].
 	pub(super) origin: Vec<Option<u32>>,
+	/// The trace identifier of each edge of the difference logic graph, indexed
+	/// by edge, while the edge is part of the model.
+	///
+	/// The graph is a single constraint of the model, so its edges are the
+	/// constraints that the trace knows.
+	pub(super) dl_edges: Vec<Option<u32>>,
 	/// The FlatZinc names of the integer decisions.
 	pub(super) int_names: Vec<Option<String>>,
 	/// The FlatZinc names of the Boolean decisions.
@@ -104,6 +112,9 @@ pub(crate) struct PreprocessTrace {
 	/// unification step that is logged afterwards. The decisions that become
 	/// fixed are collected instead.
 	pub(super) suppressed: Option<Vec<Fixed>>,
+	/// The justification of the next domain change of a Boolean decision, if
+	/// it is not the one of the window.
+	pub(super) forced: Option<(PreprocessRule, Vec<u32>)>,
 }
 
 /// The state of the preprocessing trace of a [`Model`].
@@ -134,12 +145,18 @@ pub(super) struct Window {
 	pub(super) rule: PreprocessRule,
 	/// The constraints posted during the window.
 	pub(super) posted: Vec<ConstraintId>,
+	/// The edges of the difference logic graph created during the window, with
+	/// their `.fzt` representations.
+	pub(super) posted_edges: Vec<(usize, FztConstraint)>,
 	/// The literals that search assumes to hold, recorded during the window,
 	/// one list per `huub_assume` constraint.
 	pub(super) assumed: Vec<Vec<View<bool>>>,
 	/// The constraints whose initial simplification is deferred until the
 	/// window closes.
 	pub(super) deferred: Vec<ConstraintId>,
+	/// The rule that justifies the replacement of a constraint by the edges
+	/// created in the window, if they are the two parts of one constraint.
+	pub(super) split: Option<PreprocessRule>,
 }
 
 /// What happens in a [`Window`].
@@ -149,6 +166,12 @@ pub(super) enum WindowKind {
 	FznView,
 	/// The posting of a FlatZinc constraint.
 	FznPosting,
+	/// The simplification of the difference logic graph, whose steps are
+	/// justified by the graph itself.
+	DifferenceLogic,
+	/// The conversion of a constraint into edges of the difference logic
+	/// graph, replacing the constraint with the given trace identifier, if any.
+	DifferenceLogicPosting(Option<u32>),
 	/// The simplification of a constraint, with its representation before the
 	/// simplification.
 	Simplify {
@@ -295,6 +318,7 @@ impl Model {
 			steps: 0,
 			next_id: received as u32 + 1,
 			origin: Vec::new(),
+			dl_edges: Vec::new(),
 			int_names: Vec::new(),
 			bool_names: Vec::new(),
 			announced_int: 0,
@@ -305,6 +329,7 @@ impl Model {
 			unmaterialized: Vec::new(),
 			windows: Vec::new(),
 			suppressed: None,
+			forced: None,
 		}));
 	}
 	/// Stop logging domain changes, collecting the decisions that become fixed
@@ -347,11 +372,21 @@ impl PreprocessTrace {
 		(PreprocessRule::Preserve, w.hint.into_iter().collect())
 	}
 
+	/// Record that the edge `edge` of the difference logic graph has the trace
+	/// identifier `id`, or has left the model.
+	pub(super) fn set_edge(&mut self, edge: usize, id: Option<u32>) {
+		if self.dl_edges.len() <= edge {
+			self.dl_edges.resize(edge + 1, None);
+		}
+		self.dl_edges[edge] = id;
+	}
+
 	/// Record that the constraint `out` has the trace identifier `id`.
 	pub(super) fn record_output(&mut self, id: u32, out: Output) {
 		match out {
 			Output::Assumption(lits) => self.assumptions.push((id, lits)),
 			Output::Constraint(con) => self.origin[con.index()] = Some(id),
+			Output::Edge(edge) => self.set_edge(edge, Some(id)),
 		}
 	}
 }

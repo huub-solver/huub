@@ -15,9 +15,9 @@ dom c <- 0..3 by lin-unary hint #9
 del #9 by lin-valid
 rewrite #4 => #10 by identity
   constraint int_lin_le([1, 1], [a, b], 30) :: trace_id(10);
-del #10 by lin-valid
-rewrite #5 => #11 by identity
-  constraint int_lin_le_reif([1, 1], [a, b], 3, r) :: trace_id(11);
-rewrite #6 => #12 by lin-norm
-  constraint int_lin_ne([1, -1], [a, b], 0) :: trace_id(12);
-end 14
+rewrite #5 => #11 #12 by reif-split
+  constraint int_lin_le_imp([1, 1], [a, b], 3, r) :: trace_id(11);
+  constraint int_lin_le_imp([-1, -1], [b, a], -4, !r) :: trace_id(12);
+rewrite #6 => #13 by lin-norm
+  constraint int_lin_ne([1, -1], [a, b], 0) :: trace_id(13);
+end 13

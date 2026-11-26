@@ -77,7 +77,14 @@ impl Model {
 		}
 		self.trace_flush();
 		let t = self.trace.recording().unwrap();
-		let (rule, hints) = t.justification(StepKind::Dom, |r| r);
+		// The difference constraints only justify the bounds of integers.
+		let (rule, hints) = match t.forced.clone() {
+			Some(forced) => forced,
+			None => t.justification(StepKind::Dom, |r| match r {
+				PreprocessRule::Dl => PreprocessRule::Preserve,
+				r => r,
+			}),
+		};
 		let ctx = FztContext::new(self);
 		let name = ctx.bool_name(var);
 		let Some(View(BoolView::Const(val))) = self.bool_vars[var.idx()].alias else {

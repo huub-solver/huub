@@ -17,6 +17,6 @@ rewrite #6 => #9 by lin-norm
 rewrite #7 => #10 by preserve
   constraint bool_clause([[x <= 2]], [b]) :: trace_id(10);
 rewrite #8 => #11 by lin-norm
-  constraint int_lin_le([-2, -1], [y, x], -3) :: trace_id(11);
-dom x <- -3..5 by preserve hint #11
+  constraint int_lin_le([-1, -2], [x, y], -3) :: trace_id(11);
+dom x <- -3..5 by dl
 end 14
