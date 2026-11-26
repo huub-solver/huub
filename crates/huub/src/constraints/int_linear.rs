@@ -34,9 +34,7 @@ use crate::{
 	},
 	lower::{LoweringContext, LoweringError},
 	model::{
-		self,
-		expressions::proposition::PropositionConstraint,
-		preprocess::{FztConstraint, FztContext, FztError, PreprocessRule},
+		self, expressions::proposition::PropositionConstraint, preprocess::PreprocessRule,
 		view::integer::IntView as ModelIntView,
 	},
 	solver::{
@@ -611,25 +609,6 @@ where
 			}
 		}
 		Ok(SimplificationStatus::NoFixpoint)
-	}
-
-	fn to_fzt(&self, ctx: &FztContext<'_>) -> Result<FztConstraint, FztError> {
-		let op = match self.comparator {
-			LinComparator::Equal => "eq",
-			LinComparator::LessEq => "le",
-			LinComparator::NotEqual => "ne",
-		};
-		let (suffix, reif) = match self.reif {
-			None => ("", None),
-			Some(Reification::ImpliedBy(r)) => ("_imp", Some(r)),
-			Some(Reification::ReifiedBy(r)) => ("_reif", Some(r)),
-		};
-		let (coeffs, vars, rhs) = ctx.linear(self.terms.iter().copied(), self.rhs.into());
-		let mut args = vec![coeffs, vars, rhs];
-		if let Some(r) = reif {
-			args.push(ctx.bool(r));
-		}
-		Ok(FztConstraint::new(format!("int_lin_{op}{suffix}"), args))
 	}
 
 	fn to_solver(&self, slv: &mut LoweringContext<'_>) -> Result<(), LoweringError> {

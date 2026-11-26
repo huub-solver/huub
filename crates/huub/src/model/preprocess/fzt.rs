@@ -58,9 +58,8 @@ pub struct FztConstraint {
 	pub(super) args: Vec<FztArg>,
 }
 
-/// Context used by
-/// [`Constraint::to_fzt`](crate::constraints::Constraint::to_fzt) to write the
-/// decisions that a constraint refers to as `.fzt` terms.
+/// Context used by the registry to write the decisions that a constraint
+/// refers to as `.fzt` terms.
 ///
 /// Views are written as terms over the decisions that are still part of the
 /// model, following the aliases created by unification. Unlike the resolution
@@ -81,7 +80,7 @@ pub enum FztError {
 	/// language.
 	UnsupportedConstraint {
 		/// The name of the type of the constraint.
-		constraint: &'static str,
+		constraint: String,
 	},
 	/// The objective of the instance is not a decision variable.
 	UnsupportedObjective,
