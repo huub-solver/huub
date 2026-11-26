@@ -18,7 +18,7 @@ use std::{
 	sync::{Arc, Mutex},
 };
 
-use huub::model::preprocess::{PreprocessEvent, PreprocessSink};
+use huub::model::deserialize::flatzinc::{PreprocessEvent, PreprocessSink};
 
 /// The version of the trace format that is written.
 const TRACE_FORMAT_VERSION: &str = "0.1";

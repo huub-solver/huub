@@ -503,7 +503,10 @@ mod tests {
 		lower::{LoweringContext, LoweringError},
 		model::{
 			Model,
-			preprocess::{FztError, PreprocessEvent, PreprocessSink},
+			preprocess::{
+				fzt::FztError,
+				sink::{PreprocessEvent, PreprocessSink},
+			},
 		},
 	};
 

@@ -5,7 +5,7 @@ pub(crate) mod decision;
 pub mod deserialize;
 pub mod expressions;
 pub(crate) mod initilization_context;
-pub mod preprocess;
+pub(crate) mod preprocess;
 pub(crate) mod resolved;
 pub(crate) mod view;
 

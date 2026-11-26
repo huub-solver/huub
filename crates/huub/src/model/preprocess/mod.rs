@@ -29,7 +29,9 @@
 	not(feature = "flatzinc"),
 	expect(
 		dead_code,
-		reason = "a trace is only recorded while a FlatZinc instance is read"
+		unreachable_pub,
+		reason = "a trace is only recorded while a FlatZinc instance is read, and the types that are \
+		          delivered to the caller are only exported by the FlatZinc deserializer"
 	)
 )]
 
@@ -45,15 +47,19 @@ pub(crate) mod spelling;
 mod state;
 mod windows;
 
-pub(crate) use crate::model::preprocess::state::TraceState;
+pub use crate::model::preprocess::rule::PreprocessRule;
+#[cfg(feature = "flatzinc")]
+pub use crate::model::preprocess::{
+	fzt::FztError,
+	sink::{PreprocessEvent, PreprocessSink},
+};
 #[cfg(feature = "flatzinc")]
 pub(crate) use crate::model::preprocess::{
 	fzt::{DeclaredDomain, fzt_domain},
 	normalize::lin_norm_equal,
 	state::FznOutcome,
 };
-pub use crate::model::preprocess::{
-	fzt::{FztArg, FztConstraint, FztContext, FztError, FztLitOp, FztTerm},
-	rule::PreprocessRule,
-	sink::{PreprocessEvent, PreprocessSink},
+pub(crate) use crate::model::preprocess::{
+	fzt::{FztArg, FztConstraint, FztContext},
+	state::TraceState,
 };

@@ -31,7 +31,7 @@ pub(crate) enum DeclaredDomain {
 /// An argument of a constraint in the `.fzt` model language.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
-pub enum FztArg {
+pub(crate) enum FztArg {
 	/// An array of arguments.
 	Array(Vec<FztArg>),
 	/// A Boolean constant.
@@ -51,7 +51,7 @@ pub enum FztArg {
 /// A constraint in the `.fzt` model language: a predicate applied to a list of
 /// arguments.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FztConstraint {
+pub(crate) struct FztConstraint {
 	/// The predicate of the constraint.
 	pub(super) name: Cow<'static, str>,
 	/// The arguments of the predicate.
@@ -67,7 +67,7 @@ pub struct FztConstraint {
 /// domains: the checker performs the same substitutions, but does not know the
 /// domain-dependent shortcuts that Huub takes.
 #[derive(Clone, Copy, Debug)]
-pub struct FztContext<'a> {
+pub(crate) struct FztContext<'a> {
 	/// The model whose decisions are written.
 	model: &'a Model,
 }
@@ -91,7 +91,7 @@ pub enum FztError {
 /// The comparison of an integer variable with a constant in a literal of the
 /// `.fzt` model language.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum FztLitOp {
+pub(crate) enum FztLitOp {
 	/// The variable is equal to the constant (`==`).
 	Eq,
 	/// The variable is at least the constant (`>=`).
@@ -107,7 +107,7 @@ pub enum FztLitOp {
 /// The term is written by its [`Display`] implementation.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
-pub enum FztTerm {
+pub(crate) enum FztTerm {
 	/// `scale*var + offset`, in which a unit scale is left out, over an
 	/// integer variable. A variable on its own is a [`FztTerm::Name`], so that
 	/// a term has one representation.
@@ -272,12 +272,12 @@ impl From<Vec<FztArg>> for FztArg {
 
 impl FztConstraint {
 	/// The predicate of the constraint.
-	pub fn name(&self) -> &str {
+	pub(crate) fn name(&self) -> &str {
 		&self.name
 	}
 
 	/// Create a constraint that applies the predicate `name` to `args`.
-	pub fn new(name: impl Into<Cow<'static, str>>, args: Vec<FztArg>) -> Self {
+	pub(crate) fn new(name: impl Into<Cow<'static, str>>, args: Vec<FztArg>) -> Self {
 		Self {
 			name: name.into(),
 			args,
@@ -300,7 +300,7 @@ impl Display for FztConstraint {
 
 impl<'a> FztContext<'a> {
 	/// Write a Boolean view as an argument.
-	pub fn bool(&self, view: impl Into<View<bool>>) -> FztArg {
+	pub(crate) fn bool(&self, view: impl Into<View<bool>>) -> FztArg {
 		let view = view.into();
 		match self.resolve_bool(view).0 {
 			BoolView::Const(b) => FztArg::Bool(b),
@@ -345,7 +345,7 @@ impl<'a> FztContext<'a> {
 	}
 
 	/// Write a list of Boolean views as an array argument.
-	pub fn bools<V: Into<View<bool>>>(&self, views: impl IntoIterator<Item = V>) -> FztArg {
+	pub(crate) fn bools<V: Into<View<bool>>>(&self, views: impl IntoIterator<Item = V>) -> FztArg {
 		FztArg::Array(views.into_iter().map(|v| self.bool(v)).collect())
 	}
 
@@ -439,7 +439,7 @@ impl<'a> FztContext<'a> {
 	}
 
 	/// Write an integer view as an argument.
-	pub fn int(&self, view: impl Into<View<IntVal>>) -> FztArg {
+	pub(crate) fn int(&self, view: impl Into<View<IntVal>>) -> FztArg {
 		let view = self.resolve_int(view.into());
 		match view.0 {
 			IntView::Const(c) => c.into(),
@@ -475,7 +475,7 @@ impl<'a> FztContext<'a> {
 	}
 
 	/// Write a list of integer views as an array argument.
-	pub fn ints<V: Into<View<IntVal>>>(&self, views: impl IntoIterator<Item = V>) -> FztArg {
+	pub(crate) fn ints<V: Into<View<IntVal>>>(&self, views: impl IntoIterator<Item = V>) -> FztArg {
 		FztArg::Array(views.into_iter().map(|v| self.int(v)).collect())
 	}
 
@@ -586,7 +586,7 @@ impl<'a> FztContext<'a> {
 	}
 
 	/// Write a constant set of integers as an argument.
-	pub fn set(&self, set: &IntSet) -> FztArg {
+	pub(crate) fn set(&self, set: &IntSet) -> FztArg {
 		FztArg::Set(set.clone())
 	}
 

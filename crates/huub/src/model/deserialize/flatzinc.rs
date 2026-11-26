@@ -20,6 +20,7 @@ use pindakaas::constraint::propositional_logic::Formula;
 use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::warn;
 
+pub use crate::model::preprocess::{FztError, PreprocessEvent, PreprocessSink};
 use crate::{
 	IntSet, IntVal,
 	actions::{
@@ -33,8 +34,8 @@ use crate::{
 		deserialize::{AnyView, Branching, Goal},
 		expressions::linear::IntLinearExp,
 		preprocess::{
-			DeclaredDomain, FznOutcome, FztArg, FztConstraint, FztContext, FztError,
-			PreprocessRule, PreprocessSink, fzt_domain, lin_norm_equal,
+			DeclaredDomain, FznOutcome, FztArg, FztConstraint, FztContext, PreprocessRule,
+			fzt_domain, lin_norm_equal,
 		},
 		view::{View, boolean::BoolView, integer::IntView},
 	},
@@ -435,7 +436,7 @@ pub trait HuubFlatZinc {
 	/// preprocessing of the instance, which is delivered to `sink`: every
 	/// change that the instance undergoes between reading it and the start of
 	/// search, and the model at the start of search (see
-	/// [`PreprocessEvent`](crate::model::preprocess::PreprocessEvent)).
+	/// [`PreprocessEvent`]).
 	///
 	/// Recording only observes the lowering, so the solver is the same as
 	/// without it. If the recording cannot be completed, the lowering fails

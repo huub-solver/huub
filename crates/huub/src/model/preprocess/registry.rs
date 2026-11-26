@@ -57,7 +57,7 @@ use crate::{
 	model::{
 		Model, View,
 		expressions::PropositionConstraint,
-		preprocess::{FztArg, FztConstraint, FztContext, FztError, spelling},
+		preprocess::{FztArg, FztConstraint, FztContext, fzt::FztError, spelling},
 		view::boolean::BoolView as ModelBoolView,
 	},
 };

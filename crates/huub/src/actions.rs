@@ -8,21 +8,24 @@ mod integer;
 
 use std::{fmt::Debug, marker::PhantomData, ops::Not};
 
-pub use crate::actions::{
-	analyze::{BoolAnalyzeActions, IntAnalyzeActions},
-	boolean::{
-		BoolInspectionActions, BoolOperations, BoolPropagationActions, BoolSimplificationActions,
-	},
-	initialization::{BoolInitActions, BrancherInitActions, InitActions, IntInitActions},
-	integer::{
-		IntDecisionActions, IntEvent, IntExplanationActions, IntInspectionActions, IntOperations,
-		IntPropCond, IntPropagationActions, IntSimplificationActions,
-	},
-};
 use crate::{
 	DeepClone,
 	constraints::{BoxedPropagator, Constraint},
 	helpers::bytes::Bytes,
+};
+pub use crate::{
+	actions::{
+		analyze::{BoolAnalyzeActions, IntAnalyzeActions},
+		boolean::{
+			BoolInspectionActions, BoolOperations, BoolPropagationActions,
+			BoolSimplificationActions,
+		},
+		initialization::{BoolInitActions, BrancherInitActions, InitActions, IntInitActions},
+		integer::{
+			IntDecisionActions, IntEvent, IntExplanationActions, IntInspectionActions,
+			IntOperations, IntPropCond, IntPropagationActions, IntSimplificationActions,
+		},
+	},
 	model::preprocess::PreprocessRule,
 };
 
@@ -184,7 +187,7 @@ pub trait SimplificationActions {
 
 	/// Name the rule that justifies the changes that the current
 	/// simplification makes from here on, in the preprocessing trace (see
-	/// [`preprocess`](crate::model::preprocess)).
+	/// [`HuubFlatZinc::lower_with_preprocess_trace`](crate::model::deserialize::flatzinc::HuubFlatZinc::lower_with_preprocess_trace)).
 	///
 	/// A rule applies to the steps of the kind that it justifies, including the
 	/// removal or rewriting of the constraint being simplified when the
