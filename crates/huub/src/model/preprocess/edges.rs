@@ -18,7 +18,7 @@ use crate::{
 			normalize::lin_norm_equal,
 			registry,
 			rule::{PreprocessRule, StepKind},
-			state::{Output, Window, WindowKind, hint_text},
+			state::{Event, Output, Window, WindowKind, hint_text},
 		},
 	},
 };
@@ -48,16 +48,31 @@ impl Model {
 		let Some(t) = self.trace.recording_mut() else {
 			return;
 		};
-		if let Some(w) = t.windows.last_mut() {
-			w.posted_edges.push((edge, item));
-			return;
+		match t.windows.last().map(|w| &w.kind) {
+			Some(WindowKind::FznPosting) => {
+				self.trace_flush();
+				let t = self.trace.recording_mut().unwrap();
+				let id = t.fresh_id();
+				t.set_edge(edge, Some(id));
+				let output = Output::Edge(edge);
+				let w = t.windows.last_mut().unwrap();
+				w.events.push(Event::Introduced { id, output, item });
+			}
+			Some(_) => t
+				.windows
+				.last_mut()
+				.unwrap()
+				.posted_edges
+				.push((edge, item)),
+			None => {
+				self.trace_flush();
+				let t = self.trace.recording_mut().unwrap();
+				let id = t.fresh_id();
+				t.set_edge(edge, Some(id));
+				let text = format!("add #{id} by preserve\n  constraint {item} :: trace_id({id});");
+				self.trace_emit(StepKind::Add, Some(PreprocessRule::Preserve), text);
+			}
 		}
-		self.trace_flush();
-		let t = self.trace.recording_mut().unwrap();
-		let id = t.fresh_id();
-		t.set_edge(edge, Some(id));
-		let text = format!("add #{id} by preserve\n  constraint {item} :: trace_id({id});");
-		self.trace_emit(StepKind::Add, Some(PreprocessRule::Preserve), text);
 	}
 
 	/// Log that the edge `edge` of the difference logic graph left the model,
@@ -255,8 +270,8 @@ impl Model {
 			rule: PreprocessRule::Preserve,
 			posted: Vec::new(),
 			posted_edges: Vec::new(),
-			assumed: Vec::new(),
-			deferred: Vec::new(),
+			events: Vec::new(),
+			first_id: 0,
 			split: None,
 		});
 	}
@@ -353,10 +368,11 @@ impl Model {
 			rule: PreprocessRule::Dl,
 			posted: Vec::new(),
 			posted_edges: Vec::new(),
-			assumed: Vec::new(),
-			deferred: Vec::new(),
+			events: Vec::new(),
+			first_id: 0,
 			split: None,
 		});
+		self.trace.recording_mut().unwrap().simplifying += 1;
 	}
 
 	/// Close the window of the simplification of the difference logic graph,

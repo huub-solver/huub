@@ -275,6 +275,45 @@ pub(crate) fn check_preprocess(file: &Path, trace: ExpectFile, start_model: Expe
 	start_model.assert_eq(&model);
 }
 
+/// Run the solver on the given instance with and without a preprocessing trace,
+/// and assert that the two runs are the same: the same solutions, in the same
+/// order, and the same statistics other than times.
+///
+/// Recording a trace must only observe the solver, so the traced run is
+/// expected to take exactly the same steps.
+pub(crate) fn check_trace_is_transparent(file: &Path) {
+	let strip_times = |out: Vec<u8>| -> String {
+		String::from_utf8(out)
+			.unwrap()
+			.lines()
+			.filter(|l| !l.contains("Time="))
+			.map(|l| format!("{l}\n"))
+			.collect()
+	};
+	let plain = strip_times(run_solver(["--statistics".as_ref(), file.as_os_str()]));
+
+	let dir = env::temp_dir().join(format!(
+		"huub-transparent-{}-{}",
+		process::id(),
+		file.file_stem().unwrap().to_string_lossy()
+	));
+	fs::create_dir_all(&dir).unwrap();
+	let args: &[OsString] = &[
+		"--statistics".into(),
+		"--preprocess-trace".into(),
+		dir.join("run.trace").into(),
+		"--start-model".into(),
+		dir.join("start.fzt").into(),
+		file.into(),
+	];
+	let traced = strip_times(run_solver(args));
+	fs::remove_dir_all(&dir).unwrap();
+	assert_eq!(
+		plain, traced,
+		"recording a trace changed the run on {file:?}"
+	);
+}
+
 /// Run the solver once and assert that it reports the instance as
 /// unsatisfiable.
 pub(crate) fn check_unsat(file: &Path) {

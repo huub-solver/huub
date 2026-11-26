@@ -1,0 +1,22 @@
+trace 0.1
+add var huub__i3 1..3
+add var huub__i4 1..3
+add #2 by preserve hint #1
+  constraint huub_table_int([x1, huub__i3], [1, 2]) :: trace_id(2);
+dom x1 <- {1} by preserve hint #2
+unify x1 := 1 by singleton
+dom huub__i3 <- {2} by preserve hint #2
+unify huub__i3 := 2 by singleton
+del #2 by preserve
+add #3 by preserve hint #1
+  constraint huub_table_int([2, x2, huub__i4], [1, 1, 2, 2, 1, 3, 2, 2, 3, 3, 1, 3, 3, 2, 3]) :: trace_id(3);
+dom huub__i4 <- {3} by preserve hint #3
+unify huub__i4 := 3 by singleton
+rewrite #3 => #4 by preserve
+  constraint huub_table_int([2, x2, 3], [2, 1, 3, 2, 2, 3]) :: trace_id(4);
+add #5 by preserve hint #1
+  constraint huub_table_int([3, x3], [2, 1, 2, 2, 3, 1, 3, 2]) :: trace_id(5);
+rewrite #5 => #6 by preserve
+  constraint huub_table_int([3, x3], [3, 1, 3, 2]) :: trace_id(6);
+del #1 by preserve hint #4,#6
+end 15

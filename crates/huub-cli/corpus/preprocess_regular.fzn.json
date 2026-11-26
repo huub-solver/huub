@@ -1,0 +1,79 @@
+{
+  "variables": {
+    "x1": {
+      "type": "int",
+      "domain": [
+        [
+          1,
+          2
+        ]
+      ]
+    },
+    "x2": {
+      "type": "int",
+      "domain": [
+        [
+          1,
+          2
+        ]
+      ]
+    },
+    "x3": {
+      "type": "int",
+      "domain": [
+        [
+          1,
+          2
+        ]
+      ]
+    }
+  },
+  "arrays": {
+    "xs": {
+      "a": [
+        "x1",
+        "x2",
+        "x3"
+      ]
+    },
+    "tr": {
+      "a": [
+        2,
+        0,
+        3,
+        3,
+        3,
+        3
+      ]
+    }
+  },
+  "constraints": [
+    {
+      "id": "huub_regular",
+      "args": [
+        "xs",
+        3,
+        2,
+        "tr",
+        1,
+        {
+          "set": [
+            [
+              3,
+              3
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "output": [
+    "x1",
+    "x2",
+    "x3"
+  ],
+  "solve": {
+    "method": "satisfy"
+  },
+  "version": "1.0"
+}

@@ -593,7 +593,7 @@ impl Model {
 			Err(con) => return Ok(con),
 		};
 		let (con, enqueue) = self.initialize_constraint(constraint);
-		if enqueue && !self.trace_defer_simplification(con) {
+		if enqueue {
 			self.propagate_single(con)?;
 		}
 		Ok(con)

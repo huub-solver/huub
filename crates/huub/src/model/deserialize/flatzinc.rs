@@ -395,6 +395,9 @@ pub(crate) struct FznModelBuilder<'a> {
 	/// The index of the FlatZinc constraint whose posting is logged in the
 	/// preprocessing trace, while its window is open.
 	posting: Option<usize>,
+	/// The FlatZinc constraint at `posting` as it was when its posting started,
+	/// which is what the constraints that are posted for it are compared with.
+	posting_input: Option<FztConstraint>,
 	/// Flags indicating which constraints have been processed
 	processed: Vec<bool>,
 	/// Statistics about the extraction process
@@ -1316,8 +1319,7 @@ impl<'a> FznModelBuilder<'a> {
 			.trace_fzn_close(outcome, |_| PreprocessRule::Preserve, del_rule);
 		// An error of the extraction takes precedence over one of the trace.
 		res?;
-		let deferred = closed?;
-		debug_assert!(deferred.is_empty());
+		closed?;
 		Ok(())
 	}
 
@@ -1729,6 +1731,7 @@ impl<'a> FznModelBuilder<'a> {
 			var_index,
 			prb,
 			posting: None,
+			posting_input: None,
 			processed: vec![false; fzn.constraints.len()],
 			stats: FlatZincStatistics::default(),
 			assumptions: Vec::new(),
@@ -2675,8 +2678,8 @@ impl<'a> FznModelBuilder<'a> {
 			_ => PreprocessRule::Preserve,
 		};
 		let linear = ident.is_some_and(ConstraintIdent::is_linear);
-		let input = self.render_constraint(c);
-		let deferred = self.prb.trace_fzn_close(
+		let input = self.posting_input.take();
+		self.prb.trace_fzn_close(
 			FznOutcome::Processed,
 			|outputs| match (outputs, &input) {
 				([out], Some(input)) if input == out => PreprocessRule::Identity,
@@ -2693,11 +2696,6 @@ impl<'a> FznModelBuilder<'a> {
 			},
 			del_rule,
 		)?;
-		// The constraints are simplified after their introduction has been
-		// logged.
-		for con in deferred {
-			self.prb.propagate_single(con)?;
-		}
 		Ok(())
 	}
 
@@ -2706,25 +2704,20 @@ impl<'a> FznModelBuilder<'a> {
 	/// `err`.
 	fn trace_posting_fail(&mut self, err: &FlatZincError) {
 		if self.posting.take().is_some() {
-			let deferred = self
-				.prb
+			self.prb
 				.trace_fzn_close(
 					FznOutcome::of_error(err),
 					|_| PreprocessRule::Preserve,
 					PreprocessRule::Preserve,
 				)
 				.expect("closing a window after a failure renders no constraints");
-			// The posting failed, so the deferred constraints are never
-			// simplified.
-			drop(deferred);
 		}
 	}
 
 	/// Open the window of the posting of the FlatZinc constraint at index `i`
 	/// in the preprocessing trace, closing the window of the previous one.
 	///
-	/// While the window is open, the constraints that are posted are collected,
-	/// and their simplification is deferred until the window is closed.
+	/// While the window is open, the steps of the posting are collected.
 	fn trace_posting_open(&mut self, i: usize) -> Result<(), FlatZincError> {
 		self.trace_posting_close()?;
 		if !self.prb.trace_active() {
@@ -2739,6 +2732,9 @@ impl<'a> FznModelBuilder<'a> {
 			}
 			_ => PreprocessRule::Preserve,
 		};
+		// The state of the model changes while the constraint is posted, and
+		// the constraint is rendered as it is before that.
+		self.posting_input = self.render_constraint(&self.fzn.constraints[i]);
 		self.prb.trace_fzn_open(i, false, rule);
 		self.posting = Some(i);
 		Ok(())

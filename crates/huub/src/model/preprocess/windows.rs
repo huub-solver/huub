@@ -14,7 +14,7 @@ use crate::{
 			registry,
 			rule::{PreprocessRule, StepKind},
 			spelling,
-			state::{FznOutcome, Output, Window, WindowKind},
+			state::{Event, FznOutcome, Output, Window, WindowKind, hint_text},
 		},
 	},
 };
@@ -23,12 +23,27 @@ impl Model {
 	/// Record that search assumes the literals `lits` to hold, as stated by
 	/// the `huub_assume` constraint being posted.
 	pub(crate) fn trace_assume(&mut self, lits: Vec<View<bool>>) {
-		if !self.trace_active() {
+		if !self.trace_active() || !self.trace_posting() {
 			return;
 		}
-		if let Some(w) = self.trace.recording_mut().unwrap().windows.last_mut() {
-			w.assumed.push(lits);
-		}
+		self.trace_flush();
+		let item = FztConstraint::new(
+			spelling::ASSUME,
+			vec![FztContext::new(self).bools(lits.iter().copied())],
+		);
+		let t = self.trace.recording_mut().unwrap();
+		let id = t.fresh_id();
+		let output = Output::Assumption(lits);
+		t.record_output(id, output.clone());
+		let w = t.windows.last_mut().unwrap();
+		w.events.push(Event::Introduced { id, output, item });
+	}
+	/// Whether the innermost window is the posting of a FlatZinc constraint.
+	fn trace_posting(&self) -> bool {
+		self.trace
+			.recording()
+			.and_then(|t| t.windows.last())
+			.is_some_and(|w| matches!(w.kind, WindowKind::FznPosting))
 	}
 	/// Render the constraint `con` (or the given object, if it is not in the
 	/// model) as a trace item under a fresh trace identifier, returning the
@@ -63,6 +78,17 @@ impl Model {
 		{
 			return Ok(());
 		}
+		if self.trace_posting() {
+			// The constraint is introduced now, so that the steps of its
+			// simplification, which follows at once, can refer to it.
+			self.trace_flush();
+			let (id, _, item) = self.trace_constraint_item(con, None)?;
+			let output = Output::Constraint(con);
+			let t = self.trace.recording_mut().unwrap();
+			let w = t.windows.last_mut().unwrap();
+			w.events.push(Event::Introduced { id, output, item });
+			return Ok(());
+		}
 		let t = self.trace.recording_mut().unwrap();
 		if let Some(w) = t.windows.last_mut() {
 			w.posted.push(con);
@@ -75,30 +101,6 @@ impl Model {
 		self.trace_emit(StepKind::Add, Some(PreprocessRule::Preserve), text);
 		Ok(())
 	}
-	/// Whether the initial simplification of the constraint `con` is deferred
-	/// until the current window closes.
-	///
-	/// During the posting of a FlatZinc constraint, the constraints that are
-	/// created are only simplified after all of them have been logged, so that
-	/// the steps of the simplification refer to constraints that have been
-	/// introduced.
-	pub(crate) fn trace_defer_simplification(&mut self, con: ConstraintId) -> bool {
-		if !self.trace_active() {
-			return false;
-		}
-		match self.trace.recording_mut().unwrap().windows.last_mut() {
-			Some(
-				w @ Window {
-					kind: WindowKind::FznPosting,
-					..
-				},
-			) => {
-				w.deferred.push(con);
-				true
-			}
-			_ => false,
-		}
-	}
 	/// Close the window of the extraction of a view from, or the posting of,
 	/// the FlatZinc constraint with trace identifier `fzn`, logging what
 	/// became of the constraint.
@@ -108,16 +110,48 @@ impl Model {
 	/// `.fzt` representations; `del_rule` justifies its removal when nothing
 	/// was posted.
 	///
-	/// Returns the constraints whose initial simplification was deferred, which
-	/// the caller must now simplify.
+	/// # How the steps are ordered
+	///
+	/// A constraint is simplified as soon as it is posted, exactly as it is
+	/// when no trace is recorded, so the steps of its simplification happen
+	/// before the posting of the FlatZinc constraint has finished. They refer
+	/// to the constraint that was posted, which the checker only knows once
+	/// the FlatZinc constraint has been replaced by what was posted for it,
+	/// and the replacement is only complete when the posting has finished.
+	///
+	/// The steps are therefore kept, and written when the window closes, in an
+	/// order that is only different from the order in which they happened if
+	/// that does not change what a step means. A step depends on the steps
+	/// that happened before it that it may have read the result of:
+	///
+	/// - a step of the simplification of a constraint depends on the
+	///   introduction of that constraint;
+	/// - the introduction of a constraint, and any other change that the
+	///   posting makes, depends on every step that happened before it, since
+	///   the posting reads the state of the model to decide what to post, and
+	///   the reads of that code cannot be observed.
+	///
+	/// The introductions, together with the removal of the FlatZinc constraint
+	/// they replace, form one step, so they can only be written together if
+	/// the steps between them do not depend on one of them and are not
+	/// depended on by another. Given the dependencies above, that is exactly
+	/// when no step of a simplification happened before the last change that
+	/// the posting makes. Then the steps are written as the posting's own
+	/// steps, the replacement of the FlatZinc constraint, and the steps of the
+	/// simplifications, which is the order in which a trace is written when the
+	/// simplification of a constraint is postponed until the posting has
+	/// finished.
+	///
+	/// Otherwise the steps are written in the order in which they happened, and
+	/// the FlatZinc constraint is replaced in stages.
 	pub(crate) fn trace_fzn_close(
 		&mut self,
 		outcome: FznOutcome,
 		rewrite_rule: impl FnOnce(&[FztConstraint]) -> PreprocessRule,
 		del_rule: PreprocessRule,
-	) -> Result<Vec<ConstraintId>, FztError> {
+	) -> Result<(), FztError> {
 		let Some(t) = self.trace.recording_mut() else {
-			return Ok(Vec::new());
+			return Ok(());
 		};
 		let w = t.windows.pop().expect("window was not opened");
 		t.suppressed = None;
@@ -127,81 +161,160 @@ impl Model {
 		));
 		let fzn = w.hint.unwrap();
 		self.trace_flush();
+		if outcome == FznOutcome::Failed {
+			return Ok(());
+		}
+		let events = w.events;
+		let introduced: Vec<_> = events
+			.iter()
+			.filter_map(|e| match e {
+				Event::Introduced { id, output, item } => Some((*id, output.clone(), item.clone())),
+				Event::Step { .. } => None,
+			})
+			.collect();
+		// The posting made no change after the last simplification step started
+		// if no step of a simplification precedes a change of the posting.
+		let last_change = events.iter().rposition(|e| match e {
+			Event::Introduced { .. } => true,
+			Event::Step { nested, .. } => !nested,
+		});
+		let interleaved = last_change.is_some_and(|last| {
+			events[..last]
+				.iter()
+				.any(|e| matches!(e, Event::Step { nested: true, .. }))
+		});
+
+		let staged = interleaved
+			|| matches!(outcome, FznOutcome::Conflict | FznOutcome::Unprocessed)
+			// Nothing was introduced, so there is nothing to wait for.
+			|| introduced.is_empty();
+		if !staged {
+			let items: Vec<_> = introduced.iter().map(|(_, _, item)| item.clone()).collect();
+			let rule = rewrite_rule(&items);
+			let edges = introduced
+				.iter()
+				.filter(|(_, out, _)| matches!(out, Output::Edge(_)))
+				.count();
+			let rule = match w.split {
+				Some(split) if items.len() == 2 && edges == 2 => split,
+				_ if rule.fits(StepKind::Rewrite) => rule,
+				_ => PreprocessRule::Preserve,
+			};
+			for e in &events {
+				if let Event::Step {
+					kind,
+					rule,
+					text,
+					nested: false,
+				} = e
+				{
+					self.trace_emit_now(*kind, *rule, text.clone());
+				}
+			}
+			let ids: Vec<_> = introduced
+				.iter()
+				.map(|(id, _, _)| format!("#{id}"))
+				.collect();
+			let mut cont = String::new();
+			for (id, _, item) in &introduced {
+				write!(cont, "\n  constraint {item} :: trace_id({id});").unwrap();
+			}
+			let text = format!(
+				"rewrite #{fzn} => {} by {}{cont}",
+				ids.join(" "),
+				rule.as_str()
+			);
+			self.trace_emit_now(StepKind::Rewrite, Some(rule), text);
+			for e in &events {
+				if let Event::Step {
+					kind,
+					rule,
+					text,
+					nested: true,
+				} = e
+				{
+					self.trace_emit_now(*kind, *rule, text.clone());
+				}
+			}
+			return Ok(());
+		}
+
+		// TODO: the steps below fall back to `preserve`, which the checker can
+		// only discharge with a solver. The checker has no form of the
+		// `identity`, `lin-norm`, `reif-split`, and `eq-split` rules for a
+		// constraint that is replaced in stages, i.e. one `add` per constraint
+		// that is posted, justified by the FlatZinc constraint, and a `del` of
+		// the FlatZinc constraint that is justified by the constraints that
+		// remain. Once it does, justify these steps with the rule that the
+		// replacement would have had (see the branch above), where the
+		// constraints that were posted still have the form that they had when
+		// they were introduced.
+		let mut last_unsat = false;
+		for e in &events {
+			match e {
+				Event::Introduced { id, item, .. } => {
+					let text = format!(
+						"add #{id} by preserve hint #{fzn}\n  constraint {item} :: trace_id({id});"
+					);
+					self.trace_emit_now(StepKind::Add, Some(PreprocessRule::Preserve), text);
+					last_unsat = false;
+				}
+				Event::Step {
+					kind, rule, text, ..
+				} => {
+					self.trace_emit_now(*kind, *rule, text.clone());
+					last_unsat = *kind == StepKind::Unsat;
+				}
+			}
+		}
 		match outcome {
 			FznOutcome::Conflict => {
-				let text = format!("unsat by preserve hint #{fzn}");
-				self.trace_emit(StepKind::Unsat, Some(PreprocessRule::Preserve), text);
-				return Ok(w.deferred);
+				// A simplification that ended in a conflict concluded it
+				// itself.
+				if !last_unsat {
+					let text = format!("unsat by preserve hint #{fzn}");
+					self.trace_emit_now(StepKind::Unsat, Some(PreprocessRule::Preserve), text);
+				}
 			}
-			FznOutcome::Failed => return Ok(w.deferred),
-			FznOutcome::Processed | FznOutcome::Unprocessed => {}
-		}
-		let split = split_rule(&w);
-		let mut outputs = Vec::with_capacity(w.posted.len() + w.assumed.len());
-		for &con in &w.posted {
-			let Some(c) = self.constraints[con.index()].as_deref() else {
-				continue;
-			};
-			let item = registry::to_fzt(c, &FztContext::new(self))?;
-			outputs.push((Output::Constraint(con), item));
-		}
-		for (edge, item) in w.posted_edges {
-			outputs.push((Output::Edge(edge), item));
-		}
-		for lits in w.assumed {
-			let item = FztConstraint::new(
-				spelling::ASSUME,
-				vec![FztContext::new(self).bools(lits.iter().copied())],
-			);
-			outputs.push((Output::Assumption(lits), item));
-		}
-		if outcome == FznOutcome::Unprocessed {
-			// The constraint remains, and anything posted is added as implied
-			// by it.
-			for (out, item) in outputs {
-				let t = self.trace.recording_mut().unwrap();
-				let id = t.fresh_id();
-				t.record_output(id, out);
-				let text = format!(
-					"add #{id} by preserve hint #{fzn}\n  constraint {item} :: trace_id({id});"
-				);
-				self.trace_emit(StepKind::Add, Some(PreprocessRule::Preserve), text);
+			FznOutcome::Processed => {
+				if introduced.is_empty() {
+					let rule = if del_rule.fits(StepKind::Del) {
+						del_rule
+					} else {
+						PreprocessRule::Preserve
+					};
+					let text = format!("del #{fzn} by {}", rule.as_str());
+					self.trace_emit_now(StepKind::Del, Some(rule), text);
+				} else {
+					// What is left of what was posted, which implies the
+					// FlatZinc constraint together with the domains.
+					let live = self.trace_live_since(w.first_id);
+					let text = format!("del #{fzn} by preserve{}", hint_text(&live));
+					self.trace_emit_now(StepKind::Del, Some(PreprocessRule::Preserve), text);
+				}
 			}
-			return Ok(w.deferred);
+			// The FlatZinc constraint remains.
+			FznOutcome::Failed | FznOutcome::Unprocessed => {}
 		}
-		if outputs.is_empty() {
-			let rule = if del_rule.fits(StepKind::Del) {
-				del_rule
-			} else {
-				PreprocessRule::Preserve
-			};
-			let text = format!("del #{fzn} by {}", rule.as_str());
-			self.trace_emit(StepKind::Del, Some(rule), text);
-			return Ok(w.deferred);
-		}
-		let items: Vec<_> = outputs.iter().map(|(_, item)| item.clone()).collect();
-		let rule = rewrite_rule(&items);
-		let rule = match split {
-			Some(split) if items.len() == 2 => split,
-			_ if rule.fits(StepKind::Rewrite) => rule,
-			_ => PreprocessRule::Preserve,
-		};
-		let t = self.trace.recording_mut().unwrap();
-		let mut ids = Vec::with_capacity(outputs.len());
-		let mut cont = String::new();
-		for (out, item) in outputs {
-			let id = t.fresh_id();
-			t.record_output(id, out);
-			ids.push(format!("#{id}"));
-			write!(cont, "\n  constraint {item} :: trace_id({id});").unwrap();
-		}
-		let text = format!(
-			"rewrite #{fzn} => {} by {}{cont}",
-			ids.join(" "),
-			rule.as_str()
-		);
-		self.trace_emit(StepKind::Rewrite, Some(rule), text);
-		Ok(w.deferred)
+		Ok(())
+	}
+	/// The trace identifiers, from `first` on, of the constraints and
+	/// assumptions that are part of the model.
+	fn trace_live_since(&self, first: u32) -> Vec<u32> {
+		let t = self.trace.recording().unwrap();
+		let mut live: Vec<u32> = self
+			.constraints
+			.iter()
+			.enumerate()
+			.filter(|(_, c)| c.is_some())
+			.filter_map(|(i, _)| t.origin.get(i).copied().flatten())
+			.chain(t.dl_edges.iter().copied().flatten())
+			.chain(t.assumptions.iter().map(|(id, _)| *id))
+			.filter(|&id| id >= first)
+			.collect();
+		live.sort_unstable();
+		live.dedup();
+		live
 	}
 	/// Open the window of the extraction of a view from (if `view`), or the
 	/// posting of, the FlatZinc constraint at index `fzn`, whose steps are
@@ -220,14 +333,26 @@ impl Model {
 			rule,
 			posted: Vec::new(),
 			posted_edges: Vec::new(),
-			assumed: Vec::new(),
-			deferred: Vec::new(),
+			events: Vec::new(),
+			first_id: t.next_id,
 			split: None,
 		});
 	}
 	/// Close the window of the simplification of a constraint, which ended with
 	/// `status` (or a conflict), logging what became of the constraint.
 	pub(crate) fn trace_simplify_close(
+		&mut self,
+		obj: &dyn Constraint<Model>,
+		status: Result<SimplificationStatus, ()>,
+	) -> Result<(), FztError> {
+		let result = self.trace_simplify_close_steps(obj, status);
+		if let Some(t) = self.trace.recording_mut() {
+			t.simplifying -= 1;
+		}
+		result
+	}
+	/// Log what became of the constraint whose simplification ended.
+	fn trace_simplify_close_steps(
 		&mut self,
 		obj: &dyn Constraint<Model>,
 		status: Result<SimplificationStatus, ()>,
@@ -365,10 +490,11 @@ impl Model {
 			rule: PreprocessRule::Preserve,
 			posted: Vec::new(),
 			posted_edges: Vec::new(),
-			assumed: Vec::new(),
-			deferred: Vec::new(),
+			events: Vec::new(),
+			first_id: 0,
 			split: None,
 		});
+		self.trace.recording_mut().unwrap().simplifying += 1;
 		Ok(true)
 	}
 }

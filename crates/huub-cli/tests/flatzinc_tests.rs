@@ -8,7 +8,7 @@ mod tests {
 	use crate::helpers::{
 		FZN_COMPLETE, FZN_UNSATISFIABLE, assert_all_optimal, assert_all_solutions, assert_core,
 		assert_first_solution, assert_optimal, assert_preprocess, assert_search_order,
-		assert_unsat,
+		assert_unsat, check_trace_is_transparent,
 	};
 
 	assert_all_solutions!(array_var_int_element);
@@ -38,6 +38,7 @@ mod tests {
 	assert_preprocess!(preprocess_linear);
 	assert_preprocess!(preprocess_merge);
 	assert_preprocess!(preprocess_objective_group);
+	assert_preprocess!(preprocess_regular);
 	assert_preprocess!(preprocess_unsat);
 	assert_preprocess!(preprocess_views);
 
@@ -116,4 +117,20 @@ mod tests {
 	assert_optimal!(radiation_i6_9);
 	assert_optimal!(radiation_i8_9);
 	assert_optimal!(svrp_s4_v2_c3);
+
+	/// Recording a preprocessing trace does not change the run of the solver on
+	/// any instance of the corpus.
+	#[test]
+	fn tracing_does_not_change_the_run() {
+		let mut files: Vec<_> = std::fs::read_dir("./corpus")
+			.unwrap()
+			.map(|e| e.unwrap().path())
+			.filter(|p| p.to_string_lossy().ends_with(".fzn.json"))
+			.collect();
+		files.sort();
+		assert!(!files.is_empty());
+		for file in files {
+			check_trace_is_transparent(&file);
+		}
+	}
 }

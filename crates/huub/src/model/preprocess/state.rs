@@ -108,6 +108,8 @@ pub(crate) struct PreprocessTrace {
 	pub(super) unmaterialized: Vec<(String, DeclaredDomain)>,
 	/// The windows in which the steps currently happen, innermost last.
 	pub(super) windows: Vec<Window>,
+	/// The number of simplifications that are in progress.
+	pub(super) simplifying: u32,
 	/// While set, domain changes are not logged, since they are part of a
 	/// unification step that is logged afterwards. The decisions that become
 	/// fixed are collected instead.
@@ -148,15 +150,48 @@ pub(super) struct Window {
 	/// The edges of the difference logic graph created during the window, with
 	/// their `.fzt` representations.
 	pub(super) posted_edges: Vec<(usize, FztConstraint)>,
-	/// The literals that search assumes to hold, recorded during the window,
-	/// one list per `huub_assume` constraint.
-	pub(super) assumed: Vec<Vec<View<bool>>>,
-	/// The constraints whose initial simplification is deferred until the
-	/// window closes.
-	pub(super) deferred: Vec<ConstraintId>,
+	/// What happened during the posting of a FlatZinc constraint, in the order
+	/// in which it happened (see [`Event`]).
+	pub(super) events: Vec<Event>,
+	/// The next trace identifier when the window was opened, so that the
+	/// constraints that are introduced in the window are those that have a
+	/// greater one.
+	pub(super) first_id: u32,
 	/// The rule that justifies the replacement of a constraint by the edges
 	/// created in the window, if they are the two parts of one constraint.
 	pub(super) split: Option<PreprocessRule>,
+}
+
+/// Something that happened during the posting of a FlatZinc constraint.
+///
+/// The posting is executed exactly as it is when no trace is recorded, so a
+/// constraint is simplified as soon as it is posted, and the steps of that
+/// simplification happen before the posting has finished. The events are kept
+/// until the window closes, when the steps are written in an order that the
+/// checker can replay (see `Model::trace_fzn_close`).
+#[derive(Clone, Debug)]
+pub(super) enum Event {
+	/// A constraint, edge, or assumption was introduced.
+	Introduced {
+		/// The trace identifier it was given.
+		id: u32,
+		/// What was introduced.
+		output: Output,
+		/// Its representation when it was introduced.
+		item: FztConstraint,
+	},
+	/// A step was logged.
+	Step {
+		/// The kind of the step.
+		kind: StepKind,
+		/// The rule that justifies the step.
+		rule: Option<PreprocessRule>,
+		/// The step.
+		text: String,
+		/// Whether the step is part of the simplification of an introduced
+		/// constraint, rather than a change that the posting itself makes.
+		nested: bool,
+	},
 }
 
 /// What happens in a [`Window`].
@@ -200,7 +235,34 @@ impl Model {
 		self.trace.recording().is_some()
 	}
 	/// Emit a step of the trace.
+	///
+	/// During the posting of a FlatZinc constraint, the step is kept until the
+	/// window closes.
 	pub(super) fn trace_emit(
+		&mut self,
+		kind: StepKind,
+		rule: Option<PreprocessRule>,
+		text: String,
+	) {
+		let t = self.trace.recording_mut().unwrap();
+		let nested = t.simplifying > 0;
+		if let Some(w) = t
+			.windows
+			.iter_mut()
+			.find(|w| matches!(w.kind, WindowKind::FznPosting))
+		{
+			w.events.push(Event::Step {
+				kind,
+				rule,
+				text,
+				nested,
+			});
+			return;
+		}
+		self.trace_emit_now(kind, rule, text);
+	}
+	/// Emit a step of the trace right away.
+	pub(super) fn trace_emit_now(
 		&mut self,
 		kind: StepKind,
 		rule: Option<PreprocessRule>,
@@ -329,6 +391,7 @@ impl Model {
 			unmaterialized: Vec::new(),
 			windows: Vec::new(),
 			suppressed: None,
+			simplifying: 0,
 			forced: None,
 		}));
 	}
