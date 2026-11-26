@@ -403,6 +403,14 @@ impl Resolved<Decision<IntVal>> {
 			ctx.0.trace_suppress();
 		}
 
+		// The trace keeps the objective with its domain from before the
+		// restriction below, which the replayed unification does not apply to
+		// it.
+		let logged_domain = match &ctx.0.int_vars[idx].domain {
+			Domain::Domain(dom) if traced => Some(dom.clone()),
+			_ => None,
+		};
+
 		// Set the domain on the variable to be aliased to trigger subscription
 		// events.
 		self.restrict_domain(ctx, &target.domain(ctx), NO_REASON)?;
@@ -411,7 +419,6 @@ impl Resolved<Decision<IntVal>> {
 		}
 		// The target as a term, before its decision can become fixed.
 		let rendered = traced.then(|| ctx.0.trace_unify_target(target.into()));
-		ctx.0.unified_decisions += 1;
 		// Change variable to point to the target
 		match mem::replace(&mut ctx.0.int_vars[idx].domain, Domain::Alias(target)) {
 			// Restrict the domain of the target variable using the variable domain
@@ -424,7 +431,8 @@ impl Resolved<Decision<IntVal>> {
 				}
 				target.restrict_domain(ctx, &dom, NO_REASON)?;
 				if let Some(rendered) = rendered {
-					ctx.0.trace_int_unified(var, rendered, target, &dom);
+					let logged = logged_domain.as_ref().unwrap_or(&dom);
+					ctx.0.trace_int_unified(var, rendered, target, logged);
 				}
 			}
 			// The replaced decision was fixed (and replaced by its value in the

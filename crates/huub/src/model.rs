@@ -608,10 +608,47 @@ impl Model {
 		&mut self,
 		constraint: C,
 	) -> ConstraintId {
+		let constraint = match self.take_difference_constraint(constraint) {
+			Ok(constraint) => constraint,
+			Err(con) => return con,
+		};
 		let (con, enqueue) = self.initialize_constraint(constraint);
 		if enqueue {
 			self.propagator_queue.enqueue_propagator(con.raw());
 		}
+		con
+	}
+
+	/// Hand a recognised difference constraint to the difference logic
+	/// component, creating the component if this is the first one.
+	fn post_difference(&mut self, constraint: DifferenceLogicConstraint) -> ConstraintId {
+		let con = match self.diff_logic {
+			Some(con) => con,
+			None => {
+				let component = DifferenceLogicModel::new(self);
+				let (con, _) = self.initialize_constraint(component);
+				self.diff_logic = Some(con);
+				con
+			}
+		};
+		// The component is taken out of its slot so that adding the edge can
+		// borrow the model itself, to create the nodes, gates, and any Boolean
+		// decision the reduction needs. The slot stays reserved, so a
+		// constraint posted while the edge is added does not disturb it.
+		let mut component = self.constraints[con.index()]
+			.take()
+			.expect("the difference logic component is not being simplified");
+		{
+			let component: &mut dyn Any = &mut *component;
+			component
+				.downcast_mut::<DifferenceLogicModel>()
+				.expect("the difference logic slot holds the component")
+				.add(self, constraint);
+		}
+		self.constraints[con.index()] = Some(component);
+		// Subscribe to the nodes and gates that the edge just created.
+		self.update_initialization(con);
+		self.propagator_queue.enqueue_propagator(con.raw());
 		con
 	}
 

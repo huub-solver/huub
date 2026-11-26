@@ -1,24 +1,22 @@
 //! Module for the creation of a [`Model`] from a [`FlatZinc`] instance.
 
 use std::{
-	cell::RefCell,
-	collections::{VecDeque, hash_map::Entry},
+	collections::hash_map::Entry,
 	error::Error,
 	fmt::{self, Debug, Display},
 	hash::Hash,
 	num::NonZero,
 	ops::{Not, RangeInclusive},
-	rc::Rc,
 	sync::Arc,
 };
 
 use flatzinc_serde::{
-	Annotation, AnnotationArgument, AnnotationCall, AnnotationLiteral, Argument, FlatZinc, Literal,
-	NamedRef, Type, Variable, helpers::ArcKey,
+	Annotation, AnnotationCall, AnnotationLiteral, Argument, FlatZinc, Literal, NamedRef, Type,
+	Variable,
+	helpers::{ArcKey, Immutable},
 };
 use itertools::Itertools;
 use pindakaas::constraint::propositional_logic::Formula;
-use rangelist::IntervalIterator;
 use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::warn;
 
@@ -394,6 +392,9 @@ pub(crate) struct FznModelBuilder<'a> {
 	var_index: FxHashMap<ArcKey<Variable<FznIdent>>, u32>,
 	/// The incumbent model
 	prb: Model,
+	/// The index of the FlatZinc constraint whose posting is logged in the
+	/// preprocessing trace, while its window is open.
+	posting: Option<usize>,
 	/// Flags indicating which constraints have been processed
 	processed: Vec<bool>,
 	/// Statistics about the extraction process
@@ -436,11 +437,6 @@ pub enum KnownIdent {
 	/// Constraint identifiers.
 	Constraint(ConstraintIdent),
 }
-
-/// An equality between two FlatZinc literals that caused their unification:
-/// the two sides, the index of the constraint, and whether the constraint is an
-/// equality (rather than an element constraint).
-type UnifyEdge<'a> = (&'a Literal<FznIdent>, &'a Literal<FznIdent>, usize, bool);
 
 /// The domain with which the FlatZinc variable `var` is declared.
 fn declared_domain(var: &Variable<FznIdent>) -> DeclaredDomain {
@@ -718,8 +714,8 @@ impl HuubFlatZinc for FlatZinc<FznIdent> {
 		let deserialize_model = |fzn: &FlatZinc<FznIdent>| {
 			let mut builder = FznModelBuilder::new(fzn);
 			let res = builder
-                                .extract_views()		
-				.and_then(|()| builder.post_constraints())		.and_then(|()| builder.post_constraints())
+				.extract_views()
+				.and_then(|()| builder.post_constraints())
 				.and_then(|()| builder.ensure_output());
 			if let Err(err) = res {
 				builder.trace_posting_fail(&err);
@@ -1582,26 +1578,6 @@ impl<'a> FznModelBuilder<'a> {
 				assumptions: self.assumptions,
 			},
 		))
-	}
-
-	/// The member of a group of equal FlatZinc variables and constants that
-	/// represents the group in the preprocessing trace: a constant if there is
-	/// one, otherwise the objective variable if it is a member (so that it is
-	/// not replaced), and otherwise the first variable.
-	fn group_root<'l>(&self, li: &'l [Literal<FznIdent>]) -> Option<&'l Literal<FznIdent>> {
-		let objective = match &self.fzn.solve.method {
-			flatzinc_serde::Method::Minimize(Literal::Variable(o))
-			| flatzinc_serde::Method::Maximize(Literal::Variable(o)) => Some(o),
-			_ => None,
-		};
-		li.iter()
-			.find(|l| !matches!(l, Literal::Variable(_)))
-			.or_else(|| {
-				li.iter().find(
-					|l| matches!((l, objective), (Literal::Variable(v), Some(o)) if v.name == o.name),
-				)
-			})
-			.or_else(|| li.first())
 	}
 
 	/// Extract a Boolean decision variable from a [`Literal`] in a
@@ -2617,7 +2593,6 @@ impl<'a> FznModelBuilder<'a> {
 
 					self.prb.contains(s).member(x).result(r).post()?;
 				}
-				ConstraintIdent::IntEq | ConstraintIdent::BoolEq => unreachable!(),
 			}
 			for (i, used) in ann_used.iter().enumerate() {
 				if !used {
@@ -2679,172 +2654,6 @@ impl<'a> FznModelBuilder<'a> {
 			"dom {name} <- {} by preserve",
 			fzt_domain(&IntSet::from(FULL_INT_DOMAIN))
 		));
-	}
-
-	/// Log the steps that merge a group of equal FlatZinc variables into the
-	/// single view `view` that represents all of them, where `root` is the
-	/// member that represents the group, and `group` are the indices in
-	/// `edges` of the equalities between its members.
-	///
-	/// The members are replaced in the order of a breadth-first traversal of
-	/// the equalities from `root`, so that each equality reads `x = root` when
-	/// its member `x` is replaced. The equalities, which then hold trivially,
-	/// are removed afterwards.
-	fn trace_group(
-		&mut self,
-		root: Option<&Literal<FznIdent>>,
-		edges: &[UnifyEdge<'_>],
-		group: &[usize],
-		view: &AnyView,
-	) {
-		/// The node of a literal in the graph of equalities.
-		fn key(l: &Literal<FznIdent>) -> String {
-			match l {
-				Literal::Variable(v) => format!("v:{}", v.name),
-				Literal::Bool(b) => format!("b:{b}"),
-				Literal::Int(i) => format!("i:{i}"),
-				l => format!("?:{l:?}"),
-			}
-		}
-		/// The value of a constant as an integer.
-		fn value(l: &Literal<FznIdent>) -> Option<IntVal> {
-			match l {
-				Literal::Bool(b) => Some(*b as IntVal),
-				Literal::Int(i) => Some(*i),
-				_ => None,
-			}
-		}
-
-		let Some(root) = root else { return };
-		let mut adjacent: FxHashMap<String, Vec<usize>> = FxHashMap::default();
-		for &e in group {
-			let (a, b, _, _) = edges[e];
-			adjacent.entry(key(a)).or_default().push(e);
-			adjacent.entry(key(b)).or_default().push(e);
-		}
-		// The domain of the root variable, while the members are replaced by
-		// it (`None` if it is unbounded, or Boolean).
-		let mut domain = match root {
-			Literal::Variable(r) => match declared_domain(r) {
-				DeclaredDomain::Int(d) => d,
-				DeclaredDomain::Bool => None,
-			},
-			_ => None,
-		};
-		let mut visited = FxHashSet::from_iter([key(root)]);
-		let mut queue = VecDeque::from([root]);
-		while let Some(u) = queue.pop_front() {
-			for &e in adjacent.get(&key(u)).map_or(&[][..], Vec::as_slice) {
-				let (a, b, i, is_eq) = edges[e];
-				let w = if key(a) == key(u) { b } else { a };
-				if !visited.insert(key(w)) {
-					continue;
-				}
-				let hint = i + 1;
-				let Literal::Variable(x) = w else {
-					// A second constant, different from the root, which the
-					// equality contradicts.
-					self.prb
-						.trace_raw(format!("unsat by preserve hint #{hint}"));
-					return;
-				};
-				let declared = declared_domain(x);
-				match root {
-					Literal::Variable(r) => {
-						let rule = if is_eq {
-							PreprocessRule::LinAffine
-						} else {
-							PreprocessRule::Preserve
-						};
-						let mut dom = None;
-						if let DeclaredDomain::Int(Some(dx)) = &declared {
-							let new = match &domain {
-								Some(d) => d.intersect(dx),
-								None => dx.clone(),
-							};
-							if domain.as_ref() != Some(&new) {
-								dom = Some((r.name.clone(), fzt_domain(&new)));
-							}
-							domain = Some(new);
-						}
-						self.prb.trace_name_merged(
-							&x.name,
-							&declared,
-							r.name.clone(),
-							dom,
-							(rule, vec![hint as u32]),
-						);
-					}
-					_ => {
-						let k =
-							value(root).expect("the root of a group is a variable or a constant");
-						let dx = match &declared {
-							DeclaredDomain::Bool => Some(IntSet::from(0..=1)),
-							DeclaredDomain::Int(d) => d.clone(),
-						};
-						if dx.as_ref().is_some_and(|d| !d.contains(&k)) {
-							self.prb
-								.trace_raw(format!("unsat by preserve hint #{hint}"));
-							return;
-						}
-						if dx.as_ref().is_none_or(|d| d.card() != Some(1)) {
-							let rule = if is_eq {
-								PreprocessRule::LinUnary
-							} else {
-								PreprocessRule::Preserve
-							};
-							self.prb.trace_raw(format!(
-								"dom {} <- {{{k}}} by {} hint #{hint}",
-								x.name,
-								rule.as_str()
-							));
-						}
-						let term = match root {
-							Literal::Bool(b) => b.to_string(),
-							_ => k.to_string(),
-						};
-						self.prb.trace_name_merged(
-							&x.name,
-							&declared,
-							term,
-							None,
-							(PreprocessRule::Singleton, Vec::new()),
-						);
-					}
-				}
-				queue.push_back(w);
-			}
-		}
-
-		// The equalities now hold trivially.
-		let mut removed = FxHashSet::default();
-		for &e in group {
-			let (_, _, i, is_eq) = edges[e];
-			if removed.insert(i) {
-				let rule = if is_eq {
-					PreprocessRule::LinValid
-				} else {
-					PreprocessRule::Preserve
-				};
-				self.prb
-					.trace_raw(format!("del #{} by {}", i + 1, rule.as_str()));
-			}
-		}
-
-		// The decision created for the group may not represent the root
-		// variable's domain exactly.
-		if let Literal::Variable(r) = root {
-			match view {
-				AnyView::Int(View(IntView::Const(k))) => {
-					self.prb
-						.trace_name_singleton(&r.name, &DeclaredDomain::Int(domain), *k);
-				}
-				AnyView::Int(_) if domain.is_none() => {
-					Self::trace_full_domain(&mut self.prb, &r.name);
-				}
-				_ => {}
-			}
-		}
 	}
 
 	/// Close the window of the posting of the current FlatZinc constraint in
@@ -2934,299 +2743,27 @@ impl<'a> FznModelBuilder<'a> {
 		self.posting = Some(i);
 		Ok(())
 	}
+}
 
-	/// Unify variables in the [`Model`] that are know to be equivalent.
-	///
-	/// This can happen because of `bool_eq` and `int_eq` constraints in the
-	/// [`FlatZinc`] instance, or because of the `rhs` property of a variable.
-	pub(crate) fn unify_variables(&mut self) -> Result<(), FlatZincError> {
-		let mut unify_map =
-			FxHashMap::<ArcKey<Variable<FznIdent>>, Rc<RefCell<Vec<Literal<FznIdent>>>>>::default();
-		let unify_map_find =
-			|map: &FxHashMap<ArcKey<Variable<FznIdent>>, Rc<RefCell<Vec<Literal<FznIdent>>>>>,
-			 a: &Literal<FznIdent>| {
-				if let Literal::Variable(x) = a {
-					map.get(&x.cloned_key()).map(Rc::clone)
-				} else {
-					None
-				}
-			};
-
-		let record_unify = |map: &mut FxHashMap<
-			ArcKey<Variable<FznIdent>>,
-			Rc<RefCell<Vec<Literal<FznIdent>>>>,
-		>,
-		                    a: &Literal<FznIdent>,
-		                    b: &Literal<FznIdent>| {
-			let a_set = unify_map_find(map, a);
-			let b_set = unify_map_find(map, b);
-			match (a_set, b_set) {
-				(Some(a_set), Some(b_set)) => {
-					if Rc::ptr_eq(&a_set, &b_set) {
-						return;
-					}
-					let mut members = (*a_set).borrow_mut();
-					members.extend(b_set.take());
-					for b in members.iter() {
-						if let Literal::Variable(b) = b {
-							map.insert(b.cloned_key(), Rc::clone(&a_set));
-						}
-					}
-				}
-				(Some(a_set), None) => {
-					let mut members = (*a_set).borrow_mut();
-					members.push(b.clone());
-					if let Literal::Variable(b) = b {
-						map.insert(b.cloned_key(), Rc::clone(&a_set));
-					}
-				}
-				(None, Some(b_set)) => {
-					let mut members = (*b_set).borrow_mut();
-					members.push(a.clone());
-					if let Literal::Variable(a) = a {
-						map.insert(a.cloned_key(), Rc::clone(&b_set));
-					}
-				}
-				(None, None) => {
-					let n_set = Rc::new(RefCell::new(vec![a.clone(), b.clone()]));
-					if let Literal::Variable(a) = a {
-						map.insert(a.cloned_key(), Rc::clone(&n_set));
-					}
-					if let Literal::Variable(b) = b {
-						map.insert(b.cloned_key(), n_set);
-					}
-				}
-			};
-		};
-
-		// The equalities behind the unifications, as their two sides, the index
-		// of the constraint, and whether the constraint is an equality (rather
-		// than an element constraint), kept for the preprocessing trace.
-		let traced = self.prb.trace_active();
-		let mut edges: Vec<UnifyEdge<'a>> = Vec::new();
-
-		// Unify variables based on constraints
-		for (i, c) in self.fzn.constraints.iter().enumerate() {
-			if self.processed[i] {
-				continue;
-			}
-			let FznIdent::Known(KnownIdent::Constraint(ident)) = c.id else {
-				continue;
-			};
-			let mark_processed = |me: &mut Self| me.processed[i] = true;
-			match ident {
-				ConstraintIdent::BoolEq | ConstraintIdent::IntEq => {
-					if let [Argument::Literal(a), Argument::Literal(b)] = c.args.as_slice() {
-						record_unify(&mut unify_map, a, b);
-						if traced {
-							edges.push((a, b, i, true));
-						}
-						mark_processed(self);
-					}
-				}
-				ConstraintIdent::ArrayBoolElement
-				| ConstraintIdent::ArrayIntElement
-				| ConstraintIdent::ArrayVarBoolElement
-				| ConstraintIdent::ArrayVarIntElement => {
-					if let [idx, arr, Argument::Literal(b)] = c.args.as_slice() {
-						let arr = self.arg_array(arr)?;
-						// unify if the index is constants
-						if let Argument::Literal(Literal::Int(idx)) = idx {
-							let a = &arr[(idx - 1) as usize];
-							record_unify(&mut unify_map, a, b);
-							if traced {
-								edges.push((a, b, i, false));
-							}
-							mark_processed(self);
-						}
-						// unify if all values in arr are equal
-						if !arr.is_empty() && arr.iter().all_equal() {
-							record_unify(&mut unify_map, &arr[0], b);
-							if traced {
-								edges.push((&arr[0], b, i, false));
-							}
-							mark_processed(self);
-						}
-					}
-				}
-				_ => {}
-			}
+impl FznOutcome {
+	/// The outcome of the processing of a FlatZinc constraint that ended with
+	/// `res`.
+	fn of(res: &Result<(), FlatZincError>) -> Self {
+		match res {
+			Ok(()) => FznOutcome::Processed,
+			Err(err) => Self::of_error(err),
 		}
+	}
 
-		// The equalities of each group, identified by the address of its member
-		// list. An equality between two constants belongs to no group.
-		let mut group_edges: FxHashMap<*const RefCell<Vec<Literal<FznIdent>>>, Vec<usize>> =
-			FxHashMap::default();
-		// A constraint can contribute the same equality twice, e.g. an element
-		// constraint with a constant index into an array of equal elements.
-		let mut removed = FxHashSet::default();
-		for (e, &(a, b, i, is_eq)) in edges.iter().enumerate() {
-			match [a, b]
-				.into_iter()
-				.find_map(|l| unify_map_find(&unify_map, l))
-			{
-				Some(group) => group_edges.entry(Rc::as_ptr(&group)).or_default().push(e),
-				None if !removed.insert(i) => {}
-				None => {
-					let rule = if is_eq {
-						PreprocessRule::LinValid
-					} else {
-						PreprocessRule::Preserve
-					};
-					self.prb
-						.trace_raw(format!("del #{} by {}", i + 1, rule.as_str()));
-				}
+	/// The outcome of the processing of a FlatZinc constraint that failed with
+	/// `err`.
+	fn of_error(err: &FlatZincError) -> Self {
+		match err {
+			FlatZincError::ReformulationError(LoweringError::Simplification(_)) => {
+				FznOutcome::Conflict
 			}
+			_ => FznOutcome::Failed,
 		}
-
-		// The groups to log in the preprocessing trace. They are logged once
-		// all groups have been processed, in the order of their first
-		// equality, since the order of the map depends on the addresses of the
-		// variables.
-		let mut traced_groups = Vec::new();
-
-		#[expect(clippy::iter_over_hash_type, reason = "FxHashMap::iter is stable")]
-		for (k, group) in unify_map.iter() {
-			let li = group.borrow();
-			if self.map.contains_key(k) {
-				continue;
-			}
-			let (int_len, bool_len) = (self.prb.int_vars.len(), self.prb.bool_vars.len());
-			let is_bool = li.first().is_some_and(|l| match l {
-				Literal::Variable(var) => var.ty == Type::Bool,
-				Literal::Bool(_) => true,
-				_ => false,
-			});
-			// Determine the domain of the list of literals
-			let domain: Option<Literal<()>> = if is_bool {
-				let mut domain = None;
-				for lit in li.iter() {
-					match lit {
-						Literal::Bool(b) => {
-							if domain == Some(!b) {
-								return Err(self.prb.declare_conflict(NO_REASON).into());
-							} else {
-								domain = Some(*b);
-							}
-						}
-						Literal::Variable(_) => {}
-						_ => unreachable!(),
-					};
-				}
-				domain.map(Literal::Bool)
-			} else {
-				let mut domain = None::<IntSet>;
-				for lit in li.iter() {
-					match lit {
-						Literal::Int(i) => {
-							let rl = (*i..=*i).into();
-							if let Some(dom) = domain {
-								domain = Some(dom.intersect(&rl));
-							} else {
-								domain = Some(rl);
-							}
-						}
-						Literal::Variable(var) => {
-							if let Type::Int(Some(d)) = &var.ty {
-								if let Some(dom) = domain {
-									domain = Some(dom.intersect(d));
-								} else {
-									domain = Some(d.clone());
-								}
-							}
-						}
-						_ => unreachable!(),
-					};
-				}
-				domain.map(Literal::IntSet)
-			};
-			// Find any view that is part of a unified group
-			let var = li
-				.iter()
-				.find_map(|lit| -> Option<AnyView> {
-					if let Literal::Variable(v) = lit {
-						self.map.get(&v.cloned_key()).cloned()
-					} else {
-						None
-					}
-				})
-				// Create a new variable if no view is found
-				.unwrap_or_else(|| match domain {
-					Some(Literal::Bool(b)) => View::<bool>::from(b).into(),
-					Some(Literal::IntSet(dom)) => self.prb.new_int_decision(dom).into(),
-					Some(_) => unreachable!(),
-					None => {
-						if is_bool {
-							self.prb.new_bool_decision().into()
-						} else {
-							let var = li
-								.iter()
-								.find_map(|lit| {
-									if let Literal::Variable(var) = lit {
-										Some(var)
-									} else {
-										None
-									}
-								})
-								.unwrap();
-							warn!(
-								target: "flatzinc",
-								variable = %var.name,
-								min = FULL_INT_DOMAIN.start(),
-								max = FULL_INT_DOMAIN.end(),
-								"assume full integer domain for unbounded decision variable"
-							);
-							self.prb.new_int_decision(FULL_INT_DOMAIN).into()
-						}
-					}
-				});
-
-			// All names but one no longer need a decision of their own.
-			let names = li
-				.iter()
-				.filter(|l| matches!(l, Literal::Variable(_)))
-				.count();
-			self.stats.unified_decisions += names.saturating_sub(1) as u32;
-
-			// Map (or equate) all names in the group to the new variable
-			for lit in li.iter() {
-				if let Literal::Variable(v) = lit {
-					let prev = self.map.insert(v.cloned_key(), var.clone());
-					debug_assert_eq!(prev, None);
-				}
-			}
-
-			if traced {
-				let root = self.group_root(&li);
-				// Name the new decision after the variable that represents the
-				// group.
-				if let Some(Literal::Variable(r)) = root {
-					match var {
-						AnyView::Int(View(IntView::Linear(lin)))
-							if self.prb.int_vars.len() > int_len =>
-						{
-							self.prb.trace_name_int(lin.var, &r.name);
-						}
-						AnyView::Bool(View(BoolView::Decision(d)))
-							if self.prb.bool_vars.len() > bool_len =>
-						{
-							self.prb.trace_name_bool(d, &r.name);
-						}
-						_ => {}
-					}
-				}
-				let es = group_edges
-					.get(&Rc::as_ptr(group))
-					.map_or(&[][..], Vec::as_slice);
-				let first = es.iter().map(|&e| edges[e].2).min();
-				traced_groups.push((first, root.cloned(), es, var));
-			}
-		}
-		traced_groups.sort_by_key(|(first, ..)| *first);
-		for (_, root, es, var) in traced_groups {
-			self.trace_group(root.as_ref(), &edges, es, &var);
-		}
-		Ok(())
 	}
 }
 

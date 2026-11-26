@@ -21,7 +21,7 @@ use tracing::warn;
 
 #[cfg(feature = "flatzinc")]
 use crate::model::deserialize::flatzinc::{
-	FlatZincError, FlatZincLowerData, FlatZincModelMeta, FlatZincSolverMeta, FlatZincStatistics,
+	FlatZincError, FlatZincLowerData, FlatZincModelMeta, FlatZincSolverMeta,
 };
 use crate::{
 	IntSet, IntVal,
@@ -669,7 +669,6 @@ impl<State: lowerer::State> Lowerer<Result<FlatZincLowerData, FlatZincError>, St
 			)?;
 			model.trace_finish()?;
 		}
-		let unified_decisions = model.unified_decisions;
 
 		let (mut slv, map) = LowererComplete {
 			origin: &mut model,
@@ -712,10 +711,7 @@ impl<State: lowerer::State> Lowerer<Result<FlatZincLowerData, FlatZincError>, St
 			slv,
 			FlatZincSolverMeta {
 				names,
-				stats: FlatZincStatistics {
-					unified_decisions: meta.stats.unified_decisions + unified_decisions,
-					..meta.stats
-				},
+				stats: meta.stats,
 				goal,
 				assumptions,
 			},
@@ -1277,8 +1273,8 @@ impl LoweringMapBuilder {
 						};
 						let card = dom.card();
 						let order_enc = if def.eager_order
-							|| def.eager_direct
-							|| card.is_some_and(|c| c <= self.int_eager_limit)
+							|| def.eager_direct || card
+							.is_some_and(|c| c <= self.int_eager_limit)
 						{
 							LiteralStrategy::Eager
 						} else {

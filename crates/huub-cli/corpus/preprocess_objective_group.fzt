@@ -1,5 +1,7 @@
-var 2..4: o;
+var 2..4: p;
+var 2..9: o;
+constraint int_lin_eq([1, -1], [o, p], 0) :: trace_id(4);
 psi o := o;
-psi p := o;
-psi q := o;
+psi p := p;
+psi q := p;
 solve maximize o;

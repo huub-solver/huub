@@ -22,8 +22,6 @@ pub(super) enum DomLine {
 	/// The domain of the decision in the term, which is written as it is when
 	/// the step is logged.
 	Of(Fixed),
-	/// A domain line that has already been written.
-	Text(String),
 	/// The domain of the term's decision does not change.
 	Unchanged,
 }
@@ -253,31 +251,6 @@ impl Model {
 		}
 		t.int_names[idx] = Some(name.to_owned());
 	}
-	/// Log the replacement of the FlatZinc variable `name` in a group of
-	/// FlatZinc variables that are equal, before their decision is created.
-	///
-	/// `dom` is the domain of the variable that replaces it after the
-	/// replacement, if it changes.
-	pub(crate) fn trace_name_merged(
-		&mut self,
-		name: &str,
-		domain: &DeclaredDomain,
-		term: String,
-		dom: Option<(String, String)>,
-		justification: (PreprocessRule, Vec<u32>),
-	) {
-		if !self.trace_active() {
-			return;
-		}
-		let target = UnifyTarget {
-			term,
-			dom: match dom {
-				Some((var, d)) => DomLine::Text(format!("dom {var} <- {d}")),
-				None => DomLine::Unchanged,
-			},
-		};
-		self.trace_unify(name, declared_keep_domain(domain), target, justification);
-	}
 	/// Log the replacement of the FlatZinc variable `name`, with declared
 	/// domain `domain`, by the constant `k`, which happens when its declared
 	/// domain is `{k}`.
@@ -381,7 +354,6 @@ impl Model {
 				}
 				Some(_) => unreachable!("the decision in the term was unified"),
 			},
-			DomLine::Text(text) => format!("\n  {text}"),
 			DomLine::Unchanged => String::new(),
 		};
 		let (rule, hints) = justification;

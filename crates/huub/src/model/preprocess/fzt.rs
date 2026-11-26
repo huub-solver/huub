@@ -266,9 +266,9 @@ impl<'a> FztContext<'a> {
 	/// - `[7, c, t, e]`: if node `c` holds then node `t`, else node `e`.
 	pub(crate) fn formula_encoding(
 		&self,
-		formula: &pindakaas::propositional_logic::Formula<View<bool>>,
+		formula: &pindakaas::constraint::propositional_logic::Formula<View<bool>>,
 	) -> (FztArg, FztArg) {
-		use pindakaas::propositional_logic::Formula;
+		use pindakaas::constraint::propositional_logic::Formula;
 
 		/// Append the node for `f` to `ops`, returning its (1-based) position.
 		fn encode(

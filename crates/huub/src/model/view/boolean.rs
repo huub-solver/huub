@@ -163,7 +163,6 @@ impl Resolved<View<bool>> {
 					}
 					Const(_) => unreachable!(),
 				};
-				model.unified_decisions += 1;
 				model.trace_bool_unified(x);
 				Ok(())
 			}
