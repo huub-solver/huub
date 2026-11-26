@@ -1,0 +1,8 @@
+var 5..7: x;
+psi a := true;
+psi b := true;
+psi w := 3;
+psi x := x;
+psi y := x;
+psi z := x;
+solve satisfy;

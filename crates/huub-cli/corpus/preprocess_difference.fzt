@@ -1,0 +1,15 @@
+var 0..24: a;
+var 2..26: b;
+var 5..29: c;
+var 6..30: d;
+constraint int_lin_le([1, -1], [a, b], -2) :: trace_id(8);
+constraint int_lin_le([1, -1], [b, c], -3) :: trace_id(9);
+constraint int_lin_le([1, -1], [c, d], -1) :: trace_id(11);
+constraint int_lin_le([1, -1], [d, a], 10) :: trace_id(12);
+psi a := a;
+psi b := b;
+psi c := c;
+psi d := d;
+psi p := true;
+psi q := false;
+solve satisfy;

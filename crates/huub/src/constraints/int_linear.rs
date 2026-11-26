@@ -33,7 +33,10 @@ use crate::{
 		true_type::True,
 	},
 	lower::{LoweringContext, LoweringError},
-	model::{self, expressions::proposition::PropositionConstraint},
+	model::{
+		self, expressions::proposition::PropositionConstraint, preprocess::PreprocessRule,
+		view::integer::IntView as ModelIntView,
+	},
 	solver::{
 		self, BoolView, Decision, IntLitMeaning, Polarity, queue::PriorityLevel,
 		view::integer::IntView,
@@ -327,6 +330,7 @@ where
 					let mut lin = self.clone();
 					lin.reif = None;
 					ctx.post_constraint(lin);
+					ctx.justify(PreprocessRule::LinNorm);
 					return Ok(SimplificationStatus::Subsumed);
 				}
 				Some(false) => {
@@ -334,6 +338,9 @@ where
 						let mut lin = self.clone().negate(ctx)?;
 						lin.reif = None;
 						ctx.post_constraint(lin);
+						ctx.justify(PreprocessRule::LinNorm);
+					} else {
+						ctx.justify(PreprocessRule::LinValid);
 					}
 					return Ok(SimplificationStatus::Subsumed);
 				}
@@ -349,10 +356,19 @@ where
 			});
 		self.terms = terms;
 		self.rhs -= vals.into_iter().map(OF::Accumulator::from).sum();
+		// Removing the fixed terms, which the checker has replaced by their
+		// values, preserves the linear normal form.
+		ctx.justify(PreprocessRule::LinNorm);
 
 		// Perform single-term domain changes and any possible unification
 		match *self.terms.as_slice() {
 			[var] if self.reif.is_none() => {
+				// The tailored rules reason about the decision in a term, which
+				// a Boolean view hides.
+				let unary = matches!(var.0, ModelIntView::Linear(_));
+				if unary {
+					ctx.justify(PreprocessRule::LinUnary);
+				}
 				match (self.comparator, self.rhs.try_into()) {
 					(LinComparator::Equal, Ok(rhs)) => var.fix(ctx, rhs, NO_REASON)?,
 					(LinComparator::Equal, Err(_)) => {
@@ -372,6 +388,13 @@ where
 					}
 					(LinComparator::NotEqual, Err(_)) => {}
 				}
+				// A removed value is not entailed by the bounds of the domain,
+				// which is all that `lin-valid` considers.
+				ctx.justify(if unary && self.comparator != LinComparator::NotEqual {
+					PreprocessRule::LinValid
+				} else {
+					PreprocessRule::Preserve
+				});
 				return Ok(SimplificationStatus::Subsumed);
 			}
 			[var] => {
@@ -389,6 +412,12 @@ where
 					(LinComparator::NotEqual, Ok(rhs)) => var.ne(rhs),
 					(LinComparator::NotEqual, Err(_)) => false.into(),
 				};
+				let literal = matches!(var.0, ModelIntView::Linear(lin) if lin.scale.get() == 1);
+				ctx.justify(if literal {
+					PreprocessRule::LinLit
+				} else {
+					PreprocessRule::Preserve
+				});
 				match self.reif.unwrap() {
 					Reification::ImpliedBy(r) => {
 						let _ = ctx.post_constraint(PropositionConstraint(Formula::Implies(
@@ -398,12 +427,21 @@ where
 					}
 					Reification::ReifiedBy(r) => r.unify(ctx, lit)?,
 				}
+				// Once the reification is replaced by the literal view, the
+				// constraint holds trivially.
+				ctx.justify(if literal {
+					PreprocessRule::LinValid
+				} else {
+					PreprocessRule::Preserve
+				});
 				return Ok(SimplificationStatus::Subsumed);
 			}
 			[a, b] if self.comparator == LinComparator::Equal && self.reif.is_none() => {
 				match self.rhs.try_into() {
 					Ok(rhs) => {
+						ctx.justify(PreprocessRule::Preserve);
 						let b = b.bounding_neg(ctx)?.bounding_add(ctx, rhs)?;
+						ctx.justify(PreprocessRule::LinAffine);
 						a.unify(ctx, b)?;
 					}
 					Err(_) => {
@@ -411,6 +449,7 @@ where
 						return Err(ctx.declare_conflict(NO_REASON));
 					}
 				}
+				ctx.justify(PreprocessRule::LinValid);
 				return Ok(SimplificationStatus::Subsumed);
 			}
 			_ => {}
@@ -450,6 +489,7 @@ where
 		});
 
 		if let Some(satisfied) = known_result {
+			ctx.justify(PreprocessRule::LinValid);
 			return match self.reif {
 				Some(Reification::ImpliedBy(r)) => {
 					if !satisfied {

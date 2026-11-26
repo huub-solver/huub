@@ -1,0 +1,161 @@
+{
+  "variables": {
+    "a": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          30
+        ]
+      ]
+    },
+    "b": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          30
+        ]
+      ]
+    },
+    "c": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          30
+        ]
+      ]
+    },
+    "d": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          30
+        ]
+      ]
+    },
+    "p": {
+      "type": "bool"
+    },
+    "q": {
+      "type": "bool"
+    }
+  },
+  "arrays": {},
+  "constraints": [
+    {
+      "id": "int_lin_le",
+      "args": [
+        [
+          1,
+          -1
+        ],
+        [
+          "a",
+          "b"
+        ],
+        -2
+      ]
+    },
+    {
+      "id": "int_lin_le",
+      "args": [
+        [
+          1,
+          -1
+        ],
+        [
+          "b",
+          "c"
+        ],
+        -3
+      ]
+    },
+    {
+      "id": "int_lin_le",
+      "args": [
+        [
+          1,
+          -1
+        ],
+        [
+          "a",
+          "c"
+        ],
+        -4
+      ]
+    },
+    {
+      "id": "int_lin_le",
+      "args": [
+        [
+          1,
+          -1
+        ],
+        [
+          "c",
+          "d"
+        ],
+        -1
+      ]
+    },
+    {
+      "id": "int_lin_le",
+      "args": [
+        [
+          1,
+          -1
+        ],
+        [
+          "d",
+          "a"
+        ],
+        10
+      ]
+    },
+    {
+      "id": "int_lin_le_reif",
+      "args": [
+        [
+          1,
+          -1
+        ],
+        [
+          "a",
+          "d"
+        ],
+        -6,
+        "p"
+      ]
+    },
+    {
+      "id": "int_lin_le_reif",
+      "args": [
+        [
+          1,
+          -1
+        ],
+        [
+          "d",
+          "a"
+        ],
+        -12,
+        "q"
+      ]
+    }
+  ],
+  "output": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "p",
+    "q"
+  ],
+  "solve": {
+    "method": "satisfy"
+  },
+  "version": "1.0"
+}

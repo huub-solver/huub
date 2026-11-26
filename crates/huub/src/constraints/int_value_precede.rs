@@ -71,6 +71,17 @@ pub struct IntValuePrecedeChainValue<I> {
 	mapping: Vec<Option<usize>>,
 }
 
+/// The parameters of an [`IntValuePrecedeChainValue`] constraint: the values
+/// whose first occurrences must be in order, and the decisions in which they
+/// occur.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ValuePrecedeParameters<'a, I> {
+	/// The values, in the order of their first occurrences.
+	pub(crate) values: &'a [IntVal],
+	/// The decisions in which the values occur.
+	pub(crate) vars: &'a [I],
+}
+
 impl<I> IntSeqPrecedeChainBounds<I> {
 	/// Lower bound explanation: Could not have this value earlier (=upper bound
 	/// explanation) and some later value requires the lower bound (recursive
@@ -336,6 +347,10 @@ impl<I> IntSeqPrecedeChainBounds<I> {
 	/// is no latest.
 	fn upper_limit<Ctx: TrailingActions>(&self, ctx: &mut Ctx, k: usize) -> IntVal {
 		min(ctx.trailed(self.last[k]), self.vars.len() as IntVal - 1)
+	}
+	/// The decisions whose values must first occur in increasing order.
+	pub(crate) fn vars(&self) -> &[I] {
+		&self.vars
 	}
 }
 
@@ -678,6 +693,14 @@ impl<I> IntValuePrecedeChainValue<I> {
 			min_hole,
 			next_hole,
 			mapping,
+		}
+	}
+
+	/// The parameters of the constraint.
+	pub(crate) fn parameters(&self) -> ValuePrecedeParameters<'_, I> {
+		ValuePrecedeParameters {
+			values: &self.values,
+			vars: &self.vars,
 		}
 	}
 

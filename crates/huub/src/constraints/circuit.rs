@@ -62,6 +62,12 @@ pub(crate) struct CircuitGraph<const SUBCIRCUIT: bool, I> {
 }
 
 impl<const SUBCIRCUIT: bool> Circuit<SUBCIRCUIT> {
+	/// The successor variables of the constraint and the numbering of its
+	/// nodes, which define the predicate that it enforces.
+	pub(crate) fn graph(&self) -> &CircuitGraph<SUBCIRCUIT, View<IntVal>> {
+		&self.no_cycle_prop.graph
+	}
+
 	/// Create a new `circuit` (or `subcircuit`) constraint over the given
 	/// successor variables, where `vars[i] == offset + j` means node `i`'s
 	/// successor is node `j`.

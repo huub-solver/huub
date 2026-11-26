@@ -1,0 +1,65 @@
+{
+  "variables": {
+    "p": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          5
+        ]
+      ]
+    },
+    "o": {
+      "type": "int",
+      "domain": [
+        [
+          2,
+          9
+        ]
+      ]
+    },
+    "q": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          9
+        ]
+      ]
+    }
+  },
+  "arrays": {},
+  "constraints": [
+    {
+      "id": "int_eq",
+      "args": [
+        "p",
+        "o"
+      ]
+    },
+    {
+      "id": "int_eq",
+      "args": [
+        "q",
+        "p"
+      ]
+    },
+    {
+      "id": "int_le",
+      "args": [
+        "p",
+        4
+      ]
+    }
+  ],
+  "output": [
+    "p",
+    "o",
+    "q"
+  ],
+  "solve": {
+    "method": "maximize",
+    "objective": "o"
+  },
+  "version": "1.0"
+}

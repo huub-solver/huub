@@ -1,0 +1,45 @@
+trace 0.1
+rewrite #1 => #8 by identity
+  constraint int_lin_le([1, -1], [a, b], -2) :: trace_id(8);
+rewrite #2 => #9 by identity
+  constraint int_lin_le([1, -1], [b, c], -3) :: trace_id(9);
+rewrite #3 => #10 by identity
+  constraint int_lin_le([1, -1], [a, c], -4) :: trace_id(10);
+rewrite #4 => #11 by identity
+  constraint int_lin_le([1, -1], [c, d], -1) :: trace_id(11);
+rewrite #5 => #12 by identity
+  constraint int_lin_le([1, -1], [d, a], 10) :: trace_id(12);
+rewrite #6 => #13 #14 by reif-split
+  constraint int_lin_le_imp([1, -1], [a, d], -6, p) :: trace_id(13);
+  constraint int_lin_le_imp([1, -1], [d, a], 5, !p) :: trace_id(14);
+rewrite #7 => #15 #16 by reif-split
+  constraint int_lin_le_imp([1, -1], [d, a], -12, q) :: trace_id(15);
+  constraint int_lin_le_imp([1, -1], [a, d], 11, !q) :: trace_id(16);
+dom b <- 2..30 by dl
+dom c <- 5..30 by dl
+dom d <- 6..30 by dl
+dom c <- 5..29 by dl
+dom b <- 2..26 by dl
+dom a <- 0..24 by dl
+del #10 by dl
+add #17 by dl
+  constraint int_lin_le([1, -1], [a, d], -6) :: trace_id(17);
+del #13 by imp-weaken hint #17
+del #17 by dl
+add #18 by dl
+  constraint int_lin_le([1, -1], [a, d], 11) :: trace_id(18);
+del #16 by imp-weaken hint #18
+del #18 by dl
+add #19 by dl
+  constraint int_lin_le([1, -1], [a, d], -6) :: trace_id(19);
+dom p <- {1} by imp-contra hint #14,#19
+unify p := true by singleton
+del #14 by lin-valid
+del #19 by dl
+add #20 by dl
+  constraint int_lin_le([1, -1], [a, d], 11) :: trace_id(20);
+dom q <- {0} by imp-contra hint #15,#20
+unify q := false by singleton
+del #15 by lin-valid
+del #20 by dl
+end 30

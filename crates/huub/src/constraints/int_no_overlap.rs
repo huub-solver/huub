@@ -47,9 +47,9 @@ use crate::{
 // representing the object and the second representing the dimension.
 pub struct IntNoOverlapSweep<const STRICT: bool, I1, I2> {
 	/// The origin position of each object in each dimension.
-	origin: Matrix<2, I1>,
+	pub(crate) origin: Matrix<2, I1>,
 	/// The size of each object in each dimension.
-	size: Matrix<2, I2>,
+	pub(crate) size: Matrix<2, I2>,
 
 	/// Trailed flags for target objects that have been lost and can be skipped
 	/// in later iterations because they have been checked to be fixed at a

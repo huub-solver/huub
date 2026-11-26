@@ -1,0 +1,12 @@
+trace 0.1
+unify o := p keep #4 by preserve hint #1
+  dom p <- 2..5
+del #1 by preserve
+unify q := p by preserve hint #2
+  dom p <- 2..5
+del #2 by preserve
+rewrite #3 => #5 by lin-norm
+  constraint int_lin_le([1], [p], 4) :: trace_id(5);
+dom p <- 2..4 by lin-unary hint #5
+del #5 by lin-valid
+end 7

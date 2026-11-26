@@ -45,6 +45,16 @@ pub struct Disjunctive {
 	pub(crate) detectable_precedence_propagation: Option<bool>,
 }
 
+/// The parameters of a [`Disjunctive`] constraint: the start times and
+/// durations of its tasks.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct DisjunctiveParameters<'a> {
+	/// The start time of each task.
+	pub(crate) start_times: &'a [model::View<IntVal>],
+	/// The duration of each task.
+	pub(crate) durations: &'a [IntVal],
+}
+
 /// The propagation rules for the `disjunctive` constraint. This enum is
 /// used to identify which propagation algorithm is being applied during the
 /// propagation phase of the `DisjunctiveStrictPropagator`. Values:
@@ -186,6 +196,13 @@ impl Disjunctive {
 	/// [`Solver`](crate::solver::Solver) object.
 	pub fn not_last_propagation_enabled(&self) -> bool {
 		self.not_last_propagation.unwrap_or(false)
+	}
+	/// The parameters of the constraint.
+	pub(crate) fn parameters(&self) -> DisjunctiveParameters<'_> {
+		DisjunctiveParameters {
+			start_times: &self.propagator.start_times,
+			durations: &self.propagator.durations,
+		}
 	}
 }
 

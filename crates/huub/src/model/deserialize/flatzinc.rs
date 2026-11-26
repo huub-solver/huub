@@ -7,7 +7,7 @@ use std::{
 	hash::Hash,
 	num::NonZero,
 	ops::{Not, RangeInclusive},
-	sync::Arc,
+	sync::{Arc, Mutex},
 };
 
 use flatzinc_serde::{
@@ -20,6 +20,7 @@ use pindakaas::constraint::propositional_logic::Formula;
 use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::warn;
 
+pub use crate::model::preprocess::{FztError, PreprocessEvent, PreprocessSink};
 use crate::{
 	IntSet, IntVal,
 	actions::{
@@ -29,10 +30,14 @@ use crate::{
 	constraints::{NO_REASON, Nogood},
 	lower::{Lowerer, LowererComplete, LoweringError},
 	model::{
-		Model,
+		self, Model,
 		deserialize::{AnyView, Branching, Goal},
 		expressions::linear::IntLinearExp,
-		view::{View, boolean::BoolView},
+		preprocess::{
+			DeclaredDomain, FznOutcome, FztArg, FztConstraint, FztContext, PreprocessRule,
+			fzt_domain, lin_norm_equal,
+		},
+		view::{View, boolean::BoolView, integer::IntView},
 	},
 	solver::{
 		self,
@@ -279,6 +284,8 @@ pub enum FlatZincError {
 		/// Number of arguments expected.
 		expected: usize,
 	},
+	/// The preprocessing trace that was requested cannot be produced.
+	PreprocessTrace(FztError),
 	/// FlatZinc instance used an identifier that was not defined.
 	UnknownIdentifier(String),
 	/// FlatZinc constraint or annotation used an argument of the wrong type.
@@ -386,6 +393,12 @@ pub(crate) struct FznModelBuilder<'a> {
 	var_index: FxHashMap<ArcKey<Variable<FznIdent>>, u32>,
 	/// The incumbent model
 	prb: Model,
+	/// The index of the FlatZinc constraint whose posting is logged in the
+	/// preprocessing trace, while its window is open.
+	posting: Option<usize>,
+	/// The FlatZinc constraint at `posting` as it was when its posting started,
+	/// which is what the constraints that are posted for it are compared with.
+	posting_input: Option<FztConstraint>,
 	/// Flags indicating which constraints have been processed
 	processed: Vec<bool>,
 	/// Statistics about the extraction process
@@ -418,6 +431,20 @@ pub trait HuubFlatZinc {
 	/// a [`Solver`](crate::solver::Solver) (via
 	/// [`to_solver()`](Lowerer::to_solver)).
 	fn lower(&self) -> Lowerer<Result<FlatZincLowerData, FlatZincError>>;
+
+	/// Like [`lower`](HuubFlatZinc::lower), and additionally records the
+	/// preprocessing of the instance, which is delivered to `sink`: every
+	/// change that the instance undergoes between reading it and the start of
+	/// search, and the model at the start of search (see
+	/// [`PreprocessEvent`]).
+	///
+	/// Recording only observes the lowering, so the solver is the same as
+	/// without it. If the recording cannot be completed, the lowering fails
+	/// with [`FlatZincError::PreprocessTrace`].
+	fn lower_with_preprocess_trace(
+		&self,
+		sink: impl PreprocessSink + 'static,
+	) -> Lowerer<Result<FlatZincLowerData, FlatZincError>>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -427,6 +454,15 @@ pub enum KnownIdent {
 	Annotation(AnnotationIdent),
 	/// Constraint identifiers.
 	Constraint(ConstraintIdent),
+}
+
+/// The domain with which the FlatZinc variable `var` is declared.
+fn declared_domain(var: &Variable<FznIdent>) -> DeclaredDomain {
+	match &var.ty {
+		Type::Bool => DeclaredDomain::Bool,
+		Type::Int(d) => DeclaredDomain::Int(d.clone()),
+		_ => DeclaredDomain::Int(None),
+	}
 }
 
 impl AnnotationIdent {
@@ -591,6 +627,32 @@ impl ConstraintIdent {
 			Self::ValuePrecedeChain => "huub_value_precede_chain_int",
 		}
 	}
+
+	/// Whether the constraint belongs to the linear family, which Huub posts
+	/// as a single linear constraint.
+	pub(crate) fn is_linear(self) -> bool {
+		matches!(
+			self,
+			Self::BoolLinEq
+				| Self::IntEqImp
+				| Self::IntEqReif
+				| Self::IntLe
+				| Self::IntLeImp
+				| Self::IntLeReif
+				| Self::IntLinEq
+				| Self::IntLinEqImp
+				| Self::IntLinEqReif
+				| Self::IntLinLe
+				| Self::IntLinLeImp
+				| Self::IntLinLeReif
+				| Self::IntLinNe
+				| Self::IntLinNeImp
+				| Self::IntLinNeReif
+				| Self::IntNe
+				| Self::IntNeImp
+				| Self::IntNeReif
+		)
+	}
 }
 
 impl Display for ConstraintIdent {
@@ -667,17 +729,45 @@ impl TryFrom<&str> for ConstraintIdent {
 
 impl HuubFlatZinc for FlatZinc<FznIdent> {
 	fn lower(&self) -> Lowerer<Result<FlatZincLowerData, FlatZincError>> {
+		lower_flatzinc(self, None)
+	}
+
+	fn lower_with_preprocess_trace(
+		&self,
+		sink: impl PreprocessSink + 'static,
+	) -> Lowerer<Result<FlatZincLowerData, FlatZincError>> {
+		lower_flatzinc(self, Some(Arc::new(Mutex::new(sink))))
+	}
+}
+
+/// Lower `fzn` to a builder, recording the preprocessing for `sink`, if any.
+fn lower_flatzinc(
+	fzn: &FlatZinc<FznIdent>,
+	sink: Option<Arc<Mutex<dyn PreprocessSink>>>,
+) -> Lowerer<Result<FlatZincLowerData, FlatZincError>> {
+	{
 		let deserialize_model = |fzn: &FlatZinc<FznIdent>| {
-			let mut builder = FznModelBuilder::new(fzn);
-			builder.extract_views()?;
-			builder.post_constraints()?;
-			builder.ensure_output()?;
+			let mut builder = FznModelBuilder::new(fzn, sink);
+			let res = builder
+				.extract_views()
+				.and_then(|()| builder.post_constraints())
+				.and_then(|()| builder.ensure_output());
+			if let Err(err) = res {
+				builder.trace_posting_fail(&err);
+				// A conflict concludes the trace, which ends in its `unsat`
+				// step. After any other error the trace is incomplete, and
+				// is not finished.
+				if FznOutcome::of_error(&err) == FznOutcome::Conflict {
+					builder.prb.trace_finish()?;
+				}
+				return Err(err);
+			}
 
 			builder.finalize()
 		};
 
 		LowererComplete::builder_internal(
-			deserialize_model(self).map(|(model, meta)| FlatZincLowerData { meta, model }),
+			deserialize_model(fzn).map(|(model, meta)| FlatZincLowerData { meta, model }),
 		)
 	}
 }
@@ -698,6 +788,7 @@ impl Display for FlatZincError {
 				f,
 				"constraints with identifiers `{name}' must have {expected} arguments, found {found}"
 			),
+			Self::PreprocessTrace(err) => write!(f, "{err}"),
 			Self::UnknownIdentifier(ident) => write!(f, "could not find identifier `{ident}'"),
 			Self::InvalidArgumentType { expected, found } => {
 				write!(f, "argument found of type `{found}', expected `{expected}'")
@@ -714,6 +805,12 @@ impl Error for FlatZincError {}
 impl From<<Model as ReasoningEngine>::Conflict> for FlatZincError {
 	fn from(conflict: <Model as ReasoningEngine>::Conflict) -> Self {
 		Self::ReformulationError(LoweringError::from(conflict))
+	}
+}
+
+impl From<FztError> for FlatZincError {
+	fn from(err: FztError) -> Self {
+		Self::PreprocessTrace(err)
 	}
 }
 
@@ -1222,6 +1319,49 @@ impl<'a> FznModelBuilder<'a> {
 		defined_by: &FxHashMap<ArcKey<Variable<FznIdent>>, usize>,
 		con: usize,
 	) -> Result<(), FlatZincError> {
+		if !self.prb.trace_active() {
+			return self.extract_view_inner(defined_by, con);
+		}
+		let rule = match &self.fzn.constraints[con].id {
+			FznIdent::Known(KnownIdent::Constraint(ident)) => match ident {
+				ConstraintIdent::Bool2Int | ConstraintIdent::IntLinEq => PreprocessRule::LinAffine,
+				ConstraintIdent::BoolNot => PreprocessRule::LinNeg,
+				ConstraintIdent::IntEqReif
+				| ConstraintIdent::IntLeReif
+				| ConstraintIdent::IntNeReif => PreprocessRule::LinLit,
+				_ => PreprocessRule::Preserve,
+			},
+			_ => PreprocessRule::Preserve,
+		};
+		// After the replacement, the constraint holds trivially.
+		let del_rule = match rule {
+			PreprocessRule::LinAffine | PreprocessRule::LinNeg | PreprocessRule::LinLit => {
+				PreprocessRule::LinValid
+			}
+			_ => PreprocessRule::Preserve,
+		};
+		self.prb.trace_fzn_open(con, true, rule);
+		let res = self.extract_view_inner(defined_by, con);
+		let outcome = match FznOutcome::of(&res) {
+			FznOutcome::Processed if !self.processed[con] => FznOutcome::Unprocessed,
+			outcome => outcome,
+		};
+		let closed = self
+			.prb
+			.trace_fzn_close(outcome, |_| PreprocessRule::Preserve, del_rule);
+		// An error of the extraction takes precedence over one of the trace.
+		res?;
+		closed?;
+		Ok(())
+	}
+
+	/// Implementation of [`Self::extract_view`] without the logging of the
+	/// preprocessing trace.
+	fn extract_view_inner(
+		&mut self,
+		defined_by: &FxHashMap<ArcKey<Variable<FznIdent>>, usize>,
+		con: usize,
+	) -> Result<(), FlatZincError> {
 		debug_assert!(!self.processed[con]);
 		let c = &self.fzn.constraints[con];
 
@@ -1245,6 +1385,14 @@ impl<'a> FznModelBuilder<'a> {
 					}
 				},
 				Entry::Vacant(e) => {
+					// The view as a term, before its decision can become fixed
+					// by the restriction of its domain, which is part of the
+					// unification step.
+					let target = me.prb.trace_active().then(|| {
+						let target = me.prb.trace_unify_target(view.clone());
+						me.prb.trace_suppress();
+						target
+					});
 					// Enforce the domain of the named (uncreated) variable on
 					// the view
 					if let Type::Int(Some(dom)) = &var.ty {
@@ -1252,6 +1400,14 @@ impl<'a> FznModelBuilder<'a> {
 							unreachable!()
 						};
 						view.restrict_domain(&mut me.prb, dom, NO_REASON)?;
+					}
+					if let Some(target) = target {
+						me.prb.trace_name_unified(
+							&var.name,
+							&declared_domain(var),
+							target,
+							view.clone(),
+						);
 					}
 					// Insert the view to use instead of a new variable for the
 					// name
@@ -1434,6 +1590,18 @@ impl<'a> FznModelBuilder<'a> {
 	pub(crate) fn finalize(mut self) -> Result<(Model, FlatZincModelMeta), FlatZincError> {
 		let branching = self.extract_branchings()?;
 		let goal = self.extract_goal()?;
+		if self.prb.trace_active() {
+			// Variables that are never referenced are never given a decision,
+			// and remain unconstrained.
+			let unmaterialized = self
+				.fzn
+				.variables
+				.iter()
+				.filter(|v| !self.map.contains_key(&v.cloned_key()))
+				.map(|v| (v.name.clone(), declared_domain(v)))
+				.collect();
+			self.prb.trace_unmaterialized(unmaterialized);
+		}
 		Ok((
 			self.prb,
 			FlatZincModelMeta {
@@ -1499,6 +1667,9 @@ impl<'a> FznModelBuilder<'a> {
 					Type::Bool => {
 						let model = self.prb.bool_vars.len() as u64;
 						let view = AnyView::Bool(self.prb.new_bool_decision());
+						if let AnyView::Bool(View(BoolView::Decision(d))) = view {
+							self.prb.trace_name_bool(d, &var.name);
+						}
 						// Register the model Boolean decision against its
 						// FlatZinc variable.
 						if tracing::enabled!(target: "reverse_map", tracing::Level::TRACE)
@@ -1528,6 +1699,19 @@ impl<'a> FznModelBuilder<'a> {
 								self.prb.new_int_decision(FULL_INT_DOMAIN).into()
 							}
 						};
+						if self.prb.int_vars.len() > before {
+							self.prb
+								.trace_name_int(model::Decision(before as u32), &var.name);
+							if dom.is_none() {
+								Self::trace_full_domain(&mut self.prb, &var.name);
+							}
+						} else if let AnyView::Int(View(IntView::Const(k))) = view {
+							self.prb.trace_name_singleton(
+								&var.name,
+								&DeclaredDomain::Int(dom.clone()),
+								k,
+							);
+						}
 						// Register the model integer decision against its
 						// FlatZinc variable, unless it's a constant.
 						if self.prb.int_vars.len() > before
@@ -1551,7 +1735,10 @@ impl<'a> FznModelBuilder<'a> {
 		}
 	}
 	/// Create a new builder to create a model from a FlatZinc instance.
-	pub(crate) fn new(fzn: &'a FlatZinc<FznIdent>) -> Self {
+	pub(crate) fn new(
+		fzn: &'a FlatZinc<FznIdent>,
+		sink: Option<Arc<Mutex<dyn PreprocessSink>>>,
+	) -> Self {
 		// Build map from ArcKey to index if `reverse_map` tracing is enabled.
 		let var_index = tracing::enabled!(target: "reverse_map", tracing::Level::TRACE)
 			.then(|| {
@@ -1563,11 +1750,23 @@ impl<'a> FznModelBuilder<'a> {
 			})
 			.unwrap_or_default();
 
+		let mut prb = Model::default();
+		if let Some(sink) = sink {
+			let objective = match &fzn.solve.method {
+				flatzinc_serde::Method::Minimize(Literal::Variable(v))
+				| flatzinc_serde::Method::Maximize(Literal::Variable(v)) => Some(v.name.clone()),
+				_ => None,
+			};
+			prb.trace_start(fzn.constraints.len(), objective, sink);
+		}
+
 		Self {
 			fzn,
 			map: FxHashMap::default(),
 			var_index,
-			prb: Model::default(),
+			prb,
+			posting: None,
+			posting_input: None,
 			processed: vec![false; fzn.constraints.len()],
 			stats: FlatZincStatistics::default(),
 			assumptions: Vec::new(),
@@ -1622,6 +1821,7 @@ impl<'a> FznModelBuilder<'a> {
 			if self.processed[i] {
 				continue;
 			}
+			self.trace_posting_open(i)?;
 			let mut ann_used = vec![false; c.ann.len()];
 
 			let FznIdent::Known(KnownIdent::Constraint(ident)) = c.id else {
@@ -1737,6 +1937,7 @@ impl<'a> FznModelBuilder<'a> {
 					// in. `true` literals are ignored.
 					let arr = self.arg_array(arr)?;
 					self.assumptions.reserve(arr.len());
+					let first = self.assumptions.len();
 					for l in arr {
 						let label = match l {
 							Literal::Variable(v) => v.name.clone(),
@@ -1752,6 +1953,10 @@ impl<'a> FznModelBuilder<'a> {
 						let view = self.lit_bool(l)?;
 						self.assumptions.push((label, view));
 					}
+					// Search enforces the assumptions, so they remain part of
+					// the model at the start of search.
+					let lits = self.assumptions[first..].iter().map(|(_, v)| *v).collect();
+					self.prb.trace_assume(lits);
 				}
 				ConstraintIdent::Bool2Int => {
 					let [b, i] = c.args.as_slice() else {
@@ -2073,12 +2278,11 @@ impl<'a> FznModelBuilder<'a> {
 							AnnotationIdent::CumuOppEdgeFinding,
 						),
 					) {
-						// No annotations found, so we assume the user wants the
-						// default configuration
+						// No annotations found, so we assume the user wants the default
+						// configuration
 						(false, false, false) => (None, None, None),
-						// At least one annotation was found, so we assume
-						// missing annotations disable certain propagation
-						// options.
+						// At least one annotation was found, so we assume missing annotations
+						// disable certain propagation options.
 						(eoc, ef, opp) => (Some(eoc), Some(ef), Some(opp)),
 					};
 					self.prb
@@ -2439,8 +2643,158 @@ impl<'a> FznModelBuilder<'a> {
 				}
 			}
 		}
+		self.trace_posting_close()?;
 
 		Ok(())
+	}
+
+	/// Write the FlatZinc constraint `c` in the `.fzt` model language, as it
+	/// reads after the replacements of its variables that have happened so
+	/// far, or `None` if it contains values that cannot be written.
+	fn render_constraint(&self, c: &flatzinc_serde::Constraint<FznIdent>) -> Option<FztConstraint> {
+		let ctx = FztContext::new(&self.prb);
+		let lit = |l: &Literal<FznIdent>| -> Option<FztArg> {
+			Some(match l {
+				Literal::Int(i) => (*i).into(),
+				Literal::Bool(b) => FztArg::Bool(*b),
+				Literal::IntSet(set) => ctx.set(&set.iter().collect()),
+				Literal::Variable(v) => match self.map.get(&v.cloned_key()) {
+					Some(AnyView::Int(iv)) => ctx.int(*iv),
+					Some(AnyView::Bool(bv)) => ctx.bool(*bv),
+					None => ctx.name(&v.name),
+				},
+				_ => return None,
+			})
+		};
+		let args = c
+			.args
+			.iter()
+			.map(|a| match a {
+				Argument::Literal(l) => lit(l),
+				Argument::Array(ls) => ls.iter().map(lit).collect::<Option<_>>().map(FztArg::Array),
+				Argument::ArrayNamed(arr) => arr
+					.contents
+					.iter()
+					.map(lit)
+					.collect::<Option<_>>()
+					.map(FztArg::Array),
+			})
+			.collect::<Option<_>>()?;
+		Some(FztConstraint::new(c.id.to_string(), args))
+	}
+
+	/// Log that Huub assumes the full range of [`IntVal`] as the domain of the
+	/// unbounded FlatZinc variable `name`.
+	///
+	/// This is not a solution-preserving step, and it is logged as such.
+	fn trace_full_domain(prb: &mut Model, name: &str) {
+		prb.trace_raw(format!(
+			"dom {name} <- {} by preserve",
+			fzt_domain(&IntSet::from(FULL_INT_DOMAIN))
+		));
+	}
+
+	/// Close the window of the posting of the current FlatZinc constraint in
+	/// the preprocessing trace, if one is open, logging its replacement by the
+	/// constraints that were posted for it, and simplify those constraints.
+	fn trace_posting_close(&mut self) -> Result<(), FlatZincError> {
+		let Some(i) = self.posting.take() else {
+			return Ok(());
+		};
+		let c = &self.fzn.constraints[i];
+		let ident = match c.id {
+			FznIdent::Known(KnownIdent::Constraint(ident)) => Some(ident),
+			_ => None,
+		};
+		let del_rule = match ident {
+			// Posted as unifications, after which the constraint holds
+			// trivially.
+			Some(ConstraintIdent::Bool2Int | ConstraintIdent::BoolNot) => PreprocessRule::LinValid,
+			_ => PreprocessRule::Preserve,
+		};
+		let linear = ident.is_some_and(ConstraintIdent::is_linear);
+		let input = self.posting_input.take();
+		self.prb.trace_fzn_close(
+			FznOutcome::Processed,
+			|outputs| match (outputs, &input) {
+				([out], Some(input)) if input == out => PreprocessRule::Identity,
+				// Guard the claim where the normal form of the input can be
+				// computed, i.e. for an `int_lin_*` spelling.
+				([out], Some(input))
+					if linear
+						&& out.name().starts_with("int_lin_")
+						&& lin_norm_equal(input, out) != Some(false) =>
+				{
+					PreprocessRule::LinNorm
+				}
+				_ => PreprocessRule::Preserve,
+			},
+			del_rule,
+		)?;
+		Ok(())
+	}
+
+	/// Close the window of the posting of the current FlatZinc constraint in
+	/// the preprocessing trace, if one is open, after its posting failed with
+	/// `err`.
+	fn trace_posting_fail(&mut self, err: &FlatZincError) {
+		if self.posting.take().is_some() {
+			self.prb
+				.trace_fzn_close(
+					FznOutcome::of_error(err),
+					|_| PreprocessRule::Preserve,
+					PreprocessRule::Preserve,
+				)
+				.expect("closing a window after a failure renders no constraints");
+		}
+	}
+
+	/// Open the window of the posting of the FlatZinc constraint at index `i`
+	/// in the preprocessing trace, closing the window of the previous one.
+	///
+	/// While the window is open, the steps of the posting are collected.
+	fn trace_posting_open(&mut self, i: usize) -> Result<(), FlatZincError> {
+		self.trace_posting_close()?;
+		if !self.prb.trace_active() {
+			return Ok(());
+		}
+		let rule = match self.fzn.constraints[i].id {
+			FznIdent::Known(KnownIdent::Constraint(ConstraintIdent::Bool2Int)) => {
+				PreprocessRule::LinAffine
+			}
+			FznIdent::Known(KnownIdent::Constraint(ConstraintIdent::BoolNot)) => {
+				PreprocessRule::LinNeg
+			}
+			_ => PreprocessRule::Preserve,
+		};
+		// The state of the model changes while the constraint is posted, and
+		// the constraint is rendered as it is before that.
+		self.posting_input = self.render_constraint(&self.fzn.constraints[i]);
+		self.prb.trace_fzn_open(i, false, rule);
+		self.posting = Some(i);
+		Ok(())
+	}
+}
+
+impl FznOutcome {
+	/// The outcome of the processing of a FlatZinc constraint that ended with
+	/// `res`.
+	fn of(res: &Result<(), FlatZincError>) -> Self {
+		match res {
+			Ok(()) => FznOutcome::Processed,
+			Err(err) => Self::of_error(err),
+		}
+	}
+
+	/// The outcome of the processing of a FlatZinc constraint that failed with
+	/// `err`.
+	fn of_error(err: &FlatZincError) -> Self {
+		match err {
+			FlatZincError::ReformulationError(LoweringError::Simplification(_)) => {
+				FznOutcome::Conflict
+			}
+			_ => FznOutcome::Failed,
+		}
 	}
 }
 

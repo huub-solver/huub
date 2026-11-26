@@ -1,0 +1,6 @@
+var 0..3: x;
+constraint huub_assume([[x <= 1]]) :: trace_id(4);
+psi a := [x <= 1];
+psi c := [x <= 1];
+psi x := x;
+solve satisfy;

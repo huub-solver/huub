@@ -1,0 +1,54 @@
+{
+  "variables": {
+    "a": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          5
+        ]
+      ]
+    },
+    "b": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          5
+        ]
+      ]
+    }
+  },
+  "arrays": {},
+  "constraints": [
+    {
+      "id": "int_le",
+      "args": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "id": "int_lin_le",
+      "args": [
+        [
+          1,
+          1
+        ],
+        [
+          "a",
+          "b"
+        ],
+        -1
+      ]
+    }
+  ],
+  "output": [
+    "a",
+    "b"
+  ],
+  "solve": {
+    "method": "satisfy"
+  },
+  "version": "1.0"
+}

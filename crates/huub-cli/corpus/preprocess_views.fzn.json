@@ -1,0 +1,175 @@
+{
+  "variables": {
+    "b": {
+      "type": "bool"
+    },
+    "i": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          1
+        ]
+      ],
+      "defined": true
+    },
+    "nb": {
+      "type": "bool",
+      "defined": true
+    },
+    "x": {
+      "type": "int",
+      "domain": [
+        [
+          -5,
+          5
+        ]
+      ]
+    },
+    "r": {
+      "type": "bool",
+      "defined": true
+    },
+    "y": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          10
+        ]
+      ]
+    },
+    "v": {
+      "type": "int",
+      "domain": [
+        [
+          -5,
+          5
+        ]
+      ],
+      "defined": true
+    },
+    "u": {
+      "type": "int",
+      "domain": [
+        [
+          -20,
+          3
+        ]
+      ],
+      "defined": true
+    }
+  },
+  "arrays": {},
+  "constraints": [
+    {
+      "id": "bool2int",
+      "args": [
+        "b",
+        "i"
+      ],
+      "defines": "i"
+    },
+    {
+      "id": "bool_not",
+      "args": [
+        "b",
+        "nb"
+      ],
+      "defines": "nb"
+    },
+    {
+      "id": "int_le_reif",
+      "args": [
+        "x",
+        2,
+        "r"
+      ],
+      "defines": "r"
+    },
+    {
+      "id": "int_lin_eq",
+      "args": [
+        [
+          1,
+          3
+        ],
+        [
+          "v",
+          "y"
+        ],
+        4
+      ],
+      "defines": "v"
+    },
+    {
+      "id": "int_lin_eq",
+      "args": [
+        [
+          2,
+          4
+        ],
+        [
+          "u",
+          "y"
+        ],
+        6
+      ],
+      "defines": "u"
+    },
+    {
+      "id": "int_lin_le",
+      "args": [
+        [
+          1,
+          1,
+          1
+        ],
+        [
+          "i",
+          "v",
+          "x"
+        ],
+        7
+      ]
+    },
+    {
+      "id": "bool_clause",
+      "args": [
+        [
+          "r",
+          "nb"
+        ],
+        []
+      ]
+    },
+    {
+      "id": "int_lin_le",
+      "args": [
+        [
+          1,
+          -1
+        ],
+        [
+          "u",
+          "x"
+        ],
+        0
+      ]
+    }
+  ],
+  "output": [
+    "b",
+    "i",
+    "nb",
+    "x",
+    "r",
+    "y",
+    "v",
+    "u"
+  ],
+  "solve": {
+    "method": "satisfy"
+  },
+  "version": "1.0"
+}

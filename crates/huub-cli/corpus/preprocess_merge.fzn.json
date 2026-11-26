@@ -1,0 +1,112 @@
+{
+  "variables": {
+    "x": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          10
+        ]
+      ]
+    },
+    "y": {
+      "type": "int",
+      "domain": [
+        [
+          3,
+          12
+        ]
+      ]
+    },
+    "z": {
+      "type": "int",
+      "domain": [
+        [
+          5,
+          20
+        ]
+      ]
+    },
+    "w": {
+      "type": "int",
+      "domain": [
+        [
+          0,
+          5
+        ]
+      ]
+    },
+    "a": {
+      "type": "bool"
+    },
+    "b": {
+      "type": "bool"
+    }
+  },
+  "arrays": {},
+  "constraints": [
+    {
+      "id": "int_eq",
+      "args": [
+        "x",
+        "y"
+      ]
+    },
+    {
+      "id": "int_eq",
+      "args": [
+        "y",
+        "z"
+      ]
+    },
+    {
+      "id": "int_eq",
+      "args": [
+        "w",
+        3
+      ]
+    },
+    {
+      "id": "bool_eq",
+      "args": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "id": "int_lin_le",
+      "args": [
+        [
+          1,
+          1
+        ],
+        [
+          "x",
+          "w"
+        ],
+        10
+      ]
+    },
+    {
+      "id": "bool_clause",
+      "args": [
+        [
+          "a"
+        ],
+        []
+      ]
+    }
+  ],
+  "output": [
+    "x",
+    "y",
+    "z",
+    "w",
+    "a",
+    "b"
+  ],
+  "solve": {
+    "method": "satisfy"
+  },
+  "version": "1.0"
+}
