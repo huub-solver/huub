@@ -7,7 +7,7 @@ use std::{
 	hash::Hash,
 	num::NonZero,
 	ops::{Not, RangeInclusive},
-	sync::Arc,
+	sync::{Arc, Mutex},
 };
 
 use flatzinc_serde::{
@@ -34,7 +34,7 @@ use crate::{
 		expressions::linear::IntLinearExp,
 		preprocess::{
 			DeclaredDomain, FznOutcome, FztArg, FztConstraint, FztContext, FztError,
-			PreprocessRule, fzt_domain, lin_norm_equal,
+			PreprocessRule, PreprocessSink, fzt_domain, lin_norm_equal,
 		},
 		view::{View, boolean::BoolView, integer::IntView},
 	},
@@ -430,6 +430,20 @@ pub trait HuubFlatZinc {
 	/// a [`Solver`](crate::solver::Solver) (via
 	/// [`to_solver()`](Lowerer::to_solver)).
 	fn lower(&self) -> Lowerer<Result<FlatZincLowerData, FlatZincError>>;
+
+	/// Like [`lower`](HuubFlatZinc::lower), and additionally records the
+	/// preprocessing of the instance, which is delivered to `sink`: every
+	/// change that the instance undergoes between reading it and the start of
+	/// search, and the model at the start of search (see
+	/// [`PreprocessEvent`](crate::model::preprocess::PreprocessEvent)).
+	///
+	/// Recording only observes the lowering, so the solver is the same as
+	/// without it. If the recording cannot be completed, the lowering fails
+	/// with [`FlatZincError::PreprocessTrace`].
+	fn lower_with_preprocess_trace(
+		&self,
+		sink: impl PreprocessSink + 'static,
+	) -> Lowerer<Result<FlatZincLowerData, FlatZincError>>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -714,8 +728,25 @@ impl TryFrom<&str> for ConstraintIdent {
 
 impl HuubFlatZinc for FlatZinc<FznIdent> {
 	fn lower(&self) -> Lowerer<Result<FlatZincLowerData, FlatZincError>> {
+		lower_flatzinc(self, None)
+	}
+
+	fn lower_with_preprocess_trace(
+		&self,
+		sink: impl PreprocessSink + 'static,
+	) -> Lowerer<Result<FlatZincLowerData, FlatZincError>> {
+		lower_flatzinc(self, Some(Arc::new(Mutex::new(sink))))
+	}
+}
+
+/// Lower `fzn` to a builder, recording the preprocessing for `sink`, if any.
+fn lower_flatzinc(
+	fzn: &FlatZinc<FznIdent>,
+	sink: Option<Arc<Mutex<dyn PreprocessSink>>>,
+) -> Lowerer<Result<FlatZincLowerData, FlatZincError>> {
+	{
 		let deserialize_model = |fzn: &FlatZinc<FznIdent>| {
-			let mut builder = FznModelBuilder::new(fzn);
+			let mut builder = FznModelBuilder::new(fzn, sink);
 			let res = builder
 				.extract_views()
 				.and_then(|()| builder.post_constraints())
@@ -735,7 +766,7 @@ impl HuubFlatZinc for FlatZinc<FznIdent> {
 		};
 
 		LowererComplete::builder_internal(
-			deserialize_model(self).map(|(model, meta)| FlatZincLowerData { meta, model }),
+			deserialize_model(fzn).map(|(model, meta)| FlatZincLowerData { meta, model }),
 		)
 	}
 }
@@ -1703,7 +1734,10 @@ impl<'a> FznModelBuilder<'a> {
 		}
 	}
 	/// Create a new builder to create a model from a FlatZinc instance.
-	pub(crate) fn new(fzn: &'a FlatZinc<FznIdent>) -> Self {
+	pub(crate) fn new(
+		fzn: &'a FlatZinc<FznIdent>,
+		sink: Option<Arc<Mutex<dyn PreprocessSink>>>,
+	) -> Self {
 		// Build map from ArcKey to index if `reverse_map` tracing is enabled.
 		let var_index = tracing::enabled!(target: "reverse_map", tracing::Level::TRACE)
 			.then(|| {
@@ -1716,13 +1750,13 @@ impl<'a> FznModelBuilder<'a> {
 			.unwrap_or_default();
 
 		let mut prb = Model::default();
-		if tracing::enabled!(target: "preprocess", tracing::Level::TRACE) {
+		if let Some(sink) = sink {
 			let objective = match &fzn.solve.method {
 				flatzinc_serde::Method::Minimize(Literal::Variable(v))
 				| flatzinc_serde::Method::Maximize(Literal::Variable(v)) => Some(v.name.clone()),
 				_ => None,
 			};
-			prb.trace_start(fzn.constraints.len(), objective);
+			prb.trace_start(fzn.constraints.len(), objective, sink);
 		}
 
 		Self {

@@ -12,14 +12,16 @@ use crate::{
 		preprocess::{
 			edges::is_difference_logic,
 			fzt::{DeclaredDomain, FztConstraint, FztContext, FztError, fzt_declared, fzt_domain},
-			registry, spelling,
+			registry,
+			sink::PreprocessEvent,
+			spelling,
 		},
 		view::integer::IntView,
 	},
 };
 
 impl Model {
-	/// Emit the model at the start of search on the `start_model` target.
+	/// Deliver the model at the start of search to the sink.
 	///
 	/// `names` maps each FlatZinc variable with a decision to its view, and
 	/// `goal` is the objective of the instance.
@@ -159,10 +161,17 @@ impl Model {
 		}
 		items.push(objective.unwrap_or_else(|| "solve satisfy;".to_owned()));
 
+		let sink = &self.trace.recording().unwrap().sink;
+		let mut sink = sink.lock().unwrap();
 		for item in &items {
 			tracing::trace!(target: "start_model", item = %item);
 		}
-		tracing::trace!(target: "start_model", end = items.len() as u64);
+		let count = items.len() as u64;
+		for item in items {
+			sink.event(PreprocessEvent::StartModelItem(item));
+		}
+		sink.event(PreprocessEvent::EndStartModel { items: count });
+		tracing::trace!(target: "start_model", end = count);
 		Ok(())
 	}
 	/// Record the FlatZinc variables that do not have a decision in the model.

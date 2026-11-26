@@ -33,10 +33,7 @@ use tracing_subscriber::{
 	layer::{Context, SubscriberExt},
 };
 
-use crate::{
-	cli::Cli,
-	preprocess::{ModelLayer, PreprocessOutput, TraceLayer},
-};
+use crate::cli::Cli;
 
 /// A [`tracing_subscriber::FormatFields`] implementation that attempts to
 /// format literals and integer variables according to their FlatZinc names,
@@ -198,7 +195,6 @@ pub(crate) fn create_subscriber<W>(
 	ansi: bool,
 	map: &Arc<Mutex<ReverseMap>>,
 	fzn: Arc<FlatZinc<FznIdent>>,
-	preprocess: Option<&Arc<Mutex<PreprocessOutput>>>,
 ) -> impl Subscriber
 where
 	W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
@@ -233,16 +229,6 @@ where
 			)),
 		)
 		.with(fmt_layer)
-		// The preprocessing outputs are data for a checker, so they are
-		// enabled independently of the user's filters.
-		.with(preprocess.map(|output| {
-			TraceLayer::new(Arc::clone(output))
-				.with_filter(Targets::new().with_target("preprocess", Level::TRACE))
-		}))
-		.with(preprocess.map(|output| {
-			ModelLayer::new(Arc::clone(output))
-				.with_filter(Targets::new().with_target("start_model", Level::TRACE))
-		}))
 }
 
 /// Parse a [`Debug`]-formatted list of integers, e.g. `[1, -2, 3]`, as produced

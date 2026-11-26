@@ -1,7 +1,11 @@
 //! The recording state of the preprocessing trace, and the emission of its
 //! steps.
 
-use std::{mem, num::NonZero};
+use std::{
+	mem,
+	num::NonZero,
+	sync::{Arc, Mutex},
+};
 
 use rustc_hash::FxHashMap;
 
@@ -13,6 +17,7 @@ use crate::{
 		preprocess::{
 			fzt::{DeclaredDomain, FztConstraint, FztContext, FztError, fzt_domain},
 			rule::{PreprocessRule, StepKind},
+			sink::{PreprocessEvent, PreprocessSink},
 		},
 		view::{boolean::BoolView, integer::IntView},
 	},
@@ -70,6 +75,8 @@ pub(super) enum Output {
 /// trace is requested.
 #[derive(Clone, Debug)]
 pub(crate) struct PreprocessTrace {
+	/// The receiver of the trace.
+	pub(super) sink: Arc<Mutex<dyn PreprocessSink>>,
 	/// The number of steps that have been emitted.
 	pub(super) steps: u64,
 	/// The next fresh trace identifier.
@@ -276,13 +283,18 @@ impl Model {
 	) {
 		let t = self.trace.recording_mut().unwrap();
 		t.steps += 1;
+		let seq = t.steps;
 		tracing::trace!(
 			target: "preprocess",
-			seq = t.steps,
+			seq,
 			kind = kind.as_str(),
 			rule = rule.map_or("", PreprocessRule::as_str),
 			step = %text,
 		);
+		t.sink
+			.lock()
+			.unwrap()
+			.event(PreprocessEvent::Step { seq, text });
 	}
 	/// Signal the end of the trace, returning the first error that prevented
 	/// its completion, if any.
@@ -294,7 +306,12 @@ impl Model {
 			TraceState::Off => Ok(()),
 			TraceState::Failed(err) => Err(err),
 			TraceState::Recording(t) => {
-				tracing::trace!(target: "preprocess", end = t.steps);
+				let steps = t.steps;
+				tracing::trace!(target: "preprocess", end = steps);
+				t.sink
+					.lock()
+					.unwrap()
+					.event(PreprocessEvent::EndTrace { steps });
 				Ok(())
 			}
 		}
@@ -379,10 +396,17 @@ impl Model {
 		}
 	}
 	/// Start recording a preprocessing trace for a FlatZinc instance with
-	/// `received` constraints and the objective variable `objective`.
-	pub(crate) fn trace_start(&mut self, received: usize, objective: Option<String>) {
+	/// `received` constraints and the objective variable `objective`, which is
+	/// delivered to `sink`.
+	pub(crate) fn trace_start(
+		&mut self,
+		received: usize,
+		objective: Option<String>,
+		sink: Arc<Mutex<dyn PreprocessSink>>,
+	) {
 		debug_assert!(self.int_vars.is_empty() && self.bool_vars.is_empty());
 		self.trace = TraceState::Recording(Box::new(PreprocessTrace {
+			sink,
 			steps: 0,
 			next_id: received as u32 + 1,
 			origin: Vec::new(),

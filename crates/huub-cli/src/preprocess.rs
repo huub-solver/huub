@@ -1,12 +1,12 @@
 //! Output of the preprocessing trace and of the model at the start of search.
 //!
-//! When a preprocessing trace is requested, the library emits every step on
-//! the `preprocess` tracing target and the model at the start of search on the
-//! `start_model` target (see [`huub::model::preprocess`]). The layers in this
-//! module write them to the requested files. Since the trace is data for a
-//! checker rather than diagnostics, the layers check that no event is lost: the
-//! steps must be numbered consecutively, and both outputs must be closed by an
-//! event that states their length.
+//! When a preprocessing trace is requested, the library delivers every step and
+//! the model at the start of search to a sink (see
+//! [`huub::model::deserialize::flatzinc::HuubFlatZinc::lower_with_preprocess_trace`]),
+//! which this module implements by writing them to the requested files. Since
+//! the trace is data for a checker rather than diagnostics, the sink checks
+//! that no event is lost: the steps must be numbered consecutively, and both
+//! outputs must be closed by an event that states their length.
 
 use std::{
 	error::Error,
@@ -18,28 +18,25 @@ use std::{
 	sync::{Arc, Mutex},
 };
 
-use tracing::{
-	Event, Subscriber,
-	field::{Field, Visit},
-};
-use tracing_subscriber::{Layer, layer::Context};
+use huub::model::preprocess::{PreprocessEvent, PreprocessSink};
 
 /// The version of the trace format that is written.
 const TRACE_FORMAT_VERSION: &str = "0.1";
 
-/// A [`Layer`] that writes the `start_model` events to the start model file.
-pub(crate) struct ModelLayer(Arc<Mutex<PreprocessOutput>>);
+/// The [`PreprocessSink`] that writes the events to the outputs.
+#[derive(Debug)]
+pub(crate) struct OutputSink(Arc<Mutex<PreprocessOutput>>);
 
 /// One of the two outputs of a preprocessing trace.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Output {
-	/// The model at the start of search, from the `start_model` target.
+	/// The model at the start of search.
 	StartModel,
-	/// The steps of the trace, from the `preprocess` target.
+	/// The steps of the trace.
 	Trace,
 }
 
-/// The fields of an event on the `preprocess` or `start_model` target.
+/// The fields of an event of one of the outputs.
 #[derive(Debug, Default)]
 struct OutputEvent {
 	/// The number of the step.
@@ -55,9 +52,9 @@ struct OutputEvent {
 enum OutputState {
 	/// An event could not be handled, so the outputs are incomplete.
 	///
-	/// The layers cannot return the error to the code that emitted the
-	/// event, so the error is kept until the outputs are completed, and later
-	/// events are ignored.
+	/// The sink cannot return the error to the code that delivered the event,
+	/// so the error is kept until the outputs are completed, and later events
+	/// are ignored.
 	Failed(PreprocessOutputError),
 	/// The outputs have been completed.
 	Finished,
@@ -65,7 +62,7 @@ enum OutputState {
 	Writing(Writing),
 }
 
-/// The outputs of a preprocessing trace, shared between the layers that write
+/// The outputs of a preprocessing trace, shared between the sink that writes
 /// them and the CLI that completes them.
 #[derive(Debug)]
 pub(crate) struct PreprocessOutput(OutputState);
@@ -128,9 +125,6 @@ pub(crate) enum PreprocessOutputError {
 		source: io::Error,
 	},
 }
-
-/// A [`Layer`] that writes the `preprocess` events to the trace.
-pub(crate) struct TraceLayer(Arc<Mutex<PreprocessOutput>>);
 
 /// The outputs of a preprocessing trace while they are being written.
 #[derive(Debug)]
@@ -234,18 +228,50 @@ fn sha256_file(path: &Path) -> io::Result<String> {
 	Ok(sha256(&data))
 }
 
-impl ModelLayer {
-	/// Create a layer that writes the start model to `output`.
+impl OutputSink {
+	/// Create a sink that writes the events to `output`.
 	pub(crate) fn new(output: Arc<Mutex<PreprocessOutput>>) -> Self {
 		Self(output)
 	}
 }
 
-impl<S: Subscriber> Layer<S> for ModelLayer {
-	fn on_event(&self, event: &Event<'_>, _: Context<'_, S>) {
-		let mut rec = OutputEvent::default();
-		event.record(&mut rec);
-		self.0.lock().unwrap().handle(Output::StartModel, rec);
+impl PreprocessSink for OutputSink {
+	fn event(&mut self, event: PreprocessEvent) {
+		let (output, event) = match event {
+			PreprocessEvent::EndStartModel { items } => (
+				Output::StartModel,
+				OutputEvent {
+					end: Some(items),
+					..OutputEvent::default()
+				},
+			),
+			PreprocessEvent::EndTrace { steps } => (
+				Output::Trace,
+				OutputEvent {
+					end: Some(steps),
+					..OutputEvent::default()
+				},
+			),
+			PreprocessEvent::StartModelItem(text) => (
+				Output::StartModel,
+				OutputEvent {
+					text: Some(text),
+					..OutputEvent::default()
+				},
+			),
+			PreprocessEvent::Step { seq, text } => (
+				Output::Trace,
+				OutputEvent {
+					seq: Some(seq),
+					text: Some(text),
+					..OutputEvent::default()
+				},
+			),
+			// Events that a later version of the library adds are not part of
+			// the trace that this version writes.
+			_ => return,
+		};
+		self.0.lock().unwrap().handle(output, event);
 	}
 }
 
@@ -255,28 +281,6 @@ impl Display for Output {
 			Output::StartModel => "the start model",
 			Output::Trace => "the preprocessing trace",
 		})
-	}
-}
-
-impl Visit for OutputEvent {
-	fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-		if matches!(field.name(), "step" | "item") {
-			self.text = Some(format!("{value:?}"));
-		}
-	}
-
-	fn record_str(&mut self, field: &Field, value: &str) {
-		if matches!(field.name(), "step" | "item") {
-			self.text = Some(value.to_owned());
-		}
-	}
-
-	fn record_u64(&mut self, field: &Field, value: u64) {
-		match field.name() {
-			"seq" => self.seq = Some(value),
-			"end" => self.end = Some(value),
-			_ => {}
-		}
 	}
 }
 
@@ -296,7 +300,7 @@ impl PreprocessOutput {
 
 	/// Handle an event for `output`.
 	///
-	/// This is where the events of the layers arrive, which cannot return an
+	/// This is where the events of the sink arrive, which cannot return an
 	/// error: the first error turns the outputs into the failed state, whose
 	/// error [`Self::finish`] returns. Events after an error or after the
 	/// outputs were completed are ignored.
@@ -392,21 +396,6 @@ impl Error for PreprocessOutputError {
 	}
 }
 
-impl TraceLayer {
-	/// Create a layer that writes the preprocessing steps to `output`.
-	pub(crate) fn new(output: Arc<Mutex<PreprocessOutput>>) -> Self {
-		Self(output)
-	}
-}
-
-impl<S: Subscriber> Layer<S> for TraceLayer {
-	fn on_event(&self, event: &Event<'_>, _: Context<'_, S>) {
-		let mut rec = OutputEvent::default();
-		event.record(&mut rec);
-		self.0.lock().unwrap().handle(Output::Trace, rec);
-	}
-}
-
 impl Writing {
 	/// Complete the outputs, writing the trace file with its header.
 	fn finish(self, received: &Path) -> Result<(), PreprocessOutputError> {
@@ -476,7 +465,7 @@ impl Writing {
 		Ok(())
 	}
 
-	/// Handle an event on the `start_model` target.
+	/// Handle an event of the start model.
 	fn model_event(&mut self, event: OutputEvent) -> Result<(), PreprocessOutputError> {
 		if self.model_ended {
 			return Err(PreprocessOutputError::OutputAfterEnd {
@@ -512,7 +501,7 @@ impl Writing {
 		Ok(())
 	}
 
-	/// Handle an event on the `preprocess` target.
+	/// Handle an event of the trace.
 	fn trace_event(&mut self, event: OutputEvent) -> Result<(), PreprocessOutputError> {
 		if self.trace_ended {
 			return Err(PreprocessOutputError::OutputAfterEnd {

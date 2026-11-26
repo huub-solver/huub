@@ -55,7 +55,7 @@ use tracing::{subscriber::set_default, warn};
 pub use crate::cli::Cli;
 use crate::{
 	cli::{CliReduceType, CliSearchStrategy, CliSearchTrigger},
-	preprocess::PreprocessOutput,
+	preprocess::{OutputSink, PreprocessOutput},
 	trace::ReverseMap,
 };
 
@@ -126,15 +126,17 @@ impl<'a> Cli<'a> {
 			ansi_color,
 			&map,
 			Arc::clone(&fzn),
-			preprocess.as_ref(),
 		);
 		let _guard = set_default(subscriber);
 
 		let start = Instant::now();
 		let deadline = self.time_limit.map(|t| start + t);
 
-		let lowered = fzn
-			.lower()
+		let lowerer = match &preprocess {
+			Some(output) => fzn.lower_with_preprocess_trace(OutputSink::new(Arc::clone(output))),
+			None => fzn.lower(),
+		};
+		let lowered = lowerer
 			.int_eager_limit(self.int_eager_limit)
 			.preprocessing(self.cadical.preprocessing)
 			.conditioning(self.cadical.conditioning)

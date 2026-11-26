@@ -494,13 +494,26 @@ impl Model {
 
 #[cfg(test)]
 mod tests {
+	use std::sync::{Arc, Mutex};
+
 	use crate::{
 		DeepClone,
 		actions::ReasoningEngine,
 		constraints::{Constraint, Propagator, SimplificationStatus},
 		lower::{LoweringContext, LoweringError},
-		model::{Model, preprocess::FztError},
+		model::{
+			Model,
+			preprocess::{FztError, PreprocessEvent, PreprocessSink},
+		},
 	};
+
+	/// A sink that drops everything it receives.
+	#[derive(Debug)]
+	struct Discard;
+
+	impl PreprocessSink for Discard {
+		fn event(&mut self, _: PreprocessEvent) {}
+	}
 
 	/// A constraint without a representation in the `.fzt` model language.
 	#[derive(Clone, Debug, DeepClone)]
@@ -511,7 +524,7 @@ mod tests {
 	#[test]
 	fn unwritable_constraint_fails_the_trace() {
 		let mut prb = Model::default();
-		prb.trace_start(0, None);
+		prb.trace_start(0, None, Arc::new(Mutex::new(Discard)));
 		assert!(prb.trace_active());
 		let _ = prb.post_constraint(Unwritable).unwrap();
 		assert!(!prb.trace_active());
