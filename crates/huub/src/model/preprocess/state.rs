@@ -3,6 +3,8 @@
 
 use std::{mem, num::NonZero};
 
+use rustc_hash::FxHashMap;
+
 use crate::{
 	IntSet, IntVal,
 	model::{
@@ -85,6 +87,12 @@ pub(crate) struct PreprocessTrace {
 	pub(super) int_names: Vec<Option<String>>,
 	/// The FlatZinc names of the Boolean decisions.
 	pub(super) bool_names: Vec<Option<String>>,
+	/// The decision that has a FlatZinc name, for each name of an integer
+	/// decision.
+	pub(super) int_by_name: FxHashMap<String, Decision<IntVal>>,
+	/// The decision that has a FlatZinc name, for each name of a Boolean
+	/// decision.
+	pub(super) bool_by_name: FxHashMap<String, Decision<bool>>,
 	/// The number of integer decisions whose introduction has been logged (or
 	/// that have a FlatZinc name).
 	pub(super) announced_int: usize,
@@ -212,8 +220,6 @@ pub(super) enum WindowKind {
 	Simplify {
 		/// The constraint being simplified.
 		con: ConstraintId,
-		/// The [`Debug`](fmt::Debug) representation of the constraint.
-		debug: String,
 		/// The `.fzt` representation of the constraint.
 		item: FztConstraint,
 	},
@@ -383,6 +389,8 @@ impl Model {
 			dl_edges: Vec::new(),
 			int_names: Vec::new(),
 			bool_names: Vec::new(),
+			int_by_name: FxHashMap::default(),
+			bool_by_name: FxHashMap::default(),
 			announced_int: 0,
 			announced_bool: 0,
 			objective,

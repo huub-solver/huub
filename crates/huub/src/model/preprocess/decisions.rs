@@ -243,6 +243,7 @@ impl Model {
 			t.bool_names.resize(idx + 1, None);
 		}
 		t.bool_names[idx] = Some(name.to_owned());
+		let _ = t.bool_by_name.insert(name.to_owned(), var.var());
 	}
 	/// Give the integer decision `var` the FlatZinc name `name`.
 	///
@@ -257,6 +258,7 @@ impl Model {
 			t.int_names.resize(idx + 1, None);
 		}
 		t.int_names[idx] = Some(name.to_owned());
+		let _ = t.int_by_name.insert(name.to_owned(), var);
 	}
 	/// Log the replacement of the FlatZinc variable `name`, with declared
 	/// domain `domain`, by the constant `k`, which happens when its declared

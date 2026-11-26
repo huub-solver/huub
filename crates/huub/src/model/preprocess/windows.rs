@@ -367,12 +367,7 @@ impl Model {
 			return self.trace_dl_simplify_close(status.is_err());
 		}
 		let split = split_rule(&w);
-		let WindowKind::Simplify {
-			con,
-			debug,
-			item: before,
-		} = w.kind
-		else {
+		let WindowKind::Simplify { con, item: before } = w.kind else {
 			unreachable!("closing a window that is not a simplification")
 		};
 		let id = w.hint.unwrap();
@@ -389,11 +384,13 @@ impl Model {
 		let replaced = match status {
 			SimplificationStatus::Subsumed => true,
 			SimplificationStatus::NoFixpoint => {
-				// A constraint whose own representation did not change is only
-				// affected by the substitutions, which the checker performs
+				// A constraint that is only affected by the substitutions of
+				// unifications has not changed: the checker performs them
 				// itself.
-				let after = registry::to_fzt(obj, &FztContext::new(self))?;
-				if after != before && format!("{obj:?}") != debug {
+				let ctx = FztContext::new(self);
+				let after = registry::to_fzt(obj, &ctx)?;
+				let unchanged = ctx.substitute(&before);
+				if after != unchanged && lin_norm_equal(&unchanged, &after) != Some(true) {
 					outputs.push(self.trace_constraint_item(con, Some(obj))?);
 					true
 				} else {
@@ -481,11 +478,7 @@ impl Model {
 		};
 		let item = registry::to_fzt(obj, &FztContext::new(self))?;
 		self.trace.recording_mut().unwrap().windows.push(Window {
-			kind: WindowKind::Simplify {
-				con,
-				debug: format!("{obj:?}"),
-				item,
-			},
+			kind: WindowKind::Simplify { con, item },
 			hint: Some(id),
 			rule: PreprocessRule::Preserve,
 			posted: Vec::new(),

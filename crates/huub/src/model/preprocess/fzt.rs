@@ -596,6 +596,126 @@ impl<'a> FztContext<'a> {
 	}
 }
 
+/// A decision that a name in a constraint refers to.
+#[derive(Clone, Copy)]
+enum Named {
+	/// A Boolean decision.
+	Bool(Decision<bool>),
+	/// An integer decision.
+	Int(Decision<IntVal>),
+}
+
+impl FztContext<'_> {
+	/// The Boolean view that `term` writes, if it is a Boolean term.
+	fn bool_view_of(&self, term: &FztTerm) -> Option<View<bool>> {
+		match term {
+			FztTerm::Bool(b) => Some((*b).into()),
+			FztTerm::Lit { var, op, value } => {
+				let Named::Int(x) = self.named(var)? else {
+					return None;
+				};
+				let x: View<IntVal> = x.into();
+				Some(match op {
+					FztLitOp::Eq => x.eq(*value),
+					FztLitOp::Ge => x.geq(*value),
+					FztLitOp::Le => x.leq(*value),
+					FztLitOp::Ne => x.ne(*value),
+				})
+			}
+			FztTerm::Name(name) => match self.named(name)? {
+				Named::Bool(b) => Some(b.into()),
+				Named::Int(_) => None,
+			},
+			FztTerm::Not(name) => match self.named(name)? {
+				Named::Bool(b) => Some(!View::from(b)),
+				Named::Int(_) => None,
+			},
+			FztTerm::Affine { .. } | FztTerm::BoolAffine { .. } | FztTerm::Int(_) => None,
+		}
+	}
+
+	/// The decision that `name` refers to, if it is one that the trace knows.
+	fn named(&self, name: &str) -> Option<Named> {
+		let t = self.trace();
+		if let Some(&x) = t.int_by_name.get(name) {
+			return Some(Named::Int(x));
+		}
+		if let Some(&b) = t.bool_by_name.get(name) {
+			return Some(Named::Bool(b));
+		}
+		// The decisions without a FlatZinc name are named by their index.
+		if let Some(idx) = name.strip_prefix("huub__i") {
+			return Some(Named::Int(Decision(idx.parse().ok()?)));
+		}
+		let idx: i32 = name.strip_prefix("huub__b")?.parse().ok()?;
+		Some(Named::Bool(Decision(pindakaas::Lit::from_raw(
+			NonZero::new(idx.checked_add(1)?)?,
+		))))
+	}
+
+	/// The constraint `c`, which was written at an earlier point, written again
+	/// with the aliases that have been created since resolved.
+	///
+	/// This is what the checker does to a constraint when a decision is
+	/// unified, so it is the form of a constraint that has not been changed
+	/// other than by unifications.
+	pub(crate) fn substitute(&self, c: &FztConstraint) -> FztConstraint {
+		FztConstraint {
+			name: c.name.clone(),
+			args: c.args.iter().map(|a| self.substitute_arg(a)).collect(),
+		}
+	}
+
+	/// The argument `arg` with the aliases resolved (see [`Self::substitute`]).
+	fn substitute_arg(&self, arg: &FztArg) -> FztArg {
+		match arg {
+			FztArg::Array(args) => {
+				FztArg::Array(args.iter().map(|a| self.substitute_arg(a)).collect())
+			}
+			FztArg::Term(term) => match self.substitute_term(term) {
+				FztTerm::Bool(b) => FztArg::Bool(b),
+				FztTerm::Int(k) => k.into(),
+				term => FztArg::Term(term),
+			},
+			FztArg::Bool(_) | FztArg::Int(_) | FztArg::Set(_) => arg.clone(),
+		}
+	}
+
+	/// The term `term` with the aliases resolved (see [`Self::substitute`]).
+	fn substitute_term(&self, term: &FztTerm) -> FztTerm {
+		match term {
+			FztTerm::Affine { scale, var, offset } => match self.named(var) {
+				Some(Named::Int(x)) => {
+					let x: View<IntVal> = x.into();
+					self.int_term(x * NonZero::new(*scale).unwrap() + *offset)
+				}
+				_ => term.clone(),
+			},
+			FztTerm::BoolAffine {
+				scale,
+				atom,
+				offset,
+			} => match self.bool_view_of(&self.substitute_term(atom)) {
+				Some(b) => {
+					let lin = LinearBoolView::new(NonZero::new(*scale).unwrap(), *offset, b);
+					self.int_term(View(IntView::Bool(lin)))
+				}
+				None => term.clone(),
+			},
+			FztTerm::Bool(_) | FztTerm::Int(_) => term.clone(),
+			FztTerm::Lit { .. } | FztTerm::Not(_) => match self.bool_view_of(term) {
+				Some(b) => self.bool_term(b),
+				None => term.clone(),
+			},
+			FztTerm::Name(name) => match self.named(name) {
+				Some(Named::Int(x)) => self.int_term(x.into()),
+				Some(Named::Bool(b)) => self.bool_term(b.into()),
+				None => term.clone(),
+			},
+		}
+	}
+}
+
 impl Display for FztError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
