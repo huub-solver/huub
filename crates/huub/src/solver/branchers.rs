@@ -504,9 +504,10 @@ where
 					IntLitMeaning::GreaterEq(next_var.min(actions) + 1)
 				}
 				DomainSelection::OutdomainMax => IntLitMeaning::Less(next_var.max(actions)),
-				// The selected decision variable is unfixed, so `min < max` and the bisection
-				// point `min + (max - min) / 2` lies in `min..max`, leaving both
-				// halves non-empty and guaranteeing the search makes progress.
+				// The selected decision variable is unfixed, so `min < max` and
+				// the bisection point `min + (max - min) / 2` lies in
+				// `min..max`, leaving both halves non-empty and guaranteeing
+				// the search makes progress.
 				DomainSelection::IndomainSplit => {
 					let (min, max) = next_var.bounds(actions);
 					IntLitMeaning::Less(min + (max - min) / 2 + 1)
@@ -588,10 +589,11 @@ impl WarmStartBrancher {
 					solver.ensure_decidable::<bool>(d);
 					filtered_decision.push(l);
 				}
-				// Warm starts decision conflict here, we don't have to add this or any
-				// other decisions to the brancher
+				// Warm starts decision conflict here, we don't have to add this
+				// or any other decisions to the brancher
 				BoolView::Const(false) => break,
-				// Warm starts decision is already satisfied, we don't have to add this
+				// Warm starts decision is already satisfied, we don't have to
+				// add this
 				BoolView::Const(true) => {}
 			}
 		}

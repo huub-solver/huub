@@ -13,7 +13,7 @@ use std::{cmp, marker::PhantomData, num::NonZero};
 
 use bon::bon;
 use itertools::{Itertools, MinMaxResult, iproduct};
-pub use pindakaas::propositional_logic::Formula as Proposition;
+pub use pindakaas::constraint::propositional_logic::Formula as Proposition;
 use rangelist::RangeList;
 
 pub use crate::model::expressions::{
@@ -262,6 +262,9 @@ impl Model {
 		#[builder(getter(name = index_internal, vis = ""), into)] index: View<IntVal>,
 		result: <E as ElementConstraint>::Result,
 	) -> Result<(), Nogood<View<bool>>> {
+		// Restrict the index to the array bounds, which not every
+		// implementation (e.g. `IntSetContainsReif`) enforces itself.
+		index.restrict_domain(self, &(0..=array.len() as IntVal - 1).into(), NO_REASON)?;
 		<E as ElementConstraint>::element_constraint(self, array, index, result)
 	}
 
@@ -378,7 +381,7 @@ impl Model {
 			Comparator::NotEqual => (LinComparator::NotEqual, rhs),
 		};
 
-		if IntLinear::can_overflow(self, &terms) {
+		if IntLinear::can_overflow(self, &terms, rhs.into()) {
 			self.post_constraint(IntLinear::<OverflowPossible> {
 				terms,
 				rhs: rhs.into(),

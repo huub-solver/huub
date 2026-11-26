@@ -123,17 +123,21 @@ impl<Var> LinearView<NonZero<IntVal>, IntVal, Var> {
 
 	/// Transform a [`IntLitMeaning`] from the variable given the view's scale
 	/// and offset.
+	///
+	/// For a view `y = s * x + b` with a negative scale `s`, the direction of a
+	/// bound flips: `x ≥ v` is equal to `x > v - 1`, which becomes
+	/// `y < s * (v - 1) + b`. Using `v - 1` instead of `v` ensures that the
+	/// bound is always a value that the view can take.
 	pub(crate) fn transform_meaning(&self, meaning: IntLitMeaning) -> IntLitMeaning {
-		let neg_transform_val = |v| (v * -self.scale.get()) - self.offset;
 		match meaning {
 			IntLitMeaning::Eq(v) => IntLitMeaning::Eq(self.transform_val(v)),
 			IntLitMeaning::NotEq(v) => IntLitMeaning::NotEq(self.transform_val(v)),
 			IntLitMeaning::GreaterEq(v) if self.scale.is_negative() => {
-				IntLitMeaning::Less(neg_transform_val(-v + 1))
+				IntLitMeaning::Less(self.transform_val(v - 1))
 			}
 			IntLitMeaning::GreaterEq(v) => IntLitMeaning::GreaterEq(self.transform_val(v)),
 			IntLitMeaning::Less(v) if self.scale.is_negative() => {
-				IntLitMeaning::GreaterEq(neg_transform_val(-v + 1))
+				IntLitMeaning::GreaterEq(self.transform_val(v - 1))
 			}
 			IntLitMeaning::Less(v) => IntLitMeaning::Less(self.transform_val(v)),
 		}
@@ -480,5 +484,62 @@ where
 
 	fn val(&self, sol: Solution<'_>) -> IntVal {
 		self.transform_val(self.var.val(sol))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::num::NonZero;
+
+	use crate::{IntVal, solver::IntLitMeaning, views::LinearView};
+
+	#[test]
+	fn test_transform_meaning() {
+		/// Assert that `meaning` on the decision transforms to `expected` on
+		/// the view, and that `expected` reverses back to `meaning`.
+		fn assert_meaning_transform(
+			view: &LinearView<NonZero<IntVal>, IntVal, ()>,
+			meaning: IntLitMeaning,
+			expected: IntLitMeaning,
+		) {
+			assert_eq!(view.transform_meaning(meaning), expected);
+			assert_eq!(view.reverse_meaning(expected), Ok(meaning));
+		}
+
+		let view = LinearView::new(NonZero::new(1).unwrap(), 4, ());
+		assert_meaning_transform(
+			&view,
+			IntLitMeaning::GreaterEq(5),
+			IntLitMeaning::GreaterEq(9),
+		);
+		assert_meaning_transform(&view, IntLitMeaning::Less(5), IntLitMeaning::Less(9));
+		assert_meaning_transform(&view, IntLitMeaning::NotEq(5), IntLitMeaning::NotEq(9));
+		let view = LinearView::new(NonZero::new(4).unwrap(), 3, ());
+		assert_meaning_transform(
+			&view,
+			IntLitMeaning::GreaterEq(5),
+			IntLitMeaning::GreaterEq(23),
+		);
+		assert_meaning_transform(&view, IntLitMeaning::Less(5), IntLitMeaning::Less(23));
+		assert_meaning_transform(&view, IntLitMeaning::Eq(3), IntLitMeaning::Eq(15));
+		assert_meaning_transform(&view, IntLitMeaning::NotEq(3), IntLitMeaning::NotEq(15));
+		let view = LinearView::new(NonZero::new(3).unwrap(), -4, ());
+		assert_meaning_transform(
+			&view,
+			IntLitMeaning::GreaterEq(2),
+			IntLitMeaning::GreaterEq(2),
+		);
+		assert_meaning_transform(&view, IntLitMeaning::Less(2), IntLitMeaning::Less(2));
+		assert_meaning_transform(&view, IntLitMeaning::Eq(-1), IntLitMeaning::Eq(-7));
+		assert_meaning_transform(&view, IntLitMeaning::NotEq(0), IntLitMeaning::NotEq(-4));
+		let view = LinearView::new(NonZero::new(-1).unwrap(), -5, ());
+		assert_meaning_transform(&view, IntLitMeaning::GreaterEq(5), IntLitMeaning::Less(-9));
+		assert_meaning_transform(&view, IntLitMeaning::Less(5), IntLitMeaning::GreaterEq(-9));
+		assert_meaning_transform(&view, IntLitMeaning::NotEq(5), IntLitMeaning::NotEq(-10));
+		let view = LinearView::new(NonZero::new(-2).unwrap(), 5, ());
+		assert_meaning_transform(&view, IntLitMeaning::GreaterEq(3), IntLitMeaning::Less(1));
+		assert_meaning_transform(&view, IntLitMeaning::Less(3), IntLitMeaning::GreaterEq(1));
+		assert_meaning_transform(&view, IntLitMeaning::Eq(3), IntLitMeaning::Eq(-1));
+		assert_meaning_transform(&view, IntLitMeaning::NotEq(3), IntLitMeaning::NotEq(-1));
 	}
 }

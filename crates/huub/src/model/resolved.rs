@@ -10,13 +10,19 @@ use crate::{
 		decision::integer::Domain,
 		view::{boolean::BoolView, integer::IntView},
 	},
+	views::LinearBoolView,
 };
 
 /// Wrapper for model values whose aliases have been resolved against a model.
 ///
 /// This type marks a model handle whose alias chain has already been followed
-/// against the current model state. Mutating operations should keep this
-/// wrapper updated in place, or the wrapper should simply be discarded.
+/// against the current model state. The claim only holds at the moment it is
+/// made, so a mutating operation must keep the wrapper up to date or discard
+/// it. `Clone` exists only because
+/// [`IntOperations`](crate::actions::IntOperations) and
+/// [`BoolOperations`](crate::actions::BoolOperations) require it: store the
+/// unresolved handle and resolve again where needed, rather than keeping a
+/// clone.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct Resolved<T>(pub(crate) T);
 
@@ -105,12 +111,16 @@ impl View<IntVal> {
 				},
 				Bool(lin) => {
 					let var = lin.var.resolve_alias(model).into_inner();
+					offset += scale * lin.offset;
+					scale *= lin.scale.get();
 					if let BoolView::Const(b) = var.0 {
-						return Resolved(View(Const(
-							lin.transform_val(b as IntVal) * scale + offset,
-						)));
+						return Resolved(View(Const(b as IntVal * scale + offset)));
 					}
-					return Resolved(View(Bool(lin * NonZero::new(scale).unwrap() + offset)));
+					return Resolved(View(Bool(LinearBoolView::new(
+						NonZero::new(scale).unwrap(),
+						offset,
+						var,
+					))));
 				}
 			}
 		}

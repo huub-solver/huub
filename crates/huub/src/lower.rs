@@ -31,6 +31,9 @@ use crate::{
 	},
 	constraints::{
 		BoxedConstraint, BoxedPropagator, Constraint, NO_REASON, Nogood,
+		difference_logic::{
+			DifferenceLogicBooleans, DifferenceLogicBounds, DifferenceLogicPropagators,
+		},
 		int_array_minimum::IntArrayMinimumBounds,
 		int_div::IntDivBounds,
 		int_linear::{IntEq, IntLinear, LinComparator},
@@ -822,9 +825,28 @@ impl LowererComplete<&mut Model> {
 		let map = map_builder.finalize();
 
 		// Create constraint data structures within the solver
-		let mut ctx = LoweringContext::new(&mut slv, &map, &model.trail);
-		for c in model.constraints.iter().flatten() {
+		for (i, c) in model.constraints.iter().enumerate() {
+			let Some(c) = c else { continue };
+			let mut ctx = LoweringContext::new(&mut slv, &map, &model.trail);
 			c.to_solver(&mut ctx)?;
+			// The difference logic component always posts its two propagators
+			// last, so that the solver can reach them as the model reaches the
+			// component.
+			if Some(ConstraintId::new(i)) == model.diff_logic {
+				let mut engine = slv.engine.borrow_mut();
+				let bounds = engine.propagators.len() - 2;
+				debug_assert!({
+					let (b, c): (&dyn Any, &dyn Any) = (
+						&*engine.propagators[bounds],
+						&*engine.propagators[bounds + 1],
+					);
+					b.is::<DifferenceLogicBounds>() && c.is::<DifferenceLogicBooleans>()
+				});
+				engine.state.diff_logic = Some(DifferenceLogicPropagators {
+					bounds: PropagatorId::new(bounds),
+					booleans: PropagatorId::new(bounds + 1),
+				});
+			}
 		}
 
 		Ok((slv, map))
@@ -879,6 +901,10 @@ impl<'a> LoweringContext<'a> {
 	}
 
 	/// Read a trailed value from the [`Model`] trail.
+	///
+	/// A constraint that carries trailed state from the model into the solver
+	/// reads it here; the solver's own trailed values are created at their
+	/// final value through [`ConstructionActions`].
 	pub fn model_trailed<T: Bytes>(&self, i: Trailed<T>) -> T {
 		T::from_bytes(self.trail[i.index as usize])
 	}
@@ -1251,8 +1277,8 @@ impl LoweringMapBuilder {
 						};
 						let card = dom.card();
 						let order_enc = if def.eager_order
-							|| def.eager_direct || card
-							.is_some_and(|c| c <= self.int_eager_limit)
+							|| def.eager_direct
+							|| card.is_some_and(|c| c <= self.int_eager_limit)
 						{
 							LiteralStrategy::Eager
 						} else {
@@ -1280,8 +1306,8 @@ impl LoweringMapBuilder {
 							.maybe_polarity(def.polarity.resolve())
 							.view();
 						match view.0 {
-							// Register solver Boolean decision used to represent a model integer
-							// decision.
+							// Register solver Boolean decision used to
+							// represent a model integer decision.
 							solver::IntView::Bool(lin) if tracing::enabled!(target: "reverse_map", tracing::Level::TRACE) =>
 							{
 								tracing::trace!(

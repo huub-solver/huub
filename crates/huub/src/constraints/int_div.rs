@@ -199,7 +199,7 @@ where
 		&mut self,
 		ctx: &mut E::PropagationContext<'_>,
 	) -> Result<SimplificationStatus, E::Conflict> {
-		use pindakaas::propositional_logic::Formula::*;
+		use pindakaas::constraint::propositional_logic::Formula::*;
 
 		// Always exclude zero from the domain.
 		self.denominator.remove_val(ctx, 0, NO_REASON)?;

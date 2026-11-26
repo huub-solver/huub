@@ -12,7 +12,6 @@ on:
   workflow_dispatch:
 
 env:
-  RUST_CHANNEL: "stable"
   MDBOOK_VERSION: "0.4.52"
 
 jobs:
@@ -26,20 +25,10 @@ jobs:
       - name: Setup GitHub Pages
         if: github.event_name == 'push' && github.repository_owner == 'huub-solver' && github.ref == 'refs/heads/develop'
         uses: actions/configure-pages@v6
-      - name: Install Rust toolchain
-        uses: moonrepo/setup-rust@v1
-        with:
-          cache: false
-          channel: ${{ env.RUST_CHANNEL }}
       - name: Install mdBook
         uses: peaceiris/actions-mdbook@v2
         with:
           mdbook-version: ${{ env.MDBOOK_VERSION }}
-      - name: Build Huub for mdBook tests
-        run: cargo build -p huub
-        working-directory: .
-      - name: Run mdBook tests
-        run: mdbook test --library-path ../target/debug/deps
       - name: Build mdBook site
         run: mdbook build
       - name: Upload GitHub Pages artifact

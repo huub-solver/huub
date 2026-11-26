@@ -4,6 +4,9 @@
 pub(crate) mod bytes;
 pub(crate) mod matrix;
 pub mod overflow;
+pub(crate) mod priority_queue;
+pub(crate) mod trailed_list;
+pub(crate) mod trailed_open_list;
 pub(crate) mod trailed_partition;
 pub mod true_type;
 

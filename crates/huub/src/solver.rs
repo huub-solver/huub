@@ -670,10 +670,11 @@ where
 					);
 				}
 				// Latest SAT solve was unsatisfiable:
-				// - If no previous solution was found, then the problem doesn't have any feasible
-				//   solutions.
-				// - If a previous solution was found, then the current bound is the best solution
-				//   under the current constraints and assumptions.
+				// - If no previous solution was found, then the problem doesn't
+				//   have any feasible solutions.
+				// - If a previous solution was found, then the current bound is
+				//   the best solution under the current constraints and
+				//   assumptions.
 				SatSolveResult::Unsatisfiable(fail) => {
 					if let Some(on_failure) = on_failure {
 						on_failure(&fail);
@@ -1483,7 +1484,7 @@ impl<Sat: TerminateCallback> Solver<Sat> {
 	///
 	/// Subsequent calls to this method override the previously set
 	/// callback function.
-	pub fn set_terminate_callback<F: FnMut() -> TerminationSignal + 'static>(
+	pub fn set_terminate_callback<F: FnMut() -> TerminationSignal + Send + 'static>(
 		&mut self,
 		cb: Option<F>,
 	) {
@@ -1499,7 +1500,9 @@ impl<Sat: LearnCallback> Solver<Sat> {
 	///
 	/// Subsequent calls to this method override the previously set
 	/// callback function.
-	pub fn set_learn_callback<F: FnMut(&mut dyn Iterator<Item = Decision<bool>>) + 'static>(
+	pub fn set_learn_callback<
+		F: FnMut(&mut dyn Iterator<Item = Decision<bool>>) + Send + 'static,
+	>(
 		&mut self,
 		cb: Option<F>,
 	) {

@@ -95,7 +95,7 @@ The effort spent on specifying good domains upfront pays dividends in solver per
 When creating a new decision, you must ensure the domain is not empty.
 For example, attempting to create a decision with an invalid range will panic:
 
-```rust,ignore
+```rust,should_panic
 # extern crate huub;
 # use huub::model::Model;
 # let mut model = Model::default();

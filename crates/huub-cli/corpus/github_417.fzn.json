@@ -1,0 +1,12 @@
+{
+  "variables": {
+    "x" : { "type" : "int", "domain" : [[0, 1]] }
+  },
+  "arrays": {},
+  "constraints": [
+    { "id" : "int_eq", "args" : [3, 4]}
+  ],
+  "output": ["x"],
+  "solve": { "method" : "satisfy" },
+  "version": "1.0"
+}

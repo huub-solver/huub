@@ -17,7 +17,7 @@ use flatzinc_serde::{
 	NamedRef, Type, Variable, helpers::ArcKey,
 };
 use itertools::Itertools;
-use pindakaas::propositional_logic::Formula;
+use pindakaas::constraint::propositional_logic::Formula;
 use rangelist::IntervalIterator;
 use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::warn;
@@ -49,6 +49,11 @@ use crate::{
 /// Domain assumed for integer decision variables that do not have a domain
 /// definition.
 const FULL_INT_DOMAIN: RangeInclusive<IntVal> = IntVal::MIN..=IntVal::MAX;
+
+/// Type alias for an argument of an [`AnnotationCall`] in a [`FlatZinc`]
+/// instance.
+type AnnotationArgument<Identifier> =
+	Argument<Identifier, Immutable, AnnotationLiteral<Identifier>>;
 
 /// Annotation identifiers that are known to the FlatZinc deserializer.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -359,8 +364,6 @@ pub struct FlatZincStatistics {
 	/// - Boolean linear views (i.e., scaled and offset views of Boolean
 	///   variables, able to represent any integer value with two values)
 	pub extracted_views: u32,
-	/// Number of decisions removed through unification
-	pub unified_decisions: u32,
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -391,9 +394,6 @@ pub(crate) struct FznModelBuilder<'a> {
 	var_index: FxHashMap<ArcKey<Variable<FznIdent>>, u32>,
 	/// The incumbent model
 	prb: Model,
-	/// The index of the FlatZinc constraint whose posting is logged in the
-	/// preprocessing trace, while its window is open.
-	posting: Option<usize>,
 	/// Flags indicating which constraints have been processed
 	processed: Vec<bool>,
 	/// Statistics about the extraction process
@@ -718,9 +718,8 @@ impl HuubFlatZinc for FlatZinc<FznIdent> {
 		let deserialize_model = |fzn: &FlatZinc<FznIdent>| {
 			let mut builder = FznModelBuilder::new(fzn);
 			let res = builder
-				.unify_variables()
-				.and_then(|()| builder.extract_views())
-				.and_then(|()| builder.post_constraints())
+                                .extract_views()		
+				.and_then(|()| builder.post_constraints())		.and_then(|()| builder.post_constraints())
 				.and_then(|()| builder.ensure_output());
 			if let Err(err) = res {
 				builder.trace_posting_fail(&err);
@@ -823,42 +822,23 @@ impl<'a> FznModelBuilder<'a> {
 		&self,
 		arg: &AnnotationArgument<FznIdent>,
 	) -> Result<Vec<Literal<FznIdent>>, FlatZincError> {
-		let arr = match arg {
-			AnnotationArgument::Array(x) => x.clone(),
-			AnnotationArgument::ArrayNamed(x) => x
-				.upgrade()
-				.unwrap()
-				.contents
+		match arg {
+			AnnotationArgument::Array(arr) => arr
 				.iter()
-				.cloned()
-				.map_into()
-				.collect(),
-			_ => {
-				return Err(FlatZincError::InvalidArgumentType {
-					expected: "array of literals",
-					found: format!("{arg:?}"),
-				});
-			}
-		};
-		arr.into_iter()
-			.map(|l| {
-				Ok(match l {
-					AnnotationLiteral::Int(x) => Literal::Int(x),
-					AnnotationLiteral::Float(x) => Literal::Float(x),
-					AnnotationLiteral::Variable(x) => Literal::Variable(x.upgrade().unwrap()),
-					AnnotationLiteral::Bool(x) => Literal::Bool(x),
-					AnnotationLiteral::IntSet(x) => Literal::IntSet(x),
-					AnnotationLiteral::FloatSet(x) => Literal::FloatSet(x),
-					AnnotationLiteral::String(x) => Literal::String(x),
-					AnnotationLiteral::Annotation(x) => {
-						return Err(FlatZincError::InvalidArgumentType {
-							expected: "literal",
-							found: format!("{x:?}"),
-						});
-					}
+				.map(|l| match l {
+					AnnotationLiteral::Literal(l) => Ok(l.clone()),
+					AnnotationLiteral::Annotation(x) => Err(FlatZincError::InvalidArgumentType {
+						expected: "literal",
+						found: format!("{x:?}"),
+					}),
 				})
-			})
-			.collect()
+				.collect(),
+			AnnotationArgument::ArrayNamed(arr) => Ok(arr.contents.clone()),
+			AnnotationArgument::Literal(_) => Err(FlatZincError::InvalidArgumentType {
+				expected: "array of literals",
+				found: format!("{arg:?}"),
+			}),
+		}
 	}
 
 	/// Extract an [`DecisionSelection`] from an [`AnnotationArgument`] in a
@@ -2038,6 +2018,14 @@ impl<'a> FznModelBuilder<'a> {
 						}
 					}
 				}
+				ConstraintIdent::BoolEq => {
+					let [a, b] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let a = self.arg_bool(a)?;
+					let b = self.arg_bool(b)?;
+					a.unify(&mut self.prb, b)?;
+				}
 				ConstraintIdent::BoolEqReif => {
 					let [a, b, r] = c.args.as_slice() else {
 						return num_args_err(3);
@@ -2318,11 +2306,12 @@ impl<'a> FznModelBuilder<'a> {
 						Self::anns_contains(&c.ann, &mut ann_used, AnnotationIdent::DisjNotLast),
 						Self::anns_contains(&c.ann, &mut ann_used, AnnotationIdent::DisjDetectPrec),
 					) {
-						// No annotations found, so we assume the user wants the default
-						// configuration
+						// No annotations found, so we assume the user wants the
+						// default configuration
 						(false, false, false) => (None, None, None),
-						// At least one annotation was found, so we assume missing annotations
-						// disable certain propagation options.
+						// At least one annotation was found, so we assume
+						// missing annotations disable certain propagation
+						// options.
 						(ef, nl, dp) => (Some(ef), Some(nl), Some(dp)),
 					};
 
@@ -2447,6 +2436,14 @@ impl<'a> FznModelBuilder<'a> {
 					let denom = self.arg_int(denom)?;
 					let res = self.arg_int(res)?;
 					self.prb.div(num, denom).result(res).post()?;
+				}
+				ConstraintIdent::IntEq => {
+					let [a, b] = c.args.as_slice() else {
+						return num_args_err(2);
+					};
+					let a = self.arg_int(a)?;
+					let b = self.arg_int(b)?;
+					a.unify(&mut self.prb, b)?;
 				}
 				ConstraintIdent::IntLe | ConstraintIdent::IntNe => {
 					let [a, b] = c.args.as_slice() else {
@@ -3230,28 +3227,6 @@ impl<'a> FznModelBuilder<'a> {
 			self.trace_group(root.as_ref(), &edges, es, &var);
 		}
 		Ok(())
-	}
-}
-
-impl FznOutcome {
-	/// The outcome of the processing of a FlatZinc constraint that ended with
-	/// `res`.
-	fn of(res: &Result<(), FlatZincError>) -> Self {
-		match res {
-			Ok(()) => FznOutcome::Processed,
-			Err(err) => Self::of_error(err),
-		}
-	}
-
-	/// The outcome of the processing of a FlatZinc constraint that failed with
-	/// `err`.
-	fn of_error(err: &FlatZincError) -> Self {
-		match err {
-			FlatZincError::ReformulationError(LoweringError::Simplification(_)) => {
-				FznOutcome::Conflict
-			}
-			_ => FznOutcome::Failed,
-		}
 	}
 }
 
