@@ -122,7 +122,7 @@ impl Model {
 		let ctx = FztContext::new(self);
 		let name = ctx.bool_name(var);
 		let resolved = ctx.resolve_bool(alias);
-		let term = ctx.bool_term(alias);
+		let term = ctx.bool_term(alias).to_string();
 		let t = self.trace.recording().unwrap();
 		let (rule, hints) = t.justification(StepKind::Unify, |r| bool_unify_rule(r, resolved));
 		let text = format!(
@@ -393,7 +393,7 @@ impl Model {
 			AnyView::Int(v) => {
 				let resolved = ctx.resolve_int(v);
 				UnifyTarget {
-					term: ctx.int_term(resolved),
+					term: ctx.int_term(resolved).to_string(),
 					dom: match resolved.0 {
 						IntView::Linear(lin) => DomLine::Of(Fixed::Int(lin.var)),
 						IntView::Bool(lin) => lit_base(lin.var),
@@ -402,7 +402,7 @@ impl Model {
 				}
 			}
 			AnyView::Bool(b) => UnifyTarget {
-				term: ctx.bool_term(b),
+				term: ctx.bool_term(b).to_string(),
 				dom: lit_base(b),
 			},
 		}

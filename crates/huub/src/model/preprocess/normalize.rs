@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::model::preprocess::fzt::{FztArg, FztConstraint};
+use crate::model::preprocess::fzt::{FztArg, FztConstraint, FztTerm};
 
 /// The linear normal form of a linear constraint in the `.fzt` model language.
 #[derive(Debug, Eq, PartialEq)]
@@ -51,30 +51,26 @@ pub(super) enum Reification {
 	Half,
 }
 
-/// Split a term written by
-/// [`affine`](crate::model::preprocess::fzt::affine) into `(c, atom, a)` such
-/// that the term is `c*atom + a`, where a negated Boolean atom `!b` is read as
-/// `1 - b`.
-pub(super) fn affine_parts(term: &str) -> (i128, String, i128) {
-	// A literal view contains spaces of its own, so only a trailing ` + a` or
-	// ` - a` with an integer `a` is an offset.
-	let offset = term.rsplit_once(' ').and_then(|(rest, a)| {
-		let a = a.parse::<i128>().ok()?;
-		rest.strip_suffix(" +")
-			.map(|b| (b, a))
-			.or_else(|| rest.strip_suffix(" -").map(|b| (b, -a)))
-	});
-	let (body, offset) = offset.unwrap_or((term, 0));
-	let (scale, atom) = match body.split_once('*') {
-		Some((c, atom)) if c.parse::<i128>().is_ok() => (c.parse().unwrap(), atom),
-		_ => match body.strip_prefix('-') {
-			Some(atom) => (-1, atom),
-			None => (1, body),
-		},
-	};
-	match atom.strip_prefix('!') {
-		Some(b) => (-scale, b.to_owned(), offset + scale),
-		None => (scale, atom.to_owned(), offset),
+/// Split `term` into `(c, atom, a)` such that the term is `c*atom + a`, where a
+/// negated Boolean atom `!b` is read as `1 - b`.
+pub(super) fn affine_parts(term: &FztTerm) -> (i128, String, i128) {
+	match term {
+		FztTerm::Affine { scale, var, offset } => {
+			(i128::from(*scale), var.clone(), i128::from(*offset))
+		}
+		FztTerm::BoolAffine {
+			scale,
+			atom,
+			offset,
+		} => {
+			let (scale, offset) = (i128::from(*scale), i128::from(*offset));
+			match &**atom {
+				FztTerm::Not(b) => (-scale, b.clone(), offset + scale),
+				atom => (scale, atom.to_string(), offset),
+			}
+		}
+		FztTerm::Not(b) => (-1, b.clone(), 1),
+		term => (1, term.to_string(), 0),
 	}
 }
 
@@ -106,7 +102,7 @@ pub(super) fn lin_form(c: &FztConstraint) -> Option<LinForm> {
 		let FztArg::Int(c) = c else { return None };
 		match v {
 			FztArg::Term(t) => {
-				let (scale, atom, offset) = affine_parts(&t.0);
+				let (scale, atom, offset) = affine_parts(t);
 				*terms.entry(atom).or_insert(0) += c * scale;
 				rhs -= c * offset;
 			}
@@ -133,7 +129,7 @@ pub(super) fn lin_form(c: &FztConstraint) -> Option<LinForm> {
 			}
 			None
 		}
-		Some((kind, FztArg::Term(t))) => Some((kind, t.0.clone())),
+		Some((kind, FztArg::Term(t))) => Some((kind, t.to_string())),
 		Some((_, FztArg::Int(_) | FztArg::Array(_) | FztArg::Set(_))) => return None,
 	};
 
@@ -170,7 +166,7 @@ pub(crate) fn lin_norm_equal(a: &FztConstraint, b: &FztConstraint) -> Option<boo
 #[cfg(test)]
 mod tests {
 	use crate::model::preprocess::{
-		fzt::{FztArg, FztConstraint, FztTerm},
+		fzt::{FztArg, FztConstraint, FztLitOp, FztTerm},
 		normalize::{LinForm, affine_parts, lin_form, lin_norm_equal},
 	};
 
@@ -178,25 +174,47 @@ mod tests {
 	enum Arg {
 		/// An integer constant.
 		Int(i128),
-		/// A term, as written by the trace.
-		Term(&'static str),
+		/// A term.
+		Term(FztTerm),
+	}
+
+	/// The term `scale*var + offset` over an integer variable.
+	fn affine(scale: i64, var: &str, offset: i64) -> FztTerm {
+		FztTerm::affine(scale, var.to_owned(), offset)
 	}
 
 	#[test]
 	fn affine_parts_of_terms() {
-		assert_eq!(affine_parts("x"), (1, "x".to_owned(), 0));
-		assert_eq!(affine_parts("-x"), (-1, "x".to_owned(), 0));
-		assert_eq!(affine_parts("3*x + 1"), (3, "x".to_owned(), 1));
-		assert_eq!(affine_parts("-2*y - 4"), (-2, "y".to_owned(), -4));
+		let x = || "x".to_owned();
+		assert_eq!(affine_parts(&FztTerm::Name(x())), (1, x(), 0));
+		assert_eq!(affine_parts(&affine(-1, "x", 0)), (-1, x(), 0));
+		assert_eq!(affine_parts(&affine(3, "x", 1)), (3, x(), 1));
+		assert_eq!(affine_parts(&affine(-2, "y", -4)), (-2, "y".to_owned(), -4));
 		// A negated Boolean is `1 - b`.
-		assert_eq!(affine_parts("1*!b"), (-1, "b".to_owned(), 1));
-		assert_eq!(affine_parts("2*!b + 3"), (-2, "b".to_owned(), 5));
-		// The spaces and signs of a literal view are part of the atom.
-		assert_eq!(affine_parts("[x >= -3]"), (1, "[x >= -3]".to_owned(), 0));
+		let not_b = || Box::new(FztTerm::Not("b".to_owned()));
+		let bool_affine = |scale, offset| FztTerm::BoolAffine {
+			scale,
+			atom: not_b(),
+			offset,
+		};
+		assert_eq!(affine_parts(&bool_affine(1, 0)), (-1, "b".to_owned(), 1));
+		assert_eq!(affine_parts(&bool_affine(2, 3)), (-2, "b".to_owned(), 5));
+		// A literal is an atom of its own.
+		let lit = |op, value| FztTerm::Lit {
+			var: x(),
+			op,
+			value,
+		};
 		assert_eq!(
-			affine_parts("2*[x <= 3] + 5"),
-			(2, "[x <= 3]".to_owned(), 5)
+			affine_parts(&lit(FztLitOp::Ge, -3)),
+			(1, "[x >= -3]".to_owned(), 0)
 		);
+		let scaled = FztTerm::BoolAffine {
+			scale: 2,
+			atom: Box::new(lit(FztLitOp::Le, 3)),
+			offset: 5,
+		};
+		assert_eq!(affine_parts(&scaled), (2, "[x <= 3]".to_owned(), 5));
 	}
 
 	#[test]
@@ -271,7 +289,7 @@ mod tests {
 			.into_iter()
 			.map(|v| match v {
 				Arg::Int(k) => FztArg::Int(k),
-				Arg::Term(s) => FztArg::Term(FztTerm(s.to_owned())),
+				Arg::Term(t) => FztArg::Term(t),
 			})
 			.collect();
 		let mut args = vec![
@@ -285,7 +303,7 @@ mod tests {
 
 	/// A literal argument.
 	fn lit(name: &'static str) -> Option<FztArg> {
-		Some(FztArg::Term(FztTerm(name.to_owned())))
+		Some(FztArg::Term(FztTerm::Name(name.to_owned())))
 	}
 
 	#[test]
@@ -347,9 +365,9 @@ mod tests {
 		assert_eq!(lin_norm_equal(&le, &le_flipped), Some(false));
 	}
 
-	/// A term argument.
-	fn t(term: &'static str) -> Arg {
-		Arg::Term(term)
+	/// An argument that is a variable.
+	fn t(name: &str) -> Arg {
+		Arg::Term(FztTerm::Name(name.to_owned()))
 	}
 
 	#[test]
@@ -358,14 +376,19 @@ mod tests {
 		let unfolded = lin(
 			"int_lin_le",
 			&[1, 1, 2],
-			vec![t("x"), t("x"), t("3*y + 1")],
+			vec![t("x"), t("x"), Arg::Term(affine(3, "y", 1))],
 			5,
 			None,
 		);
 		let folded = lin("int_lin_le", &[2, 6], vec![t("x"), t("y")], 3, None);
 		assert_eq!(lin_norm_equal(&unfolded, &folded), Some(true));
 		// `1*!b <= 0` is `-b <= -1`.
-		let negated = lin("int_lin_le", &[1], vec![t("1*!b")], 0, None);
+		let not_b = FztTerm::BoolAffine {
+			scale: 1,
+			atom: Box::new(FztTerm::Not("b".to_owned())),
+			offset: 0,
+		};
+		let negated = lin("int_lin_le", &[1], vec![Arg::Term(not_b)], 0, None);
 		let flipped = lin("int_lin_le", &[-1], vec![t("b")], -1, None);
 		assert_eq!(lin_norm_equal(&negated, &flipped), Some(true));
 		// Cancelling terms disappear.

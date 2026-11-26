@@ -51,6 +51,6 @@ pub(crate) use crate::model::preprocess::{
 	state::FznOutcome,
 };
 pub use crate::model::preprocess::{
-	fzt::{FztArg, FztConstraint, FztContext, FztError, FztTerm},
+	fzt::{FztArg, FztConstraint, FztContext, FztError, FztLitOp, FztTerm},
 	rule::PreprocessRule,
 };

@@ -89,9 +89,65 @@ pub enum FztError {
 	UnloggedConstraint,
 }
 
+/// The comparison of an integer variable with a constant in a literal of the
+/// `.fzt` model language.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum FztLitOp {
+	/// The variable is equal to the constant (`==`).
+	Eq,
+	/// The variable is at least the constant (`>=`).
+	Ge,
+	/// The variable is at most the constant (`<=`).
+	Le,
+	/// The variable differs from the constant (`!=`).
+	Ne,
+}
+
 /// A term over the decisions of the model in the `.fzt` model language.
+///
+/// The term is written by its [`Display`] implementation.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct FztTerm(pub(super) String);
+#[non_exhaustive]
+pub enum FztTerm {
+	/// `scale*var + offset`, in which a unit scale is left out, over an
+	/// integer variable. A variable on its own is a [`FztTerm::Name`], so that
+	/// a term has one representation.
+	Affine {
+		/// The coefficient of the variable.
+		scale: IntVal,
+		/// The name of the integer variable.
+		var: String,
+		/// The constant that is added to the product.
+		offset: IntVal,
+	},
+	/// A Boolean constant.
+	Bool(bool),
+	/// `scale*atom + offset` over a Boolean term, in which the scale is always
+	/// written.
+	BoolAffine {
+		/// The coefficient of the Boolean.
+		scale: IntVal,
+		/// The Boolean term: a variable, its negation, or a literal.
+		atom: Box<FztTerm>,
+		/// The constant that is added to the product.
+		offset: IntVal,
+	},
+	/// An integer constant.
+	Int(IntVal),
+	/// The literal `[var op value]` over an integer variable.
+	Lit {
+		/// The name of the integer variable.
+		var: String,
+		/// The comparison.
+		op: FztLitOp,
+		/// The constant that the variable is compared with.
+		value: IntVal,
+	},
+	/// The name of a variable.
+	Name(String),
+	/// The negation `!b` of a Boolean variable.
+	Not(String),
+}
 
 /// Write `c*atom + a`, omitting a unit coefficient unless `explicit`.
 pub(super) fn affine(scale: IntVal, atom: &str, offset: IntVal, explicit: bool) -> String {
@@ -157,7 +213,48 @@ impl Display for FztArg {
 			FztArg::Bool(b) => write!(f, "{b}"),
 			FztArg::Int(i) => write!(f, "{i}"),
 			FztArg::Set(s) => f.write_str(&fzt_domain(s)),
-			FztArg::Term(t) => f.write_str(&t.0),
+			FztArg::Term(t) => Display::fmt(t, f),
+		}
+	}
+}
+
+impl FztTerm {
+	/// The term `scale*var + offset` over an integer variable.
+	pub(super) fn affine(scale: IntVal, var: String, offset: IntVal) -> Self {
+		match (scale, offset) {
+			(1, 0) => FztTerm::Name(var),
+			_ => FztTerm::Affine { scale, var, offset },
+		}
+	}
+}
+
+impl Display for FztLitOp {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str(match self {
+			FztLitOp::Eq => "==",
+			FztLitOp::Ge => ">=",
+			FztLitOp::Le => "<=",
+			FztLitOp::Ne => "!=",
+		})
+	}
+}
+
+impl Display for FztTerm {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			FztTerm::Affine { scale, var, offset } => {
+				f.write_str(&affine(*scale, var, *offset, false))
+			}
+			FztTerm::Bool(b) => write!(f, "{b}"),
+			FztTerm::BoolAffine {
+				scale,
+				atom,
+				offset,
+			} => f.write_str(&affine(*scale, &atom.to_string(), *offset, true)),
+			FztTerm::Int(k) => write!(f, "{k}"),
+			FztTerm::Lit { var, op, value } => write!(f, "[{var} {op} {value}]"),
+			FztTerm::Name(name) => f.write_str(name),
+			FztTerm::Not(name) => write!(f, "!{name}"),
 		}
 	}
 }
@@ -208,7 +305,7 @@ impl<'a> FztContext<'a> {
 		let view = view.into();
 		match self.resolve_bool(view).0 {
 			BoolView::Const(b) => FztArg::Bool(b),
-			_ => FztArg::Term(FztTerm(self.bool_term(view))),
+			_ => FztArg::Term(self.bool_term(view)),
 		}
 	}
 
@@ -222,23 +319,28 @@ impl<'a> FztContext<'a> {
 	}
 
 	/// Write a Boolean view as a term, e.g. `b`, `!b`, or `[x >= 3]`.
-	pub(crate) fn bool_term(&self, view: View<bool>) -> String {
+	pub(crate) fn bool_term(&self, view: View<bool>) -> FztTerm {
+		let lit = |x: Decision<IntVal>, op, value| FztTerm::Lit {
+			var: self.int_name(x).into_owned(),
+			op,
+			value,
+		};
 		match self.resolve_bool(view).0 {
-			BoolView::Const(b) => b.to_string(),
+			BoolView::Const(b) => FztTerm::Bool(b),
 			BoolView::Decision(l) => {
-				let name = self.bool_name(l.var());
+				let name = self.bool_name(l.var()).into_owned();
 				if l.is_negated() {
-					format!("!{name}")
+					FztTerm::Not(name)
 				} else {
-					name.into_owned()
+					FztTerm::Name(name)
 				}
 			}
-			BoolView::IntEq(x, k) => format!("[{} == {k}]", self.int_name(x)),
-			BoolView::IntNotEq(x, k) => format!("[{} != {k}]", self.int_name(x)),
-			BoolView::IntGreaterEq(x, k) => format!("[{} >= {k}]", self.int_name(x)),
+			BoolView::IntEq(x, k) => lit(x, FztLitOp::Eq, k),
+			BoolView::IntNotEq(x, k) => lit(x, FztLitOp::Ne, k),
+			BoolView::IntGreaterEq(x, k) => lit(x, FztLitOp::Ge, k),
 			BoolView::IntLess(x, k) => match k.checked_sub(1) {
-				Some(k) => format!("[{} <= {k}]", self.int_name(x)),
-				None => "false".to_owned(),
+				Some(k) => lit(x, FztLitOp::Le, k),
+				None => FztTerm::Bool(false),
 			},
 		}
 	}
@@ -342,7 +444,7 @@ impl<'a> FztContext<'a> {
 		let view = self.resolve_int(view.into());
 		match view.0 {
 			IntView::Const(c) => c.into(),
-			_ => FztArg::Term(FztTerm(self.int_term(view))),
+			_ => FztArg::Term(self.int_term(view)),
 		}
 	}
 
@@ -357,15 +459,19 @@ impl<'a> FztContext<'a> {
 
 	/// Write an integer view as a term, e.g. `5`, `x`, `2*x - 1`, or `3*b +
 	/// 1`.
-	pub(crate) fn int_term(&self, view: View<IntVal>) -> String {
+	pub(crate) fn int_term(&self, view: View<IntVal>) -> FztTerm {
 		match self.resolve_int(view).0 {
-			IntView::Const(c) => c.to_string(),
-			IntView::Linear(lin) => {
-				affine(lin.scale.get(), &self.int_name(lin.var), lin.offset, false)
-			}
-			IntView::Bool(lin) => {
-				affine(lin.scale.get(), &self.bool_term(lin.var), lin.offset, true)
-			}
+			IntView::Const(c) => FztTerm::Int(c),
+			IntView::Linear(lin) => FztTerm::affine(
+				lin.scale.get(),
+				self.int_name(lin.var).into_owned(),
+				lin.offset,
+			),
+			IntView::Bool(lin) => FztTerm::BoolAffine {
+				scale: lin.scale.get(),
+				atom: Box::new(self.bool_term(lin.var)),
+				offset: lin.offset,
+			},
 		}
 	}
 
@@ -390,17 +496,18 @@ impl<'a> FztContext<'a> {
 				IntView::Const(c) => rhs -= i128::from(c),
 				IntView::Linear(lin) => {
 					coeffs.push(lin.scale.get().into());
-					vars.push(FztArg::Term(FztTerm(self.int_name(lin.var).into_owned())));
+					vars.push(FztArg::Term(FztTerm::Name(
+						self.int_name(lin.var).into_owned(),
+					)));
 					rhs -= i128::from(lin.offset);
 				}
 				IntView::Bool(lin) => {
 					coeffs.push(lin.scale.get().into());
-					vars.push(FztArg::Term(FztTerm(affine(
-						1,
-						&self.bool_term(lin.var),
-						0,
-						true,
-					))));
+					vars.push(FztArg::Term(FztTerm::BoolAffine {
+						scale: 1,
+						atom: Box::new(self.bool_term(lin.var)),
+						offset: 0,
+					}));
 					rhs -= i128::from(lin.offset);
 				}
 			}
@@ -411,7 +518,7 @@ impl<'a> FztContext<'a> {
 	/// Write the name of a variable, which has no decision of its own, as an
 	/// argument.
 	pub(crate) fn name(&self, name: &str) -> FztArg {
-		FztArg::Term(FztTerm(name.to_owned()))
+		FztArg::Term(FztTerm::Name(name.to_owned()))
 	}
 
 	/// Create a context to write the decisions of `model`.
@@ -510,3 +617,48 @@ impl Display for FztError {
 }
 
 impl Error for FztError {}
+
+#[cfg(test)]
+mod tests {
+	use crate::model::preprocess::fzt::{FztLitOp, FztTerm};
+
+	#[test]
+	fn terms_are_written_in_the_model_language() {
+		let name = |n: &str| FztTerm::Name(n.to_owned());
+		assert_eq!(name("x").to_string(), "x");
+		assert_eq!(FztTerm::Not("b".to_owned()).to_string(), "!b");
+		assert_eq!(FztTerm::Bool(true).to_string(), "true");
+		assert_eq!(FztTerm::Int(-3).to_string(), "-3");
+		assert_eq!(
+			FztTerm::affine(2, "x".to_owned(), -1).to_string(),
+			"2*x - 1"
+		);
+		assert_eq!(FztTerm::affine(-1, "x".to_owned(), 0).to_string(), "-x");
+		let lit = FztTerm::Lit {
+			var: "x".to_owned(),
+			op: FztLitOp::Ge,
+			value: 3,
+		};
+		assert_eq!(lit.to_string(), "[x >= 3]");
+		let scaled = FztTerm::BoolAffine {
+			scale: 3,
+			atom: Box::new(lit),
+			offset: 1,
+		};
+		assert_eq!(scaled.to_string(), "3*[x >= 3] + 1");
+		let unit = FztTerm::BoolAffine {
+			scale: 1,
+			atom: Box::new(name("b")),
+			offset: 0,
+		};
+		assert_eq!(unit.to_string(), "1*b");
+	}
+
+	#[test]
+	fn a_variable_on_its_own_has_one_representation() {
+		assert_eq!(
+			FztTerm::affine(1, "x".to_owned(), 0),
+			FztTerm::Name("x".to_owned())
+		);
+	}
+}

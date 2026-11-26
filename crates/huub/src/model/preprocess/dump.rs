@@ -141,8 +141,8 @@ impl Model {
 					name.to_owned()
 				} else {
 					match view {
-						AnyView::Bool(b) => ctx.bool_term(b),
-						AnyView::Int(i) => ctx.int_term(i),
+						AnyView::Bool(b) => ctx.bool_term(b).to_string(),
+						AnyView::Int(i) => ctx.int_term(i).to_string(),
 					}
 				};
 				(name.to_owned(), term)
